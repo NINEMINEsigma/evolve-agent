@@ -1,0 +1,8 @@
+[submodule "third/easysave"]
+	path = third/easysave
+	url = http://gitea.liubai.site/convention/python-easysave.git
+	branch = master
+[submodule "third/filesystem"]
+	path = third/filesystem
+	url = http://gitea.liubai.site/convention/python-file-system.git
+	branch = master
