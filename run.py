@@ -51,25 +51,38 @@ from third.filesystem import File
 
 if __name__ == "__main__":
     if fouce_init or (workspace_path/"init.lock").exists() == False:
-        fast_agent_space_path = (workspace_path/fast_agent_space_path)
-        fast_agent_space_path.mkdir(parents=True, exist_ok=True)
-        slow_agent_space_path = (workspace_path/slow_agent_space_path)
-        slow_agent_space_path.mkdir(parents=True, exist_ok=True)
+        fast_agent_space = (workspace_path/fast_agent_space_path)
+        fast_agent_space.mkdir(parents=True, exist_ok=True)
+        slow_agent_space = (workspace_path/slow_agent_space_path)
+        slow_agent_space.mkdir(parents=True, exist_ok=True)
         source = File(origin=str(origin_agent_codes_path))
-        source.copy_to(str(fast_agent_space_path))
-        source.copy_to(str(slow_agent_space_path))
+        source.copy_to(str(fast_agent_space))
+        source.copy_to(str(slow_agent_space))
     while True:
         task = subprocess.run([
             sys.executable,
-            str(fast_agent_space_path/"__main__.py"),
+            str(fast_agent_space/"__main__.py"),
             f"--workspace {workspace_path}",
             f"--log {log_file_path}",
             f"--console_log {console_log}",
-            f"--self {fast_agent_space_path}",
-            f"--fork {slow_agent_space_path}",
+            f"--self {fast_agent_space}",
+            f"--fork {slow_agent_space}",
         ])
-        if task.returncode == 0:
+        exit_code = task.returncode
+        if exit_code == 0:
+            logger.info(f"Fast agent exited with code {exit_code}")
+            if (workspace_path/"init.lock").exists():
+                (workspace_path/"init.lock").unlink()
             break
+        elif exit_code in (1,2,3):
+            logger.error(f"Error running fast agent: {exit_code}")
+            break
+        elif exit_code in (4,5,6):
+            logger.error(f"Error running fallback agent: {exit_code}")
+            break
+        elif exit_code in (-1,):
+            logger.info(f"Slow agent was updated, fast agent will update to new version")
+            File(str(slow_agent_space)).copy_to(str(fast_agent_space))
         else:
-            logger.error(f"Error running fast agent: {task.returncode}")
+            logger.error(f"Unknown error: {exit_code}")
             break

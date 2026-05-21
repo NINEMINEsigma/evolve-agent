@@ -1,5 +1,7 @@
-import time
 import sys
-time.sleep(10)
-print("Hello, World!")
-sys.exit(0)
+from pathlib import Path
+
+sys.path.append(str(Path(__file__).parent))
+
+if __name__ == "__main__":
+    sys.exit(0)
