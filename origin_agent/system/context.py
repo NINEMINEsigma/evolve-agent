@@ -1,0 +1,52 @@
+"""Runtime context — single source of truth for all configuration."""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from pathlib import Path
+
+
+@dataclass
+class RuntimeContext:
+    """Immutable (by convention) runtime configuration.
+
+    Populated by __main__.py from CLI arguments.  All paths are resolved to
+    absolute form so downstream code never has to worry about CWD.
+    """
+
+    # -- Paths (all absolute) -----------------------------------------------
+
+    workspace: Path
+    """Root workspace directory (e.g. ``workspace/``)."""
+
+    self_path: Path
+    """Directory containing the agent's own source code (fast directory)."""
+
+    fork_path: Path
+    """Directory where evolved code is written (slow directory)."""
+
+    log_path: Path
+    """Path to the log file produced by the orchestrator."""
+
+    # -- Runtime flags ------------------------------------------------------
+
+    mode: str = "fast"
+    """Execution mode: ``"fast"`` (normal) or ``"fallback"`` (repair)."""
+
+    console_log: bool = False
+
+    # -- Fallback-mode fields -----------------------------------------------
+
+    fix_path: Path | None = None
+    """When mode=='fallback', the directory to repair (the broken fast)."""
+
+    fix_log_path: Path | None = None
+    """When mode=='fallback', path to the error log to consult."""
+
+    # -- LLM config (populated later from env / config file) ----------------
+
+    llm_api_key: str = ""
+    llm_base_url: str = "https://api.openai.com/v1"
+    llm_model: str = "gpt-4o"
+    llm_temperature: float = 0.7
+    llm_max_tokens: int = 4096
