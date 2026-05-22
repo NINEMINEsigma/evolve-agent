@@ -59,14 +59,16 @@ if __name__ == "__main__":
         source.copy_to(str(fast_agent_space))
         source.copy_to(str(slow_agent_space))
     while True:
+        logger.info(f"Running fast agent")
         task = subprocess.run([
-            sys.executable,
-            str(fast_agent_space/"__main__.py"),
-            f"--workspace {workspace_path}",
-            f"--log {log_file_path}",
-            f"--console_log {console_log}",
-            f"--self {fast_agent_space}",
-            f"--fork {slow_agent_space}",
+            sys.executable, # 使用当前python解释器
+            str(fast_agent_space/"__main__.py"), # 运行fast agent
+            f"--workspace {workspace_path}", # 工作空间路径
+            f"--log {log_file_path}", # 日志路径
+            f"--console_log {console_log}", # 是否在控制台打印日志
+            f"--self {fast_agent_space}", # 自身代码路径
+            f"--evolve {slow_agent_space}", # 需要进化的代码路径
+            f"--mode fast" # 运行模式
         ])
         exit_code = task.returncode
         if exit_code == 0:
@@ -74,15 +76,28 @@ if __name__ == "__main__":
             if (workspace_path/"init.lock").exists():
                 (workspace_path/"init.lock").unlink()
             break
-        elif exit_code in (1,2,3):
-            logger.error(f"Error running fast agent: {exit_code}")
-            break
-        elif exit_code in (4,5,6):
-            logger.error(f"Error running fallback agent: {exit_code}")
-            break
         elif exit_code in (-1,):
             logger.info(f"Slow agent was updated, fast agent will update to new version")
+            File(str(workspace_path/".fallback")).delete()
+            File(str(fast_agent_space)).copy_to(str(workspace_path/".fallback"))
             File(str(slow_agent_space)).copy_to(str(fast_agent_space))
         else:
-            logger.error(f"Unknown error: {exit_code}")
+            logger.error(f"Fast agent exited with unknown error: {exit_code}")
+            logger.info(f"Running fallback agent")
+            task = subprocess.run([
+                sys.executable, # 使用当前python解释器
+                str(workspace_path/".fallback"/"__main__.py"), # 运行fallback agent
+                f"--workspace {workspace_path}", # 工作空间路径
+                f"--log {log_file_path}", # 日志路径
+                f"--console_log {console_log}", # 是否在控制台打印日志
+                f"--self {workspace_path/".fallback"}", # 自身代码路径
+                f"--fix_fork {fast_agent_space}", # 需要修复的代码路径
+                f"--fix {logs_path/"fast_agent_runtime_error.log"}", # 错误日志路径
+                f"--mode fallback" # 运行模式
+            ])
+            if task.returncode == 0:
+                logger.info(f"Fallback agent fixed successfully, restart...")
+            else:
+                logger.error(f"Fallback agent fixed failed, see {logs_path/"fallback_agent_runtime_error.log"}")
+                break
             break
