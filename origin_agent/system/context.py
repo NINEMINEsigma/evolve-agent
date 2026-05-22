@@ -43,6 +43,11 @@ class RuntimeContext:
     fix_log_path: Path | None = None
     """When mode=='fallback', path to the error log to consult."""
 
+    # -- Gateway config -----------------------------------------------------
+
+    gateway_host: str = "127.0.0.1"
+    gateway_port: int = 8765
+
     # -- LLM config (populated later from env / config file) ----------------
 
     llm_api_key: str = ""

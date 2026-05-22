@@ -51,13 +51,18 @@ from third.filesystem import File
 
 if __name__ == "__main__":
     if fouce_init or (workspace_path/"init.lock").exists() == False:
+        (workspace_path/"init.lock").touch()
+        # 保持代理空间干净，删除代理空间并重新创建
         fast_agent_space = (workspace_path/fast_agent_space_path)
-        fast_agent_space.mkdir(parents=True, exist_ok=True)
+        File(origin=str(fast_agent_space)).delete() # 删除fast agent空间
+        fast_agent_space.mkdir(parents=True, exist_ok=True) # 创建fast agent空间
         slow_agent_space = (workspace_path/slow_agent_space_path)
-        slow_agent_space.mkdir(parents=True, exist_ok=True)
+        File(origin=str(slow_agent_space)).delete() # 删除slow agent空间   
+        slow_agent_space.mkdir(parents=True, exist_ok=True) # 创建slow agent空间
+        # 复制源代码到代理空间
         source = File(origin=str(origin_agent_codes_path))
-        source.copy_to(str(fast_agent_space))
-        source.copy_to(str(slow_agent_space))
+        source.copy_to(str(fast_agent_space)) # 复制源代码到fast agent空间
+        source.copy_to(str(slow_agent_space)) # 复制源代码到slow agent空间
     while True:
         logger.info(f"Running fast agent")
         task = subprocess.run([
@@ -68,13 +73,13 @@ if __name__ == "__main__":
             f"--console_log {console_log}", # 是否在控制台打印日志
             f"--self {fast_agent_space}", # 自身代码路径
             f"--evolve {slow_agent_space}", # 需要进化的代码路径
+            f"--gateway_host {gateway_host}", # WebSocket 监听地址
+            f"--gateway_port {gateway_port}", # WebSocket 监听端口
             f"--mode fast" # 运行模式
         ])
         exit_code = task.returncode
         if exit_code == 0:
             logger.info(f"Fast agent exited with code {exit_code}")
-            if (workspace_path/"init.lock").exists():
-                (workspace_path/"init.lock").unlink()
             break
         elif exit_code in (-1,):
             logger.info(f"Slow agent was updated, fast agent will update to new version")

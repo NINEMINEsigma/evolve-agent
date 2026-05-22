@@ -7,7 +7,7 @@ todos:
     status: completed
   - id: stage-2-gateway
     content: "Stage 2: Gateway — FastAPI WebSocket 聊天接口，消息协议"
-    status: in_progress
+    status: completed
   - id: stage-3-agent-loop
     content: "Stage 3: Agent Loop — LLM 客户端，基于 abstract/tools 的工具集成，基于 abstract/memory 的记忆集成"
     status: pending

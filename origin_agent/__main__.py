@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import subprocess
 import sys
 from pathlib import Path
 
@@ -101,6 +102,8 @@ def _build_context(cli: dict) -> RuntimeContext:
         ),
         mode=str(cli.get("mode", "fast")),
         console_log=_coerce_bool(cli.get("console_log", False)),
+        gateway_host=str(cli.get("gateway_host", "127.0.0.1")),
+        gateway_port=int(cli.get("gateway_port", 8765)),
         # Fallback-mode only fields
         fix_path=(
             Path(cli["fix_fork"]).resolve() if "fix_fork" in cli else None
@@ -115,6 +118,54 @@ def _build_context(cli: dict) -> RuntimeContext:
 # Main
 # ---------------------------------------------------------------------------
 
+def _build_frontend() -> bool:
+    """Run ``npm install && npm run build`` inside the frontend directory.
+
+    The frontend lives under *AGENT_DIR* (e.g. ``origin_agent/frontend/`` or
+    ``workspace/fast_agent_space/frontend/``).  Build output goes to
+    ``frontend/dist/`` and is served by the gateway.
+
+    Returns True if the build succeeded or no frontend is present.
+    """
+    frontend_dir = Path(_AGENT_DIR) / "frontend"
+    pkg_json = frontend_dir / "package.json"
+    if not pkg_json.exists():
+        return True  # no frontend to build
+
+    logger = logging.getLogger("agent.frontend")
+    logger.info("Building frontend in %s ...", frontend_dir)
+
+    try:
+        npm = "npm.cmd" if sys.platform == "win32" else "npm"
+        # npm install (idempotent and fast when already installed)
+        subprocess.run(
+            [npm, "install"],
+            cwd=str(frontend_dir),
+            check=True,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+        )
+        # npm run build
+        subprocess.run(
+            [npm, "run", "build"],
+            cwd=str(frontend_dir),
+            check=True,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+        )
+        logger.info("Frontend build complete → %s", frontend_dir / "dist")
+        return True
+    except subprocess.CalledProcessError as exc:
+        detail = (exc.stderr or exc.stdout or "").strip()
+        logger.error("Frontend build FAILED: %s", detail)
+        return False
+    except FileNotFoundError:
+        logger.warning("npm not found — skipping frontend build")
+        return True  # not fatal
+
+
 def main() -> int:
     cli = _parse_cli()
     ctx = _build_context(cli)
@@ -128,6 +179,9 @@ def main() -> int:
         "Evolve Agent starting | mode=%s workspace=%s self=%s",
         ctx.mode, ctx.workspace, ctx.self_path,
     )
+
+    # ---- build frontend (non-fatal) ----
+    _build_frontend()
 
     app = App(ctx)
     try:
