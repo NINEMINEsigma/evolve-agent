@@ -50,13 +50,13 @@ from third.filesystem import File
 
 
 if __name__ == "__main__":
+    fast_agent_space = (workspace_path/fast_agent_space_path)
+    slow_agent_space = (workspace_path/slow_agent_space_path)
     if fouce_init or (workspace_path/"init.lock").exists() == False:
         (workspace_path/"init.lock").touch()
         # 保持代理空间干净，删除代理空间并重新创建
-        fast_agent_space = (workspace_path/fast_agent_space_path)
         File(origin=str(fast_agent_space)).delete() # 删除fast agent空间
         fast_agent_space.mkdir(parents=True, exist_ok=True) # 创建fast agent空间
-        slow_agent_space = (workspace_path/slow_agent_space_path)
         File(origin=str(slow_agent_space)).delete() # 删除slow agent空间   
         slow_agent_space.mkdir(parents=True, exist_ok=True) # 创建slow agent空间
         # 复制源代码到代理空间
@@ -75,6 +75,8 @@ if __name__ == "__main__":
             f"--evolve {slow_agent_space}", # 需要进化的代码路径
             f"--gateway_host {gateway_host}", # WebSocket 监听地址
             f"--gateway_port {gateway_port}", # WebSocket 监听端口
+            f"--llm_base_url {llm_base_url}", # LLM API 地址
+            f"--llm_model {llm_model}", # LLM 模型名
             f"--mode fast" # 运行模式
         ])
         exit_code = task.returncode
@@ -98,6 +100,8 @@ if __name__ == "__main__":
                 f"--self {workspace_path/".fallback"}", # 自身代码路径
                 f"--fix_fork {fast_agent_space}", # 需要修复的代码路径
                 f"--fix {logs_path/"fast_agent_runtime_error.log"}", # 错误日志路径
+                f"--llm_base_url {llm_base_url}", # LLM API 地址
+                f"--llm_model {llm_model}", # LLM 模型名
                 f"--mode fallback" # 运行模式
             ])
             if task.returncode == 0:

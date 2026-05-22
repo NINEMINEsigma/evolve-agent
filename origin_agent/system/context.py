@@ -2,17 +2,20 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Optional
+
+from pydantic import BaseModel, ConfigDict
 
 
-@dataclass
-class RuntimeContext:
-    """Immutable (by convention) runtime configuration.
+class RuntimeContext(BaseModel):
+    """Immutable runtime configuration.
 
     Populated by __main__.py from CLI arguments.  All paths are resolved to
     absolute form so downstream code never has to worry about CWD.
     """
+
+    model_config = ConfigDict(frozen=True)
 
     # -- Paths (all absolute) -----------------------------------------------
 
@@ -37,10 +40,10 @@ class RuntimeContext:
 
     # -- Fallback-mode fields -----------------------------------------------
 
-    fix_path: Path | None = None
+    fix_path: Optional[Path] = None
     """When mode=='fallback', the directory to repair (the broken fast)."""
 
-    fix_log_path: Path | None = None
+    fix_log_path: Optional[Path] = None
     """When mode=='fallback', path to the error log to consult."""
 
     # -- Gateway config -----------------------------------------------------

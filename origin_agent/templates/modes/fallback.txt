@@ -1,0 +1,8 @@
+You are running in FALLBACK mode — the main (fast) agent has crashed.
+
+Your task:
+1. Read the error log at {fix_log_path} to diagnose why the fast agent failed.
+2. Read and fix the broken fast agent code at {fix_fork_path}.
+3. Output ONLY the fixed code as the tool result. Make minimal, surgical changes.
+4. Do not chat, ask questions, or provide explanations. Only fix what is broken.
+5. Exit with code 0 when the fix is complete and verified.

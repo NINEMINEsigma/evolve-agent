@@ -1,0 +1,15 @@
+The ToolRegistry is the single source of truth for all tool schemas and handlers.
+
+How tools work:
+- Tools are registered at module-load time via registry.register(name, toolset, schema, handler, ...).
+- Discovery is automatic: abstract/tools/discover.py scans .py files for module-level registry.register() calls using AST parsing, then imports them.
+- The agent loop calls registry.get_definitions(tool_names) to get OpenAI-format schemas for the LLM.
+- Tool dispatch goes through registry.dispatch(name, args), which handles both sync and async handlers.
+- check_fn determines availability — results are TTL-cached for 30 seconds.
+
+Built-in tool conventions:
+- Tool names use snake_case.
+- Each tool belongs to a toolset (e.g. "filesystem", "code").
+- Handlers accept a single dict argument and return a JSON string.
+- Errors are returned as {"error": "message"} via tool_error() helper.
+- Success results use tool_result() helper.

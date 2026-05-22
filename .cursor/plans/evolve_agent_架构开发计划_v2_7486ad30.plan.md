@@ -10,10 +10,10 @@ todos:
     status: completed
   - id: stage-3-agent-loop
     content: "Stage 3: Agent Loop — LLM 客户端，基于 abstract/tools 的工具集成，基于 abstract/memory 的记忆集成"
-    status: pending
+    status: completed
   - id: stage-4-tools
     content: "Stage 4: 具体工具实现 — 文件系统工具，代码自省工具，在 abstract/tools 的 ToolRegistry 上注册"
-    status: pending
+    status: completed
   - id: stage-5-code-evolve
     content: "Stage 5: 代码进化 — evolve_code 编排，代码验证，fast-slow-fallback 联动"
     status: pending

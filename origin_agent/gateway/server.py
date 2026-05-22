@@ -26,6 +26,16 @@ logger = logging.getLogger(__name__)
 
 sessions = SessionManager()
 
+# AgentLoop reference — set by main.py before the server starts.
+# Falls back to echo mode when not set (useful for testing without an LLM).
+_agent_loop: object | None = None
+
+
+def set_agent_loop(loop: object) -> None:
+    """Wire the AgentLoop into the gateway's WebSocket handler."""
+    global _agent_loop
+    _agent_loop = loop
+
 # ---------------------------------------------------------------------------
 # FastAPI app
 # ---------------------------------------------------------------------------
@@ -113,14 +123,30 @@ async def ws_chat(ws: WebSocket) -> None:
 
             # Route by type
             if msg.type == MessageType.USER_MESSAGE:
-                # TODO: wire to Agent Loop in Stage 3
-                await ws.send_text(
-                    Message(
-                        type=MessageType.AGENT_MESSAGE,
-                        session_id=sid,
-                        content=f"[echo] {msg.content}",
-                    ).to_json()
-                )
+                if _agent_loop is not None:
+                    try:
+                        reply = await _agent_loop.process_message(  # type: ignore[union-attr]
+                            sid, msg.content or ""
+                        )
+                    except Exception as exc:
+                        logger.exception("Agent loop error for session=%s", sid)
+                        reply = f"Internal error: {exc}"
+                    await ws.send_text(
+                        Message(
+                            type=MessageType.AGENT_MESSAGE,
+                            session_id=sid,
+                            content=reply,
+                        ).to_json()
+                    )
+                else:
+                    # LLM not configured — echo fallback
+                    await ws.send_text(
+                        Message(
+                            type=MessageType.AGENT_MESSAGE,
+                            session_id=sid,
+                            content=f"[echo] {msg.content}",
+                        ).to_json()
+                    )
 
             elif msg.type == MessageType.SYSTEM:
                 logger.info("System message from session=%s: %s", sid, msg.content)

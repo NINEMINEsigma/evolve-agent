@@ -5,9 +5,10 @@ from __future__ import annotations
 import json
 import logging
 import uuid
-from dataclasses import dataclass
 from enum import Enum
 from typing import Any, Dict, Optional
+
+from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
 
@@ -21,8 +22,7 @@ class MessageType(str, Enum):
     SYSTEM = "system"
 
 
-@dataclass
-class Message:
+class Message(BaseModel):
     type: MessageType
     session_id: str = ""
     content: Optional[str] = None

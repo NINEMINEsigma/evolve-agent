@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -110,6 +111,19 @@ def _build_context(cli: dict) -> RuntimeContext:
         ),
         fix_log_path=(
             Path(cli["fix"]).resolve() if "fix" in cli else None
+        ),
+        # LLM config — env vars override CLI args, CLI args override defaults
+        llm_api_key=(
+            os.environ.get("OPENAI_API_KEY", "")
+            or str(cli.get("llm_api_key", ""))
+        ),
+        llm_base_url=(
+            os.environ.get("OPENAI_BASE_URL", "")
+            or str(cli.get("llm_base_url", ""))
+        ),
+        llm_model=(
+            os.environ.get("LLM_MODEL", "")
+            or str(cli.get("llm_model", ""))
         ),
     )
 

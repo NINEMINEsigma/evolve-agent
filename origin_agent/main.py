@@ -66,10 +66,33 @@ class App:
     async def _start_gateway(self) -> None:
         """Create uvicorn server and run it as a background task."""
         try:
-            from gateway.server import create_server
+            from gateway.server import create_server, set_agent_loop
         except ImportError as exc:
             logger.warning("Gateway unavailable (import error): %s", exc)
             return
+
+        # ---- initialize sandbox + tools ----
+        try:
+            from system.sandbox import Sandbox
+            _sandbox = Sandbox(self.ctx)
+            import component.tools.filesystem as _fs
+            _fs.set_sandbox(_sandbox)
+            import component.tools  # noqa: F401 — triggers registry.register()
+            logger.info("Sandbox + %d tools initialized | mode=%s",
+                        len(component.tools.filesystem.registry.get_all_tool_names()),
+                        self.ctx.mode)
+        except Exception as exc:
+            logger.warning("Sandbox/tools unavailable: %s", exc)
+
+        # ---- create agent loop ----
+        try:
+            from entry.agent import AgentLoop
+            agent_loop = AgentLoop(self.ctx)
+            set_agent_loop(agent_loop)
+            logger.info("AgentLoop initialized | model=%s", self.ctx.llm_model)
+        except Exception as exc:
+            logger.warning("AgentLoop unavailable: %s", exc)
+            # Gateway will fall back to echo mode
 
         host = self.ctx.gateway_host
         port = self.ctx.gateway_port
