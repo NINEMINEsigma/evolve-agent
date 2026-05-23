@@ -13,7 +13,6 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import Any, Dict, List
 
 from evolve.validator import validate_directory, summary
 from system.sandbox import Sandbox
@@ -47,7 +46,7 @@ def finalize_evolution(
     """
     # Resolve fork: to the real path on disk
     try:
-        fork_resolved = sandbox.resolve("fork:", "read")
+        fork_resolved = sandbox.resolve_read("fork:")
     except Exception as exc:
         return _json_error(f"Cannot resolve fork: namespace: {exc}")
 

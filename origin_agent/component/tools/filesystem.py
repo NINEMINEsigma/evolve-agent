@@ -195,6 +195,78 @@ registry.register(
 )
 
 
+def _handle_edit(args: Dict[str, Any]) -> str:
+    """Targeted text replacement — find and replace one exact match."""
+    path = str(args.get("path", "")).strip()
+    old_string = str(args.get("old_string", ""))
+    new_string = str(args.get("new_string", ""))
+
+    if not path:
+        return tool_error("path is required")
+    if not old_string:
+        return tool_error("old_string is required")
+
+    try:
+        content = _s().read(path)
+    except SandboxError as exc:
+        return tool_error(str(exc), path=path)
+
+    if old_string not in content:
+        return tool_error("old_string not found in file", path=path)
+
+    count = content.count(old_string)
+    if count > 1:
+        return tool_error(
+            f"old_string matches {count} locations. Use more surrounding "
+            f"context to make it unique.",
+            path=path, matches=count,
+        )
+
+    new_content = content.replace(old_string, new_string, 1)
+    try:
+        _s().write(path, new_content)
+    except SandboxError as exc:
+        return tool_error(str(exc), path=path)
+
+    return tool_result(success=True, path=path, replaced=True)
+
+
+registry.register(
+    name="edit_file",
+    toolset="filesystem",
+    schema={
+        "description": (
+            "Make a targeted edit to a file by replacing one exact match "
+            "of old_string with new_string.  The old_string must match "
+            "exactly once — include enough surrounding context (2-3 lines "
+            "before and after) to make it unique.  "
+            "Use this instead of write_file when you only need to change "
+            "a few lines — it avoids re-sending the entire file content."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "path": {
+                    "type": "string",
+                    "description": "Logical path (ws:/fork:/fix: prefix).",
+                },
+                "old_string": {
+                    "type": "string",
+                    "description": "Exact text to find and replace.",
+                },
+                "new_string": {
+                    "type": "string",
+                    "description": "Replacement text (use '' to delete).",
+                },
+            },
+            "required": ["path", "old_string", "new_string"],
+        },
+    },
+    handler=_handle_edit,
+    emoji="✂️",
+)
+
+
 # -- file_exists
 registry.register(
     name="file_exists",

@@ -14,7 +14,7 @@ import subprocess  # nosec
 from typing import Any, Dict, List
 
 from abstract.tools.registry import registry, tool_error, tool_result
-from system.sandbox import SandboxError
+from system.sandbox import Access, SandboxError
 
 logger = logging.getLogger(__name__)
 
@@ -68,10 +68,10 @@ def _handle_read_own_source(args: Dict[str, Any]) -> str:
     try:
         if ":" in path:
             # Explicit logical path — must be readable
-            resolved = _s().resolve(path, "read")
+            resolved = _s().resolve(path, Access.READ)
         else:
             # Bare filename — resolve relative to self:
-            resolved = _s().resolve(f"self:{path}", "read")
+            resolved = _s().resolve(f"self:{path}", Access.READ)
         content = resolved.real.read_text(encoding="utf-8")
         return tool_result(content=content, path=path)
     except (SandboxError, FileNotFoundError) as exc:
@@ -90,9 +90,9 @@ def _handle_write_fork(args: Dict[str, Any]) -> str:
 
     try:
         if ":" in path:
-            resolved = _s().resolve(path, "write")
+            resolved = _s().resolve(path, Access.WRITE)
         else:
-            resolved = _s().resolve(f"fork:{path}", "write")
+            resolved = _s().resolve(f"fork:{path}", Access.WRITE)
         resolved.real.parent.mkdir(parents=True, exist_ok=True)
         resolved.real.write_text(content, encoding="utf-8")
         return tool_result(success=True, path=path, bytes=len(content.encode("utf-8")))
@@ -113,9 +113,9 @@ def _handle_validate_code(args: Dict[str, Any]) -> str:
         # Validate single file
         try:
             if ":" in path:
-                resolved = _s().resolve(path, "read")
+                resolved = _s().resolve(path, Access.READ)
             else:
-                resolved = _s().resolve(f"fork:{path}", "read")
+                resolved = _s().resolve(f"fork:{path}", Access.READ)
             source = resolved.real.read_text(encoding="utf-8")
             ast.parse(source, filename=str(resolved.real))
             results.append({"file": path, "status": "ok"})
@@ -137,7 +137,7 @@ def _handle_validate_code(args: Dict[str, Any]) -> str:
                 if not entry.endswith(".py"):
                     continue
                 try:
-                    resolved = _s().resolve(f"fork:{entry}", "read")
+                    resolved = _s().resolve(f"fork:{entry}", Access.READ)
                     source = resolved.real.read_text(encoding="utf-8")
                     ast.parse(source, filename=str(resolved.real))
                     results.append({"file": entry, "status": "ok"})

@@ -194,8 +194,10 @@ def main() -> int:
         ctx.mode, ctx.workspace, ctx.self_path,
     )
 
-    # ---- build frontend (non-fatal) ----
-    _build_frontend()
+    # ---- build frontend (fatal on failure) ----
+    if not _build_frontend():
+        logger.critical("Frontend build FAILED — aborting start")
+        return 1  # non-zero, non-(-1) → triggers run.py fallback branch
 
     app = App(ctx)
     try:

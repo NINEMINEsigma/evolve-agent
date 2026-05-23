@@ -8,8 +8,11 @@ Provides:
 
 from __future__ import annotations
 
+import json
 import logging
 from pathlib import Path
+from typing import Dict
+from urllib.parse import parse_qs
 
 import uvicorn
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
@@ -35,6 +38,73 @@ def set_agent_loop(loop: object) -> None:
     """Wire the AgentLoop into the gateway's WebSocket handler."""
     global _agent_loop
     _agent_loop = loop
+
+
+# ── tool event streaming ──────────────────────────────────────────────
+# Map session_id → WebSocket for pushing tool_call / tool_result events
+# to the frontend while the agent loop is processing a turn.
+
+_tool_ws_sinks: Dict[str, WebSocket] = {}
+
+# ── shell command confirmation ────────────────────────────────────────
+# {request_id: asyncio.Future} — maps confirmation request IDs to futures
+# that are resolved when the user approves/rejects a run_command.
+# {request_id: session_id}  — reverse-maps request_id to session_id
+# for auto-deny on WebSocket disconnect.
+
+import asyncio as _asyncio
+_pending_confirms: Dict[str, _asyncio.Future] = {}
+_confirm_session_map: Dict[str, str] = {}
+
+
+def _register_confirm_session(request_id: str, session_id: str) -> None:
+    """Record which session owns a confirm request so we can auto-deny on disconnect."""
+    _confirm_session_map[request_id] = session_id
+
+
+def _resolve_confirm(request_id: str, action: str) -> None:
+    fut = _pending_confirms.pop(request_id, None)
+    _confirm_session_map.pop(request_id, None)
+    if fut and not fut.done():
+        fut.set_result(action)
+        logger.info("Confirm resolved: %s → %s", request_id, action)
+    else:
+        logger.warning(
+            "Confirm request %s not found (already resolved or timed out)", request_id
+        )
+
+
+def _deny_session_confirms(session_id: str) -> None:
+    """Auto-deny all pending confirm requests for a disconnected session."""
+    for rid in list(_confirm_session_map.keys()):
+        if _confirm_session_map.get(rid) == session_id:
+            _resolve_confirm(rid, "deny")
+
+
+async def _send_tool_event(
+    session_id: str, event_type: str, tool_name: str, payload: str,
+) -> None:
+    """Push a tool_call or tool_result event to the frontend WebSocket."""
+    ws = _tool_ws_sinks.get(session_id)
+    if ws is None:
+        return
+    msg_type = MessageType.TOOL_CALL if event_type == "tool_call" else MessageType.TOOL_RESULT
+    try:
+        data = json.loads(payload)
+    except json.JSONDecodeError:
+        data = None
+
+    msg = Message(
+        type=msg_type,
+        session_id=session_id,
+        tool=tool_name,
+        args=data if event_type == "tool_call" else None,
+        result=payload if event_type == "tool_result" else None,
+    )
+    try:
+        await ws.send_text(msg.to_json())
+    except Exception:
+        pass  # client disconnected — ignore
 
 # ---------------------------------------------------------------------------
 # FastAPI app
@@ -74,6 +144,16 @@ async def health():
     return {"status": "ok", "sessions": sessions.count}
 
 
+@app.get("/api/evolution/history")
+async def evolution_history():
+    """Return the evolution journal written by run.py during swaps."""
+    import json as _json
+    status_file = Path(__file__).resolve().parent.parent.parent / "workspace" / "logs" / "evolution.status"
+    if status_file.exists():
+        return _json.loads(status_file.read_text(encoding="utf-8"))
+    return []
+
+
 @app.get("/{full_path:path}")
 async def spa_fallback(full_path: str):
     """Catch-all for SPA client-side routes.
@@ -91,7 +171,14 @@ async def spa_fallback(full_path: str):
 @app.websocket("/ws/chat")
 async def ws_chat(ws: WebSocket) -> None:
     await ws.accept()
-    sid = sessions.create()
+    # Resume a previous session if the client requests it
+    qs = parse_qs(ws.scope.get("query_string", b"").decode())
+    resume = qs.get("resume", [None])[0]
+    if resume and sessions.exists(resume):
+        sid = resume
+    else:
+        sid = sessions.create()
+    _tool_ws_sinks[sid] = ws  # register for tool event streaming
     logger.info("WebSocket connected | session=%s", sid)
 
     try:
@@ -153,6 +240,14 @@ async def ws_chat(ws: WebSocket) -> None:
                         ).to_json()
                     )
 
+            elif msg.type == MessageType.CONFIRM_RESPONSE:
+                if msg.request_id is not None and msg.action is not None:
+                    _resolve_confirm(msg.request_id, msg.action)
+
+            elif msg.type == MessageType.INTERRUPT:
+                if _agent_loop is not None and hasattr(_agent_loop, "interrupt"):
+                    _agent_loop.interrupt(sid)  # type: ignore[union-attr]
+
             elif msg.type == MessageType.SYSTEM:
                 logger.info("System message from session=%s: %s", sid, msg.content)
 
@@ -168,6 +263,8 @@ async def ws_chat(ws: WebSocket) -> None:
     except WebSocketDisconnect:
         logger.info("WebSocket disconnected | session=%s", sid)
     finally:
+        _deny_session_confirms(sid)
+        _tool_ws_sinks.pop(sid, None)
         sessions.remove(sid)
 
 

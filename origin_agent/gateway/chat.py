@@ -18,6 +18,9 @@ class MessageType(str, Enum):
     AGENT_MESSAGE = "agent_message"
     TOOL_CALL = "tool_call"
     TOOL_RESULT = "tool_result"
+    CONFIRM_REQUEST = "confirm_request"
+    CONFIRM_RESPONSE = "confirm_response"
+    INTERRUPT = "interrupt"
     ERROR = "error"
     SYSTEM = "system"
 
@@ -30,6 +33,8 @@ class Message(BaseModel):
     args: Optional[Dict[str, Any]] = None
     result: Optional[Any] = None
     message: Optional[str] = None  # used by ERROR type
+    request_id: Optional[str] = None  # for confirm_request / confirm_response
+    action: Optional[str] = None      # for confirm_response: allow_once | allow_always | deny
 
     @classmethod
     def from_json(cls, raw: str) -> Message:
@@ -42,6 +47,8 @@ class Message(BaseModel):
             args=data.get("args"),
             result=data.get("result"),
             message=data.get("message"),
+            request_id=data.get("request_id"),
+            action=data.get("action"),
         )
 
     def to_json(self) -> str:
@@ -58,6 +65,10 @@ class Message(BaseModel):
             d["result"] = self.result
         if self.message is not None:
             d["message"] = self.message
+        if self.request_id is not None:
+            d["request_id"] = self.request_id
+        if self.action is not None:
+            d["action"] = self.action
         return json.dumps(d, ensure_ascii=False)
 
 

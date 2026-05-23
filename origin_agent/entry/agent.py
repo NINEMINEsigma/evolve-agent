@@ -12,9 +12,10 @@ at startup via ``abstract.tools.discover.discover_builtin_tools``
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
-from typing import Any, Dict, List
+from typing import Any, Awaitable, Callable, Dict, List
 
 from abstract.memory.manager import MemoryManager
 from abstract.tools.registry import registry as tool_registry
@@ -25,7 +26,7 @@ from system.prompt import build_system_prompt
 logger = logging.getLogger(__name__)
 
 # Maximum tool-calling loop iterations per message to prevent infinite loops.
-_MAX_TOOL_TURNS = 8
+_MAX_TOOL_TURNS = 90
 
 
 class AgentLoop:
@@ -41,10 +42,42 @@ class AgentLoop:
         self._ctx = ctx
         self._llm = LLMClient(ctx)
         self._memory = MemoryManager()
+        self._memory_initialized: bool = False
+        self._interrupted: Dict[str, bool] = {}
         # Per-session conversation history: session_id → list of OpenAI-format messages
         self._histories: Dict[str, List[Dict[str, Any]]] = {}
+        # Callback fired on tool_call / tool_result events.
+        # Signature: async (session_id, event_type, tool_name, payload) -> None
+        self._tool_event_callback: Callable[[str, str, str, str], Awaitable[None]] | None = None
 
     # -- public API ----------------------------------------------------------
+
+    def set_tool_event_callback(
+        self,
+        cb: Callable[[str, str, str, str], Awaitable[None]],
+    ) -> None:
+        """Register an async callback for tool execution events.
+
+        *cb* is called with ``(session_id, event_type, tool_name, payload)``
+        where *event_type* is ``"tool_call"`` or ``"tool_result"`` and
+        *payload* is a JSON string.
+        """
+        self._tool_event_callback = cb
+
+    def interrupt(self, session_id: str) -> None:
+        """Request the agent loop to stop processing for a session.
+
+        Also denies any pending shell-command confirm requests for this
+        session so that a blocking ``_request_user_confirm()`` is
+        unblocked immediately.
+        """
+        self._interrupted[session_id] = True
+        try:
+            from gateway.server import _deny_session_confirms
+            _deny_session_confirms(session_id)
+        except Exception:
+            pass
+        logger.info("Interrupt requested for session=%s", session_id)
 
     async def process_message(
         self,
@@ -59,6 +92,15 @@ class AgentLoop:
           3. Call LLM, execute tool calls, repeat until a text reply
           4. Sync the completed turn to memory
         """
+        # ---- lazy-init memory providers ----
+        if not self._memory_initialized:
+            for provider in self._memory.providers:
+                try:
+                    provider.initialize(session_id)
+                except Exception:
+                    pass
+            self._memory_initialized = True
+
         # ---- memory prefetch ----
         memory_ctx = self._memory.prefetch_all(
             user_message, session_id=session_id
@@ -70,6 +112,9 @@ class AgentLoop:
         # ---- tool-calling loop ----
         turn = 0
         while turn < _MAX_TOOL_TURNS:
+            # ---- honour interrupt ----
+            if self._interrupted.pop(session_id, False):
+                return "已中断。"
             turn += 1
             resp = await self._llm.chat(
                 messages,
@@ -92,9 +137,19 @@ class AgentLoop:
             # Execute tool calls and persist results to history
             history = self._get_history(session_id)
             for tc in resp.tool_calls:
-                tool_msg = self._execute_tool(tc)
+                tool_msg = await self._execute_tool(tc, session_id)
                 messages.append(tool_msg)
                 history.append(tool_msg)
+
+                # If evolve_code succeeded, exit the loop cleanly.
+                # No need to continue — the orchestrator will restart us.
+                if tc.name == "evolve_code":
+                    try:
+                        parsed = json.loads(tool_msg["content"])
+                        if parsed.get("evolved"):
+                            return "进化已完成，正在重启以应用新代码..."
+                    except (json.JSONDecodeError, KeyError, TypeError):
+                        pass
 
             messages = self._get_full_history(session_id)
 
@@ -173,13 +228,48 @@ class AgentLoop:
             entry["reasoning_content"] = resp.reasoning_content
         history.append(entry)
 
-    def _execute_tool(self, tc) -> Dict[str, Any]:
+    async def _execute_tool(self, tc, session_id: str = "") -> Dict[str, Any]:
         """Execute a single tool call and return an OpenAI-format tool message."""
+        # Inject session context so tools like run_command can identify the
+        # frontend session for user confirmation prompts.
+        args = dict(tc.arguments) if tc.arguments else {}
+        args["_session_id"] = session_id
+
         logger.info("Tool call: %s args=%s", tc.name, tc.arguments)
-        try:
-            result = tool_registry.dispatch(tc.name, tc.arguments)
-        except Exception as exc:
-            result = json.dumps({"error": str(exc)})
+
+        # ---- notify frontend: tool_call ----
+        if self._tool_event_callback:
+            asyncio.create_task(
+                self._tool_event_callback(
+                    session_id, "tool_call", tc.name,
+                    json.dumps(tc.arguments, ensure_ascii=False),
+                )
+            )
+
+        # Route to memory manager if it owns this tool
+        if self._memory.has_tool(tc.name):
+            try:
+                result = self._memory.handle_tool_call(tc.name, args)
+            except Exception as exc:
+                result = json.dumps({"error": str(exc)})
+        else:
+            entry = tool_registry.get_entry(tc.name)
+            try:
+                if entry and entry.is_async:
+                    result = await entry.handler(args)
+                else:
+                    result = tool_registry.dispatch(tc.name, args)
+            except Exception as exc:
+                result = json.dumps({"error": str(exc)})
+
+        # ---- notify frontend: tool_result ----
+        if self._tool_event_callback:
+            asyncio.create_task(
+                self._tool_event_callback(
+                    session_id, "tool_result", tc.name, result,
+                )
+            )
+
         return {
             "role": "tool",
             "tool_call_id": tc.id,
@@ -187,8 +277,12 @@ class AgentLoop:
         }
 
     def _get_tool_definitions(self) -> List[Dict[str, Any]]:
-        """Return available tool schemas for the LLM."""
-        names = tool_registry.get_all_tool_names()
-        if not names:
-            return None  # type: ignore[return-value]
-        return tool_registry.get_definitions(tool_names=set(names))
+        """Return available tool schemas for the LLM (registry + memory)."""
+        names = set(tool_registry.get_all_tool_names())
+        definitions = tool_registry.get_definitions(tool_names=names)
+
+        # Merge memory tool schemas (wrap in OpenAI format)
+        for schema in self._memory.get_tool_schemas():
+            definitions.append({"type": "function", "function": schema})
+
+        return definitions if definitions else None  # type: ignore[return-value]

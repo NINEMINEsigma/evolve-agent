@@ -124,6 +124,21 @@ class App:
         try:
             from entry.agent import AgentLoop
             agent_loop = AgentLoop(self.ctx)
+
+            # Register persistent memory provider
+            try:
+                from memory.provider import EasysaveMemoryProvider
+                mem = EasysaveMemoryProvider(
+                    memory_dir=str(self.ctx.workspace / "logs" / "memory")
+                )
+                agent_loop._memory.add_provider(mem)
+                logger.info("EasysaveMemoryProvider registered")
+            except Exception as exc:
+                logger.warning("Memory provider unavailable: %s", exc)
+
+            # Wire tool event streaming to the frontend
+            from gateway.server import _send_tool_event
+            agent_loop.set_tool_event_callback(_send_tool_event)
             set_agent_loop(agent_loop)
             logger.info("AgentLoop initialized | model=%s", self.ctx.llm_model)
         except Exception as exc:
@@ -139,6 +154,7 @@ class App:
         # Give the server a moment to bind
         await asyncio.sleep(0.5)
         logger.info("Gateway listening on ws://%s:%d/ws/chat", host, port)
+        logger.info("WebPage on %s:%d", host, port)
 
     async def _stop_gateway(self) -> None:
         """Gracefully stop the gateway server."""

@@ -49,6 +49,31 @@ for module in Path("third").iterdir():
 from third.filesystem import File
 
 
+# ── evolution status journal ─────────────────────────────────────────
+_EVOLVE_STATUS_PATH = logs_path / "evolution.status"
+
+
+def _append_evolve_event(stage: str, detail: str) -> None:
+    """Append a timestamped event to the evolution status file for frontend display."""
+    import json as _json
+    entry = {
+        "time": datetime.now().strftime("%H:%M:%S"),
+        "stage": stage,
+        "detail": detail,
+    }
+    try:
+        existing = []
+        if _EVOLVE_STATUS_PATH.exists():
+            existing = _json.loads(_EVOLVE_STATUS_PATH.read_text(encoding="utf-8"))
+        existing.append(entry)
+        _EVOLVE_STATUS_PATH.write_text(
+            _json.dumps(existing, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+    except Exception:
+        pass  # non-critical
+
+
 if __name__ == "__main__":
     fast_agent_space = (workspace_path/fast_agent_space_path)
     slow_agent_space = (workspace_path/slow_agent_space_path)
@@ -85,15 +110,28 @@ if __name__ == "__main__":
             break
         elif exit_code in (-1,):
             logger.info(f"Slow agent was updated, fast agent will update to new version")
+            _append_evolve_event("backup", f"fast → .fallback")
             File(str(workspace_path/".fallback")).delete()
             File(str(fast_agent_space)).copy_to(str(workspace_path/".fallback"))
+
+            _append_evolve_event("swap", f"slow → fast")
             File(str(slow_agent_space)).copy_to(str(fast_agent_space))
+
+            _append_evolve_event("complete", "swap finished, restarting")
         else:
             logger.error(f"Fast agent exited with unknown error: {exit_code}")
+            fallback_main = workspace_path / ".fallback" / "__main__.py"
+            if not fallback_main.exists():
+                logger.warning(
+                    "Fallback agent not found at %s — this is normal on first "
+                    "initialisation. Exiting.",
+                    fallback_main,
+                )
+                break
             logger.info(f"Running fallback agent")
             task = subprocess.run([
                 sys.executable, # 使用当前python解释器
-                str(workspace_path/".fallback"/"__main__.py"), # 运行fallback agent
+                str(fallback_main), # 运行fallback agent
                 f"--workspace {workspace_path}", # 工作空间路径
                 f"--log {log_file_path}", # 日志路径
                 f"--console_log {console_log}", # 是否在控制台打印日志
