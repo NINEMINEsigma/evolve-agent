@@ -189,3 +189,4 @@ test/*
 
 # workspace
 workspace/*
+.shell_allowlist.json

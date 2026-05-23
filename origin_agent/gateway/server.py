@@ -15,7 +15,7 @@ from typing import Dict
 from urllib.parse import parse_qs
 
 import uvicorn
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -152,6 +152,29 @@ async def evolution_history():
     if status_file.exists():
         return _json.loads(status_file.read_text(encoding="utf-8"))
     return []
+
+
+@app.post("/api/confirm/{request_id}")
+async def http_confirm(request_id: str, req: Request):
+    """Handle confirm response via HTTP (independent of WS connection state)."""
+    try:
+        body = await req.json()
+    except Exception:
+        body = {}
+    action = str(body.get("action", "deny"))
+    if action not in ("allow_once", "allow_always", "deny"):
+        action = "deny"
+    _resolve_confirm(request_id, action)
+    return {"resolved": True, "request_id": request_id, "action": action}
+
+
+@app.post("/api/interrupt/{session_id}")
+async def http_interrupt(session_id: str):
+    """Handle interrupt via HTTP so it works even when the WS handler is
+    blocked inside ``process_message()``."""
+    if _agent_loop is not None and hasattr(_agent_loop, "interrupt"):
+        _agent_loop.interrupt(session_id)  # type: ignore[union-attr]
+    return {"interrupted": True, "session_id": session_id}
 
 
 @app.get("/{full_path:path}")

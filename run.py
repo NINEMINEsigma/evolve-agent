@@ -115,6 +115,7 @@ if __name__ == "__main__":
             File(str(fast_agent_space)).copy_to(str(workspace_path/".fallback"))
 
             _append_evolve_event("swap", f"slow → fast")
+            File(str(fast_agent_space)).delete()
             File(str(slow_agent_space)).copy_to(str(fast_agent_space))
 
             _append_evolve_event("complete", "swap finished, restarting")

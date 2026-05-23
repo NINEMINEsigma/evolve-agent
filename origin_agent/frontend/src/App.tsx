@@ -116,18 +116,14 @@ export default function App() {
 
   // ── confirm response ──
   const respondConfirm = useCallback((action: string) => {
-    if (!pendingConfirm || !wsRef.current) return;
-    const payload = {
-      type: "confirm_response",
-      request_id: pendingConfirm.request_id,
-      action,
-    };
-    console.log("[confirm] sending", payload);
-    try {
-      wsRef.current.send(JSON.stringify(payload));
-    } catch (err) {
-      console.error("[confirm] send failed", err);
-    }
+    if (!pendingConfirm) return;
+    const payload = { action };
+    console.log("[confirm] HTTP POST", pendingConfirm.request_id, payload);
+    fetch(`/api/confirm/${pendingConfirm.request_id}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    }).catch((err) => console.error("[confirm] fetch failed", err));
     setPendingConfirm(null);
   }, [pendingConfirm]);
 
@@ -314,8 +310,8 @@ export default function App() {
           <button
             className="interrupt-btn"
             onClick={() => {
-              if (!wsRef.current) return;
-              wsRef.current.send(JSON.stringify({ type: "interrupt" }));
+              fetch(`/api/interrupt/${sessionId || "unknown"}`, { method: "POST" })
+                .catch(() => {});
             }}
           >
             ⏹
