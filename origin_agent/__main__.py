@@ -133,7 +133,7 @@ def _build_context(cli: dict) -> RuntimeContext:
 # ---------------------------------------------------------------------------
 
 def _build_frontend() -> bool:
-    """Run ``npm install && npm run build`` inside the frontend directory.
+    """Run ``pnpm install && pnpm run build`` inside the frontend directory.
 
     The frontend lives under *AGENT_DIR* (e.g. ``origin_agent/frontend/`` or
     ``workspace/fast_agent_space/frontend/``).  Build output goes to
@@ -150,19 +150,19 @@ def _build_frontend() -> bool:
     logger.info("Building frontend in %s ...", frontend_dir)
 
     try:
-        npm = "npm.cmd" if sys.platform == "win32" else "npm"
-        # npm install (idempotent and fast when already installed)
+        pnpm = "pnpm.cmd" if sys.platform == "win32" else "pnpm"
+        # pnpm install (idempotent and fast when already installed)
         subprocess.run(
-            [npm, "install"],
+            [pnpm, "install"],
             cwd=str(frontend_dir),
             check=True,
             capture_output=True,
             text=True,
             encoding="utf-8",
         )
-        # npm run build
+        # pnpm run build
         subprocess.run(
-            [npm, "run", "build"],
+            [pnpm, "run", "build"],
             cwd=str(frontend_dir),
             check=True,
             capture_output=True,
@@ -176,7 +176,7 @@ def _build_frontend() -> bool:
         logger.error("Frontend build FAILED: %s", detail)
         return False
     except FileNotFoundError:
-        logger.warning("npm not found — skipping frontend build")
+        logger.warning("pnpm not found — skipping frontend build")
         return True  # not fatal
 
 

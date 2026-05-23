@@ -158,6 +158,31 @@ def _handle_validate_code(args: Dict[str, Any]) -> str:
     return tool_result(valid=ok, results=results)
 
 
+def _handle_evolve_code(args: Dict[str, Any]) -> str:
+    """Finalize code evolution: validate fork then trigger the hot swap.
+
+    After the agent has written evolved code to fork: via write_fork
+    and checked syntax via validate_code, call this tool to run a
+    thorough validation (syntax + compile check) and, if everything
+    passes, signal the orchestrator to swap slow→fast.
+
+    Only works in 'fast' mode.  In 'fallback' mode, returns an error.
+    """
+    from evolve.code import finalize_evolution
+
+    deep = bool(args.get("deep", True))
+    compile_timeout = int(args.get("compile_timeout", 30))
+
+    try:
+        return finalize_evolution(
+            _s(),
+            deep=deep,
+            compile_timeout=compile_timeout,
+        )
+    except Exception as exc:
+        return tool_error(str(exc))
+
+
 # ---------------------------------------------------------------------------
 # Registration
 # ---------------------------------------------------------------------------
@@ -240,4 +265,39 @@ registry.register(
     },
     handler=_handle_validate_code,
     emoji="✅",
+)
+
+
+registry.register(
+    name="evolve_code",
+    toolset="code",
+    schema={
+        "description": (
+            "Finalize the code evolution cycle.  Call this after you have "
+            "written evolved source files to fork: via write_fork and "
+            "verified syntax via validate_code.  This tool runs a thorough "
+            "validation (syntax + compile check) on all .py files in the "
+            "fork directory.  If everything passes, the process exits and "
+            "the orchestrator swaps the slow (evolved) code into place, "
+            "then restarts the agent with the new version.  "
+            "If validation fails, returns error details so you can fix "
+            "the issues and retry.  "
+            "Set deep=false to skip compile checks (faster but less thorough)."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "deep": {
+                    "type": "boolean",
+                    "description": "Whether to run py_compile checks (default true).",
+                },
+                "compile_timeout": {
+                    "type": "integer",
+                    "description": "Per-file timeout in seconds for compile checks (default 30).",
+                },
+            },
+        },
+    },
+    handler=_handle_evolve_code,
+    emoji="🚀",
 )

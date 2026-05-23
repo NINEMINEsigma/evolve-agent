@@ -138,6 +138,11 @@ async def ws_chat(ws: WebSocket) -> None:
                             content=reply,
                         ).to_json()
                     )
+                    # After sending the agent response, check whether a
+                    # code-evolution finalization was requested during this
+                    # turn and trigger a graceful shutdown if so.
+                    from main import trigger_evolution_shutdown
+                    trigger_evolution_shutdown()
                 else:
                     # LLM not configured — echo fallback
                     await ws.send_text(
