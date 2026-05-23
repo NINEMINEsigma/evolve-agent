@@ -99,7 +99,7 @@ async def _send_tool_event(
         session_id=session_id,
         tool=tool_name,
         args=data if event_type == "tool_call" else None,
-        result=payload if event_type == "tool_result" else None,
+        result=(payload[:200] if event_type == "tool_result" else None),
     )
     try:
         await ws.send_text(msg.to_json())

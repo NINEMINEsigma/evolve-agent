@@ -17,6 +17,7 @@ Directory layout::
 from __future__ import annotations
 
 import logging
+import sys
 from pathlib import Path
 from typing import Optional
 
@@ -26,6 +27,47 @@ logger = logging.getLogger(__name__)
 # This works both in the source tree (origin_agent/system/)
 # and in the workspace copy (workspace/fast_agent_space/system/).
 _TEMPLATES_DIR = Path(__file__).resolve().parent.parent / "templates"
+
+
+def _platform_info(lang: str = "en") -> str:
+    """Detect the runtime platform and return a prompt block describing it.
+
+    Returns a short paragraph telling the LLM which OS it runs on, what
+    the correct Python binary is called, and how to invoke shell commands.
+    """
+    is_win = sys.platform.startswith("win")
+    is_mac = sys.platform == "darwin"
+
+    if lang == "zh":
+        if is_win:
+            return (
+                "运行平台：**Windows**。Python 命令是 ``python``（不是 ``python3``）。\n"
+                "Windows 原生命令使用 ``cmd /c <命令>`` 形式。"
+            )
+        if is_mac:
+            return (
+                "运行平台：**macOS**。Python 命令是 ``python3``。\n"
+                "使用标准 Unix shell 命令。"
+            )
+        return (
+            "运行平台：**Linux**。Python 命令是 ``python3``。\n"
+            "使用标准 Unix shell 命令。"
+        )
+    # English
+    if is_win:
+        return (
+            "Running on **Windows**.  Python is ``python`` (not ``python3``).\n"
+            "For Windows built-in commands use ``cmd /c <command>``."
+        )
+    if is_mac:
+        return (
+            "Running on **macOS**.  Python is ``python3``.\n"
+            "Use standard Unix shell commands."
+        )
+    return (
+        "Running on **Linux**.  Python is ``python3``.\n"
+        "Use standard Unix shell commands."
+    )
 
 
 def _read_if_exists(path: Path) -> str:
@@ -75,6 +117,7 @@ def build_system_prompt(
     # 1. Base
     base = _read_if_exists(template_root / "base.txt")
     if base:
+        base = base.format(platform=_platform_info(lang))
         blocks.append(base)
 
     # 2. Mode-specific

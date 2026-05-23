@@ -15,8 +15,10 @@ from __future__ import annotations
 
 import asyncio
 import json
+import locale
 import logging
 import subprocess  # nosec
+import sys
 import uuid
 from pathlib import Path
 from typing import Any, Dict, List, Set
@@ -194,7 +196,8 @@ def _execute(cmd_parts: List[str], cwd: str) -> str:
             timeout=30,
             capture_output=True,
             text=True,
-            encoding="utf-8",
+            encoding=locale.getpreferredencoding(False) or sys.getfilesystemencoding() or "utf-8",
+            errors="replace",
         )
         return tool_result(
             exit_code=result.returncode,
