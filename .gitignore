@@ -188,6 +188,6 @@ cython_debug/
 test/*
 
 # workspace
-workspace/*
+workspace/
 .shell_allowlist.json
 skills/
