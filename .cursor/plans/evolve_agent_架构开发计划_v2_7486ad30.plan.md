@@ -22,7 +22,7 @@ todos:
     status: completed
   - id: stage-7-dashboard
     content: "Stage 7: Dashboard — 管理仪表盘，监控 API，进化历史可视化"
-    status: pending
+    status: completed
 isProject: false
 ---
 
@@ -448,3 +448,24 @@ Stage 1 (骨架) ──► Stage 2 (Gateway) ──► Stage 3 (Agent Loop)
 ```
 
 Stage 2 与 Stage 3-6 可部分并行。Stage 1 是所有后续的前置依赖。abstract/ 已在代码库中，无需额外工作。
+
+---
+
+## 计划外交付（实际实施过程中新增）
+
+| 功能 | 说明 |
+|------|------|
+| `edit_file` 工具 | 局部文本替换（`old_string` → `new_string`），避免全文件覆写导致 JSON 截断 |
+| HTTP confirm/interrupt | `POST /api/confirm/{rid}` + `POST /api/interrupt/{sid}`，绕过 WS 单协程阻塞问题 |
+| 前端 WS 自动重连 | 指数退避重连（1s→2s→4s→…max 30s），状态栏实时显示 |
+| 前端 session 持久化 | localStorage + `?resume=` 参数，刷新页面不丢失会话 |
+| Shell allowlist 防篡改 | 从 `ws:logs/` 移到项目根目录（sandbox 外），防止 AI 通过 `write_file` 自我提权 |
+| 平台自动检测 | `prompt.py` 运行时检测 Windows/Linux/macOS，注入对应 shell/python 指令说明 |
+| subprocess 编码修复 | `locale.getpreferredencoding()` + `errors="replace"` 解决 Windows GBK 乱码 |
+| GENE.md | 项目根不可变固定 prompt，注入 system prompt 首位 |
+| SOUL.md | `run.py` 首次拷贝到 workspace，人机共编文件，AI 可通过 `edit_file` 修改 |
+| 技能种子 | 启动时自动创建 `workspace/skills/self-evolution/SKILL.md` |
+
+## 当前状态
+
+全部 7 个阶段已完成。原有 plan 的 todo 已全部关闭。新的 bug 修复计划见 `bug_修复与架构加固计划（review_后）_6f28b040.plan.md`。

@@ -113,6 +113,14 @@ async def _send_tool_event(
 
 app = FastAPI(title="Evolve Agent Gateway")
 
+# ---- dashboard routes ----
+try:
+    from dashboard.server import register_dashboard_routes
+    register_dashboard_routes(app)
+    logger.info("Dashboard routes registered → /dashboard")
+except Exception as exc:
+    logger.warning("Dashboard unavailable: %s", exc)
+
 # ---------------------------------------------------------------------------
 # Built frontend discovery
 # ---------------------------------------------------------------------------

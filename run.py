@@ -138,7 +138,7 @@ if __name__ == "__main__":
                 f"--workspace {workspace_path}", # 工作空间路径
                 f"--log {log_file_path}", # 日志路径
                 f"--console_log {console_log}", # 是否在控制台打印日志
-                f"--self {workspace_path/".fallback"}", # 自身代码路径
+                f"--self {workspace_path/'.fallback'}", # 自身代码路径
                 f"--fix_fork {fast_agent_space}", # 需要修复的代码路径
                 f"--fix {logs_path/"fast_agent_runtime_error.log"}", # 错误日志路径
                 f"--llm_base_url {llm_base_url}", # LLM API 地址
