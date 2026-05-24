@@ -120,6 +120,34 @@ class App:
         except Exception as exc:
             logger.warning("Sandbox/tools unavailable: %s", exc)
 
+        # ---- seed skills directory ----
+        try:
+            _skills_dir = self.ctx.workspace / "skills"
+            _skills_dir.mkdir(parents=True, exist_ok=True)
+            _seed = _skills_dir / "self-evolution" / "SKILL.md"
+            if not _seed.exists():
+                _seed.parent.mkdir(parents=True, exist_ok=True)
+                _seed.write_text("""---
+name: self-evolution
+description: "Evolve Agent 自我进化指南"
+category: core
+---
+
+# 自我进化
+
+你可以通过以下工具修改自己的源代码并完成进化：
+
+1. ``read_own_source`` — 读取 self: 下的源码
+2. ``write_fork`` 或 ``edit_file`` — 将进化代码写入 fork: 或 ws:
+3. ``validate_code`` — 检查语法
+4. ``evolve_code`` — 深度验证并通过后触发 swap
+
+退出码 -1 通知编排器执行 slow→fast 替换并重启。
+""", encoding="utf-8")
+                logger.info("Seeded skill: self-evolution")
+        except Exception as exc:
+            logger.warning("Skills directory setup failed: %s", exc)
+
         # ---- create agent loop ----
         try:
             from entry.agent import AgentLoop

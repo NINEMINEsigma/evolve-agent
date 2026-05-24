@@ -175,6 +175,28 @@ class AgentLoop:
             entry["reasoning_content"] = reasoning_content
         self._get_history(session_id).append(entry)
 
+    def _collect_skill_prompts(self) -> list[str]:
+        """Load enabled skills and return their formatted prompts."""
+        blocks: list[str] = []
+        try:
+            from abstract.skills.loader import list_skills, load_skill
+            skills = list_skills()
+            for s in skills:
+                name = s.get("name", "")
+                if not name:
+                    continue
+                try:
+                    payload = load_skill(name)
+                    if payload.get("success") and payload.get("content"):
+                        blocks.append(
+                            f"[Skill: {name}]\n{payload['content']}"
+                        )
+                except Exception:
+                    pass
+        except Exception:
+            pass
+        return blocks
+
     def _build_messages(
         self,
         session_id: str,
@@ -182,9 +204,13 @@ class AgentLoop:
         memory_ctx: str,
     ) -> List[Dict[str, Any]]:
         """Build the full message list for this turn."""
+        # Collect enabled skill prompts
+        skill_blocks = self._collect_skill_prompts()
+
         system_prompt = build_system_prompt(
             mode=self._ctx.mode,
             memory_context=memory_ctx,
+            extra_blocks=skill_blocks,
             lang="zh",
         )
 

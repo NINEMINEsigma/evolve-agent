@@ -29,6 +29,26 @@ logger = logging.getLogger(__name__)
 _TEMPLATES_DIR = Path(__file__).resolve().parent.parent / "templates"
 
 
+def _find_repo_root() -> Path:
+    """Walk up from this file until we find ``run.py`` (the project root)."""
+    p = Path(__file__).resolve()
+    for _ in range(6):
+        p = p.parent
+        if (p / "run.py").exists():
+            return p
+    return Path(__file__).resolve().parents[3]  # fallback
+
+
+def _read_gene() -> str:
+    """Read the immutable GENE.md from the project root."""
+    return _read_if_exists(_find_repo_root() / "GENE.md")
+
+
+def _read_soul() -> str:
+    """Read the editable SOUL.md from the workspace directory."""
+    return _read_if_exists(Path("SOUL.md"))
+
+
 def _platform_info(lang: str = "en") -> str:
     """Detect the runtime platform and return a prompt block describing it.
 
@@ -113,6 +133,16 @@ def build_system_prompt(
             template_root = zh_dir
 
     blocks: list[str] = []
+
+    # 0. GENE — immutable core identity, always first
+    gene = _read_gene()
+    if gene:
+        blocks.append(gene)
+
+    # 0a. SOUL — human+AI co-editable personality/style (workspace/SOUL.soul)
+    soul = _read_soul()
+    if soul:
+        blocks.append(soul)
 
     # 1. Base
     base = _read_if_exists(template_root / "base.txt")

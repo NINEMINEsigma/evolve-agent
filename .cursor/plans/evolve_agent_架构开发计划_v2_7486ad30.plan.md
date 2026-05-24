@@ -12,14 +12,14 @@ todos:
     content: "Stage 3: Agent Loop — LLM 客户端，基于 abstract/tools 的工具集成，基于 abstract/memory 的记忆集成"
     status: completed
   - id: stage-4-tools
-    content: "Stage 4: 具体工具实现 — 文件系统工具，代码自省工具，在 abstract/tools 的 ToolRegistry 上注册"
+    content: "Stage 4: 具体工具实现 — filesystem / code / shell / skills / edit_file，ToolRegistry 注册"
     status: completed
   - id: stage-5-code-evolve
-    content: "Stage 5: 代码进化 — evolve_code 编排，代码验证，fast-slow-fallback 联动"
-    status: pending
+    content: "Stage 5: 代码进化 — evolve_code 编排，validator 双层验证，fast-slow-fallback 联动"
+    status: completed
   - id: stage-6-self-evolve
-    content: "Stage 6: 自我演化 — 实现 MemoryProvider 具体类，基于 abstract/skills 的技能管理，prompt 注入"
-    status: pending
+    content: "Stage 6: 自我演化 — EasysaveMemoryProvider，skills 集成 (learn/list/recall/forget)，GENE+SOUL 身份系统，prompt 注入"
+    status: completed
   - id: stage-7-dashboard
     content: "Stage 7: Dashboard — 管理仪表盘，监控 API，进化历史可视化"
     status: pending
