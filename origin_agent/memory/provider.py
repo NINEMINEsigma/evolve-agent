@@ -70,6 +70,9 @@ class EasysaveMemoryProvider(MemoryProvider):
         return (
             "You have persistent memory of {n} previous session(s). "
             "Use the `recall_memory` tool to search past conversations. "
+            "The search only supports single keyword matching — always try "
+            "one concise keyword at a time (e.g. \"novel\" rather than "
+            "\"write a novel story\"). "
             "You can also use `remember` to explicitly store facts."
         ).format(n=len(sessions))
 
@@ -132,6 +135,11 @@ class EasysaveMemoryProvider(MemoryProvider):
                 "description": (
                     "Search past conversation history for relevant context. "
                     "Use this to remember what was discussed in previous sessions. "
+                    "IMPORTANT: Pass only a SINGLE keyword — the ENTIRE query string is used as-is "
+                    "for substring matching. Spaces are NOT treated as separators; a query like "
+                    "'foo bar' searches for the literal text 'foo bar', not 'foo' or 'bar' individually, "
+                    "and will almost certainly match nothing. Use the most unique single word you can "
+                    "think of, then refine with a different word if needed. "
                     "If session_id is omitted, searches across all sessions."
                 ),
                 "parameters": {
@@ -143,7 +151,12 @@ class EasysaveMemoryProvider(MemoryProvider):
                         },
                         "query": {
                             "type": "string",
-                            "description": "Keywords to search for in past conversations.",
+                            "description": (
+                                "A single keyword only. The search uses the ENTIRE input string as a "
+                                "literal substring — it does NOT split on spaces. Passing multiple words "
+                                "separated by spaces will search for that exact multi-word string and "
+                                "almost certainly find nothing. Pick the most distinctive single word."
+                            ),
                         },
                     },
                 },
