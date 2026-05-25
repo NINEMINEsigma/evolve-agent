@@ -12,17 +12,10 @@ import sys
 from pathlib import Path
 from typing import Any, Dict, List
 
-# Ensure third/ is importable regardless of whether this file is running
-# from origin_agent/ (repo) or workspace/fast_agent_space/ (copy).
-def _repo_root() -> Path:
-    p = Path(__file__).resolve()
-    for _ in range(6):
-        p = p.parent
-        if (p / "run.py").exists():
-            return p
-    return Path(__file__).resolve().parents[3]
+# Ensure third/ is importable
+from system.pathutils import find_repo_root
 
-_THIRD = _repo_root() / "third"
+_THIRD = find_repo_root() / "third"
 for _p in (_THIRD, _THIRD / "easysave"):
     if str(_p) not in sys.path:
         sys.path.insert(0, str(_p))
@@ -90,12 +83,20 @@ class EasysaveMemoryProvider(MemoryProvider):
         turns = data.get("turns", [])
         if not turns:
             return ""
+        # Filter by query keywords if provided
+        if query:
+            q = query.lower()
+            turns = [t for t in turns if q in str(t.get('user', '')).lower() or q in str(t.get('assistant', '')).lower()]
+            if not turns:
+                return ""
         # Return the last few turns as context
         recent = turns[-6:]  # last 6 turns
         lines = ["[Previous conversation — recall context]"]
         for t in recent:
             lines.append(f"User: {t.get('user', '')}")
-            lines.append(f"Assistant: {t.get('assistant', '')[:500]}")
+            assistant_text = str(t.get('assistant', ''))
+            truncated = assistant_text[:500] + ("...[truncated]" if len(assistant_text) > 500 else "")
+            lines.append(f"Assistant: {truncated}")
         return "\n".join(lines)
 
     def sync_turn(

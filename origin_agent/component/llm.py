@@ -32,6 +32,15 @@ class ToolCall(BaseModel):
     arguments: Dict[str, Any] = {}
 
 
+class Usage(BaseModel):
+    """Token usage returned by the LLM provider."""
+    model_config = ConfigDict(frozen=True)
+
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
+    total_tokens: int = 0
+
+
 class LLMResponse(BaseModel):
     model_config = ConfigDict(frozen=True)
 
@@ -40,6 +49,7 @@ class LLMResponse(BaseModel):
     finish_reason: str = "stop"
     reasoning_content: Optional[str] = None
     """DeepSeek thinking-mode payload — must be echoed on subsequent turns."""
+    usage: Usage = Usage()
 
 
 # ---------------------------------------------------------------------------
@@ -111,6 +121,11 @@ class LLMClient:
             ],
             finish_reason=choice.finish_reason or "stop",
             reasoning_content=getattr(msg, "reasoning_content", None),
+            usage=Usage(
+                prompt_tokens=completion.usage.prompt_tokens if completion.usage else 0,
+                completion_tokens=completion.usage.completion_tokens if completion.usage else 0,
+                total_tokens=completion.usage.total_tokens if completion.usage else 0,
+            ),
         )
 
 

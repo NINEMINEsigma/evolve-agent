@@ -33,6 +33,8 @@ def _s():
 
 
 def _resolve_sandboxed_path(path: str, mode: str) -> str:
+    # NOTE: Legacy helper — not currently used by any handler.
+    # Handlers inline their own path resolution through the sandbox.
     """Resolve a logical path to an absolute path via the sandbox.
 
     Special case: bare filenames without namespace prefix are treated
@@ -72,9 +74,14 @@ def _handle_read_own_source(args: Dict[str, Any]) -> str:
         else:
             # Bare filename — resolve relative to self:
             resolved = _s().resolve(f"self:{path}", Access.READ)
+        if resolved.real.is_dir():
+            return tool_result(
+                entries=_s().list_dir(f"self:{path}" if ":" not in path else path),
+                tip="Use read_own_source with file=<name> to read a specific file",
+            )
         content = resolved.real.read_text(encoding="utf-8")
         return tool_result(content=content, path=path)
-    except (SandboxError, FileNotFoundError) as exc:
+    except (SandboxError, FileNotFoundError, IsADirectoryError, PermissionError) as exc:
         return tool_error(str(exc), path=path)
 
 
@@ -221,7 +228,8 @@ registry.register(
             "Write an evolved version of a source file to the fork (slow) "
             "directory.  After writing all changes, call validate_code to "
             "check syntax, then call evolve_code to trigger the swap.  "
-            "Accepts bare filenames (e.g. 'main.py')."
+            "Accepts bare filenames (e.g. 'main.py').  "
+            "For small targeted changes, prefer edit_file with fork: paths instead."
         ),
         "parameters": {
             "type": "object",

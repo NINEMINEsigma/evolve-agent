@@ -9,6 +9,10 @@ fouce_init:             bool    = False
 gateway_host:           str     = "127.0.0.1"
 gateway_port:           int     = 8765
 # llm
-llm_base_url:           str     = "https://api.openai.com/v1"
-llm_model:              str     = "gpt-4o"
+llm_base_url:           str     = "https://api.deepseek.com"
+llm_model:              str     = "deepseek-v4-flash"
 # Note: llm_api_key should be set via the OPENAI_API_KEY env var, never in config.
+llm_max_context_tokens: int     = 1000000
+llm_context_upbound:    float   = 0.9
+llm_max_output_tokens:  int     = 384000
+llm_temperature:        float   = 0.95

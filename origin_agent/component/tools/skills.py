@@ -11,7 +11,7 @@ import json
 import logging
 from typing import Any, Dict, List
 
-from abstract.skills.manager import create_skill, delete_skill
+from abstract.skills.manager import create_skill, delete_skill, update_skill
 from abstract.skills.loader import list_skills, load_skill
 from abstract.tools.registry import registry, tool_error, tool_result
 from system.sandbox import SandboxError
@@ -80,6 +80,14 @@ def _handle_learn_skill(args: Dict[str, Any]) -> str:
             content=content,
             tags=tags if isinstance(tags, list) else [str(tags)],
         )
+        if not payload.get("success"):
+            payload = update_skill(
+                name=name,
+                description=description or name,
+                category=category,
+                content=content,
+                tags=tags if isinstance(tags, list) else [str(tags)],
+            )
         if payload.get("success"):
             return tool_result(
                 created=True,
@@ -126,6 +134,7 @@ def _handle_recall_skill(args: Dict[str, Any]) -> str:
                     "description": payload.get("description"),
                     "category": payload.get("category"),
                     "content": payload.get("content"),
+                    "facts": payload.get("facts", []),
                 },
                 ensure_ascii=False,
             )

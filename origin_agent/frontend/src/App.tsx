@@ -34,6 +34,21 @@ interface ChatMessage {
   toolArgs?: Record<string, unknown>;
 }
 
+interface SessionInfo {
+  id: string;
+  created_at: number;
+  status: string;
+}
+
+function formatTime(ts: number): string {
+  if (!ts) return "";
+  const diff = Date.now() / 1000 - ts;
+  if (diff < 60) return "刚刚";
+  if (diff < 3600) return `${Math.floor(diff / 60)}分钟前`;
+  if (diff < 86400) return `${Math.floor(diff / 3600)}小时前`;
+  return `${Math.floor(diff / 86400)}天前`;
+}
+
 export default function App() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
@@ -41,8 +56,17 @@ export default function App() {
   const [waiting, setWaiting] = useState(false);
   const [pendingConfirm, setPendingConfirm] = useState<ConfirmRequest | null>(null);
   const [sessionId, setSessionId] = useState("");
+  const [tokenUsage, setTokenUsage] = useState(0);
+  const [sessions, setSessions] = useState<SessionInfo[]>([]);
   const wsRef = useRef<WebSocket | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
+
+  const fetchSessions = useCallback(() => {
+    fetch("/api/sessions")
+      .then((r) => r.json())
+      .then((data) => setSessions(data.sessions || []))
+      .catch(() => {});
+  }, []);
 
   const addMessage = useCallback((role: ChatMessage["role"], content: string) => {
     const id = crypto.randomUUID();
@@ -52,6 +76,7 @@ export default function App() {
   // ── WebSocket with auto-reconnect ───────────────────────────────────
   const reconnectRef = useRef(0);
   const timerRef = useRef<ReturnType<typeof setTimeout>>();
+  const manualRef = useRef(false);  // true during manual reconnect (newChat/switchSession)
 
   const connect = useCallback(() => {
     const lastSid = localStorage.getItem("evolve_session_id") || "";
@@ -63,11 +88,17 @@ export default function App() {
       reconnectRef.current = 0;
       setStatus("已连接");
       addMessage("system", "已连接到 Evolve Agent");
+      fetchSessions();
     };
 
     ws.onclose = () => {
       setStatus("已断开");
       setWaiting(false);
+      if (manualRef.current) return;  // manual switch — skip auto-reconnect
+      if (reconnectRef.current >= 10) {
+        setStatus("连接失败 — 已达到最大重试次数");
+        return;
+      }
       // Exponential backoff: 1s → 2s → 4s → ... max 30s
       const delay = Math.min(1000 * Math.pow(2, reconnectRef.current), 30000);
       reconnectRef.current += 1;
@@ -78,7 +109,27 @@ export default function App() {
     ws.onmessage = (e) => {
       const msg: WSMessage = JSON.parse(e.data);
       if (msg.type === "system") {
-        addMessage("system", msg.content ?? "");
+        // Check if content is JSON (session_history + token_usage on resume)
+        const raw = msg.content ?? "";
+        try {
+          const data = JSON.parse(raw);
+          if (data.session_history) {
+            // Session resume — replay conversation history
+            const history = data.session_history.map((m: any) => ({
+              role: m.role,
+              content: m.content,
+              id: crypto.randomUUID(),
+            }));
+            if (history.length) setMessages(history);
+            if (data.token_usage !== undefined) setTokenUsage(data.token_usage);
+            return;  // skip normal system message handling
+          }
+          if (data.token_usage !== undefined) {
+            setTokenUsage(data.token_usage);
+            return;
+          }
+        } catch {}
+        addMessage("system", raw);
         if (msg.session_id) {
           setSessionId(msg.session_id);
           localStorage.setItem("evolve_session_id", msg.session_id);
@@ -141,7 +192,7 @@ export default function App() {
 
   const send = () => {
     const text = input.trim();
-    if (!text || !wsRef.current || waiting) return;
+    if (!text || !wsRef.current || waiting || wsRef.current.readyState !== WebSocket.OPEN) return;
     addMessage("user", text);
     wsRef.current.send(
       JSON.stringify({ type: "user_message", content: text })
@@ -150,9 +201,55 @@ export default function App() {
     setWaiting(true);
   };
 
+  const newChat = () => {
+    manualRef.current = true;
+    if (wsRef.current) wsRef.current.close();
+    localStorage.removeItem("evolve_session_id");
+    setMessages([]);
+    setSessionId("");
+    setWaiting(false);
+    setPendingConfirm(null);
+    clearTimeout(timerRef.current);
+    manualRef.current = false;
+    connect();
+  };
+
+  const switchSession = (sid: string) => {
+    if (sid === sessionId) return;
+    manualRef.current = true;
+    if (wsRef.current) wsRef.current.close();
+    localStorage.setItem("evolve_session_id", sid);
+    setMessages([]);
+    setSessionId(sid);
+    setWaiting(false);
+    setPendingConfirm(null);
+    clearTimeout(timerRef.current);
+    manualRef.current = false;
+    connect();
+  };
+
   return (
     <div className="app">
-      <header className="app-header">
+      <aside className="sidebar">
+        <div className="sidebar-header">
+          <div className="sidebar-title">💬 会话</div>
+          <button className="new-chat-btn" onClick={newChat}>+ 新对话</button>
+        </div>
+        <div className="session-list">
+          {sessions.map((s) => (
+            <div
+              key={s.id}
+              className={`session-item ${s.id === sessionId ? "active" : ""}`}
+              onClick={() => switchSession(s.id)}
+            >
+              <div className="session-item-id">{s.id}</div>
+              <div className="session-item-time">{formatTime(s.created_at)}</div>
+            </div>
+          ))}
+        </div>
+      </aside>
+      <div className="main-content">
+        <header className="app-header">
         <div className="header-left">
           <div className="model-icon">⚡</div>
           <div>
@@ -168,6 +265,11 @@ export default function App() {
             <span className="session-badge" title="刷新页面后自动恢复此会话">
               {sessionId}
             </span>
+            {tokenUsage > 0 && (
+              <span className="token-badge" title="当前会话累计 token 消耗">
+                {tokenUsage.toLocaleString()}
+              </span>
+            )}
           </div>
         )}
       </header>
@@ -318,6 +420,7 @@ export default function App() {
           </button>
         )}
       </footer>
+      </div>
     </div>
   );
 }

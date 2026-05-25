@@ -49,7 +49,7 @@ def validate_compile(file_path: Path, timeout: int = 15) -> Dict[str, Any]:
     """
     code = (
         "import py_compile, sys; "
-        f"py_compile.compile({str(file_path)!r}, doraise=True)"
+        f"py_compile.compile({file_path.as_posix()!r}, doraise=True)"
     )
     try:
         result = subprocess.run(
@@ -57,6 +57,7 @@ def validate_compile(file_path: Path, timeout: int = 15) -> Dict[str, Any]:
             capture_output=True,
             text=True,
             encoding="utf-8",
+            errors="replace",
             timeout=timeout,
         )
         if result.returncode == 0:
@@ -111,6 +112,15 @@ def summary(results: List[Dict[str, Any]]) -> Dict[str, Any]:
     """
     ok = sum(1 for r in results if r.get("status") == "ok")
     errors = len(results) - ok
+    if len(results) == 0:
+        return {
+            "valid": False,
+            "total": 0,
+            "ok": 0,
+            "errors": 0,
+            "details": [],
+            "reason": "Fork directory is empty — no .py files found",
+        }
     return {
         "valid": errors == 0,
         "total": len(results),

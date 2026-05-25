@@ -111,7 +111,31 @@ async def _send_tool_event(
 # ---------------------------------------------------------------------------
 
 
-app = FastAPI(title="Evolve Agent Gateway")
+import asyncio
+from contextlib import asynccontextmanager
+
+
+async def _cleanup_loop():
+    while True:
+        try:
+            await asyncio.sleep(300)
+            cleaned = sessions.cleanup_expired()
+            if cleaned:
+                logger.info("Cleaned up %d expired session(s)", cleaned)
+        except Exception:
+            pass
+
+
+@asynccontextmanager
+async def _app_lifespan(app):
+    task = asyncio.create_task(_cleanup_loop())
+    logger.info("Session cleanup task started (interval=300s)")
+    yield
+    task.cancel()
+    logger.info("Session cleanup task stopped")
+
+
+app = FastAPI(title="Evolve Agent Gateway", lifespan=_app_lifespan)
 
 # ---- dashboard routes ----
 try:
@@ -150,6 +174,12 @@ async def index():
 @app.get("/health")
 async def health():
     return {"status": "ok", "sessions": sessions.count}
+
+
+@app.get("/api/sessions")
+async def list_sessions():
+    """Return all active sessions with metadata."""
+    return {"sessions": sessions.get_all()}
 
 
 @app.get("/api/evolution/history")
@@ -222,6 +252,24 @@ async def ws_chat(ws: WebSocket) -> None:
             ).to_json()
         )
 
+        # On resume, replay conversation history so the frontend isn't blank
+        if resume and sessions.exists(resume) and _agent_loop is not None:
+            get_messages = getattr(_agent_loop, "get_session_messages", None)
+            get_usage = getattr(_agent_loop, "get_token_usage", None)
+            if get_messages:
+                history = get_messages(sid)
+                usage = get_usage(sid) if get_usage else 0
+                await ws.send_text(
+                    Message(
+                        type=MessageType.SYSTEM,
+                        session_id=sid,
+                        content=json.dumps({
+                            "session_history": history,
+                            "token_usage": usage,
+                        }, ensure_ascii=False),
+                    ).to_json()
+                )
+
         while True:
             raw = await ws.receive_text()
 
@@ -256,6 +304,16 @@ async def ws_chat(ws: WebSocket) -> None:
                             content=reply,
                         ).to_json()
                     )
+                    # Send live token-usage update to frontend
+                    get_usage = getattr(_agent_loop, "get_token_usage", None)
+                    if get_usage:
+                        await ws.send_text(
+                            Message(
+                                type=MessageType.SYSTEM,
+                                session_id=sid,
+                                content=json.dumps({"token_usage": get_usage(sid)}),
+                            ).to_json()
+                        )
                     # After sending the agent response, check whether a
                     # code-evolution finalization was requested during this
                     # turn and trigger a graceful shutdown if so.
@@ -296,7 +354,6 @@ async def ws_chat(ws: WebSocket) -> None:
     finally:
         _deny_session_confirms(sid)
         _tool_ws_sinks.pop(sid, None)
-        sessions.remove(sid)
 
 
 # ---------------------------------------------------------------------------

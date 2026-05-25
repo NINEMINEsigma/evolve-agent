@@ -78,18 +78,22 @@ class Message(BaseModel):
 
 
 class SessionManager:
-    """Track active WebSocket sessions.
+    """Track active WebSocket sessions with TTL-based expiry.
 
-    Each connected client gets a unique session_id.  This will be used
-    later by the agent loop to isolate conversation history per session.
+    Each connected client gets a unique session_id.
+    Sessions expire after 30 minutes of inactivity.
     """
 
+    _SESSION_TTL = 1800  # 30 minutes
+
     def __init__(self) -> None:
-        self._sessions: Dict[str, str] = {}  # session_id -> status
+        import time
+        self._sessions: Dict[str, dict] = {}  # sid -> {status, created_at}
 
     def create(self) -> str:
+        import time
         sid = uuid.uuid4().hex[:12]
-        self._sessions[sid] = "active"
+        self._sessions[sid] = {"status": "active", "created_at": time.time()}
         logger.debug("Session created | id=%s", sid)
         return sid
 
@@ -99,6 +103,25 @@ class SessionManager:
     def remove(self, sid: str) -> None:
         self._sessions.pop(sid, None)
         logger.debug("Session removed | id=%s", sid)
+
+    def cleanup_expired(self) -> int:
+        import time
+        now = time.time()
+        expired = [
+            sid for sid, info in self._sessions.items()
+            if now - info.get("created_at", 0) > self._SESSION_TTL
+        ]
+        for sid in expired:
+            self._sessions.pop(sid, None)
+            logger.debug("Session expired | id=%s", sid)
+        return len(expired)
+
+    def get_all(self) -> list[dict]:
+        """Return list of all sessions with metadata."""
+        return [
+            {"id": sid, "created_at": info.get("created_at", 0), "status": info.get("status", "unknown")}
+            for sid, info in self._sessions.items()
+        ]
 
     @property
     def count(self) -> int:

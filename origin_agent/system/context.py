@@ -56,5 +56,7 @@ class RuntimeContext(BaseModel):
     llm_api_key: str = ""
     llm_base_url: str = "https://api.openai.com/v1"
     llm_model: str = "gpt-4o"
+    llm_max_context_tokens: int = 128_000  # total context window
+    llm_context_upbound: float = 0.7       # compression threshold fraction
     llm_temperature: float = 0.7
     llm_max_tokens: int = 4096

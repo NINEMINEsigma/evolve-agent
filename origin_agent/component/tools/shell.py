@@ -35,18 +35,10 @@ from .filesystem import _s as _get_sandbox
 # Stored outside the workspace sandbox so the AI cannot self-escalate
 # by writing to this file via write_file (ws: namespace).
 
-
-def _repo_root() -> Path:
-    """Walk up from this file until we find ``run.py`` (the repo root)."""
-    p = Path(__file__).resolve()
-    for _ in range(6):
-        p = p.parent
-        if (p / "run.py").exists():
-            return p
-    return Path(__file__).resolve().parents[3]  # fallback
+from system.pathutils import find_repo_root
 
 
-_ALLOWLIST_PATH = _repo_root() / ".shell_allowlist.json"
+_ALLOWLIST_PATH = find_repo_root() / ".shell_allowlist.json"
 # Built-in seed: these complete commands are always trusted without prompting.
 _SEED_COMMANDS: Set[str] = {
     "dir", "ls", "echo .",
@@ -71,8 +63,8 @@ def _save_allowlist(entries: Set[str]) -> None:
             json.dumps(sorted(entries - _SEED_COMMANDS), ensure_ascii=False, indent=2),
             encoding="utf-8",
         )
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.warning("Failed to save allowlist: %s", exc)
 
 
 def _s():
@@ -111,7 +103,8 @@ async def _request_user_confirm(
                 "args": {"command": cmd_parts, "reason": reason},
             }, ensure_ascii=False))
         except Exception:
-            pass
+            _pending_confirms.pop(request_id, None)
+            return "deny"
 
     try:
         action: str = await asyncio.wait_for(fut, timeout=3600.0)
@@ -183,6 +176,8 @@ async def _handle_run_command(args: Dict[str, Any]) -> str:
 
 def _execute(cmd_parts: List[str], cwd: str) -> str:
     """Execute a trusted / approved command and return the result."""
+    if cmd_parts and cmd_parts[0] not in _s().allowed_commands:
+        return tool_error(f"Command '{cmd_parts[0]}' not in the allowed list")
     try:
         cwd_r = _s().resolve(cwd, "read")
     except SandboxError as exc:

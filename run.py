@@ -104,6 +104,10 @@ if __name__ == "__main__":
             f"--gateway_port {gateway_port}", # WebSocket 监听端口
             f"--llm_base_url {llm_base_url}", # LLM API 地址
             f"--llm_model {llm_model}", # LLM 模型名
+            f"--llm_max_context_tokens {llm_max_context_tokens}", # LLM 最大上下文
+            f"--llm_context_upbound {llm_context_upbound}", # LLM 上下文压缩阈值
+            f"--llm_max_output_tokens {llm_max_output_tokens}", # LLM 最大输出
+            f"--llm_temperature {llm_temperature}", # LLM 温度
             f"--mode fast" # 运行模式
         ])
         exit_code = task.returncode
@@ -143,6 +147,10 @@ if __name__ == "__main__":
                 f"--fix {logs_path/"fast_agent_runtime_error.log"}", # 错误日志路径
                 f"--llm_base_url {llm_base_url}", # LLM API 地址
                 f"--llm_model {llm_model}", # LLM 模型名
+                f"--llm_max_context_tokens {llm_max_context_tokens}", # LLM 最大上下文
+                f"--llm_context_upbound {llm_context_upbound}", # LLM 上下文压缩阈值
+                f"--llm_max_output_tokens {llm_max_output_tokens}", # LLM 最大输出
+                f"--llm_temperature {llm_temperature}", # LLM 温度
                 f"--mode fallback" # 运行模式
             ])
             if task.returncode == 0:

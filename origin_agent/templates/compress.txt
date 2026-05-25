@@ -1,0 +1,4 @@
+Summarize the key points and decisions of the following conversation. Output only the summary.
+Conversation:
+{old_text}
+Summary:

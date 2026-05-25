@@ -105,6 +105,7 @@ class App:
             from gateway.server import create_server, set_agent_loop
         except ImportError as exc:
             logger.warning("Gateway unavailable (import error): %s", exc)
+            self._shutdown_event.set()
             return
 
         # ---- initialize sandbox + tools ----
@@ -119,6 +120,7 @@ class App:
                         self.ctx.mode)
         except Exception as exc:
             logger.warning("Sandbox/tools unavailable: %s", exc)
+            self._shutdown_event.set()
 
         # ---- seed skills directory ----
         try:
@@ -147,6 +149,7 @@ category: core
                 logger.info("Seeded skill: self-evolution")
         except Exception as exc:
             logger.warning("Skills directory setup failed: %s", exc)
+            self._shutdown_event.set()
 
         # ---- create agent loop ----
         try:

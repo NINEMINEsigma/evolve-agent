@@ -28,25 +28,17 @@ logger = logging.getLogger(__name__)
 # and in the workspace copy (workspace/fast_agent_space/system/).
 _TEMPLATES_DIR = Path(__file__).resolve().parent.parent / "templates"
 
-
-def _find_repo_root() -> Path:
-    """Walk up from this file until we find ``run.py`` (the project root)."""
-    p = Path(__file__).resolve()
-    for _ in range(6):
-        p = p.parent
-        if (p / "run.py").exists():
-            return p
-    return Path(__file__).resolve().parents[3]  # fallback
+from system.pathutils import find_repo_root
 
 
 def _read_gene() -> str:
     """Read the immutable GENE.md from the project root."""
-    return _read_if_exists(_find_repo_root() / "GENE.md")
+    return _read_if_exists(find_repo_root() / "GENE.md")
 
 
-def _read_soul() -> str:
+def _read_soul(workspace: Path) -> str:
     """Read the editable SOUL.md from the workspace directory."""
-    return _read_if_exists(Path("SOUL.md"))
+    return _read_if_exists(workspace / "SOUL.md")
 
 
 def _platform_info(lang: str = "en") -> str:
@@ -106,6 +98,11 @@ def build_system_prompt(
     memory_context: str = "",
     extra_blocks: Optional[list[str]] = None,
     lang: str = "en",
+    workspace: Path | str = "",
+    self_path: str = "",
+    fork_path: str = "",
+    fix_fork_path: str = "",
+    fix_log_path: str = "",
 ) -> str:
     """Assemble the full system prompt from layered templates.
 
@@ -120,6 +117,12 @@ def build_system_prompt(
         prompts, memory provider blocks).
     lang:
         ``"en"`` (default) or ``"zh"`` — selects template language variant.
+    workspace:
+        Path to the workspace directory for reading SOUL.md.
+    self_path / fork_path / fix_fork_path / fix_log_path:
+        Real paths for ``{self_path}`` / ``{fork_path}`` / ``{fix_fork_path}`` / ``{fix_log_path}``
+        placeholders in template files (converted from ``{{var}}`` by .format(), then
+        replaced via .replace()).
 
     Returns
     -------
@@ -140,7 +143,8 @@ def build_system_prompt(
         blocks.append(gene)
 
     # 0a. SOUL — human+AI co-editable personality/style (workspace/SOUL.soul)
-    soul = _read_soul()
+    workspace_path = Path(workspace) if workspace else Path()
+    soul = _read_soul(workspace_path)
     if soul:
         blocks.append(soul)
 
@@ -148,11 +152,15 @@ def build_system_prompt(
     base = _read_if_exists(template_root / "base.txt")
     if base:
         base = base.format(platform=_platform_info(lang))
+        base = base.replace("{self_path}", self_path)
+        base = base.replace("{fork_path}", fork_path)
         blocks.append(base)
 
     # 2. Mode-specific
     mode_block = _read_if_exists(template_root / "modes" / f"{mode}.txt")
     if mode_block:
+        mode_block = mode_block.replace("{fix_fork_path}", fix_fork_path)
+        mode_block = mode_block.replace("{fix_log_path}", fix_log_path)
         blocks.append(mode_block)
 
     # 3. Tools

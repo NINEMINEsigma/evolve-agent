@@ -53,7 +53,7 @@ class Access(str, Enum):
 _PERMISSIONS: Dict[str, Dict[str, List[Access]]] = {
     "fast": {
         "self":  [Access.READ],
-        "fork":  [Access.WRITE],
+        "fork":  [Access.READ, Access.WRITE],
         "ws":    [Access.READ, Access.WRITE],
     },
     "fallback": {
@@ -183,6 +183,11 @@ class Sandbox:
         "python", "python3", "pip", "pnpm", "npx", "node", "git",
     })
 
+    @property
+    def allowed_commands(self) -> frozenset[str]:
+        """Public read-only access to the command allowlist."""
+        return self._ALLOWED_COMMANDS
+
     def run(
         self,
         args: List[str],
@@ -219,22 +224,13 @@ class Sandbox:
             raise SandboxError(f"cwd does not exist or is not a directory: {cwd_ns}")
 
         # -- validate any path arguments that look like logical paths --
-        safe_args: List[str] = []
         for arg in args:
             if ":" in arg and any(arg.startswith(p) for p in ("ws:", "self:", "fork:", "fix:")):
-                resolved = self.resolve(arg, Access.READ)
-                safe_args.insert(0, str(resolved.real))
-                # replace the logical path arg with real path
-                # BUT we insert it at position 0 to prepend to remaining args
-                # Actually, we need to be smarter. For now, just reject
-                # path-like args that look like they'd escape.
                 raise SandboxError(
                     f"Path arguments to subprocess commands must be resolved "
                     f"by the tool handler before calling sandbox.run(). "
                     f"Got: {arg!r}"
                 )
-            else:
-                safe_args.append(arg)
 
         # -- build env --
         env = None
@@ -243,9 +239,9 @@ class Sandbox:
             env = os.environ.copy()
             env.update(extra_env)
 
-        logger.debug("sandbox.run | cwd=%s cmd=%s", cwd_r.real, safe_args)
+        logger.debug("sandbox.run | cwd=%s cmd=%s", cwd_r.real, args)
         return subprocess.run(
-            safe_args,
+            args,
             cwd=str(cwd_r.real),
             timeout=timeout,
             capture_output=True,
@@ -256,11 +252,20 @@ class Sandbox:
 
     # -- helpers for tools --------------------------------------------------
 
-    def read(self, logical: str) -> str:
-        """Read file content through the sandbox."""
+    def read(self, logical: str, offset: int = 0, limit: int = 100) -> str:
+        """Read file content through the sandbox with line-based pagination.
+
+        offset: 0-indexed line number to start from (default 0).
+        limit:  max lines to return (default 100).
+        """
         r = self.resolve_read(logical)
         try:
-            return r.real.read_text(encoding="utf-8")
+            content = r.real.read_text(encoding="utf-8")
+            if offset > 0 or limit < len(content.splitlines()):
+                lines = content.splitlines()
+                chunk = lines[offset:offset + limit]
+                return "\n".join(chunk)
+            return content
         except FileNotFoundError:
             raise SandboxError(f"File not found: {logical}")
 
