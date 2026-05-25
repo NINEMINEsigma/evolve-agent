@@ -160,7 +160,8 @@ category: core
         # ---- create agent loop ----
         try:
             from entry.agent import AgentLoop
-            agent_loop = AgentLoop(self.ctx)
+            history_path = str(self.ctx.workspace / "logs" / "sessions")
+            agent_loop = AgentLoop(self.ctx, history_store_path=history_path)
 
             # Register persistent memory provider
             try:
@@ -181,6 +182,10 @@ category: core
         except Exception as exc:
             logger.warning("AgentLoop unavailable: %s", exc)
             # Gateway will fall back to echo mode
+
+        # ---- configure session persistence ----
+        from gateway.server import configure_sessions
+        configure_sessions(str(self.ctx.workspace / "logs" / "sessions"))
 
         host = self.ctx.gateway_host
         port = self.ctx.gateway_port

@@ -15,6 +15,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+from pathlib import Path
 from typing import Any, Awaitable, Callable, Dict, List
 
 from abstract.memory.manager import MemoryManager
@@ -38,7 +39,7 @@ class AgentLoop:
         reply = await loop.process_message(session_id, user_message)
     """
 
-    def __init__(self, ctx: RuntimeContext) -> None:
+    def __init__(self, ctx: RuntimeContext, history_store_path: str | None = None) -> None:
         self._ctx = ctx
         self._llm = LLMClient(ctx)
         self._memory = MemoryManager()
@@ -55,6 +56,8 @@ class AgentLoop:
         # Callback fired on tool_call / tool_result events.
         # Signature: async (session_id, event_type, tool_name, payload) -> None
         self._tool_event_callback: Callable[[str, str, str, str], Awaitable[None]] | None = None
+        # Disk persistence for message history
+        self._history_store_dir: Path | None = Path(history_store_path) if history_store_path else None
 
     # -- public API ----------------------------------------------------------
 
@@ -151,6 +154,7 @@ class AgentLoop:
                 tool_msg = await self._execute_tool(tc, session_id)
                 messages.append(tool_msg)
                 history.append(tool_msg)
+                self._persist_message(session_id, tool_msg)
 
                 # If evolve_code succeeded, exit the loop cleanly.
                 # No need to continue — the orchestrator will restart us.
@@ -174,7 +178,9 @@ class AgentLoop:
 
     def _get_history(self, session_id: str) -> List[Dict[str, Any]]:
         if session_id not in self._histories:
-            self._histories[session_id] = []
+            # Try loading from disk first (survives restart)
+            disk = self._load_history_from_disk(session_id)
+            self._histories[session_id] = disk
         return self._histories[session_id]
 
     def _append(
@@ -185,6 +191,49 @@ class AgentLoop:
         if reasoning_content:
             entry["reasoning_content"] = reasoning_content
         self._get_history(session_id).append(entry)
+        self._persist_message(session_id, entry)
+
+    # -- disk persistence helpers -------------------------------------------
+
+    def _history_path(self, session_id: str) -> Path | None:
+        """Path to the JSONL file for a session's message history."""
+        if not self._history_store_dir:
+            return None
+        return self._history_store_dir / session_id / "messages.jsonl"
+
+    def _persist_message(self, session_id: str, entry: dict) -> None:
+        """Append one message entry to the session's JSONL file."""
+        path = self._history_path(session_id)
+        if path is None:
+            return
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            with open(path, "a", encoding="utf-8") as f:
+                f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+        except Exception as exc:
+            logger.warning("Failed to persist message for session %s: %s", session_id, exc)
+
+    def _load_history_from_disk(self, session_id: str) -> list[dict]:
+        """Load full message history from a JSONL file."""
+        path = self._history_path(session_id)
+        if path is None or not path.exists():
+            return []
+        try:
+            entries = []
+            with open(path, "r", encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if line:
+                        entries.append(json.loads(line))
+            return entries
+        except Exception as exc:
+            logger.warning("Failed to load history for session %s: %s", session_id, exc)
+            return []
+
+    def clear_session(self, session_id: str) -> None:
+        """Remove a session from memory and optionally clean up disk files."""
+        self._histories.pop(session_id, None)
+        self._token_usage.pop(session_id, None)
 
     def _collect_skill_prompts(self) -> list[str]:
         """Load enabled skills and return their formatted prompts."""
@@ -405,6 +454,7 @@ class AgentLoop:
         if resp.reasoning_content:
             entry["reasoning_content"] = resp.reasoning_content
         history.append(entry)
+        self._persist_message(session_id, entry)
 
     async def _execute_tool(self, tc, session_id: str = "") -> Dict[str, Any]:
         """Execute a single tool call and return an OpenAI-format tool message."""
@@ -474,7 +524,8 @@ class AgentLoop:
 
     def get_session_messages(self, session_id: str) -> list[dict]:
         """Return conversation history formatted for frontend replay."""
-        history = self._histories.get(session_id, [])
+        # Ensure loaded from disk if not in memory yet
+        history = self._get_history(session_id)
         messages = []
         for entry in history:
             role = entry.get("role", "")

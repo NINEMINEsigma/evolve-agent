@@ -99,7 +99,10 @@ html, body, #root {
 }
 
 .session-item {
-  padding: 10px 12px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 8px 12px;
   border-radius: var(--radius-sm);
   cursor: pointer;
   transition: background 0.15s;
@@ -115,17 +118,68 @@ html, body, #root {
   border-left: 3px solid var(--accent);
 }
 
+.session-item-content {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.session-item-title {
+  font-size: 13px;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  line-height: 1.4;
+}
+
+.session-item-sub {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-top: 2px;
+}
+
 .session-item-id {
-  font-size: 12px;
+  font-size: 10px;
   font-family: "SF Mono", "Fira Code", monospace;
-  color: var(--text-secondary);
-  word-break: break-all;
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .session-item-time {
-  font-size: 11px;
+  font-size: 10px;
   color: var(--text-muted);
-  margin-top: 2px;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.session-item-delete {
+  opacity: 0;
+  width: 24px;
+  height: 24px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 12px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  transition: opacity 0.15s, background 0.15s, color 0.15s;
+}
+
+.session-item:hover .session-item-delete {
+  opacity: 1;
+}
+
+.session-item-delete:hover {
+  background: var(--danger);
+  color: #fff;
 }
 
 /* ── Main content area ── */

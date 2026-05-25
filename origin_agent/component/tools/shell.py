@@ -192,8 +192,8 @@ def _execute(cmd_parts: List[str], cwd: str) -> str:
 
     return tool_result(
         exit_code=result.returncode,
-        stdout=result.stdout[-4000:] if len(result.stdout) > 4000 else result.stdout,
-        stderr=result.stderr[-2000:] if len(result.stderr) > 2000 else result.stderr,
+        stdout=result.stdout,
+        stderr=result.stderr,
         command=cmd_parts,
     )
 

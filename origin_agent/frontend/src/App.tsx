@@ -38,6 +38,7 @@ interface SessionInfo {
   id: string;
   created_at: number;
   status: string;
+  title?: string;
 }
 
 function formatTime(ts: number): string {
@@ -138,6 +139,7 @@ export default function App() {
       else if (msg.type === "agent_message") {
         setWaiting(false);
         addMessage("agent", msg.content ?? "");
+        fetchSessions();
       }
       else if (msg.type === "tool_call") {
         const argsStr = msg.args
@@ -163,7 +165,7 @@ export default function App() {
         }
       }
     };
-  }, [addMessage]);
+  }, [addMessage, fetchSessions]);
 
   // ── confirm response ──
   const respondConfirm = useCallback((action: string) => {
@@ -228,6 +230,20 @@ export default function App() {
     connect();
   };
 
+  const deleteSession = (sid: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!confirm("确定要删除这个会话吗？此操作不可撤销。")) return;
+    fetch(`/api/sessions/${sid}`, { method: "DELETE" })
+      .then(() => {
+        setSessions((prev) => prev.filter((s) => s.id !== sid));
+        if (sid === sessionId) {
+          // If deleting the active session, create a new one
+          newChat();
+        }
+      })
+      .catch(() => {});
+  };
+
   return (
     <div className="app">
       <aside className="sidebar">
@@ -242,8 +258,20 @@ export default function App() {
               className={`session-item ${s.id === sessionId ? "active" : ""}`}
               onClick={() => switchSession(s.id)}
             >
-              <div className="session-item-id">{s.id}</div>
-              <div className="session-item-time">{formatTime(s.created_at)}</div>
+              <div className="session-item-content">
+                <div className="session-item-title">{s.title || s.id.slice(0, 8) + "..."}</div>
+                <div className="session-item-sub">
+                  <span className="session-item-id">{s.id}</span>
+                  <span className="session-item-time">{formatTime(s.created_at)}</span>
+                </div>
+              </div>
+              <button
+                className="session-item-delete"
+                onClick={(e) => deleteSession(s.id, e)}
+                title="删除会话"
+              >
+                ✕
+              </button>
             </div>
           ))}
         </div>

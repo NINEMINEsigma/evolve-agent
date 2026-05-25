@@ -40,6 +40,12 @@ def set_agent_loop(loop: object) -> None:
     _agent_loop = loop
 
 
+def configure_sessions(store_path: str | None = None) -> None:
+    """Configure the session store directory and reload persisted sessions."""
+    if store_path:
+        sessions.set_store_dir(store_path)
+
+
 # ── tool event streaming ──────────────────────────────────────────────
 # Map session_id → WebSocket for pushing tool_call / tool_result events
 # to the frontend while the agent loop is processing a turn.
@@ -215,6 +221,15 @@ async def http_interrupt(session_id: str):
     return {"interrupted": True, "session_id": session_id}
 
 
+@app.delete("/api/sessions/{session_id}")
+async def delete_session(session_id: str):
+    """Delete a session and its persisted data."""
+    sessions.remove(session_id)
+    if _agent_loop is not None and hasattr(_agent_loop, "clear_session"):
+        _agent_loop.clear_session(session_id)  # type: ignore[union-attr]
+    return {"deleted": True, "session_id": session_id}
+
+
 @app.get("/{full_path:path}")
 async def spa_fallback(full_path: str):
     """Catch-all for SPA client-side routes.
@@ -238,7 +253,15 @@ async def ws_chat(ws: WebSocket) -> None:
     if resume and sessions.exists(resume):
         sid = resume
     else:
-        sid = sessions.create()
+        # Try loading from disk in case server was restarted
+        if resume:
+            sessions.load_from_disk()
+            if sessions.exists(resume):
+                sid = resume
+            else:
+                sid = sessions.create()
+        else:
+            sid = sessions.create()
     _tool_ws_sinks[sid] = ws  # register for tool event streaming
     logger.info("WebSocket connected | session=%s", sid)
 
@@ -289,6 +312,13 @@ async def ws_chat(ws: WebSocket) -> None:
 
             # Route by type
             if msg.type == MessageType.USER_MESSAGE:
+                # Auto-generate title from first user message
+                session_info = sessions.get(sid)
+                if session_info and not session_info.get("title") and msg.content:
+                    title = msg.content.strip()[:30]
+                    if len(msg.content.strip()) > 30:
+                        title += "..."
+                    sessions.update_title(sid, title)
                 if _agent_loop is not None:
                     try:
                         reply = await _agent_loop.process_message(  # type: ignore[union-attr]
