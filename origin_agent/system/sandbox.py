@@ -267,12 +267,13 @@ class Sandbox:
         """Read file content through the sandbox with line-based pagination.
 
         offset: 0-indexed line number to start from (default 0).
-        limit:  max lines to return (default 100).
+        limit:  max lines to return (default 100).  Pass 0 to read the
+                entire file without truncation.
         """
         r = self.resolve_read(logical)
         try:
             content = r.real.read_text(encoding="utf-8")
-            if offset > 0 or limit < len(content.splitlines()):
+            if limit > 0 and (offset > 0 or limit < len(content.splitlines())):
                 lines = content.splitlines()
                 chunk = lines[offset:offset + limit]
                 return "\n".join(chunk)

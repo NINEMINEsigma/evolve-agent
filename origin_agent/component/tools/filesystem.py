@@ -46,9 +46,15 @@ def _handle_read(args: Dict[str, Any]) -> str:
     path = str(args.get("path", "")).strip()
     if not path:
         return tool_error("path is required", path=path)
+    offset = int(args.get("offset", 0))
+    limit = int(args.get("limit", 100))
+    if offset < 0:
+        return tool_error("offset must be >= 0", path=path, offset=offset)
+    if limit < 1:
+        return tool_error("limit must be >= 1", path=path, limit=limit)
     try:
-        content = _s().read(path)
-        return tool_result(content=content, path=path)
+        content = _s().read(path, offset=offset, limit=limit)
+        return tool_result(content=content, path=path, offset=offset, limit=limit)
     except SandboxError as exc:
         return tool_error(str(exc), path=path)
 
@@ -123,9 +129,34 @@ registry.register(
             "Read the contents of a file.  The path must use a namespace "
             "prefix: 'self:' for own source code, 'ws:' for workspace data, "
             "'fork:' for evolved code, or 'fix:' for repair targets.  "
-            "Examples: 'self:main.py', 'ws:logs/error.log'."
+            "Examples: 'self:main.py', 'ws:logs/error.log'.\n\n"
+            "Supports line-based pagination via offset and limit.  "
+            "Default limit is 100 lines; use offset to skip lines.  "
+            "Pass a large limit (e.g. 999999) to read the entire file."
         ),
-        "parameters": _param("file to read"),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "path": {
+                    "type": "string",
+                    "description": "Logical path to the file. "
+                    "Must use a namespace prefix: self:, fork:, ws:, or fix:.",
+                },
+                "offset": {
+                    "type": "integer",
+                    "description": "0-indexed line number to start from (default 0).",
+                    "default": 0,
+                    "minimum": 0,
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": "Maximum number of lines to return (default 100, minimum 1).",
+                    "default": 100,
+                    "minimum": 1,
+                },
+            },
+            "required": ["path"],
+        },
     },
     handler=_handle_read,
     emoji="📖",
@@ -207,7 +238,7 @@ def _handle_edit(args: Dict[str, Any]) -> str:
         return tool_error("old_string is required")
 
     try:
-        content = _s().read(path)
+        content = _s().read(path, limit=0)
     except SandboxError as exc:
         return tool_error(str(exc), path=path)
 
