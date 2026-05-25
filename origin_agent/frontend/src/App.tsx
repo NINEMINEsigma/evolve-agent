@@ -50,6 +50,45 @@ function formatTime(ts: number): string {
   return `${Math.floor(diff / 86400)}天前`;
 }
 
+function getDateGroup(ts: number): string {
+  if (!ts) return "未知";
+  const now = new Date();
+  const date = new Date(ts * 1000);
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const dateDay = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+  const diffDays = Math.floor((today.getTime() - dateDay.getTime()) / 86400000);
+  if (diffDays === 0) return "今天";
+  if (diffDays === 1) return "昨天";
+  if (diffDays < 7) return "最近7天";
+  return date.toLocaleDateString("zh-CN");
+}
+
+interface SessionGroup {
+  label: string;
+  sessions: SessionInfo[];
+}
+
+function groupSessions(sessions: SessionInfo[]): SessionGroup[] {
+  const map = new Map<string, SessionInfo[]>();
+  for (const s of sessions) {
+    const g = getDateGroup(s.created_at);
+    if (!map.has(g)) map.set(g, []);
+    map.get(g)!.push(s);
+  }
+  const order = ["今天", "昨天", "最近7天"];
+  const result: SessionGroup[] = [];
+  for (const label of order) {
+    if (map.has(label)) {
+      result.push({ label, sessions: map.get(label)! });
+      map.delete(label);
+    }
+  }
+  for (const [label, list] of map) {
+    result.push({ label, sessions: list });
+  }
+  return result;
+}
+
 export default function App() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
@@ -59,6 +98,11 @@ export default function App() {
   const [sessionId, setSessionId] = useState("");
   const [tokenUsage, setTokenUsage] = useState(0);
   const [sessions, setSessions] = useState<SessionInfo[]>([]);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [contextMenu, setContextMenu] = useState<{ x: number; y: number; sid: string } | null>(null);
+  const [renamingId, setRenamingId] = useState<string | null>(null);
+  const [renameValue, setRenameValue] = useState("");
+  const menuRef = useRef<HTMLDivElement>(null);
   const wsRef = useRef<WebSocket | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
 
@@ -192,6 +236,26 @@ export default function App() {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
+  // ── close context menu on outside click ──
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+        setContextMenu(null);
+      }
+    };
+    const escHandler = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setContextMenu(null);
+    };
+    if (contextMenu) {
+      document.addEventListener("mousedown", handler);
+      document.addEventListener("keydown", escHandler);
+    }
+    return () => {
+      document.removeEventListener("mousedown", handler);
+      document.removeEventListener("keydown", escHandler);
+    };
+  }, [contextMenu]);
+
   const send = () => {
     const text = input.trim();
     if (!text || !wsRef.current || waiting || wsRef.current.readyState !== WebSocket.OPEN) return;
@@ -230,18 +294,70 @@ export default function App() {
     connect();
   };
 
-  const deleteSession = (sid: string, e: React.MouseEvent) => {
-    e.stopPropagation();
+  const deleteSession = (sid: string) => {
     if (!confirm("确定要删除这个会话吗？此操作不可撤销。")) return;
+    const wasActive = sid === sessionId;
     fetch(`/api/sessions/${sid}`, { method: "DELETE" })
       .then(() => {
-        setSessions((prev) => prev.filter((s) => s.id !== sid));
-        if (sid === sessionId) {
-          // If deleting the active session, create a new one
-          newChat();
+        const remaining = sessions.filter((s) => s.id !== sid);
+        setSessions(remaining);
+        if (wasActive) {
+          if (remaining.length > 0) {
+            switchSession(remaining[0].id);
+          } else {
+            newChat();
+          }
         }
       })
       .catch(() => {});
+  };
+
+  // ── rename ──
+  const startRename = (sid: string, currentTitle: string) => {
+    setContextMenu(null);
+    setRenamingId(sid);
+    setRenameValue(currentTitle || sid.slice(0, 8) + "...");
+  };
+
+  const submitRename = (sid: string) => {
+    const title = renameValue.trim();
+    if (title) {
+      fetch(`/api/sessions/${sid}/title`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ title }),
+      }).then(() => {
+        setSessions((prev) => prev.map((s) => (s.id === sid ? { ...s, title } : s)));
+        fetchSessions(); // sync from server
+      }).catch(() => {});
+    }
+    setRenamingId(null);
+  };
+
+  const cancelRename = () => {
+    setRenamingId(null);
+  };
+
+  // ── auto-title ──
+  const autoTitleSession = (sid: string) => {
+    setContextMenu(null);
+    // Show temporary loading indicator by clearing the title display
+    fetch(`/api/sessions/${sid}/auto-title`, { method: "POST" })
+      .then((r) => r.json())
+      .then((data) => {
+        if (data.title) {
+          setSessions((prev) => prev.map((s) => (s.id === sid ? { ...s, title: data.title } : s)));
+          fetchSessions();
+        }
+      })
+      .catch(() => {});
+  };
+
+  // ── context menu ──
+  const handleContextMenu = (e: React.MouseEvent, sid: string) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setContextMenu({ x: e.clientX, y: e.clientY, sid });
   };
 
   return (
@@ -250,32 +366,84 @@ export default function App() {
         <div className="sidebar-header">
           <div className="sidebar-title">💬 会话</div>
           <button className="new-chat-btn" onClick={newChat}>+ 新对话</button>
+          <div className="sidebar-search">
+            <input
+              className="search-input"
+              type="text"
+              placeholder="搜索会话..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+            />
+          </div>
         </div>
         <div className="session-list">
-          {sessions.map((s) => (
-            <div
-              key={s.id}
-              className={`session-item ${s.id === sessionId ? "active" : ""}`}
-              onClick={() => switchSession(s.id)}
-            >
-              <div className="session-item-content">
-                <div className="session-item-title">{s.title || s.id.slice(0, 8) + "..."}</div>
-                <div className="session-item-sub">
-                  <span className="session-item-id">{s.id}</span>
-                  <span className="session-item-time">{formatTime(s.created_at)}</span>
-                </div>
+          {(() => {
+            const q = searchQuery.toLowerCase();
+            const filtered = q
+              ? sessions.filter((s) => (s.title || s.id).toLowerCase().includes(q))
+              : sessions;
+            const groups = groupSessions(filtered);
+            if (groups.length === 0) {
+              return <div className="session-empty">无匹配会话</div>;
+            }
+            return groups.map((g) => (
+              <div key={g.label}>
+                <div className="session-group-header">{g.label}</div>
+                {g.sessions.map((s) => (
+                  <div
+                    key={s.id}
+                    className={`session-item ${s.id === sessionId ? "active" : ""}`}
+                    onClick={() => switchSession(s.id)}
+                    onContextMenu={(e) => handleContextMenu(e, s.id)}
+                  >
+                    <div className="session-item-content">
+                      {renamingId === s.id ? (
+                        <input
+                          className="rename-input"
+                          type="text"
+                          value={renameValue}
+                          onChange={(e) => setRenameValue(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter") submitRename(s.id);
+                            else if (e.key === "Escape") cancelRename();
+                          }}
+                          onBlur={() => submitRename(s.id)}
+                          autoFocus
+                          onClick={(e) => e.stopPropagation()}
+                        />
+                      ) : (
+                        <div className="session-item-title">{s.title || s.id.slice(0, 8) + "..."}</div>
+                      )}
+                      <div className="session-item-sub">
+                        <span className="session-item-id">{s.id}</span>
+                        <span className="session-item-time">{formatTime(s.created_at)}</span>
+                      </div>
+                    </div>
+                  </div>
+                ))}
               </div>
-              <button
-                className="session-item-delete"
-                onClick={(e) => deleteSession(s.id, e)}
-                title="删除会话"
-              >
-                ✕
-              </button>
-            </div>
-          ))}
+            ));
+          })()}
         </div>
       </aside>
+      {contextMenu && (
+        <div
+          ref={menuRef}
+          className="context-menu"
+          style={{ left: contextMenu.x, top: contextMenu.y }}
+        >
+          <div className="context-menu-item" onClick={() => { const s = sessions.find(s => s.id === contextMenu.sid); if (s) startRename(s.id, s.title || ""); }}>
+            重命名
+          </div>
+          <div className="context-menu-item" onClick={() => autoTitleSession(contextMenu.sid)}>
+            自动命名
+          </div>
+          <div className="context-menu-separator" />
+          <div className="context-menu-item context-menu-item-danger" onClick={() => { setContextMenu(null); deleteSession(contextMenu.sid); }}>
+            删除会话
+          </div>
+        </div>
+      )}
       <div className="main-content">
         <header className="app-header">
         <div className="header-left">

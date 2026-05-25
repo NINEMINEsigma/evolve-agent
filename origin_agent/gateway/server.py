@@ -230,6 +230,29 @@ async def delete_session(session_id: str):
     return {"deleted": True, "session_id": session_id}
 
 
+@app.put("/api/sessions/{session_id}/title")
+async def update_session_title(session_id: str, req: Request):
+    """Manually rename a session."""
+    try:
+        body = await req.json()
+        title = str(body.get("title", "")).strip()[:50]
+    except Exception:
+        title = ""
+    sessions.update_title(session_id, title)
+    return {"updated": True, "session_id": session_id, "title": title}
+
+
+@app.post("/api/sessions/{session_id}/auto-title")
+async def auto_title_session(session_id: str):
+    """Ask LLM to generate a title from session messages."""
+    title = ""
+    if _agent_loop is not None and hasattr(_agent_loop, "auto_generate_title"):
+        title = await _agent_loop.auto_generate_title(session_id)  # type: ignore[union-attr]
+    if title:
+        sessions.update_title(session_id, title)
+    return {"title": title, "session_id": session_id}
+
+
 @app.get("/{full_path:path}")
 async def spa_fallback(full_path: str):
     """Catch-all for SPA client-side routes.

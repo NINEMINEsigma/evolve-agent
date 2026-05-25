@@ -235,6 +235,55 @@ class AgentLoop:
         self._histories.pop(session_id, None)
         self._token_usage.pop(session_id, None)
 
+    async def auto_generate_title(self, session_id: str) -> str:
+        """Use LLM to generate a short title from session conversation history."""
+        history = self._get_history(session_id)
+        if not history:
+            return ""
+        # Collect recent user/assistant text (skip system & tool entries)
+        lines = []
+        for msg in history[-20:]:
+            role = msg.get("role", "")
+            content = str(msg.get("content", "") or "")
+            if not content:
+                continue
+            if role == "user":
+                lines.append(f"用户: {content[:300]}")
+            elif role == "assistant":
+                lines.append(f"助手: {content[:300]}")
+        if not lines:
+            return ""
+        context = "\n".join(lines[-10:])
+
+        # Read auto-title prompt from template file
+        templates = Path(__file__).resolve().parent.parent / "templates"
+        zh_dir = templates / "zh"
+        use_zh = zh_dir.is_dir()
+        prompt_tpl = ""
+        auto_file = (zh_dir if use_zh else templates) / "auto_title.txt"
+        if auto_file.is_file():
+            try:
+                prompt_tpl = auto_file.read_text(encoding="utf-8").strip()
+            except OSError:
+                pass
+        if not prompt_tpl:
+            # Hardcoded fallback
+            prompt_tpl = (
+                "根据以下对话内容，用不超过20个字概括对话主题。"
+                "只输出标题，不要多余内容。\n\n{context}\n\n标题："
+            )
+
+        prompt = prompt_tpl.format(context=context)
+        try:
+            resp = await self._llm.chat(
+                [{"role": "user", "content": prompt}],
+                tools=[],
+            )
+            title = resp.content.strip()[:50] if resp.content else ""
+            return title
+        except Exception:
+            return ""
+
     def _collect_skill_prompts(self) -> list[str]:
         """Load enabled skills and return their formatted prompts."""
         if self._skill_cache_valid:
