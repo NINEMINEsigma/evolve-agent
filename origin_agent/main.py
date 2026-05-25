@@ -83,7 +83,13 @@ class App:
             try:
                 loop.add_signal_handler(sig, self._request_shutdown)
             except NotImplementedError:
-                pass  # Windows does not support add_signal_handler
+                # Windows: add_signal_handler not supported — use signal.signal
+                try:
+                    signal.signal(sig, lambda signum, frame: self._request_shutdown())
+                except (ValueError, OSError):
+                    logger.warning(
+                        "Cannot register signal handler for %s on this platform", sig
+                    )
 
         await self._shutdown_event.wait()
 
@@ -185,7 +191,7 @@ category: core
         # Give the server a moment to bind
         await asyncio.sleep(0.5)
         logger.info("Gateway listening on ws://%s:%d/ws/chat", host, port)
-        logger.info("WebPage on %s:%d", host, port)
+        logger.info("WebPage on http://%s:%d", host, port)
 
     async def _stop_gateway(self) -> None:
         """Gracefully stop the gateway server."""

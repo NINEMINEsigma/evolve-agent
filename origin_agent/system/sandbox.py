@@ -195,6 +195,8 @@ class Sandbox:
         cwd_ns: str = "ws:",
         timeout: int = 30,
         extra_env: Dict[str, str] | None = None,
+        encoding: str = "utf-8",
+        errors: str | None = None,
     ) -> subprocess.CompletedProcess:
         """Run a subprocess with sandboxed working directory.
 
@@ -202,6 +204,9 @@ class Sandbox:
         allowed list, OR be an absolute path inside ``self:``.
 
         *cwd_ns* — logical working directory for the subprocess.
+
+        *encoding* — text encoding for subprocess output (default ``"utf-8"``).
+        *errors* — error-handling scheme for decode errors (e.g. ``"replace"``).
 
         Raises ``SandboxError`` if the command is not allowed or paths
         escape the sandbox.
@@ -239,6 +244,12 @@ class Sandbox:
             env = os.environ.copy()
             env.update(extra_env)
 
+        kwargs: dict = dict(
+            encoding=encoding,
+        )
+        if errors is not None:
+            kwargs["errors"] = errors
+
         logger.debug("sandbox.run | cwd=%s cmd=%s", cwd_r.real, args)
         return subprocess.run(
             args,
@@ -246,8 +257,8 @@ class Sandbox:
             timeout=timeout,
             capture_output=True,
             text=True,
-            encoding="utf-8",
             env=env,
+            **kwargs,
         )
 
     # -- helpers for tools --------------------------------------------------

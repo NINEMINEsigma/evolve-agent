@@ -178,32 +178,24 @@ def _execute(cmd_parts: List[str], cwd: str) -> str:
     """Execute a trusted / approved command and return the result."""
     if cmd_parts and cmd_parts[0] not in _s().allowed_commands:
         return tool_error(f"Command '{cmd_parts[0]}' not in the allowed list")
+
+    logger.info("run_command | cwd=%s cmd=%s", cwd, cmd_parts)
     try:
-        cwd_r = _s().resolve(cwd, "read")
+        _enc = locale.getpreferredencoding(False) or sys.getfilesystemencoding() or "utf-8"
+        result = _s().run(cmd_parts, cwd_ns=cwd, timeout=30, encoding=_enc, errors="replace")
     except SandboxError as exc:
         return tool_error(str(exc))
-
-    logger.info("run_command | cwd=%s cmd=%s", cwd_r.real, cmd_parts)
-    try:
-        result = subprocess.run(
-            cmd_parts,
-            cwd=str(cwd_r.real),
-            timeout=30,
-            capture_output=True,
-            text=True,
-            encoding=locale.getpreferredencoding(False) or sys.getfilesystemencoding() or "utf-8",
-            errors="replace",
-        )
-        return tool_result(
-            exit_code=result.returncode,
-            stdout=result.stdout[-4000:] if len(result.stdout) > 4000 else result.stdout,
-            stderr=result.stderr[-2000:] if len(result.stderr) > 2000 else result.stderr,
-            command=cmd_parts,
-        )
     except subprocess.TimeoutExpired:
         return tool_error("Command timed out after 30s", command=cmd_parts)
     except Exception as exc:
         return tool_error(str(exc), command=cmd_parts)
+
+    return tool_result(
+        exit_code=result.returncode,
+        stdout=result.stdout[-4000:] if len(result.stdout) > 4000 else result.stdout,
+        stderr=result.stderr[-2000:] if len(result.stderr) > 2000 else result.stderr,
+        command=cmd_parts,
+    )
 
 
 # ── registration ─────────────────────────────────────────────────────

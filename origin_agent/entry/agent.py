@@ -49,7 +49,8 @@ class AgentLoop:
         # Skill prompt caching — invalidated when skills are modified
         self._skill_cache: list[str] = []
         self._skill_cache_valid: bool = False
-        # Per-session token usage tracking (actual values from LLM responses)
+        # Cumulative token consumption for dashboard display only.
+        # Compression decisions use _estimate_context_tokens() instead.
         self._token_usage: Dict[str, int] = {}
         # Callback fired on tool_call / tool_result events.
         # Signature: async (session_id, event_type, tool_name, payload) -> None
@@ -215,10 +216,44 @@ class AgentLoop:
         """Force skill cache reload on next call."""
         self._skill_cache_valid = False
 
+    def _estimate_context_tokens(self, session_id: str) -> int:
+        """Count actual context tokens from history + system prompt via tiktoken.
+
+        Drives compression decisions — distinct from the cumulative
+        ``_token_usage`` counter which is only for dashboard display.
+        """
+        import tiktoken
+
+        history = self._get_history(session_id)
+        if not history:
+            return 0
+
+        try:
+            enc = tiktoken.encoding_for_model(self._ctx.llm_model)
+        except KeyError:
+            # cl100k_base covers gpt-4, gpt-3.5-turbo, and most compatible models
+            enc = tiktoken.get_encoding("cl100k_base")
+
+        total = 0
+        for msg in history:
+            # OpenAI chat-message overhead: <|im_start|>role<|im_end|> ... <|im_end|>
+            total += 4
+            total += len(enc.encode(msg.get("role", "")))
+            total += len(enc.encode(str(msg.get("content", ""))))
+            rc = msg.get("reasoning_content")
+            if rc:
+                total += 4
+                total += len(enc.encode(str(rc)))
+
+        # Append system prompt estimate (built by _build_messages)
+        total += 2000
+
+        return total
+
     async def _compress_history(self, session_id: str, keep_last: int = 5) -> None:
         """Compress older history into a summary, keeping recent turns intact.
 
-        Triggered when estimated token count exceeds 70% of context window.
+        Triggered when estimated context tokens exceed 70 % of the LLM window.
         Uses a lightweight LLM call (no tools) to summarize old messages.
         """
         history = self._get_history(session_id)
@@ -229,8 +264,8 @@ class AgentLoop:
         max_tokens = self._ctx.llm_max_context_tokens
         threshold_tokens = int(max_tokens * self._ctx.llm_context_upbound)
 
-        # Token usage from actual LLM responses (not char-based estimates)
-        current_tokens = self._token_usage.get(session_id, 0)
+        # Use actual context size estimate — NOT cumulative _token_usage
+        current_tokens = self._estimate_context_tokens(session_id)
         if current_tokens < threshold_tokens:
             return
 
@@ -250,7 +285,6 @@ class AgentLoop:
 
         if not parts:
             self._histories[session_id] = recent
-            self._token_usage[session_id] = 0
             return
 
         old_text = "\n".join(parts[-50:])
@@ -266,7 +300,6 @@ class AgentLoop:
         except Exception:
             summary = fallback
 
-        self._token_usage[session_id] = 0
         self._histories[session_id] = (
             [{"role": "system", "content": f"{prefix}\n{summary}"}]
             + recent
