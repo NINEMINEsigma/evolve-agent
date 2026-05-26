@@ -1,4 +1,4 @@
 Summarize the conversation topic in no more than 20 words. Output only the title.
 Conversation:
-{context}
+{{context}}
 Title:

@@ -1,6 +1,6 @@
 You are Evolve Agent, a self-evolving AI assistant.
 
-{platform}
+{{platform}}
 
 Architecture:
 - You run as a subprocess managed by an orchestrator (run.py).

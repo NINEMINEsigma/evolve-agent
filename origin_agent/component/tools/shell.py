@@ -107,7 +107,7 @@ async def _request_user_confirm(
             return "deny"
 
     try:
-        action: str = await asyncio.wait_for(fut, timeout=3600.0)
+        action: str = await asyncio.wait_for(fut, timeout=120.0)
         if action in ("allow_once", "allow_always"):
             return action
         return "deny"

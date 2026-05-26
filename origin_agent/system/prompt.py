@@ -151,16 +151,16 @@ def build_system_prompt(
     # 1. Base
     base = _read_if_exists(template_root / "base.txt")
     if base:
-        base = base.format(platform=_platform_info(lang))
-        base = base.replace("{self_path}", self_path)
-        base = base.replace("{fork_path}", fork_path)
+        base = base.replace(r"{{platform}}", _platform_info(lang))
+        base = base.replace(r"{{self_path}}", self_path)
+        base = base.replace(r"{{fork_path}}", fork_path)
         blocks.append(base)
 
     # 2. Mode-specific
     mode_block = _read_if_exists(template_root / "modes" / f"{mode}.txt")
     if mode_block:
-        mode_block = mode_block.replace("{fix_fork_path}", fix_fork_path)
-        mode_block = mode_block.replace("{fix_log_path}", fix_log_path)
+        mode_block = mode_block.replace(r"{{fix_fork_path}}", fix_fork_path)
+        mode_block = mode_block.replace(r"{{fix_log_path}}", fix_log_path)
         blocks.append(mode_block)
 
     # 3. Tools

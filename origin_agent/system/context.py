@@ -60,3 +60,8 @@ class RuntimeContext(BaseModel):
     llm_context_upbound: float = 0.7       # compression threshold fraction
     llm_temperature: float = 0.7
     llm_max_tokens: int = 4096
+
+    # -- Tool execution timeout ---------------------------------------------
+
+    tool_timeout: int = 30
+    """Maximum seconds a single tool call may run before being cancelled (0 = no timeout)."""

@@ -101,6 +101,8 @@ class AgentLoop:
           3. Call LLM, execute tool calls, repeat until a text reply
           4. Sync the completed turn to memory
         """
+        # Clear any stale interrupt flag from previous turn
+        self._interrupted.pop(session_id, None)
         # ---- lazy-init memory providers ----
         if session_id not in self._memory_initialized:
             for provider in self._memory.providers:
@@ -270,10 +272,10 @@ class AgentLoop:
             # Hardcoded fallback
             prompt_tpl = (
                 "根据以下对话内容，用不超过20个字概括对话主题。"
-                "只输出标题，不要多余内容。\n\n{context}\n\n标题："
+                "只输出标题，不要多余内容。\n\n{{context}}\n\n标题："
             )
 
-        prompt = prompt_tpl.format(context=context)
+        prompt = prompt_tpl.replace(r"{{context}}", context)
         try:
             resp = await self._llm.chat(
                 [{"role": "user", "content": prompt}],
@@ -387,7 +389,7 @@ class AgentLoop:
 
         old_text = "\n".join(parts[-50:])
         prompt, fallback, prefix = self._compression_prompts()
-        summary_prompt = prompt.format(old_text=old_text)
+        summary_prompt = prompt.replace(r"{{old_text}}", old_text)
 
         try:
             summary_resp = await self._llm.chat(
@@ -424,7 +426,7 @@ class AgentLoop:
         if not prompt_tpl:
             prompt_tpl = (
                 "请用200字以内总结以下对话的关键内容和决策点。只输出总结。\n\n"
-                "对话内容：\n{old_text}\n\n总结："
+                "对话内容：\n{{old_text}}\n\n总结："
             )
 
         if use_zh:
@@ -533,16 +535,30 @@ class AgentLoop:
         # Route to memory manager if it owns this tool
         if self._memory.has_tool(tc.name):
             try:
-                result = self._memory.handle_tool_call(tc.name, args)
+                if timeout := self._ctx.tool_timeout:
+                    result = await asyncio.wait_for(
+                        asyncio.to_thread(self._memory.handle_tool_call, tc.name, args),
+                        timeout=timeout,
+                    )
+                else:
+                    result = self._memory.handle_tool_call(tc.name, args)
+            except asyncio.TimeoutError:
+                result = json.dumps({"error": f"工具执行超时（{timeout}秒）"})
             except Exception as exc:
                 result = json.dumps({"error": str(exc)})
         else:
             entry = tool_registry.get_entry(tc.name)
             try:
                 if entry and entry.is_async:
-                    result = await entry.handler(args)
+                    coro = entry.handler(args)
                 else:
-                    result = await asyncio.to_thread(tool_registry.dispatch, tc.name, args)
+                    coro = asyncio.to_thread(tool_registry.dispatch, tc.name, args)
+                if timeout := self._ctx.tool_timeout:
+                    result = await asyncio.wait_for(coro, timeout=timeout)
+                else:
+                    result = await coro
+            except asyncio.TimeoutError:
+                result = json.dumps({"error": f"工具执行超时（{timeout}秒）"})
             except Exception as exc:
                 result = json.dumps({"error": str(exc)})
 
