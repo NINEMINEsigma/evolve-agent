@@ -78,7 +78,7 @@ class LLMClient:
         )
         self._model = ctx.llm_model or "gpt-4o"
         self._temperature = ctx.llm_temperature
-        self._max_tokens = ctx.llm_max_tokens
+        self._max_tokens = ctx.llm_max_output_tokens
 
     # -- public API ----------------------------------------------------------
 
@@ -135,10 +135,18 @@ class LLMClient:
 
 
 def _safe_json_parse(raw: str) -> Dict[str, Any]:
-    import json
+    import dirtyjson
 
     try:
-        return json.loads(raw)
-    except json.JSONDecodeError:
-        logger.warning("Failed to parse tool call arguments: %s", raw[:200])
-        return {}
+        result = dirtyjson.loads(raw)
+        if isinstance(result, dict):
+            return result
+    except Exception:
+        pass
+
+    logger.warning(
+        "Failed to parse tool call arguments (%d chars): %s …",
+        len(raw), raw[:300],
+    )
+    return {"_parse_error": True, "_raw_preview": raw[:2000]}
+    

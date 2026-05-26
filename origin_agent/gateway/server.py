@@ -90,7 +90,20 @@ def _deny_session_confirms(session_id: str) -> None:
 async def _send_tool_event(
     session_id: str, event_type: str, tool_name: str, payload: str,
 ) -> None:
-    """Push a tool_call or tool_result event to the frontend WebSocket."""
+    """Push a tool_call or tool_result event to the frontend WebSocket.
+
+    Silently drops events for sessions that have been interrupted so the
+    frontend doesn't receive stale tool notifications after the user
+    clicked stop.
+    """
+    # If the session has been interrupted, skip sending tool events.
+    if _agent_loop is not None and hasattr(_agent_loop, "is_interrupted"):
+        try:
+            if _agent_loop.is_interrupted(session_id):  # type: ignore[union-attr]
+                return
+        except Exception:
+            pass
+
     ws = _tool_ws_sinks.get(session_id)
     if ws is None:
         return
@@ -186,16 +199,6 @@ async def health():
 async def list_sessions():
     """Return all active sessions with metadata."""
     return {"sessions": sessions.get_all()}
-
-
-@app.get("/api/evolution/history")
-async def evolution_history():
-    """Return the evolution journal written by run.py during swaps."""
-    import json as _json
-    status_file = Path(__file__).resolve().parent.parent.parent / "workspace" / "logs" / "evolution.status"
-    if status_file.exists():
-        return _json.loads(status_file.read_text(encoding="utf-8"))
-    return []
 
 
 @app.post("/api/confirm/{request_id}")

@@ -59,7 +59,7 @@ class RuntimeContext(BaseModel):
     llm_max_context_tokens: int = 128_000  # total context window
     llm_context_upbound: float = 0.7       # compression threshold fraction
     llm_temperature: float = 0.7
-    llm_max_tokens: int = 4096
+    llm_max_output_tokens: int = 4096
 
     # -- Tool execution timeout ---------------------------------------------
 

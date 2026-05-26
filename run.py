@@ -114,7 +114,7 @@ if __name__ == "__main__":
         if exit_code == 0:
             logger.info(f"Fast agent exited with code {exit_code}")
             break
-        elif exit_code in (-1,):
+        elif exit_code in (-1, 4294967295):
             logger.info(f"Slow agent was updated, fast agent will update to new version")
             _append_evolve_event("backup", f"fast → .fallback")
             File(str(workspace_path/".fallback")).delete()

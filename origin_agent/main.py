@@ -109,6 +109,7 @@ class App:
         """Create uvicorn server and run it as a background task."""
         try:
             from gateway.server import create_server, set_agent_loop
+            from dashboard.server import set_agent_loop as set_dashboard_agent_loop
         except ImportError as exc:
             logger.warning("Gateway unavailable (import error): %s", exc)
             self._shutdown_event.set()
@@ -178,6 +179,7 @@ category: core
             from gateway.server import _send_tool_event
             agent_loop.set_tool_event_callback(_send_tool_event)
             set_agent_loop(agent_loop)
+            set_dashboard_agent_loop(agent_loop)
             logger.info("AgentLoop initialized | model=%s", self.ctx.llm_model)
         except Exception as exc:
             logger.warning("AgentLoop unavailable: %s", exc)

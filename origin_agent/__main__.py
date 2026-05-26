@@ -127,6 +127,7 @@ def _build_context(cli: dict) -> RuntimeContext:
         ),
         llm_max_context_tokens=int(cli.get("llm_max_context_tokens", 128_000)),
         llm_context_upbound=float(cli.get("llm_context_upbound", 0.7)),
+        llm_max_output_tokens=int(cli.get("llm_max_output_tokens", 4096)),
     )
 
 

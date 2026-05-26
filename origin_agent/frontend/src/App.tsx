@@ -122,6 +122,7 @@ export default function App() {
   const reconnectRef = useRef(0);
   const timerRef = useRef<ReturnType<typeof setTimeout>>();
   const manualRef = useRef(false);  // true during manual reconnect (newChat/switchSession)
+  const ignoreStaleRef = useRef(false);  // true after interrupt — discard stale tool events
 
   const connect = useCallback(() => {
     const lastSid = localStorage.getItem("evolve_session_id") || "";
@@ -182,10 +183,12 @@ export default function App() {
       }
       else if (msg.type === "agent_message") {
         setWaiting(false);
+        ignoreStaleRef.current = false;  // new response — reset stale guard
         addMessage("agent", msg.content ?? "");
         fetchSessions();
       }
       else if (msg.type === "tool_call") {
+        if (ignoreStaleRef.current) return;  // stale after interrupt
         const argsStr = msg.args
           ? "(" + Object.entries(msg.args)
               .map(([k, v]) => `${k}=${JSON.stringify(v)}`)
@@ -194,6 +197,7 @@ export default function App() {
         addMessage("tool", `⚡ ${msg.tool} ${argsStr}`);
       }
       else if (msg.type === "tool_result") {
+        if (ignoreStaleRef.current) return;  // stale after interrupt
         addMessage("tool", `✅ ${msg.tool} → ${(msg.result ?? "").slice(0, 100)}`);
       }
       else if (msg.type === "error") addMessage("error", msg.message ?? "");
@@ -608,6 +612,9 @@ export default function App() {
           <button
             className="interrupt-btn"
             onClick={() => {
+              ignoreStaleRef.current = true;
+              setWaiting(false);
+              addMessage("system", "⏹ 已中断");
               fetch(`/api/interrupt/${sessionId || "unknown"}`, { method: "POST" })
                 .catch(() => {});
             }}

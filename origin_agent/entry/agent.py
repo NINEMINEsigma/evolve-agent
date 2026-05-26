@@ -45,6 +45,9 @@ class AgentLoop:
         self._memory = MemoryManager()
         self._memory_initialized: Dict[str, bool] = {}
         self._interrupted: Dict[str, bool] = {}
+        # Per-session cancellation events — set by interrupt(), checked by
+        # process_message() to cancel the in-flight LLM HTTP call immediately.
+        self._cancel_events: Dict[str, asyncio.Event] = {}
         # Per-session conversation history: session_id → list of OpenAI-format messages
         self._histories: Dict[str, List[Dict[str, Any]]] = {}
         # Skill prompt caching — invalidated when skills are modified
@@ -53,6 +56,9 @@ class AgentLoop:
         # Cumulative token consumption for dashboard display only.
         # Compression decisions use _estimate_context_tokens() instead.
         self._token_usage: Dict[str, int] = {}
+        # Tool-call statistics for dashboard monitoring.
+        # Keyed by tool name, values: {"calls": int, "errors": int}
+        self._tool_stats: Dict[str, Dict[str, int]] = {}
         # Callback fired on tool_call / tool_result events.
         # Signature: async (session_id, event_type, tool_name, payload) -> None
         self._tool_event_callback: Callable[[str, str, str, str], Awaitable[None]] | None = None
@@ -81,12 +87,22 @@ class AgentLoop:
         unblocked immediately.
         """
         self._interrupted[session_id] = True
+        # Signal the cancel event so any in-flight LLM call is aborted
+        # immediately instead of waiting for the HTTP response to complete.
+        ev = self._cancel_events.get(session_id)
+        if ev is not None:
+            ev.set()
         try:
             from gateway.server import _deny_session_confirms
             _deny_session_confirms(session_id)
         except Exception:
             pass
         logger.info("Interrupt requested for session=%s", session_id)
+
+    def is_interrupted(self, session_id: str) -> bool:
+        """Return True if the session has an active interrupt request."""
+        ev = self._cancel_events.get(session_id)
+        return ev is not None and ev.is_set()
 
     async def process_message(
         self,
@@ -124,51 +140,84 @@ class AgentLoop:
         messages = self._build_messages(session_id, user_message, memory_ctx)
 
         # ---- tool-calling loop ----
+        # Create a per-session cancel event so interrupt() can abort the
+        # in-flight LLM HTTP call immediately.
+        cancel_event = asyncio.Event()
+        self._cancel_events[session_id] = cancel_event
+
         turn = 0
-        while turn < _MAX_TOOL_TURNS:
-            # ---- honour interrupt ----
-            if self._interrupted.pop(session_id, False):
-                return "已中断。"
-            turn += 1
-            resp = await self._llm.chat(
-                messages,
-                tools=self._get_tool_definitions(),
-            )
-            # Track actual token usage from LLM response
-            self._token_usage[session_id] = self._token_usage.get(session_id, 0) + resp.usage.total_tokens
+        try:
+            while turn < _MAX_TOOL_TURNS:
+                # ---- honour interrupt ----
+                if cancel_event.is_set():
+                    return "已中断。"
+                turn += 1
 
-            if not resp.tool_calls:
-                # Plain text reply — store and return
-                assistant_text = resp.content or ""
-                self._append(session_id, "assistant", assistant_text,
-                             reasoning_content=resp.reasoning_content)
-                self._memory.sync_all(
-                    user_message, assistant_text, session_id=session_id,
+                # ---- cancellable LLM call ----
+                # Use asyncio.wait on both the LLM task and the cancel event
+                # so the interrupt cuts through an in-flight HTTP request
+                # instead of waiting for it to complete.
+                llm_task = asyncio.create_task(
+                    self._llm.chat(messages, tools=self._get_tool_definitions()),
                 )
-                return assistant_text
+                cancel_task = asyncio.create_task(cancel_event.wait())
 
-            # Store assistant message with tool_calls in history
-            self._store_assistant_with_tools(session_id, resp)
-
-            # Execute tool calls and persist results to history
-            history = self._get_history(session_id)
-            for tc in resp.tool_calls:
-                tool_msg = await self._execute_tool(tc, session_id)
-                messages.append(tool_msg)
-                history.append(tool_msg)
-                self._persist_message(session_id, tool_msg)
-
-                # If evolve_code succeeded, exit the loop cleanly.
-                # No need to continue — the orchestrator will restart us.
-                if tc.name == "evolve_code":
+                done, pending = await asyncio.wait(
+                    [llm_task, cancel_task],
+                    return_when=asyncio.FIRST_COMPLETED,
+                )
+                # Cancel whatever is still pending
+                for task in pending:
+                    task.cancel()
                     try:
-                        parsed = json.loads(tool_msg["content"])
-                        if parsed.get("evolved"):
-                            return "进化已完成，正在重启以应用新代码..."
-                    except (json.JSONDecodeError, KeyError, TypeError):
+                        await task
+                    except asyncio.CancelledError:
                         pass
 
-            messages = self._get_full_history(session_id, memory_ctx)
+                if cancel_task in done:
+                    # Interrupt was triggered — discard LLM result
+                    return "已中断。"
+
+                resp = llm_task.result()
+                # Track actual token usage from LLM response
+                self._token_usage[session_id] = self._token_usage.get(session_id, 0) + resp.usage.total_tokens
+
+                if not resp.tool_calls:
+                    # Plain text reply — store and return
+                    assistant_text = resp.content or ""
+                    self._append(session_id, "assistant", assistant_text,
+                                 reasoning_content=resp.reasoning_content)
+                    self._memory.sync_all(
+                        user_message, assistant_text, session_id=session_id,
+                    )
+                    return assistant_text
+
+                # Store assistant message with tool_calls in history
+                self._store_assistant_with_tools(session_id, resp)
+
+                # Execute tool calls and persist results to history
+                history = self._get_history(session_id)
+                for tc in resp.tool_calls:
+                    tool_msg = await self._execute_tool(tc, session_id)
+                    messages.append(tool_msg)
+                    history.append(tool_msg)
+                    self._persist_message(session_id, tool_msg)
+
+                    # If evolve_code succeeded, exit the loop cleanly.
+                    # No need to continue — the orchestrator will restart us.
+                    if tc.name == "evolve_code":
+                        try:
+                            parsed = json.loads(tool_msg["content"])
+                            if parsed.get("evolved"):
+                                return "进化已完成，正在重启以应用新代码..."
+                        except (json.JSONDecodeError, KeyError, TypeError):
+                            pass
+
+                messages = self._get_full_history(session_id, memory_ctx)
+
+        finally:
+            # Always clean up the cancel event so the next turn starts fresh
+            self._cancel_events.pop(session_id, None)
 
         logger.warning(
             "Tool-call loop exceeded max turns (%d) for session=%s",
@@ -509,8 +558,14 @@ class AgentLoop:
 
     async def _execute_tool(self, tc, session_id: str = "") -> Dict[str, Any]:
         """Execute a single tool call and return an OpenAI-format tool message."""
-        # Honour interrupt — check before each tool execution
-        if self._interrupted.pop(session_id, False):
+        # Honour interrupt — check before each tool execution.
+        # Also check the cancel event so that tool calls are skipped even
+        # when the interrupt arrived during the preceding LLM call.
+        cancel_ev = self._cancel_events.get(session_id)
+        if (
+            self._interrupted.pop(session_id, False)
+            or (cancel_ev is not None and cancel_ev.is_set())
+        ):
             return {
                 "role": "tool",
                 "tool_call_id": tc.id,
@@ -521,7 +576,43 @@ class AgentLoop:
         args = dict(tc.arguments) if tc.arguments else {}
         args["_session_id"] = session_id
 
+        # If tool call arguments failed to parse (e.g. truncated JSON from
+        # max_tokens being too tight for large content), return a clear
+        # error so the LLM understands why and can adjust its strategy.
+        if args.get("_parse_error"):
+            logger.warning(
+                "Tool call '%s' skipped — arguments JSON parse failed. "
+                "Preview: %s", tc.name, args.get("_raw_preview", "")[:200],
+            )
+            result = json.dumps({
+                "error": (
+                    "工具调用参数解析失败。你的 arguments JSON 不完整或格式错误"
+                    "（可能因为内容太长被截断）。请尝试："
+                    "1) 拆分内容为多段写入，"
+                    "2) 使用 edit_file 做增量修改，"
+                    "3) 或者减少单次写入的数据量。"
+                ),
+                "_parse_failed": True,
+            })
+            # Still send tool_result (with error) to frontend
+            if self._tool_event_callback:
+                asyncio.create_task(
+                    self._tool_event_callback(
+                        session_id, "tool_result", tc.name, result,
+                    )
+                )
+            return {
+                "role": "tool",
+                "tool_call_id": tc.id,
+                "content": result,
+            }
+
         logger.info("Tool call: %s args=%s", tc.name, tc.arguments)
+
+        # ---- track tool call stats ----
+        if tc.name not in self._tool_stats:
+            self._tool_stats[tc.name] = {"calls": 0, "errors": 0}
+        self._tool_stats[tc.name]["calls"] += 1
 
         # ---- notify frontend: tool_call ----
         if self._tool_event_callback:
@@ -561,6 +652,15 @@ class AgentLoop:
                 result = json.dumps({"error": f"工具执行超时（{timeout}秒）"})
             except Exception as exc:
                 result = json.dumps({"error": str(exc)})
+
+        # ---- track tool error stats ----
+        try:
+            parsed = json.loads(result)
+            if isinstance(parsed, dict) and "error" in parsed:
+                if tc.name in self._tool_stats:
+                    self._tool_stats[tc.name]["errors"] += 1
+        except (json.JSONDecodeError, TypeError):
+            pass
 
         # ---- notify frontend: tool_result ----
         if self._tool_event_callback:
