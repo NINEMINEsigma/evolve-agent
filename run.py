@@ -8,6 +8,7 @@ from datetime import datetime
 from config import *
 
 workspace_path = Path("workspace")
+agentspace_path = Path("agentspace")
 logs_path = workspace_path / "logs"
 origin_agent_codes_path = Path("origin_agent")
 
@@ -16,6 +17,8 @@ if workspace_path.exists() == False:
     workspace_path.mkdir(parents=True, exist_ok=True)
 if logs_path.exists() == False:
     logs_path.mkdir(parents=True, exist_ok=True)
+if agentspace_path.exists() == False:
+    agentspace_path.mkdir(parents=True, exist_ok=True)
 
 log_file_path = logs_path / f"{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}.log"
 file_stream = logging.FileHandler(log_file_path)
@@ -84,7 +87,7 @@ if __name__ == "__main__":
         # 保持代理空间干净，删除代理空间并重新创建
         File(origin=str(fast_agent_space)).delete() # 删除fast agent空间
         fast_agent_space.mkdir(parents=True, exist_ok=True) # 创建fast agent空间
-        File(origin=str(slow_agent_space)).delete() # 删除slow agent空间   
+        File(origin=str(slow_agent_space)).delete() # 删除slow agent空间
         slow_agent_space.mkdir(parents=True, exist_ok=True) # 创建slow agent空间
         # 复制源代码到代理空间
         source = File(origin=str(origin_agent_codes_path))
@@ -96,9 +99,9 @@ if __name__ == "__main__":
             sys.executable, # 使用当前python解释器
             str(fast_agent_space/"__main__.py"), # 运行fast agent
             f"--workspace {workspace_path}", # 工作空间路径
+            f"--agentspace {agentspace_path}", # agent 工作目录
             f"--log {log_file_path}", # 日志路径
             f"--console_log {console_log}", # 是否在控制台打印日志
-            f"--self {fast_agent_space}", # 自身代码路径
             f"--evolve {slow_agent_space}", # 需要进化的代码路径
             f"--gateway_host {gateway_host}", # WebSocket 监听地址
             f"--gateway_port {gateway_port}", # WebSocket 监听端口
@@ -140,9 +143,9 @@ if __name__ == "__main__":
                 sys.executable, # 使用当前python解释器
                 str(fallback_main), # 运行fallback agent
                 f"--workspace {workspace_path}", # 工作空间路径
+                f"--agentspace {agentspace_path}", # agent 工作目录
                 f"--log {log_file_path}", # 日志路径
                 f"--console_log {console_log}", # 是否在控制台打印日志
-                f"--self {workspace_path/'.fallback'}", # 自身代码路径
                 f"--fix_fork {fast_agent_space}", # 需要修复的代码路径
                 f"--fix {logs_path/"fast_agent_runtime_error.log"}", # 错误日志路径
                 f"--llm_base_url {llm_base_url}", # LLM API 地址

@@ -1,45 +1,39 @@
 """Skill management tools — let the agent learn, list, and forget skills.
 
 Registered at module-import time via ``registry.register()``.
-Skills are managed through ``abstract.skills.manager`` which operates
-on the ``workspace/skills/`` directory.
+Skills are stored under ``<project_root>/skills/`` (Path.cwd() / "skills").
 """
 
 from __future__ import annotations
 
 import json
 import logging
+from pathlib import Path
 from typing import Any, Dict, List
 
 from abstract.skills.manager import create_skill, delete_skill, update_skill
 from abstract.skills.loader import list_skills, load_skill
 from abstract.tools.registry import registry, tool_error, tool_result
-from system.sandbox import SandboxError
 
 logger = logging.getLogger(__name__)
 
-from .filesystem import _s as _get_sandbox
+# ── constants ────────────────────────────────────────────────────────
 
-
-def _s():
-    return _get_sandbox()
+_SKILLS_DIR = Path("skills")
 
 
 # ── helpers ──────────────────────────────────────────────────────────
 
 
-def _skills_dir() -> str:
-    """Resolve the skills directory path via the workspace sandbox."""
-    try:
-        return str(_s().resolve_read("ws:skills").real)
-    except SandboxError:
-        return "workspace/skills"
+def _skills_dir() -> Path:
+    """Return the canonical skills directory (project-root / skills)."""
+    return _SKILLS_DIR.resolve()
 
 
-def _format_skill_list() -> str:
+def _format_skill_list(skills_dir: Path | None = None) -> str:
     """Return a formatted list of all registered skills."""
     try:
-        skills = list_skills()
+        skills = list_skills(skills_dir=skills_dir or _skills_dir())
     except Exception:
         return json.dumps(
             {"error": "Failed to list skills", "skills": []},
@@ -75,6 +69,7 @@ def _handle_learn_skill(args: Dict[str, Any]) -> str:
     try:
         payload = create_skill(
             name=name,
+            skills_dir=_skills_dir(),
             description=description or name,
             category=category,
             content=content,
@@ -83,6 +78,7 @@ def _handle_learn_skill(args: Dict[str, Any]) -> str:
         if not payload.get("success"):
             payload = update_skill(
                 name=name,
+                skills_dir=_skills_dir(),
                 description=description or name,
                 category=category,
                 content=content,
@@ -101,7 +97,7 @@ def _handle_learn_skill(args: Dict[str, Any]) -> str:
 
 def _handle_list_skills(args: Dict[str, Any]) -> str:
     """List all available skills."""
-    return _format_skill_list()
+    return _format_skill_list(_skills_dir())
 
 
 def _handle_forget_skill(args: Dict[str, Any]) -> str:
@@ -111,7 +107,7 @@ def _handle_forget_skill(args: Dict[str, Any]) -> str:
         return tool_error("name is required")
 
     try:
-        result = delete_skill(name)
+        result = delete_skill(name, skills_dir=_skills_dir())
         if result.get("success"):
             return tool_result(deleted=True, name=name)
         return tool_error(result.get("error", "Unknown error deleting skill"))
@@ -123,10 +119,10 @@ def _handle_recall_skill(args: Dict[str, Any]) -> str:
     """Load a skill's full content into the conversation."""
     name = str(args.get("name", "")).strip()
     if not name:
-        return _format_skill_list()
+        return _format_skill_list(_skills_dir())
 
     try:
-        payload = load_skill(name)
+        payload = load_skill(name, skills_dir=_skills_dir())
         if payload.get("success"):
             return json.dumps(
                 {
@@ -152,7 +148,7 @@ registry.register(
     schema={
         "description": (
             "Create or update a skill.  Skills are reusable knowledge "
-            "modules stored as SKILL.md files in the workspace/skills/ "
+            "modules stored as SKILL.md files in the project-root/skills/ "
             "directory.  Use this to persist useful knowledge that should "
             "carry across sessions.  If a skill with the same name already "
             "exists, it will be updated."

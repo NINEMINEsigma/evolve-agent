@@ -6,17 +6,19 @@ resolved to real absolute paths only inside this module.  No tool handler
 or subprocess ever sees or accepts a raw filesystem path.
 
 Logical namespaces
-    ==============  ================  ======  ==========================
-    Prefix           Maps to           Perm    Purpose
-    ==============  ================  ======  ==========================
-    ``self:``        ctx.self_path     ro      Read own source (fast dir)
-    ``fork:``        ctx.fork_path     wo      Write evolved code (slow dir)
-    ``ws:``          ctx.workspace     rw      General workspace I/O
-    ``fix:``         ctx.fix_path      wo      Repair target (fallback only)
-    ==============  ================  ======  ==========================
+    ==============  ===================  ======  ==========================
+    Prefix           Maps to              Perm    Purpose
+    ==============  ===================  ======  ==========================
+    ``fork:``        ctx.fork_path        rw      Read/write evolved code
+    ``ws:``          ctx.agentspace       rw      General agent I/O
+    ``fix:``         ctx.fix_path         rw      Repair target (fallback)
+    ==============  ===================  ======  ==========================
 
-    In **fast** mode ``fork:`` is write-only and ``self:`` is read-only.
-    In **fallback** mode ``fix:`` is write-only and ``self:`` is read-only.
+    In **fast** mode ``fork:`` is read+write.
+    In **fallback** mode ``fix:`` is read+write.
+
+There is **no** ``self:`` namespace — the agent cannot read or mutate its
+own runtime copy.  Evolution happens exclusively through fork:/fix:.
 
 Every path must carry an explicit namespace prefix.  Bare paths, ``..``
 traversal, and absolute paths are rejected unconditionally.
@@ -48,17 +50,17 @@ class Access(str, Enum):
 
 
 # Map: (mode, namespace) → allowed access
-# "fast" mode: self=read, fork=write, ws=rw
-# "fallback" mode: self=read, fix=write, ws=rw
+# "fast" mode: fork=rw, ws=rw
+# "fallback" mode: fix=rw, ws=rw
+# There is NO self: namespace — the agent cannot inspect or mutate its
+# own runtime copy.  Evolution happens exclusively through fork:/fix:.
 _PERMISSIONS: Dict[str, Dict[str, List[Access]]] = {
     "fast": {
-        "self":  [Access.READ],
         "fork":  [Access.READ, Access.WRITE],
         "ws":    [Access.READ, Access.WRITE],
     },
     "fallback": {
-        "self":  [Access.READ],
-        "fix":   [Access.WRITE],
+        "fix":   [Access.READ, Access.WRITE],
         "ws":    [Access.READ, Access.WRITE],
     },
 }
@@ -66,6 +68,31 @@ _PERMISSIONS: Dict[str, Dict[str, List[Access]]] = {
 
 class SandboxError(PermissionError):
     """Raised when a tool operation violates sandbox constraints."""
+
+
+# ---------------------------------------------------------------------------
+# Process-tree kill helper
+# ---------------------------------------------------------------------------
+
+
+def _kill_proc_tree(pid: int) -> None:
+    """Force-kill a process and all its descendants.
+
+    On Windows uses ``taskkill /T /F``.  On Unix sends SIGTERM to the
+    process group.
+    """
+    if sys.platform == "win32":
+        subprocess.run(
+            ["taskkill", "/T", "/F", "/PID", str(pid)],
+            capture_output=True,
+        )
+    else:
+        try:
+            import os
+            import signal
+            os.killpg(os.getpgid(pid), signal.SIGTERM)
+        except ProcessLookupError:
+            pass
 
 
 # ---------------------------------------------------------------------------
@@ -80,7 +107,7 @@ class ResolvedPath(BaseModel):
 
     logical: str   # e.g. "ws:data/config.json"
     real: Path      # absolute path on disk
-    namespace: str  # "self" | "fork" | "ws" | "fix"
+    namespace: str  # "fork" | "ws" | "fix"
 
 
 class Sandbox:
@@ -117,7 +144,7 @@ class Sandbox:
         else:
             raise SandboxError(
                 f"Path must carry a namespace prefix "
-                f"(self:, fork:, ws:, fix:). Got: {logical!r}"
+                f"(fork:, ws:, fix:). Got: {logical!r}"
             )
 
         ns = ns.strip()
@@ -137,9 +164,8 @@ class Sandbox:
 
         # ---- resolve to real directory ----
         ns_map = {
-            "self": self._ctx.self_path,
             "fork": self._ctx.fork_path,
-            "ws":   self._ctx.workspace,
+            "ws":   self._ctx.agentspace,
             "fix":  self._ctx.fix_path,
         }
         base = ns_map[ns]
@@ -178,7 +204,6 @@ class Sandbox:
     # -- subprocess (also sandboxed) ----------------------------------------
 
     # Commands that tools are allowed to execute (by basename).
-    # Everything else must go through a self-path-relative resolution.
     _ALLOWED_COMMANDS: frozenset[str] = frozenset({
         "python", "python3", "pip", "pnpm", "git", "cmd", "curl"
     })
@@ -201,7 +226,7 @@ class Sandbox:
         """Run a subprocess with sandboxed working directory.
 
         *args* — command + arguments.  The command basename must be in the
-        allowed list, OR be an absolute path inside ``self:``.
+        allowed list.
 
         *cwd_ns* — logical working directory for the subprocess.
 
@@ -230,7 +255,7 @@ class Sandbox:
 
         # -- validate any path arguments that look like logical paths --
         for arg in args:
-            if ":" in arg and any(arg.startswith(p) for p in ("ws:", "self:", "fork:", "fix:")):
+            if ":" in arg and any(arg.startswith(p) for p in ("ws:", "fork:", "fix:")):
                 raise SandboxError(
                     f"Path arguments to subprocess commands must be resolved "
                     f"by the tool handler before calling sandbox.run(). "
@@ -251,14 +276,41 @@ class Sandbox:
             kwargs["errors"] = errors
 
         logger.debug("sandbox.run | cwd=%s cmd=%s", cwd_r.real, args)
-        return subprocess.run(
-            args,
-            cwd=str(cwd_r.real),
-            timeout=timeout,
-            capture_output=True,
-            text=True,
-            env=env,
-            **kwargs,
+
+        # Use Popen so we can force-kill the entire process tree on timeout.
+        # subprocess.run(timeout=...) does not reliably terminate child
+        # processes (e.g. pnpm spawning node processes) on Windows.
+        import os as _os
+        popen_kwargs: dict = {
+            "cwd": str(cwd_r.real),
+            "stdout": subprocess.PIPE,
+            "stderr": subprocess.PIPE,
+            "text": True,
+            "env": env,
+        }
+        if sys.platform == "win32":
+            # CREATE_NEW_PROCESS_GROUP allows sending CTRL_BREAK_EVENT,
+            # but we will use taskkill for a more reliable tree kill.
+            popen_kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP  # type: ignore[attr-defined]
+        proc = subprocess.Popen(args, **popen_kwargs, **kwargs)
+        try:
+            stdout, stderr = proc.communicate(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            _kill_proc_tree(proc.pid)
+            stdout, stderr = "", ""
+            try:
+                proc.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                pass
+            raise subprocess.TimeoutExpired(
+                cmd=args[0], timeout=timeout, output=stdout, stderr=stderr,
+            )
+
+        return subprocess.CompletedProcess(
+            args=args,
+            returncode=proc.returncode,
+            stdout=stdout,
+            stderr=stderr,
         )
 
     # -- helpers for tools --------------------------------------------------

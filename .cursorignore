@@ -1,0 +1,6 @@
+workspace/**/*.py
+workspace/**/*.js
+workspace/**/*.ts
+workspace/**/*.tsx
+workspace/**/*.css
+**/node_modules/

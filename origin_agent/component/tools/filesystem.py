@@ -5,10 +5,12 @@ Every tool handler resolves paths through the shared ``Sandbox`` instance
 (set by ``set_sandbox()`` from ``main.py`` before the agent loop starts).
 
 Path format: ``namespace:relative/path``
-  - ``self:``  read-only  (own source code)
-  - ``fork:``  write-only (evolved code destination)
-  - ``ws:``    read+write (general workspace)
-  - ``fix:``   write-only (repair target, fallback mode only)
+  - ``fork:``  read+write (evolved code destination)
+  - ``ws:``    read+write (general agent workspace)
+  - ``fix:``   read+write (repair target, fallback mode only)
+
+There is no ``self:`` namespace — the agent cannot read or mutate its
+own runtime copy.
 """
 
 from __future__ import annotations
@@ -113,7 +115,7 @@ def _param(path_desc: str, required: bool = True) -> Dict[str, Any]:
             "path": {
                 "type": "string",
                 "description": f"Logical path ({path_desc}). "
-                "Must use a namespace prefix: self:, fork:, ws:, or fix:.",
+                "Must use a namespace prefix: fork:, ws:, or fix:.",
             },
         },
         "required": (["path"] if required else []),
@@ -127,9 +129,9 @@ registry.register(
     schema={
         "description": (
             "Read the contents of a file.  The path must use a namespace "
-            "prefix: 'self:' for own source code, 'ws:' for workspace data, "
-            "'fork:' for evolved code, or 'fix:' for repair targets.  "
-            "Examples: 'self:main.py', 'ws:logs/error.log'.\n\n"
+            "prefix: 'ws:' for workspace data, 'fork:' for evolved code, "
+            "or 'fix:' for repair targets.  "
+            "Examples: 'ws:logs/error.log', 'fork:main.py'.\n\n"
             "Supports line-based pagination via offset and limit.  "
             "Default limit is 100 lines; use offset to skip lines.  "
             "Pass a large limit (e.g. 999999) to read the entire file."
@@ -140,7 +142,7 @@ registry.register(
                 "path": {
                     "type": "string",
                     "description": "Logical path to the file. "
-                    "Must use a namespace prefix: self:, fork:, ws:, or fix:.",
+                    "Must use a namespace prefix: fork:, ws:, or fix:.",
                 },
                 "offset": {
                     "type": "integer",
@@ -171,8 +173,7 @@ registry.register(
         "description": (
             "Write content to a file.  The path must use a namespace prefix.  "
             "Use 'ws:' for workspace data or 'fork:' for evolved code.  "
-            "'self:' is read-only — you cannot modify your own running code "
-            "directly.  Directories are created automatically."
+            "Directories are created automatically."
         ),
         "parameters": {
             "type": "object",

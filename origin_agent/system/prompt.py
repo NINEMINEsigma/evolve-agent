@@ -99,7 +99,7 @@ def build_system_prompt(
     extra_blocks: Optional[list[str]] = None,
     lang: str = "en",
     workspace: Path | str = "",
-    self_path: str = "",
+    agentspace: str = "",
     fork_path: str = "",
     fix_fork_path: str = "",
     fix_log_path: str = "",
@@ -119,8 +119,8 @@ def build_system_prompt(
         ``"en"`` (default) or ``"zh"`` — selects template language variant.
     workspace:
         Path to the workspace directory for reading SOUL.md.
-    self_path / fork_path / fix_fork_path / fix_log_path:
-        Real paths for ``{self_path}`` / ``{fork_path}`` / ``{fix_fork_path}`` / ``{fix_log_path}``
+    fork_path / fix_fork_path / fix_log_path:
+        Real paths for ``{fork_path}`` / ``{fix_fork_path}`` / ``{fix_log_path}``
         placeholders in template files (converted from ``{{var}}`` by .format(), then
         replaced via .replace()).
 
@@ -152,7 +152,7 @@ def build_system_prompt(
     base = _read_if_exists(template_root / "base.txt")
     if base:
         base = base.replace(r"{{platform}}", _platform_info(lang))
-        base = base.replace(r"{{self_path}}", self_path)
+        base = base.replace(r"{{agentspace}}", agentspace)
         base = base.replace(r"{{fork_path}}", fork_path)
         blocks.append(base)
 

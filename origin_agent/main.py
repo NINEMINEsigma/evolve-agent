@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from pathlib import Path
 import signal
 from typing import TYPE_CHECKING
 
@@ -67,10 +68,10 @@ class App:
     async def run(self) -> int:
         """Block until shutdown is requested.  Returns an exit code."""
         logger.info(
-            "App starting | mode=%s workspace=%s self=%s fork=%s",
+            "App starting | mode=%s workspace=%s agentspace=%s fork=%s",
             self.ctx.mode,
             self.ctx.workspace,
-            self.ctx.self_path,
+            self.ctx.agentspace,
             self.ctx.fork_path,
         )
 
@@ -134,7 +135,7 @@ class App:
 
         # ---- seed skills directory ----
         try:
-            _skills_dir = self.ctx.workspace / "skills"
+            _skills_dir = Path("skills")
             _skills_dir.mkdir(parents=True, exist_ok=True)
             _seed = _skills_dir / "self-evolution" / "SKILL.md"
             if not _seed.exists():
@@ -149,7 +150,7 @@ category: core
 
 你可以通过以下工具修改自己的源代码并完成进化：
 
-1. ``read_own_source`` — 读取 self: 下的源码
+1. 使用文件系统工具从 ``fork:`` 读取需要修改的源码
 2. ``write_fork`` 或 ``edit_file`` — 将进化代码写入 fork: 或 ws:
 3. ``validate_code`` — 检查语法
 4. ``evolve_code`` — 深度验证并通过后触发 swap

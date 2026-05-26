@@ -246,7 +246,7 @@ def _handle_evolve_code(args: Dict[str, Any]) -> str:
 # Registration
 # ---------------------------------------------------------------------------
 
-
+'''
 registry.register(
     name="read_own_source",
     toolset="code",
@@ -284,7 +284,7 @@ registry.register(
     handler=_handle_read_own_source,
     emoji="🔬",
 )
-
+'''
 
 registry.register(
     name="write_fork",
@@ -361,10 +361,13 @@ registry.register(
         "description": (
             "Finalize the code evolution cycle.  Call this after you have "
             "written evolved source files to fork: via write_fork and "
-            "verified syntax via validate_code.  This tool runs a thorough "
-            "validation (syntax + compile check) on all .py files in the "
-            "fork directory.  If everything passes, the process exits and "
-            "the orchestrator swaps the slow (evolved) code into place, "
+            "verified syntax via validate_code (and validate_frontend if "
+            "you modified any frontend files).  This tool runs a thorough "
+            "validation (syntax + compile check) on all **.py files** in the "
+            "fork directory.  It does NOT validate TypeScript or frontend "
+            "builds — you must call validate_frontend beforehand if you "
+            "touched frontend code.  If everything passes, the process exits "
+            "and the orchestrator swaps the slow (evolved) code into place, "
             "then restarts the agent with the new version.  "
             "If validation fails, returns error details so you can fix "
             "the issues and retry.  "

@@ -119,6 +119,8 @@ class AgentLoop:
         """
         # Clear any stale interrupt flag from previous turn
         self._interrupted.pop(session_id, None)
+        # ---- persist user message ----
+        self._append(session_id, "user", user_message)
         # ---- lazy-init memory providers ----
         if session_id not in self._memory_initialized:
             for provider in self._memory.providers:
@@ -181,6 +183,7 @@ class AgentLoop:
                 resp = llm_task.result()
                 # Track actual token usage from LLM response
                 self._token_usage[session_id] = self._token_usage.get(session_id, 0) + resp.usage.total_tokens
+                self._persist_token_usage(session_id)
 
                 if not resp.tool_calls:
                     # Plain text reply — store and return
@@ -281,10 +284,50 @@ class AgentLoop:
             logger.warning("Failed to load history for session %s: %s", session_id, exc)
             return []
 
+    # -- token usage persistence -------------------------------------------
+
+    def _token_usage_path(self, session_id: str) -> Path | None:
+        """Path to the JSON file for a session's token usage."""
+        if not self._history_store_dir:
+            return None
+        return self._history_store_dir / session_id / "token_usage.json"
+
+    def _persist_token_usage(self, session_id: str) -> None:
+        """Write current token usage for a session to disk."""
+        path = self._token_usage_path(session_id)
+        if path is None:
+            return
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(
+                json.dumps({"token_usage": self._token_usage.get(session_id, 0)}, ensure_ascii=False),
+                encoding="utf-8",
+            )
+        except Exception as exc:
+            logger.warning("Failed to persist token usage for session %s: %s", session_id, exc)
+
+    def _load_token_usage_from_disk(self, session_id: str) -> int:
+        """Load token usage from disk, return 0 if absent."""
+        path = self._token_usage_path(session_id)
+        if path is None or not path.exists():
+            return 0
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+            return int(data.get("token_usage", 0))
+        except Exception:
+            return 0
+
     def clear_session(self, session_id: str) -> None:
         """Remove a session from memory and optionally clean up disk files."""
         self._histories.pop(session_id, None)
         self._token_usage.pop(session_id, None)
+        # Clean up persisted token usage file
+        path = self._token_usage_path(session_id)
+        if path and path.exists():
+            try:
+                path.unlink()
+            except Exception:
+                pass
 
     async def auto_generate_title(self, session_id: str) -> str:
         """Use LLM to generate a short title from session conversation history."""
@@ -341,14 +384,15 @@ class AgentLoop:
             return self._skill_cache
         blocks: list[str] = []
         try:
+            from pathlib import Path
             from abstract.skills.loader import list_skills, load_skill
-            skills = list_skills()
+            skills = list_skills(skills_dir=Path("skills"))
             for s in skills:
                 name = s.get("name", "")
                 if not name:
                     continue
                 try:
-                    payload = load_skill(name)
+                    payload = load_skill(name, skills_dir=Path("skills"))
                     if payload.get("success") and payload.get("content"):
                         blocks.append(
                             f"[Skill: {name}]\n{payload['content']}"
@@ -498,7 +542,7 @@ class AgentLoop:
             extra_blocks=skill_blocks,
             lang="zh",
             workspace=self._ctx.workspace,
-            self_path=str(self._ctx.self_path),
+            agentspace=str(self._ctx.agentspace),
             fork_path=str(self._ctx.fork_path),
             fix_fork_path=str(self._ctx.fix_path) if self._ctx.fix_path else "",
             fix_log_path=str(self._ctx.fix_log_path or ""),
@@ -521,7 +565,7 @@ class AgentLoop:
             extra_blocks=skill_blocks,
             lang="zh",
             workspace=self._ctx.workspace,
-            self_path=str(self._ctx.self_path),
+            agentspace=str(self._ctx.agentspace),
             fork_path=str(self._ctx.fork_path),
             fix_fork_path=str(self._ctx.fix_path) if self._ctx.fix_path else "",
             fix_log_path=str(self._ctx.fix_log_path or ""),
@@ -705,4 +749,10 @@ class AgentLoop:
 
     def get_token_usage(self, session_id: str) -> int:
         """Return the current prompt-token usage for a session."""
-        return self._token_usage.get(session_id, 0)
+        if session_id in self._token_usage:
+            return self._token_usage[session_id]
+        # Memory miss — try loading from disk (survives restart/evolution)
+        disk_usage = self._load_token_usage_from_disk(session_id)
+        if disk_usage:
+            self._token_usage[session_id] = disk_usage
+        return disk_usage

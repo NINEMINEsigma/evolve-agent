@@ -22,8 +22,13 @@ class RuntimeContext(BaseModel):
     workspace: Path
     """Root workspace directory (e.g. ``workspace/``)."""
 
-    self_path: Path
-    """Directory containing the agent's own source code (fast directory)."""
+    agentspace: Path
+    """General-purpose sandbox directory for agent I/O (e.g. ``workspace/agentspace/``).
+
+    Mapped to the ``ws:`` namespace.  Kept separate from ``fork_path``
+    and ``fix_path`` so that agent file operations never overlap with the
+    runtime code directories.
+    """
 
     fork_path: Path
     """Directory where evolved code is written (slow directory)."""

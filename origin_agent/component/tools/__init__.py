@@ -7,5 +7,6 @@ this package is enough to populate the global ToolRegistry.
 
 from . import filesystem  # noqa: F401 — side-effect: registers filesystem tools
 from . import code        # noqa: F401 — side-effect: registers code tools
+from . import frontend    # noqa: F401 — side-effect: registers frontend tools
 from . import shell       # noqa: F401 — side-effect: registers shell tools
 from . import skills      # noqa: F401 — side-effect: registers skills tools

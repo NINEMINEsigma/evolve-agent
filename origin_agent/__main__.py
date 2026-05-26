@@ -96,7 +96,7 @@ def _build_context(cli: dict) -> RuntimeContext:
     """
     return RuntimeContext(
         workspace=Path(cli.get("workspace", ".")).resolve(),
-        self_path=Path(cli.get("self", ".")).resolve(),
+        agentspace=Path(cli.get("agentspace", ".")).resolve(),
         fork_path=Path(cli.get("evolve", ".")).resolve(),
         log_path=(
             Path(cli["log"]).resolve() if "log" in cli else Path("agent.log")
@@ -193,8 +193,8 @@ def main() -> int:
 
     logger = logging.getLogger("agent")
     logger.info(
-        "Evolve Agent starting | mode=%s workspace=%s self=%s",
-        ctx.mode, ctx.workspace, ctx.self_path,
+        "Evolve Agent starting | mode=%s workspace=%s agentspace=%s",
+        ctx.mode, ctx.workspace, ctx.agentspace,
     )
 
     # ---- build frontend (fatal on failure) ----

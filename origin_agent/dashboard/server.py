@@ -37,7 +37,7 @@ def set_agent_loop(loop: object) -> None:
 
 
 def _list_skills() -> List[Dict[str, Any]]:
-    """Scan workspace/skills/ recursively for SKILL.md files and parse YAML frontmatter."""
+    """Scan project-root/skills/ recursively for SKILL.md files and parse YAML frontmatter."""
     result: List[Dict[str, Any]] = []
     if not _SKILLS_DIR.exists():
         return result
