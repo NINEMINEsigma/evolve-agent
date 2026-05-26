@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import threading
 import uuid
 from enum import Enum
 from pathlib import Path
@@ -93,6 +94,7 @@ class SessionManager:
         import time
         self._sessions: Dict[str, dict] = {}  # sid -> {status, created_at, title}
         self._store_dir: Path | None = Path(store_path) if store_path else None
+        self._index_lock = threading.Lock()
         if self._store_dir:
             self._store_dir.mkdir(parents=True, exist_ok=True)
             self.load_from_disk()
@@ -130,6 +132,11 @@ class SessionManager:
         except Exception as exc:
             logger.warning("Failed to write session index: %s", exc)
 
+    def _write_index_locked(self, entries: list[dict]) -> None:
+        """Thread-safe wrapper for _write_index."""
+        with self._index_lock:
+            self._write_index(entries)
+
     def load_from_disk(self) -> None:
         """Load persisted sessions from disk into memory."""
         entries = self._read_index()
@@ -159,9 +166,10 @@ class SessionManager:
         self._sessions[sid] = {"status": "active", "created_at": now, "title": ""}
         # Persist to disk
         if self._store_dir:
-            entries = self._read_index()
-            entries.append({"id": sid, "created_at": now, "status": "active", "title": ""})
-            self._write_index(entries)
+            with self._index_lock:
+                entries = self._read_index()
+                entries.append({"id": sid, "created_at": now, "status": "active", "title": ""})
+                self._write_index(entries)
             (self._store_dir / sid).mkdir(parents=True, exist_ok=True)
         logger.debug("Session created | id=%s", sid)
         return sid
@@ -173,9 +181,10 @@ class SessionManager:
         self._sessions.pop(sid, None)
         # Clean up disk
         if self._store_dir:
-            entries = self._read_index()
-            entries = [e for e in entries if e.get("id") != sid]
-            self._write_index(entries)
+            with self._index_lock:
+                entries = self._read_index()
+                entries = [e for e in entries if e.get("id") != sid]
+                self._write_index(entries)
             import shutil
             sdir = self._store_dir / sid
             if sdir.exists():
@@ -187,19 +196,20 @@ class SessionManager:
         if sid in self._sessions:
             self._sessions[sid]["title"] = title
         if self._store_dir:
-            entries = self._read_index()
-            for e in entries:
-                if e.get("id") == sid:
-                    e["title"] = title
-                    break
-            else:
-                entries.append({
-                    "id": sid,
-                    "created_at": self._sessions.get(sid, {}).get("created_at", 0),
-                    "status": "active",
-                    "title": title,
-                })
-            self._write_index(entries)
+            with self._index_lock:
+                entries = self._read_index()
+                for e in entries:
+                    if e.get("id") == sid:
+                        e["title"] = title
+                        break
+                else:
+                    entries.append({
+                        "id": sid,
+                        "created_at": self._sessions.get(sid, {}).get("created_at", 0),
+                        "status": "active",
+                        "title": title,
+                    })
+                self._write_index(entries)
 
     def get(self, sid: str) -> dict | None:
         """Return a single session with full metadata, or None."""
@@ -220,9 +230,17 @@ class SessionManager:
             sid for sid, info in self._sessions.items()
             if now - info.get("created_at", 0) > self._SESSION_TTL
         ]
+        if not expired:
+            return 0
         for sid in expired:
             self._sessions.pop(sid, None)
             logger.debug("Session expired | id=%s", sid)
+        # Also purge expired entries from the on-disk index
+        if self._store_dir:
+            with self._index_lock:
+                entries = self._read_index()
+                entries = [e for e in entries if e.get("id") not in expired]
+                self._write_index(entries)
         return len(expired)
 
     def get_all(self) -> list[dict]:

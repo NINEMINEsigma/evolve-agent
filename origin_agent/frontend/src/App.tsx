@@ -159,6 +159,16 @@ export default function App() {
         const raw = msg.content ?? "";
         try {
           const data = JSON.parse(raw);
+          if (data.build_hash) {
+            const lastHash = localStorage.getItem("evolve_build_hash") || "";
+            if (lastHash && lastHash !== data.build_hash) {
+              localStorage.setItem("evolve_build_hash", data.build_hash);
+              window.location.reload();
+              return;
+            }
+            localStorage.setItem("evolve_build_hash", data.build_hash);
+            return;  // silent — don't show hash as a chat message
+          }
           if (data.session_history) {
             // Session resume — replay conversation history
             const history = data.session_history.map((m: any) => ({

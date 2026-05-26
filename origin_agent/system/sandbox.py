@@ -180,7 +180,7 @@ class Sandbox:
     # Commands that tools are allowed to execute (by basename).
     # Everything else must go through a self-path-relative resolution.
     _ALLOWED_COMMANDS: frozenset[str] = frozenset({
-        "python", "python3", "pip", "pnpm", "git", "cmd"
+        "python", "python3", "pip", "pnpm", "git", "cmd", "curl"
     })
 
     @property

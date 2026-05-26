@@ -57,6 +57,9 @@ def _handle_read_own_source(args: Dict[str, Any]) -> str:
 
     Accepts bare filenames (e.g. 'main.py') which resolve to self:, or
     full logical paths.  Only readable namespaces are allowed.
+
+    Supports line-based pagination via offset and limit.
+    Pass limit=0 to read the entire file.
     """
     path = str(args.get("file", args.get("path", ""))).strip()
     if not path:
@@ -66,6 +69,13 @@ def _handle_read_own_source(args: Dict[str, Any]) -> str:
             return tool_result(entries=entries, tip="Use read_own_source with file=<name>")
         except SandboxError as exc:
             return tool_error(str(exc))
+
+    offset = int(args.get("offset", 0))
+    limit = int(args.get("limit", 0))
+    if offset < 0:
+        return tool_error("offset must be >= 0", path=path, offset=offset)
+    if limit < 0:
+        return tool_error("limit must be >= 0", path=path, limit=limit)
 
     try:
         if ":" in path:
@@ -80,7 +90,11 @@ def _handle_read_own_source(args: Dict[str, Any]) -> str:
                 tip="Use read_own_source with file=<name> to read a specific file",
             )
         content = resolved.real.read_text(encoding="utf-8")
-        return tool_result(content=content, path=path)
+        if limit > 0 or offset > 0:
+            lines = content.splitlines()
+            chunk = lines[offset:offset + limit] if limit > 0 else lines[offset:]
+            content = "\n".join(chunk)
+        return tool_result(content=content, path=path, offset=offset, limit=limit)
     except (SandboxError, FileNotFoundError, IsADirectoryError, PermissionError) as exc:
         return tool_error(str(exc), path=path)
 
@@ -89,11 +103,49 @@ def _handle_write_fork(args: Dict[str, Any]) -> str:
     """Write a file to the evolution target directory (fork: namespace).
 
     Only allowed in 'fast' mode.  Accepts bare filenames or logical paths.
+
+    Supports two modes:
+      - Full overwrite: provide file + content (the default).
+      - Incremental edit: provide file + old_string + new_string.
+        The old_string must match exactly once in the existing file.
     """
     path = str(args.get("file", args.get("path", ""))).strip()
     content = str(args.get("content", ""))
-    if not path or not content:
-        return tool_error("file and content are required")
+    old_string = str(args.get("old_string", ""))
+    new_string = str(args.get("new_string", "")) if "new_string" in args else None
+
+    if not path:
+        return tool_error("file is required")
+
+    # ---- incremental edit mode ----
+    if old_string:
+        if new_string is None:
+            return tool_error("new_string is required when old_string is provided")
+        try:
+            if ":" in path:
+                resolved = _s().resolve(path, Access.READ)
+            else:
+                resolved = _s().resolve(f"fork:{path}", Access.READ)
+            existing = resolved.real.read_text(encoding="utf-8")
+        except (SandboxError, FileNotFoundError) as exc:
+            return tool_error(str(exc), path=path)
+
+        if old_string not in existing:
+            return tool_error("old_string not found in file", path=path)
+
+        count = existing.count(old_string)
+        if count > 1:
+            return tool_error(
+                f"old_string matches {count} locations. Use more surrounding "
+                f"context to make it unique.",
+                path=path, matches=count,
+            )
+
+        content = existing.replace(old_string, new_string, 1)
+
+    # ---- full overwrite mode ----
+    elif not content:
+        return tool_error("content is required when old_string is not provided")
 
     try:
         if ":" in path:
@@ -203,7 +255,9 @@ registry.register(
             "Read a file from the agent's own source code (self: namespace).  "
             "Use this to inspect your own implementation.  Pass a bare "
             "filename like 'main.py' or 'entry/agent.py'.  "
-            "With no arguments, lists available files."
+            "With no arguments, lists available files.\n\n"
+            "Supports line-based pagination via offset and limit.  "
+            "Pass limit=0 (default) to read the entire file."
         ),
         "parameters": {
             "type": "object",
@@ -211,6 +265,18 @@ registry.register(
                 "file": {
                     "type": "string",
                     "description": "Filename to read (e.g. 'main.py', 'component/llm.py').",
+                },
+                "offset": {
+                    "type": "integer",
+                    "description": "0-indexed line number to start from (default 0).",
+                    "default": 0,
+                    "minimum": 0,
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": "Maximum lines to return.  Pass 0 to read the whole file (default 0).",
+                    "default": 0,
+                    "minimum": 0,
                 },
             },
         },
@@ -228,8 +294,12 @@ registry.register(
             "Write an evolved version of a source file to the fork (slow) "
             "directory.  After writing all changes, call validate_code to "
             "check syntax, then call evolve_code to trigger the swap.  "
-            "Accepts bare filenames (e.g. 'main.py').  "
-            "For small targeted changes, prefer edit_file with fork: paths instead."
+            "Accepts bare filenames (e.g. 'main.py').\n\n"
+            "Two modes:\n"
+            "- Full overwrite: pass file + content.\n"
+            "- Incremental edit: pass file + old_string + new_string.  "
+            "The old_string must match exactly once — include enough "
+            "surrounding context (2-3 lines) to make it unique."
         ),
         "parameters": {
             "type": "object",
@@ -240,10 +310,18 @@ registry.register(
                 },
                 "content": {
                     "type": "string",
-                    "description": "The new source code content.",
+                    "description": "The new source code content (required for full overwrite).",
+                },
+                "old_string": {
+                    "type": "string",
+                    "description": "Exact text to find and replace (enables incremental edit mode).",
+                },
+                "new_string": {
+                    "type": "string",
+                    "description": "Replacement text. Use empty string to delete old_string.",
                 },
             },
-            "required": ["file", "content"],
+            "required": ["file"],
         },
     },
     handler=_handle_write_fork,

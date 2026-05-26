@@ -96,6 +96,9 @@ class App:
         # ---- stop gateway ----
         await self._stop_gateway()
 
+        # ---- drain background tasks ----
+        await self._drain_background_tasks()
+
         logger.info("App shutdown complete")
         return self._exit_code
 
@@ -212,3 +215,28 @@ category: core
         except (asyncio.CancelledError, Exception):
             pass
         logger.info("Gateway stopped")
+
+    async def _drain_background_tasks(self, timeout: float = 5.0) -> None:
+        """Wait for pending asyncio tasks to finish before returning.
+
+        This prevents in-flight I/O (session index writes, message
+        persistence, tool event streaming, etc.) from being truncated
+        when the process exits with code -1 for evolution.
+        """
+        loop = asyncio.get_running_loop()
+        pending = [
+            t for t in asyncio.all_tasks(loop)
+            if t is not asyncio.current_task() and not t.done()
+        ]
+        if pending:
+            logger.info("Draining %d background task(s)...", len(pending))
+            try:
+                await asyncio.wait_for(
+                    asyncio.gather(*pending, return_exceptions=True),
+                    timeout=timeout,
+                )
+            except asyncio.TimeoutError:
+                logger.warning(
+                    "Some background tasks did not complete within %.1fs",
+                    timeout,
+                )

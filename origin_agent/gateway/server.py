@@ -8,6 +8,7 @@ Provides:
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 from pathlib import Path
@@ -150,6 +151,10 @@ async def _app_lifespan(app):
     task = asyncio.create_task(_cleanup_loop())
     logger.info("Session cleanup task started (interval=300s)")
     yield
+    # NOTE: During evolution shutdown (exit -1) uvicorn cancels all pending
+    # handler tasks.  The resulting asyncio.CancelledError noise in the
+    # logs is harmless and expected — it simply means the gateway is
+    # tearing down its event loop.
     task.cancel()
     logger.info("Session cleanup task stopped")
 
@@ -170,15 +175,32 @@ except Exception as exc:
 
 _FRONTEND_DIST = Path(__file__).resolve().parent.parent / "frontend" / "dist"
 
+
+def _compute_build_hash() -> str:
+    """Hash of the built index.html for cache-busting detection."""
+    idx = _FRONTEND_DIST / "index.html"
+    if not idx.exists():
+        return ""
+    try:
+        return hashlib.md5(idx.read_bytes()).hexdigest()[:12]
+    except Exception:
+        return ""
+
+
+_BUILD_HASH = _compute_build_hash()
+
 if _FRONTEND_DIST.is_dir():
     assets_dir = _FRONTEND_DIST / "assets"
     if assets_dir.is_dir():
         app.mount("/assets", StaticFiles(directory=str(assets_dir)), name="assets")
-    logger.info("Frontend dist found at %s", _FRONTEND_DIST)
+    logger.info("Frontend dist found at %s (build=%s)", _FRONTEND_DIST, _BUILD_HASH or "unknown")
 
 # ---------------------------------------------------------------------------
 # Routes
 # ---------------------------------------------------------------------------
+
+
+_NO_CACHE = {"Cache-Control": "no-cache, no-store, must-revalidate", "Pragma": "no-cache"}
 
 
 @app.get("/")
@@ -186,8 +208,11 @@ async def index():
     """Serve the built React frontend, or the inline fallback."""
     index_html = _FRONTEND_DIST / "index.html"
     if index_html.exists():
-        return HTMLResponse(index_html.read_text(encoding="utf-8"))
-    return HTMLResponse(_CHAT_PAGE_HTML)
+        return HTMLResponse(
+            index_html.read_text(encoding="utf-8"),
+            headers=_NO_CACHE,
+        )
+    return HTMLResponse(_CHAT_PAGE_HTML, headers=_NO_CACHE)
 
 
 @app.get("/health")
@@ -265,7 +290,10 @@ async def spa_fallback(full_path: str):
     """
     index_html = _FRONTEND_DIST / "index.html"
     if index_html.exists():
-        return HTMLResponse(index_html.read_text(encoding="utf-8"))
+        return HTMLResponse(
+            index_html.read_text(encoding="utf-8"),
+            headers=_NO_CACHE,
+        )
     from fastapi import HTTPException
     raise HTTPException(status_code=404, detail=f"Not found: {full_path}")
 
@@ -301,6 +329,16 @@ async def ws_chat(ws: WebSocket) -> None:
             ).to_json()
         )
 
+        # Send build hash so the frontend can detect evolution and auto-reload
+        if _BUILD_HASH:
+            await ws.send_text(
+                Message(
+                    type=MessageType.SYSTEM,
+                    session_id=sid,
+                    content=json.dumps({"build_hash": _BUILD_HASH}),
+                ).to_json()
+            )
+
         # On resume, replay conversation history so the frontend isn't blank
         if resume and sessions.exists(resume) and _agent_loop is not None:
             get_messages = getattr(_agent_loop, "get_session_messages", None)
@@ -320,6 +358,10 @@ async def ws_chat(ws: WebSocket) -> None:
                 )
 
         while True:
+            # NOTE: During evolution shutdown (exit -1) uvicorn cancels all
+            # pending handler tasks.  The asyncio.CancelledError that
+            # propagates from receive_text() here is harmless and expected
+            # — it is simply the gateway tearing down its event loop.
             raw = await ws.receive_text()
 
             # Parse incoming message
