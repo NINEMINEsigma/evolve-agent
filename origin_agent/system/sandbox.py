@@ -204,14 +204,14 @@ class Sandbox:
     # -- subprocess (also sandboxed) ----------------------------------------
 
     # Commands that tools are allowed to execute (by basename).
-    _ALLOWED_COMMANDS: frozenset[str] = frozenset({
-        "python", "python3", "pip", "pnpm", "git", "cmd", "curl"
-    })
+    # _ALLOWED_COMMANDS: frozenset[str] = frozenset({
+    #     "python", "python3", "pip", "pnpm", "git", "cmd", "curl"
+    # })
 
-    @property
-    def allowed_commands(self) -> frozenset[str]:
-        """Public read-only access to the command allowlist."""
-        return self._ALLOWED_COMMANDS
+    # @property
+    # def allowed_commands(self) -> frozenset[str]:
+    #     """Public read-only access to the command allowlist."""
+    #     return self._ALLOWED_COMMANDS
 
     def run(
         self,
@@ -242,11 +242,11 @@ class Sandbox:
         # -- validate command --
         cmd = args[0]
         cmd_name = Path(cmd).name
-        if cmd_name not in self._ALLOWED_COMMANDS:
-            raise SandboxError(
-                f"Command '{cmd_name}' is not in the allowed list: "
-                f"{sorted(self._ALLOWED_COMMANDS)}"
-            )
+        # if cmd_name not in self._ALLOWED_COMMANDS:
+        #     raise SandboxError(
+        #         f"Command '{cmd_name}' is not in the allowed list: "
+        #         f"{sorted(self._ALLOWED_COMMANDS)}"
+        #     )
 
         # -- validate cwd --
         cwd_r = self.resolve(cwd_ns, Access.READ)
