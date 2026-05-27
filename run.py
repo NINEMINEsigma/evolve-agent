@@ -7,9 +7,6 @@ from datetime import datetime
 
 from config import *
 
-workspace_path = Path("workspace")
-agentspace_path = Path("agentspace")
-logs_path = workspace_path / "logs"
 origin_agent_codes_path = Path("origin_agent")
 
 # create directorys if they don't exist
@@ -98,20 +95,20 @@ if __name__ == "__main__":
         task = subprocess.run([
             sys.executable, # 使用当前python解释器
             str(fast_agent_space/"__main__.py"), # 运行fast agent
-            f"--workspace {workspace_path}", # 工作空间路径
-            f"--agentspace {agentspace_path}", # agent 工作目录
-            f"--log {log_file_path}", # 日志路径
-            f"--console_log {console_log}", # 是否在控制台打印日志
-            f"--evolve {slow_agent_space}", # 需要进化的代码路径
-            f"--gateway_host {gateway_host}", # WebSocket 监听地址
-            f"--gateway_port {gateway_port}", # WebSocket 监听端口
-            f"--llm_base_url {llm_base_url}", # LLM API 地址
-            f"--llm_model {llm_model}", # LLM 模型名
-            f"--llm_max_context_tokens {llm_max_context_tokens}", # LLM 最大上下文
-            f"--llm_context_upbound {llm_context_upbound}", # LLM 上下文压缩阈值
-            f"--llm_max_output_tokens {llm_max_output_tokens}", # LLM 最大输出
-            f"--llm_temperature {llm_temperature}", # LLM 温度
-            f"--mode fast" # 运行模式
+            "--workspace", str(workspace_path), # 工作空间路径
+            "--agentspace", str(agentspace_path), # agent 工作目录
+            "--log", str(log_file_path), # 日志路径
+            "--console_log", str(console_log), # 是否在控制台打印日志
+            "--evolve", str(slow_agent_space), # 需要进化的代码路径
+            "--gateway_host", str(gateway_host), # WebSocket 监听地址
+            "--gateway_port", str(gateway_port), # WebSocket 监听端口
+            "--llm_base_url", str(llm_base_url), # LLM API 地址
+            "--llm_model", str(llm_model), # LLM 模型名
+            "--llm_max_context_tokens", str(llm_max_context_tokens), # LLM 最大上下文
+            "--llm_context_upbound", str(llm_context_upbound), # LLM 上下文压缩阈值
+            "--llm_max_output_tokens", str(llm_max_output_tokens), # LLM 最大输出
+            "--llm_temperature", str(llm_temperature), # LLM 温度
+            "--mode", "fast", # 运行模式
         ])
         exit_code = task.returncode
         if exit_code == 0:
@@ -142,19 +139,19 @@ if __name__ == "__main__":
             task = subprocess.run([
                 sys.executable, # 使用当前python解释器
                 str(fallback_main), # 运行fallback agent
-                f"--workspace {workspace_path}", # 工作空间路径
-                f"--agentspace {agentspace_path}", # agent 工作目录
-                f"--log {log_file_path}", # 日志路径
-                f"--console_log {console_log}", # 是否在控制台打印日志
-                f"--fix_fork {fast_agent_space}", # 需要修复的代码路径
-                f"--fix {logs_path/"fast_agent_runtime_error.log"}", # 错误日志路径
-                f"--llm_base_url {llm_base_url}", # LLM API 地址
-                f"--llm_model {llm_model}", # LLM 模型名
-                f"--llm_max_context_tokens {llm_max_context_tokens}", # LLM 最大上下文
-                f"--llm_context_upbound {llm_context_upbound}", # LLM 上下文压缩阈值
-                f"--llm_max_output_tokens {llm_max_output_tokens}", # LLM 最大输出
-                f"--llm_temperature {llm_temperature}", # LLM 温度
-                f"--mode fallback" # 运行模式
+                "--workspace", str(workspace_path), # 工作空间路径
+                "--agentspace", str(agentspace_path), # agent 工作目录
+                "--log", str(log_file_path), # 日志路径
+                "--console_log", str(console_log), # 是否在控制台打印日志
+                "--fix_fork", str(fast_agent_space), # 需要修复的代码路径
+                "--fix", str(logs_path/"fast_agent_runtime_error.log"), # 错误日志路径
+                "--llm_base_url", str(llm_base_url), # LLM API 地址
+                "--llm_model", str(llm_model), # LLM 模型名
+                "--llm_max_context_tokens", str(llm_max_context_tokens), # LLM 最大上下文
+                "--llm_context_upbound", str(llm_context_upbound), # LLM 上下文压缩阈值
+                "--llm_max_output_tokens", str(llm_max_output_tokens), # LLM 最大输出
+                "--llm_temperature", str(llm_temperature), # LLM 温度
+                "--mode", "fallback", # 运行模式
             ])
             if task.returncode == 0:
                 logger.info(f"Fallback agent fixed successfully, restart...")

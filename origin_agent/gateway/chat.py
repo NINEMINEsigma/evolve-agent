@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import sys
 import threading
 import uuid
 from enum import Enum
@@ -79,6 +80,18 @@ class Message(BaseModel):
 # ---------------------------------------------------------------------------
 
 
+def _find_workspace_from_args() -> str | None:
+    """Extract ``--workspace`` value from sys.argv (set by run.py).
+
+    Format on argv: ``--workspace D:\\path`` as two separate entries.
+    """
+    args = sys.argv
+    for i, arg in enumerate(args):
+        if arg == "--workspace" and i + 1 < len(args):
+            return args[i + 1].strip("\"'")
+    return None
+
+
 class SessionManager:
     """Track WebSocket sessions with TTL-based expiry and disk persistence.
 
@@ -139,6 +152,16 @@ class SessionManager:
 
     def load_from_disk(self) -> None:
         """Load persisted sessions from disk into memory."""
+        # If configure_sessions was never called (e.g. lost during code
+        # evolution), extract --workspace from sys.argv and derive the path.
+        if self._store_dir is None:
+            ws = _find_workspace_from_args()
+            if ws:
+                candidate = Path(ws) / "logs" / "sessions"
+                if candidate.exists():
+                    self._store_dir = candidate
+        if not self._store_dir:
+            return
         entries = self._read_index()
         for entry in entries:
             sid = entry.get("id", "")

@@ -212,6 +212,7 @@ class AgentLoop:
                         try:
                             parsed = json.loads(tool_msg["content"])
                             if parsed.get("evolved"):
+                                self._append(session_id, "assistant", "进化已完成，正在重启以应用新代码...")
                                 return "进化已完成，正在重启以应用新代码..."
                         except (json.JSONDecodeError, KeyError, TypeError):
                             pass

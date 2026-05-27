@@ -32,23 +32,24 @@ from system.context import RuntimeContext  # noqa: E402
 # ---------------------------------------------------------------------------
 
 def _parse_cli() -> dict:
-    """Parse ``--flag value`` combined arguments.
+    """Parse ``--key value`` arguments from sys.argv.
 
-    The orchestrator (run.py) builds each flag+value as a single argv
-    element, e.g. ``"--workspace /path/to/ws"``.  This parser splits on
-    the **first** space inside a ``--`` prefixed argument.
-
-    Flags without a value (``--flag`` alone) are stored as ``True``.
+    Format: ``--key value`` as two separate sys.argv entries.
+    ``--flag`` alone (no value) is stored as True.
     """
     parsed: dict = {}
-    for arg in sys.argv[1:]:
+    args = sys.argv[1:]
+    i = 0
+    while i < len(args):
+        arg = args[i]
         if arg.startswith("--"):
             body = arg[2:]
-            if " " in body:
-                key, val = body.split(" ", 1)
-                parsed[key] = val.strip()
+            if i + 1 < len(args) and not args[i + 1].startswith("--"):
+                parsed[body] = args[i + 1].strip("\"'")
+                i += 1
             else:
                 parsed[body] = True
+        i += 1
     return parsed
 
 

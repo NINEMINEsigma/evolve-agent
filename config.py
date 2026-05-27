@@ -16,3 +16,11 @@ llm_max_context_tokens: int     = 1000000
 llm_context_upbound:    float   = 0.9
 llm_max_output_tokens:  int     = 384000
 llm_temperature:        float   = 0.95
+
+#----------
+# workspace
+#----------
+from pathlib import Path
+workspace_path: Path = Path("workspace")
+agentspace_path: Path = workspace_path / "agentspace"
+logs_path: Path = workspace_path / "logs"
