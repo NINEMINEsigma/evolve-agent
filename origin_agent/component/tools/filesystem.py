@@ -54,6 +54,8 @@ def _handle_read(args: Dict[str, Any]) -> str:
         return tool_error("offset must be >= 0", path=path, offset=offset)
     if limit < 1:
         return tool_error("limit must be >= 1", path=path, limit=limit)
+    if limit > 100:
+        limit = 100
     try:
         content = _s().read(path, offset=offset, limit=limit)
         return tool_result(content=content, path=path, offset=offset, limit=limit)
@@ -133,8 +135,7 @@ registry.register(
             "or 'fix:' for repair targets.  "
             "Examples: 'ws:logs/error.log', 'fork:main.py'.\n\n"
             "Supports line-based pagination via offset and limit.  "
-            "Default limit is 100 lines; use offset to skip lines.  "
-            "Pass a large limit (e.g. 999999) to read the entire file."
+            "Default limit is 100 lines (hard cap); use offset to skip lines."
         ),
         "parameters": {
             "type": "object",
@@ -152,9 +153,10 @@ registry.register(
                 },
                 "limit": {
                     "type": "integer",
-                    "description": "Maximum number of lines to return (default 100, minimum 1).",
+                    "description": "Maximum number of lines to return (hard cap: 100).",
                     "default": 100,
                     "minimum": 1,
+                    "maximum": 100,
                 },
             },
             "required": ["path"],
