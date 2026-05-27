@@ -1,9 +1,9 @@
-"""FastAPI application with WebSocket endpoint for chat.
+"""基于 FastAPI 的 WebSocket 聊天端点。
 
-Provides:
-  - ``GET /health`` — liveness check
-  - ``WS /ws/chat`` — chat WebSocket (echo placeholder until Stage 3)
-  - ``create_server(ctx)`` — factory for a uvicorn.Server instance
+提供：
+  - ``GET /health`` — 存活检查
+  - ``WS /ws/chat`` — 聊天 WebSocket（LLM 未配置时回退到 echo）
+  - ``create_server(ctx)`` — uvicorn.Server 实例工厂
 """
 
 from __future__ import annotations
@@ -25,39 +25,39 @@ from .chat import Message, MessageType, SessionManager
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
-# Shared session registry
+# 共享 session 注册表
 # ---------------------------------------------------------------------------
 
-sessions = SessionManager()
+sessions: SessionManager = SessionManager()
 
-# AgentLoop reference — set by main.py before the server starts.
-# Falls back to echo mode when not set (useful for testing without an LLM).
+# AgentLoop 引用 — 由 main.py 在 server 启动前设置。
+# 未设置时回退到 echo 模式（适用于无 LLM 的测试场景）。
 _agent_loop: object | None = None
 
 
 def set_agent_loop(loop: object) -> None:
-    """Wire the AgentLoop into the gateway's WebSocket handler."""
+    """将 AgentLoop 注入 gateway 的 WebSocket handler。"""
     global _agent_loop
     _agent_loop = loop
 
 
 def configure_sessions(store_path: str | None = None) -> None:
-    """Configure the session store directory and reload persisted sessions."""
+    """配置 session 存储目录并重新加载持久化的 session。"""
     if store_path:
         sessions.set_store_dir(store_path)
 
 
-# ── tool event streaming ──────────────────────────────────────────────
-# Map session_id → WebSocket for pushing tool_call / tool_result events
-# to the frontend while the agent loop is processing a turn.
+# ── 工具事件流 ──────────────────────────────────────────────
+# 映射 session_id → WebSocket，用于在 agent 循环处理回合期间
+# 向前端推送 tool_call / tool_result 事件。
 
 _tool_ws_sinks: Dict[str, WebSocket] = {}
 
-# ── shell command confirmation ────────────────────────────────────────
-# {request_id: asyncio.Future} — maps confirmation request IDs to futures
-# that are resolved when the user approves/rejects a run_command.
-# {request_id: session_id}  — reverse-maps request_id to session_id
-# for auto-deny on WebSocket disconnect.
+# ── shell 命令确认 ────────────────────────────────────────
+# {request_id: asyncio.Future} — 映射确认请求 ID 到 future，
+#   当用户批准/拒绝 run_command 时解析。
+# {request_id: session_id}  — request_id 到 session_id 的反向映射，
+#   用于 WebSocket 断开时自动拒绝。
 
 import asyncio as _asyncio
 _pending_confirms: Dict[str, _asyncio.Future] = {}
@@ -65,12 +65,12 @@ _confirm_session_map: Dict[str, str] = {}
 
 
 def _register_confirm_session(request_id: str, session_id: str) -> None:
-    """Record which session owns a confirm request so we can auto-deny on disconnect."""
+    """记录确认请求所属的 session，以便断开时自动拒绝。"""
     _confirm_session_map[request_id] = session_id
 
 
 def _resolve_confirm(request_id: str, action: str) -> None:
-    fut = _pending_confirms.pop(request_id, None)
+    fut: _asyncio.Future | None = _pending_confirms.pop(request_id, None)
     _confirm_session_map.pop(request_id, None)
     if fut and not fut.done():
         fut.set_result(action)
@@ -82,7 +82,7 @@ def _resolve_confirm(request_id: str, action: str) -> None:
 
 
 def _deny_session_confirms(session_id: str) -> None:
-    """Auto-deny all pending confirm requests for a disconnected session."""
+    """自动拒绝断开连接 session 的所有待处理确认请求。"""
     for rid in list(_confirm_session_map.keys()):
         if _confirm_session_map.get(rid) == session_id:
             _resolve_confirm(rid, "deny")
@@ -91,13 +91,12 @@ def _deny_session_confirms(session_id: str) -> None:
 async def _send_tool_event(
     session_id: str, event_type: str, tool_name: str, payload: str,
 ) -> None:
-    """Push a tool_call or tool_result event to the frontend WebSocket.
+    """向前端 WebSocket 推送 tool_call 或 tool_result 事件。
 
-    Silently drops events for sessions that have been interrupted so the
-    frontend doesn't receive stale tool notifications after the user
-    clicked stop.
+    对已中断的 session 静默丢弃事件，
+    防止前端在用户点击停止后收到过期的工具通知。
     """
-    # If the session has been interrupted, skip sending tool events.
+    # 如果 session 已被中断，跳过发送工具事件。
     if _agent_loop is not None and hasattr(_agent_loop, "is_interrupted"):
         try:
             if _agent_loop.is_interrupted(session_id):  # type: ignore[union-attr]
@@ -105,16 +104,17 @@ async def _send_tool_event(
         except Exception:
             pass
 
-    ws = _tool_ws_sinks.get(session_id)
+    ws: WebSocket | None = _tool_ws_sinks.get(session_id)
     if ws is None:
         return
-    msg_type = MessageType.TOOL_CALL if event_type == "tool_call" else MessageType.TOOL_RESULT
+    msg_type: MessageType = MessageType.TOOL_CALL if event_type == "tool_call" else MessageType.TOOL_RESULT
+    data: dict | None
     try:
         data = json.loads(payload)
     except json.JSONDecodeError:
         data = None
 
-    msg = Message(
+    msg: Message = Message(
         type=msg_type,
         session_id=session_id,
         tool=tool_name,
@@ -124,7 +124,7 @@ async def _send_tool_event(
     try:
         await ws.send_text(msg.to_json())
     except Exception:
-        pass  # client disconnected — ignore
+        pass  # 客户端已断开 — 忽略
 
 # ---------------------------------------------------------------------------
 # FastAPI app
@@ -135,11 +135,12 @@ import asyncio
 from contextlib import asynccontextmanager
 
 
-async def _cleanup_loop():
+async def _cleanup_loop() -> None:
+    """定期清理过期 session 的后台循环，每 300 秒执行一次。"""
     while True:
         try:
             await asyncio.sleep(300)
-            cleaned = sessions.cleanup_expired()
+            cleaned: int = sessions.cleanup_expired()
             if cleaned:
                 logger.info("Cleaned up %d expired session(s)", cleaned)
         except Exception:
@@ -147,21 +148,23 @@ async def _cleanup_loop():
 
 
 @asynccontextmanager
-async def _app_lifespan(app):
-    task = asyncio.create_task(_cleanup_loop())
+async def _app_lifespan(app: FastAPI):
+    """FastAPI 生命周期管理：启动 session 清理任务，关闭时取消。
+
+    Note: 进化关闭（exit -1）期间，uvicorn 会取消所有待处理
+    handler task。日志中出现的 asyncio.CancelledError 噪声
+    是无害且预期的 — 仅表示 gateway 正在拆除其事件循环。
+    """
+    task: asyncio.Task[None] = asyncio.create_task(_cleanup_loop())
     logger.info("Session cleanup task started (interval=300s)")
     yield
-    # NOTE: During evolution shutdown (exit -1) uvicorn cancels all pending
-    # handler tasks.  The resulting asyncio.CancelledError noise in the
-    # logs is harmless and expected — it simply means the gateway is
-    # tearing down its event loop.
     task.cancel()
     logger.info("Session cleanup task stopped")
 
 
-app = FastAPI(title="Evolve Agent Gateway", lifespan=_app_lifespan)
+app: FastAPI = FastAPI(title="Evolve Agent Gateway", lifespan=_app_lifespan)
 
-# ---- dashboard routes ----
+# ---- dashboard 路由 ----
 try:
     from dashboard.server import register_dashboard_routes
     register_dashboard_routes(app)
@@ -170,15 +173,15 @@ except Exception as exc:
     logger.warning("Dashboard unavailable: %s", exc)
 
 # ---------------------------------------------------------------------------
-# Built frontend discovery
+# 构建前端产物发现
 # ---------------------------------------------------------------------------
 
-_FRONTEND_DIST = Path(__file__).resolve().parent.parent / "frontend" / "dist"
+_FRONTEND_DIST: Path = Path(__file__).resolve().parent.parent / "frontend" / "dist"
 
 
 def _compute_build_hash() -> str:
-    """Hash of the built index.html for cache-busting detection."""
-    idx = _FRONTEND_DIST / "index.html"
+    """计算构建后 index.html 的哈希值，用于缓存破坏检测。"""
+    idx: Path = _FRONTEND_DIST / "index.html"
     if not idx.exists():
         return ""
     try:
@@ -187,26 +190,26 @@ def _compute_build_hash() -> str:
         return ""
 
 
-_BUILD_HASH = _compute_build_hash()
+_BUILD_HASH: str = _compute_build_hash()
 
 if _FRONTEND_DIST.is_dir():
-    assets_dir = _FRONTEND_DIST / "assets"
+    assets_dir: Path = _FRONTEND_DIST / "assets"
     if assets_dir.is_dir():
         app.mount("/assets", StaticFiles(directory=str(assets_dir)), name="assets")
     logger.info("Frontend dist found at %s (build=%s)", _FRONTEND_DIST, _BUILD_HASH or "unknown")
 
 # ---------------------------------------------------------------------------
-# Routes
+# 路由
 # ---------------------------------------------------------------------------
 
 
-_NO_CACHE = {"Cache-Control": "no-cache, no-store, must-revalidate", "Pragma": "no-cache"}
+_NO_CACHE: dict[str, str] = {"Cache-Control": "no-cache, no-store, must-revalidate", "Pragma": "no-cache"}
 
 
 @app.get("/")
 async def index():
-    """Serve the built React frontend, or the inline fallback."""
-    index_html = _FRONTEND_DIST / "index.html"
+    """返回构建后的 React 前端，未构建时返回内置回退页面。"""
+    index_html: Path = _FRONTEND_DIST / "index.html"
     if index_html.exists():
         return HTMLResponse(
             index_html.read_text(encoding="utf-8"),
@@ -222,18 +225,19 @@ async def health():
 
 @app.get("/api/sessions")
 async def list_sessions():
-    """Return all active sessions with metadata."""
+    """返回所有活跃 session 及其元数据。"""
     return {"sessions": sessions.get_all()}
 
 
 @app.post("/api/confirm/{request_id}")
 async def http_confirm(request_id: str, req: Request):
-    """Handle confirm response via HTTP (independent of WS connection state)."""
+    """通过 HTTP 处理确认响应（独立于 WebSocket 连接状态）。"""
+    body: dict = {}
     try:
         body = await req.json()
     except Exception:
         body = {}
-    action = str(body.get("action", "deny"))
+    action: str = str(body.get("action", "deny"))
     if action not in ("allow_once", "allow_always", "deny"):
         action = "deny"
     _resolve_confirm(request_id, action)
@@ -242,8 +246,8 @@ async def http_confirm(request_id: str, req: Request):
 
 @app.post("/api/interrupt/{session_id}")
 async def http_interrupt(session_id: str):
-    """Handle interrupt via HTTP so it works even when the WS handler is
-    blocked inside ``process_message()``."""
+    """通过 HTTP 处理中断请求，使其在 WS handler 被
+    ``process_message()`` 阻塞时仍能生效。"""
     if _agent_loop is not None and hasattr(_agent_loop, "interrupt"):
         _agent_loop.interrupt(session_id)  # type: ignore[union-attr]
     return {"interrupted": True, "session_id": session_id}
@@ -251,7 +255,7 @@ async def http_interrupt(session_id: str):
 
 @app.delete("/api/sessions/{session_id}")
 async def delete_session(session_id: str):
-    """Delete a session and its persisted data."""
+    """删除 session 及其持久化数据。"""
     sessions.remove(session_id)
     if _agent_loop is not None and hasattr(_agent_loop, "clear_session"):
         _agent_loop.clear_session(session_id)  # type: ignore[union-attr]
@@ -260,7 +264,8 @@ async def delete_session(session_id: str):
 
 @app.put("/api/sessions/{session_id}/title")
 async def update_session_title(session_id: str, req: Request):
-    """Manually rename a session."""
+    """手动重命名 session。"""
+    title: str = ""
     try:
         body = await req.json()
         title = str(body.get("title", "")).strip()[:50]
@@ -272,8 +277,8 @@ async def update_session_title(session_id: str, req: Request):
 
 @app.post("/api/sessions/{session_id}/auto-title")
 async def auto_title_session(session_id: str):
-    """Ask LLM to generate a title from session messages."""
-    title = ""
+    """请求 LLM 根据 session 消息自动生成标题。"""
+    title: str = ""
     if _agent_loop is not None and hasattr(_agent_loop, "auto_generate_title"):
         title = await _agent_loop.auto_generate_title(session_id)  # type: ignore[union-attr]
     if title:
@@ -283,12 +288,12 @@ async def auto_title_session(session_id: str):
 
 @app.get("/{full_path:path}")
 async def spa_fallback(full_path: str):
-    """Catch-all for SPA client-side routes.
+    """SPA 客户端路由的兜底处理。
 
-    Must be defined AFTER all API routes so they take precedence.
-    Returns the built index.html, or 404 if the frontend wasn't built.
+    必须在所有 API 路由之后定义，确保 API 优先匹配。
+    返回构建后的 index.html，前端未构建时返回 404。
     """
-    index_html = _FRONTEND_DIST / "index.html"
+    index_html: Path = _FRONTEND_DIST / "index.html"
     if index_html.exists():
         return HTMLResponse(
             index_html.read_text(encoding="utf-8"),
@@ -300,14 +305,16 @@ async def spa_fallback(full_path: str):
 
 @app.websocket("/ws/chat")
 async def ws_chat(ws: WebSocket) -> None:
+    """WebSocket 聊天端点：接收用户消息，转发给 AgentLoop，返回回复。"""
     await ws.accept()
-    # Resume a previous session if the client requests it
-    qs = parse_qs(ws.scope.get("query_string", b"").decode())
-    resume = qs.get("resume", [None])[0]
+    # 如果客户端请求恢复之前的 session
+    qs: dict[str, list[str]] = parse_qs(ws.scope.get("query_string", b"").decode())
+    resume: str | None = qs.get("resume", [None])[0]
+    sid: str
     if resume and sessions.exists(resume):
         sid = resume
     else:
-        # Try loading from disk in case server was restarted
+        # 尝试从磁盘加载（server 重启后恢复）
         if resume:
             sessions.load_from_disk()
             if sessions.exists(resume):
@@ -316,11 +323,11 @@ async def ws_chat(ws: WebSocket) -> None:
                 sid = sessions.create()
         else:
             sid = sessions.create()
-    _tool_ws_sinks[sid] = ws  # register for tool event streaming
+    _tool_ws_sinks[sid] = ws  # 注册用于工具事件流推送
     logger.info("WebSocket connected | session=%s", sid)
 
     try:
-        # Send welcome message
+        # 发送欢迎消息
         await ws.send_text(
             Message(
                 type=MessageType.SYSTEM,
@@ -329,7 +336,7 @@ async def ws_chat(ws: WebSocket) -> None:
             ).to_json()
         )
 
-        # Send build hash so the frontend can detect evolution and auto-reload
+        # 发送构建哈希，使前端能检测进化并自动重载
         if _BUILD_HASH:
             await ws.send_text(
                 Message(
@@ -339,13 +346,13 @@ async def ws_chat(ws: WebSocket) -> None:
                 ).to_json()
             )
 
-        # On resume, replay conversation history so the frontend isn't blank
+        # 恢复 session 时回放会话历史，使前端不为空白
         if resume and sessions.exists(resume) and _agent_loop is not None:
             get_messages = getattr(_agent_loop, "get_session_messages", None)
             get_usage = getattr(_agent_loop, "get_token_usage", None)
             if get_messages:
-                history = get_messages(sid)
-                usage = get_usage(sid) if get_usage else 0
+                history: list[dict] = get_messages(sid)
+                usage: int = get_usage(sid) if get_usage else 0
                 await ws.send_text(
                     Message(
                         type=MessageType.SYSTEM,
@@ -358,16 +365,16 @@ async def ws_chat(ws: WebSocket) -> None:
                 )
 
         while True:
-            # NOTE: During evolution shutdown (exit -1) uvicorn cancels all
-            # pending handler tasks.  The asyncio.CancelledError that
-            # propagates from receive_text() here is harmless and expected
-            # — it is simply the gateway tearing down its event loop.
-            raw = await ws.receive_text()
+            # Note: 进化关闭（exit -1）期间，uvicorn 会取消所有待处理
+            # handler task。从 receive_text() 传播的 asyncio.CancelledError
+            # 是无害且预期的 — 仅表示 gateway 正在拆除其事件循环。
+            raw: str = await ws.receive_text()
 
-            # Parse incoming message
+            # 解析接收到的消息
+            msg: Message
             try:
                 msg = Message.from_json(raw)
-                msg.session_id = sid  # trust server, not client
+                msg.session_id = sid  # 信任 server 而非 client
             except (ValueError, KeyError) as exc:
                 await ws.send_text(
                     Message(
@@ -378,16 +385,17 @@ async def ws_chat(ws: WebSocket) -> None:
                 )
                 continue
 
-            # Route by type
+            # 按类型路由
             if msg.type == MessageType.USER_MESSAGE:
-                # Auto-generate title from first user message
-                session_info = sessions.get(sid)
+                # 从首条用户消息自动生成标题
+                session_info: dict | None = sessions.get(sid)
                 if session_info and not session_info.get("title") and msg.content:
-                    title = msg.content.strip()[:30]
+                    title: str = msg.content.strip()[:30]
                     if len(msg.content.strip()) > 30:
                         title += "..."
                     sessions.update_title(sid, title)
                 if _agent_loop is not None:
+                    reply: str
                     try:
                         reply = await _agent_loop.process_message(  # type: ignore[union-attr]
                             sid, msg.content or ""
@@ -402,7 +410,7 @@ async def ws_chat(ws: WebSocket) -> None:
                             content=reply,
                         ).to_json()
                     )
-                    # Send live token-usage update to frontend
+                    # 向前端发送实时 token 消耗更新
                     get_usage = getattr(_agent_loop, "get_token_usage", None)
                     if get_usage:
                         await ws.send_text(
@@ -412,13 +420,12 @@ async def ws_chat(ws: WebSocket) -> None:
                                 content=json.dumps({"token_usage": get_usage(sid)}),
                             ).to_json()
                         )
-                    # After sending the agent response, check whether a
-                    # code-evolution finalization was requested during this
-                    # turn and trigger a graceful shutdown if so.
+                    # 发送 agent 响应后，检查本回合是否请求了
+                    # 代码进化完成，若是则触发优雅关闭。
                     from main import trigger_evolution_shutdown
                     trigger_evolution_shutdown()
                 else:
-                    # LLM not configured — echo fallback
+                    # LLM 未配置 — echo 回退
                     await ws.send_text(
                         Message(
                             type=MessageType.AGENT_MESSAGE,
@@ -455,7 +462,7 @@ async def ws_chat(ws: WebSocket) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Minimal chat UI (inlined HTML — no static files needed)
+# 最小聊天界面（内联 HTML — 无需静态文件）
 # ---------------------------------------------------------------------------
 
 _CHAT_PAGE_HTML = """<!DOCTYPE html>
@@ -522,23 +529,23 @@ input.addEventListener('keydown', (e) => { if (e.key === 'Enter') send(); });
 </html>"""
 
 # ---------------------------------------------------------------------------
-# Server factory
+# Server 工厂
 # ---------------------------------------------------------------------------
 
 
 def create_server(host: str = "127.0.0.1", port: int = 8765) -> uvicorn.Server:
-    """Create a uvicorn Server instance.
+    """创建 uvicorn Server 实例。
 
-    *host* and *port* should come from the RuntimeContext, which itself
-    receives them via CLI args passed by the orchestrator (run.py).
+    *host* 和 *port* 应来自 RuntimeContext，
+    后者通过编排器（run.py）传递的 CLI 参数接收。
 
-    Does NOT start it — the caller should ``await server.serve()``
-    as an asyncio task.
+    不会启动 server — 调用方应 ``await server.serve()``
+    作为 asyncio task 运行。
     """
-    config = uvicorn.Config(
+    config: uvicorn.Config = uvicorn.Config(
         app=app,
         host=host,
         port=port,
-        log_level="warning",  # quiet uvicorn's own access logs
+        log_level="warning",  # 抑制 uvicorn 自身的访问日志
     )
     return uvicorn.Server(config)

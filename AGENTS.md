@@ -18,7 +18,7 @@ python run.py
 - 在 `origin_agent/frontend/` 目录下运行 `pnpm install`、`pnpm run dev`、`pnpm run build`
 - 将 `origin_agent/` 中任何路径作为 `sys.path` 或 `cwd` 来运行代码
 
-前端构建由 `origin_agent/__main__.py::_build_frontend()` 在第 3 方代码空间（`fast_agent_space/frontend/`）中自动完成。如需手动构建，先确定已复制到 `workspace/` 下再操作。
+前端构建由 `origin_agent/__main__.py::_build_frontend()` 在 fast_agent_space 中自动完成。如需手动构建，先确定已复制到 `workspace/` 下再操作。构建失败会返回 exit code 1，触发 fallback 模式。
 
 ## 铁律：永不修改 workspace 下的文件
 
@@ -67,8 +67,6 @@ third/                ← 供应商第三方模块（easysave, filesystem）
 
 工具在 `component/tools/*.py` 中通过 `registry.register()` **模块导入时**注册。修改工具注册需编辑对应文件。
 
-tools.allowlist 存储在 `.shell_allowlist.json`（位于仓库根，不在沙盒内），防止 agent 自提升权限。
-
 ## 模板系统
 
 System prompt 由 `system/prompt.py` 从 `templates/`（英文）或 `templates/zh/`（中文）拼接。检测到 `templates/zh/` 目录存在时默认用中文模板。层次：GENE > SOUL > base > modes/{fast,fallback} > tools > memory > skills。
@@ -83,9 +81,13 @@ System prompt 由 `system/prompt.py` 从 `templates/`（英文）或 `templates/
 
 在 `origin_agent/frontend/`（React + Vite + TypeScript）。使用 **pnpm**（不是 npm）。启动时自动执行 `pnpm install && pnpm run build`，产物打入 `frontend/dist/`。失败时 agent 不启动。
 
+Windows 上调用的是 `pnpm.cmd`。
+
 ## 杂项
 
 - Windows 平台 Python 命令为 `python`（非 `python3`），原生命令需 `cmd /c <cmd>`。
 - 历史消息持久化在 `workspace/logs/sessions/`（JSONL），会话元数据在 `_index.json`。
 - LLM API key 从 `OPENAI_API_KEY` 环境变量读取，**永远不可写入代码**。
-- 无 `pyproject.toml`。依赖仅有 `requirements.txt`：fastapi, uvicorn, websockets, openai, pydantic, tiktoken。
+- 无 `pyproject.toml`。依赖仅有 `requirements.txt`：fastapi, uvicorn, websockets, openai, pydantic, tiktoken, dirtyjson。
+- 进化状态日志写入 `workspace/logs/evolution.status`（JSON 数组，供前端展示）。
+- `config.py` 中 `fouce_init` 是故意拼写（非 `force_init`）。

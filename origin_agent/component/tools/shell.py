@@ -1,14 +1,14 @@
-"""Shell command tool — execute CLI commands with user consent.
+"""Shell 命令工具 — 经用户同意后执行 CLI 命令。
 
-Registered at module-import time via ``registry.register()``.
-The tool requires user confirmation for every command via a
-CONFIRM_REQUEST/CONFIRM_RESPONSE WebSocket handshake.
+模块导入时通过 ``registry.register()`` 注册。
+每个命令都需要通过 CONFIRM_REQUEST/CONFIRM_RESPONSE
+WebSocket 握手获得用户确认。
 
-Allowlist
-    Stores *complete* commands (e.g. "git log --oneline") in a
-    persistent JSON file under ``workspace/logs/shell_allowlist.json``.
-    Only exact matches skip the consent prompt.  The frontend offers
-    three actions: allow once / allow always / deny.
+允许列表
+    将*完整*命令（例如 "git log --oneline"）存储在
+    ``workspace/logs/shell_allowlist.json`` 持久化 JSON 文件中。
+    仅完全匹配的命令跳过确认提示。前端提供三种操作：
+    允许一次 / 始终允许 / 拒绝。
 """
 
 from __future__ import annotations
@@ -28,27 +28,28 @@ from system.sandbox import SandboxError
 
 logger = logging.getLogger(__name__)
 
-# Import the sandbox reference from the filesystem module.
+# 从 filesystem 模块导入 sandbox 引用。
 from .filesystem import _s as _get_sandbox
 
-# ── persistent allowlist ─────────────────────────────────────────────
-# Stored outside the workspace sandbox so the AI cannot self-escalate
-# by writing to this file via write_file (ws: namespace).
+# ── 持久化允许列表 ─────────────────────────────────────────────
+# 存储在 workspace sandbox 之外，使 AI 无法通过
+# write_file（ws: 命名空间）写入此文件来自我提权。
 
 from system.pathutils import find_repo_root
 
 
-_ALLOWLIST_PATH = find_repo_root() / ".shell_allowlist.json"
-# Built-in seed: these complete commands are always trusted without prompting.
+_ALLOWLIST_PATH: Path = find_repo_root() / ".shell_allowlist.json"
+# 内置种子：这些完整命令始终受信任，无需提示。
 _SEED_COMMANDS: Set[str] = {
     "dir", "ls", "echo .",
 }
 
 
 def _load_allowlist() -> Set[str]:
+    """从持久化文件加载允许列表。"""
     try:
         if _ALLOWLIST_PATH.exists():
-            data = json.loads(_ALLOWLIST_PATH.read_text(encoding="utf-8"))
+            data: list = json.loads(_ALLOWLIST_PATH.read_text(encoding="utf-8"))
             if isinstance(data, list):
                 return set(data) | _SEED_COMMANDS
     except Exception:
@@ -57,6 +58,7 @@ def _load_allowlist() -> Set[str]:
 
 
 def _save_allowlist(entries: Set[str]) -> None:
+    """将允许列表保存到持久化文件。"""
     try:
         _ALLOWLIST_PATH.parent.mkdir(parents=True, exist_ok=True)
         _ALLOWLIST_PATH.write_text(
@@ -71,22 +73,22 @@ def _s():
     return _get_sandbox()
 
 
-# ── confirmation helper ──────────────────────────────────────────────
+# ── 确认辅助函数 ──────────────────────────────────────────────
 
 async def _request_user_confirm(
     session_id: str, cmd_parts: List[str], reason: str,
 ) -> str:
-    """Send a CONFIRM_REQUEST to the frontend and wait for the action.
+    """向前端发送 CONFIRM_REQUEST 并等待操作结果。
 
-    Returns one of ``"allow_once"``, ``"allow_always"``, or ``"deny"``
-    (defaults to ``"deny"`` on timeout).
+    返回 ``"allow_once"``、``"allow_always"`` 或 ``"deny"``
+    （超时默认 ``"deny"``）。
     """
     from gateway.server import _tool_ws_sinks, _pending_confirms, _register_confirm_session
 
-    request_id = uuid.uuid4().hex[:8]
-    cmd_str = " ".join(cmd_parts)
+    request_id: str = uuid.uuid4().hex[:8]
+    cmd_str: str = " ".join(cmd_parts)
 
-    loop = asyncio.get_event_loop()
+    loop: asyncio.AbstractEventLoop = asyncio.get_event_loop()
     fut: asyncio.Future[str] = loop.create_future()
     _pending_confirms[request_id] = fut
     _register_confirm_session(request_id, session_id)
@@ -122,37 +124,38 @@ async def _request_user_confirm(
         return "deny"
 
 
-# ── tool handler ─────────────────────────────────────────────────────
+# ── 工具 handler ─────────────────────────────────────────────────────
 
 async def _handle_run_command(args: Dict[str, Any]) -> str:
-    """Run a shell command after allowlist + user consent checks.
+    """经过允许列表 + 用户确认检查后执行 shell 命令。
 
-    Expected args:
-        command: list[str] — command and arguments
-        reason:  str      — why the agent wants to run this
-        cwd:     str      — working directory (ws: namespace), optional
+    预期参数：
+        command: list[str] — 命令及参数
+        reason:  str      — agent 执行此命令的原因
+        cwd:     str      — 工作目录（ws: 命名空间），可选
     """
-    raw_cmd = args.get("command")
-    reason = str(args.get("reason", "(no reason given)")).strip()
-    cwd = str(args.get("cwd", "ws:")).strip()
-    session_id = str(args.get("_session_id", ""))
+    raw_cmd: Any = args.get("command")
+    reason: str = str(args.get("reason", "(no reason given)")).strip()
+    cwd: str = str(args.get("cwd", "ws:")).strip()
+    session_id: str = str(args.get("_session_id", ""))
 
-    # ── validate command ──
+    # ── 验证命令 ──
     if not raw_cmd or not isinstance(raw_cmd, list):
         return tool_error("'command' must be a non-empty list of strings")
     cmd_parts: List[str] = [str(p) for p in raw_cmd]
     if not cmd_parts:
         return tool_error("'command' must be a non-empty list")
 
-    cmd_full = " ".join(cmd_parts)
+    cmd_full: str = " ".join(cmd_parts)
 
-    # ── allowlist check (exact full-command match) ──
-    allowlist = _load_allowlist()
+    # ── 允许列表检查（完整命令精确匹配）──
+    allowlist: Set[str] = _load_allowlist()
     if cmd_full in allowlist:
-        # Already trusted — skip confirmation
+        # 已受信任 — 跳过确认
         return _execute(cmd_parts, cwd)
 
-    # ── user confirmation ──
+    # ── 用户确认 ──
+    action: str
     if session_id:
         action = await _request_user_confirm(session_id, cmd_parts, reason)
     else:
@@ -170,16 +173,18 @@ async def _handle_run_command(args: Dict[str, Any]) -> str:
         _save_allowlist(allowlist)
         logger.info("Added to allowlist: %s", cmd_full)
 
-    # action is allow_once or allow_always — execute
+    # action 为 allow_once 或 allow_always — 执行
     return _execute(cmd_parts, cwd)
 
 
 def _execute(cmd_parts: List[str], cwd: str) -> str:
-    """Execute a trusted / approved command and return the result."""
+    """执行已受信任 / 已批准的命令并返回结果。"""
     # if cmd_parts and cmd_parts[0] not in _s().allowed_commands:
     #     return tool_error(f"Command '{cmd_parts[0]}' not in the allowed list")
 
     logger.info("run_command | cwd=%s cmd=%s", cwd, cmd_parts)
+    _enc: str
+    result: subprocess.CompletedProcess
     try:
         _enc = locale.getpreferredencoding(False) or sys.getfilesystemencoding() or "utf-8"
         result = _s().run(cmd_parts, cwd_ns=cwd, timeout=30, encoding=_enc, errors="replace")
@@ -198,20 +203,19 @@ def _execute(cmd_parts: List[str], cwd: str) -> str:
     )
 
 
-# ── registration ─────────────────────────────────────────────────────
+# ── 注册 ─────────────────────────────────────────────────────
 
 registry.register(
     name="run_command",
     toolset="shell",
     schema={
         "description": (
-            "Execute a shell command in the workspace.  "
-            "The user will be prompted to approve (allow once), "
-            "trust permanently (allow always), or deny the command.  "
-            "Commands previously allowed with 'allow always' skip the "
-            "prompt.  Always include a 'reason' explaining what the "
-            "command does.  "
-            "Use this to install packages, run tests, or inspect files."
+            "在 workspace 中执行 shell 命令。"
+            "用户将被提示批准（允许一次）、"
+            "永久信任（始终允许）或拒绝该命令。"
+            "之前以'始终允许'批准的命令跳过提示。"
+            "始终包含 'reason' 解释命令的用途。"
+            "用于安装软件包、运行测试或检查文件。"
         ),
         "parameters": {
             "type": "object",
@@ -219,15 +223,15 @@ registry.register(
                 "command": {
                     "type": "array",
                     "items": {"type": "string"},
-                    "description": "Command and arguments as a list, e.g. ['pip', 'install', 'requests'].",
+                    "description": "命令及参数列表，例如 ['pip', 'install', 'requests']。",
                 },
                 "reason": {
                     "type": "string",
-                    "description": "Why the agent needs to run this command.",
+                    "description": "agent 需要执行此命令的原因。",
                 },
                 "cwd": {
                     "type": "string",
-                    "description": "Working directory (ws: namespace, default 'ws:').",
+                    "description": "工作目录（ws: 命名空间，默认 'ws:'）。",
                     "default": "ws:",
                 },
             },

@@ -1,6 +1,6 @@
-"""Hermes Memory — pluggable memory provider system.
+"""抽象 Memory — 可插拔 memory provider 系统。
 
-No external dependencies beyond the MemoryProvider ABC.
+除 MemoryProvider ABC 外无外部依赖。
 """
 
 from .provider import MemoryProvider

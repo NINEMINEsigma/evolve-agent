@@ -1,8 +1,7 @@
-"""Code introspection and evolution tools.
+"""代码自省和进化工具。
 
-All paths are logical (prefixed with namespace), resolved through
-the shared Sandbox.  These tools let the agent read its own source,
-write evolved code, and validate changes.
+所有路径均为逻辑路径（带命名空间前缀），通过共享 Sandbox 解析。
+这些工具让 agent 能够读取自身源码、写入进化代码并验证变更。
 """
 
 from __future__ import annotations
@@ -18,13 +17,13 @@ from system.sandbox import Access, SandboxError
 
 logger = logging.getLogger(__name__)
 
-# Import the sandbox reference from the filesystem module's setter
-# (it's the same singleton — main.py sets it once for all tools).
+# 从 filesystem 模块导入 sandbox 引用
+# （同一个单例 — main.py 为所有工具设置一次）。
 from .filesystem import _s as _get_sandbox
 
 
 # ---------------------------------------------------------------------------
-# Helpers
+# 辅助函数
 # ---------------------------------------------------------------------------
 
 
@@ -33,66 +32,67 @@ def _s():
 
 
 def _resolve_sandboxed_path(path: str, mode: str) -> str:
-    # NOTE: Legacy helper — not currently used by any handler.
-    # Handlers inline their own path resolution through the sandbox.
-    """Resolve a logical path to an absolute path via the sandbox.
+    # Note: 遗留辅助函数 — 当前无 handler 使用。
+    # Handler 通过 sandbox 内联自己的路径解析。
+    """通过 sandbox 将逻辑路径解析为绝对路径。
 
-    Special case: bare filenames without namespace prefix are treated
-    as relative to ``self:`` (for read_own_source / write_fork).
+    特殊情况：无命名空间前缀的裸文件名视为
+    相对于 ``self:``（用于 read_own_source / write_fork）。
     """
     if ":" not in path:
-        # Bare filename — resolve relative to self: for read, fork: for write
+        # 裸文件名 — 读取时相对于 self:，写入时相对于 fork:
         return str(_s().resolve(f"{'fork' if mode == 'write' else 'self'}:{path}",
                                 "write" if mode == "write" else "read").real)
     raise SandboxError("Use bare filenames (e.g. 'main.py') for code tools")
 
 
 # ---------------------------------------------------------------------------
-# Tool handlers
+# 工具 handler
 # ---------------------------------------------------------------------------
 
 
 def _handle_read_own_source(args: Dict[str, Any]) -> str:
-    """Read a file from the agent's own source directory (self: namespace).
+    """从 agent 自身源码目录（self: 命名空间）读取文件。
 
-    Accepts bare filenames (e.g. 'main.py') which resolve to self:, or
-    full logical paths.  Only readable namespaces are allowed.
+    接受裸文件名（如 'main.py'，解析到 self:）或完整逻辑路径。
+    仅允许可读命名空间。
 
-    Supports line-based pagination via offset and limit.
-    Pass limit=0 to read the entire file.
+    支持通过 offset 和 limit 进行按行分页。
+    limit=0 表示读取完整文件。
     """
-    path = str(args.get("file", args.get("path", ""))).strip()
+    path: str = str(args.get("file", args.get("path", ""))).strip()
     if not path:
-        # Return a directory listing so the agent can discover what's available
+        # 返回目录列表，使 agent 能发现可用文件
         try:
-            entries = _s().list_dir("self:")
+            entries: list[str] = _s().list_dir("self:")
             return tool_result(entries=entries, tip="Use read_own_source with file=<name>")
         except SandboxError as exc:
             return tool_error(str(exc))
 
-    offset = int(args.get("offset", 0))
-    limit = int(args.get("limit", 0))
+    offset: int = int(args.get("offset", 0))
+    limit: int = int(args.get("limit", 0))
     if offset < 0:
         return tool_error("offset must be >= 0", path=path, offset=offset)
     if limit < 0:
         return tool_error("limit must be >= 0", path=path, limit=limit)
 
+    resolved: Any
     try:
         if ":" in path:
-            # Explicit logical path — must be readable
+            # 显式逻辑路径 — 必须可读
             resolved = _s().resolve(path, Access.READ)
         else:
-            # Bare filename — resolve relative to self:
+            # 裸文件名 — 相对于 self: 解析
             resolved = _s().resolve(f"self:{path}", Access.READ)
         if resolved.real.is_dir():
             return tool_result(
                 entries=_s().list_dir(f"self:{path}" if ":" not in path else path),
                 tip="Use read_own_source with file=<name> to read a specific file",
             )
-        content = resolved.real.read_text(encoding="utf-8")
+        content: str = resolved.real.read_text(encoding="utf-8")
         if limit > 0 or offset > 0:
-            lines = content.splitlines()
-            chunk = lines[offset:offset + limit] if limit > 0 else lines[offset:]
+            lines: list[str] = content.splitlines()
+            chunk: list[str] = lines[offset:offset + limit] if limit > 0 else lines[offset:]
             content = "\n".join(chunk)
         return tool_result(content=content, path=path, offset=offset, limit=limit)
     except (SandboxError, FileNotFoundError, IsADirectoryError, PermissionError) as exc:
@@ -100,40 +100,41 @@ def _handle_read_own_source(args: Dict[str, Any]) -> str:
 
 
 def _handle_write_fork(args: Dict[str, Any]) -> str:
-    """Write a file to the evolution target directory (fork: namespace).
+    """将文件写入进化目标目录（fork: 命名空间）。
 
-    Only allowed in 'fast' mode.  Accepts bare filenames or logical paths.
+    仅在 'fast' 模式下允许。接受裸文件名或逻辑路径。
 
-    Supports two modes:
-      - Full overwrite: provide file + content (the default).
-      - Incremental edit: provide file + old_string + new_string.
-        The old_string must match exactly once in the existing file.
+    支持两种模式：
+      - 完全覆盖：提供 file + content（默认）。
+      - 增量编辑：提供 file + old_string + new_string。
+        old_string 必须在现有文件中精确匹配一次。
     """
-    path = str(args.get("file", args.get("path", ""))).strip()
-    content = str(args.get("content", ""))
-    old_string = str(args.get("old_string", ""))
-    new_string = str(args.get("new_string", "")) if "new_string" in args else None
+    path: str = str(args.get("file", args.get("path", ""))).strip()
+    content: str = str(args.get("content", ""))
+    old_string: str = str(args.get("old_string", ""))
+    new_string: str | None = str(args.get("new_string", "")) if "new_string" in args else None
 
     if not path:
         return tool_error("file is required")
 
-    # ---- incremental edit mode ----
+    # ---- 增量编辑模式 ----
     if old_string:
         if new_string is None:
             return tool_error("new_string is required when old_string is provided")
         try:
+            resolved: Any
             if ":" in path:
                 resolved = _s().resolve(path, Access.READ)
             else:
                 resolved = _s().resolve(f"fork:{path}", Access.READ)
-            existing = resolved.real.read_text(encoding="utf-8")
+            existing: str = resolved.real.read_text(encoding="utf-8")
         except (SandboxError, FileNotFoundError) as exc:
             return tool_error(str(exc), path=path)
 
         if old_string not in existing:
             return tool_error("old_string not found in file", path=path)
 
-        count = existing.count(old_string)
+        count: int = existing.count(old_string)
         if count > 1:
             return tool_error(
                 f"old_string matches {count} locations. Use more surrounding "
@@ -143,11 +144,12 @@ def _handle_write_fork(args: Dict[str, Any]) -> str:
 
         content = existing.replace(old_string, new_string, 1)
 
-    # ---- full overwrite mode ----
+    # ---- 完全覆盖模式 ----
     elif not content:
         return tool_error("content is required when old_string is not provided")
 
     try:
+        resolved: Any
         if ":" in path:
             resolved = _s().resolve(path, Access.WRITE)
         else:
@@ -160,22 +162,23 @@ def _handle_write_fork(args: Dict[str, Any]) -> str:
 
 
 def _handle_validate_code(args: Dict[str, Any]) -> str:
-    """Validate Python code for syntax errors.
+    """验证 Python 代码的语法错误。
 
-    *file* — bare filename or logical path to validate.
-    If no file specified, validates all .py files in the fork: namespace.
+    *file* — 要验证的裸文件名或逻辑路径。
+    未指定文件时验证 fork: 命名空间中所有 .py 文件。
     """
-    path = str(args.get("file", "")).strip()
+    path: str = str(args.get("file", "")).strip()
     results: List[Dict[str, Any]] = []
 
     if path:
-        # Validate single file
+        # 验证单个文件
+        resolved: Any
         try:
             if ":" in path:
                 resolved = _s().resolve(path, Access.READ)
             else:
                 resolved = _s().resolve(f"fork:{path}", Access.READ)
-            source = resolved.real.read_text(encoding="utf-8")
+            source: str = resolved.real.read_text(encoding="utf-8")
             ast.parse(source, filename=str(resolved.real))
             results.append({"file": path, "status": "ok"})
         except SyntaxError as exc:
@@ -189,9 +192,9 @@ def _handle_validate_code(args: Dict[str, Any]) -> str:
         except (SandboxError, FileNotFoundError) as exc:
             results.append({"file": path, "status": "error", "message": str(exc)})
     else:
-        # Validate all .py files in fork:
+        # 验证 fork: 中所有 .py 文件
         try:
-            entries = _s().list_dir("fork:")
+            entries: list[str] = _s().list_dir("fork:")
             for entry in entries:
                 if not entry.endswith(".py"):
                     continue
@@ -213,24 +216,23 @@ def _handle_validate_code(args: Dict[str, Any]) -> str:
         except SandboxError as exc:
             return tool_error(str(exc))
 
-    ok = all(r.get("status") == "ok" for r in results)
+    ok: bool = all(r.get("status") == "ok" for r in results)
     return tool_result(valid=ok, results=results)
 
 
 def _handle_evolve_code(args: Dict[str, Any]) -> str:
-    """Finalize code evolution: validate fork then trigger the hot swap.
+    """完成代码进化：验证 fork 然后触发热替换。
 
-    After the agent has written evolved code to fork: via write_fork
-    and checked syntax via validate_code, call this tool to run a
-    thorough validation (syntax + compile check) and, if everything
-    passes, signal the orchestrator to swap slow→fast.
+    agent 通过 write_fork 将进化代码写入 fork: 并通过 validate_code
+    检查语法后，调用此工具运行彻底验证（语法 + 编译检查），
+    如果全部通过则通知编排器执行 slow→fast 交换。
 
-    Only works in 'fast' mode.  In 'fallback' mode, returns an error.
+    仅在 'fast' 模式下工作。在 'fallback' 模式下返回错误。
     """
     from evolve.code import finalize_evolution
 
-    deep = bool(args.get("deep", True))
-    compile_timeout = int(args.get("compile_timeout", 30))
+    deep: bool = bool(args.get("deep", True))
+    compile_timeout: int = int(args.get("compile_timeout", 30))
 
     try:
         return finalize_evolution(
@@ -243,44 +245,14 @@ def _handle_evolve_code(args: Dict[str, Any]) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Registration
+# 注册
 # ---------------------------------------------------------------------------
 
-'''
+'''read_own_source 已禁用，agent 通过 read_file 读取自身源码。
 registry.register(
     name="read_own_source",
     toolset="code",
-    schema={
-        "description": (
-            "Read a file from the agent's own source code (self: namespace).  "
-            "Use this to inspect your own implementation.  Pass a bare "
-            "filename like 'main.py' or 'entry/agent.py'.  "
-            "With no arguments, lists available files.\n\n"
-            "Supports line-based pagination via offset and limit.  "
-            "Pass limit=0 (default) to read the entire file."
-        ),
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "file": {
-                    "type": "string",
-                    "description": "Filename to read (e.g. 'main.py', 'component/llm.py').",
-                },
-                "offset": {
-                    "type": "integer",
-                    "description": "0-indexed line number to start from (default 0).",
-                    "default": 0,
-                    "minimum": 0,
-                },
-                "limit": {
-                    "type": "integer",
-                    "description": "Maximum lines to return.  Pass 0 to read the whole file (default 0).",
-                    "default": 0,
-                    "minimum": 0,
-                },
-            },
-        },
-    },
+    schema={ ... },
     handler=_handle_read_own_source,
     emoji="🔬",
 )
@@ -291,34 +263,34 @@ registry.register(
     toolset="code",
     schema={
         "description": (
-            "Write an evolved version of a source file to the fork (slow) "
-            "directory.  After writing all changes, call validate_code to "
-            "check syntax, then call evolve_code to trigger the swap.  "
-            "Accepts bare filenames (e.g. 'main.py').\n\n"
-            "Two modes:\n"
-            "- Full overwrite: pass file + content.\n"
-            "- Incremental edit: pass file + old_string + new_string.  "
-            "The old_string must match exactly once — include enough "
-            "surrounding context (2-3 lines) to make it unique."
+            "将源代码的进化版本写入 fork（slow）目录。"
+            "写入所有更改后，调用 validate_code 检查语法，"
+            "然后调用 evolve_code 触发交换。"
+            "接受裸文件名（如 'main.py'）。\n\n"
+            "两种模式：\n"
+            "- 完全覆盖：传递 file + content。\n"
+            "- 增量编辑：传递 file + old_string + new_string。"
+            "old_string 必须精确匹配一次 — 包含足够的上下文"
+            "（前后各 2-3 行）使其唯一。"
         ),
         "parameters": {
             "type": "object",
             "properties": {
                 "file": {
                     "type": "string",
-                    "description": "Target filename (e.g. 'main.py').",
+                    "description": "目标文件名（如 'main.py'）。",
                 },
                 "content": {
                     "type": "string",
-                    "description": "The new source code content (required for full overwrite).",
+                    "description": "新的源码内容（完全覆盖模式必填）。",
                 },
                 "old_string": {
                     "type": "string",
-                    "description": "Exact text to find and replace (enables incremental edit mode).",
+                    "description": "要查找替换的精确文本（启用增量编辑模式）。",
                 },
                 "new_string": {
                     "type": "string",
-                    "description": "Replacement text. Use empty string to delete old_string.",
+                    "description": "替换文本。使用空字符串删除 old_string。",
                 },
             },
             "required": ["file"],
@@ -334,17 +306,16 @@ registry.register(
     toolset="code",
     schema={
         "description": (
-            "Check Python source files for syntax errors using ast.parse().  "
-            "If a filename is given, validates that file.  Otherwise "
-            "validates all .py files in the fork: namespace.  "
-            "Call this after writing evolved code."
+            "使用 ast.parse() 检查 Python 源文件的语法错误。"
+            "给定文件名时验证该文件。否则验证 fork: 命名空间中"
+            "所有 .py 文件。在写入进化代码后调用。"
         ),
         "parameters": {
             "type": "object",
             "properties": {
                 "file": {
                     "type": "string",
-                    "description": "Optional: specific file to validate.",
+                    "description": "可选：要验证的特定文件。",
                 },
             },
         },
@@ -359,30 +330,26 @@ registry.register(
     toolset="code",
     schema={
         "description": (
-            "Finalize the code evolution cycle.  Call this after you have "
-            "written evolved source files to fork: via write_fork and "
-            "verified syntax via validate_code (and validate_frontend if "
-            "you modified any frontend files).  This tool runs a thorough "
-            "validation (syntax + compile check) on all **.py files** in the "
-            "fork directory.  It does NOT validate TypeScript or frontend "
-            "builds — you must call validate_frontend beforehand if you "
-            "touched frontend code.  If everything passes, the process exits "
-            "and the orchestrator swaps the slow (evolved) code into place, "
-            "then restarts the agent with the new version.  "
-            "If validation fails, returns error details so you can fix "
-            "the issues and retry.  "
-            "Set deep=false to skip compile checks (faster but less thorough)."
+            "完成代码进化周期。在通过 write_fork 将进化源码写入 fork: 并"
+            "通过 validate_code 验证语法（如果修改了前端文件还需通过"
+            " validate_frontend）之后调用此工具。此工具对 fork 目录中"
+            "所有 **.py 文件** 运行彻底验证（语法 + 编译检查）。"
+            "不会验证 TypeScript 或前端构建 — 如果触碰到前端代码，"
+            "必须预先调用 validate_frontend。如果全部通过，进程退出，"
+            "编排器将 slow（进化后）代码交换到位，然后用新版本重启 agent。"
+            "如果验证失败，返回错误详情以便修复问题后重试。"
+            "设置 deep=false 跳过编译检查（更快但不彻底）。"
         ),
         "parameters": {
             "type": "object",
             "properties": {
                 "deep": {
                     "type": "boolean",
-                    "description": "Whether to run py_compile checks (default true).",
+                    "description": "是否运行 py_compile 检查（默认 true）。",
                 },
                 "compile_timeout": {
                     "type": "integer",
-                    "description": "Per-file timeout in seconds for compile checks (default 30).",
+                    "description": "每个文件编译检查的超时秒数（默认 30）。",
                 },
             },
         },

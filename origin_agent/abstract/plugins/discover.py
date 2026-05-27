@@ -1,15 +1,13 @@
-"""
-Directory-based plugin discovery system.
+"""基于目录的插件发现系统。
 
-Pure Python stdlib — no external dependencies.
+纯 Python stdlib — 无外部依赖。
 
-Scans directories for plugin subdirectories, detects plugin types by
-heuristic source analysis, reads plugin.yaml metadata, and handles
-name deduplication (first directory wins on collision).
+扫描目录查找插件子目录，通过启发式源码分析检测插件类型，
+读取 plugin.yaml 元数据，处理名称去重（冲突时第一个目录获胜）。
 
-Usage::
+用法::
 
-    from hermes_plugins.discover import scan_plugins, is_plugin_dir, \
+    from abstract.plugins.discover import scan_plugins, is_plugin_dir, \
         detect_plugin_type, read_plugin_metadata
 
     plugins = scan_plugins("/path/to/plugins", "/other/plugin/dir")
@@ -26,47 +24,46 @@ from typing import Dict, List, Optional
 
 
 # ---------------------------------------------------------------------------
-# Core functions
+# 核心函数
 # ---------------------------------------------------------------------------
 
-
 def scan_plugins(*scan_dirs: str) -> List[Dict]:
-    """Scan one or more directories for plugin subdirectories.
+    """扫描一个或多个目录查找插件子目录。
 
-    Each subdirectory containing ``__init__.py`` is considered a candidate.
-    On name collisions (same directory name in multiple scan directories),
-    the first occurrence wins.
+    每个包含 ``__init__.py`` 的子目录视为候选。
+    名称冲突时（多个扫描目录中出现相同目录名），
+    最先出现的获胜。
 
-    Returns
+    返回
     -------
     list of dict
-        Each dict has keys ``name``, ``path``, ``type``, ``metadata``.
+        每个 dict 包含键 ``name``、``path``、``type``、``metadata``。
     """
     seen: Dict[str, Dict] = {}
 
     for scan_dir in scan_dirs:
-        scan_path = Path(scan_dir)
+        scan_path: Path = Path(scan_dir)
         if not scan_path.is_dir():
             continue
 
         for child in sorted(scan_path.iterdir()):
             if not child.is_dir():
                 continue
-            name = child.name
+            name: str = child.name
 
-            # Skip hidden directories and Python package directories
+            # 跳过隐藏目录和 Python 包目录
             if name.startswith("__") or name.startswith("."):
                 continue
 
             if not is_plugin_dir(str(child)):
                 continue
 
-            # First directory wins on name collision
+            # 名称冲突时第一个目录获胜
             if name in seen:
                 continue
 
-            plugin_type = detect_plugin_type(str(child))
-            metadata = read_plugin_metadata(str(child))
+            plugin_type: str = detect_plugin_type(str(child))
+            metadata: dict = read_plugin_metadata(str(child))
 
             seen[name] = {
                 "name": name,
@@ -79,42 +76,43 @@ def scan_plugins(*scan_dirs: str) -> List[Dict]:
 
 
 def is_plugin_dir(plugin_dir: str) -> bool:
-    """Check if a directory looks like a plugin.
+    """检查目录是否看起来像插件。
 
-    A valid plugin directory must contain ``__init__.py`` with non-trivial
-    content (not just a docstring or blank).
+    有效的插件目录必须包含带有非平凡内容
+    （不仅仅是 docstring 或空白）的 ``__init__.py``。
 
-    Parameters
+    参数
     ----------
     plugin_dir : str
-        Path to the candidate plugin directory.
+        候选插件目录的路径。
 
-    Returns
+    返回
     -------
     bool
-        ``True`` if the directory has ``__init__.py`` with real code.
+        如果目录有包含真实代码的 ``__init__.py`` 则返回 ``True``。
     """
-    init_file = Path(plugin_dir) / "__init__.py"
+    init_file: Path = Path(plugin_dir) / "__init__.py"
     if not init_file.is_file():
         return False
 
-    # Require at least one line of non-comment, non-blank, non-docstring code
+    # 要求至少一行非注释、非空白、非 docstring 的代码
+    text: str
     try:
         text = init_file.read_text(encoding="utf-8", errors="replace")
     except (OSError, UnicodeDecodeError):
         return False
 
     for line in text.splitlines():
-        stripped = line.strip()
+        stripped: str = line.strip()
         if not stripped:
             continue
-        # Skip comment-only lines
+        # 跳过纯注释行
         if stripped.startswith("#"):
             continue
-        # Skip triple-quoted docstrings (opening or closing)
+        # 跳过三引号 docstring（开头或结尾）
         if stripped.startswith('"""') or stripped.startswith("'''"):
             continue
-        # Skip the ``from __future__`` import (boilerplate)
+        # 跳过 ``from __future__`` 导入（样板代码）
         if stripped.startswith("from __future__"):
             continue
         return True
@@ -123,41 +121,42 @@ def is_plugin_dir(plugin_dir: str) -> bool:
 
 
 def detect_plugin_type(plugin_dir: str) -> str:
-    """Heuristically determine the plugin type by scanning source code.
+    """通过扫描源码启发式确定插件类型。
 
-    Reads ``__init__.py`` in the given directory and looks for class
-    definition patterns.  Types are returned in priority order:
+    读取指定目录中的 ``__init__.py``，查找类定义模式。
+    类型按优先级返回：
 
-    * ``"memory"`` — if source references ``MemoryProvider``
-    * ``"context_engine"`` — if source references ``ContextEngine``
-    * ``"model_provider"`` — if source references ``ModelProvider``
-    * ``"tool_provider"`` — if source references ``ToolProvider``
-    * ``"plugin"`` — if source references ``Plugin``
-    * ``"register"`` — if source defines a ``register()`` function
-    * ``"image_gen"`` — if source references ``ImageGenProvider``
-    * ``"unknown"`` — none of the above matched
+    * ``"memory"`` — 如果源码引用 ``MemoryProvider``
+    * ``"context_engine"`` — 如果源码引用 ``ContextEngine``
+    * ``"model_provider"`` — 如果源码引用 ``ModelProvider``
+    * ``"tool_provider"`` — 如果源码引用 ``ToolProvider``
+    * ``"plugin"`` — 如果源码引用 ``Plugin``
+    * ``"register"`` — 如果源码定义 ``register()`` 函数
+    * ``"image_gen"`` — 如果源码引用 ``ImageGenProvider``
+    * ``"unknown"`` — 以上均未匹配
 
-    Parameters
+    参数
     ----------
     plugin_dir : str
-        Path to the plugin directory containing ``__init__.py``.
+        包含 ``__init__.py`` 的插件目录路径。
 
-    Returns
+    返回
     -------
     str
-        One of the type strings listed above.
+        上述类型字符串之一。
     """
-    init_file = Path(plugin_dir) / "__init__.py"
+    init_file: Path = Path(plugin_dir) / "__init__.py"
     if not init_file.is_file():
         return "unknown"
 
+    source: str
     try:
         source = init_file.read_text(encoding="utf-8", errors="replace")
     except (OSError, UnicodeDecodeError):
         return "unknown"
 
-    # Ordered by specificity — check more specific before general "Plugin"
-    patterns = [
+    # 按特异性排序 — 先检查更具体的再检查通用的 "Plugin"
+    patterns: list[tuple[str, str]] = [
         (r"\bMemoryProvider\b", "memory"),
         (r"\bContextEngine\b", "context_engine"),
         (r"\bModelProvider\b", "model_provider"),
@@ -177,71 +176,72 @@ def detect_plugin_type(plugin_dir: str) -> str:
 
 
 def read_plugin_metadata(plugin_dir: str) -> dict:
-    """Read ``plugin.yaml`` metadata from a plugin directory.
+    """从插件目录读取 ``plugin.yaml`` 元数据。
 
-    Since this module uses only the Python stdlib (no PyYAML dependency),
-    ``plugin.yaml`` is parsed with a simple line-based reader that handles
-    the key ``: value`` format commonly used in plugin manifests.  Nested
-    YAML structures (lists, dicts) are **not** parsed — they are stored as
-    raw text strings.
+    由于此模块仅使用 Python stdlib（无 PyYAML 依赖），
+    ``plugin.yaml`` 使用简单的基于行的读取器解析，
+    处理插件清单中常用的 ``key: value`` 格式。
+    嵌套 YAML 结构（列表、字典）**不会**被解析 — 它们存储为
+    原始文本字符串。
 
-    Returns an empty dict if the file does not exist or cannot be parsed.
+    如果文件不存在或无法解析则返回空字典。
 
-    Parameters
+    参数
     ----------
     plugin_dir : str
-        Path to the plugin directory.
+        插件目录路径。
 
-    Returns
+    返回
     -------
     dict
-        Parsed metadata or ``{}``.
+        解析后的元数据或 ``{}``。
     """
-    yaml_file = Path(plugin_dir) / "plugin.yaml"
+    yaml_file: Path = Path(plugin_dir) / "plugin.yaml"
     if not yaml_file.is_file():
         return {}
 
+    text: str
     try:
         text = yaml_file.read_text(encoding="utf-8-sig", errors="replace")
     except (OSError, UnicodeDecodeError):
         return {}
 
     metadata: Dict = {}
-    lines = text.splitlines()
-    i = 0
-    n = len(lines)
+    lines: list[str] = text.splitlines()
+    i: int = 0
+    n: int = len(lines)
 
     while i < n:
-        line = lines[i]
-        stripped = line.strip()
+        line: str = lines[i]
+        stripped: str = line.strip()
 
-        # Skip blank and comment lines
+        # 跳过空白和注释行
         if not stripped or stripped.startswith("#"):
             i += 1
             continue
 
-        # Match key: value or key:
-        match = re.match(r"^(\S[^:]*?):\s*(.*)", stripped)
+        # 匹配 key: value 或 key:
+        match: re.Match | None = re.match(r"^(\S[^:]*?):\s*(.*)", stripped)
         if not match:
             i += 1
             continue
 
-        key = match.group(1).strip()
-        value = match.group(2).strip()
+        key: str = match.group(1).strip()
+        value: str = match.group(2).strip()
 
-        # If the value is empty, it might be the start of a multi-line
-        # block (list item with leading dash or plain continuation).
+        # 如果值为空，可能是多行块的开始
+        # （以短横线开头的列表项或普通续行）。
         if value == "":
-            # Collect continuation lines (indented relative to this key)
+            # 收集续行（相对于此键缩进）
             continuation: List[str] = []
-            j = i + 1
-            base_indent = len(line) - len(line.lstrip())
+            j: int = i + 1
+            base_indent: int = len(line) - len(line.lstrip())
             while j < n:
-                next_line = lines[j]
+                next_line: str = lines[j]
                 if not next_line.strip():
                     j += 1
                     continue
-                next_indent = len(next_line) - len(next_line.lstrip())
+                next_indent: int = len(next_line) - len(next_line.lstrip())
                 if next_indent <= base_indent:
                     break
                 continuation.append(next_line)
@@ -250,7 +250,7 @@ def read_plugin_metadata(plugin_dir: str) -> dict:
                 value = "\n".join(line.rstrip() for line in continuation)
             i = j
         else:
-            # Try to collect continuation for values that start a list
+            # 尝试收集以列表开头的值的续行
             if value == "-" and i + 1 < n:
                 continuation = []
                 j = i + 1
@@ -271,45 +271,44 @@ def read_plugin_metadata(plugin_dir: str) -> dict:
             else:
                 i += 1
 
-        # Store simple scalar values
+        # 存储简单标量值
         metadata[key] = _coerce_yaml_scalar(value)
 
     return metadata
 
 
 # ---------------------------------------------------------------------------
-# Internal helpers
+# 内部辅助函数
 # ---------------------------------------------------------------------------
 
-
 def _coerce_yaml_scalar(value: str):
-    """Coerce a YAML scalar string to the proper Python type.
+    """将 YAML 标量字符串强制转换为适当的 Python 类型。
 
-    * Quoted strings are returned as-is (quotes stripped).
-    * ``true``/``false`` (case-insensitive) → ``True``/``False``.
-    * Numeric strings → ``int`` or ``float``.
-    * ``null``/``~`` → ``None``.
-    * Everything else returned as a stripped string.
+    * 带引号的字符串原样返回（剥去引号）。
+    * ``true``/``false``（大小写不敏感）→ ``True``/``False``。
+    * 数字字符串 → ``int`` 或 ``float``。
+    * ``null``/``~`` → ``None``。
+    * 其他所有情况返回去空白的字符串。
     """
-    v = value.strip()
+    v: str = value.strip()
 
-    # Handle quoted strings
+    # 处理带引号的字符串
     if (v.startswith('"') and v.endswith('"')) or (
         v.startswith("'") and v.endswith("'")
     ):
         return v[1:-1]
 
-    # Handle null
+    # 处理 null
     if v.lower() in ("null", "~"):
         return None
 
-    # Handle booleans
+    # 处理布尔值
     if v.lower() == "true":
         return True
     if v.lower() == "false":
         return False
 
-    # Handle numbers
+    # 处理数字
     try:
         if "." in v or "e" in v.lower():
             return float(v)

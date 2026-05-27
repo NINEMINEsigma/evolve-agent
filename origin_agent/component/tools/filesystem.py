@@ -1,16 +1,15 @@
-"""File-system tools — all paths are logical (prefixed with namespace).
+"""文件系统工具 — 所有路径均为逻辑路径（带命名空间前缀）。
 
-Registered at module-import time via ``registry.register()``.
-Every tool handler resolves paths through the shared ``Sandbox`` instance
-(set by ``set_sandbox()`` from ``main.py`` before the agent loop starts).
+模块导入时通过 ``registry.register()`` 注册。
+每个工具 handler 通过共享的 ``Sandbox`` 实例解析路径
+（由 ``main.py`` 在 agent 循环启动前通过 ``set_sandbox()`` 设置）。
 
-Path format: ``namespace:relative/path``
-  - ``fork:``  read+write (evolved code destination)
-  - ``ws:``    read+write (general agent workspace)
-  - ``fix:``   read+write (repair target, fallback mode only)
+路径格式：``namespace:relative/path``
+  - ``fork:``  读写（进化代码目标）
+  - ``ws:``    读写（通用 agent 工作空间）
+  - ``fix:``   读写（修复目标，仅 fallback 模式）
 
-There is no ``self:`` namespace — the agent cannot read or mutate its
-own runtime copy.
+不存在 ``self:`` 命名空间 — agent 不能读取或修改自身的运行时副本。
 """
 
 from __future__ import annotations
@@ -24,7 +23,7 @@ from system.sandbox import Access, Sandbox, SandboxError
 
 logger = logging.getLogger(__name__)
 
-# Populated by main.py before the agent loop starts.
+# 由 main.py 在 agent 循环启动前填充。
 _sandbox: Sandbox | None = None
 
 
@@ -40,16 +39,15 @@ def _s() -> Sandbox:
 
 
 # ---------------------------------------------------------------------------
-# Tool handlers
+# 工具 handler
 # ---------------------------------------------------------------------------
 
-
 def _handle_read(args: Dict[str, Any]) -> str:
-    path = str(args.get("path", "")).strip()
+    path: str = str(args.get("path", "")).strip()
     if not path:
         return tool_error("path is required", path=path)
-    offset = int(args.get("offset", 0))
-    limit = int(args.get("limit", 100))
+    offset: int = int(args.get("offset", 0))
+    limit: int = int(args.get("limit", 100))
     if offset < 0:
         return tool_error("offset must be >= 0", path=path, offset=offset)
     if limit < 1:
@@ -57,15 +55,15 @@ def _handle_read(args: Dict[str, Any]) -> str:
     if limit > 100:
         limit = 100
     try:
-        content = _s().read(path, offset=offset, limit=limit)
+        content: str = _s().read(path, offset=offset, limit=limit)
         return tool_result(content=content, path=path, offset=offset, limit=limit)
     except SandboxError as exc:
         return tool_error(str(exc), path=path)
 
 
 def _handle_write(args: Dict[str, Any]) -> str:
-    path = str(args.get("path", "")).strip()
-    content = str(args.get("content", ""))
+    path: str = str(args.get("path", "")).strip()
+    content: str = str(args.get("content", ""))
     if not path:
         return tool_error("path is required", path=path)
     try:
@@ -76,18 +74,18 @@ def _handle_write(args: Dict[str, Any]) -> str:
 
 
 def _handle_list(args: Dict[str, Any]) -> str:
-    path = str(args.get("path", "")).strip()
+    path: str = str(args.get("path", "")).strip()
     if not path:
         return tool_error("path is required", path=path)
     try:
-        entries = _s().list_dir(path)
+        entries: list[str] = _s().list_dir(path)
         return tool_result(entries=entries, path=path, count=len(entries))
     except SandboxError as exc:
         return tool_error(str(exc), path=path)
 
 
 def _handle_delete(args: Dict[str, Any]) -> str:
-    path = str(args.get("path", "")).strip()
+    path: str = str(args.get("path", "")).strip()
     if not path:
         return tool_error("path is required", path=path)
     try:
@@ -98,15 +96,15 @@ def _handle_delete(args: Dict[str, Any]) -> str:
 
 
 def _handle_exists(args: Dict[str, Any]) -> str:
-    path = str(args.get("path", "")).strip()
+    path: str = str(args.get("path", "")).strip()
     if not path:
         return tool_error("path is required", path=path)
-    exists = _s().exists(path)
+    exists: bool = _s().exists(path)
     return tool_result(exists=exists, path=path)
 
 
 # ---------------------------------------------------------------------------
-# Registration (executes at module-import time)
+# 注册（模块导入时执行）
 # ---------------------------------------------------------------------------
 
 
@@ -116,8 +114,8 @@ def _param(path_desc: str, required: bool = True) -> Dict[str, Any]:
         "properties": {
             "path": {
                 "type": "string",
-                "description": f"Logical path ({path_desc}). "
-                "Must use a namespace prefix: fork:, ws:, or fix:.",
+                "description": f"逻辑路径（{path_desc}）。"
+                "必须使用命名空间前缀：fork:、ws: 或 fix:。",
             },
         },
         "required": (["path"] if required else []),
@@ -130,30 +128,30 @@ registry.register(
     toolset="filesystem",
     schema={
         "description": (
-            "Read the contents of a file.  The path must use a namespace "
-            "prefix: 'ws:' for workspace data, 'fork:' for evolved code, "
-            "or 'fix:' for repair targets.  "
-            "Examples: 'ws:logs/error.log', 'fork:main.py'.\n\n"
-            "Supports line-based pagination via offset and limit.  "
-            "Default limit is 100 lines (hard cap); use offset to skip lines."
+            "读取文件内容。路径必须使用命名空间前缀："
+            "'ws:' 用于 workspace 数据，'fork:' 用于进化代码，"
+            "'fix:' 用于修复目标。"
+            "示例：'ws:logs/error.log'、'fork:main.py'。\n\n"
+            "支持通过 offset 和 limit 进行按行分页。"
+            "默认 limit 为 100 行（硬上限）；使用 offset 跳过行。"
         ),
         "parameters": {
             "type": "object",
             "properties": {
                 "path": {
                     "type": "string",
-                    "description": "Logical path to the file. "
-                    "Must use a namespace prefix: fork:, ws:, or fix:.",
+                    "description": "文件逻辑路径。"
+                    "必须使用命名空间前缀：fork:、ws: 或 fix:。",
                 },
                 "offset": {
                     "type": "integer",
-                    "description": "0-indexed line number to start from (default 0).",
+                    "description": "起始行号（0-indexed，默认 0）。",
                     "default": 0,
                     "minimum": 0,
                 },
                 "limit": {
                     "type": "integer",
-                    "description": "Maximum number of lines to return (hard cap: 100).",
+                    "description": "最大返回行数（硬上限：100）。",
                     "default": 100,
                     "minimum": 1,
                     "maximum": 100,
@@ -173,20 +171,20 @@ registry.register(
     toolset="filesystem",
     schema={
         "description": (
-            "Write content to a file.  The path must use a namespace prefix.  "
-            "Use 'ws:' for workspace data or 'fork:' for evolved code.  "
-            "Directories are created automatically."
+            "将内容写入文件。路径必须使用命名空间前缀。"
+            "使用 'ws:' 写入 workspace 数据，'fork:' 写入进化代码。"
+            "目录会自动创建。"
         ),
         "parameters": {
             "type": "object",
             "properties": {
                 "path": {
                     "type": "string",
-                    "description": "Logical path. Must use ws: or fork: prefix.",
+                    "description": "逻辑路径。必须使用 ws: 或 fork: 前缀。",
                 },
                 "content": {
                     "type": "string",
-                    "description": "Content to write to the file.",
+                    "description": "要写入文件的内容。",
                 },
             },
             "required": ["path", "content"],
@@ -203,10 +201,10 @@ registry.register(
     toolset="filesystem",
     schema={
         "description": (
-            "List the contents of a directory.  Returns entry names "
-            "(not full paths).  Use any namespace prefix."
+            "列出目录内容。返回条目名称（非完整路径）。"
+            "可使用任意命名空间前缀。"
         ),
-        "parameters": _param("directory to list"),
+        "parameters": _param("要列出的目录"),
     },
     handler=_handle_list,
     emoji="📂",
@@ -219,10 +217,10 @@ registry.register(
     toolset="filesystem",
     schema={
         "description": (
-            "Delete a file or empty directory.  Only writable namespaces "
-            "(ws:, fork:, fix:) are allowed."
+            "删除文件或空目录。仅允许可写命名空间"
+            "（ws:、fork:、fix:）。"
         ),
-        "parameters": _param("file or directory to delete"),
+        "parameters": _param("要删除的文件或目录"),
     },
     handler=_handle_delete,
     emoji="🗑️",
@@ -230,10 +228,10 @@ registry.register(
 
 
 def _handle_edit(args: Dict[str, Any]) -> str:
-    """Targeted text replacement — find and replace one exact match."""
-    path = str(args.get("path", "")).strip()
-    old_string = str(args.get("old_string", ""))
-    new_string = str(args.get("new_string", ""))
+    """精准文本替换 — 查找并替换一处精确匹配。"""
+    path: str = str(args.get("path", "")).strip()
+    old_string: str = str(args.get("old_string", ""))
+    new_string: str = str(args.get("new_string", ""))
 
     if not path:
         return tool_error("path is required")
@@ -241,14 +239,14 @@ def _handle_edit(args: Dict[str, Any]) -> str:
         return tool_error("old_string is required")
 
     try:
-        content = _s().read(path, limit=0)
+        content: str = _s().read(path, limit=0)
     except SandboxError as exc:
         return tool_error(str(exc), path=path)
 
     if old_string not in content:
         return tool_error("old_string not found in file", path=path)
 
-    count = content.count(old_string)
+    count: int = content.count(old_string)
     if count > 1:
         return tool_error(
             f"old_string matches {count} locations. Use more surrounding "
@@ -256,7 +254,7 @@ def _handle_edit(args: Dict[str, Any]) -> str:
             path=path, matches=count,
         )
 
-    new_content = content.replace(old_string, new_string, 1)
+    new_content: str = content.replace(old_string, new_string, 1)
     try:
         _s().write(path, new_content)
     except SandboxError as exc:
@@ -270,27 +268,24 @@ registry.register(
     toolset="filesystem",
     schema={
         "description": (
-            "Make a targeted edit to a file by replacing one exact match "
-            "of old_string with new_string.  The old_string must match "
-            "exactly once — include enough surrounding context (2-3 lines "
-            "before and after) to make it unique.  "
-            "Use this instead of write_file when you only need to change "
-            "a few lines — it avoids re-sending the entire file content."
+            "通过替换文件中一处精确匹配的 old_string 为 new_string 来进行精准编辑。"
+            "old_string 必须仅匹配一次 — 包含足够的上下文（前后各 2-3 行）使其唯一。"
+            "仅需修改几行时使用此工具替代 write_file — 避免重新发送整个文件内容。"
         ),
         "parameters": {
             "type": "object",
             "properties": {
                 "path": {
                     "type": "string",
-                    "description": "Logical path (ws:/fork:/fix: prefix).",
+                    "description": "逻辑路径（ws:/fork:/fix: 前缀）。",
                 },
                 "old_string": {
                     "type": "string",
-                    "description": "Exact text to find and replace.",
+                    "description": "要查找并替换的精确文本。",
                 },
                 "new_string": {
                     "type": "string",
-                    "description": "Replacement text (use '' to delete).",
+                    "description": "替换文本（使用 '' 表示删除）。",
                 },
             },
             "required": ["path", "old_string", "new_string"],
@@ -306,8 +301,8 @@ registry.register(
     name="file_exists",
     toolset="filesystem",
     schema={
-        "description": "Check whether a file or directory exists (all namespaces).",
-        "parameters": _param("file or directory to check", required=True),
+        "description": "检查文件或目录是否存在（所有命名空间）。",
+        "parameters": _param("要检查的文件或目录", required=True),
     },
     handler=_handle_exists,
     emoji="🔍",

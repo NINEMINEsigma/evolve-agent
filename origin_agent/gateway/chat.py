@@ -1,4 +1,4 @@
-"""Message protocol types and session management for the chat gateway."""
+"""聊天 gateway 的消息协议类型和 session 管理。"""
 
 from __future__ import annotations
 
@@ -35,13 +35,13 @@ class Message(BaseModel):
     tool: Optional[str] = None
     args: Optional[Dict[str, Any]] = None
     result: Optional[Any] = None
-    message: Optional[str] = None  # used by ERROR type
-    request_id: Optional[str] = None  # for confirm_request / confirm_response
-    action: Optional[str] = None      # for confirm_response: allow_once | allow_always | deny
+    message: Optional[str] = None  # ERROR 类型使用
+    request_id: Optional[str] = None  # confirm_request / confirm_response 使用
+    action: Optional[str] = None      # confirm_response：allow_once | allow_always | deny
 
     @classmethod
     def from_json(cls, raw: str) -> Message:
-        data = json.loads(raw)
+        data: dict = json.loads(raw)
         return cls(
             type=MessageType(data["type"]),
             session_id=data.get("session_id", ""),
@@ -76,16 +76,16 @@ class Message(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# Session manager
+# Session 管理器
 # ---------------------------------------------------------------------------
 
 
 def _find_workspace_from_args() -> str | None:
-    """Extract ``--workspace`` value from sys.argv (set by run.py).
+    """从 sys.argv 中提取 ``--workspace`` 值（由 run.py 设置）。
 
-    Format on argv: ``--workspace D:\\path`` as two separate entries.
+    命令行格式：``--workspace D:\\path`` 作为两个独立参数。
     """
-    args = sys.argv
+    args: list[str] = sys.argv
     for i, arg in enumerate(args):
         if arg == "--workspace" and i + 1 < len(args):
             return args[i + 1].strip("\"'")
@@ -93,48 +93,47 @@ def _find_workspace_from_args() -> str | None:
 
 
 class SessionManager:
-    """Track WebSocket sessions with TTL-based expiry and disk persistence.
+    """使用 TTL 过期和磁盘持久化跟踪 WebSocket session。
 
-    Each connected client gets a unique session_id.
-    Sessions expire after 30 minutes of inactivity.
-    Session metadata is persisted to a JSON index file so the list survives
-    server restarts.
+    每个连接的客户端获得唯一 session_id。
+    Session 在 30 分钟不活动后过期。
+    Session 元数据持久化到 JSON 索引文件，使列表在 server 重启后仍然存在。
     """
 
-    _SESSION_TTL = 1800  # 30 minutes
+    _SESSION_TTL: int = 1800  # 30 分钟
 
     def __init__(self, store_path: str | None = None) -> None:
         import time
         self._sessions: Dict[str, dict] = {}  # sid -> {status, created_at, title}
         self._store_dir: Path | None = Path(store_path) if store_path else None
-        self._index_lock = threading.Lock()
+        self._index_lock: threading.Lock = threading.Lock()
         if self._store_dir:
             self._store_dir.mkdir(parents=True, exist_ok=True)
             self.load_from_disk()
 
-    # -- persistence helpers ------------------------------------------------
+    # -- 持久化辅助方法 ------------------------------------------------
 
     def _index_path(self) -> Path:
-        """Path to the session index JSON file."""
+        """返回 session 索引 JSON 文件的路径。"""
         assert self._store_dir is not None
         return self._store_dir / "_index.json"
 
     def _read_index(self) -> list[dict]:
-        """Read persisted session index from disk."""
+        """从磁盘读取持久化的 session 索引。"""
         if not self._store_dir:
             return []
-        idx = self._index_path()
+        idx: Path = self._index_path()
         if not idx.exists():
             return []
         try:
-            data = json.loads(idx.read_text(encoding="utf-8"))
+            data: list = json.loads(idx.read_text(encoding="utf-8"))
             return data if isinstance(data, list) else []
         except Exception:
             logger.warning("Failed to read session index, starting fresh")
             return []
 
     def _write_index(self, entries: list[dict]) -> None:
-        """Persist session index to disk."""
+        """将 session 索引持久化到磁盘。"""
         if not self._store_dir:
             return
         try:
@@ -146,25 +145,25 @@ class SessionManager:
             logger.warning("Failed to write session index: %s", exc)
 
     def _write_index_locked(self, entries: list[dict]) -> None:
-        """Thread-safe wrapper for _write_index."""
+        """线程安全的 _write_index 包装。"""
         with self._index_lock:
             self._write_index(entries)
 
     def load_from_disk(self) -> None:
-        """Load persisted sessions from disk into memory."""
-        # If configure_sessions was never called (e.g. lost during code
-        # evolution), extract --workspace from sys.argv and derive the path.
+        """从磁盘加载持久化的 session 到内存。"""
+        # 如果 configure_sessions 从未被调用（例如在代码进化期间丢失），
+        # 从 sys.argv 提取 --workspace 并推导路径。
         if self._store_dir is None:
-            ws = _find_workspace_from_args()
+            ws: str | None = _find_workspace_from_args()
             if ws:
-                candidate = Path(ws) / "logs" / "sessions"
+                candidate: Path = Path(ws) / "logs" / "sessions"
                 if candidate.exists():
                     self._store_dir = candidate
         if not self._store_dir:
             return
-        entries = self._read_index()
+        entries: list[dict] = self._read_index()
         for entry in entries:
-            sid = entry.get("id", "")
+            sid: str = entry.get("id", "")
             if sid:
                 self._sessions[sid] = {
                     "status": entry.get("status", "active"),
@@ -175,7 +174,7 @@ class SessionManager:
             logger.info("Loaded %d sessions from disk", len(entries))
 
     def set_store_dir(self, path: str) -> None:
-        """Set or update the store directory and reload from disk."""
+        """设置或更新存储目录并重新从磁盘加载。"""
         self._store_dir = Path(path)
         self._store_dir.mkdir(parents=True, exist_ok=True)
         self.load_from_disk()
@@ -184,13 +183,13 @@ class SessionManager:
 
     def create(self) -> str:
         import time
-        sid = uuid.uuid4().hex[:12]
-        now = time.time()
+        sid: str = uuid.uuid4().hex[:12]
+        now: float = time.time()
         self._sessions[sid] = {"status": "active", "created_at": now, "title": ""}
-        # Persist to disk
+        # 持久化到磁盘
         if self._store_dir:
             with self._index_lock:
-                entries = self._read_index()
+                entries: list[dict] = self._read_index()
                 entries.append({"id": sid, "created_at": now, "status": "active", "title": ""})
                 self._write_index(entries)
             (self._store_dir / sid).mkdir(parents=True, exist_ok=True)
@@ -202,25 +201,25 @@ class SessionManager:
 
     def remove(self, sid: str) -> None:
         self._sessions.pop(sid, None)
-        # Clean up disk
+        # 清理磁盘
         if self._store_dir:
             with self._index_lock:
-                entries = self._read_index()
+                entries: list[dict] = self._read_index()
                 entries = [e for e in entries if e.get("id") != sid]
                 self._write_index(entries)
             import shutil
-            sdir = self._store_dir / sid
+            sdir: Path = self._store_dir / sid
             if sdir.exists():
                 shutil.rmtree(sdir)
         logger.debug("Session removed | id=%s", sid)
 
     def update_title(self, sid: str, title: str) -> None:
-        """Update the title for a session in memory and on disk."""
+        """更新内存和磁盘中 session 的标题。"""
         if sid in self._sessions:
             self._sessions[sid]["title"] = title
         if self._store_dir:
             with self._index_lock:
-                entries = self._read_index()
+                entries: list[dict] = self._read_index()
                 for e in entries:
                     if e.get("id") == sid:
                         e["title"] = title
@@ -235,8 +234,8 @@ class SessionManager:
                 self._write_index(entries)
 
     def get(self, sid: str) -> dict | None:
-        """Return a single session with full metadata, or None."""
-        info = self._sessions.get(sid)
+        """返回单个 session 及其完整元数据，不存在时返回 None。"""
+        info: dict | None = self._sessions.get(sid)
         if info is None:
             return None
         return {
@@ -248,8 +247,8 @@ class SessionManager:
 
     def cleanup_expired(self) -> int:
         import time
-        now = time.time()
-        expired = [
+        now: float = time.time()
+        expired: list[str] = [
             sid for sid, info in self._sessions.items()
             if now - info.get("created_at", 0) > self._SESSION_TTL
         ]
@@ -258,16 +257,16 @@ class SessionManager:
         for sid in expired:
             self._sessions.pop(sid, None)
             logger.debug("Session expired | id=%s", sid)
-        # Also purge expired entries from the on-disk index
+        # 同时从磁盘索引中清除过期条目
         if self._store_dir:
             with self._index_lock:
-                entries = self._read_index()
+                entries: list[dict] = self._read_index()
                 entries = [e for e in entries if e.get("id") not in expired]
                 self._write_index(entries)
         return len(expired)
 
     def get_all(self) -> list[dict]:
-        """Return list of all sessions with metadata."""
+        """返回所有 session 及其元数据的列表。"""
         return [
             {
                 "id": sid,

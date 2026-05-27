@@ -1,7 +1,7 @@
-"""App lifecycle — the single async entry point for the agent process.
+"""应用生命周期 — agent 进程的唯一异步入口点。
 
-Does NOT import any heavy subsystems at module level.  Everything is
-lazily wired inside ``App.run()`` so import errors surface cleanly.
+不在模块级别导入任何重型子系统。所有组件在 ``App.run()``
+内部延迟加载，使导入错误能够干净地暴露。
 """
 
 from __future__ import annotations
@@ -17,19 +17,19 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# Module-level reference to the running App instance.
-# Set in App.__init__, cleared on shutdown.  Used by the evolve
-# subsystem to request a controlled shut down with exit code -1.
+# 模块级引用，指向运行中的 App 实例。
+# 在 App.__init__ 中设置，在 shutdown 时清除。
+# 进化子系统通过它请求以退出码 -1 进行受控关闭。
 _app: App | None = None
 
 
 def request_evolution() -> None:
-    """Mark the running App for exit with code -1.
+    """标记运行中的 App 以退出码 -1 退出。
 
-    Called by ``evolve.code.finalize_evolution`` after the fork
-    directory passes all validation checks.  Does NOT immediately
-    shut down — the gateway finishes sending the current response
-    first, then calls ``trigger_evolution_shutdown()``.
+    由 ``evolve.code.finalize_evolution`` 在 fork 目录
+    通过所有验证检查后调用。不会立即关闭 —
+    gateway 先完成当前响应的发送，
+    然后调用 ``trigger_evolution_shutdown()``。
     """
     global _app
     if _app is not None:
@@ -38,12 +38,11 @@ def request_evolution() -> None:
 
 
 def trigger_evolution_shutdown() -> None:
-    """Trigger the actual shutdown if evolution was requested.
+    """如果已请求进化，触发实际关闭。
 
-    Called by the gateway after sending a response that may have
-    completed a code-evolution cycle.  If the exit code is -1,
-    sets the shutdown event so ``App.run()`` returns and the
-    orchestrator (run.py) performs the slow→fast swap.
+    由 gateway 在发送可能完成代码进化周期的响应后调用。
+    如果退出码为 -1，设置关闭事件使 ``App.run()`` 返回，
+    编排器（run.py）执行 slow→fast 交换。
     """
     global _app
     if _app is not None and _app._exit_code == -1:
@@ -52,21 +51,25 @@ def trigger_evolution_shutdown() -> None:
 
 
 class App:
-    """Thin async runner.  Created by __main__.py with a RuntimeContext,
-    then ``await app.run()`` blocks until shutdown.
+    """轻量异步运行器。由 __main__.py 使用 RuntimeContext 创建，
+    然后 ``await app.run()`` 阻塞直到关闭。
     """
 
     def __init__(self, ctx: RuntimeContext) -> None:
         global _app
-        self.ctx = ctx
-        self._shutdown_event = asyncio.Event()
+        self.ctx: RuntimeContext = ctx
+        # 关闭信号事件，set 后 run() 返回
+        self._shutdown_event: asyncio.Event = asyncio.Event()
+        # 进程退出码，-1 表示需要进化交换
         self._exit_code: int = 0
+        # uvicorn Server 实例
         self._gateway_server: object | None = None
+        # gateway 后台 asyncio task
         self._gateway_task: asyncio.Task[None] | None = None
         _app = self
 
     async def run(self) -> int:
-        """Block until shutdown is requested.  Returns an exit code."""
+        """阻塞直到请求关闭。返回退出码。"""
         logger.info(
             "App starting | mode=%s workspace=%s agentspace=%s fork=%s",
             self.ctx.mode,
@@ -75,16 +78,16 @@ class App:
             self.ctx.fork_path,
         )
 
-        # ---- start gateway ----
+        # ---- 启动 gateway ----
         await self._start_gateway()
 
-        # ---- signal handling ----
-        loop = asyncio.get_running_loop()
+        # ---- 信号处理 ----
+        loop: asyncio.AbstractEventLoop = asyncio.get_running_loop()
         for sig in (signal.SIGINT, signal.SIGTERM):
             try:
                 loop.add_signal_handler(sig, self._request_shutdown)
             except NotImplementedError:
-                # Windows: add_signal_handler not supported — use signal.signal
+                # Windows：add_signal_handler 不支持 — 使用 signal.signal
                 try:
                     signal.signal(sig, lambda signum, frame: self._request_shutdown())
                 except (ValueError, OSError):
@@ -94,10 +97,10 @@ class App:
 
         await self._shutdown_event.wait()
 
-        # ---- stop gateway ----
+        # ---- 停止 gateway ----
         await self._stop_gateway()
 
-        # ---- drain background tasks ----
+        # ---- 排空后台任务 ----
         await self._drain_background_tasks()
 
         logger.info("App shutdown complete")
@@ -107,10 +110,10 @@ class App:
         logger.info("Shutdown requested")
         self._shutdown_event.set()
 
-    # -- gateway lifecycle --------------------------------------------------
+    # -- gateway 生命周期 --------------------------------------------------
 
     async def _start_gateway(self) -> None:
-        """Create uvicorn server and run it as a background task."""
+        """创建 uvicorn server 并作为后台 task 运行。"""
         try:
             from gateway.server import create_server, set_agent_loop
             from dashboard.server import set_agent_loop as set_dashboard_agent_loop
@@ -119,13 +122,13 @@ class App:
             self._shutdown_event.set()
             return
 
-        # ---- initialize sandbox + tools ----
+        # ---- 初始化 sandbox + 工具 ----
         try:
             from system.sandbox import Sandbox
-            _sandbox = Sandbox(self.ctx)
+            _sandbox: Sandbox = Sandbox(self.ctx)
             import component.tools.filesystem as _fs
             _fs.set_sandbox(_sandbox)
-            import component.tools  # noqa: F401 — triggers registry.register()
+            import component.tools  # noqa: F401 — 触发 registry.register()
             logger.info("Sandbox + %d tools initialized | mode=%s",
                         len(component.tools.filesystem.registry.get_all_tool_names()),
                         self.ctx.mode)
@@ -133,11 +136,11 @@ class App:
             logger.warning("Sandbox/tools unavailable: %s", exc)
             self._shutdown_event.set()
 
-        # ---- seed skills directory ----
+        # ---- 初始化 skills 目录 ----
         try:
-            _skills_dir = Path("skills")
+            _skills_dir: Path = Path("skills")
             _skills_dir.mkdir(parents=True, exist_ok=True)
-            _seed = _skills_dir / "self-evolution" / "SKILL.md"
+            _seed: Path = _skills_dir / "self-evolution" / "SKILL.md"
             if not _seed.exists():
                 _seed.parent.mkdir(parents=True, exist_ok=True)
                 _seed.write_text("""---
@@ -162,16 +165,16 @@ category: core
             logger.warning("Skills directory setup failed: %s", exc)
             self._shutdown_event.set()
 
-        # ---- create agent loop ----
+        # ---- 创建 agent 循环 ----
         try:
             from entry.agent import AgentLoop
-            history_path = str(self.ctx.workspace / "logs" / "sessions")
-            agent_loop = AgentLoop(self.ctx, history_store_path=history_path)
+            history_path: str = str(self.ctx.workspace / "logs" / "sessions")
+            agent_loop: AgentLoop = AgentLoop(self.ctx, history_store_path=history_path)
 
-            # Register persistent memory provider
+            # 注册持久化 memory provider
             try:
                 from memory.provider import EasysaveMemoryProvider
-                mem = EasysaveMemoryProvider(
+                mem: EasysaveMemoryProvider = EasysaveMemoryProvider(
                     memory_dir=str(self.ctx.workspace / "logs" / "memory")
                 )
                 agent_loop._memory.add_provider(mem)
@@ -179,7 +182,7 @@ category: core
             except Exception as exc:
                 logger.warning("Memory provider unavailable: %s", exc)
 
-            # Wire tool event streaming to the frontend
+            # 将工具事件流连接到前端
             from gateway.server import _send_tool_event
             agent_loop.set_tool_event_callback(_send_tool_event)
             set_agent_loop(agent_loop)
@@ -187,25 +190,25 @@ category: core
             logger.info("AgentLoop initialized | model=%s", self.ctx.llm_model)
         except Exception as exc:
             logger.warning("AgentLoop unavailable: %s", exc)
-            # Gateway will fall back to echo mode
+            # Gateway 将回退到 echo 模式
 
-        # ---- configure session persistence ----
+        # ---- 配置 session 持久化 ----
         from gateway.server import configure_sessions
         configure_sessions(str(self.ctx.workspace / "logs" / "sessions"))
 
-        host = self.ctx.gateway_host
-        port = self.ctx.gateway_port
+        host: str = self.ctx.gateway_host
+        port: int = self.ctx.gateway_port
         self._gateway_server = create_server(host=host, port=port)
         self._gateway_task = asyncio.create_task(
             self._gateway_server.serve()  # type: ignore[union-attr]
         )
-        # Give the server a moment to bind
+        # 给 server 一点时间完成端口绑定
         await asyncio.sleep(0.5)
         logger.info("Gateway listening on ws://%s:%d/ws/chat", host, port)
         logger.info("WebPage on http://%s:%d", host, port)
 
     async def _stop_gateway(self) -> None:
-        """Gracefully stop the gateway server."""
+        """优雅停止 gateway server。"""
         if self._gateway_server is None or self._gateway_task is None:
             return
         logger.info("Gateway shutting down...")
@@ -218,14 +221,14 @@ category: core
         logger.info("Gateway stopped")
 
     async def _drain_background_tasks(self, timeout: float = 5.0) -> None:
-        """Wait for pending asyncio tasks to finish before returning.
+        """返回前等待所有待处理 asyncio task 完成。
 
-        This prevents in-flight I/O (session index writes, message
-        persistence, tool event streaming, etc.) from being truncated
-        when the process exits with code -1 for evolution.
+        防止进程以退出码 -1（进化）退出时，
+        正在进行的 I/O（session 索引写入、消息持久化、
+        工具事件流等）被截断。
         """
-        loop = asyncio.get_running_loop()
-        pending = [
+        loop: asyncio.AbstractEventLoop = asyncio.get_running_loop()
+        pending: list[asyncio.Task] = [
             t for t in asyncio.all_tasks(loop)
             if t is not asyncio.current_task() and not t.done()
         ]

@@ -1,23 +1,23 @@
-"""Abstract base class for pluggable memory providers.
+"""可插拔 memory provider 的抽象基类。
 
-Memory providers give agents persistent recall across sessions.
+Memory provider 为 agent 提供跨 session 的持久化回忆。
 
-Lifecycle (expected caller protocol):
-  initialize()          -- connect, create resources, warm up
-  system_prompt_block() -- static text for the system prompt
-  prefetch(query)       -- background recall before each turn
-  sync_turn(user, asst) -- persist a completed turn
-  get_tool_schemas()    -- tool schemas to expose to the model
-  handle_tool_call()    -- dispatch a tool call
-  shutdown()            -- clean exit
+生命周期（预期调用方协议）：
+  initialize()          -- 连接、创建资源、预热
+  system_prompt_block() -- system prompt 的静态文本
+  prefetch(query)       -- 每个回合前的后台回忆
+  sync_turn(user, asst) -- 持久化完成的回合
+  get_tool_schemas()    -- 暴露给模型的工具 schema
+  handle_tool_call()    -- 分发工具调用
+  shutdown()            -- 干净退出
 
-Optional hooks (override to opt in):
-  on_turn_start(turn, message, **kwargs)    -- per-turn tick
-  on_session_end(messages)                  -- end-of-session extraction
-  on_session_switch(new_session_id, **kwargs) -- mid-process session rotation
-  on_pre_compress(messages) -> str          -- extract before context compression
-  on_memory_write(action, target, content)  -- mirror built-in memory writes
-  on_delegation(task, result, **kwargs)     -- parent-side observation of subagent work
+可选钩子（重写以选择加入）：
+  on_turn_start(turn, message, **kwargs)    -- 每回合计时
+  on_session_end(messages)                  -- session 结束提取
+  on_session_switch(new_session_id, **kwargs) -- 进程中的 session 轮换
+  on_pre_compress(messages) -> str          -- 上下文压缩前提取
+  on_memory_write(action, target, content)  -- 镜像内置 memory 写入
+  on_delegation(task, result, **kwargs)     -- 父代理对子代理工作的观察
 """
 
 from __future__ import annotations
@@ -30,111 +30,108 @@ logger = logging.getLogger(__name__)
 
 
 class MemoryProvider(ABC):
-    """Abstract base class for memory providers.
+    """Memory provider 的抽象基类。
 
-    Subclass this to implement a custom memory backend. All abstract methods
-    must be implemented; optional hooks can be overridden as needed.
+    子类化此类以实现自定义 memory 后端。所有抽象方法必须实现；
+    可选钩子可按需重写。
     """
 
     # ------------------------------------------------------------------
-    # Core lifecycle -- every provider must implement these
+    # 核心生命周期 — 每个 provider 必须实现
     # ------------------------------------------------------------------
 
     @property
     @abstractmethod
     def name(self) -> str:
-        """Short identifier for this provider (e.g. 'builtin', 'honcho', 'hindsight').
+        """此 provider 的简短标识符（如 'builtin'、'honcho'、'hindsight'）。
 
-        Returns
+        返回
         -------
         str
-            A human-readable identifier used for logging, config, and debugging.
+            用于日志、配置和调试的人类可读标识符。
         """
 
     @abstractmethod
     def is_available(self) -> bool:
-        """Return True if this provider is configured and ready.
+        """返回 True 表示此 provider 已配置且就绪。
 
-        Called during agent initialisation to decide whether to activate the
-        provider. Should *not* make network calls -- just check configuration
-        keys and installed dependencies.
+        在 agent 初始化期间调用，用于决定是否激活此 provider。
+        不应进行网络调用 — 仅检查配置键和已安装的依赖项。
 
-        Returns
+        返回
         -------
         bool
-            True if the provider has everything it needs to run.
+            True 表示 provider 具备运行所需的一切。
         """
 
     @abstractmethod
     def initialize(self, session_id: str, **kwargs: Any) -> None:
-        """Initialise the provider for a session.
+        """为 session 初始化 provider。
 
-        Called once at agent startup.  May create resources (tables, indices,
-        document stores), establish connections, start background threads, etc.
+        在 agent 启动时调用一次。可能创建资源（表、索引、
+        文档存储），建立连接，启动后台线程等。
 
-        Parameters
+        参数
         ----------
         session_id : str
-            The unique identifier for the conversation session the provider
-            should scope itself to.
+            对话 session 的唯一标识符，provider 应将自身限定在此范围内。
 
         **kwargs : Any
-            Environment context passed by the agent.  Common keys include:
+            agent 传递的环境上下文。常见键包括：
 
             hermes_home (str)
-                The active HERMES_HOME directory path.  Use this for
-                profile-scoped storage instead of hardcoding paths.
+                活跃的 HERMES_HOME 目录路径。使用此路径进行
+                按 profile 隔离的存储，而非硬编码路径。
             platform (str)
-                ``"cli"``, ``"telegram"``, ``"discord"``, ``"cron"``, etc.
+                ``"cli"``、``"telegram"``、``"discord"``、``"cron"`` 等。
             agent_context (str)
-                ``"primary"``, ``"subagent"``, ``"cron"``, or ``"flush"``.
-                Providers should skip writes for non-primary contexts.
+                ``"primary"``、``"subagent"``、``"cron"`` 或 ``"flush"``。
+                provider 对非 primary 上下文应跳过写入。
             agent_identity (str)
-                Profile name (e.g. ``"coder"``).  Use for per-profile
-                provider identity scoping.
+                Profile 名称（如 ``"coder"``）。用于按 profile
+                隔离 provider 身份。
             agent_workspace (str)
-                Shared workspace name (e.g. ``"hermes"``).
+                共享 workspace 名称（如 ``"hermes"``）。
             parent_session_id (str)
-                For subagents, the parent's session_id.
+                对子代理而言，父代理的 session_id。
             user_id (str)
-                Platform user identifier (gateway sessions).
+                平台用户标识符（gateway session）。
         """
 
     @abstractmethod
     def system_prompt_block(self) -> str:
-        """Return static text to include in the system prompt.
+        """返回要包含在 system prompt 中的静态文本。
 
-        This is for *static* provider information (instructions, status).
-        Prefetched recall context is injected separately via :meth:`prefetch`.
+        这是*静态* provider 信息（指令、状态）。
+        预取的回忆上下文通过 :meth:`prefetch` 单独注入。
 
-        Returns
+        返回
         -------
         str
-            Text to inject, or empty string to skip.
+            要注入的文本，跳过则返回空字符串。
         """
 
     @abstractmethod
     def prefetch(self, query: str, *, session_id: str = "") -> str:
-        """Recall relevant context for the upcoming turn.
+        """为即将到来的回合回忆相关上下文。
 
-        Called before each API call.  Return formatted text to inject as
-        context, or an empty string if nothing relevant was found.
-        Implementations should be fast -- use background threads for the
-        actual recall and return cached results here.
+        在每次 API 调用前调用。返回要作为上下文注入的格式化文本，
+        未找到相关内容时返回空字符串。
+        实现应快速 — 使用后台线程执行实际回忆，
+        此处返回缓存结果。
 
-        Parameters
+        参数
         ----------
         query : str
-            The user's latest message (or equivalent query string) to use as a
-            search / recall prompt.
+            用户的最新消息（或等效查询字符串），用作搜索/回忆 prompt。
         session_id : str
-            Session identifier for providers serving concurrent sessions.
-            Providers that don't need per-session scoping can ignore it.
+            为服务并发 session 的 provider 提供 session 标识符。
+            不需要按 session 隔离的 provider 可忽略。
 
-        Returns
+        返回
         -------
         str
-            Formatted recall text, or empty string.
+            格式化后的回忆文本，或空字符串。
         """
 
     @abstractmethod
@@ -145,98 +142,98 @@ class MemoryProvider(ABC):
         *,
         session_id: str = "",
     ) -> None:
-        """Persist a completed turn to the backend.
+        """将完成的回合持久化到后端。
 
-        Called after each conversational turn.  Should be non-blocking --
-        queue for background processing if the backend has latency.
+        在每次对话回合后调用。应非阻塞 —
+        如果后端有延迟，排队到后台处理。
 
-        Parameters
+        参数
         ----------
         user_message : str
-            The user's message for this turn.
+            本回合的用户消息。
         assistant_response : str
-            The assistant's response for this turn.
+            本回合的助手响应。
         session_id : str
-            Session identifier for providers serving concurrent sessions.
+            为服务并发 session 的 provider 提供 session 标识符。
         """
 
     @abstractmethod
     def get_tool_schemas(self) -> List[Dict[str, Any]]:
-        """Return tool schemas this provider exposes.
+        """返回此 provider 暴露的工具 schema。
 
-        Each schema follows the OpenAI function-calling format::
+        每个 schema 遵循 OpenAI function-calling 格式::
 
             {"name": "...", "description": "...", "parameters": {...}}
 
-        Return an empty list if this provider has no tools (context-only).
+        如果此 provider 无工具（仅上下文），返回空列表。
 
-        Returns
+        返回
         -------
         list[dict[str, Any]]
-            A list of OpenAI-compatible tool definition dicts.
+            OpenAI 兼容的工具定义字典列表。
         """
 
     @abstractmethod
     def handle_tool_call(self, tool_name: str, args: Dict[str, Any]) -> str:
-        """Handle a tool call for one of this provider's tools.
+        """处理对此 provider 某个工具的工具调用。
 
-        Only called for tool names previously returned by :meth:`get_tool_schemas`.
+        仅对之前由 :meth:`get_tool_schemas` 返回的工具名称调用。
 
-        Parameters
+        参数
         ----------
         tool_name : str
-            The name of the tool being invoked.
+            被调用的工具名称。
         args : dict[str, Any]
-            The arguments provided to the tool.
+            提供给工具的实参。
 
-        Returns
+        返回
         -------
         str
-            The tool result as a JSON string.
+            工具结果，JSON 字符串。
         """
 
     @abstractmethod
     def shutdown(self) -> None:
-        """Clean shutdown -- flush queues, close connections, release resources.
+        """干净关闭 — 刷新队列、关闭连接、释放资源。
 
-        Called when the agent or session ends.  Implementations should ensure
-        all pending writes are flushed and connections are closed gracefully.
+        在 agent 或 session 结束时调用。实现应确保
+        所有待处理写入被刷新，连接优雅关闭。
         """
 
     # ------------------------------------------------------------------
-    # Optional hooks -- override these to opt in to lifecycle events
+    # 可选钩子 — 重写这些方法以选择加入生命周期事件
     # ------------------------------------------------------------------
 
     def on_turn_start(self, turn_number: int, message: str, **kwargs: Any) -> None:
-        """Called at the start of each turn with the user message.
+        """每个回合开始时使用用户消息调用。
 
-        Use for turn-counting, scope management, or periodic maintenance.
+        用于回合计数、作用域管理或定期维护。
 
-        Parameters
+        参数
         ----------
         turn_number : int
-            The 1-based turn count for the current session.
+            当前 session 的基于 1 的回合计数。
         message : str
-            The user's message for this turn.
+            本回合的用户消息。
         **kwargs : Any
-            Runtime context.  May include keys such as ``remaining_tokens``,
-            ``model``, ``platform``, ``tool_count``.
+            运行时上下文。可能包含键如 ``remaining_tokens``、
+            ``model``、``platform``、``tool_count``。
         """
 
     def on_session_end(self, messages: List[Dict[str, Any]]) -> None:
-        """Called when a session ends (explicit exit or timeout).
+        """session 结束时调用（显式退出或超时）。
 
-        Use for end-of-session fact extraction, summarisation, etc.
+        用于 session 结束时的知识提取、摘要等。
 
-        Parameters
+        参数
         ----------
         messages : list[dict[str, Any]]
-            The full conversation history for the session being ended.
+            正在结束的 session 的完整对话历史。
 
         Note
         ----
-        NOT called after every turn -- only at actual session boundaries
-        (CLI exit, ``/reset``, gateway session expiry).
+        并非每个回合后调用 — 仅在真正的 session 边界
+        （CLI 退出、``/reset``、gateway session 过期）。
         """
 
     def on_session_switch(
@@ -247,52 +244,50 @@ class MemoryProvider(ABC):
         reset: bool = False,
         **kwargs: Any,
     ) -> None:
-        """Called when the agent switches session_id mid-process.
+        """agent 在进程中切换 session_id 时调用。
 
-        Fires on ``/resume``, ``/branch``, ``/reset``, ``/new``, and context
-        compression -- any path that reassigns the session identifier without
-        tearing the provider down.
+        在 ``/resume``、``/branch``、``/reset``、``/new`` 和上下文
+        压缩时触发 — 即任何重新分配 session 标识符而不拆除
+        provider 的路径。
 
-        Providers that cache per-session state in :meth:`initialize`
-        (``_session_id``, ``_document_id``, accumulated turn buffers, counters)
-        should update or reset that state here so subsequent writes land in the
-        correct session's record.
+        在 :meth:`initialize` 中缓存按 session 状态的 provider
+        （``_session_id``、``_document_id``、累积回合缓冲区、计数器）
+        应在此处更新或重置状态，使后续写入落在正确的 session 记录中。
 
-        Parameters
+        参数
         ----------
         new_session_id : str
-            The session_id the agent just switched to.
+            agent 刚切换到的 session_id。
         parent_session_id : str
-            The previous session_id when lineage is meaningful -- set for
-            ``/branch`` (fork lineage), context compression (continuation
-            lineage), and ``/resume`` (the session we are leaving).  Empty
-            string when no lineage applies.
+            有血统意义时的前一个 session_id — 对 ``/branch``
+            （fork 血统）、上下文压缩（延续血统）和 ``/resume``
+            （我们正在离开的 session）设置。无血统适用时为空字符串。
         reset : bool
-            ``True`` when this is a genuinely new conversation, not a
-            resumption.  Fired by ``/reset`` / ``/new``.  Providers should
-            flush accumulated per-session buffers when this is set.  ``False``
-            for ``/resume`` / ``/branch`` / compression where the logical
-            conversation continues under the new id.
+            ``True`` 表示这是真正的新对话而非恢复。
+            由 ``/reset`` / ``/new`` 触发。设置时 provider 应
+            刷新累积的按 session 缓冲区。``False`` 用于
+            ``/resume`` / ``/branch`` / 压缩，这些场景下逻辑对话
+            在新 id 下继续。
         **kwargs : Any
-            Additional context.
+            附加上下文。
         """
 
     def on_pre_compress(self, messages: List[Dict[str, Any]]) -> str:
-        """Called before context compression discards old messages.
+        """在上下文压缩丢弃旧消息前调用。
 
-        Use to extract insights from messages about to be compressed.
+        用于从即将被压缩的消息中提取洞察。
 
-        Parameters
+        参数
         ----------
         messages : list[dict[str, Any]]
-            The list of messages that will be summarised / discarded.
+            将被摘要/丢弃的消息列表。
 
-        Returns
+        返回
         -------
         str
-            Text to include in the compression summary prompt so the
-            compressor preserves provider-extracted insights.  Return empty
-            string for no contribution (backwards-compatible default).
+            要包含在压缩摘要 prompt 中的文本，使压缩器
+            保留 provider 提取的洞察。无贡献时返回空字符串
+            （向后兼容的默认值）。
         """
         return ""
 
@@ -303,22 +298,22 @@ class MemoryProvider(ABC):
         content: str,
         metadata: Optional[Dict[str, Any]] = None,
     ) -> None:
-        """Called when the built-in memory tool writes an entry.
+        """内置 memory 工具写入条目时调用。
 
-        Use to mirror built-in memory writes to your backend.
+        用于将内置 memory 写入镜像到你的后端。
 
-        Parameters
+        参数
         ----------
         action : str
-            ``"add"``, ``"replace"``, or ``"remove"``.
+            ``"add"``、``"replace"`` 或 ``"remove"``。
         target : str
-            ``"memory"`` or ``"user"``.
+            ``"memory"`` 或 ``"user"``。
         content : str
-            The entry content.
-        metadata : dict[str, Any] or None
-            Structured provenance for the write when available.  Common keys
-            include ``write_origin``, ``execution_context``, ``session_id``,
-            ``parent_session_id``, ``platform``, and ``tool_name``.
+            条目内容。
+        metadata : dict[str, Any] 或 None
+            写入的结构化溯源信息（可用时）。常见键包括
+            ``write_origin``、``execution_context``、``session_id``、
+            ``parent_session_id``、``platform`` 和 ``tool_name``。
         """
 
     def on_delegation(
@@ -329,20 +324,20 @@ class MemoryProvider(ABC):
         child_session_id: str = "",
         **kwargs: Any,
     ) -> None:
-        """Called on the *parent* agent when a subagent completes.
+        """子代理完成时在*父*代理上调用。
 
-        The parent's memory provider receives the task+result pair as an
-        observation of what was delegated and what came back.  The subagent
-        itself typically has no provider session.
+        父代理的 memory provider 接收 task+result 对作为
+        委托了什么和返回了什么的一次观察。子代理本身
+        通常无 provider session。
 
-        Parameters
+        参数
         ----------
         task : str
-            The delegation prompt sent to the subagent.
+            发送给子代理的委托 prompt。
         result : str
-            The subagent's final response.
+            子代理的最终响应。
         child_session_id : str
-            The subagent's session_id, if available.
+            子代理的 session_id（可用时）。
         **kwargs : Any
-            Additional context.
+            附加上下文。
         """

@@ -1,12 +1,12 @@
-"""Concrete tool modules — imported to trigger ``registry.register()`` calls.
+"""具体工具模块 — 导入以触发 ``registry.register()`` 调用。
 
-Each ``.py`` file in this package registers its tools at module-import
-time via ``abstract.tools.registry.registry.register()``.  Just importing
-this package is enough to populate the global ToolRegistry.
+此包中的每个 ``.py`` 文件在模块导入时通过
+``abstract.tools.registry.registry.register()`` 注册其工具。
+仅导入此包即可填充全局 ToolRegistry。
 """
 
-from . import filesystem  # noqa: F401 — side-effect: registers filesystem tools
-from . import code        # noqa: F401 — side-effect: registers code tools
-from . import frontend    # noqa: F401 — side-effect: registers frontend tools
-from . import shell       # noqa: F401 — side-effect: registers shell tools
-from . import skills      # noqa: F401 — side-effect: registers skills tools
+from . import filesystem  # noqa: F401 — 副作用：注册文件系统工具
+from . import code        # noqa: F401 — 副作用：注册代码工具
+from . import frontend    # noqa: F401 — 副作用：注册前端工具
+from . import shell       # noqa: F401 — 副作用：注册 shell 工具
+from . import skills      # noqa: F401 — 副作用：注册 skill 工具

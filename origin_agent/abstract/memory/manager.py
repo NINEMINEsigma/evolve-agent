@@ -1,24 +1,23 @@
-"""MemoryManager — orchestrates memory providers for the agent.
+"""MemoryManager — 为 agent 编排 memory provider。
 
-Single integration point. Replaces scattered per-backend
-code with one manager that delegates to registered providers.
+单一集成点。将分散的各后端代码替换为一个管理器，
+由它委托给已注册的 provider。
 
-Only ONE external plugin provider is allowed at a time — attempting to
-register a second external provider is rejected with a warning.  This
-prevents tool schema bloat and conflicting memory backends.
+同一时间只允许一个外部插件 provider — 注册第二个外部 provider
+会被警告拒绝。这防止工具 schema 膨胀和 memory 后端冲突。
 
-Usage:
+用法:
     manager = MemoryManager()
     manager.add_provider(builtin_provider)
-    manager.add_provider(plugin_provider)  # at most one external
+    manager.add_provider(plugin_provider)  # 最多一个外部
 
     # System prompt
     prompt_parts.append(manager.build_system_prompt())
 
-    # Pre-turn
+    # 回合前
     context = manager.prefetch_all(user_message)
 
-    # Post-turn
+    # 回合后
     manager.sync_all(user_msg, assistant_response)
 """
 
@@ -35,15 +34,15 @@ logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
-# Context fencing helpers
+# 上下文围栏辅助函数
 # ---------------------------------------------------------------------------
 
-_FENCE_TAG_RE = re.compile(r"</?\s*memory-context\s*>", re.IGNORECASE)
-_INTERNAL_CONTEXT_RE = re.compile(
+_FENCE_TAG_RE: re.Pattern = re.compile(r"</?\s*memory-context\s*>", re.IGNORECASE)
+_INTERNAL_CONTEXT_RE: re.Pattern = re.compile(
     r"<\s*memory-context\s*>[\s\S]*?</\s*memory-context\s*>",
     re.IGNORECASE,
 )
-_INTERNAL_NOTE_RE = re.compile(
+_INTERNAL_NOTE_RE: re.Pattern = re.compile(
     r"\[System note:\s*The following is recalled memory context,"
     r"\s*NOT new user input\.\s*Treat as (?:informational background data"
     r"|authoritative reference data[^\]]*)\]\.?\]?\s*",
@@ -52,7 +51,7 @@ _INTERNAL_NOTE_RE = re.compile(
 
 
 def _tool_error(message: str, **extra: Any) -> str:
-    """Return a JSON error string (local replacement for tools.registry.tool_error)."""
+    """返回 JSON 错误字符串（tools.registry.tool_error 的本地替代）。"""
     result: Dict[str, Any] = {"error": str(message)}
     if extra:
         result.update(extra)
@@ -60,7 +59,7 @@ def _tool_error(message: str, **extra: Any) -> str:
 
 
 def sanitize_context(text: str) -> str:
-    """Strip fence tags, injected context blocks, and system notes from provider output."""
+    """从 provider 输出中剥离围栏标签、注入的上下文块和系统注释。"""
     text = _INTERNAL_CONTEXT_RE.sub("", text)
     text = _INTERNAL_NOTE_RE.sub("", text)
     text = _FENCE_TAG_RE.sub("", text)
@@ -68,33 +67,31 @@ def sanitize_context(text: str) -> str:
 
 
 class StreamingContextScrubber:
-    """Stateful scrubber for streaming text that may contain split memory-context spans.
+    """有状态清洗器，处理可能跨 chunk 分割的 memory-context 区间。
 
-    The one-shot ``sanitize_context`` regex cannot survive chunk boundaries:
-    a ``<memory-context>`` opened in one delta and closed in a later delta
-    leaks its payload to the UI because the non-greedy block regex needs
-    both tags in one string.  This scrubber runs a small state machine
-    across deltas, holding back partial-tag tails and discarding
-    everything inside a span (including the system-note line).
+    一次性 ``sanitize_context`` regex 无法跨越 chunk 边界：
+    一个 delta 中打开的 ``<memory-context>`` 在后续 delta 中关闭时
+    会将其负载泄露到 UI，因为非贪心块 regex 需要两个标签
+    在同一字符串中。此清洗器跨 delta 运行一个小状态机，
+    保留部分标签尾部，丢弃区间内的所有内容（包括系统注释行）。
 
-    Usage::
+    用法::
 
         scrubber = StreamingContextScrubber()
         for delta in stream:
             visible = scrubber.feed(delta)
             if visible:
                 emit(visible)
-        trailing = scrubber.flush()  # at end of stream
+        trailing = scrubber.flush()  # 流结束时
         if trailing:
             emit(trailing)
 
-    The scrubber is re-entrant per agent instance.  Callers building new
-    top-level responses (new turn) should create a fresh scrubber or call
-    ``reset()``.
+    清洗器在每个 agent 实例内可重入。构建新顶级响应的调用方
+    应创建新清洗器或调用 ``reset()``。
     """
 
-    _OPEN_TAG = "<memory-context>"
-    _CLOSE_TAG = "</memory-context>"
+    _OPEN_TAG: str = "<memory-context>"
+    _CLOSE_TAG: str = "</memory-context>"
 
     def __init__(self) -> None:
         self._in_span: bool = False
@@ -105,33 +102,33 @@ class StreamingContextScrubber:
         self._buf = ""
 
     def feed(self, text: str) -> str:
-        """Return the visible portion of ``text`` after scrubbing.
+        """返回清洗后 ``text`` 的可见部分。
 
-        Any trailing fragment that could be the start of an open/close tag
-        is held back in the internal buffer and surfaced on the next
-        ``feed()`` call or discarded/emitted by ``flush()``.
+        任何可能是开标签/闭标签起始的尾部片段
+        被保留在内部缓冲区中，在下次 ``feed()`` 调用时释放，
+        或由 ``flush()`` 丢弃/发出。
         """
         if not text:
             return ""
-        buf = self._buf + text
+        buf: str = self._buf + text
         self._buf = ""
         out: list[str] = []
 
         while buf:
             if self._in_span:
-                idx = buf.lower().find(self._CLOSE_TAG)
+                idx: int = buf.lower().find(self._CLOSE_TAG)
                 if idx == -1:
-                    # Hold back a potential partial close tag; drop the rest
-                    held = self._max_partial_suffix(buf, self._CLOSE_TAG)
+                    # 保留可能的部分闭标签；丢弃其余内容
+                    held: int = self._max_partial_suffix(buf, self._CLOSE_TAG)
                     self._buf = buf[-held:] if held else ""
                     return "".join(out)
-                # Found close — skip span content + tag, continue
-                buf = buf[idx + len(self._CLOSE_TAG) :]
+                # 找到闭标签 — 跳过区间内容 + 标签，继续
+                buf = buf[idx + len(self._CLOSE_TAG):]
                 self._in_span = False
             else:
                 idx = buf.lower().find(self._OPEN_TAG)
                 if idx == -1:
-                    # No open tag — hold back a potential partial open tag
+                    # 无开标签 — 保留可能的部分开标签
                     held = self._max_partial_suffix(buf, self._OPEN_TAG)
                     if held:
                         out.append(buf[:-held])
@@ -139,39 +136,38 @@ class StreamingContextScrubber:
                     else:
                         out.append(buf)
                     return "".join(out)
-                # Emit text before the tag, enter span
+                # 发出标签前的文本，进入区间
                 if idx > 0:
                     out.append(buf[:idx])
-                buf = buf[idx + len(self._OPEN_TAG) :]
+                buf = buf[idx + len(self._OPEN_TAG):]
                 self._in_span = True
 
         return "".join(out)
 
     def flush(self) -> str:
-        """Emit any held-back buffer at end-of-stream.
+        """在流结束时发出任何保留的缓冲区内容。
 
-        If we're still inside an unterminated span the remaining content is
-        discarded (safer: leaking partial memory context is worse than a
-        truncated answer).  Otherwise the held-back partial-tag tail is
-        emitted verbatim (it turned out not to be a real tag).
+        如果仍在未终止的区间内，剩余内容被丢弃
+        （更安全：泄露部分 memory 上下文比截断回答更糟糕）。
+        否则保留的部分标签尾部按原样发出（它实际不是真实标签）。
         """
         if self._in_span:
             self._buf = ""
             self._in_span = False
             return ""
-        tail = self._buf
+        tail: str = self._buf
         self._buf = ""
         return tail
 
     @staticmethod
     def _max_partial_suffix(buf: str, tag: str) -> int:
-        """Return the length of the longest buf-suffix that is a tag-prefix.
+        """返回 buf 最长后缀中作为 tag 前缀的长度。
 
-        Case-insensitive.  Returns 0 if no suffix could start the tag.
+        大小写不敏感。如果无后缀可开始该 tag 则返回 0。
         """
-        tag_lower = tag.lower()
-        buf_lower = buf.lower()
-        max_check = min(len(buf_lower), len(tag_lower) - 1)
+        tag_lower: str = tag.lower()
+        buf_lower: str = buf.lower()
+        max_check: int = min(len(buf_lower), len(tag_lower) - 1)
         for i in range(max_check, 0, -1):
             if tag_lower.startswith(buf_lower[-i:]):
                 return i
@@ -179,10 +175,10 @@ class StreamingContextScrubber:
 
 
 def build_memory_context_block(raw_context: str) -> str:
-    """Wrap prefetched memory in a fenced block with system note."""
+    """将预取的 memory 包装到带系统注释的围栏块中。"""
     if not raw_context or not raw_context.strip():
         return ""
-    clean = sanitize_context(raw_context)
+    clean: str = sanitize_context(raw_context)
     if clean != raw_context:
         logger.warning("memory provider returned pre-wrapped context; stripped")
     return (
@@ -196,31 +192,31 @@ def build_memory_context_block(raw_context: str) -> str:
 
 
 class MemoryManager:
-    """Orchestrates the built-in provider plus at most one external provider.
+    """编排内置 provider 加最多一个外部 provider。
 
-    The builtin provider is always first. Only one non-builtin (external)
-    provider is allowed.  Failures in one provider never block the other.
+    内置 provider 始终排在首位。仅允许一个非内置（外部）provider。
+    任一 provider 的故障不会阻塞其他 provider。
     """
 
     def __init__(self) -> None:
         self._providers: List[MemoryProvider] = []
         self._tool_to_provider: Dict[str, MemoryProvider] = {}
-        self._has_external: bool = False  # True once a non-builtin provider is added
+        self._has_external: bool = False  # 添加非内置 provider 后为 True
 
-    # -- Registration --------------------------------------------------------
+    # -- 注册 --------------------------------------------------------
 
     def add_provider(self, provider: MemoryProvider) -> None:
-        """Register a memory provider.
+        """注册 memory provider。
 
-        Built-in provider (name ``"builtin"``) is always accepted.
-        Only **one** external (non-builtin) provider is allowed — a second
-        attempt is rejected with a warning.
+        内置 provider（名称 ``"builtin"``）始终接受。
+        仅允许**一个**外部（非内置）provider — 第二次尝试
+        将被警告拒绝。
         """
-        is_builtin = provider.name == "builtin"
+        is_builtin: bool = provider.name == "builtin"
 
         if not is_builtin:
             if self._has_external:
-                existing = next(
+                existing: str = next(
                     (p.name for p in self._providers if p.name != "builtin"), "unknown"
                 )
                 logger.warning(
@@ -235,9 +231,9 @@ class MemoryManager:
 
         self._providers.append(provider)
 
-        # Index tool names → provider for routing
+        # 索引工具名称 → provider 用于路由
         for schema in provider.get_tool_schemas():
-            tool_name = schema.get("name", "")
+            tool_name: str = schema.get("name", "")
             if tool_name and tool_name not in self._tool_to_provider:
                 self._tool_to_provider[tool_name] = provider
             elif tool_name in self._tool_to_provider:
@@ -256,26 +252,26 @@ class MemoryManager:
         )
 
     def remove_provider(self, name: str) -> bool:
-        """Remove a provider by name. Returns True if removed, False if not found.
+        """按名称移除 provider。返回 True 表示已移除，False 表示未找到。
 
-        If the removed provider was the sole external provider, resets
-        the external-provider guard so another external can be registered.
+        如果被移除的 provider 是唯一的外部 provider，
+        重置外部 provider 守卫以允许注册另一个外部 provider。
         """
-        provider = next((p for p in self._providers if p.name == name), None)
+        provider: MemoryProvider | None = next((p for p in self._providers if p.name == name), None)
         if provider is None:
             logger.warning("No memory provider named '%s' to remove", name)
             return False
 
         self._providers = [p for p in self._providers if p.name != name]
 
-        # Remove all tool entries belonging to this provider
+        # 移除此 provider 所有工具条目
         self._tool_to_provider = {
             t: p for t, p in self._tool_to_provider.items() if p.name != name
         }
 
-        # Update external guard
-        if not provider.name == "builtin":
-            remaining_external = any(
+        # 更新外部守卫
+        if provider.name != "builtin":
+            remaining_external: bool = any(
                 p.name != "builtin" for p in self._providers
             )
             if not remaining_external:
@@ -286,32 +282,32 @@ class MemoryManager:
 
     @property
     def providers(self) -> List[MemoryProvider]:
-        """All registered providers in order."""
+        """所有已注册 provider，按顺序。"""
         return list(self._providers)
 
     def get_provider(self, name: str) -> Optional[MemoryProvider]:
-        """Get a provider by name, or None if not registered."""
+        """按名称获取 provider，未注册返回 None。"""
         for p in self._providers:
             if p.name == name:
                 return p
         return None
 
     def get_provider_names(self) -> List[str]:
-        """Return the names of all registered providers in order."""
+        """返回所有已注册 provider 的名称列表，按顺序。"""
         return [p.name for p in self._providers]
 
     # -- System prompt -------------------------------------------------------
 
     def build_system_prompt(self) -> str:
-        """Collect system prompt blocks from all providers.
+        """收集所有 provider 的 system prompt 块。
 
-        Returns combined text, or empty string if no providers contribute.
-        Each non-empty block is labeled with the provider name.
+        返回合并文本，无 provider 贡献时返回空字符串。
+        每个非空块标注 provider 名称。
         """
-        blocks = []
+        blocks: list[str] = []
         for provider in self._providers:
             try:
-                block = provider.system_prompt_block()
+                block: str = provider.system_prompt_block()
                 if block and block.strip():
                     blocks.append(block)
             except Exception as e:
@@ -322,18 +318,18 @@ class MemoryManager:
                 )
         return "\n\n".join(blocks)
 
-    # -- Prefetch / recall ---------------------------------------------------
+    # -- 预取 / 回忆 ---------------------------------------------------
 
     def prefetch_all(self, query: str, *, session_id: str = "") -> str:
-        """Collect prefetch context from all providers.
+        """从所有 provider 收集预取上下文。
 
-        Returns merged context text labeled by provider. Empty providers
-        are skipped. Failures in one provider don't block others.
+        返回按 provider 标注的合并上下文文本。空 provider 被跳过。
+        任一 provider 的故障不阻塞其他 provider。
         """
-        parts = []
+        parts: list[str] = []
         for provider in self._providers:
             try:
-                result = provider.prefetch(query, session_id=session_id)
+                result: str = provider.prefetch(query, session_id=session_id)
                 if result and result.strip():
                     parts.append(result)
             except Exception as e:
@@ -344,7 +340,7 @@ class MemoryManager:
                 )
         return "\n\n".join(parts)
 
-    # -- Sync ----------------------------------------------------------------
+    # -- 同步 ----------------------------------------------------------------
 
     def sync_all(
         self,
@@ -353,7 +349,7 @@ class MemoryManager:
         *,
         session_id: str = "",
     ) -> None:
-        """Sync a completed turn to all providers."""
+        """将完成的回合同步到所有 provider。"""
         for provider in self._providers:
             try:
                 provider.sync_turn(user_msg, asst_resp, session_id=session_id)
@@ -364,19 +360,19 @@ class MemoryManager:
                     e,
                 )
 
-    # -- Tools ---------------------------------------------------------------
+    # -- 工具 ---------------------------------------------------------------
 
     def get_tool_schemas(self) -> List[Dict[str, Any]]:
-        """Collect tool schemas from all providers.
+        """收集所有 provider 的工具 schema。
 
-        Duplicate tool names are deduplicated (first provider wins).
+        重复工具名称被去重（第一个 provider 获胜）。
         """
-        schemas = []
-        seen = set()
+        schemas: list[dict] = []
+        seen: set[str] = set()
         for provider in self._providers:
             try:
                 for schema in provider.get_tool_schemas():
-                    name = schema.get("name", "")
+                    name: str = schema.get("name", "")
                     if name and name not in seen:
                         schemas.append(schema)
                         seen.add(name)
@@ -389,22 +385,22 @@ class MemoryManager:
         return schemas
 
     def get_tool_names(self) -> set:
-        """Return set of all tool names across all providers."""
+        """返回跨所有 provider 的工具名称集合。"""
         return set(self._tool_to_provider.keys())
 
     def has_tool(self, tool_name: str) -> bool:
-        """Check if any provider handles this tool."""
+        """检查是否有 provider 处理此工具。"""
         return tool_name in self._tool_to_provider
 
     def handle_tool_call(
         self, tool_name: str, args: Dict[str, Any], **kwargs: Any
     ) -> str:
-        """Route a tool call to the correct provider.
+        """将工具调用路由到正确的 provider。
 
-        Returns JSON string result. Raises ValueError if no provider
-        handles the tool.
+        返回 JSON 字符串结果。如果无 provider 处理该工具，
+        抛出 ValueError。
         """
-        provider = self._tool_to_provider.get(tool_name)
+        provider: MemoryProvider | None = self._tool_to_provider.get(tool_name)
         if provider is None:
             return _tool_error(f"No memory provider handles tool '{tool_name}'")
         try:
@@ -418,10 +414,10 @@ class MemoryManager:
             )
             return _tool_error(f"Memory tool '{tool_name}' failed: {e}")
 
-    # -- Lifecycle hooks -----------------------------------------------------
+    # -- 生命周期钩子 -----------------------------------------------------
 
     def shutdown_all(self) -> None:
-        """Shut down all providers (reverse order for clean teardown)."""
+        """关闭所有 provider（逆序以干净拆解）。"""
         for provider in reversed(self._providers):
             try:
                 provider.shutdown()

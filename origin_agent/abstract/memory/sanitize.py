@@ -1,29 +1,28 @@
-"""
-Context sanitization utilities for memory provider output.
+"""Context 清洗工具 — 用于 memory provider 输出。
 
-Strips fence tags, injected context blocks, and system notes that memory
-providers may embed in their responses.  Provides both a one-shot
-``sanitize_context`` function (suitable for buffered text) and a
-``StreamingContextScrubber`` class that can handle text split across
-arbitrary chunk boundaries.
+剥离 memory provider 可能在响应中嵌入的围栏标签、
+注入的上下文块和系统注释。同时提供一次性
+``sanitize_context`` 函数（适用于缓冲文本）和
+``StreamingContextScrubber`` 类（可处理跨任意 chunk
+边界分割的文本）。
 
-All functions use only the Python stdlib (``re``).
+所有函数仅使用 Python stdlib（``re``）。
 """
 
 import re
 
 # ---------------------------------------------------------------------------
-# Regex patterns
+# Regex 模式
 # ---------------------------------------------------------------------------
 
-_FENCE_TAG_RE = re.compile(r"</?\s*memory-context\s*>", re.IGNORECASE)
+_FENCE_TAG_RE: re.Pattern = re.compile(r"</?\s*memory-context\s*>", re.IGNORECASE)
 
-_INTERNAL_CONTEXT_RE = re.compile(
+_INTERNAL_CONTEXT_RE: re.Pattern = re.compile(
     r"<\s*memory-context\s*>[\s\S]*?</\s*memory-context\s*>",
     re.IGNORECASE,
 )
 
-_INTERNAL_NOTE_RE = re.compile(
+_INTERNAL_NOTE_RE: re.Pattern = re.compile(
     r"\[System note:\s*The following is recalled memory context,"
     r"\s*NOT new user input\.\s*Treat as "
     r"(?:informational background data|authoritative reference data[^\]]*)"
@@ -32,28 +31,26 @@ _INTERNAL_NOTE_RE = re.compile(
 )
 
 # ---------------------------------------------------------------------------
-# One-shot sanitize
+# 一次性清洗
 # ---------------------------------------------------------------------------
 
 
 def sanitize_context(text: str) -> str:
-    """Strip fence tags, injected context blocks, and system notes from
-    memory provider output.
+    """从 memory provider 输出中剥离围栏标签、注入的上下文块和系统注释。
 
-    This is a one-shot regex-based scrubber suitable for **buffered**
-    (fully received) text.  For streaming responses where a ``<memory-context>``
-    span may be split across chunks, use :class:`StreamingContextScrubber`
-    instead.
+    这是一次性基于 regex 的清洗器，适用于**缓冲完成**的文本。
+    对于流式响应（``<memory-context>`` 区间可能跨 chunk 分割），
+    请使用 :class:`StreamingContextScrubber`。
 
-    Parameters
+    参数
     ----------
     text : str
-        The raw text from a memory provider response.
+        memory provider 响应的原始文本。
 
-    Returns
+    返回
     -------
     str
-        Cleaned text with all memory-context markup removed.
+        移除所有 memory-context 标记后的清洗文本。
     """
     text = _INTERNAL_CONTEXT_RE.sub("", text)
     text = _INTERNAL_NOTE_RE.sub("", text)
@@ -62,35 +59,35 @@ def sanitize_context(text: str) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Partial-tag detection helper
+# 部分标签检测辅助函数
 # ---------------------------------------------------------------------------
 
 
 def _max_partial_suffix(buf: str, tag: str) -> int:
-    """Return the length of the longest *buf* suffix that is a prefix of *tag*.
+    """返回 *buf* 最长后缀中作为 *tag* 前缀的长度。
 
-    Case-insensitive.  Returns ``0`` if no suffix of *buf* could start *tag*.
+    大小写不敏感。如果 *buf* 无后缀可开始 *tag* 则返回 ``0``。
 
-    This is used internally by :class:`StreamingContextScrubber` to decide
-    how much trailing text to hold back when no complete tag is visible —
-    the held-back text *could* be the beginning of ``<memory-context>`` or
-    ``</memory-context>`` arriving in a future chunk.
+    此函数由 :class:`StreamingContextScrubber` 内部使用，
+    用于决定在无完整标签可见时应保留多少尾部文本 —
+    保留的文本*可能*是 ``<memory-context>`` 或
+    ``</memory-context>`` 的开头片段，在未来的 chunk 中到达。
 
-    Parameters
+    参数
     ----------
     buf : str
-        Text buffer to inspect.
+        要检查的文本缓冲区。
     tag : str
-        The full tag string to match against (e.g. ``"<memory-context>"``).
+        要匹配的完整标签字符串（例如 ``"<memory-context>"``）。
 
-    Returns
+    返回
     -------
     int
-        The length of the longest matching suffix (``0`` if none).
+        最长匹配后缀的长度（无匹配时为 ``0``）。
     """
-    tag_lower = tag.lower()
-    buf_lower = buf.lower()
-    max_check = min(len(buf_lower), len(tag_lower) - 1)
+    tag_lower: str = tag.lower()
+    buf_lower: str = buf.lower()
+    max_check: int = min(len(buf_lower), len(tag_lower) - 1)
     for i in range(max_check, 0, -1):
         if tag_lower.startswith(buf_lower[-i:]):
             return i
@@ -98,91 +95,88 @@ def _max_partial_suffix(buf: str, tag: str) -> int:
 
 
 # ---------------------------------------------------------------------------
-# Streaming scrubber
+# 流式清洗器
 # ---------------------------------------------------------------------------
 
 
 class StreamingContextScrubber:
-    """Stateful scrubber for streaming text that may contain split
-    memory-context spans across chunks.
+    """有状态清洗器，处理可能跨 chunk 分割的 memory-context 区间。
 
-    The one-shot :func:`sanitize_context` regex cannot survive chunk
-    boundaries: a ``<memory-context>`` opened in one delta and closed in a
-    later delta leaks its payload to the UI because the non-greedy block
-    regex needs both tags in one string.  This scrubber runs a small state
-    machine across deltas, holding back partial-tag tails and discarding
-    everything inside a span (including the system-note line).
+    一次性 :func:`sanitize_context` regex 无法跨越 chunk 边界：
+    一个 delta 中打开的 ``<memory-context>`` 在后续 delta 中关闭时
+    会将其负载泄露到 UI，因为非贪心块 regex 需要两个标签
+    在同一字符串中。此清洗器跨 delta 运行一个小状态机，
+    保留部分标签尾部，丢弃区间内的所有内容（包括系统注释行）。
 
-    Usage::
+    用法::
 
         scrubber = StreamingContextScrubber()
         for delta in stream:
             visible = scrubber.feed(delta)
             if visible:
                 emit(visible)
-        trailing = scrubber.flush()  # at end of stream
+        trailing = scrubber.flush()  # 流结束时
         if trailing:
             emit(trailing)
 
-    The scrubber is re-entrant per agent instance.  Callers building new
-    top-level responses (new turn) should create a fresh scrubber or call
-    :meth:`reset`.
+    清洗器在每个 agent 实例内可重入。构建新顶级响应的调用方
+    应创建新清洗器或调用 :meth:`reset`。
     """
 
-    _OPEN_TAG = "<memory-context>"
-    _CLOSE_TAG = "</memory-context>"
+    _OPEN_TAG: str = "<memory-context>"
+    _CLOSE_TAG: str = "</memory-context>"
 
     def __init__(self) -> None:
         self._in_span: bool = False
         self._buf: str = ""
 
     def reset(self) -> None:
-        """Reset the internal state machine back to initial conditions.
+        """将内部状态机重置到初始条件。
 
-        Use this when starting a new top-level response to avoid
-        cross-turn contamination.
+        在开始新的顶级响应时使用此方法，
+        避免跨回合污染。
         """
         self._in_span = False
         self._buf = ""
 
     def feed(self, text: str) -> str:
-        """Return the visible portion of *text* after scrubbing.
+        """返回清洗后 *text* 的可见部分。
 
-        Any trailing fragment that could be the start of an open or close
-        tag is held back in the internal buffer and surfaced on the next
-        ``feed()`` call or discarded/emitted by :meth:`flush`.
+        任何可能是开标签或闭标签起始的尾部片段
+        被保留在内部缓冲区中，在下次 ``feed()`` 调用时释放，
+        或由 :meth:`flush` 丢弃/发出。
 
-        Parameters
+        参数
         ----------
         text : str
-            A single chunk of streaming text.
+            流式文本的单个 chunk。
 
-        Returns
+        返回
         -------
         str
-            The visible (non-context) portion of the chunk.  May be empty.
+            该 chunk 的可见（非上下文）部分。可能为空。
         """
         if not text:
             return ""
-        buf = self._buf + text
+        buf: str = self._buf + text
         self._buf = ""
         out: list[str] = []
 
         while buf:
             if self._in_span:
-                idx = buf.lower().find(self._CLOSE_TAG)
+                idx: int = buf.lower().find(self._CLOSE_TAG)
                 if idx == -1:
-                    # Hold back a potential partial close tag; drop the rest
-                    held = _max_partial_suffix(buf, self._CLOSE_TAG)
+                    # 保留可能的部分闭标签；丢弃其余内容
+                    held: int = _max_partial_suffix(buf, self._CLOSE_TAG)
                     self._buf = buf[-held:] if held else ""
                     return "".join(out)
-                # Found close — skip span content + tag, continue
-                buf = buf[idx + len(self._CLOSE_TAG) :]
+                # 找到闭标签 — 跳过区间内容 + 标签，继续
+                buf = buf[idx + len(self._CLOSE_TAG):]
                 self._in_span = False
             else:
                 idx = buf.lower().find(self._OPEN_TAG)
                 if idx == -1:
-                    # No open tag — hold back a potential partial open tag
+                    # 无开标签 — 保留可能的部分开标签
                     held = _max_partial_suffix(buf, self._OPEN_TAG)
                     if held:
                         out.append(buf[:-held])
@@ -190,31 +184,30 @@ class StreamingContextScrubber:
                     else:
                         out.append(buf)
                     return "".join(out)
-                # Emit text before the tag, enter span
+                # 发出标签前的文本，进入区间
                 if idx > 0:
                     out.append(buf[:idx])
-                buf = buf[idx + len(self._OPEN_TAG) :]
+                buf = buf[idx + len(self._OPEN_TAG):]
                 self._in_span = True
 
         return "".join(out)
 
     def flush(self) -> str:
-        """Emit any held-back buffer at end-of-stream.
+        """在流结束时发出任何保留的缓冲区内容。
 
-        If we're still inside an unterminated span the remaining content is
-        discarded (safer: leaking partial memory context is worse than a
-        truncated answer).  Otherwise the held-back partial-tag tail is
-        emitted verbatim (it turned out not to be a real tag).
+        如果仍在未终止的区间内，剩余内容被丢弃
+        （更安全：泄露部分 memory 上下文比截断回答更糟糕）。
+        否则保留的部分标签尾部按原样发出（它实际不是真实标签）。
 
-        Returns
+        返回
         -------
         str
-            The flushed content, or empty string if still in a span.
+            刷新的内容，仍在区间内时为空字符串。
         """
         if self._in_span:
             self._buf = ""
             self._in_span = False
             return ""
-        tail = self._buf
+        tail: str = self._buf
         self._buf = ""
         return tail

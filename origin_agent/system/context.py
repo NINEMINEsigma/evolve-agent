@@ -1,4 +1,4 @@
-"""Runtime context — single source of truth for all configuration."""
+"""运行时上下文 — 所有配置的唯一真相来源。"""
 
 from __future__ import annotations
 
@@ -9,64 +9,63 @@ from pydantic import BaseModel, ConfigDict
 
 
 class RuntimeContext(BaseModel):
-    """Immutable runtime configuration.
+    """不可变的运行时配置。
 
-    Populated by __main__.py from CLI arguments.  All paths are resolved to
-    absolute form so downstream code never has to worry about CWD.
+    由 __main__.py 从 CLI 参数填充。所有路径均解析为绝对形式，
+    下游代码无需关心 CWD。
     """
 
     model_config = ConfigDict(frozen=True)
 
-    # -- Paths (all absolute) -----------------------------------------------
+    # -- 路径（均为绝对路径） -----------------------------------------------
 
     workspace: Path
-    """Root workspace directory (e.g. ``workspace/``)."""
+    """根工作空间目录（例如 ``workspace/``）。"""
 
     agentspace: Path
-    """General-purpose sandbox directory for agent I/O (e.g. ``workspace/agentspace/``).
+    """通用沙盒目录，用于 agent I/O（例如 ``workspace/agentspace/``）。
 
-    Mapped to the ``ws:`` namespace.  Kept separate from ``fork_path``
-    and ``fix_path`` so that agent file operations never overlap with the
-    runtime code directories.
+    映射到 ``ws:`` 命名空间。与 ``fork_path`` 和 ``fix_path`` 分离，
+    确保 agent 文件操作不会与运行时代码目录重叠。
     """
 
     fork_path: Path
-    """Directory where evolved code is written (slow directory)."""
+    """进化代码写入的目录（slow 目录）。"""
 
     log_path: Path
-    """Path to the log file produced by the orchestrator."""
+    """编排器产生的日志文件路径。"""
 
-    # -- Runtime flags ------------------------------------------------------
+    # -- 运行时标志 ------------------------------------------------------
 
     mode: str = "fast"
-    """Execution mode: ``"fast"`` (normal) or ``"fallback"`` (repair)."""
+    """执行模式：``"fast"``（正常）或 ``"fallback"``（修复）。"""
 
     console_log: bool = False
 
-    # -- Fallback-mode fields -----------------------------------------------
+    # -- fallback 模式字段 -----------------------------------------------
 
     fix_path: Optional[Path] = None
-    """When mode=='fallback', the directory to repair (the broken fast)."""
+    """mode=='fallback' 时，需要修复的目录（损坏的 fast）。"""
 
     fix_log_path: Optional[Path] = None
-    """When mode=='fallback', path to the error log to consult."""
+    """mode=='fallback' 时，需要参考的错误日志路径。"""
 
-    # -- Gateway config -----------------------------------------------------
+    # -- Gateway 配置 -----------------------------------------------------
 
     gateway_host: str = "127.0.0.1"
     gateway_port: int = 8765
 
-    # -- LLM config (populated later from env / config file) ----------------
+    # -- LLM 配置（后续从 env / 配置文件填充） ----------------
 
     llm_api_key: str = ""
     llm_base_url: str = "https://api.openai.com/v1"
     llm_model: str = "gpt-4o"
-    llm_max_context_tokens: int = 128_000  # total context window
-    llm_context_upbound: float = 0.7       # compression threshold fraction
+    llm_max_context_tokens: int = 128_000  # 总上下文窗口
+    llm_context_upbound: float = 0.7       # 压缩阈值比例
     llm_temperature: float = 0.7
     llm_max_output_tokens: int = 4096
 
-    # -- Tool execution timeout ---------------------------------------------
+    # -- 工具执行超时 ---------------------------------------------
 
     tool_timeout: int = 30
-    """Maximum seconds a single tool call may run before being cancelled (0 = no timeout)."""
+    """单个工具调用允许运行的最大秒数，超时后取消（0 = 无超时）。"""

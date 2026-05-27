@@ -1,8 +1,8 @@
-"""Evolve Agent — entry point.
+"""Evolve Agent — 入口点。
 
-Parses CLI arguments in the run.py orchestrator format (``--key value``
-combined into single argv elements), creates a RuntimeContext, wires up
-logging, and starts the async App.
+按 run.py 编排器格式解析 CLI 参数（``--key value``，
+合并为单个 sys.argv 元素），创建 RuntimeContext，
+配置日志，启动异步 App。
 """
 
 from __future__ import annotations
@@ -14,12 +14,12 @@ import subprocess
 import sys
 from pathlib import Path
 
-# Ensure the agent's own directory is first on sys.path so that imports
-# like ``from main import App`` and ``from system.context import RuntimeContext``
-# resolve correctly regardless of CWD or how the process was launched.
-# This is critical when the orchestrator copies the agent source into
-# workspace/fast_agent_space/ — the directory name differs from "origin_agent".
-_AGENT_DIR = str(Path(__file__).resolve().parent)
+# 确保 agent 自身目录在 sys.path 最前面，使
+# ``from main import App`` 和 ``from system.context import RuntimeContext``
+# 无论 CWD 或进程启动方式如何都能正确解析。
+# 这对编排器将 agent 源码复制到 workspace/fast_agent_space/ 时至关重要 —
+# 目录名与 "origin_agent" 不同。
+_AGENT_DIR: str = str(Path(__file__).resolve().parent)
 if _AGENT_DIR not in sys.path:
     sys.path.insert(0, _AGENT_DIR)
 
@@ -28,22 +28,22 @@ from system.context import RuntimeContext  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
-# CLI parsing (run.py orchestrator format)
+# CLI 解析（run.py 编排器格式）
 # ---------------------------------------------------------------------------
 
 def _parse_cli() -> dict:
-    """Parse ``--key value`` arguments from sys.argv.
+    """从 sys.argv 解析 ``--key value`` 参数。
 
-    Format: ``--key value`` as two separate sys.argv entries.
-    ``--flag`` alone (no value) is stored as True.
+    格式：``--key value`` 作为两个独立的 sys.argv 条目。
+    单独的 ``--flag``（无值）存储为 True。
     """
     parsed: dict = {}
-    args = sys.argv[1:]
-    i = 0
+    args: list[str] = sys.argv[1:]
+    i: int = 0
     while i < len(args):
-        arg = args[i]
+        arg: str = args[i]
         if arg.startswith("--"):
-            body = arg[2:]
+            body: str = arg[2:]
             if i + 1 < len(args) and not args[i + 1].startswith("--"):
                 parsed[body] = args[i + 1].strip("\"'")
                 i += 1
@@ -54,33 +54,33 @@ def _parse_cli() -> dict:
 
 
 # ---------------------------------------------------------------------------
-# Logging setup
+# 日志配置
 # ---------------------------------------------------------------------------
 
 def _setup_logging(log_path: str | None, console: bool) -> None:
-    """Configure root logger with a file handler and optional console handler."""
-    root = logging.getLogger()
+    """使用文件 handler 和可选的终端 handler 配置根 logger。"""
+    root: logging.Logger = logging.getLogger()
     root.setLevel(logging.INFO)
-    fmt = logging.Formatter(
+    fmt: logging.Formatter = logging.Formatter(
         "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
     )
 
     if log_path:
         Path(log_path).parent.mkdir(parents=True, exist_ok=True)
-        fh = logging.FileHandler(log_path, encoding="utf-8")
+        fh: logging.FileHandler = logging.FileHandler(log_path, encoding="utf-8")
         fh.setLevel(logging.INFO)
         fh.setFormatter(fmt)
         root.addHandler(fh)
 
     if console:
-        ch = logging.StreamHandler(sys.stdout)
+        ch: logging.StreamHandler = logging.StreamHandler(sys.stdout)
         ch.setLevel(logging.INFO)
         ch.setFormatter(fmt)
         root.addHandler(ch)
 
 
 # ---------------------------------------------------------------------------
-# Context builder
+# 上下文构建器
 # ---------------------------------------------------------------------------
 
 def _coerce_bool(raw: object) -> bool:
@@ -90,10 +90,9 @@ def _coerce_bool(raw: object) -> bool:
 
 
 def _build_context(cli: dict) -> RuntimeContext:
-    """Build RuntimeContext from parsed CLI args.
+    """从解析后的 CLI 参数构建 RuntimeContext。
 
-    Paths are resolved to absolute form so downstream code never needs
-    to worry about CWD changing.
+    路径解析为绝对形式，下游代码无需关心 CWD 变化。
     """
     return RuntimeContext(
         workspace=Path(cli.get("workspace", ".")).resolve(),
@@ -106,14 +105,14 @@ def _build_context(cli: dict) -> RuntimeContext:
         console_log=_coerce_bool(cli.get("console_log", False)),
         gateway_host=str(cli.get("gateway_host", "127.0.0.1")),
         gateway_port=int(cli.get("gateway_port", 8765)),
-        # Fallback-mode only fields
+        # 仅 fallback 模式字段
         fix_path=(
             Path(cli["fix_fork"]).resolve() if "fix_fork" in cli else None
         ),
         fix_log_path=(
             Path(cli["fix"]).resolve() if "fix" in cli else None
         ),
-        # LLM config — env vars override CLI args, CLI args override defaults
+        # LLM 配置 — env var 覆盖 CLI 参数，CLI 参数覆盖默认值
         llm_api_key=(
             os.environ.get("OPENAI_API_KEY", "")
             or str(cli.get("llm_api_key", ""))
@@ -137,25 +136,25 @@ def _build_context(cli: dict) -> RuntimeContext:
 # ---------------------------------------------------------------------------
 
 def _build_frontend() -> bool:
-    """Run ``pnpm install && pnpm run build`` inside the frontend directory.
+    """在前端目录中运行 ``pnpm install && pnpm run build``。
 
-    The frontend lives under *AGENT_DIR* (e.g. ``origin_agent/frontend/`` or
-    ``workspace/fast_agent_space/frontend/``).  Build output goes to
-    ``frontend/dist/`` and is served by the gateway.
+    前端位于 *AGENT_DIR* 下（例如 ``origin_agent/frontend/`` 或
+    ``workspace/fast_agent_space/frontend/``）。构建输出写入
+    ``frontend/dist/``，由 gateway 提供服务。
 
-    Returns True if the build succeeded or no frontend is present.
+    返回 True 表示构建成功或无前端存在。
     """
-    frontend_dir = Path(_AGENT_DIR) / "frontend"
-    pkg_json = frontend_dir / "package.json"
+    frontend_dir: Path = Path(_AGENT_DIR) / "frontend"
+    pkg_json: Path = frontend_dir / "package.json"
     if not pkg_json.exists():
-        return True  # no frontend to build
+        return True  # 无前端需要构建
 
-    logger = logging.getLogger("agent.frontend")
+    logger: logging.Logger = logging.getLogger("agent.frontend")
     logger.info("Building frontend in %s ...", frontend_dir)
 
     try:
-        pnpm = "pnpm.cmd" if sys.platform == "win32" else "pnpm"
-        # pnpm install (idempotent and fast when already installed)
+        pnpm: str = "pnpm.cmd" if sys.platform == "win32" else "pnpm"
+        # pnpm install（幂等且已安装时非常快）
         subprocess.run(
             [pnpm, "install"],
             cwd=str(frontend_dir),
@@ -176,34 +175,35 @@ def _build_frontend() -> bool:
         logger.info("Frontend build complete → %s", frontend_dir / "dist")
         return True
     except subprocess.CalledProcessError as exc:
-        detail = (exc.stderr or exc.stdout or "").strip()
+        detail: str = (exc.stderr or exc.stdout or "").strip()
         logger.error("Frontend build FAILED: %s", detail)
         return False
     except FileNotFoundError:
         logger.warning("pnpm not found — skipping frontend build")
-        return True  # not fatal
+        return True  # 非致命
 
 
 def main() -> int:
-    cli = _parse_cli()
-    ctx = _build_context(cli)
+    cli: dict = _parse_cli()
+    ctx: RuntimeContext = _build_context(cli)
 
-    # Only create a log file if explicitly requested via --log.
-    log_target = str(ctx.log_path) if "log" in cli else None
+    # 仅当通过 --log 显式请求时才创建日志文件。
+    log_target: str | None = str(ctx.log_path) if "log" in cli else None
     _setup_logging(log_target, ctx.console_log)
 
-    logger = logging.getLogger("agent")
+    logger: logging.Logger = logging.getLogger("agent")
     logger.info(
         "Evolve Agent starting | mode=%s workspace=%s agentspace=%s",
         ctx.mode, ctx.workspace, ctx.agentspace,
     )
 
-    # ---- build frontend (fatal on failure) ----
+    # ---- 构建前端（失败则致命）----
     if not _build_frontend():
         logger.critical("Frontend build FAILED — aborting start")
-        return 1  # non-zero, non-(-1) → triggers run.py fallback branch
+        return 1  # 非零，非(-1) → 触发 run.py fallback 分支
 
-    app = App(ctx)
+    app: App = App(ctx)
+    exit_code: int
     try:
         exit_code = asyncio.run(app.run())
     except KeyboardInterrupt:

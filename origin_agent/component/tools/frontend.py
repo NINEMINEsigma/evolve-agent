@@ -1,9 +1,9 @@
-"""Frontend validation tool — verify that evolved frontend code builds.
+"""前端验证工具 — 验证进化的前端代码能否构建。
 
-Registered at module-import time via ``registry.register()``.
-Runs ``pnpm install`` and ``pnpm run build`` inside the target frontend
-directory (default ``fork:frontend`` in fast mode) to catch TypeScript
-or build errors before the evolution swap.
+模块导入时通过 ``registry.register()`` 注册。
+在目标前端目录（默认 fast 模式下为 ``fork:frontend``）中
+运行 ``pnpm install`` 和 ``pnpm run build``，
+以在进化交换前捕获 TypeScript 或构建错误。
 """
 
 from __future__ import annotations
@@ -18,7 +18,7 @@ from system.sandbox import Access, SandboxError
 
 logger = logging.getLogger(__name__)
 
-# Import the sandbox reference from the filesystem module.
+# 从 filesystem 模块导入 sandbox 引用。
 from .filesystem import _s as _get_sandbox
 
 
@@ -27,45 +27,46 @@ def _s():
 
 
 # ---------------------------------------------------------------------------
-# Tool handler
+# 工具 handler
 # ---------------------------------------------------------------------------
 
 
 def _handle_validate_frontend(args: Dict[str, Any]) -> str:
-    """Validate frontend code by running pnpm install && pnpm run build.
+    """通过运行 pnpm install && pnpm run build 验证前端代码。
 
-    Expected args:
-        path: str — logical path to the frontend directory
-                    (default "fork:frontend" in fast mode).
+    预期参数：
+        path: str — 前端目录的逻辑路径
+                    （fast 模式默认 "fork:frontend"）。
     """
-    path = str(args.get("path", "")).strip()
+    path: str = str(args.get("path", "")).strip()
 
-    # ---- resolve target directory ----
+    # ---- 解析目标目录 ----
     if not path:
         path = "fork:frontend"
 
+    resolved: Any
     try:
         if ":" in path:
             resolved = _s().resolve(path, Access.READ)
         else:
             resolved = _s().resolve(f"fork:{path}", Access.READ)
-        frontend_dir = resolved.real
+        frontend_dir: Any = resolved.real
     except (SandboxError, FileNotFoundError) as exc:
         return tool_error(str(exc), path=path)
 
     if not frontend_dir.is_dir():
         return tool_error(f"Not a directory: {frontend_dir}", path=path)
 
-    pkg_json = frontend_dir / "package.json"
+    pkg_json: Any = frontend_dir / "package.json"
     if not pkg_json.exists():
         return tool_error("No package.json found in frontend directory", path=path)
 
-    pnpm = "pnpm.cmd" if sys.platform == "win32" else "pnpm"
+    pnpm: str = "pnpm.cmd" if sys.platform == "win32" else "pnpm"
 
     # ---- pnpm install ----
     logger.info("validate_frontend | install | cwd=%s", frontend_dir)
     try:
-        install_proc = subprocess.run(
+        install_proc: subprocess.CompletedProcess = subprocess.run(
             [pnpm, "install"],
             cwd=str(frontend_dir),
             capture_output=True,
@@ -98,7 +99,7 @@ def _handle_validate_frontend(args: Dict[str, Any]) -> str:
     # ---- pnpm run build ----
     logger.info("validate_frontend | build | cwd=%s", frontend_dir)
     try:
-        build_proc = subprocess.run(
+        build_proc: subprocess.CompletedProcess = subprocess.run(
             [pnpm, "run", "build"],
             cwd=str(frontend_dir),
             capture_output=True,
@@ -137,7 +138,7 @@ def _handle_validate_frontend(args: Dict[str, Any]) -> str:
 
 
 def _truncate(text: str | None, limit: int = 2000) -> str:
-    """Return the tail of *text* up to *limit* characters."""
+    """返回 *text* 的尾部，最多 *limit* 个字符。"""
     if not text:
         return ""
     if len(text) <= limit:
@@ -146,7 +147,7 @@ def _truncate(text: str | None, limit: int = 2000) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Registration
+# 注册
 # ---------------------------------------------------------------------------
 
 registry.register(
@@ -154,13 +155,11 @@ registry.register(
     toolset="frontend",
     schema={
         "description": (
-            "Validate frontend code by running ``pnpm install`` and "
-            "``pnpm run build`` in the target frontend directory.  "
-            "Use this AFTER modifying any file under ``frontend/`` "
-            "(e.g. ``.tsx``, ``.ts``, ``.css``) and BEFORE calling "
-            "``evolve_code``.  This catches TypeScript and build errors "
-            "that ``validate_code`` cannot detect.\n\n"
-            "Default path is ``fork:frontend`` (the evolution target)."
+            "验证前端代码：在目标前端目录中运行 ``pnpm install`` 和 "
+            "``pnpm run build``。在修改 ``frontend/`` 下任何文件"
+            "（如 ``.tsx``、``.ts``、``.css``）之后、调用 ``evolve_code`` 之前"
+            "使用此工具。可捕获 ``validate_code`` 无法检测的 TypeScript 和构建错误。\n\n"
+            "默认路径为 ``fork:frontend``（进化目标）。"
         ),
         "parameters": {
             "type": "object",
@@ -168,9 +167,8 @@ registry.register(
                 "path": {
                     "type": "string",
                     "description": (
-                        "Logical path to the frontend directory "
-                        "(e.g. 'fork:frontend'). "
-                        "Defaults to 'fork:frontend'."
+                        "前端目录的逻辑路径（例如 'fork:frontend'）。"
+                        "默认 'fork:frontend'。"
                     ),
                 },
             },

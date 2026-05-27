@@ -1,27 +1,27 @@
-"""Path sandbox — the single security boundary for all tool operations.
+"""路径沙盒 — 所有工具操作的唯一安全边界。
 
-All file-system tools and subprocess spawns **MUST** route through this
-module.  LLM-facing paths are **logical** (``ws:logs/error.log``) and are
-resolved to real absolute paths only inside this module.  No tool handler
-or subprocess ever sees or accepts a raw filesystem path.
+所有文件系统工具和子进程调用**必须**通过此模块路由。
+LLM 可见的路径是**逻辑路径**（``ws:logs/error.log``），
+仅在此模块内部解析为真实绝对路径。任何工具 handler
+或子进程都不会看到或接受裸文件系统路径。
 
-Logical namespaces
+逻辑命名空间
     ==============  ===================  ======  ==========================
-    Prefix           Maps to              Perm    Purpose
+    前缀            映射到              权限    用途
     ==============  ===================  ======  ==========================
-    ``fork:``        ctx.fork_path        rw      Read/write evolved code
-    ``ws:``          ctx.agentspace       rw      General agent I/O
-    ``fix:``         ctx.fix_path         rw      Repair target (fallback)
+    ``fork:``        ctx.fork_path        rw      读写进化代码
+    ``ws:``          ctx.agentspace       rw      通用 agent I/O
+    ``fix:``         ctx.fix_path         rw      修复目标（fallback）
     ==============  ===================  ======  ==========================
 
-    In **fast** mode ``fork:`` is read+write.
-    In **fallback** mode ``fix:`` is read+write.
+    在 **fast** 模式下 ``fork:`` 可读写。
+    在 **fallback** 模式下 ``fix:`` 可读写。
 
-There is **no** ``self:`` namespace — the agent cannot read or mutate its
-own runtime copy.  Evolution happens exclusively through fork:/fix:.
+**没有** ``self:`` 命名空间 — agent 不能读取或修改自身的运行时副本。
+进化完全通过 fork:/fix: 实现。
 
-Every path must carry an explicit namespace prefix.  Bare paths, ``..``
-traversal, and absolute paths are rejected unconditionally.
+所有路径必须携带显式命名空间前缀。裸路径、``..`` 遍历
+和绝对路径无条件拒绝。
 """
 
 from __future__ import annotations
@@ -41,7 +41,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
-# Permission model
+# 权限模型
 # ---------------------------------------------------------------------------
 
 
@@ -50,11 +50,11 @@ class Access(str, Enum):
     WRITE = "write"
 
 
-# Map: (mode, namespace) → allowed access
-# "fast" mode: fork=rw, ws=rw
-# "fallback" mode: fix=rw, ws=rw
-# There is NO self: namespace — the agent cannot inspect or mutate its
-# own runtime copy.  Evolution happens exclusively through fork:/fix:.
+# 映射：(mode, namespace) → 允许的访问类型
+# "fast" 模式：fork=rw, ws=rw
+# "fallback" 模式：fix=rw, ws=rw
+# 不存在 self: 命名空间 — agent 不能查看或修改自身的运行时副本。
+# 进化完全通过 fork:/fix: 实现。
 _PERMISSIONS: Dict[str, Dict[str, List[Access]]] = {
     "fast": {
         "fork":  [Access.READ, Access.WRITE],
@@ -68,19 +68,19 @@ _PERMISSIONS: Dict[str, Dict[str, List[Access]]] = {
 
 
 class SandboxError(PermissionError):
-    """Raised when a tool operation violates sandbox constraints."""
+    """当工具操作违反沙盒约束时抛出。"""
 
 
 # ---------------------------------------------------------------------------
-# Process-tree kill helper
+# 进程树终止辅助函数
 # ---------------------------------------------------------------------------
 
 
 def _kill_proc_tree(pid: int) -> None:
-    """Force-kill a process and all its descendants.
+    """强制终止进程及其所有子孙进程。
 
-    On Windows uses ``taskkill /T /F``.  On Unix sends SIGTERM to the
-    process group.
+    Windows 使用 ``taskkill /T /F``。
+    Unix 向进程组发送 SIGTERM。
     """
     if sys.platform == "win32":
         subprocess.run(
@@ -102,19 +102,19 @@ def _kill_proc_tree(pid: int) -> None:
 
 
 class ResolvedPath(BaseModel):
-    """Result of resolving a logical path through the sandbox."""
+    """逻辑路径通过沙盒解析后的结果。"""
 
     model_config = ConfigDict(frozen=True)
 
-    logical: str   # e.g. "ws:data/config.json"
-    real: Path      # absolute path on disk
+    logical: str   # 例如 "ws:data/config.json"
+    real: Path      # 磁盘上的绝对路径
     namespace: str  # "fork" | "ws" | "fix"
 
 
 class Sandbox:
-    """Stateless security boundary.  Created once per RuntimeContext.
+    """无状态安全边界。每个 RuntimeContext 创建一次。
 
-    Usage::
+    用法::
 
         sandbox = Sandbox(ctx)
         r = sandbox.resolve("ws:logs/error.log", Access.READ)
@@ -127,19 +127,21 @@ class Sandbox:
     """
 
     def __init__(self, ctx: RuntimeContext) -> None:
-        self._ctx = ctx
+        self._ctx: RuntimeContext = ctx
 
-    # -- path resolution ----------------------------------------------------
+    # -- 路径解析 ----------------------------------------------------
 
     def resolve(self, logical: str, access: Access) -> ResolvedPath:
-        """Parse a logical path, check permissions, return absolute real path.
+        """解析逻辑路径，检查权限，返回绝对真实路径。
 
-        Raises ``SandboxError`` on any violation.
+        任何违规均抛出 ``SandboxError``。
         """
         if not logical or not isinstance(logical, str):
             raise SandboxError("logical path must be a non-empty string")
 
-        # ---- extract namespace prefix ----
+        # ---- 提取命名空间前缀 ----
+        ns: str
+        rest: str
         if ":" in logical:
             ns, rest = logical.split(":", 1)
         else:
@@ -157,27 +159,27 @@ class Sandbox:
 
         rest = rest.lstrip("/")
 
-        # ---- path-traversal check ----
+        # ---- 路径遍历检查 ----
         if ".." in rest.split("/") or rest.startswith("/"):
             raise SandboxError(
                 f"Path traversal rejected: {logical!r}"
             )
 
-        # ---- resolve to real directory ----
-        ns_map = {
+        # ---- 解析到真实目录 ----
+        ns_map: Dict[str, Path | None] = {
             "fork": self._ctx.fork_path,
             "ws":   self._ctx.agentspace,
             "fix":  self._ctx.fix_path,
         }
-        base = ns_map[ns]
+        base: Path | None = ns_map[ns]
         if base is None:
             raise SandboxError(
                 f"Namespace '{ns}:' is not available in mode '{self._ctx.mode}'"
             )
 
-        real = (base / rest).resolve()
+        real: Path = (base / rest).resolve()
 
-        # ---- enforce that resolved path stays under base ----
+        # ---- 强制解析后路径仍在 base 之下 ----
         try:
             real.relative_to(base)
         except ValueError:
@@ -185,8 +187,8 @@ class Sandbox:
                 f"Resolved path {real} escapes namespace base {base}"
             )
 
-        # ---- permission check ----
-        allowed = _PERMISSIONS[self._ctx.mode][ns]
+        # ---- 权限检查 ----
+        allowed: List[Access] = _PERMISSIONS[self._ctx.mode][ns]
         if access not in allowed:
             raise SandboxError(
                 f"Access {access.value} denied for namespace '{ns}:' "
@@ -202,16 +204,16 @@ class Sandbox:
     def resolve_write(self, logical: str) -> ResolvedPath:
         return self.resolve(logical, Access.WRITE)
 
-    # -- subprocess (also sandboxed) ----------------------------------------
+    # -- 子进程（同样受沙盒约束） ----------------------------------------
 
-    # Commands that tools are allowed to execute (by basename).
+    # 工具允许执行的命令（按 basename 匹配）。
     # _ALLOWED_COMMANDS: frozenset[str] = frozenset({
     #     "python", "python3", "pip", "pnpm", "git", "cmd", "curl"
     # })
 
     # @property
     # def allowed_commands(self) -> frozenset[str]:
-    #     """Public read-only access to the command allowlist."""
+    #     """公开只读的命令允许列表。"""
     #     return self._ALLOWED_COMMANDS
 
     def run(
@@ -224,37 +226,35 @@ class Sandbox:
         encoding: str = "utf-8",
         errors: str | None = None,
     ) -> subprocess.CompletedProcess:
-        """Run a subprocess with sandboxed working directory.
+        """以沙盒化工作目录运行子进程。
 
-        *args* — command + arguments.  The command basename must be in the
-        allowed list.
+        *args* — 命令 + 参数。命令 basename 必须在允许列表中。
 
-        *cwd_ns* — logical working directory for the subprocess.
+        *cwd_ns* — 子进程的逻辑工作目录。
 
-        *encoding* — text encoding for subprocess output (default ``"utf-8"``).
-        *errors* — error-handling scheme for decode errors (e.g. ``"replace"``).
+        *encoding* — 子进程输出的文本编码（默认 ``"utf-8"``）。
+        *errors* — 解码错误的处理方案（例如 ``"replace"``）。
 
-        Raises ``SandboxError`` if the command is not allowed or paths
-        escape the sandbox.
+        如果命令不允许或路径逃逸沙盒，抛出 ``SandboxError``。
         """
         if not args:
             raise SandboxError("subprocess args must not be empty")
 
-        # -- validate command --
-        cmd = args[0]
-        cmd_name = Path(cmd).name
+        # -- 验证命令 --
+        cmd: str = args[0]
+        cmd_name: str = Path(cmd).name
         # if cmd_name not in self._ALLOWED_COMMANDS:
         #     raise SandboxError(
         #         f"Command '{cmd_name}' is not in the allowed list: "
         #         f"{sorted(self._ALLOWED_COMMANDS)}"
         #     )
 
-        # -- validate cwd --
-        cwd_r = self.resolve(cwd_ns, Access.READ)
+        # -- 验证 cwd --
+        cwd_r: ResolvedPath = self.resolve(cwd_ns, Access.READ)
         if not cwd_r.real.is_dir():
             raise SandboxError(f"cwd does not exist or is not a directory: {cwd_ns}")
 
-        # -- validate any path arguments that look like logical paths --
+        # -- 验证任何看起来像逻辑路径的参数 --
         for arg in args:
             if ":" in arg and any(arg.startswith(p) for p in ("ws:", "fork:", "fix:")):
                 raise SandboxError(
@@ -263,8 +263,8 @@ class Sandbox:
                     f"Got: {arg!r}"
                 )
 
-        # -- build env --
-        env = None
+        # -- 构建 env --
+        env: dict | None = None
         if extra_env:
             import os
             env = os.environ.copy()
@@ -278,9 +278,9 @@ class Sandbox:
 
         logger.debug("sandbox.run | cwd=%s cmd=%s", cwd_r.real, args)
 
-        # Use Popen so we can force-kill the entire process tree on timeout.
-        # subprocess.run(timeout=...) does not reliably terminate child
-        # processes (e.g. pnpm spawning node processes) on Windows.
+        # 使用 Popen 以支持超时时强制终止整个进程树。
+        # subprocess.run(timeout=...) 在 Windows 上不能可靠地
+        # 终止子进程（例如 pnpm 生成的 node 进程）。
         import os as _os
         popen_kwargs: dict = {
             "cwd": str(cwd_r.real),
@@ -290,10 +290,12 @@ class Sandbox:
             "env": env,
         }
         if sys.platform == "win32":
-            # CREATE_NEW_PROCESS_GROUP allows sending CTRL_BREAK_EVENT,
-            # but we will use taskkill for a more reliable tree kill.
+            # CREATE_NEW_PROCESS_GROUP 允许发送 CTRL_BREAK_EVENT，
+            # 但我们将使用 taskkill 进行更可靠的进程树终止。
             popen_kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP  # type: ignore[attr-defined]
-        proc = subprocess.Popen(args, **popen_kwargs, **kwargs)
+        proc: subprocess.Popen = subprocess.Popen(args, **popen_kwargs, **kwargs)
+        stdout: str
+        stderr: str
         try:
             stdout, stderr = proc.communicate(timeout=timeout)
         except subprocess.TimeoutExpired:
@@ -314,43 +316,42 @@ class Sandbox:
             stderr=stderr,
         )
 
-    # -- helpers for tools --------------------------------------------------
+    # -- 工具辅助方法 --------------------------------------------------
 
     def read(self, logical: str, offset: int = 0, limit: int = 100) -> str:
-        """Read file content through the sandbox with line-based pagination.
+        """通过沙盒读取文件内容，支持按行分页。
 
-        offset: 0-indexed line number to start from (default 0).
-        limit:  max lines to return (default 100).  Pass 0 to read the
-                entire file without truncation.
+        offset: 起始行号（0-indexed，默认 0）。
+        limit:  最大返回行数（默认 100）。传 0 读取完整文件不截断。
         """
-        r = self.resolve_read(logical)
+        r: ResolvedPath = self.resolve_read(logical)
         try:
-            content = r.real.read_text(encoding="utf-8")
+            content: str = r.real.read_text(encoding="utf-8")
             if limit > 0 and (offset > 0 or limit < len(content.splitlines())):
-                lines = content.splitlines()
-                chunk = lines[offset:offset + limit]
+                lines: list[str] = content.splitlines()
+                chunk: list[str] = lines[offset:offset + limit]
                 return "\n".join(chunk)
             return content
         except FileNotFoundError:
             raise SandboxError(f"File not found: {logical}")
 
     def write(self, logical: str, content: str) -> None:
-        """Write file content through the sandbox."""
-        r = self.resolve_write(logical)
+        """通过沙盒写入文件内容。"""
+        r: ResolvedPath = self.resolve_write(logical)
         r.real.parent.mkdir(parents=True, exist_ok=True)
         r.real.write_text(content, encoding="utf-8")
 
     def exists(self, logical: str) -> bool:
-        """Check if a logical path exists (read-only check)."""
+        """检查逻辑路径是否存在（只读检查）。"""
         try:
-            r = self.resolve_read(logical)
+            r: ResolvedPath = self.resolve_read(logical)
             return r.real.exists()
         except SandboxError:
             return False
 
     def list_dir(self, logical: str) -> List[str]:
-        """List directory entries (read-only check)."""
-        r = self.resolve_read(logical)
+        """列出目录条目（只读检查）。"""
+        r: ResolvedPath = self.resolve_read(logical)
         if not r.real.is_dir():
             raise SandboxError(f"Not a directory: {logical}")
         return sorted(
@@ -358,8 +359,8 @@ class Sandbox:
         )
 
     def delete(self, logical: str) -> None:
-        """Delete a file or empty directory (write check)."""
-        r = self.resolve_write(logical)
+        """删除文件或空目录（写入检查）。"""
+        r: ResolvedPath = self.resolve_write(logical)
         if r.real.is_dir():
             r.real.rmdir()
         else:

@@ -1,6 +1,6 @@
-"""Code evolution subsystem — validate + trigger the fast-slow-fallback cycle.
+"""代码进化子系统 — 验证 + 触发 fast-slow-fallback 循环。
 
-This package handles the final step of the evolution cycle: validate that
-evolved code (in the fork: namespace) passes syntax and import checks,
-then signal the orchestrator to perform the hot swap.
+此包处理进化周期的最后一步：验证进化代码
+（在 fork: 命名空间中）通过语法和导入检查，
+然后通知编排器执行热替换。
 """

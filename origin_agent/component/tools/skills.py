@@ -1,7 +1,7 @@
-"""Skill management tools — let the agent learn, list, and forget skills.
+"""Skill 管理工具 — 让 agent 学习、列出和遗忘 skill。
 
-Registered at module-import time via ``registry.register()``.
-Skills are stored under ``<project_root>/skills/`` (Path.cwd() / "skills").
+模块导入时通过 ``registry.register()`` 注册。
+Skill 存储在 ``<project_root>/skills/``（Path.cwd() / "skills"）下。
 """
 
 from __future__ import annotations
@@ -17,21 +17,22 @@ from abstract.tools.registry import registry, tool_error, tool_result
 
 logger = logging.getLogger(__name__)
 
-# ── constants ────────────────────────────────────────────────────────
+# ── 常量 ────────────────────────────────────────────────────────
 
-_SKILLS_DIR = Path("skills")
+_SKILLS_DIR: Path = Path("skills")
 
 
-# ── helpers ──────────────────────────────────────────────────────────
+# ── 辅助函数 ──────────────────────────────────────────────────────────
 
 
 def _skills_dir() -> Path:
-    """Return the canonical skills directory (project-root / skills)."""
+    """返回规范的 skill 目录（项目根目录 / skills）。"""
     return _SKILLS_DIR.resolve()
 
 
 def _format_skill_list(skills_dir: Path | None = None) -> str:
-    """Return a formatted list of all registered skills."""
+    """返回所有已注册 skill 的格式化列表。"""
+    skills: list[dict]
     try:
         skills = list_skills(skills_dir=skills_dir or _skills_dir())
     except Exception:
@@ -39,7 +40,7 @@ def _format_skill_list(skills_dir: Path | None = None) -> str:
             {"error": "Failed to list skills", "skills": []},
             ensure_ascii=False,
         )
-    result = []
+    result: list[dict] = []
     for s in skills:
         result.append({
             "name": s.get("name", ""),
@@ -50,16 +51,16 @@ def _format_skill_list(skills_dir: Path | None = None) -> str:
     return json.dumps({"skills": result, "total": len(result)}, ensure_ascii=False)
 
 
-# ── tool handlers ────────────────────────────────────────────────────
+# ── 工具 handler ────────────────────────────────────────────────────
 
 
 def _handle_learn_skill(args: Dict[str, Any]) -> str:
-    """Create or update a skill with the given name and content."""
-    name = str(args.get("name", "")).strip()
-    content = str(args.get("content", "")).strip()
-    description = str(args.get("description", "")).strip()
-    category = str(args.get("category", "")).strip() or None
-    tags = args.get("tags", []) or []
+    """创建或更新指定名称和内容的 skill。"""
+    name: str = str(args.get("name", "")).strip()
+    content: str = str(args.get("content", "")).strip()
+    description: str = str(args.get("description", "")).strip()
+    category: str | None = str(args.get("category", "")).strip() or None
+    tags: list = args.get("tags", []) or []
 
     if not name:
         return tool_error("name is required")
@@ -67,7 +68,7 @@ def _handle_learn_skill(args: Dict[str, Any]) -> str:
         return tool_error("content is required")
 
     try:
-        payload = create_skill(
+        payload: dict = create_skill(
             name=name,
             skills_dir=_skills_dir(),
             description=description or name,
@@ -96,18 +97,18 @@ def _handle_learn_skill(args: Dict[str, Any]) -> str:
 
 
 def _handle_list_skills(args: Dict[str, Any]) -> str:
-    """List all available skills."""
+    """列出所有可用 skill。"""
     return _format_skill_list(_skills_dir())
 
 
 def _handle_forget_skill(args: Dict[str, Any]) -> str:
-    """Delete a skill by name."""
-    name = str(args.get("name", "")).strip()
+    """按名称删除 skill。"""
+    name: str = str(args.get("name", "")).strip()
     if not name:
         return tool_error("name is required")
 
     try:
-        result = delete_skill(name, skills_dir=_skills_dir())
+        result: dict = delete_skill(name, skills_dir=_skills_dir())
         if result.get("success"):
             return tool_result(deleted=True, name=name)
         return tool_error(result.get("error", "Unknown error deleting skill"))
@@ -116,13 +117,13 @@ def _handle_forget_skill(args: Dict[str, Any]) -> str:
 
 
 def _handle_recall_skill(args: Dict[str, Any]) -> str:
-    """Load a skill's full content into the conversation."""
-    name = str(args.get("name", "")).strip()
+    """将 skill 的完整内容加载到对话中。"""
+    name: str = str(args.get("name", "")).strip()
     if not name:
         return _format_skill_list(_skills_dir())
 
     try:
-        payload = load_skill(name, skills_dir=_skills_dir())
+        payload: dict = load_skill(name, skills_dir=_skills_dir())
         if payload.get("success"):
             return json.dumps(
                 {
@@ -139,7 +140,7 @@ def _handle_recall_skill(args: Dict[str, Any]) -> str:
         return tool_error(str(exc))
 
 
-# ── registration ─────────────────────────────────────────────────────
+# ── 注册 ─────────────────────────────────────────────────────
 
 
 registry.register(
@@ -147,35 +148,34 @@ registry.register(
     toolset="skills",
     schema={
         "description": (
-            "Create or update a skill.  Skills are reusable knowledge "
-            "modules stored as SKILL.md files in the project-root/skills/ "
-            "directory.  Use this to persist useful knowledge that should "
-            "carry across sessions.  If a skill with the same name already "
-            "exists, it will be updated."
+            "创建或更新 skill。Skill 是以 SKILL.md 文件形式存储在 "
+            "project-root/skills/ 目录下的可复用知识模块。"
+            "用于持久化跨 session 有用的知识。"
+            "如果同名 skill 已存在则更新。"
         ),
         "parameters": {
             "type": "object",
             "properties": {
                 "name": {
                     "type": "string",
-                    "description": "Skill name (short, kebab-case).",
+                    "description": "Skill 名称（简短，kebab-case）。",
                 },
                 "description": {
                     "type": "string",
-                    "description": "One-line description of what the skill does.",
+                    "description": "一行描述，说明 skill 的功能。",
                 },
                 "content": {
                     "type": "string",
-                    "description": "Markdown body of the skill.",
+                    "description": "Skill 的 Markdown 正文。",
                 },
                 "category": {
                     "type": "string",
-                    "description": "Optional category (e.g. 'utility', 'knowledge').",
+                    "description": "可选分类（如 'utility'、'knowledge'）。",
                 },
                 "tags": {
                     "type": "array",
                     "items": {"type": "string"},
-                    "description": "Optional tags for filtering.",
+                    "description": "可选的筛选标签。",
                 },
             },
             "required": ["name", "content"],
@@ -190,9 +190,7 @@ registry.register(
     name="list_skills",
     toolset="skills",
     schema={
-        "description": (
-            "List all available skills with their names and descriptions."
-        ),
+        "description": "列出所有可用 skill 的名称和描述。",
         "parameters": {
             "type": "object",
             "properties": {},
@@ -207,16 +205,13 @@ registry.register(
     name="forget_skill",
     toolset="skills",
     schema={
-        "description": (
-            "Delete a skill by name.  Use this to remove skills that are "
-            "no longer relevant or useful."
-        ),
+        "description": "按名称删除 skill。用于移除不再相关或有用的 skill。",
         "parameters": {
             "type": "object",
             "properties": {
                 "name": {
                     "type": "string",
-                    "description": "Name of the skill to delete.",
+                    "description": "要删除的 skill 名称。",
                 },
             },
             "required": ["name"],
@@ -232,16 +227,16 @@ registry.register(
     toolset="skills",
     schema={
         "description": (
-            "Load the full content of a skill into the conversation.  "
-            "Use this to refresh your memory on a skill's details.  "
-            "Call without arguments to list available skills."
+            "将 skill 的完整内容加载到对话中。"
+            "用于刷新对 skill 细节的记忆。"
+            "无参数调用时列出可用 skill。"
         ),
         "parameters": {
             "type": "object",
             "properties": {
                 "name": {
                     "type": "string",
-                    "description": "Skill name to recall (omit to list all).",
+                    "description": "要回忆的 skill 名称（省略则列出全部）。",
                 },
             },
         },

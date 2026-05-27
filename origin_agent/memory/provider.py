@@ -1,7 +1,7 @@
-"""EasysaveMemoryProvider — persistent memory backed by easysave.
+"""EasysaveMemoryProvider — 基于 easysave 的持久化 memory。
 
-Stores conversation history in ``workspace/logs/memory/`` so the agent
-remembers past turns across page refreshes and restarts.
+将对话历史存储在 ``workspace/logs/memory/`` 中，
+使 agent 在页面刷新和重启后仍能记住过去的回合。
 """
 
 from __future__ import annotations
@@ -12,10 +12,10 @@ import sys
 from pathlib import Path
 from typing import Any, Dict, List
 
-# Ensure third/ is importable
+# 确保 third/ 可导入
 from system.pathutils import find_repo_root
 
-_THIRD = find_repo_root() / "third"
+_THIRD: Path = find_repo_root() / "third"
 for _p in (_THIRD, _THIRD / "easysave"):
     if str(_p) not in sys.path:
         sys.path.insert(0, str(_p))
@@ -28,15 +28,14 @@ logger = logging.getLogger(__name__)
 
 
 class EasysaveMemoryProvider(MemoryProvider):
-    """Persists conversation turns to disk via easysave.
+    """通过 easysave 将对话回合持久化到磁盘。
 
-    Each session gets a JSON file under ``memory_dir/session_{id}.json``.
-    The provider also tracks a global list of session IDs to support
-    cross-session recall.
+    每个 session 在 ``memory_dir/session_{id}.json`` 下获得一个 JSON 文件。
+    provider 还跟踪一个全局 session ID 列表以支持跨 session 回忆。
     """
 
     def __init__(self, memory_dir: str | Path = "") -> None:
-        self._dir = Path(memory_dir) if memory_dir else Path("workspace/logs/memory")
+        self._dir: Path = Path(memory_dir) if memory_dir else Path("workspace/logs/memory")
         self._dir.mkdir(parents=True, exist_ok=True)
         self._session_id: str = ""
         self._index: Dict[str, Any] = {}
@@ -52,8 +51,8 @@ class EasysaveMemoryProvider(MemoryProvider):
 
     def initialize(self, session_id: str, **kwargs: Any) -> None:
         self._session_id = session_id
-        # Load or create the session index
-        idx_path = self._dir / "_sessions.json"
+        # 加载或创建 session 索引
+        idx_path: Path = self._dir / "_sessions.json"
         try:
             self._index = load("_sessions", str(idx_path)) or {}
         except Exception:
@@ -64,7 +63,7 @@ class EasysaveMemoryProvider(MemoryProvider):
     def system_prompt_block(self) -> str:
         if not self._index:
             return ""
-        sessions = self._index.get("sessions", [])
+        sessions: list = self._index.get("sessions", [])
         if not sessions:
             return ""
         return (
@@ -77,28 +76,28 @@ class EasysaveMemoryProvider(MemoryProvider):
         ).format(n=len(sessions))
 
     def prefetch(self, query: str, *, session_id: str = "") -> str:
-        sid = session_id or self._session_id
+        sid: str = session_id or self._session_id
         if not sid:
             return ""
-        data = self._load_session(sid)
+        data: dict | None = self._load_session(sid)
         if not data:
             return ""
-        turns = data.get("turns", [])
+        turns: list = data.get("turns", [])
         if not turns:
             return ""
-        # Filter by query keywords if provided
+        # 如果提供了查询关键字则过滤
         if query:
-            q = query.lower()
+            q: str = query.lower()
             turns = [t for t in turns if q in str(t.get('user', '')).lower() or q in str(t.get('assistant', '')).lower()]
             if not turns:
                 return ""
-        # Return the last few turns as context
-        recent = turns[-6:]  # last 6 turns
-        lines = ["[Previous conversation — recall context]"]
+        # 返回最后几个回合作为上下文
+        recent: list = turns[-6:]  # 最后 6 个回合
+        lines: list[str] = ["[Previous conversation — recall context]"]
         for t in recent:
             lines.append(f"User: {t.get('user', '')}")
-            assistant_text = str(t.get('assistant', ''))
-            truncated = assistant_text[:500] + ("...[truncated]" if len(assistant_text) > 500 else "")
+            assistant_text: str = str(t.get('assistant', ''))
+            truncated: str = assistant_text[:500] + ("...[truncated]" if len(assistant_text) > 500 else "")
             lines.append(f"Assistant: {truncated}")
         return "\n".join(lines)
 
@@ -109,20 +108,20 @@ class EasysaveMemoryProvider(MemoryProvider):
         *,
         session_id: str = "",
     ) -> None:
-        sid = session_id or self._session_id
+        sid: str = session_id or self._session_id
         if not sid:
             return
-        data = self._load_session(sid) or {"session_id": sid, "turns": []}
+        data: dict = self._load_session(sid) or {"session_id": sid, "turns": []}
         data["turns"].append({
             "user": user_message,
             "assistant": assistant_response,
         })
         self._save_session(sid, data)
 
-        # Update index
-        sessions = list(set(self._index.get("sessions", []) + [sid]))
+        # 更新索引
+        sessions: list = list(set(self._index.get("sessions", []) + [sid]))
         self._index["sessions"] = sessions
-        idx_path = self._dir / "_sessions.json"
+        idx_path: Path = self._dir / "_sessions.json"
         try:
             save("_sessions", str(idx_path), self._index)
         except Exception:
@@ -190,7 +189,7 @@ class EasysaveMemoryProvider(MemoryProvider):
     def shutdown(self) -> None:
         logger.info("EasysaveMemoryProvider shut down | session=%s", self._session_id)
 
-    # -- internal -----------------------------------------------------------
+    # -- 内部方法 -----------------------------------------------------------
 
     def _session_path(self, session_id: str) -> Path:
         return self._dir / f"session_{session_id}.json"
@@ -208,25 +207,26 @@ class EasysaveMemoryProvider(MemoryProvider):
             logger.warning("Failed to save session %s: %s", session_id, exc)
 
     def _handle_recall(self, args: Dict[str, Any]) -> str:
-        sid = str(args.get("session_id", "")).strip()
-        query = str(args.get("query", "")).strip().lower()
+        sid: str = str(args.get("session_id", "")).strip()
+        query: str = str(args.get("query", "")).strip().lower()
 
+        results: list[dict]
         if sid:
-            data = self._load_session(sid)
+            data: dict | None = self._load_session(sid)
             results = [{"session_id": sid, "turns": data.get("turns", [])}] if data else []
         else:
-            # Search all sessions
+            # 搜索所有 session
             results = []
             for s in self._index.get("sessions", []):
                 data = self._load_session(s)
                 if data:
                     results.append({"session_id": s, "turns": data.get("turns", [])})
 
-        # Filter by query if provided
+        # 如果提供了查询则过滤
         if query:
-            filtered = []
+            filtered: list[dict] = []
             for r in results:
-                matching = [
+                matching: list[dict] = [
                     t for t in r.get("turns", [])
                     if query in str(t.get("user", "")).lower()
                     or query in str(t.get("assistant", "")).lower()
@@ -235,23 +235,22 @@ class EasysaveMemoryProvider(MemoryProvider):
                     filtered.append({"session_id": r["session_id"], "turns": matching})
             results = filtered
 
-        # Truncate to avoid huge responses
+        # 截断以避免巨大响应
+        total: int = 0
         if isinstance(results, list) and len(results) > 0:
             total = sum(len(r.get("turns", [])) for r in results)
-        else:
-            total = 0
         return json.dumps(
             {"found": total, "results": results[:10]},
             ensure_ascii=False,
         )
 
     def _handle_remember(self, args: Dict[str, Any]) -> str:
-        content = str(args.get("content", "")).strip()
+        content: str = str(args.get("content", "")).strip()
         if not content:
             return json.dumps({"error": "content is required"})
 
-        sid = self._session_id or "global"
-        data = self._load_session(sid) or {"session_id": sid, "turns": [], "facts": []}
+        sid: str = self._session_id or "global"
+        data: dict = self._load_session(sid) or {"session_id": sid, "turns": [], "facts": []}
         if "facts" not in data:
             data["facts"] = []
         data["facts"].append(content)
