@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import logging
 import subprocess  # nosec
+import sys
 from enum import Enum
 from pathlib import Path
 from typing import TYPE_CHECKING, Dict, List
