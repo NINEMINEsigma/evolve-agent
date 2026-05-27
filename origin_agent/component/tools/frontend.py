@@ -66,7 +66,7 @@ def _handle_validate_frontend(args: Dict[str, Any]) -> str:
     logger.info("validate_frontend | install | cwd=%s", frontend_dir)
     try:
         install_proc = subprocess.run(
-            [pnpm, "install", "--no-interactive"],
+            [pnpm, "install"],
             cwd=str(frontend_dir),
             capture_output=True,
             text=True,
