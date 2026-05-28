@@ -1,0 +1,97 @@
+# Evolve Agent Skills 索引
+
+本目录包含用于支持 Evolve Agent 自我进化的 skills。
+
+## 已创建的 Skills
+
+### 核心进化 Skills（原有）
+
+| Skill | 用途 | 触发场景 |
+|-------|------|---------|
+| `evolve-code-engineer` | 代码进化指南 | 修改源代码、规划代码变更 |
+| `evolve-code-validator` | 代码验证指南 | 语法检查、编译验证 |
+| `evolve-sandbox-operator` | 沙盒操作指南 | 文件系统操作、命名空间使用 |
+
+### 新创建的 Skills
+
+| Skill | 用途 | 触发场景 |
+|-------|------|---------|
+| `evolve-architect` | 系统架构设计 | 设计新模块、规划代码结构 |
+| `evolve-debugger` | 调试与故障排除 | fallback模式、运行时错误 |
+| `evolve-frontend-builder` | 前端开发指南 | React/TypeScript/Vite开发 |
+| `evolve-tool-creator` | 创建新工具 | 注册新tool、实现handler |
+| `evolve-memory-manager` | 记忆管理 | 持久化知识、跨会话状态 |
+| `evolve-prompt-engineer` | Prompt模板优化 | 修改templates、多语言支持 |
+| `evolve-refactoring` | 代码重构 | 优化结构、提升代码质量 |
+| `evolve-testing` | 测试策略 | 验证代码、回归测试 |
+
+## Skill 触发条件
+
+每个 skill 都有特定的触发条件，由 LLM 根据用户请求自动识别：
+
+### 代码开发相关
+- **evolve-code-engineer**: 需要修改代码时
+- **evolve-tool-creator**: 需要创建新工具时
+- **evolve-architect**: 需要设计系统架构时
+- **evolve-refactoring**: 需要优化现有代码时
+
+### 质量保证相关
+- **evolve-code-validator**: 需要验证代码时
+- **evolve-testing**: 需要测试代码时
+- **evolve-debugger**: 遇到错误或fallback模式时
+
+### 系统操作相关
+- **evolve-sandbox-operator**: 需要文件操作时
+- **evolve-memory-manager**: 需要使用记忆系统时
+- **evolve-prompt-engineer**: 需要修改prompt模板时
+
+### 前端开发相关
+- **evolve-frontend-builder**: 修改 frontend/ 目录时
+
+## 使用方式
+
+这些 skills 应该被复制到 `origin_agent/skills/` 目录下，Agent 会自动加载它们。
+
+复制命令:
+```bash
+# 从 pre-skills 复制到 origin_agent
+xcopy /E /I pre-skills\* origin_agent\skills\
+```
+
+## Skill 文件格式
+
+每个 skill 包含以下文件:
+```
+skill-name/
+├── SKILL.md          # 主要文档（必需）
+├── references/       # 参考资料
+├── templates/        # 模板文件
+├── scripts/          # 脚本文件
+└── assets/           # 资源文件
+```
+
+## Frontmatter 格式
+
+每个 `SKILL.md` 文件必须包含 YAML frontmatter:
+
+```yaml
+---
+name: skill-name
+description: "简短描述，说明skill的用途和触发条件"
+---
+```
+
+## 开发指南
+
+创建新 skill 时:
+1. 复制现有 skill 目录结构
+2. 修改 frontmatter 中的 name 和 description
+3. 编写清晰的文档内容
+4. 添加触发条件说明
+5. 提供具体示例
+6. 更新本索引文件
+
+## 版本历史
+
+- **2024-05-28**: 创建8个新skills (architect, debugger, frontend-builder, tool-creator, memory-manager, prompt-engineer, refactoring, testing)
+- **初始版本**: evolve-code-engineer, evolve-code-validator, evolve-sandbox-operator

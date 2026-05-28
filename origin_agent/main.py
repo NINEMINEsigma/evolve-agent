@@ -129,9 +129,10 @@ class App:
             import component.tools.filesystem as _fs
             _fs.set_sandbox(_sandbox)
             import component.tools  # noqa: F401 — 触发 registry.register()
+            import component.extools  # noqa: F401 — 注册 extools 工具
+            all_tools: int = len(component.tools.filesystem.registry.get_all_tool_names())
             logger.info("Sandbox + %d tools initialized | mode=%s",
-                        len(component.tools.filesystem.registry.get_all_tool_names()),
-                        self.ctx.mode)
+                        all_tools, self.ctx.mode)
         except Exception as exc:
             logger.warning("Sandbox/tools unavailable: %s", exc)
             self._shutdown_event.set()

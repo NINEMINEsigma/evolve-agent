@@ -2,6 +2,9 @@ fastapi>=0.115.0
 uvicorn>=0.30.0
 websockets>=13.0
 dirtyjson>=1.0.8
+openpyxl>=3.1.0
+python-docx>=1.1.0
+pypdf>=5.0.0
 openai>=1.50.0
 pydantic>=2.0.0
 tiktoken
