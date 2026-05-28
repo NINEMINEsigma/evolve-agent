@@ -130,6 +130,9 @@ class App:
             _fs.set_sandbox(_sandbox)
             import component.tools  # noqa: F401 — 触发 registry.register()
             import component.extools  # noqa: F401 — 注册 extools 工具
+            # 注册 MCP 工具（桥接 + 连接 server）
+            import component.mcp_tools  # noqa: F401 — 安装 MCP 回调
+            component.mcp_tools.init_mcp(self.ctx)
             all_tools: int = len(component.tools.filesystem.registry.get_all_tool_names())
             logger.info("Sandbox + %d tools initialized | mode=%s",
                         all_tools, self.ctx.mode)
@@ -213,6 +216,12 @@ category: core
         if self._gateway_server is None or self._gateway_task is None:
             return
         logger.info("Gateway shutting down...")
+        # 先关闭 MCP server 连接（释放子进程、后台线程）
+        try:
+            import component.mcp_tools
+            component.mcp_tools.shutdown_mcp()
+        except Exception:
+            pass
         self._gateway_server.should_exit = True  # type: ignore[union-attr]
         self._gateway_task.cancel()
         try:

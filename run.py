@@ -109,6 +109,7 @@ if __name__ == "__main__":
             "--llm_max_output_tokens", str(llm_max_output_tokens), # LLM 最大输出
             "--llm_temperature", str(llm_temperature), # LLM 温度
             "--mode", "fast", # 运行模式
+            "--mcp_config_path", str(mcp_config_path),
         ])
         exit_code = task.returncode
         if exit_code == 0:
@@ -152,6 +153,7 @@ if __name__ == "__main__":
                 "--llm_max_output_tokens", str(llm_max_output_tokens), # LLM 最大输出
                 "--llm_temperature", str(llm_temperature), # LLM 温度
                 "--mode", "fallback", # 运行模式
+                "--mcp_config_path", str(mcp_config_path),
             ])
             if task.returncode == 0:
                 logger.info(f"Fallback agent fixed successfully, restart...")

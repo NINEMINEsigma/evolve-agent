@@ -12,3 +12,4 @@ from . import excel_tools  # noqa: F401 — 副作用：注册 read_excel / writ
 from . import docx_tools  # noqa: F401 — 副作用：注册 read_docx
 from . import pdf_tools  # noqa: F401 — 副作用：注册 read_pdf
 from . import ffmpeg_tools  # noqa: F401 — 副作用：注册 ffmpeg 工具集
+from . import diff_tools  # noqa: F401 — 副作用：注册 diff_origin 工具

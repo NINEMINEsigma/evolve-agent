@@ -69,3 +69,8 @@ class RuntimeContext(BaseModel):
 
     tool_timeout: int = 30
     """单个工具调用允许运行的最大秒数，超时后取消（0 = 无超时）。"""
+
+    # -- MCP 配置 -------------------------------------------------
+
+    mcp_config_path: Optional[str] = None
+    """MCP server 配置文件的路径（JSON 格式）。为 None 时不启动 MCP server。"""
