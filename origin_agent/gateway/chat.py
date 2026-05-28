@@ -26,6 +26,7 @@ class MessageType(str, Enum):
     INTERRUPT = "interrupt"
     ERROR = "error"
     SYSTEM = "system"
+    FILE_UPLOAD = "file_upload"
 
 
 class Message(BaseModel):
@@ -38,6 +39,9 @@ class Message(BaseModel):
     message: Optional[str] = None  # ERROR 类型使用
     request_id: Optional[str] = None  # confirm_request / confirm_response 使用
     action: Optional[str] = None      # confirm_response：allow_once | allow_always | deny
+    filename: Optional[str] = None    # FILE_UPLOAD：原始文件名
+    mime_type: Optional[str] = None   # FILE_UPLOAD：MIME 类型
+    file_data: Optional[str] = None   # FILE_UPLOAD：base64 编码的文件内容
 
     @classmethod
     def from_json(cls, raw: str) -> Message:
@@ -52,6 +56,9 @@ class Message(BaseModel):
             message=data.get("message"),
             request_id=data.get("request_id"),
             action=data.get("action"),
+            filename=data.get("filename"),
+            mime_type=data.get("mime_type"),
+            file_data=data.get("file_data"),
         )
 
     def to_json(self) -> str:
@@ -72,6 +79,12 @@ class Message(BaseModel):
             d["request_id"] = self.request_id
         if self.action is not None:
             d["action"] = self.action
+        if self.filename is not None:
+            d["filename"] = self.filename
+        if self.mime_type is not None:
+            d["mime_type"] = self.mime_type
+        if self.file_data is not None:
+            d["file_data"] = self.file_data
         return json.dumps(d, ensure_ascii=False)
 
 

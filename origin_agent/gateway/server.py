@@ -34,11 +34,22 @@ sessions: SessionManager = SessionManager()
 # 未设置时回退到 echo 模式（适用于无 LLM 的测试场景）。
 _agent_loop: object | None = None
 
+# agentspace 路径 — 由 main.py 在 server 启动前设置。
+# 用于 FILE_UPLOAD 消息的文件保存目标。
+_agentspace_path: Path | None = None
+
 
 def set_agent_loop(loop: object) -> None:
     """将 AgentLoop 注入 gateway 的 WebSocket handler。"""
     global _agent_loop
     _agent_loop = loop
+
+
+def set_agentspace_path(path: str | Path) -> None:
+    """设置文件上传的目标目录（ws: 命名空间的根）。"""
+    global _agentspace_path
+    _agentspace_path = Path(path)
+    _agentspace_path.mkdir(parents=True, exist_ok=True)
 
 
 def configure_sessions(store_path: str | None = None) -> None:
@@ -303,6 +314,71 @@ async def spa_fallback(full_path: str):
     raise HTTPException(status_code=404, detail=f"Not found: {full_path}")
 
 
+# -- 文件上传处理 --------------------------------------------------------
+
+
+async def _handle_file_upload(ws: WebSocket, sid: str, msg: Message) -> None:
+    """处理 FILE_UPLOAD 消息：将 base64 文件保存到 agentspace。"""
+    import base64
+    import uuid
+
+    filename: str = (msg.filename or "uploaded_file").strip()
+    mime_type: str = (msg.mime_type or "application/octet-stream").strip()
+    file_data: str = (msg.file_data or "").strip()
+
+    if not file_data:
+        await ws.send_text(
+            Message(
+                type=MessageType.ERROR,
+                session_id=sid,
+                message="文件上传失败：文件内容为空",
+            ).to_json()
+        )
+        return
+
+    # 清理文件名中的路径遍历字符
+    safe_name: str = filename.replace("\\", "/").split("/")[-1]
+    if not safe_name:
+        safe_name = "uploaded_file"
+
+    # 避免文件名冲突：添加短 UUID 前缀
+    unique_name: str = f"{uuid.uuid4().hex[:8]}_{safe_name}"
+    upload_dir: Path = _agentspace_path / "uploads" if _agentspace_path else Path("workspace/agentspace/uploads")
+    upload_dir.mkdir(parents=True, exist_ok=True)
+    dest: Path = upload_dir / unique_name
+
+    try:
+        raw_bytes: bytes = base64.b64decode(file_data)
+        dest.write_bytes(raw_bytes)
+    except Exception as exc:
+        logger.exception("File upload failed for session=%s", sid)
+        await ws.send_text(
+            Message(
+                type=MessageType.ERROR,
+                session_id=sid,
+                message=f"文件保存失败：{exc}",
+            ).to_json()
+        )
+        return
+
+    logical_path: str = f"ws:uploads/{unique_name}"
+    logger.info("File uploaded | session=%s path=%s size=%d", sid, logical_path, len(raw_bytes))
+
+    await ws.send_text(
+        Message(
+            type=MessageType.SYSTEM,
+            session_id=sid,
+            content=json.dumps({
+                "uploaded": True,
+                "path": logical_path,
+                "filename": safe_name,
+                "mime_type": mime_type,
+                "size": len(raw_bytes),
+            }, ensure_ascii=False),
+        ).to_json()
+    )
+
+
 @app.websocket("/ws/chat")
 async def ws_chat(ws: WebSocket) -> None:
     """WebSocket 聊天端点：接收用户消息，转发给 AgentLoop，返回回复。"""
@@ -441,6 +517,9 @@ async def ws_chat(ws: WebSocket) -> None:
             elif msg.type == MessageType.INTERRUPT:
                 if _agent_loop is not None and hasattr(_agent_loop, "interrupt"):
                     _agent_loop.interrupt(sid)  # type: ignore[union-attr]
+
+            elif msg.type == MessageType.FILE_UPLOAD:
+                await _handle_file_upload(ws, sid, msg)
 
             elif msg.type == MessageType.SYSTEM:
                 logger.info("System message from session=%s: %s", sid, msg.content)

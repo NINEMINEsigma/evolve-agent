@@ -115,7 +115,7 @@ class App:
     async def _start_gateway(self) -> None:
         """创建 uvicorn server 并作为后台 task 运行。"""
         try:
-            from gateway.server import create_server, set_agent_loop
+            from gateway.server import create_server, set_agent_loop, set_agentspace_path
             from dashboard.server import set_agent_loop as set_dashboard_agent_loop
         except ImportError as exc:
             logger.warning("Gateway unavailable (import error): %s", exc)
@@ -128,6 +128,8 @@ class App:
             _sandbox: Sandbox = Sandbox(self.ctx)
             import component.tools.filesystem as _fs
             _fs.set_sandbox(_sandbox)
+            import component.tools.read_image as _ri
+            _ri.set_sandbox(_sandbox)
             import component.tools  # noqa: F401 — 触发 registry.register()
             import component.extools  # noqa: F401 — 注册 extools 工具
             # 注册 MCP 工具（桥接 + 连接 server）
@@ -191,6 +193,7 @@ category: core
             agent_loop.set_tool_event_callback(_send_tool_event)
             set_agent_loop(agent_loop)
             set_dashboard_agent_loop(agent_loop)
+            set_agentspace_path(self.ctx.agentspace)
             logger.info("AgentLoop initialized | model=%s", self.ctx.llm_model)
         except Exception as exc:
             logger.warning("AgentLoop unavailable: %s", exc)

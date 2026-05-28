@@ -30,6 +30,72 @@ logger = logging.getLogger(__name__)
 _MAX_TOOL_TURNS = 90
 
 
+# ---------------------------------------------------------------------------
+# content block 错误处理辅助函数
+# ---------------------------------------------------------------------------
+
+def _is_content_block_error(exc: Exception) -> bool:
+    """检测异常是否由 unsupported content blocks（如图片）引起。"""
+    import openai as _openai
+    msg: str = str(exc).lower()
+    # OpenAI BadRequestError 是 400 类错误
+    if isinstance(exc, _openai.BadRequestError):
+        # 检查错误消息中是否提到与图片/内容类型相关的问题
+        keywords: list[str] = [
+            "image_url",
+            "content type",
+            "content block",
+            "unsupported",
+            "invalid content",
+            "multimodal",
+            "vision",
+        ]
+        return any(k in msg for k in keywords)
+    # 通用的 HTTP 400 错误也可能是 content block 问题
+    if isinstance(exc, _openai.APIStatusError):
+        if getattr(exc, "status_code", 0) != 400:
+            return False
+        keywords400: list[str] = ["image", "content", "unsupported"]
+        return any(k in msg for k in keywords400)
+    return False
+
+
+def _strip_image_blocks(messages: List[Dict[str, Any]], session_id: str) -> int:
+    """移除消息列表中所有含 image_url 的 content blocks，转为纯文本。
+
+    返回被剥离的图片数量。"""
+    stripped: int = 0
+    for msg in messages:
+        content = msg.get("content")
+        if not isinstance(content, list):
+            continue
+        new_blocks: list[dict] = []
+        has_image: bool = False
+        for block in content:
+            if isinstance(block, dict) and block.get("type") == "image_url":
+                has_image = True
+                stripped += 1
+                # 替换为提示文本
+                new_blocks.append({
+                    "type": "text",
+                    "text": "[图片内容已剥离 — 当前模型不支持 vision 功能]",
+                })
+            else:
+                new_blocks.append(block)
+        if has_image:
+            msg["content"] = new_blocks
+    if stripped:
+        logger = logging.getLogger(__name__)
+        logger.info(
+            "Stripped %d image_url block(s) from messages (session=%s)",
+            stripped, session_id,
+        )
+    return stripped
+
+
+# ---------------------------------------------------------------------------
+
+
 class AgentLoop:
     """每个进程的单例，编排一次 LLM 会话回合。
 
@@ -183,7 +249,21 @@ class AgentLoop:
                     # 中断已触发 — 丢弃 LLM 结果
                     return "已中断。"
 
-                resp: LLMResponse = llm_task.result()
+                # ---- 获取 LLM 响应（含图片 content block 兼容处理） ----
+                try:
+                    resp: LLMResponse = llm_task.result()
+                except Exception as llm_exc:
+                    # 检查是否因 content blocks（如 image_url）导致 API 拒绝
+                    if _is_content_block_error(llm_exc):
+                        stripped: int = _strip_image_blocks(messages, session_id)
+                        if stripped > 0:
+                            logger.warning(
+                                "LLM rejected image content blocks — retrying with text-only "
+                                "(stripped %d image(s) from session=%s)",
+                                stripped, session_id,
+                            )
+                            continue  # 重新进入循环，用 text-only 消息重试
+                    raise
                 # 从 LLM 响应中追踪实际 token 消耗
                 self._token_usage[session_id] = self._token_usage.get(session_id, 0) + resp.usage.total_tokens
                 self._persist_token_usage(session_id)
@@ -233,6 +313,68 @@ class AgentLoop:
         return "I ran into an issue processing your request. Please try again."
 
     # -- 内部辅助方法 ----------------------------------------------------
+
+    @staticmethod
+    def _extract_text(content: Any) -> str:
+        """从消息 content 中提取纯文本（处理 string 和 list 两种格式）。"""
+        if isinstance(content, str):
+            return content
+        if isinstance(content, list):
+            parts: list[str] = []
+            for block in content:
+                if isinstance(block, dict) and block.get("type") == "text":
+                    parts.append(str(block.get("text", "")))
+            return "\n".join(parts)
+        return str(content or "")
+
+    def _supports_vision(self) -> bool:
+        """检测当前模型是否支持图像 vision 功能。
+
+        基于模型名称的启发式判断：
+        - 包含 ``vision``、``vl``、``4o``、``turbo``、``gemini``、
+          ``claude-3``、``claude-4``、``gpt-4o`` 等关键字的视为支持。
+        - ``deepseek-chat``、``deepseek-v3``、``deepseek-reasoner``、
+          ``gpt-3`` 等纯文本模型视为不支持。
+        """
+        model: str = (self._ctx.llm_model or "").lower()
+        if not model:
+            return False
+
+        # 明确的非 vision 模型
+        _non_vision = {
+            "deepseek-chat",
+            "deepseek-reasoner",
+            "deepseek-v3",
+            "gpt-3",
+            "gpt-3.5",
+            "text-davinci",
+            "llama-3",
+            "llama-2",
+            "codellama",
+            "mixtral",
+        }
+        for nv in _non_vision:
+            if nv in model:
+                return False
+
+        # vision-capable 模型特征
+        _vision_keywords = [
+            "vision", "vl", "4o", "4-turbo", "gpt-4o",
+            "gemini", "claude-3", "claude-4", "claude3", "claude4",
+            "gpt-4-turbo", "gpt-4-vision",
+            "glm-4v", "cogvlm", "llava",
+            "qwen-vl", "yi-vision", "pixtral",
+        ]
+        for kw in _vision_keywords:
+            if kw in model:
+                return True
+
+        # gpt-4（不含 o/turbo/vision 后缀）不支持 vision
+        if "gpt-4" in model:
+            return False
+
+        # 默认保守策略：不支持
+        return False
 
     def _get_history(self, session_id: str) -> List[Dict[str, Any]]:
         if session_id not in self._histories:
@@ -476,7 +618,7 @@ class AgentLoop:
         parts: list[str] = []
         for m in old:
             role: str = m.get("role", "unknown")
-            content: str = str(m.get("content", ""))[:500]
+            content: str = self._extract_text(m.get("content", ""))[:500]
             if content:
                 parts.append(f"[{role}]: {content}")
 
@@ -716,16 +858,69 @@ class AgentLoop:
         # ---- 通知前端：tool_result (fire-and-forget) ----
         # 前端推送是尽力而为的副作用，不阻塞工具执行主链路。
         if self._tool_event_callback:
+            # 对含图片的结果，推送时不包含 base64 数据
+            push_result: str = result
+            try:
+                pr: dict = json.loads(result)
+                if "_image" in pr:
+                    pr_copy: dict = dict(pr)
+                    img_info: dict = pr_copy.pop("_image", {})
+                    img_info.pop("base64", None)  # 不向前端发送 base64
+                    pr_copy["_image"] = img_info
+                    push_result = json.dumps(pr_copy, ensure_ascii=False)
+            except (json.JSONDecodeError, TypeError):
+                pass
             asyncio.create_task(
                 self._tool_event_callback(
-                    session_id, "tool_result", tc.name, result,
+                    session_id, "tool_result", tc.name, push_result,
                 )
             )
+
+        # ---- 构建 OpenAI 格式的工具消息 ----
+        # 检查结果是否包含图片数据（_image 键）。
+        # 如果有，将 content 格式化为 content blocks 列表，
+        # 使 vision-capable LLM 能够通过 ToolMessage "看到"图片。
+        content: Any = result
+        try:
+            parsed_result: dict = json.loads(result)
+            img: dict | None = parsed_result.pop("_image", None)
+            if img and isinstance(img, dict):
+                b64: str = str(img.get("base64", ""))
+                mime: str = str(img.get("mime_type", "image/png"))
+                if b64 and self._supports_vision():
+                    text_json: str = json.dumps(parsed_result, ensure_ascii=False)
+                    content = [
+                        {
+                            "type": "image_url",
+                            "image_url": {"url": f"data:{mime};base64,{b64}"},
+                        },
+                        {"type": "text", "text": text_json},
+                    ]
+                elif b64:
+                    # 模型不支持 vision — 返回纯文本降级结果，
+                    # 明确告知 agent 当前模型无法查看图片。
+                    fallback: dict = dict(parsed_result)
+                    fallback["_vision_unsupported"] = True
+                    fallback["_model"] = self._ctx.llm_model
+                    fallback["_hint"] = (
+                        f"当前模型 ({self._ctx.llm_model}) 不支持图像视觉分析。"
+                        f"你无法查看此图片的内容。以下是图片文件的元数据信息："
+                        f"路径={fallback.get('path', '?')}、"
+                        f"格式={mime}、"
+                        f"大小={fallback.get('size', '?')} bytes。"
+                        f"如果你需要对图片做进一步处理（如 OCR、格式转换），"
+                        f"可以使用 run_command 调用外部工具（如 tesseract、ImageMagick）"
+                        f"来提取图片中的文本或转换格式。"
+                    )
+                    # 不向 LLM 发送 base64 数据 — 模型无法处理且浪费 token
+                    content = json.dumps(fallback, ensure_ascii=False)
+        except (json.JSONDecodeError, TypeError, KeyError):
+            pass
 
         return {
             "role": "tool",
             "tool_call_id": tc.id,
-            "content": result,
+            "content": content,
         }
 
     def _get_tool_definitions(self) -> List[Dict[str, Any]]:
@@ -746,13 +941,13 @@ class AgentLoop:
         messages: list[dict] = []
         for entry in history:
             role: str = entry.get("role", "")
-            content: Any = entry.get("content", "")
+            content: str = self._extract_text(entry.get("content", ""))
             if role == "user":
-                messages.append({"role": "user", "content": str(content or "")})
+                messages.append({"role": "user", "content": content})
             elif role == "assistant":
-                messages.append({"role": "agent", "content": str(content or "")})
+                messages.append({"role": "agent", "content": content})
             elif role == "tool":
-                messages.append({"role": "tool", "content": str(content or "")})
+                messages.append({"role": "tool", "content": content})
         return messages
 
     def get_token_usage(self, session_id: str) -> int:

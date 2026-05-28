@@ -105,6 +105,8 @@ export default function App() {
   const menuRef = useRef<HTMLDivElement>(null);
   const wsRef = useRef<WebSocket | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [uploading, setUploading] = useState(false);
 
   const fetchSessions = useCallback(() => {
     fetch("/api/sessions")
@@ -182,6 +184,10 @@ export default function App() {
           }
           if (data.token_usage !== undefined) {
             setTokenUsage(data.token_usage);
+            return;
+          }
+          if (data.uploaded) {
+            addMessage("system", `✅ 上传成功：${data.filename || "文件"} → ${data.path}`);
             return;
           }
         } catch {}
@@ -279,6 +285,40 @@ export default function App() {
     );
     setInput("");
     setWaiting(true);
+  };
+
+  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
+
+    // 限制文件大小：20MB
+    if (file.size > 20 * 1024 * 1024) {
+      addMessage("error", `文件过大：${(file.size / 1024 / 1024).toFixed(1)}MB（最大 20MB）`);
+      return;
+    }
+
+    setUploading(true);
+    const reader = new FileReader();
+    reader.onload = () => {
+      const base64 = (reader.result as string).split(",")[1] || "";
+      wsRef.current!.send(
+        JSON.stringify({
+          type: "file_upload",
+          filename: file.name,
+          mime_type: file.type || "application/octet-stream",
+          file_data: base64,
+        })
+      );
+      addMessage("system", `📎 正在上传：${file.name} (${(file.size / 1024).toFixed(1)}KB)...`);
+      setUploading(false);
+      // 重置 input 以允许重复上传同名文件
+      if (fileInputRef.current) fileInputRef.current.value = "";
+    };
+    reader.onerror = () => {
+      addMessage("error", `文件读取失败：${file.name}`);
+      setUploading(false);
+    };
+    reader.readAsDataURL(file);
   };
 
   const newChat = () => {
@@ -613,6 +653,26 @@ export default function App() {
           autoFocus
           disabled={waiting}
         />
+        <input
+          ref={fileInputRef}
+          type="file"
+          className="file-input-hidden"
+          onChange={handleFileUpload}
+          accept="image/*,.pdf,.doc,.docx,.xls,.xlsx,.csv,.txt,.json,.py,.js,.ts,.html,.css,.md,.zip,.tar,.gz"
+          disabled={uploading}
+        />
+        <button
+          className="upload-btn"
+          onClick={() => fileInputRef.current?.click()}
+          disabled={uploading}
+          title="上传文件"
+        >
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2">
+            <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4" />
+            <polyline points="17 8 12 3 7 8" />
+            <line x1="12" y1="3" x2="12" y2="15" />
+          </svg>
+        </button>
         <button className="send-btn" onClick={send} disabled={waiting || !input.trim()}>
           <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2">
             <path d="M22 2L11 13" /><path d="M22 2L15 22L11 13L2 9L22 2Z" />
