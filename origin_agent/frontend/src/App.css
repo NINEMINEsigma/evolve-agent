@@ -707,18 +707,25 @@ html, body, #root {
   border: 1px solid var(--border);
   border-radius: var(--radius);
   padding: 24px;
-  max-width: 480px;
+  max-width: 640px;
+  max-height: min(80vh, 520px);
   width: 90%;
+  display: flex;
+  flex-direction: column;
 }
 
 .confirm-title {
   font-weight: 600;
   font-size: 16px;
   margin-bottom: 12px;
+  flex-shrink: 0;
 }
 
 .confirm-body {
-  margin-bottom: 16px;
+  margin-bottom: 12px;
+  overflow-y: auto;
+  flex: 1;
+  min-height: 0;
 }
 
 .confirm-cmd {
@@ -730,6 +737,8 @@ html, body, #root {
   white-space: pre-wrap;
   word-break: break-all;
   color: #e5c07b;
+  max-height: 40vh;
+  overflow-y: auto;
 }
 
 .confirm-reason {
@@ -742,6 +751,9 @@ html, body, #root {
   display: flex;
   gap: 10px;
   justify-content: flex-end;
+  flex-shrink: 0;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
 }
 
 .confirm-deny,
