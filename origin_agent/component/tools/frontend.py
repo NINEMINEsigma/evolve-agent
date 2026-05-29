@@ -129,10 +129,15 @@ def _handle_validate_frontend(args: Dict[str, Any]) -> str:
             valid=False, stage="build", error=str(exc),
         )
 
+    # 构建成功 — 将输出尾打入日志供诊断
+    build_tail: str = _tail(build_proc.stdout, 8)
+    logger.info("Frontend build output (tail):\n%s", build_tail)
+
     return tool_result(
         valid=True,
         stage="build",
         exit_code=0,
+        build_output=build_tail,
         message="Frontend validation passed: install + build successful.",
     )
 
@@ -144,6 +149,14 @@ def _truncate(text: str | None, limit: int = 2000) -> str:
     if len(text) <= limit:
         return text
     return "..." + text[-limit:]
+
+
+def _tail(text: str | None, n: int = 8) -> str:
+    """返回 *text* 的最后 *n* 行。"""
+    if not text:
+        return "(empty)"
+    lines: list[str] = text.strip().split("\n")
+    return "\n".join(lines[-n:])
 
 
 # ---------------------------------------------------------------------------

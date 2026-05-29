@@ -25,16 +25,19 @@ workspace/
 
 ```
 origin_agent/
-├── abstract/              ← 抽象层（工具注册、内存管理、插件发现）
+├── abstract/              ← 抽象层（工具注册、内存管理、插件发现、MCP、技能管理）
 │   ├── tools/             ← 工具注册表 + AST 扫描自动发现
 │   ├── memory/            ← Memory Provider 管理器 + 流式上下文清洗
-│   └── plugins/           ← 基于目录的插件发现系统
+│   ├── plugins/           ← 基于目录的插件发现系统
+│   ├── mcp/               ← MCP 客户端（client）、OAuth 管理（oauth_manager, oauth）
+│   └── skills/            ← 技能管理器（frontmatter 解析、加载、生命周期管理）
 ├── component/             ← 具体实现
-│   ├── tools/             ← 核心工具（文件系统、代码执行、Shell、技能管理）
+│   ├── tools/             ← 核心工具（filesystem, code, shell, frontend, skills, read_image, run_python）
 │   ├── extools/           ← 扩展工具集
-│   └── llm.py             ← LLM 客户端
+│   ├── llm.py             ← LLM 客户端
+│   └── mcp_tools.py       ← MCP 工具桥接
 ├── system/                ← 基础设施
-│   ├── sandbox.py         ← 路径沙盒（fork:/ws:/fix: 命名空间）
+│   ├── sandbox.py         ← 路径沙盒（self:/fork:/ws:/fix: 命名空间）
 │   ├── prompt.py          ← System Prompt 组装
 │   ├── context.py         ← RuntimeContext
 │   └── pathutils.py       ← 路径工具
@@ -49,20 +52,26 @@ origin_agent/
 ├── dashboard/             ← Web 管理面板
 ├── memory/                ← Memory Provider 实现
 ├── templates/             ← Prompt 模板（中/英文）
-│   └── zh/                ← 中文模板
+│   ├── modes/             ← 运行时模式模板（fast, fallback）
+│   └── zh/
+│       └── modes/         ← 中文模式模板
 ├── frontend/              ← React + Vite + TypeScript 前端
+│   ├── src/               ← 源码（App.tsx, App.css）
+│   ├── index.html, vite.config.ts, tsconfig*.json, package.json
 ├── __main__.py            ← 入口点
 └── main.py                ← App 生命周期管理
 ```
 
-### abstract — 借鉴 Hermes Agent 的抽象层
+### abstract — 抽象层
 
-`abstract/` 提供了独立于具体 agent 实现的通用基础设施, 设计上借鉴了 hermes-agent 的模块化理念：
+`abstract/` 提供了独立于具体 agent 实现的通用基础设施：
 
 - **工具注册表**（`abstract/tools/registry.py`）：线程安全的中央注册表, 支持工具注册、注销、按 toolset 分组、检查函数缓存、schema 动态覆盖。提供 `registry.register()` 模块级注册模式和 `registry.dispatch()` 按名分发。
 - **AST 扫描自动发现**（`abstract/tools/discover.py`）：纯 stdlib 实现, 通过 AST 解析扫描 `.py` 文件中的 `registry.register()` 调用, 无需显式导入即可自动发现工具模块。
 - **Memory Manager**（`abstract/memory/manager.py`）：编排内置 + 最多一个外部 memory provider, 提供预取、回合同步、流式上下文清洗（跨 chunk 的 `<memory-context>` 标签剥离）等能力。
 - **插件发现**（`abstract/plugins/discover.py`）：基于目录的插件扫描, 启发式检测插件类型（MemoryProvider、ContextEngine、ToolProvider 等）, 不依赖 PyYAML 即可解析 `plugin.yaml` 元数据。
+- **MCP 客户端**（`abstract/mcp/client.py`）：MCP 协议客户端实现, 支持多 server 连接、OAuth 认证（`oauth.py` / `oauth_manager.py`）、工具调用转发。
+- **技能管理**（`abstract/skills/`）：从 frontmatter 元数据解析到技能加载、生命周期管理的完整技能系统（`manager.py`, `loader.py`, `frontmatter.py`）。
 
 ### extools — 扩展工具集
 
@@ -76,6 +85,7 @@ origin_agent/
 | `excel_tools` | Excel（.xlsx）文件读写 |
 | `docx_tools` | Word（.docx）文档读取 |
 | `pdf_tools` | PDF 文档读取 |
+| `diff_tools` | 文件差异对比与 patch 应用 |
 | `ffmpeg_tools` | FFmpeg 多媒体处理工具集 |
 
 ### 路径沙盒
@@ -84,6 +94,7 @@ origin_agent/
 
 | 前缀 | 映射 | 模式 | 用途 |
 |------|------|------|------|
+| `self:` | `fast_agent_space/` | fast | 只读 — 读自身源码 |
 | `fork:` | `slow_agent_space/` | fast | 写入进化代码 |
 | `ws:` | `agentspace/` | fast / fallback | 通用 I/O |
 | `fix:` | `.fallback/` | fallback | 修复目标 |
@@ -134,11 +145,18 @@ $env:OPENAI_BASE_URL = "https://api.deepseek.com"  # 可选, 覆盖默认地址
 
 在 `config.py` 中可调整：
 
-- `llm_model`：模型名称（默认 `deepseek-v4-flash`）
-- `llm_max_context_tokens`：最大上下文 token 数（默认 100 万）
-- `llm_temperature`：温度（默认 0.95）
-- `gateway_host` / `gateway_port`：Web 界面地址（默认 `127.0.0.1:8765`）
-- `fouce_init`：设为 `True` 强制重新初始化 workspace
+| 字段 | 说明 | 默认值 |
+|------|------|--------|
+| `llm_base_url` | LLM API 地址 | `https://api.deepseek.com` |
+| `llm_model` | 模型名称 | `deepseek-v4-flash` |
+| `llm_max_context_tokens` | 最大上下文 token 数 | `1000000` |
+| `llm_context_upbound` | 上下文压缩触发阈值（比例） | `0.9` |
+| `llm_max_output_tokens` | 最大输出 token 数 | `384000` |
+| `llm_temperature` | 温度 | `0.95` |
+| `gateway_host` / `gateway_port` | Web 界面地址 | `127.0.0.1:8765` |
+| `fouce_init` | 设为 `True` 强制重新初始化 workspace | `False` |
+| `console_log` | 同时在控制台输出日志 | `True` |
+| `mcp_config_path` | MCP 服务器配置文件路径 | `workspace/mcp_config.json` |
 
 ### 启动
 
@@ -152,9 +170,10 @@ python run.py
 
 在对话中, agent 可以通过以下工具链完成自我进化：
 
-1. `read_own_source` — 读取自身源码
-2. `write_fork` / `edit_file` — 将改进代码写入 `fork:` 命名空间
-3. `validate_code` — 语法检查
-4. `evolve_code` — 深度验证 + 触发交换
+1. `read_file` — 通过 `self:` 前缀读取自身源码（`read_own_source` 已废弃）
+2. `write_fork` — 将改进代码写入 `fork:` 命名空间（支持完全覆盖或增量编辑）
+3. `validate_code` — Python 语法检查
+4. `validate_frontend` — （可选）如修改了前端文件，需执行此工具验证构建
+5. `evolve_code` — 深度验证（含 `py_compile`）并触发 fast-slow 交换
 
-验证通过后 agent 以退出码 -1 退出, `run.py` 自动执行 slow→fast 交换并重启, 前端将在后端更新重启后自行重连(超时过长时可刷新重连)
+验证通过后 agent 以退出码 -1 退出, `run.py` 自动执行 slow→fast 交换并重启。前端将在后端重启后自行重连（超时过长时可刷新页面重连）。

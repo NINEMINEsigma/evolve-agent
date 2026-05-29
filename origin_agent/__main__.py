@@ -156,23 +156,27 @@ def _build_frontend() -> bool:
     try:
         pnpm: str = "pnpm.cmd" if sys.platform == "win32" else "pnpm"
         # pnpm install（幂等且已安装时非常快）
-        subprocess.run(
+        install_proc = subprocess.run(
             [pnpm, "install"],
             cwd=str(frontend_dir),
-            check=True,
             capture_output=True,
             text=True,
             encoding="utf-8",
         )
+        install_proc.check_returncode()
         # pnpm run build
-        subprocess.run(
+        build_proc = subprocess.run(
             [pnpm, "run", "build"],
             cwd=str(frontend_dir),
-            check=True,
             capture_output=True,
             text=True,
             encoding="utf-8",
         )
+        build_proc.check_returncode()
+        # 将构建输出的最后几行打入日志，便于诊断构建时长和结果
+        build_lines: list[str] = build_proc.stdout.strip().split("\n")
+        tail: str = "\n".join(build_lines[-8:]) if build_lines else "(empty)"
+        logger.info("Frontend build output (tail):\n%s", tail)
         logger.info("Frontend build complete → %s", frontend_dir / "dist")
         return True
     except subprocess.CalledProcessError as exc:

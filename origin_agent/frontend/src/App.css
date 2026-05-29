@@ -571,8 +571,14 @@ html, body, #root {
   background: var(--bg-tertiary);
   color: var(--text-primary);
   font-size: 14px;
+  line-height: 1.5;
   outline: none;
   transition: border-color 0.2s;
+  resize: none;
+  overflow-y: auto;
+  min-height: 40px;
+  max-height: 200px;
+  font-family: inherit;
 }
 
 .input-field:focus {

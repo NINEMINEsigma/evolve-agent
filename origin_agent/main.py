@@ -24,17 +24,18 @@ _app: App | None = None
 
 
 def request_evolution() -> None:
-    """标记运行中的 App 以退出码 -1 退出。
+    """标记运行中的 App 以退出码 -1 退出并立即触发关闭。
 
     由 ``evolve.code.finalize_evolution`` 在 fork 目录
-    通过所有验证检查后调用。不会立即关闭 —
-    gateway 先完成当前响应的发送，
-    然后调用 ``trigger_evolution_shutdown()``。
+    通过所有验证检查后调用。直接触发关闭事件，
+    不需要等待 gateway 的 WebSocket 回调（后者在
+    WebSocket 提前断开时无法可靠抵达）。
     """
     global _app
     if _app is not None:
         _app._exit_code = -1
-        logger.info("Evolution exit code set — awaiting gateway to trigger shutdown")
+        _app._shutdown_event.set()
+        logger.info("Evolution triggered — exiting with code -1")
 
 
 def trigger_evolution_shutdown() -> None:

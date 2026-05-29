@@ -644,14 +644,25 @@ export default function App() {
       )}
 
       <footer className="input-bar">
-        <input
+        <textarea
           className="input-field"
           value={input}
           onChange={(e) => setInput(e.target.value)}
-          onKeyDown={(e) => e.key === "Enter" && send()}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && !e.shiftKey) {
+              e.preventDefault();
+              send();
+            }
+          }}
+          onInput={(e) => {
+            const el = e.currentTarget;
+            el.style.height = "auto";
+            el.style.height = el.scrollHeight + "px";
+          }}
           placeholder="输入消息..."
           autoFocus
           disabled={waiting}
+          rows={1}
         />
         <input
           ref={fileInputRef}

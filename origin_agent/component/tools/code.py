@@ -282,7 +282,7 @@ registry.register(
                 },
                 "content": {
                     "type": "string",
-                    "description": "新的源码内容（完全覆盖模式必填）。",
+                    "description": "新的源码内容（启用完全覆盖模式）。",
                 },
                 "old_string": {
                     "type": "string",
