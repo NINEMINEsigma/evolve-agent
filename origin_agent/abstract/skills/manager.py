@@ -197,6 +197,118 @@ def delete_skill(
     }
 
 
+def write_skill_file(
+    name: str,
+    subpath: str,
+    content: str,
+    skills_dir: Optional[Path] = None,
+) -> Dict[str, Any]:
+    """Write a file into an existing skill's directory.
+
+    Args:
+        name: Skill name.
+        subpath: Relative path within the skill directory
+                (e.g. ``scripts/hello.py``).
+        content: File content to write.
+        skills_dir: Base skills directory.
+
+    Returns:
+        Dict with success status and the resolved absolute path.
+    """
+    skills_dir = skills_dir or Path.cwd() / DEFAULT_SKILLS_DIR
+
+    payload = load_skill(name, skills_dir)
+    if not payload.get("success"):
+        return {"success": False, "error": payload.get("error", "Skill not found")}
+
+    skill_dir = Path(payload["skill_dir"])
+    target = (skill_dir / subpath).resolve()
+
+    # Security: target must stay inside the skill directory
+    try:
+        target.relative_to(skill_dir.resolve())
+    except ValueError:
+        return {
+            "success": False,
+            "error": f"Path '{subpath}' escapes skill directory",
+        }
+
+    # Create parent directories as needed
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(content, encoding="utf-8")
+
+    return {
+        "success": True,
+        "path": str(target),
+        "relative_path": subpath,
+        "skill_dir": str(skill_dir),
+    }
+
+
+def read_skill_file(
+    name: str,
+    subpath: str,
+    skills_dir: Optional[Path] = None,
+) -> Dict[str, Any]:
+    """Read a file from an existing skill's directory.
+
+    Args:
+        name: Skill name.
+        subpath: Relative path within the skill directory.
+        skills_dir: Base skills directory.
+
+    Returns:
+        Dict with success status, content, and metadata.
+    """
+    skills_dir = skills_dir or Path.cwd() / DEFAULT_SKILLS_DIR
+
+    payload = load_skill(name, skills_dir)
+    if not payload.get("success"):
+        return {"success": False, "error": payload.get("error", "Skill not found")}
+
+    skill_dir = Path(payload["skill_dir"])
+    target = (skill_dir / subpath).resolve()
+
+    # Security: target must stay inside the skill directory
+    try:
+        target.relative_to(skill_dir.resolve())
+    except ValueError:
+        return {
+            "success": False,
+            "error": f"Path '{subpath}' escapes skill directory",
+        }
+
+    if not target.exists():
+        return {
+            "success": False,
+            "error": f"File not found: {subpath}",
+            "path": str(target),
+        }
+    if not target.is_file():
+        return {
+            "success": False,
+            "error": f"Not a file: {subpath}",
+            "path": str(target),
+        }
+
+    try:
+        file_content = target.read_text(encoding="utf-8")
+    except Exception as e:
+        return {
+            "success": False,
+            "error": f"Failed to read file: {e}",
+            "path": str(target),
+        }
+
+    return {
+        "success": True,
+        "content": file_content,
+        "path": str(target),
+        "relative_path": subpath,
+        "skill_dir": str(skill_dir),
+    }
+
+
 def _frontmatter_to_yaml(fm: Dict[str, Any]) -> str:
     """Serialize a frontmatter dict to YAML string (without delimiters).
 

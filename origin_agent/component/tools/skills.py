@@ -11,7 +11,7 @@ import logging
 from pathlib import Path
 from typing import Any, Dict, List
 
-from abstract.skills.manager import create_skill, delete_skill, update_skill
+from abstract.skills.manager import create_skill, delete_skill, update_skill, write_skill_file, read_skill_file
 from abstract.skills.loader import list_skills, load_skill
 from abstract.tools.registry import registry, tool_error, tool_result
 
@@ -55,12 +55,13 @@ def _format_skill_list(skills_dir: Path | None = None) -> str:
 
 
 def _handle_learn_skill(args: Dict[str, Any]) -> str:
-    """创建或更新指定名称和内容的 skill。"""
+    """创建或更新指定名称和内容的 skill，支持多文件写入。"""
     name: str = str(args.get("name", "")).strip()
     content: str = str(args.get("content", "")).strip()
     description: str = str(args.get("description", "")).strip()
     category: str | None = str(args.get("category", "")).strip() or None
     tags: list = args.get("tags", []) or []
+    files: list = args.get("files", []) or []
 
     if not name:
         return tool_error("name is required")
@@ -86,10 +87,31 @@ def _handle_learn_skill(args: Dict[str, Any]) -> str:
                 tags=tags if isinstance(tags, list) else [str(tags)],
             )
         if payload.get("success"):
+            # Write additional files into the skill package
+            written: list[dict] = []
+            write_errors: list[dict] = []
+            for f in files:
+                fpath: str = str(f.get("path", "")).strip()
+                fcontent: str = str(f.get("content", ""))
+                if not fpath:
+                    write_errors.append({"error": "file 'path' is required"})
+                    continue
+                result: dict = write_skill_file(
+                    name=name,
+                    subpath=fpath,
+                    content=fcontent,
+                    skills_dir=_skills_dir(),
+                )
+                if result.get("success"):
+                    written.append({"path": fpath})
+                else:
+                    write_errors.append({"path": fpath, "error": result.get("error")})
             return tool_result(
                 created=True,
                 name=payload.get("name"),
                 path=payload.get("path"),
+                files_written=written,
+                file_errors=write_errors if write_errors else None,
             )
         return tool_error(payload.get("error", "Unknown error creating skill"))
     except Exception as exc:
@@ -132,10 +154,135 @@ def _handle_recall_skill(args: Dict[str, Any]) -> str:
                     "category": payload.get("category"),
                     "content": payload.get("content"),
                     "facts": payload.get("facts", []),
+                    "linked_files": payload.get("linked_files", {}),
+                    "skill_dir": payload.get("skill_dir"),
                 },
                 ensure_ascii=False,
             )
         return tool_error(payload.get("error", "Skill not found"))
+    except Exception as exc:
+        return tool_error(str(exc))
+
+
+def _handle_write_skill_file(args: Dict[str, Any]) -> str:
+    """向已有 skill 包内写入附属文件。"""
+    name: str = str(args.get("name", "")).strip()
+    path: str = str(args.get("path", "")).strip()
+    content: str = str(args.get("content", ""))
+
+    if not name:
+        return tool_error("name is required")
+    if not path:
+        return tool_error("path is required")
+
+    try:
+        result: dict = write_skill_file(
+            name=name,
+            subpath=path,
+            content=content,
+            skills_dir=_skills_dir(),
+        )
+        if result.get("success"):
+            return tool_result(
+                written=True,
+                name=name,
+                path=result.get("relative_path"),
+            )
+        return tool_error(result.get("error", "Unknown error"))
+    except Exception as exc:
+        return tool_error(str(exc))
+
+
+def _handle_read_skill_file(args: Dict[str, Any]) -> str:
+    """读取 skill 包内的附属文件内容。"""
+    name: str = str(args.get("name", "")).strip()
+    path: str = str(args.get("path", "")).strip()
+
+    if not name:
+        return tool_error("name is required")
+    if not path:
+        return tool_error("path is required")
+
+    try:
+        result: dict = read_skill_file(
+            name=name,
+            subpath=path,
+            skills_dir=_skills_dir(),
+        )
+        if result.get("success"):
+            return json.dumps(
+                {
+                    "name": name,
+                    "path": result.get("relative_path"),
+                    "content": result.get("content"),
+                },
+                ensure_ascii=False,
+            )
+        return tool_error(result.get("error", "File not found"))
+    except Exception as exc:
+        return tool_error(str(exc))
+
+
+def _handle_run_skill_script(args: Dict[str, Any]) -> str:
+    """在 skill 包目录下执行 scripts/ 中的脚本并返回结果。"""
+    import subprocess  # nosec: intentional for skill scripts
+
+    name: str = str(args.get("name", "")).strip()
+    script: str = str(args.get("script", "")).strip()
+    script_args: list = args.get("args", []) or []
+
+    if not name:
+        return tool_error("name is required")
+    if not script:
+        return tool_error("script is required")
+
+    try:
+        # Resolve skill directory
+        from abstract.skills.loader import load_skill as _load
+
+        payload: dict = _load(name, skills_dir=_skills_dir())
+        if not payload.get("success"):
+            return tool_error(payload.get("error", "Skill not found"))
+        skill_dir: str = str(payload.get("skill_dir", ""))
+        script_path: Path = _skills_dir().resolve().parent / skill_dir / "scripts" / script
+        script_path = script_path.resolve()
+
+        # Security: must be inside the skill's scripts/ directory
+        skill_resolved: Path = Path(skill_dir).resolve()
+        allowed_prefix: Path = skill_resolved / "scripts"
+        try:
+            script_path.relative_to(allowed_prefix)
+        except ValueError:
+            return tool_error(
+                f"Script '{script}' is not inside {skill_resolved.name}/scripts/"
+            )
+
+        if not script_path.exists():
+            return tool_error(
+                f"Script not found: {skill_resolved.name}/scripts/{script}"
+            )
+        if not script_path.is_file():
+            return tool_error(f"Not a file: {skill_resolved.name}/scripts/{script}")
+
+        cmd: list[str] = [str(script_path)] + [str(a) for a in script_args]
+        proc = subprocess.run(
+            cmd,
+            cwd=str(skill_resolved),
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        return json.dumps(
+            {
+                "stdout": proc.stdout,
+                "stderr": proc.stderr,
+                "exit_code": proc.returncode,
+                "success": proc.returncode == 0,
+            },
+            ensure_ascii=False,
+        )
+    except subprocess.TimeoutExpired:
+        return tool_error("Script execution timed out (30s)")
     except Exception as exc:
         return tool_error(str(exc))
 
@@ -148,8 +295,11 @@ registry.register(
     toolset="skills",
     schema={
         "description": (
-            "创建或更新 skill。Skill 是以 SKILL.md 文件形式存储在 "
-            "project-root/skills/ 目录下的可复用知识模块。"
+            "创建或更新 skill。Skill 是以目录形式存储在 "
+            "project-root/skills/ 下的可复用知识模块，"
+            "包含 SKILL.md 主文档以及可选的 scripts/、references/、"
+            "templates/、assets/ 等附属文件。"
+            "通过 files 参数可一次性写入脚本和参考文档。"
             "用于持久化跨 session 有用的知识。"
             "如果同名 skill 已存在则更新。"
         ),
@@ -176,6 +326,24 @@ registry.register(
                     "type": "array",
                     "items": {"type": "string"},
                     "description": "可选的筛选标签。",
+                },
+                "files": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "path": {
+                                "type": "string",
+                                "description": "相对于 skill 目录的路径，如 scripts/hello.py",
+                            },
+                            "content": {
+                                "type": "string",
+                                "description": "文件内容。",
+                            },
+                        },
+                        "required": ["path", "content"],
+                    },
+                    "description": "可选。要一同写入 skill 包的附属文件列表（脚本、参考文档等）。",
                 },
             },
             "required": ["name", "content"],
@@ -243,4 +411,99 @@ registry.register(
     },
     handler=_handle_recall_skill,
     emoji="🔍",
+)
+
+
+registry.register(
+    name="write_skill_file",
+    toolset="skills",
+    schema={
+        "description": (
+            "向已有 skill 包内写入附属文件（如 scripts/、references/ 等）。"
+            "用于在创建 skill 后补充脚本、模板、参考文档。"
+            "path 相对于 skill 目录，如 scripts/hello.py。"
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "name": {
+                    "type": "string",
+                    "description": "Skill 名称。",
+                },
+                "path": {
+                    "type": "string",
+                    "description": "相对于 skill 目录的文件路径，如 scripts/hello.py",
+                },
+                "content": {
+                    "type": "string",
+                    "description": "文件内容。",
+                },
+            },
+            "required": ["name", "path", "content"],
+        },
+    },
+    handler=_handle_write_skill_file,
+    emoji="📝",
+)
+
+
+registry.register(
+    name="read_skill_file",
+    toolset="skills",
+    schema={
+        "description": (
+            "读取 skill 包内附属文件的内容（如 scripts/、references/ 等）。"
+            "用于查看 skill 包中的脚本代码、参考文档等。"
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "name": {
+                    "type": "string",
+                    "description": "Skill 名称。",
+                },
+                "path": {
+                    "type": "string",
+                    "description": "相对于 skill 目录的文件路径，如 scripts/hello.py",
+                },
+            },
+            "required": ["name", "path"],
+        },
+    },
+    handler=_handle_read_skill_file,
+    emoji="📖",
+)
+
+
+registry.register(
+    name="run_skill_script",
+    toolset="skills",
+    schema={
+        "description": (
+            "执行 skill 包内 scripts/ 目录下的脚本并返回结果。"
+            "用于运行 skill 附带的工具脚本。"
+            "脚本在 skill 目录上下文下执行，timeout 30 秒。"
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "name": {
+                    "type": "string",
+                    "description": "Skill 名称。",
+                },
+                "script": {
+                    "type": "string",
+                    "description": "scripts/ 目录下的脚本文件名，如 hello.py",
+                },
+                "args": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "传递给脚本的命令行参数。",
+                },
+            },
+            "required": ["name", "script"],
+        },
+    },
+    handler=_handle_run_skill_script,
+    emoji="▶️",
 )

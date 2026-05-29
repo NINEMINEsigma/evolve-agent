@@ -60,8 +60,11 @@ Keys:
 # Constants
 # ---------------------------------------------------------------------------
 
-# Well-known subdirectories for supporting files
-SUPPORTING_DIRS = frozenset({"references", "templates", "scripts", "assets"})
+# Excluded directory/file patterns for linked-files scan (blacklist)
+IGNORED_DIRS: frozenset[str] = frozenset({
+    "__pycache__", ".git", ".github", ".hub", ".archive",
+    "node_modules", ".venv", "__pypackages__",
+})
 
 # Default skills directory name
 DEFAULT_SKILLS_DIR = "skills"
@@ -398,17 +401,34 @@ def _expand_inline_shell(
 
 
 def _discover_linked_files(skill_dir: Path) -> Dict[str, List[str]]:
-    """Scan skill directory for supporting files."""
+    """Scan the entire skill directory for supporting files (blacklist-based).
+
+    Excludes directories and patterns listed in ``IGNORED_DIRS`` as well
+    as any hidden entry (starting with ``.``).
+    """
     linked: Dict[str, List[str]] = {}
-    for subdir in SUPPORTING_DIRS:
-        subdir_path = skill_dir / subdir
-        if subdir_path.exists():
-            files: List[str] = []
-            for f in sorted(subdir_path.rglob("*")):
-                if f.is_file() and not f.is_symlink():
-                    files.append(str(f.relative_to(skill_dir)))
-            if files:
-                linked[subdir] = files
+    if not skill_dir.exists():
+        return linked
+
+    for f in sorted(skill_dir.rglob("*")):
+        if not f.is_file() or f.is_symlink():
+            continue
+
+        rel = f.relative_to(skill_dir)
+        parts = rel.parts
+
+        # Skip hidden entries (dotfiles / dotdirs)
+        if any(p.startswith(".") for p in parts):
+            continue
+
+        # Skip blacklisted directories
+        if any(p in IGNORED_DIRS for p in parts):
+            continue
+
+        # Group by top-level subdir (or "" for files at root)
+        parent = str(parts[0]) if len(parts) > 1 else ""
+        linked.setdefault(parent, []).append(str(rel))
+
     return linked
 
 
