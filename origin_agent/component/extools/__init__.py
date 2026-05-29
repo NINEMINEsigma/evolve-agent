@@ -13,3 +13,8 @@ from . import docx_tools  # noqa: F401 — 副作用：注册 read_docx
 from . import pdf_tools  # noqa: F401 — 副作用：注册 read_pdf
 from . import ffmpeg_tools  # noqa: F401 — 副作用：注册 ffmpeg 工具集
 from . import diff_tools  # noqa: F401 — 副作用：注册 diff_origin 工具
+from . import web_browser  # noqa: F401 — 副作用：注册 browser_* 工具集
+from . import diagram  # noqa: F401 — 副作用：注册 draw_diagram / render_diagram
+from . import docgen_tools  # noqa: F401 — 副作用：注册 write_docx / write_xlsx / write_pptx / write_pdf
+from . import display  # noqa: F401 — 副作用：注册 display_image / publish_file
+from . import pip  # noqa: F401 — 副作用：注册 install_package

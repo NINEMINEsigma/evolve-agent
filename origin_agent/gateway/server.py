@@ -17,7 +17,7 @@ from urllib.parse import parse_qs
 
 import uvicorn
 from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
-from fastapi.responses import HTMLResponse
+from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
 from .chat import Message, MessageType, SessionManager
@@ -295,6 +295,20 @@ async def auto_title_session(session_id: str):
     if title:
         sessions.update_title(session_id, title)
     return {"title": title, "session_id": session_id}
+
+
+@app.get("/uploads/{file_path:path}")
+async def serve_workspace_file(file_path: str):
+    """提供 ws: 命名空间下文件的 HTTP 访问，供前端展示图片等静态文件。"""
+    if not _agentspace_path:
+        return HTMLResponse("Upload service not available", status_code=503)
+    # 防止路径遍历
+    resolved = (_agentspace_path / file_path).resolve()
+    if not str(resolved).startswith(str(_agentspace_path.resolve())):
+        return HTMLResponse("Forbidden", status_code=403)
+    if not resolved.exists() or not resolved.is_file():
+        return HTMLResponse("File not found", status_code=404)
+    return FileResponse(str(resolved))
 
 
 @app.get("/{full_path:path}")

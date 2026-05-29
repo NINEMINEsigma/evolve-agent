@@ -591,6 +591,15 @@ export default function App() {
                         </a>
                       );
                     },
+                    img({ src, alt }) {
+                      return (
+                        <img
+                          src={src}
+                          alt={alt || ''}
+                          style={{ maxWidth: "100%", borderRadius: 6, margin: "0.5em 0" }}
+                        />
+                      );
+                    },
                   }}
                 >
                   {m.content}
