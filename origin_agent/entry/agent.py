@@ -784,7 +784,7 @@ class AgentLoop:
                     "3) 或者减少单次写入的数据量。"
                 ),
                 "_parse_failed": True,
-            })
+            }, ensure_ascii=False)
             # Fire-and-forget: 前端推送是尽力而为的副作用，
             # 不能因为 WebSocket 发送失败或阻塞就中断工具执行主链路。
             if self._tool_event_callback:
@@ -827,9 +827,9 @@ class AgentLoop:
                 else:
                     result = self._memory.handle_tool_call(tc.name, args)
             except asyncio.TimeoutError:
-                result = json.dumps({"error": f"工具执行超时（{timeout}秒）"})
+                result = json.dumps({"error": f"工具执行超时（{timeout}秒）"}, ensure_ascii=False)
             except Exception as exc:
-                result = json.dumps({"error": str(exc)})
+                result = json.dumps({"error": str(exc)}, ensure_ascii=False)
         else:
             entry: Any = tool_registry.get_entry(tc.name)
             try:
@@ -842,9 +842,9 @@ class AgentLoop:
                 else:
                     result = await coro
             except asyncio.TimeoutError:
-                result = json.dumps({"error": f"工具执行超时（{timeout}秒）"})
+                result = json.dumps({"error": f"工具执行超时（{timeout}秒）"}, ensure_ascii=False)
             except Exception as exc:
-                result = json.dumps({"error": str(exc)})
+                result = json.dumps({"error": str(exc)}, ensure_ascii=False)
 
         # ---- 追踪工具错误统计 ----
         try:

@@ -401,7 +401,7 @@ class ToolRegistry:
         except Exception as e:
             logger.exception("Tool %s dispatch error: %s", name, e)
             sanitized: str = f"Tool execution failed: {type(e).__name__}: {e}"
-            return json.dumps({"error": sanitized})
+            return json.dumps({"error": sanitized}, ensure_ascii=False)
 
     # -- toolset 可用性查询 --------------------------------------
 

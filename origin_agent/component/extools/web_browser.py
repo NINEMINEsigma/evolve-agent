@@ -36,8 +36,9 @@ def _resolve_ab_cmd() -> str | None:
     """Find the full path to agent-browser.
 
     Tries in order:
+      0. ``pnpm exec agent-browser --version`` — pnpm's own package resolution (most reliable for pnpm users)
       1. ``shutil.which("agent-browser")`` — Python's native PATH lookup
-      2. ``pnpm bin -g`` — pnpm's global bin directory (user confirmed pnpm works)
+      2. ``pnpm bin -g`` — pnpm's global bin directory
       3. ``npx --no-install agent-browser --version`` — Node.js global resolver
       4. Hardcoded common install directories
     Returns the full path string, or None if not found.
@@ -50,6 +51,26 @@ def _resolve_ab_cmd() -> str | None:
     import shutil
 
     binary_names = ["agent-browser.cmd", "agent-browser.exe", "agent-browser"]
+
+    # ------------------------------------------------------------------
+    # 0. pnpm exec — pnpm's own package resolution.
+    #    Most reliable for users who installed agent-browser via pnpm,
+    #    because pnpm knows exactly where its global packages live,
+    #    regardless of PATH configuration.
+    # ------------------------------------------------------------------
+    try:
+        proc = subprocess.run(
+            ["pnpm", "exec", "agent-browser", "--version"],
+            capture_output=True, text=True, timeout=15,
+        )
+        if proc.returncode == 0:
+            global _AB_USE_PNPM_EXEC
+            _AB_USE_PNPM_EXEC = True
+            _AB_CMD = "pnpm"
+            logger.info("agent-browser resolved via pnpm exec")
+            return _AB_CMD
+    except Exception as exc:
+        logger.debug("pnpm exec failed: %s", exc)
 
     # ------------------------------------------------------------------
     # 1. Python shutil.which() — uses os.environ["PATH"]
@@ -128,6 +149,8 @@ def _resolve_ab_cmd() -> str | None:
 
 
 _AB_USE_NPX: bool = False
+_AB_USE_PNPM_EXEC: bool = False
+_HEADED: bool = True  # 设为 True 显示浏览器窗口，False 则无头运行
 
 
 def _check_binary() -> str | None:
@@ -143,15 +166,18 @@ def _check_binary() -> str | None:
             "  pnpm bin -g"
         )
     try:
-        if _AB_USE_NPX:
+        if _AB_USE_PNPM_EXEC:
+            check_cmd = ["pnpm", "exec", "agent-browser", "--version"]
+        elif _AB_USE_NPX:
             check_cmd = ["npx", "--no-install", "agent-browser", "--version"]
         else:
             check_cmd = [cmd, "--version"]
         proc = subprocess.run(check_cmd, capture_output=True, text=True, timeout=10)
         if proc.returncode == 0:
             return None
-        # npx exit code != 0 means the package isn't found globally
         return f"agent-browser 检查失败 (exit={proc.returncode}): {proc.stderr or proc.stdout or ''}"
+    except FileNotFoundError:
+        return "agent-browser 命令未找到，请确认 PATH 中有 pnpm 或 agent-browser。"
     except subprocess.TimeoutExpired:
         return "agent-browser 检查超时，请确认安装是否正确。"
 
@@ -163,9 +189,12 @@ def _build_ab_cmd(*args: str) -> list[str]:
         raise RuntimeError(
             "agent-browser 未安装，请运行: pnpm i -g agent-browser && agent-browser install"
         )
+    headed_flags: list[str] = ["--headed"] if _HEADED else []
+    if _AB_USE_PNPM_EXEC:
+        return ["pnpm", "exec", "agent-browser", "--session", _SESSION_NAME, *headed_flags, *args]
     if _AB_USE_NPX:
-        return ["npx", "--no-install", "agent-browser", "--session", _SESSION_NAME, *args]
-    return [cmd, "--session", _SESSION_NAME, *args]
+        return ["npx", "--no-install", "agent-browser", "--session", _SESSION_NAME, *headed_flags, *args]
+    return [cmd, "--session", _SESSION_NAME, *headed_flags, *args]
 
 
 def _run_ab(*args: str, timeout: int = 60) -> str:
