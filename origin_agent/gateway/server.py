@@ -11,9 +11,10 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import re
 from pathlib import Path
 from typing import Dict
-from urllib.parse import parse_qs
+from urllib.parse import parse_qs, quote
 
 import uvicorn
 from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
@@ -125,12 +126,13 @@ async def _send_tool_event(
     except json.JSONDecodeError:
         data = None
 
+    # tool_result 当前会被完整发送
     msg: Message = Message(
         type=msg_type,
         session_id=session_id,
         tool=tool_name,
         args=data if event_type == "tool_call" else None,
-        result=(payload[:200] if event_type == "tool_result" else None),
+        result=(payload if event_type == "tool_result" else None),
     )
     try:
         await ws.send_text(msg.to_json())
@@ -309,6 +311,32 @@ async def serve_workspace_file(file_path: str):
     if not resolved.exists() or not resolved.is_file():
         return HTMLResponse("File not found", status_code=404)
     return FileResponse(str(resolved))
+
+
+@app.get("/downloads/{file_path:path}")
+async def download_workspace_file(file_path: str):
+    """提供 ws: 命名空间下文件的 HTTP 下载（强制 Content-Disposition: attachment）。"""
+    if not _agentspace_path:
+        return HTMLResponse("Download service not available", status_code=503)
+    # 防止路径遍历
+    resolved = (_agentspace_path / file_path).resolve()
+    if not str(resolved).startswith(str(_agentspace_path.resolve())):
+        return HTMLResponse("Forbidden", status_code=403)
+    if not resolved.exists() or not resolved.is_file():
+        return HTMLResponse("File not found", status_code=404)
+    filename = resolved.name
+    # RFC 5987: non-ASCII filename needs filename* with UTF-8 encoding
+    safe_ascii = re.sub(r'[^\x20-\x7e]', '_', filename)
+    return FileResponse(
+        str(resolved),
+        media_type="application/octet-stream",
+        headers={
+            "Content-Disposition": (
+                f'attachment; filename="{safe_ascii}"; '
+                f"filename*=UTF-8''{quote(filename, safe='')}"
+            ),
+        },
+    )
 
 
 @app.get("/{full_path:path}")

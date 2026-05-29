@@ -26,6 +26,13 @@ interface ConfirmRequest {
   reason?: string;
 }
 
+interface DownloadInfo {
+  url: string;
+  filename: string;
+  description?: string;
+  size?: number;
+}
+
 interface ChatMessage {
   role: "user" | "agent" | "system" | "error" | "tool";
   content: string;
@@ -33,6 +40,7 @@ interface ChatMessage {
   toolName?: string;
   toolArgs?: Record<string, unknown>;
   imageMarkdown?: string;
+  downloadInfo?: DownloadInfo;
 }
 
 interface SessionInfo {
@@ -125,9 +133,9 @@ export default function App() {
       .catch(() => {});
   }, []);
 
-  const addMessage = useCallback((role: ChatMessage["role"], content: string, imageMarkdown?: string) => {
+  const addMessage = useCallback((role: ChatMessage["role"], content: string, imageMarkdown?: string, downloadInfo?: DownloadInfo) => {
     const id = crypto.randomUUID();
-    setMessages((prev) => [...prev, { role, content, id, imageMarkdown }]);
+    setMessages((prev) => [...prev, { role, content, id, imageMarkdown, downloadInfo }]);
   }, []);
 
   // ── WebSocket with auto-reconnect ───────────────────────────────────
@@ -183,11 +191,33 @@ export default function App() {
           }
           if (data.session_history) {
             // Session resume — replay conversation history
-            const history = data.session_history.map((m: any) => ({
-              role: m.role,
-              content: m.content,
-              id: crypto.randomUUID(),
-            }));
+            const history = data.session_history.map((m: any) => {
+              const entry: any = {
+                role: m.role,
+                content: m.content,
+                id: crypto.randomUUID(),
+              };
+              // Parse tool message content to restore downloadInfo and imageMarkdown
+              if (m.role === "tool" && typeof m.content === "string") {
+                try {
+                  const parsed = JSON.parse(m.content);
+                  if (parsed.markdown) {
+                    entry.imageMarkdown = parsed.markdown;
+                  }
+                  if (parsed.download_url) {
+                    entry.downloadInfo = {
+                      url: parsed.download_url,
+                      filename: parsed.filename || "download",
+                      description: parsed.description,
+                      size: parsed.size,
+                    };
+                  }
+                } catch {
+                  // not JSON — leave as plain text
+                }
+              }
+              return entry;
+            });
             if (history.length) setMessages(history);
             if (data.token_usage !== undefined) setTokenUsage(data.token_usage);
             return;  // skip normal system message handling
@@ -227,10 +257,19 @@ export default function App() {
         const raw = msg.result ?? "";
         let text = `✅ ${msg.tool} → `;
         let imageMarkdown: string | undefined;
+        let downloadInfo: DownloadInfo | undefined;
         try {
           const parsed = JSON.parse(raw);
           if (parsed.markdown) {
             imageMarkdown = parsed.markdown;
+            text += (parsed.message ?? "").slice(0, 200);
+          } else if (parsed.download_url) {
+            downloadInfo = {
+              url: parsed.download_url,
+              filename: parsed.filename || "download",
+              description: parsed.description,
+              size: parsed.size,
+            };
             text += (parsed.message ?? "").slice(0, 200);
           } else if (parsed.message) {
             text += parsed.message.slice(0, 200);
@@ -240,7 +279,7 @@ export default function App() {
         } catch {
           text += raw.slice(0, 2000);
         }
-        addMessage("tool", text, imageMarkdown);
+        addMessage("tool", text, imageMarkdown, downloadInfo);
       }
       else if (msg.type === "error") addMessage("error", msg.message ?? "");
       else if (msg.type === "confirm_request") {
@@ -571,6 +610,25 @@ export default function App() {
                       </a>
                     ) : null;
                   })()}
+                  {m.downloadInfo && (
+                    <div className="tool-download">
+                      <a
+                        href={m.downloadInfo.url}
+                        className="download-btn"
+                        download={m.downloadInfo.filename}
+                      >
+                        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2">
+                          <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4" />
+                          <polyline points="7 10 12 15 17 10" />
+                          <line x1="12" y1="15" x2="12" y2="3" />
+                        </svg>
+                        下载 {m.downloadInfo.filename}
+                      </a>
+                      {m.downloadInfo.size != null && (
+                        <span className="download-size">（{(m.downloadInfo.size / 1024).toFixed(1)} KB）</span>
+                      )}
+                    </div>
+                  )}
                 </>
               ) : m.role === "agent" ? (
                 <ReactMarkdown

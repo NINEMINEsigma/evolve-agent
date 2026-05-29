@@ -2,6 +2,7 @@
 
 Call this after generating an image file (via run_python, Pillow, etc.)
 so the user can see it inline in the web UI.
+Also provides publish_file for downloading any ws: file.
 
 Module-import-time registration via ``registry.register()``.
 """
@@ -21,6 +22,19 @@ _fs_sandbox: Any | None = None
 
 _IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".gif", ".webp"}
 
+_MIME_MAP = {
+    ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
+    ".gif": "image/gif", ".webp": "image/webp",
+    ".pdf": "application/pdf",
+    ".json": "application/json",
+    ".csv": "text/csv",
+    ".txt": "text/plain",
+    ".md": "text/markdown",
+    ".zip": "application/zip",
+    ".tar": "application/x-tar",
+    ".gz": "application/gzip",
+}
+
 
 def _get_sandbox():
     global _fs_sandbox
@@ -30,10 +44,8 @@ def _get_sandbox():
     return _fs_sandbox
 
 
-def _resolve_and_validate(path: str) -> tuple[Path, str, str] | str:
-    """Resolve a ws: path. On success returns (real_path, mime_type, http_url).
-    On error returns an error string.
-    """
+def _resolve_common(path: str) -> tuple[Path, Path] | str:
+    """Resolve a ws: path. Returns (real_path, agentspace_root) or error string."""
     if not path.startswith("ws:"):
         return '路径必须以 "ws:" 开头，例如 ws:output/diagram.png'
 
@@ -52,18 +64,23 @@ def _resolve_and_validate(path: str) -> tuple[Path, str, str] | str:
     if not real.is_file():
         return f"不是文件: {path}"
 
+    return real, sb._ctx.agentspace
+
+
+def _resolve_image(path: str) -> tuple[Path, str, str] | str:
+    """Resolve a ws: image path. Returns (real_path, mime_type, http_url) or error.
+    Only accepts image extensions.
+    """
+    result = _resolve_common(path)
+    if isinstance(result, str):
+        return result
+    real, agentspace = result
+
     ext = real.suffix.lower()
     if ext not in _IMAGE_EXTS:
-        return f"不支持的文件类型: {ext}（支持: {', '.join(sorted(_IMAGE_EXTS))})"
+        return f"不支持的文件类型: {ext}（支持: {', '.join(sorted(_IMAGE_EXTS))}）"
 
-    # MIME type
-    mime = {
-        ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
-        ".gif": "image/gif", ".webp": "image/webp",
-    }.get(ext, "application/octet-stream")
-
-    # Compute HTTP URL relative to agentspace
-    agentspace = sb._ctx.agentspace
+    mime = _MIME_MAP.get(ext, "application/octet-stream")
     try:
         rel = real.relative_to(agentspace)
         http_url = f"/uploads/{rel.as_posix()}"
@@ -71,6 +88,27 @@ def _resolve_and_validate(path: str) -> tuple[Path, str, str] | str:
         http_url = f"/uploads/{real.name}"
 
     return real, mime, http_url
+
+
+def _resolve_download(path: str) -> tuple[Path, str, str] | str:
+    """Resolve any ws: path for download. Returns (real_path, mime_type, download_url) or error.
+    Accepts any file type and generates a /downloads/ URL that triggers attachment download.
+    """
+    result = _resolve_common(path)
+    if isinstance(result, str):
+        return result
+    real, agentspace = result
+
+    ext = real.suffix.lower()
+    mime = _MIME_MAP.get(ext, "application/octet-stream")
+
+    try:
+        rel = real.relative_to(agentspace)
+        download_url = f"/downloads/{rel.as_posix()}"
+    except ValueError:
+        download_url = f"/downloads/{real.name}"
+
+    return real, mime, download_url
 
 
 def _handle_display_image(args: Dict[str, Any]) -> str:
@@ -81,12 +119,11 @@ def _handle_display_image(args: Dict[str, Any]) -> str:
     if not path:
         return tool_error("path 是必填的 — ws: 路径下的图片文件")
 
-    result = _resolve_and_validate(path)
+    result = _resolve_image(path)
     if isinstance(result, str):
         return tool_error(result)
 
     real_path, mime, http_url = result
-
     file_size = real_path.stat().st_size
     markdown = f"![{description}]({http_url})"
     return tool_result(
@@ -107,22 +144,22 @@ def _handle_publish_file(args: Dict[str, Any]) -> str:
     if not path:
         return tool_error("path 是必填的 — ws: 路径下的文件")
 
-    result = _resolve_and_validate(path)
+    result = _resolve_download(path)
     if isinstance(result, str):
         return tool_error(result)
 
-    real_path, mime, http_url = result
+    real_path, mime, download_url = result
     file_size = real_path.stat().st_size
     display_name = filename or real_path.name
 
-    link = f"[{description}]({http_url})" if mime.startswith("image/") else f"[{display_name}]({http_url})"
     return tool_result(
         path=path,
         mime=mime,
         size=file_size,
         filename=display_name,
-        download_url=http_url,
-        message=f"[{display_name}]({http_url})",
+        description=description,
+        download_url=download_url,
+        message=f"📄 {display_name} ({file_size / 1024:.1f} KB)",
     )
 
 
@@ -135,21 +172,21 @@ registry.register(
     toolset="display",
     schema={
         "description": (
-            "将 ws: 路径下的图片发布到前端，使用户能在聊天界面中直接看到。\n\n"
-            "使用步骤:\n"
-            "  1. 生成或获取图片并保存到 ws: 路径\n"
-            "  2. 调用 display_image(path=\"ws:path/to/image.png\", description=\"xxx\")\n"
-            "  3. 工具会验证图片文件是否存在并返回 Markdown 图片链接\n"
-            "  4. **你必须把返回的 Markdown 图片链接放入你的回复文本中**，\n"
-            "     用户才能在前端看到图片。不要只发超链接 [text](url)，\n"
-            "     要用 ![](/uploads/xxx.png) 语法。\n\n"
-            "路径规则:\n"
-            "  - ws: 是逻辑路径前缀，不是真实文件系统目录。\n"
-            "    用 write_file(path=\"ws:output/img.png\", ...) 保存文件。\n"
-            "  - 在 Python 代码中用绝对路径保存：agentspace 目录是服务器能访问的。\n"
-            "  - 可用 run_python 查询 agentspace 目录路径。\n\n"
-            "示例:\n"
-            "  display_image(path=\"ws:output/mindmap.png\", description=\"中国古代史思维导图\")\n"
+            '将 ws: 路径下的图片发布到前端，使用户能在聊天界面中直接看到。\n\n'
+            '使用步骤:\n'
+            '  1. 生成或获取图片并保存到 ws: 路径\n'
+            '  2. 调用 display_image(path="ws:path/to/image.png", description="xxx")\n'
+            '  3. 工具会验证图片文件是否存在并返回 Markdown 图片链接\n'
+            '  4. **你必须把返回的 Markdown 图片链接放入你的回复文本中**，\n'
+            '     用户才能在前端看到图片。不要只发超链接 [text](url)，\n'
+            '     要用 ![](/uploads/xxx.png) 语法。\n\n'
+            '路径规则:\n'
+            '  - ws: 是逻辑路径前缀，不是真实文件系统目录。\n'
+            '    用 write_file(path="ws:output/img.png", ...) 保存文件。\n'
+            '  - 在 Python 代码中用绝对路径保存：agentspace 目录是服务器能访问的。\n'
+            '  - 可用 run_python 查询 agentspace 目录路径。\n\n'
+            '示例:\n'
+            '  display_image(path="ws:output/mindmap.png", description="中国古代史思维导图")\n'
         ),
         "parameters": {
             "type": "object",
@@ -167,7 +204,7 @@ registry.register(
         },
     },
     handler=_handle_display_image,
-    emoji="\U0001f5bc\U0000fe0f",
+    emoji="🖼️",
 )
 
 registry.register(
@@ -175,8 +212,13 @@ registry.register(
     toolset="display",
     schema={
         "description": (
-            "将 ws: 路径下的任意文件发布为前端可下载的链接。\n"
-            "图片文件会自动使用 display_image 的显示方式。\n"
+            '将 ws: 路径下的任意文件发布为前端可下载的链接。\n'
+            '前端会显示一个下载按钮，用户点击即可下载文件。\n'
+            '注意：图片文件如需展示请使用 display_image，\n'
+            'publish_file 是用于下载的（包括图片）。\n\n'
+            '示例:\n'
+            '  publish_file(path="ws:output/report.pdf", filename="报告.pdf", description="数据分析报告")\n'
+            '  publish_file(path="ws:output/archive.zip", description="数据集压缩包")\n'
         ),
         "parameters": {
             "type": "object",
@@ -198,5 +240,5 @@ registry.register(
         },
     },
     handler=_handle_publish_file,
-    emoji="\U0001f4e4",
+    emoji="📤",
 )
