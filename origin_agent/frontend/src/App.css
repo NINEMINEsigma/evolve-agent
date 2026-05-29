@@ -442,6 +442,65 @@ html, body, #root {
   padding-left: 10px;
 }
 
+/* ── 工具消息中的内嵌图片 ── */
+.tool-image-link {
+  display: inline-block;
+  margin-top: 6px;
+}
+.tool-image {
+  max-width: 320px;
+  max-height: 240px;
+  width: auto;
+  height: auto;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  cursor: pointer;
+  transition: opacity 0.15s;
+}
+.tool-image:hover {
+  opacity: 0.85;
+}
+
+/* ── agent 正文中的图片 ── */
+.message-img-link {
+  display: inline-block;
+  margin: 0.5em 0;
+}
+.message-img {
+  max-width: 100%;
+  max-height: 480px;
+  width: auto;
+  height: auto;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: opacity 0.15s;
+}
+.message-img:hover {
+  opacity: 0.85;
+}
+
+/* ── lightbox 全屏预览 ── */
+.lightbox-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  background: rgba(0, 0, 0, 0.85);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: zoom-out;
+  animation: fadeIn 0.15s ease;
+}
+.lightbox-img {
+  max-width: 92vw;
+  max-height: 92vh;
+  width: auto;
+  height: auto;
+  border-radius: 8px;
+  cursor: default;
+  box-shadow: 0 4px 32px rgba(0,0,0,0.5);
+}
+
 .message-error {
   justify-content: center;
 }

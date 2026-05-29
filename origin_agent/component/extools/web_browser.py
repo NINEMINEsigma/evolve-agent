@@ -212,6 +212,8 @@ def _run_ab(*args: str, timeout: int = 60) -> str:
             full_cmd,
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             timeout=timeout,
         )
     except FileNotFoundError:
@@ -662,7 +664,7 @@ registry.register(
     name="browser_screenshot",
     toolset="browser",
     schema={
-        "description": "对当前页面截图并保存到 workspace。返回 Markdown 图片链接，前端可直接显示。",
+        "description": "对当前页面截图并保存到 workspace。返回与display_image工具等价的 Markdown 图片链接，前端可直接显示。",
         "parameters": {
             "type": "object",
             "properties": {

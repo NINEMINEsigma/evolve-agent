@@ -32,6 +32,7 @@ interface ChatMessage {
   id: string;
   toolName?: string;
   toolArgs?: Record<string, unknown>;
+  imageMarkdown?: string;
 }
 
 interface SessionInfo {
@@ -97,6 +98,7 @@ export default function App() {
   const [pendingConfirm, setPendingConfirm] = useState<ConfirmRequest | null>(null);
   const [sessionId, setSessionId] = useState("");
   const [tokenUsage, setTokenUsage] = useState(0);
+  const [lightboxSrc, setLightboxSrc] = useState<string | null>(null);
   const [sessions, setSessions] = useState<SessionInfo[]>([]);
   const [searchQuery, setSearchQuery] = useState("");
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; sid: string } | null>(null);
@@ -108,6 +110,14 @@ export default function App() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState(false);
 
+  // ── lightbox: Escape 关闭 ──
+  useEffect(() => {
+    if (!lightboxSrc) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setLightboxSrc(null); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [lightboxSrc]);
+
   const fetchSessions = useCallback(() => {
     fetch("/api/sessions")
       .then((r) => r.json())
@@ -115,9 +125,9 @@ export default function App() {
       .catch(() => {});
   }, []);
 
-  const addMessage = useCallback((role: ChatMessage["role"], content: string) => {
+  const addMessage = useCallback((role: ChatMessage["role"], content: string, imageMarkdown?: string) => {
     const id = crypto.randomUUID();
-    setMessages((prev) => [...prev, { role, content, id }]);
+    setMessages((prev) => [...prev, { role, content, id, imageMarkdown }]);
   }, []);
 
   // ── WebSocket with auto-reconnect ───────────────────────────────────
@@ -214,7 +224,23 @@ export default function App() {
       }
       else if (msg.type === "tool_result") {
         if (ignoreStaleRef.current) return;  // stale after interrupt
-        addMessage("tool", `✅ ${msg.tool} → ${(msg.result ?? "").slice(0, 100)}`);
+        const raw = msg.result ?? "";
+        let text = `✅ ${msg.tool} → `;
+        let imageMarkdown: string | undefined;
+        try {
+          const parsed = JSON.parse(raw);
+          if (parsed.markdown) {
+            imageMarkdown = parsed.markdown;
+            text += (parsed.message ?? "").slice(0, 200);
+          } else if (parsed.message) {
+            text += parsed.message.slice(0, 200);
+          } else {
+            text += raw.slice(0, 2000);
+          }
+        } catch {
+          text += raw.slice(0, 2000);
+        }
+        addMessage("tool", text, imageMarkdown);
       }
       else if (msg.type === "error") addMessage("error", msg.message ?? "");
       else if (msg.type === "confirm_request") {
@@ -532,7 +558,20 @@ export default function App() {
             </div>
             <div className="message-bubble">
               {m.role === "tool" ? (
-                <pre className="message-text message-text-tool">{m.content}</pre>
+                <>
+                  <pre className="message-text message-text-tool">{m.content}</pre>
+                  {m.imageMarkdown && (() => {
+                    const md = m.imageMarkdown;
+                    const match = md.match(/!\[(.*?)\]\(([^)]+)\)/);
+                    const altText = match ? match[1] : "";
+                    const imgSrc = match ? match[2] : "";
+                    return imgSrc ? (
+                      <a href="#" onClick={(e) => { e.preventDefault(); setLightboxSrc(imgSrc); }} className="tool-image-link">
+                        <img src={imgSrc} alt={altText} className="tool-image" />
+                      </a>
+                    ) : null;
+                  })()}
+                </>
               ) : m.role === "agent" ? (
                 <ReactMarkdown
                   remarkPlugins={[remarkGfm]}
@@ -593,11 +632,9 @@ export default function App() {
                     },
                     img({ src, alt }) {
                       return (
-                        <img
-                          src={src}
-                          alt={alt || ''}
-                          style={{ maxWidth: "100%", borderRadius: 6, margin: "0.5em 0" }}
-                        />
+                        <a href="#" onClick={(e) => { e.preventDefault(); setLightboxSrc(src!); }} className="message-img-link">
+                          <img src={src} alt={alt || ''} className="message-img" />
+                        </a>
                       );
                     },
                   }}
@@ -714,6 +751,12 @@ export default function App() {
         )}
       </footer>
       </div>
+      {/* ── lightbox 遮罩 ── */}
+      {lightboxSrc && (
+        <div className="lightbox-backdrop" onClick={() => setLightboxSrc(null)}>
+          <img src={lightboxSrc} className="lightbox-img" onClick={(e) => e.stopPropagation()} />
+        </div>
+      )}
     </div>
   );
 }

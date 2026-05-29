@@ -137,7 +137,7 @@ registry.register(
         "description": (
             "将 ws: 路径下的图片发布到前端，使用户能在聊天界面中直接看到。\n\n"
             "使用步骤:\n"
-            "  1. 通过 Pillow / matplotlib / browser_screenshot 等生成图片并保存到 ws: 路径\n"
+            "  1. 生成或获取图片并保存到 ws: 路径\n"
             "  2. 调用 display_image(path=\"ws:path/to/image.png\", description=\"xxx\")\n"
             "  3. 工具会验证图片文件是否存在并返回 Markdown 图片链接\n"
             "  4. **你必须把返回的 Markdown 图片链接放入你的回复文本中**，\n"
