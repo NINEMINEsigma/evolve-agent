@@ -119,6 +119,19 @@ async def _send_tool_event(
     ws: WebSocket | None = _tool_ws_sinks.get(session_id)
     if ws is None:
         return
+    # Handle assistant_text event type specially via SYSTEM message
+    if event_type == "assistant_text":
+        msg = Message(
+            type=MessageType.SYSTEM,
+            session_id=session_id,
+            content=json.dumps({"assistant_text": payload}),
+        )
+        try:
+            await ws.send_text(msg.to_json())
+        except Exception:
+            pass
+        return
+
     msg_type: MessageType = MessageType.TOOL_CALL if event_type == "tool_call" else MessageType.TOOL_RESULT
     data: dict | None
     try:

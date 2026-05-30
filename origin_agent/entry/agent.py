@@ -281,6 +281,15 @@ class AgentLoop:
                 # 将带 tool_calls 的 assistant 消息存入历史
                 self._store_assistant_with_tools(session_id, resp)
 
+                # 推送中间 assistant 文本到前端（非纯文本回复，避免重复）
+                if resp.content and self._tool_event_callback:
+                    asyncio.create_task(
+                        self._tool_event_callback(
+                            session_id, "assistant_text", "",
+                            json.dumps({"content": resp.content, "reasoning": resp.reasoning_content}),
+                        )
+                    )
+
                 # 执行工具调用并将结果持久化到历史
                 history: List[Dict[str, Any]] = self._get_history(session_id)
                 for tc in resp.tool_calls:
@@ -945,7 +954,10 @@ class AgentLoop:
             if role == "user":
                 messages.append({"role": "user", "content": content})
             elif role == "assistant":
-                messages.append({"role": "agent", "content": content})
+                msg: dict = {"role": "agent", "content": content}
+                if entry.get("reasoning_content"):
+                    msg["reasoning_content"] = entry["reasoning_content"]
+                messages.append(msg)
             elif role == "tool":
                 messages.append({"role": "tool", "content": content})
         return messages

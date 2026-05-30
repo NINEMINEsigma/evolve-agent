@@ -108,6 +108,7 @@ if __name__ == "__main__":
             "--llm_context_upbound", str(llm_context_upbound), # LLM 上下文压缩阈值
             "--llm_max_output_tokens", str(llm_max_output_tokens), # LLM 最大输出
             "--llm_temperature", str(llm_temperature), # LLM 温度
+            "--llm_reasoning_effort", str(llm_reasoning_effort), # LLM reasoning_effort
             "--mode", "fast", # 运行模式
             "--mcp_config_path", str(mcp_config_path),
         ])
@@ -152,6 +153,7 @@ if __name__ == "__main__":
                 "--llm_context_upbound", str(llm_context_upbound), # LLM 上下文压缩阈值
                 "--llm_max_output_tokens", str(llm_max_output_tokens), # LLM 最大输出
                 "--llm_temperature", str(llm_temperature), # LLM 温度
+                "--llm_reasoning_effort", str(llm_reasoning_effort), # LLM reasoning_effort
                 "--mode", "fallback", # 运行模式
                 "--mcp_config_path", str(mcp_config_path),
             ])

@@ -79,6 +79,7 @@ class LLMClient:
         self._model: str = ctx.llm_model or "gpt-4o"
         self._temperature: float = ctx.llm_temperature
         self._max_tokens: int = ctx.llm_max_output_tokens
+        self._reasoning_effort: str = ctx.llm_reasoning_effort or ""
 
     # -- 公开 API ----------------------------------------------------------
 
@@ -103,6 +104,8 @@ class LLMClient:
         }
         if tools:
             kwargs["tools"] = tools
+        if self._reasoning_effort:
+            kwargs["reasoning_effort"] = self._reasoning_effort
 
         completion: Any = await self._client.chat.completions.create(**kwargs)
         choice: Any = completion.choices[0]

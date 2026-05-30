@@ -399,7 +399,48 @@ html, body, #root {
   line-height: 1.65;
 }
 
-.message-user {
+/* ── Reasoning block (thinking process) ── */
+.reasoning-block {
+  margin-bottom: 10px;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+
+.reasoning-summary {
+  padding: 6px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  cursor: pointer;
+  user-select: none;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.reasoning-summary::before {
+  content: "🧠";
+  font-size: 13px;
+}
+
+.reasoning-summary:hover {
+  color: var(--text-primary);
+}
+
+.reasoning-content {
+  padding: 8px 12px 12px;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--text-secondary);
+  font-style: italic;
+  border-top: 1px solid var(--border);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.message-agent .message-bubble {
   flex-direction: row-reverse;
 }
 

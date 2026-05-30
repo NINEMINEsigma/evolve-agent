@@ -6,7 +6,7 @@ slow_agent_space_path:  str     = "slow_agent_space"
 # runtime
 fouce_init:             bool    = False
 # gateway
-gateway_host:           str     = "127.0.0.1"
+gateway_host:           str     = "0.0.0.0"
 gateway_port:           int     = 8765
 # llm
 llm_base_url:           str     = "https://api.deepseek.com"
@@ -16,6 +16,7 @@ llm_max_context_tokens: int     = 1000000
 llm_context_upbound:    float   = 0.9
 llm_max_output_tokens:  int     = 384000
 llm_temperature:        float   = 0.95
+llm_reasoning_effort:   str     = "medium" # 可选值：e.g. "low" / "medium" / "high"，空字符串表示不启用
 
 
 #----------

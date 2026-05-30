@@ -41,6 +41,7 @@ interface ChatMessage {
   toolArgs?: Record<string, unknown>;
   imageMarkdown?: string;
   downloadInfo?: DownloadInfo;
+  reasoningContent?: string;
 }
 
 interface SessionInfo {
@@ -197,6 +198,9 @@ export default function App() {
                 content: m.content,
                 id: crypto.randomUUID(),
               };
+              if (m.reasoning_content) {
+                entry.reasoningContent = m.reasoning_content;
+              }
               // Parse tool message content to restore downloadInfo and imageMarkdown
               if (m.role === "tool" && typeof m.content === "string") {
                 try {
@@ -228,6 +232,17 @@ export default function App() {
           }
           if (data.uploaded) {
             addMessage("system", `✅ 上传成功：${data.filename || "文件"} → ${data.path}`);
+            return;
+          }
+          if (data.assistant_text) {
+            const p = JSON.parse(data.assistant_text);
+            const id = crypto.randomUUID();
+            setMessages((prev) => [...prev, {
+              role: "agent",
+              content: p.content || "",
+              id,
+              reasoningContent: p.reasoning || undefined,
+            }]);
             return;
           }
         } catch {}
@@ -631,7 +646,14 @@ export default function App() {
                   )}
                 </>
               ) : m.role === "agent" ? (
-                <ReactMarkdown
+                <>
+                  {m.reasoningContent && (
+                    <details className="reasoning-block">
+                      <summary className="reasoning-summary">思考过程</summary>
+                      <div className="reasoning-content">{m.reasoningContent}</div>
+                    </details>
+                  )}
+                  <ReactMarkdown
                   remarkPlugins={[remarkGfm]}
                   components={{
                     code({ className, children, ...props }) {
@@ -699,6 +721,7 @@ export default function App() {
                 >
                   {m.content}
                 </ReactMarkdown>
+                </>
               ) : (
                 <pre className={`message-text message-text-${m.role}`}>{m.content}</pre>
               )}
