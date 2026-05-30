@@ -132,7 +132,7 @@ class SessionManager:
         return self._store_dir / "_index.json"
 
     def _read_index(self) -> list[dict]:
-        """从磁盘读取持久化的 session 索引。"""
+        """从磁盘读取持久化的 session 索引，损坏时尝试从 .bak 恢复。"""
         if not self._store_dir:
             return []
         idx: Path = self._index_path()
@@ -142,18 +142,61 @@ class SessionManager:
             data: list = json.loads(idx.read_text(encoding="utf-8"))
             return data if isinstance(data, list) else []
         except Exception:
-            logger.warning("Failed to read session index, starting fresh")
+            logger.exception("Failed to parse session index, trying backup")
+            # 尝试读取 .bak 备份
+            backup = idx.with_suffix(".json.bak")
+            if backup.exists():
+                try:
+                    data = json.loads(backup.read_text(encoding="utf-8"))
+                    if isinstance(data, list):
+                        logger.info("Recovered %d sessions from backup", len(data))
+                        return data
+                except Exception:
+                    logger.warning("Backup also corrupted")
+            # 最终兜底：从会话目录重建索引
+            logger.info("Rebuilding session index from directory scan")
+            import time as _time
+            recovered: list[dict] = []
+            for entry in sorted(self._store_dir.iterdir()):
+                if not entry.is_dir():
+                    continue
+                sid: str = entry.name
+                if len(sid) != 12 or not all(c in "0123456789abcdef" for c in sid):
+                    continue
+                created_at: float = 0.0
+                try:
+                    created_at = entry.stat().st_ctime
+                except OSError:
+                    created_at = _time.time()
+                recovered.append({
+                    "id": sid,
+                    "created_at": created_at,
+                    "status": "active",
+                    "title": "",
+                })
+            if recovered:
+                logger.info("Recovered %d sessions from directory scan", len(recovered))
+                return recovered
+            logger.critical("Session index lost — no valid backup or directories available")
             return []
 
     def _write_index(self, entries: list[dict]) -> None:
-        """将 session 索引持久化到磁盘。"""
+        """将 session 索引持久化到磁盘（原子写入 + 备份）。"""
         if not self._store_dir:
             return
         try:
-            self._index_path().write_text(
+            idx = self._index_path()
+            # 备份当前文件
+            if idx.exists():
+                backup = idx.with_suffix(".json.bak")
+                idx.replace(backup)
+            # 原子写入：先写 tmp 文件，再 rename
+            tmp = idx.with_suffix(".json.tmp")
+            tmp.write_text(
                 json.dumps(entries, ensure_ascii=False, indent=2),
                 encoding="utf-8",
             )
+            tmp.replace(idx)
         except Exception as exc:
             logger.warning("Failed to write session index: %s", exc)
 
