@@ -118,6 +118,7 @@ export default function App() {
   const bottomRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
 
   // ── lightbox: Escape 关闭 ──
   useEffect(() => {
@@ -496,7 +497,7 @@ export default function App() {
 
   return (
     <div className="app">
-      <aside className="sidebar">
+      <aside className={`sidebar ${sidebarCollapsed ? 'collapsed' : ''}`}>
         <div className="sidebar-header">
           <div className="sidebar-title">💬 会话</div>
           <button className="new-chat-btn" onClick={newChat}>+ 新对话</button>
@@ -581,6 +582,21 @@ export default function App() {
       <div className="main-content">
         <header className="app-header">
         <div className="header-left">
+          <button
+            className="sidebar-toggle"
+            onClick={() => setSidebarCollapsed(v => !v)}
+            title={sidebarCollapsed ? "展开侧栏" : "收起侧栏"}
+          >
+            {sidebarCollapsed ? (
+              <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M9 18l6-6-6-6" />
+              </svg>
+            ) : (
+              <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M15 18l-6-6 6-6" />
+              </svg>
+            )}
+          </button>
           <div className="model-icon">⚡</div>
           <div>
             <div className="model-name">Evolve Agent</div>
@@ -612,8 +628,12 @@ export default function App() {
             </div>
             <div className="message-bubble">
               {m.role === "tool" ? (
-                <>
-                  <pre className="message-text message-text-tool">{m.content}</pre>
+                <details className="tool-call-block">
+                  <summary className="tool-call-summary">
+                    {m.content.length > 80 ? m.content.slice(0, 80) + '...' : m.content}
+                  </summary>
+                  <div className="tool-call-detail">
+                    <pre className="message-text message-text-tool">{m.content}</pre>
                   {m.imageMarkdown && (() => {
                     const md = m.imageMarkdown;
                     const match = md.match(/!\[(.*?)\]\(([^)]+)\)/);
@@ -644,7 +664,8 @@ export default function App() {
                       )}
                     </div>
                   )}
-                </>
+                    </div>
+                </details>
               ) : m.role === "agent" ? (
                 <>
                   {m.reasoningContent && (

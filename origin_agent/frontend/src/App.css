@@ -43,6 +43,36 @@ html, body, #root {
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  transition: width 0.2s ease, min-width 0.2s ease, border 0.2s ease;
+}
+
+.sidebar.collapsed {
+  width: 0;
+  min-width: 0;
+  overflow: hidden;
+  border-right: none;
+  padding: 0;
+}
+
+.sidebar-toggle {
+  background: transparent;
+  border: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: 16px;
+  width: 30px;
+  height: 30px;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  transition: background 0.15s, color 0.15s;
+}
+
+.sidebar-toggle:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
 }
 
 .sidebar-header {
@@ -438,6 +468,8 @@ html, body, #root {
   border-top: 1px solid var(--border);
   white-space: pre-wrap;
   word-break: break-word;
+  max-height: 240px;
+  overflow-y: auto;
 }
 
 .message-agent .message-bubble {
@@ -470,6 +502,52 @@ html, body, #root {
 
 .message-tool .message-bubble {
   background: transparent;
+}
+
+/* ── Tool call collapse ── */
+.tool-call-block {
+  margin-bottom: 2px;
+  border-radius: var(--radius-sm);
+  background: transparent;
+}
+
+.tool-call-summary {
+  padding: 3px 8px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  user-select: none;
+  border-radius: var(--radius-sm);
+  transition: color 0.15s;
+  list-style: none;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.tool-call-summary::-webkit-details-marker {
+  display: none;
+}
+
+.tool-call-summary:hover {
+  color: var(--text-primary);
+}
+
+.tool-call-summary::before {
+  content: '▶';
+  font-size: 9px;
+  transition: transform 0.15s;
+  color: var(--text-muted);
+}
+
+.tool-call-block[open] > .tool-call-summary::before {
+  transform: rotate(90deg);
+}
+
+.tool-call-detail {
+  padding: 2px 8px 4px 18px;
+  border-left: 2px solid var(--border);
+  margin: 0 0 2px 6px;
 }
 
 .message-text-tool {

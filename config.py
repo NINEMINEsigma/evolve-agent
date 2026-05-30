@@ -1,29 +1,58 @@
+import argparse
+argparse_parser = argparse.ArgumentParser()
+
+argparse_parser.add_argument("--console_log", type=bool, default=True)
+argparse_parser.add_argument("--fast_agent_space_path", type=str, default="fast_agent_space")
+argparse_parser.add_argument("--slow_agent_space_path", type=str, default="slow_agent_space")
+argparse_parser.add_argument("--fouce_init", type=bool, default=False)
+argparse_parser.add_argument("--gateway_host", type=str, default="127.0.0.1")
+argparse_parser.add_argument("--gateway_port", type=int, default=8765)
+argparse_parser.add_argument("--llm_base_url", type=str, default="https://api.deepseek.com")
+argparse_parser.add_argument("--llm_model", type=str, default="deepseek-v4-flash")
+argparse_parser.add_argument("--llm_max_context_tokens", type=int, default=1000000)
+argparse_parser.add_argument("--llm_context_upbound", type=float, default=0.9)
+argparse_parser.add_argument("--llm_max_output_tokens", type=int, default=384000)
+argparse_parser.add_argument("--llm_temperature", type=float, default=0.95)
+# 可选值：e.g. "low" / "medium" / "high"，空字符串表示不启用
+argparse_parser.add_argument("--llm_reasoning_effort", type=str, default="medium")
+
+#----------
+# workspace
+#----------
+argparse_parser.add_argument("--workspace_path", type=str, default="workspace")
+argparse_parser.add_argument("--logs_path_name", type=str, default="logs")
+argparse_parser.add_argument("--agentspace_path_name", type=str, default="agentspace")
+argparse_parser.add_argument("--mcp_config_path_name", type=str, default="mcp_config.json")
+
+args = argparse_parser.parse_args()
+
+
 # log
-console_log:            bool    = True
+console_log:            bool    = args.console_log
 # path
-fast_agent_space_path:  str     = "fast_agent_space"
-slow_agent_space_path:  str     = "slow_agent_space"
+fast_agent_space_path:  str     = args.fast_agent_space_path
+slow_agent_space_path:  str     = args.slow_agent_space_path
 # runtime
-fouce_init:             bool    = False
+fouce_init:             bool    = args.fouce_init
 # gateway
-gateway_host:           str     = "0.0.0.0"
-gateway_port:           int     = 8765
+gateway_host:           str     = args.gateway_host
+gateway_port:           int     = args.gateway_port
 # llm
-llm_base_url:           str     = "https://api.deepseek.com"
-llm_model:              str     = "deepseek-v4-flash"
+llm_base_url:           str     = args.llm_base_url
+llm_model:              str     = args.llm_model
 # Note: llm_api_key should be set via the OPENAI_API_KEY env var, never in config.
-llm_max_context_tokens: int     = 1000000
-llm_context_upbound:    float   = 0.9
-llm_max_output_tokens:  int     = 384000
-llm_temperature:        float   = 0.95
-llm_reasoning_effort:   str     = "medium" # 可选值：e.g. "low" / "medium" / "high"，空字符串表示不启用
+llm_max_context_tokens: int     = args.llm_max_context_tokens
+llm_context_upbound:    float   = args.llm_context_upbound
+llm_max_output_tokens:  int     = args.llm_max_output_tokens
+llm_temperature:        float   = args.llm_temperature
+llm_reasoning_effort:   str     = args.llm_reasoning_effort 
 
 
 #----------
 # workspace
 #----------
 from pathlib import Path
-workspace_path:         Path = Path("workspace")
-agentspace_path:        Path = workspace_path / "agentspace"
-logs_path:              Path = workspace_path / "logs"
-mcp_config_path:        Path = workspace_path / "mcp_config.json"
+workspace_path:         Path = Path(args.workspace_path)
+agentspace_path:        Path = workspace_path / args.agentspace_path_name
+logs_path:              Path = workspace_path / args.logs_path_name
+mcp_config_path:        Path = workspace_path / args.mcp_config_path_name
