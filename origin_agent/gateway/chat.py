@@ -137,6 +137,19 @@ class SessionManager:
             return []
         idx: Path = self._index_path()
         if not idx.exists():
+            # 主文件不存在时尝试从 .bak 恢复（例如前一次写入中途失败）
+            backup = idx.with_suffix(".json.bak")
+            if backup.exists():
+                logger.warning("Primary index missing, recovering from backup")
+                import shutil
+                try:
+                    shutil.copy2(backup, idx)
+                    data: list = json.loads(idx.read_text(encoding="utf-8"))
+                    if isinstance(data, list):
+                        logger.info("Recovered %d sessions from backup", len(data))
+                        return data
+                except Exception:
+                    logger.warning("Backup recovery failed")
             return []
         try:
             data: list = json.loads(idx.read_text(encoding="utf-8"))
@@ -186,16 +199,20 @@ class SessionManager:
             return
         try:
             idx = self._index_path()
-            # 备份当前文件
-            if idx.exists():
-                backup = idx.with_suffix(".json.bak")
-                idx.replace(backup)
-            # 原子写入：先写 tmp 文件，再 rename
+            # 1. 先写 tmp 文件，不影响 _index.json
             tmp = idx.with_suffix(".json.tmp")
             tmp.write_text(
                 json.dumps(entries, ensure_ascii=False, indent=2),
                 encoding="utf-8",
             )
+            # 2. 备份当前文件（copy，不 rename，保证失败时 _index.json 仍在）
+            if idx.exists():
+                import shutil
+                try:
+                    shutil.copy2(idx, idx.with_suffix(".json.bak"))
+                except Exception:
+                    pass  # 备份失败不阻塞主流程
+            # 3. 原子替换
             tmp.replace(idx)
         except Exception as exc:
             logger.warning("Failed to write session index: %s", exc)
@@ -317,8 +334,14 @@ class SessionManager:
         if self._store_dir:
             with self._index_lock:
                 entries: list[dict] = self._read_index()
-                entries = [e for e in entries if e.get("id") not in expired]
-                self._write_index(entries)
+                if not entries:
+                    logger.warning(
+                        "cleanup_expired: disk index empty (%d sessions in memory), skipping write",
+                        len(self._sessions),
+                    )
+                else:
+                    entries = [e for e in entries if e.get("id") not in expired]
+                    self._write_index(entries)
         return len(expired)
 
     def get_all(self) -> list[dict]:
