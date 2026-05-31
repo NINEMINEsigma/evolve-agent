@@ -18,3 +18,4 @@ from . import diagram  # noqa: F401 — 副作用：注册 draw_diagram / render
 from . import docgen_tools  # noqa: F401 — 副作用：注册 write_docx / write_xlsx / write_pptx / write_pdf
 from . import display  # noqa: F401 — 副作用：注册 display_image / publish_file
 from . import pip  # noqa: F401 — 副作用：注册 install_package
+from . import gui_windows  # noqa: F401 — 副作用：注册 gui_* Windows 操控工具集
