@@ -127,18 +127,30 @@ class App:
         try:
             from system.sandbox import Sandbox
             _sandbox: Sandbox = Sandbox(self.ctx)
+            # 先注入 sandbox 到需要它的模块（在 discover 之前完成）
             import component.tools.filesystem as _fs
             _fs.set_sandbox(_sandbox)
             import component.tools.read_image as _ri
             _ri.set_sandbox(_sandbox)
-            import component.tools  # noqa: F401 — 触发 registry.register()
-            import component.extools  # noqa: F401 — 注册 extools 工具
+            # AST 自动发现并注册工具模块
+            from abstract.tools.discover import discover_builtin_tools
+            from system.pathutils import find_repo_root
+            import sys
+            _agent_root: Path = Path(__file__).resolve().parent
+            _root: Path = find_repo_root()
+            if str(_root) not in sys.path:
+                sys.path.insert(0, str(_root))
+            discover_builtin_tools(str(_agent_root / "component" / "tools"), "component.tools")
+            discover_builtin_tools(str(_agent_root / "component" / "extools"), "component.extools")
+            _custom_tools: Path = _root / "custom_tools"
+            if _custom_tools.exists():
+                discover_builtin_tools(str(_custom_tools), "custom_tools")
             # 注册 MCP 工具（桥接 + 连接 server）
             import component.mcp_tools  # noqa: F401 — 安装 MCP 回调
             component.mcp_tools.init_mcp(self.ctx)
-            all_tools: int = len(component.tools.filesystem.registry.get_all_tool_names())
+            _all_tools: int = len(component.tools.filesystem.registry.get_all_tool_names())
             logger.info("Sandbox + %d tools initialized | mode=%s",
-                        all_tools, self.ctx.mode)
+                        _all_tools, self.ctx.mode)
         except Exception as exc:
             logger.warning("Sandbox/tools unavailable: %s", exc)
             self._shutdown_event.set()

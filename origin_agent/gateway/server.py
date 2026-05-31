@@ -161,18 +161,6 @@ import asyncio
 from contextlib import asynccontextmanager
 
 
-async def _cleanup_loop() -> None:
-    """定期清理过期 session 的后台循环，每 300 秒执行一次。"""
-    while True:
-        try:
-            await asyncio.sleep(300)
-            cleaned: int = sessions.cleanup_expired()
-            if cleaned:
-                logger.info("Cleaned up %d expired session(s)", cleaned)
-        except Exception:
-            pass
-
-
 @asynccontextmanager
 async def _app_lifespan(app: FastAPI):
     """FastAPI 生命周期管理：启动 session 清理任务，关闭时取消。
@@ -181,11 +169,7 @@ async def _app_lifespan(app: FastAPI):
     handler task。日志中出现的 asyncio.CancelledError 噪声
     是无害且预期的 — 仅表示 gateway 正在拆除其事件循环。
     """
-    task: asyncio.Task[None] = asyncio.create_task(_cleanup_loop())
-    logger.info("Session cleanup task started (interval=300s)")
     yield
-    task.cancel()
-    logger.info("Session cleanup task stopped")
 
 
 app: FastAPI = FastAPI(title="Evolve Agent Gateway", lifespan=_app_lifespan)

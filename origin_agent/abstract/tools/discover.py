@@ -1,9 +1,11 @@
 """工具模块自动发现 — 通过 AST 扫描。
 
 函数:
-    discover_builtin_tools(tools_dir) -> List[str]
+    discover_builtin_tools(tools_dir, package_prefix) -> List[str]
         扫描目录中的 .py 文件，寻找模块级别包含 registry.register() 调用的文件，
         导入它们，返回已导入模块名称列表。
+        *tools_dir* 是磁盘上的目录路径，*package_prefix* 是该目录对应的 Python 包名
+        （例如 tools_dir="component/tools/"、package_prefix="component.tools"）。
 
     _module_registers_tools(module_path) -> bool
         使用 ast.parse 检测模块级别的 registry.register()。
@@ -53,8 +55,8 @@ def _module_registers_tools(module_path: Path) -> bool:
     return any(_is_registry_register_call(stmt) for stmt in tree.body)
 
 
-def discover_builtin_tools(tools_dir: str) -> List[str]:
-    """扫描 *tools_dir* 查找工具模块，导入它们，返回模块名称列表。
+def discover_builtin_tools(tools_dir: str, package_prefix: str) -> List[str]:
+    """扫描 *tools_dir* 查找工具模块，通过 *package_prefix* 推导模块名并导入。
 
     步骤:
       1. 列出目录中所有 ``.py`` 文件。
@@ -62,12 +64,17 @@ def discover_builtin_tools(tools_dir: str) -> List[str]:
          开头的文件。
       3. 对每个剩余文件，AST 扫描模块级别的
          ``registry.register(...)`` 调用（参见 ``_module_registers_tools``）。
-      4. 按相对于 ``tools_dir`` 父包的模块名导入每个符合条件的模块。
+      4. 模块名推导为 ``{package_prefix}.{filename}`` 并导入。
       5. 返回成功导入的模块名称列表。
 
     导入失败的模块记录警告并跳过。
     """
     tools_path: Path = Path(tools_dir).resolve()
+    if not tools_path.is_dir():
+        logger.info("discover_builtin_tools: skip (not a dir) %s", tools_path)
+        return []
+
+    logger.info("discover_builtin_tools: scanning %s (prefix=%s)", tools_path, package_prefix)
     module_names: List[str] = []
 
     for path in sorted(tools_path.glob("*.py")):
@@ -76,21 +83,21 @@ def discover_builtin_tools(tools_dir: str) -> List[str]:
         if path.stem.startswith("_"):
             continue
         if not _module_registers_tools(path):
+            logger.info("discover_builtin_tools: skip (no registry.register) %s", path.name)
             continue
 
-        # 推导相对于包含包的模块名。
-        # 例如 tools_dir 为 /home/hermes/hermes-agent/tools/
-        # 文件为 my_tool.py，则模块名为 "tools.my_tool"。
-        parent_pkg: str = tools_path.parent.name
-        mod_name: str = f"{parent_pkg}.{path.stem}"
+        mod_name: str = f"{package_prefix}.{path.stem}"
         module_names.append(mod_name)
+        logger.info("discover_builtin_tools: found %s -> %s", path.name, mod_name)
 
     imported: List[str] = []
     for mod_name in module_names:
         try:
             importlib.import_module(mod_name)
             imported.append(mod_name)
+            logger.info("discover_builtin_tools: imported %s", mod_name)
         except Exception as exc:
-            logger.warning("Could not import tool module %s: %s", mod_name, exc)
+            logger.warning("discover_builtin_tools: could not import %s: %s", mod_name, exc)
 
+    logger.info("discover_builtin_tools: done (%d imported from %s)", len(imported), tools_path)
     return imported

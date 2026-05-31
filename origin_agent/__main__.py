@@ -95,16 +95,14 @@ def _build_context(cli: dict) -> RuntimeContext:
     路径解析为绝对形式，下游代码无需关心 CWD 变化。
     """
     return RuntimeContext(
-        workspace=Path(cli.get("workspace", ".")).resolve(),
-        agentspace=Path(cli.get("agentspace", ".")).resolve(),
-        fork_path=Path(cli.get("evolve", ".")).resolve(),
-        log_path=(
-            Path(cli["log"]).resolve() if "log" in cli else Path("agent.log")
-        ),
-        mode=str(cli.get("mode", "fast")),
-        console_log=_coerce_bool(cli.get("console_log", False)),
-        gateway_host=str(cli.get("gateway_host", "127.0.0.1")),
-        gateway_port=int(cli.get("gateway_port", 8765)),
+        workspace       = Path(cli["workspace"]).resolve(),
+        agentspace      = Path(cli["agentspace"]).resolve(),
+        fork_path       = Path(cli["evolve"]).resolve(),
+        log_path        = Path(cli["log"]).resolve(),
+        mode            = str(cli["mode"]),
+        console_log     = _coerce_bool(cli["console_log"]),
+        gateway_host    = str(cli["gateway_host"]),
+        gateway_port    = int(cli["gateway_port"]),
         # 仅 fallback 模式字段
         fix_path=(
             Path(cli["fix_fork"]).resolve() if "fix_fork" in cli else None
@@ -125,11 +123,11 @@ def _build_context(cli: dict) -> RuntimeContext:
             os.environ.get("LLM_MODEL", "")
             or str(cli.get("llm_model", ""))
         ),
-        llm_max_context_tokens=int(cli.get("llm_max_context_tokens", 128_000)),
-        llm_context_upbound=float(cli.get("llm_context_upbound", 0.7)),
-        llm_max_output_tokens=int(cli.get("llm_max_output_tokens", 4096)),
-        llm_reasoning_effort=str(cli.get("llm_reasoning_effort", "")),
-        mcp_config_path=cli.get("mcp_config_path") or None,
+        llm_max_context_tokens  = int(cli["llm_max_context_tokens"]),
+        llm_context_upbound     = float(cli["llm_context_upbound"]),
+        llm_max_output_tokens   = int(cli["llm_max_output_tokens"]),
+        llm_reasoning_effort    = str(cli["llm_reasoning_effort"]),
+        mcp_config_path         = cli["mcp_config_path"],
     )
 
 
@@ -156,7 +154,7 @@ def _build_frontend() -> bool:
 
     try:
         pnpm: str = "pnpm.cmd" if sys.platform == "win32" else "pnpm"
-        # pnpm install（幂等且已安装时非常快）
+        # pnpm install
         install_proc = subprocess.run(
             [pnpm, "install"],
             cwd=str(frontend_dir),
@@ -174,10 +172,9 @@ def _build_frontend() -> bool:
             encoding="utf-8",
         )
         build_proc.check_returncode()
-        # 将构建输出的最后几行打入日志，便于诊断构建时长和结果
+        # 将构建输出打入日志，便于诊断构建时长和结果
         build_lines: list[str] = build_proc.stdout.strip().split("\n")
-        tail: str = "\n".join(build_lines[-8:]) if build_lines else "(empty)"
-        logger.info("Frontend build output (tail):\n%s", tail)
+        logger.info("Frontend build output:\n%s", "\n".join(build_lines))
         logger.info("Frontend build complete → %s", frontend_dir / "dist")
         return True
     except subprocess.CalledProcessError as exc:

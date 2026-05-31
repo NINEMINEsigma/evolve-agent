@@ -319,30 +319,8 @@ class SessionManager:
         }
 
     def cleanup_expired(self) -> int:
-        import time
-        now: float = time.time()
-        expired: list[str] = [
-            sid for sid, info in self._sessions.items()
-            if now - info.get("created_at", 0) > self._SESSION_TTL
-        ]
-        if not expired:
-            return 0
-        for sid in expired:
-            self._sessions.pop(sid, None)
-            logger.debug("Session expired | id=%s", sid)
-        # 同时从磁盘索引中清除过期条目
-        if self._store_dir:
-            with self._index_lock:
-                entries: list[dict] = self._read_index()
-                if not entries:
-                    logger.warning(
-                        "cleanup_expired: disk index empty (%d sessions in memory), skipping write",
-                        len(self._sessions),
-                    )
-                else:
-                    entries = [e for e in entries if e.get("id") not in expired]
-                    self._write_index(entries)
-        return len(expired)
+        # 禁用过期清理：会话应永久保留在索引中，避免历史丢失。
+        return 0
 
     def get_all(self) -> list[dict]:
         """返回所有 session 及其元数据的列表。"""
