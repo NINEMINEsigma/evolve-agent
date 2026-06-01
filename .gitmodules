@@ -6,3 +6,7 @@
 	path = third/filesystem
 	url = http://gitea.liubai.site/convention/python-file-system.git
 	branch = master
+[submodule "third/llamaapis"]
+	path = third/llamaapis
+	url = http://gitea.liubai.site/ai/llama.apis.git
+	branch = master
