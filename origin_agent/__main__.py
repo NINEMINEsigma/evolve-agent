@@ -124,7 +124,6 @@ def _build_context(cli: dict) -> RuntimeContext:
             or str(cli.get("llm_model", ""))
         ),
         llm_max_context_tokens  = int(cli["llm_max_context_tokens"]),
-        llm_context_upbound     = float(cli["llm_context_upbound"]),
         llm_max_output_tokens   = int(cli["llm_max_output_tokens"]),
         llm_reasoning_effort    = str(cli["llm_reasoning_effort"]),
         mcp_config_path         = cli["mcp_config_path"],

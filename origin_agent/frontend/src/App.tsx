@@ -231,6 +231,14 @@ export default function App() {
             setTokenUsage(data.token_usage);
             return;
           }
+          if (data.action === "session_rotated") {
+            setSessionId(data.new_sid);
+            localStorage.setItem("evolve_session_id", data.new_sid);
+            setMessages([]);
+            setTokenUsage(0);
+            fetchSessions();
+            return;
+          }
           if (data.uploaded) {
             addMessage("system", `✅ 上传成功：${data.filename || "文件"} → ${data.path}`);
             return;
@@ -527,8 +535,8 @@ export default function App() {
                 {g.sessions.map((s) => (
                   <div
                     key={s.id}
-                    className={`session-item ${s.id === sessionId ? "active" : ""}`}
-                    onClick={() => switchSession(s.id)}
+                    className={`session-item ${s.id === sessionId ? "active" : ""} ${s.status === "archived" ? "archived" : ""}`}
+                    onClick={() => { if (s.status !== "archived") switchSession(s.id); }}
                     onContextMenu={(e) => handleContextMenu(e, s.id)}
                   >
                     <div className="session-item-content">
@@ -547,7 +555,10 @@ export default function App() {
                           onClick={(e) => e.stopPropagation()}
                         />
                       ) : (
-                        <div className="session-item-title">{s.title || s.id.slice(0, 8) + "..."}</div>
+                        <div className="session-item-title">
+                          {s.title || s.id.slice(0, 8) + "..."}
+                          {s.status === "archived" && <span className="archived-badge">已归档</span>}
+                        </div>
                       )}
                       <div className="session-item-sub">
                         <span className="session-item-id">{s.id}</span>

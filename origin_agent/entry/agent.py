@@ -15,6 +15,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Awaitable, Callable, Dict, List
 
@@ -125,6 +126,14 @@ class AgentLoop:
         # 累计 token 消耗，仅用于 dashboard 展示。
         # 压缩决策使用 _estimate_context_tokens() 替代。
         self._token_usage: Dict[str, int] = {}
+        # 最近一次 LLM 调用返回的真实 prompt_tokens（上下文占用锚点）
+        self._last_prompt_tokens: Dict[str, int] = {}
+        # 缓存 system prompt 字符串，用于精确 token 估算
+        self._cached_system_prompt: str | None = None
+        # SessionManager 引用（由 server.py 注入），用于归档+旋转会话
+        self._session_manager: Any | None = None
+        # 会话旋转通知队列：old_sid -> new_sid（server.py 在 process_message 后检查并推送前端）
+        self._session_rotated_notify: Dict[str, str] = {}
         # 工具调用统计，用于 dashboard 监控。
         # key 为工具名，value 为 {"calls": int, "errors": int}
         self._tool_stats: Dict[str, Dict[str, int]] = {}
@@ -147,6 +156,10 @@ class AgentLoop:
         *payload* 为 JSON 字符串。
         """
         self._tool_event_callback = cb
+
+    def set_session_manager(self, manager: Any) -> None:
+        """注入 SessionManager 引用，用于归档会话。"""
+        self._session_manager = manager
 
     def interrupt(self, session_id: str) -> None:
         """请求停止指定 session 的 agent 循环处理。
@@ -203,8 +216,19 @@ class AgentLoop:
             user_message, session_id=session_id
         )
 
-        # ---- 历史过长时进行压缩 ----
-        await self._compress_history(session_id)
+        # ---- 历史过长时进行会话旋转（归档+新会话）或压缩 ----
+        _cur: int = self._last_prompt_tokens.get(session_id, 0)
+        if _cur == 0:
+            _cur = self._estimate_context_tokens(session_id)
+        _SAFETY: int = 5000
+        if (_cur + self._ctx.llm_max_output_tokens + _SAFETY) > self._ctx.llm_max_context_tokens:
+            rotated: str | None = await self._rotate_session(session_id)
+            if not rotated:
+                await self._compress_history(session_id)
+            else:
+                await self._compress_history(session_id)  # 当前回合的旧上下文仍需压缩
+            # 旋转后不切换 session_id：当前回合继续用旧 sid 保证工具事件路由正确，
+            # 新会话从下一个用户消息开始生效（前端收到 session_rotated 后自动切换）
 
         # ---- 构建消息列表 ----
         messages = self._build_messages(session_id, user_message, memory_ctx)
@@ -267,6 +291,8 @@ class AgentLoop:
                 # 从 LLM 响应中追踪实际 token 消耗
                 self._token_usage[session_id] = self._token_usage.get(session_id, 0) + resp.usage.total_tokens
                 self._persist_token_usage(session_id)
+                # 记录真实 prompt_tokens 作为上下文占用锚点
+                self._last_prompt_tokens[session_id] = resp.usage.prompt_tokens
 
                 if not resp.tool_calls:
                     # 纯文本回复 — 存储并返回
@@ -308,6 +334,14 @@ class AgentLoop:
                                 return "进化已完成，正在重启以应用新代码..."
                         except (json.JSONDecodeError, KeyError, TypeError):
                             pass
+
+                # Mid-loop 压缩检查：工具结果追加后若接近上限则压缩
+                est: int = self._last_prompt_tokens.get(session_id, 0)
+                if est == 0:
+                    est = self._estimate_context_tokens(session_id)
+                SAFETY: int = 5000
+                if (est + self._ctx.llm_max_output_tokens + SAFETY) > self._ctx.llm_max_context_tokens:
+                    await self._compress_history(session_id)
 
                 messages = self._get_full_history(session_id, memory_ctx)
 
@@ -563,6 +597,7 @@ class AgentLoop:
     def invalidate_skill_cache(self) -> None:
         """强制下次调用时重新加载 skill 缓存。"""
         self._skill_cache_valid = False
+        self._cached_system_prompt = None
 
     def _estimate_context_tokens(self, session_id: str) -> int:
         """通过 tiktoken 计算历史 + system prompt 的实际上下文 token 数。
@@ -592,9 +627,15 @@ class AgentLoop:
             if rc:
                 total += 4
                 total += len(enc.encode(str(rc)))
+            tc: Any = msg.get("tool_calls")
+            if tc:
+                total += len(enc.encode(json.dumps(tc, ensure_ascii=False)))
 
-        # 加上 system prompt 估算值（由 _build_messages 构建）
-        total += 2000
+        # 使用缓存的 system prompt 精确计数（而非固定 +2000）
+        if self._cached_system_prompt is not None:
+            total += len(enc.encode(self._cached_system_prompt))
+        else:
+            total += 2000
 
         return total
 
@@ -610,11 +651,15 @@ class AgentLoop:
 
         # 来自 RuntimeContext 的上下文限制（可配置）
         max_tokens: int = self._ctx.llm_max_context_tokens
-        threshold_tokens: int = int(max_tokens * self._ctx.llm_context_upbound)
 
-        # 使用实际上下文大小估算 — 而非累计 _token_usage
-        current_tokens: int = self._estimate_context_tokens(session_id)
-        if current_tokens < threshold_tokens:
+        # 优先使用真实 prompt_tokens，首次调用 fallback 到估算
+        current_tokens: int = self._last_prompt_tokens.get(session_id, 0)
+        if current_tokens == 0:
+            current_tokens = self._estimate_context_tokens(session_id)
+
+        # 容量检查：当前上下文 + 最大输出 <= 窗口上限（含安全边距）
+        SAFETY_MARGIN: int = 5000
+        if (current_tokens + self._ctx.llm_max_output_tokens + SAFETY_MARGIN) <= max_tokens:
             return
 
         keep_msgs: int = keep_last * 2  # user+assistant 成对
@@ -684,6 +729,65 @@ class AgentLoop:
             return prompt_tpl, "（历史对话过长，已自动截断）", "[上下文摘要]"
         return prompt_tpl, "(History too long, truncated)", "[Context Summary]"
 
+    async def _rotate_session(self, session_id: str) -> str | None:
+        """归档当前会话并创建带摘要的新会话。
+
+        由 _compress_history 在容量检查触发时调用。
+        返回新 session_id，或 None 表示旋转失败。
+        """
+        if self._session_manager is None:
+            return None
+
+        sm = self._session_manager
+        old_sid: str = session_id
+
+        # 1. 对完整历史做 LLM 摘要
+        summary: str = ""
+        try:
+            history: List[Dict[str, Any]] = self._get_history(old_sid)
+            parts: list[str] = []
+            for m in history:
+                role: str = m.get("role", "unknown")
+                content: str = self._extract_text(m.get("content", ""))[:500]
+                if content:
+                    parts.append(f"[{role}]: {content}")
+            old_text: str = "\n".join(parts[-50:])
+            if old_text.strip():
+                prompt, fallback, _ = self._compression_prompts()
+                summary_prompt: str = prompt.replace(r"{{old_text}}", old_text)
+                summary_resp: LLMResponse = await self._llm.chat(
+                    [{"role": "user", "content": summary_prompt}],
+                    tools=[],
+                )
+                summary = summary_resp.content.strip()[:300] if summary_resp.content else ""
+                if not summary:
+                    summary = fallback
+            if not summary:
+                summary = "(会话上下文已归档)"
+        except Exception:
+            summary = "(会话上下文已归档)"
+
+        # 2. 同步 memory
+        try:
+            self._memory.sync_all("", summary, session_id=old_sid)
+        except Exception:
+            pass
+
+        # 3. 归档旧会话
+        new_sid = sm.create_with_context(summary, old_sid)
+        sm.archive(old_sid, continuation_sid=new_sid)
+
+        # 4. 将新会话的历史加载到内存
+        self._histories[new_sid] = self._load_history_from_disk(new_sid)
+        self._last_prompt_tokens[new_sid] = 0
+        self._session_rotated_notify[old_sid] = new_sid
+
+        logger.info(
+            "Session rotated | old=%s new=%s (summary=%d chars)",
+            old_sid, new_sid, len(summary),
+        )
+        return new_sid
+
     def _build_messages(
         self,
         session_id: str,
@@ -705,6 +809,8 @@ class AgentLoop:
             fix_fork_path=str(self._ctx.fix_path) if self._ctx.fix_path else "",
             fix_log_path=str(self._ctx.fix_log_path or ""),
         )
+        # 缓存 system prompt 用于 token 估算
+        self._cached_system_prompt = system_prompt
 
         history: List[Dict[str, Any]] = self._get_history(session_id)
         messages: List[Dict[str, Any]] = [
@@ -863,6 +969,23 @@ class AgentLoop:
                     self._tool_stats[tc.name]["errors"] += 1
         except (json.JSONDecodeError, TypeError):
             pass
+
+        # ---- 工具结果大小截断 ----
+        _MAX_RESULT_CHARS: int = 50_000
+        if len(result) > _MAX_RESULT_CHARS:
+            _ts: str = datetime.now().strftime("%Y%m%d_%H%M%S")
+            _rel: str = f"tool_results/{_ts}_{tc.name}.txt"
+            _full: Path = self._ctx.agentspace / _rel.replace("/", "\\")
+            try:
+                _full.parent.mkdir(parents=True, exist_ok=True)
+                _full.write_text(result, encoding="utf-8")
+                _preview: str = result[:2000]
+                result = (
+                    f"[结果过长（{len(result)}字符），完整内容已写入 ws:{_rel}]\n"
+                    f"[前2000字符预览]:\n{_preview}"
+                )
+            except Exception as _exc:
+                logger.warning("Failed to write tool result to file: %s", _exc)
 
         # ---- 通知前端：tool_result (fire-and-forget) ----
         # 前端推送是尽力而为的副作用，不阻塞工具执行主链路。

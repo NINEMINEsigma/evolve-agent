@@ -10,7 +10,6 @@ argparse_parser.add_argument("--gateway_port", type=int, default=8765)
 argparse_parser.add_argument("--llm_base_url", type=str, default="https://api.deepseek.com")
 argparse_parser.add_argument("--llm_model", type=str, default="deepseek-v4-flash")
 argparse_parser.add_argument("--llm_max_context_tokens", type=int, default=1000000)
-argparse_parser.add_argument("--llm_context_upbound", type=float, default=0.9)
 argparse_parser.add_argument("--llm_max_output_tokens", type=int, default=384000)
 argparse_parser.add_argument("--llm_temperature", type=float, default=0.95)
 # 可选值：e.g. "low" / "medium" / "high"，空字符串表示不启用
@@ -42,7 +41,6 @@ llm_base_url:           str     = args.llm_base_url
 llm_model:              str     = args.llm_model
 # Note: llm_api_key should be set via the OPENAI_API_KEY env var, never in config.
 llm_max_context_tokens: int     = args.llm_max_context_tokens
-llm_context_upbound:    float   = args.llm_context_upbound
 llm_max_output_tokens:  int     = args.llm_max_output_tokens
 llm_temperature:        float   = args.llm_temperature
 llm_reasoning_effort:   str     = args.llm_reasoning_effort 

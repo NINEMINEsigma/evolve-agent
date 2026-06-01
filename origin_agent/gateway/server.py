@@ -438,6 +438,17 @@ async def ws_chat(ws: WebSocket) -> None:
                 sid = sessions.create()
         else:
             sid = sessions.create()
+
+    # 如果 resume 的会话已归档，自动切换到延续会话或创建新会话
+    _info: dict | None = sessions.get(sid)
+    if _info and _info.get("status") == "archived":
+        _cont: str | None = _info.get("continuation")
+        if _cont and sessions.exists(_cont):
+            sid = _cont
+            logger.info("Redirected archived session %s to continuation %s", resume, sid)
+        else:
+            sid = sessions.create()
+            logger.info("Archived session %s has no continuation, created new session %s", resume, sid)
     _tool_ws_sinks[sid] = ws  # 注册用于工具事件流推送
     logger.info("WebSocket connected | session=%s", sid)
 
@@ -518,6 +529,26 @@ async def ws_chat(ws: WebSocket) -> None:
                     except Exception as exc:
                         logger.exception("Agent loop error for session=%s", sid)
                         reply = f"Internal error: {exc}"
+
+                    # 检查 AgentLoop 是否旋转了会话（归档+新会话）
+                    _old: str = sid
+                    _rotated: str | None = getattr(
+                        _agent_loop, "_session_rotated_notify", {},
+                    ).pop(sid, None)
+                    if _rotated:
+                        _tool_ws_sinks[_rotated] = ws  # 注册新 sid 到 WebSocket 映射
+                        sid = _rotated
+                        await ws.send_text(
+                            Message(
+                                type=MessageType.SYSTEM,
+                                content=json.dumps({
+                                    "action": "session_rotated",
+                                    "new_sid": sid,
+                                    "old_sid": _old,
+                                }),
+                            ).to_json()
+                        )
+
                     await ws.send_text(
                         Message(
                             type=MessageType.AGENT_MESSAGE,

@@ -105,7 +105,6 @@ if __name__ == "__main__":
             "--llm_base_url", str(llm_base_url), # LLM API 地址
             "--llm_model", str(llm_model), # LLM 模型名
             "--llm_max_context_tokens", str(llm_max_context_tokens), # LLM 最大上下文
-            "--llm_context_upbound", str(llm_context_upbound), # LLM 上下文压缩阈值
             "--llm_max_output_tokens", str(llm_max_output_tokens), # LLM 最大输出
             "--llm_temperature", str(llm_temperature), # LLM 温度
             "--llm_reasoning_effort", str(llm_reasoning_effort), # LLM reasoning_effort
@@ -150,7 +149,6 @@ if __name__ == "__main__":
                 "--llm_base_url", str(llm_base_url), # LLM API 地址
                 "--llm_model", str(llm_model), # LLM 模型名
                 "--llm_max_context_tokens", str(llm_max_context_tokens), # LLM 最大上下文
-                "--llm_context_upbound", str(llm_context_upbound), # LLM 上下文压缩阈值
                 "--llm_max_output_tokens", str(llm_max_output_tokens), # LLM 最大输出
                 "--llm_temperature", str(llm_temperature), # LLM 温度
                 "--llm_reasoning_effort", str(llm_reasoning_effort), # LLM reasoning_effort

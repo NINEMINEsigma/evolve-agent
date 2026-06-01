@@ -207,6 +207,18 @@ def _run_ab(*args: str, timeout: int = 60) -> str:
     except RuntimeError as exc:
         raise exc
 
+    # On Windows, pnpm exec / npx are .cmd scripts that re-shell args
+    # through cmd.exe, interpreting & | > < as command separators.
+    # Use shell=True with double-quoted special-chars args to avoid this.
+    shell_mode: bool = False
+    if sys.platform == "win32" and (_AB_USE_PNPM_EXEC or _AB_USE_NPX):
+        shell_mode = True
+        escaped: list[str] = [
+            f'"{a}"' if any(c in a for c in "&|><^%") else a
+            for a in full_cmd
+        ]
+        full_cmd = " ".join(escaped)
+
     try:
         proc = subprocess.run(
             full_cmd,
@@ -215,6 +227,7 @@ def _run_ab(*args: str, timeout: int = 60) -> str:
             encoding="utf-8",
             errors="replace",
             timeout=timeout,
+            shell=shell_mode,
         )
     except FileNotFoundError:
         # Clear cached path — it may have been deleted

@@ -61,7 +61,6 @@ class RuntimeContext(BaseModel):
     llm_base_url: str = "https://api.openai.com/v1"
     llm_model: str = "gpt-4o"
     llm_max_context_tokens: int = 128_000  # 总上下文窗口
-    llm_context_upbound: float = 0.7       # 压缩阈值比例
     llm_temperature: float = 0.7
     llm_max_output_tokens: int = 4096
     llm_reasoning_effort: str = ""

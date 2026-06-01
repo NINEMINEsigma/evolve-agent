@@ -186,6 +186,8 @@ class SessionManager:
                     "created_at": created_at,
                     "status": "active",
                     "title": "",
+                    "parent": None,
+                    "continuation": None,
                 })
             if recovered:
                 logger.info("Recovered %d sessions from directory scan", len(recovered))
@@ -242,6 +244,8 @@ class SessionManager:
                     "status": entry.get("status", "active"),
                     "created_at": entry.get("created_at", 0),
                     "title": entry.get("title", ""),
+                    "parent": entry.get("parent"),
+                    "continuation": entry.get("continuation"),
                 }
         if entries:
             logger.info("Loaded %d sessions from disk", len(entries))
@@ -254,20 +258,63 @@ class SessionManager:
 
     # -- CRUD ----------------------------------------------------------------
 
-    def create(self) -> str:
+    def create(self, parent_sid: str | None = None) -> str:
         import time
         sid: str = uuid.uuid4().hex[:12]
         now: float = time.time()
-        self._sessions[sid] = {"status": "active", "created_at": now, "title": ""}
+        self._sessions[sid] = {
+            "status": "active", "created_at": now, "title": "",
+            "parent": parent_sid, "continuation": None,
+        }
         # 持久化到磁盘
         if self._store_dir:
             with self._index_lock:
                 entries: list[dict] = self._read_index()
-                entries.append({"id": sid, "created_at": now, "status": "active", "title": ""})
+                entries.append({
+                    "id": sid, "created_at": now, "status": "active", "title": "",
+                    "parent": parent_sid, "continuation": None,
+                })
                 self._write_index(entries)
             (self._store_dir / sid).mkdir(parents=True, exist_ok=True)
-        logger.debug("Session created | id=%s", sid)
+        logger.debug("Session created | id=%s parent=%s", sid, parent_sid)
         return sid
+
+    def archive(self, sid: str, continuation_sid: str | None = None) -> None:
+        """将会话标记为已归档，不可再对话。"""
+        if sid in self._sessions:
+            self._sessions[sid]["status"] = "archived"
+            self._sessions[sid]["continuation"] = continuation_sid
+        if self._store_dir:
+            with self._index_lock:
+                entries: list[dict] = self._read_index()
+                for e in entries:
+                    if e.get("id") == sid:
+                        e["status"] = "archived"
+                        if continuation_sid:
+                            e["continuation"] = continuation_sid
+                        break
+                self._write_index(entries)
+        logger.info("Session archived | id=%s continuation=%s", sid, continuation_sid)
+
+    def create_with_context(self, summary: str, parent_sid: str) -> str:
+        """创建新会话并以摘要作为初始 system 消息。"""
+        new_sid: str = self.create(parent_sid=parent_sid)
+        # 写入初始 system 摘要消息到 JSONL
+        sdir: Path | None = self._store_dir / new_sid if self._store_dir else None
+        if sdir:
+            sdir.mkdir(parents=True, exist_ok=True)
+            msg_path: Path = sdir / "messages.jsonl"
+            entry: dict = {"role": "system", "content": f"[会话延续摘要]\n{summary}"}
+            try:
+                with open(msg_path, "a", encoding="utf-8") as f:
+                    f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+            except Exception as exc:
+                logger.warning("Failed to write context for session %s: %s", new_sid, exc)
+        # 更新父会话指向延续
+        if parent_sid in self._sessions:
+            self._sessions[parent_sid]["continuation"] = new_sid
+        logger.info("Session created from archive | new=%s parent=%s", new_sid, parent_sid)
+        return new_sid
 
     def exists(self, sid: str) -> bool:
         return sid in self._sessions
@@ -316,6 +363,8 @@ class SessionManager:
             "created_at": info.get("created_at", 0),
             "status": info.get("status", "unknown"),
             "title": info.get("title", ""),
+            "parent": info.get("parent"),
+            "continuation": info.get("continuation"),
         }
 
     def cleanup_expired(self) -> int:
@@ -330,6 +379,8 @@ class SessionManager:
                 "created_at": info.get("created_at", 0),
                 "status": info.get("status", "unknown"),
                 "title": info.get("title", ""),
+                "parent": info.get("parent"),
+                "continuation": info.get("continuation"),
             }
             for sid, info in self._sessions.items()
         ]

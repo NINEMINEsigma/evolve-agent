@@ -185,10 +185,11 @@ category: core
             self._shutdown_event.set()
 
         # ---- 创建 agent 循环 ----
+        agent_loop: AgentLoop | None = None
         try:
             from entry.agent import AgentLoop
             history_path: str = str(self.ctx.workspace / "logs" / "sessions")
-            agent_loop: AgentLoop = AgentLoop(self.ctx, history_store_path=history_path)
+            agent_loop = AgentLoop(self.ctx, history_store_path=history_path)
 
             # 注册持久化 memory provider
             try:
@@ -213,8 +214,12 @@ category: core
             # Gateway 将回退到 echo 模式
 
         # ---- 配置 session 持久化 ----
-        from gateway.server import configure_sessions
+        from gateway.server import configure_sessions, sessions
         configure_sessions(str(self.ctx.workspace / "logs" / "sessions"))
+
+        # ---- 将 SessionManager 注入 AgentLoop ----
+        if agent_loop is not None:
+            agent_loop.set_session_manager(sessions)
 
         host: str = self.ctx.gateway_host
         port: int = self.ctx.gateway_port

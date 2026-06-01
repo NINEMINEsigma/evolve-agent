@@ -100,7 +100,7 @@ class LLMClient:
             "model": self._model,
             "messages": messages,
             "temperature": self._temperature,
-            "max_tokens": self._max_tokens,
+            "max_completion_tokens": self._max_tokens,
         }
         if tools:
             kwargs["tools"] = tools
