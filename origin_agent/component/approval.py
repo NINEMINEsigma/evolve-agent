@@ -14,7 +14,8 @@ import asyncio
 import json
 import logging
 import uuid
-from typing import Any, Dict
+from typing import Any, Dict, TYPE_CHECKING
+import dirtyjson
 
 logger = logging.getLogger(__name__)
 
@@ -40,7 +41,10 @@ def is_adventure_mode(session_id: str) -> bool:
 # 冒险模式：小 LLM 审批器（懒加载单例）
 # ---------------------------------------------------------------------------
 
-_approver: Any = None
+if TYPE_CHECKING:
+    from third.llamaapis import InferenceEngine
+
+_approver: InferenceEngine|None = None
 _approver_lock = asyncio.Lock()
 _APPROVER_FAILED = "__failed__"  # sentinel: 标记初始化失败，防止每次重试
 
@@ -63,7 +67,7 @@ def _detect_cuda() -> bool:
         return False
 
 
-def _get_approver() -> Any:
+def _get_approver() -> InferenceEngine|None:
     """懒加载审批小模型的 InferenceEngine 单例。"""
     global _approver
     if _approver is not None:
@@ -105,7 +109,7 @@ def _get_approver() -> Any:
         return _approver
     except Exception as exc:
         logger.warning("Failed to initialize adventure approver: %s", exc)
-        _approver = _APPROVER_FAILED
+        _approver = _APPROVER_FAILED # type: ignore
         return None
 
 
@@ -117,11 +121,10 @@ async def _adventure_confirm(tool_name: str, args: dict, reason: str, content: s
     engine = _get_approver()
     if engine is None:
         logger.warning("Approver not available — falling back to human approval")
-        return None
+        return "deny"
 
     system_prompt = (
-        "你是命令安全审查器。判断工具调用是否危险。"
-        "规则：对工作目录外写操作=危险（删系统文件、改配置、装系统级包等），读操作=安全。"
+        "你是命令安全审查器, 判断工具调用是否危险, 只有合法且安全时才允许执行."
         '仅返回JSON：{"approved":true/false,"reason":"简短原因"}'
     )
 
@@ -136,18 +139,24 @@ async def _adventure_confirm(tool_name: str, args: dict, reason: str, content: s
 
         resp = engine.chat(
             [system_message(system_prompt), user_message(user_prompt)],
-            GenerationConfig(temperature=0.1, max_tokens=128),
+            GenerationConfig(temperature=0.1, max_tokens=4096),
         )
-        result = json.loads(resp.content)
-        approved = result.get("approved", False)
-        reason_text = result.get("reason", "")
+        resp_content = resp.choices[0].message.content
+        result: dict = dirtyjson.loads(resp_content)
+        approved: bool = result["approved"] # type: ignore
+        reason_text: str = result["reason"] # type: ignore
         if approved:
             logger.info("Adventure approved | tool=%s reason=%s", tool_name, reason_text)
             return "allow_once"
         logger.info("Adventure denied | tool=%s reason=%s", tool_name, reason_text)
         return "deny"
     except Exception as exc:
-        logger.warning("Adventure approval failed: %s — denying tool=%s", exc, tool_name)
+        resp_content = locals().get("resp_content", "<not available>")
+        logger.warning(
+            "Adventure approval failed: %s — denying tool=%s | resp=%r",
+            exc, tool_name, resp_content,
+            exc_info=True,
+        )
         return "deny"
 
 
