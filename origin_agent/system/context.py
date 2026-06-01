@@ -71,7 +71,37 @@ class RuntimeContext(BaseModel):
     tool_timeout: int = 30
     """单个工具调用允许运行的最大秒数，超时后取消（0 = 无超时）。"""
 
+    # -- 冒险模式审批模型配置 ---------------------------------------
+
+    approval_model_path: str = ""
+    """冒险模式审批小模型的 GGUF 路径。空字符串表示未配置。"""
+
+    approval_model_n_ctx: int = 4096
+    """审批小模型的上下文窗口 token 数。"""
+
     # -- MCP 配置 -------------------------------------------------
 
     mcp_config_path: Optional[str] = None
     """MCP server 配置文件的路径（JSON 格式）。为 None 时不启动 MCP server。"""
+
+
+# ---------------------------------------------------------------------------
+# 全局 RuntimeContext 单例
+# ---------------------------------------------------------------------------
+
+_runtime_ctx: RuntimeContext | None = None
+
+
+def set_runtime_context(ctx: RuntimeContext) -> None:
+    """设置进程级全局 RuntimeContext 单例。"""
+    global _runtime_ctx
+    _runtime_ctx = ctx
+
+
+def get_runtime_context() -> RuntimeContext:
+    """返回全局 RuntimeContext，必须确保在 set 之后调用。"""
+    if _runtime_ctx is None:
+        raise RuntimeError(
+            "RuntimeContext not set. Call set_runtime_context(ctx) during startup."
+        )
+    return _runtime_ctx

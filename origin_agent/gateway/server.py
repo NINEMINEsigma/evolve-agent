@@ -591,6 +591,11 @@ async def ws_chat(ws: WebSocket) -> None:
             elif msg.type == MessageType.FILE_UPLOAD:
                 await _handle_file_upload(ws, sid, msg)
 
+            elif msg.type == MessageType.ADVENTURE_MODE:
+                from component.approval import set_adventure_mode
+                enabled = msg.content is not None and (str(msg.content).lower() in ("true", "1", "on"))
+                set_adventure_mode(sid, enabled)
+
             elif msg.type == MessageType.SYSTEM:
                 logger.info("System message from session=%s: %s", sid, msg.content)
 

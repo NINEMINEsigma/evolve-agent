@@ -27,6 +27,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Tuple
 
 from abstract.tools.registry import registry, tool_error, tool_result
+from system.sandbox import Access
 
 logger = logging.getLogger(__name__)
 
@@ -52,7 +53,7 @@ def _resolve_fork_root() -> Path | None:
     """通过 sandbox 获取 fork（slow）目录的绝对路径。"""
     try:
         from component.tools.filesystem import _s as _get_sandbox
-        r = _get_sandbox().resolve("fork:", "read")
+        r = _get_sandbox().resolve("fork:", Access.READ)
         return r.real
     except Exception as exc:
         logger.debug("Could not resolve fork: sandbox — %s", exc)

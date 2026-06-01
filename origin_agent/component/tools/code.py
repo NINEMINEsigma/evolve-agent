@@ -42,7 +42,7 @@ def _resolve_sandboxed_path(path: str, mode: str) -> str:
     if ":" not in path:
         # 裸文件名 — 读取时相对于 self:，写入时相对于 fork:
         return str(_s().resolve(f"{'fork' if mode == 'write' else 'self'}:{path}",
-                                "write" if mode == "write" else "read").real)
+                                Access.WRITE if mode == "write" else Access.READ).real)
     raise SandboxError("Use bare filenames (e.g. 'main.py') for code tools")
 
 

@@ -191,3 +191,6 @@ test/*
 workspace/
 .shell_allowlist.json
 /skills/
+
+# custom
+custom_models/*.gguf

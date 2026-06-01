@@ -126,6 +126,9 @@ def _build_context(cli: dict) -> RuntimeContext:
         llm_max_context_tokens  = int(cli["llm_max_context_tokens"]),
         llm_max_output_tokens   = int(cli["llm_max_output_tokens"]),
         llm_reasoning_effort    = str(cli["llm_reasoning_effort"]),
+        # 冒险模式审批模型配置
+        approval_model_path     = str(cli.get("approval_model_path", "")),
+        approval_model_n_ctx    = int(cli.get("approval_model_n_ctx", 4096)),
         mcp_config_path         = cli["mcp_config_path"],
     )
 
@@ -188,6 +191,8 @@ def _build_frontend() -> bool:
 def main() -> int:
     cli: dict = _parse_cli()
     ctx: RuntimeContext = _build_context(cli)
+    from system.context import set_runtime_context
+    set_runtime_context(ctx)
 
     # 仅当通过 --log 显式请求时才创建日志文件。
     log_target: str | None = str(ctx.log_path) if "log" in cli else None

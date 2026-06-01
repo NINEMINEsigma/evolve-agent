@@ -16,7 +16,6 @@ import json
 import logging
 import subprocess
 import sys
-import uuid
 from typing import Any, Dict, List
 
 from abstract.tools.registry import registry, tool_error, tool_result
@@ -24,52 +23,7 @@ from abstract.tools.registry import registry, tool_error, tool_result
 logger = logging.getLogger(__name__)
 
 
-# ── 确认辅助函数（与 shell.py / run_python.py 一致）────────────────
-
-
-async def _request_user_confirm(
-    session_id: str, packages: str, reason: str,
-) -> str:
-    """Send CONFIRM_REQUEST to frontend and wait for the result.
-
-    Returns ``"allow_once"`` or ``"deny"`` (timeout defaults to ``"deny"``).
-    """
-    from gateway.server import _tool_ws_sinks, _pending_confirms, _register_confirm_session
-
-    request_id: str = uuid.uuid4().hex[:8]
-
-    loop: asyncio.AbstractEventLoop = asyncio.get_event_loop()
-    fut: asyncio.Future[str] = loop.create_future()
-    _pending_confirms[request_id] = fut
-    _register_confirm_session(request_id, session_id)
-
-    ws = _tool_ws_sinks.get(session_id)
-    if ws:
-        try:
-            await ws.send_text(json.dumps({
-                "type": "confirm_request",
-                "session_id": session_id,
-                "request_id": request_id,
-                "content": f"安装包: `{packages}`\n原因: {reason}",
-                "tool": "install_package",
-                "args": {"packages": packages, "reason": reason},
-            }, ensure_ascii=False))
-        except Exception:
-            _pending_confirms.pop(request_id, None)
-            return "deny"
-
-    try:
-        action: str = await asyncio.wait_for(fut, timeout=120.0)
-        return action if action == "allow_once" else "deny"
-    except asyncio.CancelledError:
-        _pending_confirms.pop(request_id, None)
-        return "deny"
-    except asyncio.TimeoutError:
-        _pending_confirms.pop(request_id, None)
-        return "deny"
-    except Exception:
-        _pending_confirms.pop(request_id, None)
-        return "deny"
+from component.approval import request_user_confirm
 
 
 # ── 工具 handler ─────────────────────────────────────────────────────
@@ -91,7 +45,12 @@ async def _handle_install_package(args: Dict[str, Any]) -> str:
 
     # ── 用户确认 ──
     if session_id:
-        action: str = await _request_user_confirm(session_id, packages, reason)
+        action: str = await request_user_confirm(
+            session_id, "install_package",
+            {"packages": packages, "reason": reason},
+            reason,
+            f"安装包: `{packages}`\n原因: {reason}",
+        )
     else:
         action = "deny"
 

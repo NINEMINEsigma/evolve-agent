@@ -110,6 +110,8 @@ if __name__ == "__main__":
             "--llm_reasoning_effort", str(llm_reasoning_effort), # LLM reasoning_effort
             "--mode", "fast", # 运行模式
             "--mcp_config_path", str(mcp_config_path),
+            "--approval_model_path", str(approval_model_path),
+            "--approval_model_n_ctx", str(approval_model_n_ctx),
         ])
         exit_code = task.returncode
         if exit_code == 0:
@@ -154,6 +156,8 @@ if __name__ == "__main__":
                 "--llm_reasoning_effort", str(llm_reasoning_effort), # LLM reasoning_effort
                 "--mode", "fallback", # 运行模式
                 "--mcp_config_path", str(mcp_config_path),
+                "--approval_model_path", str(approval_model_path),
+                "--approval_model_n_ctx", str(approval_model_n_ctx),
             ])
             if task.returncode == 0:
                 logger.info(f"Fallback agent fixed successfully, restart...")

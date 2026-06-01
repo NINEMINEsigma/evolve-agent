@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import logging
-import sys
 import threading
 import uuid
 from enum import Enum
@@ -27,6 +26,7 @@ class MessageType(str, Enum):
     ERROR = "error"
     SYSTEM = "system"
     FILE_UPLOAD = "file_upload"
+    ADVENTURE_MODE = "adventure_mode"
 
 
 class Message(BaseModel):
@@ -92,17 +92,6 @@ class Message(BaseModel):
 # Session 管理器
 # ---------------------------------------------------------------------------
 
-
-def _find_workspace_from_args() -> str | None:
-    """从 sys.argv 中提取 ``--workspace`` 值（由 run.py 设置）。
-
-    命令行格式：``--workspace D:\\path`` 作为两个独立参数。
-    """
-    args: list[str] = sys.argv
-    for i, arg in enumerate(args):
-        if arg == "--workspace" and i + 1 < len(args):
-            return args[i + 1].strip("\"'")
-    return None
 
 
 class SessionManager:
@@ -227,13 +216,16 @@ class SessionManager:
     def load_from_disk(self) -> None:
         """从磁盘加载持久化的 session 到内存。"""
         # 如果 configure_sessions 从未被调用（例如在代码进化期间丢失），
-        # 从 sys.argv 提取 --workspace 并推导路径。
+        # 从 RuntimeContext 获取 workspace 路径。
         if self._store_dir is None:
-            ws: str | None = _find_workspace_from_args()
-            if ws:
-                candidate: Path = Path(ws) / "logs" / "sessions"
+            try:
+                from system.context import get_runtime_context
+                ws: Path = get_runtime_context().workspace
+                candidate: Path = ws / "logs" / "sessions"
                 if candidate.exists():
                     self._store_dir = candidate
+            except Exception:
+                pass
         if not self._store_dir:
             return
         entries: list[dict] = self._read_index()

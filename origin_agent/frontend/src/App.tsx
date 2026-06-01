@@ -119,6 +119,7 @@ export default function App() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [adventureMode, setAdventureMode] = useState(false);
 
   // ── lightbox: Escape 关闭 ──
   useEffect(() => {
@@ -418,6 +419,7 @@ export default function App() {
     setSessionId("");
     setWaiting(false);
     setPendingConfirm(null);
+    setAdventureMode(false);
     clearTimeout(timerRef.current);
     manualRef.current = false;
     connect();
@@ -619,6 +621,24 @@ export default function App() {
         </div>
         {sessionId && (
           <div className="header-right">
+            <label className="adventure-toggle" title={adventureMode ? "冒险模式已开启 — 工具调用由 AI 自动审批" : "冒险模式已关闭 — 工具调用需用户审批"}>
+              <span className="adventure-label">冒险</span>
+              <input
+                type="checkbox"
+                checked={adventureMode}
+                onChange={(e) => {
+                  const enabled = e.target.checked;
+                  setAdventureMode(enabled);
+                  if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+                    wsRef.current.send(JSON.stringify({
+                      type: "adventure_mode",
+                      content: enabled ? "true" : "false",
+                    }));
+                  }
+                }}
+              />
+              <span className="adventure-slider" />
+            </label>
             <span className="session-badge" title="刷新页面后自动恢复此会话">
               {sessionId}
             </span>

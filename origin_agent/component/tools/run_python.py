@@ -19,7 +19,6 @@ import locale
 import logging
 import subprocess  # nosec
 import sys
-import uuid
 from pathlib import Path
 from typing import Any, Dict, List, Set
 
@@ -34,7 +33,6 @@ from system.pathutils import find_repo_root
 
 _ALLOWLIST_PATH: Path = find_repo_root() / ".shell_allowlist.json"
 
-# 内联代码模式的种子条目，首次执行仍需确认。
 _SEED_COMMANDS: Set[str] = set()
 
 
@@ -69,50 +67,7 @@ def _s():
     return _get_sandbox()
 
 
-# ── 确认辅助函数（与 shell.py 逻辑一致）──────────────────────────────
-
-
-async def _request_user_confirm(
-    session_id: str, cmd_parts: List[str], reason: str,
-) -> str:
-    from gateway.server import _tool_ws_sinks, _pending_confirms, _register_confirm_session
-
-    request_id: str = uuid.uuid4().hex[:8]
-
-    loop: asyncio.AbstractEventLoop = asyncio.get_event_loop()
-    fut: asyncio.Future[str] = loop.create_future()
-    _pending_confirms[request_id] = fut
-    _register_confirm_session(request_id, session_id)
-
-    ws = _tool_ws_sinks.get(session_id)
-    if ws:
-        try:
-            await ws.send_text(json.dumps({
-                "type": "confirm_request",
-                "session_id": session_id,
-                "request_id": request_id,
-                "content": f"Python 执行: `{' '.join(cmd_parts)}`\n原因: {reason}",
-                "tool": "run_python",
-                "args": {"command": cmd_parts, "reason": reason},
-            }, ensure_ascii=False))
-        except Exception:
-            _pending_confirms.pop(request_id, None)
-            return "deny"
-
-    try:
-        action: str = await asyncio.wait_for(fut, timeout=120.0)
-        if action in ("allow_once", "allow_always"):
-            return action
-        return "deny"
-    except asyncio.CancelledError:
-        _pending_confirms.pop(request_id, None)
-        return "deny"
-    except asyncio.TimeoutError:
-        _pending_confirms.pop(request_id, None)
-        return "deny"
-    except Exception:
-        _pending_confirms.pop(request_id, None)
-        return "deny"
+from component.approval import request_user_confirm
 
 
 # ── 工具 handler ─────────────────────────────────────────────────────
@@ -159,7 +114,13 @@ async def _handle_run_python(args: Dict[str, Any]) -> str:
     # ── 用户确认 ──
     action: str
     if session_id:
-        action = await _request_user_confirm(session_id, cmd_parts, reason)
+        cmd_str = " ".join(cmd_parts)
+        action = await request_user_confirm(
+            session_id, "run_python",
+            {"command": cmd_parts, "reason": reason},
+            reason,
+            f"Python 执行: `{cmd_str}`\n原因: {reason}",
+        )
     else:
         action = "deny"
 
