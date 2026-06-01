@@ -76,7 +76,7 @@ def _run_validation(
     validators = []
 
     if suffix == ".docx":
-        author = "Claude"
+        author = "Eve-Agent"
         if infer_author_func:
             try:
                 author = infer_author_func(unpacked_dir, original_file)
