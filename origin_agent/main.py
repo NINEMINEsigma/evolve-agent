@@ -148,7 +148,7 @@ class App:
             # 注册 MCP 工具（桥接 + 连接 server）
             import component.mcp_tools  # noqa: F401 — 安装 MCP 回调
             component.mcp_tools.init_mcp(self.ctx)
-            _all_tools: int = len(component.tools.filesystem.registry.get_all_tool_names())
+            _all_tools: int = len(_fs.registry.get_all_tool_names())
             logger.info("Sandbox + %d tools initialized | mode=%s",
                         _all_tools, self.ctx.mode)
         except Exception as exc:

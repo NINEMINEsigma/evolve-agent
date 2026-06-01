@@ -20,7 +20,7 @@ import ast
 import importlib
 import logging
 from pathlib import Path
-from typing import List
+from typing import List, Sequence
 
 logger = logging.getLogger(__name__)
 
@@ -77,7 +77,7 @@ def discover_builtin_tools(tools_dir: str, package_prefix: str) -> List[str]:
     logger.info("discover_builtin_tools: scanning %s (prefix=%s)", tools_path, package_prefix)
     module_names: List[str] = []
 
-    for path in sorted(tools_path.glob("*.py")):
+    for path in sorted(tools_path.rglob("*.py")):
         if path.name in _EXCLUDED_FILENAMES:
             continue
         if path.stem.startswith("_"):
@@ -86,7 +86,8 @@ def discover_builtin_tools(tools_dir: str, package_prefix: str) -> List[str]:
             logger.info("discover_builtin_tools: skip (no registry.register) %s", path.name)
             continue
 
-        mod_name: str = f"{package_prefix}.{path.stem}"
+        rel_parts: Sequence[str] = path.relative_to(tools_path).with_suffix("").parts
+        mod_name: str = f"{package_prefix}.{'.'.join(rel_parts)}"
         module_names.append(mod_name)
         logger.info("discover_builtin_tools: found %s -> %s", path.name, mod_name)
 
