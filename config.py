@@ -16,8 +16,9 @@ argparse_parser.add_argument("--llm_temperature", type=float, default=0.95)
 argparse_parser.add_argument("--llm_reasoning_effort", type=str, default="medium")
 
 # 冒险模式审批小模型 — 仅需文件名，agent 会自动从 custom_models/ 目录下加载
-argparse_parser.add_argument("--approval_model_path", type=str, default="Qwen3-0.6B-Q3_K_L.gguf")
+argparse_parser.add_argument("--approval_model_path", type=str, default="Qwen3.5-0.8B-Q8_0.gguf")
 argparse_parser.add_argument("--approval_model_n_ctx", type=int, default=4096)
+argparse_parser.add_argument("--approval_model_cuda", action="store_true")
 
 #----------
 # workspace
@@ -51,6 +52,7 @@ llm_reasoning_effort:   str     = args.llm_reasoning_effort
 # approval model
 approval_model_path:    str  = args.approval_model_path
 approval_model_n_ctx:   int  = args.approval_model_n_ctx
+approval_model_cuda:    bool = args.approval_model_cuda
 
 
 #----------

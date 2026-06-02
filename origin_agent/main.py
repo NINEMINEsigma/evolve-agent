@@ -221,6 +221,21 @@ category: core
         if agent_loop is not None:
             agent_loop.set_session_manager(sessions)
 
+        # ---- 预编译 llama-server（冒险模式审批模型需要）----
+        if self.ctx.approval_model_path:
+            try:
+                from third.llamaapis.system.builder import LlamaBuilder
+                _builder = LlamaBuilder(
+                    source_dir="lib/llama.cpp",
+                    cuda=self.ctx.approval_model_cuda,
+                    jobs=4,
+                )
+                await asyncio.to_thread(_builder.build_if_needed)
+            except Exception as exc:
+                logger.warning(
+                    "llama-server pre-build failed (will retry at runtime): %s", exc
+                )
+
         host: str = self.ctx.gateway_host
         port: int = self.ctx.gateway_port
         self._gateway_server = create_server(host=host, port=port)

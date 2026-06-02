@@ -129,6 +129,7 @@ def _build_context(cli: dict) -> RuntimeContext:
         # 冒险模式审批模型配置
         approval_model_path     = str(cli.get("approval_model_path", "")),
         approval_model_n_ctx    = int(cli.get("approval_model_n_ctx", 4096)),
+        approval_model_cuda     = _coerce_bool(cli.get("approval_model_cuda", False)),
         mcp_config_path         = cli["mcp_config_path"],
     )
 

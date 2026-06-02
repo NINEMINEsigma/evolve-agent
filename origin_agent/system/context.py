@@ -79,6 +79,9 @@ class RuntimeContext(BaseModel):
     approval_model_n_ctx: int = 4096
     """审批小模型的上下文窗口 token 数。"""
 
+    approval_model_cuda: bool = False
+    """冒险模式审批小模型是否启用 CUDA。默认 False，不自动检测。"""
+
     # -- MCP 配置 -------------------------------------------------
 
     mcp_config_path: Optional[str] = None

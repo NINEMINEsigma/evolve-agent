@@ -19,11 +19,11 @@ if agentspace_path.exists() == False:
 
 log_file_path = logs_path / f"{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}.log"
 file_stream = logging.FileHandler(log_file_path)
-file_stream.setLevel(logging.INFO)
+file_stream.setLevel(logging.DEBUG)
 file_stream.setFormatter(logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
 logger = logging.getLogger(__name__)
 logger.addHandler(file_stream)
-logger.setLevel(logging.INFO)
+logger.setLevel(logging.DEBUG)
 
 if console_log:
     stream_handler = logging.StreamHandler()
@@ -109,9 +109,10 @@ if __name__ == "__main__":
             "--llm_temperature", str(llm_temperature), # LLM 温度
             "--llm_reasoning_effort", str(llm_reasoning_effort), # LLM reasoning_effort
             "--mode", "fast", # 运行模式
-            "--mcp_config_path", str(mcp_config_path),
-            "--approval_model_path", str(approval_model_path),
-            "--approval_model_n_ctx", str(approval_model_n_ctx),
+            "--mcp_config_path", str(mcp_config_path), # MCP 配置路径
+            "--approval_model_path", str(approval_model_path), # 审批模型路径
+            "--approval_model_n_ctx", str(approval_model_n_ctx), # 审批模型最大上下文
+            "--approval_model_cuda", str(approval_model_cuda), # 审批模型是否使用CUDA
         ])
         exit_code = task.returncode
         if exit_code == 0:
@@ -155,9 +156,10 @@ if __name__ == "__main__":
                 "--llm_temperature", str(llm_temperature), # LLM 温度
                 "--llm_reasoning_effort", str(llm_reasoning_effort), # LLM reasoning_effort
                 "--mode", "fallback", # 运行模式
-                "--mcp_config_path", str(mcp_config_path),
-                "--approval_model_path", str(approval_model_path),
-                "--approval_model_n_ctx", str(approval_model_n_ctx),
+                "--mcp_config_path", str(mcp_config_path), # MCP 配置路径
+                "--approval_model_path", str(approval_model_path), # 审批模型路径
+                "--approval_model_n_ctx", str(approval_model_n_ctx), # 审批模型最大上下文
+                "--approval_model_cuda", str(approval_model_cuda), # 审批模型是否使用CUDA
             ])
             if task.returncode == 0:
                 logger.info(f"Fallback agent fixed successfully, restart...")

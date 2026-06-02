@@ -2,6 +2,14 @@
 
 一个具备自我代码进化能力的人工智能代理。Agent 在运行时分析自身, 将改进后的代码写入进化目标目录, 通过验证后触发 **fast-slow 交换**——编排器自动备份当前版本并热替换为新代码, 重启后以进化后的形态继续运行。
 
+## 安装
+
+```bash
+git clone ... --recurse-submodules
+git submodule update --init --recursive
+# git pull --recurse-submodules
+```
+
 ## 核心机制：Fast-Slow-Fallback 演化循环
 
 以下为默认配置时的参考

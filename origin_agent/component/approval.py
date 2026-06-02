@@ -49,22 +49,17 @@ _approver_lock = asyncio.Lock()
 _APPROVER_FAILED = "__failed__"  # sentinel: 标记初始化失败，防止每次重试
 
 
-def _detect_cuda() -> bool:
-    """检测当前设备 CUDA 是否可用。"""
-    try:
-        import torch
-        available = torch.cuda.is_available()
-        if available:
-            logger.info("CUDA detected — approval model will use GPU")
-        else:
-            logger.info("CUDA not available — approval model runs on CPU")
-        return available
-    except ImportError:
-        logger.info("torch not installed — approval model runs on CPU")
-        return False
-    except Exception as exc:
-        logger.warning("CUDA detection failed: %s — falling back to CPU", exc)
-        return False
+def _detect_cuda(cuda: bool = False) -> bool:
+    """是否启用 CUDA（由配置决定，不自动检测）。
+
+    参数：
+        cuda: 配置中指定的 CUDA 启用状态，默认 False。
+    """
+    if cuda:
+        logger.info("CUDA enabled via config — approval model will use GPU")
+    else:
+        logger.info("CUDA disabled via config — approval model runs on CPU")
+    return cuda
 
 
 def _get_approver() -> InferenceEngine|None:
@@ -91,7 +86,7 @@ def _get_approver() -> InferenceEngine|None:
         p = _root / "custom_models" / model_path
         model_path = str(p.resolve())
 
-        cuda_available = _detect_cuda()
+        cuda_available = _detect_cuda(ctx.approval_model_cuda)
         n_gpu_layers = -1 if cuda_available else 0
 
         from third.llamaapis import InferenceEngine, ModelConfig

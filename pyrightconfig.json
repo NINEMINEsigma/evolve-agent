@@ -1,5 +1,6 @@
 {
     "extraPaths": [
         "./origin_agent",
+        "./third"
     ]
 }
