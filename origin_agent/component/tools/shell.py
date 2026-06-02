@@ -69,7 +69,7 @@ def _s():
     return _get_sandbox()
 
 
-from component.approval import request_user_confirm
+from component.approval import ApprovalResult, request_user_confirm
 
 
 # ── 工具 handler ─────────────────────────────────────────────────────
@@ -103,26 +103,27 @@ async def _handle_run_command(args: Dict[str, Any]) -> str:
         return _execute(cmd_parts, cwd)
 
     # ── 用户确认 ──
-    action: str
+    result: ApprovalResult
     if session_id:
         cmd_str = " ".join(cmd_parts)
-        action = await request_user_confirm(
+        result = await request_user_confirm(
             session_id, "run_command",
             {"command": cmd_parts, "reason": reason},
             reason,
             f"命令: `{cmd_str}`\n原因: {reason}",
         )
     else:
-        action = "deny"
+        result = ApprovalResult(action="deny", deny_reason="缺少 session_id")
 
-    if action == "deny":
+    if result.action == "deny":
+        source_label = {"model": "审批模型", "user": "用户", "system": "系统"}.get(result.denied_by, "系统")
         return tool_error(
-            "User denied the command or confirmation timed out.",
+            f"[{source_label}拒绝] {result.deny_reason or '未知原因'}",
             command=cmd_parts,
             denied=True,
         )
 
-    if action == "allow_always":
+    if result.action == "allow_always":
         allowlist.add(cmd_full)
         _save_allowlist(allowlist)
         logger.info("Added to allowlist: %s", cmd_full)
@@ -195,4 +196,5 @@ registry.register(
     handler=_handle_run_command,
     is_async=True,
     emoji="💻",
+    danger_level="dangerous",
 )

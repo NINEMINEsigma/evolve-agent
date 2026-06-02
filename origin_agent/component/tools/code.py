@@ -298,6 +298,7 @@ registry.register(
     },
     handler=_handle_write_fork,
     emoji="🧬",
+    danger_level="write",
 )
 
 

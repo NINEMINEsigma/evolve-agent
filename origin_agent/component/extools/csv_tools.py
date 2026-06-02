@@ -168,4 +168,5 @@ registry.register(
     },
     handler=_handle_write_csv,
     emoji="📊",
+    danger_level="write",
 )

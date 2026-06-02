@@ -192,6 +192,7 @@ registry.register(
     },
     handler=_handle_write,
     emoji="✏️",
+    danger_level="write",
 )
 
 
@@ -224,6 +225,7 @@ registry.register(
     },
     handler=_handle_delete,
     emoji="🗑️",
+    danger_level="write",
 )
 
 
@@ -293,6 +295,7 @@ registry.register(
     },
     handler=_handle_edit,
     emoji="✂️",
+    danger_level="write",
 )
 
 

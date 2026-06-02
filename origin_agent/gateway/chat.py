@@ -39,6 +39,8 @@ class Message(BaseModel):
     message: Optional[str] = None  # ERROR 类型使用
     request_id: Optional[str] = None  # confirm_request / confirm_response 使用
     action: Optional[str] = None      # confirm_response：allow_once | allow_always | deny
+    deny_reason: Optional[str] = None  # confirm_response：拒绝原因
+    denied_by: Optional[str] = None    # confirm_response：拒绝来源 (model/user/system)
     filename: Optional[str] = None    # FILE_UPLOAD：原始文件名
     mime_type: Optional[str] = None   # FILE_UPLOAD：MIME 类型
     file_data: Optional[str] = None   # FILE_UPLOAD：base64 编码的文件内容
@@ -56,6 +58,8 @@ class Message(BaseModel):
             message=data.get("message"),
             request_id=data.get("request_id"),
             action=data.get("action"),
+            deny_reason=data.get("deny_reason"),
+            denied_by=data.get("denied_by"),
             filename=data.get("filename"),
             mime_type=data.get("mime_type"),
             file_data=data.get("file_data"),
@@ -79,6 +83,10 @@ class Message(BaseModel):
             d["request_id"] = self.request_id
         if self.action is not None:
             d["action"] = self.action
+        if self.deny_reason is not None:
+            d["deny_reason"] = self.deny_reason
+        if self.denied_by is not None:
+            d["denied_by"] = self.denied_by
         if self.filename is not None:
             d["filename"] = self.filename
         if self.mime_type is not None:

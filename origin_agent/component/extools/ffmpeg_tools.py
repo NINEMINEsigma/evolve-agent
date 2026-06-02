@@ -573,6 +573,7 @@ registry.register(
     handler=_handle_convert_media,
     check_fn=_ffmpeg_available,
     emoji="🔄",
+    danger_level="write",
 )
 
 # -- extract_audio
@@ -617,6 +618,7 @@ registry.register(
     handler=_handle_extract_audio,
     check_fn=_ffmpeg_available,
     emoji="🎵",
+    danger_level="write",
 )
 
 # -- trim_media

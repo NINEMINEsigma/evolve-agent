@@ -526,6 +526,7 @@ registry.register(
     },
     handler=_handle_write_docx,
     emoji="📝",
+    danger_level="write",
 )
 
 registry.register(
@@ -555,6 +556,7 @@ registry.register(
     },
     handler=_handle_write_xlsx,
     emoji="📊",
+    danger_level="write",
 )
 
 registry.register(
@@ -582,6 +584,7 @@ registry.register(
     },
     handler=_handle_write_pptx,
     emoji="📽️",
+    danger_level="write",
 )
 
 registry.register(
@@ -610,4 +613,5 @@ registry.register(
     },
     handler=_handle_write_pdf,
     emoji="📄",
+    danger_level="write",
 )

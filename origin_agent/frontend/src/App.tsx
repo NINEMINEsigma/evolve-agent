@@ -105,6 +105,7 @@ export default function App() {
   const [status, setStatus] = useState("connecting...");
   const [waiting, setWaiting] = useState(false);
   const [pendingConfirm, setPendingConfirm] = useState<ConfirmRequest | null>(null);
+  const [denyReason, setDenyReason] = useState("此操作可能带来安全风险");
   const [sessionId, setSessionId] = useState("");
   const [tokenUsage, setTokenUsage] = useState(0);
   const [lightboxSrc, setLightboxSrc] = useState<string | null>(null);
@@ -310,6 +311,7 @@ export default function App() {
       else if (msg.type === "confirm_request") {
         // Show confirmation dialog — only if there's a request_id
         if (msg.request_id) {
+          setDenyReason("此操作可能带来安全风险");
           setPendingConfirm({
             request_id: msg.request_id,
             content: msg.content ?? "运行命令?",
@@ -322,9 +324,13 @@ export default function App() {
   }, [addMessage, fetchSessions]);
 
   // ── confirm response ──
-  const respondConfirm = useCallback((action: string) => {
+  const respondConfirm = useCallback((action: string, denyReasonText?: string, deniedBy?: string) => {
     if (!pendingConfirm) return;
-    const payload = { action };
+    const payload: Record<string, string> = { action };
+    if (action === "deny" && denyReasonText) {
+      payload.deny_reason = denyReasonText;
+      payload.denied_by = deniedBy || "user";
+    }
     console.log("[confirm] HTTP POST", pendingConfirm.request_id, payload);
     fetch(`/api/confirm/${pendingConfirm.request_id}`, {
       method: "POST",
@@ -798,7 +804,7 @@ export default function App() {
       {pendingConfirm && (
         <div className="confirm-overlay">
           <div className="confirm-dialog">
-            <div className="confirm-title">💻 确认执行命令</div>
+            <div className="confirm-title">确认执行命令</div>
             <div className="confirm-body">
               <pre className="confirm-cmd">
                 {pendingConfirm.command?.join(" ") ?? pendingConfirm.content}
@@ -806,9 +812,18 @@ export default function App() {
               {pendingConfirm.reason && (
                 <div className="confirm-reason">原因: {pendingConfirm.reason}</div>
               )}
+              <textarea
+                className="confirm-deny-reason"
+                value={denyReason}
+                onChange={(e) => setDenyReason(e.target.value)}
+                placeholder="输入拒绝原因..."
+                rows={2}
+              />
             </div>
             <div className="confirm-actions">
-              <button className="confirm-deny" onClick={() => respondConfirm("deny")}>
+              <button
+                className="confirm-deny"
+                onClick={() => respondConfirm("deny", denyReason, "user")}>
                 拒绝
               </button>
               <button className="confirm-once" onClick={() => respondConfirm("allow_once")}>

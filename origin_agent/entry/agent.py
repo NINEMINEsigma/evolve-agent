@@ -21,6 +21,7 @@ from typing import Any, Awaitable, Callable, Dict, List
 
 from abstract.memory.manager import MemoryManager
 from abstract.tools.registry import registry as tool_registry
+from component.approval import ApprovalResult, is_adventure_mode, request_user_confirm
 from component.llm import LLMClient, LLMResponse
 from system.context import RuntimeContext
 from system.prompt import build_system_prompt
@@ -931,35 +932,56 @@ class AgentLoop:
                 )
             )
 
-        # 如果 memory 管理器拥有该工具，则路由过去
-        if self._memory.has_tool(tc.name):
-            try:
-                if timeout := self._ctx.tool_timeout:
-                    result = await asyncio.wait_for(
-                        asyncio.to_thread(self._memory.handle_tool_call, tc.name, args),
-                        timeout=timeout,
-                    )
-                else:
-                    result = self._memory.handle_tool_call(tc.name, args)
-            except asyncio.TimeoutError:
-                result = json.dumps({"error": f"工具执行超时（{timeout}秒）"}, ensure_ascii=False)
-            except Exception as exc:
-                result = json.dumps({"error": str(exc)}, ensure_ascii=False)
-        else:
-            entry: Any = tool_registry.get_entry(tc.name)
-            try:
-                if entry and entry.is_async:
-                    coro: Any = entry.handler(args)
-                else:
-                    coro = asyncio.to_thread(tool_registry.dispatch, tc.name, args)
-                if timeout := self._ctx.tool_timeout:
-                    result = await asyncio.wait_for(coro, timeout=timeout)
-                else:
-                    result = await coro
-            except asyncio.TimeoutError:
-                result = json.dumps({"error": f"工具执行超时（{timeout}秒）"}, ensure_ascii=False)
-            except Exception as exc:
-                result = json.dumps({"error": str(exc)}, ensure_ascii=False)
+        # ---- 冒险模式写入审批 ----
+        _skip_dispatch = False
+        result: str = ""
+        danger_level: str = tool_registry.get_danger_level(tc.name)
+        if danger_level == "write" and is_adventure_mode(session_id):
+            _approval_args = {k: v for k, v in args.items() if k != "_session_id"}
+            approval = await request_user_confirm(
+                session_id, tc.name, _approval_args,
+                reason=str(args.get("reason", "")),
+                content=f"工具: {tc.name}\n参数: {json.dumps(_approval_args, ensure_ascii=False)[:500]}",
+            )
+            if approval.action == "deny":
+                source_label = {"model": "审批模型", "user": "用户", "system": "系统"}.get(approval.denied_by, "系统")
+                result = json.dumps({
+                    "error": f"[{source_label}拒绝] {approval.deny_reason or '未知原因'}",
+                    "denied": True,
+                    "denied_by": approval.denied_by,
+                }, ensure_ascii=False)
+                _skip_dispatch = True
+
+        if not _skip_dispatch:
+            # 如果 memory 管理器拥有该工具，则路由过去
+            if self._memory.has_tool(tc.name):
+                try:
+                    if timeout := self._ctx.tool_timeout:
+                        result = await asyncio.wait_for(
+                            asyncio.to_thread(self._memory.handle_tool_call, tc.name, args),
+                            timeout=timeout,
+                        )
+                    else:
+                        result = self._memory.handle_tool_call(tc.name, args)
+                except asyncio.TimeoutError:
+                    result = json.dumps({"error": f"工具执行超时（{timeout}秒）"}, ensure_ascii=False)
+                except Exception as exc:
+                    result = json.dumps({"error": str(exc)}, ensure_ascii=False)
+            else:
+                entry: Any = tool_registry.get_entry(tc.name)
+                try:
+                    if entry and entry.is_async:
+                        coro: Any = entry.handler(args)
+                    else:
+                        coro = asyncio.to_thread(tool_registry.dispatch, tc.name, args)
+                    if timeout := self._ctx.tool_timeout:
+                        result = await asyncio.wait_for(coro, timeout=timeout)
+                    else:
+                        result = await coro
+                except asyncio.TimeoutError:
+                    result = json.dumps({"error": f"工具执行超时（{timeout}秒）"}, ensure_ascii=False)
+                except Exception as exc:
+                    result = json.dumps({"error": str(exc)}, ensure_ascii=False)
 
         # ---- 追踪工具错误统计 ----
         try:

@@ -54,7 +54,7 @@ def _validate_target(target: str) -> str | None:
     return None
 
 
-from component.approval import request_user_confirm
+from component.approval import ApprovalResult, request_user_confirm
 
 
 # ---------------------------------------------------------------------------
@@ -82,18 +82,19 @@ async def _handle_ssh_exec(args: Dict[str, Any]) -> str:
 
     # --- 用户确认 ---
     if session_id:
-        action: str = await request_user_confirm(
+        result: ApprovalResult = await request_user_confirm(
             session_id, "ssh_exec",
             {"target": target, "command": command[:200], "reason": reason},
             reason,
             f"SSH 操作: 在 {target} 上执行: {command[:200]}\n原因: {reason}",
         )
     else:
-        action = "deny"
+        result = ApprovalResult(action="deny", deny_reason="缺少 session_id")
 
-    if action == "deny":
+    if result.action == "deny":
+        source_label = {"model": "审批模型", "user": "用户", "system": "系统"}.get(result.denied_by, "系统")
         return tool_error(
-            "用户拒绝了 SSH 执行请求或确认超时。",
+            f"[{source_label}拒绝] {result.deny_reason or '未知原因'}",
             target=target,
             command=command[:200],
             denied=True,
@@ -169,18 +170,19 @@ async def _handle_ssh_upload(args: Dict[str, Any]) -> str:
 
     # --- 用户确认 ---
     if session_id:
-        action: str = await request_user_confirm(
+        result: ApprovalResult = await request_user_confirm(
             session_id, "ssh_upload",
             {"local_path": local_path, "remote_path": remote_path, "target": target, "reason": reason},
             reason,
             f"SSH 操作: 上传 {local_path} → {target}:{remote_path}\n原因: {reason}",
         )
     else:
-        action = "deny"
+        result = ApprovalResult(action="deny", deny_reason="缺少 session_id")
 
-    if action == "deny":
+    if result.action == "deny":
+        source_label = {"model": "审批模型", "user": "用户", "system": "系统"}.get(result.denied_by, "系统")
         return tool_error(
-            "用户拒绝了 SSH 上传请求或确认超时。",
+            f"[{source_label}拒绝] {result.deny_reason or '未知原因'}",
             target=target,
             local_path=local_path,
             remote_path=remote_path,
@@ -257,18 +259,19 @@ async def _handle_ssh_download(args: Dict[str, Any]) -> str:
 
     # --- 用户确认 ---
     if session_id:
-        action: str = await request_user_confirm(
+        result: ApprovalResult = await request_user_confirm(
             session_id, "ssh_download",
             {"remote_path": remote_path, "target": target, "local_path": local_path, "reason": reason},
             reason,
             f"SSH 操作: 下载 {target}:{remote_path} → {local_path}\n原因: {reason}",
         )
     else:
-        action = "deny"
+        result = ApprovalResult(action="deny", deny_reason="缺少 session_id")
 
-    if action == "deny":
+    if result.action == "deny":
+        source_label = {"model": "审批模型", "user": "用户", "system": "系统"}.get(result.denied_by, "系统")
         return tool_error(
-            "用户拒绝了 SSH 下载请求或确认超时。",
+            f"[{source_label}拒绝] {result.deny_reason or '未知原因'}",
             target=target,
             remote_path=remote_path,
             local_path=local_path,
@@ -368,6 +371,7 @@ registry.register(
     handler=_handle_ssh_exec,
     is_async=True,
     emoji="🖥",
+    danger_level="dangerous",
 )
 
 registry.register(
@@ -408,6 +412,7 @@ registry.register(
     handler=_handle_ssh_upload,
     is_async=True,
     emoji="📤",
+    danger_level="dangerous",
 )
 
 registry.register(
@@ -448,4 +453,5 @@ registry.register(
     handler=_handle_ssh_download,
     is_async=True,
     emoji="📥",
+    danger_level="dangerous",
 )

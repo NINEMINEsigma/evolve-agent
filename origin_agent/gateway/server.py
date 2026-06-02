@@ -22,6 +22,7 @@ from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
 from .chat import Message, MessageType, SessionManager
+from component.approval import ApprovalResult
 
 logger = logging.getLogger(__name__)
 
@@ -72,7 +73,7 @@ _tool_ws_sinks: Dict[str, WebSocket] = {}
 #   用于 WebSocket 断开时自动拒绝。
 
 import asyncio as _asyncio
-_pending_confirms: Dict[str, _asyncio.Future] = {}
+_pending_confirms: Dict[str, _asyncio.Future[ApprovalResult]] = {}
 _confirm_session_map: Dict[str, str] = {}
 
 
@@ -81,12 +82,12 @@ def _register_confirm_session(request_id: str, session_id: str) -> None:
     _confirm_session_map[request_id] = session_id
 
 
-def _resolve_confirm(request_id: str, action: str) -> None:
-    fut: _asyncio.Future | None = _pending_confirms.pop(request_id, None)
+def _resolve_confirm(request_id: str, action: str, deny_reason: str | None = None, denied_by: str = "user") -> None:
+    fut: _asyncio.Future[ApprovalResult] | None = _pending_confirms.pop(request_id, None)
     _confirm_session_map.pop(request_id, None)
     if fut and not fut.done():
-        fut.set_result(action)
-        logger.info("Confirm resolved: %s → %s", request_id, action)
+        fut.set_result(ApprovalResult(action=action, deny_reason=deny_reason, denied_by=denied_by))
+        logger.info("Confirm resolved: %s -> %s (reason=%s, by=%s)", request_id, action, deny_reason, denied_by)
     else:
         logger.warning(
             "Confirm request %s not found (already resolved or timed out)", request_id
@@ -97,7 +98,7 @@ def _deny_session_confirms(session_id: str) -> None:
     """自动拒绝断开连接 session 的所有待处理确认请求。"""
     for rid in list(_confirm_session_map.keys()):
         if _confirm_session_map.get(rid) == session_id:
-            _resolve_confirm(rid, "deny")
+            _resolve_confirm(rid, "deny", deny_reason="WebSocket 连接已断开", denied_by="system")
 
 
 async def _send_tool_event(
@@ -250,7 +251,11 @@ async def http_confirm(request_id: str, req: Request):
     action: str = str(body.get("action", "deny"))
     if action not in ("allow_once", "allow_always", "deny"):
         action = "deny"
-    _resolve_confirm(request_id, action)
+    deny_reason: str | None = str(body.get("deny_reason", "")) or None
+    denied_by: str = str(body.get("denied_by", "user"))
+    if action != "deny":
+        deny_reason = None
+    _resolve_confirm(request_id, action, deny_reason=deny_reason, denied_by=denied_by)
     return {"resolved": True, "request_id": request_id, "action": action}
 
 
@@ -582,7 +587,7 @@ async def ws_chat(ws: WebSocket) -> None:
 
             elif msg.type == MessageType.CONFIRM_RESPONSE:
                 if msg.request_id is not None and msg.action is not None:
-                    _resolve_confirm(msg.request_id, msg.action)
+                    _resolve_confirm(msg.request_id, msg.action, deny_reason=msg.deny_reason, denied_by=msg.denied_by or "user")
 
             elif msg.type == MessageType.INTERRUPT:
                 if _agent_loop is not None and hasattr(_agent_loop, "interrupt"):

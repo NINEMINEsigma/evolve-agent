@@ -444,6 +444,7 @@ registry.register(
     },
     handler=_handle_write_skill_file,
     emoji="📝",
+    danger_level="write",
 )
 
 
@@ -506,4 +507,5 @@ registry.register(
     },
     handler=_handle_run_skill_script,
     emoji="▶️",
+    danger_level="write",
 )

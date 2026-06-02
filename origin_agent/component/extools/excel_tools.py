@@ -239,4 +239,5 @@ registry.register(
     },
     handler=_handle_write_excel,
     emoji="📗",
+    danger_level="write",
 )

@@ -23,7 +23,7 @@ from abstract.tools.registry import registry, tool_error, tool_result
 logger = logging.getLogger(__name__)
 
 
-from component.approval import request_user_confirm
+from component.approval import ApprovalResult, request_user_confirm
 
 
 # ── 工具 handler ─────────────────────────────────────────────────────
@@ -45,18 +45,19 @@ async def _handle_install_package(args: Dict[str, Any]) -> str:
 
     # ── 用户确认 ──
     if session_id:
-        action: str = await request_user_confirm(
+        result: ApprovalResult = await request_user_confirm(
             session_id, "install_package",
             {"packages": packages, "reason": reason},
             reason,
             f"安装包: `{packages}`\n原因: {reason}",
         )
     else:
-        action = "deny"
+        result = ApprovalResult(action="deny", deny_reason="缺少 session_id")
 
-    if action == "deny":
+    if result.action == "deny":
+        source_label = {"model": "审批模型", "user": "用户", "system": "系统"}.get(result.denied_by, "系统")
         return tool_error(
-            "用户拒绝了安装请求或确认超时。",
+            f"[{source_label}拒绝] {result.deny_reason or '未知原因'}",
             packages=pkg_list,
             denied=True,
         )
@@ -136,4 +137,5 @@ registry.register(
     handler=_handle_install_package,
     is_async=True,
     emoji="\U0001f4e6",
+    danger_level="dangerous",
 )

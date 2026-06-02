@@ -1,7 +1,12 @@
 """统一审批模块 — 支持正常模式（前端审批）和冒险模式（小LLM自动审批）。
 
 对外暴露的唯一接口：
-    request_user_confirm(session_id, tool_name, args, reason, content) -> str
+    request_user_confirm(session_id, tool_name, args, reason, content) -> ApprovalResult
+
+结果类型：
+    ApprovalResult
+        .action       — "allow_once" | "allow_always" | "deny"
+        .deny_reason  — 拒绝时携带具体原因，通过时为 None
 
 冒险模式通过 set_adventure_mode() 开启/关闭，每次启动默认关闭。
 审批小模型路径通过 config.py 的 approval_model_path 配置。
@@ -14,10 +19,30 @@ import asyncio
 import json
 import logging
 import uuid
-from typing import Any, Dict, TYPE_CHECKING
+from typing import Any, Dict, Optional, TYPE_CHECKING
+
+from pydantic import BaseModel
 import dirtyjson
 
 logger = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# ApprovalResult
+# ---------------------------------------------------------------------------
+
+class ApprovalResult(BaseModel):
+    """审批结果。
+
+    Attributes:
+        action:      "allow_once" | "allow_always" | "deny"
+        deny_reason: 拒绝原因，仅 action == "deny" 时有效
+        denied_by:   拒绝来源 — "model"（冒险模式LLM）、"user"（人工）、"system"（超时/断开等）
+    """
+    action: str
+    deny_reason: Optional[str] = None
+    denied_by: str = "system"
+
 
 # ---------------------------------------------------------------------------
 # 冒险模式 session 注册表
@@ -108,15 +133,15 @@ def _get_approver() -> InferenceEngine|None:
         return None
 
 
-async def _adventure_confirm(tool_name: str, args: dict, reason: str, content: str) -> str:
+async def _adventure_confirm(tool_name: str, args: dict, reason: str, content: str) -> ApprovalResult:
     """冒险模式：将工具调用 JSON 发送给小 LLM 审批。
 
-    返回 "allow_once" 或 "deny"。
+    返回 ApprovalResult，deny 时携带 LLM 生成的拒绝原因。
     """
     engine = _get_approver()
     if engine is None:
-        logger.warning("Approver not available — falling back to human approval")
-        return "deny"
+        logger.warning("Approver not available — adventure mode deny")
+        return ApprovalResult(action="deny", deny_reason="审批模型不可用，自动拒绝", denied_by="system")
 
     system_prompt = (
         "你是命令安全审查器, 判断工具调用是否危险, 只有合法且安全时才允许执行."
@@ -139,12 +164,12 @@ async def _adventure_confirm(tool_name: str, args: dict, reason: str, content: s
         resp_content = resp.choices[0].message.content
         result: dict = dirtyjson.loads(resp_content)
         approved: bool = result["approved"] # type: ignore
-        reason_text: str = result["reason"] # type: ignore
+        reason_text: str = result.get("reason", "") # type: ignore
         if approved:
             logger.info("Adventure approved | tool=%s reason=%s", tool_name, reason_text)
-            return "allow_once"
+            return ApprovalResult(action="allow_once")
         logger.info("Adventure denied | tool=%s reason=%s", tool_name, reason_text)
-        return "deny"
+        return ApprovalResult(action="deny", deny_reason=reason_text or "安全性审查未通过", denied_by="model")
     except Exception as exc:
         resp_content = locals().get("resp_content", "<not available>")
         logger.warning(
@@ -152,7 +177,7 @@ async def _adventure_confirm(tool_name: str, args: dict, reason: str, content: s
             exc, tool_name, resp_content,
             exc_info=True,
         )
-        return "deny"
+        return ApprovalResult(action="deny", deny_reason=f"审批模型解析失败: {exc}", denied_by="model")
 
 
 # ---------------------------------------------------------------------------
@@ -166,7 +191,7 @@ async def request_user_confirm(
     args: dict,
     reason: str,
     content: str,
-) -> str:
+) -> ApprovalResult:
     """统一审批入口。
 
     参数：
@@ -176,7 +201,7 @@ async def request_user_confirm(
         reason:     agent 给出的执行原因
         content:    展示给审批者的描述文本
 
-    返回 "allow_once" / "allow_always" / "deny"。
+    返回 ApprovalResult(action, deny_reason)。
     """
     # 冒险模式：小 LLM 自动审批
     if is_adventure_mode(session_id):
@@ -191,7 +216,7 @@ async def request_user_confirm(
     request_id: str = uuid.uuid4().hex[:8]
 
     loop: asyncio.AbstractEventLoop = asyncio.get_event_loop()
-    fut: asyncio.Future[str] = loop.create_future()
+    fut: asyncio.Future[ApprovalResult] = loop.create_future()
     _pending_confirms[request_id] = fut
     _register_confirm_session(request_id, session_id)
 
@@ -208,19 +233,17 @@ async def request_user_confirm(
             }, ensure_ascii=False))
         except Exception:
             _pending_confirms.pop(request_id, None)
-            return "deny"
+            return ApprovalResult(action="deny", deny_reason="WebSocket 推送确认请求失败", denied_by="system")
 
     try:
-        action: str = await asyncio.wait_for(fut, timeout=120.0)
-        if action in ("allow_once", "allow_always"):
-            return action
-        return "deny"
+        result: ApprovalResult = await asyncio.wait_for(fut, timeout=120.0)
+        return result
     except asyncio.CancelledError:
         _pending_confirms.pop(request_id, None)
-        return "deny"
+        return ApprovalResult(action="deny", deny_reason="审批请求被取消", denied_by="system")
     except asyncio.TimeoutError:
         _pending_confirms.pop(request_id, None)
-        return "deny"
+        return ApprovalResult(action="deny", deny_reason="审批等待超时 (120s)", denied_by="system")
     except Exception:
         _pending_confirms.pop(request_id, None)
-        return "deny"
+        return ApprovalResult(action="deny", deny_reason="审批处理异常", denied_by="system")

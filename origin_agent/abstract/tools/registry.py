@@ -43,6 +43,7 @@ class ToolEntry:
         "emoji",
         "max_result_size_chars",
         "dynamic_schema_overrides",
+        "danger_level",
     )
 
     def __init__(
@@ -58,6 +59,7 @@ class ToolEntry:
         emoji: str = "",
         max_result_size_chars: Optional[int] = None,
         dynamic_schema_overrides: Optional[Callable] = None,
+        danger_level: str = "readonly",
     ):
         self.name: str = name
         self.toolset: str = toolset
@@ -72,6 +74,7 @@ class ToolEntry:
         # 可选的零参数可调用对象，返回 schema 覆盖字典，
         # 在 get_definitions() 时应用。用于依赖运行时配置的字段。
         self.dynamic_schema_overrides: Optional[Callable] = dynamic_schema_overrides
+        self.danger_level: str = danger_level
 
 
 # ---------------------------------------------------------------------------
@@ -196,6 +199,14 @@ class ToolRegistry:
         entry: ToolEntry | None = self.get_entry(name)
         return entry.emoji if entry and entry.emoji else default
 
+    def get_danger_level(self, name: str) -> str:
+        """返回工具的危险等级，未注册时返回 "readonly"。
+
+        返回值: "readonly" | "write" | "dangerous"
+        """
+        entry: ToolEntry | None = self.get_entry(name)
+        return entry.danger_level if entry else "readonly"
+
     def get_tool_to_toolset_map(self) -> Dict[str, str]:
         """返回 ``{tool_name: toolset_name}`` 映射。"""
         return {entry.name: entry.toolset for entry in self._snapshot_entries()}
@@ -251,6 +262,7 @@ class ToolRegistry:
         max_result_size_chars: Optional[int] = None,
         dynamic_schema_overrides: Optional[Callable] = None,
         override: bool = False,
+        danger_level: str = "readonly",
     ) -> None:
         """注册工具。由每个工具文件在模块导入时调用。
 
@@ -302,6 +314,7 @@ class ToolRegistry:
                 emoji=emoji,
                 max_result_size_chars=max_result_size_chars,
                 dynamic_schema_overrides=dynamic_schema_overrides,
+                danger_level=danger_level,
             )
             if check_fn and toolset not in self._toolset_checks:
                 self._toolset_checks[toolset] = check_fn
