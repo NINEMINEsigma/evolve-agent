@@ -4,7 +4,7 @@ import remarkGfm from "remark-gfm";
 import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
 import { oneDark } from "react-syntax-highlighter/dist/esm/styles/prism";
 
-type MessageType = "system" | "user_message" | "agent_message" | "tool_call" | "tool_result" | "confirm_request" | "error";
+type MessageType = "system" | "user_message" | "agent_message" | "tool_call" | "tool_result" | "confirm_request" | "ask_request" | "error";
 
 interface WSMessage {
   type: MessageType;
@@ -17,6 +17,11 @@ interface WSMessage {
   request_id?: string;
   approved?: boolean;
   action?: string;
+  question?: string;
+  options?: Array<{ label: string; value: string }>;
+  allow_custom?: boolean;
+  option?: string;
+  custom_text?: string;
 }
 
 interface ConfirmRequest {
@@ -24,6 +29,13 @@ interface ConfirmRequest {
   content: string;
   command?: string[];
   reason?: string;
+}
+
+interface AskRequest {
+  request_id: string;
+  question: string;
+  options?: Array<{ label: string; value: string }>;
+  allow_custom?: boolean;
 }
 
 interface DownloadInfo {
@@ -106,6 +118,9 @@ export default function App() {
   const [waiting, setWaiting] = useState(false);
   const [pendingConfirm, setPendingConfirm] = useState<ConfirmRequest | null>(null);
   const [denyReason, setDenyReason] = useState("此操作可能带来安全风险");
+  const [pendingAsk, setPendingAsk] = useState<AskRequest | null>(null);
+  const [askCustomText, setAskCustomText] = useState("");
+  const [askSelectedOption, setAskSelectedOption] = useState<string | null>(null);
   const [sessionId, setSessionId] = useState("");
   const [tokenUsage, setTokenUsage] = useState(0);
   const [lightboxSrc, setLightboxSrc] = useState<string | null>(null);
@@ -320,6 +335,19 @@ export default function App() {
           });
         }
       }
+      else if (msg.type === "ask_request") {
+        // Show ask dialog
+        if (msg.request_id && msg.question) {
+          setAskCustomText("");
+          setAskSelectedOption(null);
+          setPendingAsk({
+            request_id: msg.request_id,
+            question: msg.question ?? "",
+            options: msg.options,
+            allow_custom: msg.allow_custom ?? true,
+          });
+        }
+      }
     };
   }, [addMessage, fetchSessions]);
 
@@ -339,6 +367,21 @@ export default function App() {
     }).catch((err) => console.error("[confirm] fetch failed", err));
     setPendingConfirm(null);
   }, [pendingConfirm]);
+
+  // ── ask response ──
+  const respondAsk = useCallback((option?: string, customText?: string) => {
+    if (!pendingAsk) return;
+    const payload: Record<string, string | null> = { option: option ?? null, custom_text: customText ?? null };
+    console.log("[ask] HTTP POST", pendingAsk.request_id, payload);
+    fetch(`/api/ask/${pendingAsk.request_id}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    }).catch((err) => console.error("[ask] fetch failed", err));
+    setPendingAsk(null);
+    setAskCustomText("");
+    setAskSelectedOption(null);
+  }, [pendingAsk]);
 
   useEffect(() => {
     connect();
@@ -831,6 +874,60 @@ export default function App() {
               </button>
               <button className="confirm-always" onClick={() => respondConfirm("allow_always")}>
                 始终允许
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Ask dialog for agent questions ── */}
+      {pendingAsk && (
+        <div className="confirm-overlay" onClick={() => {}}>
+          <div className="confirm-dialog ask-dialog" onClick={(e) => e.stopPropagation()}>
+            <div className="confirm-title">❓ {pendingAsk.question}</div>
+            <div className="confirm-body">
+              {pendingAsk.options && pendingAsk.options.length > 0 && (
+                <div className="ask-options">
+                  {pendingAsk.options.map((opt) => (
+                    <button
+                      key={opt.value}
+                      className={`ask-option-btn ${askSelectedOption === opt.value ? "ask-option-selected" : ""}`}
+                      onClick={() => {
+                        setAskSelectedOption(opt.value);
+                        setAskCustomText("");
+                      }}
+                    >
+                      {opt.label}
+                    </button>
+                  ))}
+                </div>
+              )}
+              {pendingAsk.allow_custom !== false && (
+                <textarea
+                  className="ask-custom-input"
+                  value={askCustomText}
+                  onChange={(e) => {
+                    setAskCustomText(e.target.value);
+                    if (e.target.value) setAskSelectedOption(null);
+                  }}
+                  placeholder="输入自定义内容..."
+                  rows={3}
+                />
+              )}
+            </div>
+            <div className="confirm-actions">
+              <button
+                className="confirm-deny"
+                onClick={() => respondAsk(undefined, undefined)}
+              >
+                跳过
+              </button>
+              <button
+                className="confirm-always"
+                disabled={!askSelectedOption && !askCustomText.trim()}
+                onClick={() => respondAsk(askSelectedOption ?? undefined, askCustomText.trim() || undefined)}
+              >
+                提交
               </button>
             </div>
           </div>

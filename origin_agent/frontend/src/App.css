@@ -926,6 +926,66 @@ html, body, #root {
   background: var(--accent-hover);
 }
 
+/* ── Ask dialog (agent questions) ── */
+.ask-dialog {
+  max-height: min(80vh, 500px);
+}
+
+.ask-options {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.ask-option-btn {
+  padding: 10px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+  font-size: 14px;
+  cursor: pointer;
+  text-align: left;
+  transition: border-color 0.15s, background 0.15s;
+}
+
+.ask-option-btn:hover {
+  border-color: var(--accent);
+  background: var(--bg-hover);
+}
+
+.ask-option-selected {
+  border-color: var(--accent);
+  background: rgba(25, 195, 125, 0.15);
+  color: var(--accent);
+  font-weight: 500;
+}
+
+.ask-custom-input {
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+  font-size: 14px;
+  outline: none;
+  resize: vertical;
+  font-family: inherit;
+  line-height: 1.5;
+  box-sizing: border-box;
+  transition: border-color 0.15s;
+}
+
+.ask-custom-input:focus {
+  border-color: var(--accent);
+}
+
+.ask-custom-input::placeholder {
+  color: var(--text-muted);
+}
+
 /* ── Context menu ── */
 .context-menu {
   position: fixed;

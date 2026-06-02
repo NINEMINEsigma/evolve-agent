@@ -144,40 +144,71 @@ async def _adventure_confirm(tool_name: str, args: dict, reason: str, content: s
         return ApprovalResult(action="deny", deny_reason="审批模型不可用，自动拒绝", denied_by="system")
 
     system_prompt = (
-        "你是命令安全审查器, 判断工具调用是否危险, 只有合法且安全时才允许执行."
+        "你是进化式AI Agent的安全审查器。Agent运行在沙箱环境中。\n\n"
+        "沙箱路径前缀及含义：\n"
+        "- fork: → slow_agent_space/（Agent的源代码工作区，可读写）\n"
+        "- ws:   → agentspace/（Agent的I/O工作区，可读写）\n"
+        "- fix:  → .fallback/（故障恢复目录，可读写）\n\n"
+        "注意：写入沙箱的代码文件（.py/.js/.ts等）将来会被执行，所以代码本身可能危险。\n\n"
+        "判断原则：\n"
+        "- 写沙箱内的配置文件、JSON、日志、文本 → 安全，批准\n"
+        "- 写可执行代码（.py/.js/.sh等），代码看起来是正常功能实现 → 批准\n"
+        "- 写可执行代码，但内容明显恶意（删除文件、加密数据、反弹shell、窃取凭据等）→ 拒绝\n"
+        "- 读取文件操作 → 安全，批准\n"
         '仅返回JSON：{"approved":true/false,"reason":"简短原因"}'
     )
+
+    from system.pathutils import find_repo_root
+
+    cwd = str(find_repo_root().resolve())
 
     user_prompt = json.dumps({
         "tool": tool_name,
         "args": args,
         "reason": reason,
+        "description": content,
+        "cwd": cwd,
     }, ensure_ascii=False)
 
-    try:
-        from third.llamaapis import GenerationConfig, system_message, user_message
+    from third.llamaapis import GenerationConfig, system_message, user_message
 
-        resp = engine.chat(
-            [system_message(system_prompt), user_message(user_prompt)],
-            GenerationConfig(temperature=0.1, max_tokens=4096),
-        )
-        resp_content = resp.choices[0].message.content
-        result: dict = dirtyjson.loads(resp_content)
-        approved: bool = result["approved"] # type: ignore
-        reason_text: str = result.get("reason", "") # type: ignore
-        if approved:
-            logger.info("Adventure approved | tool=%s reason=%s", tool_name, reason_text)
-            return ApprovalResult(action="allow_once")
-        logger.info("Adventure denied | tool=%s reason=%s", tool_name, reason_text)
-        return ApprovalResult(action="deny", deny_reason=reason_text or "安全性审查未通过", denied_by="model")
-    except Exception as exc:
-        resp_content = locals().get("resp_content", "<not available>")
-        logger.warning(
-            "Adventure approval failed: %s — denying tool=%s | resp=%r",
-            exc, tool_name, resp_content,
-            exc_info=True,
-        )
-        return ApprovalResult(action="deny", deny_reason=f"审批模型解析失败: {exc}", denied_by="model")
+    max_attempts = 3
+    last_error: str | None = None
+
+    for attempt in range(1, max_attempts + 1):
+        try:
+            messages = [system_message(system_prompt), user_message(user_prompt)]
+            resp = engine.chat(messages, GenerationConfig(temperature=0.1, max_tokens=4096))
+            resp_content = resp.choices[0].message.content
+            result: dict = dirtyjson.loads(resp_content)
+            approved: bool = result["approved"]  # type: ignore
+            reason_text: str = result.get("reason", "")  # type: ignore
+            if approved:
+                logger.info("Adventure approved | tool=%s reason=%s", tool_name, reason_text)
+                return ApprovalResult(action="allow_once")
+            logger.info("Adventure denied | tool=%s reason=%s", tool_name, reason_text)
+            return ApprovalResult(action="deny", deny_reason=reason_text or "安全性审查未通过", denied_by="model")
+        except Exception as exc:
+            last_error = str(exc)
+            resp_content = locals().get("resp_content", "<not available>")
+            logger.warning(
+                "Adventure approval attempt %d/%d failed: %s | resp=%r",
+                attempt, max_attempts, exc, resp_content,
+            )
+            if attempt < max_attempts:
+                # 将上次的原始输出和解析错误附加到 prompt，引导模型修正格式
+                correction_hint = (
+                    f"\n\n[系统提示] 你上次的返回格式有误，无法解析。错误: {exc}\n"
+                    f"你上次的原始输出:\n```\n{resp_content}\n```\n"
+                    "请严格按 JSON 格式重新返回: {\"approved\":true/false,\"reason\":\"简短原因\"}"
+                )
+                user_prompt += correction_hint
+
+    logger.warning(
+        "Adventure approval exhausted %d attempts — denying tool=%s | last_error=%s",
+        max_attempts, tool_name, last_error,
+    )
+    return ApprovalResult(action="deny", deny_reason=f"审批模型连续{max_attempts}次解析失败: {last_error}", denied_by="model")
 
 
 # ---------------------------------------------------------------------------

@@ -101,6 +101,39 @@ def _deny_session_confirms(session_id: str) -> None:
             _resolve_confirm(rid, "deny", deny_reason="WebSocket 连接已断开", denied_by="system")
 
 
+# ── ask（提问） ──────────────────────────────────────────────
+# {request_id: asyncio.Future} — 映射提问请求 ID 到 future，
+#   当用户在对话框中选择或提交时解析。
+# 结果格式：{"option": str|None, "custom_text": str|None}
+
+_pending_asks: Dict[str, _asyncio.Future[str]] = {}
+_ask_session_map: Dict[str, str] = {}
+
+
+def _register_ask_session(request_id: str, session_id: str) -> None:
+    """记录提问请求所属的 session，以便断开时自动拒绝。"""
+    _ask_session_map[request_id] = session_id
+
+
+def _resolve_ask(request_id: str, option: str | None = None, custom_text: str | None = None) -> None:
+    """解析提问请求 — 将用户选择传递给等待的 tool handler。"""
+    fut: _asyncio.Future[str] | None = _pending_asks.pop(request_id, None)
+    _ask_session_map.pop(request_id, None)
+    if fut and not fut.done():
+        result = json.dumps({"option": option, "custom_text": custom_text}, ensure_ascii=False)
+        fut.set_result(result)
+        logger.info("Ask resolved: %s -> option=%s custom=%s", request_id, option, custom_text)
+    else:
+        logger.warning("Ask request %s not found (already resolved or timed out)", request_id)
+
+
+def _deny_session_asks(session_id: str) -> None:
+    """自动拒绝断开连接 session 的所有待处理提问请求。"""
+    for rid in list(_ask_session_map.keys()):
+        if _ask_session_map.get(rid) == session_id:
+            _resolve_ask(rid, option=None, custom_text=None)
+
+
 async def _send_tool_event(
     session_id: str, event_type: str, tool_name: str, payload: str,
 ) -> None:
@@ -257,6 +290,20 @@ async def http_confirm(request_id: str, req: Request):
         deny_reason = None
     _resolve_confirm(request_id, action, deny_reason=deny_reason, denied_by=denied_by)
     return {"resolved": True, "request_id": request_id, "action": action}
+
+
+@app.post("/api/ask/{request_id}")
+async def http_ask(request_id: str, req: Request):
+    """通过 HTTP 处理提问响应（独立于 WebSocket 连接状态）。"""
+    body: dict = {}
+    try:
+        body = await req.json()
+    except Exception:
+        body = {}
+    option: str | None = str(body.get("option")) if body.get("option") is not None else None
+    custom_text: str | None = str(body.get("custom_text")) if body.get("custom_text") is not None else None
+    _resolve_ask(request_id, option=option, custom_text=custom_text)
+    return {"resolved": True, "request_id": request_id, "option": option, "custom_text": custom_text}
 
 
 @app.post("/api/interrupt/{session_id}")
@@ -589,6 +636,10 @@ async def ws_chat(ws: WebSocket) -> None:
                 if msg.request_id is not None and msg.action is not None:
                     _resolve_confirm(msg.request_id, msg.action, deny_reason=msg.deny_reason, denied_by=msg.denied_by or "user")
 
+            elif msg.type == MessageType.ASK_RESPONSE:
+                if msg.request_id is not None:
+                    _resolve_ask(msg.request_id, option=msg.option, custom_text=msg.custom_text)
+
             elif msg.type == MessageType.INTERRUPT:
                 if _agent_loop is not None and hasattr(_agent_loop, "interrupt"):
                     _agent_loop.interrupt(sid)  # type: ignore[union-attr]
@@ -617,6 +668,7 @@ async def ws_chat(ws: WebSocket) -> None:
         logger.info("WebSocket disconnected | session=%s", sid)
     finally:
         _deny_session_confirms(sid)
+        _deny_session_asks(sid)
         _tool_ws_sinks.pop(sid, None)
 
 

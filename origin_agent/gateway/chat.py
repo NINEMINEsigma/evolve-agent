@@ -22,6 +22,8 @@ class MessageType(str, Enum):
     TOOL_RESULT = "tool_result"
     CONFIRM_REQUEST = "confirm_request"
     CONFIRM_RESPONSE = "confirm_response"
+    ASK_REQUEST = "ask_request"
+    ASK_RESPONSE = "ask_response"
     INTERRUPT = "interrupt"
     ERROR = "error"
     SYSTEM = "system"
@@ -44,6 +46,12 @@ class Message(BaseModel):
     filename: Optional[str] = None    # FILE_UPLOAD：原始文件名
     mime_type: Optional[str] = None   # FILE_UPLOAD：MIME 类型
     file_data: Optional[str] = None   # FILE_UPLOAD：base64 编码的文件内容
+    # ask_request / ask_response 相关字段
+    question: Optional[str] = None    # ASK_REQUEST：问题文本
+    options: Optional[list] = None    # ASK_REQUEST：选项列表 [{label, value}]
+    allow_custom: Optional[bool] = None  # ASK_REQUEST：是否允许自定义输入
+    option: Optional[str] = None      # ASK_RESPONSE：选中的选项值
+    custom_text: Optional[str] = None # ASK_RESPONSE：自定义输入文本
 
     @classmethod
     def from_json(cls, raw: str) -> Message:
@@ -63,6 +71,11 @@ class Message(BaseModel):
             filename=data.get("filename"),
             mime_type=data.get("mime_type"),
             file_data=data.get("file_data"),
+            question=data.get("question"),
+            options=data.get("options"),
+            allow_custom=data.get("allow_custom"),
+            option=data.get("option"),
+            custom_text=data.get("custom_text"),
         )
 
     def to_json(self) -> str:
@@ -93,6 +106,16 @@ class Message(BaseModel):
             d["mime_type"] = self.mime_type
         if self.file_data is not None:
             d["file_data"] = self.file_data
+        if self.question is not None:
+            d["question"] = self.question
+        if self.options is not None:
+            d["options"] = self.options
+        if self.allow_custom is not None:
+            d["allow_custom"] = self.allow_custom
+        if self.option is not None:
+            d["option"] = self.option
+        if self.custom_text is not None:
+            d["custom_text"] = self.custom_text
         return json.dumps(d, ensure_ascii=False)
 
 
