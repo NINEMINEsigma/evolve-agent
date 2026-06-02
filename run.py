@@ -7,6 +7,12 @@ from datetime import datetime
 
 from config import *
 
+def quote(path) -> str:
+    result = str(path)
+    if path == "":
+        return "\"\""
+    return result
+
 origin_agent_codes_path = Path("origin_agent")
 
 # create directorys if they don't exist
@@ -94,25 +100,25 @@ if __name__ == "__main__":
         logger.info(f"Running fast agent")
         task = subprocess.run([
             sys.executable, # 使用当前python解释器
-            str(fast_agent_space/"__main__.py"), # 运行fast agent
-            "--workspace", str(workspace_path), # 工作空间路径
-            "--agentspace", str(agentspace_path), # agent 工作目录
-            "--log", str(log_file_path), # 日志路径
-            "--console_log", str(console_log), # 是否在控制台打印日志
-            "--evolve", str(slow_agent_space), # 需要进化的代码路径
-            "--gateway_host", str(gateway_host), # WebSocket 监听地址
-            "--gateway_port", str(gateway_port), # WebSocket 监听端口
-            "--llm_base_url", str(llm_base_url), # LLM API 地址
-            "--llm_model", str(llm_model), # LLM 模型名
-            "--llm_max_context_tokens", str(llm_max_context_tokens), # LLM 最大上下文
-            "--llm_max_output_tokens", str(llm_max_output_tokens), # LLM 最大输出
-            "--llm_temperature", str(llm_temperature), # LLM 温度
-            "--llm_reasoning_effort", str(llm_reasoning_effort), # LLM reasoning_effort
+            quote(fast_agent_space/"__main__.py"), # 运行fast agent
+            "--workspace", quote(workspace_path), # 工作空间路径
+            "--agentspace", quote(agentspace_path), # agent 工作目录
+            "--log", quote(log_file_path), # 日志路径
+            "--console_log", quote(console_log), # 是否在控制台打印日志
+            "--evolve", quote(slow_agent_space), # 需要进化的代码路径
+            "--gateway_host", quote(gateway_host), # WebSocket 监听地址
+            "--gateway_port", quote(gateway_port), # WebSocket 监听端口
+            "--llm_base_url", quote(llm_base_url), # LLM API 地址
+            "--llm_model", quote(llm_model), # LLM 模型名
+            "--llm_max_context_tokens", quote(llm_max_context_tokens), # LLM 最大上下文
+            "--llm_max_output_tokens", quote(llm_max_output_tokens), # LLM 最大输出
+            "--llm_temperature", quote(llm_temperature), # LLM 温度
+            "--llm_reasoning_effort", quote(llm_reasoning_effort), # LLM reasoning_effort
             "--mode", "fast", # 运行模式
-            "--mcp_config_path", str(mcp_config_path), # MCP 配置路径
-            "--approval_model_path", str(approval_model_path), # 审批模型路径
-            "--approval_model_n_ctx", str(approval_model_n_ctx), # 审批模型最大上下文
-            "--approval_model_cuda", str(approval_model_cuda), # 审批模型是否使用CUDA
+            "--mcp_config_path", quote(mcp_config_path), # MCP 配置路径
+            "--approval_model_path", quote(approval_model_path), # 审批模型路径
+            "--approval_model_n_ctx", quote(approval_model_n_ctx), # 审批模型最大上下文
+            "--approval_model_cuda", quote(approval_model_cuda), # 审批模型是否使用CUDA
         ])
         exit_code = task.returncode
         if exit_code == 0:
@@ -142,24 +148,24 @@ if __name__ == "__main__":
             logger.info(f"Running fallback agent")
             task = subprocess.run([
                 sys.executable, # 使用当前python解释器
-                str(fallback_main), # 运行fallback agent
-                "--workspace", str(workspace_path), # 工作空间路径
-                "--agentspace", str(agentspace_path), # agent 工作目录
-                "--log", str(log_file_path), # 日志路径
-                "--console_log", str(console_log), # 是否在控制台打印日志
-                "--fix_fork", str(fast_agent_space), # 需要修复的代码路径
-                "--fix", str(logs_path/"fast_agent_runtime_error.log"), # 错误日志路径
-                "--llm_base_url", str(llm_base_url), # LLM API 地址
-                "--llm_model", str(llm_model), # LLM 模型名
-                "--llm_max_context_tokens", str(llm_max_context_tokens), # LLM 最大上下文
-                "--llm_max_output_tokens", str(llm_max_output_tokens), # LLM 最大输出
-                "--llm_temperature", str(llm_temperature), # LLM 温度
-                "--llm_reasoning_effort", str(llm_reasoning_effort), # LLM reasoning_effort
+                quote(fallback_main), # 运行fallback agent
+                "--workspace", quote(workspace_path), # 工作空间路径
+                "--agentspace", quote(agentspace_path), # agent 工作目录
+                "--log", quote(log_file_path), # 日志路径
+                "--console_log", quote(console_log), # 是否在控制台打印日志
+                "--fix_fork", quote(fast_agent_space), # 需要修复的代码路径
+                "--fix", quote(logs_path/"fast_agent_runtime_error.log"), # 错误日志路径
+                "--llm_base_url", quote(llm_base_url), # LLM API 地址
+                "--llm_model", quote(llm_model), # LLM 模型名
+                "--llm_max_context_tokens", quote(llm_max_context_tokens), # LLM 最大上下文
+                "--llm_max_output_tokens", quote(llm_max_output_tokens), # LLM 最大输出
+                "--llm_temperature", quote(llm_temperature), # LLM 温度
+                "--llm_reasoning_effort", quote(llm_reasoning_effort), # LLM reasoning_effort
                 "--mode", "fallback", # 运行模式
-                "--mcp_config_path", str(mcp_config_path), # MCP 配置路径
-                "--approval_model_path", str(approval_model_path), # 审批模型路径
-                "--approval_model_n_ctx", str(approval_model_n_ctx), # 审批模型最大上下文
-                "--approval_model_cuda", str(approval_model_cuda), # 审批模型是否使用CUDA
+                "--mcp_config_path", quote(mcp_config_path), # MCP 配置路径
+                "--approval_model_path", quote(approval_model_path), # 审批模型路径
+                "--approval_model_n_ctx", quote(approval_model_n_ctx), # 审批模型最大上下文
+                "--approval_model_cuda", quote(approval_model_cuda), # 审批模型是否使用CUDA
             ])
             if task.returncode == 0:
                 logger.info(f"Fallback agent fixed successfully, restart...")

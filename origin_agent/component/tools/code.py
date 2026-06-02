@@ -104,21 +104,48 @@ def _handle_write_fork(args: Dict[str, Any]) -> str:
 
     仅在 'fast' 模式下允许。接受裸文件名或逻辑路径。
 
-    支持两种模式：
-      - 完全覆盖：提供 file + content（默认）。
+    支持三种模式：
+      - 完全覆盖：提供 file + content。内容最多 1000 个字符。
       - 增量编辑：提供 file + old_string + new_string。
         old_string 必须在现有文件中精确匹配一次。
+      - 追加模式：提供 file + content + append=true。
+        将内容追加到文件末尾，内容最多 10 行。
     """
     path: str = str(args.get("file", args.get("path", ""))).strip()
     content: str = str(args.get("content", ""))
     old_string: str = str(args.get("old_string", ""))
     new_string: str | None = str(args.get("new_string", "")) if "new_string" in args else None
+    append: bool = bool(args.get("append", False))
 
     if not path:
         return tool_error("file is required")
 
+    # ---- 追加模式 ----
+    if append:
+        if old_string:
+            return tool_error("Cannot combine append with old_string/new_string")
+        if not content:
+            return tool_error("content is required in append mode")
+
+        lines = content.splitlines()
+        if len(lines) > 10:
+            return tool_error(
+                f"content exceeds 10 lines (got {len(lines)}) in append mode",
+            )
+
+        try:
+            if ":" in path:
+                resolved = _s().resolve(path, Access.READ)
+            else:
+                resolved = _s().resolve(f"fork:{path}", Access.READ)
+            existing = resolved.real.read_text(encoding="utf-8")
+        except (SandboxError, FileNotFoundError) as exc:
+            return tool_error(str(exc), path=path)
+
+        content = existing.rstrip("\n") + "\n" + content
+
     # ---- 增量编辑模式 ----
-    if old_string:
+    elif old_string:
         if new_string is None:
             return tool_error("new_string is required when old_string is provided")
         try:
@@ -147,6 +174,12 @@ def _handle_write_fork(args: Dict[str, Any]) -> str:
     # ---- 完全覆盖模式 ----
     elif not content:
         return tool_error("content is required when old_string is not provided")
+
+    # 完全覆盖模式下限制字符数
+    if not old_string and not append and len(content) > 1000:
+        return tool_error(
+            f"content exceeds 1000 characters (got {len(content)}) in overwrite mode",
+        )
 
     try:
         resolved: Any
@@ -267,11 +300,13 @@ registry.register(
             "写入所有更改后，调用 validate_code 检查语法，"
             "然后调用 evolve_code 触发交换。"
             "接受裸文件名（如 'main.py'）。\n\n"
-            "两种模式：\n"
-            "- 完全覆盖：传递 file + content。\n"
+            "三种模式：\n"
+            "- 完全覆盖：传递 file + content。内容最多 1000 个字符。\n"
             "- 增量编辑：传递 file + old_string + new_string。"
             "old_string 必须精确匹配一次 — 包含足够的上下文"
-            "（前后各 2-3 行）使其唯一。"
+            "（前后各 2-3 行）使其唯一。\n"
+            "- 追加模式：传递 file + content + append=true。"
+            "将内容追加到文件末尾。内容最多 10 行。"
         ),
         "parameters": {
             "type": "object",
@@ -282,7 +317,10 @@ registry.register(
                 },
                 "content": {
                     "type": "string",
-                    "description": "新的源码内容（启用完全覆盖模式）。",
+                    "description": (
+                        "新的源码内容。完全覆盖模式下最多 1000 个字符；"
+                        "追加模式下最多 10 行。"
+                    ),
                 },
                 "old_string": {
                     "type": "string",
@@ -291,6 +329,10 @@ registry.register(
                 "new_string": {
                     "type": "string",
                     "description": "替换文本。使用空字符串删除 old_string。",
+                },
+                "append": {
+                    "type": "boolean",
+                    "description": "追加模式：将 content 追加到现有文件末尾。最多 10 行。",
                 },
             },
             "required": ["file"],

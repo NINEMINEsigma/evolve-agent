@@ -4,11 +4,24 @@
 
 ## 安装
 
+克隆与拉取
 ```bash
 git clone ... --recurse-submodules
 git submodule update --init --recursive
-# git pull --recurse-submodules
+# git pull --recurse-submodules 更新仓库
 ```
+
+检查环境
+```bash
+python check_env.py --cuda # cuda可选
+```
+
+配置OPENAI_API_KEY等环境变量后即可运行(示例为: 强制初始化, 开启cuda, 使用Qwen3.5-0.8B-Q8_0.gguf作为审批模型)
+```bash
+python run.py  --fouce_init --approval_model_cuda --approval_model_path Qwen3.5-0.8B-Q8_0.gguf
+```
+
+配置可传递命令行参数, 也可修改config.py中的默认配置
 
 ## 核心机制：Fast-Slow-Fallback 演化循环
 
@@ -45,7 +58,7 @@ origin_agent/
 │   ├── llm.py             ← LLM 客户端
 │   └── mcp_tools.py       ← MCP 工具桥接
 ├── system/                ← 基础设施
-│   ├── sandbox.py         ← 路径沙盒（self:/fork:/ws:/fix: 命名空间）
+│   ├── sandbox.py         ← 路径沙盒（fork:/ws:/fix: 命名空间）
 │   ├── prompt.py          ← System Prompt 组装
 │   ├── context.py         ← RuntimeContext
 │   └── pathutils.py       ← 路径工具
@@ -94,16 +107,23 @@ origin_agent/
 | `docx_tools` | Word（.docx）文档读取 |
 | `pdf_tools` | PDF 文档读取 |
 | `diff_tools` | 文件差异对比与 patch 应用 |
-| `ffmpeg_tools` | FFmpeg 多媒体处理工具集 |
+| `ffmpeg_tools` | FFmpeg 多媒体处理 |
+| `diagram` | 图表/流程图生成 |
+| `display` | 图片展示 |
+| `docgen_tools` | 文档生成 |
+| `excalidraw_render` | Excalidraw 渲染 |
+| `gui_windows` | Windows GUI 自动化 |
+| `pip` | Python 包安装 |
+| `ssh_tools` | SSH 远程连接 |
+| `web_browser` | 浏览器自动化操作 |
 
 ### 路径沙盒
 
-所有文件操作必须使用逻辑路径前缀, 禁止裸路径和 `..` 遍历：
+所有文件操作必须使用逻辑路径前缀, 禁止裸路径和 `..` 遍历。注意：不存在 `self:` 命名空间, agent 从 `fork:` 读取自身源码副本。
 
 | 前缀 | 映射 | 模式 | 用途 |
 |------|------|------|------|
-| `self:` | `fast_agent_space/` | fast | 只读 — 读自身源码 |
-| `fork:` | `slow_agent_space/` | fast | 写入进化代码 |
+| `fork:` | `slow_agent_space/` | fast | 读写进化代码 |
 | `ws:` | `agentspace/` | fast / fallback | 通用 I/O |
 | `fix:` | `.fallback/` | fallback | 修复目标 |
 
@@ -125,8 +145,6 @@ origin_agent/
 | `evolve-testing` | 进化代码的测试策略 |
 | `evolve-tool-creator` | 新工具开发模板与规范 |
 | `pymem-memory` | Python 内存分析工具集（进程扫描、指针追踪、内存冻结） |
-
-诸如此类
 
 ## 快速开始
 
@@ -158,7 +176,7 @@ $env:OPENAI_BASE_URL = "https://api.deepseek.com"  # 可选, 覆盖默认地址
 | `llm_base_url` | LLM API 地址 | `https://api.deepseek.com` |
 | `llm_model` | 模型名称 | `deepseek-v4-flash` |
 | `llm_max_context_tokens` | 最大上下文 token 数 | `1000000` |
-| `llm_context_upbound` | 上下文压缩触发阈值（比例） | `0.9` |
+| `llm_reasoning_effort` | 模型 reasoning 力度（low/medium/high） | `medium` |
 | `llm_max_output_tokens` | 最大输出 token 数 | `384000` |
 | `llm_temperature` | 温度 | `0.95` |
 | `gateway_host` / `gateway_port` | Web 界面地址 | `127.0.0.1:8765` |
@@ -178,9 +196,9 @@ python run.py
 
 在对话中, agent 可以通过以下工具链完成自我进化：
 
-1. `read_file` — 通过 `self:` 前缀读取自身源码（`read_own_source` 已废弃）
-2. `write_fork` — 将改进代码写入 `fork:` 命名空间（支持完全覆盖或增量编辑）
-3. `validate_code` — Python 语法检查
+1. `read_file` — 通过 `fork:` 前缀读取待进化代码（`read_own_source` 已废弃）
+2. `write_fork` 或 `edit_file` — 将改进代码写入 `fork:` 命名空间（支持完全覆盖或增量编辑）
+3. `validate_code` — Python 语法 + AST 检查
 4. `validate_frontend` — （可选）如修改了前端文件，需执行此工具验证构建
 5. `evolve_code` — 深度验证（含 `py_compile`）并触发 fast-slow 交换
 

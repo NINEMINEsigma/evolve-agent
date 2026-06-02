@@ -66,6 +66,11 @@ def _handle_write(args: Dict[str, Any]) -> str:
     content: str = str(args.get("content", ""))
     if not path:
         return tool_error("path is required", path=path)
+    if len(content) > 1000:
+        return tool_error(
+            f"content exceeds 1000 characters (got {len(content)})",
+            path=path,
+        )
     try:
         _s().write(path, content)
         return tool_result(success=True, path=path, bytes=len(content.encode("utf-8")))
@@ -184,7 +189,7 @@ registry.register(
                 },
                 "content": {
                     "type": "string",
-                    "description": "要写入文件的内容。",
+                    "description": "要写入文件的内容。最多 1000 个字符。",
                 },
             },
             "required": ["path", "content"],

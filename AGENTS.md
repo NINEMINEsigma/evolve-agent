@@ -1,93 +1,104 @@
 # Evolve Agent — AGENTS.md
 
-## 启动
+## Startup
 
 ```bash
 python run.py
 ```
 
-运行前需设置环境变量 `OPENAI_API_KEY`。如需覆盖默认模型地址，设 `OPENAI_BASE_URL`。修改 `config.py` 中的 `llm_*` 字段可调整模型、温度、上下文窗口等。
+Requires `OPENAI_API_KEY`. Optional `OPENAI_BASE_URL` to override default LLM endpoint. Web UI at `http://127.0.0.1:8765`.
 
-启动后 Web 界面在 `http://127.0.0.1:8765`。
+CLI flags (override `config.py` defaults): `--fouce_init`, `--approval_model_path`, `--approval_model_cuda`, `--llm_model`, `--llm_temperature`, `--llm_max_context_tokens`, `--llm_max_output_tokens`, `--llm_reasoning_effort`, `--gateway_host`, `--gateway_port`, `--console_log`.
 
-## 铁律：origin_agent 不可直接执行
+Environment check: `python check_env.py --cuda`
 
-`origin_agent/` 下的源代码**必须经过 `run.py` 复制到 `workspace/fast_agent_space/` 后才能运行**。严禁：
+## Iron rules
 
-- 直接执行 `origin_agent/__main__.py`
-- 在 `origin_agent/frontend/` 目录下运行 `pnpm install`、`pnpm run dev`、`pnpm run build`
-- 将 `origin_agent/` 中任何路径作为 `sys.path` 或 `cwd` 来运行代码
+- **Never execute `origin_agent/` directly.** `run.py` copies it to `workspace/fast_agent_space/` before running. No: `origin_agent/__main__.py` direct execution, `pnpm install/build/dev` in `origin_agent/frontend/`, or using `origin_agent/` paths in `sys.path` or `cwd`.
+- **Never modify `workspace/` code files** (`.py`, `.js`, `.ts`, `.tsx`, `.css`). They are runtime copies — changes are lost on re-init. Non-code files (logs, JSON) are readable but not writable.
 
-前端构建由 `origin_agent/__main__.py::_build_frontend()` 在 fast_agent_space 中自动完成。如需手动构建，先确定已复制到 `workspace/` 下再操作。构建失败会返回 exit code 1，触发 fallback 模式。
-
-## 铁律：永不修改 workspace 下的文件
-
-`workspace/` 下的代码文件（`.py`, `.js`, `.ts`, `.jsx`, `.tsx` 等）是 `origin_agent` 的运行时副本，**修改不会被持久化**。日志和 JSON 等非代码文件可读但不可写。
-
-`.cursorignore` 和 `.cursor/rules/protect-workspace.mdc` 已实施此约束。
-
-## 架构要点
+## Architecture
 
 ```
-origin_agent/         ← 代码真相来源（唯一需编辑的地方）
-workspace/            ← 运行时副本 + 日志 + skill 文件
-  fast_agent_space/     正在运行的 agent 代码（origin_agent 的副本）
-  slow_agent_space/     LLM 写进化代码的目标目录
-  .fallback/            上一次 fast 的备份
-third/                ← 供应商第三方模块（easysave, filesystem）
+origin_agent/        ← sole source of truth (edit here)
+workspace/
+  fast_agent_space/    running agent copy
+  slow_agent_space/    evolution target (fork:)
+  .fallback/           previous fast backup (for repair)
+  agentspace/          agent I/O workspace (ws:)
+  logs/                sessions, evolution status
+third/               ← git submodules: easysave, filesystem, llamaapis
 ```
 
-- `origin_agent/` 是**唯一**需要编辑源码的位置。
-- 无 CI/CD、无测试框架、无 lint/typecheck 配置。项目纯运行时代码演化，无构建工具（前端除外）。
+- No CI/CD, no test framework, no lint/typecheck. Pure runtime code evolution.
+- `pyrightconfig.json` adds `origin_agent/` and `third/` to `extraPaths`.
+- `.shell_allowlist.json` at project root stores permanently-allowed shell commands.
 
-## 生命周期（run.py）
+## Lifecycle (run.py)
 
-`run.py` 是编排器：
+1. First run or `--fouce_init`: wipe `workspace/*`, copy `origin_agent/` to both `fast_agent_space/` and `slow_agent_space/`.
+2. Run `fast_agent_space/__main__.py`.
+3. Exit code `0` = normal stop. `-1` = evolution swap (fast → .fallback, slow → fast, restart). Other = fallback mode (run `.fallback/__main__.py` to repair).
 
-1. 首次运行或 `fouce_init=True` 时：删 `workspace/*`，将 `origin_agent/` **完整复制**到 `fast_agent_space/` 和 `slow_agent_space/`，写锁文件。
-2. 运行 `fast_agent_space/__main__.py`。
-3. **退出码 0** = 正常退出，停止。
-4. **退出码 -1** = 演化交换：fast → .fallback, slow → fast, 重启。
-5. **其他退出码** = fallback 模式：运行 `.fallback/__main__.py` 修复 `fast_agent_space/`。
+## Sandbox
 
-## 路径沙盒（Sandbox）
+All file operations use logical path prefixes. No bare paths, no `..`, no absolute paths.
 
-所有文件操作必须使用逻辑路径前缀，不能使用裸路径：
+| Prefix | Maps to | Mode | Permission |
+|--------|---------|------|------------|
+| `fork:` | `slow_agent_space/` | fast | rw |
+| `ws:` | `agentspace/` | fast / fallback | rw |
+| `fix:` | `.fallback/` | fallback | rw |
 
-| 前缀 | 映射 | 权限 | 用途 |
-|------|------|------|------|
-| `self:` | `fast_agent_space/` | 只读 | 读自身源码 |
-| `fork:` | `slow_agent_space/` | 读写 | 写进化代码 |
-| `ws:` | `workspace/` | 读写 | 通用工作空间 |
-| `fix:` | 仅 fallback 模式 | 只写 | 修复目标 |
+There is **no** `self:` namespace. Agent reads its own source from `fork:` (which starts as a copy of `origin_agent/`).
 
-不允许 `..` 遍历、绝对路径、裸路径。
+## Evolution flow
 
-## 工具系统
+```
+read_file (fork:path) → write_fork (or edit_file fork:path) → validate_code → [validate_frontend if frontend changed] → evolve_code
+```
 
-工具在 `component/tools/*.py` 中通过 `registry.register()` **模块导入时**注册。修改工具注册需编辑对应文件。
+- `read_own_source` is **disabled** (handler exists but not registered). Use `read_file` with `fork:` prefix instead.
+- `write_fork` supports 3 modes: full overwrite (content), incremental edit (old_string+new_string), append (content+append=true). Max 1000 chars for overwrite, 10 lines for append.
+- `edit_file` (filesystem.py:274): same-purpose incremental edit using `fork:`/`ws:`/`fix:` prefix.
+- `validate_code`: AST syntax check on `fork:` all `.py` files.
+- `validate_frontend`: runs `pnpm install && pnpm run build` on `fork:frontend`. Required if frontend touched.
+- `evolve_code` calls `finalize_evolution()` → py_compile deep check → triggers exit code -1.
+- `fouce_init` is intentionally misspelled (not `force_init`).
 
-## 模板系统
+## Template system
 
-System prompt 由 `system/prompt.py` 从 `templates/`（英文）或 `templates/zh/`（中文）拼接。检测到 `templates/zh/` 目录存在时默认用中文模板。层次：GENE > SOUL > base > modes/{fast,fallback} > tools > memory > skills。
+Assembled by `system/prompt.py`. Detects `templates/zh/` existence → defaults to Chinese. Hierarchy: `GENE > SOUL > base > modes/{fast,fallback} > tools > memory > skills`.
 
-## 进化流程（LLM 调用链）
+## Tool system
 
-`read_own_source` → `write_fork`/`edit_file` → `validate_code` → `evolve_code`
+Tools register via `registry.register()` at import time. Auto-discovered by AST scan (`abstract/tools/discover.py`) scanning for module-level `registry.register()` calls. Tool sources:
 
-退出码 -1 → run.py 执行 slow→fast 交换。
+- `component/tools/` — core (filesystem, code, shell, frontend, skills, read_image, run_python)
+- `component/extools/` — extras (web_search, web_fetch, csv_tools, excel_tools, docx_tools, pdf_tools, diff_tools, ffmpeg_tools, diagram, display, docgen_tools, excalidraw_render, gui_windows, pip, ssh_tools, web_browser)
+- `custom_tools/` — user-defined, auto-discovered if directory exists
 
-## 前端
+## Approval (component/approval.py)
 
-在 `origin_agent/frontend/`（React + Vite + TypeScript）。使用 **pnpm**（不是 npm）。启动时自动执行 `pnpm install && pnpm run build`，产物打入 `frontend/dist/`。失败时 agent 不启动。
+- **Normal mode**: user confirms tools via WebSocket frontend prompt.
+- **Adventure mode**: local GGUF model auto-approves. Enable via `--approval_model_path <gguf>` and optional `--approval_model_cuda`. Uses `third/llamaapis` (llama.cpp subprocess wrapper). Model files go in `custom_models/`.
 
-Windows 上调用的是 `pnpm.cmd`。
+## Frontend
 
-## 杂项
+React + Vite + TypeScript in `origin_agent/frontend/`. Uses pnpm (**pnpm.cmd** on Windows). Auto-built at startup (`_build_frontend()` in `__main__.py:141`): `pnpm install && pnpm run build`. Build failure → exit code 1 → orchestrator enters fallback mode.
 
-- Windows 平台 Python 命令为 `python`（非 `python3`），原生命令需 `cmd /c <cmd>`。
-- 历史消息持久化在 `workspace/logs/sessions/`（JSONL），会话元数据在 `_index.json`。
-- LLM API key 从 `OPENAI_API_KEY` 环境变量读取，**永远不可写入代码**。
-- 无 `pyproject.toml`。依赖仅有 `requirements.txt`：fastapi, uvicorn, websockets, openai, pydantic, tiktoken, dirtyjson。
-- 进化状态日志写入 `workspace/logs/evolution.status`（JSON 数组，供前端展示）。
-- `config.py` 中 `fouce_init` 是故意拼写（非 `force_init`）。
+## Memory
+
+`memory/provider.py`: `EasysaveMemoryProvider` backed by `third/easysave`. Sessions persisted to `workspace/logs/sessions/` (JSONL) with `_index.json` metadata. Evolution status at `workspace/logs/evolution.status` (JSON array).
+
+## Windows specifics
+
+- Python command is `python` (not `python3`).
+- Native executables (pnpm, etc.) invoked as `pnpm.cmd`.
+- Process tree kill uses `taskkill /T /F`.
+- Sandbox subprocess uses `CREATE_NEW_PROCESS_GROUP`.
+- `signal.add_signal_handler` unavailable → falls back to `signal.signal`.
+
+## pre-skills/
+
+`pre-skills/` contains built-in skill templates for agent self-evolution (evolve-architect, evolve-code-engineer, evolve-code-validator, evolve-debugger, evolve-frontend-builder, etc.). These are reference guides; the agent can load them as skills at runtime.

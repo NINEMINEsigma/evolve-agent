@@ -1,1 +1,0 @@
-python run.py --fouce_init
