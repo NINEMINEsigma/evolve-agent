@@ -315,3 +315,147 @@ registry.register(
     handler=_handle_exists,
     emoji="🔍",
 )
+
+
+# -- copy_file
+def _handle_copy(args: Dict[str, Any]) -> str:
+    source: str = str(args.get("source", "")).strip()
+    destination: str = str(args.get("destination", "")).strip()
+    if not source:
+        return tool_error("source is required")
+    if not destination:
+        return tool_error("destination is required")
+    try:
+        _s().copy(source, destination)
+        return tool_result(success=True, source=source, destination=destination)
+    except SandboxError as exc:
+        return tool_error(str(exc), source=source, destination=destination)
+
+
+registry.register(
+    name="copy_file",
+    toolset="filesystem",
+    schema={
+        "description": (
+            "复制文件。源路径和目标路径均需使用命名空间前缀"
+            "（ws:、fork:、fix:）。支持跨命名空间复制。"
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "source": {
+                    "type": "string",
+                    "description": "要复制的源文件逻辑路径（命名空间前缀 + 路径）。",
+                },
+                "destination": {
+                    "type": "string",
+                    "description": "目标文件逻辑路径（命名空间前缀 + 路径）。",
+                },
+            },
+            "required": ["source", "destination"],
+        },
+    },
+    handler=_handle_copy,
+    emoji="📋",
+    danger_level="write",
+)
+
+
+# -- move_file
+def _handle_move(args: Dict[str, Any]) -> str:
+    source: str = str(args.get("source", "")).strip()
+    destination: str = str(args.get("destination", "")).strip()
+    if not source:
+        return tool_error("source is required")
+    if not destination:
+        return tool_error("destination is required")
+    try:
+        _s().move(source, destination)
+        return tool_result(success=True, source=source, destination=destination)
+    except SandboxError as exc:
+        return tool_error(str(exc), source=source, destination=destination)
+
+
+registry.register(
+    name="move_file",
+    toolset="filesystem",
+    schema={
+        "description": (
+            "移动文件或目录。目标路径可以包含新名称，从而实现重命名。"
+            "源和目标路径均需使用命名空间前缀"
+            "（ws:、fork:、fix:）。支持跨命名空间移动。"
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "source": {
+                    "type": "string",
+                    "description": "要移动的源文件/目录逻辑路径。",
+                },
+                "destination": {
+                    "type": "string",
+                    "description": "目标路径（可包含新文件名）。",
+                },
+            },
+            "required": ["source", "destination"],
+        },
+    },
+    handler=_handle_move,
+    emoji="🚚",
+    danger_level="write",
+)
+
+
+# -- rename_file
+def _handle_rename(args: Dict[str, Any]) -> str:
+    path: str = str(args.get("path", "")).strip()
+    new_name: str = str(args.get("new_name", "")).strip()
+    if not path:
+        return tool_error("path is required")
+    if not new_name:
+        return tool_error("new_name is required")
+    # 在同一目录下重命名：找出父目录，用新名称拼出目标路径
+    import re as _re
+    m = _re.match(r"^([a-zA-Z]+:)(.*/)?([^/]+)$", path)
+    if not m:
+        return tool_error(
+            "unable to parse path — ensure it has a namespace prefix and filename",
+            path=path,
+        )
+    ns_prefix: str = m.group(1)
+    parent_dir: str = m.group(2) or ""
+    destination: str = f"{ns_prefix}{parent_dir}{new_name}"
+    try:
+        _s().move(path, destination)
+        return tool_result(success=True, source=path, destination=destination)
+    except SandboxError as exc:
+        return tool_error(str(exc), source=path, destination=destination)
+
+
+registry.register(
+    name="rename_file",
+    toolset="filesystem",
+    schema={
+        "description": (
+            "重命名文件。在同一目录下将文件更名为新名称，"
+            "路径和命名空间前缀不变。如需跨目录移动，请使用 move_file。"
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "path": {
+                    "type": "string",
+                    "description": "要重命名的文件逻辑路径（命名空间前缀 + 完整路径）。",
+                },
+                "new_name": {
+                    "type": "string",
+                    "description": "新文件名（仅文件名，不含路径）。",
+                },
+            },
+            "required": ["path", "new_name"],
+        },
+    },
+    handler=_handle_rename,
+    emoji="🏷️",
+    danger_level="write",
+)

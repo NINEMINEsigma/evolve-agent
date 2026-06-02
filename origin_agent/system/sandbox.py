@@ -358,6 +358,26 @@ class Sandbox:
             p.name for p in r.real.iterdir()
         )
 
+    def copy(self, logical_src: str, logical_dst: str) -> None:
+        """复制文件（源只读、目标写入）。"""
+        src: ResolvedPath = self.resolve_read(logical_src)
+        dst: ResolvedPath = self.resolve_write(logical_dst)
+        if not src.real.is_file():
+            raise SandboxError(f"Source is not a file: {logical_src}")
+        dst.real.parent.mkdir(parents=True, exist_ok=True)
+        import shutil
+        shutil.copy2(src.real, dst.real)
+
+    def move(self, logical_src: str, logical_dst: str) -> None:
+        """移动或重命名文件/目录（源只读、目标写入）。"""
+        src: ResolvedPath = self.resolve_read(logical_src)
+        dst: ResolvedPath = self.resolve_write(logical_dst)
+        if not src.real.exists():
+            raise SandboxError(f"Source does not exist: {logical_src}")
+        dst.real.parent.mkdir(parents=True, exist_ok=True)
+        import shutil
+        shutil.move(str(src.real), str(dst.real))
+
     def delete(self, logical: str) -> None:
         """删除文件或空目录（写入检查）。"""
         r: ResolvedPath = self.resolve_write(logical)

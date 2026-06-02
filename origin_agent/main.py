@@ -132,6 +132,8 @@ class App:
             _fs.set_sandbox(_sandbox)
             import component.tools.read_image as _ri
             _ri.set_sandbox(_sandbox)
+            import component.tools.list_uploads as _lu
+            _lu.set_sandbox(_sandbox)
             # AST 自动发现并注册工具模块
             from abstract.tools.discover import discover_builtin_tools
             from system.pathutils import find_repo_root
