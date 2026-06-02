@@ -524,13 +524,37 @@ async def ws_chat(ws: WebSocket) -> None:
                 ).to_json()
             )
 
+        # 发送服务端信息：上下文窗口、审批模型配置
+        try:
+            from system.context import get_runtime_context
+            ctx = get_runtime_context()
+            model_path: str = Path(ctx.approval_model_path).name if ctx.approval_model_path else ""
+            await ws.send_text(
+                Message(
+                    type=MessageType.SYSTEM,
+                    session_id=sid,
+                    content=json.dumps({
+                        "server_info": {
+                            "llm_max_context_tokens": ctx.llm_max_context_tokens,
+                            "approval_model_name": model_path,
+                            "approval_model_available": bool(ctx.approval_model_path),
+                        },
+                    }),
+                ).to_json()
+            )
+        except Exception:
+            # RuntimeContext 未初始化时静默跳过（fallback 模式可能无 LLM）
+            pass
+
         # 恢复 session 时回放会话历史，使前端不为空白
         if resume and sessions.exists(resume) and _agent_loop is not None:
             get_messages = getattr(_agent_loop, "get_session_messages", None)
             get_usage = getattr(_agent_loop, "get_token_usage", None)
+            get_context = getattr(_agent_loop, "get_context_tokens", None)
             if get_messages:
                 history: list[dict] = get_messages(sid)
                 usage: int = get_usage(sid) if get_usage else 0
+                context: int = get_context(sid) if get_context else 0
                 await ws.send_text(
                     Message(
                         type=MessageType.SYSTEM,
@@ -538,6 +562,7 @@ async def ws_chat(ws: WebSocket) -> None:
                         content=json.dumps({
                             "session_history": history,
                             "token_usage": usage,
+                            "context_tokens": context,
                         }, ensure_ascii=False),
                     ).to_json()
                 )
@@ -610,12 +635,16 @@ async def ws_chat(ws: WebSocket) -> None:
                     )
                     # 向前端发送实时 token 消耗更新
                     get_usage = getattr(_agent_loop, "get_token_usage", None)
+                    get_context = getattr(_agent_loop, "get_context_tokens", None)
                     if get_usage:
                         await ws.send_text(
                             Message(
                                 type=MessageType.SYSTEM,
                                 session_id=sid,
-                                content=json.dumps({"token_usage": get_usage(sid)}),
+                                content=json.dumps({
+                                    "token_usage": get_usage(sid),
+                                    "context_tokens": get_context(sid) if get_context else 0,
+                                }),
                             ).to_json()
                         )
                     # 发送 agent 响应后，检查本回合是否请求了

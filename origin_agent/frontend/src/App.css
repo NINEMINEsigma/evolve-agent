@@ -324,6 +324,17 @@ html, body, #root {
   cursor: default;
 }
 
+.approval-model-badge {
+  font-size: 11px;
+  font-family: "SF Mono", "Fira Code", monospace;
+  background: var(--bg-tertiary);
+  color: var(--accent);
+  padding: 3px 10px;
+  border-radius: 10px;
+  margin-left: 6px;
+  cursor: default;
+}
+
 .model-icon {
   width: 34px;
   height: 34px;

@@ -1138,3 +1138,7 @@ class AgentLoop:
         if disk_usage:
             self._token_usage[session_id] = disk_usage
         return disk_usage
+
+    def get_context_tokens(self, session_id: str) -> int:
+        """返回 session 最近一次 LLM 调用的 prompt_tokens（已用上下文）。"""
+        return self._last_prompt_tokens.get(session_id, 0)

@@ -1,4 +1,5 @@
 import argparse
+from third.filesystem import File
 argparse_parser = argparse.ArgumentParser()
 
 argparse_parser.add_argument("--console_log", type=bool, default=True)
@@ -16,7 +17,12 @@ argparse_parser.add_argument("--llm_temperature", type=float, default=0.95)
 argparse_parser.add_argument("--llm_reasoning_effort", type=str, default="medium")
 
 # 冒险模式审批小模型 — 仅需文件名，agent 会自动从 custom_models/ 目录下加载
-argparse_parser.add_argument("--approval_model_path", type=str, default="")
+check_default_approval_model_path = ""
+for file in File("custom_models/").childs():
+    if file.suffix == "gguf" or file.suffix == ".gguf":
+        check_default_approval_model_path = str(file)
+        break
+argparse_parser.add_argument("--approval_model_path", type=str, default=check_default_approval_model_path)
 argparse_parser.add_argument("--approval_model_n_ctx", type=int, default=65536)
 argparse_parser.add_argument("--approval_model_cuda", action="store_true")
 

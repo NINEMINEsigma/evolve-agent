@@ -123,6 +123,7 @@ export default function App() {
   const [askSelectedOption, setAskSelectedOption] = useState<string | null>(null);
   const [sessionId, setSessionId] = useState("");
   const [tokenUsage, setTokenUsage] = useState(0);
+  const [contextTokens, setContextTokens] = useState(0);
   const [lightboxSrc, setLightboxSrc] = useState<string | null>(null);
   const [sessions, setSessions] = useState<SessionInfo[]>([]);
   const [searchQuery, setSearchQuery] = useState("");
@@ -136,6 +137,9 @@ export default function App() {
   const [uploading, setUploading] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [adventureMode, setAdventureMode] = useState(false);
+  const [llmMaxContextTokens, setLlmMaxContextTokens] = useState(0);
+  const [approvalModelName, setApprovalModelName] = useState("");
+  const [approvalModelAvailable, setApprovalModelAvailable] = useState(false);
 
   // ── lightbox: Escape 关闭 ──
   useEffect(() => {
@@ -208,6 +212,13 @@ export default function App() {
             localStorage.setItem("evolve_build_hash", data.build_hash);
             return;  // silent — don't show hash as a chat message
           }
+          if (data.server_info) {
+            const info = data.server_info;
+            if (info.llm_max_context_tokens) setLlmMaxContextTokens(info.llm_max_context_tokens);
+            setApprovalModelName(info.approval_model_name || "");
+            setApprovalModelAvailable(info.approval_model_available || false);
+            return;  // silent — server metadata only
+          }
           if (data.session_history) {
             // Session resume — replay conversation history
             const history = data.session_history.map((m: any) => {
@@ -242,10 +253,16 @@ export default function App() {
             });
             if (history.length) setMessages(history);
             if (data.token_usage !== undefined) setTokenUsage(data.token_usage);
+            if (data.context_tokens !== undefined) setContextTokens(data.context_tokens);
             return;  // skip normal system message handling
           }
           if (data.token_usage !== undefined) {
             setTokenUsage(data.token_usage);
+          }
+          if (data.context_tokens !== undefined) {
+            setContextTokens(data.context_tokens);
+          }
+          if (data.token_usage !== undefined || data.context_tokens !== undefined) {
             return;
           }
           if (data.action === "session_rotated") {
@@ -670,32 +687,37 @@ export default function App() {
         </div>
         {sessionId && (
           <div className="header-right">
-            <label className="adventure-toggle" title={adventureMode ? "冒险模式已开启 — 工具调用由 AI 自动审批" : "冒险模式已关闭 — 工具调用需用户审批"}>
-              <span className="adventure-label">冒险</span>
-              <input
-                type="checkbox"
-                checked={adventureMode}
-                onChange={(e) => {
-                  const enabled = e.target.checked;
-                  setAdventureMode(enabled);
-                  if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-                    wsRef.current.send(JSON.stringify({
-                      type: "adventure_mode",
-                      content: enabled ? "true" : "false",
-                    }));
-                  }
-                }}
-              />
-              <span className="adventure-slider" />
-            </label>
+            {approvalModelAvailable && (
+              <label className="adventure-toggle" title={adventureMode ? "冒险模式已开启 — 工具调用由 AI 自动审批" : "冒险模式已关闭 — 工具调用需用户审批"}>
+                <span className="adventure-label">冒险</span>
+                <input
+                  type="checkbox"
+                  checked={adventureMode}
+                  onChange={(e) => {
+                    const enabled = e.target.checked;
+                    setAdventureMode(enabled);
+                    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+                      wsRef.current.send(JSON.stringify({
+                        type: "adventure_mode",
+                        content: enabled ? "true" : "false",
+                      }));
+                    }
+                  }}
+                />
+                <span className="adventure-slider" />
+              </label>
+            )}
+            {adventureMode && approvalModelName && (
+              <span className="approval-model-badge" title={`审批模型: ${approvalModelName}`}>
+                {approvalModelName}
+              </span>
+            )}
             <span className="session-badge" title="刷新页面后自动恢复此会话">
               {sessionId}
             </span>
-            {tokenUsage > 0 && (
-              <span className="token-badge" title="当前会话累计 token 消耗">
-                {tokenUsage.toLocaleString()}
-              </span>
-            )}
+            <span className="token-badge" title={`累计消耗: ${tokenUsage.toLocaleString()}  |  已用上下文: ${contextTokens.toLocaleString()}  |  最大上下文: ${llmMaxContextTokens > 0 ? llmMaxContextTokens.toLocaleString() : "?"}`}>
+              累计 {tokenUsage.toLocaleString()} / 上下文 {contextTokens.toLocaleString()} / 上限 {llmMaxContextTokens > 0 ? llmMaxContextTokens.toLocaleString() : "?"}
+            </span>
           </div>
         )}
       </header>
