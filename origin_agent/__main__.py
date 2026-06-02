@@ -60,7 +60,7 @@ def _parse_cli() -> dict:
 def _setup_logging(log_path: str | None, console: bool) -> None:
     """使用文件 handler 和可选的终端 handler 配置根 logger。"""
     root: logging.Logger = logging.getLogger()
-    root.setLevel(logging.INFO)
+    root.setLevel(logging.DEBUG)
     fmt: logging.Formatter = logging.Formatter(
         "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
     )
@@ -68,7 +68,7 @@ def _setup_logging(log_path: str | None, console: bool) -> None:
     if log_path:
         Path(log_path).parent.mkdir(parents=True, exist_ok=True)
         fh: logging.FileHandler = logging.FileHandler(log_path, encoding="utf-8")
-        fh.setLevel(logging.INFO)
+        fh.setLevel(logging.DEBUG)
         fh.setFormatter(fmt)
         root.addHandler(fh)
 
@@ -198,6 +198,10 @@ def main() -> int:
     # 仅当通过 --log 显式请求时才创建日志文件。
     log_target: str | None = str(ctx.log_path) if "log" in cli else None
     _setup_logging(log_target, ctx.console_log)
+
+    # 压制第三方库的冗余 debug 日志
+    logging.getLogger("openai").setLevel(logging.WARNING)
+    logging.getLogger("httpx").setLevel(logging.WARNING)
 
     logger: logging.Logger = logging.getLogger("agent")
     logger.info(

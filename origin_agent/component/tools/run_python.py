@@ -23,7 +23,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Set
 
 from abstract.tools.registry import registry, tool_error, tool_result
-from system.sandbox import SandboxError
+from system.sandbox import Access, SandboxError
 
 logger = logging.getLogger(__name__)
 
@@ -98,7 +98,7 @@ async def _handle_run_python(args: Dict[str, Any]) -> str:
     else:
         # script — 通过 sandbox 解析逻辑路径
         try:
-            resolved = _s().resolve(script)
+            resolved = _s().resolve(script, Access.READ)
             cmd_parts.append(str(resolved.real))
         except SandboxError as exc:
             return tool_error(str(exc), script=script)
