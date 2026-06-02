@@ -17,7 +17,7 @@ argparse_parser.add_argument("--llm_reasoning_effort", type=str, default="medium
 
 # 冒险模式审批小模型 — 仅需文件名，agent 会自动从 custom_models/ 目录下加载
 argparse_parser.add_argument("--approval_model_path", type=str, default="")
-argparse_parser.add_argument("--approval_model_n_ctx", type=int, default=4096)
+argparse_parser.add_argument("--approval_model_n_ctx", type=int, default=65536)
 argparse_parser.add_argument("--approval_model_cuda", action="store_true")
 
 #----------

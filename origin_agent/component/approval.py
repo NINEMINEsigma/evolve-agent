@@ -19,7 +19,7 @@ import asyncio
 import json
 import logging
 import uuid
-from typing import Any, Dict, Optional, TYPE_CHECKING
+from typing import Any, Awaitable, Callable, Dict, Optional, TYPE_CHECKING
 
 from pydantic import BaseModel
 import dirtyjson
@@ -133,8 +133,15 @@ def _get_approver() -> InferenceEngine|None:
         return None
 
 
-async def _adventure_confirm(tool_name: str, args: dict, reason: str, content: str) -> ApprovalResult:
+async def _adventure_confirm(
+    tool_name: str, args: dict, reason: str, content: str,
+    ask_agent_callback: Optional[Callable[[str], Awaitable[str]]] = None,
+    max_dialog_turns: int = 2,
+) -> ApprovalResult:
     """冒险模式：将工具调用 JSON 发送给小 LLM 审批。
+
+    支持 dialog 模式：当审批模型不确定时，可通过 ask_agent_callback
+    向 Agent 主模型提问，获取更多上下文后重新评估。
 
     返回 ApprovalResult，deny 时携带 LLM 生成的拒绝原因。
     """
@@ -155,7 +162,10 @@ async def _adventure_confirm(tool_name: str, args: dict, reason: str, content: s
         "- 写可执行代码（.py/.js/.sh等），代码看起来是正常功能实现 → 批准\n"
         "- 写可执行代码，但内容明显恶意（删除文件、加密数据、反弹shell、窃取凭据等）→ 拒绝\n"
         "- 读取文件操作 → 安全，批准\n"
-        '仅返回JSON：{"approved":true/false,"reason":"简短原因"}'
+        '仅返回JSON（三种输出之一）：\n'
+        '1. 确定安全 → {"approved":true,"reason":"简短原因"}\n'
+        '2. 确定危险 → {"approved":false,"reason":"简短原因"}\n'
+        '3. 不确定，需要向Agent了解更多信息 → {"ask":"你的具体问题","reason":"为什么需要更多信息"}'
     )
 
     from system.pathutils import find_repo_root
@@ -172,43 +182,101 @@ async def _adventure_confirm(tool_name: str, args: dict, reason: str, content: s
 
     from third.llamaapis import GenerationConfig, system_message, user_message
 
-    max_attempts = 3
+    dialog_turn = 0
     last_error: str | None = None
+    max_attempts = 3
 
-    for attempt in range(1, max_attempts + 1):
-        try:
-            messages = [system_message(system_prompt), user_message(user_prompt)]
-            resp = engine.chat(messages, GenerationConfig(temperature=0.1, max_tokens=4096))
-            resp_content = resp.choices[0].message.content
-            result: dict = dirtyjson.loads(resp_content)
-            approved: bool = result["approved"]  # type: ignore
-            reason_text: str = result.get("reason", "")  # type: ignore
-            if approved:
-                logger.info("Adventure approved | tool=%s reason=%s", tool_name, reason_text)
-                return ApprovalResult(action="allow_once")
-            logger.info("Adventure denied | tool=%s reason=%s", tool_name, reason_text)
-            return ApprovalResult(action="deny", deny_reason=reason_text or "安全性审查未通过", denied_by="model")
-        except Exception as exc:
-            last_error = str(exc)
-            resp_content = locals().get("resp_content", "<not available>")
-            logger.warning(
-                "Adventure approval attempt %d/%d failed: %s | resp=%r",
-                attempt, max_attempts, exc, resp_content,
-            )
-            if attempt < max_attempts:
-                # 将上次的原始输出和解析错误附加到 prompt，引导模型修正格式
-                correction_hint = (
-                    f"\n\n[系统提示] 你上次的返回格式有误，无法解析。错误: {exc}\n"
-                    f"你上次的原始输出:\n```\n{resp_content}\n```\n"
-                    "请严格按 JSON 格式重新返回: {\"approved\":true/false,\"reason\":\"简短原因\"}"
+    while dialog_turn <= max_dialog_turns:
+        current_prompt = user_prompt
+        last_error = None
+        resp_content: str | None = None
+
+        for attempt in range(1, max_attempts + 1):
+            try:
+                messages = [system_message(system_prompt), user_message(current_prompt)]
+                resp = engine.chat(messages, GenerationConfig(temperature=0.1, max_tokens=4096))
+                resp_content = resp.choices[0].message.content
+                result: dict = dirtyjson.loads(resp_content)
+
+                # ---- 处理「ask」响应：审批模型不确定，向Agent提问 ----
+                ask_question: str | None = result.get("ask")
+                if ask_question and isinstance(ask_question, str) and ask_question.strip():
+                    if ask_agent_callback is None or dialog_turn >= max_dialog_turns:
+                        reason_text: str = result.get("reason", "") or ""
+                        logger.info(
+                            "Adventure ask but cannot continue | tool=%s question=%s",
+                            tool_name, ask_question,
+                        )
+                        return ApprovalResult(
+                            action="deny",
+                            deny_reason=f"审批模型不确定: {reason_text}" if reason_text else "审批模型需要更多信息，但无法继续对话",
+                            denied_by="model",
+                        )
+
+                    logger.info(
+                        "Adventure asking agent (turn %d/%d) | tool=%s question=%s",
+                        dialog_turn + 1, max_dialog_turns, tool_name, ask_question,
+                    )
+                    agent_answer = await ask_agent_callback(ask_question)
+                    logger.info(
+                        "Adventure got agent answer (turn %d/%d) | tool=%s answer_len=%d",
+                        dialog_turn + 1, max_dialog_turns, tool_name, len(agent_answer),
+                    )
+
+                    # 将Agent的回答追加到 user_prompt，下一轮循环重新审批
+                    user_prompt += (
+                        f"\n\n---\n"
+                        f"[Dialog 回合 {dialog_turn + 1}]\n"
+                        f"审批模型的疑问: {ask_question}\n"
+                        f"Agent的回答: {agent_answer}\n"
+                        f"---\n"
+                        f"请基于Agent的上述回答重新评估此工具调用的安全性。\n"
+                    )
+                    dialog_turn += 1
+                    break  # 跳出重试循环，进入 while 下一轮
+
+                # ---- 处理 approve / deny ----
+                approved: bool = result["approved"]  # type: ignore
+                reason_text: str = result.get("reason", "")  # type: ignore
+                if approved:
+                    logger.info("Adventure approved | tool=%s reason=%s", tool_name, reason_text)
+                    return ApprovalResult(action="allow_once")
+                logger.info("Adventure denied | tool=%s reason=%s", tool_name, reason_text)
+                return ApprovalResult(action="deny", deny_reason=reason_text or "安全性审查未通过", denied_by="model")
+
+            except Exception as exc:
+                last_error = str(exc)
+                resp_content = locals().get("resp_content", "<not available>")
+                logger.warning(
+                    "Adventure approval attempt %d/%d failed: %s | resp=%r",
+                    attempt, max_attempts, exc, resp_content,
                 )
-                user_prompt += correction_hint
+                if attempt < max_attempts:
+                    correction_hint = (
+                        f"\n\n[系统提示] 你上次的返回格式有误，无法解析。错误: {exc}\n"
+                        f"你上次的原始输出:\n```\n{resp_content}\n```\n"
+                        "请严格按 JSON 格式重新返回: "
+                        '{"approved":true/false,"reason":"简短原因"} 或 '
+                        '{"ask":"你的问题","reason":"原因"}'
+                    )
+                    current_prompt += correction_hint
+
+        # 重试循环全部失败 → 拒绝
+        if last_error and dialog_turn > max_dialog_turns:
+            break
+        if not last_error:
+            # 如果没有错误但既没有 return 也没有 break → 状态异常，安全起见拒绝
+            break
 
     logger.warning(
-        "Adventure approval exhausted %d attempts — denying tool=%s | last_error=%s",
-        max_attempts, tool_name, last_error,
+        "Adventure approval exhausted — denying tool=%s | last_error=%s",
+        tool_name, last_error,
     )
-    return ApprovalResult(action="deny", deny_reason=f"审批模型连续{max_attempts}次解析失败: {last_error}", denied_by="model")
+    return ApprovalResult(
+        action="deny",
+        deny_reason=f"审批模型连续解析失败: {last_error}" if last_error else "审批模型无法做出判断",
+        denied_by="model",
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -222,6 +290,7 @@ async def request_user_confirm(
     args: dict,
     reason: str,
     content: str,
+    ask_agent_callback: Optional[Callable[[str], Awaitable[str]]] = None,
 ) -> ApprovalResult:
     """统一审批入口。
 
@@ -231,12 +300,17 @@ async def request_user_confirm(
         args:       工具调用参数字典
         reason:     agent 给出的执行原因
         content:    展示给审批者的描述文本
+        ask_agent_callback: 可选 — 冒险模式专用。当审批模型不确定时，
+                            通过此回调向 Agent 主模型提问，获取更多上下文。
 
     返回 ApprovalResult(action, deny_reason)。
     """
     # 冒险模式：小 LLM 自动审批
     if is_adventure_mode(session_id):
-        result = await _adventure_confirm(tool_name, args, reason, content)
+        result = await _adventure_confirm(
+            tool_name, args, reason, content,
+            ask_agent_callback=ask_agent_callback,
+        )
         if result is not None:
             return result
         # approver 不可用 → 回退到人工审批

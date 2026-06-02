@@ -938,10 +938,32 @@ class AgentLoop:
         danger_level: str = tool_registry.get_danger_level(tc.name)
         if danger_level == "write" and is_adventure_mode(session_id):
             _approval_args = {k: v for k, v in args.items() if k != "_session_id"}
+
+            # 定义向 Agent 主模型提问的回调（用于审批模型不确定时）
+            async def _ask_agent_reason(question: str) -> str:
+                """将审批模型的疑问转发给 Agent 主模型，获取解释。"""
+                ask_prompt = (
+                    f"审批模型在执行 **{tc.name}** 工具时对你的操作意图有疑问。\n\n"
+                    f"审批模型的疑问：\n{question}\n\n"
+                    f"请诚实、具体地解释此操作的目的和必要性，"
+                    f"说明为什么它是安全的或必要的。不要编造理由。\n\n"
+                    f"工具参数：\n{json.dumps(_approval_args, ensure_ascii=False, indent=2)[:2000]}"
+                )
+                try:
+                    resp = await self._llm.chat(
+                        [{"role": "user", "content": ask_prompt}],
+                        tools=[],
+                    )
+                    return resp.content or "(Agent未提供解释)"
+                except Exception as exc:
+                    logger.warning("Failed to ask agent for clarification: %s", exc)
+                    return f"(获取Agent解释失败: {exc})"
+
             approval = await request_user_confirm(
                 session_id, tc.name, _approval_args,
                 reason=str(args.get("reason", "")),
                 content=f"工具: {tc.name}\n参数: {json.dumps(_approval_args, ensure_ascii=False)[:500]}",
+                ask_agent_callback=_ask_agent_reason,
             )
             if approval.action == "deny":
                 source_label = {"model": "审批模型", "user": "用户", "system": "系统"}.get(approval.denied_by, "系统")
