@@ -159,9 +159,10 @@ _EXCEL_PARAMS: dict = {
     "properties": {
         "path": {
             "type": "string",
+            # Excel 文件逻辑路径，必须使用命名空间前缀（ws:、fork:）。例如 'ws:data/report.xlsx'。
             "description": (
-                "Excel 文件逻辑路径，必须使用命名空间前缀 "
-                "（ws:、fork:）。例如 'ws:data/report.xlsx'。"
+                "Excel file logical path, must use a namespace prefix "
+                "(ws:, fork:). E.g. 'ws:data/report.xlsx'."
             ),
         },
     },
@@ -172,10 +173,15 @@ registry.register(
     name="read_excel",
     toolset="extools",
     schema={
+        # 读取 .xlsx Excel 工作簿。返回所有 sheet 的数据，
+        # 首行作为列名。支持指定单个 sheet 或读取全部。
+        # 空行会被跳过。使用 data_only=True 读取公式计算结果而非公式本身。
         "description": (
-            "读取 .xlsx Excel 工作簿。返回所有 sheet 的数据，"
-            "首行作为列名。支持指定单个 sheet 或读取全部。"
-            "空行会被跳过。使用 data_only=True 读取公式计算结果而非公式本身。"
+            "Read a .xlsx Excel workbook. Returns data from all sheets, "
+            "with the first row as column names. "
+            "Supports specifying a single sheet or reading all. "
+            "Empty rows are skipped. Uses data_only=True to read "
+            "formula results instead of formulas."
         ),
         "parameters": {
             **_EXCEL_PARAMS,
@@ -183,8 +189,9 @@ registry.register(
                 **_EXCEL_PARAMS["properties"],
                 "sheet": {
                     "type": "string",
+                    # 要读取的 sheet 名称。省略时返回所有 sheet。
                     "description": (
-                        "要读取的 sheet 名称。省略时返回所有 sheet。"
+                        "Name of the sheet to read. Omit to return all sheets."
                     ),
                 },
             },
@@ -198,39 +205,50 @@ registry.register(
     name="write_excel",
     toolset="extools",
     schema={
+        # 将结构化数据写入 .xlsx Excel 文件。支持两种输入格式：
+        # 1) 单 sheet：data 是行对象列表，默认 sheet 名 'Sheet1'
+        # 2) 多 sheet：data 是 {sheet_name: rows} 字典
+        # 每行是一个字典，键对应列名。首行自动写入列名作为表头。
         "description": (
-            "将结构化数据写入 .xlsx Excel 文件。支持两种输入格式：\n"
-            "1) 单 sheet：data 是行对象列表，默认 sheet 名 'Sheet1'\n"
-            "2) 多 sheet：data 是 {sheet_name: rows} 字典\n"
-            "每行是一个字典，键对应列名。首行自动写入列名作为表头。"
+            "Write structured data to a .xlsx Excel file. "
+            "Supports two input formats:\n"
+            "1) Single sheet: data is a list of row objects, default sheet name 'Sheet1'\n"
+            "2) Multi sheet: data is a {sheet_name: rows} dict\n"
+            "Each row is a dict with keys as column names. "
+            "The first row is automatically written as column headers."
         ),
         "parameters": {
             "type": "object",
             "properties": {
                 "path": {
                     "type": "string",
+                    # Excel 文件逻辑路径（ws: 或 fork: 前缀）。
                     "description": (
-                        "Excel 文件逻辑路径（ws: 或 fork: 前缀）。"
+                        "Excel file logical path (ws: or fork: prefix)."
                     ),
                 },
                 "data": {
+                    # 要写入的数据。可以是行对象列表（单 sheet）或 {sheet_name: rows} 字典（多 sheet）。
                     "description": (
-                        "要写入的数据。可以是行对象列表（单 sheet）"
-                        "或 {sheet_name: rows} 字典（多 sheet）。"
+                        "Data to write. Can be a list of row objects (single sheet) "
+                        "or a {sheet_name: rows} dict (multi sheet)."
                     ),
                 },
                 "columns": {
                     "type": "array",
                     "items": {"type": "string"},
+                    # 列顺序及白名单。省略时使用第一行字典的键。
                     "description": (
-                        "列顺序及白名单。省略时使用第一行字典的键。"
+                        "Column order and allowlist. "
+                        "When omitted, uses keys from the first row dict."
                     ),
                 },
                 "sheet": {
                     "type": "string",
+                    # 单 sheet 模式下的 sheet 名称（默认 'Sheet1'）。当 data 为字典时忽略此参数。
                     "description": (
-                        "单 sheet 模式下的 sheet 名称（默认 'Sheet1'）。"
-                        "当 data 为字典时忽略此参数。"
+                        "Sheet name for single sheet mode (default 'Sheet1'). "
+                        "Ignored when data is a dict."
                     ),
                 },
             },

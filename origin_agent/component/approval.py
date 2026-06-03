@@ -19,7 +19,7 @@ import asyncio
 import json
 import logging
 import uuid
-from typing import Any, Awaitable, Callable, Dict, Optional, TYPE_CHECKING
+from typing import Any, Awaitable, Callable, Dict, Optional, TYPE_CHECKING, cast
 
 from pydantic import BaseModel
 import dirtyjson
@@ -148,24 +148,29 @@ async def _adventure_confirm(
     engine = _get_approver()
     if engine is None:
         logger.warning("Approver not available — adventure mode deny")
-        return ApprovalResult(action="deny", deny_reason="审批模型不可用，自动拒绝", denied_by="system")
+        return ApprovalResult(action="deny", deny_reason="Approval model unavailable, auto-denied", denied_by="system")
 
     system_prompt = (
-        "你是进化式AI Agent的安全审查器。Agent运行在沙箱环境中。\n\n"
-        "沙箱路径前缀及含义：\n"
-        "- fork: → slow_agent_space/（Agent的源代码工作区，可读写）\n"
-        "- ws:   → agentspace/（Agent的I/O工作区，可读写）\n"
-        "- fix:  → .fallback/（故障恢复目录，可读写）\n\n"
-        "注意：写入沙箱的代码文件（.py/.js/.ts等）将来会被执行，所以代码本身可能危险。\n\n"
-        "判断原则：\n"
-        "- 写沙箱内的配置文件、JSON、日志、文本 → 安全，批准\n"
-        "- 写可执行代码（.py/.js/.sh等），代码看起来是正常功能实现 → 批准\n"
-        "- 写可执行代码，但内容明显恶意（删除文件、加密数据、反弹shell、窃取凭据等）→ 拒绝\n"
-        "- 读取文件操作 → 安全，批准\n"
-        '仅返回JSON（三种输出之一）：\n'
-        '1. 确定安全 → {"approved":true,"reason":"简短原因"}\n'
-        '2. 确定危险 → {"approved":false,"reason":"简短原因"}\n'
-        '3. 不确定，需要向Agent了解更多信息 → {"ask":"你的具体问题","reason":"为什么需要更多信息"}'
+        "You are a security reviewer for an evolutionary AI agent. "
+        "The agent runs in a sandbox environment.\n\n"
+        "Sandbox path prefixes and their meanings:\n"
+        "- fork: → slow_agent_space/ (Agent source code workspace, rw)\n"
+        "- ws:   → agentspace/ (Agent I/O workspace, rw)\n"
+        "- fix:  → .fallback/ (Disaster recovery directory, rw)\n\n"
+        "Note: Code files (.py/.js/.ts etc.) written to the sandbox "
+        "will be executed later, so the code itself may be dangerous.\n\n"
+        "Judgment principles:\n"
+        "- Writing config files, JSON, logs, text to sandbox → safe, approve\n"
+        "- Writing executable code (.py/.js/.sh etc.) that appears to be "
+        "normal functionality → approve\n"
+        "- Writing executable code that is clearly malicious "
+        "(deleting files, encrypting data, reverse shell, "
+        "stealing credentials, etc.) → deny\n"
+        "- Reading files → safe, approve\n"
+        'Return only JSON (one of three outputs):\n'
+        '1. Definitely safe → {"approved":true,"reason":"brief reason"}\n'
+        '2. Definitely dangerous → {"approved":false,"reason":"brief reason"}\n'
+        '3. Unsure, need more info from Agent → {"ask":"your question","reason":"why more info is needed"}'
     )
 
     from system.pathutils import find_repo_root
@@ -196,20 +201,20 @@ async def _adventure_confirm(
                 messages = [system_message(system_prompt), user_message(current_prompt)]
                 resp = engine.chat(messages, GenerationConfig(temperature=0.1, max_tokens=4096))
                 resp_content = resp.choices[0].message.content
-                result: dict = dirtyjson.loads(resp_content)
+                result: dict = cast(dict, dirtyjson.loads(resp_content))
 
                 # ---- 处理「ask」响应：审批模型不确定，向Agent提问 ----
                 ask_question: str | None = result.get("ask")
                 if ask_question and isinstance(ask_question, str) and ask_question.strip():
                     if ask_agent_callback is None or dialog_turn >= max_dialog_turns:
-                        reason_text: str = result.get("reason", "") or ""
+                        reason_text: str = cast(str, result.get("reason", ""))
                         logger.info(
                             "Adventure ask but cannot continue | tool=%s question=%s",
                             tool_name, ask_question,
                         )
                         return ApprovalResult(
                             action="deny",
-                            deny_reason=f"审批模型不确定: {reason_text}" if reason_text else "审批模型需要更多信息，但无法继续对话",
+                            deny_reason=f"Approval model uncertain: {reason_text}" if reason_text else "Approval model needs more info but cannot continue dialog",
                             denied_by="model",
                         )
 
@@ -226,23 +231,24 @@ async def _adventure_confirm(
                     # 将Agent的回答追加到 user_prompt，下一轮循环重新审批
                     user_prompt += (
                         f"\n\n---\n"
-                        f"[Dialog 回合 {dialog_turn + 1}]\n"
-                        f"审批模型的疑问: {ask_question}\n"
-                        f"Agent的回答: {agent_answer}\n"
+                        f"[Dialog round {dialog_turn + 1}]\n"
+                        f"Approval model's question: {ask_question}\n"
+                        f"Agent's answer: {agent_answer}\n"
                         f"---\n"
-                        f"请基于Agent的上述回答重新评估此工具调用的安全性。\n"
+                        f"Please re-evaluate the safety of this tool call "
+                        f"based on the Agent's answer above.\n"
                     )
                     dialog_turn += 1
                     break  # 跳出重试循环，进入 while 下一轮
 
-                # ---- 处理 approve / deny ----
-                approved: bool = result["approved"]  # type: ignore
-                reason_text: str = result.get("reason", "")  # type: ignore
+                # Process approve / deny
+                approved: bool = result["approved"]
+                reason_text = cast(str, result.get("reason", ""))
                 if approved:
                     logger.info("Adventure approved | tool=%s reason=%s", tool_name, reason_text)
                     return ApprovalResult(action="allow_once")
                 logger.info("Adventure denied | tool=%s reason=%s", tool_name, reason_text)
-                return ApprovalResult(action="deny", deny_reason=reason_text or "安全性审查未通过", denied_by="model")
+                return ApprovalResult(action="deny", deny_reason=reason_text or "Security review failed", denied_by="model")
 
             except Exception as exc:
                 last_error = str(exc)
@@ -253,11 +259,11 @@ async def _adventure_confirm(
                 )
                 if attempt < max_attempts:
                     correction_hint = (
-                        f"\n\n[系统提示] 你上次的返回格式有误，无法解析。错误: {exc}\n"
-                        f"你上次的原始输出:\n```\n{resp_content}\n```\n"
-                        "请严格按 JSON 格式重新返回: "
-                        '{"approved":true/false,"reason":"简短原因"} 或 '
-                        '{"ask":"你的问题","reason":"原因"}'
+                        f"\n\n[System prompt] Your last response had a parse error. Error: {exc}\n"
+                        f"Your raw output was:\n```\n{resp_content}\n```\n"
+                        "Please respond with strict JSON format: "
+                        '{"approved":true/false,"reason":"brief reason"} or '
+                        '{"ask":"your question","reason":"reason"}'
                     )
                     current_prompt += correction_hint
 
@@ -338,17 +344,17 @@ async def request_user_confirm(
             }, ensure_ascii=False))
         except Exception:
             _pending_confirms.pop(request_id, None)
-            return ApprovalResult(action="deny", deny_reason="WebSocket 推送确认请求失败", denied_by="system")
+            return ApprovalResult(action="deny", deny_reason="WebSocket push confirm request failed", denied_by="system")
 
     try:
         result: ApprovalResult = await asyncio.wait_for(fut, timeout=120.0)
         return result
     except asyncio.CancelledError:
         _pending_confirms.pop(request_id, None)
-        return ApprovalResult(action="deny", deny_reason="审批请求被取消", denied_by="system")
+        return ApprovalResult(action="deny", deny_reason="Approval request cancelled", denied_by="system")
     except asyncio.TimeoutError:
         _pending_confirms.pop(request_id, None)
-        return ApprovalResult(action="deny", deny_reason="审批等待超时 (120s)", denied_by="system")
+        return ApprovalResult(action="deny", deny_reason="Approval wait timed out (120s)", denied_by="system")
     except Exception:
         _pending_confirms.pop(request_id, None)
-        return ApprovalResult(action="deny", deny_reason="审批处理异常", denied_by="system")
+        return ApprovalResult(action="deny", deny_reason="Approval handling error", denied_by="system")

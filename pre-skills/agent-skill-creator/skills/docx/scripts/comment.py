@@ -21,8 +21,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import defusedxml.minidom
+from origin_agent.system.pathutils import get_templates_dir
 
-TEMPLATE_DIR = Path(__file__).parent / "templates"
+TEMPLATE_DIR = get_templates_dir()
 NS = {
     "w": "http://schemas.openxmlformats.org/wordprocessingml/2006/main",
     "w14": "http://schemas.microsoft.com/office/word/2010/wordml",
@@ -88,6 +89,9 @@ def _append_xml(xml_path: Path, root_tag: str, content: str) -> None:
     root = dom.getElementsByTagName(root_tag)[0]
     ns_attrs = " ".join(f'xmlns:{k}="{v}"' for k, v in NS.items())
     wrapper_dom = defusedxml.minidom.parseString(f"<root {ns_attrs}>{content}</root>")
+    if wrapper_dom.documentElement is None:
+        # TODO
+        raise ValueError(f"Failed to parse XML content: {content}")
     for child in wrapper_dom.documentElement.childNodes:  
         if child.nodeType == child.ELEMENT_NODE:
             root.appendChild(dom.importNode(child, True))
@@ -144,6 +148,9 @@ def _ensure_comment_relationships(unpacked_dir: Path) -> None:
 
     dom = defusedxml.minidom.parseString(rels_path.read_text(encoding="utf-8"))
     root = dom.documentElement
+    if root is None:
+        # TODO
+        raise ValueError(f"Failed to get document element from {rels_path}")
     next_rid = _get_next_rid(rels_path)
 
     rels = [
@@ -186,6 +193,9 @@ def _ensure_comment_content_types(unpacked_dir: Path) -> None:
 
     dom = defusedxml.minidom.parseString(ct_path.read_text(encoding="utf-8"))
     root = dom.documentElement
+    if root is None:
+        # TODO
+        raise ValueError(f"Failed to get document element from {ct_path}")
 
     overrides = [
         (

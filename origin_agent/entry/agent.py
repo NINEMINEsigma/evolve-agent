@@ -77,10 +77,11 @@ def _strip_image_blocks(messages: List[Dict[str, Any]], session_id: str) -> int:
             if isinstance(block, dict) and block.get("type") == "image_url":
                 has_image = True
                 stripped += 1
+                # Replace with hint text
                 # 替换为提示文本
                 new_blocks.append({
                     "type": "text",
-                    "text": "[图片内容已剥离 — 当前模型不支持 vision 功能]",
+                    "text": "[Image content stripped — current model does not support vision]",
                 })
             else:
                 new_blocks.append(block)
@@ -245,7 +246,7 @@ class AgentLoop:
             while turn < _MAX_TOOL_TURNS:
                 # ---- 响应中断 ----
                 if cancel_event.is_set():
-                    return "已中断。"
+                    return "Cancelled."
                 turn += 1
 
                 # ---- 可取消的 LLM 调用 ----
@@ -272,7 +273,7 @@ class AgentLoop:
 
                 if cancel_task in done:
                     # 中断已触发 — 丢弃 LLM 结果
-                    return "已中断。"
+                    return "Cancelled."
 
                 # ---- 获取 LLM 响应（含图片 content block 兼容处理） ----
                 try:
@@ -331,8 +332,8 @@ class AgentLoop:
                         try:
                             parsed: Any = json.loads(tool_msg["content"])
                             if parsed.get("evolved"):
-                                self._append(session_id, "assistant", "进化已完成，正在重启以应用新代码...")
-                                return "进化已完成，正在重启以应用新代码..."
+                                self._append(session_id, "assistant", "Evolution complete, restarting to apply new code...")
+                                return "Evolution complete, restarting to apply new code..."
                         except (json.JSONDecodeError, KeyError, TypeError):
                             pass
 
@@ -532,15 +533,16 @@ class AgentLoop:
             if not content:
                 continue
             if role == "user":
-                lines.append(f"用户: {content[:300]}")
+                lines.append(f"User: {content[:300]}")
             elif role == "assistant":
-                lines.append(f"助手: {content[:300]}")
+                lines.append(f"Assistant: {content[:300]}")
         if not lines:
             return ""
         context: str = "\n".join(lines[-10:])
 
         # 从模板文件读取自动标题 prompt
-        templates: Path = Path(__file__).resolve().parent.parent / "templates"
+        from system.pathutils import get_templates_dir
+        templates: Path = get_templates_dir()
         zh_dir: Path = templates / "zh"
         use_zh: bool = zh_dir.is_dir()
         prompt_tpl: str = ""
@@ -553,8 +555,8 @@ class AgentLoop:
         if not prompt_tpl:
             # 硬编码回退
             prompt_tpl = (
-                "根据以下对话内容，用不超过20个字概括对话主题。"
-                "只输出标题，不要多余内容。\n\n{{context}}\n\n标题："
+                "Based on the following conversation, summarize the topic in no more than 20 characters. "
+                "Output only the title, no extra content.\n\n{{context}}\n\nTitle: "
             )
 
         prompt: str = prompt_tpl.replace(r"{{context}}", context)
@@ -707,8 +709,8 @@ class AgentLoop:
 
         读取 templates/zh/compress.txt（中文）或 templates/compress.txt（英文）。
         """
-        from pathlib import Path
-        templates: Path = Path(__file__).resolve().parent.parent / "templates"
+        from system.pathutils import get_templates_dir
+        templates: Path = get_templates_dir()
         zh_dir: Path = templates / "zh"
         use_zh: bool = zh_dir.is_dir()
 
@@ -722,12 +724,12 @@ class AgentLoop:
 
         if not prompt_tpl:
             prompt_tpl = (
-                "请用200字以内总结以下对话的关键内容和决策点。只输出总结。\n\n"
-                "对话内容：\n{{old_text}}\n\n总结："
+                "Summarize the key content and decisions of the following conversation in no more than 200 characters. Output only the summary.\n\n"
+                "Conversation:\n{{old_text}}\n\nSummary: "
             )
 
         if use_zh:
-            return prompt_tpl, "（历史对话过长，已自动截断）", "[上下文摘要]"
+            return prompt_tpl, "(Conversation too long, auto-truncated)", "[Context Summary]"
         return prompt_tpl, "(History too long, truncated)", "[Context Summary]"
 
     async def _rotate_session(self, session_id: str) -> str | None:
@@ -764,7 +766,7 @@ class AgentLoop:
                 if not summary:
                     summary = fallback
             if not summary:
-                summary = "(会话上下文已归档)"
+                summary = "(Session context archived)"
         except Exception:
             summary = "(会话上下文已归档)"
 
@@ -877,7 +879,7 @@ class AgentLoop:
             return {
                 "role": "tool",
                 "tool_call_id": tc.id,
-                "content": "已中断。",
+                "content": "Cancelled.",
             }
         # 注入 session 上下文，使 run_command 等工具能够识别
         # 前端 session 以进行用户确认提示。
@@ -893,11 +895,11 @@ class AgentLoop:
             )
             result: str = json.dumps({
                 "error": (
-                    "工具调用参数解析失败。你的 arguments JSON 不完整或格式错误"
-                    "（可能因为内容太长被截断）。请尝试："
-                    "1) 拆分内容为多段写入，"
-                    "2) 使用 edit_file 做增量修改，"
-                    "3) 或者减少单次写入的数据量。"
+                    "Tool call parameter parsing failed. Your arguments JSON is incomplete or malformed "
+                    "(possibly truncated due to content being too long). Please try: "
+                    "1) Split content into multiple writes, "
+                    "2) Use edit_file for incremental edits, "
+                    "3) Or reduce the amount of data written in a single call."
                 ),
                 "_parse_failed": True,
             }, ensure_ascii=False)
@@ -939,36 +941,37 @@ class AgentLoop:
         if danger_level == "write" and is_adventure_mode(session_id):
             _approval_args = {k: v for k, v in args.items() if k != "_session_id"}
 
-            # 定义向 Agent 主模型提问的回调（用于审批模型不确定时）
+            # Define callback to ask Agent main model (used when approval model is uncertain)
             async def _ask_agent_reason(question: str) -> str:
-                """将审批模型的疑问转发给 Agent 主模型，获取解释。"""
+                """Forward the approval model's question to the main Agent model for explanation."""
                 ask_prompt = (
-                    f"审批模型在执行 **{tc.name}** 工具时对你的操作意图有疑问。\n\n"
-                    f"审批模型的疑问：\n{question}\n\n"
-                    f"请诚实、具体地解释此操作的目的和必要性，"
-                    f"说明为什么它是安全的或必要的。不要编造理由。\n\n"
-                    f"工具参数：\n{json.dumps(_approval_args, ensure_ascii=False, indent=2)[:2000]}"
+                    f"The approval model has a question about your intent "
+                    f"when executing the **{tc.name}** tool.\n\n"
+                    f"The approval model's question:\n{question}\n\n"
+                    f"Please honestly and specifically explain the purpose and necessity of this operation, "
+                    f"and why it is safe or necessary. Do not fabricate reasons.\n\n"
+                    f"Tool parameters:\n{json.dumps(_approval_args, ensure_ascii=False, indent=2)[:2000]}"
                 )
                 try:
                     resp = await self._llm.chat(
                         [{"role": "user", "content": ask_prompt}],
                         tools=[],
                     )
-                    return resp.content or "(Agent未提供解释)"
+                    return resp.content or "(Agent did not provide an explanation)"
                 except Exception as exc:
                     logger.warning("Failed to ask agent for clarification: %s", exc)
-                    return f"(获取Agent解释失败: {exc})"
+                    return f"(Failed to get agent explanation: {exc})"
 
             approval = await request_user_confirm(
                 session_id, tc.name, _approval_args,
                 reason=str(args.get("reason", "")),
-                content=f"工具: {tc.name}\n参数: {json.dumps(_approval_args, ensure_ascii=False)[:500]}",
+                content=f"Tool: {tc.name}\nParameters: {json.dumps(_approval_args, ensure_ascii=False)[:500]}",
                 ask_agent_callback=_ask_agent_reason,
             )
             if approval.action == "deny":
-                source_label = {"model": "审批模型", "user": "用户", "system": "系统"}.get(approval.denied_by, "系统")
+                source_label = {"model": "approval model", "user": "user", "system": "system"}.get(approval.denied_by, "system")
                 result = json.dumps({
-                    "error": f"[{source_label}拒绝] {approval.deny_reason or '未知原因'}",
+                    "error": f"[{source_label} denied] {approval.deny_reason or 'unknown reason'}",
                     "denied": True,
                     "denied_by": approval.denied_by,
                 }, ensure_ascii=False)
@@ -986,7 +989,7 @@ class AgentLoop:
                     else:
                         result = self._memory.handle_tool_call(tc.name, args)
                 except asyncio.TimeoutError:
-                    result = json.dumps({"error": f"工具执行超时（{timeout}秒）"}, ensure_ascii=False)
+                    result = json.dumps({"error": f"Tool execution timed out ({timeout}s)"}, ensure_ascii=False)
                 except Exception as exc:
                     result = json.dumps({"error": str(exc)}, ensure_ascii=False)
             else:
@@ -1001,7 +1004,7 @@ class AgentLoop:
                     else:
                         result = await coro
                 except asyncio.TimeoutError:
-                    result = json.dumps({"error": f"工具执行超时（{timeout}秒）"}, ensure_ascii=False)
+                    result = json.dumps({"error": f"Tool execution timed out ({timeout}s)"}, ensure_ascii=False)
                 except Exception as exc:
                     result = json.dumps({"error": str(exc)}, ensure_ascii=False)
 
@@ -1025,8 +1028,8 @@ class AgentLoop:
                 _full.write_text(result, encoding="utf-8")
                 _preview: str = result[:2000]
                 result = (
-                    f"[结果过长（{len(result)}字符），完整内容已写入 ws:{_rel}]\n"
-                    f"[前2000字符预览]:\n{_preview}"
+                    f"[Result too long ({len(result)} chars), full content written to ws:{_rel}]\n"
+                    f"[First 2000 chars preview]:\n{_preview}"
                 )
             except Exception as _exc:
                 logger.warning("Failed to write tool result to file: %s", _exc)
@@ -1073,20 +1076,20 @@ class AgentLoop:
                         {"type": "text", "text": text_json},
                     ]
                 elif b64:
-                    # 模型不支持 vision — 返回纯文本降级结果，
-                    # 明确告知 agent 当前模型无法查看图片。
+                    # Model does not support vision — return text-only degraded result,
+                    # clearly informing the agent that the current model cannot view images.
                     fallback: dict = dict(parsed_result)
                     fallback["_vision_unsupported"] = True
                     fallback["_model"] = self._ctx.llm_model
                     fallback["_hint"] = (
-                        f"当前模型 ({self._ctx.llm_model}) 不支持图像视觉分析。"
-                        f"你无法查看此图片的内容。以下是图片文件的元数据信息："
-                        f"路径={fallback.get('path', '?')}、"
-                        f"格式={mime}、"
-                        f"大小={fallback.get('size', '?')} bytes。"
-                        f"如果你需要对图片做进一步处理（如 OCR、格式转换），"
-                        f"可以使用 run_command 调用外部工具（如 tesseract、ImageMagick）"
-                        f"来提取图片中的文本或转换格式。"
+                        f"The current model ({self._ctx.llm_model}) does not support image vision analysis. "
+                        f"You cannot view the content of this image. Below is the image metadata:\n"
+                        f"Path={fallback.get('path', '?')}, "
+                        f"Format={mime}, "
+                        f"Size={fallback.get('size', '?')} bytes. "
+                        f"If you need further processing of the image (e.g. OCR, format conversion), "
+                        f"you can use run_command to call external tools "
+                        f"(e.g. tesseract, ImageMagick) to extract text or convert formats."
                     )
                     # 不向 LLM 发送 base64 数据 — 模型无法处理且浪费 token
                     content = json.dumps(fallback, ensure_ascii=False)

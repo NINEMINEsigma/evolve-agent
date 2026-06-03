@@ -98,7 +98,7 @@ def _deny_session_confirms(session_id: str) -> None:
     """自动拒绝断开连接 session 的所有待处理确认请求。"""
     for rid in list(_confirm_session_map.keys()):
         if _confirm_session_map.get(rid) == session_id:
-            _resolve_confirm(rid, "deny", deny_reason="WebSocket 连接已断开", denied_by="system")
+            _resolve_confirm(rid, "deny", deny_reason="WebSocket connection disconnected", denied_by="system")
 
 
 # ── ask（提问） ──────────────────────────────────────────────
@@ -422,7 +422,7 @@ async def _handle_file_upload(ws: WebSocket, sid: str, msg: Message) -> None:
             Message(
                 type=MessageType.ERROR,
                 session_id=sid,
-                message="文件上传失败：文件内容为空",
+                message="File upload failed: file content is empty",
             ).to_json()
         )
         return
@@ -447,7 +447,7 @@ async def _handle_file_upload(ws: WebSocket, sid: str, msg: Message) -> None:
             Message(
                 type=MessageType.ERROR,
                 session_id=sid,
-                message=f"文件保存失败：{exc}",
+                message=f"File save failed: {exc}",
             ).to_json()
         )
         return

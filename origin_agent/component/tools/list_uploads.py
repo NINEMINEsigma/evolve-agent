@@ -77,13 +77,15 @@ registry.register(
     name="list_uploads",
     toolset="filesystem",
     schema={
-        "description": "获取最晚上传的文件列表。返回每个文件的原始文件名、大小（字节）、修改时间和逻辑路径（ws:uploads/...）。",
+        # 获取最晚上传的文件列表。返回每个文件的原始文件名、大小（字节）、修改时间和逻辑路径（ws:uploads/...）。
+        "description": "Get the most recently uploaded files. Returns the original filename, size (bytes), modification time, and logical path (ws:uploads/...) for each file.",
         "parameters": {
             "type": "object",
             "properties": {
                 "n": {
                     "type": "integer",
-                    "description": "要返回的最新文件数量（默认 10，最大 100）。",
+                    # 要返回的最新文件数量（默认 10，最大 100）
+                    "description": "Number of most recent files to return (default 10, max 100).",
                     "default": 10,
                 },
             },

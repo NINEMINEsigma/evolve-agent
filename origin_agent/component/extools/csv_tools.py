@@ -95,9 +95,10 @@ _CSV_PARAMS: dict = {
     "properties": {
         "path": {
             "type": "string",
+            # CSV 文件逻辑路径，必须使用命名空间前缀（ws:、fork:）。例如 'ws:data/report.csv'。
             "description": (
-                "CSV 文件逻辑路径，必须使用命名空间前缀 "
-                "（ws:、fork:）。例如 'ws:data/report.csv'。"
+                "CSV file logical path, must use a namespace prefix "
+                "(ws:, fork:). E.g. 'ws:data/report.csv'."
             ),
         },
     },
@@ -109,10 +110,14 @@ registry.register(
     name="read_csv",
     toolset="extools",
     schema={
+        # 读取 CSV（逗号分隔值）文件并以结构化行列表形式返回。
+        # 自动探测分隔符（逗号、制表符、分号等）。
+        # 支持 UTF-8 BOM。返回每行作为字典，键来自表头。
         "description": (
-            "读取 CSV（逗号分隔值）文件并以结构化行列表形式返回。"
-            "自动探测分隔符（逗号、制表符、分号等）。"
-            "支持 UTF-8 BOM。返回每行作为字典，键来自表头。"
+            "Read a CSV (comma-separated values) file and return as a "
+            "structured list of rows. "
+            "Auto-detects delimiter (comma, tab, semicolon, etc.). "
+            "Supports UTF-8 BOM. Returns each row as a dict, keys from header."
         ),
         "parameters": {
             **_CSV_PARAMS,
@@ -120,7 +125,8 @@ registry.register(
                 **_CSV_PARAMS["properties"],
                 "has_header": {
                     "type": "boolean",
-                    "description": "第一行是否为表头（默认 True）。",
+                    # 第一行是否为表头（默认 True）。
+                    "description": "Whether the first row is a header (default True).",
                     "default": True,
                 },
             },
@@ -135,31 +141,37 @@ registry.register(
     name="write_csv",
     toolset="extools",
     schema={
+        # 将结构化行列表写入 CSV 文件。
+        # 每行是一个字典，表头取自列名（columns）或第一行的键。
+        # 仅有在 columns 中列出的字段会被写入。
         "description": (
-            "将结构化行列表写入 CSV 文件。"
-            "每行是一个字典，表头取自列名（columns）或第一行的键。"
-            "仅有在 columns 中列出的字段会被写入。"
+            "Write a structured list of rows to a CSV file. "
+            "Each row is a dict; headers are taken from columns or first row keys. "
+            "Only fields listed in columns will be written."
         ),
         "parameters": {
             "type": "object",
             "properties": {
                 "path": {
                     "type": "string",
+                    # CSV 文件逻辑路径，必须使用命名空间前缀（ws:、fork:）。
                     "description": (
-                        "CSV 文件逻辑路径，必须使用命名空间前缀 "
-                        "（ws:、fork:）。"
+                        "CSV file logical path, must use a namespace prefix "
+                        "(ws:, fork:)."
                     ),
                 },
                 "data": {
                     "type": "array",
                     "items": {"type": "object"},
-                    "description": "要写入的行数据，每行一个字典。",
+                    # 要写入的行数据，每行一个字典。
+                    "description": "Row data to write, each row a dict.",
                 },
                 "columns": {
                     "type": "array",
                     "items": {"type": "string"},
+                    # 列顺序。省略时使用第一行字典的键顺序。
                     "description": (
-                        "列顺序。省略时使用第一行字典的键顺序。"
+                        "Column order. When omitted, uses keys from the first row dict."
                     ),
                 },
             },

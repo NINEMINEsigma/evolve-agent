@@ -167,21 +167,28 @@ registry.register(
     name="validate_frontend",
     toolset="frontend",
     schema={
+        # 验证前端代码：在目标前端目录中运行 ``pnpm install`` 和 ``pnpm run build``。
+        # 在修改 ``frontend/`` 下任何文件（如 ``.tsx``、``.ts``、``.css``）之后、
+        # 调用 ``evolve_code`` 之前使用此工具。
+        # 可捕获 ``validate_code`` 无法检测的 TypeScript 和构建错误。
+        # 默认路径为 ``fork:frontend``（进化目标）。
         "description": (
-            "验证前端代码：在目标前端目录中运行 ``pnpm install`` 和 "
-            "``pnpm run build``。在修改 ``frontend/`` 下任何文件"
-            "（如 ``.tsx``、``.ts``、``.css``）之后、调用 ``evolve_code`` 之前"
-            "使用此工具。可捕获 ``validate_code`` 无法检测的 TypeScript 和构建错误。\n\n"
-            "默认路径为 ``fork:frontend``（进化目标）。"
+            "Validate frontend code: run ``pnpm install`` and "
+            "``pnpm run build`` in the target frontend directory. "
+            "Use this after modifying any file under ``frontend/`` "
+            "(e.g. ``.tsx``, ``.ts``, ``.css``), before calling ``evolve_code``. "
+            "Catches TypeScript and build errors that ``validate_code`` cannot detect.\n\n"
+            "Default path is ``fork:frontend`` (evolution target)."
         ),
         "parameters": {
             "type": "object",
             "properties": {
                 "path": {
                     "type": "string",
+                    # 前端目录的逻辑路径（例如 'fork:frontend'）。默认 'fork:frontend'。
                     "description": (
-                        "前端目录的逻辑路径（例如 'fork:frontend'）。"
-                        "默认 'fork:frontend'。"
+                        "Logical path of the frontend directory (e.g. 'fork:frontend'). "
+                        "Defaults to 'fork:frontend'."
                     ),
                 },
             },

@@ -158,10 +158,10 @@ def _check_binary() -> str | None:
     cmd = _resolve_ab_cmd()
     if cmd is None:
         return (
-            "需要安装 agent-browser:\n"
+            "agent-browser needs to be installed:\n"
             "  pnpm i -g agent-browser && agent-browser install\n"
-            "安装后重启 agent 即可使用浏览器工具。\n"
-            "如果已安装但仍找不到，请尝试在 terminal 中运行:\n"
+            "Restart the agent after installation to use browser tools.\n"
+            "If still not found, try running in terminal:\n"
             "  where agent-browser\n"
             "  pnpm bin -g"
         )
@@ -175,11 +175,11 @@ def _check_binary() -> str | None:
         proc = subprocess.run(check_cmd, capture_output=True, text=True, timeout=10)
         if proc.returncode == 0:
             return None
-        return f"agent-browser 检查失败 (exit={proc.returncode}): {proc.stderr or proc.stdout or ''}"
+        return f"agent-browser check failed (exit={proc.returncode}): {proc.stderr or proc.stdout or ''}"
     except FileNotFoundError:
-        return "agent-browser 命令未找到，请确认 PATH 中有 pnpm 或 agent-browser。"
+        return "agent-browser command not found. Please ensure pnpm or agent-browser is in your PATH."
     except subprocess.TimeoutExpired:
-        return "agent-browser 检查超时，请确认安装是否正确。"
+        return "agent-browser check timed out. Please verify the installation is correct."
 
 
 def _build_ab_cmd(*args: str) -> list[str]:
@@ -187,7 +187,7 @@ def _build_ab_cmd(*args: str) -> list[str]:
     cmd = _resolve_ab_cmd()
     if cmd is None:
         raise RuntimeError(
-            "agent-browser 未安装，请运行: pnpm i -g agent-browser && agent-browser install"
+            "agent-browser is not installed. Run: pnpm i -g agent-browser && agent-browser install"
         )
     headed_flags: list[str] = ["--headed"] if _HEADED else []
     if _AB_USE_PNPM_EXEC:
@@ -234,7 +234,7 @@ def _run_ab(*args: str, timeout: int = 60) -> str:
         global _AB_CMD
         _AB_CMD = None
         raise RuntimeError(
-            "agent-browser 未安装，请运行: pnpm i -g agent-browser && agent-browser install"
+            "agent-browser is not installed. Run: pnpm i -g agent-browser && agent-browser install"
         )
     except subprocess.TimeoutExpired:
         raise RuntimeError(f"命令超时 ({timeout}s): {' '.join(full_cmd)}")
@@ -243,8 +243,8 @@ def _run_ab(*args: str, timeout: int = 60) -> str:
         stderr = (proc.stderr or "").strip()
         hint = ""
         if "not found" in stderr.lower() or "unknown command" in stderr.lower():
-            hint = "\n可能是 agent-browser 版本过旧，请运行: pnpm i -g agent-browser@latest"
-        raise RuntimeError(f"agent-browser 返回错误 ({proc.returncode}): {stderr}{hint}")
+            hint = "\nPossibly agent-browser version is outdated, run: pnpm i -g agent-browser@latest"
+        raise RuntimeError(f"agent-browser returned error ({proc.returncode}): {stderr}{hint}")
 
     return proc.stdout
 
@@ -305,8 +305,8 @@ def _handle_browser_navigate(args: Dict[str, Any]) -> str:
             url=url,
             snapshot=snapshot,
             instruction=(
-                "页面已加载。使用 browser_snapshot 获取最新状态，"
-                "使用 @eN ref 与元素交互。"
+                "Page loaded. Use browser_snapshot for latest state, "
+                "use @eN ref to interact with elements."
             ),
         )
     except RuntimeError as exc:
@@ -328,8 +328,8 @@ def _handle_browser_snapshot(args: Dict[str, Any]) -> str:
         return tool_result(
             snapshot=snapshot,
             instruction=(
-                "使用 @eN ref 与元素交互（如 browser_click @e3）。"
-                "页面变化后需重新 snapshot。"
+                "Use @eN ref to interact with elements (e.g. browser_click @e3). "
+                "Re-snapshot after page changes."
             ),
         )
     except RuntimeError as exc:
@@ -345,7 +345,7 @@ def _handle_browser_click(args: Dict[str, Any]) -> str:
     ref: str = (args.get("ref") or "").strip()
     selector: str = (args.get("selector") or "").strip()
     if not ref and not selector:
-        return tool_error("ref (如 @e3) 或 CSS selector 至少需要一个")
+        return tool_error("ref (e.g. @e3) or CSS selector is required")
 
     target = ref if ref else selector
     try:
@@ -355,7 +355,7 @@ def _handle_browser_click(args: Dict[str, Any]) -> str:
         return tool_result(
             clicked=target,
             snapshot=snapshot,
-            instruction="元素已点击，当前页面状态如 snapshot 所示。",
+            instruction="Element clicked, current page state shown in snapshot.",
         )
     except RuntimeError as exc:
         return tool_error(str(exc))
@@ -370,16 +370,16 @@ def _handle_browser_fill(args: Dict[str, Any]) -> str:
     ref: str = (args.get("ref") or "").strip()
     text: str = str(args.get("text") or "")
     if not ref:
-        return tool_error("ref (如 @e3) 是必填的")
+        return tool_error("ref (e.g. @e3) is required")
     if not text:
-        return tool_error("text 是必填的")
+        return tool_error("text is required")
 
     try:
         _run_ab("fill", ref, text)
         return tool_result(
             filled=ref,
             value=text,
-            message="输入框已填充。",
+            message="Input field filled.",
         )
     except RuntimeError as exc:
         return tool_error(str(exc))
@@ -394,7 +394,7 @@ def _handle_browser_type(args: Dict[str, Any]) -> str:
     ref: str = (args.get("ref") or "").strip()
     text: str = str(args.get("text") or "")
     if not ref:
-        return tool_error("ref (如 @e3) 是必填的")
+        return tool_error("ref (e.g. @e3) is required")
 
     try:
         if text:
@@ -405,7 +405,7 @@ def _handle_browser_type(args: Dict[str, Any]) -> str:
         return tool_result(
             typed=ref,
             value=text or "(focused)",
-            message="输入完成。" if text else "元素已聚焦。",
+            message="Input complete." if text else "Element focused.",
         )
     except RuntimeError as exc:
         return tool_error(str(exc))
@@ -424,7 +424,7 @@ def _handle_browser_press_key(args: Dict[str, Any]) -> str:
         return tool_result(
             key=key,
             snapshot=snapshot,
-            instruction=f"按键 {key} 已发送。",
+            instruction=f"Key {key} sent.",
         )
     except RuntimeError as exc:
         return tool_error(str(exc))
@@ -452,7 +452,7 @@ def _handle_browser_screenshot(args: Dict[str, Any]) -> str:
         return tool_result(
             path=f"ws:{rel_path}",
             markdown=md_link,
-            message=f"截图已保存: ws:{rel_path}",
+            message=f"Screenshot saved: ws:{rel_path}",
         )
     except RuntimeError as exc:
         return tool_error(str(exc))
@@ -466,7 +466,7 @@ def _handle_browser_get_text(args: Dict[str, Any]) -> str:
 
     ref: str = (args.get("ref") or "").strip()
     if not ref:
-        return tool_error("ref (如 @e3) 是必填的")
+        return tool_error("ref (e.g. @e3) is required")
 
     try:
         text = _run_ab("get", "text", ref)
@@ -483,7 +483,7 @@ def _handle_browser_eval(args: Dict[str, Any]) -> str:
 
     code: str = str(args.get("code") or "")
     if not code:
-        return tool_error("code 是必填的")
+        return tool_error("code is required")
 
     try:
         result = _run_ab("eval", code)
@@ -517,7 +517,7 @@ def _handle_browser_wait(args: Dict[str, Any]) -> str:
         snapshot = _run_ab("snapshot", "-i", "-c", "-d", "4")
         return tool_result(
             snapshot=snapshot,
-            message="等待完成，页面已就绪。",
+            message="Wait complete, page ready.",
         )
     except RuntimeError as exc:
         return tool_error(str(exc))
@@ -531,7 +531,7 @@ def _handle_browser_close(args: Dict[str, Any]) -> str:
 
     try:
         _run_ab("close")
-        return tool_result(message="浏览器会话已关闭。")
+        return tool_result(message="Browser session closed.")
     except RuntimeError as exc:
         return tool_error(str(exc))
 
@@ -541,20 +541,22 @@ def _handle_browser_close(args: Dict[str, Any]) -> str:
 # ---------------------------------------------------------------------------
 
 _INSTALL_HINT = (
-    "需要 agent-browser CLI:\n  pnpm i -g agent-browser && agent-browser install\n"
+    "agent-browser CLI is required:\n  pnpm i -g agent-browser && agent-browser install\n"
 )
 
 registry.register(
     name="browser_navigate",
     toolset="browser",
     schema={
-        "description": "在浏览器中打开 URL 并返回页面可交互元素的 snapshot。需要 agent-browser 已安装。",
+        # 在浏览器中打开 URL 并返回页面可交互元素的 snapshot。需要 agent-browser 已安装。
+        "description": "Open a URL in the browser and return a snapshot of interactive elements. Requires agent-browser to be installed.",
         "parameters": {
             "type": "object",
             "properties": {
                 "url": {
                     "type": "string",
-                    "description": "要打开的完整 URL（含 https://）。",
+                    # 要打开的完整 URL（含 https://）。
+                    "description": "Full URL to open (including https://).",
                 },
             },
             "required": ["url"],
@@ -568,13 +570,15 @@ registry.register(
     name="browser_snapshot",
     toolset="browser",
     schema={
-        "description": "获取当前浏览页面的可交互元素树（@eN ref），用于了解页面状态。",
+        # 获取当前浏览页面的可交互元素树（@eN ref），用于了解页面状态。
+        "description": "Get the interactive element tree (@eN ref) of the current page to understand page state.",
         "parameters": {
             "type": "object",
             "properties": {
                 "full": {
                     "type": "boolean",
-                    "description": "设为 true 获取完整深度（默认限制 4 层）。",
+                    # 设为 true 获取完整深度（默认限制 4 层）。
+                    "description": "Set to true for full depth (default limited to 4 levels).",
                 },
             },
         },
@@ -587,17 +591,20 @@ registry.register(
     name="browser_click",
     toolset="browser",
     schema={
-        "description": "通过 @eN ref 或 CSS 选择器点击页面元素。点击后自动 snapshot 返回最新状态。",
+        # 通过 @eN ref 或 CSS 选择器点击页面元素。点击后自动 snapshot 返回最新状态。
+        "description": "Click a page element via @eN ref or CSS selector. Auto-snapshots after click returning latest state.",
         "parameters": {
             "type": "object",
             "properties": {
                 "ref": {
                     "type": "string",
-                    "description": "元素的 @eN ref（如 @e3），来自 browser_navigate 或 browser_snapshot。",
+                    # 元素的 @eN ref（如 @e3），来自 browser_navigate 或 browser_snapshot。
+                    "description": "@eN ref of the element (e.g. @e3), from browser_navigate or browser_snapshot.",
                 },
                 "selector": {
                     "type": "string",
-                    "description": "CSS 选择器（当 ref 不可用时使用）。",
+                    # CSS 选择器（当 ref 不可用时使用）。
+                    "description": "CSS selector (used when ref is not available).",
                 },
             },
         },
@@ -610,17 +617,20 @@ registry.register(
     name="browser_fill",
     toolset="browser",
     schema={
-        "description": "清空输入框并填入指定文本。",
+        # 清空输入框并填入指定文本。
+        "description": "Clear the input field and fill with specified text.",
         "parameters": {
             "type": "object",
             "properties": {
                 "ref": {
                     "type": "string",
-                    "description": "输入框的 @eN ref。",
+                    # 输入框的 @eN ref。
+                    "description": "@eN ref of the input field.",
                 },
                 "text": {
                     "type": "string",
-                    "description": "要填入的文本。",
+                    # 要填入的文本。
+                    "description": "Text to fill in.",
                 },
             },
             "required": ["ref", "text"],
@@ -634,17 +644,20 @@ registry.register(
     name="browser_type",
     toolset="browser",
     schema={
-        "description": "在输入框中逐字输入文本（不清空已有内容）。不带 text 时仅聚焦元素。",
+        # 在输入框中逐字输入文本（不清空已有内容）。不带 text 时仅聚焦元素。
+        "description": "Type text character by character into an input field (does not clear existing content). Without text, just focuses the element.",
         "parameters": {
             "type": "object",
             "properties": {
                 "ref": {
                     "type": "string",
-                    "description": "输入框的 @eN ref。",
+                    # 输入框的 @eN ref。
+                    "description": "@eN ref of the input field.",
                 },
                 "text": {
                     "type": "string",
-                    "description": "要追加的文本（可选，留空则聚焦）。",
+                    # 要追加的文本（可选，留空则聚焦）。
+                    "description": "Text to type (optional, leave empty to focus).",
                 },
             },
             "required": ["ref"],
@@ -658,13 +671,15 @@ registry.register(
     name="browser_press_key",
     toolset="browser",
     schema={
-        "description": "发送键盘按键（Enter, Tab, Escape, ArrowDown 等）。通常用于提交表单或导航。",
+        # 发送键盘按键（Enter, Tab, Escape, ArrowDown 等）。通常用于提交表单或导航。
+        "description": "Send keyboard keys (Enter, Tab, Escape, ArrowDown, etc.). Typically used for form submission or navigation.",
         "parameters": {
             "type": "object",
             "properties": {
                 "key": {
                     "type": "string",
-                    "description": "按键名，如 Enter, Tab, Escape, ArrowDown 等。",
+                    # 按键名，如 Enter, Tab, Escape, ArrowDown 等。
+                    "description": "Key name, e.g. Enter, Tab, Escape, ArrowDown, etc.",
                 },
             },
         },
@@ -677,17 +692,20 @@ registry.register(
     name="browser_screenshot",
     toolset="browser",
     schema={
-        "description": "对当前页面截图并保存到 workspace。返回与display_image工具等价的 Markdown 图片链接，前端可直接显示。",
+        # 对当前页面截图并保存到 workspace。返回与 display_image 工具等价的 Markdown 图片链接，前端可直接显示。
+        "description": "Take a screenshot of the current page and save to workspace. Returns a Markdown image link equivalent to the display_image tool, displayable in the frontend.",
         "parameters": {
             "type": "object",
             "properties": {
                 "name": {
                     "type": "string",
-                    "description": "截图文件名（如 screenshot.png）。",
+                    # 截图文件名（如 screenshot.png）。
+                    "description": "Screenshot filename (e.g. screenshot.png).",
                 },
                 "full_page": {
                     "type": "boolean",
-                    "description": "是否截取整页（包括滚动区域）。",
+                    # 是否截取整页（包括滚动区域）。
+                    "description": "Whether to capture full page (including scroll area).",
                 },
             },
         },
@@ -700,13 +718,15 @@ registry.register(
     name="browser_get_text",
     toolset="browser",
     schema={
-        "description": "提取指定元素的可见文本内容。",
+        # 提取指定元素的可见文本内容。
+        "description": "Extract visible text content from a specified element.",
         "parameters": {
             "type": "object",
             "properties": {
                 "ref": {
                     "type": "string",
-                    "description": "元素的 @eN ref。",
+                    # 元素的 @eN ref。
+                    "description": "@eN ref of the element.",
                 },
             },
             "required": ["ref"],
@@ -720,7 +740,8 @@ registry.register(
     name="browser_eval",
     toolset="browser",
     schema={
-        "description": "在浏览器页面上下文中执行 JavaScript 代码并返回结果。",
+        # 在浏览器页面上下文中执行 JavaScript 代码并返回结果。
+        "description": "Execute JavaScript code in the browser page context and return the result.",
         "parameters": {
             "type": "object",
             "properties": {
@@ -740,22 +761,26 @@ registry.register(
     name="browser_wait",
     toolset="browser",
     schema={
-        "description": "等待页面条件就绪（网络空闲、特定文本/元素出现、URL 变化等）。",
+        # 等待页面条件就绪（网络空闲、特定文本/元素出现、URL 变化等）。
+        "description": "Wait for page conditions to be ready (network idle, specific text/element appears, URL changes, etc.).",
         "parameters": {
             "type": "object",
             "properties": {
                 "condition": {
                     "type": "string",
                     "enum": ["networkidle", "text", "url", "element"],
-                    "description": "等待条件: networkidle(默认), text(文本出现), url(URL 匹配), element(元素出现)。",
+                    # 等待条件: networkidle(默认), text(文本出现), url(URL 匹配), element(元素出现)。
+                    "description": "Wait condition: networkidle(default), text, url, element.",
                 },
                 "value": {
                     "type": "string",
-                    "description": "条件值（text/url/element 时必填）。",
+                    # 条件值（text/url/element 时必填）。
+                    "description": "Condition value (required for text/url/element).",
                 },
                 "timeout": {
                     "type": "integer",
-                    "description": "超时秒数（默认 25）。",
+                    # 超时秒数（默认 25）。
+                    "description": "Timeout in seconds (default 25).",
                 },
             },
         },
@@ -768,7 +793,8 @@ registry.register(
     name="browser_close",
     toolset="browser",
     schema={
-        "description": "关闭当前浏览器会话，释放资源。",
+        # 关闭当前浏览器会话，释放资源。
+        "description": "Close the current browser session and release resources.",
         "parameters": {
             "type": "object",
             "properties": {},

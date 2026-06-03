@@ -119,8 +119,9 @@ def _param(path_desc: str, required: bool = True) -> Dict[str, Any]:
         "properties": {
             "path": {
                 "type": "string",
-                "description": f"逻辑路径（{path_desc}）。"
-                "必须使用命名空间前缀：fork:、ws: 或 fix:。",
+                # 逻辑路径（{path_desc}）。必须使用命名空间前缀：fork:、ws: 或 fix:。
+                "description": f"Logical path ({path_desc}). "
+                "Must use a namespace prefix: fork:, ws:, or fix:.",
             },
         },
         "required": (["path"] if required else []),
@@ -132,31 +133,40 @@ registry.register(
     name="read_file",
     toolset="filesystem",
     schema={
+        # 读取文件内容。路径必须使用命名空间前缀：
+        # 'ws:' 用于 workspace 数据，'fork:' 用于进化代码，
+        # 'fix:' 用于修复目标。
+        # 示例：'ws:logs/error.log'、'fork:main.py'。
+        # 支持通过 offset 和 limit 进行按行分页。
+        # 默认 limit 为 100 行（硬上限）；使用 offset 跳过行。
         "description": (
-            "读取文件内容。路径必须使用命名空间前缀："
-            "'ws:' 用于 workspace 数据，'fork:' 用于进化代码，"
-            "'fix:' 用于修复目标。"
-            "示例：'ws:logs/error.log'、'fork:main.py'。\n\n"
-            "支持通过 offset 和 limit 进行按行分页。"
-            "默认 limit 为 100 行（硬上限）；使用 offset 跳过行。"
+            "Read file content. Path must use a namespace prefix: "
+            "'ws:' for workspace data, 'fork:' for evolution code, "
+            "'fix:' for repair targets. "
+            "Example: 'ws:logs/error.log', 'fork:main.py'.\n\n"
+            "Supports line-based pagination via offset and limit. "
+            "Default limit is 100 lines (hard cap); use offset to skip lines."
         ),
         "parameters": {
             "type": "object",
             "properties": {
                 "path": {
                     "type": "string",
-                    "description": "文件逻辑路径。"
-                    "必须使用命名空间前缀：fork:、ws: 或 fix:。",
+                    # 文件逻辑路径。必须使用命名空间前缀：fork:、ws: 或 fix:。
+                    "description": "File logical path. "
+                    "Must use a namespace prefix: fork:, ws:, or fix:.",
                 },
                 "offset": {
                     "type": "integer",
-                    "description": "起始行号（0-indexed，默认 0）。",
+                    # 起始行号（0-indexed，默认 0）。
+                    "description": "Starting line number (0-indexed, default 0).",
                     "default": 0,
                     "minimum": 0,
                 },
                 "limit": {
                     "type": "integer",
-                    "description": "最大返回行数（硬上限：100）。",
+                    # 最大返回行数（硬上限：100）。
+                    "description": "Maximum number of lines to return (hard cap: 100).",
                     "default": 100,
                     "minimum": 1,
                     "maximum": 100,
@@ -175,21 +185,26 @@ registry.register(
     name="write_file",
     toolset="filesystem",
     schema={
+        # 将内容写入文件。路径必须使用命名空间前缀。
+        # 使用 'ws:' 写入 workspace 数据，'fork:' 写入进化代码。
+        # 目录会自动创建。
         "description": (
-            "将内容写入文件。路径必须使用命名空间前缀。"
-            "使用 'ws:' 写入 workspace 数据，'fork:' 写入进化代码。"
-            "目录会自动创建。"
+            "Write content to a file. Path must use a namespace prefix. "
+            "Use 'ws:' for workspace data, 'fork:' for evolution code. "
+            "Directories are created automatically."
         ),
         "parameters": {
             "type": "object",
             "properties": {
                 "path": {
                     "type": "string",
-                    "description": "逻辑路径。必须使用 ws: 或 fork: 前缀。",
+                    # 逻辑路径。必须使用 ws: 或 fork: 前缀。
+                    "description": "Logical path. Must use ws: or fork: prefix.",
                 },
                 "content": {
                     "type": "string",
-                    "description": "要写入文件的内容。最多 1000 个字符。",
+                    # 要写入文件的内容。最多 1000 个字符。
+                    "description": "Content to write to the file. Max 1000 characters.",
                 },
             },
             "required": ["path", "content"],
@@ -206,11 +221,13 @@ registry.register(
     name="list_directory",
     toolset="filesystem",
     schema={
+        # 列出目录内容。返回条目名称（非完整路径）。可使用任意命名空间前缀。
         "description": (
-            "列出目录内容。返回条目名称（非完整路径）。"
-            "可使用任意命名空间前缀。"
+            "List directory contents. Returns entry names (not full paths). "
+            "Any namespace prefix can be used."
         ),
-        "parameters": _param("要列出的目录"),
+        # 要列出的目录
+        "parameters": _param("directory to list"),
     },
     handler=_handle_list,
     emoji="📂",
@@ -222,11 +239,13 @@ registry.register(
     name="delete_file",
     toolset="filesystem",
     schema={
+        # 删除文件或空目录。仅允许可写命名空间（ws:、fork:、fix:）。
         "description": (
-            "删除文件或空目录。仅允许可写命名空间"
-            "（ws:、fork:、fix:）。"
+            "Delete a file or empty directory. "
+            "Only writable namespaces are allowed (ws:, fork:, fix:)."
         ),
-        "parameters": _param("要删除的文件或目录"),
+        # 要删除的文件或目录
+        "parameters": _param("file or directory to delete"),
     },
     handler=_handle_delete,
     emoji="🗑️",
@@ -274,25 +293,33 @@ registry.register(
     name="edit_file",
     toolset="filesystem",
     schema={
+        # 通过替换文件中一处精确匹配的 old_string 为 new_string 来进行精准编辑。
+        # old_string 必须仅匹配一次 — 包含足够的上下文（前后各 2-3 行）使其唯一。
+        # 仅需修改几行时使用此工具替代 write_file — 避免重新发送整个文件内容。
         "description": (
-            "通过替换文件中一处精确匹配的 old_string 为 new_string 来进行精准编辑。"
-            "old_string 必须仅匹配一次 — 包含足够的上下文（前后各 2-3 行）使其唯一。"
-            "仅需修改几行时使用此工具替代 write_file — 避免重新发送整个文件内容。"
+            "Precisely edit a file by replacing one exact match of old_string with new_string. "
+            "old_string must match exactly once — include enough surrounding context "
+            "(2-3 lines before and after) to make it unique. "
+            "Use this instead of write_file when only a few lines need changing "
+            "— avoids resending the entire file content."
         ),
         "parameters": {
             "type": "object",
             "properties": {
                 "path": {
                     "type": "string",
-                    "description": "逻辑路径（ws:/fork:/fix: 前缀）。",
+                    # 逻辑路径（ws:/fork:/fix: 前缀）。
+                    "description": "Logical path (ws:/fork:/fix: prefix).",
                 },
                 "old_string": {
                     "type": "string",
-                    "description": "要查找并替换的精确文本。",
+                    # 要查找并替换的精确文本。
+                    "description": "Exact text to find and replace.",
                 },
                 "new_string": {
                     "type": "string",
-                    "description": "替换文本（使用 '' 表示删除）。",
+                    # 替换文本（使用 '' 表示删除）。
+                    "description": "Replacement text (use '' to delete).",
                 },
             },
             "required": ["path", "old_string", "new_string"],
@@ -309,8 +336,10 @@ registry.register(
     name="file_exists",
     toolset="filesystem",
     schema={
-        "description": "检查文件或目录是否存在（所有命名空间）。",
-        "parameters": _param("要检查的文件或目录", required=True),
+        # 检查文件或目录是否存在（所有命名空间）。
+        "description": "Check if a file or directory exists (all namespaces).",
+        # 要检查的文件或目录
+        "parameters": _param("file or directory to check", required=True),
     },
     handler=_handle_exists,
     emoji="🔍",
@@ -336,20 +365,25 @@ registry.register(
     name="copy_file",
     toolset="filesystem",
     schema={
+        # 复制文件。源路径和目标路径均需使用命名空间前缀
+        #（ws:、fork:、fix:）。支持跨命名空间复制。
         "description": (
-            "复制文件。源路径和目标路径均需使用命名空间前缀"
-            "（ws:、fork:、fix:）。支持跨命名空间复制。"
+            "Copy a file. Both source and destination must use "
+            "a namespace prefix (ws:, fork:, fix:). "
+            "Supports cross-namespace copying."
         ),
         "parameters": {
             "type": "object",
             "properties": {
                 "source": {
                     "type": "string",
-                    "description": "要复制的源文件逻辑路径（命名空间前缀 + 路径）。",
+                    # 要复制的源文件逻辑路径（命名空间前缀 + 路径）。
+                    "description": "Source file logical path (namespace prefix + path).",
                 },
                 "destination": {
                     "type": "string",
-                    "description": "目标文件逻辑路径（命名空间前缀 + 路径）。",
+                    # 目标文件逻辑路径（命名空间前缀 + 路径）。
+                    "description": "Destination file logical path (namespace prefix + path).",
                 },
             },
             "required": ["source", "destination"],
@@ -380,21 +414,26 @@ registry.register(
     name="move_file",
     toolset="filesystem",
     schema={
+        # 移动文件或目录。目标路径可以包含新名称，从而实现重命名。
+        # 源和目标路径均需使用命名空间前缀（ws:、fork:、fix:）。支持跨命名空间移动。
         "description": (
-            "移动文件或目录。目标路径可以包含新名称，从而实现重命名。"
-            "源和目标路径均需使用命名空间前缀"
-            "（ws:、fork:、fix:）。支持跨命名空间移动。"
+            "Move a file or directory. The destination can include a new name, "
+            "effectively renaming. Both source and destination must use "
+            "a namespace prefix (ws:, fork:, fix:). "
+            "Supports cross-namespace moving."
         ),
         "parameters": {
             "type": "object",
             "properties": {
                 "source": {
                     "type": "string",
-                    "description": "要移动的源文件/目录逻辑路径。",
+                    # 要移动的源文件/目录逻辑路径。
+                    "description": "Source file/directory logical path.",
                 },
                 "destination": {
                     "type": "string",
-                    "description": "目标路径（可包含新文件名）。",
+                    # 目标路径（可包含新文件名）。
+                    "description": "Destination path (can include a new filename).",
                 },
             },
             "required": ["source", "destination"],
@@ -414,6 +453,7 @@ def _handle_rename(args: Dict[str, Any]) -> str:
         return tool_error("path is required")
     if not new_name:
         return tool_error("new_name is required")
+    # Rename within the same directory: find parent dir, build destination with new name
     # 在同一目录下重命名：找出父目录，用新名称拼出目标路径
     import re as _re
     m = _re.match(r"^([a-zA-Z]+:)(.*/)?([^/]+)$", path)
@@ -436,20 +476,25 @@ registry.register(
     name="rename_file",
     toolset="filesystem",
     schema={
+        # 重命名文件。在同一目录下将文件更名为新名称，
+        # 路径和命名空间前缀不变。如需跨目录移动，请使用 move_file。
         "description": (
-            "重命名文件。在同一目录下将文件更名为新名称，"
-            "路径和命名空间前缀不变。如需跨目录移动，请使用 move_file。"
+            "Rename a file. The file is renamed within the same directory; "
+            "the path and namespace prefix remain unchanged. "
+            "For cross-directory moves, use move_file."
         ),
         "parameters": {
             "type": "object",
             "properties": {
                 "path": {
                     "type": "string",
-                    "description": "要重命名的文件逻辑路径（命名空间前缀 + 完整路径）。",
+                    # 要重命名的文件逻辑路径（命名空间前缀 + 完整路径）。
+                    "description": "File logical path to rename (namespace prefix + full path).",
                 },
                 "new_name": {
                     "type": "string",
-                    "description": "新文件名（仅文件名，不含路径）。",
+                    # 新文件名（仅文件名，不含路径）。
+                    "description": "New filename (filename only, no path).",
                 },
             },
             "required": ["path", "new_name"],

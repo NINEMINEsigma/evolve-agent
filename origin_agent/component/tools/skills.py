@@ -294,38 +294,50 @@ registry.register(
     name="learn_skill",
     toolset="skills",
     schema={
+        # 创建或更新 skill。Skill 是以目录形式存储在
+        # project-root/skills/ 下的可复用知识模块，
+        # 包含 SKILL.md 主文档以及可选的 scripts/、references/、
+        # templates/、assets/ 等附属文件。
+        # 通过 files 参数可一次性写入脚本和参考文档。
+        # 用于持久化跨 session 有用的知识。
+        # 如果同名 skill 已存在则更新。
         "description": (
-            "创建或更新 skill。Skill 是以目录形式存储在 "
-            "project-root/skills/ 下的可复用知识模块，"
-            "包含 SKILL.md 主文档以及可选的 scripts/、references/、"
-            "templates/、assets/ 等附属文件。"
-            "通过 files 参数可一次性写入脚本和参考文档。"
-            "用于持久化跨 session 有用的知识。"
-            "如果同名 skill 已存在则更新。"
+            "Create or update a skill. A skill is a reusable knowledge module "
+            "stored as a directory under project-root/skills/, "
+            "containing a SKILL.md main document and optional scripts/, "
+            "references/, templates/, assets/ and other ancillary files. "
+            "The files parameter can write scripts and reference docs in one go. "
+            "Useful for persisting useful knowledge across sessions. "
+            "Updates the skill if one with the same name already exists."
         ),
         "parameters": {
             "type": "object",
             "properties": {
                 "name": {
                     "type": "string",
-                    "description": "Skill 名称（简短，kebab-case）。",
+                    # Skill 名称（简短，kebab-case）。
+                    "description": "Skill name (short, kebab-case).",
                 },
                 "description": {
                     "type": "string",
-                    "description": "一行描述，说明 skill 的功能。",
+                    # 一行描述，说明 skill 的功能。
+                    "description": "A one-line description explaining the skill's purpose.",
                 },
                 "content": {
                     "type": "string",
-                    "description": "Skill 的 Markdown 正文。",
+                    # Skill 的 Markdown 正文。
+                    "description": "The Markdown body of the skill.",
                 },
                 "category": {
                     "type": "string",
-                    "description": "可选分类（如 'utility'、'knowledge'）。",
+                    # 可选分类（如 'utility'、'knowledge'）。
+                    "description": "Optional category (e.g. 'utility', 'knowledge').",
                 },
                 "tags": {
                     "type": "array",
                     "items": {"type": "string"},
-                    "description": "可选的筛选标签。",
+                    # 可选的筛选标签。
+                    "description": "Optional filtering tags.",
                 },
                 "files": {
                     "type": "array",
@@ -334,16 +346,19 @@ registry.register(
                         "properties": {
                             "path": {
                                 "type": "string",
-                                "description": "相对于 skill 目录的路径，如 scripts/hello.py",
+                                # 相对于 skill 目录的路径，如 scripts/hello.py
+                                "description": "Path relative to the skill directory, e.g. scripts/hello.py",
                             },
                             "content": {
                                 "type": "string",
-                                "description": "文件内容。",
+                                # 文件内容。
+                                "description": "File content.",
                             },
                         },
                         "required": ["path", "content"],
                     },
-                    "description": "可选。要一同写入 skill 包的附属文件列表（脚本、参考文档等）。",
+                    # 可选。要一同写入 skill 包的附属文件列表（脚本、参考文档等）。
+                    "description": "Optional. List of ancillary files (scripts, reference docs, etc.) to write into the skill package.",
                 },
             },
             "required": ["name", "content"],
@@ -358,7 +373,8 @@ registry.register(
     name="list_skills",
     toolset="skills",
     schema={
-        "description": "列出所有可用 skill 的名称和描述。",
+        # 列出所有可用 skill 的名称和描述。
+        "description": "List all available skills' names and descriptions.",
         "parameters": {
             "type": "object",
             "properties": {},
@@ -373,13 +389,15 @@ registry.register(
     name="forget_skill",
     toolset="skills",
     schema={
-        "description": "按名称删除 skill。用于移除不再相关或有用的 skill。",
+        # 按名称删除 skill。用于移除不再相关或有用的 skill。
+        "description": "Delete a skill by name. Used to remove skills that are no longer relevant or useful.",
         "parameters": {
             "type": "object",
             "properties": {
                 "name": {
                     "type": "string",
-                    "description": "要删除的 skill 名称。",
+                    # 要删除的 skill 名称。
+                    "description": "The name of the skill to delete.",
                 },
             },
             "required": ["name"],
@@ -394,17 +412,21 @@ registry.register(
     name="recall_skill",
     toolset="skills",
     schema={
+        # 将 skill 的完整内容加载到对话中。
+        # 用于刷新对 skill 细节的记忆。
+        # 无参数调用时列出可用 skill。
         "description": (
-            "将 skill 的完整内容加载到对话中。"
-            "用于刷新对 skill 细节的记忆。"
-            "无参数调用时列出可用 skill。"
+            "Load the full content of a skill into the conversation. "
+            "Useful for refreshing memory of skill details. "
+            "Calling without arguments lists available skills."
         ),
         "parameters": {
             "type": "object",
             "properties": {
                 "name": {
                     "type": "string",
-                    "description": "要回忆的 skill 名称（省略则列出全部）。",
+                    # 要回忆的 skill 名称（省略则列出全部）。
+                    "description": "The name of the skill to recall (omit to list all).",
                 },
             },
         },
@@ -418,25 +440,33 @@ registry.register(
     name="write_skill_file",
     toolset="skills",
     schema={
+        # 向已有 skill 包内写入附属文件（如 scripts/、references/ 等）。
+        # 用于在创建 skill 后补充脚本、模板、参考文档。
+        # path 相对于 skill 目录，如 scripts/hello.py。
         "description": (
-            "向已有 skill 包内写入附属文件（如 scripts/、references/ 等）。"
-            "用于在创建 skill 后补充脚本、模板、参考文档。"
-            "path 相对于 skill 目录，如 scripts/hello.py。"
+            "Write ancillary files (e.g. scripts/, references/) "
+            "into an existing skill package. "
+            "Used to add scripts, templates, and reference documents "
+            "after creating the skill. "
+            "path is relative to the skill directory, e.g. scripts/hello.py."
         ),
         "parameters": {
             "type": "object",
             "properties": {
                 "name": {
                     "type": "string",
-                    "description": "Skill 名称。",
+                    # Skill 名称。
+                    "description": "Skill name.",
                 },
                 "path": {
                     "type": "string",
-                    "description": "相对于 skill 目录的文件路径，如 scripts/hello.py",
+                    # 相对于 skill 目录的文件路径，如 scripts/hello.py
+                    "description": "File path relative to the skill directory, e.g. scripts/hello.py",
                 },
                 "content": {
                     "type": "string",
-                    "description": "文件内容。",
+                    # 文件内容。
+                    "description": "File content.",
                 },
             },
             "required": ["name", "path", "content"],
@@ -452,20 +482,26 @@ registry.register(
     name="read_skill_file",
     toolset="skills",
     schema={
+        # 读取 skill 包内附属文件的内容（如 scripts/、references/ 等）。
+        # 用于查看 skill 包中的脚本代码、参考文档等。
         "description": (
-            "读取 skill 包内附属文件的内容（如 scripts/、references/ 等）。"
-            "用于查看 skill 包中的脚本代码、参考文档等。"
+            "Read the content of ancillary files inside a skill package "
+            "(e.g. scripts/, references/). "
+            "Useful for viewing script code, reference documents, etc. "
+            "inside a skill package."
         ),
         "parameters": {
             "type": "object",
             "properties": {
                 "name": {
                     "type": "string",
-                    "description": "Skill 名称。",
+                    # Skill 名称。
+                    "description": "Skill name.",
                 },
                 "path": {
                     "type": "string",
-                    "description": "相对于 skill 目录的文件路径，如 scripts/hello.py",
+                    # 相对于 skill 目录的文件路径，如 scripts/hello.py
+                    "description": "File path relative to the skill directory, e.g. scripts/hello.py",
                 },
             },
             "required": ["name", "path"],
@@ -480,26 +516,34 @@ registry.register(
     name="run_skill_script",
     toolset="skills",
     schema={
+        # 执行 skill 包内 scripts/ 目录下的脚本并返回结果。
+        # 用于运行 skill 附带的工具脚本。
+        # 脚本在 skill 目录上下文下执行，timeout 30 秒。
         "description": (
-            "执行 skill 包内 scripts/ 目录下的脚本并返回结果。"
-            "用于运行 skill 附带的工具脚本。"
-            "脚本在 skill 目录上下文下执行，timeout 30 秒。"
+            "Execute a script from the scripts/ directory inside "
+            "a skill package and return the result. "
+            "Useful for running utility scripts bundled with a skill. "
+            "The script runs in the context of the skill directory "
+            "with a 30-second timeout."
         ),
         "parameters": {
             "type": "object",
             "properties": {
                 "name": {
                     "type": "string",
-                    "description": "Skill 名称。",
+                    # Skill 名称。
+                    "description": "Skill name.",
                 },
                 "script": {
                     "type": "string",
-                    "description": "scripts/ 目录下的脚本文件名，如 hello.py",
+                    # scripts/ 目录下的脚本文件名，如 hello.py
+                    "description": "Script filename under scripts/, e.g. hello.py",
                 },
                 "args": {
                     "type": "array",
                     "items": {"type": "string"},
-                    "description": "传递给脚本的命令行参数。",
+                    # 传递给脚本的命令行参数。
+                    "description": "Command-line arguments to pass to the script.",
                 },
             },
             "required": ["name", "script"],

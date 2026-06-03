@@ -117,7 +117,7 @@ def _handle_display_image(args: Dict[str, Any]) -> str:
     description: str = str(args.get("description", "")).strip() or "image"
 
     if not path:
-        return tool_error("path 是必填的 — ws: 路径下的图片文件")
+        return tool_error("path is required — image file under ws: path")
 
     result = _resolve_image(path)
     if isinstance(result, str):
@@ -142,7 +142,7 @@ def _handle_publish_file(args: Dict[str, Any]) -> str:
     description: str = str(args.get("description", "")).strip() or "file"
 
     if not path:
-        return tool_error("path 是必填的 — ws: 路径下的文件")
+        return tool_error("path is required — file under ws: path")
 
     result = _resolve_download(path)
     if isinstance(result, str):
@@ -171,33 +171,51 @@ registry.register(
     name="display_image",
     toolset="display",
     schema={
+        # 将 ws: 路径下的图片发布到前端，使用户能在聊天界面中直接看到。
+        # 使用步骤:
+        #   1. 生成或获取图片并保存到 ws: 路径
+        #   2. 调用 display_image(path="ws:path/to/image.png", description="xxx")
+        #   3. 工具会验证图片文件是否存在并返回 Markdown 图片链接
+        #   4. **你必须把返回的 Markdown 图片链接放入你的回复文本中**，
+        #      用户才能在前端看到图片。不要只发超链接 [text](url)，
+        #      要用 ![](/uploads/xxx.png) 语法。
+        # 路径规则:
+        #   - ws: 是逻辑路径前缀，不是真实文件系统目录。
+        #     用 write_file(path="ws:output/img.png", ...) 保存文件。
+        #   - 在 Python 代码中用绝对路径保存：agentspace 目录是服务器能访问的。
+        #   - 可用 run_python 查询 agentspace 目录路径。
         "description": (
-            '将 ws: 路径下的图片发布到前端，使用户能在聊天界面中直接看到。\n\n'
-            '使用步骤:\n'
-            '  1. 生成或获取图片并保存到 ws: 路径\n'
-            '  2. 调用 display_image(path="ws:path/to/image.png", description="xxx")\n'
-            '  3. 工具会验证图片文件是否存在并返回 Markdown 图片链接\n'
-            '  4. **你必须把返回的 Markdown 图片链接放入你的回复文本中**，\n'
-            '     用户才能在前端看到图片。不要只发超链接 [text](url)，\n'
-            '     要用 ![](/uploads/xxx.png) 语法。\n\n'
-            '路径规则:\n'
-            '  - ws: 是逻辑路径前缀，不是真实文件系统目录。\n'
-            '    用 write_file(path="ws:output/img.png", ...) 保存文件。\n'
-            '  - 在 Python 代码中用绝对路径保存：agentspace 目录是服务器能访问的。\n'
-            '  - 可用 run_python 查询 agentspace 目录路径。\n\n'
-            '示例:\n'
-            '  display_image(path="ws:output/mindmap.png", description="中国古代史思维导图")\n'
+            'Publish an image under ws: path to the frontend so the user '
+            'can see it directly in the chat interface.\n\n'
+            'Steps:\n'
+            '  1. Generate or obtain an image and save it to a ws: path\n'
+            '  2. Call display_image(path="ws:path/to/image.png", description="xxx")\n'
+            '  3. The tool verifies the image file exists and returns a Markdown image link\n'
+            '  4. **You MUST include the returned Markdown image link in your reply text** '
+            'for the user to see the image in the frontend. '
+            'Do NOT just send a hyperlink [text](url), '
+            'use the ![](/uploads/xxx.png) syntax.\n\n'
+            'Path rules:\n'
+            '  - ws: is a logical path prefix, not a real filesystem directory.\n'
+            '    Use write_file(path="ws:output/img.png", ...) to save files.\n'
+            '  - In Python code, save with absolute paths: the agentspace directory '
+            'is accessible by the server.\n'
+            '  - Use run_python to query the agentspace directory path.\n\n'
+            'Example:\n'
+            '  display_image(path="ws:output/mindmap.png", description="Mind map of ancient Chinese history")\n'
         ),
         "parameters": {
             "type": "object",
             "properties": {
                 "path": {
                     "type": "string",
-                    "description": "ws: 前缀下的图片文件路径，如 ws:output/diagram.png",
+                    # ws: 前缀下的图片文件路径，如 ws:output/diagram.png
+                    "description": "Image file path under ws: prefix, e.g. ws:output/diagram.png",
                 },
                 "description": {
                     "type": "string",
-                    "description": "图片描述（alt 文本），用于无障碍和图片加载失败时的替代文字。",
+                    # 图片描述（alt 文本），用于无障碍和图片加载失败时的替代文字。
+                    "description": "Image description (alt text), for accessibility and fallback when image fails to load.",
                 },
             },
             "required": ["path"],
@@ -211,29 +229,36 @@ registry.register(
     name="publish_file",
     toolset="display",
     schema={
+        # 将 ws: 路径下的任意文件发布为前端可下载的链接。
+        # 前端会显示一个下载按钮，用户点击即可下载文件。
+        # 注意：图片文件如需展示请使用 display_image，
+        # publish_file 是用于下载的（包括图片）。
         "description": (
-            '将 ws: 路径下的任意文件发布为前端可下载的链接。\n'
-            '前端会显示一个下载按钮，用户点击即可下载文件。\n'
-            '注意：图片文件如需展示请使用 display_image，\n'
-            'publish_file 是用于下载的（包括图片）。\n\n'
-            '示例:\n'
-            '  publish_file(path="ws:output/report.pdf", filename="报告.pdf", description="数据分析报告")\n'
-            '  publish_file(path="ws:output/archive.zip", description="数据集压缩包")\n'
+            'Publish any file under ws: path as a frontend-downloadable link.\n'
+            'The frontend shows a download button; clicking it downloads the file.\n'
+            'Note: for displaying images, use display_image instead;\n'
+            'publish_file is for downloading (including images).\n\n'
+            'Examples:\n'
+            '  publish_file(path="ws:output/report.pdf", filename="report.pdf", description="Data analysis report")\n'
+            '  publish_file(path="ws:output/archive.zip", description="Dataset archive")\n'
         ),
         "parameters": {
             "type": "object",
             "properties": {
                 "path": {
                     "type": "string",
-                    "description": "ws: 前缀下的文件路径",
+                    # ws: 前缀下的文件路径
+                    "description": "File path under ws: prefix",
                 },
                 "filename": {
                     "type": "string",
-                    "description": "可选的下载文件名（覆盖原文件名）",
+                    # 可选的下载文件名（覆盖原文件名）
+                    "description": "Optional download filename (overrides original filename)",
                 },
                 "description": {
                     "type": "string",
-                    "description": "文件描述",
+                    # 文件描述
+                    "description": "File description",
                 },
             },
             "required": ["path"],

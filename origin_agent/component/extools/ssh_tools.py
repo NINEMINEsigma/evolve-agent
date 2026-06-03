@@ -78,23 +78,24 @@ async def _handle_ssh_exec(args: Dict[str, Any]) -> str:
     if not command:
         return tool_error("command is required")
     if not reason:
-        return tool_error("reason is required — 请解释为什么需要执行此远程命令")
+        return tool_error("reason is required — please explain why this remote command needs to be executed")
 
     # --- 用户确认 ---
     if session_id:
-        result: ApprovalResult = await request_user_confirm(
+        approval_result: ApprovalResult = await request_user_confirm(
             session_id, "ssh_exec",
             {"target": target, "command": command[:200], "reason": reason},
             reason,
-            f"SSH 操作: 在 {target} 上执行: {command[:200]}\n原因: {reason}",
+            f"SSH operation: execute on {target}: {command[:200]}\nReason: {reason}",
         )
     else:
-        result = ApprovalResult(action="deny", deny_reason="缺少 session_id")
+        approval_result = ApprovalResult(action="deny", deny_reason="missing session_id")
 
-    if result.action == "deny":
-        source_label = {"model": "审批模型", "user": "用户", "system": "系统"}.get(result.denied_by, "系统")
+    if approval_result.action == "deny":
+        # 审批模型/用户/系统
+        source_label = {"model": "approval model", "user": "user", "system": "system"}.get(approval_result.denied_by, "system")
         return tool_error(
-            f"[{source_label}拒绝] {result.deny_reason or '未知原因'}",
+            f"[{source_label} denied] {approval_result.deny_reason or 'unknown reason'}",
             target=target,
             command=command[:200],
             denied=True,
@@ -113,7 +114,7 @@ async def _handle_ssh_exec(args: Dict[str, Any]) -> str:
 
     # --- 执行 ---
     try:
-        result = subprocess.run(
+        result: subprocess.CompletedProcess[str] = subprocess.run(
             cmd,
             capture_output=True,
             text=True,
@@ -166,23 +167,24 @@ async def _handle_ssh_upload(args: Dict[str, Any]) -> str:
     if not remote_path:
         return tool_error("remote_path is required")
     if not reason:
-        return tool_error("reason is required — 请解释为什么需要上传文件")
+        return tool_error("reason is required — please explain why the file needs to be uploaded")
 
     # --- 用户确认 ---
     if session_id:
-        result: ApprovalResult = await request_user_confirm(
+        approval_result: ApprovalResult = await request_user_confirm(
             session_id, "ssh_upload",
             {"local_path": local_path, "remote_path": remote_path, "target": target, "reason": reason},
             reason,
-            f"SSH 操作: 上传 {local_path} → {target}:{remote_path}\n原因: {reason}",
+            f"SSH operation: upload {local_path} → {target}:{remote_path}\nReason: {reason}",
         )
     else:
-        result = ApprovalResult(action="deny", deny_reason="缺少 session_id")
+        approval_result = ApprovalResult(action="deny", deny_reason="missing session_id")
 
-    if result.action == "deny":
-        source_label = {"model": "审批模型", "user": "用户", "system": "系统"}.get(result.denied_by, "系统")
+    if approval_result.action == "deny":
+        # 审批模型/用户/系统
+        source_label = {"model": "approval model", "user": "user", "system": "system"}.get(approval_result.denied_by, "system")
         return tool_error(
-            f"[{source_label}拒绝] {result.deny_reason or '未知原因'}",
+            f"[{source_label} denied] {approval_result.deny_reason or 'unknown reason'}",
             target=target,
             local_path=local_path,
             remote_path=remote_path,
@@ -199,7 +201,7 @@ async def _handle_ssh_upload(args: Dict[str, Any]) -> str:
 
     # --- 执行 ---
     try:
-        result = subprocess.run(
+        result: subprocess.CompletedProcess[str] = subprocess.run(
             cmd,
             capture_output=True,
             text=True,
@@ -255,23 +257,24 @@ async def _handle_ssh_download(args: Dict[str, Any]) -> str:
     if not local_path:
         return tool_error("local_path is required")
     if not reason:
-        return tool_error("reason is required — 请解释为什么需要下载文件")
+        return tool_error("reason is required — please explain why the file needs to be downloaded")
 
     # --- 用户确认 ---
     if session_id:
-        result: ApprovalResult = await request_user_confirm(
+        approval_result: ApprovalResult = await request_user_confirm(
             session_id, "ssh_download",
             {"remote_path": remote_path, "target": target, "local_path": local_path, "reason": reason},
             reason,
-            f"SSH 操作: 下载 {target}:{remote_path} → {local_path}\n原因: {reason}",
+            f"SSH operation: download {target}:{remote_path} → {local_path}\nReason: {reason}",
         )
     else:
-        result = ApprovalResult(action="deny", deny_reason="缺少 session_id")
+        approval_result = ApprovalResult(action="deny", deny_reason="missing session_id")
 
-    if result.action == "deny":
-        source_label = {"model": "审批模型", "user": "用户", "system": "系统"}.get(result.denied_by, "系统")
+    if approval_result.action == "deny":
+        # 审批模型/用户/系统
+        source_label = {"model": "approval model", "user": "user", "system": "system"}.get(approval_result.denied_by, "system")
         return tool_error(
-            f"[{source_label}拒绝] {result.deny_reason or '未知原因'}",
+            f"[{source_label} denied] {approval_result.deny_reason or 'unknown reason'}",
             target=target,
             remote_path=remote_path,
             local_path=local_path,
@@ -288,7 +291,7 @@ async def _handle_ssh_download(args: Dict[str, Any]) -> str:
 
     # --- 执行 ---
     try:
-        result = subprocess.run(
+        result: subprocess.CompletedProcess[str] = subprocess.run(
             cmd,
             capture_output=True,
             text=True,
@@ -327,11 +330,13 @@ async def _handle_ssh_download(args: Dict[str, Any]) -> str:
 _COMMON_PARAMS_TARGET_PORT: dict = {
     "target": {
         "type": "string",
-        "description": "远程目标，格式 user@host（如 root@10.0.0.1）。",
+        # 远程目标，格式 user@host（如 root@10.0.0.1）。
+        "description": "Remote target in user@host format (e.g. root@10.0.0.1).",
     },
     "port": {
         "type": "integer",
-        "description": "SSH 端口（默认 22）。",
+        # SSH 端口（默认 22）。
+        "description": "SSH port (default 22).",
         "default": 22,
     },
 }
@@ -340,12 +345,18 @@ registry.register(
     name="ssh_exec",
     toolset="extools",
     schema={
+        # 在远程服务器上执行 shell 命令并返回 stdout、stderr 和退出码。
+        # 使用系统原生 ssh 命令，依赖已有的 SSH 配置（~/.ssh/config、密钥等）。
+        # 首次连接到新主机时自动接受 host key，密钥变更时拒绝连接。
+        # 用户将被提示批准（允许一次）或拒绝该操作。
+        # 始终包含 'reason' 解释需要执行远程命令的原因。
         "description": (
-            "在远程服务器上执行 shell 命令并返回 stdout、stderr 和退出码。"
-            "使用系统原生 ssh 命令，依赖已有的 SSH 配置（~/.ssh/config、密钥等）。"
-            "首次连接到新主机时自动接受 host key，密钥变更时拒绝连接。"
-            "用户将被提示批准（允许一次）或拒绝该操作。"
-            "始终包含 'reason' 解释需要执行远程命令的原因。"
+            "Execute a shell command on a remote server and return stdout, stderr, and exit code. "
+            "Uses system-native ssh, relying on existing SSH configuration "
+            "(~/.ssh/config, keys, etc.). "
+            "Automatically accepts host key on first connection, rejects on key mismatch. "
+            "The user will be prompted to approve (allow once) or deny the operation. "
+            "Always include 'reason' explaining why the remote command is needed."
         ),
         "parameters": {
             "type": "object",
@@ -353,16 +364,19 @@ registry.register(
                 **_COMMON_PARAMS_TARGET_PORT,
                 "command": {
                     "type": "string",
-                    "description": "要在远程服务器上执行的 shell 命令。",
+                    # 要在远程服务器上执行的 shell 命令。
+                    "description": "Shell command to execute on the remote server.",
                 },
                 "timeout": {
                     "type": "integer",
-                    "description": "命令执行超时秒数（默认 30）。",
+                    # 命令执行超时秒数（默认 30）。
+                    "description": "Command execution timeout in seconds (default 30).",
                     "default": 30,
                 },
                 "reason": {
                     "type": "string",
-                    "description": "需要执行此远程命令的原因，将展示给用户以供审批。",
+                    # 需要执行此远程命令的原因，将展示给用户以供审批。
+                    "description": "Reason for executing this remote command, shown to user for approval.",
                 },
             },
             "required": ["target", "command", "reason"],
@@ -378,11 +392,15 @@ registry.register(
     name="ssh_upload",
     toolset="extools",
     schema={
+        # 使用 scp 将本地文件上传到远程服务器。
+        # 支持递归上传目录（设置 recursive=true）。
+        # 用户将被提示批准（允许一次）或拒绝该操作。
+        # 始终包含 'reason' 解释需要上传文件的原因。
         "description": (
-            "使用 scp 将本地文件上传到远程服务器。"
-            "支持递归上传目录（设置 recursive=true）。"
-            "用户将被提示批准（允许一次）或拒绝该操作。"
-            "始终包含 'reason' 解释需要上传文件的原因。"
+            "Upload local files to a remote server using scp. "
+            "Supports recursive directory upload (set recursive=true). "
+            "The user will be prompted to approve (allow once) or deny the operation. "
+            "Always include 'reason' explaining why the file upload is needed."
         ),
         "parameters": {
             "type": "object",
@@ -390,20 +408,24 @@ registry.register(
                 **_COMMON_PARAMS_TARGET_PORT,
                 "local_path": {
                     "type": "string",
-                    "description": "本地文件或目录的路径。",
+                    # 本地文件或目录的路径。
+                    "description": "Path to the local file or directory.",
                 },
                 "remote_path": {
                     "type": "string",
-                    "description": "远程目标路径。",
+                    # 远程目标路径。
+                    "description": "Remote destination path.",
                 },
                 "recursive": {
                     "type": "boolean",
-                    "description": "是否递归上传目录（默认 false）。",
+                    # 是否递归上传目录（默认 false）。
+                    "description": "Whether to recursively upload a directory (default false).",
                     "default": False,
                 },
                 "reason": {
                     "type": "string",
-                    "description": "需要上传文件的原因，将展示给用户以供审批。",
+                    # 需要上传文件的原因，将展示给用户以供审批。
+                    "description": "Reason for uploading the file, shown to user for approval.",
                 },
             },
             "required": ["target", "local_path", "remote_path", "reason"],
@@ -419,11 +441,15 @@ registry.register(
     name="ssh_download",
     toolset="extools",
     schema={
+        # 使用 scp 从远程服务器下载文件到本地。
+        # 支持递归下载目录（设置 recursive=true）。
+        # 用户将被提示批准（允许一次）或拒绝该操作。
+        # 始终包含 'reason' 解释需要下载文件的原因。
         "description": (
-            "使用 scp 从远程服务器下载文件到本地。"
-            "支持递归下载目录（设置 recursive=true）。"
-            "用户将被提示批准（允许一次）或拒绝该操作。"
-            "始终包含 'reason' 解释需要下载文件的原因。"
+            "Download files from a remote server to local using scp. "
+            "Supports recursive directory download (set recursive=true). "
+            "The user will be prompted to approve (allow once) or deny the operation. "
+            "Always include 'reason' explaining why the file download is needed."
         ),
         "parameters": {
             "type": "object",
@@ -431,11 +457,13 @@ registry.register(
                 **_COMMON_PARAMS_TARGET_PORT,
                 "remote_path": {
                     "type": "string",
-                    "description": "远程文件或目录的路径。",
+                    # 远程文件或目录的路径。
+                    "description": "Path to the remote file or directory.",
                 },
                 "local_path": {
                     "type": "string",
-                    "description": "本地目标路径。",
+                    # 本地目标路径。
+                    "description": "Local destination path.",
                 },
                 "recursive": {
                     "type": "boolean",

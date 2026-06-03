@@ -12,6 +12,7 @@ import logging
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict
+from PIL import Image
 
 from abstract.tools.registry import registry, tool_error, tool_result
 
@@ -20,39 +21,6 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 # 延迟导入 — 避免启动时强制要求 GUI 依赖
 # ---------------------------------------------------------------------------
-
-_pyautogui = None
-_pygetwindow = None
-_Image = None
-
-def _ensure_deps():
-    """按需导入 GUI 操纵库，失败时抛出明确错误。"""
-    global _pyautogui, _pygetwindow, _Image
-    if _pyautogui is None:
-        try:
-            import pyautogui as pag
-            _pyautogui = pag
-        except ImportError:
-            raise ImportError(
-                "pyautogui 未安装。请运行: pip install pyautogui"
-            )
-    if _pygetwindow is None:
-        try:
-            import pygetwindow as gw
-            _pygetwindow = gw
-        except ImportError:
-            raise ImportError(
-                "pygetwindow 未安装。请运行: pip install pygetwindow"
-            )
-    if _Image is None:
-        try:
-            from PIL import Image as PILImage
-            _Image = PILImage
-        except ImportError:
-            raise ImportError(
-                "Pillow 未安装。请运行: pip install Pillow"
-            )
-
 
 def _get_sandbox():
     """延迟获取 sandbox 引用。"""
@@ -73,9 +41,9 @@ def _resolve_ws_dir(subdir: str = "screenshots") -> Path:
 # 辅助：截图保存与编码
 # ---------------------------------------------------------------------------
 
-def _save_screenshot(img, filename: str | None = None) -> tuple[str, str, int]:
+def _save_screenshot(img: Image.Image, filename: str | None = None) -> tuple[str, str, int]:
     """将 PIL Image 保存到 ws:screenshots/ 下，返回 (ws_path, b64, size_bytes)。"""
-    _ensure_deps()
+    
     if filename is None:
         ts = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
         filename = f"screenshot_{ts}.png"
@@ -95,14 +63,19 @@ def _save_screenshot(img, filename: str | None = None) -> tuple[str, str, int]:
 # ---------------------------------------------------------------------------
 
 def _handle_gui_screenshot(args: Dict[str, Any]) -> str:
-    _ensure_deps()
+    try:
+        import pyautogui as _pyautogui
+    except ImportError:
+        raise ImportError(
+            "pyautogui is not installed. Run: pip install pyautogui"
+        )
 
     region = args.get("region")  # [x, y, w, h] or None
-    filename: str = str(args.get("filename", "")).strip() or None
+    filename: str = str(args.get("filename", "")).strip()
 
     if region is not None:
         if not (isinstance(region, list) and len(region) == 4):
-            return tool_error("region 必须是 [x, y, width, height] 格式的列表")
+            return tool_error("region must be a list in [x, y, width, height] format")
         x, y, w, h = int(region[0]), int(region[1]), int(region[2]), int(region[3])
         img = _pyautogui.screenshot(region=(x, y, w, h))
     else:
@@ -116,7 +89,7 @@ def _handle_gui_screenshot(args: Dict[str, Any]) -> str:
         width=img.width,
         height=img.height,
         base64_preview=b64[:200] + "..." if len(b64) > 200 else b64,
-        message=f"截图已保存: {ws_path} ({img.width}x{img.height}, {size_bytes/1024:.1f} KB)",
+        message=f"Screenshot saved: {ws_path} ({img.width}x{img.height}, {size_bytes/1024:.1f} KB)",
     )
 
 
@@ -125,7 +98,12 @@ def _handle_gui_screenshot(args: Dict[str, Any]) -> str:
 # ---------------------------------------------------------------------------
 
 def _handle_gui_mouse_move(args: Dict[str, Any]) -> str:
-    _ensure_deps()
+    try:
+        import pyautogui as _pyautogui
+    except ImportError:
+        raise ImportError(
+            "pyautogui is not installed. Run: pip install pyautogui"
+        )
 
     x: int = int(args["x"])
     y: int = int(args["y"])
@@ -137,7 +115,7 @@ def _handle_gui_mouse_move(args: Dict[str, Any]) -> str:
     return tool_result(
         target={"x": x, "y": y},
         actual={"x": actual.x, "y": actual.y},
-        message=f"鼠标已移动到 ({actual.x}, {actual.y})",
+        message=f"Mouse moved to ({actual.x}, {actual.y})",
     )
 
 
@@ -146,7 +124,12 @@ def _handle_gui_mouse_move(args: Dict[str, Any]) -> str:
 # ---------------------------------------------------------------------------
 
 def _handle_gui_mouse_click(args: Dict[str, Any]) -> str:
-    _ensure_deps()
+    try:
+        import pyautogui as _pyautogui
+    except ImportError:
+        raise ImportError(
+            "pyautogui is not installed. Run: pip install pyautogui"
+        )
 
     x = args.get("x")
     y = args.get("y")
@@ -156,9 +139,9 @@ def _handle_gui_mouse_click(args: Dict[str, Any]) -> str:
     duration: float = float(args.get("duration", 0.0))
 
     if button not in ("left", "right", "middle"):
-        return tool_error(f"无效的按键类型: {button}（支持 left/right/middle）")
+        return tool_error(f"Invalid button type: {button} (supported: left/right/middle)")
     if clicks < 1 or clicks > 3:
-        return tool_error(f"点击次数无效: {clicks}（支持 1-3）")
+        return tool_error(f"Invalid click count: {clicks} (supported: 1-3)")
 
     if x is not None and y is not None:
         _pyautogui.click(int(x), int(y), clicks=clicks, interval=interval,
@@ -174,7 +157,7 @@ def _handle_gui_mouse_click(args: Dict[str, Any]) -> str:
         position=pos_msg,
         button=button,
         clicks=clicks,
-        message=f"已{button}键单击 {pos_msg}，共{clicks}次",
+        message=f"{button}-click at {pos_msg}, {clicks} time(s)",
     )
 
 
@@ -183,7 +166,12 @@ def _handle_gui_mouse_click(args: Dict[str, Any]) -> str:
 # ---------------------------------------------------------------------------
 
 def _handle_gui_mouse_drag(args: Dict[str, Any]) -> str:
-    _ensure_deps()
+    try:
+        import pyautogui as _pyautogui
+    except ImportError:
+        raise ImportError(
+            "pyautogui is not installed. Run: pip install pyautogui"
+        )
 
     start_x: int = int(args.get("start_x", args.get("x", 0)))
     start_y: int = int(args.get("start_y", args.get("y", 0)))
@@ -193,7 +181,7 @@ def _handle_gui_mouse_drag(args: Dict[str, Any]) -> str:
     duration: float = float(args.get("duration", 0.5))
 
     if button not in ("left", "right", "middle"):
-        return tool_error(f"无效的按键类型: {button}")
+        return tool_error(f"Invalid button type: {button}")
 
     _pyautogui.moveTo(start_x, start_y, duration=0.1)
     _pyautogui.drag(end_x - start_x, end_y - start_y,
@@ -202,7 +190,7 @@ def _handle_gui_mouse_drag(args: Dict[str, Any]) -> str:
     return tool_result(
         start={"x": start_x, "y": start_y},
         end={"x": end_x, "y": end_y},
-        message=f"已从 ({start_x}, {start_y}) 拖拽到 ({end_x}, {end_y})",
+        message=f"Dragged from ({start_x}, {start_y}) to ({end_x}, {end_y})",
     )
 
 
@@ -211,7 +199,12 @@ def _handle_gui_mouse_drag(args: Dict[str, Any]) -> str:
 # ---------------------------------------------------------------------------
 
 def _handle_gui_mouse_scroll(args: Dict[str, Any]) -> str:
-    _ensure_deps()
+    try:
+        import pyautogui as _pyautogui
+    except ImportError:
+        raise ImportError(
+            "pyautogui is not installed. Run: pip install pyautogui"
+        )
 
     clicks: int = int(args.get("clicks", 3))
     x = args.get("x")
@@ -222,11 +215,11 @@ def _handle_gui_mouse_scroll(args: Dict[str, Any]) -> str:
     else:
         _pyautogui.scroll(clicks)
 
-    direction = "上" if clicks > 0 else "下"
+    direction = "up" if clicks > 0 else "down"
     return tool_result(
         direction=direction,
         amount=abs(clicks),
-        message=f"滚轮{direction}滚动了 {abs(clicks)} 格",
+        message=f"Scrolled {abs(clicks)} notch(es) {direction}",
     )
 
 
@@ -235,7 +228,12 @@ def _handle_gui_mouse_scroll(args: Dict[str, Any]) -> str:
 # ---------------------------------------------------------------------------
 
 def _handle_gui_type(args: Dict[str, Any]) -> str:
-    _ensure_deps()
+    try:
+        import pyautogui as _pyautogui
+    except ImportError:
+        raise ImportError(
+            "pyautogui is not installed. Run: pip install pyautogui"
+        )
 
     text: str = str(args["text"])
     interval: float = float(args.get("interval", 0.0))
@@ -244,7 +242,7 @@ def _handle_gui_type(args: Dict[str, Any]) -> str:
 
     return tool_result(
         length=len(text),
-        message=f"已输入 {len(text)} 个字符",
+        message=f"Typed {len(text)} character(s)",
     )
 
 
@@ -253,14 +251,19 @@ def _handle_gui_type(args: Dict[str, Any]) -> str:
 # ---------------------------------------------------------------------------
 
 def _handle_gui_press_keys(args: Dict[str, Any]) -> str:
-    _ensure_deps()
+    try:
+        import pyautogui as _pyautogui
+    except ImportError:
+        raise ImportError(
+            "pyautogui is not installed. Run: pip install pyautogui"
+        )
 
     keys = args.get("keys", [])
 
     if isinstance(keys, str):
         keys = [keys]
     if not isinstance(keys, list) or len(keys) == 0:
-        return tool_error("keys 必须是非空列表，如 [\"ctrl\", \"c\"]")
+        return tool_error("keys must be a non-empty list, e.g. [\"ctrl\", \"c\"]")
 
     keys = [str(k) for k in keys]
 
@@ -268,14 +271,14 @@ def _handle_gui_press_keys(args: Dict[str, Any]) -> str:
         _pyautogui.press(keys[0])
         return tool_result(
             keys=keys,
-            message=f"已按下: {keys[0]}",
+            message=f"Pressed: {keys[0]}",
         )
     else:
         _pyautogui.hotkey(*keys)
         return tool_result(
             keys=keys,
             combination="+".join(keys),
-            message=f"已按下组合键: {'+'.join(keys)}",
+            message=f"Pressed combo: {'+'.join(keys)}",
         )
 
 
@@ -284,14 +287,19 @@ def _handle_gui_press_keys(args: Dict[str, Any]) -> str:
 # ---------------------------------------------------------------------------
 
 def _handle_gui_get_mouse_position(_args: Dict[str, Any]) -> str:
-    _ensure_deps()
+    try:
+        import pyautogui as _pyautogui
+    except ImportError:
+        raise ImportError(
+            "pyautogui is not installed. Run: pip install pyautogui"
+        )
 
     pos = _pyautogui.position()
 
     return tool_result(
         x=pos.x,
         y=pos.y,
-        message=f"鼠标当前位置: ({pos.x}, {pos.y})",
+        message=f"Mouse position: ({pos.x}, {pos.y})",
     )
 
 
@@ -300,14 +308,19 @@ def _handle_gui_get_mouse_position(_args: Dict[str, Any]) -> str:
 # ---------------------------------------------------------------------------
 
 def _handle_gui_get_screen_size(_args: Dict[str, Any]) -> str:
-    _ensure_deps()
+    try:
+        import pyautogui as _pyautogui
+    except ImportError:
+        raise ImportError(
+            "pyautogui is not installed. Run: pip install pyautogui"
+        )
 
     w, h = _pyautogui.size()
 
     return tool_result(
         width=w,
         height=h,
-        message=f"屏幕分辨率: {w} x {h}",
+        message=f"Screen resolution: {w} x {h}",
     )
 
 
@@ -316,7 +329,18 @@ def _handle_gui_get_screen_size(_args: Dict[str, Any]) -> str:
 # ---------------------------------------------------------------------------
 
 def _handle_gui_get_windows(args: Dict[str, Any]) -> str:
-    _ensure_deps()
+    try:
+        import pyautogui as _pyautogui
+    except ImportError:
+        raise ImportError(
+            "pyautogui is not installed. Run: pip install pyautogui"
+        )
+    try:
+        import pygetwindow as _pygetwindow
+    except ImportError:
+        raise ImportError(
+            "pygetwindow is not installed. Run: pip install pygetwindow"
+        )
 
     title_filter: str = str(args.get("title", "")).strip().lower()
     max_results: int = int(args.get("max_results", 50))
@@ -344,7 +368,7 @@ def _handle_gui_get_windows(args: Dict[str, Any]) -> str:
         count=len(results),
         windows=results,
         filter=title_filter or None,
-        message=f"找到 {len(results)} 个匹配窗口",
+        message=f"Found {len(results)} matching window(s)",
     )
 
 
@@ -353,13 +377,24 @@ def _handle_gui_get_windows(args: Dict[str, Any]) -> str:
 # ---------------------------------------------------------------------------
 
 def _handle_gui_focus_window(args: Dict[str, Any]) -> str:
-    _ensure_deps()
+    try:
+        import pyautogui as _pyautogui
+    except ImportError:
+        raise ImportError(
+            "pyautogui is not installed. Run: pip install pyautogui"
+        )
+    try:
+        import pygetwindow as _pygetwindow
+    except ImportError:
+        raise ImportError(
+            "pygetwindow is not installed. Run: pip install pygetwindow"
+        )
 
     title: str = str(args["title"]).strip()
     bring_to_front: bool = bool(args.get("bring_to_front", True))
 
     if not title:
-        return tool_error("title 是必填的")
+        return tool_error("title is required")
 
     matches = _pygetwindow.getWindowsWithTitle(title)
     if not matches:
@@ -389,7 +424,7 @@ def _handle_gui_focus_window(args: Dict[str, Any]) -> str:
         title=win.title,
         position={"left": win.left, "top": win.top},
         size={"width": win.width, "height": win.height},
-        message=f"已聚焦窗口: {win.title}",
+        message=f"Focused window: {win.title}",
     )
 
 
@@ -398,15 +433,26 @@ def _handle_gui_focus_window(args: Dict[str, Any]) -> str:
 # ---------------------------------------------------------------------------
 
 def _handle_gui_get_active_window(_args: Dict[str, Any]) -> str:
-    _ensure_deps()
+    try:
+        import pyautogui as _pyautogui
+    except ImportError:
+        raise ImportError(
+            "pyautogui is not installed. Run: pip install pyautogui"
+        )
+    try:
+        import pygetwindow as _pygetwindow
+    except ImportError:
+        raise ImportError(
+            "pygetwindow is not installed. Run: pip install pygetwindow"
+        )
 
     try:
         win = _pygetwindow.getActiveWindow()
     except Exception:
-        return tool_error("无法获取活动窗口信息")
+        return tool_error("Unable to get active window info")
 
     if win is None:
-        return tool_error("无法获取活动窗口（可能没有 GUI 环境）")
+        return tool_error("Unable to get active window (may not have a GUI environment)")
 
     return tool_result(
         title=win.title,
@@ -414,7 +460,7 @@ def _handle_gui_get_active_window(_args: Dict[str, Any]) -> str:
         top=win.top,
         width=win.width,
         height=win.height,
-        message=f"活动窗口: {win.title} ({win.width}x{win.height})",
+        message=f"Active window: {win.title} ({win.width}x{win.height})",
     )
 
 
@@ -423,13 +469,18 @@ def _handle_gui_get_active_window(_args: Dict[str, Any]) -> str:
 # ---------------------------------------------------------------------------
 
 def _handle_gui_locate_on_screen(args: Dict[str, Any]) -> str:
-    _ensure_deps()
+    try:
+        import pyautogui as _pyautogui
+    except ImportError:
+        raise ImportError(
+            "pyautogui is not installed. Run: pip install pyautogui"
+        )
 
     image_path: str = str(args["image_path"]).strip()
     confidence: float = float(args.get("confidence", 0.9))
 
     if not image_path:
-        return tool_error("image_path 是必填的 — 要查找的模板图片路径")
+        return tool_error("image_path is required — template image path to search for")
 
     # 支持 ws: 路径
     if image_path.startswith("ws:"):
@@ -438,20 +489,20 @@ def _handle_gui_locate_on_screen(args: Dict[str, Any]) -> str:
             r = sb.resolve_read(image_path)
             image_path = str(r.real)
         except Exception as e:
-            return tool_error(f"无法解析路径 {image_path}: {e}")
+            return tool_error(f"Unable to resolve path {image_path}: {e}")
 
     if not Path(image_path).exists():
-        return tool_error(f"模板图片不存在: {image_path}")
+        return tool_error(f"Template image not found: {image_path}")
 
     try:
         location = _pyautogui.locateOnScreen(image_path, confidence=confidence)
     except Exception as e:
-        return tool_error(f"屏幕查找失败: {e}")
+        return tool_error(f"Screen search failed: {e}")
 
     if location is None:
         return tool_result(
             found=False,
-            message=f"未在屏幕上找到匹配的图像（confidence={confidence}）",
+            message=f"Image not found on screen (confidence={confidence})",
         )
 
     center = _pyautogui.center(location)
@@ -461,7 +512,7 @@ def _handle_gui_locate_on_screen(args: Dict[str, Any]) -> str:
         location={"left": location.left, "top": location.top,
                   "width": location.width, "height": location.height},
         center={"x": center.x, "y": center.y},
-        message=f"找到匹配图像，中心点: ({center.x}, {center.y})",
+        message=f"Match found, center: ({center.x}, {center.y})",
     )
 
 
@@ -479,10 +530,13 @@ registry.register(
     name="gui_screenshot",
     toolset="extools",
     schema={
+        # 截取屏幕截图并保存到 ws:screenshots/ 目录。
+        # 可指定 region=[x, y, w, h] 截取部分区域，省略则截全屏。
+        # 截图保存为 PNG 格式，返回 ws: 路径供 display_image 使用。
         "description": (
-            "截取屏幕截图并保存到 ws:screenshots/ 目录。\n"
-            "可指定 region=[x, y, w, h] 截取部分区域，省略则截全屏。\n"
-            "截图保存为 PNG 格式，返回 ws: 路径供 display_image 使用。"
+            "Take a screenshot and save to ws:screenshots/.\n"
+            "Specify region=[x, y, w, h] for partial capture, omit for fullscreen.\n"
+            "Saved as PNG, returns ws: path for display_image."
         ),
         "parameters": {
             "type": "object",
@@ -492,11 +546,13 @@ registry.register(
                     "items": {"type": "integer"},
                     "minItems": 4,
                     "maxItems": 4,
-                    "description": "截图区域 [x, y, width, height]，省略则截全屏",
+                    # 截图区域 [x, y, width, height]，省略则截全屏
+                    "description": "Capture region [x, y, width, height], omit for fullscreen",
                 },
                 "filename": {
                     "type": "string",
-                    "description": "自定义文件名（不含路径），默认自动生成时间戳名称",
+                    # 自定义文件名（不含路径），默认自动生成时间戳名称
+                    "description": "Custom filename (without path), auto-generates timestamp name by default",
                 },
             },
             "required": [],
@@ -511,9 +567,11 @@ registry.register(
     name="gui_mouse_move",
     toolset="extools",
     schema={
+        # 将鼠标移动到指定的屏幕坐标。
+        # duration 控制移动耗时（秒），默认 0.3 秒实现平滑移动。
         "description": (
-            "将鼠标移动到指定的屏幕坐标。\n"
-            "duration 控制移动耗时（秒），默认 0.3 秒实现平滑移动。"
+            "Move the mouse to specified screen coordinates.\n"
+            "duration controls movement time (seconds), default 0.3s for smooth movement."
         ),
         "parameters": {
             "type": "object",
@@ -521,7 +579,8 @@ registry.register(
                 **_COORD_PROPS,
                 "duration": {
                     "type": "number",
-                    "description": "移动耗时（秒），默认 0.3",
+                    # 移动耗时（秒），默认 0.3
+                    "description": "Movement duration (seconds), default 0.3",
                     "default": 0.3,
                 },
             },
@@ -537,10 +596,13 @@ registry.register(
     name="gui_mouse_click",
     toolset="extools",
     schema={
+        # 在指定坐标或当前位置执行鼠标单击。
+        # 不传 x/y 则在当前位置点击。
+        # button: left/right/middle，clicks: 1-3（双击传 2）。
         "description": (
-            "在指定坐标或当前位置执行鼠标单击。\n"
-            "不传 x/y 则在当前位置点击。\n"
-            "button: left/right/middle，clicks: 1-3（双击传 2）。"
+            "Click the mouse at specified coordinates or current position.\n"
+            "Omit x/y to click at current position.\n"
+            "button: left/right/middle, clicks: 1-3 (2 for double-click)."
         ),
         "parameters": {
             "type": "object",
@@ -550,22 +612,26 @@ registry.register(
                 "button": {
                     "type": "string",
                     "enum": ["left", "right", "middle"],
-                    "description": "鼠标按键，默认 left",
+                    # 鼠标按键，默认 left
+                    "description": "Mouse button, default left",
                     "default": "left",
                 },
                 "clicks": {
                     "type": "integer",
-                    "description": "点击次数，1=单击 2=双击，默认 1",
+                    # 点击次数，1=单击 2=双击，默认 1
+                    "description": "Click count, 1=click 2=double-click, default 1",
                     "default": 1,
                 },
                 "interval": {
                     "type": "number",
-                    "description": "多次点击间隔（秒），默认 0",
+                    # 多次点击间隔（秒），默认 0
+                    "description": "Interval between clicks (seconds), default 0",
                     "default": 0.0,
                 },
                 "duration": {
                     "type": "number",
-                    "description": "移动到目标位置的耗时（秒），默认 0",
+                    # 移动到目标位置的耗时（秒），默认 0
+                    "description": "Duration to move to target (seconds), default 0",
                     "default": 0.0,
                 },
             },
@@ -581,10 +647,13 @@ registry.register(
     name="gui_mouse_drag",
     toolset="extools",
     schema={
+        # 从起始坐标拖拽鼠标到目标坐标。
+        # start_x/start_y 默认等于 x/y（或当前鼠标位置），end_x/end_y 为必填。
+        # 用于选取文本、拖拽文件、移动窗口等操作。
         "description": (
-            "从起始坐标拖拽鼠标到目标坐标。\n"
-            "start_x/start_y 默认等于 x/y（或当前鼠标位置），end_x/end_y 为必填。\n"
-            "用于选取文本、拖拽文件、移动窗口等操作。"
+            "Drag the mouse from start to target coordinates.\n"
+            "start_x/start_y default to current position, end_x/end_y are required.\n"
+            "Used for text selection, file dragging, window moving, etc."
         ),
         "parameters": {
             "type": "object",
@@ -596,12 +665,14 @@ registry.register(
                 "button": {
                     "type": "string",
                     "enum": ["left", "right", "middle"],
-                    "description": "拖拽按键，默认 left",
+                    # 拖拽按键，默认 left
+                    "description": "Drag button, default left",
                     "default": "left",
                 },
                 "duration": {
                     "type": "number",
-                    "description": "拖拽耗时（秒），默认 0.5",
+                    # 拖拽耗时（秒），默认 0.5
+                    "description": "Drag duration (seconds), default 0.5",
                     "default": 0.5,
                 },
             },
@@ -617,16 +688,19 @@ registry.register(
     name="gui_mouse_scroll",
     toolset="extools",
     schema={
+        # 在指定位置或当前鼠标位置执行滚轮滚动。
+        # clicks 正值向上滚，负值向下滚，每格通常为一行。
         "description": (
-            "在指定位置或当前鼠标位置执行滚轮滚动。\n"
-            "clicks 正值向上滚，负值向下滚，每格通常为一行。"
+            "Scroll the mouse wheel at specified position or current position.\n"
+            "Positive clicks scroll up, negative scroll down, one notch is typically one line."
         ),
         "parameters": {
             "type": "object",
             "properties": {
                 "clicks": {
                     "type": "integer",
-                    "description": "滚动格数，正=向上，负=向下，默认 3",
+                    # 滚动格数，正=向上，负=向下，默认 3
+                    "description": "Scroll notches, positive=up, negative=down, default 3",
                     "default": 3,
                 },
                 "x": {"type": "integer", "description": "滚动位置的 X 坐标，省略则使用当前鼠标位置"},
@@ -644,22 +718,28 @@ registry.register(
     name="gui_type",
     toolset="extools",
     schema={
+        # 模拟键盘输入文本。
+        # 输入的文本将如同用户在键盘上逐键敲击一样发送到当前焦点窗口。
+        # interval 为每个字符之间的延迟（秒）。
+        # 注意：非 ASCII 字符可能无法正确输入，此时建议用 gui_press_keys 配合剪贴板。
         "description": (
-            "模拟键盘输入文本。\n"
-            "输入的文本将如同用户在键盘上逐键敲击一样发送到当前焦点窗口。\n"
-            "interval 为每个字符之间的延迟（秒）。\n"
-            "注意：非 ASCII 字符可能无法正确输入，此时建议用 gui_press_keys 配合剪贴板。"
+            "Simulate keyboard text input.\n"
+            "Text is typed character by character into the currently focused window.\n"
+            "interval is the delay between characters (seconds).\n"
+            "Note: non-ASCII characters may not be entered correctly."
         ),
         "parameters": {
             "type": "object",
             "properties": {
                 "text": {
                     "type": "string",
-                    "description": "要输入的文本",
+                    # 要输入的文本
+                    "description": "Text to type",
                 },
                 "interval": {
                     "type": "number",
-                    "description": "字符间延迟（秒），默认 0（最快）",
+                    # 字符间延迟（秒），默认 0（最快）
+                    "description": "Delay between characters (seconds), default 0 (fastest)",
                     "default": 0.0,
                 },
             },
@@ -675,13 +755,19 @@ registry.register(
     name="gui_press_keys",
     toolset="extools",
     schema={
+        # 按下单个键或组合键。
+        # 单个键: ["enter"] 或 ["esc"]
+        # 组合键: ["ctrl", "c"] 表示 Ctrl+C
+        # 可用键名: enter, space, tab, esc, backspace, delete,
+        # up, down, left, right, home, end, pageup, pagedown,
+        # f1-f12, ctrl, alt, shift, win, 以及所有字母和数字键。
         "description": (
-            "按下单个键或组合键。\n"
-            "单个键: [\"enter\"] 或 [\"esc\"]\n"
-            "组合键: [\"ctrl\", \"c\"] 表示 Ctrl+C\n"
-            "可用键名: enter, space, tab, esc, backspace, delete, "
+            "Press a single key or key combination.\n"
+            "Single key: [\"enter\"] or [\"esc\"]\n"
+            "Combo: [\"ctrl\", \"c\"] for Ctrl+C\n"
+            "Available keys: enter, space, tab, esc, backspace, delete, "
             "up, down, left, right, home, end, pageup, pagedown, "
-            "f1-f12, ctrl, alt, shift, win, 以及所有字母和数字键。"
+            "f1-f12, ctrl, alt, shift, win, and all letter/number keys."
         ),
         "parameters": {
             "type": "object",
@@ -692,7 +778,8 @@ registry.register(
                         {"type": "array", "items": {"type": "string"},
                          "description": "键名列表，如 [\"ctrl\", \"c\"]"},
                     ],
-                    "description": "要按下的键或组合键",
+                    # 要按下的键或组合键
+                    "description": "Key or key combination to press",
                 },
             },
             "required": ["keys"],
@@ -707,7 +794,8 @@ registry.register(
     name="gui_get_mouse_position",
     toolset="extools",
     schema={
-        "description": "获取鼠标当前屏幕坐标，返回 {x, y}。",
+        # 获取鼠标当前屏幕坐标，返回 {x, y}。
+        "description": "Get current mouse screen coordinates, returns {x, y}.",
         "parameters": {"type": "object", "properties": {}, "required": []},
     },
     handler=_handle_gui_get_mouse_position,
@@ -719,7 +807,8 @@ registry.register(
     name="gui_get_screen_size",
     toolset="extools",
     schema={
-        "description": "获取主显示器分辨率，返回 {width, height}。",
+        # 获取主显示器分辨率，返回 {width, height}。
+        "description": "Get primary monitor resolution, returns {width, height}.",
         "parameters": {"type": "object", "properties": {}, "required": []},
     },
     handler=_handle_gui_get_screen_size,
@@ -731,21 +820,26 @@ registry.register(
     name="gui_get_windows",
     toolset="extools",
     schema={
+        # 列出当前系统中所有可见窗口。
+        # 可按 title 过滤（大小写不敏感的部分匹配）。
+        # 返回窗口标题、位置、大小信息。
         "description": (
-            "列出当前系统中所有可见窗口。\n"
-            "可按 title 过滤（大小写不敏感的部分匹配）。\n"
-            "返回窗口标题、位置、大小信息。"
+            "List all visible windows on the system.\n"
+            "Can filter by title (case-insensitive partial match).\n"
+            "Returns window title, position, and size."
         ),
         "parameters": {
             "type": "object",
             "properties": {
                 "title": {
                     "type": "string",
-                    "description": "窗口标题过滤关键字（部分匹配），留空则列出所有窗口",
+                    # 窗口标题过滤关键字（部分匹配），留空则列出所有窗口
+                    "description": "Window title filter keyword (partial match), leave empty to list all",
                 },
                 "max_results": {
                     "type": "integer",
-                    "description": "最大返回窗口数，默认 50",
+                    # 最大返回窗口数，默认 50
+                    "description": "Max windows to return, default 50",
                     "default": 50,
                 },
             },
@@ -761,21 +855,26 @@ registry.register(
     name="gui_focus_window",
     toolset="extools",
     schema={
+        # 按标题查找窗口并将其置于前台（聚焦）。
+        # title 为部分匹配（不区分大小写）。
+        # 如果未找到匹配窗口，返回错误并建议先用 gui_get_windows 列出窗口。
         "description": (
-            "按标题查找窗口并将其置于前台（聚焦）。\n"
-            "title 为部分匹配（不区分大小写）。\n"
-            "如果未找到匹配窗口，返回错误并建议先用 gui_get_windows 列出窗口。"
+            "Find a window by title and bring it to the foreground (focus).\n"
+            "title is a partial match (case-insensitive).\n"
+            "If no matching window is found, returns an error suggesting to use gui_get_windows first."
         ),
         "parameters": {
             "type": "object",
             "properties": {
                 "title": {
                     "type": "string",
-                    "description": "窗口标题关键字（部分匹配）",
+                    # 窗口标题关键字（部分匹配）
+                    "description": "Window title keyword (partial match)",
                 },
                 "bring_to_front": {
                     "type": "boolean",
-                    "description": "是否将窗口置于最前（默认 true）",
+                    # 是否将窗口置于最前（默认 true）
+                    "description": "Whether to bring the window to front (default true)",
                     "default": True,
                 },
             },
@@ -791,8 +890,10 @@ registry.register(
     name="gui_get_active_window",
     toolset="extools",
     schema={
+        # 获取当前活动（前景）窗口的信息，包括标题、位置、大小。
         "description": (
-            "获取当前活动（前景）窗口的信息，包括标题、位置、大小。"
+            "Get info about the currently active (foreground) window, "
+            "including title, position, and size."
         ),
         "parameters": {"type": "object", "properties": {}, "required": []},
     },
@@ -805,22 +906,28 @@ registry.register(
     name="gui_locate_on_screen",
     toolset="extools",
     schema={
+        # 在屏幕中查找匹配模板图像的位置。
+        # image_path 可以是 ws: 路径或本地绝对路径。
+        # confidence 为匹配置信度（0-1），默认 0.9。
+        # 找到则返回匹配区域和中心点坐标，未找到返回 found=false。
         "description": (
-            "在屏幕中查找匹配模板图像的位置。\n"
-            "image_path 可以是 ws: 路径或本地绝对路径。\n"
-            "confidence 为匹配置信度（0-1），默认 0.9。\n"
-            "找到则返回匹配区域和中心点坐标，未找到返回 found=false。"
+            "Find a matching template image on screen.\n"
+            "image_path can be a ws: path or local absolute path.\n"
+            "confidence is the matching threshold (0-1), default 0.9.\n"
+            "Returns match region and center if found, found=false otherwise."
         ),
         "parameters": {
             "type": "object",
             "properties": {
                 "image_path": {
                     "type": "string",
-                    "description": "模板图片路径，支持 ws: 前缀或本地绝对路径",
+                    # 模板图片路径，支持 ws: 前缀或本地绝对路径
+                    "description": "Template image path, supports ws: prefix or local absolute path",
                 },
                 "confidence": {
                     "type": "number",
-                    "description": "匹配置信度 0-1，默认 0.9。需要 opencv-python 才能使用",
+                    # 匹配置信度 0-1，默认 0.9。需要 opencv-python 才能使用
+                    "description": "Confidence threshold 0-1, default 0.9. Requires opencv-python",
                     "default": 0.9,
                 },
             },

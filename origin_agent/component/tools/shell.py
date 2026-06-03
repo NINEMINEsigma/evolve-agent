@@ -116,9 +116,10 @@ async def _handle_run_command(args: Dict[str, Any]) -> str:
         result = ApprovalResult(action="deny", deny_reason="缺少 session_id")
 
     if result.action == "deny":
-        source_label = {"model": "审批模型", "user": "用户", "system": "系统"}.get(result.denied_by, "系统")
+        # 审批模型/用户/系统
+        source_label = {"model": "approval model", "user": "user", "system": "system"}.get(result.denied_by, "system")
         return tool_error(
-            f"[{source_label}拒绝] {result.deny_reason or '未知原因'}",
+            f"[{source_label} denied] {result.deny_reason or 'unknown reason'}",
             command=cmd_parts,
             denied=True,
         )
@@ -164,13 +165,18 @@ registry.register(
     name="run_command",
     toolset="shell",
     schema={
+        # 在 workspace 中执行 shell 命令。
+        # 用户将被提示批准（允许一次）、永久信任（始终允许）或拒绝该命令。
+        # 之前以'始终允许'批准的命令跳过提示。
+        # 始终包含 'reason' 解释命令的用途。
+        # 用于安装软件包、运行测试或检查文件。
         "description": (
-            "在 workspace 中执行 shell 命令。"
-            "用户将被提示批准（允许一次）、"
-            "永久信任（始终允许）或拒绝该命令。"
-            "之前以'始终允许'批准的命令跳过提示。"
-            "始终包含 'reason' 解释命令的用途。"
-            "用于安装软件包、运行测试或检查文件。"
+            "Execute shell commands in the workspace. "
+            "The user will be prompted to approve (allow once), "
+            "permanently trust (always allow), or deny the command. "
+            "Commands previously approved with 'always allow' skip the prompt. "
+            "Always include 'reason' explaining the command's purpose. "
+            "Useful for installing packages, running tests, or inspecting files."
         ),
         "parameters": {
             "type": "object",
@@ -178,15 +184,18 @@ registry.register(
                 "command": {
                     "type": "array",
                     "items": {"type": "string"},
-                    "description": "命令及参数列表，例如 ['pip', 'install', 'requests']。",
+                    # 命令及参数列表，例如 ['pip', 'install', 'requests']。
+                    "description": "Command and argument list, e.g. ['pip', 'install', 'requests'].",
                 },
                 "reason": {
                     "type": "string",
-                    "description": "agent 需要执行此命令的原因。",
+                    # agent 需要执行此命令的原因。
+                    "description": "The reason the agent needs to execute this command.",
                 },
                 "cwd": {
                     "type": "string",
-                    "description": "工作目录（ws: 命名空间，默认 'ws:'）。",
+                    # 工作目录（ws: 命名空间，默认 'ws:'）。
+                    "description": "Working directory (ws: namespace, default 'ws:').",
                     "default": "ws:",
                 },
             },

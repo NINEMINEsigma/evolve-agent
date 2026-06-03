@@ -104,9 +104,14 @@ def _handle_read_image(args: Dict[str, Any]) -> str:
             "mime_type": mime_type,
         },
         "_note": (
-            "图片已以 base64 编码返回。如果模型支持 vision，你可以直接查看并分析图片内容。"
-            "如果 API 返回内容类型错误，系统会自动剥离图片并用纯文本重试，"
-            "届时你会收到明确的错误提示。"
+            # 图片已以 base64 编码返回。如果模型支持 vision，你可以直接查看并分析图片内容。
+            # 如果 API 返回内容类型错误，系统会自动剥离图片并用纯文本重试，
+            # 届时你会收到明确的错误提示。
+            "The image has been returned as base64-encoded data. "
+            "If the model supports vision, you can directly view and analyze the image. "
+            "If the API returns a content-type error, the system will automatically "
+            "strip the image and retry with plain text, at which point you will "
+            "receive a clear error message."
         ),
     }, ensure_ascii=False)
 
@@ -119,23 +124,36 @@ registry.register(
     name="read_image",
     toolset="filesystem",
     schema={
+        # 读取图片文件并返回其内容。图片以 base64 编码返回。
+        # 如果模型支持 vision，你可以直接查看图片内容进行视觉分析。
+        # 如果模型不支持 vision，系统会自动处理错误并告知你。
+        # 路径必须使用命名空间前缀，通常为 'ws:'（agent workspace）。
+        # 示例：'ws:uploads/screenshot.png'。
+        # 支持的格式：PNG、JPEG、WebP、GIF、BMP、TIFF、SVG。
+        # 最大文件大小：20MB。
         "description": (
-            "读取图片文件并返回其内容。图片以 base64 编码返回。\n\n"
-            "如果模型支持 vision，你可以直接查看图片内容进行视觉分析。\n"
-            "如果模型不支持 vision，系统会自动处理错误并告知你。\n\n"
-            "路径必须使用命名空间前缀，通常为 'ws:'（agent workspace）。"
-            "示例：'ws:uploads/screenshot.png'。\n\n"
-            "支持的格式：PNG、JPEG、WebP、GIF、BMP、TIFF、SVG。"
-            "最大文件大小：20MB。"
+            "Read an image file and return its contents. "
+            "The image is returned as base64-encoded data.\n\n"
+            "If the model supports vision, you can directly view the image "
+            "for visual analysis.\n"
+            "If the model does not support vision, the system will "
+            "automatically handle the error and inform you.\n\n"
+            "Path must use a namespace prefix, typically 'ws:' (agent workspace). "
+            "Example: 'ws:uploads/screenshot.png'.\n\n"
+            "Supported formats: PNG, JPEG, WebP, GIF, BMP, TIFF, SVG. "
+            "Maximum file size: 20MB."
         ),
         "parameters": {
             "type": "object",
             "properties": {
                 "path": {
                     "type": "string",
+                    # 图片文件的逻辑路径。必须使用命名空间前缀（ws:、fork: 或 fix:）。
+                    # 上传的文件位于 'ws:uploads/' 目录下。
                     "description": (
-                        "图片文件的逻辑路径。必须使用命名空间前缀（ws:、fork: 或 fix:）。"
-                        "上传的文件位于 'ws:uploads/' 目录下。"
+                        "Logical path of the image file. "
+                        "Must include a namespace prefix (ws:, fork:, or fix:). "
+                        "Uploaded files are located under 'ws:uploads/'."
                     ),
                 },
             },

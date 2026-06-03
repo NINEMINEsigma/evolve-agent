@@ -307,26 +307,33 @@ _COMMON_SCHEMA = {
     "properties": {
         "path": {
             "type": "string",
+            # 可选路径过滤子串。只对比路径中包含此字符串的文件。
+            # 例如传入 'tools/' 只对比 tools 目录下的文件。
             "description": (
-                "可选路径过滤子串。只对比路径中包含此字符串的文件。"
-                "例如传入 'tools/' 只对比 tools 目录下的文件。"
+                "Optional path filter substring. Only compare files "
+                "whose path contains this string. "
+                "E.g. 'tools/' to compare files under the tools directory."
             ),
         },
         "pattern": {
             "type": "string",
+            # 可选 glob 模式过滤。例如 '*.py' 只比较 Python 文件，
+            # '**/filesystem.py' 匹配所有 filesystem.py。
             "description": (
-                "可选 glob 模式过滤。例如 '*.py' 只比较 Python 文件，"
-                "'**/filesystem.py' 匹配所有 filesystem.py。"
+                "Optional glob pattern filter. E.g. '*.py' for Python files "
+                "only, '**/filesystem.py' to match all filesystem.py."
             ),
         },
         "context_lines": {
             "type": "integer",
-            "description": "unified diff 上下文行数（默认 3）。",
+            # unified diff 上下文行数（默认 3）。
+            "description": "Number of unified diff context lines (default 3).",
             "default": 3,
         },
         "max_files": {
             "type": "integer",
-            "description": "最多返回多少个有差异的文件结果（默认 50）。",
+            # 最多返回多少个有差异的文件结果（默认 50）。
+            "description": "Max number of differing file results to return (default 50).",
             "default": 50,
         },
     },
@@ -341,13 +348,21 @@ registry.register(
     name="diff_origin_fast",
     toolset="extools",
     schema={
+        # 对比原始源码仓库（origin_agent/）与当前正在运行的
+        # fast 仓库（fast_agent_space/）之间的代码差异。
+        # origin_agent 是代码真相来源，fast 是运行时副本。
+        # 每次代码进化（slow→fast 交换）可能导致二者产生差异，
+        # 进化次数越多差异越大。此工具用于审查当前运行版本
+        # 相对于最初源代码的偏离程度。
         "description": (
-            "对比原始源码仓库（origin_agent/）与当前正在运行的 "
-            "fast 仓库（fast_agent_space/）之间的代码差异。"
-            "origin_agent 是代码真相来源，fast 是运行时副本。"
-            "每次代码进化（slow→fast 交换）可能导致二者产生差异，"
-            "进化次数越多差异越大。此工具用于审查当前运行版本"
-            "相对于最初源代码的偏离程度。"
+            "Compare code differences between the original source repo "
+            "(origin_agent/) and the currently running fast repo "
+            "(fast_agent_space/). "
+            "origin_agent is the source of truth, fast is the runtime copy. "
+            "Each code evolution (slow→fast swap) may cause divergence; "
+            "the more evolutions, the greater the difference. "
+            "Use this tool to review how much the running version "
+            "has deviated from the original source."
         ),
         **_COMMON_SCHEMA,
     },
@@ -359,11 +374,17 @@ registry.register(
     name="diff_fast_fork",
     toolset="extools",
     schema={
+        # 对比当前运行的 fast 仓库（fast_agent_space/）与
+        # fork 目录（slow_agent_space/ 进化目标）之间的代码差异。
+        # 写进化代码到 fork 后，可通过此工具审查即将被交换的变更。
+        # 如果二者一致则无需调用 evolve_code。
         "description": (
-            "对比当前运行的 fast 仓库（fast_agent_space/）与 "
-            "fork 目录（slow_agent_space/ 进化目标）之间的代码差异。"
-            "写进化代码到 fork 后，可通过此工具审查即将被交换的变更。"
-            "如果二者一致则无需调用 evolve_code。"
+            "Compare code differences between the currently running fast repo "
+            "(fast_agent_space/) and the fork directory "
+            "(slow_agent_space/, the evolution target). "
+            "After writing evolved code to fork, use this tool to review "
+            "changes that are about to be swapped. "
+            "If they are identical, there is no need to call evolve_code."
         ),
         **_COMMON_SCHEMA,
     },

@@ -100,29 +100,35 @@ registry.register(
     name="read_pdf",
     toolset="extools",
     schema={
+        # 读取 .pdf 文件并提取文本内容。返回每页的文本和全文拼接。
+        # 支持指定页范围（start_page / end_page，从 1 开始计数）。
+        # 适用于文档阅读、报告分析、信息提取等场景。
         "description": (
-            "读取 .pdf 文件并提取文本内容。返回每页的文本和全文拼接。"
-            "支持指定页范围（start_page / end_page，从 1 开始计数）。"
-            "适用于文档阅读、报告分析、信息提取等场景。"
+            "Read .pdf file and extract text content. Returns text per page and full concatenation. "
+            "Supports specifying page range (start_page / end_page, 1-based). "
+            "Suitable for document reading, report analysis, information extraction, etc."
         ),
         "parameters": {
             "type": "object",
             "properties": {
                 "path": {
                     "type": "string",
+                    # PDF 文件逻辑路径，必须使用命名空间前缀（ws:、fork:）。例如 'ws:docs/report.pdf'。
                     "description": (
-                        "PDF 文件逻辑路径，必须使用命名空间前缀 "
-                        "（ws:、fork:）。例如 'ws:docs/report.pdf'。"
+                        "PDF file logical path, must use namespace prefix "
+                        "(ws:, fork:). E.g. 'ws:docs/report.pdf'."
                     ),
                 },
                 "start_page": {
                     "type": "integer",
-                    "description": "起始页码（从 1 开始，默认 1）。",
+                    # 起始页码（从 1 开始，默认 1）
+                    "description": "Start page number (1-based, default 1).",
                     "default": 1,
                 },
                 "end_page": {
                     "type": "integer",
-                    "description": "结束页码（默认到最后一页）。",
+                    # 结束页码（默认到最后一页）
+                    "description": "End page number (defaults to last page).",
                 },
             },
             "required": ["path"],

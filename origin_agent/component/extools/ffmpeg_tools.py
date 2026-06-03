@@ -520,17 +520,21 @@ registry.register(
     name="media_info",
     toolset="extools",
     schema={
+        # 使用 ffprobe 读取媒体文件的详细信息，包括：
+        # 格式、时长、视频流（分辨率、fps、编码）、
+        # 音频流（采样率、声道、编码）等。
         "description": (
-            "使用 ffprobe 读取媒体文件的详细信息，包括："
-            "格式、时长、视频流（分辨率、fps、编码）、"
-            "音频流（采样率、声道、编码）等。"
+            "Read detailed media file info using ffprobe: "
+            "format, duration, video streams (resolution, fps, codec), "
+            "audio streams (sample rate, channels, codec), etc."
         ),
         "parameters": {
             "type": "object",
             "properties": {
                 "path": {
                     "type": "string",
-                    "description": "媒体文件逻辑路径（ws: 或 fork: 前缀）。",
+                    # 媒体文件逻辑路径（ws: 或 fork: 前缀）。
+                    "description": "Media file logical path (ws: or fork: prefix).",
                 },
             },
             "required": ["path"],
@@ -546,25 +550,31 @@ registry.register(
     name="convert_media",
     toolset="extools",
     schema={
+        # 使用 ffmpeg 转换媒体文件格式。自动根据输出文件扩展名选择编码器。
+        # 通过 extra_args 可传递额外 ffmpeg 参数。
         "description": (
-            "使用 ffmpeg 转换媒体文件格式。自动根据输出文件扩展名选择编码器。"
-            "通过 extra_args 可传递额外 ffmpeg 参数。"
+            "Convert media file format using ffmpeg. "
+            "Auto-selects encoder based on output file extension. "
+            "Pass extra ffmpeg arguments via extra_args."
         ),
         "parameters": {
             "type": "object",
             "properties": {
                 "input": {
                     "type": "string",
-                    "description": "输入文件逻辑路径。",
+                    # 输入文件逻辑路径。
+                    "description": "Input file logical path.",
                 },
                 "output": {
                     "type": "string",
-                    "description": "输出文件逻辑路径（扩展名决定目标格式）。",
+                    # 输出文件逻辑路径（扩展名决定目标格式）。
+                    "description": "Output file logical path (extension determines target format).",
                 },
                 "extra_args": {
                     "type": "array",
                     "items": {"type": "string"},
-                    "description": "附加 ffmpeg 参数列表（可选），例如 ['-b:v', '2M', '-vf', 'scale=1280:720']。",
+                    # 附加 ffmpeg 参数列表（可选），例如 ['-b:v', '2M', '-vf', 'scale=1280:720']。
+                    "description": "Extra ffmpeg arguments (optional), e.g. ['-b:v', '2M', '-vf', 'scale=1280:720'].",
                 },
             },
             "required": ["input", "output"],
@@ -581,34 +591,41 @@ registry.register(
     name="extract_audio",
     toolset="extools",
     schema={
+        # 从视频文件中提取音频轨道。支持指定编码器、采样率和声道数。默认输出 MP3 格式。
         "description": (
-            "从视频文件中提取音频轨道。支持指定编码器、采样率和声道数。"
-            "默认输出 MP3 格式。"
+            "Extract audio track from a video file. "
+            "Supports specifying codec, sample rate, and channel count. "
+            "Default output format is MP3."
         ),
         "parameters": {
             "type": "object",
             "properties": {
                 "input": {
                     "type": "string",
-                    "description": "输入视频文件逻辑路径。",
+                    # 输入视频文件逻辑路径。
+                    "description": "Input video file logical path.",
                 },
                 "output": {
                     "type": "string",
-                    "description": "输出音频文件逻辑路径。",
+                    # 输出音频文件逻辑路径。
+                    "description": "Output audio file logical path.",
                 },
                 "codec": {
                     "type": "string",
-                    "description": "音频编码器（默认 libmp3lame）。常见选项：libmp3lame, aac, libvorbis, pcm_s16le。",
+                    # 音频编码器（默认 libmp3lame）。常见选项：libmp3lame, aac, libvorbis, pcm_s16le。
+                    "description": "Audio codec (default libmp3lame). Common options: libmp3lame, aac, libvorbis, pcm_s16le.",
                     "default": "libmp3lame",
                 },
                 "sample_rate": {
                     "type": "integer",
-                    "description": "采样率（Hz），例如 44100、48000。0 表示使用源文件采样率。",
+                    # 采样率（Hz），例如 44100、48000。0 表示使用源文件采样率。
+                    "description": "Sample rate (Hz), e.g. 44100, 48000. 0 means use source sample rate.",
                     "default": 0,
                 },
                 "channels": {
                     "type": "integer",
-                    "description": "声道数，例如 1（单声道）、2（立体声）。0 表示使用源文件声道数。",
+                    # 声道数，例如 1（单声道）、2（立体声）。0 表示使用源文件声道数。
+                    "description": "Number of channels, e.g. 1 (mono), 2 (stereo). 0 means use source channel count.",
                     "default": 0,
                 },
             },
@@ -626,32 +643,40 @@ registry.register(
     name="trim_media",
     toolset="extools",
     schema={
+        # 裁剪音视频片段。使用流复制（-c copy）实现快速无损裁剪。
+        # 至少需要指定 start、duration 或 end 之一。
         "description": (
-            "裁剪音视频片段。使用流复制（-c copy）实现快速无损裁剪。"
-            "至少需要指定 start、duration 或 end 之一。"
+            "Trim an audio/video clip. Uses stream copy (-c copy) "
+            "for fast lossless trimming. "
+            "At least one of start, duration, or end must be specified."
         ),
         "parameters": {
             "type": "object",
             "properties": {
                 "input": {
                     "type": "string",
-                    "description": "输入文件逻辑路径。",
+                    # 输入文件逻辑路径。
+                    "description": "Input file logical path.",
                 },
                 "output": {
                     "type": "string",
-                    "description": "输出文件逻辑路径。",
+                    # 输出文件逻辑路径。
+                    "description": "Output file logical path.",
                 },
                 "start": {
                     "type": "number",
-                    "description": "起始时间（秒），从该时间点开始裁剪。",
+                    # 起始时间（秒），从该时间点开始裁剪。
+                    "description": "Start time (seconds), trim from this point.",
                 },
                 "duration": {
                     "type": "number",
-                    "description": "裁剪时长（秒）。",
+                    # 裁剪时长（秒）。
+                    "description": "Duration to trim (seconds).",
                 },
                 "end": {
                     "type": "number",
-                    "description": "结束时间（秒），与 start 一起使用。",
+                    # 结束时间（秒），与 start 一起使用。
+                    "description": "End time (seconds), used together with start.",
                 },
             },
             "required": ["input", "output"],
@@ -667,10 +692,15 @@ registry.register(
     name="concat_media",
     toolset="extools",
     schema={
+        # 拼接多个音视频文件。使用 ffmpeg concat demuxer，
+        # 执行流复制（-c copy），无需重编码。
+        # 所有文件需使用相同编码参数（同格式、同分辨率等）。
         "description": (
-            "拼接多个音视频文件。使用 ffmpeg concat demuxer，"
-            "执行流复制（-c copy），无需重编码。"
-            "所有文件需使用相同编码参数（同格式、同分辨率等）。"
+            "Concatenate multiple media files. "
+            "Uses ffmpeg concat demuxer with stream copy (-c copy), "
+            "no re-encoding needed. "
+            "All files must use identical encoding parameters "
+            "(same format, resolution, etc.)."
         ),
         "parameters": {
             "type": "object",
@@ -678,11 +708,13 @@ registry.register(
                 "inputs": {
                     "type": "array",
                     "items": {"type": "string"},
-                    "description": "输入文件逻辑路径列表（至少 2 个）。",
+                    # 输入文件逻辑路径列表（至少 2 个）。
+                    "description": "List of input file logical paths (at least 2).",
                 },
                 "output": {
                     "type": "string",
-                    "description": "输出文件逻辑路径。",
+                    # 输出文件逻辑路径。
+                    "description": "Output file logical path.",
                 },
             },
             "required": ["inputs", "output"],
@@ -698,49 +730,60 @@ registry.register(
     name="compress_media",
     toolset="extools",
     schema={
+        # 压缩视频文件（降低码率/分辨率）。
+        # 支持设置 CRF（0-51，越低质量越好）、视频比特率、
+        # 编码器和缩放分辨率。
         "description": (
-            "压缩视频文件（降低码率/分辨率）。"
-            "支持设置 CRF（0-51，越低质量越好）、视频比特率、"
-            "编码器和缩放分辨率。"
+            "Compress a video file (reduce bitrate/resolution). "
+            "Supports setting CRF (0-51, lower = better quality), "
+            "video bitrate, codec, and scaling resolution."
         ),
         "parameters": {
             "type": "object",
             "properties": {
                 "input": {
                     "type": "string",
-                    "description": "输入文件逻辑路径。",
+                    # 输入文件逻辑路径。
+                    "description": "Input file logical path.",
                 },
                 "output": {
                     "type": "string",
-                    "description": "输出文件逻辑路径。",
+                    # 输出文件逻辑路径。
+                    "description": "Output file logical path.",
                 },
                 "video_codec": {
                     "type": "string",
-                    "description": "视频编码器（默认 libx264）。",
+                    # 视频编码器（默认 libx264）。
+                    "description": "Video codec (default libx264).",
                     "default": "libx264",
                 },
                 "crf": {
                     "type": "integer",
-                    "description": "CRF 值（0-51），越低质量越好。默认 23。仅对 libx264/libx265/libvpx-vp9 有效。",
+                    # CRF 值（0-51），越低质量越好。默认 23。仅对 libx264/libx265/libvpx-vp9 有效。
+                    "description": "CRF value (0-51), lower = better quality. Default 23. Only effective for libx264/libx265/libvpx-vp9.",
                     "default": 23,
                 },
                 "video_bitrate": {
                     "type": "string",
-                    "description": "视频目标比特率，例如 '2M'、'500k'。",
+                    # 视频目标比特率，例如 '2M'、'500k'。
+                    "description": "Target video bitrate, e.g. '2M', '500k'.",
                 },
                 "audio_codec": {
                     "type": "string",
-                    "description": "音频编码器（默认 aac）。",
+                    # 音频编码器（默认 aac）。
+                    "description": "Audio codec (default aac).",
                     "default": "aac",
                 },
                 "audio_bitrate": {
                     "type": "string",
-                    "description": "音频比特率（默认 128k）。",
+                    # 音频比特率（默认 128k）。
+                    "description": "Audio bitrate (default 128k).",
                     "default": "128k",
                 },
                 "scale": {
                     "type": "string",
-                    "description": "缩放分辨率，例如 '1280:720'、'640:-1'（等比例缩放）。",
+                    # 缩放分辨率，例如 '1280:720'、'640:-1'（等比例缩放）。
+                    "description": "Scale resolution, e.g. '1280:720', '640:-1' (proportional scaling).",
                 },
             },
             "required": ["input", "output"],

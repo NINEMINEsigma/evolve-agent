@@ -131,8 +131,8 @@ def _handle_draw_diagram(args: Dict[str, Any]) -> str:
 
     if not json_file and not json_str:
         return tool_error(
-            "需要提供 json_file（ws: 路径）或 json（原始 JSON 字符串）。\n"
-            "推荐方式: 先用 write_file 保存 JSON，再传入 json_file 参数。"
+            "Must provide json_file (ws: path) or json (raw JSON string).\n"
+            "Recommended: save JSON with write_file first, then pass json_file parameter."
         )
 
     data: dict | None = None
@@ -146,22 +146,22 @@ def _handle_draw_diagram(args: Dict[str, Any]) -> str:
             fs_path, agentspace_base = _resolve_ws_path(json_file)
             if not fs_path.exists():
                 return tool_error(
-                    f"文件不存在: {json_file}\n"
-                    f"请先用 write_file(path=\"{json_file}\", content=...) 写入 JSON。"
+                    f"File not found: {json_file}\n"
+                    f"Please write JSON first: write_file(path=\"{json_file}\", content=...)."
                 )
             json_str = fs_path.read_text(encoding="utf-8")
             data = json.loads(json_str)
             output_parent = fs_path.parent
             source_label = json_file
         except Exception as exc:
-            return tool_error(f"读取文件失败 ({json_file}): {exc}")
+            return tool_error(f"Failed to read file ({json_file}): {exc}")
 
     # --- Mode 2: inline JSON string ---
     if data is None and json_str:
         try:
             data = json.loads(json_str)
         except json.JSONDecodeError as e:
-            return tool_error(f"JSON 格式错误: {e}")
+            return tool_error(f"JSON format error: {e}")
         # Determine output dir
         output_parent, agentspace_base = _resolve_ws_dir_for_write("ws:diagrams")
         source_label = "inline JSON"
@@ -280,7 +280,7 @@ def _handle_render_diagram(args: Dict[str, Any]) -> str:
         source=path,
         png_path=png_logical,
         markdown=http_url,
-        message=f"图表已渲染\n\n![]({http_url})",
+        message=f"Diagram rendered\n\n![]({http_url})",
     )
 
 
@@ -292,41 +292,57 @@ registry.register(
     name="draw_diagram",
     toolset="diagram",
     schema={
+        # 将 Excalidraw JSON 渲染为 PNG 图片，返回 Markdown 图片链接。
+        # 使用步骤:
+        #   1. 用 write_file 将 Excalidraw JSON 保存到文件
+        #   2. 调用 draw_diagram(json_file='ws:diagrams/my.excalidraw')
+        #   3. 工具返回 Markdown 图片链接，前端自动显示
         "description": (
-            "将 Excalidraw JSON 渲染为 PNG 图片，返回 Markdown 图片链接。\n\n"
-            "使用步骤:\n"
-            "  1. 用 write_file 将 Excalidraw JSON 保存到文件，如 "
+            "Render Excalidraw JSON to a PNG image and return a "
+            "Markdown image link.\n\n"
+            "Steps:\n"
+            "  1. Save Excalidraw JSON to a file with write_file, e.g. "
             "write_file(path='ws:diagrams/my.excalidraw', content='...')\n"
-            "  2. 调用 draw_diagram(json_file='ws:diagrams/my.excalidraw')\n"
-            "  3. 工具返回 ![diagram](/uploads/diagrams/xxx.png)，前端自动显示\n\n"
-            "Excalidraw JSON 格式:\n"
+            "  2. Call draw_diagram(json_file='ws:diagrams/my.excalidraw')\n"
+            "  3. The tool returns ![diagram](/uploads/diagrams/xxx.png), "
+            "displayed automatically in the frontend\n\n"
+            "Excalidraw JSON format:\n"
             '  { "type": "excalidraw", "version": 2, '
             '"elements": [...], "appState": {...} }\n\n'
-            "元素类型: rectangle, text, arrow, ellipse, diamond, line 等\n"
-            "每个元素需要 id, type, x, y, width, height, strokeColor, backgroundColor 等字段\n"
-            "文本元素有 text, fontSize, fontFamily(1=手写, 2=正常, 3=代码), "
-            "textAlign, verticalAlign\n"
-            "箭头用 points: [[x1,y1], [x2,y2]] 定义路径\n\n"
-            "使用前需安装: pip install playwright && python -m playwright install chromium\n"
-            "agent 应通过 JSON 结构完整性来判断正确性，用户通过前端查看渲染结果。"
+            "Element types: rectangle, text, arrow, ellipse, diamond, line, etc.\n"
+            "Each element needs id, type, x, y, width, height, "
+            "strokeColor, backgroundColor, etc.\n"
+            "Text elements have text, fontSize, fontFamily(1=handwriting, "
+            "2=normal, 3=code), textAlign, verticalAlign\n"
+            "Arrows use points: [[x1,y1], [x2,y2]] for path definition\n\n"
+            "Prerequisites: pip install playwright && "
+            "python -m playwright install chromium\n"
+            "The agent should verify correctness through JSON structure "
+            "integrity; the user sees the rendered result in the frontend."
         ),
         "parameters": {
             "type": "object",
             "properties": {
                 "json_file": {
                     "type": "string",
+                    # ws: 前缀下的 .excalidraw JSON 文件路径。
+                    # 先用 write_file 保存 JSON 到此路径，再传入。
+                    # 例如: ws:diagrams/mindmap.excalidraw
                     "description": (
-                        "ws: 前缀下的 .excalidraw JSON 文件路径。"
-                        "先用 write_file 保存 JSON 到此路径，再传入。"
-                        "例如: ws:diagrams/mindmap.excalidraw"
+                        "Path to .excalidraw JSON file under ws: prefix. "
+                        "Save JSON to this path with write_file first, then pass it. "
+                        "Example: ws:diagrams/mindmap.excalidraw"
                     ),
                 },
                 "json": {
                     "type": "string",
+                    # 完整的 Excalidraw JSON 字符串（备选方案）。
+                    # 仅在图表很小、可直接构造时使用。
+                    # 复杂图表请使用 json_file 参数。
                     "description": (
-                        "完整的 Excalidraw JSON 字符串（备选方案）。"
-                        "仅在图表很小、可直接构造时使用。"
-                        "复杂图表请使用 json_file 参数。"
+                        "Full Excalidraw JSON string (fallback). "
+                        "Only use for small diagrams constructable inline. "
+                        "For complex diagrams, use the json_file parameter."
                     ),
                 },
             },
@@ -340,16 +356,19 @@ registry.register(
     name="render_diagram",
     toolset="diagram",
     schema={
+        # 将 workspace 中已有的 .excalidraw JSON 文件重新渲染为 PNG。
+        # 用于迭代修改后重新生成图片。
         "description": (
-            "将 workspace 中已有的 .excalidraw JSON 文件重新渲染为 PNG。"
-            "用于迭代修改后重新生成图片。"
+            "Re-render an existing .excalidraw JSON file in the workspace "
+            "to PNG. Use for iterative editing and regenerating images."
         ),
         "parameters": {
             "type": "object",
             "properties": {
                 "path": {
                     "type": "string",
-                    "description": "ws: 前缀下的 .excalidraw 文件路径（如 ws:diagrams/mydiagram.excalidraw）。",
+                    # ws: 前缀下的 .excalidraw 文件路径（如 ws:diagrams/mydiagram.excalidraw）。
+                    "description": "Path to .excalidraw file under ws: prefix (e.g. ws:diagrams/mydiagram.excalidraw).",
                 },
             },
             "required": ["path"],

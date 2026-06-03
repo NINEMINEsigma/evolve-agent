@@ -37,11 +37,11 @@ async def _handle_install_package(args: Dict[str, Any]) -> str:
     session_id: str = str(args.get("_session_id", ""))
 
     if not packages:
-        return tool_error("packages 是必填的 — 要安装的包名，空格分隔")
+        return tool_error("packages is required — package names to install, space-separated")
 
     pkg_list: List[str] = [p.strip() for p in packages.split() if p.strip()]
     if not pkg_list:
-        return tool_error("packages 不能为空")
+        return tool_error("packages cannot be empty")
 
     # ── 用户确认 ──
     if session_id:
@@ -49,15 +49,16 @@ async def _handle_install_package(args: Dict[str, Any]) -> str:
             session_id, "install_package",
             {"packages": packages, "reason": reason},
             reason,
-            f"安装包: `{packages}`\n原因: {reason}",
+            f"Install package: `{packages}`\nReason: {reason}",
         )
     else:
-        result = ApprovalResult(action="deny", deny_reason="缺少 session_id")
+        result = ApprovalResult(action="deny", deny_reason="missing session_id")
 
     if result.action == "deny":
-        source_label = {"model": "审批模型", "user": "用户", "system": "系统"}.get(result.denied_by, "系统")
+        # 审批模型/用户/系统
+        source_label = {"model": "approval model", "user": "user", "system": "system"}.get(result.denied_by, "system")
         return tool_error(
-            f"[{source_label}拒绝] {result.deny_reason or '未知原因'}",
+            f"[{source_label} denied] {result.deny_reason or 'unknown reason'}",
             packages=pkg_list,
             denied=True,
         )
@@ -72,9 +73,9 @@ async def _handle_install_package(args: Dict[str, Any]) -> str:
     try:
         proc = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
     except subprocess.TimeoutExpired:
-        return tool_error(f"pip install 超时 (120s): {packages}")
+        return tool_error(f"pip install timed out (120s): {packages}")
     except Exception as exc:
-        return tool_error(f"pip install 失败: {exc}")
+        return tool_error(f"pip install failed: {exc}")
 
     std = (proc.stdout or "") + "\n" + (proc.stderr or "")
     success = proc.returncode == 0
@@ -89,12 +90,12 @@ async def _handle_install_package(args: Dict[str, Any]) -> str:
         return tool_result(
             packages=installed or pkg_list,
             exit_code=0,
-            message=f"安装成功: {' '.join(installed or pkg_list)}\n{proc.stdout or ''}",
+            message=f"Installation successful: {' '.join(installed or pkg_list)}\n{proc.stdout or ''}",
         )
     # Failure
     error_lines = [l for l in (proc.stderr or "").splitlines() if "ERROR:" in l]
     err_msg = error_lines[0] if error_lines else (proc.stderr or "Unknown error").strip()
-    return tool_error(f"安装失败: {err_msg}")
+    return tool_error(f"Installation failed: {err_msg}")
 
 
 # ---------------------------------------------------------------------------
@@ -105,30 +106,39 @@ registry.register(
     name="install_package",
     toolset="python",
     schema={
+        # 安装 Python 包到当前运行环境中。
+        # 始终使用 ``sys.executable -m pip install`` 执行，保证包安装到
+        # 与 agent 进程相同的 Python 解释器。不要用 ``run_command`` 安装 pip 包。
+        # 用户将被提示批准（允许一次）或拒绝安装。
+        # 请始终包含 'reason' 解释需要安装的包的原因。
         "description": (
-            "安装 Python 包到当前运行环境中。\n\n"
-            "始终使用 ``sys.executable -m pip install`` 执行，保证包安装到\n"
-            "与 agent 进程相同的 Python 解释器。不要用 ``run_command`` 安装 pip 包。\n\n"
-            "用户将被提示批准（允许一次）或拒绝安装。\n"
-            "请始终包含 'reason' 解释需要安装的包的原因。\n\n"
-            "示例:\n"
-            "  install_package(packages=\"matplotlib\", reason=\"用于数据可视化\")\n"
-            "  install_package(packages=\"pandas numpy\", upgrade=True, reason=\"数据科学库\")\n"
+            "Install Python packages into the current runtime environment.\n\n"
+            "Always uses ``sys.executable -m pip install`` to ensure packages "
+            "are installed to the same Python interpreter as the agent process. "
+            "Do NOT use ``run_command`` to install pip packages.\n\n"
+            "The user will be prompted to approve (allow once) or deny the installation.\n"
+            "Always include 'reason' explaining why the package is needed.\n\n"
+            "Examples:\n"
+            "  install_package(packages=\"matplotlib\", reason=\"for data visualization\")\n"
+            "  install_package(packages=\"pandas numpy\", upgrade=True, reason=\"data science libraries\")\n"
         ),
         "parameters": {
             "type": "object",
             "properties": {
                 "packages": {
                     "type": "string",
-                    "description": "要安装的包名，多个包用空格分隔，如 \"matplotlib pandas\"",
+                    # 要安装的包名，多个包用空格分隔，如 "matplotlib pandas"
+                    "description": "Package names to install, space-separated, e.g. \"matplotlib pandas\"",
                 },
                 "upgrade": {
                     "type": "boolean",
-                    "description": "是否升级到最新版（pip install --upgrade），默认 false",
+                    # 是否升级到最新版（pip install --upgrade），默认 false
+                    "description": "Whether to upgrade to the latest version (pip install --upgrade), default false",
                 },
                 "reason": {
                     "type": "string",
-                    "description": "需要安装这些包的原因，将展示给用户以供审批。",
+                    # 需要安装这些包的原因，将展示给用户以供审批。
+                    "description": "Reason for installing these packages, shown to the user for approval.",
                 },
             },
             "required": ["packages", "reason"],

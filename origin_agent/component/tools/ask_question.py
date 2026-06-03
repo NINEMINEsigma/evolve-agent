@@ -59,7 +59,7 @@ async def _handle_ask_question(args: Dict[str, Any]) -> str:
         allow_custom = True
 
     if not session_id:
-        return tool_error("缺少 session_id，无法发送提问")
+        return tool_error("Missing session_id, cannot send question")
 
     # ── 注册异步等待 ──
     request_id: str = uuid.uuid4().hex[:8]
@@ -82,10 +82,10 @@ async def _handle_ask_question(args: Dict[str, Any]) -> str:
             }, ensure_ascii=False))
         except Exception as exc:
             _pending_asks.pop(request_id, None)
-            return tool_error(f"WebSocket 推送提问消息失败: {exc}")
+            return tool_error(f"Failed to push question via WebSocket: {exc}")
     else:
         _pending_asks.pop(request_id, None)
-        return tool_error("WebSocket 连接不可用，无法发送提问")
+        return tool_error("WebSocket connection unavailable, cannot send question")
 
     # ── 等待用户回答（最多 600 秒）──
     try:
@@ -99,13 +99,13 @@ async def _handle_ask_question(args: Dict[str, Any]) -> str:
         )
     except asyncio.CancelledError:
         _pending_asks.pop(request_id, None)
-        return tool_error("提问请求被取消")
+        return tool_error("Question request was cancelled")
     except asyncio.TimeoutError:
         _pending_asks.pop(request_id, None)
-        return tool_error("用户回答超时（600s）")
+        return tool_error("User response timed out (600s)")
     except Exception as exc:
         _pending_asks.pop(request_id, None)
-        return tool_error(f"提问处理异常: {exc}")
+        return tool_error(f"Question handling error: {exc}")
 
 
 # ── 注册 ─────────────────────────────────────────────────────
@@ -114,21 +114,31 @@ registry.register(
     name="ask_question",
     toolset="core",
     schema={
+        # 向当前用户提问，提供预设选项供选择，并可选择允许用户自定义输入。
+        # 适用于需要用户决策的场景，如：
+        #   - 询问用户想要怎么处理某个文件
+        #   - 让用户从多个方案中选择一个
+        #   - 收集用户的偏好或确认信息
+        # 返回用户选择的 option（选项的 value）和/或 custom_text（自定义输入）。
+        # 如果用户未选择任何选项也未输入自定义文本，answered 字段为 false。
         "description": (
-            "向当前用户提问，提供预设选项供选择，并可选择允许用户自定义输入。\n\n"
-            "适用于需要用户决策的场景，如：\n"
-            "  - 询问用户想要怎么处理某个文件\n"
-            "  - 让用户从多个方案中选择一个\n"
-            "  - 收集用户的偏好或确认信息\n\n"
-            "返回用户选择的 option（选项的 value）和/或 custom_text（自定义输入）。\n"
-            "如果用户未选择任何选项也未输入自定义文本，answered 字段为 false。"
+            "Ask the current user a question with preset options to choose from, "
+            "and optionally allow custom input.\n\n"
+            "Useful for scenarios requiring a user decision, e.g.:\n"
+            "  - Asking the user how to handle a file\n"
+            "  - Letting the user choose from multiple options\n"
+            "  - Collecting user preferences or confirmation\n\n"
+            "Returns the user's chosen option (option's value) and/or custom_text. "
+            "If the user neither selects an option nor enters custom text, "
+            "answered will be false."
         ),
         "parameters": {
             "type": "object",
             "properties": {
                 "question": {
                     "type": "string",
-                    "description": "要向用户提出的问题。",
+                    # 要向用户提出的问题。
+                    "description": "The question to ask the user.",
                 },
                 "options": {
                     "type": "array",
@@ -140,11 +150,13 @@ registry.register(
                         },
                         "required": ["label", "value"],
                     },
-                    "description": "预设选项列表，每项包含 label（显示文本）和 value（返回值）。留空或 null 时仅允许自定义输入。",
+                    # 预设选项列表，每项包含 label（显示文本）和 value（返回值）。留空或 null 时仅允许自定义输入。
+                    "description": "List of preset options, each with a label (display text) and value (return value). When empty or null, only custom input is allowed.",
                 },
                 "allow_custom": {
                     "type": "boolean",
-                    "description": "是否允许用户输入自定义文本（默认 true）。设为 false 时用户必须在预设选项中做出选择。",
+                    # 是否允许用户输入自定义文本（默认 true）。设为 false 时用户必须在预设选项中做出选择。
+                    "description": "Whether to allow custom text input (default true). When false, the user must choose from preset options.",
                     "default": True,
                 },
             },

@@ -327,7 +327,7 @@ class SessionManager:
         if sdir:
             sdir.mkdir(parents=True, exist_ok=True)
             msg_path: Path = sdir / "messages.jsonl"
-            entry: dict = {"role": "system", "content": f"[会话延续摘要]\n{summary}"}
+            entry: dict = {"role": "system", "content": f"[Session continuation summary]\n{summary}"}
             try:
                 with open(msg_path, "a", encoding="utf-8") as f:
                     f.write(json.dumps(entry, ensure_ascii=False) + "\n")

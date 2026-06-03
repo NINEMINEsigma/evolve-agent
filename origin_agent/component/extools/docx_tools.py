@@ -107,20 +107,26 @@ registry.register(
     toolset="extools",
     schema={
         "description": (
-            "读取 .docx Word 文档。返回：\n"
-            "1) paragraphs — 段落列表（含文本和样式名称）\n"
-            "2) tables — 文档中的表格（含表头和数据行）\n"
-            "3) plain_text — 纯文本拼接，便于快速预览\n"
-            "空段落会被跳过。"
+            # 读取 .docx Word 文档。返回：
+            # 1) paragraphs — 段落列表（含文本和样式名称）
+            # 2) tables — 文档中的表格（含表头和数据行）
+            # 3) plain_text — 纯文本拼接，便于快速预览
+            # 空段落会被跳过。
+            "Read a .docx Word document. Returns:\n"
+            "1) paragraphs — list of paragraphs (with text and style name)\n"
+            "2) tables — tables in the document (with headers and data rows)\n"
+            "3) plain_text — concatenated plain text for quick preview\n"
+            "Empty paragraphs are skipped."
         ),
         "parameters": {
             "type": "object",
             "properties": {
                 "path": {
                     "type": "string",
+                    # Word 文档逻辑路径，必须使用命名空间前缀（ws:、fork:）。例如 'ws:docs/report.docx'。
                     "description": (
-                        "Word 文档逻辑路径，必须使用命名空间前缀 "
-                        "（ws:、fork:）。例如 'ws:docs/report.docx'。"
+                        "Word document logical path, must use a namespace prefix "
+                        "(ws:, fork:). E.g. 'ws:docs/report.docx'."
                     ),
                 },
             },

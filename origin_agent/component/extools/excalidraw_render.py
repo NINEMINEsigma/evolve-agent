@@ -77,7 +77,7 @@ def render(
         from playwright.sync_api import sync_playwright
     except ImportError:
         raise RuntimeError(
-            "需要 playwright 库:\n"
+            "playwright library is required:\n"
             "  pip install playwright\n"
             "  python -m playwright install chromium"
         )
@@ -101,10 +101,10 @@ def render(
         except Exception as e:
             if "Executable doesn't exist" in str(e):
                 raise RuntimeError(
-                    "Chromium 未安装:\n"
+                    "Chromium is not installed:\n"
                     "  python -m playwright install chromium"
                 )
-            raise RuntimeError(f"浏览器启动失败: {e}")
+            raise RuntimeError(f"Browser launch failed: {e}")
 
         page = browser.new_page(
             viewport={"width": vp_width, "height": vp_height},
@@ -121,14 +121,14 @@ def render(
             )
         except Exception as exc:
             browser.close()
-            raise RuntimeError(f"Excalidraw 模块加载超时 (120s): {exc}")
+            raise RuntimeError(f"Excalidraw module load timed out (120s): {exc}")
 
         # Evaluate the render function
         result = page.evaluate(f"window.renderDiagram({json.dumps(data)})")
         if not result or not result.get("success"):
             err = result.get("error", "unknown error") if result else "renderDiagram returned null"
             browser.close()
-            raise RuntimeError(f"渲染失败: {err}")
+            raise RuntimeError(f"Render failed: {err}")
 
         # Wait for the SVG to be fully rendered. Complex diagrams with many
         # elements may take significant time.
@@ -140,7 +140,7 @@ def render(
         except Exception as exc:
             # Capture partial state for debugging
             has_svg = page.query_selector("#root svg") is not None
-            err_info = f"渲染等待超时 (120s), SVG 已生成={has_svg}"
+            err_info = f"Render wait timed out (120s), SVG generated={has_svg}"
             if not has_svg:
                 # Check for any JS errors
                 logs = page.evaluate("() => window.__renderError || null")

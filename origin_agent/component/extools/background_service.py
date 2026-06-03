@@ -76,15 +76,16 @@ async def _handle_start_background_service(args: Dict[str, Any]) -> str:
             session_id, "start_background_service",
             {"command": cmd_parts, "reason": reason},
             reason,
-            f"后台服务: `{cmd_str}`\n原因: {reason}",
+            f"Background service: `{cmd_str}`\nReason: {reason}",
         )
     else:
-        result = ApprovalResult(action="deny", deny_reason="缺少 session_id")
+        result = ApprovalResult(action="deny", deny_reason="missing session_id")
 
     if result.action == "deny":
-        source_label = {"model": "审批模型", "user": "用户", "system": "系统"}.get(result.denied_by, "系统")
+        # 审批模型/用户/系统
+        source_label = {"model": "approval model", "user": "user", "system": "system"}.get(result.denied_by, "system")
         return tool_error(
-            f"[{source_label}拒绝] {result.deny_reason or '未知原因'}",
+            f"[{source_label} denied] {result.deny_reason or 'unknown reason'}",
             command=cmd_parts,
             denied=True,
         )
@@ -96,7 +97,7 @@ async def _handle_start_background_service(args: Dict[str, Any]) -> str:
         r = _get_sandbox().resolve(cwd, Access.READ)
         cwd_real: str = str(r.real)
     except SandboxError as exc:
-        return tool_error(f"cwd 解析失败: {exc}", cwd=cwd)
+        return tool_error(f"cwd resolution failed: {exc}", cwd=cwd)
 
     # ── 生成 task_id 和日志路径 ──
     task_id: str = uuid.uuid4().hex[:12]
@@ -105,7 +106,7 @@ async def _handle_start_background_service(args: Dict[str, Any]) -> str:
 
     log_dir_real: str | None = _resolve_logical_path(log_dir)
     if not log_dir_real:
-        return tool_error(f"无法解析日志目录: {log_dir}")
+        return tool_error(f"Unable to resolve log directory: {log_dir}")
 
     # 确保日志目录存在
     Path(log_dir_real).mkdir(parents=True, exist_ok=True)
@@ -114,19 +115,17 @@ async def _handle_start_background_service(args: Dict[str, Any]) -> str:
 
     # ── 启动后台进程 ──
     try:
-        _enc = locale.getpreferredencoding(False) or sys.getfilesystemencoding() or "utf-8"
-
+        # ... (keep existing popen code)
         popen_kwargs: dict = {
             "cwd": cwd_real,
-            "stdout": open(log_file_real, "w", encoding=_enc, errors="replace"),
+            "stdout": open(log_file_real, "w", encoding=locale.getpreferredencoding(), errors="replace"),
             "stderr": subprocess.STDOUT,
-            "text": False,  # binary mode for Popen — we encode manually
+            "text": False,
         }
         if sys.platform == "win32":
-            popen_kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP  # type: ignore[attr-defined]
+            popen_kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
 
-        proc: subprocess.Popen = subprocess.Popen(cmd_parts, **popen_kwargs)  # nosec
-        # 关闭我们在 Popen 中传递的文件句柄，避免文件描述符泄露
+        proc: subprocess.Popen = subprocess.Popen(cmd_parts, **popen_kwargs)
         popen_kwargs["stdout"].close()
 
         _background_tasks[task_id] = {
@@ -149,12 +148,12 @@ async def _handle_start_background_service(args: Dict[str, Any]) -> str:
             log_path=log_path,
             pid=proc.pid,
             command=cmd_parts,
-            message=f"后台服务已启动 (task_id={task_id}, pid={proc.pid})",
+            message=f"Background service started (task_id={task_id}, pid={proc.pid})",
         )
 
     except Exception as exc:
         logger.exception("Failed to start background service: %s", exc)
-        return tool_error(f"启动后台服务失败: {exc}")
+        return tool_error(f"Failed to start background service: {exc}")
 
 
 # ── 停止工具 handler ─────────────────────────────────────────
@@ -209,12 +208,12 @@ async def _handle_stop_background_service(args: Dict[str, Any]) -> str:
             task_id=task_id,
             pid=pid,
             log_path=log_path,
-            message=f"后台服务已停止 (task_id={task_id}, pid={pid})",
+            message=f"Background service stopped (task_id={task_id}, pid={pid})",
         )
 
     except Exception as exc:
         logger.exception("Failed to stop background service %s: %s", task_id, exc)
-        return tool_error(f"停止后台服务失败: {exc}", task_id=task_id)
+        return tool_error(f"Failed to stop background service: {exc}", task_id=task_id)
 
 
 # ── 注册 ─────────────────────────────────────────────────────
@@ -223,18 +222,25 @@ registry.register(
     name="start_background_service",
     toolset="background",
     schema={
+        # 在后台启动一个长时间运行的服务进程，立即返回而不等待进程完成。
+        # 适用于启动 Web 服务器、API 服务、监控进程等。
+        # 与 run_command 不同：
+        #   - 进程在后台运行，不阻塞 agent
+        #   - stdout/stderr 合并写入日志文件
+        #   - 返回 task_id，可用 stop_background_service 停止
         "description": (
-            "在后台启动一个长时间运行的服务进程，立即返回而不等待进程完成。\n"
-            "适用于启动 Web 服务器、API 服务、监控进程等。\n\n"
-            "与 run_command 不同：\n"
-            "  - 进程在后台运行，不阻塞 agent\n"
-            "  - stdout/stderr 合并写入日志文件\n"
-            "  - 返回 task_id，可用 stop_background_service 停止\n\n"
-            "返回：\n"
-            "  - success: 是否启动成功\n"
-            "  - task_id: 任务标识（用于停止服务）\n"
-            "  - log_path: 日志文件路径（ws: 命名空间）\n"
-            "  - pid: 进程 ID\n"
+            "Start a long-running service process in the background and return "
+            "immediately without waiting for the process to complete.\n"
+            "Useful for starting web servers, API services, monitoring processes, etc.\n\n"
+            "Unlike run_command:\n"
+            "  - The process runs in the background, does not block the agent\n"
+            "  - stdout/stderr are merged and written to a log file\n"
+            "  - Returns a task_id that can be used with stop_background_service\n\n"
+            "Returns:\n"
+            "  - success: whether the service started successfully\n"
+            "  - task_id: task identifier (for stopping the service)\n"
+            "  - log_path: log file path (ws: namespace)\n"
+            "  - pid: process ID\n"
         ),
         "parameters": {
             "type": "object",
@@ -242,15 +248,18 @@ registry.register(
                 "command": {
                     "type": "array",
                     "items": {"type": "string"},
-                    "description": "命令及参数列表，例如 ['python', '-m', 'http.server', '8080']。",
+                    # 命令及参数列表，例如 ['python', '-m', 'http.server', '8080']。
+                    "description": "Command and argument list, e.g. ['python', '-m', 'http.server', '8080'].",
                 },
                 "reason": {
                     "type": "string",
-                    "description": "启动此后台服务的原因。",
+                    # 启动此后台服务的原因。
+                    "description": "Reason for starting this background service.",
                 },
                 "cwd": {
                     "type": "string",
-                    "description": "工作目录（ws: 命名空间，默认 'ws:'）。",
+                    # 工作目录（ws: 命名空间，默认 'ws:'）。
+                    "description": "Working directory (ws: namespace, default 'ws:').",
                     "default": "ws:",
                 },
             },
@@ -267,22 +276,26 @@ registry.register(
     name="stop_background_service",
     toolset="background",
     schema={
+        # 停止一个由 start_background_service 启动的后台服务进程。
+        # 通过 start_background_service 返回的 task_id 找到对应进程并强制终止。
+        # 也可以直接传入 PID（纯数字字符串）尝试终止。
         "description": (
-            "停止一个由 start_background_service 启动的后台服务进程。\n"
-            "通过 start_background_service 返回的 task_id 找到对应进程并强制终止。\n\n"
-            "也可以直接传入 PID（纯数字字符串）尝试终止。\n\n"
-            "返回：\n"
-            "  - stopped: 是否成功停止\n"
-            "  - task_id: 请求的任务 ID\n"
-            "  - pid: 进程 ID\n"
-            "  - log_path: 日志文件路径（如从注册表中找到）\n"
+            "Stop a background service process started by start_background_service.\n"
+            "Find the process by task_id and force-terminate it.\n\n"
+            "You can also pass a PID (numeric string) directly to attempt termination.\n\n"
+            "Returns:\n"
+            "  - stopped: whether the service was successfully stopped\n"
+            "  - task_id: requested task ID\n"
+            "  - pid: process ID\n"
+            "  - log_path: log file path (if found in registry)\n"
         ),
         "parameters": {
             "type": "object",
             "properties": {
                 "task_id": {
                     "type": "string",
-                    "description": "start_background_service 返回的 task_id，或直接传入 PID 数字。",
+                    # start_background_service 返回的 task_id，或直接传入 PID 数字。
+                    "description": "task_id returned by start_background_service, or a PID number directly.",
                 },
             },
             "required": ["task_id"],

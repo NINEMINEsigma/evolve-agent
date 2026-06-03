@@ -34,7 +34,7 @@ def _check_node_docx() -> str | None:
     try:
         subprocess.run(["node", "--version"], capture_output=True, text=True, timeout=10)
     except FileNotFoundError:
-        return "需要 Node.js 来生成 docx 文档。请安装 Node.js 后运行:\n  pnpm i -g docx"
+        return "Node.js is required to generate docx documents. Install Node.js then run:\n  pnpm i -g docx"
     # Check docx package
     try:
         subprocess.run(
@@ -42,7 +42,7 @@ def _check_node_docx() -> str | None:
             capture_output=True, text=True, timeout=10,
         )
     except Exception:
-        return "需要 docx npm 包:\n  pnpm i -g docx"
+        return "docx npm package is required:\n  pnpm i -g docx"
     return None
 
 
@@ -52,7 +52,7 @@ def _check_python_pptx() -> str | None:
         import pptx  # noqa: F401
         return None
     except ImportError:
-        return "需要 python-pptx 库:\n  pip install python-pptx"
+        return "python-pptx library is required:\n  pip install python-pptx"
 
 
 def _check_fpdf2() -> str | None:
@@ -61,7 +61,7 @@ def _check_fpdf2() -> str | None:
         import fpdf  # noqa: F401
         return None
     except ImportError:
-        return "需要 fpdf2 库:\n  pip install fpdf2"
+        return "fpdf2 library is required:\n  pip install fpdf2"
 
 
 # Lazy import of Sandbox (set at runtime by main.py)
@@ -292,22 +292,22 @@ def _handle_write_docx(args: Dict[str, Any]) -> str:
         )
     except subprocess.TimeoutExpired:
         js_path.unlink(missing_ok=True)
-        return tool_error("Node.js 执行超时 (30s)")
+        return tool_error("Node.js execution timed out (30s)")
     except Exception as exc:
         js_path.unlink(missing_ok=True)
-        return tool_error(f"Node.js 执行失败: {exc}")
+        return tool_error(f"Node.js execution failed: {exc}")
 
     js_path.unlink(missing_ok=True)
 
     if proc.returncode != 0:
         err = (proc.stderr or "").strip()
-        return tool_error(f"docx 生成失败: {err}")
+        return tool_error(f"docx generation failed: {err}")
 
     return tool_result(
         path=f"ws:documents/{output_rel.split('/')[-1]}",
         title=title,
         sections=len(sections),
-        message=f"docx 文档已生成: {output_rel}",
+        message=f"docx document generated: {output_rel}",
     )
 
 
@@ -320,15 +320,18 @@ def _handle_write_xlsx(args: Dict[str, Any]) -> str:
     """Generate an .xlsx file using openpyxl."""
     try:
         import openpyxl
+        from openpyxl.styles import Font
+        from openpyxl.utils import get_column_letter
     except ImportError:
-        return tool_error("需要 openpyxl 库 (已在 requirements.txt 中)")
+        return tool_error("openpyxl library is required (already in requirements.txt)")
 
     filename: str = str(args.get("filename", "workbook")).strip()
     sheets: list = args.get("sheets", []) or []
 
     wb = openpyxl.Workbook()
     # Remove default sheet
-    wb.remove(wb.active)
+    if wb.active is not None:
+        wb.remove(wb.active)
 
     for sheet_def in sheets:
         sheet_name: str = str(sheet_def.get("name", "Sheet")).strip()[:31]
@@ -341,7 +344,7 @@ def _handle_write_xlsx(args: Dict[str, Any]) -> str:
         if headers:
             for col_idx, h in enumerate(headers, 1):
                 cell = ws.cell(row=1, column=col_idx, value=str(h))
-                cell.font = openpyxl.styles.Font(bold=True)
+                cell.font = Font(bold=True)
             start_row = 2
         else:
             start_row = 1
@@ -358,18 +361,18 @@ def _handle_write_xlsx(args: Dict[str, Any]) -> str:
                 cell_val = ws.cell(row=row_idx, column=col_idx).value
                 if cell_val:
                     max_len = max(max_len, len(str(cell_val)))
-            ws.column_dimensions[openpyxl.utils.get_column_letter(col_idx)].width = min(max_len + 4, 60)
+            ws.column_dimensions[get_column_letter(col_idx)].width = min(max_len + 4, 60)
 
     output_fs, output_rel = _make_output_path("documents", "xlsx")
     try:
         wb.save(str(output_fs))
     except Exception as exc:
-        return tool_error(f"xlsx 保存失败: {exc}")
+        return tool_error(f"xlsx save failed: {exc}")
 
     return tool_result(
         path=f"ws:documents/{output_rel.split('/')[-1]}",
         sheets=len(sheets),
-        message=f"xlsx 工作簿已生成: {output_rel}",
+        message=f"xlsx workbook generated: {output_rel}",
     )
 
 
@@ -384,8 +387,11 @@ def _handle_write_pptx(args: Dict[str, Any]) -> str:
     if dep_err:
         return tool_error(dep_err)
 
-    from pptx import Presentation
-    from pptx.util import Inches, Pt
+    try:
+        from pptx import Presentation
+        from pptx.util import Inches, Pt
+    except ImportError:
+        return tool_error("python-pptx library is required: pip install python-pptx")
 
     slides_data: list = args.get("slides", []) or []
 
@@ -420,12 +426,12 @@ def _handle_write_pptx(args: Dict[str, Any]) -> str:
     try:
         prs.save(str(output_fs))
     except Exception as exc:
-        return tool_error(f"pptx 保存失败: {exc}")
+        return tool_error(f"pptx save failed: {exc}")
 
     return tool_result(
         path=f"ws:documents/{output_rel.split('/')[-1]}",
         slides=len(slides_data),
-        message=f"pptx 演示文稿已生成: {output_rel}",
+        message=f"pptx presentation generated: {output_rel}",
     )
 
 
@@ -478,13 +484,13 @@ def _handle_write_pdf(args: Dict[str, Any]) -> str:
     try:
         pdf.output(str(output_fs))
     except Exception as exc:
-        return tool_error(f"PDF 保存失败: {exc}")
+        return tool_error(f"PDF save failed: {exc}")
 
     return tool_result(
         path=f"ws:documents/{output_rel.split('/')[-1]}",
         title=title,
         pages=pdf.pages_count,
-        message=f"PDF 已生成: {output_rel}",
+        message=f"PDF generated: {output_rel}",
     )
 
 
@@ -497,7 +503,8 @@ registry.register(
     name="write_docx",
     toolset="document",
     schema={
-        "description": "生成 Word (.docx) 文件。需要 Node.js + docx npm 包 (pnpm i -g docx)。",
+        # 生成 Word (.docx) 文件。需要 Node.js + docx npm 包 (pnpm i -g docx)。
+        "description": "Generate a Word (.docx) file. Requires Node.js + docx npm package (pnpm i -g docx).",
         "parameters": {
             "type": "object",
             "properties": {
@@ -505,11 +512,14 @@ registry.register(
                 "subtitle": {"type": "string", "description": "可选的副标题。"},
                 "sections": {
                     "type": "array",
+                    # 文档章节列表。每项包含 heading (章节标题), level (1-3), content (内容块数组)。
+                    # 内容块类型: paragraph(文本), bullet_list(列表),
+                    # numbered_list(编号列表), table(表格，含 headers 和 rows)。
                     "description": (
-                        "文档章节列表。每项包含 heading (章节标题), "
-                        "level (1-3), content (内容块数组)。"
-                        "内容块类型: paragraph(文本), bullet_list(列表), "
-                        "numbered_list(编号列表), table(表格，含 headers 和 rows)。"
+                        "List of document sections. Each contains heading, "
+                        "level (1-3), content (array of content blocks). "
+                        "Content block types: paragraph, bullet_list, "
+                        "numbered_list, table (with headers and rows)."
                     ),
                     "items": {
                         "type": "object",
@@ -533,14 +543,16 @@ registry.register(
     name="write_xlsx",
     toolset="document",
     schema={
-        "description": "生成 Excel (.xlsx) 工作簿。使用 openpyxl。",
+        # 生成 Excel (.xlsx) 工作簿。使用 openpyxl。
+        "description": "Generate an Excel (.xlsx) workbook. Uses openpyxl.",
         "parameters": {
             "type": "object",
             "properties": {
                 "filename": {"type": "string", "description": "工作簿名称（不含扩展名）。"},
                 "sheets": {
                     "type": "array",
-                    "description": "工作表列表。每项包含 name, headers(表头), rows(数据行)。",
+                    # 工作表列表。每项包含 name, headers(表头), rows(数据行)。
+                    "description": "List of sheets. Each contains name, headers, rows.",
                     "items": {
                         "type": "object",
                         "properties": {
@@ -563,13 +575,15 @@ registry.register(
     name="write_pptx",
     toolset="document",
     schema={
-        "description": "生成 PowerPoint (.pptx) 演示文稿。需要 python-pptx (pip install python-pptx)。",
+        # 生成 PowerPoint (.pptx) 演示文稿。需要 python-pptx (pip install python-pptx)。
+        "description": "Generate a PowerPoint (.pptx) presentation. Requires python-pptx (pip install python-pptx).",
         "parameters": {
             "type": "object",
             "properties": {
                 "slides": {
                     "type": "array",
-                    "description": "幻灯片列表。每项包含 title 和 body (文本行数组)。",
+                    # 幻灯片列表。每项包含 title 和 body (文本行数组)。
+                    "description": "List of slides. Each contains title and body (array of text lines).",
                     "items": {
                         "type": "object",
                         "properties": {
@@ -591,7 +605,8 @@ registry.register(
     name="write_pdf",
     toolset="document",
     schema={
-        "description": "生成 PDF 文件。需要 fpdf2 (pip install fpdf2)。",
+        # 生成 PDF 文件。需要 fpdf2 (pip install fpdf2)。
+        "description": "Generate a PDF file. Requires fpdf2 (pip install fpdf2).",
         "parameters": {
             "type": "object",
             "properties": {
@@ -599,7 +614,8 @@ registry.register(
                 "content": {"type": "string", "description": "正文内容（纯文本，自动换行）。"},
                 "sections": {
                     "type": "array",
-                    "description": "章节列表。每项包含 heading 和 body。",
+                    # 章节列表。每项包含 heading 和 body。
+                    "description": "List of sections. Each contains heading and body.",
                     "items": {
                         "type": "object",
                         "properties": {

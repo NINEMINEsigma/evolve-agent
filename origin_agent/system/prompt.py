@@ -23,12 +23,12 @@ from typing import Optional
 
 logger = logging.getLogger(__name__)
 
+from system.pathutils import find_repo_root, get_templates_dir, get_template_path
+
 # 解析相对于此文件的 templates 目录。
 # 在源码树（origin_agent/system/）和 workspace 副本
 # （workspace/fast_agent_space/system/）中均可工作。
-_TEMPLATES_DIR: Path = Path(__file__).resolve().parent.parent / "templates"
-
-from system.pathutils import find_repo_root
+_TEMPLATES_DIR: Path = get_templates_dir()
 
 
 def _read_gene() -> str:
@@ -53,17 +53,17 @@ def _platform_info(lang: str = "en") -> str:
     if lang == "zh":
         if is_win:
             return (
-                "运行平台：**Windows**。Python 命令是 ``python``（不是 ``python3``）。\n"
-                "Windows 原生命令使用 ``cmd /c <命令>`` 形式。"
+                "Running on **Windows**. Python is ``python`` (not ``python3``).\n"
+                "For Windows built-in commands use ``cmd /c <command>``."
             )
         if is_mac:
             return (
-                "运行平台：**macOS**。Python 命令是 ``python3``。\n"
-                "使用标准 Unix shell 命令。"
+                "Running on **macOS**. Python is ``python3``.\n"
+                "Use standard Unix shell commands."
             )
         return (
-            "运行平台：**Linux**。Python 命令是 ``python3``。\n"
-            "使用标准 Unix shell 命令。"
+            "Running on **Linux**. Python is ``python3``.\n"
+            "Use standard Unix shell commands."
         )
     # English
     if is_win:

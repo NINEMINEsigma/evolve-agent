@@ -119,15 +119,16 @@ async def _handle_run_python(args: Dict[str, Any]) -> str:
             session_id, "run_python",
             {"command": cmd_parts, "reason": reason},
             reason,
-            f"Python 执行: `{cmd_str}`\n原因: {reason}",
+            f"Python execution: `{cmd_str}`\nReason: {reason}",
         )
     else:
         result = ApprovalResult(action="deny", deny_reason="缺少 session_id")
 
     if result.action == "deny":
-        source_label = {"model": "审批模型", "user": "用户", "system": "系统"}.get(result.denied_by, "系统")
+        # 审批模型/用户/系统
+        source_label = {"model": "approval model", "user": "user", "system": "system"}.get(result.denied_by, "system")
         return tool_error(
-            f"[{source_label}拒绝] {result.deny_reason or '未知原因'}",
+            f"[{source_label} denied] {result.deny_reason or 'unknown reason'}",
             command=cmd_parts,
             denied=True,
         )
@@ -168,46 +169,61 @@ registry.register(
     name="run_python",
     toolset="python",
     schema={
+        # 使用与 agent 进程相同的 Python 解释器执行代码。
+        # 与 run_command 不同，此工具固定使用当前解释器的完整路径，
+        # 不受 PATH 中 python 指向的影响。
+        # 两种模式：
+        #   1. 内联代码：传递 code="print('hello')"（等效于 python -c）。
+        #   2. 脚本文件：传递 script="ws:scripts/test.py"，可选地传递 args。
+        # 用户将被提示批准（允许一次/始终允许/拒绝）。
+        # 对于内联代码模式，规范形式始终为 '<python路径> -c <inline>'，
+        # 因此单独允许一次即可。
         "description": (
-            "使用与 agent 进程相同的 Python 解释器执行代码。"
-            "与 run_command 不同，此工具固定使用当前解释器的完整路径，"
-            "不受 PATH 中 python 指向的影响。\n\n"
-            "两种模式：\n"
-            "  1. 内联代码：传递 code=\"print('hello')\"（等效于 python -c）。\n"
-            "  2. 脚本文件：传递 script=\"ws:scripts/test.py\"，"
-            "可选地传递 args=[\"--flag\", \"val\"]。\n\n"
-            "用户将被提示批准（允许一次/始终允许/拒绝）。"
-            "对于内联代码模式，规范形式始终为 '<python路径> -c <inline>'，"
-            "因此单独允许一次即可。"
+            "Execute code using the same Python interpreter as the agent process. "
+            "Unlike run_command, this tool always uses the full path of the current interpreter, "
+            "unaffected by which python PATH points to.\n\n"
+            "Two modes:\n"
+            "  1. Inline code: pass code=\"print('hello')\" (equivalent to python -c).\n"
+            "  2. Script file: pass script=\"ws:scripts/test.py\", "
+            "optionally with args=[\"--flag\", \"val\"].\n\n"
+            "The user will be prompted to approve (allow once / always allow / deny). "
+            "For inline code mode, the canonical form is always "
+            "'<python_path> -c <inline>', so a single approval is sufficient."
         ),
         "parameters": {
             "type": "object",
             "properties": {
                 "code": {
                     "type": "string",
-                    "description": "要执行的 Python 内联代码（等效于 python -c \"...\"）。与 script 互斥。",
+                    # 要执行的 Python 内联代码（等效于 python -c "..."）。与 script 互斥。
+                    "description": "Inline Python code to execute (equivalent to python -c \"...\"). Mutually exclusive with script.",
                 },
                 "script": {
                     "type": "string",
-                    "description": "要执行的 Python 脚本的逻辑路径（如 'ws:script.py'、'fork:test.py'）。与 code 互斥。",
+                    # 要执行的 Python 脚本的逻辑路径（如 'ws:script.py'、'fork:test.py'）。与 code 互斥。
+                    "description": "Logical path to a Python script to execute (e.g. 'ws:script.py', 'fork:test.py'). Mutually exclusive with code.",
                 },
                 "args": {
                     "type": "array",
                     "items": {"type": "string"},
-                    "description": "传递给脚本的附加参数（仅 script 模式可用）。",
+                    # 传递给脚本的附加参数（仅 script 模式可用）。
+                    "description": "Additional arguments to pass to the script (script mode only).",
                 },
                 "reason": {
                     "type": "string",
-                    "description": "执行此 Python 代码的原因。",
+                    # 执行此 Python 代码的原因。
+                    "description": "The reason for executing this Python code.",
                 },
                 "cwd": {
                     "type": "string",
-                    "description": "工作目录（ws: 命名空间，默认 'ws:'）。",
+                    # 工作目录（ws: 命名空间，默认 'ws:'）。
+                    "description": "Working directory (ws: namespace, default 'ws:').",
                     "default": "ws:",
                 },
                 "timeout": {
                     "type": "integer",
-                    "description": "超时秒数（默认 60，最大 300）。",
+                    # 超时秒数（默认 60，最大 300）。
+                    "description": "Timeout in seconds (default 60, max 300).",
                     "default": 60,
                 },
             },
