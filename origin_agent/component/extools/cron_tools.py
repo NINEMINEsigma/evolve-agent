@@ -1,0 +1,886 @@
+"""Cron 定时任务工具 — 创建和管理周期性执行的后台任务。
+
+任务状态持久化到磁盘，后端重启后自动恢复并重新调度。
+会话断开不会终止定时任务，任务在后台继续运行直到完成或被显式取消。
+
+支持两种调度格式：
+  1. ``interval_seconds`` — 纯数字，最小 10 秒
+  2. Cron 表达式 — 5 字段 ``分 时 日 月 周``
+
+Weekday 遵循标准 cron 语义：0=Sunday, 1=Monday, ..., 6=Saturday。
+
+模块导入时通过 ``registry.register()`` 注册 4 个工具：
+  - ``schedule_cron``      — 创建定时任务
+  - ``list_cron_jobs``     — 列出当前会话的任务
+  - ``cancel_cron_job``    — 取消指定任务
+  - ``run_cron_job_now``   — 立即触发执行一次
+"""
+
+from __future__ import annotations
+
+import datetime
+import json
+import locale
+import logging
+import subprocess  # nosec
+import sys
+import threading
+import time
+import uuid
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Set
+
+from abstract.tools.registry import registry, tool_error, tool_result
+from component.approval import ApprovalResult, request_user_confirm
+
+logger = logging.getLogger(__name__)
+
+# ── 持久化路径 ────────────────────────────────────────────────
+
+# origin_agent/component/extools/cron_tools.py -> 项目根目录
+_REPO_ROOT: Path = Path(__file__).resolve().parents[3]
+_CRON_STORE_DIR: Path = _REPO_ROOT / "workspace" / "logs"
+_CRON_STORE_PATH: Path = _CRON_STORE_DIR / "cron_jobs.json"
+
+
+# ── cron 解析器（标准库实现）──────────────────────────────────
+
+
+def _parse_cron_field(field: str, min_val: int, max_val: int) -> Set[int]:
+    """解析单个 cron 字段，返回允许值的集合。
+
+    支持的语法::
+
+        *        — 任意值
+        */n      — 每 n 个单位
+        a-b      — 范围
+        a,b,c    — 列表
+        a-b/n    — 范围内每 n 个单位
+    """
+    result: Set[int] = set()
+    for part in field.split(","):
+        part = part.strip()
+        if part == "*":
+            result.update(range(min_val, max_val + 1))
+        elif "/" in part:
+            base, step_str = part.split("/", 1)
+            step = int(step_str)
+            if base == "*":
+                start = min_val
+            elif "-" in base:
+                start = int(base.split("-")[0])
+            else:
+                start = int(base)
+            result.update(range(start, max_val + 1, step))
+        elif "-" in part:
+            start, end = part.split("-", 1)
+            result.update(range(int(start), int(end) + 1))
+        else:
+            result.add(int(part))
+    return result
+
+
+def _match_cron(cron_expr: str, dt: datetime.datetime) -> bool:
+    """检查给定时间是否匹配 5 字段 cron 表达式 ``分 时 日 月 周``。
+
+    weekday 遵循标准 cron 语义：0=Sunday, 1=Monday, ..., 6=Saturday。
+    """
+    parts = cron_expr.split()
+    if len(parts) != 5:
+        raise ValueError(f"Cron expression must have 5 fields, got: {cron_expr}")
+
+    minute_s, hour_s, day_s, month_s, weekday_s = parts
+
+    if dt.minute not in _parse_cron_field(minute_s, 0, 59):
+        return False
+    if dt.hour not in _parse_cron_field(hour_s, 0, 23):
+        return False
+    if dt.day not in _parse_cron_field(day_s, 1, 31):
+        return False
+    if dt.month not in _parse_cron_field(month_s, 1, 12):
+        return False
+
+    # Python weekday: Monday=0 ... Sunday=6
+    # Cron weekday:   Sunday=0 ... Saturday=6
+    cron_wday = (dt.weekday() + 1) % 7
+    if cron_wday not in _parse_cron_field(weekday_s, 0, 6):
+        return False
+
+    return True
+
+
+def _next_cron_time(
+    cron_expr: str,
+    after: Optional[datetime.datetime] = None,
+) -> datetime.datetime:
+    """计算给定 cron 表达式的下一个执行时间。
+
+    从 *after* 之后的第一分钟开始逐分钟检查，返回最早匹配的时间。
+    最多搜索一年，未找到时抛出 ValueError。
+    """
+    after = after or datetime.datetime.now()
+    candidate = after.replace(second=0, microsecond=0) + datetime.timedelta(minutes=1)
+
+    max_iter = 366 * 24 * 60
+    for _ in range(max_iter):
+        if _match_cron(cron_expr, candidate):
+            return candidate
+        candidate += datetime.timedelta(minutes=1)
+
+    raise ValueError(f"No next execution time found for cron expression: {cron_expr}")
+
+
+# ── 任务数据结构 ───────────────────────────────────────────
+
+
+@dataclass
+class _CronTask:
+    task_id: str
+    session_id: str
+    name: str
+    schedule_type: str  # "interval" | "cron"
+    schedule_value: str
+    command: List[str]
+    cwd: str
+    enabled: bool = True
+    next_run: float = 0.0
+    run_count: int = 0
+    max_runs: int = 0  # 0 = unlimited
+    last_run: float = 0.0
+    log_path: str = ""
+    _timer: Optional[threading.Timer] = field(default=None, repr=False)
+
+
+# ── 任务注册表 ──────────────────────────────────────────────
+
+_cron_tasks: Dict[str, Dict[str, _CronTask]] = {}
+_cron_lock: threading.RLock = threading.RLock()
+_MAX_JOBS_PER_SESSION: int = 20
+
+# ── 事件回调 ──────────────────────────────────────────────────
+# 由 gateway/server.py 注册，用于在任务执行完成后向前端推送结果。
+
+_CronEventCallback = Any  # Callable[[str, str, str, int, str], None]
+_cron_event_callbacks: List[_CronEventCallback] = []
+
+
+def register_cron_event_callback(cb: _CronEventCallback) -> None:
+    """注册一个回调，在定时任务执行完成后触发。
+
+    回调签名::
+
+        cb(session_id, task_id, name, exit_code, stdout_preview) -> None
+    """
+    _cron_event_callbacks.append(cb)
+
+
+def _notify_cron_event(
+    session_id: str,
+    task_id: str,
+    name: str,
+    exit_code: int,
+    stdout_preview: str,
+) -> None:
+    """通知所有已注册的 cron 事件回调。"""
+    for cb in _cron_event_callbacks:
+        try:
+            cb(session_id, task_id, name, exit_code, stdout_preview)
+        except Exception as exc:
+            logger.debug("Cron event callback error: %s", exc)
+
+
+# ── 持久化辅助 ───────────────────────────────────────────────
+
+
+def _task_to_dict(task: _CronTask) -> dict:
+    """将 _CronTask 序列化为字典（不含 _timer）。"""
+    return {
+        "task_id": task.task_id,
+        "session_id": task.session_id,
+        "name": task.name,
+        "schedule_type": task.schedule_type,
+        "schedule_value": task.schedule_value,
+        "command": task.command,
+        "cwd": task.cwd,
+        "enabled": task.enabled,
+        "next_run": task.next_run,
+        "run_count": task.run_count,
+        "max_runs": task.max_runs,
+        "last_run": task.last_run,
+        "log_path": task.log_path,
+    }
+
+
+def _task_from_dict(data: dict) -> _CronTask:
+    """从字典反序列化为 _CronTask。"""
+    return _CronTask(
+        task_id=data["task_id"],
+        session_id=data["session_id"],
+        name=data.get("name", ""),
+        schedule_type=data["schedule_type"],
+        schedule_value=data["schedule_value"],
+        command=list(data.get("command", [])),
+        cwd=data.get("cwd", "ws:"),
+        enabled=data.get("enabled", True),
+        next_run=float(data.get("next_run", 0.0)),
+        run_count=int(data.get("run_count", 0)),
+        max_runs=int(data.get("max_runs", 0)),
+        last_run=float(data.get("last_run", 0.0)),
+        log_path=data.get("log_path", ""),
+    )
+
+
+def _save_all_tasks() -> None:
+    """将所有任务状态持久化到磁盘。"""
+    try:
+        _CRON_STORE_DIR.mkdir(parents=True, exist_ok=True)
+        with _cron_lock:
+            payload: Dict[str, Dict[str, dict]] = {}
+            for sid, tasks in _cron_tasks.items():
+                payload[sid] = {}
+                for tid, task in tasks.items():
+                    payload[sid][tid] = _task_to_dict(task)
+        _CRON_STORE_PATH.write_text(
+            json.dumps(payload, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+    except Exception as exc:
+        logger.warning("Failed to save cron jobs: %s", exc)
+
+
+def _load_all_tasks() -> None:
+    """从磁盘加载任务状态并重新调度。"""
+    if not _CRON_STORE_PATH.exists():
+        return
+    try:
+        raw: dict = json.loads(_CRON_STORE_PATH.read_text(encoding="utf-8"))
+    except Exception as exc:
+        logger.warning("Failed to load cron jobs: %s", exc)
+        return
+
+    restored = 0
+    for sid, tasks in raw.items():
+        for tid, data in tasks.items():
+            try:
+                task = _task_from_dict(data)
+                if not task.enabled:
+                    continue
+                # 重新计算 next_run
+                _restore_and_schedule_task(task)
+                with _cron_lock:
+                    if sid not in _cron_tasks:
+                        _cron_tasks[sid] = {}
+                    _cron_tasks[sid][tid] = task
+                restored += 1
+            except Exception as exc:
+                logger.warning("Failed to restore cron job %s: %s", tid, exc)
+
+    if restored:
+        logger.info("Restored and rescheduled %d cron jobs from disk", restored)
+
+
+def _restore_and_schedule_task(task: _CronTask) -> None:
+    """进程重启后恢复任务：校正 next_run 并启动 Timer。"""
+    now = time.time()
+
+    if task.schedule_type == "interval":
+        interval = float(task.schedule_value)
+        if task.next_run <= now:
+            # 进程终止期间错过了执行时间：从当前时间重新开始
+            task.next_run = now + interval
+    else:  # cron
+        try:
+            next_dt = _next_cron_time(task.schedule_value)
+            task.next_run = next_dt.timestamp()
+        except Exception as exc:
+            logger.error(
+                "Failed to calculate next run for restored cron task %s: %s",
+                task.task_id, exc,
+            )
+            task.enabled = False
+            return
+
+    _schedule_next(task)
+
+
+# ── 公开 API：会话清理 ──────────────────────────────────────
+
+
+def cleanup_session_cron_jobs(session_id: str) -> int:
+    """清理指定会话的所有定时任务。返回清理的任务数量。
+
+    注意：此函数不再由 WebSocket 断开自动调用。
+    仅在需要显式清理某个会话的所有任务时使用。
+    """
+    with _cron_lock:
+        session_tasks = _cron_tasks.pop(session_id, {})
+
+    count = 0
+    for task in session_tasks.values():
+        task.enabled = False
+        if task._timer:
+            task._timer.cancel()
+            task._timer = None
+        count += 1
+
+    if count:
+        logger.info("Cleaned up %d cron jobs for session=%s", count, session_id)
+        _save_all_tasks()
+    return count
+
+
+# ── 路径解析辅助 ──────────────────────────────────────────────
+
+
+def _resolve_cwd(cwd: str) -> str:
+    """将逻辑路径解析为真实文件系统路径，失败时回退到当前工作目录。"""
+    from component.tools.filesystem import _s as _get_sandbox
+    from system.sandbox import Access
+
+    try:
+        r = _get_sandbox().resolve(cwd, Access.READ)
+        return str(r.real)
+    except Exception:
+        return str(Path.cwd())
+
+
+def _resolve_log_path(log_path: str) -> Optional[str]:
+    """将日志逻辑路径解析为真实文件系统路径。"""
+    from component.tools.filesystem import _s as _get_sandbox
+    from system.sandbox import Access
+
+    try:
+        r = _get_sandbox().resolve(log_path, Access.WRITE)
+        return str(r.real)
+    except Exception:
+        return None
+
+
+# ── 调度器 ──────────────────────────────────────────────────
+
+
+def _schedule_next(task: _CronTask) -> None:
+    """计算并安排任务的下次执行（Timer 一次性触发）。"""
+    with _cron_lock:
+        if not task.enabled:
+            return
+
+        # 取消旧的 timer（如果有）
+        if task._timer is not None:
+            task._timer.cancel()
+            task._timer = None
+
+        now = time.time()
+
+        if task.schedule_type == "interval":
+            interval = float(task.schedule_value)
+            task.next_run = now + interval
+        else:  # cron
+            try:
+                next_dt = _next_cron_time(task.schedule_value)
+                task.next_run = next_dt.timestamp()
+            except Exception as exc:
+                logger.error(
+                    "Failed to calculate next run for cron task %s: %s",
+                    task.task_id, exc,
+                )
+                task.enabled = False
+                return
+
+        delay = max(0.1, task.next_run - now)
+        task._timer = threading.Timer(
+            delay, _run_task_wrapper, args=[task.task_id, task.session_id],
+        )
+        task._timer.daemon = True
+        task._timer.start()
+
+
+def _run_task_wrapper(task_id: str, session_id: str) -> None:
+    """Timer 回调包装：在持有锁的情况下查找任务，然后执行。"""
+    with _cron_lock:
+        session_tasks = _cron_tasks.get(session_id)
+        if not session_tasks:
+            return
+        task = session_tasks.get(task_id)
+        if not task or not task.enabled:
+            return
+
+    _run_task(task)
+
+
+def _run_task(task: _CronTask) -> None:
+    """在后台线程中执行定时任务命令并记录日志。"""
+    if not task.enabled:
+        return
+
+    task.last_run = time.time()
+
+    cwd_real = _resolve_cwd(task.cwd)
+    log_file: Optional[str] = None
+    if task.log_path:
+        log_file = _resolve_log_path(task.log_path)
+        if log_file:
+            Path(log_file).parent.mkdir(parents=True, exist_ok=True)
+
+    exit_code = -1
+    stdout_text = ""
+
+    try:
+        _enc = locale.getpreferredencoding(False) or sys.getfilesystemencoding() or "utf-8"
+        popen_kwargs: Dict[str, Any] = {
+            "cwd": cwd_real,
+            "stdout": subprocess.PIPE,
+            "stderr": subprocess.STDOUT,
+            "text": True,
+            "encoding": _enc,
+            "errors": "replace",
+        }
+        if sys.platform == "win32":
+            popen_kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
+
+        result = subprocess.run(task.command, timeout=300, **popen_kwargs)
+        exit_code = result.returncode
+        stdout_text = result.stdout or ""
+
+        logger.info(
+            "Cron task executed | task=%s name=%s session=%s exit=%d",
+            task.task_id, task.name, task.session_id, exit_code,
+        )
+    except subprocess.TimeoutExpired:
+        logger.warning(
+            "Cron task timed out | task=%s session=%s",
+            task.task_id, task.session_id,
+        )
+        stdout_text = "[TIMEOUT after 300s]"
+    except Exception as exc:
+        logger.exception(
+            "Cron task failed | task=%s session=%s",
+            task.task_id, task.session_id,
+        )
+        stdout_text = f"[ERROR: {exc}]"
+
+    # 执行完成后递增计数
+    task.run_count += 1
+
+    # 达到最大执行次数限制时自动停止
+    if task.max_runs > 0 and task.run_count >= task.max_runs:
+        logger.info(
+            "Cron job reached max_runs | task=%s session=%s",
+            task.task_id, task.session_id,
+        )
+        task.enabled = False
+
+    # 写日志
+    if log_file:
+        try:
+            timestamp = datetime.datetime.now().isoformat()
+            with open(log_file, "a", encoding="utf-8") as f:
+                f.write(f"\n{'=' * 60}\n")
+                f.write(f"[{timestamp}] Run #{task.run_count} | Exit: {exit_code}\n")
+                f.write(f"Command: {' '.join(task.command)}\n")
+                f.write(f"Stdout:\n")
+                f.write(stdout_text)
+        except Exception as exc:
+            logger.warning("Failed to write cron log: %s", exc)
+
+    # 重新调度（如果仍然启用）并持久化
+    if task.enabled:
+        _schedule_next(task)
+    _save_all_tasks()
+
+    # 通知 Agent（无论是否达到 max_runs，确保执行结果被传递）
+    _notify_cron_event(
+        task.session_id,
+        task.task_id,
+        task.name,
+        exit_code,
+        f"task output is too long, you can view the full output in the log file: {task.log_path}" if len(stdout_text) > 5000 else stdout_text,
+    )
+
+
+# ── 工具 handler ─────────────────────────────────────────────
+
+
+async def _handle_schedule_cron(args: Dict[str, Any]) -> str:
+    """创建新的定时任务。"""
+    raw_schedule: str = str(args.get("schedule", "")).strip()
+    raw_command: Any = args.get("command")
+    reason: str = str(args.get("reason", "")).strip()
+    name: str = str(args.get("name", "")).strip()
+    cwd: str = str(args.get("cwd", "ws:")).strip()
+    max_runs: int = int(args.get("max_runs", 0))
+    session_id: str = str(args.get("_session_id", ""))
+
+    # ── 参数校验 ──
+    if not raw_schedule:
+        return tool_error("'schedule' is required")
+    if not raw_command or not isinstance(raw_command, list):
+        return tool_error("'command' must be a non-empty list of strings")
+    cmd_parts: List[str] = [str(p) for p in raw_command]
+    if not cmd_parts:
+        return tool_error("'command' must be a non-empty list")
+
+    # ── 解析 schedule 类型 ──
+    schedule_type: str
+    schedule_value: str
+    interval_sec: float = 0.0
+
+    if raw_schedule.isdigit():
+        schedule_type = "interval"
+        schedule_value = raw_schedule
+        interval_sec = int(raw_schedule)
+        if interval_sec < 10:
+            return tool_error("Interval must be at least 10 seconds")
+    else:
+        schedule_type = "cron"
+        schedule_value = raw_schedule
+        parts = raw_schedule.split()
+        if len(parts) != 5:
+            return tool_error(
+                "Cron expression must have 5 fields: min hour day month weekday"
+            )
+        try:
+            _next_cron_time(raw_schedule)
+        except ValueError as exc:
+            return tool_error(f"Invalid cron expression: {exc}")
+
+    # ── 任务数量限制 ──
+    with _cron_lock:
+        current_count = len(_cron_tasks.get(session_id, {}))
+    if current_count >= _MAX_JOBS_PER_SESSION:
+        return tool_error(
+            f"Maximum {_MAX_JOBS_PER_SESSION} cron jobs per session reached"
+        )
+
+    # ── 用户确认 ──
+    if session_id:
+        result: ApprovalResult = await request_user_confirm(
+            session_id,
+            "schedule_cron",
+            {"schedule": raw_schedule, "command": cmd_parts, "reason": reason},
+            reason,
+            f"Schedule cron job: `{raw_schedule}` -> `{' '.join(cmd_parts)}`\n"
+            f"Reason: {reason}",
+        )
+    else:
+        result = ApprovalResult(action="deny", deny_reason="missing session_id")
+
+    if result.action == "deny":
+        source_label = {
+            "model": "approval model",
+            "user": "user",
+            "system": "system",
+        }.get(result.denied_by, "system")
+        return tool_error(
+            f"[{source_label} denied] {result.deny_reason or 'unknown reason'}",
+            denied=True,
+        )
+
+    # ── 创建任务 ──
+    task_id: str = uuid.uuid4().hex[:12]
+    log_path = f"ws:logs/cron/{session_id}/{task_id}.log"
+
+    task = _CronTask(
+        task_id=task_id,
+        session_id=session_id,
+        name=name or f"cron-{task_id}",
+        schedule_type=schedule_type,
+        schedule_value=schedule_value,
+        command=cmd_parts,
+        cwd=cwd,
+        enabled=True,
+        log_path=log_path,
+        max_runs=max_runs,
+    )
+
+    with _cron_lock:
+        if session_id not in _cron_tasks:
+            _cron_tasks[session_id] = {}
+        _cron_tasks[session_id][task_id] = task
+
+    # 计算首次执行时间并启动调度
+    if schedule_type == "interval":
+        task.next_run = time.time() + interval_sec
+    else:
+        next_dt = _next_cron_time(schedule_value)
+        task.next_run = next_dt.timestamp()
+
+    _schedule_next(task)
+    _save_all_tasks()
+
+    logger.info(
+        "Cron job scheduled | task=%s session=%s schedule=%s command=%s",
+        task_id, session_id, raw_schedule, " ".join(cmd_parts),
+    )
+
+    return tool_result(
+        success=True,
+        task_id=task_id,
+        name=task.name,
+        schedule_type=schedule_type,
+        schedule_value=schedule_value,
+        next_run=datetime.datetime.fromtimestamp(
+            task.next_run, tz=datetime.timezone.utc,
+        ).isoformat(),
+        log_path=log_path,
+        message=(
+            f"Cron job scheduled (task_id={task_id}, "
+            f"next_run={datetime.datetime.fromtimestamp(task.next_run, tz=datetime.timezone.utc).isoformat()})"
+        ),
+    )
+
+
+async def _handle_list_cron_jobs(args: Dict[str, Any]) -> str:
+    """列出当前会话的所有定时任务。"""
+    session_id: str = str(args.get("_session_id", ""))
+
+    with _cron_lock:
+        session_tasks = _cron_tasks.get(session_id, {})
+        tasks: List[dict] = []
+        for task in session_tasks.values():
+            tasks.append(
+                {
+                    "task_id": task.task_id,
+                    "name": task.name,
+                    "schedule_type": task.schedule_type,
+                    "schedule_value": task.schedule_value,
+                    "command": task.command,
+                    "enabled": task.enabled,
+                    "next_run": (
+                        datetime.datetime.fromtimestamp(
+                            task.next_run, tz=datetime.timezone.utc,
+                        ).isoformat()
+                        if task.next_run
+                        else None
+                    ),
+                    "run_count": task.run_count,
+                    "max_runs": task.max_runs,
+                    "last_run": (
+                        datetime.datetime.fromtimestamp(
+                            task.last_run, tz=datetime.timezone.utc,
+                        ).isoformat()
+                        if task.last_run
+                        else None
+                    ),
+                    "log_path": task.log_path,
+                }
+            )
+
+    return tool_result(
+        success=True,
+        count=len(tasks),
+        tasks=tasks,
+    )
+
+
+async def _handle_cancel_cron_job(args: Dict[str, Any]) -> str:
+    """取消指定定时任务。"""
+    task_id: str = str(args.get("task_id", "")).strip()
+    session_id: str = str(args.get("_session_id", ""))
+
+    if not task_id:
+        return tool_error("'task_id' is required")
+
+    with _cron_lock:
+        session_tasks = _cron_tasks.get(session_id, {})
+        task = session_tasks.pop(task_id, None)
+
+    if not task:
+        return tool_error(f"Task not found: {task_id}")
+
+    task.enabled = False
+    if task._timer:
+        task._timer.cancel()
+        task._timer = None
+
+    _save_all_tasks()
+
+    logger.info(
+        "Cron job cancelled | task=%s session=%s", task_id, session_id,
+    )
+
+    return tool_result(
+        success=True,
+        task_id=task_id,
+        name=task.name,
+        message=f"Cancelled cron job: {task.name or task_id}",
+    )
+
+
+async def _handle_run_cron_job_now(args: Dict[str, Any]) -> str:
+    """立即触发指定任务执行一次（不影响正常调度）。"""
+    task_id: str = str(args.get("task_id", "")).strip()
+    session_id: str = str(args.get("_session_id", ""))
+
+    if not task_id:
+        return tool_error("'task_id' is required")
+
+    with _cron_lock:
+        task = _cron_tasks.get(session_id, {}).get(task_id)
+
+    if not task:
+        return tool_error(f"Task not found: {task_id}")
+
+    # 取消当前 timer，避免冲突
+    if task._timer:
+        task._timer.cancel()
+        task._timer = None
+
+    # 在新线程中立即执行
+    t = threading.Thread(target=_run_task, args=[task], daemon=True)
+    t.start()
+
+    logger.info(
+        "Cron job triggered manually | task=%s session=%s",
+        task_id, session_id,
+    )
+
+    return tool_result(
+        success=True,
+        task_id=task_id,
+        name=task.name,
+        message=f"Triggered immediate execution of cron job: {task.name or task_id}",
+    )
+
+
+# ── 注册 ─────────────────────────────────────────────────────
+
+registry.register(
+    name="schedule_cron",
+    toolset="cron",
+    schema={
+        "description": (
+            "Schedule a recurring background task that runs automatically at specified intervals.\n"
+            "Two schedule formats are supported:\n"
+            "  1. Interval: a number in seconds (e.g. '300' for every 5 minutes, min 10s).\n"
+            "  2. Cron expression: 5 fields 'minute hour day month weekday' "
+            "(e.g. '0 9 * * 1' for 9:00 AM every Monday).\n"
+            "     Weekday: 0=Sunday, 1=Monday, ..., 6=Saturday.\n\n"
+            "The task executes the given command in the background. stdout/stderr are written "
+            "to a log file. Tasks survive WebSocket disconnect and process restart.\n\n"
+            "Returns:\n"
+            "  - success: whether the task was created\n"
+            "  - task_id: unique identifier for managing the task\n"
+            "  - next_run: ISO timestamp of the next scheduled execution\n"
+            "  - log_path: path to the execution log file\n"
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "schedule": {
+                    "type": "string",
+                    "description": (
+                        "Schedule specification. Either: (1) a number in seconds for interval, "
+                        "or (2) a 5-field cron expression 'min hour day month weekday'. "
+                        "Examples: '60' (every 60s), '0 */6 * * *' (every 6 hours), "
+                        "'0 9 * * 1' (9am every Monday). Weekday: 0=Sunday."
+                    ),
+                },
+                "command": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Command and arguments to execute, e.g. ['python', '-c', 'print(1)'].",
+                },
+                "reason": {
+                    "type": "string",
+                    "description": "Reason for creating this scheduled task.",
+                },
+                "name": {
+                    "type": "string",
+                    "description": "Optional human-readable name for the task.",
+                },
+                "cwd": {
+                    "type": "string",
+                    "description": "Working directory (ws: namespace, default 'ws:').",
+                    "default": "ws:",
+                },
+                "max_runs": {
+                    "type": "integer",
+                    "description": "Maximum number of executions. 0 or omit for unlimited.",
+                    "default": 0,
+                },
+            },
+            "required": ["schedule", "command", "reason"],
+        },
+    },
+    handler=_handle_schedule_cron,
+    is_async=True,
+    emoji="⏰",
+    danger_level="dangerous",
+)
+
+registry.register(
+    name="list_cron_jobs",
+    toolset="cron",
+    schema={
+        "description": (
+            "List all scheduled cron jobs for the current session.\n"
+            "Returns task metadata including schedule, next run time, run count, and log path."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {},
+        },
+    },
+    handler=_handle_list_cron_jobs,
+    is_async=True,
+    emoji="📋",
+    danger_level="readonly",
+)
+
+registry.register(
+    name="cancel_cron_job",
+    toolset="cron",
+    schema={
+        "description": (
+            "Cancel and remove a scheduled cron job by its task_id.\n"
+            "The task will no longer execute. Pending executions are discarded."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "task_id": {
+                    "type": "string",
+                    "description": "task_id returned by schedule_cron.",
+                },
+            },
+            "required": ["task_id"],
+        },
+    },
+    handler=_handle_cancel_cron_job,
+    is_async=True,
+    emoji="🗑",
+    danger_level="write",
+)
+
+registry.register(
+    name="run_cron_job_now",
+    toolset="cron",
+    schema={
+        "description": (
+            "Immediately trigger a one-time execution of a scheduled cron job.\n"
+            "This does not affect the regular schedule — the next automatic execution "
+            "still occurs as originally planned (unless the task uses interval scheduling, "
+            "in which case the timer is reset from now)."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "task_id": {
+                    "type": "string",
+                    "description": "task_id returned by schedule_cron.",
+                },
+            },
+            "required": ["task_id"],
+        },
+    },
+    handler=_handle_run_cron_job_now,
+    is_async=True,
+    emoji="▶",
+    danger_level="dangerous",
+)
+
+
+# ── 进程启动时自动加载持久化的任务 ───────────────────────────
+_load_all_tasks()

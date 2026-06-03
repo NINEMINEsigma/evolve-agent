@@ -66,6 +66,18 @@ def configure_sessions(store_path: str | None = None) -> None:
 
 _tool_ws_sinks: Dict[str, WebSocket] = {}
 
+# ── cron 定时任务结果推送 ────────────────────────────────────
+# 后台线程通过 ws_chat 保存的 uvicorn 主事件循环调度协程。
+# 必须在 ws_chat 中设置，因为主循环引用无法从后台线程获取。
+
+_cron_push_loop: _asyncio.AbstractEventLoop | None = None
+
+
+def set_cron_event_loop(loop: _asyncio.AbstractEventLoop) -> None:
+    """由 main.py 在 server 启动后调用，保存主事件循环供后台线程使用。"""
+    global _cron_push_loop
+    _cron_push_loop = loop
+
 # ── shell 命令确认 ────────────────────────────────────────
 # {request_id: asyncio.Future} — 映射确认请求 ID 到 future，
 #   当用户批准/拒绝 run_command 时解析。
@@ -474,6 +486,9 @@ async def _handle_file_upload(ws: WebSocket, sid: str, msg: Message) -> None:
 async def ws_chat(ws: WebSocket) -> None:
     """WebSocket 聊天端点：接收用户消息，转发给 AgentLoop，返回回复。"""
     await ws.accept()
+    # 保存事件循环引用，供后台 cron 任务线程调度协程使用
+    global _cron_push_loop
+    _cron_push_loop = _asyncio.get_running_loop()
     # 如果客户端请求恢复之前的 session
     qs: dict[str, list[str]] = parse_qs(ws.scope.get("query_string", b"").decode())
     resume: str | None = qs.get("resume", [None])[0]
@@ -695,6 +710,9 @@ async def ws_chat(ws: WebSocket) -> None:
 
     except WebSocketDisconnect:
         logger.info("WebSocket disconnected | session=%s", sid)
+    except _asyncio.CancelledError:
+        # uvicorn 关闭时取消 handler task，属于正常退出，无需记录为错误
+        logger.debug("WebSocket handler cancelled for session=%s (server shutting down)", sid)
     finally:
         _deny_session_confirms(sid)
         _deny_session_asks(sid)
@@ -789,3 +807,75 @@ def create_server(host: str = "127.0.0.1", port: int = 8765) -> uvicorn.Server:
         log_level="warning",  # 抑制 uvicorn 自身的访问日志
     )
     return uvicorn.Server(config)
+
+
+# ---------------------------------------------------------------------------
+# Cron 定时任务结果回调
+# ---------------------------------------------------------------------------
+
+
+def _on_cron_event(
+    session_id: str,
+    task_id: str,
+    name: str,
+    exit_code: int,
+    stdout_preview: str,
+) -> None:
+    """定时任务执行完成后触发 Agent 回复。
+
+    将任务结果作为一条特殊修饰的用户消息注入 Agent 历史，
+    让 Agent 生成回复。若 session 当前有 WebSocket 连接，
+    则将回复推送到前端。
+    """
+    # 优先使用 ws_chat 中保存的主循环（保证正确）；
+    # 回退到 get_event_loop（仅在主线程中有效）
+    loop: _asyncio.AbstractEventLoop | None = _cron_push_loop
+    if loop is None:
+        try:
+            loop = _asyncio.get_event_loop()
+        except RuntimeError:
+            return
+    if loop.is_closed():
+        return
+
+    agent = _agent_loop
+    if agent is None or not hasattr(agent, "process_message"):
+        return
+
+    # 构建触发 Agent 的消息
+    status_label = "成功" if exit_code == 0 else f"失败 (exit={exit_code})"
+    message = (
+        f"[cron-result] 定时任务 `{name}` ({task_id}) 执行{status_label}\n"
+        f"输出预览:\n{stdout_preview[:800]}"
+    )
+
+    async def _trigger() -> None:
+        try:
+            reply: str = await agent.process_message(session_id, message)  # type: ignore[union-attr]
+        except Exception as exc:
+            logger.warning("Cron agent trigger error for session=%s: %s", session_id, exc)
+            return
+
+        # 若前端仍在连接，推送 Agent 回复
+        ws: WebSocket | None = _tool_ws_sinks.get(session_id)
+        if ws is not None:
+            try:
+                await ws.send_text(
+                    Message(
+                        type=MessageType.AGENT_MESSAGE,
+                        session_id=session_id,
+                        content=reply,
+                    ).to_json()
+                )
+            except Exception as exc:
+                logger.warning("Failed to push cron reply to session=%s: %s", session_id, exc)
+
+    _asyncio.run_coroutine_threadsafe(_trigger(), loop)
+
+
+# 注册回调（静默失败，避免 discover 阶段循环导入问题）
+try:
+    from component.extools.cron_tools import register_cron_event_callback
+    register_cron_event_callback(_on_cron_event)
+except Exception:
+    pass

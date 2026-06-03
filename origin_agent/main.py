@@ -177,9 +177,8 @@ You can modify your own source code and complete evolution through the following
 1. Use the filesystem tool to read source code from ``fork:``
 2. ``write_fork`` or ``edit_file`` — write evolved code to fork: or ws:
 3. ``validate_code`` — check syntax
-4. ``evolve_code`` — deep validate and trigger swap
-
-退出码 -1 通知编排器执行 slow→fast 替换并重启。
+4. ``diff_fast_fork`` — diff fast fork and save diff file
+5. ``evolve_code`` — deep validate and trigger swap
 """, encoding="utf-8")
                 logger.info("Seeded skill: self-evolution")
         except Exception as exc:
@@ -246,6 +245,11 @@ You can modify your own source code and complete evolution through the following
         )
         # 给 server 一点时间完成端口绑定
         await asyncio.sleep(0.5)
+
+        # 保存主事件循环，供 cron 后台线程调度协程使用
+        from gateway.server import set_cron_event_loop
+        set_cron_event_loop(asyncio.get_running_loop())
+
         logger.info("Gateway listening on ws://%s:%d/ws/chat", host, port)
         logger.info("WebPage on http://%s:%d", host, port)
 
