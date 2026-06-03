@@ -218,7 +218,7 @@ def _get_registered_mcp_tools() -> List[str]:
         from abstract.mcp.client import get_mcp_status
         status = get_mcp_status()
         tools = []
-        for server_state in status.values():
+        for server_state in status:
             tools.extend(server_state.get("tools", []))
         return tools
     except Exception:

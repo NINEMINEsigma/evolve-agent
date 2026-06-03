@@ -20,9 +20,9 @@ from pathlib import Path
 from typing import Any, Awaitable, Callable, Dict, List
 
 from abstract.memory.manager import MemoryManager
-from abstract.tools.registry import registry as tool_registry
-from component.approval import ApprovalResult, is_adventure_mode, request_user_confirm
-from component.llm import LLMClient, LLMResponse
+from abstract.tools.registry import ToolEntry, registry as tool_registry
+from component.approval import ApprovalResult, ask_agent_reason, is_adventure_mode, request_user_confirm
+from component.llm import LLMClient, LLMResponse, ToolCall
 from system.context import RuntimeContext
 from system.prompt import build_system_prompt
 
@@ -255,7 +255,7 @@ class AgentLoop:
                 llm_task: asyncio.Task[LLMResponse] = asyncio.create_task(
                     self._llm.chat(messages, tools=self._get_tool_definitions()),
                 )
-                cancel_task: asyncio.Task[None] = asyncio.create_task(cancel_event.wait())
+                cancel_task: asyncio.Task[bool] = asyncio.create_task(cancel_event.wait())
 
                 done: set[asyncio.Task[Any]]
                 pending: set[asyncio.Task[Any]]
@@ -315,7 +315,7 @@ class AgentLoop:
                         self._tool_event_callback(
                             session_id, "assistant_text", "",
                             json.dumps({"content": resp.content, "reasoning": resp.reasoning_content}),
-                        )
+                        ) # type: ignore
                     )
 
                 # 执行工具调用并将结果持久化到历史
@@ -614,8 +614,9 @@ class AgentLoop:
         if not history:
             return 0
 
+        enc: tiktoken.Encoding | None = None
         try:
-            enc: Any = tiktoken.encoding_for_model(self._ctx.llm_model)
+            enc = tiktoken.encoding_for_model(self._ctx.llm_model)
         except KeyError:
             # cl100k_base 覆盖 gpt-4、gpt-3.5-turbo 及大多数兼容模型
             enc = tiktoken.get_encoding("cl100k_base")
@@ -768,7 +769,7 @@ class AgentLoop:
             if not summary:
                 summary = "(Session context archived)"
         except Exception:
-            summary = "(会话上下文已归档)"
+            summary = "(Session context archived)"
 
         # 2. 同步 memory
         try:
@@ -867,7 +868,7 @@ class AgentLoop:
         history.append(entry)
         self._persist_message(session_id, entry)
 
-    async def _execute_tool(self, tc: Any, session_id: str = "") -> Dict[str, Any]:
+    async def _execute_tool(self, tc: ToolCall, session_id: str = "") -> Dict[str, Any]:
         """执行单个工具调用，返回 OpenAI 格式的工具消息。"""
         # 响应中断 — 每次工具执行前检查。
         # 同时检查取消事件，以处理中断在前一个 LLM 调用期间到达的情况。
@@ -893,7 +894,7 @@ class AgentLoop:
                 "Tool call '%s' skipped — arguments JSON parse failed. "
                 "Preview: %s", tc.name, args.get("_raw_preview", "")[:200],
             )
-            result: str = json.dumps({
+            _result: str = str(json.dumps({
                 "error": (
                     "Tool call parameter parsing failed. Your arguments JSON is incomplete or malformed "
                     "(possibly truncated due to content being too long). Please try: "
@@ -902,19 +903,19 @@ class AgentLoop:
                     "3) Or reduce the amount of data written in a single call."
                 ),
                 "_parse_failed": True,
-            }, ensure_ascii=False)
+            }, ensure_ascii=False))
             # Fire-and-forget: 前端推送是尽力而为的副作用，
             # 不能因为 WebSocket 发送失败或阻塞就中断工具执行主链路。
             if self._tool_event_callback:
                 asyncio.create_task(
                     self._tool_event_callback(
-                        session_id, "tool_result", tc.name, result,
-                    )
+                        session_id, "tool_result", tc.name, _result,
+                    ) # type: ignore
                 )
             return {
                 "role": "tool",
                 "tool_call_id": tc.id,
-                "content": result,
+                "content": _result,
             }
 
         logger.info("Tool call: %s args=%s", tc.name, tc.arguments)
@@ -931,7 +932,7 @@ class AgentLoop:
                 self._tool_event_callback(
                     session_id, "tool_call", tc.name,
                     json.dumps(tc.arguments, ensure_ascii=False),
-                )
+                ) # type: ignore
             )
 
         # ---- 冒险模式写入审批 ----
@@ -941,32 +942,11 @@ class AgentLoop:
         if danger_level == "write" and is_adventure_mode(session_id):
             _approval_args = {k: v for k, v in args.items() if k != "_session_id"}
 
-            # Define callback to ask Agent main model (used when approval model is uncertain)
-            async def _ask_agent_reason(question: str) -> str:
-                """Forward the approval model's question to the main Agent model for explanation."""
-                ask_prompt = (
-                    f"The approval model has a question about your intent "
-                    f"when executing the **{tc.name}** tool.\n\n"
-                    f"The approval model's question:\n{question}\n\n"
-                    f"Please honestly and specifically explain the purpose and necessity of this operation, "
-                    f"and why it is safe or necessary. Do not fabricate reasons.\n\n"
-                    f"Tool parameters:\n{json.dumps(_approval_args, ensure_ascii=False, indent=2)[:2000]}"
-                )
-                try:
-                    resp = await self._llm.chat(
-                        [{"role": "user", "content": ask_prompt}],
-                        tools=[],
-                    )
-                    return resp.content or "(Agent did not provide an explanation)"
-                except Exception as exc:
-                    logger.warning("Failed to ask agent for clarification: %s", exc)
-                    return f"(Failed to get agent explanation: {exc})"
-
             approval = await request_user_confirm(
                 session_id, tc.name, _approval_args,
                 reason=str(args.get("reason", "")),
                 content=f"Tool: {tc.name}\nParameters: {json.dumps(_approval_args, ensure_ascii=False)[:500]}",
-                ask_agent_callback=_ask_agent_reason,
+                ask_agent_callback=lambda q: ask_agent_reason(self._llm, tc.name, _approval_args, q),
             )
             if approval.action == "deny":
                 source_label = {"model": "approval model", "user": "user", "system": "system"}.get(approval.denied_by, "system")
@@ -978,10 +958,11 @@ class AgentLoop:
                 _skip_dispatch = True
 
         if not _skip_dispatch:
+            timeout: int = self._ctx.tool_timeout
             # 如果 memory 管理器拥有该工具，则路由过去
             if self._memory.has_tool(tc.name):
                 try:
-                    if timeout := self._ctx.tool_timeout:
+                    if timeout:
                         result = await asyncio.wait_for(
                             asyncio.to_thread(self._memory.handle_tool_call, tc.name, args),
                             timeout=timeout,
@@ -993,13 +974,13 @@ class AgentLoop:
                 except Exception as exc:
                     result = json.dumps({"error": str(exc)}, ensure_ascii=False)
             else:
-                entry: Any = tool_registry.get_entry(tc.name)
+                entry: ToolEntry | None = tool_registry.get_entry(tc.name)
                 try:
                     if entry and entry.is_async:
                         coro: Any = entry.handler(args)
                     else:
                         coro = asyncio.to_thread(tool_registry.dispatch, tc.name, args)
-                    if timeout := self._ctx.tool_timeout:
+                    if timeout:
                         result = await asyncio.wait_for(coro, timeout=timeout)
                     else:
                         result = await coro
@@ -1052,7 +1033,7 @@ class AgentLoop:
             asyncio.create_task(
                 self._tool_event_callback(
                     session_id, "tool_result", tc.name, push_result,
-                )
+                ) # type: ignore
             )
 
         # ---- 构建 OpenAI 格式的工具消息 ----

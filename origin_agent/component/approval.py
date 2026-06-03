@@ -19,10 +19,11 @@ import asyncio
 import json
 import logging
 import uuid
+import dirtyjson
+from pydantic import BaseModel
 from typing import Any, Awaitable, Callable, Dict, Optional, TYPE_CHECKING, cast
 
-from pydantic import BaseModel
-import dirtyjson
+from component.llm import LLMClient
 
 logger = logging.getLogger(__name__)
 
@@ -150,30 +151,9 @@ async def _adventure_confirm(
         logger.warning("Approver not available — adventure mode deny")
         return ApprovalResult(action="deny", deny_reason="Approval model unavailable, auto-denied", denied_by="system")
 
-    system_prompt = (
-        "You are a security reviewer for an evolutionary AI agent. "
-        "The agent runs in a sandbox environment.\n\n"
-        "Sandbox path prefixes and their meanings:\n"
-        "- fork: → slow_agent_space/ (Agent source code workspace, rw)\n"
-        "- ws:   → agentspace/ (Agent I/O workspace, rw)\n"
-        "- fix:  → .fallback/ (Disaster recovery directory, rw)\n\n"
-        "Note: Code files (.py/.js/.ts etc.) written to the sandbox "
-        "will be executed later, so the code itself may be dangerous.\n\n"
-        "Judgment principles:\n"
-        "- Writing config files, JSON, logs, text to sandbox → safe, approve\n"
-        "- Writing executable code (.py/.js/.sh etc.) that appears to be "
-        "normal functionality → approve\n"
-        "- Writing executable code that is clearly malicious "
-        "(deleting files, encrypting data, reverse shell, "
-        "stealing credentials, etc.) → deny\n"
-        "- Reading files → safe, approve\n"
-        'Return only JSON (one of three outputs):\n'
-        '1. Definitely safe → {"approved":true,"reason":"brief reason"}\n'
-        '2. Definitely dangerous → {"approved":false,"reason":"brief reason"}\n'
-        '3. Unsure, need more info from Agent → {"ask":"your question","reason":"why more info is needed"}'
-    )
+    from system.pathutils import find_repo_root, get_templates_dir
 
-    from system.pathutils import find_repo_root
+    system_prompt = (get_templates_dir() / "approval" / "system_prompt.md").read_text(encoding="utf-8")
 
     cwd = str(find_repo_root().resolve())
 
@@ -258,14 +238,8 @@ async def _adventure_confirm(
                     attempt, max_attempts, exc, resp_content,
                 )
                 if attempt < max_attempts:
-                    correction_hint = (
-                        f"\n\n[System prompt] Your last response had a parse error. Error: {exc}\n"
-                        f"Your raw output was:\n```\n{resp_content}\n```\n"
-                        "Please respond with strict JSON format: "
-                        '{"approved":true/false,"reason":"brief reason"} or '
-                        '{"ask":"your question","reason":"reason"}'
-                    )
-                    current_prompt += correction_hint
+                    _ct = (get_templates_dir() / "approval" / "correction_hint.md").read_text(encoding="utf-8")
+                    current_prompt += "\n\n" + _ct.replace("{{error}}", str(exc)).replace("{{raw_output}}", resp_content or "<not available>")
 
         # 重试循环全部失败 → 拒绝
         if last_error and dialog_turn > max_dialog_turns:
@@ -358,3 +332,47 @@ async def request_user_confirm(
     except Exception:
         _pending_confirms.pop(request_id, None)
         return ApprovalResult(action="deny", deny_reason="Approval handling error", denied_by="system")
+
+
+# ---------------------------------------------------------------------------
+# 冒险模式辅助 — 向 Agent 主模型提问以获取审批上下文
+# ---------------------------------------------------------------------------
+
+
+async def ask_agent_reason(
+    llm: LLMClient,
+    tool_name: str,
+    tool_args: dict,
+    question: str,
+) -> str:
+    """将审批模型的问题转发给 Agent 主模型，获取操作意图解释。
+
+    当冒险模式的小 LLM 不确定时，通过此函数向主模型提问，
+    主模型的回答会追加到提示词中供审批模型重新评估。
+
+    参数：
+        llm:       Agent 主模型 LLMClient 实例
+        tool_name: 被审批的工具名
+        tool_args: 工具参数字典
+        question:  审批模型提出的问题
+
+    返回：
+        主模型的回答文本
+    """
+    from system.pathutils import get_templates_dir
+
+    ask_prompt = (
+        (get_templates_dir() / "approval" / "ask_agent_prompt.md").read_text(encoding="utf-8")
+        .replace("{{tool_name}}", tool_name)
+        .replace("{{question}}", question)
+        .replace("{{tool_args_json}}", json.dumps(tool_args, ensure_ascii=False, indent=2))
+    )
+    try:
+        resp = await llm.chat(
+            [{"role": "user", "content": ask_prompt}],
+            tools=[],
+        )
+        return resp.content or "(Agent did not provide an explanation)"
+    except Exception as exc:
+        logger.warning("Failed to ask agent for clarification: %s", exc)
+        return f"(Failed to get agent explanation: {exc})"
