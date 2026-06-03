@@ -23,6 +23,7 @@ from abstract.memory.manager import MemoryManager
 from abstract.tools.registry import ToolEntry, registry as tool_registry
 from component.approval import ApprovalResult, ask_agent_reason, is_adventure_mode, request_user_confirm
 from component.llm import LLMClient, LLMResponse, ToolCall
+from system.pathutils import find_repo_root
 from system.context import RuntimeContext
 from system.prompt import build_system_prompt
 
@@ -144,6 +145,8 @@ class AgentLoop:
         self._tool_event_callback: Callable[[str, str, str, str], Awaitable[None]] | None = None
         # 消息历史的磁盘持久化目录
         self._history_store_dir: Path | None = Path(history_store_path) if history_store_path else None
+        # 自定义消息 hook 缓存（custom_hooks/ 下的扩展上下文脚本）
+        self._message_hooks_cache: list[dict] | None = None
 
     # -- 公开 API ----------------------------------------------------------
 
@@ -792,13 +795,53 @@ class AgentLoop:
         )
         return new_sid
 
+    def _load_message_hooks(self) -> list[dict]:
+        """扫描 custom_hooks/ 目录，加载消息扩展 hook。
+
+        每个 .py 脚本需定义 hook_tag_name() -> str 和 hook_message() -> str。
+        缓存函数引用，在构建消息时实时调用，保证动态内容（如时间戳）实时变化。
+        返回 [{"tag_fn": callable, "msg_fn": callable}, ...]。
+        """
+        if self._message_hooks_cache is not None:
+            return self._message_hooks_cache
+
+        hooks: list[dict] = []
+        hooks_dir = find_repo_root() / "custom_hooks"
+        if not hooks_dir.is_dir():
+            self._message_hooks_cache = hooks
+            return hooks
+
+        for fpath in sorted(hooks_dir.glob("*.py")):
+            if fpath.name.startswith("_"):
+                continue
+            try:
+                import importlib.util
+                spec = importlib.util.spec_from_file_location(fpath.stem, fpath)
+                if spec is None or spec.loader is None:
+                    continue
+                mod = importlib.util.module_from_spec(spec)
+                spec.loader.exec_module(mod)
+                tag_fn = getattr(mod, "hook_tag_name", None)
+                msg_fn = getattr(mod, "hook_message", None)
+                if callable(tag_fn) and callable(msg_fn):
+                    hooks.append({"tag_fn": tag_fn, "msg_fn": msg_fn})
+            except Exception:
+                logger.warning("Failed to load message hook %s", fpath, exc_info=True)
+
+        self._message_hooks_cache = hooks
+        return hooks
+
     def _build_messages(
         self,
         session_id: str,
         user_message: str,
         memory_ctx: str,
     ) -> List[Dict[str, Any]]:
-        """构建当前回合的完整消息列表。"""
+        """构建当前回合的完整消息列表。
+
+        对 history 中最后一条 user message 原地附加 custom_hooks 扩展上下文，
+        避免重复追加 user message。
+        """
         # 收集已启用的 skill prompt
         skill_blocks: list[str] = self._collect_skill_prompts()
 
@@ -820,8 +863,21 @@ class AgentLoop:
         messages: List[Dict[str, Any]] = [
             {"role": "system", "content": system_prompt},
         ]
-        messages.extend(history)
-        messages.append({"role": "user", "content": user_message})
+
+        # 复制 history，对最后一条 user message 附加 hook 扩展上下文
+        for i, msg in enumerate(history):
+            if i == len(history) - 1 and msg.get("role") == "user":
+                hooked_msg = dict(msg)
+                hooked_content = str(hooked_msg.get("content", ""))
+                for hook in self._load_message_hooks():
+                    tag = hook["tag_fn"]()
+                    msg = hook["msg_fn"]()
+                    hooked_content += f"<im_{tag}_start>{msg}</im_{tag}_end>"
+                hooked_msg["content"] = hooked_content
+                messages.append(hooked_msg)
+            else:
+                messages.append(msg)
+
         return messages
 
     def _get_full_history(self, session_id: str, memory_ctx: str = "") -> List[Dict[str, Any]]:

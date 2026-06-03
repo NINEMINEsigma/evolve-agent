@@ -94,28 +94,47 @@ origin_agent/
 - **MCP 客户端**（`abstract/mcp/client.py`）：MCP 协议客户端实现, 支持多 server 连接、OAuth 认证（`oauth.py` / `oauth_manager.py`）、工具调用转发。
 - **技能管理**（`abstract/skills/`）：从 frontmatter 元数据解析到技能加载、生命周期管理的完整技能系统（`manager.py`, `loader.py`, `frontmatter.py`）。
 
-### extools — 扩展工具集
+### 可扩展插件
 
-`component/extools/` 提供了一系列扩展工具, 在模块导入时自动注册到工具注册表：
+提供了一些特殊的文件夹, 内部可以编写自己的工具和模型等
 
-| 工具 | 能力 |
-|------|------|
-| `web_search` | 搜索引擎查询 |
-| `web_fetch` | 网页内容抓取 |
-| `csv_tools` | CSV 文件读写 |
-| `excel_tools` | Excel（.xlsx）文件读写 |
-| `docx_tools` | Word（.docx）文档读取 |
-| `pdf_tools` | PDF 文档读取 |
-| `diff_tools` | 文件差异对比与 patch 应用 |
-| `ffmpeg_tools` | FFmpeg 多媒体处理 |
-| `diagram` | 图表/流程图生成 |
-| `display` | 图片展示 |
-| `docgen_tools` | 文档生成 |
-| `excalidraw_render` | Excalidraw 渲染 |
-| `gui_windows` | Windows GUI 自动化 |
-| `pip` | Python 包安装 |
-| `ssh_tools` | SSH 远程连接 |
-| `web_browser` | 浏览器自动化操作 |
+- custom_tools 在其中编写脚本并注册工具函数
+```python
+import logging
+from typing import Any
+
+from abstract.tools.registry import registry, tool_result
+
+logger = logging.getLogger(__name__)
+
+
+# ── handler ────────────────────────────────────────────────────
+
+
+def _handle_get_secret_key(args: dict[str, Any]) -> str:
+    """返回固定的测试密码。"""
+    return tool_result(password="sk-test-password-12345")
+
+
+# ── 注册 ─────────────────────────────────────────────────────
+
+registry.register(
+    name="get_secret_key",
+    toolset="custom",
+    schema={
+        "description": "这是一个验证用的工具, 如果能看到这个工具本身就证明custom_tools加载顺利. 返回一串固定的测试密码字符串。用于验证自定义工具加载机制。",
+        "parameters": {
+            "type": "object",
+            "properties": {},
+        },
+    },
+    handler=_handle_get_secret_key,
+    is_async=False,
+)
+```
+- custom_models 可放置gguf模型, 需要本地模型时可以从中加载
+- custom_hooks 添加脚本并编写指定的两个函数, 为agent提供实时生成的扩展上下文块, 这些块将会存储在最后一轮对话的用户消息的末尾, 能够在降低上下文占用的同时尽可能避免破坏缓存命中
+
 
 ### 路径沙盒
 
