@@ -113,6 +113,20 @@ async def _handle_start_background_service(args: Dict[str, Any]) -> str:
 
     log_file_real = str(Path(log_dir_real) / f"{task_id}.log")
 
+    # ── 解析命令参数中的沙箱路径 ──
+    # 将 ws:/fork:/fix: 前缀的逻辑路径展开为真实绝对路径。
+    from component.tools.filesystem import _s as _get_sandbox
+    resolved_parts: List[str] = []
+    for part in cmd_parts:
+        if any(part.startswith(p) for p in ("ws:", "fork:", "fix:")):
+            try:
+                r = _get_sandbox().resolve_read(part)
+                resolved_parts.append(str(r.real))
+            except SandboxError:
+                resolved_parts.append(part)
+        else:
+            resolved_parts.append(part)
+
     # ── 启动后台进程 ──
     try:
         # ... (keep existing popen code)
@@ -125,7 +139,7 @@ async def _handle_start_background_service(args: Dict[str, Any]) -> str:
         if sys.platform == "win32":
             popen_kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
 
-        proc: subprocess.Popen = subprocess.Popen(cmd_parts, **popen_kwargs)
+        proc: subprocess.Popen = subprocess.Popen(resolved_parts, **popen_kwargs)
         popen_kwargs["stdout"].close()
 
         _background_tasks[task_id] = {
