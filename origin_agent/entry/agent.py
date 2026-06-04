@@ -1054,6 +1054,46 @@ class AgentLoop:
         except (json.JSONDecodeError, TypeError):
             pass
 
+        # ---- 提取多模态内容（在截断之前） ----
+        # read_image 等工具返回 _image 键，含 base64 图片数据，
+        # 大小远超 _MAX_RESULT_CHARS，必须在截断前提取并构建 content blocks。
+        multimodal_content: Any = None
+        try:
+            parsed_result: dict = json.loads(result)
+            # 不是dict则报错离开
+            img: dict | None = parsed_result.pop("_image", None)
+            if img and isinstance(img, dict):
+                b64: str = str(img.get("base64", ""))
+                mime: str = str(img.get("mime_type", "image/png"))
+                if b64 and self._supports_vision():
+                    text_json: str = json.dumps(parsed_result, ensure_ascii=False)
+                    multimodal_content = [
+                        {
+                            "type": "image_url",
+                            "image_url": {"url": f"data:{mime};base64,{b64}"},
+                        },
+                        {"type": "text", "text": text_json},
+                    ]
+                    # 后续截断/推送只用文本部分
+                    result = text_json
+                elif b64:
+                    fallback: dict = dict(parsed_result)
+                    fallback["_vision_unsupported"] = True
+                    fallback["_model"] = self._ctx.llm_model
+                    fallback["_hint"] = (
+                        f"The current model ({self._ctx.llm_model}) does not support image vision analysis. "
+                        f"You cannot view the content of this image. Below is the image metadata:\n"
+                        f"Path={fallback.get('path', '?')}, "
+                        f"Format={mime}, "
+                        f"Size={fallback.get('size', '?')} bytes. "
+                        f"If you need further processing of the image (e.g. OCR, format conversion), "
+                        f"you can use run_command to call external tools "
+                        f"(e.g. tesseract, ImageMagick) to extract text or convert formats."
+                    )
+                    result = json.dumps(fallback, ensure_ascii=False)
+        except (json.JSONDecodeError, TypeError, KeyError):
+            pass
+
         # ---- 工具结果大小截断 ----
         _MAX_RESULT_CHARS: int = 50_000
         if len(result) > _MAX_RESULT_CHARS:
@@ -1093,45 +1133,9 @@ class AgentLoop:
             )
 
         # ---- 构建 OpenAI 格式的工具消息 ----
-        # 检查结果是否包含图片数据（_image 键）。
-        # 如果有，将 content 格式化为 content blocks 列表，
-        # 使 vision-capable LLM 能够通过 ToolMessage "看到"图片。
-        content: Any = result
-        try:
-            parsed_result: dict = json.loads(result)
-            img: dict | None = parsed_result.pop("_image", None)
-            if img and isinstance(img, dict):
-                b64: str = str(img.get("base64", ""))
-                mime: str = str(img.get("mime_type", "image/png"))
-                if b64 and self._supports_vision():
-                    text_json: str = json.dumps(parsed_result, ensure_ascii=False)
-                    content = [
-                        {
-                            "type": "image_url",
-                            "image_url": {"url": f"data:{mime};base64,{b64}"},
-                        },
-                        {"type": "text", "text": text_json},
-                    ]
-                elif b64:
-                    # Model does not support vision — return text-only degraded result,
-                    # clearly informing the agent that the current model cannot view images.
-                    fallback: dict = dict(parsed_result)
-                    fallback["_vision_unsupported"] = True
-                    fallback["_model"] = self._ctx.llm_model
-                    fallback["_hint"] = (
-                        f"The current model ({self._ctx.llm_model}) does not support image vision analysis. "
-                        f"You cannot view the content of this image. Below is the image metadata:\n"
-                        f"Path={fallback.get('path', '?')}, "
-                        f"Format={mime}, "
-                        f"Size={fallback.get('size', '?')} bytes. "
-                        f"If you need further processing of the image (e.g. OCR, format conversion), "
-                        f"you can use run_command to call external tools "
-                        f"(e.g. tesseract, ImageMagick) to extract text or convert formats."
-                    )
-                    # 不向 LLM 发送 base64 数据 — 模型无法处理且浪费 token
-                    content = json.dumps(fallback, ensure_ascii=False)
-        except (json.JSONDecodeError, TypeError, KeyError):
-            pass
+        # multimodal_content 已在截断前的提取步骤中构建完成（若存在）。
+        # 此处直接使用，避免对已截断的 result 二次解析。
+        content: Any = multimodal_content if multimodal_content is not None else result
 
         return {
             "role": "tool",

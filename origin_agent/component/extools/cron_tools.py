@@ -33,13 +33,14 @@ from typing import Any, Dict, List, Optional, Set
 
 from abstract.tools.registry import registry, tool_error, tool_result
 from component.approval import ApprovalResult, request_user_confirm
+from system.pathutils import find_repo_root
 
 logger = logging.getLogger(__name__)
 
 # ── 持久化路径 ────────────────────────────────────────────────
 
-# origin_agent/component/extools/cron_tools.py -> 项目根目录
-_REPO_ROOT: Path = Path(__file__).resolve().parents[3]
+# agent/component/extools/cron_tools.py -> 项目根目录
+_REPO_ROOT: Path = find_repo_root()
 _CRON_STORE_DIR: Path = _REPO_ROOT / "workspace" / "logs"
 _CRON_STORE_PATH: Path = _CRON_STORE_DIR / "cron_jobs.json"
 

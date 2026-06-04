@@ -13,18 +13,20 @@ import os
 import subprocess
 import sys
 from pathlib import Path
+from system.pathutils import get_agent_dir
 
 # 确保 agent 自身目录在 sys.path 最前面，使
 # ``from main import App`` 和 ``from system.context import RuntimeContext``
 # 无论 CWD 或进程启动方式如何都能正确解析。
 # 这对编排器将 agent 源码复制到 workspace/fast_agent_space/ 时至关重要 —
 # 目录名与 "origin_agent" 不同。
-_AGENT_DIR: str = str(Path(__file__).resolve().parent)
+_AGENT_DIR: str = str(get_agent_dir())
 if _AGENT_DIR not in sys.path:
     sys.path.insert(0, _AGENT_DIR)
 
 from main import App  # noqa: E402
 from system.context import RuntimeContext  # noqa: E402
+from system.convert import as_bool
 
 
 # ---------------------------------------------------------------------------
@@ -83,11 +85,6 @@ def _setup_logging(log_path: str | None, console: bool) -> None:
 # 上下文构建器
 # ---------------------------------------------------------------------------
 
-def _coerce_bool(raw: object) -> bool:
-    if isinstance(raw, bool):
-        return raw
-    return str(raw).strip().lower() in ("true", "1", "yes", "on")
-
 
 def _build_context(cli: dict) -> RuntimeContext:
     """从解析后的 CLI 参数构建 RuntimeContext。
@@ -100,7 +97,7 @@ def _build_context(cli: dict) -> RuntimeContext:
         fork_path       = Path(cli["evolve"]).resolve(),
         log_path        = Path(cli["log"]).resolve(),
         mode            = str(cli["mode"]),
-        console_log     = _coerce_bool(cli["console_log"]),
+        console_log     = as_bool(cli["console_log"]),
         gateway_host    = str(cli["gateway_host"]),
         gateway_port    = int(cli["gateway_port"]),
         # 仅 fallback 模式字段
@@ -129,7 +126,7 @@ def _build_context(cli: dict) -> RuntimeContext:
         # 冒险模式审批模型配置
         approval_model_path     = str(cli.get("approval_model_path", "")),
         approval_model_n_ctx    = int(cli.get("approval_model_n_ctx", 4096)),
-        approval_model_cuda     = _coerce_bool(cli.get("approval_model_cuda", False)),
+        approval_model_cuda     = as_bool(cli.get("approval_model_cuda", False)),
         mcp_config_path         = cli["mcp_config_path"],
     )
 

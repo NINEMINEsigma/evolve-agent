@@ -17,28 +17,30 @@ import json
 import logging
 import uuid
 from pathlib import Path
-from typing import Any, Dict
+from typing import TYPE_CHECKING, Any, Dict
 
 from abstract.tools.registry import registry, tool_error, tool_result
-
 from .excalidraw_render import render, validate_excalidraw
 
 logger = logging.getLogger(__name__)
 
-# Path to the vendored HTML render template (same directory as this file)
-_TEMPLATE_DIR = Path(__file__).resolve().parent
+# Path to the vendored HTML render template
+template_html = Path(__file__).resolve().parent / "excalidraw_template.html"
+
+if TYPE_CHECKING:
+    from component.tools.filesystem import Sandbox
 
 # Lazy import of Sandbox (set at runtime by main.py)
-_fs_sandbox: Any | None = None
+_fs_sandbox: Sandbox | None = None
 
 
-def _get_sandbox():
+def _get_sandbox() -> Sandbox:
     """Lazy import of the shared Sandbox from filesystem tools."""
     global _fs_sandbox
     if _fs_sandbox is None:
         from component.tools.filesystem import _sandbox
         _fs_sandbox = _sandbox
-    return _fs_sandbox
+    return _fs_sandbox # type: ignore
 
 
 def _check_dependencies() -> str | None:
@@ -137,7 +139,7 @@ def _handle_draw_diagram(args: Dict[str, Any]) -> str:
 
     data: dict | None = None
     source_label: str = ""
-    output_parent: Path | None = None
+    output_parent: Path = None # type: ignore
     agentspace_base: Path | None = None
 
     # --- Mode 1: load from file ---
@@ -191,7 +193,6 @@ def _handle_draw_diagram(args: Dict[str, Any]) -> str:
         logger.warning("Could not write reference JSON: %s", exc)
 
     # Render to PNG
-    template_html = _TEMPLATE_DIR / "excalidraw_template.html"
     try:
         render(excalidraw_json=json.dumps(data, ensure_ascii=False),
                output_png=png_path,
@@ -221,7 +222,7 @@ def _handle_draw_diagram(args: Dict[str, Any]) -> str:
         json_path=json_logical,
         png_path=png_logical,
         markdown=http_url,
-        message=f"图表已生成（{element_count} 个元素）\n\n![]({http_url})",
+        message=f"diagram generated (with {element_count} elements)\n\n![]({http_url})",
     )
 
 
@@ -233,21 +234,21 @@ def _handle_render_diagram(args: Dict[str, Any]) -> str:
 
     path: str = str(args.get("path", "")).strip()
     if not path:
-        return tool_error("path 是必填的 — ws: 路径下的 .excalidraw 文件")
+        return tool_error("path is required — .excalidraw file under ws: path")
 
     fs_path, agentspace_base = _resolve_ws_path(path)
     if not fs_path.exists():
-        return tool_error(f"文件不存在: {path}")
+        return tool_error(f"file not found: {path}")
 
     try:
         json_str = fs_path.read_text(encoding="utf-8")
     except OSError as exc:
-        return tool_error(f"读取文件失败: {exc}")
+        return tool_error(f"failed to read file: {exc}")
 
     data = json.loads(json_str)
     errors = validate_excalidraw(data)
     if errors:
-        return tool_error("Excalidraw JSON 校验失败:\n" + "\n".join(f"  - {e}" for e in errors))
+        return tool_error("Excalidraw JSON validation failed:\n" + "\n".join(f"  - {e}" for e in errors))
 
     # Output in same directory as input
     output_parent = fs_path.parent
@@ -256,7 +257,6 @@ def _handle_render_diagram(args: Dict[str, Any]) -> str:
     png_name = f"{diagram_id}.png"
     png_path = output_parent / png_name
 
-    template_html = _TEMPLATE_DIR / "excalidraw_template.html"
     try:
         render(excalidraw_json=json_str,
                output_png=png_path,

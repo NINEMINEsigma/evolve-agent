@@ -95,6 +95,8 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 from urllib.parse import urlparse
 
+from system.convert import as_bool
+
 logger = logging.getLogger(__name__)
 
 
@@ -2999,22 +3001,6 @@ def _normalize_name_filter(value: Any, label: str) -> set[str]:
     return set()
 
 
-def _parse_boolish(value: Any, default: bool = True) -> bool:
-    """Parse a bool-like config value with safe fallback."""
-    if value is None:
-        return default
-    if isinstance(value, bool):
-        return value
-    if isinstance(value, str):
-        lowered = value.strip().lower()
-        if lowered in {"true", "1", "yes", "on"}:
-            return True
-        if lowered in {"false", "0", "no", "off"}:
-            return False
-    logger.warning("MCP config expected a boolean-ish value, got %r; using default=%s", value, default)
-    return default
-
-
 _UTILITY_CAPABILITY_METHODS = {
     "list_resources": "list_resources",
     "read_resource": "read_resource",
@@ -3056,8 +3042,8 @@ def _forget_mcp_tool_server(tool_name: str) -> None:
 def _select_utility_schemas(server_name: str, server: MCPServerTask, config: dict) -> List[dict]:
     """Select utility schemas based on config and server capabilities."""
     tools_filter = config.get("tools") or {}
-    resources_enabled = _parse_boolish(tools_filter.get("resources"), default=True)
-    prompts_enabled = _parse_boolish(tools_filter.get("prompts"), default=True)
+    resources_enabled = as_bool(tools_filter.get("resources"), default=True)
+    prompts_enabled = as_bool(tools_filter.get("prompts"), default=True)
 
     # ``initialize_result.capabilities`` is the source of truth: its sub-objects
     # (``resources``, ``prompts``) are non-None iff the server advertises that
@@ -3288,11 +3274,11 @@ def register_mcp_servers(servers: Dict[str, dict]) -> List[str]:
         new_servers = {
             k: v
             for k, v in servers.items()
-            if k not in _servers and _parse_boolish(v.get("enabled", True), default=True)
+            if k not in _servers and as_bool(v.get("enabled", True), default=True)
         }
         # Track which servers opt-in to parallel tool calls (idempotent).
         for srv_name, srv_cfg in servers.items():
-            if _parse_boolish(srv_cfg.get("supports_parallel_tool_calls", False), default=False):
+            if as_bool(srv_cfg.get("supports_parallel_tool_calls", False), default=False):
                 _parallel_safe_servers.add(sanitize_mcp_name_component(srv_name))
             else:
                 _parallel_safe_servers.discard(sanitize_mcp_name_component(srv_name))
@@ -3377,7 +3363,7 @@ def discover_mcp_tools() -> List[str]:
         new_server_names = [
             name
             for name, cfg in servers.items()
-            if name not in _servers and _parse_boolish(cfg.get("enabled", True), default=True)
+            if name not in _servers and as_bool(cfg.get("enabled", True), default=True)
         ]
 
     tool_names = register_mcp_servers(servers)
@@ -3479,7 +3465,7 @@ def probe_mcp_server_tools() -> Dict[str, List[tuple]]:
 
     enabled = {
         k: v for k, v in servers_config.items()
-        if _parse_boolish(v.get("enabled", True), default=True)
+        if as_bool(v.get("enabled", True), default=True)
     }
     if not enabled:
         return {}

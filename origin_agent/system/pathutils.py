@@ -1,7 +1,5 @@
-"""共享路径工具 — 查找项目根目录和常用路径。
-
-由 prompt.py、memory/provider.py 和 shell.py 使用，
-通过向上查找 run.py 来一致定位项目根目录。
+"""
+共享路径工具 — 查找项目根目录和常用路径。
 """
 
 from pathlib import Path
@@ -14,8 +12,12 @@ def find_repo_root() -> Path:
         p = p.parent
         if (p / "run.py").exists():
             return p
-    return Path(__file__).resolve().parents[3]  # 兜底
+    raise RuntimeError("Failed to find repo root")
 
+
+def get_agent_dir() -> Path:
+    return Path(__file__).resolve().parent.parent
+    
 
 def get_templates_dir() -> Path:
     """返回 templates 目录路径（相对于当前代码副本）。

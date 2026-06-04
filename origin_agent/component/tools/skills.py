@@ -15,11 +15,9 @@ from abstract.skills.manager import create_skill, delete_skill, update_skill, wr
 from abstract.skills.loader import list_skills, load_skill
 from abstract.tools.registry import registry, tool_error, tool_result
 
+from system.pathutils import find_repo_root
+
 logger = logging.getLogger(__name__)
-
-# ── 常量 ────────────────────────────────────────────────────────
-
-_SKILLS_DIR: Path = Path("skills")
 
 
 # ── 辅助函数 ──────────────────────────────────────────────────────────
@@ -27,7 +25,7 @@ _SKILLS_DIR: Path = Path("skills")
 
 def _skills_dir() -> Path:
     """返回规范的 skill 目录（项目根目录 / skills）。"""
-    return _SKILLS_DIR.resolve()
+    return (find_repo_root() / "skills").resolve()
 
 
 def _format_skill_list(skills_dir: Path | None = None) -> str:
@@ -61,7 +59,7 @@ def _handle_learn_skill(args: Dict[str, Any]) -> str:
     description: str = str(args.get("description", "")).strip()
     category: str | None = str(args.get("category", "")).strip() or None
     tags: list = args.get("tags", []) or []
-    files: list = args.get("files", []) or []
+    files: list[dict] = args.get("files", []) or []
 
     if not name:
         return tool_error("name is required")
@@ -79,7 +77,7 @@ def _handle_learn_skill(args: Dict[str, Any]) -> str:
         )
         if not payload.get("success"):
             payload = update_skill(
-                name=name,
+                name,
                 skills_dir=_skills_dir(),
                 description=description or name,
                 category=category,
@@ -244,7 +242,7 @@ def _handle_run_skill_script(args: Dict[str, Any]) -> str:
         if not payload.get("success"):
             return tool_error(payload.get("error", "Skill not found"))
         skill_dir: str = str(payload.get("skill_dir", ""))
-        script_path: Path = _skills_dir().resolve().parent / skill_dir / "scripts" / script
+        script_path: Path = Path(skill_dir) / "scripts" / script
         script_path = script_path.resolve()
 
         # Security: must be inside the skill's scripts/ directory

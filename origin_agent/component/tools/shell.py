@@ -110,10 +110,10 @@ async def _handle_run_command(args: Dict[str, Any]) -> str:
             session_id, "run_command",
             {"command": cmd_parts, "reason": reason},
             reason,
-            f"命令: `{cmd_str}`\n原因: {reason}",
+            f"command: `{cmd_str}`\nreason: {reason}"
         )
     else:
-        result = ApprovalResult(action="deny", deny_reason="缺少 session_id")
+        result = ApprovalResult(action="deny", deny_reason="session_id is required")
 
     if result.action == "deny":
         # 审批模型/用户/系统
@@ -138,12 +138,25 @@ def _execute(cmd_parts: List[str], cwd: str) -> str:
     # if cmd_parts and cmd_parts[0] not in _s().allowed_commands:
     #     return tool_error(f"Command '{cmd_parts[0]}' not in the allowed list")
 
+    # 将命令参数中的沙箱逻辑路径（ws:/fork:/fix:）展开为真实绝对路径。
+    # sandbox.run() 要求 tool handler 预先展开，不接收未解析的逻辑路径。
+    resolved_parts: List[str] = []
+    for part in cmd_parts:
+        if any(part.startswith(p) for p in ("ws:", "fork:", "fix:")):
+            try:
+                r = _s().resolve_read(part)
+                resolved_parts.append(str(r.real))
+            except SandboxError:
+                resolved_parts.append(part)
+        else:
+            resolved_parts.append(part)
+
     logger.info("run_command | cwd=%s cmd=%s", cwd, cmd_parts)
     _enc: str
     result: subprocess.CompletedProcess
     try:
         _enc = locale.getpreferredencoding(False) or sys.getfilesystemencoding() or "utf-8"
-        result = _s().run(cmd_parts, cwd_ns=cwd, timeout=30, encoding=_enc, errors="replace")
+        result = _s().run(resolved_parts, cwd_ns=cwd, timeout=30, encoding=_enc, errors="replace")
     except SandboxError as exc:
         return tool_error(str(exc))
     except subprocess.TimeoutExpired:

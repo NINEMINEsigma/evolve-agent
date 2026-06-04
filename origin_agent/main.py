@@ -136,9 +136,9 @@ class App:
             _lu.set_sandbox(_sandbox)
             # AST 自动发现并注册工具模块
             from abstract.tools.discover import discover_builtin_tools
-            from system.pathutils import find_repo_root
+            from system.pathutils import find_repo_root, get_agent_dir
             import sys
-            _agent_root: Path = Path(__file__).resolve().parent
+            _agent_root: Path = get_agent_dir()
             _root: Path = find_repo_root()
             if str(_root) not in sys.path:
                 sys.path.insert(0, str(_root))

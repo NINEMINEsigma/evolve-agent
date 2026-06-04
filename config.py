@@ -19,8 +19,10 @@ argparse_parser.add_argument("--llm_reasoning_effort", type=str, default="medium
 # 冒险模式审批小模型 — 仅需文件名，agent 会自动从 custom_models/ 目录下加载
 check_default_approval_model_path = ""
 for file in File("custom_models/").childs():
+    if "mmproj" in file.name:
+        continue
     if file.suffix == "gguf" or file.suffix == ".gguf":
-        check_default_approval_model_path = str(file)
+        check_default_approval_model_path = str(file.name)
         break
 argparse_parser.add_argument("--approval_model_path", type=str, default=check_default_approval_model_path)
 argparse_parser.add_argument("--approval_model_n_ctx", type=int, default=65536)

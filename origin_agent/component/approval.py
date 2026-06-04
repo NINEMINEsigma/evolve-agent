@@ -91,7 +91,7 @@ def _detect_cuda(cuda: bool = False) -> bool:
 def _get_approver() -> InferenceEngine|None:
     """懒加载审批小模型的 InferenceEngine 单例。"""
     global _approver
-    if _approver is not None:
+    if _approver is not None and _approver != _APPROVER_FAILED:
         return _approver
 
     try:
@@ -179,7 +179,7 @@ async def _adventure_confirm(
         for attempt in range(1, max_attempts + 1):
             try:
                 messages = [system_message(system_prompt), user_message(current_prompt)]
-                resp = engine.chat(messages, GenerationConfig(temperature=0.1, max_tokens=4096))
+                resp = await asyncio.to_thread(engine.chat, messages, GenerationConfig(temperature=0.1))
                 resp_content = resp.choices[0].message.content
                 result: dict = cast(dict, dirtyjson.loads(resp_content))
 
@@ -241,11 +241,8 @@ async def _adventure_confirm(
                     _ct = (get_templates_dir() / "approval" / "correction_hint.md").read_text(encoding="utf-8")
                     current_prompt += "\n\n" + _ct.replace("{{error}}", str(exc)).replace("{{raw_output}}", resp_content or "<not available>")
 
-        # 重试循环全部失败 → 拒绝
-        if last_error and dialog_turn > max_dialog_turns:
-            break
-        if not last_error:
-            # 如果没有错误但既没有 return 也没有 break → 状态异常，安全起见拒绝
+        # 重试循环全部失败 → 退出 while，最终返回 deny
+        if last_error:
             break
 
     logger.warning(
