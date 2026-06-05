@@ -136,7 +136,7 @@ class MCPServerRegistry:
         if self.on_deregister is not None:
             self.on_deregister(name)
 
-    def get_toolset_for_tool(self, name: str) -> Optional[str]:
+    def get_toolset_for_tool(self, name: str) -> str|None:
         """Get the toolset for a tool via callback if set."""
         if self.on_get_toolset is not None:
             return self.on_get_toolset(name)
@@ -607,7 +607,7 @@ def _validate_remote_mcp_url(server_name: str, url: Any) -> str:
 def _format_connect_error(exc: BaseException) -> str:
     """Render nested MCP connection errors into an actionable short message."""
 
-    def _find_missing(current: BaseException) -> Optional[str]:
+    def _find_missing(current: BaseException) -> str|None:
         nested = getattr(current, "exceptions", None)
         if nested:
             for child in nested:
@@ -668,7 +668,7 @@ def _format_connect_error(exc: BaseException) -> str:
 # Sampling -- server-initiated LLM requests (MCP sampling/createMessage)
 # ---------------------------------------------------------------------------
 
-def _safe_numeric(value, default, coerce=int, minimum=1):
+def _safe_numeric(value, default, coerce: type=int, minimum=1):
     """Coerce a config value to a numeric type, returning *default* on failure.
 
     Handles string values from YAML (e.g. ``"10"`` instead of ``10``),
@@ -698,7 +698,7 @@ class SamplingHandler:
 
     _STOP_REASON_MAP = {"stop": "endTurn", "length": "maxTokens", "tool_calls": "toolUse"}
 
-    def __init__(self, server_name: str, config: dict, call_llm: Optional[Callable] = None):
+    def __init__(self, server_name: str, config: dict, call_llm: Callable|None = None):
         self.server_name = server_name
         self._call_llm = call_llm
         self.max_rpm = _safe_numeric(config.get("max_rpm", 10), 10, int)
@@ -734,7 +734,7 @@ class SamplingHandler:
 
     # -- Model resolution ----------------------------------------------------
 
-    def _resolve_model(self, preferences) -> Optional[str]:
+    def _resolve_model(self, preferences) -> str|None:
         """Config override > server hint > None (use default)."""
         if self.model_override:
             return self.model_override
@@ -747,7 +747,7 @@ class SamplingHandler:
     # -- Message conversion --------------------------------------------------
 
     @staticmethod
-    def _extract_tool_result_text(block) -> str:
+    def _extract_tool_result_text(block: Any) -> str:
         """Extract text from a ToolResultContent block."""
         if not hasattr(block, "content") or block.content is None:
             return ""

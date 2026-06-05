@@ -346,7 +346,7 @@ def _resolve_cwd(cwd: str) -> str:
         return str(Path.cwd())
 
 
-def _resolve_log_path(log_path: str) -> Optional[str]:
+def _resolve_log_path(log_path: str) -> str|None:
     """将日志逻辑路径解析为真实文件系统路径。"""
     from component.tools.filesystem import _s as _get_sandbox
     from system.sandbox import Access

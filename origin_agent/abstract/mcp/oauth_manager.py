@@ -81,7 +81,7 @@ class _ProviderEntry:
 # ---------------------------------------------------------------------------
 
 
-def _make_hermes_provider_class() -> Optional[type]:
+def _make_hermes_provider_class() -> type|None:
     """Lazy-import the SDK base class and return our subclass.
 
     Wrapped in a function so this module imports cleanly even when the
@@ -355,7 +355,7 @@ class MCPOAuthManager:
         server_name: str,
         server_url: str,
         oauth_config: Optional[dict],
-    ) -> Optional[Any]:
+    ) -> Any|None:
         """Return a cached OAuth provider for ``server_name`` or build one.
 
         Idempotent: repeat calls with the same name return the same instance.
@@ -389,7 +389,7 @@ class MCPOAuthManager:
         self,
         server_name: str,
         entry: _ProviderEntry,
-    ) -> Optional[Any]:
+    ) -> Any|None:
         """Build the underlying OAuth provider.
 
         Constructs :class:`HermesMCPOAuthProvider` directly using the helpers

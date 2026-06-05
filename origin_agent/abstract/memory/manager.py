@@ -285,7 +285,7 @@ class MemoryManager:
         """所有已注册 provider，按顺序。"""
         return list(self._providers)
 
-    def get_provider(self, name: str) -> Optional[MemoryProvider]:
+    def get_provider(self, name: str) -> MemoryProvider|None:
         """按名称获取 provider，未注册返回 None。"""
         for p in self._providers:
             if p.name == name:

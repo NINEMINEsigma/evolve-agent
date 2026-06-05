@@ -69,7 +69,7 @@ def _bridge_on_deregister(name: str) -> None:
     tool_registry.deregister(name)
 
 
-def _bridge_on_get_toolset(name: str) -> Optional[str]:
+def _bridge_on_get_toolset(name: str) -> str|None:
     """MCP toolset 查询回调 → 项目 ToolRegistry。"""
     from abstract.tools.registry import registry as tool_registry
     return tool_registry.get_toolset_for_tool(name)

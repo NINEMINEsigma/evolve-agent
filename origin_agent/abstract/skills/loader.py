@@ -261,7 +261,7 @@ def list_skills(
 
 def _resolve_skill_path(
     name_or_path: str, skills_dir: Path, external_dirs: List[Path]
-) -> Optional[Path]:
+) -> Path|None:
     """Resolve a skill name or path to a SKILL.md file."""
     p = Path(name_or_path).expanduser()
 
@@ -479,7 +479,7 @@ def _command_exists(cmd: str) -> bool:
     )
 
 
-def _infer_category(skill_dir: Path, skills_base: Path) -> Optional[str]:
+def _infer_category(skill_dir: Path, skills_base: Path) -> str|None:
     """Infer skill category from its parent directory structure."""
     try:
         rel = skill_dir.relative_to(skills_base)
@@ -491,7 +491,7 @@ def _infer_category(skill_dir: Path, skills_base: Path) -> Optional[str]:
     return None
 
 
-def _first_non_heading_line(body: str) -> Optional[str]:
+def _first_non_heading_line(body: str) -> str|None:
     """Return the first non-empty, non-heading line of *body*."""
     for line in body.strip().split("\n"):
         line = line.strip()

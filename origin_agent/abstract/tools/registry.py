@@ -172,12 +172,12 @@ class ToolRegistry:
 
     # -- 查询方法 -----------------------------------------------------
 
-    def get_entry(self, name: str) -> Optional[ToolEntry]:
+    def get_entry(self, name: str) -> ToolEntry|None:
         """按名称返回已注册工具条目，不存在返回 None。"""
         with self._lock:
             return self._tools.get(name)
 
-    def get_schema(self, name: str) -> Optional[dict]:
+    def get_schema(self, name: str) -> dict|None:
         """返回工具的原始 schema 字典，绕过 check_fn 过滤。
 
         用于 token 估算和内省，这些场景下可用性不重要 — 只需 schema 内容。
@@ -189,7 +189,7 @@ class ToolRegistry:
         """返回所有已注册工具名称的排序列表。"""
         return sorted(entry.name for entry in self._snapshot_entries())
 
-    def get_toolset_for_tool(self, name: str) -> Optional[str]:
+    def get_toolset_for_tool(self, name: str) -> str|None:
         """返回工具所属的 toolset，不存在返回 None。"""
         entry: ToolEntry | None = self.get_entry(name)
         return entry.toolset if entry else None
@@ -241,7 +241,7 @@ class ToolRegistry:
         with self._lock:
             return dict(self._toolset_aliases)
 
-    def get_toolset_alias_target(self, alias: str) -> Optional[str]:
+    def get_toolset_alias_target(self, alias: str) -> str|None:
         """返回别名的规范 toolset 名称，不存在返回 None。"""
         with self._lock:
             return self._toolset_aliases.get(alias)
