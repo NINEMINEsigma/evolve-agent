@@ -22,10 +22,12 @@ from typing import TYPE_CHECKING, Any, Dict
 from abstract.tools.registry import registry, tool_error, tool_result
 from .excalidraw_render import render, validate_excalidraw
 
+from system.pathutils import get_templates_dir
+
 logger = logging.getLogger(__name__)
 
 # Path to the vendored HTML render template
-template_html = Path(__file__).resolve().parent / "excalidraw_template.html"
+template_html = get_templates_dir() / "html" / "excalidraw_template.html"
 
 if TYPE_CHECKING:
     from component.tools.filesystem import Sandbox

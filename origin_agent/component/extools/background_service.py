@@ -230,6 +230,42 @@ async def _handle_stop_background_service(args: Dict[str, Any]) -> str:
         return tool_error(f"Failed to stop background service: {exc}", task_id=task_id)
 
 
+# ── 进程清理（agent 关闭时调用）───────────────────────────
+
+
+def cleanup_background_services() -> int:
+    """Kill all tracked background service processes. Returns count killed.
+
+    由 ``main.py`` 在 agent 关闭时调用，确保没有孤儿进程残留。
+    """
+    count = 0
+    for task_id, task in list(_background_tasks.items()):
+        pid: int = task["pid"]
+        proc: subprocess.Popen = task["proc"]
+        log_path: str = task["log_path"]
+        try:
+            _kill_proc_tree(pid)
+            try:
+                proc.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                logger.warning(
+                    "Background service %s (pid=%d) did not exit within 5s after kill",
+                    task_id, pid,
+                )
+            del _background_tasks[task_id]
+            count += 1
+            logger.info(
+                "Background service cleaned up | task=%s pid=%d log=%s",
+                task_id, pid, log_path,
+            )
+        except Exception as exc:
+            logger.error(
+                "Failed to clean up background service %s (pid=%d): %s",
+                task_id, pid, exc,
+            )
+    return count
+
+
 # ── 注册 ─────────────────────────────────────────────────────
 
 registry.register(

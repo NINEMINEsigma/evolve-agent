@@ -194,3 +194,6 @@ workspace/
 
 # custom
 custom_models/*.gguf
+
+# temp
+temp/

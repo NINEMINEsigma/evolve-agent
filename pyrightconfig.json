@@ -2,5 +2,7 @@
     "extraPaths": [
         "./origin_agent",
         "./third"
-    ]
+    ],
+    "reportOptionalMemberAccess": false,
+    "reportOptionalOperand": false
 }

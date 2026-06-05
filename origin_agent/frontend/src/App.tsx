@@ -53,6 +53,8 @@ interface ChatMessage {
   toolArgs?: Record<string, unknown>;
   imageMarkdown?: string;
   downloadInfo?: DownloadInfo;
+  audioUrl?: string;
+  audioAutoplay?: boolean;
   reasoningContent?: string;
 }
 
@@ -156,9 +158,9 @@ export default function App() {
       .catch(() => {});
   }, []);
 
-  const addMessage = useCallback((role: ChatMessage["role"], content: string, imageMarkdown?: string, downloadInfo?: DownloadInfo) => {
+  const addMessage = useCallback((role: ChatMessage["role"], content: string, imageMarkdown?: string, downloadInfo?: DownloadInfo, audioUrl?: string, audioAutoplay?: boolean) => {
     const id = crypto.randomUUID();
-    setMessages((prev) => [...prev, { role, content, id, imageMarkdown, downloadInfo }]);
+    setMessages((prev) => [...prev, { role, content, id, imageMarkdown, downloadInfo, audioUrl, audioAutoplay }]);
   }, []);
 
   // ── WebSocket with auto-reconnect ───────────────────────────────────
@@ -230,7 +232,7 @@ export default function App() {
               if (m.reasoning_content) {
                 entry.reasoningContent = m.reasoning_content;
               }
-              // Parse tool message content to restore downloadInfo and imageMarkdown
+              // Parse tool message content to restore downloadInfo, imageMarkdown and audioUrl
               if (m.role === "tool" && typeof m.content === "string") {
                 try {
                   const parsed = JSON.parse(m.content);
@@ -244,6 +246,14 @@ export default function App() {
                       description: parsed.description,
                       size: parsed.size,
                     };
+                  }
+                  if (parsed.audio_url) {
+                    entry.audioUrl = parsed.audio_url;
+                    entry.audioAutoplay = parsed.autoplay === true;
+                  }
+                  // Use the readable message instead of raw JSON
+                  if (parsed.message && typeof parsed.message === "string") {
+                    entry.content = parsed.message;
                   }
                 } catch {
                   // not JSON — leave as plain text
@@ -316,6 +326,8 @@ export default function App() {
         let text = `✅ ${msg.tool} → `;
         let imageMarkdown: string | undefined;
         let downloadInfo: DownloadInfo | undefined;
+        let audioUrl: string | undefined;
+        let audioAutoplay = false;
         try {
           const parsed = JSON.parse(raw);
           if (parsed.markdown) {
@@ -329,6 +341,10 @@ export default function App() {
               size: parsed.size,
             };
             text += (parsed.message ?? "").slice(0, 200);
+          } else if (parsed.audio_url) {
+            audioUrl = parsed.audio_url;
+            audioAutoplay = parsed.autoplay === true;
+            text += (parsed.message ?? "").slice(0, 200);
           } else if (parsed.message) {
             text += parsed.message.slice(0, 200);
           } else {
@@ -337,7 +353,7 @@ export default function App() {
         } catch {
           text += raw.slice(0, 2000);
         }
-        addMessage("tool", text, imageMarkdown, downloadInfo);
+        addMessage("tool", text, imageMarkdown, downloadInfo, audioUrl, audioAutoplay);
       }
       else if (msg.type === "error") addMessage("error", msg.message ?? "");
       else if (msg.type === "confirm_request") {
@@ -747,6 +763,13 @@ export default function App() {
                       </a>
                     ) : null;
                   })()}
+                  {m.audioUrl && (
+                    <div className="tool-audio">
+                      <audio controls={true} autoPlay={m.audioAutoplay} src={m.audioUrl} className="tool-audio-player">
+                        您的浏览器不支持音频播放
+                      </audio>
+                    </div>
+                  )}
                   {m.downloadInfo && (
                     <div className="tool-download">
                       <a

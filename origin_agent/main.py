@@ -104,6 +104,15 @@ class App:
         # ---- 排空后台任务 ----
         await self._drain_background_tasks()
 
+        # ---- 清理后台服务进程 ----
+        try:
+            from component.extools.background_service import cleanup_background_services
+            killed = await asyncio.to_thread(cleanup_background_services)
+            if killed:
+                logger.info("Cleaned up %d background service(s)", killed)
+        except Exception as exc:
+            logger.warning("Background service cleanup failed: %s", exc)
+
         logger.info("App shutdown complete")
         return self._exit_code
 

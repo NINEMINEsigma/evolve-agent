@@ -21,6 +21,7 @@ logger = logging.getLogger(__name__)
 _fs_sandbox: Any | None = None
 
 _IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".gif", ".webp"}
+_AUDIO_EXTS = {".mp3", ".wav", ".ogg", ".flac", ".aac", ".m4a"}
 
 _MIME_MAP = {
     ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
@@ -33,6 +34,8 @@ _MIME_MAP = {
     ".zip": "application/zip",
     ".tar": "application/x-tar",
     ".gz": "application/gzip",
+    ".mp3": "audio/mpeg", ".wav": "audio/wav", ".ogg": "audio/ogg",
+    ".flac": "audio/flac", ".aac": "audio/aac", ".m4a": "audio/mp4",
 }
 
 
@@ -163,6 +166,63 @@ def _handle_publish_file(args: Dict[str, Any]) -> str:
     )
 
 
+def _handle_play_audio(args: Dict[str, Any]) -> str:
+    """Play audio in the frontend. Accepts a ws: file path or an external URL."""
+    path: str = str(args.get("path", "")).strip()
+    url: str = str(args.get("url", "")).strip()
+    autoplay: bool = bool(args.get("autoplay", True))
+
+    if not path and not url:
+        return tool_error("Must provide 'path' (ws: audio file) or 'url' (external audio URL)")
+    if path and url:
+        return tool_error("Provide only one of 'path' or 'url', not both.")
+
+    audio_url: str = ""
+    mime: str = "audio/mpeg"
+    size: int = 0
+
+    if path:
+        result = _resolve_common(path)
+        if isinstance(result, str):
+            return tool_error(result)
+        real, agentspace = result
+
+        ext = real.suffix.lower()
+        if ext not in _AUDIO_EXTS:
+            return tool_error(
+                f"Unsupported audio format '{ext}'. "
+                f"Supported: {', '.join(sorted(_AUDIO_EXTS))}"
+            )
+
+        mime = _MIME_MAP.get(ext, "audio/mpeg")
+        size = real.stat().st_size
+        try:
+            rel = real.relative_to(agentspace)
+            audio_url = f"/uploads/{rel.as_posix()}"
+        except ValueError:
+            audio_url = f"/uploads/{real.name}"
+
+    if url:
+        audio_url = url
+        # infer MIME from extension if possible
+        ext = Path(url.split("?")[0]).suffix.lower()
+        mime = _MIME_MAP.get(ext, "audio/mpeg")
+
+    label = path or url
+    size_str = f" ({size / 1024:.1f} KB)" if size else ""
+    autoplay_str = " (autoplay)" if autoplay else ""
+
+    return tool_result(
+        path=path or None,
+        url=url or None,
+        audio_url=audio_url,
+        mime=mime,
+        size=size,
+        autoplay=autoplay,
+        message=f"🔊 {label}{size_str}{autoplay_str}",
+    )
+
+
 # ---------------------------------------------------------------------------
 # Registration
 # ---------------------------------------------------------------------------
@@ -266,4 +326,71 @@ registry.register(
     },
     handler=_handle_publish_file,
     emoji="📤",
+)
+
+registry.register(
+    name="play_audio",
+    toolset="display",
+    schema={
+        # 将音频发送到前端，可选择立即播放。
+        # 使用步骤:
+        #   1. 生成或获取音频文件并保存到 ws: 路径，或准备一个外部 URL
+        #   2. 调用 play_audio(path="ws:output/speech.mp3", autoplay=true)
+        #   3. 前端会显示一个音频播放器，如果 autoplay=true 则自动播放
+        # 输入模式（二选一）:
+        #   - path: ws: 前缀下的本地音频文件路径
+        #   - url:  外部音频 URL
+        # 支持的音频格式:
+        #   mp3, wav, ogg, flac, aac, m4a
+        "description": (
+            "Send audio to the frontend and optionally play it immediately.\\n\\n"
+            "Two input modes (mutually exclusive):\\n"
+            "  - path: ws: path to a local audio file\\n"
+            "  - url:  external audio URL\\n\\n"
+            "If autoplay=true (default), the frontend <audio> element has the "
+            "autoPlay attribute, which starts playback as soon as the "
+            "tool result is received.\\n\\n"
+            "Supported audio formats (for ws: path): "
+            "mp3, wav, ogg, flac, aac, m4a\\n\\n"
+            "Returns:\\n"
+            "  - audio_url: resolved URL for playback\\n"
+            "  - autoplay: whether autoplay is enabled\\n"
+            "  - mime: MIME type\\n"
+            "  - size: file size in bytes (path mode only)\\n"
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "path": {
+                    "type": "string",
+                    # ws: 前缀下的音频文件路径，如 ws:output/speech.mp3。与 url 互斥。
+                    "description": (
+                        "Path to an audio file under ws: prefix, "
+                        "e.g. ws:output/speech.mp3. "
+                        "Mutually exclusive with 'url'."
+                    ),
+                },
+                "url": {
+                    "type": "string",
+                    # 外部音频 URL，如 https://example.com/audio.mp3。与 path 互斥。
+                    "description": (
+                        "External URL of an audio file, "
+                        "e.g. https://example.com/audio.mp3. "
+                        "Mutually exclusive with 'path'."
+                    ),
+                },
+                "autoplay": {
+                    "type": "boolean",
+                    # 是否立即播放。开启后前端收到结果自动播放，默认为 true。
+                    "description": (
+                        "If true, the frontend starts playback immediately "
+                        "when the tool result arrives. Default: true."
+                    ),
+                    "default": True,
+                },
+            },
+        },
+    },
+    handler=_handle_play_audio,
+    emoji="🔊",
 )

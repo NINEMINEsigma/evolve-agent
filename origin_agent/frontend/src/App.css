@@ -612,6 +612,16 @@ html, body, #root {
   opacity: 0.85;
 }
 
+.tool-audio {
+  margin-top: 8px;
+}
+.tool-audio-player {
+  width: 100%;
+  max-width: 400px;
+  height: 40px;
+  border-radius: 6px;
+}
+
 /* ── agent 正文中的图片 ── */
 .message-img-link {
   display: inline-block;
