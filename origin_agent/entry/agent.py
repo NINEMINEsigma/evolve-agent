@@ -1013,6 +1013,9 @@ class AgentLoop:
                 }, ensure_ascii=False)
                 _skip_dispatch = True
 
+        # ---- 实际工具执行（审批耗时与 tool_timeout 相互独立）----
+        # request_user_confirm 的审批时间（含模型加载、推理）
+        # 不计入下方的 tool_timeout，两者是先后独立的两个阶段。
         if not _skip_dispatch:
             timeout: int = self._ctx.tool_timeout
             # 如果 memory 管理器拥有该工具，则路由过去

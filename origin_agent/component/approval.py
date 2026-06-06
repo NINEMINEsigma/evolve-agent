@@ -151,6 +151,18 @@ async def _adventure_confirm(
         logger.warning("Approver not available — adventure mode deny")
         return ApprovalResult(action="deny", deny_reason="Approval model unavailable, auto-denied", denied_by="system")
 
+    # 等待模型加载完成（防止 health 200 但模型仍在 loading 导致的 502）
+    if not engine.is_model_loaded():
+        logger.info("Approval model loading — waiting | tool=%s", tool_name)
+        for _ in range(120):
+            await asyncio.sleep(1.0)
+            if engine.is_model_loaded():
+                logger.info("Approval model loaded | tool=%s", tool_name)
+                break
+        else:
+            logger.warning("Approval model load timeout (120s) | tool=%s", tool_name)
+            return ApprovalResult(action="deny", deny_reason="Approval model load timeout (120s)", denied_by="system")
+
     from system.pathutils import find_repo_root, get_templates_dir
 
     system_prompt = (get_templates_dir() / "approval" / "system_prompt.md").read_text(encoding="utf-8")
@@ -282,7 +294,7 @@ async def request_user_confirm(
 
     返回 ApprovalResult(action, deny_reason)。
     """
-    # 冒险模式：小 LLM 自动审批
+    # 冒险模式：小 LLM 自动审批（不占用工具调用超时时间）
     if is_adventure_mode(session_id):
         result = await _adventure_confirm(
             tool_name, args, reason, content,
