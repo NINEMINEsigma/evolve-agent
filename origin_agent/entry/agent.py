@@ -847,7 +847,7 @@ class AgentLoop:
         self._message_hooks_cache = hooks
         return hooks
 
-    def _get_hooks_context(self) -> str:
+    def _get_hooks_context(self, session_id: str) -> str:
         """收集当前所有 custom_hooks 的实时内容，返回格式化的扩展上下文字符串。
 
         用于审批流程，让审批模型也能看到主模型看到的额外上下文。
@@ -855,9 +855,11 @@ class AgentLoop:
         parts: list[str] = []
         for hook in self._load_message_hooks():
             try:
-                tag = hook["tag_fn"]()
-                msg = hook["msg_fn"]()
-                parts.append(f"<im_{tag}_start>{msg}<im_{tag}_end>")
+                tag = hook["tag_fn"](session_id, self._ctx.workspace)
+                if tag:
+                    msg = hook["msg_fn"](session_id, self._ctx.workspace)
+                    if msg:
+                        parts.append(f"<|im_{tag}_start|>{msg}<|im_{tag}_end|>")
             except Exception:
                 pass
         return "\n".join(parts)
@@ -901,9 +903,11 @@ class AgentLoop:
                 hooked_msg = dict(msg)
                 hooked_content = str(hooked_msg.get("content", ""))
                 for hook in self._load_message_hooks():
-                    tag = hook["tag_fn"]()
-                    msg = hook["msg_fn"]()
-                    hooked_content += f"<im_{tag}_start>{msg}</im_{tag}_end>"
+                    tag = hook["tag_fn"](session_id, self._ctx.workspace)
+                    if tag:
+                        msg = hook["msg_fn"](session_id, self._ctx.workspace)
+                        if msg:
+                            hooked_content += f"<|im_{tag}_start|>{msg}<|im_{tag}_end|>"
                 hooked_msg["content"] = hooked_content
                 messages.append(hooked_msg)
             else:
@@ -1028,7 +1032,7 @@ class AgentLoop:
         danger_level: str = tool_registry.get_danger_level(tc.name)
         if danger_level == "write" and is_handsfree_mode(session_id):
             _approval_args = {k: v for k, v in args.items() if k != "_session_id"}
-            _hooks_ctx = self._get_hooks_context()
+            _hooks_ctx = self._get_hooks_context(session_id)
 
             approval = await request_user_confirm(
                 session_id, tc.name, _approval_args,
