@@ -27,4 +27,5 @@ def hook_message() -> str:
         "current_time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         "current_platform": sys.platform,
         "current_root_dir": Path(__file__).parent.parent.absolute().as_posix(),
+        "current_python": sys.executable,
     })

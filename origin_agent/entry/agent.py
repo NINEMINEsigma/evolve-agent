@@ -1149,6 +1149,23 @@ class AgentLoop:
             except Exception as _exc:
                 logger.warning("Failed to write tool result to file: %s", _exc)
 
+        # ---- 进度条工具：额外推送 task_progress 事件 ----
+        if self._tool_event_callback and tc.name in ("set_task_progress", "clear_task_progress"):
+            _progress_payload: str = result
+            try:
+                _pp: dict = json.loads(result)
+                if "_image" in _pp:
+                    _pp_copy: dict = dict(_pp)
+                    _pp_copy.pop("_image", None)
+                    _progress_payload = json.dumps(_pp_copy, ensure_ascii=False)
+            except (json.JSONDecodeError, TypeError):
+                pass
+            asyncio.create_task(
+                self._tool_event_callback(
+                    session_id, "task_progress", tc.name, _progress_payload,
+                ) # type: ignore
+            )
+
         # ---- 通知前端：tool_result (fire-and-forget) ----
         # 前端推送是尽力而为的副作用，不阻塞工具执行主链路。
         if self._tool_event_callback:

@@ -88,7 +88,8 @@ if __name__ == "__main__":
     if fouce_init or (workspace_path/"init.lock").exists() == False:
         (workspace_path/"init.lock").touch()
         # 保持代理空间干净，删除代理空间并重新创建
-        File(origin=str(fast_agent_space)).delete() # 删除fast agent空间
+        # 不再尝试每次都删除代理空间，避免前端可能的重新下载
+        # File(origin=str(fast_agent_space)).delete() # 删除fast agent空间
         fast_agent_space.mkdir(parents=True, exist_ok=True) # 创建fast agent空间
         File(origin=str(slow_agent_space)).delete() # 删除slow agent空间
         slow_agent_space.mkdir(parents=True, exist_ok=True) # 创建slow agent空间
@@ -131,11 +132,13 @@ if __name__ == "__main__":
         elif exit_code in (-1, 4294967295):
             logger.info(f"Slow agent was updated, fast agent will update to new version")
             _append_evolve_event("backup", f"fast → .fallback")
-            File(str(workspace_path/".fallback")).delete()
+            # 不再尝试每次都删除备份空间，避免前端可能的重新下载
+            # File(str(workspace_path/".fallback")).delete()
             File(str(fast_agent_space)).copy_to(str(workspace_path/".fallback"))
 
             _append_evolve_event("swap", f"slow → fast")
-            File(str(fast_agent_space)).delete()
+            # 不再尝试每次都删除代理空间，避免前端可能的重新下载
+            # File(str(fast_agent_space)).delete()
             File(str(slow_agent_space)).copy_to(str(fast_agent_space))
 
             _append_evolve_event("complete", "swap finished, restarting")

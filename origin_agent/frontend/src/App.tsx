@@ -4,7 +4,7 @@ import remarkGfm from "remark-gfm";
 import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
 import { oneDark } from "react-syntax-highlighter/dist/esm/styles/prism";
 
-type MessageType = "system" | "user_message" | "agent_message" | "tool_call" | "tool_result" | "confirm_request" | "ask_request" | "error";
+type MessageType = "system" | "user_message" | "agent_message" | "tool_call" | "tool_result" | "task_progress" | "confirm_request" | "ask_request" | "error";
 
 interface WSMessage {
   type: MessageType;
@@ -43,6 +43,15 @@ interface DownloadInfo {
   filename: string;
   description?: string;
   size?: number;
+}
+
+interface TaskProgress {
+  task_id: string;
+  label: string;
+  current: number;
+  total: number;
+  percent: number;
+  status: string;
 }
 
 interface ChatMessage {
@@ -139,6 +148,7 @@ export default function App() {
   const [uploading, setUploading] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [handsfreeMode, setHandsfreeMode] = useState(false);
+  const [taskProgress, setTaskProgress] = useState<Record<string, TaskProgress>>({});
   const [llmMaxContextTokens, setLlmMaxContextTokens] = useState(0);
   const [approvalModelName, setApprovalModelName] = useState("");
   const [approvalModelAvailable, setApprovalModelAvailable] = useState(false);
@@ -354,6 +364,40 @@ export default function App() {
           text += raw.slice(0, 2000);
         }
         addMessage("tool", text, imageMarkdown, downloadInfo, audioUrl, audioAutoplay);
+      }
+      else if (msg.type === "task_progress") {
+        const raw = msg.result ?? "";
+        try {
+          const data = JSON.parse(raw);
+          if (data.cleared) {
+            // clear_task_progress — 移除指定或全部进度条
+            setTaskProgress((prev) => {
+              const next = { ...prev };
+              if (Array.isArray(data.cleared) && data.cleared.length) {
+                for (const tid of data.cleared) delete next[tid];
+              } else {
+                // 无明确 task_id 时全部清除
+                return {};
+              }
+              return next;
+            });
+          } else if (data.task_id) {
+            // set_task_progress — 更新或创建
+            setTaskProgress((prev) => ({
+              ...prev,
+              [data.task_id]: {
+                task_id: data.task_id,
+                label: data.label || data.task_id,
+                current: data.current ?? 0,
+                total: data.total ?? 100,
+                percent: data.percent ?? 0,
+                status: data.status || "running",
+              },
+            }));
+          }
+        } catch {
+          // ignore malformed progress payload
+        }
       }
       else if (msg.type === "error") addMessage("error", msg.message ?? "");
       else if (msg.type === "confirm_request") {
@@ -737,6 +781,30 @@ export default function App() {
           </div>
         )}
       </header>
+
+      {/* ── 任务进度条面板（固定在 header 下方，不随消息滚动）── */}
+      {Object.keys(taskProgress).length > 0 && (
+        <div className="task-progress-panel">
+          {Object.values(taskProgress).map((tp) => (
+            <div key={tp.task_id} className="task-progress-item">
+              <div className="task-progress-header">
+                <span className="task-progress-label">{tp.label}</span>
+                <span className="task-progress-status">{tp.status}</span>
+                <span className="task-progress-percent">{tp.percent}%</span>
+              </div>
+              <div className="task-progress-bar-bg">
+                <div
+                  className="task-progress-bar-fill"
+                  style={{ width: `${tp.percent}%` }}
+                />
+              </div>
+              <div className="task-progress-detail">
+                {tp.current} / {tp.total}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
 
       <main className="chat-area">
         {messages.map((m) => (
