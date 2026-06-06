@@ -147,6 +147,9 @@ class AgentLoop:
         self._history_store_dir: Path | None = Path(history_store_path) if history_store_path else None
         # 自定义消息 hook 缓存（custom_hooks/ 下的扩展上下文脚本）
         self._message_hooks_cache: list[dict] | None = None
+        # 每个 session 的排他锁，防止并发 process_message 破坏消息序列
+        # （如 cron 定时任务回调与主流程同时写入同一 session）
+        self._session_locks: Dict[str, asyncio.Lock] = {}
 
     # -- 公开 API ----------------------------------------------------------
 
@@ -203,6 +206,19 @@ class AgentLoop:
           3. 调用 LLM，执行工具调用，重复直到得到文本回复
           4. 将完成的本回合同步到 memory
         """
+        # 获取或创建 session 级排他锁，防止并发 process_message
+        # 破坏消息序列（如 cron 回调与主流程同时写入同一 session）
+        if session_id not in self._session_locks:
+            self._session_locks[session_id] = asyncio.Lock()
+        async with self._session_locks[session_id]:
+            return await self._process_message_locked(session_id, user_message)
+
+    async def _process_message_locked(
+        self,
+        session_id: str,
+        user_message: str,
+    ) -> str:
+        """process_message 的锁内实现。"""
         # 清除上一回合残留的过期中断标记
         self._interrupted.pop(session_id, None)
         # ---- 持久化用户消息 ----
