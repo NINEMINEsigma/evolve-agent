@@ -138,6 +138,7 @@ async def _adventure_confirm(
     tool_name: str, args: dict, reason: str, content: str,
     ask_agent_callback: Optional[Callable[[str], Awaitable[str]]] = None,
     max_dialog_turns: int = 2,
+    extra_context: Optional[str] = None,
 ) -> ApprovalResult:
     """冒险模式：将工具调用 JSON 发送给小 LLM 审批。
 
@@ -169,13 +170,16 @@ async def _adventure_confirm(
 
     cwd = str(find_repo_root().resolve())
 
-    user_prompt = json.dumps({
+    user_prompt_data: Dict[str, Any] = {
         "tool": tool_name,
         "args": args,
         "reason": reason,
         "description": content,
         "cwd": cwd,
-    }, ensure_ascii=False)
+    }
+    if extra_context:
+        user_prompt_data["context"] = extra_context
+    user_prompt = json.dumps(user_prompt_data, ensure_ascii=False)
 
     from third.llamaapis import GenerationConfig, system_message, user_message
 
@@ -280,6 +284,7 @@ async def request_user_confirm(
     reason: str,
     content: str,
     ask_agent_callback: Optional[Callable[[str], Awaitable[str]]] = None,
+    extra_context: Optional[str] = None,
 ) -> ApprovalResult:
     """统一审批入口。
 
@@ -291,6 +296,7 @@ async def request_user_confirm(
         content:    展示给审批者的描述文本
         ask_agent_callback: 可选 — 冒险模式专用。当审批模型不确定时，
                             通过此回调向 Agent 主模型提问，获取更多上下文。
+        extra_context: 可选 — custom_hooks 等额外上下文，供审批模型参考。
 
     返回 ApprovalResult(action, deny_reason)。
     """
@@ -299,6 +305,7 @@ async def request_user_confirm(
         result = await _adventure_confirm(
             tool_name, args, reason, content,
             ask_agent_callback=ask_agent_callback,
+            extra_context=extra_context,
         )
         if result is not None:
             return result
@@ -353,6 +360,7 @@ async def ask_agent_reason(
     tool_name: str,
     tool_args: dict,
     question: str,
+    extra_context: Optional[str] = None,
 ) -> str:
     """将审批模型的问题转发给 Agent 主模型，获取操作意图解释。
 
@@ -364,6 +372,7 @@ async def ask_agent_reason(
         tool_name: 被审批的工具名
         tool_args: 工具参数字典
         question:  审批模型提出的问题
+        extra_context: 可选 — custom_hooks 等额外上下文
 
     返回：
         主模型的回答文本
@@ -376,6 +385,13 @@ async def ask_agent_reason(
         .replace("{{question}}", question)
         .replace("{{tool_args_json}}", json.dumps(tool_args, ensure_ascii=False, indent=2))
     )
+    if extra_context:
+        ask_prompt += (
+            f"\n\n[Additional Context]\n"
+            f"The following context was attached to the user's latest message "
+            f"and may be relevant to answering the approval model's question:\n"
+            f"{extra_context}"
+        )
     try:
         resp = await llm.chat(
             [{"role": "user", "content": ask_prompt}],

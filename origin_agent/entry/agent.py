@@ -847,6 +847,21 @@ class AgentLoop:
         self._message_hooks_cache = hooks
         return hooks
 
+    def _get_hooks_context(self) -> str:
+        """收集当前所有 custom_hooks 的实时内容，返回格式化的扩展上下文字符串。
+
+        用于审批流程，让审批模型也能看到主模型看到的额外上下文。
+        """
+        parts: list[str] = []
+        for hook in self._load_message_hooks():
+            try:
+                tag = hook["tag_fn"]()
+                msg = hook["msg_fn"]()
+                parts.append(f"<im_{tag}_start>{msg}<im_{tag}_end>")
+            except Exception:
+                pass
+        return "\n".join(parts)
+
     def _build_messages(
         self,
         session_id: str,
@@ -1013,12 +1028,16 @@ class AgentLoop:
         danger_level: str = tool_registry.get_danger_level(tc.name)
         if danger_level == "write" and is_adventure_mode(session_id):
             _approval_args = {k: v for k, v in args.items() if k != "_session_id"}
+            _hooks_ctx = self._get_hooks_context()
 
             approval = await request_user_confirm(
                 session_id, tc.name, _approval_args,
                 reason=str(args.get("reason", "")),
                 content=f"Tool: {tc.name}\nParameters: {json.dumps(_approval_args, ensure_ascii=False)[:500]}",
-                ask_agent_callback=lambda q: ask_agent_reason(self._llm, tc.name, _approval_args, q),
+                ask_agent_callback=lambda q: ask_agent_reason(
+                    self._llm, tc.name, _approval_args, q, extra_context=_hooks_ctx,
+                ),
+                extra_context=_hooks_ctx,
             )
             if approval.action == "deny":
                 source_label = {"model": "approval model", "user": "user", "system": "system"}.get(approval.denied_by, "system")

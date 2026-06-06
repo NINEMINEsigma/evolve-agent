@@ -28,6 +28,3 @@ def hook_message() -> str:
         "current_platform": sys.platform,
         "current_root_dir": Path(__file__).parent.parent.absolute().as_posix(),
     })
-
-if __name__ == "__main__":
-    print(f"<im_{hook_tag_name()}_start>{hook_message()}</im_{hook_tag_name()}_end>")
