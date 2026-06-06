@@ -231,7 +231,7 @@ You can modify your own source code and complete evolution through the following
         if agent_loop is not None:
             agent_loop.set_session_manager(sessions)
 
-        # ---- 预编译 llama-server（冒险模式审批模型需要）----
+        # ---- 预编译 llama-server（脱手模式审批模型需要）----
         if self.ctx.approval_model_path:
             try:
                 from third.llamaapis.system.builder import LlamaBuilder

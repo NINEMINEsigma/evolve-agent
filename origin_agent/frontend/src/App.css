@@ -1122,8 +1122,8 @@ html, body, #root {
   color: var(--text-muted);
 }
 
-/* ── Adventure mode toggle ── */
-.adventure-toggle {
+/* ── Handsfree mode toggle ── */
+.handsfree-toggle {
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -1132,17 +1132,17 @@ html, body, #root {
   margin-right: 8px;
 }
 
-.adventure-label {
+.handsfree-label {
   font-size: 11px;
   color: var(--text-muted);
   font-weight: 500;
 }
 
-.adventure-toggle input {
+.handsfree-toggle input {
   display: none;
 }
 
-.adventure-slider {
+.handsfree-slider {
   position: relative;
   width: 32px;
   height: 18px;
@@ -1152,7 +1152,7 @@ html, body, #root {
   flex-shrink: 0;
 }
 
-.adventure-slider::before {
+.handsfree-slider::before {
   content: "";
   position: absolute;
   top: 2px;
@@ -1164,11 +1164,11 @@ html, body, #root {
   transition: transform 0.2s, background 0.2s;
 }
 
-.adventure-toggle input:checked + .adventure-slider {
+.handsfree-toggle input:checked + .handsfree-slider {
   background: var(--accent);
 }
 
-.adventure-toggle input:checked + .adventure-slider::before {
+.handsfree-toggle input:checked + .handsfree-slider::before {
   transform: translateX(14px);
   background: #fff;
 }

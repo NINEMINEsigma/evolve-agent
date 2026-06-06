@@ -28,7 +28,7 @@ class MessageType(str, Enum):
     ERROR = "error"
     SYSTEM = "system"
     FILE_UPLOAD = "file_upload"
-    ADVENTURE_MODE = "adventure_mode"
+    HANDSFREE_MODE = "handsfree_mode"
 
 
 class Message(BaseModel):

@@ -21,7 +21,7 @@ from typing import Any, Awaitable, Callable, Dict, List
 
 from abstract.memory.manager import MemoryManager
 from abstract.tools.registry import ToolEntry, registry as tool_registry
-from component.approval import ApprovalResult, ask_agent_reason, is_adventure_mode, request_user_confirm
+from component.approval import ApprovalResult, ask_agent_reason, is_handsfree_mode, request_user_confirm
 from component.llm import LLMClient, LLMResponse, ToolCall
 from system.pathutils import find_repo_root
 from system.context import RuntimeContext
@@ -1022,11 +1022,11 @@ class AgentLoop:
                 ) # type: ignore
             )
 
-        # ---- 冒险模式写入审批 ----
+        # ---- 脱手模式写入审批 ----
         _skip_dispatch = False
         result: str = ""
         danger_level: str = tool_registry.get_danger_level(tc.name)
-        if danger_level == "write" and is_adventure_mode(session_id):
+        if danger_level == "write" and is_handsfree_mode(session_id):
             _approval_args = {k: v for k, v in args.items() if k != "_session_id"}
             _hooks_ctx = self._get_hooks_context()
 

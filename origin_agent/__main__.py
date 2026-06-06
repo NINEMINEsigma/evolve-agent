@@ -123,7 +123,7 @@ def _build_context(cli: dict) -> RuntimeContext:
         llm_max_context_tokens  = int(cli["llm_max_context_tokens"]),
         llm_max_output_tokens   = int(cli["llm_max_output_tokens"]),
         llm_reasoning_effort    = str(cli["llm_reasoning_effort"]),
-        # 冒险模式审批模型配置
+        # 脱手模式审批模型配置
         approval_model_path     = str(cli.get("approval_model_path", "")),
         approval_model_n_ctx    = int(cli.get("approval_model_n_ctx", 4096)),
         approval_model_cuda     = as_bool(cli.get("approval_model_cuda", False)),

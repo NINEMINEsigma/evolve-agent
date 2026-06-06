@@ -138,7 +138,7 @@ export default function App() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
-  const [adventureMode, setAdventureMode] = useState(false);
+  const [handsfreeMode, setHandsfreeMode] = useState(false);
   const [llmMaxContextTokens, setLlmMaxContextTokens] = useState(0);
   const [approvalModelName, setApprovalModelName] = useState("");
   const [approvalModelAvailable, setApprovalModelAvailable] = useState(false);
@@ -501,7 +501,7 @@ export default function App() {
     setSessionId("");
     setWaiting(false);
     setPendingConfirm(null);
-    setAdventureMode(false);
+    setHandsfreeMode(false);
     clearTimeout(timerRef.current);
     manualRef.current = false;
     connect();
@@ -704,26 +704,26 @@ export default function App() {
         {sessionId && (
           <div className="header-right">
             {approvalModelAvailable && (
-              <label className="adventure-toggle" title={adventureMode ? "冒险模式已开启 — 工具调用由 AI 自动审批" : "冒险模式已关闭 — 工具调用需用户审批"}>
-                <span className="adventure-label">冒险</span>
+              <label className="handsfree-toggle" title={handsfreeMode ? "脱手模式已开启 — 工具调用由 AI 自动审批" : "脱手模式已关闭 — 工具调用需用户审批"}>
+                <span className="handsfree-label">脱手</span>
                 <input
                   type="checkbox"
-                  checked={adventureMode}
+                  checked={handsfreeMode}
                   onChange={(e) => {
                     const enabled = e.target.checked;
-                    setAdventureMode(enabled);
+                    setHandsfreeMode(enabled);
                     if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
                       wsRef.current.send(JSON.stringify({
-                        type: "adventure_mode",
+                        type: "handsfree_mode",
                         content: enabled ? "true" : "false",
                       }));
                     }
                   }}
                 />
-                <span className="adventure-slider" />
+                <span className="handsfree-slider" />
               </label>
             )}
-            {adventureMode && approvalModelName && (
+            {handsfreeMode && approvalModelName && (
               <span className="approval-model-badge" title={`审批模型: ${approvalModelName}`}>
                 {approvalModelName}
               </span>

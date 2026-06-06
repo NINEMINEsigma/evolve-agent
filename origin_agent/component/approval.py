@@ -1,4 +1,4 @@
-"""统一审批模块 — 支持正常模式（前端审批）和冒险模式（小LLM自动审批）。
+"""统一审批模块 — 支持正常模式（前端审批）和脱手模式（小LLM自动审批）。
 
 对外暴露的唯一接口：
     request_user_confirm(session_id, tool_name, args, reason, content) -> ApprovalResult
@@ -8,7 +8,7 @@
         .action       — "allow_once" | "allow_always" | "deny"
         .deny_reason  — 拒绝时携带具体原因，通过时为 None
 
-冒险模式通过 set_adventure_mode() 开启/关闭，每次启动默认关闭。
+脱手模式通过 set_handsfree_mode() 开启/关闭，每次启动默认关闭。
 审批小模型路径通过 config.py 的 approval_model_path 配置。
 CUDA 可用时自动全卸载到 GPU。
 """
@@ -38,7 +38,7 @@ class ApprovalResult(BaseModel):
     Attributes:
         action:      "allow_once" | "allow_always" | "deny"
         deny_reason: 拒绝原因，仅 action == "deny" 时有效
-        denied_by:   拒绝来源 — "model"（冒险模式LLM）、"user"（人工）、"system"（超时/断开等）
+        denied_by:   拒绝来源 — "model"（脱手模式LLM）、"user"（人工）、"system"（超时/断开等）
     """
     action: str
     deny_reason: Optional[str] = None
@@ -46,25 +46,25 @@ class ApprovalResult(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# 冒险模式 session 注册表
+# 脱手模式 session 注册表
 # ---------------------------------------------------------------------------
 
-_adventure_sessions: Dict[str, bool] = {}
+_handsfree_sessions: Dict[str, bool] = {}
 
 
-def set_adventure_mode(session_id: str, enabled: bool) -> None:
-    """开启/关闭冒险模式。"""
-    _adventure_sessions[session_id] = enabled
-    logger.info("Adventure mode %s for session=%s", "enabled" if enabled else "disabled", session_id)
+def set_handsfree_mode(session_id: str, enabled: bool) -> None:
+    """开启/关闭脱手模式。"""
+    _handsfree_sessions[session_id] = enabled
+    logger.info("Handsfree mode %s for session=%s", "enabled" if enabled else "disabled", session_id)
 
 
-def is_adventure_mode(session_id: str) -> bool:
-    """返回该 session 是否处于冒险模式。"""
-    return _adventure_sessions.get(session_id, False)
+def is_handsfree_mode(session_id: str) -> bool:
+    """返回该 session 是否处于脱手模式。"""
+    return _handsfree_sessions.get(session_id, False)
 
 
 # ---------------------------------------------------------------------------
-# 冒险模式：小 LLM 审批器（懒加载单例）
+# 脱手模式：小 LLM 审批器（懒加载单例）
 # ---------------------------------------------------------------------------
 
 if TYPE_CHECKING:
@@ -105,7 +105,7 @@ def _get_approver() -> InferenceEngine|None:
         n_ctx = ctx.approval_model_n_ctx or 4096
 
         if not model_path:
-            logger.warning("approval_model_path not configured — adventure mode will deny all")
+            logger.warning("approval_model_path not configured — handsfree mode will deny all")
             return None
 
         # 文件存放在 custom_models/ 目录下
@@ -126,21 +126,21 @@ def _get_approver() -> InferenceEngine|None:
             flash_attn=cuda_available,
             auto_build=True,
         ))
-        logger.info("Adventure approver loaded | model=%s cuda=%s", model_path, cuda_available)
+        logger.info("Handsfree approver loaded | model=%s cuda=%s", model_path, cuda_available)
         return _approver
     except Exception as exc:
-        logger.warning("Failed to initialize adventure approver: %s", exc)
+        logger.warning("Failed to initialize handsfree approver: %s", exc)
         _approver = _APPROVER_FAILED # type: ignore
         return None
 
 
-async def _adventure_confirm(
+async def _handsfree_confirm(
     tool_name: str, args: dict, reason: str, content: str,
     ask_agent_callback: Optional[Callable[[str], Awaitable[str]]] = None,
     max_dialog_turns: int = 2,
     extra_context: Optional[str] = None,
 ) -> ApprovalResult:
-    """冒险模式：将工具调用 JSON 发送给小 LLM 审批。
+    """脱手模式：将工具调用 JSON 发送给小 LLM 审批。
 
     支持 dialog 模式：当审批模型不确定时，可通过 ask_agent_callback
     向 Agent 主模型提问，获取更多上下文后重新评估。
@@ -149,7 +149,7 @@ async def _adventure_confirm(
     """
     engine = _get_approver()
     if engine is None:
-        logger.warning("Approver not available — adventure mode deny")
+        logger.warning("Approver not available — handsfree mode deny")
         return ApprovalResult(action="deny", deny_reason="Approval model unavailable, auto-denied", denied_by="system")
 
     # 等待模型加载完成（防止 health 200 但模型仍在 loading 导致的 502）
@@ -205,7 +205,7 @@ async def _adventure_confirm(
                     if ask_agent_callback is None or dialog_turn >= max_dialog_turns:
                         reason_text: str = cast(str, result.get("reason", ""))
                         logger.info(
-                            "Adventure ask but cannot continue | tool=%s question=%s",
+                            "Handsfree ask but cannot continue | tool=%s question=%s",
                             tool_name, ask_question,
                         )
                         return ApprovalResult(
@@ -215,12 +215,12 @@ async def _adventure_confirm(
                         )
 
                     logger.info(
-                        "Adventure asking agent (turn %d/%d) | tool=%s question=%s",
+                        "Handsfree asking agent (turn %d/%d) | tool=%s question=%s",
                         dialog_turn + 1, max_dialog_turns, tool_name, ask_question,
                     )
                     agent_answer = await ask_agent_callback(ask_question)
                     logger.info(
-                        "Adventure got agent answer (turn %d/%d) | tool=%s answer_len=%d",
+                        "Handsfree got agent answer (turn %d/%d) | tool=%s answer_len=%d",
                         dialog_turn + 1, max_dialog_turns, tool_name, len(agent_answer),
                     )
 
@@ -241,16 +241,16 @@ async def _adventure_confirm(
                 approved: bool = result["approved"]
                 reason_text = cast(str, result.get("reason", ""))
                 if approved:
-                    logger.info("Adventure approved | tool=%s reason=%s", tool_name, reason_text)
+                    logger.info("Handsfree approved | tool=%s reason=%s", tool_name, reason_text)
                     return ApprovalResult(action="allow_once")
-                logger.info("Adventure denied | tool=%s reason=%s", tool_name, reason_text)
+                logger.info("Handsfree denied | tool=%s reason=%s", tool_name, reason_text)
                 return ApprovalResult(action="deny", deny_reason=reason_text or "Security review failed", denied_by="model")
 
             except Exception as exc:
                 last_error = str(exc)
                 resp_content = locals().get("resp_content", "<not available>")
                 logger.warning(
-                    "Adventure approval attempt %d/%d failed: %s | resp=%r",
+                    "Handsfree approval attempt %d/%d failed: %s | resp=%r",
                     attempt, max_attempts, exc, resp_content,
                 )
                 if attempt < max_attempts:
@@ -262,7 +262,7 @@ async def _adventure_confirm(
             break
 
     logger.warning(
-        "Adventure approval exhausted — denying tool=%s | last_error=%s",
+        "Handsfree approval exhausted — denying tool=%s | last_error=%s",
         tool_name, last_error,
     )
     return ApprovalResult(
@@ -294,15 +294,15 @@ async def request_user_confirm(
         args:       工具调用参数字典
         reason:     agent 给出的执行原因
         content:    展示给审批者的描述文本
-        ask_agent_callback: 可选 — 冒险模式专用。当审批模型不确定时，
+        ask_agent_callback: 可选 — 脱手模式专用。当审批模型不确定时，
                             通过此回调向 Agent 主模型提问，获取更多上下文。
         extra_context: 可选 — custom_hooks 等额外上下文，供审批模型参考。
 
     返回 ApprovalResult(action, deny_reason)。
     """
-    # 冒险模式：小 LLM 自动审批（不占用工具调用超时时间）
-    if is_adventure_mode(session_id):
-        result = await _adventure_confirm(
+    # 脱手模式：小 LLM 自动审批（不占用工具调用超时时间）
+    if is_handsfree_mode(session_id):
+        result = await _handsfree_confirm(
             tool_name, args, reason, content,
             ask_agent_callback=ask_agent_callback,
             extra_context=extra_context,
@@ -351,7 +351,7 @@ async def request_user_confirm(
 
 
 # ---------------------------------------------------------------------------
-# 冒险模式辅助 — 向 Agent 主模型提问以获取审批上下文
+# 脱手模式辅助 — 向 Agent 主模型提问以获取审批上下文
 # ---------------------------------------------------------------------------
 
 
@@ -364,7 +364,7 @@ async def ask_agent_reason(
 ) -> str:
     """将审批模型的问题转发给 Agent 主模型，获取操作意图解释。
 
-    当冒险模式的小 LLM 不确定时，通过此函数向主模型提问，
+    当脱手模式的小 LLM 不确定时，通过此函数向主模型提问，
     主模型的回答会追加到提示词中供审批模型重新评估。
 
     参数：
