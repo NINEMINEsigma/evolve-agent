@@ -155,6 +155,10 @@ async def _handsfree_confirm(
     # 等待模型加载完成（防止 health 200 但模型仍在 loading 导致的 502）
     if not engine.is_model_loaded():
         logger.info("Approval model loading — waiting | tool=%s", tool_name)
+        # 检查引擎进程是否存活，若已崩溃则尝试重启
+        if not engine.ensure_alive():
+            logger.warning("Approval engine restart failed | tool=%s", tool_name)
+            return ApprovalResult(action="deny", deny_reason="Approval model crashed and restart failed", denied_by="system")
         for _ in range(120):
             await asyncio.sleep(1.0)
             if engine.is_model_loaded():
@@ -174,7 +178,8 @@ async def _handsfree_confirm(
         "tool": tool_name,
         "args": args,
         "reason": reason,
-        "description": content,
+        # NOTICE: 可能太长，先不传了
+        # "description": content,
         "cwd": cwd,
     }
     if extra_context:
@@ -195,7 +200,7 @@ async def _handsfree_confirm(
         for attempt in range(1, max_attempts + 1):
             try:
                 messages = [system_message(system_prompt), user_message(current_prompt)]
-                resp = await asyncio.to_thread(engine.chat, messages, GenerationConfig(temperature=0.1))
+                resp = await asyncio.to_thread(engine.chat, messages, GenerationConfig(temperature=0.1, max_tokens=2048, thinking=False))
                 resp_content = resp.choices[0].message.content
                 result: dict = cast(dict, dirtyjson.loads(resp_content))
 

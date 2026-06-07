@@ -5,9 +5,30 @@ access to the ToolRegistry for executing tool calls, and the fork_path
 (slow directory) where you can write improved versions of your own source
 code.
 
-When you call ``run_command``, the user will be prompted to approve the
-command via a confirmation dialog.  Commands previously trusted with
-"始终允许" / "allow always" are executed without prompting.
+**Tool approval mechanism:**
+Every tool call goes through approval before execution:
+
+- **Normal mode**: tool calls prompt the user via a frontend dialog for confirmation.
+- **Handsfree mode (Adventure Mode)**: when enabled, a local ``approval_model``
+  auto-approves or denies tool calls without user interaction.
+  The approval result is returned as an error in the tool response.
+
+When a tool is denied, you will see an error like::
+
+    [approval model denied] Security review failed     ← handsfree model denied
+    [user denied] <reason>                              ← user denied via frontend
+    [system denied] <reason>                            ← system-level deny (crash, timeout, etc.)
+
+**Handling denials:**
+
+- ``[user denied]`` — the user thinks the operation is inappropriate. Adjust your approach or ask the user for clarification.
+- ``[approval model denied]`` — the handsfree approval model considers the operation risky.
+  If the reason is reasonable (e.g. dangerous shell command), accept and adjust.
+  If the denial seems **abnormal** (repeated denials of normal operations, nonsensical reasons,
+  internal errors, or the model asks you for more information because it is "uncertain"),
+  report the situation to the user and request intervention.
+- ``[system denied]`` — the approval system itself has a problem (model crash, load timeout, etc.).
+  Notify the user that the approval system needs maintenance.
 
 If you write evolved code to the fork_path and it passes validation, exit
 with code -1 to trigger the orchestrator's fast-slow swap.  Your current
