@@ -494,7 +494,8 @@ export default function App() {
 
   const send = () => {
     const text = input.trim();
-    if (!text || !wsRef.current || waiting || wsRef.current.readyState !== WebSocket.OPEN) return;
+    const isArchived = sessions.find((s) => s.id === sessionId)?.status === "archived";
+    if (!text || !wsRef.current || waiting || wsRef.current.readyState !== WebSocket.OPEN || isArchived) return;
     addMessage("user", text);
     wsRef.current.send(
       JSON.stringify({ type: "user_message", content: text })
@@ -505,7 +506,8 @@ export default function App() {
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (!file || !wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
+    const isArchived = sessions.find((s) => s.id === sessionId)?.status === "archived";
+    if (!file || !wsRef.current || wsRef.current.readyState !== WebSocket.OPEN || isArchived) return;
 
     // 限制文件大小：20MB
     if (file.size > 20 * 1024 * 1024) {
@@ -624,6 +626,32 @@ export default function App() {
       .catch(() => {});
   };
 
+  // ── archive ──
+  const archiveSession = (sid: string) => {
+    setContextMenu(null);
+    fetch(`/api/sessions/${sid}/archive`, { method: "POST" })
+      .then(() => {
+        fetchSessions();
+        if (sid === sessionId) {
+          newChat();
+        }
+      })
+      .catch(() => {});
+  };
+
+  // ── compress ──
+  const compressSession = (sid: string) => {
+    setContextMenu(null);
+    fetch(`/api/sessions/${sid}/compress`, { method: "POST" })
+      .then(() => {
+        fetchSessions();
+        if (sid === sessionId) {
+          newChat();
+        }
+      })
+      .catch(() => {});
+  };
+
   // ── context menu ──
   const handleContextMenu = (e: React.MouseEvent, sid: string) => {
     e.preventDefault();
@@ -664,7 +692,7 @@ export default function App() {
                   <div
                     key={s.id}
                     className={`session-item ${s.id === sessionId ? "active" : ""} ${s.status === "archived" ? "archived" : ""}`}
-                    onClick={() => { if (s.status !== "archived") switchSession(s.id); }}
+                    onClick={() => switchSession(s.id)}
                     onContextMenu={(e) => handleContextMenu(e, s.id)}
                   >
                     <div className="session-item-content">
@@ -711,6 +739,12 @@ export default function App() {
           </div>
           <div className="context-menu-item" onClick={() => autoTitleSession(contextMenu.sid)}>
             自动命名
+          </div>
+          <div className="context-menu-item" onClick={() => { setContextMenu(null); compressSession(contextMenu.sid); }}>
+            压缩记忆
+          </div>
+          <div className="context-menu-item" onClick={() => { setContextMenu(null); archiveSession(contextMenu.sid); }}>
+            归档
           </div>
           <div className="context-menu-separator" />
           <div className="context-menu-item context-menu-item-danger" onClick={() => { setContextMenu(null); deleteSession(contextMenu.sid); }}>
@@ -778,6 +812,19 @@ export default function App() {
             <span className="token-badge" title={`累计消耗: ${tokenUsage.toLocaleString()}  |  已用上下文: ${contextTokens.toLocaleString()}  |  最大上下文: ${llmMaxContextTokens > 0 ? llmMaxContextTokens.toLocaleString() : "?"}`}>
               累计 {tokenUsage.toLocaleString()} / 上下文 {contextTokens.toLocaleString()} / 上限 {llmMaxContextTokens > 0 ? llmMaxContextTokens.toLocaleString() : "?"}
             </span>
+            {(() => {
+              const isArchived = sessions.find((s) => s.id === sessionId)?.status === "archived";
+              return (
+                <>
+                  <button className="header-action-btn" onClick={() => archiveSession(sessionId)} title="归档当前会话" disabled={isArchived}>
+                    归档
+                  </button>
+                  <button className="header-action-btn" onClick={() => compressSession(sessionId)} title="压缩记忆并归档" disabled={isArchived}>
+                    压缩
+                  </button>
+                </>
+              );
+            })()}
           </div>
         )}
       </header>
@@ -1047,67 +1094,78 @@ export default function App() {
         </div>
       )}
 
-      <footer className="input-bar">
-        <textarea
-          className="input-field"
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" && !e.shiftKey) {
-              e.preventDefault();
-              send();
-            }
-          }}
-          onInput={(e) => {
-            const el = e.currentTarget;
-            el.style.height = "auto";
-            el.style.height = el.scrollHeight + "px";
-          }}
-          placeholder="输入消息..."
-          autoFocus
-          disabled={waiting}
-          rows={1}
-        />
-        <input
-          ref={fileInputRef}
-          type="file"
-          className="file-input-hidden"
-          onChange={handleFileUpload}
-          accept="image/*,.pdf,.doc,.docx,.xls,.xlsx,.csv,.txt,.json,.py,.js,.ts,.html,.css,.md,.zip,.tar,.gz"
-          disabled={uploading}
-        />
-        <button
-          className="upload-btn"
-          onClick={() => fileInputRef.current?.click()}
-          disabled={uploading}
-          title="上传文件"
-        >
-          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2">
-            <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4" />
-            <polyline points="17 8 12 3 7 8" />
-            <line x1="12" y1="3" x2="12" y2="15" />
-          </svg>
-        </button>
-        <button className="send-btn" onClick={send} disabled={waiting || !input.trim()}>
-          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2">
-            <path d="M22 2L11 13" /><path d="M22 2L15 22L11 13L2 9L22 2Z" />
-          </svg>
-        </button>
-        {waiting && (
-          <button
-            className="interrupt-btn"
-            onClick={() => {
-              ignoreStaleRef.current = true;
-              setWaiting(false);
-              addMessage("system", "⏹ 已中断");
-              fetch(`/api/interrupt/${sessionId || "unknown"}`, { method: "POST" })
-                .catch(() => {});
-            }}
-          >
-            ⏹
-          </button>
-        )}
-      </footer>
+      {(() => {
+        const isArchived = sessions.find((s) => s.id === sessionId)?.status === "archived";
+        return (
+          <footer className="input-bar">
+            {isArchived ? (
+              <div className="archived-notice">此会话已归档，无法发送消息</div>
+            ) : (
+              <>
+                <textarea
+                  className="input-field"
+                  value={input}
+                  onChange={(e) => setInput(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && !e.shiftKey) {
+                      e.preventDefault();
+                      send();
+                    }
+                  }}
+                  onInput={(e) => {
+                    const el = e.currentTarget;
+                    el.style.height = "auto";
+                    el.style.height = el.scrollHeight + "px";
+                  }}
+                  placeholder="输入消息..."
+                  autoFocus
+                  disabled={waiting}
+                  rows={1}
+                />
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  className="file-input-hidden"
+                  onChange={handleFileUpload}
+                  accept="image/*,.pdf,.doc,.docx,.xls,.xlsx,.csv,.txt,.json,.py,.js,.ts,.html,.css,.md,.zip,.tar,.gz"
+                  disabled={uploading}
+                />
+                <button
+                  className="upload-btn"
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={uploading}
+                  title="上传文件"
+                >
+                  <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2">
+                    <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4" />
+                    <polyline points="17 8 12 3 7 8" />
+                    <line x1="12" y1="3" x2="12" y2="15" />
+                  </svg>
+                </button>
+                <button className="send-btn" onClick={send} disabled={waiting || !input.trim()}>
+                  <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2">
+                    <path d="M22 2L11 13" /><path d="M22 2L15 22L11 13L2 9L22 2Z" />
+                  </svg>
+                </button>
+                {waiting && (
+                  <button
+                    className="interrupt-btn"
+                    onClick={() => {
+                      ignoreStaleRef.current = true;
+                      setWaiting(false);
+                      addMessage("system", "⏹ 已中断");
+                      fetch(`/api/interrupt/${sessionId || "unknown"}`, { method: "POST" })
+                        .catch(() => {});
+                    }}
+                  >
+                    ⏹
+                  </button>
+                )}
+              </>
+            )}
+          </footer>
+        );
+      })()}
       </div>
       {/* ── lightbox 遮罩 ── */}
       {lightboxSrc && (

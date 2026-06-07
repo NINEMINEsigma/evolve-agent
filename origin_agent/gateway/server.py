@@ -379,6 +379,24 @@ async def auto_title_session(session_id: str):
     return {"title": title, "session_id": session_id}
 
 
+@app.post("/api/sessions/{session_id}/archive")
+async def archive_session_endpoint(session_id: str):
+    """手动归档指定会话（轻量归档，不创建延续会话）。"""
+    if _agent_loop is not None and hasattr(_agent_loop, "archive_session"):
+        result = _agent_loop.archive_session(session_id)  # type: ignore[union-attr]
+        return result
+    return {"archived": False, "error": "agent loop not ready", "session_id": session_id}
+
+
+@app.post("/api/sessions/{session_id}/compress")
+async def compress_session_endpoint(session_id: str):
+    """手动压缩会话历史并自动归档。"""
+    if _agent_loop is not None and hasattr(_agent_loop, "compress_session"):
+        result = await _agent_loop.compress_session(session_id)  # type: ignore[union-attr]
+        return result
+    return {"compressed": False, "error": "agent loop not ready", "session_id": session_id}
+
+
 @app.get("/uploads/{file_path:path}")
 async def serve_workspace_file(file_path: str):
     """提供 ws: 命名空间下文件的 HTTP 访问，供前端展示图片等静态文件。"""
@@ -525,16 +543,6 @@ async def ws_chat(ws: WebSocket) -> None:
         else:
             sid = sessions.create()
 
-    # 如果 resume 的会话已归档，自动切换到延续会话或创建新会话
-    _info: dict | None = sessions.get(sid)
-    if _info and _info.get("status") == "archived":
-        _cont: str | None = _info.get("continuation")
-        if _cont and sessions.exists(_cont):
-            sid = _cont
-            logger.info("Redirected archived session %s to continuation %s", resume, sid)
-        else:
-            sid = sessions.create()
-            logger.info("Archived session %s has no continuation, created new session %s", resume, sid)
     _tool_ws_sinks[sid] = ws  # 注册用于工具事件流推送
     logger.info("WebSocket connected | session=%s", sid)
 

@@ -662,15 +662,16 @@ class AgentLoop:
 
         return total
 
-    async def _compress_history(self, session_id: str, keep_last: int = 5) -> None:
+    async def _compress_history(self, session_id: str, keep_last: int = 5) -> str | None:
         """将较早的历史压缩为摘要，保留最近回合不变。
 
         当估算上下文 token 超过 LLM 窗口的 70% 时触发。
         使用轻量级 LLM 调用（无工具）来总结旧消息。
+        返回生成的摘要文本，若未执行压缩则返回 None。
         """
         history: List[Dict[str, Any]] = self._get_history(session_id)
         if not history:
-            return
+            return None
 
         # 来自 RuntimeContext 的上下文限制（可配置）
         max_tokens: int = self._ctx.llm_max_context_tokens
@@ -683,11 +684,11 @@ class AgentLoop:
         # 容量检查：当前上下文 + 最大输出 <= 窗口上限（含安全边距）
         SAFETY_MARGIN: int = 5000
         if (current_tokens + self._ctx.llm_max_output_tokens + SAFETY_MARGIN) <= max_tokens:
-            return
+            return None
 
         keep_msgs: int = keep_last * 2  # user+assistant 成对
         if len(history) <= keep_msgs:
-            return
+            return None
 
         old: List[Dict[str, Any]] = history[:-keep_msgs]
         recent: List[Dict[str, Any]] = history[-keep_msgs:]
@@ -701,7 +702,7 @@ class AgentLoop:
 
         if not parts:
             self._histories[session_id] = recent
-            return
+            return None
 
         old_text: str = "\n".join(parts[-50:])
         prompt: str
@@ -723,6 +724,24 @@ class AgentLoop:
             [{"role": "system", "content": f"{prefix}\n{summary}"}]
             + recent
         )
+        return summary
+
+    def archive_session(self, session_id: str) -> dict:
+        """将指定会话标记为 archived（轻量归档，不创建延续会话）。"""
+        if self._session_manager is not None:
+            self._session_manager.archive(session_id)
+        return {"archived": True, "session_id": session_id}
+
+    async def compress_session(self, session_id: str) -> dict:
+        """手动压缩会话历史并自动归档。"""
+        summary: str | None = await self._compress_history(session_id)
+        archive_result = self.archive_session(session_id)
+        return {
+            "compressed": True,
+            "archived": archive_result.get("archived", False),
+            "session_id": session_id,
+            "summary": summary,
+        }
 
     def _compression_prompts(self) -> tuple[str, str, str]:
         """从模板文件返回 (prompt模板, 回退文本, 摘要前缀)。
@@ -803,6 +822,14 @@ class AgentLoop:
         # 4. 将新会话的历史加载到内存
         self._histories[new_sid] = self._load_history_from_disk(new_sid)
         self._last_prompt_tokens[new_sid] = 0
+
+        # 5. 迁移旧会话的 cron 定时任务到新会话
+        try:
+            from component.extools import cron_tools
+            cron_tools.migrate_session_cron_jobs(old_sid, new_sid)
+        except Exception:
+            pass
+
         self._session_rotated_notify[old_sid] = new_sid
 
         logger.info(

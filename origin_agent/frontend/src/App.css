@@ -324,6 +324,29 @@ html, body, #root {
   cursor: default;
 }
 
+.header-action-btn {
+  font-size: 12px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  background: var(--bg-tertiary);
+  color: var(--text-secondary);
+  padding: 4px 10px;
+  border-radius: 8px;
+  margin-left: 6px;
+  border: 1px solid var(--border);
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+
+.header-action-btn:hover:not(:disabled) {
+  background: var(--accent);
+  color: #fff;
+}
+
+.header-action-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
 .approval-model-badge {
   font-size: 11px;
   font-family: "SF Mono", "Fira Code", monospace;
@@ -803,6 +826,19 @@ html, body, #root {
 
 .input-field:focus {
   border-color: var(--accent);
+}
+
+.archived-notice {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 10px 16px;
+  border-radius: var(--radius);
+  background: var(--bg-tertiary);
+  color: var(--text-muted);
+  font-size: 14px;
+  min-height: 40px;
 }
 
 .input-field::placeholder {

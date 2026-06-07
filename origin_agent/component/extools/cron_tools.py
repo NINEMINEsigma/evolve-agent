@@ -331,6 +331,36 @@ def cleanup_session_cron_jobs(session_id: str) -> int:
     return count
 
 
+def migrate_session_cron_jobs(old_sid: str, new_sid: str) -> int:
+    """将旧会话的定时任务整体迁移到新会话。
+
+    更新每个任务的 session_id，取消旧 timer 并用新 session_id 重新调度。
+    返回迁移的任务数量。
+    """
+    with _cron_lock:
+        session_tasks = _cron_tasks.pop(old_sid, {})
+        if not session_tasks:
+            return 0
+        _cron_tasks[new_sid] = session_tasks
+
+    count = 0
+    for task in session_tasks.values():
+        task.session_id = new_sid
+        if task._timer:
+            task._timer.cancel()
+            task._timer = None
+        _schedule_next(task)
+        count += 1
+
+    if count:
+        logger.info(
+            "Migrated %d cron jobs from session=%s to session=%s",
+            count, old_sid, new_sid,
+        )
+        _save_all_tasks()
+    return count
+
+
 # ── 路径解析辅助 ──────────────────────────────────────────────
 
 
