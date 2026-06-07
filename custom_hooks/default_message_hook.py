@@ -17,11 +17,6 @@ from datetime import datetime
 import os
 import sys
 from pathlib import Path
-from pydantic import BaseModel
-from easysave import save, load
-
-class SessionCache(BaseModel):
-    last_hook_time: str
 
 
 def hook_tag_name(session_id: str = "", workspace: str = "") -> str:
@@ -29,34 +24,35 @@ def hook_tag_name(session_id: str = "", workspace: str = "") -> str:
 
 
 def hook_message(session_id: str = "", workspace: str = "") -> str:
-    session_cache_dir = Path(workspace) / "session_cache" / session_id
-    if not session_cache_dir.exists():
-        session_cache_dir.mkdir(parents=True, exist_ok=True)
-        save("session_cache", str(session_cache_dir/"session_cache.json"), SessionCache(
-            last_hook_time=datetime.now().isoformat(),
-        ))
+    cache_path = Path(workspace) / "session_cache" / session_id / "session_cache.json"
+    now = datetime.now()
+
+    if not cache_path.exists():
+        cache_path.parent.mkdir(parents=True, exist_ok=True)
+        cache_data = {"last_hook_time": now.isoformat()}
+        cache_path.write_text(json.dumps(cache_data), encoding="utf-8")
         return json.dumps({
-            "current_time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "current_time": now.strftime("%Y-%m-%d %H:%M:%S"),
             "current_platform": sys.platform,
             "current_python": sys.executable,
             "session_id": session_id,
-            "workspace": workspace,
+            "workspace": str(workspace),
         })
+
     else:
-        session_cache: SessionCache = load("session_cache", str(session_cache_dir/"session_cache.json"))
-        last_time = datetime.fromisoformat(session_cache.last_hook_time)
-        now = datetime.now()
+        cache_data = json.loads(cache_path.read_text(encoding="utf-8"))
+        last_time = datetime.fromisoformat(cache_data["last_hook_time"])
         interval_seconds = int((now - last_time).total_seconds())
 
-        session_cache.last_hook_time = now.isoformat()
-        save("session_cache", str(session_cache_dir/"session_cache.json"), session_cache)
+        cache_data["last_hook_time"] = now.isoformat()
+        cache_path.write_text(json.dumps(cache_data), encoding="utf-8")
 
         result = {
             "current_time": now.strftime("%Y-%m-%d %H:%M:%S"),
             "current_platform": sys.platform,
             "current_python": sys.executable,
             "session_id": session_id,
-            "workspace": workspace,
+            "workspace": str(workspace),
             "last_conversation_interval_seconds": interval_seconds,
         }
 

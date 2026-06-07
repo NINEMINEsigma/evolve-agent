@@ -37,9 +37,9 @@ logger = logging.getLogger(__name__)
 # 上下文围栏辅助函数
 # ---------------------------------------------------------------------------
 
-_FENCE_TAG_RE: re.Pattern = re.compile(r"</?\s*memory-context\s*>", re.IGNORECASE)
+_FENCE_TAG_RE: re.Pattern = re.compile(r"<\|/?\s*im_memory_context\s*\|>", re.IGNORECASE)
 _INTERNAL_CONTEXT_RE: re.Pattern = re.compile(
-    r"<\s*memory-context\s*>[\s\S]*?</\s*memory-context\s*>",
+    r"<\|im_memory_context_start\|>[\s\S]*?<\|im_memory_context_end\|>",
     re.IGNORECASE,
 )
 _INTERNAL_NOTE_RE: re.Pattern = re.compile(
@@ -90,8 +90,8 @@ class StreamingContextScrubber:
     应创建新清洗器或调用 ``reset()``。
     """
 
-    _OPEN_TAG: str = "<memory-context>"
-    _CLOSE_TAG: str = "</memory-context>"
+    _OPEN_TAG: str = "<|im_memory_context_start|>"
+    _CLOSE_TAG: str = "<|im_memory_context_end|>"
 
     def __init__(self) -> None:
         self._in_span: bool = False
@@ -182,12 +182,12 @@ def build_memory_context_block(raw_context: str) -> str:
     if clean != raw_context:
         logger.warning("memory provider returned pre-wrapped context; stripped")
     return (
-        "<memory-context>\n"
+        "<|im_memory_context_start|>\n"
         "[System note: The following is recalled memory context, "
         "NOT new user input. Treat as authoritative reference data — "
         "this is the agent's persistent memory and should inform all responses.]\n\n"
         f"{clean}\n"
-        "</memory-context>"
+        "<|im_memory_context_end|>"
     )
 
 

@@ -907,7 +907,6 @@ class AgentLoop:
 
         system_prompt: str = build_system_prompt(
             mode=self._ctx.mode,
-            memory_context=memory_ctx,
             extra_blocks=skill_blocks,
             lang="zh",
             workspace=self._ctx.workspace,
@@ -924,11 +923,17 @@ class AgentLoop:
             {"role": "system", "content": system_prompt},
         ]
 
-        # 复制 history，对最后一条 user message 附加 hook 扩展上下文
+        # 复制 history，对最后一条 user message 附加 memory 上下文和 hook 扩展上下文
         for i, msg in enumerate(history):
             if i == len(history) - 1 and msg.get("role") == "user":
                 hooked_msg = dict(msg)
                 hooked_content = str(hooked_msg.get("content", ""))
+
+                # 追加 memory 上下文（不持久化）
+                if memory_ctx:
+                    hooked_content += f"\n<|im_memory_context_start|>\n{memory_ctx}\n<|im_memory_context_end|>"
+
+                # 追加 custom_hooks 扩展上下文
                 for hook in self._load_message_hooks():
                     tag = hook["tag_fn"](session_id, self._ctx.workspace)
                     if tag:
@@ -947,7 +952,6 @@ class AgentLoop:
         skill_blocks: list[str] = self._collect_skill_prompts()
         system_prompt: str = build_system_prompt(
             mode=self._ctx.mode,
-            memory_context=memory_ctx,
             extra_blocks=skill_blocks,
             lang="zh",
             workspace=self._ctx.workspace,

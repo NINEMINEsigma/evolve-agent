@@ -36,9 +36,9 @@ def _read_gene() -> str:
     return _read_if_exists(find_repo_root() / "GENE.md")
 
 
-def _read_soul(workspace: Path) -> str:
-    """从 workspace 目录读取可编辑的 SOUL.md。"""
-    return _read_if_exists(workspace / "SOUL.md")
+def _read_soul(agentspace: Path) -> str:
+    """从 agentspace 目录读取可编辑的 SOUL.md。"""
+    return _read_if_exists(agentspace / "SOUL.md")
 
 
 def _platform_info(lang: str = "en") -> str:
@@ -95,7 +95,6 @@ def _read_if_exists(path: Path) -> str:
 
 def build_system_prompt(
     mode: str = "fast",
-    memory_context: str = "",
     extra_blocks: Optional[list[str]] = None,
     lang: str = "en",
     workspace: Path | str = "",
@@ -110,8 +109,6 @@ def build_system_prompt(
     ----------
     mode:
         ``"fast"`` 或 ``"fallback"`` — 选择模式特定的模板。
-    memory_context:
-        追加在 prompt 之后的 memory 预取文本。
     extra_blocks:
         追加在模式段之后的额外节（例如 skill prompt、memory provider 块）。
     lang:
@@ -140,9 +137,9 @@ def build_system_prompt(
     if gene:
         blocks.append(gene)
 
-    # 0a. SOUL — 人+AI 共同编辑的个性/风格（workspace/SOUL.soul）
+    # 0a. SOUL — 人+AI 共同编辑的个性/风格（agentspace/SOUL.soul）
     workspace_path: Path = Path(workspace) if workspace else Path()
-    soul: str = _read_soul(workspace_path)
+    soul: str = _read_soul(Path(agentspace) if agentspace else Path())
     if soul:
         blocks.append(soul)
 
@@ -166,11 +163,7 @@ def build_system_prompt(
     if tools:
         blocks.append(tools)
 
-    # 4. Memory 上下文
-    if memory_context:
-        blocks.append(memory_context)
-
-    # 5. 额外块（skills、memory provider 等）
+    # 4. 额外块（skills、memory provider 等）
     if extra_blocks:
         for block in extra_blocks:
             if block and block.strip():

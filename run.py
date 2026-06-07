@@ -83,8 +83,8 @@ def _append_evolve_event(stage: str, detail: str) -> None:
 if __name__ == "__main__":
     fast_agent_space = (workspace_path/fast_agent_space_path)
     slow_agent_space = (workspace_path/slow_agent_space_path)
-    if (workspace_path/"SOUL.soul").exists() == False:
-        File("SOUL.md").copy_to(str(workspace_path/"SOUL.md"))
+    if (agentspace_path/"SOUL.soul").exists() == False:
+        File("SOUL.md").copy_to(str(agentspace_path/"SOUL.md"))
     if fouce_init or (workspace_path/"init.lock").exists() == False:
         (workspace_path/"init.lock").touch()
         # 保持代理空间干净，删除代理空间并重新创建

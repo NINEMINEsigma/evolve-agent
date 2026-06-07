@@ -75,6 +75,7 @@ class EasysaveMemoryProvider(MemoryProvider):
             "You can also use `remember` to explicitly store facts."
         ).format(n=len(sessions))
 
+    # TODO: 这里可能可以提供一些分词以其优化和匹配
     def prefetch(self, query: str, *, session_id: str = "") -> str:
         sid: str = session_id or self._session_id
         if not sid:
