@@ -674,6 +674,7 @@ async def ws_chat(ws: WebSocket) -> None:
                         _agent_loop, "_session_rotated_notify", {},
                     ).pop(sid, None)
                     if _rotated:
+                        _tool_ws_sinks.pop(_old, None)  # 清理旧 session 映射
                         _tool_ws_sinks[_rotated] = ws  # 注册新 sid 到 WebSocket 映射
                         sid = _rotated
                         await ws.send_text(

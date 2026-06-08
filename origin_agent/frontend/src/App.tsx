@@ -328,6 +328,8 @@ export default function App() {
             localStorage.setItem("evolve_session_id", data.new_sid);
             setMessages([]);
             setTokenUsage(0);
+            setClipboardDisplays({});
+            setTaskProgress({});
             fetchSessions();
             return;
           }
@@ -616,6 +618,8 @@ export default function App() {
     setWaiting(false);
     setPendingConfirm(null);
     setHandsfreeMode(false);
+    setClipboardDisplays({});
+    setTaskProgress({});
     clearTimeout(timerRef.current);
     manualRef.current = false;
     connect();
@@ -630,6 +634,8 @@ export default function App() {
     setSessionId(sid);
     setWaiting(false);
     setPendingConfirm(null);
+    setClipboardDisplays({});
+    setTaskProgress({});
     clearTimeout(timerRef.current);
     manualRef.current = false;
     connect();
