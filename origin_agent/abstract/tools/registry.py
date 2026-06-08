@@ -44,6 +44,7 @@ class ToolEntry:
         "max_result_size_chars",
         "dynamic_schema_overrides",
         "danger_level",
+        "no_timeout",
     )
 
     def __init__(
@@ -60,6 +61,7 @@ class ToolEntry:
         max_result_size_chars: Optional[int] = None,
         dynamic_schema_overrides: Optional[Callable] = None,
         danger_level: str = "readonly",
+        no_timeout: bool = False,
     ):
         self.name: str = name
         self.toolset: str = toolset
@@ -75,6 +77,7 @@ class ToolEntry:
         # 在 get_definitions() 时应用。用于依赖运行时配置的字段。
         self.dynamic_schema_overrides: Optional[Callable] = dynamic_schema_overrides
         self.danger_level: str = danger_level
+        self.no_timeout: bool = no_timeout
 
 
 # ---------------------------------------------------------------------------
@@ -263,6 +266,7 @@ class ToolRegistry:
         dynamic_schema_overrides: Optional[Callable] = None,
         override: bool = False,
         danger_level: str = "readonly",
+        no_timeout: bool = False,
     ) -> None:
         """注册工具。由每个工具文件在模块导入时调用。
 
@@ -315,6 +319,7 @@ class ToolRegistry:
                 max_result_size_chars=max_result_size_chars,
                 dynamic_schema_overrides=dynamic_schema_overrides,
                 danger_level=danger_level,
+                no_timeout=no_timeout,
             )
             if check_fn and toolset not in self._toolset_checks:
                 self._toolset_checks[toolset] = check_fn

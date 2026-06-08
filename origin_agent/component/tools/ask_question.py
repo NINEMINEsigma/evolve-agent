@@ -87,9 +87,9 @@ async def _handle_ask_question(args: Dict[str, Any]) -> str:
         _pending_asks.pop(request_id, None)
         return tool_error("WebSocket connection unavailable, cannot send question")
 
-    # ── 等待用户回答（最多 600 秒）──
+    # ── 等待用户回答（永不超时，由注册时声明的 no_timeout 保障）──
     try:
-        result_str: str = await asyncio.wait_for(fut, timeout=600.0)
+        result_str: str = await fut
         result: dict = json.loads(result_str)
         return tool_result(
             question=question,
@@ -100,9 +100,6 @@ async def _handle_ask_question(args: Dict[str, Any]) -> str:
     except asyncio.CancelledError:
         _pending_asks.pop(request_id, None)
         return tool_error("Question request was cancelled")
-    except asyncio.TimeoutError:
-        _pending_asks.pop(request_id, None)
-        return tool_error("User response timed out (600s)")
     except Exception as exc:
         _pending_asks.pop(request_id, None)
         return tool_error(f"Question handling error: {exc}")
@@ -167,4 +164,5 @@ registry.register(
     is_async=True,
     emoji="❓",
     danger_level="readonly",
+    no_timeout=True,
 )

@@ -1087,7 +1087,11 @@ class AgentLoop:
         # request_user_confirm 的审批时间（含模型加载、推理）
         # 不计入下方的 tool_timeout，两者是先后独立的两个阶段。
         if not _skip_dispatch:
+            entry: ToolEntry | None = tool_registry.get_entry(tc.name)
             timeout: int = self._ctx.tool_timeout
+            # no_timeout 标记使该工具调用不受 tool_timeout 限制
+            if entry and entry.no_timeout:
+                timeout = 0
             # 如果 memory 管理器拥有该工具，则路由过去
             if self._memory.has_tool(tc.name):
                 try:
@@ -1103,7 +1107,6 @@ class AgentLoop:
                 except Exception as exc:
                     result = json.dumps({"error": str(exc)}, ensure_ascii=False)
             else:
-                entry: ToolEntry | None = tool_registry.get_entry(tc.name)
                 try:
                     if entry and entry.is_async:
                         coro: Any = entry.handler(args)
