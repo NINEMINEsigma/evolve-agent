@@ -1204,6 +1204,23 @@ class AgentLoop:
                 ) # type: ignore
             )
 
+        # ---- 剪贴板展示工具：额外推送 clipboard_display 事件 ----
+        if self._tool_event_callback and tc.name in ("set_clipboard_display", "clear_clipboard_display"):
+            _display_payload: str = result
+            try:
+                _dp: dict = json.loads(result)
+                if "_image" in _dp:
+                    _dp_copy: dict = dict(_dp)
+                    _dp_copy.pop("_image", None)
+                    _display_payload = json.dumps(_dp_copy, ensure_ascii=False)
+            except (json.JSONDecodeError, TypeError):
+                pass
+            asyncio.create_task(
+                self._tool_event_callback(
+                    session_id, "clipboard_display", tc.name, _display_payload,
+                ) # type: ignore
+            )
+
         # ---- 通知前端：tool_result (fire-and-forget) ----
         # 前端推送是尽力而为的副作用，不阻塞工具执行主链路。
         if self._tool_event_callback:

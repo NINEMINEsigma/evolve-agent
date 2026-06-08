@@ -4,7 +4,38 @@ import remarkGfm from "remark-gfm";
 import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
 import { oneDark } from "react-syntax-highlighter/dist/esm/styles/prism";
 
-type MessageType = "system" | "user_message" | "agent_message" | "tool_call" | "tool_result" | "task_progress" | "confirm_request" | "ask_request" | "error";
+function CodeBlock({ language, code }: { language: string; code: string }) {
+  const [copied, setCopied] = useState(false);
+  const handleCopy = async () => {
+    try {
+      await navigator.clipboard.writeText(code);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      // ignore clipboard errors
+    }
+  };
+  return (
+    <div className="code-block-wrapper">
+      <div className="code-block-header">
+        <span className="code-block-lang">{language}</span>
+        <button className="code-block-copy" onClick={handleCopy}>
+          {copied ? "已复制" : "复制"}
+        </button>
+      </div>
+      <SyntaxHighlighter
+        style={oneDark}
+        language={language}
+        PreTag="div"
+        customStyle={{ margin: 0, borderRadius: "0 0 6px 6px" }}
+      >
+        {code}
+      </SyntaxHighlighter>
+    </div>
+  );
+}
+
+type MessageType = "system" | "user_message" | "agent_message" | "tool_call" | "tool_result" | "task_progress" | "clipboard_display" | "confirm_request" | "ask_request" | "error";
 
 interface WSMessage {
   type: MessageType;
@@ -52,6 +83,12 @@ interface TaskProgress {
   total: number;
   percent: number;
   status: string;
+}
+
+interface ClipboardDisplay {
+  display_id: string;
+  label: string;
+  content: string;
 }
 
 interface ChatMessage {
@@ -149,6 +186,7 @@ export default function App() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [handsfreeMode, setHandsfreeMode] = useState(false);
   const [taskProgress, setTaskProgress] = useState<Record<string, TaskProgress>>({});
+  const [clipboardDisplays, setClipboardDisplays] = useState<Record<string, ClipboardDisplay>>({});
   const [llmMaxContextTokens, setLlmMaxContextTokens] = useState(0);
   const [approvalModelName, setApprovalModelName] = useState("");
   const [approvalModelAvailable, setApprovalModelAvailable] = useState(false);
@@ -397,6 +435,36 @@ export default function App() {
           }
         } catch {
           // ignore malformed progress payload
+        }
+      }
+      else if (msg.type === "clipboard_display") {
+        const raw = msg.result ?? "";
+        try {
+          const data = JSON.parse(raw);
+          if (data.cleared) {
+            // clear_clipboard_display — 移除指定或全部展示区域
+            setClipboardDisplays((prev) => {
+              const next = { ...prev };
+              if (Array.isArray(data.cleared) && data.cleared.length) {
+                for (const did of data.cleared) delete next[did];
+              } else {
+                return {};
+              }
+              return next;
+            });
+          } else if (data.display_id) {
+            // set_clipboard_display — 更新或创建
+            setClipboardDisplays((prev) => ({
+              ...prev,
+              [data.display_id]: {
+                display_id: data.display_id,
+                label: data.label || data.display_id,
+                content: data.content ?? "",
+              },
+            }));
+          }
+        } catch {
+          // ignore malformed clipboard display payload
         }
       }
       else if (msg.type === "error") addMessage("error", msg.message ?? "");
@@ -853,6 +921,32 @@ export default function App() {
         </div>
       )}
 
+      {/* ── 剪贴板展示面板（固定在 header 下方，不随消息滚动）── */}
+      {Object.keys(clipboardDisplays).length > 0 && (
+        <div className="clipboard-display-panel">
+          {Object.values(clipboardDisplays).map((cd) => (
+            <div key={cd.display_id} className="clipboard-display-item">
+              <div className="clipboard-display-header">
+                <span className="clipboard-display-label">{cd.label}</span>
+                <button
+                  className="clipboard-display-copy"
+                  onClick={async () => {
+                    try {
+                      await navigator.clipboard.writeText(cd.content);
+                    } catch {
+                      // ignore
+                    }
+                  }}
+                >
+                  复制
+                </button>
+              </div>
+              <pre className="clipboard-display-content">{cd.content}</pre>
+            </div>
+          ))}
+        </div>
+      )}
+
       <main className="chat-area">
         {messages.map((m) => (
           <div key={m.id} className={`message message-${m.role}`}>
@@ -921,16 +1015,7 @@ export default function App() {
                       const match = /language-(\w+)/.exec(className || "");
                       const code = String(children).replace(/\n$/, "");
                       if (match) {
-                        return (
-                          <SyntaxHighlighter
-                            style={oneDark}
-                            language={match[1]}
-                            PreTag="div"
-                            customStyle={{ margin: 0, borderRadius: 6 }}
-                          >
-                            {code}
-                          </SyntaxHighlighter>
-                        );
+                        return <CodeBlock language={match[1]} code={code} />;
                       }
                       return (
                         <code className={className} {...props}>

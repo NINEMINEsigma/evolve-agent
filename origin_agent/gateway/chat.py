@@ -30,6 +30,7 @@ class MessageType(str, Enum):
     FILE_UPLOAD = "file_upload"
     HANDSFREE_MODE = "handsfree_mode"
     TASK_PROGRESS = "task_progress"
+    CLIPBOARD_DISPLAY = "clipboard_display"
 
 
 class Message(BaseModel):

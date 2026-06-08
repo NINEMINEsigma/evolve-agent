@@ -197,6 +197,25 @@ async def _send_tool_event(
             pass
         return
 
+    # Handle clipboard_display events
+    if event_type == "clipboard_display":
+        data: dict | None
+        try:
+            data = json.loads(payload)
+        except json.JSONDecodeError:
+            data = None
+        msg = Message(
+            type=MessageType.CLIPBOARD_DISPLAY,
+            session_id=session_id,
+            tool=tool_name,
+            result=(payload if data else None),
+        )
+        try:
+            await ws.send_text(msg.to_json())
+        except Exception:
+            pass
+        return
+
     msg_type: MessageType = MessageType.TOOL_CALL if event_type == "tool_call" else MessageType.TOOL_RESULT
     data: dict | None
     try:
