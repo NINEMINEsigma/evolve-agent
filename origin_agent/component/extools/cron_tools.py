@@ -144,12 +144,13 @@ class _CronTask:
     schedule_value: str
     command: List[str]
     cwd: str
-    enabled: bool = True
+    should_schedule: bool = True  # 控制任务是否继续被 Timer 调度；False 时停止后续执行
     next_run: float = 0.0
     run_count: int = 0
     max_runs: int = 0  # 0 = unlimited
     last_run: float = 0.0
     log_path: str = ""
+    skip_agent_notify: bool = False  # 用户显式取消时设为 True，抑制在途执行完成后的通知
     _timer: Optional[threading.Timer] = field(default=None, repr=False)
 
 
@@ -204,7 +205,7 @@ def _task_to_dict(task: _CronTask) -> dict:
         "schedule_value": task.schedule_value,
         "command": task.command,
         "cwd": task.cwd,
-        "enabled": task.enabled,
+        "should_schedule": task.should_schedule,
         "next_run": task.next_run,
         "run_count": task.run_count,
         "max_runs": task.max_runs,
@@ -223,7 +224,7 @@ def _task_from_dict(data: dict) -> _CronTask:
         schedule_value=data["schedule_value"],
         command=list(data.get("command", [])),
         cwd=data.get("cwd", "ws:"),
-        enabled=data.get("enabled", True),
+        should_schedule=data.get("should_schedule", True),
         next_run=float(data.get("next_run", 0.0)),
         run_count=int(data.get("run_count", 0)),
         max_runs=int(data.get("max_runs", 0)),
@@ -265,7 +266,7 @@ def _load_all_tasks() -> None:
         for tid, data in tasks.items():
             try:
                 task = _task_from_dict(data)
-                if not task.enabled:
+                if not task.should_schedule:
                     continue
                 # 重新计算 next_run
                 _restore_and_schedule_task(task)
@@ -299,7 +300,7 @@ def _restore_and_schedule_task(task: _CronTask) -> None:
                 "Failed to calculate next run for restored cron task %s: %s",
                 task.task_id, exc,
             )
-            task.enabled = False
+            task.should_schedule = False
             return
 
     _schedule_next(task)
@@ -319,7 +320,7 @@ def cleanup_session_cron_jobs(session_id: str) -> int:
 
     count = 0
     for task in session_tasks.values():
-        task.enabled = False
+        task.should_schedule = False
         if task._timer:
             task._timer.cancel()
             task._timer = None
@@ -394,7 +395,7 @@ def _resolve_log_path(log_path: str) -> str|None:
 def _schedule_next(task: _CronTask) -> None:
     """计算并安排任务的下次执行（Timer 一次性触发）。"""
     with _cron_lock:
-        if not task.enabled:
+        if not task.should_schedule:
             return
 
         # 取消旧的 timer（如果有）
@@ -416,7 +417,7 @@ def _schedule_next(task: _CronTask) -> None:
                     "Failed to calculate next run for cron task %s: %s",
                     task.task_id, exc,
                 )
-                task.enabled = False
+                task.should_schedule = False
                 return
 
         delay = max(0.1, task.next_run - now)
@@ -434,7 +435,7 @@ def _run_task_wrapper(task_id: str, session_id: str) -> None:
         if not session_tasks:
             return
         task = session_tasks.get(task_id)
-        if not task or not task.enabled:
+        if not task or not task.should_schedule:
             return
 
     _run_task(task)
@@ -442,7 +443,7 @@ def _run_task_wrapper(task_id: str, session_id: str) -> None:
 
 def _run_task(task: _CronTask) -> None:
     """在后台线程中执行定时任务命令并记录日志。"""
-    if not task.enabled:
+    if not task.should_schedule:
         return
 
     task.last_run = time.time()
@@ -500,7 +501,7 @@ def _run_task(task: _CronTask) -> None:
             "Cron job reached max_runs | task=%s session=%s",
             task.task_id, task.session_id,
         )
-        task.enabled = False
+        task.should_schedule = False
 
     # 写日志
     if log_file:
@@ -515,19 +516,20 @@ def _run_task(task: _CronTask) -> None:
         except Exception as exc:
             logger.warning("Failed to write cron log: %s", exc)
 
-    # 重新调度（如果仍然启用）并持久化
-    if task.enabled:
+    # 重新调度（如果仍应继续）并持久化
+    if task.should_schedule:
         _schedule_next(task)
     _save_all_tasks()
 
-    # 通知 Agent（无论是否达到 max_runs，确保执行结果被传递）
-    _notify_cron_event(
-        task.session_id,
-        task.task_id,
-        task.name,
-        exit_code,
-        f"task output is too long, you can view the full output in the log file: {task.log_path}" if len(stdout_text) > 5000 else stdout_text,
-    )
+    # 被用户取消的任务不发送通知（已在执行的子进程无法中止，但结果无需告知 Agent）
+    if not task.skip_agent_notify:
+        _notify_cron_event(
+            task.session_id,
+            task.task_id,
+            task.name,
+            exit_code,
+            f"task output is too long, you can view the full output in the log file: {task.log_path}" if len(stdout_text) > 5000 else stdout_text,
+        )
 
 
 # ── 工具 handler ─────────────────────────────────────────────
@@ -620,7 +622,7 @@ async def _handle_schedule_cron(args: Dict[str, Any]) -> str:
         schedule_value=schedule_value,
         command=cmd_parts,
         cwd=cwd,
-        enabled=True,
+        should_schedule=True,
         log_path=log_path,
         max_runs=max_runs,
     )
@@ -677,7 +679,7 @@ async def _handle_list_cron_jobs(args: Dict[str, Any]) -> str:
                     "schedule_type": task.schedule_type,
                     "schedule_value": task.schedule_value,
                     "command": task.command,
-                    "enabled": task.enabled,
+                    "should_schedule": task.should_schedule,
                     "next_run": (
                         datetime.datetime.fromtimestamp(
                             task.next_run, tz=datetime.timezone.utc,
@@ -720,7 +722,8 @@ async def _handle_cancel_cron_job(args: Dict[str, Any]) -> str:
     if not task:
         return tool_error(f"Task not found: {task_id}")
 
-    task.enabled = False
+    task.should_schedule = False
+    task.skip_agent_notify = True
     if task._timer:
         task._timer.cancel()
         task._timer = None
