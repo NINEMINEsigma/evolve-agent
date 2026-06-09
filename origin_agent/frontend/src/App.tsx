@@ -251,6 +251,9 @@ interface SessionInfo {
   title?: string;
   pinned?: boolean;
   last_activity_at?: number;
+  parents?: string[];
+  parent?: string | null;
+  continuation?: string | null;
 }
 
 function formatTime(ts: number): string {
@@ -262,49 +265,7 @@ function formatTime(ts: number): string {
   return `${Math.floor(diff / 86400)}天前`;
 }
 
-function getDateGroup(ts: number): string {
-  if (!ts) return "未知";
-  const now = new Date();
-  const date = new Date(ts * 1000);
-  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-  const dateDay = new Date(date.getFullYear(), date.getMonth(), date.getDate());
-  const diffDays = Math.floor((today.getTime() - dateDay.getTime()) / 86400000);
-  if (diffDays === 0) return "今天";
-  if (diffDays === 1) return "昨天";
-  if (diffDays < 7) return "最近7天";
-  return date.toLocaleDateString("zh-CN");
-}
 
-interface SessionGroup {
-  label: string;
-  sessions: SessionInfo[];
-}
-
-function groupSessions(sessions: SessionInfo[]): SessionGroup[] {
-  const pinned = sessions.filter((s) => s.pinned);
-  const normal = sessions.filter((s) => !s.pinned);
-  const map = new Map<string, SessionInfo[]>();
-  for (const s of normal) {
-    const g = getDateGroup(s.last_activity_at || s.created_at);
-    if (!map.has(g)) map.set(g, []);
-    map.get(g)!.push(s);
-  }
-  const order = ["今天", "昨天", "最近7天"];
-  const result: SessionGroup[] = [];
-  if (pinned.length > 0) {
-    result.push({ label: "置顶", sessions: pinned });
-  }
-  for (const label of order) {
-    if (map.has(label)) {
-      result.push({ label, sessions: map.get(label)! });
-      map.delete(label);
-    }
-  }
-  for (const [label, list] of map) {
-    result.push({ label, sessions: list });
-  }
-  return result;
-}
 
 export default function App() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -323,8 +284,6 @@ export default function App() {
   const [sessions, setSessions] = useState<SessionInfo[]>([]);
   const [searchQuery, setSearchQuery] = useState("");
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; sid: string } | null>(null);
-  const [renamingId, setRenamingId] = useState<string | null>(null);
-  const [renameValue, setRenameValue] = useState("");
   const menuRef = useRef<HTMLDivElement>(null);
   const wsRef = useRef<WebSocket | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -338,6 +297,8 @@ export default function App() {
   const [llmMaxContextTokens, setLlmMaxContextTokens] = useState(0);
   const [approvalModelName, setApprovalModelName] = useState("");
   const [approvalModelAvailable, setApprovalModelAvailable] = useState(false);
+  const [mergeMode, setMergeMode] = useState(false);
+  const [selectedForMerge, setSelectedForMerge] = useState<Set<string>>(new Set());
 
   const messageList = useMemo(() =>
     messages.map((m) => (
@@ -346,13 +307,20 @@ export default function App() {
     [messages]
   );
 
-  const sidebarGroups = useMemo(() => {
+  const sidebarSessions = useMemo(() => {
     const q = searchQuery.toLowerCase();
     const filtered = q
       ? sessions.filter((s) => (s.title || s.id).toLowerCase().includes(q))
       : sessions;
-    return groupSessions(filtered);
-  }, [sessions, searchQuery]);
+    const current = sessions.find((s) => s.id === sessionId);
+    const parentIds = new Set(current?.parents || []);
+    return filtered.sort((a, b) => {
+      const scoreA = (a.pinned ? 2 : 0) + (parentIds.has(a.id) ? 1 : 0);
+      const scoreB = (b.pinned ? 2 : 0) + (parentIds.has(b.id) ? 1 : 0);
+      if (scoreB !== scoreA) return scoreB - scoreA;
+      return (b.last_activity_at || b.created_at) - (a.last_activity_at || a.created_at);
+    });
+  }, [sessions, searchQuery, sessionId]);
 
   // ── lightbox: Escape 关闭 ──
   useEffect(() => {
@@ -881,32 +849,6 @@ export default function App() {
       .catch(() => {});
   };
 
-  // ── rename ──
-  const startRename = (sid: string, currentTitle: string) => {
-    setContextMenu(null);
-    setRenamingId(sid);
-    setRenameValue(currentTitle || sid.slice(0, 8) + "...");
-  };
-
-  const submitRename = (sid: string) => {
-    const title = renameValue.trim();
-    if (title) {
-      fetch(`/api/sessions/${sid}/title`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ title }),
-      }).then(() => {
-        setSessions((prev) => prev.map((s) => (s.id === sid ? { ...s, title } : s)));
-        fetchSessions(); // sync from server
-      }).catch(() => {});
-    }
-    setRenamingId(null);
-  };
-
-  const cancelRename = () => {
-    setRenamingId(null);
-  };
-
   // ── auto-title ──
   const autoTitleSession = (sid: string) => {
     setContextMenu(null);
@@ -962,12 +904,84 @@ export default function App() {
       .catch(() => {});
   };
 
+  // ── merge / branch ──
+  const mergeSessions = (sources: string[]) => {
+    setContextMenu(null);
+    fetch("/api/sessions/merge", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ sources }),
+    })
+      .then((r) => r.json())
+      .then((data) => {
+        if (data.session_id) {
+          switchSession(data.session_id);
+          fetchSessions();
+        }
+      })
+      .catch(() => {});
+  };
+
+  const branchSession = (sid: string) => mergeSessions([sid]);
+
+  const toggleMergeSelect = (sid: string) => {
+    setSelectedForMerge((prev) => {
+      const next = new Set(prev);
+      if (next.has(sid)) next.delete(sid);
+      else next.add(sid);
+      return next;
+    });
+  };
+
   // ── context menu ──
   const handleContextMenu = (e: React.MouseEvent, sid: string) => {
     e.preventDefault();
     e.stopPropagation();
     setContextMenu({ x: e.clientX, y: e.clientY, sid });
   };
+
+  // ── session list item (flat, no tree) ──
+  function SessionListItem({ session: s }: { session: SessionInfo }) {
+    const isArchived = s.status === "archived";
+    const current = sessions.find((cs) => cs.id === sessionId);
+    const isParentOfCurrent = current?.parents?.includes(s.id) ?? false;
+
+    return (
+      <div
+        className={`session-item ${s.id === sessionId ? "active" : ""} ${isArchived ? "archived" : ""} ${isParentOfCurrent ? "parent-session" : ""}`}
+        onClick={() => {
+          if (mergeMode) toggleMergeSelect(s.id);
+          else switchSession(s.id);
+        }}
+        onContextMenu={(e) => {
+          if (!mergeMode) handleContextMenu(e, s.id);
+        }}
+      >
+        <div className="session-item-content">
+          <div className="session-item-row">
+            {mergeMode && (
+              <input
+                type="checkbox"
+                checked={selectedForMerge.has(s.id)}
+                onChange={() => toggleMergeSelect(s.id)}
+                onClick={(e) => e.stopPropagation()}
+              />
+            )}
+            <div className="session-item-title">
+              {isParentOfCurrent && <span className="parent-mark" />}
+              {s.pinned && <span className="pin-badge">★</span>}
+              {s.title || s.id.slice(0, 8) + "..."}
+              {isArchived && <span className="archived-badge">已归档</span>}
+            </div>
+          </div>
+          <div className="session-item-sub">
+            <span className="session-item-id">{s.id}</span>
+            <span className="session-item-time">{formatTime(s.last_activity_at || s.created_at)}</span>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="app">
@@ -984,54 +998,33 @@ export default function App() {
               onChange={(e) => setSearchQuery(e.target.value)}
             />
           </div>
+          <button
+            className={`merge-mode-toggle ${mergeMode ? 'active' : ''}`}
+            onClick={() => {
+              setMergeMode(!mergeMode);
+              setSelectedForMerge(new Set());
+            }}
+          >
+            {mergeMode ? '退出多选' : '多选合并'}
+          </button>
         </div>
         <div className="session-list">
-          {sidebarGroups.length === 0 ? (
+          {sidebarSessions.length === 0 ? (
             <div className="session-empty">无匹配会话</div>
           ) : (
-            sidebarGroups.map((g) => (
-              <div key={g.label}>
-                <div className="session-group-header">{g.label}</div>
-                {g.sessions.map((s) => (
-                  <div
-                    key={s.id}
-                    className={`session-item ${s.id === sessionId ? "active" : ""} ${s.status === "archived" ? "archived" : ""}`}
-                    onClick={() => switchSession(s.id)}
-                    onContextMenu={(e) => handleContextMenu(e, s.id)}
-                  >
-                    <div className="session-item-content">
-                      {renamingId === s.id ? (
-                        <input
-                          className="rename-input"
-                          type="text"
-                          value={renameValue}
-                          onChange={(e) => setRenameValue(e.target.value)}
-                          onKeyDown={(e) => {
-                            if (e.key === "Enter") submitRename(s.id);
-                            else if (e.key === "Escape") cancelRename();
-                          }}
-                          onBlur={() => submitRename(s.id)}
-                          autoFocus
-                          onClick={(e) => e.stopPropagation()}
-                        />
-                      ) : (
-                        <div className="session-item-title">
-                          {s.pinned && <span className="pin-badge">★</span>}
-                          {s.title || s.id.slice(0, 8) + "..."}
-                          {s.status === "archived" && <span className="archived-badge">已归档</span>}
-                        </div>
-                      )}
-                      <div className="session-item-sub">
-                        <span className="session-item-id">{s.id}</span>
-                        <span className="session-item-time">{formatTime(s.last_activity_at || s.created_at)}</span>
-                      </div>
-                    </div>
-                  </div>
-                ))}
-              </div>
+            sidebarSessions.map((s) => (
+              <SessionListItem key={s.id} session={s} />
             ))
           )}
         </div>
+        {mergeMode && selectedForMerge.size >= 2 && (
+          <div className="merge-bar">
+            <span>已选 {selectedForMerge.size} 个会话</span>
+            <button onClick={() => { mergeSessions(Array.from(selectedForMerge)); setMergeMode(false); setSelectedForMerge(new Set()); }}>
+              合并延续
+            </button>
+          </div>
+        )}
       </aside>
       {contextMenu && (
         <div
@@ -1039,15 +1032,17 @@ export default function App() {
           className="context-menu"
           style={{ left: contextMenu.x, top: contextMenu.y }}
         >
-          <div className="context-menu-item" onClick={() => { const s = sessions.find(s => s.id === contextMenu.sid); if (s) startRename(s.id, s.title || ""); }}>
-            重命名
-          </div>
           <div className="context-menu-item" onClick={() => autoTitleSession(contextMenu.sid)}>
             自动命名
           </div>
           <div className="context-menu-item" onClick={() => { setContextMenu(null); togglePinSession(contextMenu.sid); }}>
-            {(() => { const s = sessions.find(s => s.id === contextMenu.sid); return s?.pinned ? "取消置顶" : "置顶"; })()}
+            {(() => { const s = sessions.find(s => s.id === contextMenu.sid); return s?.pinned ? "取消收藏" : "收藏"; })()}
           </div>
+          {(() => { const s = sessions.find(s => s.id === contextMenu.sid); return s?.status === "archived" ? (
+            <div className="context-menu-item" onClick={() => { setContextMenu(null); branchSession(contextMenu.sid); }}>
+              继续此会话
+            </div>
+          ) : null; })()}
           <div className="context-menu-item" onClick={() => { setContextMenu(null); compressSession(contextMenu.sid); }}>
             压缩记忆
           </div>

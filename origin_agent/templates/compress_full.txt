@@ -1,0 +1,10 @@
+Below is the full conversation history. Please summarize only the [Earlier Conversation] section, preserving key decisions, important context, and core information.
+The [Recent Conversation] will be kept directly and should NOT be included in the summary.
+
+[Earlier Conversation]:
+{{old_text}}
+
+[Recent Conversation (will be kept directly)]:
+{{recent_text}}
+
+Please output only the summary content, no other explanation:

@@ -693,23 +693,41 @@ class AgentLoop:
         old: List[Dict[str, Any]] = history[:-keep_msgs]
         recent: List[Dict[str, Any]] = history[-keep_msgs:]
 
-        parts: list[str] = []
-        for m in old:
+        # 构建完整对话文本（包含 old 和 recent），让 LLM 基于完整上下文做摘要
+        all_parts: list[str] = []
+        for m in history:
             role: str = m.get("role", "unknown")
             content: str = self._extract_text(m.get("content", ""))[:500]
             if content:
-                parts.append(f"[{role}]: {content}")
+                all_parts.append(f"[{role}]: {content}")
 
-        if not parts:
+        old_parts = all_parts[:-keep_msgs] if len(all_parts) > keep_msgs else []
+        recent_parts = all_parts[-keep_msgs:] if len(all_parts) > keep_msgs else all_parts
+
+        if not old_parts:
             self._histories[session_id] = recent
             return None
 
-        old_text: str = "\n".join(parts[-50:])
-        prompt: str
-        fallback: str
-        prefix: str
-        prompt, fallback, prefix = self._compression_prompts()
-        summary_prompt: str = prompt.replace(r"{{old_text}}", old_text)
+        old_text: str = "\n".join(old_parts[-50:])
+        recent_text: str = "\n".join(recent_parts)
+
+        # 从模板文件读取基于完整历史的摘要 prompt
+        from system.pathutils import get_templates_dir
+        _templates: Path = get_templates_dir()
+        _zh_dir: Path = _templates / "zh"
+        _use_zh: bool = _zh_dir.is_dir()
+
+        _tpl_file: Path = (_zh_dir if _use_zh else _templates) / "compress_full.txt"
+        _prompt_tpl: str = _tpl_file.read_text(encoding="utf-8").strip()
+
+        summary_prompt: str = (
+            _prompt_tpl
+            .replace(r"{{old_text}}", old_text)
+            .replace(r"{{recent_text}}", recent_text)
+        )
+
+        _fallback: str = "(Conversation too long, auto-truncated)" if _use_zh else "(History too long, truncated)"
+        prefix: str = "[Context Summary]"
 
         try:
             summary_resp: LLMResponse = await self._llm.chat(
@@ -718,7 +736,7 @@ class AgentLoop:
             )
             summary: str = summary_resp.content.strip()[:300] if summary_resp.content else ""
         except Exception:
-            summary = fallback
+            summary = _fallback
 
         self._histories[session_id] = (
             [{"role": "system", "content": f"{prefix}\n{summary}"}]
@@ -741,6 +759,84 @@ class AgentLoop:
             "archived": archive_result.get("archived", False),
             "session_id": session_id,
             "summary": summary,
+        }
+
+    async def merge_sessions(self, source_session_ids: list[str]) -> dict:
+        """从多个会话创建合并延续。摘要阈值 5w，作为 user message 写入。
+
+        单源调用退化为分支（branch）。
+        """
+        if self._session_manager is None:
+            return {"error": "session manager not ready"}
+        if len(source_session_ids) < 1:
+            return {"error": "at least one source session required"}
+
+        # 收集各源摘要
+        summaries: list[tuple[str, str, str]] = []  # (sid, title, summary_text)
+
+        for sid in source_session_ids:
+            history: List[Dict[str, Any]] = self._get_history(sid)
+            title: str = ""
+            if self._session_manager is not None:
+                info = self._session_manager.get(sid)
+                title = info.get("title", "") if info else ""
+
+            summary: str = ""
+            if history:
+                # 情况1：第一条是继承上下文消息 → 提取其正文（去掉标记行）
+                first_content: str = history[0].get("content", "")
+                if history[0].get("role") in ("system", "user") and \
+                   any(marker in first_content for marker in ["[Context Summary]", "[Session continuation summary]", "[Inherited Context]"]):
+                    lines = first_content.split("\n")
+                    if len(lines) > 1:
+                        summary = "\n".join(lines[1:])
+                    else:
+                        summary = first_content
+                else:
+                    # 情况2：普通会话 → 直接拼接完整 user/assistant 对话历史
+                    parts_inner: list[str] = []
+                    for msg in history:
+                        role: str = msg.get("role", "")
+                        if role in ("user", "assistant"):
+                            text: str = self._extract_text(msg.get("content", ""))
+                            if text.strip():
+                                parts_inner.append(f"[{role}]: {text}")
+                    summary = "\n".join(parts_inner)
+
+            if not summary:
+                summary = f"(Session {sid[:8]})"
+
+            summaries.append((sid, title, summary))
+
+        # 拼接内容（阈值来自配置，默认 5w 字符）
+        CONCAT_THRESHOLD: int = self._ctx.merge_concat_threshold
+
+        parts: list[str] = [
+            "[The following is inherited context from previous sessions. "
+            "It is background information, not a new question.]"
+        ]
+        for sid, title, text in summaries:
+            display: str = title.strip() if title.strip() else sid[:8]
+            parts.append(f"\n--- From session {sid[:8]}: {display} ---\n{text}")
+
+        merged_content: str = "\n".join(parts)
+
+        if len(merged_content) > CONCAT_THRESHOLD:
+            merged_content = merged_content[:CONCAT_THRESHOLD] + "\n\n[...truncated due to length limit]"
+
+        # 创建新会话，作为 user message 写入
+        new_sid: str = self._session_manager.create_with_context(
+            merged_content,
+            parents=source_session_ids,
+            role="user",
+        )
+
+        self._histories[new_sid] = self._load_history_from_disk(new_sid)
+        self._last_prompt_tokens[new_sid] = 0
+
+        return {
+            "session_id": new_sid,
+            "parents": source_session_ids,
         }
 
     def _compression_prompts(self) -> tuple[str, str, str]:
@@ -793,7 +889,7 @@ class AgentLoop:
                 content: str = self._extract_text(m.get("content", ""))[:500]
                 if content:
                     parts.append(f"[{role}]: {content}")
-            old_text: str = "\n".join(parts[-50:])
+            old_text: str = "\n".join(parts[-100:])
             if old_text.strip():
                 prompt, fallback, _ = self._compression_prompts()
                 summary_prompt: str = prompt.replace(r"{{old_text}}", old_text)

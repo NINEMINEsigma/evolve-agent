@@ -13,7 +13,7 @@ import json
 import logging
 import re
 from pathlib import Path
-from typing import Dict
+from typing import TYPE_CHECKING, Dict
 from urllib.parse import parse_qs, quote
 
 import uvicorn
@@ -23,6 +23,9 @@ from fastapi.staticfiles import StaticFiles
 
 from .chat import Message, MessageType, SessionManager
 from component.approval import ApprovalResult
+
+if TYPE_CHECKING:
+    from entry.agent import AgentLoop
 
 logger = logging.getLogger(__name__)
 
@@ -34,14 +37,14 @@ sessions: SessionManager = SessionManager()
 
 # AgentLoop 引用 — 由 main.py 在 server 启动前设置。
 # 未设置时回退到 echo 模式（适用于无 LLM 的测试场景）。
-_agent_loop: object | None = None
+_agent_loop: AgentLoop | None = None
 
 # agentspace 路径 — 由 main.py 在 server 启动前设置。
 # 用于 FILE_UPLOAD 消息的文件保存目标。
 _agentspace_path: Path | None = None
 
 
-def set_agent_loop(loop: object) -> None:
+def set_agent_loop(loop: AgentLoop) -> None:
     """将 AgentLoop 注入 gateway 的 WebSocket handler。"""
     global _agent_loop
     _agent_loop = loop
@@ -421,6 +424,35 @@ async def pin_session_endpoint(session_id: str):
     """切换 session 置顶状态。"""
     pinned: bool = sessions.toggle_pin(session_id)
     return {"pinned": pinned, "session_id": session_id}
+
+
+@app.post("/api/sessions/merge")
+async def merge_sessions_endpoint(req: Request):
+    """合并多个会话（或单源分支）。
+
+    Body: {"sources": ["sid1", "sid2", ...]}
+    """
+    body: dict = {}
+    try:
+        body = await req.json()
+    except Exception:
+        pass
+    sources: list[str] = body.get("sources", [])
+    if not sources:
+        return {"error": "sources array required", "merged": False}
+    if _agent_loop is not None and hasattr(_agent_loop, "merge_sessions"):
+        result = await _agent_loop.merge_sessions(sources)  # type: ignore[union-attr]
+        return result
+    return {"error": "agent loop not ready", "merged": False}
+
+
+@app.post("/api/sessions/{session_id}/branch")
+async def branch_session_endpoint(session_id: str):
+    """从指定会话创建分支延续（单源 merge 的快捷端点）。"""
+    if _agent_loop is not None and hasattr(_agent_loop, "merge_sessions"):
+        result = await _agent_loop.merge_sessions([session_id])  # type: ignore[union-attr]
+        return result
+    return {"error": "agent loop not ready", "session_id": session_id}
 
 
 @app.post("/api/file-picker")

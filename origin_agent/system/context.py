@@ -87,6 +87,11 @@ class RuntimeContext(BaseModel):
     mcp_config_path: Optional[str] = None
     """MCP server 配置文件的路径（JSON 格式）。为 None 时不启动 MCP server。"""
 
+    # -- 会话合并配置 ------------------------------------------------
+
+    merge_concat_threshold: int = 50000
+    """会话合并时直接拼接摘要的字符阈值，超过则截断。"""
+
 
 # ---------------------------------------------------------------------------
 # 全局 RuntimeContext 单例

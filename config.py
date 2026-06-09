@@ -15,6 +15,8 @@ argparse_parser.add_argument("--llm_max_output_tokens", type=int, default=384000
 argparse_parser.add_argument("--llm_temperature", type=float, default=0.95)
 # 可选值：e.g. "low" / "medium" / "high"，空字符串表示不启用
 argparse_parser.add_argument("--llm_reasoning_effort", type=str, default="medium")
+# 会话合并时直接拼接摘要的字符阈值，超过则截断
+argparse_parser.add_argument("--merge_concat_threshold", type=int, default=50000)
 
 # 冒险模式审批小模型 — 仅需文件名，agent 会自动从 custom_models/ 目录下加载
 check_default_approval_model_path = ""
@@ -57,6 +59,8 @@ llm_max_context_tokens: int     = args.llm_max_context_tokens
 llm_max_output_tokens:  int     = args.llm_max_output_tokens
 llm_temperature:        float   = args.llm_temperature
 llm_reasoning_effort:   str     = args.llm_reasoning_effort 
+# merge
+merge_concat_threshold: int     = args.merge_concat_threshold
 # approval model
 approval_model_path:    str  = args.approval_model_path
 approval_model_n_ctx:   int  = args.approval_model_n_ctx

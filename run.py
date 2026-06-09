@@ -121,6 +121,7 @@ if __name__ == "__main__":
                 "--approval_model_path", quote(approval_model_path), # 审批模型路径
                 "--approval_model_n_ctx", quote(approval_model_n_ctx), # 审批模型最大上下文
                 "--approval_model_cuda", quote(approval_model_cuda), # 审批模型是否使用CUDA
+                "--merge_concat_threshold", quote(merge_concat_threshold), # 会话合并摘要截断阈值
             ])
         except KeyboardInterrupt:
             logger.info("Interrupted by user (KeyboardInterrupt)")
@@ -174,6 +175,7 @@ if __name__ == "__main__":
                     "--approval_model_path", quote(approval_model_path), # 审批模型路径
                     "--approval_model_n_ctx", quote(approval_model_n_ctx), # 审批模型最大上下文
                     "--approval_model_cuda", quote(approval_model_cuda), # 审批模型是否使用CUDA
+                    "--merge_concat_threshold", quote(merge_concat_threshold), # 会话合并摘要截断阈值
                 ])
             except KeyboardInterrupt:
                 logger.info("Interrupted by user (KeyboardInterrupt)")

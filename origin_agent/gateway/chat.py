@@ -162,6 +162,7 @@ class SessionManager:
         if not self._store_dir:
             return []
         idx: Path = self._index_path()
+        data: list[dict]
         if not idx.exists():
             # 主文件不存在时尝试从 .bak 恢复（例如前一次写入中途失败）
             backup = idx.with_suffix(".json.bak")
@@ -170,16 +171,16 @@ class SessionManager:
                 import shutil
                 try:
                     shutil.copy2(backup, idx)
-                    data: list = json.loads(idx.read_text(encoding="utf-8"))
+                    data = json.loads(idx.read_text(encoding="utf-8"))
                     if isinstance(data, list):
                         logger.info("Recovered %d sessions from backup", len(data))
-                        return data
+                        return self._upgrade_index_entries(data)
                 except Exception:
                     logger.warning("Backup recovery failed")
             return []
         try:
-            data: list = json.loads(idx.read_text(encoding="utf-8"))
-            return data if isinstance(data, list) else []
+            data = json.loads(idx.read_text(encoding="utf-8"))
+            return self._upgrade_index_entries(data if isinstance(data, list) else [])
         except Exception:
             logger.exception("Failed to parse session index, trying backup")
             # 尝试读取 .bak 备份
@@ -189,7 +190,7 @@ class SessionManager:
                     data = json.loads(backup.read_text(encoding="utf-8"))
                     if isinstance(data, list):
                         logger.info("Recovered %d sessions from backup", len(data))
-                        return data
+                        return self._upgrade_index_entries(data)
                 except Exception:
                     logger.warning("Backup also corrupted")
             # 最终兜底：从会话目录重建索引
@@ -212,7 +213,7 @@ class SessionManager:
                     "created_at": created_at,
                     "status": "active",
                     "title": "",
-                    "parent": None,
+                    "parents": [],
                     "continuation": None,
                     "pinned": False,
                     "last_activity_at": created_at,
@@ -223,16 +224,33 @@ class SessionManager:
             logger.critical("Session index lost — no valid backup or directories available")
             return []
 
+    @staticmethod
+    def _upgrade_index_entries(entries: list[dict]) -> list[dict]:
+        """将旧格式索引中的 parent 升级为 parents 数组。"""
+        for entry in entries:
+            if "parent" in entry and "parents" not in entry:
+                p = entry.pop("parent")
+                entry["parents"] = [p] if p else []
+            elif "parents" not in entry:
+                entry["parents"] = []
+        return entries
+
     def _write_index(self, entries: list[dict]) -> None:
         """将 session 索引持久化到磁盘（原子写入 + 备份）。"""
         if not self._store_dir:
             return
         try:
             idx = self._index_path()
+            # 清理旧格式字段，只保留 parents
+            clean_entries: list[dict] = []
+            for e in entries:
+                clean: dict = dict(e)
+                clean.pop("parent", None)
+                clean_entries.append(clean)
             # 1. 先写 tmp 文件，不影响 _index.json
             tmp = idx.with_suffix(".json.tmp")
             tmp.write_text(
-                json.dumps(entries, ensure_ascii=False, indent=2),
+                json.dumps(clean_entries, ensure_ascii=False, indent=2),
                 encoding="utf-8",
             )
             # 2. 备份当前文件（copy，不 rename，保证失败时 _index.json 仍在）
@@ -275,7 +293,7 @@ class SessionManager:
                     "status": entry.get("status", "active"),
                     "created_at": entry.get("created_at", 0),
                     "title": entry.get("title", ""),
-                    "parent": entry.get("parent"),
+                    "parents": entry.get("parents", []),
                     "continuation": entry.get("continuation"),
                     "pinned": entry.get("pinned", False),
                     "last_activity_at": entry.get("last_activity_at", entry.get("created_at", 0)),
@@ -291,13 +309,23 @@ class SessionManager:
 
     # -- CRUD ----------------------------------------------------------------
 
-    def create(self, parent_sid: str | None = None) -> str:
+    def create(
+        self,
+        parent_sid: str | None = None,
+        parents: list[str] | None = None,
+    ) -> str:
         import time
         sid: str = uuid.uuid4().hex[:12]
         now: float = time.time()
+        # 兼容旧参数：parent_sid 存在时纳入 parents
+        effective_parents: list[str] = []
+        if parents:
+            effective_parents = list(parents)
+        if parent_sid and parent_sid not in effective_parents:
+            effective_parents.insert(0, parent_sid)
         self._sessions[sid] = {
             "status": "active", "created_at": now, "title": "",
-            "parent": parent_sid, "continuation": None,
+            "parents": effective_parents, "continuation": None,
             "pinned": False, "last_activity_at": now,
         }
         # 持久化到磁盘
@@ -306,12 +334,12 @@ class SessionManager:
                 entries: list[dict] = self._read_index()
                 entries.append({
                     "id": sid, "created_at": now, "status": "active", "title": "",
-                    "parent": parent_sid, "continuation": None,
+                    "parents": effective_parents, "continuation": None,
                     "pinned": False, "last_activity_at": now,
                 })
                 self._write_index(entries)
             (self._store_dir / sid).mkdir(parents=True, exist_ok=True)
-        logger.debug("Session created | id=%s parent=%s", sid, parent_sid)
+        logger.debug("Session created | id=%s parents=%s", sid, effective_parents)
         return sid
 
     def archive(self, sid: str, continuation_sid: str | None = None) -> None:
@@ -331,24 +359,35 @@ class SessionManager:
                 self._write_index(entries)
         logger.info("Session archived | id=%s continuation=%s", sid, continuation_sid)
 
-    def create_with_context(self, summary: str, parent_sid: str) -> str:
-        """创建新会话并以摘要作为初始 system 消息。"""
-        new_sid: str = self.create(parent_sid=parent_sid)
-        # 写入初始 system 摘要消息到 JSONL
+    def create_with_context(
+        self,
+        content: str,
+        parent_sid: str | None = None,
+        parents: list[str] | None = None,
+        role: str = "system",
+    ) -> str:
+        """创建新会话并以指定角色的消息作为初始内容。支持多父合并。"""
+        new_sid: str = self.create(parent_sid=parent_sid, parents=parents)
+        # 写入初始消息到 JSONL
         sdir: Path | None = self._store_dir / new_sid if self._store_dir else None
         if sdir:
             sdir.mkdir(parents=True, exist_ok=True)
             msg_path: Path = sdir / "messages.jsonl"
-            entry: dict = {"role": "system", "content": f"[Session continuation summary]\n{summary}"}
+            entry: dict = {"role": role, "content": content}
             try:
                 with open(msg_path, "a", encoding="utf-8") as f:
                     f.write(json.dumps(entry, ensure_ascii=False) + "\n")
             except Exception as exc:
                 logger.warning("Failed to write context for session %s: %s", new_sid, exc)
-        # 更新父会话指向延续
-        if parent_sid in self._sessions:
-            self._sessions[parent_sid]["continuation"] = new_sid
-        logger.info("Session created from archive | new=%s parent=%s", new_sid, parent_sid)
+        # 更新主父会话的 continuation（仅第一个父节点）
+        primary_parent: str | None = None
+        if parents:
+            primary_parent = parents[0]
+        elif parent_sid:
+            primary_parent = parent_sid
+        if primary_parent and primary_parent in self._sessions:
+            self._sessions[primary_parent]["continuation"] = new_sid
+        logger.info("Session created | new=%s parents=%s role=%s", new_sid, parents or [parent_sid], role)
         return new_sid
 
     def exists(self, sid: str) -> bool:
@@ -386,7 +425,7 @@ class SessionManager:
                         "created_at": info.get("created_at", 0),
                         "status": "active",
                         "title": title,
-                        "parent": info.get("parent"),
+                        "parents": info.get("parents", []),
                         "continuation": info.get("continuation"),
                         "pinned": info.get("pinned", False),
                         "last_activity_at": info.get("last_activity_at", info.get("created_at", 0)),
@@ -429,12 +468,14 @@ class SessionManager:
         info: dict | None = self._sessions.get(sid)
         if info is None:
             return None
+        parents: list[str] = info.get("parents", [])
         return {
             "id": sid,
             "created_at": info.get("created_at", 0),
             "status": info.get("status", "unknown"),
             "title": info.get("title", ""),
-            "parent": info.get("parent"),
+            "parents": parents,
+            "parent": parents[0] if parents else None,
             "continuation": info.get("continuation"),
             "pinned": info.get("pinned", False),
             "last_activity_at": info.get("last_activity_at", info.get("created_at", 0)),
@@ -450,19 +491,20 @@ class SessionManager:
         排序规则：置顶的 session 排在最前面；
         同一层级内按 last_activity_at 降序（最近的在前）。
         """
-        items: list[dict] = [
-            {
+        items: list[dict] = []
+        for sid, info in self._sessions.items():
+            parents: list[str] = info.get("parents", [])
+            items.append({
                 "id": sid,
                 "created_at": info.get("created_at", 0),
                 "status": info.get("status", "unknown"),
                 "title": info.get("title", ""),
-                "parent": info.get("parent"),
+                "parents": parents,
+                "parent": parents[0] if parents else None,
                 "continuation": info.get("continuation"),
                 "pinned": info.get("pinned", False),
                 "last_activity_at": info.get("last_activity_at", info.get("created_at", 0)),
-            }
-            for sid, info in self._sessions.items()
-        ]
+            })
         items.sort(key=lambda s: (-int(s["pinned"]), -s["last_activity_at"]))
         return items
 
