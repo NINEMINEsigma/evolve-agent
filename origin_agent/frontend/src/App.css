@@ -410,7 +410,6 @@ html, body, #root {
   display: flex;
   flex-direction: column;
   gap: 6px;
-  scroll-behavior: smooth;
 }
 
 .chat-area::-webkit-scrollbar {

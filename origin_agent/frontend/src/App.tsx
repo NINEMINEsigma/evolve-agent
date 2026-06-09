@@ -328,6 +328,7 @@ export default function App() {
   const menuRef = useRef<HTMLDivElement>(null);
   const wsRef = useRef<WebSocket | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
+  const instantScrollRef = useRef(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
@@ -388,6 +389,7 @@ export default function App() {
     ws.onopen = () => {
       reconnectRef.current = 0;
       setStatus("已连接");
+      instantScrollRef.current = true;
       addMessage("system", "已连接到 Evolve Agent");
       fetchSessions();
     };
@@ -471,7 +473,10 @@ export default function App() {
               }
               return entry;
             });
-            if (history.length) setMessages(history);
+            if (history.length) {
+              instantScrollRef.current = true;
+              setMessages(history);
+            }
             if (data.token_usage !== undefined) setTokenUsage(data.token_usage);
             if (data.context_tokens !== undefined) setContextTokens(data.context_tokens);
             return;  // skip normal system message handling
@@ -701,7 +706,10 @@ export default function App() {
   }, [connect]);
 
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+    if (messages.length === 0) return;
+    const behavior = instantScrollRef.current ? "auto" : "smooth";
+    instantScrollRef.current = false;
+    bottomRef.current?.scrollIntoView({ behavior });
   }, [messages]);
 
   // ── close context menu on outside click ──
