@@ -544,20 +544,25 @@ class AgentLoop:
         history: List[Dict[str, Any]] = self._get_history(session_id)
         if not history:
             return ""
-        # 收集最近的 user/assistant 文本（跳过 system 和 tool 条目）
+        # 收集最近的 50 轮 user/assistant 文本（跳过 system 和 tool 条目）
+        # 一轮对话按 user + assistant 估算，最多取最近 100 条相关消息
+        chat_msgs: list[dict] = [
+            msg for msg in history if msg.get("role") in ("user", "assistant")
+        ]
+        chat_msgs = chat_msgs[-100:]
         lines: list[str] = []
-        for msg in history[-20:]:
+        for msg in chat_msgs:
             role: str = msg.get("role", "")
             content: str = str(msg.get("content", "") or "")
             if not content:
                 continue
             if role == "user":
-                lines.append(f"User: {content[:300]}")
+                lines.append(f"User: {content[:5000]}")
             elif role == "assistant":
-                lines.append(f"Assistant: {content[:300]}")
+                lines.append(f"Assistant: {content[:5000]}")
         if not lines:
             return ""
-        context: str = "\n".join(lines[-10:])
+        context: str = "\n".join(lines)
 
         # 从模板文件读取自动标题 prompt
         from system.pathutils import get_templates_dir
