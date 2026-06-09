@@ -1,0 +1,7 @@
+---
+description: 禁止运行或者构建origin_agent中的代码
+alwaysApply: true
+---
+
+# 约束
+禁止运行或者构建origin_agent中的代码

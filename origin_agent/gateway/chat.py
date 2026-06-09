@@ -214,6 +214,8 @@ class SessionManager:
                     "title": "",
                     "parent": None,
                     "continuation": None,
+                    "pinned": False,
+                    "last_activity_at": created_at,
                 })
             if recovered:
                 logger.info("Recovered %d sessions from directory scan", len(recovered))
@@ -275,6 +277,8 @@ class SessionManager:
                     "title": entry.get("title", ""),
                     "parent": entry.get("parent"),
                     "continuation": entry.get("continuation"),
+                    "pinned": entry.get("pinned", False),
+                    "last_activity_at": entry.get("last_activity_at", entry.get("created_at", 0)),
                 }
         if entries:
             logger.info("Loaded %d sessions from disk", len(entries))
@@ -294,6 +298,7 @@ class SessionManager:
         self._sessions[sid] = {
             "status": "active", "created_at": now, "title": "",
             "parent": parent_sid, "continuation": None,
+            "pinned": False, "last_activity_at": now,
         }
         # 持久化到磁盘
         if self._store_dir:
@@ -302,6 +307,7 @@ class SessionManager:
                 entries.append({
                     "id": sid, "created_at": now, "status": "active", "title": "",
                     "parent": parent_sid, "continuation": None,
+                    "pinned": False, "last_activity_at": now,
                 })
                 self._write_index(entries)
             (self._store_dir / sid).mkdir(parents=True, exist_ok=True)
@@ -374,13 +380,49 @@ class SessionManager:
                         e["title"] = title
                         break
                 else:
+                    info = self._sessions.get(sid, {})
                     entries.append({
                         "id": sid,
-                        "created_at": self._sessions.get(sid, {}).get("created_at", 0),
+                        "created_at": info.get("created_at", 0),
                         "status": "active",
                         "title": title,
+                        "parent": info.get("parent"),
+                        "continuation": info.get("continuation"),
+                        "pinned": info.get("pinned", False),
+                        "last_activity_at": info.get("last_activity_at", info.get("created_at", 0)),
                     })
                 self._write_index(entries)
+
+    def update_last_activity(self, sid: str) -> None:
+        """更新 session 的最后活动时间。"""
+        import time
+        now: float = time.time()
+        if sid in self._sessions:
+            self._sessions[sid]["last_activity_at"] = now
+        if self._store_dir:
+            with self._index_lock:
+                entries: list[dict] = self._read_index()
+                for e in entries:
+                    if e.get("id") == sid:
+                        e["last_activity_at"] = now
+                        break
+                self._write_index(entries)
+
+    def toggle_pin(self, sid: str) -> bool:
+        """切换 session 的置顶状态，返回新的 pinned 值。"""
+        if sid not in self._sessions:
+            return False
+        new_val: bool = not self._sessions[sid].get("pinned", False)
+        self._sessions[sid]["pinned"] = new_val
+        if self._store_dir:
+            with self._index_lock:
+                entries: list[dict] = self._read_index()
+                for e in entries:
+                    if e.get("id") == sid:
+                        e["pinned"] = new_val
+                        break
+                self._write_index(entries)
+        return new_val
 
     def get(self, sid: str) -> dict | None:
         """返回单个 session 及其完整元数据，不存在时返回 None。"""
@@ -394,6 +436,8 @@ class SessionManager:
             "title": info.get("title", ""),
             "parent": info.get("parent"),
             "continuation": info.get("continuation"),
+            "pinned": info.get("pinned", False),
+            "last_activity_at": info.get("last_activity_at", info.get("created_at", 0)),
         }
 
     def cleanup_expired(self) -> int:
@@ -401,8 +445,12 @@ class SessionManager:
         return 0
 
     def get_all(self) -> list[dict]:
-        """返回所有 session 及其元数据的列表。"""
-        return [
+        """返回所有 session 及其元数据的列表。
+
+        排序规则：置顶的 session 排在最前面；
+        同一层级内按 last_activity_at 降序（最近的在前）。
+        """
+        items: list[dict] = [
             {
                 "id": sid,
                 "created_at": info.get("created_at", 0),
@@ -410,9 +458,13 @@ class SessionManager:
                 "title": info.get("title", ""),
                 "parent": info.get("parent"),
                 "continuation": info.get("continuation"),
+                "pinned": info.get("pinned", False),
+                "last_activity_at": info.get("last_activity_at", info.get("created_at", 0)),
             }
             for sid, info in self._sessions.items()
         ]
+        items.sort(key=lambda s: (-int(s["pinned"]), -s["last_activity_at"]))
+        return items
 
     @property
     def count(self) -> int:

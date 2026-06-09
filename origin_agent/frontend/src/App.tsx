@@ -109,6 +109,8 @@ interface SessionInfo {
   created_at: number;
   status: string;
   title?: string;
+  pinned?: boolean;
+  last_activity_at?: number;
 }
 
 function formatTime(ts: number): string {
@@ -139,14 +141,19 @@ interface SessionGroup {
 }
 
 function groupSessions(sessions: SessionInfo[]): SessionGroup[] {
+  const pinned = sessions.filter((s) => s.pinned);
+  const normal = sessions.filter((s) => !s.pinned);
   const map = new Map<string, SessionInfo[]>();
-  for (const s of sessions) {
-    const g = getDateGroup(s.created_at);
+  for (const s of normal) {
+    const g = getDateGroup(s.last_activity_at || s.created_at);
     if (!map.has(g)) map.set(g, []);
     map.get(g)!.push(s);
   }
   const order = ["今天", "昨天", "最近7天"];
   const result: SessionGroup[] = [];
+  if (pinned.length > 0) {
+    result.push({ label: "置顶", sessions: pinned });
+  }
   for (const label of order) {
     if (map.has(label)) {
       result.push({ label, sessions: map.get(label)! });
@@ -778,6 +785,20 @@ export default function App() {
       .catch(() => {});
   };
 
+  // ── pin ──
+  const togglePinSession = (sid: string) => {
+    setContextMenu(null);
+    fetch(`/api/sessions/${sid}/pin`, { method: "POST" })
+      .then((r) => r.json())
+      .then((data) => {
+        setSessions((prev) =>
+          prev.map((s) => (s.id === sid ? { ...s, pinned: data.pinned } : s))
+        );
+        fetchSessions();
+      })
+      .catch(() => {});
+  };
+
   // ── context menu ──
   const handleContextMenu = (e: React.MouseEvent, sid: string) => {
     e.preventDefault();
@@ -838,13 +859,14 @@ export default function App() {
                         />
                       ) : (
                         <div className="session-item-title">
+                          {s.pinned && <span className="pin-badge">★</span>}
                           {s.title || s.id.slice(0, 8) + "..."}
                           {s.status === "archived" && <span className="archived-badge">已归档</span>}
                         </div>
                       )}
                       <div className="session-item-sub">
                         <span className="session-item-id">{s.id}</span>
-                        <span className="session-item-time">{formatTime(s.created_at)}</span>
+                        <span className="session-item-time">{formatTime(s.last_activity_at || s.created_at)}</span>
                       </div>
                     </div>
                   </div>
@@ -865,6 +887,9 @@ export default function App() {
           </div>
           <div className="context-menu-item" onClick={() => autoTitleSession(contextMenu.sid)}>
             自动命名
+          </div>
+          <div className="context-menu-item" onClick={() => { setContextMenu(null); togglePinSession(contextMenu.sid); }}>
+            {(() => { const s = sessions.find(s => s.id === contextMenu.sid); return s?.pinned ? "取消置顶" : "置顶"; })()}
           </div>
           <div className="context-menu-item" onClick={() => { setContextMenu(null); compressSession(contextMenu.sid); }}>
             压缩记忆

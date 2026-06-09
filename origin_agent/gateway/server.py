@@ -416,6 +416,13 @@ async def compress_session_endpoint(session_id: str):
     return {"compressed": False, "error": "agent loop not ready", "session_id": session_id}
 
 
+@app.post("/api/sessions/{session_id}/pin")
+async def pin_session_endpoint(session_id: str):
+    """切换 session 置顶状态。"""
+    pinned: bool = sessions.toggle_pin(session_id)
+    return {"pinned": pinned, "session_id": session_id}
+
+
 @app.post("/api/file-picker")
 async def file_picker():
     """打开原生 Windows 文件选择对话框（仅本地 localhost 有效），
@@ -796,6 +803,7 @@ async def ws_chat(ws: WebSocket) -> None:
                     if len(msg.content.strip()) > 30:
                         title += "..."
                     sessions.update_title(sid, title)
+                sessions.update_last_activity(sid)
                 if _agent_loop is not None:
                     reply: str
                     try:

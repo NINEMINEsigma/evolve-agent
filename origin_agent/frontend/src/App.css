@@ -216,6 +216,14 @@ html, body, #root {
   vertical-align: middle;
 }
 
+.pin-badge {
+  display: inline-block;
+  margin-right: 4px;
+  font-size: 11px;
+  color: #f59e0b;
+  vertical-align: middle;
+}
+
 .session-item.archived {
   opacity: 0.55;
   cursor: default;
