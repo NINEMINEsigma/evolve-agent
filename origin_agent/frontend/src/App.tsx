@@ -575,38 +575,90 @@ export default function App() {
   };
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
+    const files = e.target.files;
     const isArchived = sessions.find((s) => s.id === sessionId)?.status === "archived";
-    if (!file || !wsRef.current || wsRef.current.readyState !== WebSocket.OPEN || isArchived) return;
-
-    // 限制文件大小：20MB
-    if (file.size > 20 * 1024 * 1024) {
-      addMessage("error", `文件过大：${(file.size / 1024 / 1024).toFixed(1)}MB（最大 20MB）`);
-      return;
-    }
+    if (!files || files.length === 0 || !wsRef.current || wsRef.current.readyState !== WebSocket.OPEN || isArchived) return;
 
     setUploading(true);
-    const reader = new FileReader();
-    reader.onload = () => {
-      const base64 = (reader.result as string).split(",")[1] || "";
-      wsRef.current!.send(
-        JSON.stringify({
-          type: "file_upload",
-          filename: file.name,
-          mime_type: file.type || "application/octet-stream",
-          file_data: base64,
-        })
-      );
-      addMessage("system", `📎 正在上传：${file.name} (${(file.size / 1024).toFixed(1)}KB)...`);
-      setUploading(false);
-      // 重置 input 以允许重复上传同名文件
-      if (fileInputRef.current) fileInputRef.current.value = "";
-    };
-    reader.onerror = () => {
-      addMessage("error", `文件读取失败：${file.name}`);
-      setUploading(false);
-    };
-    reader.readAsDataURL(file);
+    let completed = 0;
+
+    Array.from(files).forEach((file) => {
+      // 尝试获取本地路径（部分浏览器在 localhost 下暴露 file.path）
+      const localPath = (file as any).path || (file as any).webkitRelativePath || "";
+
+      // 如果有本地路径且和 uploads 在同一盘，后端会优先硬链接，不需要读 base64
+      if (localPath) {
+        wsRef.current!.send(
+          JSON.stringify({
+            type: "file_upload",
+            filename: file.name,
+            mime_type: file.type || "application/octet-stream",
+            local_path: localPath,
+            file_data: "",
+          })
+        );
+        addMessage("system", `📎 上传中（硬链接）：${file.name}`);
+        completed++;
+        if (completed === files.length) {
+          setUploading(false);
+          if (fileInputRef.current) fileInputRef.current.value = "";
+        }
+        return;
+      }
+
+      const reader = new FileReader();
+      reader.onload = () => {
+        const base64 = (reader.result as string).split(",")[1] || "";
+        wsRef.current!.send(
+          JSON.stringify({
+            type: "file_upload",
+            filename: file.name,
+            mime_type: file.type || "application/octet-stream",
+            file_data: base64,
+          })
+        );
+        addMessage("system", `📎 正在上传：${file.name} (${(file.size / 1024).toFixed(1)}KB)...`);
+        completed++;
+        if (completed === files.length) {
+          setUploading(false);
+          // 重置 input 以允许重复上传
+          if (fileInputRef.current) fileInputRef.current.value = "";
+        }
+      };
+      reader.onerror = () => {
+        addMessage("error", `文件读取失败：${file.name}`);
+        completed++;
+        if (completed === files.length) setUploading(false);
+      };
+      reader.readAsDataURL(file);
+    });
+  };
+
+  const isLocal = window.location.hostname === "127.0.0.1" || window.location.hostname === "localhost";
+
+  const handleUploadClick = async () => {
+    if (isLocal) {
+      // 本机 → 后端打开原生 Windows 文件对话框，走硬链接
+      try {
+        const resp = await fetch("/api/file-picker", { method: "POST" });
+        const data = await resp.json();
+        if (data.uploaded && data.files) {
+          for (const f of data.files) {
+            addMessage("system", `📎 ${f.method === "hardlink" ? "硬链接" : "复制"}: ${f.filename} (${(f.size / 1024).toFixed(1)}KB)`);
+          }
+        } else if (data.error) {
+          addMessage("error", `文件选择失败: ${data.error}`);
+          // fallback: 走浏览器上传
+          if (isLocal) fileInputRef.current?.click();
+        }
+      } catch (err) {
+        addMessage("error", `文件选择异常: ${err}`);
+        fileInputRef.current?.click();
+      }
+    } else {
+      // 远程 → 浏览器 file input + base64
+      fileInputRef.current?.click();
+    }
   };
 
   const newChat = () => {
@@ -1192,7 +1244,8 @@ export default function App() {
             {isArchived ? (
               <div className="archived-notice">此会话已归档，无法发送消息</div>
             ) : (
-              <>
+              <div className="input-bar-inner">
+                  <div className="input-bar-row">
                 <textarea
                   className="input-field"
                   value={input}
@@ -1218,12 +1271,12 @@ export default function App() {
                   type="file"
                   className="file-input-hidden"
                   onChange={handleFileUpload}
-                  accept="image/*,.pdf,.doc,.docx,.xls,.xlsx,.csv,.txt,.json,.py,.js,.ts,.html,.css,.md,.zip,.tar,.gz"
+                  multiple
                   disabled={uploading}
                 />
                 <button
                   className="upload-btn"
-                  onClick={() => fileInputRef.current?.click()}
+                  onClick={handleUploadClick}
                   disabled={uploading}
                   title="上传文件"
                 >
@@ -1252,7 +1305,8 @@ export default function App() {
                     ⏹
                   </button>
                 )}
-              </>
+                  </div>
+              </div>
             )}
           </footer>
         );

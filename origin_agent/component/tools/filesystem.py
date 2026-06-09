@@ -191,7 +191,10 @@ registry.register(
         "description": (
             "Write content to a file. Path must use a namespace prefix. "
             "Use 'ws:' for workspace data, 'fork:' for evolution code. "
-            "Directories are created automatically."
+            "Directories are created automatically. "
+            "Max 1000 characters per call. "
+            "If rejected for exceeding the limit, do NOT use run_python to write files; "
+            "use edit_file for incremental changes instead."
         ),
         "parameters": {
             "type": "object",
@@ -301,7 +304,8 @@ registry.register(
             "old_string must match exactly once — include enough surrounding context "
             "(2-3 lines before and after) to make it unique. "
             "Use this instead of write_file when only a few lines need changing "
-            "— avoids resending the entire file content."
+            "— avoids resending the entire file content. "
+            "For larger changes, make multiple sequential edit_file calls."
         ),
         "parameters": {
             "type": "object",

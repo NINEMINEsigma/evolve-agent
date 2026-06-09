@@ -416,6 +416,89 @@ async def compress_session_endpoint(session_id: str):
     return {"compressed": False, "error": "agent loop not ready", "session_id": session_id}
 
 
+@app.post("/api/file-picker")
+async def file_picker():
+    """打开原生 Windows 文件选择对话框（仅本地 localhost 有效），
+    选中的文件通过硬链接（同盘）或复制（跨盘）放入 uploads 目录。"""
+    import json
+    import os
+    import shutil
+    import subprocess
+    import sys
+    import textwrap
+    import uuid
+    from pathlib import Path
+
+    script: str = textwrap.dedent("""\
+    import json, tkinter as tk
+    from tkinter import filedialog
+    root = tk.Tk()
+    root.withdraw()
+    root.attributes('-topmost', True)
+    files = filedialog.askopenfilenames(title="选择要上传的文件")
+    root.destroy()
+    print(json.dumps(list(files)))
+    """)
+
+    loop = asyncio.get_event_loop()
+    try:
+        result = await loop.run_in_executor(
+            None,
+            lambda: subprocess.run(
+                [sys.executable, "-c", script],
+                capture_output=True,
+                text=True,
+                timeout=120,
+            ),
+        )
+        if result.returncode != 0:
+            logger.warning("File dialog subprocess failed: %s", result.stderr.strip())
+            return {"uploaded": False, "error": "dialog_failed"}
+        paths: list[str] = json.loads(result.stdout.strip())
+    except subprocess.TimeoutExpired:
+        logger.warning("File dialog subprocess timed out")
+        return {"uploaded": False, "error": "dialog_timeout"}
+    except Exception as exc:
+        logger.warning("File dialog exception: %s", exc)
+        return {"uploaded": False, "error": f"dialog_exception: {exc}"}
+
+    if not paths:
+        return {"uploaded": False, "files": []}
+
+    upload_dir: Path = (_agentspace_path / "uploads") if _agentspace_path else Path("workspace/agentspace/uploads")
+    upload_dir.mkdir(parents=True, exist_ok=True)
+
+    results: list[dict] = []
+    for p in paths:
+        src: Path = Path(p)
+        if not src.is_file():
+            continue
+        safe_name: str = src.name
+        unique_name: str = f"{uuid.uuid4().hex[:8]}_{safe_name}"
+        dest: Path = upload_dir / unique_name
+        method: str = "hardlink"
+        try:
+            os.link(str(src), str(dest))
+        except OSError:
+            try:
+                shutil.copy2(str(src), str(dest))
+                method = "copy"
+            except OSError as exc:
+                results.append({"uploaded": False, "filename": safe_name, "error": str(exc)})
+                continue
+
+        logger.info("File %s | picker src=%s dest=%s", method, src, dest)
+        results.append({
+            "uploaded": True,
+            "path": f"ws:uploads/{unique_name}",
+            "filename": safe_name,
+            "size": dest.stat().st_size,
+            "method": method,
+        })
+
+    return {"uploaded": True, "files": results}
+
+
 @app.get("/uploads/{file_path:path}")
 async def serve_workspace_file(file_path: str):
     """提供 ws: 命名空间下文件的 HTTP 访问，供前端展示图片等静态文件。"""
@@ -477,14 +560,80 @@ async def spa_fallback(full_path: str):
 
 
 async def _handle_file_upload(ws: WebSocket, sid: str, msg: Message) -> None:
-    """处理 FILE_UPLOAD 消息：将 base64 文件保存到 agentspace。"""
+    """处理 FILE_UPLOAD 消息：优先硬链接，fallback 到复制或 base64 解码。"""
     import base64
+    import os
+    import shutil
     import uuid
 
     filename: str = (msg.filename or "uploaded_file").strip()
     mime_type: str = (msg.mime_type or "application/octet-stream").strip()
     file_data: str = (msg.file_data or "").strip()
+    local_path: str | None = msg.local_path
 
+    # 清理文件名中的路径遍历字符
+    safe_name: str = filename.replace("\\", "/").split("/")[-1]
+    if not safe_name:
+        safe_name = "uploaded_file"
+
+    unique_name: str = f"{uuid.uuid4().hex[:8]}_{safe_name}"
+    upload_dir: Path = _agentspace_path / "uploads" if _agentspace_path else Path("workspace/agentspace/uploads")
+    upload_dir.mkdir(parents=True, exist_ok=True)
+    dest: Path = upload_dir / unique_name
+
+    # -- 硬链接优先 ---------------------------------------------------------
+    if local_path:
+        src: Path = Path(local_path)
+        if src.is_file():
+            try:
+                os.link(str(src), str(dest))
+                logger.info("File hard-linked | session=%s src=%s dest=%s", sid, src, dest)
+                await ws.send_text(
+                    Message(
+                        type=MessageType.SYSTEM,
+                        session_id=sid,
+                        content=json.dumps({
+                            "uploaded": True,
+                            "path": f"ws:uploads/{unique_name}",
+                            "filename": safe_name,
+                            "size": src.stat().st_size,
+                            "method": "hardlink",
+                        }),
+                    ).to_json()
+                )
+                return
+            except OSError as exc:
+                # 跨设备等 -> 回退到复制
+                logger.info("Hard link failed, fallback to copy | session=%s err=%s", sid, exc)
+                try:
+                    shutil.copy2(str(src), str(dest))
+                    logger.info("File copied (hardlink fallback) | session=%s src=%s dest=%s", sid, src, dest)
+                    await ws.send_text(
+                        Message(
+                            type=MessageType.SYSTEM,
+                            session_id=sid,
+                            content=json.dumps({
+                                "uploaded": True,
+                                "path": f"ws:uploads/{unique_name}",
+                                "filename": safe_name,
+                                "size": src.stat().st_size,
+                                "method": "copy",
+                            }),
+                        ).to_json()
+                    )
+                    return
+                except OSError as exc2:
+                    logger.error("File copy also failed | session=%s err=%s", sid, exc2)
+                    await ws.send_text(
+                        Message(
+                            type=MessageType.ERROR,
+                            session_id=sid,
+                            message=f"File link/copy failed: {exc2}",
+                        ).to_json()
+                    )
+                    return
+
+    # -- Base64 写入 --------------------------------------------------------
     if not file_data:
         await ws.send_text(
             Message(
@@ -494,17 +643,6 @@ async def _handle_file_upload(ws: WebSocket, sid: str, msg: Message) -> None:
             ).to_json()
         )
         return
-
-    # 清理文件名中的路径遍历字符
-    safe_name: str = filename.replace("\\", "/").split("/")[-1]
-    if not safe_name:
-        safe_name = "uploaded_file"
-
-    # 避免文件名冲突：添加短 UUID 前缀
-    unique_name: str = f"{uuid.uuid4().hex[:8]}_{safe_name}"
-    upload_dir: Path = _agentspace_path / "uploads" if _agentspace_path else Path("workspace/agentspace/uploads")
-    upload_dir.mkdir(parents=True, exist_ok=True)
-    dest: Path = upload_dir / unique_name
 
     try:
         raw_bytes: bytes = base64.b64decode(file_data)
@@ -521,7 +659,7 @@ async def _handle_file_upload(ws: WebSocket, sid: str, msg: Message) -> None:
         return
 
     logical_path: str = f"ws:uploads/{unique_name}"
-    logger.info("File uploaded | session=%s path=%s size=%d", sid, logical_path, len(raw_bytes))
+    logger.info("File uploaded (base64) | session=%s path=%s size=%d", sid, logical_path, len(raw_bytes))
 
     await ws.send_text(
         Message(

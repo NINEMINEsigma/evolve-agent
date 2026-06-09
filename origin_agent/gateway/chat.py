@@ -48,6 +48,7 @@ class Message(BaseModel):
     filename: Optional[str] = None    # FILE_UPLOAD：原始文件名
     mime_type: Optional[str] = None   # FILE_UPLOAD：MIME 类型
     file_data: Optional[str] = None   # FILE_UPLOAD：base64 编码的文件内容
+    local_path: Optional[str] = None  # FILE_UPLOAD：本地文件路径（同盘时优先硬链接）
     # ask_request / ask_response 相关字段
     question: Optional[str] = None    # ASK_REQUEST：问题文本
     options: Optional[list] = None    # ASK_REQUEST：选项列表 [{label, value}]
@@ -73,6 +74,7 @@ class Message(BaseModel):
             filename=data.get("filename"),
             mime_type=data.get("mime_type"),
             file_data=data.get("file_data"),
+            local_path=data.get("local_path"),
             question=data.get("question"),
             options=data.get("options"),
             allow_custom=data.get("allow_custom"),
@@ -108,6 +110,8 @@ class Message(BaseModel):
             d["mime_type"] = self.mime_type
         if self.file_data is not None:
             d["file_data"] = self.file_data
+        if self.local_path is not None:
+            d["local_path"] = self.local_path
         if self.question is not None:
             d["question"] = self.question
         if self.options is not None:
