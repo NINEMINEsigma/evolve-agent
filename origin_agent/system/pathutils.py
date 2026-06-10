@@ -17,7 +17,7 @@ def find_repo_root() -> Path:
 
 def get_agent_dir() -> Path:
     return Path(__file__).resolve().parent.parent
-    
+
 
 def get_templates_dir() -> Path:
     """返回 templates 目录路径（相对于当前代码副本）。

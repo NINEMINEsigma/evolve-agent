@@ -32,20 +32,23 @@ from .filesystem import _s as _get_sandbox
 
 # ── 持久化允许列表 ─────────────────────────────────────────────
 
-from system.pathutils import find_repo_root
+from system.context import get_runtime_context
 
-
-_ALLOWLIST_PATH: Path = find_repo_root() / ".shell_allowlist.json"
 _SEED_COMMANDS: Set[str] = {
     "dir", "ls", "echo .",
 }
 
 
+def _get_allowlist_path() -> Path:
+    return get_runtime_context().workspace / "logs" / "shell_allowlist.json"
+
+
 def _load_allowlist() -> Set[str]:
     """从持久化文件加载允许列表。"""
     try:
-        if _ALLOWLIST_PATH.exists():
-            data: list = json.loads(_ALLOWLIST_PATH.read_text(encoding="utf-8"))
+        path = _get_allowlist_path()
+        if path.exists():
+            data: list = json.loads(path.read_text(encoding="utf-8"))
             if isinstance(data, list):
                 return set(data) | _SEED_COMMANDS
     except Exception:
@@ -56,8 +59,9 @@ def _load_allowlist() -> Set[str]:
 def _save_allowlist(entries: Set[str]) -> None:
     """将允许列表保存到持久化文件。"""
     try:
-        _ALLOWLIST_PATH.parent.mkdir(parents=True, exist_ok=True)
-        _ALLOWLIST_PATH.write_text(
+        path = _get_allowlist_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(
             json.dumps(sorted(entries - _SEED_COMMANDS), ensure_ascii=False, indent=2),
             encoding="utf-8",
         )
