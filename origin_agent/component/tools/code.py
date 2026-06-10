@@ -31,21 +31,6 @@ def _s():
     return _get_sandbox()
 
 
-def _resolve_sandboxed_path(path: str, mode: str) -> str:
-    # Note: 遗留辅助函数 — 当前无 handler 使用。
-    # Handler 通过 sandbox 内联自己的路径解析。
-    """通过 sandbox 将逻辑路径解析为绝对路径。
-
-    特殊情况：无命名空间前缀的裸文件名视为
-    相对于 ``self:``（用于 read_own_source / write_fork）。
-    """
-    if ":" not in path:
-        # 裸文件名 — 读取时相对于 self:，写入时相对于 fork:
-        return str(_s().resolve(f"{'fork' if mode == 'write' else 'self'}:{path}",
-                                Access.WRITE if mode == "write" else Access.READ).real)
-    raise SandboxError("Use bare filenames (e.g. 'main.py') for code tools")
-
-
 # ---------------------------------------------------------------------------
 # 工具 handler
 # ---------------------------------------------------------------------------

@@ -222,6 +222,7 @@ class AgentLoop:
         # 清除上一回合残留的过期中断标记
         self._interrupted.pop(session_id, None)
         # ---- 持久化用户消息 ----
+        logger.info("Received user message | session=%s content=%s", session_id, user_message)
         self._append(session_id, "user", user_message)
         # ---- 延迟初始化 memory provider ----
         if session_id not in self._memory_initialized:
