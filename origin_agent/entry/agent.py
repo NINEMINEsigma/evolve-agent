@@ -1158,11 +1158,11 @@ class AgentLoop:
                 ) # type: ignore
             )
 
-        # ---- 脱手模式写入审批 ----
+        # ---- 脱手模式审批（write + dangerous 均在此处理，与 tool_timeout 独立）----
         _skip_dispatch = False
         result: str = ""
         danger_level: str = tool_registry.get_danger_level(tc.name)
-        if danger_level == "write" and is_handsfree_mode(session_id):
+        if danger_level in ("write", "dangerous") and is_handsfree_mode(session_id):
             _approval_args = {k: v for k, v in args.items() if k != "_session_id"}
             _hooks_ctx = self._get_hooks_context(session_id)
 
@@ -1183,6 +1183,10 @@ class AgentLoop:
                     "denied_by": approval.denied_by,
                 }, ensure_ascii=False)
                 _skip_dispatch = True
+            else:
+                # 审批通过，向 handler 注入标记使其跳过内部重复审批
+                args["_pre_approved"] = True
+                args["_approval_action"] = approval.action
 
         # ---- 实际工具执行（审批耗时与 tool_timeout 相互独立）----
         # request_user_confirm 的审批时间（含模型加载、推理）

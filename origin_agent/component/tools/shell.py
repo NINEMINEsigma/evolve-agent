@@ -102,9 +102,13 @@ async def _handle_run_command(args: Dict[str, Any]) -> str:
         # 已受信任 — 跳过确认
         return _execute(cmd_parts, cwd)
 
-    # ── 用户确认 ──
+    # ── 用户确认（若已由 _execute_tool 预审批则跳过）──
+    _pre_approved: bool = args.get("_pre_approved", False)
+    _approval_action: str = args.get("_approval_action", "allow_once")
     result: ApprovalResult
-    if session_id:
+    if _pre_approved:
+        result = ApprovalResult(action=_approval_action)
+    elif session_id:
         cmd_str = " ".join(cmd_parts)
         result = await request_user_confirm(
             session_id, "run_command",

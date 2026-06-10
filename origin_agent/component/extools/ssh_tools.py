@@ -80,8 +80,12 @@ async def _handle_ssh_exec(args: Dict[str, Any]) -> str:
     if not reason:
         return tool_error("reason is required — please explain why this remote command needs to be executed")
 
-    # --- 用户确认 ---
-    if session_id:
+    # --- 用户确认（若已由 _execute_tool 预审批则跳过）---
+    _pre_approved: bool = args.get("_pre_approved", False)
+    _approval_action: str = args.get("_approval_action", "allow_once")
+    if _pre_approved:
+        approval_result = ApprovalResult(action=_approval_action)
+    elif session_id:
         approval_result: ApprovalResult = await request_user_confirm(
             session_id, "ssh_exec",
             {"target": target, "command": command[:200], "reason": reason},
@@ -169,8 +173,12 @@ async def _handle_ssh_upload(args: Dict[str, Any]) -> str:
     if not reason:
         return tool_error("reason is required — please explain why the file needs to be uploaded")
 
-    # --- 用户确认 ---
-    if session_id:
+    # --- 用户确认（若已由 _execute_tool 预审批则跳过）---
+    _pre_approved: bool = args.get("_pre_approved", False)
+    _approval_action: str = args.get("_approval_action", "allow_once")
+    if _pre_approved:
+        approval_result = ApprovalResult(action=_approval_action)
+    elif session_id:
         approval_result: ApprovalResult = await request_user_confirm(
             session_id, "ssh_upload",
             {"local_path": local_path, "remote_path": remote_path, "target": target, "reason": reason},
@@ -259,8 +267,12 @@ async def _handle_ssh_download(args: Dict[str, Any]) -> str:
     if not reason:
         return tool_error("reason is required — please explain why the file needs to be downloaded")
 
-    # --- 用户确认 ---
-    if session_id:
+    # --- 用户确认（若已由 _execute_tool 预审批则跳过）---
+    _pre_approved: bool = args.get("_pre_approved", False)
+    _approval_action: str = args.get("_approval_action", "allow_once")
+    if _pre_approved:
+        approval_result = ApprovalResult(action=_approval_action)
+    elif session_id:
         approval_result: ApprovalResult = await request_user_confirm(
             session_id, "ssh_download",
             {"remote_path": remote_path, "target": target, "local_path": local_path, "reason": reason},
