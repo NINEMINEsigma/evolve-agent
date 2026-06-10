@@ -82,6 +82,9 @@ class RuntimeContext(BaseModel):
     approval_model_cuda: bool = False
     """脱手模式审批小模型是否启用 CUDA。默认 False，不自动检测。"""
 
+    approval_model_port: int = 8081
+    """脱手模式审批小模型 llama-server 的监听端口。"""
+
     # -- MCP 配置 -------------------------------------------------
 
     mcp_config_path: Optional[str] = None

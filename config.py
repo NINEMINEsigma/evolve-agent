@@ -29,6 +29,7 @@ for file in File("custom_models/").childs():
 argparse_parser.add_argument("--approval_model_path", type=str, default=check_default_approval_model_path)
 argparse_parser.add_argument("--approval_model_n_ctx", type=int, default=65536)
 argparse_parser.add_argument("--approval_model_cuda", action="store_true")
+argparse_parser.add_argument("--approval_model_port", type=int, default=8081)
 
 #----------
 # workspace
@@ -65,6 +66,7 @@ merge_concat_threshold: int     = args.merge_concat_threshold
 approval_model_path:    str  = args.approval_model_path
 approval_model_n_ctx:   int  = args.approval_model_n_ctx
 approval_model_cuda:    bool = args.approval_model_cuda
+approval_model_port:    int  = args.approval_model_port
 
 
 #----------

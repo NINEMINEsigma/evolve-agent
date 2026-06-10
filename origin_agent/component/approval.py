@@ -18,7 +18,6 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import socket
 import uuid
 import dirtyjson
 from pydantic import BaseModel
@@ -76,13 +75,6 @@ _approver_lock = asyncio.Lock()
 _APPROVER_FAILED = "__failed__"  # sentinel: 标记初始化失败，防止每次重试
 
 
-def _find_free_port() -> int:
-    """找一个可用的 TCP 端口。"""
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-        s.bind(("127.0.0.1", 0))
-        return s.getsockname()[1]
-
-
 def _detect_cuda(cuda: bool = False) -> bool:
     """是否启用 CUDA（由配置决定，不自动检测）。
 
@@ -130,7 +122,7 @@ def _get_approver() -> InferenceEngine|None:
             n_ctx=n_ctx,
             n_gpu_layers=n_gpu_layers,
             cuda=cuda_available,
-            port=_find_free_port(),  # 动态分配，避免与主 LLM server 冲突
+            port=ctx.approval_model_port,  # 与主 LLM server 不同端口
             flash_attn=cuda_available,
             auto_build=True,
         ))

@@ -127,6 +127,7 @@ def _build_context(cli: dict) -> RuntimeContext:
         approval_model_path     = str(cli.get("approval_model_path", "")),
         approval_model_n_ctx    = int(cli.get("approval_model_n_ctx", 4096)),
         approval_model_cuda     = as_bool(cli.get("approval_model_cuda", False)),
+        approval_model_port     = int(cli.get("approval_model_port", 8081)),
         mcp_config_path         = cli["mcp_config_path"],
         # 会话合并配置
         merge_concat_threshold  = int(cli.get("merge_concat_threshold", 50000)),
