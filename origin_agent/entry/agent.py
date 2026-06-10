@@ -26,6 +26,7 @@ from component.llm import LLMClient, LLMResponse, ToolCall
 from system.pathutils import find_repo_root
 from system.context import RuntimeContext
 from system.prompt import build_system_prompt
+from component.tools.probe_vision import _load_cache
 
 logger = logging.getLogger(__name__)
 
@@ -395,51 +396,20 @@ class AgentLoop:
     def _supports_vision(self) -> bool:
         """检测当前模型是否支持图像 vision 功能。
 
-        基于模型名称的启发式判断：
-        - 包含 ``vision``、``vl``、``4o``、``turbo``、``gemini``、
-          ``claude-3``、``claude-4``、``gpt-4o`` 等关键字的视为支持。
-        - ``deepseek-chat``、``deepseek-v3``、``deepseek-reasoner``、
-          ``gpt-3`` 等纯文本模型视为不支持。
+        优先查询 probe_vision_capability 工具产生的本地缓存；
+        缓存未命中时采用乐观默认（视为支持），让图片进入消息流，
+        由下游 _is_content_block_error 在 API 拒绝时降级处理。
         """
         model: str = (self._ctx.llm_model or "").lower()
         if not model:
             return False
 
-        # 明确的非 vision 模型
-        _non_vision = {
-            "deepseek-chat",
-            "deepseek-reasoner",
-            "deepseek-v3",
-            "gpt-3",
-            "gpt-3.5",
-            "text-davinci",
-            "llama-3",
-            "llama-2",
-            "codellama",
-            "mixtral",
-        }
-        for nv in _non_vision:
-            if nv in model:
-                return False
+        cache: dict[str, bool] = _load_cache()
+        if model in cache:
+            return cache[model]
 
-        # vision-capable 模型特征
-        _vision_keywords = [
-            "vision", "vl", "4o", "4-turbo", "gpt-4o",
-            "gemini", "claude-3", "claude-4", "claude3", "claude4",
-            "gpt-4-turbo", "gpt-4-vision",
-            "glm-4v", "cogvlm", "llava",
-            "qwen-vl", "yi-vision", "pixtral",
-        ]
-        for kw in _vision_keywords:
-            if kw in model:
-                return True
-
-        # gpt-4（不含 o/turbo/vision 后缀）不支持 vision
-        if "gpt-4" in model:
-            return False
-
-        # 默认保守策略：不支持
-        return False
+        # 缓存未命中：乐观默认，避免新模型被硬编码名单漏掉
+        return True
 
     def _get_history(self, session_id: str) -> List[Dict[str, Any]]:
         if session_id not in self._histories:
