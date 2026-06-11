@@ -310,7 +310,10 @@ class AgentLoop:
                                 stripped, session_id,
                             )
                             continue  # 重新进入循环，用 text-only 消息重试
-                    raise
+                    # 其他异常：记录错误、清理本轮用户消息、返回友好提示，不抛异常
+                    logger.exception("LLM call failed for session=%s", session_id)
+                    self._remove_last_user_message(session_id)
+                    return f"The service provider returned an error, please try again later. Details: {llm_exc}"
                 # 从 LLM 响应中追踪实际 token 消耗
                 self._token_usage[session_id] = self._token_usage.get(session_id, 0) + resp.usage.total_tokens
                 self._persist_token_usage(session_id)
@@ -464,6 +467,24 @@ class AgentLoop:
         except Exception as exc:
             logger.warning("Failed to load history for session %s: %s", session_id, exc)
             return []
+
+    def _remove_last_user_message(self, session_id: str) -> None:
+        """从历史中移除最后一条用户消息（用于 LLM 调用失败时清理上下文）。"""
+        history: List[Dict[str, Any]] = self._histories.get(session_id, [])
+        if history and history[-1].get("role") == "user":
+            history.pop()
+
+        path: Path | None = self._history_path(session_id)
+        if path and path.exists():
+            try:
+                lines: list[str] = path.read_text(encoding="utf-8").strip().split("\n")
+                if lines:
+                    last: dict = json.loads(lines[-1])
+                    if last.get("role") == "user":
+                        lines.pop()
+                        path.write_text("\n".join(lines) + "\n" if lines else "", encoding="utf-8")
+            except Exception as exc:
+                logger.warning("Failed to remove last user message from disk for session %s: %s", session_id, exc)
 
     # -- token 消耗持久化 -------------------------------------------
 

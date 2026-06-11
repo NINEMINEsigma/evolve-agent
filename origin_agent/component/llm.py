@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 from typing import Any, Dict, List, Optional
@@ -17,6 +18,11 @@ from pydantic import BaseModel, ConfigDict
 from system.context import RuntimeContext
 
 logger = logging.getLogger(__name__)
+
+# 对 transient 网络错误的最大重试次数
+_MAX_RETRIES = 3
+# 指数退避基数（秒）
+_BACKOFF_BASE = 1.0
 
 
 # ---------------------------------------------------------------------------
@@ -90,6 +96,9 @@ class LLMClient:
     ) -> LLMResponse:
         """发送聊天请求，返回结构化响应。
 
+        对 transient 网络错误（连接中断、超时、限流、5xx）
+        自动进行指数退避重试，最多 ``_MAX_RETRIES`` 次。
+
         *messages* 为 OpenAI 格式的消息字典列表
         （``{"role": "...", "content": "..."}``）。
         *tools* 为可选的 OpenAI 格式工具 schema 列表。
@@ -107,28 +116,51 @@ class LLMClient:
         if self._reasoning_effort:
             kwargs["reasoning_effort"] = self._reasoning_effort
 
-        completion: Any = await self._client.chat.completions.create(**kwargs)
-        choice: Any = completion.choices[0]
-        msg: Any = choice.message
+        for attempt in range(_MAX_RETRIES):
+            try:
+                completion: Any = await self._client.chat.completions.create(**kwargs)
+                choice: Any = completion.choices[0]
+                msg: Any = choice.message
 
-        return LLMResponse(
-            content=msg.content or "",
-            tool_calls=[
-                ToolCall(
-                    id=tc.id,
-                    name=tc.function.name,
-                    arguments=_safe_json_parse(tc.function.arguments),
+                return LLMResponse(
+                    content=msg.content or "",
+                    tool_calls=[
+                        ToolCall(
+                            id=tc.id,
+                            name=tc.function.name,
+                            arguments=_safe_json_parse(tc.function.arguments),
+                        )
+                        for tc in (msg.tool_calls or [])
+                    ],
+                    finish_reason=choice.finish_reason or "stop",
+                    reasoning_content=getattr(msg, "reasoning_content", None),
+                    usage=Usage(
+                        prompt_tokens=completion.usage.prompt_tokens if completion.usage else 0,
+                        completion_tokens=completion.usage.completion_tokens if completion.usage else 0,
+                        total_tokens=completion.usage.total_tokens if completion.usage else 0,
+                    ),
                 )
-                for tc in (msg.tool_calls or [])
-            ],
-            finish_reason=choice.finish_reason or "stop",
-            reasoning_content=getattr(msg, "reasoning_content", None),
-            usage=Usage(
-                prompt_tokens=completion.usage.prompt_tokens if completion.usage else 0,
-                completion_tokens=completion.usage.completion_tokens if completion.usage else 0,
-                total_tokens=completion.usage.total_tokens if completion.usage else 0,
-            ),
-        )
+            except (
+                openai.APIConnectionError,
+                openai.APITimeoutError,
+                openai.RateLimitError,
+                openai.InternalServerError,
+            ) as exc:
+                if attempt < _MAX_RETRIES - 1:
+                    wait: float = _BACKOFF_BASE * (2 ** attempt)
+                    logger.warning(
+                        "LLM transient error (attempt %d/%d): %s. Retrying in %.1fs...",
+                        attempt + 1, _MAX_RETRIES, exc, wait,
+                    )
+                    await asyncio.sleep(wait)
+                else:
+                    logger.error("LLM transient error exhausted all %d retries: %s", _MAX_RETRIES, exc)
+                    raise exc
+            except Exception:
+                # 非 transient 异常（如认证失败、BadRequestError 等）立即抛出
+                raise
+        # 所有代码路径都已 return 或 raise，此处不可达（保留以安抚类型检查器）
+        raise AssertionError("unreachable")
 
 
 # ---------------------------------------------------------------------------
