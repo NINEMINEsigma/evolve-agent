@@ -223,6 +223,99 @@ def _handle_play_audio(args: Dict[str, Any]) -> str:
     )
 
 
+def _resolve_audio_item(raw: Any, agentspace: Path) -> dict[str, Any] | str:
+    """Resolve a single audio item (dict with path or url) into playlist entry."""
+    if not isinstance(raw, dict):
+        return f"Invalid playlist item: expected dict, got {type(raw).__name__}"
+
+    path: str = str(raw.get("path", "")).strip()
+    url: str = str(raw.get("url", "")).strip()
+    title: str = str(raw.get("title", "")).strip()
+
+    if not path and not url:
+        return "Each item must provide 'path' or 'url'"
+    if path and url:
+        return "Each item must provide only one of 'path' or 'url'"
+
+    audio_url: str = ""
+    mime: str = "audio/mpeg"
+    size: int = 0
+
+    if path:
+        result = _resolve_common(path)
+        if isinstance(result, str):
+            return result
+        real, _ = result
+
+        ext = real.suffix.lower()
+        if ext not in _AUDIO_EXTS:
+            return (
+                f"Unsupported audio format '{ext}' for '{path}'. "
+                f"Supported: {', '.join(sorted(_AUDIO_EXTS))}"
+            )
+
+        mime = _MIME_MAP.get(ext, "audio/mpeg")
+        size = real.stat().st_size
+        try:
+            rel = real.relative_to(agentspace)
+            audio_url = f"/uploads/{rel.as_posix()}"
+        except ValueError:
+            audio_url = f"/uploads/{real.name}"
+        if not title:
+            title = real.stem
+
+    if url:
+        audio_url = url
+        ext = Path(url.split("?")[0]).suffix.lower()
+        mime = _MIME_MAP.get(ext, "audio/mpeg")
+        if not title:
+            title = Path(url.split("?")[0]).stem or "Untitled"
+
+    return {
+        "audio_url": audio_url,
+        "mime": mime,
+        "size": size,
+        "title": title,
+        "path": path or None,
+        "url": url or None,
+    }
+
+
+def _handle_play_audio_list(args: Dict[str, Any]) -> str:
+    """Play a list of audio tracks sequentially in the frontend."""
+    items: Any = args.get("items", [])
+    autoplay: bool = bool(args.get("autoplay", True))
+
+    if not isinstance(items, list):
+        return tool_error("'items' must be a list of audio entries")
+    if not items:
+        return tool_error("'items' list is empty — provide at least one audio entry")
+
+    sb = _get_sandbox()
+    agentspace: Path = sb._ctx.agentspace if sb else Path()
+
+    playlist: list[dict[str, Any]] = []
+    for idx, raw in enumerate(items):
+        entry = _resolve_audio_item(raw, agentspace)
+        if isinstance(entry, str):
+            return tool_error(f"Item {idx + 1}: {entry}")
+        playlist.append(entry)
+
+    total_size = sum(t.get("size", 0) for t in playlist)
+    track_labels = ", ".join(t["title"] for t in playlist)
+    size_str = f" ({total_size / 1024:.1f} KB)" if total_size else ""
+    autoplay_str = " (autoplay)" if autoplay else ""
+
+    return tool_result(
+        playlist=playlist,
+        autoplay=autoplay,
+        current_index=0,
+        total_tracks=len(playlist),
+        total_size=total_size,
+        message=f"📻 Playlist: {track_labels}{size_str}{autoplay_str}",
+    )
+
+
 # ---------------------------------------------------------------------------
 # Registration
 # ---------------------------------------------------------------------------
@@ -393,4 +486,80 @@ registry.register(
     },
     handler=_handle_play_audio,
     emoji="🔊",
+)
+
+registry.register(
+    name="play_audio_list",
+    toolset="display",
+    schema={
+        "description": (
+            "Send a playlist of audio tracks to the frontend and play them sequentially.\n\n"
+            "Each track plays to completion, then the next track starts automatically.\n\n"
+            "Input: a list of items, each item is an object with:\n"
+            "  - path: ws: path to a local audio file (mutually exclusive with url)\n"
+            "  - url:  external audio URL (mutually exclusive with path)\n"
+            "  - title: optional track title\n\n"
+            "Supported audio formats (for ws: path): "
+            "mp3, wav, ogg, flac, aac, m4a\n\n"
+            "Returns:\n"
+            "  - playlist: list of resolved tracks with audio_url, mime, title, size\n"
+            "  - autoplay: whether playback starts immediately\n"
+            "  - current_index: starting track index (always 0)\n"
+            "  - total_tracks: number of tracks\n\n"
+            "Example:\n"
+            '  play_audio_list(items=[\n'
+            '    {"path": "ws:output/chapter1.mp3", "title": "Chapter 1"},\n'
+            '    {"path": "ws:output/chapter2.mp3", "title": "Chapter 2"},\n'
+            '    {"url": "https://example.com/outro.mp3", "title": "Outro"}\n'
+            '  ], autoplay=true)\n'
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "items": {
+                    "type": "array",
+                    "description": (
+                        "List of audio entries. Each entry is an object with "
+                        "'path' (ws: file) or 'url' (external), and optional 'title'."
+                    ),
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "path": {
+                                "type": "string",
+                                "description": (
+                                    "Path to an audio file under ws: prefix, "
+                                    "e.g. ws:output/speech.mp3. "
+                                    "Mutually exclusive with 'url'."
+                                ),
+                            },
+                            "url": {
+                                "type": "string",
+                                "description": (
+                                    "External URL of an audio file, "
+                                    "e.g. https://example.com/audio.mp3. "
+                                    "Mutually exclusive with 'path'."
+                                ),
+                            },
+                            "title": {
+                                "type": "string",
+                                "description": "Optional track title displayed in the playlist.",
+                            },
+                        },
+                    },
+                },
+                "autoplay": {
+                    "type": "boolean",
+                    "description": (
+                        "If true, the frontend starts playback immediately "
+                        "when the tool result arrives. Default: true."
+                    ),
+                    "default": True,
+                },
+            },
+            "required": ["items"],
+        },
+    },
+    handler=_handle_play_audio_list,
+    emoji="📻",
 )
