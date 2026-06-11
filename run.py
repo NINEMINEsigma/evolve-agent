@@ -112,6 +112,7 @@ if __name__ == "__main__":
                 "--gateway_port", quote(gateway_port), # WebSocket 监听端口
                 "--llm_base_url", quote(llm_base_url), # LLM API 地址
                 "--llm_model", quote(llm_model), # LLM 模型名
+                "--llm_api_key", quote(llm_api_key), # LLM API 密钥
                 "--llm_max_context_tokens", quote(llm_max_context_tokens), # LLM 最大上下文
                 "--llm_max_output_tokens", quote(llm_max_output_tokens), # LLM 最大输出
                 "--llm_temperature", quote(llm_temperature), # LLM 温度
@@ -167,6 +168,7 @@ if __name__ == "__main__":
                     "--fix", quote(logs_path/"fast_agent_runtime_error.log"), # 错误日志路径
                     "--llm_base_url", quote(llm_base_url), # LLM API 地址
                     "--llm_model", quote(llm_model), # LLM 模型名
+                    "--llm_api_key", quote(llm_api_key), # LLM API 密钥
                     "--llm_max_context_tokens", quote(llm_max_context_tokens), # LLM 最大上下文
                     "--llm_max_output_tokens", quote(llm_max_output_tokens), # LLM 最大输出
                     "--llm_temperature", quote(llm_temperature), # LLM 温度

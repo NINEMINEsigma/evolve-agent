@@ -200,6 +200,7 @@ interface ConfirmRequest {
   content: string;
   command?: string[];
   reason?: string;
+  tool?: string;
 }
 
 interface AskRequest {
@@ -614,6 +615,7 @@ export default function App() {
             content: msg.content ?? "运行命令?",
             command: (msg.args as Record<string, unknown>)?.command as string[] | undefined,
             reason: (msg.args as Record<string, unknown>)?.reason as string | undefined,
+            tool: msg.tool ?? undefined,
           });
         }
       }
@@ -1202,7 +1204,34 @@ export default function App() {
       {pendingConfirm && (
         <div className="confirm-overlay">
           <div className="confirm-dialog">
-            <div className="confirm-title">确认执行命令</div>
+            <div className="confirm-title">
+              {(() => {
+                const t = pendingConfirm.tool ?? "";
+                if (t.includes("command") || t.includes("shell")) return "确认执行命令";
+                if (t.includes("python")) return "确认运行 Python";
+                if (t.includes("file") || t.includes("edit") || t.includes("write")) return "确认文件操作";
+                if (t.includes("frontend")) return "确认前端操作";
+                if (t.includes("code")) return "确认代码操作";
+                if (t.includes("web_search")) return "确认网络搜索";
+                if (t.includes("web_fetch")) return "确认获取网页";
+                if (t.includes("browser")) return "确认浏览器操作";
+                if (t.includes("ssh")) return "确认 SSH 操作";
+                if (t.includes("pip") || t.includes("install")) return "确认安装依赖";
+                if (t.includes("cron")) return "确认定时任务";
+                if (t.includes("display")) return "确认展示内容";
+                if (t.includes("image")) return "确认读取图片";
+                if (t.includes("excel")) return "确认 Excel 操作";
+                if (t.includes("docx")) return "确认 Word 操作";
+                if (t.includes("pdf")) return "确认 PDF 操作";
+                if (t.includes("csv")) return "确认 CSV 操作";
+                if (t.includes("ffmpeg")) return "确认 FFmpeg 操作";
+                if (t.includes("diagram")) return "确认图表操作";
+                if (t.includes("mermaid")) return "确认 Mermaid 操作";
+                if (t.includes("gui")) return "确认 GUI 操作";
+                if (t) return `确认执行: ${t}`;
+                return "确认执行命令";
+              })()}
+            </div>
             <div className="confirm-body">
               <pre className="confirm-cmd">
                 {pendingConfirm.command?.join(" ") ?? pendingConfirm.content}

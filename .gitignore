@@ -189,7 +189,6 @@ test/*
 
 # workspace
 workspace/
-.shell_allowlist.json
 /skills/
 
 # custom
@@ -197,3 +196,4 @@ custom_models/*.gguf
 
 # temp
 temp/
+config.json

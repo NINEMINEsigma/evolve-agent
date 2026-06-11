@@ -107,19 +107,10 @@ def _build_context(cli: dict) -> RuntimeContext:
         fix_log_path=(
             Path(cli["fix"]).resolve() if "fix" in cli else None
         ),
-        # LLM 配置 — env var 覆盖 CLI 参数，CLI 参数覆盖默认值
-        llm_api_key=(
-            os.environ.get("OPENAI_API_KEY", "")
-            or str(cli.get("llm_api_key", ""))
-        ),
-        llm_base_url=(
-            os.environ.get("OPENAI_BASE_URL", "")
-            or str(cli.get("llm_base_url", ""))
-        ),
-        llm_model=(
-            os.environ.get("LLM_MODEL", "")
-            or str(cli.get("llm_model", ""))
-        ),
+        # LLM 配置 — 直接从 CLI 参数读取（config.py/run.py 已处理默认值）
+        llm_api_key             = str(cli.get("llm_api_key", "")),
+        llm_base_url            = str(cli.get("llm_base_url", "")),
+        llm_model               = str(cli.get("llm_model", "")),
         llm_max_context_tokens  = int(cli["llm_max_context_tokens"]),
         llm_max_output_tokens   = int(cli["llm_max_output_tokens"]),
         llm_reasoning_effort    = str(cli["llm_reasoning_effort"]),
