@@ -1054,7 +1054,8 @@ class AgentLoop:
         history: List[Dict[str, Any]] = self._get_history(session_id)
         entry: Dict[str, Any] = {
             "role": "assistant",
-            "content": resp.content or None,
+            # TODO:
+            "content": resp.content,
             "tool_calls": tool_calls_data,
         }
         if resp.reasoning_content:
