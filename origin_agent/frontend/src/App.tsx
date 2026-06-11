@@ -83,6 +83,192 @@ const markdownComponentsBase = {
   },
 };
 
+function formatTimeSec(sec: number): string {
+  if (!isFinite(sec) || sec < 0) return "0:00";
+  const m = Math.floor(sec / 60);
+  const s = Math.floor(sec % 60);
+  return `${m}:${s.toString().padStart(2, "0")}`;
+}
+
+function PlaylistPlayer({ playlist, autoplay }: { playlist: PlaylistEntry[]; autoplay: boolean }) {
+  const audioRef = useRef<HTMLAudioElement>(null);
+  const [currentIndex, setCurrentIndex] = useState(0);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [currentTime, setCurrentTime] = useState(0);
+  const [duration, setDuration] = useState(0);
+  const [expanded, setExpanded] = useState(true);
+
+  useEffect(() => {
+    setCurrentIndex(0);
+    setCurrentTime(0);
+    setDuration(0);
+    setIsPlaying(false);
+  }, [playlist]);
+
+  const playIndex = useCallback((idx: number) => {
+    if (idx < 0 || idx >= playlist.length) return;
+    setCurrentIndex(idx);
+    setCurrentTime(0);
+    setDuration(0);
+    // audio src change triggers loadedmetadata
+  }, [playlist.length]);
+
+  const handlePrev = useCallback(() => {
+    playIndex(currentIndex - 1);
+  }, [currentIndex, playIndex]);
+
+  const handleNext = useCallback(() => {
+    playIndex(currentIndex + 1);
+  }, [currentIndex, playIndex]);
+
+  const handleEnded = useCallback(() => {
+    if (currentIndex + 1 < playlist.length) {
+      playIndex(currentIndex + 1);
+    } else {
+      setIsPlaying(false);
+    }
+  }, [currentIndex, playlist.length, playIndex]);
+
+  const currentTrack = playlist[currentIndex];
+
+  useEffect(() => {
+    const audio = audioRef.current;
+    if (!audio || !currentTrack) return;
+    audio.src = currentTrack.audio_url;
+    audio.load();
+    if (autoplay || currentIndex > 0) {
+      const p = audio.play();
+      p?.catch(() => {});
+    }
+  }, [currentIndex, currentTrack, autoplay]);
+
+  useEffect(() => {
+    const audio = audioRef.current;
+    if (!audio) return;
+    const onTime = () => setCurrentTime(audio.currentTime);
+    const onDur = () => setDuration(audio.duration || 0);
+    const onPlay = () => setIsPlaying(true);
+    const onPause = () => setIsPlaying(false);
+    audio.addEventListener("timeupdate", onTime);
+    audio.addEventListener("loadedmetadata", onDur);
+    audio.addEventListener("play", onPlay);
+    audio.addEventListener("pause", onPause);
+    return () => {
+      audio.removeEventListener("timeupdate", onTime);
+      audio.removeEventListener("loadedmetadata", onDur);
+      audio.removeEventListener("play", onPlay);
+      audio.removeEventListener("pause", onPause);
+    };
+  }, []);
+
+  const togglePlay = () => {
+    const audio = audioRef.current;
+    if (!audio) return;
+    if (audio.paused) {
+      audio.play().catch(() => {});
+    } else {
+      audio.pause();
+    }
+  };
+
+  const progressPercent = duration > 0 ? (currentTime / duration) * 100 : 0;
+
+  return (
+    <div className="playlist-player">
+      <div className="playlist-header">
+        <span className="playlist-title">{currentTrack?.title || "Untitled"}</span>
+        <span className="playlist-counter">{currentIndex + 1} / {playlist.length}</span>
+      </div>
+
+      <div className="playlist-progress-bar" onClick={(e) => {
+        const rect = e.currentTarget.getBoundingClientRect();
+        const pct = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+        if (audioRef.current && duration > 0) {
+          audioRef.current.currentTime = pct * duration;
+        }
+      }}>
+        <div className="playlist-progress-fill" style={{ width: `${progressPercent}%` }} />
+      </div>
+
+      <div className="playlist-time">
+        <span>{formatTimeSec(currentTime)}</span>
+        <span>{formatTimeSec(duration)}</span>
+      </div>
+
+      <div className="playlist-controls">
+        <button
+          className="playlist-btn"
+          onClick={handlePrev}
+          disabled={currentIndex <= 0}
+          title="上一首"
+        >
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor">
+            <path d="M6 6h2v12H6zm3.5 6l8.5 6V6z" />
+          </svg>
+        </button>
+        <button className="playlist-btn playlist-play-btn" onClick={togglePlay} title={isPlaying ? "暂停" : "播放"}>
+          {isPlaying ? (
+            <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor">
+              <path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z" />
+            </svg>
+          ) : (
+            <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor">
+              <path d="M8 5v14l11-7z" />
+            </svg>
+          )}
+        </button>
+        <button
+          className="playlist-btn"
+          onClick={handleNext}
+          disabled={currentIndex >= playlist.length - 1}
+          title="下一首"
+        >
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor">
+            <path d="M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z" />
+          </svg>
+        </button>
+        <button
+          className="playlist-btn playlist-expand-btn"
+          onClick={() => setExpanded(v => !v)}
+          title={expanded ? "收起列表" : "展开列表"}
+        >
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor" style={{ transform: expanded ? "rotate(180deg)" : "none", transition: "transform 0.2s" }}>
+            <path d="M7 10l5 5 5-5z" />
+          </svg>
+        </button>
+      </div>
+
+      {expanded && (
+        <div className="playlist-tracks">
+          {playlist.map((track, idx) => (
+            <div
+              key={idx}
+              className={`playlist-track ${idx === currentIndex ? "active" : ""}`}
+              onClick={() => playIndex(idx)}
+            >
+              <span className="playlist-track-num">{idx + 1}</span>
+              <span className="playlist-track-title">{track.title || "Untitled"}</span>
+              {idx === currentIndex && isPlaying && (
+                <span className="playlist-track-playing">
+                  <span />
+                  <span />
+                  <span />
+                </span>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+
+      <audio
+        ref={audioRef}
+        onEnded={handleEnded}
+        style={{ display: "none" }}
+      />
+    </div>
+  );
+}
+
 const MessageItem = memo(function MessageItem({ message, onImageClick }: {
   message: ChatMessage;
   onImageClick: (src: string) => void;
@@ -130,6 +316,9 @@ const MessageItem = memo(function MessageItem({ message, onImageClick }: {
                     您的浏览器不支持音频播放
                   </audio>
                 </div>
+              )}
+              {m.playlist && m.playlist.length > 0 && (
+                <PlaylistPlayer playlist={m.playlist} autoplay={m.playlistAutoplay ?? true} />
               )}
               {m.downloadInfo && (
                 <div className="tool-download">
@@ -217,6 +406,15 @@ interface DownloadInfo {
   size?: number;
 }
 
+interface PlaylistEntry {
+  audio_url: string;
+  mime: string;
+  size: number;
+  title: string;
+  path?: string | null;
+  url?: string | null;
+}
+
 interface TaskProgress {
   task_id: string;
   label: string;
@@ -242,6 +440,8 @@ interface ChatMessage {
   downloadInfo?: DownloadInfo;
   audioUrl?: string;
   audioAutoplay?: boolean;
+  playlist?: PlaylistEntry[];
+  playlistAutoplay?: boolean;
   reasoningContent?: string;
 }
 
@@ -338,9 +538,9 @@ export default function App() {
       .catch(() => {});
   }, []);
 
-  const addMessage = useCallback((role: ChatMessage["role"], content: string, imageMarkdown?: string, downloadInfo?: DownloadInfo, audioUrl?: string, audioAutoplay?: boolean) => {
+  const addMessage = useCallback((role: ChatMessage["role"], content: string, imageMarkdown?: string, downloadInfo?: DownloadInfo, audioUrl?: string, audioAutoplay?: boolean, playlist?: PlaylistEntry[], playlistAutoplay?: boolean) => {
     const id = crypto.randomUUID();
-    setMessages((prev) => [...prev, { role, content, id, imageMarkdown, downloadInfo, audioUrl, audioAutoplay }]);
+    setMessages((prev) => [...prev, { role, content, id, imageMarkdown, downloadInfo, audioUrl, audioAutoplay, playlist, playlistAutoplay }]);
   }, []);
 
   // ── WebSocket with auto-reconnect ───────────────────────────────────
@@ -432,6 +632,10 @@ export default function App() {
                     entry.audioUrl = parsed.audio_url;
                     entry.audioAutoplay = parsed.autoplay === true;
                   }
+                  if (parsed.playlist) {
+                    entry.playlist = parsed.playlist;
+                    entry.playlistAutoplay = parsed.autoplay === true;
+                  }
                   // Use the readable message instead of raw JSON
                   if (parsed.message && typeof parsed.message === "string") {
                     entry.content = parsed.message;
@@ -514,6 +718,8 @@ export default function App() {
         let downloadInfo: DownloadInfo | undefined;
         let audioUrl: string | undefined;
         let audioAutoplay = false;
+        let playlist: PlaylistEntry[] | undefined;
+        let playlistAutoplay = false;
         try {
           const parsed = JSON.parse(raw);
           if (parsed.markdown) {
@@ -531,6 +737,10 @@ export default function App() {
             audioUrl = parsed.audio_url;
             audioAutoplay = parsed.autoplay === true;
             text += (parsed.message ?? "").slice(0, 200);
+          } else if (parsed.playlist) {
+            playlist = parsed.playlist;
+            playlistAutoplay = parsed.autoplay === true;
+            text += (parsed.message ?? "").slice(0, 200);
           } else if (parsed.message) {
             text += parsed.message.slice(0, 200);
           } else {
@@ -539,7 +749,7 @@ export default function App() {
         } catch {
           text += raw.slice(0, 2000);
         }
-        addMessage("tool", text, imageMarkdown, downloadInfo, audioUrl, audioAutoplay);
+        addMessage("tool", text, imageMarkdown, downloadInfo, audioUrl, audioAutoplay, playlist, playlistAutoplay);
       }
       else if (msg.type === "task_progress") {
         const raw = msg.result ?? "";

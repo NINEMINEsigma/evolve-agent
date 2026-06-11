@@ -5,7 +5,7 @@ from third.easysave import save, load
 from pydantic import BaseModel
 argparse_parser = argparse.ArgumentParser()
 
-argparse_parser.add_argument("--reload", action="store_true")
+argparse_parser.add_argument("--load", type=str, default="default")
 argparse_parser.add_argument("--console_log", type=bool, default=True)
 argparse_parser.add_argument("--fast_agent_space_path", type=str, default="fast_agent_space")
 argparse_parser.add_argument("--slow_agent_space_path", type=str, default="slow_agent_space")
@@ -59,35 +59,35 @@ argparse_parser.add_argument("--mcp_config_path_name", type=str, default="mcp_co
 args = argparse_parser.parse_args()
 
 class Config(BaseModel):
-    # 这个reload只是占位符
-    reload: bool = False
-    console_log: bool
-    fast_agent_space_path: str
-    slow_agent_space_path: str
-    fouce_init: bool
-    gateway_host: str
-    gateway_port: int
-    llm_base_url: str
-    llm_model: str
-    llm_api_key: str
-    llm_max_context_tokens: int
-    llm_max_output_tokens: int
-    llm_temperature: float
-    llm_reasoning_effort: str
-    merge_concat_threshold: int
-    approval_model_path: str
-    approval_model_n_ctx: int
-    approval_model_cuda: bool
-    approval_model_port: int
-    workspace_path: str
-    agentspace_path_name: str
-    logs_path_name: str
-    mcp_config_path_name: str
+    # 这个load只是占位符
+    load: str = "default"
+    console_log: bool = True
+    fast_agent_space_path: str = "fast_agent_space"
+    slow_agent_space_path: str = "slow_agent_space"
+    fouce_init: bool = False
+    gateway_host: str = "127.0.0.1"
+    gateway_port: int = 8765
+    llm_base_url: str = "https://api.deepseek.com"
+    llm_model: str = "deepseek-v4-flash"
+    llm_api_key: str = os.getenv("OPENAI_API_KEY") or ""
+    llm_max_context_tokens: int = 1000000
+    llm_max_output_tokens: int = 384000
+    llm_temperature: float = 0.95
+    llm_reasoning_effort: str = "medium"
+    merge_concat_threshold: int = 50000
+    approval_model_path: str = "Qwen3.5-0.8B-Q8_0.gguf"
+    approval_model_n_ctx: int = 65536
+    approval_model_cuda: bool = True
+    approval_model_port: int = 8081
+    workspace_path: str = "workspace"
+    agentspace_path_name: str = "agentspace"
+    logs_path_name: str = "logs"
+    mcp_config_path_name: str = "mcp_config.json"
 
 current_config: Config = Config.model_validate(vars(args))
 
-if args.reload:
-    current_config = load("config", "config.json")
+if args.load or not os.path.exists("config.json"):
+    current_config = load(args.load, "config.json")
 else:
     save("config", "config.json", current_config)
 

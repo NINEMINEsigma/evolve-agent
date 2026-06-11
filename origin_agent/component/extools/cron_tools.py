@@ -1,4 +1,4 @@
-"""Cron 定时任务工具 — 创建和管理周期性执行的后台任务。
+"""Cron 定时任务工具 — 创建和管理单次执行的后台任务。
 
 任务状态持久化到磁盘，后端重启后自动恢复并重新调度。
 会话断开不会终止定时任务，任务在后台继续运行直到完成或被显式取消。
@@ -9,11 +9,15 @@
 
 Weekday 遵循标准 cron 语义：0=Sunday, 1=Monday, ..., 6=Saturday。
 
-模块导入时通过 ``registry.register()`` 注册 4 个工具：
-  - ``schedule_cron``      — 创建定时任务
-  - ``list_cron_jobs``     — 列出当前会话的任务
-  - ``cancel_cron_job``    — 取消指定任务
-  - ``run_cron_job_now``   — 立即触发执行一次
+每个任务仅运行一次，执行后自动停止调度但保留记录。
+可通过 reschedule_cron_job 基于已有任务配置再次创建相同的新任务。
+
+模块导入时通过 ``registry.register()`` 注册 5 个工具：
+  - ``schedule_cron``       — 创建定时任务（仅执行一次）
+  - ``list_cron_jobs``      — 列出当前会话的任务
+  - ``cancel_cron_job``     — 取消指定任务
+  - ``run_cron_job_now``    — 立即触发执行一次
+  - ``reschedule_cron_job`` — 基于已有任务配置重新创建任务（参数不可修改）
 """
 
 from __future__ import annotations
@@ -147,7 +151,6 @@ class _CronTask:
     should_schedule: bool = True  # 控制任务是否继续被 Timer 调度；False 时停止后续执行
     next_run: float = 0.0
     run_count: int = 0
-    max_runs: int = 0  # 0 = unlimited
     last_run: float = 0.0
     log_path: str = ""
     skip_agent_notify: bool = False  # 用户显式取消时设为 True，抑制在途执行完成后的通知
@@ -208,9 +211,9 @@ def _task_to_dict(task: _CronTask) -> dict:
         "should_schedule": task.should_schedule,
         "next_run": task.next_run,
         "run_count": task.run_count,
-        "max_runs": task.max_runs,
         "last_run": task.last_run,
         "log_path": task.log_path,
+        "skip_agent_notify": task.skip_agent_notify,
     }
 
 
@@ -227,14 +230,14 @@ def _task_from_dict(data: dict) -> _CronTask:
         should_schedule=data.get("should_schedule", True),
         next_run=float(data.get("next_run", 0.0)),
         run_count=int(data.get("run_count", 0)),
-        max_runs=int(data.get("max_runs", 0)),
         last_run=float(data.get("last_run", 0.0)),
         log_path=data.get("log_path", ""),
+        skip_agent_notify=data.get("skip_agent_notify", False),
     )
 
 
 def _save_all_tasks() -> None:
-    """将所有任务状态持久化到磁盘。"""
+    """将所有任务状态持久化到磁盘（原子写入，避免半写损坏）。"""
     try:
         _CRON_STORE_DIR.mkdir(parents=True, exist_ok=True)
         with _cron_lock:
@@ -243,10 +246,13 @@ def _save_all_tasks() -> None:
                 payload[sid] = {}
                 for tid, task in tasks.items():
                     payload[sid][tid] = _task_to_dict(task)
-        _CRON_STORE_PATH.write_text(
+        # 原子写入：先写临时文件再重命名，防止进程崩溃时留下半写文件
+        tmp_path = _CRON_STORE_PATH.with_suffix(".tmp")
+        tmp_path.write_text(
             json.dumps(payload, ensure_ascii=False, indent=2),
             encoding="utf-8",
         )
+        tmp_path.replace(_CRON_STORE_PATH)
     except Exception as exc:
         logger.warning("Failed to save cron jobs: %s", exc)
 
@@ -266,15 +272,14 @@ def _load_all_tasks() -> None:
         for tid, data in tasks.items():
             try:
                 task = _task_from_dict(data)
-                if not task.should_schedule:
-                    continue
-                # 重新计算 next_run
-                _restore_and_schedule_task(task)
                 with _cron_lock:
                     if sid not in _cron_tasks:
                         _cron_tasks[sid] = {}
                     _cron_tasks[sid][tid] = task
-                restored += 1
+                if task.should_schedule:
+                    # 重新计算 next_run
+                    _restore_and_schedule_task(task)
+                    restored += 1
             except Exception as exc:
                 logger.warning("Failed to restore cron job %s: %s", tid, exc)
 
@@ -492,16 +497,9 @@ def _run_task(task: _CronTask) -> None:
         )
         stdout_text = f"[ERROR: {exc}]"
 
-    # 执行完成后递增计数
+    # 执行完成后递增计数并停止调度（每个任务仅运行一次）
     task.run_count += 1
-
-    # 达到最大执行次数限制时自动停止
-    if task.max_runs > 0 and task.run_count >= task.max_runs:
-        logger.info(
-            "Cron job reached max_runs | task=%s session=%s",
-            task.task_id, task.session_id,
-        )
-        task.should_schedule = False
+    task.should_schedule = False
 
     # 写日志
     if log_file:
@@ -542,7 +540,6 @@ async def _handle_schedule_cron(args: Dict[str, Any]) -> str:
     reason: str = str(args.get("reason", "")).strip()
     name: str = str(args.get("name", "")).strip()
     cwd: str = str(args.get("cwd", "ws:")).strip()
-    max_runs: int = int(args.get("max_runs", 0))
     session_id: str = str(args.get("_session_id", ""))
 
     # ── 参数校验 ──
@@ -628,7 +625,6 @@ async def _handle_schedule_cron(args: Dict[str, Any]) -> str:
         cwd=cwd,
         should_schedule=True,
         log_path=log_path,
-        max_runs=max_runs,
     )
 
     with _cron_lock:
@@ -692,7 +688,6 @@ async def _handle_list_cron_jobs(args: Dict[str, Any]) -> str:
                         else None
                     ),
                     "run_count": task.run_count,
-                    "max_runs": task.max_runs,
                     "last_run": (
                         datetime.datetime.fromtimestamp(
                             task.last_run, tz=datetime.timezone.utc,
@@ -782,6 +777,108 @@ async def _handle_run_cron_job_now(args: Dict[str, Any]) -> str:
     )
 
 
+async def _handle_reschedule_cron_job(args: Dict[str, Any]) -> str:
+    """基于已有任务配置重新创建并调度一个新任务（所有参数不可修改）。"""
+    task_id: str = str(args.get("task_id", "")).strip()
+    session_id: str = str(args.get("_session_id", ""))
+
+    if not task_id:
+        return tool_error("'task_id' is required")
+
+    with _cron_lock:
+        source_task = _cron_tasks.get(session_id, {}).get(task_id)
+
+    if not source_task:
+        return tool_error(f"Task not found: {task_id}")
+
+    # ── 任务数量限制 ──
+    with _cron_lock:
+        current_count = len(_cron_tasks.get(session_id, {}))
+    if current_count >= _MAX_JOBS_PER_SESSION:
+        return tool_error(
+            f"Maximum {_MAX_JOBS_PER_SESSION} cron jobs per session reached"
+        )
+
+    # ── 用户确认（若已由 _execute_tool 预审批则跳过）──
+    _pre_approved: bool = args.get("_pre_approved", False)
+    _approval_action: str = args.get("_approval_action", "allow_once")
+    if _pre_approved:
+        result = ApprovalResult(action=_approval_action)
+    elif session_id:
+        result: ApprovalResult = await request_user_confirm(
+            session_id,
+            "reschedule_cron_job",
+            {"task_id": task_id},
+            "",
+            f"Reschedule cron job based on {task_id}: `{source_task.schedule_value}` -> `{' '.join(source_task.command)}`",
+        )
+    else:
+        result = ApprovalResult(action="deny", deny_reason="missing session_id")
+
+    if result.action == "deny":
+        source_label = {
+            "model": "approval model",
+            "user": "user",
+            "system": "system",
+        }.get(result.denied_by, "system")
+        return tool_error(
+            f"[{source_label} denied] {result.deny_reason or 'unknown reason'}",
+            denied=True,
+        )
+
+    # ── 创建新任务，完全复制原配置（不可修改任何参数）──
+    new_task_id: str = uuid.uuid4().hex[:12]
+    log_path = f"ws:logs/cron/{session_id}/{new_task_id}.log"
+
+    new_task = _CronTask(
+        task_id=new_task_id,
+        session_id=session_id,
+        name=source_task.name,
+        schedule_type=source_task.schedule_type,
+        schedule_value=source_task.schedule_value,
+        command=list(source_task.command),  # 深拷贝命令列表
+        cwd=source_task.cwd,
+        should_schedule=True,
+        log_path=log_path,
+    )
+
+    with _cron_lock:
+        if session_id not in _cron_tasks:
+            _cron_tasks[session_id] = {}
+        _cron_tasks[session_id][new_task_id] = new_task
+
+    # 计算首次执行时间并启动调度
+    if new_task.schedule_type == "interval":
+        new_task.next_run = time.time() + float(new_task.schedule_value)
+    else:
+        next_dt = _next_cron_time(new_task.schedule_value)
+        new_task.next_run = next_dt.timestamp()
+
+    _schedule_next(new_task)
+    _save_all_tasks()
+
+    logger.info(
+        "Cron job rescheduled | old_task=%s new_task=%s session=%s schedule=%s",
+        task_id, new_task_id, session_id, new_task.schedule_value,
+    )
+
+    return tool_result(
+        success=True,
+        task_id=new_task_id,
+        name=new_task.name,
+        schedule_type=new_task.schedule_type,
+        schedule_value=new_task.schedule_value,
+        next_run=datetime.datetime.fromtimestamp(
+            new_task.next_run, tz=datetime.timezone.utc,
+        ).isoformat(),
+        log_path=log_path,
+        message=(
+            f"Rescheduled cron job (new task_id={new_task_id}, "
+            f"next_run={datetime.datetime.fromtimestamp(new_task.next_run, tz=datetime.timezone.utc).isoformat()})"
+        ),
+    )
+
+
 # ── 注册 ─────────────────────────────────────────────────────
 
 registry.register(
@@ -789,14 +886,16 @@ registry.register(
     toolset="cron",
     schema={
         "description": (
-            "Schedule a recurring background task that runs automatically at specified intervals.\n"
+            "Schedule a background task that runs exactly once at the specified time.\n"
             "Two schedule formats are supported:\n"
             "  1. Interval: a number in seconds (e.g. '300' for every 5 minutes, min 10s).\n"
             "  2. Cron expression: 5 fields 'minute hour day month weekday' "
             "(e.g. '0 9 * * 1' for 9:00 AM every Monday).\n"
             "     Weekday: 0=Sunday, 1=Monday, ..., 6=Saturday.\n\n"
-            "The task executes the given command in the background. stdout/stderr are written "
-            "to a log file. Tasks survive WebSocket disconnect and process restart.\n\n"
+            "The task executes the given command exactly once in the background. "
+            "After execution the task record is kept but will not run again automatically. "
+            "To run the same command again, use reschedule_cron_job. "
+            "stdout/stderr are written to a log file. Tasks survive WebSocket disconnect and process restart.\n\n"
             "Returns:\n"
             "  - success: whether the task was created\n"
             "  - task_id: unique identifier for managing the task\n"
@@ -832,11 +931,6 @@ registry.register(
                     "type": "string",
                     "description": "Working directory (ws: namespace, default 'ws:').",
                     "default": "ws:",
-                },
-                "max_runs": {
-                    "type": "integer",
-                    "description": "Maximum number of executions. 0 or omit for unlimited.",
-                    "default": 0,
                 },
             },
             "required": ["schedule", "command", "reason"],
@@ -889,7 +983,7 @@ registry.register(
     handler=_handle_cancel_cron_job,
     is_async=True,
     emoji="🗑",
-    danger_level="write",
+    danger_level="readonly",
 )
 
 registry.register(
@@ -916,6 +1010,34 @@ registry.register(
     handler=_handle_run_cron_job_now,
     is_async=True,
     emoji="▶",
+    danger_level="dangerous",
+)
+
+registry.register(
+    name="reschedule_cron_job",
+    toolset="cron",
+    schema={
+        "description": (
+            "Create a new cron job by copying an existing task's configuration.\n"
+            "All parameters (schedule, command, cwd) are taken from the source task "
+            "and cannot be modified. If you need different parameters, cancel the old "
+            "task and create a new one with schedule_cron.\n\n"
+            "The new task will run exactly once, just like a normally scheduled task."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "task_id": {
+                    "type": "string",
+                    "description": "task_id of the existing task to copy configuration from.",
+                },
+            },
+            "required": ["task_id"],
+        },
+    },
+    handler=_handle_reschedule_cron_job,
+    is_async=True,
+    emoji="🔁",
     danger_level="dangerous",
 )
 
