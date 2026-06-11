@@ -32,6 +32,9 @@ class RuntimeContext(BaseModel):
     fork_path: Path
     """进化代码写入的目录（slow 目录）。"""
 
+    skills_path: Path
+    """Skill 文件存储目录（项目根目录 / skills）。"""
+
     log_path: Path
     """编排器产生的日志文件路径。"""
 

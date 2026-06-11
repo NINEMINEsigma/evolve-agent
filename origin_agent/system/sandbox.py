@@ -12,10 +12,11 @@ LLM 可见的路径是**逻辑路径**（``ws:logs/error.log``），
     ``fork:``        ctx.fork_path        rw      读写进化代码
     ``ws:``          ctx.agentspace       rw      通用 agent I/O
     ``fix:``         ctx.fix_path         rw      修复目标（fallback）
+    ``skills:``      ctx.skills_path      rw      skill 文件读写
     ==============  ===================  ======  ==========================
 
-    在 **fast** 模式下 ``fork:`` 可读写。
-    在 **fallback** 模式下 ``fix:`` 可读写。
+    在 **fast** 模式下 ``fork:`` 和 ``skills:`` 可读写。
+    在 **fallback** 模式下 ``fix:`` 和 ``skills:`` 可读写。
 
 **没有** ``self:`` 命名空间 — agent 不能读取或修改自身的运行时副本。
 进化完全通过 fork:/fix: 实现。
@@ -51,18 +52,20 @@ class Access(str, Enum):
 
 
 # 映射：(mode, namespace) → 允许的访问类型
-# "fast" 模式：fork=rw, ws=rw
-# "fallback" 模式：fix=rw, ws=rw
+# "fast" 模式：fork=rw, ws=rw, skills=rw
+# "fallback" 模式：fix=rw, ws=rw, skills=rw
 # 不存在 self: 命名空间 — agent 不能查看或修改自身的运行时副本。
 # 进化完全通过 fork:/fix: 实现。
 _PERMISSIONS: Dict[str, Dict[str, List[Access]]] = {
     "fast": {
-        "fork":  [Access.READ, Access.WRITE],
-        "ws":    [Access.READ, Access.WRITE],
+        "fork":   [Access.READ, Access.WRITE],
+        "ws":     [Access.READ, Access.WRITE],
+        "skills": [Access.READ, Access.WRITE],
     },
     "fallback": {
-        "fix":   [Access.READ, Access.WRITE],
-        "ws":    [Access.READ, Access.WRITE],
+        "fix":    [Access.READ, Access.WRITE],
+        "ws":     [Access.READ, Access.WRITE],
+        "skills": [Access.READ, Access.WRITE],
     },
 }
 
@@ -147,7 +150,7 @@ class Sandbox:
         else:
             raise SandboxError(
                 f"Path must carry a namespace prefix "
-                f"(fork:, ws:, fix:). Got: {logical!r}"
+                f"(fork:, ws:, fix:, skills:). Got: {logical!r}"
             )
 
         ns = ns.strip()
@@ -167,9 +170,10 @@ class Sandbox:
 
         # ---- 解析到真实目录 ----
         ns_map: Dict[str, Path | None] = {
-            "fork": self._ctx.fork_path,
-            "ws":   self._ctx.agentspace,
-            "fix":  self._ctx.fix_path,
+            "fork":   self._ctx.fork_path,
+            "ws":     self._ctx.agentspace,
+            "fix":    self._ctx.fix_path,
+            "skills": self._ctx.skills_path,
         }
         base: Path | None = ns_map[ns]
         if base is None:
@@ -256,7 +260,7 @@ class Sandbox:
 
         # -- 验证任何看起来像逻辑路径的参数 --
         for arg in args:
-            if ":" in arg and any(arg.startswith(p) for p in ("ws:", "fork:", "fix:")):
+            if ":" in arg and any(arg.startswith(p) for p in ("ws:", "fork:", "fix:", "skills:")):
                 raise SandboxError(
                     f"Path arguments to subprocess commands must be resolved "
                     f"by the tool handler before calling sandbox.run(). "

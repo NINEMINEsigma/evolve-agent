@@ -5,11 +5,10 @@
 （由 ``main.py`` 在 agent 循环启动前通过 ``set_sandbox()`` 设置）。
 
 路径格式：``namespace:relative/path``
-  - ``fork:``  读写（进化代码目标）
-  - ``ws:``    读写（通用 agent 工作空间）
-  - ``fix:``   读写（修复目标，仅 fallback 模式）
-
-不存在 ``self:`` 命名空间 — agent 不能读取或修改自身的运行时副本。
+  - ``fork:``    读写（进化代码目标）
+  - ``ws:``      读写（通用 agent 工作空间）
+  - ``fix:``     读写（修复目标，仅 fallback 模式）
+  - ``skills:``  读写（skill 文件目录）
 """
 
 from __future__ import annotations
@@ -119,9 +118,9 @@ def _param(path_desc: str, required: bool = True) -> Dict[str, Any]:
         "properties": {
             "path": {
                 "type": "string",
-                # 逻辑路径（{path_desc}）。必须使用命名空间前缀：fork:、ws: 或 fix:。
+                # 逻辑路径（{path_desc}）。必须使用命名空间前缀：fork:、ws:、fix: 或 skills:。
                 "description": f"Logical path ({path_desc}). "
-                "Must use a namespace prefix: fork:, ws:, or fix:.",
+                "Must use a namespace prefix: fork:, ws:, fix:, or skills:.",
             },
         },
         "required": (["path"] if required else []),
@@ -142,8 +141,8 @@ registry.register(
         "description": (
             "Read file content. Path must use a namespace prefix: "
             "'ws:' for workspace data, 'fork:' for evolution code, "
-            "'fix:' for repair targets. "
-            "Example: 'ws:logs/error.log', 'fork:main.py'.\n\n"
+            "'fix:' for repair targets, 'skills:' for skill files. "
+            "Example: 'ws:logs/error.log', 'fork:main.py', 'skills:my_skill.md'.\n\n"
             "Supports line-based pagination via offset and limit. "
             "Default limit is 100 lines (hard cap); use offset to skip lines."
         ),
@@ -154,7 +153,7 @@ registry.register(
                     "type": "string",
                     # 文件逻辑路径。必须使用命名空间前缀：fork:、ws: 或 fix:。
                     "description": "File logical path. "
-                    "Must use a namespace prefix: fork:, ws:, or fix:.",
+                    "Must use a namespace prefix: fork:, ws:, fix:, or skills:.",
                 },
                 "offset": {
                     "type": "integer",
@@ -190,7 +189,8 @@ registry.register(
         # 目录会自动创建。
         "description": (
             "Write content to a file. Path must use a namespace prefix. "
-            "Use 'ws:' for workspace data, 'fork:' for evolution code. "
+            "Use 'ws:' for workspace data, 'fork:' for evolution code, "
+            "'skills:' for skill files. "
             "Directories are created automatically. "
             "Max 1000 characters per call. "
             "If rejected for exceeding the limit, do NOT use run_python to write files; "
@@ -201,8 +201,8 @@ registry.register(
             "properties": {
                 "path": {
                     "type": "string",
-                    # 逻辑路径。必须使用 ws: 或 fork: 前缀。
-                    "description": "Logical path. Must use ws: or fork: prefix.",
+                    # 逻辑路径。必须使用 ws:、fork: 或 skills: 前缀。
+                    "description": "Logical path. Must use ws:, fork:, or skills: prefix.",
                 },
                 "content": {
                     "type": "string",
@@ -242,10 +242,10 @@ registry.register(
     name="delete_file",
     toolset="filesystem",
     schema={
-        # 删除文件或空目录。仅允许可写命名空间（ws:、fork:、fix:）。
+        # 删除文件或空目录。仅允许可写命名空间（ws:、fork:、fix:、skills:）。
         "description": (
             "Delete a file or empty directory. "
-            "Only writable namespaces are allowed (ws:, fork:, fix:)."
+            "Only writable namespaces are allowed (ws:, fork:, fix:, skills:)."
         ),
         # 要删除的文件或目录
         "parameters": _param("file or directory to delete"),
@@ -312,8 +312,8 @@ registry.register(
             "properties": {
                 "path": {
                     "type": "string",
-                    # 逻辑路径（ws:/fork:/fix: 前缀）。
-                    "description": "Logical path (ws:/fork:/fix: prefix).",
+                    # 逻辑路径（ws:/fork:/fix:/skills: 前缀）。
+                    "description": "Logical path (ws:/fork:/fix:/skills: prefix).",
                 },
                 "old_string": {
                     "type": "string",
@@ -370,10 +370,10 @@ registry.register(
     toolset="filesystem",
     schema={
         # 复制文件。源路径和目标路径均需使用命名空间前缀
-        #（ws:、fork:、fix:）。支持跨命名空间复制。
+        #（ws:、fork:、fix:、skills:）。支持跨命名空间复制。
         "description": (
             "Copy a file. Both source and destination must use "
-            "a namespace prefix (ws:, fork:, fix:). "
+            "a namespace prefix (ws:, fork:, fix:, skills:). "
             "Supports cross-namespace copying."
         ),
         "parameters": {
@@ -419,11 +419,11 @@ registry.register(
     toolset="filesystem",
     schema={
         # 移动文件或目录。目标路径可以包含新名称，从而实现重命名。
-        # 源和目标路径均需使用命名空间前缀（ws:、fork:、fix:）。支持跨命名空间移动。
+        # 源和目标路径均需使用命名空间前缀（ws:、fork:、fix:、skills:）。支持跨命名空间移动。
         "description": (
             "Move a file or directory. The destination can include a new name, "
             "effectively renaming. Both source and destination must use "
-            "a namespace prefix (ws:, fork:, fix:). "
+            "a namespace prefix (ws:, fork:, fix:, skills:). "
             "Supports cross-namespace moving."
         ),
         "parameters": {

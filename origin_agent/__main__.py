@@ -13,7 +13,7 @@ import os
 import subprocess
 import sys
 from pathlib import Path
-from system.pathutils import get_agent_dir
+from system.pathutils import get_agent_dir, find_repo_root
 
 # 确保 agent 自身目录在 sys.path 最前面，使
 # ``from main import App`` 和 ``from system.context import RuntimeContext``
@@ -95,6 +95,7 @@ def _build_context(cli: dict) -> RuntimeContext:
         workspace       = Path(cli["workspace"]).resolve(),
         agentspace      = Path(cli["agentspace"]).resolve(),
         fork_path       = Path(cli["evolve"]).resolve(),
+        skills_path     = (find_repo_root() / "skills").resolve(),
         log_path        = Path(cli["log"]).resolve(),
         mode            = str(cli["mode"]),
         console_log     = as_bool(cli["console_log"]),
