@@ -29,7 +29,7 @@ logger = logging.getLogger(__name__)
 from component.approval import ApprovalResult, request_user_confirm
 
 # ── 后台任务注册表 ───────────────────────────────────────────
-# task_id -> {proc, log_path, command, start_time, pid}
+# task_id -> {proc, log_path, command, start_time, pid, session_id}
 
 _background_tasks: Dict[str, Dict[str, Any]] = {}
 
@@ -153,6 +153,7 @@ async def _handle_start_background_service(args: Dict[str, Any]) -> str:
             "log_file_real": log_file_real,
             "command": cmd_parts,
             "start_time": time.time(),
+            "session_id": session_id,
         }
 
         logger.info(
@@ -268,6 +269,55 @@ def cleanup_background_services() -> int:
                 task_id, pid, exc,
             )
     return count
+
+
+# ── 公开 API（供 gateway/server.py 调用）────────────────────
+
+def list_background_tasks(session_id: str) -> List[Dict[str, Any]]:
+    """返回指定会话关联的所有后台任务。"""
+    result: List[Dict[str, Any]] = []
+    for task_id, task in _background_tasks.items():
+        if task.get("session_id") == session_id:
+            proc: subprocess.Popen = task["proc"]
+            status = "running" if proc.poll() is None else "stopped"
+            result.append({
+                "task_id": task_id,
+                "pid": task["pid"],
+                "command": task["command"],
+                "start_time": task["start_time"],
+                "log_path": task["log_path"],
+                "status": status,
+            })
+    return result
+
+
+def stop_background_task(task_id: str) -> Dict[str, Any]:
+    """通过 task_id 停止后台任务，返回操作结果。"""
+    task: Dict[str, Any] | None = _background_tasks.pop(task_id, None)
+
+    if task is None and task_id.isdigit():
+        pid = int(task_id)
+        try:
+            _kill_proc_tree(pid)
+        except Exception:
+            pass
+        return {"stopped": True, "task_id": task_id, "pid": pid, "message": f"已发送终止信号 (PID={pid})"}
+
+    if task is None:
+        return {"stopped": False, "task_id": task_id, "message": f"未找到 task_id={task_id} 对应的后台任务"}
+
+    pid: int = task["pid"]
+    try:
+        _kill_proc_tree(pid)
+        proc = task["proc"]
+        try:
+            proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            logger.warning("Process %d did not exit within 5s after kill", pid)
+        return {"stopped": True, "task_id": task_id, "pid": pid, "message": f"已停止 (task_id={task_id}, pid={pid})"}
+    except Exception as exc:
+        logger.exception("Failed to stop background service %s: %s", task_id, exc)
+        return {"stopped": False, "task_id": task_id, "message": str(exc)}
 
 
 # ── 注册 ─────────────────────────────────────────────────────

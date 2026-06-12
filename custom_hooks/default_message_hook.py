@@ -27,17 +27,19 @@ def hook_message(session_id: str = "", workspace: str = "") -> str:
     cache_path = Path(workspace) / "session_cache" / session_id / "session_cache.json"
     now = datetime.now()
 
+    result: dict[str, str] = {
+        "current_time": now.strftime("%Y-%m-%d %H:%M:%S"),
+        "current_platform": sys.platform,
+        "current_python": sys.executable,
+        "session_id": session_id,
+        "workspace": str(workspace),
+    }
+
     if not cache_path.exists():
         cache_path.parent.mkdir(parents=True, exist_ok=True)
         cache_data = {"last_hook_time": now.isoformat()}
         cache_path.write_text(json.dumps(cache_data), encoding="utf-8")
-        return json.dumps({
-            "current_time": now.strftime("%Y-%m-%d %H:%M:%S"),
-            "current_platform": sys.platform,
-            "current_python": sys.executable,
-            "session_id": session_id,
-            "workspace": str(workspace),
-        })
+        return json.dumps(result)
 
     else:
         cache_data = json.loads(cache_path.read_text(encoding="utf-8"))
@@ -47,22 +49,11 @@ def hook_message(session_id: str = "", workspace: str = "") -> str:
         cache_data["last_hook_time"] = now.isoformat()
         cache_path.write_text(json.dumps(cache_data), encoding="utf-8")
 
-        result = {
-            "current_time": now.strftime("%Y-%m-%d %H:%M:%S"),
-            "current_platform": sys.platform,
-            "current_python": sys.executable,
-            "session_id": session_id,
-            "workspace": str(workspace),
-            "last_conversation_interval_seconds": interval_seconds,
-        }
-
+        result["last_conversation_interval_seconds"] = str(interval_seconds)
         if interval_seconds > 3600:
             hours = interval_seconds // 3600
-            minutes = interval_seconds % 3600 // 60
-            result["long_interval_reminder"] = (
-                f"This conversation is {hours}h {minutes}m after the last one. "
-                f"Reminder: review previous context for continuity."
-            )
+            minutes = (interval_seconds % 3600) // 60
+            result["long_interval_reminder"] = f"This conversation is {hours}h {minutes}m after the last one. Reminder: review previous context for continuity."
 
         return json.dumps(result)
     

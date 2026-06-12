@@ -501,6 +501,16 @@ export default function App() {
   const [mergeMode, setMergeMode] = useState(false);
   const [selectedForMerge, setSelectedForMerge] = useState<Set<string>>(new Set());
 
+  // ── drawer & collapsible panels ──
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const [resourcesExpanded, setResourcesExpanded] = useState(true);
+  const [backgroundExpanded, setBackgroundExpanded] = useState(true);
+  const [cronExpanded, setCronExpanded] = useState(true);
+  const [taskProgressCollapsed, setTaskProgressCollapsed] = useState(false);
+  const [clipboardCollapsed, setClipboardCollapsed] = useState(false);
+  const [bgTasks, setBgTasks] = useState<Array<{ task_id: string; pid: number; command: string[]; start_time: number; log_path: string; status: string }>>([]);
+  const [cronTasks, setCronTasks] = useState<Array<{ task_id: string; name: string; schedule_type: string; schedule_value: string; next_run: string | null; run_count: number; max_runs: number; should_schedule: boolean; log_path: string }>>([]);
+
   const messageList = useMemo(() =>
     messages.map((m) => (
       <MessageItem key={m.id} message={m} onImageClick={setLightboxSrc} />
@@ -522,6 +532,57 @@ export default function App() {
       return (b.last_activity_at || b.created_at) - (a.last_activity_at || a.created_at);
     });
   }, [sessions, searchQuery, sessionId]);
+
+  // ── 从消息中提取资源 ──
+  const sessionResources = useMemo(() => {
+    const images: Array<{ id: string; src: string; alt: string }> = [];
+    const audios: Array<{ id: string; url: string; autoplay?: boolean }> = [];
+    const downloads: Array<{ id: string; url: string; filename: string; size?: number }> = [];
+    const seen = new Set<string>();
+    messages.forEach((m) => {
+      if (m.imageMarkdown) {
+        const match = m.imageMarkdown.match(/!\[(.*?)\]\(([^)]+)\)/);
+        if (match) {
+          const src = match[2];
+          if (!seen.has(src)) {
+            seen.add(src);
+            images.push({ id: m.id + "-img", src, alt: match[1] || "" });
+          }
+        }
+      }
+      if (m.audioUrl && !seen.has(m.audioUrl)) {
+        seen.add(m.audioUrl);
+        audios.push({ id: m.id + "-audio", url: m.audioUrl, autoplay: m.audioAutoplay });
+      }
+      if (m.downloadInfo && !seen.has(m.downloadInfo.url)) {
+        seen.add(m.downloadInfo.url);
+        downloads.push({ id: m.id + "-dl", url: m.downloadInfo.url, filename: m.downloadInfo.filename, size: m.downloadInfo.size });
+      }
+      if (m.role === "agent") {
+        const imgMatches = m.content.matchAll(/!\[(.*?)\]\(([^)]+)\)/g);
+        for (const match of imgMatches) {
+          const src = match[2];
+          if (!seen.has(src)) {
+            seen.add(src);
+            images.push({ id: m.id + "-mdimg-" + src.slice(-8), src, alt: match[1] || "" });
+          }
+        }
+      }
+    });
+    return { images, audios, downloads };
+  }, [messages]);
+
+  // ── drawer 轮询 ──
+  useEffect(() => {
+    if (!drawerOpen || !sessionId) return;
+    const fetchTasks = () => {
+      fetch(`/api/sessions/${sessionId}/background-tasks`).then(r => r.json()).then(d => setBgTasks(d.tasks || [])).catch(() => {});
+      fetch(`/api/sessions/${sessionId}/cron-tasks`).then(r => r.json()).then(d => setCronTasks(d.tasks || [])).catch(() => {});
+    };
+    fetchTasks();
+    const iv = setInterval(fetchTasks, 3000);
+    return () => clearInterval(iv);
+  }, [drawerOpen, sessionId]);
 
   // ── lightbox: Escape 关闭 ──
   useEffect(() => {
@@ -1327,27 +1388,20 @@ export default function App() {
             <span className="token-badge" title={`累计消耗: ${tokenUsage.toLocaleString()}  |  已用上下文: ${contextTokens.toLocaleString()}  |  最大上下文: ${llmMaxContextTokens > 0 ? llmMaxContextTokens.toLocaleString() : "?"}`}>
               累计 {tokenUsage.toLocaleString()} / 上下文 {contextTokens.toLocaleString()} / 上限 {llmMaxContextTokens > 0 ? llmMaxContextTokens.toLocaleString() : "?"}
             </span>
-            {(() => {
-              const isArchived = sessions.find((s) => s.id === sessionId)?.status === "archived";
-              return (
-                <>
-                  <button className="header-action-btn" onClick={() => archiveSession(sessionId)} title="归档当前会话" disabled={isArchived}>
-                    归档
-                  </button>
-                  <button className="header-action-btn" onClick={() => compressSession(sessionId)} title="压缩记忆并归档" disabled={isArchived}>
-                    压缩
-                  </button>
-                </>
-              );
-            })()}
           </div>
         )}
       </header>
 
       {/* ── 任务进度条面板（固定在 header 下方，不随消息滚动）── */}
       {Object.keys(taskProgress).length > 0 && (
-        <div className="task-progress-panel">
-          {Object.values(taskProgress).map((tp) => (
+        <div className={`task-progress-panel ${taskProgressCollapsed ? "collapsed" : ""}`}>
+          <div className="panel-header" onClick={() => setTaskProgressCollapsed((v) => !v)}>
+            <span className="panel-header-title">任务进度 ({Object.keys(taskProgress).length})</span>
+            <button className="panel-header-toggle">
+              {taskProgressCollapsed ? "▼" : "▲"}
+            </button>
+          </div>
+          {!taskProgressCollapsed && Object.values(taskProgress).map((tp) => (
             <div key={tp.task_id} className="task-progress-item">
               <div className="task-progress-header">
                 <span className="task-progress-label">{tp.label}</span>
@@ -1370,8 +1424,14 @@ export default function App() {
 
       {/* ── 剪贴板展示面板（固定在 header 下方，不随消息滚动）── */}
       {Object.keys(clipboardDisplays).length > 0 && (
-        <div className="clipboard-display-panel">
-          {Object.values(clipboardDisplays).map((cd) => (
+        <div className={`clipboard-display-panel ${clipboardCollapsed ? "collapsed" : ""}`}>
+          <div className="panel-header" onClick={() => setClipboardCollapsed((v) => !v)}>
+            <span className="panel-header-title">剪切板 ({Object.keys(clipboardDisplays).length})</span>
+            <button className="panel-header-toggle">
+              {clipboardCollapsed ? "▼" : "▲"}
+            </button>
+          </div>
+          {!clipboardCollapsed && Object.values(clipboardDisplays).map((cd) => (
             <div key={cd.display_id} className="clipboard-display-item">
               <div className="clipboard-display-header">
                 <span className="clipboard-display-label">{cd.label}</span>
@@ -1603,6 +1663,136 @@ export default function App() {
         );
       })()}
       </div>
+
+      {/* ── 右侧抽屉触发条 ── */}
+      {!drawerOpen && (
+        <div className="drawer-trigger-bar" onClick={() => setDrawerOpen(true)} title="打开资源/任务抽屉">
+          <span className="drawer-trigger-icon">◀</span>
+        </div>
+      )}
+
+      {/* ── Session Drawer ── */}
+      {drawerOpen && (
+        <div className="drawer-overlay" onClick={() => setDrawerOpen(false)}>
+          <div className="drawer-panel" onClick={(e) => e.stopPropagation()}>
+            <div className="drawer-header">
+              <span className="drawer-title">会话资源 / 任务</span>
+              <button className="drawer-close" onClick={() => setDrawerOpen(false)}>✕</button>
+            </div>
+            <div className="drawer-body">
+              {/* 资源区块 */}
+              <div className="drawer-section">
+                <div className="drawer-section-header" onClick={() => setResourcesExpanded((v) => !v)}>
+                  <span className={`drawer-arrow ${resourcesExpanded ? "expanded" : ""}`}>▶</span>
+                  <span className="drawer-section-title">资源 ({sessionResources.images.length + sessionResources.audios.length + sessionResources.downloads.length})</span>
+                </div>
+                {resourcesExpanded && (
+                  <div className="drawer-section-body">
+                    {sessionResources.images.length === 0 && sessionResources.audios.length === 0 && sessionResources.downloads.length === 0 && (
+                      <div className="drawer-empty">暂无资源</div>
+                    )}
+                    {sessionResources.images.length > 0 && (
+                      <div className="resource-group">
+                        <div className="resource-group-title">图片 ({sessionResources.images.length})</div>
+                        <div className="resource-grid">
+                          {sessionResources.images.map((img) => (
+                            <div key={img.id} className="resource-img-card">
+                              <img src={img.src} alt={img.alt} className="resource-img-thumb" onClick={() => setLightboxSrc(img.src)} />
+                              <a href={img.src} download className="resource-download-link">下载</a>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                    {sessionResources.audios.length > 0 && (
+                      <div className="resource-group">
+                        <div className="resource-group-title">音频 ({sessionResources.audios.length})</div>
+                        {sessionResources.audios.map((a) => (
+                          <div key={a.id} className="resource-audio-card">
+                            <audio controls src={a.url} className="resource-audio-player" />
+                            <a href={a.url} download className="resource-download-link">下载</a>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                    {sessionResources.downloads.length > 0 && (
+                      <div className="resource-group">
+                        <div className="resource-group-title">文件 ({sessionResources.downloads.length})</div>
+                        {sessionResources.downloads.map((d) => (
+                          <div key={d.id} className="resource-download-card">
+                            <span className="resource-filename">{d.filename}</span>
+                            {d.size != null && <span className="resource-filesize">（{(d.size / 1024).toFixed(1)} KB）</span>}
+                            <a href={d.url} download={d.filename} className="resource-download-link">下载</a>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              {/* 后台任务区块 */}
+              <div className="drawer-section">
+                <div className="drawer-section-header" onClick={() => setBackgroundExpanded((v) => !v)}>
+                  <span className={`drawer-arrow ${backgroundExpanded ? "expanded" : ""}`}>▶</span>
+                  <span className="drawer-section-title">后台任务 ({bgTasks.length})</span>
+                </div>
+                {backgroundExpanded && (
+                  <div className="drawer-section-body">
+                    {bgTasks.length === 0 ? (
+                      <div className="drawer-empty">暂无后台任务</div>
+                    ) : (
+                      bgTasks.map((t) => (
+                        <div key={t.task_id} className={`task-list-item ${t.status === "running" ? "running" : "stopped"}`}>
+                          <div className="task-list-header">
+                            <span className="task-list-name">{t.command.join(" ")}</span>
+                            <span className={`task-list-status status-${t.status}`}>{t.status}</span>
+                          </div>
+                          <div className="task-list-meta">PID: {t.pid} | 启动: {new Date(t.start_time * 1000).toLocaleString()}</div>
+                          <div className="task-list-actions">
+                            <button className="task-list-action stop" onClick={() => fetch(`/api/sessions/${sessionId}/background-tasks/${t.task_id}/stop`, { method: "POST" }).then(() => setBgTasks((prev) => prev.map((x) => x.task_id === t.task_id ? { ...x, status: "stopping" } : x)))}>停止</button>
+                          </div>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                )}
+              </div>
+
+              {/* 定时任务区块 */}
+              <div className="drawer-section">
+                <div className="drawer-section-header" onClick={() => setCronExpanded((v) => !v)}>
+                  <span className={`drawer-arrow ${cronExpanded ? "expanded" : ""}`}>▶</span>
+                  <span className="drawer-section-title">定时任务 ({cronTasks.length})</span>
+                </div>
+                {cronExpanded && (
+                  <div className="drawer-section-body">
+                    {cronTasks.length === 0 ? (
+                      <div className="drawer-empty">暂无定时任务</div>
+                    ) : (
+                      cronTasks.map((t) => (
+                        <div key={t.task_id} className={`cron-list-item ${t.should_schedule ? "active" : "inactive"}`}>
+                          <div className="cron-list-header">
+                            <span className="cron-list-name">{t.name}</span>
+                            <span className={`cron-list-status ${t.should_schedule ? "active" : "inactive"}`}>{t.should_schedule ? "运行中" : "已停止"}</span>
+                          </div>
+                          <div className="cron-list-schedule">{t.schedule_type === "interval" ? `每 ${t.schedule_value} 秒` : t.schedule_value}</div>
+                          <div className="cron-list-meta">下次执行: {t.next_run ? new Date(t.next_run).toLocaleString() : "-"} | 已执行: {t.run_count} 次</div>
+                          <div className="cron-list-actions">
+                            <button className="cron-list-action trigger" onClick={() => fetch(`/api/sessions/${sessionId}/cron-tasks/${t.task_id}/trigger`, { method: "POST" }).then(() => setCronTasks((prev) => prev.map((x) => x.task_id === t.task_id ? { ...x, run_count: x.run_count + 1 } : x)))}>立即触发</button>
+                            <button className="cron-list-action cancel" onClick={() => fetch(`/api/sessions/${sessionId}/cron-tasks/${t.task_id}/cancel`, { method: "POST" }).then(() => setCronTasks((prev) => prev.filter((x) => x.task_id !== t.task_id)))}>取消</button>
+                          </div>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* ── lightbox 遮罩 ── */}
       {lightboxSrc && (
         <div className="lightbox-backdrop" onClick={() => setLightboxSrc(null)}>

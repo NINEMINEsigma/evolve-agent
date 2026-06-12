@@ -879,6 +879,75 @@ async def _handle_reschedule_cron_job(args: Dict[str, Any]) -> str:
     )
 
 
+# ── 公开 API（供 gateway/server.py 调用）────────────────────
+
+def list_cron_tasks_for_session(session_id: str) -> List[Dict[str, Any]]:
+    """返回指定会话的所有定时任务。"""
+    with _cron_lock:
+        session_tasks = _cron_tasks.get(session_id, {})
+        tasks: List[Dict[str, Any]] = []
+        for task in session_tasks.values():
+            tasks.append(
+                {
+                    "task_id": task.task_id,
+                    "name": task.name,
+                    "schedule_type": task.schedule_type,
+                    "schedule_value": task.schedule_value,
+                    "command": task.command,
+                    "should_schedule": task.should_schedule,
+                    "next_run": (
+                        datetime.datetime.fromtimestamp(
+                            task.next_run, tz=datetime.timezone.utc,
+                        ).isoformat()
+                        if task.next_run
+                        else None
+                    ),
+                    "run_count": task.run_count,
+                    "last_run": (
+                        datetime.datetime.fromtimestamp(
+                            task.last_run, tz=datetime.timezone.utc,
+                        ).isoformat()
+                        if task.last_run
+                        else None
+                    ),
+                    "log_path": task.log_path,
+                }
+            )
+    return tasks
+
+
+def trigger_cron_task(session_id: str, task_id: str) -> Dict[str, Any]:
+    """立即触发指定定时任务执行一次。"""
+    with _cron_lock:
+        task = _cron_tasks.get(session_id, {}).get(task_id)
+    if not task:
+        return {"success": False, "message": f"Task not found: {task_id}"}
+    if task._timer:
+        task._timer.cancel()
+        task._timer = None
+    t = threading.Thread(target=_run_task, args=[task], daemon=True)
+    t.start()
+    logger.info("Cron job triggered manually via API | task=%s session=%s", task_id, session_id)
+    return {"success": True, "task_id": task_id, "name": task.name, "message": f"Triggered: {task.name or task_id}"}
+
+
+def cancel_cron_task(session_id: str, task_id: str) -> Dict[str, Any]:
+    """取消指定定时任务。"""
+    with _cron_lock:
+        session_tasks = _cron_tasks.get(session_id, {})
+        task = session_tasks.pop(task_id, None)
+    if not task:
+        return {"success": False, "message": f"Task not found: {task_id}"}
+    task.should_schedule = False
+    task.skip_agent_notify = True
+    if task._timer:
+        task._timer.cancel()
+        task._timer = None
+    _save_all_tasks()
+    logger.info("Cron job cancelled via API | task=%s session=%s", task_id, session_id)
+    return {"success": True, "task_id": task_id, "name": task.name, "message": f"Cancelled: {task.name or task_id}"}
+
+
 # ── 注册 ─────────────────────────────────────────────────────
 
 registry.register(

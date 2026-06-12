@@ -455,6 +455,46 @@ async def branch_session_endpoint(session_id: str):
     return {"error": "agent loop not ready", "session_id": session_id}
 
 
+@app.get("/api/sessions/{session_id}/background-tasks")
+async def list_background_tasks_endpoint(session_id: str):
+    """列出指定会话的所有后台任务。"""
+    from component.extools.background_service import list_background_tasks
+    tasks = list_background_tasks(session_id)
+    return {"tasks": tasks}
+
+
+@app.post("/api/sessions/{session_id}/background-tasks/{task_id}/stop")
+async def stop_background_task_endpoint(session_id: str, task_id: str):
+    """停止指定的后台任务。"""
+    from component.extools.background_service import stop_background_task
+    result = stop_background_task(task_id)
+    return result
+
+
+@app.get("/api/sessions/{session_id}/cron-tasks")
+async def list_cron_tasks_endpoint(session_id: str):
+    """列出指定会话的所有定时任务。"""
+    from component.extools.cron_tools import list_cron_tasks_for_session
+    tasks = list_cron_tasks_for_session(session_id)
+    return {"tasks": tasks}
+
+
+@app.post("/api/sessions/{session_id}/cron-tasks/{task_id}/trigger")
+async def trigger_cron_task_endpoint(session_id: str, task_id: str):
+    """立即触发指定的定时任务执行一次。"""
+    from component.extools.cron_tools import trigger_cron_task
+    result = trigger_cron_task(session_id, task_id)
+    return result
+
+
+@app.post("/api/sessions/{session_id}/cron-tasks/{task_id}/cancel")
+async def cancel_cron_task_endpoint(session_id: str, task_id: str):
+    """取消指定的定时任务。"""
+    from component.extools.cron_tools import cancel_cron_task
+    result = cancel_cron_task(session_id, task_id)
+    return result
+
+
 @app.post("/api/file-picker")
 async def file_picker():
     """打开原生 Windows 文件选择对话框（仅本地 localhost 有效），
