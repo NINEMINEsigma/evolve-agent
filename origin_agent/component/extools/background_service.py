@@ -178,7 +178,7 @@ async def _handle_start_background_service(args: Dict[str, Any]) -> dict:
 # ── 停止工具 handler ─────────────────────────────────────────
 
 
-async def _handle_stop_background_service(args: Dict[str, Any] -> dict:
+async def _handle_stop_background_service(args: Dict[str, Any]) -> dict:
     """通过 task_id 停止后台服务进程。"""
     task_id: str = str(args.get("task_id", "")).strip()
 

@@ -147,8 +147,19 @@ def _build_frontend() -> bool:
     logger: logging.Logger = logging.getLogger("agent.frontend")
     logger.info("Building frontend in %s ...", frontend_dir)
 
+    def _log_output(proc: subprocess.CompletedProcess, label: str) -> None:
+        """将子进程 stdout/stderr 写入 debug 日志流，确保落盘。"""
+        for stream_name, stream in (("stdout", proc.stdout), ("stderr", proc.stderr)):
+            if not stream:
+                continue
+            for line in stream.splitlines():
+                if line.strip():
+                    logger.debug("[%s] %s: %s", label, stream_name, line)
+
     try:
         pnpm: str = "pnpm.cmd" if sys.platform == "win32" else "pnpm"
+        # 强制非交互模式：避免 pnpm 在子进程中弹出 ConfirmPrompt 导致 readline 崩溃
+        env: dict[str, str] = {**os.environ, "CI": "true"}
         # pnpm install
         install_proc = subprocess.run(
             [pnpm, "install"],
@@ -156,7 +167,10 @@ def _build_frontend() -> bool:
             capture_output=True,
             text=True,
             encoding="utf-8",
+            errors="replace",
+            env=env,
         )
+        _log_output(install_proc, "install")
         install_proc.check_returncode()
         # pnpm run build
         build_proc = subprocess.run(
@@ -165,15 +179,22 @@ def _build_frontend() -> bool:
             capture_output=True,
             text=True,
             encoding="utf-8",
+            errors="replace",
+            env=env,
         )
+        _log_output(build_proc, "build")
         build_proc.check_returncode()
-        # 将构建输出打入日志，便于诊断构建时长和结果
-        build_lines: list[str] = build_proc.stdout.strip().split("\n")
-        logger.info("Frontend build output:\n%s", "\n".join(build_lines))
         logger.info("Frontend build complete → %s", frontend_dir / "dist")
         return True
     except subprocess.CalledProcessError as exc:
-        detail: str = (exc.stderr or exc.stdout or "").strip()
+        # 即使 check_returncode 抛异常，之前 _log_output 已写入 debug 日志；
+        # 若子进程解码失败，stdout/stderr 可能为 None，因此回退到对象属性
+        out: str = ""
+        if exc.stdout:
+            out += exc.stdout
+        if exc.stderr:
+            out += "\n" + exc.stderr
+        detail: str = out.strip()
         logger.error("Frontend build FAILED: %s", detail)
         return False
     except FileNotFoundError:

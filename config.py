@@ -5,7 +5,8 @@ from third.easysave import save, load
 from pydantic import BaseModel
 argparse_parser = argparse.ArgumentParser()
 
-argparse_parser.add_argument("--load", type=str, default="default")
+argparse_parser.add_argument("--load", type=str, default="")
+argparse_parser.add_argument("--save", type=str, default="")
 argparse_parser.add_argument("--console_log", type=bool, default=True)
 argparse_parser.add_argument("--fast_agent_space_path", type=str, default="fast_agent_space")
 argparse_parser.add_argument("--slow_agent_space_path", type=str, default="slow_agent_space")
@@ -86,10 +87,10 @@ class Config(BaseModel):
 
 current_config: Config = Config.model_validate(vars(args))
 
-if args.load or not os.path.exists("config.json"):
-    current_config = load(args.load, "config.json")
+if args.load:
+    current_config = load(args.load or "default", "config.json")
 else:
-    save("config", "config.json", current_config)
+    save(args.save or "default", "config.json", current_config)
 
 
 # log

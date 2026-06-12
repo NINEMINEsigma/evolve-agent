@@ -62,6 +62,9 @@ def _handle_validate_frontend(args: Dict[str, Any]) -> dict:
         return tool_error("No package.json found in frontend directory", path=path)
 
     pnpm: str = "pnpm.cmd" if sys.platform == "win32" else "pnpm"
+    # 强制非交互模式：避免 pnpm 在子进程中弹出 ConfirmPrompt 导致 readline 崩溃
+    import os
+    pnpm_env: dict[str, str] = {**os.environ, "CI": "true"}
 
     # ---- pnpm install ----
     logger.info("validate_frontend | install | cwd=%s", frontend_dir)
@@ -74,6 +77,7 @@ def _handle_validate_frontend(args: Dict[str, Any]) -> dict:
             encoding="utf-8",
             errors="replace",
             timeout=120,
+            env=pnpm_env,
         )
         if install_proc.returncode != 0:
             return tool_result(
@@ -107,6 +111,7 @@ def _handle_validate_frontend(args: Dict[str, Any]) -> dict:
             encoding="utf-8",
             errors="replace",
             timeout=120,
+            env=pnpm_env,
         )
         if build_proc.returncode != 0:
             return tool_result(

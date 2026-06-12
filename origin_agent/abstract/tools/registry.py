@@ -401,13 +401,13 @@ class ToolRegistry:
 
     # -- 分发 ----------------------------------------------------------
 
-    def dispatch(self, name: str, args: dict, **kwargs: Any) -> dict:
+    def dispatch(self, name: str, args: dict, **kwargs: Any) -> Any:
         """按名称执行工具 handler。
 
         * 异步 handler 通过 ``asyncio.run()`` 自动桥接。
         * 所有异常被捕获并返回 ``{"error": "..."}``，保证一致的错误格式。
 
-        返回 dict。
+        返回 dict 或 str。
         """
         entry: ToolEntry | None = self.get_entry(name)
         if not entry:

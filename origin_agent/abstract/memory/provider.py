@@ -174,7 +174,7 @@ class MemoryProvider(ABC):
         """
 
     @abstractmethod
-    def handle_tool_call(self, tool_name: str, args: Dict[str, Any]) -> dict:
+    def handle_tool_call(self, tool_name: str, args: Dict[str, Any]) -> Any:
         """处理对此 provider 某个工具的工具调用。
 
         仅对之前由 :meth:`get_tool_schemas` 返回的工具名称调用。
@@ -188,8 +188,8 @@ class MemoryProvider(ABC):
 
         返回
         -------
-        dict
-            工具结果 dict。
+        Any
+            工具结果 dict 或 str。
         """
 
     @abstractmethod
