@@ -1,0 +1,17 @@
+/* ── CSS Variables ── */
+:root {
+  --bg-primary: #1a1a1a;
+  --bg-secondary: #212121;
+  --bg-tertiary: #2a2a2a;
+  --bg-hover: #333;
+  --text-primary: #e4e4e4;
+  --text-secondary: #888;
+  --text-muted: #666;
+  --accent: #19c37d;
+  --accent-hover: #1a7f5a;
+  --user-bubble: #2f2f2f;
+  --border: #3a3a3a;
+  --danger: #ef4444;
+  --radius: 10px;
+  --radius-sm: 6px;
+}

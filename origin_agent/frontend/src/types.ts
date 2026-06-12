@@ -1,0 +1,102 @@
+export type MessageType =
+  | "system"
+  | "user_message"
+  | "agent_message"
+  | "tool_call"
+  | "tool_result"
+  | "task_progress"
+  | "clipboard_display"
+  | "confirm_request"
+  | "ask_request"
+  | "error";
+
+export interface WSMessage {
+  type: MessageType;
+  session_id?: string;
+  content?: string;
+  message?: string;
+  tool?: string;
+  args?: Record<string, unknown>;
+  result?: string;
+  request_id?: string;
+  approved?: boolean;
+  action?: string;
+  question?: string;
+  options?: Array<{ label: string; value: string }>;
+  allow_custom?: boolean;
+  option?: string;
+  custom_text?: string;
+}
+
+export interface ConfirmRequest {
+  request_id: string;
+  content: string;
+  command?: string[];
+  reason?: string;
+  tool?: string;
+}
+
+export interface AskRequest {
+  request_id: string;
+  question: string;
+  options?: Array<{ label: string; value: string }>;
+  allow_custom?: boolean;
+}
+
+export interface DownloadInfo {
+  url: string;
+  filename: string;
+  description?: string;
+  size?: number;
+}
+
+export interface PlaylistEntry {
+  audio_url: string;
+  mime: string;
+  size: number;
+  title: string;
+  path?: string | null;
+  url?: string | null;
+}
+
+export interface TaskProgress {
+  task_id: string;
+  label: string;
+  current: number;
+  total: number;
+  percent: number;
+  status: string;
+}
+
+export interface ClipboardDisplay {
+  display_id: string;
+  label: string;
+  content: string;
+}
+
+export interface ChatMessage {
+  role: "user" | "agent" | "system" | "error" | "tool";
+  content: string;
+  id: string;
+  toolName?: string;
+  toolArgs?: Record<string, unknown>;
+  imageMarkdown?: string;
+  downloadInfo?: DownloadInfo;
+  audioUrl?: string;
+  audioAutoplay?: boolean;
+  playlist?: PlaylistEntry[];
+  playlistAutoplay?: boolean;
+  reasoningContent?: string;
+}
+
+export interface SessionInfo {
+  id: string;
+  created_at: number;
+  status: string;
+  title?: string;
+  pinned?: boolean;
+  last_activity_at?: number;
+  parents?: string[];
+  parent?: string | null;
+  continuation?: string | null;
+}

@@ -1,0 +1,154 @@
+/* ── Confirm dialog ── */
+.confirm-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+}
+
+.confirm-dialog {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 24px;
+  max-width: 640px;
+  max-height: min(80vh, 520px);
+  width: 90%;
+  display: flex;
+  flex-direction: column;
+}
+
+.confirm-title {
+  font-weight: 600;
+  font-size: 16px;
+  margin-bottom: 12px;
+  flex-shrink: 0;
+}
+
+.confirm-body {
+  margin-bottom: 12px;
+  overflow-y: auto;
+  flex: 1;
+  min-height: 0;
+}
+
+.confirm-cmd {
+  background: var(--bg-tertiary);
+  padding: 10px 14px;
+  border-radius: var(--radius-sm);
+  font-family: "SF Mono", "Fira Code", monospace;
+  font-size: 13px;
+  white-space: pre-wrap;
+  word-break: break-all;
+  color: #e5c07b;
+  max-height: 40vh;
+  overflow-y: auto;
+}
+
+.confirm-reason {
+  margin-top: 8px;
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.confirm-actions {
+  display: flex;
+  gap: 10px;
+  justify-content: flex-end;
+  flex-shrink: 0;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+
+.confirm-deny,
+.confirm-once,
+.confirm-always {
+  padding: 8px 16px;
+  border: none;
+  border-radius: var(--radius-sm);
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.confirm-deny {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.confirm-once {
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+  border: 1px solid var(--border);
+}
+
+.confirm-always {
+  background: var(--accent);
+  color: #fff;
+}
+
+.confirm-always:hover {
+  background: var(--accent-hover);
+}
+
+/* ── Ask dialog (agent questions) ── */
+.ask-dialog {
+  max-height: min(80vh, 500px);
+}
+
+.ask-options {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.ask-option-btn {
+  padding: 10px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+  font-size: 14px;
+  cursor: pointer;
+  text-align: left;
+  transition: border-color 0.15s, background 0.15s;
+}
+
+.ask-option-btn:hover {
+  border-color: var(--accent);
+  background: var(--bg-hover);
+}
+
+.ask-option-selected {
+  border-color: var(--accent);
+  background: rgba(25, 195, 125, 0.15);
+  color: var(--accent);
+  font-weight: 500;
+}
+
+.ask-custom-input {
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+  font-size: 14px;
+  outline: none;
+  resize: vertical;
+  font-family: inherit;
+  line-height: 1.5;
+  box-sizing: border-box;
+  transition: border-color 0.15s;
+}
+
+.ask-custom-input:focus {
+  border-color: var(--accent);
+}
+
+.ask-custom-input::placeholder {
+  color: var(--text-muted);
+}

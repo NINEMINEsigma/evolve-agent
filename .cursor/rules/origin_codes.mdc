@@ -4,4 +4,4 @@ alwaysApply: true
 ---
 
 # 约束
-禁止运行或者构建origin_agent中的代码
+禁止运行或者构建origin_agent中的代码, 并且前端frontend中由于位置不在根目录所以语法感知可能是不准确的, 需要测试时停下来通知用户
