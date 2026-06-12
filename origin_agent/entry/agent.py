@@ -1110,7 +1110,7 @@ class AgentLoop:
                 "Tool call '%s' skipped — arguments JSON parse failed. "
                 "Preview: %s", tc.name, args.get("_raw_preview", "")[:200],
             )
-            _result: str = str(json.dumps({
+            _result: dict = {
                 "error": (
                     "Tool call parameter parsing failed. Your arguments JSON is incomplete or malformed "
                     "(possibly truncated due to content being too long). Please try: "
@@ -1119,19 +1119,19 @@ class AgentLoop:
                     "3) Or reduce the amount of data written in a single call."
                 ),
                 "_parse_failed": True,
-            }, ensure_ascii=False))
+            }
             # Fire-and-forget: 前端推送是尽力而为的副作用，
             # 不能因为 WebSocket 发送失败或阻塞就中断工具执行主链路。
             if self._tool_event_callback:
                 asyncio.create_task(
                     self._tool_event_callback(
-                        session_id, "tool_result", tc.name, _result,
+                        session_id, "tool_result", tc.name, json.dumps(_result, ensure_ascii=False),
                     ) # type: ignore
                 )
             return {
                 "role": "tool",
                 "tool_call_id": tc.id,
-                "content": _result,
+                "content": json.dumps(_result, ensure_ascii=False),
             }
 
         logger.info("Tool call: %s args=%s", tc.name, tc.arguments)
@@ -1153,7 +1153,7 @@ class AgentLoop:
 
         # ---- 脱手模式审批（write + dangerous 均在此处理，与 tool_timeout 独立）----
         _skip_dispatch = False
-        result: str = ""
+        result: dict|str = {}
         danger_level: str = tool_registry.get_danger_level(tc.name)
         if danger_level in ("write", "dangerous") and is_handsfree_mode(session_id):
             _approval_args = {k: v for k, v in args.items() if k != "_session_id"}
@@ -1170,11 +1170,11 @@ class AgentLoop:
             )
             if approval.action == "deny":
                 source_label = {"model": "approval model", "user": "user", "system": "system"}.get(approval.denied_by, "system")
-                result = json.dumps({
+                result = {
                     "error": f"[{source_label} denied] {approval.deny_reason or 'unknown reason'}",
                     "denied": True,
                     "denied_by": approval.denied_by,
-                }, ensure_ascii=False)
+                }
                 _skip_dispatch = True
             else:
                 # 审批通过，向 handler 注入标记使其跳过内部重复审批
@@ -1201,9 +1201,9 @@ class AgentLoop:
                     else:
                         result = self._memory.handle_tool_call(tc.name, args)
                 except asyncio.TimeoutError:
-                    result = json.dumps({"error": f"Tool execution timed out ({timeout}s)"}, ensure_ascii=False)
+                    result = {"error": f"Tool execution timed out ({timeout}s)"}
                 except Exception as exc:
-                    result = json.dumps({"error": str(exc)}, ensure_ascii=False)
+                    result = {"error": str(exc)}
             else:
                 try:
                     if entry and entry.is_async:
@@ -1215,26 +1215,21 @@ class AgentLoop:
                     else:
                         result = await coro
                 except asyncio.TimeoutError:
-                    result = json.dumps({"error": f"Tool execution timed out ({timeout}s)"}, ensure_ascii=False)
+                    result = {"error": f"Tool execution timed out ({timeout}s)"}
                 except Exception as exc:
-                    result = json.dumps({"error": str(exc)}, ensure_ascii=False)
+                    result = {"error": str(exc)}
 
         # ---- 追踪工具错误统计 ----
-        try:
-            parsed: Any = json.loads(result)
-            if isinstance(parsed, dict) and "error" in parsed:
-                if tc.name in self._tool_stats:
-                    self._tool_stats[tc.name]["errors"] += 1
-        except (json.JSONDecodeError, TypeError):
-            pass
+        if isinstance(result, dict) and "error" in result:
+            if tc.name in self._tool_stats:
+                self._tool_stats[tc.name]["errors"] += 1
 
         # ---- 提取多模态内容（在截断之前） ----
         # read_image 等工具返回 _image 键，含 base64 图片数据，
         # 大小远超 _MAX_RESULT_CHARS，必须在截断前提取并构建 content blocks。
         multimodal_content: Any = None
-        try:
-            parsed_result: dict = json.loads(result)
-            # 不是dict则报错离开
+        if isinstance(result, dict):
+            parsed_result: dict = dict(result)
             img: dict | None = parsed_result.pop("_image", None)
             if img and isinstance(img, dict):
                 b64: str = str(img.get("base64", ""))
@@ -1265,21 +1260,20 @@ class AgentLoop:
                         f"(e.g. tesseract, ImageMagick) to extract text or convert formats."
                     )
                     result = json.dumps(fallback, ensure_ascii=False)
-        except (json.JSONDecodeError, TypeError, KeyError):
-            pass
 
         # ---- 工具结果大小截断 ----
         _MAX_RESULT_CHARS: int = 50_000
-        if len(result) > _MAX_RESULT_CHARS:
+        result_str: str = result if isinstance(result, str) else json.dumps(result, ensure_ascii=False)
+        if len(result_str) > _MAX_RESULT_CHARS:
             _ts: str = datetime.now().strftime("%Y%m%d_%H%M%S")
             _rel: str = f"tool_results/{_ts}_{tc.name}.txt"
             _full: Path = self._ctx.agentspace / _rel.replace("/", "\\")
             try:
                 _full.parent.mkdir(parents=True, exist_ok=True)
-                _full.write_text(result, encoding="utf-8")
-                _preview: str = result[:2000]
-                result = (
-                    f"[Result too long ({len(result)} chars), full content written to ws:{_rel}]\n"
+                _full.write_text(result_str, encoding="utf-8")
+                _preview: str = result_str[:2000]
+                result_str = (
+                    f"[Result too long ({len(result_str)} chars), full content written to ws:{_rel}]\n"
                     f"[First 2000 chars preview]:\n{_preview}"
                 )
             except Exception as _exc:
@@ -1287,15 +1281,11 @@ class AgentLoop:
 
         # ---- 进度条工具：额外推送 task_progress 事件 ----
         if self._tool_event_callback and tc.name in ("set_task_progress", "clear_task_progress"):
-            _progress_payload: str = result
-            try:
-                _pp: dict = json.loads(result)
-                if "_image" in _pp:
-                    _pp_copy: dict = dict(_pp)
-                    _pp_copy.pop("_image", None)
-                    _progress_payload = json.dumps(_pp_copy, ensure_ascii=False)
-            except (json.JSONDecodeError, TypeError):
-                pass
+            _progress_payload: str = result_str
+            if isinstance(result, dict) and "_image" in result:
+                _pp_copy: dict = dict(result)
+                _pp_copy.pop("_image", None)
+                _progress_payload = json.dumps(_pp_copy, ensure_ascii=False)
             asyncio.create_task(
                 self._tool_event_callback(
                     session_id, "task_progress", tc.name, _progress_payload,
@@ -1304,15 +1294,11 @@ class AgentLoop:
 
         # ---- 剪贴板展示工具：额外推送 clipboard_display 事件 ----
         if self._tool_event_callback and tc.name in ("set_clipboard_display", "clear_clipboard_display"):
-            _display_payload: str = result
-            try:
-                _dp: dict = json.loads(result)
-                if "_image" in _dp:
-                    _dp_copy: dict = dict(_dp)
-                    _dp_copy.pop("_image", None)
-                    _display_payload = json.dumps(_dp_copy, ensure_ascii=False)
-            except (json.JSONDecodeError, TypeError):
-                pass
+            _display_payload: str = result_str
+            if isinstance(result, dict) and "_image" in result:
+                _dp_copy: dict = dict(result)
+                _dp_copy.pop("_image", None)
+                _display_payload = json.dumps(_dp_copy, ensure_ascii=False)
             asyncio.create_task(
                 self._tool_event_callback(
                     session_id, "clipboard_display", tc.name, _display_payload,
@@ -1323,17 +1309,13 @@ class AgentLoop:
         # 前端推送是尽力而为的副作用，不阻塞工具执行主链路。
         if self._tool_event_callback:
             # 对含图片的结果，推送时不包含 base64 数据
-            push_result: str = result
-            try:
-                pr: dict = json.loads(result)
-                if "_image" in pr:
-                    pr_copy: dict = dict(pr)
-                    img_info: dict = pr_copy.pop("_image", {})
-                    img_info.pop("base64", None)  # 不向前端发送 base64
-                    pr_copy["_image"] = img_info
-                    push_result = json.dumps(pr_copy, ensure_ascii=False)
-            except (json.JSONDecodeError, TypeError):
-                pass
+            push_result: str = result_str
+            if isinstance(result, dict) and "_image" in result:
+                pr_copy: dict = dict(result)
+                img_info: dict = pr_copy.pop("_image", {})
+                img_info.pop("base64", None)  # 不向前端发送 base64
+                pr_copy["_image"] = img_info
+                push_result = json.dumps(pr_copy, ensure_ascii=False)
             asyncio.create_task(
                 self._tool_event_callback(
                     session_id, "tool_result", tc.name, push_result,
@@ -1343,7 +1325,7 @@ class AgentLoop:
         # ---- 构建 OpenAI 格式的工具消息 ----
         # multimodal_content 已在截断前的提取步骤中构建完成（若存在）。
         # 此处直接使用，避免对已截断的 result 二次解析。
-        content: Any = multimodal_content if multimodal_content is not None else result
+        content: Any = multimodal_content if multimodal_content is not None else result_str
 
         return {
             "role": "tool",

@@ -261,7 +261,7 @@ Packer.toBuffer(doc).then(buffer => {{
 """
 
 
-def _handle_write_docx(args: Dict[str, Any]) -> str:
+def _handle_write_docx(args: Dict[str, Any]) -> dict:
     """Generate a .docx file using Node.js + docx npm package."""
     dep_err = _check_node_docx()
     if dep_err:
@@ -316,7 +316,7 @@ def _handle_write_docx(args: Dict[str, Any]) -> str:
 # ---------------------------------------------------------------------------
 
 
-def _handle_write_xlsx(args: Dict[str, Any]) -> str:
+def _handle_write_xlsx(args: Dict[str, Any]) -> dict:
     """Generate an .xlsx file using openpyxl."""
     try:
         import openpyxl
@@ -381,7 +381,7 @@ def _handle_write_xlsx(args: Dict[str, Any]) -> str:
 # ---------------------------------------------------------------------------
 
 
-def _handle_write_pptx(args: Dict[str, Any]) -> str:
+def _handle_write_pptx(args: Dict[str, Any]) -> dict:
     """Generate a .pptx file using python-pptx."""
     dep_err = _check_python_pptx()
     if dep_err:
@@ -411,7 +411,7 @@ def _handle_write_pptx(args: Dict[str, Any]) -> str:
         # Body
         if body_items and slide.placeholders:
             body_shape = slide.placeholders[1]
-            tf = body_shape.text_frame
+            tf = body_shape.text_frame  # type: ignore[attr-defined]
             tf.clear()
             for i, item in enumerate(body_items):
                 if isinstance(item, str):
@@ -440,7 +440,7 @@ def _handle_write_pptx(args: Dict[str, Any]) -> str:
 # ---------------------------------------------------------------------------
 
 
-def _handle_write_pdf(args: Dict[str, Any]) -> str:
+def _handle_write_pdf(args: Dict[str, Any]) -> dict:
     """Generate a PDF file using fpdf2."""
     dep_err = _check_fpdf2()
     if dep_err:

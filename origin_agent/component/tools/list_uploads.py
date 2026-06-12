@@ -25,7 +25,7 @@ def _s() -> Sandbox:
     return _sandbox
 
 
-def _handle_list_uploads(args: Dict[str, Any]) -> str:
+def _handle_list_uploads(args: Dict[str, Any]) -> dict:
     """处理获取最晚上传文件的请求。"""
     n: int = args.get("n", 10)
     if not isinstance(n, int) or n < 1:

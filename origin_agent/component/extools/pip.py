@@ -29,7 +29,7 @@ from component.approval import ApprovalResult, request_user_confirm
 # ── 工具 handler ─────────────────────────────────────────────────────
 
 
-async def _handle_install_package(args: Dict[str, Any]) -> str:
+async def _handle_install_package(args: Dict[str, Any]) -> dict:
     """Install one or more Python packages via pip, after user approval."""
     packages: str = str(args.get("packages", "")).strip()
     upgrade: bool = args.get("upgrade", False)

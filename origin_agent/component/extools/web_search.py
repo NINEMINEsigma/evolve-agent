@@ -202,7 +202,7 @@ def _search_bing(query: str, max_results: int) -> Tuple[List[Dict[str, str]] | N
 # ---------------------------------------------------------------------------
 
 
-def _handle_web_search(args: Dict[str, Any]) -> str:
+def _handle_web_search(args: Dict[str, Any]) -> dict:
     query: str = str(args.get("query", "")).strip()
     max_results: int = int(args.get("max_results", 5))
 

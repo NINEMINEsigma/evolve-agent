@@ -533,7 +533,7 @@ def _run_task(task: _CronTask) -> None:
 # ── 工具 handler ─────────────────────────────────────────────
 
 
-async def _handle_schedule_cron(args: Dict[str, Any]) -> str:
+async def _handle_schedule_cron(args: Dict[str, Any]) -> dict:
     """创建新的定时任务。"""
     raw_schedule: str = str(args.get("schedule", "")).strip()
     raw_command: Any = args.get("command")
@@ -664,7 +664,7 @@ async def _handle_schedule_cron(args: Dict[str, Any]) -> str:
     )
 
 
-async def _handle_list_cron_jobs(args: Dict[str, Any]) -> str:
+async def _handle_list_cron_jobs(args: Dict[str, Any] -> dict:
     """列出当前会话的所有定时任务。"""
     session_id: str = str(args.get("_session_id", ""))
 
@@ -706,7 +706,7 @@ async def _handle_list_cron_jobs(args: Dict[str, Any]) -> str:
     )
 
 
-async def _handle_cancel_cron_job(args: Dict[str, Any]) -> str:
+async def _handle_cancel_cron_job(args: Dict[str, Any] -> dict:
     """取消指定定时任务。"""
     task_id: str = str(args.get("task_id", "")).strip()
     session_id: str = str(args.get("_session_id", ""))
@@ -741,7 +741,7 @@ async def _handle_cancel_cron_job(args: Dict[str, Any]) -> str:
     )
 
 
-async def _handle_run_cron_job_now(args: Dict[str, Any]) -> str:
+async def _handle_run_cron_job_now(args: Dict[str, Any] -> dict:
     """立即触发指定任务执行一次（不影响正常调度）。"""
     task_id: str = str(args.get("task_id", "")).strip()
     session_id: str = str(args.get("_session_id", ""))
@@ -777,7 +777,7 @@ async def _handle_run_cron_job_now(args: Dict[str, Any]) -> str:
     )
 
 
-async def _handle_reschedule_cron_job(args: Dict[str, Any]) -> str:
+async def _handle_reschedule_cron_job(args: Dict[str, Any] -> dict:
     """基于已有任务配置重新创建并调度一个新任务（所有参数不可修改）。"""
     task_id: str = str(args.get("task_id", "")).strip()
     session_id: str = str(args.get("_session_id", ""))

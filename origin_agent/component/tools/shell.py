@@ -78,7 +78,7 @@ from component.approval import ApprovalResult, request_user_confirm
 
 # ── 工具 handler ─────────────────────────────────────────────────────
 
-async def _handle_run_command(args: Dict[str, Any]) -> str:
+async def _handle_run_command(args: Dict[str, Any]) -> dict:
     """经过允许列表 + 用户确认检查后执行 shell 命令。
 
     预期参数：
@@ -141,7 +141,7 @@ async def _handle_run_command(args: Dict[str, Any]) -> str:
     return _execute(cmd_parts, cwd)
 
 
-def _execute(cmd_parts: List[str], cwd: str) -> str:
+def _execute(cmd_parts: List[str], cwd: str) -> dict:
     """执行已受信任 / 已批准的命令并返回结果。"""
     # if cmd_parts and cmd_parts[0] not in _s().allowed_commands:
     #     return tool_error(f"Command '{cmd_parts[0]}' not in the allowed list")

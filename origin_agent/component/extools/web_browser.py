@@ -288,7 +288,7 @@ def _ws_path(*parts: str) -> tuple[Path, str]:
 # ---------------------------------------------------------------------------
 
 
-def _handle_browser_navigate(args: Dict[str, Any]) -> str:
+def _handle_browser_navigate(args: Dict[str, Any]) -> dict:
     """Open a URL and return the page snapshot."""
     err = _check_binary()
     if err:
@@ -313,7 +313,7 @@ def _handle_browser_navigate(args: Dict[str, Any]) -> str:
         return tool_error(str(exc))
 
 
-def _handle_browser_snapshot(args: Dict[str, Any]) -> str:
+def _handle_browser_snapshot(args: Dict[str, Any]) -> dict:
     """Return the current page's interactive element tree."""
     err = _check_binary()
     if err:
@@ -336,7 +336,7 @@ def _handle_browser_snapshot(args: Dict[str, Any]) -> str:
         return tool_error(str(exc))
 
 
-def _handle_browser_click(args: Dict[str, Any]) -> str:
+def _handle_browser_click(args: Dict[str, Any]) -> dict:
     """Click an element by @eN ref or CSS selector."""
     err = _check_binary()
     if err:
@@ -361,7 +361,7 @@ def _handle_browser_click(args: Dict[str, Any]) -> str:
         return tool_error(str(exc))
 
 
-def _handle_browser_fill(args: Dict[str, Any]) -> str:
+def _handle_browser_fill(args: Dict[str, Any]) -> dict:
     """Fill an input element with text (clear + type)."""
     err = _check_binary()
     if err:
@@ -385,7 +385,7 @@ def _handle_browser_fill(args: Dict[str, Any]) -> str:
         return tool_error(str(exc))
 
 
-def _handle_browser_type(args: Dict[str, Any]) -> str:
+def _handle_browser_type(args: Dict[str, Any]) -> dict:
     """Type text without clearing (append to existing content)."""
     err = _check_binary()
     if err:
@@ -411,7 +411,7 @@ def _handle_browser_type(args: Dict[str, Any]) -> str:
         return tool_error(str(exc))
 
 
-def _handle_browser_press_key(args: Dict[str, Any]) -> str:
+def _handle_browser_press_key(args: Dict[str, Any]) -> dict:
     """Press a keyboard key (Enter, Tab, Escape, etc.)."""
     err = _check_binary()
     if err:
@@ -430,7 +430,7 @@ def _handle_browser_press_key(args: Dict[str, Any]) -> str:
         return tool_error(str(exc))
 
 
-def _handle_browser_screenshot(args: Dict[str, Any]) -> str:
+def _handle_browser_screenshot(args: Dict[str, Any]) -> dict:
     """Take a screenshot and save to ws:, return markdown image URL."""
     err = _check_binary()
     if err:
@@ -458,7 +458,7 @@ def _handle_browser_screenshot(args: Dict[str, Any]) -> str:
         return tool_error(str(exc))
 
 
-def _handle_browser_get_text(args: Dict[str, Any]) -> str:
+def _handle_browser_get_text(args: Dict[str, Any]) -> dict:
     """Extract visible text from an element."""
     err = _check_binary()
     if err:
@@ -475,7 +475,7 @@ def _handle_browser_get_text(args: Dict[str, Any]) -> str:
         return tool_error(str(exc))
 
 
-def _handle_browser_eval(args: Dict[str, Any]) -> str:
+def _handle_browser_eval(args: Dict[str, Any]) -> dict:
     """Execute JavaScript in the page context."""
     err = _check_binary()
     if err:
@@ -492,7 +492,7 @@ def _handle_browser_eval(args: Dict[str, Any]) -> str:
         return tool_error(str(exc))
 
 
-def _handle_browser_wait(args: Dict[str, Any]) -> str:
+def _handle_browser_wait(args: Dict[str, Any]) -> dict:
     """Wait for a page condition."""
     err = _check_binary()
     if err:
@@ -523,7 +523,7 @@ def _handle_browser_wait(args: Dict[str, Any]) -> str:
         return tool_error(str(exc))
 
 
-def _handle_browser_close(args: Dict[str, Any]) -> str:
+def _handle_browser_close(args: Dict[str, Any]) -> dict:
     """Close the browser session."""
     err = _check_binary()
     if err:

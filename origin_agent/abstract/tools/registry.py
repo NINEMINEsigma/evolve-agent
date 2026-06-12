@@ -401,17 +401,17 @@ class ToolRegistry:
 
     # -- 分发 ----------------------------------------------------------
 
-    def dispatch(self, name: str, args: dict, **kwargs: Any) -> str:
+    def dispatch(self, name: str, args: dict, **kwargs: Any) -> dict:
         """按名称执行工具 handler。
 
         * 异步 handler 通过 ``asyncio.run()`` 自动桥接。
         * 所有异常被捕获并返回 ``{"error": "..."}``，保证一致的错误格式。
 
-        返回 JSON 字符串。
+        返回 dict。
         """
         entry: ToolEntry | None = self.get_entry(name)
         if not entry:
-            return json.dumps({"error": f"Unknown tool: {name}"})
+            return {"error": f"Unknown tool: {name}"}
         try:
             if entry.is_async:
                 return asyncio.run(entry.handler(args, **kwargs))
@@ -419,7 +419,7 @@ class ToolRegistry:
         except Exception as e:
             logger.exception("Tool %s dispatch error: %s", name, e)
             sanitized: str = f"Tool execution failed: {type(e).__name__}: {e}"
-            return json.dumps({"error": sanitized}, ensure_ascii=False)
+            return {"error": sanitized}
 
     # -- toolset 可用性查询 --------------------------------------
 
@@ -576,30 +576,30 @@ registry: ToolRegistry = ToolRegistry()
 #   return tool_result(items)            # 直接传 dict
 
 
-def tool_error(message: str, **extra: Any) -> str:
-    """返回工具 handler 的 JSON 错误字符串。
+def tool_error(message: str, **extra: Any) -> dict:
+    """返回工具 handler 的错误 dict。
 
     >>> tool_error("file not found")
-    '{"error": "file not found"}'
+    {"error": "file not found"}
     >>> tool_error("bad input", success=False)
-    '{"error": "bad input", "success": false}'
+    {"error": "bad input", "success": false}
     """
     result: dict = {"error": str(message)}
     if extra:
         result.update(extra)
-    return json.dumps(result, ensure_ascii=False)
+    return result
 
 
-def tool_result(data: Optional[dict] = None, **kwargs: Any) -> str:
-    """返回工具 handler 的 JSON 结果字符串。
+def tool_result(data: Optional[dict] = None, **kwargs: Any) -> dict:
+    """返回工具 handler 的结果 dict。
 
     接受 dict 位置参数 *或* 关键字参数（不能混用）：
 
     >>> tool_result(success=True, count=42)
-    '{"success": true, "count": 42}'
+    {"success": true, "count": 42}
     >>> tool_result({"key": "value"})
-    '{"key": "value"}'
+    {"key": "value"}
     """
     if data is not None:
-        return json.dumps(data, ensure_ascii=False)
-    return json.dumps(kwargs, ensure_ascii=False)
+        return data
+    return kwargs

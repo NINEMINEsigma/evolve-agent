@@ -54,7 +54,7 @@ def _guess_mime(path: str) -> str:
     return mime or "application/octet-stream"
 
 
-def _handle_read_image(args: Dict[str, Any]) -> str:
+def _handle_read_image(args: Dict[str, Any]) -> dict:
     path: str = str(args.get("path", "")).strip()
     if not path:
         return tool_error("path is required", path=path)
@@ -93,7 +93,7 @@ def _handle_read_image(args: Dict[str, Any]) -> str:
 
     logger.info("read_image | path=%s mime=%s size=%d", path, mime_type, file_size)
 
-    return json.dumps({
+    return {
         "path": path,
         "mime_type": mime_type,
         "size": file_size,
@@ -113,7 +113,7 @@ def _handle_read_image(args: Dict[str, Any]) -> str:
             "strip the image and retry with plain text, at which point you will "
             "receive a clear error message."
         ),
-    }, ensure_ascii=False)
+    }
 
 
 # ---------------------------------------------------------------------------

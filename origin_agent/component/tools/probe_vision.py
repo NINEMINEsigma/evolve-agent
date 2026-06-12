@@ -72,7 +72,7 @@ def _is_vision_rejection(exc: Exception) -> bool:
     return False
 
 
-async def _handle_probe_vision(args: Dict[str, Any]) -> str:
+async def _handle_probe_vision(args: Dict[str, Any]) -> dict:
     """探测当前配置的 LLM 模型是否支持 vision 输入。"""
     force: bool = bool(args.get("force", False))
 

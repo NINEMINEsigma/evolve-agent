@@ -119,7 +119,7 @@ def _compute_http_url(real_path: Path, agentspace_base: Path | None) -> str:
     return f"/uploads/{real_path.name}"
 
 
-def _handle_draw_diagram(args: Dict[str, Any]) -> str:
+def _handle_draw_diagram(args: Dict[str, Any]) -> dict:
     """Render Excalidraw JSON and return a Markdown image link.
 
     Two input modes:
@@ -228,7 +228,7 @@ def _handle_draw_diagram(args: Dict[str, Any]) -> str:
     )
 
 
-def _handle_render_diagram(args: Dict[str, Any]) -> str:
+def _handle_render_diagram(args: Dict[str, Any]) -> dict:
     """Render pre-existing Excalidraw JSON from a ws: path to PNG."""
     dep_err = _check_dependencies()
     if dep_err:

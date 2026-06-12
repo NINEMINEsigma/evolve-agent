@@ -28,16 +28,13 @@ def _skills_dir() -> Path:
     return (find_repo_root() / "skills").resolve()
 
 
-def _format_skill_list(skills_dir: Path | None = None) -> str:
+def _format_skill_list(skills_dir: Path | None = None) -> dict:
     """返回所有已注册 skill 的格式化列表。"""
     skills: list[dict]
     try:
         skills = list_skills(skills_dir=skills_dir or _skills_dir())
     except Exception:
-        return json.dumps(
-            {"error": "Failed to list skills", "skills": []},
-            ensure_ascii=False,
-        )
+        return {"error": "Failed to list skills", "skills": []}
     result: list[dict] = []
     for s in skills:
         result.append({
@@ -46,13 +43,13 @@ def _format_skill_list(skills_dir: Path | None = None) -> str:
             "category": s.get("category"),
             "tags": s.get("tags", []),
         })
-    return json.dumps({"skills": result, "total": len(result)}, ensure_ascii=False)
+    return {"skills": result, "total": len(result)}
 
 
 # ── 工具 handler ────────────────────────────────────────────────────
 
 
-def _handle_learn_skill(args: Dict[str, Any]) -> str:
+def _handle_learn_skill(args: Dict[str, Any]) -> dict:
     """创建或更新指定名称和内容的 skill，支持多文件写入。"""
     name: str = str(args.get("name", "")).strip()
     content: str = str(args.get("content", "")).strip()
@@ -116,12 +113,12 @@ def _handle_learn_skill(args: Dict[str, Any]) -> str:
         return tool_error(str(exc))
 
 
-def _handle_list_skills(args: Dict[str, Any]) -> str:
+def _handle_list_skills(args: Dict[str, Any]) -> dict:
     """列出所有可用 skill。"""
     return _format_skill_list(_skills_dir())
 
 
-def _handle_forget_skill(args: Dict[str, Any]) -> str:
+def _handle_forget_skill(args: Dict[str, Any]) -> dict:
     """按名称删除 skill。"""
     name: str = str(args.get("name", "")).strip()
     if not name:
@@ -136,7 +133,7 @@ def _handle_forget_skill(args: Dict[str, Any]) -> str:
         return tool_error(str(exc))
 
 
-def _handle_recall_skill(args: Dict[str, Any]) -> str:
+def _handle_recall_skill(args: Dict[str, Any]) -> dict:
     """将 skill 的完整内容加载到对话中。"""
     name: str = str(args.get("name", "")).strip()
     if not name:
@@ -145,24 +142,21 @@ def _handle_recall_skill(args: Dict[str, Any]) -> str:
     try:
         payload: dict = load_skill(name, skills_dir=_skills_dir())
         if payload.get("success"):
-            return json.dumps(
-                {
-                    "name": payload.get("name"),
-                    "description": payload.get("description"),
-                    "category": payload.get("category"),
-                    "content": payload.get("content"),
-                    "facts": payload.get("facts", []),
-                    "linked_files": payload.get("linked_files", {}),
-                    "skill_dir": payload.get("skill_dir"),
-                },
-                ensure_ascii=False,
-            )
+            return {
+                "name": payload.get("name"),
+                "description": payload.get("description"),
+                "category": payload.get("category"),
+                "content": payload.get("content"),
+                "facts": payload.get("facts", []),
+                "linked_files": payload.get("linked_files", {}),
+                "skill_dir": payload.get("skill_dir"),
+            }
         return tool_error(payload.get("error", "Skill not found"))
     except Exception as exc:
         return tool_error(str(exc))
 
 
-def _handle_write_skill_file(args: Dict[str, Any]) -> str:
+def _handle_write_skill_file(args: Dict[str, Any]) -> dict:
     """向已有 skill 包内写入附属文件。"""
     name: str = str(args.get("name", "")).strip()
     path: str = str(args.get("path", "")).strip()
@@ -191,7 +185,7 @@ def _handle_write_skill_file(args: Dict[str, Any]) -> str:
         return tool_error(str(exc))
 
 
-def _handle_read_skill_file(args: Dict[str, Any]) -> str:
+def _handle_read_skill_file(args: Dict[str, Any]) -> dict:
     """读取 skill 包内的附属文件内容。"""
     name: str = str(args.get("name", "")).strip()
     path: str = str(args.get("path", "")).strip()
@@ -208,20 +202,17 @@ def _handle_read_skill_file(args: Dict[str, Any]) -> str:
             skills_dir=_skills_dir(),
         )
         if result.get("success"):
-            return json.dumps(
-                {
-                    "name": name,
-                    "path": result.get("relative_path"),
-                    "content": result.get("content"),
-                },
-                ensure_ascii=False,
-            )
+            return {
+                "name": name,
+                "path": result.get("relative_path"),
+                "content": result.get("content"),
+            }
         return tool_error(result.get("error", "File not found"))
     except Exception as exc:
         return tool_error(str(exc))
 
 
-def _handle_run_skill_script(args: Dict[str, Any]) -> str:
+def _handle_run_skill_script(args: Dict[str, Any]) -> dict:
     """在 skill 包目录下执行 scripts/ 中的脚本并返回结果。"""
     import subprocess  # nosec: intentional for skill scripts
 
@@ -270,15 +261,12 @@ def _handle_run_skill_script(args: Dict[str, Any]) -> str:
             text=True,
             timeout=30,
         )
-        return json.dumps(
-            {
-                "stdout": proc.stdout,
-                "stderr": proc.stderr,
-                "exit_code": proc.returncode,
-                "success": proc.returncode == 0,
-            },
-            ensure_ascii=False,
-        )
+        return {
+            "stdout": proc.stdout,
+            "stderr": proc.stderr,
+            "exit_code": proc.returncode,
+            "success": proc.returncode == 0,
+        }
     except subprocess.TimeoutExpired:
         return tool_error("Script execution timed out (30s)")
     except Exception as exc:

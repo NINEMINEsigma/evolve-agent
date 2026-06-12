@@ -27,7 +27,7 @@ except ImportError:
 # ---------------------------------------------------------------------------
 
 
-def _handle_read_excel(args: Dict[str, Any]) -> str:
+def _handle_read_excel(args: Dict[str, Any]) -> dict:
     path: str = str(args.get("path", "")).strip()
     if not path:
         return tool_error("path is required")
@@ -71,8 +71,9 @@ def _handle_read_excel(args: Dict[str, Any]) -> str:
                     continue
                 if all(v is None for v in row):
                     continue  # 跳过空行
+                # headers 可能为 None，需要类型断言
                 sheet_rows.append(
-                    {headers[i]: (v if v is not None else None) for i, v in enumerate(row)}
+                    {headers[i]: (v if v is not None else None) for i, v in enumerate(row)}  # type: ignore
                 )
 
             sheets[name] = sheet_rows
@@ -87,7 +88,7 @@ def _handle_read_excel(args: Dict[str, Any]) -> str:
         wb.close()
 
 
-def _handle_write_excel(args: Dict[str, Any]) -> str:
+def _handle_write_excel(args: Dict[str, Any]) -> dict:
     path: str = str(args.get("path", "")).strip()
     data: list[dict[str, Any]] | dict[str, list[dict[str, Any]]] = args.get("data", [])
 

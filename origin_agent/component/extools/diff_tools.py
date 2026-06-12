@@ -145,7 +145,7 @@ def _compare_dirs(
     pattern: str,
     context_lines: int,
     max_files: int,
-) -> str:
+) -> dict:
     """对比两个目录的文件并返回 unified diff 结果。
 
     参数
@@ -240,7 +240,7 @@ def _compare_dirs(
 # Handler: diff_origin_fast
 # ---------------------------------------------------------------------------
 
-def _handle_diff_origin_fast(args: Dict[str, Any]) -> str:
+def _handle_diff_origin_fast(args: Dict[str, Any]) -> dict:
     if not _ORIGIN_ROOT.is_dir():
         return tool_error(f"origin_agent not found: {_ORIGIN_ROOT}")
     if not _FAST_ROOT.is_dir():
@@ -272,7 +272,7 @@ def _get_fork_root() -> Path | None:
     return _FORK_ROOT_CACHE
 
 
-def _handle_diff_fast_fork(args: Dict[str, Any]) -> str:
+def _handle_diff_fast_fork(args: Dict[str, Any]) -> dict:
     if not _FAST_ROOT.is_dir():
         return tool_error(f"fast_agent not found: {_FAST_ROOT}")
 

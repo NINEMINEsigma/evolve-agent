@@ -24,7 +24,7 @@ logger = logging.getLogger(__name__)
 
 # ── 工具 handler ─────────────────────────────────────────────
 
-async def _handle_ask_question(args: Dict[str, Any]) -> str:
+async def _handle_ask_question(args: Dict[str, Any]) -> dict:
     """向用户提问，等待回答后返回结果。
 
     预期参数：

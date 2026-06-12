@@ -87,7 +87,7 @@ def _run_ffmpeg(
 # ---------------------------------------------------------------------------
 
 
-def _handle_media_info(args: Dict[str, Any]) -> str:
+def _handle_media_info(args: Dict[str, Any]) -> dict:
     path: str = str(args.get("path", "")).strip()
     if not path:
         return tool_error("path is required")
@@ -210,7 +210,7 @@ def _parse_duration(duration_str: str) -> float | None:
 # ---------------------------------------------------------------------------
 
 
-def _handle_convert_media(args: Dict[str, Any]) -> str:
+def _handle_convert_media(args: Dict[str, Any]) -> dict:
     input_path: str = str(args.get("input", "")).strip()
     output_path: str = str(args.get("output", "")).strip()
 
@@ -258,7 +258,7 @@ def _handle_convert_media(args: Dict[str, Any]) -> str:
 # ---------------------------------------------------------------------------
 
 
-def _handle_extract_audio(args: Dict[str, Any]) -> str:
+def _handle_extract_audio(args: Dict[str, Any]) -> dict:
     input_path: str = str(args.get("input", "")).strip()
     output_path: str = str(args.get("output", "")).strip()
 
@@ -310,7 +310,7 @@ def _handle_extract_audio(args: Dict[str, Any]) -> str:
 # ---------------------------------------------------------------------------
 
 
-def _handle_trim_media(args: Dict[str, Any]) -> str:
+def _handle_trim_media(args: Dict[str, Any]) -> dict:
     input_path: str = str(args.get("input", "")).strip()
     output_path: str = str(args.get("output", "")).strip()
 
@@ -385,7 +385,7 @@ def _handle_trim_media(args: Dict[str, Any]) -> str:
 # ---------------------------------------------------------------------------
 
 
-def _handle_concat_media(args: Dict[str, Any]) -> str:
+def _handle_concat_media(args: Dict[str, Any]) -> dict:
     inputs: list[str] = args.get("inputs", [])
     output_path: str = str(args.get("output", "")).strip()
 
@@ -403,11 +403,12 @@ def _handle_concat_media(args: Dict[str, Any]) -> str:
     # 使用 concat demuxer — 需要先创建文件列表
     import tempfile
 
+    list_path: str | None = None
     try:
         with tempfile.NamedTemporaryFile(
             mode="w", suffix=".txt", delete=False, encoding="utf-8",
         ) as f:
-            list_path: str = f.name
+            list_path = f.name
             for rp in real_inputs:
                 f.write(f"file '{rp}'\n")
 
@@ -426,11 +427,12 @@ def _handle_concat_media(args: Dict[str, Any]) -> str:
     except Exception as e:
         return tool_error(str(e), inputs=inputs, output=output_path)
     finally:
-        import os as _os
-        try:
-            _os.unlink(list_path)
-        except Exception:
-            pass
+        if list_path is not None:
+            import os as _os
+            try:
+                _os.unlink(list_path)
+            except Exception:
+                pass
 
     if proc.returncode != 0:
         return tool_error(
@@ -451,7 +453,7 @@ def _handle_concat_media(args: Dict[str, Any]) -> str:
 # ---------------------------------------------------------------------------
 
 
-def _handle_compress_media(args: Dict[str, Any]) -> str:
+def _handle_compress_media(args: Dict[str, Any]) -> dict:
     input_path: str = str(args.get("input", "")).strip()
     output_path: str = str(args.get("output", "")).strip()
 

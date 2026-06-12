@@ -26,7 +26,7 @@ _progress_registry: Dict[str, Dict[str, Dict[str, Any]]] = {}
 # ── handler ─────────────────────────────────────────────────────────
 
 
-async def _handle_set_task_progress(args: Dict[str, Any]) -> str:
+async def _handle_set_task_progress(args: Dict[str, Any]) -> dict:
     """创建或更新前端进度条。
 
     参数：
@@ -70,7 +70,7 @@ async def _handle_set_task_progress(args: Dict[str, Any]) -> str:
     return tool_result(**info)
 
 
-async def _handle_clear_task_progress(args: Dict[str, Any]) -> str:
+async def _handle_clear_task_progress(args: Dict[str, Any]) -> dict:
     """清除前端指定进度条。
 
     参数：

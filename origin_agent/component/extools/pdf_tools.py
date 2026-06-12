@@ -26,7 +26,7 @@ except ImportError:
 # ---------------------------------------------------------------------------
 
 
-def _handle_read_pdf(args: Dict[str, Any]) -> str:
+def _handle_read_pdf(args: Dict[str, Any]) -> dict:
     path: str = str(args.get("path", "")).strip()
     if not path:
         return tool_error("path is required")

@@ -41,7 +41,7 @@ def _s() -> Sandbox:
 # 工具 handler
 # ---------------------------------------------------------------------------
 
-def _handle_read(args: Dict[str, Any]) -> str:
+def _handle_read(args: Dict[str, Any]) -> dict:
     path: str = str(args.get("path", "")).strip()
     if not path:
         return tool_error("path is required", path=path)
@@ -60,7 +60,7 @@ def _handle_read(args: Dict[str, Any]) -> str:
         return tool_error(str(exc), path=path)
 
 
-def _handle_write(args: Dict[str, Any]) -> str:
+def _handle_write(args: Dict[str, Any]) -> dict:
     path: str = str(args.get("path", "")).strip()
     content: str = str(args.get("content", ""))
     if not path:
@@ -77,7 +77,7 @@ def _handle_write(args: Dict[str, Any]) -> str:
         return tool_error(str(exc), path=path)
 
 
-def _handle_list(args: Dict[str, Any]) -> str:
+def _handle_list(args: Dict[str, Any]) -> dict:
     path: str = str(args.get("path", "")).strip()
     if not path:
         return tool_error("path is required", path=path)
@@ -88,7 +88,7 @@ def _handle_list(args: Dict[str, Any]) -> str:
         return tool_error(str(exc), path=path)
 
 
-def _handle_delete(args: Dict[str, Any]) -> str:
+def _handle_delete(args: Dict[str, Any]) -> dict:
     path: str = str(args.get("path", "")).strip()
     if not path:
         return tool_error("path is required", path=path)
@@ -99,7 +99,7 @@ def _handle_delete(args: Dict[str, Any]) -> str:
         return tool_error(str(exc), path=path)
 
 
-def _handle_exists(args: Dict[str, Any]) -> str:
+def _handle_exists(args: Dict[str, Any]) -> dict:
     path: str = str(args.get("path", "")).strip()
     if not path:
         return tool_error("path is required", path=path)
@@ -256,7 +256,7 @@ registry.register(
 )
 
 
-def _handle_edit(args: Dict[str, Any]) -> str:
+def _handle_edit(args: Dict[str, Any]) -> dict:
     """精准文本替换 — 查找并替换一处精确匹配。"""
     path: str = str(args.get("path", "")).strip()
     old_string: str = str(args.get("old_string", ""))
@@ -351,7 +351,7 @@ registry.register(
 
 
 # -- copy_file
-def _handle_copy(args: Dict[str, Any]) -> str:
+def _handle_copy(args: Dict[str, Any]) -> dict:
     source: str = str(args.get("source", "")).strip()
     destination: str = str(args.get("destination", "")).strip()
     if not source:
@@ -400,7 +400,7 @@ registry.register(
 
 
 # -- move_file
-def _handle_move(args: Dict[str, Any]) -> str:
+def _handle_move(args: Dict[str, Any]) -> dict:
     source: str = str(args.get("source", "")).strip()
     destination: str = str(args.get("destination", "")).strip()
     if not source:
@@ -450,7 +450,7 @@ registry.register(
 
 
 # -- rename_file
-def _handle_rename(args: Dict[str, Any]) -> str:
+def _handle_rename(args: Dict[str, Any]) -> dict:
     path: str = str(args.get("path", "")).strip()
     new_name: str = str(args.get("new_name", "")).strip()
     if not path:

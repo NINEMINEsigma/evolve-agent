@@ -62,7 +62,7 @@ def _save_screenshot(img: Image.Image, filename: str | None = None) -> tuple[str
 # 1. gui_screenshot
 # ---------------------------------------------------------------------------
 
-def _handle_gui_screenshot(args: Dict[str, Any]) -> str:
+def _handle_gui_screenshot(args: Dict[str, Any]) -> dict:
     try:
         import pyautogui as _pyautogui
     except ImportError:
@@ -97,7 +97,7 @@ def _handle_gui_screenshot(args: Dict[str, Any]) -> str:
 # 2. gui_mouse_move
 # ---------------------------------------------------------------------------
 
-def _handle_gui_mouse_move(args: Dict[str, Any]) -> str:
+def _handle_gui_mouse_move(args: Dict[str, Any]) -> dict:
     try:
         import pyautogui as _pyautogui
     except ImportError:
@@ -123,7 +123,7 @@ def _handle_gui_mouse_move(args: Dict[str, Any]) -> str:
 # 3. gui_mouse_click
 # ---------------------------------------------------------------------------
 
-def _handle_gui_mouse_click(args: Dict[str, Any]) -> str:
+def _handle_gui_mouse_click(args: Dict[str, Any]) -> dict:
     try:
         import pyautogui as _pyautogui
     except ImportError:
@@ -165,7 +165,7 @@ def _handle_gui_mouse_click(args: Dict[str, Any]) -> str:
 # 4. gui_mouse_drag
 # ---------------------------------------------------------------------------
 
-def _handle_gui_mouse_drag(args: Dict[str, Any]) -> str:
+def _handle_gui_mouse_drag(args: Dict[str, Any]) -> dict:
     try:
         import pyautogui as _pyautogui
     except ImportError:
@@ -198,7 +198,7 @@ def _handle_gui_mouse_drag(args: Dict[str, Any]) -> str:
 # 5. gui_mouse_scroll
 # ---------------------------------------------------------------------------
 
-def _handle_gui_mouse_scroll(args: Dict[str, Any]) -> str:
+def _handle_gui_mouse_scroll(args: Dict[str, Any]) -> dict:
     try:
         import pyautogui as _pyautogui
     except ImportError:
@@ -227,7 +227,7 @@ def _handle_gui_mouse_scroll(args: Dict[str, Any]) -> str:
 # 6. gui_type
 # ---------------------------------------------------------------------------
 
-def _handle_gui_type(args: Dict[str, Any]) -> str:
+def _handle_gui_type(args: Dict[str, Any]) -> dict:
     try:
         import pyautogui as _pyautogui
     except ImportError:
@@ -250,7 +250,7 @@ def _handle_gui_type(args: Dict[str, Any]) -> str:
 # 7. gui_press_keys
 # ---------------------------------------------------------------------------
 
-def _handle_gui_press_keys(args: Dict[str, Any]) -> str:
+def _handle_gui_press_keys(args: Dict[str, Any]) -> dict:
     try:
         import pyautogui as _pyautogui
     except ImportError:
@@ -286,7 +286,7 @@ def _handle_gui_press_keys(args: Dict[str, Any]) -> str:
 # 8. gui_get_mouse_position
 # ---------------------------------------------------------------------------
 
-def _handle_gui_get_mouse_position(_args: Dict[str, Any]) -> str:
+def _handle_gui_get_mouse_position(_args: Dict[str, Any]) -> dict:
     try:
         import pyautogui as _pyautogui
     except ImportError:
@@ -307,7 +307,7 @@ def _handle_gui_get_mouse_position(_args: Dict[str, Any]) -> str:
 # 9. gui_get_screen_size
 # ---------------------------------------------------------------------------
 
-def _handle_gui_get_screen_size(_args: Dict[str, Any]) -> str:
+def _handle_gui_get_screen_size(_args: Dict[str, Any]) -> dict:
     try:
         import pyautogui as _pyautogui
     except ImportError:
@@ -328,7 +328,7 @@ def _handle_gui_get_screen_size(_args: Dict[str, Any]) -> str:
 # 10. gui_get_windows
 # ---------------------------------------------------------------------------
 
-def _handle_gui_get_windows(args: Dict[str, Any]) -> str:
+def _handle_gui_get_windows(args: Dict[str, Any]) -> dict:
     try:
         import pyautogui as _pyautogui
     except ImportError:
@@ -376,7 +376,7 @@ def _handle_gui_get_windows(args: Dict[str, Any]) -> str:
 # 11. gui_focus_window
 # ---------------------------------------------------------------------------
 
-def _handle_gui_focus_window(args: Dict[str, Any]) -> str:
+def _handle_gui_focus_window(args: Dict[str, Any]) -> dict:
     try:
         import pyautogui as _pyautogui
     except ImportError:
@@ -432,7 +432,7 @@ def _handle_gui_focus_window(args: Dict[str, Any]) -> str:
 # 12. gui_get_active_window
 # ---------------------------------------------------------------------------
 
-def _handle_gui_get_active_window(_args: Dict[str, Any]) -> str:
+def _handle_gui_get_active_window(_args: Dict[str, Any]) -> dict:
     try:
         import pyautogui as _pyautogui
     except ImportError:
@@ -468,7 +468,7 @@ def _handle_gui_get_active_window(_args: Dict[str, Any]) -> str:
 # 13. gui_locate_on_screen
 # ---------------------------------------------------------------------------
 
-def _handle_gui_locate_on_screen(args: Dict[str, Any]) -> str:
+def _handle_gui_locate_on_screen(args: Dict[str, Any]) -> dict:
     try:
         import pyautogui as _pyautogui
     except ImportError:

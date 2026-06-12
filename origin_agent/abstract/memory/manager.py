@@ -50,12 +50,12 @@ _INTERNAL_NOTE_RE: re.Pattern = re.compile(
 )
 
 
-def _tool_error(message: str, **extra: Any) -> str:
-    """返回 JSON 错误字符串（tools.registry.tool_error 的本地替代）。"""
+def _tool_error(message: str, **extra: Any) -> dict:
+    """返回错误 dict（tools.registry.tool_error 的本地替代）。"""
     result: Dict[str, Any] = {"error": str(message)}
     if extra:
         result.update(extra)
-    return json.dumps(result, ensure_ascii=False)
+    return result
 
 
 def sanitize_context(text: str) -> str:
@@ -394,10 +394,10 @@ class MemoryManager:
 
     def handle_tool_call(
         self, tool_name: str, args: Dict[str, Any], **kwargs: Any
-    ) -> str:
+    ) -> Any:
         """将工具调用路由到正确的 provider。
 
-        返回 JSON 字符串结果。如果无 provider 处理该工具，
+        返回 dict 或 JSON 字符串结果。如果无 provider 处理该工具，
         抛出 ValueError。
         """
         provider: MemoryProvider | None = self._tool_to_provider.get(tool_name)

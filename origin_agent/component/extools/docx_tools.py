@@ -26,7 +26,7 @@ except ImportError:
 # ---------------------------------------------------------------------------
 
 
-def _handle_read_docx(args: Dict[str, Any]) -> str:
+def _handle_read_docx(args: Dict[str, Any]) -> dict:
     path: str = str(args.get("path", "")).strip()
     if not path:
         return tool_error("path is required")
@@ -47,55 +47,52 @@ def _handle_read_docx(args: Dict[str, Any]) -> str:
     except Exception as e:
         return tool_error(f"Failed to open document: {e}", path=path)
 
-    try:
-        # 段落文本
-        paragraphs: list[dict[str, Any]] = []
-        for para in doc.paragraphs:
-            text = para.text.strip()
-            if text:
-                paragraphs.append({
-                    "style": para.style.name if para.style else "Normal",
-                    "text": text,
-                })
-
-        # 表格
-        tables: list[dict[str, Any]] = []
-        for table in doc.tables:
-            rows_data: list[dict[str, str]] = []
-            headers: list[str] = []
-            for row_idx, row in enumerate(table.rows):
-                cells = [cell.text.strip() for cell in row.cells]
-                if row_idx == 0:
-                    headers = [c or f"col_{i}" for i, c in enumerate(cells)]
-                else:
-                    row_dict: dict[str, str] = {}
-                    for i, cell in enumerate(cells):
-                        key = headers[i] if i < len(headers) else f"col_{i}"
-                        row_dict[key] = cell
-                    if any(row_dict.values()):
-                        rows_data.append(row_dict)
-
-            tables.append({
-                "headers": headers,
-                "rows": rows_data,
-                "row_count": len(rows_data),
+    # 段落文本
+    paragraphs: list[dict[str, Any]] = []
+    for para in doc.paragraphs:
+        text = para.text.strip()
+        if text:
+            paragraphs.append({
+                "style": para.style.name if para.style else "Normal",
+                "text": text,
             })
 
-        # 纯文本（用于快速摘要）
-        plain_text: str = "\n".join(
-            p["text"] for p in paragraphs
-        )
+    # 表格
+    tables: list[dict[str, Any]] = []
+    for table in doc.tables:
+        rows_data: list[dict[str, str]] = []
+        headers: list[str] = []
+        for row_idx, row in enumerate(table.rows):
+            cells = [cell.text.strip() for cell in row.cells]
+            if row_idx == 0:
+                headers = [c or f"col_{i}" for i, c in enumerate(cells)]
+            else:
+                row_dict: dict[str, str] = {}
+                for i, cell in enumerate(cells):
+                    key = headers[i] if i < len(headers) else f"col_{i}"
+                    row_dict[key] = cell
+                if any(row_dict.values()):
+                    rows_data.append(row_dict)
 
-        return tool_result(
-            path=path,
-            paragraphs=paragraphs,
-            tables=tables,
-            plain_text=plain_text,
-            paragraph_count=len(paragraphs),
-            table_count=len(tables),
-        )
-    finally:
-        doc.close()
+        tables.append({
+            "headers": headers,
+            "rows": rows_data,
+            "row_count": len(rows_data),
+        })
+
+    # 纯文本（用于快速摘要）
+    plain_text: str = "\n".join(
+        p["text"] for p in paragraphs
+    )
+
+    return tool_result(
+        path=path,
+        paragraphs=paragraphs,
+        tables=tables,
+        plain_text=plain_text,
+        paragraph_count=len(paragraphs),
+        table_count=len(tables),
+    )
 
 
 # ---------------------------------------------------------------------------

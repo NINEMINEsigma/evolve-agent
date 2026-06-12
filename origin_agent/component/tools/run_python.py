@@ -77,7 +77,7 @@ from component.approval import ApprovalResult, request_user_confirm
 # ── 工具 handler ─────────────────────────────────────────────────────
 
 
-async def _handle_run_python(args: Dict[str, Any]) -> str:
+async def _handle_run_python(args: Dict[str, Any]) -> dict:
     """执行 Python 代码，始终使用与 agent 进程相同的解释器。"""
     code: str = str(args.get("code", "")).strip()
     script: str = str(args.get("script", "")).strip()
@@ -149,7 +149,7 @@ async def _handle_run_python(args: Dict[str, Any]) -> str:
     return _execute(cmd_parts, cwd, timeout)
 
 
-def _execute(cmd_parts: List[str], cwd: str, timeout: int = 60) -> str:
+def _execute(cmd_parts: List[str], cwd: str, timeout: int = 60) -> dict:
     """执行已批准的命令并返回结果。"""
     logger.info("run_python | cwd=%s cmd=%s", cwd, cmd_parts)
     result: subprocess.CompletedProcess

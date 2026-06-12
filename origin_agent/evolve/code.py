@@ -29,7 +29,7 @@ def finalize_evolution(
     *,
     deep: bool = True,
     compile_timeout: int = 30,
-) -> str:
+) -> dict:
     """验证 fork 目录，所有检查通过后触发热替换。
 
     返回适合 LLM 工具响应的 JSON 结果字符串：
@@ -66,8 +66,7 @@ def finalize_evolution(
             "Evolution validation FAILED: %d/%d files have errors",
             report["errors"], report["total"],
         )
-        return json.dumps(
-            {
+        return {
                 "evolved": False,
                 "validation": report,
                 "hint": (
@@ -75,9 +74,7 @@ def finalize_evolution(
                     "validate_code to check syntax, then call evolve_code "
                     "again when all files pass."
                 ),
-            },
-            ensure_ascii=False,
-        )
+            }
 
     # ---- 2. 验证通过 — 触发交换 ----
     logger.info(
@@ -90,18 +87,15 @@ def finalize_evolution(
 
     request_evolution()
 
-    return json.dumps(
-        {
+    return {
             "evolved": True,
             "validation": report,
             "message": (
                 "All {n} files validated. The orchestrator will now swap "
                 "slow→fast and restart with the evolved code."
             ).format(n=report["total"]),
-        },
-        ensure_ascii=False,
-    )
+    }
 
 
-def _json_error(message: str) -> str:
-    return json.dumps({"evolved": False, "error": str(message)}, ensure_ascii=False)
+def _json_error(message: str) -> dict[str, Any]:
+    return {"evolved": False, "error": str(message)}
