@@ -618,6 +618,14 @@ async def download_workspace_file(file_path: str):
     )
 
 
+@app.post("/api/shutdown-approval-model")
+async def shutdown_approval_model_endpoint():
+    """关闭本地审批模型 (llama-server) 以释放显存。"""
+    from component.approval import shutdown_approval_model
+    ok = shutdown_approval_model()
+    return {"ok": ok}
+
+
 @app.get("/{full_path:path}")
 async def spa_fallback(full_path: str):
     """SPA 客户端路由的兜底处理。

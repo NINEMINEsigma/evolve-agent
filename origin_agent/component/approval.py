@@ -134,6 +134,25 @@ def _get_approver() -> InferenceEngine|None:
         return None
 
 
+def shutdown_approval_model() -> bool:
+    """安全关闭审批模型并释放显存。
+
+    返回 True 表示成功关闭或原本未在运行。
+    """
+    global _approver
+    if _approver is None or _approver == _APPROVER_FAILED:
+        return True
+    try:
+        _approver.unload()
+        logger.info("Approval model unloaded successfully")
+        _approver = None
+        return True
+    except Exception as exc:
+        logger.warning("Failed to unload approval model: %s", exc)
+        _approver = _APPROVER_FAILED
+        return False
+
+
 async def _handsfree_confirm(
     tool_name: str, args: dict, reason: str, content: str,
     ask_agent_callback: Optional[Callable[[str], Awaitable[str]]] = None,

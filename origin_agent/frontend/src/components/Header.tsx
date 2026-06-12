@@ -1,3 +1,5 @@
+import { useEffect, useRef, useState } from "react";
+
 interface HeaderProps {
   status: string;
   sessionId: string;
@@ -25,6 +27,69 @@ export default function Header({
   onToggleSidebar,
   onToggleHandsfree,
 }: HeaderProps) {
+  const [cmdMenuOpen, setCmdMenuOpen] = useState(false);
+  const [menuPos, setMenuPos] = useState<{ top: number; left: number } | null>(null);
+  const [modelClosed, setModelClosed] = useState(false);
+  const [shuttingDown, setShuttingDown] = useState(false);
+  const cmdBtnRef = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    if (!cmdMenuOpen) return;
+    const onClick = (e: MouseEvent) => {
+      const target = e.target as Node;
+      if (cmdBtnRef.current && !cmdBtnRef.current.contains(target)) {
+        setCmdMenuOpen(false);
+      }
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setCmdMenuOpen(false);
+    };
+    document.addEventListener("mousedown", onClick);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onClick);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [cmdMenuOpen]);
+
+  const toggleCmdMenu = () => {
+    setCmdMenuOpen((open) => {
+      if (open) {
+        setMenuPos(null);
+        return false;
+      }
+      const rect = cmdBtnRef.current?.getBoundingClientRect();
+      if (rect) {
+        setMenuPos({ top: rect.bottom + 6, left: rect.left });
+      }
+      return true;
+    });
+  };
+
+  const handleShutdownApprovalModel = async () => {
+    setCmdMenuOpen(false);
+    setMenuPos(null);
+    if (!window.confirm("确定要关闭审批模型 (llama-server) 吗？关闭后将释放显存，脱手模式不可用。")) return;
+    setShuttingDown(true);
+    try {
+      const resp = await fetch("/api/shutdown-approval-model", { method: "POST" });
+      const data = await resp.json();
+      if (data.ok) {
+        setModelClosed(true);
+        onToggleHandsfree(false);
+        alert("审批模型已关闭，显存已释放。");
+      } else {
+        alert("关闭审批模型失败。");
+      }
+    } catch {
+      alert("请求失败，请检查网络。");
+    } finally {
+      setShuttingDown(false);
+    }
+  };
+
+  const showApprovalUI = approvalModelAvailable && !modelClosed;
+
   return (
     <header className="app-header">
       <div className="header-left">
@@ -51,10 +116,34 @@ export default function Header({
             {status}
           </div>
         </div>
+        <button
+          ref={cmdBtnRef}
+          className="header-action-btn"
+          onClick={toggleCmdMenu}
+          title="命令菜单"
+          disabled={shuttingDown}
+        >
+          ⋮
+        </button>
+        {cmdMenuOpen && menuPos && (
+          <div
+            className="context-menu cmd-menu-dropdown"
+            style={{ position: "fixed", top: menuPos.top, left: menuPos.left }}
+          >
+            <div
+              className={`context-menu-item ${showApprovalUI ? "context-menu-item-danger" : ""}`}
+              onClick={showApprovalUI ? handleShutdownApprovalModel : undefined}
+              style={showApprovalUI ? undefined : { opacity: 0.45, cursor: "not-allowed", userSelect: "none" }}
+              title={showApprovalUI ? "" : "审批模型未加载"}
+            >
+              关闭审批模型
+            </div>
+          </div>
+        )}
       </div>
       {sessionId && (
         <div className="header-right">
-          {approvalModelAvailable && (
+          {showApprovalUI && (
             <label className="handsfree-toggle" title={handsfreeMode ? "脱手模式已开启 — 工具调用由 AI 自动审批" : "脱手模式已关闭 — 工具调用需用户审批"}>
               <span className="handsfree-label">脱手</span>
               <input
@@ -65,7 +154,7 @@ export default function Header({
               <span className="handsfree-slider" />
             </label>
           )}
-          {handsfreeMode && approvalModelName && (
+          {handsfreeMode && showApprovalUI && approvalModelName && (
             <span className="approval-model-badge" title={`审批模型: ${approvalModelName}`}>
               {approvalModelName}
             </span>

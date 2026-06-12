@@ -160,3 +160,16 @@
   transform: translateX(14px);
   background: #fff;
 }
+
+/* ── Command menu ── */
+.cmd-menu-wrapper {
+  position: relative;
+  display: inline-block;
+  vertical-align: middle;
+  margin-left: 6px;
+}
+
+.cmd-menu-dropdown {
+  position: fixed;
+  min-width: 180px;
+}
