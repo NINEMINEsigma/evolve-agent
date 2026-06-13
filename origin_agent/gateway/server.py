@@ -377,6 +377,34 @@ async def delete_session(session_id: str):
     return {"deleted": True, "session_id": session_id}
 
 
+@app.put("/api/sessions/{session_id}/messages/{message_index}")
+async def update_session_message(session_id: str, message_index: int, req: Request):
+    """编辑指定 session 中一条历史消息的正文，不触发重新生成。"""
+    body: dict = {}
+    try:
+        body = await req.json()
+    except Exception:
+        body = {}
+    content = body.get("content")
+    info = sessions.get(session_id)
+    if info and info.get("status") == "archived":
+        result = {"updated": False, "error": "archived session cannot be edited", "session_id": session_id}
+        return HTMLResponse(
+            json.dumps(result, ensure_ascii=False),
+            media_type="application/json",
+            status_code=403,
+        )
+    if _agent_loop is None or not hasattr(_agent_loop, "edit_session_message"):
+        return {"updated": False, "error": "agent loop not ready", "session_id": session_id}
+    result = _agent_loop.edit_session_message(session_id, message_index, content)  # type: ignore[union-attr]
+    status_code = 200 if result.get("updated") else 400
+    return HTMLResponse(
+        json.dumps(result, ensure_ascii=False),
+        media_type="application/json",
+        status_code=status_code,
+    )
+
+
 @app.put("/api/sessions/{session_id}/title")
 async def update_session_title(session_id: str, req: Request):
     """手动重命名 session。"""

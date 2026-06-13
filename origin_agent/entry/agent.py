@@ -336,12 +336,12 @@ class AgentLoop:
                 # 将带 tool_calls 的 assistant 消息存入历史
                 self._store_assistant_with_tools(session_id, resp)
 
-                # 推送中间 assistant 文本到前端（非纯文本回复，避免重复）
-                if resp.content and self._tool_event_callback:
+                # 推送中间 assistant 文本或思考内容到前端（非纯文本回复，避免重复）
+                if (resp.content or resp.reasoning_content) and self._tool_event_callback:
                     asyncio.create_task(
                         self._tool_event_callback(
                             session_id, "assistant_text", "",
-                            json.dumps({"content": resp.content, "reasoning": resp.reasoning_content}),
+                            json.dumps({"content": resp.content or "", "reasoning": resp.reasoning_content}),
                         ) # type: ignore
                     )
 
@@ -1392,19 +1392,44 @@ class AgentLoop:
         # 如果尚未加载到内存，先从磁盘加载
         history: List[Dict[str, Any]] = self._get_history(session_id)
         messages: list[dict] = []
-        for entry in history:
+        for index, entry in enumerate(history):
             role: str = entry.get("role", "")
             content: str = self._extract_text(entry.get("content", ""))
             if role == "user":
-                messages.append({"role": "user", "content": content})
+                messages.append({"role": "user", "content": content, "index": index})
             elif role == "assistant":
-                msg: dict = {"role": "agent", "content": content}
+                msg: dict = {"role": "agent", "content": content, "index": index}
                 if entry.get("reasoning_content"):
                     msg["reasoning_content"] = entry["reasoning_content"]
                 messages.append(msg)
             elif role == "tool":
-                messages.append({"role": "tool", "content": content})
+                messages.append({"role": "tool", "content": content, "index": index})
+            elif role == "system":
+                messages.append({"role": "system", "content": content, "index": index})
         return messages
+
+    def edit_session_message(self, session_id: str, index: int, content: str) -> dict:
+        """按历史索引编辑消息正文，并同步内存与 JSONL。"""
+        if not isinstance(index, int) or index < 0:
+            return {"updated": False, "error": "invalid message index"}
+        if not isinstance(content, str):
+            return {"updated": False, "error": "content must be a string"}
+        history: List[Dict[str, Any]] = self._get_history(session_id)
+        if index >= len(history):
+            return {"updated": False, "error": "message index out of range"}
+        entry: Dict[str, Any] = dict(history[index])
+        entry["content"] = content
+        history[index] = entry
+        self._histories[session_id] = history
+        self._overwrite_history_file(session_id)
+        role: str = entry.get("role", "")
+        return {
+            "updated": True,
+            "session_id": session_id,
+            "index": index,
+            "role": "agent" if role == "assistant" else role,
+            "content": self._extract_text(entry.get("content", "")),
+        }
 
     def get_token_usage(self, session_id: str) -> int:
         """返回 session 当前的 prompt token 消耗。"""

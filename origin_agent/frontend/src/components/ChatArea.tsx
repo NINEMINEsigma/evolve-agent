@@ -5,16 +5,26 @@ import MessageItem from "./MessageItem";
 interface ChatAreaProps {
   messages: ChatMessage[];
   waiting: boolean;
+  archived: boolean;
   onImageClick: (src: string) => void;
+  onToggleCollapse: (id: string) => void;
+  onEditMessage: (id: string, content: string) => void | Promise<void>;
   bottomRef: React.RefObject<HTMLDivElement>;
 }
 
-export default function ChatArea({ messages, waiting, onImageClick, bottomRef }: ChatAreaProps) {
+export default function ChatArea({ messages, waiting, archived, onImageClick, onToggleCollapse, onEditMessage, bottomRef }: ChatAreaProps) {
   const messageList = useMemo(() =>
     messages.map((m) => (
-      <MessageItem key={m.id} message={m} onImageClick={onImageClick} />
+      <MessageItem
+        key={m.id}
+        message={m}
+        archived={archived}
+        onImageClick={onImageClick}
+        onToggleCollapse={onToggleCollapse}
+        onEditMessage={onEditMessage}
+      />
     )),
-    [messages, onImageClick]
+    [messages, archived, onImageClick, onToggleCollapse, onEditMessage]
   );
 
   return (

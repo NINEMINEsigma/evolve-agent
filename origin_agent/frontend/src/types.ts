@@ -78,6 +78,9 @@ export interface ChatMessage {
   role: "user" | "agent" | "system" | "error" | "tool";
   content: string;
   id: string;
+  messageIndex?: number;
+  edited?: boolean;
+  collapsed?: boolean;
   toolName?: string;
   toolArgs?: Record<string, unknown>;
   imageMarkdown?: string;

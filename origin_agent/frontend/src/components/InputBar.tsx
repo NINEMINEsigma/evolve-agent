@@ -1,17 +1,16 @@
-import { SessionInfo } from "../types";
+import type { ChangeEvent, RefObject } from "react";
 
 interface InputBarProps {
   input: string;
   setInput: (v: string) => void;
   waiting: boolean;
   uploading: boolean;
-  sessionId: string;
-  sessions: SessionInfo[];
+  archived: boolean;
   onSend: () => void;
-  onUpload: (e: React.ChangeEvent<HTMLInputElement>) => void;
+  onUpload: (e: ChangeEvent<HTMLInputElement>) => void;
   onUploadClick: () => Promise<void>;
   onInterrupt: () => void;
-  fileInputRef: React.RefObject<HTMLInputElement>;
+  fileInputRef: RefObject<HTMLInputElement>;
 }
 
 export default function InputBar({
@@ -19,24 +18,20 @@ export default function InputBar({
   setInput,
   waiting,
   uploading,
-  sessionId,
-  sessions,
+  archived,
   onSend,
   onUpload,
   onUploadClick,
   onInterrupt,
   fileInputRef,
 }: InputBarProps) {
-  const isArchived = sessions.find((s) => s.id === sessionId)?.status === "archived";
+  if (archived) return null;
 
   return (
     <footer className="input-bar">
-      {isArchived ? (
-        <div className="archived-notice">此会话已归档，无法发送消息</div>
-      ) : (
-        <div className="input-bar-inner">
-          <div className="input-bar-row">
-            <textarea
+      <div className="input-bar-inner">
+        <div className="input-bar-row">
+          <textarea
               className="input-field"
               value={input}
               onChange={(e) => setInput(e.target.value)}
@@ -91,7 +86,6 @@ export default function InputBar({
             )}
           </div>
         </div>
-      )}
     </footer>
   );
 }

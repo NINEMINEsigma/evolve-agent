@@ -64,6 +64,14 @@ export function useWebSocket() {
   const timerRef = useRef<ReturnType<typeof setTimeout>>();
   const manualRef = useRef(false);
   const ignoreStaleRef = useRef(false);
+  const lastMessageCountRef = useRef(0);
+
+  const nextMessageIndex = useCallback((items: ChatMessage[]) => {
+    const indexes = items
+      .map((m) => m.messageIndex)
+      .filter((index): index is number => typeof index === "number");
+    return indexes.length ? Math.max(...indexes) + 1 : 0;
+  }, []);
 
   const addMessage = useCallback((
     role: ChatMessage["role"],
@@ -73,11 +81,12 @@ export function useWebSocket() {
     audioUrl?: string,
     audioAutoplay?: boolean,
     playlist?: PlaylistEntry[],
-    playlistAutoplay?: boolean
+    playlistAutoplay?: boolean,
+    messageIndex?: number
   ) => {
     const id = crypto.randomUUID();
     setMessages((prev) => [...prev, {
-      role, content, id, imageMarkdown, downloadInfo, audioUrl, audioAutoplay, playlist, playlistAutoplay
+      role, content, id, imageMarkdown, downloadInfo, audioUrl, audioAutoplay, playlist, playlistAutoplay, messageIndex
     }]);
   }, []);
 
@@ -145,6 +154,7 @@ export function useWebSocket() {
                 role: m.role,
                 content: m.content,
                 id: crypto.randomUUID(),
+                messageIndex: typeof m.index === "number" ? m.index : undefined,
               };
               if (m.reasoning_content) {
                 entry.reasoningContent = m.reasoning_content;
@@ -211,6 +221,7 @@ export function useWebSocket() {
               content: p.content || "",
               id,
               reasoningContent: p.reasoning || undefined,
+              messageIndex: nextMessageIndex(prev),
             }]);
             return;
           }
@@ -224,7 +235,12 @@ export function useWebSocket() {
       else if (msg.type === "agent_message") {
         setWaiting(false);
         ignoreStaleRef.current = false;
-        addMessage("agent", msg.content ?? "");
+        setMessages((prev) => [...prev, {
+          role: "agent",
+          content: msg.content ?? "",
+          id: crypto.randomUUID(),
+          messageIndex: nextMessageIndex(prev),
+        }]);
         fetchSessions();
       }
       else if (msg.type === "tool_call") {
@@ -275,7 +291,18 @@ export function useWebSocket() {
         } catch {
           text += raw.slice(0, 2000);
         }
-        addMessage("tool", text, imageMarkdown, downloadInfo, audioUrl, audioAutoplay, playlist, playlistAutoplay);
+        setMessages((prev) => [...prev, {
+          role: "tool",
+          content: text,
+          id: crypto.randomUUID(),
+          imageMarkdown,
+          downloadInfo,
+          audioUrl,
+          audioAutoplay,
+          playlist,
+          playlistAutoplay,
+          messageIndex: nextMessageIndex(prev),
+        }]);
       }
       else if (msg.type === "task_progress") {
         const raw = msg.result ?? "";
@@ -360,7 +387,34 @@ export function useWebSocket() {
         }
       }
     };
-  }, [addMessage, fetchSessions]);
+  }, [addMessage, fetchSessions, nextMessageIndex]);
+
+  const toggleMessageCollapse = useCallback((id: string) => {
+    setMessages((prev) => prev.map((m) => (
+      m.id === id ? { ...m, collapsed: m.collapsed === undefined ? false : !m.collapsed } : m
+    )));
+  }, []);
+
+  const editMessage = useCallback(async (id: string, content: string) => {
+    const target = messages.find((m) => m.id === id);
+    if (!target || typeof target.messageIndex !== "number") {
+      addMessage("error", "这条消息还没有可持久化的历史索引，无法编辑。");
+      return;
+    }
+    const resp = await fetch(`/api/sessions/${sessionId}/messages/${target.messageIndex}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ content }),
+    });
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok || !data.updated) {
+      addMessage("error", `消息编辑失败：${data.error || "unknown error"}`);
+      return;
+    }
+    setMessages((prev) => prev.map((m) => (
+      m.id === id ? { ...m, content: data.content ?? content, edited: true } : m
+    )));
+  }, [addMessage, messages, sessionId]);
 
   const respondConfirm = useCallback((action: string, denyReasonText?: string, deniedBy?: string) => {
     if (!pendingConfirm) return;
@@ -397,11 +451,16 @@ export function useWebSocket() {
     const text = input.trim();
     const isArchived = sessions.find((s) => s.id === sessionId)?.status === "archived";
     if (!text || !wsRef.current || waiting || wsRef.current.readyState !== WebSocket.OPEN || isArchived) return;
-    addMessage("user", text);
+    setMessages((prev) => [...prev, {
+      role: "user",
+      content: text,
+      id: crypto.randomUUID(),
+      messageIndex: nextMessageIndex(prev),
+    }]);
     wsRef.current.send(JSON.stringify({ type: "user_message", content: text }));
     setInput("");
     setWaiting(true);
-  }, [input, sessions, sessionId, waiting, addMessage]);
+  }, [input, sessions, sessionId, waiting, nextMessageIndex]);
 
   const handleFileUpload = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
@@ -606,13 +665,6 @@ export function useWebSocket() {
     });
   }, []);
 
-  const handleContextMenu = useCallback((e: React.MouseEvent, sid: string) => {
-    e.preventDefault();
-    e.stopPropagation();
-    // 返回位置信息，由 App.tsx 设置 contextMenu 状态
-    return { x: e.clientX, y: e.clientY, sid };
-  }, []);
-
   const toggleHandsfree = useCallback((enabled: boolean) => {
     setHandsfreeMode(enabled);
     if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
@@ -645,11 +697,13 @@ export function useWebSocket() {
 
   // ── auto scroll ──
   useEffect(() => {
-    if (messages.length === 0) return;
+    const previousCount = lastMessageCountRef.current;
+    lastMessageCountRef.current = messages.length;
+    if (messages.length === 0 || messages.length <= previousCount) return;
     const behavior = instantScrollRef.current ? "auto" : "smooth";
     instantScrollRef.current = false;
     bottomRef.current?.scrollIntoView({ behavior });
-  }, [messages]);
+  }, [messages.length]);
 
   // ── connect on mount ──
   useEffect(() => {
@@ -772,7 +826,8 @@ export function useWebSocket() {
     respondAsk,
     toggleHandsfree,
     interrupt,
-    handleContextMenu,
+    toggleMessageCollapse,
+    editMessage,
     addMessage,
     fetchSessions,
     connect,

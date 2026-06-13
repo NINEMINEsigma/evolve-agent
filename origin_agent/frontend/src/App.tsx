@@ -54,6 +54,8 @@ export default function App() {
     setContextMenu({ x: e.clientX, y: e.clientY, sid });
   };
 
+  const currentSessionArchived = ws.sessions.find((s) => s.id === ws.sessionId)?.status === "archived";
+
   return (
     <div className="app">
       <Sidebar
@@ -156,7 +158,10 @@ export default function App() {
         <ChatArea
           messages={ws.messages}
           waiting={ws.waiting}
+          archived={currentSessionArchived}
           onImageClick={setLightboxSrc}
+          onToggleCollapse={ws.toggleMessageCollapse}
+          onEditMessage={ws.editMessage}
           bottomRef={ws.bottomRef}
         />
 
@@ -165,8 +170,7 @@ export default function App() {
           setInput={ws.setInput}
           waiting={ws.waiting}
           uploading={ws.uploading}
-          sessionId={ws.sessionId}
-          sessions={ws.sessions}
+          archived={currentSessionArchived}
           onSend={ws.send}
           onUpload={ws.handleFileUpload}
           onUploadClick={ws.handleUploadClick}
