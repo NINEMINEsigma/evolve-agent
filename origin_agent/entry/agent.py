@@ -868,7 +868,7 @@ class AgentLoop:
 
         if not prompt_tpl:
             prompt_tpl = (
-                "Summarize the key content and decisions of the following conversation in no more than 200 characters. Output only the summary.\n\n"
+                "Summarize the key content and decisions of the following conversation in no more than 50000 characters. Output only the summary.\n\n"
                 "Conversation:\n{{old_text}}\n\nSummary: "
             )
 
@@ -908,10 +908,10 @@ class AgentLoop:
                 parts: list[str] = []
                 for m in history:
                     role: str = m.get("role", "unknown")
-                    content: str = self._extract_text(m.get("content", ""))[:500]
+                    content: str = self._extract_text(m.get("content", ""))
                     if content:
                         parts.append(f"[{role}]: {content}")
-                old_text: str = "\n".join(parts[-100:])
+                old_text: str = "\n".join(parts[-10:])
                 if old_text.strip():
                     prompt, fallback, _ = self._compression_prompts()
                     summary_prompt: str = prompt.replace(r"{{old_text}}", old_text)
