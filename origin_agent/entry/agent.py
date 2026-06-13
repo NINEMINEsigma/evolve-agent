@@ -222,6 +222,11 @@ class AgentLoop:
         """process_message 的锁内实现。"""
         # 清除上一回合残留的过期中断标记
         self._interrupted.pop(session_id, None)
+        # ---- 拒绝已归档会话的新消息 ----
+        if self._session_manager is not None:
+            info = self._session_manager.get(session_id)
+            if info and info.get("status") == "archived":
+                return "This session has been archived. Please continue in the new session or start a new one."
         # ---- 持久化用户消息 ----
         logger.info("Received user message | session=%s content=%s", session_id, user_message)
         self._append(session_id, "user", user_message)
@@ -239,17 +244,15 @@ class AgentLoop:
             user_message, session_id=session_id
         )
 
-        # ---- 历史过长时进行会话旋转（归档+新会话）或压缩 ----
+        # ---- 历史过长时自动终结会话（生成摘要、存档、旋转创建继承会话） ----
         _cur: int = self._last_prompt_tokens.get(session_id, 0)
         if _cur == 0:
             _cur = self._estimate_context_tokens(session_id)
         _SAFETY: int = 5000
         if (_cur + self._ctx.llm_max_output_tokens + _SAFETY) > self._ctx.llm_max_context_tokens:
-            rotated: str | None = await self._rotate_session(session_id)
-            if not rotated:
+            new_sid: str | None = await self._terminate_session(session_id, rotate=True)
+            if not new_sid:
                 await self._compress_history(session_id)
-            else:
-                await self._compress_history(session_id)  # 当前回合的旧上下文仍需压缩
             # 旋转后不切换 session_id：当前回合继续用旧 sid 保证工具事件路由正确，
             # 新会话从下一个用户消息开始生效（前端收到 session_rotated 后自动切换）
 
@@ -687,7 +690,6 @@ class AgentLoop:
         if len(history) <= keep_msgs:
             return None
 
-        old: List[Dict[str, Any]] = history[:-keep_msgs]
         recent: List[Dict[str, Any]] = history[-keep_msgs:]
 
         # 构建完整对话文本（包含 old 和 recent），让 LLM 基于完整上下文做摘要
@@ -703,6 +705,8 @@ class AgentLoop:
 
         if not old_parts:
             self._histories[session_id] = recent
+            # 持久化压缩后的历史
+            self._overwrite_history_file(session_id)
             return None
 
         old_text: str = "\n".join(old_parts[-50:])
@@ -739,23 +743,31 @@ class AgentLoop:
             [{"role": "system", "content": f"{prefix}\n{summary}"}]
             + recent
         )
+        # 持久化压缩后的完整历史
+        self._overwrite_history_file(session_id)
         return summary
 
-    def archive_session(self, session_id: str) -> dict:
-        """将指定会话标记为 archived（轻量归档，不创建延续会话）。"""
-        if self._session_manager is not None:
-            self._session_manager.archive(session_id)
-        return {"archived": True, "session_id": session_id}
+    def _overwrite_history_file(self, session_id: str) -> None:
+        """将内存中的完整历史覆写回磁盘 JSONL（用于压缩后持久化）。"""
+        path: Path | None = self._history_path(session_id)
+        if path is None:
+            return
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            lines: list[str] = [
+                json.dumps(m, ensure_ascii=False) + "\n"
+                for m in self._histories.get(session_id, [])
+            ]
+            path.write_text("".join(lines), encoding="utf-8")
+        except Exception as exc:
+            logger.warning("Failed to overwrite history file for session %s: %s", session_id, exc)
 
-    async def compress_session(self, session_id: str) -> dict:
-        """手动压缩会话历史并自动归档。"""
-        summary: str | None = await self._compress_history(session_id)
-        archive_result = self.archive_session(session_id)
+    async def terminate_session(self, session_id: str) -> dict:
+        """手动终结会话：归档 + 压缩（生成摘要），不旋转。"""
+        await self._terminate_session(session_id, rotate=False)
         return {
-            "compressed": True,
-            "archived": archive_result.get("archived", False),
+            "terminated": True,
             "session_id": session_id,
-            "summary": summary,
         }
 
     async def merge_sessions(self, source_session_ids: list[str]) -> dict:
@@ -864,11 +876,13 @@ class AgentLoop:
             return prompt_tpl, "(Conversation too long, auto-truncated)", "[Context Summary]"
         return prompt_tpl, "(History too long, truncated)", "[Context Summary]"
 
-    async def _rotate_session(self, session_id: str) -> str | None:
-        """归档当前会话并创建带摘要的新会话。
+    async def _terminate_session(self, session_id: str, rotate: bool = False) -> str | None:
+        """终结会话：归档 + 压缩（生成摘要），可选旋转创建继承会话。
 
-        由 _compress_history 在容量检查触发时调用。
-        返回新 session_id，或 None 表示旋转失败。
+        终结 = 归档 + 压缩，统一两种触发方式：
+          - 手动终结（rotate=False）：生成摘要、保存 summary.txt、标记 archived
+          - 自动终结（rotate=True）：同上 + 创建继承会话并旋转
+        返回新 session_id（rotate=True 时），或 None。
         """
         if self._session_manager is None:
             return None
@@ -876,60 +890,89 @@ class AgentLoop:
         sm = self._session_manager
         old_sid: str = session_id
 
-        # 1. 对完整历史做 LLM 摘要
+        # 1. 优先读取已持久化的摘要（兼容旧会话或测试复用）
         summary: str = ""
-        try:
-            history: List[Dict[str, Any]] = self._get_history(old_sid)
-            parts: list[str] = []
-            for m in history:
-                role: str = m.get("role", "unknown")
-                content: str = self._extract_text(m.get("content", ""))[:500]
-                if content:
-                    parts.append(f"[{role}]: {content}")
-            old_text: str = "\n".join(parts[-100:])
-            if old_text.strip():
-                prompt, fallback, _ = self._compression_prompts()
-                summary_prompt: str = prompt.replace(r"{{old_text}}", old_text)
-                summary_resp: LLMResponse = await self._llm.chat(
-                    [{"role": "user", "content": summary_prompt}],
-                    tools=[],
-                )
-                summary = summary_resp.content.strip()[:300] if summary_resp.content else ""
-                if not summary:
-                    summary = fallback
-            if not summary:
-                summary = "(Session context archived)"
-        except Exception:
-            summary = "(Session context archived)"
+        summary_path: Path | None = None
+        if self._history_store_dir:
+            summary_path = self._history_store_dir / old_sid / "summary.txt"
+            if summary_path.exists():
+                try:
+                    summary = summary_path.read_text(encoding="utf-8")
+                except Exception:
+                    summary = ""
 
-        # 2. 同步 memory
+        # 2. 若无持久化摘要，则对完整历史做 LLM 压缩生成摘要
+        if not summary:
+            try:
+                history: List[Dict[str, Any]] = self._get_history(old_sid)
+                parts: list[str] = []
+                for m in history:
+                    role: str = m.get("role", "unknown")
+                    content: str = self._extract_text(m.get("content", ""))[:500]
+                    if content:
+                        parts.append(f"[{role}]: {content}")
+                old_text: str = "\n".join(parts[-100:])
+                if old_text.strip():
+                    prompt, fallback, _ = self._compression_prompts()
+                    summary_prompt: str = prompt.replace(r"{{old_text}}", old_text)
+                    summary_resp: LLMResponse = await self._llm.chat(
+                        [{"role": "user", "content": summary_prompt}],
+                        tools=[],
+                    )
+                    summary = summary_resp.content.strip() if summary_resp.content else ""
+                    if not summary:
+                        summary = fallback
+                if not summary:
+                    summary = "(Session context archived)"
+            except Exception:
+                summary = "(Session context archived)"
+
+        # 3. 将完整摘要写入 summary.txt（供后续继承复用）
+        if summary_path:
+            try:
+                summary_path.parent.mkdir(parents=True, exist_ok=True)
+                summary_path.write_text(summary, encoding="utf-8")
+            except Exception as exc:
+                logger.warning("Failed to write summary for session %s: %s", old_sid, exc)
+
+        # 4. 同步 memory
         try:
             self._memory.sync_all("", summary, session_id=old_sid)
         except Exception:
             pass
 
-        # 3. 归档旧会话
-        new_sid = sm.create_with_context(summary, old_sid)
-        sm.archive(old_sid, continuation_sid=new_sid)
+        # 5. 归档旧会话
+        sm.archive(old_sid, continuation_sid=None)
 
-        # 4. 将新会话的历史加载到内存
-        self._histories[new_sid] = self._load_history_from_disk(new_sid)
-        self._last_prompt_tokens[new_sid] = 0
+        if rotate:
+            # 6a. 创建继承会话并旋转
+            new_sid: str = sm.create_with_context(summary, parent_sid=old_sid, role="user")
+            sm.archive(old_sid, continuation_sid=new_sid)
 
-        # 5. 迁移旧会话的 cron 定时任务到新会话
-        try:
-            from component.extools import cron_tools
-            cron_tools.migrate_session_cron_jobs(old_sid, new_sid)
-        except Exception:
-            pass
+            # 7. 将新会话的历史加载到内存
+            self._histories[new_sid] = self._load_history_from_disk(new_sid)
+            self._last_prompt_tokens[new_sid] = 0
 
-        self._session_rotated_notify[old_sid] = new_sid
+            # 8. 迁移旧会话的 cron 定时任务到新会话
+            try:
+                from component.extools import cron_tools
+                cron_tools.migrate_session_cron_jobs(old_sid, new_sid)
+            except Exception:
+                pass
+
+            self._session_rotated_notify[old_sid] = new_sid
+
+            logger.info(
+                "Session terminated and rotated | old=%s new=%s summary=%d chars",
+                old_sid, new_sid, len(summary),
+            )
+            return new_sid
 
         logger.info(
-            "Session rotated | old=%s new=%s (summary=%d chars)",
-            old_sid, new_sid, len(summary),
+            "Session terminated | old=%s summary=%d chars",
+            old_sid, len(summary),
         )
-        return new_sid
+        return None
 
     def _load_message_hooks(self) -> list[dict]:
         """扫描 custom_hooks/ 目录，加载消息扩展 hook。

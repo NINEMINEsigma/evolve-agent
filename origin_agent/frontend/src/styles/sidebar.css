@@ -275,19 +275,91 @@
   font-weight: 500;
 }
 
-/* ── Parent session mark ── */
+/* ── Parent / continuation session mark ── */
 .parent-session {
   border-left: 2px solid #8b5cf6;
 }
 
-.parent-mark {
+.continuation-session {
+  border-left: 2px solid #06b6d4;
+}
+
+.parent-mark,
+.continuation-mark {
   display: inline-block;
   width: 3px;
   height: 14px;
-  background: #8b5cf6;
   border-radius: 2px;
   margin-right: 4px;
   vertical-align: middle;
+}
+
+.parent-mark {
+  background: #8b5cf6;
+}
+
+.continuation-mark {
+  background: #06b6d4;
+}
+
+/* ── Parent / continuation shortcuts ── */
+.relation-shortcuts {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 3px 0 5px 14px;
+  padding-left: 8px;
+  border-left: 1px dashed var(--border);
+}
+
+.relation-shortcuts-before {
+  margin-bottom: 4px;
+}
+
+.relation-shortcuts-after {
+  margin-top: 4px;
+}
+
+.relation-shortcut {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  padding: 5px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-tertiary);
+  color: var(--text-secondary);
+  cursor: pointer;
+  text-align: left;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+
+.relation-shortcut:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.relation-shortcut-parent {
+  border-left: 3px solid #8b5cf6;
+}
+
+.relation-shortcut-continuation {
+  border-left: 3px solid #06b6d4;
+}
+
+.relation-shortcut-label {
+  flex-shrink: 0;
+  font-size: 10px;
+  color: var(--text-muted);
+}
+
+.relation-shortcut-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
 }
 
 /* ── Merge mode toggle ── */

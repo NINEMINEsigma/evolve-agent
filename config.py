@@ -1,7 +1,7 @@
 import argparse
 import os
 from third.filesystem import File
-from third.easysave import save, load
+from third.easysave import save, load, contains
 from pydantic import BaseModel
 argparse_parser = argparse.ArgumentParser()
 
@@ -89,8 +89,16 @@ current_config: Config = Config.model_validate(vars(args))
 
 if args.load:
     current_config = load(args.load or "default", "config.json")
+elif args.save:
+    save(args.save, "config.json", current_config)
 else:
-    save(args.save or "default", "config.json", current_config)
+    config_field_key = input("config key：") or "default"
+    if contains(config_field_key, "config.json"):
+        current_config = load(config_field_key, "config.json")
+    else:
+        current_config = Config()
+
+print(current_config)
 
 
 # log

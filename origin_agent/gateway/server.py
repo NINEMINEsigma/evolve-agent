@@ -401,22 +401,13 @@ async def auto_title_session(session_id: str):
     return {"title": title, "session_id": session_id}
 
 
-@app.post("/api/sessions/{session_id}/archive")
-async def archive_session_endpoint(session_id: str):
-    """手动归档指定会话（轻量归档，不创建延续会话）。"""
-    if _agent_loop is not None and hasattr(_agent_loop, "archive_session"):
-        result = _agent_loop.archive_session(session_id)  # type: ignore[union-attr]
+@app.post("/api/sessions/{session_id}/terminate")
+async def terminate_session_endpoint(session_id: str):
+    """手动终结指定会话：归档 + 压缩（生成摘要），不旋转。"""
+    if _agent_loop is not None and hasattr(_agent_loop, "terminate_session"):
+        result = await _agent_loop.terminate_session(session_id)  # type: ignore[union-attr]
         return result
-    return {"archived": False, "error": "agent loop not ready", "session_id": session_id}
-
-
-@app.post("/api/sessions/{session_id}/compress")
-async def compress_session_endpoint(session_id: str):
-    """手动压缩会话历史并自动归档。"""
-    if _agent_loop is not None and hasattr(_agent_loop, "compress_session"):
-        result = await _agent_loop.compress_session(session_id)  # type: ignore[union-attr]
-        return result
-    return {"compressed": False, "error": "agent loop not ready", "session_id": session_id}
+    return {"terminated": False, "error": "agent loop not ready", "session_id": session_id}
 
 
 @app.post("/api/sessions/{session_id}/pin")
@@ -884,6 +875,17 @@ async def ws_chat(ws: WebSocket) -> None:
                         title += "..."
                     sessions.update_title(sid, title)
                 sessions.update_last_activity(sid)
+                # 拦截 archived 会话的新消息
+                _session_info = sessions.get(sid)
+                if _session_info and _session_info.get("status") == "archived":
+                    await ws.send_text(
+                        Message(
+                            type=MessageType.ERROR,
+                            session_id=sid,
+                            message="This session has been archived. Please switch to the continuation session or create a new one.",
+                        ).to_json()
+                    )
+                    continue
                 if _agent_loop is not None:
                     reply: str
                     try:

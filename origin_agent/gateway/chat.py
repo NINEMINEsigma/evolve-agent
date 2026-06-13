@@ -346,14 +346,15 @@ class SessionManager:
         """将会话标记为已归档，不可再对话。"""
         if sid in self._sessions:
             self._sessions[sid]["status"] = "archived"
-            self._sessions[sid]["continuation"] = continuation_sid
+            if continuation_sid is not None:
+                self._sessions[sid]["continuation"] = continuation_sid
         if self._store_dir:
             with self._index_lock:
                 entries: list[dict] = self._read_index()
                 for e in entries:
                     if e.get("id") == sid:
                         e["status"] = "archived"
-                        if continuation_sid:
+                        if continuation_sid is not None:
                             e["continuation"] = continuation_sid
                         break
                 self._write_index(entries)

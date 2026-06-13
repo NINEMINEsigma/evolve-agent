@@ -18,6 +18,35 @@ interface SidebarProps {
   sidebarSessions: SessionInfo[];
 }
 
+function sessionLabel(s: SessionInfo) {
+  return s.title || s.id.slice(0, 8) + "...";
+}
+
+function RelatedSessionShortcut({
+  session,
+  kind,
+  onSwitchSession,
+}: {
+  session: SessionInfo;
+  kind: "parent" | "continuation";
+  onSwitchSession: (sid: string) => void;
+}) {
+  const isParent = kind === "parent";
+  return (
+    <button
+      className={`relation-shortcut ${isParent ? "relation-shortcut-parent" : "relation-shortcut-continuation"}`}
+      title={isParent ? "当前会话继承自此会话" : "继承自当前会话"}
+      onClick={(e) => {
+        e.stopPropagation();
+        onSwitchSession(session.id);
+      }}
+    >
+      <span className="relation-shortcut-label">{isParent ? "父会话" : "继承会话"}</span>
+      <span className="relation-shortcut-title">{sessionLabel(session)}</span>
+    </button>
+  );
+}
+
 function SessionListItem({
   session: s,
   sessionId,
@@ -40,10 +69,17 @@ function SessionListItem({
   const isArchived = s.status === "archived";
   const current = sessions.find((cs) => cs.id === sessionId);
   const isParentOfCurrent = current?.parents?.includes(s.id) ?? false;
+  const isContinuationOfCurrent = current?.continuation === s.id;
+  const relationTooltip = isParentOfCurrent
+    ? "当前会话继承自此会话"
+    : isContinuationOfCurrent
+      ? "继承自当前会话"
+      : undefined;
 
   return (
     <div
-      className={`session-item ${s.id === sessionId ? "active" : ""} ${isArchived ? "archived" : ""} ${isParentOfCurrent ? "parent-session" : ""}`}
+      title={relationTooltip}
+      className={`session-item ${s.id === sessionId ? "active" : ""} ${isArchived ? "archived" : ""} ${isParentOfCurrent ? "parent-session" : ""} ${isContinuationOfCurrent ? "continuation-session" : ""}`}
       onClick={() => {
         if (mergeMode) onToggleMergeSelect(s.id);
         else onSwitchSession(s.id);
@@ -64,8 +100,9 @@ function SessionListItem({
           )}
           <div className="session-item-title">
             {isParentOfCurrent && <span className="parent-mark" />}
+            {isContinuationOfCurrent && <span className="continuation-mark" />}
             {s.pinned && <span className="pin-badge">★</span>}
-            {s.title || s.id.slice(0, 8) + "..."}
+            {sessionLabel(s)}
             {isArchived && <span className="archived-badge">已归档</span>}
           </div>
         </div>
@@ -94,6 +131,13 @@ export default function Sidebar({
   onMergeSessions,
   sidebarSessions,
 }: SidebarProps) {
+  const currentSession = sessions.find((s) => s.id === sessionId);
+  const parentSessions = currentSession?.parents
+    ?.map((pid) => sessions.find((s) => s.id === pid))
+    .filter((s): s is SessionInfo => Boolean(s)) ?? [];
+  const continuationSession = currentSession?.continuation
+    ? sessions.find((s) => s.id === currentSession.continuation)
+    : undefined;
   return (
     <aside className={`sidebar ${collapsed ? 'collapsed' : ''}`}>
       <div className="sidebar-header">
@@ -120,17 +164,39 @@ export default function Sidebar({
           <div className="session-empty">无匹配会话</div>
         ) : (
           sidebarSessions.map((s) => (
-            <SessionListItem
-              key={s.id}
-              session={s}
-              sessionId={sessionId}
-              sessions={sessions}
-              mergeMode={mergeMode}
-              selectedForMerge={selectedForMerge}
-              onToggleMergeSelect={onToggleMergeSelect}
-              onSwitchSession={onSwitchSession}
-              onContextMenu={onContextMenu}
-            />
+            <div key={s.id}>
+              {s.id === sessionId && (parentSessions.length > 0 || continuationSession) && (
+                <div className="relation-shortcuts relation-shortcuts-before">
+                  {parentSessions.map((parent) => (
+                    <RelatedSessionShortcut
+                      key={parent.id}
+                      session={parent}
+                      kind="parent"
+                      onSwitchSession={onSwitchSession}
+                    />
+                  ))}
+                </div>
+              )}
+              <SessionListItem
+                session={s}
+                sessionId={sessionId}
+                sessions={sessions}
+                mergeMode={mergeMode}
+                selectedForMerge={selectedForMerge}
+                onToggleMergeSelect={onToggleMergeSelect}
+                onSwitchSession={onSwitchSession}
+                onContextMenu={onContextMenu}
+              />
+              {s.id === sessionId && continuationSession && (
+                <div className="relation-shortcuts relation-shortcuts-after">
+                  <RelatedSessionShortcut
+                    session={continuationSession}
+                    kind="continuation"
+                    onSwitchSession={onSwitchSession}
+                  />
+                </div>
+              )}
+            </div>
           ))
         )}
       </div>

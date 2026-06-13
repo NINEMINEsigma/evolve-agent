@@ -54,6 +54,7 @@ export function useWebSocket() {
     should_schedule: boolean;
     log_path: string;
   }>>([]);
+  const [terminatingSessions, setTerminatingSessions] = useState<Set<string>>(new Set());
 
   const wsRef = useRef<WebSocket | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -546,27 +547,29 @@ export function useWebSocket() {
       .catch(() => {});
   }, [fetchSessions]);
 
-  const archiveSession = useCallback((sid: string) => {
-    fetch(`/api/sessions/${sid}/archive`, { method: "POST" })
+  const terminateSession = useCallback((sid: string) => {
+    setTerminatingSessions((prev) => new Set(prev).add(sid));
+    addMessage("system", "⏳ 正在终结会话，请稍候...");
+    fetch(`/api/sessions/${sid}/terminate`, { method: "POST" })
       .then(() => {
         fetchSessions();
         if (sid === sessionId) {
           newChat();
         }
       })
-      .catch(() => {});
-  }, [sessionId, newChat, fetchSessions]);
+      .catch(() => {
+        addMessage("error", "❌ 终结会话失败");
+      })
+      .finally(() => {
+        setTerminatingSessions((prev) => {
+          const next = new Set(prev);
+          next.delete(sid);
+          return next;
+        });
+      });
+  }, [sessionId, newChat, fetchSessions, addMessage]);
 
-  const compressSession = useCallback((sid: string) => {
-    fetch(`/api/sessions/${sid}/compress`, { method: "POST" })
-      .then(() => {
-        fetchSessions();
-        if (sid === sessionId) {
-          newChat();
-        }
-      })
-      .catch(() => {});
-  }, [sessionId, newChat, fetchSessions]);
+
 
   const togglePinSession = useCallback((sid: string) => {
     fetch(`/api/sessions/${sid}/pin`, { method: "POST" })
@@ -664,15 +667,11 @@ export function useWebSocket() {
     const filtered = q
       ? sessions.filter((s) => (s.title || s.id).toLowerCase().includes(q))
       : sessions;
-    const current = sessions.find((s) => s.id === sessionId);
-    const parentIds = new Set(current?.parents || []);
     return filtered.sort((a, b) => {
-      const scoreA = (a.pinned ? 2 : 0) + (parentIds.has(a.id) ? 1 : 0);
-      const scoreB = (b.pinned ? 2 : 0) + (parentIds.has(b.id) ? 1 : 0);
-      if (scoreB !== scoreA) return scoreB - scoreA;
+      if (Number(b.pinned) !== Number(a.pinned)) return Number(b.pinned) - Number(a.pinned);
       return (b.last_activity_at || b.created_at) - (a.last_activity_at || a.created_at);
     });
-  }, [sessions, searchQuery, sessionId]);
+  }, [sessions, searchQuery]);
 
   const sessionResources = useMemo(() => {
     const images: Array<{ id: string; src: string; alt: string }> = [];
@@ -757,6 +756,7 @@ export function useWebSocket() {
     setBgTasks,
     cronTasks,
     setCronTasks,
+    terminatingSessions,
     // actions
     send,
     handleFileUpload,
@@ -765,8 +765,7 @@ export function useWebSocket() {
     switchSession,
     deleteSession,
     autoTitleSession,
-    archiveSession,
-    compressSession,
+    terminateSession,
     togglePinSession,
     mergeSessions,
     branchSession,

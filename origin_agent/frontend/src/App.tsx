@@ -97,18 +97,28 @@ export default function App() {
           </div>
           {(() => {
             const s = ws.sessions.find((s) => s.id === contextMenu.sid);
-            return s?.status === "archived" ? (
-              <div className="context-menu-item" onClick={() => { setContextMenu(null); ws.branchSession(contextMenu.sid); }}>
-                继续此会话
+            if (!s) return null;
+            if (s.status === "archived") {
+              return (
+                <div className="context-menu-item" onClick={() => { setContextMenu(null); ws.branchSession(contextMenu.sid); }}>
+                  继续此会话
+                </div>
+              );
+            }
+            const isTerminating = ws.terminatingSessions.has(contextMenu.sid);
+            return (
+              <div
+                className={`context-menu-item ${isTerminating ? "context-menu-item-disabled" : ""}`}
+                onClick={() => {
+                  if (isTerminating) return;
+                  setContextMenu(null);
+                  ws.terminateSession(contextMenu.sid);
+                }}
+              >
+                {isTerminating ? "⏳ 终结中..." : "终结"}
               </div>
-            ) : null;
+            );
           })()}
-          <div className="context-menu-item" onClick={() => { setContextMenu(null); ws.compressSession(contextMenu.sid); }}>
-            压缩记忆
-          </div>
-          <div className="context-menu-item" onClick={() => { setContextMenu(null); ws.archiveSession(contextMenu.sid); }}>
-            归档
-          </div>
           <div className="context-menu-separator" />
           <div className="context-menu-item context-menu-item-danger" onClick={() => { setContextMenu(null); ws.deleteSession(contextMenu.sid); }}>
             删除会话
