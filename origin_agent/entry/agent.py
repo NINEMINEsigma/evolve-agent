@@ -762,6 +762,54 @@ class AgentLoop:
         except Exception as exc:
             logger.warning("Failed to overwrite history file for session %s: %s", session_id, exc)
 
+    def _read_session_summary(self, session_id: str) -> str:
+        """读取会话终结时生成的持久化摘要。"""
+        if not self._history_store_dir:
+            return ""
+        summary_path: Path = self._history_store_dir / session_id / "summary.txt"
+        if not summary_path.is_file():
+            return ""
+        try:
+            return summary_path.read_text(encoding="utf-8").strip()
+        except Exception:
+            return ""
+
+    def _recent_history_text(self, session_id: str, keep_messages: int = 10) -> str:
+        """提取最近几条旧历史，作为继承会话的短期上下文。"""
+        history: List[Dict[str, Any]] = self._get_history(session_id)
+        parts: list[str] = []
+        for msg in history:
+            role: str = msg.get("role", "")
+            if role not in ("user", "assistant", "tool"):
+                continue
+            text: str = self._extract_text(msg.get("content", "")).strip()
+            if not text:
+                continue
+            parts.append(f"[{role}]: {text[:2000]}")
+        return "\n".join(parts[-keep_messages:])
+
+    def _build_inherited_context(self, session_id: str, summary: str = "") -> str:
+        """构造继承会话首条消息：终结摘要 + 最近旧历史。"""
+        summary_text: str = summary.strip() or self._read_session_summary(session_id)
+        if not summary_text:
+            summary_text = "(Session context archived)"
+
+        recent_text: str = self._recent_history_text(session_id)
+        sections: list[str] = [
+            "[Session continuation summary]",
+            "The following is inherited context from a previous session. It is background information, not a new question.",
+            "",
+            "## Summary",
+            summary_text,
+        ]
+        if recent_text:
+            sections.extend([
+                "",
+                "## Recent history from previous session",
+                recent_text,
+            ])
+        return "\n".join(sections)
+
     async def terminate_session(self, session_id: str) -> dict:
         """手动终结会话：归档 + 压缩（生成摘要），不旋转。"""
         await self._terminate_session(session_id, rotate=False)
@@ -780,42 +828,17 @@ class AgentLoop:
         if len(source_session_ids) < 1:
             return {"error": "at least one source session required"}
 
-        # 收集各源摘要
-        summaries: list[tuple[str, str, str]] = []  # (sid, title, summary_text)
+        # 收集各源继承上下文：终结摘要 + 最近旧历史
+        summaries: list[tuple[str, str, str]] = []  # (sid, title, inherited_context)
 
         for sid in source_session_ids:
-            history: List[Dict[str, Any]] = self._get_history(sid)
             title: str = ""
             if self._session_manager is not None:
                 info = self._session_manager.get(sid)
                 title = info.get("title", "") if info else ""
 
-            summary: str = ""
-            if history:
-                # 情况1：第一条是继承上下文消息 → 提取其正文（去掉标记行）
-                first_content: str = history[0].get("content", "")
-                if history[0].get("role") in ("system", "user") and \
-                   any(marker in first_content for marker in ["[Context Summary]", "[Session continuation summary]", "[Inherited Context]"]):
-                    lines = first_content.split("\n")
-                    if len(lines) > 1:
-                        summary = "\n".join(lines[1:])
-                    else:
-                        summary = first_content
-                else:
-                    # 情况2：普通会话 → 直接拼接完整 user/assistant 对话历史
-                    parts_inner: list[str] = []
-                    for msg in history:
-                        role: str = msg.get("role", "")
-                        if role in ("user", "assistant"):
-                            text: str = self._extract_text(msg.get("content", ""))
-                            if text.strip():
-                                parts_inner.append(f"[{role}]: {text}")
-                    summary = "\n".join(parts_inner)
-
-            if not summary:
-                summary = f"(Session {sid[:8]})"
-
-            summaries.append((sid, title, summary))
+            inherited_context: str = self._build_inherited_context(sid)
+            summaries.append((sid, title, inherited_context))
 
         # 拼接内容（阈值来自配置，默认 5w 字符）
         CONCAT_THRESHOLD: int = self._ctx.merge_concat_threshold
@@ -911,7 +934,7 @@ class AgentLoop:
                     content: str = self._extract_text(m.get("content", ""))
                     if content:
                         parts.append(f"[{role}]: {content}")
-                old_text: str = "\n".join(parts[-10:])
+                old_text: str = "\n".join(parts)
                 if old_text.strip():
                     prompt, fallback, _ = self._compression_prompts()
                     summary_prompt: str = prompt.replace(r"{{old_text}}", old_text)
@@ -946,7 +969,8 @@ class AgentLoop:
 
         if rotate:
             # 6a. 创建继承会话并旋转
-            new_sid: str = sm.create_with_context(summary, parent_sid=old_sid, role="user")
+            context: str = self._build_inherited_context(old_sid, summary)
+            new_sid: str = sm.create_with_context(context, parent_sid=old_sid, role="user")
             sm.archive(old_sid, continuation_sid=new_sid)
 
             # 7. 将新会话的历史加载到内存

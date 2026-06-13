@@ -327,7 +327,7 @@
 }
 
 .message-content-collapsed {
-  max-height: 260px;
+  max-height: 520px;
   overflow-y: auto;
   overflow-x: hidden;
   padding-right: 6px;
