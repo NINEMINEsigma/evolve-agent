@@ -553,9 +553,7 @@ export function useWebSocket() {
     fetch(`/api/sessions/${sid}/terminate`, { method: "POST" })
       .then(() => {
         fetchSessions();
-        if (sid === sessionId) {
-          newChat();
-        }
+        // 手动终结后不再自动创建新会话，也不自动路由到任何会话
       })
       .catch(() => {
         addMessage("error", "❌ 终结会话失败");
@@ -567,7 +565,7 @@ export function useWebSocket() {
           return next;
         });
       });
-  }, [sessionId, newChat, fetchSessions, addMessage]);
+  }, [fetchSessions, addMessage]);
 
 
 

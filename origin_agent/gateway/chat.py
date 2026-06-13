@@ -300,6 +300,36 @@ class SessionManager:
                 }
         if entries:
             logger.info("Loaded %d sessions from disk", len(entries))
+            # 双向修复父子会话关系：从磁盘加载后确保 continuation 与 parents 严格一致
+            changed = False
+            for sid, info in self._sessions.items():
+                parents: list[str] = info.get("parents", [])
+                continuation: str | None = info.get("continuation")
+                # 修复A：如果本会话的 continuation 指向某个子，但该子未以本会话为 parent，则补入
+                if continuation and continuation in self._sessions:
+                    child = self._sessions[continuation]
+                    child_parents: list[str] = child.get("parents", [])
+                    if sid not in child_parents:
+                        child_parents.insert(0, sid)
+                        child["parents"] = child_parents
+                        changed = True
+                # 修复B：如果本会话的 parents[0] 指向某个父，但该父未以本会话为 continuation，则修正
+                if parents:
+                    primary_parent: str = parents[0]
+                    if primary_parent in self._sessions:
+                        if self._sessions[primary_parent].get("continuation") != sid:
+                            self._sessions[primary_parent]["continuation"] = sid
+                            changed = True
+            if changed:
+                with self._index_lock:
+                    entries = self._read_index()
+                    for e in entries:
+                        sid = e.get("id", "")
+                        if sid in self._sessions:
+                            e["parents"] = self._sessions[sid].get("parents", [])
+                            e["continuation"] = self._sessions[sid].get("continuation")
+                    self._write_index(entries)
+                logger.info("Fixed session parent-child inconsistencies and synced to disk")
 
     def set_store_dir(self, path: str) -> None:
         """设置或更新存储目录并重新从磁盘加载。"""
@@ -388,6 +418,15 @@ class SessionManager:
             primary_parent = parent_sid
         if primary_parent and primary_parent in self._sessions:
             self._sessions[primary_parent]["continuation"] = new_sid
+            # 同步更新父会话索引持久化，确保重启后 continuation 关系可恢复
+            if self._store_dir:
+                with self._index_lock:
+                    entries = self._read_index()
+                    for e in entries:
+                        if e.get("id") == primary_parent:
+                            e["continuation"] = new_sid
+                            break
+                    self._write_index(entries)
         logger.info("Session created | new=%s parents=%s role=%s", new_sid, parents or [parent_sid], role)
         return new_sid
 

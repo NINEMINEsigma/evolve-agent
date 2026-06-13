@@ -3,14 +3,15 @@
 任务状态持久化到磁盘，后端重启后自动恢复并重新调度。
 会话断开不会终止定时任务，任务在后台继续运行直到完成或被显式取消。
 
-支持两种调度格式：
-  1. ``interval_seconds`` — 纯数字，最小 10 秒
-  2. Cron 表达式 — 5 字段 ``分 时 日 月 周``
+支持两种一次性调度格式：
+  1. ``interval_seconds`` — 从现在起延迟指定秒数后执行一次，最小 10 秒
+  2. Cron 表达式 — 在下一个匹配 5 字段 ``分 时 日 月 周`` 的时间执行一次
 
 Weekday 遵循标准 cron 语义：0=Sunday, 1=Monday, ..., 6=Saturday。
 
 每个任务仅运行一次，执行后自动停止调度但保留记录。
-可通过 reschedule_cron_job 基于已有任务配置再次创建相同的新任务。
+需要循环、轮询或长期观察时，只安排下一次任务；等 [cron-result] 返回后再决定是否继续安排。
+可通过 reschedule_cron_job 在 [cron-result] 返回后基于已有任务配置再次创建相同的新任务。
 
 模块导入时通过 ``registry.register()`` 注册 5 个工具：
   - ``schedule_cron``       — 创建定时任务（仅执行一次）
@@ -662,8 +663,10 @@ async def _handle_schedule_cron(args: Dict[str, Any]) -> dict:
         ).isoformat(),
         log_path=log_path,
         message=(
-            f"Cron job scheduled (task_id={task_id}, "
-            f"next_run={datetime.datetime.fromtimestamp(task.next_run, tz=datetime.timezone.utc).isoformat()})"
+            f"One-shot cron job scheduled (task_id={task_id}, "
+            f"next_run={datetime.datetime.fromtimestamp(task.next_run, tz=datetime.timezone.utc).isoformat()}). "
+            "After it finishes, a [cron-result] message will wake the Agent. "
+            "If the task must continue, schedule only the next run then."
         ),
     )
 
@@ -958,21 +961,25 @@ registry.register(
     name="schedule_cron",
     toolset="cron",
     schema={
+        # 创建一个后台一次性定时任务；任务只会执行一次。
+        # 数字 schedule 表示延迟 N 秒后执行一次；cron 表达式表示下一个匹配时间执行一次。
+        # 循环、轮询或长期观察必须等 [cron-result] 返回后再安排下一次，不要预排未来链式任务。
+        # 原始 stdout/stderr 会写入日志并注入回 Agent；用户不会自动看到原始输出。
         "description": (
-            "Schedule a background task that runs exactly once at the specified time.\n"
-            "Two schedule formats are supported:\n"
-            "  1. Interval: a number in seconds (e.g. '300' for every 5 minutes, min 10s).\n"
-            "  2. Cron expression: 5 fields 'minute hour day month weekday' "
-            "(e.g. '0 9 * * 1' for 9:00 AM every Monday).\n"
+            "Schedule a one-shot background task. It runs exactly once.\n"
+            "Two one-shot schedule formats are supported:\n"
+            "  1. Delay: a number in seconds, e.g. '300' means run once after 300 seconds; minimum 10s.\n"
+            "  2. Cron expression: 5 fields 'minute hour day month weekday', "
+            "e.g. '0 9 * * 1' means run once at the next matching Monday 9:00 AM.\n"
             "     Weekday: 0=Sunday, 1=Monday, ..., 6=Saturday.\n\n"
-            "The task executes the given command exactly once in the background. "
-            "After execution the task record is kept but will not run again automatically. "
-            "To run the same command again, use reschedule_cron_job. "
-            "stdout/stderr are written to a log file. Tasks survive WebSocket disconnect and process restart.\n\n"
+            "For loops, polling, or long-running observation, schedule only the next run. "
+            "Do not pre-create future chains such as 15s, 30s, and 45s unless the user explicitly asks for multiple independent future runs. "
+            "After execution, the Agent receives a [cron-result] message and can decide whether to schedule the next one-shot task. "
+            "Raw stdout/stderr are written to a log file and injected back to the Agent; the user does not automatically see the raw output.\n\n"
             "Returns:\n"
             "  - success: whether the task was created\n"
             "  - task_id: unique identifier for managing the task\n"
-            "  - next_run: ISO timestamp of the next scheduled execution\n"
+            "  - next_run: ISO timestamp of the one scheduled execution\n"
             "  - log_path: path to the execution log file\n"
         ),
         "parameters": {
@@ -980,28 +987,34 @@ registry.register(
             "properties": {
                 "schedule": {
                     "type": "string",
+                    # 一次性调度说明：延迟秒数，或用于计算下一个匹配时间的 5 字段 cron 表达式。
                     "description": (
-                        "Schedule specification. Either: (1) a number in seconds for interval, "
-                        "or (2) a 5-field cron expression 'min hour day month weekday'. "
-                        "Examples: '60' (every 60s), '0 */6 * * *' (every 6 hours), "
-                        "'0 9 * * 1' (9am every Monday). Weekday: 0=Sunday."
+                        "One-shot schedule specification. Either: (1) a number of seconds to delay, "
+                        "or (2) a 5-field cron expression 'min hour day month weekday' for the next matching time. "
+                        "Examples: '60' = run once after 60 seconds; "
+                        "'0 */6 * * *' = run once at the next matching 6-hour boundary; "
+                        "'0 9 * * 1' = run once at the next Monday 9:00 AM. Weekday: 0=Sunday."
                     ),
                 },
                 "command": {
                     "type": "array",
                     "items": {"type": "string"},
+                    # 要执行的命令及参数列表。
                     "description": "Command and arguments to execute, e.g. ['python', '-c', 'print(1)'].",
                 },
                 "reason": {
                     "type": "string",
+                    # 创建此定时任务的原因。
                     "description": "Reason for creating this scheduled task.",
                 },
                 "name": {
                     "type": "string",
+                    # 可选的人类可读任务名称。
                     "description": "Optional human-readable name for the task.",
                 },
                 "cwd": {
                     "type": "string",
+                    # 工作目录（ws: 命名空间，默认 'ws:'）。
                     "description": "Working directory (ws: namespace, default 'ws:').",
                     "default": "ws:",
                 },
@@ -1019,6 +1032,7 @@ registry.register(
     name="list_cron_jobs",
     toolset="cron",
     schema={
+        # 列出当前会话的所有定时任务。
         "description": (
             "List all scheduled cron jobs for the current session.\n"
             "Returns task metadata including schedule, next run time, run count, and log path."
@@ -1038,6 +1052,7 @@ registry.register(
     name="cancel_cron_job",
     toolset="cron",
     schema={
+        # 按 task_id 取消并移除指定定时任务。
         "description": (
             "Cancel and remove a scheduled cron job by its task_id.\n"
             "The task will no longer execute. Pending executions are discarded."
@@ -1047,6 +1062,7 @@ registry.register(
             "properties": {
                 "task_id": {
                     "type": "string",
+                    # schedule_cron 返回的任务标识。
                     "description": "task_id returned by schedule_cron.",
                 },
             },
@@ -1063,6 +1079,7 @@ registry.register(
     name="run_cron_job_now",
     toolset="cron",
     schema={
+        # 立即触发指定定时任务执行一次。
         "description": (
             "Immediately trigger a one-time execution of a scheduled cron job.\n"
             "This does not affect the regular schedule — the next automatic execution "
@@ -1074,6 +1091,7 @@ registry.register(
             "properties": {
                 "task_id": {
                     "type": "string",
+                    # schedule_cron 返回的任务标识。
                     "description": "task_id returned by schedule_cron.",
                 },
             },
@@ -1090,11 +1108,14 @@ registry.register(
     name="reschedule_cron_job",
     toolset="cron",
     schema={
+        # 基于已有任务配置重新创建一个一次性任务；适合在 [cron-result] 返回后安排下一轮。
+        # 不要用它预排一批未来任务；需要修改参数时应改用 schedule_cron 创建一个新的下一次任务。
         "description": (
-            "Create a new cron job by copying an existing task's configuration.\n"
-            "All parameters (schedule, command, cwd) are taken from the source task "
-            "and cannot be modified. If you need different parameters, cancel the old "
-            "task and create a new one with schedule_cron.\n\n"
+            "Create one new one-shot cron job by copying an existing task's configuration.\n"
+            "Use this after receiving a [cron-result] when the same command should continue for one more run. "
+            "Do not use it to pre-create batches of future runs.\n"
+            "All parameters (schedule, command, cwd) are taken from the source task and cannot be modified. "
+            "If the next run needs a different delay, cron expression, command, or cwd, create one new task with schedule_cron instead.\n\n"
             "The new task will run exactly once, just like a normally scheduled task."
         ),
         "parameters": {
@@ -1102,6 +1123,7 @@ registry.register(
             "properties": {
                 "task_id": {
                     "type": "string",
+                    # 要复制配置的已有任务标识。
                     "description": "task_id of the existing task to copy configuration from.",
                 },
             },

@@ -1118,10 +1118,13 @@ def _on_cron_event(
         return
 
     # 构建触发 Agent 的消息
-    status_label = "成功" if exit_code == 0 else f"失败 (exit={exit_code})"
+    status_label = "success" if exit_code == 0 else f"failed (exit={exit_code})"
     message = (
-        f"[cron-result] 定时任务 `{name}` ({task_id}) 执行{status_label}\n"
-        f"输出预览:\n{stdout_preview[:800]}"
+        f"[cron-result] Scheduled task `{name}` ({task_id}) {status_label}.\n"
+        "This is a background scheduled-task result visible only to the Agent; the user does not directly see the raw output below.\n"
+        "If the user should be informed, the Agent must actively summarize, explain, or continue acting.\n"
+        "If the goal requires continued execution, schedule only one next run now; do not backfill multiple future runs.\n"
+        f"Output preview:\n{stdout_preview[:800]}"
     )
 
     async def _trigger() -> None:

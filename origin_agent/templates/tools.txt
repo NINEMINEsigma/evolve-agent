@@ -13,3 +13,8 @@ Built-in tool conventions:
 - Handlers accept a single dict argument and return a JSON string.
 - Errors are returned as {"error": "message"} via tool_error() helper.
 - Success results use tool_result() helper.
+
+Cron tool conventions:
+- Scheduled tasks are background one-shot tasks, not a batch queue or an automatic loop mechanism.
+- Periodic work, polling, or long-running observation must be expressed as recursive scheduling: wait for the task result, then schedule the next one-shot task.
+- Raw scheduled-task output is internal Agent input and log content, not a user message; if the user needs the result, actively summarize it.

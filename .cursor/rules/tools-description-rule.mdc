@@ -1,0 +1,80 @@
+---
+alwaysApply: true
+---
+
+# 工具注册格式
+
+```python
+registry.register(
+    name="schedule_cron",
+    toolset="cron",
+    schema={
+        # 创建一个后台一次性定时任务；任务只会执行一次。
+        # 数字 schedule 表示延迟 N 秒后执行一次；cron 表达式表示下一个匹配时间执行一次。
+        # 循环、轮询或长期观察必须等 [cron-result] 返回后再安排下一次，不要预排未来链式任务。
+        # 原始 stdout/stderr 会写入日志并注入回 Agent；用户不会自动看到原始输出。
+        "description": (
+            "Schedule a one-shot background task. It runs exactly once.\n"
+            "Two one-shot schedule formats are supported:\n"
+            "  1. Delay: a number in seconds, e.g. '300' means run once after 300 seconds; minimum 10s.\n"
+            "  2. Cron expression: 5 fields 'minute hour day month weekday', "
+            "e.g. '0 9 * * 1' means run once at the next matching Monday 9:00 AM.\n"
+            "     Weekday: 0=Sunday, 1=Monday, ..., 6=Saturday.\n\n"
+            "For loops, polling, or long-running observation, schedule only the next run. "
+            "Do not pre-create future chains such as 15s, 30s, and 45s unless the user explicitly asks for multiple independent future runs. "
+            "After execution, the Agent receives a [cron-result] message and can decide whether to schedule the next one-shot task. "
+            "Raw stdout/stderr are written to a log file and injected back to the Agent; the user does not automatically see the raw output.\n\n"
+            "Returns:\n"
+            "  - success: whether the task was created\n"
+            "  - task_id: unique identifier for managing the task\n"
+            "  - next_run: ISO timestamp of the one scheduled execution\n"
+            "  - log_path: path to the execution log file\n"
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "schedule": {
+                    "type": "string",
+                    # 一次性调度说明：延迟秒数，或用于计算下一个匹配时间的 5 字段 cron 表达式。
+                    "description": (
+                        "One-shot schedule specification. Either: (1) a number of seconds to delay, "
+                        "or (2) a 5-field cron expression 'min hour day month weekday' for the next matching time. "
+                        "Examples: '60' = run once after 60 seconds; "
+                        "'0 */6 * * *' = run once at the next matching 6-hour boundary; "
+                        "'0 9 * * 1' = run once at the next Monday 9:00 AM. Weekday: 0=Sunday."
+                    ),
+                },
+                "command": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    # 要执行的命令及参数列表。
+                    "description": "Command and arguments to execute, e.g. ['python', '-c', 'print(1)'].",
+                },
+                "reason": {
+                    "type": "string",
+                    # 创建此定时任务的原因。
+                    "description": "Reason for creating this scheduled task.",
+                },
+                "name": {
+                    "type": "string",
+                    # 可选的人类可读任务名称。
+                    "description": "Optional human-readable name for the task.",
+                },
+                "cwd": {
+                    "type": "string",
+                    # 工作目录（ws: 命名空间，默认 'ws:'）。
+                    "description": "Working directory (ws: namespace, default 'ws:').",
+                    "default": "ws:",
+                },
+            },
+            "required": ["schedule", "command", "reason"],
+        },
+    },
+    handler=_handle_schedule_cron,
+    is_async=True,
+    emoji="⏰",
+    danger_level="dangerous",
+)
+```
+
+1. description字段内用英文编写, 上方必须附带中文注释
