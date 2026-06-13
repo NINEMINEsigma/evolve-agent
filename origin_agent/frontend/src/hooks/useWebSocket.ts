@@ -7,6 +7,7 @@ import {
   PlaylistEntry,
   TaskProgress,
   ClipboardDisplay,
+  CronTask,
   SessionInfo,
   WSMessage,
 } from "../types";
@@ -43,17 +44,7 @@ export function useWebSocket() {
     log_path: string;
     status: string;
   }>>([]);
-  const [cronTasks, setCronTasks] = useState<Array<{
-    task_id: string;
-    name: string;
-    schedule_type: string;
-    schedule_value: string;
-    next_run: string | null;
-    run_count: number;
-    max_runs: number;
-    should_schedule: boolean;
-    log_path: string;
-  }>>([]);
+  const [cronTasks, setCronTasks] = useState<CronTask[]>([]);
   const [terminatingSessions, setTerminatingSessions] = useState<Set<string>>(new Set());
 
   const wsRef = useRef<WebSocket | null>(null);
@@ -173,11 +164,11 @@ export function useWebSocket() {
                   }
                   if (parsed.audio_url) {
                     entry.audioUrl = parsed.audio_url;
-                    entry.audioAutoplay = parsed.autoplay === true;
+                    entry.audioAutoplay = false;
                   }
                   if (parsed.playlist) {
                     entry.playlist = parsed.playlist;
-                    entry.playlistAutoplay = parsed.autoplay === true;
+                    entry.playlistAutoplay = false;
                   }
                   if (parsed.message && typeof parsed.message === "string") {
                     entry.content = parsed.message;

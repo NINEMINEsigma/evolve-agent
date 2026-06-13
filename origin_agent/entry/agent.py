@@ -353,6 +353,19 @@ class AgentLoop:
                     history.append(tool_msg)
                     self._persist_message(session_id, tool_msg)
 
+                    if self._tool_event_callback:
+                        context_tokens = self._estimate_context_tokens(session_id)
+                        self._last_prompt_tokens[session_id] = context_tokens
+                        asyncio.create_task(
+                            self._tool_event_callback(
+                                session_id, "usage_update", "",
+                                json.dumps({
+                                    "token_usage": self._token_usage.get(session_id, 0),
+                                    "context_tokens": context_tokens,
+                                }),
+                            ) # type: ignore
+                        )
+
                     # 如果 evolve_code 执行成功，干净退出循环。
                     # 无需继续 — run.py 编排器会重启我们。
                     if tc.name == "evolve_code":
@@ -640,23 +653,26 @@ class AgentLoop:
             # cl100k_base 覆盖 gpt-4、gpt-3.5-turbo 及大多数兼容模型
             enc = tiktoken.get_encoding("cl100k_base")
 
+        def count_tokens(text: Any) -> int:
+            return len(enc.encode(str(text), disallowed_special=()))
+
         total: int = 0
         for msg in history:
             # OpenAI 聊天消息开销：<|im_start|>role<|im_end|> ... <|im_end|>
             total += 4
-            total += len(enc.encode(msg.get("role", "")))
-            total += len(enc.encode(str(msg.get("content", ""))))
+            total += count_tokens(msg.get("role", ""))
+            total += count_tokens(msg.get("content", ""))
             rc: Any = msg.get("reasoning_content")
             if rc:
                 total += 4
-                total += len(enc.encode(str(rc)))
+                total += count_tokens(rc)
             tc: Any = msg.get("tool_calls")
             if tc:
-                total += len(enc.encode(json.dumps(tc, ensure_ascii=False)))
+                total += count_tokens(json.dumps(tc, ensure_ascii=False))
 
         # 使用缓存的 system prompt 精确计数（而非固定 +2000）
         if self._cached_system_prompt is not None:
-            total += len(enc.encode(self._cached_system_prompt))
+            total += count_tokens(self._cached_system_prompt)
         else:
             total += 2000
 
@@ -1422,6 +1438,8 @@ class AgentLoop:
             if role == "user":
                 messages.append({"role": "user", "content": content, "index": index})
             elif role == "assistant":
+                if not content and not entry.get("reasoning_content"):
+                    continue
                 msg: dict = {"role": "agent", "content": content, "index": index}
                 if entry.get("reasoning_content"):
                     msg["reasoning_content"] = entry["reasoning_content"]

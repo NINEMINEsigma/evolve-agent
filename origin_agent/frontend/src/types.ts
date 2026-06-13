@@ -74,6 +74,20 @@ export interface ClipboardDisplay {
   content: string;
 }
 
+export interface CronTask {
+  task_id: string;
+  session_id?: string;
+  name: string;
+  schedule_type: string;
+  schedule_value: string;
+  command?: string[];
+  next_run: string | null;
+  run_count: number;
+  max_runs?: number;
+  should_schedule: boolean;
+  log_path: string;
+}
+
 export interface ChatMessage {
   role: "user" | "agent" | "system" | "error" | "tool";
   content: string;

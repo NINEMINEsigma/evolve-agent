@@ -76,14 +76,13 @@ export default function InputBar({
                 <path d="M22 2L11 13" /><path d="M22 2L15 22L11 13L2 9L22 2Z" />
               </svg>
             </button>
-            {waiting && (
-              <button
-                className="interrupt-btn"
-                onClick={onInterrupt}
-              >
-                ⏹
-              </button>
-            )}
+            <button
+              className="interrupt-btn"
+              onClick={onInterrupt}
+              title="中断当前 Agent 工作"
+            >
+              ⏹
+            </button>
           </div>
         </div>
     </footer>

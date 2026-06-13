@@ -331,7 +331,6 @@
   overflow-y: auto;
   overflow-x: hidden;
   padding-right: 6px;
-  overscroll-behavior: contain;
   scrollbar-width: thin;
 }
 

@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { CronTask } from "../types";
 
 interface DrawerProps {
   open: boolean;
@@ -20,14 +21,8 @@ interface DrawerProps {
   setBgTasks: React.Dispatch<React.SetStateAction<Array<{
     task_id: string; pid: number; command: string[]; start_time: number; log_path: string; status: string
   }>>>;
-  cronTasks: Array<{
-    task_id: string; name: string; schedule_type: string; schedule_value: string;
-    next_run: string | null; run_count: number; max_runs: number; should_schedule: boolean; log_path: string
-  }>;
-  setCronTasks: React.Dispatch<React.SetStateAction<Array<{
-    task_id: string; name: string; schedule_type: string; schedule_value: string;
-    next_run: string | null; run_count: number; max_runs: number; should_schedule: boolean; log_path: string
-  }>>>;
+  cronTasks: CronTask[];
+  setCronTasks: React.Dispatch<React.SetStateAction<CronTask[]>>;
 }
 
 export default function Drawer({

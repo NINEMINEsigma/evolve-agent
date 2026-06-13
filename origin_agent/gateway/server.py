@@ -181,6 +181,23 @@ async def _send_tool_event(
             pass
         return
 
+    # Handle usage update events
+    if event_type == "usage_update":
+        try:
+            json.loads(payload)
+        except json.JSONDecodeError:
+            return
+        msg = Message(
+            type=MessageType.SYSTEM,
+            session_id=session_id,
+            content=payload,
+        )
+        try:
+            await ws.send_text(msg.to_json())
+        except Exception:
+            pass
+        return
+
     # Handle task_progress events
     if event_type == "task_progress":
         data: dict | None

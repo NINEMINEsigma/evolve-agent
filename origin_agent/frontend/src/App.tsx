@@ -9,6 +9,7 @@ import AskDialog from "./components/AskDialog";
 import TaskProgressPanel from "./components/TaskProgressPanel";
 import ClipboardPanel from "./components/ClipboardPanel";
 import Drawer from "./components/Drawer";
+import CronCountdown from "./components/CronCountdown";
 
 export default function App() {
   const ws = useWebSocket();
@@ -164,6 +165,8 @@ export default function App() {
           onEditMessage={ws.editMessage}
           bottomRef={ws.bottomRef}
         />
+
+        <CronCountdown cronTasks={ws.cronTasks} />
 
         <InputBar
           input={ws.input}

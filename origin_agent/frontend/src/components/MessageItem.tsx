@@ -1,4 +1,4 @@
-import { memo, useMemo, useState } from "react";
+import { memo, useMemo, useState, type WheelEvent } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { ChatMessage } from "../types";
@@ -97,6 +97,26 @@ const MessageItem = memo(function MessageItem({ message, archived, onImageClick,
     setEditing(false);
   };
 
+  const handoffWheelAtBoundary = (event: WheelEvent<HTMLDivElement>) => {
+    const current = event.currentTarget;
+    const { scrollTop, scrollHeight, clientHeight } = current;
+    const canScroll = scrollHeight > clientHeight;
+    if (!canScroll || event.deltaY === 0) return;
+
+    const scrollingUp = event.deltaY < 0;
+    const scrollingDown = event.deltaY > 0;
+    const atTop = scrollTop <= 0;
+    const atBottom = scrollTop + clientHeight >= scrollHeight - 1;
+    const shouldHandoff = (scrollingUp && atTop) || (scrollingDown && atBottom);
+    if (!shouldHandoff) return;
+
+    const chatArea = current.closest(".chat-area");
+    if (!(chatArea instanceof HTMLElement)) return;
+
+    event.preventDefault();
+    chatArea.scrollTop += event.deltaY;
+  };
+
   const renderAttachments = () => (
     <>
       {m.imageMarkdown && (() => {
@@ -191,14 +211,17 @@ const MessageItem = memo(function MessageItem({ message, archived, onImageClick,
               {m.content.length > 80 ? m.content.slice(0, 80) + '...' : m.content}
             </button>
             {!collapsed && (
-              <div className="tool-call-detail message-content-collapsed">
+              <div className="tool-call-detail message-content-collapsed" onWheel={handoffWheelAtBoundary}>
                 <pre className="message-text message-text-tool">{m.content}</pre>
                 {renderAttachments()}
               </div>
             )}
           </div>
         ) : (
-          <div className={`message-content ${collapsed && !editing ? "message-content-collapsed" : ""}`}>
+          <div
+            className={`message-content ${collapsed && !editing ? "message-content-collapsed" : ""}`}
+            onWheel={collapsed && !editing ? handoffWheelAtBoundary : undefined}
+          >
             {renderBody()}
             {renderAttachments()}
           </div>
