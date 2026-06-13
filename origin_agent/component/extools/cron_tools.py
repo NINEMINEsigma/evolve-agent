@@ -24,7 +24,6 @@ from __future__ import annotations
 
 import datetime
 import json
-import locale
 import logging
 import subprocess  # nosec
 import sys
@@ -38,6 +37,7 @@ from typing import Any, Dict, List, Optional, Set
 from abstract.tools.registry import registry, tool_error, tool_result
 from component.approval import ApprovalResult, request_user_confirm
 from system.pathutils import find_repo_root
+from system.subprocess_utils import build_subprocess_env, completed_process_from_bytes
 
 logger = logging.getLogger(__name__)
 
@@ -464,21 +464,25 @@ def _run_task(task: _CronTask) -> None:
     stdout_text = ""
 
     try:
-        _enc = locale.getpreferredencoding(False) or sys.getfilesystemencoding() or "utf-8"
         popen_kwargs: Dict[str, Any] = {
             "cwd": cwd_real,
             "stdout": subprocess.PIPE,
             "stderr": subprocess.STDOUT,
-            "text": True,
-            "encoding": _enc,
-            "errors": "replace",
+            "text": False,
+            "env": build_subprocess_env(),
         }
         if sys.platform == "win32":
             popen_kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
 
         result = subprocess.run(task.command, timeout=300, **popen_kwargs)
-        exit_code = result.returncode
-        stdout_text = result.stdout or ""
+        decoded = completed_process_from_bytes(
+            args=task.command,
+            returncode=result.returncode,
+            stdout=result.stdout,
+            stderr=None,
+        )
+        exit_code = decoded.returncode
+        stdout_text = decoded.stdout or ""
 
         logger.info(
             "Cron task executed | task=%s name=%s session=%s exit=%d",

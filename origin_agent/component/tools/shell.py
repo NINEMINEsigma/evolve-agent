@@ -15,7 +15,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import locale
 import logging
 import subprocess  # nosec
 import sys
@@ -160,11 +159,9 @@ def _execute(cmd_parts: List[str], cwd: str) -> dict:
             resolved_parts.append(part)
 
     logger.info("run_command | cwd=%s cmd=%s", cwd, cmd_parts)
-    _enc: str
     result: subprocess.CompletedProcess
     try:
-        _enc = locale.getpreferredencoding(False) or sys.getfilesystemencoding() or "utf-8"
-        result = _s().run(resolved_parts, cwd_ns=cwd, timeout=30, encoding=_enc, errors="replace")
+        result = _s().run(resolved_parts, cwd_ns=cwd, timeout=30)
     except SandboxError as exc:
         return tool_error(str(exc))
     except subprocess.TimeoutExpired:

@@ -34,6 +34,8 @@ from enum import Enum
 from pathlib import Path
 from typing import TYPE_CHECKING, Dict, List
 
+from system.subprocess_utils import build_subprocess_env, completed_process_from_bytes
+
 from pydantic import BaseModel, ConfigDict
 
 if TYPE_CHECKING:
@@ -268,52 +270,41 @@ class Sandbox:
                 )
 
         # -- 构建 env --
-        env: dict | None = None
-        if extra_env:
-            import os
-            env = os.environ.copy()
-            env.update(extra_env)
-
-        kwargs: dict = dict(
-            encoding=encoding,
-        )
-        if errors is not None:
-            kwargs["errors"] = errors
+        env = build_subprocess_env(extra_env)
 
         logger.debug("sandbox.run | cwd=%s cmd=%s", cwd_r.real, args)
 
         # 使用 Popen 以支持超时时强制终止整个进程树。
         # subprocess.run(timeout=...) 在 Windows 上不能可靠地
         # 终止子进程（例如 pnpm 生成的 node 进程）。
-        import os as _os
         popen_kwargs: dict = {
             "cwd": str(cwd_r.real),
             "stdout": subprocess.PIPE,
             "stderr": subprocess.PIPE,
-            "text": True,
+            "text": False,
             "env": env,
         }
         if sys.platform == "win32":
             # CREATE_NEW_PROCESS_GROUP 允许发送 CTRL_BREAK_EVENT，
             # 但我们将使用 taskkill 进行更可靠的进程树终止。
             popen_kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP  # type: ignore[attr-defined]
-        proc: subprocess.Popen = subprocess.Popen(args, **popen_kwargs, **kwargs)
-        stdout: str
-        stderr: str
+        proc: subprocess.Popen = subprocess.Popen(args, **popen_kwargs)
+        stdout: bytes
+        stderr: bytes
         try:
             stdout, stderr = proc.communicate(timeout=timeout)
         except subprocess.TimeoutExpired:
             _kill_proc_tree(proc.pid)
-            stdout, stderr = "", ""
+            stdout, stderr = b"", b""
             try:
                 proc.wait(timeout=5)
             except subprocess.TimeoutExpired:
                 pass
             raise subprocess.TimeoutExpired(
-                cmd=args[0], timeout=timeout, output=stdout, stderr=stderr,
+                cmd=args[0], timeout=timeout, output="", stderr="",
             )
 
-        return subprocess.CompletedProcess(
+        return completed_process_from_bytes(
             args=args,
             returncode=proc.returncode,
             stdout=stdout,
