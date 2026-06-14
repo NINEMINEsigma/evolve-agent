@@ -1,20 +1,12 @@
 import { useState } from "react";
-import { CronTask } from "../types";
+import { ChatMessage, CronTask } from "../types";
 import { extractMessageResources } from "../utils";
 
 interface DrawerProps {
   open: boolean;
   onClose: () => void;
   sessionId: string;
-  messages: Array<{
-    id: string;
-    role: string;
-    content: string;
-    imageMarkdown?: string;
-    audioUrl?: string;
-    audioAutoplay?: boolean;
-    downloadInfo?: { url: string; filename: string; size?: number };
-  }>;
+  messages: ChatMessage[];
   onImageClick: (src: string) => void;
   bgTasks: Array<{
     task_id: string; pid: number; command: string[]; start_time: number; log_path: string; status: string

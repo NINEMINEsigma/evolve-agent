@@ -88,7 +88,7 @@ export function parseToolResult(raw: string, toolName?: string): ParsedToolResul
 export interface MessageResourceSource {
   id: string;
   role: string;
-  content: string;
+  content: string | unknown;
   imageMarkdown?: string;
   audioUrl?: string;
   audioAutoplay?: boolean;
@@ -128,7 +128,7 @@ export function extractMessageResources(messages: MessageResourceSource[]): Mess
       });
     }
 
-    if (m.role === "agent") {
+    if (m.role === "agent" && typeof m.content === "string") {
       const imgMatches = m.content.matchAll(/!\[(.*?)\]\(([^)]+)\)/g);
       for (const match of imgMatches) {
         const src = match[2];

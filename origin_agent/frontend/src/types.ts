@@ -1,3 +1,16 @@
+export interface TextContentBlock {
+  type: "text";
+  text: string;
+}
+
+export interface ImageContentBlock {
+  type: "image_url";
+  image_url: { url: string };
+}
+
+export type ContentBlock = TextContentBlock | ImageContentBlock;
+export type MessageContent = string | ContentBlock[];
+
 export type MessageType =
   | "system"
   | "user_message"
@@ -13,7 +26,7 @@ export type MessageType =
 export interface WSMessage {
   type: MessageType;
   session_id?: string;
-  content?: string;
+  content?: MessageContent;
   message?: string;
   tool?: string;
   args?: Record<string, unknown>;
@@ -90,7 +103,7 @@ export interface CronTask {
 
 export interface ChatMessage {
   role: "user" | "agent" | "system" | "error" | "tool";
-  content: string;
+  content: MessageContent;
   id: string;
   messageIndex?: number;
   edited?: boolean;

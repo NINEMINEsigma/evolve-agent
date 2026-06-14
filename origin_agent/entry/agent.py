@@ -40,6 +40,7 @@ from entry.agent_support.multimodal import (
     is_content_block_error,
     sanitize_image_payload,
     strip_image_blocks,
+    summarize_message_for_log,
     supports_vision,
 )
 
@@ -162,7 +163,7 @@ class AgentLoop:
     async def process_message(
         self,
         session_id: str,
-        user_message: str,
+        user_message: str | list[dict[str, Any]],
     ) -> str:
         """处理一条用户消息，返回助手的回复。
 
@@ -182,7 +183,7 @@ class AgentLoop:
     async def _process_message_locked(
         self,
         session_id: str,
-        user_message: str,
+        user_message: str | list[dict[str, Any]],
     ) -> str:
         """process_message 的锁内实现。"""
         # 清除上一回合残留的过期中断标记
@@ -193,7 +194,10 @@ class AgentLoop:
             if info and info.get("status") == "archived":
                 return "This session has been archived. Please continue in the new session or start a new one."
         # ---- 持久化用户消息 ----
-        logger.info("Received user message | session=%s content=%s", session_id, user_message)
+        logger.info(
+            "Received user message | session=%s content=%s",
+            session_id, summarize_message_for_log(user_message),
+        )
         self._append(session_id, "user", user_message)
         # ---- 延迟初始化 memory provider ----
         if session_id not in self._memory_initialized:
@@ -205,8 +209,9 @@ class AgentLoop:
             self._memory_initialized[session_id] = True
 
         # ---- memory 预取 ----
+        # memory provider 通常只接受文本摘要，因此传入提取后的文本
         memory_ctx = self._memory.prefetch_all(
-            user_message, session_id=session_id
+            self._extract_text(user_message), session_id=session_id
         )
 
         # ---- 历史过长时自动终结会话并将当前回合转移到继承会话 ----
@@ -218,7 +223,7 @@ class AgentLoop:
             if new_sid:
                 session_id = new_sid
                 memory_ctx = self._memory.prefetch_all(
-                    user_message, session_id=session_id
+                    self._extract_text(user_message), session_id=session_id
                 )
 
         # ---- 构建消息列表 ----
@@ -393,7 +398,7 @@ class AgentLoop:
         return self._histories[session_id]
 
     def _append(
-        self, session_id: str, role: str, content: str,
+        self, session_id: str, role: str, content: str | list[dict[str, Any]],
         reasoning_content: str | None = None,
     ) -> None:
         entry: Dict[str, Any] = {"role": role, "content": content}
@@ -951,7 +956,7 @@ class AgentLoop:
     def _build_messages(
         self,
         session_id: str,
-        user_message: str,
+        user_message: str | list[dict[str, Any]],
         memory_ctx: str,
     ) -> List[Dict[str, Any]]:
         """构建当前回合的完整消息列表。"""

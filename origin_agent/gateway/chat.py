@@ -8,7 +8,7 @@ import threading
 import uuid
 from enum import Enum
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional, Union
 
 from pydantic import BaseModel
 
@@ -36,7 +36,7 @@ class MessageType(str, Enum):
 class Message(BaseModel):
     type: MessageType
     session_id: str = ""
-    content: Optional[str] = None
+    content: Optional[Any] = None
     tool: Optional[str] = None
     args: Optional[Dict[str, Any]] = None
     result: Optional[Any] = None

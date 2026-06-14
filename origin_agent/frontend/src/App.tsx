@@ -164,6 +164,7 @@ export default function App() {
           onToggleCollapse={ws.toggleMessageCollapse}
           onEditMessage={ws.editMessage}
           bottomRef={ws.bottomRef}
+          onDropFiles={ws.handleFileUpload}
         />
 
         <CronCountdown cronTasks={ws.cronTasks} />
@@ -175,10 +176,14 @@ export default function App() {
           uploading={ws.uploading}
           archived={currentSessionArchived}
           onSend={ws.send}
-          onUpload={ws.handleFileUpload}
+          onUpload={ws.handleFileInputChange}
           onUploadClick={ws.handleUploadClick}
           onInterrupt={ws.interrupt}
           fileInputRef={ws.fileInputRef}
+          pendingImages={ws.pendingImages}
+          onRemovePendingImage={ws.removePendingImage}
+          onPasteImage={ws.handlePasteImages}
+          inputRef={ws.inputRef}
         />
 
         <ConfirmDialog

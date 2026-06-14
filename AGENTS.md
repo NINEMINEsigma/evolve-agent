@@ -1,5 +1,15 @@
 # Evolve Agent — AGENTS.md
 
+> ⚠️ **极度重要 — 绝对禁止** ⚠️
+>
+> **不要在 `origin_agent/frontend/` 目录下执行 `pnpm install`、`pnpm build`、`pnpm dev` 或任何其他 pnpm/npm 命令。**
+>
+> `origin_agent/` 是唯一的源码真相源；前端构建必须由 `run.py` 在启动时自动复制到 `workspace/fast_agent_space/frontend/` 后进行。在 `origin_agent/frontend/` 下运行这些命令会污染源码目录、破坏构建环境，并导致不可预期的运行时错误。
+>
+> **正确验证方式：修改源码后，直接运行 `python run.py --load <config>`，`run.py` 会自动完成复制与构建。**
+>
+> 违反本条造成的构建失败或状态损坏，必须优先清理并恢复 `origin_agent/frontend/` 环境。
+
 ## Startup
 
 ```bash

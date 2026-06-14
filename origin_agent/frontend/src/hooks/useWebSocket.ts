@@ -10,8 +10,18 @@ import {
   CronTask,
   SessionInfo,
   WSMessage,
+  ContentBlock,
+  MessageContent,
 } from "../types";
 import { extractMessageResources, parseToolResult } from "../utils";
+
+const MAX_PASTE_IMAGE_SIZE = 20 * 1024 * 1024;
+
+export interface PendingImage {
+  id: string;
+  file: File;
+  dataUrl: string;
+}
 
 export function useWebSocket() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -47,11 +57,13 @@ export function useWebSocket() {
   }>>([]);
   const [cronTasks, setCronTasks] = useState<CronTask[]>([]);
   const [terminatingSessions, setTerminatingSessions] = useState<Set<string>>(new Set());
+  const [pendingImages, setPendingImages] = useState<PendingImage[]>([]);
 
   const wsRef = useRef<WebSocket | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const instantScrollRef = useRef(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const inputRef = useRef<HTMLDivElement>(null);
   const reconnectRef = useRef(0);
   const timerRef = useRef<ReturnType<typeof setTimeout>>();
   const manualRef = useRef(false);
@@ -67,7 +79,7 @@ export function useWebSocket() {
 
   const addMessage = useCallback((
     role: ChatMessage["role"],
-    content: string,
+    content: MessageContent,
     imageMarkdown?: string,
     downloadInfo?: DownloadInfo,
     audioUrl?: string,
@@ -133,7 +145,7 @@ export function useWebSocket() {
     ws.onmessage = (e) => {
       const msg: WSMessage = JSON.parse(e.data);
       if (msg.type === "system") {
-        const raw = msg.content ?? "";
+        const raw = typeof msg.content === "string" ? msg.content : JSON.stringify(msg.content ?? "");
         try {
           const data = JSON.parse(raw);
           if (data.build_hash) {
@@ -328,7 +340,7 @@ export function useWebSocket() {
           setDenyReason("此操作可能带来安全风险");
           setPendingConfirm({
             request_id: msg.request_id,
-            content: msg.content ?? "运行命令?",
+            content: typeof msg.content === "string" ? msg.content : "运行命令?",
             command: (msg.args as Record<string, unknown>)?.command as string[] | undefined,
             reason: (msg.args as Record<string, unknown>)?.reason as string | undefined,
             tool: msg.tool ?? undefined,
@@ -409,27 +421,75 @@ export function useWebSocket() {
   }, [pendingAsk]);
 
   const send = useCallback(() => {
-    const text = input.trim();
     const isArchived = sessions.find((s) => s.id === sessionId)?.status === "archived";
-    if (!text || !wsRef.current || waiting || wsRef.current.readyState !== WebSocket.OPEN || isArchived) return;
+    if (!wsRef.current || waiting || wsRef.current.readyState !== WebSocket.OPEN || isArchived) return;
+
+    const blocks = extractContentBlocks(inputRef.current, pendingImages);
+    const hasContent = blocks.length > 0;
+    if (!hasContent) return;
+
+    const content: MessageContent = blocks.length === 1 && blocks[0].type === "text" ? blocks[0].text : blocks;
+
     setMessages((prev) => [...prev, {
       role: "user",
-      content: text,
+      content,
       id: crypto.randomUUID(),
       messageIndex: nextMessageIndex(prev),
     }]);
-    wsRef.current.send(JSON.stringify({ type: "user_message", content: text }));
+    wsRef.current.send(JSON.stringify({ type: "user_message", content }));
     setInput("");
+    setPendingImages([]);
     setWaiting(true);
-  }, [input, sessions, sessionId, waiting, nextMessageIndex]);
+  }, [pendingImages, sessions, sessionId, waiting, nextMessageIndex]);
 
-  const handleFileUpload = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = e.target.files;
+  const extractContentBlocks = (el: HTMLDivElement | null, images: PendingImage[]): ContentBlock[] => {
+    if (!el) return [];
+    const blocks: ContentBlock[] = [];
+    const imageMap = new Map(images.map((img) => [img.id, img]));
+
+    const flushText = (text: string) => {
+      const trimmed = text.replace(/\u200B/g, "").replace(/\n{3,}/g, "\n\n").trim();
+      if (trimmed) blocks.push({ type: "text", text: trimmed });
+    };
+
+    const walk = (node: Node) => {
+      if (node.nodeType === Node.TEXT_NODE) {
+        flushText(node.textContent || "");
+        return;
+      }
+      if (node.nodeType === Node.ELEMENT_NODE) {
+        const el = node as HTMLElement;
+        if (el.classList.contains("input-inline-image")) {
+          const id = el.dataset.imageId;
+          const img = id ? imageMap.get(id) : undefined;
+          if (img) {
+            blocks.push({ type: "image_url", image_url: { url: img.dataUrl } });
+          }
+          return;
+        }
+        for (const child of Array.from(el.childNodes)) {
+          walk(child);
+        }
+        if (el.tagName === "DIV" && blocks.length > 0) {
+          const last = blocks[blocks.length - 1];
+          if (last.type === "text") last.text += "\n";
+        }
+      }
+    };
+
+    for (const child of Array.from(el.childNodes)) {
+      walk(child);
+    }
+    return blocks;
+  };
+
+  const handleFileUpload = useCallback((files: FileList | File[] | null) => {
     const isArchived = sessions.find((s) => s.id === sessionId)?.status === "archived";
     if (!files || files.length === 0 || !wsRef.current || wsRef.current.readyState !== WebSocket.OPEN || isArchived) return;
 
     setUploading(true);
     let completed = 0;
+    const total = files.length;
 
     Array.from(files).forEach((file) => {
       const localPath = (file as any).path || (file as any).webkitRelativePath || "";
@@ -446,7 +506,7 @@ export function useWebSocket() {
         );
         addMessage("system", `📎 上传中（硬链接）：${file.name}`);
         completed++;
-        if (completed === files.length) {
+        if (completed === total) {
           setUploading(false);
           if (fileInputRef.current) fileInputRef.current.value = "";
         }
@@ -466,7 +526,7 @@ export function useWebSocket() {
         );
         addMessage("system", `📎 正在上传：${file.name} (${(file.size / 1024).toFixed(1)}KB)...`);
         completed++;
-        if (completed === files.length) {
+        if (completed === total) {
           setUploading(false);
           if (fileInputRef.current) fileInputRef.current.value = "";
         }
@@ -474,11 +534,47 @@ export function useWebSocket() {
       reader.onerror = () => {
         addMessage("error", `文件读取失败：${file.name}`);
         completed++;
-        if (completed === files.length) setUploading(false);
+        if (completed === total) setUploading(false);
       };
       reader.readAsDataURL(file);
     });
   }, [sessions, sessionId, addMessage]);
+
+  const addPendingImage = useCallback((file: File) => {
+    return new Promise<{ id: string; dataUrl: string } | null>((resolve) => {
+      if (!file.type.startsWith("image/")) {
+        addMessage("error", "仅支持粘贴图片文件");
+        resolve(null);
+        return;
+      }
+      if (file.size > MAX_PASTE_IMAGE_SIZE) {
+        addMessage("error", `图片超过 20MB 限制：${file.name}`);
+        resolve(null);
+        return;
+      }
+      const id = crypto.randomUUID();
+      const reader = new FileReader();
+      reader.onload = () => {
+        const dataUrl = reader.result as string;
+        setPendingImages((prev) => [...prev, { id, file, dataUrl }]);
+        resolve({ id, dataUrl });
+      };
+      reader.onerror = () => {
+        addMessage("error", `读取图片失败：${file.name}`);
+        resolve(null);
+      };
+      reader.readAsDataURL(file);
+    });
+  }, [addMessage]);
+
+  const removePendingImage = useCallback((id: string) => {
+    setPendingImages((prev) => prev.filter((img) => img.id !== id));
+  }, []);
+
+  const handlePasteImages = useCallback(async (file: File) => {
+    return addPendingImage(file);
+  }, [addPendingImage]);
+
 
   const isLocal = typeof window !== "undefined" &&
     (window.location.hostname === "127.0.0.1" || window.location.hostname === "localhost");
@@ -504,6 +600,11 @@ export function useWebSocket() {
       fileInputRef.current?.click();
     }
   }, [addMessage, isLocal]);
+
+  const handleFileInputChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    handleFileUpload(e.target.files);
+    if (fileInputRef.current) fileInputRef.current.value = "";
+  }, [handleFileUpload]);
 
   const newChat = useCallback(() => {
     manualRef.current = true;
@@ -739,10 +840,16 @@ export function useWebSocket() {
     cronTasks,
     setCronTasks,
     terminatingSessions,
+    pendingImages,
     // actions
     send,
     handleFileUpload,
+    handleFileInputChange,
     handleUploadClick,
+    addPendingImage,
+    removePendingImage,
+    handlePasteImages,
+    inputRef,
     newChat,
     switchSession,
     deleteSession,

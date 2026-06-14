@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { ChatMessage } from "../types";
 import MessageItem from "./MessageItem";
 
@@ -10,9 +10,11 @@ interface ChatAreaProps {
   onToggleCollapse: (id: string) => void;
   onEditMessage: (id: string, content: string) => void | Promise<void>;
   bottomRef: React.RefObject<HTMLDivElement>;
+  onDropFiles: (files: FileList) => void;
 }
 
-export default function ChatArea({ messages, waiting, archived, onImageClick, onToggleCollapse, onEditMessage, bottomRef }: ChatAreaProps) {
+export default function ChatArea({ messages, waiting, archived, onImageClick, onToggleCollapse, onEditMessage, bottomRef, onDropFiles }: ChatAreaProps) {
+  const [dragOver, setDragOver] = useState(false);
   const messageList = useMemo(() =>
     messages.map((m) => (
       <MessageItem
@@ -28,7 +30,21 @@ export default function ChatArea({ messages, waiting, archived, onImageClick, on
   );
 
   return (
-    <main className="chat-area">
+    <main
+      className={`chat-area ${dragOver ? "chat-area-drag-over" : ""}`}
+      onDragOver={(e) => {
+        e.preventDefault();
+        setDragOver(true);
+      }}
+      onDragLeave={() => setDragOver(false)}
+      onDrop={(e) => {
+        e.preventDefault();
+        setDragOver(false);
+        if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+          onDropFiles(e.dataTransfer.files);
+        }
+      }}
+    >
       {messageList}
 
       {waiting && (

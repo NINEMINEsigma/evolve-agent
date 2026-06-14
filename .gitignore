@@ -198,3 +198,6 @@ custom_models/*.gguf
 /temp/
 /config.json
 /config copy.json
+
+# task
+/.tasks/

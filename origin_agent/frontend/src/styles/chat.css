@@ -20,3 +20,9 @@
   background: var(--border);
   border-radius: 3px;
 }
+
+.chat-area-drag-over {
+  outline: 2px dashed var(--accent);
+  outline-offset: -4px;
+  background: rgba(25, 195, 125, 0.05);
+}

@@ -80,14 +80,38 @@ def build_turn_messages(
     for i, msg in enumerate(history):
         if i == len(history) - 1 and msg.get("role") == "user":
             hooked_msg = dict(msg)
-            hooked_content = str(hooked_msg.get("content", ""))
+            hooked_content = hooked_msg.get("content", "")
 
-            if memory_ctx:
-                hooked_content += f"\n<|im_memory_context_start|>\n{memory_ctx}\n<|im_memory_context_end|>"
-
+            # 把 memory / hooks 上下文追加到最后一条用户文本 block 后面
             hooks_context = collect_hooks_context(hooks, session_id, workspace)
-            if hooks_context:
-                hooked_content += hooks_context
+            if memory_ctx or hooks_context:
+                if isinstance(hooked_content, list):
+                    # 找到最后一个 text block，把上下文追加到它的 text
+                    appended = False
+                    for block in reversed(hooked_content):
+                        if isinstance(block, dict) and block.get("type") == "text":
+                            extras: list[str] = []
+                            if memory_ctx:
+                                extras.append(f"<|im_memory_context_start|>\n{memory_ctx}\n<|im_memory_context_end|>")
+                            if hooks_context:
+                                extras.append(hooks_context)
+                            block["text"] = str(block.get("text", "")) + "\n" + "\n".join(extras)
+                            appended = True
+                            break
+                    if not appended:
+                        # 没有 text block 时新建一个
+                        extras: list[str] = []
+                        if memory_ctx:
+                            extras.append(f"<|im_memory_context_start|>\n{memory_ctx}\n<|im_memory_context_end|>")
+                        if hooks_context:
+                            extras.append(hooks_context)
+                        hooked_content.append({"type": "text", "text": "\n".join(extras)})
+                else:
+                    hooked_content = str(hooked_content)
+                    if memory_ctx:
+                        hooked_content += f"\n<|im_memory_context_start|>\n{memory_ctx}\n<|im_memory_context_end|>"
+                    if hooks_context:
+                        hooked_content += hooks_context
 
             hooked_msg["content"] = hooked_content
             messages.append(hooked_msg)

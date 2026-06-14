@@ -104,3 +104,37 @@ def sanitize_image_payload(result: dict, keep_metadata: bool = True) -> dict:
     if keep_metadata and img_info:
         pr_copy["_image"] = img_info
     return pr_copy
+
+
+def summarize_message_for_log(content: str | list[dict[str, Any]], max_text_len: int = 300) -> str:
+    """将用户消息（纯文本或多模态 blocks）转为适合日志的短字符串。
+
+    图片 block 会被替换为 [image_url] 占位符，避免 base64 撑爆日志。
+    """
+    if isinstance(content, str):
+        if len(content) <= max_text_len:
+            return content
+        return content[:max_text_len] + "..."
+
+    parts: list[str] = []
+    for block in content:
+        if not isinstance(block, dict):
+            parts.append(str(block))
+            continue
+        btype = block.get("type")
+        if btype == "text":
+            parts.append(str(block.get("text", "")))
+        elif btype == "image_url":
+            url = block.get("image_url", {}).get("url", "")
+            if url.startswith("data:"):
+                mime = url.split(";")[0].split(":")[1] if ";" in url else "image"
+                parts.append(f"[{mime}]")
+            else:
+                parts.append("[image_url]")
+        else:
+            parts.append(f"[{btype}]")
+
+    summary = " | ".join(parts)
+    if len(summary) > max_text_len:
+        summary = summary[:max_text_len] + "..."
+    return summary

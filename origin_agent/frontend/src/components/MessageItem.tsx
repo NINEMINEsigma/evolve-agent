@@ -1,7 +1,7 @@
 import { memo, useMemo, useState, type WheelEvent } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { ChatMessage } from "../types";
+import { ChatMessage, ContentBlock } from "../types";
 import CodeBlock from "./CodeBlock";
 import PlaylistPlayer from "./PlaylistPlayer";
 
@@ -65,11 +65,12 @@ const MessageItem = memo(function MessageItem({ message, archived, onImageClick,
 }) {
   const m = message;
   const [editing, setEditing] = useState(false);
-  const [draft, setDraft] = useState(m.content);
-  const lineCount = m.content.split("\n").length;
-  const isLong = m.content.length > LONG_MESSAGE_CHARS || lineCount > LONG_MESSAGE_LINES;
+  const textContent = typeof m.content === "string" ? m.content : "";
+  const [draft, setDraft] = useState(textContent);
+  const lineCount = textContent.split("\n").length;
+  const isLong = textContent.length > LONG_MESSAGE_CHARS || lineCount > LONG_MESSAGE_LINES;
   const collapsed = isLong && m.collapsed !== false;
-  const canEdit = !archived && typeof m.messageIndex === "number";
+  const canEdit = !archived && typeof m.messageIndex === "number" && typeof m.content === "string";
 
   const mdComponents = useMemo(() => ({
     ...markdownComponentsBase,
@@ -93,7 +94,7 @@ const MessageItem = memo(function MessageItem({ message, archived, onImageClick,
   };
 
   const cancelEdit = () => {
-    setDraft(m.content);
+    setDraft(textContent);
     setEditing(false);
   };
 
@@ -158,6 +159,45 @@ const MessageItem = memo(function MessageItem({ message, archived, onImageClick,
     </>
   );
 
+  const renderUserContent = () => {
+    const content = m.content;
+    let text = "";
+    const images: string[] = [];
+    if (typeof content === "string") {
+      text = content;
+    } else if (Array.isArray(content)) {
+      const blocks = content as ContentBlock[];
+      const textParts: string[] = [];
+      blocks.forEach((block) => {
+        if (block.type === "text") {
+          textParts.push(block.text);
+        } else if (block.type === "image_url") {
+          images.push(block.image_url.url);
+        }
+      });
+      text = textParts.join("");
+    }
+    return (
+      <>
+        <pre className={`message-text message-text-${m.role}`}>{text}</pre>
+        {images.length > 0 && (
+          <div className="message-user-images">
+            {images.map((src, idx) => (
+              <a
+                key={`${m.id}-img-${idx}`}
+                href="#"
+                onClick={(e) => { e.preventDefault(); onImageClick(src); }}
+                className="message-user-img-link"
+              >
+                <img src={src} alt={`图片 ${idx + 1}`} className="message-user-thumb" />
+              </a>
+            ))}
+          </div>
+        )}
+      </>
+    );
+  };
+
   const renderBody = () => {
     if (editing) {
       return (
@@ -186,13 +226,17 @@ const MessageItem = memo(function MessageItem({ message, archived, onImageClick,
             </details>
           )}
           <ReactMarkdown remarkPlugins={[remarkGfm]} components={mdComponents}>
-            {m.content || (m.reasoningContent ? "_仅包含思考内容_" : "")}
+            {textContent || (m.reasoningContent ? "_仅包含思考内容_" : "")}
           </ReactMarkdown>
         </>
       );
     }
 
-    return <pre className={`message-text message-text-${m.role}`}>{m.content}</pre>;
+    if (m.role === "user") {
+      return renderUserContent();
+    }
+
+    return <pre className={`message-text message-text-${m.role}`}>{textContent}</pre>;
   };
 
   return (
@@ -208,11 +252,11 @@ const MessageItem = memo(function MessageItem({ message, archived, onImageClick,
               className={`tool-call-summary ${collapsed ? "" : "tool-call-summary-open"}`}
               onClick={() => onToggleCollapse(m.id)}
             >
-              {m.content.length > 80 ? m.content.slice(0, 80) + '...' : m.content}
+              {textContent.length > 80 ? textContent.slice(0, 80) + '...' : textContent}
             </button>
             {!collapsed && (
               <div className="tool-call-detail message-content-collapsed" onWheel={handoffWheelAtBoundary}>
-                <pre className="message-text message-text-tool">{m.content}</pre>
+                <pre className="message-text message-text-tool">{textContent}</pre>
                 {renderAttachments()}
               </div>
             )}
@@ -237,7 +281,7 @@ const MessageItem = memo(function MessageItem({ message, archived, onImageClick,
               </button>
             )}
             {canEdit && !editing && (
-              <button type="button" onClick={() => { setDraft(m.content); setEditing(true); }}>
+              <button type="button" onClick={() => { setDraft(textContent); setEditing(true); }}>
                 编辑
               </button>
             )}

@@ -273,6 +273,41 @@
   font-family: inherit;
 }
 
+/* ── User message images ── */
+.message-user-images {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.message-user-img-link {
+  position: relative;
+  display: inline-block;
+  width: 80px;
+  height: 80px;
+  border-radius: 6px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.message-user-thumb {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  cursor: pointer;
+  transition: opacity 0.15s;
+}
+
+.message-user-thumb:hover {
+  opacity: 0.85;
+}
+
+.message-user-img-index {
+  display: none;
+}
+
 /* ── Message actions, folding and editing ── */
 .message-toolbar {
   display: flex;

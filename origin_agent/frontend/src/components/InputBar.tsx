@@ -1,4 +1,6 @@
 import type { ChangeEvent, RefObject } from "react";
+import RichInput from "./RichInput";
+import type { PendingImage } from "../hooks/useWebSocket";
 
 interface InputBarProps {
   input: string;
@@ -11,6 +13,10 @@ interface InputBarProps {
   onUploadClick: () => Promise<void>;
   onInterrupt: () => void;
   fileInputRef: RefObject<HTMLInputElement>;
+  pendingImages: PendingImage[];
+  onRemovePendingImage: (id: string) => void;
+  onPasteImage: (file: File) => Promise<{ id: string; dataUrl: string } | null>;
+  inputRef: RefObject<HTMLDivElement>;
 }
 
 export default function InputBar({
@@ -24,6 +30,10 @@ export default function InputBar({
   onUploadClick,
   onInterrupt,
   fileInputRef,
+  pendingImages,
+  onRemovePendingImage,
+  onPasteImage,
+  inputRef,
 }: InputBarProps) {
   if (archived) return null;
 
@@ -31,26 +41,17 @@ export default function InputBar({
     <footer className="input-bar">
       <div className="input-bar-inner">
         <div className="input-bar-row">
-          <textarea
-              className="input-field"
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" && !e.shiftKey) {
-                  e.preventDefault();
-                  onSend();
-                }
-              }}
-              onInput={(e) => {
-                const el = e.currentTarget;
-                el.style.height = "auto";
-                el.style.height = el.scrollHeight + "px";
-              }}
-              placeholder="输入消息..."
-              autoFocus
-              disabled={waiting}
-              rows={1}
-            />
+          <RichInput
+            ref={inputRef}
+            value={input}
+            onChange={(html) => setInput(html)}
+            onSend={onSend}
+            onPasteImage={onPasteImage}
+            onRemoveImage={onRemovePendingImage}
+            pendingImages={pendingImages}
+            disabled={waiting}
+            placeholder="输入消息..."
+          />
             <input
               ref={fileInputRef}
               type="file"
@@ -71,7 +72,7 @@ export default function InputBar({
                 <line x1="12" y1="3" x2="12" y2="15" />
               </svg>
             </button>
-            <button className="send-btn" onClick={onSend} disabled={waiting || !input.trim()}>
+            <button className="send-btn" onClick={onSend} disabled={waiting}>
               <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2">
                 <path d="M22 2L11 13" /><path d="M22 2L15 22L11 13L2 9L22 2Z" />
               </svg>
