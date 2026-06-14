@@ -79,12 +79,9 @@ class AgentLoop:
         # skill 缓存是否有效
         self._skill_cache_valid: bool = False
         # 累计 token 消耗，仅用于 dashboard 展示。
-        # 压缩决策使用 _estimate_context_tokens() 替代。
         self._token_usage: Dict[str, int] = {}
         # 最近一次 LLM 调用返回的真实 prompt_tokens（上下文占用锚点）
         self._last_prompt_tokens: Dict[str, int] = {}
-        # 缓存 system prompt 字符串，用于精确 token 估算
-        self._cached_system_prompt: str | None = None
         # SessionManager 引用（由 server.py 注入），用于归档+旋转会话
         self._session_manager: Any | None = None
         # 会话旋转通知队列：old_sid -> new_sid（server.py 在 process_message 后检查并推送前端）
@@ -322,14 +319,12 @@ class AgentLoop:
                     self._persist_message(session_id, tool_msg)
 
                     if self._tool_event_callback:
-                        context_tokens = self._estimate_context_tokens(session_id)
-                        self._last_prompt_tokens[session_id] = context_tokens
                         asyncio.create_task(
                             self._tool_event_callback(
                                 session_id, "usage_update", "",
                                 json.dumps({
                                     "token_usage": self._token_usage.get(session_id, 0),
-                                    "context_tokens": context_tokens,
+                                    "context_tokens": self._last_prompt_tokens.get(session_id, 0),
                                 }),
                             ) # type: ignore
                         )
@@ -448,10 +443,14 @@ class AgentLoop:
             logger.warning("Failed to remove last user message from disk for session %s: %s", session_id, exc)
 
     def _is_context_over_limit(self, session_id: str, safety_margin: int = 5000) -> bool:
-        """判断当前上下文是否已经需要会话终结与延续。"""
+        """判断当前上下文是否已经需要会话终结与延续。
+
+        仅使用 LLM 服务商返回的真实 prompt_tokens 作为判断依据；
+        未取得真实值时保守返回 False，避免本地估算导致误判。
+        """
         current_tokens: int = self._last_prompt_tokens.get(session_id, 0)
         if current_tokens == 0:
-            current_tokens = self._estimate_context_tokens(session_id)
+            return False
         return (
             current_tokens + self._ctx.llm_max_output_tokens + safety_margin
         ) > self._ctx.llm_max_context_tokens
@@ -695,51 +694,6 @@ class AgentLoop:
     def invalidate_skill_cache(self) -> None:
         """强制下次调用时重新加载 skill 缓存。"""
         self._skill_cache_valid = False
-        self._cached_system_prompt = None
-
-    def _estimate_context_tokens(self, session_id: str) -> int:
-        """通过 tiktoken 计算历史 + system prompt 的实际上下文 token 数。
-
-        用于驱动压缩决策 — 与仅用于 dashboard 展示的
-        累计 ``_token_usage`` 计数器不同。
-        """
-        import tiktoken
-
-        history: List[Dict[str, Any]] = self._get_history(session_id)
-        if not history:
-            return 0
-
-        enc: tiktoken.Encoding | None = None
-        try:
-            enc = tiktoken.encoding_for_model(self._ctx.llm_model)
-        except KeyError:
-            # cl100k_base 覆盖 gpt-4、gpt-3.5-turbo 及大多数兼容模型
-            enc = tiktoken.get_encoding("cl100k_base")
-
-        def count_tokens(text: Any) -> int:
-            return len(enc.encode(str(text), disallowed_special=()))
-
-        total: int = 0
-        for msg in history:
-            # OpenAI 聊天消息开销：<|im_start|>role<|im_end|> ... <|im_end|>
-            total += 4
-            total += count_tokens(msg.get("role", ""))
-            total += count_tokens(msg.get("content", ""))
-            rc: Any = msg.get("reasoning_content")
-            if rc:
-                total += 4
-                total += count_tokens(rc)
-            tc: Any = msg.get("tool_calls")
-            if tc:
-                total += count_tokens(json.dumps(tc, ensure_ascii=False))
-
-        # 使用缓存的 system prompt 精确计数（而非固定 +2000）
-        if self._cached_system_prompt is not None:
-            total += count_tokens(self._cached_system_prompt)
-        else:
-            total += 2000
-
-        return total
 
     def _overwrite_history_file(self, session_id: str) -> None:
         """将内存中的完整历史覆写回磁盘 JSONL（用于压缩后持久化）。"""
@@ -1005,7 +959,6 @@ class AgentLoop:
             self._ctx,
             self._collect_skill_prompts(),
         )
-        self._cached_system_prompt = system_prompt
         return build_turn_messages(
             system_prompt,
             self._get_history(session_id),
