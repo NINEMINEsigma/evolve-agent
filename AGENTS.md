@@ -3,7 +3,7 @@
 ## Startup
 
 ```bash
-python run.py
+python run.py --load default
 ```
 
 Requires `OPENAI_API_KEY`. Optional `OPENAI_BASE_URL` to override default LLM endpoint. Web UI at `http://127.0.0.1:8765`.
@@ -12,10 +12,19 @@ CLI flags (override `config.py` defaults): `--fouce_init`, `--approval_model_pat
 
 Environment check: `python check_env.py --cuda`
 
+### Configuration gotchas
+
+- `config.py` prompts interactively for a config key unless `--load <key>` or `--save <key>` is given. In non-interactive/agent sessions always pass `--load default` (or another key from `config.json`).
+- `config.json` contains an unencrypted API key and is gitignored. Do not commit it.
+- The `default` config in `config.json` has `fouce_init: true`, so `--load default` wipes `workspace/` on each start. Use a different config key for persistent workspaces.
+
 ## Iron rules
 
 - **Never execute `origin_agent/` directly.** `run.py` copies it to `workspace/fast_agent_space/` before running. No: `origin_agent/__main__.py` direct execution, `pnpm install/build/dev` in `origin_agent/frontend/`, or using `origin_agent/` paths in `sys.path` or `cwd`.
 - **Never modify `workspace/` code files** (`.py`, `.js`, `.ts`, `.tsx`, `.css`). They are runtime copies — changes are lost on re-init. Non-code files (logs, JSON) are readable but not writable.
+- **Never read or search `workspace/` code files.** Do not use them as code evidence; they are runtime copies of `origin_agent/`.
+- **Never use scripts to batch-edit source files.** Make targeted, reviewable edits.
+- `origin_agent/frontend/` is not at the repo root, so static type/IDE awareness may be inaccurate. Before relying on frontend type checks or builds, stop and notify the user.
 
 ## Architecture
 
@@ -33,6 +42,13 @@ third/               ← git submodules: easysave, filesystem, llamaapis
 - No CI/CD, no test framework, no lint/typecheck. Pure runtime code evolution.
 - `pyrightconfig.json` adds `origin_agent/` and `third/` to `extraPaths`.
 - `.shell_allowlist.json` at project root stores permanently-allowed shell commands.
+
+## Tool registration style
+
+When adding new `registry.register(...)` tools, follow the convention in `component/tools/`:
+
+- `schema["description"]` is written in English.
+- The line immediately above the `description` string is a Chinese comment explaining the tool behavior.
 
 ## Lifecycle (run.py)
 
@@ -65,6 +81,7 @@ read_file (fork:path) → write_fork (or edit_file fork:path) → validate_code 
 - `validate_frontend`: runs `pnpm install && pnpm run build` on `fork:frontend`. Required if frontend touched.
 - `evolve_code` calls `finalize_evolution()` → py_compile deep check → triggers exit code -1.
 - `fouce_init` is intentionally misspelled (not `force_init`).
+- `diff_fast_fork`: compare `fast_agent_space/` vs `fork:` before swapping; skip `evolve_code` if identical.
 
 ## Template system
 
