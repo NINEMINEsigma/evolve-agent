@@ -89,6 +89,19 @@ export function useWebSocket() {
       .catch(() => {});
   }, []);
 
+  const fetchToolResources = useCallback((sid: string) => {
+    if (!sid) return;
+    fetch(`/api/sessions/${sid}/tool-resources`)
+      .then((r) => r.json())
+      .then((data) => {
+        const activeSid = localStorage.getItem("evolve_session_id") || sid;
+        if (activeSid !== sid) return;
+        setTaskProgress(data.task_progress || {});
+        setClipboardDisplays(data.clipboard_display || {});
+      })
+      .catch(() => {});
+  }, []);
+
   const connect = useCallback(() => {
     const lastSid = localStorage.getItem("evolve_session_id") || "";
     const qs = lastSid ? `?resume=${lastSid}` : "";
@@ -187,6 +200,7 @@ export function useWebSocket() {
             setTokenUsage(0);
             setClipboardDisplays({});
             setTaskProgress({});
+            fetchToolResources(data.new_sid);
             fetchSessions();
             return;
           }
@@ -211,6 +225,7 @@ export function useWebSocket() {
         if (msg.session_id) {
           setSessionId(msg.session_id);
           localStorage.setItem("evolve_session_id", msg.session_id);
+          fetchToolResources(msg.session_id);
         }
       }
       else if (msg.type === "agent_message") {
@@ -333,7 +348,7 @@ export function useWebSocket() {
         }
       }
     };
-  }, [addMessage, fetchSessions, nextMessageIndex]);
+  }, [addMessage, fetchSessions, fetchToolResources, nextMessageIndex]);
 
   const toggleMessageCollapse = useCallback((id: string) => {
     setMessages((prev) => prev.map((m) => (
@@ -620,6 +635,11 @@ export function useWebSocket() {
       }));
     }
   }, []);
+
+  useEffect(() => {
+    if (!sessionId) return;
+    fetchToolResources(sessionId);
+  }, [sessionId, fetchToolResources]);
 
   const interrupt = useCallback(() => {
     ignoreStaleRef.current = true;

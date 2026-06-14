@@ -343,6 +343,21 @@ async def list_sessions():
     return {"sessions": sessions.get_all()}
 
 
+@app.get("/api/sessions/{session_id}/tool-resources")
+async def get_session_tool_resources(session_id: str):
+    """返回 session 的可恢复工具副作用资源快照。"""
+    if not sessions.exists(session_id):
+        return {"session_id": session_id, "task_progress": {}, "clipboard_display": {}}
+    if _agent_loop is None or not hasattr(_agent_loop, "get_tool_resources"):
+        return {"session_id": session_id, "task_progress": {}, "clipboard_display": {}}
+    resources = _agent_loop.get_tool_resources(session_id)  # type: ignore[union-attr]
+    return {
+        "session_id": session_id,
+        "task_progress": resources.get("task_progress", {}),
+        "clipboard_display": resources.get("clipboard_display", {}),
+    }
+
+
 @app.post("/api/confirm/{request_id}")
 async def http_confirm(request_id: str, req: Request):
     """通过 HTTP 处理确认响应（独立于 WebSocket 连接状态）。"""

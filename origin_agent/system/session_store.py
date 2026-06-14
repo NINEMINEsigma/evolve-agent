@@ -28,6 +28,9 @@ class SessionStore:
     def token_usage_path(self, session_id: str) -> Path:
         return self.session_dir(session_id) / "token_usage.json"
 
+    def tool_resources_path(self, session_id: str) -> Path:
+        return self.session_dir(session_id) / "tool_resources.json"
+
     def append_message(self, session_id: str, entry: dict[str, Any]) -> None:
         path = self.messages_path(session_id)
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -84,6 +87,22 @@ class SessionStore:
 
     def write_summary(self, session_id: str, summary: str) -> None:
         self._write_text_atomic(self.summary_path(session_id), summary)
+
+    def read_tool_resources(self, session_id: str) -> dict[str, Any]:
+        path = self.tool_resources_path(session_id)
+        if not path.exists():
+            return {"task_progress": {}, "clipboard_display": {}}
+        data = json.loads(path.read_text(encoding="utf-8"))
+        if not isinstance(data, dict):
+            return {"task_progress": {}, "clipboard_display": {}}
+        return {
+            "task_progress": data.get("task_progress", {}) if isinstance(data.get("task_progress"), dict) else {},
+            "clipboard_display": data.get("clipboard_display", {}) if isinstance(data.get("clipboard_display"), dict) else {},
+        }
+
+    def write_tool_resources(self, session_id: str, resources: dict[str, Any]) -> None:
+        payload = json.dumps(resources, ensure_ascii=False, indent=2)
+        self._write_text_atomic(self.tool_resources_path(session_id), payload)
 
     @staticmethod
     def _write_text_atomic(path: Path, content: str) -> None:

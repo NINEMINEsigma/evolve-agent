@@ -478,6 +478,69 @@ class AgentLoop:
         except Exception:
             return 0
 
+    def _load_tool_resources(self, session_id: str) -> dict[str, Any]:
+        if self._session_store is None:
+            return {"task_progress": {}, "clipboard_display": {}}
+        try:
+            return self._session_store.read_tool_resources(session_id)
+        except Exception as exc:
+            logger.warning("Failed to load tool resources for session %s: %s", session_id, exc)
+            return {"task_progress": {}, "clipboard_display": {}}
+
+    def _persist_tool_resource_event(self, session_id: str, resource_type: str, tool_name: str, payload: str) -> None:
+        if self._session_store is None:
+            return
+        try:
+            data: dict[str, Any] = json.loads(payload)
+        except json.JSONDecodeError:
+            return
+
+        resources = self._load_tool_resources(session_id)
+        bucket = resources.setdefault(resource_type, {})
+        if not isinstance(bucket, dict):
+            bucket = {}
+            resources[resource_type] = bucket
+
+        if resource_type == "task_progress":
+            if tool_name == "clear_task_progress":
+                cleared = data.get("cleared")
+                if isinstance(cleared, list) and cleared:
+                    for task_id in cleared:
+                        bucket.pop(str(task_id), None)
+                else:
+                    bucket.clear()
+            elif data.get("task_id"):
+                bucket[str(data["task_id"])] = {
+                    "task_id": str(data["task_id"]),
+                    "label": str(data.get("label") or data["task_id"]),
+                    "current": data.get("current", 0),
+                    "total": data.get("total", 100),
+                    "percent": data.get("percent", 0),
+                    "status": str(data.get("status") or "running"),
+                }
+        elif resource_type == "clipboard_display":
+            if tool_name == "clear_clipboard_display":
+                cleared = data.get("cleared")
+                if isinstance(cleared, list) and cleared:
+                    for display_id in cleared:
+                        bucket.pop(str(display_id), None)
+                else:
+                    bucket.clear()
+            elif data.get("display_id"):
+                bucket[str(data["display_id"])] = {
+                    "display_id": str(data["display_id"]),
+                    "label": str(data.get("label") or data["display_id"]),
+                    "content": str(data.get("content") or ""),
+                }
+
+        try:
+            self._session_store.write_tool_resources(session_id, resources)
+        except Exception as exc:
+            logger.warning("Failed to persist tool resources for session %s: %s", session_id, exc)
+
+    def get_tool_resources(self, session_id: str) -> dict[str, Any]:
+        return self._load_tool_resources(session_id)
+
     def clear_session(self, session_id: str) -> None:
         """从内存中移除 session，可选择清理磁盘文件。"""
         self._histories.pop(session_id, None)
@@ -673,17 +736,19 @@ class AgentLoop:
             .replace(r"{{recent_text}}", recent_text)
         )
 
-        _fallback: str = "(Conversation too long, auto-truncated)" if _use_zh else "(History too long, truncated)"
         prefix: str = "[Context Summary]"
+        fallback: str = "failed to compress history"
 
         try:
             summary_resp: LLMResponse = await self._llm.chat(
                 [{"role": "user", "content": summary_prompt}],
                 tools=[],
             )
-            summary: str = summary_resp.content.strip()[:300] if summary_resp.content else ""
+            summary: str = summary_resp.content.strip() if summary_resp.content else fallback
         except Exception:
-            summary = _fallback
+            summary = fallback
+
+        summary += f"[Last Messages]\n{recent_text}"
 
         self._histories[session_id] = (
             [{"role": "system", "content": f"{prefix}\n{summary}"}]
@@ -1204,27 +1269,30 @@ class AgentLoop:
             except Exception as _exc:
                 logger.warning("Failed to write tool result to file: %s", _exc)
 
-        # ---- 进度条工具：额外推送 task_progress 事件 ----
-        if self._tool_event_callback and tc.name in ("set_task_progress", "clear_task_progress"):
+        # ---- 可恢复工具副作用资源：实时持久化并推送前端事件 ----
+        if tc.name in ("set_task_progress", "clear_task_progress"):
             _progress_payload: str = result_str
             if isinstance(result, dict) and "_image" in result:
                 _progress_payload = json.dumps(sanitize_image_payload(result), ensure_ascii=False)
-            asyncio.create_task(
-                self._tool_event_callback(
-                    session_id, "task_progress", tc.name, _progress_payload,
-                ) # type: ignore
-            )
+            self._persist_tool_resource_event(session_id, "task_progress", tc.name, _progress_payload)
+            if self._tool_event_callback:
+                asyncio.create_task(
+                    self._tool_event_callback(
+                        session_id, "task_progress", tc.name, _progress_payload,
+                    ) # type: ignore
+                )
 
-        # ---- 剪贴板展示工具：额外推送 clipboard_display 事件 ----
-        if self._tool_event_callback and tc.name in ("set_clipboard_display", "clear_clipboard_display"):
+        if tc.name in ("set_clipboard_display", "clear_clipboard_display"):
             _display_payload: str = result_str
             if isinstance(result, dict) and "_image" in result:
                 _display_payload = json.dumps(sanitize_image_payload(result), ensure_ascii=False)
-            asyncio.create_task(
-                self._tool_event_callback(
-                    session_id, "clipboard_display", tc.name, _display_payload,
-                ) # type: ignore
-            )
+            self._persist_tool_resource_event(session_id, "clipboard_display", tc.name, _display_payload)
+            if self._tool_event_callback:
+                asyncio.create_task(
+                    self._tool_event_callback(
+                        session_id, "clipboard_display", tc.name, _display_payload,
+                    ) # type: ignore
+                )
 
         # ---- 通知前端：tool_result (fire-and-forget) ----
         # 前端推送是尽力而为的副作用，不阻塞工具执行主链路。
