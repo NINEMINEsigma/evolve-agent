@@ -1,25 +1,15 @@
 """Shell 命令工具 — 经用户同意后执行 CLI 命令。
 
 模块导入时通过 ``registry.register()`` 注册。
-每个命令都需要通过 CONFIRM_REQUEST/CONFIRM_RESPONSE
-WebSocket 握手获得用户确认。
-
-允许列表
-    将*完整*命令（例如 "git log --oneline"）存储在
-    ``workspace/logs/shell_allowlist.json`` 持久化 JSON 文件中。
-    仅完全匹配的命令跳过确认提示。前端提供三种操作：
-    允许一次 / 始终允许 / 拒绝。
+审批与“始终允许”由工具执行入口的统一 allowlist 层处理。
+handler 保留 ``_pre_approved`` 兼容路径，避免旧调用链重复审批。
 """
 
 from __future__ import annotations
 
-import asyncio
-import json
 import logging
 import subprocess  # nosec
-import sys
-from pathlib import Path
-from typing import Any, Dict, List, Set
+from typing import Any, Dict, List
 
 from abstract.tools.registry import registry, tool_error, tool_result
 from system.sandbox import SandboxError
@@ -28,44 +18,6 @@ logger = logging.getLogger(__name__)
 
 # 从 filesystem 模块导入 sandbox 引用。
 from .filesystem import _s as _get_sandbox
-
-# ── 持久化允许列表 ─────────────────────────────────────────────
-
-from system.context import get_runtime_context
-
-_SEED_COMMANDS: Set[str] = {
-    "dir", "ls", "echo .",
-}
-
-
-def _get_allowlist_path() -> Path:
-    return get_runtime_context().workspace / "logs" / "shell_allowlist.json"
-
-
-def _load_allowlist() -> Set[str]:
-    """从持久化文件加载允许列表。"""
-    try:
-        path = _get_allowlist_path()
-        if path.exists():
-            data: list = json.loads(path.read_text(encoding="utf-8"))
-            if isinstance(data, list):
-                return set(data) | _SEED_COMMANDS
-    except Exception:
-        pass
-    return set(_SEED_COMMANDS)
-
-
-def _save_allowlist(entries: Set[str]) -> None:
-    """将允许列表保存到持久化文件。"""
-    try:
-        path = _get_allowlist_path()
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(
-            json.dumps(sorted(entries - _SEED_COMMANDS), ensure_ascii=False, indent=2),
-            encoding="utf-8",
-        )
-    except Exception as exc:
-        logger.warning("Failed to save allowlist: %s", exc)
 
 
 def _s():
@@ -97,15 +49,7 @@ async def _handle_run_command(args: Dict[str, Any]) -> dict:
     if not cmd_parts:
         return tool_error("'command' must be a non-empty list")
 
-    cmd_full: str = " ".join(cmd_parts)
-
-    # ── 允许列表检查（完整命令精确匹配）──
-    allowlist: Set[str] = _load_allowlist()
-    if cmd_full in allowlist:
-        # 已受信任 — 跳过确认
-        return _execute(cmd_parts, cwd)
-
-    # ── 用户确认（若已由 _execute_tool 预审批则跳过）──
+    # ── 用户确认（若已由工具执行入口预审批则跳过）──
     _pre_approved: bool = args.get("_pre_approved", False)
     _approval_action: str = args.get("_approval_action", "allow_once")
     result: ApprovalResult
@@ -130,11 +74,6 @@ async def _handle_run_command(args: Dict[str, Any]) -> dict:
             command=cmd_parts,
             denied=True,
         )
-
-    if result.action == "allow_always":
-        allowlist.add(cmd_full)
-        _save_allowlist(allowlist)
-        logger.info("Added to allowlist: %s", cmd_full)
 
     # action 为 allow_once 或 allow_always — 执行
     return _execute(cmd_parts, cwd)

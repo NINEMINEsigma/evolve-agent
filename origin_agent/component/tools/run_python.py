@@ -13,54 +13,16 @@
 
 from __future__ import annotations
 
-import asyncio
-import json
 import locale
 import logging
 import subprocess  # nosec
 import sys
-from pathlib import Path
-from typing import Any, Dict, List, Set
+from typing import Any, Dict, List
 
 from abstract.tools.registry import registry, tool_error, tool_result
 from system.sandbox import Access, SandboxError
 
 logger = logging.getLogger(__name__)
-
-# ── 持久化允许列表 ──────────────────────────────────────────────────
-
-from system.context import get_runtime_context
-
-_SEED_COMMANDS: Set[str] = set()
-
-
-def _get_allowlist_path() -> Path:
-    return get_runtime_context().workspace / "logs" / "python_allowlist.json"
-
-
-def _load_allowlist() -> Set[str]:
-    try:
-        path = _get_allowlist_path()
-        if path.exists():
-            data: list = json.loads(path.read_text(encoding="utf-8"))
-            if isinstance(data, list):
-                return set(data) | _SEED_COMMANDS
-    except Exception:
-        pass
-    return set(_SEED_COMMANDS)
-
-
-def _save_allowlist(entries: Set[str]) -> None:
-    try:
-        path = _get_allowlist_path()
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(
-            json.dumps(sorted(entries - _SEED_COMMANDS), ensure_ascii=False, indent=2),
-            encoding="utf-8",
-        )
-    except Exception as exc:
-        logger.warning("Failed to save allowlist: %s", exc)
-
 
 # ── 文件系统模块的 sandbox 引用 ──────────────────────────────────────
 
@@ -97,8 +59,6 @@ async def _handle_run_python(args: Dict[str, Any]) -> dict:
 
     if code:
         cmd_parts += ["-c", code]
-        # 用于允许列表匹配的规范形式
-        canonical: str = f"{sys.executable} -c <inline>"
     else:
         # script — 通过 sandbox 解析逻辑路径
         try:
@@ -108,14 +68,8 @@ async def _handle_run_python(args: Dict[str, Any]) -> dict:
             return tool_error(str(exc), script=script)
         if extra_args:
             cmd_parts.extend(extra_args)
-        canonical = f"{sys.executable} {script}"
 
-    # ── 允许列表检查 ──
-    allowlist: Set[str] = _load_allowlist()
-    if canonical in allowlist:
-        return _execute(cmd_parts, cwd, timeout)
-
-    # ── 用户确认（若已由 _execute_tool 预审批则跳过）──
+    # ── 用户确认（若已由工具执行入口预审批则跳过）──
     _pre_approved: bool = args.get("_pre_approved", False)
     _approval_action: str = args.get("_approval_action", "allow_once")
     result: ApprovalResult
@@ -140,11 +94,6 @@ async def _handle_run_python(args: Dict[str, Any]) -> dict:
             command=cmd_parts,
             denied=True,
         )
-
-    if result.action == "allow_always":
-        allowlist.add(canonical)
-        _save_allowlist(allowlist)
-        logger.info("Added to allowlist: %s", canonical)
 
     return _execute(cmd_parts, cwd, timeout)
 
@@ -184,8 +133,7 @@ registry.register(
         #   1. 内联代码：传递 code="print('hello')"（等效于 python -c）。
         #   2. 脚本文件：传递 script="ws:scripts/test.py"，可选地传递 args。
         # 用户将被提示批准（允许一次/始终允许/拒绝）。
-        # 对于内联代码模式，规范形式始终为 '<python路径> -c <inline>'，
-        # 因此单独允许一次即可。
+        # “始终允许”由统一工具 allowlist 层按工具名和参数指纹持久化。
         "description": (
             "Execute code using the same Python interpreter as the agent process. "
             "Unlike run_command, this tool always uses the full path of the current interpreter, "
@@ -195,8 +143,7 @@ registry.register(
             "  2. Script file: pass script=\"ws:scripts/test.py\", "
             "optionally with args=[\"--flag\", \"val\"].\n\n"
             "The user will be prompted to approve (allow once / always allow / deny). "
-            "For inline code mode, the canonical form is always "
-            "'<python_path> -c <inline>', so a single approval is sufficient."
+            "Always-allow approvals are persisted by the unified tool allowlist layer."
         ),
         "parameters": {
             "type": "object",

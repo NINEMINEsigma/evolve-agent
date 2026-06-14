@@ -22,6 +22,8 @@ from typing import Any, Awaitable, Callable, Dict, List
 from abstract.memory.manager import MemoryManager
 from abstract.tools.registry import ToolEntry, registry as tool_registry
 from component.approval import ApprovalResult, ask_agent_reason, is_handsfree_mode, request_user_confirm
+from component.approval_allowlist import add_allowed as add_tool_allowlist_entry
+from component.approval_allowlist import is_allowed as is_tool_allowlisted
 from component.llm import LLMClient, LLMResponse, ToolCall
 from system.pathutils import find_repo_root
 from system.context import RuntimeContext
@@ -1234,35 +1236,47 @@ class AgentLoop:
                 ) # type: ignore
             )
 
-        # ---- 脱手模式审批（write + dangerous 均在此处理，与 tool_timeout 独立）----
+        # ---- 统一审批与 allowlist（write + dangerous 均在此处理，与 tool_timeout 独立）----
         _skip_dispatch = False
         result: dict|str = {}
         danger_level: str = tool_registry.get_danger_level(tc.name)
-        if danger_level in ("write", "dangerous") and is_handsfree_mode(session_id):
+        if danger_level in ("write", "dangerous"):
             _approval_args = {k: v for k, v in args.items() if k != "_session_id"}
-            _hooks_ctx = self._get_hooks_context(session_id)
-
-            approval = await request_user_confirm(
-                session_id, tc.name, _approval_args,
-                reason=str(args.get("reason", "")),
-                content=f"Tool: {tc.name}\nParameters: {json.dumps(_approval_args, ensure_ascii=False)[:500]}",
-                ask_agent_callback=lambda q: ask_agent_reason(
-                    self._llm, tc.name, _approval_args, q, extra_context=_hooks_ctx,
-                ),
-                extra_context=_hooks_ctx,
-            )
-            if approval.action == "deny":
-                source_label = {"model": "approval model", "user": "user", "system": "system"}.get(approval.denied_by, "system")
-                result = {
-                    "error": f"[{source_label} denied] {approval.deny_reason or 'unknown reason'}",
-                    "denied": True,
-                    "denied_by": approval.denied_by,
-                }
-                _skip_dispatch = True
-            else:
-                # 审批通过，向 handler 注入标记使其跳过内部重复审批
+            if is_tool_allowlisted(tc.name, _approval_args):
                 args["_pre_approved"] = True
-                args["_approval_action"] = approval.action
+                args["_approval_action"] = "allow_once"
+            else:
+                _hooks_ctx = self._get_hooks_context(session_id)
+                _handsfree_enabled = is_handsfree_mode(session_id)
+                _ask_agent_callback: Callable[[str], Awaitable[str]] | None = None
+                _extra_context: str | None = None
+                if _handsfree_enabled:
+                    async def _ask_agent_callback_impl(q: str) -> str:
+                        return await ask_agent_reason(
+                            self._llm, tc.name, _approval_args, q, extra_context=_hooks_ctx,
+                        )
+                    _ask_agent_callback = _ask_agent_callback_impl
+                    _extra_context = _hooks_ctx
+                approval = await request_user_confirm(
+                    session_id, tc.name, _approval_args,
+                    reason=str(args.get("reason", "")),
+                    content=f"Tool: {tc.name}\nParameters: {json.dumps(_approval_args, ensure_ascii=False)[:500]}",
+                    ask_agent_callback=_ask_agent_callback,
+                    extra_context=_extra_context,
+                )
+                if approval.action == "deny":
+                    source_label = {"model": "approval model", "user": "user", "system": "system"}.get(approval.denied_by, "system")
+                    result = {
+                        "error": f"[{source_label} denied] {approval.deny_reason or 'unknown reason'}",
+                        "denied": True,
+                        "denied_by": approval.denied_by,
+                    }
+                    _skip_dispatch = True
+                else:
+                    if approval.action == "allow_always" and not is_handsfree_mode(session_id):
+                        add_tool_allowlist_entry(tc.name, _approval_args)
+                    args["_pre_approved"] = True
+                    args["_approval_action"] = approval.action
 
         # ---- 实际工具执行（审批耗时与 tool_timeout 相互独立）----
         # request_user_confirm 的审批时间（含模型加载、推理）
