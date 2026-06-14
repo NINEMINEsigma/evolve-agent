@@ -3,16 +3,13 @@
 Uses sys.executable -m pip to guarantee the package is installed into
 the same environment that's running the agent process.
 
-Each installation requires user approval via CONFIRM_REQUEST/CONFIRM_RESPONSE
-WebSocket handshake, matching the pattern used by run_command and run_python.
+Approval is handled by the unified AgentLoop tool execution entry.
 
 Module-import-time registration via ``registry.register()``.
 """
 
 from __future__ import annotations
 
-import asyncio
-import json
 import logging
 import subprocess
 import sys
@@ -23,18 +20,13 @@ from abstract.tools.registry import registry, tool_error, tool_result
 logger = logging.getLogger(__name__)
 
 
-from component.approval import ApprovalResult, request_user_confirm
-
-
 # ── 工具 handler ─────────────────────────────────────────────────────
 
 
 async def _handle_install_package(args: Dict[str, Any]) -> dict:
-    """Install one or more Python packages via pip, after user approval."""
+    """Install one or more Python packages via pip."""
     packages: str = str(args.get("packages", "")).strip()
     upgrade: bool = args.get("upgrade", False)
-    reason: str = str(args.get("reason", "")).strip()
-    session_id: str = str(args.get("_session_id", ""))
 
     if not packages:
         return tool_error("packages is required — package names to install, space-separated")
@@ -43,31 +35,7 @@ async def _handle_install_package(args: Dict[str, Any]) -> dict:
     if not pkg_list:
         return tool_error("packages cannot be empty")
 
-    # ── 用户确认（若已由 _execute_tool 预审批则跳过）──
-    _pre_approved: bool = args.get("_pre_approved", False)
-    _approval_action: str = args.get("_approval_action", "allow_once")
-    if _pre_approved:
-        result = ApprovalResult(action=_approval_action)
-    elif session_id:
-        result: ApprovalResult = await request_user_confirm(
-            session_id, "install_package",
-            {"packages": packages, "reason": reason},
-            reason,
-            f"Install package: `{packages}`\nReason: {reason}",
-        )
-    else:
-        result = ApprovalResult(action="deny", deny_reason="missing session_id")
-
-    if result.action == "deny":
-        # 审批模型/用户/系统
-        source_label = {"model": "approval model", "user": "user", "system": "system"}.get(result.denied_by, "system")
-        return tool_error(
-            f"[{source_label} denied] {result.deny_reason or 'unknown reason'}",
-            packages=pkg_list,
-            denied=True,
-        )
-
-    # ── 执行安装 ──
+    # 审批由 AgentLoop 统一入口处理（handler 内不再重复确认）
     cmd = [sys.executable, "-m", "pip", "install"] + pkg_list
     if upgrade:
         cmd.append("--upgrade")
@@ -81,7 +49,6 @@ async def _handle_install_package(args: Dict[str, Any]) -> dict:
     except Exception as exc:
         return tool_error(f"pip install failed: {exc}")
 
-    std = (proc.stdout or "") + "\n" + (proc.stderr or "")
     success = proc.returncode == 0
 
     if success:

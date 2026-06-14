@@ -33,9 +33,6 @@ def _s():
     return _get_sandbox()
 
 
-from component.approval import ApprovalResult, request_user_confirm
-
-
 # ── 工具 handler ─────────────────────────────────────────────────────
 
 
@@ -44,10 +41,8 @@ async def _handle_run_python(args: Dict[str, Any]) -> dict:
     code: str = str(args.get("code", "")).strip()
     script: str = str(args.get("script", "")).strip()
     extra_args: List[str] = [str(a) for a in args.get("args", [])]
-    reason: str = str(args.get("reason", "(no reason given)")).strip()
     cwd: str = str(args.get("cwd", "ws:")).strip()
     timeout: int = int(args.get("timeout", 60))
-    session_id: str = str(args.get("_session_id", ""))
 
     if not code and not script:
         return tool_error("Either 'code' or 'script' is required")
@@ -69,32 +64,7 @@ async def _handle_run_python(args: Dict[str, Any]) -> dict:
         if extra_args:
             cmd_parts.extend(extra_args)
 
-    # ── 用户确认（若已由工具执行入口预审批则跳过）──
-    _pre_approved: bool = args.get("_pre_approved", False)
-    _approval_action: str = args.get("_approval_action", "allow_once")
-    result: ApprovalResult
-    if _pre_approved:
-        result = ApprovalResult(action=_approval_action)
-    elif session_id:
-        cmd_str = " ".join(cmd_parts)
-        result = await request_user_confirm(
-            session_id, "run_python",
-            {"command": cmd_parts, "reason": reason},
-            reason,
-            f"Python execution: `{cmd_str}`\nReason: {reason}",
-        )
-    else:
-        result = ApprovalResult(action="deny", deny_reason="缺少 session_id")
-
-    if result.action == "deny":
-        # 审批模型/用户/系统
-        source_label = {"model": "approval model", "user": "user", "system": "system"}.get(result.denied_by, "system")
-        return tool_error(
-            f"[{source_label} denied] {result.deny_reason or 'unknown reason'}",
-            command=cmd_parts,
-            denied=True,
-        )
-
+    # 审批由 AgentLoop 统一入口处理（handler 内不再重复确认）
     return _execute(cmd_parts, cwd, timeout)
 
 

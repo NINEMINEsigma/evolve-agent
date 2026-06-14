@@ -26,8 +26,6 @@ from abstract.tools.registry import registry, tool_error, tool_result
 
 logger = logging.getLogger(__name__)
 
-from component.approval import ApprovalResult, request_user_confirm
-
 # ── 后台任务注册表 ───────────────────────────────────────────
 # task_id -> {proc, log_path, command, start_time, pid, session_id}
 
@@ -57,7 +55,6 @@ async def _handle_start_background_service(args: Dict[str, Any]) -> dict:
     参数与 run_command 类似，但进程在后台运行不等待完成。
     """
     raw_cmd: Any = args.get("command")
-    reason: str = str(args.get("reason", "(no reason given)")).strip()
     cwd: str = str(args.get("cwd", "ws:")).strip()
     session_id: str = str(args.get("_session_id", ""))
 
@@ -68,32 +65,7 @@ async def _handle_start_background_service(args: Dict[str, Any]) -> dict:
     if not cmd_parts:
         return tool_error("'command' must be a non-empty list")
 
-    # ── 用户确认（若已由 _execute_tool 预审批则跳过）──
-    _pre_approved: bool = args.get("_pre_approved", False)
-    _approval_action: str = args.get("_approval_action", "allow_once")
-    result: ApprovalResult
-    if _pre_approved:
-        result = ApprovalResult(action=_approval_action)
-    elif session_id:
-        cmd_str = " ".join(cmd_parts)
-        result = await request_user_confirm(
-            session_id, "start_background_service",
-            {"command": cmd_parts, "reason": reason},
-            reason,
-            f"Background service: `{cmd_str}`\nReason: {reason}",
-        )
-    else:
-        result = ApprovalResult(action="deny", deny_reason="missing session_id")
-
-    if result.action == "deny":
-        # 审批模型/用户/系统
-        source_label = {"model": "approval model", "user": "user", "system": "system"}.get(result.denied_by, "system")
-        return tool_error(
-            f"[{source_label} denied] {result.deny_reason or 'unknown reason'}",
-            command=cmd_parts,
-            denied=True,
-        )
-
+    # 审批由 AgentLoop 统一入口处理（handler 内不再重复确认）
     # ── 解析 cwd ──
     from component.tools.filesystem import _s as _get_sandbox
     from system.sandbox import Access, SandboxError

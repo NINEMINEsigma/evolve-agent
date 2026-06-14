@@ -27,77 +27,26 @@ from component.approval_allowlist import is_allowed as is_tool_allowlisted
 from component.llm import LLMClient, LLMResponse, ToolCall
 from system.pathutils import find_repo_root
 from system.context import RuntimeContext
-from system.prompt import build_system_prompt
-from component.tools.probe_vision import _load_cache
+from system.session_store import SessionStore
+from entry.agent_support.messages import (
+    build_agent_system_prompt,
+    build_full_history_messages,
+    build_turn_messages,
+    collect_hooks_context,
+    load_message_hooks,
+)
+from entry.agent_support.multimodal import (
+    build_image_content_blocks,
+    is_content_block_error,
+    sanitize_image_payload,
+    strip_image_blocks,
+    supports_vision,
+)
 
 logger = logging.getLogger(__name__)
 
 # 每条消息的最大工具调用循环次数，防止无限循环。
 _MAX_TOOL_TURNS = 90
-
-
-# ---------------------------------------------------------------------------
-# content block 错误处理辅助函数
-# ---------------------------------------------------------------------------
-
-def _is_content_block_error(exc: Exception) -> bool:
-    """检测异常是否由 unsupported content blocks（如图片）引起。"""
-    import openai as _openai
-    msg: str = str(exc).lower()
-    # OpenAI BadRequestError 是 400 类错误
-    if isinstance(exc, _openai.BadRequestError):
-        # 检查错误消息中是否提到与图片/内容类型相关的问题
-        keywords: list[str] = [
-            "image_url",
-            "content type",
-            "content block",
-            "unsupported",
-            "invalid content",
-            "multimodal",
-            "vision",
-        ]
-        return any(k in msg for k in keywords)
-    # 通用的 HTTP 400 错误也可能是 content block 问题
-    if isinstance(exc, _openai.APIStatusError):
-        if getattr(exc, "status_code", 0) != 400:
-            return False
-        keywords400: list[str] = ["image", "content", "unsupported"]
-        return any(k in msg for k in keywords400)
-    return False
-
-
-def _strip_image_blocks(messages: List[Dict[str, Any]], session_id: str) -> int:
-    """移除消息列表中所有含 image_url 的 content blocks，转为纯文本。
-
-    返回被剥离的图片数量。"""
-    stripped: int = 0
-    for msg in messages:
-        content = msg.get("content")
-        if not isinstance(content, list):
-            continue
-        new_blocks: list[dict] = []
-        has_image: bool = False
-        for block in content:
-            if isinstance(block, dict) and block.get("type") == "image_url":
-                has_image = True
-                stripped += 1
-                # Replace with hint text
-                # 替换为提示文本
-                new_blocks.append({
-                    "type": "text",
-                    "text": "[Image content stripped — current model does not support vision]",
-                })
-            else:
-                new_blocks.append(block)
-        if has_image:
-            msg["content"] = new_blocks
-    if stripped:
-        logger = logging.getLogger(__name__)
-        logger.info(
-            "Stripped %d image_url block(s) from messages (session=%s)",
-            stripped, session_id,
-        )
-    return stripped
 
 
 # ---------------------------------------------------------------------------
@@ -148,6 +97,7 @@ class AgentLoop:
         self._tool_event_callback: Callable[[str, str, str, str], Awaitable[None]] | None = None
         # 消息历史的磁盘持久化目录
         self._history_store_dir: Path | None = Path(history_store_path) if history_store_path else None
+        self._session_store: SessionStore | None = SessionStore(self._history_store_dir) if self._history_store_dir else None
         # 自定义消息 hook 缓存（custom_hooks/ 下的扩展上下文脚本）
         self._message_hooks_cache: list[dict] | None = None
         # 每个 session 的排他锁，防止并发 process_message 破坏消息序列
@@ -171,6 +121,22 @@ class AgentLoop:
     def set_session_manager(self, manager: Any) -> None:
         """注入 SessionManager 引用，用于归档会话。"""
         self._session_manager = manager
+
+    def add_memory_provider(self, provider: Any) -> None:
+        """注册 memory provider，避免外部直接访问内部 memory manager。"""
+        self._memory.add_provider(provider)
+
+    def pop_session_rotated(self, session_id: str) -> str | None:
+        """取出并移除指定 session 的旋转通知。"""
+        return self._session_rotated_notify.pop(session_id, None)
+
+    def get_all_token_usage(self) -> dict[str, int]:
+        """返回所有已加载 session 的 token 消耗快照。"""
+        return dict(self._token_usage)
+
+    def get_all_tool_stats(self) -> dict[str, dict[str, int]]:
+        """返回工具调用统计快照。"""
+        return {name: dict(stats) for name, stats in self._tool_stats.items()}
 
     def interrupt(self, session_id: str) -> None:
         """请求停止指定 session 的 agent 循环处理。
@@ -306,8 +272,8 @@ class AgentLoop:
                     resp: LLMResponse = llm_task.result()
                 except Exception as llm_exc:
                     # 检查是否因 content blocks（如 image_url）导致 API 拒绝
-                    if _is_content_block_error(llm_exc):
-                        stripped: int = _strip_image_blocks(messages, session_id)
+                    if is_content_block_error(llm_exc):
+                        stripped: int = strip_image_blocks(messages, session_id)
                         if stripped > 0:
                             logger.warning(
                                 "LLM rejected image content blocks — retrying with text-only "
@@ -387,7 +353,7 @@ class AgentLoop:
                 if (est + self._ctx.llm_max_output_tokens + SAFETY) > self._ctx.llm_max_context_tokens:
                     await self._compress_history(session_id)
 
-                messages = self._get_full_history(session_id, memory_ctx)
+                messages = self._get_full_history(session_id)
 
         finally:
             # 始终清理取消事件，确保下一回合从干净状态开始
@@ -419,18 +385,12 @@ class AgentLoop:
 
         优先查询 probe_vision_capability 工具产生的本地缓存；
         缓存未命中时采用乐观默认（视为支持），让图片进入消息流，
-        由下游 _is_content_block_error 在 API 拒绝时降级处理。
+        由下游 is_content_block_error 在 API 拒绝时降级处理。
         """
         model: str = (self._ctx.llm_model or "").lower()
         if not model:
             return False
-
-        cache: dict[str, bool] = _load_cache()
-        if model in cache:
-            return cache[model]
-
-        # 缓存未命中：乐观默认，避免新模型被硬编码名单漏掉
-        return True
+        return supports_vision(model)
 
     def _get_history(self, session_id: str) -> List[Dict[str, Any]]:
         if session_id not in self._histories:
@@ -453,35 +413,25 @@ class AgentLoop:
 
     def _history_path(self, session_id: str) -> Path | None:
         """返回 session 消息历史 JSONL 文件的路径。"""
-        if not self._history_store_dir:
+        if self._session_store is None:
             return None
-        return self._history_store_dir / session_id / "messages.jsonl"
+        return self._session_store.messages_path(session_id)
 
     def _persist_message(self, session_id: str, entry: dict) -> None:
         """向 session 的 JSONL 文件追加一条消息。"""
-        path: Path | None = self._history_path(session_id)
-        if path is None:
+        if self._session_store is None:
             return
         try:
-            path.parent.mkdir(parents=True, exist_ok=True)
-            with open(path, "a", encoding="utf-8") as f:
-                f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+            self._session_store.append_message(session_id, entry)
         except Exception as exc:
             logger.warning("Failed to persist message for session %s: %s", session_id, exc)
 
     def _load_history_from_disk(self, session_id: str) -> list[dict]:
         """从 JSONL 文件加载完整消息历史。"""
-        path: Path | None = self._history_path(session_id)
-        if path is None or not path.exists():
+        if self._session_store is None:
             return []
         try:
-            entries: list[dict] = []
-            with open(path, "r", encoding="utf-8") as f:
-                for line in f:
-                    line = line.strip()
-                    if line:
-                        entries.append(json.loads(line))
-            return entries
+            return self._session_store.read_messages(session_id)
         except Exception as exc:
             logger.warning("Failed to load history for session %s: %s", session_id, exc)
             return []
@@ -492,48 +442,39 @@ class AgentLoop:
         if history and history[-1].get("role") == "user":
             history.pop()
 
-        path: Path | None = self._history_path(session_id)
-        if path and path.exists():
-            try:
-                lines: list[str] = path.read_text(encoding="utf-8").strip().split("\n")
-                if lines:
-                    last: dict = json.loads(lines[-1])
-                    if last.get("role") == "user":
-                        lines.pop()
-                        path.write_text("\n".join(lines) + "\n" if lines else "", encoding="utf-8")
-            except Exception as exc:
-                logger.warning("Failed to remove last user message from disk for session %s: %s", session_id, exc)
+        if self._session_store is None:
+            return
+        try:
+            self._session_store.remove_last_user_message(session_id)
+        except Exception as exc:
+            logger.warning("Failed to remove last user message from disk for session %s: %s", session_id, exc)
 
     # -- token 消耗持久化 -------------------------------------------
 
     def _token_usage_path(self, session_id: str) -> Path | None:
         """返回 session token 消耗 JSON 文件的路径。"""
-        if not self._history_store_dir:
+        if self._session_store is None:
             return None
-        return self._history_store_dir / session_id / "token_usage.json"
+        return self._session_store.token_usage_path(session_id)
 
     def _persist_token_usage(self, session_id: str) -> None:
         """将 session 当前 token 消耗写入磁盘。"""
-        path: Path | None = self._token_usage_path(session_id)
-        if path is None:
+        if self._session_store is None:
             return
         try:
-            path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text(
-                json.dumps({"token_usage": self._token_usage.get(session_id, 0)}, ensure_ascii=False),
-                encoding="utf-8",
+            self._session_store.write_token_usage(
+                session_id,
+                self._token_usage.get(session_id, 0),
             )
         except Exception as exc:
             logger.warning("Failed to persist token usage for session %s: %s", session_id, exc)
 
     def _load_token_usage_from_disk(self, session_id: str) -> int:
         """从磁盘加载 token 消耗，不存在则返回 0。"""
-        path: Path | None = self._token_usage_path(session_id)
-        if path is None or not path.exists():
+        if self._session_store is None:
             return 0
         try:
-            data: dict = json.loads(path.read_text(encoding="utf-8"))
-            return int(data.get("token_usage", 0))
+            return self._session_store.read_token_usage(session_id)
         except Exception:
             return 0
 
@@ -575,17 +516,8 @@ class AgentLoop:
         context: str = "\n".join(lines)
 
         # 从模板文件读取自动标题 prompt
-        from system.pathutils import get_templates_dir
-        templates: Path = get_templates_dir()
-        zh_dir: Path = templates / "zh"
-        use_zh: bool = zh_dir.is_dir()
-        prompt_tpl: str = ""
-        auto_file: Path = (zh_dir if use_zh else templates) / "auto_title.txt"
-        if auto_file.is_file():
-            try:
-                prompt_tpl = auto_file.read_text(encoding="utf-8").strip()
-            except OSError:
-                pass
+        from system.templates import read_template
+        prompt_tpl: str = read_template("auto_title.txt", "zh")
         if not prompt_tpl:
             # 硬编码回退
             prompt_tpl = (
@@ -731,13 +663,9 @@ class AgentLoop:
         recent_text: str = "\n".join(recent_parts)
 
         # 从模板文件读取基于完整历史的摘要 prompt
-        from system.pathutils import get_templates_dir
-        _templates: Path = get_templates_dir()
-        _zh_dir: Path = _templates / "zh"
-        _use_zh: bool = _zh_dir.is_dir()
-
-        _tpl_file: Path = (_zh_dir if _use_zh else _templates) / "compress_full.txt"
-        _prompt_tpl: str = _tpl_file.read_text(encoding="utf-8").strip()
+        from system.templates import read_template, select_template_root
+        _use_zh: bool = select_template_root("zh").name == "zh"
+        _prompt_tpl: str = read_template("compress_full.txt", "zh")
 
         summary_prompt: str = (
             _prompt_tpl
@@ -767,28 +695,22 @@ class AgentLoop:
 
     def _overwrite_history_file(self, session_id: str) -> None:
         """将内存中的完整历史覆写回磁盘 JSONL（用于压缩后持久化）。"""
-        path: Path | None = self._history_path(session_id)
-        if path is None:
+        if self._session_store is None:
             return
         try:
-            path.parent.mkdir(parents=True, exist_ok=True)
-            lines: list[str] = [
-                json.dumps(m, ensure_ascii=False) + "\n"
-                for m in self._histories.get(session_id, [])
-            ]
-            path.write_text("".join(lines), encoding="utf-8")
+            self._session_store.overwrite_messages(
+                session_id,
+                self._histories.get(session_id, []),
+            )
         except Exception as exc:
             logger.warning("Failed to overwrite history file for session %s: %s", session_id, exc)
 
     def _read_session_summary(self, session_id: str) -> str:
         """读取会话终结时生成的持久化摘要。"""
-        if not self._history_store_dir:
-            return ""
-        summary_path: Path = self._history_store_dir / session_id / "summary.txt"
-        if not summary_path.is_file():
+        if self._session_store is None:
             return ""
         try:
-            return summary_path.read_text(encoding="utf-8").strip()
+            return self._session_store.read_summary(session_id)
         except Exception:
             return ""
 
@@ -894,19 +816,10 @@ class AgentLoop:
 
         读取 templates/zh/compress.txt（中文）或 templates/compress.txt（英文）。
         """
-        from system.pathutils import get_templates_dir
-        templates: Path = get_templates_dir()
-        zh_dir: Path = templates / "zh"
-        use_zh: bool = zh_dir.is_dir()
+        from system.templates import read_template, select_template_root
+        use_zh: bool = select_template_root("zh").name == "zh"
 
-        prompt_tpl: str = ""
-        compress_file: Path = (zh_dir if use_zh else templates) / "compress.txt"
-        if compress_file.is_file():
-            try:
-                prompt_tpl = compress_file.read_text(encoding="utf-8").strip()
-            except OSError:
-                pass
-
+        prompt_tpl: str = read_template("compress.txt", "zh")
         if not prompt_tpl:
             prompt_tpl = (
                 "Summarize the key content and decisions of the following conversation in no more than 50000 characters. Output only the summary.\n\n"
@@ -969,10 +882,9 @@ class AgentLoop:
                 summary = "(Session context archived)"
 
         # 3. 将完整摘要写入 summary.txt（供后续继承复用）
-        if summary_path:
+        if self._session_store is not None:
             try:
-                summary_path.parent.mkdir(parents=True, exist_ok=True)
-                summary_path.write_text(summary, encoding="utf-8")
+                self._session_store.write_summary(old_sid, summary)
             except Exception as exc:
                 logger.warning("Failed to write summary for session %s: %s", old_sid, exc)
 
@@ -1017,57 +929,20 @@ class AgentLoop:
         return None
 
     def _load_message_hooks(self) -> list[dict]:
-        """扫描 custom_hooks/ 目录，加载消息扩展 hook。
-
-        每个 .py 脚本需定义 hook_tag_name() -> str 和 hook_message() -> str。
-        缓存函数引用，在构建消息时实时调用，保证动态内容（如时间戳）实时变化。
-        返回 [{"tag_fn": callable, "msg_fn": callable}, ...]。
-        """
+        """加载并缓存 custom_hooks 消息扩展。"""
         if self._message_hooks_cache is not None:
             return self._message_hooks_cache
-
-        hooks: list[dict] = []
-        hooks_dir = find_repo_root() / "custom_hooks"
-        if not hooks_dir.is_dir():
-            self._message_hooks_cache = hooks
-            return hooks
-
-        for fpath in sorted(hooks_dir.glob("*.py")):
-            if fpath.name.startswith("_"):
-                continue
-            try:
-                import importlib.util
-                spec = importlib.util.spec_from_file_location(fpath.stem, fpath)
-                if spec is None or spec.loader is None:
-                    continue
-                mod = importlib.util.module_from_spec(spec)
-                spec.loader.exec_module(mod)
-                tag_fn = getattr(mod, "hook_tag_name", None)
-                msg_fn = getattr(mod, "hook_message", None)
-                if callable(tag_fn) and callable(msg_fn):
-                    hooks.append({"tag_fn": tag_fn, "msg_fn": msg_fn})
-            except Exception:
-                logger.warning("Failed to load message hook %s", fpath, exc_info=True)
-
+        hooks = load_message_hooks(find_repo_root(), logger)
         self._message_hooks_cache = hooks
         return hooks
 
     def _get_hooks_context(self, session_id: str) -> str:
-        """收集当前所有 custom_hooks 的实时内容，返回格式化的扩展上下文字符串。
-
-        用于审批流程，让审批模型也能看到主模型看到的额外上下文。
-        """
-        parts: list[str] = []
-        for hook in self._load_message_hooks():
-            try:
-                tag = hook["tag_fn"](session_id, self._ctx.workspace)
-                if tag:
-                    msg = hook["msg_fn"](session_id, self._ctx.workspace)
-                    if msg:
-                        parts.append(f"<|im_{tag}_start|>{msg}<|im_{tag}_end|>")
-            except Exception:
-                pass
-        return "\n".join(parts)
+        """收集当前所有 custom_hooks 的实时扩展上下文。"""
+        return collect_hooks_context(
+            self._load_message_hooks(),
+            session_id,
+            str(self._ctx.workspace),
+        )
 
     def _build_messages(
         self,
@@ -1075,75 +950,31 @@ class AgentLoop:
         user_message: str,
         memory_ctx: str,
     ) -> List[Dict[str, Any]]:
-        """构建当前回合的完整消息列表。
-
-        对 history 中最后一条 user message 原地附加 custom_hooks 扩展上下文，
-        避免重复追加 user message。
-        """
-        # 收集已启用的 skill prompt
-        skill_blocks: list[str] = self._collect_skill_prompts()
-
-        system_prompt: str = build_system_prompt(
-            mode=self._ctx.mode,
-            extra_blocks=skill_blocks,
-            lang="zh",
-            workspace=self._ctx.workspace,
-            agentspace=str(self._ctx.agentspace),
-            fork_path=str(self._ctx.fork_path),
-            fix_fork_path=str(self._ctx.fix_path) if self._ctx.fix_path else "",
-            fix_log_path=str(self._ctx.fix_log_path or ""),
+        """构建当前回合的完整消息列表。"""
+        system_prompt: str = build_agent_system_prompt(
+            self._ctx,
+            self._collect_skill_prompts(),
         )
-        # 缓存 system prompt 用于 token 估算
         self._cached_system_prompt = system_prompt
-
-        history: List[Dict[str, Any]] = self._get_history(session_id)
-        messages: List[Dict[str, Any]] = [
-            {"role": "system", "content": system_prompt},
-        ]
-
-        # 复制 history，对最后一条 user message 附加 memory 上下文和 hook 扩展上下文
-        for i, msg in enumerate(history):
-            if i == len(history) - 1 and msg.get("role") == "user":
-                hooked_msg = dict(msg)
-                hooked_content = str(hooked_msg.get("content", ""))
-
-                # 追加 memory 上下文（不持久化）
-                if memory_ctx:
-                    hooked_content += f"\n<|im_memory_context_start|>\n{memory_ctx}\n<|im_memory_context_end|>"
-
-                # 追加 custom_hooks 扩展上下文
-                for hook in self._load_message_hooks():
-                    tag = hook["tag_fn"](session_id, self._ctx.workspace)
-                    if tag:
-                        msg = hook["msg_fn"](session_id, self._ctx.workspace)
-                        if msg:
-                            hooked_content += f"<|im_{tag}_start|>{msg}<|im_{tag}_end|>"
-                hooked_msg["content"] = hooked_content
-                messages.append(hooked_msg)
-            else:
-                messages.append(msg)
-
-        return messages
-
-    def _get_full_history(self, session_id: str, memory_ctx: str = "") -> List[Dict[str, Any]]:
-        """从存储的历史中重建完整消息列表（循环中间使用）。"""
-        skill_blocks: list[str] = self._collect_skill_prompts()
-        system_prompt: str = build_system_prompt(
-            mode=self._ctx.mode,
-            extra_blocks=skill_blocks,
-            lang="zh",
-            workspace=self._ctx.workspace,
-            agentspace=str(self._ctx.agentspace),
-            fork_path=str(self._ctx.fork_path),
-            fix_fork_path=str(self._ctx.fix_path) if self._ctx.fix_path else "",
-            fix_log_path=str(self._ctx.fix_log_path or ""),
+        return build_turn_messages(
+            system_prompt,
+            self._get_history(session_id),
+            session_id,
+            str(self._ctx.workspace),
+            memory_ctx,
+            self._load_message_hooks(),
         )
-        history: List[Dict[str, Any]] = self._get_history(session_id)
-        messages: List[Dict[str, Any]] = [
-            {"role": "system", "content": system_prompt},
-        ]
-        messages.extend(history)
-        return messages
+
+    def _get_full_history(self, session_id: str) -> List[Dict[str, Any]]:
+        """从存储的历史中重建完整消息列表（循环中间使用）。"""
+        system_prompt: str = build_agent_system_prompt(
+            self._ctx,
+            self._collect_skill_prompts(),
+        )
+        return build_full_history_messages(
+            system_prompt,
+            self._get_history(session_id),
+        )
 
     def _store_assistant_with_tools(
         self, session_id: str, resp: LLMResponse,
@@ -1236,18 +1067,21 @@ class AgentLoop:
                 ) # type: ignore
             )
 
-        # ---- 统一审批与 allowlist（write + dangerous 均在此处理，与 tool_timeout 独立）----
+        # ---- 统一审批与 allowlist（dangerous 始终审批；write 仅脱手模式审批）----
         _skip_dispatch = False
         result: dict|str = {}
         danger_level: str = tool_registry.get_danger_level(tc.name)
-        if danger_level in ("write", "dangerous"):
+        _handsfree_enabled = is_handsfree_mode(session_id)
+        _needs_approval = danger_level == "dangerous" or (
+            danger_level == "write" and _handsfree_enabled
+        )
+        if _needs_approval:
             _approval_args = {k: v for k, v in args.items() if k != "_session_id"}
             if is_tool_allowlisted(tc.name, _approval_args):
                 args["_pre_approved"] = True
                 args["_approval_action"] = "allow_once"
             else:
                 _hooks_ctx = self._get_hooks_context(session_id)
-                _handsfree_enabled = is_handsfree_mode(session_id)
                 _ask_agent_callback: Callable[[str], Awaitable[str]] | None = None
                 _extra_context: str | None = None
                 if _handsfree_enabled:
@@ -1273,7 +1107,7 @@ class AgentLoop:
                     }
                     _skip_dispatch = True
                 else:
-                    if approval.action == "allow_always" and not is_handsfree_mode(session_id):
+                    if approval.action == "allow_always" and not _handsfree_enabled:
                         add_tool_allowlist_entry(tc.name, _approval_args)
                     args["_pre_approved"] = True
                     args["_approval_action"] = approval.action
@@ -1333,13 +1167,7 @@ class AgentLoop:
                 mime: str = str(img.get("mime_type", "image/png"))
                 if b64 and self._supports_vision():
                     text_json: str = json.dumps(parsed_result, ensure_ascii=False)
-                    multimodal_content = [
-                        {
-                            "type": "image_url",
-                            "image_url": {"url": f"data:{mime};base64,{b64}"},
-                        },
-                        {"type": "text", "text": text_json},
-                    ]
+                    multimodal_content = build_image_content_blocks(img, text_json)
                     # 后续截断/推送只用文本部分
                     result = text_json
                 elif b64:
@@ -1380,9 +1208,7 @@ class AgentLoop:
         if self._tool_event_callback and tc.name in ("set_task_progress", "clear_task_progress"):
             _progress_payload: str = result_str
             if isinstance(result, dict) and "_image" in result:
-                _pp_copy: dict = dict(result)
-                _pp_copy.pop("_image", None)
-                _progress_payload = json.dumps(_pp_copy, ensure_ascii=False)
+                _progress_payload = json.dumps(sanitize_image_payload(result), ensure_ascii=False)
             asyncio.create_task(
                 self._tool_event_callback(
                     session_id, "task_progress", tc.name, _progress_payload,
@@ -1393,9 +1219,7 @@ class AgentLoop:
         if self._tool_event_callback and tc.name in ("set_clipboard_display", "clear_clipboard_display"):
             _display_payload: str = result_str
             if isinstance(result, dict) and "_image" in result:
-                _dp_copy: dict = dict(result)
-                _dp_copy.pop("_image", None)
-                _display_payload = json.dumps(_dp_copy, ensure_ascii=False)
+                _display_payload = json.dumps(sanitize_image_payload(result), ensure_ascii=False)
             asyncio.create_task(
                 self._tool_event_callback(
                     session_id, "clipboard_display", tc.name, _display_payload,
@@ -1408,11 +1232,7 @@ class AgentLoop:
             # 对含图片的结果，推送时不包含 base64 数据
             push_result: str = result_str
             if isinstance(result, dict) and "_image" in result:
-                pr_copy: dict = dict(result)
-                img_info: dict = pr_copy.pop("_image", {})
-                img_info.pop("base64", None)  # 不向前端发送 base64
-                pr_copy["_image"] = img_info
-                push_result = json.dumps(pr_copy, ensure_ascii=False)
+                push_result = json.dumps(sanitize_image_payload(result), ensure_ascii=False)
             asyncio.create_task(
                 self._tool_event_callback(
                     session_id, "tool_result", tc.name, push_result,

@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { CronTask } from "../types";
+import { extractMessageResources } from "../utils";
 
 interface DrawerProps {
   open: boolean;
@@ -33,43 +34,7 @@ export default function Drawer({
   const [backgroundExpanded, setBackgroundExpanded] = useState(true);
   const [cronExpanded, setCronExpanded] = useState(true);
 
-  const { images, audios, downloads } = (() => {
-    const images: Array<{ id: string; src: string; alt: string }> = [];
-    const audios: Array<{ id: string; url: string; autoplay?: boolean }> = [];
-    const downloads: Array<{ id: string; url: string; filename: string; size?: number }> = [];
-    const seen = new Set<string>();
-    messages.forEach((m) => {
-      if (m.imageMarkdown) {
-        const match = m.imageMarkdown.match(/!\[(.*?)\]\(([^)]+)\)/);
-        if (match) {
-          const src = match[2];
-          if (!seen.has(src)) {
-            seen.add(src);
-            images.push({ id: m.id + "-img", src, alt: match[1] || "" });
-          }
-        }
-      }
-      if (m.audioUrl && !seen.has(m.audioUrl)) {
-        seen.add(m.audioUrl);
-        audios.push({ id: m.id + "-audio", url: m.audioUrl, autoplay: m.audioAutoplay });
-      }
-      if (m.downloadInfo && !seen.has(m.downloadInfo.url)) {
-        seen.add(m.downloadInfo.url);
-        downloads.push({ id: m.id + "-dl", url: m.downloadInfo.url, filename: m.downloadInfo.filename, size: m.downloadInfo.size });
-      }
-      if (m.role === "agent") {
-        const imgMatches = m.content.matchAll(/!\[(.*?)\]\(([^)]+)\)/g);
-        for (const match of imgMatches) {
-          const src = match[2];
-          if (!seen.has(src)) {
-            seen.add(src);
-            images.push({ id: m.id + "-mdimg-" + src.slice(-8), src, alt: match[1] || "" });
-          }
-        }
-      }
-    });
-    return { images, audios, downloads };
-  })();
+  const { images, audios, downloads } = extractMessageResources(messages);
 
   if (!open) return null;
 

@@ -20,6 +20,7 @@ from typing import TYPE_CHECKING, Any, Dict
 
 from abstract.tools.registry import registry, tool_error, tool_result
 from system.pathutils import get_templates_dir
+from component.tools.filesystem import _s as _get_sandbox
 
 logger = logging.getLogger(__name__)
 
@@ -132,18 +133,6 @@ template_html = get_templates_dir() / "html" / "mermaid_template.html"
 
 if TYPE_CHECKING:
     from component.tools.filesystem import Sandbox
-
-# Lazy import of Sandbox (set at runtime by main.py)
-_fs_sandbox: Sandbox | None = None
-
-
-def _get_sandbox() -> Sandbox:
-    """Lazy import of the shared Sandbox from filesystem tools."""
-    global _fs_sandbox
-    if _fs_sandbox is None:
-        from component.tools.filesystem import _sandbox
-        _fs_sandbox = _sandbox
-    return _fs_sandbox  # type: ignore
 
 
 def _check_dependencies() -> str | None:

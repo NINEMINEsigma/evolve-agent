@@ -1,8 +1,7 @@
-"""Shell 命令工具 — 经用户同意后执行 CLI 命令。
+"""Shell 命令工具 — 执行已由统一入口审批的 CLI 命令。
 
 模块导入时通过 ``registry.register()`` 注册。
 审批与“始终允许”由工具执行入口的统一 allowlist 层处理。
-handler 保留 ``_pre_approved`` 兼容路径，避免旧调用链重复审批。
 """
 
 from __future__ import annotations
@@ -24,23 +23,17 @@ def _s():
     return _get_sandbox()
 
 
-from component.approval import ApprovalResult, request_user_confirm
-
-
 # ── 工具 handler ─────────────────────────────────────────────────────
 
 async def _handle_run_command(args: Dict[str, Any]) -> dict:
-    """经过允许列表 + 用户确认检查后执行 shell 命令。
+    """执行已由 AgentLoop 统一审批的 shell 命令。
 
     预期参数：
         command: list[str] — 命令及参数
-        reason:  str      — agent 执行此命令的原因
         cwd:     str      — 工作目录（ws: 命名空间），可选
     """
     raw_cmd: Any = args.get("command")
-    reason: str = str(args.get("reason", "(no reason given)")).strip()
     cwd: str = str(args.get("cwd", "ws:")).strip()
-    session_id: str = str(args.get("_session_id", ""))
 
     # ── 验证命令 ──
     if not raw_cmd or not isinstance(raw_cmd, list):
@@ -49,33 +42,7 @@ async def _handle_run_command(args: Dict[str, Any]) -> dict:
     if not cmd_parts:
         return tool_error("'command' must be a non-empty list")
 
-    # ── 用户确认（若已由工具执行入口预审批则跳过）──
-    _pre_approved: bool = args.get("_pre_approved", False)
-    _approval_action: str = args.get("_approval_action", "allow_once")
-    result: ApprovalResult
-    if _pre_approved:
-        result = ApprovalResult(action=_approval_action)
-    elif session_id:
-        cmd_str = " ".join(cmd_parts)
-        result = await request_user_confirm(
-            session_id, "run_command",
-            {"command": cmd_parts, "reason": reason},
-            reason,
-            f"command: `{cmd_str}`\nreason: {reason}"
-        )
-    else:
-        result = ApprovalResult(action="deny", deny_reason="session_id is required")
-
-    if result.action == "deny":
-        # 审批模型/用户/系统
-        source_label = {"model": "approval model", "user": "user", "system": "system"}.get(result.denied_by, "system")
-        return tool_error(
-            f"[{source_label} denied] {result.deny_reason or 'unknown reason'}",
-            command=cmd_parts,
-            denied=True,
-        )
-
-    # action 为 allow_once 或 allow_always — 执行
+    # 审批由 AgentLoop 统一入口处理（handler 内不再重复确认）
     return _execute(cmd_parts, cwd)
 
 

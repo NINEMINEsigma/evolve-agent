@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Any, Dict, List
 
 from abstract.tools.registry import registry, tool_error, tool_result
+from component.tools.filesystem import _s as _get_sandbox
 
 logger = logging.getLogger(__name__)
 
@@ -63,18 +64,6 @@ def _check_fpdf2() -> str | None:
     except ImportError:
         return "fpdf2 library is required:\n  pip install fpdf2"
 
-
-# Lazy import of Sandbox (set at runtime by main.py)
-_fs_sandbox: Any | None = None
-
-
-def _get_sandbox():
-    """Lazy import of the shared Sandbox from filesystem tools."""
-    global _fs_sandbox
-    if _fs_sandbox is None:
-        from component.tools.filesystem import _sandbox
-        _fs_sandbox = _sandbox
-    return _fs_sandbox
 
 
 def _make_output_path(subdir: str, ext: str) -> tuple[Path, str]:

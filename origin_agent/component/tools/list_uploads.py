@@ -7,22 +7,10 @@ import logging
 from typing import Any, Dict, List
 
 from abstract.tools.registry import registry, tool_error, tool_result
-from system.sandbox import Access, Sandbox, SandboxError
+from system.sandbox import SandboxError
+from .filesystem import _s
 
 logger = logging.getLogger(__name__)
-
-_sandbox: Sandbox | None = None
-
-
-def set_sandbox(s: Sandbox) -> None:
-    global _sandbox
-    _sandbox = s
-
-
-def _s() -> Sandbox:
-    if _sandbox is None:
-        raise RuntimeError("Sandbox not initialized — call set_sandbox() first")
-    return _sandbox
 
 
 def _handle_list_uploads(args: Dict[str, Any]) -> dict:

@@ -136,13 +136,9 @@ class App:
         try:
             from system.sandbox import Sandbox
             _sandbox: Sandbox = Sandbox(self.ctx)
-            # 先注入 sandbox 到需要它的模块（在 discover 之前完成）
+            # 先注入 sandbox 到唯一入口（在 discover 之前完成）
             import component.tools.filesystem as _fs
             _fs.set_sandbox(_sandbox)
-            import component.tools.read_image as _ri
-            _ri.set_sandbox(_sandbox)
-            import component.tools.list_uploads as _lu
-            _lu.set_sandbox(_sandbox)
             # AST 自动发现并注册工具模块
             from abstract.tools.discover import discover_builtin_tools
             from system.pathutils import find_repo_root, get_agent_dir
@@ -207,7 +203,7 @@ You can modify your own source code and complete evolution through the following
                 mem: EasysaveMemoryProvider = EasysaveMemoryProvider(
                     memory_dir=str(self.ctx.workspace / "logs" / "memory")
                 )
-                agent_loop._memory.add_provider(mem)
+                agent_loop.add_memory_provider(mem)
                 logger.info("EasysaveMemoryProvider registered")
             except Exception as exc:
                 logger.warning("Memory provider unavailable: %s", exc)

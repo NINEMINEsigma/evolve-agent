@@ -943,9 +943,8 @@ async def ws_chat(ws: WebSocket) -> None:
 
                     # 检查 AgentLoop 是否旋转了会话（归档+新会话）
                     _old: str = sid
-                    _rotated: str | None = getattr(
-                        _agent_loop, "_session_rotated_notify", {},
-                    ).pop(sid, None)
+                    _pop_rotated = getattr(_agent_loop, "pop_session_rotated", None)
+                    _rotated: str | None = _pop_rotated(sid) if callable(_pop_rotated) else None
                     if _rotated:
                         _tool_ws_sinks.pop(_old, None)  # 清理旧 session 映射
                         _tool_ws_sinks[_rotated] = ws  # 注册新 sid 到 WebSocket 映射

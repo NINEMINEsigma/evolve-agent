@@ -16,8 +16,6 @@ ssh_download  使用 scp 从远程下载文件到本地
 
 from __future__ import annotations
 
-import asyncio
-import json
 import logging
 import subprocess
 from typing import Any, Dict
@@ -54,22 +52,18 @@ def _validate_target(target: str) -> str | None:
     return None
 
 
-from component.approval import ApprovalResult, request_user_confirm
-
-
 # ---------------------------------------------------------------------------
 # ssh_exec
 # ---------------------------------------------------------------------------
 
 
 async def _handle_ssh_exec(args: Dict[str, Any]) -> dict:
-    """在远程服务器上执行 shell 命令（需用户审批）。"""
+    """在远程服务器上执行 shell 命令。"""
     target: str = str(args.get("target", "")).strip()
     command: str = str(args.get("command", "")).strip()
     port: int = int(args.get("port", 22))
     timeout: int = int(args.get("timeout", 30))
     reason: str = str(args.get("reason", "")).strip()
-    session_id: str = str(args.get("_session_id", ""))
 
     # --- 校验 ---
     err = _validate_target(target)
@@ -80,31 +74,7 @@ async def _handle_ssh_exec(args: Dict[str, Any]) -> dict:
     if not reason:
         return tool_error("reason is required — please explain why this remote command needs to be executed")
 
-    # --- 用户确认（若已由 _execute_tool 预审批则跳过）---
-    _pre_approved: bool = args.get("_pre_approved", False)
-    _approval_action: str = args.get("_approval_action", "allow_once")
-    if _pre_approved:
-        approval_result = ApprovalResult(action=_approval_action)
-    elif session_id:
-        approval_result: ApprovalResult = await request_user_confirm(
-            session_id, "ssh_exec",
-            {"target": target, "command": command[:200], "reason": reason},
-            reason,
-            f"SSH operation: execute on {target}: {command[:200]}\nReason: {reason}",
-        )
-    else:
-        approval_result = ApprovalResult(action="deny", deny_reason="missing session_id")
-
-    if approval_result.action == "deny":
-        # 审批模型/用户/系统
-        source_label = {"model": "approval model", "user": "user", "system": "system"}.get(approval_result.denied_by, "system")
-        return tool_error(
-            f"[{source_label} denied] {approval_result.deny_reason or 'unknown reason'}",
-            target=target,
-            command=command[:200],
-            denied=True,
-        )
-
+    # 审批由 AgentLoop 统一入口处理（handler 内不再重复确认）
     # --- 构造命令 ---
     cmd: list[str] = [
         "ssh",
@@ -153,14 +123,13 @@ async def _handle_ssh_exec(args: Dict[str, Any]) -> dict:
 
 
 async def _handle_ssh_upload(args: Dict[str, Any]) -> dict:
-    """使用 scp 上传本地文件到远程服务器（需用户审批）。"""
+    """使用 scp 上传本地文件到远程服务器。"""
     target: str = str(args.get("target", "")).strip()
     local_path: str = str(args.get("local_path", "")).strip()
     remote_path: str = str(args.get("remote_path", "")).strip()
     port: int = int(args.get("port", 22))
     recursive: bool = bool(args.get("recursive", False))
     reason: str = str(args.get("reason", "")).strip()
-    session_id: str = str(args.get("_session_id", ""))
 
     # --- 校验 ---
     err = _validate_target(target)
@@ -173,32 +142,7 @@ async def _handle_ssh_upload(args: Dict[str, Any]) -> dict:
     if not reason:
         return tool_error("reason is required — please explain why the file needs to be uploaded")
 
-    # --- 用户确认（若已由 _execute_tool 预审批则跳过）---
-    _pre_approved: bool = args.get("_pre_approved", False)
-    _approval_action: str = args.get("_approval_action", "allow_once")
-    if _pre_approved:
-        approval_result = ApprovalResult(action=_approval_action)
-    elif session_id:
-        approval_result: ApprovalResult = await request_user_confirm(
-            session_id, "ssh_upload",
-            {"local_path": local_path, "remote_path": remote_path, "target": target, "reason": reason},
-            reason,
-            f"SSH operation: upload {local_path} → {target}:{remote_path}\nReason: {reason}",
-        )
-    else:
-        approval_result = ApprovalResult(action="deny", deny_reason="missing session_id")
-
-    if approval_result.action == "deny":
-        # 审批模型/用户/系统
-        source_label = {"model": "approval model", "user": "user", "system": "system"}.get(approval_result.denied_by, "system")
-        return tool_error(
-            f"[{source_label} denied] {approval_result.deny_reason or 'unknown reason'}",
-            target=target,
-            local_path=local_path,
-            remote_path=remote_path,
-            denied=True,
-        )
-
+    # 审批由 AgentLoop 统一入口处理（handler 内不再重复确认）
     # --- 构造命令 ---
     cmd: list[str] = ["scp", "-P", str(port), *_SSH_COMMON_FLAGS]
     if recursive:
@@ -247,14 +191,13 @@ async def _handle_ssh_upload(args: Dict[str, Any]) -> dict:
 
 
 async def _handle_ssh_download(args: Dict[str, Any]) -> dict:
-    """使用 scp 从远程服务器下载文件到本地（需用户审批）。"""
+    """使用 scp 从远程服务器下载文件到本地。"""
     target: str = str(args.get("target", "")).strip()
     remote_path: str = str(args.get("remote_path", "")).strip()
     local_path: str = str(args.get("local_path", "")).strip()
     port: int = int(args.get("port", 22))
     recursive: bool = bool(args.get("recursive", False))
     reason: str = str(args.get("reason", "")).strip()
-    session_id: str = str(args.get("_session_id", ""))
 
     # --- 校验 ---
     err = _validate_target(target)
@@ -267,32 +210,7 @@ async def _handle_ssh_download(args: Dict[str, Any]) -> dict:
     if not reason:
         return tool_error("reason is required — please explain why the file needs to be downloaded")
 
-    # --- 用户确认（若已由 _execute_tool 预审批则跳过）---
-    _pre_approved: bool = args.get("_pre_approved", False)
-    _approval_action: str = args.get("_approval_action", "allow_once")
-    if _pre_approved:
-        approval_result = ApprovalResult(action=_approval_action)
-    elif session_id:
-        approval_result: ApprovalResult = await request_user_confirm(
-            session_id, "ssh_download",
-            {"remote_path": remote_path, "target": target, "local_path": local_path, "reason": reason},
-            reason,
-            f"SSH operation: download {target}:{remote_path} → {local_path}\nReason: {reason}",
-        )
-    else:
-        approval_result = ApprovalResult(action="deny", deny_reason="missing session_id")
-
-    if approval_result.action == "deny":
-        # 审批模型/用户/系统
-        source_label = {"model": "approval model", "user": "user", "system": "system"}.get(approval_result.denied_by, "system")
-        return tool_error(
-            f"[{source_label} denied] {approval_result.deny_reason or 'unknown reason'}",
-            target=target,
-            remote_path=remote_path,
-            local_path=local_path,
-            denied=True,
-        )
-
+    # 审批由 AgentLoop 统一入口处理（handler 内不再重复确认）
     # --- 构造命令 ---
     cmd: list[str] = ["scp", "-P", str(port), *_SSH_COMMON_FLAGS]
     if recursive:

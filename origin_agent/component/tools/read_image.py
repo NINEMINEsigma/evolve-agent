@@ -5,8 +5,8 @@
 始终返回 ``_image`` 键。agent 循环检测到此键后，
 会将 ToolMessage 的 content 格式化为 OpenAI content blocks
 （包含 ``image_url`` 块）。如果模型不支持 vision 导致 API 拒绝，
-entry/agent.py 中的 ``_strip_image_blocks`` 会捕获错误、
-剥离图片 block、用 text-only 消息重试，agent 会收到明确的错误提示。
+AgentLoop 会通过多模态辅助模块剥离图片 block、用 text-only 消息重试，
+agent 会收到明确的错误提示。
 """
 
 from __future__ import annotations
@@ -18,22 +18,10 @@ import mimetypes
 from typing import Any, Dict
 
 from abstract.tools.registry import registry, tool_error
-from system.sandbox import Sandbox, SandboxError
+from system.sandbox import SandboxError
+from .filesystem import _s
 
 logger = logging.getLogger(__name__)
-
-_sandbox: Sandbox | None = None
-
-
-def set_sandbox(s: Sandbox) -> None:
-    global _sandbox
-    _sandbox = s
-
-
-def _s() -> Sandbox:
-    if _sandbox is None:
-        raise RuntimeError("Sandbox not initialized — call set_sandbox() first")
-    return _sandbox
 
 
 _SUPPORTED_MIMES: set[str] = {

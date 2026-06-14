@@ -38,6 +38,15 @@ def _load_cache() -> Dict[str, bool]:
     return {}
 
 
+def get_cached_vision_support(model: str) -> bool | None:
+    """读取模型 vision 能力缓存；未命中返回 None。"""
+    normalized = model.lower()
+    cache = _load_cache()
+    if normalized in cache:
+        return cache[normalized]
+    return None
+
+
 def _save_cache(data: Dict[str, bool]) -> None:
     try:
         path = _cache_path()

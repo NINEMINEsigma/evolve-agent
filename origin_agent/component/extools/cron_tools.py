@@ -36,7 +36,6 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Set
 
 from abstract.tools.registry import registry, tool_error, tool_result
-from component.approval import ApprovalResult, request_user_confirm
 from system.pathutils import find_repo_root
 from system.subprocess_utils import build_subprocess_env, completed_process_from_bytes
 
@@ -588,34 +587,7 @@ async def _handle_schedule_cron(args: Dict[str, Any]) -> dict:
             f"Maximum {_MAX_JOBS_PER_SESSION} cron jobs per session reached"
         )
 
-    # ── 用户确认（若已由 _execute_tool 预审批则跳过）──
-    _pre_approved: bool = args.get("_pre_approved", False)
-    _approval_action: str = args.get("_approval_action", "allow_once")
-    if _pre_approved:
-        result = ApprovalResult(action=_approval_action)
-    elif session_id:
-        result: ApprovalResult = await request_user_confirm(
-            session_id,
-            "schedule_cron",
-            {"schedule": raw_schedule, "command": cmd_parts, "reason": reason},
-            reason,
-            f"Schedule cron job: `{raw_schedule}` -> `{' '.join(cmd_parts)}`\n"
-            f"Reason: {reason}",
-        )
-    else:
-        result = ApprovalResult(action="deny", deny_reason="missing session_id")
-
-    if result.action == "deny":
-        source_label = {
-            "model": "approval model",
-            "user": "user",
-            "system": "system",
-        }.get(result.denied_by, "system")
-        return tool_error(
-            f"[{source_label} denied] {result.deny_reason or 'unknown reason'}",
-            denied=True,
-        )
-
+    # 审批由 AgentLoop 统一入口处理（handler 内不再重复确认）
     # ── 创建任务 ──
     task_id: str = uuid.uuid4().hex[:12]
     log_path = f"ws:logs/cron/{session_id}/{task_id}.log"
@@ -806,33 +778,7 @@ async def _handle_reschedule_cron_job(args: Dict[str, Any]) -> dict:
             f"Maximum {_MAX_JOBS_PER_SESSION} cron jobs per session reached"
         )
 
-    # ── 用户确认（若已由 _execute_tool 预审批则跳过）──
-    _pre_approved: bool = args.get("_pre_approved", False)
-    _approval_action: str = args.get("_approval_action", "allow_once")
-    if _pre_approved:
-        result = ApprovalResult(action=_approval_action)
-    elif session_id:
-        result: ApprovalResult = await request_user_confirm(
-            session_id,
-            "reschedule_cron_job",
-            {"task_id": task_id},
-            "",
-            f"Reschedule cron job based on {task_id}: `{source_task.schedule_value}` -> `{' '.join(source_task.command)}`",
-        )
-    else:
-        result = ApprovalResult(action="deny", deny_reason="missing session_id")
-
-    if result.action == "deny":
-        source_label = {
-            "model": "approval model",
-            "user": "user",
-            "system": "system",
-        }.get(result.denied_by, "system")
-        return tool_error(
-            f"[{source_label} denied] {result.deny_reason or 'unknown reason'}",
-            denied=True,
-        )
-
+    # 审批由 AgentLoop 统一入口处理（handler 内不再重复确认）
     # ── 创建新任务，完全复制原配置（不可修改任何参数）──
     new_task_id: str = uuid.uuid4().hex[:12]
     log_path = f"ws:logs/cron/{session_id}/{new_task_id}.log"

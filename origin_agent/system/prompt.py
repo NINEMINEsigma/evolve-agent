@@ -23,12 +23,8 @@ from typing import Optional
 
 logger = logging.getLogger(__name__)
 
-from system.pathutils import find_repo_root, get_templates_dir, get_template_path
-
-# 解析相对于此文件的 templates 目录。
-# 在源码树（origin_agent/system/）和 workspace 副本
-# （workspace/fast_agent_space/system/）中均可工作。
-_TEMPLATES_DIR: Path = get_templates_dir()
+from system.pathutils import find_repo_root
+from system.templates import read_template, select_template_root
 
 
 def _read_gene() -> str:
@@ -124,11 +120,7 @@ def build_system_prompt(
     str
         组装完成的 system prompt，可直接用于 LLM。
     """
-    template_root: Path = _TEMPLATES_DIR
-    if lang == "zh":
-        zh_dir: Path = _TEMPLATES_DIR / "zh"
-        if zh_dir.is_dir():
-            template_root = zh_dir
+    template_root: Path = select_template_root(lang)
 
     blocks: list[str] = []
 
@@ -144,7 +136,7 @@ def build_system_prompt(
         blocks.append(soul)
 
     # 1. 基础
-    base: str = _read_if_exists(template_root / "base.txt")
+    base: str = read_template("base.txt", lang)
     if base:
         base = base.replace(r"{{platform}}", _platform_info(lang))
         base = base.replace(r"{{agentspace}}", agentspace)
@@ -152,14 +144,14 @@ def build_system_prompt(
         blocks.append(base)
 
     # 2. 模式特定
-    mode_block: str = _read_if_exists(template_root / "modes" / f"{mode}.txt")
+    mode_block: str = read_template(f"modes/{mode}.txt", lang)
     if mode_block:
         mode_block = mode_block.replace(r"{{fix_fork_path}}", fix_fork_path)
         mode_block = mode_block.replace(r"{{fix_log_path}}", fix_log_path)
         blocks.append(mode_block)
 
     # 3. 工具
-    tools: str = _read_if_exists(template_root / "tools.txt")
+    tools: str = read_template("tools.txt", lang)
     if tools:
         blocks.append(tools)
 

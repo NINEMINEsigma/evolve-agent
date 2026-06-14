@@ -193,15 +193,15 @@ def register_dashboard_routes(app: FastAPI) -> None:
     @app.get("/api/stats/token-usage")
     async def stats_token_usage():
         """返回每个 session 的累计 token 消耗。"""
-        if _agent_loop is not None and hasattr(_agent_loop, "_token_usage"):
-            return dict(_agent_loop._token_usage)  # type: ignore[union-attr]
+        if _agent_loop is not None and hasattr(_agent_loop, "get_all_token_usage"):
+            return _agent_loop.get_all_token_usage()  # type: ignore[union-attr]
         return {}
 
     @app.get("/api/stats/tool-calls")
     async def stats_tool_calls():
         """返回按工具名称聚合的工具调用统计。"""
-        if _agent_loop is not None and hasattr(_agent_loop, "_tool_stats"):
-            return _agent_loop._tool_stats  # type: ignore[union-attr]
+        if _agent_loop is not None and hasattr(_agent_loop, "get_all_tool_stats"):
+            return _agent_loop.get_all_tool_stats()  # type: ignore[union-attr]
         return {}
 
     @app.get("/api/stats/session-activity")

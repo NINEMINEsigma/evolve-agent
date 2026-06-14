@@ -11,6 +11,7 @@ import {
   SessionInfo,
   WSMessage,
 } from "../types";
+import { extractMessageResources, parseToolResult } from "../utils";
 
 export function useWebSocket() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -151,30 +152,19 @@ export function useWebSocket() {
                 entry.reasoningContent = m.reasoning_content;
               }
               if (m.role === "tool" && typeof m.content === "string") {
-                try {
-                  const parsed = JSON.parse(m.content);
-                  if (parsed.markdown) entry.imageMarkdown = parsed.markdown;
-                  if (parsed.download_url) {
-                    entry.downloadInfo = {
-                      url: parsed.download_url,
-                      filename: parsed.filename || "download",
-                      description: parsed.description,
-                      size: parsed.size,
-                    };
-                  }
-                  if (parsed.audio_url) {
-                    entry.audioUrl = parsed.audio_url;
-                    entry.audioAutoplay = false;
-                  }
-                  if (parsed.playlist) {
-                    entry.playlist = parsed.playlist;
-                    entry.playlistAutoplay = false;
-                  }
-                  if (parsed.message && typeof parsed.message === "string") {
-                    entry.content = parsed.message;
-                  }
-                } catch {
-                  // not JSON
+                const parsed = parseToolResult(m.content);
+                if (parsed.imageMarkdown) entry.imageMarkdown = parsed.imageMarkdown;
+                if (parsed.downloadInfo) entry.downloadInfo = parsed.downloadInfo;
+                if (parsed.audioUrl) {
+                  entry.audioUrl = parsed.audioUrl;
+                  entry.audioAutoplay = parsed.audioAutoplay;
+                }
+                if (parsed.playlist) {
+                  entry.playlist = parsed.playlist;
+                  entry.playlistAutoplay = parsed.playlistAutoplay;
+                }
+                if (parsed.content !== undefined) {
+                  entry.content = parsed.content;
                 }
               }
               return entry;
@@ -246,52 +236,17 @@ export function useWebSocket() {
       else if (msg.type === "tool_result") {
         if (ignoreStaleRef.current) return;
         const raw = msg.result ?? "";
-        let text = `✅ ${msg.tool} → `;
-        let imageMarkdown: string | undefined;
-        let downloadInfo: DownloadInfo | undefined;
-        let audioUrl: string | undefined;
-        let audioAutoplay = false;
-        let playlist: PlaylistEntry[] | undefined;
-        let playlistAutoplay = false;
-        try {
-          const parsed = JSON.parse(raw);
-          if (parsed.markdown) {
-            imageMarkdown = parsed.markdown;
-            text += (parsed.message ?? "").slice(0, 200);
-          } else if (parsed.download_url) {
-            downloadInfo = {
-              url: parsed.download_url,
-              filename: parsed.filename || "download",
-              description: parsed.description,
-              size: parsed.size,
-            };
-            text += (parsed.message ?? "").slice(0, 200);
-          } else if (parsed.audio_url) {
-            audioUrl = parsed.audio_url;
-            audioAutoplay = parsed.autoplay === true;
-            text += (parsed.message ?? "").slice(0, 200);
-          } else if (parsed.playlist) {
-            playlist = parsed.playlist;
-            playlistAutoplay = parsed.autoplay === true;
-            text += (parsed.message ?? "").slice(0, 200);
-          } else if (parsed.message) {
-            text += parsed.message.slice(0, 200);
-          } else {
-            text += raw.slice(0, 2000);
-          }
-        } catch {
-          text += raw.slice(0, 2000);
-        }
+        const parsed = parseToolResult(raw, msg.tool);
         setMessages((prev) => [...prev, {
           role: "tool",
-          content: text,
+          content: parsed.content ?? `✅ ${msg.tool} → ${raw.slice(0, 2000)}`,
           id: crypto.randomUUID(),
-          imageMarkdown,
-          downloadInfo,
-          audioUrl,
-          audioAutoplay,
-          playlist,
-          playlistAutoplay,
+          imageMarkdown: parsed.imageMarkdown,
+          downloadInfo: parsed.downloadInfo,
+          audioUrl: parsed.audioUrl,
+          audioAutoplay: parsed.audioAutoplay ?? false,
+          playlist: parsed.playlist,
+          playlistAutoplay: parsed.playlistAutoplay ?? false,
           messageIndex: nextMessageIndex(prev),
         }]);
       }
@@ -716,43 +671,7 @@ export function useWebSocket() {
     });
   }, [sessions, searchQuery]);
 
-  const sessionResources = useMemo(() => {
-    const images: Array<{ id: string; src: string; alt: string }> = [];
-    const audios: Array<{ id: string; url: string; autoplay?: boolean }> = [];
-    const downloads: Array<{ id: string; url: string; filename: string; size?: number }> = [];
-    const seen = new Set<string>();
-    messages.forEach((m) => {
-      if (m.imageMarkdown) {
-        const match = m.imageMarkdown.match(/!\[(.*?)\]\(([^)]+)\)/);
-        if (match) {
-          const src = match[2];
-          if (!seen.has(src)) {
-            seen.add(src);
-            images.push({ id: m.id + "-img", src, alt: match[1] || "" });
-          }
-        }
-      }
-      if (m.audioUrl && !seen.has(m.audioUrl)) {
-        seen.add(m.audioUrl);
-        audios.push({ id: m.id + "-audio", url: m.audioUrl, autoplay: m.audioAutoplay });
-      }
-      if (m.downloadInfo && !seen.has(m.downloadInfo.url)) {
-        seen.add(m.downloadInfo.url);
-        downloads.push({ id: m.id + "-dl", url: m.downloadInfo.url, filename: m.downloadInfo.filename, size: m.downloadInfo.size });
-      }
-      if (m.role === "agent") {
-        const imgMatches = m.content.matchAll(/!\[(.*?)\]\(([^)]+)\)/g);
-        for (const match of imgMatches) {
-          const src = match[2];
-          if (!seen.has(src)) {
-            seen.add(src);
-            images.push({ id: m.id + "-mdimg-" + src.slice(-8), src, alt: match[1] || "" });
-          }
-        }
-      }
-    });
-    return { images, audios, downloads };
-  }, [messages]);
+  const sessionResources = useMemo(() => extractMessageResources(messages), [messages]);
 
   return {
     // state
