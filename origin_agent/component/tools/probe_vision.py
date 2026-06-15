@@ -189,4 +189,5 @@ registry.register(
     is_async=True,
     emoji="👁️",
     danger_level="readonly",
+    no_timeout=True,
 )

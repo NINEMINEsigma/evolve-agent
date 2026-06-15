@@ -165,4 +165,5 @@ registry.register(
     },
     handler=_handle_read_image,
     emoji="🖼️",
+    no_timeout=True,
 )
