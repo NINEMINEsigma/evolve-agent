@@ -13,12 +13,13 @@ Weekday 遵循标准 cron 语义：0=Sunday, 1=Monday, ..., 6=Saturday。
 需要循环、轮询或长期观察时，只安排下一次任务；等 [cron-result] 返回后再决定是否继续安排。
 可通过 reschedule_cron_job 在 [cron-result] 返回后基于已有任务配置再次创建相同的新任务。
 
-模块导入时通过 ``registry.register()`` 注册 5 个工具：
+模块导入时通过 ``registry.register()`` 注册 6 个工具：
   - ``schedule_cron``       — 创建定时任务（仅执行一次）
   - ``list_cron_jobs``      — 列出当前会话的任务
   - ``cancel_cron_job``     — 取消指定任务
   - ``run_cron_job_now``    — 立即触发执行一次
   - ``reschedule_cron_job`` — 基于已有任务配置重新创建任务（参数不可修改）
+  - ``wait_cron``           — 创建一个只等待、不执行脚本的精简定时提醒任务
 """
 
 from __future__ import annotations
@@ -155,6 +156,8 @@ class _CronTask:
     last_run: float = 0.0
     log_path: str = ""
     skip_agent_notify: bool = False  # 用户显式取消时设为 True，抑制在途执行完成后的通知
+    is_wait: bool = False  # 为 True 时不执行任何脚本，仅返回固定提醒内容
+    wait_message: str = ""  # wait 任务触发时返回的固定内容
     _timer: Optional[threading.Timer] = field(default=None, repr=False)
 
 
@@ -215,6 +218,8 @@ def _task_to_dict(task: _CronTask) -> dict:
         "last_run": task.last_run,
         "log_path": task.log_path,
         "skip_agent_notify": task.skip_agent_notify,
+        "is_wait": task.is_wait,
+        "wait_message": task.wait_message,
     }
 
 
@@ -234,6 +239,8 @@ def _task_from_dict(data: dict) -> _CronTask:
         last_run=float(data.get("last_run", 0.0)),
         log_path=data.get("log_path", ""),
         skip_agent_notify=data.get("skip_agent_notify", False),
+        is_wait=data.get("is_wait", False),
+        wait_message=data.get("wait_message", ""),
     )
 
 
@@ -464,43 +471,51 @@ def _run_task(task: _CronTask) -> None:
     exit_code = -1
     stdout_text = ""
 
-    try:
-        popen_kwargs: Dict[str, Any] = {
-            "cwd": cwd_real,
-            "stdout": subprocess.PIPE,
-            "stderr": subprocess.STDOUT,
-            "text": False,
-            "env": build_subprocess_env(),
-        }
-        if sys.platform == "win32":
-            popen_kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
-
-        result = subprocess.run(task.command, timeout=300, **popen_kwargs)
-        decoded = completed_process_from_bytes(
-            args=task.command,
-            returncode=result.returncode,
-            stdout=result.stdout,
-            stderr=None,
-        )
-        exit_code = decoded.returncode
-        stdout_text = decoded.stdout or ""
-
+    if task.is_wait:
+        exit_code = 0
+        stdout_text = task.wait_message or "Wait time is up."
         logger.info(
-            "Cron task executed | task=%s name=%s session=%s exit=%d",
-            task.task_id, task.name, task.session_id, exit_code,
+            "Wait task triggered | task=%s name=%s session=%s",
+            task.task_id, task.name, task.session_id,
         )
-    except subprocess.TimeoutExpired:
-        logger.warning(
-            "Cron task timed out | task=%s session=%s",
-            task.task_id, task.session_id,
-        )
-        stdout_text = "[TIMEOUT after 300s]"
-    except Exception as exc:
-        logger.exception(
-            "Cron task failed | task=%s session=%s",
-            task.task_id, task.session_id,
-        )
-        stdout_text = f"[ERROR: {exc}]"
+    else:
+        try:
+            popen_kwargs: Dict[str, Any] = {
+                "cwd": cwd_real,
+                "stdout": subprocess.PIPE,
+                "stderr": subprocess.STDOUT,
+                "text": False,
+                "env": build_subprocess_env(),
+            }
+            if sys.platform == "win32":
+                popen_kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
+
+            result = subprocess.run(task.command, timeout=300, **popen_kwargs)
+            decoded = completed_process_from_bytes(
+                args=task.command,
+                returncode=result.returncode,
+                stdout=result.stdout,
+                stderr=None,
+            )
+            exit_code = decoded.returncode
+            stdout_text = decoded.stdout or ""
+
+            logger.info(
+                "Cron task executed | task=%s name=%s session=%s exit=%d",
+                task.task_id, task.name, task.session_id, exit_code,
+            )
+        except subprocess.TimeoutExpired:
+            logger.warning(
+                "Cron task timed out | task=%s session=%s",
+                task.task_id, task.session_id,
+            )
+            stdout_text = "[TIMEOUT after 300s]"
+        except Exception as exc:
+            logger.exception(
+                "Cron task failed | task=%s session=%s",
+                task.task_id, task.session_id,
+            )
+            stdout_text = f"[ERROR: {exc}]"
 
     # 执行完成后递增计数并停止调度（每个任务仅运行一次）
     task.run_count += 1
@@ -513,7 +528,8 @@ def _run_task(task: _CronTask) -> None:
             with open(log_file, "a", encoding="utf-8") as f:
                 f.write(f"\n{'=' * 60}\n")
                 f.write(f"[{timestamp}] Run #{task.run_count} | Exit: {exit_code}\n")
-                f.write(f"Command: {' '.join(task.command)}\n")
+                if not task.is_wait:
+                    f.write(f"Command: {' '.join(task.command)}\n")
                 f.write(f"Stdout:\n")
                 f.write(stdout_text)
         except Exception as exc:
@@ -833,6 +849,74 @@ async def _handle_reschedule_cron_job(args: Dict[str, Any]) -> dict:
     )
 
 
+async def _handle_wait_cron(args: Dict[str, Any]) -> dict:
+    """创建一个只等待、不执行任何脚本的精简定时提醒任务。"""
+    raw_duration: str = str(args.get("duration", "")).strip()
+    message: str = str(args.get("message", "Wait time is up.")).strip()
+    session_id: str = str(args.get("_session_id", ""))
+
+    if not raw_duration or not raw_duration.isdigit():
+        return tool_error("'duration' is required and must be a positive integer (seconds)")
+
+    duration_sec = int(raw_duration)
+    if duration_sec < 10:
+        return tool_error("Duration must be at least 10 seconds")
+
+    # ── 任务数量限制 ──
+    with _cron_lock:
+        current_count = len(_cron_tasks.get(session_id, {}))
+    if current_count >= _MAX_JOBS_PER_SESSION:
+        return tool_error(
+            f"Maximum {_MAX_JOBS_PER_SESSION} cron jobs per session reached"
+        )
+
+    task_id: str = uuid.uuid4().hex[:12]
+    log_path = f"ws:logs/cron/{session_id}/{task_id}.log"
+
+    task = _CronTask(
+        task_id=task_id,
+        session_id=session_id,
+        name=f"wait-{task_id}",
+        schedule_type="interval",
+        schedule_value=str(duration_sec),
+        command=[],
+        cwd="ws:",
+        should_schedule=True,
+        log_path=log_path,
+        is_wait=True,
+        wait_message=message,
+    )
+
+    with _cron_lock:
+        if session_id not in _cron_tasks:
+            _cron_tasks[session_id] = {}
+        _cron_tasks[session_id][task_id] = task
+
+    task.next_run = time.time() + duration_sec
+    _schedule_next(task)
+    _save_all_tasks()
+
+    logger.info(
+        "Wait cron scheduled | task=%s session=%s duration=%ds",
+        task_id, session_id, duration_sec,
+    )
+
+    return tool_result(
+        success=True,
+        task_id=task_id,
+        duration=duration_sec,
+        next_run=datetime.datetime.fromtimestamp(
+            task.next_run, tz=datetime.timezone.utc,
+        ).isoformat(),
+        message=(
+            f"Wait task scheduled (task_id={task_id}, "
+            f"duration={duration_sec}s, "
+            f"next_run={datetime.datetime.fromtimestamp(task.next_run, tz=datetime.timezone.utc).isoformat()}). "
+            "A [cron-result] message will be sent when the wait completes."
+        ),
+    )
+
+
 # ── 公开 API（供 gateway/server.py 调用）────────────────────
 
 def list_cron_tasks_for_session(session_id: str) -> List[Dict[str, Any]]:
@@ -1081,6 +1165,43 @@ registry.register(
     is_async=True,
     emoji="🔁",
     danger_level="dangerous",
+)
+
+registry.register(
+    name="wait_cron",
+    toolset="cron",
+    schema={
+        # 创建一个只等待、不执行任何脚本的精简定时提醒任务。
+        "description": (
+            "Schedule a lightweight wait reminder that does not execute any script.\n"
+            "After the specified duration expires, a [cron-result] message with the fixed reminder text is sent to the Agent.\n\n"
+            "Returns:\n"
+            "  - success: whether the wait task was created\n"
+            "  - task_id: unique identifier for managing the task\n"
+            "  - next_run: ISO timestamp when the reminder will trigger\n"
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "duration": {
+                    "type": "string",
+                    # 等待时长，以秒为单位，最小 10 秒。
+                    "description": "Delay in seconds before the reminder triggers. Minimum 10 seconds.",
+                },
+                "message": {
+                    "type": "string",
+                    # 提醒时返回的固定内容。
+                    "description": "Fixed reminder text returned when the wait completes. Default: 'Wait time is up.'",
+                    "default": "Wait time is up.",
+                },
+            },
+            "required": ["duration"],
+        },
+    },
+    handler=_handle_wait_cron,
+    is_async=True,
+    emoji="⏳",
+    danger_level="readonly",
 )
 
 

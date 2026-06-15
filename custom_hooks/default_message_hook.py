@@ -30,7 +30,6 @@ def hook_message(session_id: str = "", workspace: str = "") -> str:
     result: dict[str, str] = {
         "current_time": now.strftime("%Y-%m-%d %H:%M:%S"),
         "current_platform": sys.platform,
-        "current_python": sys.executable,
         "session_id": session_id,
         "workspace": str(workspace),
     }

@@ -380,5 +380,4 @@ registry.register(
     handler=_handle_stop_background_service,
     is_async=True,
     emoji="⏹",
-    danger_level="dangerous",
 )

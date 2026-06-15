@@ -83,6 +83,7 @@ def _append_evolve_event(stage: str, detail: str) -> None:
 if __name__ == "__main__":
     fast_agent_space = (workspace_path/fast_agent_space_path)
     slow_agent_space = (workspace_path/slow_agent_space_path)
+    source = File(origin=str(origin_agent_codes_path))
     if (agentspace_path/"SOUL.md").exists() == False:
         File("SOUL.md").copy_to(str(agentspace_path/"SOUL.md"))
     if fouce_init or (workspace_path/"init.lock").exists() == False:
@@ -94,7 +95,6 @@ if __name__ == "__main__":
         File(origin=str(slow_agent_space)).delete() # 删除slow agent空间
         slow_agent_space.mkdir(parents=True, exist_ok=True) # 创建slow agent空间
         # 复制源代码到代理空间
-        source = File(origin=str(origin_agent_codes_path))
         source.copy_to(str(fast_agent_space)) # 复制源代码到fast agent空间
         source.copy_to(str(slow_agent_space)) # 复制源代码到slow agent空间
     while True:
@@ -147,6 +147,8 @@ if __name__ == "__main__":
             _append_evolve_event("complete", "swap finished, restarting")
         else:
             logger.error(f"Fast agent exited with unknown error: {exit_code}")
+            if (workspace_path / ".fallback").exists() == False:
+                source.copy_to(str(workspace_path / ".fallback")) # 复制源代码到备份空间
             fallback_main = workspace_path / ".fallback" / "__main__.py"
             if not fallback_main.exists():
                 logger.warning(
