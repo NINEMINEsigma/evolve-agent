@@ -1194,6 +1194,10 @@ class AgentLoop:
                     )
                     result = json.dumps(fallback, ensure_ascii=False)
 
+        # 防止 base64 以纯文本形式污染上下文。
+        if isinstance(result, dict) and "_image" in result:
+            result.pop("_image", None)
+
         # ---- 工具结果大小截断 ----
         _MAX_RESULT_CHARS: int = 50_000
         result_str: str = result if isinstance(result, str) else json.dumps(result, ensure_ascii=False)

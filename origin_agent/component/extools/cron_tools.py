@@ -36,6 +36,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Set
 
 from abstract.tools.registry import registry, tool_error, tool_result
+from entity.constant import CRON_STDOUT_PREVIEW_MAX_LENGTH
 from system.pathutils import find_repo_root
 from system.subprocess_utils import build_subprocess_env, completed_process_from_bytes
 
@@ -530,7 +531,7 @@ def _run_task(task: _CronTask) -> None:
             task.task_id,
             task.name,
             exit_code,
-            f"task output is too long, you can view the full output in the log file: {task.log_path}" if len(stdout_text) > 5000 else stdout_text,
+            f"task output is too long, you can view the full output in the log file: {task.log_path}" if len(stdout_text) > CRON_STDOUT_PREVIEW_MAX_LENGTH else stdout_text,
         )
 
 

@@ -5,8 +5,9 @@ from third.easysave import save, load, contains
 from pydantic import BaseModel
 argparse_parser = argparse.ArgumentParser()
 
-argparse_parser.add_argument("--load", type=str, default="")
-argparse_parser.add_argument("--save", type=str, default="")
+group = argparse_parser.add_mutually_exclusive_group()
+group.add_argument("--load", type=str, default="")
+group.add_argument("--save", type=str, default="")
 argparse_parser.add_argument("--console_log", type=bool, default=True)
 argparse_parser.add_argument("--fast_agent_space_path", type=str, default="fast_agent_space")
 argparse_parser.add_argument("--slow_agent_space_path", type=str, default="slow_agent_space")
