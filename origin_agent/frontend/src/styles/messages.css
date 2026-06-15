@@ -273,7 +273,21 @@
   font-family: inherit;
 }
 
-/* ── User message images ── */
+/* ── User message mixed content (text + image interleaved) ── */
+.message-user-mixed {
+  display: block;
+}
+
+.message-user-mixed .message-text {
+  display: inline;
+}
+
+.message-user-mixed .message-user-img-link {
+  vertical-align: middle;
+  margin: 2px 4px;
+}
+
+/* ── User message images (legacy bottom-aligned gallery) ── */
 .message-user-images {
   display: flex;
   flex-wrap: wrap;

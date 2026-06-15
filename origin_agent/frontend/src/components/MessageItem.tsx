@@ -161,41 +161,42 @@ const MessageItem = memo(function MessageItem({ message, archived, onImageClick,
 
   const renderUserContent = () => {
     const content = m.content;
-    let text = "";
-    const images: string[] = [];
     if (typeof content === "string") {
-      text = content;
-    } else if (Array.isArray(content)) {
-      const blocks = content as ContentBlock[];
-      const textParts: string[] = [];
-      blocks.forEach((block) => {
-        if (block.type === "text") {
-          textParts.push(block.text);
-        } else if (block.type === "image_url") {
-          images.push(block.image_url.url);
-        }
-      });
-      text = textParts.join("");
+      return <pre className={`message-text message-text-${m.role}`}>{content}</pre>;
     }
-    return (
-      <>
-        <pre className={`message-text message-text-${m.role}`}>{text}</pre>
-        {images.length > 0 && (
-          <div className="message-user-images">
-            {images.map((src, idx) => (
-              <a
-                key={`${m.id}-img-${idx}`}
-                href="#"
-                onClick={(e) => { e.preventDefault(); onImageClick(src); }}
-                className="message-user-img-link"
-              >
-                <img src={src} alt={`图片 ${idx + 1}`} className="message-user-thumb" />
-              </a>
-            ))}
-          </div>
-        )}
-      </>
-    );
+
+    if (Array.isArray(content)) {
+      const blocks = content as ContentBlock[];
+      return (
+        <div className="message-user-mixed">
+          {blocks.map((block, idx) => {
+            if (block.type === "text") {
+              return (
+                <span key={`${m.id}-txt-${idx}`} className={`message-text message-text-${m.role}`}>
+                  {block.text}
+                </span>
+              );
+            }
+            if (block.type === "image_url") {
+              const src = block.image_url.url;
+              return (
+                <a
+                  key={`${m.id}-img-${idx}`}
+                  href="#"
+                  onClick={(e) => { e.preventDefault(); onImageClick(src); }}
+                  className="message-user-img-link"
+                >
+                  <img src={src} alt={`图片 ${idx + 1}`} className="message-user-thumb" />
+                </a>
+              );
+            }
+            return null;
+          })}
+        </div>
+      );
+    }
+
+    return <pre className={`message-text message-text-${m.role}`}>{String(content)}</pre>;
   };
 
   const renderBody = () => {
