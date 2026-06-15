@@ -6,7 +6,9 @@
 >
 > `origin_agent/` 是唯一的源码真相源；前端构建必须由 `run.py` 在启动时自动复制到 `workspace/fast_agent_space/frontend/` 后进行。在 `origin_agent/frontend/` 下运行这些命令会污染源码目录、破坏构建环境，并导致不可预期的运行时错误。
 >
-> **正确验证方式：修改源码后，直接运行 `python run.py --load <config>`，`run.py` 会自动完成复制与构建。**
+> **严格禁止在任何位置执行 `python run.py`、`python check_env.py` 或任何其他构建/运行/启动命令，除非用户明确授权。** 修改源码后不得主动替用户运行验证，必须由用户自行决定是否以及何时启动。
+>
+> **即使用户主动要求，也绝对禁止代其执行构建或运行命令；请直接拒绝并告知用户自行在本地执行。**
 >
 > 违反本条造成的构建失败或状态损坏，必须优先清理并恢复 `origin_agent/frontend/` 环境。
 

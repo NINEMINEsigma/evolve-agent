@@ -10,6 +10,7 @@ import TaskProgressPanel from "./components/TaskProgressPanel";
 import ClipboardPanel from "./components/ClipboardPanel";
 import Drawer from "./components/Drawer";
 import CronCountdown from "./components/CronCountdown";
+import Lightbox from "./components/Lightbox";
 
 export default function App() {
   const ws = useWebSocket();
@@ -20,14 +21,6 @@ export default function App() {
   const [clipboardCollapsed, setClipboardCollapsed] = useState(false);
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; sid: string } | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
-
-  // ── lightbox: Escape 关闭 ──
-  useEffect(() => {
-    if (!lightboxSrc) return;
-    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setLightboxSrc(null); };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [lightboxSrc]);
 
   // ── close context menu on outside click ──
   useEffect(() => {
@@ -222,9 +215,7 @@ export default function App() {
       />
 
       {lightboxSrc && (
-        <div className="lightbox-backdrop" onClick={() => setLightboxSrc(null)}>
-          <img src={lightboxSrc} className="lightbox-img" onClick={(e) => e.stopPropagation()} />
-        </div>
+        <Lightbox src={lightboxSrc} onClose={() => setLightboxSrc(null)} />
       )}
     </div>
   );
