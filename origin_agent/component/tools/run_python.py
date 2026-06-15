@@ -41,6 +41,7 @@ async def _handle_run_python(args: Dict[str, Any]) -> dict:
     code: str = str(args.get("code", "")).strip()
     script: str = str(args.get("script", "")).strip()
     extra_args: List[str] = [str(a) for a in args.get("args", [])]
+    python_path: str = str(args.get("python_path", "")).strip()
     cwd: str = str(args.get("cwd", "ws:")).strip()
     timeout: int = int(args.get("timeout", 60))
 
@@ -49,8 +50,18 @@ async def _handle_run_python(args: Dict[str, Any]) -> dict:
     if code and script:
         return tool_error("Provide either 'code' or 'script', not both")
 
+    # ── 确定解释器路径 ──
+    if python_path:
+        try:
+            resolved_interp = _s().resolve(python_path, Access.READ)
+            interpreter = str(resolved_interp.real)
+        except SandboxError as exc:
+            return tool_error(str(exc), python_path=python_path)
+    else:
+        interpreter = sys.executable
+
     # ── 构建完整的命令数组 ──
-    cmd_parts: List[str] = [sys.executable]
+    cmd_parts: List[str] = [interpreter]
 
     if code:
         cmd_parts += ["-c", code]
@@ -133,6 +144,12 @@ registry.register(
                     "items": {"type": "string"},
                     # 传递给脚本的附加参数（仅 script 模式可用）。
                     "description": "Additional arguments to pass to the script (script mode only).",
+                },
+                "python_path": {
+                    "type": "string",
+                    # 要使用的 Python 解释器路径（如虚拟环境中的 python）。留空则使用当前解释器。
+                    "description": "Path to the Python interpreter to use (e.g. path to a virtualenv python). Leave empty to use the current interpreter.",
+                    "default": "",
                 },
                 "reason": {
                     "type": "string",
