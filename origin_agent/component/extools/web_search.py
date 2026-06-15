@@ -46,13 +46,13 @@ _BING_SEARCH_URL: str = "https://cn.bing.com/search"
 # ---------------------------------------------------------------------------
 
 
-def _parse_ddg_lite(html: str, max_results: int) -> List[Dict[str, str]]:
+def _parse_ddg_lite(html: str, max_results: int) -> list[dict[str, str]]:
     """Extract title/url/snippet tuples from DuckDuckGo Lite HTML.
 
     The lite endpoint returns results in a flat HTML table where each result
     spans two rows: one for the link, one for the snippet.
     """
-    results: list[Dict[str, str]] = []
+    results: list[dict[str, str]] = []
 
     # 1) Extract ranked links inside <a rel="nofollow" href="...">
     links: list[tuple[str, str]] = re.findall(
@@ -88,7 +88,7 @@ def _parse_ddg_lite(html: str, max_results: int) -> List[Dict[str, str]]:
 # ---------------------------------------------------------------------------
 
 
-def _parse_bing(html: str, max_results: int) -> List[Dict[str, str]]:
+def _parse_bing(html: str, max_results: int) -> list[dict[str, str]]:
     """Extract title/url/snippet tuples from Bing search HTML.
 
     Bing uses a clean structure:
@@ -96,7 +96,7 @@ def _parse_bing(html: str, max_results: int) -> List[Dict[str, str]]:
     - Titles in <h2><a href="..." title="...">text</a></h2>
     - Snippets in <p> tags within the block
     """
-    results: list[Dict[str, str]] = []
+    results: list[dict[str, str]] = []
 
     # Extract result blocks
     blocks: list[str] = re.findall(
@@ -153,7 +153,7 @@ def _parse_bing(html: str, max_results: int) -> List[Dict[str, str]]:
 # ---------------------------------------------------------------------------
 
 
-def _search_ddg(query: str, max_results: int) -> Tuple[List[Dict[str, str]] | None, str | None]:
+def _search_ddg(query: str, max_results: int) -> Tuple[list[dict[str, str]] | None, str | None]:
     """Try searching via DuckDuckGo. Returns (results, error)."""
     encoded: str = urllib.parse.quote(query, safe="")
     search_url: str = f"{_DDG_LITE_URL}?q={encoded}"
@@ -173,7 +173,7 @@ def _search_ddg(query: str, max_results: int) -> Tuple[List[Dict[str, str]] | No
         return None, f"{type(e).__name__}: {e}"
 
 
-def _search_bing(query: str, max_results: int) -> Tuple[List[Dict[str, str]] | None, str | None]:
+def _search_bing(query: str, max_results: int) -> Tuple[list[dict[str, str]] | None, str | None]:
     """Try searching via Bing. Returns (results, error)."""
     encoded: str = urllib.parse.quote(query, safe="")
     search_url: str = f"{_BING_SEARCH_URL}?q={encoded}"
@@ -202,7 +202,7 @@ def _search_bing(query: str, max_results: int) -> Tuple[List[Dict[str, str]] | N
 # ---------------------------------------------------------------------------
 
 
-def _handle_web_search(args: Dict[str, Any]) -> dict:
+def _handle_web_search(args: dict[str, Any]) -> dict:
     query: str = str(args.get("query", "")).strip()
     max_results: int = int(args.get("max_results", 5))
 

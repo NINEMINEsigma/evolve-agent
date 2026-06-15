@@ -104,7 +104,7 @@ def _resolve_download(path: str) -> tuple[Path, str, str] | str:
     return real, mime, download_url
 
 
-def _handle_display_image(args: Dict[str, Any]) -> dict:
+def _handle_display_image(args: dict[str, Any]) -> dict:
     """Publish a ws: image file to the frontend for inline display."""
     path: str = str(args.get("path", "")).strip()
     description: str = str(args.get("description", "")).strip() or "image"
@@ -128,7 +128,7 @@ def _handle_display_image(args: Dict[str, Any]) -> dict:
     )
 
 
-def _handle_publish_file(args: Dict[str, Any]) -> dict:
+def _handle_publish_file(args: dict[str, Any]) -> dict:
     """Publish any file from ws: and return a download link for the frontend."""
     path: str = str(args.get("path", "")).strip()
     filename: str = str(args.get("filename", "")).strip()
@@ -156,7 +156,7 @@ def _handle_publish_file(args: Dict[str, Any]) -> dict:
     )
 
 
-def _handle_play_audio(args: Dict[str, Any]) -> dict:
+def _handle_play_audio(args: dict[str, Any]) -> dict:
     """Play audio in the frontend. Accepts a ws: file path or an external URL."""
     path: str = str(args.get("path", "")).strip()
     url: str = str(args.get("url", "")).strip()
@@ -271,7 +271,7 @@ def _resolve_audio_item(raw: Any, agentspace: Path) -> dict[str, Any] | str:
     }
 
 
-def _handle_play_audio_list(args: Dict[str, Any]) -> dict:
+def _handle_play_audio_list(args: dict[str, Any]) -> dict:
     """Play a list of audio tracks sequentially in the frontend."""
     items: Any = args.get("items", [])
     autoplay: bool = bool(args.get("autoplay", True))

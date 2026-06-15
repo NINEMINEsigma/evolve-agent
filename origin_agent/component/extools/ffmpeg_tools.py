@@ -87,7 +87,7 @@ def _run_ffmpeg(
 # ---------------------------------------------------------------------------
 
 
-def _handle_media_info(args: Dict[str, Any]) -> dict:
+def _handle_media_info(args: dict[str, Any]) -> dict:
     path: str = str(args.get("path", "")).strip()
     if not path:
         return tool_error("path is required")
@@ -210,7 +210,7 @@ def _parse_duration(duration_str: str) -> float | None:
 # ---------------------------------------------------------------------------
 
 
-def _handle_convert_media(args: Dict[str, Any]) -> dict:
+def _handle_convert_media(args: dict[str, Any]) -> dict:
     input_path: str = str(args.get("input", "")).strip()
     output_path: str = str(args.get("output", "")).strip()
 
@@ -258,7 +258,7 @@ def _handle_convert_media(args: Dict[str, Any]) -> dict:
 # ---------------------------------------------------------------------------
 
 
-def _handle_extract_audio(args: Dict[str, Any]) -> dict:
+def _handle_extract_audio(args: dict[str, Any]) -> dict:
     input_path: str = str(args.get("input", "")).strip()
     output_path: str = str(args.get("output", "")).strip()
 
@@ -310,7 +310,7 @@ def _handle_extract_audio(args: Dict[str, Any]) -> dict:
 # ---------------------------------------------------------------------------
 
 
-def _handle_trim_media(args: Dict[str, Any]) -> dict:
+def _handle_trim_media(args: dict[str, Any]) -> dict:
     input_path: str = str(args.get("input", "")).strip()
     output_path: str = str(args.get("output", "")).strip()
 
@@ -385,7 +385,7 @@ def _handle_trim_media(args: Dict[str, Any]) -> dict:
 # ---------------------------------------------------------------------------
 
 
-def _handle_concat_media(args: Dict[str, Any]) -> dict:
+def _handle_concat_media(args: dict[str, Any]) -> dict:
     inputs: list[str] = args.get("inputs", [])
     output_path: str = str(args.get("output", "")).strip()
 
@@ -453,7 +453,7 @@ def _handle_concat_media(args: Dict[str, Any]) -> dict:
 # ---------------------------------------------------------------------------
 
 
-def _handle_compress_media(args: Dict[str, Any]) -> dict:
+def _handle_compress_media(args: dict[str, Any]) -> dict:
     input_path: str = str(args.get("input", "")).strip()
     output_path: str = str(args.get("output", "")).strip()
 

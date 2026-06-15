@@ -36,7 +36,7 @@ def _s():
 # ---------------------------------------------------------------------------
 
 
-def _handle_write_fork(args: Dict[str, Any]) -> dict:
+def _handle_write_fork(args: dict[str, Any]) -> dict:
     """将文件写入进化目标目录（fork: 命名空间）。
 
     仅在 'fast' 模式下允许。接受裸文件名或逻辑路径。
@@ -131,14 +131,14 @@ def _handle_write_fork(args: Dict[str, Any]) -> dict:
         return tool_error(str(exc), path=path)
 
 
-def _handle_validate_code(args: Dict[str, Any]) -> dict:
+def _handle_validate_code(args: dict[str, Any]) -> dict:
     """验证 Python 代码的语法错误。
 
     *file* — 要验证的裸文件名或逻辑路径。
     未指定文件时验证 fork: 命名空间中所有 .py 文件。
     """
     path: str = str(args.get("file", "")).strip()
-    results: List[Dict[str, Any]] = []
+    results: list[dict[str, Any]] = []
 
     if path:
         # 验证单个文件
@@ -190,7 +190,7 @@ def _handle_validate_code(args: Dict[str, Any]) -> dict:
     return tool_result(valid=ok, results=results)
 
 
-def _handle_evolve_code(args: Dict[str, Any]) -> dict:
+def _handle_evolve_code(args: dict[str, Any]) -> dict:
     """完成代码进化：验证 fork 然后触发热替换。
 
     agent 通过 write_fork 将进化代码写入 fork: 并通过 validate_code

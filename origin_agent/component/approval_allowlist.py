@@ -33,7 +33,7 @@ def _json_safe(value: Any) -> Any:
     return str(value)
 
 
-def normalize_args(args: Dict[str, Any]) -> Dict[str, Any]:
+def normalize_args(args: dict[str, Any]) -> dict[str, Any]:
     return {
         str(k): _json_safe(v)
         for k, v in sorted(args.items(), key=lambda item: str(item[0]))
@@ -41,11 +41,11 @@ def normalize_args(args: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
-def _empty_store() -> List[Dict[str, Any]]:
+def _empty_store() -> list[dict[str, Any]]:
     return []
 
 
-def _load_store() -> List[Dict[str, Any]]:
+def _load_store() -> list[dict[str, Any]]:
     path = _allowlist_path()
     if not path.exists():
         return _empty_store()
@@ -63,7 +63,7 @@ def _load_store() -> List[Dict[str, Any]]:
         return _empty_store()
 
 
-def _save_store(entries: List[Dict[str, Any]]) -> None:
+def _save_store(entries: list[dict[str, Any]]) -> None:
     path = _allowlist_path()
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -72,7 +72,7 @@ def _save_store(entries: List[Dict[str, Any]]) -> None:
         logger.warning("Failed to save tool allowlist: %s", exc)
 
 
-def is_allowed(tool_name: str, args: Dict[str, Any]) -> bool:
+def is_allowed(tool_name: str, args: dict[str, Any]) -> bool:
     normalized = normalize_args(args)
     with _lock:
         entries = _load_store()
@@ -82,7 +82,7 @@ def is_allowed(tool_name: str, args: Dict[str, Any]) -> bool:
     return False
 
 
-def add_allowed(tool_name: str, args: Dict[str, Any]) -> None:
+def add_allowed(tool_name: str, args: dict[str, Any]) -> None:
     normalized = normalize_args(args)
     with _lock:
         entries = _load_store()

@@ -24,7 +24,7 @@ logger = logging.getLogger(__name__)
 
 # ── 工具 handler ─────────────────────────────────────────────
 
-async def _handle_ask_question(args: Dict[str, Any]) -> dict:
+async def _handle_ask_question(args: dict[str, Any]) -> dict:
     """向用户提问，等待回答后返回结果。
 
     预期参数：
@@ -43,7 +43,7 @@ async def _handle_ask_question(args: Dict[str, Any]) -> dict:
         return tool_error("'question' is required")
 
     # 标准化 options
-    options: List[Dict[str, str]] = []
+    options: list[dict[str, str]] = []
     if raw_options and isinstance(raw_options, list):
         for item in raw_options:
             if isinstance(item, dict):

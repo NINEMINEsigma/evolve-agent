@@ -116,8 +116,8 @@ def _is_text_file(path: Path) -> bool:
 # 文件收集
 # ---------------------------------------------------------------------------
 
-def _collect_files(root: Path) -> Dict[str, Path]:
-    files: Dict[str, Path] = {}
+def _collect_files(root: Path) -> dict[str, Path]:
+    files: dict[str, Path] = {}
     if not root.is_dir():
         return files
     for f in root.rglob("*"):
@@ -157,16 +157,16 @@ def _compare_dirs(
     context_lines : diff 上下文行数
     max_files : 最多返回差异文件数
     """
-    left_files: Dict[str, Path] = _collect_files(left_root)
-    right_files: Dict[str, Path] = _collect_files(right_root)
+    left_files: dict[str, Path] = _collect_files(left_root)
+    right_files: dict[str, Path] = _collect_files(right_root)
 
-    all_paths: List[str] = sorted(set(left_files) | set(right_files))
+    all_paths: list[str] = sorted(set(left_files) | set(right_files))
     if path_filter:
         all_paths = [p for p in all_paths if path_filter in p.replace("\\", "/")]
     if pattern:
         all_paths = [p for p in all_paths if fnmatch.fnmatch(p, pattern)]
 
-    stats: Dict[str, int] = {
+    stats: dict[str, int] = {
         "total_left": len(left_files),
         "total_right": len(right_files),
         "same": 0,
@@ -176,7 +176,7 @@ def _compare_dirs(
         "skipped_max": 0,
     }
 
-    diffs: List[Dict[str, Any]] = []
+    diffs: list[dict[str, Any]] = []
 
     for rel_path in all_paths:
         if len(diffs) >= max_files:
@@ -209,7 +209,7 @@ def _compare_dirs(
 
         stats["modified"] += 1
 
-        diff_lines: List[str] = list(difflib.unified_diff(
+        diff_lines: list[str] = list(difflib.unified_diff(
             left_text.splitlines(keepends=True),
             right_text.splitlines(keepends=True),
             fromfile=f"{left_label}/{rel_path}",
@@ -240,7 +240,7 @@ def _compare_dirs(
 # Handler: diff_origin_fast
 # ---------------------------------------------------------------------------
 
-def _handle_diff_origin_fast(args: Dict[str, Any]) -> dict:
+def _handle_diff_origin_fast(args: dict[str, Any]) -> dict:
     if not _ORIGIN_ROOT.is_dir():
         return tool_error(f"origin_agent not found: {_ORIGIN_ROOT}")
     if not _FAST_ROOT.is_dir():
@@ -272,7 +272,7 @@ def _get_fork_root() -> Path | None:
     return _FORK_ROOT_CACHE
 
 
-def _handle_diff_fast_fork(args: Dict[str, Any]) -> dict:
+def _handle_diff_fast_fork(args: dict[str, Any]) -> dict:
     if not _FAST_ROOT.is_dir():
         return tool_error(f"fast_agent not found: {_FAST_ROOT}")
 

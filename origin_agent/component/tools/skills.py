@@ -49,7 +49,7 @@ def _format_skill_list(skills_dir: Path | None = None) -> dict:
 # ── 工具 handler ────────────────────────────────────────────────────
 
 
-def _handle_learn_skill(args: Dict[str, Any]) -> dict:
+def _handle_learn_skill(args: dict[str, Any]) -> dict:
     """创建或更新指定名称和内容的 skill，支持多文件写入。"""
     name: str = str(args.get("name", "")).strip()
     content: str = str(args.get("content", "")).strip()
@@ -113,12 +113,12 @@ def _handle_learn_skill(args: Dict[str, Any]) -> dict:
         return tool_error(str(exc))
 
 
-def _handle_list_skills(args: Dict[str, Any]) -> dict:
+def _handle_list_skills(args: dict[str, Any]) -> dict:
     """列出所有可用 skill。"""
     return _format_skill_list(_skills_dir())
 
 
-def _handle_forget_skill(args: Dict[str, Any]) -> dict:
+def _handle_forget_skill(args: dict[str, Any]) -> dict:
     """按名称删除 skill。"""
     name: str = str(args.get("name", "")).strip()
     if not name:
@@ -133,7 +133,7 @@ def _handle_forget_skill(args: Dict[str, Any]) -> dict:
         return tool_error(str(exc))
 
 
-def _handle_recall_skill(args: Dict[str, Any]) -> dict:
+def _handle_recall_skill(args: dict[str, Any]) -> dict:
     """将 skill 的完整内容加载到对话中。"""
     name: str = str(args.get("name", "")).strip()
     if not name:
@@ -156,7 +156,7 @@ def _handle_recall_skill(args: Dict[str, Any]) -> dict:
         return tool_error(str(exc))
 
 
-def _handle_write_skill_file(args: Dict[str, Any]) -> dict:
+def _handle_write_skill_file(args: dict[str, Any]) -> dict:
     """向已有 skill 包内写入附属文件。"""
     name: str = str(args.get("name", "")).strip()
     path: str = str(args.get("path", "")).strip()
@@ -185,7 +185,7 @@ def _handle_write_skill_file(args: Dict[str, Any]) -> dict:
         return tool_error(str(exc))
 
 
-def _handle_read_skill_file(args: Dict[str, Any]) -> dict:
+def _handle_read_skill_file(args: dict[str, Any]) -> dict:
     """读取 skill 包内的附属文件内容。"""
     name: str = str(args.get("name", "")).strip()
     path: str = str(args.get("path", "")).strip()
@@ -212,7 +212,7 @@ def _handle_read_skill_file(args: Dict[str, Any]) -> dict:
         return tool_error(str(exc))
 
 
-def _handle_run_skill_script(args: Dict[str, Any]) -> dict:
+def _handle_run_skill_script(args: dict[str, Any]) -> dict:
     """在 skill 包目录下执行 scripts/ 中的脚本并返回结果。"""
     import subprocess  # nosec: intentional for skill scripts
 

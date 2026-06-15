@@ -148,7 +148,7 @@ class _CronTask:
     name: str
     schedule_type: str  # "interval" | "cron"
     schedule_value: str
-    command: List[str]
+    command: list[str]
     cwd: str
     should_schedule: bool = True  # 控制任务是否继续被 Timer 调度；False 时停止后续执行
     next_run: float = 0.0
@@ -163,7 +163,7 @@ class _CronTask:
 
 # ── 任务注册表 ──────────────────────────────────────────────
 
-_cron_tasks: Dict[str, Dict[str, _CronTask]] = {}
+_cron_tasks: dict[str, dict[str, _CronTask]] = {}
 _cron_lock: threading.RLock = threading.RLock()
 _MAX_JOBS_PER_SESSION: int = 20
 
@@ -171,7 +171,7 @@ _MAX_JOBS_PER_SESSION: int = 20
 # 由 gateway/server.py 注册，用于在任务执行完成后向前端推送结果。
 
 _CronEventCallback = Any  # Callable[[str, str, str, int, str], None]
-_cron_event_callbacks: List[_CronEventCallback] = []
+_cron_event_callbacks: list[_CronEventCallback] = []
 
 
 def register_cron_event_callback(cb: _CronEventCallback) -> None:
@@ -249,7 +249,7 @@ def _save_all_tasks() -> None:
     try:
         _CRON_STORE_DIR.mkdir(parents=True, exist_ok=True)
         with _cron_lock:
-            payload: Dict[str, Dict[str, dict]] = {}
+            payload: dict[str, dict[str, dict]] = {}
             for sid, tasks in _cron_tasks.items():
                 payload[sid] = {}
                 for tid, task in tasks.items():
@@ -390,7 +390,7 @@ def _resolve_cwd(cwd: str) -> str:
         return str(Path.cwd())
 
 
-def _resolve_log_path(log_path: str) -> str|None:
+def _resolve_log_path(log_path: str) -> str | None:
     """将日志逻辑路径解析为真实文件系统路径。"""
     from component.tools.filesystem import _s as _get_sandbox
     from system.sandbox import Access
@@ -462,7 +462,7 @@ def _run_task(task: _CronTask) -> None:
     task.last_run = time.time()
 
     cwd_real = _resolve_cwd(task.cwd)
-    log_file: Optional[str] = None
+    log_file: str | None = None
     if task.log_path:
         log_file = _resolve_log_path(task.log_path)
         if log_file:
@@ -480,7 +480,7 @@ def _run_task(task: _CronTask) -> None:
         )
     else:
         try:
-            popen_kwargs: Dict[str, Any] = {
+            popen_kwargs: dict[str, Any] = {
                 "cwd": cwd_real,
                 "stdout": subprocess.PIPE,
                 "stderr": subprocess.STDOUT,
@@ -554,7 +554,7 @@ def _run_task(task: _CronTask) -> None:
 # ── 工具 handler ─────────────────────────────────────────────
 
 
-async def _handle_schedule_cron(args: Dict[str, Any]) -> dict:
+async def _handle_schedule_cron(args: dict[str, Any]) -> dict:
     """创建新的定时任务。"""
     raw_schedule: str = str(args.get("schedule", "")).strip()
     raw_command: Any = args.get("command")
@@ -568,7 +568,7 @@ async def _handle_schedule_cron(args: Dict[str, Any]) -> dict:
         return tool_error("'schedule' is required")
     if not raw_command or not isinstance(raw_command, list):
         return tool_error("'command' must be a non-empty list of strings")
-    cmd_parts: List[str] = [str(p) for p in raw_command]
+    cmd_parts: list[str] = [str(p) for p in raw_command]
     if not cmd_parts:
         return tool_error("'command' must be a non-empty list")
 
@@ -660,13 +660,13 @@ async def _handle_schedule_cron(args: Dict[str, Any]) -> dict:
     )
 
 
-async def _handle_list_cron_jobs(args: Dict[str, Any]) -> dict:
+async def _handle_list_cron_jobs(args: dict[str, Any]) -> dict:
     """列出当前会话的所有定时任务。"""
     session_id: str = str(args.get("_session_id", ""))
 
     with _cron_lock:
         session_tasks = _cron_tasks.get(session_id, {})
-        tasks: List[dict] = []
+        tasks: list[dict] = []
         for task in session_tasks.values():
             tasks.append(
                 {
@@ -702,7 +702,7 @@ async def _handle_list_cron_jobs(args: Dict[str, Any]) -> dict:
     )
 
 
-async def _handle_cancel_cron_job(args: Dict[str, Any]) -> dict:
+async def _handle_cancel_cron_job(args: dict[str, Any]) -> dict:
     """取消指定定时任务。"""
     task_id: str = str(args.get("task_id", "")).strip()
     session_id: str = str(args.get("_session_id", ""))
@@ -737,7 +737,7 @@ async def _handle_cancel_cron_job(args: Dict[str, Any]) -> dict:
     )
 
 
-async def _handle_run_cron_job_now(args: Dict[str, Any]) -> dict:
+async def _handle_run_cron_job_now(args: dict[str, Any]) -> dict:
     """立即触发指定任务执行一次（不影响正常调度）。"""
     task_id: str = str(args.get("task_id", "")).strip()
     session_id: str = str(args.get("_session_id", ""))
@@ -773,7 +773,7 @@ async def _handle_run_cron_job_now(args: Dict[str, Any]) -> dict:
     )
 
 
-async def _handle_reschedule_cron_job(args: Dict[str, Any]) -> dict:
+async def _handle_reschedule_cron_job(args: dict[str, Any]) -> dict:
     """基于已有任务配置重新创建并调度一个新任务（所有参数不可修改）。"""
     task_id: str = str(args.get("task_id", "")).strip()
     session_id: str = str(args.get("_session_id", ""))
@@ -849,7 +849,7 @@ async def _handle_reschedule_cron_job(args: Dict[str, Any]) -> dict:
     )
 
 
-async def _handle_wait_cron(args: Dict[str, Any]) -> dict:
+async def _handle_wait_cron(args: dict[str, Any]) -> dict:
     """创建一个只等待、不执行任何脚本的精简定时提醒任务。"""
     raw_duration: str = str(args.get("duration", "")).strip()
     message: str = str(args.get("message", "Wait time is up.")).strip()
@@ -919,11 +919,11 @@ async def _handle_wait_cron(args: Dict[str, Any]) -> dict:
 
 # ── 公开 API（供 gateway/server.py 调用）────────────────────
 
-def list_cron_tasks_for_session(session_id: str) -> List[Dict[str, Any]]:
+def list_cron_tasks_for_session(session_id: str) -> list[dict[str, Any]]:
     """返回指定会话的所有定时任务。"""
     with _cron_lock:
         session_tasks = _cron_tasks.get(session_id, {})
-        tasks: List[Dict[str, Any]] = []
+        tasks: list[dict[str, Any]] = []
         for task in session_tasks.values():
             tasks.append(
                 {
@@ -954,7 +954,7 @@ def list_cron_tasks_for_session(session_id: str) -> List[Dict[str, Any]]:
     return tasks
 
 
-def trigger_cron_task(session_id: str, task_id: str) -> Dict[str, Any]:
+def trigger_cron_task(session_id: str, task_id: str) -> dict[str, Any]:
     """立即触发指定定时任务执行一次。"""
     with _cron_lock:
         task = _cron_tasks.get(session_id, {}).get(task_id)
@@ -969,7 +969,7 @@ def trigger_cron_task(session_id: str, task_id: str) -> Dict[str, Any]:
     return {"success": True, "task_id": task_id, "name": task.name, "message": f"Triggered: {task.name or task_id}"}
 
 
-def cancel_cron_task(session_id: str, task_id: str) -> Dict[str, Any]:
+def cancel_cron_task(session_id: str, task_id: str) -> dict[str, Any]:
     """取消指定定时任务。"""
     with _cron_lock:
         session_tasks = _cron_tasks.get(session_id, {})

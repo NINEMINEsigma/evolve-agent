@@ -67,7 +67,7 @@ def _strip_html(html: str) -> str:
 # Handler
 # ---------------------------------------------------------------------------
 
-def _handle_web_fetch(args: Dict[str, Any]) -> dict:
+def _handle_web_fetch(args: dict[str, Any]) -> dict:
     url: str = str(args.get("url", "")).strip()
 
     if not url:

@@ -36,9 +36,9 @@ def set_agent_loop(loop: object) -> None:
 # ── 辅助函数 ───────────────────────────────────────────────────────────
 
 
-def _list_skills() -> List[Dict[str, Any]]:
+def _list_skills() -> list[dict[str, Any]]:
     """递归扫描 project-root/skills/ 查找 SKILL.md 文件并解析 YAML frontmatter。"""
-    result: List[Dict[str, Any]] = []
+    result: list[dict[str, Any]] = []
     if not _SKILLS_DIR.exists():
         return result
     for skill_file in sorted(_SKILLS_DIR.rglob("SKILL.md")):
@@ -48,7 +48,7 @@ def _list_skills() -> List[Dict[str, Any]]:
             if len(parts) < 3:
                 continue
             frontmatter: str = parts[1].strip()
-            meta: Dict[str, Any] = {"name": "", "description": "", "category": None, "tags": []}
+            meta: dict[str, Any] = {"name": "", "description": "", "category": None, "tags": []}
             for line in frontmatter.splitlines():
                 line = line.strip()
                 if ":" in line:
@@ -75,9 +75,9 @@ def _list_skills() -> List[Dict[str, Any]]:
     return result
 
 
-def _list_memory_sessions() -> List[Dict[str, Any]]:
+def _list_memory_sessions() -> list[dict[str, Any]]:
     import json
-    result: List[Dict[str, Any]] = []
+    result: list[dict[str, Any]] = []
     if not _MEMORY_DIR.exists():
         return result
     try:
@@ -108,8 +108,8 @@ def _list_memory_sessions() -> List[Dict[str, Any]]:
     return result
 
 
-def _list_logs() -> List[Dict[str, str]]:
-    files: List[Dict[str, str]] = []
+def _list_logs() -> list[dict[str, str]]:
+    files: list[dict[str, str]] = []
     if not _LOGS_DIR.exists():
         return files
     for p in sorted(_LOGS_DIR.glob("*.log"), reverse=True)[:10]:

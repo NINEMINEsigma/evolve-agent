@@ -29,7 +29,7 @@ logger = logging.getLogger(__name__)
 # ── 后台任务注册表 ───────────────────────────────────────────
 # task_id -> {proc, log_path, command, start_time, pid, session_id}
 
-_background_tasks: Dict[str, Dict[str, Any]] = {}
+_background_tasks: dict[str, dict[str, Any]] = {}
 
 # ── sandbox 引用 ──────────────────────────────────────────────
 from system.sandbox import _kill_proc_tree
@@ -49,7 +49,7 @@ def _resolve_logical_path(logical: str) -> str | None:
 # ── 启动工具 handler ─────────────────────────────────────────
 
 
-async def _handle_start_background_service(args: Dict[str, Any]) -> dict:
+async def _handle_start_background_service(args: dict[str, Any]) -> dict:
     """启动后台服务进程，立即返回 task_id 和日志路径。
 
     参数与 run_command 类似，但进程在后台运行不等待完成。
@@ -61,7 +61,7 @@ async def _handle_start_background_service(args: Dict[str, Any]) -> dict:
     # ── 验证命令 ──
     if not raw_cmd or not isinstance(raw_cmd, list):
         return tool_error("'command' must be a non-empty list of strings")
-    cmd_parts: List[str] = [str(p) for p in raw_cmd]
+    cmd_parts: list[str] = [str(p) for p in raw_cmd]
     if not cmd_parts:
         return tool_error("'command' must be a non-empty list")
 
@@ -92,7 +92,7 @@ async def _handle_start_background_service(args: Dict[str, Any]) -> dict:
     # ── 解析命令参数中的沙箱路径 ──
     # 将 ws:/fork:/fix: 前缀的逻辑路径展开为真实绝对路径。
     from component.tools.filesystem import _s as _get_sandbox
-    resolved_parts: List[str] = []
+    resolved_parts: list[str] = []
     for part in cmd_parts:
         if any(part.startswith(p) for p in ("ws:", "fork:", "fix:")):
             try:
@@ -150,14 +150,14 @@ async def _handle_start_background_service(args: Dict[str, Any]) -> dict:
 # ── 停止工具 handler ─────────────────────────────────────────
 
 
-async def _handle_stop_background_service(args: Dict[str, Any]) -> dict:
+async def _handle_stop_background_service(args: dict[str, Any]) -> dict:
     """通过 task_id 停止后台服务进程。"""
     task_id: str = str(args.get("task_id", "")).strip()
 
     if not task_id:
         return tool_error("'task_id' is required")
 
-    task: Dict[str, Any] | None = _background_tasks.pop(task_id, None)
+    task: dict[str, Any] | None = _background_tasks.pop(task_id, None)
 
     if task is None and task_id.isdigit():
         # 直接用 PID 尝试
@@ -245,9 +245,9 @@ def cleanup_background_services() -> int:
 
 # ── 公开 API（供 gateway/server.py 调用）────────────────────
 
-def list_background_tasks(session_id: str) -> List[Dict[str, Any]]:
+def list_background_tasks(session_id: str) -> list[dict[str, Any]]:
     """返回指定会话关联的所有后台任务。"""
-    result: List[Dict[str, Any]] = []
+    result: list[dict[str, Any]] = []
     for task_id, task in _background_tasks.items():
         if task.get("session_id") == session_id:
             proc: subprocess.Popen = task["proc"]
@@ -263,9 +263,9 @@ def list_background_tasks(session_id: str) -> List[Dict[str, Any]]:
     return result
 
 
-def stop_background_task(task_id: str) -> Dict[str, Any]:
+def stop_background_task(task_id: str) -> dict[str, Any]:
     """通过 task_id 停止后台任务，返回操作结果。"""
-    task: Dict[str, Any] | None = _background_tasks.pop(task_id, None)
+    task: dict[str, Any] | None = _background_tasks.pop(task_id, None)
 
     if task is None and task_id.isdigit():
         pid = int(task_id)

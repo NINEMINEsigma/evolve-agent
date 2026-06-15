@@ -1,7 +1,7 @@
 """工具模块自动发现 — 通过 AST 扫描。
 
 函数:
-    discover_builtin_tools(tools_dir, package_prefix) -> List[str]
+    discover_builtin_tools(tools_dir, package_prefix) -> list[str]
         扫描目录中的 .py 文件，寻找模块级别包含 registry.register() 调用的文件，
         导入它们，返回已导入模块名称列表。
         *tools_dir* 是磁盘上的目录路径，*package_prefix* 是该目录对应的 Python 包名
@@ -55,7 +55,7 @@ def _module_registers_tools(module_path: Path) -> bool:
     return any(_is_registry_register_call(stmt) for stmt in tree.body)
 
 
-def discover_builtin_tools(tools_dir: str, package_prefix: str) -> List[str]:
+def discover_builtin_tools(tools_dir: str, package_prefix: str) -> list[str]:
     """扫描 *tools_dir* 查找工具模块，通过 *package_prefix* 推导模块名并导入。
 
     步骤:
@@ -75,7 +75,7 @@ def discover_builtin_tools(tools_dir: str, package_prefix: str) -> List[str]:
         return []
 
     logger.info("discover_builtin_tools: scanning %s (prefix=%s)", tools_path, package_prefix)
-    module_names: List[str] = []
+    module_names: list[str] = []
 
     for path in sorted(tools_path.rglob("*.py")):
         if path.name in _EXCLUDED_FILENAMES:
@@ -91,7 +91,7 @@ def discover_builtin_tools(tools_dir: str, package_prefix: str) -> List[str]:
         module_names.append(mod_name)
         logger.info("discover_builtin_tools: found %s -> %s", path.name, mod_name)
 
-    imported: List[str] = []
+    imported: list[str] = []
     for mod_name in module_names:
         try:
             importlib.import_module(mod_name)

@@ -19,13 +19,13 @@ logger = logging.getLogger(__name__)
 
 # ── 内部状态：session_id → {display_id → display_info} ─────────────────
 
-_display_registry: Dict[str, Dict[str, Dict[str, Any]]] = {}
+_display_registry: dict[str, dict[str, dict[str, Any]]] = {}
 
 
 # ── handler ─────────────────────────────────────────────────────────
 
 
-async def _handle_set_clipboard_display(args: Dict[str, Any]) -> dict:
+async def _handle_set_clipboard_display(args: dict[str, Any]) -> dict:
     """创建或更新前端可复制展示区域。
 
     参数：
@@ -41,7 +41,7 @@ async def _handle_set_clipboard_display(args: Dict[str, Any]) -> dict:
     if not display_id:
         return tool_error("'display_id' is required")
 
-    info: Dict[str, Any] = {
+    info: dict[str, Any] = {
         "display_id": display_id,
         "label": label or display_id,
         "content": content,
@@ -55,7 +55,7 @@ async def _handle_set_clipboard_display(args: Dict[str, Any]) -> dict:
     return tool_result(**info)
 
 
-async def _handle_clear_clipboard_display(args: Dict[str, Any]) -> dict:
+async def _handle_clear_clipboard_display(args: dict[str, Any]) -> dict:
     """清除前端指定展示区域。
 
     参数：

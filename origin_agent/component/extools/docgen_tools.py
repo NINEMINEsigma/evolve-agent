@@ -250,7 +250,7 @@ Packer.toBuffer(doc).then(buffer => {{
 """
 
 
-def _handle_write_docx(args: Dict[str, Any]) -> dict:
+def _handle_write_docx(args: dict[str, Any]) -> dict:
     """Generate a .docx file using Node.js + docx npm package."""
     dep_err = _check_node_docx()
     if dep_err:
@@ -305,7 +305,7 @@ def _handle_write_docx(args: Dict[str, Any]) -> dict:
 # ---------------------------------------------------------------------------
 
 
-def _handle_write_xlsx(args: Dict[str, Any]) -> dict:
+def _handle_write_xlsx(args: dict[str, Any]) -> dict:
     """Generate an .xlsx file using openpyxl."""
     try:
         import openpyxl
@@ -370,7 +370,7 @@ def _handle_write_xlsx(args: Dict[str, Any]) -> dict:
 # ---------------------------------------------------------------------------
 
 
-def _handle_write_pptx(args: Dict[str, Any]) -> dict:
+def _handle_write_pptx(args: dict[str, Any]) -> dict:
     """Generate a .pptx file using python-pptx."""
     dep_err = _check_python_pptx()
     if dep_err:
@@ -429,7 +429,7 @@ def _handle_write_pptx(args: Dict[str, Any]) -> dict:
 # ---------------------------------------------------------------------------
 
 
-def _handle_write_pdf(args: Dict[str, Any]) -> dict:
+def _handle_write_pdf(args: dict[str, Any]) -> dict:
     """Generate a PDF file using fpdf2."""
     dep_err = _check_fpdf2()
     if dep_err:

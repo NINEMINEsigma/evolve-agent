@@ -26,11 +26,11 @@ def create_skill(
     name: str,
     skills_dir: Optional[Path] = None,
     description: str = "",
-    category: Optional[str] = None,
+    category: str | None = None,
     content: str = "",
     author: str = "Hermes Agent",
     version: str = "1.0.0",
-    tags: Optional[List[str]] = None,
+    tags: Optional[list[str]] = None,
     **extra_frontmatter: Any,
 ) -> SkillPayload:
     """Create a new skill on disk.
@@ -117,9 +117,9 @@ def create_skill(
 def update_skill(
     name_or_path: str,
     skills_dir: Optional[Path] = None,
-    description: Optional[str] = None,
-    content: Optional[str] = None,
-    tags: Optional[List[str]] = None,
+    description: str | None = None,
+    content: str | None = None,
+    tags: Optional[list[str]] = None,
     **frontmatter_updates: Any,
 ) -> SkillPayload:
     """Update an existing skill's frontmatter and/or body.
@@ -168,7 +168,7 @@ def update_skill(
 def delete_skill(
     name_or_path: str,
     skills_dir: Optional[Path] = None,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Delete a skill and its directory.
 
     Args:
@@ -202,7 +202,7 @@ def write_skill_file(
     subpath: str,
     content: str,
     skills_dir: Optional[Path] = None,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Write a file into an existing skill's directory.
 
     Args:
@@ -249,7 +249,7 @@ def read_skill_file(
     name: str,
     subpath: str,
     skills_dir: Optional[Path] = None,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Read a file from an existing skill's directory.
 
     Args:
@@ -309,13 +309,13 @@ def read_skill_file(
     }
 
 
-def _frontmatter_to_yaml(fm: Dict[str, Any]) -> str:
+def _frontmatter_to_yaml(fm: dict[str, Any]) -> str:
     """Serialize a frontmatter dict to YAML string (without delimiters).
 
     Uses a simple serializer that handles strings, bools, ints, lists,
     and nested dicts.
     """
-    lines: List[str] = []
+    lines: list[str] = []
     for key, value in fm.items():
         if value is None:
             continue

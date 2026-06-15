@@ -36,7 +36,7 @@ def is_content_block_error(exc: Exception) -> bool:
     return False
 
 
-def strip_image_blocks(messages: List[Dict[str, Any]], session_id: str) -> int:
+def strip_image_blocks(messages: list[dict[str, Any]], session_id: str) -> int:
     """移除消息列表中所有含 image_url 的 content blocks，转为纯文本。
 
     返回被剥离的图片数量。

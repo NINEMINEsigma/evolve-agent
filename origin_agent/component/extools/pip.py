@@ -23,7 +23,7 @@ logger = logging.getLogger(__name__)
 # ── 工具 handler ─────────────────────────────────────────────────────
 
 
-async def _handle_install_package(args: Dict[str, Any]) -> dict:
+async def _handle_install_package(args: dict[str, Any]) -> dict:
     """Install one or more Python packages via pip."""
     packages: str = str(args.get("packages", "")).strip()
     upgrade: bool = args.get("upgrade", False)
@@ -31,7 +31,7 @@ async def _handle_install_package(args: Dict[str, Any]) -> dict:
     if not packages:
         return tool_error("packages is required — package names to install, space-separated")
 
-    pkg_list: List[str] = [p.strip() for p in packages.split() if p.strip()]
+    pkg_list: list[str] = [p.strip() for p in packages.split() if p.strip()]
     if not pkg_list:
         return tool_error("packages cannot be empty")
 

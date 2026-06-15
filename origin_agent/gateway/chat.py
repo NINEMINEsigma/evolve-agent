@@ -31,30 +31,32 @@ class MessageType(str, Enum):
     HANDSFREE_MODE = "handsfree_mode"
     TASK_PROGRESS = "task_progress"
     CLIPBOARD_DISPLAY = "clipboard_display"
+    PING = "ping"
+    PONG = "pong"
 
 
 class Message(BaseModel):
     type: MessageType
     session_id: str = ""
     content: Optional[Any] = None
-    tool: Optional[str] = None
-    args: Optional[Dict[str, Any]] = None
+    tool: str | None = None
+    args: Optional[dict[str, Any]] = None
     result: Optional[Any] = None
-    message: Optional[str] = None  # ERROR 类型使用
-    request_id: Optional[str] = None  # confirm_request / confirm_response 使用
-    action: Optional[str] = None      # confirm_response：allow_once | allow_always | deny
-    deny_reason: Optional[str] = None  # confirm_response：拒绝原因
-    denied_by: Optional[str] = None    # confirm_response：拒绝来源 (model/user/system)
-    filename: Optional[str] = None    # FILE_UPLOAD：原始文件名
-    mime_type: Optional[str] = None   # FILE_UPLOAD：MIME 类型
-    file_data: Optional[str] = None   # FILE_UPLOAD：base64 编码的文件内容
-    local_path: Optional[str] = None  # FILE_UPLOAD：本地文件路径（同盘时优先硬链接）
+    message: str | None = None  # ERROR 类型使用
+    request_id: str | None = None  # confirm_request / confirm_response 使用
+    action: str | None = None      # confirm_response：allow_once | allow_always | deny
+    deny_reason: str | None = None  # confirm_response：拒绝原因
+    denied_by: str | None = None    # confirm_response：拒绝来源 (model/user/system)
+    filename: str | None = None    # FILE_UPLOAD：原始文件名
+    mime_type: str | None = None   # FILE_UPLOAD：MIME 类型
+    file_data: str | None = None   # FILE_UPLOAD：base64 编码的文件内容
+    local_path: str | None = None  # FILE_UPLOAD：本地文件路径（同盘时优先硬链接）
     # ask_request / ask_response 相关字段
-    question: Optional[str] = None    # ASK_REQUEST：问题文本
+    question: str | None = None    # ASK_REQUEST：问题文本
     options: Optional[list] = None    # ASK_REQUEST：选项列表 [{label, value}]
     allow_custom: Optional[bool] = None  # ASK_REQUEST：是否允许自定义输入
-    option: Optional[str] = None      # ASK_RESPONSE：选中的选项值
-    custom_text: Optional[str] = None # ASK_RESPONSE：自定义输入文本
+    option: str | None = None      # ASK_RESPONSE：选中的选项值
+    custom_text: str | None = None # ASK_RESPONSE：自定义输入文本
 
     @classmethod
     def from_json(cls, raw: str) -> Message:
@@ -83,7 +85,7 @@ class Message(BaseModel):
         )
 
     def to_json(self) -> str:
-        d: Dict[str, Any] = {"type": self.type.value}
+        d: dict[str, Any] = {"type": self.type.value}
         if self.session_id:
             d["session_id"] = self.session_id
         if self.content is not None:
@@ -143,7 +145,7 @@ class SessionManager:
 
     def __init__(self, store_path: str | None = None) -> None:
         import time
-        self._sessions: Dict[str, dict] = {}  # sid -> {status, created_at, title}
+        self._sessions: dict[str, dict] = {}  # sid -> {status, created_at, title}
         self._store_dir: Path | None = Path(store_path) if store_path else None
         self._index_lock: threading.Lock = threading.Lock()
         if self._store_dir:

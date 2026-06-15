@@ -22,7 +22,7 @@ from .frontmatter import parse_frontmatter
 # Types
 # ---------------------------------------------------------------------------
 
-SkillPayload = Dict[str, Any]
+SkillPayload = dict[str, Any]
 """Serializable dict representing a loaded skill.
 
 Keys:
@@ -43,7 +43,7 @@ Keys:
     error: str | None (on failure)
 """
 
-SkillInfo = Dict[str, Any]
+SkillInfo = dict[str, Any]
 """Minimal skill metadata for listing.
 
 Keys:
@@ -81,12 +81,12 @@ _INLINE_SHELL_RE = re.compile(r"\u007b\u007b\s*(.+?)\s*\u007d\u007d")
 def load_skill(
     name_or_path: str,
     skills_dir: Optional[Path] = None,
-    external_dirs: Optional[List[Path]] = None,
-    task_id: Optional[str] = None,
+    external_dirs: Optional[list[Path]] = None,
+    task_id: str | None = None,
     preprocess: bool = True,
     inline_shell: bool = False,
     inline_shell_timeout: int = 10,
-    template_vars: Optional[Dict[str, str]] = None,
+    template_vars: Optional[dict[str, str]] = None,
 ) -> SkillPayload:
     """Load a skill by name or path.
 
@@ -173,10 +173,10 @@ def load_skill(
 
 def list_skills(
     skills_dir: Optional[Path] = None,
-    external_dirs: Optional[List[Path]] = None,
-    category: Optional[str] = None,
-    disabled: Optional[List[str]] = None,
-) -> List[SkillInfo]:
+    external_dirs: Optional[list[Path]] = None,
+    category: str | None = None,
+    disabled: Optional[list[str]] = None,
+) -> list[SkillInfo]:
     """List all available skills with minimal metadata.
 
     Args:
@@ -192,7 +192,7 @@ def list_skills(
     external_dirs = external_dirs or []
     disabled = disabled or []
     seen: set = set()
-    results: List[SkillInfo] = []
+    results: list[SkillInfo] = []
 
     for scan_dir in [skills_dir] + external_dirs:
         if not scan_dir.exists():
@@ -260,7 +260,7 @@ def list_skills(
 
 
 def _resolve_skill_path(
-    name_or_path: str, skills_dir: Path, external_dirs: List[Path]
+    name_or_path: str, skills_dir: Path, external_dirs: list[Path]
 ) -> Path|None:
     """Resolve a skill name or path to a SKILL.md file."""
     p = Path(name_or_path).expanduser()
@@ -302,9 +302,9 @@ def _resolve_skill_path(
     return None
 
 
-def _iter_skill_index_files(base_dir: Path, index_name: str) -> List[Path]:
+def _iter_skill_index_files(base_dir: Path, index_name: str) -> list[Path]:
     """Find all *index_name* files under *base_dir*, breadth-first limited."""
-    results: List[Path] = []
+    results: list[Path] = []
     if not base_dir.exists():
         return results
 
@@ -329,7 +329,7 @@ def _iter_skill_index_files(base_dir: Path, index_name: str) -> List[Path]:
 # ---------------------------------------------------------------------------
 
 
-def _default_template_vars(task_id: Optional[str] = None) -> Dict[str, str]:
+def _default_template_vars(task_id: str | None = None) -> dict[str, str]:
     """Return default template variables."""
     return {
         "user": os.environ.get("USER", "unknown"),
@@ -340,7 +340,7 @@ def _default_template_vars(task_id: Optional[str] = None) -> Dict[str, str]:
 
 
 def _substitute_template_vars(
-    content: str, skill_dir: Optional[Path], vars: Dict[str, str]
+    content: str, skill_dir: Optional[Path], vars: dict[str, str]
 ) -> str:
     """Replace ``{{ var_name }}`` placeholders with values from *vars*.
 
@@ -400,13 +400,13 @@ def _expand_inline_shell(
 # ---------------------------------------------------------------------------
 
 
-def _discover_linked_files(skill_dir: Path) -> Dict[str, List[str]]:
+def _discover_linked_files(skill_dir: Path) -> dict[str, list[str]]:
     """Scan the entire skill directory for supporting files (blacklist-based).
 
     Excludes directories and patterns listed in ``IGNORED_DIRS`` as well
     as any hidden entry (starting with ``.``).
     """
-    linked: Dict[str, List[str]] = {}
+    linked: dict[str, list[str]] = {}
     if not skill_dir.exists():
         return linked
 
@@ -433,8 +433,8 @@ def _discover_linked_files(skill_dir: Path) -> Dict[str, List[str]]:
 
 
 def _check_setup_status(
-    frontmatter: Dict[str, Any], skill_dir: Path
-) -> Dict[str, Any]:
+    frontmatter: dict[str, Any], skill_dir: Path
+) -> dict[str, Any]:
     """Check if a skill requires setup."""
     metadata = frontmatter.get("metadata", {}) or {}
     if isinstance(metadata, dict):
@@ -479,7 +479,7 @@ def _command_exists(cmd: str) -> bool:
     )
 
 
-def _infer_category(skill_dir: Path, skills_base: Path) -> str|None:
+def _infer_category(skill_dir: Path, skills_base: Path) -> str | None:
     """Infer skill category from its parent directory structure."""
     try:
         rel = skill_dir.relative_to(skills_base)
@@ -491,7 +491,7 @@ def _infer_category(skill_dir: Path, skills_base: Path) -> str|None:
     return None
 
 
-def _first_non_heading_line(body: str) -> str|None:
+def _first_non_heading_line(body: str) -> str | None:
     """Return the first non-empty, non-heading line of *body*."""
     for line in body.strip().split("\n"):
         line = line.strip()

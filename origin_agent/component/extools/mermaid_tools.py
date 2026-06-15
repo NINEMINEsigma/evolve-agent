@@ -199,7 +199,7 @@ def _compute_http_url(real_path: Path, agentspace_base: Path | None) -> str:
 # ── Tool handler ──────────────────────────────────────────────────────────
 
 
-def _handle_draw_mermaid(args: Dict[str, Any]) -> dict:
+def _handle_draw_mermaid(args: dict[str, Any]) -> dict:
     """Render a Mermaid diagram to PNG and return a Markdown image link.
 
     Two input modes (mutually exclusive):

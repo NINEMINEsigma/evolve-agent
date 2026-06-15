@@ -506,7 +506,7 @@ class MCPOAuthManager:
     async def handle_401(
         self,
         server_name: str,
-        failed_access_token: Optional[str] = None,
+        failed_access_token: str | None = None,
     ) -> bool:
         """Handle a 401 from a tool call, deduplicated across concurrent callers.
 

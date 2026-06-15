@@ -64,7 +64,7 @@ def _run(cmd: list[str], timeout: int = 15) -> tuple[int, str]:
         return -1, str(e)
 
 
-def _which(name: str) -> Optional[str]:
+def _which(name: str) -> str | None:
     """return path if executable exists in PATH"""
     return shutil.which(name)
 

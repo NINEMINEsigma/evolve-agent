@@ -58,7 +58,7 @@ class Access(str, Enum):
 # "fallback" 模式：fix=rw, ws=rw, skills=rw
 # 不存在 self: 命名空间 — agent 不能查看或修改自身的运行时副本。
 # 进化完全通过 fork:/fix: 实现。
-_PERMISSIONS: Dict[str, Dict[str, List[Access]]] = {
+_PERMISSIONS: dict[str, dict[str, list[Access]]] = {
     "fast": {
         "fork":   [Access.READ, Access.WRITE],
         "ws":     [Access.READ, Access.WRITE],
@@ -165,13 +165,17 @@ class Sandbox:
         rest = rest.lstrip("/")
 
         # ---- 路径遍历检查 ----
-        if ".." in rest.split("/") or rest.startswith("/"):
+        if ".." in rest.split("/") or rest.startswith("/") or (len(rest)>1 and rest[1]==":"):
+            raise SandboxError(
+                f"Path traversal rejected: {logical!r}"
+            )
+        if ".." in rest.split("\\") or rest.startswith("\\") or (len(rest)>1 and rest[1]==":"):
             raise SandboxError(
                 f"Path traversal rejected: {logical!r}"
             )
 
         # ---- 解析到真实目录 ----
-        ns_map: Dict[str, Path | None] = {
+        ns_map: dict[str, Path | None] = {
             "fork":   self._ctx.fork_path,
             "ws":     self._ctx.agentspace,
             "fix":    self._ctx.fix_path,
@@ -194,7 +198,7 @@ class Sandbox:
             )
 
         # ---- 权限检查 ----
-        allowed: List[Access] = _PERMISSIONS[self._ctx.mode][ns]
+        allowed: list[Access] = _PERMISSIONS[self._ctx.mode][ns]
         if access not in allowed:
             raise SandboxError(
                 f"Access {access.value} denied for namespace '{ns}:' "
@@ -224,11 +228,11 @@ class Sandbox:
 
     def run(
         self,
-        args: List[str],
+        args: list[str],
         *,
         cwd_ns: str = "ws:",
         timeout: int = 30,
-        extra_env: Dict[str, str] | None = None,
+        extra_env: dict[str, str] | None = None,
         encoding: str = "utf-8",
         errors: str | None = None,
     ) -> subprocess.CompletedProcess:
@@ -344,7 +348,7 @@ class Sandbox:
         except SandboxError:
             return False
 
-    def list_dir(self, logical: str) -> List[str]:
+    def list_dir(self, logical: str) -> list[str]:
         """列出目录条目（只读检查）。"""
         r: ResolvedPath = self.resolve_read(logical)
         if not r.real.is_dir():

@@ -13,7 +13,7 @@ from .filesystem import _s
 logger = logging.getLogger(__name__)
 
 
-def _handle_list_uploads(args: Dict[str, Any]) -> dict:
+def _handle_list_uploads(args: dict[str, Any]) -> dict:
     """处理获取最晚上传文件的请求。"""
     n: int = args.get("n", 10)
     if not isinstance(n, int) or n < 1:
@@ -22,13 +22,13 @@ def _handle_list_uploads(args: Dict[str, Any]) -> dict:
         n = 100
 
     try:
-        names: List[str] = _s().list_dir("ws:uploads/")
+        names: list[str] = _s().list_dir("ws:uploads/")
     except SandboxError as exc:
         # uploads 目录可能还不存在
         logger.info("uploads directory not available: %s", exc)
         return tool_result(files=[])
 
-    entries: List[dict] = []
+    entries: list[dict] = []
     for name in names:
         try:
             r = _s().resolve_read(f"ws:uploads/{name}")

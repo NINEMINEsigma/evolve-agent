@@ -52,7 +52,7 @@ _INTERNAL_NOTE_RE: re.Pattern = re.compile(
 
 def _tool_error(message: str, **extra: Any) -> dict:
     """返回错误 dict（tools.registry.tool_error 的本地替代）。"""
-    result: Dict[str, Any] = {"error": str(message)}
+    result: dict[str, Any] = {"error": str(message)}
     if extra:
         result.update(extra)
     return result
@@ -199,8 +199,8 @@ class MemoryManager:
     """
 
     def __init__(self) -> None:
-        self._providers: List[MemoryProvider] = []
-        self._tool_to_provider: Dict[str, MemoryProvider] = {}
+        self._providers: list[MemoryProvider] = []
+        self._tool_to_provider: dict[str, MemoryProvider] = {}
         self._has_external: bool = False  # 添加非内置 provider 后为 True
 
     # -- 注册 --------------------------------------------------------
@@ -281,7 +281,7 @@ class MemoryManager:
         return True
 
     @property
-    def providers(self) -> List[MemoryProvider]:
+    def providers(self) -> list[MemoryProvider]:
         """所有已注册 provider，按顺序。"""
         return list(self._providers)
 
@@ -292,7 +292,7 @@ class MemoryManager:
                 return p
         return None
 
-    def get_provider_names(self) -> List[str]:
+    def get_provider_names(self) -> list[str]:
         """返回所有已注册 provider 的名称列表，按顺序。"""
         return [p.name for p in self._providers]
 
@@ -362,7 +362,7 @@ class MemoryManager:
 
     # -- 工具 ---------------------------------------------------------------
 
-    def get_tool_schemas(self) -> List[Dict[str, Any]]:
+    def get_tool_schemas(self) -> list[dict[str, Any]]:
         """收集所有 provider 的工具 schema。
 
         重复工具名称被去重（第一个 provider 获胜）。
@@ -393,7 +393,7 @@ class MemoryManager:
         return tool_name in self._tool_to_provider
 
     def handle_tool_call(
-        self, tool_name: str, args: Dict[str, Any], **kwargs: Any
+        self, tool_name: str, args: dict[str, Any], **kwargs: Any
     ) -> Any:
         """将工具调用路由到正确的 provider。
 

@@ -45,7 +45,7 @@ _CONTINUATION = re.compile(r"^(\s+)(.+)$")
 # ---------------------------------------------------------------------------
 
 
-def parse_frontmatter(content: str) -> Tuple[Dict[str, Any], str]:
+def parse_frontmatter(content: str) -> Tuple[dict[str, Any], str]:
     """Parse YAML frontmatter from *content*.
 
     Args:
@@ -73,7 +73,7 @@ def parse_frontmatter(content: str) -> Tuple[Dict[str, Any], str]:
     return parsed, body.lstrip()
 
 
-def load_frontmatter_only(content: str) -> Dict[str, Any]:
+def load_frontmatter_only(content: str) -> dict[str, Any]:
     """Parse and return *only* the frontmatter dict (discard body).
 
     Convenience wrapper when you only need the metadata.
@@ -87,7 +87,7 @@ def load_frontmatter_only(content: str) -> Dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 
-def _parse_yaml_block(text: str) -> Dict[str, Any]:
+def _parse_yaml_block(text: str) -> dict[str, Any]:
     """Parse a raw YAML string block into a dict.
 
     Handles:
@@ -102,16 +102,16 @@ def _parse_yaml_block(text: str) -> Dict[str, Any]:
         return {}
 
     lines = text.split("\n")
-    result: Dict[str, Any] = {}
+    result: dict[str, Any] = {}
     _parse_dict_body(lines, 0, len(lines), result, 0)
     return result
 
 
 def _parse_dict_body(
-    lines: List[str],
+    lines: list[str],
     start: int,
     end: int,
-    target: Dict[str, Any],
+    target: dict[str, Any],
     base_indent: int,
 ) -> int:
     """Parse lines[start:end] as key-value pairs into *target*.
@@ -168,10 +168,10 @@ def _parse_dict_body(
 
 
 def _parse_list_block(
-    lines: List[str],
+    lines: list[str],
     start: int,
     end: int,
-    target: List[Any],
+    target: list[Any],
     base_indent: int,
 ) -> int:
     """Parse a block list starting at *start* into *target*.
@@ -213,7 +213,7 @@ def _parse_list_block(
 
         if is_kv:
             # Parse as inline or multi-line sub-dict
-            sub: Dict[str, Any] = {}
+            sub: dict[str, Any] = {}
             _parse_dict_body([item_raw], 0, 1, sub, 0)
             if sub:
                 target.append(sub)
@@ -234,10 +234,10 @@ def _parse_list_block(
 
 
 def _parse_multiline_value(
-    lines: List[str],
+    lines: list[str],
     start: int,
     end: int,
-    target: Dict[str, Any],
+    target: dict[str, Any],
     key: str,
     indicator: str,
 ) -> int:
@@ -250,7 +250,7 @@ def _parse_multiline_value(
 
     if indicator in ("|", ">"):
         body_indent: Optional[int] = None
-        collected: List[str] = []
+        collected: list[str] = []
         while i < end:
             line = lines[i]
             if not line.strip():
@@ -287,10 +287,10 @@ def _parse_multiline_value(
 
 
 def _collect_multiline_body(
-    lines: List[str], start: int, end: int, min_indent: int
-) -> List[str]:
+    lines: list[str], start: int, end: int, min_indent: int
+) -> list[str]:
     """Collect continuation lines indented at least *min_indent*."""
-    collected: List[str] = []
+    collected: list[str] = []
     i = start
     while i < end:
         line = lines[i]
@@ -306,7 +306,7 @@ def _collect_multiline_body(
     return collected
 
 
-def _parse_inline_list(text: str) -> List[Any]:
+def _parse_inline_list(text: str) -> list[Any]:
     """Parse an inline YAML list: ``[a, b, c]``"""
     inner = text.strip()
     if inner.startswith("[") and inner.endswith("]"):

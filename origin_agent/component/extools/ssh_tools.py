@@ -57,7 +57,7 @@ def _validate_target(target: str) -> str | None:
 # ---------------------------------------------------------------------------
 
 
-async def _handle_ssh_exec(args: Dict[str, Any]) -> dict:
+async def _handle_ssh_exec(args: dict[str, Any]) -> dict:
     """在远程服务器上执行 shell 命令。"""
     target: str = str(args.get("target", "")).strip()
     command: str = str(args.get("command", "")).strip()
@@ -122,7 +122,7 @@ async def _handle_ssh_exec(args: Dict[str, Any]) -> dict:
 # ---------------------------------------------------------------------------
 
 
-async def _handle_ssh_upload(args: Dict[str, Any]) -> dict:
+async def _handle_ssh_upload(args: dict[str, Any]) -> dict:
     """使用 scp 上传本地文件到远程服务器。"""
     target: str = str(args.get("target", "")).strip()
     local_path: str = str(args.get("local_path", "")).strip()
@@ -190,7 +190,7 @@ async def _handle_ssh_upload(args: Dict[str, Any]) -> dict:
 # ---------------------------------------------------------------------------
 
 
-async def _handle_ssh_download(args: Dict[str, Any]) -> dict:
+async def _handle_ssh_download(args: dict[str, Any]) -> dict:
     """使用 scp 从远程服务器下载文件到本地。"""
     target: str = str(args.get("target", "")).strip()
     remote_path: str = str(args.get("remote_path", "")).strip()

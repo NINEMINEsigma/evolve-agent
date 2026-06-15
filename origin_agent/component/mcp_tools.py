@@ -69,7 +69,7 @@ def _bridge_on_deregister(name: str) -> None:
     tool_registry.deregister(name)
 
 
-def _bridge_on_get_toolset(name: str) -> str|None:
+def _bridge_on_get_toolset(name: str) -> str | None:
     """MCP toolset 查询回调 → 项目 ToolRegistry。"""
     from abstract.tools.registry import registry as tool_registry
     return tool_registry.get_toolset_for_tool(name)
@@ -103,7 +103,7 @@ except ImportError as exc:
 # ---------------------------------------------------------------------------
 
 
-def _load_mcp_config(path: Optional[Path]) -> Dict[str, dict]:
+def _load_mcp_config(path: Optional[Path]) -> dict[str, dict]:
     """从 JSON 配置文件加载 MCP server 配置。
 
     支持的格式：:
@@ -132,7 +132,7 @@ def _load_mcp_config(path: Optional[Path]) -> Dict[str, dict]:
             logger.warning("MCP config at %s is not a dict, ignoring", path)
             return {}
         # 过滤出符合 {name: {command|url: ...}} 格式的条目
-        servers: Dict[str, dict] = {}
+        servers: dict[str, dict] = {}
         for key, val in config.items():
             if isinstance(val, dict) and ("command" in val or "url" in val):
                 servers[key] = val
@@ -149,7 +149,7 @@ def _load_mcp_config(path: Optional[Path]) -> Dict[str, dict]:
 # ---------------------------------------------------------------------------
 
 
-def init_mcp(ctx: RuntimeContext) -> List[str]:
+def init_mcp(ctx: RuntimeContext) -> list[str]:
     """初始化并连接 MCP server。
 
     从 ``ctx.mcp_config_path`` 读取配置（若未设置则跳过），
@@ -212,7 +212,7 @@ def shutdown_mcp() -> None:
     _mcp_initialized = False
 
 
-def _get_registered_mcp_tools() -> List[str]:
+def _get_registered_mcp_tools() -> list[str]:
     """返回当前已注册的所有 MCP 工具名列表。"""
     try:
         from abstract.mcp.client import get_mcp_status

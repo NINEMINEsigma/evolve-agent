@@ -57,7 +57,7 @@ def _parse_size(raw_bytes: bytes, mime_type: str) -> Tuple[Optional[int], Option
         return None, None
 
 
-def _handle_read_image(args: Dict[str, Any]) -> dict:
+def _handle_read_image(args: dict[str, Any]) -> dict:
     path: str = str(args.get("path", "")).strip()
     if not path:
         return tool_error("path is required", path=path)

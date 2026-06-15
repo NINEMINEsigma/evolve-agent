@@ -158,7 +158,7 @@ class MemoryProvider(ABC):
         """
 
     @abstractmethod
-    def get_tool_schemas(self) -> List[Dict[str, Any]]:
+    def get_tool_schemas(self) -> list[dict[str, Any]]:
         """返回此 provider 暴露的工具 schema。
 
         每个 schema 遵循 OpenAI function-calling 格式::
@@ -174,7 +174,7 @@ class MemoryProvider(ABC):
         """
 
     @abstractmethod
-    def handle_tool_call(self, tool_name: str, args: Dict[str, Any]) -> Any:
+    def handle_tool_call(self, tool_name: str, args: dict[str, Any]) -> Any:
         """处理对此 provider 某个工具的工具调用。
 
         仅对之前由 :meth:`get_tool_schemas` 返回的工具名称调用。
@@ -220,7 +220,7 @@ class MemoryProvider(ABC):
             ``model``、``platform``、``tool_count``。
         """
 
-    def on_session_end(self, messages: List[Dict[str, Any]]) -> None:
+    def on_session_end(self, messages: list[dict[str, Any]]) -> None:
         """session 结束时调用（显式退出或超时）。
 
         用于 session 结束时的知识提取、摘要等。
@@ -272,7 +272,7 @@ class MemoryProvider(ABC):
             附加上下文。
         """
 
-    def on_pre_compress(self, messages: List[Dict[str, Any]]) -> str:
+    def on_pre_compress(self, messages: list[dict[str, Any]]) -> str:
         """在上下文压缩丢弃旧消息前调用。
 
         用于从即将被压缩的消息中提取洞察。
@@ -296,7 +296,7 @@ class MemoryProvider(ABC):
         action: str,
         target: str,
         content: str,
-        metadata: Optional[Dict[str, Any]] = None,
+        metadata: Optional[dict[str, Any]] = None,
     ) -> None:
         """内置 memory 工具写入条目时调用。
 

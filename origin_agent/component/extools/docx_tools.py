@@ -26,7 +26,7 @@ except ImportError:
 # ---------------------------------------------------------------------------
 
 
-def _handle_read_docx(args: Dict[str, Any]) -> dict:
+def _handle_read_docx(args: dict[str, Any]) -> dict:
     path: str = str(args.get("path", "")).strip()
     if not path:
         return tool_error("path is required")

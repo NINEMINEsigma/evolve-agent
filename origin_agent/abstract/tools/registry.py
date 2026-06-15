@@ -54,7 +54,7 @@ class ToolEntry:
         schema: dict,
         handler: Callable,
         check_fn: Optional[Callable] = None,
-        requires_env: Optional[List[str]] = None,
+        requires_env: Optional[list[str]] = None,
         is_async: bool = False,
         description: str = "",
         emoji: str = "",
@@ -68,7 +68,7 @@ class ToolEntry:
         self.schema: dict = schema
         self.handler: Callable = handler
         self.check_fn: Optional[Callable] = check_fn
-        self.requires_env: List[str] = requires_env or []
+        self.requires_env: list[str] = requires_env or []
         self.is_async: bool = is_async
         self.description: str = description
         self.emoji: str = emoji
@@ -90,7 +90,7 @@ class ToolEntry:
 # ---------------------------------------------------------------------------
 
 _CHECK_FN_TTL_SECONDS: float = 30.0
-_check_fn_cache: Dict[Callable, Tuple[float, bool]] = {}
+_check_fn_cache: dict[Callable, Tuple[float, bool]] = {}
 _check_fn_cache_lock: threading.Lock = threading.Lock()
 
 DEFAULT_RESULT_SIZE_CHARS: int = 100000
@@ -137,9 +137,9 @@ class ToolRegistry:
     """
 
     def __init__(self):
-        self._tools: Dict[str, ToolEntry] = {}
-        self._toolset_checks: Dict[str, Callable] = {}
-        self._toolset_aliases: Dict[str, str] = {}
+        self._tools: dict[str, ToolEntry] = {}
+        self._toolset_checks: dict[str, Callable] = {}
+        self._toolset_aliases: dict[str, str] = {}
         # 序列化变更并为读取者提供稳定快照。
         self._lock: threading.RLock = threading.RLock()
         # 单调递增的 generation 计数器。每次变更时递增
@@ -150,16 +150,16 @@ class ToolRegistry:
 
     # -- 内部快照辅助方法 -----------------------------------------
 
-    def _snapshot_state(self) -> Tuple[List[ToolEntry], Dict[str, Callable]]:
+    def _snapshot_state(self) -> Tuple[list[ToolEntry], dict[str, Callable]]:
         """返回注册表条目和 toolset 检查的一致性快照。"""
         with self._lock:
             return list(self._tools.values()), dict(self._toolset_checks)
 
-    def _snapshot_entries(self) -> List[ToolEntry]:
+    def _snapshot_entries(self) -> list[ToolEntry]:
         """返回已注册工具条目的稳定快照。"""
         return self._snapshot_state()[0]
 
-    def _snapshot_toolset_checks(self) -> Dict[str, Callable]:
+    def _snapshot_toolset_checks(self) -> dict[str, Callable]:
         """返回 toolset 可用性检查的稳定快照。"""
         return self._snapshot_state()[1]
 
@@ -188,11 +188,11 @@ class ToolRegistry:
         entry: ToolEntry | None = self.get_entry(name)
         return entry.schema if entry else None
 
-    def get_all_tool_names(self) -> List[str]:
+    def get_all_tool_names(self) -> list[str]:
         """返回所有已注册工具名称的排序列表。"""
         return sorted(entry.name for entry in self._snapshot_entries())
 
-    def get_toolset_for_tool(self, name: str) -> str|None:
+    def get_toolset_for_tool(self, name: str) -> str | None:
         """返回工具所属的 toolset，不存在返回 None。"""
         entry: ToolEntry | None = self.get_entry(name)
         return entry.toolset if entry else None
@@ -210,15 +210,15 @@ class ToolRegistry:
         entry: ToolEntry | None = self.get_entry(name)
         return entry.danger_level if entry else "readonly"
 
-    def get_tool_to_toolset_map(self) -> Dict[str, str]:
+    def get_tool_to_toolset_map(self) -> dict[str, str]:
         """返回 ``{tool_name: toolset_name}`` 映射。"""
         return {entry.name: entry.toolset for entry in self._snapshot_entries()}
 
-    def get_registered_toolset_names(self) -> List[str]:
+    def get_registered_toolset_names(self) -> list[str]:
         """返回注册表中存在的排序去重 toolset 名称列表。"""
         return sorted({entry.toolset for entry in self._snapshot_entries()})
 
-    def get_tool_names_for_toolset(self, toolset: str) -> List[str]:
+    def get_tool_names_for_toolset(self, toolset: str) -> list[str]:
         """返回指定 toolset 下注册的工具名称排序列表。"""
         return sorted(
             entry.name for entry in self._snapshot_entries()
@@ -239,12 +239,12 @@ class ToolRegistry:
             self._toolset_aliases[alias] = toolset
             self._generation += 1
 
-    def get_registered_toolset_aliases(self) -> Dict[str, str]:
+    def get_registered_toolset_aliases(self) -> dict[str, str]:
         """返回 ``{alias: canonical_toolset}`` 映射的快照。"""
         with self._lock:
             return dict(self._toolset_aliases)
 
-    def get_toolset_alias_target(self, alias: str) -> str|None:
+    def get_toolset_alias_target(self, alias: str) -> str | None:
         """返回别名的规范 toolset 名称，不存在返回 None。"""
         with self._lock:
             return self._toolset_aliases.get(alias)
@@ -258,7 +258,7 @@ class ToolRegistry:
         schema: dict,
         handler: Callable,
         check_fn: Optional[Callable] = None,
-        requires_env: Optional[List[str]] = None,
+        requires_env: Optional[list[str]] = None,
         is_async: bool = False,
         description: str = "",
         emoji: str = "",
@@ -356,7 +356,7 @@ class ToolRegistry:
         self,
         tool_names: set,
         quiet: bool = False,
-    ) -> List[dict]:
+    ) -> list[dict]:
         """返回请求工具名称的 OpenAI 格式 tool schema。
 
         仅包含 ``check_fn()`` 返回 True（或无 check_fn）的工具。
@@ -366,11 +366,11 @@ class ToolRegistry:
         返回 ``{"type": "function", "function": schema}`` 字典列表，
         适合直接传递给 OpenAI 格式的 chat completions API。
         """
-        result: List[dict] = []
+        result: list[dict] = []
         # 在 30 秒 TTL 之上的每次调用缓存 — 处理一次 definitions
         # 调用中对同一 check_fn 的重复探测，无需重新读取 TTL 时钟。
-        check_results: Dict[Callable, bool] = {}
-        entries_by_name: Dict[str, ToolEntry] = {entry.name: entry for entry in self._snapshot_entries()}
+        check_results: dict[Callable, bool] = {}
+        entries_by_name: dict[str, ToolEntry] = {entry.name: entry for entry in self._snapshot_entries()}
         for name in sorted(tool_names):
             entry: ToolEntry | None = entries_by_name.get(name)
             if not entry:
@@ -445,18 +445,18 @@ class ToolRegistry:
             check: Callable | None = self._toolset_checks.get(toolset)
         return self._evaluate_toolset_check(toolset, check)
 
-    def check_toolset_requirements(self) -> Dict[str, bool]:
+    def check_toolset_requirements(self) -> dict[str, bool]:
         """返回 ``{toolset: available_bool}`` 映射。"""
-        entries: List[ToolEntry]
-        toolset_checks: Dict[str, Callable]
+        entries: list[ToolEntry]
+        toolset_checks: dict[str, Callable]
         entries, toolset_checks = self._snapshot_state()
-        toolsets: List[str] = sorted({entry.toolset for entry in entries})
+        toolsets: list[str] = sorted({entry.toolset for entry in entries})
         return {
             toolset: self._evaluate_toolset_check(toolset, toolset_checks.get(toolset))
             for toolset in toolsets
         }
 
-    def get_available_toolsets(self) -> Dict[str, dict]:
+    def get_available_toolsets(self) -> dict[str, dict]:
         """返回用于 UI 展示的 toolset 元数据。
 
         每个值::
@@ -468,9 +468,9 @@ class ToolRegistry:
                 "requirements": [str, ...],
             }
         """
-        toolsets: Dict[str, dict] = {}
-        entries: List[ToolEntry]
-        toolset_checks: Dict[str, Callable]
+        toolsets: dict[str, dict] = {}
+        entries: list[ToolEntry]
+        toolset_checks: dict[str, Callable]
         entries, toolset_checks = self._snapshot_state()
         for entry in entries:
             ts: str = entry.toolset
@@ -490,7 +490,7 @@ class ToolRegistry:
                         toolsets[ts]["requirements"].append(env)
         return toolsets
 
-    def get_toolset_requirements(self) -> Dict[str, dict]:
+    def get_toolset_requirements(self) -> dict[str, dict]:
         """构建向后兼容的 toolset-requirements 字典。
 
         每个值::
@@ -503,9 +503,9 @@ class ToolRegistry:
                 "tools": [str, ...],
             }
         """
-        result: Dict[str, dict] = {}
-        entries: List[ToolEntry]
-        toolset_checks: Dict[str, Callable]
+        result: dict[str, dict] = {}
+        entries: list[ToolEntry]
+        toolset_checks: dict[str, Callable]
         entries, toolset_checks = self._snapshot_state()
         for entry in entries:
             ts: str = entry.toolset
@@ -524,7 +524,7 @@ class ToolRegistry:
                     result[ts]["env_vars"].append(env)
         return result
 
-    def check_tool_availability(self, quiet: bool = False) -> Tuple[List[str], List[dict]]:
+    def check_tool_availability(self, quiet: bool = False) -> Tuple[list[str], list[dict]]:
         """返回 ``(available_toolsets, unavailable_info)``。
 
         每个不可用条目::
@@ -535,11 +535,11 @@ class ToolRegistry:
                 "tools": [str, ...],
             }
         """
-        available: List[str] = []
-        unavailable: List[dict] = []
+        available: list[str] = []
+        unavailable: list[dict] = []
         seen: set = set()
-        entries: List[ToolEntry]
-        toolset_checks: Dict[str, Callable]
+        entries: list[ToolEntry]
+        toolset_checks: dict[str, Callable]
         entries, toolset_checks = self._snapshot_state()
         for entry in entries:
             ts: str = entry.toolset

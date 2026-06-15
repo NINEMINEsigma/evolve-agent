@@ -16,7 +16,7 @@ from typing import Any, Dict, List
 logger = logging.getLogger(__name__)
 
 
-def validate_syntax(file_path: Path) -> Dict[str, Any]:
+def validate_syntax(file_path: Path) -> dict[str, Any]:
     """使用 ast.parse() 检查单个 Python 文件的语法错误。
 
     返回 ``{"status": "ok"}`` 或 ``{"status": "syntax_error", "line": ..., "message": ...}``。
@@ -39,7 +39,7 @@ def validate_syntax(file_path: Path) -> Dict[str, Any]:
         return {"file": file_path.name, "status": "error", "message": str(exc)}
 
 
-def validate_compile(file_path: Path, timeout: int = 15) -> Dict[str, Any]:
+def validate_compile(file_path: Path, timeout: int = 15) -> dict[str, Any]:
     """在子进程中通过 ``py_compile`` 检查 Python 文件能否编译。
 
     可捕获 ``ast.parse()`` 无法检测的导入级错误 —
@@ -78,7 +78,7 @@ def validate_directory(
     *,
     deep: bool = False,
     timeout: int = 15,
-) -> List[Dict[str, Any]]:
+) -> list[dict[str, Any]]:
     """验证目录中所有 .py 文件。
 
     *deep=False* — 仅语法检查（快速，覆盖大多数问题）。
@@ -86,7 +86,7 @@ def validate_directory(
 
     返回每个文件的验证结果字典列表。
     """
-    results: List[Dict[str, Any]] = []
+    results: list[dict[str, Any]] = []
     if not dir_path.is_dir():
         return [{"file": str(dir_path), "status": "error", "message": "Not a directory"}]
 
@@ -94,18 +94,18 @@ def validate_directory(
         # 跳过 __pycache__ 和其他生成目录
         if "__pycache__" in py_file.parts:
             continue
-        result: Dict[str, Any] = validate_syntax(py_file)
+        result: dict[str, Any] = validate_syntax(py_file)
         results.append(result)
         if deep and result.get("status") == "ok":
             # 仅对通过语法检查的文件进行编译检查
-            compile_result: Dict[str, Any] = validate_compile(py_file, timeout=timeout)
+            compile_result: dict[str, Any] = validate_compile(py_file, timeout=timeout)
             if compile_result["status"] != "ok":
                 results[-1] = compile_result
 
     return results
 
 
-def summary(results: List[Dict[str, Any]]) -> Dict[str, Any]:
+def summary(results: list[dict[str, Any]]) -> dict[str, Any]:
     """从验证结果生成高层摘要。
 
     返回 ``{"valid": bool, "total": int, "ok": int, "errors": int, "details": [...]}``。

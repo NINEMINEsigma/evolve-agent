@@ -82,7 +82,7 @@ def _extract_text(content: Any) -> str:
 # 映射 session_id → WebSocket，用于在 agent 循环处理回合期间
 # 向前端推送 tool_call / tool_result 事件。
 
-_tool_ws_sinks: Dict[str, WebSocket] = {}
+_tool_ws_sinks: dict[str, WebSocket] = {}
 
 # ── cron 定时任务结果推送 ────────────────────────────────────
 # 后台线程通过 ws_chat 保存的 uvicorn 主事件循环调度协程。
@@ -103,8 +103,8 @@ def set_cron_event_loop(loop: _asyncio.AbstractEventLoop) -> None:
 #   用于 WebSocket 断开时自动拒绝。
 
 import asyncio as _asyncio
-_pending_confirms: Dict[str, _asyncio.Future[ApprovalResult]] = {}
-_confirm_session_map: Dict[str, str] = {}
+_pending_confirms: dict[str, _asyncio.Future[ApprovalResult]] = {}
+_confirm_session_map: dict[str, str] = {}
 
 
 def _register_confirm_session(request_id: str, session_id: str) -> None:
@@ -134,10 +134,10 @@ def _deny_session_confirms(session_id: str) -> None:
 # ── ask（提问） ──────────────────────────────────────────────
 # {request_id: asyncio.Future} — 映射提问请求 ID 到 future，
 #   当用户在对话框中选择或提交时解析。
-# 结果格式：{"option": str|None, "custom_text": str|None}
+# 结果格式：{"option": str | None, "custom_text": str | None}
 
-_pending_asks: Dict[str, _asyncio.Future[str]] = {}
-_ask_session_map: Dict[str, str] = {}
+_pending_asks: dict[str, _asyncio.Future[str]] = {}
+_ask_session_map: dict[str, str] = {}
 
 
 def _register_ask_session(request_id: str, session_id: str) -> None:
@@ -904,10 +904,12 @@ async def ws_chat(ws: WebSocket) -> None:
             get_messages = getattr(_agent_loop, "get_session_messages", None)
             get_usage = getattr(_agent_loop, "get_token_usage", None)
             get_context = getattr(_agent_loop, "get_context_tokens", None)
+            is_processing = getattr(_agent_loop, "is_processing", None)
             if get_messages:
                 history: list[dict] = get_messages(sid)
                 usage: int = get_usage(sid) if get_usage else 0
                 context: int = get_context(sid) if get_context else 0
+                processing: bool = is_processing(sid) if is_processing else False
                 await ws.send_text(
                     Message(
                         type=MessageType.SYSTEM,
@@ -916,6 +918,7 @@ async def ws_chat(ws: WebSocket) -> None:
                             "session_history": history,
                             "token_usage": usage,
                             "context_tokens": context,
+                            "processing": processing,
                         }, ensure_ascii=False),
                     ).to_json()
                 )
@@ -1042,6 +1045,14 @@ async def ws_chat(ws: WebSocket) -> None:
                 enabled = msg.content is not None and (str(msg.content).lower() in ("true", "1", "on"))
                 set_handsfree_mode(sid, enabled)
 
+            elif msg.type == MessageType.PING:
+                await ws.send_text(
+                    Message(
+                        type=MessageType.PONG,
+                        session_id=sid,
+                    ).to_json()
+                )
+
             elif msg.type == MessageType.SYSTEM:
                 logger.info("System message from session=%s: %s", sid, msg.content)
 
@@ -1059,6 +1070,9 @@ async def ws_chat(ws: WebSocket) -> None:
     except _asyncio.CancelledError:
         # uvicorn 关闭时取消 handler task，属于正常退出，无需记录为错误
         logger.debug("WebSocket handler cancelled for session=%s (server shutting down)", sid)
+    except RuntimeError as exc:
+        # 收到非 text 消息（如 binary）或连接已关闭时仍尝试读写
+        logger.info("WebSocket runtime error for session=%s: %s", sid, exc)
     finally:
         _deny_session_confirms(sid)
         _deny_session_asks(sid)

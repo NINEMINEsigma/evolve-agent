@@ -27,7 +27,7 @@ from typing import Dict, List, Optional
 # 核心函数
 # ---------------------------------------------------------------------------
 
-def scan_plugins(*scan_dirs: str) -> List[Dict]:
+def scan_plugins(*scan_dirs: str) -> list[Dict]:
     """扫描一个或多个目录查找插件子目录。
 
     每个包含 ``__init__.py`` 的子目录视为候选。
@@ -39,7 +39,7 @@ def scan_plugins(*scan_dirs: str) -> List[Dict]:
     list of dict
         每个 dict 包含键 ``name``、``path``、``type``、``metadata``。
     """
-    seen: Dict[str, Dict] = {}
+    seen: dict[str, Dict] = {}
 
     for scan_dir in scan_dirs:
         scan_path: Path = Path(scan_dir)
@@ -233,7 +233,7 @@ def read_plugin_metadata(plugin_dir: str) -> dict:
         # （以短横线开头的列表项或普通续行）。
         if value == "":
             # 收集续行（相对于此键缩进）
-            continuation: List[str] = []
+            continuation: list[str] = []
             j: int = i + 1
             base_indent: int = len(line) - len(line.lstrip())
             while j < n:

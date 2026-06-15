@@ -90,7 +90,7 @@ class RuntimeContext(BaseModel):
 
     # -- MCP 配置 -------------------------------------------------
 
-    mcp_config_path: Optional[str] = None
+    mcp_config_path: str | None = None
     """MCP server 配置文件的路径（JSON 格式）。为 None 时不启动 MCP server。"""
 
     # -- 会话合并配置 ------------------------------------------------

@@ -38,7 +38,7 @@ class EasysaveMemoryProvider(MemoryProvider):
         self._dir: Path = Path(memory_dir) if memory_dir else Path("workspace/logs/memory")
         self._dir.mkdir(parents=True, exist_ok=True)
         self._session_id: str = ""
-        self._index: Dict[str, Any] = {}
+        self._index: dict[str, Any] = {}
 
     # -- MemoryProvider ABC ------------------------------------------------
 
@@ -128,7 +128,7 @@ class EasysaveMemoryProvider(MemoryProvider):
         except Exception:
             pass
 
-    def get_tool_schemas(self) -> List[Dict[str, Any]]:
+    def get_tool_schemas(self) -> list[dict[str, Any]]:
         return [
             {
                 "name": "recall_memory",
@@ -180,7 +180,7 @@ class EasysaveMemoryProvider(MemoryProvider):
             },
         ]
 
-    def handle_tool_call(self, tool_name: str, args: Dict[str, Any]) -> str:
+    def handle_tool_call(self, tool_name: str, args: dict[str, Any]) -> str:
         if tool_name == "recall_memory":
             return self._handle_recall(args)
         if tool_name == "remember":
@@ -195,19 +195,19 @@ class EasysaveMemoryProvider(MemoryProvider):
     def _session_path(self, session_id: str) -> Path:
         return self._dir / f"session_{session_id}.json"
 
-    def _load_session(self, session_id: str) -> Dict[str, Any] | None:
+    def _load_session(self, session_id: str) -> dict[str, Any] | None:
         try:
             return load(f"session_{session_id}", str(self._session_path(session_id)))
         except Exception:
             return None
 
-    def _save_session(self, session_id: str, data: Dict[str, Any]) -> None:
+    def _save_session(self, session_id: str, data: dict[str, Any]) -> None:
         try:
             save(f"session_{session_id}", str(self._session_path(session_id)), data)
         except Exception as exc:
             logger.warning("Failed to save session %s: %s", session_id, exc)
 
-    def _handle_recall(self, args: Dict[str, Any]) -> str:
+    def _handle_recall(self, args: dict[str, Any]) -> str:
         sid: str = str(args.get("session_id", "")).strip()
         query: str = str(args.get("query", "")).strip().lower()
 
@@ -245,7 +245,7 @@ class EasysaveMemoryProvider(MemoryProvider):
             ensure_ascii=False,
         )
 
-    def _handle_remember(self, args: Dict[str, Any]) -> str:
+    def _handle_remember(self, args: dict[str, Any]) -> str:
         content: str = str(args.get("content", "")).strip()
         if not content:
             return json.dumps({"error": "content is required"})

@@ -31,7 +31,7 @@ def _s():
 # ---------------------------------------------------------------------------
 
 
-def _handle_validate_frontend(args: Dict[str, Any]) -> dict:
+def _handle_validate_frontend(args: dict[str, Any]) -> dict:
     """通过运行 pnpm install && pnpm run build 验证前端代码。
 
     预期参数：

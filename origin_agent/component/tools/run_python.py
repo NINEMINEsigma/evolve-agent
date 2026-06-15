@@ -36,11 +36,11 @@ def _s():
 # ── 工具 handler ─────────────────────────────────────────────────────
 
 
-async def _handle_run_python(args: Dict[str, Any]) -> dict:
+async def _handle_run_python(args: dict[str, Any]) -> dict:
     """执行 Python 代码，始终使用与 agent 进程相同的解释器。"""
     code: str = str(args.get("code", "")).strip()
     script: str = str(args.get("script", "")).strip()
-    extra_args: List[str] = [str(a) for a in args.get("args", [])]
+    extra_args: list[str] = [str(a) for a in args.get("args", [])]
     python_path: str = str(args.get("python_path", "")).strip()
     cwd: str = str(args.get("cwd", "ws:")).strip()
     timeout: int = int(args.get("timeout", 60))
@@ -61,7 +61,7 @@ async def _handle_run_python(args: Dict[str, Any]) -> dict:
         interpreter = sys.executable
 
     # ── 构建完整的命令数组 ──
-    cmd_parts: List[str] = [interpreter]
+    cmd_parts: list[str] = [interpreter]
 
     if code:
         cmd_parts += ["-c", code]
@@ -79,7 +79,7 @@ async def _handle_run_python(args: Dict[str, Any]) -> dict:
     return _execute(cmd_parts, cwd, timeout)
 
 
-def _execute(cmd_parts: List[str], cwd: str, timeout: int = 60) -> dict:
+def _execute(cmd_parts: list[str], cwd: str, timeout: int = 60) -> dict:
     """执行已批准的命令并返回结果。"""
     logger.info("run_python | cwd=%s cmd=%s", cwd, cmd_parts)
     result: subprocess.CompletedProcess

@@ -27,7 +27,7 @@ except ImportError:
 # ---------------------------------------------------------------------------
 
 
-def _handle_read_excel(args: Dict[str, Any]) -> dict:
+def _handle_read_excel(args: dict[str, Any]) -> dict:
     path: str = str(args.get("path", "")).strip()
     if not path:
         return tool_error("path is required")
@@ -88,7 +88,7 @@ def _handle_read_excel(args: Dict[str, Any]) -> dict:
         wb.close()
 
 
-def _handle_write_excel(args: Dict[str, Any]) -> dict:
+def _handle_write_excel(args: dict[str, Any]) -> dict:
     path: str = str(args.get("path", "")).strip()
     data: list[dict[str, Any]] | dict[str, list[dict[str, Any]]] = args.get("data", [])
 

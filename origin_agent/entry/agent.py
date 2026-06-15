@@ -67,29 +67,29 @@ class AgentLoop:
         self._llm: LLMClient = LLMClient(ctx)
         self._memory: MemoryManager = MemoryManager()
         # 记录哪些 session 已完成 memory provider 初始化
-        self._memory_initialized: Dict[str, bool] = {}
+        self._memory_initialized: dict[str, bool] = {}
         # 记录哪些 session 已收到中断请求
-        self._interrupted: Dict[str, bool] = {}
+        self._interrupted: dict[str, bool] = {}
         # 每个 session 的取消事件 — 由 interrupt() 设置，
         # 由 process_message() 检查，用于立即取消正在进行的 LLM HTTP 请求。
-        self._cancel_events: Dict[str, asyncio.Event] = {}
+        self._cancel_events: dict[str, asyncio.Event] = {}
         # 每个 session 的会话历史：session_id → OpenAI 格式的消息列表
-        self._histories: Dict[str, List[Dict[str, Any]]] = {}
+        self._histories: dict[str, list[dict[str, Any]]] = {}
         # Skill prompt 缓存 — skill 被修改后失效
         self._skill_cache: list[str] = []
         # skill 缓存是否有效
         self._skill_cache_valid: bool = False
         # 累计 token 消耗，仅用于 dashboard 展示。
-        self._token_usage: Dict[str, int] = {}
+        self._token_usage: dict[str, int] = {}
         # 最近一次 LLM 调用返回的真实 prompt_tokens（上下文占用锚点）
-        self._last_prompt_tokens: Dict[str, int] = {}
+        self._last_prompt_tokens: dict[str, int] = {}
         # SessionManager 引用（由 server.py 注入），用于归档+旋转会话
         self._session_manager: Any | None = None
         # 会话旋转通知队列：old_sid -> new_sid（server.py 在 process_message 后检查并推送前端）
-        self._session_rotated_notify: Dict[str, str] = {}
+        self._session_rotated_notify: dict[str, str] = {}
         # 工具调用统计，用于 dashboard 监控。
         # key 为工具名，value 为 {"calls": int, "errors": int}
-        self._tool_stats: Dict[str, Dict[str, int]] = {}
+        self._tool_stats: dict[str, dict[str, int]] = {}
         # 工具调用事件回调，在 tool_call / tool_result 时触发。
         # 签名：async (session_id, event_type, tool_name, payload) -> None
         self._tool_event_callback: Callable[[str, str, str, str], Awaitable[None]] | None = None
@@ -100,7 +100,9 @@ class AgentLoop:
         self._message_hooks_cache: list[dict] | None = None
         # 每个 session 的排他锁，防止并发 process_message 破坏消息序列
         # （如 cron 定时任务回调与主流程同时写入同一 session）
-        self._session_locks: Dict[str, asyncio.Lock] = {}
+        self._session_locks: dict[str, asyncio.Lock] = {}
+        # 记录哪些 session 正在处理消息（process_message 未返回）
+        self._processing_sessions: dict[str, bool] = {}
 
     # -- 公开 API ----------------------------------------------------------
 
@@ -159,6 +161,10 @@ class AgentLoop:
         """返回 True 表示该 session 存在活跃的中断请求。"""
         ev = self._cancel_events.get(session_id)
         return ev is not None and ev.is_set()
+
+    def is_processing(self, session_id: str) -> bool:
+        """返回 True 表示该 session 当前正在处理消息。"""
+        return self._processing_sessions.get(session_id, False)
 
     async def process_message(
         self,
@@ -234,6 +240,8 @@ class AgentLoop:
         # 立即中止正在进行的 LLM HTTP 请求。
         cancel_event: asyncio.Event = asyncio.Event()
         self._cancel_events[session_id] = cancel_event
+        # 标记当前 session 正在处理消息
+        self._processing_sessions[session_id] = True
 
         turn: int = 0
         try:
@@ -316,9 +324,9 @@ class AgentLoop:
                     )
 
                 # 执行工具调用并将结果持久化到历史
-                history: List[Dict[str, Any]] = self._get_history(session_id)
+                history: list[dict[str, Any]] = self._get_history(session_id)
                 for tc in resp.tool_calls:
-                    tool_msg: Dict[str, Any] = await self._execute_tool(tc, session_id)
+                    tool_msg: dict[str, Any] = await self._execute_tool(tc, session_id)
                     messages.append(tool_msg)
                     history.append(tool_msg)
                     self._persist_message(session_id, tool_msg)
@@ -356,6 +364,8 @@ class AgentLoop:
         finally:
             # 始终清理取消事件，确保下一回合从干净状态开始
             self._cancel_events.pop(session_id, None)
+            # 清除处理中标记
+            self._processing_sessions.pop(session_id, None)
 
         logger.warning(
             "Tool-call loop exceeded max turns (%d) for session=%s",
@@ -390,7 +400,7 @@ class AgentLoop:
             return False
         return supports_vision(model)
 
-    def _get_history(self, session_id: str) -> List[Dict[str, Any]]:
+    def _get_history(self, session_id: str) -> list[dict[str, Any]]:
         if session_id not in self._histories:
             # 先尝试从磁盘加载（重启后仍然可用）
             disk: list[dict] = self._load_history_from_disk(session_id)
@@ -401,7 +411,7 @@ class AgentLoop:
         self, session_id: str, role: str, content: str | list[dict[str, Any]],
         reasoning_content: str | None = None,
     ) -> None:
-        entry: Dict[str, Any] = {"role": role, "content": content}
+        entry: dict[str, Any] = {"role": role, "content": content}
         if reasoning_content:
             entry["reasoning_content"] = reasoning_content
         self._get_history(session_id).append(entry)
@@ -436,7 +446,7 @@ class AgentLoop:
 
     def _remove_last_user_message(self, session_id: str) -> None:
         """从历史中移除最后一条用户消息（用于 LLM 调用失败时清理上下文）。"""
-        history: List[Dict[str, Any]] = self._histories.get(session_id, [])
+        history: list[dict[str, Any]] = self._histories.get(session_id, [])
         if history and history[-1].get("role") == "user":
             history.pop()
 
@@ -500,6 +510,9 @@ class AgentLoop:
         self._last_prompt_tokens[new_sid] = 0
         self._token_usage[new_sid] = self._token_usage.get(old_sid, 0)
         self._persist_token_usage(new_sid)
+        # 迁移 processing 标志
+        if self._processing_sessions.pop(old_sid, False):
+            self._processing_sessions[new_sid] = True
 
         if new_sid not in self._memory_initialized:
             for provider in self._memory.providers:
@@ -625,7 +638,7 @@ class AgentLoop:
 
     async def auto_generate_title(self, session_id: str) -> str:
         """使用 LLM 从会话历史中生成简短标题。"""
-        history: List[Dict[str, Any]] = self._get_history(session_id)
+        history: list[dict[str, Any]] = self._get_history(session_id)
         if not history:
             return ""
         # 收集最近的 50 轮 user/assistant 文本（跳过 system 和 tool 条目）
@@ -723,7 +736,7 @@ class AgentLoop:
 
     def _recent_history_text(self, session_id: str, keep_messages: int = 10) -> str:
         """提取最近几条旧历史，作为继承会话的短期上下文。"""
-        history: List[Dict[str, Any]] = self._get_history(session_id)
+        history: list[dict[str, Any]] = self._get_history(session_id)
         parts: list[str] = []
         for msg in history:
             role: str = msg.get("role", "")
@@ -840,7 +853,7 @@ class AgentLoop:
     async def _summarize_session_history(self, session_id: str) -> str:
         """为会话终结生成持久化摘要。"""
         try:
-            history: List[Dict[str, Any]] = self._get_history(session_id)
+            history: list[dict[str, Any]] = self._get_history(session_id)
             parts: list[str] = []
             for msg in history:
                 role: str = msg.get("role", "unknown")
@@ -958,7 +971,7 @@ class AgentLoop:
         session_id: str,
         user_message: str | list[dict[str, Any]],
         memory_ctx: str,
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """构建当前回合的完整消息列表。"""
         system_prompt: str = build_agent_system_prompt(
             self._ctx,
@@ -973,7 +986,7 @@ class AgentLoop:
             self._load_message_hooks(),
         )
 
-    def _get_full_history(self, session_id: str) -> List[Dict[str, Any]]:
+    def _get_full_history(self, session_id: str) -> list[dict[str, Any]]:
         """从存储的历史中重建完整消息列表（循环中间使用）。"""
         system_prompt: str = build_agent_system_prompt(
             self._ctx,
@@ -996,8 +1009,8 @@ class AgentLoop:
             }
             for tc in resp.tool_calls
         ]
-        history: List[Dict[str, Any]] = self._get_history(session_id)
-        entry: Dict[str, Any] = {
+        history: list[dict[str, Any]] = self._get_history(session_id)
+        entry: dict[str, Any] = {
             "role": "assistant",
             # TODO:
             "content": resp.content,
@@ -1008,7 +1021,7 @@ class AgentLoop:
         history.append(entry)
         self._persist_message(session_id, entry)
 
-    async def _execute_tool(self, tc: ToolCall, session_id: str = "") -> Dict[str, Any]:
+    async def _execute_tool(self, tc: ToolCall, session_id: str = "") -> dict[str, Any]:
         """执行单个工具调用，返回 OpenAI 格式的工具消息。"""
         # 响应中断 — 每次工具执行前检查。
         # 同时检查取消事件，以处理中断在前一个 LLM 调用期间到达的情况。
@@ -1265,7 +1278,7 @@ class AgentLoop:
             "content": content,
         }
 
-    def _get_tool_definitions(self) -> List[Dict[str, Any]]:
+    def _get_tool_definitions(self) -> list[dict[str, Any]]:
         """返回 LLM 可用的工具 schema（registry + memory）。"""
         names: set[str] = set(tool_registry.get_all_tool_names())
         definitions: list[dict] = tool_registry.get_definitions(tool_names=names)
@@ -1279,7 +1292,7 @@ class AgentLoop:
     def get_session_messages(self, session_id: str) -> list[dict]:
         """返回格式化后的会话历史，供前端回放。"""
         # 如果尚未加载到内存，先从磁盘加载
-        history: List[Dict[str, Any]] = self._get_history(session_id)
+        history: list[dict[str, Any]] = self._get_history(session_id)
         messages: list[dict] = []
         for index, entry in enumerate(history):
             role: str = entry.get("role", "")
@@ -1305,10 +1318,10 @@ class AgentLoop:
             return {"updated": False, "error": "invalid message index"}
         if not isinstance(content, str):
             return {"updated": False, "error": "content must be a string"}
-        history: List[Dict[str, Any]] = self._get_history(session_id)
+        history: list[dict[str, Any]] = self._get_history(session_id)
         if index >= len(history):
             return {"updated": False, "error": "message index out of range"}
-        entry: Dict[str, Any] = dict(history[index])
+        entry: dict[str, Any] = dict(history[index])
         entry["content"] = content
         history[index] = entry
         self._histories[session_id] = history

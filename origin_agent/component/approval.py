@@ -41,7 +41,7 @@ class ApprovalResult(BaseModel):
         denied_by:   拒绝来源 — "model"（脱手模式LLM）、"user"（人工）、"system"（超时/断开等）
     """
     action: str
-    deny_reason: Optional[str] = None
+    deny_reason: str | None = None
     denied_by: str = "system"
 
 
@@ -49,7 +49,7 @@ class ApprovalResult(BaseModel):
 # 脱手模式 session 注册表
 # ---------------------------------------------------------------------------
 
-_handsfree_sessions: Dict[str, bool] = {}
+_handsfree_sessions: dict[str, bool] = {}
 
 
 def set_handsfree_mode(session_id: str, enabled: bool) -> None:
@@ -157,7 +157,7 @@ async def _handsfree_confirm(
     tool_name: str, args: dict, reason: str, content: str,
     ask_agent_callback: Optional[Callable[[str], Awaitable[str]]] = None,
     max_dialog_turns: int = 2,
-    extra_context: Optional[str] = None,
+    extra_context: str | None = None,
 ) -> ApprovalResult:
     """脱手模式：将工具调用 JSON 发送给小 LLM 审批。
 
@@ -193,7 +193,7 @@ async def _handsfree_confirm(
 
     cwd = str(find_repo_root().resolve())
 
-    user_prompt_data: Dict[str, Any] = {
+    user_prompt_data: dict[str, Any] = {
         "tool": tool_name,
         "args": args,
         "reason": reason,
@@ -308,7 +308,7 @@ async def request_user_confirm(
     reason: str,
     content: str,
     ask_agent_callback: Optional[Callable[[str], Awaitable[str]]] = None,
-    extra_context: Optional[str] = None,
+    extra_context: str | None = None,
 ) -> ApprovalResult:
     """统一审批入口。
 
@@ -384,7 +384,7 @@ async def ask_agent_reason(
     tool_name: str,
     tool_args: dict,
     question: str,
-    extra_context: Optional[str] = None,
+    extra_context: str | None = None,
 ) -> str:
     """将审批模型的问题转发给 Agent 主模型，获取操作意图解释。
 

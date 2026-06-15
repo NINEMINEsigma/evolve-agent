@@ -35,7 +35,7 @@ class ToolCall(BaseModel):
 
     id: str
     name: str
-    arguments: Dict[str, Any] = {}
+    arguments: dict[str, Any] = {}
 
 
 class Usage(BaseModel):
@@ -51,9 +51,9 @@ class LLMResponse(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     content: str = ""
-    tool_calls: List[ToolCall] = []
+    tool_calls: list[ToolCall] = []
     finish_reason: str = "stop"
-    reasoning_content: Optional[str] = None
+    reasoning_content: str | None = None
     """DeepSeek thinking-mode 载荷 — 在后续回合中必须回传。"""
     usage: Usage = Usage()
 
@@ -91,8 +91,8 @@ class LLMClient:
 
     async def chat(
         self,
-        messages: List[Dict[str, Any]],
-        tools: Optional[List[Dict[str, Any]]] = None,
+        messages: list[dict[str, Any]],
+        tools: Optional[list[dict[str, Any]]] = None,
     ) -> LLMResponse:
         """发送聊天请求，返回结构化响应。
 
@@ -105,7 +105,7 @@ class LLMClient:
 
         返回包含 assistant 内容和工具调用的 :class:`LLMResponse`。
         """
-        kwargs: Dict[str, Any] = {
+        kwargs: dict[str, Any] = {
             "model": self._model,
             "messages": messages,
             "temperature": self._temperature,
@@ -168,7 +168,7 @@ class LLMClient:
 # ---------------------------------------------------------------------------
 
 
-def _safe_json_parse(raw: str) -> Dict[str, Any]:
+def _safe_json_parse(raw: str) -> dict[str, Any]:
     import dirtyjson
 
     try:

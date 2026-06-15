@@ -66,6 +66,7 @@ export function useWebSocket() {
   const inputRef = useRef<HTMLDivElement>(null);
   const reconnectRef = useRef(0);
   const timerRef = useRef<ReturnType<typeof setTimeout>>();
+  const keepaliveRef = useRef<ReturnType<typeof setInterval>>();
   const manualRef = useRef(false);
   const ignoreStaleRef = useRef(false);
   const lastMessageCountRef = useRef(0);
@@ -126,9 +127,17 @@ export function useWebSocket() {
       instantScrollRef.current = true;
       addMessage("system", "已连接到 Evolve Agent");
       fetchSessions();
+      // 启动 keepalive，防止空闲超时被代理/浏览器断开
+      if (keepaliveRef.current) clearInterval(keepaliveRef.current);
+      keepaliveRef.current = setInterval(() => {
+        if (ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({ type: "ping" }));
+        }
+      }, 20000);
     };
 
     ws.onclose = () => {
+      if (keepaliveRef.current) clearInterval(keepaliveRef.current);
       setStatus("已断开");
       setWaiting(false);
       if (manualRef.current) return;
@@ -200,6 +209,7 @@ export function useWebSocket() {
             }
             if (data.token_usage !== undefined) setTokenUsage(data.token_usage);
             if (data.context_tokens !== undefined) setContextTokens(data.context_tokens);
+            if (data.processing) setWaiting(true);
             return;
           }
           if (data.token_usage !== undefined) setTokenUsage(data.token_usage);
@@ -608,7 +618,11 @@ export function useWebSocket() {
 
   const newChat = useCallback(() => {
     manualRef.current = true;
-    if (wsRef.current) wsRef.current.close();
+    if (keepaliveRef.current) clearInterval(keepaliveRef.current);
+    if (wsRef.current) {
+      wsRef.current.onclose = null;
+      wsRef.current.close();
+    }
     localStorage.removeItem("evolve_session_id");
     setMessages([]);
     setSessionId("");
@@ -625,7 +639,11 @@ export function useWebSocket() {
   const switchSession = useCallback((sid: string) => {
     if (sid === sessionId) return;
     manualRef.current = true;
-    if (wsRef.current) wsRef.current.close();
+    if (keepaliveRef.current) clearInterval(keepaliveRef.current);
+    if (wsRef.current) {
+      wsRef.current.onclose = null;
+      wsRef.current.close();
+    }
     localStorage.setItem("evolve_session_id", sid);
     setMessages([]);
     setSessionId(sid);
@@ -673,6 +691,7 @@ export function useWebSocket() {
     addMessage("system", "⏳ 正在终结会话，请稍候...");
     fetch(`/api/sessions/${sid}/terminate`, { method: "POST" })
       .then(() => {
+        addMessage("system", "✅ 会话已终结");
         fetchSessions();
         // 手动终结后不再自动创建新会话，也不自动路由到任何会话
       })
@@ -777,6 +796,7 @@ export function useWebSocket() {
     connect();
     return () => {
       if (timerRef.current) clearTimeout(timerRef.current);
+      if (keepaliveRef.current) clearInterval(keepaliveRef.current);
       if (wsRef.current) wsRef.current.close();
     };
   }, [connect]);

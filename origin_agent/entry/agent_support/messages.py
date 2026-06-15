@@ -66,14 +66,14 @@ def build_agent_system_prompt(ctx: Any, skill_blocks: list[str]) -> str:
 
 def build_turn_messages(
     system_prompt: str,
-    history: List[Dict[str, Any]],
+    history: list[dict[str, Any]],
     session_id: str,
     workspace: str,
     memory_ctx: str,
     hooks: list[dict],
-) -> List[Dict[str, Any]]:
+) -> list[dict[str, Any]]:
     """构建当前回合发送给 LLM 的消息列表。"""
-    messages: List[Dict[str, Any]] = [
+    messages: list[dict[str, Any]] = [
         {"role": "system", "content": system_prompt},
     ]
 
@@ -88,9 +88,10 @@ def build_turn_messages(
                 if isinstance(hooked_content, list):
                     # 找到最后一个 text block，把上下文追加到它的 text
                     appended = False
+                    extras: list[str]
                     for block in reversed(hooked_content):
                         if isinstance(block, dict) and block.get("type") == "text":
-                            extras: list[str] = []
+                            extras = []
                             if memory_ctx:
                                 extras.append(f"<|im_memory_context_start|>\n{memory_ctx}\n<|im_memory_context_end|>")
                             if hooks_context:
@@ -100,7 +101,7 @@ def build_turn_messages(
                             break
                     if not appended:
                         # 没有 text block 时新建一个
-                        extras: list[str] = []
+                        extras = []
                         if memory_ctx:
                             extras.append(f"<|im_memory_context_start|>\n{memory_ctx}\n<|im_memory_context_end|>")
                         if hooks_context:
@@ -123,10 +124,10 @@ def build_turn_messages(
 
 def build_full_history_messages(
     system_prompt: str,
-    history: List[Dict[str, Any]],
-) -> List[Dict[str, Any]]:
+    history: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
     """构建包含 system prompt 和完整历史的消息列表。"""
-    messages: List[Dict[str, Any]] = [
+    messages: list[dict[str, Any]] = [
         {"role": "system", "content": system_prompt},
     ]
     messages.extend(history)

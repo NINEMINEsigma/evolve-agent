@@ -28,7 +28,7 @@ def _cache_path() -> Path:
     return get_runtime_context().workspace / "logs" / "vision_capability_cache.json"
 
 
-def _load_cache() -> Dict[str, bool]:
+def _load_cache() -> dict[str, bool]:
     try:
         path = _cache_path()
         if path.exists():
@@ -47,7 +47,7 @@ def get_cached_vision_support(model: str) -> bool | None:
     return None
 
 
-def _save_cache(data: Dict[str, bool]) -> None:
+def _save_cache(data: dict[str, bool]) -> None:
     try:
         path = _cache_path()
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -81,7 +81,7 @@ def _is_vision_rejection(exc: Exception) -> bool:
     return False
 
 
-async def _handle_probe_vision(args: Dict[str, Any]) -> dict:
+async def _handle_probe_vision(args: dict[str, Any]) -> dict:
     """探测当前配置的 LLM 模型是否支持 vision 输入。"""
     force: bool = bool(args.get("force", False))
 

@@ -25,7 +25,7 @@ def _s():
 
 # ── 工具 handler ─────────────────────────────────────────────────────
 
-async def _handle_run_command(args: Dict[str, Any]) -> dict:
+async def _handle_run_command(args: dict[str, Any]) -> dict:
     """执行已由 AgentLoop 统一审批的 shell 命令。
 
     预期参数：
@@ -38,7 +38,7 @@ async def _handle_run_command(args: Dict[str, Any]) -> dict:
     # ── 验证命令 ──
     if not raw_cmd or not isinstance(raw_cmd, list):
         return tool_error("'command' must be a non-empty list of strings")
-    cmd_parts: List[str] = [str(p) for p in raw_cmd]
+    cmd_parts: list[str] = [str(p) for p in raw_cmd]
     if not cmd_parts:
         return tool_error("'command' must be a non-empty list")
 
@@ -46,14 +46,14 @@ async def _handle_run_command(args: Dict[str, Any]) -> dict:
     return _execute(cmd_parts, cwd)
 
 
-def _execute(cmd_parts: List[str], cwd: str) -> dict:
+def _execute(cmd_parts: list[str], cwd: str) -> dict:
     """执行已受信任 / 已批准的命令并返回结果。"""
     # if cmd_parts and cmd_parts[0] not in _s().allowed_commands:
     #     return tool_error(f"Command '{cmd_parts[0]}' not in the allowed list")
 
     # 将命令参数中的沙箱逻辑路径（ws:/fork:/fix:）展开为真实绝对路径。
     # sandbox.run() 要求 tool handler 预先展开，不接收未解析的逻辑路径。
-    resolved_parts: List[str] = []
+    resolved_parts: list[str] = []
     for part in cmd_parts:
         if any(part.startswith(p) for p in ("ws:", "fork:", "fix:")):
             try:
