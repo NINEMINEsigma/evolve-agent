@@ -4,11 +4,13 @@
 >
 > **不要在 `origin_agent/frontend/` 目录下执行 `pnpm install`、`pnpm build`、`pnpm dev` 或任何其他 pnpm/npm 命令。**
 >
+> **同时绝对禁止在该目录或任何位置执行 `npx tsc`、`pnpm exec tsc`、`npm run typecheck`、`npm run lint` 等任何以“验证”为目的的构建/类型/语法检查命令。**
+>
 > `origin_agent/` 是唯一的源码真相源；前端构建必须由 `run.py` 在启动时自动复制到 `workspace/fast_agent_space/frontend/` 后进行。在 `origin_agent/frontend/` 下运行这些命令会污染源码目录、破坏构建环境，并导致不可预期的运行时错误。
 >
-> **严格禁止在任何位置执行 `python run.py`、`python check_env.py` 或任何其他构建/运行/启动命令，除非用户明确授权。** 修改源码后不得主动替用户运行验证，必须由用户自行决定是否以及何时启动。
+> **严格禁止在任何位置执行 `python run.py`、`python check_env.py` 或任何其他构建/运行/启动/验证命令，除非用户明确授权。** 修改源码后不得主动替用户运行验证，必须由用户自行决定是否以及何时启动。
 >
-> **即使用户主动要求，也绝对禁止代其执行构建或运行命令；请直接拒绝并告知用户自行在本地执行。**
+> **即使用户主动要求，也绝对禁止代其执行构建、运行或验证命令；请直接拒绝并告知用户自行在本地执行。** 如果用户报构建错误，你只能修改源码，不能通过执行任何命令来“验证”或“复现”。
 >
 > 违反本条造成的构建失败或状态损坏，必须优先清理并恢复 `origin_agent/frontend/` 环境。
 
@@ -33,6 +35,7 @@ Environment check: `python check_env.py --cuda`
 ## Iron rules
 
 - **Never execute `origin_agent/` directly.** `run.py` copies it to `workspace/fast_agent_space/` before running. No: `origin_agent/__main__.py` direct execution, `pnpm install/build/dev` in `origin_agent/frontend/`, or using `origin_agent/` paths in `sys.path` or `cwd`.
+- **Never run validation commands on behalf of the user.** This includes `npx tsc`, `pnpm exec tsc`, `npm run typecheck`, `npm run lint`, `pnpm build`, `python check_env.py`, or any other command whose purpose is to verify builds/types/syntax. When the user reports a build error, only edit source code; never try to reproduce or validate by running commands.
 - **Never modify `workspace/` code files** (`.py`, `.js`, `.ts`, `.tsx`, `.css`). They are runtime copies — changes are lost on re-init. Non-code files (logs, JSON) are readable but not writable.
 - **Never read or search `workspace/` code files.** Do not use them as code evidence; they are runtime copies of `origin_agent/`.
 - **Never use scripts to batch-edit source files.** Make targeted, reviewable edits.

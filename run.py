@@ -147,7 +147,7 @@ if __name__ == "__main__":
             _append_evolve_event("complete", "swap finished, restarting")
         else:
             logger.error(f"Fast agent exited with unknown error: {exit_code}")
-            if (workspace_path / ".fallback").exists() == False:
+            if True:#(workspace_path / ".fallback").exists() == False:
                 source.copy_to(str(workspace_path / ".fallback")) # 复制源代码到备份空间
             fallback_main = workspace_path / ".fallback" / "__main__.py"
             if not fallback_main.exists():
