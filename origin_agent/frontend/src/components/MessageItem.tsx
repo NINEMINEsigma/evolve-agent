@@ -56,12 +56,13 @@ const markdownComponentsBase = {
   },
 };
 
-const MessageItem = memo(function MessageItem({ message, archived, onImageClick, onToggleCollapse, onEditMessage }: {
+const MessageItem = memo(function MessageItem({ message, archived, onImageClick, onToggleCollapse, onEditMessage, streaming }: {
   message: ChatMessage;
   archived: boolean;
   onImageClick: (src: string) => void;
   onToggleCollapse: (id: string) => void;
   onEditMessage: (id: string, content: string) => void | Promise<void>;
+  streaming?: boolean;
 }) {
   const m = message;
   const [editing, setEditing] = useState(false);
@@ -70,7 +71,7 @@ const MessageItem = memo(function MessageItem({ message, archived, onImageClick,
   const lineCount = textContent.split("\n").length;
   const isLong = textContent.length > LONG_MESSAGE_CHARS || lineCount > LONG_MESSAGE_LINES;
   const collapsed = m.collapsed !== false;
-  const canEdit = !archived && typeof m.messageIndex === "number" && typeof m.content === "string";
+  const canEdit = !archived && !streaming && typeof m.messageIndex === "number" && typeof m.content === "string";
 
   const mdComponents = useMemo(() => ({
     ...markdownComponentsBase,
@@ -229,6 +230,7 @@ const MessageItem = memo(function MessageItem({ message, archived, onImageClick,
           <ReactMarkdown remarkPlugins={[remarkGfm]} components={mdComponents}>
             {textContent || (m.reasoningContent ? "_仅包含思考内容_" : "")}
           </ReactMarkdown>
+          {streaming && <span className="streaming-cursor" />}
         </>
       );
     }

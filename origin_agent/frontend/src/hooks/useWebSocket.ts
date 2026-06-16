@@ -58,6 +58,7 @@ export function useWebSocket() {
   const [cronTasks, setCronTasks] = useState<CronTask[]>([]);
   const [terminatingSessions, setTerminatingSessions] = useState<Set<string>>(new Set());
   const [pendingImages, setPendingImages] = useState<PendingImage[]>([]);
+  const [streamingMessage, setStreamingMessage] = useState<ChatMessage | null>(null);
 
   const wsRef = useRef<WebSocket | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -77,6 +78,63 @@ export function useWebSocket() {
       .filter((index): index is number => typeof index === "number");
     return indexes.length ? Math.max(...indexes) + 1 : 0;
   }, []);
+
+  const ensureStreamingMessage = useCallback((streamId: string) => {
+    setStreamingMessage((prev) => {
+      if (prev && prev.id === streamId) return prev;
+      return {
+        role: "agent",
+        content: "",
+        id: streamId,
+        reasoningContent: undefined,
+        messageIndex: nextMessageIndex(messagesRef.current),
+      };
+    });
+  }, []);
+
+  const flushStreamingMessage = useCallback(() => {
+    setStreamingMessage((prev) => {
+      if (!prev) return null;
+      setMessages((m) => {
+        const exists = m.some((x) => x.id === prev.id);
+        return exists ? m.map((x) => (x.id === prev.id ? prev : x)) : [...m, prev];
+      });
+      return null;
+    });
+  }, []);
+
+  const appendStreamingDelta = useCallback((streamId: string, delta: string, reasoningDelta?: string, toolCall?: unknown) => {
+    ensureStreamingMessage(streamId);
+    setStreamingMessage((prev) => {
+      if (!prev) return null;
+      const content = typeof prev.content === "string" ? prev.content : "";
+      const reasoning = prev.reasoningContent || "";
+      let nextContent: string = content;
+      let nextReasoning: string | undefined = reasoning || undefined;
+      let nextToolName: string | undefined = prev.toolName;
+      let nextToolArgs: Record<string, unknown> | undefined = prev.toolArgs;
+      if (delta) nextContent = content + delta;
+      if (reasoningDelta) nextReasoning = reasoning + reasoningDelta;
+      if (toolCall && typeof toolCall === "object") {
+        const tc = toolCall as Record<string, unknown>;
+        if (typeof tc.name === "string") nextToolName = tc.name;
+        if (typeof tc.arguments === "object" && tc.arguments !== null) {
+          nextToolArgs = tc.arguments as Record<string, unknown>;
+        }
+      }
+      return { ...prev, content: nextContent, reasoningContent: nextReasoning, toolName: nextToolName, toolArgs: nextToolArgs };
+    });
+  }, [ensureStreamingMessage]);
+
+  const messagesRef = useRef<ChatMessage[]>([]);
+  useEffect(() => {
+    messagesRef.current = messages;
+  }, [messages]);
+
+  const streamingMessageRef = useRef<ChatMessage | null>(null);
+  useEffect(() => {
+    streamingMessageRef.current = streamingMessage;
+  }, [streamingMessage]);
 
   const addMessage = useCallback((
     role: ChatMessage["role"],
@@ -253,16 +311,41 @@ export function useWebSocket() {
       else if (msg.type === "agent_message") {
         setWaiting(false);
         ignoreStaleRef.current = false;
-        setMessages((prev) => [...prev, {
-          role: "agent",
-          content: msg.content ?? "",
-          id: crypto.randomUUID(),
-          messageIndex: nextMessageIndex(prev),
-        }]);
+        // 如果存在同 stream_id 的流式消息，则刷新它；否则追加一条新消息
+        if (msg.session_id && streamingMessageRef.current && streamingMessageRef.current.id === (msg as any).stream_id) {
+          flushStreamingMessage();
+        } else {
+          setMessages((prev) => [...prev, {
+            role: "agent",
+            content: msg.content ?? "",
+            id: crypto.randomUUID(),
+            messageIndex: nextMessageIndex(prev),
+          }]);
+        }
         fetchSessions();
+      }
+      else if (msg.type === "stream_delta") {
+        if (ignoreStaleRef.current) return;
+        const delta = msg.delta || "";
+        const reasoningDelta = msg.reasoning_delta;
+        let toolCall: unknown = undefined;
+        if (typeof msg.content === "string") {
+          try {
+            const parsed = JSON.parse(msg.content);
+            toolCall = parsed?.tool_call;
+          } catch {}
+        }
+        appendStreamingDelta(msg.stream_id || "", delta, reasoningDelta, toolCall);
+      }
+      else if (msg.type === "stream_done") {
+        setWaiting(false);
+        ignoreStaleRef.current = false;
+        flushStreamingMessage();
       }
       else if (msg.type === "tool_call") {
         if (ignoreStaleRef.current) return;
+        // 工具调用前确保已产生的流式文本固化
+        flushStreamingMessage();
         const argsStr = msg.args
           ? "(" + Object.entries(msg.args)
               .map(([k, v]) => `${k}=${JSON.stringify(v)}`)
@@ -820,7 +903,7 @@ export function useWebSocket() {
     return () => clearInterval(iv);
   }, [sessionId]);
 
-  // ── auto scroll ──
+  // 自动滚动：同时监听 messages 长度和流式消息 content 变化
   useEffect(() => {
     const previousCount = lastMessageCountRef.current;
     lastMessageCountRef.current = messages.length;
@@ -829,6 +912,14 @@ export function useWebSocket() {
     instantScrollRef.current = false;
     bottomRef.current?.scrollIntoView({ behavior });
   }, [messages.length]);
+
+  useEffect(() => {
+    if (streamingMessage?.content || streamingMessage?.reasoningContent) {
+      const behavior = instantScrollRef.current ? "auto" : "smooth";
+      instantScrollRef.current = false;
+      bottomRef.current?.scrollIntoView({ behavior });
+    }
+  }, [streamingMessage?.content, streamingMessage?.reasoningContent]);
 
   // ── connect on mount ──
   useEffect(() => {
@@ -905,6 +996,7 @@ export function useWebSocket() {
     setCronTasks,
     terminatingSessions,
     pendingImages,
+    streamingMessage,
     // actions
     send,
     handleFileUpload,

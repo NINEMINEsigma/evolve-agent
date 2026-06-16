@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+from collections.abc import AsyncIterator
 from typing import Any, Dict, List, Optional
 
 import openai
@@ -58,6 +59,20 @@ class LLMResponse(BaseModel):
     usage: Usage = Usage()
 
 
+class StreamChunk(BaseModel):
+    """流式响应的一个片段。"""
+    model_config = ConfigDict(frozen=True)
+
+    content_delta: str | None = None
+    reasoning_delta: str | None = None
+    """DeepSeek thinking-mode 增量 — 仅用于展示。"""
+    tool_call: ToolCall | None = None
+    """当前 chunk 中首次完整出现的 tool_call（用于工具调用开始通知）。"""
+    finish_reason: str | None = None
+    usage: Usage | None = None
+    error: str | None = None
+
+
 # ---------------------------------------------------------------------------
 # 客户端
 # ---------------------------------------------------------------------------
@@ -89,6 +104,25 @@ class LLMClient:
 
     # -- 公开 API ----------------------------------------------------------
 
+    def _build_kwargs(
+        self,
+        messages: list[dict[str, Any]],
+        tools: Optional[list[dict[str, Any]]] = None,
+        stream: bool = False,
+    ) -> dict[str, Any]:
+        kwargs: dict[str, Any] = {
+            "model": self._model,
+            "messages": messages,
+            "temperature": self._temperature,
+            "max_completion_tokens": self._max_tokens,
+            "stream": stream,
+        }
+        if tools:
+            kwargs["tools"] = tools
+        if self._reasoning_effort:
+            kwargs["reasoning_effort"] = self._reasoning_effort
+        return kwargs
+
     async def chat(
         self,
         messages: list[dict[str, Any]],
@@ -105,16 +139,7 @@ class LLMClient:
 
         返回包含 assistant 内容和工具调用的 :class:`LLMResponse`。
         """
-        kwargs: dict[str, Any] = {
-            "model": self._model,
-            "messages": messages,
-            "temperature": self._temperature,
-            "max_completion_tokens": self._max_tokens,
-        }
-        if tools:
-            kwargs["tools"] = tools
-        if self._reasoning_effort:
-            kwargs["reasoning_effort"] = self._reasoning_effort
+        kwargs = self._build_kwargs(messages, tools, stream=False)
 
         for attempt in range(_MAX_RETRIES):
             try:
@@ -161,6 +186,127 @@ class LLMClient:
                 raise
         # 所有代码路径都已 return 或 raise，此处不可达（保留以安抚类型检查器）
         raise AssertionError("unreachable")
+
+    async def chat_stream(
+        self,
+        messages: list[dict[str, Any]],
+        tools: Optional[list[dict[str, Any]]] = None,
+    ) -> AsyncIterator[StreamChunk]:
+        """发送流式聊天请求，逐块返回增量内容。
+
+        支持 content、reasoning_content 的增量输出，以及 tool_calls 的
+        完整累积输出。流结束时会发出一个带 ``finish_reason`` 的空 chunk。
+        """
+        kwargs = self._build_kwargs(messages, tools, stream=True)
+
+        for attempt in range(_MAX_RETRIES):
+            try:
+                async with await self._client.chat.completions.create(**kwargs) as stream:
+                    content_buffer: str = ""
+                    reasoning_buffer: str = ""
+                    tool_buffers: dict[int, dict[str, Any]] = {}
+                    completed_tool_indices: set[int] = set()
+
+                    async for chunk in stream:
+                        choice = chunk.choices[0] if chunk.choices else None
+                        if choice is None:
+                            continue
+                        delta = choice.delta
+                        if delta is None:
+                            continue
+
+                        content_delta = delta.content or ""
+                        reasoning_delta = getattr(delta, "reasoning_content", None) or ""
+
+                        if content_delta:
+                            content_buffer += content_delta
+                            yield StreamChunk(content_delta=content_delta)
+
+                        if reasoning_delta:
+                            reasoning_buffer += reasoning_delta
+                            yield StreamChunk(reasoning_delta=reasoning_delta)
+
+                        # 累积 tool_calls
+                        for tc in (delta.tool_calls or []):
+                            idx: int = tc.index
+                            if idx in completed_tool_indices:
+                                continue
+                            buf = tool_buffers.setdefault(idx, {
+                                "id": "",
+                                "name": "",
+                                "arguments": "",
+                            })
+                            if getattr(tc, "id", None):
+                                buf["id"] = tc.id
+                            if getattr(tc, "function", None):
+                                if tc.function.name:
+                                    buf["name"] += tc.function.name
+                                if tc.function.arguments:
+                                    buf["arguments"] += tc.function.arguments
+
+                            # 当收集到 id、name 且 finish_reason 出现时认为完整
+                            finish = choice.finish_reason
+                            if finish and buf["id"] and buf["name"]:
+                                completed_tool_indices.add(idx)
+                                yield StreamChunk(
+                                    tool_call=ToolCall(
+                                        id=buf["id"],
+                                        name=buf["name"],
+                                        arguments=_safe_json_parse(buf["arguments"]),
+                                    )
+                                )
+
+                        if choice.finish_reason:
+                            # 某些 provider 在 finish_reason 时仍未触发 tool_call 完成，兜底
+                            for idx, buf in tool_buffers.items():
+                                if idx in completed_tool_indices:
+                                    continue
+                                if buf["id"] and buf["name"]:
+                                    completed_tool_indices.add(idx)
+                                    yield StreamChunk(
+                                        tool_call=ToolCall(
+                                            id=buf["id"],
+                                            name=buf["name"],
+                                            arguments=_safe_json_parse(buf["arguments"]),
+                                        )
+                                    )
+                            usage = Usage(
+                                prompt_tokens=chunk.usage.prompt_tokens if chunk.usage else 0,
+                                completion_tokens=chunk.usage.completion_tokens if chunk.usage else 0,
+                                total_tokens=chunk.usage.total_tokens if chunk.usage else 0,
+                            )
+                            yield StreamChunk(
+                                finish_reason=choice.finish_reason,
+                                usage=usage,
+                            )
+
+                return
+            except (
+                openai.APIConnectionError,
+                openai.APITimeoutError,
+                openai.RateLimitError,
+                openai.InternalServerError,
+            ) as exc:
+                if attempt < _MAX_RETRIES - 1:
+                    wait: float = _BACKOFF_BASE * (2 ** attempt)
+                    logger.warning(
+                        "LLM stream transient error (attempt %d/%d): %s. Retrying in %.1fs...",
+                        attempt + 1, _MAX_RETRIES, exc, wait,
+                    )
+                    await asyncio.sleep(wait)
+                else:
+                    logger.error("LLM stream transient error exhausted all %d retries: %s", _MAX_RETRIES, exc)
+                    yield StreamChunk(error=f"{exc}")
+                    return
+            except openai.APIStatusError as exc:
+                # 非 transient 的 HTTP 状态错误（如 400、401）立即报告
+                logger.error("LLM stream API status error: %s", exc)
+                yield StreamChunk(error=f"{exc}")
+                return
+            except Exception as exc:
+                logger.exception("LLM stream unexpected error")
+                yield StreamChunk(error=f"{exc}")
+                return
 
 
 # ---------------------------------------------------------------------------

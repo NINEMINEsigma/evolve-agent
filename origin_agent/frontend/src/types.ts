@@ -21,6 +21,8 @@ export type MessageType =
   | "clipboard_display"
   | "confirm_request"
   | "ask_request"
+  | "stream_delta"
+  | "stream_done"
   | "error";
 
 export interface WSMessage {
@@ -39,6 +41,10 @@ export interface WSMessage {
   allow_custom?: boolean;
   option?: string;
   custom_text?: string;
+  stream_id?: string;
+  delta?: string;
+  reasoning_delta?: string;
+  finish_reason?: string;
 }
 
 export interface ConfirmRequest {

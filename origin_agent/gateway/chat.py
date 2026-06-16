@@ -31,6 +31,8 @@ class MessageType(str, Enum):
     HANDSFREE_MODE = "handsfree_mode"
     TASK_PROGRESS = "task_progress"
     CLIPBOARD_DISPLAY = "clipboard_display"
+    STREAM_DELTA = "stream_delta"
+    STREAM_DONE = "stream_done"
     PING = "ping"
     PONG = "pong"
 
@@ -57,6 +59,11 @@ class Message(BaseModel):
     allow_custom: Optional[bool] = None  # ASK_REQUEST：是否允许自定义输入
     option: str | None = None      # ASK_RESPONSE：选中的选项值
     custom_text: str | None = None # ASK_RESPONSE：自定义输入文本
+    # stream 相关字段
+    stream_id: str | None = None   # STREAM_DELTA / STREAM_DONE：流标识
+    delta: str | None = None       # STREAM_DELTA：文本增量
+    reasoning_delta: str | None = None  # STREAM_DELTA：reasoning 增量
+    finish_reason: str | None = None    # STREAM_DONE：结束原因或错误
 
     @classmethod
     def from_json(cls, raw: str) -> Message:
@@ -124,6 +131,14 @@ class Message(BaseModel):
             d["option"] = self.option
         if self.custom_text is not None:
             d["custom_text"] = self.custom_text
+        if self.stream_id is not None:
+            d["stream_id"] = self.stream_id
+        if self.delta is not None:
+            d["delta"] = self.delta
+        if self.reasoning_delta is not None:
+            d["reasoning_delta"] = self.reasoning_delta
+        if self.finish_reason is not None:
+            d["finish_reason"] = self.finish_reason
         return json.dumps(d, ensure_ascii=False)
 
 

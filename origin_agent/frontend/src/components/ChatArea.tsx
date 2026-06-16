@@ -12,9 +12,10 @@ interface ChatAreaProps {
   onEditMessage: (id: string, content: string) => void | Promise<void>;
   bottomRef: React.RefObject<HTMLDivElement>;
   onDropFiles: (files: FileList) => void;
+  streamingMessage?: ChatMessage | null;
 }
 
-export default function ChatArea({ messages, waiting, archived, onImageClick, onToggleCollapse, onEditMessage, bottomRef, onDropFiles }: ChatAreaProps) {
+export default function ChatArea({ messages, waiting, archived, onImageClick, onToggleCollapse, onEditMessage, bottomRef, onDropFiles, streamingMessage }: ChatAreaProps) {
   const [dragOver, setDragOver] = useState(false);
   const chatAreaRef = useRef<HTMLDivElement>(null);
   const messageList = useMemo(() =>
@@ -51,7 +52,18 @@ export default function ChatArea({ messages, waiting, archived, onImageClick, on
       >
         {messageList}
 
-        {waiting && (
+        {streamingMessage && (
+          <MessageItem
+            message={streamingMessage}
+            archived={archived}
+            onImageClick={onImageClick}
+            onToggleCollapse={onToggleCollapse}
+            onEditMessage={onEditMessage}
+            streaming
+          />
+        )}
+
+        {waiting && !streamingMessage && (
           <div className="message message-agent" data-message-id="__waiting__">
             <div className="message-avatar">⚡</div>
             <div className="message-bubble">

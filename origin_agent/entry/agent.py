@@ -15,6 +15,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import uuid
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Awaitable, Callable, Dict, List
@@ -24,7 +25,7 @@ from abstract.tools.registry import ToolEntry, registry as tool_registry
 from component.approval import ApprovalResult, ask_agent_reason, is_handsfree_mode, request_user_confirm
 from component.approval_allowlist import add_allowed as add_tool_allowlist_entry
 from component.approval_allowlist import is_allowed as is_tool_allowlisted
-from component.llm import LLMClient, LLMResponse, ToolCall
+from component.llm import LLMClient, LLMResponse, StreamChunk, ToolCall
 from system.pathutils import find_repo_root
 from system.context import RuntimeContext
 from system.session_store import SessionStore
@@ -251,39 +252,12 @@ class AgentLoop:
                     return "Cancelled."
                 turn += 1
 
-                # ---- 可取消的 LLM 调用 ----
-                # 同时等待 LLM task 和取消事件，使中断能够
-                # 穿透正在进行的 HTTP 请求，而不是等待其完成。
-                llm_task: asyncio.Task[LLMResponse] = asyncio.create_task(
-                    self._llm.chat(messages, tools=self._get_tool_definitions()),
-                    name=f"llm-chat-{session_id}",
-                )
-                cancel_task: asyncio.Task[bool] = asyncio.create_task(
-                    cancel_event.wait(),
-                    name=f"cancel-wait-{session_id}",
-                )
-
-                done: set[asyncio.Task[Any]]
-                pending: set[asyncio.Task[Any]]
-                done, pending = await asyncio.wait(
-                    [llm_task, cancel_task],
-                    return_when=asyncio.FIRST_COMPLETED,
-                )
-                # 取消仍处于 pending 状态的 task
-                for task in pending:
-                    task.cancel()
-                    try:
-                        await task
-                    except asyncio.CancelledError:
-                        pass
-
-                if cancel_task in done:
-                    # 中断已触发 — 丢弃 LLM 结果
-                    return "Cancelled."
-
-                # ---- 获取 LLM 响应（含图片 content block 兼容处理） ----
+                # ---- 可取消的 LLM 流式调用 ----
+                stream_id: str = uuid.uuid4().hex[:12]
                 try:
-                    resp: LLMResponse = llm_task.result()
+                    resp = await self._stream_llm_response(
+                        session_id, messages, self._get_tool_definitions(), cancel_event, stream_id
+                    )
                 except Exception as llm_exc:
                     # 检查是否因 content blocks（如 image_url）导致 API 拒绝
                     if is_content_block_error(llm_exc):
@@ -299,11 +273,29 @@ class AgentLoop:
                     logger.exception("LLM call failed for session=%s", session_id)
                     self._remove_last_user_message(session_id)
                     return f"The service provider returned an error, please try again later. Details: {llm_exc}"
+
+                # 处理中断：流式已提前结束
+                if cancel_event.is_set():
+                    return "Cancelled."
+
                 # 从 LLM 响应中追踪实际 token 消耗
                 self._token_usage[session_id] = self._token_usage.get(session_id, 0) + resp.usage.total_tokens
                 self._persist_token_usage(session_id)
                 # 记录真实 prompt_tokens 作为上下文占用锚点
                 self._last_prompt_tokens[session_id] = resp.usage.prompt_tokens
+
+                # 发送流结束标记
+                if self._tool_event_callback:
+                    asyncio.create_task(
+                        self._tool_event_callback(
+                            session_id, "stream_done", "",
+                            json.dumps({
+                                "stream_id": stream_id,
+                                "finish_reason": resp.finish_reason,
+                            }),
+                        ),
+                        name=f"stream-done-{session_id}",
+                    )
 
                 if not resp.tool_calls:
                     # 纯文本回复 — 存储并返回
@@ -317,16 +309,6 @@ class AgentLoop:
 
                 # 将带 tool_calls 的 assistant 消息存入历史
                 self._store_assistant_with_tools(session_id, resp)
-
-                # 推送中间 assistant 文本或思考内容到前端（非纯文本回复，避免重复）
-                if (resp.content or resp.reasoning_content) and self._tool_event_callback:
-                    asyncio.create_task(
-                        self._tool_event_callback(
-                            session_id, "assistant_text", "",
-                            json.dumps({"content": resp.content or "", "reasoning": resp.reasoning_content}),
-                        ),  # type: ignore
-                        name=f"push-assistant-text-{session_id}",
-                    )
 
                 # 执行工具调用并将结果持久化到历史
                 history: list[dict[str, Any]] = self._get_history(session_id)
@@ -379,7 +361,131 @@ class AgentLoop:
         )
         return "I ran into an issue processing your request. Please try again."
 
-    # -- 内部辅助方法 ----------------------------------------------------
+    async def _stream_llm_response(
+        self,
+        session_id: str,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]] | None,
+        cancel_event: asyncio.Event,
+        stream_id: str,
+    ) -> LLMResponse:
+        """以流式方式调用 LLM，边收边向前端推送增量。
+
+        返回聚合后的完整 LLMResponse。当 cancel_event 被设置时，
+        立即停止迭代并返回已收集的内容。
+        """
+        content: str = ""
+        reasoning_content: str = ""
+        tool_calls: list[ToolCall] = []
+        finish_reason: str = "stop"
+        usage: dict[str, int] = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
+
+        stream = self._llm.chat_stream(messages, tools=tools)
+        try:
+            async for chunk in stream:
+                if cancel_event.is_set():
+                    break
+
+                if chunk.error:
+                    raise RuntimeError(chunk.error)
+
+                if chunk.content_delta:
+                    content += chunk.content_delta
+                    if self._tool_event_callback:
+                        asyncio.create_task(
+                            self._tool_event_callback(
+                                session_id, "stream_delta", "",
+                                json.dumps({
+                                    "stream_id": stream_id,
+                                    "delta": chunk.content_delta,
+                                }),
+                            ),
+                            name=f"stream-delta-{session_id}",
+                        )
+
+                if chunk.reasoning_delta:
+                    reasoning_content += chunk.reasoning_delta
+                    if self._tool_event_callback:
+                        asyncio.create_task(
+                            self._tool_event_callback(
+                                session_id, "stream_delta", "",
+                                json.dumps({
+                                    "stream_id": stream_id,
+                                    "reasoning_delta": chunk.reasoning_delta,
+                                }),
+                            ),
+                            name=f"stream-reasoning-{session_id}",
+                        )
+
+                if chunk.tool_call:
+                    tool_calls.append(chunk.tool_call)
+                    if self._tool_event_callback:
+                        asyncio.create_task(
+                            self._tool_event_callback(
+                                session_id, "stream_delta", "",
+                                json.dumps({
+                                    "stream_id": stream_id,
+                                    "tool_call": {
+                                        "id": chunk.tool_call.id,
+                                        "name": chunk.tool_call.name,
+                                        "arguments": chunk.tool_call.arguments,
+                                    },
+                                }),
+                            ),
+                            name=f"stream-tool-{session_id}",
+                        )
+
+                if chunk.finish_reason:
+                    finish_reason = chunk.finish_reason
+                    if chunk.usage:
+                        usage["prompt_tokens"] = chunk.usage.prompt_tokens
+                        usage["completion_tokens"] = chunk.usage.completion_tokens
+                        usage["total_tokens"] = chunk.usage.total_tokens
+        finally:
+            await _close_async_iterator(stream)
+
+        if cancel_event.is_set():
+            finish_reason = "cancelled"
+
+        return LLMResponse(
+            content=content,
+            tool_calls=tool_calls,
+            finish_reason=finish_reason,
+            reasoning_content=reasoning_content or None,
+            usage=LLMResponse.model_fields["usage"].default,
+        )
+
+    def _store_assistant_with_tools(self, session_id: str, resp: LLMResponse) -> None:
+        entry: dict[str, Any] = {
+            "role": "assistant",
+            "content": resp.content or "",
+            "tool_calls": [
+                {
+                    "id": tc.id,
+                    "type": "function",
+                    "function": {
+                        "name": tc.name,
+                        "arguments": json.dumps(tc.arguments, ensure_ascii=False),
+                    },
+                }
+                for tc in resp.tool_calls
+            ],
+        }
+        if resp.reasoning_content:
+            entry["reasoning_content"] = resp.reasoning_content
+        self._get_history(session_id).append(entry)
+        self._persist_message(session_id, entry)
+
+
+async def _close_async_iterator(ait: Any) -> None:
+    """安全关闭异步迭代器，避免未读取完成的流留下资源泄漏。"""
+    try:
+        await ait.aclose()
+    except Exception:
+        pass
+
+
+# -- 内部辅助方法 ----------------------------------------------------
 
     @staticmethod
     def _extract_text(content: Any) -> str:
@@ -1081,15 +1187,14 @@ class AgentLoop:
             {
                 "id": tc.id,
                 "type": "function",
-                "function": {"name": tc.name, "arguments": json.dumps(tc.arguments)},
+                "function": {"name": tc.name, "arguments": json.dumps(tc.arguments, ensure_ascii=False)},
             }
             for tc in resp.tool_calls
         ]
         history: list[dict[str, Any]] = self._get_history(session_id)
         entry: dict[str, Any] = {
             "role": "assistant",
-            # TODO:
-            "content": resp.content,
+            "content": resp.content or "",
             "tool_calls": tool_calls_data,
         }
         if resp.reasoning_content:

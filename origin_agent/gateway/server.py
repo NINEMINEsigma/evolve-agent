@@ -252,6 +252,46 @@ async def _send_tool_event(
             pass
         return
 
+    # Handle stream delta events
+    if event_type == "stream_delta":
+        data: dict | None
+        try:
+            data = json.loads(payload)
+        except json.JSONDecodeError:
+            data = None
+        msg = Message(
+            type=MessageType.STREAM_DELTA,
+            session_id=session_id,
+            stream_id=(data.get("stream_id") if data else None),
+            delta=(data.get("delta") if data else None),
+            reasoning_delta=(data.get("reasoning_delta") if data else None),
+            content=(json.dumps({"tool_call": data["tool_call"]}, ensure_ascii=False)
+                     if data and data.get("tool_call") else None),
+        )
+        try:
+            await ws.send_text(msg.to_json())
+        except Exception:
+            pass
+        return
+
+    # Handle stream done events
+    if event_type == "stream_done":
+        try:
+            data = json.loads(payload)
+        except json.JSONDecodeError:
+            data = None
+        msg = Message(
+            type=MessageType.STREAM_DONE,
+            session_id=session_id,
+            stream_id=(data.get("stream_id") if data else None),
+            finish_reason=(data.get("finish_reason") if data else None),
+        )
+        try:
+            await ws.send_text(msg.to_json())
+        except Exception:
+            pass
+        return
+
     msg_type: MessageType = MessageType.TOOL_CALL if event_type == "tool_call" else MessageType.TOOL_RESULT
     data: dict | None
     try:
@@ -1033,6 +1073,8 @@ async def ws_chat(ws: WebSocket) -> None:
                             content=reply,
                         ).to_json()
                     )
+                    # 发送最终回复标记，兼容未启用流式的前端或 cron 回调路径
+                    # 若前端已收到 stream_done，此消息会携带完整文本作为兜底
                     # 向前端发送实时 token 消耗更新
                     get_usage = getattr(_agent_loop, "get_token_usage", None)
                     get_context = getattr(_agent_loop, "get_context_tokens", None)

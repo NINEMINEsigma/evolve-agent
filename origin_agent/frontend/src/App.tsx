@@ -178,6 +178,7 @@ export default function App() {
           onEditMessage={ws.editMessage}
           bottomRef={ws.bottomRef}
           onDropFiles={ws.handleFileUpload}
+          streamingMessage={ws.streamingMessage}
         />
 
         <CronCountdown cronTasks={ws.cronTasks} />
