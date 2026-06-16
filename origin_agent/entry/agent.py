@@ -794,6 +794,10 @@ class AgentLoop:
         if len(source_session_ids) < 1:
             return {"error": "at least one source session required"}
 
+        err = self._session_manager.validate_merge_sources(source_session_ids)
+        if err:
+            return {"error": err}
+
         # 收集各源继承上下文：终结摘要 + 最近旧历史
         summaries: list[tuple[str, str, str]] = []  # (sid, title, inherited_context)
 

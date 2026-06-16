@@ -720,10 +720,22 @@ export function useWebSocket() {
   }, [fetchSessions]);
 
   const mergeSessions = useCallback((sources: string[]) => {
+    const validSources = sources.filter((sid) => {
+      const session = sessions.find((s) => s.id === sid);
+      return session && session.status === "archived";
+    });
+    if (validSources.length < 1) {
+      console.warn("[merge] 没有可合并的已归档会话");
+      return;
+    }
+    if (validSources.length !== sources.length) {
+      const skipped = sources.filter((sid) => !validSources.includes(sid));
+      console.warn(`[merge] 以下未归档会话被排除: ${skipped.join(", ")}`);
+    }
     fetch("/api/sessions/merge", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ sources }),
+      body: JSON.stringify({ sources: validSources }),
     })
       .then((r) => r.json())
       .then((data) => {
@@ -733,18 +745,23 @@ export function useWebSocket() {
         }
       })
       .catch(() => {});
-  }, [switchSession, fetchSessions]);
+  }, [switchSession, fetchSessions, sessions]);
 
   const branchSession = useCallback((sid: string) => mergeSessions([sid]), [mergeSessions]);
 
   const toggleMergeSelect = useCallback((sid: string) => {
+    const session = sessions.find((s) => s.id === sid);
+    if (!session || session.status !== "archived") {
+      console.warn(`[merge] 会话 ${sid.slice(0, 8)} 未归档，不可合并`);
+      return;
+    }
     setSelectedForMerge((prev) => {
       const next = new Set(prev);
       if (next.has(sid)) next.delete(sid);
       else next.add(sid);
       return next;
     });
-  }, []);
+  }, [sessions]);
 
   const toggleHandsfree = useCallback((enabled: boolean) => {
     setHandsfreeMode(enabled);

@@ -507,6 +507,9 @@ async def merge_sessions_endpoint(req: Request):
     sources: list[str] = body.get("sources", [])
     if not sources:
         return {"error": "sources array required", "merged": False}
+    err = sessions.validate_merge_sources(sources)
+    if err:
+        return {"error": err, "merged": False}
     if _agent_loop is not None and hasattr(_agent_loop, "merge_sessions"):
         result = await _agent_loop.merge_sessions(sources)  # type: ignore[union-attr]
         return result
@@ -516,6 +519,9 @@ async def merge_sessions_endpoint(req: Request):
 @app.post("/api/sessions/{session_id}/branch")
 async def branch_session_endpoint(session_id: str):
     """从指定会话创建分支延续（单源 merge 的快捷端点）。"""
+    err = sessions.validate_merge_sources([session_id])
+    if err:
+        return {"error": err, "merged": False}
     if _agent_loop is not None and hasattr(_agent_loop, "merge_sessions"):
         result = await _agent_loop.merge_sessions([session_id])  # type: ignore[union-attr]
         return result

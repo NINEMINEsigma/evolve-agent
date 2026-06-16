@@ -550,6 +550,16 @@ class SessionManager:
         items.sort(key=lambda s: (-int(s["pinned"]), -s["last_activity_at"]))
         return items
 
+    def validate_merge_sources(self, source_ids: list[str]) -> str | None:
+        """校验所有源会话是否已归档。返回错误信息，全部通过则返回 None。"""
+        for sid in source_ids:
+            info = self._sessions.get(sid)
+            if info is None:
+                return f"session {sid} not found"
+            if info.get("status") != "archived":
+                return f"session {sid} is not archived"
+        return None
+
     @property
     def count(self) -> int:
         return len(self._sessions)

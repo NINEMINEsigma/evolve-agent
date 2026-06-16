@@ -67,6 +67,7 @@ function SessionListItem({
   onContextMenu: (e: React.MouseEvent, sid: string) => void;
 }) {
   const isArchived = s.status === "archived";
+  const canSelectForMerge = mergeMode && isArchived;
   const current = sessions.find((cs) => cs.id === sessionId);
   const isParentOfCurrent = current?.parents?.includes(s.id) ?? false;
   const isContinuationOfCurrent = current?.continuation === s.id;
@@ -79,10 +80,10 @@ function SessionListItem({
   return (
     <div
       title={relationTooltip}
-      className={`session-item ${s.id === sessionId ? "active" : ""} ${isArchived ? "archived" : ""} ${isParentOfCurrent ? "parent-session" : ""} ${isContinuationOfCurrent ? "continuation-session" : ""}`}
+      className={`session-item ${s.id === sessionId ? "active" : ""} ${isArchived ? "archived" : ""} ${isParentOfCurrent ? "parent-session" : ""} ${isContinuationOfCurrent ? "continuation-session" : ""} ${mergeMode && !isArchived ? "merge-unavailable" : ""}`}
       onClick={() => {
-        if (mergeMode) onToggleMergeSelect(s.id);
-        else onSwitchSession(s.id);
+        if (canSelectForMerge) onToggleMergeSelect(s.id);
+        else if (!mergeMode) onSwitchSession(s.id);
       }}
       onContextMenu={(e) => {
         if (!mergeMode) onContextMenu(e, s.id);
@@ -91,12 +92,16 @@ function SessionListItem({
       <div className="session-item-content">
         <div className="session-item-row">
           {mergeMode && (
-            <input
-              type="checkbox"
-              checked={selectedForMerge.has(s.id)}
-              onChange={() => onToggleMergeSelect(s.id)}
-              onClick={(e) => e.stopPropagation()}
-            />
+            isArchived ? (
+              <input
+                type="checkbox"
+                checked={selectedForMerge.has(s.id)}
+                onChange={() => onToggleMergeSelect(s.id)}
+                onClick={(e) => e.stopPropagation()}
+              />
+            ) : (
+              <span className="merge-placeholder" title="未归档会话不可合并">—</span>
+            )
           )}
           <div className="session-item-title">
             {isParentOfCurrent && <span className="parent-mark" />}
