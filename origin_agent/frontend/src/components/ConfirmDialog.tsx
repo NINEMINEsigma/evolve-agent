@@ -48,7 +48,9 @@ export default function ConfirmDialog({
         <div className="confirm-title">{toolTitle}</div>
         <div className="confirm-body">
           <pre className="confirm-cmd">
-            {pendingConfirm.command?.join(" ") ?? pendingConfirm.content}
+            {Array.isArray(pendingConfirm.command)
+              ? pendingConfirm.command.join(" ")
+              : (pendingConfirm.command ?? pendingConfirm.content)}
           </pre>
           {pendingConfirm.reason && (
             <div className="confirm-reason">原因: {pendingConfirm.reason}</div>

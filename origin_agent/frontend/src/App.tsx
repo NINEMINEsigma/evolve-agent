@@ -12,6 +12,7 @@ import Drawer from "./components/Drawer";
 import CronCountdown from "./components/CronCountdown";
 import Lightbox from "./components/Lightbox";
 import TagEditor from "./components/TagEditor";
+import ErrorBoundary from "./components/ErrorBoundary";
 import { SessionInfo } from "./types";
 
 export default function App() {
@@ -66,7 +67,8 @@ export default function App() {
   const currentSessionArchived = ws.sessions.find((s) => s.id === ws.sessionId)?.status === "archived";
 
   return (
-    <div className="app">
+    <ErrorBoundary>
+      <div className="app">
       <Sidebar
         collapsed={sidebarCollapsed}
         sessions={ws.sessions}
@@ -248,5 +250,6 @@ export default function App() {
         />
       )}
     </div>
+    </ErrorBoundary>
   );
 }
