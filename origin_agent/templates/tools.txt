@@ -21,6 +21,6 @@ Cron tool conventions:
 
 Tool selection rules:
 - Always prefer dedicated tools over shell workarounds.
-- For reading files, use ``read_file``; for editing, use ``edit_file`` or ``write_file``.
+- For reading files, use ``read_file``; for editing, use ``edit_file``; for create, use ``write_file``.
 - For searching code, use ``search_files`` or ``grep``.
 - Never use ``run_command`` to invoke cat, type, head, tail, find, grep, or similar file utilities.

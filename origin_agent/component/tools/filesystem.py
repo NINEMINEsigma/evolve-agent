@@ -15,6 +15,8 @@ from __future__ import annotations
 
 import json
 import logging
+import re
+from datetime import datetime, timezone
 from typing import Any, Dict
 
 from abstract.tools.registry import registry, tool_error, tool_result
@@ -507,4 +509,254 @@ registry.register(
     handler=_handle_rename,
     emoji="🏷️",
     danger_level="write",
+)
+
+
+# -- search_files
+def _handle_search_files(args: dict[str, Any]) -> dict:
+    path: str = str(args.get("path", "")).strip()
+    pattern: str = str(args.get("pattern", "")).strip()
+    limit: int = int(args.get("limit", 100))
+
+    if not path:
+        return tool_error("path is required")
+    if not pattern:
+        return tool_error("pattern is required")
+
+    try:
+        resolved = _s().resolve_read(path)
+    except SandboxError as exc:
+        return tool_error(str(exc), path=path)
+
+    if not resolved.real.is_dir():
+        return tool_error(f"Not a directory: {path}")
+
+    matches: list[str] = []
+    for p in resolved.real.rglob(pattern):
+        if p.is_file():
+            rel = p.relative_to(resolved.real).as_posix()
+            matches.append(f"{resolved.namespace}:{rel}")
+
+    count = len(matches)
+    if count > limit:
+        timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+        log_name = f"ws:logs/search_files_{timestamp}.log"
+        log_content = (
+            f"# search_files results for {path} pattern={pattern}\n"
+            f"Total: {count} matches\n\n"
+            + "\n".join(matches)
+        )
+        try:
+            _s().write(log_name, log_content)
+        except SandboxError as exc:
+            return tool_error(str(exc))
+        return tool_result(
+            count=count,
+            log_path=log_name,
+            note=f"Results exceeded {limit} matches. Full list written to log file.",
+        )
+
+    return tool_result(matches=matches, count=count)
+
+
+registry.register(
+    name="search_files",
+    toolset="filesystem",
+    schema={
+        # 按文件名模式递归搜索目录中的文件。
+        # 返回匹配文件的逻辑路径列表。
+        # 如果结果超过 limit，完整列表写入 ws:logs/ 下的日志文件，仅返回数量和路径。
+        "description": (
+            "Recursively search for files matching a filename pattern in a directory. "
+            "Returns a list of matching logical file paths. "
+            "If results exceed the limit, the full list is written to a log file under ws:logs/ "
+            "and only the count and log path are returned."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "path": {
+                    "type": "string",
+                    # 要搜索的目录逻辑路径（如 'ws:'、'fork:src'）。必须使用命名空间前缀。
+                    "description": "Directory logical path to search in (e.g. 'ws:', 'fork:src'). Must use a namespace prefix.",
+                },
+                "pattern": {
+                    "type": "string",
+                    # 文件名 glob 模式（如 '*.py'、'*.md'）。
+                    "description": "Filename glob pattern (e.g. '*.py', '*.md').",
+                },
+                "limit": {
+                    "type": "integer",
+                    # 内联返回的最大结果数（默认 100）。超出时写入日志文件。
+                    "description": "Maximum number of results to return inline (default 100). Excess results are written to a log file.",
+                    "default": 100,
+                },
+            },
+            "required": ["path", "pattern"],
+        },
+    },
+    handler=_handle_search_files,
+    emoji="🔍",
+)
+
+
+# -- grep
+_TEXT_EXTENSIONS: frozenset[str] = frozenset(
+    {
+        ".py", ".txt", ".md", ".json", ".yaml", ".yml", ".toml", ".csv",
+        ".ini", ".cfg", ".conf", ".js", ".ts", ".jsx", ".tsx", ".css",
+        ".html", ".htm", ".xml", ".sh", ".bat", ".ps1", ".rs", ".go",
+        ".java", ".c", ".cpp", ".h", ".hpp", ".rb", ".php", ".swift",
+        ".kt", ".scala", ".sql", ".rst", ".log",
+    }
+)
+
+
+def _is_text_file(path: Any) -> bool:
+    """通过扩展名和空字节探测判断是否为文本文件。"""
+    if path.suffix.lower() in _TEXT_EXTENSIONS:
+        return True
+    try:
+        sample: bytes = path.read_bytes()[:4096]
+        return b"\x00" not in sample
+    except Exception:
+        return False
+
+
+def _handle_grep(args: dict[str, Any]) -> dict:
+    path: str = str(args.get("path", "")).strip()
+    pattern: str = str(args.get("pattern", "")).strip()
+    limit: int = int(args.get("limit", 100))
+    max_file_size: int = int(args.get("max_file_size", 524_288_000))
+    context_lines: int = int(args.get("context_lines", 2))
+
+    if not path:
+        return tool_error("path is required")
+    if not pattern:
+        return tool_error("pattern is required")
+
+    try:
+        resolved = _s().resolve_read(path)
+    except SandboxError as exc:
+        return tool_error(str(exc), path=path)
+
+    if not resolved.real.is_dir():
+        return tool_error(f"Not a directory: {path}")
+
+    try:
+        regex = re.compile(pattern)
+    except re.error as exc:
+        return tool_error(f"Invalid regex pattern: {exc}")
+
+    matches: list[dict[str, Any]] = []
+    for p in resolved.real.rglob("*"):
+        if not p.is_file():
+            continue
+        if p.stat().st_size > max_file_size:
+            continue
+        if not _is_text_file(p):
+            continue
+
+        try:
+            content = p.read_text(encoding="utf-8", errors="replace")
+        except Exception:
+            continue
+
+        lines = content.splitlines()
+        for i, line in enumerate(lines):
+            if regex.search(line):
+                rel = p.relative_to(resolved.real).as_posix()
+                matches.append(
+                    {
+                        "file": f"{resolved.namespace}:{rel}",
+                        "line": i + 1,
+                        "match": line,
+                        "context_before": lines[max(0, i - context_lines) : i],
+                        "context_after": lines[i + 1 : i + 1 + context_lines],
+                    }
+                )
+
+    count = len(matches)
+    if count > limit:
+        timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+        log_name = f"ws:logs/grep_{timestamp}.log"
+        out_lines = [
+            f"# grep results for {path} pattern={pattern}",
+            f"Total: {count} matches",
+            "",
+        ]
+        for m in matches:
+            out_lines.append(f"{m['file']}:{m['line']}:{m['match']}")
+            if m["context_before"]:
+                for cb in m["context_before"]:
+                    out_lines.append(f"  - {cb}")
+            if m["context_after"]:
+                for ca in m["context_after"]:
+                    out_lines.append(f"  + {ca}")
+            out_lines.append("")
+        try:
+            _s().write(log_name, "\n".join(out_lines))
+        except SandboxError as exc:
+            return tool_error(str(exc))
+        return tool_result(
+            count=count,
+            log_path=log_name,
+            note=f"Results exceeded {limit} matches. Full list written to log file.",
+        )
+
+    return tool_result(matches=matches, count=count)
+
+
+registry.register(
+    name="grep",
+    toolset="filesystem",
+    schema={
+        # 按正则表达式递归搜索目录中文本文件的内容。
+        # 只搜索文本文件，跳过超过 max_file_size 的文件。
+        # 返回匹配项的文件、行号、匹配文本及上下文。
+        # 如果结果超过 limit，完整列表写入 ws:logs/ 下的日志文件，仅返回数量和路径。
+        "description": (
+            "Recursively search text file contents using a regex pattern in a directory. "
+            "Only searches text files and skips files larger than max_file_size. "
+            "Returns matches with file path, line number, matched text, and surrounding context. "
+            "If results exceed the limit, the full list is written to a log file under ws:logs/ "
+            "and only the count and log path are returned."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "path": {
+                    "type": "string",
+                    # 要搜索的目录逻辑路径（如 'ws:'、'fork:src'）。必须使用命名空间前缀。
+                    "description": "Directory logical path to search in (e.g. 'ws:', 'fork:src'). Must use a namespace prefix.",
+                },
+                "pattern": {
+                    "type": "string",
+                    # 用于匹配文件内容的正则表达式。
+                    "description": "Regex pattern to search for in file contents.",
+                },
+                "limit": {
+                    "type": "integer",
+                    # 内联返回的最大结果数（默认 100）。超出时写入日志文件。
+                    "description": "Maximum number of results to return inline (default 100). Excess results are written to a log file.",
+                    "default": 100,
+                },
+                "max_file_size": {
+                    "type": "integer",
+                    # 跳过大于此字节数的文件（默认 524288000 = 500MB）。
+                    "description": "Skip files larger than this many bytes (default 524288000 = 500MB).",
+                    "default": 524288000,
+                },
+                "context_lines": {
+                    "type": "integer",
+                    # 每条匹配结果前后包含的上下文行数（默认 2）。
+                    "description": "Number of context lines to include before and after each match (default 2).",
+                    "default": 2,
+                },
+            },
+            "required": ["path", "pattern"],
+        },
+    },
+    handler=_handle_grep,
+    emoji="🔎",
 )
