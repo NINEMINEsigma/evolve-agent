@@ -1,6 +1,7 @@
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { ChatMessage } from "../types";
 import MessageItem from "./MessageItem";
+import Minimap from "./Minimap";
 
 interface ChatAreaProps {
   messages: ChatMessage[];
@@ -15,6 +16,7 @@ interface ChatAreaProps {
 
 export default function ChatArea({ messages, waiting, archived, onImageClick, onToggleCollapse, onEditMessage, bottomRef, onDropFiles }: ChatAreaProps) {
   const [dragOver, setDragOver] = useState(false);
+  const chatAreaRef = useRef<HTMLDivElement>(null);
   const messageList = useMemo(() =>
     messages.map((m) => (
       <MessageItem
@@ -30,34 +32,38 @@ export default function ChatArea({ messages, waiting, archived, onImageClick, on
   );
 
   return (
-    <main
-      className={`chat-area ${dragOver ? "chat-area-drag-over" : ""}`}
-      onDragOver={(e) => {
-        e.preventDefault();
-        setDragOver(true);
-      }}
-      onDragLeave={() => setDragOver(false)}
-      onDrop={(e) => {
-        e.preventDefault();
-        setDragOver(false);
-        if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
-          onDropFiles(e.dataTransfer.files);
-        }
-      }}
-    >
-      {messageList}
+    <div className="chat-area-wrapper">
+      <main
+        ref={chatAreaRef}
+        className={`chat-area ${dragOver ? "chat-area-drag-over" : ""}`}
+        onDragOver={(e) => {
+          e.preventDefault();
+          setDragOver(true);
+        }}
+        onDragLeave={() => setDragOver(false)}
+        onDrop={(e) => {
+          e.preventDefault();
+          setDragOver(false);
+          if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+            onDropFiles(e.dataTransfer.files);
+          }
+        }}
+      >
+        {messageList}
 
-      {waiting && (
-        <div className="message message-agent">
-          <div className="message-avatar">⚡</div>
-          <div className="message-bubble">
-            <div className="typing-indicator">
-              <span /><span /><span />
+        {waiting && (
+          <div className="message message-agent" data-message-id="__waiting__">
+            <div className="message-avatar">⚡</div>
+            <div className="message-bubble">
+              <div className="typing-indicator">
+                <span /><span /><span />
+              </div>
             </div>
           </div>
-        </div>
-      )}
-      <div ref={bottomRef} />
-    </main>
+        )}
+        <div ref={bottomRef} />
+      </main>
+      <Minimap messages={messages} chatAreaRef={chatAreaRef} />
+    </div>
   );
 }

@@ -380,20 +380,31 @@
   overflow-y: auto;
   overflow-x: hidden;
   padding-right: 6px;
-  scrollbar-width: thin;
+  scrollbar-width: auto;
+  scrollbar-color: rgba(255, 255, 255, 0.15) rgba(255, 255, 255, 0.03);
 }
 
 .message-content-collapsed::-webkit-scrollbar {
-  width: 8px;
-}
-
-.message-content-collapsed::-webkit-scrollbar-thumb {
-  background: var(--border);
-  border-radius: 999px;
+  width: 10px;
 }
 
 .message-content-collapsed::-webkit-scrollbar-track {
-  background: transparent;
+  background: rgba(255, 255, 255, 0.03);
+  border-left: 1px solid var(--border);
+}
+
+.message-content-collapsed::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.15);
+  border-radius: 5px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+  min-height: 30px;
+}
+
+.message-content-collapsed::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.28);
+  border: 2px solid transparent;
+  background-clip: padding-box;
 }
 
 .message-edit-box {

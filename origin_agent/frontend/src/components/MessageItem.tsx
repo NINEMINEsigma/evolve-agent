@@ -241,7 +241,7 @@ const MessageItem = memo(function MessageItem({ message, archived, onImageClick,
   };
 
   return (
-    <div className={`message message-${m.role}`}>
+    <div className={`message message-${m.role}`} data-message-id={m.id}>
       <div className="message-avatar">
         {m.role === "user" ? "U" : m.role === "agent" ? "⚡" : m.role === "error" ? "!" : m.role === "tool" ? "🔧" : "●"}
       </div>
