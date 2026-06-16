@@ -246,7 +246,8 @@ You can modify your own source code and complete evolution through the following
         port: int = self.ctx.gateway_port
         self._gateway_server = create_server(host=host, port=port)
         self._gateway_task = asyncio.create_task(
-            self._gateway_server.serve()  # type: ignore[union-attr]
+            self._gateway_server.serve(),  # type: ignore[union-attr]
+            name="gateway-server",
         )
         # 给 server 一点时间完成端口绑定
         await asyncio.sleep(0.5)
@@ -289,15 +290,34 @@ You can modify your own source code and complete evolution through the following
             t for t in asyncio.all_tasks(loop)
             if t is not asyncio.current_task() and not t.done()
         ]
-        if pending:
-            logger.info("Draining %d background task(s)...", len(pending))
-            try:
-                await asyncio.wait_for(
-                    asyncio.gather(*pending, return_exceptions=True),
-                    timeout=timeout,
-                )
-            except asyncio.TimeoutError:
-                logger.warning(
-                    "Some background tasks did not complete within %.1fs",
-                    timeout,
-                )
+        if not pending:
+            return
+
+        for t in pending:
+            name = t.get_name()
+            if not name or name.startswith("Task-") or name == "Task":
+                coro = t.get_coro()
+                name = getattr(coro, "__qualname__", None) or getattr(coro, "__name__", repr(coro))
+            logger.info("  pending background task: %s", name)
+
+        logger.info("Draining %d background task(s)...", len(pending))
+        try:
+            await asyncio.wait_for(
+                asyncio.gather(*pending, return_exceptions=True),
+                timeout=timeout,
+            )
+        except asyncio.TimeoutError:
+            still_pending = [
+                t for t in asyncio.all_tasks(loop)
+                if t is not asyncio.current_task() and not t.done()
+            ]
+            for t in still_pending:
+                name = t.get_name()
+                if not name or name.startswith("Task-") or name == "Task":
+                    coro = t.get_coro()
+                    name = getattr(coro, "__qualname__", None) or getattr(coro, "__name__", repr(coro))
+                logger.warning("  task still running after timeout: %s", name)
+            logger.warning(
+                "Some background tasks did not complete within %.1fs",
+                timeout,
+            )

@@ -256,8 +256,12 @@ class AgentLoop:
                 # 穿透正在进行的 HTTP 请求，而不是等待其完成。
                 llm_task: asyncio.Task[LLMResponse] = asyncio.create_task(
                     self._llm.chat(messages, tools=self._get_tool_definitions()),
+                    name=f"llm-chat-{session_id}",
                 )
-                cancel_task: asyncio.Task[bool] = asyncio.create_task(cancel_event.wait())
+                cancel_task: asyncio.Task[bool] = asyncio.create_task(
+                    cancel_event.wait(),
+                    name=f"cancel-wait-{session_id}",
+                )
 
                 done: set[asyncio.Task[Any]]
                 pending: set[asyncio.Task[Any]]
@@ -320,7 +324,8 @@ class AgentLoop:
                         self._tool_event_callback(
                             session_id, "assistant_text", "",
                             json.dumps({"content": resp.content or "", "reasoning": resp.reasoning_content}),
-                        ) # type: ignore
+                        ),  # type: ignore
+                        name=f"push-assistant-text-{session_id}",
                     )
 
                 # 执行工具调用并将结果持久化到历史
@@ -339,7 +344,8 @@ class AgentLoop:
                                     "token_usage": self._token_usage.get(session_id, 0),
                                     "context_tokens": self._last_prompt_tokens.get(session_id, 0),
                                 }),
-                            ) # type: ignore
+                            ),  # type: ignore
+                            name=f"push-usage-update-{session_id}",
                         )
 
                     # 如果 evolve_code 执行成功，干净退出循环。
@@ -1057,7 +1063,8 @@ class AgentLoop:
                 asyncio.create_task(
                     self._tool_event_callback(
                         session_id, "tool_result", tc.name, json.dumps(_result, ensure_ascii=False),
-                    ) # type: ignore
+                    ),  # type: ignore
+                    name=f"push-tool-result-{session_id}",
                 )
             return {
                 "role": "tool",
@@ -1079,7 +1086,8 @@ class AgentLoop:
                 self._tool_event_callback(
                     session_id, "tool_call", tc.name,
                     json.dumps(tc.arguments, ensure_ascii=False),
-                ) # type: ignore
+                ),  # type: ignore
+                name=f"push-tool-call-{session_id}",
             )
 
         # ---- 统一审批与 allowlist（dangerous 始终审批；write 仅脱手模式审批）----
@@ -1233,7 +1241,8 @@ class AgentLoop:
                 asyncio.create_task(
                     self._tool_event_callback(
                         session_id, "task_progress", tc.name, _progress_payload,
-                    ) # type: ignore
+                    ),  # type: ignore
+                    name=f"push-task-progress-{session_id}",
                 )
 
         if tc.name in ("set_clipboard_display", "clear_clipboard_display"):
@@ -1245,7 +1254,8 @@ class AgentLoop:
                 asyncio.create_task(
                     self._tool_event_callback(
                         session_id, "clipboard_display", tc.name, _display_payload,
-                    ) # type: ignore
+                    ),  # type: ignore
+                    name=f"push-clipboard-display-{session_id}",
                 )
 
         # ---- 通知前端：tool_result (fire-and-forget) ----
@@ -1258,7 +1268,8 @@ class AgentLoop:
             asyncio.create_task(
                 self._tool_event_callback(
                     session_id, "tool_result", tc.name, push_result,
-                ) # type: ignore
+                ),  # type: ignore
+                name=f"push-tool-result-{session_id}",
             )
 
         # ---- 构建 OpenAI 格式的工具消息 ----

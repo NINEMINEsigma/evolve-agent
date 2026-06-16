@@ -570,7 +570,7 @@ class MCPOAuthManager:
                     finally:
                         entry.pending_401.pop(key, None)
 
-                asyncio.create_task(_do_handle())
+                asyncio.create_task(_do_handle(), name=f"mcp-oauth-401-{server_name}")
 
         try:
             return await pending

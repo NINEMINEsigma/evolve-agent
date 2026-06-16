@@ -1139,7 +1139,10 @@ class MCPServerTask:
 
     def _schedule_tools_refresh(self) -> asyncio.Task:
         """Schedule a background tool refresh and keep it strongly referenced."""
-        task = asyncio.create_task(self._refresh_tools_task())
+        task = asyncio.create_task(
+            self._refresh_tools_task(),
+            name=f"mcp-refresh-tools-{self.name}",
+        )
         self._pending_refresh_tasks.add(task)
         task.add_done_callback(self._pending_refresh_tasks.discard)
         return task
@@ -1270,8 +1273,14 @@ class MCPServerTask:
         # LB / NAT idle-timeout (commonly 300-600s).
         _KEEPALIVE_INTERVAL = 180  # 3 minutes
 
-        shutdown_task = asyncio.create_task(self._shutdown_event.wait())
-        reconnect_task = asyncio.create_task(self._reconnect_event.wait())
+        shutdown_task = asyncio.create_task(
+            self._shutdown_event.wait(),
+            name=f"mcp-shutdown-wait-{self.name}",
+        )
+        reconnect_task = asyncio.create_task(
+            self._reconnect_event.wait(),
+            name=f"mcp-reconnect-wait-{self.name}",
+        )
         try:
             while True:
                 done, _pending = await asyncio.wait(
@@ -1717,6 +1726,7 @@ class MCPServerTask:
     async def start(self, config: dict):
         """Create the background Task and wait until ready (or failed)."""
         self._task = asyncio.ensure_future(self.run(config))
+        self._task.set_name(f"mcp-server-{self.name}")
         await self._ready.wait()
         if self._error:
             raise self._error
