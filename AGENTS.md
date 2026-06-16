@@ -41,6 +41,19 @@ Environment check: `python check_env.py --cuda`
 - **Never use scripts to batch-edit source files.** Make targeted, reviewable edits.
 - `origin_agent/frontend/` is not at the repo root, so static type/IDE awareness may be inaccurate. Before relying on frontend type checks or builds, stop and notify the user.
 
+## Git commit style
+
+- 使用中文提交信息，前缀采用仓库已有标签：`[feature]`、`[fix]`、`[refactor]`、`[docs]` 等。
+- 提交首行格式：`[标签] 简短描述（50 字以内）`。
+- 需要时追加正文说明，使用 `- ` 列出改动要点。
+- 示例：
+  ```
+  [fix] 修复 ssh 审批弹窗 command 类型错误导致前端黑屏
+
+  - ConfirmDialog 兼容 command 为字符串（ssh_exec）或数组（run_command）
+  - 新增 ErrorBoundary，避免模态组件渲染异常导致整个 App 被卸载
+  ```
+
 ## Architecture
 
 ```
