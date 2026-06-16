@@ -24,7 +24,8 @@ from fastapi.staticfiles import StaticFiles
 
 from .chat import Message, MessageType, SessionManager
 from component.approval import ApprovalResult
-from entity.constant import CRON_STDOUT_PREVIEW_MAX_LENGTH
+from datetime import datetime, timezone
+from entity.constant import CRON_STDOUT_PREVIEW_MAX_LENGTH, UPLOAD_FILENAME_TIME_FORMAT
 
 if TYPE_CHECKING:
     from entry.agent import AgentLoop
@@ -648,7 +649,8 @@ async def file_picker():
         if not src.is_file():
             continue
         safe_name: str = src.name
-        unique_name: str = f"{uuid.uuid4().hex[:8]}_{safe_name}"
+        timestamp: str = datetime.now(timezone.utc).strftime(UPLOAD_FILENAME_TIME_FORMAT)
+        unique_name: str = f"{timestamp}_{uuid.uuid4().hex[:8]}_{safe_name}"
         dest: Path = upload_dir / unique_name
         method: str = "hardlink"
         try:
@@ -758,7 +760,8 @@ async def _handle_file_upload(ws: WebSocket, sid: str, msg: Message) -> None:
     if not safe_name:
         safe_name = "uploaded_file"
 
-    unique_name: str = f"{uuid.uuid4().hex[:8]}_{safe_name}"
+    timestamp: str = datetime.now(timezone.utc).strftime(UPLOAD_FILENAME_TIME_FORMAT)
+    unique_name: str = f"{timestamp}_{uuid.uuid4().hex[:8]}_{safe_name}"
     upload_dir: Path = _agentspace_path / "uploads" if _agentspace_path else Path("workspace/agentspace/uploads")
     upload_dir.mkdir(parents=True, exist_ok=True)
     dest: Path = upload_dir / unique_name
