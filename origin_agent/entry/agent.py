@@ -663,7 +663,7 @@ class AgentLoop:
 
         # 从模板文件读取自动标题 prompt
         from system.templates import read_template
-        prompt_tpl: str = read_template("auto_title.txt", "zh")
+        prompt_tpl: str = read_template("auto_title.txt")
         if not prompt_tpl:
             # 硬编码回退
             prompt_tpl = (
@@ -832,22 +832,16 @@ class AgentLoop:
         }
 
     def _compression_prompts(self) -> tuple[str, str, str]:
-        """从模板文件返回 (prompt模板, 回退文本, 摘要前缀)。
+        """从模板文件返回 (prompt模板, 回退文本, 摘要前缀)。"""
+        from system.templates import read_template
 
-        读取 templates/zh/compress.txt（中文）或 templates/compress.txt（英文）。
-        """
-        from system.templates import read_template, select_template_root
-        use_zh: bool = select_template_root("zh").name == "zh"
-
-        prompt_tpl: str = read_template("compress.txt", "zh")
+        prompt_tpl: str = read_template("compress.txt")
         if not prompt_tpl:
             prompt_tpl = (
                 "Summarize the key content and decisions of the following conversation in no more than 50000 characters. Output only the summary.\n\n"
                 "Conversation:\n{{old_text}}\n\nSummary: "
             )
 
-        if use_zh:
-            return prompt_tpl, "(Conversation too long, auto-truncated)", "[Context Summary]"
         return prompt_tpl, "(History too long, truncated)", "[Context Summary]"
 
     async def _summarize_session_history(self, session_id: str) -> str:

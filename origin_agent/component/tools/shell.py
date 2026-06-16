@@ -100,7 +100,8 @@ registry.register(
             "permanently trust (always allow), or deny the command. "
             "Commands previously approved with 'always allow' skip the prompt. "
             "Always include 'reason' explaining the command's purpose. "
-            "Useful for installing packages, running tests, or inspecting files."
+            "Useful for installing packages, running tests, or other shell-specific tasks. "
+            "DO NOT use this tool to read or inspect files; use read_file instead."
         ),
         "parameters": {
             "type": "object",

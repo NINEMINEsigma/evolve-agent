@@ -55,7 +55,6 @@ def build_agent_system_prompt(ctx: Any, skill_blocks: list[str]) -> str:
     return build_system_prompt(
         mode=ctx.mode,
         extra_blocks=skill_blocks,
-        lang="zh",
         workspace=ctx.workspace,
         agentspace=str(ctx.agentspace),
         fork_path=str(ctx.fork_path),

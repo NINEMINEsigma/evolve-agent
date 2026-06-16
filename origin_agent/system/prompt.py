@@ -24,7 +24,7 @@ from typing import Optional
 logger = logging.getLogger(__name__)
 
 from system.pathutils import find_repo_root
-from system.templates import read_template, select_template_root
+from system.templates import read_template
 
 
 def _read_gene() -> str:
@@ -37,7 +37,7 @@ def _read_soul(agentspace: Path) -> str:
     return _read_if_exists(agentspace / "SOUL.md")
 
 
-def _platform_info(lang: str = "en") -> str:
+def _platform_info() -> str:
     """检测运行时平台并返回描述该平台的 prompt 块。
 
     返回一个简短段落，告知 LLM 运行在哪个操作系统上、
@@ -46,34 +46,18 @@ def _platform_info(lang: str = "en") -> str:
     is_win: bool = sys.platform.startswith("win")
     is_mac: bool = sys.platform == "darwin"
 
-    if lang == "zh":
-        if is_win:
-            return (
-                "Running on **Windows**. Python is ``python`` (not ``python3``).\n"
-                "For Windows built-in commands use ``cmd /c <command>``."
-            )
-        if is_mac:
-            return (
-                "Running on **macOS**. Python is ``python3``.\n"
-                "Use standard Unix shell commands."
-            )
-        return (
-            "Running on **Linux**. Python is ``python3``.\n"
-            "Use standard Unix shell commands."
-        )
-    # English
     if is_win:
         return (
-            "Running on **Windows**.  Python is ``python`` (not ``python3``).\n"
+            "Running on **Windows**. Python is ``python`` (not ``python3``).\n"
             "For Windows built-in commands use ``cmd /c <command>``."
         )
     if is_mac:
         return (
-            "Running on **macOS**.  Python is ``python3``.\n"
+            "Running on **macOS**. Python is ``python3``.\n"
             "Use standard Unix shell commands."
         )
     return (
-        "Running on **Linux**.  Python is ``python3``.\n"
+        "Running on **Linux**. Python is ``python3``.\n"
         "Use standard Unix shell commands."
     )
 
@@ -92,7 +76,6 @@ def _read_if_exists(path: Path) -> str:
 def build_system_prompt(
     mode: str = "fast",
     extra_blocks: Optional[list[str]] = None,
-    lang: str = "en",
     workspace: Path | str = "",
     agentspace: str = "",
     fork_path: str = "",
@@ -107,8 +90,6 @@ def build_system_prompt(
         ``"fast"`` 或 ``"fallback"`` — 选择模式特定的模板。
     extra_blocks:
         追加在模式段之后的额外节（例如 skill prompt、memory provider 块）。
-    lang:
-        ``"en"``（默认）或 ``"zh"`` — 选择模板语言变体。
     workspace:
         workspace 目录路径，用于读取 SOUL.md。
     fork_path / fix_fork_path / fix_log_path:
@@ -120,8 +101,6 @@ def build_system_prompt(
     str
         组装完成的 system prompt，可直接用于 LLM。
     """
-    template_root: Path = select_template_root(lang)
-
     blocks: list[str] = []
 
     # 0. GENE — 不可变的核心身份，始终在最前面
@@ -136,22 +115,22 @@ def build_system_prompt(
         blocks.append(soul)
 
     # 1. 基础
-    base: str = read_template("base.txt", lang)
+    base: str = read_template("base.txt")
     if base:
-        base = base.replace(r"{{platform}}", _platform_info(lang))
+        base = base.replace(r"{{platform}}", _platform_info())
         base = base.replace(r"{{agentspace}}", agentspace)
         base = base.replace(r"{{fork_path}}", fork_path)
         blocks.append(base)
 
     # 2. 模式特定
-    mode_block: str = read_template(f"modes/{mode}.txt", lang)
+    mode_block: str = read_template(f"modes/{mode}.txt")
     if mode_block:
         mode_block = mode_block.replace(r"{{fix_fork_path}}", fix_fork_path)
         mode_block = mode_block.replace(r"{{fix_log_path}}", fix_log_path)
         blocks.append(mode_block)
 
     # 3. 工具
-    tools: str = read_template("tools.txt", lang)
+    tools: str = read_template("tools.txt")
     if tools:
         blocks.append(tools)
 

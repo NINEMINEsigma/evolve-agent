@@ -10,28 +10,19 @@ from system.pathutils import get_templates_dir
 logger = logging.getLogger(__name__)
 
 
-def select_template_root(lang: str = "zh") -> Path:
-    """根据语言选择模板根目录。"""
-    templates = get_templates_dir()
-    if lang == "zh":
-        zh_dir = templates / "zh"
-        if zh_dir.is_dir():
-            return zh_dir
-    return templates
+def select_template_root() -> Path:
+    """返回模板根目录。"""
+    return get_templates_dir()
 
 
-def read_template_path(name: str, lang: str = "zh") -> Path:
-    """返回模板路径；语言目录缺失时回退到默认模板目录。"""
-    root = select_template_root(lang)
-    candidate = root / name
-    if candidate.is_file():
-        return candidate
+def read_template_path(name: str) -> Path:
+    """返回模板文件路径。"""
     return get_templates_dir() / name
 
 
-def read_template(name: str, lang: str = "zh") -> str:
+def read_template(name: str) -> str:
     """读取模板文本，缺失或读取失败时返回空字符串。"""
-    path = read_template_path(name, lang)
+    path = read_template_path(name)
     if not path.is_file():
         return ""
     try:

@@ -18,3 +18,9 @@ Cron tool conventions:
 - Scheduled tasks are background one-shot tasks, not a batch queue or an automatic loop mechanism.
 - Periodic work, polling, or long-running observation must be expressed as recursive scheduling: wait for the task result, then schedule the next one-shot task.
 - Raw scheduled-task output is internal Agent input and log content, not a user message; if the user needs the result, actively summarize it.
+
+Tool selection rules:
+- Always prefer dedicated tools over shell workarounds.
+- For reading files, use ``read_file``; for editing, use ``edit_file`` or ``write_file``.
+- For searching code, use ``search_files`` or ``grep``.
+- Never use ``run_command`` to invoke cat, type, head, tail, find, grep, or similar file utilities.
