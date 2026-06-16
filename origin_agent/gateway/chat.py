@@ -145,9 +145,10 @@ class SessionManager:
 
     def __init__(self, store_path: str | None = None) -> None:
         import time
-        self._sessions: dict[str, dict] = {}  # sid -> {status, created_at, title}
+        self._sessions: dict[str, dict] = {}  # sid -> {status, created_at, title, tags}
         self._store_dir: Path | None = Path(store_path) if store_path else None
         self._index_lock: threading.Lock = threading.Lock()
+        self._tags: list[str] = []
         if self._store_dir:
             self._store_dir.mkdir(parents=True, exist_ok=True)
             self.load_from_disk()
@@ -158,6 +159,11 @@ class SessionManager:
         """返回 session 索引 JSON 文件的路径。"""
         assert self._store_dir is not None
         return self._store_dir / "_index.json"
+
+    def _tags_path(self) -> Path:
+        """返回全局标签 JSON 文件的路径。"""
+        assert self._store_dir is not None
+        return self._store_dir / "tags.json"
 
     def _read_index(self) -> list[dict]:
         """从磁盘读取持久化的 session 索引，损坏时尝试从 .bak 恢复。"""
@@ -219,6 +225,7 @@ class SessionManager:
                     "continuation": None,
                     "pinned": False,
                     "last_activity_at": created_at,
+                    "tags": [],
                 })
             if recovered:
                 logger.info("Recovered %d sessions from directory scan", len(recovered))
@@ -228,13 +235,15 @@ class SessionManager:
 
     @staticmethod
     def _upgrade_index_entries(entries: list[dict]) -> list[dict]:
-        """将旧格式索引中的 parent 升级为 parents 数组。"""
+        """将旧格式索引中的 parent 升级为 parents 数组，并补齐 tags。"""
         for entry in entries:
             if "parent" in entry and "parents" not in entry:
                 p = entry.pop("parent")
                 entry["parents"] = [p] if p else []
             elif "parents" not in entry:
                 entry["parents"] = []
+            if "tags" not in entry:
+                entry["tags"] = []
         return entries
 
     def _write_index(self, entries: list[dict]) -> None:
@@ -288,6 +297,7 @@ class SessionManager:
         if not self._store_dir:
             return
         entries: list[dict] = self._read_index()
+        self._tags = self._read_tags()
         for entry in entries:
             sid: str = entry.get("id", "")
             if sid:
@@ -299,6 +309,7 @@ class SessionManager:
                     "continuation": entry.get("continuation"),
                     "pinned": entry.get("pinned", False),
                     "last_activity_at": entry.get("last_activity_at", entry.get("created_at", 0)),
+                    "tags": entry.get("tags", []),
                 }
         if entries:
             logger.info("Loaded %d sessions from disk", len(entries))
@@ -330,6 +341,7 @@ class SessionManager:
                         if sid in self._sessions:
                             e["parents"] = self._sessions[sid].get("parents", [])
                             e["continuation"] = self._sessions[sid].get("continuation")
+                            e["tags"] = self._sessions[sid].get("tags", [])
                     self._write_index(entries)
                 logger.info("Fixed session parent-child inconsistencies and synced to disk")
 
@@ -359,6 +371,7 @@ class SessionManager:
             "status": "active", "created_at": now, "title": "",
             "parents": effective_parents, "continuation": None,
             "pinned": False, "last_activity_at": now,
+            "tags": [],
         }
         # 持久化到磁盘
         if self._store_dir:
@@ -368,6 +381,7 @@ class SessionManager:
                     "id": sid, "created_at": now, "status": "active", "title": "",
                     "parents": effective_parents, "continuation": None,
                     "pinned": False, "last_activity_at": now,
+                    "tags": [],
                 })
                 self._write_index(entries)
             (self._store_dir / sid).mkdir(parents=True, exist_ok=True)
@@ -388,6 +402,9 @@ class SessionManager:
                         e["status"] = "archived"
                         if continuation_sid is not None:
                             e["continuation"] = continuation_sid
+                        # 保留 tags 字段
+                        if "tags" not in e:
+                            e["tags"] = self._sessions.get(sid, {}).get("tags", [])
                         break
                 self._write_index(entries)
         logger.info("Session archived | id=%s continuation=%s", sid, continuation_sid)
@@ -471,6 +488,7 @@ class SessionManager:
                         "continuation": info.get("continuation"),
                         "pinned": info.get("pinned", False),
                         "last_activity_at": info.get("last_activity_at", info.get("created_at", 0)),
+                        "tags": info.get("tags", []),
                     })
                 self._write_index(entries)
 
@@ -521,6 +539,7 @@ class SessionManager:
             "continuation": info.get("continuation"),
             "pinned": info.get("pinned", False),
             "last_activity_at": info.get("last_activity_at", info.get("created_at", 0)),
+            "tags": info.get("tags", []),
         }
 
     def cleanup_expired(self) -> int:
@@ -546,9 +565,93 @@ class SessionManager:
                 "continuation": info.get("continuation"),
                 "pinned": info.get("pinned", False),
                 "last_activity_at": info.get("last_activity_at", info.get("created_at", 0)),
+                "tags": info.get("tags", []),
             })
         items.sort(key=lambda s: (-int(s["pinned"]), -s["last_activity_at"]))
         return items
+
+    @staticmethod
+    def validate_tag(tag: str) -> bool:
+        """校验单个标签格式：最多5个汉字或10个英文字母，不含空格。"""
+        if not tag:
+            return False
+        import re
+        return bool(re.fullmatch(r"[\u4e00-\u9fa5]{1,5}|[a-zA-Z]{1,10}", tag))
+
+    def get_all_tags(self) -> list[str]:
+        """返回全局已有标签列表。"""
+        return list(self._tags)
+
+    def _read_tags(self) -> list[str]:
+        """从磁盘读取全局标签列表。"""
+        if not self._store_dir:
+            return []
+        path = self._tags_path()
+        if not path.exists():
+            return []
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+            if isinstance(data, list):
+                return [str(t) for t in data if self.validate_tag(str(t))]
+        except Exception as exc:
+            logger.warning("Failed to read tags file: %s", exc)
+        return []
+
+    def _write_tags(self, tags: list[str]) -> None:
+        """原子写入全局标签列表。"""
+        if not self._store_dir:
+            return
+        try:
+            path = self._tags_path()
+            tmp = path.with_suffix(".json.tmp")
+            tmp.write_text(json.dumps(tags, ensure_ascii=False, indent=2), encoding="utf-8")
+            tmp.replace(path)
+        except Exception as exc:
+            logger.warning("Failed to write tags file: %s", exc)
+
+    def add_tags(self, new_tags: list[str]) -> bool:
+        """把新标签合并到全局标签列表，返回是否发生变化。"""
+        valid = [t for t in new_tags if self.validate_tag(t)]
+        if not valid:
+            return False
+        changed = False
+        for t in valid:
+            if t not in self._tags:
+                self._tags.append(t)
+                changed = True
+        if changed and self._store_dir:
+            with self._index_lock:
+                self._write_tags(list(self._tags))
+        return changed
+
+    def set_session_tags(self, sid: str, tags: list[str]) -> list[str]:
+        """更新会话标签并同步全局标签。返回最终有效的标签列表。"""
+        valid = [t for t in tags if self.validate_tag(t)]
+        if sid in self._sessions:
+            self._sessions[sid]["tags"] = valid
+        if self._store_dir:
+            with self._index_lock:
+                entries: list[dict] = self._read_index()
+                for e in entries:
+                    if e.get("id") == sid:
+                        e["tags"] = valid
+                        break
+                else:
+                    info = self._sessions.get(sid, {})
+                    entries.append({
+                        "id": sid,
+                        "created_at": info.get("created_at", 0),
+                        "status": info.get("status", "active"),
+                        "title": info.get("title", ""),
+                        "parents": info.get("parents", []),
+                        "continuation": info.get("continuation"),
+                        "pinned": info.get("pinned", False),
+                        "last_activity_at": info.get("last_activity_at", info.get("created_at", 0)),
+                        "tags": valid,
+                    })
+                self._write_index(entries)
+        self.add_tags(valid)
+        return valid
 
     def validate_merge_sources(self, source_ids: list[str]) -> str | None:
         """校验所有源会话是否已归档。返回错误信息，全部通过则返回 None。"""

@@ -129,4 +129,5 @@ export interface SessionInfo {
   parents?: string[];
   parent?: string | null;
   continuation?: string | null;
+  tags?: string[];
 }

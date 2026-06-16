@@ -115,6 +115,13 @@ function SessionListItem({
           <span className="session-item-id">{s.id}</span>
           <span className="session-item-time">{formatTime(s.last_activity_at || s.created_at)}</span>
         </div>
+        {(s.tags?.length || 0) > 0 && (
+          <div className="session-tags">
+            {s.tags!.map((t) => (
+              <span key={t} className="session-tag">{t}</span>
+            ))}
+          </div>
+        )}
       </div>
     </div>
   );

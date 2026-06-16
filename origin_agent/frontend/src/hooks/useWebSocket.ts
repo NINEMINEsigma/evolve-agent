@@ -749,6 +749,28 @@ export function useWebSocket() {
 
   const branchSession = useCallback((sid: string) => mergeSessions([sid]), [mergeSessions]);
 
+  const updateSessionTags = useCallback(async (sid: string, tags: string[]) => {
+    const valid = tags
+      .map((t) => t.trim())
+      .filter((t) => {
+        if (!t) return false;
+        const zh = /^[\u4e00-\u9fa5]{1,5}$/.test(t);
+        const en = /^[a-zA-Z]{1,10}$/.test(t);
+        return zh || en;
+      });
+    const resp = await fetch(`/api/sessions/${sid}/tags`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ tags: valid }),
+    });
+    const data = await resp.json().catch(() => ({}));
+    if (data.updated) {
+      setSessions((prev) => prev.map((s) => (s.id === sid ? { ...s, tags: data.tags || valid } : s)));
+      fetchSessions();
+    }
+    return data.tags || valid;
+  }, [fetchSessions]);
+
   const toggleMergeSelect = useCallback((sid: string) => {
     const session = sessions.find((s) => s.id === sid);
     if (!session || session.status !== "archived") {
@@ -819,9 +841,14 @@ export function useWebSocket() {
   }, [connect]);
 
   const sidebarSessions = useMemo(() => {
-    const q = searchQuery.toLowerCase();
+    const q = searchQuery.toLowerCase().trim();
     const filtered = q
-      ? sessions.filter((s) => (s.title || s.id).toLowerCase().includes(q))
+      ? sessions.filter((s) => {
+          const text = (s.title || s.id).toLowerCase();
+          if (text.includes(q)) return true;
+          const tags = s.tags || [];
+          return tags.some((t) => t.toLowerCase().includes(q));
+        })
       : sessions;
     return filtered.sort((a, b) => {
       if (Number(b.pinned) !== Number(a.pinned)) return Number(b.pinned) - Number(a.pinned);
@@ -905,6 +932,7 @@ export function useWebSocket() {
     addMessage,
     fetchSessions,
     connect,
+    updateSessionTags,
     // refs
     wsRef,
     bottomRef,

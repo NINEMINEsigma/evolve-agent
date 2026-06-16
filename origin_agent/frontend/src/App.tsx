@@ -11,6 +11,8 @@ import ClipboardPanel from "./components/ClipboardPanel";
 import Drawer from "./components/Drawer";
 import CronCountdown from "./components/CronCountdown";
 import Lightbox from "./components/Lightbox";
+import TagEditor from "./components/TagEditor";
+import { SessionInfo } from "./types";
 
 export default function App() {
   const ws = useWebSocket();
@@ -21,6 +23,8 @@ export default function App() {
   const [clipboardCollapsed, setClipboardCollapsed] = useState(false);
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; sid: string } | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
+  const [tagEditorSession, setTagEditorSession] = useState<SessionInfo | null>(null);
+  const [allTags, setAllTags] = useState<string[]>([]);
 
   // ── close context menu on outside click ──
   useEffect(() => {
@@ -47,6 +51,17 @@ export default function App() {
     e.stopPropagation();
     setContextMenu({ x: e.clientX, y: e.clientY, sid });
   };
+
+  const fetchAllTags = () => {
+    fetch("/api/tags")
+      .then((r) => r.json())
+      .then((data) => setAllTags(data.tags || []))
+      .catch(() => {});
+  };
+
+  useEffect(() => {
+    fetchAllTags();
+  }, []);
 
   const currentSessionArchived = ws.sessions.find((s) => s.id === ws.sessionId)?.status === "archived";
 
@@ -90,6 +105,9 @@ export default function App() {
               const s = ws.sessions.find((s) => s.id === contextMenu.sid);
               return s?.pinned ? "取消收藏" : "收藏";
             })()}
+          </div>
+          <div className="context-menu-item" onClick={() => { setContextMenu(null); setTagEditorSession(ws.sessions.find((s) => s.id === contextMenu.sid) || null); }}>
+            编辑标签
           </div>
           {(() => {
             const s = ws.sessions.find((s) => s.id === contextMenu.sid);
@@ -216,6 +234,18 @@ export default function App() {
 
       {lightboxSrc && (
         <Lightbox src={lightboxSrc} onClose={() => setLightboxSrc(null)} />
+      )}
+
+      {tagEditorSession && (
+        <TagEditor
+          session={tagEditorSession}
+          allTags={allTags}
+          onClose={() => setTagEditorSession(null)}
+          onSave={async (sid, tags) => {
+            await ws.updateSessionTags(sid, tags);
+            fetchAllTags();
+          }}
+        />
       )}
     </div>
   );

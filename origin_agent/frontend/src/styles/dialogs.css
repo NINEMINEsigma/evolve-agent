@@ -152,3 +152,110 @@
 .ask-custom-input::placeholder {
   color: var(--text-muted);
 }
+
+/* ── Tag editor ── */
+.tag-editor .confirm-body {
+  min-height: 160px;
+}
+
+.tag-editor-subtitle {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-bottom: 12px;
+  word-break: break-all;
+}
+
+.tag-editor-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 12px;
+  min-height: 28px;
+}
+
+.tag-editor-empty {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.tag-editor-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  font-size: 12px;
+  color: var(--text-primary);
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+
+.tag-editor-tag button {
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+  padding: 0 0 0 2px;
+}
+
+.tag-editor-tag button:hover {
+  color: var(--danger);
+}
+
+.tag-editor-input {
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+  font-size: 13px;
+  outline: none;
+  box-sizing: border-box;
+  margin-bottom: 6px;
+}
+
+.tag-editor-input:focus {
+  border-color: var(--accent);
+}
+
+.tag-editor-input::placeholder {
+  color: var(--text-muted);
+}
+
+.tag-editor-error {
+  font-size: 12px;
+  color: var(--danger);
+  margin-bottom: 10px;
+}
+
+.tag-editor-suggest-title {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin: 8px 0 6px;
+}
+
+.tag-editor-suggestions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.tag-editor-suggest-btn {
+  padding: 3px 8px;
+  font-size: 11px;
+  color: var(--text-secondary);
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+}
+
+.tag-editor-suggest-btn:hover {
+  background: var(--bg-hover);
+  border-color: var(--accent);
+  color: var(--text-primary);
+}

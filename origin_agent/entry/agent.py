@@ -776,6 +776,74 @@ class AgentLoop:
             ])
         return "\n".join(sections)
 
+    def get_session_tags(self, session_id: str) -> list[str]:
+        """返回指定 session 当前的标签列表。"""
+        if self._session_manager is None:
+            return []
+        info = self._session_manager.get(session_id)
+        return list(info.get("tags", [])) if info else []
+
+    async def _auto_classify_session_tags(self, session_id: str) -> list[str]:
+        """终结时自动归类标签。仅当会话无标签时执行。
+
+        LLM 从已有全局标签中选择，若无合适可创建新标签。
+        返回校验后的标签列表。
+        """
+        if self._session_manager is None:
+            return []
+        info = self._session_manager.get(session_id)
+        if not info:
+            return []
+        existing_tags: list[str] = list(info.get("tags", []))
+        if existing_tags:
+            return []
+
+        summary: str = ""
+        if self._session_store is not None:
+            summary = self._session_store.read_summary(session_id)
+        if not summary:
+            summary = await self._summarize_session_history(session_id)
+        summary = summary.strip() or "(Session context archived)"
+
+        all_tags: list[str] = self._session_manager.get_all_tags()
+        prompt_lines: list[str] = [
+            "You are a session classification assistant.",
+            "Based on the following session summary, select the most appropriate tags from the existing tag list.",
+            "If no existing tag is suitable, you may create new tags.",
+            "Each tag must be either 1-5 Chinese characters OR 1-10 English letters (a-z, A-Z).",
+            "Tags must NOT contain spaces, digits, symbols, or mixed Chinese-English characters.",
+            "Return ONLY a valid JSON object in this exact format: {\"tags\": [\"tag1\", \"tag2\"]}.",
+            "Do not include any explanation, markdown, or extra text.",
+            "",
+            f"Existing tags: {json.dumps(all_tags, ensure_ascii=False)}",
+            "",
+            "Session summary:",
+            summary[:4000],
+            "",
+            "Output JSON:",
+        ]
+        prompt: str = "\n".join(prompt_lines)
+        try:
+            resp: LLMResponse = await self._llm.chat(
+                [{"role": "user", "content": prompt}],
+                tools=[],
+            )
+            raw: str = resp.content.strip()
+            # 兼容 markdown 代码块
+            if raw.startswith("```"):
+                raw = raw.strip("`").strip()
+                if raw.lower().startswith("json"):
+                    raw = raw[4:].strip()
+            data: Any = json.loads(raw)
+            if isinstance(data, dict) and isinstance(data.get("tags"), list):
+                candidates: list[str] = [str(t).strip() for t in data["tags"]]
+                if self._session_manager is not None:
+                    valid = [t for t in candidates if self._session_manager.validate_tag(t)]
+                    return valid
+        except Exception:
+            logger.warning("Failed to auto-classify tags for session %s", session_id, exc_info=True)
+        return []
+
     async def terminate_session(self, session_id: str) -> dict:
         """手动终结会话：归档 + 压缩（生成摘要），不旋转。"""
         await self._terminate_session(session_id, rotate=False)
@@ -921,6 +989,10 @@ class AgentLoop:
             pass
 
         # 5. 归档旧会话
+        tags: list[str] = await self._auto_classify_session_tags(old_sid)
+        if tags and self._session_manager is not None:
+            self._session_manager.set_session_tags(old_sid, tags)
+            logger.info("Auto-classified tags for session %s: %s", old_sid, tags)
         sm.archive(old_sid, continuation_sid=None)
 
         if rotate:

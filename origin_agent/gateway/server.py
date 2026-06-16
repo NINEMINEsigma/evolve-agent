@@ -359,6 +359,28 @@ async def list_sessions():
     return {"sessions": sessions.get_all()}
 
 
+@app.get("/api/tags")
+async def list_tags():
+    """返回全局已有标签列表。"""
+    return {"tags": sessions.get_all_tags()}
+
+
+@app.put("/api/sessions/{session_id}/tags")
+async def update_session_tags(session_id: str, req: Request):
+    """更新 session 的标签列表。"""
+    body: dict = {}
+    try:
+        body = await req.json()
+    except Exception:
+        body = {}
+    raw_tags = body.get("tags", [])
+    if not isinstance(raw_tags, list):
+        return {"updated": False, "error": "tags must be an array", "session_id": session_id}
+    tags: list[str] = [str(t).strip() for t in raw_tags]
+    valid = sessions.set_session_tags(session_id, tags)
+    return {"updated": True, "session_id": session_id, "tags": valid}
+
+
 @app.get("/api/sessions/{session_id}/tool-resources")
 async def get_session_tool_resources(session_id: str):
     """返回 session 的可恢复工具副作用资源快照。"""
