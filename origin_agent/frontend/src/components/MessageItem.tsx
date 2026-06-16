@@ -69,7 +69,7 @@ const MessageItem = memo(function MessageItem({ message, archived, onImageClick,
   const [draft, setDraft] = useState(textContent);
   const lineCount = textContent.split("\n").length;
   const isLong = textContent.length > LONG_MESSAGE_CHARS || lineCount > LONG_MESSAGE_LINES;
-  const collapsed = isLong && m.collapsed !== false;
+  const collapsed = m.collapsed !== false;
   const canEdit = !archived && typeof m.messageIndex === "number" && typeof m.content === "string";
 
   const mdComponents = useMemo(() => ({
