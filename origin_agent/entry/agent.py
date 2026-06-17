@@ -302,11 +302,11 @@ class AgentLoop:
                         return resp.content
                     return "Cancelled."
 
-                # 从 LLM 响应中追踪实际 token 消耗
-                self._token_usage[session_id] = self._token_usage.get(session_id, 0) + resp.usage.total_tokens
-                self._persist_token_usage(session_id)
-                # 记录真实 prompt_tokens 作为上下文占用锚点
-                self._last_prompt_tokens[session_id] = resp.usage.prompt_tokens
+                # 流式内部已实时累加 token 消耗；这里用最终响应中的
+                # prompt_tokens 兜底更新上下文占用锚点，并统一推送。
+                if resp.usage.prompt_tokens:
+                    self._last_prompt_tokens[session_id] = resp.usage.prompt_tokens
+                self._push_usage_update(session_id)
 
                 # 记录 agent 响应日志
                 if resp.tool_calls:
@@ -354,17 +354,7 @@ class AgentLoop:
                     history.append(tool_msg)
                     self._persist_message(session_id, tool_msg)
 
-                    if self._tool_event_callback:
-                        asyncio.create_task(
-                            self._tool_event_callback(
-                                session_id, "usage_update", "",
-                                json.dumps({
-                                    "token_usage": self._token_usage.get(session_id, 0),
-                                    "context_tokens": self._last_prompt_tokens.get(session_id, 0),
-                                }),
-                            ),  # type: ignore
-                            name=f"push-usage-update-{session_id}",
-                        )
+                    self._push_usage_update(session_id)
 
                     # 如果 evolve_code 执行成功，干净退出循环。
                     # 无需继续 — run.py 编排器会重启我们。
@@ -471,17 +461,31 @@ class AgentLoop:
                             name=f"stream-tool-{session_id}",
                         )
 
+                # usage 可能在 finish_reason chunk 中，也可能在
+                # include_usage 模式下的独立尾部 chunk 中到达
+                if chunk.usage:
+                    usage["prompt_tokens"] = chunk.usage.prompt_tokens
+                    usage["completion_tokens"] = chunk.usage.completion_tokens
+                    usage["total_tokens"] = chunk.usage.total_tokens
+                    # 实时累加并推送最新 usage，让前端立即看到上下文占用
+                    self._token_usage[session_id] = self._token_usage.get(session_id, 0) + chunk.usage.total_tokens
+                    self._persist_token_usage(session_id)
+                    self._last_prompt_tokens[session_id] = chunk.usage.prompt_tokens
+                    self._push_usage_update(session_id)
+
                 if chunk.finish_reason:
                     finish_reason = chunk.finish_reason
-                    if chunk.usage:
-                        usage["prompt_tokens"] = chunk.usage.prompt_tokens
-                        usage["completion_tokens"] = chunk.usage.completion_tokens
-                        usage["total_tokens"] = chunk.usage.total_tokens
         finally:
             await _close_async_iterator(stream)
 
         if cancel_event.is_set():
             finish_reason = "cancelled"
+
+        if not cancel_event.is_set() and usage["total_tokens"] == 0:
+            raise RuntimeError(
+                "LLM provider did not return token usage for streaming response. "
+                "Provider must support stream_options.include_usage."
+            )
 
         return LLMResponse(
             content=content,
@@ -704,6 +708,23 @@ class AgentLoop:
             return self._session_store.read_token_usage(session_id)
         except Exception:
             return 0
+
+    def _push_usage_update(self, session_id: str) -> None:
+        """统一推送当前 session 的 token 消耗与上下文占用到前端。
+
+        读取内存中的累计消耗和最近一次 prompt_tokens，通过 usage_update
+        事件异步发送。调用方无需关心回调是否注册或发送是否成功。
+        """
+        if self._tool_event_callback is None:
+            return
+        payload = json.dumps({
+            "token_usage": self._token_usage.get(session_id, 0),
+            "context_tokens": self._last_prompt_tokens.get(session_id, 0),
+        }, ensure_ascii=False)
+        asyncio.create_task(
+            self._tool_event_callback(session_id, "usage_update", "", payload),
+            name=f"push-usage-update-{session_id}",
+        )
 
     def _load_tool_resources(self, session_id: str) -> dict[str, Any]:
         if self._session_store is None:

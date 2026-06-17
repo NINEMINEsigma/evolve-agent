@@ -122,6 +122,9 @@ class LLMClient:
             "max_completion_tokens": self._max_tokens,
             "stream": stream,
         }
+        if stream:
+            # 强制要求 provider 在流末尾返回 usage，否则无法统计上下文占用。
+            kwargs["stream_options"] = {"include_usage": True}
         if tools:
             kwargs["tools"] = tools
         if self._reasoning_effort:
@@ -213,6 +216,18 @@ class LLMClient:
                     completed_tool_indices: set[int] = set()
 
                     async for chunk in stream:
+                        # include_usage 模式下，OpenAI 在最终发送一个
+                        # choices 为空但携带 usage 的独立 chunk，需要单独提取
+                        if not chunk.choices and chunk.usage:
+                            yield StreamChunk(
+                                usage=Usage(
+                                    prompt_tokens=chunk.usage.prompt_tokens,
+                                    completion_tokens=chunk.usage.completion_tokens,
+                                    total_tokens=chunk.usage.total_tokens,
+                                ),
+                            )
+                            continue
+
                         choice = chunk.choices[0] if chunk.choices else None
                         if choice is None:
                             continue
