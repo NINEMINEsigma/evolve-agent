@@ -4,6 +4,9 @@
   - ``GET /health`` — 存活检查
   - ``WS /ws/chat`` — 聊天 WebSocket（LLM 未配置时回退到 echo）
   - ``create_server(ctx)`` — uvicorn.Server 实例工厂
+
+支持流式消息转发：将 AgentLoop 产生的 ``stream_delta`` / ``stream_done``
+事件实时透传给前端 WebSocket 客户端。
 """
 
 from __future__ import annotations

@@ -1,5 +1,9 @@
 """OpenAI 兼容的 LLM 客户端。
 
+提供两个接口：
+  - ``chat()`` — 非流式请求，返回完整 :class:`LLMResponse`
+  - ``chat_stream()`` — 流式请求，逐块 yield :class:`StreamChunk`
+
 使用 ``openai`` SDK。配置来自 RuntimeContext
 （api_key、base_url、model、temperature、max_tokens），
 密钥通过环境变量兜底（``OPENAI_API_KEY``）。

@@ -1,4 +1,9 @@
-"""聊天 gateway 的消息协议类型和 session 管理。"""
+"""聊天 gateway 的消息协议类型和 session 管理。
+
+定义所有 WebSocket 消息类型，包括流式相关消息：
+  - ``STREAM_DELTA`` — LLM 响应增量（content / reasoning_content）
+  - ``STREAM_DONE`` — 流式结束标记（携带 finish_reason）
+"""
 
 from __future__ import annotations
 

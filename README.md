@@ -55,7 +55,7 @@ origin_agent/
 ├── component/             ← 具体实现
 │   ├── tools/             ← 核心工具（filesystem, code, shell, frontend, skills, read_image, run_python）
 │   ├── extools/           ← 扩展工具集
-│   ├── llm.py             ← LLM 客户端
+│   ├── llm.py             ← LLM 客户端（chat 非流式 + chat_stream 流式）
 │   └── mcp_tools.py       ← MCP 工具桥接
 ├── system/                ← 基础设施
 │   ├── sandbox.py         ← 路径沙盒（fork:/ws:/fix: 命名空间）
@@ -66,10 +66,10 @@ origin_agent/
 │   ├── code.py            ← 进化编排（验证 + 触发交换）
 │   └── validator.py       ← 语法 + 编译检查
 ├── entry/                 ← Agent 主循环
-│   └── agent.py           ← 消息处理、工具调用、上下文压缩
+│   └── agent.py           ← 消息处理、流式 LLM 调用、工具执行、上下文压缩
 ├── gateway/               ← WebSocket + HTTP 网关
 │   ├── server.py          ← FastAPI 服务器
-│   └── chat.py            ← 聊天协议
+│   └── chat.py            ← 聊天协议（含 stream_delta / stream_done 流式消息）
 ├── dashboard/             ← Web 管理面板
 ├── memory/                ← Memory Provider 实现
 ├── templates/             ← Prompt 模板（中/英文）

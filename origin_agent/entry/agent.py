@@ -1,13 +1,13 @@
-"""Agent 主循环 — 接收用户消息，调用 LLM + 工具，返回回复。
+"""Agent 主循环 — 接收用户消息，流式调用 LLM + 工具，边生成边推送回复。
 
 将抽象层的三个子系统串联起来：
   - ``abstract.tools.registry`` — 工具 schema 发现与分发
   - ``abstract.memory.manager`` — memory 预取 / 同步
-  - ``component.llm`` — LLM 客户端
+  - ``component.llm`` — LLM 客户端（chat_stream 流式 + chat 非流式）
 
-每个 session 的消息历史保存在内存中。工具在启动时通过
-``abstract.tools.discover.discover_builtin_tools`` 发现
-（Stage 4 将注册具体工具）。
+每个 session 的消息历史保存在内存中。LLM 响应通过 ``chat_stream``
+逐块接收，以 ``stream_delta`` / ``stream_done`` 消息实时推送到前端。
+工具在启动时通过 ``abstract.tools.discover.discover_builtin_tools`` 发现。
 """
 
 from __future__ import annotations
@@ -305,6 +305,21 @@ class AgentLoop:
                 self._persist_token_usage(session_id)
                 # 记录真实 prompt_tokens 作为上下文占用锚点
                 self._last_prompt_tokens[session_id] = resp.usage.prompt_tokens
+
+                # 记录 agent 响应日志
+                if resp.tool_calls:
+                    tool_names = ", ".join(tc.name for tc in resp.tool_calls)
+                    logger.info(
+                        "Agent response | session=%s tools=[%s] content=%s",
+                        session_id, tool_names,
+                        (resp.content[:200] + "...") if len(resp.content or "") > 200 else (resp.content or ""),
+                    )
+                else:
+                    logger.info(
+                        "Agent response | session=%s content=%s",
+                        session_id,
+                        (resp.content[:200] + "...") if len(resp.content or "") > 200 else (resp.content or ""),
+                    )
 
                 # 发送流结束标记（必须 await，确保在 agent_message 之前到达前端）
                 if self._tool_event_callback:
