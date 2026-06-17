@@ -70,7 +70,9 @@ const MessageItem = memo(function MessageItem({ message, archived, onImageClick,
   const [draft, setDraft] = useState(textContent);
   const lineCount = textContent.split("\n").length;
   const isLong = textContent.length > LONG_MESSAGE_CHARS || lineCount > LONG_MESSAGE_LINES;
-  const collapsed = !streaming && isLong && m.collapsed !== false;
+  const isTool = m.role === "tool";
+  const toolCollapsed = isTool && !streaming && m.collapsed !== false;
+  const collapsed = !isTool && !streaming && isLong && m.collapsed !== false;
   const canEdit = !archived && !streaming && typeof m.messageIndex === "number" && typeof m.content === "string";
 
   const mdComponents = useMemo(() => ({
@@ -248,16 +250,16 @@ const MessageItem = memo(function MessageItem({ message, archived, onImageClick,
         {m.role === "user" ? "U" : m.role === "agent" ? "⚡" : m.role === "error" ? "!" : m.role === "tool" ? "🔧" : "●"}
       </div>
       <div className="message-bubble">
-        {m.role === "tool" && !editing ? (
+        {isTool && !editing ? (
           <div className="tool-call-block">
             <button
               type="button"
-              className={`tool-call-summary ${collapsed ? "" : "tool-call-summary-open"}`}
+              className={`tool-call-summary ${toolCollapsed ? "" : "tool-call-summary-open"}`}
               onClick={() => onToggleCollapse(m.id)}
             >
               {textContent.length > 80 ? textContent.slice(0, 80) + '...' : textContent}
             </button>
-            {!collapsed && (
+            {!toolCollapsed && (
               <div className="tool-call-detail message-content-collapsed" onWheel={handoffWheelAtBoundary}>
                 <pre className="message-text message-text-tool">{textContent}</pre>
                 {renderAttachments()}
