@@ -71,6 +71,7 @@ export function useWebSocket() {
   const manualRef = useRef(false);
   const ignoreStaleRef = useRef(false);
   const lastMessageCountRef = useRef(0);
+  const streamDoneRef = useRef(false);
 
   const nextMessageIndex = useCallback((items: ChatMessage[]) => {
     const indexes = items
@@ -311,6 +312,12 @@ export function useWebSocket() {
       else if (msg.type === "agent_message") {
         setWaiting(false);
         ignoreStaleRef.current = false;
+        // stream_done 之后后端会发 agent_message 作为兜底，此时流式消息已固化，直接跳过
+        if (streamDoneRef.current) {
+          streamDoneRef.current = false;
+          fetchSessions();
+          return;
+        }
         // 如果存在同 stream_id 的流式消息，则刷新它；否则追加一条新消息
         if (msg.session_id && streamingMessageRef.current && streamingMessageRef.current.id === (msg as any).stream_id) {
           flushStreamingMessage();
@@ -341,6 +348,8 @@ export function useWebSocket() {
         setWaiting(false);
         ignoreStaleRef.current = false;
         flushStreamingMessage();
+        // 标记流式已完成，紧随的 agent_message 兜底消息应跳过
+        streamDoneRef.current = true;
       }
       else if (msg.type === "tool_call") {
         if (ignoreStaleRef.current) return;
@@ -533,6 +542,7 @@ export function useWebSocket() {
     setInput("");
     setPendingImages([]);
     setWaiting(true);
+    streamDoneRef.current = false;
   }, [pendingImages, sessions, sessionId, waiting, nextMessageIndex]);
 
   const extractContentBlocks = (el: HTMLDivElement | null, images: PendingImage[]): ContentBlock[] => {
@@ -886,10 +896,20 @@ export function useWebSocket() {
   const interrupt = useCallback(() => {
     ignoreStaleRef.current = true;
     setWaiting(false);
-    addMessage("system", "⏹ 已中断");
+    // 先将流式消息固化为普通消息，再添加中断提示，保证顺序正确
+    const streamed = streamingMessageRef.current;
+    setStreamingMessage(null);
+    setMessages((prev) => {
+      let next = prev;
+      if (streamed) {
+        const exists = prev.some((x) => x.id === streamed.id);
+        next = exists ? prev.map((x) => (x.id === streamed.id ? streamed : x)) : [...prev, streamed];
+      }
+      return [...next, { role: "system" as const, content: "⏹ 已中断", id: crypto.randomUUID() }];
+    });
     fetch(`/api/interrupt/${sessionId || "unknown"}`, { method: "POST" })
       .catch(() => {});
-  }, [sessionId, addMessage]);
+  }, [sessionId]);
 
   // ── drawer polling ──
   useEffect(() => {

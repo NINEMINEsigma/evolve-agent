@@ -25,7 +25,7 @@ from abstract.tools.registry import ToolEntry, registry as tool_registry
 from component.approval import ApprovalResult, ask_agent_reason, is_handsfree_mode, request_user_confirm
 from component.approval_allowlist import add_allowed as add_tool_allowlist_entry
 from component.approval_allowlist import is_allowed as is_tool_allowlisted
-from component.llm import LLMClient, LLMResponse, StreamChunk, ToolCall
+from component.llm import LLMClient, LLMResponse, StreamChunk, ToolCall, Usage
 from system.pathutils import find_repo_root
 from system.context import RuntimeContext
 from system.session_store import SessionStore
@@ -49,6 +49,14 @@ logger = logging.getLogger(__name__)
 
 # 每条消息的最大工具调用循环次数，防止无限循环。
 _MAX_TOOL_TURNS = 90
+
+
+async def _close_async_iterator(ait: Any) -> None:
+    """安全关闭异步迭代器，避免未读取完成的流留下资源泄漏。"""
+    try:
+        await ait.aclose()
+    except Exception:
+        pass
 
 
 # ---------------------------------------------------------------------------
@@ -276,6 +284,20 @@ class AgentLoop:
 
                 # 处理中断：流式已提前结束
                 if cancel_event.is_set():
+                    # 仍然发送 stream_done 以便前端刷新流式消息
+                    if self._tool_event_callback:
+                        await self._tool_event_callback(
+                            session_id, "stream_done", "",
+                            json.dumps({
+                                "stream_id": stream_id,
+                                "finish_reason": "cancelled",
+                            }),
+                        )
+                    # 已有内容则保存并返回，否则返回 "Cancelled."
+                    if resp.content:
+                        self._append(session_id, "assistant", resp.content,
+                                     reasoning_content=resp.reasoning_content)
+                        return resp.content
                     return "Cancelled."
 
                 # 从 LLM 响应中追踪实际 token 消耗
@@ -284,17 +306,14 @@ class AgentLoop:
                 # 记录真实 prompt_tokens 作为上下文占用锚点
                 self._last_prompt_tokens[session_id] = resp.usage.prompt_tokens
 
-                # 发送流结束标记
+                # 发送流结束标记（必须 await，确保在 agent_message 之前到达前端）
                 if self._tool_event_callback:
-                    asyncio.create_task(
-                        self._tool_event_callback(
-                            session_id, "stream_done", "",
-                            json.dumps({
-                                "stream_id": stream_id,
-                                "finish_reason": resp.finish_reason,
-                            }),
-                        ),
-                        name=f"stream-done-{session_id}",
+                    await self._tool_event_callback(
+                        session_id, "stream_done", "",
+                        json.dumps({
+                            "stream_id": stream_id,
+                            "finish_reason": resp.finish_reason,
+                        }),
                     )
 
                 if not resp.tool_calls:
@@ -452,7 +471,11 @@ class AgentLoop:
             tool_calls=tool_calls,
             finish_reason=finish_reason,
             reasoning_content=reasoning_content or None,
-            usage=LLMResponse.model_fields["usage"].default,
+            usage=Usage(
+                prompt_tokens=usage["prompt_tokens"],
+                completion_tokens=usage["completion_tokens"],
+                total_tokens=usage["total_tokens"],
+            ),
         )
 
     def _store_assistant_with_tools(self, session_id: str, resp: LLMResponse) -> None:
@@ -475,14 +498,6 @@ class AgentLoop:
             entry["reasoning_content"] = resp.reasoning_content
         self._get_history(session_id).append(entry)
         self._persist_message(session_id, entry)
-
-
-async def _close_async_iterator(ait: Any) -> None:
-    """安全关闭异步迭代器，避免未读取完成的流留下资源泄漏。"""
-    try:
-        await ait.aclose()
-    except Exception:
-        pass
 
 
 # -- 内部辅助方法 ----------------------------------------------------
