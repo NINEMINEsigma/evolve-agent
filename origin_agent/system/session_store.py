@@ -9,6 +9,8 @@ import json
 from pathlib import Path
 from typing import Any
 
+from entity.puretype import Role
+
 
 class SessionStore:
     """封装单个 sessions 根目录下的会话文件读写。"""
@@ -63,7 +65,7 @@ class SessionStore:
         if not lines:
             return
         last = json.loads(lines[-1])
-        if last.get("role") != "user":
+        if last.get("role") != Role.USER:
             return
         lines.pop()
         self._write_text_atomic(path, "\n".join(lines) + "\n" if lines else "")

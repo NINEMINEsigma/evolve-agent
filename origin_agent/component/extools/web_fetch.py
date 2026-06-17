@@ -12,14 +12,9 @@ from html.parser import HTMLParser
 from typing import Any, Dict
 
 from abstract.tools.registry import registry, tool_error, tool_result
+from entity.constant import DEFAULT_USER_AGENT
 
 logger = logging.getLogger(__name__)
-
-_USER_AGENT: str = (
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-    "AppleWebKit/537.36 (KHTML, like Gecko) "
-    "Chrome/120.0.0.0 Safari/537.36"
-)
 _FETCH_TIMEOUT: int = 15
 _MAX_CHARS: int = 50000
 
@@ -79,7 +74,7 @@ def _handle_web_fetch(args: dict[str, Any]) -> dict:
     req = urllib.request.Request(
         url,
         headers={
-            "User-Agent": _USER_AGENT,
+            "User-Agent": DEFAULT_USER_AGENT,
             "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
             "Accept-Language": "en-US,en;q=0.5",
         },

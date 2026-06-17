@@ -34,7 +34,9 @@ from enum import Enum
 from pathlib import Path
 from typing import TYPE_CHECKING, Dict, List
 
-from system.subprocess_utils import build_subprocess_env, completed_process_from_bytes
+from entity.constant import NAMESPACE_PREFIXES
+from system.context import get_runtime_context
+from system.subprocess_utils import build_subprocess_env, completed_process_from_bytes, windows_process_group_flags
 
 from pydantic import BaseModel, ConfigDict
 
@@ -231,7 +233,7 @@ class Sandbox:
         args: list[str],
         *,
         cwd_ns: str = "ws:",
-        timeout: int = 30,
+        timeout: int | None = None,
         extra_env: dict[str, str] | None = None,
         encoding: str = "utf-8",
         errors: str | None = None,
@@ -242,11 +244,16 @@ class Sandbox:
 
         *cwd_ns* — 子进程的逻辑工作目录。
 
+        *timeout* — 超时秒数；``None`` 时从 ``RuntimeContext.tool_timeout`` 获取。
+
         *encoding* — 子进程输出的文本编码（默认 ``"utf-8"``）。
         *errors* — 解码错误的处理方案（例如 ``"replace"``）。
 
         如果命令不允许或路径逃逸沙盒，抛出 ``SandboxError``。
         """
+        if timeout is None:
+            timeout = get_runtime_context().tool_timeout
+
         if not args:
             raise SandboxError("subprocess args must not be empty")
 
@@ -266,7 +273,7 @@ class Sandbox:
 
         # -- 验证任何看起来像逻辑路径的参数 --
         for arg in args:
-            if ":" in arg and any(arg.startswith(p) for p in ("ws:", "fork:", "fix:", "skills:")):
+            if ":" in arg and any(arg.startswith(p) for p in NAMESPACE_PREFIXES):
                 raise SandboxError(
                     f"Path arguments to subprocess commands must be resolved "
                     f"by the tool handler before calling sandbox.run(). "
@@ -291,7 +298,7 @@ class Sandbox:
         if sys.platform == "win32":
             # CREATE_NEW_PROCESS_GROUP 允许发送 CTRL_BREAK_EVENT，
             # 但我们将使用 taskkill 进行更可靠的进程树终止。
-            popen_kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP  # type: ignore[attr-defined]
+            popen_kwargs["creationflags"] = windows_process_group_flags()
         proc: subprocess.Popen = subprocess.Popen(args, **popen_kwargs)
         stdout: bytes
         stderr: bytes

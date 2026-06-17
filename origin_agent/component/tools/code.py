@@ -13,6 +13,7 @@ import subprocess  # nosec
 from typing import Any, Dict, List
 
 from abstract.tools.registry import registry, tool_error, tool_result
+from entity.constant import WRITE_FILE_MAX_CHARS
 from system.sandbox import Access, SandboxError, ResolvedPath
 
 logger = logging.getLogger(__name__)
@@ -42,7 +43,7 @@ def _handle_write_fork(args: dict[str, Any]) -> dict:
     仅在 'fast' 模式下允许。接受裸文件名或逻辑路径。
 
     支持三种模式：
-      - 完全覆盖：提供 file + content。内容最多 1000 个字符。
+      - 完全覆盖：提供 file + content。内容最多 {WRITE_FILE_MAX_CHARS} 个字符。
       - 增量编辑：提供 file + old_string + new_string。
         old_string 必须在现有文件中精确匹配一次。
       - 追加模式：提供 file + content + append=true。
@@ -114,9 +115,9 @@ def _handle_write_fork(args: dict[str, Any]) -> dict:
         return tool_error("content is required when old_string is not provided")
 
     # 完全覆盖模式下限制字符数
-    if not old_string and not append and len(content) > 1000:
+    if not old_string and not append and len(content) > WRITE_FILE_MAX_CHARS:
         return tool_error(
-            f"content exceeds 1000 characters (got {len(content)}) in overwrite mode",
+            f"content exceeds {WRITE_FILE_MAX_CHARS} characters (got {len(content)}) in overwrite mode",
         )
 
     try:
@@ -228,7 +229,7 @@ registry.register(
         # 然后调用 evolve_code 触发交换。
         # 接受裸文件名（如 'main.py'）。
         # 三种模式：
-        # - 完全覆盖：传递 file + content。内容最多 1000 个字符。
+        # - 完全覆盖：传递 file + content。内容最多 {WRITE_FILE_MAX_CHARS} 个字符。
         # - 增量编辑：传递 file + old_string + new_string。
         #   old_string 必须精确匹配一次 — 包含足够的上下文（前后各 2-3 行）使其唯一。
         # - 追加模式：传递 file + content + append=true。将内容追加到文件末尾。内容最多 10 行。
@@ -238,7 +239,8 @@ registry.register(
             "then call evolve_code to trigger the swap. "
             "Accepts bare filenames (e.g. 'main.py').\n\n"
             "Three modes:\n"
-            "- Full overwrite: pass file + content. Content max 1000 characters.\n"
+            "- Full overwrite: pass file + content. Content max "
+            f"{WRITE_FILE_MAX_CHARS} characters.\n"
             "- Incremental edit: pass file + old_string + new_string. "
             "old_string must match exactly once — include enough context "
             "(2-3 lines before and after) to make it unique.\n"
@@ -255,10 +257,10 @@ registry.register(
                 },
                 "content": {
                     "type": "string",
-                    # 新的源码内容。完全覆盖模式下最多 1000 个字符；追加模式下最多 10 行。
+                    # 新的源码内容。完全覆盖模式下最多 {WRITE_FILE_MAX_CHARS} 个字符；追加模式下最多 10 行。
                     "description": (
                         "New source code content. "
-                        "Max 1000 characters in full overwrite mode; "
+                        f"Max {WRITE_FILE_MAX_CHARS} characters in full overwrite mode; "
                         "max 10 lines in append mode."
                     ),
                 },

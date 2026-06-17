@@ -19,6 +19,18 @@ UTF8_ENV: dict[str, str] = {
 }
 
 
+def windows_process_group_flags() -> int:
+    """返回 Windows 下用于创建独立进程组的 creationflags。
+
+    ``CREATE_NEW_PROCESS_GROUP`` 使子进程成为新进程组的根，
+    便于后续用 ``taskkill /T`` 或 ``CTRL_BREAK_EVENT`` 终止整棵进程树。
+    非 Windows 平台返回 0（无操作）。
+    """
+    if sys.platform == "win32":
+        return subprocess.CREATE_NEW_PROCESS_GROUP  # type: ignore[attr-defined]
+    return 0
+
+
 def build_subprocess_env(
     extra_env: Mapping[str, str] | None = None,
     *,

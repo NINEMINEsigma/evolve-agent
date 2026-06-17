@@ -21,6 +21,7 @@ import openai
 from pydantic import BaseModel, ConfigDict
 
 from system.context import RuntimeContext
+from entity.constant import TOOL_RESULT_PREVIEW_CHARS
 
 logger = logging.getLogger(__name__)
 
@@ -99,9 +100,9 @@ class LLMClient:
 
         self._client: openai.AsyncOpenAI = openai.AsyncOpenAI(
             api_key=api_key,
-            base_url=ctx.llm_base_url or "https://api.openai.com/v1",
+            base_url=ctx.llm_base_url,
         )
-        self._model: str = ctx.llm_model or "gpt-4o"
+        self._model: str = ctx.llm_model
         self._temperature: float = ctx.llm_temperature
         self._max_tokens: int = ctx.llm_max_output_tokens
         self._reasoning_effort: str = ctx.llm_reasoning_effort or ""
@@ -332,4 +333,4 @@ def _safe_json_parse(raw: str) -> dict[str, Any]:
         "Failed to parse tool call arguments (%d chars): %s …",
         len(raw), raw[:300],
     )
-    return {"_parse_error": True, "_raw_preview": raw[:2000]}
+    return {"_parse_error": True, "_raw_preview": raw[:TOOL_RESULT_PREVIEW_CHARS]}

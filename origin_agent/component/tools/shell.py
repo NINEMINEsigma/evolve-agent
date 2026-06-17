@@ -11,6 +11,8 @@ import subprocess  # nosec
 from typing import Any, Dict, List
 
 from abstract.tools.registry import registry, tool_error, tool_result
+from entity.constant import NAMESPACE_PREFIXES
+from system.context import get_runtime_context
 from system.sandbox import SandboxError
 
 logger = logging.getLogger(__name__)
@@ -55,7 +57,7 @@ def _execute(cmd_parts: list[str], cwd: str) -> dict:
     # sandbox.run() 要求 tool handler 预先展开，不接收未解析的逻辑路径。
     resolved_parts: list[str] = []
     for part in cmd_parts:
-        if any(part.startswith(p) for p in ("ws:", "fork:", "fix:")):
+        if any(part.startswith(p) for p in NAMESPACE_PREFIXES):
             try:
                 r = _s().resolve_read(part)
                 resolved_parts.append(str(r.real))
@@ -67,11 +69,14 @@ def _execute(cmd_parts: list[str], cwd: str) -> dict:
     logger.info("run_command | cwd=%s cmd=%s", cwd, cmd_parts)
     result: subprocess.CompletedProcess
     try:
-        result = _s().run(resolved_parts, cwd_ns=cwd, timeout=30)
+        result = _s().run(resolved_parts, cwd_ns=cwd)
     except SandboxError as exc:
         return tool_error(str(exc))
     except subprocess.TimeoutExpired:
-        return tool_error("Command timed out after 30s", command=cmd_parts)
+        return tool_error(
+            f"Command timed out after {get_runtime_context().tool_timeout}s",
+            command=cmd_parts,
+        )
     except Exception as exc:
         return tool_error(str(exc), command=cmd_parts)
 

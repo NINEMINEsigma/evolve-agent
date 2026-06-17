@@ -29,6 +29,8 @@ from component.llm import LLMClient, LLMResponse, StreamChunk, ToolCall, Usage
 from system.pathutils import find_repo_root
 from system.context import RuntimeContext
 from system.session_store import SessionStore
+from entity.constant import LOG_PREVIEW_CHARS, TOOL_RESULT_PREVIEW_CHARS, AUTO_TITLE_CONTENT_MAX
+from entity.puretype import Role
 from entry.agent_support.messages import (
     build_agent_system_prompt,
     build_full_history_messages,
@@ -213,7 +215,7 @@ class AgentLoop:
             "Received user message | session=%s content=%s",
             session_id, summarize_message_for_log(user_message),
         )
-        self._append(session_id, "user", user_message)
+        self._append(session_id, Role.USER, user_message)
         # ---- 延迟初始化 memory provider ----
         if session_id not in self._memory_initialized:
             for provider in self._memory.providers:
@@ -295,7 +297,7 @@ class AgentLoop:
                         )
                     # 已有内容则保存并返回，否则返回 "Cancelled."
                     if resp.content:
-                        self._append(session_id, "assistant", resp.content,
+                        self._append(session_id, Role.ASSISTANT, resp.content,
                                      reasoning_content=resp.reasoning_content)
                         return resp.content
                     return "Cancelled."
@@ -312,13 +314,13 @@ class AgentLoop:
                     logger.info(
                         "Agent response | session=%s tools=[%s] content=%s",
                         session_id, tool_names,
-                        (resp.content[:200] + "...") if len(resp.content or "") > 200 else (resp.content or ""),
+                        (resp.content[:LOG_PREVIEW_CHARS] + "...") if len(resp.content or "") > LOG_PREVIEW_CHARS else (resp.content or ""),
                     )
                 else:
                     logger.info(
                         "Agent response | session=%s content=%s",
                         session_id,
-                        (resp.content[:200] + "...") if len(resp.content or "") > 200 else (resp.content or ""),
+                        (resp.content[:LOG_PREVIEW_CHARS] + "...") if len(resp.content or "") > LOG_PREVIEW_CHARS else (resp.content or ""),
                     )
 
                 # 发送流结束标记（必须 await，确保在 agent_message 之前到达前端）
@@ -334,7 +336,7 @@ class AgentLoop:
                 if not resp.tool_calls:
                     # 纯文本回复 — 存储并返回
                     assistant_text = resp.content or ""
-                    self._append(session_id, "assistant", assistant_text,
+                    self._append(session_id, Role.ASSISTANT, assistant_text,
                                  reasoning_content=resp.reasoning_content)
                     self._memory.sync_all(
                         user_message, assistant_text, session_id=session_id,
@@ -370,7 +372,7 @@ class AgentLoop:
                         try:
                             parsed: Any = json.loads(tool_msg["content"])
                             if parsed.get("evolved"):
-                                self._append(session_id, "assistant", "Evolution complete, restarting to apply new code...")
+                                self._append(session_id, Role.ASSISTANT, "Evolution complete, restarting to apply new code...")
                                 return "Evolution complete, restarting to apply new code..."
                         except (json.JSONDecodeError, KeyError, TypeError):
                             pass
@@ -495,7 +497,7 @@ class AgentLoop:
 
     def _store_assistant_with_tools(self, session_id: str, resp: LLMResponse) -> None:
         entry: dict[str, Any] = {
-            "role": "assistant",
+            "role": Role.ASSISTANT,
             "content": resp.content or "",
             "tool_calls": [
                 {
@@ -589,7 +591,7 @@ class AgentLoop:
     def _remove_last_user_message(self, session_id: str) -> None:
         """从历史中移除最后一条用户消息（用于 LLM 调用失败时清理上下文）。"""
         history: list[dict[str, Any]] = self._histories.get(session_id, [])
-        if history and history[-1].get("role") == "user":
+        if history and history[-1].get("role") == Role.USER:
             history.pop()
 
         if self._session_store is None:
@@ -625,7 +627,7 @@ class AgentLoop:
         new_sid: str | None = await self._terminate_session(old_sid, rotate=True)
         if not new_sid:
             if pending_user_message is not None:
-                self._append(old_sid, "user", pending_user_message)
+                self._append(old_sid, Role.USER, pending_user_message)
             return None
 
         cancel_event: asyncio.Event | None = self._cancel_events.pop(old_sid, None)
@@ -639,7 +641,7 @@ class AgentLoop:
         self._transfer_session_runtime_resources(old_sid, new_sid)
 
         if pending_user_message is not None:
-            self._append(new_sid, "user", pending_user_message)
+            self._append(new_sid, Role.USER, pending_user_message)
 
         logger.info(
             "Session context exceeded limit and continued in new session | old=%s new=%s",
@@ -786,7 +788,7 @@ class AgentLoop:
         # 收集最近的 50 轮 user/assistant 文本（跳过 system 和 tool 条目）
         # 一轮对话按 user + assistant 估算，最多取最近 100 条相关消息
         chat_msgs: list[dict] = [
-            msg for msg in history if msg.get("role") in ("user", "assistant")
+            msg for msg in history if msg.get("role") in (Role.USER, Role.ASSISTANT)
         ]
         chat_msgs = chat_msgs[-100:]
         lines: list[str] = []
@@ -795,10 +797,10 @@ class AgentLoop:
             content: str = str(msg.get("content", "") or "")
             if not content:
                 continue
-            if role == "user":
-                lines.append(f"User: {content[:5000]}")
-            elif role == "assistant":
-                lines.append(f"Assistant: {content[:5000]}")
+            if role == Role.USER:
+                lines.append(f"User: {content[:AUTO_TITLE_CONTENT_MAX]}")
+            elif role == Role.ASSISTANT:
+                lines.append(f"Assistant: {content[:AUTO_TITLE_CONTENT_MAX]}")
         if not lines:
             return ""
         context: str = "\n".join(lines)
@@ -816,7 +818,7 @@ class AgentLoop:
         prompt: str = prompt_tpl.replace(r"{{context}}", context)
         try:
             resp: LLMResponse = await self._llm.chat(
-                [{"role": "user", "content": prompt}],
+                [{"role": Role.USER, "content": prompt}],
                 tools=[],
             )
             title: str = resp.content.strip()[:50] if resp.content else ""
@@ -882,12 +884,12 @@ class AgentLoop:
         parts: list[str] = []
         for msg in history:
             role: str = msg.get("role", "")
-            if role not in ("user", "assistant"):
+            if role not in (Role.USER, Role.ASSISTANT):
                 continue
             text: str = self._extract_text(msg.get("content", "")).strip()
             if not text:
                 continue
-            parts.append(f"[{role}]: {text[:2000]}")
+            parts.append(f"[{role}]: {text[:TOOL_RESULT_PREVIEW_CHARS]}")
         return "\n".join(parts[-keep_messages:])
 
     def _build_inherited_context(self, session_id: str, summary: str = "") -> str:
@@ -961,7 +963,7 @@ class AgentLoop:
         prompt: str = "\n".join(prompt_lines)
         try:
             resp: LLMResponse = await self._llm.chat(
-                [{"role": "user", "content": prompt}],
+                [{"role": Role.USER, "content": prompt}],
                 tools=[],
             )
             raw: str = resp.content.strip()
@@ -1034,7 +1036,7 @@ class AgentLoop:
         new_sid: str = self._session_manager.create_with_context(
             merged_content,
             parents=source_session_ids,
-            role="user",
+            role=Role.USER,
         )
 
         self._histories[new_sid] = self._load_history_from_disk(new_sid)
@@ -1051,8 +1053,9 @@ class AgentLoop:
 
         prompt_tpl: str = read_template("compress.txt")
         if not prompt_tpl:
+            max_chars: int = self._ctx.merge_concat_threshold
             prompt_tpl = (
-                "Summarize the key content and decisions of the following conversation in no more than 50000 characters. Output only the summary.\n\n"
+                f"Summarize the key content and decisions of the following conversation in no more than {max_chars} characters. Output only the summary.\n\n"
                 "Conversation:\n{{old_text}}\n\nSummary: "
             )
 
@@ -1073,7 +1076,7 @@ class AgentLoop:
                 prompt, fallback, _ = self._compression_prompts()
                 summary_prompt: str = prompt.replace(r"{{old_text}}", old_text)
                 summary_resp: LLMResponse = await self._llm.chat(
-                    [{"role": "user", "content": summary_prompt}],
+                    [{"role": Role.USER, "content": summary_prompt}],
                     tools=[],
                 )
                 summary: str = summary_resp.content.strip() if summary_resp.content else ""
@@ -1134,7 +1137,7 @@ class AgentLoop:
         if rotate:
             # 6a. 创建继承会话并旋转
             context: str = self._build_inherited_context(old_sid, summary)
-            new_sid: str = sm.create_with_context(context, parent_sid=old_sid, role="user")
+            new_sid: str = sm.create_with_context(context, parent_sid=old_sid, role=Role.USER)
             sm.archive(old_sid, continuation_sid=new_sid)
 
             # 7. 将新会话的历史加载到内存
@@ -1223,7 +1226,7 @@ class AgentLoop:
         ]
         history: list[dict[str, Any]] = self._get_history(session_id)
         entry: dict[str, Any] = {
-            "role": "assistant",
+            "role": Role.ASSISTANT,
             "content": resp.content or "",
             "tool_calls": tool_calls_data,
         }
@@ -1242,7 +1245,7 @@ class AgentLoop:
             or (cancel_ev is not None and cancel_ev.is_set())
         ):
             return {
-                "role": "tool",
+                "role": Role.TOOL,
                 "tool_call_id": tc.id,
                 "content": "Cancelled.",
             }
@@ -1256,7 +1259,7 @@ class AgentLoop:
         if args.get("_parse_error"):
             logger.warning(
                 "Tool call '%s' skipped — arguments JSON parse failed. "
-                "Preview: %s", tc.name, args.get("_raw_preview", "")[:200],
+                "Preview: %s", tc.name, args.get("_raw_preview", "")[:LOG_PREVIEW_CHARS],
             )
             _result: dict = {
                 "error": (
@@ -1278,7 +1281,7 @@ class AgentLoop:
                     name=f"push-tool-result-{session_id}",
                 )
             return {
-                "role": "tool",
+                "role": Role.TOOL,
                 "tool_call_id": tc.id,
                 "content": json.dumps(_result, ensure_ascii=False),
             }
@@ -1434,10 +1437,10 @@ class AgentLoop:
             try:
                 _full.parent.mkdir(parents=True, exist_ok=True)
                 _full.write_text(result_str, encoding="utf-8")
-                _preview: str = result_str[:2000]
+                _preview: str = result_str[:TOOL_RESULT_PREVIEW_CHARS]
                 result_str = (
                     f"[Result too long ({len(result_str)} chars), full content written to ws:{_rel}]\n"
-                    f"[First 2000 chars preview]:\n{_preview}"
+                    f"[First {TOOL_RESULT_PREVIEW_CHARS} chars preview]:\n{_preview}"
                 )
             except Exception as _exc:
                 logger.warning("Failed to write tool result to file: %s", _exc)
@@ -1489,7 +1492,7 @@ class AgentLoop:
         content: Any = multimodal_content if multimodal_content is not None else result_str
 
         return {
-            "role": "tool",
+            "role": Role.TOOL,
             "tool_call_id": tc.id,
             "content": content,
         }
@@ -1513,19 +1516,19 @@ class AgentLoop:
         for index, entry in enumerate(history):
             role: str = entry.get("role", "")
             content: str = self._extract_text(entry.get("content", ""))
-            if role == "user":
-                messages.append({"role": "user", "content": content, "index": index})
-            elif role == "assistant":
+            if role == Role.USER:
+                messages.append({"role": Role.USER, "content": content, "index": index})
+            elif role == Role.ASSISTANT:
                 if not content and not entry.get("reasoning_content"):
                     continue
                 msg: dict = {"role": "agent", "content": content, "index": index}
                 if entry.get("reasoning_content"):
                     msg["reasoning_content"] = entry["reasoning_content"]
                 messages.append(msg)
-            elif role == "tool":
-                messages.append({"role": "tool", "content": content, "index": index})
-            elif role == "system":
-                messages.append({"role": "system", "content": content, "index": index})
+            elif role == Role.TOOL:
+                messages.append({"role": Role.TOOL, "content": content, "index": index})
+            elif role == Role.SYSTEM:
+                messages.append({"role": Role.SYSTEM, "content": content, "index": index})
         return messages
 
     def edit_session_message(self, session_id: str, index: int, content: str) -> dict:
@@ -1547,7 +1550,7 @@ class AgentLoop:
             "updated": True,
             "session_id": session_id,
             "index": index,
-            "role": "agent" if role == "assistant" else role,
+            "role": "agent" if role == Role.ASSISTANT else role,
             "content": self._extract_text(entry.get("content", "")),
         }
 

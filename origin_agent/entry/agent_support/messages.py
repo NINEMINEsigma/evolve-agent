@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any, Dict, List
 
 from system.prompt import build_system_prompt
+from entity.puretype import Role
 
 
 def load_message_hooks(repo_root: Path, logger: logging.Logger) -> list[dict]:
@@ -73,11 +74,11 @@ def build_turn_messages(
 ) -> list[dict[str, Any]]:
     """构建当前回合发送给 LLM 的消息列表。"""
     messages: list[dict[str, Any]] = [
-        {"role": "system", "content": system_prompt},
+        {"role": Role.SYSTEM, "content": system_prompt},
     ]
 
     for i, msg in enumerate(history):
-        if i == len(history) - 1 and msg.get("role") == "user":
+        if i == len(history) - 1 and msg.get("role") == Role.USER:
             hooked_msg = dict(msg)
             hooked_content = hooked_msg.get("content", "")
 
@@ -127,7 +128,7 @@ def build_full_history_messages(
 ) -> list[dict[str, Any]]:
     """构建包含 system prompt 和完整历史的消息列表。"""
     messages: list[dict[str, Any]] = [
-        {"role": "system", "content": system_prompt},
+        {"role": Role.SYSTEM, "content": system_prompt},
     ]
     messages.extend(history)
     return messages

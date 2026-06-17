@@ -15,6 +15,7 @@ from abstract.skills.manager import create_skill, delete_skill, update_skill, wr
 from abstract.skills.loader import list_skills, load_skill
 from abstract.tools.registry import registry, tool_error, tool_result
 
+from system.context import get_runtime_context
 from system.pathutils import find_repo_root
 
 logger = logging.getLogger(__name__)
@@ -254,12 +255,13 @@ def _handle_run_skill_script(args: dict[str, Any]) -> dict:
             return tool_error(f"Not a file: {skill_resolved.name}/scripts/{script}")
 
         cmd: list[str] = [str(script_path)] + [str(a) for a in script_args]
+        _timeout = get_runtime_context().tool_timeout
         proc = subprocess.run(
             cmd,
             cwd=str(skill_resolved),
             capture_output=True,
             text=True,
-            timeout=30,
+            timeout=_timeout,
         )
         return {
             "stdout": proc.stdout,
@@ -268,7 +270,7 @@ def _handle_run_skill_script(args: dict[str, Any]) -> dict:
             "success": proc.returncode == 0,
         }
     except subprocess.TimeoutExpired:
-        return tool_error("Script execution timed out (30s)")
+        return tool_error(f"Script execution timed out ({_timeout}s)")
     except Exception as exc:
         return tool_error(str(exc))
 

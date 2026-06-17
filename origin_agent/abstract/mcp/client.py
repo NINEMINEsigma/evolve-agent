@@ -96,6 +96,7 @@ from typing import Any, Callable, Dict, List, Optional
 from urllib.parse import urlparse
 
 from system.convert import as_bool
+from entity.puretype import Role
 
 logger = logging.getLogger(__name__)
 
@@ -777,7 +778,7 @@ class SamplingHandler:
             # Emit tool result messages (role: tool)
             for tr in tool_results:
                 messages.append({
-                    "role": "tool",
+                    "role": Role.TOOL,
                     "tool_call_id": tr.toolUseId,
                     "content": self._extract_tool_result_text(tr),
                 })
@@ -976,7 +977,7 @@ class SamplingHandler:
         # Convert messages
         messages = self._convert_messages(params)
         if hasattr(params, "systemPrompt") and params.systemPrompt:
-            messages.insert(0, {"role": "system", "content": params.systemPrompt})
+            messages.insert(0, {"role": Role.SYSTEM, "content": params.systemPrompt})
 
         # Build LLM call kwargs
         max_tokens = min(params.maxTokens, self.max_tokens_cap)

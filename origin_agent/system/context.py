@@ -7,6 +7,8 @@ from typing import Optional
 
 from pydantic import BaseModel, ConfigDict
 
+from entity.constant import APPROVAL_MODEL_N_CTX_DEFAULT, MERGE_CONCAT_THRESHOLD
+
 
 class RuntimeContext(BaseModel):
     """不可变的运行时配置。
@@ -79,7 +81,7 @@ class RuntimeContext(BaseModel):
     approval_model_path: str = ""
     """脱手模式审批小模型的 GGUF 路径。空字符串表示未配置。"""
 
-    approval_model_n_ctx: int = 4096
+    approval_model_n_ctx: int = APPROVAL_MODEL_N_CTX_DEFAULT
     """审批小模型的上下文窗口 token 数。"""
 
     approval_model_cuda: bool = False
@@ -95,7 +97,7 @@ class RuntimeContext(BaseModel):
 
     # -- 会话合并配置 ------------------------------------------------
 
-    merge_concat_threshold: int = 50000
+    merge_concat_threshold: int = MERGE_CONCAT_THRESHOLD
     """会话合并时直接拼接摘要的字符阈值，超过则截断。"""
 
 

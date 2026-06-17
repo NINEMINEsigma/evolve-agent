@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Any, Dict, List
 
 from fastapi import FastAPI, HTTPException
-from system.pathutils import get_template_path
+from system.pathutils import get_agent_dir, get_template_path
 
 logger = logging.getLogger(__name__)
 
@@ -151,7 +151,7 @@ def register_dashboard_routes(app: FastAPI) -> None:
     @app.get("/api/status")
     async def api_status():
         """返回 agent 运行时状态。"""
-        ws_exists: bool = (_WORKSPACE / "fast_agent_space" / "__main__.py").exists()
+        ws_exists: bool = (get_agent_dir() / "__main__.py").exists()
         return {
             "status": "running" if ws_exists else "unknown",
             "workspace": str(_WORKSPACE),

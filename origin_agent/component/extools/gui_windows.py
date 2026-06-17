@@ -15,6 +15,7 @@ from typing import Any, Dict
 from PIL import Image
 
 from abstract.tools.registry import registry, tool_error, tool_result
+from entity.constant import LOG_PREVIEW_CHARS
 
 logger = logging.getLogger(__name__)
 
@@ -88,7 +89,7 @@ def _handle_gui_screenshot(args: dict[str, Any]) -> dict:
         size=size_bytes,
         width=img.width,
         height=img.height,
-        base64_preview=b64[:200] + "..." if len(b64) > 200 else b64,
+        base64_preview=b64[:LOG_PREVIEW_CHARS] + "..." if len(b64) > LOG_PREVIEW_CHARS else b64,
         message=f"Screenshot saved: {ws_path} ({img.width}x{img.height}, {size_bytes/1024:.1f} KB)",
     )
 

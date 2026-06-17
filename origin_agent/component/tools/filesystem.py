@@ -20,6 +20,7 @@ from datetime import datetime, timezone
 from typing import Any, Dict
 
 from abstract.tools.registry import registry, tool_error, tool_result
+from entity.constant import FILE_SNIFF_BYTES, WRITE_FILE_MAX_CHARS
 from system.sandbox import Access, Sandbox, SandboxError
 
 logger = logging.getLogger(__name__)
@@ -67,9 +68,9 @@ def _handle_write(args: dict[str, Any]) -> dict:
     content: str = str(args.get("content", ""))
     if not path:
         return tool_error("path is required", path=path)
-    if len(content) > 1000:
+    if len(content) > WRITE_FILE_MAX_CHARS:
         return tool_error(
-            f"content exceeds 1000 characters (got {len(content)})",
+            f"content exceeds {WRITE_FILE_MAX_CHARS} characters (got {len(content)})",
             path=path,
         )
     try:
@@ -194,7 +195,7 @@ registry.register(
             "Use 'ws:' for workspace data, 'fork:' for evolution code, "
             "'skills:' for skill files. "
             "Directories are created automatically. "
-            "Max 1000 characters per call. "
+            f"Max {WRITE_FILE_MAX_CHARS} characters per call. "
             "If rejected for exceeding the limit, do NOT use run_python to write files; "
             "use edit_file for incremental changes instead."
         ),
@@ -208,8 +209,8 @@ registry.register(
                 },
                 "content": {
                     "type": "string",
-                    # 要写入文件的内容。最多 1000 个字符。
-                    "description": "Content to write to the file. Max 1000 characters.",
+                    # 要写入文件的内容。最多 WRITE_FILE_MAX_CHARS 个字符。
+                    "description": f"Content to write to the file. Max {WRITE_FILE_MAX_CHARS} characters.",
                 },
             },
             "required": ["path", "content"],
@@ -617,7 +618,7 @@ def _is_text_file(path: Any) -> bool:
     if path.suffix.lower() in _TEXT_EXTENSIONS:
         return True
     try:
-        sample: bytes = path.read_bytes()[:4096]
+        sample: bytes = path.read_bytes()[:FILE_SNIFF_BYTES]
         return b"\x00" not in sample
     except Exception:
         return False

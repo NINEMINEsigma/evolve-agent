@@ -21,7 +21,7 @@ import subprocess
 from typing import Any, Dict
 
 from abstract.tools.registry import registry, tool_error, tool_result
-from entity.constant import SUBPROCESS_TIMEOUT_DEFAULT
+from entity.constant import LOG_PREVIEW_CHARS, SUBPROCESS_TIMEOUT_DEFAULT
 
 logger = logging.getLogger(__name__)
 
@@ -101,7 +101,7 @@ async def _handle_ssh_exec(args: dict[str, Any]) -> dict:
         return tool_error(
             f"SSH command timed out after {timeout}s",
             target=target,
-            command=command[:200],
+            command=command[:LOG_PREVIEW_CHARS],
         )
     except FileNotFoundError:
         return tool_error(

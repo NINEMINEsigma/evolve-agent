@@ -23,6 +23,7 @@ from pathlib import Path
 from typing import Any, Dict, List
 
 from abstract.tools.registry import registry, tool_error, tool_result
+from entity.constant import NAMESPACE_PREFIXES
 
 logger = logging.getLogger(__name__)
 
@@ -33,6 +34,7 @@ _background_tasks: dict[str, dict[str, Any]] = {}
 
 # ── sandbox 引用 ──────────────────────────────────────────────
 from system.sandbox import _kill_proc_tree
+from system.subprocess_utils import windows_process_group_flags
 
 
 def _resolve_logical_path(logical: str) -> str | None:
@@ -94,7 +96,7 @@ async def _handle_start_background_service(args: dict[str, Any]) -> dict:
     from component.tools.filesystem import _s as _get_sandbox
     resolved_parts: list[str] = []
     for part in cmd_parts:
-        if any(part.startswith(p) for p in ("ws:", "fork:", "fix:")):
+        if any(part.startswith(p) for p in NAMESPACE_PREFIXES):
             try:
                 r = _get_sandbox().resolve_read(part)
                 resolved_parts.append(str(r.real))
@@ -113,7 +115,7 @@ async def _handle_start_background_service(args: dict[str, Any]) -> dict:
             "text": False,
         }
         if sys.platform == "win32":
-            popen_kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
+            popen_kwargs["creationflags"] = windows_process_group_flags()
 
         proc: subprocess.Popen = subprocess.Popen(resolved_parts, **popen_kwargs)
         popen_kwargs["stdout"].close()

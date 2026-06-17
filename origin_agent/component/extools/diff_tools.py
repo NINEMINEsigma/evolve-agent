@@ -51,17 +51,9 @@ _ORIGIN_ROOT: Path = _FAST_ROOT.parent.parent / "origin_agent"
 
 def _resolve_fork_root() -> Path | None:
     """通过 sandbox 获取 fork（slow）目录的绝对路径。"""
-    try:
-        from component.tools.filesystem import _s as _get_sandbox
-        r = _get_sandbox().resolve("fork:", Access.READ)
-        return r.real
-    except Exception as exc:
-        logger.debug("Could not resolve fork: sandbox — %s", exc)
-        # fallback：默认 slow_agent_space/
-        fallback = _FAST_ROOT.parent.parent / "slow_agent_space"
-        if fallback.is_dir():
-            return fallback
-        return None
+    from component.tools.filesystem import _s as _get_sandbox
+    r = _get_sandbox().resolve("fork:", Access.READ)
+    return r.real
 
 
 # ---------------------------------------------------------------------------

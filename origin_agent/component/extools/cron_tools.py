@@ -39,7 +39,7 @@ from typing import Any, Dict, List, Optional, Set
 from abstract.tools.registry import registry, tool_error, tool_result
 from entity.constant import CRON_STDOUT_PREVIEW_MAX_LENGTH, CRON_TASK_TIMEOUT
 from system.pathutils import find_repo_root
-from system.subprocess_utils import build_subprocess_env, completed_process_from_bytes
+from system.subprocess_utils import build_subprocess_env, completed_process_from_bytes, windows_process_group_flags
 
 logger = logging.getLogger(__name__)
 
@@ -488,7 +488,7 @@ def _run_task(task: _CronTask) -> None:
                 "env": build_subprocess_env(),
             }
             if sys.platform == "win32":
-                popen_kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
+                popen_kwargs["creationflags"] = windows_process_group_flags()
 
             result = subprocess.run(task.command, timeout=CRON_TASK_TIMEOUT, **popen_kwargs)
             decoded = completed_process_from_bytes(

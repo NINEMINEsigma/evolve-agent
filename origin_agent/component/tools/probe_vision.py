@@ -15,6 +15,7 @@ from typing import Any, Dict
 from abstract.tools.registry import registry, tool_error, tool_result
 from component.llm import LLMClient
 from system.context import get_runtime_context
+from entity.puretype import Role
 
 logger = logging.getLogger(__name__)
 
@@ -106,7 +107,7 @@ async def _handle_probe_vision(args: dict[str, Any]) -> dict:
     client = LLMClient(ctx)
     probe_messages: list[dict] = [
         {
-            "role": "user",
+            "role": Role.USER,
             "content": [
                 {
                     "type": "image_url",

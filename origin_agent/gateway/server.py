@@ -29,6 +29,7 @@ from .chat import Message, MessageType, SessionManager
 from component.approval import ApprovalResult
 from datetime import datetime, timezone
 from entity.constant import CRON_STDOUT_PREVIEW_MAX_LENGTH, SUBPROCESS_TIMEOUT_DEFAULT, UPLOAD_FILENAME_TIME_FORMAT
+from system.context import get_runtime_context
 
 if TYPE_CHECKING:
     from entry.agent import AgentLoop
@@ -683,7 +684,11 @@ async def file_picker():
     if not paths:
         return {"uploaded": False, "files": []}
 
-    upload_dir: Path = (_agentspace_path / "uploads") if _agentspace_path else Path("workspace/agentspace/uploads")
+    if not _agentspace_path:
+        logger.error("agentspace path not set, cannot accept file picker uploads")
+        return {"uploaded": False, "error": "agentspace_not_configured"}
+
+    upload_dir: Path = _agentspace_path / "uploads"
     upload_dir.mkdir(parents=True, exist_ok=True)
 
     results: list[dict] = []
@@ -805,7 +810,17 @@ async def _handle_file_upload(ws: WebSocket, sid: str, msg: Message) -> None:
 
     timestamp: str = datetime.now(timezone.utc).strftime(UPLOAD_FILENAME_TIME_FORMAT)
     unique_name: str = f"{timestamp}_{uuid.uuid4().hex[:8]}_{safe_name}"
-    upload_dir: Path = _agentspace_path / "uploads" if _agentspace_path else Path("workspace/agentspace/uploads")
+    if not _agentspace_path:
+        logger.error("agentspace path not set, cannot accept file uploads")
+        await ws.send_text(
+            Message(
+                type=MessageType.SYSTEM,
+                session_id=sid,
+                content=json.dumps({"uploaded": False, "error": "agentspace_not_configured"}),
+            ).to_json()
+        )
+        return
+    upload_dir: Path = _agentspace_path / "uploads"
     upload_dir.mkdir(parents=True, exist_ok=True)
     dest: Path = upload_dir / unique_name
 
@@ -1160,15 +1175,18 @@ async def ws_chat(ws: WebSocket) -> None:
 # ---------------------------------------------------------------------------
 
 
-def create_server(host: str = "127.0.0.1", port: int = 8765) -> uvicorn.Server:
+def create_server(host: str | None = None, port: int | None = None) -> uvicorn.Server:
     """创建 uvicorn Server 实例。
 
-    *host* 和 *port* 应来自 RuntimeContext，
+    *host* 和 *port* 优先使用传入值，否则从 RuntimeContext 获取。
     后者通过编排器（run.py）传递的 CLI 参数接收。
 
     不会启动 server — 调用方应 ``await server.serve()``
     作为 asyncio task 运行。
     """
+    ctx = get_runtime_context()
+    host = host or ctx.gateway_host
+    port = port or ctx.gateway_port
     config: uvicorn.Config = uvicorn.Config(
         app=app,
         host=host,

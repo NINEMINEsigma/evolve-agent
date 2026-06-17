@@ -22,14 +22,9 @@ import urllib.request
 from typing import Any, Dict, List, Tuple
 
 from abstract.tools.registry import registry, tool_error, tool_result
+from entity.constant import DEFAULT_USER_AGENT
 
 logger = logging.getLogger(__name__)
-
-_USER_AGENT: str = (
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-    "AppleWebKit/537.36 (KHTML, like Gecko) "
-    "Chrome/120.0.0.0 Safari/537.36"
-)
 _DDG_TIMEOUT: int = 8   # DDG often blocked in China — fail fast
 _BING_TIMEOUT: int = 15  # Bing is responsive in China
 _MAX_RESULTS_HARD: int = 20
@@ -160,7 +155,7 @@ def _search_ddg(query: str, max_results: int) -> Tuple[list[dict[str, str]] | No
 
     req = urllib.request.Request(
         search_url,
-        headers={"User-Agent": _USER_AGENT},
+        headers={"User-Agent": DEFAULT_USER_AGENT},
         method="GET",
     )
 

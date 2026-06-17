@@ -25,6 +25,7 @@ from typing import Any, Awaitable, Callable, Dict, Optional, TYPE_CHECKING, cast
 
 from component.llm import LLMClient
 from entity.constant import APPROVAL_MODEL_LOAD_TIMEOUT, APPROVAL_WAIT_TIMEOUT
+from entity.puretype import Role
 
 logger = logging.getLogger(__name__)
 
@@ -103,7 +104,7 @@ def _get_approver() -> InferenceEngine|None:
         _root = find_repo_root()
         ctx = get_runtime_context()
         model_path = ctx.approval_model_path
-        n_ctx = ctx.approval_model_n_ctx or 4096
+        n_ctx = ctx.approval_model_n_ctx
 
         if not model_path:
             logger.warning("approval_model_path not configured — handsfree mode will deny all")
@@ -419,7 +420,7 @@ async def ask_agent_reason(
         )
     try:
         resp = await llm.chat(
-            [{"role": "user", "content": ask_prompt}],
+            [{"role": Role.USER, "content": ask_prompt}],
             tools=[],
         )
         return resp.content or "(Agent did not provide an explanation)"

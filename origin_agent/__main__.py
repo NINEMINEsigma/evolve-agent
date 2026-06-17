@@ -27,6 +27,7 @@ if _AGENT_DIR not in sys.path:
 from main import App  # noqa: E402
 from system.context import RuntimeContext  # noqa: E402
 from system.convert import as_bool
+from entity.constant import APPROVAL_MODEL_N_CTX_DEFAULT
 
 
 # ---------------------------------------------------------------------------
@@ -117,7 +118,7 @@ def _build_context(cli: dict) -> RuntimeContext:
         llm_reasoning_effort    = str(cli["llm_reasoning_effort"]),
         # 脱手模式审批模型配置
         approval_model_path     = str(cli.get("approval_model_path", "")),
-        approval_model_n_ctx    = int(cli.get("approval_model_n_ctx", 4096)),
+        approval_model_n_ctx    = int(cli.get("approval_model_n_ctx", APPROVAL_MODEL_N_CTX_DEFAULT)),
         approval_model_cuda     = as_bool(cli.get("approval_model_cuda", False)),
         approval_model_port     = int(cli.get("approval_model_port", 8081)),
         mcp_config_path         = cli["mcp_config_path"],
