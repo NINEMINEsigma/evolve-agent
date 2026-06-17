@@ -20,7 +20,7 @@ from datetime import datetime, timezone
 from typing import Any, Dict
 
 from abstract.tools.registry import registry, tool_error, tool_result
-from entity.constant import FILE_SNIFF_BYTES, WRITE_FILE_MAX_CHARS
+from entity.constant import EDIT_FILE_MAX_CHARS, FILE_SNIFF_BYTES, WRITE_FILE_MAX_CHARS
 from system.sandbox import Access, Sandbox, SandboxError
 
 logger = logging.getLogger(__name__)
@@ -70,7 +70,9 @@ def _handle_write(args: dict[str, Any]) -> dict:
         return tool_error("path is required", path=path)
     if len(content) > WRITE_FILE_MAX_CHARS:
         return tool_error(
-            f"content exceeds {WRITE_FILE_MAX_CHARS} characters (got {len(content)})",
+            f"content exceeds {WRITE_FILE_MAX_CHARS} characters (got {len(content)}). "
+            "Use edit_file for incremental changes — split the write into multiple "
+            "edit_file calls instead of sending the entire file at once.",
             path=path,
         )
     try:
@@ -269,6 +271,20 @@ def _handle_edit(args: dict[str, Any]) -> dict:
         return tool_error("path is required")
     if not old_string:
         return tool_error("old_string is required")
+    if len(old_string) > EDIT_FILE_MAX_CHARS:
+        return tool_error(
+            f"old_string exceeds {EDIT_FILE_MAX_CHARS} characters (got {len(old_string)}). "
+            "Use a smaller, unique snippet with surrounding context instead.",
+            path=path,
+        )
+    if len(new_string) > EDIT_FILE_MAX_CHARS:
+        return tool_error(
+            f"new_string exceeds {EDIT_FILE_MAX_CHARS} characters (got {len(new_string)}). "
+            "Split the change into multiple sequential edit_file calls.",
+            path=path,
+        )
+    if old_string == new_string:
+        return tool_error("old_string and new_string are identical — nothing to change", path=path)
 
     try:
         content: str = _s().read(path, limit=0)
@@ -301,11 +317,14 @@ registry.register(
     schema={
         # 通过替换文件中一处精确匹配的 old_string 为 new_string 来进行精准编辑。
         # old_string 必须仅匹配一次 — 包含足够的上下文（前后各 2-3 行）使其唯一。
+        # old_string 和 new_string 各自不能超过 EDIT_FILE_MAX_CHARS 字符，且不能相同。
         # 仅需修改几行时使用此工具替代 write_file — 避免重新发送整个文件内容。
         "description": (
             "Precisely edit a file by replacing one exact match of old_string with new_string. "
             "old_string must match exactly once — include enough surrounding context "
             "(2-3 lines before and after) to make it unique. "
+            f"Both old_string and new_string are limited to {EDIT_FILE_MAX_CHARS} characters each "
+            "and must not be identical. "
             "Use this instead of write_file when only a few lines need changing "
             "— avoids resending the entire file content. "
             "For larger changes, make multiple sequential edit_file calls."
