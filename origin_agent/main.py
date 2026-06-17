@@ -259,6 +259,16 @@ You can modify your own source code and complete evolution through the following
         logger.info("Gateway listening on ws://%s:%d/ws/chat", host, port)
         logger.info("WebPage on http://%s:%d", host, port)
 
+        # ---- 自动打开浏览器 ----
+        import webbrowser
+        _browser_host: str = "127.0.0.1" if host in ("0.0.0.0", "::") else host
+        _url: str = f"http://{_browser_host}:{port}"
+        try:
+            webbrowser.open(_url)
+            logger.info("Browser opened: %s", _url)
+        except Exception as exc:
+            logger.warning("Failed to open browser: %s", exc)
+
     async def _stop_gateway(self) -> None:
         """优雅停止 gateway server。"""
         if self._gateway_server is None or self._gateway_task is None:
