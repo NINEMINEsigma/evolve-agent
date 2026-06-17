@@ -8,12 +8,12 @@ argparse_parser = argparse.ArgumentParser()
 group = argparse_parser.add_mutually_exclusive_group()
 group.add_argument("--load", type=str, default="")
 group.add_argument("--save", type=str, default="")
-argparse_parser.add_argument("--console_log", type=bool, default=True)
-argparse_parser.add_argument("--fast_agent_space_path", type=str, default="fast_agent_space")
-argparse_parser.add_argument("--slow_agent_space_path", type=str, default="slow_agent_space")
-argparse_parser.add_argument("--fouce_init", action="store_true")
-argparse_parser.add_argument("--gateway_host", type=str, default="127.0.0.1")
-argparse_parser.add_argument("--gateway_port", type=int, default=8765)
+argparse_parser.add_argument("--console_log", type=bool, default=argparse.SUPPRESS)
+argparse_parser.add_argument("--fast_agent_space_path", type=str, default=argparse.SUPPRESS)
+argparse_parser.add_argument("--slow_agent_space_path", type=str, default=argparse.SUPPRESS)
+argparse_parser.add_argument("--fouce_init", action="store_true", default=argparse.SUPPRESS)
+argparse_parser.add_argument("--gateway_host", type=str, default=argparse.SUPPRESS)
+argparse_parser.add_argument("--gateway_port", type=int, default=argparse.SUPPRESS)
 
 #----------
 # llm
@@ -26,16 +26,16 @@ default_llm_max_output_tokens = 384000
 default_llm_temperature = 0.95
 default_llm_reasoning_effort = "medium"
 
-argparse_parser.add_argument("--llm_base_url", type=str, default=default_llm_base_url)
-argparse_parser.add_argument("--llm_model", type=str, default=default_llm_model)
-argparse_parser.add_argument("--llm_api_key", type=str, default=default_llm_api_key)
-argparse_parser.add_argument("--llm_max_context_tokens", type=int, default=default_llm_max_context_tokens)
-argparse_parser.add_argument("--llm_max_output_tokens", type=int, default=default_llm_max_output_tokens)
-argparse_parser.add_argument("--llm_temperature", type=float, default=default_llm_temperature)
+argparse_parser.add_argument("--llm_base_url", type=str, default=argparse.SUPPRESS)
+argparse_parser.add_argument("--llm_model", type=str, default=argparse.SUPPRESS)
+argparse_parser.add_argument("--llm_api_key", type=str, default=argparse.SUPPRESS)
+argparse_parser.add_argument("--llm_max_context_tokens", type=int, default=argparse.SUPPRESS)
+argparse_parser.add_argument("--llm_max_output_tokens", type=int, default=argparse.SUPPRESS)
+argparse_parser.add_argument("--llm_temperature", type=float, default=argparse.SUPPRESS)
 # 可选值：e.g. "low" / "medium" / "high"，空字符串表示不启用
-argparse_parser.add_argument("--llm_reasoning_effort", type=str, default=default_llm_reasoning_effort)
+argparse_parser.add_argument("--llm_reasoning_effort", type=str, default=argparse.SUPPRESS)
 # 会话合并时直接拼接摘要的字符阈值，超过则截断
-argparse_parser.add_argument("--merge_concat_threshold", type=int, default=50000)
+argparse_parser.add_argument("--merge_concat_threshold", type=int, default=argparse.SUPPRESS)
 
 # 冒险模式审批小模型 — 仅需文件名，agent 会自动从 custom_models/ 目录下加载
 check_default_approval_model_path = ""
@@ -45,18 +45,18 @@ for file in File("custom_models/").childs():
     if file.suffix == "gguf" or file.suffix == ".gguf":
         check_default_approval_model_path = str(file.name)
         break
-argparse_parser.add_argument("--approval_model_path", type=str, default=check_default_approval_model_path)
-argparse_parser.add_argument("--approval_model_n_ctx", type=int, default=65536)
-argparse_parser.add_argument("--approval_model_cuda", action="store_true")
-argparse_parser.add_argument("--approval_model_port", type=int, default=8081)
+argparse_parser.add_argument("--approval_model_path", type=str, default=argparse.SUPPRESS)
+argparse_parser.add_argument("--approval_model_n_ctx", type=int, default=argparse.SUPPRESS)
+argparse_parser.add_argument("--approval_model_cuda", action="store_true", default=argparse.SUPPRESS)
+argparse_parser.add_argument("--approval_model_port", type=int, default=argparse.SUPPRESS)
 
 #----------
 # workspace
 #----------
-argparse_parser.add_argument("--workspace_path", type=str, default="workspace")
-argparse_parser.add_argument("--logs_path_name", type=str, default="logs")
-argparse_parser.add_argument("--agentspace_path_name", type=str, default="agentspace")
-argparse_parser.add_argument("--mcp_config_path_name", type=str, default="mcp_config.json")
+argparse_parser.add_argument("--workspace_path", type=str, default=argparse.SUPPRESS)
+argparse_parser.add_argument("--logs_path_name", type=str, default=argparse.SUPPRESS)
+argparse_parser.add_argument("--agentspace_path_name", type=str, default=argparse.SUPPRESS)
+argparse_parser.add_argument("--mcp_config_path_name", type=str, default=argparse.SUPPRESS)
 
 args = argparse_parser.parse_args()
 
@@ -86,18 +86,28 @@ class Config(BaseModel):
     logs_path_name: str = "logs"
     mcp_config_path_name: str = "mcp_config.json"
 
-current_config: Config = Config.model_validate(vars(args))
+base_config: Config|None = None
+# 仅保留用户显式传递的参数（排除 load / save）
+cli_overrides = {k: v for k, v in vars(args).items() if k not in ("load", "save")}
+current_config = Config.model_validate(cli_overrides)
 
 if args.load:
-    current_config = load(args.load or "default", "config.json")
+    base_config = load(args.load or "default", "config.json")
+    current_config = base_config.model_copy()
+    for k, v in cli_overrides.items():
+        setattr(current_config, k, v)
 elif args.save:
     save(args.save, "config.json", current_config)
 else:
     config_field_key = input("config key：") or "default"
     if contains(config_field_key, "config.json"):
-        current_config = load(config_field_key, "config.json")
+        base_config = load(config_field_key, "config.json")
+        current_config = base_config.model_copy()
+        for k, v in cli_overrides.items():
+            setattr(current_config, k, v)
     else:
-        current_config = Config()
+        current_config = Config.model_validate(cli_overrides)
+        save(config_field_key, "config.json", current_config)
 
 print(current_config)
 
