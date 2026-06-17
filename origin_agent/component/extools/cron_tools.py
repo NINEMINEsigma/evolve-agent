@@ -37,7 +37,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Set
 
 from abstract.tools.registry import registry, tool_error, tool_result
-from entity.constant import CRON_STDOUT_PREVIEW_MAX_LENGTH
+from entity.constant import CRON_STDOUT_PREVIEW_MAX_LENGTH, CRON_TASK_TIMEOUT
 from system.pathutils import find_repo_root
 from system.subprocess_utils import build_subprocess_env, completed_process_from_bytes
 
@@ -490,7 +490,7 @@ def _run_task(task: _CronTask) -> None:
             if sys.platform == "win32":
                 popen_kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
 
-            result = subprocess.run(task.command, timeout=300, **popen_kwargs)
+            result = subprocess.run(task.command, timeout=CRON_TASK_TIMEOUT, **popen_kwargs)
             decoded = completed_process_from_bytes(
                 args=task.command,
                 returncode=result.returncode,
@@ -509,7 +509,7 @@ def _run_task(task: _CronTask) -> None:
                 "Cron task timed out | task=%s session=%s",
                 task.task_id, task.session_id,
             )
-            stdout_text = "[TIMEOUT after 300s]"
+            stdout_text = f"[TIMEOUT after {CRON_TASK_TIMEOUT}s]"
         except Exception as exc:
             logger.exception(
                 "Cron task failed | task=%s session=%s",

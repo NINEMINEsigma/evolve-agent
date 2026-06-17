@@ -51,6 +51,9 @@ from urllib.parse import parse_qs, urlparse
 
 logger = logging.getLogger(__name__)
 
+# OAuth 回调等待超时（秒）— 等待用户在浏览器中完成授权的时间
+_OAUTH_CALLBACK_TIMEOUT: float = 300.0
+
 # ---------------------------------------------------------------------------
 # Lazy imports -- MCP SDK with OAuth support is optional
 # ---------------------------------------------------------------------------
@@ -470,7 +473,7 @@ async def _wait_for_callback() -> tuple[str, str | None]:
     server_thread = threading.Thread(target=server.handle_request, daemon=True)
     server_thread.start()
 
-    timeout = 300.0
+    timeout = _OAUTH_CALLBACK_TIMEOUT
     poll_interval = 0.5
     elapsed = 0.0
     try:
@@ -646,5 +649,5 @@ def build_oauth_auth(
         storage=storage,
         redirect_handler=_redirect_handler,
         callback_handler=_wait_for_callback,
-        timeout=float(cfg.get("timeout", 300)),
+        timeout=float(cfg.get("timeout", _OAUTH_CALLBACK_TIMEOUT)),
     )

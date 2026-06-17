@@ -21,6 +21,7 @@ import subprocess
 from typing import Any, Dict
 
 from abstract.tools.registry import registry, tool_error, tool_result
+from entity.constant import SUBPROCESS_TIMEOUT_DEFAULT
 
 logger = logging.getLogger(__name__)
 
@@ -159,11 +160,11 @@ async def _handle_ssh_upload(args: dict[str, Any]) -> dict:
             text=True,
             encoding="utf-8",
             errors="replace",
-            timeout=120,
+            timeout=SUBPROCESS_TIMEOUT_DEFAULT,
         )
     except subprocess.TimeoutExpired:
         return tool_error(
-            "SCP upload timed out after 120s",
+            "SCP upload timed out after {}s".format(SUBPROCESS_TIMEOUT_DEFAULT),
             target=target,
             local_path=local_path,
             remote_path=remote_path,
@@ -227,11 +228,11 @@ async def _handle_ssh_download(args: dict[str, Any]) -> dict:
             text=True,
             encoding="utf-8",
             errors="replace",
-            timeout=120,
+            timeout=SUBPROCESS_TIMEOUT_DEFAULT,
         )
     except subprocess.TimeoutExpired:
         return tool_error(
-            "SCP download timed out after 120s",
+            "SCP download timed out after {}s".format(SUBPROCESS_TIMEOUT_DEFAULT),
             target=target,
             remote_path=remote_path,
             local_path=local_path,

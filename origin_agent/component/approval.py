@@ -24,6 +24,7 @@ from pydantic import BaseModel
 from typing import Any, Awaitable, Callable, Dict, Optional, TYPE_CHECKING, cast
 
 from component.llm import LLMClient
+from entity.constant import APPROVAL_MODEL_LOAD_TIMEOUT, APPROVAL_WAIT_TIMEOUT
 
 logger = logging.getLogger(__name__)
 
@@ -178,14 +179,14 @@ async def _handsfree_confirm(
         if not engine.ensure_alive():
             logger.warning("Approval engine restart failed | tool=%s", tool_name)
             return ApprovalResult(action="deny", deny_reason="Approval model crashed and restart failed", denied_by="system")
-        for _ in range(120):
+        for _ in range(APPROVAL_MODEL_LOAD_TIMEOUT):
             await asyncio.sleep(1.0)
             if engine.is_model_loaded():
                 logger.info("Approval model loaded | tool=%s", tool_name)
                 break
         else:
-            logger.warning("Approval model load timeout (120s) | tool=%s", tool_name)
-            return ApprovalResult(action="deny", deny_reason="Approval model load timeout (120s)", denied_by="system")
+            logger.warning("Approval model load timeout (%ds) | tool=%s", APPROVAL_MODEL_LOAD_TIMEOUT, tool_name)
+            return ApprovalResult(action="deny", deny_reason=f"Approval model load timeout ({APPROVAL_MODEL_LOAD_TIMEOUT}s)", denied_by="system")
 
     from system.pathutils import find_repo_root, get_templates_dir
 
@@ -361,14 +362,14 @@ async def request_user_confirm(
             return ApprovalResult(action="deny", deny_reason="WebSocket push confirm request failed", denied_by="system")
 
     try:
-        result: ApprovalResult = await asyncio.wait_for(fut, timeout=120.0)
+        result: ApprovalResult = await asyncio.wait_for(fut, timeout=APPROVAL_WAIT_TIMEOUT)
         return result
     except asyncio.CancelledError:
         _pending_confirms.pop(request_id, None)
         return ApprovalResult(action="deny", deny_reason="Approval request cancelled", denied_by="system")
     except asyncio.TimeoutError:
         _pending_confirms.pop(request_id, None)
-        return ApprovalResult(action="deny", deny_reason="Approval wait timed out (120s)", denied_by="system")
+        return ApprovalResult(action="deny", deny_reason=f"Approval wait timed out ({APPROVAL_WAIT_TIMEOUT}s)", denied_by="system")
     except Exception:
         _pending_confirms.pop(request_id, None)
         return ApprovalResult(action="deny", deny_reason="Approval handling error", denied_by="system")

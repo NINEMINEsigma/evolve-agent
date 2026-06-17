@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Dict
 
 from abstract.tools.registry import registry, tool_error, tool_result
+from entity.constant import PLAYWRIGHT_PAGE_TIMEOUT_MS
 from system.pathutils import get_templates_dir
 from component.tools.filesystem import _s as _get_sandbox
 
@@ -83,11 +84,11 @@ def render(
         try:
             page.wait_for_function(
                 "typeof mermaid !== 'undefined'",
-                timeout=120_000,
+                timeout=PLAYWRIGHT_PAGE_TIMEOUT_MS,
             )
         except Exception as exc:
             browser.close()
-            raise RuntimeError(f"Mermaid library load timed out (120s): {exc}")
+            raise RuntimeError(f"Mermaid library load timed out ({PLAYWRIGHT_PAGE_TIMEOUT_MS // 1000}s): {exc}")
 
         # Call the render function
         escaped_def = json.dumps(mermaid_definition)

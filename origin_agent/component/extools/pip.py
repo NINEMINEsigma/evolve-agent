@@ -16,6 +16,7 @@ import sys
 from typing import Any, Dict, List
 
 from abstract.tools.registry import registry, tool_error, tool_result
+from entity.constant import SUBPROCESS_TIMEOUT_DEFAULT
 
 logger = logging.getLogger(__name__)
 
@@ -43,9 +44,9 @@ async def _handle_install_package(args: dict[str, Any]) -> dict:
     logger.info("install_package | %s", " ".join(cmd))
 
     try:
-        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=SUBPROCESS_TIMEOUT_DEFAULT)
     except subprocess.TimeoutExpired:
-        return tool_error(f"pip install timed out (120s): {packages}")
+        return tool_error(f"pip install timed out ({SUBPROCESS_TIMEOUT_DEFAULT}s): {packages}")
     except Exception as exc:
         return tool_error(f"pip install failed: {exc}")
 

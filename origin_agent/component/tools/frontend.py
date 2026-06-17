@@ -14,6 +14,7 @@ import sys
 from typing import Any, Dict
 
 from abstract.tools.registry import registry, tool_error, tool_result
+from entity.constant import SUBPROCESS_TIMEOUT_DEFAULT
 from system.sandbox import Access, SandboxError
 
 logger = logging.getLogger(__name__)
@@ -76,7 +77,7 @@ def _handle_validate_frontend(args: dict[str, Any]) -> dict:
             text=True,
             encoding="utf-8",
             errors="replace",
-            timeout=120,
+            timeout=SUBPROCESS_TIMEOUT_DEFAULT,
             env=pnpm_env,
         )
         if install_proc.returncode != 0:
@@ -93,7 +94,7 @@ def _handle_validate_frontend(args: dict[str, Any]) -> dict:
             )
     except subprocess.TimeoutExpired:
         return tool_result(
-            valid=False, stage="install", error="Timeout after 120s",
+            valid=False, stage="install", error=f"Timeout after {SUBPROCESS_TIMEOUT_DEFAULT}s",
         )
     except Exception as exc:
         return tool_result(
@@ -110,7 +111,7 @@ def _handle_validate_frontend(args: dict[str, Any]) -> dict:
             text=True,
             encoding="utf-8",
             errors="replace",
-            timeout=120,
+            timeout=SUBPROCESS_TIMEOUT_DEFAULT,
             env=pnpm_env,
         )
         if build_proc.returncode != 0:
@@ -127,7 +128,7 @@ def _handle_validate_frontend(args: dict[str, Any]) -> dict:
             )
     except subprocess.TimeoutExpired:
         return tool_result(
-            valid=False, stage="build", error="Timeout after 120s",
+            valid=False, stage="build", error=f"Timeout after {SUBPROCESS_TIMEOUT_DEFAULT}s",
         )
     except Exception as exc:
         return tool_result(

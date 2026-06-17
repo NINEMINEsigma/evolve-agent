@@ -28,7 +28,7 @@ from fastapi.staticfiles import StaticFiles
 from .chat import Message, MessageType, SessionManager
 from component.approval import ApprovalResult
 from datetime import datetime, timezone
-from entity.constant import CRON_STDOUT_PREVIEW_MAX_LENGTH, UPLOAD_FILENAME_TIME_FORMAT
+from entity.constant import CRON_STDOUT_PREVIEW_MAX_LENGTH, SUBPROCESS_TIMEOUT_DEFAULT, UPLOAD_FILENAME_TIME_FORMAT
 
 if TYPE_CHECKING:
     from entry.agent import AgentLoop
@@ -666,7 +666,7 @@ async def file_picker():
                 [sys.executable, "-c", script],
                 capture_output=True,
                 text=True,
-                timeout=120,
+                timeout=SUBPROCESS_TIMEOUT_DEFAULT,
             ),
         )
         if result.returncode != 0:

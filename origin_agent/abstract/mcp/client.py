@@ -318,6 +318,7 @@ if _MCP_AVAILABLE and not _MCP_MESSAGE_HANDLER_SUPPORTED:
 
 _DEFAULT_TOOL_TIMEOUT = 120      # seconds for tool calls
 _DEFAULT_CONNECT_TIMEOUT = 60    # seconds for initial connection per server
+_SSE_READ_TIMEOUT = 300.0        # seconds — matches LB/NAT idle timeout (commonly 300-600s)
 _MAX_RECONNECT_RETRIES = 5
 _MAX_INITIAL_CONNECT_RETRIES = 3 # retries for the very first connection attempt
 _MAX_BACKOFF_SECONDS = 60
@@ -1461,7 +1462,7 @@ class MCPServerTask:
                 "url": url,
                 "headers": headers or None,
                 "timeout": float(connect_timeout),
-                "sse_read_timeout": 300.0,
+                "sse_read_timeout": _SSE_READ_TIMEOUT,
             }
             if _oauth_auth is not None:
                 # Pass OAuth auth through to sse_client so SSE MCP servers
@@ -1503,7 +1504,7 @@ class MCPServerTask:
 
             client_kwargs: dict = {
                 "follow_redirects": True,
-                "timeout": httpx.Timeout(float(connect_timeout), read=300.0),
+                "timeout": httpx.Timeout(float(connect_timeout), read=_SSE_READ_TIMEOUT),
                 "verify": ssl_verify,
                 "event_hooks": {"response": [_strip_auth_on_cross_origin_redirect]},
             }

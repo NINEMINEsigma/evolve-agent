@@ -40,6 +40,8 @@ import threading
 from dataclasses import dataclass, field
 from typing import Any, Optional
 
+from .oauth import _OAUTH_CALLBACK_TIMEOUT
+
 logger = logging.getLogger(__name__)
 
 
@@ -442,7 +444,7 @@ class MCPOAuthManager:
             storage=storage,
             redirect_handler=_redirect_handler,
             callback_handler=_wait_for_callback,
-            timeout=float(cfg.get("timeout", 300)),
+            timeout=float(cfg.get("timeout", _OAUTH_CALLBACK_TIMEOUT)),
         )
 
     def remove(self, server_name: str) -> None:

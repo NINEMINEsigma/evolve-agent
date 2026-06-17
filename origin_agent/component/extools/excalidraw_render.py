@@ -9,6 +9,8 @@ import json
 import sys
 from pathlib import Path
 
+from entity.constant import PLAYWRIGHT_PAGE_TIMEOUT_MS
+
 
 def validate_excalidraw(data: dict) -> list[str]:
     """Validate Excalidraw JSON structure. Returns list of errors (empty = valid)."""
@@ -117,11 +119,11 @@ def render(
         try:
             page.wait_for_function(
                 "window.__moduleReady === true",
-                timeout=120_000,
+                timeout=PLAYWRIGHT_PAGE_TIMEOUT_MS,
             )
         except Exception as exc:
             browser.close()
-            raise RuntimeError(f"Excalidraw module load timed out (120s): {exc}")
+            raise RuntimeError(f"Excalidraw module load timed out ({PLAYWRIGHT_PAGE_TIMEOUT_MS // 1000}s): {exc}")
 
         # Evaluate the render function
         result = page.evaluate(f"window.renderDiagram({json.dumps(data)})")
@@ -135,12 +137,12 @@ def render(
         try:
             page.wait_for_function(
                 "window.__renderComplete === true",
-                timeout=120_000,
+                timeout=PLAYWRIGHT_PAGE_TIMEOUT_MS,
             )
         except Exception as exc:
             # Capture partial state for debugging
             has_svg = page.query_selector("#root svg") is not None
-            err_info = f"Render wait timed out (120s), SVG generated={has_svg}"
+            err_info = f"Render wait timed out ({PLAYWRIGHT_PAGE_TIMEOUT_MS // 1000}s), SVG generated={has_svg}"
             if not has_svg:
                 # Check for any JS errors
                 logs = page.evaluate("() => window.__renderError || null")

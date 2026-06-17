@@ -14,6 +14,7 @@ from typing import Any, Dict, List
 
 from abstract.tools.registry import registry, tool_error, tool_result
 from component.tools.filesystem import _s as _get_sandbox
+from entity.constant import FFMPEG_DEFAULT_TIMEOUT
 from system.sandbox import SandboxError
 
 logger = logging.getLogger(__name__)
@@ -69,7 +70,7 @@ def _resolve_output(path: str) -> str:
 
 def _run_ffmpeg(
     args: list[str],
-    timeout: int = 300,
+    timeout: int = FFMPEG_DEFAULT_TIMEOUT,
 ) -> subprocess.CompletedProcess:
     """执行 ffmpeg 命令并返回结果。"""
     logger.info("ffmpeg %s", " ".join(args))
