@@ -942,28 +942,25 @@ class AgentLoop:
         info = self._session_manager.get(session_id)
         return list(info.get("tags", [])) if info else []
 
-    async def _auto_classify_session_tags(self, session_id: str) -> list[str]:
-        """终结时自动归类标签。仅当会话无标签时执行。
+    async def _get_or_create_session_summary(self, session_id: str) -> str:
+        """获取会话摘要，优先读取已持久化摘要，否则生成新摘要。"""
+        summary: str = ""
+        if self._session_store is not None:
+            summary = self._session_store.read_summary(session_id)
+        if not summary:
+            summary = await self._summarize_session_history(session_id)
+        return summary
+
+    async def _generate_tags_from_summary(self, summary: str) -> list[str]:
+        """基于会话摘要调用 LLM 生成并校验标签。
 
         LLM 从已有全局标签中选择，若无合适可创建新标签。
         返回校验后的标签列表。
         """
         if self._session_manager is None:
             return []
-        info = self._session_manager.get(session_id)
-        if not info:
-            return []
-        existing_tags: list[str] = list(info.get("tags", []))
-        if existing_tags:
-            return []
 
-        summary: str = ""
-        if self._session_store is not None:
-            summary = self._session_store.read_summary(session_id)
-        if not summary:
-            summary = await self._summarize_session_history(session_id)
         summary = summary.strip() or "(Session context archived)"
-
         all_tags: list[str] = self._session_manager.get_all_tags()
         prompt_lines: list[str] = [
             "You are a session classification assistant.",
@@ -996,12 +993,59 @@ class AgentLoop:
             data: Any = json.loads(raw)
             if isinstance(data, dict) and isinstance(data.get("tags"), list):
                 candidates: list[str] = [str(t).strip() for t in data["tags"]]
-                if self._session_manager is not None:
-                    valid = [t for t in candidates if self._session_manager.validate_tag(t)]
-                    return valid
+                return [t for t in candidates if self._session_manager.validate_tag(t)]
         except Exception:
-            logger.warning("Failed to auto-classify tags for session %s", session_id, exc_info=True)
+            logger.warning("Failed to generate tags from summary", exc_info=True)
         return []
+
+    async def _auto_classify_session_tags(self, session_id: str) -> list[str]:
+        """终结时自动归类标签。仅当会话无标签时执行。
+
+        保留旧行为的内部包装：先检查现有标签，再获取/生成摘要并生成标签。
+        """
+        if self._session_manager is None:
+            return []
+        info = self._session_manager.get(session_id)
+        if not info:
+            return []
+        existing_tags: list[str] = list(info.get("tags", []))
+        if existing_tags:
+            return []
+
+        summary: str = await self._get_or_create_session_summary(session_id)
+        return await self._generate_tags_from_summary(summary)
+
+    async def generate_session_tags(self, session_id: str, force: bool = False) -> list[str]:
+        """为指定会话生成标签候选。
+
+        force=False 时遵循"无标签才生成"语义，已有标签直接返回；
+        force=True  时无视现有标签，基于会话摘要重新生成。
+        返回校验后的标签列表，不写入 session manager。
+        """
+        if self._session_manager is None:
+            return []
+        info = self._session_manager.get(session_id)
+        if not info:
+            return []
+
+        existing_tags: list[str] = list(info.get("tags", []))
+        if existing_tags and not force:
+            return existing_tags
+
+        summary: str = await self._get_or_create_session_summary(session_id)
+        return await self._generate_tags_from_summary(summary)
+
+    async def regenerate_session_tags(self, session_id: str) -> list[str]:
+        """手动触发标签完全重新生成并持久化。
+
+        基于会话摘要重新生成标签，覆盖会话已有标签，并同步全局标签。
+        返回最终生效的标签列表。
+        """
+        tags: list[str] = await self.generate_session_tags(session_id, force=True)
+        if tags and self._session_manager is not None:
+            self._session_manager.set_session_tags(session_id, tags)
+            logger.info("Regenerated tags for session %s: %s", session_id, tags)
+        return tags
 
     async def terminate_session(self, session_id: str) -> dict:
         """手动终结会话：归档 + 压缩（生成摘要），不旋转。"""
@@ -1149,7 +1193,7 @@ class AgentLoop:
             pass
 
         # 5. 归档旧会话
-        tags: list[str] = await self._auto_classify_session_tags(old_sid)
+        tags: list[str] = await self.generate_session_tags(old_sid, force=False)
         if tags and self._session_manager is not None:
             self._session_manager.set_session_tags(old_sid, tags)
             logger.info("Auto-classified tags for session %s: %s", old_sid, tags)

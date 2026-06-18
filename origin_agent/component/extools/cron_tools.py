@@ -996,8 +996,12 @@ registry.register(
         # 数字 schedule 表示延迟 N 秒后执行一次；cron 表达式表示下一个匹配时间执行一次。
         # 循环、轮询或长期观察必须等 [cron-result] 返回后再安排下一次，不要预排未来链式任务。
         # 原始 stdout/stderr 会写入日志并注入回 Agent；用户不会自动看到原始输出。
+        # 本工具是非阻塞的：Agent 调用后立即继续执行，任务在后台运行，完成后通过 [cron-result] 通知。
         "description": (
             "Schedule a one-shot background task. It runs exactly once.\n"
+            "This is NON-BLOCKING: the Agent continues immediately after scheduling, "
+            "and the task runs in the background. A [cron-result] message is delivered when it completes. "
+            "It is NOT sleep.\n\n"
             "Two one-shot schedule formats are supported:\n"
             "  1. Delay: a number in seconds, e.g. '300' means run once after 300 seconds; minimum 10s.\n"
             "  2. Cron expression: 5 fields 'minute hour day month weekday', "
@@ -1172,8 +1176,12 @@ registry.register(
     toolset="cron",
     schema={
         # 创建一个只等待、不执行任何脚本的精简定时提醒任务。
+        # 本工具是非阻塞的：Agent 调用后立即继续执行，等待在后台进行，完成后通过 [cron-result] 通知。
         "description": (
             "Schedule a lightweight wait reminder that does not execute any script.\n"
+            "This is NON-BLOCKING: the Agent continues immediately after scheduling, "
+            "and the wait happens in the background. A [cron-result] message is delivered when the duration expires. "
+            "It is NOT sleep.\n\n"
             "After the specified duration expires, a [cron-result] message with the fixed reminder text is sent to the Agent.\n\n"
             "Returns:\n"
             "  - success: whether the wait task was created\n"

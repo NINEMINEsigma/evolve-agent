@@ -246,8 +246,8 @@ async def _handsfree_confirm(
                     )
                     agent_answer = await ask_agent_callback(ask_question)
                     logger.info(
-                        "Handsfree got agent answer (turn %d/%d) | tool=%s answer_len=%d",
-                        dialog_turn + 1, max_dialog_turns, tool_name, len(agent_answer),
+                        "Handsfree got agent answer (turn %d/%d) | tool=%s answer: %s",
+                        dialog_turn + 1, max_dialog_turns, tool_name, agent_answer,
                     )
 
                     # 将Agent的回答追加到 user_prompt，下一轮循环重新审批

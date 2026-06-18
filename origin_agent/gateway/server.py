@@ -544,6 +544,15 @@ async def auto_title_session(session_id: str):
     return {"title": title, "session_id": session_id}
 
 
+@app.post("/api/sessions/{session_id}/auto-tags")
+async def auto_tags_session(session_id: str):
+    """请求根据 session 摘要重新生成标签并持久化。"""
+    tags: list[str] = []
+    if _agent_loop is not None and hasattr(_agent_loop, "regenerate_session_tags"):
+        tags = await _agent_loop.regenerate_session_tags(session_id)  # type: ignore[union-attr]
+    return {"tags": tags, "session_id": session_id}
+
+
 @app.post("/api/sessions/{session_id}/terminate")
 async def terminate_session_endpoint(session_id: str):
     """手动终结指定会话：归档 + 压缩（生成摘要），不旋转。"""

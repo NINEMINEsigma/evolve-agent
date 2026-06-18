@@ -25,7 +25,6 @@ export default function App() {
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; sid: string } | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const [tagEditorSession, setTagEditorSession] = useState<SessionInfo | null>(null);
-  const [allTags, setAllTags] = useState<string[]>([]);
 
   // ── close context menu on outside click ──
   useEffect(() => {
@@ -53,18 +52,11 @@ export default function App() {
     setContextMenu({ x: e.clientX, y: e.clientY, sid });
   };
 
-  const fetchAllTags = () => {
-    fetch("/api/tags")
-      .then((r) => r.json())
-      .then((data) => setAllTags(data.tags || []))
-      .catch(() => {});
-  };
+  const currentSessionArchived = ws.sessions.find((s) => s.id === ws.sessionId)?.status === "archived";
 
   useEffect(() => {
-    fetchAllTags();
+    ws.fetchAllTags();
   }, []);
-
-  const currentSessionArchived = ws.sessions.find((s) => s.id === ws.sessionId)?.status === "archived";
 
   return (
     <ErrorBoundary>
@@ -99,8 +91,25 @@ export default function App() {
           className="context-menu"
           style={{ left: contextMenu.x, top: contextMenu.y }}
         >
-          <div className="context-menu-item" onClick={() => { setContextMenu(null); ws.autoTitleSession(contextMenu.sid); }}>
-            自动命名
+          <div
+            className={`context-menu-item ${ws.generatingTitleSessions.has(contextMenu.sid) ? "context-menu-item-disabled" : ""}`}
+            onClick={() => {
+              if (ws.generatingTitleSessions.has(contextMenu.sid)) return;
+              setContextMenu(null);
+              ws.autoTitleSession(contextMenu.sid);
+            }}
+          >
+            {ws.generatingTitleSessions.has(contextMenu.sid) ? "⏳ 命名中..." : "自动命名"}
+          </div>
+          <div
+            className={`context-menu-item ${ws.generatingTagSessions.has(contextMenu.sid) ? "context-menu-item-disabled" : ""}`}
+            onClick={() => {
+              if (ws.generatingTagSessions.has(contextMenu.sid)) return;
+              setContextMenu(null);
+              ws.autoTagSession(contextMenu.sid);
+            }}
+          >
+            {ws.generatingTagSessions.has(contextMenu.sid) ? "⏳ 生成标签中..." : "自动标签"}
           </div>
           <div className="context-menu-item" onClick={() => { setContextMenu(null); ws.togglePinSession(contextMenu.sid); }}>
             {(() => {
@@ -242,15 +251,15 @@ export default function App() {
       {tagEditorSession && (
         <TagEditor
           session={tagEditorSession}
-          allTags={allTags}
+          allTags={ws.allTags}
           onClose={() => setTagEditorSession(null)}
           onSave={async (sid, tags) => {
             await ws.updateSessionTags(sid, tags);
-            fetchAllTags();
+            ws.fetchAllTags();
           }}
         />
       )}
-    </div>
+      </div>
     </ErrorBoundary>
   );
 }

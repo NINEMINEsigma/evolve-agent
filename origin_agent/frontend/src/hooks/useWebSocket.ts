@@ -57,8 +57,11 @@ export function useWebSocket() {
   }>>([]);
   const [cronTasks, setCronTasks] = useState<CronTask[]>([]);
   const [terminatingSessions, setTerminatingSessions] = useState<Set<string>>(new Set());
+  const [generatingTitleSessions, setGeneratingTitleSessions] = useState<Set<string>>(new Set());
+  const [generatingTagSessions, setGeneratingTagSessions] = useState<Set<string>>(new Set());
   const [pendingImages, setPendingImages] = useState<PendingImage[]>([]);
   const [streamingMessage, setStreamingMessage] = useState<ChatMessage | null>(null);
+  const [allTags, setAllTags] = useState<string[]>([]);
 
   const wsRef = useRef<WebSocket | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -158,6 +161,13 @@ export function useWebSocket() {
     fetch("/api/sessions")
       .then((r) => r.json())
       .then((data) => setSessions(data.sessions || []))
+      .catch(() => {});
+  }, []);
+
+  const fetchAllTags = useCallback(() => {
+    fetch("/api/tags")
+      .then((r) => r.json())
+      .then((data) => setAllTags(data.tags || []))
       .catch(() => {});
   }, []);
 
@@ -768,6 +778,7 @@ export function useWebSocket() {
   }, [sessions, sessionId, switchSession, newChat]);
 
   const autoTitleSession = useCallback((sid: string) => {
+    setGeneratingTitleSessions((prev) => new Set(prev).add(sid));
     fetch(`/api/sessions/${sid}/auto-title`, { method: "POST" })
       .then((r) => r.json())
       .then((data) => {
@@ -776,8 +787,36 @@ export function useWebSocket() {
           fetchSessions();
         }
       })
-      .catch(() => {});
+      .catch(() => {})
+      .finally(() => {
+        setGeneratingTitleSessions((prev) => {
+          const next = new Set(prev);
+          next.delete(sid);
+          return next;
+        });
+      });
   }, [fetchSessions]);
+
+  const autoTagSession = useCallback((sid: string) => {
+    setGeneratingTagSessions((prev) => new Set(prev).add(sid));
+    fetch(`/api/sessions/${sid}/auto-tags`, { method: "POST" })
+      .then((r) => r.json())
+      .then((data) => {
+        if (data.tags && Array.isArray(data.tags)) {
+          setSessions((prev) => prev.map((s) => (s.id === sid ? { ...s, tags: data.tags } : s)));
+          fetchSessions();
+          fetchAllTags();
+        }
+      })
+      .catch(() => {})
+      .finally(() => {
+        setGeneratingTagSessions((prev) => {
+          const next = new Set(prev);
+          next.delete(sid);
+          return next;
+        });
+      });
+  }, [fetchSessions, fetchAllTags]);
 
   const terminateSession = useCallback((sid: string) => {
     setTerminatingSessions((prev) => new Set(prev).add(sid));
@@ -1015,8 +1054,11 @@ export function useWebSocket() {
     cronTasks,
     setCronTasks,
     terminatingSessions,
+    generatingTitleSessions,
+    generatingTagSessions,
     pendingImages,
     streamingMessage,
+    allTags,
     // actions
     send,
     handleFileUpload,
@@ -1030,6 +1072,7 @@ export function useWebSocket() {
     switchSession,
     deleteSession,
     autoTitleSession,
+    autoTagSession,
     terminateSession,
     togglePinSession,
     mergeSessions,
@@ -1043,6 +1086,7 @@ export function useWebSocket() {
     editMessage,
     addMessage,
     fetchSessions,
+    fetchAllTags,
     connect,
     updateSessionTags,
     // refs
