@@ -64,3 +64,29 @@ AUTO_TITLE_CONTENT_MAX: int = 5000
 
 # 会话合并时直接拼接摘要的字符阈值，超过则截断
 MERGE_CONCAT_THRESHOLD: int = 50000
+
+# 子 Agent 最大工具调用轮次上限 — 复用父 Agent 的 _MAX_TOOL_TURNS 语义，防止死循环
+MAX_TOOL_TURNS: int = 90
+
+# 子 Agent 注册表持久化文件名 — 存放于 workspace/logs/ 下
+SUBAGENT_STORE_FILENAME: str = "subagents.json"
+
+# 子 Agent 周期收集空闲触发时间（秒）— 父 Agent 消息队列空闲超过此时间后触发收集
+SUBAGENT_IDLE_TRIGGER_SECONDS: int = 15
+
+# 子 Agent 最大同时活跃数量 — 超出上限的子 Agent 进入等待队列
+SUBAGENT_MAX_ACTIVE: int = 5
+
+# 子 Agent 系统预设 readonly 工具白名单 — 子 Agent 默认可用这些只读工具
+# 此列表硬编码在代码中，仅能通过修改代码来调整；multiagent 工具集始终被硬排除（禁止递归）
+SUBAGENT_READONLY_WHITELIST: list[str] = [
+    "list_tools",
+    "list_uploads",
+    "read_file",
+    "list_directory",
+    "search_files",
+    "grep",
+]
+
+# Cron 任务持久化文件名 — 存放于 workspace/logs/ 下
+CRON_STORE_FILENAME: str = "cron_jobs.json"

@@ -29,7 +29,7 @@ from component.llm import LLMClient, LLMResponse, StreamChunk, ToolCall, Usage
 from system.pathutils import find_repo_root
 from system.context import RuntimeContext
 from system.session_store import SessionStore
-from entity.constant import LOG_PREVIEW_CHARS, TOOL_RESULT_PREVIEW_CHARS, AUTO_TITLE_CONTENT_MAX
+from entity.constant import LOG_PREVIEW_CHARS, TOOL_RESULT_PREVIEW_CHARS, AUTO_TITLE_CONTENT_MAX, MAX_TOOL_TURNS
 from entity.puretype import Role
 from entry.agent_support.messages import (
     build_agent_system_prompt,
@@ -50,7 +50,7 @@ from entry.agent_support.multimodal import (
 logger = logging.getLogger(__name__)
 
 # 每条消息的最大工具调用循环次数，防止无限循环。
-_MAX_TOOL_TURNS = 90
+_MAX_TOOL_TURNS: int = MAX_TOOL_TURNS
 
 
 async def _close_async_iterator(ait: Any) -> None:

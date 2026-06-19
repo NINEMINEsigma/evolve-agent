@@ -1,6 +1,9 @@
-"""纯类型定义 — 不包含任何方法，仅作为数据标记使用。"""
+"""
+只含有不包含任何方法定义的类型定义
+"""
 
 from enum import Enum
+from pydantic import BaseModel, Field
 
 
 class Role(str, Enum):

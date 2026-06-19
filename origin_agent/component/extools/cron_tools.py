@@ -37,18 +37,23 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Set
 
 from abstract.tools.registry import registry, tool_error, tool_result
-from entity.constant import CRON_STDOUT_PREVIEW_MAX_LENGTH, CRON_TASK_TIMEOUT
-from system.pathutils import find_repo_root
+from entity.constant import CRON_STDOUT_PREVIEW_MAX_LENGTH, CRON_TASK_TIMEOUT, CRON_STORE_FILENAME
 from system.subprocess_utils import build_subprocess_env, completed_process_from_bytes, windows_process_group_flags
 
 logger = logging.getLogger(__name__)
 
 # ── 持久化路径 ────────────────────────────────────────────────
 
-# agent/component/extools/cron_tools.py -> 项目根目录
-_REPO_ROOT: Path = find_repo_root()
-_CRON_STORE_DIR: Path = _REPO_ROOT / "workspace" / "logs"
-_CRON_STORE_PATH: Path = _CRON_STORE_DIR / "cron_jobs.json"
+def _get_cron_store_path() -> Path:
+    """返回 cron 任务持久化文件路径。
+
+    从 ``RuntimeContext.workspace`` 获取实际工作空间路径。
+    RuntimeContext 未初始化时抛出 RuntimeError。
+    """
+    from system.context import get_runtime_context
+
+    ctx = get_runtime_context()
+    return ctx.workspace / "logs" / CRON_STORE_FILENAME
 
 
 # ── cron 解析器（标准库实现）──────────────────────────────────
@@ -247,7 +252,8 @@ def _task_from_dict(data: dict) -> _CronTask:
 def _save_all_tasks() -> None:
     """将所有任务状态持久化到磁盘（原子写入，避免半写损坏）。"""
     try:
-        _CRON_STORE_DIR.mkdir(parents=True, exist_ok=True)
+        store_path = _get_cron_store_path()
+        store_path.parent.mkdir(parents=True, exist_ok=True)
         with _cron_lock:
             payload: dict[str, dict[str, dict]] = {}
             for sid, tasks in _cron_tasks.items():
@@ -255,22 +261,26 @@ def _save_all_tasks() -> None:
                 for tid, task in tasks.items():
                     payload[sid][tid] = _task_to_dict(task)
         # 原子写入：先写临时文件再重命名，防止进程崩溃时留下半写文件
-        tmp_path = _CRON_STORE_PATH.with_suffix(".tmp")
+        tmp_path = store_path.with_suffix(".tmp")
         tmp_path.write_text(
             json.dumps(payload, ensure_ascii=False, indent=2),
             encoding="utf-8",
         )
-        tmp_path.replace(_CRON_STORE_PATH)
+        tmp_path.replace(store_path)
     except Exception as exc:
         logger.warning("Failed to save cron jobs: %s", exc)
 
 
 def _load_all_tasks() -> None:
     """从磁盘加载任务状态并重新调度。"""
-    if not _CRON_STORE_PATH.exists():
+    try:
+        store_path = _get_cron_store_path()
+    except RuntimeError:
+        return
+    if not store_path.exists():
         return
     try:
-        raw: dict = json.loads(_CRON_STORE_PATH.read_text(encoding="utf-8"))
+        raw: dict = json.loads(store_path.read_text(encoding="utf-8"))
     except Exception as exc:
         logger.warning("Failed to load cron jobs: %s", exc)
         return

@@ -1,3 +1,4 @@
+from typing import * # type: ignore
 import argparse
 import os
 from third.filesystem import File
@@ -90,6 +91,7 @@ base_config: Config|None = None
 # 仅保留用户显式传递的参数（排除 load / save）
 cli_overrides = {k: v for k, v in vars(args).items() if k not in ("load", "save")}
 current_config = Config.model_validate(cli_overrides)
+
 
 if args.load:
     base_config = load(args.load or "default", "config.json")
