@@ -7,6 +7,7 @@ import {
   PlaylistEntry,
   TaskProgress,
   ClipboardDisplay,
+  SubagentSession,
   CronTask,
   SessionInfo,
   WSMessage,
@@ -42,6 +43,7 @@ export function useWebSocket() {
   const [handsfreeMode, setHandsfreeMode] = useState(false);
   const [taskProgress, setTaskProgress] = useState<Record<string, TaskProgress>>({});
   const [clipboardDisplays, setClipboardDisplays] = useState<Record<string, ClipboardDisplay>>({});
+  const [subagentSessions, setSubagentSessions] = useState<Record<string, SubagentSession>>({});
   const [llmMaxContextTokens, setLlmMaxContextTokens] = useState(0);
   const [approvalModelName, setApprovalModelName] = useState("");
   const [approvalModelAvailable, setApprovalModelAvailable] = useState(false);
@@ -56,6 +58,7 @@ export function useWebSocket() {
     status: string;
   }>>([]);
   const [cronTasks, setCronTasks] = useState<CronTask[]>([]);
+  const [subagentIdleCountdown, setSubagentIdleCountdown] = useState<number | null>(null);
   const [terminatingSessions, setTerminatingSessions] = useState<Set<string>>(new Set());
   const [generatingTitleSessions, setGeneratingTitleSessions] = useState<Set<string>>(new Set());
   const [generatingTagSessions, setGeneratingTagSessions] = useState<Set<string>>(new Set());
@@ -182,6 +185,42 @@ export function useWebSocket() {
         setClipboardDisplays(data.clipboard_display || {});
       })
       .catch(() => {});
+    // 拉取子会话快照 — snapshot 来自 _history，是权威数据源
+    fetch(`/api/sessions/${sid}/subagents`)
+      .then((r) => r.json())
+      .then((data) => {
+        if (!data.subagents) return;
+        setSubagentSessions((prev) => {
+          const incoming = data.subagents as Record<string, any>;
+          const merged: Record<string, any> = {};
+          for (const [sKey, snap] of Object.entries(incoming)) {
+            const existing = prev[sKey];
+            if (!existing) {
+              merged[sKey] = snap;
+              continue;
+            }
+            // snapshot 的 feedback 来自 _history（权威）；
+            // 只保留 existing 中 snapshot 没有的增量 WS 消息
+            const snapIds = new Set(
+              (snap.feedback || []).map((f: any) =>
+                `${f.role}::${f.content?.slice(0, 80)}::${f.tool_call_id || ""}`
+              )
+            );
+            const wsOnly = (existing.feedback || []).filter((f: any) =>
+              !snapIds.has(`${f.role}::${f.content?.slice(0, 80)}::${f.tool_call_id || ""}`)
+            );
+            merged[sKey] = {
+              ...snap,
+              feedback: [...(snap.feedback || []), ...wsOnly],
+              pending_approvals: existing.pending_approvals?.length
+                ? existing.pending_approvals
+                : snap.pending_approvals,
+            };
+          }
+          return merged;
+        });
+      })
+      .catch(() => {});
   }, []);
 
   const connect = useCallback(() => {
@@ -290,6 +329,7 @@ export function useWebSocket() {
             setMessages([]);
             setTokenUsage(0);
             setClipboardDisplays({});
+            setSubagentSessions({});
             setTaskProgress({});
             fetchToolResources(data.new_sid);
             fetchSessions();
@@ -442,6 +482,54 @@ export function useWebSocket() {
               },
             }));
           }
+        } catch {}
+      }
+      else if (msg.type === "subagent_update") {
+        const raw = msg.result ?? "";
+        try {
+          const data = JSON.parse(raw);
+          const sid = data.session_id || "";
+          // 倒计时值所有子会话共享，提到顶层进度条
+          const rawFeedback = Array.isArray(data.feedback) ? data.feedback : [];
+          for (const item of rawFeedback) {
+            if (item.role === "countdown") {
+              const v = parseInt(item.content, 10);
+              if (!isNaN(v)) {
+                setSubagentIdleCountdown(v);
+              }
+              break; // 只需第一个 countdown，值都一样
+            }
+          }
+          setSubagentSessions((prev) => {
+            if (data._removed) {
+              const next = { ...prev };
+              delete next[sid];
+              if (Object.keys(next).length === 0) {
+                setSubagentIdleCountdown(null);
+              }
+              return next;
+            }
+            const existing = prev[sid];
+            const prevFeedback = existing?.feedback || [];
+            const prevApprovals = existing?.pending_approvals || [];
+            const realFeedback: Array<{role: string; content: string; tool_name?: string; tool_call_id?: string; tool_args?: Record<string, unknown>; reasoning?: string}> = [];
+            for (const item of rawFeedback) {
+              if (item.role === "countdown") continue;
+              if (item.role === "status" && !item.content) continue;
+              realFeedback.push(item);
+            }
+            const newApprovals = Array.isArray(data.pending_approvals) ? data.pending_approvals : [];
+            return {
+              ...prev,
+              [sid]: {
+                session_id: sid,
+                name: data.name || existing?.name || "",
+                status: data.status || existing?.status || "running",
+                feedback: [...prevFeedback, ...realFeedback],
+                pending_approvals: data.pending_approvals !== undefined ? newApprovals : prevApprovals,
+              },
+            };
+          });
         } catch {}
       }
       else if (msg.type === "error") {
@@ -1042,6 +1130,7 @@ export function useWebSocket() {
     setTaskProgress,
     clipboardDisplays,
     setClipboardDisplays,
+    subagentSessions,
     llmMaxContextTokens,
     approvalModelName,
     approvalModelAvailable,
@@ -1053,6 +1142,7 @@ export function useWebSocket() {
     setBgTasks,
     cronTasks,
     setCronTasks,
+    subagentIdleCountdown,
     terminatingSessions,
     generatingTitleSessions,
     generatingTagSessions,

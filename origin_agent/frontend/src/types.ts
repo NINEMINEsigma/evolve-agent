@@ -23,7 +23,8 @@ export type MessageType =
   | "ask_request"
   | "stream_delta"
   | "stream_done"
-  | "error";
+  | "error"
+  | "subagent_update";
 
 export interface WSMessage {
   type: MessageType;
@@ -136,4 +137,27 @@ export interface SessionInfo {
   parent?: string | null;
   continuation?: string | null;
   tags?: string[];
+}
+
+export interface PendingApproval {
+  tool_call_id: string;
+  tool_name: string;
+  arguments: Record<string, unknown>;
+}
+
+export interface SubagentMessage {
+  role: string;
+  content: string;
+  tool_name?: string;
+  tool_call_id?: string;
+  tool_args?: Record<string, unknown>;
+  reasoning?: string;
+}
+
+export interface SubagentSession {
+  session_id: string;
+  name: string;
+  status: "running" | "waiting" | "completed" | "terminated";
+  feedback: SubagentMessage[];
+  pending_approvals: PendingApproval[];
 }

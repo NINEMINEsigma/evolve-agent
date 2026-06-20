@@ -7,9 +7,11 @@ import InputBar from "./components/InputBar";
 import ConfirmDialog from "./components/ConfirmDialog";
 import AskDialog from "./components/AskDialog";
 import TaskProgressPanel from "./components/TaskProgressPanel";
-import ClipboardPanel from "./components/ClipboardPanel";
+import UnifiedPanel from "./components/UnifiedPanel";
 import Drawer from "./components/Drawer";
+import SubagentDrawer from "./components/SubagentDrawer";
 import CronCountdown from "./components/CronCountdown";
+import SubagentCountdown from "./components/SubagentCountdown";
 import Lightbox from "./components/Lightbox";
 import TagEditor from "./components/TagEditor";
 import ErrorBoundary from "./components/ErrorBoundary";
@@ -20,6 +22,7 @@ export default function App() {
   const [lightboxSrc, setLightboxSrc] = useState<string | null>(null);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const [subagentDrawerOpen, setSubagentDrawerOpen] = useState(false);
   const [taskProgressCollapsed, setTaskProgressCollapsed] = useState(false);
   const [clipboardCollapsed, setClipboardCollapsed] = useState(false);
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; sid: string } | null>(null);
@@ -172,7 +175,7 @@ export default function App() {
           onToggleCollapse={() => setTaskProgressCollapsed((v) => !v)}
         />
 
-        <ClipboardPanel
+        <UnifiedPanel
           clipboardDisplays={ws.clipboardDisplays}
           collapsed={clipboardCollapsed}
           onToggleCollapse={() => setClipboardCollapsed((v) => !v)}
@@ -191,6 +194,11 @@ export default function App() {
         />
 
         <CronCountdown cronTasks={ws.cronTasks} />
+
+        <SubagentCountdown
+          subagentSessions={ws.subagentSessions}
+          idleCountdown={ws.subagentIdleCountdown}
+        />
 
         <InputBar
           input={ws.input}
@@ -232,6 +240,16 @@ export default function App() {
         </div>
       )}
 
+      {!subagentDrawerOpen && Object.keys(ws.subagentSessions).length > 0 && (
+        <div
+          className="drawer-trigger-bar subagent"
+          onClick={() => setSubagentDrawerOpen(true)}
+          title="打开子会话抽屉"
+        >
+          <span className="drawer-trigger-icon">◀</span>
+        </div>
+      )}
+
       <Drawer
         open={drawerOpen}
         onClose={() => setDrawerOpen(false)}
@@ -242,6 +260,12 @@ export default function App() {
         setBgTasks={ws.setBgTasks}
         cronTasks={ws.cronTasks}
         setCronTasks={ws.setCronTasks}
+      />
+
+      <SubagentDrawer
+        open={subagentDrawerOpen}
+        onClose={() => setSubagentDrawerOpen(false)}
+        subagentSessions={ws.subagentSessions}
       />
 
       {lightboxSrc && (

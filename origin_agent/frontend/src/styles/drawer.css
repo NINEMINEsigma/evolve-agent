@@ -19,6 +19,15 @@
   opacity: 0.6;
 }
 
+.drawer-trigger-bar.subagent {
+  top: calc(50% - 80px);
+  background: rgba(100, 210, 255, 0.25);
+}
+
+.drawer-trigger-bar.subagent:hover {
+  background: #64d2ff;
+}
+
 .drawer-trigger-bar:hover {
   width: 22px;
   background: var(--accent);
@@ -58,6 +67,14 @@
   display: flex;
   flex-direction: column;
   animation: slideInRight 0.2s ease;
+}
+
+.drawer-panel.subagent-drawer {
+  width: 560px;
+}
+
+.drawer-panel.subagent-drawer .drawer-body {
+  padding: 12px;
 }
 
 @keyframes slideInRight {

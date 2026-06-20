@@ -47,7 +47,7 @@ export default function ConfirmDialog({
       <div className="confirm-dialog">
         <div className="confirm-title">{toolTitle}</div>
         <div className="confirm-body">
-          <pre className="confirm-cmd">
+          <pre className="confirm-cmd" style={{ maxHeight: "40vh", overflowY: "auto" }}>
             {Array.isArray(pendingConfirm.command)
               ? pendingConfirm.command.join(" ")
               : (pendingConfirm.command ?? pendingConfirm.content)}
