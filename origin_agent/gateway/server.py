@@ -56,6 +56,67 @@ def set_agent_loop(loop: AgentLoop) -> None:
     global _agent_loop
     _agent_loop = loop
 
+    # 初始化 SubAgentOrchestrator（若有子 Agent 系统导入）
+    try:
+        from subagent.orchestrator import SubAgentOrchestrator, set_orchestrator
+        orch = SubAgentOrchestrator()
+        orch.set_agent_loop(loop)
+        set_orchestrator(orch)
+        logger.info("SubAgentOrchestrator initialized")
+    except Exception as exc:
+        logger.debug("SubAgentOrchestrator not available: %s", exc)
+
+
+def get_subagent_orchestrator():
+    """返回 SubAgentOrchestrator 单例（供工具层调用）。"""
+    from subagent.orchestrator import get_orchestrator
+    return get_orchestrator()
+
+
+async def shutdown_subagent_orchestrator() -> None:
+    """优雅停止 SubAgentOrchestrator（供 shutdown 流程调用）。"""
+    try:
+        from subagent.orchestrator import get_orchestrator
+        orch = get_orchestrator()
+        await orch.shutdown()
+    except Exception as exc:
+        logger.debug("SubAgentOrchestrator shutdown skipped: %s", exc)
+
+
+async def push_subagent_update(
+    parent_session_id: str,
+    subagent_session_id: str,
+    subagent_name: str,
+    status: str,
+    feedback: list[dict[str, str]],
+    pending_approvals: list[dict[str, Any]],
+) -> None:
+    """将子 Agent 状态更新推送到前端 WebSocket。
+
+    前端 UnifiedPanel 接收此消息并更新子会话列表。
+    feedback 每项为 {\"role\": \"assistant\"|\"tool\"|\"status\", \"content\": \"...\"}
+    """
+    ws = _tool_ws_sinks.get(parent_session_id)
+    if ws is None:
+        return
+    import json as _json
+    try:
+        await ws.send_text(
+            Message(
+                type=MessageType.SUBAGENT_UPDATE,
+                session_id=parent_session_id,
+                result=_json.dumps({
+                    "session_id": subagent_session_id,
+                    "name": subagent_name,
+                    "status": status,
+                    "feedback": feedback,
+                    "pending_approvals": pending_approvals,
+                }, ensure_ascii=False),
+            ).to_json()
+        )
+    except Exception as exc:
+        logger.debug("Failed to push subagent update to session=%s: %s", parent_session_id, exc)
+
 
 def set_agentspace_path(path: str | Path) -> None:
     """设置文件上传的目标目录（ws: 命名空间的根）。"""
@@ -441,6 +502,17 @@ async def get_session_tool_resources(session_id: str):
     }
 
 
+@app.get("/api/sessions/{session_id}/subagents")
+async def get_session_subagents(session_id: str):
+    """返回当前活跃子会话的快照。"""
+    try:
+        from subagent.orchestrator import get_orchestrator
+        orch = get_orchestrator()
+        return {"session_id": session_id, "subagents": orch.get_snapshot()}
+    except Exception:
+        return {"session_id": session_id, "subagents": {}}
+
+
 @app.post("/api/confirm/{request_id}")
 async def http_confirm(request_id: str, req: Request):
     """通过 HTTP 处理确认响应（独立于 WebSocket 连接状态）。"""
@@ -556,6 +628,12 @@ async def auto_tags_session(session_id: str):
 @app.post("/api/sessions/{session_id}/terminate")
 async def terminate_session_endpoint(session_id: str):
     """手动终结指定会话：归档 + 压缩（生成摘要），不旋转。"""
+    # 先停止该父会话的所有子 Agent 会话
+    try:
+        orch = get_subagent_orchestrator()
+        await orch.terminate_parent()
+    except Exception:
+        pass
     if _agent_loop is not None and hasattr(_agent_loop, "terminate_session"):
         result = await _agent_loop.terminate_session(session_id)  # type: ignore[union-attr]
         return result

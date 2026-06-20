@@ -40,6 +40,7 @@ class MessageType(str, Enum):
     STREAM_DONE = "stream_done"
     PING = "ping"
     PONG = "pong"
+    SUBAGENT_UPDATE = "subagent_update"
 
 
 class Message(BaseModel):

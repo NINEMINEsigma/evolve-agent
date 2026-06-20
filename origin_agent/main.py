@@ -149,6 +149,7 @@ class App:
                 sys.path.insert(0, str(_root))
             discover_builtin_tools(str(_agent_root / "component" / "tools"), "component.tools")
             discover_builtin_tools(str(_agent_root / "component" / "extools"), "component.extools")
+            discover_builtin_tools(str(_agent_root / "component" / "mutliagenttools"), "component.mutliagenttools")
             _custom_tools: Path = _root / "custom_tools"
             if _custom_tools.exists():
                 discover_builtin_tools(str(_custom_tools), "custom_tools")
@@ -274,7 +275,13 @@ You can modify your own source code and complete evolution through the following
         if self._gateway_server is None or self._gateway_task is None:
             return
         logger.info("Gateway shutting down...")
-        # 先关闭 MCP server 连接（释放子进程、后台线程）
+        # 先停止所有子 Agent 会话
+        try:
+            from gateway.server import shutdown_subagent_orchestrator
+            await shutdown_subagent_orchestrator()
+        except Exception:
+            pass
+        # 关闭 MCP server 连接（释放子进程、后台线程）
         try:
             import component.mcp_tools
             component.mcp_tools.shutdown_mcp()

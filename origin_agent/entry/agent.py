@@ -15,6 +15,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import time
 import uuid
 from datetime import datetime
 from pathlib import Path
@@ -115,6 +116,9 @@ class AgentLoop:
         # 记录哪些 session 正在处理消息（process_message 未返回）
         self._processing_sessions: dict[str, bool] = {}
 
+        # 父 Agent 最后一次消息处理结束的时间戳（供 SubAgentOrchestrator 空闲检测）
+        self._last_idle_time: float = time.monotonic()
+
     # -- 公开 API ----------------------------------------------------------
 
     def set_tool_event_callback(
@@ -166,6 +170,12 @@ class AgentLoop:
             _deny_session_confirms(session_id)
         except Exception:
             pass
+        # 暂停子 Agent 周期定时器（子 Agent 本身继续运行）
+        try:
+            from gateway.server import get_subagent_orchestrator
+            get_subagent_orchestrator().interrupt()
+        except Exception:
+            pass
         logger.info("Interrupt requested for session=%s", session_id)
 
     def is_interrupted(self, session_id: str) -> bool:
@@ -205,6 +215,12 @@ class AgentLoop:
         """process_message 的锁内实现。"""
         # 清除上一回合残留的过期中断标记
         self._interrupted.pop(session_id, None)
+        # 恢复子 Agent 周期定时器（用户发消息后恢复）
+        try:
+            from gateway.server import get_subagent_orchestrator
+            get_subagent_orchestrator().resume()
+        except Exception:
+            pass
         # ---- 拒绝已归档会话的新消息 ----
         if self._session_manager is not None:
             info = self._session_manager.get(session_id)
@@ -380,6 +396,8 @@ class AgentLoop:
             self._cancel_events.pop(session_id, None)
             # 清除处理中标记
             self._processing_sessions.pop(session_id, None)
+            # 记录空闲时间戳（供 SubAgentOrchestrator 周期检测）
+            self._last_idle_time = time.monotonic()
 
         logger.warning(
             "Tool-call loop exceeded max turns (%d) for session=%s",

@@ -72,7 +72,8 @@ MAX_TOOL_TURNS: int = 90
 SUBAGENT_STORE_FILENAME: str = "subagents.json"
 
 # 子 Agent 周期收集空闲触发时间（秒）— 父 Agent 消息队列空闲超过此时间后触发收集
-SUBAGENT_IDLE_TRIGGER_SECONDS: int = 15
+# 推荐该值不要超过origin_agent\frontend\src\components\SubagentCountdown.tsx中设定的值
+SUBAGENT_IDLE_TRIGGER_SECONDS: int = 20
 
 # 子 Agent 最大同时活跃数量 — 超出上限的子 Agent 进入等待队列
 SUBAGENT_MAX_ACTIVE: int = 5
@@ -83,9 +84,18 @@ SUBAGENT_READONLY_WHITELIST: list[str] = [
     "list_tools",
     "list_uploads",
     "read_file",
+    "probe_vision_capability",
+    "read_image",
+    "read_csv",
+    "read_docx",
+    "read_excel",
+    "read_pdf",
     "list_directory",
     "search_files",
     "grep",
+    "web_fetch",
+    "web_search",
+    "media_info",
 ]
 
 # Cron 任务持久化文件名 — 存放于 workspace/logs/ 下

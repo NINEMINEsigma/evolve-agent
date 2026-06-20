@@ -71,16 +71,17 @@ registry.register(
     schema={
         # 注册一个子 Agent 的完整配置（base_url、model、api_key、max_output_tokens、
         # max_context_tokens、system_prompt_path）。
-        # 以 name 为唯一标识，不允许覆盖已存在的注册项。
-        # max_output_tokens / max_context_tokens 为必填的 token 限制参数。
-        # system_prompt_path 为可选字段，指向自定义系统提示词的文本文件绝对路径。
-        # 注册信息为全局共享，其他多 Agent 工具可据此调用子 Agent。
+        # 以 name 为唯一标识，不允许覆盖已存在的注册项（需先 unregister 再重新 register）。
+        # system_prompt_path 存储的是文件路径，文件内容在 run_subagent 启动时实时读取。
+        # 因此修改系统提示词文件的内容无需重新注册，直接编辑文件即可。
         "description": (
             "Register a sub-agent profile (base_url, model, api_key, max_output_tokens, "
             "max_context_tokens, system_prompt_path). "
-            "The 'name' field is the unique identifier; existing entries cannot be overwritten. "
-            "max_output_tokens and max_context_tokens are required token limits. "
-            "The optional 'system_prompt_path' points to a text file containing a custom system prompt. "
+            "The 'name' field is the unique identifier; existing entries cannot be overwritten "
+            "(unregister first if you need to change the registration). "
+            "'system_prompt_path' stores a file path — the file content is read at "
+            "sub-agent launch time, so editing the file content does NOT require re-registration. "
+            "To change parameters like base_url or model, unregister the existing entry first. "
             "Registered profiles are global and may be used by other multi-agent tools."
         ),
         "parameters": {

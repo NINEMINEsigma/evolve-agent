@@ -4,34 +4,34 @@ overview: 基于 subagent.plan.md 需求文档，分 5 个阶段实现子 Agent 
 todos:
   - id: phase1-context
     content: 新建 subagent/context.py — SubRuntimeContext
-    status: pending
+    status: completed
   - id: phase1-report-tool
     content: 新建 subagent/report_tool.py — report_to_parent 工具注册
-    status: pending
+    status: completed
   - id: phase1-loop
     content: 新建 subagent/loop.py — SubAgentLoop（LLM 循环 + 审批暂停 + 收件箱注入）
-    status: pending
+    status: completed
   - id: phase1-orchestrator
     content: 新建 subagent/orchestrator.py — SubAgentOrchestrator（并发管理 + 周期定时器 + 消息注入）
-    status: pending
+    status: completed
   - id: phase1-init
     content: 新建 subagent/__init__.py — 模块导出
-    status: pending
+    status: completed
   - id: phase2-agent
     content: 修改 entry/agent.py — 加入 _last_idle_time 跟踪
-    status: pending
+    status: completed
   - id: phase2-server
     content: 修改 gateway/server.py — 初始化编排器 + shutdown 回调
-    status: pending
+    status: completed
   - id: phase3-tools
     content: 填充 4 个工具骨架执行逻辑（run/chat/approve/stop）
-    status: pending
+    status: completed
   - id: phase4-injection
     content: 实现 report_to_parent 工具注入到子 Agent 工具集
-    status: pending
+    status: completed
   - id: phase5-integration
     content: 实现父 Agent 中断/终结回调 + 上下文变量传递
-    status: pending
+    status: completed
 isProject: false
 ---
 

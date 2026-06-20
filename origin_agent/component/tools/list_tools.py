@@ -11,7 +11,11 @@ from abstract.tools.registry import registry, tool_error, tool_result
 
 
 def _handle_list_tools(args: dict[str, Any]) -> dict:
-    """返回当前注册表中指定危险等级的工具名称列表。"""
+    """返回当前注册表中指定危险等级的工具名称列表。
+
+    在子 Agent 上下文中调用时，只返回该子 Agent 被授权的工具，
+    避免子 Agent 看到全局清单后绕过沙箱。
+    """
     danger_level: str = str(args.get("danger_level", "")).strip()
 
     valid_levels = {"readonly", "write", "dangerous"}
@@ -22,10 +26,21 @@ def _handle_list_tools(args: dict[str, Any]) -> dict:
             f"Invalid danger_level '{danger_level}'. Must be one of: {', '.join(sorted(valid_levels))}."
         )
 
+    # 子 Agent 沙箱：仅暴露被授权的工具
+    allowed: set[str] | None = None
+    try:
+        from subagent.report_tool import current_subagent_loop
+        loop = current_subagent_loop.get()
+        if loop is not None:
+            allowed = loop.allowed_tool_names
+    except (LookupError, ImportError):
+        allowed = None
+
     names = [
         name
         for name in registry.get_all_tool_names()
         if registry.get_danger_level(name) == danger_level
+        and (allowed is None or name in allowed)
     ]
     return tool_result(
         success=True,

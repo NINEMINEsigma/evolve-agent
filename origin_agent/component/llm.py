@@ -152,6 +152,8 @@ class LLMClient:
         for attempt in range(_MAX_RETRIES):
             try:
                 completion: Any = await self._client.chat.completions.create(**kwargs)
+                if not completion.choices:
+                    raise RuntimeError("LLM returned empty choices list")
                 choice: Any = completion.choices[0]
                 msg: Any = choice.message
 
