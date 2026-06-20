@@ -12,7 +12,7 @@ from typing import Any
 from abstract.tools.registry import registry, tool_error, tool_result
 
 
-def _handle_approval_subagent(args: dict[str, Any]) -> dict:
+async def _handle_approval_subagent(args: dict[str, Any]) -> dict:
     """审批子 Agent 的工具调用。
 
     预期参数：
@@ -51,19 +51,13 @@ def _handle_approval_subagent(args: dict[str, Any]) -> dict:
             "reason": reason if not approved else None,
         })
 
-    # TODO: 实现批量审批逻辑
-    # 1. 通过编排器查找 session_id 对应的 SubAgentLoop
-    # 2. 按其待审批队列匹配 tool_call_id
-    # 3. 同意的工具立即在子 Agent 上下文中执行，结果注入
-    # 4. 拒绝的工具将原因返回给子 Agent
-    # 5. 所有决策处理完后解除子 Agent 阻塞
-
-    return tool_result(
-        success=True,
-        session_id=session_id,
-        processed=len(decisions),
-        message="Approval decisions validated. Execution not yet implemented.",
-    )
+    try:
+        from gateway.server import get_subagent_orchestrator
+        orch = get_subagent_orchestrator()
+        result = await orch.approve(session_id, decisions)
+        return tool_result(**result)
+    except Exception as exc:
+        return tool_error(f"Failed to approve subagent tools: {exc}")
 
 
 registry.register(
@@ -73,12 +67,16 @@ registry.register(
         # 批量审批子 Agent 的工具调用申请。
         # 同意的工具立即执行，拒绝的工具必须附带原因。
         # 子 Agent 的工具调用永不超时，等待父 Agent 审批期间完全暂停。
+        # 返回值包含可选的 `feedback` 字段，为子 Agent 当前发件箱中的文本列表（审批后即时收集）。
         "description": (
             "Batch approve or reject tool-call requests from a sub-agent. "
             "Approved tools execute immediately in the sub-agent context. "
             "Rejected tools must include a reason. "
             "The sub-agent is fully paused while waiting for approval "
-            "(there is no timeout)."
+            "(there is no timeout).\n\n"
+            "Returns an optional 'feedback' field — a list of text responses from the "
+            "sub-agent's outbox collected after tool execution. "
+            "Use this for instant feedback."
         ),
         "parameters": {
             "type": "object",
@@ -119,6 +117,7 @@ registry.register(
         },
     },
     handler=_handle_approval_subagent,
+    is_async=True,
     emoji="✅",
     danger_level="readonly",
 )
