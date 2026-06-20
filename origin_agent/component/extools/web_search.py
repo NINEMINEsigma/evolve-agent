@@ -176,7 +176,7 @@ def _search_bing(query: str, max_results: int) -> Tuple[list[dict[str, str]] | N
     req = urllib.request.Request(
         search_url,
         headers={
-            "User-Agent": _USER_AGENT,
+            "User-Agent": DEFAULT_USER_AGENT,
             "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
             "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
         },
