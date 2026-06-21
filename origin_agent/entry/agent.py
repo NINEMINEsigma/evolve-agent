@@ -866,26 +866,31 @@ class AgentLoop:
             return ""
 
     def _collect_skill_prompts(self) -> list[str]:
-        """加载已启用的 skill，返回格式化后的 prompt 列表。"""
+        """生成 skill 名称和描述清单，避免全量内容注入 system prompt。
+
+        Skill 的完整内容通过 ``list_skills`` 和 ``recall_skill`` 工具按需加载。
+        """
         if self._skill_cache_valid:
             return self._skill_cache
         blocks: list[str] = []
         try:
             from pathlib import Path
-            from abstract.skills.loader import list_skills, load_skill
+            from abstract.skills.loader import list_skills
             skills: list[dict] = list_skills(skills_dir=Path("skills"))
-            for s in skills:
-                name: str = s.get("name", "")
-                if not name:
-                    continue
-                try:
-                    payload: dict = load_skill(name, skills_dir=Path("skills"))
-                    if payload.get("success") and payload.get("content"):
-                        blocks.append(
-                            f"[Skill: {name}]\n{payload['content']}"
-                        )
-                except Exception:
-                    pass
+            if skills:
+                lines: list[str] = [
+                    "Available skills (use list_skills to see details, use recall_skill to load one):",
+                    "",
+                ]
+                for s in skills:
+                    name: str = s.get("name", "")
+                    description: str = s.get("description", "")
+                    category: str | None = s.get("category")
+                    if not name:
+                        continue
+                    category_tag: str = f" [{category}]" if category else ""
+                    lines.append(f"- {name}{category_tag}: {description or '(no description)'}")
+                blocks.append("\n".join(lines))
         except Exception:
             pass
         self._skill_cache = blocks

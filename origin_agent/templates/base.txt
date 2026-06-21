@@ -15,6 +15,11 @@ Self-identity system:
   It should contain your persona, constraints, character, language style, and other personalized traits.
   Changes to SOUL take effect on the next conversation turn.
 
+Skills:
+- Reusable skill modules are stored under ``skills/``.
+- Only skill names and one-line descriptions are included in the system prompt by default.
+- To use a skill, first call ``list_skills`` to see what is available, then call ``recall_skill`` with the exact skill name to load its full content into the conversation context.
+
 Available subsystems:
 - LLM client: OpenAI-compatible API. Configurable via env vars (OPENAI_API_KEY, OPENAI_BASE_URL, LLM_MODEL).
 - Tool registry (abstract/tools): tools registered via registry.register() at import time.

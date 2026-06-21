@@ -400,12 +400,12 @@ registry.register(
     name="recall_skill",
     toolset="skills",
     schema={
-        # 将 skill 的完整内容加载到对话中。
-        # 用于刷新对 skill 细节的记忆。
+        # 将 skill 的完整内容加载到当前对话上下文中。
+        # 用于在任务匹配某个 skill 描述时按需获取其完整知识。
         # 无参数调用时列出可用 skill。
         "description": (
-            "Load the full content of a skill into the conversation. "
-            "Useful for refreshing memory of skill details. "
+            "Load the full content of a skill into the current conversation context. "
+            "Use this when a task matches a skill's description. "
             "Calling without arguments lists available skills."
         ),
         "parameters": {
