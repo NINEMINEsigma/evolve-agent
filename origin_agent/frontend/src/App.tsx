@@ -9,7 +9,7 @@ import AskDialog from "./components/AskDialog";
 import TaskProgressPanel from "./components/TaskProgressPanel";
 import UnifiedPanel from "./components/UnifiedPanel";
 import Drawer from "./components/Drawer";
-import SubagentDrawer from "./components/SubagentDrawer";
+import SubagentPanel from "./components/SubagentPanel";
 import CronCountdown from "./components/CronCountdown";
 import SubagentCountdown from "./components/SubagentCountdown";
 import Lightbox from "./components/Lightbox";
@@ -17,12 +17,115 @@ import TagEditor from "./components/TagEditor";
 import ErrorBoundary from "./components/ErrorBoundary";
 import { SessionInfo } from "./types";
 
+const TOOLTIP_MARGIN = 10;
+const TOOLTIP_ARROW = 6;
+
+function useGlobalTooltip() {
+  useEffect(() => {
+    const tooltip = document.createElement("div");
+    tooltip.className = "global-tooltip";
+    const arrow = document.createElement("div");
+    arrow.className = "global-tooltip-arrow";
+    tooltip.appendChild(arrow);
+    document.body.appendChild(tooltip);
+
+    let hideTimer: ReturnType<typeof setTimeout> | null = null;
+
+    const showTooltip = (target: HTMLElement, text: string) => {
+      if (hideTimer) {
+        clearTimeout(hideTimer);
+        hideTimer = null;
+      }
+      tooltip.textContent = text;
+      tooltip.appendChild(arrow);
+      tooltip.classList.add("visible");
+
+      const rect = target.getBoundingClientRect();
+      const tipRect = tooltip.getBoundingClientRect();
+      const vw = window.innerWidth;
+      const vh = window.innerHeight;
+
+      let top = rect.bottom + TOOLTIP_MARGIN + TOOLTIP_ARROW;
+      let left = rect.left + rect.width / 2 - tipRect.width / 2;
+      let arrowDir: "top" | "bottom" | "left" | "right" = "top";
+
+      if (top + tipRect.height > vh - TOOLTIP_MARGIN) {
+        top = rect.top - tipRect.height - TOOLTIP_MARGIN - TOOLTIP_ARROW;
+        arrowDir = "bottom";
+      }
+      if (left < TOOLTIP_MARGIN) {
+        left = TOOLTIP_MARGIN;
+      }
+      if (left + tipRect.width > vw - TOOLTIP_MARGIN) {
+        left = vw - tipRect.width - TOOLTIP_MARGIN;
+      }
+
+      if (tipRect.width > vw - TOOLTIP_MARGIN * 2) {
+        left = TOOLTIP_MARGIN;
+        tooltip.style.maxWidth = `${vw - TOOLTIP_MARGIN * 2}px`;
+      }
+
+      tooltip.style.top = `${top}px`;
+      tooltip.style.left = `${left}px`;
+
+      arrow.className = `global-tooltip-arrow ${arrowDir}`;
+      if (arrowDir === "top") {
+        arrow.style.top = "-5px";
+        arrow.style.left = `${rect.left + rect.width / 2 - left - 5}px`;
+        arrow.style.bottom = "";
+        arrow.style.right = "";
+      } else if (arrowDir === "bottom") {
+        arrow.style.bottom = "-5px";
+        arrow.style.left = `${rect.left + rect.width / 2 - left - 5}px`;
+        arrow.style.top = "";
+        arrow.style.right = "";
+      }
+    };
+
+    const hideTooltip = () => {
+      if (hideTimer) clearTimeout(hideTimer);
+      hideTimer = setTimeout(() => {
+        tooltip.classList.remove("visible");
+      }, 80);
+    };
+
+    const onMouseEnter = (e: MouseEvent) => {
+      const target = e.target as HTMLElement;
+      if (!target) return;
+      const tooltipText = target.getAttribute("data-tooltip");
+      if (!tooltipText) return;
+      showTooltip(target, tooltipText);
+    };
+
+    const onMouseLeave = () => {
+      hideTooltip();
+    };
+
+    const app = document.getElementById("root");
+    if (app) {
+      app.addEventListener("mouseenter", onMouseEnter, true);
+      app.addEventListener("mouseleave", onMouseLeave, true);
+    }
+
+    return () => {
+      if (app) {
+        app.removeEventListener("mouseenter", onMouseEnter, true);
+        app.removeEventListener("mouseleave", onMouseLeave, true);
+      }
+      if (hideTimer) clearTimeout(hideTimer);
+      tooltip.remove();
+    };
+  }, []);
+}
+
 export default function App() {
+  useGlobalTooltip();
   const ws = useWebSocket();
   const [lightboxSrc, setLightboxSrc] = useState<string | null>(null);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
-  const [subagentDrawerOpen, setSubagentDrawerOpen] = useState(false);
+  const [subagentPanelOpen, setSubagentPanelOpen] = useState(false);
+  const [activeSubagentId, setActiveSubagentId] = useState<string | null>(null);
   const [taskProgressCollapsed, setTaskProgressCollapsed] = useState(false);
   const [clipboardCollapsed, setClipboardCollapsed] = useState(false);
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; sid: string } | null>(null);
@@ -234,18 +337,8 @@ export default function App() {
         />
       </div>
 
-      {!drawerOpen && (
-        <div className="drawer-trigger-bar" onClick={() => setDrawerOpen(true)} title="打开资源/任务抽屉">
-          <span className="drawer-trigger-icon">◀</span>
-        </div>
-      )}
-
-      {!subagentDrawerOpen && Object.keys(ws.subagentSessions).length > 0 && (
-        <div
-          className="drawer-trigger-bar subagent"
-          onClick={() => setSubagentDrawerOpen(true)}
-          title="打开子会话抽屉"
-        >
+      {!drawerOpen && !subagentPanelOpen && (
+        <div className="drawer-trigger-bar" onClick={() => setDrawerOpen(true)} data-tooltip="打开资源/任务抽屉">
           <span className="drawer-trigger-icon">◀</span>
         </div>
       )}
@@ -262,10 +355,12 @@ export default function App() {
         setCronTasks={ws.setCronTasks}
       />
 
-      <SubagentDrawer
-        open={subagentDrawerOpen}
-        onClose={() => setSubagentDrawerOpen(false)}
+      <SubagentPanel
+        open={subagentPanelOpen}
+        onToggle={() => setSubagentPanelOpen((v) => !v)}
         subagentSessions={ws.subagentSessions}
+        activeId={activeSubagentId}
+        onSelect={setActiveSubagentId}
       />
 
       {lightboxSrc && (

@@ -89,7 +89,7 @@ export default function SubagentDrawer({
   );
 }
 
-function SubagentCard({ session, collapsed, onToggleCollapse }: { session: SubagentSession; collapsed: boolean; onToggleCollapse: () => void }) {
+export function SubagentCard({ session, collapsed, onToggleCollapse, disableToggle }: { session: SubagentSession; collapsed: boolean; onToggleCollapse: () => void; disableToggle?: boolean }) {
   const chatRef = useRef<HTMLDivElement>(null);
   const isInactive = session.status === "terminated" || session.status === "completed";
 
@@ -101,45 +101,44 @@ function SubagentCard({ session, collapsed, onToggleCollapse }: { session: Subag
 
   return (
     <div className={`subagent-card ${isInactive ? "inactive" : "active"}`}>
-      <div className="subagent-info" onClick={onToggleCollapse}>
-        <span className="subagent-name">
-          <span className="subagent-collapse-arrow">{collapsed ? "▶" : "▼"}</span>
-          {session.name || session.session_id.slice(0, 12)}
-          <span className="subagent-feedback-count">
-            {session.feedback.length} 条
-          </span>
+      <div className={`subagent-info ${disableToggle ? "no-toggle" : ""}`} onClick={disableToggle ? undefined : onToggleCollapse}>
+      <span className="subagent-name">
+        <span className="subagent-collapse-arrow">{collapsed ? "▶" : "▼"}</span>
+        {session.name || session.session_id.slice(0, 12)}
+        <span className="subagent-feedback-count">
+          {session.feedback.length} 条
         </span>
-        <span className="subagent-status-container">
-          <span className={`subagent-status subagent-status-${session.status}`}>
-            {STATUS_LABEL[session.status] ?? session.status}
-          </span>
+      </span>
+      <span className="subagent-status-container">
+        <span className={`subagent-status subagent-status-${session.status}`}>
+          {STATUS_LABEL[session.status] ?? session.status}
         </span>
-      </div>
-
-      {!collapsed && (
-        <div className="subagent-chat subagent-chat-scroll" ref={chatRef}>
-          {session.feedback.length === 0 && session.pending_approvals.length === 0 && (
-            <div className="drawer-empty subagent-chat-empty">等待子会话响应...</div>
-          )}
-          {session.feedback.map((msg, i) => (
-            <SubagentBubble key={i} msg={msg} />
-          ))}
-          {session.pending_approvals.map((pa) => (
-            <div key={pa.tool_call_id} className="subagent-bubble subagent-bubble-pending">
-              <span className="subagent-bubble-role">待审批</span>
-              <div className="subagent-approval-tool">{pa.tool_name}</div>
-              <pre className="subagent-approval-args">
-                {JSON.stringify(pa.arguments, null, 2)}
-              </pre>
-            </div>
-          ))}
-        </div>
-      )}
+      </span>
     </div>
+
+    {!collapsed && (<div className="subagent-chat subagent-chat-scroll" ref={chatRef}>
+      {session.feedback.length === 0 && session.pending_approvals.length === 0 && (
+        <div className="drawer-empty subagent-chat-empty">等待子会话响应...</div>
+      )}
+      {session.feedback.map((msg, i) => (
+        <SubagentBubble key={i} msg={msg} />
+      ))}
+      {session.pending_approvals.map((pa) => (
+        <div key={pa.tool_call_id} className="subagent-bubble subagent-bubble-pending">
+          <span className="subagent-bubble-role">待审批</span>
+          <div className="subagent-approval-tool">{pa.tool_name}</div>
+          <pre className="subagent-approval-args">
+            {JSON.stringify(pa.arguments, null, 2)}
+          </pre>
+        </div>
+      ))}
+    </div>
+    )}
+  </div>
   );
 }
 
-function SubagentBubble({ msg }: { msg: SubagentMessage }) {
+export function SubagentBubble({ msg }: { msg: SubagentMessage }) {
   const role = (msg.role || "msg").toLowerCase();
   const label = ROLE_LABEL[role] ?? (msg.role || "MSG");
   const variant = bubbleVariant(role);

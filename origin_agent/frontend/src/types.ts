@@ -124,6 +124,7 @@ export interface ChatMessage {
   playlist?: PlaylistEntry[];
   playlistAutoplay?: boolean;
   reasoningContent?: string;
+  reasoningDuration?: number;
 }
 
 export interface SessionInfo {

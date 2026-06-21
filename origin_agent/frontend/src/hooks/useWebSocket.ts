@@ -78,6 +78,7 @@ export function useWebSocket() {
   const ignoreStaleRef = useRef(false);
   const lastMessageCountRef = useRef(0);
   const streamDoneRef = useRef(false);
+  const reasoningStartRef = useRef<number | null>(null);
 
   const nextMessageIndex = useCallback((items: ChatMessage[]) => {
     const indexes = items
@@ -89,6 +90,7 @@ export function useWebSocket() {
   const ensureStreamingMessage = useCallback((streamId: string) => {
     setStreamingMessage((prev) => {
       if (prev && prev.id === streamId) return prev;
+      reasoningStartRef.current = null;
       return {
         role: "agent",
         content: "",
@@ -102,9 +104,15 @@ export function useWebSocket() {
   const flushStreamingMessage = useCallback(() => {
     setStreamingMessage((prev) => {
       if (!prev) return null;
+      let finalPrev = prev;
+      if (reasoningStartRef.current && prev.reasoningContent) {
+        const duration = Math.round((Date.now() - reasoningStartRef.current) / 1000);
+        finalPrev = { ...prev, reasoningDuration: duration };
+        reasoningStartRef.current = null;
+      }
       setMessages((m) => {
-        const exists = m.some((x) => x.id === prev.id);
-        return exists ? m.map((x) => (x.id === prev.id ? prev : x)) : [...m, prev];
+        const exists = m.some((x) => x.id === finalPrev.id);
+        return exists ? m.map((x) => (x.id === finalPrev.id ? finalPrev : x)) : [...m, finalPrev];
       });
       return null;
     });
@@ -112,6 +120,9 @@ export function useWebSocket() {
 
   const appendStreamingDelta = useCallback((streamId: string, delta: string, reasoningDelta?: string, toolCall?: unknown) => {
     ensureStreamingMessage(streamId);
+    if (reasoningDelta && reasoningStartRef.current == null) {
+      reasoningStartRef.current = Date.now();
+    }
     setStreamingMessage((prev) => {
       if (!prev) return null;
       const content = typeof prev.content === "string" ? prev.content : "";
