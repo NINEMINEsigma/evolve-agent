@@ -86,6 +86,25 @@ const MessageItem = memo(function MessageItem({ message, archived, onImageClick,
     },
   }), [onImageClick]);
 
+  const formatReasoningDuration = (seconds: number): string => {
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    if (mins > 0) {
+      return `Thought for ${mins} minute${mins > 1 ? "s" : ""} ${secs} second${secs > 1 ? "s" : ""}`;
+    }
+    return `Thought for ${secs} second${secs > 1 ? "s" : ""}`;
+  };
+
+  const reasoningLabel = useMemo(() => {
+    if (m.reasoningDuration != null) {
+      return formatReasoningDuration(m.reasoningDuration);
+    }
+    if (streaming && m.reasoningContent) {
+      return "Thinking...";
+    }
+    return "Thought process";
+  }, [m.reasoningDuration, streaming, m.reasoningContent]);
+
   const saveEdit = async () => {
     const next = draft.trimEnd();
     if (next === m.content) {
@@ -225,7 +244,7 @@ const MessageItem = memo(function MessageItem({ message, archived, onImageClick,
         <>
           {m.reasoningContent && (
             <details className="reasoning-block">
-              <summary className="reasoning-summary">思考过程</summary>
+              <summary className="reasoning-summary">{reasoningLabel}</summary>
               <div className="reasoning-content">{m.reasoningContent}</div>
             </details>
           )}
@@ -246,9 +265,11 @@ const MessageItem = memo(function MessageItem({ message, archived, onImageClick,
 
   return (
     <div className={`message message-${m.role}`} data-message-id={m.id}>
-      <div className="message-avatar">
-        {m.role === "user" ? "U" : m.role === "agent" ? "⚡" : m.role === "error" ? "!" : m.role === "tool" ? "🔧" : "●"}
-      </div>
+      {m.role !== "user" && m.role !== "agent" && (
+        <div className="message-avatar">
+          {m.role === "error" ? "!" : m.role === "tool" ? "🔧" : "●"}
+        </div>
+      )}
       <div className="message-bubble">
         {isTool && !editing ? (
           <div className="tool-call-block">

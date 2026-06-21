@@ -1,17 +1,35 @@
 /* ── CSS Variables ── */
 :root {
-  --bg-primary: #1a1a1a;
-  --bg-secondary: #212121;
-  --bg-tertiary: #2a2a2a;
-  --bg-hover: #333;
-  --text-primary: #e4e4e4;
-  --text-secondary: #888;
-  --text-muted: #666;
-  --accent: #19c37d;
-  --accent-hover: #1a7f5a;
-  --user-bubble: #2f2f2f;
-  --border: #3a3a3a;
+  /* Background — 4 levels of cool dark */
+  --bg-primary:   #0b0b0f;
+  --bg-secondary: #131319;
+  --bg-tertiary:  #1a1a22;
+  --bg-hover:     #232330;
+  --bg-elevated:  #1f1f29;
+
+  /* Text */
+  --text-primary:   #e6e6ec;
+  --text-secondary: #9a9aa8;
+  --text-muted:     #5c5c6a;
+
+  /* Accent — purple */
+  --accent:       #a78bfa;
+  --accent-hover: #7c3aed;
+  --accent-soft:  rgba(124, 58, 237, 0.14);
+  --accent-glow:  rgba(167, 139, 250, 0.45);
+  --accent-grad:  linear-gradient(135deg, #7c3aed 0%, #6366f1 100%);
+
+  /* Surfaces */
+  --user-bubble: #1f1f29;
+
+  /* Borders */
+  --border:        rgba(255, 255, 255, 0.06);
+  --border-strong: rgba(255, 255, 255, 0.10);
+
+  /* Status */
   --danger: #ef4444;
-  --radius: 10px;
-  --radius-sm: 6px;
+
+  /* Shape */
+  --radius:    14px;
+  --radius-sm: 8px;
 }

@@ -1,12 +1,15 @@
 /* ── Input bar ── */
 .input-bar {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  padding: 16px 20px;
-  border-top: 1px solid var(--border);
-  background: var(--bg-secondary);
-  flex-shrink: 0;
+  position: absolute;
+  bottom: 16px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: calc(100% - 40px);
+  max-width: 900px;
+  z-index: 10;
+  padding: 0;
+  border: none;
+  background: transparent;
 }
 
 .input-bar-inner {
@@ -14,34 +17,41 @@
   flex-direction: column;
   gap: 8px;
   width: 100%;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border);
+  border-radius: 24px;
+  padding: 6px 10px;
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.35), 0 0 1px rgba(255, 255, 255, 0.06);
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+.input-bar-inner:focus-within {
+  border-color: var(--border-strong);
+  box-shadow: 0 4px 28px rgba(0, 0, 0, 0.45), 0 0 0 1px var(--border-strong);
 }
 
 .input-bar-row {
   display: flex;
-  gap: 8px;
+  gap: 6px;
   width: 100%;
+  align-items: center;
 }
 
 .input-field {
   flex: 1;
-  padding: 10px 16px;
-  border: 1px solid var(--border);
+  padding: 10px 12px;
+  border: none;
   border-radius: var(--radius);
-  background: var(--bg-tertiary);
+  background: transparent;
   color: var(--text-primary);
   font-size: 14px;
   line-height: 1.5;
   outline: none;
-  transition: border-color 0.2s;
   resize: none;
   overflow-y: auto;
   min-height: 40px;
   max-height: 200px;
   font-family: inherit;
-}
-
-.input-field:focus {
-  border-color: var(--accent);
 }
 
 .input-field::placeholder {
@@ -52,23 +62,54 @@
   opacity: 0.5;
 }
 
-.send-btn {
-  width: 40px;
-  height: 40px;
+/* ── Tool buttons (left side) ── */
+.input-tool-btn {
+  width: 36px;
+  height: 36px;
   border: none;
-  border-radius: var(--radius);
-  background: var(--accent);
-  color: #fff;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--text-muted);
   cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
-  transition: background 0.2s;
+  transition: background 0.15s, color 0.15s;
+}
+
+.input-tool-btn:hover:not(:disabled) {
+  background: var(--bg-hover);
+  color: var(--text-secondary);
+}
+
+.input-tool-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.send-btn {
+  width: 36px;
+  height: 36px;
+  border: none;
+  border-radius: 50%;
+  background: var(--bg-hover);
+  color: var(--text-secondary);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  transition: background 0.15s, color 0.15s, transform 0.05s;
 }
 
 .send-btn:hover:not(:disabled) {
-  background: var(--accent-hover);
+  background: var(--bg-elevated);
+  color: var(--text-primary);
+}
+
+.send-btn:active:not(:disabled) {
+  transform: translateY(1px);
 }
 
 .send-btn:disabled {
@@ -77,18 +118,23 @@
 }
 
 .interrupt-btn {
-  width: 40px;
-  height: 40px;
+  width: 36px;
+  height: 36px;
   border: none;
-  border-radius: var(--radius);
-  background: var(--danger);
-  color: #fff;
-  font-size: 18px;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--text-muted);
   cursor: pointer;
   flex-shrink: 0;
   display: flex;
   align-items: center;
   justify-content: center;
+  transition: background 0.15s, color 0.15s;
+}
+
+.interrupt-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text-secondary);
 }
 
 /* ── File upload ── */
@@ -99,9 +145,9 @@
 .upload-btn {
   width: 40px;
   height: 40px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  background: var(--bg-tertiary);
+  border: 1px solid var(--border-strong);
+  border-radius: 12px;
+  background: transparent;
   color: var(--text-secondary);
   cursor: pointer;
   display: flex;
@@ -134,9 +180,9 @@
   min-height: 40px;
   max-height: 200px;
   padding: 10px 16px;
-  border: 1px solid var(--border);
+  border: none;
   border-radius: var(--radius);
-  background: var(--bg-tertiary);
+  background: transparent;
   color: var(--text-primary);
   font-size: 14px;
   line-height: 1.5;
@@ -145,10 +191,6 @@
   white-space: pre-wrap;
   word-break: break-word;
   font-family: inherit;
-}
-
-.rich-input:focus {
-  border-color: var(--accent);
 }
 
 .rich-input:empty::before {
@@ -221,7 +263,7 @@
   width: 64px;
   height: 64px;
   border-radius: var(--radius-sm);
-  border: 1px solid var(--border);
+  border: 1px solid var(--border-strong);
   overflow: hidden;
   background: var(--bg-tertiary);
   flex-shrink: 0;
@@ -255,33 +297,3 @@
   background: rgba(0, 0, 0, 0.8);
 }
 
-/* ── Legacy textarea styles (kept for compatibility) ── */
-.input-field {
-  flex: 1;
-  padding: 10px 16px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  background: var(--bg-tertiary);
-  color: var(--text-primary);
-  font-size: 14px;
-  line-height: 1.5;
-  outline: none;
-  transition: border-color 0.2s;
-  resize: none;
-  overflow-y: auto;
-  min-height: 40px;
-  max-height: 200px;
-  font-family: inherit;
-}
-
-.input-field:focus {
-  border-color: var(--accent);
-}
-
-.input-field::placeholder {
-  color: var(--text-muted);
-}
-
-.input-field:disabled {
-  opacity: 0.5;
-}

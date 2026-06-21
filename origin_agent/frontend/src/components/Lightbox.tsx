@@ -21,28 +21,28 @@ function Toolbar({ onClose }: { onClose: () => void }) {
       <button
         className="lightbox-btn"
         onClick={() => zoomIn(0.2)}
-        title="放大"
+        data-tooltip="放大"
       >
         +
       </button>
       <button
         className="lightbox-btn"
         onClick={() => zoomOut(0.2)}
-        title="缩小"
+        data-tooltip="缩小"
       >
         −
       </button>
       <button
         className="lightbox-btn"
         onClick={() => resetTransform()}
-        title="重置"
+        data-tooltip="重置"
       >
         ⟲
       </button>
       <button
         className="lightbox-btn lightbox-btn-close"
         onClick={onClose}
-        title="关闭"
+        data-tooltip="关闭"
       >
         ×
       </button>

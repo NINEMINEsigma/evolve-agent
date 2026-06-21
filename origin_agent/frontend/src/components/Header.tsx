@@ -37,17 +37,16 @@ export default function Header({
     if (!cmdMenuOpen) return;
     const onClick = (e: MouseEvent) => {
       const target = e.target as Node;
-      if (cmdBtnRef.current && !cmdBtnRef.current.contains(target)) {
-        setCmdMenuOpen(false);
-      }
+      if (cmdBtnRef.current?.contains(target)) return;
+      setCmdMenuOpen(false);
     };
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") setCmdMenuOpen(false);
     };
-    document.addEventListener("mousedown", onClick);
+    document.addEventListener("click", onClick);
     document.addEventListener("keydown", onKey);
     return () => {
-      document.removeEventListener("mousedown", onClick);
+      document.removeEventListener("click", onClick);
       document.removeEventListener("keydown", onKey);
     };
   }, [cmdMenuOpen]);
@@ -96,7 +95,7 @@ export default function Header({
         <button
           className="sidebar-toggle"
           onClick={onToggleSidebar}
-          title={sidebarCollapsed ? "展开侧栏" : "收起侧栏"}
+          data-tooltip={sidebarCollapsed ? "展开侧栏" : "收起侧栏"}
         >
           {sidebarCollapsed ? (
             <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2">
@@ -108,19 +107,11 @@ export default function Header({
             </svg>
           )}
         </button>
-        <div className="model-icon">⚡</div>
-        <div>
-          <div className="model-name">Evolve Agent</div>
-          <div className={`model-status ${status === "已连接" ? "connected" : ""}`}>
-            <span className="status-dot" />
-            {status}
-          </div>
-        </div>
         <button
           ref={cmdBtnRef}
           className="header-action-btn"
           onClick={toggleCmdMenu}
-          title="命令菜单"
+          data-tooltip="命令菜单"
           disabled={shuttingDown}
         >
           ⋮
@@ -134,17 +125,26 @@ export default function Header({
               className={`context-menu-item ${showApprovalUI ? "context-menu-item-danger" : ""}`}
               onClick={showApprovalUI ? handleShutdownApprovalModel : undefined}
               style={showApprovalUI ? undefined : { opacity: 0.45, cursor: "not-allowed", userSelect: "none" }}
-              title={showApprovalUI ? "" : "审批模型未加载"}
+              data-tooltip={showApprovalUI ? "" : "审批模型未加载"}
             >
               关闭审批模型
             </div>
           </div>
         )}
       </div>
+
+      <div className="header-center">
+        <div className={`header-pill ${status === "已连接" ? "connected" : ""}`}>
+          <span className="status-dot" />
+          <span>Evolve Agent</span>
+        </div>
+        <span className="model-status">{status}</span>
+      </div>
+
       {sessionId && (
         <div className="header-right">
           {showApprovalUI && (
-            <label className="handsfree-toggle" title={handsfreeMode ? "脱手模式已开启 — 工具调用由 AI 自动审批" : "脱手模式已关闭 — 工具调用需用户审批"}>
+            <label className="handsfree-toggle" data-tooltip={handsfreeMode ? "脱手模式已开启 — 工具调用由 AI 自动审批" : "脱手模式已关闭 — 工具调用需用户审批"}>
               <span className="handsfree-label">脱手</span>
               <input
                 type="checkbox"
@@ -155,18 +155,65 @@ export default function Header({
             </label>
           )}
           {handsfreeMode && showApprovalUI && approvalModelName && (
-            <span className="approval-model-badge" title={`审批模型: ${approvalModelName}`}>
+            <span className="approval-model-badge" data-tooltip={`审批模型: ${approvalModelName}`}>
               {approvalModelName}
             </span>
           )}
-          <span className="session-badge" title="刷新页面后自动恢复此会话">
+          <span className="session-badge" data-tooltip="刷新页面后自动恢复此会话">
             {sessionId}
           </span>
-          <span className="token-badge" title={`累计消耗: ${tokenUsage.toLocaleString()}  |  已用上下文: ${contextTokens.toLocaleString()}  |  最大上下文: ${llmMaxContextTokens > 0 ? llmMaxContextTokens.toLocaleString() : "?"}`}>
+          <span className="token-badge" data-tooltip={`累计消耗: ${tokenUsage.toLocaleString()}  |  已用上下文: ${contextTokens.toLocaleString()}  |  最大上下文: ${llmMaxContextTokens > 0 ? llmMaxContextTokens.toLocaleString() : "?"}`}>
             累计 {tokenUsage.toLocaleString()} / 上下文 {contextTokens.toLocaleString()} / 上限 {llmMaxContextTokens > 0 ? llmMaxContextTokens.toLocaleString() : "?"}
           </span>
+          <TokenRing
+            contextTokens={contextTokens}
+            llmMaxContextTokens={llmMaxContextTokens}
+            tokenUsage={tokenUsage}
+          />
         </div>
       )}
     </header>
+  );
+}
+
+function TokenRing({
+  contextTokens,
+  llmMaxContextTokens,
+  tokenUsage,
+}: {
+  contextTokens: number;
+  llmMaxContextTokens: number;
+  tokenUsage: number;
+}) {
+  const percent =
+    llmMaxContextTokens > 0
+      ? Math.round((contextTokens / llmMaxContextTokens) * 100)
+      : 0;
+  const R = 12;
+  const C = 2 * Math.PI * R;
+  const offset = C * (1 - percent / 100);
+
+  return (
+    <span
+      className="token-ring"
+      data-tooltip={`累计消耗: ${tokenUsage.toLocaleString()}  |  已用上下文: ${contextTokens.toLocaleString()}  |  最大上下文: ${llmMaxContextTokens > 0 ? llmMaxContextTokens.toLocaleString() : "?"}`}
+    >
+      <svg viewBox="0 0 32 32" width="28" height="28">
+        <circle
+          className="token-ring-track"
+          cx="16"
+          cy="16"
+          r={R}
+        />
+        <circle
+          className="token-ring-progress"
+          cx="16"
+          cy="16"
+          r={R}
+          style={{ strokeDashoffset: offset }}
+        />
+      </svg>
+      <span className="token-ring-label">{percent}</span>
+    </span>
   );
 }

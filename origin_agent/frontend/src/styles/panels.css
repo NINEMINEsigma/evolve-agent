@@ -12,7 +12,7 @@
 .task-progress-strip-item {
   position: relative;
   height: 3px;
-  background: rgba(52, 199, 89, 0.16);
+  background: rgba(167, 139, 250, 0.16);
   border-radius: 999px;
   overflow: visible;
 }
@@ -22,9 +22,9 @@
   top: 0;
   left: 0;
   height: 100%;
-  background: #34c759;
+  background: var(--accent-grad);
   border-radius: 999px;
-  box-shadow: 0 0 8px rgba(52, 199, 89, 0.55);
+  box-shadow: 0 0 10px rgba(167, 139, 250, 0.45);
   transition: width 0.25s ease;
 }
 
@@ -240,8 +240,8 @@
 }
 
 .subagent-bubble-user {
-  background: rgba(25, 195, 125, 0.08);
-  border-color: rgba(25, 195, 125, 0.25);
+  background: var(--accent-soft);
+  border-color: rgba(124, 58, 237, 0.25);
   align-self: flex-end;
   max-width: 92%;
 }
@@ -300,12 +300,12 @@
 }
 
 .subagent-bubble-tool-result {
-  background: rgba(52, 199, 89, 0.06);
-  border-color: rgba(52, 199, 89, 0.2);
+  background: var(--accent-soft);
+  border-color: rgba(124, 58, 237, 0.2);
 }
 
 .subagent-bubble-tool-result .subagent-bubble-role {
-  color: #34c759;
+  color: var(--accent);
 }
 
 .subagent-bubble-decision {
@@ -337,6 +337,10 @@
 .subagent-card .subagent-info {
   cursor: pointer;
   user-select: none;
+}
+
+.subagent-card .subagent-info.no-toggle {
+  cursor: default;
 }
 
 .subagent-collapse-arrow {
@@ -496,8 +500,8 @@
 }
 
 .subagent-status-running {
-  background: rgba(52, 199, 89, 0.15);
-  color: #34c759;
+  background: var(--accent-soft);
+  color: var(--accent);
 }
 
 .subagent-status-waiting {

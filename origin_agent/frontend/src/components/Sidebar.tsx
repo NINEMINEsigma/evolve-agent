@@ -22,6 +22,15 @@ function sessionLabel(s: SessionInfo) {
   return s.title || s.id.slice(0, 8) + "...";
 }
 
+function buildTooltip(s: SessionInfo): string {
+  const parts: string[] = [];
+  parts.push(`ID: ${s.id}`);
+  parts.push(`时间: ${formatTime(s.last_activity_at || s.created_at)}`);
+  if (s.status === "archived") parts.push("状态: 已归档");
+  if (s.tags?.length) parts.push(`标签: ${s.tags.join(", ")}`);
+  return parts.join("\n");
+}
+
 function RelatedSessionShortcut({
   session,
   kind,
@@ -35,13 +44,12 @@ function RelatedSessionShortcut({
   return (
     <button
       className={`relation-shortcut ${isParent ? "relation-shortcut-parent" : "relation-shortcut-continuation"}`}
-      title={isParent ? "当前会话继承自此会话" : "继承自当前会话"}
+      data-tooltip={isParent ? "当前会话继承自此会话" : "继承自当前会话"}
       onClick={(e) => {
         e.stopPropagation();
         onSwitchSession(session.id);
       }}
     >
-      <span className="relation-shortcut-label">{isParent ? "父会话" : "继承会话"}</span>
       <span className="relation-shortcut-title">{sessionLabel(session)}</span>
     </button>
   );
@@ -79,7 +87,7 @@ function SessionListItem({
 
   return (
     <div
-      title={relationTooltip}
+      data-tooltip={relationTooltip || buildTooltip(s)}
       className={`session-item ${s.id === sessionId ? "active" : ""} ${isArchived ? "archived" : ""} ${isParentOfCurrent ? "parent-session" : ""} ${isContinuationOfCurrent ? "continuation-session" : ""} ${mergeMode && !isArchived ? "merge-unavailable" : ""}`}
       onClick={() => {
         if (canSelectForMerge) onToggleMergeSelect(s.id);
@@ -89,40 +97,35 @@ function SessionListItem({
         if (!mergeMode) onContextMenu(e, s.id);
       }}
     >
-      <div className="session-item-content">
-        <div className="session-item-row">
-          {mergeMode && (
-            isArchived ? (
-              <input
-                type="checkbox"
-                checked={selectedForMerge.has(s.id)}
-                onChange={() => onToggleMergeSelect(s.id)}
-                onClick={(e) => e.stopPropagation()}
-              />
-            ) : (
-              <span className="merge-placeholder" title="未归档会话不可合并">—</span>
-            )
-          )}
-          <div className="session-item-title">
-            {isParentOfCurrent && <span className="parent-mark" />}
-            {isContinuationOfCurrent && <span className="continuation-mark" />}
-            {s.pinned && <span className="pin-badge">★</span>}
-            {sessionLabel(s)}
-            {isArchived && <span className="archived-badge">已归档</span>}
-          </div>
-        </div>
-        <div className="session-item-sub">
-          <span className="session-item-id">{s.id}</span>
-          <span className="session-item-time">{formatTime(s.last_activity_at || s.created_at)}</span>
-        </div>
-        {(s.tags?.length || 0) > 0 && (
-          <div className="session-tags">
-            {s.tags!.map((t) => (
-              <span key={t} className="session-tag">{t}</span>
-            ))}
-          </div>
-        )}
-      </div>
+      {mergeMode && (
+        isArchived ? (
+          <input
+            type="checkbox"
+            checked={selectedForMerge.has(s.id)}
+            onChange={() => onToggleMergeSelect(s.id)}
+            onClick={(e) => e.stopPropagation()}
+            className="merge-checkbox"
+          />
+        ) : (
+          <span className="merge-placeholder" data-tooltip="未归档会话不可合并">—</span>
+        )
+      )}
+      <span className="session-item-title">
+        {s.pinned && <span className="pinned-mark" data-tooltip="已收藏">★</span>}
+        {sessionLabel(s)}
+      </span>
+      {!mergeMode && (
+        <button
+          className="session-item-more"
+          onClick={(e) => {
+            e.stopPropagation();
+            onContextMenu(e, s.id);
+          }}
+          data-tooltip="更多操作"
+        >
+          ⋮
+        </button>
+      )}
     </div>
   );
 }
@@ -153,23 +156,43 @@ export default function Sidebar({
   return (
     <aside className={`sidebar ${collapsed ? 'collapsed' : ''}`}>
       <div className="sidebar-header">
-        <div className="sidebar-title">💬 会话</div>
-        <button className="new-chat-btn" onClick={onNewChat}>+ 新对话</button>
-        <div className="sidebar-search">
-          <input
-            className="search-input"
-            type="text"
-            placeholder="搜索会话..."
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-          />
+        <div className="sidebar-toolbar">
+          <div className="sidebar-search">
+            <textarea
+              className="search-input"
+              rows={1}
+              placeholder="Search chats..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && !e.shiftKey) e.preventDefault();
+              }}
+            />
+          </div>
+          <button
+            className={`icon-btn ${mergeMode ? 'active' : ''}`}
+            onClick={onToggleMergeMode}
+            data-tooltip={mergeMode ? '退出多选' : '多选合并'}
+            aria-label={mergeMode ? '退出多选' : '多选合并'}
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <circle cx="5" cy="12" r="1.6" />
+              <circle cx="12" cy="12" r="1.6" />
+              <circle cx="19" cy="12" r="1.6" />
+            </svg>
+          </button>
+          <button
+            className="icon-btn"
+            onClick={onNewChat}
+            data-tooltip="新建会话"
+            aria-label="新建会话"
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M12 20h9" />
+              <path d="M16.5 3.5a2.121 2.121 0 1 1 3 3L7 19l-4 1 1-4 12.5-12.5z" />
+            </svg>
+          </button>
         </div>
-        <button
-          className={`merge-mode-toggle ${mergeMode ? 'active' : ''}`}
-          onClick={onToggleMergeMode}
-        >
-          {mergeMode ? '退出多选' : '多选合并'}
-        </button>
       </div>
       <div className="session-list">
         {sidebarSessions.length === 0 ? (
@@ -177,18 +200,6 @@ export default function Sidebar({
         ) : (
           sidebarSessions.map((s) => (
             <div key={s.id}>
-              {s.id === sessionId && (parentSessions.length > 0 || continuationSession) && (
-                <div className="relation-shortcuts relation-shortcuts-before">
-                  {parentSessions.map((parent) => (
-                    <RelatedSessionShortcut
-                      key={parent.id}
-                      session={parent}
-                      kind="parent"
-                      onSwitchSession={onSwitchSession}
-                    />
-                  ))}
-                </div>
-              )}
               <SessionListItem
                 session={s}
                 sessionId={sessionId}
@@ -199,13 +210,23 @@ export default function Sidebar({
                 onSwitchSession={onSwitchSession}
                 onContextMenu={onContextMenu}
               />
-              {s.id === sessionId && continuationSession && (
-                <div className="relation-shortcuts relation-shortcuts-after">
-                  <RelatedSessionShortcut
-                    session={continuationSession}
-                    kind="continuation"
-                    onSwitchSession={onSwitchSession}
-                  />
+              {s.id === sessionId && (parentSessions.length > 0 || continuationSession) && (
+                <div className="relation-shortcuts relation-shortcuts">
+                  {parentSessions.map((parent) => (
+                    <RelatedSessionShortcut
+                      key={parent.id}
+                      session={parent}
+                      kind="parent"
+                      onSwitchSession={onSwitchSession}
+                    />
+                  ))}
+                  {continuationSession && (
+                    <RelatedSessionShortcut
+                      session={continuationSession}
+                      kind="continuation"
+                      onSwitchSession={onSwitchSession}
+                    />
+                  )}
                 </div>
               )}
             </div>

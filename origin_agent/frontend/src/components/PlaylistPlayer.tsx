@@ -111,13 +111,13 @@ export default function PlaylistPlayer({ playlist, autoplay }: { playlist: Playl
           className="playlist-btn"
           onClick={handlePrev}
           disabled={currentIndex <= 0}
-          title="上一首"
+          data-tooltip="上一首"
         >
           <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor">
             <path d="M6 6h2v12H6zm3.5 6l8.5 6V6z" />
           </svg>
         </button>
-        <button className="playlist-btn playlist-play-btn" onClick={togglePlay} title={isPlaying ? "暂停" : "播放"}>
+        <button className="playlist-btn playlist-play-btn" onClick={togglePlay} data-tooltip={isPlaying ? "暂停" : "播放"}>
           {isPlaying ? (
             <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor">
               <path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z" />
@@ -132,7 +132,7 @@ export default function PlaylistPlayer({ playlist, autoplay }: { playlist: Playl
           className="playlist-btn"
           onClick={handleNext}
           disabled={currentIndex >= playlist.length - 1}
-          title="下一首"
+          data-tooltip="下一首"
         >
           <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor">
             <path d="M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z" />
@@ -141,7 +141,7 @@ export default function PlaylistPlayer({ playlist, autoplay }: { playlist: Playl
         <button
           className="playlist-btn playlist-expand-btn"
           onClick={() => setExpanded(v => !v)}
-          title={expanded ? "收起列表" : "展开列表"}
+          data-tooltip={expanded ? "收起列表" : "展开列表"}
         >
           <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor" style={{ transform: expanded ? "rotate(180deg)" : "none", transition: "transform 0.2s" }}>
             <path d="M7 10l5 5 5-5z" />
