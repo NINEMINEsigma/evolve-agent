@@ -95,7 +95,7 @@ def _build_context(cli: dict) -> RuntimeContext:
     return RuntimeContext(
         workspace       = Path(cli["workspace"]).resolve(),
         agentspace      = Path(cli["agentspace"]).resolve(),
-        fork_path       = Path(cli["evolve"]).resolve(),
+        fork_path       = Path(cli["evolve"]).resolve() if "evolve" in cli else Path(cli["workspace"]).resolve() / "slow_agent_space",
         skills_path     = (find_repo_root() / "skills").resolve(),
         log_path        = Path(cli["log"]).resolve(),
         mode            = str(cli["mode"]),

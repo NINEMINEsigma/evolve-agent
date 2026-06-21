@@ -29,7 +29,7 @@ def _handle_list_tools(args: dict[str, Any]) -> dict:
     # 子 Agent 沙箱：仅暴露被授权的工具
     allowed: set[str] | None = None
     try:
-        from subagent.report_tool import current_subagent_loop
+        from subagent.loop import current_subagent_loop
         loop = current_subagent_loop.get()
         if loop is not None:
             allowed = loop.allowed_tool_names

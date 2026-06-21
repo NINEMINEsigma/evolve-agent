@@ -4,7 +4,6 @@
 - ``context.py`` — SubRuntimeContext
 - ``loop.py`` — SubAgentLoop
 - ``orchestrator.py`` — SubAgentOrchestrator（进程级单例）
-- ``report_tool.py`` — report_to_parent 工具注册
 """
 
 from .context import SubRuntimeContext

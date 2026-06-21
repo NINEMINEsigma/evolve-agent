@@ -1,6 +1,4 @@
 """注册子 Agent 鉴权参数。
-
-模块导入时通过 ``registry.register()`` 注册 ``register_subagent`` 工具。
 以 name 为唯一标识，不允许覆盖已存在的注册项。
 """
 
@@ -62,6 +60,49 @@ def _handle_register_subagent(args: dict[str, Any]) -> dict:
         success=True,
         name=name,
         message=f"Subagent '{name}' registered successfully.",
+    )
+
+
+def _handle_register_subagent_from_parent(args: dict[str, Any]) -> dict:
+    """以主 Agent 当前 LLM 配置为模板注册子 Agent，只需提供 name。"""
+    from system.context import get_runtime_context
+
+    name: str = str(args.get("name", "")).strip()
+    system_prompt_path: str | None = args.get("system_prompt_path")
+
+    if not name:
+        return tool_error("'name' is required and must not be empty")
+
+    if name in _subagent_registry:
+        return tool_error(
+            f"Subagent '{name}' already registered. "
+            "Unregister it first if you need to replace.",
+            registered=True,
+        )
+
+    ctx = get_runtime_context()
+
+    _subagent_registry[name] = {
+        "base_url": ctx.llm_base_url,
+        "model": ctx.llm_model,
+        "api_key": ctx.llm_api_key or None,
+        "system_prompt_path": system_prompt_path if system_prompt_path else None,
+        "max_output_tokens": ctx.llm_max_output_tokens,
+        "max_context_tokens": ctx.llm_max_context_tokens,
+    }
+    _save_subagents()
+    logger.info(
+        "Registered subagent '%s' from parent config: %s @ %s",
+        name, ctx.llm_model, ctx.llm_base_url,
+    )
+    return tool_result(
+        success=True,
+        name=name,
+        base_url=ctx.llm_base_url,
+        model=ctx.llm_model,
+        max_output_tokens=ctx.llm_max_output_tokens,
+        max_context_tokens=ctx.llm_max_context_tokens,
+        message=f"Subagent '{name}' registered using parent agent's LLM config.",
     )
 
 
@@ -127,6 +168,44 @@ registry.register(
         },
     },
     handler=_handle_register_subagent,
+    emoji="🤖",
+    danger_level="write",
+)
+
+registry.register(
+    name="register_subagent_from_parent",
+    toolset="multiagent",
+    schema={
+        # 以主 Agent 当前的 LLM 配置为模板注册一个子 Agent。
+        # 仅需提供 name，其余参数（base_url、model、api_key、max_output_tokens、
+        # max_context_tokens）均自动从主 Agent 运行时上下文继承。
+        # 可选的 system_prompt_path 用于指定自定义系统提示词文件。
+        # 不允许覆盖已存在的注册项（需先 unregister 再重新 register）。
+        "description": (
+            "Register a sub-agent using the parent agent's current LLM configuration as a template. "
+            "Only 'name' is required; all other parameters (base_url, model, api_key, "
+            "max_output_tokens, max_context_tokens) are inherited from the parent agent. "
+            "Optional 'system_prompt_path' can specify a custom system prompt file. "
+            "Existing entries cannot be overwritten (unregister first if needed)."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "name": {
+                    "type": "string",
+                    # 子 Agent 的唯一标识名称。
+                    "description": "Unique identifier for the sub-agent.",
+                },
+                "system_prompt_path": {
+                    "type": "string",
+                    # 可选的自定义系统提示词文件绝对路径。
+                    "description": "Optional absolute path to a custom system prompt text file. Must exist at sub-agent launch time if specified.",
+                },
+            },
+            "required": ["name"],
+        },
+    },
+    handler=_handle_register_subagent_from_parent,
     emoji="🤖",
     danger_level="write",
 )

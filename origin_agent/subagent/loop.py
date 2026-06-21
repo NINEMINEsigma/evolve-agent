@@ -1,7 +1,7 @@
 """子 Agent 的 LLM 调用 + 工具执行循环。
 
 参考 ``AgentLoop._process_message_locked`` 的结构，但适配子 Agent 的特化需求：
-- 工具调用分类处理（report_to_parent 立即执行不暂停，其他工具阻塞等审批）
+- 工具调用分类处理（readonly 立即执行，其他工具阻塞等审批）
 - 独立 LLM 客户端（SubRuntimeContext）
 - 收件箱/发件箱机制
 """
@@ -12,6 +12,7 @@ import asyncio
 import json
 import logging
 import time as _time_module
+from contextvars import ContextVar
 from pathlib import Path
 from typing import Any
 
@@ -19,9 +20,11 @@ from abstract.tools.registry import ToolEntry, registry as tool_registry
 from component.llm import LLMClient, LLMResponse, ToolCall
 from entity.puretype import Role
 
-from .report_tool import current_subagent_loop
-
 logger = logging.getLogger(__name__)
+
+# 由 SubAgentLoop 在每次工具执行前设置，供沙箱隔离（list_tools）及工具 handler 使用。
+# 类型标注为 Any 以避免循环导入；实际类型为 subagent.loop.SubAgentLoop。
+current_subagent_loop: ContextVar[Any] = ContextVar("current_subagent_loop")
 
 # 分隔符 — 用于合并多条消息
 PARENT_MESSAGE_SEPARATOR = "[Main Agent Message]"
@@ -178,9 +181,6 @@ class SubAgentLoop:
 
                 if self._cancel_event.is_set():
                     return
-
-                # 记录本轮是否调用了 report_to_parent
-                self._called_report_this_chain = False
 
                 # 推送 reasoning（若有）
                 reasoning_text = getattr(resp, "reasoning_content", None)
@@ -366,17 +366,6 @@ class SubAgentLoop:
             })
             return True
         return False
-
-    async def _execute_report(self, tc: ToolCall) -> dict[str, Any]:
-        """执行 report_to_parent 工具调用。"""
-        try:
-            current_subagent_loop.set(self)
-            result = tool_registry.dispatch(tc.name, dict(tc.arguments))
-            return self._make_tool_msg(tc.id, json.dumps(result, ensure_ascii=False))
-        except Exception as exc:
-            return self._make_tool_msg(tc.id, f"report_to_parent failed: {exc}")
-        finally:
-            current_subagent_loop.set(None)
 
     async def _queue_for_approval(self, tc: ToolCall) -> dict[str, Any]:
         """将工具调用加入待审批队列并阻塞等待结果。

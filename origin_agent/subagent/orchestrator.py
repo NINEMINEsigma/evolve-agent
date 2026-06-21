@@ -28,8 +28,7 @@ from abstract.tools.registry import registry as tool_registry
 from system.context import get_runtime_context
 
 from .context import SubRuntimeContext, build_subagent_context
-from .loop import SUB_MESSAGE_SEPARATOR, SubAgentLoop
-from .report_tool import current_subagent_loop
+from .loop import SUB_MESSAGE_SEPARATOR, SubAgentLoop, current_subagent_loop
 
 logger = logging.getLogger(__name__)
 
