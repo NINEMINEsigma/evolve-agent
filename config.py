@@ -54,7 +54,7 @@ for file in File("custom_models/").childs():
     if file.suffix == "gguf" or file.suffix == ".gguf":
         check_default_approval_model_path = str(file.name)
         break
-argparse_parser.add_argument("--approval_model", type=str, default="0")
+argparse_parser.add_argument("--approval_model", type=str, default=argparse.SUPPRESS)
 argparse_parser.add_argument("--approval_model_n_ctx", type=int, default=argparse.SUPPRESS)
 argparse_parser.add_argument("--approval_model_cuda", action="store_true", default=argparse.SUPPRESS)
 argparse_parser.add_argument("--approval_model_port", type=int, default=argparse.SUPPRESS)
@@ -88,7 +88,7 @@ class Config(BaseModel):
     llm_temperature: float = 0.95
     llm_reasoning_effort: str = "medium"
     merge_concat_threshold: int = 50000
-    approval_model: str = "0"
+    approval_model: str = check_default_approval_model_path
     approval_model_n_ctx: int = 65536
     approval_model_cuda: bool = True
     approval_model_port: int = 8081
