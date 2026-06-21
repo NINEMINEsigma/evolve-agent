@@ -20,7 +20,7 @@ _lock = threading.RLock()
 
 
 def _allowlist_path() -> Path:
-    return get_runtime_context().workspace / "logs" / "tool_allowlist.json"
+    return get_runtime_context().workspace / "tool_allowlist.json"
 
 
 def _json_safe(value: Any) -> Any:

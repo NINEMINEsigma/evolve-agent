@@ -28,7 +28,7 @@ def _get_store_path() -> Path:
     from system.context import get_runtime_context
 
     ctx = get_runtime_context()
-    return ctx.workspace / "logs" / SUBAGENT_STORE_FILENAME
+    return ctx.workspace / SUBAGENT_STORE_FILENAME
 
 # ── 内存注册表 ─────────────────────────────────────────────────────
 

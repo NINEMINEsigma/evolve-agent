@@ -310,7 +310,7 @@ class SessionManager:
             try:
                 from system.context import get_runtime_context
                 ws: Path = get_runtime_context().workspace
-                candidate: Path = ws / "logs" / "sessions"
+                candidate: Path = ws / "sessions"
                 if candidate.exists():
                     self._store_dir = candidate
             except Exception:

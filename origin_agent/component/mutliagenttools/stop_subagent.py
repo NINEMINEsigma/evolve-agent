@@ -37,7 +37,7 @@ registry.register(
     toolset="multiagent",
     schema={
         # 强制终止一个子 Agent 会话。每次仅停止一个子 Agent。
-        # 停止后完整会话历史保存到 workspace/logs/subagents/ 下的 JSONL 文件。
+        # 停止后完整会话历史保存到 agentspace/subagents/ 下的 JSONL 文件。
         # 已完成的子 Agent 无法再次停止。等待中的子 Agent 直接移除不落盘。
         # 若等待队列非空，停止后自动激活队列头部的一个子 Agent（一出一入）。
         "description": (

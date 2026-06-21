@@ -68,7 +68,7 @@ MERGE_CONCAT_THRESHOLD: int = 50000
 # 子 Agent 最大工具调用轮次上限 — 复用父 Agent 的 _MAX_TOOL_TURNS 语义，防止死循环
 MAX_TOOL_TURNS: int = 90
 
-# 子 Agent 注册表持久化文件名 — 存放于 workspace/logs/ 下
+# 子 Agent 注册表持久化文件名 — 存放于 workspace/ 下
 SUBAGENT_STORE_FILENAME: str = "subagents.json"
 
 # 子 Agent 周期收集空闲触发时间（秒）— 父 Agent 消息队列空闲超过此时间后触发收集
@@ -98,5 +98,5 @@ SUBAGENT_READONLY_WHITELIST: list[str] = [
     "media_info",
 ]
 
-# Cron 任务持久化文件名 — 存放于 workspace/logs/ 下
+# Cron 任务持久化文件名 — 存放于 workspace/ 下
 CRON_STORE_FILENAME: str = "cron_jobs.json"

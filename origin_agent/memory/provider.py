@@ -1,6 +1,6 @@
 """EasysaveMemoryProvider — 基于 easysave 的持久化 memory。
 
-将对话历史存储在 ``workspace/logs/memory/`` 中，
+将对话历史存储在 ``workspace/memory/`` 中，
 使 agent 在页面刷新和重启后仍能记住过去的回合。
 """
 
@@ -35,7 +35,7 @@ class EasysaveMemoryProvider(MemoryProvider):
     """
 
     def __init__(self, memory_dir: str | Path = "") -> None:
-        self._dir: Path = Path(memory_dir) if memory_dir else Path("workspace/logs/memory")
+        self._dir: Path = Path(memory_dir) if memory_dir else Path("workspace/memory")
         self._dir.mkdir(parents=True, exist_ok=True)
         self._session_id: str = ""
         self._index: dict[str, Any] = {}

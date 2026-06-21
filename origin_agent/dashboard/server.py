@@ -16,11 +16,29 @@ from system.pathutils import get_agent_dir, get_template_path
 
 logger = logging.getLogger(__name__)
 
-# 解析 workspace 路径
-_WORKSPACE: Path = Path(".").resolve()
-_LOGS_DIR: Path = _WORKSPACE / "logs"
-_MEMORY_DIR: Path = _LOGS_DIR / "memory"
-_SKILLS_DIR: Path = _WORKSPACE / "skills"
+# ---------------------------------------------------------------------------
+# 路径解析（延迟获取，避免在 RuntimeContext 尚未 set 时触发导入）
+# ---------------------------------------------------------------------------
+
+
+def _get_workspace() -> Path:
+    from system.context import get_runtime_context
+    return get_runtime_context().workspace
+
+
+def _get_logs_dir() -> Path:
+    from system.context import get_runtime_context
+    return get_runtime_context().log_path.parent
+
+
+def _get_memory_dir() -> Path:
+    return _get_workspace() / "memory"
+
+
+def _get_skills_dir() -> Path:
+    from system.context import get_runtime_context
+    return get_runtime_context().skills_path
+
 
 # AgentLoop 引用 — 由 gateway.server 在 server 启动前设置。
 # 用于暴露运行中 agent 的 token 消耗和工具调用统计。
@@ -39,9 +57,10 @@ def set_agent_loop(loop: object) -> None:
 def _list_skills() -> list[dict[str, Any]]:
     """递归扫描 project-root/skills/ 查找 SKILL.md 文件并解析 YAML frontmatter。"""
     result: list[dict[str, Any]] = []
-    if not _SKILLS_DIR.exists():
+    skills_dir = _get_skills_dir()
+    if not skills_dir.exists():
         return result
-    for skill_file in sorted(_SKILLS_DIR.rglob("SKILL.md")):
+    for skill_file in sorted(skills_dir.rglob("SKILL.md")):
         try:
             text: str = skill_file.read_text(encoding="utf-8")
             parts: list[str] = text.split("---", 2)
@@ -78,15 +97,16 @@ def _list_skills() -> list[dict[str, Any]]:
 def _list_memory_sessions() -> list[dict[str, Any]]:
     import json
     result: list[dict[str, Any]] = []
-    if not _MEMORY_DIR.exists():
+    memory_dir = _get_memory_dir()
+    if not memory_dir.exists():
         return result
     try:
-        idx_path: Path = _MEMORY_DIR / "_sessions.json"
+        idx_path: Path = memory_dir / "_sessions.json"
         if idx_path.exists():
             idx: dict = json.loads(idx_path.read_text(encoding="utf-8"))
             sessions: list = idx.get("sessions", []) if isinstance(idx, dict) else []
             for sid in sessions[-20:]:  # 最近 20 个
-                sp: Path = _MEMORY_DIR / f"session_{sid}.json"
+                sp: Path = memory_dir / f"session_{sid}.json"
                 size: int = sp.stat().st_size if sp.exists() else 0
                 # 尝试从 session 文件提取消息计数和最后修改时间
                 msg_count: int = 0
@@ -110,9 +130,10 @@ def _list_memory_sessions() -> list[dict[str, Any]]:
 
 def _list_logs() -> list[dict[str, str]]:
     files: list[dict[str, str]] = []
-    if not _LOGS_DIR.exists():
+    logs_dir = _get_logs_dir()
+    if not logs_dir.exists():
         return files
-    for p in sorted(_LOGS_DIR.glob("*.log"), reverse=True)[:10]:
+    for p in sorted(logs_dir.glob("*.log"), reverse=True)[:10]:
         try:
             files.append({
                 "name": p.name,
@@ -127,9 +148,10 @@ def _list_logs() -> list[dict[str, str]]:
 def _read_log(filename: str, lines: int = 200) -> str:
     # 解析以防护路径遍历
     resolved: Path
+    logs_dir = _get_logs_dir()
     try:
-        resolved = (_LOGS_DIR / filename).resolve()
-        resolved.relative_to(_LOGS_DIR.resolve())
+        resolved = (logs_dir / filename).resolve()
+        resolved.relative_to(logs_dir.resolve())
     except (ValueError, OSError):
         raise HTTPException(400, "Invalid filename")
     if not resolved.exists():
@@ -154,7 +176,7 @@ def register_dashboard_routes(app: FastAPI) -> None:
         ws_exists: bool = (get_agent_dir() / "__main__.py").exists()
         return {
             "status": "running" if ws_exists else "unknown",
-            "workspace": str(_WORKSPACE),
+            "workspace": str(_get_workspace()),
             "logs": len(_list_logs()),
             "skills": len(_list_skills()),
             "memory_sessions": len(_list_memory_sessions()),
@@ -183,7 +205,7 @@ def register_dashboard_routes(app: FastAPI) -> None:
     @app.get("/api/evolution/history")
     async def evolution_history():
         """返回 run.py 在交换期间写入的进化日志。"""
-        status_file: Path = Path(__file__).resolve().parent.parent.parent / "workspace" / "logs" / "evolution.status"
+        status_file: Path = _get_logs_dir() / "evolution.status"
         if status_file.exists():
             return _json.loads(status_file.read_text(encoding="utf-8"))
         return []

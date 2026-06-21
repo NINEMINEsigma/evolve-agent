@@ -20,7 +20,7 @@ python run.py --load <config_key>
 
 Requires `OPENAI_API_KEY`. Optional `OPENAI_BASE_URL` to override the LLM endpoint. Web UI at `http://127.0.0.1:8765`.
 
-CLI flags (override `config.py` defaults): `--fouce_init`, `--approval_model_path`, `--approval_model_cuda`, `--llm_model`, `--llm_temperature`, `--llm_max_context_tokens`, `--llm_max_output_tokens`, `--llm_reasoning_effort`, `--gateway_host`, `--gateway_port`, `--console_log`.
+CLI flags (override `config.py` defaults): `--fouce_init`, `--approval_model`, `--approval_model_cuda`, `--llm_model`, `--llm_temperature`, `--llm_max_context_tokens`, `--llm_max_output_tokens`, `--llm_reasoning_effort`, `--gateway_host`, `--gateway_port`, `--console_log`.
 
 Environment check: `python check_env.py --cuda`
 
@@ -123,7 +123,7 @@ Assembled by `system/prompt.py`. Detects `templates/zh/` existence → defaults 
 ## Approval (component/approval.py)
 
 - **Normal mode**: user confirms tools via WebSocket frontend prompt.
-- **Adventure mode**: local GGUF model auto-approves. Enabled by default if a GGUF model is found in `custom_models/` (default filename `Qwen3.5-0.8B-Q8_0.gguf`). Explicit flags: `--approval_model_path <gguf>` and optional `--approval_model_cuda`. Uses `third/llamaapis` (llama.cpp subprocess wrapper).
+- **Adventure mode**: local GGUF model auto-approves. Enabled by default if a GGUF model is found in `custom_models/` (default filename `Qwen3.5-0.8B-Q8_0.gguf`). Explicit flags: `--approval_model <gguf>` and optional `--approval_model_cuda`. Uses `third/llamaapis` (llama.cpp subprocess wrapper).
 
 ## Frontend
 

@@ -53,7 +53,7 @@ def _get_cron_store_path() -> Path:
     from system.context import get_runtime_context
 
     ctx = get_runtime_context()
-    return ctx.workspace / "logs" / CRON_STORE_FILENAME
+    return ctx.workspace / CRON_STORE_FILENAME
 
 
 # ── cron 解析器（标准库实现）──────────────────────────────────

@@ -195,14 +195,14 @@ You can modify your own source code and complete evolution through the following
         agent_loop: AgentLoop | None = None
         try:
             from entry.agent import AgentLoop
-            history_path: str = str(self.ctx.workspace / "logs" / "sessions")
+            history_path: str = str(self.ctx.workspace / "sessions")
             agent_loop = AgentLoop(self.ctx, history_store_path=history_path)
 
             # 注册持久化 memory provider
             try:
                 from memory.provider import EasysaveMemoryProvider
                 mem: EasysaveMemoryProvider = EasysaveMemoryProvider(
-                    memory_dir=str(self.ctx.workspace / "logs" / "memory")
+                    memory_dir=str(self.ctx.workspace / "memory")
                 )
                 agent_loop.add_memory_provider(mem)
                 logger.info("EasysaveMemoryProvider registered")
@@ -222,7 +222,7 @@ You can modify your own source code and complete evolution through the following
 
         # ---- 配置 session 持久化 ----
         from gateway.server import configure_sessions, sessions
-        configure_sessions(str(self.ctx.workspace / "logs" / "sessions"))
+        configure_sessions(str(self.ctx.workspace / "sessions"))
 
         # ---- 将 SessionManager 注入 AgentLoop ----
         if agent_loop is not None:

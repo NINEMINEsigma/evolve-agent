@@ -18,12 +18,12 @@ origin_agent_codes_path = Path("origin_agent")
 # create directorys if they don't exist
 if workspace_path.exists() == False:
     workspace_path.mkdir(parents=True, exist_ok=True)
-if logs_path.exists() == False:
-    logs_path.mkdir(parents=True, exist_ok=True)
-if agentspace_path.exists() == False:
-    agentspace_path.mkdir(parents=True, exist_ok=True)
+if logs_path_name.exists() == False:
+    logs_path_name.mkdir(parents=True, exist_ok=True)
+if agentspace_path_name.exists() == False:
+    agentspace_path_name.mkdir(parents=True, exist_ok=True)
 
-log_file_path = logs_path / f"{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}.log"
+log_file_path = logs_path_name / f"{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}.log"
 file_stream = logging.FileHandler(log_file_path)
 file_stream.setLevel(logging.DEBUG)
 file_stream.setFormatter(logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
@@ -56,7 +56,7 @@ from third.filesystem import File
 
 
 # ── evolution status journal ─────────────────────────────────────────
-_EVOLVE_STATUS_PATH = logs_path / "evolution.status"
+_EVOLVE_STATUS_PATH = logs_path_name / "evolution.status"
 
 
 def _append_evolve_event(stage: str, detail: str) -> None:
@@ -84,8 +84,8 @@ if __name__ == "__main__":
     fast_agent_space = (workspace_path/fast_agent_space_path)
     slow_agent_space = (workspace_path/slow_agent_space_path)
     source = File(origin=str(origin_agent_codes_path))
-    if (agentspace_path/"SOUL.md").exists() == False:
-        File("SOUL.md").copy_to(str(agentspace_path/"SOUL.md"))
+    if (agentspace_path_name/"SOUL.md").exists() == False:
+        File("SOUL.md").copy_to(str(agentspace_path_name/"SOUL.md"))
     if fouce_init or (workspace_path/"init.lock").exists() == False:
         (workspace_path/"init.lock").touch()
         # 保持代理空间干净，删除代理空间并重新创建
@@ -104,7 +104,7 @@ if __name__ == "__main__":
                 sys.executable, # 使用当前python解释器
                 quote(fast_agent_space/"__main__.py"), # 运行fast agent
                 "--workspace", quote(workspace_path), # 工作空间路径
-                "--agentspace", quote(agentspace_path), # agent 工作目录
+                "--agentspace", quote(agentspace_path_name), # agent 工作目录
                 "--log", quote(log_file_path), # 日志路径
                 "--console_log", quote(console_log), # 是否在控制台打印日志
                 "--evolve", quote(slow_agent_space), # 需要进化的代码路径
@@ -166,11 +166,11 @@ if __name__ == "__main__":
                     sys.executable, # 使用当前python解释器
                     quote(fallback_main), # 运行fallback agent
                     "--workspace", quote(workspace_path), # 工作空间路径
-                    "--agentspace", quote(agentspace_path), # agent 工作目录
+                    "--agentspace", quote(agentspace_path_name), # agent 工作目录
                     "--log", quote(log_file_path), # 日志路径
                     "--console_log", quote(console_log), # 是否在控制台打印日志
                     "--fix_fork", quote(fast_agent_space), # 需要修复的代码路径
-                    "--fix", quote(logs_path/"fast_agent_runtime_error.log"), # 错误日志路径
+                    "--fix", quote(logs_path_name/"fast_agent_runtime_error.log"), # 错误日志路径
                     "--llm_base_url", quote(llm_base_url), # LLM API 地址
                     "--llm_model", quote(llm_model), # LLM 模型名
                     "--llm_api_key", quote(llm_api_key), # LLM API 密钥
@@ -195,6 +195,6 @@ if __name__ == "__main__":
             if task.returncode == 0:
                 logger.info(f"Fallback agent fixed successfully, restart...")
             else:
-                logger.error(f"Fallback agent fixed failed, see {logs_path/"fallback_agent_runtime_error.log"}")
+                logger.error(f"Fallback agent fixed failed, see {logs_path_name/"fallback_agent_runtime_error.log"}")
                 break
             break

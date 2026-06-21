@@ -26,7 +26,7 @@ _DUMMY_PNG_B64: str = (
 
 
 def _cache_path() -> Path:
-    return get_runtime_context().workspace / "logs" / "vision_capability_cache.json"
+    return get_runtime_context().workspace / "vision_capability_cache.json"
 
 
 def _load_cache() -> dict[str, bool]:
@@ -168,11 +168,12 @@ registry.register(
         "type": "function",
         "function": {
             "name": "probe_vision_capability",
+            # 探测当前配置的 LLM 模型是否支持图像/视觉输入。
+            # 使用一张最小的 dummy 图片（1x1 PNG）进行探测，不携带对话历史。
             "description": (
                 "Test whether the current LLM model supports image/vision input "
                 "using a minimal dummy image probe (1x1 PNG). No conversation history "
-                "is included. Results are cached in workspace/logs/vision_capability_cache.json. "
-                "Call this when the model changes or when you need to confirm vision capability."
+                "is included. Call this when the model changes or when you need to confirm vision capability."
             ),
             "parameters": {
                 "type": "object",

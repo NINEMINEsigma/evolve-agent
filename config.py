@@ -1,4 +1,6 @@
-from typing import * # type: ignore
+from typing import *
+from collections.abc import Callable
+from typing import Any
 import argparse
 import os
 import logging
@@ -14,6 +16,7 @@ argparse_parser = argparse.ArgumentParser()
 group = argparse_parser.add_mutually_exclusive_group()
 group.add_argument("--load", type=str, default="")
 group.add_argument("--save", type=str, default="")
+group.add_argument("--interactive", action="store_true", default=False)
 argparse_parser.add_argument("--console_log", type=bool, default=argparse.SUPPRESS)
 argparse_parser.add_argument("--fast_agent_space_path", type=str, default=argparse.SUPPRESS)
 argparse_parser.add_argument("--slow_agent_space_path", type=str, default=argparse.SUPPRESS)
@@ -26,7 +29,7 @@ argparse_parser.add_argument("--gateway_port", type=int, default=argparse.SUPPRE
 #----------
 default_llm_base_url = "https://api.deepseek.com"
 default_llm_model = "deepseek-v4-flash"
-default_llm_api_key = os.getenv("OPENAI_API_KEY")
+default_llm_api_key = os.getenv("OPENAI_API_KEY", "")
 default_llm_max_context_tokens = 1000000
 default_llm_max_output_tokens = 384000
 default_llm_temperature = 0.95
@@ -51,7 +54,7 @@ for file in File("custom_models/").childs():
     if file.suffix == "gguf" or file.suffix == ".gguf":
         check_default_approval_model_path = str(file.name)
         break
-argparse_parser.add_argument("--approval_model_path", type=str, default=argparse.SUPPRESS)
+argparse_parser.add_argument("--approval_model", type=str, default="0")
 argparse_parser.add_argument("--approval_model_n_ctx", type=int, default=argparse.SUPPRESS)
 argparse_parser.add_argument("--approval_model_cuda", action="store_true", default=argparse.SUPPRESS)
 argparse_parser.add_argument("--approval_model_port", type=int, default=argparse.SUPPRESS)
@@ -71,8 +74,6 @@ argparse_parser.add_argument("--mcp_config_path_name", type=str, default=argpars
 args = argparse_parser.parse_args()
 
 class Config(BaseModel):
-    # 这个load只是占位符
-    load: str = "default"
     console_log: bool = True
     fast_agent_space_path: str = "fast_agent_space"
     slow_agent_space_path: str = "slow_agent_space"
@@ -87,7 +88,7 @@ class Config(BaseModel):
     llm_temperature: float = 0.95
     llm_reasoning_effort: str = "medium"
     merge_concat_threshold: int = 50000
-    approval_model_path: str = "Qwen3.5-0.8B-Q8_0.gguf"
+    approval_model: str = "0"
     approval_model_n_ctx: int = 65536
     approval_model_cuda: bool = True
     approval_model_port: int = 8081
@@ -100,8 +101,15 @@ class Config(BaseModel):
     mcp_config_path_name: str = "mcp_config.json"
 
 base_config: Config|None = None
+# 运行时类型转换器：将用户输入字符串转为对应类型
+_type_converters: dict[type, Callable[[str], Any]] = {
+    bool: lambda v: v.strip().lower() in ("true", "1", "yes", "on", "y"),
+    int: int,
+    float: float,
+    str: str,
+}
 # 仅保留用户显式传递的参数（排除 load / save）
-cli_overrides = {k: v for k, v in vars(args).items() if k not in ("load", "save")}
+cli_overrides = {k: v for k, v in vars(args).items() if k not in ("load", "save", "interactive")}
 current_config = Config.model_validate(cli_overrides)
 
 
@@ -112,6 +120,15 @@ if args.load:
         setattr(current_config, k, v)
 elif args.save:
     save(args.save, "config.json", current_config)
+elif args.interactive:
+    config_field_key = input("config key：") or "default"
+    for field, field_info in Config.model_fields.items():
+        value = input(f"{field} (default: {getattr(current_config, field)})：")
+        if value:
+            target_type = field_info.default.__class__
+            converter = _type_converters.get(target_type, str)
+            setattr(current_config, field, converter(value))
+    save(config_field_key, "config.json", current_config)
 else:
     config_field_key = input("config key：") or "default"
     if contains(config_field_key, "config.json"):
@@ -120,7 +137,7 @@ else:
         for k, v in cli_overrides.items():
             setattr(current_config, k, v)
     else:
-        current_config = Config.model_validate(cli_overrides)
+        #current_config = Config.model_validate(cli_overrides)
         save(config_field_key, "config.json", current_config)
 
 print(current_config)
@@ -147,7 +164,7 @@ llm_reasoning_effort:   str     = current_config.llm_reasoning_effort
 # merge
 merge_concat_threshold: int     = current_config.merge_concat_threshold
 # approval model
-approval_model_path:         str  = current_config.approval_model_path
+approval_model:         str  = current_config.approval_model
 approval_model_n_ctx:        int  = current_config.approval_model_n_ctx
 approval_model_cuda:         bool = current_config.approval_model_cuda
 approval_model_port:         int  = current_config.approval_model_port
@@ -159,9 +176,10 @@ approval_remote_model:       str  = current_config.approval_remote_model
 # 审批模型本地/远程二选一，配置阶段完成判定与存在性检查
 # ----------
 _local_disabled_values = {"", "false", "0", "no"}
-_local_path_raw = (approval_model_path or "").strip()
+_local_path_raw = (approval_model or "").strip()
 _use_local_approval = _local_path_raw.lower() not in _local_disabled_values
 
+approval_model_path: str = ""
 if _use_local_approval:
     _gguf_path = Path("custom_models") / _local_path_raw
     if not _gguf_path.is_file():
@@ -170,7 +188,6 @@ if _use_local_approval:
             _gguf_path,
         )
         _use_local_approval = False
-        approval_model_path = ""
     else:
         # 标准化为纯文件名
         approval_model_path = _local_path_raw
@@ -188,6 +205,6 @@ if not _use_local_approval:
 # workspace
 #----------
 workspace_path:         Path = Path(current_config.workspace_path)
-agentspace_path:        Path = workspace_path / current_config.agentspace_path_name
-logs_path:              Path = workspace_path / current_config.logs_path_name
+agentspace_path_name:   Path = workspace_path / current_config.agentspace_path_name
+logs_path_name:         Path = workspace_path / current_config.logs_path_name
 mcp_config_path:        Path = workspace_path / current_config.mcp_config_path_name
