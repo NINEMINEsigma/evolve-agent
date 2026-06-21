@@ -14,6 +14,7 @@ import "./styles/panels.css";
 import "./styles/drawer.css";
 import "./styles/input.css";
 import "./styles/tooltip.css";
+import "./styles/context-menu.css";
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
