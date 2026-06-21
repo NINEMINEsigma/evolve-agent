@@ -1057,7 +1057,14 @@ async def ws_chat(ws: WebSocket) -> None:
         try:
             from system.context import get_runtime_context
             ctx = get_runtime_context()
-            model_path: str = Path(ctx.approval_model_path).name if ctx.approval_model_path else ""
+            _local_disabled = {"", "false", "0", "no"}
+            _local_raw = (ctx.approval_model_path or "").strip().lower()
+            if _local_raw not in _local_disabled:
+                model_name: str = Path(ctx.approval_model_path).name if ctx.approval_model_path else ""
+                model_available: bool = bool(ctx.approval_model_path)
+            else:
+                model_name = ctx.approval_remote_model or ""
+                model_available = bool(ctx.approval_remote_base_url and ctx.approval_remote_model)
             await ws.send_text(
                 Message(
                     type=MessageType.SYSTEM,
@@ -1065,8 +1072,8 @@ async def ws_chat(ws: WebSocket) -> None:
                     content=json.dumps({
                         "server_info": {
                             "llm_max_context_tokens": ctx.llm_max_context_tokens,
-                            "approval_model_name": model_path,
-                            "approval_model_available": bool(ctx.approval_model_path),
+                            "approval_model_name": model_name,
+                            "approval_model_available": model_available,
                         },
                     }),
                 ).to_json()

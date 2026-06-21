@@ -90,6 +90,15 @@ class RuntimeContext(BaseModel):
     approval_model_port: int = 8081
     """脱手模式审批小模型 llama-server 的监听端口。"""
 
+    approval_remote_base_url: str = ""
+    """远程审批模型 OpenAI 兼容端点 URL。空字符串表示未配置。"""
+
+    approval_remote_api_key: str = ""
+    """远程审批模型 API 密钥。"""
+
+    approval_remote_model: str = ""
+    """远程审批模型名称。"""
+
     # -- MCP 配置 -------------------------------------------------
 
     mcp_config_path: str | None = None

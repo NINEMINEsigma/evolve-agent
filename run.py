@@ -123,6 +123,9 @@ if __name__ == "__main__":
                 "--approval_model_n_ctx", quote(approval_model_n_ctx), # 审批模型最大上下文
                 "--approval_model_cuda", quote(approval_model_cuda), # 审批模型是否使用CUDA
                 "--approval_model_port", quote(approval_model_port), # 审批模型服务端口
+                "--approval_remote_base_url", quote(approval_remote_base_url), # 远程审批模型端点
+                "--approval_remote_api_key", quote(approval_remote_api_key), # 远程审批模型密钥
+                "--approval_remote_model", quote(approval_remote_model), # 远程审批模型名
                 "--merge_concat_threshold", quote(merge_concat_threshold), # 会话合并摘要截断阈值
             ])
         except KeyboardInterrupt:
@@ -181,6 +184,9 @@ if __name__ == "__main__":
                     "--approval_model_n_ctx", quote(approval_model_n_ctx), # 审批模型最大上下文
                     "--approval_model_cuda", quote(approval_model_cuda), # 审批模型是否使用CUDA
                     "--approval_model_port", quote(approval_model_port), # 审批模型服务端口
+                    "--approval_remote_base_url", quote(approval_remote_base_url), # 远程审批模型端点
+                    "--approval_remote_api_key", quote(approval_remote_api_key), # 远程审批模型密钥
+                    "--approval_remote_model", quote(approval_remote_model), # 远程审批模型名
                     "--merge_concat_threshold", quote(merge_concat_threshold), # 会话合并摘要截断阈值
                 ])
             except KeyboardInterrupt:

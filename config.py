@@ -1,9 +1,14 @@
 from typing import * # type: ignore
 import argparse
 import os
+import logging
+from pathlib import Path
 from third.filesystem import File
 from third.easysave import save, load, contains
 from pydantic import BaseModel
+
+logger = logging.getLogger(__name__)
+
 argparse_parser = argparse.ArgumentParser()
 
 group = argparse_parser.add_mutually_exclusive_group()
@@ -50,6 +55,10 @@ argparse_parser.add_argument("--approval_model_path", type=str, default=argparse
 argparse_parser.add_argument("--approval_model_n_ctx", type=int, default=argparse.SUPPRESS)
 argparse_parser.add_argument("--approval_model_cuda", action="store_true", default=argparse.SUPPRESS)
 argparse_parser.add_argument("--approval_model_port", type=int, default=argparse.SUPPRESS)
+# 远程审批模型 — 本地模型不可用时 fallback 到 OpenAI 兼容端点
+argparse_parser.add_argument("--approval_remote_base_url", type=str, default=argparse.SUPPRESS)
+argparse_parser.add_argument("--approval_remote_api_key", type=str, default=argparse.SUPPRESS)
+argparse_parser.add_argument("--approval_remote_model", type=str, default=argparse.SUPPRESS)
 
 #----------
 # workspace
@@ -82,6 +91,9 @@ class Config(BaseModel):
     approval_model_n_ctx: int = 65536
     approval_model_cuda: bool = True
     approval_model_port: int = 8081
+    approval_remote_base_url: str = ""
+    approval_remote_api_key: str = ""
+    approval_remote_model: str = ""
     workspace_path: str = "workspace"
     agentspace_path_name: str = "agentspace"
     logs_path_name: str = "logs"
@@ -135,16 +147,46 @@ llm_reasoning_effort:   str     = current_config.llm_reasoning_effort
 # merge
 merge_concat_threshold: int     = current_config.merge_concat_threshold
 # approval model
-approval_model_path:    str  = current_config.approval_model_path
-approval_model_n_ctx:   int  = current_config.approval_model_n_ctx
-approval_model_cuda:    bool = current_config.approval_model_cuda
-approval_model_port:    int  = current_config.approval_model_port
+approval_model_path:         str  = current_config.approval_model_path
+approval_model_n_ctx:        int  = current_config.approval_model_n_ctx
+approval_model_cuda:         bool = current_config.approval_model_cuda
+approval_model_port:         int  = current_config.approval_model_port
+approval_remote_base_url:    str  = current_config.approval_remote_base_url
+approval_remote_api_key:     str  = current_config.approval_remote_api_key
+approval_remote_model:       str  = current_config.approval_remote_model
+
+# ----------
+# 审批模型本地/远程二选一，配置阶段完成判定与存在性检查
+# ----------
+_local_disabled_values = {"", "false", "0", "no"}
+_local_path_raw = (approval_model_path or "").strip()
+_use_local_approval = _local_path_raw.lower() not in _local_disabled_values
+
+if _use_local_approval:
+    _gguf_path = Path("custom_models") / _local_path_raw
+    if not _gguf_path.is_file():
+        logger.warning(
+            "Configured approval_model_path not found: %s — falling back to remote approval backend",
+            _gguf_path,
+        )
+        _use_local_approval = False
+        approval_model_path = ""
+    else:
+        # 标准化为纯文件名
+        approval_model_path = _local_path_raw
+
+# 远程模式下检查是否配置了远程后端
+if not _use_local_approval:
+    if not (approval_remote_base_url and approval_remote_model):
+        logger.warning(
+            "Local approval model disabled and no remote approval backend configured — "
+            "handsfree mode will be unavailable."
+        )
 
 
 #----------
 # workspace
 #----------
-from pathlib import Path
 workspace_path:         Path = Path(current_config.workspace_path)
 agentspace_path:        Path = workspace_path / current_config.agentspace_path_name
 logs_path:              Path = workspace_path / current_config.logs_path_name

@@ -9,8 +9,10 @@
         .deny_reason  — 拒绝时携带具体原因，通过时为 None
 
 脱手模式通过 set_handsfree_mode() 开启/关闭，每次启动默认关闭。
-审批小模型路径通过 config.py 的 approval_model_path 配置。
-CUDA 可用时自动全卸载到 GPU。
+审批后端支持两种模式（二选一）：
+- 本地 GGUF：通过 approval_model_path 配置，启动 llama-server 推理。
+- 远程 OpenAI 兼容 API：通过 approval_remote_* 配置，连接 LM Studio / 自定义服务商。
+CUDA 可用时本地模型自动全卸载到 GPU。
 """
 
 from __future__ import annotations
@@ -19,13 +21,19 @@ import asyncio
 import json
 import logging
 import uuid
-import dirtyjson
-from pydantic import BaseModel
+from abc import ABC, abstractmethod
 from typing import Any, Awaitable, Callable, Dict, Optional, TYPE_CHECKING, cast
+
+import dirtyjson
+import openai
+from pydantic import BaseModel
 
 from component.llm import LLMClient
 from entity.constant import APPROVAL_MODEL_LOAD_TIMEOUT, APPROVAL_WAIT_TIMEOUT
 from entity.puretype import Role
+
+if TYPE_CHECKING:
+    from third.llamaapis import InferenceEngine
 
 logger = logging.getLogger(__name__)
 
@@ -66,94 +74,267 @@ def is_handsfree_mode(session_id: str) -> bool:
 
 
 # ---------------------------------------------------------------------------
-# 脱手模式：小 LLM 审批器（懒加载单例）
+# 审批输出 JSON Schema
 # ---------------------------------------------------------------------------
 
-if TYPE_CHECKING:
-    from third.llamaapis import InferenceEngine
-
-_approver: InferenceEngine|None = None
-_approver_lock = asyncio.Lock()
-_APPROVER_FAILED = "__failed__"  # sentinel: 标记初始化失败，防止每次重试
-
-
-def _detect_cuda(cuda: bool = False) -> bool:
-    """是否启用 CUDA（由配置决定，不自动检测）。
-
-    参数：
-        cuda: 配置中指定的 CUDA 启用状态，默认 False。
-    """
-    if cuda:
-        logger.info("CUDA enabled via config — approval model will use GPU")
-    else:
-        logger.info("CUDA disabled via config — approval model runs on CPU")
-    return cuda
+APPROVAL_JSON_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "approved": {"type": "boolean"},
+        "reason": {"type": "string"},
+        "ask": {"type": "string"},
+    },
+    "required": ["approved"],
+}
 
 
-def _get_approver() -> InferenceEngine|None:
-    """懒加载审批小模型的 InferenceEngine 单例。"""
-    global _approver
-    if _approver is not None and _approver != _APPROVER_FAILED:
-        return _approver
+# ---------------------------------------------------------------------------
+# 后端抽象
+# ---------------------------------------------------------------------------
 
-    try:
-        from system.context import get_runtime_context
-        from system.pathutils import find_repo_root
-        from pathlib import Path
+class ApprovalBackend(ABC):
+    """脱手模式审批后端抽象。"""
 
-        _root = find_repo_root()
-        ctx = get_runtime_context()
-        model_path = ctx.approval_model_path
-        n_ctx = ctx.approval_model_n_ctx
+    @abstractmethod
+    async def chat(self, messages: list[dict[str, Any]], json_schema: dict[str, Any] | None = None) -> str:
+        """发送对话请求，返回模型生成的文本。"""
+        ...
 
-        if not model_path:
-            logger.warning("approval_model_path not configured — handsfree mode will deny all")
+    @abstractmethod
+    async def is_available(self) -> bool:
+        """后端当前是否可用。"""
+        ...
+
+
+# ---------------------------------------------------------------------------
+# 本地 GGUF 后端
+# ---------------------------------------------------------------------------
+
+class LocalApprovalBackend(ApprovalBackend):
+    """基于 llama.cpp / llama-server 的本地审批后端。"""
+
+    def __init__(self, ctx: Any) -> None:
+        self._ctx = ctx
+        self._engine: InferenceEngine | None | str = None  # str sentinel for failed
+
+    def _get_engine(self) -> InferenceEngine | None:
+        """懒加载本地审批引擎。"""
+        if self._engine == "__failed__":
+            return None
+        if self._engine is not None:
+            return self._engine  # type: ignore[return-value]
+
+        try:
+            from system.pathutils import find_repo_root
+            from third.llamaapis import InferenceEngine as LlamaEngine, ModelConfig
+
+            root = find_repo_root()
+            model_path = str((root / "custom_models" / self._ctx.approval_model_path.strip()).resolve())
+            cuda = bool(self._ctx.approval_model_cuda)
+            n_gpu_layers = -1 if cuda else 0
+
+            self._engine = LlamaEngine(ModelConfig(
+                model_path=model_path,
+                n_ctx=int(self._ctx.approval_model_n_ctx),
+                n_gpu_layers=n_gpu_layers,
+                cuda=cuda,
+                port=int(self._ctx.approval_model_port),
+                flash_attn=cuda,
+                auto_build=True,
+            ))
+            logger.info("Local approval backend loaded | model=%s cuda=%s", model_path, cuda)
+            return self._engine
+        except Exception as exc:
+            logger.warning("Failed to initialize local approval backend: %s", exc)
+            self._engine = "__failed__"  # type: ignore[assignment]
             return None
 
-        # 文件存放在 custom_models/ 目录下
-        p = _root / "custom_models" / model_path
-        model_path = str(p.resolve())
+    async def is_available(self) -> bool:
+        engine = self._get_engine()
+        if engine is None:
+            return False
+        if not engine.is_model_loaded():
+            if not engine.ensure_alive():
+                return False
+            for _ in range(APPROVAL_MODEL_LOAD_TIMEOUT):
+                await asyncio.sleep(1.0)
+                if engine.is_model_loaded():
+                    return True
+            return False
+        return True
 
-        cuda_available = _detect_cuda(ctx.approval_model_cuda)
-        n_gpu_layers = -1 if cuda_available else 0
+    async def chat(self, messages: list[dict[str, Any]], json_schema: dict[str, Any] | None = None) -> str:
+        from third.llamaapis import GenerationConfig, system_message, user_message
 
-        from third.llamaapis import InferenceEngine, ModelConfig
+        engine = self._get_engine()
+        if engine is None:
+            raise RuntimeError("Local approval engine not available")
 
-        _approver = InferenceEngine(ModelConfig(
-            model_path=model_path,
-            n_ctx=n_ctx,
-            n_gpu_layers=n_gpu_layers,
-            cuda=cuda_available,
-            port=ctx.approval_model_port,  # 与主 LLM server 不同端口
-            flash_attn=cuda_available,
-            auto_build=True,
-        ))
-        logger.info("Handsfree approver loaded | model=%s cuda=%s", model_path, cuda_available)
-        return _approver
-    except Exception as exc:
-        logger.warning("Failed to initialize handsfree approver: %s", exc)
-        _approver = _APPROVER_FAILED # type: ignore
-        return None
+        internal_messages = []
+        for m in messages:
+            role = m.get("role", "user")
+            content = m.get("content", "")
+            if role == "system":
+                internal_messages.append(system_message(content))
+            else:
+                internal_messages.append(user_message(content))
+
+        config = GenerationConfig(temperature=0.1, max_tokens=2048, thinking=False)
+        if json_schema is not None:
+            config.json_schema = json_schema
+        resp = await asyncio.to_thread(engine.chat, internal_messages, config)
+        return resp.choices[0].message.content or ""
+
+
+# ---------------------------------------------------------------------------
+# 远程 OpenAI 兼容后端
+# ---------------------------------------------------------------------------
+
+class RemoteApprovalBackend(ApprovalBackend):
+    """基于 OpenAI 兼容 API 的远程审批后端（如 LM Studio）。"""
+
+    def __init__(self, ctx: Any) -> None:
+        self._ctx = ctx
+        self._client: openai.AsyncOpenAI | None = None
+
+    def _get_client(self) -> openai.AsyncOpenAI:
+        if self._client is None:
+            api_key = self._ctx.approval_remote_api_key or ""
+            base_url = self._ctx.approval_remote_base_url or ""
+            self._client = openai.AsyncOpenAI(api_key=api_key, base_url=base_url)
+        return self._client
+
+    async def is_available(self) -> bool:
+        return bool(self._ctx.approval_remote_base_url and self._ctx.approval_remote_model)
+
+    async def chat(self, messages: list[dict[str, Any]], json_schema: dict[str, Any] | None = None) -> str:
+        client = self._get_client()
+        model: str = self._ctx.approval_remote_model
+        kwargs: dict[str, Any] = {
+            "model": model,
+            "messages": messages,
+            "temperature": 0.1,
+            "max_tokens": 2048,
+        }
+        if json_schema is not None:
+            kwargs["response_format"] = {
+                "type": "json_schema",
+                "json_schema": {
+                    "name": "approval_decision",
+                    "schema": json_schema,
+                    "strict": True,
+                },
+            }
+
+        try:
+            resp = await client.chat.completions.create(**kwargs)
+        except openai.APIStatusError as exc:
+            # 若服务端不支持 json_schema（如部分旧 LM Studio），回退到普通请求
+            if json_schema is not None and exc.status_code in (400, 422):
+                logger.warning(
+                    "Remote approval backend rejected json_schema (status=%s) — falling back to plain chat",
+                    exc.status_code,
+                )
+                kwargs.pop("response_format", None)
+                resp = await client.chat.completions.create(**kwargs)
+            else:
+                raise
+
+        if not resp.choices:
+            raise RuntimeError("Remote approval backend returned empty choices")
+        return resp.choices[0].message.content or ""
+
+
+# ---------------------------------------------------------------------------
+# 后端工厂
+# ---------------------------------------------------------------------------
+
+_LOCAL_DISABLED_VALUES: set[str] = {"", "false", "0", "no"}
+
+
+def _is_local_approval_enabled(ctx: Any) -> bool:
+    """判定当前是否启用本地审批模型。"""
+    raw = (ctx.approval_model_path or "").strip().lower()
+    return raw not in _LOCAL_DISABLED_VALUES
+
+
+def _create_approval_backend(ctx: Any) -> ApprovalBackend | None:
+    """根据 RuntimeContext 创建对应的审批后端。"""
+    if _is_local_approval_enabled(ctx):
+        return LocalApprovalBackend(ctx)
+    if ctx.approval_remote_base_url and ctx.approval_remote_model:
+        return RemoteApprovalBackend(ctx)
+    return None
+
+
+# ---------------------------------------------------------------------------
+# 统一审批后端实例（懒加载）
+# ---------------------------------------------------------------------------
+
+_approval_backend: ApprovalBackend | None = None
+_backend_lock = asyncio.Lock()
+_BACKEND_FAILED = "__failed__"
+
+
+async def _get_approval_backend() -> ApprovalBackend | None:
+    """懒加载全局审批后端单例。"""
+    global _approval_backend
+    if _approval_backend is not None and _approval_backend != _BACKEND_FAILED:
+        return _approval_backend
+
+    async with _backend_lock:
+        if _approval_backend is not None and _approval_backend != _BACKEND_FAILED:
+            return _approval_backend
+
+        try:
+            from system.context import get_runtime_context
+            ctx = get_runtime_context()
+        except Exception as exc:
+            logger.warning("Failed to get runtime context for approval backend: %s", exc)
+            _approval_backend = _BACKEND_FAILED  # type: ignore[assignment]
+            return None
+
+        backend = _create_approval_backend(ctx)
+        if backend is None:
+            logger.warning("No approval backend configured — handsfree mode will deny all")
+            _approval_backend = _BACKEND_FAILED  # type: ignore[assignment]
+            return None
+
+        if not await backend.is_available():
+            logger.warning("Approval backend not available — handsfree mode will deny all")
+            _approval_backend = _BACKEND_FAILED  # type: ignore[assignment]
+            return None
+
+        _approval_backend = backend
+        return backend
 
 
 def shutdown_approval_model() -> bool:
-    """安全关闭审批模型并释放显存。
+    """安全关闭本地审批模型并释放显存。
 
     返回 True 表示成功关闭或原本未在运行。
     """
-    global _approver
-    if _approver is None or _approver == _APPROVER_FAILED:
+    global _approval_backend
+    backend = _approval_backend
+    if backend is None or backend == _BACKEND_FAILED:
         return True
     try:
-        _approver.unload()
-        logger.info("Approval model unloaded successfully")
-        _approver = None
+        if isinstance(backend, LocalApprovalBackend):
+            engine = backend._get_engine()
+            if engine is not None:
+                engine.unload()
+        logger.info("Approval backend unloaded successfully")
+        _approval_backend = None
         return True
     except Exception as exc:
-        logger.warning("Failed to unload approval model: %s", exc)
-        _approver = _APPROVER_FAILED
+        logger.warning("Failed to unload approval backend: %s", exc)
+        _approval_backend = _BACKEND_FAILED  # type: ignore[assignment]
         return False
 
+
+# ---------------------------------------------------------------------------
+# 脱手模式：小 LLM 审批
+# ---------------------------------------------------------------------------
 
 async def _handsfree_confirm(
     tool_name: str, args: dict, reason: str, content: str,
@@ -168,61 +349,43 @@ async def _handsfree_confirm(
 
     返回 ApprovalResult，deny 时携带 LLM 生成的拒绝原因。
     """
-    engine = _get_approver()
-    if engine is None:
+    backend = await _get_approval_backend()
+    if backend is None:
         logger.warning("Approver not available — handsfree mode deny")
-        return ApprovalResult(action="deny", deny_reason="Approval model unavailable, auto-denied", denied_by="system")
-
-    # 等待模型加载完成（防止 health 200 但模型仍在 loading 导致的 502）
-    if not engine.is_model_loaded():
-        logger.info("Approval model loading — waiting | tool=%s", tool_name)
-        # 检查引擎进程是否存活，若已崩溃则尝试重启
-        if not engine.ensure_alive():
-            logger.warning("Approval engine restart failed | tool=%s", tool_name)
-            return ApprovalResult(action="deny", deny_reason="Approval model crashed and restart failed", denied_by="system")
-        for _ in range(APPROVAL_MODEL_LOAD_TIMEOUT):
-            await asyncio.sleep(1.0)
-            if engine.is_model_loaded():
-                logger.info("Approval model loaded | tool=%s", tool_name)
-                break
-        else:
-            logger.warning("Approval model load timeout (%ds) | tool=%s", APPROVAL_MODEL_LOAD_TIMEOUT, tool_name)
-            return ApprovalResult(action="deny", deny_reason=f"Approval model load timeout ({APPROVAL_MODEL_LOAD_TIMEOUT}s)", denied_by="system")
+        return ApprovalResult(action="deny", deny_reason="Approval backend unavailable, auto-denied", denied_by="system")
 
     from system.pathutils import find_repo_root, get_templates_dir
 
     system_prompt = (get_templates_dir() / "approval" / "system_prompt.md").read_text(encoding="utf-8")
-
     cwd = str(find_repo_root().resolve())
 
     user_prompt_data: dict[str, Any] = {
         "tool": tool_name,
         "args": args,
         "reason": reason,
-        # NOTICE: 可能太长，先不传了
-        # "description": content,
         "cwd": cwd,
     }
     if extra_context:
         user_prompt_data["context"] = extra_context
     user_prompt = json.dumps(user_prompt_data, ensure_ascii=False)
 
-    from third.llamaapis import GenerationConfig, system_message, user_message
+    messages: list[dict[str, Any]] = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": user_prompt},
+    ]
 
     dialog_turn = 0
     last_error: str | None = None
     max_attempts = 3
 
     while dialog_turn <= max_dialog_turns:
-        current_prompt = user_prompt
+        current_messages = list(messages)
         last_error = None
         resp_content: str | None = None
 
         for attempt in range(1, max_attempts + 1):
             try:
-                messages = [system_message(system_prompt), user_message(current_prompt)]
-                resp = await asyncio.to_thread(engine.chat, messages, GenerationConfig(temperature=0.1, max_tokens=2048, thinking=False))
-                resp_content = resp.choices[0].message.content
+                resp_content = await backend.chat(current_messages, json_schema=APPROVAL_JSON_SCHEMA)
                 result: dict = cast(dict, dirtyjson.loads(resp_content))
 
                 # ---- 处理「ask」响应：审批模型不确定，向Agent提问 ----
@@ -250,16 +413,18 @@ async def _handsfree_confirm(
                         dialog_turn + 1, max_dialog_turns, tool_name, agent_answer,
                     )
 
-                    # 将Agent的回答追加到 user_prompt，下一轮循环重新审批
-                    user_prompt += (
-                        f"\n\n---\n"
-                        f"[Dialog round {dialog_turn + 1}]\n"
-                        f"Approval model's question: {ask_question}\n"
-                        f"Agent's answer: {agent_answer}\n"
-                        f"---\n"
-                        f"Please re-evaluate the safety of this tool call "
-                        f"based on the Agent's answer above.\n"
-                    )
+                    # 将Agent的回答追加到 messages，下一轮循环重新审批
+                    current_messages.append({"role": "assistant", "content": resp_content or ""})
+                    current_messages.append({
+                        "role": "user",
+                        "content": (
+                            f"[Dialog round {dialog_turn + 1}]\n"
+                            f"Approval model's question: {ask_question}\n"
+                            f"Agent's answer: {agent_answer}\n\n"
+                            f"Please re-evaluate the safety of this tool call based on the Agent's answer above."
+                        ),
+                    })
+                    messages.extend(current_messages[2:])  # 保留 system + 原始 user，追加对话
                     dialog_turn += 1
                     break  # 跳出重试循环，进入 while 下一轮
 
@@ -281,7 +446,10 @@ async def _handsfree_confirm(
                 )
                 if attempt < max_attempts:
                     _ct = (get_templates_dir() / "approval" / "correction_hint.md").read_text(encoding="utf-8")
-                    current_prompt += "\n\n" + _ct.replace("{{error}}", str(exc)).replace("{{raw_output}}", resp_content or "<not available>")
+                    current_messages.append({
+                        "role": "user",
+                        "content": _ct.replace("{{error}}", str(exc)).replace("{{raw_output}}", resp_content or "<not available>"),
+                    })
 
         # 重试循环全部失败 → 退出 while，最终返回 deny
         if last_error:

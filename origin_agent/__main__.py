@@ -121,6 +121,9 @@ def _build_context(cli: dict) -> RuntimeContext:
         approval_model_n_ctx    = int(cli.get("approval_model_n_ctx", APPROVAL_MODEL_N_CTX_DEFAULT)),
         approval_model_cuda     = as_bool(cli.get("approval_model_cuda", False)),
         approval_model_port     = int(cli.get("approval_model_port", 8081)),
+        approval_remote_base_url= str(cli.get("approval_remote_base_url", "")),
+        approval_remote_api_key = str(cli.get("approval_remote_api_key", "")),
+        approval_remote_model   = str(cli.get("approval_remote_model", "")),
         mcp_config_path         = cli["mcp_config_path"],
         # 会话合并配置
         merge_concat_threshold  = int(cli.get("merge_concat_threshold", 50000)),

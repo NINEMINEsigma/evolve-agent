@@ -228,19 +228,29 @@ You can modify your own source code and complete evolution through the following
         if agent_loop is not None:
             agent_loop.set_session_manager(sessions)
 
-        # ---- 预编译 llama-server（脱手模式审批模型需要）----
-        if self.ctx.approval_model_path:
-            try:
-                from third.llamaapis.system.builder import LlamaBuilder
-                _builder = LlamaBuilder(
-                    source_dir="lib/llama.cpp",
-                    cuda=self.ctx.approval_model_cuda,
-                    jobs=4,
-                )
-                await asyncio.to_thread(_builder.build_if_needed)
-            except Exception as exc:
+        # ---- 预编译 llama-server（本地脱手模式审批模型需要）----
+        _local_disabled = {"", "false", "0", "no"}
+        _local_path_raw = (self.ctx.approval_model_path or "").strip().lower()
+        if _local_path_raw not in _local_disabled:
+            from system.pathutils import find_repo_root
+            gguf_path = find_repo_root() / "custom_models" / self.ctx.approval_model_path.strip()
+            if gguf_path.is_file():
+                try:
+                    from third.llamaapis.system.builder import LlamaBuilder
+                    _builder = LlamaBuilder(
+                        source_dir="lib/llama.cpp",
+                        cuda=self.ctx.approval_model_cuda,
+                        jobs=4,
+                    )
+                    await asyncio.to_thread(_builder.build_if_needed)
+                except Exception as exc:
+                    logger.warning(
+                        "llama-server pre-build failed (will retry at runtime): %s", exc
+                    )
+            else:
                 logger.warning(
-                    "llama-server pre-build failed (will retry at runtime): %s", exc
+                    "Local approval model file not found: %s — skipping llama.cpp pre-build",
+                    gguf_path,
                 )
 
         host: str = self.ctx.gateway_host
