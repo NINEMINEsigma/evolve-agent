@@ -872,6 +872,16 @@ async def _handle_wait_cron(args: dict[str, Any]) -> dict:
     if duration_sec < 10:
         return tool_error("Duration must be at least 10 seconds")
 
+    # ── 同一会话只允许一个活跃 wait 任务 ──
+    with _cron_lock:
+        for existing in _cron_tasks.get(session_id, {}).values():
+            if existing.is_wait and existing.should_schedule:
+                return tool_error(
+                    f"wait_cron is NOT sleep — a previous wait task (task_id={existing.task_id}) "
+                    f"is still pending in this session. Do not create a new wait before the previous one completes. "
+                    f"Use schedule_cron if you need to schedule actual work, not waiting."
+                )
+
     # ── 任务数量限制 ──
     with _cron_lock:
         current_count = len(_cron_tasks.get(session_id, {}))
@@ -886,7 +896,7 @@ async def _handle_wait_cron(args: dict[str, Any]) -> dict:
     task = _CronTask(
         task_id=task_id,
         session_id=session_id,
-        name=f"wait-{task_id}",
+        name="wait",
         schedule_type="interval",
         schedule_value=str(duration_sec),
         command=[],
