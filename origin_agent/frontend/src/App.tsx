@@ -267,6 +267,7 @@ export default function App() {
           handsfreeMode={ws.handsfreeMode}
           approvalModelAvailable={ws.approvalModelAvailable}
           approvalModelName={ws.approvalModelName}
+          llmModelName={ws.llmModelName}
           sidebarCollapsed={sidebarCollapsed}
           onToggleSidebar={() => setSidebarCollapsed((v) => !v)}
           onToggleHandsfree={ws.toggleHandsfree}

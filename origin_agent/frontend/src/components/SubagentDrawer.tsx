@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useLayoutEffect, useCallback } from "react";
 import { SubagentSession, SubagentMessage } from "../types";
 
 interface SubagentDrawerProps {
@@ -51,6 +51,11 @@ export default function SubagentDrawer({
   subagentSessions,
 }: SubagentDrawerProps) {
   const [collapsedSessions, setCollapsedSessions] = useState<Set<string>>(new Set());
+  const [openTick, setOpenTick] = useState(0);
+
+  useEffect(() => {
+    if (open) setOpenTick((t) => t + 1);
+  }, [open]);
 
   if (!open) return null;
 
@@ -75,12 +80,13 @@ export default function SubagentDrawer({
           {items.length === 0 && (
             <div className="drawer-empty">暂无子会话</div>
           )}
-          {items.map((session) => (
+          {items.map((session, index) => (
             <SubagentCard
               key={session.session_id}
               session={session}
               collapsed={collapsedSessions.has(session.session_id)}
               onToggleCollapse={() => toggleCollapse(session.session_id)}
+              openTick={openTick + index}
             />
           ))}
         </div>
@@ -89,15 +95,53 @@ export default function SubagentDrawer({
   );
 }
 
-export function SubagentCard({ session, collapsed, onToggleCollapse, disableToggle }: { session: SubagentSession; collapsed: boolean; onToggleCollapse: () => void; disableToggle?: boolean }) {
+interface SubagentCardProps {
+  session: SubagentSession;
+  collapsed: boolean;
+  onToggleCollapse: () => void;
+  disableToggle?: boolean;
+  openTick?: number;
+}
+
+export function SubagentCard({ session, collapsed, onToggleCollapse, disableToggle, openTick }: SubagentCardProps) {
   const chatRef = useRef<HTMLDivElement>(null);
+  const bottomRef = useRef<HTMLDivElement>(null);
   const isInactive = session.status === "terminated" || session.status === "completed";
 
+  const scrollToBottom = useCallback(() => {
+    bottomRef.current?.scrollIntoView({ block: "end", inline: "nearest", behavior: "auto" });
+  }, []);
+
+  useLayoutEffect(() => {
+    if (collapsed) return;
+    scrollToBottom();
+
+    const el = chatRef.current;
+    if (!el) return;
+
+    const ro = new ResizeObserver(() => {
+      scrollToBottom();
+    });
+    ro.observe(el);
+
+    const timers = [
+      setTimeout(scrollToBottom, 50),
+      setTimeout(scrollToBottom, 150),
+      setTimeout(scrollToBottom, 350),
+      setTimeout(scrollToBottom, 700),
+    ];
+
+    return () => {
+      ro.disconnect();
+      timers.forEach(clearTimeout);
+    };
+  }, [collapsed, session.session_id, openTick, scrollToBottom]);
+
   useEffect(() => {
-    if (!collapsed && chatRef.current) {
-      chatRef.current.scrollTop = chatRef.current.scrollHeight;
+    if (!collapsed) {
+      scrollToBottom();
     }
-  }, [collapsed, session.feedback.length]);
+  }, [collapsed, session.feedback.length, scrollToBottom]);
 
   return (
     <div className={`subagent-card ${isInactive ? "inactive" : "active"}`}>
@@ -116,23 +160,25 @@ export function SubagentCard({ session, collapsed, onToggleCollapse, disableTogg
       </span>
     </div>
 
-    {!collapsed && (<div className="subagent-chat subagent-chat-scroll" ref={chatRef}>
-      {session.feedback.length === 0 && session.pending_approvals.length === 0 && (
-        <div className="drawer-empty subagent-chat-empty">等待子会话响应...</div>
-      )}
-      {session.feedback.map((msg, i) => (
-        <SubagentBubble key={i} msg={msg} />
-      ))}
-      {session.pending_approvals.map((pa) => (
-        <div key={pa.tool_call_id} className="subagent-bubble subagent-bubble-pending">
-          <span className="subagent-bubble-role">待审批</span>
-          <div className="subagent-approval-tool">{pa.tool_name}</div>
-          <pre className="subagent-approval-args">
-            {JSON.stringify(pa.arguments, null, 2)}
-          </pre>
-        </div>
-      ))}
-    </div>
+    {!collapsed && (
+      <div className="subagent-chat subagent-chat-scroll" ref={chatRef}>
+        {session.feedback.length === 0 && session.pending_approvals.length === 0 && (
+          <div className="drawer-empty subagent-chat-empty">等待子会话响应...</div>
+        )}
+        {session.feedback.map((msg, i) => (
+          <SubagentBubble key={i} msg={msg} />
+        ))}
+        {session.pending_approvals.map((pa) => (
+          <div key={pa.tool_call_id} className="subagent-bubble subagent-bubble-pending">
+            <span className="subagent-bubble-role">待审批</span>
+            <div className="subagent-approval-tool">{pa.tool_name}</div>
+            <pre className="subagent-approval-args">
+              {JSON.stringify(pa.arguments, null, 2)}
+            </pre>
+          </div>
+        ))}
+        <div ref={bottomRef} />
+      </div>
     )}
   </div>
   );

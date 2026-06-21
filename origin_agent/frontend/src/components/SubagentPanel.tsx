@@ -1,3 +1,4 @@
+import { useState, useEffect } from "react";
 import { SubagentCard } from "./SubagentDrawer";
 import { SubagentSession } from "../types";
 
@@ -17,6 +18,11 @@ export default function SubagentPanel({
   onSelect,
 }: SubagentPanelProps) {
   const items = Object.values(subagentSessions);
+  const [openTick, setOpenTick] = useState(0);
+
+  useEffect(() => {
+    if (open) setOpenTick((t) => t + 1);
+  }, [open]);
 
   if (!open) {
     if (items.length === 0) return null;
@@ -68,10 +74,12 @@ export default function SubagentPanel({
       <div className="subagent-panel-body">
         {activeSession ? (
           <SubagentCard
+            key={resolvedActiveId}
             session={activeSession}
             collapsed={false}
             onToggleCollapse={() => {}}
             disableToggle
+            openTick={openTick}
           />
         ) : (
           <div className="drawer-empty">暂无子会话</div>

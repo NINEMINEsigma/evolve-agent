@@ -45,6 +45,7 @@ export function useWebSocket() {
   const [clipboardDisplays, setClipboardDisplays] = useState<Record<string, ClipboardDisplay>>({});
   const [subagentSessions, setSubagentSessions] = useState<Record<string, SubagentSession>>({});
   const [llmMaxContextTokens, setLlmMaxContextTokens] = useState(0);
+  const [llmModelName, setLlmModelName] = useState("");
   const [approvalModelName, setApprovalModelName] = useState("");
   const [approvalModelAvailable, setApprovalModelAvailable] = useState(false);
   const [mergeMode, setMergeMode] = useState(false);
@@ -289,6 +290,7 @@ export function useWebSocket() {
           if (data.server_info) {
             const info = data.server_info;
             if (info.llm_max_context_tokens) setLlmMaxContextTokens(info.llm_max_context_tokens);
+            setLlmModelName(info.llm_model || "");
             setApprovalModelName(info.approval_model_name || "");
             setApprovalModelAvailable(info.approval_model_available || false);
             return;
@@ -1143,6 +1145,7 @@ export function useWebSocket() {
     setClipboardDisplays,
     subagentSessions,
     llmMaxContextTokens,
+    llmModelName,
     approvalModelName,
     approvalModelAvailable,
     mergeMode,

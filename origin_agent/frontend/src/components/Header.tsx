@@ -9,6 +9,7 @@ interface HeaderProps {
   handsfreeMode: boolean;
   approvalModelAvailable: boolean;
   approvalModelName: string;
+  llmModelName: string;
   sidebarCollapsed: boolean;
   onToggleSidebar: () => void;
   onToggleHandsfree: (enabled: boolean) => void;
@@ -23,6 +24,7 @@ export default function Header({
   handsfreeMode,
   approvalModelAvailable,
   approvalModelName,
+  llmModelName,
   sidebarCollapsed,
   onToggleSidebar,
   onToggleHandsfree,
@@ -107,6 +109,11 @@ export default function Header({
             </svg>
           )}
         </button>
+        {sessionId && (
+          <span className="session-badge" data-tooltip="刷新页面后自动恢复此会话">
+            {sessionId}
+          </span>
+        )}
         <button
           ref={cmdBtnRef}
           className="header-action-btn"
@@ -134,34 +141,39 @@ export default function Header({
       </div>
 
       <div className="header-center">
-        <div className={`header-pill ${status === "已连接" ? "connected" : ""}`}>
+        <div
+          className={[
+            "header-pill",
+            status === "已连接" ? "connected" : "",
+            status.startsWith("重连中") ? "reconnecting" : "",
+            status === "已断开" || status === "连接失败 — 已达到最大重试次数" ? "disconnected" : "",
+          ].filter(Boolean).join(" ")}
+        >
           <span className="status-dot" />
-          <span>Evolve Agent</span>
+          <span className="pill-label">Evolve Agent</span>
+          <span className="pill-detail">
+            <span className="pill-status">{status}</span>
+            {llmModelName && <span className="pill-model">{llmModelName}</span>}
+          </span>
+          <span className="pill-ripple" aria-hidden />
+          <span className="pill-ripple" aria-hidden />
         </div>
-        <span className="model-status">{status}</span>
       </div>
 
       {sessionId && (
         <div className="header-right">
           {showApprovalUI && (
-            <label className="handsfree-toggle" data-tooltip={handsfreeMode ? "脱手模式已开启 — 工具调用由 AI 自动审批" : "脱手模式已关闭 — 工具调用需用户审批"}>
-              <span className="handsfree-label">脱手</span>
-              <input
-                type="checkbox"
-                checked={handsfreeMode}
-                onChange={(e) => onToggleHandsfree(e.target.checked)}
-              />
-              <span className="handsfree-slider" />
-            </label>
-          )}
-          {handsfreeMode && showApprovalUI && approvalModelName && (
-            <span className="approval-model-badge" data-tooltip={`审批模型: ${approvalModelName}`}>
-              {approvalModelName}
+            <span
+              className={[
+                "approval-model-badge",
+                handsfreeMode ? "handsfree-on" : "handsfree-off",
+              ].filter(Boolean).join(" ")}
+              data-tooltip={handsfreeMode ? "脱手模式已开启 — 工具调用由 AI 自动审批" : "脱手模式已关闭 — 工具调用需用户审批"}
+              onClick={() => onToggleHandsfree(!handsfreeMode)}
+            >
+              {handsfreeMode ? approvalModelName || "自动审批" : "脱手"}
             </span>
           )}
-          <span className="session-badge" data-tooltip="刷新页面后自动恢复此会话">
-            {sessionId}
-          </span>
           <span className="token-badge" data-tooltip={`累计消耗: ${tokenUsage.toLocaleString()}  |  已用上下文: ${contextTokens.toLocaleString()}  |  最大上下文: ${llmMaxContextTokens > 0 ? llmMaxContextTokens.toLocaleString() : "?"}`}>
             累计 {tokenUsage.toLocaleString()} / 上下文 {contextTokens.toLocaleString()} / 上限 {llmMaxContextTokens > 0 ? llmMaxContextTokens.toLocaleString() : "?"}
           </span>

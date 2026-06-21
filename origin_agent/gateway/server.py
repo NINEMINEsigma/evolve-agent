@@ -1072,6 +1072,7 @@ async def ws_chat(ws: WebSocket) -> None:
                     content=json.dumps({
                         "server_info": {
                             "llm_max_context_tokens": ctx.llm_max_context_tokens,
+                            "llm_model": ctx.llm_model,
                             "approval_model_name": model_name,
                             "approval_model_available": model_available,
                         },

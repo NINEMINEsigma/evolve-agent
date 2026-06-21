@@ -25,6 +25,7 @@
   gap: 10px;
   pointer-events: none;
   justify-content: center;
+  position: relative;
 }
 
 .header-pill {
@@ -40,6 +41,105 @@
   letter-spacing: 0.2px;
   box-shadow: 0 4px 14px -4px var(--accent-glow);
   pointer-events: auto;
+  position: relative;
+  cursor: default;
+  white-space: nowrap;
+}
+
+.pill-label {
+  white-space: nowrap;
+}
+
+.pill-detail {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 0;
+  opacity: 0;
+  padding-left: 0;
+  padding-right: 0;
+  overflow: hidden;
+  transition: max-width 0.35s ease, opacity 0.25s ease, padding 0.25s ease;
+  white-space: nowrap;
+}
+
+.header-pill:hover .pill-detail {
+  max-width: 280px;
+  opacity: 1;
+  padding-left: 10px;
+  padding-right: 2px;
+}
+
+.pill-status,
+.pill-model {
+  font-size: 11px;
+  font-weight: 500;
+  opacity: 0.92;
+}
+
+.pill-model {
+  position: relative;
+  padding-left: 8px;
+}
+
+.pill-model::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 1px;
+  height: 12px;
+  background: rgba(255, 255, 255, 0.25);
+}
+
+.pill-ripple {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  border: 1px solid rgba(255, 255, 255, 0.45);
+  transform: translate(-50%, -50%) scale(0.2);
+  opacity: 0;
+  pointer-events: none;
+}
+
+.header-pill:hover .pill-ripple {
+  opacity: 1;
+  animation: pillRipple 1.8s ease-out infinite;
+}
+
+.header-pill:hover .pill-ripple:nth-child(5) {
+  animation-delay: 0.9s;
+}
+
+@keyframes pillRipple {
+  0% {
+    transform: translate(-50%, -50%) scale(0.2);
+    opacity: 0.55;
+  }
+  100% {
+    transform: translate(-50%, -50%) scale(3.5);
+    opacity: 0;
+  }
+}
+
+.header-pill.disconnected,
+.header-pill.reconnecting {
+  animation: pillBlink 1s ease-in-out infinite;
+}
+
+@keyframes pillBlink {
+  0%, 100% {
+    opacity: 1;
+    filter: brightness(1);
+  }
+  50% {
+    opacity: 0.55;
+    filter: brightness(1.25);
+  }
 }
 
 .header-pill .status-dot {
@@ -122,15 +222,28 @@
 .approval-model-badge {
   font-size: 11px;
   font-family: "SF Mono", "Fira Code", monospace;
-  background: var(--accent-soft);
-  color: var(--accent);
   padding: 4px 12px;
   border-radius: 999px;
-  cursor: default;
+  cursor: pointer;
+  user-select: none;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
   max-width: 100%;
+  transition: background 0.2s, color 0.2s, opacity 0.2s;
+}
+
+.approval-model-badge.handsfree-off {
+  background: var(--accent-soft);
+  color: var(--accent);
+  opacity: 0.55;
+}
+
+.approval-model-badge.handsfree-on {
+  background: var(--accent-grad);
+  color: #fff;
+  opacity: 1;
+  box-shadow: 0 4px 12px -4px var(--accent-glow);
 }
 
 .model-icon {
@@ -180,12 +293,15 @@
   cursor: pointer;
   user-select: none;
   margin-right: 4px;
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 
 .handsfree-label {
   font-size: 11px;
   color: var(--text-muted);
   font-weight: 500;
+  white-space: nowrap;
 }
 
 .handsfree-toggle input {
@@ -221,6 +337,10 @@
 .handsfree-toggle input:checked + .handsfree-slider::before {
   transform: translateX(14px);
   background: #fff;
+}
+
+.handsfree-toggle {
+  display: none;
 }
 
 /* ── Token ring (compact context usage) ── */
