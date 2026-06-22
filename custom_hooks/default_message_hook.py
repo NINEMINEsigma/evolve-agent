@@ -7,9 +7,12 @@
 f"现在几点了<|im_{hook_tag_name()}_start|>{hook_message()}<|im_{hook_tag_name()}_end|>"
 
 被附加的块称为扩展上下文, 这些块仅会在发送会话时附加在最后一条UserMessage的末尾,
-这些块既不会出现在持久化的会话的历史记录文件中, 
+这些块既不会出现在持久化的会话的历史记录文件中,
 也不会在下一轮对话中被保留在那个成为倒数第二个UserMessage的末尾,
 而只会出现在最后一轮对话的UserMessage的末尾.
+
+新签名支持 **kwargs, 其中 kwargs["runtime_ctx"] 为 RuntimeContext 单例,
+可从中读取 agentspace、fork_path、mode、llm_model 等运行时信息。
 '''
 
 import json
@@ -19,11 +22,11 @@ import sys
 from pathlib import Path
 
 
-def hook_tag_name(session_id: str = "", workspace: str = "") -> str:
+def hook_tag_name(session_id: str = "", workspace: str = "", **kwargs) -> str:
     return "external_knowledge"
 
 
-def hook_message(session_id: str = "", workspace: str = "") -> str:
+def hook_message(session_id: str = "", workspace: str = "", **kwargs) -> str:
     cache_path = Path(workspace) / "session_cache" / session_id / "session_cache.json"
     now = datetime.now()
 
@@ -33,6 +36,11 @@ def hook_message(session_id: str = "", workspace: str = "") -> str:
         "session_id": session_id,
         "workspace": str(workspace),
     }
+
+    # 示例：如果 hook 需要运行时上下文，可从 kwargs 中获取
+    runtime_ctx = kwargs.get("runtime_ctx")
+    if runtime_ctx is not None:
+        result["mode"] = str(getattr(runtime_ctx, "mode", ""))
 
     if not cache_path.exists():
         cache_path.parent.mkdir(parents=True, exist_ok=True)
@@ -55,4 +63,3 @@ def hook_message(session_id: str = "", workspace: str = "") -> str:
             result["long_interval_reminder"] = f"This conversation is {hours}h {minutes}m after the last one. Reminder: review previous context for continuity."
 
         return json.dumps(result)
-    

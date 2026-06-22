@@ -9,16 +9,14 @@ import re
 from typing import Any, Dict, List
 
 from abstract.tools.registry import registry, tool_error, tool_result
-from entity.constant import UPLOAD_FILENAME_TIME_FORMAT
+from entity.constant import UPLOAD_FILENAME_TIME_FORMAT, UPLOAD_TIME_RE_PATTERN
 from system.sandbox import SandboxError
 from .filesystem import _s
 
 logger = logging.getLogger(__name__)
 
 # 文件名示例：20250617_123045_utc_a1b2c3d4_filename.ext
-_UPLOAD_TIME_RE = re.compile(
-    r"^(\d{8}_\d{6}_utc)_[a-f0-9]{8}_(.+)$"
-)
+_UPLOAD_TIME_RE = re.compile(UPLOAD_TIME_RE_PATTERN)
 
 
 def _parse_upload_time(filename: str) -> datetime.datetime | None:

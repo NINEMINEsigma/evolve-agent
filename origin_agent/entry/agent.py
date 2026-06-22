@@ -1267,6 +1267,7 @@ class AgentLoop:
             self._load_message_hooks(),
             session_id,
             str(self._ctx.workspace),
+            self._ctx,
         )
 
     def _build_messages(
@@ -1287,6 +1288,7 @@ class AgentLoop:
             str(self._ctx.workspace),
             memory_ctx,
             self._load_message_hooks(),
+            self._ctx,
         )
 
     def _get_full_history(self, session_id: str) -> list[dict[str, Any]]:

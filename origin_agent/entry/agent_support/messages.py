@@ -5,17 +5,24 @@ from __future__ import annotations
 import importlib.util
 import logging
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, List, TYPE_CHECKING
 
 from system.prompt import build_system_prompt
 from entity.puretype import Role
+
+if TYPE_CHECKING:
+    from system.context import RuntimeContext
+
+logger = logging.getLogger(__name__)
 
 
 def load_message_hooks(repo_root: Path, logger: logging.Logger) -> list[dict]:
     """加载 custom_hooks 中的消息扩展 hook。"""
     hooks: list[dict] = []
     hooks_dir = repo_root / "custom_hooks"
+    logger.info("Loading message hooks from %s", hooks_dir)
     if not hooks_dir.is_dir():
+        logger.info("Hooks directory does not exist: %s", hooks_dir)
         return hooks
 
     for fpath in sorted(hooks_dir.glob("*.py")):
@@ -31,24 +38,47 @@ def load_message_hooks(repo_root: Path, logger: logging.Logger) -> list[dict]:
             msg_fn = getattr(mod, "hook_message", None)
             if callable(tag_fn) and callable(msg_fn):
                 hooks.append({"tag_fn": tag_fn, "msg_fn": msg_fn})
+                logger.info("Loaded message hook: %s", fpath.name)
+            else:
+                logger.info("Skipping %s: missing hook_tag_name or hook_message", fpath.name)
         except Exception:
             logger.warning("Failed to load message hook %s", fpath, exc_info=True)
+    logger.info("Total message hooks loaded: %d", len(hooks))
     return hooks
 
 
-def collect_hooks_context(hooks: list[dict], session_id: str, workspace: str) -> str:
-    """收集 custom_hooks 的实时上下文。"""
+def _call_hook_with_runtime_ctx(fn, session_id: str, workspace: str, runtime_ctx: "RuntimeContext | None"):
+    """调用 hook 函数，优先传入 runtime_ctx；旧签名不兼容时回退到两参数调用。"""
+    try:
+        return fn(session_id, workspace, runtime_ctx=runtime_ctx)
+    except TypeError as exc:
+        msg = str(exc)
+        if "unexpected keyword argument" in msg or "got an unexpected keyword argument" in msg:
+            return fn(session_id, workspace)
+        raise
+
+
+def collect_hooks_context(
+    hooks: list[dict],
+    session_id: str,
+    workspace: str,
+    runtime_ctx: "RuntimeContext | None" = None,
+) -> str:
+    """收集 custom_hooks 的实时上下文。新 hook 可通过 **kwargs 接收 runtime_ctx。"""
     parts: list[str] = []
     for hook in hooks:
         try:
-            tag = hook["tag_fn"](session_id, workspace)
+            tag = _call_hook_with_runtime_ctx(hook["tag_fn"], session_id, workspace, runtime_ctx)
             if tag:
-                msg = hook["msg_fn"](session_id, workspace)
+                msg = _call_hook_with_runtime_ctx(hook["msg_fn"], session_id, workspace, runtime_ctx)
                 if msg:
-                    parts.append(f"<|im_{tag}_start|>{msg}<|im_{tag}_end|>")
+                    part = f"<|im_{tag}_start|>{msg}<|im_{tag}_end|>"
+                    parts.append(part)
         except Exception:
-            pass
-    return "\n".join(parts)
+            logger.warning("Failed to collect hook context", exc_info=True)
+    result = "\n".join(parts)
+    logger.info("Collected hooks context (%d chars): %s", len(result), result[:500])
+    return result
 
 
 def build_agent_system_prompt(ctx: Any, skill_blocks: list[str]) -> str:
@@ -71,6 +101,7 @@ def build_turn_messages(
     workspace: str,
     memory_ctx: str,
     hooks: list[dict],
+    runtime_ctx: "RuntimeContext | None" = None,
 ) -> list[dict[str, Any]]:
     """构建当前回合发送给 LLM 的消息列表。"""
     messages: list[dict[str, Any]] = [
@@ -83,7 +114,8 @@ def build_turn_messages(
             hooked_content = hooked_msg.get("content", "")
 
             # 把 memory / hooks 上下文追加到最后一条用户文本 block 后面
-            hooks_context = collect_hooks_context(hooks, session_id, workspace)
+            hooks_context = collect_hooks_context(hooks, session_id, workspace, runtime_ctx)
+            logger.info("Appending hooks_context (%d chars) to user message", len(hooks_context))
             if memory_ctx or hooks_context:
                 if isinstance(hooked_content, list):
                     # 找到最后一个 text block，把上下文追加到它的 text

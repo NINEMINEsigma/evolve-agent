@@ -12,6 +12,9 @@ TOOL_RESULT_PREVIEW_CHARS: int = 2000
 # 超过此长度时，Agent 会收到提示去日志文件查看完整输出
 CRON_STDOUT_PREVIEW_MAX_LENGTH = 5000
 
+# 文件名示例：20250617_123045_utc_a1b2c3d4_filename.ext
+UPLOAD_TIME_RE_PATTERN = r"^(\d{8}_\d{6}_utc)_[a-f0-9]{8}_(.+)$"
+
 # 上传文件名中携带的 UTC 时间戳格式，用于 list_uploads 按真实上传时间排序。
 # 例如：20250617_123045_utc
 UPLOAD_FILENAME_TIME_FORMAT = "%Y%m%d_%H%M%S_utc"
