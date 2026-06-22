@@ -661,32 +661,48 @@ export function useWebSocket() {
     const blocks: ContentBlock[] = [];
     const imageMap = new Map(images.map((img) => [img.id, img]));
 
-    const flushText = (text: string) => {
-      const trimmed = text.replace(/\u200B/g, "").replace(/\n{3,}/g, "\n\n").trim();
-      if (trimmed) blocks.push({ type: "text", text: trimmed });
+    const imageNodes = el.querySelectorAll<HTMLSpanElement>(".input-inline-image");
+    if (imageNodes.length === 0) {
+      const text = (el.innerText || "").replace(/\u200B/g, "").replace(/\n{3,}/g, "\n\n").trim();
+      if (text) blocks.push({ type: "text", text });
+      return blocks;
+    }
+
+    const imagePositions = new Map<Node, PendingImage>();
+    imageNodes.forEach((node) => {
+      const id = node.dataset.imageId;
+      const img = id ? imageMap.get(id) : undefined;
+      if (img) imagePositions.set(node, img);
+    });
+
+    let currentText = "";
+    const flushText = () => {
+      const cleaned = currentText.replace(/\u200B/g, "").replace(/\n{3,}/g, "\n\n").trim();
+      if (cleaned) blocks.push({ type: "text", text: cleaned });
+      currentText = "";
     };
 
     const walk = (node: Node) => {
       if (node.nodeType === Node.TEXT_NODE) {
-        flushText(node.textContent || "");
+        currentText += node.textContent || "";
         return;
       }
       if (node.nodeType === Node.ELEMENT_NODE) {
         const el = node as HTMLElement;
-        if (el.classList.contains("input-inline-image")) {
-          const id = el.dataset.imageId;
-          const img = id ? imageMap.get(id) : undefined;
-          if (img) {
-            blocks.push({ type: "image_url", image_url: { url: img.dataUrl } });
-          }
+        if (imagePositions.has(el)) {
+          flushText();
+          blocks.push({ type: "image_url", image_url: { url: imagePositions.get(el)!.dataUrl } });
           return;
         }
         for (const child of Array.from(el.childNodes)) {
-          walk(child);
+          if (child.nodeType === Node.ELEMENT_NODE && (child as HTMLElement).tagName === "BR") {
+            currentText += "\n";
+          } else {
+            walk(child);
+          }
         }
-        if (el.tagName === "DIV" && blocks.length > 0) {
-          const last = blocks[blocks.length - 1];
-          if (last.type === "text") last.text += "\n";
+        if (el.tagName === "DIV") {
+          currentText += "\n";
         }
       }
     };
@@ -694,6 +710,7 @@ export function useWebSocket() {
     for (const child of Array.from(el.childNodes)) {
       walk(child);
     }
+    flushText();
     return blocks;
   };
 

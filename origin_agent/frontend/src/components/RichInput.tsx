@@ -35,6 +35,7 @@ const RichInput = React.forwardRef<HTMLDivElement, RichInputProps>(function Rich
     if (value !== el.innerHTML && value !== currentText) {
       el.innerHTML = value;
       setIsEmpty(!el.innerText?.trim() && !el.querySelector(".input-inline-image"));
+      autoResize();
     }
   }, [value]);
 
