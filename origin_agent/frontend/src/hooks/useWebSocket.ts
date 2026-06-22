@@ -243,6 +243,7 @@ export function useWebSocket() {
 
     ws.onopen = () => {
       reconnectRef.current = 0;
+      ignoreStaleRef.current = false;
       setStatus("已连接");
       instantScrollRef.current = true;
       addMessage("system", "已连接到 Evolve Agent");
@@ -653,6 +654,7 @@ export function useWebSocket() {
     setInput("");
     setPendingImages([]);
     setWaiting(true);
+    ignoreStaleRef.current = false;
     streamDoneRef.current = false;
   }, [pendingImages, sessions, sessionId, waiting, nextMessageIndex]);
 
@@ -852,6 +854,7 @@ export function useWebSocket() {
     setHandsfreeMode(false);
     setClipboardDisplays({});
     setTaskProgress({});
+    ignoreStaleRef.current = false;
     clearTimeout(timerRef.current);
     manualRef.current = false;
     connect();
@@ -872,6 +875,7 @@ export function useWebSocket() {
     setPendingConfirm(null);
     setClipboardDisplays({});
     setTaskProgress({});
+    ignoreStaleRef.current = false;
     clearTimeout(timerRef.current);
     manualRef.current = false;
     connect();
