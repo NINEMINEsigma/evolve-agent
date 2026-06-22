@@ -347,6 +347,16 @@ class Sandbox:
         r.real.parent.mkdir(parents=True, exist_ok=True)
         r.real.write_text(content, encoding="utf-8")
 
+    def append(self, logical: str, content: str) -> None:
+        """通过沙盒追加文件内容。文件不存在时报错。"""
+        r: ResolvedPath = self.resolve_write(logical)
+        if not r.real.exists():
+            raise SandboxError(f"File not found: {logical}")
+        if not r.real.is_file():
+            raise SandboxError(f"Not a file: {logical}")
+        with r.real.open("a", encoding="utf-8") as f:
+            f.write(content)
+
     def exists(self, logical: str) -> bool:
         """检查逻辑路径是否存在（只读检查）。"""
         try:
@@ -391,3 +401,45 @@ class Sandbox:
             r.real.rmdir()
         else:
             r.real.unlink(missing_ok=True)
+
+    def resolve_abs(self, logical: str) -> str:
+        """将逻辑路径解析为绝对路径字符串（只读检查）。"""
+        r: ResolvedPath = self.resolve_read(logical)
+        return str(r.real)
+
+    def create_folder(self, logical: str, parents: bool = True) -> None:
+        """创建目录（写入检查）。"""
+        r: ResolvedPath = self.resolve_write(logical)
+        r.real.mkdir(parents=parents, exist_ok=True)
+
+    def delete_folder(self, logical: str) -> None:
+        """递归删除目录及其所有内容（写入检查）。"""
+        import shutil
+        r: ResolvedPath = self.resolve_write(logical)
+        if not r.real.exists():
+            raise SandboxError(f"Path does not exist: {logical}")
+        if not r.real.is_dir():
+            raise SandboxError(f"Not a directory: {logical}")
+        shutil.rmtree(str(r.real))
+
+    def is_file(self, logical: str) -> bool:
+        """检查逻辑路径是否为一个文件（只读检查）。"""
+        r: ResolvedPath = self.resolve_read(logical)
+        return r.real.is_file()
+
+    def is_dir(self, logical: str) -> bool:
+        """检查逻辑路径是否为一个目录（只读检查）。"""
+        r: ResolvedPath = self.resolve_read(logical)
+        return r.real.is_dir()
+
+    def count_lines(self, logical: str) -> int:
+        """计算文件的总行数（只读检查）。如果文件不存在或不是文件则报错。"""
+        r: ResolvedPath = self.resolve_read(logical)
+        if not r.real.exists():
+            raise SandboxError(f"File not found: {logical}")
+        if not r.real.is_file():
+            raise SandboxError(f"Not a file: {logical}")
+        content = r.real.read_text(encoding="utf-8")
+        if content:
+            return content.count("\n") + (1 if not content.endswith("\n") else 0)
+        return 0

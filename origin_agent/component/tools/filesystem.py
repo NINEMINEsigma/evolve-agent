@@ -224,6 +224,65 @@ registry.register(
 )
 
 
+# -- append_file
+def _handle_append(args: dict[str, Any]) -> dict:
+    path: str = str(args.get("path", "")).strip()
+    content: str = str(args.get("content", ""))
+    if not path:
+        return tool_error("path is required", path=path)
+    if len(content) > WRITE_FILE_MAX_CHARS:
+        return tool_error(
+            f"content exceeds {WRITE_FILE_MAX_CHARS} characters (got {len(content)}). "
+            "Split the append into multiple sequential append_file calls.",
+            path=path,
+        )
+    if not _s().exists(path):
+        return tool_error("File not found — use write_file to create it first", path=path)
+    try:
+        _s().append(path, content)
+        return tool_result(success=True, path=path, bytes=len(content.encode("utf-8")))
+    except SandboxError as exc:
+        return tool_error(str(exc), path=path)
+
+
+registry.register(
+    name="append_file",
+    toolset="filesystem",
+    schema={
+        # 将内容追加到文件末尾。路径必须使用命名空间前缀。
+        # 使用 'ws:' 写入 workspace 数据，'fork:' 写入进化代码。
+        # 文件必须已存在，否则报错；如需创建文件请使用 write_file。
+        "description": (
+            "Append content to the end of a file. Path must use a namespace prefix. "
+            "Use 'ws:' for workspace data, 'fork:' for evolution code, "
+            "'skills:' for skill files. "
+            "File must already exist; use write_file to create it first. "
+            f"Max {WRITE_FILE_MAX_CHARS} characters per call. "
+            "If rejected for exceeding the limit, split the append into multiple append_file calls."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "path": {
+                    "type": "string",
+                    # 逻辑路径。必须使用 ws:、fork: 或 skills: 前缀。
+                    "description": "Logical path. Must use ws:, fork:, or skills: prefix.",
+                },
+                "content": {
+                    "type": "string",
+                    # 要追加到文件末尾的内容。最多 WRITE_FILE_MAX_CHARS 个字符。
+                    "description": f"Content to append to the file. Max {WRITE_FILE_MAX_CHARS} characters.",
+                },
+            },
+            "required": ["path", "content"],
+        },
+    },
+    handler=_handle_append,
+    emoji="📝",
+    danger_level="write",
+)
+
+
 # -- list_directory
 registry.register(
     name="list_directory",
@@ -285,6 +344,9 @@ def _handle_edit(args: dict[str, Any]) -> dict:
         )
     if old_string == new_string:
         return tool_error("old_string and new_string are identical — nothing to change", path=path)
+
+    if not _s().exists(path):
+        return tool_error("File not found — use write_file to create it first", path=path)
 
     try:
         content: str = _s().read(path, limit=0)
@@ -779,4 +841,277 @@ registry.register(
     },
     handler=_handle_grep,
     emoji="🔎",
+)
+
+
+# -- resolve_path
+# 将沙盒逻辑路径解析为磁盘上的绝对路径
+# Resolve sandbox logical path to absolute filesystem path
+
+
+def _handle_resolve_path(args: dict[str, Any]) -> dict:
+    path: str = str(args.get("path", "")).strip()
+    if not path:
+        return tool_error("path is required", path=path)
+    try:
+        abs_path: str = _s().resolve_abs(path)
+        return tool_result(absolute_path=abs_path, logical_path=path)
+    except SandboxError as exc:
+        return tool_error(str(exc), path=path)
+
+
+registry.register(
+    name="resolve_path",
+    toolset="filesystem",
+    schema={
+        # 将逻辑路径解析为绝对路径。路径必须使用命名空间前缀
+        # (fork:、ws:、fix:、skills:)。返回该路径在磁盘上的绝对路径。
+        "description": (
+            "Resolve a logical path to an absolute filesystem path. "
+            "Path must use a namespace prefix (fork:, ws:, fix:, skills:). "
+            "Returns the absolute path on disk."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "path": {
+                    "type": "string",
+                    # 逻辑路径（命名空间前缀 + 相对路径）。
+                    "description": "Logical path (namespace prefix + relative path).",
+                },
+            },
+            "required": ["path"],
+        },
+    },
+    handler=_handle_resolve_path,
+    emoji="📍",
+)
+
+
+# -- create_folder
+# 创建目录（包括父目录）
+# Create directory (including parent directories)
+
+
+def _handle_create_folder(args: dict[str, Any]) -> dict:
+    path: str = str(args.get("path", "")).strip()
+    if not path:
+        return tool_error("path is required", path=path)
+    try:
+        parents: bool = bool(args.get("parents", True))
+        _s().create_folder(path, parents=parents)
+        return tool_result(success=True, path=path, created=True)
+    except SandboxError as exc:
+        return tool_error(str(exc), path=path)
+
+
+registry.register(
+    name="create_folder",
+    toolset="filesystem",
+    schema={
+        # 创建目录。路径必须使用命名空间前缀
+        # (fork:、ws:、fix:、skills:)。
+        # 默认自动创建所有缺失的父目录（parents=true）。
+        "description": (
+            "Create a directory. Path must use a namespace prefix "
+            "(fork:, ws:, fix:, skills:). "
+            "By default, all missing parent directories are created automatically."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "path": {
+                    "type": "string",
+                    # 要创建的目录逻辑路径（命名空间前缀 + 相对路径）。
+                    "description": "Directory logical path to create (namespace prefix + relative path).",
+                },
+                "parents": {
+                    "type": "boolean",
+                    # 是否同时创建缺失的父目录（默认 true）。
+                    "description": "Whether to also create missing parent directories (default true).",
+                    "default": True,
+                },
+            },
+            "required": ["path"],
+        },
+    },
+    handler=_handle_create_folder,
+    emoji="📁",
+    danger_level="write",
+)
+
+
+# -- delete_folder
+# 递归删除目录及其所有内容
+# Recursively delete a directory and all its contents
+
+
+def _handle_delete_folder(args: dict[str, Any]) -> dict:
+    path: str = str(args.get("path", "")).strip()
+    if not path:
+        return tool_error("path is required", path=path)
+    try:
+        _s().delete_folder(path)
+        return tool_result(success=True, path=path, deleted=True)
+    except SandboxError as exc:
+        return tool_error(str(exc), path=path)
+
+
+registry.register(
+    name="delete_folder",
+    toolset="filesystem",
+    schema={
+        # 递归删除目录及其所有内容。路径必须使用命名空间前缀
+        # (fork:、ws:、fix:、skills:)。仅允许可写命名空间。
+        # 危险操作：会删除目录中的所有文件和子目录。
+        "description": (
+            "Recursively delete a directory and all its contents. "
+            "Path must use a writable namespace prefix (ws:, fork:, fix:, skills:). "
+            "DANGEROUS: this removes all files and subdirectories inside the directory."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "path": {
+                    "type": "string",
+                    # 要删除的目录逻辑路径（命名空间前缀 + 相对路径）。
+                    "description": "Directory logical path to delete (namespace prefix + relative path).",
+                },
+            },
+            "required": ["path"],
+        },
+    },
+    handler=_handle_delete_folder,
+    emoji="🗂️",
+    danger_level="write",
+)
+
+
+# -- is_file
+# 判断路径是否为文件
+# Check if a path is a file (not a directory)
+
+
+def _handle_is_file(args: dict[str, Any]) -> dict:
+    path: str = str(args.get("path", "")).strip()
+    if not path:
+        return tool_error("path is required", path=path)
+    try:
+        result: bool = _s().is_file(path)
+        return tool_result(is_file=result, path=path)
+    except SandboxError as exc:
+        return tool_error(str(exc), path=path)
+
+
+registry.register(
+    name="is_file",
+    toolset="filesystem",
+    schema={
+        # 判断路径是否为文件（不是目录）。路径必须使用命名空间前缀
+        # (fork:、ws:、fix:、skills:)。
+        "description": (
+            "Check whether a path is a file (not a directory). "
+            "Path must use a namespace prefix (fork:, ws:, fix:, skills:)."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "path": {
+                    "type": "string",
+                    # 要检查的逻辑路径（命名空间前缀 + 相对路径）。
+                    "description": "Logical path to check (namespace prefix + relative path).",
+                },
+            },
+            "required": ["path"],
+        },
+    },
+    handler=_handle_is_file,
+    emoji="📄",
+)
+
+
+# -- is_directory
+# 判断路径是否为目录
+# Check if a path is a directory
+
+
+def _handle_is_directory(args: dict[str, Any]) -> dict:
+    path: str = str(args.get("path", "")).strip()
+    if not path:
+        return tool_error("path is required", path=path)
+    try:
+        result: bool = _s().is_dir(path)
+        return tool_result(is_directory=result, path=path)
+    except SandboxError as exc:
+        return tool_error(str(exc), path=path)
+
+
+registry.register(
+    name="is_directory",
+    toolset="filesystem",
+    schema={
+        # 判断路径是否为目录。路径必须使用命名空间前缀
+        # (fork:、ws:、fix:、skills:)。
+        "description": (
+            "Check whether a path is a directory. "
+            "Path must use a namespace prefix (fork:, ws:, fix:, skills:)."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "path": {
+                    "type": "string",
+                    # 要检查的逻辑路径（命名空间前缀 + 相对路径）。
+                    "description": "Logical path to check (namespace prefix + relative path).",
+                },
+            },
+            "required": ["path"],
+        },
+    },
+    handler=_handle_is_directory,
+    emoji="📁",
+)
+
+
+# -- count_lines
+# 返回文件的总行数，辅助 read_file 的分页读取
+# Return total number of lines in a file to assist paginated read_file
+
+
+def _handle_count_lines(args: dict[str, Any]) -> dict:
+    path: str = str(args.get("path", "")).strip()
+    if not path:
+        return tool_error("path is required", path=path)
+    try:
+        total: int = _s().count_lines(path)
+        return tool_result(total_lines=total, path=path)
+    except SandboxError as exc:
+        return tool_error(str(exc), path=path)
+
+
+registry.register(
+    name="count_lines",
+    toolset="filesystem",
+    schema={
+        # 返回文件的总行数。路径必须使用命名空间前缀
+        # (fork:、ws:、fix:、skills:)。可配合 read_file 的 offset 使用。
+        "description": (
+            "Return the total number of lines in a file. "
+            "Path must use a namespace prefix (fork:, ws:, fix:, skills:). "
+            "Useful to know file bounds before calling read_file with offset."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "path": {
+                    "type": "string",
+                    # 文件逻辑路径（命名空间前缀 + 相对路径）。
+                    "description": "File logical path (namespace prefix + relative path).",
+                },
+            },
+            "required": ["path"],
+        },
+    },
+    handler=_handle_count_lines,
+    emoji="📏",
 )
