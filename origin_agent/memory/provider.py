@@ -58,6 +58,7 @@ class EasysaveMemoryProvider(MemoryProvider):
         try:
             self._index = load("_sessions", str(idx_path)) or {}
         except Exception:
+            logger.exception("Failed to load session index from %s, resetting to empty", idx_path)
             self._index = {}
         logger.info("EasysaveMemoryProvider initialized | session=%s dir=%s",
                     session_id, self._dir)
@@ -128,7 +129,7 @@ class EasysaveMemoryProvider(MemoryProvider):
         try:
             save("_sessions", str(idx_path), self._index)
         except Exception:
-            pass
+            logger.exception("Failed to persist session index to %s", idx_path)
 
     def get_tool_schemas(self) -> list[dict[str, Any]]:
         return [

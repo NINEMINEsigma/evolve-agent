@@ -1237,7 +1237,7 @@ class AgentLoop:
                 from component.extools import cron_tools
                 cron_tools.migrate_session_cron_jobs(old_sid, new_sid)
             except Exception:
-                pass
+                logger.exception("Failed to migrate cron jobs from %s to %s", old_sid, new_sid)
 
             self._session_rotated_notify[old_sid] = new_sid
 
