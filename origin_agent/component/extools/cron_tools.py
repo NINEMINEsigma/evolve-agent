@@ -1012,31 +1012,26 @@ registry.register(
     name="schedule_cron",
     toolset="cron",
     schema={
-        # 创建一个后台一次性定时任务；任务只会执行一次。
-        # 数字 schedule 表示延迟 N 秒后执行一次；cron 表达式表示下一个匹配时间执行一次。
-        # 循环、轮询或长期观察必须等 [cron-result] 返回后再安排下一次，不要预排未来链式任务。
-        # 原始 stdout/stderr 会写入日志并注入回 Agent；用户不会自动看到原始输出。
-        # 本工具是非阻塞的：Agent 调用后立即继续执行，任务在后台运行，完成后通过 [cron-result] 通知。
-        "description": (
-            "Schedule a one-shot background task. It runs exactly once.\n"
-            "This is NON-BLOCKING: the Agent continues immediately after scheduling, "
-            "and the task runs in the background. A [cron-result] message is delivered when it completes. "
-            "It is NOT sleep.\n\n"
-            "Two one-shot schedule formats are supported:\n"
-            "  1. Delay: a number in seconds, e.g. '300' means run once after 300 seconds; minimum 10s.\n"
-            "  2. Cron expression: 5 fields 'minute hour day month weekday', "
-            "e.g. '0 9 * * 1' means run once at the next matching Monday 9:00 AM.\n"
-            "     Weekday: 0=Sunday, 1=Monday, ..., 6=Saturday.\n\n"
-            "For loops, polling, or long-running observation, schedule only the next run. "
-            "Do not pre-create future chains such as 15s, 30s, and 45s unless the user explicitly asks for multiple independent future runs. "
-            "After execution, the Agent receives a [cron-result] message and can decide whether to schedule the next one-shot task. "
-            "Raw stdout/stderr are written to a log file and injected back to the Agent; the user does not automatically see the raw output.\n\n"
-            "Returns:\n"
-            "  - success: whether the task was created\n"
-            "  - task_id: unique identifier for managing the task\n"
-            "  - next_run: ISO timestamp of the one scheduled execution\n"
-            "  - log_path: path to the execution log file\n"
-        ),
+        # Schedule a one-shot background task. It runs exactly once.
+        # Numeric schedule means delay N seconds; cron expression matches the next execution time.
+        # For loops, polling, or long-term observation, wait for [cron-result] before scheduling the next; do not pre-create future chained tasks.
+        # Raw stdout/stderr are written to a log file and injected back to the Agent; the user does not automatically see raw output.
+        # This is NON-BLOCKING: the Agent continues immediately after scheduling, the task runs in the background, and a [cron-result] notifies on completion.
+        "description": """Schedule a one-shot background task. It runs exactly once.
+This is NON-BLOCKING: the Agent continues immediately after scheduling, and the task runs in the background. A [cron-result] message is delivered when it completes. It is NOT sleep.
+
+Two one-shot schedule formats are supported:
+  1. Delay: a number in seconds, e.g. '300' means run once after 300 seconds; minimum 10s.
+  2. Cron expression: 5 fields 'minute hour day month weekday', e.g. '0 9 * * 1' means run once at the next matching Monday 9:00 AM.
+     Weekday: 0=Sunday, 1=Monday, ..., 6=Saturday.
+
+For loops, polling, or long-running observation, schedule only the next run. Do not pre-create future chains such as 15s, 30s, and 45s unless the user explicitly asks for multiple independent future runs. After execution, the Agent receives a [cron-result] message and can decide whether to schedule the next one-shot task. Raw stdout/stderr are written to a log file and injected back to the Agent; the user does not automatically see the raw output.
+
+Returns:
+  - success: whether the task was created
+  - task_id: unique identifier for managing the task
+  - next_run: ISO timestamp of the one scheduled execution
+  - log_path: path to the execution log file""",
         "parameters": {
             "type": "object",
             "properties": {
@@ -1087,11 +1082,9 @@ registry.register(
     name="list_cron_jobs",
     toolset="cron",
     schema={
-        # 列出当前会话的所有定时任务。
-        "description": (
-            "List all scheduled cron jobs for the current session.\n"
-            "Returns task metadata including schedule, next run time, run count, and log path."
-        ),
+        # List all scheduled cron jobs for the current session.
+        "description": """List all scheduled cron jobs for the current session.
+Returns task metadata including schedule, next run time, run count, and log path.""",
         "parameters": {
             "type": "object",
             "properties": {},
@@ -1107,11 +1100,9 @@ registry.register(
     name="cancel_cron_job",
     toolset="cron",
     schema={
-        # 按 task_id 取消并移除指定定时任务。
-        "description": (
-            "Cancel and remove a scheduled cron job by its task_id.\n"
-            "The task will no longer execute. Pending executions are discarded."
-        ),
+        # Cancel and remove a scheduled cron job by its task_id.
+        "description": """Cancel and remove a scheduled cron job by its task_id.
+The task will no longer execute. Pending executions are discarded.""",
         "parameters": {
             "type": "object",
             "properties": {
@@ -1134,13 +1125,9 @@ registry.register(
     name="run_cron_job_now",
     toolset="cron",
     schema={
-        # 立即触发指定定时任务执行一次。
-        "description": (
-            "Immediately trigger a one-time execution of a scheduled cron job.\n"
-            "This does not affect the regular schedule — the next automatic execution "
-            "still occurs as originally planned (unless the task uses interval scheduling, "
-            "in which case the timer is reset from now)."
-        ),
+        # Immediately trigger a one-time execution of a scheduled cron job.
+        "description": """Immediately trigger a one-time execution of a scheduled cron job.
+This does not affect the regular schedule — the next automatic execution still occurs as originally planned (unless the task uses interval scheduling, in which case the timer is reset from now).""",
         "parameters": {
             "type": "object",
             "properties": {
@@ -1163,16 +1150,13 @@ registry.register(
     name="reschedule_cron_job",
     toolset="cron",
     schema={
-        # 基于已有任务配置重新创建一个一次性任务；适合在 [cron-result] 返回后安排下一轮。
-        # 不要用它预排一批未来任务；需要修改参数时应改用 schedule_cron 创建一个新的下一次任务。
-        "description": (
-            "Create one new one-shot cron job by copying an existing task's configuration.\n"
-            "Use this after receiving a [cron-result] when the same command should continue for one more run. "
-            "Do not use it to pre-create batches of future runs.\n"
-            "All parameters (schedule, command, cwd) are taken from the source task and cannot be modified. "
-            "If the next run needs a different delay, cron expression, command, or cwd, create one new task with schedule_cron instead.\n\n"
-            "The new task will run exactly once, just like a normally scheduled task."
-        ),
+        # Create one new one-shot cron job by copying an existing task's configuration; suitable for arranging the next round after [cron-result].
+        # Do not use it to pre-create batches of future runs; if parameters need modification, use schedule_cron to create a new next task instead.
+        "description": """Create one new one-shot cron job by copying an existing task's configuration.
+Use this after receiving a [cron-result] when the same command should continue for one more run. Do not use it to pre-create batches of future runs.
+All parameters (schedule, command, cwd) are taken from the source task and cannot be modified. If the next run needs a different delay, cron expression, command, or cwd, create one new task with schedule_cron instead.
+
+The new task will run exactly once, just like a normally scheduled task.""",
         "parameters": {
             "type": "object",
             "properties": {
@@ -1195,19 +1179,17 @@ registry.register(
     name="wait_cron",
     toolset="cron",
     schema={
-        # 创建一个只等待、不执行任何脚本的精简定时提醒任务。
-        # 本工具是非阻塞的：Agent 调用后立即继续执行，等待在后台进行，完成后通过 [cron-result] 通知。
-        "description": (
-            "Schedule a lightweight wait reminder that does not execute any script.\n"
-            "This is NON-BLOCKING: the Agent continues immediately after scheduling, "
-            "and the wait happens in the background. A [cron-result] message is delivered when the duration expires. "
-            "It is NOT sleep.\n\n"
-            "After the specified duration expires, a [cron-result] message with the fixed reminder text is sent to the Agent.\n\n"
-            "Returns:\n"
-            "  - success: whether the wait task was created\n"
-            "  - task_id: unique identifier for managing the task\n"
-            "  - next_run: ISO timestamp when the reminder will trigger\n"
-        ),
+        # Create a lightweight wait reminder that does not execute any script.
+        # This is NON-BLOCKING: the Agent continues immediately after scheduling, the wait happens in the background, and a [cron-result] notifies on completion.
+        "description": """Schedule a lightweight wait reminder that does not execute any script.
+This is NON-BLOCKING: the Agent continues immediately after scheduling, and the wait happens in the background. A [cron-result] message is delivered when the duration expires. It is NOT sleep.
+
+After the specified duration expires, a [cron-result] message with the fixed reminder text is sent to the Agent.
+
+Returns:
+  - success: whether the wait task was created
+  - task_id: unique identifier for managing the task
+  - next_run: ISO timestamp when the reminder will trigger""",
         "parameters": {
             "type": "object",
             "properties": {

@@ -128,36 +128,29 @@ registry.register(
     name="read_image",
     toolset="filesystem",
     schema={
-        # 读取图片文件并返回其内容。
-        # 如果模型支持 vision，图片内容会作为多模态 block 直接送入 LLM 供视觉分析。
-        # 如果模型不支持 vision，你将只收到图片元数据文本。
-        # 路径必须使用命名空间前缀，通常为 'ws:'（agent workspace）。
-        # 示例：'ws:uploads/screenshot.png'。
-        # 支持的格式：PNG、JPEG、WebP、GIF、BMP、TIFF、SVG。
-        # 最大文件大小：20MB。
-        "description": (
-            "Read an image file and return its contents.\n\n"
-            "If the model supports vision, the image is attached as a multimodal "
-            "block for direct visual analysis.\n"
-            "If the model does not support vision, you will receive only the "
-            "image metadata (path, format, size, width, height).\n\n"
-            "Path must use a namespace prefix, typically 'ws:' (agent workspace). "
-            "Example: 'ws:uploads/screenshot.png'.\n\n"
-            "Supported formats: PNG, JPEG, WebP, GIF, BMP, TIFF, SVG. "
-            "Maximum file size: 20MB."
-        ),
+        # Read an image file and return its contents.
+        # If the model supports vision, the image is attached as a multimodal block for direct visual analysis.
+        # If the model does not support vision, you will receive only the image metadata (path, format, size, width, height).
+        # Path must use a namespace prefix, typically 'ws:' (agent workspace).
+        # Example: 'ws:uploads/screenshot.png'.
+        # Supported formats: PNG, JPEG, WebP, GIF, BMP, TIFF, SVG.
+        # Maximum file size: 20MB.
+        "description": """Read an image file and return its contents.
+
+If the model supports vision, the image is attached as a multimodal block for direct visual analysis.
+If the model does not support vision, you will receive only the image metadata (path, format, size, width, height).
+
+Path must use a namespace prefix, typically 'ws:' (agent workspace). Example: 'ws:uploads/screenshot.png'.
+
+Supported formats: PNG, JPEG, WebP, GIF, BMP, TIFF, SVG. Maximum file size: 20MB.""",
         "parameters": {
             "type": "object",
             "properties": {
                 "path": {
                     "type": "string",
-                    # 图片文件的逻辑路径。必须使用命名空间前缀（ws:、fork: 或 fix:）。
-                    # 上传的文件位于 'ws:uploads/' 目录下。
-                    "description": (
-                        "Logical path of the image file. "
-                        "Must include a namespace prefix (ws:, fork:, or fix:). "
-                        "Uploaded files are located under 'ws:uploads/'."
-                    ),
+                    # Logical path of the image file. Must include a namespace prefix (ws:, fork:, or fix:).
+                    # Uploaded files are located under 'ws:uploads/'.
+                    "description": """Logical path of the image file. Must include a namespace prefix (ws:, fork:, or fix:). Uploaded files are located under 'ws:uploads/'.""",
                 },
             },
             "required": ["path"],

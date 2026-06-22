@@ -539,15 +539,15 @@ registry.register(
     name="browser_navigate",
     toolset="browser",
     schema={
-        # 在浏览器中打开 URL 并返回页面可交互元素的 snapshot。需要 agent-browser 已安装。
-        "description": "Open a URL in the browser and return a snapshot of interactive elements. Requires agent-browser to be installed.",
+        # Open a URL in the browser and return a snapshot of interactive elements. Requires agent-browser to be installed.
+        "description": """Open a URL in the browser and return a snapshot of interactive elements. Requires agent-browser to be installed.""",
         "parameters": {
             "type": "object",
             "properties": {
                 "url": {
                     "type": "string",
-                    # 要打开的完整 URL（含 https://）。
-                    "description": "Full URL to open (including https://).",
+                    # Full URL to open (including https://).
+                    "description": """Full URL to open (including https://).""",
                 },
             },
             "required": ["url"],
@@ -561,15 +561,15 @@ registry.register(
     name="browser_snapshot",
     toolset="browser",
     schema={
-        # 获取当前浏览页面的可交互元素树（@eN ref），用于了解页面状态。
-        "description": "Get the interactive element tree (@eN ref) of the current page to understand page state.",
+        # Get the interactive element tree (@eN ref) of the current page to understand page state.
+        "description": """Get the interactive element tree (@eN ref) of the current page to understand page state.""",
         "parameters": {
             "type": "object",
             "properties": {
                 "full": {
                     "type": "boolean",
-                    # 设为 true 获取完整深度（默认限制 4 层）。
-                    "description": "Set to true for full depth (default limited to 4 levels).",
+                    # Set to true for full depth (default limited to 4 levels).
+                    "description": """Set to true for full depth (default limited to 4 levels).""",
                 },
             },
         },
@@ -582,20 +582,20 @@ registry.register(
     name="browser_click",
     toolset="browser",
     schema={
-        # 通过 @eN ref 或 CSS 选择器点击页面元素。点击后自动 snapshot 返回最新状态。
-        "description": "Click a page element via @eN ref or CSS selector. Auto-snapshots after click returning latest state.",
+        # Click a page element via @eN ref or CSS selector. Auto-snapshots after click returning latest state.
+        "description": """Click a page element via @eN ref or CSS selector. Auto-snapshots after click returning latest state.""",
         "parameters": {
             "type": "object",
             "properties": {
                 "ref": {
                     "type": "string",
-                    # 元素的 @eN ref（如 @e3），来自 browser_navigate 或 browser_snapshot。
-                    "description": "@eN ref of the element (e.g. @e3), from browser_navigate or browser_snapshot.",
+                    # @eN ref of the element (e.g. @e3), from browser_navigate or browser_snapshot.
+                    "description": """@eN ref of the element (e.g. @e3), from browser_navigate or browser_snapshot.""",
                 },
                 "selector": {
                     "type": "string",
-                    # CSS 选择器（当 ref 不可用时使用）。
-                    "description": "CSS selector (used when ref is not available).",
+                    # CSS selector (used when ref is not available).
+                    "description": """CSS selector (used when ref is not available).""",
                 },
             },
         },
@@ -608,20 +608,20 @@ registry.register(
     name="browser_fill",
     toolset="browser",
     schema={
-        # 清空输入框并填入指定文本。
-        "description": "Clear the input field and fill with specified text.",
+        # Clear the input field and fill with specified text.
+        "description": """Clear the input field and fill with specified text.""",
         "parameters": {
             "type": "object",
             "properties": {
                 "ref": {
                     "type": "string",
-                    # 输入框的 @eN ref。
-                    "description": "@eN ref of the input field.",
+                    # @eN ref of the input field.
+                    "description": """@eN ref of the input field.""",
                 },
                 "text": {
                     "type": "string",
-                    # 要填入的文本。
-                    "description": "Text to fill in.",
+                    # Text to fill in.
+                    "description": """Text to fill in.""",
                 },
             },
             "required": ["ref", "text"],
@@ -635,20 +635,20 @@ registry.register(
     name="browser_type",
     toolset="browser",
     schema={
-        # 在输入框中逐字输入文本（不清空已有内容）。不带 text 时仅聚焦元素。
-        "description": "Type text character by character into an input field (does not clear existing content). Without text, just focuses the element.",
+        # Type text character by character into an input field (does not clear existing content). Without text, just focuses the element.
+        "description": """Type text character by character into an input field (does not clear existing content). Without text, just focuses the element.""",
         "parameters": {
             "type": "object",
             "properties": {
                 "ref": {
                     "type": "string",
-                    # 输入框的 @eN ref。
-                    "description": "@eN ref of the input field.",
+                    # @eN ref of the input field.
+                    "description": """@eN ref of the input field.""",
                 },
                 "text": {
                     "type": "string",
-                    # 要追加的文本（可选，留空则聚焦）。
-                    "description": "Text to type (optional, leave empty to focus).",
+                    # Text to type (optional, leave empty to focus).
+                    "description": """Text to type (optional, leave empty to focus).""",
                 },
             },
             "required": ["ref"],
@@ -662,15 +662,15 @@ registry.register(
     name="browser_press_key",
     toolset="browser",
     schema={
-        # 发送键盘按键（Enter, Tab, Escape, ArrowDown 等）。通常用于提交表单或导航。
-        "description": "Send keyboard keys (Enter, Tab, Escape, ArrowDown, etc.). Typically used for form submission or navigation.",
+        # Send keyboard keys (Enter, Tab, Escape, ArrowDown, etc.). Typically used for form submission or navigation.
+        "description": """Send keyboard keys (Enter, Tab, Escape, ArrowDown, etc.). Typically used for form submission or navigation.""",
         "parameters": {
             "type": "object",
             "properties": {
                 "key": {
                     "type": "string",
-                    # 按键名，如 Enter, Tab, Escape, ArrowDown 等。
-                    "description": "Key name, e.g. Enter, Tab, Escape, ArrowDown, etc.",
+                    # Key name, e.g. Enter, Tab, Escape, ArrowDown, etc.
+                    "description": """Key name, e.g. Enter, Tab, Escape, ArrowDown, etc.""",
                 },
             },
         },
@@ -683,20 +683,20 @@ registry.register(
     name="browser_screenshot",
     toolset="browser",
     schema={
-        # 对当前页面截图并保存到 workspace。返回与 display_image 工具等价的 Markdown 图片链接，前端可直接显示。
-        "description": "Take a screenshot of the current page and save to workspace. Returns a Markdown image link equivalent to the display_image tool, displayable in the frontend.",
+        # Take a screenshot of the current page and save to workspace. Returns a Markdown image link equivalent to the display_image tool, displayable in the frontend.
+        "description": """Take a screenshot of the current page and save to workspace. Returns a Markdown image link equivalent to the display_image tool, displayable in the frontend.""",
         "parameters": {
             "type": "object",
             "properties": {
                 "name": {
                     "type": "string",
-                    # 截图文件名（如 screenshot.png）。
-                    "description": "Screenshot filename (e.g. screenshot.png).",
+                    # Screenshot filename (e.g. screenshot.png).
+                    "description": """Screenshot filename (e.g. screenshot.png).""",
                 },
                 "full_page": {
                     "type": "boolean",
-                    # 是否截取整页（包括滚动区域）。
-                    "description": "Whether to capture full page (including scroll area).",
+                    # Whether to capture full page (including scroll area).
+                    "description": """Whether to capture full page (including scroll area).""",
                 },
             },
         },
@@ -709,15 +709,15 @@ registry.register(
     name="browser_get_text",
     toolset="browser",
     schema={
-        # 提取指定元素的可见文本内容。
-        "description": "Extract visible text content from a specified element.",
+        # Extract visible text content from a specified element.
+        "description": """Extract visible text content from a specified element.""",
         "parameters": {
             "type": "object",
             "properties": {
                 "ref": {
                     "type": "string",
-                    # 元素的 @eN ref。
-                    "description": "@eN ref of the element.",
+                    # @eN ref of the element.
+                    "description": """@eN ref of the element.""",
                 },
             },
             "required": ["ref"],
@@ -731,14 +731,15 @@ registry.register(
     name="browser_eval",
     toolset="browser",
     schema={
-        # 在浏览器页面上下文中执行 JavaScript 代码并返回结果。
-        "description": "Execute JavaScript code in the browser page context and return the result.",
+        # Execute JavaScript code in the browser page context and return the result.
+        "description": """Execute JavaScript code in the browser page context and return the result.""",
         "parameters": {
             "type": "object",
             "properties": {
                 "code": {
                     "type": "string",
-                    "description": "要执行的 JavaScript 代码。支持多行。",
+                    # JavaScript code to execute. Supports multiple lines.
+                    "description": """要执行的 JavaScript 代码。支持多行。""",
                 },
             },
             "required": ["code"],
@@ -752,26 +753,26 @@ registry.register(
     name="browser_wait",
     toolset="browser",
     schema={
-        # 等待页面条件就绪（网络空闲、特定文本/元素出现、URL 变化等）。
-        "description": "Wait for page conditions to be ready (network idle, specific text/element appears, URL changes, etc.).",
+        # Wait for page conditions to be ready (network idle, specific text/element appears, URL changes, etc.).
+        "description": """Wait for page conditions to be ready (network idle, specific text/element appears, URL changes, etc.).""",
         "parameters": {
             "type": "object",
             "properties": {
                 "condition": {
                     "type": "string",
                     "enum": ["networkidle", "text", "url", "element"],
-                    # 等待条件: networkidle(默认), text(文本出现), url(URL 匹配), element(元素出现)。
-                    "description": "Wait condition: networkidle(default), text, url, element.",
+                    # Wait condition: networkidle(default), text, url, element.
+                    "description": """Wait condition: networkidle(default), text, url, element.""",
                 },
                 "value": {
                     "type": "string",
-                    # 条件值（text/url/element 时必填）。
-                    "description": "Condition value (required for text/url/element).",
+                    # Condition value (required for text/url/element).
+                    "description": """Condition value (required for text/url/element).""",
                 },
                 "timeout": {
                     "type": "integer",
-                    # 超时秒数（默认 25）。
-                    "description": "Timeout in seconds (default 25).",
+                    # Timeout in seconds (default 25).
+                    "description": """Timeout in seconds (default 25).""",
                 },
             },
         },
@@ -784,8 +785,8 @@ registry.register(
     name="browser_close",
     toolset="browser",
     schema={
-        # 关闭当前浏览器会话，释放资源。
-        "description": "Close the current browser session and release resources.",
+        # Close the current browser session and release resources.
+        "description": """Close the current browser session and release resources.""",
         "parameters": {
             "type": "object",
             "properties": {},

@@ -168,20 +168,17 @@ registry.register(
         "type": "function",
         "function": {
             "name": "probe_vision_capability",
-            # 探测当前配置的 LLM 模型是否支持图像/视觉输入。
-            # 使用一张最小的 dummy 图片（1x1 PNG）进行探测，不携带对话历史。
-            "description": (
-                "Test whether the current LLM model supports image/vision input "
-                "using a minimal dummy image probe (1x1 PNG). No conversation history "
-                "is included. Call this when the model changes or when you need to confirm vision capability."
-            ),
+            # Test whether the current LLM model supports image/vision input using a minimal dummy image probe (1x1 PNG).
+            # No conversation history is included.
+            # Call this when the model changes or when you need to confirm vision capability.
+            "description": """Test whether the current LLM model supports image/vision input using a minimal dummy image probe (1x1 PNG). No conversation history is included. Call this when the model changes or when you need to confirm vision capability.""",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "force": {
                         "type": "boolean",
                         "default": False,
-                        "description": "Force re-probe even if a cached result exists.",
+                        "description": """Force re-probe even if a cached result exists.""",
                     },
                 },
             },

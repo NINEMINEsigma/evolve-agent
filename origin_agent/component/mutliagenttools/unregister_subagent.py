@@ -42,16 +42,14 @@ registry.register(
     name="unregister_subagent",
     toolset="multiagent",
     schema={
-        # 按名称删除已注册的子 Agent。
-        "description": (
-            "Remove a registered sub-agent by its unique name."
-        ),
+        # 通过唯一名称移除已注册的子 Agent。
+        "description": """Remove a registered sub-agent by its unique name.""",
         "parameters": {
             "type": "object",
             "properties": {
                 "name": {
                     "type": "string",
-                    # 要删除的子 Agent 名称。
+                    # 要注销的子 Agent 的名称。
                     "description": "Name of the sub-agent to unregister.",
                 },
             },

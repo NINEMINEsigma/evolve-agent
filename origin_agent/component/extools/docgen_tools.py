@@ -492,8 +492,8 @@ registry.register(
     name="write_docx",
     toolset="document",
     schema={
-        # 生成 Word (.docx) 文件。需要 Node.js + docx npm 包 (pnpm i -g docx)。
-        "description": "Generate a Word (.docx) file. Requires Node.js + docx npm package (pnpm i -g docx).",
+        # Generate a Word (.docx) file. Requires Node.js + docx npm package (pnpm i -g docx).
+        "description": """Generate a Word (.docx) file. Requires Node.js + docx npm package (pnpm i -g docx).""",
         "parameters": {
             "type": "object",
             "properties": {
@@ -532,8 +532,8 @@ registry.register(
     name="write_xlsx",
     toolset="document",
     schema={
-        # 生成 Excel (.xlsx) 工作簿。使用 openpyxl。
-        "description": "Generate an Excel (.xlsx) workbook. Uses openpyxl.",
+        # Generate an Excel (.xlsx) workbook. Uses openpyxl.
+        "description": """Generate an Excel (.xlsx) workbook. Uses openpyxl.""",
         "parameters": {
             "type": "object",
             "properties": {
@@ -564,8 +564,8 @@ registry.register(
     name="write_pptx",
     toolset="document",
     schema={
-        # 生成 PowerPoint (.pptx) 演示文稿。需要 python-pptx (pip install python-pptx)。
-        "description": "Generate a PowerPoint (.pptx) presentation. Requires python-pptx (pip install python-pptx).",
+        # Generate a PowerPoint (.pptx) presentation. Requires python-pptx (pip install python-pptx).
+        "description": """Generate a PowerPoint (.pptx) presentation. Requires python-pptx (pip install python-pptx).""",
         "parameters": {
             "type": "object",
             "properties": {
@@ -594,8 +594,8 @@ registry.register(
     name="write_pdf",
     toolset="document",
     schema={
-        # 生成 PDF 文件。需要 fpdf2 (pip install fpdf2)。
-        "description": "Generate a PDF file. Requires fpdf2 (pip install fpdf2).",
+        # Generate a PDF file. Requires fpdf2 (pip install fpdf2).
+        "description": """Generate a PDF file. Requires fpdf2 (pip install fpdf2).""",
         "parameters": {
             "type": "object",
             "properties": {

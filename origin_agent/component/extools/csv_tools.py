@@ -110,15 +110,10 @@ registry.register(
     name="read_csv",
     toolset="extools",
     schema={
-        # 读取 CSV（逗号分隔值）文件并以结构化行列表形式返回。
-        # 自动探测分隔符（逗号、制表符、分号等）。
-        # 支持 UTF-8 BOM。返回每行作为字典，键来自表头。
-        "description": (
-            "Read a CSV (comma-separated values) file and return as a "
-            "structured list of rows. "
-            "Auto-detects delimiter (comma, tab, semicolon, etc.). "
-            "Supports UTF-8 BOM. Returns each row as a dict, keys from header."
-        ),
+        # Read a CSV (comma-separated values) file and return as a structured list of rows.
+        # Auto-detects delimiter (comma, tab, semicolon, etc.).
+        # Supports UTF-8 BOM. Returns each row as a dict, keys from header.
+        "description": """Read a CSV (comma-separated values) file and return as a structured list of rows. Auto-detects delimiter (comma, tab, semicolon, etc.). Supports UTF-8 BOM. Returns each row as a dict, keys from header.""",
         "parameters": {
             **_CSV_PARAMS,
             "properties": {
@@ -141,14 +136,10 @@ registry.register(
     name="write_csv",
     toolset="extools",
     schema={
-        # 将结构化行列表写入 CSV 文件。
-        # 每行是一个字典，表头取自列名（columns）或第一行的键。
-        # 仅有在 columns 中列出的字段会被写入。
-        "description": (
-            "Write a structured list of rows to a CSV file. "
-            "Each row is a dict; headers are taken from columns or first row keys. "
-            "Only fields listed in columns will be written."
-        ),
+        # Write a structured list of rows to a CSV file.
+        # Each row is a dict; headers are taken from columns or first row keys.
+        # Only fields listed in columns will be written.
+        "description": """Write a structured list of rows to a CSV file. Each row is a dict; headers are taken from columns or first row keys. Only fields listed in columns will be written.""",
         "parameters": {
             "type": "object",
             "properties": {

@@ -314,39 +314,37 @@ registry.register(
     name="display_image",
     toolset="display",
     schema={
-        # 将 ws: 路径下的图片发布到前端，使用户能在聊天界面中直接看到。
-        # 使用步骤:
-        #   1. 生成或获取图片并保存到 ws: 路径
-        #   2. 调用 display_image(path="ws:path/to/image.png", description="xxx")
-        #   3. 工具会验证图片文件是否存在并返回 Markdown 图片链接
-        #   4. **你必须把返回的 Markdown 图片链接放入你的回复文本中**，
-        #      用户才能在前端看到图片。不要只发超链接 [text](url)，
-        #      要用 ![](/uploads/xxx.png) 语法。
-        # 路径规则:
-        #   - ws: 是逻辑路径前缀，不是真实文件系统目录。
-        #     用 write_file(path="ws:output/img.png", ...) 保存文件。
-        #   - 在 Python 代码中用绝对路径保存：agentspace 目录是服务器能访问的。
-        #   - 可用 run_python 查询 agentspace 目录路径。
-        "description": (
-            'Publish an image under ws: path to the frontend so the user '
-            'can see it directly in the chat interface.\n\n'
-            'Steps:\n'
-            '  1. Generate or obtain an image and save it to a ws: path\n'
-            '  2. Call display_image(path="ws:path/to/image.png", description="xxx")\n'
-            '  3. The tool verifies the image file exists and returns a Markdown image link\n'
-            '  4. **You MUST include the returned Markdown image link in your reply text** '
-            'for the user to see the image in the frontend. '
-            'Do NOT just send a hyperlink [text](url), '
-            'use the ![](/uploads/xxx.png) syntax.\n\n'
-            'Path rules:\n'
-            '  - ws: is a logical path prefix, not a real filesystem directory.\n'
-            '    Use write_file(path="ws:output/img.png", ...) to save files.\n'
-            '  - In Python code, save with absolute paths: the agentspace directory '
-            'is accessible by the server.\n'
-            '  - Use run_python to query the agentspace directory path.\n\n'
-            'Example:\n'
-            '  display_image(path="ws:output/mindmap.png", description="Mind map of ancient Chinese history")\n'
-        ),
+        # Publish an image under ws: path to the frontend so the user can see it directly in the chat interface.
+        # Steps:
+        #   1. Generate or obtain an image and save it to a ws: path
+        #   2. Call display_image(path="ws:path/to/image.png", description="xxx")
+        #   3. The tool verifies the image file exists and returns a Markdown image link
+        #   4. **You MUST include the returned Markdown image link in your reply text**
+        #      for the user to see the image in the frontend.
+        #      Do NOT just send a hyperlink [text](url),
+        #      use the ![](/uploads/xxx.png) syntax.
+        # Path rules:
+        #   - ws: is a logical path prefix, not a real filesystem directory.
+        #     Use write_file(path="ws:output/img.png", ...) to save files.
+        #   - In Python code, save with absolute paths: the agentspace directory is accessible by the server.
+        #   - Use run_python to query the agentspace directory path.
+        "description": """Publish an image under ws: path to the frontend so the user can see it directly in the chat interface.
+
+Steps:
+  1. Generate or obtain an image and save it to a ws: path
+  2. Call display_image(path="ws:path/to/image.png", description="xxx")
+  3. The tool verifies the image file exists and returns a Markdown image link
+  4. **You MUST include the returned Markdown image link in your reply text** for the user to see the image in the frontend. Do NOT just send a hyperlink [text](url), use the ![](/uploads/xxx.png) syntax.
+
+Path rules:
+  - ws: is a logical path prefix, not a real filesystem directory.
+    Use write_file(path="ws:output/img.png", ...) to save files.
+  - In Python code, save with absolute paths: the agentspace directory is accessible by the server.
+  - Use run_python to query the agentspace directory path.
+
+Example:
+  display_image(path="ws:output/mindmap.png", description="Mind map of ancient Chinese history")
+""",
         "parameters": {
             "type": "object",
             "properties": {
@@ -372,19 +370,19 @@ registry.register(
     name="publish_file",
     toolset="display",
     schema={
-        # 将 ws: 路径下的任意文件发布为前端可下载的链接。
-        # 前端会显示一个下载按钮，用户点击即可下载文件。
-        # 注意：图片文件如需展示请使用 display_image，
-        # publish_file 是用于下载的（包括图片）。
-        "description": (
-            'Publish any file under ws: path as a frontend-downloadable link.\n'
-            'The frontend shows a download button; clicking it downloads the file.\n'
-            'Note: for displaying images, use display_image instead;\n'
-            'publish_file is for downloading (including images).\n\n'
-            'Examples:\n'
-            '  publish_file(path="ws:output/report.pdf", filename="report.pdf", description="Data analysis report")\n'
-            '  publish_file(path="ws:output/archive.zip", description="Dataset archive")\n'
-        ),
+        # Publish any file under ws: path as a frontend-downloadable link.
+        # The frontend shows a download button; clicking it downloads the file.
+        # Note: for displaying images, use display_image instead;
+        # publish_file is for downloading (including images).
+        "description": """Publish any file under ws: path as a frontend-downloadable link.
+The frontend shows a download button; clicking it downloads the file.
+Note: for displaying images, use display_image instead;
+publish_file is for downloading (including images).
+
+Examples:
+  publish_file(path="ws:output/report.pdf", filename="report.pdf", description="Data analysis report")
+  publish_file(path="ws:output/archive.zip", description="Dataset archive")
+""",
         "parameters": {
             "type": "object",
             "properties": {
@@ -415,32 +413,28 @@ registry.register(
     name="play_audio",
     toolset="display",
     schema={
-        # 将音频发送到前端，可选择立即播放。
-        # 使用步骤:
-        #   1. 生成或获取音频文件并保存到 ws: 路径，或准备一个外部 URL
-        #   2. 调用 play_audio(path="ws:output/speech.mp3", autoplay=true)
-        #   3. 前端会显示一个音频播放器，如果 autoplay=true 则自动播放
-        # 输入模式（二选一）:
-        #   - path: ws: 前缀下的本地音频文件路径
-        #   - url:  外部音频 URL
-        # 支持的音频格式:
-        #   mp3, wav, ogg, flac, aac, m4a
-        "description": (
-            "Send audio to the frontend and optionally play it immediately.\\n\\n"
-            "Two input modes (mutually exclusive):\\n"
-            "  - path: ws: path to a local audio file\\n"
-            "  - url:  external audio URL\\n\\n"
-            "If autoplay=true (default), the frontend <audio> element has the "
-            "autoPlay attribute, which starts playback as soon as the "
-            "tool result is received.\\n\\n"
-            "Supported audio formats (for ws: path): "
-            "mp3, wav, ogg, flac, aac, m4a\\n\\n"
-            "Returns:\\n"
-            "  - audio_url: resolved URL for playback\\n"
-            "  - autoplay: whether autoplay is enabled\\n"
-            "  - mime: MIME type\\n"
-            "  - size: file size in bytes (path mode only)\\n"
-        ),
+        # Send audio to the frontend and optionally play it immediately.
+        # Two input modes (mutually exclusive):
+        #   - path: ws: path to a local audio file
+        #   - url:  external audio URL
+        # If autoplay=true (default), the frontend <audio> element has the
+        # autoPlay attribute, which starts playback as soon as the tool result is received.
+        # Supported audio formats (for ws: path): mp3, wav, ogg, flac, aac, m4a.
+        "description": """Send audio to the frontend and optionally play it immediately.
+
+Two input modes (mutually exclusive):
+  - path: ws: path to a local audio file
+  - url:  external audio URL
+
+If autoplay=true (default), the frontend <audio> element has the autoPlay attribute, which starts playback as soon as the tool result is received.
+
+Supported audio formats (for ws: path): mp3, wav, ogg, flac, aac, m4a
+
+Returns:
+  - audio_url: resolved URL for playback
+  - autoplay: whether autoplay is enabled
+  - mime: MIME type
+  - size: file size in bytes (path mode only)""",
         "parameters": {
             "type": "object",
             "properties": {
@@ -482,27 +476,30 @@ registry.register(
     name="play_audio_list",
     toolset="display",
     schema={
-        "description": (
-            "Send a playlist of audio tracks to the frontend and play them sequentially.\n\n"
-            "Each track plays to completion, then the next track starts automatically.\n\n"
-            "Input: a list of items, each item is an object with:\n"
-            "  - path: ws: path to a local audio file (mutually exclusive with url)\n"
-            "  - url:  external audio URL (mutually exclusive with path)\n"
-            "  - title: optional track title\n\n"
-            "Supported audio formats (for ws: path): "
-            "mp3, wav, ogg, flac, aac, m4a\n\n"
-            "Returns:\n"
-            "  - playlist: list of resolved tracks with audio_url, mime, title, size\n"
-            "  - autoplay: whether playback starts immediately\n"
-            "  - current_index: starting track index (always 0)\n"
-            "  - total_tracks: number of tracks\n\n"
-            "Example:\n"
-            '  play_audio_list(items=[\n'
-            '    {"path": "ws:output/chapter1.mp3", "title": "Chapter 1"},\n'
-            '    {"path": "ws:output/chapter2.mp3", "title": "Chapter 2"},\n'
-            '    {"url": "https://example.com/outro.mp3", "title": "Outro"}\n'
-            '  ], autoplay=true)\n'
-        ),
+        "description": """Send a playlist of audio tracks to the frontend and play them sequentially.
+
+Each track plays to completion, then the next track starts automatically.
+
+Input: a list of items, each item is an object with:
+  - path: ws: path to a local audio file (mutually exclusive with url)
+  - url:  external audio URL (mutually exclusive with path)
+  - title: optional track title
+
+Supported audio formats (for ws: path): mp3, wav, ogg, flac, aac, m4a
+
+Returns:
+  - playlist: list of resolved tracks with audio_url, mime, title, size
+  - autoplay: whether playback starts immediately
+  - current_index: starting track index (always 0)
+  - total_tracks: number of tracks
+
+Example:
+  play_audio_list(items=[
+    {"path": "ws:output/chapter1.mp3", "title": "Chapter 1"},
+    {"path": "ws:output/chapter2.mp3", "title": "Chapter 2"},
+    {"url": "https://example.com/outro.mp3", "title": "Outro"}
+  ], autoplay=true)
+""",
         "parameters": {
             "type": "object",
             "properties": {

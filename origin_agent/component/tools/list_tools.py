@@ -54,18 +54,15 @@ registry.register(
     name="list_tools",
     toolset="core",
     schema={
-        # 按危险等级过滤并返回当前注册表中匹配的工具名称列表。
-        "description": (
-            "Return a sorted list of names for currently registered tools filtered by danger level. "
-            "Accepted levels: 'readonly', 'write', 'dangerous'."
-        ),
+        # Return a sorted list of names for currently registered tools filtered by danger level. Accepted levels: 'readonly', 'write', 'dangerous'.
+        "description": """Return a sorted list of names for currently registered tools filtered by danger level. Accepted levels: 'readonly', 'write', 'dangerous'.""",
         "parameters": {
             "type": "object",
             "properties": {
                 "danger_level": {
                     "type": "string",
-                    # 要过滤的危险等级。可选值：readonly、write、dangerous。
-                    "description": "Danger level to filter by. One of: 'readonly', 'write', 'dangerous'.",
+                    # Danger level to filter by. One of: 'readonly', 'write', 'dangerous'.
+                    "description": """Danger level to filter by. One of: 'readonly', 'write', 'dangerous'.""",
                 },
             },
             "required": ["danger_level"],

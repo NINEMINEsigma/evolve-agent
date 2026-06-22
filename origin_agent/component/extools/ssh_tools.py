@@ -281,14 +281,7 @@ registry.register(
         # 首次连接到新主机时自动接受 host key，密钥变更时拒绝连接。
         # 用户将被提示批准（允许一次）或拒绝该操作。
         # 始终包含 'reason' 解释需要执行远程命令的原因。
-        "description": (
-            "Execute a shell command on a remote server and return stdout, stderr, and exit code. "
-            "Uses system-native ssh, relying on existing SSH configuration "
-            "(~/.ssh/config, keys, etc.). "
-            "Automatically accepts host key on first connection, rejects on key mismatch. "
-            "The user will be prompted to approve (allow once) or deny the operation. "
-            "Always include 'reason' explaining why the remote command is needed."
-        ),
+        "description": """Execute a shell command on a remote server and return stdout, stderr, and exit code. Uses system-native ssh, relying on existing SSH configuration (~/.ssh/config, keys, etc.). Automatically accepts host key on first connection, rejects on key mismatch. The user will be prompted to approve (allow once) or deny the operation. Always include 'reason' explaining why the remote command is needed.""",
         "parameters": {
             "type": "object",
             "properties": {
@@ -327,12 +320,7 @@ registry.register(
         # 支持递归上传目录（设置 recursive=true）。
         # 用户将被提示批准（允许一次）或拒绝该操作。
         # 始终包含 'reason' 解释需要上传文件的原因。
-        "description": (
-            "Upload local files to a remote server using scp. "
-            "Supports recursive directory upload (set recursive=true). "
-            "The user will be prompted to approve (allow once) or deny the operation. "
-            "Always include 'reason' explaining why the file upload is needed."
-        ),
+        "description": """Upload local files to a remote server using scp. Supports recursive directory upload (set recursive=true). The user will be prompted to approve (allow once) or deny the operation. Always include 'reason' explaining why the file upload is needed.""",
         "parameters": {
             "type": "object",
             "properties": {
@@ -376,12 +364,7 @@ registry.register(
         # 支持递归下载目录（设置 recursive=true）。
         # 用户将被提示批准（允许一次）或拒绝该操作。
         # 始终包含 'reason' 解释需要下载文件的原因。
-        "description": (
-            "Download files from a remote server to local using scp. "
-            "Supports recursive directory download (set recursive=true). "
-            "The user will be prompted to approve (allow once) or deny the operation. "
-            "Always include 'reason' explaining why the file download is needed."
-        ),
+        "description": """Download files from a remote server to local using scp. Supports recursive directory download (set recursive=true). The user will be prompted to approve (allow once) or deny the operation. Always include 'reason' explaining why the file download is needed.""",
         "parameters": {
             "type": "object",
             "properties": {

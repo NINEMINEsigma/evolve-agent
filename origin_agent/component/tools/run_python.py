@@ -108,65 +108,61 @@ registry.register(
     name="run_python",
     toolset="python",
     schema={
-        # 使用与 agent 进程相同的 Python 解释器执行代码。
-        # 与 run_command 不同，此工具固定使用当前解释器的完整路径，
-        # 不受 PATH 中 python 指向的影响。
-        # 两种模式：
-        #   1. 内联代码：传递 code="print('hello')"（等效于 python -c）。
-        #   2. 脚本文件：传递 script="ws:scripts/test.py"，可选地传递 args。
-        # 用户将被提示批准（允许一次/始终允许/拒绝）。
-        # “始终允许”由统一工具 allowlist 层按工具名和参数指纹持久化。
-        "description": (
-            "Execute code using the same Python interpreter as the agent process. "
-            "Unlike run_command, this tool always uses the full path of the current interpreter, "
-            "unaffected by which python PATH points to.\n\n"
-            "Two modes:\n"
-            "  1. Inline code: pass code=\"print('hello')\" (equivalent to python -c).\n"
-            "  2. Script file: pass script=\"ws:scripts/test.py\", "
-            "optionally with args=[\"--flag\", \"val\"].\n\n"
-            "The user will be prompted to approve (allow once / always allow / deny). "
-            "Always-allow approvals are persisted by the unified tool allowlist layer."
-        ),
+        # Execute code using the same Python interpreter as the agent process.
+        # Unlike run_command, this tool always uses the full path of the current interpreter,
+        # unaffected by which python PATH points to.
+        # Two modes:
+        #   1. Inline code: pass code="print('hello')" (equivalent to python -c).
+        #   2. Script file: pass script="ws:scripts/test.py", optionally with args=["--flag", "val"].
+        # The user will be prompted to approve (allow once / always allow / deny).
+        # Always-allow approvals are persisted by the unified tool allowlist layer.
+        "description": """Execute code using the same Python interpreter as the agent process. Unlike run_command, this tool always uses the full path of the current interpreter, unaffected by which python PATH points to.
+
+Two modes:
+  1. Inline code: pass code="print('hello')" (equivalent to python -c).
+  2. Script file: pass script="ws:scripts/test.py", optionally with args=["--flag", "val"].
+
+The user will be prompted to approve (allow once / always allow / deny). Always-allow approvals are persisted by the unified tool allowlist layer.""",
         "parameters": {
             "type": "object",
             "properties": {
                 "code": {
                     "type": "string",
-                    # 要执行的 Python 内联代码（等效于 python -c "..."）。与 script 互斥。
-                    "description": "Inline Python code to execute (equivalent to python -c \"...\"). Mutually exclusive with script.",
+                    # Inline Python code to execute (equivalent to python -c "..."). Mutually exclusive with script.
+                    "description": """Inline Python code to execute (equivalent to python -c "..."). Mutually exclusive with script.""",
                 },
                 "script": {
                     "type": "string",
-                    # 要执行的 Python 脚本的逻辑路径（如 'ws:script.py'、'fork:test.py'）。与 code 互斥。
-                    "description": "Logical path to a Python script to execute (e.g. 'ws:script.py', 'fork:test.py'). Mutually exclusive with code.",
+                    # Logical path to a Python script to execute (e.g. 'ws:script.py', 'fork:test.py'). Mutually exclusive with code.
+                    "description": """Logical path to a Python script to execute (e.g. 'ws:script.py', 'fork:test.py'). Mutually exclusive with code.""",
                 },
                 "args": {
                     "type": "array",
                     "items": {"type": "string"},
-                    # 传递给脚本的附加参数（仅 script 模式可用）。
-                    "description": "Additional arguments to pass to the script (script mode only).",
+                    # Additional arguments to pass to the script (script mode only).
+                    "description": """Additional arguments to pass to the script (script mode only).""",
                 },
                 "python_path": {
                     "type": "string",
-                    # 要使用的 Python 解释器路径（如虚拟环境中的 python）。留空则使用当前解释器。
-                    "description": "Path to the Python interpreter to use (e.g. path to a virtualenv python). Leave empty to use the current interpreter.",
+                    # Path to the Python interpreter to use (e.g. path to a virtualenv python). Leave empty to use the current interpreter.
+                    "description": """Path to the Python interpreter to use (e.g. path to a virtualenv python). Leave empty to use the current interpreter.""",
                     "default": "",
                 },
                 "reason": {
                     "type": "string",
-                    # 执行此 Python 代码的原因。
-                    "description": "The reason for executing this Python code.",
+                    # The reason for executing this Python code.
+                    "description": """The reason for executing this Python code.""",
                 },
                 "cwd": {
                     "type": "string",
-                    # 工作目录（ws: 命名空间，默认 'ws:'）。
-                    "description": "Working directory (ws: namespace, default 'ws:').",
+                    # Working directory (ws: namespace, default 'ws:').
+                    "description": """Working directory (ws: namespace, default 'ws:').""",
                     "default": "ws:",
                 },
                 "timeout": {
                     "type": "integer",
-                    # 超时秒数（默认 SUBPROCESS_TIMEOUT_DEFAULT，最大 300）。
-                    "description": "Timeout in seconds.",
+                    # Timeout in seconds.
+                    "description": """Timeout in seconds.""",
                     "default": SUBPROCESS_TIMEOUT_DEFAULT,
                 },
             },

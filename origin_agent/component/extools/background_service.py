@@ -306,20 +306,20 @@ registry.register(
         #   - 进程在后台运行，不阻塞 agent
         #   - stdout/stderr 合并写入日志文件
         #   - 返回 task_id，可用 stop_background_service 停止
-        "description": (
-            "Start a long-running service process in the background and return "
-            "immediately without waiting for the process to complete.\n"
-            "Useful for starting web servers, API services, monitoring processes, etc.\n\n"
-            "Unlike run_command:\n"
-            "  - The process runs in the background, does not block the agent\n"
-            "  - stdout/stderr are merged and written to a log file\n"
-            "  - Returns a task_id that can be used with stop_background_service\n\n"
-            "Returns:\n"
-            "  - success: whether the service started successfully\n"
-            "  - task_id: task identifier (for stopping the service)\n"
-            "  - log_path: log file path (ws: namespace)\n"
-            "  - pid: process ID\n"
-        ),
+        "description": """Start a long-running service process in the background and return immediately without waiting for the process to complete.
+Useful for starting web servers, API services, monitoring processes, etc.
+
+Unlike run_command:
+  - The process runs in the background, does not block the agent
+  - stdout/stderr are merged and written to a log file
+  - Returns a task_id that can be used with stop_background_service
+
+Returns:
+  - success: whether the service started successfully
+  - task_id: task identifier (for stopping the service)
+  - log_path: log file path (ws: namespace)
+  - pid: process ID
+""",
         "parameters": {
             "type": "object",
             "properties": {
@@ -357,16 +357,17 @@ registry.register(
         # 停止一个由 start_background_service 启动的后台服务进程。
         # 通过 start_background_service 返回的 task_id 找到对应进程并强制终止。
         # 也可以直接传入 PID（纯数字字符串）尝试终止。
-        "description": (
-            "Stop a background service process started by start_background_service.\n"
-            "Find the process by task_id and force-terminate it.\n\n"
-            "You can also pass a PID (numeric string) directly to attempt termination.\n\n"
-            "Returns:\n"
-            "  - stopped: whether the service was successfully stopped\n"
-            "  - task_id: requested task ID\n"
-            "  - pid: process ID\n"
-            "  - log_path: log file path (if found in registry)\n"
-        ),
+        "description": """Stop a background service process started by start_background_service.
+Find the process by task_id and force-terminate it.
+
+You can also pass a PID (numeric string) directly to attempt termination.
+
+Returns:
+  - stopped: whether the service was successfully stopped
+  - task_id: requested task ID
+  - pid: process ID
+  - log_path: log file path (if found in registry)
+""",
         "parameters": {
             "type": "object",
             "properties": {

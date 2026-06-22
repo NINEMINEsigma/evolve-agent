@@ -531,14 +531,12 @@ registry.register(
     name="gui_screenshot",
     toolset="extools",
     schema={
-        # 截取屏幕截图并保存到 ws:screenshots/ 目录。
-        # 可指定 region=[x, y, w, h] 截取部分区域，省略则截全屏。
-        # 截图保存为 PNG 格式，返回 ws: 路径供 display_image 使用。
-        "description": (
-            "Take a screenshot and save to ws:screenshots/.\n"
-            "Specify region=[x, y, w, h] for partial capture, omit for fullscreen.\n"
-            "Saved as PNG, returns ws: path for display_image."
-        ),
+        # Take a screenshot and save to ws:screenshots/.
+        # Specify region=[x, y, w, h] for partial capture, omit for fullscreen.
+        # Saved as PNG, returns ws: path for display_image.
+        "description": """Take a screenshot and save to ws:screenshots/.
+Specify region=[x, y, w, h] for partial capture, omit for fullscreen.
+Saved as PNG, returns ws: path for display_image.""",
         "parameters": {
             "type": "object",
             "properties": {
@@ -568,12 +566,10 @@ registry.register(
     name="gui_mouse_move",
     toolset="extools",
     schema={
-        # 将鼠标移动到指定的屏幕坐标。
-        # duration 控制移动耗时（秒），默认 0.3 秒实现平滑移动。
-        "description": (
-            "Move the mouse to specified screen coordinates.\n"
-            "duration controls movement time (seconds), default 0.3s for smooth movement."
-        ),
+        # Move the mouse to specified screen coordinates.
+        # duration controls movement time (seconds), default 0.3s for smooth movement.
+        "description": """Move the mouse to specified screen coordinates.
+duration controls movement time (seconds), default 0.3s for smooth movement.""",
         "parameters": {
             "type": "object",
             "properties": {
@@ -597,14 +593,12 @@ registry.register(
     name="gui_mouse_click",
     toolset="extools",
     schema={
-        # 在指定坐标或当前位置执行鼠标单击。
-        # 不传 x/y 则在当前位置点击。
-        # button: left/right/middle，clicks: 1-3（双击传 2）。
-        "description": (
-            "Click the mouse at specified coordinates or current position.\n"
-            "Omit x/y to click at current position.\n"
-            "button: left/right/middle, clicks: 1-3 (2 for double-click)."
-        ),
+        # Click the mouse at specified coordinates or current position.
+        # Omit x/y to click at current position.
+        # button: left/right/middle, clicks: 1-3 (2 for double-click).
+        "description": """Click the mouse at specified coordinates or current position.
+Omit x/y to click at current position.
+button: left/right/middle, clicks: 1-3 (2 for double-click).""",
         "parameters": {
             "type": "object",
             "properties": {
@@ -648,14 +642,12 @@ registry.register(
     name="gui_mouse_drag",
     toolset="extools",
     schema={
-        # 从起始坐标拖拽鼠标到目标坐标。
-        # start_x/start_y 默认等于 x/y（或当前鼠标位置），end_x/end_y 为必填。
-        # 用于选取文本、拖拽文件、移动窗口等操作。
-        "description": (
-            "Drag the mouse from start to target coordinates.\n"
-            "start_x/start_y default to current position, end_x/end_y are required.\n"
-            "Used for text selection, file dragging, window moving, etc."
-        ),
+        # Drag the mouse from start to target coordinates.
+        # start_x/start_y default to current position, end_x/end_y are required.
+        # Used for text selection, file dragging, window moving, etc.
+        "description": """Drag the mouse from start to target coordinates.
+start_x/start_y default to current position, end_x/end_y are required.
+Used for text selection, file dragging, window moving, etc.""",
         "parameters": {
             "type": "object",
             "properties": {
@@ -689,12 +681,10 @@ registry.register(
     name="gui_mouse_scroll",
     toolset="extools",
     schema={
-        # 在指定位置或当前鼠标位置执行滚轮滚动。
-        # clicks 正值向上滚，负值向下滚，每格通常为一行。
-        "description": (
-            "Scroll the mouse wheel at specified position or current position.\n"
-            "Positive clicks scroll up, negative scroll down, one notch is typically one line."
-        ),
+        # Scroll the mouse wheel at specified position or current position.
+        # Positive clicks scroll up, negative scroll down, one notch is typically one line.
+        "description": """Scroll the mouse wheel at specified position or current position.
+Positive clicks scroll up, negative scroll down, one notch is typically one line.""",
         "parameters": {
             "type": "object",
             "properties": {
@@ -719,16 +709,14 @@ registry.register(
     name="gui_type",
     toolset="extools",
     schema={
-        # 模拟键盘输入文本。
-        # 输入的文本将如同用户在键盘上逐键敲击一样发送到当前焦点窗口。
-        # interval 为每个字符之间的延迟（秒）。
-        # 注意：非 ASCII 字符可能无法正确输入，此时建议用 gui_press_keys 配合剪贴板。
-        "description": (
-            "Simulate keyboard text input.\n"
-            "Text is typed character by character into the currently focused window.\n"
-            "interval is the delay between characters (seconds).\n"
-            "Note: non-ASCII characters may not be entered correctly."
-        ),
+        # Simulate keyboard text input.
+        # Text is typed character by character into the currently focused window.
+        # interval is the delay between characters (seconds).
+        # Note: non-ASCII characters may not be entered correctly.
+        "description": """Simulate keyboard text input.
+Text is typed character by character into the currently focused window.
+interval is the delay between characters (seconds).
+Note: non-ASCII characters may not be entered correctly.""",
         "parameters": {
             "type": "object",
             "properties": {
@@ -756,20 +744,16 @@ registry.register(
     name="gui_press_keys",
     toolset="extools",
     schema={
-        # 按下单个键或组合键。
-        # 单个键: ["enter"] 或 ["esc"]
-        # 组合键: ["ctrl", "c"] 表示 Ctrl+C
-        # 可用键名: enter, space, tab, esc, backspace, delete,
+        # Press a single key or key combination.
+        # Single key: ["enter"] or ["esc"]
+        # Combo: ["ctrl", "c"] for Ctrl+C
+        # Available keys: enter, space, tab, esc, backspace, delete,
         # up, down, left, right, home, end, pageup, pagedown,
-        # f1-f12, ctrl, alt, shift, win, 以及所有字母和数字键。
-        "description": (
-            "Press a single key or key combination.\n"
-            "Single key: [\"enter\"] or [\"esc\"]\n"
-            "Combo: [\"ctrl\", \"c\"] for Ctrl+C\n"
-            "Available keys: enter, space, tab, esc, backspace, delete, "
-            "up, down, left, right, home, end, pageup, pagedown, "
-            "f1-f12, ctrl, alt, shift, win, and all letter/number keys."
-        ),
+        # f1-f12, ctrl, alt, shift, win, and all letter/number keys.
+        "description": """Press a single key or key combination.
+Single key: ["enter"] or ["esc"]
+Combo: ["ctrl", "c"] for Ctrl+C
+Available keys: enter, space, tab, esc, backspace, delete, up, down, left, right, home, end, pageup, pagedown, f1-f12, ctrl, alt, shift, win, and all letter/number keys.""",
         "parameters": {
             "type": "object",
             "properties": {
@@ -795,8 +779,8 @@ registry.register(
     name="gui_get_mouse_position",
     toolset="extools",
     schema={
-        # 获取鼠标当前屏幕坐标，返回 {x, y}。
-        "description": "Get current mouse screen coordinates, returns {x, y}.",
+        # Get current mouse screen coordinates, returns {x, y}.
+        "description": """Get current mouse screen coordinates, returns {x, y}.""",
         "parameters": {"type": "object", "properties": {}, "required": []},
     },
     handler=_handle_gui_get_mouse_position,
@@ -808,8 +792,8 @@ registry.register(
     name="gui_get_screen_size",
     toolset="extools",
     schema={
-        # 获取主显示器分辨率，返回 {width, height}。
-        "description": "Get primary monitor resolution, returns {width, height}.",
+        # Get primary monitor resolution, returns {width, height}.
+        "description": """Get primary monitor resolution, returns {width, height}.""",
         "parameters": {"type": "object", "properties": {}, "required": []},
     },
     handler=_handle_gui_get_screen_size,
@@ -821,14 +805,12 @@ registry.register(
     name="gui_get_windows",
     toolset="extools",
     schema={
-        # 列出当前系统中所有可见窗口。
-        # 可按 title 过滤（大小写不敏感的部分匹配）。
-        # 返回窗口标题、位置、大小信息。
-        "description": (
-            "List all visible windows on the system.\n"
-            "Can filter by title (case-insensitive partial match).\n"
-            "Returns window title, position, and size."
-        ),
+        # List all visible windows on the system.
+        # Can filter by title (case-insensitive partial match).
+        # Returns window title, position, and size.
+        "description": """List all visible windows on the system.
+Can filter by title (case-insensitive partial match).
+Returns window title, position, and size.""",
         "parameters": {
             "type": "object",
             "properties": {
@@ -856,14 +838,12 @@ registry.register(
     name="gui_focus_window",
     toolset="extools",
     schema={
-        # 按标题查找窗口并将其置于前台（聚焦）。
-        # title 为部分匹配（不区分大小写）。
-        # 如果未找到匹配窗口，返回错误并建议先用 gui_get_windows 列出窗口。
-        "description": (
-            "Find a window by title and bring it to the foreground (focus).\n"
-            "title is a partial match (case-insensitive).\n"
-            "If no matching window is found, returns an error suggesting to use gui_get_windows first."
-        ),
+        # Find a window by title and bring it to the foreground (focus).
+        # title is a partial match (case-insensitive).
+        # If no matching window is found, returns an error suggesting to use gui_get_windows first.
+        "description": """Find a window by title and bring it to the foreground (focus).
+title is a partial match (case-insensitive).
+If no matching window is found, returns an error suggesting to use gui_get_windows first.""",
         "parameters": {
             "type": "object",
             "properties": {
@@ -891,11 +871,8 @@ registry.register(
     name="gui_get_active_window",
     toolset="extools",
     schema={
-        # 获取当前活动（前景）窗口的信息，包括标题、位置、大小。
-        "description": (
-            "Get info about the currently active (foreground) window, "
-            "including title, position, and size."
-        ),
+        # Get info about the currently active (foreground) window, including title, position, and size.
+        "description": """Get info about the currently active (foreground) window, including title, position, and size.""",
         "parameters": {"type": "object", "properties": {}, "required": []},
     },
     handler=_handle_gui_get_active_window,
@@ -907,16 +884,14 @@ registry.register(
     name="gui_locate_on_screen",
     toolset="extools",
     schema={
-        # 在屏幕中查找匹配模板图像的位置。
-        # image_path 可以是 ws: 路径或本地绝对路径。
-        # confidence 为匹配置信度（0-1），默认 0.9。
-        # 找到则返回匹配区域和中心点坐标，未找到返回 found=false。
-        "description": (
-            "Find a matching template image on screen.\n"
-            "image_path can be a ws: path or local absolute path.\n"
-            "confidence is the matching threshold (0-1), default 0.9.\n"
-            "Returns match region and center if found, found=false otherwise."
-        ),
+        # Find a matching template image on screen.
+        # image_path can be a ws: path or local absolute path.
+        # confidence is the matching threshold (0-1), default 0.9.
+        # Returns match region and center if found, found=false otherwise.
+        "description": """Find a matching template image on screen.
+image_path can be a ws: path or local absolute path.
+confidence is the matching threshold (0-1), default 0.9.
+Returns match region and center if found, found=false otherwise.""",
         "parameters": {
             "type": "object",
             "properties": {

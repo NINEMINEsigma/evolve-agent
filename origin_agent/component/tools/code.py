@@ -233,20 +233,12 @@ registry.register(
         # - 增量编辑：传递 file + old_string + new_string。
         #   old_string 必须精确匹配一次 — 包含足够的上下文（前后各 2-3 行）使其唯一。
         # - 追加模式：传递 file + content + append=true。将内容追加到文件末尾。内容最多 10 行。
-        "description": (
-            "Write the evolved version of source code to the fork (slow) directory. "
-            "After writing all changes, call validate_code to check syntax, "
-            "then call evolve_code to trigger the swap. "
-            "Accepts bare filenames (e.g. 'main.py').\n\n"
-            "Three modes:\n"
-            "- Full overwrite: pass file + content. Content max "
-            f"{WRITE_FILE_MAX_CHARS} characters.\n"
-            "- Incremental edit: pass file + old_string + new_string. "
-            "old_string must match exactly once — include enough context "
-            "(2-3 lines before and after) to make it unique.\n"
-            "- Append mode: pass file + content + append=true. "
-            "Appends content to the end of the file. Content max 10 lines."
-        ),
+        "description": f"""Write the evolved version of source code to the fork (slow) directory. After writing all changes, call validate_code to check syntax, then call evolve_code to trigger the swap. Accepts bare filenames (e.g. 'main.py').
+
+Three modes:
+- Full overwrite: pass file + content. Content max {WRITE_FILE_MAX_CHARS} characters.
+- Incremental edit: pass file + old_string + new_string. old_string must match exactly once — include enough context (2-3 lines before and after) to make it unique.
+- Append mode: pass file + content + append=true. Appends content to the end of the file. Content max 10 lines.""",
         "parameters": {
             "type": "object",
             "properties": {
@@ -296,12 +288,7 @@ registry.register(
         # 使用 ast.parse() 检查 Python 源文件的语法错误。
         # 给定文件名时验证该文件。否则验证 fork: 命名空间中所有 .py 文件。
         # 在写入进化代码后调用。
-        "description": (
-            "Check Python source files for syntax errors using ast.parse(). "
-            "If a filename is given, validates that file. "
-            "Otherwise validates all .py files in the fork: namespace. "
-            "Call after writing evolved code."
-        ),
+        "description": """Check Python source files for syntax errors using ast.parse(). If a filename is given, validates that file. Otherwise validates all .py files in the fork: namespace. Call after writing evolved code.""",
         "parameters": {
             "type": "object",
             "properties": {
@@ -331,21 +318,7 @@ registry.register(
         # 编排器将 slow（进化后）代码交换到位，然后用新版本重启 agent。
         # 如果验证失败，返回错误详情以便修复问题后重试。
         # 设置 deep=false 跳过编译检查（更快但不彻底）。
-        "description": (
-            "Complete the code evolution cycle. After writing evolved source code "
-            "to fork: via write_fork and passing validate_code syntax check "
-            "(and validate_frontend if frontend files were modified), "
-            "call this tool. It runs thorough validation (syntax + compile check) "
-            "on all **.py files** in the fork directory. "
-            "Does not validate TypeScript or frontend builds — "
-            "if you touched frontend code, you must call validate_frontend first. "
-            "If all checks pass, the process exits, the orchestrator swaps "
-            "the slow (evolved) code into place, and restarts the agent "
-            "with the new version. "
-            "If validation fails, error details are returned so you can fix "
-            "and retry. "
-            "Set deep=false to skip compile checks (faster but less thorough)."
-        ),
+        "description": """Complete the code evolution cycle. After writing evolved source code to fork: via write_fork and passing validate_code syntax check (and validate_frontend if frontend files were modified), call this tool. It runs thorough validation (syntax + compile check) on all **.py files** in the fork directory. Does not validate TypeScript or frontend builds — if you touched frontend code, you must call validate_frontend first. If all checks pass, the process exits, the orchestrator swaps the slow (evolved) code into place, and restarts the agent with the new version. If validation fails, error details are returned so you can fix and retry. Set deep=false to skip compile checks (faster but less thorough).""",
         "parameters": {
             "type": "object",
             "properties": {

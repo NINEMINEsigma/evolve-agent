@@ -174,16 +174,10 @@ registry.register(
     name="read_excel",
     toolset="extools",
     schema={
-        # 读取 .xlsx Excel 工作簿。返回所有 sheet 的数据，
-        # 首行作为列名。支持指定单个 sheet 或读取全部。
-        # 空行会被跳过。使用 data_only=True 读取公式计算结果而非公式本身。
-        "description": (
-            "Read a .xlsx Excel workbook. Returns data from all sheets, "
-            "with the first row as column names. "
-            "Supports specifying a single sheet or reading all. "
-            "Empty rows are skipped. Uses data_only=True to read "
-            "formula results instead of formulas."
-        ),
+        # Read a .xlsx Excel workbook. Returns data from all sheets, with the first row as column names.
+        # Supports specifying a single sheet or reading all.
+        # Empty rows are skipped. Uses data_only=True to read formula results instead of formulas.
+        "description": """Read a .xlsx Excel workbook. Returns data from all sheets, with the first row as column names. Supports specifying a single sheet or reading all. Empty rows are skipped. Uses data_only=True to read formula results instead of formulas.""",
         "parameters": {
             **_EXCEL_PARAMS,
             "properties": {
@@ -206,18 +200,15 @@ registry.register(
     name="write_excel",
     toolset="extools",
     schema={
-        # 将结构化数据写入 .xlsx Excel 文件。支持两种输入格式：
-        # 1) 单 sheet：data 是行对象列表，默认 sheet 名 'Sheet1'
-        # 2) 多 sheet：data 是 {sheet_name: rows} 字典
-        # 每行是一个字典，键对应列名。首行自动写入列名作为表头。
-        "description": (
-            "Write structured data to a .xlsx Excel file. "
-            "Supports two input formats:\n"
-            "1) Single sheet: data is a list of row objects, default sheet name 'Sheet1'\n"
-            "2) Multi sheet: data is a {sheet_name: rows} dict\n"
-            "Each row is a dict with keys as column names. "
-            "The first row is automatically written as column headers."
-        ),
+        # Write structured data to a .xlsx Excel file.
+        # Supports two input formats:
+        # 1) Single sheet: data is a list of row objects, default sheet name 'Sheet1'
+        # 2) Multi sheet: data is a {sheet_name: rows} dict
+        # Each row is a dict with keys as column names. The first row is automatically written as column headers.
+        "description": f"""Write structured data to a .xlsx Excel file. Supports two input formats:
+1) Single sheet: data is a list of row objects, default sheet name 'Sheet1'
+2) Multi sheet: data is a {{sheet_name: rows}} dict
+Each row is a dict with keys as column names. The first row is automatically written as column headers.""",
         "parameters": {
             "type": "object",
             "properties": {

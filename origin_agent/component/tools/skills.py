@@ -289,15 +289,7 @@ registry.register(
         # 通过 files 参数可一次性写入脚本和参考文档。
         # 用于持久化跨 session 有用的知识。
         # 如果同名 skill 已存在则更新。
-        "description": (
-            "Create or update a skill. A skill is a reusable knowledge module "
-            "stored as a directory under project-root/skills/, "
-            "containing a SKILL.md main document and optional scripts/, "
-            "references/, templates/, assets/ and other ancillary files. "
-            "The files parameter can write scripts and reference docs in one go. "
-            "Useful for persisting useful knowledge across sessions. "
-            "Updates the skill if one with the same name already exists."
-        ),
+        "description": """Create or update a skill. A skill is a reusable knowledge module stored as a directory under project-root/skills/, containing a SKILL.md main document and optional scripts/, references/, templates/, assets/ and other ancillary files. The files parameter can write scripts and reference docs in one go. Useful for persisting useful knowledge across sessions. Updates the skill if one with the same name already exists.""",
         "parameters": {
             "type": "object",
             "properties": {
@@ -362,7 +354,7 @@ registry.register(
     toolset="skills",
     schema={
         # 列出所有可用 skill 的名称和描述。
-        "description": "List all available skills' names and descriptions.",
+        "description": """List all available skills' names and descriptions.""",
         "parameters": {
             "type": "object",
             "properties": {},
@@ -378,7 +370,7 @@ registry.register(
     toolset="skills",
     schema={
         # 按名称删除 skill。用于移除不再相关或有用的 skill。
-        "description": "Delete a skill by name. Used to remove skills that are no longer relevant or useful.",
+        "description": """Delete a skill by name. Used to remove skills that are no longer relevant or useful.""",
         "parameters": {
             "type": "object",
             "properties": {
@@ -403,11 +395,7 @@ registry.register(
         # 将 skill 的完整内容加载到当前对话上下文中。
         # 用于在任务匹配某个 skill 描述时按需获取其完整知识。
         # 无参数调用时列出可用 skill。
-        "description": (
-            "Load the full content of a skill into the current conversation context. "
-            "Use this when a task matches a skill's description. "
-            "Calling without arguments lists available skills."
-        ),
+        "description": """Load the full content of a skill into the current conversation context. Use this when a task matches a skill's description. Calling without arguments lists available skills.""",
         "parameters": {
             "type": "object",
             "properties": {
@@ -431,13 +419,7 @@ registry.register(
         # 向已有 skill 包内写入附属文件（如 scripts/、references/ 等）。
         # 用于在创建 skill 后补充脚本、模板、参考文档。
         # path 相对于 skill 目录，如 scripts/hello.py。
-        "description": (
-            "Write ancillary files (e.g. scripts/, references/) "
-            "into an existing skill package. "
-            "Used to add scripts, templates, and reference documents "
-            "after creating the skill. "
-            "path is relative to the skill directory, e.g. scripts/hello.py."
-        ),
+        "description": """Write ancillary files (e.g. scripts/, references/) into an existing skill package. Used to add scripts, templates, and reference documents after creating the skill. path is relative to the skill directory, e.g. scripts/hello.py.""",
         "parameters": {
             "type": "object",
             "properties": {
@@ -472,12 +454,7 @@ registry.register(
     schema={
         # 读取 skill 包内附属文件的内容（如 scripts/、references/ 等）。
         # 用于查看 skill 包中的脚本代码、参考文档等。
-        "description": (
-            "Read the content of ancillary files inside a skill package "
-            "(e.g. scripts/, references/). "
-            "Useful for viewing script code, reference documents, etc. "
-            "inside a skill package."
-        ),
+        "description": """Read the content of ancillary files inside a skill package (e.g. scripts/, references/). Useful for viewing script code, reference documents, etc. inside a skill package.""",
         "parameters": {
             "type": "object",
             "properties": {
@@ -507,13 +484,7 @@ registry.register(
         # 执行 skill 包内 scripts/ 目录下的脚本并返回结果。
         # 用于运行 skill 附带的工具脚本。
         # 脚本在 skill 目录上下文下执行，timeout 30 秒。
-        "description": (
-            "Execute a script from the scripts/ directory inside "
-            "a skill package and return the result. "
-            "Useful for running utility scripts bundled with a skill. "
-            "The script runs in the context of the skill directory "
-            "with a 30-second timeout."
-        ),
+        "description": """Execute a script from the scripts/ directory inside a skill package and return the result. Useful for running utility scripts bundled with a skill. The script runs in the context of the skill directory with a 30-second timeout.""",
         "parameters": {
             "type": "object",
             "properties": {

@@ -340,22 +340,11 @@ registry.register(
     name="diff_origin_fast",
     toolset="extools",
     schema={
-        # 对比原始源码仓库（origin_agent/）与当前正在运行的
-        # fast 仓库（fast_agent_space/）之间的代码差异。
-        # origin_agent 是代码真相来源，fast 是运行时副本。
-        # 每次代码进化（slow→fast 交换）可能导致二者产生差异，
-        # 进化次数越多差异越大。此工具用于审查当前运行版本
-        # 相对于最初源代码的偏离程度。
-        "description": (
-            "Compare code differences between the original source repo "
-            "(origin_agent/) and the currently running fast repo "
-            "(fast_agent_space/). "
-            "origin_agent is the source of truth, fast is the runtime copy. "
-            "Each code evolution (slow→fast swap) may cause divergence; "
-            "the more evolutions, the greater the difference. "
-            "Use this tool to review how much the running version "
-            "has deviated from the original source."
-        ),
+        # Compare code differences between the original source repo (origin_agent/) and the currently running fast repo (fast_agent_space/).
+        # origin_agent is the source of truth, fast is the runtime copy.
+        # Each code evolution (slow→fast swap) may cause divergence; the more evolutions, the greater the difference.
+        # Use this tool to review how much the running version has deviated from the original source.
+        "description": """Compare code differences between the original source repo (origin_agent/) and the currently running fast repo (fast_agent_space/). origin_agent is the source of truth, fast is the runtime copy. Each code evolution (slow→fast swap) may cause divergence; the more evolutions, the greater the difference. Use this tool to review how much the running version has deviated from the original source.""",
         **_COMMON_SCHEMA,
     },
     handler=_handle_diff_origin_fast,
@@ -366,18 +355,10 @@ registry.register(
     name="diff_fast_fork",
     toolset="extools",
     schema={
-        # 对比当前运行的 fast 仓库（fast_agent_space/）与
-        # fork 目录（slow_agent_space/ 进化目标）之间的代码差异。
-        # 写进化代码到 fork 后，可通过此工具审查即将被交换的变更。
-        # 如果二者一致则无需调用 evolve_code。
-        "description": (
-            "Compare code differences between the currently running fast repo "
-            "(fast_agent_space/) and the fork directory "
-            "(slow_agent_space/, the evolution target). "
-            "After writing evolved code to fork, use this tool to review "
-            "changes that are about to be swapped. "
-            "If they are identical, there is no need to call evolve_code."
-        ),
+        # Compare code differences between the currently running fast repo (fast_agent_space/) and the fork directory (slow_agent_space/, the evolution target).
+        # After writing evolved code to fork, use this tool to review changes that are about to be swapped.
+        # If they are identical, there is no need to call evolve_code.
+        "description": """Compare code differences between the currently running fast repo (fast_agent_space/) and the fork directory (slow_agent_space/, the evolution target). After writing evolved code to fork, use this tool to review changes that are about to be swapped. If they are identical, there is no need to call evolve_code.""",
         **_COMMON_SCHEMA,
     },
     handler=_handle_diff_fast_fork,

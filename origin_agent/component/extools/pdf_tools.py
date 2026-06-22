@@ -100,14 +100,10 @@ registry.register(
     name="read_pdf",
     toolset="extools",
     schema={
-        # 读取 .pdf 文件并提取文本内容。返回每页的文本和全文拼接。
-        # 支持指定页范围（start_page / end_page，从 1 开始计数）。
-        # 适用于文档阅读、报告分析、信息提取等场景。
-        "description": (
-            "Read .pdf file and extract text content. Returns text per page and full concatenation. "
-            "Supports specifying page range (start_page / end_page, 1-based). "
-            "Suitable for document reading, report analysis, information extraction, etc."
-        ),
+        # Read .pdf file and extract text content. Returns text per page and full concatenation.
+        # Supports specifying page range (start_page / end_page, 1-based).
+        # Suitable for document reading, report analysis, information extraction, etc.
+        "description": """Read .pdf file and extract text content. Returns text per page and full concatenation. Supports specifying page range (start_page / end_page, 1-based). Suitable for document reading, report analysis, information extraction, etc.""",
         "parameters": {
             "type": "object",
             "properties": {

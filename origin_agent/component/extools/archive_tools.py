@@ -198,11 +198,7 @@ registry.register(
     toolset="archive",
     schema={
         # 将文件或目录压缩为指定格式的压缩包。
-        "description": (
-            "Compress a file or directory into an archive. "
-            "Supported formats: zip, tar, gztar, bztar, xztar. "
-            "Paths must use a namespace prefix (ws:, fork:, fix:, skills:)."
-        ),
+        "description": """Compress a file or directory into an archive. Supported formats: zip, tar, gztar, bztar, xztar. Paths must use a namespace prefix (ws:, fork:, fix:, skills:).""",
         "parameters": {
             "type": "object",
             "properties": {
@@ -236,12 +232,7 @@ registry.register(
     toolset="archive",
     schema={
         # 将压缩包解压到指定目录。支持格式自动推断。
-        "description": (
-            "Decompress an archive into a directory. "
-            "Supported formats: zip, tar, gztar, bztar, xztar. "
-            "Format is inferred from filename if not specified. "
-            "Paths must use a namespace prefix (ws:, fork:, fix:, skills:)."
-        ),
+        "description": """Decompress an archive into a directory. Supported formats: zip, tar, gztar, bztar, xztar. Format is inferred from filename if not specified. Paths must use a namespace prefix (ws:, fork:, fix:, skills:).""",
         "parameters": {
             "type": "object",
             "properties": {

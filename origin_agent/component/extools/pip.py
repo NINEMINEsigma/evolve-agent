@@ -83,17 +83,17 @@ registry.register(
         # 与 agent 进程相同的 Python 解释器。不要用 ``run_command`` 安装 pip 包。
         # 用户将被提示批准（允许一次）或拒绝安装。
         # 请始终包含 'reason' 解释需要安装的包的原因。
-        "description": (
-            "Install Python packages into the current runtime environment.\n\n"
-            "Always uses ``sys.executable -m pip install`` to ensure packages "
-            "are installed to the same Python interpreter as the agent process. "
-            "Do NOT use ``run_command`` to install pip packages.\n\n"
-            "The user will be prompted to approve (allow once) or deny the installation.\n"
-            "Always include 'reason' explaining why the package is needed.\n\n"
-            "Examples:\n"
-            "  install_package(packages=\"matplotlib\", reason=\"for data visualization\")\n"
-            "  install_package(packages=\"pandas numpy\", upgrade=True, reason=\"data science libraries\")\n"
-        ),
+        "description": """Install Python packages into the current runtime environment.
+
+Always uses ``sys.executable -m pip install`` to ensure packages are installed to the same Python interpreter as the agent process. Do NOT use ``run_command`` to install pip packages.
+
+The user will be prompted to approve (allow once) or deny the installation.
+Always include 'reason' explaining why the package is needed.
+
+Examples:
+  install_package(packages="matplotlib", reason="for data visualization")
+  install_package(packages="pandas numpy", upgrade=True, reason="data science libraries")
+""",
         "parameters": {
             "type": "object",
             "properties": {

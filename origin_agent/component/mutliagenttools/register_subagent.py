@@ -110,32 +110,23 @@ registry.register(
     name="register_subagent",
     toolset="multiagent",
     schema={
-        # 注册一个子 Agent 的完整配置（base_url、model、api_key、max_output_tokens、
-        # max_context_tokens、system_prompt_path）。
-        # 以 name 为唯一标识，不允许覆盖已存在的注册项（需先 unregister 再重新 register）。
-        # system_prompt_path 存储的是文件路径，文件内容在 run_subagent 启动时实时读取。
-        # 因此修改系统提示词文件的内容无需重新注册，直接编辑文件即可。
-        "description": (
-            "Register a sub-agent profile (base_url, model, api_key, max_output_tokens, "
-            "max_context_tokens, system_prompt_path). "
-            "The 'name' field is the unique identifier; existing entries cannot be overwritten "
-            "(unregister first if you need to change the registration). "
-            "'system_prompt_path' stores a file path — the file content is read at "
-            "sub-agent launch time, so editing the file content does NOT require re-registration. "
-            "To change parameters like base_url or model, unregister the existing entry first. "
-            "Registered profiles are global and may be used by other multi-agent tools."
-        ),
+        # 注册一个子 Agent 配置文件（base_url、model、api_key、max_output_tokens、max_context_tokens、system_prompt_path）。
+        # 'name' 字段是唯一标识；现有条目不能被覆盖（如果需要更改注册，请先注销）。
+        # 'system_prompt_path' 存储文件路径——文件内容在子 Agent 启动时读取，因此编辑文件内容不需要重新注册。
+        # 要更改 base_url 或 model 等参数，请先注销现有条目。
+        # 已注册的配置文件是全局的，可能被其他多 Agent 工具使用。
+        "description": """Register a sub-agent profile (base_url, model, api_key, max_output_tokens, max_context_tokens, system_prompt_path). The 'name' field is the unique identifier; existing entries cannot be overwritten (unregister first if you need to change the registration). 'system_prompt_path' stores a file path — the file content is read at sub-agent launch time, so editing the file content does NOT require re-registration. To change parameters like base_url or model, unregister the existing entry first. Registered profiles are global and may be used by other multi-agent tools.""",
         "parameters": {
             "type": "object",
             "properties": {
                 "name": {
                     "type": "string",
-                    # 子 Agent 的唯一标识名称。
+                    # 子 Agent 的唯一标识。
                     "description": "Unique identifier for the sub-agent.",
                 },
                 "base_url": {
                     "type": "string",
-                    # 子 Agent 的 API 基础地址。
+                    # 子 Agent API 端点的基础 URL。
                     "description": "Base URL of the sub-agent API endpoint.",
                 },
                 "model": {
@@ -145,22 +136,22 @@ registry.register(
                 },
                 "api_key": {
                     "type": "string",
-                    # 可选的 API 密钥。本地模型可能不需要。
+                    # 可选的 API 密钥。本地模型可省略。
                     "description": "Optional API key. May be omitted for local models.",
                 },
                 "system_prompt_path": {
                     "type": "string",
-                    # 可选的自定义系统提示词文件绝对路径。若指定则启动时必须存在。
+                    # 可选的自定义系统提示词文本文件的绝对路径。若指定，启动时必须存在。
                     "description": "Optional absolute path to a custom system prompt text file. Must exist at sub-agent launch time if specified.",
                 },
                 "max_output_tokens": {
                     "type": "integer",
-                    # 子 Agent 单次 LLM 输出的最大 token 数。
+                    # 子 Agent 每次 LLM 响应可生成的最大 token 数。
                     "description": "Maximum number of tokens the sub-agent can generate per LLM response.",
                 },
                 "max_context_tokens": {
                     "type": "integer",
-                    # 子 Agent 上下文窗口的 token 上限，用于旋转控制。
+                    # 以 token 计的最大上下文窗口大小。用于会话轮转控制。
                     "description": "Maximum context window size in tokens. Used for session rotation control.",
                 },
             },
@@ -176,29 +167,22 @@ registry.register(
     name="register_subagent_from_parent",
     toolset="multiagent",
     schema={
-        # 以主 Agent 当前的 LLM 配置为模板注册一个子 Agent。
-        # 仅需提供 name，其余参数（base_url、model、api_key、max_output_tokens、
-        # max_context_tokens）均自动从主 Agent 运行时上下文继承。
-        # 可选的 system_prompt_path 用于指定自定义系统提示词文件。
-        # 不允许覆盖已存在的注册项（需先 unregister 再重新 register）。
-        "description": (
-            "Register a sub-agent using the parent agent's current LLM configuration as a template. "
-            "Only 'name' is required; all other parameters (base_url, model, api_key, "
-            "max_output_tokens, max_context_tokens) are inherited from the parent agent. "
-            "Optional 'system_prompt_path' can specify a custom system prompt file. "
-            "Existing entries cannot be overwritten (unregister first if needed)."
-        ),
+        # 使用主 Agent 当前的 LLM 配置作为模板注册一个子 Agent。
+        # 仅需要 'name'；所有其他参数（base_url、model、api_key、max_output_tokens、max_context_tokens）从主 Agent 继承。
+        # 可选的 'system_prompt_path' 可以指定自定义系统提示词文件。
+        # 现有条目不能被覆盖（如果需要请先注销）。
+        "description": """Register a sub-agent using the parent agent's current LLM configuration as a template. Only 'name' is required; all other parameters (base_url, model, api_key, max_output_tokens, max_context_tokens) are inherited from the parent agent. Optional 'system_prompt_path' can specify a custom system prompt file. Existing entries cannot be overwritten (unregister first if needed).""",
         "parameters": {
             "type": "object",
             "properties": {
                 "name": {
                     "type": "string",
-                    # 子 Agent 的唯一标识名称。
+                    # 子 Agent 的唯一标识。
                     "description": "Unique identifier for the sub-agent.",
                 },
                 "system_prompt_path": {
                     "type": "string",
-                    # 可选的自定义系统提示词文件绝对路径。
+                    # 可选的自定义系统提示词文本文件的绝对路径。若指定，启动时必须存在。
                     "description": "Optional absolute path to a custom system prompt text file. Must exist at sub-agent launch time if specified.",
                 },
             },

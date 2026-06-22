@@ -47,10 +47,10 @@ CRON_TASK_TIMEOUT: int = 300
 FFMPEG_DEFAULT_TIMEOUT: int = 300
 
 # write_file / write_fork 完全覆盖模式的内容上限（字符数）
-WRITE_FILE_MAX_CHARS: int = 2000
+WRITE_FILE_MAX_CHARS: int = 10000
 
 # edit_file 增量编辑模式的内容上限（字符数）
-EDIT_FILE_MAX_CHARS: int = 2000
+EDIT_FILE_MAX_CHARS: int = 10000
 
 # 支持的命名空间前缀元组 — 用于命令参数中的逻辑路径解析
 NAMESPACE_PREFIXES: tuple[str, ...] = ("ws:", "fork:", "fix:", "skills:")

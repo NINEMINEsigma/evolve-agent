@@ -283,34 +283,28 @@ registry.register(
     name="draw_diagram",
     toolset="diagram",
     schema={
-        # 将 Excalidraw JSON 渲染为 PNG 图片，返回 Markdown 图片链接。
-        # 使用步骤:
-        #   1. 用 write_file 将 Excalidraw JSON 保存到文件
-        #   2. 调用 draw_diagram(json_file='ws:diagrams/my.excalidraw')
-        #   3. 工具返回 Markdown 图片链接，前端自动显示
-        "description": (
-            "Render Excalidraw JSON to a PNG image and return a "
-            "Markdown image link.\n\n"
-            "Steps:\n"
-            "  1. Save Excalidraw JSON to a file with write_file, e.g. "
-            "write_file(path='ws:diagrams/my.excalidraw', content='...')\n"
-            "  2. Call draw_diagram(json_file='ws:diagrams/my.excalidraw')\n"
-            "  3. The tool returns ![diagram](/uploads/diagrams/xxx.png), "
-            "displayed automatically in the frontend\n\n"
-            "Excalidraw JSON format:\n"
-            '  { "type": "excalidraw", "version": 2, '
-            '"elements": [...], "appState": {...} }\n\n'
-            "Element types: rectangle, text, arrow, ellipse, diamond, line, etc.\n"
-            "Each element needs id, type, x, y, width, height, "
-            "strokeColor, backgroundColor, etc.\n"
-            "Text elements have text, fontSize, fontFamily(1=handwriting, "
-            "2=normal, 3=code), textAlign, verticalAlign\n"
-            "Arrows use points: [[x1,y1], [x2,y2]] for path definition\n\n"
-            "Prerequisites: pip install playwright && "
-            "python -m playwright install chromium\n"
-            "The agent should verify correctness through JSON structure "
-            "integrity; the user sees the rendered result in the frontend."
-        ),
+        # Render Excalidraw JSON to a PNG image and return a Markdown image link.
+        # Steps:
+        #   1. Save Excalidraw JSON to a file with write_file
+        #   2. Call draw_diagram(json_file='ws:diagrams/my.excalidraw')
+        #   3. The tool returns ![diagram](/uploads/diagrams/xxx.png), displayed automatically in the frontend
+        "description": """Render Excalidraw JSON to a PNG image and return a Markdown image link.
+
+Steps:
+  1. Save Excalidraw JSON to a file with write_file, e.g. write_file(path='ws:diagrams/my.excalidraw', content='...')
+  2. Call draw_diagram(json_file='ws:diagrams/my.excalidraw')
+  3. The tool returns ![diagram](/uploads/diagrams/xxx.png), displayed automatically in the frontend
+
+Excalidraw JSON format:
+  { "type": "excalidraw", "version": 2, "elements": [...], "appState": {...} }
+
+Element types: rectangle, text, arrow, ellipse, diamond, line, etc.
+Each element needs id, type, x, y, width, height, strokeColor, backgroundColor, etc.
+Text elements have text, fontSize, fontFamily(1=handwriting, 2=normal, 3=code), textAlign, verticalAlign
+Arrows use points: [[x1,y1], [x2,y2]] for path definition
+
+Prerequisites: pip install playwright && python -m playwright install chromium
+The agent should verify correctness through JSON structure integrity; the user sees the rendered result in the frontend.""",
         "parameters": {
             "type": "object",
             "properties": {
@@ -347,12 +341,8 @@ registry.register(
     name="render_diagram",
     toolset="diagram",
     schema={
-        # 将 workspace 中已有的 .excalidraw JSON 文件重新渲染为 PNG。
-        # 用于迭代修改后重新生成图片。
-        "description": (
-            "Re-render an existing .excalidraw JSON file in the workspace "
-            "to PNG. Use for iterative editing and regenerating images."
-        ),
+        # Re-render an existing .excalidraw JSON file in the workspace to PNG. Use for iterative editing and regenerating images.
+        "description": """Re-render an existing .excalidraw JSON file in the workspace to PNG. Use for iterative editing and regenerating images.""",
         "parameters": {
             "type": "object",
             "properties": {

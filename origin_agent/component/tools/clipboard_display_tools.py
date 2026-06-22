@@ -89,32 +89,30 @@ registry.register(
     name="set_clipboard_display",
     toolset="clipboard",
     schema={
-        "description": (
-            "**ALWAYS use this tool immediately** when the user asks to copy something, or when you generate any long text "
-            "(tags, prompts, keywords, code snippets, configuration, comma-separated lists, etc.) that the user is likely to copy.\n"
-            "Do NOT paste the text into the chat message and ask the user to manually select/copy it. "
-            "Instead, call this tool so the user can copy with a single click from the top panel.\n\n"
-            "Common triggers:\n"
-            "- User says '让我复制' / 'copy this' / '给我复制' / '复制出来'\n"
-            "- You produce a long list of tags, prompts, or keywords\n"
-            "- You generate code, config, or any text the user will reuse\n\n"
-            "The same display_id will overwrite the existing display area.\n"
-            "Returns the current display metadata."
-        ),
+        "description": """**ALWAYS use this tool immediately** when the user asks to copy something, or when you generate any long text (tags, prompts, keywords, code snippets, configuration, comma-separated lists, etc.) that the user is likely to copy.
+Do NOT paste the text into the chat message and ask the user to manually select/copy it. Instead, call this tool so the user can copy with a single click from the top panel.
+
+Common triggers:
+- User says '让我复制' / 'copy this' / '给我复制' / '复制出来'
+- You produce a long list of tags, prompts, or keywords
+- You generate code, config, or any text the user will reuse
+
+The same display_id will overwrite the existing display area.
+Returns the current display metadata.""",
         "parameters": {
             "type": "object",
             "properties": {
                 "display_id": {
                     "type": "string",
-                    "description": "Unique identifier for this display area. Reusing the same ID updates it.",
+                    "description": """Unique identifier for this display area. Reusing the same ID updates it.""",
                 },
                 "label": {
                     "type": "string",
-                    "description": "Human-readable title/description of the content.",
+                    "description": """Human-readable title/description of the content.""",
                 },
                 "content": {
                     "type": "string",
-                    "description": "The text content to display and copy.",
+                    "description": """The text content to display and copy.""",
                 },
             },
             "required": ["display_id", "label", "content"],
@@ -130,19 +128,19 @@ registry.register(
     name="clear_clipboard_display",
     toolset="clipboard",
     schema={
-        # 从前端移除指定可复制展示区域。
-        # 省略 display_id 时清除当前会话的所有展示区域。
-        "description": (
-            "Remove a copy-to-clipboard display area from the frontend.\n"
-            "If display_id is omitted, all display areas for the current session are cleared.\n\n"
-            "Returns the list of cleared display IDs."
-        ),
+        # Remove a copy-to-clipboard display area from the frontend.
+        # If display_id is omitted, all display areas for the current session are cleared.
+        # Returns the list of cleared display IDs.
+        "description": """Remove a copy-to-clipboard display area from the frontend.
+If display_id is omitted, all display areas for the current session are cleared.
+
+Returns the list of cleared display IDs.""",
         "parameters": {
             "type": "object",
             "properties": {
                 "display_id": {
                     "type": "string",
-                    "description": "display_id of the area to clear. Omit to clear all.",
+                    "description": """display_id of the area to clear. Omit to clear all.""",
                 },
             },
             "required": [],

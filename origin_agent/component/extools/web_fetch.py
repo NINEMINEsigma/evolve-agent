@@ -125,12 +125,7 @@ registry.register(
     name="web_fetch",
     toolset="extools",
     schema={
-        "description": (
-            "Fetches a URL and returns its content as plain text. "
-            "HTML pages are automatically converted to text (scripts and styles stripped). "
-            "Useful for reading web pages, API responses, documentation, etc. "
-            "Content is truncated at 50 000 characters."
-        ),
+        "description": """Fetches a URL and returns its content as plain text. HTML pages are automatically converted to text (scripts and styles stripped). Useful for reading web pages, API responses, documentation, etc. Content is truncated at 50 000 characters.""",
         "parameters": {
             "type": "object",
             "properties": {

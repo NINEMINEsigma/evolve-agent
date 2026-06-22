@@ -98,16 +98,9 @@ registry.register(
         # 用户将被提示批准（允许一次）、永久信任（始终允许）或拒绝该命令。
         # 之前以'始终允许'批准的命令跳过提示。
         # 始终包含 'reason' 解释命令的用途。
-        # 用于安装软件包、运行测试或检查文件。
-        "description": (
-            "Execute shell commands in the workspace. "
-            "The user will be prompted to approve (allow once), "
-            "permanently trust (always allow), or deny the command. "
-            "Commands previously approved with 'always allow' skip the prompt. "
-            "Always include 'reason' explaining the command's purpose. "
-            "Useful for installing packages, running tests, or other shell-specific tasks. "
-            "DO NOT use this tool to read or inspect files; use read_file instead."
-        ),
+        # 用于安装软件包、运行测试或其他 shell 专用任务。
+        # 不得使用此工具读取或检查文件；请使用 read_file 代替。
+        "description": """Execute shell commands in the workspace. The user will be prompted to approve (allow once), permanently trust (always allow), or deny the command. Commands previously approved with 'always allow' skip the prompt. Always include 'reason' explaining the command's purpose. Useful for installing packages, running tests, or other shell-specific tasks. DO NOT use this tool to read or inspect files; use read_file instead.""",
         "parameters": {
             "type": "object",
             "properties": {

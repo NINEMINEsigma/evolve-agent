@@ -103,18 +103,16 @@ registry.register(
     name="read_docx",
     toolset="extools",
     schema={
-        "description": (
-            # 读取 .docx Word 文档。返回：
-            # 1) paragraphs — 段落列表（含文本和样式名称）
-            # 2) tables — 文档中的表格（含表头和数据行）
-            # 3) plain_text — 纯文本拼接，便于快速预览
-            # 空段落会被跳过。
-            "Read a .docx Word document. Returns:\n"
-            "1) paragraphs — list of paragraphs (with text and style name)\n"
-            "2) tables — tables in the document (with headers and data rows)\n"
-            "3) plain_text — concatenated plain text for quick preview\n"
-            "Empty paragraphs are skipped."
-        ),
+        # Read a .docx Word document. Returns:
+        # 1) paragraphs — list of paragraphs (with text and style name)
+        # 2) tables — tables in the document (with headers and data rows)
+        # 3) plain_text — concatenated plain text for quick preview
+        # Empty paragraphs are skipped.
+        "description": """Read a .docx Word document. Returns:
+1) paragraphs — list of paragraphs (with text and style name)
+2) tables — tables in the document (with headers and data rows)
+3) plain_text — concatenated plain text for quick preview
+Empty paragraphs are skipped.""",
         "parameters": {
             "type": "object",
             "properties": {

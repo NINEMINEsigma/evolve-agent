@@ -26,10 +26,8 @@ registry.register(
     name="list_subagents",
     toolset="multiagent",
     schema={
-        # 返回所有已注册子 Agent 的名称列表。
-        "description": (
-            "Return a list of names for all currently registered sub-agents."
-        ),
+        # 返回所有当前已注册子 Agent 的名称列表。
+        "description": """Return a list of names for all currently registered sub-agents.""",
         "parameters": {
             "type": "object",
             "properties": {},

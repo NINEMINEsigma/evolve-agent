@@ -36,25 +36,19 @@ registry.register(
     name="stop_subagent",
     toolset="multiagent",
     schema={
-        # 强制终止一个子 Agent 会话。每次仅停止一个子 Agent。
-        # 停止后完整会话历史保存到 agentspace/subagents/ 下的 JSONL 文件。
-        # 已完成的子 Agent 无法再次停止。等待中的子 Agent 直接移除不落盘。
-        # 若等待队列非空，停止后自动激活队列头部的一个子 Agent（一出一入）。
-        "description": (
-            "Forcefully terminate a sub-agent session. "
-            "Only one sub-agent can be stopped per call. "
-            "The complete session history is saved as a JSONL file. "
-            "An already-completed sub-agent cannot be stopped again. "
-            "Queued (not yet active) sub-agents are removed without saving history. "
-            "If the waiting queue is non-empty, the next queued sub-agent is "
-            "automatically activated after this one is stopped."
-        ),
+        # 强制终止一个子 Agent 会话。
+        # 每次调用只能停止一个子 Agent。
+        # 完整会话历史保存为 JSONL 文件。
+        # 已完成子 Agent 不能再次停止。
+        # 已排队（尚未活跃）的子 Agent 被移除而不保存历史。
+        # 如果等待队列非空，此子 Agent 停止后自动激活下一个排队的子 Agent。
+        "description": """Forcefully terminate a sub-agent session. Only one sub-agent can be stopped per call. The complete session history is saved as a JSONL file. An already-completed sub-agent cannot be stopped again. Queued (not yet active) sub-agents are removed without saving history. If the waiting queue is non-empty, the next queued sub-agent is automatically activated after this one is stopped.""",
         "parameters": {
             "type": "object",
             "properties": {
                 "session_id": {
                     "type": "string",
-                    # 要停止的子 Agent 会话 ID。
+                    # 要停止的子 Agent 的会话 ID。
                     "description": "Session ID of the sub-agent to stop.",
                 },
             },

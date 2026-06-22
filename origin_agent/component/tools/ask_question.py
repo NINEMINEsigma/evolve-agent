@@ -111,49 +111,46 @@ registry.register(
     name="ask_question",
     toolset="core",
     schema={
-        # 向当前用户提问，提供预设选项供选择，并可选择允许用户自定义输入。
-        # 适用于需要用户决策的场景，如：
-        #   - 询问用户想要怎么处理某个文件
-        #   - 让用户从多个方案中选择一个
-        #   - 收集用户的偏好或确认信息
-        # 返回用户选择的 option（选项的 value）和/或 custom_text（自定义输入）。
-        # 如果用户未选择任何选项也未输入自定义文本，answered 字段为 false。
-        "description": (
-            "Ask the current user a question with preset options to choose from, "
-            "and optionally allow custom input.\n\n"
-            "Useful for scenarios requiring a user decision, e.g.:\n"
-            "  - Asking the user how to handle a file\n"
-            "  - Letting the user choose from multiple options\n"
-            "  - Collecting user preferences or confirmation\n\n"
-            "Returns the user's chosen option (option's value) and/or custom_text. "
-            "If the user neither selects an option nor enters custom text, "
-            "answered will be false."
-        ),
+        # Ask the current user a question with preset options to choose from, and optionally allow custom input.
+        # Useful for scenarios requiring a user decision, e.g.:
+        #   - Asking the user how to handle a file
+        #   - Letting the user choose from multiple options
+        #   - Collecting user preferences or confirmation
+        # Returns the user's chosen option (option's value) and/or custom_text.
+        # If the user neither selects an option nor enters custom text, answered will be false.
+        "description": """Ask the current user a question with preset options to choose from, and optionally allow custom input.
+
+Useful for scenarios requiring a user decision, e.g.:
+  - Asking the user how to handle a file
+  - Letting the user choose from multiple options
+  - Collecting user preferences or confirmation
+
+Returns the user's chosen option (option's value) and/or custom_text. If the user neither selects an option nor enters custom text, answered will be false.""",
         "parameters": {
             "type": "object",
             "properties": {
                 "question": {
                     "type": "string",
-                    # 要向用户提出的问题。
-                    "description": "The question to ask the user.",
+                    # The question to ask the user.
+                    "description": """The question to ask the user.""",
                 },
                 "options": {
                     "type": "array",
                     "items": {
                         "type": "object",
                         "properties": {
-                            "label": {"type": "string", "description": "显示的选项文本"},
-                            "value": {"type": "string", "description": "选项的值"},
+                            "label": {"type": "string", "description": """Display text for the option."""},
+                            "value": {"type": "string", "description": """Value of the option."""},
                         },
                         "required": ["label", "value"],
                     },
-                    # 预设选项列表，每项包含 label（显示文本）和 value（返回值）。留空或 null 时仅允许自定义输入。
-                    "description": "List of preset options, each with a label (display text) and value (return value). When empty or null, only custom input is allowed.",
+                    # List of preset options, each with a label (display text) and value (return value). When empty or null, only custom input is allowed.
+                    "description": """List of preset options, each with a label (display text) and value (return value). When empty or null, only custom input is allowed.""",
                 },
                 "allow_custom": {
                     "type": "boolean",
-                    # 是否允许用户输入自定义文本（默认 true）。设为 false 时用户必须在预设选项中做出选择。
-                    "description": "Whether to allow custom text input (default true). When false, the user must choose from preset options.",
+                    # Whether to allow custom text input (default true). When false, the user must choose from preset options.
+                    "description": """Whether to allow custom text input (default true). When false, the user must choose from preset options.""",
                     "default": True,
                 },
             },

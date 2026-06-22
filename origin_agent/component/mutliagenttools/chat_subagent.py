@@ -40,18 +40,13 @@ registry.register(
     name="chat_subagent",
     toolset="multiagent",
     schema={
-        # 向指定子 Agent 会话发送一条消息，消息进入收件箱并在子 Agent 工具链结束后合并注入上下文。
-        # 子 Agent 处于等待队列（未活跃）时不可发送消息。
-        # 返回值包含可选的 `feedback` 字段，为子 Agent 当前发件箱中的文本列表（即时反馈，避免等待周期收集）。
-        "description": (
-            "Send a message to a running sub-agent session. "
-            "The message is queued in the sub-agent's inbox and injected into its context "
-            "after the current tool-call chain finishes. "
-            "Cannot be used on sub-agents that are queued (not yet active).\n\n"
-            "Returns an optional 'feedback' field — a list of text responses from the "
-            "sub-agent's outbox collected at call time. Use this for instant feedback "
-            "instead of waiting for the periodic collection cycle."
-        ),
+        # 向正在运行的子 Agent 会话发送一条消息。
+        # 消息进入子 Agent 收件箱队列，在当前工具调用链完成后注入其上下文。
+        # 不能用于已排队（尚未活跃）的子 Agent。
+        # 返回可选的 'feedback' 字段——调用时从子 Agent 发件箱收集的文本响应列表。用于即时反馈，而非等待定期收集周期。
+        "description": """Send a message to a running sub-agent session. The message is queued in the sub-agent's inbox and injected into its context after the current tool-call chain finishes. Cannot be used on sub-agents that are queued (not yet active).
+
+Returns an optional 'feedback' field — a list of text responses from the sub-agent's outbox collected at call time. Use this for instant feedback instead of waiting for the periodic collection cycle.""",
         "parameters": {
             "type": "object",
             "properties": {

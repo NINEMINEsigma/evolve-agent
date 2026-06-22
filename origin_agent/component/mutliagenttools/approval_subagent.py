@@ -64,20 +64,14 @@ registry.register(
     name="approval_subagent",
     toolset="multiagent",
     schema={
-        # 批量审批子 Agent 的工具调用申请。
-        # 同意的工具立即执行，拒绝的工具必须附带原因。
-        # 子 Agent 的工具调用永不超时，等待父 Agent 审批期间完全暂停。
-        # 返回值包含可选的 `feedback` 字段，为子 Agent 当前发件箱中的文本列表（审批后即时收集）。
-        "description": (
-            "Batch approve or reject tool-call requests from a sub-agent. "
-            "Approved tools execute immediately in the sub-agent context. "
-            "Rejected tools must include a reason. "
-            "The sub-agent is fully paused while waiting for approval "
-            "(there is no timeout).\n\n"
-            "Returns an optional 'feedback' field — a list of text responses from the "
-            "sub-agent's outbox collected after tool execution. "
-            "Use this for instant feedback."
-        ),
+        # 批量批准或拒绝子 Agent 的工具调用请求。
+        # 批准的工具在子 Agent 上下文中立即执行。
+        # 拒绝的工具必须包含原因。
+        # 子 Agent 在等待审批期间完全暂停（没有超时）。
+        # 返回可选的 'feedback' 字段——子 Agent 发件箱中的文本响应列表，在工具执行后收集。用于即时反馈。
+        "description": """Batch approve or reject tool-call requests from a sub-agent. Approved tools execute immediately in the sub-agent context. Rejected tools must include a reason. The sub-agent is fully paused while waiting for approval (there is no timeout).
+
+Returns an optional 'feedback' field — a list of text responses from the sub-agent's outbox collected after tool execution. Use this for instant feedback.""",
         "parameters": {
             "type": "object",
             "properties": {
@@ -93,23 +87,23 @@ registry.register(
                         "properties": {
                             "tool_call_id": {
                                 "type": "string",
-                                # 子 Agent 发出的工具调用 ID。
+                                # 子 Agent 发来的工具调用 ID。
                                 "description": "The tool call ID from the sub-agent.",
                             },
                             "approved": {
                                 "type": "boolean",
-                                # 是否同意执行。
+                                # 是否批准此工具调用。
                                 "description": "Whether to approve this tool call.",
                             },
                             "reason": {
                                 "type": "string",
-                                # 拒绝原因（拒绝时必填）。
+                                # 拒绝原因（approved=false 时必填）。
                                 "description": "Reason for denial (required when approved=false).",
                             },
                         },
                         "required": ["tool_call_id", "approved"],
                     },
-                    # 审批决策列表，一次调用可审批多个工具调用。
+                    # 审批决策列表。每个条目批准或拒绝子 Agent 的一个工具调用。
                     "description": "List of approval decisions. Each entry approves or rejects one tool call from the sub-agent.",
                 },
             },

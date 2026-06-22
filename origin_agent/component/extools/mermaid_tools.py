@@ -317,31 +317,34 @@ registry.register(
     name="draw_mermaid",
     toolset="mermaid",
     schema={
-        "description": (
-            "Render a Mermaid diagram definition to a PNG image and return a "
-            "Markdown image link.\n\n"
-            "Mermaid is a diagramming and charting tool that renders Markdown-like "
-            "text definitions to diagrams.\n\n"
-            "Common diagram types (full syntax at https://mermaid.js.org/syntax/):\n"
-            "  - graph TD; A-->B;  (flowchart, top-down)\n"
-            "  - graph LR; A-->B;  (flowchart, left-right)\n"
-            "  - sequenceDiagram; A->>B: Hello; (sequence)\n"
-            "  - classDiagram; class Animal; (class)\n"
-            "  - stateDiagram-v2; [*] --> Idle; (state)\n"
-            "  - gantt; title Timeline; (gantt chart)\n"
-            "  - pie; \"A\": 40; \"B\": 60; (pie chart)\n"
-            "  - erDiagram; CUSTOMER ||--o{ ORDER : places; (ER diagram)\n\n"
-            "Usage:\n"
-            '  draw_mermaid(definition="graph TD; A-->B;")\n\n'
-            "  Or save to a .mmd file first:\n"
-            '  write_file(path="ws:diagrams/my.mmd", content="graph TD; A-->B;")\n'
-            '  draw_mermaid(file="ws:diagrams/my.mmd")\n\n'
-            "Supported themes: default, forest, dark, neutral\n\n"
-            "Returns:\n"
-            "  - png_path: ws: path to the generated PNG\n"
-            "  - mmd_path: ws: path to the saved .mmd reference file\n"
-            "  - markdown: image URL for frontend display\n"
-        ),
+        "description": """Render a Mermaid diagram definition to a PNG image and return a Markdown image link.
+
+Mermaid is a diagramming and charting tool that renders Markdown-like text definitions to diagrams.
+
+Common diagram types (full syntax at https://mermaid.js.org/syntax/):
+  - graph TD; A-->B;  (flowchart, top-down)
+  - graph LR; A-->B;  (flowchart, left-right)
+  - sequenceDiagram; A->>B: Hello; (sequence)
+  - classDiagram; class Animal; (class)
+  - stateDiagram-v2; [*] --> Idle; (state)
+  - gantt; title Timeline; (gantt chart)
+  - pie; "A": 40; "B": 60; (pie chart)
+  - erDiagram; CUSTOMER ||--o{ ORDER : places; (ER diagram)
+
+Usage:
+  draw_mermaid(definition="graph TD; A-->B;")
+
+  Or save to a .mmd file first:
+  write_file(path="ws:diagrams/my.mmd", content="graph TD; A-->B;")
+  draw_mermaid(file="ws:diagrams/my.mmd")
+
+Supported themes: default, forest, dark, neutral
+
+Returns:
+  - png_path: ws: path to the generated PNG
+  - mmd_path: ws: path to the saved .mmd reference file
+  - markdown: image URL for frontend display
+""",
         "parameters": {
             "type": "object",
             "properties": {

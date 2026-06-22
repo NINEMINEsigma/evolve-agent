@@ -523,14 +523,8 @@ registry.register(
     name="media_info",
     toolset="extools",
     schema={
-        # 使用 ffprobe 读取媒体文件的详细信息，包括：
-        # 格式、时长、视频流（分辨率、fps、编码）、
-        # 音频流（采样率、声道、编码）等。
-        "description": (
-            "Read detailed media file info using ffprobe: "
-            "format, duration, video streams (resolution, fps, codec), "
-            "audio streams (sample rate, channels, codec), etc."
-        ),
+        # Read detailed media file info using ffprobe: format, duration, video streams (resolution, fps, codec), audio streams (sample rate, channels, codec), etc.
+        "description": """Read detailed media file info using ffprobe: format, duration, video streams (resolution, fps, codec), audio streams (sample rate, channels, codec), etc.""",
         "parameters": {
             "type": "object",
             "properties": {
@@ -553,13 +547,8 @@ registry.register(
     name="convert_media",
     toolset="extools",
     schema={
-        # 使用 ffmpeg 转换媒体文件格式。自动根据输出文件扩展名选择编码器。
-        # 通过 extra_args 可传递额外 ffmpeg 参数。
-        "description": (
-            "Convert media file format using ffmpeg. "
-            "Auto-selects encoder based on output file extension. "
-            "Pass extra ffmpeg arguments via extra_args."
-        ),
+        # Convert media file format using ffmpeg. Auto-selects encoder based on output file extension. Pass extra ffmpeg arguments via extra_args.
+        "description": """Convert media file format using ffmpeg. Auto-selects encoder based on output file extension. Pass extra ffmpeg arguments via extra_args.""",
         "parameters": {
             "type": "object",
             "properties": {
@@ -594,12 +583,8 @@ registry.register(
     name="extract_audio",
     toolset="extools",
     schema={
-        # 从视频文件中提取音频轨道。支持指定编码器、采样率和声道数。默认输出 MP3 格式。
-        "description": (
-            "Extract audio track from a video file. "
-            "Supports specifying codec, sample rate, and channel count. "
-            "Default output format is MP3."
-        ),
+        # Extract audio track from a video file. Supports specifying codec, sample rate, and channel count. Default output format is MP3.
+        "description": """Extract audio track from a video file. Supports specifying codec, sample rate, and channel count. Default output format is MP3.""",
         "parameters": {
             "type": "object",
             "properties": {
@@ -646,13 +631,8 @@ registry.register(
     name="trim_media",
     toolset="extools",
     schema={
-        # 裁剪音视频片段。使用流复制（-c copy）实现快速无损裁剪。
-        # 至少需要指定 start、duration 或 end 之一。
-        "description": (
-            "Trim an audio/video clip. Uses stream copy (-c copy) "
-            "for fast lossless trimming. "
-            "At least one of start, duration, or end must be specified."
-        ),
+        # Trim an audio/video clip. Uses stream copy (-c copy) for fast lossless trimming. At least one of start, duration, or end must be specified.
+        "description": """Trim an audio/video clip. Uses stream copy (-c copy) for fast lossless trimming. At least one of start, duration, or end must be specified.""",
         "parameters": {
             "type": "object",
             "properties": {
@@ -695,16 +675,8 @@ registry.register(
     name="concat_media",
     toolset="extools",
     schema={
-        # 拼接多个音视频文件。使用 ffmpeg concat demuxer，
-        # 执行流复制（-c copy），无需重编码。
-        # 所有文件需使用相同编码参数（同格式、同分辨率等）。
-        "description": (
-            "Concatenate multiple media files. "
-            "Uses ffmpeg concat demuxer with stream copy (-c copy), "
-            "no re-encoding needed. "
-            "All files must use identical encoding parameters "
-            "(same format, resolution, etc.)."
-        ),
+        # Concatenate multiple media files. Uses ffmpeg concat demuxer with stream copy (-c copy), no re-encoding needed. All files must use identical encoding parameters (same format, resolution, etc.).
+        "description": """Concatenate multiple media files. Uses ffmpeg concat demuxer with stream copy (-c copy), no re-encoding needed. All files must use identical encoding parameters (same format, resolution, etc.).""",
         "parameters": {
             "type": "object",
             "properties": {
@@ -733,14 +705,8 @@ registry.register(
     name="compress_media",
     toolset="extools",
     schema={
-        # 压缩视频文件（降低码率/分辨率）。
-        # 支持设置 CRF（0-51，越低质量越好）、视频比特率、
-        # 编码器和缩放分辨率。
-        "description": (
-            "Compress a video file (reduce bitrate/resolution). "
-            "Supports setting CRF (0-51, lower = better quality), "
-            "video bitrate, codec, and scaling resolution."
-        ),
+        # Compress a video file (reduce bitrate/resolution). Supports setting CRF (0-51, lower = better quality), video bitrate, codec, and scaling resolution.
+        "description": """Compress a video file (reduce bitrate/resolution). Supports setting CRF (0-51, lower = better quality), video bitrate, codec, and scaling resolution.""",
         "parameters": {
             "type": "object",
             "properties": {

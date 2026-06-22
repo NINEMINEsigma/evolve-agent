@@ -249,13 +249,7 @@ registry.register(
     name="web_search",
     toolset="extools",
     schema={
-        "description": (
-            "Searches the web using DuckDuckGo (primary) or Bing (fallback) "
-            "and returns a list of results with title, URL, and snippet for each. "
-            "Automatically falls back to Bing if DuckDuckGo is unavailable. "
-            "Use this tool when you need up-to-date information, documentation, "
-            "or any knowledge not available in your training data."
-        ),
+        "description": """Searches the web using DuckDuckGo (primary) or Bing (fallback) and returns a list of results with title, URL, and snippet for each. Automatically falls back to Bing if DuckDuckGo is unavailable. Use this tool when you need up-to-date information, documentation, or any knowledge not available in your training data.""",
         "parameters": {
             "type": "object",
             "properties": {

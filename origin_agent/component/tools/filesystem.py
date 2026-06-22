@@ -54,11 +54,15 @@ def _handle_read(args: dict[str, Any]) -> dict:
         return tool_error("offset must be >= 0", path=path, offset=offset)
     if limit < 1:
         return tool_error("limit must be >= 1", path=path, limit=limit)
-    if limit > 100:
-        limit = 100
+    if limit > 2000:
+        limit = 2000
     try:
         content: str = _s().read(path, offset=offset, limit=limit)
-        return tool_result(content=content, path=path, offset=offset, limit=limit)
+        lines: list[str] = content.splitlines()
+        numbered: str = "\n".join(
+            f"{offset + i + 1}: {line}" for i, line in enumerate(lines)
+        )
+        return tool_result(content=numbered, path=path, offset=offset, limit=limit)
     except SandboxError as exc:
         return tool_error(str(exc), path=path)
 
@@ -87,7 +91,12 @@ def _handle_list(args: dict[str, Any]) -> dict:
     if not path:
         return tool_error("path is required", path=path)
     try:
-        entries: list[str] = _s().list_dir(path)
+        raw: list[str] = _s().list_dir(path)
+        resolved = _s().resolve_read(path)
+        entries: list[str] = []
+        for name in raw:
+            p = resolved.real / name
+            entries.append(f"{name}/" if p.is_dir() else name)
         return tool_result(entries=entries, path=path, count=len(entries))
     except SandboxError as exc:
         return tool_error(str(exc), path=path)
@@ -137,20 +146,45 @@ registry.register(
     name="read_file",
     toolset="filesystem",
     schema={
-        # 读取文件内容。路径必须使用命名空间前缀：
+        # 读取文件内容并附带行号。路径必须使用命名空间前缀：
         # 'ws:' 用于 workspace 数据，'fork:' 用于进化代码，
-        # 'fix:' 用于修复目标。
-        # 示例：'ws:logs/error.log'、'fork:main.py'。
-        # 支持通过 offset 和 limit 进行按行分页。
-        # 默认 limit 为 100 行（硬上限）；使用 offset 跳过行。
-        "description": (
-            "Read file content. Path must use a namespace prefix: "
-            "'ws:' for workspace data, 'fork:' for evolution code, "
-            "'fix:' for repair targets, 'skills:' for skill files. "
-            "Example: 'ws:logs/error.log', 'fork:main.py', 'skills:my_skill.md'.\n\n"
-            "Supports line-based pagination via offset and limit. "
-            "Default limit is 100 lines (hard cap); use offset to skip lines."
-        ),
+        # 'fix:' 用于修复目标，'skills:' 用于 skill 文件。
+        # 示例：'ws:logs/error.log'、'fork:main.py'、'skills:my_skill.md'。
+        #
+        # 使用方式：
+        # - 支持通过 offset（0-indexed）和 limit 进行按行分页。
+        # - 默认 limit 为 2000 行（硬上限）；使用 offset 继续读取。
+        # - 输出以 1-indexed 行号为前缀，便于引用。
+        # - 使用 read_file 在编辑前查看内容。
+        #
+        # 参数：
+        #   path:   带命名空间前缀的逻辑文件路径（必需）
+        #   offset: 起始行号，0-indexed（默认 0）
+        #   limit:  最大返回行数，硬上限 2000（默认 100）
+        #
+        # 错误：
+        #   - path 为空或缺失 → 错误
+        #   - offset < 0 → 错误
+        #   - limit < 1 → 错误（limit 会被静默截断为 2000）
+        #   - 文件不存在或沙盒拒绝访问 → 描述性错误
+        "description": """Read file content with line numbers. Path must use a namespace prefix: 'ws:' for workspace data, 'fork:' for evolution code, 'fix:' for repair targets, 'skills:' for skill files. Example: 'ws:logs/error.log', 'fork:main.py', 'skills:my_skill.md'.
+
+Usage:
+- Supports line-based pagination via offset (0-indexed) and limit.
+- Default limit is 2000 lines (hard cap); use offset to continue reading.
+- Output is prefixed with 1-indexed line numbers for easy reference.
+- Use read_file to inspect content before editing with edit_file.
+
+Parameters:
+  path:   Logical file path with namespace prefix (required)
+  offset: Starting line number, 0-indexed (default 0)
+  limit:  Maximum lines to return, hard cap at 2000 (default 100)
+
+Errors:
+  - path is empty or missing → error
+  - offset < 0 → error
+  - limit < 1 → error (limit silently capped at 2000)
+  - file not found or sandbox access denied → descriptive error""",
         "parameters": {
             "type": "object",
             "properties": {
@@ -162,18 +196,19 @@ registry.register(
                 },
                 "offset": {
                     "type": "integer",
-                    # 起始行号（0-indexed，默认 0）。
-                    "description": "Starting line number (0-indexed, default 0).",
+                    # 起始行号（0-indexed，默认 0）。输出使用 1-indexed 行号前缀。
+                    "description": "Starting line number, 0-indexed (default 0). "
+                    "Output uses 1-indexed line number prefixes for display.",
                     "default": 0,
                     "minimum": 0,
                 },
                 "limit": {
                     "type": "integer",
-                    # 最大返回行数（硬上限：100）。
-                    "description": "Maximum number of lines to return (hard cap: 100).",
+                    # 最大返回行数（硬上限：2000）。
+                    "description": "Maximum number of lines to return (default 100, hard cap: 2000).",
                     "default": 100,
                     "minimum": 1,
-                    "maximum": 100,
+                    "maximum": 2000,
                 },
             },
             "required": ["path"],
@@ -190,17 +225,10 @@ registry.register(
     toolset="filesystem",
     schema={
         # 将内容写入文件。路径必须使用命名空间前缀。
-        # 使用 'ws:' 写入 workspace 数据，'fork:' 写入进化代码。
-        # 目录会自动创建。
-        "description": (
-            "Write content to a file. Path must use a namespace prefix. "
-            "Use 'ws:' for workspace data, 'fork:' for evolution code, "
-            "'skills:' for skill files. "
-            "Directories are created automatically. "
-            f"Max {WRITE_FILE_MAX_CHARS} characters per call. "
-            "If rejected for exceeding the limit, do NOT use run_python to write files; "
-            "use edit_file for incremental changes instead."
-        ),
+        # 使用 'ws:' 写入 workspace 数据，'fork:' 写入进化代码，'skills:' 写入 skill 文件。
+        # 目录会自动创建。每次调用最多 {WRITE_FILE_MAX_CHARS} 字符。
+        # 如果因超出限制被拒绝，不要使用 run_python 来写文件；改用 edit_file 进行增量修改。
+        "description": f"""Write content to a file. Path must use a namespace prefix. Use 'ws:' for workspace data, 'fork:' for evolution code, 'skills:' for skill files. Directories are created automatically. Max {WRITE_FILE_MAX_CHARS} characters per call. If rejected for exceeding the limit, do NOT use run_python to write files; use edit_file for incremental changes instead.""",
         "parameters": {
             "type": "object",
             "properties": {
@@ -250,16 +278,10 @@ registry.register(
     toolset="filesystem",
     schema={
         # 将内容追加到文件末尾。路径必须使用命名空间前缀。
-        # 使用 'ws:' 写入 workspace 数据，'fork:' 写入进化代码。
-        # 文件必须已存在，否则报错；如需创建文件请使用 write_file。
-        "description": (
-            "Append content to the end of a file. Path must use a namespace prefix. "
-            "Use 'ws:' for workspace data, 'fork:' for evolution code, "
-            "'skills:' for skill files. "
-            "File must already exist; use write_file to create it first. "
-            f"Max {WRITE_FILE_MAX_CHARS} characters per call. "
-            "If rejected for exceeding the limit, split the append into multiple append_file calls."
-        ),
+        # 使用 'ws:' 写入 workspace 数据，'fork:' 写入进化代码，'skills:' 写入 skill 文件。
+        # 文件必须已存在；先使用 write_file 创建。每次调用最多 {WRITE_FILE_MAX_CHARS} 字符。
+        # 如果因超出限制被拒绝，拆分到多次 append_file 调用中。
+        "description": f"""Append content to the end of a file. Path must use a namespace prefix. Use 'ws:' for workspace data, 'fork:' for evolution code, 'skills:' for skill files. File must already exist; use write_file to create it first. Max {WRITE_FILE_MAX_CHARS} characters per call. If rejected for exceeding the limit, split the append into multiple append_file calls.""",
         "parameters": {
             "type": "object",
             "properties": {
@@ -288,11 +310,8 @@ registry.register(
     name="list_directory",
     toolset="filesystem",
     schema={
-        # 列出目录内容。返回条目名称（非完整路径）。可使用任意命名空间前缀。
-        "description": (
-            "List directory contents. Returns entry names (not full paths). "
-            "Any namespace prefix can be used."
-        ),
+        # 列出目录内容。返回条目名称（非完整路径）。目录条目以 "/" 结尾以便区分。可使用任意命名空间前缀。
+        "description": """List directory contents. Returns entry names (not full paths). Directory entries are suffixed with '/' for easy identification. Any namespace prefix can be used.""",
         # 要列出的目录
         "parameters": _param("directory to list"),
     },
@@ -307,10 +326,7 @@ registry.register(
     toolset="filesystem",
     schema={
         # 删除文件或空目录。仅允许可写命名空间（ws:、fork:、fix:、skills:）。
-        "description": (
-            "Delete a file or empty directory. "
-            "Only writable namespaces are allowed (ws:, fork:, fix:, skills:)."
-        ),
+        "description": """Delete a file or empty directory. Only writable namespaces are allowed (ws:, fork:, fix:, skills:).""",
         # 要删除的文件或目录
         "parameters": _param("file or directory to delete"),
     },
@@ -325,6 +341,7 @@ def _handle_edit(args: dict[str, Any]) -> dict:
     path: str = str(args.get("path", "")).strip()
     old_string: str = str(args.get("old_string", ""))
     new_string: str = str(args.get("new_string", ""))
+    replace_all: bool = bool(args.get("replace_all", False))
 
     if not path:
         return tool_error("path is required")
@@ -356,15 +373,18 @@ def _handle_edit(args: dict[str, Any]) -> dict:
     if old_string not in content:
         return tool_error("old_string not found in file", path=path)
 
-    count: int = content.count(old_string)
-    if count > 1:
-        return tool_error(
-            f"old_string matches {count} locations. Use more surrounding "
-            f"context to make it unique.",
-            path=path, matches=count,
-        )
+    if replace_all:
+        new_content: str = content.replace(old_string, new_string)
+    else:
+        count: int = content.count(old_string)
+        if count > 1:
+            return tool_error(
+                f"old_string matches {count} locations. Use more surrounding "
+                f"context to make it unique, or set replace_all=true.",
+                path=path, matches=count,
+            )
+        new_content = content.replace(old_string, new_string, 1)
 
-    new_content: str = content.replace(old_string, new_string, 1)
     try:
         _s().write(path, new_content)
     except SandboxError as exc:
@@ -377,20 +397,53 @@ registry.register(
     name="edit_file",
     toolset="filesystem",
     schema={
-        # 通过替换文件中一处精确匹配的 old_string 为 new_string 来进行精准编辑。
-        # old_string 必须仅匹配一次 — 包含足够的上下文（前后各 2-3 行）使其唯一。
-        # old_string 和 new_string 各自不能超过 EDIT_FILE_MAX_CHARS 字符，且不能相同。
+        # 通过替换 old_string 为 new_string 来精准编辑文件。
+        # 默认情况下，old_string 必须仅匹配一次 — 包含足够的周围上下文（前后各 2-3 行）使其唯一。
+        # old_string 和 new_string 各自不能超过 {EDIT_FILE_MAX_CHARS} 字符，且不能相同。
         # 仅需修改几行时使用此工具替代 write_file — 避免重新发送整个文件内容。
-        "description": (
-            "Precisely edit a file by replacing one exact match of old_string with new_string. "
-            "old_string must match exactly once — include enough surrounding context "
-            "(2-3 lines before and after) to make it unique. "
-            f"Both old_string and new_string are limited to {EDIT_FILE_MAX_CHARS} characters each "
-            "and must not be identical. "
-            "Use this instead of write_file when only a few lines need changing "
-            "— avoids resending the entire file content. "
-            "For larger changes, make multiple sequential edit_file calls."
-        ),
+        # 如需更大更改，请多次顺序调用 edit_file。
+        #
+        # 使用方式：
+        # - 必须先使用 read_file 查看当前内容及行号。
+        # - 从 read_file 输出中选取 old_string 时，保留行号前缀之后的精确缩进。
+        # - 包含 2-3 行周围上下文以确保唯一匹配。
+        # - 设置 replace_all=true 可替换所有匹配项（跳过唯一性检查）。
+        # - 修改少量行时始终优先使用此工具替代 write_file。
+        #
+        # 参数：
+        #   path:       带命名空间前缀的逻辑路径（ws:/fork:/fix:/skills:）（必需）
+        #   old_string: 要查找并替换的精确文本，最多 {EDIT_FILE_MAX_CHARS} 字符（必需）
+        #   new_string: 替换文本，使用 '' 表示删除，最多 {EDIT_FILE_MAX_CHARS} 字符（必需）
+        #   replace_all: 替换所有匹配项而非仅第一处（默认 false）
+        #
+        # 错误：
+        #   - 文件中未找到 old_string → 编辑失败，返回描述性错误
+        #   - old_string 匹配到 2+ 处（当 replace_all=false 时）→ 编辑失败，
+        #     提示设置 replace_all=true 或添加更多周围上下文
+        #   - 文件不存在 → 提示先使用 write_file 创建
+        #   - 字符串相同 → 无变更，报错
+        "description": f"""Precisely edit a file by replacing old_string with new_string. By default, old_string must match exactly once — include enough surrounding context (2-3 lines before and after) to make it unique. Both old_string and new_string are limited to {EDIT_FILE_MAX_CHARS} characters each and must not be identical. Use this instead of write_file when only a few lines need changing — avoids resending the entire file content. For larger changes, make multiple sequential edit_file calls.
+
+Usage:
+- You must use read_file first to inspect current content with line numbers.
+- When picking old_string from read_file output, preserve exact indentation
+  as it appears AFTER the line number prefix.
+- Include 2-3 lines of surrounding context to ensure a unique match.
+- Set replace_all=true to replace all occurrences (skips uniqueness check).
+- ALWAYS prefer editing existing files over write_file for small changes.
+
+Parameters:
+  path:       Logical path with namespace prefix (ws:/fork:/fix:/skills:) (required)
+  old_string: Exact text to find and replace, max {EDIT_FILE_MAX_CHARS} chars (required)
+  new_string: Replacement text, use '' to delete, max {EDIT_FILE_MAX_CHARS} chars (required)
+  replace_all: Replace all occurrences instead of just one (default false)
+
+Errors:
+  - old_string not found in file → edit fails, return descriptive error
+  - old_string matches 2+ locations (when replace_all=false) → edit fails,
+    tell caller to set replace_all=true or add more surrounding context
+  - File does not exist → error telling caller to use write_file first
+  - Strings identical → error, nothing to change""",
         "parameters": {
             "type": "object",
             "properties": {
@@ -409,6 +462,12 @@ registry.register(
                     # 替换文本（使用 '' 表示删除）。
                     "description": "Replacement text (use '' to delete).",
                 },
+                "replace_all": {
+                    "type": "boolean",
+                    # 如为 true，替换所有匹配项而非仅替换第一处（默认 false）。
+                    "description": "If true, replace ALL occurrences instead of just the first one (default false).",
+                    "default": False,
+                },
             },
             "required": ["path", "old_string", "new_string"],
         },
@@ -425,7 +484,7 @@ registry.register(
     toolset="filesystem",
     schema={
         # 检查文件或目录是否存在（所有命名空间）。
-        "description": "Check if a file or directory exists (all namespaces).",
+        "description": """Check if a file or directory exists (all namespaces).""",
         # 要检查的文件或目录
         "parameters": _param("file or directory to check", required=True),
     },
@@ -453,13 +512,8 @@ registry.register(
     name="copy_file",
     toolset="filesystem",
     schema={
-        # 复制文件。源路径和目标路径均需使用命名空间前缀
-        #（ws:、fork:、fix:、skills:）。支持跨命名空间复制。
-        "description": (
-            "Copy a file. Both source and destination must use "
-            "a namespace prefix (ws:, fork:, fix:, skills:). "
-            "Supports cross-namespace copying."
-        ),
+        # 复制文件。源路径和目标路径均需使用命名空间前缀（ws:、fork:、fix:、skills:）。支持跨命名空间复制。
+        "description": """Copy a file. Both source and destination must use a namespace prefix (ws:, fork:, fix:, skills:). Supports cross-namespace copying.""",
         "parameters": {
             "type": "object",
             "properties": {
@@ -502,14 +556,8 @@ registry.register(
     name="move_file",
     toolset="filesystem",
     schema={
-        # 移动文件或目录。目标路径可以包含新名称，从而实现重命名。
-        # 源和目标路径均需使用命名空间前缀（ws:、fork:、fix:、skills:）。支持跨命名空间移动。
-        "description": (
-            "Move a file or directory. The destination can include a new name, "
-            "effectively renaming. Both source and destination must use "
-            "a namespace prefix (ws:, fork:, fix:, skills:). "
-            "Supports cross-namespace moving."
-        ),
+        # 移动文件或目录。目标路径可以包含新名称，从而实现重命名。源和目标路径均需使用命名空间前缀（ws:、fork:、fix:、skills:）。支持跨命名空间移动。
+        "description": """Move a file or directory. The destination can include a new name, effectively renaming. Both source and destination must use a namespace prefix (ws:, fork:, fix:, skills:). Supports cross-namespace moving.""",
         "parameters": {
             "type": "object",
             "properties": {
@@ -564,13 +612,8 @@ registry.register(
     name="rename_file",
     toolset="filesystem",
     schema={
-        # 重命名文件。在同一目录下将文件更名为新名称，
-        # 路径和命名空间前缀不变。如需跨目录移动，请使用 move_file。
-        "description": (
-            "Rename a file. The file is renamed within the same directory; "
-            "the path and namespace prefix remain unchanged. "
-            "For cross-directory moves, use move_file."
-        ),
+        # 重命名文件。在同一目录下将文件更名为新名称，路径和命名空间前缀不变。如需跨目录移动，请使用 move_file。
+        "description": """Rename a file. The file is renamed within the same directory; the path and namespace prefix remain unchanged. For cross-directory moves, use move_file.""",
         "parameters": {
             "type": "object",
             "properties": {
@@ -645,15 +688,8 @@ registry.register(
     name="search_files",
     toolset="filesystem",
     schema={
-        # 按文件名模式递归搜索目录中的文件。
-        # 返回匹配文件的逻辑路径列表。
-        # 如果结果超过 limit，完整列表写入 ws:logs/ 下的日志文件，仅返回数量和路径。
-        "description": (
-            "Recursively search for files matching a filename pattern in a directory. "
-            "Returns a list of matching logical file paths. "
-            "If results exceed the limit, the full list is written to a log file under ws:logs/ "
-            "and only the count and log path are returned."
-        ),
+        # 按文件名模式递归搜索目录中的文件。返回匹配文件的逻辑路径列表。如果结果超过 limit，完整列表写入 ws:logs/ 下的日志文件，仅返回数量和日志路径。
+        "description": """Recursively search for files matching a filename pattern in a directory. Returns a list of matching logical file paths. If results exceed the limit, the full list is written to a log file under ws:logs/ and only the count and log path are returned.""",
         "parameters": {
             "type": "object",
             "properties": {
@@ -793,17 +829,8 @@ registry.register(
     name="grep",
     toolset="filesystem",
     schema={
-        # 按正则表达式递归搜索目录中文本文件的内容。
-        # 只搜索文本文件，跳过超过 max_file_size 的文件。
-        # 返回匹配项的文件、行号、匹配文本及上下文。
-        # 如果结果超过 limit，完整列表写入 ws:logs/ 下的日志文件，仅返回数量和路径。
-        "description": (
-            "Recursively search text file contents using a regex pattern in a directory. "
-            "Only searches text files and skips files larger than max_file_size. "
-            "Returns matches with file path, line number, matched text, and surrounding context. "
-            "If results exceed the limit, the full list is written to a log file under ws:logs/ "
-            "and only the count and log path are returned."
-        ),
+        # 按正则表达式递归搜索目录中文本文件的内容。只搜索文本文件，跳过超过 max_file_size 的文件。返回匹配项的文件路径、行号、匹配文本及周围上下文。如果结果超过 limit，完整列表写入 ws:logs/ 下的日志文件，仅返回数量和日志路径。
+        "description": """Recursively search text file contents using a regex pattern in a directory. Only searches text files and skips files larger than max_file_size. Returns matches with file path, line number, matched text, and surrounding context. If results exceed the limit, the full list is written to a log file under ws:logs/ and only the count and log path are returned.""",
         "parameters": {
             "type": "object",
             "properties": {
@@ -864,13 +891,8 @@ registry.register(
     name="resolve_path",
     toolset="filesystem",
     schema={
-        # 将逻辑路径解析为绝对路径。路径必须使用命名空间前缀
-        # (fork:、ws:、fix:、skills:)。返回该路径在磁盘上的绝对路径。
-        "description": (
-            "Resolve a logical path to an absolute filesystem path. "
-            "Path must use a namespace prefix (fork:, ws:, fix:, skills:). "
-            "Returns the absolute path on disk."
-        ),
+        # 将逻辑路径解析为绝对路径。路径必须使用命名空间前缀（fork:、ws:、fix:、skills:）。返回该路径在磁盘上的绝对路径。
+        "description": """Resolve a logical path to an absolute filesystem path. Path must use a namespace prefix (fork:, ws:, fix:, skills:). Returns the absolute path on disk.""",
         "parameters": {
             "type": "object",
             "properties": {
@@ -909,14 +931,8 @@ registry.register(
     name="create_folder",
     toolset="filesystem",
     schema={
-        # 创建目录。路径必须使用命名空间前缀
-        # (fork:、ws:、fix:、skills:)。
-        # 默认自动创建所有缺失的父目录（parents=true）。
-        "description": (
-            "Create a directory. Path must use a namespace prefix "
-            "(fork:, ws:, fix:, skills:). "
-            "By default, all missing parent directories are created automatically."
-        ),
+        # 创建目录。路径必须使用命名空间前缀（fork:、ws:、fix:、skills:）。默认自动创建所有缺失的父目录（parents=true）。
+        "description": """Create a directory. Path must use a namespace prefix (fork:, ws:, fix:, skills:). By default, all missing parent directories are created automatically.""",
         "parameters": {
             "type": "object",
             "properties": {
@@ -961,14 +977,8 @@ registry.register(
     name="delete_folder",
     toolset="filesystem",
     schema={
-        # 递归删除目录及其所有内容。路径必须使用命名空间前缀
-        # (fork:、ws:、fix:、skills:)。仅允许可写命名空间。
-        # 危险操作：会删除目录中的所有文件和子目录。
-        "description": (
-            "Recursively delete a directory and all its contents. "
-            "Path must use a writable namespace prefix (ws:, fork:, fix:, skills:). "
-            "DANGEROUS: this removes all files and subdirectories inside the directory."
-        ),
+        # 递归删除目录及其所有内容。路径必须使用可写命名空间前缀（ws:、fork:、fix:、skills:）。危险操作：会删除目录中的所有文件和子目录。
+        "description": """Recursively delete a directory and all its contents. Path must use a writable namespace prefix (ws:, fork:, fix:, skills:). DANGEROUS: this removes all files and subdirectories inside the directory.""",
         "parameters": {
             "type": "object",
             "properties": {
@@ -1007,12 +1017,8 @@ registry.register(
     name="is_file",
     toolset="filesystem",
     schema={
-        # 判断路径是否为文件（不是目录）。路径必须使用命名空间前缀
-        # (fork:、ws:、fix:、skills:)。
-        "description": (
-            "Check whether a path is a file (not a directory). "
-            "Path must use a namespace prefix (fork:, ws:, fix:, skills:)."
-        ),
+        # 判断路径是否为文件（不是目录）。路径必须使用命名空间前缀（fork:、ws:、fix:、skills:）。
+        "description": """Check whether a path is a file (not a directory). Path must use a namespace prefix (fork:, ws:, fix:, skills:).""",
         "parameters": {
             "type": "object",
             "properties": {
@@ -1050,12 +1056,8 @@ registry.register(
     name="is_directory",
     toolset="filesystem",
     schema={
-        # 判断路径是否为目录。路径必须使用命名空间前缀
-        # (fork:、ws:、fix:、skills:)。
-        "description": (
-            "Check whether a path is a directory. "
-            "Path must use a namespace prefix (fork:, ws:, fix:, skills:)."
-        ),
+        # 判断路径是否为目录。路径必须使用命名空间前缀（fork:、ws:、fix:、skills:）。
+        "description": """Check whether a path is a directory. Path must use a namespace prefix (fork:, ws:, fix:, skills:).""",
         "parameters": {
             "type": "object",
             "properties": {
@@ -1093,13 +1095,8 @@ registry.register(
     name="count_lines",
     toolset="filesystem",
     schema={
-        # 返回文件的总行数。路径必须使用命名空间前缀
-        # (fork:、ws:、fix:、skills:)。可配合 read_file 的 offset 使用。
-        "description": (
-            "Return the total number of lines in a file. "
-            "Path must use a namespace prefix (fork:, ws:, fix:, skills:). "
-            "Useful to know file bounds before calling read_file with offset."
-        ),
+        # 返回文件的总行数。路径必须使用命名空间前缀（fork:、ws:、fix:、skills:）。在调用 read_file 的 offset 前先了解文件边界时有用。
+        "description": """Return the total number of lines in a file. Path must use a namespace prefix (fork:, ws:, fix:, skills:). Useful to know file bounds before calling read_file with offset.""",
         "parameters": {
             "type": "object",
             "properties": {
