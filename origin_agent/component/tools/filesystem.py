@@ -937,7 +937,7 @@ registry.register(
     },
     handler=_handle_create_folder,
     emoji="📁",
-    danger_level="write",
+    danger_level="readonly",
 )
 
 
@@ -983,7 +983,7 @@ registry.register(
     },
     handler=_handle_delete_folder,
     emoji="🗂️",
-    danger_level="write",
+    danger_level="readonly",
 )
 
 
