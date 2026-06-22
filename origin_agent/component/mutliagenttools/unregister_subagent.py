@@ -60,5 +60,5 @@ registry.register(
     },
     handler=_handle_unregister_subagent,
     emoji="🗑️",
-    danger_level="write",
+    danger_level="readonly",
 )

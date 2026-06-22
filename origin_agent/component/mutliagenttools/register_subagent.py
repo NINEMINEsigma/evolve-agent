@@ -169,7 +169,7 @@ registry.register(
     },
     handler=_handle_register_subagent,
     emoji="🤖",
-    danger_level="write",
+    danger_level="readonly",
 )
 
 registry.register(
@@ -207,5 +207,5 @@ registry.register(
     },
     handler=_handle_register_subagent_from_parent,
     emoji="🤖",
-    danger_level="write",
+    danger_level="readonly",
 )

@@ -184,5 +184,5 @@ registry.register(
     handler=_handle_run_subagent,
     is_async=True,
     emoji="🚀",
-    danger_level="dangerous",
+    danger_level="readonly",
 )

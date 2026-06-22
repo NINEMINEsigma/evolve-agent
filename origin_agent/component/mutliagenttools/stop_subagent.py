@@ -64,5 +64,5 @@ registry.register(
     handler=_handle_stop_subagent,
     is_async=True,
     emoji="🛑",
-    danger_level="write",
+    danger_level="readonly",
 )
