@@ -14,7 +14,7 @@ from typing import Any, Dict, List
 
 from abstract.tools.registry import registry, tool_error, tool_result
 from component.tools.filesystem import _s as _get_sandbox
-from entity.constant import FFMPEG_DEFAULT_TIMEOUT
+from entity.constant import FFMPEG_DEFAULT_TIMEOUT, SUBPROCESS_SHORT_TIMEOUT_DEFAULT
 from system.sandbox import SandboxError
 
 logger = logging.getLogger(__name__)
@@ -30,7 +30,7 @@ def _ffmpeg_available() -> bool:
         subprocess.run(
             ["ffmpeg", "-version"],
             capture_output=True,
-            timeout=5,
+            timeout=SUBPROCESS_SHORT_TIMEOUT_DEFAULT,
         )
         return True
     except Exception:
@@ -42,7 +42,7 @@ def _ffprobe_available() -> bool:
         subprocess.run(
             ["ffprobe", "-version"],
             capture_output=True,
-            timeout=5,
+            timeout=SUBPROCESS_SHORT_TIMEOUT_DEFAULT,
         )
         return True
     except Exception:

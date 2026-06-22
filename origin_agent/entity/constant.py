@@ -22,8 +22,14 @@ UPLOAD_FILENAME_TIMEZONE = timezone.utc
 # 子进程默认超时（秒）— 用于 pip install、scp 传输、前端构建等子进程调用
 SUBPROCESS_TIMEOUT_DEFAULT: int = 120
 
+# 子进程短超时 (秒) - 用于检查版本的指令等
+SUBPROCESS_SHORT_TIMEOUT_DEFAULT: int = 5
+
+# 子进程软清理等待时间, 到时后强杀进程
+SUBPROCESS_SOFT_CLEANUP_WAIT_TIME: int = 5
+
 # Playwright 页面操作默认超时（毫秒）— 用于 Mermaid/Excalidraw 等浏览器渲染场景
-PLAYWRIGHT_PAGE_TIMEOUT_MS: int = 120_000
+PLAYWRIGHT_PAGE_TIMEOUT_MS: int = 120000
 
 # 审批模型加载等待超时（秒）— 等待本地 GGUF 模型从 loading 变为 ready
 APPROVAL_MODEL_LOAD_TIMEOUT: int = 120
@@ -65,7 +71,13 @@ AUTO_TITLE_CONTENT_MAX: int = 5000
 # 会话合并时直接拼接摘要的字符阈值，超过则截断
 MERGE_CONCAT_THRESHOLD: int = 50000
 
-# 子 Agent 最大工具调用轮次上限 — 复用父 Agent 的 _MAX_TOOL_TURNS 语义，防止死循环
+# 指数退避基数（秒）
+BACKOFF_BASE: float = 1.0
+
+# 所有LLM解析的重试次数
+LLM_RETRY_COUNT: int = 3
+
+# Agent 最大工具调用轮次上限 — 防止死循环
 MAX_TOOL_TURNS: int = 90
 
 # 子 Agent 注册表持久化文件名 — 存放于 workspace/ 下
@@ -100,3 +112,6 @@ SUBAGENT_READONLY_WHITELIST: list[str] = [
 
 # Cron 任务持久化文件名 — 存放于 workspace/ 下
 CRON_STORE_FILENAME: str = "cron_jobs.json"
+
+# 会话索引文件名
+SESSION_INDEX_FILENAME: str = "_sessions.json"

@@ -14,6 +14,8 @@ from typing import Any, Dict, List
 from fastapi import FastAPI, HTTPException
 from system.pathutils import get_agent_dir, get_template_path
 
+from entity.constant import SESSION_INDEX_FILENAME
+
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
@@ -101,7 +103,7 @@ def _list_memory_sessions() -> list[dict[str, Any]]:
     if not memory_dir.exists():
         return result
     try:
-        idx_path: Path = memory_dir / "_sessions.json"
+        idx_path: Path = memory_dir / SESSION_INDEX_FILENAME
         if idx_path.exists():
             idx: dict = json.loads(idx_path.read_text(encoding="utf-8"))
             sessions: list = idx.get("sessions", []) if isinstance(idx, dict) else []

@@ -63,7 +63,7 @@ async def _handle_ssh_exec(args: dict[str, Any]) -> dict:
     target: str = str(args.get("target", "")).strip()
     command: str = str(args.get("command", "")).strip()
     port: int = int(args.get("port", 22))
-    timeout: int = int(args.get("timeout", 30))
+    timeout: int = int(args.get("timeout", SUBPROCESS_TIMEOUT_DEFAULT))
     reason: str = str(args.get("reason", "")).strip()
 
     # --- 校验 ---
@@ -300,9 +300,9 @@ registry.register(
                 },
                 "timeout": {
                     "type": "integer",
-                    # 命令执行超时秒数（默认 30）。
-                    "description": "Command execution timeout in seconds (default 30).",
-                    "default": 30,
+                    # 命令执行超时秒数（默认 SUBPROCESS_TIMEOUT_DEFAULT）。
+                    "description": "Command execution timeout in seconds.",
+                    "default": SUBPROCESS_TIMEOUT_DEFAULT,
                 },
                 "reason": {
                     "type": "string",

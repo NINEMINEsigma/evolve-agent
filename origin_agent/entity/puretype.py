@@ -13,3 +13,9 @@ class Role(str, Enum):
     ASSISTANT = "assistant"
     SYSTEM = "system"
     TOOL = "tool"
+
+
+class ToolDangerLevel(str, Enum):
+    readonly = "readonly"
+    write = "write"
+    dangerous = "dangerous"

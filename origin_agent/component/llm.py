@@ -21,14 +21,9 @@ import openai
 from pydantic import BaseModel, ConfigDict
 
 from system.context import RuntimeContext
-from entity.constant import TOOL_RESULT_PREVIEW_CHARS
+from entity.constant import TOOL_RESULT_PREVIEW_CHARS, LLM_RETRY_COUNT, BACKOFF_BASE
 
 logger = logging.getLogger(__name__)
-
-# 对 transient 网络错误的最大重试次数
-_MAX_RETRIES = 3
-# 指数退避基数（秒）
-_BACKOFF_BASE = 1.0
 
 
 # ---------------------------------------------------------------------------
@@ -139,7 +134,7 @@ class LLMClient:
         """发送聊天请求，返回结构化响应。
 
         对 transient 网络错误（连接中断、超时、限流、5xx）
-        自动进行指数退避重试，最多 ``_MAX_RETRIES`` 次。
+        自动进行指数退避重试，最多 ``LLM_RETRY_COUNT`` 次。
 
         *messages* 为 OpenAI 格式的消息字典列表
         （``{"role": "...", "content": "..."}``）。
@@ -149,7 +144,7 @@ class LLMClient:
         """
         kwargs = self._build_kwargs(messages, tools, stream=False)
 
-        for attempt in range(_MAX_RETRIES):
+        for attempt in range(LLM_RETRY_COUNT):
             try:
                 completion: Any = await self._client.chat.completions.create(**kwargs)
                 if not completion.choices:
@@ -181,15 +176,15 @@ class LLMClient:
                 openai.RateLimitError,
                 openai.InternalServerError,
             ) as exc:
-                if attempt < _MAX_RETRIES - 1:
-                    wait: float = _BACKOFF_BASE * (2 ** attempt)
+                if attempt < LLM_RETRY_COUNT - 1:
+                    wait: float = BACKOFF_BASE * (2 ** attempt)
                     logger.warning(
                         "LLM transient error (attempt %d/%d): %s. Retrying in %.1fs...",
-                        attempt + 1, _MAX_RETRIES, exc, wait,
+                        attempt + 1, LLM_RETRY_COUNT, exc, wait,
                     )
                     await asyncio.sleep(wait)
                 else:
-                    logger.error("LLM transient error exhausted all %d retries: %s", _MAX_RETRIES, exc)
+                    logger.error("LLM transient error exhausted all %d retries: %s", LLM_RETRY_COUNT, exc)
                     raise exc
             except Exception:
                 # 非 transient 异常（如认证失败、BadRequestError 等）立即抛出
@@ -209,7 +204,7 @@ class LLMClient:
         """
         kwargs = self._build_kwargs(messages, tools, stream=True)
 
-        for attempt in range(_MAX_RETRIES):
+        for attempt in range(LLM_RETRY_COUNT):
             try:
                 async with await self._client.chat.completions.create(**kwargs) as stream:
                     content_buffer: str = ""
@@ -309,15 +304,15 @@ class LLMClient:
                 openai.RateLimitError,
                 openai.InternalServerError,
             ) as exc:
-                if attempt < _MAX_RETRIES - 1:
-                    wait: float = _BACKOFF_BASE * (2 ** attempt)
+                if attempt < LLM_RETRY_COUNT - 1:
+                    wait: float = BACKOFF_BASE * (2 ** attempt)
                     logger.warning(
                         "LLM stream transient error (attempt %d/%d): %s. Retrying in %.1fs...",
-                        attempt + 1, _MAX_RETRIES, exc, wait,
+                        attempt + 1, LLM_RETRY_COUNT, exc, wait,
                     )
                     await asyncio.sleep(wait)
                 else:
-                    logger.error("LLM stream transient error exhausted all %d retries: %s", _MAX_RETRIES, exc)
+                    logger.error("LLM stream transient error exhausted all %d retries: %s", LLM_RETRY_COUNT, exc)
                     yield StreamChunk(error=f"{exc}")
                     return
             except openai.APIStatusError as exc:

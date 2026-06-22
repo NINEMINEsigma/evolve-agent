@@ -21,6 +21,7 @@ from typing import Any, Dict, List
 
 from abstract.tools.registry import registry, tool_error, tool_result
 from system.sandbox import Access, SandboxError
+from entity.constant import SUBPROCESS_TIMEOUT_DEFAULT
 
 logger = logging.getLogger(__name__)
 
@@ -43,7 +44,7 @@ async def _handle_run_python(args: dict[str, Any]) -> dict:
     extra_args: list[str] = [str(a) for a in args.get("args", [])]
     python_path: str = str(args.get("python_path", "")).strip()
     cwd: str = str(args.get("cwd", "ws:")).strip()
-    timeout: int = int(args.get("timeout", 60))
+    timeout: int = int(args.get("timeout", SUBPROCESS_TIMEOUT_DEFAULT))
 
     if not code and not script:
         return tool_error("Either 'code' or 'script' is required")
@@ -79,7 +80,7 @@ async def _handle_run_python(args: dict[str, Any]) -> dict:
     return _execute(cmd_parts, cwd, timeout)
 
 
-def _execute(cmd_parts: list[str], cwd: str, timeout: int = 60) -> dict:
+def _execute(cmd_parts: list[str], cwd: str, timeout: int = SUBPROCESS_TIMEOUT_DEFAULT) -> dict:
     """执行已批准的命令并返回结果。"""
     logger.info("run_python | cwd=%s cmd=%s", cwd, cmd_parts)
     result: subprocess.CompletedProcess
@@ -164,9 +165,9 @@ registry.register(
                 },
                 "timeout": {
                     "type": "integer",
-                    # 超时秒数（默认 60，最大 300）。
-                    "description": "Timeout in seconds (default 60, max 300).",
-                    "default": 60,
+                    # 超时秒数（默认 SUBPROCESS_TIMEOUT_DEFAULT，最大 300）。
+                    "description": "Timeout in seconds.",
+                    "default": SUBPROCESS_TIMEOUT_DEFAULT,
                 },
             },
             "required": ["reason"],

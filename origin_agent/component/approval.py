@@ -29,7 +29,7 @@ import openai
 from pydantic import BaseModel
 
 from component.llm import LLMClient
-from entity.constant import APPROVAL_MODEL_LOAD_TIMEOUT, APPROVAL_WAIT_TIMEOUT
+from entity.constant import APPROVAL_MODEL_LOAD_TIMEOUT, APPROVAL_WAIT_TIMEOUT, LLM_RETRY_COUNT
 from entity.puretype import Role
 
 if TYPE_CHECKING:
@@ -376,14 +376,13 @@ async def _handsfree_confirm(
 
     dialog_turn = 0
     last_error: str | None = None
-    max_attempts = 3
 
     while dialog_turn <= max_dialog_turns:
         current_messages = list(messages)
         last_error = None
         resp_content: str | None = None
 
-        for attempt in range(1, max_attempts + 1):
+        for attempt in range(1, LLM_RETRY_COUNT + 1):
             try:
                 resp_content = await backend.chat(current_messages, json_schema=APPROVAL_JSON_SCHEMA)
                 result: dict = cast(dict, dirtyjson.loads(resp_content))
@@ -442,9 +441,9 @@ async def _handsfree_confirm(
                 resp_content = locals().get("resp_content", "<not available>")
                 logger.warning(
                     "Handsfree approval attempt %d/%d failed: %s | resp=%r",
-                    attempt, max_attempts, exc, resp_content,
+                    attempt, LLM_RETRY_COUNT, exc, resp_content,
                 )
-                if attempt < max_attempts:
+                if attempt < LLM_RETRY_COUNT:
                     _ct = (get_templates_dir() / "approval" / "correction_hint.md").read_text(encoding="utf-8")
                     current_messages.append({
                         "role": "user",

@@ -12,6 +12,8 @@ import sys
 from pathlib import Path
 from typing import Any, Dict, List
 
+from entity.constant import SESSION_INDEX_FILENAME
+
 # 确保 third/ 可导入
 from system.pathutils import find_repo_root
 
@@ -52,7 +54,7 @@ class EasysaveMemoryProvider(MemoryProvider):
     def initialize(self, session_id: str, **kwargs: Any) -> None:
         self._session_id = session_id
         # 加载或创建 session 索引
-        idx_path: Path = self._dir / "_sessions.json"
+        idx_path: Path = self._dir / SESSION_INDEX_FILENAME
         try:
             self._index = load("_sessions", str(idx_path)) or {}
         except Exception:
@@ -122,7 +124,7 @@ class EasysaveMemoryProvider(MemoryProvider):
         # 更新索引
         sessions: list = list(set(self._index.get("sessions", []) + [sid]))
         self._index["sessions"] = sessions
-        idx_path: Path = self._dir / "_sessions.json"
+        idx_path: Path = self._dir / SESSION_INDEX_FILENAME
         try:
             save("_sessions", str(idx_path), self._index)
         except Exception:

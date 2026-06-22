@@ -17,6 +17,7 @@ import logging
 from evolve.validator import validate_directory, summary
 from system.sandbox import Sandbox
 from typing import Any
+from entity.constant import SUBPROCESS_TIMEOUT_DEFAULT
 
 logger = logging.getLogger(__name__)
 
@@ -28,7 +29,7 @@ def finalize_evolution(
     sandbox: Sandbox,
     *,
     deep: bool = True,
-    compile_timeout: int = 30,
+    compile_timeout: int = SUBPROCESS_TIMEOUT_DEFAULT,
 ) -> dict:
     """验证 fork 目录，所有检查通过后触发热替换。
 

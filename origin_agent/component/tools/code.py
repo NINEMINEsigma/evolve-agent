@@ -13,7 +13,7 @@ import subprocess  # nosec
 from typing import Any, Dict, List
 
 from abstract.tools.registry import registry, tool_error, tool_result
-from entity.constant import WRITE_FILE_MAX_CHARS
+from entity.constant import WRITE_FILE_MAX_CHARS, SUBPROCESS_TIMEOUT_DEFAULT
 from system.sandbox import Access, SandboxError, ResolvedPath
 
 logger = logging.getLogger(__name__)
@@ -203,7 +203,7 @@ def _handle_evolve_code(args: dict[str, Any]) -> dict:
     from evolve.code import finalize_evolution
 
     deep: bool = bool(args.get("deep", True))
-    compile_timeout: int = int(args.get("compile_timeout", 30))
+    compile_timeout: int = int(args.get("compile_timeout", SUBPROCESS_TIMEOUT_DEFAULT))
 
     try:
         return finalize_evolution(
@@ -356,8 +356,8 @@ registry.register(
                 },
                 "compile_timeout": {
                     "type": "integer",
-                    # 每个文件编译检查的超时秒数（默认 30）。
-                    "description": "Timeout per file for compile check in seconds (default 30).",
+                    # 每个文件编译检查的超时秒数（默认 SUBPROCESS_TIMEOUT_DEFAULT）。
+                    "description": "Timeout per file for compile check in seconds.",
                 },
             },
         },

@@ -23,7 +23,7 @@ from pathlib import Path
 from typing import Any, Dict, List
 
 from abstract.tools.registry import registry, tool_error, tool_result
-from entity.constant import NAMESPACE_PREFIXES
+from entity.constant import NAMESPACE_PREFIXES, SUBPROCESS_SOFT_CLEANUP_WAIT_TIME
 
 logger = logging.getLogger(__name__)
 
@@ -190,7 +190,7 @@ async def _handle_stop_background_service(args: dict[str, Any]) -> dict:
         # 等待进程退出
         proc = task["proc"]
         try:
-            proc.wait(timeout=5)
+            proc.wait(timeout=SUBPROCESS_SOFT_CLEANUP_WAIT_TIME)
         except subprocess.TimeoutExpired:
             logger.warning("Process %d did not exit within 5s after kill", pid)
 
@@ -225,7 +225,7 @@ def cleanup_background_services() -> int:
         try:
             _kill_proc_tree(pid)
             try:
-                proc.wait(timeout=5)
+                proc.wait(timeout=SUBPROCESS_SOFT_CLEANUP_WAIT_TIME)
             except subprocess.TimeoutExpired:
                 logger.warning(
                     "Background service %s (pid=%d) did not exit within 5s after kill",
@@ -285,7 +285,7 @@ def stop_background_task(task_id: str) -> dict[str, Any]:
         _kill_proc_tree(pid)
         proc = task["proc"]
         try:
-            proc.wait(timeout=5)
+            proc.wait(timeout=SUBPROCESS_SOFT_CLEANUP_WAIT_TIME)
         except subprocess.TimeoutExpired:
             logger.warning("Process %d did not exit within 5s after kill", pid)
         return {"stopped": True, "task_id": task_id, "pid": pid, "message": f"已停止 (task_id={task_id}, pid={pid})"}

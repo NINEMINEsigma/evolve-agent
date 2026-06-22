@@ -19,6 +19,7 @@ from typing import Any, Dict, List
 
 from abstract.tools.registry import registry, tool_error, tool_result
 from component.tools.filesystem import _s as _get_sandbox
+from entity.constant import SUBPROCESS_SHORT_TIMEOUT_DEFAULT
 
 logger = logging.getLogger(__name__)
 
@@ -62,7 +63,7 @@ def _resolve_ab_cmd() -> str | None:
     try:
         proc = subprocess.run(
             ["pnpm", "exec", "agent-browser", "--version"],
-            capture_output=True, text=True, timeout=15,
+            capture_output=True, text=True, timeout=SUBPROCESS_SHORT_TIMEOUT_DEFAULT,
         )
         if proc.returncode == 0:
             global _AB_USE_PNPM_EXEC
@@ -112,7 +113,7 @@ def _resolve_ab_cmd() -> str | None:
     try:
         proc = subprocess.run(
             ["npx", "--no-install", "agent-browser", "--version"],
-            capture_output=True, text=True, timeout=15,
+            capture_output=True, text=True, timeout=SUBPROCESS_SHORT_TIMEOUT_DEFAULT,
         )
         if proc.returncode == 0:
             # npx found it — subsequent calls will use npx too
