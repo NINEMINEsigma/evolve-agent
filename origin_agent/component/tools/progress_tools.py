@@ -104,37 +104,75 @@ registry.register(
     name="set_task_progress",
     toolset="progress",
     schema={
-        # Create or update a progress bar on the frontend to visualize the current task status.
-        # Use this tool to keep the user informed about long-running operations (e.g., downloads, installations, builds).
-        # The same task_id will overwrite the existing progress bar.
-        # Returns the current progress metadata including computed percentage.
-        "description": """Create or update a progress bar on the frontend to visualize the current task status.
-Use this tool to keep the user informed about long-running operations (e.g., downloads, installations, builds).
-The same task_id will overwrite the existing progress bar.
+        # 创建或更新前端进度条以可视化当前任务状态。
+        # 任何可拆分为离散阶段的串行任务都应积极使用此工具（多文件编辑、批量下载、分步构建、多阶段操作）。
+        #
+        # ## 调用效果
+        # 创建或更新一个由 `task_id` 标识的进度条。复用同一 `task_id` 会覆盖已有进度条。百分比自动计算为 `current / total * 100`，上限 100%。
+        #
+        # ## 返回
+        # ```json
+        # {"task_id": "...", "label": "...", "current": 3, "total": 10, "percent": 30.0, "status": "running"}
+        # ```
+        #
+        # ## 何时使用
+        # - 任何可拆分为离散阶段的串行任务（多文件编辑、批量下载、分步构建、多阶段操作）。
+        # - 增量反馈能降低用户不确定性的长时间操作。
+        #
+        # ## 副作用/注意
+        # - 任务确定结束后应调用 `clear_task_progress` 清理进度条。
+        # - 进度条限定在会话范围内，会话结束时自动清除。
+        # - `current` 被 clamp 到 >= 0；`total` 必须 > 0。
+        # - 若 `label` 为空，`task_id` 被用作显示标签。
+        # - `status` 省略时默认为 'running'。
+        "description": """Create or update a frontend progress bar to visualize the current task status.
+This tool SHOULD be used proactively for any serial task that can be divided into discrete stages (multi-file edits, batch downloads, step-by-step builds, multi-phase operations).
 
-Returns the current progress metadata including computed percentage.""",
+## Effect
+Creates or updates a progress bar identified by `task_id`. Reusing the same `task_id` overwrites the previous bar. Percentage is auto-computed as `current / total * 100`, capped at 100%.
+
+## Returns
+```json
+{"task_id": "...", "label": "...", "current": 3, "total": 10, "percent": 30.0, "status": "running"}
+```
+
+## When to Use
+- Any serial task that can be divided into discrete stages (multi-file edits, batch downloads, step-by-step builds, multi-phase operations).
+- Long-running operations where incremental feedback reduces user uncertainty.
+
+## Side Effects / Notes
+- After the task is confirmed complete, call `clear_task_progress` to clean up the progress bar.
+- Progress bars are session-scoped and auto-cleared when the session ends.
+- `current` is clamped to >= 0; `total` must be > 0.
+- If `label` is empty, `task_id` is used as the display label.
+- `status` defaults to 'running' if omitted.""",
         "parameters": {
             "type": "object",
             "properties": {
                 "task_id": {
                     "type": "string",
-                    "description": """Unique identifier for this progress bar. Reusing the same ID updates it.""",
+                    # 此进度条的唯一标识。复用同一 ID 更新已有进度条。必须非空。
+                    "description": """Unique identifier for this progress bar. Reusing the same ID updates the existing bar. Must be non-empty.""",
                 },
                 "label": {
                     "type": "string",
-                    "description": """Human-readable title/description of the task.""",
+                    # 前端进度条上显示的标题。为空或省略时回退为 task_id。
+                    "description": """Display title shown on the frontend bar. Falls back to task_id if empty or omitted.""",
                 },
                 "current": {
                     "type": "integer",
-                    "description": """Current completed amount (integer).""",
+                    # 已完成单元数。非负整数；负值被 clamp 到 0。
+                    "description": """Number of completed units. Non-negative integer; negative values are clamped to 0.""",
                 },
                 "total": {
                     "type": "integer",
-                    "description": """Total expected amount (integer, must be > 0).""",
+                    # 预期总单元数。必须为正整数（> 0）。
+                    "description": """Total number of units expected. Must be a positive integer (> 0).""",
                 },
                 "status": {
                     "type": "string",
-                    "description": """Optional status text, e.g. 'downloading', 'compiling', 'waiting'.""",
+                    # 可选状态文本（如 'downloading'、'compiling'）。默认为 'running'。
+                    "description": """Optional status text (e.g. 'downloading', 'compiling'). Defaults to 'running'.""",
                 },
             },
             "required": ["task_id", "label", "current", "total"],
@@ -150,19 +188,57 @@ registry.register(
     name="clear_task_progress",
     toolset="progress",
     schema={
-        # Remove a progress bar from the frontend.
-        # If task_id is omitted, all progress bars for the current session are cleared.
-        # Returns the list of cleared task IDs.
-        "description": """Remove a progress bar from the frontend.
-If task_id is omitted, all progress bars for the current session are cleared.
+        # 从当前会话移除一个或全部进度条。
+        # 提供 `task_id` 则仅移除该进度条；省略或为空则移除当前会话全部进度条。
+        #
+        # ## 前置条件
+        # 当前会话中应存在对应的进度条。调用不存在的 `task_id` 不报错（no-op）。
+        #
+        # ## 调用效果
+        # 若提供了 `task_id` 且非空，仅移除该特定进度条。若省略或为空，移除当前会话的全部进度条。
+        #
+        # ## 返回
+        # ```json
+        # {"success": true, "cleared": ["task_1"], "message": "Cleared progress: task_1"}
+        # ```
+        #
+        # ## 何时使用
+        # - 任务确定完成后清理关联的进度条。
+        # - 任务取消或中止后移除残留的进度指示。
+        # - 开始新阶段时清除全部进度条以重置界面。
+        #
+        # ## 副作用/注意
+        # - 清除不存在的 `task_id` 为 no-op（不返回错误）。
+        # - 进度条在会话结束时自动清除；显式调用仍推荐用于即时界面清理。
+        "description": """Remove one or all progress bars from the current session.
+Provide `task_id` to remove only that bar; omit or leave empty to remove all progress bars for the current session.
 
-Returns the list of cleared task IDs.""",
+## Prerequisites
+The corresponding progress bar should exist in the current session. Calling with a non-existent `task_id` is a no-op (no error returned).
+
+## Effect
+If `task_id` is provided and non-empty, removes only that specific bar. If omitted or empty, removes ALL progress bars for the current session.
+
+## Returns
+```json
+{"success": true, "cleared": ["task_1"], "message": "Cleared progress: task_1"}
+```
+
+## When to Use
+- After a task is confirmed complete, clean up the associated progress bar.
+- After a task is cancelled or aborted, remove stale progress indicators.
+- When starting a new phase, clear all bars to reset the UI.
+
+## Side Effects / Notes
+- Clearing a non-existent `task_id` is a no-op (no error returned).
+- Progress bars are auto-cleared when the session ends; explicit calls are still recommended for immediate UI cleanup.""",
         "parameters": {
             "type": "object",
             "properties": {
                 "task_id": {
                     "type": "string",
-                    "description": """task_id of the progress bar to clear. Omit to clear all.""",
+                    # 要清除的进度条标识。省略或为空则清除当前会话全部进度条。
+                    "description": """Identifier of the progress bar to clear. Omit or leave empty to clear all progress bars for the current session.""",
                 },
             },
             "required": [],

@@ -16,22 +16,25 @@ todos:
     status: completed
   - id: progress-tools
     content: progress_tools.py — set_task_progress, clear_task_progress
-    status: pending
+    status: completed
   - id: probe-vision
     content: probe_vision.py — probe_vision_capability
-    status: pending
+    status: completed
   - id: run-python
     content: run_python.py — run_python
-    status: pending
+    status: completed
   - id: shell-command
     content: shell.py — run_command
-    status: pending
+    status: completed
   - id: skills
     content: skills.py — 7 个工具
-    status: pending
+    status: completed
   - id: filesystem
-    content: filesystem.py — 18 个工具
+    content: filesystem.py — read_file, write_file, append_file 完成（共 18 个工具）
     status: pending
+  - id: constant-refactor
+    content: constant.py — 常量文件重新分区整理
+    status: completed
   - id: extools
     content: component/extools/ — 全部扩展工具
     status: pending

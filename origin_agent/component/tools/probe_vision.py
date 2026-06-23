@@ -168,17 +168,84 @@ registry.register(
         "type": "function",
         "function": {
             "name": "probe_vision_capability",
-            # Test whether the current LLM model supports image/vision input using a minimal dummy image probe (1x1 PNG).
-            # No conversation history is included.
-            # Call this when the model changes or when you need to confirm vision capability.
-            "description": """Test whether the current LLM model supports image/vision input using a minimal dummy image probe (1x1 PNG). No conversation history is included. Call this when the model changes or when you need to confirm vision capability.""",
+            # 通过发送一张最小 dummy 图片（1x1 透明 PNG）测试当前 LLM 模型是否支持图片/vision 输入。
+            # 结果缓存到本地 JSON 文件，同一模型后续调用直接返回缓存结果，不消耗 API 请求。
+            #
+            # ## 前置条件
+            # 必须已配置 LLM 模型（RuntimeContext.llm_model 非空）。
+            #
+            # ## 调用效果
+            # 若缓存命中且 force=false，立即返回缓存结果。
+            # 若缓存未命中或 force=true，发送一次含 1x1 透明 PNG 的 chat 请求探测。
+            # - API 接受请求 → 模型支持 vision → 结果缓存为 capable=true。
+            # - API 以 vision 相关关键词拒绝图片内容块 → 结果缓存为 capable=false。
+            # - API 因非 vision 错误（网络、认证、超时）失败 → 不写缓存，工具返回错误。
+            #
+            # ## 返回
+            # 成功时：
+            # ```json
+            # {"capable": true, "model": "gpt-4o", "source": "probe|cache", "message": "..."}
+            # ```
+            # vision 拒绝时：
+            # ```json
+            # {"capable": false, "model": "gpt-4o", "source": "probe", "message": "..."}
+            # ```
+            # 非 vision 错误时：
+            # ```json
+            # {"error": "...", "model": "gpt-4o"}
+            # ```
+            #
+            # ## 何时使用
+            # - 模型变更后确认 vision 能力。
+            # - 调用图片相关工具（read_image 等）前验证模型不会拒绝图片内容。
+            #
+            # ## 副作用/注意
+            # - 每次未缓存的探测消耗恰好一次 API 请求。
+            # - 缓存持久化到本地 JSON 文件（vision_capability_cache.json），跨会话保留直到运行时工作空间重置。
+            # - 非 vision 错误（网络、认证、超时）不写入缓存，agent 可重试。
+            "description": """Test whether the current LLM model supports image/vision input by sending a minimal dummy image (1x1 transparent PNG).
+Results are cached to a local JSON file; subsequent calls for the same model return the cached result immediately without consuming an API request.
+
+## Prerequisites
+An LLM model must be configured (RuntimeContext.llm_model must be non-empty).
+
+## Effect
+If a cached result exists and `force` is false, returns the cached result immediately.
+If no cache exists or `force` is true, sends a single chat request with a 1x1 transparent PNG.
+- API accepts the request → model supports vision → result cached as `capable=true`.
+- API rejects the image content block with vision-related keywords → result cached as `capable=false`.
+- API fails with a non-vision error (network, auth, timeout) → no cache written, tool returns error.
+
+## Returns
+On success:
+```json
+{"capable": true, "model": "gpt-4o", "source": "probe|cache", "message": "..."}
+```
+On vision rejection:
+```json
+{"capable": false, "model": "gpt-4o", "source": "probe", "message": "..."}
+```
+On non-vision error:
+```json
+{"error": "...", "model": "gpt-4o"}
+```
+
+## When to Use
+- After the model changes, confirm vision capability.
+- Before calling image-based tools (read_image, etc.), verify the model won't reject image content.
+
+## Side Effects / Notes
+- Each uncached probe consumes exactly one API request.
+- Cache is persisted to a local JSON file (vision_capability_cache.json) and survives sessions until the runtime workspace is reset.
+- Non-vision errors (network, auth, timeout) are NOT cached; the agent can retry.""",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "force": {
                         "type": "boolean",
                         "default": False,
-                        "description": """Force re-probe even if a cached result exists.""",
+                        # 若为 true，即使缓存中已有结果也重新探测。默认 false。
+                        "description": """If true, re-probe the model even when a cached result already exists. Default: false.""",
                     },
                 },
             },

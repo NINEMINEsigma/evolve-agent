@@ -94,26 +94,71 @@ registry.register(
     name="run_command",
     toolset="shell",
     schema={
-        # 在 workspace 中执行 shell 命令。
-        # 用户将被提示批准（允许一次）、永久信任（始终允许）或拒绝该命令。
-        # 之前以'始终允许'批准的命令跳过提示。
-        # 始终包含 'reason' 解释命令的用途。
-        # 用于安装软件包、运行测试或其他 shell 专用任务。
-        # 不得使用此工具读取或检查文件；请使用 read_file 代替。
-        "description": """Execute shell commands in the workspace. The user will be prompted to approve (allow once), permanently trust (always allow), or deny the command. Commands previously approved with 'always allow' skip the prompt. Always include 'reason' explaining the command's purpose. Useful for installing packages, running tests, or other shell-specific tasks. DO NOT use this tool to read or inspect files; use read_file instead.""",
+        # 在沙箱中执行 shell 命令。
+        #
+        # ## 前置条件
+        # 首次使用前必须向用户详细说明此工具的用途和风险，并询问用户明确意见（允许/禁止/条件允许）。
+        # 禁止使用此工具替代沙箱已有的文件读写和搜索操作（如 read_file、write_file、grep 等）。
+        # 禁止用于执行安装命令（pip install、npm install 等）或需要较长时间运行的测试，此工具默认 30 秒超时。
+        #
+        # ## 调用效果
+        # 命令中的沙箱逻辑路径（`ws:`、`fork:` 等前缀）会被自动展开为真实绝对路径后执行。
+        # 执行结果（stdout/stderr/exit_code）直接返回。
+        # 每次调用需用户审批（允许一次/总是允许/拒绝）。总是允许的审批由统一工具白名单层持久化。
+        #
+        # ## 返回
+        # ```json
+        # {"exit_code": 0, "stdout": "...", "stderr": "...", "command": ["git", "status"]}
+        # ```
+        #
+        # ## 何时使用
+        # - 执行版本控制操作（git 命令）。
+        # - 其他无法通过内置工具完成且能在 30 秒内完成的 shell 操作。
+        #
+        # ## 副作用/注意
+        # - 错误调用可对整台机器造成毁灭性打击。
+        # - 禁止用于替代沙箱已有的文件读写和搜索操作（read_file、write_file、grep、glob 等），这些操作有更安全的内置工具。
+        # - 禁止用于安装命令或长流程测试，默认 30 秒超时。
+        # - 默认工作目录为 `ws:`（agentspace）。
+        "description": """Execute shell commands in the sandbox.
+
+## Prerequisites
+Before the first use, the agent MUST explain this tool's purpose and risks to the user in detail and ask for explicit consent (allow / deny / conditional allow).
+Do NOT use this tool to replace sandbox file I/O and search operations (read_file, write_file, grep, glob, etc.).
+Do NOT use this tool for install commands (pip install, npm install, etc.) or long-running tests; it has a default 30-second timeout.
+
+## Effect
+Sandbox logical paths in the command (`ws:`, `fork:` prefixes) are automatically resolved to real absolute paths before execution.
+Execution results (stdout/stderr/exit_code) are returned directly.
+Each invocation requires user approval (allow once / always allow / deny). Always-allow approvals are persisted by the unified tool allowlist layer.
+
+## Returns
+```json
+{"exit_code": 0, "stdout": "...", "stderr": "...", "command": ["git", "status"]}
+```
+
+## When to Use
+- Perform version control operations (git commands).
+- Other shell operations that cannot be accomplished with built-in tools and complete within 30 seconds.
+
+## Side Effects / Notes
+- Misuse can cause catastrophic damage to the entire machine.
+- Do NOT use this tool to replace sandbox file I/O and search operations (read_file, write_file, grep, glob, etc.); those have safer built-in tools.
+- Do NOT use this tool for install commands or long-running tests; default timeout is 30 seconds.
+- Default working directory is `ws:` (agentspace).""",
         "parameters": {
             "type": "object",
             "properties": {
                 "command": {
                     "type": "array",
                     "items": {"type": "string"},
-                    # 命令及参数列表，例如 ['pip', 'install', 'requests']。
-                    "description": "Command and argument list, e.g. ['pip', 'install', 'requests'].",
+                    # 命令及参数列表，例如 ['git', 'status']。
+                    "description": "Command and argument list, e.g. ['git', 'status'].",
                 },
                 "reason": {
                     "type": "string",
-                    # agent 需要执行此命令的原因。
-                    "description": "The reason the agent needs to execute this command.",
+                    # agent 需要执行此命令的原因（用于审批提示）。
+                    "description": "The reason the agent needs to execute this command (shown in the approval prompt).",
                 },
                 "cwd": {
                     "type": "string",

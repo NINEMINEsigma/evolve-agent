@@ -20,7 +20,7 @@ from datetime import datetime, timezone
 from typing import Any, Dict
 
 from abstract.tools.registry import registry, tool_error, tool_result
-from entity.constant import EDIT_FILE_MAX_CHARS, FILE_SNIFF_BYTES, WRITE_FILE_MAX_CHARS
+from entity.constant import EDIT_FILE_MAX_CHARS, FILE_SNIFF_BYTES, READ_FILE_DEFAULT_LIMIT, READ_FILE_MAX_LINES, WRITE_FILE_MAX_CHARS, WRITE_FILE_TRUNCATION_TAIL
 from system.sandbox import Access, Sandbox, SandboxError
 
 logger = logging.getLogger(__name__)
@@ -49,20 +49,26 @@ def _handle_read(args: dict[str, Any]) -> dict:
     if not path:
         return tool_error("path is required", path=path)
     offset: int = int(args.get("offset", 0))
-    limit: int = int(args.get("limit", 100))
+    limit: int = int(args.get("limit", READ_FILE_DEFAULT_LIMIT))
     if offset < 0:
         return tool_error("offset must be >= 0", path=path, offset=offset)
     if limit < 1:
         return tool_error("limit must be >= 1", path=path, limit=limit)
-    if limit > 2000:
-        limit = 2000
+    if limit > READ_FILE_MAX_LINES:
+        limit = READ_FILE_MAX_LINES
     try:
         content: str = _s().read(path, offset=offset, limit=limit)
         lines: list[str] = content.splitlines()
         numbered: str = "\n".join(
             f"{offset + i + 1}: {line}" for i, line in enumerate(lines)
         )
-        return tool_result(content=numbered, path=path, offset=offset, limit=limit)
+        total: int = _s().count_lines(path)
+        last_line: int = offset + len(lines)
+        remaining: int = max(0, total - last_line)
+        return tool_result(
+            content=numbered, path=path, offset=offset, limit=limit,
+            total_lines=total, remaining=remaining,
+        )
     except SandboxError as exc:
         return tool_error(str(exc), path=path)
 
@@ -72,16 +78,30 @@ def _handle_write(args: dict[str, Any]) -> dict:
     content: str = str(args.get("content", ""))
     if not path:
         return tool_error("path is required", path=path)
+    truncated: bool = False
+    tail: str = ""
     if len(content) > WRITE_FILE_MAX_CHARS:
-        return tool_error(
-            f"content exceeds {WRITE_FILE_MAX_CHARS} characters (got {len(content)}). "
-            "Use edit_file for incremental changes — split the write into multiple "
-            "edit_file calls instead of sending the entire file at once.",
-            path=path,
+        tail = content[WRITE_FILE_MAX_CHARS:WRITE_FILE_MAX_CHARS + WRITE_FILE_TRUNCATION_TAIL]
+        content = content[:WRITE_FILE_MAX_CHARS]
+        truncated = True
+        logger.warning(
+            "write_file | content truncated from %d to %d chars | path=%s | tail=%s",
+            len(args.get("content", "")), WRITE_FILE_MAX_CHARS, path, repr(tail),
         )
     try:
         _s().write(path, content)
-        return tool_result(success=True, path=path, bytes=len(content.encode("utf-8")))
+        if truncated:
+            return tool_result(
+                success=True, path=path, 
+                bytes=len(content.encode("utf-8")),
+                truncated=True,
+                tail=tail,
+            )
+        else:
+            return tool_result(
+                success=True, path=path, 
+                bytes=len(content.encode("utf-8")),
+            )
     except SandboxError as exc:
         return tool_error(str(exc), path=path)
 
@@ -149,42 +169,55 @@ registry.register(
         # 读取文件内容并附带行号。路径必须使用命名空间前缀：
         # 'ws:' 用于 workspace 数据，'fork:' 用于进化代码，
         # 'fix:' 用于修复目标，'skills:' 用于 skill 文件。
-        # 示例：'ws:logs/error.log'、'fork:main.py'、'skills:my_skill.md'。
         #
-        # 使用方式：
-        # - 支持通过 offset（0-indexed）和 limit 进行按行分页。
-        # - 默认 limit 为 2000 行（硬上限）；使用 offset 继续读取。
-        # - 输出以 1-indexed 行号为前缀，便于引用。
-        # - 使用 read_file 在编辑前查看内容。
+        # ## 前置条件
+        # 文件必须存在于命名空间对应路径。
         #
-        # 参数：
-        #   path:   带命名空间前缀的逻辑文件路径（必需）
-        #   offset: 起始行号，0-indexed（默认 0）
-        #   limit:  最大返回行数，硬上限 2000（默认 100）
+        # ## 调用效果
+        # 无副作用，纯查询。返回文件内容，每行前缀为 1-indexed 行号。
+        # 支持分页：offset（0-indexed 起始行）和 limit（最大行数，硬上限 {READ_FILE_MAX_LINES}，默认 {READ_FILE_DEFAULT_LIMIT}）。
         #
-        # 错误：
-        #   - path 为空或缺失 → 错误
-        #   - offset < 0 → 错误
-        #   - limit < 1 → 错误（limit 会被静默截断为 2000）
-        #   - 文件不存在或沙盒拒绝访问 → 描述性错误
-        "description": """Read file content with line numbers. Path must use a namespace prefix: 'ws:' for workspace data, 'fork:' for evolution code, 'fix:' for repair targets, 'skills:' for skill files. Example: 'ws:logs/error.log', 'fork:main.py', 'skills:my_skill.md'.
+        # ## 返回
+        # ```json
+        # {"path": "ws:example.txt", "content": "1|first line\n2|second line", "total_lines": 100, "remaining": 98, "offset": 0, "limit": 100}
+        # ```
+        # `total_lines` 为文件总行数。`remaining` 为当前读取的最后一行到文件末尾还剩多少行（0 表示已读至文件末尾）。
+        #
+        # ## 何时使用
+        # - 编辑前查看文件内容。
+        # - 分页浏览大文件。
+        # - 通过行号引用具体位置。
+        # - 利用 `remaining` 判断是否需要继续分页读取。
+        #
+        # ## 副作用/注意
+        # - 无副作用，纯查询。
+        # - offset < 0 或 limit < 1 返回错误。
+        # - 文件不存在或沙箱拒绝访问返回描述性错误。
+        "description": f"""Read file content with line numbers. Path must use a namespace prefix: 'ws:' for workspace data, 'fork:' for evolution code, 'fix:' for repair targets, 'skills:' for skill files.
 
-Usage:
-- Supports line-based pagination via offset (0-indexed) and limit.
-- Default limit is 2000 lines (hard cap); use offset to continue reading.
-- Output is prefixed with 1-indexed line numbers for easy reference.
-- Use read_file to inspect content before editing with edit_file.
+## Prerequisites
+The file must exist at the namespace-resolved path.
 
-Parameters:
-  path:   Logical file path with namespace prefix (required)
-  offset: Starting line number, 0-indexed (default 0)
-  limit:  Maximum lines to return, hard cap at 2000 (default 100)
+## Effect
+No side effects, read-only query. Returns file content with each line prefixed by a 1-indexed line number.
+Supports pagination via offset (0-indexed starting line) and limit (max lines, hard cap {READ_FILE_MAX_LINES}, default {READ_FILE_DEFAULT_LIMIT}).
 
-Errors:
-  - path is empty or missing → error
-  - offset < 0 → error
-  - limit < 1 → error (limit silently capped at 2000)
-  - file not found or sandbox access denied → descriptive error""",
+## Returns
+```json
+{"path": "ws:example.txt", "content": "1|first line\n2|second line", "total_lines": 100, "remaining": 98, "offset": 0, "limit": 100}
+```
+`total_lines` is the total line count of the file. `remaining` is how many lines remain after the last line read (0 means the read reached the end of file).
+
+## When to Use
+- Inspect file content before editing.
+- Browse large files in pages.
+- Reference specific locations by line number.
+- Use `remaining` to determine whether another page of reading is needed.
+
+## Side Effects / Notes
+- No side effects, read-only query.
+- offset < 0 or limit < 1 returns an error.
+- File not found or sandbox access denied returns a descriptive error.""",
         "parameters": {
             "type": "object",
             "properties": {
@@ -204,11 +237,11 @@ Errors:
                 },
                 "limit": {
                     "type": "integer",
-                    # 最大返回行数（硬上限：2000）。
-                    "description": "Maximum number of lines to return (default 100, hard cap: 2000).",
+                    # 最大返回行数（默认 100，硬上限见 READ_FILE_MAX_LINES）。
+                    "description": "Maximum number of lines to return (default 100, hard cap defined by READ_FILE_MAX_LINES).",
                     "default": 100,
                     "minimum": 1,
-                    "maximum": 2000,
+                    "maximum": READ_FILE_MAX_LINES,
                 },
             },
             "required": ["path"],
@@ -225,10 +258,67 @@ registry.register(
     toolset="filesystem",
     schema={
         # 将内容写入文件。路径必须使用命名空间前缀。
-        # 使用 'ws:' 写入 workspace 数据，'fork:' 写入进化代码，'skills:' 写入 skill 文件。
-        # 目录会自动创建。每次调用最多 {WRITE_FILE_MAX_CHARS} 字符。
-        # 如果因超出限制被拒绝，不要使用 run_python 来写文件；改用 edit_file 进行增量修改。
-        "description": f"""Write content to a file. Path must use a namespace prefix. Use 'ws:' for workspace data, 'fork:' for evolution code, 'skills:' for skill files. Directories are created automatically. Max {WRITE_FILE_MAX_CHARS} characters per call. If rejected for exceeding the limit, do NOT use run_python to write files; use edit_file for incremental changes instead.""",
+        #
+        # ## 前置条件
+        # 确定文件不存在需要新建文件，或确定文件内容已完全无效需要覆写。
+        # 小范围修改或追加内容应使用 edit_file 或 append_file。
+        #
+        # ## 调用效果
+        # 以 `content` 完整覆盖目标文件。若文件已存在则被覆盖，若不存在则创建。每次调用最多 {WRITE_FILE_MAX_CHARS} 个字符。
+        # 超出限制时自动截断至 {WRITE_FILE_MAX_CHARS}，返回结果中 `truncated=true` 提示内容不完整。
+        # 同时返回 `tail` 字段（被截断内容的前 {WRITE_FILE_TRUNCATION_TAIL} 个字符），可作为 edit_file 的 old_string 继续写入，剩余内容也可用 append_file 追加。
+        # 不得使用 run_python 替代此工具写文件。
+        #
+        # ## 返回
+        # 未截断时：
+        # ```json
+        # {{"success": true, "path": "ws:example.txt", "bytes": 42}}
+        # ```
+        # 截断时额外包含 `truncated=true` 和 `tail` 字段：
+        # ```json
+        # {{"success": true, "path": "ws:example.txt", "bytes": {WRITE_FILE_MAX_CHARS}, "truncated": true, "tail": "..."}}
+        # ```
+        # `tail` 为被截断部分的前 {WRITE_FILE_TRUNCATION_TAIL} 个字符，用作 edit_file 的 old_string。
+        #
+        # ## 何时使用
+        # - 创建新文件。
+        # - 完整覆写小文件（不超过 {WRITE_FILE_MAX_CHARS} 字符）。
+        #
+        # ## 副作用/注意
+        # - 写入文件系统，覆盖已有文件。
+        # - 超出 {WRITE_FILE_MAX_CHARS} 限制时自动截断，应继续用 `tail` 作为 old_string 调用 edit_file，或用 append_file 追加剩余内容。
+        # - 路径使用命名空间前缀：'ws:' 用于 workspace 数据，'fork:' 用于进化代码，'skills:' 用于 skill 文件。
+        "description": f"""Write content to a file. Path must use a namespace prefix.
+
+## Prerequisites
+The file must not exist yet (new file creation), or the file content is confirmed to be completely invalid and needs overwriting.
+For small edits or appending, use edit_file or append_file instead.
+
+## Effect
+Overwrites the target file entirely with `content`. Creates the file if it doesn't exist. Max {WRITE_FILE_MAX_CHARS} characters per call.
+Content exceeding the limit is automatically truncated to {WRITE_FILE_MAX_CHARS}; the result includes `truncated=true` to indicate incomplete content.
+When truncated, a `tail` field is also returned containing the first {WRITE_FILE_TRUNCATION_TAIL} characters of the truncated portion — use it as the `old_string` for a follow-up edit_file call, and append the remaining content with append_file.
+Do NOT use run_python as a substitute for this tool.
+
+## Returns
+Without truncation:
+```json
+{{"success": true, "path": "ws:example.txt", "bytes": 42}}
+```
+When truncated, additionally includes `truncated=true` and `tail`:
+```json
+{{"success": true, "path": "ws:example.txt", "bytes": {WRITE_FILE_MAX_CHARS}, "truncated": true, "tail": "..."}}
+```
+`tail` contains the first {WRITE_FILE_TRUNCATION_TAIL} characters of the truncated portion to use as old_string for edit_file.
+
+## When to Use
+- Create new files.
+- Completely overwrite small files (within {WRITE_FILE_MAX_CHARS} characters).
+
+## Side Effects / Notes
+- Writes to the file system, overwriting existing files.
+- Content exceeding {WRITE_FILE_MAX_CHARS} is auto-truncated; continue with edit_file using `tail` as old_string, or use append_file to add the remaining content.
+- Use namespace prefixes: 'ws:' for workspace data, 'fork:' for evolution code, 'skills:' for skill files.""",
         "parameters": {
             "type": "object",
             "properties": {
@@ -258,17 +348,32 @@ def _handle_append(args: dict[str, Any]) -> dict:
     content: str = str(args.get("content", ""))
     if not path:
         return tool_error("path is required", path=path)
+    truncated: bool = False
+    tail: str = ""
     if len(content) > WRITE_FILE_MAX_CHARS:
-        return tool_error(
-            f"content exceeds {WRITE_FILE_MAX_CHARS} characters (got {len(content)}). "
-            "Split the append into multiple sequential append_file calls.",
-            path=path,
+        tail = content[WRITE_FILE_MAX_CHARS:WRITE_FILE_MAX_CHARS + WRITE_FILE_TRUNCATION_TAIL]
+        content = content[:WRITE_FILE_MAX_CHARS]
+        truncated = True
+        logger.warning(
+            "append_file | content truncated from %d to %d chars | path=%s | tail=%s",
+            len(args.get("content", "")), WRITE_FILE_MAX_CHARS, path, repr(tail),
         )
     if not _s().exists(path):
         return tool_error("File not found — use write_file to create it first", path=path)
     try:
         _s().append(path, content)
-        return tool_result(success=True, path=path, bytes=len(content.encode("utf-8")))
+        if truncated:
+            return tool_result(
+                success=True, path=path,
+                bytes=len(content.encode("utf-8")),
+                truncated=True,
+                tail=tail,
+            )
+        else:
+            return tool_result(
+                success=True, path=path,
+                bytes=len(content.encode("utf-8")),
+            )
     except SandboxError as exc:
         return tool_error(str(exc), path=path)
 
@@ -278,10 +383,61 @@ registry.register(
     toolset="filesystem",
     schema={
         # 将内容追加到文件末尾。路径必须使用命名空间前缀。
-        # 使用 'ws:' 写入 workspace 数据，'fork:' 写入进化代码，'skills:' 写入 skill 文件。
-        # 文件必须已存在；先使用 write_file 创建。每次调用最多 {WRITE_FILE_MAX_CHARS} 字符。
-        # 如果因超出限制被拒绝，拆分到多次 append_file 调用中。
-        "description": f"""Append content to the end of a file. Path must use a namespace prefix. Use 'ws:' for workspace data, 'fork:' for evolution code, 'skills:' for skill files. File must already exist; use write_file to create it first. Max {WRITE_FILE_MAX_CHARS} characters per call. If rejected for exceeding the limit, split the append into multiple append_file calls.""",
+        #
+        # ## 前置条件
+        # 文件必须已存在。使用 write_file 先创建文件。
+        #
+        # ## 调用效果
+        # 将 `content` 追加到目标文件末尾，不影响已有内容。每次调用最多 {WRITE_FILE_MAX_CHARS} 个字符。
+        # 超出限制时自动截断至 {WRITE_FILE_MAX_CHARS}，返回结果中 `truncated=true` 提示内容不完整，应继续用下一次 append_file 追加剩余内容。
+        #
+        # ## 返回
+        # 未截断时：
+        # ```json
+        # {{"success": true, "path": "ws:example.txt", "bytes": 42}}
+        # ```
+        # 截断时额外包含 `truncated=true` 和 `tail` 字段：
+        # ```json
+        # {{"success": true, "path": "ws:example.txt", "bytes": {WRITE_FILE_MAX_CHARS}, "truncated": true, "tail": "..."}}
+        # ```
+        # `tail` 为被截断部分的前 {WRITE_FILE_TRUNCATION_TAIL} 个字符。
+        #
+        # ## 何时使用
+        # - 向已有文件末尾追加新内容。
+        # - 配合 write_file 使用：先 write_file 创建，再 append_file 追加。
+        #
+        # ## 副作用/注意
+        # - 写入文件系统，追加到文件末尾。
+        # - 超出 {WRITE_FILE_MAX_CHARS} 限制时自动截断，`tail` 可协助继续用下一次 append_file 追加剩余内容。
+        # - 路径使用命名空间前缀：'ws:' 用于 workspace 数据，'fork:' 用于进化代码，'skills:' 用于 skill 文件。
+        "description": f"""Append content to the end of a file. Path must use a namespace prefix.
+
+## Prerequisites
+The file must already exist. Use write_file to create it first.
+
+## Effect
+Appends `content` to the end of the target file without affecting existing content. Max {WRITE_FILE_MAX_CHARS} characters per call.
+Content exceeding the limit is automatically truncated to {WRITE_FILE_MAX_CHARS}; the result includes `truncated=true` to indicate incomplete content — continue with another append_file call for the remainder.
+
+## Returns
+Without truncation:
+```json
+{{"success": true, "path": "ws:example.txt", "bytes": 42}}
+```
+When truncated, additionally includes `truncated=true` and `tail`:
+```json
+{{"success": true, "path": "ws:example.txt", "bytes": {WRITE_FILE_MAX_CHARS}, "truncated": true, "tail": "..."}}
+```
+`tail` contains the first {WRITE_FILE_TRUNCATION_TAIL} characters of the truncated portion.
+
+## When to Use
+- Append new content to the end of an existing file.
+- Use together with write_file: create with write_file, then append with append_file.
+
+## Side Effects / Notes
+- Writes to the file system, appending to the end of the file.
+- Content exceeding {WRITE_FILE_MAX_CHARS} is auto-truncated; use `tail` to help continue with another append_file call for the remainder.
+- Use namespace prefixes: 'ws:' for workspace data, 'fork:' for evolution code, 'skills:' for skill files.""",
         "parameters": {
             "type": "object",
             "properties": {
