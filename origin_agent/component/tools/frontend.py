@@ -173,20 +173,56 @@ registry.register(
     name="validate_frontend",
     toolset="frontend",
     schema={
-        # Validate frontend code: run ``pnpm install`` and ``pnpm run build`` in the target frontend directory.
-        # Use this after modifying any file under ``frontend/`` (e.g. ``.tsx``, ``.ts``, ``.css``), before calling ``evolve_code``.
-        # Catches TypeScript and build errors that ``validate_code`` cannot detect.
-        # Default path is ``fork:frontend`` (evolution target).
-        "description": """Validate frontend code: run ``pnpm install`` and ``pnpm run build`` in the target frontend directory. Use this after modifying any file under ``frontend/`` (e.g. ``.tsx``, ``.ts``, ``.css``), before calling ``evolve_code``. Catches TypeScript and build errors that ``validate_code`` cannot detect.
+        # 验证前端代码能否构建。在 fork:frontend 目录下运行 pnpm install && pnpm run build。
+        # 前置条件：已通过 write_fork 修改了 frontend/ 下的 .tsx/.ts/.css 文件。仅 fast 模式下可用。
+        # path 默认 'fork:frontend'（进化目标目录）。可指定其他逻辑路径。
+        # 调用效果：在目标目录中执行 pnpm install 和 pnpm run build（CI=true 非交互模式），捕获 TypeScript 和构建错误。
+        # 成功返回：{ valid: true, stage: "build", exit_code: 0, build_output, message }
+        # 失败返回：{ valid: false, stage: "install"|"build", exit_code, stdout?, stderr?, hint? } 或 { valid: false, stage: ..., error }
+        # 典型场景：修改前端文件后、evolve_code 前调用，捕获 validate_code 无法检测的 TypeScript/构建错误。
+        # 注意：运行时间较长（超时时间 SUBPROCESS_TIMEOUT_DEFAULT），非前端修改无需调用。
+        "description": """Validate frontend code by running `pnpm install && pnpm run build` in the target frontend directory.
 
-Default path is ``fork:frontend`` (evolution target).""",
+## Prerequisites
+- Frontend files (`.tsx`, `.ts`, `.css`) have been modified via `write_fork`.
+- Only available in fast mode.
+
+## Effect
+Runs `pnpm install` followed by `pnpm run build` in the target directory (non-interactive, `CI=true`). Catches TypeScript and build errors that `validate_code` cannot detect. Does not modify any files beyond what pnpm itself generates (`node_modules/`, `dist/`).
+
+## Parameters
+- `path` (string, default `"fork:frontend"`): Logical path of the frontend directory. Can be a bare name or a namespaced path like `"fork:frontend"`.
+
+## Returns
+**Success**:
+```json
+{ "valid": true, "stage": "build", "exit_code": 0, "build_output": "<tail of build output>", "message": "Frontend validation passed..." }
+```
+**Install failure**:
+```json
+{ "valid": false, "stage": "install", "exit_code": N, "stdout": "...", "stderr": "...", "hint": "pnpm install failed. Check dependency conflicts..." }
+```
+**Build failure**:
+```json
+{ "valid": false, "stage": "build", "exit_code": N, "stdout": "...", "stderr": "...", "hint": "Frontend build failed. Check TypeScript errors..." }
+```
+**Timeout**:
+```json
+{ "valid": false, "stage": "install"|"build", "error": "Timeout after Ns" }
+```
+
+## When to Use
+Evolution workflow — call after modifying frontend files and before `evolve_code`. Skip if no frontend files were changed.
+
+## Side Effects
+Creates `node_modules/` and `dist/` in the target directory. Long-running (up to timeout); only call when frontend changes were actually made.""",
         "parameters": {
             "type": "object",
             "properties": {
                 "path": {
                     "type": "string",
-                    # Logical path of the frontend directory (e.g. 'fork:frontend'). Defaults to 'fork:frontend'.
-                    "description": """Logical path of the frontend directory (e.g. 'fork:frontend'). Defaults to 'fork:frontend'.""",
+                    # 前端目录的逻辑路径。默认 'fork:frontend'（进化目标）。可为裸名或命名空间路径。
+                    "description": """Logical path of the frontend directory. Defaults to 'fork:frontend' (evolution target). Can be a bare name or namespaced path.""",
                 },
             },
         },

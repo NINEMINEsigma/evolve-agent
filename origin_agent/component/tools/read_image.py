@@ -128,28 +128,54 @@ registry.register(
     name="read_image",
     toolset="filesystem",
     schema={
-        # Read an image file and return its contents.
-        # If the model supports vision, the image is attached as a multimodal block for direct visual analysis.
-        # If the model does not support vision, you will receive only the image metadata (path, format, size, width, height).
-        # Path must use a namespace prefix, typically 'ws:' (agent workspace).
-        # Example: 'ws:uploads/screenshot.png'.
-        # Supported formats: PNG, JPEG, WebP, GIF, BMP, TIFF, SVG.
-        # Maximum file size: 20MB.
-        "description": """Read an image file and return its contents.
+        # 读取图片文件并返回其内容和元数据。
+        # 前置条件：图片存在于 agentspace（ws: 或 fork: 命名空间）。支持 PNG/JPEG/WebP/GIF/BMP/TIFF/SVG，最大 20MB。
+        # 调用效果：只读操作，不修改任何文件。
+        # 返回：{ path, mime_type, size, width, height, _image: { base64, mime_type }, _note }。width/height 通过 Pillow 解析（SVG 或解析失败时为 null）。
+        # _image 载荷：AgentLoop 自动根据模型 vision 能力处理 — 支持时作为多模态 content block 送入 LLM，不支持时清理并以文本元数据形式提供。
+        # 典型场景：查看用户上传的截图/图片；分析图片内容（需 vision 模型）。
+        # 注意：path 必须包含命名空间前缀（如 'ws:uploads/screenshot.png'），否则沙箱无法解析。
+        "description": """Read an image file and return its content and metadata.
 
-If the model supports vision, the image is attached as a multimodal block for direct visual analysis.
-If the model does not support vision, you will receive only the image metadata (path, format, size, width, height).
+## Prerequisites
+Image must exist in agentspace (ws: or fork: namespace). Supported formats: PNG, JPEG, WebP, GIF, BMP, TIFF, SVG. Maximum file size: 20 MB.
 
-Path must use a namespace prefix, typically 'ws:' (agent workspace). Example: 'ws:uploads/screenshot.png'.
+## Effect
+Read-only. Does not modify any files.
 
-Supported formats: PNG, JPEG, WebP, GIF, BMP, TIFF, SVG. Maximum file size: 20MB.""",
+## Returns
+```json
+{
+  "path": "<logical path>",
+  "mime_type": "image/png",
+  "size": 12345,
+  "width": 800,
+  "height": 600,
+  "_image": { "base64": "...", "mime_type": "image/png" },
+  "_note": "Image metadata returned. width/height are parsed via Pillow..."
+}
+```
+`width`/`height` are parsed via Pillow; `null` for SVG or on parse failure.
+
+## How `_image` Works
+The AgentLoop automatically handles the `_image` payload based on model capability:
+- **Vision-capable model**: the image is attached as a multimodal content block for direct visual analysis.
+- **Non-vision model**: `_image` is stripped and only text metadata (path, mime_type, size, width, height) is provided.
+
+The agent does not need to handle this distinction.
+
+## When to Use
+- Viewing user-uploaded screenshots or images.
+- Analyzing image content (requires a vision-capable model).
+
+## Side Effects / Notes
+Path must include a namespace prefix (e.g. `ws:uploads/screenshot.png`); otherwise sandbox resolution fails. Uploaded files are located under `ws:uploads/`.""",
         "parameters": {
             "type": "object",
             "properties": {
                 "path": {
                     "type": "string",
-                    # Logical path of the image file. Must include a namespace prefix (ws:, fork:, or fix:).
-                    # Uploaded files are located under 'ws:uploads/'.
+                    # 图片文件的逻辑路径。必须包含命名空间前缀（ws:、fork: 或 fix:）。上传文件位于 'ws:uploads/'。
                     "description": """Logical path of the image file. Must include a namespace prefix (ws:, fork:, or fix:). Uploaded files are located under 'ws:uploads/'.""",
                 },
             },

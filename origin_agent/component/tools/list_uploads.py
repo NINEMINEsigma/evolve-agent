@@ -100,15 +100,43 @@ registry.register(
     name="list_uploads",
     toolset="filesystem",
     schema={
-        # Get the most recently uploaded files. Returns the original filename, size (bytes), upload time, modification time, and logical path (ws:uploads/...) for each file.
-        "description": """Get the most recently uploaded files. Returns the original filename, size (bytes), upload time, modification time, and logical path (ws:uploads/...) for each file.""",
+        # 列出最近上传的文件，按上传时间降序排列。
+        # 前置条件：无（uploads 目录不存在时返回空列表）。
+        # 调用效果：只读查询，无副作用。
+        # n: 返回数量，默认 10，最大 100。
+        # 返回：{ files: [{ filename, size, upload_time, mtime, path }] }。upload_time 从文件名前缀时间戳解析（格式 YYYYMMDD_HHMMSS_utc_rand），旧文件回退到 mtime。
+        # 典型场景：查看用户刚上传了哪些文件；获取文件路径后配合 read_file/read_image 读取。
+        "description": """List the most recently uploaded files, sorted by upload time (newest first).
+
+## Prerequisites
+None. Returns an empty list if the uploads directory does not exist yet.
+
+## Effect
+Read-only query. No side effects.
+
+## Parameters
+- `n` (integer, default 10, max 100): Number of most recent files to return.
+
+## Returns
+```json
+{
+  "files": [
+    { "filename": "20250617_123045_utc_a1b2c3d4_screenshot.png", "size": 12345, "upload_time": "2025-06-17 12:30:45 UTC", "mtime": "2025-06-17 12:30:45 UTC", "path": "ws:uploads/20250617_123045_utc_a1b2c3d4_screenshot.png" }
+  ]
+}
+```
+`upload_time` is parsed from the filename prefix timestamp (`YYYYMMDD_HHMMSS_utc_rand`). For older files without a timestamp prefix, falls back to file `mtime`.
+
+## When to Use
+- Checking what files the user recently uploaded.
+- Getting file paths to use with `read_file` or `read_image`.""",
         "parameters": {
             "type": "object",
             "properties": {
                 "n": {
                     "type": "integer",
-                    # Number of most recent files to return (default 10, max 100).
-                    "description": """Number of most recent files to return (default 10, max 100).""",
+                    # 返回的最近文件数量。默认 10，最大 100。
+                    "description": """Number of most recent files to return. Default 10, max 100.""",
                     "default": 10,
                 },
             },

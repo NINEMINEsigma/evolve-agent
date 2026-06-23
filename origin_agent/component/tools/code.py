@@ -343,28 +343,56 @@ registry.register(
     name="evolve_code",
     toolset="code",
     schema={
-        # 完成代码进化周期。在通过 write_fork 将进化源码写入 fork: 并
-        # 通过 validate_code 验证语法（如果修改了前端文件还需通过
-        # validate_frontend）之后调用此工具。此工具对 fork 目录中
-        # 所有 **.py 文件** 运行彻底验证（语法 + 编译检查）。
-        # 不会验证 TypeScript 或前端构建 — 如果触碰到前端代码，
-        # 必须预先调用 validate_frontend。如果全部通过，进程退出，
-        # 编排器将 slow（进化后）代码交换到位，然后用新版本重启 agent。
-        # 如果验证失败，返回错误详情以便修复问题后重试。
-        # 设置 deep=false 跳过编译检查（更快但不彻底）。
-        "description": """Complete the code evolution cycle. After writing evolved source code to fork: via write_fork and passing validate_code syntax check (and validate_frontend if frontend files were modified), call this tool. It runs thorough validation (syntax + compile check) on all **.py files** in the fork directory. Does not validate TypeScript or frontend builds — if you touched frontend code, you must call validate_frontend first. If all checks pass, the process exits, the orchestrator swaps the slow (evolved) code into place, and restarts the agent with the new version. If validation fails, error details are returned so you can fix and retry. Set deep=false to skip compile checks (faster but less thorough).""",
+        # 完成代码进化周期 — 进化工作流最后一步。
+        # 前置条件：已通过 write_fork 写入进化代码 + validate_code 语法检查通过（修改前端时还需 validate_frontend）。
+        # 调用效果：对 fork: 下所有 .py 文件运行彻底验证（语法 + 可选编译检查），全部通过后进程以退出码 -1 退出，编排器执行 slow→fast 交换并重启。
+        # deep=true（默认）：语法 + py_compile 子进程编译检查（更彻底但更慢）。
+        # deep=false：仅语法检查（更快）。
+        # 成功返回：{ evolved: true, validation: { valid, total, ok, errors, details }, message } — 进程随即退出，agent 不会收到此响应。
+        # 失败返回：{ evolved: false, validation: {...}, hint } — agent 可修复问题后重试。
+        # 注意：不会验证 TypeScript/前端构建，触碰前端代码需先调 validate_frontend。
+        "description": """Complete the code evolution cycle — final step of the evolution workflow.
+
+## Prerequisites
+- Evolved source code has been written to fork: via `write_fork`.
+- Syntax check via `validate_code` has passed.
+- If frontend files were modified, `validate_frontend` must also have passed.
+- Only available in fast mode.
+
+## Effect
+Runs thorough validation (syntax + optional compile check) on all `.py` files in fork:. If all checks pass, the process exits with code -1, the orchestrator performs the slow→fast swap, and the agent restarts with the evolved code. Does **not** validate TypeScript or frontend builds — call `validate_frontend` separately if frontend code was touched.
+
+## Parameters
+- `deep` (boolean, default true): When true, runs both `ast.parse()` syntax check and `py_compile` subprocess compile check on each file. When false, syntax check only (faster but less thorough).
+- `compile_timeout` (integer): Timeout in seconds for each file's `py_compile` subprocess.
+
+## Returns
+**Success** — process exits immediately; the agent does not see this response:
+```json
+{ "evolved": true, "validation": { "valid": true, "total": N, "ok": N, "errors": 0, "details": [...] }, "message": "All N files validated..." }
+```
+**Failure** — agent can fix errors and retry:
+```json
+{ "evolved": false, "validation": { "valid": false, "total": N, "ok": N, "errors": N, "details": [...] }, "hint": "Fix the errors above using write_fork, then call validate_code..." }
+```
+
+## When to Use
+Evolution workflow step 3 — call after `write_fork` + `validate_code` (and optionally `validate_frontend`). This is the commit point; once called successfully, the current agent session ends.
+
+## Side Effects
+On success, the current agent process exits. The success response is never seen by the calling agent. On failure, the agent continues and can fix issues then retry.""",
         "parameters": {
             "type": "object",
             "properties": {
                 "deep": {
                     "type": "boolean",
-                    # 是否运行 py_compile 检查（默认 true）。
-                    "description": "Whether to run py_compile check (default true).",
+                    # 是否运行 py_compile 编译检查。默认 true（更彻底，语法+编译）。设为 false 跳过编译检查，仅语法验证。
+                    "description": """Whether to run py_compile check. Default true (more thorough: syntax + compile). Set false to skip compile check and only validate syntax.""",
                 },
                 "compile_timeout": {
                     "type": "integer",
-                    # 每个文件编译检查的超时秒数（默认 SUBPROCESS_TIMEOUT_DEFAULT）。
-                    "description": "Timeout per file for compile check in seconds.",
+                    # 每个文件 py_compile 子进程的超时秒数。
+                    "description": """Timeout in seconds for each file's py_compile subprocess.""",
                 },
             },
         },

@@ -4,16 +4,16 @@ overview: 逐文件优化 origin_agent 所有工具的 description，统一使�
 todos:
   - id: code-evolve
     content: code.py — evolve_code
-    status: pending
+    status: completed
   - id: frontend-validate
     content: frontend.py — validate_frontend
-    status: pending
+    status: completed
   - id: read-image
     content: read_image.py — read_image
-    status: pending
+    status: completed
   - id: list-uploads
     content: list_uploads.py — list_uploads
-    status: pending
+    status: completed
   - id: progress-tools
     content: progress_tools.py — set_task_progress, clear_task_progress
     status: pending
@@ -52,7 +52,10 @@ isProject: false
 - `list_tools.py` — `list_tools`
 - `ask_question.py` — `ask_question`
 - `clipboard_display_tools.py` — `set_clipboard_display`, `clear_clipboard_display`
-- `code.py` — `write_fork`, `validate_code`
+- `code.py` — `write_fork`, `validate_code`, `evolve_code`
+- `frontend.py` — `validate_frontend`
+- `read_image.py` — `read_image`
+- `list_uploads.py` — `list_uploads`
 
 ## 格式规范
 
