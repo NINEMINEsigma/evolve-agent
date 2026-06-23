@@ -179,7 +179,7 @@ registry.register(
         #
         # ## 返回
         # ```json
-        # {"path": "ws:example.txt", "content": "1|first line\n2|second line", "total_lines": 100, "remaining": 98, "offset": 0, "limit": 100}
+        # {{"path": "ws:example.txt", "content": "1|first line\n2|second line", "total_lines": 100, "remaining": 98, "offset": 0, "limit": 100}}
         # ```
         # `total_lines` 为文件总行数。`remaining` 为当前读取的最后一行到文件末尾还剩多少行（0 表示已读至文件末尾）。
         #
@@ -204,7 +204,7 @@ Supports pagination via offset (0-indexed starting line) and limit (max lines, h
 
 ## Returns
 ```json
-{"path": "ws:example.txt", "content": "1|first line\n2|second line", "total_lines": 100, "remaining": 98, "offset": 0, "limit": 100}
+{{"path": "ws:example.txt", "content": "1|first line\n2|second line", "total_lines": 100, "remaining": 98, "offset": 0, "limit": 100}}
 ```
 `total_lines` is the total line count of the file. `remaining` is how many lines remain after the last line read (0 means the read reached the end of file).
 
