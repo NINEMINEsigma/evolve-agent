@@ -54,15 +54,51 @@ registry.register(
     name="list_tools",
     toolset="core",
     schema={
-        # Return a sorted list of names for currently registered tools filtered by danger level. Accepted levels: 'readonly', 'write', 'dangerous'.
-        "description": """Return a sorted list of names for currently registered tools filtered by danger level. Accepted levels: 'readonly', 'write', 'dangerous'.""",
+        # 列出当前 agent 可用的工具名称，按危险等级筛选。
+        # 前置条件：无。
+        # 调用效果：无副作用，纯查询。
+        # 返回格式：{ success, danger_level, count, names: [...] }
+        # 典型场景：排查工具可用性；了解当前权限边界。
+        # 注意：在子 Agent 中调用时仅返回该子 Agent 被授权的工具名称，不暴露全局注册表。
+        "description": """List currently available tool names filtered by danger level.
+
+## Prerequisites
+None.
+
+## danger_level Meanings
+
+| Level | Impact |
+|-------|--------|
+| `readonly` | Operations fully confined within the sandbox, no external system impact. |
+| `write` | May have indirect impact (e.g. writing scripts that won't auto-execute but could contain high-risk code). |
+| `dangerous` | Misuse can directly cause catastrophic damage to the entire machine or critical assets. |
+
+## Effect
+No side effects, read-only query.
+
+## Returns
+```json
+{ "success": true, "danger_level": "<level>", "count": N, "names": ["tool_a", "tool_b", ...] }
+```
+
+## When to Use
+- Diagnosing tool availability.
+- Understanding current permission scope.
+
+## Note
+When called from a sub-agent, only tools authorized for that sub-agent are returned; the global registry is never exposed.""",
         "parameters": {
             "type": "object",
             "properties": {
                 "danger_level": {
                     "type": "string",
-                    # Danger level to filter by. One of: 'readonly', 'write', 'dangerous'.
-                    "description": """Danger level to filter by. One of: 'readonly', 'write', 'dangerous'.""",
+                    # 要筛选的危险等级。
+                    # 'readonly'=沙箱内操作无外部影响，'write'=可能间接影响，'dangerous'=可直接毁灭性打击。
+                    "description": """Danger level to filter by.
+
+- `readonly` — sandbox-confined, no external impact.
+- `write` — may have indirect impact.
+- `dangerous` — capable of catastrophic direct damage.""",
                 },
             },
             "required": ["danger_level"],

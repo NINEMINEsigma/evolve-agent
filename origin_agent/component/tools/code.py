@@ -224,52 +224,63 @@ registry.register(
     name="write_fork",
     toolset="code",
     schema={
-        # 将源代码的进化版本写入 fork（slow）目录。
-        # 写入所有更改后，调用 validate_code 检查语法，
-        # 然后调用 evolve_code 触发交换。
-        # 接受裸文件名（如 'main.py'）。
-        # 三种模式：
-        # - 完全覆盖：传递 file + content。内容最多 {WRITE_FILE_MAX_CHARS} 个字符。
-        # - 增量编辑：传递 file + old_string + new_string。
-        #   old_string 必须精确匹配一次 — 包含足够的上下文（前后各 2-3 行）使其唯一。
-        # - 追加模式：传递 file + content + append=true。将内容追加到文件末尾。内容最多 10 行。
-        "description": f"""Write the evolved version of source code to the fork (slow) directory. After writing all changes, call validate_code to check syntax, then call evolve_code to trigger the swap. Accepts bare filenames (e.g. 'main.py').
+        # 将进化源码写入 fork: 命名空间（slow 目录）。
+        # 前置条件：agent 运行在 fast 模式下。fallback 模式下 fork: 命名空间不可用。
+        # file 可以是裸文件名（'main.py'）或逻辑路径（'fork:main.py'）。
+        # 三种模式互斥，按优先级检测：append > old_string/new_string > content 覆盖。
+        #   - 完全覆盖：file + content。content 最大 10000 字符。
+        #   - 增量编辑：file + old_string + new_string。old_string 必须精确匹配一次。
+        #   - 追加模式：file + content + append=true。content 最大 10 行。
+        # 调用效果：文件写入 fork: 命名空间，不影响当前运行的 agent 代码。
+        # 返回：{ success, path, bytes }
+        # 典型场景：进化工作流第一步 → 后续调用 validate_code 检查语法。
+        "description": f"""Write evolved source code to the fork: namespace (slow directory).
 
-Three modes:
-- Full overwrite: pass file + content. Content max {WRITE_FILE_MAX_CHARS} characters.
-- Incremental edit: pass file + old_string + new_string. old_string must match exactly once — include enough context (2-3 lines before and after) to make it unique.
-- Append mode: pass file + content + append=true. Appends content to the end of the file. Content max 10 lines.""",
+## Prerequisites
+Agent must be running in fast mode. The fork: namespace is not available in fallback mode.
+
+## Modes (mutually exclusive, checked in priority order: append > old_string > content)
+- **Full overwrite**: `file` + `content`. Content max {WRITE_FILE_MAX_CHARS} characters.
+- **Incremental edit**: `file` + `old_string` + `new_string`. `old_string` must match exactly once — include 2-3 lines of surrounding context to make it unique.
+- **Append**: `file` + `content` + `append=true`. Content max 10 lines, appended to end of file.
+
+## Effect
+Writes to the fork: namespace only. Does not affect the currently running agent code.
+
+## Returns
+```json
+{{ "success": true, "path": "<path>", "bytes": N }}
+```
+
+## Workflow
+This is step 1 of the evolution cycle. After writing all changes, call `validate_code` to check syntax, then `evolve_code` to trigger the swap.""",
         "parameters": {
             "type": "object",
             "properties": {
                 "file": {
                     "type": "string",
-                    # 目标文件名（如 'main.py'）。
-                    "description": "Target filename (e.g. 'main.py').",
+                    # 目标文件名（如 'main.py'）或逻辑路径（如 'fork:main.py'）。必需。
+                    "description": """Target filename (e.g. 'main.py') or logical path (e.g. 'fork:main.py'). Required.""",
                 },
                 "content": {
                     "type": "string",
-                    # 新的源码内容。完全覆盖模式下最多 {WRITE_FILE_MAX_CHARS} 个字符；追加模式下最多 10 行。
-                    "description": (
-                        "New source code content. "
-                        f"Max {WRITE_FILE_MAX_CHARS} characters in full overwrite mode; "
-                        "max 10 lines in append mode."
-                    ),
+                    # 新的源码内容。完全覆盖模式下最多 10000 字符；追加模式下最多 10 行。
+                    "description": f"""New source code content. Max {WRITE_FILE_MAX_CHARS} characters in full overwrite mode; max 10 lines in append mode.""",
                 },
                 "old_string": {
                     "type": "string",
-                    # 要查找替换的精确文本（启用增量编辑模式）。
-                    "description": "Exact text to find and replace (enables incremental edit mode).",
+                    # 要查找替换的精确文本。提供此参数即启用增量编辑模式，需同时提供 new_string。
+                    "description": """Exact text to find and replace. Providing this enables incremental edit mode; new_string is required.""",
                 },
                 "new_string": {
                     "type": "string",
-                    # 替换文本。使用空字符串删除 old_string。
-                    "description": "Replacement text. Use empty string to delete old_string.",
+                    # 替换文本。使用空字符串删除 old_string。仅在增量编辑模式下有效。
+                    "description": """Replacement text. Use empty string to delete old_string. Only valid in incremental edit mode.""",
                 },
                 "append": {
                     "type": "boolean",
-                    # 追加模式：将 content 追加到现有文件末尾。最多 10 行。
-                    "description": "Append mode: appends content to end of file. Max 10 lines.",
+                    # 设为 true 启用追加模式。content 追加到文件末尾，最多 10 行。与 old_string/new_string 互斥。
+                    "description": """Set to true to enable append mode. Content is appended to end of file, max 10 lines. Mutually exclusive with old_string/new_string.""",
                 },
             },
             "required": ["file"],
@@ -285,17 +296,40 @@ registry.register(
     name="validate_code",
     toolset="code",
     schema={
-        # 使用 ast.parse() 检查 Python 源文件的语法错误。
-        # 给定文件名时验证该文件。否则验证 fork: 命名空间中所有 .py 文件。
-        # 在写入进化代码后调用。
-        "description": """Check Python source files for syntax errors using ast.parse(). If a filename is given, validates that file. Otherwise validates all .py files in the fork: namespace. Call after writing evolved code.""",
+        # 用 ast.parse() 检查 fork: 命名空间中 Python 文件的语法错误。
+        # 前置条件：已通过 write_fork 将进化代码写入 fork:。仅 fast 模式下可用。
+        # file: 可选。指定时只验证该文件（裸名或 'fork:xxx.py'）；省略时验证 fork: 下所有 .py 文件。
+        # 调用效果：只读分析，不修改任何文件。
+        # 返回：{ valid: bool, results: [{ file, status: "ok"|"syntax_error"|"error", line?, offset?, message? }] }
+        # 典型场景：进化工作流第二步 — write_fork 之后、evolve_code 之前调用，确保语法无误。
+        "description": """Check Python source files in the fork: namespace for syntax errors using ast.parse().
+
+## Prerequisites
+Evolved code must have been written to fork: via `write_fork`. Only available in fast mode.
+
+## Effect
+Read-only analysis. Does not modify any files.
+
+## Returns
+```json
+{
+  "valid": true|false,
+  "results": [
+    { "file": "<path>", "status": "ok"|"syntax_error"|"error", "line": N, "offset": N, "message": "<detail>" }
+  ]
+}
+```
+`valid` is `true` only when all files have status `"ok"`.
+
+## When to Use
+Evolution workflow step 2 — call after `write_fork` and before `evolve_code` to ensure syntax correctness.""",
         "parameters": {
             "type": "object",
             "properties": {
                 "file": {
                     "type": "string",
-                    # 可选：要验证的特定文件。
-                    "description": "Optional: specific file to validate.",
+                    # 可选。要验证的特定文件，裸名（'main.py'）或逻辑路径（'fork:main.py'）。省略则验证 fork: 下所有 .py 文件。
+                    "description": """Optional. Specific file to validate, as bare name ('main.py') or logical path ('fork:main.py'). Omit to validate all .py files in fork:.""",
                 },
             },
         },

@@ -89,30 +89,57 @@ registry.register(
     name="set_clipboard_display",
     toolset="clipboard",
     schema={
-        "description": """**ALWAYS use this tool immediately** when the user asks to copy something, or when you generate any long text (tags, prompts, keywords, code snippets, configuration, comma-separated lists, etc.) that the user is likely to copy.
-Do NOT paste the text into the chat message and ask the user to manually select/copy it. Instead, call this tool so the user can copy with a single click from the top panel.
+        # 在前端顶部创建或更新可一键复制的展示区域。
+        # 前置条件：无（前端在线即可）。display_id 重复使用会覆盖更新而非追加。
+        # 调用效果：前端顶部出现可复制文本卡片，用户点击即可复制。
+        # 返回：{ display_id, label, content }
+        # 使用限制：最多同时保留 2 个展示区域，除非用户明确要求更多。
+        #   内容发生变化时应主动调用本工具更新对应 display_id 的卡片。
+        #   感觉用户已不再需要某卡片时应主动调用 clear_clipboard_display 关闭。
+        # 典型场景：用户要求复制内容、生成长文本（代码、配置、标签列表）时。
+        # 副作用：仅影响前端 UI，不涉及文件系统。不会将内容写入剪贴板。
+        "description": """Create or update a one-click copy area in the frontend top panel.
 
-Common triggers:
-- User says '让我复制' / 'copy this' / '给我复制' / '复制出来'
-- You produce a long list of tags, prompts, or keywords
-- You generate code, config, or any text the user will reuse
+## Prerequisites
+None (frontend must be online).
 
-The same display_id will overwrite the existing display area.
-Returns the current display metadata.""",
+## Effect
+A copyable text card appears at the top of the frontend. The user can copy with a single click.
+
+## Returns
+```json
+{ "display_id": "<id>", "label": "<title>", "content": "<text>" }
+```
+
+## Usage Rules
+- **Limit**: keep at most 2 display areas simultaneously, unless the user explicitly requests more.
+- **Update**: when content changes, proactively call this tool with the same `display_id` to update the card.
+- **Cleanup**: when you sense the user no longer needs a card, proactively call `clear_clipboard_display` to remove it.
+
+## When to Use
+- The user asks to copy something (e.g. "copy this", "给我复制").
+- You generate long text the user is likely to copy: code snippets, configs, keyword lists, comma-separated values, etc.
+- Do NOT paste the text into the chat and ask the user to manually select/copy it. Use this tool instead.
+
+## Side Effects
+Frontend UI only. Does not write to the system clipboard. Reusing the same `display_id` overwrites the previous card.""",
         "parameters": {
             "type": "object",
             "properties": {
                 "display_id": {
                     "type": "string",
-                    "description": """Unique identifier for this display area. Reusing the same ID updates it.""",
+                    # 展示区域唯一标识。重复使用同一 id 会覆盖更新。
+                    "description": """Unique identifier for this display area. Reusing the same ID overwrites the existing card instead of creating a new one.""",
                 },
                 "label": {
                     "type": "string",
-                    "description": """Human-readable title/description of the content.""",
+                    # 展示区域标题/描述。
+                    "description": """Human-readable title shown above the content.""",
                 },
                 "content": {
                     "type": "string",
-                    "description": """The text content to display and copy.""",
+                    # 要展示的文本内容，用户点击即可复制。
+                    "description": """The text content to display. The user can copy it with a single click.""",
                 },
             },
             "required": ["display_id", "label", "content"],
@@ -128,19 +155,33 @@ registry.register(
     name="clear_clipboard_display",
     toolset="clipboard",
     schema={
-        # Remove a copy-to-clipboard display area from the frontend.
-        # If display_id is omitted, all display areas for the current session are cleared.
-        # Returns the list of cleared display IDs.
-        "description": """Remove a copy-to-clipboard display area from the frontend.
-If display_id is omitted, all display areas for the current session are cleared.
+        # 移除前端展示区域。
+        # display_id: 要清除的展示区域 id。不传则清除当前会话全部展示区域。
+        # 调用效果：前端对应卡片消失。
+        # 返回：{ success, cleared: [...], message }
+        # 使用规则：当感觉用户不再需要某卡片时，应主动调用本工具清理，保持面板整洁。
+        "description": """Remove a clipboard display area from the frontend.
 
-Returns the list of cleared display IDs.""",
+## Effect
+The corresponding card disappears from the frontend top panel.
+
+## Returns
+```json
+{ "success": true, "cleared": ["id1", ...], "message": "Cleared clipboard display: id1, ..." }
+```
+
+## Parameters
+- `display_id`: ID of the area to clear. Omit to clear all areas for the current session.
+
+## Usage Rule
+Proactively call this tool when you sense the user no longer needs a card, to keep the panel clean.""",
         "parameters": {
             "type": "object",
             "properties": {
                 "display_id": {
                     "type": "string",
-                    "description": """display_id of the area to clear. Omit to clear all.""",
+                    # 要清除的展示区域 id。省略则清除当前会话全部。
+                    "description": """ID of the display area to clear. Omit to clear all areas for the current session.""",
                 },
             },
             "required": [],

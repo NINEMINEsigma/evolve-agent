@@ -111,28 +111,41 @@ registry.register(
     name="ask_question",
     toolset="core",
     schema={
-        # Ask the current user a question with preset options to choose from, and optionally allow custom input.
-        # Useful for scenarios requiring a user decision, e.g.:
-        #   - Asking the user how to handle a file
-        #   - Letting the user choose from multiple options
-        #   - Collecting user preferences or confirmation
-        # Returns the user's chosen option (option's value) and/or custom_text.
-        # If the user neither selects an option nor enters custom text, answered will be false.
+        # 向当前用户提问，支持预设选项和自定义输入。
+        # 前置条件：必须有活跃的 WebSocket 连接（前端在线）。无连接时调用会失败。
+        # 调用效果：agent 阻塞等待用户回答（永不超时）。阻塞期间 agent 不处理其他任务。
+        # 返回格式：{ question, option: 选中项的 value, custom_text: 自由文本, answered: bool }
+        # 未选择也未输入时 answered=false。
+        # 典型场景：需要用户决策（文件处理方式、多选一）、收集偏好、确认操作。
+        # 副作用：agent 线程阻塞直到用户响应，不应在后台任务中调用。
         "description": """Ask the current user a question with preset options to choose from, and optionally allow custom input.
 
-Useful for scenarios requiring a user decision, e.g.:
-  - Asking the user how to handle a file
-  - Letting the user choose from multiple options
-  - Collecting user preferences or confirmation
+## Prerequisites
+An active WebSocket connection is required (the frontend must be online). Calling without one will fail.
 
-Returns the user's chosen option (option's value) and/or custom_text. If the user neither selects an option nor enters custom text, answered will be false.""",
+## Effect
+The agent blocks and waits for the user's response indefinitely (no timeout). The agent cannot process other tasks while waiting.
+
+## Returns
+```json
+{ "question": "<asked>", "option": "<selected value>", "custom_text": "<free text>", "answered": true|false }
+```
+`answered` is `false` when the user neither selects an option nor enters custom text.
+
+## When to Use
+- Asking the user how to handle a file.
+- Letting the user choose from multiple options.
+- Collecting user preferences or confirmation.
+
+## Side Effects
+The agent thread blocks until the user responds. Do not call this inside background tasks.""",
         "parameters": {
             "type": "object",
             "properties": {
                 "question": {
                     "type": "string",
-                    # The question to ask the user.
-                    "description": """The question to ask the user.""",
+                    # 显示给用户的问题文本。必需。
+                    "description": """The question text to display to the user. Required.""",
                 },
                 "options": {
                     "type": "array",
@@ -144,13 +157,14 @@ Returns the user's chosen option (option's value) and/or custom_text. If the use
                         },
                         "required": ["label", "value"],
                     },
-                    # List of preset options, each with a label (display text) and value (return value). When empty or null, only custom input is allowed.
-                    "description": """List of preset options, each with a label (display text) and value (return value). When empty or null, only custom input is allowed.""",
+                    # 预设选项列表。每项包含 label（显示文本）和 value（返回值）。
+                    # 为空或不传时仅允许自定义输入，allow_custom 自动变为 true。
+                    "description": """List of preset options, each with a `label` (display text) and `value` (returned value). When empty or omitted, only custom input is allowed and `allow_custom` is forced to `true`.""",
                 },
                 "allow_custom": {
                     "type": "boolean",
-                    # Whether to allow custom text input (default true). When false, the user must choose from preset options.
-                    "description": """Whether to allow custom text input (default true). When false, the user must choose from preset options.""",
+                    # 是否允许自由文本输入（默认 true）。false 时用户必须从 options 中选择。
+                    "description": """Whether to allow free-text custom input (default `true`). When `false`, the user must choose from the preset `options`.""",
                     "default": True,
                 },
             },
