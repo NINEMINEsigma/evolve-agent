@@ -13,12 +13,11 @@ from ._store import _subagent_registry
 
 
 def _handle_list_subagents(_args: dict[str, Any]) -> dict:
-    """获取所有已注册子 Agent 的名称列表。"""
-    names = sorted(_subagent_registry.keys())
+    """获取所有已注册子 Agent 的完整配置。"""
     return tool_result(
         success=True,
-        count=len(names),
-        names=names,
+        count=len(_subagent_registry),
+        agents=_subagent_registry,
     )
 
 
@@ -26,8 +25,8 @@ registry.register(
     name="list_subagents",
     toolset="multiagent",
     schema={
-        # 返回所有当前已注册子 Agent 的名称列表。
-        "description": """Return a list of names for all currently registered sub-agents.""",
+        # 返回所有当前已注册子 Agent 的完整配置，key 为名称，value 包含 base_url、model、api_key。
+        "description": """Return the full configuration of all currently registered sub-agents, keyed by name with base_url, model, and api_key fields.""",
         "parameters": {
             "type": "object",
             "properties": {},
