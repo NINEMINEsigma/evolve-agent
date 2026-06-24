@@ -169,6 +169,12 @@ CRON_STORE_FILENAME: str = "cron_jobs.json"
 # 超过此长度时，Agent 会收到提示去日志文件查看完整输出
 CRON_STDOUT_PREVIEW_MAX_LENGTH = 5000
 
+# Cron 最小可设间隔/等待秒数（schedule_cron 和 wait_cron 共用）
+CRON_MIN_INTERVAL_SECONDS: int = 3
+
+# 每个会话最多允许的 Cron 任务数量
+CRON_MAX_JOBS_PER_SESSION: int = 20
+
 
 # ============================================================================
 # 会话

@@ -4,7 +4,7 @@
 会话断开不会终止定时任务，任务在后台继续运行直到完成或被显式取消。
 
 支持两种一次性调度格式：
-  1. ``interval_seconds`` — 从现在起延迟指定秒数后执行一次，最小 10 秒
+  1. ``interval_seconds`` — 从现在起延迟指定秒数后执行一次，最小 CRON_MIN_INTERVAL_SECONDS 秒
   2. Cron 表达式 — 在下一个匹配 5 字段 ``分 时 日 月 周`` 的时间执行一次
 
 Weekday 遵循标准 cron 语义：0=Sunday, 1=Monday, ..., 6=Saturday。
@@ -37,7 +37,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Set
 
 from abstract.tools.registry import registry, tool_error, tool_result
-from entity.constant import CRON_STDOUT_PREVIEW_MAX_LENGTH, CRON_TASK_TIMEOUT, CRON_STORE_FILENAME
+from entity.constant import CRON_STDOUT_PREVIEW_MAX_LENGTH, CRON_TASK_TIMEOUT, CRON_STORE_FILENAME, CRON_MIN_INTERVAL_SECONDS, CRON_MAX_JOBS_PER_SESSION
 from system.subprocess_utils import build_subprocess_env, completed_process_from_bytes, windows_process_group_flags
 
 logger = logging.getLogger(__name__)
@@ -170,7 +170,6 @@ class _CronTask:
 
 _cron_tasks: dict[str, dict[str, _CronTask]] = {}
 _cron_lock: threading.RLock = threading.RLock()
-_MAX_JOBS_PER_SESSION: int = 20
 
 # ── 事件回调 ──────────────────────────────────────────────────
 # 由 gateway/server.py 注册，用于在任务执行完成后向前端推送结果。
@@ -591,8 +590,8 @@ async def _handle_schedule_cron(args: dict[str, Any]) -> dict:
         schedule_type = "interval"
         schedule_value = raw_schedule
         interval_sec = int(raw_schedule)
-        if interval_sec < 10:
-            return tool_error("Interval must be at least 10 seconds")
+        if interval_sec < CRON_MIN_INTERVAL_SECONDS:
+            return tool_error(f"Interval must be at least {CRON_MIN_INTERVAL_SECONDS} seconds")
     else:
         schedule_type = "cron"
         schedule_value = raw_schedule
@@ -609,9 +608,9 @@ async def _handle_schedule_cron(args: dict[str, Any]) -> dict:
     # ── 任务数量限制 ──
     with _cron_lock:
         current_count = len(_cron_tasks.get(session_id, {}))
-    if current_count >= _MAX_JOBS_PER_SESSION:
+    if current_count >= CRON_MAX_JOBS_PER_SESSION:
         return tool_error(
-            f"Maximum {_MAX_JOBS_PER_SESSION} cron jobs per session reached"
+            f"Maximum {CRON_MAX_JOBS_PER_SESSION} cron jobs per session reached"
         )
 
     # 审批由 AgentLoop 统一入口处理（handler 内不再重复确认）
@@ -800,9 +799,9 @@ async def _handle_reschedule_cron_job(args: dict[str, Any]) -> dict:
     # ── 任务数量限制 ──
     with _cron_lock:
         current_count = len(_cron_tasks.get(session_id, {}))
-    if current_count >= _MAX_JOBS_PER_SESSION:
+    if current_count >= CRON_MAX_JOBS_PER_SESSION:
         return tool_error(
-            f"Maximum {_MAX_JOBS_PER_SESSION} cron jobs per session reached"
+            f"Maximum {CRON_MAX_JOBS_PER_SESSION} cron jobs per session reached"
         )
 
     # 审批由 AgentLoop 统一入口处理（handler 内不再重复确认）
@@ -869,25 +868,28 @@ async def _handle_wait_cron(args: dict[str, Any]) -> dict:
         return tool_error("'duration' is required and must be a positive integer (seconds)")
 
     duration_sec = int(raw_duration)
-    if duration_sec < 10:
-        return tool_error("Duration must be at least 10 seconds")
+    if duration_sec < CRON_MIN_INTERVAL_SECONDS:
+        return tool_error(f"Duration must be at least {CRON_MIN_INTERVAL_SECONDS} seconds")
 
-    # ── 同一会话只允许一个活跃 wait 任务 ──
+    # ── 同一会话只保留一个 wait 任务 ──
     with _cron_lock:
-        for existing in _cron_tasks.get(session_id, {}).values():
-            if existing.is_wait and existing.should_schedule:
-                return tool_error(
-                    f"wait_cron is NOT sleep — a previous wait task (task_id={existing.task_id}) "
-                    f"is still pending in this session. Do not create a new wait before the previous one completes. "
-                    f"Use schedule_cron if you need to schedule actual work, not waiting."
-                )
+        session_tasks = _cron_tasks.get(session_id)
+        if session_tasks:
+            for tid, existing in list(session_tasks.items()):
+                if existing.is_wait:
+                    existing.should_schedule = False
+                    if existing._timer:
+                        existing._timer.cancel()
+                        existing._timer = None
+                    session_tasks.pop(tid, None)
+                    logger.info("Replaced previous wait task | old_task=%s session=%s", tid, session_id)
 
     # ── 任务数量限制 ──
     with _cron_lock:
         current_count = len(_cron_tasks.get(session_id, {}))
-    if current_count >= _MAX_JOBS_PER_SESSION:
+    if current_count >= CRON_MAX_JOBS_PER_SESSION:
         return tool_error(
-            f"Maximum {_MAX_JOBS_PER_SESSION} cron jobs per session reached"
+            f"Maximum {CRON_MAX_JOBS_PER_SESSION} cron jobs per session reached"
         )
 
     task_id: str = uuid.uuid4().hex[:12]
@@ -1017,11 +1019,11 @@ registry.register(
         # For loops, polling, or long-term observation, wait for [cron-result] before scheduling the next; do not pre-create future chained tasks.
         # Raw stdout/stderr are written to a log file and injected back to the Agent; the user does not automatically see raw output.
         # This is NON-BLOCKING: the Agent continues immediately after scheduling, the task runs in the background, and a [cron-result] notifies on completion.
-        "description": """Schedule a one-shot background task. It runs exactly once.
+        "description": f"""Schedule a one-shot background task. It runs exactly once.
 This is NON-BLOCKING: the Agent continues immediately after scheduling, and the task runs in the background. A [cron-result] message is delivered when it completes. It is NOT sleep.
 
 Two one-shot schedule formats are supported:
-  1. Delay: a number in seconds, e.g. '300' means run once after 300 seconds; minimum 10s.
+  1. Delay: a number in seconds, e.g. '300' means run once after 300 seconds; minimum {CRON_MIN_INTERVAL_SECONDS}s.
   2. Cron expression: 5 fields 'minute hour day month weekday', e.g. '0 9 * * 1' means run once at the next matching Monday 9:00 AM.
      Weekday: 0=Sunday, 1=Monday, ..., 6=Saturday.
 
@@ -1195,8 +1197,8 @@ Returns:
             "properties": {
                 "duration": {
                     "type": "string",
-                    # 等待时长，以秒为单位，最小 10 秒。
-                    "description": "Delay in seconds before the reminder triggers. Minimum 10 seconds.",
+                    # 等待时长，以秒为单位，最小 CRON_MIN_INTERVAL_SECONDS 秒。
+                    "description": f"Delay in seconds before the reminder triggers. Minimum {CRON_MIN_INTERVAL_SECONDS} seconds.",
                 },
                 "message": {
                     "type": "string",
