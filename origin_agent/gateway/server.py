@@ -238,6 +238,8 @@ async def _send_tool_event(
     对已中断的 session 静默丢弃事件，
     防止前端在用户点击停止后收到过期的工具通知。
     """
+    if event_type not in ("stream_delta", "usage_update"):
+        logger.info("[ws push] session=%s type=%s tool=%s payload_len=%d", session_id, event_type, tool_name, len(payload))
     # 如果 session 已被中断，跳过发送工具事件。
     if _agent_loop is not None and hasattr(_agent_loop, "is_interrupted"):
         try:
@@ -374,7 +376,11 @@ async def _send_tool_event(
     )
     try:
         await ws.send_text(msg.to_json())
+        if event_type not in ("stream_delta", "usage_update"):
+            logger.info("[ws push ok] session=%s type=%s tool=%s", session_id, event_type, tool_name)
     except Exception:
+        if event_type not in ("stream_delta", "usage_update"):
+            logger.warning("[ws push fail] session=%s type=%s tool=%s", session_id, event_type, tool_name)
         pass  # 客户端已断开 — 忽略
 
 # ---------------------------------------------------------------------------

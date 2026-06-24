@@ -13,6 +13,13 @@ interface HeaderProps {
   sidebarCollapsed: boolean;
   onToggleSidebar: () => void;
   onToggleHandsfree: (enabled: boolean) => void;
+  waiting?: boolean;
+  pendingConfirm?: { request_id: string } | null;
+  streamingMessage?: { id: string } | null;
+  ignoreStaleRef?: React.RefObject<boolean>;
+  lastRecvAtRef?: React.RefObject<number>;
+  lastPongAtRef?: React.RefObject<number>;
+  recvTick?: number;
 }
 
 export default function Header({
@@ -28,6 +35,13 @@ export default function Header({
   sidebarCollapsed,
   onToggleSidebar,
   onToggleHandsfree,
+  waiting,
+  pendingConfirm,
+  streamingMessage,
+  ignoreStaleRef,
+  lastRecvAtRef,
+  lastPongAtRef,
+  recvTick,
 }: HeaderProps) {
   const [cmdMenuOpen, setCmdMenuOpen] = useState(false);
   const [menuPos, setMenuPos] = useState<{ top: number; left: number } | null>(null);
@@ -114,6 +128,15 @@ export default function Header({
             {sessionId}
           </span>
         )}
+        <DebugBadges
+          waiting={waiting}
+          pendingConfirm={pendingConfirm}
+          streamingMessage={streamingMessage}
+          ignoreStaleRef={ignoreStaleRef}
+          lastRecvAtRef={lastRecvAtRef}
+          lastPongAtRef={lastPongAtRef}
+          recvTick={recvTick}
+        />
         <button
           ref={cmdBtnRef}
           className="header-action-btn"
@@ -185,6 +208,78 @@ export default function Header({
         </div>
       )}
     </header>
+  );
+}
+
+function DebugBadges({
+  waiting,
+  pendingConfirm,
+  streamingMessage,
+  ignoreStaleRef,
+  lastRecvAtRef,
+  lastPongAtRef,
+  recvTick,
+}: {
+  waiting?: boolean;
+  pendingConfirm?: { request_id: string } | null;
+  streamingMessage?: { id: string } | null;
+  ignoreStaleRef?: React.RefObject<boolean>;
+  lastRecvAtRef?: React.RefObject<number>;
+  lastPongAtRef?: React.RefObject<number>;
+  recvTick?: number;
+})
+{
+  const [, forceRender] = useState(0);
+  useEffect(() => {
+    const id = setInterval(() => forceRender((v) => v + 1), 500);
+    return () => clearInterval(id);
+  }, []);
+
+  const now = Date.now();
+  const lastRecv = lastRecvAtRef?.current ?? now;
+  const lastPong = lastPongAtRef?.current ?? now;
+  const recvStall = now - lastRecv;
+  const pongStall = now - lastPong;
+  const active = waiting || !!streamingMessage;
+  const recvStallThreshold = active ? 2000 : 30000;
+
+  return (
+    <span className="debug-badges" key={recvTick}>
+      {waiting && (
+        <span className="debug-badge pulse" title="waiting=true">
+          处理中 ⚡
+        </span>
+      )}
+      {streamingMessage && (
+        <span className="debug-badge ok" title={`stream id=${streamingMessage.id}`}>
+          流式 ✍️
+        </span>
+      )}
+      {pendingConfirm && (
+        <span className="debug-badge danger" title={`confirm id=${pendingConfirm.request_id}`}>
+          待审批 ⏳
+        </span>
+      )}
+      {ignoreStaleRef?.current && (
+        <span className="debug-badge warn" title="ignoreStaleRef=true">
+          IGN
+        </span>
+      )}
+      {recvStall >= recvStallThreshold ? (
+        <span className="debug-badge danger" title={`last recv ${(recvStall / 1000).toFixed(1)}s ago`}>
+          接收停滞 🛑 {Math.floor(recvStall / 1000)}s
+        </span>
+      ) : (
+        <span className="debug-badge ok" title={`last recv ${recvStall}ms ago`}>
+          接收正常
+        </span>
+      )}
+      {pongStall >= 35000 && (
+        <span className="debug-badge warn" title={`last pong ${(pongStall / 1000).toFixed(1)}s ago`}>
+          心跳异常
+        </span>
+      )}
+    </span>
   );
 }
 

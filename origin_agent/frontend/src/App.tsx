@@ -271,6 +271,13 @@ export default function App() {
           sidebarCollapsed={sidebarCollapsed}
           onToggleSidebar={() => setSidebarCollapsed((v) => !v)}
           onToggleHandsfree={ws.toggleHandsfree}
+          waiting={ws.waiting}
+          pendingConfirm={ws.pendingConfirm}
+          streamingMessage={ws.streamingMessage}
+          ignoreStaleRef={ws.ignoreStaleRef}
+          lastRecvAtRef={ws.lastRecvAtRef}
+          lastPongAtRef={ws.lastPongAtRef}
+          recvTick={ws.recvTick}
         />
 
         <TaskProgressPanel
