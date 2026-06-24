@@ -121,6 +121,41 @@
   color: var(--text-muted);
 }
 
+.search-tag-cloud {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px 6px;
+  padding: 8px 2px 2px;
+  max-height: 92px;
+  overflow-y: auto;
+}
+
+.search-tag-btn {
+  font-size: 11px;
+  line-height: 1;
+  padding: 4px 8px;
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  background: var(--bg-tertiary);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: background 0.12s, color 0.12s, border-color 0.12s;
+  white-space: nowrap;
+  font-family: inherit;
+}
+
+.search-tag-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+  border-color: var(--accent);
+}
+
+.search-tag-btn.active {
+  background: var(--accent-grad);
+  color: #fff;
+  border-color: transparent;
+}
+
 .session-group-header {
   font-size: 11px;
   font-weight: 600;

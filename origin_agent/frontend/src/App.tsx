@@ -173,6 +173,7 @@ export default function App() {
         sessionId={ws.sessionId}
         searchQuery={ws.searchQuery}
         setSearchQuery={ws.setSearchQuery}
+        allTags={ws.allTags}
         mergeMode={ws.mergeMode}
         selectedForMerge={ws.selectedForMerge}
         onToggleMergeMode={() => {

@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { SessionInfo } from "../types";
 import { formatTime } from "../utils";
 
@@ -7,6 +8,7 @@ interface SidebarProps {
   sessionId: string;
   searchQuery: string;
   setSearchQuery: (q: string) => void;
+  allTags: string[];
   mergeMode: boolean;
   selectedForMerge: Set<string>;
   onToggleMergeMode: () => void;
@@ -144,6 +146,7 @@ export default function Sidebar({
   sessionId,
   searchQuery,
   setSearchQuery,
+  allTags,
   mergeMode,
   selectedForMerge,
   onToggleMergeMode,
@@ -154,6 +157,7 @@ export default function Sidebar({
   onMergeSessions,
   sidebarSessions,
 }: SidebarProps) {
+  const [searchFocused, setSearchFocused] = useState(false);
   const currentSession = sessions.find((s) => s.id === sessionId);
   const parentSessions = currentSession?.parents
     ?.map((pid) => sessions.find((s) => s.id === pid))
@@ -172,10 +176,29 @@ export default function Sidebar({
               placeholder="Search chats..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
+              onFocus={() => setSearchFocused(true)}
+              onBlur={() => setSearchFocused(false)}
               onKeyDown={(e) => {
                 if (e.key === 'Enter' && !e.shiftKey) e.preventDefault();
               }}
             />
+            {(searchFocused || searchQuery) && allTags.length > 0 && (
+              <div className="search-tag-cloud">
+                {allTags.map((t) => {
+                  const active = searchQuery.toLowerCase().trim() === t.toLowerCase();
+                  return (
+                    <button
+                      key={t}
+                      className={`search-tag-btn ${active ? 'active' : ''}`}
+                      onMouseDown={(e) => e.preventDefault()}
+                      onClick={() => setSearchQuery(active ? '' : t)}
+                    >
+                      {t}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
           </div>
           <button
             className={`icon-btn ${mergeMode ? 'active' : ''}`}
