@@ -80,6 +80,9 @@ export function useWebSocket() {
   const lastMessageCountRef = useRef(0);
   const streamDoneRef = useRef(false);
   const reasoningStartRef = useRef<number | null>(null);
+  const lastRecvAtRef = useRef<number>(Date.now());
+  const lastPongAtRef = useRef<number>(Date.now());
+  const [recvTick, setRecvTick] = useState(0);
 
   const nextMessageIndex = useCallback((items: ChatMessage[]) => {
     const indexes = items
@@ -274,6 +277,11 @@ export function useWebSocket() {
 
     ws.onmessage = (e) => {
       const msg: WSMessage = JSON.parse(e.data);
+      const now = Date.now();
+      lastRecvAtRef.current = now;
+      setRecvTick((v) => v + 1);
+      const payloadLen = typeof e.data === "string" ? e.data.length : 0;
+      console.debug(`[ws recv] type=${msg.type} len=${payloadLen} at=${now}`);
       if (msg.type === "system") {
         const raw = typeof msg.content === "string" ? msg.content : JSON.stringify(msg.content ?? "");
         try {
@@ -548,6 +556,9 @@ export function useWebSocket() {
       }
       else if (msg.type === "error") {
         addMessage("error", msg.message ?? "");
+      }
+      else if (msg.type === "pong") {
+        lastPongAtRef.current = Date.now();
       }
       else if (msg.type === "confirm_request") {
         if (msg.request_id) {
@@ -1184,6 +1195,10 @@ export function useWebSocket() {
     pendingImages,
     streamingMessage,
     allTags,
+    ignoreStaleRef,
+    lastRecvAtRef,
+    lastPongAtRef,
+    recvTick,
     // actions
     send,
     handleFileUpload,

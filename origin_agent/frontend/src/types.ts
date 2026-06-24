@@ -24,7 +24,9 @@ export type MessageType =
   | "stream_delta"
   | "stream_done"
   | "error"
-  | "subagent_update";
+  | "subagent_update"
+  | "ping"
+  | "pong";
 
 export interface WSMessage {
   type: MessageType;

@@ -30,14 +30,14 @@ todos:
     content: skills.py — 7 个工具
     status: completed
   - id: filesystem
-    content: filesystem.py — read_file, write_file, append_file 完成（共 18 个工具）
-    status: pending
+    content: filesystem.py — 19 个工具全部完成 ✅（含新增 copy_folder、delete_file 不删目录、resolve_path 约束）
+    status: completed
   - id: constant-refactor
     content: constant.py — 常量文件重新分区整理
     status: completed
   - id: extools
-    content: component/extools/ — 全部扩展工具
-    status: pending
+    content: component/extools/ — archive_tools.py (compress, decompress) 完成
+    status: in_progress
   - id: multiagent
     content: component/mutliagenttools/ — 全部多 Agent 工具
     status: pending
