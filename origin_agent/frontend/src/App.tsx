@@ -164,6 +164,11 @@ export default function App() {
     ws.fetchAllTags();
   }, []);
 
+  useEffect(() => {
+    const cleanup = ws.attachScrollListener();
+    return cleanup;
+  }, [ws.attachScrollListener, ws.chatAreaRef]);
+
   return (
     <ErrorBoundary>
       <div className="app">
@@ -301,6 +306,7 @@ export default function App() {
           onToggleCollapse={ws.toggleMessageCollapse}
           onEditMessage={ws.editMessage}
           bottomRef={ws.bottomRef}
+          chatAreaRef={ws.chatAreaRef}
           onDropFiles={ws.handleFileUpload}
           streamingMessage={ws.streamingMessage}
         />

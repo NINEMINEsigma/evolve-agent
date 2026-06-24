@@ -13,11 +13,13 @@ interface ChatAreaProps {
   bottomRef: React.RefObject<HTMLDivElement>;
   onDropFiles: (files: FileList) => void;
   streamingMessage?: ChatMessage | null;
+  chatAreaRef?: React.RefObject<HTMLDivElement>;
 }
 
-export default function ChatArea({ messages, waiting, archived, onImageClick, onToggleCollapse, onEditMessage, bottomRef, onDropFiles, streamingMessage }: ChatAreaProps) {
+export default function ChatArea({ messages, waiting, archived, onImageClick, onToggleCollapse, onEditMessage, bottomRef, onDropFiles, streamingMessage, chatAreaRef: externalChatAreaRef }: ChatAreaProps) {
   const [dragOver, setDragOver] = useState(false);
-  const chatAreaRef = useRef<HTMLDivElement>(null);
+  const internalChatAreaRef = useRef<HTMLDivElement>(null);
+  const chatAreaRef = externalChatAreaRef || internalChatAreaRef;
   const messageList = useMemo(() =>
     messages.map((m) => (
       <MessageItem
