@@ -384,6 +384,18 @@ class Sandbox:
         import shutil
         shutil.copy2(src.real, dst.real)
 
+    def copy_folder(self, logical_src: str, logical_dst: str) -> None:
+        """递归复制目录（源只读、目标写入）。"""
+        src: ResolvedPath = self.resolve_read(logical_src)
+        dst: ResolvedPath = self.resolve_write(logical_dst)
+        if not src.real.is_dir():
+            raise SandboxError(f"Source is not a directory: {logical_src}")
+        if dst.real.exists():
+            raise SandboxError(f"Destination already exists: {logical_dst}")
+        dst.real.parent.mkdir(parents=True, exist_ok=True)
+        import shutil
+        shutil.copytree(src.real, dst.real)
+
     def move(self, logical_src: str, logical_dst: str) -> None:
         """移动或重命名文件/目录（源只读、目标写入）。"""
         src: ResolvedPath = self.resolve_read(logical_src)

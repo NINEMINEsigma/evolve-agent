@@ -198,7 +198,54 @@ registry.register(
     toolset="archive",
     schema={
         # 将文件或目录压缩为指定格式的压缩包。
-        "description": """Compress a file or directory into an archive. Supported formats: zip, tar, gztar, bztar, xztar. Paths must use a namespace prefix (ws:, fork:, fix:, skills:).""",
+        # ⚠️ 如果 output 已存在，会被自动删除后重新创建。
+        #
+        # ## 前置条件
+        # - source 文件或目录必须存在。
+        # - output 路径所在命名空间必须是可写的。
+        #
+        # ## 调用效果
+        # 将 source（文件或目录）压缩为指定格式的压缩包到 output 路径。
+        # 如果 output 已存在（无论文件还是目录），会被删除后重新创建。
+        # 返回 source_is_dir 表示源是文件还是目录。
+        #
+        # ## 返回
+        # ```json
+        # {"success": true, "source": "ws:src", "output": "ws:src.zip", "format": "zip", "source_is_dir": true}
+        # ```
+        #
+        # ## 何时使用
+        # - 打包多份文件以便用 publish_file 一次性发送。
+        # - 打包文件或目录用于传输或归档。
+        # - 备份目录结构。
+        #
+        # ## 副作用/注意
+        # - ⚠️ output 已存在时被无条件删除后重新创建。
+        # - 压缩目录时，压缩包内包含目录本身作为根条目（非仅内容）。
+        # - 目录压缩自动递归处理。
+        "description": """Compress a file or directory into an archive. Supported formats: zip, tar, gztar, bztar, xztar. ⚠️ If the output path already exists, it is automatically deleted and recreated.
+
+## Prerequisites
+- The source file or directory must exist.
+- The output path namespace must be writable.
+
+## Effect
+Compresses the source (file or directory) into an archive at the output path. If the output already exists (file or directory), it is deleted first and recreated. Returns `source_is_dir` indicating whether the source was a file or directory.
+
+## Returns
+```json
+{"success": true, "source": "ws:src", "output": "ws:src.zip", "format": "zip", "source_is_dir": true}
+```
+
+## When to Use
+- Package multiple files so they can be sent as a single archive via publish_file.
+- Package files or directories for transfer or archiving.
+- Back up a directory structure.
+
+## Side Effects / Notes
+- ⚠️ If output already exists, it is unconditionally deleted and recreated.
+- When compressing a directory, the archive contains the directory itself as the root entry (not just its contents).
+- Directory compression is recursive.""",
         "parameters": {
             "type": "object",
             "properties": {
@@ -231,8 +278,50 @@ registry.register(
     name="decompress",
     toolset="archive",
     schema={
-        # 将压缩包解压到指定目录。支持格式自动推断。
-        "description": """Decompress an archive into a directory. Supported formats: zip, tar, gztar, bztar, xztar. Format is inferred from filename if not specified. Paths must use a namespace prefix (ws:, fork:, fix:, skills:).""",
+        # 将压缩包解压到指定目录。支持格式自动推断（根据文件名后缀）。
+        # format 留空时自动从文件后缀推断：.zip → zip、.tar.gz/.tgz → gztar 等。
+        #
+        # ## 前置条件
+        # - source 压缩包必须存在。
+        # - output_dir 路径所在命名空间必须是可写的。
+        #
+        # ## 调用效果
+        # 将压缩包解压到目标目录。自动创建目标目录（如不存在）。
+        # format 可选，留空时根据文件后缀自动推断。
+        #
+        # ## 返回
+        # ```json
+        # {"success": true, "source": "ws:src.zip", "output_dir": "ws:extracted/", "format": "zip"}
+        # ```
+        #
+        # ## 何时使用
+        # - 解压 .zip、.tar.gz 等压缩包。
+        #
+        # ## 副作用/注意
+        # - 写入文件系统。目标目录自动创建。
+        # - format 自动推断规则：.zip→zip, .tar.gz/.tgz→gztar, .tar.bz2/.tbz2→bztar, .tar.xz/.txz→xztar, .tar→tar。
+        # - 无法推断格式时需明确指定 format。
+        "description": """Decompress an archive into a directory. Supported formats: zip, tar, gztar, bztar, xztar. Format is auto-inferred from filename suffix when not specified.
+
+## Prerequisites
+- The source archive must exist.
+- The output_dir namespace must be writable.
+
+## Effect
+Decompresses the archive into the target directory. The target directory is automatically created if it does not exist. The format can be left empty to auto-infer from the file suffix.
+
+## Returns
+```json
+{"success": true, "source": "ws:src.zip", "output_dir": "ws:extracted/", "format": "zip"}
+```
+
+## When to Use
+- Extract .zip, .tar.gz, and other compressed archives.
+
+## Side Effects / Notes
+- Writes to the file system. Target directory is auto-created.
+- Auto-inference: .zip→zip, .tar.gz/.tgz→gztar, .tar.bz2/.tbz2→bztar, .tar.xz/.txz→xztar, .tar→tar.
+- If format cannot be inferred, specify it explicitly.""",
         "parameters": {
             "type": "object",
             "properties": {
