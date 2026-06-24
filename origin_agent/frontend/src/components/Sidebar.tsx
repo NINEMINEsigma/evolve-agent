@@ -88,7 +88,7 @@ function SessionListItem({
   return (
     <div
       data-tooltip={relationTooltip || buildTooltip(s)}
-      className={`session-item ${s.id === sessionId ? "active" : ""} ${isArchived ? "archived" : ""} ${isParentOfCurrent ? "parent-session" : ""} ${isContinuationOfCurrent ? "continuation-session" : ""} ${mergeMode && !isArchived ? "merge-unavailable" : ""}`}
+      className={`session-item ${s.id === sessionId ? "active" : ""} ${isArchived ? "archived" : ""} ${isParentOfCurrent ? "parent-session" : ""} ${isContinuationOfCurrent ? "continuation-session" : ""} ${mergeMode && !isArchived ? "merge-unavailable" : ""} ${mergeMode && selectedForMerge.has(s.id) ? "merge-selected" : ""}`}
       onClick={() => {
         if (canSelectForMerge) onToggleMergeSelect(s.id);
         else if (!mergeMode) onSwitchSession(s.id);
@@ -99,15 +99,23 @@ function SessionListItem({
     >
       {mergeMode && (
         isArchived ? (
-          <input
-            type="checkbox"
-            checked={selectedForMerge.has(s.id)}
-            onChange={() => onToggleMergeSelect(s.id)}
-            onClick={(e) => e.stopPropagation()}
-            className="merge-checkbox"
-          />
+          <span
+            className={`merge-checkbox-custom ${selectedForMerge.has(s.id) ? "checked" : ""}`}
+            onClick={(e) => {
+              e.stopPropagation();
+              onToggleMergeSelect(s.id);
+            }}
+            role="checkbox"
+            aria-checked={selectedForMerge.has(s.id)}
+          >
+            {selectedForMerge.has(s.id) && (
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+                <polyline points="20 6 9 17 4 12" />
+              </svg>
+            )}
+          </span>
         ) : (
-          <span className="merge-placeholder" data-tooltip="未归档会话不可合并">—</span>
+          <span className="merge-checkbox-custom disabled" data-tooltip="未归档会话不可合并" />
         )
       )}
       <span className="session-item-title">
@@ -176,9 +184,10 @@ export default function Sidebar({
             aria-label={mergeMode ? '退出多选' : '多选合并'}
           >
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <circle cx="5" cy="12" r="1.6" />
-              <circle cx="12" cy="12" r="1.6" />
-              <circle cx="19" cy="12" r="1.6" />
+              <rect x="3" y="5" width="6" height="6" rx="1" />
+              <rect x="3" y="13" width="6" height="6" rx="1" />
+              <line x1="13" y1="7" x2="21" y2="7" />
+              <line x1="13" y1="17" x2="21" y2="17" />
             </svg>
           </button>
           <button
@@ -211,7 +220,7 @@ export default function Sidebar({
                 onContextMenu={onContextMenu}
               />
               {s.id === sessionId && (parentSessions.length > 0 || continuationSession) && (
-                <div className="relation-shortcuts relation-shortcuts">
+                <div className="relation-shortcuts">
                   {parentSessions.map((parent) => (
                     <RelatedSessionShortcut
                       key={parent.id}
@@ -233,12 +242,18 @@ export default function Sidebar({
           ))
         )}
       </div>
-      {mergeMode && selectedForMerge.size >= 2 && (
+      {mergeMode && (
         <div className="merge-bar">
-          <span>已选 {selectedForMerge.size} 个会话</span>
-          <button onClick={() => { onMergeSessions(Array.from(selectedForMerge)); }}>
+          <span className="merge-count-badge">已选 {selectedForMerge.size}</span>
+          <button
+            className="merge-btn"
+            disabled={selectedForMerge.size < 2}
+            data-tooltip={selectedForMerge.size < 2 ? "请至少选择 2 个已归档会话" : "合并为新的延续会话"}
+            onClick={() => { onMergeSessions(Array.from(selectedForMerge)); }}
+          >
             合并延续
           </button>
+          <span className="merge-hint">仅已归档会话可合并</span>
         </div>
       )}
     </aside>
