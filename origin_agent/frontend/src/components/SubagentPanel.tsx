@@ -25,16 +25,7 @@ export default function SubagentPanel({
   }, [open]);
 
   if (!open) {
-    if (items.length === 0) return null;
-    return (
-      <div
-        className="subagent-trigger-bar"
-        onClick={onToggle}
-        data-tooltip="展开子会话面板"
-      >
-        <span className="subagent-trigger-icon">◀</span>
-      </div>
-    );
+    return null;
   }
 
   const resolvedActiveId =

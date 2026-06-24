@@ -1,40 +1,35 @@
 /* ── Drawer ── */
-.drawer-trigger-bar {
-  position: fixed;
-  top: 50%;
-  right: 0;
-  transform: translateY(-50%);
+.right-trigger-strip {
+  display: flex;
+  flex-direction: column;
   width: 8px;
-  height: 60px;
-  background: var(--bg-hover);
-  border: 1px solid var(--border);
-  border-right: none;
-  border-radius: 6px 0 0 6px;
-  cursor: pointer;
+  height: 100%;
+  flex-shrink: 0;
+  position: relative;
   z-index: 100;
+}
+
+.right-trigger-bar {
+  flex: 1 1 auto;
+  min-height: 0;
+  width: 8px;
+  background: var(--bg-hover);
+  border-left: 1px solid var(--border);
+  cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: center;
   transition: width 0.2s ease, background 0.15s;
   opacity: 0.6;
+  position: relative;
 }
 
-.drawer-trigger-bar.subagent {
-  top: calc(50% - 80px);
-  background: rgba(100, 210, 255, 0.25);
-}
-
-.drawer-trigger-bar.subagent:hover {
-  background: #64d2ff;
-}
-
-.drawer-trigger-bar:hover {
+.right-trigger-bar:hover {
   width: 22px;
-  background: var(--accent-grad);
   opacity: 1;
 }
 
-.drawer-trigger-icon {
+.right-trigger-icon {
   font-size: 10px;
   color: var(--text-secondary);
   opacity: 0;
@@ -42,9 +37,25 @@
   user-select: none;
 }
 
-.drawer-trigger-bar:hover .drawer-trigger-icon {
+.right-trigger-bar:hover .right-trigger-icon {
   opacity: 1;
   color: #fff;
+}
+
+.resource-trigger-bar {
+  border-bottom: 1px solid var(--border);
+}
+
+.resource-trigger-bar:hover {
+  background: var(--accent-grad);
+}
+
+.subagent-trigger-bar {
+  background: rgba(100, 210, 255, 0.25);
+}
+
+.subagent-trigger-bar:hover {
+  background: #64d2ff;
 }
 
 .drawer-overlay {
@@ -584,39 +595,4 @@
 
 .subagent-panel-body .subagent-chat {
   max-height: none;
-}
-
-.subagent-trigger-bar {
-  width: 8px;
-  height: 100%;
-  background: var(--bg-hover);
-  border-left: 1px solid var(--border);
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  transition: width 0.2s ease, background 0.15s;
-  opacity: 0.6;
-  flex-shrink: 0;
-  position: relative;
-  z-index: 101;
-}
-
-.subagent-trigger-bar:hover {
-  width: 22px;
-  background: #64d2ff;
-  opacity: 1;
-}
-
-.subagent-trigger-icon {
-  font-size: 10px;
-  color: var(--text-secondary);
-  opacity: 0;
-  transition: opacity 0.15s;
-  user-select: none;
-}
-
-.subagent-trigger-bar:hover .subagent-trigger-icon {
-  opacity: 1;
-  color: #fff;
 }

@@ -345,9 +345,24 @@ export default function App() {
         />
       </div>
 
-      {!drawerOpen && !subagentPanelOpen && (
-        <div className="drawer-trigger-bar" onClick={() => setDrawerOpen(true)} data-tooltip="打开资源/任务抽屉">
-          <span className="drawer-trigger-icon">◀</span>
+      {!(drawerOpen || subagentPanelOpen) && (
+        <div className="right-trigger-strip">
+          <div
+            className="right-trigger-bar resource-trigger-bar"
+            onClick={() => setDrawerOpen(true)}
+            data-tooltip="打开资源/任务抽屉"
+          >
+            <span className="right-trigger-icon">◀</span>
+          </div>
+          {Object.keys(ws.subagentSessions).length > 0 && !subagentPanelOpen && (
+            <div
+              className="right-trigger-bar subagent-trigger-bar"
+              onClick={() => setSubagentPanelOpen(true)}
+              data-tooltip="展开子会话面板"
+            >
+              <span className="right-trigger-icon">◀</span>
+            </div>
+          )}
         </div>
       )}
 
