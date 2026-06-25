@@ -28,7 +28,7 @@ from abstract.tools.registry import registry as tool_registry
 from system.context import get_runtime_context
 
 from .context import SubRuntimeContext, build_subagent_context
-from .loop import SUB_MESSAGE_SEPARATOR, SubAgentLoop, current_subagent_loop
+from .loop import SUB_MESSAGE_SEPARATOR, SubAgentLoop, current_subagent_loop, format_user_message
 
 logger = logging.getLogger(__name__)
 
@@ -57,6 +57,8 @@ class WaitingEntry:
         temperature: float,
         authorized_tools: list[str],
         initial_prompt: str,
+        user_name: str,
+        message_type: str,
         history_path: str = "",
     ) -> None:
         self.session_id: str = session_id
@@ -64,6 +66,8 @@ class WaitingEntry:
         self.temperature: float = temperature
         self.authorized_tools: list[str] = authorized_tools
         self.initial_prompt: str = initial_prompt
+        self.user_name: str = user_name
+        self.message_type: str = message_type
         self.history_path: str = history_path
 
 
@@ -103,6 +107,8 @@ class SubAgentOrchestrator:
         temperature: float,
         authorized_tools: list[str],
         initial_prompt: str,
+        user_name: str,
+        message_type: str,
         parent_session_id: str,
         history_path: str | None = None,
     ) -> dict[str, Any]:
@@ -131,6 +137,8 @@ class SubAgentOrchestrator:
                     temperature=temperature,
                     authorized_tools=authorized_tools,
                     initial_prompt=initial_prompt,
+                    user_name=user_name,
+                    message_type=message_type,
                     history_path=history_path or "",
                 )
             )
@@ -148,7 +156,7 @@ class SubAgentOrchestrator:
         # 立即启动
         await self._start_subagent(
             session_id, profile, temperature, authorized_tools,
-            initial_prompt, history_path,
+            initial_prompt, user_name, message_type, history_path,
         )
         return {
             "success": True,
@@ -164,7 +172,13 @@ class SubAgentOrchestrator:
         sub._outbox.clear()
         return list(outbox)
 
-    async def chat(self, session_id: str, message: str) -> dict[str, Any]:
+    async def chat(
+        self,
+        session_id: str,
+        message: str,
+        user_name: str,
+        message_type: str,
+    ) -> dict[str, Any]:
         """父 Agent 向子 Agent 发送消息。"""
         sub = self._active.get(session_id)
         if sub is None:
@@ -181,12 +195,13 @@ class SubAgentOrchestrator:
                 "session_id": session_id,
                 "error": "Sub-agent not found (may have been stopped or completed).",
             }
-        sub.inject_parent_message(message)
+        sub.inject_parent_message(message, user_name, message_type)
         # 推送父→子消息到前端子会话面板
+        wrapped = format_user_message(user_name, message_type, message)
         await self._push_subagent_ws(
             session_id,
             self._subagent_names.get(session_id, ""),
-            {"role": "user", "content": message},
+            {"role": "user", "content": wrapped},
         )
         # 顺手收集一次 outbox，让父 Agent 获得即时反馈
         outbox = self._drain_outbox(sub)
@@ -406,6 +421,8 @@ class SubAgentOrchestrator:
         temperature: float,
         authorized_tools: list[str],
         initial_prompt: str,
+        user_name: str,
+        message_type: str,
         history_path: str | None = None,
     ) -> None:
         """创建 SubAgentLoop 并以 asyncio.Task 启动。"""
@@ -495,13 +512,14 @@ class SubAgentOrchestrator:
         )
 
         # 推送 initial_prompt 到前端面板，确保刷新时不丢失
+        wrapped_initial = format_user_message(user_name, message_type, initial_prompt)
         await self._push_subagent_ws(
             session_id,
             profile.get("_name", ""),
-            {"role": "user", "content": initial_prompt},
+            {"role": "user", "content": wrapped_initial},
         )
 
-        task = asyncio.create_task(loop.run(initial_prompt), name=f"subagent-{session_id[:16]}")
+        task = asyncio.create_task(loop.run(initial_prompt, user_name, message_type), name=f"subagent-{session_id[:16]}")
         self._active_task[session_id] = task
 
         logger.info(
@@ -520,6 +538,8 @@ class SubAgentOrchestrator:
             entry.temperature,
             entry.authorized_tools,
             entry.initial_prompt,
+            entry.user_name,
+            entry.message_type,
             entry.history_path or None,
         )
         logger.info("Subagent activated from queue | session=%s", entry.session_id)

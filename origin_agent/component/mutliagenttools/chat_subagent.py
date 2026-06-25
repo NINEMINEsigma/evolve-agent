@@ -16,21 +16,29 @@ async def _handle_chat_subagent(args: dict[str, Any]) -> dict:
     """向子 Agent 发送消息。
 
     预期参数：
-        session_id: str — 目标子 Agent 会话 ID
-        message:    str — 发送给子 Agent 的消息内容
+        session_id:    str — 目标子 Agent 会话 ID
+        message:       str — 发送给子 Agent 的消息内容
+        user_name:     str — 本轮发送者身份名称（必填）
+        message_type:  str — "direct" 或 "overheard"（必填）
     """
     session_id: str = str(args.get("session_id", "")).strip()
     message: str = str(args.get("message", "")).strip()
+    user_name: str = str(args.get("user_name", "")).strip()
+    message_type: str = str(args.get("message_type", "")).strip().lower()
 
     if not session_id:
         return tool_error("'session_id' is required and must not be empty")
     if not message:
         return tool_error("'message' is required and must not be empty")
+    if not user_name:
+        return tool_error("'user_name' is required and must not be empty")
+    if message_type not in ("direct", "overheard"):
+        return tool_error("'message_type' must be 'direct' or 'overheard'")
 
     try:
         from gateway.server import get_subagent_orchestrator
         orch = get_subagent_orchestrator()
-        result = await orch.chat(session_id, message)
+        result = await orch.chat(session_id, message, user_name, message_type)
         return tool_result(**result)
     except Exception as exc:
         return tool_error(f"Failed to chat with subagent: {exc}")
@@ -107,8 +115,18 @@ The optional 'feedback' field is a list of text responses from the sub-agent's o
                     # 发送给子 Agent 的消息内容。
                     "description": "The message content to send to the sub-agent.",
                 },
+                "user_name": {
+                    "type": "string",
+                    # 本轮消息的真实发送者名称（必填）。即使转述第三方内容，也应填你自己的身份。
+                    "description": "The real sender's name for this turn (required). Use your own identity even when relaying third-party content.",
+                },
+                "message_type": {
+                    "type": "string",
+                    # 消息类型："direct" 表示直接对子 Agent 说，子 Agent 应响应；"overheard" 表示旁听。
+                    "description": "Message type: 'direct' means addressed to the sub-agent (it should respond); 'overheard' means it is only listening in.",
+                },
             },
-            "required": ["session_id", "message"],
+            "required": ["session_id", "message", "user_name", "message_type"],
         },
     },
     handler=_handle_chat_subagent,

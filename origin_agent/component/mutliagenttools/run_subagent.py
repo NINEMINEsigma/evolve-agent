@@ -20,9 +20,13 @@ async def _handle_run_subagent(args: dict[str, Any]) -> dict:
         temperature:     float     — 采样温度（默认 1.0，范围 0.0–1.3）
         authorized_tools: list[str] | None — 额外授权的 write / dangerous 工具名称列表
         initial_prompt:  str       — 发送给子 Agent 的初始提问词
+        user_name:       str       — 本轮发送者身份名称（必填）
+        message_type:    str       — "direct" 或 "overheard"（必填）
     """
     name: str = str(args.get("name", "")).strip()
     initial_prompt: str = str(args.get("initial_prompt", "")).strip()
+    user_name: str = str(args.get("user_name", "")).strip()
+    message_type: str = str(args.get("message_type", "")).strip().lower()
     parent_session_id: str = str(args.get("_session_id", "")).strip()
     history_path: str = str(args.get("history_path", "")).strip()
 
@@ -47,8 +51,13 @@ async def _handle_run_subagent(args: dict[str, Any]) -> dict:
         return tool_error("'name' is required and must not be empty")
     if not initial_prompt:
         return tool_error("'initial_prompt' is required and must not be empty")
+    if not user_name:
+        return tool_error("'user_name' is required and must not be empty")
+    if message_type not in ("direct", "overheard"):
+        return tool_error("'message_type' must be 'direct' or 'overheard'")
 
     from ._store import _subagent_registry
+
 
     if name not in _subagent_registry:
         return tool_error(f"Subagent '{name}' not found. Register it first.")
@@ -93,6 +102,8 @@ async def _handle_run_subagent(args: dict[str, Any]) -> dict:
             temperature=temperature,
             authorized_tools=authorized_tools,
             initial_prompt=initial_prompt,
+            user_name=user_name,
+            message_type=message_type,
             parent_session_id=parent_session_id,
             history_path=history_path or None,
         )
@@ -215,13 +226,23 @@ When queued:
                     # 发送给子 Agent 的首条消息（任务描述与完整上下文）。不要仅为了发送这条消息而再次调用 chat_subagent。
                     "description": """The first message (task description and full context) sent to the sub-agent. Do NOT call chat_subagent afterward just to send this prompt.""",
                 },
+                "user_name": {
+                    "type": "string",
+                    # 本轮消息的真实发送者名称（必填）。子 Agent 会根据此名称识别当前说话人。
+                    "description": "The real sender's name for this turn (required). The sub-agent uses this to identify who is speaking to it.",
+                },
+                "message_type": {
+                    "type": "string",
+                    # 消息类型："direct" 表示直接对子 Agent 说，子 Agent 应响应；"overheard" 表示旁听，不必主动响应。
+                    "description": "Message type: 'direct' means addressed to the sub-agent (it should respond); 'overheard' means the sub-agent is only listening in.",
+                },
                 "history_path": {
                     "type": "string",
                     # 可选。stop_subagent 保存的 JSONL 历史文件路径。提供后子 Agent 从该历史恢复，而非从头开始。
                     "description": "Optional path to a JSONL history file saved by stop_subagent. When provided, the sub-agent resumes from that history instead of starting fresh.",
                 },
             },
-            "required": ["name", "initial_prompt"],
+            "required": ["name", "initial_prompt", "user_name", "message_type"],
         },
     },
     handler=_handle_run_subagent,

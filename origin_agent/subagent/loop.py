@@ -27,8 +27,28 @@ logger = logging.getLogger(__name__)
 current_subagent_loop: ContextVar[Any] = ContextVar("current_subagent_loop")
 
 # 分隔符 — 用于合并多条消息
-PARENT_MESSAGE_SEPARATOR = "[Main Agent Message]"
 SUB_MESSAGE_SEPARATOR = "[Sub Session Message]"
+
+
+def format_user_message(user_name: str, message_type: str, content: str) -> str:
+    """包装进入子 Agent 的用户消息，明确标识真实发送者身份。"""
+    if message_type == "direct":
+        header = f"[your direct conversation partner in this turn: {user_name}]"
+        description = (
+            f'The following message is addressed to you directly by "{user_name}".\n'
+            f'Even if the content mentions or quotes someone else, that other person is being relayed by {user_name}.\n'
+            f'Respond to {user_name}, not to anyone mentioned inside the message.'
+        )
+    elif message_type == "overheard":
+        header = f"[The speaker of this message in this turn: {user_name}]"
+        description = (
+            f'You are hearing a message that was spoken by "{user_name}".\n'
+            f'This message may not be addressed to you; {user_name} may be talking to someone else or simply being quoted.\n'
+            f'Do not assume you must reply unless the content explicitly asks something of you.'
+        )
+    else:
+        raise ValueError(f"Unknown message_type: {message_type}")
+    return f"{header}\n\n{description}\n\n---\n\n{content}"
 
 
 class PendingToolCall:
@@ -155,7 +175,7 @@ class SubAgentLoop:
         except Exception:
             return False
 
-    async def run(self, initial_prompt: str) -> None:
+    async def run(self, initial_prompt: str, user_name: str, message_type: str) -> None:
         """子 Agent 主循环。"""
         try:
             # 添加系统提示词（首条消息）
@@ -166,7 +186,7 @@ class SubAgentLoop:
             # 添加初始用户消息
             self._history.append({
                 "role": Role.USER,
-                "content": initial_prompt,
+                "content": format_user_message(user_name, message_type, initial_prompt),
             })
 
             turn: int = 0
@@ -265,15 +285,10 @@ class SubAgentLoop:
         finally:
             self._terminated = True
 
-    def inject_parent_message(self, text: str) -> None:
-        """父 Agent 通过 chat_subagent 发来的消息，追加到收件箱。
-
-        消息在下一轮 tool 链结束时由 _maybe_inject_inbox 统一注入 _history，
-        确保不会插入到 assistant(tool_calls) 与 tool(result) 之间，
-        避免破坏 LLM API 要求的消息顺序。
-        """
-        self._inbox.append(text)
-        self._wake_event.set()  # 唤醒正在等收件箱的循环
+    def inject_parent_message(self, text: str, user_name: str, message_type: str) -> None:
+        """父 Agent 通过 chat_subagent 发来的消息，追加到收件箱。"""
+        self._inbox.append(format_user_message(user_name, message_type, text))
+        self._wake_event.set()
 
     def approve_tools(self, decisions: list[dict[str, Any]]) -> list[dict[str, Any]]:
         """父 Agent 审批结果，触发工具执行并解除阻塞。
@@ -358,11 +373,11 @@ class SubAgentLoop:
     def _maybe_inject_inbox(self) -> bool:
         """若有收件箱消息，注入到历史。"""
         if self._inbox:
-            merged = PARENT_MESSAGE_SEPARATOR.join(self._inbox)
+            merged = "\n\n".join(self._inbox)
             self._inbox.clear()
             self._history.append({
                 "role": Role.USER,
-                "content": f"[Parent Agent Message]\n{merged}",
+                "content": merged,
             })
             return True
         return False
