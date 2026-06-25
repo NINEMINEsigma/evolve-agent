@@ -38,6 +38,7 @@ Environment check: `python check_env.py --cuda`
 - **Never read or search `workspace/` code files.** Do not use them as code evidence; they are runtime copies of `origin_agent/`.
 - **Never use scripts to batch-edit source files.** Make targeted, reviewable edits.
 - `origin_agent/frontend/` is not at the repo root, so static type/IDE awareness may be inaccurate. Before relying on frontend type checks or builds, stop and notify the user.
+- **Git 操作仅限于 `git diff` 和 `git log`（只读查询）。禁止使用任何写入性 git 命令，包括但不限于 `git add`、`git commit`、`git push`、`git checkout`、`git branch`、`git merge`、`git rebase`、`git reset`、`git stash`、`git revert` 等。所有 git 写入操作必须由用户手动执行。**
 
 ## Git commit style
 

@@ -47,7 +47,8 @@ registry.register(
         # 已经完成的子 Agent 不能再次停止。
         # 处于排队状态（尚未活跃）的子 Agent 会被移除，且不保存历史。
         # 如果等待队列非空，当前子 Agent 停止后会自动激活下一个排队的子 Agent。
-        # 如果该子会话不是临时任务，或未来可能需要恢复/参考，应将返回的 history_path 复制到更安全的位置（如 ws: 下的专门目录），并重命名为具有标识性的名称（例如包含子 Agent 名称和任务摘要）。
+        # 获得 history_path 后，你必须主动询问用户是否需要将历史文件保存到更持久的位置。
+        # 如果需要保存，使用 copy_file 或 move_file 工具将文件从原始路径复制/移动到用户指定的位置（如 ws: 下的专门目录），并重命名为具有标识性的名称。
         #
         # ## 返回
         # ```json
@@ -62,7 +63,7 @@ registry.register(
         # ## 副作用/注意
         # - 强制终止会立即停止子 Agent 的执行。
         # - 活跃会话的历史被持久化到 JSONL 文件，原始路径随会话环境而定。
-        # - 若需要长期保留或后续恢复，建议立即将 history_path 复制到受控位置并改名，避免被覆盖或误清理。
+        # - 自动保存的原始路径是临时性的，可能被覆盖或清理。你必须在获得 history_path 后询问用户是否要将其复制或移动到更安全的位置。
         # - 队列中的会话被移除且不留历史。
         # - 停止后会自动激活下一个排队会话（如果有）。
         "description": """Forcefully terminate a sub-agent session.
@@ -77,7 +78,7 @@ An already-completed sub-agent cannot be stopped again.
 Queued (not yet active) sub-agents are removed without saving history.
 If the waiting queue is non-empty, the next queued sub-agent is automatically activated after this one stops.
 
-If this sub-agent session is not a temporary task, or if it may need to be resumed or referenced later, copy the returned history_path to a safer location (e.g. a dedicated directory under ws:) and rename it to a descriptive name (such as one that includes the sub-agent name and a task summary).
+After receiving history_path, you MUST proactively ask the user whether to persist the history file to a more permanent location. If the user wants to save it, use copy_file or move_file to copy/move the file from the original path to a user-specified location (e.g. a dedicated directory under ws:), and rename it to a descriptive name (including the sub-agent name and task summary).
 
 ## Returns
 ```json
@@ -92,7 +93,7 @@ If this sub-agent session is not a temporary task, or if it may need to be resum
 ## Side Effects / Notes
 - Termination immediately halts the sub-agent's execution.
 - Active session history is persisted to a JSONL file; the original path depends on the session environment.
-- If long-term retention or later resumption is needed, copy history_path to a controlled location and rename it immediately to avoid accidental overwrite or cleanup.
+- The auto-saved history file is at a temporary location that may be overwritten or cleaned up. After receiving history_path, you must ask the user whether to copy or move it to a safer location for long-term retention.
 - Queued sessions are removed without leaving history.
 - The next queued session is automatically activated if one exists.""",
         "parameters": {
