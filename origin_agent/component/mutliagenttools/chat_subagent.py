@@ -41,12 +41,59 @@ registry.register(
     toolset="multiagent",
     schema={
         # 向正在运行的子 Agent 会话发送一条消息。
-        # 消息进入子 Agent 收件箱队列，在当前工具调用链完成后注入其上下文。
-        # 不能用于已排队（尚未活跃）的子 Agent。
-        # 返回可选的 'feedback' 字段——调用时从子 Agent 发件箱收集的文本响应列表。用于即时反馈，而非等待定期收集周期。
-        "description": """Send a message to a running sub-agent session. The message is queued in the sub-agent's inbox and injected into its context after the current tool-call chain finishes. Cannot be used on sub-agents that are queued (not yet active).
+        #
+        # ## 前置条件
+        # 目标子 Agent 必须已经处于活跃运行状态（waiting=false）。
+        # 不能用于尚未从 FIFO 队列中激活的子 Agent。
+        # 在发送新消息前，应当已经收到子 Agent 的最新一轮回复；避免在上一轮工具调用链尚未结束时连续发送消息。
+        #
+        # ## 调用效果
+        # 消息进入子 Agent 的收件箱队列，并在当前工具调用链完成后注入其上下文。
+        # 可用于追加任务说明、回答问题、提供新上下文或纠正子 Agent 的行为。
+        # 不要仅为了发送初始提示而调用本工具——初始提示应通过 run_subagent 的 initial_prompt 参数发送。
+        #
+        # ## 返回
+        # ```json
+        # {"feedback": ["..."], "success": true}
+        # ```
+        # feedback 是调用时从子 Agent 发件箱收集的文本响应列表，用于即时反馈，而非等待定期收集周期。
+        #
+        # ## 何时使用
+        # - 子 Agent 运行过程中需要补充上下文或纠正方向。
+        # - 子 Agent 提出问题时回复它。
+        # - 需要立即获取子 Agent 的最新输出（通过 feedback）。
+        #
+        # ## 副作用/注意
+        # - 消息不会立即打断子 Agent 当前的工具调用链，而是排队等待当前链结束后注入。
+        # - 对排队中的子 Agent 调用会失败。
+        # - 频繁发送消息可能让子 Agent 上下文变得混乱；应等待子 Agent 回复后再决定是否需要继续发送。
+        "description": """Send a message to an active running sub-agent session.
 
-Returns an optional 'feedback' field — a list of text responses from the sub-agent's outbox collected at call time. Use this for instant feedback instead of waiting for the periodic collection cycle.""",
+## Prerequisites
+The target sub-agent must already be active (waiting=false).
+Cannot be used on sub-agents that are still in the FIFO queue and not yet activated.
+Before sending a new message, you should have received the sub-agent's latest round of response. Avoid calling chat_subagent repeatedly while the previous tool-call chain is still in progress.
+
+## Effect
+The message is queued in the sub-agent's inbox and injected into its context after the current tool-call chain finishes.
+Use it to add task instructions, answer questions, provide new context, or correct the sub-agent's behavior.
+Do NOT use this tool solely to send the initial prompt — that should be passed via the initial_prompt parameter of run_subagent.
+
+## Returns
+```json
+{"feedback": ["..."], "success": true}
+```
+The optional 'feedback' field is a list of text responses from the sub-agent's outbox collected at call time. Use it for instant feedback instead of waiting for the periodic collection cycle.
+
+## When to Use
+- Add context or correct direction while the sub-agent is running.
+- Reply to a question from the sub-agent.
+- Fetch the latest sub-agent output immediately (via feedback).
+
+## Side Effects / Notes
+- The message does not interrupt the sub-agent's current tool-call chain; it is queued and injected after the chain ends.
+- Calling this on a queued (not yet active) sub-agent fails.
+- Frequent messages may clutter the sub-agent's context; wait for the sub-agent's response before deciding whether to send another message.""",
         "parameters": {
             "type": "object",
             "properties": {

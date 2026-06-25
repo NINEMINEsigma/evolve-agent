@@ -1014,60 +1014,85 @@ registry.register(
     name="schedule_cron",
     toolset="cron",
     schema={
-        # Schedule a one-shot background task. It runs exactly once.
-        # Numeric schedule means delay N seconds; cron expression matches the next execution time.
-        # For loops, polling, or long-term observation, wait for [cron-result] before scheduling the next; do not pre-create future chained tasks.
-        # Raw stdout/stderr are written to a log file and injected back to the Agent; the user does not automatically see raw output.
-        # This is NON-BLOCKING: the Agent continues immediately after scheduling, the task runs in the background, and a [cron-result] notifies on completion.
-        "description": f"""Schedule a one-shot background task. It runs exactly once.
-This is NON-BLOCKING: the Agent continues immediately after scheduling, and the task runs in the background. A [cron-result] message is delivered when it completes. It is NOT sleep.
+        # 创建一个一次性后台定时任务。
+        #
+        # ## 前置条件
+        # schedule 必须为纯数字秒数或合法的 5 字段 cron 表达式。
+        # command 必须为非空字符串列表。
+        # 必须提供 reason 说明创建原因。
+        # 同一会话任务数不能超过 CRON_MAX_JOBS_PER_SESSION。
+        #
+        # ## 调用效果
+        # 安排任务在未来某个时间点执行一次，执行完成后通过 [cron-result] 消息通知 Agent。
+        # 这是非阻塞调用：调用后立即返回，任务在后台运行。
+        # 循环、轮询或长期观察场景下，应等待 [cron-result] 后再安排下一次，不要预创建多个未来任务。
+        #
+        # ## 返回
+        # ```json
+        # {"success": true, "task_id": "...", "name": "...", "schedule_type": "interval", "schedule_value": "300", "next_run": "...", "log_path": "ws:logs/cron/.../....log", "message": "..."}
+        # ```
+        #
+        # ## 何时使用
+        # - 需要延迟执行某个命令。
+        # - 需要在指定 cron 时间执行一次任务。
+        # - 需要轮询时：每次只安排下一次，收到结果后再决定是否继续。
+        #
+        # ## 副作用/注意
+        # - 任务在后台运行，可能产生文件系统或网络副作用，danger_level 为 dangerous。
+        # - 每次调用需要用户审批。
+        # - 任务执行日志写入 log_path。
+        # - 任务执行后自动停止调度，但记录保留。
+        "description": """Schedule a one-shot background task.
 
-Two one-shot schedule formats are supported:
-  1. Delay: a number in seconds, e.g. '300' means run once after 300 seconds; minimum {CRON_MIN_INTERVAL_SECONDS}s.
-  2. Cron expression: 5 fields 'minute hour day month weekday', e.g. '0 9 * * 1' means run once at the next matching Monday 9:00 AM.
-     Weekday: 0=Sunday, 1=Monday, ..., 6=Saturday.
+## Prerequisites
+schedule must be either a plain number of seconds or a valid 5-field cron expression. command must be a non-empty list of strings. A reason explaining why the task is needed must be provided. The number of cron jobs per session cannot exceed CRON_MAX_JOBS_PER_SESSION.
 
-For loops, polling, or long-running observation, schedule only the next run. Do not pre-create future chains such as 15s, 30s, and 45s unless the user explicitly asks for multiple independent future runs. After execution, the Agent receives a [cron-result] message and can decide whether to schedule the next one-shot task. Raw stdout/stderr are written to a log file and injected back to the Agent; the user does not automatically see the raw output.
+## Effect
+Schedules the task to run once at a future time. After execution, a [cron-result] message notifies the Agent. This call is NON-BLOCKING: it returns immediately while the task runs in the background. For loops, polling, or long-running observation, schedule only the next run and wait for the [cron-result] before deciding whether to schedule again.
 
-Returns:
-  - success: whether the task was created
-  - task_id: unique identifier for managing the task
-  - next_run: ISO timestamp of the one scheduled execution
-  - log_path: path to the execution log file""",
+## Returns
+```json
+{"success": true, "task_id": "...", "name": "...", "schedule_type": "interval", "schedule_value": "300", "next_run": "...", "log_path": "ws:logs/cron/.../....log", "message": "..."}
+```
+
+## When to Use
+- Delay execution of a command.
+- Run a task once at a specific cron time.
+- Polling: schedule only the next run, then decide after receiving the result.
+
+## Side Effects / Notes
+- Tasks run in the background and may cause filesystem or network side effects; danger_level is dangerous.
+- Each invocation requires user approval.
+- Execution logs are written to log_path.
+- The task stops scheduling automatically after it runs, but its record remains.""",
         "parameters": {
             "type": "object",
             "properties": {
                 "schedule": {
                     "type": "string",
                     # 一次性调度说明：延迟秒数，或用于计算下一个匹配时间的 5 字段 cron 表达式。
-                    "description": (
-                        "One-shot schedule specification. Either: (1) a number of seconds to delay, "
-                        "or (2) a 5-field cron expression 'min hour day month weekday' for the next matching time. "
-                        "Examples: '60' = run once after 60 seconds; "
-                        "'0 */6 * * *' = run once at the next matching 6-hour boundary; "
-                        "'0 9 * * 1' = run once at the next Monday 9:00 AM. Weekday: 0=Sunday."
-                    ),
+                    "description": """One-shot schedule. Either a number of seconds to delay, or a 5-field cron expression 'min hour day month weekday'. Examples: '60' = run once after 60 seconds; '0 9 * * 1' = run once at next Monday 9:00 AM. Weekday: 0=Sunday.""",
                 },
                 "command": {
                     "type": "array",
                     "items": {"type": "string"},
                     # 要执行的命令及参数列表。
-                    "description": "Command and arguments to execute, e.g. ['python', '-c', 'print(1)'].",
+                    "description": """Command and arguments to execute, e.g. ['python', '-c', 'print(1)'].""",
                 },
                 "reason": {
                     "type": "string",
                     # 创建此定时任务的原因。
-                    "description": "Reason for creating this scheduled task.",
+                    "description": """Reason for creating this scheduled task.""",
                 },
                 "name": {
                     "type": "string",
                     # 可选的人类可读任务名称。
-                    "description": "Optional human-readable name for the task.",
+                    "description": """Optional human-readable name for the task.""",
                 },
                 "cwd": {
                     "type": "string",
                     # 工作目录（ws: 命名空间，默认 'ws:'）。
-                    "description": "Working directory (ws: namespace, default 'ws:').",
+                    "description": """Working directory (ws: namespace, default 'ws:').""",
                     "default": "ws:",
                 },
             },
@@ -1084,9 +1109,44 @@ registry.register(
     name="list_cron_jobs",
     toolset="cron",
     schema={
-        # List all scheduled cron jobs for the current session.
+        # 列出当前会话的所有定时任务。
+        #
+        # ## 前置条件
+        # 无。
+        #
+        # ## 调用效果
+        # 返回当前会话中所有 cron 任务的元数据，包括调度信息、下次执行时间、执行次数、日志路径等。
+        #
+        # ## 返回
+        # ```json
+        # {"success": true, "count": 2, "tasks": [{"task_id": "...", "name": "...", "schedule_type": "interval", "schedule_value": "300", "command": ["..."], "should_schedule": true, "next_run": "...", "run_count": 0, "last_run": null, "log_path": "..."}]}
+        # ```
+        #
+        # ## 何时使用
+        # - 查看当前有哪些定时任务。
+        # - 获取 task_id 以便取消或立即触发任务。
+        #
+        # ## 副作用/注意
+        # - 纯查询，不会修改任务状态。
         "description": """List all scheduled cron jobs for the current session.
-Returns task metadata including schedule, next run time, run count, and log path.""",
+
+## Prerequisites
+None.
+
+## Effect
+Returns metadata for all cron jobs in the current session, including schedule info, next run time, run count, and log path.
+
+## Returns
+```json
+{"success": true, "count": 2, "tasks": [{"task_id": "...", "name": "...", "schedule_type": "interval", "schedule_value": "300", "command": ["..."], "should_schedule": true, "next_run": "...", "run_count": 0, "last_run": null, "log_path": "..."}]}
+```
+
+## When to Use
+- Check what cron jobs are currently scheduled.
+- Obtain task_id values for cancel_cron_job or run_cron_job_now.
+
+## Side Effects / Notes
+- Read-only query; does not modify task state.""",
         "parameters": {
             "type": "object",
             "properties": {},
@@ -1102,16 +1162,54 @@ registry.register(
     name="cancel_cron_job",
     toolset="cron",
     schema={
-        # Cancel and remove a scheduled cron job by its task_id.
+        # 取消指定 task_id 的定时任务。
+        #
+        # ## 前置条件
+        # task_id 必须存在且属于当前会话。
+        #
+        # ## 调用效果
+        # 停止该任务的后续调度，移除记录，并抑制在途执行完成后的通知。
+        # 已经启动的子进程不会被强行终止。
+        #
+        # ## 返回
+        # ```json
+        # {"success": true, "task_id": "...", "name": "...", "message": "Cancelled cron job: ..."}
+        # ```
+        #
+        # ## 何时使用
+        # - 不再需要某个延迟/定时任务时。
+        # - 停止轮询或等待提醒。
+        #
+        # ## 副作用/注意
+        # - 已在运行的子进程不会被终止。
+        # - 取消后该 task_id 失效。
         "description": """Cancel and remove a scheduled cron job by its task_id.
-The task will no longer execute. Pending executions are discarded.""",
+
+## Prerequisites
+task_id must exist and belong to the current session.
+
+## Effect
+Stops future scheduling for the task, removes its record, and suppresses notifications if an in-flight execution completes later. Any already-started subprocess is not forcibly terminated.
+
+## Returns
+```json
+{"success": true, "task_id": "...", "name": "...", "message": "Cancelled cron job: ..."}
+```
+
+## When to Use
+- When a delayed or scheduled task is no longer needed.
+- Stop polling or wait reminders.
+
+## Side Effects / Notes
+- A subprocess that has already started is not terminated.
+- The task_id becomes invalid after cancellation.""",
         "parameters": {
             "type": "object",
             "properties": {
                 "task_id": {
                     "type": "string",
                     # schedule_cron 返回的任务标识。
-                    "description": "task_id returned by schedule_cron.",
+                    "description": """task_id returned by schedule_cron.""",
                 },
             },
             "required": ["task_id"],
@@ -1127,16 +1225,54 @@ registry.register(
     name="run_cron_job_now",
     toolset="cron",
     schema={
-        # Immediately trigger a one-time execution of a scheduled cron job.
+        # 立即触发指定定时任务执行一次。
+        #
+        # ## 前置条件
+        # task_id 必须存在且属于当前会话。
+        #
+        # ## 调用效果
+        # 在新线程中立即执行任务一次，不影响原定调度（interval 类型会重置 timer）。
+        # 执行完成后仍会通过 [cron-result] 通知。
+        #
+        # ## 返回
+        # ```json
+        # {"success": true, "task_id": "...", "name": "...", "message": "Triggered immediate execution of cron job: ..."}
+        # ```
+        #
+        # ## 何时使用
+        # - 需要立刻验证任务行为。
+        # - 不想等待原定调度时间时。
+        #
+        # ## 副作用/注意
+        # - 会实际执行 command，可能产生副作用。
+        # - interval 类型的原定下次执行时间会基于当前时间重新计算。
         "description": """Immediately trigger a one-time execution of a scheduled cron job.
-This does not affect the regular schedule — the next automatic execution still occurs as originally planned (unless the task uses interval scheduling, in which case the timer is reset from now).""",
+
+## Prerequisites
+task_id must exist and belong to the current session.
+
+## Effect
+Runs the task once immediately in a new thread. The regular schedule is not affected (for interval scheduling, the timer is reset from now). A [cron-result] notification is still sent after execution.
+
+## Returns
+```json
+{"success": true, "task_id": "...", "name": "...", "message": "Triggered immediate execution of cron job: ..."}
+```
+
+## When to Use
+- Verify task behavior immediately.
+- Avoid waiting for the originally scheduled time.
+
+## Side Effects / Notes
+- Actually executes the command and may produce side effects.
+- For interval tasks, the next scheduled time is recalculated from the current time.""",
         "parameters": {
             "type": "object",
             "properties": {
                 "task_id": {
                     "type": "string",
                     # schedule_cron 返回的任务标识。
-                    "description": "task_id returned by schedule_cron.",
+                    "description": """task_id returned by schedule_cron.""",
                 },
             },
             "required": ["task_id"],
@@ -1152,20 +1288,55 @@ registry.register(
     name="reschedule_cron_job",
     toolset="cron",
     schema={
-        # Create one new one-shot cron job by copying an existing task's configuration; suitable for arranging the next round after [cron-result].
-        # Do not use it to pre-create batches of future runs; if parameters need modification, use schedule_cron to create a new next task instead.
-        "description": """Create one new one-shot cron job by copying an existing task's configuration.
-Use this after receiving a [cron-result] when the same command should continue for one more run. Do not use it to pre-create batches of future runs.
-All parameters (schedule, command, cwd) are taken from the source task and cannot be modified. If the next run needs a different delay, cron expression, command, or cwd, create one new task with schedule_cron instead.
+        # 基于已有任务配置复制创建一个新的定时任务。
+        #
+        # ## 前置条件
+        # task_id 必须存在且属于当前会话。
+        # 同一会话任务数不能超过 CRON_MAX_JOBS_PER_SESSION。
+        #
+        # ## 调用效果
+        # 完全复制源任务的 schedule、command、cwd 等参数，创建新的 task_id 并调度。
+        # 新任务的所有参数不可修改；如需修改请使用 schedule_cron。
+        #
+        # ## 返回
+        # ```json
+        # {"success": true, "task_id": "...", "name": "...", "schedule_type": "interval", "schedule_value": "300", "next_run": "...", "log_path": "...", "message": "..."}
+        # ```
+        #
+        # ## 何时使用
+        # - 收到 [cron-result] 后需要继续执行相同命令时。
+        # - 安排轮询的下一次迭代。
+        #
+        # ## 副作用/注意
+        # - 新任务会再次执行 command，可能产生副作用。
+        # - 不可用于批量预创建未来任务。
+        "description": """Create a new one-shot cron job by copying an existing task's configuration.
 
-The new task will run exactly once, just like a normally scheduled task.""",
+## Prerequisites
+task_id must exist and belong to the current session. The number of cron jobs per session cannot exceed CRON_MAX_JOBS_PER_SESSION.
+
+## Effect
+Copies schedule, command, cwd, and other parameters from the source task, creates a new task_id, and schedules it. All parameters are taken from the source task and cannot be modified; if modifications are needed, use schedule_cron instead.
+
+## Returns
+```json
+{"success": true, "task_id": "...", "name": "...", "schedule_type": "interval", "schedule_value": "300", "next_run": "...", "log_path": "...", "message": "..."}
+```
+
+## When to Use
+- Continue running the same command after receiving a [cron-result].
+- Schedule the next iteration of a polling loop.
+
+## Side Effects / Notes
+- The new task will execute the command again and may produce side effects.
+- Do not use it to pre-create batches of future runs.""",
         "parameters": {
             "type": "object",
             "properties": {
                 "task_id": {
                     "type": "string",
                     # 要复制配置的已有任务标识。
-                    "description": "task_id of the existing task to copy configuration from.",
+                    "description": """task_id of the existing task to copy configuration from.""",
                 },
             },
             "required": ["task_id"],
@@ -1181,29 +1352,59 @@ registry.register(
     name="wait_cron",
     toolset="cron",
     schema={
-        # Create a lightweight wait reminder that does not execute any script.
-        # This is NON-BLOCKING: the Agent continues immediately after scheduling, the wait happens in the background, and a [cron-result] notifies on completion.
+        # 创建一个只等待、不执行任何脚本的精简定时提醒任务。
+        #
+        # ## 前置条件
+        # duration 必须为正整数秒数，且不小于 CRON_MIN_INTERVAL_SECONDS。
+        #
+        # ## 调用效果
+        # 非阻塞等待指定秒数，时间到后通过 [cron-result] 返回固定提醒文本。
+        # 同一会话中同时只能保留一个 wait 任务，新任务会替换旧任务。
+        #
+        # ## 返回
+        # ```json
+        # {"success": true, "task_id": "...", "duration": 60, "next_run": "...", "message": "..."}
+        # ```
+        #
+        # ## 何时使用
+        # - 需要让 Agent 在指定时间后继续处理某事。
+        # - 简单倒计时提醒，不需要执行命令。
+        #
+        # ## 副作用/注意
+        # - 不执行任何命令，只发送提醒消息。
+        # - 不是阻塞式 sleep，Agent 可继续处理其他任务。
         "description": """Schedule a lightweight wait reminder that does not execute any script.
-This is NON-BLOCKING: the Agent continues immediately after scheduling, and the wait happens in the background. A [cron-result] message is delivered when the duration expires. It is NOT sleep.
 
-After the specified duration expires, a [cron-result] message with the fixed reminder text is sent to the Agent.
+## Prerequisites
+duration must be a positive integer in seconds and at least CRON_MIN_INTERVAL_SECONDS.
 
-Returns:
-  - success: whether the wait task was created
-  - task_id: unique identifier for managing the task
-  - next_run: ISO timestamp when the reminder will trigger""",
+## Effect
+Waits non-blockingly for the specified number of seconds, then sends a [cron-result] with the fixed reminder text. Only one wait task is kept per session; a new wait task replaces any existing one.
+
+## Returns
+```json
+{"success": true, "task_id": "...", "duration": 60, "next_run": "...", "message": "..."}
+```
+
+## When to Use
+- Resume processing something after a delay.
+- Simple countdown reminder without running a command.
+
+## Side Effects / Notes
+- Does not execute any command; only sends a reminder message.
+- This is not a blocking sleep; the Agent can continue with other tasks.""",
         "parameters": {
             "type": "object",
             "properties": {
                 "duration": {
                     "type": "string",
                     # 等待时长，以秒为单位，最小 CRON_MIN_INTERVAL_SECONDS 秒。
-                    "description": f"Delay in seconds before the reminder triggers. Minimum {CRON_MIN_INTERVAL_SECONDS} seconds.",
+                    "description": f"""Delay in seconds before the reminder triggers. Minimum {CRON_MIN_INTERVAL_SECONDS} seconds.""",
                 },
                 "message": {
                     "type": "string",
                     # 提醒时返回的固定内容。
-                    "description": "Fixed reminder text returned when the wait completes. Default: 'Wait time is up.'",
+                    "description": """Fixed reminder text returned when the wait completes. Default: 'Wait time is up.'""",
                     "default": "Wait time is up.",
                 },
             },

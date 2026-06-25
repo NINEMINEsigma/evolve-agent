@@ -317,59 +317,68 @@ registry.register(
     name="draw_mermaid",
     toolset="mermaid",
     schema={
+        # 将 Mermaid 图表定义渲染为 PNG 图片并返回 Markdown 图片链接。
+        #
+        # ## 前置条件
+        # 必须安装 Playwright 和 Chromium（pip install playwright && python -m playwright install chromium）。
+        # 必须提供 definition（内联定义）或 file（ws: 路径下的 .mmd 文件），二者互斥。
+        #
+        # ## 调用效果
+        # 使用 headless Chromium 将 Mermaid 定义渲染为 PNG，保存到工作空间，返回图片的 ws: 路径和 Markdown 链接。
+        # 同时会在同目录保存一份 .mmd 参考文件。
+        #
+        # ## 返回
+        # ```json
+        # {"source": "inline definition", "theme": "default", "png_path": "ws:diagrams/xxx.png", "markdown": "/uploads/diagrams/xxx.png", "mmd_path": "ws:diagrams/xxx.mmd", "message": "..."}
+        # ```
+        #
+        # ## 何时使用
+        # - 需要根据文本定义生成流程图、时序图、类图、甘特图等。
+        # - 在回复中向用户展示可视化图表。
+        #
+        # ## 副作用/注意
+        # - 会写入 PNG 和 .mmd 文件到工作空间。
+        # - 首次加载 CDN 资源可能较慢，渲染可能耗时数秒。
+        # - 复杂图表可能渲染超时。
         "description": """Render a Mermaid diagram definition to a PNG image and return a Markdown image link.
 
-Mermaid is a diagramming and charting tool that renders Markdown-like text definitions to diagrams.
+## Prerequisites
+Playwright and Chromium must be installed (pip install playwright && python -m playwright install chromium). You must provide either definition (inline) or file (a .mmd file under ws: prefix); they are mutually exclusive.
 
-Common diagram types (full syntax at https://mermaid.js.org/syntax/):
-  - graph TD; A-->B;  (flowchart, top-down)
-  - graph LR; A-->B;  (flowchart, left-right)
-  - sequenceDiagram; A->>B: Hello; (sequence)
-  - classDiagram; class Animal; (class)
-  - stateDiagram-v2; [*] --> Idle; (state)
-  - gantt; title Timeline; (gantt chart)
-  - pie; "A": 40; "B": 60; (pie chart)
-  - erDiagram; CUSTOMER ||--o{ ORDER : places; (ER diagram)
+## Effect
+Renders the Mermaid definition to a PNG using a headless Chromium browser, saves it to the workspace, and returns the ws: path and Markdown link. A reference .mmd file is also saved alongside the PNG.
 
-Usage:
-  draw_mermaid(definition="graph TD; A-->B;")
+## Returns
+```json
+{"source": "inline definition", "theme": "default", "png_path": "ws:diagrams/xxx.png", "markdown": "/uploads/diagrams/xxx.png", "mmd_path": "ws:diagrams/xxx.mmd", "message": "..."}
+```
 
-  Or save to a .mmd file first:
-  write_file(path="ws:diagrams/my.mmd", content="graph TD; A-->B;")
-  draw_mermaid(file="ws:diagrams/my.mmd")
+## When to Use
+- Generate flowcharts, sequence diagrams, class diagrams, Gantt charts, etc. from text definitions.
+- Display visual diagrams to the user in a response.
 
-Supported themes: default, forest, dark, neutral
-
-Returns:
-  - png_path: ws: path to the generated PNG
-  - mmd_path: ws: path to the saved .mmd reference file
-  - markdown: image URL for frontend display
-""",
+## Side Effects / Notes
+- Writes PNG and .mmd files to the workspace.
+- First-time CDN loading can be slow; rendering may take several seconds.
+- Complex diagrams may time out during rendering.""",
         "parameters": {
             "type": "object",
             "properties": {
                 "definition": {
                     "type": "string",
-                    "description": (
-                        "Inline Mermaid diagram definition string. "
-                        "Mutually exclusive with 'file'.\n"
-                        "Examples:\n"
-                        '  "graph TD; A-->B;"\n'
-                        '  "sequenceDiagram; Alice->>Bob: Hello;"'
-                    ),
+                    # 内联 Mermaid 图表定义字符串。与 file 互斥。
+                    "description": """Inline Mermaid diagram definition string. Mutually exclusive with file.""",
                 },
                 "file": {
                     "type": "string",
-                    "description": (
-                        "Path to a .mmd file under ws: prefix. "
-                        "Mutually exclusive with 'definition'.\n"
-                        "Example: ws:diagrams/my.mmd"
-                    ),
+                    # ws: 前缀下的 .mmd 文件路径。与 definition 互斥。
+                    "description": """Path to a .mmd file under ws: prefix. Mutually exclusive with definition.""",
                 },
                 "theme": {
                     "type": "string",
                     "enum": ["default", "forest", "dark", "neutral"],
-                    "description": "Mermaid theme. Default: 'default'.",
+                    # Mermaid 主题（默认 default）。
+                    "description": """Mermaid theme. Default: 'default'.""",
                     "default": "default",
                 },
             },

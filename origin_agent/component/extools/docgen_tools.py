@@ -492,24 +492,66 @@ registry.register(
     name="write_docx",
     toolset="document",
     schema={
-        # Generate a Word (.docx) file. Requires Node.js + docx npm package (pnpm i -g docx).
-        "description": """Generate a Word (.docx) file. Requires Node.js + docx npm package (pnpm i -g docx).""",
+        # 生成 Word (.docx) 文件。
+        #
+        # ## 前置条件
+        # 必须安装 Node.js 和 docx npm 包（pnpm i -g docx）。
+        # sections 参数必须非空。
+        #
+        # ## 调用效果
+        # 根据 title、subtitle 和 sections 生成 docx 文件，保存到 ws:documents/。
+        # 每个 section 可包含 heading、level(1-3) 和 content（段落、列表、表格等）。
+        #
+        # ## 返回
+        # ```json
+        # {"path": "ws:documents/xxx.docx", "title": "...", "sections": 3, "message": "docx document generated: documents/xxx.docx"}
+        # ```
+        #
+        # ## 何时使用
+        # - 生成结构化 Word 报告或文档。
+        # - 将表格、列表、标题组合成文档。
+        #
+        # ## 副作用/注意
+        # - 会写入新文件到工作空间。
+        # - 依赖 Node.js 执行环境。
+        "description": """Generate a Word (.docx) file.
+
+## Prerequisites
+Node.js and the docx npm package must be installed (pnpm i -g docx). The sections parameter must be non-empty.
+
+## Effect
+Generates a docx file from title, subtitle, and sections, saved under ws:documents/. Each section may contain heading, level (1-3), and content blocks (paragraphs, lists, tables, etc.).
+
+## Returns
+```json
+{"path": "ws:documents/xxx.docx", "title": "...", "sections": 3, "message": "docx document generated: documents/xxx.docx"}
+```
+
+## When to Use
+- Generate structured Word reports or documents.
+- Combine tables, lists, and headings into a document.
+
+## Side Effects / Notes
+- Writes a new file to the workspace.
+- Depends on the Node.js runtime.""",
         "parameters": {
             "type": "object",
             "properties": {
-                "title": {"type": "string", "description": "文档标题（居中、大号加粗）。"},
-                "subtitle": {"type": "string", "description": "可选的副标题。"},
+                "title": {
+                    "type": "string",
+                    # 文档标题（居中、大号加粗）。
+                    "description": """Document title (centered, large, bold).""",
+                },
+                "subtitle": {
+                    "type": "string",
+                    # 可选的副标题。
+                    "description": """Optional subtitle.""",
+                },
                 "sections": {
                     "type": "array",
-                    # 文档章节列表。每项包含 heading (章节标题), level (1-3), content (内容块数组)。
-                    # 内容块类型: paragraph(文本), bullet_list(列表),
-                    # numbered_list(编号列表), table(表格，含 headers 和 rows)。
-                    "description": (
-                        "List of document sections. Each contains heading, "
-                        "level (1-3), content (array of content blocks). "
-                        "Content block types: paragraph, bullet_list, "
-                        "numbered_list, table (with headers and rows)."
-                    ),
+                    # 文档章节列表。每项包含 heading（章节标题）、level（1-3）、content（内容块数组）。
+                    # 内容块类型：paragraph（文本）、bullet_list（无序列表）、numbered_list（编号列表）、table（表格，含 headers 和 rows）。
+                    "description": """List of document sections. Each contains heading, level (1-3), and content (array of content blocks). Content block types: paragraph, bullet_list, numbered_list, table (with headers and rows).""",
                     "items": {
                         "type": "object",
                         "properties": {
@@ -532,16 +574,58 @@ registry.register(
     name="write_xlsx",
     toolset="document",
     schema={
-        # Generate an Excel (.xlsx) workbook. Uses openpyxl.
-        "description": """Generate an Excel (.xlsx) workbook. Uses openpyxl.""",
+        # 生成 Excel (.xlsx) 工作簿。
+        #
+        # ## 前置条件
+        # 必须安装 openpyxl（已在 requirements.txt 中）。
+        # sheets 参数必须非空。
+        #
+        # ## 调用效果
+        # 根据 sheets 定义生成 xlsx 文件，保存到 ws:documents/。
+        # 每个 sheet 包含 name、headers 和 rows；表头会加粗显示。
+        #
+        # ## 返回
+        # ```json
+        # {"path": "ws:documents/xxx.xlsx", "sheets": 2, "message": "xlsx workbook generated: documents/xxx.xlsx"}
+        # ```
+        #
+        # ## 何时使用
+        # - 将表格数据导出为 Excel。
+        # - 生成包含多个工作表的报表。
+        #
+        # ## 副作用/注意
+        # - 会写入新文件到工作空间，可能覆盖同名文件。
+        "description": """Generate an Excel (.xlsx) workbook.
+
+## Prerequisites
+openpyxl must be installed (listed in requirements.txt). The sheets parameter must be non-empty.
+
+## Effect
+Generates an xlsx file from the sheets definition, saved under ws:documents/. Each sheet contains name, headers, and rows; headers are displayed in bold.
+
+## Returns
+```json
+{"path": "ws:documents/xxx.xlsx", "sheets": 2, "message": "xlsx workbook generated: documents/xxx.xlsx"}
+```
+
+## When to Use
+- Export tabular data to Excel.
+- Generate reports with multiple worksheets.
+
+## Side Effects / Notes
+- Writes a new file to the workspace and may overwrite an existing file with the same name.""",
         "parameters": {
             "type": "object",
             "properties": {
-                "filename": {"type": "string", "description": "工作簿名称（不含扩展名）。"},
+                "filename": {
+                    "type": "string",
+                    # 工作簿名称（不含扩展名）。
+                    "description": """Workbook name without extension.""",
+                },
                 "sheets": {
                     "type": "array",
-                    # 工作表列表。每项包含 name, headers(表头), rows(数据行)。
-                    "description": "List of sheets. Each contains name, headers, rows.",
+                    # 工作表列表。每项包含 name、headers（表头）、rows（数据行）。
+                    "description": """List of sheets. Each contains name, headers, and rows.""",
                     "items": {
                         "type": "object",
                         "properties": {
@@ -564,15 +648,55 @@ registry.register(
     name="write_pptx",
     toolset="document",
     schema={
-        # Generate a PowerPoint (.pptx) presentation. Requires python-pptx (pip install python-pptx).
-        "description": """Generate a PowerPoint (.pptx) presentation. Requires python-pptx (pip install python-pptx).""",
+        # 生成 PowerPoint (.pptx) 演示文稿。
+        #
+        # ## 前置条件
+        # 必须安装 python-pptx（pip install python-pptx）。
+        # slides 参数必须非空。
+        #
+        # ## 调用效果
+        # 根据 slides 列表生成 pptx 文件，保存到 ws:documents/。
+        # 每张幻灯片包含 title 和 body（文本行数组）。
+        #
+        # ## 返回
+        # ```json
+        # {"path": "ws:documents/xxx.pptx", "slides": 5, "message": "pptx presentation generated: documents/xxx.pptx"}
+        # ```
+        #
+        # ## 何时使用
+        # - 将大纲内容生成 PPT。
+        # - 快速生成多页演示文稿。
+        #
+        # ## 副作用/注意
+        # - 会写入新文件到工作空间，可能覆盖同名文件。
+        # - 布局固定为“标题和内容”。
+        "description": """Generate a PowerPoint (.pptx) presentation.
+
+## Prerequisites
+python-pptx must be installed (pip install python-pptx). The slides parameter must be non-empty.
+
+## Effect
+Generates a pptx file from the slides list, saved under ws:documents/. Each slide contains a title and a body array of text lines.
+
+## Returns
+```json
+{"path": "ws:documents/xxx.pptx", "slides": 5, "message": "pptx presentation generated: documents/xxx.pptx"}
+```
+
+## When to Use
+- Convert an outline into a presentation.
+- Quickly generate a multi-slide deck.
+
+## Side Effects / Notes
+- Writes a new file to the workspace and may overwrite an existing file with the same name.
+- Layout is fixed to "Title and Content".""",
         "parameters": {
             "type": "object",
             "properties": {
                 "slides": {
                     "type": "array",
-                    # 幻灯片列表。每项包含 title 和 body (文本行数组)。
-                    "description": "List of slides. Each contains title and body (array of text lines).",
+                    # 幻灯片列表。每项包含 title 和 body（文本行数组）。
+                    "description": """List of slides. Each contains title and body (array of text lines).""",
                     "items": {
                         "type": "object",
                         "properties": {
@@ -594,17 +718,64 @@ registry.register(
     name="write_pdf",
     toolset="document",
     schema={
-        # Generate a PDF file. Requires fpdf2 (pip install fpdf2).
-        "description": """Generate a PDF file. Requires fpdf2 (pip install fpdf2).""",
+        # 生成 PDF 文件。
+        #
+        # ## 前置条件
+        # 必须安装 fpdf2（pip install fpdf2）。
+        #
+        # ## 调用效果
+        # 根据 title、content 和 sections 生成 PDF，保存到 ws:documents/。
+        # 默认使用 Helvetica 字体。
+        #
+        # ## 返回
+        # ```json
+        # {"path": "ws:documents/xxx.pdf", "title": "...", "pages": 2, "message": "PDF generated: documents/xxx.pdf"}
+        # ```
+        #
+        # ## 何时使用
+        # - 生成简单 PDF 报告或文档。
+        # - 将纯文本内容快速导出为 PDF。
+        #
+        # ## 副作用/注意
+        # - 会写入新文件到工作空间，可能覆盖同名文件。
+        # - 仅支持基础排版，复杂格式请使用 write_docx 后再转换。
+        "description": """Generate a PDF file.
+
+## Prerequisites
+fpdf2 must be installed (pip install fpdf2).
+
+## Effect
+Generates a PDF from title, content, and sections, saved under ws:documents/. Uses Helvetica font by default.
+
+## Returns
+```json
+{"path": "ws:documents/xxx.pdf", "title": "...", "pages": 2, "message": "PDF generated: documents/xxx.pdf"}
+```
+
+## When to Use
+- Generate simple PDF reports or documents.
+- Quickly export plain text content to PDF.
+
+## Side Effects / Notes
+- Writes a new file to the workspace and may overwrite an existing file with the same name.
+- Supports only basic layout; for complex formatting use write_docx and convert.""",
         "parameters": {
             "type": "object",
             "properties": {
-                "title": {"type": "string", "description": "PDF 标题。默认字体 Helvetica。"},
-                "content": {"type": "string", "description": "正文内容（纯文本，自动换行）。"},
+                "title": {
+                    "type": "string",
+                    # PDF 标题。默认字体 Helvetica。
+                    "description": """PDF title. Default font is Helvetica.""",
+                },
+                "content": {
+                    "type": "string",
+                    # 正文内容（纯文本，自动换行）。
+                    "description": """Body content as plain text, wrapped automatically.""",
+                },
                 "sections": {
                     "type": "array",
                     # 章节列表。每项包含 heading 和 body。
-                    "description": "List of sections. Each contains heading and body.",
+                    "description": """List of sections. Each contains heading and body.""",
                     "items": {
                         "type": "object",
                         "properties": {

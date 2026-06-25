@@ -79,38 +79,69 @@ registry.register(
     toolset="python",
     schema={
         # 安装 Python 包到当前运行环境中。
-        # 始终使用 ``sys.executable -m pip install`` 执行，保证包安装到
-        # 与 agent 进程相同的 Python 解释器。不要用 ``run_command`` 安装 pip 包。
-        # 用户将被提示批准（允许一次）或拒绝安装。
-        # 请始终包含 'reason' 解释需要安装的包的原因。
+        #
+        # ## 前置条件
+        # 必须明确需要安装的包名，并能在 PyPI 或已配置索引中找到。
+        # 必须提供 reason 说明安装原因，用于审批提示。
+        # 此工具使用 sys.executable -m pip install，确保包安装到与 agent 相同的 Python 环境。
+        #
+        # ## 调用效果
+        # 执行 pip install 安装指定包。可设置 upgrade=true 升级到最新版。
+        # 返回安装的包名、退出码和标准输出摘要。
+        #
+        # ## 返回
+        # ```json
+        # {"packages": ["matplotlib"], "exit_code": 0, "message": "Installation successful: matplotlib\n..."}
+        # ```
+        #
+        # ## 何时使用
+        # - 运行代码需要某个未安装的第三方库时。
+        # - 需要升级已安装库到最新版本时。
+        #
+        # ## 副作用/注意
+        # - 修改当前 Python 环境，可能影响后续代码执行。
+        # - 错误安装可能破坏环境；请只安装可信来源的包。
+        # - 每次调用需要用户审批。
+        # - 不要用 run_command 安装 pip 包。
         "description": """Install Python packages into the current runtime environment.
 
-Always uses ``sys.executable -m pip install`` to ensure packages are installed to the same Python interpreter as the agent process. Do NOT use ``run_command`` to install pip packages.
+## Prerequisites
+The package names to install must be clear and available on PyPI or the configured index. A reason explaining why the package is needed must be provided for the approval prompt. This tool always uses sys.executable -m pip install to ensure packages are installed into the same Python interpreter as the agent process.
 
-The user will be prompted to approve (allow once) or deny the installation.
-Always include 'reason' explaining why the package is needed.
+## Effect
+Runs pip install to install the specified packages. Set upgrade=true to upgrade to the latest version. Returns the installed package names, exit code, and a summary of stdout.
 
-Examples:
-  install_package(packages="matplotlib", reason="for data visualization")
-  install_package(packages="pandas numpy", upgrade=True, reason="data science libraries")
-""",
+## Returns
+```json
+{"packages": ["matplotlib"], "exit_code": 0, "message": "Installation successful: matplotlib\n..."}
+```
+
+## When to Use
+- When running code requires a third-party library that is not installed.
+- When upgrading an installed library to the latest version.
+
+## Side Effects / Notes
+- Modifies the current Python environment and may affect subsequent code execution.
+- Installing from untrusted sources can break the environment; only install trusted packages.
+- Each invocation requires user approval.
+- Do NOT use run_command to install pip packages.""",
         "parameters": {
             "type": "object",
             "properties": {
                 "packages": {
                     "type": "string",
-                    # 要安装的包名，多个包用空格分隔，如 "matplotlib pandas"
-                    "description": "Package names to install, space-separated, e.g. \"matplotlib pandas\"",
+                    # 要安装的包名，多个包用空格分隔，如 "matplotlib pandas"。
+                    "description": """Package names to install, space-separated, e.g. "matplotlib pandas".""",
                 },
                 "upgrade": {
                     "type": "boolean",
-                    # 是否升级到最新版（pip install --upgrade），默认 false
-                    "description": "Whether to upgrade to the latest version (pip install --upgrade), default false",
+                    # 是否升级到最新版（pip install --upgrade），默认 false。
+                    "description": """Whether to upgrade to the latest version (pip install --upgrade), default false.""",
                 },
                 "reason": {
                     "type": "string",
                     # 需要安装这些包的原因，将展示给用户以供审批。
-                    "description": "Reason for installing these packages, shown to the user for approval.",
+                    "description": """Reason for installing these packages, shown to the user for approval.""",
                 },
             },
             "required": ["packages", "reason"],
@@ -118,6 +149,6 @@ Examples:
     },
     handler=_handle_install_package,
     is_async=True,
-    emoji="\U0001f4e6",
+    emoji="f4e6",
     danger_level="dangerous",
 )

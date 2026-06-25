@@ -283,52 +283,61 @@ registry.register(
     name="draw_diagram",
     toolset="diagram",
     schema={
-        # Render Excalidraw JSON to a PNG image and return a Markdown image link.
-        # Steps:
-        #   1. Save Excalidraw JSON to a file with write_file
-        #   2. Call draw_diagram(json_file='ws:diagrams/my.excalidraw')
-        #   3. The tool returns ![diagram](/uploads/diagrams/xxx.png), displayed automatically in the frontend
+        # 将 Excalidraw JSON 渲染为 PNG 图片并返回 Markdown 图片链接。
+        #
+        # ## 前置条件
+        # 必须安装 Playwright 和 Chromium（pip install playwright && python -m playwright install chromium）。
+        # 推荐先用 write_file 将 Excalidraw JSON 保存到 ws: 路径，再传入 json_file 参数。
+        # json_file 与 json 参数互斥。
+        #
+        # ## 调用效果
+        # 解析 Excalidraw JSON，渲染为 PNG，保存到 ws:diagrams/。
+        # 返回 PNG 路径、Markdown 链接以及参考的 .excalidraw 文件路径。
+        #
+        # ## 返回
+        # ```json
+        # {"elements": 10, "source": "ws:diagrams/my.excalidraw", "json_path": "ws:diagrams/xxx.excalidraw", "png_path": "ws:diagrams/xxx.png", "markdown": "/uploads/diagrams/xxx.png", "message": "..."}
+        # ```
+        #
+        # ## 何时使用
+        # - 从 Excalidraw JSON 生成手绘风格图表。
+        # - 向用户展示流程图、架构图等可视化内容。
+        #
+        # ## 副作用/注意
+        # - 会写入 PNG 和 .excalidraw 文件到工作空间。
+        # - 首次加载 CDN 资源可能较慢。
         "description": """Render Excalidraw JSON to a PNG image and return a Markdown image link.
 
-Steps:
-  1. Save Excalidraw JSON to a file with write_file, e.g. write_file(path='ws:diagrams/my.excalidraw', content='...')
-  2. Call draw_diagram(json_file='ws:diagrams/my.excalidraw')
-  3. The tool returns ![diagram](/uploads/diagrams/xxx.png), displayed automatically in the frontend
+## Prerequisites
+Playwright and Chromium must be installed (pip install playwright && python -m playwright install chromium). It is recommended to save the Excalidraw JSON to a ws: path with write_file first, then pass the json_file parameter. json_file and json are mutually exclusive.
 
-Excalidraw JSON format:
-  { "type": "excalidraw", "version": 2, "elements": [...], "appState": {...} }
+## Effect
+Parses the Excalidraw JSON, renders it to a PNG, and saves it under ws:diagrams/. Returns the PNG path, Markdown link, and the reference .excalidraw file path.
 
-Element types: rectangle, text, arrow, ellipse, diamond, line, etc.
-Each element needs id, type, x, y, width, height, strokeColor, backgroundColor, etc.
-Text elements have text, fontSize, fontFamily(1=handwriting, 2=normal, 3=code), textAlign, verticalAlign
-Arrows use points: [[x1,y1], [x2,y2]] for path definition
+## Returns
+```json
+{"elements": 10, "source": "ws:diagrams/my.excalidraw", "json_path": "ws:diagrams/xxx.excalidraw", "png_path": "ws:diagrams/xxx.png", "markdown": "/uploads/diagrams/xxx.png", "message": "..."}
+```
 
-Prerequisites: pip install playwright && python -m playwright install chromium
-The agent should verify correctness through JSON structure integrity; the user sees the rendered result in the frontend.""",
+## When to Use
+- Generate hand-drawn style diagrams from Excalidraw JSON.
+- Display flowcharts, architecture diagrams, or other visuals to the user.
+
+## Side Effects / Notes
+- Writes PNG and .excalidraw files to the workspace.
+- First-time CDN loading can be slow.""",
         "parameters": {
             "type": "object",
             "properties": {
                 "json_file": {
                     "type": "string",
-                    # ws: 前缀下的 .excalidraw JSON 文件路径。
-                    # 先用 write_file 保存 JSON 到此路径，再传入。
-                    # 例如: ws:diagrams/mindmap.excalidraw
-                    "description": (
-                        "Path to .excalidraw JSON file under ws: prefix. "
-                        "Save JSON to this path with write_file first, then pass it. "
-                        "Example: ws:diagrams/mindmap.excalidraw"
-                    ),
+                    # ws: 前缀下的 .excalidraw JSON 文件路径。推荐先用 write_file 保存 JSON 到此路径。
+                    "description": """Path to .excalidraw JSON file under ws: prefix. Save JSON to this path with write_file first. Example: ws:diagrams/mindmap.excalidraw.""",
                 },
                 "json": {
                     "type": "string",
-                    # 完整的 Excalidraw JSON 字符串（备选方案）。
-                    # 仅在图表很小、可直接构造时使用。
-                    # 复杂图表请使用 json_file 参数。
-                    "description": (
-                        "Full Excalidraw JSON string (fallback). "
-                        "Only use for small diagrams constructable inline. "
-                        "For complex diagrams, use the json_file parameter."
-                    ),
+                    # 完整的 Excalidraw JSON 字符串（备选方案）。仅在图表很小、可直接构造时使用。
+                    "description": """Full Excalidraw JSON string (fallback). Only use for small diagrams constructable inline.""",
                 },
             },
         },
@@ -341,15 +350,55 @@ registry.register(
     name="render_diagram",
     toolset="diagram",
     schema={
-        # Re-render an existing .excalidraw JSON file in the workspace to PNG. Use for iterative editing and regenerating images.
-        "description": """Re-render an existing .excalidraw JSON file in the workspace to PNG. Use for iterative editing and regenerating images.""",
+        # 重新渲染工作区中已有的 .excalidraw JSON 文件为 PNG。
+        #
+        # ## 前置条件
+        # 必须安装 Playwright 和 Chromium。
+        # path 必须指向一个已存在的 ws: 路径下的 .excalidraw 文件。
+        #
+        # ## 调用效果
+        # 读取已有的 .excalidraw 文件，渲染为 PNG 并保存到同一目录。
+        # 返回 PNG 路径和 Markdown 链接。
+        #
+        # ## 返回
+        # ```json
+        # {"source": "ws:diagrams/my.excalidraw", "png_path": "ws:diagrams/xxx.png", "markdown": "/uploads/diagrams/xxx.png", "message": "..."}
+        # ```
+        #
+        # ## 何时使用
+        # - 修改 Excalidraw JSON 后重新生成图片。
+        # - 迭代编辑图表并多次渲染。
+        #
+        # ## 副作用/注意
+        # - 会写入新的 PNG 文件到工作空间。
+        # - 不会修改原始 .excalidraw 文件。
+        "description": """Re-render an existing .excalidraw JSON file in the workspace to PNG.
+
+## Prerequisites
+Playwright and Chromium must be installed. path must point to an existing .excalidraw file under the ws: namespace.
+
+## Effect
+Reads the existing .excalidraw file, renders it to a PNG, and saves the PNG in the same directory. Returns the PNG path and Markdown link.
+
+## Returns
+```json
+{"source": "ws:diagrams/my.excalidraw", "png_path": "ws:diagrams/xxx.png", "markdown": "/uploads/diagrams/xxx.png", "message": "..."}
+```
+
+## When to Use
+- Regenerate the image after modifying Excalidraw JSON.
+- Iteratively edit and re-render diagrams.
+
+## Side Effects / Notes
+- Writes a new PNG file to the workspace.
+- Does not modify the original .excalidraw file.""",
         "parameters": {
             "type": "object",
             "properties": {
                 "path": {
                     "type": "string",
                     # ws: 前缀下的 .excalidraw 文件路径（如 ws:diagrams/mydiagram.excalidraw）。
-                    "description": "Path to .excalidraw file under ws: prefix (e.g. ws:diagrams/mydiagram.excalidraw).",
+                    "description": """Path to .excalidraw file under ws: prefix (e.g. ws:diagrams/mydiagram.excalidraw).""",
                 },
             },
             "required": ["path"],

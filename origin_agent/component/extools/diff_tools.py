@@ -301,31 +301,24 @@ _COMMON_SCHEMA = {
             "type": "string",
             # 可选路径过滤子串。只对比路径中包含此字符串的文件。
             # 例如传入 'tools/' 只对比 tools 目录下的文件。
-            "description": (
-                "Optional path filter substring. Only compare files "
-                "whose path contains this string. "
-                "E.g. 'tools/' to compare files under the tools directory."
-            ),
+            "description": """Optional path filter substring. Only compare files whose path contains this string. E.g. 'tools/' to compare files under the tools directory.""",
         },
         "pattern": {
             "type": "string",
             # 可选 glob 模式过滤。例如 '*.py' 只比较 Python 文件，
             # '**/filesystem.py' 匹配所有 filesystem.py。
-            "description": (
-                "Optional glob pattern filter. E.g. '*.py' for Python files "
-                "only, '**/filesystem.py' to match all filesystem.py."
-            ),
+            "description": """Optional glob pattern filter. E.g. '*.py' for Python files only, '**/filesystem.py' to match all filesystem.py.""",
         },
         "context_lines": {
             "type": "integer",
             # unified diff 上下文行数（默认 3）。
-            "description": "Number of unified diff context lines (default 3).",
+            "description": """Number of unified diff context lines (default 3).""",
             "default": 3,
         },
         "max_files": {
             "type": "integer",
             # 最多返回多少个有差异的文件结果（默认 50）。
-            "description": "Max number of differing file results to return (default 50).",
+            "description": """Max number of differing file results to return (default 50).""",
             "default": 50,
         },
     },
@@ -340,11 +333,48 @@ registry.register(
     name="diff_origin_fast",
     toolset="extools",
     schema={
-        # Compare code differences between the original source repo (origin_agent/) and the currently running fast repo (fast_agent_space/).
-        # origin_agent is the source of truth, fast is the runtime copy.
-        # Each code evolution (slow→fast swap) may cause divergence; the more evolutions, the greater the difference.
-        # Use this tool to review how much the running version has deviated from the original source.
-        "description": """Compare code differences between the original source repo (origin_agent/) and the currently running fast repo (fast_agent_space/). origin_agent is the source of truth, fast is the runtime copy. Each code evolution (slow→fast swap) may cause divergence; the more evolutions, the greater the difference. Use this tool to review how much the running version has deviated from the original source.""",
+        # 比较原始源码仓库 origin_agent/ 与当前运行副本 fast_agent_space/ 之间的代码差异。
+        #
+        # ## 前置条件
+        # 无。
+        #
+        # ## 调用效果
+        # 以 origin_agent 为基准，fast_agent_space 为运行副本，生成 unified diff。
+        # 可用于查看运行版本与原始源码的偏离程度。
+        # 支持 path 子串过滤、pattern glob 过滤、context_lines 上下文行数、max_files 最大返回文件数。
+        #
+        # ## 返回
+        # ```json
+        # {"stats": {"total_left": 100, "total_right": 100, "same": 90, "modified": 5, "missing_in_right": 3, "new_in_right": 2, "skipped_max": 0}, "left_path": "...", "right_path": "...", "diffs": [{"file": "...", "status": "modified", "diff": "..."}]}
+        # ```
+        #
+        # ## 何时使用
+        # - 检查运行版本相比原始源码有哪些改动。
+        # - 多次进化后查看累积差异。
+        #
+        # ## 副作用/注意
+        # - 纯查询，不会修改任何文件。
+        # - 只对比文本文件，跳过二进制和构建产物。
+        "description": """Compare code differences between the original source repo (origin_agent/) and the currently running fast repo (fast_agent_space/).
+
+## Prerequisites
+None.
+
+## Effect
+Generates a unified diff with origin_agent as the baseline and fast_agent_space as the runtime copy. Useful for reviewing how much the running version has deviated from the original source. Supports path substring filtering, glob pattern filtering, context_lines, and max_files.
+
+## Returns
+```json
+{"stats": {"total_left": 100, "total_right": 100, "same": 90, "modified": 5, "missing_in_right": 3, "new_in_right": 2, "skipped_max": 0}, "left_path": "...", "right_path": "...", "diffs": [{"file": "...", "status": "modified", "diff": "..."}]}
+```
+
+## When to Use
+- Check what changes the running version has compared to the original source.
+- Review accumulated divergence after multiple evolutions.
+
+## Side Effects / Notes
+- Read-only query; does not modify any files.
+- Only text files are compared; binaries and build artifacts are skipped.""",
         **_COMMON_SCHEMA,
     },
     handler=_handle_diff_origin_fast,
@@ -355,10 +385,49 @@ registry.register(
     name="diff_fast_fork",
     toolset="extools",
     schema={
-        # Compare code differences between the currently running fast repo (fast_agent_space/) and the fork directory (slow_agent_space/, the evolution target).
-        # After writing evolved code to fork, use this tool to review changes that are about to be swapped.
-        # If they are identical, there is no need to call evolve_code.
-        "description": """Compare code differences between the currently running fast repo (fast_agent_space/) and the fork directory (slow_agent_space/, the evolution target). After writing evolved code to fork, use this tool to review changes that are about to be swapped. If they are identical, there is no need to call evolve_code.""",
+        # 比较当前运行副本 fast_agent_space/ 与 fork 目录 slow_agent_space/ 之间的代码差异。
+        #
+        # ## 前置条件
+        # fork（slow_agent_space）目录必须可用。
+        #
+        # ## 调用效果
+        # 生成 fast_agent_space 与 fork 之间的 unified diff。
+        # 在向 fork 写入进化代码后，可用此工具审查即将交换的改动。
+        # 如果两者完全相同，则无需调用 evolve_code。
+        # 支持 path 子串过滤、pattern glob 过滤、context_lines 上下文行数、max_files 最大返回文件数。
+        #
+        # ## 返回
+        # ```json
+        # {"stats": {...}, "left_path": "...", "right_path": "...", "diffs": [{"file": "...", "status": "modified", "diff": "..."}]}
+        # ```
+        #
+        # ## 何时使用
+        # - 在调用 evolve_code 前审查 fork 中的改动。
+        # - 确认是否有实际差异需要进化。
+        #
+        # ## 副作用/注意
+        # - 纯查询，不会修改任何文件。
+        # - 只对比文本文件，跳过二进制和构建产物。
+        "description": """Compare code differences between the currently running fast repo (fast_agent_space/) and the fork directory (slow_agent_space/, the evolution target).
+
+## Prerequisites
+The fork (slow_agent_space) directory must be available.
+
+## Effect
+Generates a unified diff between fast_agent_space and fork. After writing evolved code to fork, use this tool to review changes that are about to be swapped. If they are identical, there is no need to call evolve_code. Supports path substring filtering, glob pattern filtering, context_lines, and max_files.
+
+## Returns
+```json
+{"stats": {...}, "left_path": "...", "right_path": "...", "diffs": [{"file": "...", "status": "modified", "diff": "..."}]}
+```
+
+## When to Use
+- Review changes in fork before calling evolve_code.
+- Confirm whether there is any actual difference that requires evolution.
+
+## Side Effects / Notes
+- Read-only query; does not modify any files.
+- Only text files are compared; binaries and build artifacts are skipped.""",
         **_COMMON_SCHEMA,
     },
     handler=_handle_diff_fast_fork,

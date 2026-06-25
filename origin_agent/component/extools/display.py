@@ -370,36 +370,64 @@ registry.register(
     name="publish_file",
     toolset="display",
     schema={
-        # Publish any file under ws: path as a frontend-downloadable link.
-        # The frontend shows a download button; clicking it downloads the file.
-        # Note: for displaying images, use display_image instead;
-        # publish_file is for downloading (including images).
-        "description": """Publish any file under ws: path as a frontend-downloadable link.
-The frontend shows a download button; clicking it downloads the file.
-Note: for displaying images, use display_image instead;
-publish_file is for downloading (including images).
+        # 将 ws: 路径下的任意文件发布为前端可下载链接。
+        #
+        # ## 前置条件
+        # path 必须指向一个已存在的 ws: 文件。
+        #
+        # ## 调用效果
+        # 验证文件存在后返回下载链接，前端会显示下载按钮。
+        # 图片展示请使用 display_image；publish_file 用于下载（包括图片）。
+        #
+        # ## 返回
+        # ```json
+        # {"path": "ws:output/report.pdf", "mime": "application/pdf", "size": 10240, "filename": "report.pdf", "description": "...", "download_url": "/downloads/output/report.pdf", "message": "📄 report.pdf (10.0 KB)"}
+        # ```
+        #
+        # ## 何时使用
+        # - 让用户下载生成的 PDF、ZIP、CSV 等文件。
+        # - 提供文件附件给用户。
+        #
+        # ## 副作用/注意
+        # - 纯查询，不会修改文件。
+        # - 只有 ws: 命名空间下的文件可被发布。
+        "description": """Publish any file under a ws: path as a frontend-downloadable link.
 
-Examples:
-  publish_file(path="ws:output/report.pdf", filename="report.pdf", description="Data analysis report")
-  publish_file(path="ws:output/archive.zip", description="Dataset archive")
-""",
+## Prerequisites
+path must point to an existing file under the ws: namespace.
+
+## Effect
+Verifies the file exists and returns a download link. The frontend shows a download button. For displaying images inline, use display_image instead; publish_file is for downloading (including images).
+
+## Returns
+```json
+{"path": "ws:output/report.pdf", "mime": "application/pdf", "size": 10240, "filename": "report.pdf", "description": "...", "download_url": "/downloads/output/report.pdf", "message": "📄 report.pdf (10.0 KB)"}
+```
+
+## When to Use
+- Let the user download generated PDFs, ZIPs, CSVs, etc.
+- Provide file attachments to the user.
+
+## Side Effects / Notes
+- Read-only query; does not modify the file.
+- Only files under the ws: namespace can be published.""",
         "parameters": {
             "type": "object",
             "properties": {
                 "path": {
                     "type": "string",
-                    # ws: 前缀下的文件路径
-                    "description": "File path under ws: prefix",
+                    # ws: 前缀下的文件路径。
+                    "description": """File path under ws: prefix.""",
                 },
                 "filename": {
                     "type": "string",
-                    # 可选的下载文件名（覆盖原文件名）
-                    "description": "Optional download filename (overrides original filename)",
+                    # 可选的下载文件名（覆盖原文件名）。
+                    "description": """Optional download filename (overrides original filename).""",
                 },
                 "description": {
                     "type": "string",
-                    # 文件描述
-                    "description": "File description",
+                    # 文件描述。
+                    "description": """File description.""",
                 },
             },
             "required": ["path"],
@@ -413,56 +441,64 @@ registry.register(
     name="play_audio",
     toolset="display",
     schema={
-        # Send audio to the frontend and optionally play it immediately.
-        # Two input modes (mutually exclusive):
-        #   - path: ws: path to a local audio file
-        #   - url:  external audio URL
-        # If autoplay=true (default), the frontend <audio> element has the
-        # autoPlay attribute, which starts playback as soon as the tool result is received.
-        # Supported audio formats (for ws: path): mp3, wav, ogg, flac, aac, m4a.
+        # 将音频发送到前端并可选立即播放。
+        #
+        # ## 前置条件
+        # 必须提供 path（ws: 本地音频文件）或 url（外部音频 URL）之一，二者互斥。
+        # ws: 路径支持的格式：mp3、wav、ogg、flac、aac、m4a。
+        #
+        # ## 调用效果
+        # 返回音频播放 URL 和 MIME 类型。autoplay=true 时前端收到结果后自动播放。
+        #
+        # ## 返回
+        # ```json
+        # {"path": "ws:output/speech.mp3", "audio_url": "/uploads/output/speech.mp3", "mime": "audio/mpeg", "size": 10240, "autoplay": true, "message": "🔊 ws:output/speech.mp3 (10.0 KB) (autoplay)"}
+        # ```
+        #
+        # ## 何时使用
+        # - 播放生成的语音或音乐文件。
+        # - 播放外部音频链接。
+        #
+        # ## 副作用/注意
+        # - autoplay 可能被浏览器策略阻止。
+        # - url 模式下无法获取文件大小。
         "description": """Send audio to the frontend and optionally play it immediately.
 
-Two input modes (mutually exclusive):
-  - path: ws: path to a local audio file
-  - url:  external audio URL
+## Prerequisites
+Provide exactly one of path (a local audio file under ws:) or url (an external audio URL); they are mutually exclusive. Supported formats for ws: paths: mp3, wav, ogg, flac, aac, m4a.
 
-If autoplay=true (default), the frontend <audio> element has the autoPlay attribute, which starts playback as soon as the tool result is received.
+## Effect
+Returns the audio playback URL and MIME type. If autoplay=true, the frontend starts playback as soon as the tool result is received.
 
-Supported audio formats (for ws: path): mp3, wav, ogg, flac, aac, m4a
+## Returns
+```json
+{"path": "ws:output/speech.mp3", "audio_url": "/uploads/output/speech.mp3", "mime": "audio/mpeg", "size": 10240, "autoplay": true, "message": "🔊 ws:output/speech.mp3 (10.0 KB) (autoplay)"}
+```
 
-Returns:
-  - audio_url: resolved URL for playback
-  - autoplay: whether autoplay is enabled
-  - mime: MIME type
-  - size: file size in bytes (path mode only)""",
+## When to Use
+- Play generated speech or music files.
+- Play an external audio link.
+
+## Side Effects / Notes
+- Autoplay may be blocked by browser policies.
+- File size is not available in url mode.""",
         "parameters": {
             "type": "object",
             "properties": {
                 "path": {
                     "type": "string",
                     # ws: 前缀下的音频文件路径，如 ws:output/speech.mp3。与 url 互斥。
-                    "description": (
-                        "Path to an audio file under ws: prefix, "
-                        "e.g. ws:output/speech.mp3. "
-                        "Mutually exclusive with 'url'."
-                    ),
+                    "description": """Path to an audio file under ws: prefix, e.g. ws:output/speech.mp3. Mutually exclusive with url.""",
                 },
                 "url": {
                     "type": "string",
                     # 外部音频 URL，如 https://example.com/audio.mp3。与 path 互斥。
-                    "description": (
-                        "External URL of an audio file, "
-                        "e.g. https://example.com/audio.mp3. "
-                        "Mutually exclusive with 'path'."
-                    ),
+                    "description": """External URL of an audio file, e.g. https://example.com/audio.mp3. Mutually exclusive with path.""",
                 },
                 "autoplay": {
                     "type": "boolean",
                     # 是否立即播放。开启后前端收到结果自动播放，默认为 true。
-                    "description": (
-                        "If true, the frontend starts playback immediately "
-                        "when the tool result arrives. Default: true."
-                    ),
+                    "description": """If true, the frontend starts playback immediately when the tool result arrives. Default: true.""",
                     "default": True,
                 },
             },
@@ -476,71 +512,76 @@ registry.register(
     name="play_audio_list",
     toolset="display",
     schema={
+        # 将播放列表发送到前端并依次播放。
+        #
+        # ## 前置条件
+        # items 必须为非空列表，每项提供 path（ws: 本地音频）或 url（外部音频 URL）之一，二者互斥。
+        # ws: 路径支持的格式：mp3、wav、ogg、flac、aac、m4a。
+        #
+        # ## 调用效果
+        # 返回解析后的播放列表，前端按顺序播放，一首结束后自动播放下一首。
+        #
+        # ## 返回
+        # ```json
+        # {"playlist": [{"audio_url": "...", "mime": "audio/mpeg", "size": 10240, "title": "Chapter 1"}], "autoplay": true, "current_index": 0, "total_tracks": 1, "total_size": 10240, "message": "📻 Playlist: Chapter 1 (10.0 KB) (autoplay)"}
+        # ```
+        #
+        # ## 何时使用
+        # - 连续播放多个音频文件。
+        # - 播放章节化语音内容。
+        #
+        # ## 副作用/注意
+        # - autoplay 可能被浏览器策略阻止。
+        # - 列表中任一项无效会导致整个调用失败。
         "description": """Send a playlist of audio tracks to the frontend and play them sequentially.
 
-Each track plays to completion, then the next track starts automatically.
+## Prerequisites
+items must be a non-empty list. Each item must provide exactly one of path (a local audio file under ws:) or url (an external audio URL); they are mutually exclusive. Supported formats for ws: paths: mp3, wav, ogg, flac, aac, m4a.
 
-Input: a list of items, each item is an object with:
-  - path: ws: path to a local audio file (mutually exclusive with url)
-  - url:  external audio URL (mutually exclusive with path)
-  - title: optional track title
+## Effect
+Returns a resolved playlist. The frontend plays tracks in order, automatically advancing to the next track when one finishes.
 
-Supported audio formats (for ws: path): mp3, wav, ogg, flac, aac, m4a
+## Returns
+```json
+{"playlist": [{"audio_url": "...", "mime": "audio/mpeg", "size": 10240, "title": "Chapter 1"}], "autoplay": true, "current_index": 0, "total_tracks": 1, "total_size": 10240, "message": "📻 Playlist: Chapter 1 (10.0 KB) (autoplay)"}
+```
 
-Returns:
-  - playlist: list of resolved tracks with audio_url, mime, title, size
-  - autoplay: whether playback starts immediately
-  - current_index: starting track index (always 0)
-  - total_tracks: number of tracks
+## When to Use
+- Play multiple audio files in sequence.
+- Play chapterized speech content.
 
-Example:
-  play_audio_list(items=[
-    {"path": "ws:output/chapter1.mp3", "title": "Chapter 1"},
-    {"path": "ws:output/chapter2.mp3", "title": "Chapter 2"},
-    {"url": "https://example.com/outro.mp3", "title": "Outro"}
-  ], autoplay=true)
-""",
+## Side Effects / Notes
+- Autoplay may be blocked by browser policies.
+- An invalid item in the list causes the entire call to fail.""",
         "parameters": {
             "type": "object",
             "properties": {
                 "items": {
                     "type": "array",
-                    "description": (
-                        "List of audio entries. Each entry is an object with "
-                        "'path' (ws: file) or 'url' (external), and optional 'title'."
-                    ),
+                    # 音频条目列表。每项是包含 path（ws: 文件）或 url（外部 URL）以及可选 title 的对象。
+                    "description": """List of audio entries. Each entry is an object with 'path' (ws: file) or 'url' (external), and optional 'title'.""",
                     "items": {
                         "type": "object",
                         "properties": {
                             "path": {
                                 "type": "string",
-                                "description": (
-                                    "Path to an audio file under ws: prefix, "
-                                    "e.g. ws:output/speech.mp3. "
-                                    "Mutually exclusive with 'url'."
-                                ),
+                                "description": """Path to an audio file under ws: prefix, e.g. ws:output/speech.mp3. Mutually exclusive with url.""",
                             },
                             "url": {
                                 "type": "string",
-                                "description": (
-                                    "External URL of an audio file, "
-                                    "e.g. https://example.com/audio.mp3. "
-                                    "Mutually exclusive with 'path'."
-                                ),
+                                "description": """External URL of an audio file, e.g. https://example.com/audio.mp3. Mutually exclusive with path.""",
                             },
                             "title": {
                                 "type": "string",
-                                "description": "Optional track title displayed in the playlist.",
+                                "description": """Optional track title displayed in the playlist.""",
                             },
                         },
                     },
                 },
                 "autoplay": {
                     "type": "boolean",
-                    "description": (
-                        "If true, the frontend starts playback immediately "
-                        "when the tool result arrives. Default: true."
-                    ),
+                    # 是否立即播放。开启后前端收到结果自动播放，默认为 true。
+                    "description": """If true, the frontend starts playback immediately when the tool result arrives. Default: true.""",
                     "default": True,
                 },
             },

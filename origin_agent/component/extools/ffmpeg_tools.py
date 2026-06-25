@@ -523,15 +523,54 @@ registry.register(
     name="media_info",
     toolset="extools",
     schema={
-        # Read detailed media file info using ffprobe: format, duration, video streams (resolution, fps, codec), audio streams (sample rate, channels, codec), etc.
-        "description": """Read detailed media file info using ffprobe: format, duration, video streams (resolution, fps, codec), audio streams (sample rate, channels, codec), etc.""",
+        # 使用 ffprobe 读取媒体文件的详细信息。
+        #
+        # ## 前置条件
+        # 系统中必须已安装 ffmpeg（含 ffprobe）。
+        # path 必须使用命名空间前缀（如 ws:、fork:）。
+        #
+        # ## 调用效果
+        # 返回格式、时长、大小、比特率以及视频/音频/字幕流的编解码器、分辨率、帧率、采样率等信息。
+        #
+        # ## 返回
+        # ```json
+        # {"path": "ws:videos/sample.mp4", "format": "mov,mp4,m4a,3gp,3g2,mj2", "duration_sec": 120.5, "size_bytes": 10485760, "bitrate_kbps": 1024, "video_streams": [{"index": 0, "codec": "h264", "width": 1920, "height": 1080, "fps": 30}], "audio_streams": [...], "subtitle_streams": [...], "total_streams": 2}
+        # ```
+        #
+        # ## 何时使用
+        # - 检查媒体文件格式和参数。
+        # - 确认分辨率、码率、时长后再进行转码或剪辑。
+        #
+        # ## 副作用/注意
+        # - 只读操作，不会修改源文件。
+        # - 损坏或格式不支持的文件可能返回错误。
+        "description": """Read detailed media file info using ffprobe.
+
+## Prerequisites
+ffmpeg (including ffprobe) must be installed on the system. The path must use a namespace prefix (e.g. ws:, fork:).
+
+## Effect
+Returns the format, duration, size, bitrate, and stream details (codec, resolution, frame rate, sample rate, channels, etc.) for video, audio, and subtitle streams.
+
+## Returns
+```json
+{"path": "ws:videos/sample.mp4", "format": "mov,mp4,m4a,3gp,3g2,mj2", "duration_sec": 120.5, "size_bytes": 10485760, "bitrate_kbps": 1024, "video_streams": [{"index": 0, "codec": "h264", "width": 1920, "height": 1080, "fps": 30}], "audio_streams": [...], "subtitle_streams": [...], "total_streams": 2}
+```
+
+## When to Use
+- Inspect media file format and parameters.
+- Confirm resolution, bitrate, and duration before transcoding or trimming.
+
+## Side Effects / Notes
+- Read-only operation; does not modify the source file.
+- Corrupted or unsupported files may return an error.""",
         "parameters": {
             "type": "object",
             "properties": {
                 "path": {
                     "type": "string",
                     # 媒体文件逻辑路径（ws: 或 fork: 前缀）。
-                    "description": "Media file logical path (ws: or fork: prefix).",
+                    "description": """Media file logical path (ws: or fork: prefix).""",
                 },
             },
             "required": ["path"],
@@ -547,26 +586,66 @@ registry.register(
     name="convert_media",
     toolset="extools",
     schema={
-        # Convert media file format using ffmpeg. Auto-selects encoder based on output file extension. Pass extra ffmpeg arguments via extra_args.
-        "description": """Convert media file format using ffmpeg. Auto-selects encoder based on output file extension. Pass extra ffmpeg arguments via extra_args.""",
+        # 使用 ffmpeg 转换媒体文件格式。
+        #
+        # ## 前置条件
+        # 系统中必须已安装 ffmpeg。
+        # input 和 output 必须使用命名空间前缀。
+        #
+        # ## 调用效果
+        # 根据 output 文件扩展名自动选择编码器，也可通过 extra_args 传入额外 ffmpeg 参数。
+        # 默认覆盖已存在的输出文件。
+        #
+        # ## 返回
+        # ```json
+        # {"input": "ws:videos/input.avi", "output": "ws:videos/output.mp4", "success": true, "stderr": "..."}
+        # ```
+        #
+        # ## 何时使用
+        # - 将视频/音频转换为另一种格式。
+        # - 通过 extra_args 自定义编码参数。
+        #
+        # ## 副作用/注意
+        # - 会写入新文件，可能覆盖同名输出。
+        # - 大文件转换可能耗时较长。
+        "description": """Convert a media file to another format using ffmpeg.
+
+## Prerequisites
+ffmpeg must be installed on the system. input and output must use namespace prefixes.
+
+## Effect
+Converts the input file to the format implied by the output extension. Extra ffmpeg arguments can be passed via extra_args. Existing output files are overwritten by default.
+
+## Returns
+```json
+{"input": "ws:videos/input.avi", "output": "ws:videos/output.mp4", "success": true, "stderr": "..."}
+```
+
+## When to Use
+- Convert a video or audio file to another format.
+- Customize encoding parameters via extra_args.
+
+## Side Effects / Notes
+- Writes a new file and may overwrite an existing output file with the same name.
+- Large file conversions may take a long time.""",
         "parameters": {
             "type": "object",
             "properties": {
                 "input": {
                     "type": "string",
                     # 输入文件逻辑路径。
-                    "description": "Input file logical path.",
+                    "description": """Input file logical path.""",
                 },
                 "output": {
                     "type": "string",
                     # 输出文件逻辑路径（扩展名决定目标格式）。
-                    "description": "Output file logical path (extension determines target format).",
+                    "description": """Output file logical path (extension determines target format).""",
                 },
                 "extra_args": {
                     "type": "array",
                     "items": {"type": "string"},
                     # 附加 ffmpeg 参数列表（可选），例如 ['-b:v', '2M', '-vf', 'scale=1280:720']。
-                    "description": "Extra ffmpeg arguments (optional), e.g. ['-b:v', '2M', '-vf', 'scale=1280:720'].",
+                    "description": """Extra ffmpeg arguments (optional), e.g. ['-b:v', '2M', '-vf', 'scale=1280:720'].""",
                 },
             },
             "required": ["input", "output"],
@@ -583,37 +662,77 @@ registry.register(
     name="extract_audio",
     toolset="extools",
     schema={
-        # Extract audio track from a video file. Supports specifying codec, sample rate, and channel count. Default output format is MP3.
-        "description": """Extract audio track from a video file. Supports specifying codec, sample rate, and channel count. Default output format is MP3.""",
+        # 从视频文件中提取音频轨道。
+        #
+        # ## 前置条件
+        # 系统中必须已安装 ffmpeg。
+        # input 和 output 必须使用命名空间前缀。
+        #
+        # ## 调用效果
+        # 从 input 视频提取音频并保存为 output。默认编码器为 libmp3lame，输出 MP3。
+        # 可通过 codec、sample_rate、channels 调整编码参数。
+        #
+        # ## 返回
+        # ```json
+        # {"input": "ws:videos/video.mp4", "output": "ws:audio/audio.mp3", "codec": "libmp3lame", "success": true}
+        # ```
+        #
+        # ## 何时使用
+        # - 从视频中提取背景音乐或对白。
+        # - 将视频转为纯音频文件。
+        #
+        # ## 副作用/注意
+        # - 会写入新音频文件。
+        # - sample_rate 和 channels 为 0 时使用源文件值。
+        "description": """Extract the audio track from a video file.
+
+## Prerequisites
+ffmpeg must be installed on the system. input and output must use namespace prefixes.
+
+## Effect
+Extracts audio from the input video and saves it to output. Default codec is libmp3lame, producing MP3. Codec, sample rate, and channel count can be customized.
+
+## Returns
+```json
+{"input": "ws:videos/video.mp4", "output": "ws:audio/audio.mp3", "codec": "libmp3lame", "success": true}
+```
+
+## When to Use
+- Extract background music or dialogue from a video.
+- Convert a video to an audio-only file.
+
+## Side Effects / Notes
+- Writes a new audio file.
+- sample_rate and channels of 0 mean use the source values.""",
         "parameters": {
             "type": "object",
             "properties": {
                 "input": {
                     "type": "string",
                     # 输入视频文件逻辑路径。
-                    "description": "Input video file logical path.",
+                    "description": """Input video file logical path.""",
                 },
                 "output": {
                     "type": "string",
                     # 输出音频文件逻辑路径。
-                    "description": "Output audio file logical path.",
+                    "description": """Output audio file logical path.""",
                 },
                 "codec": {
                     "type": "string",
                     # 音频编码器（默认 libmp3lame）。常见选项：libmp3lame, aac, libvorbis, pcm_s16le。
-                    "description": "Audio codec (default libmp3lame). Common options: libmp3lame, aac, libvorbis, pcm_s16le.",
+                    "description": """Audio codec (default libmp3lame). Common options: libmp3lame, aac, libvorbis, pcm_s16le.""",
                     "default": "libmp3lame",
                 },
                 "sample_rate": {
                     "type": "integer",
                     # 采样率（Hz），例如 44100、48000。0 表示使用源文件采样率。
-                    "description": "Sample rate (Hz), e.g. 44100, 48000. 0 means use source sample rate.",
+                    "description": """Sample rate in Hz, e.g. 44100, 48000. 0 means use source sample rate.""",
                     "default": 0,
                 },
                 "channels": {
                     "type": "integer",
                     # 声道数，例如 1（单声道）、2（立体声）。0 表示使用源文件声道数。
-                    "description": "Number of channels, e.g. 1 (mono), 2 (stereo). 0 means use source channel count.",
+                    "description": """Number of channels, e.g. 1 (mono), 2 (stereo). 0 means use source channel count.""",
                     "default": 0,
                 },
             },
@@ -631,35 +750,76 @@ registry.register(
     name="trim_media",
     toolset="extools",
     schema={
-        # Trim an audio/video clip. Uses stream copy (-c copy) for fast lossless trimming. At least one of start, duration, or end must be specified.
-        "description": """Trim an audio/video clip. Uses stream copy (-c copy) for fast lossless trimming. At least one of start, duration, or end must be specified.""",
+        # 裁剪音视频片段。
+        #
+        # ## 前置条件
+        # 系统中必须已安装 ffmpeg。
+        # input 和 output 必须使用命名空间前缀。
+        # 必须提供 start、duration、end 中的至少一个。
+        #
+        # ## 调用效果
+        # 使用 ffmpeg 的流复制模式（-c copy）快速无损裁剪片段。
+        # 可通过 start、duration、end 控制时间范围（单位：秒）。
+        #
+        # ## 返回
+        # ```json
+        # {"input": "ws:videos/video.mp4", "output": "ws:videos/clip.mp4", "start": 10, "duration": 30, "end": null, "reencode": false, "success": true}
+        # ```
+        #
+        # ## 何时使用
+        # - 从长视频中截取片段。
+        # - 快速剪辑而不重新编码。
+        #
+        # ## 副作用/注意
+        # - 会写入新文件。
+        # - 流复制要求片段起止在关键帧附近，否则可能产生短暂黑屏或音画不同步。
+        "description": """Trim an audio/video clip.
+
+## Prerequisites
+ffmpeg must be installed on the system. input and output must use namespace prefixes. At least one of start, duration, or end must be provided.
+
+## Effect
+Performs fast lossless trimming using ffmpeg stream copy mode (-c copy). Time range is controlled by start, duration, and end (all in seconds).
+
+## Returns
+```json
+{"input": "ws:videos/video.mp4", "output": "ws:videos/clip.mp4", "start": 10, "duration": 30, "end": null, "reencode": false, "success": true}
+```
+
+## When to Use
+- Extract a segment from a long video.
+- Quickly clip media without re-encoding.
+
+## Side Effects / Notes
+- Writes a new file.
+- Stream copy requires cut points near keyframes; otherwise brief black frames or A/V desync may occur.""",
         "parameters": {
             "type": "object",
             "properties": {
                 "input": {
                     "type": "string",
                     # 输入文件逻辑路径。
-                    "description": "Input file logical path.",
+                    "description": """Input file logical path.""",
                 },
                 "output": {
                     "type": "string",
                     # 输出文件逻辑路径。
-                    "description": "Output file logical path.",
+                    "description": """Output file logical path.""",
                 },
                 "start": {
                     "type": "number",
                     # 起始时间（秒），从该时间点开始裁剪。
-                    "description": "Start time (seconds), trim from this point.",
+                    "description": """Start time in seconds, trim from this point.""",
                 },
                 "duration": {
                     "type": "number",
                     # 裁剪时长（秒）。
-                    "description": "Duration to trim (seconds).",
+                    "description": """Duration to trim in seconds.""",
                 },
                 "end": {
                     "type": "number",
                     # 结束时间（秒），与 start 一起使用。
-                    "description": "End time (seconds), used together with start.",
+                    "description": """End time in seconds, used together with start.""",
                 },
             },
             "required": ["input", "output"],
@@ -675,8 +835,48 @@ registry.register(
     name="concat_media",
     toolset="extools",
     schema={
-        # Concatenate multiple media files. Uses ffmpeg concat demuxer with stream copy (-c copy), no re-encoding needed. All files must use identical encoding parameters (same format, resolution, etc.).
-        "description": """Concatenate multiple media files. Uses ffmpeg concat demuxer with stream copy (-c copy), no re-encoding needed. All files must use identical encoding parameters (same format, resolution, etc.).""",
+        # 拼接多个媒体文件。
+        #
+        # ## 前置条件
+        # 系统中必须已安装 ffmpeg。
+        # inputs 必须至少包含 2 个使用命名空间前缀的逻辑路径。
+        # 所有输入文件必须使用相同的编码参数（格式、分辨率等）。
+        #
+        # ## 调用效果
+        # 使用 ffmpeg concat demuxer 和流复制模式拼接文件，无需重新编码。
+        #
+        # ## 返回
+        # ```json
+        # {"inputs": ["ws:a.mp4", "ws:b.mp4"], "output": "ws:output.mp4", "file_count": 2, "success": true}
+        # ```
+        #
+        # ## 何时使用
+        # - 将多个同格式视频/音频合并为一个文件。
+        # - 拼接分段录制的媒体。
+        #
+        # ## 副作用/注意
+        # - 会写入新文件。
+        # - 输入文件编码参数不一致可能导致拼接失败或异常。
+        "description": """Concatenate multiple media files.
+
+## Prerequisites
+ffmpeg must be installed on the system. inputs must contain at least 2 logical paths with namespace prefixes. All input files must use identical encoding parameters (format, resolution, etc.).
+
+## Effect
+Concatenates the input files using the ffmpeg concat demuxer with stream copy mode, avoiding re-encoding.
+
+## Returns
+```json
+{"inputs": ["ws:a.mp4", "ws:b.mp4"], "output": "ws:output.mp4", "file_count": 2, "success": true}
+```
+
+## When to Use
+- Merge multiple files of the same format into one.
+- Combine segmented recordings.
+
+## Side Effects / Notes
+- Writes a new file.
+- Mismatched encoding parameters among inputs may cause concatenation failures or artifacts.""",
         "parameters": {
             "type": "object",
             "properties": {
@@ -684,12 +884,12 @@ registry.register(
                     "type": "array",
                     "items": {"type": "string"},
                     # 输入文件逻辑路径列表（至少 2 个）。
-                    "description": "List of input file logical paths (at least 2).",
+                    "description": """List of input file logical paths (at least 2).""",
                 },
                 "output": {
                     "type": "string",
                     # 输出文件逻辑路径。
-                    "description": "Output file logical path.",
+                    "description": """Output file logical path.""",
                 },
             },
             "required": ["inputs", "output"],
@@ -705,54 +905,96 @@ registry.register(
     name="compress_media",
     toolset="extools",
     schema={
-        # Compress a video file (reduce bitrate/resolution). Supports setting CRF (0-51, lower = better quality), video bitrate, codec, and scaling resolution.
-        "description": """Compress a video file (reduce bitrate/resolution). Supports setting CRF (0-51, lower = better quality), video bitrate, codec, and scaling resolution.""",
+        # 压缩视频文件（降低分辨率/码率）。
+        #
+        # ## 前置条件
+        # 系统中必须已安装 ffmpeg。
+        # input 和 output 必须使用命名空间前缀。
+        #
+        # ## 调用效果
+        # 通过设置 CRF、视频码率、编码器、缩放分辨率等参数压缩视频。
+        # CRF 越低质量越好（0-51），默认 23。仅对 libx264/libx265/libvpx-vp9 有效。
+        #
+        # ## 返回
+        # ```json
+        # {"input": "ws:videos/input.mp4", "output": "ws:videos/output.mp4", "video_codec": "libx264", "crf": 23, "scale": "1280:720", "success": true}
+        # ```
+        #
+        # ## 何时使用
+        # - 缩小视频文件体积以便传输或存储。
+        # - 调整视频分辨率或码率。
+        #
+        # ## 副作用/注意
+        # - 会写入新文件，可能覆盖同名输出。
+        # - 压缩是有损操作，会降低画质。
+        # - 大文件压缩可能耗时较长。
+        "description": """Compress a video file (reduce bitrate/resolution).
+
+## Prerequisites
+ffmpeg must be installed on the system. input and output must use namespace prefixes.
+
+## Effect
+Compresses the video by setting CRF, video bitrate, codec, and scale resolution. Lower CRF means better quality (0-51), default 23. CRF is only effective for libx264, libx265, and libvpx-vp9.
+
+## Returns
+```json
+{"input": "ws:videos/input.mp4", "output": "ws:videos/output.mp4", "video_codec": "libx264", "crf": 23, "scale": "1280:720", "success": true}
+```
+
+## When to Use
+- Reduce video file size for transfer or storage.
+- Adjust video resolution or bitrate.
+
+## Side Effects / Notes
+- Writes a new file and may overwrite an existing output file with the same name.
+- Compression is lossy and reduces visual quality.
+- Large file compression may take a long time.""",
         "parameters": {
             "type": "object",
             "properties": {
                 "input": {
                     "type": "string",
                     # 输入文件逻辑路径。
-                    "description": "Input file logical path.",
+                    "description": """Input file logical path.""",
                 },
                 "output": {
                     "type": "string",
                     # 输出文件逻辑路径。
-                    "description": "Output file logical path.",
+                    "description": """Output file logical path.""",
                 },
                 "video_codec": {
                     "type": "string",
                     # 视频编码器（默认 libx264）。
-                    "description": "Video codec (default libx264).",
+                    "description": """Video codec (default libx264).""",
                     "default": "libx264",
                 },
                 "crf": {
                     "type": "integer",
                     # CRF 值（0-51），越低质量越好。默认 23。仅对 libx264/libx265/libvpx-vp9 有效。
-                    "description": "CRF value (0-51), lower = better quality. Default 23. Only effective for libx264/libx265/libvpx-vp9.",
+                    "description": """CRF value (0-51), lower = better quality. Default 23. Only effective for libx264/libx265/libvpx-vp9.""",
                     "default": 23,
                 },
                 "video_bitrate": {
                     "type": "string",
                     # 视频目标比特率，例如 '2M'、'500k'。
-                    "description": "Target video bitrate, e.g. '2M', '500k'.",
+                    "description": """Target video bitrate, e.g. '2M', '500k'.""",
                 },
                 "audio_codec": {
                     "type": "string",
                     # 音频编码器（默认 aac）。
-                    "description": "Audio codec (default aac).",
+                    "description": """Audio codec (default aac).""",
                     "default": "aac",
                 },
                 "audio_bitrate": {
                     "type": "string",
                     # 音频比特率（默认 128k）。
-                    "description": "Audio bitrate (default 128k).",
+                    "description": """Audio bitrate (default 128k).""",
                     "default": "128k",
                 },
                 "scale": {
                     "type": "string",
                     # 缩放分辨率，例如 '1280:720'、'640:-1'（等比例缩放）。
-                    "description": "Scale resolution, e.g. '1280:720', '640:-1' (proportional scaling).",
+                    "description": """Scale resolution, e.g. '1280:720', '640:-1' (proportional scaling).""",
                 },
             },
             "required": ["input", "output"],

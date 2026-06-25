@@ -36,11 +36,11 @@ todos:
     content: constant.py — 常量文件重新分区整理
     status: completed
   - id: extools
-    content: component/extools/ — archive_tools.py, web_fetch.py, web_search.py, background_service.py完成
-    status: in_progress
+    content: component/extools/ — 全部 extools 工具描述已按规范重写完成
+    status: completed
   - id: multiagent
     content: component/mutliagenttools/ — 全部多 Agent 工具
-    status: pending
+    status: completed
 isProject: false
 ---
 

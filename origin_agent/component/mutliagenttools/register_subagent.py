@@ -110,24 +110,74 @@ registry.register(
     name="register_subagent",
     toolset="multiagent",
     schema={
-        # 注册一个子 Agent 配置文件（base_url、model、api_key、max_output_tokens、max_context_tokens、system_prompt_path）。
-        # 'name' 字段是唯一标识；现有条目不能被覆盖（如果需要更改注册，请先注销）。
-        # 'system_prompt_path' 存储文件路径——文件内容在子 Agent 启动时读取，因此编辑文件内容不需要重新注册。
-        # 要更改 base_url 或 model 等参数，请先注销现有条目。
-        # 已注册的配置文件是全局的，可能被其他多 Agent 工具使用。
-        "description": """Register a sub-agent profile (base_url, model, api_key, max_output_tokens, max_context_tokens, system_prompt_path). The 'name' field is the unique identifier; existing entries cannot be overwritten (unregister first if you need to change the registration). 'system_prompt_path' stores a file path — the file content is read at sub-agent launch time, so editing the file content does NOT require re-registration. To change parameters like base_url or model, unregister the existing entry first. Registered profiles are global and may be used by other multi-agent tools.""",
+        # 注册一个子 Agent 的 LLM 配置。
+        #
+        # ## 前置条件
+        # 调用前必须向用户说明：将使用此工具手动配置一个子 Agent，需要用户提供或确认以下参数：name、base_url、model、api_key、system_prompt_path、max_output_tokens、max_context_tokens。
+        # 用户必须明确同意后才能调用此工具；不得在未经用户确认的情况下推测或填写任何参数（尤其是 api_key 和 base_url）。
+        # 必须与用户共同决定：本次注册是使用手动配置的 register_subagent，还是使用继承父 Agent 配置的 register_subagent_from_parent。
+        # name 不能与其他已注册子 Agent 重复；如需更新，请先调用 unregister_subagent 注销。
+        #
+        # ## 调用效果
+        # 以 name 为唯一标识保存子 Agent 配置。配置持久化到工作空间，供 run_subagent 等工具全局使用。
+        # system_prompt_path 仅保存文件路径，文件内容在子 Agent 启动时读取，因此修改提示词文件不需要重新注册。
+        # 若要更改 base_url、model、token 限制等参数，必须先注销再重新注册。
+        #
+        # ## 返回
+        # ```json
+        # {"success": true, "name": "...", "message": "Subagent '...' registered successfully."}
+        # ```
+        #
+        # ## 何时使用
+        # - 当用户希望子 Agent 使用与父 Agent 不同的 LLM 端点/模型时使用本工具。
+        # - 如果用户希望子 Agent 继承父 Agent 的当前 LLM 配置，应使用 register_subagent_from_parent，而不是本工具。
+        # - 为子 Agent 指定自定义系统提示词文件。
+        # - 配置子 Agent 的输出和上下文 token 限制。
+        #
+        # ## 副作用/注意
+        # - 注册信息持久化到磁盘，可被其他多 Agent 工具读取。
+        # - 同名已存在时会返回错误，不会覆盖。
+        # - api_key 可能以明文形式持久化，注意避免泄露。
+        "description": """Register a sub-agent's LLM configuration.
+
+## Prerequisites
+Before calling this tool, you MUST explain to the user that you are about to manually configure a sub-agent and ask them to provide or confirm the following parameters: name, base_url, model, api_key, system_prompt_path, max_output_tokens, and max_context_tokens.
+You MUST obtain explicit user consent before calling this tool. Do NOT guess or fill in any parameters — especially api_key and base_url — without user confirmation.
+You and the user MUST jointly decide whether to use this manual tool (register_subagent) or the parent-config template tool (register_subagent_from_parent).
+The name must be unique among registered sub-agents; to update an existing profile, call unregister_subagent first.
+
+## Effect
+Saves the sub-agent profile keyed by name. The profile is persisted to the workspace and used globally by tools such as run_subagent.
+system_prompt_path stores only the file path; the file content is read at sub-agent launch time, so editing the prompt file does NOT require re-registration.
+To change base_url, model, token limits, or other core parameters, unregister and re-register.
+
+## Returns
+```json
+{"success": true, "name": "...", "message": "Subagent '...' registered successfully."}
+```
+
+## When to Use
+- Use this tool when the user wants the sub-agent to use a different LLM endpoint or model than the parent agent.
+- If the user wants the sub-agent to inherit the parent agent's current LLM configuration, use register_subagent_from_parent instead.
+- Specify a custom system prompt file for the sub-agent.
+- Configure output and context token limits for the sub-agent.
+
+## Side Effects / Notes
+- Registration data is persisted to disk and may be read by other multi-agent tools.
+- If the name already exists, the call returns an error and does not overwrite.
+- api_key may be persisted in plaintext; avoid leaking it.""",
         "parameters": {
             "type": "object",
             "properties": {
                 "name": {
                     "type": "string",
-                    # 子 Agent 的唯一标识。
-                    "description": "Unique identifier for the sub-agent.",
+                    # 子 Agent 的唯一标识（注册名）。
+                    "description": "Unique identifier (registration name) for the sub-agent.",
                 },
                 "base_url": {
                     "type": "string",
-                    # 子 Agent API 端点的基础 URL。
-                    "description": "Base URL of the sub-agent API endpoint.",
+                    # 子 Agent LLM API 端点的基础 URL。
+                    "description": "Base URL of the sub-agent LLM API endpoint.",
                 },
                 "model": {
                     "type": "string",
@@ -141,18 +191,18 @@ registry.register(
                 },
                 "system_prompt_path": {
                     "type": "string",
-                    # 可选的自定义系统提示词文本文件的绝对路径。若指定，启动时必须存在。
-                    "description": "Optional absolute path to a custom system prompt text file. Must exist at sub-agent launch time if specified.",
+                    # 可选的自定义系统提示词文本文件路径。若指定，启动时必须存在。
+                    "description": "Optional path to a custom system prompt text file. Must exist at sub-agent launch time if specified.",
                 },
                 "max_output_tokens": {
                     "type": "integer",
-                    # 子 Agent 每次 LLM 响应可生成的最大 token 数。
-                    "description": "Maximum number of tokens the sub-agent can generate per LLM response.",
+                    # 子 Agent 每次 LLM 响应可生成的最大 token 数。必须为正整数。
+                    "description": "Maximum number of tokens the sub-agent can generate per LLM response. Must be a positive integer.",
                 },
                 "max_context_tokens": {
                     "type": "integer",
-                    # 以 token 计的最大上下文窗口大小。用于会话轮转控制。
-                    "description": "Maximum context window size in tokens. Used for session rotation control.",
+                    # 最大上下文窗口大小（token 数）。用于会话轮转控制。必须为正整数。
+                    "description": "Maximum context window size in tokens. Used for session rotation control. Must be a positive integer.",
                 },
             },
             "required": ["name", "base_url", "model", "max_output_tokens", "max_context_tokens"],
@@ -168,22 +218,71 @@ registry.register(
     toolset="multiagent",
     schema={
         # 使用主 Agent 当前的 LLM 配置作为模板注册一个子 Agent。
-        # 仅需要 'name'；所有其他参数（base_url、model、api_key、max_output_tokens、max_context_tokens）从主 Agent 继承。
-        # 可选的 'system_prompt_path' 可以指定自定义系统提示词文件。
-        # 现有条目不能被覆盖（如果需要请先注销）。
-        "description": """Register a sub-agent using the parent agent's current LLM configuration as a template. Only 'name' is required; all other parameters (base_url, model, api_key, max_output_tokens, max_context_tokens) are inherited from the parent agent. Optional 'system_prompt_path' can specify a custom system prompt file. Existing entries cannot be overwritten (unregister first if needed).""",
+        #
+        # ## 前置条件
+        # 调用前必须向用户说明：将使用此工具从父 Agent 复制当前 LLM 配置（base_url、model、api_key、max_output_tokens、max_context_tokens）到新子 Agent。
+        # 必须明确告知用户哪些配置会被继承，并说明 api_key 也可能被复制和明文持久化。
+        # 用户必须明确同意后才能调用此工具。
+        # 必须与用户共同决定：本次注册是使用继承父 Agent 配置的 register_subagent_from_parent，还是手动指定参数的 register_subagent。
+        # name 不能与其他已注册子 Agent 重复；如需更新，请先注销。
+        #
+        # ## 调用效果
+        # 将主 Agent 的 base_url、model、api_key、max_output_tokens、max_context_tokens 复制到新的子 Agent 配置中。
+        # 可选的 system_prompt_path 可指定自定义系统提示词文件。
+        # 配置持久化到工作空间，供 run_subagent 等工具全局使用。
+        #
+        # ## 返回
+        # ```json
+        # {"success": true, "name": "...", "base_url": "...", "model": "...", "max_output_tokens": 4096, "max_context_tokens": 8192, "message": "..."}
+        # ```
+        #
+        # ## 何时使用
+        # - 当用户希望子 Agent 使用与父 Agent 完全相同的 LLM 配置时使用本工具。
+        # - 如果用户希望子 Agent 使用不同的端点、模型或参数，应使用 register_subagent 手动配置，而不是本工具。
+        #
+        # ## 副作用/注意
+        # - 注册信息持久化到磁盘。
+        # - 同名已存在时会返回错误，不会覆盖。
+        # - 继承自父 Agent 的 api_key 可能以明文形式持久化。
+        "description": """Register a sub-agent using the parent agent's current LLM configuration as a template.
+
+## Prerequisites
+Before calling this tool, you MUST explain to the user that you are about to copy the parent agent's current LLM configuration (base_url, model, api_key, max_output_tokens, max_context_tokens) into a new sub-agent profile.
+You MUST clearly tell the user which settings will be inherited and that api_key may also be copied and persisted in plaintext.
+You MUST obtain explicit user consent before calling this tool.
+You and the user MUST jointly decide whether to use this parent-config template tool (register_subagent_from_parent) or the manual configuration tool (register_subagent).
+The name must be unique among registered sub-agents; to update an existing profile, call unregister_subagent first.
+
+## Effect
+Copies the parent agent's base_url, model, api_key, max_output_tokens, and max_context_tokens into a new sub-agent profile.
+An optional system_prompt_path can specify a custom system prompt file.
+The profile is persisted to the workspace and used globally by tools such as run_subagent.
+
+## Returns
+```json
+{"success": true, "name": "...", "base_url": "...", "model": "...", "max_output_tokens": 4096, "max_context_tokens": 8192, "message": "Subagent '...' registered using parent agent's LLM config."}
+```
+
+## When to Use
+- Use this tool when the user wants the sub-agent to use the exact same LLM configuration as the parent agent.
+- If the user wants a different endpoint, model, or other parameters, use register_subagent with manual configuration instead.
+
+## Side Effects / Notes
+- Registration data is persisted to disk.
+- If the name already exists, the call returns an error and does not overwrite.
+- The inherited api_key may be persisted in plaintext.""",
         "parameters": {
             "type": "object",
             "properties": {
                 "name": {
                     "type": "string",
-                    # 子 Agent 的唯一标识。
-                    "description": "Unique identifier for the sub-agent.",
+                    # 子 Agent 的唯一标识（注册名）。
+                    "description": "Unique identifier (registration name) for the sub-agent.",
                 },
                 "system_prompt_path": {
                     "type": "string",
-                    # 可选的自定义系统提示词文本文件的绝对路径。若指定，启动时必须存在。
-                    "description": "Optional absolute path to a custom system prompt text file. Must exist at sub-agent launch time if specified.",
+                    # 可选的自定义系统提示词文本文件路径。若指定，启动时必须存在。
+                    "description": "Optional path to a custom system prompt text file. Must exist at sub-agent launch time if specified.",
                 },
             },
             "required": ["name"],

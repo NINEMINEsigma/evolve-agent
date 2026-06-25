@@ -161,10 +161,7 @@ _EXCEL_PARAMS: dict = {
         "path": {
             "type": "string",
             # Excel 文件逻辑路径，必须使用命名空间前缀（ws:、fork:）。例如 'ws:data/report.xlsx'。
-            "description": (
-                "Excel file logical path, must use a namespace prefix "
-                "(ws:, fork:). E.g. 'ws:data/report.xlsx'."
-            ),
+            "description": """Excel file logical path, must use a namespace prefix (ws:, fork:). E.g. 'ws:data/report.xlsx'.""",
         },
     },
     "required": ["path"],
@@ -174,10 +171,48 @@ registry.register(
     name="read_excel",
     toolset="extools",
     schema={
-        # Read a .xlsx Excel workbook. Returns data from all sheets, with the first row as column names.
-        # Supports specifying a single sheet or reading all.
-        # Empty rows are skipped. Uses data_only=True to read formula results instead of formulas.
-        "description": """Read a .xlsx Excel workbook. Returns data from all sheets, with the first row as column names. Supports specifying a single sheet or reading all. Empty rows are skipped. Uses data_only=True to read formula results instead of formulas.""",
+        # 读取 .xlsx Excel 工作簿。
+        #
+        # ## 前置条件
+        # 必须安装 openpyxl。
+        # path 必须使用命名空间前缀（如 ws:、fork:）。
+        #
+        # ## 调用效果
+        # 读取工作簿，首行作为列名，返回所有 sheet 或指定 sheet 的数据。
+        # 空行会被跳过。使用 data_only=True 读取公式结果而非公式本身。
+        #
+        # ## 返回
+        # ```json
+        # {"path": "ws:data/report.xlsx", "sheets": {"Sheet1": [{"col1": "value1"}]}, "sheet_names": ["Sheet1"], "active_sheet": "Sheet1"}
+        # ```
+        #
+        # ## 何时使用
+        # - 从 Excel 文件读取结构化数据。
+        # - 批量处理表格内容。
+        #
+        # ## 副作用/注意
+        # - 只读操作，不会修改源文件。
+        # - 公式返回计算后的值。
+        "description": """Read a .xlsx Excel workbook.
+
+## Prerequisites
+openpyxl must be installed. The path must use a namespace prefix (e.g. ws:, fork:).
+
+## Effect
+Reads the workbook and returns data from all sheets or a single specified sheet. The first row is used as column names. Empty rows are skipped. Uses data_only=True to read formula results instead of formulas.
+
+## Returns
+```json
+{"path": "ws:data/report.xlsx", "sheets": {"Sheet1": [{"col1": "value1"}]}, "sheet_names": ["Sheet1"], "active_sheet": "Sheet1"}
+```
+
+## When to Use
+- Read structured data from an Excel file.
+- Batch process tabular content.
+
+## Side Effects / Notes
+- Read-only operation; does not modify the source file.
+- Formulas return their calculated values.""",
         "parameters": {
             **_EXCEL_PARAMS,
             "properties": {
@@ -185,9 +220,7 @@ registry.register(
                 "sheet": {
                     "type": "string",
                     # 要读取的 sheet 名称。省略时返回所有 sheet。
-                    "description": (
-                        "Name of the sheet to read. Omit to return all sheets."
-                    ),
+                    "description": """Name of the sheet to read. Omit to return all sheets.""",
                 },
             },
         },
@@ -200,48 +233,77 @@ registry.register(
     name="write_excel",
     toolset="extools",
     schema={
-        # Write structured data to a .xlsx Excel file.
-        # Supports two input formats:
-        # 1) Single sheet: data is a list of row objects, default sheet name 'Sheet1'
-        # 2) Multi sheet: data is a {sheet_name: rows} dict
-        # Each row is a dict with keys as column names. The first row is automatically written as column headers.
-        "description": f"""Write structured data to a .xlsx Excel file. Supports two input formats:
-1) Single sheet: data is a list of row objects, default sheet name 'Sheet1'
-2) Multi sheet: data is a {{sheet_name: rows}} dict
-Each row is a dict with keys as column names. The first row is automatically written as column headers.""",
+        # 将结构化数据写入 .xlsx Excel 文件。
+        #
+        # ## 前置条件
+        # 必须安装 openpyxl。
+        # path 必须使用命名空间前缀（如 ws:、fork:）。
+        #
+        # ## 调用效果
+        # 支持两种输入格式：
+        # 1) 单 sheet：data 为行对象列表，默认 sheet 名 'Sheet1'。
+        # 2) 多 sheet：data 为 {sheet_name: rows} 字典。
+        # 每行是一个字典，第一行自动作为表头写入。columns 可控制列顺序和白名单。
+        #
+        # ## 返回
+        # ```json
+        # {"path": "ws:data/report.xlsx", "sheets": ["Sheet1"], "success": true}
+        # ```
+        #
+        # ## 何时使用
+        # - 将表格数据导出为 Excel。
+        # - 生成多 sheet 报表。
+        #
+        # ## 副作用/注意
+        # - 会写入新文件，可能覆盖同名文件。
+        # - 只有 columns 中列出的字段会被写入。
+        "description": """Write structured data to a .xlsx Excel file.
+
+## Prerequisites
+openpyxl must be installed. The path must use a namespace prefix (e.g. ws:, fork:).
+
+## Effect
+Supports two input formats:
+1) Single sheet: data is a list of row objects, default sheet name 'Sheet1'.
+2) Multi sheet: data is a {sheet_name: rows} dict.
+Each row is a dict; the first row's keys become headers automatically. columns controls column order and allowlist.
+
+## Returns
+```json
+{"path": "ws:data/report.xlsx", "sheets": ["Sheet1"], "success": true}
+```
+
+## When to Use
+- Export tabular data to Excel.
+- Generate multi-sheet reports.
+
+## Side Effects / Notes
+- Writes a new file and may overwrite an existing file with the same name.
+- Only fields listed in columns are written.""",
         "parameters": {
             "type": "object",
             "properties": {
                 "path": {
                     "type": "string",
                     # Excel 文件逻辑路径（ws: 或 fork: 前缀）。
-                    "description": (
-                        "Excel file logical path (ws: or fork: prefix)."
-                    ),
+                    "description": """Excel file logical path (ws: or fork: prefix).""",
                 },
                 "data": {
+                    "type": "array",
+                    "items": {"type": "object"},
                     # 要写入的数据。可以是行对象列表（单 sheet）或 {sheet_name: rows} 字典（多 sheet）。
-                    "description": (
-                        "Data to write. Can be a list of row objects (single sheet) "
-                        "or a {sheet_name: rows} dict (multi sheet)."
-                    ),
+                    "description": """Data to write. Can be a list of row objects (single sheet) or a {sheet_name: rows} dict (multi sheet).""",
                 },
                 "columns": {
                     "type": "array",
                     "items": {"type": "string"},
-                    # 列顺序及白名单。省略时使用第一行字典的键。
-                    "description": (
-                        "Column order and allowlist. "
-                        "When omitted, uses keys from the first row dict."
-                    ),
+                    # 列顺序及白名单。省略时使用第一行字典的键顺序。
+                    "description": """Column order and allowlist. When omitted, uses keys from the first row dict.""",
                 },
                 "sheet": {
                     "type": "string",
                     # 单 sheet 模式下的 sheet 名称（默认 'Sheet1'）。当 data 为字典时忽略此参数。
-                    "description": (
-                        "Sheet name for single sheet mode (default 'Sheet1'). "
-                        "Ignored when data is a dict."
-                    ),
+                    "description": """Sheet name for single sheet mode (default 'Sheet1'). Ignored when data is a dict.""",
                 },
             },
             "required": ["path", "data"],
