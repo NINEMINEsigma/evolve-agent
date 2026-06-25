@@ -2,6 +2,7 @@ import logging
 import os
 from pathlib import Path
 import subprocess
+import shutil
 import sys
 from datetime import datetime
 
@@ -52,7 +53,6 @@ for module in Path("third").iterdir():
     else:
         logger.error(f"{module} is not a directory")
 '''
-from third.filesystem import File
 
 
 # ── evolution status journal ─────────────────────────────────────────
@@ -83,20 +83,20 @@ def _append_evolve_event(stage: str, detail: str) -> None:
 if __name__ == "__main__":
     fast_agent_space = (workspace_path/fast_agent_space_path)
     slow_agent_space = (workspace_path/slow_agent_space_path)
-    source = File(origin=str(origin_agent_codes_path))
-    if (agentspace_path_name/"SOUL.md").exists() == False:
-        File("SOUL.md").copy_to(str(agentspace_path_name/"SOUL.md"))
-    if fouce_init or (workspace_path/"init.lock").exists() == False:
-        (workspace_path/"init.lock").touch()
+    source = Path(origin_agent_codes_path)
+    if (agentspace_path_name / "SOUL.md").exists() == False:
+        shutil.copy("SOUL.md", agentspace_path_name / "SOUL.md")
+    if fouce_init or (workspace_path / "init.lock").exists() == False:
+        (workspace_path / "init.lock").touch()
         # 保持代理空间干净，删除代理空间并重新创建
         # 不再尝试每次都删除代理空间，避免前端可能的重新下载
-        # File(origin=str(fast_agent_space)).delete() # 删除fast agent空间
+        # shutil.rmtree(fast_agent_space)
         fast_agent_space.mkdir(parents=True, exist_ok=True) # 创建fast agent空间
-        File(origin=str(slow_agent_space)).delete() # 删除slow agent空间
+        shutil.rmtree(slow_agent_space, ignore_errors=True) # 删除slow agent空间
         slow_agent_space.mkdir(parents=True, exist_ok=True) # 创建slow agent空间
         # 复制源代码到代理空间
-        source.copy_to(str(fast_agent_space)) # 复制源代码到fast agent空间
-        source.copy_to(str(slow_agent_space)) # 复制源代码到slow agent空间
+        shutil.copytree(source, fast_agent_space, dirs_exist_ok=True) # 复制源代码到fast agent空间
+        shutil.copytree(source, slow_agent_space, dirs_exist_ok=True) # 复制源代码到slow agent空间
     while True:
         logger.info(f"Running fast agent")
         try:
@@ -139,19 +139,19 @@ if __name__ == "__main__":
             logger.info(f"Slow agent was updated, fast agent will update to new version")
             _append_evolve_event("backup", f"fast → .fallback")
             # 不再尝试每次都删除备份空间，避免前端可能的重新下载
-            # File(str(workspace_path/".fallback")).delete()
-            File(str(fast_agent_space)).copy_to(str(workspace_path/".fallback"))
+            # shutil.rmtree(workspace_path / ".fallback")
+            shutil.copytree(fast_agent_space, workspace_path / ".fallback", dirs_exist_ok=True)
 
             _append_evolve_event("swap", f"slow → fast")
             # 不再尝试每次都删除代理空间，避免前端可能的重新下载
-            # File(str(fast_agent_space)).delete()
-            File(str(slow_agent_space)).copy_to(str(fast_agent_space))
+            # shutil.rmtree(fast_agent_space)
+            shutil.copytree(slow_agent_space, fast_agent_space, dirs_exist_ok=True)
 
             _append_evolve_event("complete", "swap finished, restarting")
         else:
             logger.error(f"Fast agent exited with unknown error: {exit_code}")
             if True:#(workspace_path / ".fallback").exists() == False:
-                source.copy_to(str(workspace_path / ".fallback")) # 复制源代码到备份空间
+                shutil.copytree(source, workspace_path / ".fallback", dirs_exist_ok=True) # 复制源代码到备份空间
             fallback_main = workspace_path / ".fallback" / "__main__.py"
             if not fallback_main.exists():
                 logger.warning(

@@ -5,7 +5,6 @@ import argparse
 import os
 import logging
 from pathlib import Path
-from third.filesystem import File
 from third.easysave import save, load, contains
 from pydantic import BaseModel
 
@@ -48,12 +47,14 @@ argparse_parser.add_argument("--merge_concat_threshold", type=int, default=argpa
 
 # 冒险模式审批小模型 — 仅需文件名，agent 会自动从 custom_models/ 目录下加载
 check_default_approval_model_path = ""
-for file in File("custom_models/").childs():
-    if "mmproj" in file.name:
-        continue
-    if file.suffix == "gguf" or file.suffix == ".gguf":
-        check_default_approval_model_path = str(file.name)
-        break
+custom_models_dir = Path("custom_models")
+if custom_models_dir.is_dir():
+    for file_path in custom_models_dir.iterdir():
+        if "mmproj" in file_path.name:
+            continue
+        if file_path.suffix == ".gguf":
+            check_default_approval_model_path = file_path.name
+            break
 argparse_parser.add_argument("--approval_model", type=str, default=argparse.SUPPRESS)
 argparse_parser.add_argument("--approval_model_n_ctx", type=int, default=argparse.SUPPRESS)
 argparse_parser.add_argument("--approval_model_cuda", action="store_true", default=argparse.SUPPRESS)
