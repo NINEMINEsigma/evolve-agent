@@ -539,15 +539,63 @@ registry.register(
     name="browser_navigate",
     toolset="browser",
     schema={
-        # Open a URL in the browser and return a snapshot of interactive elements. Requires agent-browser to be installed.
-        "description": """Open a URL in the browser and return a snapshot of interactive elements. Requires agent-browser to be installed.""",
+        # 在浏览器中打开指定 URL 并返回当前页面的交互元素快照。
+        # ⚠️ 这是所有浏览器自动化工具的**关键起点**，必须先调用此工具打开页面，
+        # 才能使用 browser_click、browser_fill、browser_screenshot 等其他浏览器工具。
+        # 需要 agent-browser CLI 已安装（pnpm i -g agent-browser && agent-browser install）。
+        # 首次调用会启动浏览器会话，后续工具共享同一会话（session name: evolve）。
+        #
+        # ## 前置条件
+        # - agent-browser CLI 必须已安装。
+        # - URL 必须以 http:// 或 https:// 开头。
+        #
+        # ## 调用效果
+        # 打开 URL 后获取页面交互元素树（含 @eN ref），用于后续点击、填写等操作。
+        # 会话在 browser_close 之前保持活跃。
+        #
+        # ## 返回
+        # ```json
+        # {"url": "https://example.com", "snapshot": "...", "instruction": "Page loaded. Use browser_snapshot for latest state, use @eN ref to interact with elements."}
+        # ```
+        #
+        # ## 何时使用
+        # - 开始浏览器自动化流程时**第一步**调用。
+        # - 跳转到新的页面 URL。
+        #
+        # ## 副作用/注意
+        # - 首次调用会启动浏览器进程，可能耗时数秒。
+        # - 会话持续占用系统资源，直到调用 browser_close。
+        # - 页面打不开或超时时，可能是需要鉴权登录（如 SSO、OAuth、Cookie 认证），
+        #   此时应改用 web_fetch 获取内容，或提示用户手动完成登录后再继续。
+        "description": """Open a URL in the browser and return a snapshot of interactive elements. This is the **critical starting point** for all browser automation tools — you must call this first before using browser_click, browser_fill, browser_screenshot, etc. Requires agent-browser CLI to be installed.
+
+## Prerequisites
+- agent-browser CLI must be installed (pnpm i -g agent-browser && agent-browser install).
+- The URL must start with http:// or https://.
+
+## Effect
+Opens the URL and captures the interactive element tree (with @eN refs) for subsequent click/fill/type operations. The session remains active until browser_close is called.
+
+## Returns
+```json
+{"url": "https://example.com", "snapshot": "...", "instruction": "Page loaded. Use browser_snapshot for latest state, use @eN ref to interact with elements."}
+```
+
+## When to Use
+- **First step** when starting a browser automation workflow.
+- Navigate to a new page URL.
+
+## Side Effects / Notes
+- The first call launches the browser process, which may take a few seconds.
+- The session consumes system resources until browser_close is called.
+- If the page fails to load or times out, it may require authentication (e.g. SSO, OAuth, cookie-based login). In such cases, use web_fetch instead, or ask the user to complete login manually before continuing.""",
         "parameters": {
             "type": "object",
             "properties": {
                 "url": {
                     "type": "string",
-                    # Full URL to open (including https://).
-                    "description": """Full URL to open (including https://).""",
+                    # 要打开的完整 URL（包含 https://）。
+                    "description": "Full URL to open (including https://).",
                 },
             },
             "required": ["url"],

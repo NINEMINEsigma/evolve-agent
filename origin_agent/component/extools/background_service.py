@@ -302,24 +302,57 @@ registry.register(
     schema={
         # 在后台启动一个长时间运行的服务进程，立即返回而不等待进程完成。
         # 适用于启动 Web 服务器、API 服务、监控进程等。
-        # 与 run_command 不同：
-        #   - 进程在后台运行，不阻塞 agent
-        #   - stdout/stderr 合并写入日志文件
-        #   - 返回 task_id，可用 stop_background_service 停止
-        "description": """Start a long-running service process in the background and return immediately without waiting for the process to complete.
-Useful for starting web servers, API services, monitoring processes, etc.
+        # 与 run_command 不同：进程在后台运行不阻塞 agent，stdout/stderr 合并写入日志文件，
+        # 返回 task_id 供 stop_background_service 使用。
+        #
+        # ## 前置条件
+        # - command 必须是非空字符串列表。
+        # - cwd 所在命名空间必须可读。
+        # - 日志目录 ws:logs/background/ 必须可写。
+        #
+        # ## 调用效果
+        # 解析命令中的沙箱逻辑路径后，在后台启动子进程。
+        # stdout/stderr 合并重定向到 ws:logs/background/{task_id}.log。
+        # 立即返回 task_id、pid 和日志路径。
+        #
+        # ## 返回
+        # ```json
+        # {"success": true, "task_id": "abc123", "log_path": "ws:logs/background/abc123.log", "pid": 1234, "command": ["python", "-m", "http.server", "8080"]}
+        # ```
+        #
+        # ## 何时使用
+        # - 启动 Web 服务器、API 服务、后台监控进程。
+        # - 运行需要持续监听的服务（如 dev server、proxy）。
+        #
+        # ## 副作用/注意
+        # - ⚠️ 进程在后台运行，agent 不会自动等待其完成。
+        # - 如需获取实时输出，需定期使用 read_file 读取 log_path。
+        # - agent 关闭时会调用 cleanup_background_services 强制清理所有残留进程。
+        # - 错误调用可对系统造成毁灭性打击。
+        "description": """Start a long-running service process in the background and return immediately without waiting for completion. Useful for web servers, API services, monitoring processes, etc.
 
-Unlike run_command:
-  - The process runs in the background, does not block the agent
-  - stdout/stderr are merged and written to a log file
-  - Returns a task_id that can be used with stop_background_service
+## Prerequisites
+- command must be a non-empty list of strings.
+- The cwd namespace must be readable.
+- The log directory ws:logs/background/ must be writable.
 
-Returns:
-  - success: whether the service started successfully
-  - task_id: task identifier (for stopping the service)
-  - log_path: log file path (ws: namespace)
-  - pid: process ID
-""",
+## Effect
+Resolves sandbox logical paths in the command, then launches the subprocess in the background. stdout/stderr are merged and redirected to ws:logs/background/{task_id}.log. Returns task_id, pid, and log_path immediately.
+
+## Returns
+```json
+{"success": true, "task_id": "abc123", "log_path": "ws:logs/background/abc123.log", "pid": 1234, "command": ["python", "-m", "http.server", "8080"]}
+```
+
+## When to Use
+- Start a web server, API service, or background monitoring process.
+- Run a service that needs to keep listening (e.g. dev server, proxy).
+
+## Side Effects / Notes
+- ⚠️ The process runs in the background; the agent does not wait for it.
+- To check real-time output, periodically read the log_path with read_file.
+- On agent shutdown, cleanup_background_services force-terminates all remaining background processes.
+- Misuse can cause catastrophic damage.""",
         "parameters": {
             "type": "object",
             "properties": {
@@ -357,17 +390,48 @@ registry.register(
         # 停止一个由 start_background_service 启动的后台服务进程。
         # 通过 start_background_service 返回的 task_id 找到对应进程并强制终止。
         # 也可以直接传入 PID（纯数字字符串）尝试终止。
-        "description": """Stop a background service process started by start_background_service.
-Find the process by task_id and force-terminate it.
+        #
+        # ## 前置条件
+        # - task_id 必须是由 start_background_service 返回的有效 ID，或一个存在的 PID。
+        #
+        # ## 调用效果
+        # 通过 task_id 查找进程，发送终止信号并等待最多 5 秒让其退出，超时则强制杀死整个进程树。
+        # 找不到 task_id 但输入为纯数字时，直接当作 PID 终止。
+        #
+        # ## 返回
+        # ```json
+        # {"stopped": true, "task_id": "abc123", "pid": 1234, "log_path": "ws:logs/background/abc123.log", "message": "Background service stopped (task_id=abc123, pid=1234)"}
+        # ```
+        #
+        # ## 何时使用
+        # - 停止之前通过 start_background_service 启动的后台服务。
+        # - 直接终止某个已知 PID 的进程。
+        #
+        # ## 副作用/注意
+        # - 强制终止进程树，可能导致数据丢失或文件损坏。
+        # - 等待进程退出最多 5 秒，超时则强制杀死。
+        # - 无法找到 task_id 且非纯数字时返回 stopped=false。
+        "description": """Stop a background service process started by start_background_service. Finds the process by task_id and force-terminates it. You can also pass a PID (numeric string) directly.
 
-You can also pass a PID (numeric string) directly to attempt termination.
+## Prerequisites
+- task_id must be a valid ID returned by start_background_service, or an existing PID.
 
-Returns:
-  - stopped: whether the service was successfully stopped
-  - task_id: requested task ID
-  - pid: process ID
-  - log_path: log file path (if found in registry)
-""",
+## Effect
+Looks up the process by task_id, sends a termination signal, and waits up to 5 seconds for exit before force-killing the entire process tree. If the task_id is not found but the input is numeric, it is treated as a PID and terminated directly.
+
+## Returns
+```json
+{"stopped": true, "task_id": "abc123", "pid": 1234, "log_path": "ws:logs/background/abc123.log", "message": "Background service stopped (task_id=abc123, pid=1234)"}
+```
+
+## When to Use
+- Stop a background service previously started by start_background_service.
+- Terminate a process with a known PID.
+
+## Side Effects / Notes
+- Force-terminates the process tree; may cause data loss or file corruption.
+- Waits up to 5 seconds for graceful exit, then force-kills.
+- Returns stopped=false when the task_id cannot be found and is not numeric.""",
         "parameters": {
             "type": "object",
             "properties": {

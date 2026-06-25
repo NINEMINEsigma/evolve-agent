@@ -36,7 +36,7 @@ todos:
     content: constant.py — 常量文件重新分区整理
     status: completed
   - id: extools
-    content: component/extools/ — archive_tools.py (compress, decompress) 完成
+    content: component/extools/ — archive_tools.py, web_fetch.py, web_search.py, background_service.py完成
     status: in_progress
   - id: multiagent
     content: component/mutliagenttools/ — 全部多 Agent 工具

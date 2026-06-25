@@ -249,17 +249,64 @@ registry.register(
     name="web_search",
     toolset="extools",
     schema={
-        "description": """Searches the web using DuckDuckGo (primary) or Bing (fallback) and returns a list of results with title, URL, and snippet for each. Automatically falls back to Bing if DuckDuckGo is unavailable. Use this tool when you need up-to-date information, documentation, or any knowledge not available in your training data.""",
+        # 使用 DuckDuckGo（主）或 Bing（降级）搜索网页，返回标题、URL 和摘要列表。
+        # 当 DuckDuckGo 不可用时自动降级到 Bing。
+        #
+        # ## 前置条件
+        # - 查询字符串非空。
+        # - 目标网络可达（否则返回错误）。
+        #
+        # ## 调用效果
+        # 依次尝试 DuckDuckGo Lite → Bing。成功即返回结果列表。
+        # max_results 小于 1 时自动修正为 5，大于 20 时截断为 20。
+        #
+        # ## 返回
+        # ```json
+        # {"query": "...", "results": [{"title": "...", "url": "...", "snippet": "..."}], "total": 5, "engine": "duckduckgo"}
+        # ```
+        # fallback=true 时表示使用了 Bing 降级。
+        #
+        # ## 何时使用
+        # - 获取训练数据截止后的事件、新闻、最新文档。
+        # - 验证事实、查找 API 文档、技术参考。
+        #
+        # ## 副作用/注意
+        # - 依赖外部网络服务，可能因网络或反爬策略失败。
+        # - DDG 超时 8s，Bing 超时 15s。
+        "description": """Searches the web using DuckDuckGo (primary) or Bing (fallback) and returns a list of results with title, URL, and snippet for each. Automatically falls back to Bing if DuckDuckGo is unavailable.
+
+## Prerequisites
+- The query string must be non-empty.
+- Network connectivity to the search engines is required.
+
+## Effect
+Tries DuckDuckGo Lite first, then falls back to Bing on failure. max_results is clamped to 1–20 (default 5). Returns a list of result objects.
+
+## Returns
+```json
+{"query": "...", "results": [{"title": "...", "url": "...", "snippet": "..."}], "total": 5, "engine": "duckduckgo"}
+```
+`fallback: true` is included when Bing is used as the fallback.
+
+## When to Use
+- Retrieve events, news, or documentation after the training cutoff.
+- Verify facts, find API docs, or look up technical references.
+
+## Side Effects / Notes
+- Depends on external network services; may fail due to network issues or anti-bot measures.
+- DDG timeout: 8s. Bing timeout: 15s.""",
         "parameters": {
             "type": "object",
             "properties": {
                 "query": {
                     "type": "string",
-                    "description": "The search query.",
+                    # 搜索查询字符串。必需。
+                    "description": "The search query string. Required.",
                 },
                 "max_results": {
                     "type": "integer",
-                    "description": "Maximum number of results (default 5, max 20).",
+                    # 最大返回结果数（默认 5，硬上限 20，小于 1 时自动修正为 5）。
+                    "description": "Maximum number of results to return (default 5, hard cap 20). Values below 1 are clamped to 5.",
                     "default": 5,
                 },
             },
