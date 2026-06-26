@@ -5,7 +5,7 @@ from __future__ import annotations
 import importlib.util
 import logging
 from pathlib import Path
-from typing import Any, Dict, List, TYPE_CHECKING
+from typing import Any, TYPE_CHECKING
 
 from system.prompt import build_system_prompt
 from entity.puretype import Role
@@ -36,11 +36,16 @@ def load_message_hooks(repo_root: Path, logger: logging.Logger) -> list[dict]:
             spec.loader.exec_module(mod)
             tag_fn = getattr(mod, "hook_tag_name", None)
             msg_fn = getattr(mod, "hook_message", None)
-            if callable(tag_fn) and callable(msg_fn):
-                hooks.append({"tag_fn": tag_fn, "msg_fn": msg_fn})
+            fixator_fn = getattr(mod, "hook_fixator", None)
+            if callable(tag_fn) and (callable(msg_fn) or callable(fixator_fn)):
+                hooks.append({
+                    "tag_fn": tag_fn,
+                    "msg_fn": msg_fn if callable(msg_fn) else None,
+                    "fixator_fn": fixator_fn if callable(fixator_fn) else None,
+                })
                 logger.info("Loaded message hook: %s", fpath.name)
             else:
-                logger.info("Skipping %s: missing hook_tag_name or hook_message", fpath.name)
+                logger.info("Skipping %s: missing hook_tag_name or hook_message/hook_fixator", fpath.name)
         except Exception:
             logger.warning("Failed to load message hook %s", fpath, exc_info=True)
     logger.info("Total message hooks loaded: %d", len(hooks))
@@ -50,7 +55,7 @@ def load_message_hooks(repo_root: Path, logger: logging.Logger) -> list[dict]:
 def _call_hook_with_runtime_ctx(fn, session_id: str, workspace: str, runtime_ctx: "RuntimeContext | None"):
     """调用 hook 函数，优先传入 runtime_ctx；旧签名不兼容时回退到两参数调用。"""
     try:
-        return fn(session_id, workspace, runtime_ctx=runtime_ctx)
+        return fn(session_id=session_id, workspace=workspace, runtime_ctx=runtime_ctx)
     except TypeError as exc:
         msg = str(exc)
         if "unexpected keyword argument" in msg or "got an unexpected keyword argument" in msg:
@@ -102,56 +107,89 @@ def build_turn_messages(
     memory_ctx: str,
     hooks: list[dict],
     runtime_ctx: "RuntimeContext | None" = None,
-) -> list[dict[str, Any]]:
-    """构建当前回合发送给 LLM 的消息列表。"""
+) -> tuple[list[dict[str, Any]], str]:
+    """构建当前回合发送给 LLM 的消息列表。返回 (messages, fixator_context)。"""
     messages: list[dict[str, Any]] = [
         {"role": Role.SYSTEM, "content": system_prompt},
     ]
 
+    # 找到最后一条 user 消息的位置
+    last_user_idx = -1
     for i, msg in enumerate(history):
-        if i == len(history) - 1 and msg.get("role") == Role.USER:
+        if msg.get("role") == Role.USER:
+            last_user_idx = i
+
+    # 分别收集 hook_message（仅发送）和 hook_fixator（发送 + 历史保留）内容
+    hooks_parts: list[str] = []
+    fixator_parts: list[str] = []
+    for hook in hooks:
+        try:
+            tag = _call_hook_with_runtime_ctx(hook["tag_fn"], session_id, workspace, runtime_ctx)
+            if not tag:
+                continue
+            if callable(hook.get("msg_fn")):
+                msg = _call_hook_with_runtime_ctx(hook["msg_fn"], session_id, workspace, runtime_ctx)
+                if msg:
+                    hooks_parts.append(f"<|im_{tag}_start|>{msg}<|im_{tag}_end|>")
+            if callable(hook.get("fixator_fn")):
+                fix = _call_hook_with_runtime_ctx(hook["fixator_fn"], session_id, workspace, runtime_ctx)
+                if fix:
+                    fixator_parts.append(f"<|im_{tag}_fixator_start|>\n{fix}\n<|im_{tag}_fixator_end|>")
+        except Exception:
+            logger.warning("Failed to collect hook context", exc_info=True)
+
+    hooks_context = "\n".join(hooks_parts)
+    fixator_context = "\n".join(fixator_parts)
+    logger.info("Appending hooks_context (%s) + fixator_context (%s) to user message", hooks_context, fixator_context)
+
+    for i, msg in enumerate(history):
+        if i == last_user_idx and msg.get("role") == Role.USER:
             hooked_msg = dict(msg)
             hooked_content = hooked_msg.get("content", "")
+            original_content = msg.get("content", "")
 
-            # 把 memory / hooks 上下文追加到最后一条用户文本 block 后面
-            hooks_context = collect_hooks_context(hooks, session_id, workspace, runtime_ctx)
-            logger.info("Appending hooks_context (%d chars) to user message", len(hooks_context))
-            if memory_ctx or hooks_context:
+            # 发送用的消息：附加 memory + hooks_context + fixator_context
+            send_extras: list[str] = []
+            if memory_ctx:
+                send_extras.append(f"<|im_memory_context_start|>\n{memory_ctx}\n<|im_memory_context_end|>")
+            if hooks_context:
+                send_extras.append(hooks_context)
+            if fixator_context:
+                send_extras.append(fixator_context)
+
+            if send_extras:
                 if isinstance(hooked_content, list):
-                    # 找到最后一个 text block，把上下文追加到它的 text
                     appended = False
-                    extras: list[str]
                     for block in reversed(hooked_content):
                         if isinstance(block, dict) and block.get("type") == "text":
-                            extras = []
-                            if memory_ctx:
-                                extras.append(f"<|im_memory_context_start|>\n{memory_ctx}\n<|im_memory_context_end|>")
-                            if hooks_context:
-                                extras.append(hooks_context)
-                            block["text"] = str(block.get("text", "")) + "\n" + "\n".join(extras)
+                            block["text"] = str(block.get("text", "")) + "\n" + "\n".join(send_extras)
                             appended = True
                             break
                     if not appended:
-                        # 没有 text block 时新建一个
-                        extras = []
-                        if memory_ctx:
-                            extras.append(f"<|im_memory_context_start|>\n{memory_ctx}\n<|im_memory_context_end|>")
-                        if hooks_context:
-                            extras.append(hooks_context)
-                        hooked_content.append({"type": "text", "text": "\n".join(extras)})
+                        hooked_content.append({"type": "text", "text": "\n".join(send_extras)})
                 else:
-                    hooked_content = str(hooked_content)
-                    if memory_ctx:
-                        hooked_content += f"\n<|im_memory_context_start|>\n{memory_ctx}\n<|im_memory_context_end|>"
-                    if hooks_context:
-                        hooked_content += hooks_context
+                    hooked_content = str(hooked_content) + "\n" + "\n".join(send_extras)
+                hooked_msg["content"] = hooked_content
 
-            hooked_msg["content"] = hooked_content
             messages.append(hooked_msg)
+
+            # 同时把 fixator_context 追加到历史中的原始 user 消息（保留在历史中）
+            if fixator_context:
+                if isinstance(original_content, list):
+                    appended = False
+                    for block in reversed(original_content):
+                        if isinstance(block, dict) and block.get("type") == "text":
+                            block["text"] = str(block.get("text", "")) + "\n" + fixator_context
+                            appended = True
+                            break
+                    if not appended:
+                        original_content.append({"type": "text", "text": fixator_context})
+                else:
+                    msg["content"] = str(original_content) + "\n" + fixator_context
         else:
             messages.append(msg)
 
-    return messages
+    return messages, fixator_context
 
 
 def build_full_history_messages(

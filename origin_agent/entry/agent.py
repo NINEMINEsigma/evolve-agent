@@ -260,7 +260,10 @@ class AgentLoop:
                 )
 
         # ---- 构建消息列表 ----
-        messages = self._build_messages(session_id, user_message, memory_ctx)
+        messages, fixator_context = self._build_messages(session_id, user_message, memory_ctx)
+        # fixator 内容已被拼接到历史中的 user 消息，需要重新持久化
+        if fixator_context:
+            self._update_last_user_message(session_id, self._get_history(session_id)[-1])
 
         # ---- 工具调用循环 ----
         # 为每个 session 创建取消事件，使 interrupt() 能够
@@ -622,6 +625,24 @@ class AgentLoop:
             self._session_store.remove_last_user_message(session_id)
         except Exception as exc:
             logger.warning("Failed to remove last user message from disk for session %s: %s", session_id, exc)
+
+    def _update_last_user_message(self, session_id: str, entry: dict[str, Any]) -> None:
+        """更新 JSONL 文件中的最后一条 user 消息（用于 hook_fixator 持久化）。"""
+        if self._session_store is None:
+            return
+        try:
+            path = self._history_path(session_id)
+            if not path or not path.exists():
+                return
+            lines = path.read_text(encoding="utf-8").splitlines()
+            if not lines:
+                return
+            last = json.loads(lines[-1])
+            if last.get("role") == Role.USER:
+                lines[-1] = json.dumps(entry, ensure_ascii=False)
+                path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        except Exception as exc:
+            logger.warning("Failed to update last user message for session %s: %s", session_id, exc)
 
     def _is_context_over_limit(self, session_id: str, safety_margin: int = 5000) -> bool:
         """判断当前上下文是否已经需要会话终结与延续。
@@ -1275,8 +1296,8 @@ class AgentLoop:
         session_id: str,
         user_message: str | list[dict[str, Any]],
         memory_ctx: str,
-    ) -> list[dict[str, Any]]:
-        """构建当前回合的完整消息列表。"""
+    ) -> tuple[list[dict[str, Any]], str]:
+        """构建当前回合的完整消息列表。返回 (messages, fixator_context)。"""
         system_prompt: str = build_agent_system_prompt(
             self._ctx,
             self._collect_skill_prompts(),

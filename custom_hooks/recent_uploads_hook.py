@@ -24,7 +24,7 @@ _UPLOAD_TIME_RE = re.compile(UPLOAD_TIME_RE_PATTERN)
 _RECENT_SECONDS = 300  # 5 分钟
 
 
-def hook_tag_name(session_id: str = "", workspace: str = "", **kwargs) -> str:
+def hook_tag_name(**kwargs) -> str:
     return "recent_uploads"
 
 
@@ -42,11 +42,7 @@ def _parse_upload_time(filename: str) -> datetime.datetime | None:
         return None
 
 
-def hook_message(session_id: str = "", workspace: str = "", **kwargs) -> str:
-    runtime_ctx: RuntimeContext | None = cast(RuntimeContext, kwargs.get("runtime_ctx"))
-    if runtime_ctx is None:
-        return json.dumps({"recent_uploads": [], "reason": "runtime_ctx not available"})
-
+def hook_message(runtime_ctx: RuntimeContext, **kwargs) -> str:
     agentspace: Path = runtime_ctx.agentspace
 
     upload_dir = agentspace / "uploads"
@@ -79,6 +75,8 @@ def hook_message(session_id: str = "", workspace: str = "", **kwargs) -> str:
                 "age_seconds": int(age_seconds),
             })
 
+    if len(recent) == 0:
+        return ""
     recent.sort(key=lambda e: e["age_seconds"])
     return json.dumps({
         "recent_uploads": recent,
