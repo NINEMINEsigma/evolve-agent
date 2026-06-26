@@ -335,8 +335,14 @@ class SubAgentOrchestrator:
                     feedback.append({"role": "user", "content": str(entry.get("content", ""))})
                 elif role == "assistant":
                     content = str(entry.get("content", ""))
+                    reasoning = entry.get("reasoning_content")
                     if content:
-                        feedback.append({"role": "assistant", "content": content})
+                        item: dict[str, Any] = {"role": "assistant", "content": content}
+                        if reasoning:
+                            item["reasoning"] = str(reasoning)
+                        feedback.append(item)
+                    elif reasoning:
+                        feedback.append({"role": "reasoning", "reasoning": str(reasoning)})
                     tool_calls = entry.get("tool_calls")
                     if tool_calls and isinstance(tool_calls, list):
                         for tc in tool_calls:

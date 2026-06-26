@@ -202,20 +202,20 @@ class SubAgentLoop:
                 if self._cancel_event.is_set():
                     return
 
-                # 推送 reasoning（若有）
                 reasoning_text = getattr(resp, "reasoning_content", None)
-                if reasoning_text:
-                    self._emit("reasoning", reasoning=reasoning_text)
 
                 if not resp.tool_calls:
                     # 文本回复 — 推入发件箱并发给前端
                     text = resp.content or ""
-                    self._history.append({
+                    assistant_entry: dict[str, Any] = {
                         "role": Role.ASSISTANT,
                         "content": text,
-                    })
+                    }
+                    if reasoning_text:
+                        assistant_entry["reasoning_content"] = reasoning_text
+                    self._history.append(assistant_entry)
                     self._outbox.append(text)
-                    self._emit("assistant", content=text)
+                    self._emit("assistant", content=text, reasoning=reasoning_text)
                     # LLM 给出纯文本即视作本轮对话结束，等待父 Agent 消息或取消
                     self._wake_event.clear()
                     await self._wake_event.wait()
@@ -224,7 +224,7 @@ class SubAgentLoop:
 
                 # 推送 assistant 文本（若与 tool_calls 同帧）
                 if resp.content:
-                    self._emit("assistant", content=resp.content)
+                    self._emit("assistant", content=resp.content, reasoning=reasoning_text)
 
                 # 存储带 tool_calls 的 assistant 消息
                 assistant_entry: dict[str, Any] = {

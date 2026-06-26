@@ -1,4 +1,4 @@
-import type { DownloadInfo, PlaylistEntry } from "./types";
+import type { ChatMessage, DownloadInfo, PlaylistEntry, SubagentSession } from "./types";
 
 export function formatTimeSec(sec: number): string {
   if (!isFinite(sec) || sec < 0) return "0:00";
@@ -141,4 +141,100 @@ export function extractMessageResources(messages: MessageResourceSource[]): Mess
   });
 
   return { images, audios, downloads };
+}
+
+export function subagentFeedbackToChatMessages(session: SubagentSession): ChatMessage[] {
+  const baseId = session.session_id;
+  const messages: ChatMessage[] = [];
+
+  session.feedback.forEach((msg, idx) => {
+    const id = `${baseId}-msg-${idx}`;
+    const role = (msg.role || "").toLowerCase();
+
+    switch (role) {
+      case "user":
+        messages.push({ role: "user", content: msg.content || "", id });
+        break;
+      case "assistant":
+        messages.push({
+          role: "agent",
+          content: msg.content || "",
+          id,
+          reasoningContent: msg.reasoning,
+        });
+        break;
+      case "reasoning":
+        messages.push({
+          role: "agent",
+          content: "",
+          id,
+          reasoningContent: msg.reasoning || msg.content,
+        });
+        break;
+      case "tool_call": {
+        const toolName = msg.tool_name || "";
+        const argsStr = msg.tool_args ? `(${JSON.stringify(msg.tool_args)})` : "()";
+        messages.push({
+          role: "tool",
+          content: `⚡ ${toolName}${argsStr}`,
+          id,
+          toolName,
+          toolArgs: msg.tool_args,
+        });
+        break;
+      }
+      case "tool_result":
+        messages.push({
+          role: "tool",
+          content: msg.content || "",
+          id,
+          toolName: msg.tool_name,
+        });
+        break;
+      case "status":
+      case "completed":
+      case "terminated":
+        messages.push({
+          role: "system",
+          content: msg.content || (role === "completed" ? "子会话已完成" : role === "terminated" ? "子会话已终止" : ""),
+          id,
+        });
+        break;
+      case "approval_pending": {
+        const toolName = msg.tool_name || "";
+        const argsStr = msg.tool_args ? `\n${JSON.stringify(msg.tool_args, null, 2)}` : "";
+        messages.push({
+          role: "system",
+          content: `⏸ 待审批: ${toolName}${argsStr}`,
+          id,
+          toolName,
+          toolArgs: msg.tool_args,
+        });
+        break;
+      }
+      case "approval_decision": {
+        const toolName = msg.tool_name ? `${msg.tool_name}: ` : "";
+        messages.push({
+          role: "system",
+          content: `${toolName}${msg.content}`,
+          id,
+        });
+        break;
+      }
+      default:
+        messages.push({ role: "system", content: msg.content || "", id });
+    }
+  });
+
+  session.pending_approvals.forEach((pa, idx) => {
+    messages.push({
+      role: "tool",
+      content: `⏸ 待审批: ${pa.tool_name}\n${JSON.stringify(pa.arguments, null, 2)}`,
+      id: `${baseId}-pending-${idx}`,
+      toolName: pa.tool_name,
+      toolArgs: pa.arguments,
+    });
+  });
+
+  return messages;
 }

@@ -249,7 +249,7 @@ const MessageItem = memo(function MessageItem({ message, archived, onImageClick,
             </details>
           )}
           <ReactMarkdown remarkPlugins={[remarkGfm]} components={mdComponents}>
-            {textContent || (m.reasoningContent ? "_仅包含思考内容_" : "")}
+            {textContent || ""}
           </ReactMarkdown>
           {streaming && <span className="streaming-cursor" />}
         </>

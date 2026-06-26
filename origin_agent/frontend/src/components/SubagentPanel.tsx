@@ -8,6 +8,7 @@ interface SubagentPanelProps {
   subagentSessions: Record<string, SubagentSession>;
   activeId: string | null;
   onSelect: (id: string) => void;
+  width?: number;
 }
 
 export default function SubagentPanel({
@@ -16,6 +17,7 @@ export default function SubagentPanel({
   subagentSessions,
   activeId,
   onSelect,
+  width = 420,
 }: SubagentPanelProps) {
   const items = Object.values(subagentSessions);
   const [openTick, setOpenTick] = useState(0);
@@ -37,7 +39,7 @@ export default function SubagentPanel({
     : null;
 
   return (
-    <div className="subagent-panel">
+    <div className="subagent-panel" style={{ width }}>
       <div className="subagent-panel-header">
         <div className="subagent-tabs">
           {items.map((s) => (

@@ -474,6 +474,22 @@
   flex-shrink: 0;
 }
 
+.subagent-panel-resize-handle {
+  width: 8px;
+  height: 100%;
+  flex-shrink: 0;
+  cursor: col-resize;
+  background: transparent;
+  position: relative;
+  z-index: 10;
+  transition: background 0.15s;
+}
+
+.subagent-panel-resize-handle:hover,
+.subagent-panel-resize-handle.dragging {
+  background: var(--accent);
+}
+
 .subagent-panel-header {
   display: flex;
   align-items: center;
@@ -583,6 +599,9 @@
 }
 
 .subagent-panel-body .subagent-card {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
   margin-bottom: 0;
   border: none;
   background: transparent;
@@ -593,6 +612,15 @@
   display: none;
 }
 
+.subagent-panel-body .subagent-chat-wrapper {
+  flex: 1;
+  min-height: 0;
+}
+
 .subagent-panel-body .subagent-chat {
   max-height: none;
+}
+
+.subagent-panel-body .subagent-chat-scroll {
+  overflow-y: auto;
 }

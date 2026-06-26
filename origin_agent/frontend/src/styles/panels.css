@@ -224,97 +224,30 @@
   padding: 4px 0;
   display: flex;
   flex-direction: column;
-  gap: 6px;
 }
 
-.subagent-bubble {
-  padding: 6px 10px;
-  border-radius: 8px;
-  background: var(--bg-tertiary);
-  border: 1px solid var(--border);
+.subagent-chat-wrapper {
+  display: flex;
+  flex: 1;
+  overflow: hidden;
+  min-height: 0;
 }
 
-.subagent-bubble-pending {
-  background: rgba(255, 204, 0, 0.08);
-  border-color: rgba(255, 204, 0, 0.25);
+.subagent-chat-wrapper .subagent-chat {
+  flex: 1;
+  min-width: 0;
 }
 
-.subagent-bubble-user {
-  background: var(--accent-soft);
-  border-color: rgba(124, 58, 237, 0.25);
-  align-self: flex-end;
-  max-width: 92%;
-}
-
-.subagent-bubble-user .subagent-bubble-role {
-  color: var(--accent);
-}
-
-.subagent-bubble-assistant {
-  background: var(--bg-tertiary);
-  border-color: var(--border);
-  align-self: flex-start;
-  max-width: 92%;
-}
-
-.subagent-bubble-assistant .subagent-bubble-role {
-  color: #64d2ff;
-}
-
-.subagent-bubble-tool {
-  background: rgba(100, 210, 255, 0.06);
-  border-color: rgba(100, 210, 255, 0.18);
-}
-
-.subagent-bubble-status {
+.subagent-chat-wrapper .minimap {
+  width: 60px;
+  flex-shrink: 0;
   background: transparent;
-  border: none;
-  border-left: 2px solid var(--text-muted);
-  border-radius: 0;
-  padding-left: 8px;
-  opacity: 0.75;
+  border-left: 1px solid var(--border);
 }
 
-.subagent-bubble-status .subagent-bubble-role {
-  color: var(--text-muted);
-}
-
-.subagent-bubble-reasoning {
-  background: rgba(180, 180, 180, 0.06);
-  border-color: rgba(180, 180, 180, 0.2);
-  font-style: italic;
-  opacity: 0.85;
-}
-
-.subagent-bubble-reasoning .subagent-bubble-role {
-  color: var(--text-muted);
-}
-
-.subagent-bubble-tool-call {
-  background: rgba(255, 159, 10, 0.08);
-  border-color: rgba(255, 159, 10, 0.25);
-}
-
-.subagent-bubble-tool-call .subagent-bubble-role {
-  color: #ff9f0a;
-}
-
-.subagent-bubble-tool-result {
-  background: var(--accent-soft);
-  border-color: rgba(124, 58, 237, 0.2);
-}
-
-.subagent-bubble-tool-result .subagent-bubble-role {
-  color: var(--accent);
-}
-
-.subagent-bubble-decision {
-  background: rgba(100, 210, 255, 0.06);
-  border-color: rgba(100, 210, 255, 0.2);
-}
-
-.subagent-bubble-decision .subagent-bubble-role {
-  color: #64d2ff;
+.subagent-chat-wrapper .minimap-block {
+  left: 4px;
+  right: 4px;
 }
 
 .subagent-card {
@@ -370,26 +303,50 @@
   padding: 16px 0;
 }
 
-.subagent-bubble-role {
-  font-size: 10px;
-  font-weight: 700;
-  color: var(--accent);
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-  margin-bottom: 3px;
-  display: block;
+/* 子会话面板复用 MessageItem 后的样式适配 */
+.subagent-chat .message {
+  margin-bottom: 6px;
 }
 
-.subagent-bubble-pending .subagent-bubble-role {
-  color: #ffcc00;
+.subagent-chat .message:last-child {
+  margin-bottom: 0;
 }
 
-.subagent-bubble-text {
+.subagent-chat .message-bubble {
+  max-width: 100%;
+}
+
+.subagent-chat .message-user .message-bubble,
+.subagent-chat .message-agent .message-bubble,
+.subagent-chat .message-tool .message-bubble,
+.subagent-chat .message-system .message-bubble {
+  max-width: 100%;
+  padding: 8px 10px;
+  border-radius: 8px;
+}
+
+.subagent-chat .message-agent .message-bubble,
+.subagent-chat .message-tool .message-bubble,
+.subagent-chat .message-system .message-bubble {
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border);
+  margin-left: 0;
+  margin-right: 0;
+}
+
+.subagent-chat .message-user .message-bubble {
+  border: 1px solid var(--border);
+  margin-left: auto;
+  margin-right: 0;
+}
+
+.subagent-chat .message-text {
   font-size: 13px;
-  line-height: 1.5;
-  color: var(--text-primary);
-  white-space: pre-wrap;
-  word-break: break-word;
+}
+
+.subagent-chat .message-meta,
+.subagent-chat .message-actions button {
+  font-size: 11px;
 }
 
 /* ── Unified Panel (剪切板 + 子会话) ── */
@@ -541,52 +498,6 @@
   text-transform: uppercase;
   letter-spacing: 0.5px;
   margin-bottom: 6px;
-}
-
-.subagent-message {
-  padding: 6px 10px;
-  margin-bottom: 4px;
-  font-size: 13px;
-  line-height: 1.45;
-  color: var(--text-primary);
-  background: var(--bg-tertiary);
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  white-space: pre-wrap;
-  word-break: break-word;
-}
-
-.subagent-approvals {
-  margin-top: 8px;
-}
-
-.subagent-approval-item {
-  padding: 8px 10px;
-  margin-bottom: 4px;
-  background: rgba(255, 204, 0, 0.08);
-  border: 1px solid rgba(255, 204, 0, 0.25);
-  border-radius: 4px;
-}
-
-.subagent-approval-tool {
-  font-size: 13px;
-  font-weight: 600;
-  color: #ffcc00;
-}
-
-.subagent-approval-args {
-  margin: 4px 0 0;
-  padding: 6px 8px;
-  font-family: "SF Mono", "Fira Code", "Fira Mono", Menlo, Consolas, monospace;
-  font-size: 12px;
-  line-height: 1.4;
-  color: var(--text-secondary);
-  background: var(--bg-tertiary);
-  border-radius: 4px;
-  white-space: pre-wrap;
-  word-break: break-word;
-  max-height: 120px;
-  overflow-y: auto;
 }
 
 /* ── Unified panel collapsed ── */

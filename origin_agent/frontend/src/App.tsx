@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useWebSocket } from "./hooks/useWebSocket";
 import Sidebar from "./components/Sidebar";
 import Header from "./components/Header";
@@ -125,6 +125,16 @@ export default function App() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [subagentPanelOpen, setSubagentPanelOpen] = useState(false);
+  const [subagentPanelWidth, setSubagentPanelWidth] = useState(() => {
+    const saved = localStorage.getItem("evolve_subagent_panel_width");
+    const parsed = saved ? parseInt(saved, 10) : 420;
+    return isNaN(parsed) ? 420 : parsed;
+  });
+  const [resizingPanel, setResizingPanel] = useState(false);
+  const subagentPanelWidthRef = useRef(subagentPanelWidth);
+  useEffect(() => {
+    subagentPanelWidthRef.current = subagentPanelWidth;
+  }, [subagentPanelWidth]);
   const [activeSubagentId, setActiveSubagentId] = useState<string | null>(null);
   const [taskProgressCollapsed, setTaskProgressCollapsed] = useState(false);
   const [clipboardCollapsed, setClipboardCollapsed] = useState(false);
@@ -159,6 +169,29 @@ export default function App() {
   };
 
   const currentSessionArchived = ws.sessions.find((s) => s.id === ws.sessionId)?.status === "archived";
+
+  const handleResizePointerDown = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    setResizingPanel(true);
+    const startX = e.clientX;
+    const startWidth = subagentPanelWidthRef.current;
+
+    const handleMove = (ev: PointerEvent) => {
+      const delta = startX - ev.clientX;
+      const newWidth = Math.max(280, Math.min(800, startWidth + delta));
+      setSubagentPanelWidth(newWidth);
+    };
+
+    const handleUp = () => {
+      setResizingPanel(false);
+      window.removeEventListener("pointermove", handleMove);
+      window.removeEventListener("pointerup", handleUp);
+      localStorage.setItem("evolve_subagent_panel_width", String(subagentPanelWidthRef.current));
+    };
+
+    window.addEventListener("pointermove", handleMove);
+    window.addEventListener("pointerup", handleUp);
+  }, []);
 
   useEffect(() => {
     ws.fetchAllTags();
@@ -385,12 +418,21 @@ export default function App() {
         setCronTasks={ws.setCronTasks}
       />
 
+      {subagentPanelOpen && (
+        <div
+          className={`subagent-panel-resize-handle ${resizingPanel ? "dragging" : ""}`}
+          onPointerDown={handleResizePointerDown}
+          data-tooltip="拖拽调整子会话面板宽度"
+        />
+      )}
+
       <SubagentPanel
         open={subagentPanelOpen}
         onToggle={() => setSubagentPanelOpen((v) => !v)}
         subagentSessions={ws.subagentSessions}
         activeId={activeSubagentId}
         onSelect={setActiveSubagentId}
+        width={subagentPanelWidth}
       />
 
       {lightboxSrc && (
