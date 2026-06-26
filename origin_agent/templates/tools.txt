@@ -19,6 +19,12 @@ Cron tool conventions:
 - Periodic work, polling, or long-running observation must be expressed as recursive scheduling: wait for the task result, then schedule the next one-shot task.
 - Raw scheduled-task output is internal Agent input and log content, not a user message; if the user needs the result, actively summarize it.
 
+Sub-agent conventions:
+- After launching a sub-agent with run_subagent, you MUST wait for the [subagent-result] message before interacting with it again.
+- Do NOT call chat_subagent to check whether the sub-agent is alive, to ask "are you there", or to urge it to respond faster. The system will reject such calls while the sub-agent is still generating its current response.
+- Use chat_subagent only to reply to the sub-agent's questions, add missing context, or correct its direction AFTER you have received its latest response.
+- Do NOT call chat_subagent just to send the initial prompt; put all initial context into the initial_prompt parameter of run_subagent.
+
 Tool selection rules:
 - Always prefer dedicated tools over shell workarounds.
 - For reading files, use ``read_file``; for editing, use ``edit_file``; for create, use ``write_file``.

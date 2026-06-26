@@ -6,9 +6,9 @@
 
 from __future__ import annotations
 
-from pathlib import Path
-
 from pydantic import BaseModel
+from system.context import RuntimeContext
+from system.sandbox import Sandbox
 
 
 class SubRuntimeContext(BaseModel):
@@ -36,27 +36,27 @@ class SubRuntimeContext(BaseModel):
     """上下文窗口 token 上限，用于旋转控制（来自注册表）。"""
 
     system_prompt: str
-    """系统提示词（来自注册表 system_prompt_path 或内置默认模板）。"""
+    """系统提示词（来自注册表 system_prompt_paths 列表或内置默认模板）。"""
 
 
 async def build_subagent_context(
     profile: dict,
     temperature: float,
-    parent_workspace: Path,
+    parent_ctx: RuntimeContext,
 ) -> SubRuntimeContext:
     """从注册表配置构建 SubRuntimeContext。
 
     Args:
         profile: 注册表中的子 Agent 配置字典。
         temperature: run_subagent 调用时传入的采样温度。
-        parent_workspace: 父 Agent 的 workspace 路径（用于解析相对路径）。
+        parent_ctx: 父 Agent 的 RuntimeContext，用于创建沙盒实例解析路径。
 
     Returns:
         SubRuntimeContext 实例。
 
     Raises:
-        FileNotFoundError: system_prompt_path 指定的文件不存在。
-        OSError: 读取 system_prompt_path 失败。
+        FileNotFoundError: system_prompt_paths 中任一文件不存在。
+        OSError: 读取 system_prompt_paths 中文件失败。
     """
     from system.templates import read_template
 
@@ -69,15 +69,16 @@ async def build_subagent_context(
     if tools_doc:
         system_prompt = system_prompt + "\n\n" + tools_doc
 
-    # 3. 用户自定义角色提示词 — 追加到最后
-    system_prompt_path: str | None = profile.get("system_prompt_path")
-    if system_prompt_path:
-        prompt_file = Path(system_prompt_path)
-        if not prompt_file.exists():
+    # 3. 用户自定义角色提示词 — 按注册表顺序追加到最后
+    system_prompt_paths: list[str] = profile.get("system_prompt_paths") or []
+    sandbox = Sandbox(parent_ctx)
+    for prompt_path in system_prompt_paths:
+        resolved = sandbox.resolve_read(prompt_path)
+        if not resolved.real.exists():
             raise FileNotFoundError(
-                f"System prompt file not found: {system_prompt_path}"
+                f"System prompt file not found: {prompt_path}"
             )
-        custom_prompt = prompt_file.read_text(encoding="utf-8").strip()
+        custom_prompt = resolved.real.read_text(encoding="utf-8").strip()
         if custom_prompt:
             system_prompt = system_prompt + "\n\n" + custom_prompt
 

@@ -31,11 +31,11 @@ registry.register(
         # 无。
         #
         # ## 调用效果
-        # 纯查询，无副作用。返回以 name 为 key 的字典，每个 value 包含 base_url、model、api_key、system_prompt_path、max_output_tokens、max_context_tokens。
+        # 纯查询，无副作用。返回以 name 为 key 的字典，每个 value 包含 base_url、model、api_key、system_prompt_paths、max_output_tokens、max_context_tokens。
         #
         # ## 返回
         # ```json
-        # {"success": true, "count": 2, "agents": {"sub1": {"base_url": "...", "model": "...", "api_key": "...", "system_prompt_path": "...", "max_output_tokens": 4096, "max_context_tokens": 8192}}}
+        # {"success": true, "count": 2, "agents": {"sub1": {"base_url": "...", "model": "...", "api_key": "...", "system_prompt_paths": [...], "max_output_tokens": 4096, "max_context_tokens": 8192}}}
         # ```
         #
         # ## 何时使用
@@ -52,11 +52,11 @@ registry.register(
 None.
 
 ## Effect
-Read-only query with no side effects. Returns a dictionary keyed by sub-agent name, where each value contains base_url, model, api_key, system_prompt_path, max_output_tokens, and max_context_tokens.
+Read-only query with no side effects. Returns a dictionary keyed by sub-agent name, where each value contains base_url, model, api_key, system_prompt_paths, max_output_tokens, and max_context_tokens.
 
 ## Returns
 ```json
-{"success": true, "count": 2, "agents": {"sub1": {"base_url": "...", "model": "...", "api_key": "...", "system_prompt_path": "...", "max_output_tokens": 4096, "max_context_tokens": 8192}}}
+{"success": true, "count": 2, "agents": {"sub1": {"base_url": "...", "model": "...", "api_key": "...", "system_prompt_paths": ["..."], "max_output_tokens": 4096, "max_context_tokens": 8192}}}
 ```
 
 ## When to Use

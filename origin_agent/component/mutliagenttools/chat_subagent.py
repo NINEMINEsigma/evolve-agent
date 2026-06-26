@@ -80,7 +80,9 @@ registry.register(
 ## Prerequisites
 The target sub-agent must already be active (waiting=false).
 Cannot be used on sub-agents that are still in the FIFO queue and not yet activated.
+You MUST wait for the [subagent-result] message from the sub-agent before calling this tool.
 Before sending a new message, you should have received the sub-agent's latest round of response. Avoid calling chat_subagent repeatedly while the previous tool-call chain is still in progress.
+**NEVER use chat_subagent to check whether the sub-agent is alive, to ask "are you there", or to urge the sub-agent.** Such calls will be rejected by the system.
 
 ## Effect
 The message is queued in the sub-agent's inbox and injected into its context after the current tool-call chain finishes.
@@ -92,15 +94,20 @@ Do NOT use this tool solely to send the initial prompt — that should be passed
 {"feedback": ["..."], "success": true}
 ```
 The optional 'feedback' field is a list of text responses from the sub-agent's outbox collected at call time. Use it for instant feedback instead of waiting for the periodic collection cycle.
+If the sub-agent is still generating its current response, the call fails with:
+```json
+{"success": false, "error": "Sub-agent is still generating its current response. Wait for [subagent-result] before calling chat_subagent."}
+```
 
 ## When to Use
-- Add context or correct direction while the sub-agent is running.
 - Reply to a question from the sub-agent.
-- Fetch the latest sub-agent output immediately (via feedback).
+- Add context or correct direction while the sub-agent is running AND after you have received its latest [subagent-result].
+- Fetch the latest sub-agent output immediately (via feedback) ONLY after the sub-agent has produced a response.
 
 ## Side Effects / Notes
 - The message does not interrupt the sub-agent's current tool-call chain; it is queued and injected after the chain ends.
 - Calling this on a queued (not yet active) sub-agent fails.
+- Calling this before the sub-agent has finished its current round fails.
 - Frequent messages may clutter the sub-agent's context; wait for the sub-agent's response before deciding whether to send another message.""",
         "parameters": {
             "type": "object",

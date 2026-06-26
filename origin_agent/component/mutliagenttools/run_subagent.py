@@ -6,10 +6,10 @@
 
 from __future__ import annotations
 
-from pathlib import Path
 from typing import Any
 
 from abstract.tools.registry import registry, tool_error, tool_result
+from system.sandbox import Sandbox
 
 
 async def _handle_run_subagent(args: dict[str, Any]) -> dict:
@@ -86,11 +86,20 @@ async def _handle_run_subagent(args: dict[str, Any]) -> dict:
             "and cannot be authorized for a sub-agent (recursive sub-agents are not allowed)."
         )
 
-    # 校验 system_prompt_path（若指定则文件必须存在）
-    system_prompt_path: str | None = profile.get("system_prompt_path")
-    if system_prompt_path:
-        if not Path(system_prompt_path).exists():
-            return tool_error(f"System prompt file not found: {system_prompt_path}")
+    # 校验 system_prompt_paths
+    system_prompt_paths = profile.get("system_prompt_paths") or []
+    if not isinstance(system_prompt_paths, list):
+        return tool_error("'system_prompt_paths' must be a list of strings")
+    for p in system_prompt_paths:
+        if not isinstance(p, str):
+            return tool_error("'system_prompt_paths' must be a list of strings")
+    if len(system_prompt_paths) != len(set(system_prompt_paths)):
+        return tool_error("Duplicate paths found in 'system_prompt_paths'")
+    from system.context import get_runtime_context
+    sandbox = Sandbox(get_runtime_context())
+    for p in system_prompt_paths:
+        if not sandbox.exists(p):
+            return tool_error(f"System prompt file not found: {p}")
 
     # 通过编排器启动子 Agent
     profile["_name"] = name  # 注入注册名供编排器推送 WS 时使用

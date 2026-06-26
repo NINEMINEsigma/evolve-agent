@@ -195,6 +195,13 @@ class SubAgentOrchestrator:
                 "session_id": session_id,
                 "error": "Sub-agent not found (may have been stopped or completed).",
             }
+        # 硬拦截：本轮响应尚未完成时禁止 chat（防止父 Agent 疯狂催促）
+        if sub.round_active:
+            return {
+                "success": False,
+                "session_id": session_id,
+                "error": "Sub-agent is still generating its current response. Wait for [subagent-result] before calling chat_subagent.",
+            }
         sub.inject_parent_message(message, user_name, message_type)
         # 推送父→子消息到前端子会话面板
         wrapped = format_user_message(user_name, message_type, message)
@@ -434,7 +441,7 @@ class SubAgentOrchestrator:
         """创建 SubAgentLoop 并以 asyncio.Task 启动。"""
         # 构建上下文
         parent_ctx = get_runtime_context()
-        ctx = await build_subagent_context(profile, temperature, parent_ctx.workspace)
+        ctx = await build_subagent_context(profile, temperature, parent_ctx)
 
         # 构建工具集
         tools = self._build_tool_set(authorized_tools)

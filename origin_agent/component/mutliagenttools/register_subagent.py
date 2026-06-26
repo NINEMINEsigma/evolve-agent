@@ -20,7 +20,7 @@ def _handle_register_subagent(args: dict[str, Any]) -> dict:
     base_url: str = str(args.get("base_url", "")).strip()
     model: str = str(args.get("model", "")).strip()
     api_key: str | None = args.get("api_key")
-    system_prompt_path: str | None = args.get("system_prompt_path")
+    system_prompt_paths: list[str] = args.get("system_prompt_paths") or []
     max_output_tokens: int | None = args.get("max_output_tokens")
     max_context_tokens: int | None = args.get("max_context_tokens")
 
@@ -39,6 +39,12 @@ def _handle_register_subagent(args: dict[str, Any]) -> dict:
     if not isinstance(max_context_tokens, int) or max_context_tokens <= 0:
         return tool_error("'max_context_tokens' must be a positive integer")
 
+    if not isinstance(system_prompt_paths, list):
+        return tool_error("'system_prompt_paths' must be a list of strings")
+    for p in system_prompt_paths:
+        if not isinstance(p, str):
+            return tool_error("'system_prompt_paths' must be a list of strings")
+
     if name in _subagent_registry:
         return tool_error(
             f"Subagent '{name}' already registered. "
@@ -50,7 +56,7 @@ def _handle_register_subagent(args: dict[str, Any]) -> dict:
         "base_url": base_url,
         "model": model,
         "api_key": api_key if api_key is not None else None,
-        "system_prompt_path": system_prompt_path if system_prompt_path else None,
+        "system_prompt_paths": system_prompt_paths,
         "max_output_tokens": max_output_tokens,
         "max_context_tokens": max_context_tokens,
     }
@@ -68,10 +74,16 @@ def _handle_register_subagent_from_parent(args: dict[str, Any]) -> dict:
     from system.context import get_runtime_context
 
     name: str = str(args.get("name", "")).strip()
-    system_prompt_path: str | None = args.get("system_prompt_path")
+    system_prompt_paths: list[str] = args.get("system_prompt_paths") or []
 
     if not name:
         return tool_error("'name' is required and must not be empty")
+
+    if not isinstance(system_prompt_paths, list):
+        return tool_error("'system_prompt_paths' must be a list of strings")
+    for p in system_prompt_paths:
+        if not isinstance(p, str):
+            return tool_error("'system_prompt_paths' must be a list of strings")
 
     if name in _subagent_registry:
         return tool_error(
@@ -86,7 +98,7 @@ def _handle_register_subagent_from_parent(args: dict[str, Any]) -> dict:
         "base_url": ctx.llm_base_url,
         "model": ctx.llm_model,
         "api_key": ctx.llm_api_key or None,
-        "system_prompt_path": system_prompt_path if system_prompt_path else None,
+        "system_prompt_paths": system_prompt_paths,
         "max_output_tokens": ctx.llm_max_output_tokens,
         "max_context_tokens": ctx.llm_max_context_tokens,
     }
@@ -113,14 +125,14 @@ registry.register(
         # 注册一个子 Agent 的 LLM 配置。
         #
         # ## 前置条件
-        # 调用前必须向用户说明：将使用此工具手动配置一个子 Agent，需要用户提供或确认以下参数：name、base_url、model、api_key、system_prompt_path、max_output_tokens、max_context_tokens。
+        # 调用前必须向用户说明：将使用此工具手动配置一个子 Agent，需要用户提供或确认以下参数：name、base_url、model、api_key、system_prompt_paths、max_output_tokens、max_context_tokens。
         # 用户必须明确同意后才能调用此工具；不得在未经用户确认的情况下推测或填写任何参数（尤其是 api_key 和 base_url）。
         # 必须与用户共同决定：本次注册是使用手动配置的 register_subagent，还是使用继承父 Agent 配置的 register_subagent_from_parent。
         # name 不能与其他已注册子 Agent 重复；如需更新，请先调用 unregister_subagent 注销。
         #
         # ## 调用效果
         # 以 name 为唯一标识保存子 Agent 配置。配置持久化到工作空间，供 run_subagent 等工具全局使用。
-        # system_prompt_path 仅保存文件路径，文件内容在子 Agent 启动时读取，因此修改提示词文件不需要重新注册。
+        # system_prompt_paths 仅保存文件路径列表，文件内容在子 Agent 启动时读取，因此修改提示词文件不需要重新注册。
         # 若要更改 base_url、model、token 限制等参数，必须先注销再重新注册。
         #
         # ## 返回
@@ -141,14 +153,14 @@ registry.register(
         "description": """Register a sub-agent's LLM configuration.
 
 ## Prerequisites
-Before calling this tool, you MUST explain to the user that you are about to manually configure a sub-agent and ask them to provide or confirm the following parameters: name, base_url, model, api_key, system_prompt_path, max_output_tokens, and max_context_tokens.
+Before calling this tool, you MUST explain to the user that you are about to manually configure a sub-agent and ask them to provide or confirm the following parameters: name, base_url, model, api_key, system_prompt_paths, max_output_tokens, and max_context_tokens.
 You MUST obtain explicit user consent before calling this tool. Do NOT guess or fill in any parameters — especially api_key and base_url — without user confirmation.
 You and the user MUST jointly decide whether to use this manual tool (register_subagent) or the parent-config template tool (register_subagent_from_parent).
 The name must be unique among registered sub-agents; to update an existing profile, call unregister_subagent first.
 
 ## Effect
 Saves the sub-agent profile keyed by name. The profile is persisted to the workspace and used globally by tools such as run_subagent.
-system_prompt_path stores only the file path; the file content is read at sub-agent launch time, so editing the prompt file does NOT require re-registration.
+system_prompt_paths stores only the file paths; the file contents are read at sub-agent launch time, so editing the prompt files does NOT require re-registration.
 To change base_url, model, token limits, or other core parameters, unregister and re-register.
 
 ## Returns
@@ -159,7 +171,7 @@ To change base_url, model, token limits, or other core parameters, unregister an
 ## When to Use
 - Use this tool when the user wants the sub-agent to use a different LLM endpoint or model than the parent agent.
 - If the user wants the sub-agent to inherit the parent agent's current LLM configuration, use register_subagent_from_parent instead.
-- Specify a custom system prompt file for the sub-agent.
+- Specify custom system prompt files for the sub-agent.
 - Configure output and context token limits for the sub-agent.
 
 ## Side Effects / Notes
@@ -189,10 +201,11 @@ To change base_url, model, token limits, or other core parameters, unregister an
                     # 可选的 API 密钥。本地模型可省略。
                     "description": "Optional API key. May be omitted for local models.",
                 },
-                "system_prompt_path": {
-                    "type": "string",
-                    # 可选的自定义系统提示词文本文件路径。若指定，启动时必须存在。
-                    "description": "Optional path to a custom system prompt text file. Must exist at sub-agent launch time if specified.",
+                "system_prompt_paths": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    # 可选的自定义系统提示词文件路径列表。若指定，启动时所有文件必须存在。
+                    "description": "Optional list of paths to custom system prompt text files. All files must exist at sub-agent launch time if specified.",
                 },
                 "max_output_tokens": {
                     "type": "integer",
@@ -228,7 +241,7 @@ registry.register(
         #
         # ## 调用效果
         # 将主 Agent 的 base_url、model、api_key、max_output_tokens、max_context_tokens 复制到新的子 Agent 配置中。
-        # 可选的 system_prompt_path 可指定自定义系统提示词文件。
+        # 可选的 system_prompt_paths 可指定自定义系统提示词文件列表。
         # 配置持久化到工作空间，供 run_subagent 等工具全局使用。
         #
         # ## 返回
@@ -255,7 +268,7 @@ The name must be unique among registered sub-agents; to update an existing profi
 
 ## Effect
 Copies the parent agent's base_url, model, api_key, max_output_tokens, and max_context_tokens into a new sub-agent profile.
-An optional system_prompt_path can specify a custom system prompt file.
+An optional system_prompt_paths can specify a list of custom system prompt files.
 The profile is persisted to the workspace and used globally by tools such as run_subagent.
 
 ## Returns
@@ -279,10 +292,11 @@ The profile is persisted to the workspace and used globally by tools such as run
                     # 子 Agent 的唯一标识（注册名）。
                     "description": "Unique identifier (registration name) for the sub-agent.",
                 },
-                "system_prompt_path": {
-                    "type": "string",
-                    # 可选的自定义系统提示词文本文件路径。若指定，启动时必须存在。
-                    "description": "Optional path to a custom system prompt text file. Must exist at sub-agent launch time if specified.",
+                "system_prompt_paths": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    # 可选的自定义系统提示词文件路径列表。若指定，启动时所有文件必须存在。
+                    "description": "Optional list of paths to custom system prompt text files. All files must exist at sub-agent launch time if specified.",
                 },
             },
             "required": ["name"],

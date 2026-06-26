@@ -109,6 +109,9 @@ class SubAgentLoop:
         # 标记
         self._completed: bool = False
         self._terminated: bool = False
+        # 本轮响应是否仍在进行中（含 LLM 推理与工具链执行/审批）。
+        # 初始为 True：会话启动后必须至少完成首轮响应，父 Agent 才能 chat。
+        self._round_active: bool = True
 
     # ── 构造 LLM 客户端 ────────────────────────────────────────────
 
@@ -194,6 +197,7 @@ class SubAgentLoop:
                 if self._cancel_event.is_set():
                     return
                 turn += 1
+                self._round_active = True  # 新一轮响应开始
 
                 # 调用 LLM
                 messages: list[dict[str, Any]] = self._build_messages()
@@ -217,6 +221,7 @@ class SubAgentLoop:
                     self._outbox.append(text)
                     self._emit("assistant", content=text, reasoning=reasoning_text)
                     # LLM 给出纯文本即视作本轮对话结束，等待父 Agent 消息或取消
+                    self._round_active = False
                     self._wake_event.clear()
                     await self._wake_event.wait()
                     self._maybe_inject_inbox()
@@ -277,7 +282,8 @@ class SubAgentLoop:
                     messages.append(tool_msg)
                     self._history.append(tool_msg)
 
-                # 工具结果已收集，注入收件箱（若有）后立刻进入下一轮 LLM 推理
+                # 工具结果已收集，本轮响应结束；注入收件箱（若有）后立刻进入下一轮 LLM 推理
+                self._round_active = False
                 self._maybe_inject_inbox()
 
         except Exception as exc:
@@ -349,6 +355,10 @@ class SubAgentLoop:
     @property
     def terminated(self) -> bool:
         return self._terminated
+
+    @property
+    def round_active(self) -> bool:
+        return self._round_active
 
     @property
     def outbox(self) -> list[str]:
