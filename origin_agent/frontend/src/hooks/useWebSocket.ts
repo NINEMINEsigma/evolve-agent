@@ -346,6 +346,11 @@ export function useWebSocket() {
             if (data.token_usage !== undefined) setTokenUsage(data.token_usage);
             if (data.context_tokens !== undefined) setContextTokens(data.context_tokens);
             if (data.processing) setWaiting(true);
+            if (msg.session_id) {
+              setSessionId(msg.session_id);
+              localStorage.setItem("evolve_session_id", msg.session_id);
+              fetchToolResources(msg.session_id);
+            }
             return;
           }
           if (data.token_usage !== undefined) setTokenUsage(data.token_usage);
