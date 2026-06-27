@@ -35,10 +35,14 @@ async def _handle_chat_subagent(args: dict[str, Any]) -> dict:
     if message_type not in ("direct", "overheard"):
         return tool_error("'message_type' must be 'direct' or 'overheard'")
 
+    parent_session_id: str = str(args.get("_session_id", "")).strip()
+    if not parent_session_id:
+        return tool_error("'_session_id' is required and must not be empty")
+
     try:
         from gateway.server import get_subagent_orchestrator
         orch = get_subagent_orchestrator()
-        result = await orch.chat(session_id, message, user_name, message_type)
+        result = await orch.chat(parent_session_id=parent_session_id, session_id=session_id, message=message, user_name=user_name, message_type=message_type)
         return tool_result(**result)
     except Exception as exc:
         return tool_error(f"Failed to chat with subagent: {exc}")

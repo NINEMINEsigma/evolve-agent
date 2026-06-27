@@ -118,13 +118,13 @@ async def _handle_run_subagent(args: dict[str, Any]) -> dict:
         from gateway.server import get_subagent_orchestrator
         orch = get_subagent_orchestrator()
         result = await orch.launch(
+            parent_session_id=parent_session_id,
             profile=profile,
             temperature=temperature,
             authorized_tools=authorized_tools,
             initial_prompt=initial_prompt,
             user_name=user_name,
             message_type=message_type,
-            parent_session_id=parent_session_id,
             history_path=resolved_history_path,
         )
         return tool_result(**result)
@@ -157,6 +157,7 @@ registry.register(
         # - authorized_tools 中不能包含只读工具或 multiagent 工具（防止递归子 Agent）。
         # temperature 被钳制在 0.0–1.3 之间。
         # 若活跃子 Agent 达到上限，新会话进入 FIFO 等待队列。
+        # 同一主会话下同一 name 的子 Agent 只能有一个活跃或排队实例；若已存在，调用会失败，需先 stop_subagent 再重新 run。
         #
         # ## 返回
         # ```json
@@ -199,6 +200,7 @@ The sub-agent has an isolated tool set:
 
 temperature is clamped to the range 0.0–1.3.
 If the active sub-agent limit is reached, the new session enters a FIFO waiting queue.
+Within the same parent session, only one instance of a given sub-agent name can be active or queued at a time. If one already exists, the call fails; stop it first with stop_subagent before re-running it.
 
 ## Returns
 ```json
@@ -220,7 +222,8 @@ When queued:
 - The sub-agent may execute authorized write-level or dangerous tools, causing real effects comparable to the parent agent.
 - Readonly tools cannot be added or removed via authorized_tools.
 - The registered profile is global and shared by all callers.
-- Whether to inherit history must be decided explicitly; omitting history_path means no memory by default.""",
+- Whether to inherit history must be decided explicitly; omitting history_path means no memory by default.
+- Within the same parent session, only one instance of a given sub-agent name can be active or queued at a time.""",
         "parameters": {
             "type": "object",
             "properties": {

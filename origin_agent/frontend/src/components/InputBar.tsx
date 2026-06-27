@@ -1,6 +1,7 @@
 import type { ChangeEvent, RefObject } from "react";
 import RichInput from "./RichInput";
 import type { PendingImage } from "../hooks/useWebSocket";
+import type { SubagentSession, TargetSessionOption } from "../types";
 
 interface InputBarProps {
   input: string;
@@ -17,6 +18,9 @@ interface InputBarProps {
   onRemovePendingImage: (id: string) => void;
   onPasteImage: (file: File) => Promise<{ id: string; dataUrl: string } | null>;
   inputRef: RefObject<HTMLDivElement>;
+  subagentSessions: Record<string, SubagentSession>;
+  targetSessions: string[];
+  setTargetSessions: (ids: string[]) => void;
 }
 
 export default function InputBar({
@@ -34,12 +38,61 @@ export default function InputBar({
   onRemovePendingImage,
   onPasteImage,
   inputRef,
+  subagentSessions,
+  targetSessions,
+  setTargetSessions,
 }: InputBarProps) {
   if (archived) return null;
+
+  const activeSubagents = Object.values(subagentSessions).filter(
+    (s) => s.status === "running" || s.status === "waiting"
+  );
+  const hasSubagents = activeSubagents.length > 0;
+
+  const targetOptions: TargetSessionOption[] = [
+    { id: "main", name: "主会话", status: undefined },
+    ...activeSubagents
+      .sort((a, b) => a.session_id.localeCompare(b.session_id))
+      .map((s) => ({ id: s.session_id, name: s.name || s.session_id.slice(0, 12), status: s.status })),
+  ];
+
+  const toggleTarget = (id: string) => {
+    const selected = new Set(targetSessions);
+    if (selected.has(id)) {
+      selected.delete(id);
+      if (selected.size === 0) {
+        selected.add("main");
+      }
+    } else {
+      selected.add(id);
+    }
+    setTargetSessions(Array.from(selected));
+  };
 
   return (
     <footer className="input-bar">
       <div className="input-bar-inner">
+        {hasSubagents && (
+          <div className="input-target-row">
+            {targetOptions.map((opt) => {
+              const active = targetSessions.includes(opt.id);
+              const tooltip = `${opt.name} · 当前消息${active ? "将会" : "不会"}发送至该会话`;
+              return (
+              <button
+                key={opt.id}
+                type="button"
+                className={`input-target-chip ${active ? "active" : ""} input-target-chip-${opt.status || "main"}`}
+                onClick={() => toggleTarget(opt.id)}
+                data-tooltip={tooltip}
+                title={opt.name}
+              >
+                <span className="input-target-chip-dot" />
+                {opt.name}
+              </button>
+              );
+            })}
+          </div>
+        )}
         <div className="input-bar-row">
           <button
             className="input-tool-btn"

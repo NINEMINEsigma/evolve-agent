@@ -70,6 +70,7 @@ class Message(BaseModel):
     delta: str | None = None       # STREAM_DELTA：文本增量
     reasoning_delta: str | None = None  # STREAM_DELTA：reasoning 增量
     finish_reason: str | None = None    # STREAM_DONE：结束原因或错误
+    target_sessions: Optional[list[str]] = None  # USER_MESSAGE：目标会话列表
 
     @classmethod
     def from_json(cls, raw: str) -> Message:
@@ -95,6 +96,7 @@ class Message(BaseModel):
             allow_custom=data.get("allow_custom"),
             option=data.get("option"),
             custom_text=data.get("custom_text"),
+            target_sessions=data.get("target_sessions"),
         )
 
     def to_json(self) -> str:
@@ -145,6 +147,8 @@ class Message(BaseModel):
             d["reasoning_delta"] = self.reasoning_delta
         if self.finish_reason is not None:
             d["finish_reason"] = self.finish_reason
+        if self.target_sessions is not None:
+            d["target_sessions"] = self.target_sessions
         return json.dumps(d, ensure_ascii=False)
 
 

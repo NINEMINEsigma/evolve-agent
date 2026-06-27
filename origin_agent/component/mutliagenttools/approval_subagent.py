@@ -51,10 +51,14 @@ async def _handle_approval_subagent(args: dict[str, Any]) -> dict:
             "reason": reason if not approved else None,
         })
 
+    parent_session_id: str = str(args.get("_session_id", "")).strip()
+    if not parent_session_id:
+        return tool_error("'_session_id' is required and must not be empty")
+
     try:
         from gateway.server import get_subagent_orchestrator
         orch = get_subagent_orchestrator()
-        result = await orch.approve(session_id, decisions)
+        result = await orch.approve(parent_session_id=parent_session_id, session_id=session_id, decisions=decisions)
         return tool_result(**result)
     except Exception as exc:
         return tool_error(f"Failed to approve subagent tools: {exc}")

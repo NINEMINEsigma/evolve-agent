@@ -48,6 +48,7 @@ export interface WSMessage {
   delta?: string;
   reasoning_delta?: string;
   finish_reason?: string;
+  target_sessions?: string[];
 }
 
 export interface ConfirmRequest {
@@ -163,4 +164,10 @@ export interface SubagentSession {
   status: "running" | "waiting" | "completed" | "terminated";
   feedback: SubagentMessage[];
   pending_approvals: PendingApproval[];
+}
+
+export interface TargetSessionOption {
+  id: string;
+  name: string;
+  status?: SubagentSession["status"];
 }

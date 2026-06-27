@@ -124,7 +124,14 @@ export default function App() {
   const [lightboxSrc, setLightboxSrc] = useState<string | null>(null);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
-  const [subagentPanelOpen, setSubagentPanelOpen] = useState(false);
+  const [subagentPanelOpenMap, setSubagentPanelOpenMap] = useState<Record<string, boolean>>({});
+  const [activeSubagentIdMap, setActiveSubagentIdMap] = useState<Record<string, string | null>>({});
+  const [targetSessionsMap, setTargetSessionsMap] = useState<Record<string, string[]>>({});
+
+  const subagentPanelOpen = subagentPanelOpenMap[ws.sessionId] || false;
+  const activeSubagentId = activeSubagentIdMap[ws.sessionId] || null;
+  const targetSessions = targetSessionsMap[ws.sessionId] || ["main"];
+
   const [subagentPanelWidth, setSubagentPanelWidth] = useState(() => {
     const saved = localStorage.getItem("evolve_subagent_panel_width");
     const parsed = saved ? parseInt(saved, 10) : 420;
@@ -135,7 +142,34 @@ export default function App() {
   useEffect(() => {
     subagentPanelWidthRef.current = subagentPanelWidth;
   }, [subagentPanelWidth]);
-  const [activeSubagentId, setActiveSubagentId] = useState<string | null>(null);
+
+  const setSubagentPanelOpen = (value: boolean | ((prev: boolean) => boolean)) => {
+    setSubagentPanelOpenMap((prev) => ({
+      ...prev,
+      [ws.sessionId]: typeof value === "function" ? value(prev[ws.sessionId] || false) : value,
+    }));
+  };
+  const setActiveSubagentId = (value: string | null | ((prev: string | null) => string | null)) => {
+    setActiveSubagentIdMap((prev) => ({
+      ...prev,
+      [ws.sessionId]: typeof value === "function" ? value(prev[ws.sessionId] || null) : value,
+    }));
+  };
+  const setTargetSessions = (value: string[] | ((prev: string[]) => string[])) => {
+    setTargetSessionsMap((prev) => ({
+      ...prev,
+      [ws.sessionId]: typeof value === "function" ? value(prev[ws.sessionId] || ["main"]) : value,
+    }));
+  };
+
+  // 切换主会话时重置目标选择为默认值（仅对没有记录的新会话生效）
+  useEffect(() => {
+    setTargetSessionsMap((prev) => {
+      if (prev[ws.sessionId]) return prev;
+      return { ...prev, [ws.sessionId]: ["main"] };
+    });
+  }, [ws.sessionId]);
+
   const [taskProgressCollapsed, setTaskProgressCollapsed] = useState(false);
   const [clipboardCollapsed, setClipboardCollapsed] = useState(false);
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; sid: string } | null>(null);
@@ -378,7 +412,9 @@ export default function App() {
           waiting={ws.waiting}
           uploading={ws.uploading}
           archived={currentSessionArchived}
-          onSend={ws.send}
+          onSend={() => {
+            ws.send(targetSessions);
+          }}
           onUpload={ws.handleFileInputChange}
           onUploadClick={ws.handleUploadClick}
           onInterrupt={ws.interrupt}
@@ -387,6 +423,9 @@ export default function App() {
           onRemovePendingImage={ws.removePendingImage}
           onPasteImage={ws.handlePasteImages}
           inputRef={ws.inputRef}
+          subagentSessions={ws.subagentSessions}
+          targetSessions={targetSessions}
+          setTargetSessions={setTargetSessions}
         />
 
         <ConfirmDialog

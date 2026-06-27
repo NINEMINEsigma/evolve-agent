@@ -46,6 +46,12 @@ def format_user_message(user_name: str, message_type: str, content: str) -> str:
             f'This message may not be addressed to you; {user_name} may be talking to someone else or simply being quoted.\n'
             f'Do not assume you must reply unless the content explicitly asks something of you.'
         )
+    elif message_type == "user_direct":
+        header = f"[Direct message from the end user: {user_name}]"
+        description = (
+            f'The following message is sent directly to you by the end user "{user_name}", '
+            f'not relayed by the parent agent. Respond to {user_name} directly.'
+        )
     else:
         raise ValueError(f"Unknown message_type: {message_type}")
     return f"{header}\n\n{description}\n\n---\n\n{content}"
@@ -98,6 +104,9 @@ class SubAgentLoop:
         self._inbox: list[str] = []
         self._pending_approvals: list[PendingToolCall] = []
         self._max_turns: int = max_turns
+
+        # 记录最后一条用户消息是否来自父 Agent；只有父 Agent 触发的回复才进入 _outbox
+        self._last_message_from_parent: bool = True
 
         # 控制事件
         self._cancel_event: asyncio.Event = asyncio.Event()
@@ -229,7 +238,8 @@ class SubAgentLoop:
                     if reasoning_text:
                         assistant_entry["reasoning_content"] = reasoning_text
                     self._history.append(assistant_entry)
-                    self._outbox.append(text)
+                    if self._last_message_from_parent:
+                        self._outbox.append(text)
                     self._emit("assistant", content=text, reasoning=reasoning_text)
                     # LLM 给出纯文本即视作本轮对话结束，等待父 Agent 消息或取消
                     self._round_active = False
@@ -303,7 +313,8 @@ class SubAgentLoop:
             self._terminated = True
 
     def inject_parent_message(self, text: str, user_name: str, message_type: str) -> None:
-        """父 Agent 通过 chat_subagent 发来的消息，追加到收件箱。"""
+        """父 Agent 通过 chat_subagent 或用户直接发送来的消息，追加到收件箱。"""
+        self._last_message_from_parent = (message_type != "user_direct")
         self._inbox.append(format_user_message(user_name, message_type, text))
         self._wake_event.set()
 

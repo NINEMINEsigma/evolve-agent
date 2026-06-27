@@ -23,10 +23,14 @@ async def _handle_stop_subagent(args: dict[str, Any]) -> dict:
     if not session_id:
         return tool_error("'session_id' is required and must not be empty")
 
+    parent_session_id: str = str(args.get("_session_id", "")).strip()
+    if not parent_session_id:
+        return tool_error("'_session_id' is required and must not be empty")
+
     try:
         from gateway.server import get_subagent_orchestrator
         orch = get_subagent_orchestrator()
-        result = await orch.stop(session_id)
+        result = await orch.stop(parent_session_id=parent_session_id, session_id=session_id)
         return tool_result(**result)
     except Exception as exc:
         return tool_error(f"Failed to stop subagent: {exc}")

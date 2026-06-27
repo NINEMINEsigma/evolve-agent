@@ -116,8 +116,8 @@ class AgentLoop:
         # 记录哪些 session 正在处理消息（process_message 未返回）
         self._processing_sessions: dict[str, bool] = {}
 
-        # 父 Agent 最后一次消息处理结束的时间戳（供 SubAgentOrchestrator 空闲检测）
-        self._last_idle_time: float = time.monotonic()
+        # 父 Agent 每个 session 最后一次消息处理结束的时间戳（供 SubAgentOrchestrator 空闲检测）
+        self._last_idle_time: dict[str, float] = {}
 
     # -- 公开 API ----------------------------------------------------------
 
@@ -173,7 +173,7 @@ class AgentLoop:
         # 暂停子 Agent 周期定时器（子 Agent 本身继续运行）
         try:
             from gateway.server import get_subagent_orchestrator
-            get_subagent_orchestrator().interrupt()
+            get_subagent_orchestrator().interrupt(parent_session_id=session_id)
         except Exception:
             pass
         logger.info("Interrupt requested for session=%s", session_id)
@@ -218,7 +218,7 @@ class AgentLoop:
         # 恢复子 Agent 周期定时器（用户发消息后恢复）
         try:
             from gateway.server import get_subagent_orchestrator
-            get_subagent_orchestrator().resume()
+            get_subagent_orchestrator().resume(parent_session_id=session_id)
         except Exception:
             pass
         # ---- 拒绝已归档会话的新消息 ----
@@ -400,7 +400,7 @@ class AgentLoop:
             # 清除处理中标记
             self._processing_sessions.pop(session_id, None)
             # 记录空闲时间戳（供 SubAgentOrchestrator 周期检测）
-            self._last_idle_time = time.monotonic()
+            self._last_idle_time[session_id] = time.monotonic()
 
         logger.warning(
             "Tool-call loop exceeded max turns (%d) for session=%s",
@@ -700,6 +700,9 @@ class AgentLoop:
         # 迁移 processing 标志
         if self._processing_sessions.pop(old_sid, False):
             self._processing_sessions[new_sid] = True
+        # 迁移空闲时间戳
+        if old_sid in self._last_idle_time:
+            self._last_idle_time[new_sid] = self._last_idle_time.pop(old_sid)
 
         if new_sid not in self._memory_initialized:
             for provider in self._memory.providers:

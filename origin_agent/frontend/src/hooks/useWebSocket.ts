@@ -43,7 +43,10 @@ export function useWebSocket() {
   const [handsfreeMode, setHandsfreeMode] = useState(false);
   const [taskProgress, setTaskProgress] = useState<Record<string, TaskProgress>>({});
   const [clipboardDisplays, setClipboardDisplays] = useState<Record<string, ClipboardDisplay>>({});
-  const [subagentSessions, setSubagentSessions] = useState<Record<string, SubagentSession>>({});
+  const [subagentSessionsMap, setSubagentSessionsMap] = useState<Record<string, Record<string, SubagentSession>>>({});
+
+  // 当前会话派生的子会话列表
+  const subagentSessions = useMemo(() => subagentSessionsMap[sessionId] || {}, [subagentSessionsMap, sessionId]);
   const [llmMaxContextTokens, setLlmMaxContextTokens] = useState(0);
   const [llmModelName, setLlmModelName] = useState("");
   const [approvalModelName, setApprovalModelName] = useState("");
@@ -209,8 +212,9 @@ export function useWebSocket() {
       .then((r) => r.json())
       .then((data) => {
         if (!data.subagents) return;
-        setSubagentSessions((prev) => {
+        setSubagentSessionsMap((prevMap) => {
           const incoming = data.subagents as Record<string, any>;
+          const prev = prevMap[sid] || {};
           const merged: Record<string, any> = {};
           for (const [sKey, snap] of Object.entries(incoming)) {
             const existing = prev[sKey];
@@ -218,8 +222,6 @@ export function useWebSocket() {
               merged[sKey] = snap;
               continue;
             }
-            // snapshot 来自 _history，是权威数据源：用它重置 feedback，
-            // 但保留 existing 中 snapshot 之后到达的 WS 增量消息。
             const snapIds = new Set(
               (snap.feedback || []).map((f: any) =>
                 `${f.role}::${f.content?.slice(0, 80)}::${f.tool_call_id || ""}`
@@ -236,13 +238,13 @@ export function useWebSocket() {
                 : snap.pending_approvals,
             };
           }
-          // 清理已不活跃的子会话：snapshot 中不存在的会话应被移除
+          // 清理已不活跃的子会话
           for (const sKey of Object.keys(prev)) {
             if (!(sKey in incoming)) {
               delete merged[sKey];
             }
           }
-          return merged;
+          return { ...prevMap, [sid]: merged };
         });
       })
       .catch(() => {});
@@ -368,7 +370,7 @@ export function useWebSocket() {
             setMessages([]);
             setTokenUsage(0);
             setClipboardDisplays({});
-            setSubagentSessions({});
+            setSubagentSessionsMap((prev) => ({ ...prev, [sessionId]: {} }));
             setTaskProgress({});
             fetchToolResources(data.new_sid);
             fetchSessions();
@@ -527,7 +529,8 @@ export function useWebSocket() {
         const raw = msg.result ?? "";
         try {
           const data = JSON.parse(raw);
-          const sid = data.session_id || "";
+          const subId = data.session_id || "";
+          const parentId = msg.session_id || sessionId;
           // 倒计时值所有子会话共享，提到顶层进度条
           const rawFeedback = Array.isArray(data.feedback) ? data.feedback : [];
           for (const item of rawFeedback) {
@@ -536,19 +539,21 @@ export function useWebSocket() {
               if (!isNaN(v)) {
                 setSubagentIdleCountdown(v);
               }
-              break; // 只需第一个 countdown，值都一样
+              break;
             }
           }
-          setSubagentSessions((prev) => {
+          setSubagentSessionsMap((prevMap) => {
+            const prev = prevMap[parentId] || {};
             if (data._removed) {
               const next = { ...prev };
-              delete next[sid];
-              if (Object.keys(next).length === 0) {
+              delete next[subId];
+              const nextMap = { ...prevMap, [parentId]: next };
+              if (Object.keys(next).length === 0 && parentId === sessionId) {
                 setSubagentIdleCountdown(null);
               }
-              return next;
+              return nextMap;
             }
-            const existing = prev[sid];
+            const existing = prev[subId];
             const prevFeedback = existing?.feedback || [];
             const prevApprovals = existing?.pending_approvals || [];
             const realFeedback: Array<{role: string; content: string; tool_name?: string; tool_call_id?: string; tool_args?: Record<string, unknown>; reasoning?: string}> = [];
@@ -559,13 +564,16 @@ export function useWebSocket() {
             }
             const newApprovals = Array.isArray(data.pending_approvals) ? data.pending_approvals : [];
             return {
-              ...prev,
-              [sid]: {
-                session_id: sid,
-                name: data.name || existing?.name || "",
-                status: data.status || existing?.status || "running",
-                feedback: [...prevFeedback, ...realFeedback],
-                pending_approvals: data.pending_approvals !== undefined ? newApprovals : prevApprovals,
+              ...prevMap,
+              [parentId]: {
+                ...prev,
+                [subId]: {
+                  session_id: subId,
+                  name: data.name || existing?.name || "",
+                  status: data.status || existing?.status || "running",
+                  feedback: [...prevFeedback, ...realFeedback],
+                  pending_approvals: data.pending_approvals !== undefined ? newApprovals : prevApprovals,
+                },
               },
             };
           });
@@ -707,7 +715,7 @@ export function useWebSocket() {
     }
   }, []);
 
-  const send = useCallback(() => {
+  const send = useCallback((targetSessions: string[]) => {
     const isArchived = sessions.find((s) => s.id === sessionId)?.status === "archived";
     if (!wsRef.current || waiting || wsRef.current.readyState !== WebSocket.OPEN || isArchived) return;
 
@@ -723,7 +731,7 @@ export function useWebSocket() {
       id: generateUUID(),
       messageIndex: nextMessageIndex(prev),
     }]);
-    wsRef.current.send(JSON.stringify({ type: "user_message", content }));
+    wsRef.current.send(JSON.stringify({ type: "user_message", content, target_sessions: targetSessions }));
     setInput("");
     setPendingImages([]);
     setWaiting(true);

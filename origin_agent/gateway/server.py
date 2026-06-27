@@ -67,20 +67,20 @@ def set_agent_loop(loop: AgentLoop) -> None:
         logger.debug("SubAgentOrchestrator not available: %s", exc)
 
 
-def get_subagent_orchestrator():
-    """返回 SubAgentOrchestrator 单例（供工具层调用）。"""
-    from subagent.orchestrator import get_orchestrator
-    return get_orchestrator()
-
-
 async def shutdown_subagent_orchestrator() -> None:
     """优雅停止 SubAgentOrchestrator（供 shutdown 流程调用）。"""
     try:
         from subagent.orchestrator import get_orchestrator
         orch = get_orchestrator()
-        await orch.shutdown()
+        await orch.shutdown_all()
     except Exception as exc:
         logger.debug("SubAgentOrchestrator shutdown skipped: %s", exc)
+
+
+def get_subagent_orchestrator():
+    """返回 SubAgentOrchestrator 单例（供工具层调用）。"""
+    from subagent.orchestrator import get_orchestrator
+    return get_orchestrator()
 
 
 async def push_subagent_update(
@@ -514,7 +514,7 @@ async def get_session_subagents(session_id: str):
     try:
         from subagent.orchestrator import get_orchestrator
         orch = get_orchestrator()
-        return {"session_id": session_id, "subagents": orch.get_snapshot()}
+        return {"session_id": session_id, "subagents": orch.get_snapshot(parent_session_id=session_id)}
     except Exception:
         return {"session_id": session_id, "subagents": {}}
 
@@ -637,7 +637,7 @@ async def terminate_session_endpoint(session_id: str):
     # 先停止该父会话的所有子 Agent 会话
     try:
         orch = get_subagent_orchestrator()
-        await orch.terminate_parent()
+        await orch.terminate_parent(parent_session_id=session_id)
     except Exception:
         pass
     if _agent_loop is not None and hasattr(_agent_loop, "terminate_session"):
@@ -1157,14 +1157,45 @@ async def ws_chat(ws: WebSocket) -> None:
                     )
                     continue
                 if _agent_loop is not None:
+                    target_sessions: list[str] = msg.target_sessions or ["main"]
+                    content = msg.content or ""
+
+                    # 先并行/异步转发到选中的子会话（用户直接发送）
+                    subagent_tasks: list[asyncio.Task] = []
+                    if any(t != "main" for t in target_sessions):
+                        try:
+                            orch = get_subagent_orchestrator()
+                            for sub_id in target_sessions:
+                                if sub_id == "main":
+                                    continue
+                                subagent_tasks.append(
+                                    asyncio.create_task(
+                                        orch.chat_user_direct(parent_session_id=sid, session_id=sub_id, message=str(content)),
+                                        name=f"user-to-subagent-{sub_id[:16]}",
+                                    )
+                                )
+                        except Exception as exc:
+                            logger.warning("Failed to dispatch subagent messages: %s", exc)
+
+                    # 主会话处理
                     reply: str
-                    try:
-                        reply = await _agent_loop.process_message(  # type: ignore[union-attr]
-                            sid, msg.content or ""
-                        )
-                    except Exception as exc:
-                        logger.exception("Agent loop error for session=%s", sid)
-                        reply = f"Internal error: {exc}"
+                    if "main" in target_sessions:
+                        try:
+                            reply = await _agent_loop.process_message(  # type: ignore[union-attr]
+                                sid, content
+                            )
+                        except Exception as exc:
+                            logger.exception("Agent loop error for session=%s", sid)
+                            reply = f"Internal error: {exc}"
+                    else:
+                        reply = "Message forwarded to sub-agent(s)."
+
+                    # 等待子会话转发完成（不阻塞主会话回复已生成）
+                    if subagent_tasks:
+                        results = await asyncio.gather(*subagent_tasks, return_exceptions=True)
+                        for idx, res in enumerate(results):
+                            if isinstance(res, Exception):
+                                logger.warning("Subagent forward failed: %s", res)
 
                     # 检查 AgentLoop 是否旋转了会话（归档+新会话）
                     _old: str = sid
@@ -1268,7 +1299,9 @@ async def ws_chat(ws: WebSocket) -> None:
     finally:
         _deny_session_confirms(sid)
         _deny_session_asks(sid)
-        _tool_ws_sinks.pop(sid, None)
+        # 修复：只有当前 sink 仍是本 ws 实例时才清理，避免切换会话时旧 ws 关闭 pop 掉新 ws
+        if _tool_ws_sinks.get(sid) is ws:
+            _tool_ws_sinks.pop(sid, None)
 
 
 # ---------------------------------------------------------------------------

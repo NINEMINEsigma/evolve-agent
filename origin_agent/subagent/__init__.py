@@ -3,7 +3,7 @@
 核心模块：
 - ``context.py`` — SubRuntimeContext
 - ``loop.py`` — SubAgentLoop
-- ``orchestrator.py`` — SubAgentOrchestrator（进程级单例）
+- ``orchestrator.py`` — SubAgentOrchestrator（按主会话管理多个上下文）
 """
 
 from .context import SubRuntimeContext
