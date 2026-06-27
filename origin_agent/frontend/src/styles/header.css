@@ -465,3 +465,15 @@
   position: fixed;
   min-width: 180px;
 }
+
+@media (max-width: 768px) {
+  .app-header { padding: 8px 12px; }
+  .header-pill { padding: 4px 10px; font-size: 11px; }
+  .token-badge { display: none; }
+  .session-badge {
+    max-width: 80px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+}

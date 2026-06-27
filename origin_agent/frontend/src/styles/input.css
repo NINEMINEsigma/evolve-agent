@@ -297,3 +297,10 @@
   background: rgba(0, 0, 0, 0.8);
 }
 
+@media (max-width: 768px) {
+  .input-bar { width: calc(100% - 24px); bottom: 12px; }
+  .input-bar-inner { padding: 4px 8px; }
+  .input-tool-btn { width: 32px; height: 32px; }
+  .input-field { padding: 8px 10px; font-size: 15px; }
+}
+

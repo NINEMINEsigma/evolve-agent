@@ -14,7 +14,7 @@ import {
   ContentBlock,
   MessageContent,
 } from "../types";
-import { extractMessageResources, parseToolResult } from "../utils";
+import { extractMessageResources, parseToolResult, generateUUID } from "../utils";
 
 const MAX_PASTE_IMAGE_SIZE = 20 * 1024 * 1024;
 
@@ -173,7 +173,7 @@ export function useWebSocket() {
     playlistAutoplay?: boolean,
     messageIndex?: number
   ) => {
-    const id = crypto.randomUUID();
+    const id = generateUUID();
     setMessages((prev) => [...prev, {
       role, content, id, imageMarkdown, downloadInfo, audioUrl, audioAutoplay, playlist, playlistAutoplay, messageIndex
     }]);
@@ -314,7 +314,7 @@ export function useWebSocket() {
               const entry: any = {
                 role: m.role,
                 content: m.content,
-                id: crypto.randomUUID(),
+                id: generateUUID(),
                 messageIndex: typeof m.index === "number" ? m.index : undefined,
               };
               if (m.reasoning_content) {
@@ -374,7 +374,7 @@ export function useWebSocket() {
           }
           if (data.assistant_text) {
             const p = JSON.parse(data.assistant_text);
-            const id = crypto.randomUUID();
+            const id = generateUUID();
             setMessages((prev) => [...prev, {
               role: "agent",
               content: p.content || "",
@@ -408,7 +408,7 @@ export function useWebSocket() {
           setMessages((prev) => [...prev, {
             role: "agent",
             content: msg.content ?? "",
-            id: crypto.randomUUID(),
+            id: generateUUID(),
             messageIndex: nextMessageIndex(prev),
           }]);
         }
@@ -452,7 +452,7 @@ export function useWebSocket() {
         setMessages((prev) => [...prev, {
           role: "tool",
           content: parsed.content ?? `✅ ${msg.tool} → ${raw.slice(0, 2000)}`,
-          id: crypto.randomUUID(),
+          id: generateUUID(),
           imageMarkdown: parsed.imageMarkdown,
           downloadInfo: parsed.downloadInfo,
           audioUrl: parsed.audioUrl,
@@ -714,7 +714,7 @@ export function useWebSocket() {
     setMessages((prev) => [...prev, {
       role: "user",
       content,
-      id: crypto.randomUUID(),
+      id: generateUUID(),
       messageIndex: nextMessageIndex(prev),
     }]);
     wsRef.current.send(JSON.stringify({ type: "user_message", content }));
@@ -855,7 +855,7 @@ export function useWebSocket() {
         resolve(null);
         return;
       }
-      const id = crypto.randomUUID();
+      const id = generateUUID();
       const reader = new FileReader();
       reader.onload = () => {
         const dataUrl = reader.result as string;
@@ -1136,7 +1136,7 @@ export function useWebSocket() {
         const exists = prev.some((x) => x.id === streamed.id);
         next = exists ? prev.map((x) => (x.id === streamed.id ? streamed : x)) : [...prev, streamed];
       }
-      return [...next, { role: "system" as const, content: "⏹ 已中断", id: crypto.randomUUID() }];
+      return [...next, { role: "system" as const, content: "⏹ 已中断", id: generateUUID() }];
     });
     fetch(`/api/interrupt/${sessionId || "unknown"}`, { method: "POST" })
       .catch(() => {});

@@ -268,7 +268,7 @@ You can modify your own source code and complete evolution through the following
         set_cron_event_loop(asyncio.get_running_loop())
 
         logger.info("Gateway listening on ws://%s:%d/ws/chat", host, port)
-        logger.info("WebPage on http://%s:%d", host, port)
+        logger.info("WebPage on http://127.0.0.1:%d", port)
 
         # ---- 自动打开浏览器 ----
         # import webbrowser

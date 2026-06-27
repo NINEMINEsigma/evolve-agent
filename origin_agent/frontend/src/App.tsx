@@ -141,6 +141,20 @@ export default function App() {
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; sid: string } | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const [tagEditorSession, setTagEditorSession] = useState<SessionInfo | null>(null);
+  const [isMobile, setIsMobile] = useState(false);
+
+  // ── 移动端默认折叠侧边栏 ──
+  useEffect(() => {
+    const mq = window.matchMedia("(max-width: 768px)");
+    const onChange = (e: MediaQueryListEvent) => {
+      setIsMobile(e.matches);
+      setSidebarCollapsed(e.matches);
+    };
+    setIsMobile(mq.matches);
+    setSidebarCollapsed(mq.matches);
+    mq.addEventListener("change", onChange);
+    return () => mq.removeEventListener("change", onChange);
+  }, []);
 
   // ── close context menu on outside click ──
   useEffect(() => {
@@ -229,6 +243,13 @@ export default function App() {
         }}
         sidebarSessions={ws.sidebarSessions}
       />
+
+      {isMobile && !sidebarCollapsed && (
+        <div
+          className="sidebar-backdrop"
+          onClick={() => setSidebarCollapsed(true)}
+        />
+      )}
 
       {contextMenu && (
         <div
