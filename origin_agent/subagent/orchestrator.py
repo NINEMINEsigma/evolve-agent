@@ -24,6 +24,7 @@ from entity.constant import (
     SUBAGENT_MAX_ACTIVE,
     SUBAGENT_READONLY_WHITELIST,
 )
+from entity.puretype import Role
 from abstract.tools.registry import registry as tool_registry
 from system.context import get_runtime_context
 
@@ -335,12 +336,12 @@ class SubAgentOrchestrator:
         for session_id, sub in self._active.items():
             feedback: list[dict[str, Any]] = []
             for entry in sub._history:
-                role = str(entry.get("role", ""))
-                if role == "system":
+                role = entry.get("role")
+                if role == Role.SYSTEM:
                     continue  # system prompt 不展示
-                if role == "user":
+                if role == Role.USER:
                     feedback.append({"role": "user", "content": str(entry.get("content", ""))})
-                elif role == "assistant":
+                elif role == Role.ASSISTANT:
                     content = str(entry.get("content", ""))
                     reasoning = entry.get("reasoning_content")
                     if content:
@@ -360,7 +361,7 @@ class SubAgentOrchestrator:
                                 "tool_name": str(fn.get("name", "")),
                                 "tool_args": fn.get("arguments") if isinstance(fn, dict) else {},
                             })
-                elif role == "tool":
+                elif role == Role.TOOL:
                     feedback.append({
                         "role": "tool_result",
                         "tool_call_id": str(entry.get("tool_call_id", "")),
