@@ -871,18 +871,26 @@ async def _handle_wait_cron(args: dict[str, Any]) -> dict:
     if duration_sec < CRON_MIN_INTERVAL_SECONDS:
         return tool_error(f"Duration must be at least {CRON_MIN_INTERVAL_SECONDS} seconds")
 
-    # ── 同一会话只保留一个 wait 任务 ──
+    # ── 同一会话最多一个 pending 的 wait 任务 ──
     with _cron_lock:
         session_tasks = _cron_tasks.get(session_id)
         if session_tasks:
             for tid, existing in list(session_tasks.items()):
                 if existing.is_wait:
-                    existing.should_schedule = False
+                    if existing.should_schedule:
+                        return tool_error(
+                            "A wait task is already pending for this session (task_id: "
+                            f"{existing.task_id}). Cancel it first with cancel_cron_job "
+                            "before creating a new one."
+                        )
+                    # 已终止的 wait 自动清理
                     if existing._timer:
                         existing._timer.cancel()
-                        existing._timer = None
-                    session_tasks.pop(tid, None)
-                    logger.info("Replaced previous wait task | old_task=%s session=%s", tid, session_id)
+                    del session_tasks[tid]
+                    logger.info(
+                        "Cleaned up completed wait task | old_task=%s session=%s",
+                        tid, session_id,
+                    )
 
     # ── 任务数量限制 ──
     with _cron_lock:
@@ -1359,7 +1367,7 @@ registry.register(
         #
         # ## 调用效果
         # 非阻塞等待指定秒数，时间到后通过 [cron-result] 返回固定提醒文本。
-        # 同一会话中同时只能保留一个 wait 任务，新任务会替换旧任务。
+        # 同一会话中同时只能有一个 wait 任务，已有时再次调用会返回错误。
         #
         # ## 返回
         # ```json
@@ -1373,13 +1381,14 @@ registry.register(
         # ## 副作用/注意
         # - 不执行任何命令，只发送提醒消息。
         # - 不是阻塞式 sleep，Agent 可继续处理其他任务。
+        # - 同一会话已有一个 wait 任务时再次调用会返回错误，需先取消已有任务。
         "description": """Schedule a lightweight wait reminder that does not execute any script.
 
 ## Prerequisites
 duration must be a positive integer in seconds and at least CRON_MIN_INTERVAL_SECONDS.
 
 ## Effect
-Waits non-blockingly for the specified number of seconds, then sends a [cron-result] with the fixed reminder text. Only one wait task is kept per session; a new wait task replaces any existing one.
+Waits non-blockingly for the specified number of seconds, then sends a [cron-result] with the fixed reminder text. Only one wait task is allowed per session; calling wait_cron again while one exists returns an error.
 
 ## Returns
 ```json
@@ -1392,7 +1401,8 @@ Waits non-blockingly for the specified number of seconds, then sends a [cron-res
 
 ## Side Effects / Notes
 - Does not execute any command; only sends a reminder message.
-- This is not a blocking sleep; the Agent can continue with other tasks.""",
+- This is not a blocking sleep; the Agent can continue with other tasks.
+- Calling wait_cron again while a wait task already exists for the session returns an error; cancel the existing one first.""",
         "parameters": {
             "type": "object",
             "properties": {
