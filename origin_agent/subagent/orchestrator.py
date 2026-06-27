@@ -224,6 +224,16 @@ class _OrchestratorContext:
                 "session_id": session_id,
                 "error": "Sub-agent is still generating its current response. Wait for [subagent-result] before calling chat_subagent.",
             }
+        # 先收取子 Agent 的反馈；如果还有未送达的反馈，让父 Agent 先查看，不要急于发新消息
+        outbox = self._drain_outbox(sub)
+        if outbox:
+            return {
+                "success": False,
+                "session_id": session_id,
+                "feedback": outbox,
+                "note": "Sub-agent has already produced feedback that you have not yet received. Please review the feedback first, then decide whether and how to reply via chat_subagent.",
+            }
+        # 没有未送达反馈，正常发送
         sub.inject_parent_message(message, user_name, message_type)
         # 推送父→子消息到前端子会话面板
         wrapped = format_user_message(user_name, message_type, message)
@@ -232,12 +242,10 @@ class _OrchestratorContext:
             self._subagent_names.get(session_id, ""),
             {"role": "user", "content": wrapped},
         )
-        # 顺手收集一次 outbox，让父 Agent 获得即时反馈
-        outbox = self._drain_outbox(sub)
         return {
             "success": True,
             "session_id": session_id,
-            "feedback": outbox if outbox else None,
+            "feedback": None,
         }
 
     async def approve(self, session_id: str, decisions: list[dict[str, Any]]) -> dict[str, Any]:
