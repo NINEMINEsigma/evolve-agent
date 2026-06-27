@@ -181,16 +181,27 @@ class SubAgentLoop:
     async def run(self, initial_prompt: str, user_name: str, message_type: str) -> None:
         """子 Agent 主循环。"""
         try:
-            # 添加系统提示词（首条消息）
-            self._history.append({
-                "role": Role.SYSTEM,
-                "content": self._ctx.system_prompt,
-            })
-            # 添加初始用户消息
-            self._history.append({
-                "role": Role.USER,
-                "content": format_user_message(user_name, message_type, initial_prompt),
-            })
+            # 若 _history 为空（非恢复会话），注入系统提示词和初始用户消息
+            if not self._history:
+                self._history.append({
+                    "role": Role.SYSTEM,
+                    "content": self._ctx.system_prompt,
+                })
+                self._history.append({
+                    "role": Role.USER,
+                    "content": format_user_message(user_name, message_type, initial_prompt),
+                })
+            else:
+                # 恢复会话：确保 system prompt 在最前，然后把新 initial_prompt 作为最新用户轮次追加
+                if self._history[0].get("role") != Role.SYSTEM:
+                    self._history.insert(0, {
+                        "role": Role.SYSTEM,
+                        "content": self._ctx.system_prompt,
+                    })
+                self._history.append({
+                    "role": Role.USER,
+                    "content": format_user_message(user_name, message_type, initial_prompt),
+                })
 
             turn: int = 0
             while turn < self._max_turns:

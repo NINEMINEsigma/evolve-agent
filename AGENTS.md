@@ -39,6 +39,7 @@ Environment check: `python check_env.py --cuda`
 - **Never use scripts to batch-edit source files.** Make targeted, reviewable edits.
 - `origin_agent/frontend/` is not at the repo root, so static type/IDE awareness may be inaccurate. Before relying on frontend type checks or builds, stop and notify the user.
 - **Git 操作仅限于 `git diff` 和 `git log`（只读查询）。禁止使用任何写入性 git 命令，包括但不限于 `git add`、`git commit`、`git push`、`git checkout`、`git branch`、`git merge`、`git rebase`、`git reset`、`git stash`、`git revert` 等。所有 git 写入操作必须由用户手动执行。**
+- **绝对禁止在 RIPER-5 模式之间擅自切换，尤其禁止未经用户明确批准就从 PLAN/RESEARCH 跳到 EXECUTE 模式。** 必须先建立完整计划、获得明确的批准信号（例如用户回复“批准”“ENTER EXECUTE MODE”或同等含义的指令）后，才能修改任何文件。未经批准的自主代码修改属于严重违规。
 
 ## Git commit style
 

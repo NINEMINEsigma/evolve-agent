@@ -101,6 +101,17 @@ async def _handle_run_subagent(args: dict[str, Any]) -> dict:
         if not sandbox.exists(p):
             return tool_error(f"System prompt file not found: {p}")
 
+    # 校验 history_path（若提供）：必须由沙箱解析且文件真实存在
+    resolved_history_path: str | None = None
+    if history_path:
+        try:
+            resolved = sandbox.resolve_read(history_path)
+        except Exception as exc:
+            return tool_error(f"Invalid history_path: {exc}")
+        if not resolved.real.exists():
+            return tool_error(f"history_path not found: {history_path}")
+        resolved_history_path = str(resolved.real)
+
     # 通过编排器启动子 Agent
     profile["_name"] = name  # 注入注册名供编排器推送 WS 时使用
     try:
@@ -114,7 +125,7 @@ async def _handle_run_subagent(args: dict[str, Any]) -> dict:
             user_name=user_name,
             message_type=message_type,
             parent_session_id=parent_session_id,
-            history_path=history_path or None,
+            history_path=resolved_history_path,
         )
         return tool_result(**result)
     except Exception as exc:
@@ -138,9 +149,9 @@ registry.register(
         #
         # ## 调用效果
         # 每次调用创建一个全新会话；若不传 history_path，子 Agent 不记得之前会话的任何内容，因此必须在 initial_prompt 中包含全部必要上下文。
-        # 如需恢复之前会话，可传入 stop_subagent 保存的 JSONL 文件路径作为 history_path。
+        # 如需恢复之前会话，可传入 stop_subagent 保存的 JSONL 文件路径作为 history_path（沙箱逻辑路径，如 ws:subagents/name/session.jsonl）。
         # 子 Agent 拥有独立的工具权限：
-        # - 预授权只读工具始终可用（如 list_tools、read_file、grep 等，具体以系统为准）。
+        # - 系统按固定白名单预授权部分只读工具（如 list_tools、read_file、grep 等），不可通过 authorized_tools 增删。
         # - 默认不提供 write_file、edit_file 等写工具，也不提供 run_command 等危险工具。
         # - 若任务需要写文件、执行命令或其他非只读工具，必须在 authorized_tools 中列出；启动后不可更改。
         # - authorized_tools 中不能包含只读工具或 multiagent 工具（防止递归子 Agent）。
@@ -178,10 +189,10 @@ The 'initial_prompt' parameter IS the first message sent to the sub-agent — do
 
 ## Effect
 Each call creates a brand-new session. If history_path is omitted, the sub-agent has NO memory of prior conversations, so you MUST include all necessary context in initial_prompt.
-To resume a previous session, pass the JSONL file path saved by stop_subagent as history_path.
+To resume a previous session, pass the sandbox logical path of the JSONL history file saved by stop_subagent as history_path (e.g. ws:subagents/name/session.jsonl). The path is resolved and validated; the tool call fails if the file does not exist.
 
 The sub-agent has an isolated tool set:
-- Pre-authorized readonly tools (e.g. list_tools, read_file, grep) are always available (exact set is system-defined).
+- A fixed whitelist of pre-authorized readonly tools is available (e.g. list_tools, read_file, grep). This set is hardcoded and cannot be changed via authorized_tools.
 - Write tools such as write_file or edit_file and dangerous tools such as run_command are NOT available by default.
 - Any non-readonly tools required by the task MUST be listed in authorized_tools at launch time; the tool set cannot be changed after launch.
 - authorized_tools cannot contain readonly tools or multiagent tools (recursive sub-agents are not allowed).
@@ -247,8 +258,8 @@ When queued:
                 },
                 "history_path": {
                     "type": "string",
-                    # 可选。stop_subagent 保存的 JSONL 历史文件路径。提供后子 Agent 从该历史恢复，而非从头开始。
-                    "description": "Optional path to a JSONL history file saved by stop_subagent. When provided, the sub-agent resumes from that history instead of starting fresh.",
+                    # 可选。stop_subagent 保存的 JSONL 历史文件路径（沙箱逻辑路径，如 ws:subagents/name/session.jsonl）。工具会解析并校验存在性，不存在则调用失败。
+                    "description": "Optional sandbox logical path to a JSONL history file saved by stop_subagent (e.g. ws:subagents/name/session.jsonl). The path is resolved and validated; the tool call fails if the file does not exist.",
                 },
             },
             "required": ["name", "initial_prompt", "user_name", "message_type"],

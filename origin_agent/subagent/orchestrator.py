@@ -459,63 +459,72 @@ class SubAgentOrchestrator:
         self._subagent_names[session_id] = profile.get("_name", "")
 
         # 若有历史文件，加载并预填到 loop._history（子 Agent 在已有上下文上继续）
+        # 注意：history_path 已由 run_subagent 工具层完成沙箱解析和存在性校验，
+        # 此处不再吞没任何异常，确保问题立即暴露。
         if history_path:
-            hist_file = Path(history_path)
-            if hist_file.exists():
-                try:
-                    with open(hist_file, "r", encoding="utf-8") as f:
-                        for line in f:
-                            line = line.strip()
-                            if not line:
-                                continue
-                            try:
-                                entry = json.loads(line)
-                            except json.JSONDecodeError:
-                                continue
-                            role = str(entry.get("role", ""))
-                            # 跳过 system prompt（由本次启动重新注入）
-                            if role == "system":
-                                continue
-                            loop._history.append(entry)
-                            # 推送到前端面板
-                            if role == "user":
-                                await self._push_subagent_ws(
-                                    session_id, profile.get("_name", ""),
-                                    {"role": "user", "content": str(entry.get("content", ""))},
-                                )
-                            elif role == "assistant":
-                                content = str(entry.get("content", ""))
-                                if content:
-                                    await self._push_subagent_ws(
-                                        session_id, profile.get("_name", ""),
-                                        {"role": "assistant", "content": content},
-                                    )
-                                for tc in (entry.get("tool_calls") or []):
-                                    fn = (tc.get("function") or {}) if isinstance(tc, dict) else {}
-                                    await self._push_subagent_ws(
-                                        session_id, profile.get("_name", ""),
-                                        {
-                                            "role": "tool_call",
-                                            "tool_call_id": str(tc.get("id", "") if isinstance(tc, dict) else ""),
-                                            "tool_name": str(fn.get("name", "")),
-                                            "tool_args": fn.get("arguments") if isinstance(fn, dict) else {},
-                                        },
-                                    )
-                            elif role == "tool":
-                                await self._push_subagent_ws(
-                                    session_id, profile.get("_name", ""),
-                                    {
-                                        "role": "tool_result",
-                                        "tool_call_id": str(entry.get("tool_call_id", "")),
-                                        "content": str(entry.get("content", "")),
-                                    },
-                                )
-                    logger.info(
-                        "Subagent history loaded | session=%s entries=%d",
-                        session_id, len(loop._history),
+            loaded: list[dict[str, Any]] = []
+            role_map = {
+                "system": Role.SYSTEM,
+                "user": Role.USER,
+                "assistant": Role.ASSISTANT,
+                "tool": Role.TOOL,
+            }
+            with open(history_path, "r", encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    entry = json.loads(line)
+                    if not isinstance(entry, dict):
+                        continue
+                    role = role_map.get(entry.get("role"))
+                    if role is None:
+                        continue
+                    # 跳过旧 system prompt（由 loop.run() 重新注入当前最新版本）
+                    if role == Role.SYSTEM:
+                        continue
+                    entry["role"] = role
+                    loaded.append(entry)
+            loop._history = loaded
+            # 推送到前端面板
+            for entry in loaded:
+                role = entry.get("role")
+                if role == Role.USER:
+                    await self._push_subagent_ws(
+                        session_id, profile.get("_name", ""),
+                        {"role": "user", "content": str(entry.get("content", ""))},
                     )
-                except Exception as exc:
-                    logger.warning("Failed to load subagent history: %s", exc)
+                elif role == Role.ASSISTANT:
+                    content = str(entry.get("content", ""))
+                    if content:
+                        await self._push_subagent_ws(
+                            session_id, profile.get("_name", ""),
+                            {"role": "assistant", "content": content},
+                        )
+                    for tc in (entry.get("tool_calls") or []):
+                        fn = (tc.get("function") or {}) if isinstance(tc, dict) else {}
+                        await self._push_subagent_ws(
+                            session_id, profile.get("_name", ""),
+                            {
+                                "role": "tool_call",
+                                "tool_call_id": str(tc.get("id", "") if isinstance(tc, dict) else ""),
+                                "tool_name": str(fn.get("name", "")),
+                                "tool_args": fn.get("arguments") if isinstance(fn, dict) else {},
+                            },
+                        )
+                elif role == Role.TOOL:
+                    await self._push_subagent_ws(
+                        session_id, profile.get("_name", ""),
+                        {
+                            "role": "tool_result",
+                            "tool_call_id": str(entry.get("tool_call_id", "")),
+                            "content": str(entry.get("content", "")),
+                        },
+                    )
+            logger.info(
+                "Subagent history loaded | session=%s entries=%d",
+                session_id, len(loop._history),
+            )
 
         # 立即推送 WS 通知前端面板
         await self._push_subagent_ws(

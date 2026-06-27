@@ -204,8 +204,8 @@ To change base_url, model, token limits, or other core parameters, unregister an
                 "system_prompt_paths": {
                     "type": "array",
                     "items": {"type": "string"},
-                    # 可选的自定义系统提示词文件路径列表。若指定，启动时所有文件必须存在。
-                    "description": "Optional list of paths to custom system prompt text files. All files must exist at sub-agent launch time if specified.",
+                    # 可选的自定义系统提示词文件路径列表（沙箱逻辑路径，如 ws:prompts/subagent.txt）。若指定，启动时所有文件必须存在。
+                    "description": "Optional list of sandbox logical paths to custom system prompt text files (e.g. ws:prompts/subagent.txt). All files must exist at sub-agent launch time if specified.",
                 },
                 "max_output_tokens": {
                     "type": "integer",
@@ -241,7 +241,7 @@ registry.register(
         #
         # ## 调用效果
         # 将主 Agent 的 base_url、model、api_key、max_output_tokens、max_context_tokens 复制到新的子 Agent 配置中。
-        # 可选的 system_prompt_paths 可指定自定义系统提示词文件列表。
+        # 可选的 system_prompt_paths 可指定自定义系统提示词文件列表（沙箱逻辑路径，如 ws:prompts/subagent.txt）。
         # 配置持久化到工作空间，供 run_subagent 等工具全局使用。
         #
         # ## 返回
@@ -268,7 +268,7 @@ The name must be unique among registered sub-agents; to update an existing profi
 
 ## Effect
 Copies the parent agent's base_url, model, api_key, max_output_tokens, and max_context_tokens into a new sub-agent profile.
-An optional system_prompt_paths can specify a list of custom system prompt files.
+An optional system_prompt_paths can specify a list of custom system prompt files as sandbox logical paths (e.g. ws:prompts/subagent.txt).
 The profile is persisted to the workspace and used globally by tools such as run_subagent.
 
 ## Returns
@@ -295,8 +295,8 @@ The profile is persisted to the workspace and used globally by tools such as run
                 "system_prompt_paths": {
                     "type": "array",
                     "items": {"type": "string"},
-                    # 可选的自定义系统提示词文件路径列表。若指定，启动时所有文件必须存在。
-                    "description": "Optional list of paths to custom system prompt text files. All files must exist at sub-agent launch time if specified.",
+                    # 可选的自定义系统提示词文件路径列表（沙箱逻辑路径，如 ws:prompts/subagent.txt）。若指定，启动时所有文件必须存在。
+                    "description": "Optional list of sandbox logical paths to custom system prompt text files (e.g. ws:prompts/subagent.txt). All files must exist at sub-agent launch time if specified.",
                 },
             },
             "required": ["name"],

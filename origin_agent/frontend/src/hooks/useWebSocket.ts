@@ -218,8 +218,8 @@ export function useWebSocket() {
               merged[sKey] = snap;
               continue;
             }
-            // snapshot 的 feedback 来自 _history（权威）；
-            // 只保留 existing 中 snapshot 没有的增量 WS 消息
+            // snapshot 来自 _history，是权威数据源：用它重置 feedback，
+            // 但保留 existing 中 snapshot 之后到达的 WS 增量消息。
             const snapIds = new Set(
               (snap.feedback || []).map((f: any) =>
                 `${f.role}::${f.content?.slice(0, 80)}::${f.tool_call_id || ""}`
@@ -235,6 +235,12 @@ export function useWebSocket() {
                 ? existing.pending_approvals
                 : snap.pending_approvals,
             };
+          }
+          // 清理已不活跃的子会话：snapshot 中不存在的会话应被移除
+          for (const sKey of Object.keys(prev)) {
+            if (!(sKey in incoming)) {
+              delete merged[sKey];
+            }
           }
           return merged;
         });
