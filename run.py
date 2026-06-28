@@ -80,6 +80,34 @@ def _append_evolve_event(stage: str, detail: str) -> None:
         pass  # non-critical
 
 
+def _build_base_args():
+    """构建 fast/fallback 共用的命令行参数列表"""
+    return [
+        "--workspace",              quote(workspace_path),
+        "--agentspace",             quote(agentspace_path_name),
+        "--log",                    quote(log_file_path),
+        "--console_log",            quote(console_log),
+        "--gateway_host",           quote(gateway_host),
+        "--gateway_port",           quote(gateway_port),
+        "--llm_base_url",           quote(llm_base_url),
+        "--llm_model",              quote(llm_model),
+        "--llm_api_key",            quote(llm_api_key),
+        "--llm_max_context_tokens", quote(llm_max_context_tokens),
+        "--llm_max_output_tokens",  quote(llm_max_output_tokens),
+        "--llm_temperature",        quote(llm_temperature),
+        "--llm_reasoning_effort",   quote(llm_reasoning_effort),
+        "--mcp_config_path",        quote(mcp_config_path),
+        "--approval_model_path",    quote(approval_model_path),
+        "--approval_model_n_ctx",   quote(approval_model_n_ctx),
+        "--approval_model_cuda",    quote(approval_model_cuda),
+        "--approval_model_port",    quote(approval_model_port),
+        "--approval_remote_base_url",  quote(approval_remote_base_url),
+        "--approval_remote_api_key",   quote(approval_remote_api_key),
+        "--approval_remote_model",     quote(approval_remote_model),
+        "--merge_concat_threshold",    quote(merge_concat_threshold),
+    ]
+
+
 if __name__ == "__main__":
     fast_agent_space = (workspace_path/fast_agent_space_path)
     slow_agent_space = (workspace_path/slow_agent_space_path)
@@ -101,32 +129,11 @@ if __name__ == "__main__":
         logger.info(f"Running fast agent")
         try:
             task = subprocess.run([
-                sys.executable, # 使用当前python解释器
-                quote(fast_agent_space/"__main__.py"), # 运行fast agent
-                "--workspace", quote(workspace_path), # 工作空间路径
-                "--agentspace", quote(agentspace_path_name), # agent 工作目录
-                "--log", quote(log_file_path), # 日志路径
-                "--console_log", quote(console_log), # 是否在控制台打印日志
-                "--evolve", quote(slow_agent_space), # 需要进化的代码路径
-                "--gateway_host", quote(gateway_host), # WebSocket 监听地址
-                "--gateway_port", quote(gateway_port), # WebSocket 监听端口
-                "--llm_base_url", quote(llm_base_url), # LLM API 地址
-                "--llm_model", quote(llm_model), # LLM 模型名
-                "--llm_api_key", quote(llm_api_key), # LLM API 密钥
-                "--llm_max_context_tokens", quote(llm_max_context_tokens), # LLM 最大上下文
-                "--llm_max_output_tokens", quote(llm_max_output_tokens), # LLM 最大输出
-                "--llm_temperature", quote(llm_temperature), # LLM 温度
-                "--llm_reasoning_effort", quote(llm_reasoning_effort), # LLM reasoning_effort
-                "--mode", "fast", # 运行模式
-                "--mcp_config_path", quote(mcp_config_path), # MCP 配置路径
-                "--approval_model_path", quote(approval_model_path), # 审批模型路径
-                "--approval_model_n_ctx", quote(approval_model_n_ctx), # 审批模型最大上下文
-                "--approval_model_cuda", quote(approval_model_cuda), # 审批模型是否使用CUDA
-                "--approval_model_port", quote(approval_model_port), # 审批模型服务端口
-                "--approval_remote_base_url", quote(approval_remote_base_url), # 远程审批模型端点
-                "--approval_remote_api_key", quote(approval_remote_api_key), # 远程审批模型密钥
-                "--approval_remote_model", quote(approval_remote_model), # 远程审批模型名
-                "--merge_concat_threshold", quote(merge_concat_threshold), # 会话合并摘要截断阈值
+                sys.executable,
+                quote(fast_agent_space / "__main__.py"),
+                *_build_base_args(),
+                "--mode", "fast",
+                "--evolve", quote(slow_agent_space),
             ])
         except KeyboardInterrupt:
             logger.info("Interrupted by user (KeyboardInterrupt)")
@@ -150,7 +157,7 @@ if __name__ == "__main__":
             _append_evolve_event("complete", "swap finished, restarting")
         else:
             logger.error(f"Fast agent exited with unknown error: {exit_code}")
-            if True:#(workspace_path / ".fallback").exists() == False:
+            if (workspace_path / ".fallback").exists() == False:
                 shutil.copytree(source, workspace_path / ".fallback", dirs_exist_ok=True) # 复制源代码到备份空间
             fallback_main = workspace_path / ".fallback" / "__main__.py"
             if not fallback_main.exists():
@@ -163,31 +170,12 @@ if __name__ == "__main__":
             logger.info(f"Running fallback agent")
             try:
                 task = subprocess.run([
-                    sys.executable, # 使用当前python解释器
-                    quote(fallback_main), # 运行fallback agent
-                    "--workspace", quote(workspace_path), # 工作空间路径
-                    "--agentspace", quote(agentspace_path_name), # agent 工作目录
-                    "--log", quote(log_file_path), # 日志路径
-                    "--console_log", quote(console_log), # 是否在控制台打印日志
-                    "--fix_fork", quote(fast_agent_space), # 需要修复的代码路径
-                    "--fix", quote(logs_path_name/"fast_agent_runtime_error.log"), # 错误日志路径
-                    "--llm_base_url", quote(llm_base_url), # LLM API 地址
-                    "--llm_model", quote(llm_model), # LLM 模型名
-                    "--llm_api_key", quote(llm_api_key), # LLM API 密钥
-                    "--llm_max_context_tokens", quote(llm_max_context_tokens), # LLM 最大上下文
-                    "--llm_max_output_tokens", quote(llm_max_output_tokens), # LLM 最大输出
-                    "--llm_temperature", quote(llm_temperature), # LLM 温度
-                    "--llm_reasoning_effort", quote(llm_reasoning_effort), # LLM reasoning_effort
-                    "--mode", "fallback", # 运行模式
-                    "--mcp_config_path", quote(mcp_config_path), # MCP 配置路径
-                    "--approval_model_path", quote(approval_model_path), # 审批模型路径
-                    "--approval_model_n_ctx", quote(approval_model_n_ctx), # 审批模型最大上下文
-                    "--approval_model_cuda", quote(approval_model_cuda), # 审批模型是否使用CUDA
-                    "--approval_model_port", quote(approval_model_port), # 审批模型服务端口
-                    "--approval_remote_base_url", quote(approval_remote_base_url), # 远程审批模型端点
-                    "--approval_remote_api_key", quote(approval_remote_api_key), # 远程审批模型密钥
-                    "--approval_remote_model", quote(approval_remote_model), # 远程审批模型名
-                    "--merge_concat_threshold", quote(merge_concat_threshold), # 会话合并摘要截断阈值
+                    sys.executable,
+                    quote(fallback_main),
+                    *_build_base_args(),
+                    "--mode", "fallback",
+                    "--fix_fork", quote(fast_agent_space),
+                    "--fix", quote(logs_path_name / "fast_agent_runtime_error.log"),
                 ])
             except KeyboardInterrupt:
                 logger.info("Interrupted by user (KeyboardInterrupt)")

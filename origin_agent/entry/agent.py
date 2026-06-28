@@ -446,7 +446,7 @@ class AgentLoop:
                                     "stream_id": stream_id,
                                     "delta": chunk.content_delta,
                                 }),
-                            ),
+                            ), # type: ignore
                             name=f"stream-delta-{session_id}",
                         )
 
@@ -460,7 +460,7 @@ class AgentLoop:
                                     "stream_id": stream_id,
                                     "reasoning_delta": chunk.reasoning_delta,
                                 }),
-                            ),
+                            ), # type: ignore
                             name=f"stream-reasoning-{session_id}",
                         )
 
@@ -478,7 +478,7 @@ class AgentLoop:
                                         "arguments": chunk.tool_call.arguments,
                                     },
                                 }),
-                            ),
+                            ), # type: ignore
                             name=f"stream-tool-{session_id}",
                         )
 

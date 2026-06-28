@@ -106,6 +106,16 @@ class ApprovalBackend(ABC):
         ...
 
 
+class FailedApprovalBackend(ApprovalBackend):
+    """哨兵子类，表示审批后端已尝试初始化但失败。"""
+
+    async def is_available(self) -> bool:
+        return False
+
+    async def chat(self, messages: list[dict[str, Any]], json_schema: dict[str, Any] | None = None) -> str:
+        raise RuntimeError("Approval backend is in failed state")
+
+
 # ---------------------------------------------------------------------------
 # 本地 GGUF 后端
 # ---------------------------------------------------------------------------
@@ -115,11 +125,11 @@ class LocalApprovalBackend(ApprovalBackend):
 
     def __init__(self, ctx: Any) -> None:
         self._ctx = ctx
-        self._engine: InferenceEngine | None | str = None  # str sentinel for failed
+        self._engine: InferenceEngine | None | object = None  # object sentinel for failed
 
     def _get_engine(self) -> InferenceEngine | None:
         """懒加载本地审批引擎。"""
-        if self._engine == "__failed__":
+        if self._engine is _ENGINE_FAILED:
             return None
         if self._engine is not None:
             return self._engine  # type: ignore[return-value]
@@ -146,7 +156,7 @@ class LocalApprovalBackend(ApprovalBackend):
             return self._engine
         except Exception as exc:
             logger.warning("Failed to initialize local approval backend: %s", exc)
-            self._engine = "__failed__"  # type: ignore[assignment]
+            self._engine = _ENGINE_FAILED
             return None
 
     async def is_available(self) -> bool:
@@ -273,17 +283,17 @@ def _create_approval_backend(ctx: Any) -> ApprovalBackend | None:
 
 _approval_backend: ApprovalBackend | None = None
 _backend_lock = asyncio.Lock()
-_BACKEND_FAILED = "__failed__"
+_ENGINE_FAILED = object()
 
 
 async def _get_approval_backend() -> ApprovalBackend | None:
     """懒加载全局审批后端单例。"""
     global _approval_backend
-    if _approval_backend is not None and _approval_backend != _BACKEND_FAILED:
+    if _approval_backend is not None and not isinstance(_approval_backend, FailedApprovalBackend):
         return _approval_backend
 
     async with _backend_lock:
-        if _approval_backend is not None and _approval_backend != _BACKEND_FAILED:
+        if _approval_backend is not None and not isinstance(_approval_backend, FailedApprovalBackend):
             return _approval_backend
 
         try:
@@ -291,18 +301,18 @@ async def _get_approval_backend() -> ApprovalBackend | None:
             ctx = get_runtime_context()
         except Exception as exc:
             logger.warning("Failed to get runtime context for approval backend: %s", exc)
-            _approval_backend = _BACKEND_FAILED  # type: ignore[assignment]
+            _approval_backend = FailedApprovalBackend()
             return None
 
         backend = _create_approval_backend(ctx)
         if backend is None:
             logger.warning("No approval backend configured — handsfree mode will deny all")
-            _approval_backend = _BACKEND_FAILED  # type: ignore[assignment]
+            _approval_backend = FailedApprovalBackend()
             return None
 
         if not await backend.is_available():
             logger.warning("Approval backend not available — handsfree mode will deny all")
-            _approval_backend = _BACKEND_FAILED  # type: ignore[assignment]
+            _approval_backend = FailedApprovalBackend()
             return None
 
         _approval_backend = backend
@@ -316,7 +326,7 @@ def shutdown_approval_model() -> bool:
     """
     global _approval_backend
     backend = _approval_backend
-    if backend is None or backend == _BACKEND_FAILED:
+    if backend is None or isinstance(backend, FailedApprovalBackend):
         return True
     try:
         if isinstance(backend, LocalApprovalBackend):
@@ -328,7 +338,7 @@ def shutdown_approval_model() -> bool:
         return True
     except Exception as exc:
         logger.warning("Failed to unload approval backend: %s", exc)
-        _approval_backend = _BACKEND_FAILED  # type: ignore[assignment]
+        _approval_backend = FailedApprovalBackend()
         return False
 
 
