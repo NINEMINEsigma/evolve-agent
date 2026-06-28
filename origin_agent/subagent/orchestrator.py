@@ -470,7 +470,7 @@ class _OrchestratorContext:
                 session_id, profile.get("_name", ""), event,
             ))
 
-        loop = SubAgentLoop(ctx, session_id, tools, MAX_TOOL_TURNS, on_message=_push_msg)
+        loop = SubAgentLoop(ctx, session_id, tools, MAX_TOOL_TURNS, on_message=_push_msg, parent_session_id=self._parent_session_id)
         self._active[session_id] = loop
         self._subagent_names[session_id] = profile.get("_name", "")
 

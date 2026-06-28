@@ -80,9 +80,11 @@ class SubAgentLoop:
         tools: list[dict[str, Any]],
         max_turns: int,
         on_message: Any = None,  # Callable[[dict], None] — 推送一条结构化事件给前端
+        parent_session_id: str = "",
     ) -> None:
         self._ctx = ctx
         self._session_id: str = session_id
+        self._parent_session_id: str = parent_session_id
         self._tools: list[dict[str, Any]] = tools
 
         # 当前子 Agent 被授权的工具名集合 — 用于运行时强制隔离
@@ -419,6 +421,33 @@ class SubAgentLoop:
 
         子 Agent 进入暂停状态，直到父 Agent 通过 approve_tools() 审批。
         """
+        from component.approval import is_handsfree_mode, request_user_confirm
+
+        if is_handsfree_mode(self._parent_session_id):
+            result = await request_user_confirm(
+                session_id=self._parent_session_id,
+                tool_name=tc.name,
+                args=dict(tc.arguments) if tc.arguments else {},
+                reason="Sub-agent initiated tool call",
+                content=f"Sub-agent {tc.name} tool call",
+                ask_agent_callback=None,
+            )
+            if result.action in ("allow_once", "allow_always"):
+                self._emit(
+                    "approval_decision",
+                    tool_call_id=tc.id,
+                    tool_name=tc.name,
+                    content="approved",
+                )
+                return await self._execute_approved_tool(tc)
+            self._emit(
+                "approval_decision",
+                tool_call_id=tc.id,
+                tool_name=tc.name,
+                content=f"rejected: {result.deny_reason}",
+            )
+            return self._make_tool_msg(tc.id, f"Tool call denied: {result.deny_reason}")
+
         pending = PendingToolCall(tc)
         self._pending_approvals.append(pending)
 
