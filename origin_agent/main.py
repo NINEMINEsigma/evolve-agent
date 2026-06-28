@@ -164,13 +164,12 @@ class App:
             self._shutdown_event.set()
 
         # ---- 初始化 skills 目录 ----
-        try:
-            _skills_dir: Path = Path("skills")
-            _skills_dir.mkdir(parents=True, exist_ok=True)
-            _seed: Path = _skills_dir / "self-evolution" / "SKILL.md"
-            if not _seed.exists():
-                _seed.parent.mkdir(parents=True, exist_ok=True)
-                _seed.write_text("""---
+        _skills_dir: Path = Path("skills")
+        _skills_dir.mkdir(parents=True, exist_ok=True)
+        _seed: Path = _skills_dir / "self-evolution" / "SKILL.md"
+        if not _seed.exists():
+            _seed.parent.mkdir(parents=True, exist_ok=True)
+            _seed.write_text("""---
 name: self-evolution
 description: "Evolve Agent Self-Evolution Guide"
 category: core
@@ -186,10 +185,7 @@ You can modify your own source code and complete evolution through the following
 4. ``diff_fast_fork`` — diff fast fork and save diff file
 5. ``evolve_code`` — deep validate and trigger swap
 """, encoding="utf-8")
-                logger.info("Seeded skill: self-evolution")
-        except Exception as exc:
-            logger.warning("Skills directory setup failed: %s", exc)
-            self._shutdown_event.set()
+            logger.info("Seeded skill: self-evolution")
 
         # ---- 创建 agent 循环 ----
         agent_loop: AgentLoop | None = None
