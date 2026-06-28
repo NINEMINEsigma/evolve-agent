@@ -38,6 +38,9 @@ class SubRuntimeContext(BaseModel):
     system_prompt: str
     """系统提示词（来自注册表 system_prompt_paths 列表或内置默认模板）。"""
 
+    tool_timeout: int = 30
+    """单个工具调用允许运行的最大秒数，超时后取消（0 = 无超时）。"""
+
 
 async def build_subagent_context(
     profile: dict,

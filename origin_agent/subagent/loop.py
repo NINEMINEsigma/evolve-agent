@@ -19,6 +19,7 @@ from typing import Any
 from abstract.tools.registry import ToolEntry, registry as tool_registry
 from component.llm import LLMClient, LLMResponse, ToolCall
 from entity.puretype import Role
+from subagent.context import SubRuntimeContext
 
 logger = logging.getLogger(__name__)
 
@@ -75,7 +76,7 @@ class SubAgentLoop:
 
     def __init__(
         self,
-        ctx: Any,  # SubRuntimeContext
+        ctx: SubRuntimeContext,
         session_id: str,
         tools: list[dict[str, Any]],
         max_turns: int,
@@ -255,7 +256,7 @@ class SubAgentLoop:
                     self._emit("assistant", content=resp.content, reasoning=reasoning_text)
 
                 # 存储带 tool_calls 的 assistant 消息
-                assistant_entry: dict[str, Any] = {
+                assistant_entry = {
                     "role": Role.ASSISTANT,
                     "content": resp.content or "",
                     "tool_calls": [
@@ -509,6 +510,7 @@ class SubAgentLoop:
                     ensure_ascii=False,
                 ),
             )
+        timeout: int = self._ctx.tool_timeout
         try:
             if tool_registry.get_entry(tc.name) is None:
                 return self._make_tool_msg(tc.id, f"Tool '{tc.name}' not found in registry")
@@ -518,11 +520,28 @@ class SubAgentLoop:
 
             current_subagent_loop.set(self)
             entry = tool_registry.get_entry(tc.name)
+            if entry and entry.no_timeout:
+                timeout = 0
+
             if entry is not None and entry.is_async:
-                result = await entry.handler(args)
+                coro: Any = entry.handler(args)
             else:
-                result = tool_registry.dispatch(tc.name, args)
+                coro = asyncio.to_thread(tool_registry.dispatch, tc.name, args)
+
+            if timeout:
+                result = await asyncio.wait_for(coro, timeout=timeout)
+            else:
+                result = await coro
+
             return self._make_tool_msg(tc.id, json.dumps(result, ensure_ascii=False))
+        except asyncio.TimeoutError:
+            return self._make_tool_msg(
+                tc.id,
+                json.dumps(
+                    {"success": False, "error": f"Tool execution timed out ({timeout}s)"},
+                    ensure_ascii=False,
+                ),
+            )
         except Exception as exc:
             return self._make_tool_msg(
                 tc.id,
