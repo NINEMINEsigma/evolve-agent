@@ -8,6 +8,9 @@
     "build": "tsc -b && vite build",
     "preview": "vite preview"
   },
+  "pnpm": {
+    "onlyBuiltDependencies": ["esbuild"]
+  },
   "dependencies": {
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
