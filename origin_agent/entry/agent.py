@@ -520,28 +520,6 @@ class AgentLoop:
             ),
         )
 
-    def _store_assistant_with_tools(self, session_id: str, resp: LLMResponse) -> None:
-        entry: dict[str, Any] = {
-            "role": Role.ASSISTANT,
-            "content": resp.content or "",
-            "tool_calls": [
-                {
-                    "id": tc.id,
-                    "type": "function",
-                    "function": {
-                        "name": tc.name,
-                        "arguments": json.dumps(tc.arguments, ensure_ascii=False),
-                    },
-                }
-                for tc in resp.tool_calls
-            ],
-        }
-        if resp.reasoning_content:
-            entry["reasoning_content"] = resp.reasoning_content
-        self._get_history(session_id).append(entry)
-        self._persist_message(session_id, entry)
-
-
 # -- 内部辅助方法 ----------------------------------------------------
 
     @staticmethod
