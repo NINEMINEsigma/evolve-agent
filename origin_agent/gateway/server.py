@@ -604,6 +604,78 @@ async def update_session_message(session_id: str, message_index: int, req: Reque
     )
 
 
+@app.delete("/api/sessions/{session_id}/messages")
+async def delete_session_messages(session_id: str, count: int = 1):
+    """删除最后 count 个逻辑轮次的消息（从倒数第 count 条 user 起，覆盖其后所有 tool/assistant）。"""
+    info = sessions.get(session_id)
+    if info and info.get("status") == "archived":
+        result = {"deleted": False, "error": "archived session"}
+        return HTMLResponse(
+            json.dumps(result, ensure_ascii=False),
+            media_type="application/json",
+            status_code=403,
+        )
+    if _agent_loop is None or not hasattr(_agent_loop, "delete_session_messages"):
+        return {"deleted": False, "error": "agent loop not ready"}
+    result = _agent_loop.delete_session_messages(session_id, count)  # type: ignore[union-attr]
+    status_code = 200 if result.get("deleted") else 400
+    return HTMLResponse(
+        json.dumps(result, ensure_ascii=False),
+        media_type="application/json",
+        status_code=status_code,
+    )
+
+
+@app.post("/api/sessions/{session_id}/regenerate")
+async def regenerate_response(session_id: str):
+    """重新生成最后一条 user 消息的响应：截断历史，重新调用 process_message。"""
+    info = sessions.get(session_id)
+    if info and info.get("status") == "archived":
+        result = {"regenerate": False, "error": "archived session"}
+        return HTMLResponse(
+            json.dumps(result, ensure_ascii=False),
+            media_type="application/json",
+            status_code=403,
+        )
+    if _agent_loop is None:
+        return {"regenerate": False, "error": "agent loop not ready"}
+    # 先截断历史
+    result = _agent_loop.regenerate_response(session_id)  # type: ignore[union-attr]
+    if not result.get("regenerate"):
+        return HTMLResponse(
+            json.dumps(result, ensure_ascii=False),
+            media_type="application/json",
+            status_code=400,
+        )
+    content: str = result.get("last_user_content", "")
+    # 通知前端裁剪本地消息
+    ws = _tool_ws_sinks.get(session_id)
+    if ws:
+        try:
+            await ws.send_text(
+                Message(
+                    type=MessageType.SYSTEM,
+                    session_id=session_id,
+                    content=json.dumps({
+                        "regenerate_trim": True,
+                        "keep_count": result.get("remaining_count", 0),
+                    }),
+                ).to_json()
+            )
+        except Exception:
+            pass
+        # 复用 process_message 流程（流式事件自动推送到 ws）
+        reply: str = await _agent_loop.process_message(session_id, content)  # type: ignore[union-attr]
+        await ws.send_text(
+            Message(
+                type=MessageType.AGENT_MESSAGE,
+                session_id=session_id,
+                content=reply,
+            ).to_json()
+        )
+    return {"regenerate": True, "session_id": session_id}
+
+
 @app.put("/api/sessions/{session_id}/title")
 async def update_session_title(session_id: str, req: Request):
     """手动重命名 session。"""

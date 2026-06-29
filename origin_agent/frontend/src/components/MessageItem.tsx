@@ -56,12 +56,15 @@ const markdownComponentsBase = {
   },
 };
 
-const MessageItem = memo(function MessageItem({ message, archived, onImageClick, onToggleCollapse, onEditMessage, streaming }: {
+const MessageItem = memo(function MessageItem({ message, archived, onImageClick, onToggleCollapse, onEditMessage, onDeleteMessages, onRegenerateResponse, isLastUserMessage, streaming }: {
   message: ChatMessage;
   archived: boolean;
   onImageClick: (src: string) => void;
   onToggleCollapse: (id: string) => void;
   onEditMessage: (id: string, content: string) => void | Promise<void>;
+  onDeleteMessages?: (count: number) => void;
+  onRegenerateResponse?: () => void;
+  isLastUserMessage?: boolean;
   streaming?: boolean;
 }) {
   const m = message;
@@ -74,6 +77,8 @@ const MessageItem = memo(function MessageItem({ message, archived, onImageClick,
   const toolCollapsed = isTool && !streaming && m.collapsed !== false;
   const collapsed = !isTool && !streaming && isLong && m.collapsed !== false;
   const canEdit = !archived && !streaming && typeof m.messageIndex === "number" && typeof m.content === "string";
+  const canDelete = !archived && !streaming && isLastUserMessage;
+  const canRegenerate = !archived && !streaming && m.role === "user" && isLastUserMessage;
 
   const mdComponents = useMemo(() => ({
     ...markdownComponentsBase,
@@ -309,6 +314,20 @@ const MessageItem = memo(function MessageItem({ message, archived, onImageClick,
             {canEdit && !editing && (
               <button type="button" onClick={() => { setDraft(textContent); setEditing(true); }}>
                 编辑
+              </button>
+            )}
+            {canDelete && (
+              <button type="button" onClick={() => {
+                const countStr = prompt("删除最后几轮对话？", "1");
+                const count = parseInt(countStr || "1", 10);
+                if (count > 0) onDeleteMessages!(count);
+              }}>
+                删除
+              </button>
+            )}
+            {canRegenerate && (
+              <button type="button" onClick={() => onRegenerateResponse!()}>
+                重新生成
               </button>
             )}
           </div>

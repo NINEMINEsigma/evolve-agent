@@ -393,6 +393,8 @@ export default function App() {
           onImageClick={setLightboxSrc}
           onToggleCollapse={ws.toggleMessageCollapse}
           onEditMessage={ws.editMessage}
+          onDeleteMessages={ws.deleteMessages}
+          onRegenerateResponse={ws.regenerateResponse}
           bottomRef={ws.bottomRef}
           chatAreaRef={ws.chatAreaRef}
           onDropFiles={ws.handleFileUpload}

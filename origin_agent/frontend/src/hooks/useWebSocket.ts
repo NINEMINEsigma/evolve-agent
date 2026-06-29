@@ -364,6 +364,13 @@ export function useWebSocket() {
           if (data.token_usage !== undefined) setTokenUsage(data.token_usage);
           if (data.context_tokens !== undefined) setContextTokens(data.context_tokens);
           if (data.token_usage !== undefined || data.context_tokens !== undefined) return;
+          if (data.regenerate_trim) {
+            const keepCount = data.keep_count as number;
+            setMessages((prev) => prev.filter((m) =>
+              typeof m.messageIndex === "number" && m.messageIndex < keepCount
+            ));
+            return;
+          }
           if (data.action === "session_rotated") {
             setSessionId(data.new_sid);
             localStorage.setItem("evolve_session_id", data.new_sid);
@@ -638,6 +645,33 @@ export function useWebSocket() {
       m.id === id ? { ...m, content: data.content ?? content, edited: true } : m
     )));
   }, [addMessage, messages, sessionId]);
+
+  const deleteMessages = useCallback(async (count: number = 1) => {
+    const resp = await fetch(`/api/sessions/${sessionId}/messages?count=${count}`, {
+      method: "DELETE",
+    });
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok || !data.deleted) {
+      addMessage("error", `删除失败：${data.error || "unknown error"}`);
+      return;
+    }
+    const remaining = data.remaining_count as number;
+    setMessages((prev) => prev.filter((m) =>
+      typeof m.messageIndex === "number" && m.messageIndex < remaining
+    ));
+  }, [sessionId, addMessage]);
+
+  const regenerateResponse = useCallback(async () => {
+    setWaiting(true);
+    const resp = await fetch(`/api/sessions/${sessionId}/regenerate`, {
+      method: "POST",
+    });
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok || !data.regenerate) {
+      setWaiting(false);
+      addMessage("error", `重新生成失败：${data.error || "unknown error"}`);
+    }
+  }, [sessionId, addMessage]);
 
   const respondConfirm = useCallback((action: string, denyReasonText?: string, deniedBy?: string) => {
     if (!pendingConfirm) return;
@@ -1293,6 +1327,8 @@ export function useWebSocket() {
     interrupt,
     toggleMessageCollapse,
     editMessage,
+    deleteMessages,
+    regenerateResponse,
     addMessage,
     fetchSessions,
     fetchAllTags,

@@ -1646,6 +1646,45 @@ class AgentLoop:
             "content": self._extract_text(entry.get("content", "")),
         }
 
+    def delete_session_messages(self, session_id: str, count: int = 1) -> dict:
+        """删除最后 count 个逻辑轮次（从倒数第 count 条 user 起，覆盖其后的所有 tool/assistant）。
+        返回 {deleted_count, remaining_count}。"""
+        if not isinstance(count, int) or count < 1:
+            return {"deleted": False, "error": "count must be >= 1"}
+        history: list[dict[str, Any]] = self._get_history(session_id)
+        if not history:
+            return {"deleted": False, "error": "history is empty"}
+        user_indices: list[int] = [i for i, m in enumerate(history) if m.get("role") == Role.USER]
+        if len(user_indices) < count:
+            return {"deleted": False, "error": f"only {len(user_indices)} user rounds, cannot delete {count}"}
+        cut_index: int = user_indices[-count]
+        deleted_count: int = len(history) - cut_index
+        self._histories[session_id] = history[:cut_index]
+        self._overwrite_history_file(session_id)
+        return {"deleted": True, "deleted_count": deleted_count, "remaining_count": cut_index}
+
+    def regenerate_response(self, session_id: str) -> dict:
+        """找到最后一条 user 消息，截断其后所有消息，返回该 user 的 content。
+        server 层用返回值重新调用 process_message()。"""
+        history: list[dict[str, Any]] = self._get_history(session_id)
+        if not history:
+            return {"regenerate": False, "error": "history is empty"}
+        last_user_idx: int = -1
+        for i in range(len(history) - 1, -1, -1):
+            if history[i].get("role") == Role.USER:
+                last_user_idx = i
+                break
+        if last_user_idx == -1:
+            return {"regenerate": False, "error": "no user message found"}
+        content: str = self._extract_text(history[last_user_idx].get("content", ""))
+        self._histories[session_id] = history[:last_user_idx + 1]
+        self._overwrite_history_file(session_id)
+        return {
+            "regenerate": True,
+            "last_user_content": content,
+            "remaining_count": last_user_idx + 1,
+        }
+
     def get_token_usage(self, session_id: str) -> int:
         """返回 session 当前的 prompt token 消耗。"""
         if session_id in self._token_usage:
