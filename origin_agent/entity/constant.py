@@ -140,25 +140,26 @@ SUBAGENT_STORE_FILENAME: str = "subagents.json"
 # 子 Agent 最大同时活跃数量 — 超出上限的子 Agent 进入等待队列
 SUBAGENT_MAX_ACTIVE: int = 5
 
-# 子 Agent 系统预设 readonly 工具白名单 — 子 Agent 默认可用这些只读工具
-# 此列表硬编码在代码中，仅能通过修改代码来调整；multiagent 工具集始终被硬排除（禁止递归）
-SUBAGENT_READONLY_WHITELIST: list[str] = [
-    "list_tools",
-    "list_uploads",
-    "read_file",
-    "probe_vision_capability",
-    "read_image",
-    "read_csv",
-    "read_docx",
-    "read_excel",
-    "read_pdf",
-    "list_directory",
-    "search_files",
-    "grep",
-    "web_fetch",
-    "web_search",
-    "media_info",
-]
+# DEPRECATED: SUBAGENT_READONLY_WHITELIST is no longer used.
+# Subagents now inherit all non-multiagent tools automatically.
+# Kept commented for reference.
+# SUBAGENT_READONLY_WHITELIST: list[str] = [
+#     "list_tools",
+#     "list_uploads",
+#     "read_file",
+#     "probe_vision_capability",
+#     "read_image",
+#     "read_csv",
+#     "read_docx",
+#     "read_excel",
+#     "read_pdf",
+#     "list_directory",
+#     "search_files",
+#     "grep",
+#     "web_fetch",
+#     "web_search",
+#     "media_info",
+# ]
 
 
 # ============================================================================

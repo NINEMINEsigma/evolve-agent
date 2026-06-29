@@ -1162,15 +1162,28 @@ async def ws_chat(ws: WebSocket) -> None:
 
                     # 先并行/异步转发到选中的子会话（用户直接发送）
                     subagent_tasks: list[asyncio.Task] = []
+                    sub_ids: list[str] = []
+                    name_map: dict[str, str] = {}
                     if any(t != "main" for t in target_sessions):
                         try:
                             orch = get_subagent_orchestrator()
-                            for sub_id in target_sessions:
-                                if sub_id == "main":
-                                    continue
+                            sub_ids = [t for t in target_sessions if t != "main"]
+                            also_main = "main" in target_sessions
+                            # 建立 session_id -> name 映射
+                            try:
+                                snapshot = orch.get_snapshot(parent_session_id=sid)
+                                for sess_id, info in snapshot.items():
+                                    name_map[sess_id] = info.get("name", "")
+                            except Exception:
+                                pass
+                            for sub_id in sub_ids:
+                                other_ids = [o for o in sub_ids if o != sub_id]
+                                other_names = [name_map.get(o, o) for o in other_ids]
+                                if also_main:
+                                    other_names.append("the Parent Agent (main session)")
                                 subagent_tasks.append(
                                     asyncio.create_task(
-                                        orch.chat_user_direct(parent_session_id=sid, session_id=sub_id, message=str(content)),
+                                        orch.chat_user_direct(parent_session_id=sid, session_id=sub_id, message=str(content), co_recipients=other_names),
                                         name=f"user-to-subagent-{sub_id[:16]}",
                                     )
                                 )
@@ -1180,9 +1193,16 @@ async def ws_chat(ws: WebSocket) -> None:
                     # 主会话处理
                     reply: str
                     if "main" in target_sessions:
+                        main_content = content
+                        if sub_ids:
+                            sub_names = [name_map.get(s, s) for s in sub_ids]
+                            main_content = (
+                                f"[This message is also shared with sub-agents: {', '.join(sub_names)}]\n\n"
+                                f"{content}"
+                            )
                         try:
                             reply = await _agent_loop.process_message(  # type: ignore[union-attr]
-                                sid, content
+                                sid, main_content
                             )
                         except Exception as exc:
                             logger.exception("Agent loop error for session=%s", sid)

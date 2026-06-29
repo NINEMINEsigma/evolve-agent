@@ -23,7 +23,6 @@ from entity.constant import (
     MAX_TOOL_TURNS,
     SUBAGENT_IDLE_TRIGGER_SECONDS,
     SUBAGENT_MAX_ACTIVE,
-    SUBAGENT_READONLY_WHITELIST,
 )
 from entity.puretype import Role
 from abstract.tools.registry import registry as tool_registry
@@ -57,7 +56,6 @@ class WaitingEntry:
         session_id: str,
         profile: dict[str, Any],
         temperature: float,
-        authorized_tools: list[str],
         initial_prompt: str,
         user_name: str,
         message_type: str,
@@ -66,7 +64,6 @@ class WaitingEntry:
         self.session_id: str = session_id
         self.profile: dict[str, Any] = profile
         self.temperature: float = temperature
-        self.authorized_tools: list[str] = authorized_tools
         self.initial_prompt: str = initial_prompt
         self.user_name: str = user_name
         self.message_type: str = message_type
@@ -93,7 +90,6 @@ class _OrchestratorContext:
         self,
         profile: dict[str, Any],
         temperature: float,
-        authorized_tools: list[str],
         initial_prompt: str,
         user_name: str,
         message_type: str,
@@ -132,7 +128,6 @@ class _OrchestratorContext:
                     session_id=session_id,
                     profile=profile,
                     temperature=temperature,
-                    authorized_tools=authorized_tools,
                     initial_prompt=initial_prompt,
                     user_name=user_name,
                     message_type=message_type,
@@ -152,7 +147,7 @@ class _OrchestratorContext:
 
         # 立即启动
         await self._start_subagent(
-            session_id, profile, temperature, authorized_tools,
+            session_id, profile, temperature,
             initial_prompt, user_name, message_type, history_path,
         )
         return {
@@ -169,7 +164,7 @@ class _OrchestratorContext:
         sub._outbox.clear()
         return list(outbox)
 
-    async def chat_user_direct(self, session_id: str, message: str) -> dict[str, Any]:
+    async def chat_user_direct(self, session_id: str, message: str, co_recipients: list[str] | None = None) -> dict[str, Any]:
         """最终用户直接向子会话发送消息（支持 FIFO 排队）。"""
         sub = self._active.get(session_id)
         if sub is None:
@@ -185,8 +180,8 @@ class _OrchestratorContext:
                 "session_id": session_id,
                 "error": "Sub-agent not found (may have been stopped or completed).",
             }
-        sub.inject_parent_message(message, "User", "user_direct")
-        wrapped = format_user_message("User", "user_direct", message)
+        sub.inject_parent_message(message, "User", "user_direct", co_recipients)
+        wrapped = format_user_message("User", "user_direct", message, co_recipients)
         await self._push_subagent_ws(
             session_id,
             self._subagent_names.get(session_id, ""),
@@ -200,6 +195,7 @@ class _OrchestratorContext:
         message: str,
         user_name: str,
         message_type: str,
+        co_recipients: list[str] | None = None,
     ) -> dict[str, Any]:
         """父 Agent 向子 Agent 发送消息。"""
         sub = self._active.get(session_id)
@@ -234,9 +230,9 @@ class _OrchestratorContext:
                 "note": "Sub-agent has already produced feedback that you have not yet received. Please review the feedback first, then decide whether and how to reply via chat_subagent.",
             }
         # 没有未送达反馈，正常发送
-        sub.inject_parent_message(message, user_name, message_type)
+        sub.inject_parent_message(message, user_name, message_type, co_recipients)
         # 推送父→子消息到前端子会话面板
-        wrapped = format_user_message(user_name, message_type, message)
+        wrapped = format_user_message(user_name, message_type, message, co_recipients)
         await self._push_subagent_ws(
             session_id,
             self._subagent_names.get(session_id, ""),
@@ -453,7 +449,6 @@ class _OrchestratorContext:
         session_id: str,
         profile: dict[str, Any],
         temperature: float,
-        authorized_tools: list[str],
         initial_prompt: str,
         user_name: str,
         message_type: str,
@@ -463,7 +458,7 @@ class _OrchestratorContext:
         parent_ctx = get_runtime_context()
         ctx = await build_subagent_context(profile, temperature, parent_ctx)
 
-        tools = self._build_tool_set(authorized_tools)
+        tools = self._build_tool_set()
 
         def _push_msg(event: dict[str, Any]) -> None:
             asyncio.create_task(self._push_subagent_ws(
@@ -570,7 +565,6 @@ class _OrchestratorContext:
             entry.session_id,
             entry.profile,
             entry.temperature,
-            entry.authorized_tools,
             entry.initial_prompt,
             entry.user_name,
             entry.message_type,
@@ -579,19 +573,14 @@ class _OrchestratorContext:
         logger.info("Subagent activated from queue | session=%s", entry.session_id)
         return [{"session_id": entry.session_id, "subagent_name": entry.profile.get("name", "")}]
 
-    def _build_tool_set(self, authorized_tools: list[str]) -> list[dict[str, Any]]:
-        """构建子 Agent 的工具集。"""
-        tool_names: set[str] = set()
-
-        for name in SUBAGENT_READONLY_WHITELIST:
-            entry = tool_registry.get_entry(name)
-            if entry is not None and entry.toolset != "multiagent":
-                tool_names.add(name)
-
-        for name in authorized_tools:
-            entry = tool_registry.get_entry(name)
-            if entry is not None and entry.toolset != "multiagent":
-                tool_names.add(name)
+    def _build_tool_set(self) -> list[dict[str, Any]]:
+        """构建子 Agent 的工具集 — 包含所有非 multiagent 工具。"""
+        tool_map = tool_registry.get_tool_to_toolset_map()
+        tool_names = {
+            name for name, toolset in tool_map.items()
+            if toolset != "multiagent"
+        }
+        return tool_registry.get_definitions(tool_names=tool_names)
 
         return tool_registry.get_definitions(tool_names=tool_names)
 
@@ -735,11 +724,11 @@ class SubAgentOrchestrator:
     async def launch(self, parent_session_id: str, **kwargs: Any) -> dict[str, Any]:
         return await self._get_context(parent_session_id).launch(parent_session_id=parent_session_id, **kwargs)
 
-    async def chat_user_direct(self, parent_session_id: str, session_id: str, message: str) -> dict[str, Any]:
-        return await self._get_context(parent_session_id).chat_user_direct(session_id, message)
+    async def chat_user_direct(self, parent_session_id: str, session_id: str, message: str, co_recipients: list[str] | None = None) -> dict[str, Any]:
+        return await self._get_context(parent_session_id).chat_user_direct(session_id, message, co_recipients)
 
-    async def chat(self, parent_session_id: str, session_id: str, message: str, user_name: str, message_type: str) -> dict[str, Any]:
-        return await self._get_context(parent_session_id).chat(session_id, message, user_name, message_type)
+    async def chat(self, parent_session_id: str, session_id: str, message: str, user_name: str, message_type: str, co_recipients: list[str] | None = None) -> dict[str, Any]:
+        return await self._get_context(parent_session_id).chat(session_id, message, user_name, message_type, co_recipients)
 
     async def approve(self, parent_session_id: str, session_id: str, decisions: list[dict[str, Any]]) -> dict[str, Any]:
         return await self._get_context(parent_session_id).approve(session_id, decisions)

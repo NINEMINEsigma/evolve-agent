@@ -31,7 +31,7 @@ current_subagent_loop: ContextVar[Any] = ContextVar("current_subagent_loop")
 SUB_MESSAGE_SEPARATOR = "[Sub Session Message]"
 
 
-def format_user_message(user_name: str, message_type: str, content: str) -> str:
+def format_user_message(user_name: str, message_type: str, content: str, co_recipients: list[str] | None = None) -> str:
     """包装进入子 Agent 的用户消息，明确标识真实发送者身份。"""
     if message_type == "direct":
         header = f"[your direct conversation partner in this turn: {user_name}]"
@@ -55,6 +55,9 @@ def format_user_message(user_name: str, message_type: str, content: str) -> str:
         )
     else:
         raise ValueError(f"Unknown message_type: {message_type}")
+    if co_recipients:
+        description += f"\n\n(This message is also shared with: {', '.join(co_recipients)}.)"
+    # TODO: 使用---作为分割, 当前并不统一
     return f"{header}\n\n{description}\n\n---\n\n{content}"
 
 
@@ -315,10 +318,10 @@ class SubAgentLoop:
         finally:
             self._terminated = True
 
-    def inject_parent_message(self, text: str, user_name: str, message_type: str) -> None:
+    def inject_parent_message(self, text: str, user_name: str, message_type: str, co_recipients: list[str] | None = None) -> None:
         """父 Agent 通过 chat_subagent 或用户直接发送来的消息，追加到收件箱。"""
         self._last_message_from_parent = (message_type != "user_direct")
-        self._inbox.append(format_user_message(user_name, message_type, text))
+        self._inbox.append(format_user_message(user_name, message_type, text, co_recipients))
         self._wake_event.set()
 
     def approve_tools(self, decisions: list[dict[str, Any]]) -> list[dict[str, Any]]:

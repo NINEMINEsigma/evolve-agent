@@ -18,7 +18,6 @@ async def _handle_run_subagent(args: dict[str, Any]) -> dict:
     预期参数：
         name:            str       — 已注册子 Agent 的名称
         temperature:     float     — 采样温度（默认 1.0，范围 0.0–1.3）
-        authorized_tools: list[str] | None — 额外授权的 write / dangerous 工具名称列表
         initial_prompt:  str       — 发送给子 Agent 的初始提问词
         user_name:       str       — 本轮发送者身份名称（必填）
         message_type:    str       — "direct" 或 "overheard"（必填）
@@ -40,13 +39,6 @@ async def _handle_run_subagent(args: dict[str, Any]) -> dict:
         except (ValueError, TypeError):
             return tool_error("'temperature' must be a valid number")
 
-    raw_authorized: Any = args.get("authorized_tools")
-    authorized_tools: list[str] = []
-    if raw_authorized is not None:
-        if not isinstance(raw_authorized, list):
-            return tool_error("'authorized_tools' must be a list of strings")
-        authorized_tools = [str(t).strip() for t in raw_authorized if str(t).strip()]
-
     if not name:
         return tool_error("'name' is required and must not be empty")
     if not initial_prompt:
@@ -63,28 +55,6 @@ async def _handle_run_subagent(args: dict[str, Any]) -> dict:
         return tool_error(f"Subagent '{name}' not found. Register it first.")
 
     profile = _subagent_registry[name]
-
-    # 校验 authorized_tools：不允许 readonly，不允许 multiagent，工具必须存在
-    nonexist_authorized_tools = []
-    multiagent_authorized_tools = []
-    for tool_name in authorized_tools:
-        level = registry.get_danger_level(tool_name)
-        if level == "readonly":
-            return tool_error(
-                f"Tool '{tool_name}' is read-only and cannot be added via authorized_tools."
-            )
-        entry = registry.get_entry(tool_name)
-        if entry is None:
-            nonexist_authorized_tools.append(tool_name)
-        elif entry.toolset == "multiagent":
-            multiagent_authorized_tools.append(tool_name)
-    if nonexist_authorized_tools:
-        return tool_error(f"Tools: ['{', '.join(nonexist_authorized_tools)}'] do not exist in the registry.")
-    if multiagent_authorized_tools:
-        return tool_error(
-            f"Tools: ['{', '.join(multiagent_authorized_tools)}'] belong to multiagent toolset "
-            "and cannot be authorized for a sub-agent (recursive sub-agents are not allowed)."
-        )
 
     # 校验 system_prompt_paths
     system_prompt_paths = profile.get("system_prompt_paths") or []
@@ -121,7 +91,6 @@ async def _handle_run_subagent(args: dict[str, Any]) -> dict:
             parent_session_id=parent_session_id,
             profile=profile,
             temperature=temperature,
-            authorized_tools=authorized_tools,
             initial_prompt=initial_prompt,
             user_name=user_name,
             message_type=message_type,
@@ -140,7 +109,6 @@ registry.register(
         #
         # ## 前置条件
         # 调用前必须先调用 list_subagents 确认目标子 Agent 已注册存在；不存在时必须先注册。
-        # 必须根据任务明确子 Agent 需要哪些 write / dangerous 工具，并在 authorized_tools 中显式列出；不能遗漏任务必需的工具。
         # 必须明确决定是否传递 history_path：
         # - 不传递时，子 Agent 没有之前对话的记忆，只有人设/系统提示。
         # - 角色扮演型子 Agent 通常需要记忆，应传入由 stop_subagent 保存的 JSONL 历史文件。
@@ -150,11 +118,7 @@ registry.register(
         # ## 调用效果
         # 每次调用创建一个全新会话；若不传 history_path，子 Agent 不记得之前会话的任何内容，因此必须在 initial_prompt 中包含全部必要上下文。
         # 如需恢复之前会话，可传入 stop_subagent 保存的 JSONL 文件路径作为 history_path（沙箱逻辑路径，如 ws:subagents/name/session.jsonl）。
-        # 子 Agent 拥有独立的工具权限：
-        # - 系统按固定白名单预授权部分只读工具（如 list_tools、read_file、grep 等），不可通过 authorized_tools 增删。
-        # - 默认不提供 write_file、edit_file 等写工具，也不提供 run_command 等危险工具。
-        # - 若任务需要写文件、执行命令或其他非只读工具，必须在 authorized_tools 中列出；启动后不可更改。
-        # - authorized_tools 中不能包含只读工具或 multiagent 工具（防止递归子 Agent）。
+        # 子 Agent 默认拥有所有非 multiagent 工具，与父 Agent 同等权限（但无法创建子 Agent）。
         # temperature 被钳制在 0.0–1.3 之间。
         # 若活跃子 Agent 达到上限，新会话进入 FIFO 等待队列。
         # 同一主会话下同一 name 的子 Agent 只能有一个活跃或排队实例；若已存在，调用会失败，需先 stop_subagent 再重新 run。
@@ -173,15 +137,13 @@ registry.register(
         # - 需要功能型子 Agent 独立执行、避免历史干扰时（不传 history_path）。
         #
         # ## 副作用/注意
-        # - 子 Agent 可能执行被授权的 write / dangerous 工具，产生与父 Agent 同等的实际影响。
-        # - 只读工具不能通过 authorized_tools 添加或移除。
+        # - 子 Agent 默认拥有所有非 multiagent 工具，可能执行 write / dangerous 工具，产生与父 Agent 同等的实际影响。
         # - 同一 name 的注册配置全局共享。
         # - 是否继承历史必须显式决定；默认不传 history_path 即无记忆。
         "description": """Start a session with a registered sub-agent.
 
 ## Prerequisites
 Before calling this tool, call list_subagents to confirm the target sub-agent is registered; if it is not registered, register it first.
-You MUST determine the exact set of write-level or dangerous tools the sub-agent needs for the task and list them explicitly in authorized_tools. Do not omit tools required by the task.
 You MUST explicitly decide whether to pass history_path:
 - Without history_path, the sub-agent has no memory of previous conversations; only its persona/system prompt remains.
 - Role-play sub-agents usually need memory, so pass the JSONL history file saved by stop_subagent.
@@ -192,11 +154,7 @@ The 'initial_prompt' parameter IS the first message sent to the sub-agent — do
 Each call creates a brand-new session. If history_path is omitted, the sub-agent has NO memory of prior conversations, so you MUST include all necessary context in initial_prompt.
 To resume a previous session, pass the sandbox logical path of the JSONL history file saved by stop_subagent as history_path (e.g. ws:subagents/name/session.jsonl). The path is resolved and validated; the tool call fails if the file does not exist.
 
-The sub-agent has an isolated tool set:
-- A fixed whitelist of pre-authorized readonly tools is available (e.g. list_tools, read_file, grep). This set is hardcoded and cannot be changed via authorized_tools.
-- Write tools such as write_file or edit_file and dangerous tools such as run_command are NOT available by default.
-- Any non-readonly tools required by the task MUST be listed in authorized_tools at launch time; the tool set cannot be changed after launch.
-- authorized_tools cannot contain readonly tools or multiagent tools (recursive sub-agents are not allowed).
+The sub-agent has access to all non-multiagent tools (read, write, and dangerous) — the same tool set as the parent agent, minus recursive sub-agent creation.
 
 temperature is clamped to the range 0.0–1.3.
 If the active sub-agent limit is reached, the new session enters a FIFO waiting queue.
@@ -219,8 +177,7 @@ When queued:
 - Let a functional sub-agent execute independently without historical interference (omit history_path).
 
 ## Side Effects / Notes
-- The sub-agent may execute authorized write-level or dangerous tools, causing real effects comparable to the parent agent.
-- Readonly tools cannot be added or removed via authorized_tools.
+- The sub-agent has access to all non-multiagent tools and may execute write/dangerous tools, causing real effects comparable to the parent agent.
 - The registered profile is global and shared by all callers.
 - Whether to inherit history must be decided explicitly; omitting history_path means no memory by default.
 - Within the same parent session, only one instance of a given sub-agent name can be active or queued at a time.""",
@@ -237,12 +194,6 @@ When queued:
                     # 子 Agent 的采样温度。默认 1.0，会被钳制到 0.0–1.3。
                     "description": "Sampling temperature for the sub-agent. Default 1.0, clamped to 0.0–1.3.",
                     "default": 1.0,
-                },
-                "authorized_tools": {
-                    "type": "array",
-                    "items": {"type": "string"},
-                    # 要显式授权给子 Agent 的 write 或 dangerous 级别工具名称列表。只读工具由系统预授权，不能在此添加或移除；multiagent 工具也不能出现。
-                    "description": """List of write-level or dangerous tool names to explicitly authorize for the sub-agent. Readonly tools are pre-authorized and cannot be added or removed here; multiagent tools are not allowed.""",
                 },
                 "initial_prompt": {
                     "type": "string",
