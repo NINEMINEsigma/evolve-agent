@@ -567,6 +567,12 @@ async def delete_session(session_id: str):
     sessions.remove(session_id)
     if _agent_loop is not None and hasattr(_agent_loop, "clear_session"):
         _agent_loop.clear_session(session_id)  # type: ignore[union-attr]
+    # 停止该主会话下的所有子 Agent 并清理上下文
+    try:
+        orch = get_subagent_orchestrator()
+        await orch.shutdown_parent(session_id)
+    except Exception:
+        pass
     return {"deleted": True, "session_id": session_id}
 
 

@@ -758,3 +758,9 @@ class SubAgentOrchestrator:
         for ctx in list(self._contexts.values()):
             await ctx.shutdown()
         self._contexts.clear()
+
+    async def shutdown_parent(self, parent_session_id: str) -> None:
+        """关闭指定父会话的所有子 Agent 并清理上下文。"""
+        ctx = self._contexts.pop(parent_session_id, None)
+        if ctx is not None:
+            await ctx.shutdown()
