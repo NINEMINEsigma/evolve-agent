@@ -31,15 +31,33 @@ def hook_fixator(**kwargs) -> str:
 
 
 def hook_message(session_id: str = "", workspace: str = "", **kwargs) -> str:
-    cache_path = Path(workspace) / "session_cache" / session_id / "time_hook.json"
+    # 这个cache文件会始终持久化
+    cache_path: Path = Path(workspace) / "session_cache" / session_id / "time_hook.json"
     now = datetime.now()
+    result_message = ""
+
+    # 这个flag文件会在每次重启程序后都被刷新
+    runtime_flag_path: Path = Path(workspace) / "flag.json"
+    is_update_flag_cache = False
+    # 读出hook的启动缓存
+    with open(runtime_flag_path, "r", encoding="utf-8") as f:
+        runtime_flag = json.load(f)
+        if __file__ not in runtime_flag:
+            result_message += f"This is the first message in this conversation after the program started, need to check if there are any background services or sub-conversations that need restarting."
+            is_update_flag_cache = True
+    # 存入hook的启动缓存
+    if is_update_flag_cache:
+        with open(runtime_flag_path, "w", encoding="utf-8") as f:
+            runtime_flag[__file__] = {}
+            json.dump(runtime_flag, f, ensure_ascii=False)
+
 
     if not cache_path.exists():
         cache_path.parent.mkdir(parents=True, exist_ok=True)
         cache_data = {"last_turn_time": now.isoformat()}
         with open(cache_path, "w", encoding="utf-8") as f:
             json.dump(cache_data, f, ensure_ascii=False)
-        return "this is the first message of the conversation, or session cache is been cleared"
+        result_message += "this is the first message of the conversation, or session cache is been cleared"
     else:
         with open(cache_path, "r", encoding="utf-8") as f:
             cache_data = json.load(f)
@@ -53,6 +71,7 @@ def hook_message(session_id: str = "", workspace: str = "", **kwargs) -> str:
         if interval_seconds > 3600:
             hours = interval_seconds // 3600
             minutes = (interval_seconds % 3600) // 60
-            return f"This conversation is {hours}h {minutes}m after the last one. Reminder: review previous context for continuity."
+            result_message += f"This conversation is {hours}h {minutes}m after the last one. Reminder: review previous context for continuity."
         else:
-            return f"This message between the previous one is {interval_seconds} seconds."
+            result_message += f"This message between the previous one is {interval_seconds} seconds."
+    return result_message

@@ -8,6 +8,8 @@
 from __future__ import annotations
 
 import asyncio
+import datetime
+import json
 import logging
 import os
 import subprocess
@@ -211,6 +213,14 @@ def main() -> int:
     ctx: RuntimeContext = _build_context(cli)
     from system.context import set_runtime_context
     set_runtime_context(ctx)
+
+    # 创建运行时标志文件, 可供hook判断启动时间等
+    runtime_flag_file: Path = ctx.workspace / "flag.json"
+    with open(runtime_flag_file, "w", encoding="utf-8") as f:
+        json.dump({
+            "start_time": datetime.datetime.now().isoformat()
+            }, f, ensure_ascii=False)    
+
 
     # 仅当通过 --log 显式请求时才创建日志文件。
     log_target: str | None = str(ctx.log_path) if "log" in cli else None
