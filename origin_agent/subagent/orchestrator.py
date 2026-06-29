@@ -583,8 +583,6 @@ class _OrchestratorContext:
         }
         return tool_registry.get_definitions(tool_names=tool_names)
 
-        return tool_registry.get_definitions(tool_names=tool_names)
-
     async def _cycle_loop(self) -> None:
         """后台周期定时器 — 收集子 Agent 结果并注入父 Agent。"""
         while not self._shutting_down:
