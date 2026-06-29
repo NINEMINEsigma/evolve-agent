@@ -390,6 +390,7 @@ class _OrchestratorContext:
                     })
             status = "completed" if sub.completed else ("terminated" if sub.terminated else "running")
             snap[session_id] = {
+                "session_id": session_id,
                 "name": self._subagent_names.get(session_id, ""),
                 "status": status,
                 "feedback": feedback,
