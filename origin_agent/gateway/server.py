@@ -1191,29 +1191,10 @@ async def ws_chat(ws: WebSocket) -> None:
                     ).to_json()
                 )
 
-        while True:
-            # Note: 进化关闭（exit -1）期间，uvicorn 会取消所有待处理
-            # handler task。从 receive_text() 传播的 asyncio.CancelledError
-            # 是无害且预期的 — 仅表示 gateway 正在拆除其事件循环。
-            raw: str = await ws.receive_text()
-
-            # 解析接收到的消息
-            msg: Message
+        async def _handle_user_message(msg: Message) -> None:
+            """后台处理用户消息，不阻塞 WebSocket 消息循环。"""
+            nonlocal sid
             try:
-                msg = Message.from_json(raw)
-                msg.session_id = sid  # 信任 server 而非 client
-            except (ValueError, KeyError) as exc:
-                await ws.send_text(
-                    Message(
-                        type=MessageType.ERROR,
-                        session_id=sid,
-                        message=f"Invalid message: {exc}",
-                    ).to_json()
-                )
-                continue
-
-            # 按类型路由
-            if msg.type == MessageType.USER_MESSAGE:
                 # 从首条用户消息自动生成标题
                 session_info: dict | None = sessions.get(sid)
                 if session_info and not session_info.get("title") and msg.content:
@@ -1233,7 +1214,7 @@ async def ws_chat(ws: WebSocket) -> None:
                             message="This session has been archived. Please switch to the continuation session or create a new one.",
                         ).to_json()
                     )
-                    continue
+                    return
                 if _agent_loop is not None:
                     target_sessions: list[str] = msg.target_sessions or ["main"]
                     content = msg.content or ""
@@ -1341,10 +1322,41 @@ async def ws_chat(ws: WebSocket) -> None:
                     # 代码进化完成，若是则触发优雅关闭。
                     from main import trigger_evolution_shutdown
                     trigger_evolution_shutdown()
-                else:
-                    # LLM 未配置 — 直接报错退出
+            except Exception as exc:
+                logger.exception("User message handler error for session=%s: %s", sid, exc)
+
+        while True:
+            # Note: 进化关闭（exit -1）期间，uvicorn 会取消所有待处理
+            # handler task。从 receive_text() 传播的 asyncio.CancelledError
+            # 是无害且预期的 — 仅表示 gateway 正在拆除其事件循环。
+            raw: str = await ws.receive_text()
+
+            # 解析接收到的消息
+            msg: Message
+            try:
+                msg = Message.from_json(raw)
+                msg.session_id = sid  # 信任 server 而非 client
+            except (ValueError, KeyError) as exc:
+                await ws.send_text(
+                    Message(
+                        type=MessageType.ERROR,
+                        session_id=sid,
+                        message=f"Invalid message: {exc}",
+                    ).to_json()
+                )
+                continue
+
+            # 按类型路由
+            if msg.type == MessageType.USER_MESSAGE:
+                # _agent_loop 未配置时直接报错退出（启动阶段保护）
+                if _agent_loop is None:
                     logger.error("AgentLoop not configured; cannot handle chat messages")
                     sys.exit(0)
+                # 后台执行，不阻塞 WebSocket 消息循环
+                asyncio.create_task(
+                    _handle_user_message(msg),
+                    name=f"user-msg-{sid[:8]}",
+                )
 
             elif msg.type == MessageType.CONFIRM_RESPONSE:
                 if msg.request_id is not None and msg.action is not None:

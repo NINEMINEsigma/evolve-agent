@@ -30,7 +30,7 @@ from component.llm import LLMClient, LLMResponse, StreamChunk, ToolCall, Usage
 from system.pathutils import find_repo_root
 from system.context import RuntimeContext
 from system.session_store import SessionStore
-from entity.constant import LOG_PREVIEW_CHARS, TOOL_RESULT_PREVIEW_CHARS, AUTO_TITLE_CONTENT_MAX, MAX_TOOL_TURNS
+from entity.constant import LOG_PREVIEW_CHARS, TOOL_RESULT_PREVIEW_CHARS, TOOL_RESULT_SAVE_THRESHOLD_CHARS, AUTO_TITLE_CONTENT_MAX, MAX_TOOL_TURNS
 from entity.puretype import Role
 from entry.agent_support.messages import (
     build_agent_system_prompt,
@@ -1520,9 +1520,8 @@ class AgentLoop:
             result.pop("_image", None)
 
         # ---- 工具结果大小截断 ----
-        _MAX_RESULT_CHARS: int = 50_000
         result_str: str = result if isinstance(result, str) else json.dumps(result, ensure_ascii=False)
-        if len(result_str) > _MAX_RESULT_CHARS:
+        if len(result_str) > TOOL_RESULT_SAVE_THRESHOLD_CHARS:
             _ts: str = datetime.now().strftime("%Y%m%d_%H%M%S")
             _rel: str = f"tool_results/{_ts}_{tc.name}.txt"
             _full: Path = self._ctx.agentspace / _rel.replace("/", "\\")

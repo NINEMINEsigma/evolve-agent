@@ -61,11 +61,24 @@ class ApprovalResult(BaseModel):
 
 _handsfree_sessions: dict[str, bool] = {}
 
+# 内部哨兵结果：当脱手模式切换时，注入到等待前端确认的 Future 中，
+# 通知 request_user_confirm 立即转入脱手审批路径。
+_SWITCH_TO_HANDSFREE = ApprovalResult(action="switch_to_handsfree", denied_by="system")
+
 
 def set_handsfree_mode(session_id: str, enabled: bool) -> None:
     """开启/关闭脱手模式。"""
     _handsfree_sessions[session_id] = enabled
     logger.info("Handsfree mode %s for session=%s", "enabled" if enabled else "disabled", session_id)
+    if enabled:
+        # 触发该 session 所有正在等待前端确认的 Future，
+        # 使其立即返回哨兵结果，转入脱手审批路径。
+        from gateway.server import _pending_confirms, _confirm_session_map
+        for req_id, req_sid in list(_confirm_session_map.items()):
+            if req_sid == session_id:
+                fut = _pending_confirms.get(req_id)
+                if fut and not fut.done():
+                    fut.set_result(_SWITCH_TO_HANDSFREE)
 
 
 def is_handsfree_mode(session_id: str) -> bool:
@@ -541,6 +554,20 @@ async def request_user_confirm(
 
     try:
         result: ApprovalResult = await asyncio.wait_for(fut, timeout=APPROVAL_WAIT_TIMEOUT)
+        # 检查是否是脱手模式切换触发的哨兵结果
+        if result.action == "switch_to_handsfree":
+            _pending_confirms.pop(request_id, None)
+            if is_handsfree_mode(session_id):
+                return await _handsfree_confirm(
+                    tool_name, args, reason, content,
+                    ask_agent_callback=ask_agent_callback,
+                    extra_context=extra_context,
+                )
+            return ApprovalResult(
+                action="deny",
+                deny_reason="Approval mode switched during processing",
+                denied_by="system",
+            )
         return result
     except asyncio.CancelledError:
         _pending_confirms.pop(request_id, None)

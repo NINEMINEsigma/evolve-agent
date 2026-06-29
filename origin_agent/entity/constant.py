@@ -12,11 +12,16 @@ LOG_PREVIEW_CHARS: int = 200
 # 工具结果/原始参数预览截断长度（字符数）— 用于工具返回值预览、JSON 参数预览
 TOOL_RESULT_PREVIEW_CHARS: int = 2000
 
+# 工具结果完整内容保存截断阈值（字符数）— 超过时结果写入文件，仅返回预览
+# 目前设置为一百万, 尽可能不再阻塞大部分工具调用, 同时组织真正的无限大文件输出
+# TODO: 以后还需要更优的策略
+TOOL_RESULT_SAVE_THRESHOLD_CHARS: int = 1000000
+
 # 自动标题生成时单条消息内容截断长度（字符数）— user/assistant 消息过长时截断后拼入 prompt
 AUTO_TITLE_CONTENT_MAX: int = 5000
 
 # 会话合并时直接拼接摘要的字符阈值，超过则截断
-MERGE_CONCAT_THRESHOLD: int = 50000
+MERGE_CONCAT_THRESHOLD: int = 500000
 
 
 # ============================================================================
