@@ -9,11 +9,15 @@
 
 from __future__ import annotations
 
+import json
 import logging
-from typing import Any, Dict
+from typing import TYPE_CHECKING, Any, Dict
 
 from abstract.tools.registry import registry, tool_error, tool_result
 from abstract.tools.ui_event_router import ui_event_router
+
+if TYPE_CHECKING:
+    from entry.agent_sink import AgentSink
 
 logger = logging.getLogger(__name__)
 
@@ -21,6 +25,17 @@ logger = logging.getLogger(__name__)
 # ── 内部状态：session_id → {display_id → display_info} ─────────────────
 
 _display_registry: dict[str, dict[str, dict[str, Any]]] = {}
+
+
+# ── emit handler ────────────────────────────────────────────────
+
+
+async def _emit_clipboard_display(
+    result: Any, sink: AgentSink, session_id: str, tool_name: str,
+) -> None:
+    """将 clipboard display tool result 推送到前端。"""
+    payload = json.dumps(result, ensure_ascii=False)
+    await sink.emit_clipboard_display(session_id, tool_name, payload)
 
 
 # ── handler ─────────────────────────────────────────────────────────
@@ -152,7 +167,7 @@ Frontend UI only. Does not write to the system clipboard. Reusing the same `disp
     danger_level="readonly",
     availability="main",
 )
-ui_event_router.register("set_clipboard_display", "clipboard_display")
+ui_event_router.register("set_clipboard_display", _emit_clipboard_display)
 
 registry.register(
     name="clear_clipboard_display",
@@ -196,4 +211,4 @@ Proactively call this tool when you sense the user no longer needs a card, to ke
     danger_level="readonly",
     availability="main",
 )
-ui_event_router.register("clear_clipboard_display", "clipboard_display")
+ui_event_router.register("clear_clipboard_display", _emit_clipboard_display)

@@ -560,6 +560,23 @@ class _OrchestratorContext:
         """构建子 Agent 的工具集 — 仅包含 availability 为 every 或 subagent 的工具。"""
         return tool_registry.get_definitions_for_availability("subagent")
 
+    def _get_agent_loop(self) -> ParentAgentLoop | None:
+        """解析当前父 session 对应的真实 ParentAgentLoop。
+
+        Orchestrator 在启动时拿到的是 __bootstrap__ loop，而每个真实 session
+        都由 SessionManager 维护独立的 loop，因此需要动态解析。
+        """
+        try:
+            from system.application import Application
+            sm = Application.current().session_manager
+            if sm is not None:
+                loop = sm.get_loop(self._parent_session_id)
+                if loop is not None:
+                    return loop
+        except Exception:
+            pass
+        return self._agent_loop
+
     async def _cycle_loop(self) -> None:
         """后台周期定时器 — 收集子 Agent 结果并注入父 Agent。"""
         while not self._shutting_down:
@@ -571,10 +588,11 @@ class _OrchestratorContext:
             if self._interrupted or self._shutting_down:
                 continue
 
-            if self._agent_loop is None:
+            loop = self._get_agent_loop()
+            if loop is None:
                 continue
 
-            last_idle = getattr(self._agent_loop, "_last_idle_time", {})
+            last_idle = loop._last_idle_time
             if not isinstance(last_idle, dict):
                 continue
 
@@ -595,14 +613,13 @@ class _OrchestratorContext:
                 continue
 
             # 检查是否有父 Agent 正在处理本会话消息
-            processing_sessions = getattr(self._agent_loop, "_processing_sessions", {})
-            if processing_sessions.get(self._parent_session_id, False):
+            if loop.is_processing():
                 continue
 
             # 收集
-            await self._collect_and_inject()
+            await self._collect_and_inject(loop)
 
-    async def _collect_and_inject(self) -> None:
+    async def _collect_and_inject(self, loop: ParentAgentLoop) -> None:
         """收集所有活跃子 Agent 的 outbox 和待审批队列，注入父 Agent。"""
         messages: list[str] = []
 
@@ -655,7 +672,7 @@ class _OrchestratorContext:
         ) + "\n\n".join(messages)
 
         try:
-            await self._agent_loop.process_message(full_message)
+            await loop.process_message(full_message)
             logger.debug("Subagent result injected to parent | parent=%s entries=%d", self._parent_session_id, len(messages))
         except Exception as exc:
             logger.warning("Failed to inject subagent result for parent=%s: %s", self._parent_session_id, exc)

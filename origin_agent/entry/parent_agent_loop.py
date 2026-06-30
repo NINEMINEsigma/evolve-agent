@@ -103,8 +103,15 @@ class ParentAgentLoop(BaseAgentLoop):
         # -- 处理状态（process_message 运行时设为 True） --
         self._processing: bool = False
 
+        # -- inbox 处理并发锁和事件循环引用 --
+        self._process_lock: asyncio.Lock = asyncio.Lock()
+        self._event_loop: asyncio.AbstractEventLoop | None = None
+
         # -- 取消与中断 --
         self._interrupted: bool = False
+
+        # -- 子 Agent 周期收集器用的空闲时间戳（按 session_id 索引） --
+        self._last_idle_time: dict[str, float] = {session_id: time.monotonic()}
 
         # -- 磁盘持久化 --
         self._history_store_dir: Path | None = history_store_dir
@@ -224,45 +231,62 @@ class ParentAgentLoop(BaseAgentLoop):
         self._interrupted = False
         self._processing = True
 
+        self._event_loop = asyncio.get_running_loop()
+
         logger.info(
             "Received user message | session=%s content=%s",
             sid, summarize_message_for_log(user_message),
         )
-        self._append(sid, Role.USER, user_message)
+        async with self._process_lock:
+            # 先消费 inbox 遗留消息（如上回合未被消费的 cron 结果），再追加用户消息
+            self._maybe_inject_inbox()
+            self._append(sid, Role.USER, user_message)
 
-        # 延迟初始化 memory provider
-        if not self._memory_initialized:
-            for provider in self._memory.providers:
-                try:
-                    provider.initialize(sid)
-                except Exception:
-                    pass
-            self._memory_initialized = True
+            # 延迟初始化 memory provider
+            if not self._memory_initialized:
+                for provider in self._memory.providers:
+                    try:
+                        provider.initialize(sid)
+                    except Exception:
+                        pass
+                self._memory_initialized = True
 
-        # memory 预取
-        memory_ctx = self._memory.prefetch_all(
-            self._extract_text(user_message), session_id=sid
-        )
-
-        # 历史过长时自动终结会话
-        if self._is_context_over_limit():
-            new_sid: str | None = await self._rotate_session_for_continuation(
-                sid,
-                pending_user_message=user_message,
+            # memory 预取
+            memory_ctx = self._memory.prefetch_all(
+                self._extract_text(user_message), session_id=sid
             )
-            if new_sid:
-                sid = new_sid
-                self.session_id = new_sid
-                memory_ctx = self._memory.prefetch_all(
-                    self._extract_text(user_message), session_id=sid
+
+            # 历史过长时自动终结会话
+            if self._is_context_over_limit():
+                new_sid: str | None = await self._rotate_session_for_continuation(
+                    sid,
+                    pending_user_message=user_message,
                 )
+                if new_sid:
+                    sid = new_sid
+                    self.session_id = new_sid
+                    memory_ctx = self._memory.prefetch_all(
+                        self._extract_text(user_message), session_id=sid
+                    )
 
-        # 构建消息列表
-        messages, fixator_context = self._build_messages(sid, user_message, memory_ctx)
-        if fixator_context:
-            self._update_last_user_message(sid, self._history[-1])
+            # 构建消息列表
+            messages, fixator_context = self._build_messages(sid, user_message, memory_ctx)
+            if fixator_context:
+                self._update_last_user_message(sid, self._history[-1])
 
-        # 工具调用循环
+            try:
+                return await self._run_tool_loop(sid, messages, user_message)
+            finally:
+                self._processing = False
+                self._last_idle_time[self.session_id] = time.monotonic()
+
+    async def _run_tool_loop(
+        self,
+        sid: str,
+        messages: list[dict[str, Any]],
+        user_message: str | list[dict[str, Any]],
+    ) -> str:
+        """执行 LLM 工具调用循环（含 inbox 消息消费）。"""
         self._cancel_event.clear()
 
         turn: int = 0
@@ -271,6 +295,9 @@ class ParentAgentLoop(BaseAgentLoop):
                 if self._cancel_event.is_set():
                     return "Cancelled."
                 turn += 1
+
+                # 在每次 LLM 调用前消费 inbox（如同时到达的 cron 结果）
+                self._maybe_inject_inbox(messages)
 
                 stream_id: str = uuid.uuid4().hex[:12]
                 try:
@@ -361,14 +388,88 @@ class ParentAgentLoop(BaseAgentLoop):
                 messages = self._get_full_history(sid)
 
         finally:
-            self._processing = False
-            self._last_idle_time = time.monotonic()
+            pass  # _processing 由 process_message/process_inbox 的 finally 管理
 
         logger.warning(
             "Tool-call loop exceeded max turns (%d) for session=%s",
             _MAX_TOOL_TURNS, sid,
         )
         return "I ran into an issue processing your request. Please try again."
+
+    # ========================================================================
+    # Inbox 消息消费
+    # ========================================================================
+
+    def _maybe_inject_inbox(self, target_messages: list[dict[str, Any]] | None = None) -> bool:
+        """消费 inbox 中的待处理消息，注入到 _history（和可选的 target_messages）。
+
+        返回 True 表示有新消息注入，False 表示 inbox 为空。
+        格式与 subagent/loop.py 一致：多条消息用 \n\n 连接为一条 role=user 消息。
+        """
+        pending = self._inbox.get_pending()
+        if not pending:
+            return False
+        merged = "\n\n".join(msg.to_text() for msg in pending)
+        entry: dict[str, Any] = {"role": Role.USER, "content": merged}
+        self._history.append(entry)
+        self._persist_message(self.session_id, entry)
+        if target_messages is not None:
+            target_messages.append(dict(entry))
+        return True
+
+    async def process_inbox(self) -> str | None:
+        """消费 inbox 消息并触发一轮 LLM 工具循环，返回 assistant 文本。
+
+        由后台线程通过 schedule_inbox_processing 异步调度，
+        使用 _process_lock 保证不与 process_message 并发。
+        执行完毕后自动推送 AGENT_MESSAGE 到前端。
+        """
+        async with self._process_lock:
+            if self._cancel_event.is_set():
+                return None
+
+            messages = self._get_full_history(self.session_id)
+            if not self._maybe_inject_inbox(messages):
+                return None
+
+            sid = self.session_id
+            self._interrupted = False
+            self._processing = True
+            self._event_loop = asyncio.get_running_loop()
+
+            try:
+                reply = await self._run_tool_loop(sid, messages, "[cron-result]")
+            finally:
+                self._processing = False
+                self._last_idle_time[self.session_id] = time.monotonic()
+
+            # 推送 AGENT_MESSAGE 到前端（server.py 的 process_message 路径会自动做，
+            # 但 process_inbox 是异步调度触发的，需要自己推）
+            if reply:
+                from gateway.chat import Message, MessageType
+                try:
+                    msg = Message(
+                        type=MessageType.AGENT_MESSAGE,
+                        session_id=sid,
+                        content=reply,
+                    )
+                    ws = self._frontend_sink.get_ws(sid)
+                    if ws is not None:
+                        await ws.send_text(msg.to_json())
+                except Exception as exc:
+                    logger.warning("Failed to send AGENT_MESSAGE for inbox processing: %s", exc)
+
+            return reply
+
+    def schedule_inbox_processing(self) -> None:
+        """从后台线程安全调度 process_inbox 到主事件循环。"""
+        loop = self._event_loop
+        if loop is None or loop.is_closed():
+            return
+        try:
+            asyncio.run_coroutine_threadsafe(self.process_inbox(), loop)
+        except Exception as exc:
+            logger.exception("Failed to schedule inbox processing: %s", exc)
 
     # ========================================================================
     # 流式 LLM
@@ -588,6 +689,15 @@ class ParentAgentLoop(BaseAgentLoop):
             session_id, tc.name, tc.id, content_str,
         )
 
+        # 对前端 UI 类工具推送实时状态更新
+        from abstract.tools.ui_event_router import ui_event_router
+        await ui_event_router.emit_for(
+            tc.name,
+            result,
+            self._get_sink(),
+            session_id or self.session_id,
+        )
+
         return {
             "role": Role.TOOL,
             "tool_call_id": tc.id,
@@ -711,6 +821,10 @@ class ParentAgentLoop(BaseAgentLoop):
         """将旧会话的运行态资源迁移到继承会话。"""
         self._last_prompt_tokens = 0
         self._session_rotated_notify[old_sid] = new_sid
+
+        # 迁移子 Agent 周期收集器使用的空闲时间戳
+        idle_ts = self._last_idle_time.pop(old_sid, None)
+        self._last_idle_time[new_sid] = idle_ts if idle_ts is not None else time.monotonic()
 
         if not self._memory_initialized:
             for provider in self._memory.providers:

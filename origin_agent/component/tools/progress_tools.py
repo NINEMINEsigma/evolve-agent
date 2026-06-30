@@ -10,11 +10,15 @@
 
 from __future__ import annotations
 
+import json
 import logging
-from typing import Any, Dict
+from typing import TYPE_CHECKING, Any, Dict
 
 from abstract.tools.registry import registry, tool_error, tool_result
 from abstract.tools.ui_event_router import ui_event_router
+
+if TYPE_CHECKING:
+    from entry.agent_sink import AgentSink
 
 logger = logging.getLogger(__name__)
 
@@ -22,6 +26,17 @@ logger = logging.getLogger(__name__)
 # ── 内部状态：session_id → {task_id → progress_info} ─────────────────
 
 _progress_registry: dict[str, dict[str, dict[str, Any]]] = {}
+
+
+# ── emit handler ────────────────────────────────────────────────
+
+
+async def _emit_task_progress(
+    result: Any, sink: AgentSink, session_id: str, tool_name: str,
+) -> None:
+    """将 progress tool result 推送到前端。"""
+    payload = json.dumps(result, ensure_ascii=False)
+    await sink.emit_progress(session_id, tool_name, payload)
 
 
 # ── handler ─────────────────────────────────────────────────────────
@@ -185,7 +200,7 @@ Creates or updates a progress bar identified by `task_id`. Reusing the same `tas
     danger_level="readonly",
     availability="main",
 )
-ui_event_router.register("set_task_progress", "task_progress")
+ui_event_router.register("set_task_progress", _emit_task_progress)
 
 registry.register(
     name="clear_task_progress",
@@ -253,4 +268,4 @@ If `task_id` is provided and non-empty, removes only that specific bar. If omitt
     danger_level="readonly",
     availability="main",
 )
-ui_event_router.register("clear_task_progress", "task_progress")
+ui_event_router.register("clear_task_progress", _emit_task_progress)

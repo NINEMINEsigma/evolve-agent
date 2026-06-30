@@ -144,16 +144,17 @@ class FrontendSink(AgentSink):
 
         try:
             from gateway.chat import Message, MessageType
+            # 前端期望 request_id/tool/args/content 在消息顶层
+            display_args = dict(args)
+            if reason:
+                display_args["reason"] = reason
             msg = Message(
                 type=MessageType.CONFIRM_REQUEST,
                 session_id=session_id,
-                content=json.dumps({
-                    "request_id": request_id,
-                    "tool_name": tool_name,
-                    "args": args,
-                    "reason": reason,
-                    "content": content,
-                }, ensure_ascii=False),
+                request_id=request_id,
+                tool=tool_name,
+                args=display_args,
+                content=content,
             )
             await ws.send_text(msg.to_json())
         except Exception as exc:
@@ -339,19 +340,11 @@ class FrontendSink(AgentSink):
         elif event_type == "usage_update":
             msg = Message(type=MessageType.SYSTEM, session_id=session_id, content=payload)
         elif event_type == "task_progress":
-            try:
-                data = json.loads(payload)
-            except json.JSONDecodeError:
-                data = None
             msg = Message(type=MessageType.TASK_PROGRESS, session_id=session_id, tool=tool_name,
-                          result=data if data is not None else payload)
+                          result=payload)
         elif event_type == "clipboard_display":
-            try:
-                data = json.loads(payload)
-            except json.JSONDecodeError:
-                data = None
             msg = Message(type=MessageType.CLIPBOARD_DISPLAY, session_id=session_id, tool=tool_name,
-                          result=data if data is not None else payload)
+                          result=payload)
         elif event_type == "subagent_update":
             msg = Message(type=MessageType.SUBAGENT_UPDATE, session_id=session_id,
                           result=payload)
