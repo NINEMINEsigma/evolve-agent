@@ -171,23 +171,6 @@ class _CronTask:
 _cron_tasks: dict[str, dict[str, _CronTask]] = {}
 _cron_lock: threading.RLock = threading.RLock()
 
-# ── 事件回调 ──────────────────────────────────────────────────
-# 由 gateway/server.py 注册，用于在任务执行完成后向前端推送结果。
-
-_CronEventCallback = Any  # Callable[[str, str, str, int, str], None]
-_cron_event_callbacks: list[_CronEventCallback] = []
-
-
-def register_cron_event_callback(cb: _CronEventCallback) -> None:
-    """注册一个回调，在定时任务执行完成后触发。
-
-    回调签名::
-
-        cb(session_id, task_id, name, exit_code, stdout_preview) -> None
-    """
-    _cron_event_callbacks.append(cb)
-
-
 def _notify_cron_event(
     session_id: str,
     task_id: str,
@@ -195,12 +178,9 @@ def _notify_cron_event(
     exit_code: int,
     stdout_preview: str,
 ) -> None:
-    """通知所有已注册的 cron 事件回调。"""
-    for cb in _cron_event_callbacks:
-        try:
-            cb(session_id, task_id, name, exit_code, stdout_preview)
-        except Exception as exc:
-            logger.debug("Cron event callback error: %s", exc)
+    """通知 cron 事件：通过 CronRouter 投递到对应 loop 的 inbox。"""
+    from system.application import Application
+    Application.current().cron_router.dispatch(session_id, task_id, name, exit_code, stdout_preview)
 
 
 # ── 持久化辅助 ───────────────────────────────────────────────

@@ -182,6 +182,7 @@ Creates or updates a progress bar identified by `task_id`. Reusing the same `tas
     is_async=True,
     emoji="📊",
     danger_level="readonly",
+    availability="main",
 )
 
 registry.register(
@@ -248,4 +249,5 @@ If `task_id` is provided and non-empty, removes only that specific bar. If omitt
     is_async=True,
     emoji="🧹",
     danger_level="readonly",
+    availability="main",
 )

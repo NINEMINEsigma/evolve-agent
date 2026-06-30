@@ -10,12 +10,15 @@ from __future__ import annotations
 import json
 import logging
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any, Dict, TYPE_CHECKING
 
 from abstract.tools.registry import registry, tool_error, tool_result
 from component.llm import LLMClient
 from system.context import get_runtime_context
 from entity.puretype import Role
+
+if TYPE_CHECKING:
+    from entry.base_agent_loop import ToolContext
 
 logger = logging.getLogger(__name__)
 
@@ -82,11 +85,11 @@ def _is_vision_rejection(exc: Exception) -> bool:
     return False
 
 
-async def _handle_probe_vision(args: dict[str, Any]) -> dict:
+async def _handle_probe_vision(args: dict[str, Any], context: ToolContext | None = None) -> dict:
     """探测当前配置的 LLM 模型是否支持 vision 输入。"""
     force: bool = bool(args.get("force", False))
 
-    ctx = get_runtime_context()
+    ctx = context.runtime_context if context is not None else get_runtime_context()
     model: str = (ctx.llm_model or "").lower()
     if not model:
         return tool_error("No LLM model configured in RuntimeContext")
@@ -256,4 +259,5 @@ On non-vision error:
     emoji="👁️",
     danger_level="readonly",
     no_timeout=True,
+    availability="every",
 )

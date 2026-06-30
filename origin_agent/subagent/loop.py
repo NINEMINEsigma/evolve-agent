@@ -14,12 +14,14 @@ import logging
 import time as _time_module
 from contextvars import ContextVar
 from pathlib import Path
-from typing import Any
+from typing import * # type: ignore
 
 from abstract.tools.registry import ToolEntry, registry as tool_registry
 from component.llm import LLMClient, LLMResponse, ToolCall
 from entity.puretype import Role
 from subagent.context import SubRuntimeContext
+from entry.base_agent_loop import BaseAgentLoop, UserMessage, ContextLimitMessage, ToolContext
+from entry.agent_sink import ParentAgentSink
 
 logger = logging.getLogger(__name__)
 
@@ -71,9 +73,10 @@ class PendingToolCall:
         self.result: asyncio.Future = asyncio.get_event_loop().create_future()
 
 
-class SubAgentLoop:
+class SubAgentLoop(BaseAgentLoop):
     """单个子 Agent 会话的 LLM 循环。
 
+    继承 BaseAgentLoop，实现子 Agent 特化的 LLM 客户端、收件箱和工具审批。
     每个子 Agent 在独立的 asyncio.Task 中运行 ``run()``。
     """
 
@@ -83,13 +86,19 @@ class SubAgentLoop:
         session_id: str,
         tools: list[dict[str, Any]],
         max_turns: int,
-        on_message: Any = None,  # Callable[[dict], None] — 推送一条结构化事件给前端
+        # TODO: 真的可能为空吗
+        on_message: Callable[[dict], None]|None = None, 
         parent_session_id: str = "",
+        name: str = "",
     ) -> None:
-        self._ctx = ctx
-        self._session_id: str = session_id
-        self._parent_session_id: str = parent_session_id
-        self._tools: list[dict[str, Any]] = tools
+        from system.application import Application
+        app = Application.current()
+        super().__init__(app, session_id)
+
+        self._name: str = name                              # 子 Agent 注册名，用于历史保存路径
+        self._ctx: SubRuntimeContext = ctx                   # 子 Agent 的独立运行时上下文（LLM 配置、system prompt）
+        self._parent_session_id: str = parent_session_id     # 父 Agent 的 session ID，用于审批回源
+        self._tools: list[dict[str, Any]] = tools            # OpenAI function-calling 格式的工具 schema 列表
 
         # 当前子 Agent 被授权的工具名集合 — 用于运行时强制隔离
         self._allowed_tool_names: set[str] = {
@@ -98,35 +107,26 @@ class SubAgentLoop:
         }
         self._allowed_tool_names.discard("")
 
-        # 用 SubRuntimeContext 初始化独立的 LLM 客户端
-        self._llm: LLMClient = self._build_llm_client(ctx)
+        self._llm: LLMClient = self._build_llm_client(ctx)   # 子 Agent 独立的 LLM 客户端
+        self._on_message: Callable[[dict], None] | None = on_message  # 每轮 LLM 响应/工具调用即时推送回调
 
-        # 消息回调 — 每轮 LLM 响应/工具调用/工具结果都即时推送到前端
-        self._on_message = on_message
+        # 内部状态（_history / _inbox / _cancel_event 由 BaseAgentLoop 提供）
+        self._outbox: list[str] = []                         # 发件箱：子 Agent 文本回复，父 Agent 通过 get_outbox() 收集
+        self._pending_approvals: list[PendingToolCall] = []   # 等待父 Agent 审批的工具调用队列
+        self._max_turns: int = max_turns                     # 最大工具调用轮次上限
 
-        # 内部状态
-        self._history: list[dict[str, Any]] = []
-        self._outbox: list[str] = []
-        self._inbox: list[str] = []
-        self._pending_approvals: list[PendingToolCall] = []
-        self._max_turns: int = max_turns
-
-        # 记录最后一条用户消息是否来自父 Agent；只有父 Agent 触发的回复才进入 _outbox
-        self._last_message_from_parent: bool = True
+        self._last_message_from_parent: bool = True          # 上一条消息是否来自父 Agent（用于决定是否入 outbox）
 
         # 控制事件
-        self._cancel_event: asyncio.Event = asyncio.Event()
-        self._paused_event: asyncio.Event = asyncio.Event()
-        self._paused_event.set()  # 初始非暂停
-        self._wake_event: asyncio.Event = asyncio.Event()
-        self._wake_event.set()  # 初始允许首轮 LLM 调用
+        self._paused_event: asyncio.Event = asyncio.Event()  # 暂停信号：设置后 run() 等待恢复
+        self._paused_event.set()
+        self._wake_event: asyncio.Event = asyncio.Event()    # 唤醒信号：新消息到达时触发
+        self._wake_event.set()
 
-        # 标记
-        self._completed: bool = False
-        self._terminated: bool = False
-        # 本轮响应是否仍在进行中（含 LLM 推理与工具链执行/审批）。
-        # 初始为 True：会话启动后必须至少完成首轮响应，父 Agent 才能 chat。
-        self._round_active: bool = True
+        # 生命周期标记
+        self._completed: bool = False                        # run() 正常结束（非中断/异常）
+        self._terminated: bool = False                       # 被外部请求终止
+        self._round_active: bool = True                      # 当前是否正在执行 LLM 推理或工具链
 
     # ── 构造 LLM 客户端 ────────────────────────────────────────────
 
@@ -195,24 +195,25 @@ class SubAgentLoop:
 
     async def run(self, initial_prompt: str, user_name: str, message_type: str) -> None:
         """子 Agent 主循环。"""
+        # 注册到 CronRouter，使 cron 结果能投递到 inbox
+        from system.application import Application
+        _cron = Application.current().cron_router
+        if _cron is not None:
+            _cron.register(self.session_id, self)
         try:
             # 若 _history 为空（非恢复会话），注入系统提示词和初始用户消息
             if not self._history:
-                self._history.append({
-                    "role": Role.SYSTEM,
-                    "content": self._ctx.system_prompt,
-                })
+                for sp in self._ctx.system_prompts:
+                    self._history.append({"role": Role.SYSTEM, "content": sp})
                 self._history.append({
                     "role": Role.USER,
                     "content": format_user_message(user_name, message_type, initial_prompt),
                 })
             else:
-                # 恢复会话：确保 system prompt 在最前，然后把新 initial_prompt 作为最新用户轮次追加
+                # 恢复会话：确保 system prompts 在最前
                 if self._history[0].get("role") != Role.SYSTEM:
-                    self._history.insert(0, {
-                        "role": Role.SYSTEM,
-                        "content": self._ctx.system_prompt,
-                    })
+                    for sp in reversed(self._ctx.system_prompts):
+                        self._history.insert(0, {"role": Role.SYSTEM, "content": sp})
                 self._history.append({
                     "role": Role.USER,
                     "content": format_user_message(user_name, message_type, initial_prompt),
@@ -314,14 +315,17 @@ class SubAgentLoop:
                 self._maybe_inject_inbox()
 
         except Exception as exc:
-            logger.exception("SubAgentLoop error for session=%s: %s", self._session_id, exc)
+            logger.exception("SubAgentLoop error for session=%s: %s", self.session_id, exc)
         finally:
+            if _cron is not None:
+                _cron.unregister(self.session_id)
             self._terminated = True
 
     def inject_parent_message(self, text: str, user_name: str, message_type: str, co_recipients: list[str] | None = None) -> None:
-        """父 Agent 通过 chat_subagent 或用户直接发送来的消息，追加到收件箱。"""
+        """父 Agent 或用户直接发送来的消息，投递到收件箱。"""
         self._last_message_from_parent = (message_type != "user_direct")
-        self._inbox.append(format_user_message(user_name, message_type, text, co_recipients))
+        content = format_user_message(user_name, message_type, text, co_recipients)
+        self._inbox.put(UserMessage(content=content))
         self._wake_event.set()
 
     def approve_tools(self, decisions: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -370,10 +374,12 @@ class SubAgentLoop:
         self._cancel_event.set()
 
     def save_history(self, path: Path) -> None:
-        """将完整会话历史写入 JSONL 文件。"""
+        """将会话历史写入 JSONL 文件（不含 system message，重启后会重新注入）。"""
         path.parent.mkdir(parents=True, exist_ok=True)
         with open(path, "w", encoding="utf-8") as f:
             for entry in self._history:
+                if entry.get("role") == Role.SYSTEM:
+                    continue
                 f.write(json.dumps(entry, ensure_ascii=False) + "\n")
 
     @property
@@ -410,15 +416,12 @@ class SubAgentLoop:
 
     def _maybe_inject_inbox(self) -> bool:
         """若有收件箱消息，注入到历史。"""
-        if self._inbox:
-            merged = "\n\n".join(self._inbox)
-            self._inbox.clear()
-            self._history.append({
-                "role": Role.USER,
-                "content": merged,
-            })
-            return True
-        return False
+        msgs = self._inbox.get_pending()
+        if not msgs:
+            return False
+        merged = "\n\n".join(msg.to_text() for msg in msgs)
+        self._history.append({"role": Role.USER, "content": merged})
+        return True
 
     async def _queue_for_approval(self, tc: ToolCall) -> dict[str, Any]:
         """将工具调用加入待审批队列并阻塞等待结果。
@@ -519,17 +522,20 @@ class SubAgentLoop:
                 return self._make_tool_msg(tc.id, f"Tool '{tc.name}' not found in registry")
 
             args: dict[str, Any] = dict(tc.arguments) if tc.arguments else {}
-            args["_session_id"] = self._session_id
+            args["_session_id"] = self.session_id
 
             current_subagent_loop.set(self)
             entry = tool_registry.get_entry(tc.name)
             if entry and entry.no_timeout:
                 timeout = 0
 
+            # 创建 ToolContext 并传递给 handler（替代直接调用 entry.handler）
+            tool_ctx = ToolContext(loop=self, session_id=self.session_id)
+
             if entry is not None and entry.is_async:
-                coro: Any = entry.handler(args)
+                coro: Any = entry.handler(args, context=tool_ctx)
             else:
-                coro = asyncio.to_thread(tool_registry.dispatch, tc.name, args)
+                coro = asyncio.to_thread(entry.handler, args, context=tool_ctx)
 
             if timeout:
                 result = await asyncio.wait_for(coro, timeout=timeout)
@@ -610,3 +616,46 @@ class SubAgentLoop:
             "tool_call_id": tool_call_id,
             "content": content,
         }
+
+    # -- BaseAgentLoop 抽象方法实现 ------------------------------------------
+
+    def _get_llm_client(self):
+        return self._llm
+
+    def _get_context(self):
+        return self._ctx
+
+    def _get_sink(self):
+        return ParentAgentSink(self)
+
+    def _get_tool_definitions(self) -> list[dict]:
+        return self._tools
+
+    async def _on_context_over_limit(self) -> None:
+        """上下文超限时保存历史并通知 inbox，下次轮次 LLM 会收到 ContextLimitMessage。"""
+        path = self._get_history_path()
+        try:
+            self.save_history(path)
+            self._inbox.put(ContextLimitMessage(saved_path=str(path)))
+            logger.warning(
+                "SubAgentLoop context over limit for session=%s, saved to %s",
+                self.session_id, path,
+            )
+        except Exception as exc:
+            logger.warning(
+                "SubAgentLoop context over limit for session=%s, failed to save: %s",
+                self.session_id, exc,
+            )
+
+    def _get_history_path(self) -> Path:
+        """返回历史保存路径：agentspace/subagents/{name}/{session_id}.jsonl。"""
+        from system.context import get_runtime_context
+        ctx = get_runtime_context()
+        dir = ctx.agentspace / "subagents"
+        if self._name:
+            dir = dir / self._name
+        dir.mkdir(parents=True, exist_ok=True)
+        return dir / f"{self.session_id}.jsonl"
+
+    def _build_system_prompt(self) -> list[str]:
+        return self._ctx.system_prompts

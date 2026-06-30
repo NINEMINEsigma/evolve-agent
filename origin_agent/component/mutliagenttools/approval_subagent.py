@@ -164,4 +164,5 @@ The optional 'feedback' field is a list of text responses from the sub-agent's o
     is_async=True,
     emoji="✅",
     danger_level="readonly",
+    availability="main",
 )

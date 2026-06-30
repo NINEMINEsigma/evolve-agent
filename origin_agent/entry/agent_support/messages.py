@@ -5,7 +5,7 @@ from __future__ import annotations
 import importlib.util
 import logging
 from pathlib import Path
-from typing import Any, TYPE_CHECKING
+from typing import * # type: ignore
 
 from system.prompt import build_system_prompt
 from entity.puretype import Role
@@ -86,8 +86,8 @@ def collect_hooks_context(
     return result
 
 
-def build_agent_system_prompt(ctx: Any, skill_blocks: list[str]) -> str:
-    """构建 AgentLoop 使用的 system prompt。"""
+def build_agent_system_prompt(ctx: RuntimeContext, skill_blocks: list[str]) -> list[str]:
+    """构建 Agent 使用的 system prompt 段落列表。"""
     return build_system_prompt(
         mode=ctx.mode,
         extra_blocks=skill_blocks,
@@ -100,7 +100,7 @@ def build_agent_system_prompt(ctx: Any, skill_blocks: list[str]) -> str:
 
 
 def build_turn_messages(
-    system_prompt: str,
+    system_prompts: list[str],
     history: list[dict[str, Any]],
     session_id: str,
     workspace: str,
@@ -110,7 +110,7 @@ def build_turn_messages(
 ) -> tuple[list[dict[str, Any]], str]:
     """构建当前回合发送给 LLM 的消息列表。返回 (messages, fixator_context)。"""
     messages: list[dict[str, Any]] = [
-        {"role": Role.SYSTEM, "content": system_prompt},
+        {"role": Role.SYSTEM, "content": sp} for sp in system_prompts
     ]
 
     # 找到最后一条 user 消息的位置
@@ -193,12 +193,12 @@ def build_turn_messages(
 
 
 def build_full_history_messages(
-    system_prompt: str,
+    system_prompts: list[str],
     history: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
-    """构建包含 system prompt 和完整历史的消息列表。"""
+    """构建包含 system prompts 和完整历史的消息列表。"""
     messages: list[dict[str, Any]] = [
-        {"role": Role.SYSTEM, "content": system_prompt},
+        {"role": Role.SYSTEM, "content": sp} for sp in system_prompts
     ]
     messages.extend(history)
     return messages

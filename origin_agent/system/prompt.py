@@ -81,8 +81,8 @@ def build_system_prompt(
     fork_path: str = "",
     fix_fork_path: str = "",
     fix_log_path: str = "",
-) -> str:
-    """从分层模板组装完整的 system prompt。
+) -> list[str]:
+    """从分层模板组装完整的 system prompt 列表。
 
     参数
     ----------
@@ -98,8 +98,8 @@ def build_system_prompt(
 
     返回
     -------
-    str
-        组装完成的 system prompt，可直接用于 LLM。
+    list[str]
+        组装完成的 system prompt 段落列表，每项为独立 system message。
     """
     blocks: list[str] = []
 
@@ -140,4 +140,4 @@ def build_system_prompt(
             if block and block.strip():
                 blocks.append(block.strip())
 
-    return "\n\n".join(blocks)
+    return blocks

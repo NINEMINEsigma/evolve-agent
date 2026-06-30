@@ -116,4 +116,5 @@ After receiving history_path, you MUST proactively ask the user whether to persi
     is_async=True,
     emoji="🛑",
     danger_level="readonly",
+    availability="main",
 )

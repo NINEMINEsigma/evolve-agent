@@ -12,6 +12,8 @@ from pathlib import Path
 import signal
 from typing import TYPE_CHECKING
 
+from system.application import Application
+
 if TYPE_CHECKING:
     from system.context import RuntimeContext
 
@@ -187,12 +189,31 @@ You can modify your own source code and complete evolution through the following
 """, encoding="utf-8")
             logger.info("Seeded skill: self-evolution")
 
+        # ---- 创建 Application 单例并装配子系统 ----
+        from system.application import Application, ApprovalBackendManager
+        from gateway.session_manager import SessionManager
+        from component.cron_router import CronRouter
+        from abstract.tools.registry import registry as tool_registry
+
+        app = Application(self.ctx)
+        app.session_manager = SessionManager(str(self.ctx.workspace / "sessions"))
+        app.approval_backend_manager = ApprovalBackendManager(self.ctx)
+        app.cron_router = CronRouter()
+        app.tool_registry = tool_registry
+        # _app 已在 Application.__init__ 中设为全局单例
+
         # ---- 创建 agent 循环 ----
         agent_loop: AgentLoop | None = None
         try:
-            from entry.agent import AgentLoop
+            from entry.parent_agent_loop import ParentAgentLoop as AgentLoop
+            from entry.agent_sink import FrontendSink
             history_path: str = str(self.ctx.workspace / "sessions")
-            agent_loop = AgentLoop(self.ctx, history_store_path=history_path)
+            agent_loop = AgentLoop(
+                Application.current(),
+                session_id="__bootstrap__",
+                frontend_sink=FrontendSink(),
+                history_store_dir=Path(history_path) if history_path else None,
+            )
 
             # 注册持久化 memory provider
             try:
@@ -215,14 +236,6 @@ You can modify your own source code and complete evolution through the following
         except Exception as exc:
             logger.warning("AgentLoop unavailable: %s", exc)
             # Gateway 将回退到 echo 模式
-
-        # ---- 配置 session 持久化 ----
-        from gateway.server import configure_sessions, sessions
-        configure_sessions(str(self.ctx.workspace / "sessions"))
-
-        # ---- 将 SessionManager 注入 AgentLoop ----
-        if agent_loop is not None:
-            agent_loop.set_session_manager(sessions)
 
         # ---- 预编译 llama-server（本地脱手模式审批模型需要）----
         _local_disabled = {"", "false", "0", "no"}

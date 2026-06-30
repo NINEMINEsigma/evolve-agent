@@ -223,4 +223,5 @@ When queued:
     is_async=True,
     emoji="🚀",
     danger_level="readonly",
+    availability="main",
 )

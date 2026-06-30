@@ -224,6 +224,7 @@ To change base_url, model, token limits, or other core parameters, unregister an
     handler=_handle_register_subagent,
     emoji="🤖",
     danger_level="readonly",
+    availability="main",
 )
 
 registry.register(
@@ -305,4 +306,5 @@ The profile is persisted to the workspace and used globally by tools such as run
     handler=_handle_register_subagent_from_parent,
     emoji="🤖",
     danger_level="readonly",
+    availability="main",
 )

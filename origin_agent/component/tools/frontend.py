@@ -229,4 +229,5 @@ Creates `node_modules/` and `dist/` in the target directory. Long-running (up to
     },
     handler=_handle_validate_frontend,
     emoji="🎨",
+    availability="main",
 )

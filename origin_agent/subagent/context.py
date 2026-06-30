@@ -35,8 +35,8 @@ class SubRuntimeContext(BaseModel):
     max_context_tokens: int
     """上下文窗口 token 上限，用于旋转控制（来自注册表）。"""
 
-    system_prompt: str
-    """系统提示词（来自注册表 system_prompt_paths 列表或内置默认模板）。"""
+    system_prompts: list[str]
+    """系统提示词列表（每项为独立 system message，来自注册表 system_prompt_paths 或内置默认模板）。"""
 
     tool_timeout: int = 30
     """单个工具调用允许运行的最大秒数，超时后取消（0 = 无超时）。"""
@@ -63,16 +63,15 @@ async def build_subagent_context(
     """
     from system.templates import read_template
 
-    # 1. 子 Agent 角色指令（你是父 Agent 的子会话，不是最终用户的对话对象）
-    system_prompt: str = _default_system_prompt()
+    # 1. 子 Agent 角色指令
+    prompts: list[str] = [_default_system_prompt()]
 
-    # 2. 工具使用说明 — tools.txt 是纯工具使用规范（read_file vs run_command、
-    #    edit_file vs write_file 的选择规则等），与主/子身份无关，必须传递
+    # 2. 工具使用说明
     tools_doc: str = read_template("tools.txt")
     if tools_doc:
-        system_prompt = system_prompt + "\n\n" + tools_doc
+        prompts.append(tools_doc)
 
-    # 3. 用户自定义角色提示词 — 按注册表顺序追加到最后
+    # 3. 用户自定义角色提示词
     system_prompt_paths: list[str] = profile.get("system_prompt_paths") or []
     sandbox = Sandbox(parent_ctx)
     for prompt_path in system_prompt_paths:
@@ -83,7 +82,7 @@ async def build_subagent_context(
             )
         custom_prompt = resolved.real.read_text(encoding="utf-8").strip()
         if custom_prompt:
-            system_prompt = system_prompt + "\n\n" + custom_prompt
+            prompts.append(custom_prompt)
 
     return SubRuntimeContext(
         base_url=str(profile.get("base_url", "")),
@@ -92,7 +91,7 @@ async def build_subagent_context(
         temperature=temperature,
         max_output_tokens=int(profile.get("max_output_tokens", 0)),
         max_context_tokens=int(profile.get("max_context_tokens", 0)),
-        system_prompt=system_prompt,
+        system_prompts=prompts,
     )
 
 

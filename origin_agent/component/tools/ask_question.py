@@ -11,11 +11,8 @@
 
 from __future__ import annotations
 
-import asyncio
-import json
 import logging
-import uuid
-from typing import Any, Dict, List
+from typing import Any
 
 from abstract.tools.registry import registry, tool_error, tool_result
 
@@ -32,8 +29,8 @@ async def _handle_ask_question(args: dict[str, Any]) -> dict:
         options:    list[dict] — 预设选项列表，每项 {label, value}（可选）
         allow_custom: bool    — 是否允许用户自定义输入（默认 true）
     """
-    # 延迟导入以避免与 gateway.server 的循环依赖
-    from gateway.server import _tool_ws_sinks, _pending_asks, _register_ask_session
+    from system.application import Application
+
     question: str = str(args.get("question", "")).strip()
     raw_options: Any = args.get("options")
     allow_custom: bool = bool(args.get("allow_custom", True))
@@ -61,48 +58,26 @@ async def _handle_ask_question(args: dict[str, Any]) -> dict:
     if not session_id:
         return tool_error("Missing session_id, cannot send question")
 
-    # ── 注册异步等待 ──
-    request_id: str = uuid.uuid4().hex[:8]
-    loop: asyncio.AbstractEventLoop = asyncio.get_event_loop()
-    fut: asyncio.Future[str] = loop.create_future()
-    _pending_asks[request_id] = fut
-    _register_ask_session(request_id, session_id)
+    sink = Application.current().frontend_sink
+    if sink is None:
+        return tool_error("FrontendSink not available")
 
-    # ── 通过 WebSocket 推送提问消息到前端 ──
-    ws = _tool_ws_sinks.get(session_id)
-    if ws:
-        try:
-            await ws.send_text(json.dumps({
-                "type": "ask_request",
-                "session_id": session_id,
-                "request_id": request_id,
-                "question": question,
-                "options": options,
-                "allow_custom": allow_custom,
-            }, ensure_ascii=False))
-        except Exception as exc:
-            _pending_asks.pop(request_id, None)
-            return tool_error(f"Failed to push question via WebSocket: {exc}")
-    else:
-        _pending_asks.pop(request_id, None)
-        return tool_error("WebSocket connection unavailable, cannot send question")
+    result = await sink.ask_question(
+        question=question,
+        options=options,
+        allow_custom=allow_custom,
+        session_id=session_id,
+    )
 
-    # ── 等待用户回答（永不超时，由注册时声明的 no_timeout 保障）──
-    try:
-        result_str: str = await fut
-        result: dict = json.loads(result_str)
-        return tool_result(
-            question=question,
-            option=result.get("option"),
-            custom_text=result.get("custom_text"),
-            answered=result.get("option") is not None or result.get("custom_text") is not None,
-        )
-    except asyncio.CancelledError:
-        _pending_asks.pop(request_id, None)
-        return tool_error("Question request was cancelled")
-    except Exception as exc:
-        _pending_asks.pop(request_id, None)
-        return tool_error(f"Question handling error: {exc}")
+    if "error" in result:
+        return tool_error(result["error"])
+
+    return tool_result(
+        question=result.get("question"),
+        option=result.get("option"),
+        custom_text=result.get("custom_text"),
+        answered=result.get("answered", False),
+    )
 
 
 # ── 注册 ─────────────────────────────────────────────────────
@@ -176,4 +151,5 @@ The agent thread blocks until the user responds. Do not call this inside backgro
     emoji="❓",
     danger_level="readonly",
     no_timeout=True,
+    availability="main",
 )

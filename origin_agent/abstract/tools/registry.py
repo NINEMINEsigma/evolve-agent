@@ -45,6 +45,7 @@ class ToolEntry:
         "dynamic_schema_overrides",
         "danger_level",
         "no_timeout",
+        "availability",
     )
 
     def __init__(
@@ -62,6 +63,7 @@ class ToolEntry:
         dynamic_schema_overrides: Optional[Callable] = None,
         danger_level: str = "readonly",
         no_timeout: bool = False,
+        availability: str = "every",
     ):
         self.name: str = name
         self.toolset: str = toolset
@@ -78,6 +80,7 @@ class ToolEntry:
         self.dynamic_schema_overrides: Optional[Callable] = dynamic_schema_overrides
         self.danger_level: str = danger_level
         self.no_timeout: bool = no_timeout
+        self.availability: str = availability
 
 
 # ---------------------------------------------------------------------------
@@ -197,6 +200,77 @@ class ToolRegistry:
         entry: ToolEntry | None = self.get_entry(name)
         return entry.toolset if entry else None
 
+    def get_availability(self, name: str) -> str:
+        """返回工具的 availability 级别（``"every"`` | ``"main"`` | ``"subagent"``）。
+
+        Raises:
+            KeyError: 工具未注册。
+        """
+        entry: ToolEntry | None = self.get_entry(name)
+        if entry is None:
+            raise KeyError(f"Tool not registered: {name}")
+        return entry.availability
+
+    def get_definitions_for_availability(
+        self,
+        scope: str,
+        tool_names: set | None = None,
+        quiet: bool = False,
+    ) -> list[dict]:
+        """返回指定 availability 范围的工具的 OpenAI 格式 schema。
+
+        *scope* 取值：
+        - ``"main"``: 返回 availability in (\"every\", \"main\") 的工具
+        - ``"subagent"``: 返回 availability in (\"every\", \"subagent\") 的工具
+        - ``"every"``: 返回所有 availability == \"every\" 的工具
+
+        若提供 *tool_names*，仅返回名称在该集合中的工具。
+        """
+        if scope == "main":
+            allowed = {"every", "main"}
+        elif scope == "subagent":
+            allowed = {"every", "subagent"}
+        else:
+            allowed = {"every", "main", "subagent"}
+
+        result: list[dict] = []
+        check_results: dict[Callable, bool] = {}
+        entries_by_name: dict[str, ToolEntry] = {
+            entry.name: entry for entry in self._snapshot_entries()
+        }
+
+        names_to_check = tool_names or set(entries_by_name.keys())
+        for name in sorted(names_to_check):
+            entry: ToolEntry | None = entries_by_name.get(name)
+            if not entry:
+                if tool_names is not None:
+                    raise KeyError(f"Tool not registered: {name}")
+                continue
+            if entry.availability not in allowed:
+                if not quiet:
+                    logger.debug("Tool %s filtered out (availability=%s, scope=%s)", name, entry.availability, scope)
+                continue
+            if entry.check_fn:
+                if entry.check_fn not in check_results:
+                    check_results[entry.check_fn] = _check_fn_cached(entry.check_fn)
+                if not check_results[entry.check_fn]:
+                    if not quiet:
+                        logger.debug("Tool %s unavailable (check failed)", name)
+                    continue
+            schema_with_name: dict = {**entry.schema, "name": entry.name}
+            if entry.dynamic_schema_overrides is not None:
+                try:
+                    overrides: dict = entry.dynamic_schema_overrides()
+                    if isinstance(overrides, dict):
+                        schema_with_name.update(overrides)
+                except Exception as exc:
+                    logger.warning(
+                        "dynamic_schema_overrides for tool %s raised %s; using static schema",
+                        name, exc,
+                    )
+            result.append({"type": "function", "function": schema_with_name})
+        return result
+
     def get_emoji(self, name: str, default: str = "⚡") -> str:
         """返回工具的 emoji，未设置时返回 *default*。"""
         entry: ToolEntry | None = self.get_entry(name)
@@ -267,6 +341,7 @@ class ToolRegistry:
         override: bool = False,
         danger_level: str = "readonly",
         no_timeout: bool = False,
+        availability: str = "every",
     ) -> None:
         """注册工具。由每个工具文件在模块导入时调用。
 
@@ -320,6 +395,7 @@ class ToolRegistry:
                 dynamic_schema_overrides=dynamic_schema_overrides,
                 danger_level=danger_level,
                 no_timeout=no_timeout,
+                availability=availability,
             )
             if check_fn and toolset not in self._toolset_checks:
                 self._toolset_checks[toolset] = check_fn

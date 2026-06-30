@@ -27,25 +27,28 @@ from entity.constant import (
 from entity.puretype import Role
 from abstract.tools.registry import registry as tool_registry
 from system.context import get_runtime_context
+from entry.parent_agent_loop import ParentAgentLoop
+from system.convert import as_enum
 
 from .context import SubRuntimeContext, build_subagent_context
 from .loop import SUB_MESSAGE_SEPARATOR, SubAgentLoop, format_user_message
 
 logger = logging.getLogger(__name__)
 
-# 全局编排器单例
-_orchestrator: SubAgentOrchestrator | None = None
-
 
 def get_orchestrator() -> SubAgentOrchestrator:
-    if _orchestrator is None:
+    """获取 SubAgentOrchestrator 实例。"""
+    from system.application import Application
+    orch = Application.current().subagent_orchestrator
+    if orch is None:
         raise RuntimeError("SubAgentOrchestrator not initialized")
-    return _orchestrator
+    return orch
 
 
 def set_orchestrator(o: SubAgentOrchestrator) -> None:
-    global _orchestrator
-    _orchestrator = o
+    """设置 SubAgentOrchestrator 实例。"""
+    from system.application import Application
+    Application.current().subagent_orchestrator = o
 
 
 class WaitingEntry:
@@ -73,9 +76,9 @@ class WaitingEntry:
 class _OrchestratorContext:
     """单个主会话的子 Agent 上下文。"""
 
-    def __init__(self, parent_session_id: str, agent_loop: Any) -> None:
+    def __init__(self, parent_session_id: str, agent_loop: ParentAgentLoop) -> None:
         self._parent_session_id: str = parent_session_id
-        self._agent_loop: Any = agent_loop
+        self._agent_loop: ParentAgentLoop = agent_loop
         self._active: dict[str, SubAgentLoop] = {}
         self._active_task: dict[str, asyncio.Task] = {}
         self._waiting_queue: deque[WaitingEntry] = deque()
@@ -466,27 +469,21 @@ class _OrchestratorContext:
                 session_id, profile.get("_name", ""), event,
             ))
 
-        loop = SubAgentLoop(ctx, session_id, tools, MAX_TOOL_TURNS, on_message=_push_msg, parent_session_id=self._parent_session_id)
+        loop = SubAgentLoop(ctx, session_id, tools, MAX_TOOL_TURNS, on_message=_push_msg, parent_session_id=self._parent_session_id, name=profile.get("_name", ""))
         self._active[session_id] = loop
         self._subagent_names[session_id] = profile.get("_name", "")
 
         if history_path:
             loaded: list[dict[str, Any]] = []
-            role_map = {
-                "system": Role.SYSTEM,
-                "user": Role.USER,
-                "assistant": Role.ASSISTANT,
-                "tool": Role.TOOL,
-            }
             with open(history_path, "r", encoding="utf-8") as f:
                 for line in f:
                     line = line.strip()
                     if not line:
                         continue
-                    entry = json.loads(line)
+                    entry: dict[str, Any] = json.loads(line)
                     if not isinstance(entry, dict):
                         continue
-                    role = role_map.get(entry.get("role"))
+                    role = as_enum(entry.get("role"), Role)
                     if role is None:
                         continue
                     if role == Role.SYSTEM:
@@ -575,13 +572,8 @@ class _OrchestratorContext:
         return [{"session_id": entry.session_id, "subagent_name": entry.profile.get("name", "")}]
 
     def _build_tool_set(self) -> list[dict[str, Any]]:
-        """构建子 Agent 的工具集 — 包含所有非 multiagent 工具。"""
-        tool_map = tool_registry.get_tool_to_toolset_map()
-        tool_names = {
-            name for name, toolset in tool_map.items()
-            if toolset != "multiagent"
-        }
-        return tool_registry.get_definitions(tool_names=tool_names)
+        """构建子 Agent 的工具集 — 仅包含 availability 为 every 或 subagent 的工具。"""
+        return tool_registry.get_definitions_for_availability("subagent")
 
     async def _cycle_loop(self) -> None:
         """后台周期定时器 — 收集子 Agent 结果并注入父 Agent。"""
@@ -678,9 +670,7 @@ class _OrchestratorContext:
         ) + "\n\n".join(messages)
 
         try:
-            await self._agent_loop.process_message(
-                self._parent_session_id, full_message
-            )
+            await self._agent_loop.process_message(full_message)
             logger.debug("Subagent result injected to parent | parent=%s entries=%d", self._parent_session_id, len(messages))
         except Exception as exc:
             logger.warning("Failed to inject subagent result for parent=%s: %s", self._parent_session_id, exc)
@@ -700,16 +690,17 @@ class SubAgentOrchestrator:
     """按主会话管理多个子 Agent 上下文。"""
 
     def __init__(self) -> None:
-        self._agent_loop: Any = None
+        self._agent_loop: ParentAgentLoop | None = None
         self._contexts: dict[str, _OrchestratorContext] = {}
 
-    def set_agent_loop(self, agent_loop: Any) -> None:
+    def set_agent_loop(self, agent_loop: ParentAgentLoop) -> None:
         """注入父 AgentLoop 引用。"""
         self._agent_loop = agent_loop
 
     def _get_context(self, parent_session_id: str) -> _OrchestratorContext:
         """获取或创建指定父会话的上下文。"""
         if parent_session_id not in self._contexts:
+            assert self._agent_loop is not None, "set_agent_loop() must be called before any context operation"
             self._contexts[parent_session_id] = _OrchestratorContext(parent_session_id, self._agent_loop)
             # 启动后台周期任务
             self._contexts[parent_session_id]._background_task = asyncio.create_task(

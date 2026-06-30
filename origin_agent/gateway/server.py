@@ -5,7 +5,7 @@
   - ``WS /ws/chat`` — 聊天 WebSocket（LLM 未配置时回退到 echo）
   - ``create_server(ctx)`` — uvicorn.Server 实例工厂
 
-支持流式消息转发：将 AgentLoop 产生的 ``stream_delta`` / ``stream_done``
+支持流式消息转发：将 ParentAgentLoop 产生的 ``stream_delta`` / ``stream_done``
 事件实时透传给前端 WebSocket 客户端。
 """
 
@@ -25,36 +25,183 @@ from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
-from .chat import Message, MessageType, SessionManager
-from component.approval import ApprovalResult
+from .chat import Message, MessageType, SessionManager as _ChatSessionManager
 from datetime import datetime, timezone
 from entity.constant import CRON_STDOUT_PREVIEW_MAX_LENGTH, SUBPROCESS_TIMEOUT_DEFAULT, UPLOAD_FILENAME_TIME_FORMAT
 from system.context import get_runtime_context
 
 if TYPE_CHECKING:
-    from entry.agent import AgentLoop
+    from entry.parent_agent_loop import ParentAgentLoop
+    from entry.agent_sink import FrontendSink
 
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
-# 共享 session 注册表
+# 向后兼容：模块级全局 → Application 委托代理
 # ---------------------------------------------------------------------------
 
-sessions: SessionManager = SessionManager()
+class _SessionsProxy:
+    """代理对象：将所有属性访问委托给 Application.current().session_manager。
 
-# AgentLoop 引用 — 由 main.py 在 server 启动前设置。
-# 未设置时回退到 echo 模式（适用于无 LLM 的测试场景）。
-_agent_loop: AgentLoop | None = None
+    若 Application 未初始化，回退到本地 _ChatSessionManager 实例。
+    """
+
+    def __init__(self):
+        self._fallback = _ChatSessionManager()
+
+    @property
+    def _sm(self):
+        try:
+            from system.application import Application
+            return Application.current().session_manager or self._fallback
+        except Exception:
+            return self._fallback
+
+    def __getattr__(self, name):
+        if name.startswith("_"):
+            raise AttributeError(name)
+        return getattr(self._sm, name)
+
+    def __setattr__(self, name, value):
+        if name in ("_sm", "_fallback"):
+            super().__setattr__(name, value)
+        else:
+            setattr(self._sm, name, value)
+
+    def __bool__(self):
+        return self._sm is not None
+
+    def __contains__(self, item):
+        try:
+            from system.application import Application
+            sm = Application.current().session_manager
+            return sm is not None and sm.get_loop(item) is not None
+        except Exception:
+            return False
+
+
+class _AgentLoopProxy:
+    """按 session_id 从 session_manager 查找对应 loop 并路由调用。
+
+    `_agent_loop.process_message(sid, content)` 等调用通过此 proxy
+    路由到 SessionManager._loops[sid] 对应的 ParentAgentLoop 实例。
+    对无 sid 参数的方法则委托给任意活跃 loop。
+    """
+
+    def __bool__(self):
+        try:
+            sm = _get_sm()
+            return sm is not None
+        except Exception:
+            return False
+
+    def __getattr__(self, name):
+        sm = _get_sm()
+
+        # 确认有 loop 实现了该方法，否则提前 AttributeError
+        # 使 getattr(obj, name, default) 能正确回退到 default
+        _has_method = False
+        if sm is not None:
+            for sid, loop in sm.get_all_loops().items():
+                if hasattr(loop, name):
+                    _has_method = True
+                    break
+        if not _has_method:
+            raise AttributeError(f"No active loop has method: {name}")
+
+        def _wrapper(*args, **kwargs):
+            if args and isinstance(args[0], str):
+                loop = sm.get_loop(args[0]) if sm else None
+                if loop is not None:
+                    return getattr(loop, name)(*args[1:], **kwargs)
+            if sm is not None:
+                for sid, loop in sm.get_all_loops().items():
+                    if hasattr(loop, name):
+                        return getattr(loop, name)(*args, **kwargs)
+            raise AttributeError(f"No active loop has method: {name}")
+        return _wrapper
+
+
+class _ToolWSSinksProxy(dict):
+    """代理：工具事件 WebSocket 映射委托给 FrontendSink。"""
+
+    @property
+    def _sink(self) -> "FrontendSink | None":
+        try:
+            from system.application import Application
+            return Application.current().frontend_sink
+        except Exception:
+            return None
+
+    def get(self, key, default=None):
+        sink = self._sink
+        return sink.get_ws(key) if sink else default
+
+    def __getitem__(self, key):
+        sink = self._sink
+        if sink is None:
+            raise KeyError(key)
+        ws = sink.get_ws(key)
+        if ws is None:
+            raise KeyError(key)
+        return ws
+
+    def __setitem__(self, key, value):
+        sink = self._sink
+        if sink:
+            sink.register_ws(key, value)
+
+    def __delitem__(self, key):
+        sink = self._sink
+        if sink:
+            sink.unregister_ws(key)
+
+    def pop(self, key, *args):
+        val = self.get(key)
+        if val is None and args:
+            return args[0]
+        self.__delitem__(key)
+        return val
+
+    def __contains__(self, key):
+        return self.get(key) is not None
+
+
+def _get_sm():
+    from system.application import Application
+    return Application.current().session_manager
+
+
+# 模块级兼容引用
+sessions: _SessionsProxy = _SessionsProxy()
+_agent_loop: _AgentLoopProxy | None = None  # 初始化前为 None，保持 is not None 语义
+_tool_ws_sinks: _ToolWSSinksProxy = _ToolWSSinksProxy()
 
 # agentspace 路径 — 由 main.py 在 server 启动前设置。
-# 用于 FILE_UPLOAD 消息的文件保存目标。
 _agentspace_path: Path | None = None
 
 
-def set_agent_loop(loop: AgentLoop) -> None:
-    """将 AgentLoop 注入 gateway 的 WebSocket handler。"""
+def set_agent_loop(loop: ParentAgentLoop) -> None:
+    """将 ParentAgentLoop 注入 Application 的 session_manager。
+
+    在启动流程中调用一次，之后所有 session 由 SessionManager 管理。
+    """
     global _agent_loop
-    _agent_loop = loop
+
+    from system.application import Application
+    from entry.agent_sink import FrontendSink
+
+    app = Application.current()
+    if app.session_manager is None:
+        logger.error("SessionManager not initialized — call Application.setup() first")
+        return
+
+    # 创建 FrontendSink 并注册到 Application
+    if app.frontend_sink is None:
+        app.frontend_sink = FrontendSink()
+
+    # 激活代理，使 _agent_loop is not None 变为 True
+    _agent_loop = _AgentLoopProxy()
 
     # 初始化 SubAgentOrchestrator（若有子 Agent 系统导入）
     try:
@@ -144,16 +291,11 @@ def _extract_text(content: Any) -> str:
     return str(content or "")
 
 
-# ── 工具事件流 ──────────────────────────────────────────────
-# 映射 session_id → WebSocket，用于在 agent 循环处理回合期间
-# 向前端推送 tool_call / tool_result 事件。
-
-_tool_ws_sinks: dict[str, WebSocket] = {}
-
 # ── cron 定时任务结果推送 ────────────────────────────────────
 # 后台线程通过 ws_chat 保存的 uvicorn 主事件循环调度协程。
 # 必须在 ws_chat 中设置，因为主循环引用无法从后台线程获取。
 
+import asyncio as _asyncio
 _cron_push_loop: _asyncio.AbstractEventLoop | None = None
 
 
@@ -161,73 +303,6 @@ def set_cron_event_loop(loop: _asyncio.AbstractEventLoop) -> None:
     """由 main.py 在 server 启动后调用，保存主事件循环供后台线程使用。"""
     global _cron_push_loop
     _cron_push_loop = loop
-
-# ── shell 命令确认 ────────────────────────────────────────
-# {request_id: asyncio.Future} — 映射确认请求 ID 到 future，
-#   当用户批准/拒绝 run_command 时解析。
-# {request_id: session_id}  — request_id 到 session_id 的反向映射，
-#   用于 WebSocket 断开时自动拒绝。
-
-import asyncio as _asyncio
-_pending_confirms: dict[str, _asyncio.Future[ApprovalResult]] = {}
-_confirm_session_map: dict[str, str] = {}
-
-
-def _register_confirm_session(request_id: str, session_id: str) -> None:
-    """记录确认请求所属的 session，以便断开时自动拒绝。"""
-    _confirm_session_map[request_id] = session_id
-
-
-def _resolve_confirm(request_id: str, action: str, deny_reason: str | None = None, denied_by: str = "user") -> None:
-    fut: _asyncio.Future[ApprovalResult] | None = _pending_confirms.pop(request_id, None)
-    _confirm_session_map.pop(request_id, None)
-    if fut and not fut.done():
-        fut.set_result(ApprovalResult(action=action, deny_reason=deny_reason, denied_by=denied_by))
-        logger.info("Confirm resolved: %s -> %s (reason=%s, by=%s)", request_id, action, deny_reason, denied_by)
-    else:
-        logger.warning(
-            "Confirm request %s not found (already resolved or timed out)", request_id
-        )
-
-
-def _deny_session_confirms(session_id: str) -> None:
-    """自动拒绝断开连接 session 的所有待处理确认请求。"""
-    for rid in list(_confirm_session_map.keys()):
-        if _confirm_session_map.get(rid) == session_id:
-            _resolve_confirm(rid, "deny", deny_reason="WebSocket connection disconnected", denied_by="system")
-
-
-# ── ask（提问） ──────────────────────────────────────────────
-# {request_id: asyncio.Future} — 映射提问请求 ID 到 future，
-#   当用户在对话框中选择或提交时解析。
-# 结果格式：{"option": str | None, "custom_text": str | None}
-
-_pending_asks: dict[str, _asyncio.Future[str]] = {}
-_ask_session_map: dict[str, str] = {}
-
-
-def _register_ask_session(request_id: str, session_id: str) -> None:
-    """记录提问请求所属的 session，以便断开时自动拒绝。"""
-    _ask_session_map[request_id] = session_id
-
-
-def _resolve_ask(request_id: str, option: str | None = None, custom_text: str | None = None) -> None:
-    """解析提问请求 — 将用户选择传递给等待的 tool handler。"""
-    fut: _asyncio.Future[str] | None = _pending_asks.pop(request_id, None)
-    _ask_session_map.pop(request_id, None)
-    if fut and not fut.done():
-        result = json.dumps({"option": option, "custom_text": custom_text}, ensure_ascii=False)
-        fut.set_result(result)
-        logger.info("Ask resolved: %s -> option=%s custom=%s", request_id, option, custom_text)
-    else:
-        logger.warning("Ask request %s not found (already resolved or timed out)", request_id)
-
-
-def _deny_session_asks(session_id: str) -> None:
-    """自动拒绝断开连接 session 的所有待处理提问请求。"""
-    for rid in list(_ask_session_map.keys()):
-        if _ask_session_map.get(rid) == session_id:
-            _resolve_ask(rid, option=None, custom_text=None)
 
 
 async def _send_tool_event(
@@ -534,7 +609,10 @@ async def http_confirm(request_id: str, req: Request):
     denied_by: str = str(body.get("denied_by", "user"))
     if action != "deny":
         deny_reason = None
-    _resolve_confirm(request_id, action, deny_reason=deny_reason, denied_by=denied_by)
+    from system.application import Application
+    sink = Application.current().frontend_sink
+    if sink:
+        sink.resolve_confirm(request_id, action, deny_reason=deny_reason, denied_by=denied_by)
     return {"resolved": True, "request_id": request_id, "action": action}
 
 
@@ -548,7 +626,10 @@ async def http_ask(request_id: str, req: Request):
         body = {}
     option: str | None = str(body.get("option")) if body.get("option") is not None else None
     custom_text: str | None = str(body.get("custom_text")) if body.get("custom_text") is not None else None
-    _resolve_ask(request_id, option=option, custom_text=custom_text)
+    from system.application import Application
+    sink = Application.current().frontend_sink
+    if sink:
+        sink.resolve_ask(request_id, option=option, custom_text=custom_text)
     return {"resolved": True, "request_id": request_id, "option": option, "custom_text": custom_text}
 
 
@@ -1117,6 +1198,20 @@ async def ws_chat(ws: WebSocket) -> None:
     _tool_ws_sinks[sid] = ws  # 注册用于工具事件流推送
     logger.info("WebSocket connected | session=%s", sid)
 
+    # 为当前 session 创建专属 ParentAgentLoop，使 proxy 能正确路由调用
+    try:
+        from system.application import Application as _AppInner
+        _app_inner = _AppInner.current()
+        if _app_inner.session_manager and _app_inner.frontend_sink:
+            _store_inner = _app_inner.runtime_context.workspace / "sessions"
+            _app_inner.session_manager.create_session(
+                session_id=sid,
+                frontend_sink=_app_inner.frontend_sink,
+                history_store_dir=_store_inner,
+            )
+    except Exception as exc:
+        logger.warning("Failed to create session loop for %s: %s", sid, exc)
+
     try:
         # 发送欢迎消息
         await ws.send_text(
@@ -1276,7 +1371,7 @@ async def ws_chat(ws: WebSocket) -> None:
                             if isinstance(res, Exception):
                                 logger.warning("Subagent forward failed: %s", res)
 
-                    # 检查 AgentLoop 是否旋转了会话（归档+新会话）
+                    # 检查 ParentAgentLoop 是否旋转了会话（归档+新会话）
                     _old: str = sid
                     _pop_rotated: Callable[[str], str] | None = getattr(_agent_loop, "pop_session_rotated", None)
                     _rotated: str | None = _pop_rotated(sid) if callable(_pop_rotated) else None
@@ -1350,7 +1445,7 @@ async def ws_chat(ws: WebSocket) -> None:
             if msg.type == MessageType.USER_MESSAGE:
                 # _agent_loop 未配置时直接报错退出（启动阶段保护）
                 if _agent_loop is None:
-                    logger.error("AgentLoop not configured; cannot handle chat messages")
+                    logger.error("ParentAgentLoop not configured; cannot handle chat messages")
                     sys.exit(0)
                 # 后台执行，不阻塞 WebSocket 消息循环
                 asyncio.create_task(
@@ -1360,11 +1455,17 @@ async def ws_chat(ws: WebSocket) -> None:
 
             elif msg.type == MessageType.CONFIRM_RESPONSE:
                 if msg.request_id is not None and msg.action is not None:
-                    _resolve_confirm(msg.request_id, msg.action, deny_reason=msg.deny_reason, denied_by=msg.denied_by or "user")
+                    from system.application import Application
+                    sink = Application.current().frontend_sink
+                    if sink:
+                        sink.resolve_confirm(msg.request_id, msg.action, deny_reason=msg.deny_reason, denied_by=msg.denied_by or "user")
 
             elif msg.type == MessageType.ASK_RESPONSE:
                 if msg.request_id is not None:
-                    _resolve_ask(msg.request_id, option=msg.option, custom_text=msg.custom_text)
+                    from system.application import Application
+                    sink = Application.current().frontend_sink
+                    if sink:
+                        sink.resolve_ask(msg.request_id, option=msg.option, custom_text=msg.custom_text)
 
             elif msg.type == MessageType.INTERRUPT:
                 if _agent_loop is not None and hasattr(_agent_loop, "interrupt"):
@@ -1407,8 +1508,11 @@ async def ws_chat(ws: WebSocket) -> None:
         # 收到非 text 消息（如 binary）或连接已关闭时仍尝试读写
         logger.info("WebSocket runtime error for session=%s: %s", sid, exc)
     finally:
-        _deny_session_confirms(sid)
-        _deny_session_asks(sid)
+        from system.application import Application
+        _sink = Application.current().frontend_sink
+        if _sink:
+            _sink._deny_session_confirms(sid)
+            _sink._deny_session_asks(sid)
         # 修复：只有当前 sink 仍是本 ws 实例时才清理，避免切换会话时旧 ws 关闭 pop 掉新 ws
         if _tool_ws_sinks.get(sid) is ws:
             _tool_ws_sinks.pop(sid, None)
@@ -1438,78 +1542,3 @@ def create_server(host: str | None = None, port: int | None = None) -> uvicorn.S
         log_level="warning",  # 抑制 uvicorn 自身的访问日志
     )
     return uvicorn.Server(config)
-
-
-# ---------------------------------------------------------------------------
-# Cron 定时任务结果回调
-# ---------------------------------------------------------------------------
-
-
-def _on_cron_event(
-    session_id: str,
-    task_id: str,
-    name: str,
-    exit_code: int,
-    stdout_preview: str,
-) -> None:
-    """定时任务执行完成后触发 Agent 回复。
-
-    将任务结果作为一条特殊修饰的用户消息注入 Agent 历史，
-    让 Agent 生成回复。若 session 当前有 WebSocket 连接，
-    则将回复推送到前端。
-    """
-    # 优先使用 ws_chat 中保存的主循环（保证正确）；
-    # 回退到 get_event_loop（仅在主线程中有效）
-    loop: _asyncio.AbstractEventLoop | None = _cron_push_loop
-    if loop is None:
-        try:
-            loop = _asyncio.get_event_loop()
-        except RuntimeError:
-            return
-    if loop.is_closed():
-        return
-
-    agent = _agent_loop
-    if agent is None or not hasattr(agent, "process_message"):
-        return
-
-    # 构建触发 Agent 的消息
-    status_label = "success" if exit_code == 0 else f"failed (exit={exit_code})"
-    message = (
-        f"[cron-result] Scheduled task `{name}` ({task_id}) {status_label}.\n"
-        "This is a background scheduled-task result visible only to the Agent; the user does not directly see the raw output below.\n"
-        "If the user should be informed, the Agent must actively summarize, explain, or continue acting.\n"
-        "If the goal requires continued execution, schedule only one next run now; do not backfill multiple future runs.\n"
-        f"Output preview:\n{stdout_preview[:CRON_STDOUT_PREVIEW_MAX_LENGTH]}"
-    )
-
-    async def _trigger() -> None:
-        try:
-            reply: str = await agent.process_message(session_id, message)  # type: ignore[union-attr]
-        except Exception as exc:
-            logger.warning("Cron agent trigger error for session=%s: %s", session_id, exc)
-            return
-
-        # 若前端仍在连接，推送 Agent 回复
-        ws: WebSocket | None = _tool_ws_sinks.get(session_id)
-        if ws is not None:
-            try:
-                await ws.send_text(
-                    Message(
-                        type=MessageType.AGENT_MESSAGE,
-                        session_id=session_id,
-                        content=reply,
-                    ).to_json()
-                )
-            except Exception as exc:
-                logger.warning("Failed to push cron reply to session=%s: %s", session_id, exc)
-
-    _asyncio.run_coroutine_threadsafe(_trigger(), loop)
-
-
-# 注册回调（静默失败，避免 discover 阶段循环导入问题）
-try:
-    from component.extools.cron_tools import register_cron_event_callback
-    register_cron_event_callback(_on_cron_event)
-except Exception:
-    pass

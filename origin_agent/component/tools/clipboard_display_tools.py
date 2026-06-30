@@ -149,6 +149,7 @@ Frontend UI only. Does not write to the system clipboard. Reusing the same `disp
     is_async=True,
     emoji="📋",
     danger_level="readonly",
+    availability="main",
 )
 
 registry.register(
@@ -191,4 +192,5 @@ Proactively call this tool when you sense the user no longer needs a card, to ke
     is_async=True,
     emoji="🧹",
     danger_level="readonly",
+    availability="main",
 )

@@ -61,24 +61,10 @@ class ApprovalResult(BaseModel):
 
 _handsfree_sessions: dict[str, bool] = {}
 
-# 内部哨兵结果：当脱手模式切换时，注入到等待前端确认的 Future 中，
-# 通知 request_user_confirm 立即转入脱手审批路径。
-_SWITCH_TO_HANDSFREE = ApprovalResult(action="switch_to_handsfree", denied_by="system")
-
-
 def set_handsfree_mode(session_id: str, enabled: bool) -> None:
     """开启/关闭脱手模式。"""
     _handsfree_sessions[session_id] = enabled
     logger.info("Handsfree mode %s for session=%s", "enabled" if enabled else "disabled", session_id)
-    if enabled:
-        # 触发该 session 所有正在等待前端确认的 Future，
-        # 使其立即返回哨兵结果，转入脱手审批路径。
-        from gateway.server import _pending_confirms, _confirm_session_map
-        for req_id, req_sid in list(_confirm_session_map.items()):
-            if req_sid == session_id:
-                fut = _pending_confirms.get(req_id)
-                if fut and not fut.done():
-                    fut.set_result(_SWITCH_TO_HANDSFREE)
 
 
 def is_handsfree_mode(session_id: str) -> bool:
@@ -356,7 +342,7 @@ def shutdown_approval_model() -> bool:
 
 
 # ---------------------------------------------------------------------------
-# 脱手模式：小 LLM 审批
+# 脱手模式：LLM 审批
 # ---------------------------------------------------------------------------
 
 async def _handsfree_confirm(
@@ -365,7 +351,7 @@ async def _handsfree_confirm(
     max_dialog_turns: int = 2,
     extra_context: str | None = None,
 ) -> ApprovalResult:
-    """脱手模式：将工具调用 JSON 发送给小 LLM 审批。
+    """脱手模式：将工具调用 JSON 发送给LLM 审批。
 
     支持 dialog 模式：当审批模型不确定时，可通过 ask_agent_callback
     向 Agent 主模型提问，获取更多上下文后重新评估。
@@ -516,7 +502,7 @@ async def request_user_confirm(
 
     返回 ApprovalResult(action, deny_reason)。
     """
-    # 脱手模式：小 LLM 自动审批（不占用工具调用超时时间）
+    # 脱手模式：LLM 自动审批（不占用工具调用超时时间）
     if is_handsfree_mode(session_id):
         result = await _handsfree_confirm(
             tool_name, args, reason, content,
@@ -527,57 +513,15 @@ async def request_user_confirm(
             return result
         # approver 不可用 → 回退到人工审批
 
-    # 正常模式：WebSocket 前端审批
-    from gateway.server import _tool_ws_sinks, _pending_confirms, _register_confirm_session
-
-    request_id: str = uuid.uuid4().hex[:8]
-
-    loop: asyncio.AbstractEventLoop = asyncio.get_event_loop()
-    fut: asyncio.Future[ApprovalResult] = loop.create_future()
-    _pending_confirms[request_id] = fut
-    _register_confirm_session(request_id, session_id)
-
-    ws = _tool_ws_sinks.get(session_id)
-    if ws:
-        try:
-            await ws.send_text(json.dumps({
-                "type": "confirm_request",
-                "session_id": session_id,
-                "request_id": request_id,
-                "content": content,
-                "tool": tool_name,
-                "args": args,
-            }, ensure_ascii=False))
-        except Exception:
-            _pending_confirms.pop(request_id, None)
-            return ApprovalResult(action="deny", deny_reason="WebSocket push confirm request failed", denied_by="system")
-
-    try:
-        result: ApprovalResult = await asyncio.wait_for(fut, timeout=APPROVAL_WAIT_TIMEOUT)
-        # 检查是否是脱手模式切换触发的哨兵结果
-        if result.action == "switch_to_handsfree":
-            _pending_confirms.pop(request_id, None)
-            if is_handsfree_mode(session_id):
-                return await _handsfree_confirm(
-                    tool_name, args, reason, content,
-                    ask_agent_callback=ask_agent_callback,
-                    extra_context=extra_context,
-                )
-            return ApprovalResult(
-                action="deny",
-                deny_reason="Approval mode switched during processing",
-                denied_by="system",
-            )
-        return result
-    except asyncio.CancelledError:
-        _pending_confirms.pop(request_id, None)
-        return ApprovalResult(action="deny", deny_reason="Approval request cancelled", denied_by="system")
-    except asyncio.TimeoutError:
-        _pending_confirms.pop(request_id, None)
-        return ApprovalResult(action="deny", deny_reason=f"Approval wait timed out ({APPROVAL_WAIT_TIMEOUT}s)", denied_by="system")
-    except Exception:
-        _pending_confirms.pop(request_id, None)
-        return ApprovalResult(action="deny", deny_reason="Approval handling error", denied_by="system")
+    # 正常模式：通过 FrontendSink 请求审批
+    from system.application import Application
+    return await Application.current().frontend_sink.request_approval(
+        tool_name=tool_name,
+        args=args,
+        reason=reason,
+        content=content,
+        session_id=session_id,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -594,7 +538,7 @@ async def ask_agent_reason(
 ) -> str:
     """将审批模型的问题转发给 Agent 主模型，获取操作意图解释。
 
-    当脱手模式的小 LLM 不确定时，通过此函数向主模型提问，
+    当脱手模式的 LLM 不确定时，通过此函数向主模型提问，
     主模型的回答会追加到提示词中供审批模型重新评估。
 
     参数：

@@ -115,4 +115,5 @@ Read-only query with no side effects. Returns a dictionary keyed by sub-agent na
     is_async=True,
     emoji="📋",
     danger_level="readonly",
+    availability="main",
 )

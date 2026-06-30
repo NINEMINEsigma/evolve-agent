@@ -4,25 +4,25 @@ overview: 重构主/子 Agent 架构：提取 BaseAgentLoop 基类，引入 Appl
 todos:
   - id: "1"
     content: 创建 system/application.py：Application 唯一全局单例，装配 SessionManager/ApprovalBackendManager/CronRouter/ToolRegistry/RuntimeContext
-    status: pending
+    status: completed
   - id: "2"
     content: 创建 entry/agent_sink.py：AgentSink 抽象 + FrontendSink + ParentAgentSink
-    status: pending
+    status: completed
   - id: "3"
     content: 创建 entry/base_agent_loop.py：BaseAgentLoop 基类 + Inbox/InboxMessage + 统一 LLM-工具循环
-    status: pending
+    status: completed
   - id: "4"
     content: 修改 abstract/tools/registry.py：ToolEntry 增加 availability 字段，register() 增加 availability 参数，新增 get_availability / get_definitions_for_availability
-    status: pending
+    status: in_progress
   - id: "5"
     content: 创建 entry/parent_agent_loop.py：ParentAgentLoop 继承 BaseAgentLoop，实现流式 LLM、session 旋转、Memory、前端事件
-    status: pending
+    status: completed
   - id: "6"
     content: 重构 entry/agent.py：迁移 AgentLoop 逻辑到 BaseAgentLoop/ParentAgentLoop
-    status: pending
+    status: in_progress
   - id: "7"
     content: 创建 gateway/session_manager.py：从 gateway/server.py 抽出 session 生命周期管理
-    status: pending
+    status: completed
   - id: "8"
     content: 重构 gateway/server.py：移除全局业务变量，使用 Application.session_manager 和 FrontendSink
     status: pending

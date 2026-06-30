@@ -149,4 +149,5 @@ If the sub-agent is still generating its current response, the call fails with:
     is_async=True,
     emoji="💬",
     danger_level="readonly",
+    availability="main",
 )
