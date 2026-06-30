@@ -549,7 +549,7 @@ def _build_client_metadata(cfg: dict) -> "OAuthClientMetadata":
         raise ValueError(
             "_configure_callback_port() must be called before _build_client_metadata()"
         )
-    client_name = cfg.get("client_name", "Hermes Agent")
+    client_name = cfg.get("client_name", "Evolve-Agent")
     scope = cfg.get("scope")
     redirect_uri = f"http://127.0.0.1:{port}/callback"
 

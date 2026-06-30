@@ -1,4 +1,4 @@
-"""Hermes MCP — Model Context Protocol client library.
+"""MCP — Model Context Protocol client library.
 
 Standalone package extracted from Hermes Agent. Provides a full MCP client
 that can connect to MCP servers via stdio, HTTP/StreamableHTTP, or SSE

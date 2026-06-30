@@ -28,7 +28,7 @@ def create_skill(
     description: str = "",
     category: str | None = None,
     content: str = "",
-    author: str = "Hermes Agent",
+    author: str = "Evolve-Agent",
     version: str = "1.0.0",
     tags: Optional[list[str]] = None,
     **extra_frontmatter: Any,
