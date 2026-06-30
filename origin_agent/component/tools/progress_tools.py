@@ -14,6 +14,7 @@ import logging
 from typing import Any, Dict
 
 from abstract.tools.registry import registry, tool_error, tool_result
+from abstract.tools.ui_event_router import ui_event_router
 
 logger = logging.getLogger(__name__)
 
@@ -184,6 +185,7 @@ Creates or updates a progress bar identified by `task_id`. Reusing the same `tas
     danger_level="readonly",
     availability="main",
 )
+ui_event_router.register("set_task_progress", "task_progress")
 
 registry.register(
     name="clear_task_progress",
@@ -251,3 +253,4 @@ If `task_id` is provided and non-empty, removes only that specific bar. If omitt
     danger_level="readonly",
     availability="main",
 )
+ui_event_router.register("clear_task_progress", "task_progress")

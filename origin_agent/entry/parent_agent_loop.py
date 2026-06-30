@@ -151,15 +151,18 @@ class ParentAgentLoop(BaseAgentLoop):
         # 合并 memory 工具 schema
         for schema in self._memory.get_tool_schemas():
             definitions.append({"type": "function", "function": schema})
-        return definitions if definitions else None
+        return definitions if definitions else []
 
     async def _on_context_over_limit(self) -> None:
         """上下文超限：触发 session 旋转/归档。"""
+        old_sid = self.session_id
         new_sid: str | None = await self._rotate_session_for_continuation(
             self.session_id,
         )
         if new_sid:
             self.session_id = new_sid
+            if self._session_manager is not None:
+                self._session_manager.rotate_session(old_sid, new_sid)
 
     def _build_system_prompt(self) -> list[str]:
         """构建系统提示词段落列表（含 skill prompts）。"""
@@ -332,7 +335,9 @@ class ParentAgentLoop(BaseAgentLoop):
 
                 # 执行工具调用
                 for tc in resp.tool_calls:
-                    tool_msg: dict[str, Any] = await self._execute_tool(tc, sid)
+                    tool_msg: dict[str, Any] = await self._execute_tool(
+                        tc.name, dict(tc.arguments) if tc.arguments else {}, tc.id, sid,
+                    )
                     messages.append(tool_msg)
                     self._append_history(tool_msg)
                     self._persist_message(sid, tool_msg)
@@ -459,8 +464,11 @@ class ParentAgentLoop(BaseAgentLoop):
     # 工具执行
     # ========================================================================
 
-    async def _execute_tool(self, tc: ToolCall, session_id: str) -> dict[str, Any]:
+    async def _execute_tool(self, tool_name: str, args: dict,
+                            tool_call_id: str = "",
+                            session_id: str = "") -> dict[str, Any]:
         """执行单个工具调用，含审批流程。"""
+        tc = ToolCall(id=tool_call_id, name=tool_name, arguments=args)
         if self._interrupted or self._cancel_event.is_set():
             return {
                 "role": Role.TOOL,
@@ -468,7 +476,6 @@ class ParentAgentLoop(BaseAgentLoop):
                 "content": "Cancelled.",
             }
 
-        args: dict = dict(tc.arguments) if tc.arguments else {}
         args["_session_id"] = session_id
 
         if args.get("_parse_error"):
@@ -506,7 +513,7 @@ class ParentAgentLoop(BaseAgentLoop):
         # 通知前端
         await self._frontend_sink.emit_tool_call(
             session_id, tc.name, tc.id,
-            json.dumps(tc.arguments, ensure_ascii=False),
+            tc.arguments,
         )
 
         # 审批流程
@@ -524,22 +531,30 @@ class ParentAgentLoop(BaseAgentLoop):
                 args["_pre_approved"] = True
                 args["_approval_action"] = "allow_once"
             else:
-                _hooks_ctx = self._get_hooks_context(session_id)
-                _ask_agent_callback: Callable[[str], Awaitable[str]] | None = None
                 if _handsfree_enabled:
+                    # 脱手模式：通过 approval 模型自动审批（仍走 request_user_confirm）
+                    _hooks_ctx = self._get_hooks_context(session_id)
                     async def _ask_agent_callback_impl(q: str) -> str:
                         return await ask_agent_reason(
                             self._llm, tc.name, _approval_args, q,
                             extra_context=_hooks_ctx,
                         )
-                    _ask_agent_callback = _ask_agent_callback_impl
-                approval = await request_user_confirm(
-                    session_id, tc.name, _approval_args,
-                    reason=str(args.get("reason", "")),
-                    content=f"Tool: {tc.name}\nParameters: {json.dumps(_approval_args, ensure_ascii=False)[:500]}",
-                    ask_agent_callback=_ask_agent_callback,
-                    extra_context=_hooks_ctx if _handsfree_enabled else None,
-                )
+                    approval = await request_user_confirm(
+                        session_id, tc.name, _approval_args,
+                        reason=str(args.get("reason", "")),
+                        content=f"Tool: {tc.name}\nParameters: {json.dumps(_approval_args, ensure_ascii=False)[:500]}",
+                        ask_agent_callback=_ask_agent_callback_impl,
+                        extra_context=_hooks_ctx,
+                    )
+                else:
+                    # 正常模式：通过 AgentSink 请求审批（干净路径）
+                    approval = await self._get_sink().request_approval(
+                        tool_name=tc.name,
+                        args=_approval_args,
+                        reason=str(args.get("reason", "")),
+                        content=f"Tool: {tc.name}\nParameters: {json.dumps(_approval_args, ensure_ascii=False)[:500]}",
+                        session_id=session_id,
+                    )
                 if approval.action == "deny":
                     source_label = {"model": "approval model", "user": "user", "system": "system"}.get(
                         approval.denied_by, "system"
@@ -561,7 +576,7 @@ class ParentAgentLoop(BaseAgentLoop):
             timeout: int = self.app.runtime_context.tool_timeout
             try:
                 ctx = ToolContext(loop=self, session_id=self.session_id)
-                result = tool_registry.dispatch(tc.name, args, context=ctx)
+                result = await tool_registry.async_dispatch(tc.name, args, context=ctx)
             except Exception as exc:
                 logger.exception("Tool %s dispatch error: %s", tc.name, exc)
                 self._tool_stats[tc.name]["errors"] += 1
@@ -867,13 +882,14 @@ class ParentAgentLoop(BaseAgentLoop):
         messages = self._get_full_history(session_id)
         if not messages:
             return ""
+        # TODO: 总结过短, 截断剩余文本过少, 提示词模板没有分离
         summary_prompt = (
             "Summarize the following conversation history into a concise summary "
             "that captures the key context, actions taken, and decisions made. "
             "Keep it under 2000 characters."
         )
         try:
-            resp = self._llm.chat([
+            resp = await self._llm.chat([
                 {"role": "user", "content": summary_prompt},
                 {"role": "user", "content": json.dumps(messages, ensure_ascii=False)[:30000]},
             ])
@@ -888,11 +904,12 @@ class ParentAgentLoop(BaseAgentLoop):
         if not messages:
             return []
         try:
+            # TODO: 提示词模板没有分离, 截断剩余文本过少
             tag_prompt = (
                 "Based on the conversation, generate 3-5 concise tags (single words or short phrases) "
                 "that best categorize the session's topics. Return them as a JSON array of strings."
             )
-            resp = self._llm.chat([
+            resp = await self._llm.chat([
                 {"role": "user", "content": tag_prompt},
                 {"role": "user", "content": json.dumps(messages, ensure_ascii=False)[:20000]},
             ])

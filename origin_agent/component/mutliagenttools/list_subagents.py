@@ -25,8 +25,8 @@ async def _handle_list_subagents(args: dict[str, Any]) -> dict:
     name_to_session: dict[str, dict[str, Any]] = {}
     if parent_session_id:
         try:
-            from gateway.server import get_subagent_orchestrator
-            orch = get_subagent_orchestrator()
+            from system.application import Application
+            orch = Application.current().subagent_orchestrator
             snapshot = orch.get_snapshot(parent_session_id=parent_session_id)
             for session_id, info in snapshot.items():
                 name = info.get("name", "")

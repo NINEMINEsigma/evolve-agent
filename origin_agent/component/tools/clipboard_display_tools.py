@@ -13,6 +13,7 @@ import logging
 from typing import Any, Dict
 
 from abstract.tools.registry import registry, tool_error, tool_result
+from abstract.tools.ui_event_router import ui_event_router
 
 logger = logging.getLogger(__name__)
 
@@ -151,6 +152,7 @@ Frontend UI only. Does not write to the system clipboard. Reusing the same `disp
     danger_level="readonly",
     availability="main",
 )
+ui_event_router.register("set_clipboard_display", "clipboard_display")
 
 registry.register(
     name="clear_clipboard_display",
@@ -194,3 +196,4 @@ Proactively call this tool when you sense the user no longer needs a card, to ke
     danger_level="readonly",
     availability="main",
 )
+ui_event_router.register("clear_clipboard_display", "clipboard_display")

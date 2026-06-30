@@ -261,7 +261,8 @@ class FrontendSink(AgentSink):
 
     async def emit_tool_result(self, session_id: str, tool_name: str,
                                tool_call_id: str, content: str) -> None:
-        await self._send_msg(session_id, "tool_result", tool_name, content)
+        await self._send_msg(session_id, "tool_result", tool_name, content,
+                             tool_call_id=tool_call_id)
 
     async def emit_stream_delta(self, session_id: str, stream_id: str,
                                 delta: str = "", reasoning_delta: str = "",
@@ -303,7 +304,8 @@ class FrontendSink(AgentSink):
                              json.dumps(payload, ensure_ascii=False))
 
     async def _send_msg(self, session_id: str, event_type: str,
-                        tool_name: str, payload: str) -> None:
+                        tool_name: str, payload: str, *,
+                        tool_call_id: str = "") -> None:
         """通过 WebSocket 推送一条事件消息。"""
         ws = self._ws_sinks.get(session_id)
         if ws is None:
@@ -316,7 +318,8 @@ class FrontendSink(AgentSink):
             msg = Message(type=msg_type, session_id=session_id, tool=tool_name, args=data)
         elif event_type == "tool_result":
             msg_type = MessageType.TOOL_RESULT
-            msg = Message(type=msg_type, session_id=session_id, tool=tool_name, result=payload)
+            msg = Message(type=msg_type, session_id=session_id, tool=tool_name,
+                          result=payload, tool_call_id=tool_call_id)
         elif event_type == "stream_delta":
             data = json.loads(payload)
             msg = Message(
@@ -341,14 +344,14 @@ class FrontendSink(AgentSink):
             except json.JSONDecodeError:
                 data = None
             msg = Message(type=MessageType.TASK_PROGRESS, session_id=session_id, tool=tool_name,
-                          result=payload if data else None)
+                          result=data if data is not None else payload)
         elif event_type == "clipboard_display":
             try:
                 data = json.loads(payload)
             except json.JSONDecodeError:
                 data = None
             msg = Message(type=MessageType.CLIPBOARD_DISPLAY, session_id=session_id, tool=tool_name,
-                          result=payload if data else None)
+                          result=data if data is not None else payload)
         elif event_type == "subagent_update":
             msg = Message(type=MessageType.SUBAGENT_UPDATE, session_id=session_id,
                           result=payload)
@@ -463,19 +466,64 @@ class ParentAgentSink(AgentSink):
 
     async def emit_stream_done(self, session_id: str, stream_id: str,
                                finish_reason: str = "stop") -> None:
-        pass  # 子 Agent 不需要流式完成事件
+        """转发流结束事件到父 Agent 前端。"""
+        try:
+            from system.application import Application
+            sink = Application.current().frontend_sink
+            if sink is not None:
+                await sink.emit_stream_done(
+                    self._loop._parent_session_id, stream_id, finish_reason,
+                )
+        except Exception:
+            pass
 
     async def emit_usage_update(self, session_id: str, token_usage: int,
                                 context_tokens: int) -> None:
-        pass  # 子 Agent 暂不推送 token 信息
+        """转发 token 消耗更新到父 Agent 前端。"""
+        try:
+            from system.application import Application
+            sink = Application.current().frontend_sink
+            if sink is not None:
+                await sink.emit_usage_update(
+                    self._loop._parent_session_id, token_usage, context_tokens,
+                )
+        except Exception:
+            pass
 
     async def emit_progress(self, session_id: str, tool_name: str,
                             payload: str) -> None:
-        pass  # 子 Agent 的进度不推送到前端
+        """转发进度事件到父 Agent 前端。"""
+        try:
+            from system.application import Application
+            sink = Application.current().frontend_sink
+            if sink is not None:
+                await sink.emit_progress(
+                    self._loop._parent_session_id, tool_name, payload,
+                )
+        except Exception:
+            pass
 
     async def emit_clipboard_display(self, session_id: str, tool_name: str,
                                      payload: str) -> None:
-        pass  # 子 Agent 不显示剪贴板内容
+        """转发剪贴板展示事件到父 Agent 前端。"""
+        try:
+            from system.application import Application
+            sink = Application.current().frontend_sink
+            if sink is not None:
+                await sink.emit_clipboard_display(
+                    self._loop._parent_session_id, tool_name, payload,
+                )
+        except Exception:
+            pass
 
     async def emit_subagent_update(self, session_id: str, payload: dict) -> None:
-        pass  # 子 Agent 本身不触发子 Agent 更新
+        """转发子 Agent 状态更新到父 Agent 前端。"""
+        try:
+            from system.application import Application
+            sink = Application.current().frontend_sink
+            if sink is not None:
+                await sink.emit_subagent_update(
+                    self._loop._parent_session_id, payload,
+                )
+        except Exception:
+            pass

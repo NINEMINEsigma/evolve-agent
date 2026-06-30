@@ -80,6 +80,12 @@ class Application:
                 await self.approval_backend_manager.shutdown()
             except Exception as exc:
                 logger.warning("ApprovalBackendManager shutdown failed: %s", exc)
+        # 3. 停止子 Agent 编排器
+        if self.subagent_orchestrator is not None:
+            try:
+                await self.subagent_orchestrator.shutdown_all()
+            except Exception as exc:
+                logger.warning("SubAgentOrchestrator shutdown failed: %s", exc)
         logger.info("Application shutdown complete")
 
 
@@ -94,7 +100,7 @@ class ApprovalBackendManager:
         self._backend: ApprovalBackend | None = None
         self._failed: bool = False
 
-    def get_backend(self) -> ApprovalBackend | None:
+    async def get_backend(self) -> ApprovalBackend | None:
         """懒加载审批后端。返回 None 表示不可用。"""
         if self._failed:
             return None
@@ -105,13 +111,28 @@ class ApprovalBackendManager:
         self._backend = _create_approval_backend(self._ctx)
         if self._backend is None:
             self._failed = True
+            return None
+
+        if not await self._backend.is_available():
+            logger.warning("Approval backend not available — handsfree mode will deny all")
+            self._failed = True
+            self._backend = None
+            return None
+
         return self._backend
 
     async def shutdown(self) -> None:
-        """停止审批后端子进程。"""
+        """停止审批后端子进程并释放资源。"""
+        if self._backend is None:
+            return
         try:
-            from component.approval import shutdown_approval_model
-            shutdown_approval_model()
-        except Exception:
-            pass
+            from component.approval import LocalApprovalBackend
+            if isinstance(self._backend, LocalApprovalBackend):
+                engine = self._backend._get_engine()
+                if engine is not None:
+                    engine.unload()
+                    logger.info("Approval backend unloaded successfully")
+        except Exception as exc:
+            logger.warning("Failed to unload approval backend: %s", exc)
         self._backend = None
+        self._failed = False

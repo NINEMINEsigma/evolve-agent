@@ -32,6 +32,10 @@ def _cache_path() -> Path:
     return get_runtime_context().workspace / "vision_capability_cache.json"
 
 
+def _cache_key(session_id: str, model: str) -> str:
+    return f"{session_id}:{model.lower()}"
+
+
 def _load_cache() -> dict[str, bool]:
     try:
         path = _cache_path()
@@ -43,7 +47,7 @@ def _load_cache() -> dict[str, bool]:
 
 
 def get_cached_vision_support(model: str) -> bool | None:
-    """读取模型 vision 能力缓存；未命中返回 None。"""
+    """读取模型 vision 能力缓存（全局，按 model 键）；未命中返回 None。"""
     normalized = model.lower()
     cache = _load_cache()
     if normalized in cache:
@@ -90,19 +94,21 @@ async def _handle_probe_vision(args: dict[str, Any], context: ToolContext | None
     force: bool = bool(args.get("force", False))
 
     ctx = context.runtime_context if context is not None else get_runtime_context()
-    model: str = (ctx.llm_model or "").lower()
-    if not model:
+    session_id = context.session_id if context is not None else ""
+    model_name: str = ctx.llm_model or ""
+    if not model_name:
         return tool_error("No LLM model configured in RuntimeContext")
 
+    key = _cache_key(session_id, model_name)
     cache = _load_cache()
-    if not force and model in cache:
-        capable: bool = cache[model]
+    if not force and key in cache:
+        capable: bool = cache[key]
         return tool_result(
             capable=capable,
-            model=ctx.llm_model,
+            model=model_name,
             source="cache",
             message=(
-                f"Model {ctx.llm_model} {'supports' if capable else 'does not support'} "
+                f"Model {model_name} {'supports' if capable else 'does not support'} "
                 f"vision (cached)."
             ),
         )
@@ -126,37 +132,37 @@ async def _handle_probe_vision(args: dict[str, Any], context: ToolContext | None
     try:
         resp = await client.chat(probe_messages)
         # API 接受了图片即视为支持（不关心回答内容）
-        cache[model] = True
+        cache[key] = True
         _save_cache(cache)
         logger.info(
-            "probe_vision | model=%s capable=True source=probe",
-            ctx.llm_model,
+            "probe_vision | session=%s model=%s capable=True source=probe",
+            session_id, model_name,
         )
         return tool_result(
             capable=True,
-            model=ctx.llm_model,
+            model=model_name,
             source="probe",
-            message=f"Model {ctx.llm_model} accepts image content blocks.",
+            message=f"Model {model_name} accepts image content blocks.",
         )
     except Exception as exc:
         if _is_vision_rejection(exc):
-            cache[model] = False
+            cache[key] = False
             _save_cache(cache)
             logger.info(
-                "probe_vision | model=%s capable=False source=probe reason=content_block_rejection",
-                ctx.llm_model,
+                "probe_vision | session=%s model=%s capable=False source=probe reason=content_block_rejection",
+                session_id, model_name,
             )
             return tool_result(
                 capable=False,
-                model=ctx.llm_model,
+                model=model_name,
                 source="probe",
-                message=f"Model {ctx.llm_model} rejected image content blocks: {exc}",
+                message=f"Model {model_name} rejected image content blocks: {exc}",
             )
         # 非 vision 相关错误（网络、认证、超时等）不写入缓存
-        logger.warning("probe_vision | model=%s error=%s", ctx.llm_model, exc)
+        logger.warning("probe_vision | session=%s model=%s error=%s", session_id, model_name, exc)
         return tool_error(
             f"Probe failed with non-vision error: {exc}",
-            model=ctx.llm_model,
+            model=model_name,
         )
 
 

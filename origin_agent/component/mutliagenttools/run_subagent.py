@@ -85,8 +85,8 @@ async def _handle_run_subagent(args: dict[str, Any]) -> dict:
     # 通过编排器启动子 Agent
     profile["_name"] = name  # 注入注册名供编排器推送 WS 时使用
     try:
-        from gateway.server import get_subagent_orchestrator
-        orch = get_subagent_orchestrator()
+        from system.application import Application
+        orch = Application.current().subagent_orchestrator
         result = await orch.launch(
             parent_session_id=parent_session_id,
             profile=profile,

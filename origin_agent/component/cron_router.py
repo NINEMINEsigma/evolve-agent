@@ -1,12 +1,13 @@
-"""CronRouter — 将 cron 任务结果路由到对应 loop 的收件箱。
+"""CronRouter — 将 cron 任务结果路由到对应 loop 的收件箱，并管理任务注册表。
 
-替代 ``component/extools/cron_tools.py`` 中的全局 ``_cron_event_callbacks`` 列表。
+替代 ``component/extools/cron_tools.py`` 中的全局 ``_cron_tasks`` 注册表和 ``_cron_event_callbacks`` 列表。
 通过 ``Application.cron_router`` 访问，按 session_id 或 runtime 路由结果。
 """
 
 from __future__ import annotations
 
 import logging
+import threading
 from typing import Any, TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -19,11 +20,17 @@ class CronRouter:
     """按 session_id 或 runtime 将 cron 结果投递到对应 loop 的 inbox。
 
     生命周期由 ``Application.cron_router`` 管理。
+    持有 ``_tasks`` 注册表，替代 ``cron_tools.py`` 的模块级 ``_cron_tasks`` 全局变量。
     """
 
     def __init__(self) -> None:
-        # session_id → loop 的弱引用映射（loop 存活时投递，loop 消亡则丢弃）
+        # session_id → loop 映射（loop 存活时投递，loop 消亡则丢弃）
         self._routes: dict[str, BaseAgentLoop] = {}
+        # 任务注册表：session_id → task_id → _CronTask
+        self._tasks: dict[str, dict[str, Any]] = {}
+        self._lock: threading.RLock = threading.RLock()
+
+    # -- 路由管理 ----------------------------------------------------------------
 
     def register(self, session_id: str, loop: BaseAgentLoop) -> None:
         """注册 session 对应的 loop，cron 结果将投递到 loop.inbox。"""
@@ -63,7 +70,37 @@ class CronRouter:
         logger.debug("CronRouter: dispatched %s to session=%s", task_id, session_id)
         return True
 
+    # -- 任务注册表管理 ----------------------------------------------------------
+
+    def add_task(self, session_id: str, task_id: str, task: Any) -> None:
+        """向注册表添加一个任务。"""
+        if session_id not in self._tasks:
+            self._tasks[session_id] = {}
+        self._tasks[session_id][task_id] = task
+
+    def get_task(self, session_id: str, task_id: str) -> Any | None:
+        """获取指定任务，不存在时返回 None。"""
+        return self._tasks.get(session_id, {}).get(task_id)
+
+    def remove_task(self, session_id: str, task_id: str) -> Any | None:
+        """从注册表移除并返回指定任务。"""
+        session_tasks = self._tasks.get(session_id)
+        if session_tasks:
+            return session_tasks.pop(task_id, None)
+        return None
+
+    def get_session_tasks(self, session_id: str) -> dict[str, Any]:
+        """返回指定 session 的所有任务。"""
+        return self._tasks.get(session_id, {})
+
+    def pop_session_tasks(self, session_id: str) -> dict[str, Any]:
+        """弹出并返回指定 session 的所有任务。"""
+        return self._tasks.pop(session_id, {})
+
+    # -- 生命周期 ----------------------------------------------------------------
+
     async def shutdown(self) -> None:
-        """清理所有路由。"""
+        """清理所有路由和任务。"""
         self._routes.clear()
+        self._tasks.clear()
         logger.info("CronRouter shutdown")

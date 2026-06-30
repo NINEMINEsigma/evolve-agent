@@ -263,11 +263,20 @@ class BaseAgentLoop(ABC):
         from abstract.tools.registry import registry
         from entry.base_agent_loop import ToolContext
         ctx = ToolContext(loop=self, session_id=self.session_id)
-        result = registry.dispatch(tool_name, args, context=ctx)
+        result = await registry.async_dispatch(tool_name, args, context=ctx)
         if isinstance(result, dict) and "error" in result:
             content = json.dumps(result, ensure_ascii=False)
         else:
             content = json.dumps(result, ensure_ascii=False) if not isinstance(result, str) else result
+
+        # 对前端 UI 类工具推送实时状态更新（工具模块自行注册事件类型）
+        from abstract.tools.ui_event_router import ui_event_router
+        await ui_event_router.emit_for(
+            tool_name,
+            result,
+            sink,
+            session_id or self.session_id,
+        )
 
         return {
             "role": Role.TOOL,

@@ -25,7 +25,7 @@ from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
-from .chat import Message, MessageType, SessionManager as _ChatSessionManager
+from .chat import Message, MessageType
 from datetime import datetime, timezone
 from entity.constant import CRON_STDOUT_PREVIEW_MAX_LENGTH, SUBPROCESS_TIMEOUT_DEFAULT, UPLOAD_FILENAME_TIME_FORMAT
 from system.context import get_runtime_context
@@ -36,146 +36,25 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# ---------------------------------------------------------------------------
-# 向后兼容：模块级全局 → Application 委托代理
-# ---------------------------------------------------------------------------
-
-class _SessionsProxy:
-    """代理对象：将所有属性访问委托给 Application.current().session_manager。
-
-    若 Application 未初始化，回退到本地 _ChatSessionManager 实例。
-    """
-
-    def __init__(self):
-        self._fallback = _ChatSessionManager()
-
-    @property
-    def _sm(self):
-        try:
-            from system.application import Application
-            return Application.current().session_manager or self._fallback
-        except Exception:
-            return self._fallback
-
-    def __getattr__(self, name):
-        if name.startswith("_"):
-            raise AttributeError(name)
-        return getattr(self._sm, name)
-
-    def __setattr__(self, name, value):
-        if name in ("_sm", "_fallback"):
-            super().__setattr__(name, value)
-        else:
-            setattr(self._sm, name, value)
-
-    def __bool__(self):
-        return self._sm is not None
-
-    def __contains__(self, item):
-        try:
-            from system.application import Application
-            sm = Application.current().session_manager
-            return sm is not None and sm.get_loop(item) is not None
-        except Exception:
-            return False
-
-
-class _AgentLoopProxy:
-    """按 session_id 从 session_manager 查找对应 loop 并路由调用。
-
-    `_agent_loop.process_message(sid, content)` 等调用通过此 proxy
-    路由到 SessionManager._loops[sid] 对应的 ParentAgentLoop 实例。
-    对无 sid 参数的方法则委托给任意活跃 loop。
-    """
-
-    def __bool__(self):
-        try:
-            sm = _get_sm()
-            return sm is not None
-        except Exception:
-            return False
-
-    def __getattr__(self, name):
-        sm = _get_sm()
-
-        # 确认有 loop 实现了该方法，否则提前 AttributeError
-        # 使 getattr(obj, name, default) 能正确回退到 default
-        _has_method = False
-        if sm is not None:
-            for sid, loop in sm.get_all_loops().items():
-                if hasattr(loop, name):
-                    _has_method = True
-                    break
-        if not _has_method:
-            raise AttributeError(f"No active loop has method: {name}")
-
-        def _wrapper(*args, **kwargs):
-            if args and isinstance(args[0], str):
-                loop = sm.get_loop(args[0]) if sm else None
-                if loop is not None:
-                    return getattr(loop, name)(*args[1:], **kwargs)
-            if sm is not None:
-                for sid, loop in sm.get_all_loops().items():
-                    if hasattr(loop, name):
-                        return getattr(loop, name)(*args, **kwargs)
-            raise AttributeError(f"No active loop has method: {name}")
-        return _wrapper
-
-
-class _ToolWSSinksProxy(dict):
-    """代理：工具事件 WebSocket 映射委托给 FrontendSink。"""
-
-    @property
-    def _sink(self) -> "FrontendSink | None":
-        try:
-            from system.application import Application
-            return Application.current().frontend_sink
-        except Exception:
-            return None
-
-    def get(self, key, default=None):
-        sink = self._sink
-        return sink.get_ws(key) if sink else default
-
-    def __getitem__(self, key):
-        sink = self._sink
-        if sink is None:
-            raise KeyError(key)
-        ws = sink.get_ws(key)
-        if ws is None:
-            raise KeyError(key)
-        return ws
-
-    def __setitem__(self, key, value):
-        sink = self._sink
-        if sink:
-            sink.register_ws(key, value)
-
-    def __delitem__(self, key):
-        sink = self._sink
-        if sink:
-            sink.unregister_ws(key)
-
-    def pop(self, key, *args):
-        val = self.get(key)
-        if val is None and args:
-            return args[0]
-        self.__delitem__(key)
-        return val
-
-    def __contains__(self, key):
-        return self.get(key) is not None
-
 
 def _get_sm():
+    """返回 Application 的 SessionManager。"""
     from system.application import Application
     return Application.current().session_manager
 
 
-# 模块级兼容引用
-sessions: _SessionsProxy = _SessionsProxy()
-_agent_loop: _AgentLoopProxy | None = None  # 初始化前为 None，保持 is not None 语义
-_tool_ws_sinks: _ToolWSSinksProxy = _ToolWSSinksProxy()
+def _get_loop(session_id: str):
+    """返回指定 session 的 ParentAgentLoop。"""
+    sm = _get_sm()
+    return sm.get_loop(session_id) if sm else None
+
+
+def _get_ws(session_id: str):
+    """返回指定 session 的 WebSocket sink。"""
+    from system.application import Application
+    sink = Application.current().frontend_sink
+    return sink.get_ws(session_id) if sink else None
+
 
 # agentspace 路径 — 由 main.py 在 server 启动前设置。
 _agentspace_path: Path | None = None
@@ -186,8 +65,6 @@ def set_agent_loop(loop: ParentAgentLoop) -> None:
 
     在启动流程中调用一次，之后所有 session 由 SessionManager 管理。
     """
-    global _agent_loop
-
     from system.application import Application
     from entry.agent_sink import FrontendSink
 
@@ -200,34 +77,22 @@ def set_agent_loop(loop: ParentAgentLoop) -> None:
     if app.frontend_sink is None:
         app.frontend_sink = FrontendSink()
 
-    # 激活代理，使 _agent_loop is not None 变为 True
-    _agent_loop = _AgentLoopProxy()
-
-    # 初始化 SubAgentOrchestrator（若有子 Agent 系统导入）
-    try:
-        from subagent.orchestrator import SubAgentOrchestrator, set_orchestrator
-        orch = SubAgentOrchestrator()
-        orch.set_agent_loop(loop)
-        set_orchestrator(orch)
-        logger.info("SubAgentOrchestrator initialized")
-    except Exception as exc:
-        logger.debug("SubAgentOrchestrator not available: %s", exc)
-
 
 async def shutdown_subagent_orchestrator() -> None:
     """优雅停止 SubAgentOrchestrator（供 shutdown 流程调用）。"""
     try:
-        from subagent.orchestrator import get_orchestrator
-        orch = get_orchestrator()
-        await orch.shutdown_all()
+        from system.application import Application
+        orch = Application.current().subagent_orchestrator
+        if orch is not None:
+            await orch.shutdown_all()
     except Exception as exc:
         logger.debug("SubAgentOrchestrator shutdown skipped: %s", exc)
 
 
 def get_subagent_orchestrator():
     """返回 SubAgentOrchestrator 单例（供工具层调用）。"""
-    from subagent.orchestrator import get_orchestrator
-    return get_orchestrator()
+    from system.application import Application
+    return Application.current().subagent_orchestrator
 
 
 async def push_subagent_update(
@@ -243,7 +108,7 @@ async def push_subagent_update(
     前端 UnifiedPanel 接收此消息并更新子会话列表。
     feedback 每项为 {\"role\": \"assistant\"|\"tool\"|\"status\", \"content\": \"...\"}
     """
-    ws = _tool_ws_sinks.get(parent_session_id)
+    ws = _get_ws(parent_session_id)
     if ws is None:
         return
     import json as _json
@@ -275,7 +140,9 @@ def set_agentspace_path(path: str | Path) -> None:
 def configure_sessions(store_path: str | None = None) -> None:
     """配置 session 存储目录并重新加载持久化的 session。"""
     if store_path:
-        sessions.set_store_dir(store_path)
+        sm = _get_sm()
+        if sm:
+            sm.set_store_dir(store_path)
 
 
 def _extract_text(content: Any) -> str:
@@ -291,19 +158,6 @@ def _extract_text(content: Any) -> str:
     return str(content or "")
 
 
-# ── cron 定时任务结果推送 ────────────────────────────────────
-# 后台线程通过 ws_chat 保存的 uvicorn 主事件循环调度协程。
-# 必须在 ws_chat 中设置，因为主循环引用无法从后台线程获取。
-
-import asyncio as _asyncio
-_cron_push_loop: _asyncio.AbstractEventLoop | None = None
-
-
-def set_cron_event_loop(loop: _asyncio.AbstractEventLoop) -> None:
-    """由 main.py 在 server 启动后调用，保存主事件循环供后台线程使用。"""
-    global _cron_push_loop
-    _cron_push_loop = loop
-
 
 async def _send_tool_event(
     session_id: str, event_type: str, tool_name: str, payload: str,
@@ -316,14 +170,15 @@ async def _send_tool_event(
     if event_type not in ("stream_delta", "usage_update"):
         logger.info("[ws push] session=%s type=%s tool=%s payload_len=%d", session_id, event_type, tool_name, len(payload))
     # 如果 session 已被中断，跳过发送工具事件。
-    if _agent_loop is not None and hasattr(_agent_loop, "is_interrupted"):
+    loop = _get_loop(session_id)
+    if loop is not None and hasattr(loop, "is_interrupted"):
         try:
-            if _agent_loop.is_interrupted(session_id):  # type: ignore[union-attr]
+            if loop.is_interrupted():
                 return
         except Exception:
             pass
 
-    ws: WebSocket | None = _tool_ws_sinks.get(session_id)
+    ws: WebSocket | None = _get_ws(session_id)
     if ws is None:
         return
     # Handle assistant_text event type specially via SYSTEM message
@@ -537,19 +392,19 @@ async def index():
 
 @app.get("/health")
 async def health():
-    return {"status": "ok", "sessions": sessions.count}
+    return {"status": "ok", "sessions": _get_sm().count}
 
 
 @app.get("/api/sessions")
 async def list_sessions():
     """返回所有活跃 session 及其元数据。"""
-    return {"sessions": sessions.get_all()}
+    return {"sessions": _get_sm().get_all()}
 
 
 @app.get("/api/tags")
 async def list_tags():
     """返回全局已有标签列表。"""
-    return {"tags": sessions.get_all_tags()}
+    return {"tags": _get_sm().get_all_tags()}
 
 
 @app.put("/api/sessions/{session_id}/tags")
@@ -564,18 +419,17 @@ async def update_session_tags(session_id: str, req: Request):
     if not isinstance(raw_tags, list):
         return {"updated": False, "error": "tags must be an array", "session_id": session_id}
     tags: list[str] = [str(t).strip() for t in raw_tags]
-    valid = sessions.set_session_tags(session_id, tags)
+    valid = _get_sm().set_session_tags(session_id, tags)
     return {"updated": True, "session_id": session_id, "tags": valid}
 
 
 @app.get("/api/sessions/{session_id}/tool-resources")
 async def get_session_tool_resources(session_id: str):
     """返回 session 的可恢复工具副作用资源快照。"""
-    if not sessions.exists(session_id):
+    loop = _get_loop(session_id)
+    if loop is None:
         return {"session_id": session_id, "task_progress": {}, "clipboard_display": {}}
-    if _agent_loop is None or not hasattr(_agent_loop, "get_tool_resources"):
-        return {"session_id": session_id, "task_progress": {}, "clipboard_display": {}}
-    resources = _agent_loop.get_tool_resources(session_id)  # type: ignore[union-attr]
+    resources = loop.get_tool_resources()
     return {
         "session_id": session_id,
         "task_progress": resources.get("task_progress", {}),
@@ -587,8 +441,8 @@ async def get_session_tool_resources(session_id: str):
 async def get_session_subagents(session_id: str):
     """返回当前活跃子会话的快照。"""
     try:
-        from subagent.orchestrator import get_orchestrator
-        orch = get_orchestrator()
+        from system.application import Application
+        orch = Application.current().subagent_orchestrator
         return {"session_id": session_id, "subagents": orch.get_snapshot(parent_session_id=session_id)}
     except Exception:
         return {"session_id": session_id, "subagents": {}}
@@ -637,17 +491,19 @@ async def http_ask(request_id: str, req: Request):
 async def http_interrupt(session_id: str):
     """通过 HTTP 处理中断请求，使其在 WS handler 被
     ``process_message()`` 阻塞时仍能生效。"""
-    if _agent_loop is not None and hasattr(_agent_loop, "interrupt"):
-        _agent_loop.interrupt(session_id)  # type: ignore[union-attr]
+    loop = _get_loop(session_id)
+    if loop is not None:
+        loop.interrupt()
     return {"interrupted": True, "session_id": session_id}
 
 
 @app.delete("/api/sessions/{session_id}")
 async def delete_session(session_id: str):
     """删除 session 及其持久化数据。"""
-    sessions.remove(session_id)
-    if _agent_loop is not None and hasattr(_agent_loop, "clear_session"):
-        _agent_loop.clear_session(session_id)  # type: ignore[union-attr]
+    _get_sm().remove(session_id)
+    loop = _get_loop(session_id)
+    if loop is not None:
+        loop.clear_session()
     # 停止该主会话下的所有子 Agent 并清理上下文
     try:
         orch = get_subagent_orchestrator()
@@ -666,7 +522,7 @@ async def update_session_message(session_id: str, message_index: int, req: Reque
     except Exception:
         body = {}
     content = body.get("content")
-    info = sessions.get(session_id)
+    info = _get_sm().get(session_id)
     if info and info.get("status") == "archived":
         result = {"updated": False, "error": "archived session cannot be edited", "session_id": session_id}
         return HTMLResponse(
@@ -674,9 +530,10 @@ async def update_session_message(session_id: str, message_index: int, req: Reque
             media_type="application/json",
             status_code=403,
         )
-    if _agent_loop is None or not hasattr(_agent_loop, "edit_session_message"):
+    loop = _get_loop(session_id)
+    if loop is None:
         return {"updated": False, "error": "agent loop not ready", "session_id": session_id}
-    result = _agent_loop.edit_session_message(session_id, message_index, content)  # type: ignore[union-attr]
+    result = loop.edit_session_message(message_index, content)
     status_code = 200 if result.get("updated") else 400
     return HTMLResponse(
         json.dumps(result, ensure_ascii=False),
@@ -688,7 +545,7 @@ async def update_session_message(session_id: str, message_index: int, req: Reque
 @app.delete("/api/sessions/{session_id}/messages")
 async def delete_session_messages(session_id: str, count: int = 1):
     """删除最后 count 个逻辑轮次的消息（从倒数第 count 条 user 起，覆盖其后所有 tool/assistant）。"""
-    info = sessions.get(session_id)
+    info = _get_sm().get(session_id)
     if info and info.get("status") == "archived":
         result = {"deleted": False, "error": "archived session"}
         return HTMLResponse(
@@ -696,9 +553,10 @@ async def delete_session_messages(session_id: str, count: int = 1):
             media_type="application/json",
             status_code=403,
         )
-    if _agent_loop is None or not hasattr(_agent_loop, "delete_session_messages"):
+    loop = _get_loop(session_id)
+    if loop is None:
         return {"deleted": False, "error": "agent loop not ready"}
-    result = _agent_loop.delete_session_messages(session_id, count)  # type: ignore[union-attr]
+    result = loop.delete_session_messages(count)
     status_code = 200 if result.get("deleted") else 400
     return HTMLResponse(
         json.dumps(result, ensure_ascii=False),
@@ -710,7 +568,7 @@ async def delete_session_messages(session_id: str, count: int = 1):
 @app.post("/api/sessions/{session_id}/regenerate")
 async def regenerate_response(session_id: str):
     """重新生成最后一条 user 消息的响应：截断历史，重新调用 process_message。"""
-    info = sessions.get(session_id)
+    info = _get_sm().get(session_id)
     if info and info.get("status") == "archived":
         result = {"regenerate": False, "error": "archived session"}
         return HTMLResponse(
@@ -718,10 +576,11 @@ async def regenerate_response(session_id: str):
             media_type="application/json",
             status_code=403,
         )
-    if _agent_loop is None:
+    loop = _get_loop(session_id)
+    if loop is None:
         return {"regenerate": False, "error": "agent loop not ready"}
     # 先截断历史
-    result = _agent_loop.regenerate_response(session_id)  # type: ignore[union-attr]
+    result = loop.regenerate_response()
     if not result.get("regenerate"):
         return HTMLResponse(
             json.dumps(result, ensure_ascii=False),
@@ -730,7 +589,7 @@ async def regenerate_response(session_id: str):
         )
     content: str = result.get("last_user_content", "")
     # 通知前端裁剪本地消息
-    ws = _tool_ws_sinks.get(session_id)
+    ws = _get_ws(session_id)
     if ws:
         try:
             await ws.send_text(
@@ -746,7 +605,7 @@ async def regenerate_response(session_id: str):
         except Exception:
             pass
         # 复用 process_message 流程（流式事件自动推送到 ws）
-        reply: str = await _agent_loop.process_message(session_id, content)  # type: ignore[union-attr]
+        reply: str = await loop.process_message(content)
         await ws.send_text(
             Message(
                 type=MessageType.AGENT_MESSAGE,
@@ -766,7 +625,7 @@ async def update_session_title(session_id: str, req: Request):
         title = str(body.get("title", "")).strip()[:50]
     except Exception:
         title = ""
-    sessions.update_title(session_id, title)
+    _get_sm().update_title(session_id, title)
     return {"updated": True, "session_id": session_id, "title": title}
 
 
@@ -774,10 +633,11 @@ async def update_session_title(session_id: str, req: Request):
 async def auto_title_session(session_id: str):
     """请求 LLM 根据 session 消息自动生成标题。"""
     title: str = ""
-    if _agent_loop is not None and hasattr(_agent_loop, "auto_generate_title"):
-        title = await _agent_loop.auto_generate_title(session_id)  # type: ignore[union-attr]
+    loop = _get_loop(session_id)
+    if loop is not None:
+        title = await loop.auto_generate_title()
     if title:
-        sessions.update_title(session_id, title)
+        _get_sm().update_title(session_id, title)
     return {"title": title, "session_id": session_id}
 
 
@@ -785,8 +645,9 @@ async def auto_title_session(session_id: str):
 async def auto_tags_session(session_id: str):
     """请求根据 session 摘要重新生成标签并持久化。"""
     tags: list[str] = []
-    if _agent_loop is not None and hasattr(_agent_loop, "regenerate_session_tags"):
-        tags = await _agent_loop.regenerate_session_tags(session_id)  # type: ignore[union-attr]
+    loop = _get_loop(session_id)
+    if loop is not None:
+        tags = await loop.regenerate_session_tags()
     return {"tags": tags, "session_id": session_id}
 
 
@@ -799,8 +660,9 @@ async def terminate_session_endpoint(session_id: str):
         await orch.terminate_parent(parent_session_id=session_id)
     except Exception:
         pass
-    if _agent_loop is not None and hasattr(_agent_loop, "terminate_session"):
-        result = await _agent_loop.terminate_session(session_id)  # type: ignore[union-attr]
+    loop = _get_loop(session_id)
+    if loop is not None:
+        result = await loop.terminate_session()
         return result
     return {"terminated": False, "error": "agent loop not ready", "session_id": session_id}
 
@@ -808,7 +670,7 @@ async def terminate_session_endpoint(session_id: str):
 @app.post("/api/sessions/{session_id}/pin")
 async def pin_session_endpoint(session_id: str):
     """切换 session 置顶状态。"""
-    pinned: bool = sessions.toggle_pin(session_id)
+    pinned: bool = _get_sm().toggle_pin(session_id)
     return {"pinned": pinned, "session_id": session_id}
 
 
@@ -826,23 +688,26 @@ async def merge_sessions_endpoint(req: Request):
     sources: list[str] = body.get("sources", [])
     if not sources:
         return {"error": "sources array required", "merged": False}
-    err = sessions.validate_merge_sources(sources)
+    err = _get_sm().validate_merge_sources(sources)
     if err:
         return {"error": err, "merged": False}
-    if _agent_loop is not None and hasattr(_agent_loop, "merge_sessions"):
-        result = await _agent_loop.merge_sessions(sources)  # type: ignore[union-attr]
-        return result
+    sm = _get_sm()
+    if sm is not None:
+        for _, loop in sm.get_all_loops().items():
+            result = await loop.merge_sessions(sources)
+            return result
     return {"error": "agent loop not ready", "merged": False}
 
 
 @app.post("/api/sessions/{session_id}/branch")
 async def branch_session_endpoint(session_id: str):
     """从指定会话创建分支延续（单源 merge 的快捷端点）。"""
-    err = sessions.validate_merge_sources([session_id])
+    err = _get_sm().validate_merge_sources([session_id])
     if err:
         return {"error": err, "merged": False}
-    if _agent_loop is not None and hasattr(_agent_loop, "merge_sessions"):
-        result = await _agent_loop.merge_sessions([session_id])  # type: ignore[union-attr]
+    loop = _get_loop(session_id)
+    if loop is not None:
+        result = await loop.merge_sessions([session_id])
         return result
     return {"error": "agent loop not ready", "session_id": session_id}
 
@@ -1018,9 +883,15 @@ async def download_workspace_file(file_path: str):
 @app.post("/api/shutdown-approval-model")
 async def shutdown_approval_model_endpoint():
     """关闭本地审批模型 (llama-server) 以释放显存。"""
-    from component.approval import shutdown_approval_model
-    ok = shutdown_approval_model()
-    return {"ok": ok}
+    try:
+        from system.application import Application
+        mgr = Application.current().approval_backend_manager
+        if mgr is not None:
+            await mgr.shutdown()
+            return {"ok": True}
+        return {"ok": False, "error": "approval_backend_manager not available"}
+    except Exception as exc:
+        return {"ok": False, "error": str(exc)}
 
 
 @app.get("/{full_path:path}")
@@ -1175,27 +1046,25 @@ async def _handle_file_upload(ws: WebSocket, sid: str, msg: Message) -> None:
 async def ws_chat(ws: WebSocket) -> None:
     """WebSocket 聊天端点：接收用户消息，转发给 AgentLoop，返回回复。"""
     await ws.accept()
-    # 保存事件循环引用，供后台 cron 任务线程调度协程使用
-    global _cron_push_loop
-    _cron_push_loop = _asyncio.get_running_loop()
     # 如果客户端请求恢复之前的 session
     qs: dict[str, list[str]] = parse_qs(ws.scope.get("query_string", b"").decode())
     resume: str | None = qs.get("resume", [None])[0]
     sid: str
-    if resume and sessions.exists(resume):
+    if resume and _get_sm().exists(resume):
         sid = resume
     else:
         # 尝试从磁盘加载（server 重启后恢复）
         if resume:
-            sessions.load_from_disk()
-            if sessions.exists(resume):
+            _get_sm().load_from_disk()
+            if _get_sm().exists(resume):
                 sid = resume
             else:
-                sid = sessions.create()
+                sid = _get_sm().create()
         else:
-            sid = sessions.create()
+            sid = _get_sm().create()
 
-    _tool_ws_sinks[sid] = ws  # 注册用于工具事件流推送
+    from system.application import Application as _AppInnerNew
+    _AppInnerNew.current().frontend_sink.register_ws(sid, ws)  # 注册用于工具事件流推送
     logger.info("WebSocket connected | session=%s", sid)
 
     # 为当前 session 创建专属 ParentAgentLoop，使 proxy 能正确路由调用
@@ -1263,44 +1132,40 @@ async def ws_chat(ws: WebSocket) -> None:
             pass
 
         # 恢复 session 时回放会话历史，使前端不为空白
-        if resume and sessions.exists(resume) and _agent_loop is not None:
-            get_messages = getattr(_agent_loop, "get_session_messages", None)
-            get_usage = getattr(_agent_loop, "get_token_usage", None)
-            get_context = getattr(_agent_loop, "get_context_tokens", None)
-            is_processing = getattr(_agent_loop, "is_processing", None)
-            if get_messages:
-                history: list[dict] = get_messages(sid)
-                usage: int = get_usage(sid) if get_usage else 0
-                context: int = get_context(sid) if get_context else 0
-                processing: bool = is_processing(sid) if is_processing else False
-                await ws.send_text(
-                    Message(
-                        type=MessageType.SYSTEM,
-                        session_id=sid,
-                        content=json.dumps({
-                            "session_history": history,
-                            "token_usage": usage,
-                            "context_tokens": context,
-                            "processing": processing,
-                        }, ensure_ascii=False),
-                    ).to_json()
-                )
+        loop = _get_loop(resume)
+        if resume and _get_sm().exists(resume) and loop is not None:
+            history: list[dict] = loop.get_session_messages()
+            usage: int = loop.get_token_usage()
+            context: int = loop.get_context_tokens()
+            processing: bool = loop.is_processing()
+            await ws.send_text(
+                Message(
+                    type=MessageType.SYSTEM,
+                    session_id=sid,
+                    content=json.dumps({
+                        "session_history": history,
+                        "token_usage": usage,
+                        "context_tokens": context,
+                        "processing": processing,
+                    }, ensure_ascii=False),
+                ).to_json()
+            )
 
         async def _handle_user_message(msg: Message) -> None:
             """后台处理用户消息，不阻塞 WebSocket 消息循环。"""
             nonlocal sid
             try:
                 # 从首条用户消息自动生成标题
-                session_info: dict | None = sessions.get(sid)
+                session_info: dict | None = _get_sm().get(sid)
                 if session_info and not session_info.get("title") and msg.content:
                     text_content: str = _extract_text(msg.content)
                     title: str = text_content.strip()[:30]
                     if len(text_content.strip()) > 30:
                         title += "..."
-                    sessions.update_title(sid, title)
-                sessions.update_last_activity(sid)
+                    _get_sm().update_title(sid, title)
+                _get_sm().update_last_activity(sid)
                 # 拦截 archived 会话的新消息
-                _session_info = sessions.get(sid)
+                _session_info = _get_sm().get(sid)
                 if _session_info and _session_info.get("status") == "archived":
                     await ws.send_text(
                         Message(
@@ -1310,7 +1175,8 @@ async def ws_chat(ws: WebSocket) -> None:
                         ).to_json()
                     )
                     return
-                if _agent_loop is not None:
+                loop = _get_loop(sid)
+                if loop is not None:
                     target_sessions: list[str] = msg.target_sessions or ["main"]
                     content = msg.content or ""
 
@@ -1355,8 +1221,8 @@ async def ws_chat(ws: WebSocket) -> None:
                                 f"{content}"
                             )
                         try:
-                            reply = await _agent_loop.process_message(  # type: ignore[union-attr]
-                                sid, main_content
+                            reply = await loop.process_message(
+                                main_content
                             )
                         except Exception as exc:
                             logger.exception("Agent loop error for session=%s", sid)
@@ -1373,11 +1239,11 @@ async def ws_chat(ws: WebSocket) -> None:
 
                     # 检查 ParentAgentLoop 是否旋转了会话（归档+新会话）
                     _old: str = sid
-                    _pop_rotated: Callable[[str], str] | None = getattr(_agent_loop, "pop_session_rotated", None)
-                    _rotated: str | None = _pop_rotated(sid) if callable(_pop_rotated) else None
+                    _rotated: str | None = loop.pop_session_rotated()
                     if _rotated:
-                        _tool_ws_sinks.pop(_old, None)  # 清理旧 session 映射
-                        _tool_ws_sinks[_rotated] = ws  # 注册新 sid 到 WebSocket 映射
+                        from system.application import Application as _FSApp
+                        _FSApp.current().frontend_sink.unregister_ws(_old)  # 清理旧 session 映射
+                        _FSApp.current().frontend_sink.register_ws(_rotated, ws)  # 注册新 sid 到 WebSocket 映射
                         sid = _rotated
                         await ws.send_text(
                             Message(
@@ -1400,19 +1266,19 @@ async def ws_chat(ws: WebSocket) -> None:
                     # 发送最终回复标记，兼容未启用流式的前端或 cron 回调路径
                     # 若前端已收到 stream_done，此消息会携带完整文本作为兜底
                     # 向前端发送实时 token 消耗更新
-                    get_usage = getattr(_agent_loop, "get_token_usage", None)
-                    get_context = getattr(_agent_loop, "get_context_tokens", None)
-                    if get_usage:
+                    try:
                         await ws.send_text(
                             Message(
                                 type=MessageType.SYSTEM,
                                 session_id=sid,
                                 content=json.dumps({
-                                    "token_usage": get_usage(sid),
-                                    "context_tokens": get_context(sid) if get_context else 0,
+                                    "token_usage": loop.get_token_usage(),
+                                    "context_tokens": loop.get_context_tokens(),
                                 }),
                             ).to_json()
                         )
+                    except Exception:
+                        logger.exception("Failed to send token usage update for session=%s", sid)
                     # 发送 agent 响应后，检查本回合是否请求了
                     # 代码进化完成，若是则触发优雅关闭。
                     from main import trigger_evolution_shutdown
@@ -1443,8 +1309,8 @@ async def ws_chat(ws: WebSocket) -> None:
 
             # 按类型路由
             if msg.type == MessageType.USER_MESSAGE:
-                # _agent_loop 未配置时直接报错退出（启动阶段保护）
-                if _agent_loop is None:
+                # agent loop 未配置时直接报错退出（启动阶段保护）
+                if _get_loop(sid) is None:
                     logger.error("ParentAgentLoop not configured; cannot handle chat messages")
                     sys.exit(0)
                 # 后台执行，不阻塞 WebSocket 消息循环
@@ -1468,8 +1334,9 @@ async def ws_chat(ws: WebSocket) -> None:
                         sink.resolve_ask(msg.request_id, option=msg.option, custom_text=msg.custom_text)
 
             elif msg.type == MessageType.INTERRUPT:
-                if _agent_loop is not None and hasattr(_agent_loop, "interrupt"):
-                    _agent_loop.interrupt(sid)  # type: ignore[union-attr]
+                loop = _get_loop(sid)
+                if loop is not None:
+                    loop.interrupt()
 
             elif msg.type == MessageType.FILE_UPLOAD:
                 await _handle_file_upload(ws, sid, msg)
@@ -1501,7 +1368,7 @@ async def ws_chat(ws: WebSocket) -> None:
 
     except WebSocketDisconnect:
         logger.info("WebSocket disconnected | session=%s", sid)
-    except _asyncio.CancelledError:
+    except asyncio.CancelledError:
         # uvicorn 关闭时取消 handler task，属于正常退出，无需记录为错误
         logger.debug("WebSocket handler cancelled for session=%s (server shutting down)", sid)
     except RuntimeError as exc:
@@ -1514,8 +1381,9 @@ async def ws_chat(ws: WebSocket) -> None:
             _sink._deny_session_confirms(sid)
             _sink._deny_session_asks(sid)
         # 修复：只有当前 sink 仍是本 ws 实例时才清理，避免切换会话时旧 ws 关闭 pop 掉新 ws
-        if _tool_ws_sinks.get(sid) is ws:
-            _tool_ws_sinks.pop(sid, None)
+        if _get_ws(sid) is ws:
+            from system.application import Application as _FSAppEnd
+            _FSAppEnd.current().frontend_sink.unregister_ws(sid)
 
 
 # ---------------------------------------------------------------------------

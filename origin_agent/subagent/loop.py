@@ -201,23 +201,11 @@ class SubAgentLoop(BaseAgentLoop):
         if _cron is not None:
             _cron.register(self.session_id, self)
         try:
-            # 若 _history 为空（非恢复会话），注入系统提示词和初始用户消息
-            if not self._history:
-                for sp in self._ctx.system_prompts:
-                    self._history.append({"role": Role.SYSTEM, "content": sp})
-                self._history.append({
-                    "role": Role.USER,
-                    "content": format_user_message(user_name, message_type, initial_prompt),
-                })
-            else:
-                # 恢复会话：确保 system prompts 在最前
-                if self._history[0].get("role") != Role.SYSTEM:
-                    for sp in reversed(self._ctx.system_prompts):
-                        self._history.insert(0, {"role": Role.SYSTEM, "content": sp})
-                self._history.append({
-                    "role": Role.USER,
-                    "content": format_user_message(user_name, message_type, initial_prompt),
-                })
+            # 注入初始用户消息（system prompt 由 _build_history_messages 通过 _build_system_prompt 处理）
+            self._history.append({
+                "role": Role.USER,
+                "content": format_user_message(user_name, message_type, initial_prompt),
+            })
 
             turn: int = 0
             while turn < self._max_turns:
@@ -226,7 +214,7 @@ class SubAgentLoop(BaseAgentLoop):
                 turn += 1
                 self._round_active = True  # 新一轮响应开始
 
-                # 调用 LLM
+                # 调用 LLM（_build_messages 通过 _build_history_messages 处理 system prompt + hooks）
                 messages: list[dict[str, Any]] = self._build_messages()
                 resp: LLMResponse = await self._llm.chat(messages, self._tools)
 
@@ -412,7 +400,8 @@ class SubAgentLoop(BaseAgentLoop):
     # ── 内部方法 ─────────────────────────────────────────────────────
 
     def _build_messages(self) -> list[dict[str, Any]]:
-        return list(self._history)
+        """构建 LLM 消息列表，通过基类 _build_history_messages() 处理 system prompt + hooks。"""
+        return self._build_history_messages()
 
     def _maybe_inject_inbox(self) -> bool:
         """若有收件箱消息，注入到历史。"""
@@ -529,13 +518,9 @@ class SubAgentLoop(BaseAgentLoop):
             if entry and entry.no_timeout:
                 timeout = 0
 
-            # 创建 ToolContext 并传递给 handler（替代直接调用 entry.handler）
+            # 通过 registry.async_dispatch 执行，正确传递 ToolContext
             tool_ctx = ToolContext(loop=self, session_id=self.session_id)
-
-            if entry is not None and entry.is_async:
-                coro: Any = entry.handler(args, context=tool_ctx)
-            else:
-                coro = asyncio.to_thread(entry.handler, args, context=tool_ctx)
+            coro = tool_registry.async_dispatch(tc.name, args, context=tool_ctx)
 
             if timeout:
                 result = await asyncio.wait_for(coro, timeout=timeout)

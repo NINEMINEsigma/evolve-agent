@@ -276,69 +276,7 @@ def _create_approval_backend(ctx: Any) -> ApprovalBackend | None:
     return None
 
 
-# ---------------------------------------------------------------------------
-# 统一审批后端实例（懒加载）
-# ---------------------------------------------------------------------------
-
-_approval_backend: ApprovalBackend | None = None
-_backend_lock = asyncio.Lock()
 _ENGINE_FAILED = object()
-
-
-async def _get_approval_backend() -> ApprovalBackend | None:
-    """懒加载全局审批后端单例。"""
-    global _approval_backend
-    if _approval_backend is not None and not isinstance(_approval_backend, FailedApprovalBackend):
-        return _approval_backend
-
-    async with _backend_lock:
-        if _approval_backend is not None and not isinstance(_approval_backend, FailedApprovalBackend):
-            return _approval_backend
-
-        try:
-            from system.context import get_runtime_context
-            ctx = get_runtime_context()
-        except Exception as exc:
-            logger.warning("Failed to get runtime context for approval backend: %s", exc)
-            _approval_backend = FailedApprovalBackend()
-            return None
-
-        backend = _create_approval_backend(ctx)
-        if backend is None:
-            logger.warning("No approval backend configured — handsfree mode will deny all")
-            _approval_backend = FailedApprovalBackend()
-            return None
-
-        if not await backend.is_available():
-            logger.warning("Approval backend not available — handsfree mode will deny all")
-            _approval_backend = FailedApprovalBackend()
-            return None
-
-        _approval_backend = backend
-        return backend
-
-
-def shutdown_approval_model() -> bool:
-    """安全关闭本地审批模型并释放显存。
-
-    返回 True 表示成功关闭或原本未在运行。
-    """
-    global _approval_backend
-    backend = _approval_backend
-    if backend is None or isinstance(backend, FailedApprovalBackend):
-        return True
-    try:
-        if isinstance(backend, LocalApprovalBackend):
-            engine = backend._get_engine()
-            if engine is not None:
-                engine.unload()
-        logger.info("Approval backend unloaded successfully")
-        _approval_backend = None
-        return True
-    except Exception as exc:
-        logger.warning("Failed to unload approval backend: %s", exc)
-        _approval_backend = FailedApprovalBackend()
-        return False
 
 
 # ---------------------------------------------------------------------------
@@ -358,7 +296,14 @@ async def _handsfree_confirm(
 
     返回 ApprovalResult，deny 时携带 LLM 生成的拒绝原因。
     """
-    backend = await _get_approval_backend()
+    backend = None
+    try:
+        from system.application import Application
+        mgr = Application.current().approval_backend_manager
+        if mgr is not None:
+            backend = await mgr.get_backend()
+    except Exception:
+        backend = None
     if backend is None:
         logger.warning("Approver not available — handsfree mode deny")
         return ApprovalResult(action="deny", deny_reason="Approval backend unavailable, auto-denied", denied_by="system")

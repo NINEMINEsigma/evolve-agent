@@ -115,6 +115,12 @@ class App:
         except Exception as exc:
             logger.warning("Background service cleanup failed: %s", exc)
 
+        # ---- 关闭 Application 子系统 ----
+        try:
+            await Application.current().shutdown()
+        except Exception as exc:
+            logger.warning("Application shutdown failed: %s", exc)
+
         logger.info("App shutdown complete")
         return self._exit_code
 
@@ -200,6 +206,8 @@ You can modify your own source code and complete evolution through the following
         app.approval_backend_manager = ApprovalBackendManager(self.ctx)
         app.cron_router = CronRouter()
         app.tool_registry = tool_registry
+        # 绑定关闭事件，供子系统优雅退出使用
+        app.link_shutdown_event(self._shutdown_event)
         # _app 已在 Application.__init__ 中设为全局单例
 
         # ---- 创建 agent 循环 ----
@@ -232,6 +240,17 @@ You can modify your own source code and complete evolution through the following
             set_agent_loop(agent_loop)
             set_dashboard_agent_loop(agent_loop)
             set_agentspace_path(self.ctx.agentspace)
+
+            # ---- 创建 SubAgentOrchestrator ----
+            try:
+                from subagent.orchestrator import SubAgentOrchestrator
+                orch = SubAgentOrchestrator()
+                orch.set_agent_loop(agent_loop)
+                Application.current().subagent_orchestrator = orch
+                logger.info("SubAgentOrchestrator initialized")
+            except Exception as exc:
+                logger.debug("SubAgentOrchestrator not available: %s", exc)
+
             logger.info("AgentLoop initialized | model=%s", self.ctx.llm_model)
         except Exception as exc:
             logger.warning("AgentLoop unavailable: %s", exc)
@@ -271,10 +290,6 @@ You can modify your own source code and complete evolution through the following
         )
         # 给 server 一点时间完成端口绑定
         await asyncio.sleep(0.5)
-
-        # 保存主事件循环，供 cron 后台线程调度协程使用
-        from gateway.server import set_cron_event_loop
-        set_cron_event_loop(asyncio.get_running_loop())
 
         logger.info("Gateway listening on ws://%s:%d/ws/chat", host, port)
         logger.info("WebPage on http://127.0.0.1:%d", port)

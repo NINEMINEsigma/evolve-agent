@@ -90,14 +90,16 @@ class SessionManager:
     ) -> ParentAgentLoop:
         """为 session 创建 ParentAgentLoop 实例。
 
-        若已有活跃的 loop 实例则先清理。
+        若已有活跃的 loop 实例则直接返回，避免 WebSocket
+        重连时丢失运行时状态。
         """
-        from entry.parent_agent_loop import ParentAgentLoop
+        # 已有 loop 则复用
+        existing = self._loops.get(session_id)
+        if existing is not None:
+            logger.debug("Reusing existing ParentAgentLoop for session=%s", session_id)
+            return existing
 
-        # 清理旧 loop
-        old = self._loops.pop(session_id, None)
-        if old is not None:
-            logger.debug("Replacing existing ParentAgentLoop for session=%s", session_id)
+        from entry.parent_agent_loop import ParentAgentLoop
 
         loop = ParentAgentLoop(
             app=self._app,

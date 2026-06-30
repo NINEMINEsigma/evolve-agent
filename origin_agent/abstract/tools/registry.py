@@ -10,6 +10,7 @@ generation 计数器支持外部缓存失效。
 """
 
 import asyncio
+import inspect
 import json
 import logging
 import threading
@@ -123,6 +124,25 @@ def invalidate_check_fn_cache() -> None:
     """丢弃所有缓存的 ``check_fn`` 结果。在影响工具可用性的配置变更后调用。"""
     with _check_fn_cache_lock:
         _check_fn_cache.clear()
+
+
+# ---------------------------------------------------------------------------
+# 工具 handler context 兼容性检查
+# ---------------------------------------------------------------------------
+
+def _handler_accepts_context(handler: Callable, context: Any) -> bool:
+    """检查 handler 是否声明了 ``context`` 参数。
+
+    仅当 ``context`` 非 None 且 handler 签名包含 ``context`` 形参时返回 True。
+    """
+    if context is None:
+        return False
+    try:
+        sig = inspect.signature(handler)
+        return "context" in sig.parameters
+    except (ValueError, TypeError):
+        # C 扩展或无法内省的可调用对象 — 保守地返回 False
+        return False
 
 
 # ---------------------------------------------------------------------------
@@ -477,10 +497,14 @@ class ToolRegistry:
 
     # -- 分发 ----------------------------------------------------------
 
-    def dispatch(self, name: str, args: dict, **kwargs: Any) -> Any:
-        """按名称执行工具 handler。
+    def dispatch(self, name: str, args: dict, context: Any = None) -> Any:
+        """同步分发 — 供非 async 上下文调用。
 
-        * 异步 handler 通过 ``asyncio.run()`` 自动桥接。
+        通过 ``inspect.signature`` 检查 handler 是否声明 ``context`` 参数。
+        仅当 handler 兼容时传递 ``context``，实现逐步迁移。
+
+        * 同步 handler 直接调用。
+        * 异步 handler 通过 ``asyncio.run()`` 桥接。
         * 所有异常被捕获并返回 ``{"error": "..."}``，保证一致的错误格式。
 
         返回 dict 或 str。
@@ -489,11 +513,41 @@ class ToolRegistry:
         if not entry:
             return {"error": f"Unknown tool: {name}"}
         try:
+            handler = entry.handler
+            _pass_context = _handler_accepts_context(handler, context)
+            kwargs: dict[str, Any] = {"context": context} if _pass_context else {}
+
             if entry.is_async:
-                return asyncio.run(entry.handler(args, **kwargs))
-            return entry.handler(args, **kwargs)
+                return asyncio.run(handler(args, **kwargs))
+            return handler(args, **kwargs)
         except Exception as e:
             logger.exception("Tool %s dispatch error: %s", name, e)
+            sanitized: str = f"Tool execution failed: {type(e).__name__}: {e}"
+            return {"error": sanitized}
+
+    async def async_dispatch(self, name: str, args: dict, context: Any = None) -> Any:
+        """异步分发 — 供 async 上下文调用。
+
+        与 ``dispatch()`` 语义相同，但：
+        * 同步 handler 通过 ``asyncio.to_thread`` 卸载到线程池避免阻塞事件循环。
+        * 异步 handler 直接 ``await``。
+        * **不** 处理超时 — 调用方自行 ``asyncio.wait_for``。
+
+        返回 dict 或 str。
+        """
+        entry: ToolEntry | None = self.get_entry(name)
+        if not entry:
+            return {"error": f"Unknown tool: {name}"}
+        try:
+            handler = entry.handler
+            _pass_context = _handler_accepts_context(handler, context)
+            kwargs: dict[str, Any] = {"context": context} if _pass_context else {}
+
+            if entry.is_async:
+                return await handler(args, **kwargs)
+            return await asyncio.to_thread(handler, args, **kwargs)
+        except Exception as e:
+            logger.exception("Tool %s async_dispatch error: %s", name, e)
             sanitized: str = f"Tool execution failed: {type(e).__name__}: {e}"
             return {"error": sanitized}
 

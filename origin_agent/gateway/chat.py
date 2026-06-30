@@ -71,6 +71,8 @@ class Message(BaseModel):
     reasoning_delta: str | None = None  # STREAM_DELTA：reasoning 增量
     finish_reason: str | None = None    # STREAM_DONE：结束原因或错误
     target_sessions: Optional[list[str]] = None  # USER_MESSAGE：目标会话列表
+    # tool_call / tool_result 相关字段
+    tool_call_id: str | None = None  # TOOL_CALL / TOOL_RESULT：工具调用 ID
 
     @classmethod
     def from_json(cls, raw: str) -> Message:
@@ -97,6 +99,7 @@ class Message(BaseModel):
             option=data.get("option"),
             custom_text=data.get("custom_text"),
             target_sessions=data.get("target_sessions"),
+            tool_call_id=data.get("tool_call_id"),
         )
 
     def to_json(self) -> str:
@@ -149,6 +152,8 @@ class Message(BaseModel):
             d["finish_reason"] = self.finish_reason
         if self.target_sessions is not None:
             d["target_sessions"] = self.target_sessions
+        if self.tool_call_id is not None:
+            d["tool_call_id"] = self.tool_call_id
         return json.dumps(d, ensure_ascii=False)
 
 

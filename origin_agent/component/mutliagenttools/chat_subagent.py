@@ -40,8 +40,8 @@ async def _handle_chat_subagent(args: dict[str, Any]) -> dict:
         return tool_error("'_session_id' is required and must not be empty")
 
     try:
-        from gateway.server import get_subagent_orchestrator
-        orch = get_subagent_orchestrator()
+        from system.application import Application
+        orch = Application.current().subagent_orchestrator
         result = await orch.chat(parent_session_id=parent_session_id, session_id=session_id, message=message, user_name=user_name, message_type=message_type)
         return tool_result(**result)
     except Exception as exc:

@@ -8,12 +8,10 @@
 
 from .context import SubRuntimeContext
 from .loop import SubAgentLoop
-from .orchestrator import SubAgentOrchestrator, get_orchestrator, set_orchestrator
+from .orchestrator import SubAgentOrchestrator
 
 __all__ = [
     "SubRuntimeContext",
     "SubAgentLoop",
     "SubAgentOrchestrator",
-    "get_orchestrator",
-    "set_orchestrator",
 ]

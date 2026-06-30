@@ -36,21 +36,6 @@ from .loop import SUB_MESSAGE_SEPARATOR, SubAgentLoop, format_user_message
 logger = logging.getLogger(__name__)
 
 
-def get_orchestrator() -> SubAgentOrchestrator:
-    """获取 SubAgentOrchestrator 实例。"""
-    from system.application import Application
-    orch = Application.current().subagent_orchestrator
-    if orch is None:
-        raise RuntimeError("SubAgentOrchestrator not initialized")
-    return orch
-
-
-def set_orchestrator(o: SubAgentOrchestrator) -> None:
-    """设置 SubAgentOrchestrator 实例。"""
-    from system.application import Application
-    Application.current().subagent_orchestrator = o
-
-
 class WaitingEntry:
     """等待队列条目。"""
 
