@@ -177,21 +177,19 @@ class SubAgentLoop(BaseAgentLoop):
         except Exception:
             logger.warning("Failed to emit subagent event role=%s", role, exc_info=True)
 
-    @staticmethod
-    def _is_readonly_tool(name: str) -> bool:
+    def _is_readonly_tool(self, name: str) -> bool:
         entry = tool_registry.get_entry(name)
         if entry is None:
             return False
         return entry.danger_level == ToolDangerLevel.readonly
 
-    @staticmethod
-    def _is_auto_approved_tool(tc: ToolCall) -> bool:
+    def _is_auto_approved_tool(self, name: str, args: dict) -> bool:
         """检查工具调用是否在 allowlist 中（始终自动批准）。"""
         try:
             from component.approval_allowlist import is_allowed
-            return is_allowed(tc.name, dict(tc.arguments) if tc.arguments else {})
+            return is_allowed(name, args)
         except Exception:
-            logger.warning("Failed to check approval allowlist for subagent tool=%s", tc.name, exc_info=True)
+            logger.warning("Failed to check approval allowlist for subagent tool=%s", name, exc_info=True)
             return False
 
     async def run(self, initial_prompt: str, user_name: str, message_type: str) -> None:
@@ -279,7 +277,7 @@ class SubAgentLoop(BaseAgentLoop):
                         tool_args=dict(tc.arguments) if tc.arguments else {},
                     )
 
-                    if self._is_readonly_tool(tc.name) or self._is_auto_approved_tool(tc):
+                    if self._is_readonly_tool(tc.name) or self._is_auto_approved_tool(tc.name, dict(tc.arguments) if tc.arguments else {}):
                         tool_msg = await self._execute_approved_tool(tc)
                     else:
                         tool_msg = await self._queue_for_approval(tc)
