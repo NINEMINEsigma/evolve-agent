@@ -15,7 +15,7 @@ import asyncio
 import logging
 import os
 from collections.abc import AsyncIterator
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Iterator, List, Optional
 
 import openai
 from pydantic import BaseModel, ConfigDict
@@ -153,22 +153,11 @@ class LLMClient:
                 msg: Any = choice.message
 
                 return LLMResponse(
-                    content=msg.content or "",
-                    tool_calls=[
-                        ToolCall(
-                            id=tc.id,
-                            name=tc.function.name,
-                            arguments=_safe_json_parse(tc.function.arguments),
-                        )
-                        for tc in (msg.tool_calls or [])
-                    ],
-                    finish_reason=choice.finish_reason or "stop",
-                    reasoning_content=msg.reasoning_content,
-                    usage=Usage(
-                        prompt_tokens=completion.usage.prompt_tokens if completion.usage else 0,
-                        completion_tokens=completion.usage.completion_tokens if completion.usage else 0,
-                        total_tokens=completion.usage.total_tokens if completion.usage else 0,
-                    ),
+                    content=_extract_content(msg),
+                    tool_calls=_extract_tool_calls(msg),
+                    finish_reason=_extract_finish_reason(choice),
+                    reasoning_content=_extract_reasoning(msg),
+                    usage=_extract_usage(completion),
                 )
             except (
                 openai.APIConnectionError,
@@ -215,14 +204,8 @@ class LLMClient:
                     async for chunk in stream:
                         # include_usage 模式下，OpenAI 在最终发送一个
                         # choices 为空但携带 usage 的独立 chunk，需要单独提取
-                        if not chunk.choices and chunk.usage:
-                            yield StreamChunk(
-                                usage=Usage(
-                                    prompt_tokens=chunk.usage.prompt_tokens,
-                                    completion_tokens=chunk.usage.completion_tokens,
-                                    total_tokens=chunk.usage.total_tokens,
-                                ),
-                            )
+                        if not chunk.choices and getattr(chunk, "usage", None):
+                            yield StreamChunk(usage=_extract_usage(chunk))
                             continue
 
                         choice = chunk.choices[0] if chunk.choices else None
@@ -232,8 +215,8 @@ class LLMClient:
                         if delta is None:
                             continue
 
-                        content_delta = delta.content or ""
-                        reasoning_delta = delta.reasoning_content or ""
+                        content_delta = _extract_content(delta)
+                        reasoning_delta = _extract_reasoning(delta) or ""
 
                         if content_delta:
                             content_buffer += content_delta
@@ -244,8 +227,7 @@ class LLMClient:
                             yield StreamChunk(reasoning_delta=reasoning_delta)
 
                         # 累积 tool_calls
-                        for tc in (delta.tool_calls or []):
-                            idx: int = tc.index
+                        for idx, tc_id, name_delta, args_delta in _iter_delta_tool_calls(delta):
                             if idx in completed_tool_indices:
                                 continue
                             buf = tool_buffers.setdefault(idx, {
@@ -253,16 +235,15 @@ class LLMClient:
                                 "name": "",
                                 "arguments": "",
                             })
-                            if tc.id:
-                                buf["id"] = tc.id
-                            if tc.function:
-                                if tc.function.name:
-                                    buf["name"] += tc.function.name
-                                if tc.function.arguments:
-                                    buf["arguments"] += tc.function.arguments
+                            if tc_id:
+                                buf["id"] = tc_id
+                            if name_delta:
+                                buf["name"] += name_delta
+                            if args_delta:
+                                buf["arguments"] += args_delta
 
                             # 当收集到 id、name 且 finish_reason 出现时认为完整
-                            finish = choice.finish_reason
+                            finish = _extract_finish_reason(choice)
                             if finish and buf["id"] and buf["name"]:
                                 completed_tool_indices.add(idx)
                                 yield StreamChunk(
@@ -273,7 +254,8 @@ class LLMClient:
                                     )
                                 )
 
-                        if choice.finish_reason:
+                        finish = _extract_finish_reason(choice)
+                        if finish:
                             # 某些 provider 在 finish_reason 时仍未触发 tool_call 完成，兜底
                             for idx, buf in tool_buffers.items():
                                 if idx in completed_tool_indices:
@@ -287,14 +269,9 @@ class LLMClient:
                                             arguments=_safe_json_parse(buf["arguments"]),
                                         )
                                     )
-                            usage = Usage(
-                                prompt_tokens=chunk.usage.prompt_tokens if chunk.usage else 0,
-                                completion_tokens=chunk.usage.completion_tokens if chunk.usage else 0,
-                                total_tokens=chunk.usage.total_tokens if chunk.usage else 0,
-                            )
                             yield StreamChunk(
-                                finish_reason=choice.finish_reason,
-                                usage=usage,
+                                finish_reason=finish,
+                                usage=_extract_usage(chunk),
                             )
 
                 return
@@ -331,6 +308,61 @@ class LLMClient:
 # ---------------------------------------------------------------------------
 
 
+def _extract_content(obj: Any) -> str:
+    """从 message/delta 对象中提取 assistant content。
+
+    部分 provider 或 SDK 版本可能不暴露 ``content`` 字段，统一做防御式提取。
+    """
+    if obj is None:
+        return ""
+    return getattr(obj, "content", None) or ""
+
+
+def _extract_reasoning(obj: Any) -> str | None:
+    """从 OpenAI SDK 的 delta/message 对象中提取 reasoning 内容。
+
+    不同 provider / SDK 版本对 reasoning 字段的命名和暴露方式不同：
+      - DeepSeek: ``reasoning_content``
+      - 某些 OpenAI 兼容接口: ``reasoning``
+      - 标准 OpenAI ``ChoiceDelta``: 可能不存在该字段
+
+    统一在此函数内做防御式提取，上层无需关心兼容细节，也便于
+    后续升级为按 provider 配置的适配器模式。
+    """
+    if obj is None:
+        return None
+    for attr in ("reasoning_content", "reasoning"):
+        value = getattr(obj, attr, None)
+        if value:
+            return value
+    return None
+
+
+def _extract_usage(obj: Any) -> Usage:
+    """从 completion/chunk 对象中提取 token 消耗。
+
+    某些 provider 在流式最终帧或特定错误场景下可能不返回 ``usage``，
+    统一返回零值 ``Usage()`` 作为兜底。
+    """
+    if obj is None:
+        return Usage()
+    usage = getattr(obj, "usage", None)
+    if usage is None:
+        return Usage()
+    return Usage(
+        prompt_tokens=getattr(usage, "prompt_tokens", 0) or 0,
+        completion_tokens=getattr(usage, "completion_tokens", 0) or 0,
+        total_tokens=getattr(usage, "total_tokens", 0) or 0,
+    )
+
+
+def _extract_finish_reason(choice: Any, default: str = "stop") -> str:
+    """从 choice 对象中提取 finish_reason，缺失时返回默认值。"""
+    if choice is None:
+        return default
+    return getattr(choice, "finish_reason", None) or default
+
+
 def _safe_json_parse(raw: str) -> dict[str, Any]:
     import dirtyjson
 
@@ -355,3 +387,67 @@ def _safe_json_parse(raw: str) -> dict[str, Any]:
         len(raw), raw[:300],
     )
     return {"_parse_error": True, "_raw_preview": raw[:TOOL_RESULT_PREVIEW_CHARS]}
+
+
+def _parse_tool_call(tc: Any) -> ToolCall | None:
+    """从完整的 tool_call 对象解析为 ToolCall。
+
+    对字段缺失做防御式处理：``id``、``function.name`` 任一缺失时返回 ``None``。
+    """
+    if tc is None:
+        return None
+    tc_id = getattr(tc, "id", None)
+    function = getattr(tc, "function", None)
+    if not tc_id or not function:
+        return None
+    name = getattr(function, "name", None)
+    if not name:
+        return None
+    arguments = getattr(function, "arguments", None) or ""
+    return ToolCall(
+        id=tc_id,
+        name=name,
+        arguments=_safe_json_parse(arguments),
+    )
+
+
+def _extract_tool_calls(obj: Any) -> list[ToolCall]:
+    """从 message 对象中提取完整的 tool_calls 列表。"""
+    if obj is None:
+        return []
+    tool_calls = getattr(obj, "tool_calls", None)
+    if not tool_calls:
+        return []
+    result: list[ToolCall] = []
+    for tc in tool_calls:
+        parsed = _parse_tool_call(tc)
+        if parsed:
+            result.append(parsed)
+    return result
+
+
+def _iter_delta_tool_calls(
+    delta: Any,
+) -> Iterator[tuple[int, str | None, str | None, str | None]]:
+    """从 ChoiceDelta 的 tool_calls 增量中安全提取片段。
+
+    返回 ``(index, id, name_delta, arguments_delta)`` 元组。任意字段缺失时以
+    ``None`` 占位，避免直接访问 ``tc.function.name`` 等可能不存在的属性。
+    """
+    if delta is None:
+        return
+    tool_calls = getattr(delta, "tool_calls", None)
+    if not tool_calls:
+        return
+    for tc in tool_calls:
+        idx = getattr(tc, "index", None)
+        if idx is None:
+            continue
+        tc_id = getattr(tc, "id", None) or None
+        function = getattr(tc, "function", None)
+        name_delta = None
+        arguments_delta = None
+        if function is not None:
+            name_delta = getattr(function, "name", None) or None
+            arguments_delta = getattr(function, "arguments", None) or None
+        yield idx, tc_id, name_delta, arguments_delta
