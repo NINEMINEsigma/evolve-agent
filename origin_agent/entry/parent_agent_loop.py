@@ -492,6 +492,7 @@ class ParentAgentLoop(BaseAgentLoop):
         tool_calls: list[ToolCall] = []
         finish_reason: str = "stop"
         usage: dict[str, int] = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
+        stream_error: str | None = None
 
         stream = self._llm.chat_stream(messages, tools=tools)
         try:
@@ -500,7 +501,8 @@ class ParentAgentLoop(BaseAgentLoop):
                     break
 
                 if chunk.error:
-                    raise RuntimeError(chunk.error)
+                    stream_error = chunk.error
+                    break
 
                 if chunk.content_delta:
                     content += chunk.content_delta
@@ -543,6 +545,9 @@ class ParentAgentLoop(BaseAgentLoop):
 
         if ev.is_set():
             finish_reason = "cancelled"
+
+        if stream_error:
+            raise RuntimeError(stream_error)
 
         if not ev.is_set() and usage["total_tokens"] == 0:
             raise RuntimeError(

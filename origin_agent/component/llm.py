@@ -12,11 +12,14 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import os
 from collections.abc import AsyncIterator
 from typing import Any, Iterator, Optional
 
+import httpcore
+import httpx
 import openai
 from pydantic import BaseModel, ConfigDict
 
@@ -190,97 +193,46 @@ class LLMClient:
 
         支持 content、reasoning_content 的增量输出，以及 tool_calls 的
         完整累积输出。流结束时会发出一个带 ``finish_reason`` 的空 chunk。
+
+        当底层连接在流传输过程中中断时，会尝试把已收到的内容拼回 prompt
+        并重新发起请求，让 LLM 从断点继续生成（应用层伪续传）。
         """
-        kwargs = self._build_kwargs(messages, tools, stream=True)
+        original_messages: list[dict[str, Any]] = list(messages)
+        state: dict[str, Any] = {
+            "content": "",
+            "reasoning": "",
+            "completed_tool_calls": [],
+            "pending_tool_buffers": {},
+            "finish_reason": None,
+        }
 
         for attempt in range(LLM_RETRY_COUNT):
+            resume_messages = (
+                original_messages
+                if attempt == 0
+                else _build_resume_messages(original_messages, state)
+            )
             try:
+                kwargs = self._build_kwargs(resume_messages, tools, stream=True)
                 async with await self._client.chat.completions.create(**kwargs) as stream:
-                    content_buffer: str = ""
-                    reasoning_buffer: str = ""
-                    tool_buffers: dict[int, dict[str, Any]] = {}
-                    completed_tool_indices: set[int] = set()
-                    pending_finish_reason: str | None = None
-                    pending_finish_usage: Usage | None = None
-
-                    async for chunk in stream:
-                        # TODO: include_usage 的 usage-only chunk 可能被 finish chunk 的零值 usage 覆盖。
-                        # OpenAI 流式接口在 stream_options.include_usage=True 时，通常会在 finish_reason
-                        # 之后再发一个 choices=[] 但带 usage 的独立 chunk。当前逻辑先把这个 usage 单独
-                        # yield 出去，随后又在带 finish_reason 的 chunk 上记录 pending_finish_usage；如果
-                        # 后者本身没有 usage，pending_finish_usage 就是零值，最终 finish chunk 会把真实
-                        # usage 覆盖为 0，导致 parent_agent_loop.py 抛出
-                        # "LLM provider did not return token usage for streaming response."。
-                        # 修复方向：维护一个跨 chunk 的最新非零 usage，避免用零值覆盖真实 usage。
-                        # include_usage 模式下，OpenAI 在最终发送一个
-                        # choices 为空但携带 usage 的独立 chunk，需要单独提取
-                        if not chunk.choices and getattr(chunk, "usage", None):
-                            yield StreamChunk(usage=_extract_usage(chunk))
-                            continue
-
-                        choice = chunk.choices[0] if chunk.choices else None
-                        if choice is None:
-                            continue
-                        delta = choice.delta
-                        if delta is None:
-                            continue
-
-                        content_delta = _extract_content(delta)
-                        reasoning_delta = _extract_reasoning(delta) or ""
-
-                        if content_delta:
-                            content_buffer += content_delta
-                            yield StreamChunk(content_delta=content_delta)
-
-                        if reasoning_delta:
-                            reasoning_buffer += reasoning_delta
-                            yield StreamChunk(reasoning_delta=reasoning_delta)
-
-                        # 累积 tool_calls
-                        for idx, tc_id, name_delta, args_delta in _iter_delta_tool_calls(delta):
-                            if idx in completed_tool_indices:
-                                continue
-                            buf = tool_buffers.setdefault(idx, {
-                                "id": "",
-                                "name": "",
-                                "arguments": "",
-                            })
-                            if tc_id:
-                                buf["id"] = tc_id
-                            if name_delta:
-                                buf["name"] += name_delta
-                            if args_delta:
-                                buf["arguments"] += args_delta
-
-                        # 某些 provider 会提前发送 finish_reason，此时 arguments 可能尚未
-                        # 累积完成。这里只记录 finish_reason，不提前 yield tool_call，
-                        # 等到流真正结束后再兜底输出所有未完成的 tool_call。
-                        finish = _extract_finish_reason(choice, None)
-                        if finish:
-                            pending_finish_reason = finish
-                            pending_finish_usage = _extract_usage(chunk)
-
-                    # 流结束：先 yield 所有未完成的 tool_call，再 yield finish_reason
-                    for idx, buf in tool_buffers.items():
-                        if idx in completed_tool_indices:
-                            continue
-                        if buf["id"] and buf["name"]:
-                            completed_tool_indices.add(idx)
-                            yield StreamChunk(
-                                tool_call=ToolCall(
-                                    id=buf["id"],
-                                    name=buf["name"],
-                                    arguments=_safe_json_parse(buf["arguments"]),
-                                )
-                            )
-
-                    if pending_finish_reason:
-                        yield StreamChunk(
-                            finish_reason=pending_finish_reason,
-                            usage=pending_finish_usage or Usage(),
-                        )
-
+                    async for chunk in self._consume_one_stream(stream, state):
+                        yield chunk
                 return
+            except _StreamInterruptedError:
+                logger.warning(
+                    "LLM stream interrupted (attempt %d/%d), resuming from breakpoint...",
+                    attempt + 1,
+                    LLM_RETRY_COUNT,
+                )
+                if attempt < LLM_RETRY_COUNT - 1:
+                    wait: float = BACKOFF_BASE * (2 ** attempt)
+                    await asyncio.sleep(wait)
+                else:
+                    logger.error("LLM stream resume attempts exhausted")
+                    yield StreamChunk(
+                        error="LLM stream interrupted and resume attempts exhausted."
+                    )
+                    return
             except (
                 openai.APIConnectionError,
                 openai.APITimeoutError,
@@ -288,14 +240,21 @@ class LLMClient:
                 openai.InternalServerError,
             ) as exc:
                 if attempt < LLM_RETRY_COUNT - 1:
-                    wait: float = BACKOFF_BASE * (2 ** attempt)
+                    wait = BACKOFF_BASE * (2 ** attempt)
                     logger.warning(
                         "LLM stream transient error (attempt %d/%d): %s. Retrying in %.1fs...",
-                        attempt + 1, LLM_RETRY_COUNT, exc, wait,
+                        attempt + 1,
+                        LLM_RETRY_COUNT,
+                        exc,
+                        wait,
                     )
                     await asyncio.sleep(wait)
                 else:
-                    logger.error("LLM stream transient error exhausted all %d retries: %s", LLM_RETRY_COUNT, exc)
+                    logger.error(
+                        "LLM stream transient error exhausted all %d retries: %s",
+                        LLM_RETRY_COUNT,
+                        exc,
+                    )
                     yield StreamChunk(error=f"{exc}")
                     return
             except openai.APIStatusError as exc:
@@ -307,6 +266,195 @@ class LLMClient:
                 logger.exception("LLM stream unexpected error")
                 yield StreamChunk(error=f"{exc}")
                 return
+
+    async def _consume_one_stream(
+        self,
+        stream: Any,
+        state: dict[str, Any],
+    ) -> AsyncIterator[StreamChunk]:
+        """消费单条流，更新状态并产出增量。
+
+        遇到可恢复网络错误时抛出 ``_StreamInterruptedError``，由 ``chat_stream``
+        外层决定是否续传；正常结束时 yield finish chunk。
+        """
+        content_buffer: str = state["content"]
+        reasoning_buffer: str = state["reasoning"]
+        # 每次新流都清空未完成的 tool_call buffer；已完成的由 completed_tool_calls 保留
+        state["pending_tool_buffers"] = {}
+        tool_buffers: dict[int, dict[str, Any]] = state["pending_tool_buffers"]
+        completed_tool_indices: set[int] = set()
+        pending_finish_reason: str | None = None
+        pending_finish_usage: Usage | None = None
+
+        try:
+            async for chunk in stream:
+                # TODO: include_usage 的 usage-only chunk 可能被 finish chunk 的零值 usage 覆盖。
+                # OpenAI 流式接口在 stream_options.include_usage=True 时，通常会在 finish_reason
+                # 之后再发一个 choices=[] 但带 usage 的独立 chunk。当前逻辑先把这个 usage 单独
+                # yield 出去，随后又在带 finish_reason 的 chunk 上记录 pending_finish_usage；如果
+                # 后者本身没有 usage，pending_finish_usage 就是零值，最终 finish chunk 会把真实
+                # usage 覆盖为 0，导致 parent_agent_loop.py 抛出
+                # "LLM provider did not return token usage for streaming response."。
+                # 修复方向：维护一个跨 chunk 的最新非零 usage，避免用零值覆盖真实 usage。
+                # include_usage 模式下，OpenAI 在最终发送一个
+                # choices 为空但携带 usage 的独立 chunk，需要单独提取
+                if not chunk.choices and getattr(chunk, "usage", None):
+                    yield StreamChunk(usage=_extract_usage(chunk))
+                    continue
+
+                choice = chunk.choices[0] if chunk.choices else None
+                if choice is None:
+                    continue
+                delta = choice.delta
+                if delta is None:
+                    continue
+
+                content_delta = _extract_content(delta)
+                reasoning_delta = _extract_reasoning(delta) or ""
+
+                if content_delta:
+                    content_buffer += content_delta
+                    state["content"] = content_buffer
+                    yield StreamChunk(content_delta=content_delta)
+
+                if reasoning_delta:
+                    reasoning_buffer += reasoning_delta
+                    state["reasoning"] = reasoning_buffer
+                    yield StreamChunk(reasoning_delta=reasoning_delta)
+
+                # 累积 tool_calls
+                for idx, tc_id, name_delta, args_delta in _iter_delta_tool_calls(delta):
+                    if idx in completed_tool_indices:
+                        continue
+                    buf = tool_buffers.setdefault(idx, {
+                        "id": "",
+                        "name": "",
+                        "arguments": "",
+                    })
+                    if tc_id:
+                        buf["id"] = tc_id
+                    if name_delta:
+                        buf["name"] += name_delta
+                    if args_delta:
+                        buf["arguments"] += args_delta
+
+                # 某些 provider 会提前发送 finish_reason，此时 arguments 可能尚未
+                # 累积完成。这里只记录 finish_reason，不提前 yield tool_call，
+                # 等到流真正结束后再兜底输出所有未完成的 tool_call。
+                finish = _extract_finish_reason(choice, None)
+                if finish:
+                    pending_finish_reason = finish
+                    pending_finish_usage = _extract_usage(chunk)
+
+        except Exception as exc:
+            if _is_retriable_stream_error(exc):
+                # 把已经完整累积的 tool_call 固化为已完成，未完成的丢弃
+                for idx, buf in tool_buffers.items():
+                    if idx in completed_tool_indices:
+                        continue
+                    if buf["id"] and buf["name"]:
+                        completed_tool_indices.add(idx)
+                        state["completed_tool_calls"].append(
+                            ToolCall(
+                                id=buf["id"],
+                                name=buf["name"],
+                                arguments=_safe_json_parse(buf["arguments"]),
+                            )
+                        )
+                state["pending_tool_buffers"] = tool_buffers
+                state["finish_reason"] = pending_finish_reason
+                raise _StreamInterruptedError(state) from exc
+            raise
+
+        # 流正常结束：先 yield 所有未完成的 tool_call，再 yield finish_reason
+        for idx, buf in tool_buffers.items():
+            if idx in completed_tool_indices:
+                continue
+            if buf["id"] and buf["name"]:
+                completed_tool_indices.add(idx)
+                tc = ToolCall(
+                    id=buf["id"],
+                    name=buf["name"],
+                    arguments=_safe_json_parse(buf["arguments"]),
+                )
+                state["completed_tool_calls"].append(tc)
+                yield StreamChunk(tool_call=tc)
+
+        state["pending_tool_buffers"] = tool_buffers
+
+        if pending_finish_reason:
+            yield StreamChunk(
+                finish_reason=pending_finish_reason,
+                usage=pending_finish_usage or Usage(),
+            )
+
+
+# ---------------------------------------------------------------------------
+# 续传 / 重试辅助
+# ---------------------------------------------------------------------------
+
+
+class _StreamInterruptedError(Exception):
+    """流式响应因可恢复网络错误中断，携带当前已累积状态。"""
+
+    def __init__(self, state: dict[str, Any]) -> None:
+        self.state = state
+
+
+def _is_retriable_stream_error(exc: Exception) -> bool:
+    """判断异常是否为流式传输过程中可恢复的网络错误。"""
+    retriable_types: tuple[type[Exception], ...] = (
+        openai.APIConnectionError,
+        openai.APITimeoutError,
+        openai.InternalServerError,
+    )
+    if isinstance(exc, retriable_types):
+        return True
+    if isinstance(exc, (httpx.ReadError, httpx.ConnectError, httpx.TimeoutException)):
+        return True
+    if isinstance(exc, (httpcore.ReadError, httpcore.ConnectError, httpcore.ConnectTimeout)):
+        return True
+    return False
+
+
+def _build_resume_messages(
+    original_messages: list[dict[str, Any]],
+    state: dict[str, Any],
+) -> list[dict[str, Any]]:
+    """根据已收状态构造续传 messages。
+
+    在原消息列表后追加 assistant 消息（包含已生成的 content/reasoning/
+    completed-tool-calls），再追加一条 user 提示让 LLM 从断点继续。
+    """
+    messages: list[dict[str, Any]] = list(original_messages)
+    assistant_content: str = state.get("content", "")
+    assistant_reasoning: str | None = state.get("reasoning") or None
+    completed_tool_calls: list[ToolCall] = state.get("completed_tool_calls", [])
+
+    assistant_msg: dict[str, Any] = {
+        "role": "assistant",
+        "content": assistant_content or " ",
+    }
+    if assistant_reasoning:
+        assistant_msg["reasoning_content"] = assistant_reasoning
+    if completed_tool_calls:
+        assistant_msg["tool_calls"] = [
+            {
+                "id": tc.id,
+                "type": "function",
+                "function": {
+                    "name": tc.name,
+                    "arguments": json.dumps(tc.arguments, ensure_ascii=False),
+                },
+            }
+            for tc in completed_tool_calls
+        ]
+    messages.append(assistant_msg)
+    messages.append({
+        "role": "user",
+        "content": "（网络连接短暂中断，请从刚才中断的位置继续输出，不要重复已生成的内容。）",
+    })
+    return messages
 
 
 # ---------------------------------------------------------------------------
