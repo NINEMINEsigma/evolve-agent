@@ -213,8 +213,8 @@ class SubAgentLoop(BaseAgentLoop):
                 turn += 1
                 self._round_active = True  # 新一轮响应开始
 
-                # 调用 LLM（_build_messages 通过 _build_history_messages 处理 system prompt + hooks）
-                messages: list[dict[str, Any]] = self._build_messages()
+                # 调用 LLM（基类 _build_history_messages 统一处理 system prompt + hooks + memory）
+                messages, _ = self._build_history_messages()
                 resp: LLMResponse = await self._llm.chat(messages, self._tools)
 
                 if self._cancel_event.is_set():
@@ -397,10 +397,6 @@ class SubAgentLoop(BaseAgentLoop):
         ]
 
     # ── 内部方法 ─────────────────────────────────────────────────────
-
-    def _build_messages(self) -> list[dict[str, Any]]:
-        """构建 LLM 消息列表，通过基类 _build_history_messages() 处理 system prompt + hooks。"""
-        return self._build_history_messages()
 
     def _maybe_inject_inbox(self) -> bool:
         """若有收件箱消息，注入到历史。"""

@@ -15,6 +15,8 @@ from typing import Any, TYPE_CHECKING
 from pydantic import BaseModel
 
 from entity.puretype import Role, ToolDangerLevel
+from entry.agent_support.messages import build_turn_messages, load_message_hooks
+from system.pathutils import find_repo_root
 
 if TYPE_CHECKING:
     from system.context import RuntimeContext
@@ -171,7 +173,7 @@ class BaseAgentLoop(ABC):
         self._history: list[dict[str, Any]] = []
         self._inbox: Inbox = Inbox()
         self._cancel_event: asyncio.Event = asyncio.Event()
-        self._hooks_context: str | None = None
+        self._message_hooks_cache: list[dict] | None = None
 
     @property
     def inbox(self) -> Inbox:
@@ -317,27 +319,42 @@ class BaseAgentLoop(ABC):
     def _append_history(self, entry: dict[str, Any]) -> None:
         self._history.append(entry)
 
-    def _build_history_messages(self) -> list[dict[str, Any]]:
-        """构建发送给 LLM 的完整历史消息列表（含 system prompt + hooks）。
+    def _load_message_hooks(self) -> list[dict]:
+        """加载 custom_hooks 目录中的消息扩展 hook，结果按 loop 实例缓存。"""
+        if self._message_hooks_cache is not None:
+            return self._message_hooks_cache
+        hooks = load_message_hooks(find_repo_root(), logger)
+        self._message_hooks_cache = hooks
+        return hooks
 
-        子类可重写以添加 memory 上下文等。
+    def _get_memory_context(self, user_message: str) -> str:
+        """返回当前回合的 memory 上下文；子类可重写，默认空。"""
+        _ = user_message  # 基类默认不使用，子类重写时消费
+        return ""
+
+    def _build_history_messages(
+        self, user_message: str = ""
+    ) -> tuple[list[dict[str, Any]], str]:
+        """构建发送给 LLM 的完整历史消息列表（含 system prompt + hooks + memory）。
+
+        返回 (messages, fixator_context)。fixator_context 由 hook_fixator 产生，
+        调用方如需持久化到磁盘可据此判断。
         """
-        messages: list[dict[str, Any]] = []
-        for sp in self._build_system_prompt():
-            messages.append({"role": Role.SYSTEM, "content": sp})
-        # 将 hooks 上下文拼接到最后一条 user 消息
-        history = list(self._history)
-        if self._hooks_context and history:
-            last_user_idx = None
-            for i in range(len(history) - 1, -1, -1):
-                if history[i].get("role") == Role.USER:
-                    last_user_idx = i
-                    break
-            if last_user_idx is not None:
-                old_content = history[last_user_idx].get("content", "")
-                history[last_user_idx] = {
-                    **history[last_user_idx],
-                    "content": (old_content if isinstance(old_content, str) else str(old_content)) + "\n\n" + self._hooks_context,
-                }
-        messages.extend(history)
-        return messages
+        system_prompts = self._build_system_prompt()
+        memory_ctx = self._get_memory_context(user_message)
+        hooks = self._load_message_hooks()
+        workspace = (
+            str(self.app.runtime_context.workspace)
+            if self.app.runtime_context is not None
+            else str(find_repo_root())
+        )
+        messages, fixator_context = build_turn_messages(
+            system_prompts=system_prompts,
+            history=self._history,
+            session_id=self.session_id,
+            workspace=workspace,
+            memory_ctx=memory_ctx,
+            hooks=hooks,
+            runtime_ctx=self.app.runtime_context,
+        )
+        return messages, fixator_context

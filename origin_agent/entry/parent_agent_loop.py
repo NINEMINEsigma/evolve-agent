@@ -22,7 +22,6 @@ from component.approval import ApprovalResult, ask_agent_reason, is_handsfree_mo
 from component.approval_allowlist import add_allowed as add_tool_allowlist_entry
 from component.approval_allowlist import is_allowed as is_tool_allowlisted
 from component.llm import LLMClient, LLMResponse, StreamChunk, ToolCall, Usage
-from system.pathutils import find_repo_root
 from system.session_store import SessionStore
 from entity.constant import LOG_PREVIEW_CHARS, TOOL_RESULT_PREVIEW_CHARS, TOOL_RESULT_SAVE_THRESHOLD_CHARS, AUTO_TITLE_CONTENT_MAX, MAX_TOOL_TURNS
 from entity.puretype import Role, ToolDangerLevel
@@ -31,9 +30,7 @@ from entry.agent_sink import AgentSink, FrontendSink
 from entry.agent_support.messages import (
     build_agent_system_prompt,
     build_full_history_messages,
-    build_turn_messages,
     collect_hooks_context,
-    load_message_hooks,
 )
 from entry.agent_support.multimodal import (
     build_image_content_blocks,
@@ -128,9 +125,6 @@ class ParentAgentLoop(BaseAgentLoop):
             disk_history = self._session_store.read_messages(self.session_id)
             if disk_history:
                 self._history = disk_history
-
-        # -- message hooks 缓存 --
-        self._message_hooks_cache: list[dict] | None = None
 
         # -- SubAgentOrchestrator（由 server 层注入） --
         self.subagent_orchestrator: Any = None
@@ -254,11 +248,6 @@ class ParentAgentLoop(BaseAgentLoop):
                 except Exception:
                     logger.exception("Failed to initialize memory provider for session=%s", sid)
 
-            # memory 预取
-            memory_ctx = self._memory.prefetch_all(
-                self._extract_text(user_message), session_id=sid
-            )
-
             # 历史过长时自动终结会话
             if self._is_context_over_limit():
                 new_sid: str | None = await self._rotate_session_for_continuation(
@@ -268,12 +257,9 @@ class ParentAgentLoop(BaseAgentLoop):
                 if new_sid:
                     sid = new_sid
                     self.session_id = new_sid
-                    memory_ctx = self._memory.prefetch_all(
-                        self._extract_text(user_message), session_id=sid
-                    )
 
-            # 构建消息列表
-            messages, fixator_context = self._build_messages(sid, user_message, memory_ctx)
+            # 构建消息列表（hook / memory / fixator 由基类统一处理）
+            messages, fixator_context = self._build_history_messages(user_message)
             if fixator_context:
                 self._update_last_user_message(sid, self._history[-1])
 
@@ -737,23 +723,11 @@ class ParentAgentLoop(BaseAgentLoop):
         self._history.append(entry)
         self._persist_message(session_id, entry)
 
-    def _build_messages(
-        self, session_id: str,
-        user_message: str | list[dict[str, Any]],
-        memory_ctx: str,
-    ) -> tuple[list[dict[str, Any]], str]:
-        system_prompts: list[str] = build_agent_system_prompt(
-            self.app.runtime_context,
-            self._collect_skill_prompts(),
-        )
-        return build_turn_messages(
-            system_prompts,
-            self._history,
-            session_id,
-            str(self.app.runtime_context.workspace),
-            memory_ctx,
-            self._load_message_hooks(),
-            self.app.runtime_context,
+    def _get_memory_context(self, user_message: str) -> str:
+        """主会话：通过 MemoryManager 预取当前回合的 memory 上下文。"""
+        return self._memory.prefetch_all(
+            self._extract_text(user_message),
+            session_id=self.session_id,
         )
 
     def _get_full_history(self, session_id: str) -> list[dict[str, Any]]:
@@ -1088,13 +1062,6 @@ class ParentAgentLoop(BaseAgentLoop):
     # ========================================================================
     # Hooks / Skill prompts
     # ========================================================================
-
-    def _load_message_hooks(self) -> list[dict]:
-        if self._message_hooks_cache is not None:
-            return self._message_hooks_cache
-        hooks = load_message_hooks(find_repo_root(), logger)
-        self._message_hooks_cache = hooks
-        return hooks
 
     def _get_hooks_context(self, session_id: str) -> str:
         return collect_hooks_context(
