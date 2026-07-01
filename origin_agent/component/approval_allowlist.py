@@ -59,7 +59,7 @@ def _load_store() -> list[dict[str, Any]]:
                 return [entry for entry in entries if isinstance(entry, dict)]
         return _empty_store()
     except Exception as exc:
-        logger.warning("Failed to load tool allowlist: %s", exc)
+        logger.exception("Failed to load tool allowlist: %s", exc)
         return _empty_store()
 
 
@@ -69,7 +69,7 @@ def _save_store(entries: list[dict[str, Any]]) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(entries, ensure_ascii=False, indent=2), encoding="utf-8")
     except Exception as exc:
-        logger.warning("Failed to save tool allowlist: %s", exc)
+        logger.exception("Failed to save tool allowlist: %s", exc)
 
 
 def is_allowed(tool_name: str, args: dict[str, Any]) -> bool:

@@ -225,7 +225,7 @@ def _write_stderr_log_header(server_name: str) -> None:
         fh.write(f"\n===== [{ts}] starting MCP server '{server_name}' =====\n")
         fh.flush()
     except Exception:
-        pass
+        logger.warning("Failed to write MCP stderr log for server='%s'", server_name, exc_info=True)
 
 # ---------------------------------------------------------------------------
 # Graceful import -- MCP SDK is an optional dependency
@@ -522,6 +522,8 @@ def _cache_mcp_image_block(block) -> str:
     """
     import base64
 
+    # 跨块类型的 duck typing 检查：不同 MCP 内容块类型不一定都有 data/mimeType，
+    # 这里有意使用 getattr 来兼容多种块类型，而不是假设固定属性存在。
     data = getattr(block, "data", None)
     mime_type = getattr(block, "mimeType", None)
     normalized_mime = str(mime_type or "").split(";", 1)[0].strip().lower()
@@ -609,6 +611,8 @@ def _validate_remote_mcp_url(server_name: str, url: Any) -> str:
 def _format_connect_error(exc: BaseException) -> str:
     """Render nested MCP connection errors into an actionable short message."""
 
+    # 跨异常类型的 duck typing 检查：不同异常类可能携带 exceptions/filename/__cause__/__context__
+    # 等可选属性，这里有意使用 getattr 来兼容多种异常类型，而不是假设固定属性存在。
     def _find_missing(current: BaseException) -> str | None:
         nested = getattr(current, "exceptions", None)
         if nested:
@@ -788,7 +792,7 @@ class SamplingHandler:
                 tc_list = []
                 for tu in tool_uses:
                     tc_list.append({
-                        "id": getattr(tu, "id", f"call_{len(tc_list)}"),
+                        "id": tu.id,
                         "type": "function",
                         "function": {
                             "name": tu.name,
@@ -882,7 +886,7 @@ class SamplingHandler:
             self.audit_level,
             "MCP server '%s' sampling response: model=%s, tokens=%s, tool_calls=%d",
             self.server_name, response.model,
-            getattr(getattr(response, "usage", None), "total_tokens", "?"),
+            response.usage.total_tokens,
             len(content_blocks),
         )
 
@@ -902,7 +906,7 @@ class SamplingHandler:
             self.audit_level,
             "MCP server '%s' sampling response: model=%s, tokens=%s",
             self.server_name, response.model,
-            getattr(getattr(response, "usage", None), "total_tokens", "?"),
+            response.usage.total_tokens,
         )
 
         return CreateMessageResult(
@@ -945,7 +949,7 @@ class SamplingHandler:
             )
 
         # Resolve model
-        model = self._resolve_model(getattr(params, "modelPreferences", None))
+        model = self._resolve_model(params.modelPreferences)
 
         # Get auxiliary LLM client. If no call_llm callback was provided,
         # return an error — the host application must supply this.
@@ -987,16 +991,16 @@ class SamplingHandler:
 
         # Forward server-provided tools
         call_tools = None
-        server_tools = getattr(params, "tools", None)
+        server_tools = params.tools
         if server_tools:
             call_tools = [
                 {
                     "type": "function",
                     "function": {
-                        "name": getattr(t, "name", ""),
-                        "description": getattr(t, "description", "") or "",
+                        "name": t.name,
+                        "description": t.description or "",
                         "parameters": _normalize_mcp_input_schema(
-                            getattr(t, "inputSchema", None)
+                            t.inputSchema
                         ),
                     },
                 }
@@ -1041,7 +1045,7 @@ class SamplingHandler:
             )
 
         # Guard against empty choices (content filtering, provider errors)
-        if not getattr(response, "choices", None):
+        if not response.choices:
             self.metrics["errors"] += 1
             return self._error(
                 f"LLM returned empty response (no choices) for server "
@@ -1051,7 +1055,7 @@ class SamplingHandler:
         # Track metrics
         choice = response.choices[0]
         self.metrics["requests"] += 1
-        total_tokens = getattr(getattr(response, "usage", None), "total_tokens", 0)
+        total_tokens = response.usage.total_tokens
         if isinstance(total_tokens, int):
             self.metrics["tokens_used"] += total_tokens
 
@@ -2186,7 +2190,7 @@ def _snapshot_child_pids() -> set:
         import psutil
         return {c.pid for c in psutil.Process(my_pid).children()}
     except Exception:
-        pass
+        logger.warning("Failed to enumerate child processes via psutil", exc_info=True)
 
     return set()
 
@@ -2311,7 +2315,7 @@ def _load_mcp_config() -> dict[str, dict]:
         # is a no-op stub that returns an empty dict.
         return {}
     except Exception as exc:
-        logger.debug("Failed to load MCP config: %s", exc)
+        logger.warning("Failed to load MCP config: %s", exc, exc_info=True)
         return {}
 
 
@@ -2924,7 +2928,7 @@ def _convert_mcp_schema(server_name: str, mcp_tool) -> dict:
     return {
         "name": prefixed_name,
         "description": mcp_tool.description or f"MCP tool {mcp_tool.name} from {server_name}",
-        "parameters": _normalize_mcp_input_schema(getattr(mcp_tool, "inputSchema", None)),
+        "parameters": _normalize_mcp_input_schema(mcp_tool.inputSchema),
     }
 
 
@@ -3337,7 +3341,7 @@ def register_mcp_servers(servers: dict[str, dict]) -> list[str]:
     with _lock:
         connected = [n for n in new_servers if n in _servers]
         new_tool_count = sum(
-            len(getattr(_servers[n], "_registered_tool_names", []))
+            len(_servers[n]._registered_tool_names)
             for n in connected
         )
     failed = len(new_servers) - len(connected)
@@ -3385,7 +3389,7 @@ def discover_mcp_tools() -> list[str]:
     with _lock:
         connected_server_names = [name for name in new_server_names if name in _servers]
         new_tool_count = sum(
-            len(getattr(_servers[name], "_registered_tool_names", []))
+            len(_servers[name]._registered_tool_names)
             for name in connected_server_names
         )
 
@@ -3503,7 +3507,7 @@ def probe_mcp_server_tools() -> dict[str, list[tuple]]:
             probed_servers.append(outcome)
             tools = []
             for t in outcome._tools:
-                desc = getattr(t, "description", "") or ""
+                desc = t.description or ""
                 tools.append((t.name, desc))
             result[name] = tools
 
@@ -3646,7 +3650,7 @@ def _stop_mcp_loop():
         try:
             loop.close()
         except Exception:
-            pass
+            logger.warning("Failed to close MCP event loop", exc_info=True)
         # After closing the loop, any stdio subprocesses that survived the
         # graceful shutdown are now orphaned — include active PIDs too
         # since the loop is gone and no session can still be in flight.

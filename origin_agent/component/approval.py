@@ -154,7 +154,7 @@ class LocalApprovalBackend(ApprovalBackend):
             logger.info("Local approval backend loaded | model=%s cuda=%s", model_path, cuda)
             return self._engine
         except Exception as exc:
-            logger.warning("Failed to initialize local approval backend: %s", exc)
+            logger.exception("Failed to initialize local approval backend: %s", exc)
             self._engine = _ENGINE_FAILED
             return None
 
@@ -302,7 +302,8 @@ async def _handsfree_confirm(
         mgr = Application.current().approval_backend_manager
         if mgr is not None:
             backend = await mgr.get_backend()
-    except Exception:
+    except Exception as exc:
+        logger.warning("Failed to resolve approval backend: %s", exc, exc_info=True)
         backend = None
     if backend is None:
         logger.warning("Approver not available — handsfree mode deny")
@@ -518,5 +519,5 @@ async def ask_agent_reason(
         )
         return resp.content or "(Agent did not provide an explanation)"
     except Exception as exc:
-        logger.warning("Failed to ask agent for clarification: %s", exc)
+        logger.exception("Failed to ask agent for clarification: %s", exc)
         return f"(Failed to get agent explanation: {exc})"

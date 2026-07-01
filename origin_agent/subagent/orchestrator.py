@@ -431,7 +431,7 @@ class _OrchestratorContext:
                 pending_approvals=pending,
             )
         except Exception as exc:
-            logger.debug("WS push for subagent %s failed: %s", session_id, exc)
+            logger.warning("WS push for subagent %s failed: %s", session_id, exc, exc_info=True)
 
     async def _start_subagent(
         self,
@@ -574,7 +574,11 @@ class _OrchestratorContext:
                 if loop is not None:
                     return loop
         except Exception:
-            pass
+            logger.warning(
+                "Failed to resolve real ParentAgentLoop for parent=%s; falling back to bootstrap loop",
+                self._parent_session_id,
+                exc_info=True,
+            )
         return self._agent_loop
 
     async def _cycle_loop(self) -> None:
@@ -675,7 +679,10 @@ class _OrchestratorContext:
             await loop.process_message(full_message)
             logger.debug("Subagent result injected to parent | parent=%s entries=%d", self._parent_session_id, len(messages))
         except Exception as exc:
-            logger.warning("Failed to inject subagent result for parent=%s: %s", self._parent_session_id, exc)
+            logger.exception(
+                "Failed to inject subagent result for parent=%s: %s",
+                self._parent_session_id, exc,
+            )
 
     @staticmethod
     def _history_path(session_id: str, name: str = "") -> Path:

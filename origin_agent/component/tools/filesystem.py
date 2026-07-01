@@ -1317,6 +1317,7 @@ def _is_text_file(path: Any) -> bool:
         sample: bytes = path.read_bytes()[:FILE_SNIFF_BYTES]
         return b"\x00" not in sample
     except Exception:
+        logger.warning("Failed to sniff file type: %s", path, exc_info=True)
         return False
 
 
@@ -1357,6 +1358,7 @@ def _handle_grep(args: dict[str, Any]) -> dict:
         try:
             content = p.read_text(encoding="utf-8", errors="replace")
         except Exception:
+            logger.warning("Failed to read file for search: %s", p, exc_info=True)
             continue
 
         lines = content.splitlines()

@@ -412,10 +412,12 @@ def _handle_gui_focus_window(args: dict[str, Any]) -> dict:
             win.focus()
     except Exception:
         # pygetwindow 的窗口 focus 在部分环境可能不可用
+        logger.warning("Window focus failed for \"%s\", trying minimize/restore", win.title, exc_info=True)
         try:
             win.minimize()
             win.restore()
         except Exception:
+            logger.warning("Window minimize/restore also failed for \"%s\"", win.title, exc_info=True)
             return tool_error(
                 f"无法聚焦窗口 \"{win.title}\"，请手动切换到该窗口",
                 title=win.title,
@@ -450,6 +452,7 @@ def _handle_gui_get_active_window(_args: dict[str, Any]) -> dict:
     try:
         win = _pygetwindow.getActiveWindow()
     except Exception:
+        logger.warning("Unable to get active window info", exc_info=True)
         return tool_error("Unable to get active window info")
 
     if win is None:

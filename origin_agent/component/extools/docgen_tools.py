@@ -42,8 +42,10 @@ def _check_node_docx() -> str | None:
             ["node", "-e", "require('docx')"],
             capture_output=True, text=True, timeout=10,
         )
-    except Exception:
-        return "docx npm package is required:\n  pnpm i -g docx"
+    except FileNotFoundError:
+        return "Node.js is required to generate docx documents. Install Node.js then run:\n  pnpm i -g docx"
+    except Exception as exc:
+        return f"docx npm package check failed: {exc}\n  pnpm i -g docx"
     return None
 
 
@@ -81,8 +83,8 @@ def _make_output_path(subdir: str, ext: str) -> tuple[Path, str]:
             out_dir.mkdir(parents=True, exist_ok=True)
             name = f"{uuid.uuid4().hex[:12]}.{ext}"
             return out_dir / name, f"{subdir}/{name}"
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.warning("Failed to create output dir in agentspace/%s: %s", subdir, exc, exc_info=True)
     # Fallback: cwd
     out_dir = Path.cwd() / subdir
     out_dir.mkdir(parents=True, exist_ok=True)

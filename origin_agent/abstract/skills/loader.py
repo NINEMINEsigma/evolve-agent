@@ -207,6 +207,7 @@ def list_skills(
                 content = skill_md.read_text(encoding="utf-8")
                 frontmatter, body_text = parse_frontmatter(content)
             except Exception:
+                logger.warning("Failed to parse skill frontmatter: %s", skill_md, exc_info=True)
                 continue
 
             name = str(frontmatter.get("name", skill_md.parent.name))

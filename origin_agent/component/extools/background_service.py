@@ -45,6 +45,7 @@ def _resolve_logical_path(logical: str) -> str | None:
         r = _get_sandbox().resolve(logical, Access.WRITE)
         return str(r.real)
     except Exception:
+        logger.warning("Failed to resolve background service path '%s'", logical, exc_info=True)
         return None
 
 
@@ -167,7 +168,7 @@ async def _handle_stop_background_service(args: dict[str, Any]) -> dict:
         try:
             _kill_proc_tree(pid)
         except Exception:
-            pass
+            logger.warning("Failed to kill background process PID=%d", pid, exc_info=True)
         return tool_result(
             stopped=True,
             task_id=task_id,
@@ -274,7 +275,7 @@ def stop_background_task(task_id: str) -> dict[str, Any]:
         try:
             _kill_proc_tree(pid)
         except Exception:
-            pass
+            logger.warning("Failed to kill background process PID=%d", pid, exc_info=True)
         return {"stopped": True, "task_id": task_id, "pid": pid, "message": f"已发送终止信号 (PID={pid})"}
 
     if task is None:

@@ -145,7 +145,7 @@ class SubAgentLoop(BaseAgentLoop):
                 from system.context import get_runtime_context
                 parent_api_key = get_runtime_context().llm_api_key
             except Exception:
-                pass
+                logger.warning("Failed to load parent API key for subagent; using empty fallback", exc_info=True)
 
         class _MockCtx:
             llm_api_key = ctx.api_key or parent_api_key or os.environ.get("OPENAI_API_KEY", "")
@@ -175,14 +175,14 @@ class SubAgentLoop(BaseAgentLoop):
             payload.update({k: v for k, v in fields.items() if v is not None})
             self._on_message(payload)
         except Exception:
-            pass
+            logger.warning("Failed to emit subagent event role=%s", role, exc_info=True)
 
     @staticmethod
     def _is_readonly_tool(name: str) -> bool:
         entry = tool_registry.get_entry(name)
         if entry is None:
             return False
-        return getattr(entry, "danger_level", "readonly") == "readonly"
+        return entry.danger_level == "readonly"
 
     @staticmethod
     def _is_auto_approved_tool(tc: ToolCall) -> bool:
@@ -191,6 +191,7 @@ class SubAgentLoop(BaseAgentLoop):
             from component.approval_allowlist import is_allowed
             return is_allowed(tc.name, dict(tc.arguments) if tc.arguments else {})
         except Exception:
+            logger.warning("Failed to check approval allowlist for subagent tool=%s", tc.name, exc_info=True)
             return False
 
     async def run(self, initial_prompt: str, user_name: str, message_type: str) -> None:
@@ -221,7 +222,7 @@ class SubAgentLoop(BaseAgentLoop):
                 if self._cancel_event.is_set():
                     return
 
-                reasoning_text = getattr(resp, "reasoning_content", None)
+                reasoning_text = resp.reasoning_content
 
                 if not resp.tool_calls:
                     # 文本回复 — 推入发件箱并发给前端

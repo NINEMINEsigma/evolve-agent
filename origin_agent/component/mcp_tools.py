@@ -167,7 +167,7 @@ def init_mcp(ctx: RuntimeContext) -> list[str]:
         logger.debug("MCP already initialized, skipping")
         return _get_registered_mcp_tools()
 
-    config_path = getattr(ctx, "mcp_config_path", None)
+    config_path = ctx.mcp_config_path
     if not config_path:
         logger.info("No mcp_config_path set — MCP servers disabled")
         return []

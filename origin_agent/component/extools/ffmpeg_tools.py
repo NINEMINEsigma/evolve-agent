@@ -34,6 +34,7 @@ def _ffmpeg_available() -> bool:
         )
         return True
     except Exception:
+        logger.warning("ffmpeg availability check failed", exc_info=True)
         return False
 
 
@@ -46,6 +47,7 @@ def _ffprobe_available() -> bool:
         )
         return True
     except Exception:
+        logger.warning("ffprobe availability check failed", exc_info=True)
         return False
 
 
@@ -433,7 +435,7 @@ def _handle_concat_media(args: dict[str, Any]) -> dict:
             try:
                 _os.unlink(list_path)
             except Exception:
-                pass
+                logger.warning("Failed to delete temporary concat list file: %s", list_path, exc_info=True)
 
     if proc.returncode != 0:
         return tool_error(

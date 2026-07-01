@@ -202,13 +202,14 @@ class EasysaveMemoryProvider(MemoryProvider):
         try:
             return load(f"session_{session_id}", str(self._session_path(session_id)))
         except Exception:
+            logger.warning("Failed to load session %s", session_id, exc_info=True)
             return None
 
     def _save_session(self, session_id: str, data: dict[str, Any]) -> None:
         try:
             save(f"session_{session_id}", str(self._session_path(session_id)), data)
         except Exception as exc:
-            logger.warning("Failed to save session %s: %s", session_id, exc)
+            logger.exception("Failed to save session %s: %s", session_id, exc)
 
     def _handle_recall(self, args: dict[str, Any]) -> str:
         sid: str = str(args.get("session_id", "")).strip()

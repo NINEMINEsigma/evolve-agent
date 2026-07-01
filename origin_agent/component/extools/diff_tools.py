@@ -192,7 +192,9 @@ def _compare_dirs(
         try:
             left_text: str = left_file.read_text(encoding="utf-8")
             right_text: str = right_file.read_text(encoding="utf-8")
-        except Exception:
+        except Exception as exc:
+            logger.warning("Failed to read file for diff %s: %s", rel_path, exc, exc_info=True)
+            diffs.append({"file": rel_path, "status": "error", "error": str(exc)})
             continue
 
         if left_text == right_text:

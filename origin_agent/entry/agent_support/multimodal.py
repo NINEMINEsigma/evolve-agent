@@ -29,7 +29,7 @@ def is_content_block_error(exc: Exception) -> bool:
         ]
         return any(k in msg for k in keywords)
     if isinstance(exc, _openai.APIStatusError):
-        if getattr(exc, "status_code", 0) != 400:
+        if exc.status_code != 400:
             return False
         keywords400: list[str] = ["image", "content", "unsupported"]
         return any(k in msg for k in keywords400)

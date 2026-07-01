@@ -163,7 +163,7 @@ class LLMClient:
                         for tc in (msg.tool_calls or [])
                     ],
                     finish_reason=choice.finish_reason or "stop",
-                    reasoning_content=getattr(msg, "reasoning_content", None),
+                    reasoning_content=msg.reasoning_content,
                     usage=Usage(
                         prompt_tokens=completion.usage.prompt_tokens if completion.usage else 0,
                         completion_tokens=completion.usage.completion_tokens if completion.usage else 0,
@@ -233,7 +233,7 @@ class LLMClient:
                             continue
 
                         content_delta = delta.content or ""
-                        reasoning_delta = getattr(delta, "reasoning_content", None) or ""
+                        reasoning_delta = delta.reasoning_content or ""
 
                         if content_delta:
                             content_buffer += content_delta
@@ -253,9 +253,9 @@ class LLMClient:
                                 "name": "",
                                 "arguments": "",
                             })
-                            if getattr(tc, "id", None):
+                            if tc.id:
                                 buf["id"] = tc.id
-                            if getattr(tc, "function", None):
+                            if tc.function:
                                 if tc.function.name:
                                     buf["name"] += tc.function.name
                                 if tc.function.arguments:
@@ -338,8 +338,17 @@ def _safe_json_parse(raw: str) -> dict[str, Any]:
         result = dirtyjson.loads(raw)
         if isinstance(result, dict):
             return result
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.warning(
+            "Failed to parse tool call arguments (%d chars): %s: %s",
+            len(raw), type(exc).__name__, exc,
+        )
+        return {
+            "_parse_error": True,
+            "_parse_error_type": type(exc).__name__,
+            "_parse_error_msg": str(exc),
+            "_raw_preview": raw[:TOOL_RESULT_PREVIEW_CHARS],
+        }
 
     logger.warning(
         "Failed to parse tool call arguments (%d chars): %s …",

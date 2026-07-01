@@ -60,7 +60,8 @@ async def _close_async_iterator(ait: Any) -> None:
     try:
         await ait.aclose()
     except Exception:
-        pass
+        # 迭代器已关闭或不可关闭；清理阶段失败不应中断主流程
+        logger.debug("Failed to close async iterator", exc_info=True)
 
 
 class ParentAgentLoop(BaseAgentLoop):
@@ -248,7 +249,7 @@ class ParentAgentLoop(BaseAgentLoop):
                     try:
                         provider.initialize(sid)
                     except Exception:
-                        pass
+                        logger.exception("Failed to initialize memory provider for session=%s", sid)
                 self._memory_initialized = True
 
             # memory 预取
@@ -457,7 +458,7 @@ class ParentAgentLoop(BaseAgentLoop):
                     if ws is not None:
                         await ws.send_text(msg.to_json())
                 except Exception as exc:
-                    logger.warning("Failed to send AGENT_MESSAGE for inbox processing: %s", exc)
+                    logger.exception("Failed to send AGENT_MESSAGE for inbox processing: %s", exc)
 
             return reply
 
@@ -831,7 +832,7 @@ class ParentAgentLoop(BaseAgentLoop):
                 try:
                     provider.initialize(new_sid)
                 except Exception:
-                    pass
+                    logger.exception("Failed to initialize memory provider for session=%s", new_sid)
             self._memory_initialized = True
 
         if self._session_store is not None:
@@ -839,7 +840,7 @@ class ParentAgentLoop(BaseAgentLoop):
                 resources = self._session_store.read_tool_resources(old_sid)
                 self._session_store.write_tool_resources(new_sid, resources)
             except Exception as exc:
-                logger.warning(
+                logger.exception(
                     "Failed to transfer tool resources from %s to %s: %s",
                     old_sid, new_sid, exc,
                 )
@@ -859,7 +860,7 @@ class ParentAgentLoop(BaseAgentLoop):
         try:
             self._session_store.append_message(session_id, entry)
         except Exception as exc:
-            logger.warning("Failed to persist message for session %s: %s", session_id, exc)
+            logger.exception("Failed to persist message for session %s: %s", session_id, exc)
 
     def _persist_token_usage(self, session_id: str) -> None:
         if self._session_store is None:
@@ -867,7 +868,7 @@ class ParentAgentLoop(BaseAgentLoop):
         try:
             self._session_store.write_token_usage(session_id, self._token_usage)
         except Exception as exc:
-            logger.warning("Failed to persist token usage for session %s: %s", session_id, exc)
+            logger.exception("Failed to persist token usage for session %s: %s", session_id, exc)
 
     def _load_token_usage_from_disk(self) -> int:
         if self._session_store is None:
@@ -875,7 +876,7 @@ class ParentAgentLoop(BaseAgentLoop):
         try:
             return self._session_store.read_token_usage(self.session_id)
         except Exception as exc:
-            logger.warning("Failed to load token usage for session %s: %s", self.session_id, exc)
+            logger.exception("Failed to load token usage for session %s: %s", self.session_id, exc)
             return 0
 
     def _remove_last_user_message(self, session_id: str) -> None:
@@ -886,7 +887,7 @@ class ParentAgentLoop(BaseAgentLoop):
         try:
             self._session_store.remove_last_user_message(session_id)
         except Exception as exc:
-            logger.warning(
+            logger.exception(
                 "Failed to remove last user message from disk for session %s: %s",
                 session_id, exc,
             )
@@ -906,7 +907,7 @@ class ParentAgentLoop(BaseAgentLoop):
                 lines[-1] = json.dumps(entry, ensure_ascii=False)
                 path.write_text("\n".join(lines) + "\n", encoding="utf-8")
         except Exception as exc:
-            logger.warning(
+            logger.exception(
                 "Failed to update last user message for session %s: %s",
                 session_id, exc,
             )
@@ -931,7 +932,8 @@ class ParentAgentLoop(BaseAgentLoop):
                 try:
                     summary = summary_path.read_text(encoding="utf-8")
                 except Exception:
-                    summary = ""
+                    # 摘要文件读取失败时回退为空，由 LLM 重新生成
+                    logger.exception("Failed to read persisted summary for session=%s", old_sid)
 
         # 若无持久化摘要，则 LLM 压缩生成
         if not summary:
@@ -942,13 +944,13 @@ class ParentAgentLoop(BaseAgentLoop):
             try:
                 self._session_store.write_summary(old_sid, summary)
             except Exception as exc:
-                logger.warning("Failed to write summary for session %s: %s", old_sid, exc)
+                logger.exception("Failed to write summary for session %s: %s", old_sid, exc)
 
         # 同步 memory
         try:
             self._memory.sync_all("", summary, session_id=old_sid)
         except Exception:
-            pass
+            logger.exception("Failed to sync memory for session=%s", old_sid)
 
         # 归档旧会话
         tags: list[str] = await self._generate_session_tags(old_sid)
@@ -988,7 +990,7 @@ class ParentAgentLoop(BaseAgentLoop):
         try:
             return self._session_store.read_messages(session_id)
         except Exception as exc:
-            logger.warning("Failed to load history for session %s: %s", session_id, exc)
+            logger.exception("Failed to load history for session %s: %s", session_id, exc)
             return []
 
     async def _summarize_session_history(self, session_id: str) -> str:
@@ -1009,7 +1011,7 @@ class ParentAgentLoop(BaseAgentLoop):
             ])
             return resp.content or ""
         except Exception as exc:
-            logger.warning("Failed to generate session summary: %s", exc)
+            logger.exception("Failed to generate session summary: %s", exc)
             return ""
 
     async def _generate_session_tags(self, session_id: str) -> list[str]:
@@ -1035,7 +1037,7 @@ class ParentAgentLoop(BaseAgentLoop):
             except json.JSONDecodeError:
                 pass
         except Exception as exc:
-            logger.warning("Failed to generate session tags: %s", exc)
+            logger.exception("Failed to generate session tags: %s", exc)
         return []
 
     def _build_inherited_context(self, old_sid: str, summary: str) -> str:
@@ -1090,7 +1092,7 @@ class ParentAgentLoop(BaseAgentLoop):
                 blocks.append("\n".join(lines))
             return blocks
         except Exception as e:
-            logger.warning(f"Failed to collect skill prompts: {e}")
+            logger.exception("Failed to collect skill prompts: %s", e)
             return []
 
     # ========================================================================
@@ -1108,7 +1110,7 @@ class ParentAgentLoop(BaseAgentLoop):
                 name=f"usage-push-{session_id}",
             )
         except Exception:
-            pass
+            logger.warning("Failed to schedule usage update for session=%s", session_id, exc_info=True)
 
     async def _emit_stream_done(
         self, session_id: str, stream_id: str, finish_reason: str
@@ -1119,7 +1121,10 @@ class ParentAgentLoop(BaseAgentLoop):
                 session_id, stream_id, finish_reason,
             )
         except Exception:
-            pass
+            logger.warning(
+                "Failed to emit stream_done for session=%s stream=%s",
+                session_id, stream_id, exc_info=True,
+            )
 
     # ========================================================================
     # 会话消息管理（供 server API 调用）
@@ -1170,7 +1175,7 @@ class ParentAgentLoop(BaseAgentLoop):
         try:
             self._session_store.overwrite_messages(session_id, self._history)
         except Exception as exc:
-            logger.warning("Failed to overwrite history file for session %s: %s", session_id, exc)
+            logger.exception("Failed to overwrite history file for session %s: %s", session_id, exc)
 
     def is_processing(self) -> bool:
         """返回当前是否正在处理消息。"""
@@ -1275,7 +1280,7 @@ class ParentAgentLoop(BaseAgentLoop):
             title = (resp.content or "").strip().strip("\"'")[:50]
             return title
         except Exception as exc:
-            logger.warning("Failed to auto-generate title: %s", exc)
+            logger.exception("Failed to auto-generate title: %s", exc)
             return ""
 
     async def regenerate_session_tags(self) -> list[str]:

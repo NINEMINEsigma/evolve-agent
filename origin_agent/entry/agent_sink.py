@@ -160,7 +160,7 @@ class FrontendSink(AgentSink):
         except Exception as exc:
             self._pending_confirms.pop(request_id, None)
             self._confirm_session_map.pop(request_id, None)
-            logger.warning("Failed to send confirm_request to session=%s: %s", session_id, exc)
+            logger.exception("Failed to send confirm_request to session=%s: %s", session_id, exc)
             return ApprovalResult(action="deny", deny_reason=f"Failed to push to frontend: {exc}", denied_by="system")
 
         try:
@@ -217,6 +217,7 @@ class FrontendSink(AgentSink):
         except Exception as exc:
             self._pending_asks.pop(request_id, None)
             self._ask_session_map.pop(request_id, None)
+            logger.exception("Failed to send ask_request to session=%s: %s", session_id, exc)
             return {"error": f"Failed to push question via WebSocket: {exc}"}
 
         try:
@@ -235,6 +236,7 @@ class FrontendSink(AgentSink):
         except Exception as exc:
             self._pending_asks.pop(request_id, None)
             self._ask_session_map.pop(request_id, None)
+            logger.exception("Failed to handle ask response for session=%s: %s", session_id, exc)
             return {"error": f"Question handling error: {exc}"}
 
     def resolve_ask(self, request_id: str, option: str | None = None,
@@ -354,7 +356,9 @@ class FrontendSink(AgentSink):
         try:
             await ws.send_text(msg.to_json())
         except Exception:
-            pass
+            logger.warning(
+                "Failed to send %s event to session=%s", event_type, session_id, exc_info=True
+            )
 
 
 class ParentAgentSink(AgentSink):
@@ -468,7 +472,9 @@ class ParentAgentSink(AgentSink):
                     self._loop._parent_session_id, stream_id, finish_reason,
                 )
         except Exception:
-            pass
+            logger.warning(
+                "Failed to forward stream_done to parent session=%s", session_id, exc_info=True
+            )
 
     async def emit_usage_update(self, session_id: str, token_usage: int,
                                 context_tokens: int) -> None:
@@ -481,7 +487,9 @@ class ParentAgentSink(AgentSink):
                     self._loop._parent_session_id, token_usage, context_tokens,
                 )
         except Exception:
-            pass
+            logger.warning(
+                "Failed to forward usage_update to parent session=%s", session_id, exc_info=True
+            )
 
     async def emit_progress(self, session_id: str, tool_name: str,
                             payload: str) -> None:
@@ -494,7 +502,9 @@ class ParentAgentSink(AgentSink):
                     self._loop._parent_session_id, tool_name, payload,
                 )
         except Exception:
-            pass
+            logger.warning(
+                "Failed to forward progress event to parent session=%s", session_id, exc_info=True
+            )
 
     async def emit_clipboard_display(self, session_id: str, tool_name: str,
                                      payload: str) -> None:
@@ -507,7 +517,9 @@ class ParentAgentSink(AgentSink):
                     self._loop._parent_session_id, tool_name, payload,
                 )
         except Exception:
-            pass
+            logger.warning(
+                "Failed to forward clipboard_display to parent session=%s", session_id, exc_info=True
+            )
 
     async def emit_subagent_update(self, session_id: str, payload: dict) -> None:
         """转发子 Agent 状态更新到父 Agent 前端。"""
@@ -519,4 +531,6 @@ class ParentAgentSink(AgentSink):
                     self._loop._parent_session_id, payload,
                 )
         except Exception:
-            pass
+            logger.warning(
+                "Failed to forward subagent_update to parent session=%s", session_id, exc_info=True
+            )

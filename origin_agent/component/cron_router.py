@@ -74,6 +74,7 @@ class CronRouter:
             try:
                 loop.schedule_inbox_processing()
             except Exception:
+                # cron 结果已安全存入 inbox，调度失败不丢失数据；记录异常供排查
                 logger.exception(
                     "Failed to schedule inbox processing for session=%s", session_id,
                 )

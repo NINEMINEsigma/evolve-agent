@@ -218,7 +218,7 @@ class BaseAgentLoop(ABC):
         entry = registry.get_entry(name)
         if entry is None:
             return False
-        return getattr(entry, "danger_level", "readonly") == "readonly"
+        return entry.danger_level == "readonly"
 
     def _is_auto_approved_tool(self, name: str, args: dict) -> bool:
         """检查工具是否在自动批准白名单中。"""
@@ -226,6 +226,7 @@ class BaseAgentLoop(ABC):
             from component.approval_allowlist import is_allowed
             return is_allowed(name, args)
         except Exception:
+            logger.exception("Failed to check approval allowlist for tool=%s", name)
             return False
 
     async def _execute_tool(self, tool_name: str, args: dict,

@@ -68,25 +68,32 @@ class Application:
     async def shutdown(self) -> None:
         """按依赖顺序停止子系统。"""
         logger.info("Application shutdown initiated")
+        failures: list[str] = []
         # 1. 停止 cron 后台任务
         if self.cron_router is not None:
             try:
                 await self.cron_router.shutdown()
             except Exception as exc:
-                logger.warning("CronRouter shutdown failed: %s", exc)
+                logger.exception("CronRouter shutdown failed: %s", exc)
+                failures.append(f"CronRouter: {exc}")
         # 2. 停止审批后端
         if self.approval_backend_manager is not None:
             try:
                 await self.approval_backend_manager.shutdown()
             except Exception as exc:
-                logger.warning("ApprovalBackendManager shutdown failed: %s", exc)
+                logger.exception("ApprovalBackendManager shutdown failed: %s", exc)
+                failures.append(f"ApprovalBackendManager: {exc}")
         # 3. 停止子 Agent 编排器
         if self.subagent_orchestrator is not None:
             try:
                 await self.subagent_orchestrator.shutdown_all()
             except Exception as exc:
-                logger.warning("SubAgentOrchestrator shutdown failed: %s", exc)
-        logger.info("Application shutdown complete")
+                logger.exception("SubAgentOrchestrator shutdown failed: %s", exc)
+                failures.append(f"SubAgentOrchestrator: {exc}")
+        if failures:
+            logger.error("Application shutdown completed with failures: %s", "; ".join(failures))
+        else:
+            logger.info("Application shutdown complete")
 
 
 class ApprovalBackendManager:

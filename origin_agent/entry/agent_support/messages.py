@@ -34,16 +34,22 @@ def load_message_hooks(repo_root: Path, logger: logging.Logger) -> list[dict]:
                 continue
             mod = importlib.util.module_from_spec(spec)
             spec.loader.exec_module(mod)
-            tag_fn = getattr(mod, "hook_tag_name", None)
-            msg_fn = getattr(mod, "hook_message", None)
-            fixator_fn = getattr(mod, "hook_fixator", None)
-            if callable(tag_fn) and (callable(msg_fn) or callable(fixator_fn)):
-                hooks.append({
-                    "tag_fn": tag_fn,
-                    "msg_fn": msg_fn if callable(msg_fn) else None,
-                    "fixator_fn": fixator_fn if callable(fixator_fn) else None,
-                })
-                logger.info("Loaded message hook: %s", fpath.name)
+            if (
+                hasattr(mod, "hook_tag_name")
+                and (hasattr(mod, "hook_message") or hasattr(mod, "hook_fixator"))
+            ):
+                tag_fn = mod.hook_tag_name
+                msg_fn = mod.hook_message if hasattr(mod, "hook_message") else None
+                fixator_fn = mod.hook_fixator if hasattr(mod, "hook_fixator") else None
+                if callable(tag_fn) and (callable(msg_fn) or callable(fixator_fn)):
+                    hooks.append({
+                        "tag_fn": tag_fn,
+                        "msg_fn": msg_fn if callable(msg_fn) else None,
+                        "fixator_fn": fixator_fn if callable(fixator_fn) else None,
+                    })
+                    logger.info("Loaded message hook: %s", fpath.name)
+                else:
+                    logger.info("Skipping %s: hook attributes are not callable", fpath.name)
             else:
                 logger.info("Skipping %s: missing hook_tag_name or hook_message/hook_fixator", fpath.name)
         except Exception:

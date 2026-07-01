@@ -214,7 +214,7 @@ class SessionManager:
                         logger.info("Recovered %d sessions from backup", len(data))
                         return self._upgrade_index_entries(data)
                 except Exception:
-                    logger.warning("Backup recovery failed")
+                    logger.exception("Backup recovery failed")
             return []
         try:
             data = json.loads(idx.read_text(encoding="utf-8"))
@@ -230,7 +230,7 @@ class SessionManager:
                         logger.info("Recovered %d sessions from backup", len(data))
                         return self._upgrade_index_entries(data)
                 except Exception:
-                    logger.warning("Backup also corrupted")
+                    logger.exception("Backup also corrupted")
             # 最终兜底：从会话目录重建索引
             logger.info("Rebuilding session index from directory scan")
             import time as _time
@@ -300,11 +300,11 @@ class SessionManager:
                 try:
                     shutil.copy2(idx, idx.with_suffix(".json.bak"))
                 except Exception:
-                    pass  # 备份失败不阻塞主流程
+                    logger.warning("Failed to backup session index", exc_info=True)  # 备份失败不阻塞主流程
             # 3. 原子替换
             tmp.replace(idx)
         except Exception as exc:
-            logger.warning("Failed to write session index: %s", exc)
+            logger.exception("Failed to write session index")
 
     def _write_index_locked(self, entries: list[dict]) -> None:
         """线程安全的 _write_index 包装。"""
@@ -323,7 +323,7 @@ class SessionManager:
                 if candidate.exists():
                     self._store_dir = candidate
             except Exception:
-                pass
+                logger.warning("Failed to resolve workspace sessions directory", exc_info=True)
         if not self._store_dir:
             return
         entries: list[dict] = self._read_index()

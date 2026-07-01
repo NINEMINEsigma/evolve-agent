@@ -22,7 +22,8 @@ from .filesystem import _s
 
 try:
     from PIL import Image as PILImage
-except Exception:  # pragma: no cover
+except Exception:  # pragma: no cover — PIL is optional
+    logger.debug("PIL not available; image size parsing disabled", exc_info=True)
     PILImage = None  # type: ignore
 
 logger = logging.getLogger(__name__)
@@ -54,6 +55,7 @@ def _parse_size(raw_bytes: bytes, mime_type: str) -> Tuple[Optional[int], Option
         with PILImage.open(io.BytesIO(raw_bytes)) as im:
             return im.width, im.height
     except Exception:
+        logger.warning("Failed to parse image dimensions", exc_info=True)
         return None, None
 
 

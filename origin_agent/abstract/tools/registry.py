@@ -114,6 +114,7 @@ def _check_fn_cached(fn: Callable) -> bool:
     try:
         value = bool(fn())
     except Exception:
+        logger.warning("Tool availability check failed", exc_info=True)
         value = False
     with _check_fn_cache_lock:
         _check_fn_cache[fn] = (now, value)
@@ -193,7 +194,7 @@ class ToolRegistry:
         try:
             return bool(check())
         except Exception:
-            logger.debug("Toolset %s check raised; marking unavailable", toolset)
+            logger.warning("Toolset %s check raised; marking unavailable", toolset, exc_info=True)
             return False
 
     # -- 查询方法 -----------------------------------------------------
@@ -284,6 +285,7 @@ class ToolRegistry:
                     if isinstance(overrides, dict):
                         schema_with_name.update(overrides)
                 except Exception as exc:
+                    # 动态 schema 覆盖失败属于可恢复降级：回退到静态 schema
                     logger.warning(
                         "dynamic_schema_overrides for tool %s raised %s; using static schema",
                         name, exc,
@@ -487,6 +489,7 @@ class ToolRegistry:
                     if isinstance(overrides, dict):
                         schema_with_name.update(overrides)
                 except Exception as exc:
+                    # 动态 schema 覆盖失败属于可恢复降级：回退到静态 schema
                     logger.warning(
                         "dynamic_schema_overrides for tool %s raised %s; "
                         "using static schema",

@@ -86,7 +86,7 @@ async def shutdown_subagent_orchestrator() -> None:
         if orch is not None:
             await orch.shutdown_all()
     except Exception as exc:
-        logger.debug("SubAgentOrchestrator shutdown skipped: %s", exc)
+        logger.warning("SubAgentOrchestrator shutdown skipped: %s", exc, exc_info=True)
 
 
 def get_subagent_orchestrator():
@@ -127,7 +127,7 @@ async def push_subagent_update(
             ).to_json()
         )
     except Exception as exc:
-        logger.debug("Failed to push subagent update to session=%s: %s", parent_session_id, exc)
+        logger.warning("Failed to push subagent update to session=%s: %s", parent_session_id, exc, exc_info=True)
 
 
 def set_agentspace_path(path: str | Path) -> None:
@@ -176,7 +176,7 @@ async def _send_tool_event(
             if loop.is_interrupted():
                 return
         except Exception:
-            pass
+            logger.warning("Failed to check interrupt state for session=%s", session_id, exc_info=True)
 
     ws: WebSocket | None = _get_ws(session_id)
     if ws is None:
@@ -191,7 +191,7 @@ async def _send_tool_event(
         try:
             await ws.send_text(msg.to_json())
         except Exception:
-            pass
+            logger.warning("Failed to push assistant_text to session=%s", session_id, exc_info=True)
         return
 
     # Handle usage update events
@@ -208,7 +208,7 @@ async def _send_tool_event(
         try:
             await ws.send_text(msg.to_json())
         except Exception:
-            pass
+            logger.warning("Failed to push usage_update to session=%s", session_id, exc_info=True)
         return
 
     # Handle task_progress events
@@ -227,7 +227,7 @@ async def _send_tool_event(
         try:
             await ws.send_text(msg.to_json())
         except Exception:
-            pass
+            logger.warning("Failed to push task_progress to session=%s", session_id, exc_info=True)
         return
 
     # Handle clipboard_display events
@@ -246,7 +246,7 @@ async def _send_tool_event(
         try:
             await ws.send_text(msg.to_json())
         except Exception:
-            pass
+            logger.warning("Failed to push clipboard_display to session=%s", session_id, exc_info=True)
         return
 
     # Handle stream delta events
@@ -268,7 +268,7 @@ async def _send_tool_event(
         try:
             await ws.send_text(msg.to_json())
         except Exception:
-            pass
+            logger.warning("Failed to push stream_delta to session=%s", session_id, exc_info=True)
         return
 
     # Handle stream done events
@@ -286,7 +286,7 @@ async def _send_tool_event(
         try:
             await ws.send_text(msg.to_json())
         except Exception:
-            pass
+            logger.warning("Failed to push stream_done to session=%s", session_id, exc_info=True)
         return
 
     msg_type: MessageType = MessageType.TOOL_CALL if event_type == "tool_call" else MessageType.TOOL_RESULT
@@ -311,7 +311,7 @@ async def _send_tool_event(
     except Exception:
         if event_type not in ("stream_delta", "usage_update"):
             logger.warning("[ws push fail] session=%s type=%s tool=%s", session_id, event_type, tool_name)
-        pass  # 客户端已断开 — 忽略
+        logger.warning("Failed to push %s event to session=%s", event_type, session_id, exc_info=True)  # 客户端已断开 — 忽略
 
 # ---------------------------------------------------------------------------
 # FastAPI app
@@ -358,6 +358,7 @@ def _compute_build_hash() -> str:
     try:
         return hashlib.md5(idx.read_bytes()).hexdigest()[:12]
     except Exception:
+        logger.warning("Failed to compute frontend build hash", exc_info=True)
         return ""
 
 
@@ -414,6 +415,7 @@ async def update_session_tags(session_id: str, req: Request):
     try:
         body = await req.json()
     except Exception:
+        logger.warning("Failed to parse tags request body for session=%s", session_id, exc_info=True)
         body = {}
     raw_tags = body.get("tags", [])
     if not isinstance(raw_tags, list):
@@ -455,6 +457,7 @@ async def http_confirm(request_id: str, req: Request):
     try:
         body = await req.json()
     except Exception:
+        logger.warning("Failed to parse confirm request body for request_id=%s", request_id, exc_info=True)
         body = {}
     action: str = str(body.get("action", "deny"))
     if action not in ("allow_once", "allow_always", "deny"):
@@ -477,6 +480,7 @@ async def http_ask(request_id: str, req: Request):
     try:
         body = await req.json()
     except Exception:
+        logger.warning("Failed to parse ask request body for request_id=%s", request_id, exc_info=True)
         body = {}
     option: str | None = str(body.get("option")) if body.get("option") is not None else None
     custom_text: str | None = str(body.get("custom_text")) if body.get("custom_text") is not None else None
@@ -509,7 +513,7 @@ async def delete_session(session_id: str):
         orch = get_subagent_orchestrator()
         await orch.shutdown_parent(session_id)
     except Exception:
-        pass
+        logger.warning("Failed to shutdown subagents for session=%s", session_id, exc_info=True)
     return {"deleted": True, "session_id": session_id}
 
 
@@ -520,6 +524,7 @@ async def update_session_message(session_id: str, message_index: int, req: Reque
     try:
         body = await req.json()
     except Exception:
+        logger.warning("Failed to parse edit message request body for session=%s", session_id, exc_info=True)
         body = {}
     content = body.get("content")
     info = _get_sm().get(session_id)
@@ -603,7 +608,7 @@ async def regenerate_response(session_id: str):
                 ).to_json()
             )
         except Exception:
-            pass
+            logger.warning("Failed to send regenerate_trim to session=%s", session_id, exc_info=True)
         # 复用 process_message 流程（流式事件自动推送到 ws）
         reply: str = await loop.process_message(content)
         await ws.send_text(
@@ -624,6 +629,7 @@ async def update_session_title(session_id: str, req: Request):
         body = await req.json()
         title = str(body.get("title", "")).strip()[:50]
     except Exception:
+        logger.warning("Failed to parse title request body for session=%s", session_id, exc_info=True)
         title = ""
     _get_sm().update_title(session_id, title)
     return {"updated": True, "session_id": session_id, "title": title}
@@ -659,7 +665,7 @@ async def terminate_session_endpoint(session_id: str):
         orch = get_subagent_orchestrator()
         await orch.terminate_parent(parent_session_id=session_id)
     except Exception:
-        pass
+        logger.warning("Failed to terminate subagents for session=%s", session_id, exc_info=True)
     loop = _get_loop(session_id)
     if loop is not None:
         result = await loop.terminate_session()
@@ -684,7 +690,7 @@ async def merge_sessions_endpoint(req: Request):
     try:
         body = await req.json()
     except Exception:
-        pass
+        logger.warning("Failed to parse merge request body", exc_info=True)
     sources: list[str] = body.get("sources", [])
     if not sources:
         return {"error": "sources array required", "merged": False}
@@ -1128,8 +1134,7 @@ async def ws_chat(ws: WebSocket) -> None:
                 ).to_json()
             )
         except Exception:
-            # RuntimeContext 未初始化时静默跳过（fallback 模式可能无 LLM）
-            pass
+            logger.warning("RuntimeContext not initialized, skipping server_info push", exc_info=True)  # fallback 模式可能无 LLM
 
         # 恢复 session 时回放会话历史，使前端不为空白
         loop = _get_loop(resume)
@@ -1195,7 +1200,7 @@ async def ws_chat(ws: WebSocket) -> None:
                                 for sess_id, info in snapshot.items():
                                     name_map[sess_id] = info.get("name", "")
                             except Exception:
-                                pass
+                                logger.warning("Failed to get subagent snapshot for session=%s", sid, exc_info=True)
                             for sub_id in sub_ids:
                                 other_ids = [o for o in sub_ids if o != sub_id]
                                 other_names = [name_map.get(o, o) for o in other_ids]

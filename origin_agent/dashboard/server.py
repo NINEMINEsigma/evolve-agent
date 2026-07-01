@@ -92,6 +92,7 @@ def _list_skills() -> list[dict[str, Any]]:
             meta["path"] = str(skill_file)
             result.append(meta)
         except Exception:
+            logger.warning("Failed to parse skill file: %s", skill_file, exc_info=True)
             continue
     return result
 
@@ -118,7 +119,7 @@ def _list_memory_sessions() -> list[dict[str, Any]]:
                     try:
                         last_active = sp.stat().st_mtime
                     except OSError:
-                        pass
+                        logger.debug("Failed to stat session file: %s", sp, exc_info=True)
                 result.append({
                     "session_id": sid,
                     "size_bytes": size,
@@ -126,7 +127,7 @@ def _list_memory_sessions() -> list[dict[str, Any]]:
                     "last_active": last_active,
                 })
     except Exception:
-        pass
+        logger.warning("Failed to list memory sessions", exc_info=True)
     return result
 
 

@@ -314,19 +314,21 @@ You can modify your own source code and complete evolution through the following
             from gateway.server import shutdown_subagent_orchestrator
             await shutdown_subagent_orchestrator()
         except Exception:
-            pass
+            logger.warning("Failed to shutdown subagent orchestrator", exc_info=True)
         # 关闭 MCP server 连接（释放子进程、后台线程）
         try:
             import component.mcp_tools
             component.mcp_tools.shutdown_mcp()
         except Exception:
-            pass
+            logger.warning("Failed to shutdown MCP tools", exc_info=True)
         self._gateway_server.should_exit = True  # type: ignore[union-attr]
         self._gateway_task.cancel()
         try:
             await self._gateway_task
-        except (asyncio.CancelledError, Exception):
+        except asyncio.CancelledError:
             pass
+        except Exception:
+            logger.warning("Failed to await gateway task during shutdown", exc_info=True)
         logger.info("Gateway stopped")
 
     async def _drain_background_tasks(self, timeout: float = 5.0) -> None:

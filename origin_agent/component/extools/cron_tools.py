@@ -249,7 +249,7 @@ def _save_all_tasks() -> None:
         )
         tmp_path.replace(store_path)
     except Exception as exc:
-        logger.warning("Failed to save cron jobs: %s", exc)
+        logger.error("Failed to save cron jobs: %s", exc)
 
 
 def _load_all_tasks() -> None:
@@ -378,6 +378,7 @@ def _resolve_cwd(cwd: str) -> str:
         r = _get_sandbox().resolve(cwd, Access.READ)
         return str(r.real)
     except Exception:
+        logger.error("Failed to resolve cron cwd '%s', falling back to '%s'", cwd, Path.cwd(), exc_info=True)
         return str(Path.cwd())
 
 
@@ -390,6 +391,7 @@ def _resolve_log_path(log_path: str) -> str | None:
         r = _get_sandbox().resolve(log_path, Access.WRITE)
         return str(r.real)
     except Exception:
+        logger.error("Failed to resolve cron log path '%s'", log_path, exc_info=True)
         return None
 
 
@@ -1414,4 +1416,4 @@ Waits non-blockingly for the specified number of seconds, then sends a [cron-res
 try:
     _load_all_tasks()
 except Exception:
-    pass
+    logger.exception("Failed to load persisted cron jobs on startup")

@@ -72,7 +72,7 @@ def _resolve_ab_cmd() -> str | None:
             logger.info("agent-browser resolved via pnpm exec")
             return _AB_CMD
     except Exception as exc:
-        logger.debug("pnpm exec failed: %s", exc)
+        logger.warning("agent-browser binary lookup via pnpm exec failed: %s", exc, exc_info=True)
 
     # ------------------------------------------------------------------
     # 1. Python shutil.which() — uses os.environ["PATH"]
@@ -84,7 +84,7 @@ def _resolve_ab_cmd() -> str | None:
                 _AB_CMD = p
                 return _AB_CMD
         except Exception:
-            pass
+            logger.warning("shutil.which lookup failed for %s", name, exc_info=True)
 
     # ------------------------------------------------------------------
     # 2. pnpm bin -g — get the global bin directory from pnpm directly.
@@ -105,7 +105,7 @@ def _resolve_ab_cmd() -> str | None:
                         logger.info("Found agent-browser via pnpm bin: %s", p)
                         return _AB_CMD
     except Exception as exc:
-        logger.debug("pnpm bin -g failed: %s", exc)
+        logger.warning("agent-browser binary lookup via pnpm bin -g failed: %s", exc, exc_info=True)
 
     # ------------------------------------------------------------------
     # 3. npx --no-install — Node.js global package resolver
@@ -123,7 +123,7 @@ def _resolve_ab_cmd() -> str | None:
             logger.info("agent-browser resolved via npx --no-install")
             return _AB_CMD
     except Exception as exc:
-        logger.debug("npx --no-install failed: %s", exc)
+        logger.warning("agent-browser binary lookup via npx --no-install failed: %s", exc, exc_info=True)
 
     # ------------------------------------------------------------------
     # 4. Hardcoded common global install directories
@@ -268,7 +268,7 @@ def _ws_path(*parts: str) -> tuple[Path, str]:
             fs_path.parent.mkdir(parents=True, exist_ok=True)
             return fs_path, rel
         except Exception:
-            pass
+            logger.warning("Failed to resolve ws: path for browser output: %s", rel, exc_info=True)
     fs_path = (Path.cwd() / rel.replace("/", "\\")).resolve()
     fs_path.parent.mkdir(parents=True, exist_ok=True)
     return fs_path, rel

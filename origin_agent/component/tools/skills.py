@@ -34,8 +34,9 @@ def _format_skill_list(skills_dir: Path | None = None) -> dict:
     skills: list[dict]
     try:
         skills = list_skills(skills_dir=skills_dir or _skills_dir())
-    except Exception:
-        return {"error": "Failed to list skills", "skills": []}
+    except Exception as exc:
+        logger.exception("Failed to list skills: %s", exc)
+        return {"error": f"Failed to list skills: {exc}", "skills": []}
     result: list[dict] = []
     for s in skills:
         result.append({

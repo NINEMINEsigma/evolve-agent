@@ -42,7 +42,7 @@ def _load_cache() -> dict[str, bool]:
         if path.exists():
             return json.loads(path.read_text(encoding="utf-8"))
     except Exception:
-        pass
+        logger.warning("Failed to load vision capability cache", exc_info=True)
     return {}
 
 
@@ -84,7 +84,7 @@ def _is_vision_rejection(exc: Exception) -> bool:
         ]
         return any(k in msg for k in keywords)
     if isinstance(exc, _openai.APIStatusError):
-        if getattr(exc, "status_code", 0) == 400:
+        if exc.status_code == 400:
             return any(k in msg for k in ["image", "content", "unsupported"])
     return False
 

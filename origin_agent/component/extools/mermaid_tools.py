@@ -161,7 +161,7 @@ def _resolve_ws_path(path: str) -> tuple[Path, Path | None]:
             agentspace = sb._ctx.agentspace
             return resolved.real, agentspace
         except Exception:
-            pass
+            logger.warning("Failed to resolve mermaid path: %s", path, exc_info=True)
     # Fallback
     if path.startswith("ws:"):
         rel = path[3:].lstrip("/\\")
@@ -179,7 +179,7 @@ def _resolve_ws_dir_for_write(path: str) -> tuple[Path, Path | None]:
                 rel = path[3:].lstrip("/\\")
                 return agentspace / rel, agentspace
         except Exception:
-            pass
+            logger.warning("Failed to resolve mermaid output dir: %s", path, exc_info=True)
     if path.startswith("ws:"):
         rel = path[3:].lstrip("/\\")
         return Path.cwd() / rel, None

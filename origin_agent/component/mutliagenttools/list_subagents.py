@@ -9,9 +9,13 @@ from __future__ import annotations
 
 from typing import Any
 
+import logging
+
 from abstract.tools.registry import registry, tool_result
 
 from ._store import _subagent_registry
+
+logger = logging.getLogger(__name__)
 
 
 async def _handle_list_subagents(args: dict[str, Any]) -> dict:
@@ -38,7 +42,7 @@ async def _handle_list_subagents(args: dict[str, Any]) -> dict:
                         "feedback_count": len(info.get("feedback", [])),
                     }
         except Exception:
-            pass
+            logger.warning("Failed to get subagent snapshot for session=%s", parent_session_id, exc_info=True)
 
     # 为每个注册项注入 session 字段
     agents: dict[str, dict[str, Any]] = {}

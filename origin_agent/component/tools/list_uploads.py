@@ -78,7 +78,11 @@ def _handle_list_uploads(args: dict[str, Any]) -> dict:
                 "path": f"ws:uploads/{name}",
             })
         except Exception as exc:
-            logger.debug("skipping %s: %s", name, exc)
+            logger.warning("Skipping upload entry %s: %s", name, exc, exc_info=True)
+            entries.append({
+                "filename": name,
+                "error": f"Failed to stat file: {exc}",
+            })
             continue
 
     # 按真实上传时间降序排列，取前 n 个

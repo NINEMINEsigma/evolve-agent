@@ -305,6 +305,7 @@ class MemoryManager:
         每个非空块标注 provider 名称。
         """
         blocks: list[str] = []
+        failures: list[str] = []
         for provider in self._providers:
             try:
                 block: str = provider.system_prompt_block()
@@ -312,10 +313,15 @@ class MemoryManager:
                     blocks.append(block)
             except Exception as e:
                 logger.warning(
-                    "Memory provider '%s' system_prompt_block() failed: %s",
+                    "Memory provider '%s' system_prompt_block() failed",
                     provider.name,
-                    e,
+                    exc_info=True,
                 )
+                failures.append(provider.name)
+        if failures:
+            logger.error(
+                "Memory system_prompt_block failures: %s", ", ".join(failures)
+            )
         return "\n\n".join(blocks)
 
     # -- 预取 / 回忆 ---------------------------------------------------
@@ -327,17 +333,23 @@ class MemoryManager:
         任一 provider 的故障不阻塞其他 provider。
         """
         parts: list[str] = []
+        failures: list[str] = []
         for provider in self._providers:
             try:
                 result: str = provider.prefetch(query, session_id=session_id)
                 if result and result.strip():
                     parts.append(result)
             except Exception as e:
-                logger.debug(
-                    "Memory provider '%s' prefetch failed (non-fatal): %s",
+                logger.warning(
+                    "Memory provider '%s' prefetch failed",
                     provider.name,
-                    e,
+                    exc_info=True,
                 )
+                failures.append(provider.name)
+        if failures:
+            logger.error(
+                "Memory prefetch failures: %s", ", ".join(failures)
+            )
         return "\n\n".join(parts)
 
     # -- 同步 ----------------------------------------------------------------
@@ -350,15 +362,21 @@ class MemoryManager:
         session_id: str = "",
     ) -> None:
         """将完成的回合同步到所有 provider。"""
+        failures: list[str] = []
         for provider in self._providers:
             try:
                 provider.sync_turn(user_msg, asst_resp, session_id=session_id)
             except Exception as e:
                 logger.warning(
-                    "Memory provider '%s' sync_turn failed: %s",
+                    "Memory provider '%s' sync_turn failed",
                     provider.name,
-                    e,
+                    exc_info=True,
                 )
+                failures.append(provider.name)
+        if failures:
+            logger.error(
+                "Memory sync_turn failures: %s", ", ".join(failures)
+            )
 
     # -- 工具 ---------------------------------------------------------------
 
@@ -369,6 +387,7 @@ class MemoryManager:
         """
         schemas: list[dict] = []
         seen: set[str] = set()
+        failures: list[str] = []
         for provider in self._providers:
             try:
                 for schema in provider.get_tool_schemas():
@@ -378,10 +397,15 @@ class MemoryManager:
                         seen.add(name)
             except Exception as e:
                 logger.warning(
-                    "Memory provider '%s' get_tool_schemas() failed: %s",
+                    "Memory provider '%s' get_tool_schemas() failed",
                     provider.name,
-                    e,
+                    exc_info=True,
                 )
+                failures.append(provider.name)
+        if failures:
+            logger.error(
+                "Memory get_tool_schemas failures: %s", ", ".join(failures)
+            )
         return schemas
 
     def get_tool_names(self) -> set:
@@ -418,12 +442,18 @@ class MemoryManager:
 
     def shutdown_all(self) -> None:
         """关闭所有 provider（逆序以干净拆解）。"""
+        failures: list[str] = []
         for provider in reversed(self._providers):
             try:
                 provider.shutdown()
             except Exception as e:
                 logger.warning(
-                    "Memory provider '%s' shutdown failed: %s",
+                    "Memory provider '%s' shutdown failed",
                     provider.name,
-                    e,
+                    exc_info=True,
                 )
+                failures.append(provider.name)
+        if failures:
+            logger.error(
+                "Memory shutdown failures: %s", ", ".join(failures)
+            )
