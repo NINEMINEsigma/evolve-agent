@@ -18,6 +18,13 @@ class Role(str, Enum):
 
 
 class ToolDangerLevel(str, Enum):
+    """工具的危险等级。
+
+    readonly  : 只读查询，无外部副作用。
+    write       : 会写入文件系统或产生持久化副作用。
+    dangerous   : 可能直接造成系统级损害，必须经审批后执行。
+    """
+
     readonly = "readonly"
     write = "write"
     dangerous = "dangerous"

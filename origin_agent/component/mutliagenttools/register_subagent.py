@@ -8,6 +8,7 @@ import logging
 from typing import Any
 
 from abstract.tools.registry import registry, tool_error, tool_result
+from entity.puretype import ToolDangerLevel
 
 from ._store import _save_subagents, _subagent_registry
 
@@ -223,7 +224,7 @@ To change base_url, model, token limits, or other core parameters, unregister an
     },
     handler=_handle_register_subagent,
     emoji="🤖",
-    danger_level="readonly",
+    danger_level=ToolDangerLevel.readonly,
     availability="main",
 )
 
@@ -305,6 +306,6 @@ The profile is persisted to the workspace and used globally by tools such as run
     },
     handler=_handle_register_subagent_from_parent,
     emoji="🤖",
-    danger_level="readonly",
+    danger_level=ToolDangerLevel.readonly,
     availability="main",
 )

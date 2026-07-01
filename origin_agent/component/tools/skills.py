@@ -14,6 +14,7 @@ from typing import Any, Dict, List
 from abstract.skills.manager import create_skill, delete_skill, update_skill, write_skill_file, read_skill_file
 from abstract.skills.loader import list_skills, load_skill
 from abstract.tools.registry import registry, tool_error, tool_result
+from entity.puretype import ToolDangerLevel
 
 from system.context import get_runtime_context
 from system.pathutils import find_repo_root
@@ -658,7 +659,7 @@ The file content is determined entirely by the `content` parameter — no append
     },
     handler=_handle_write_skill_file,
     emoji="📝",
-    danger_level="write",
+    danger_level=ToolDangerLevel.write,
 )
 
 
@@ -807,5 +808,5 @@ Default timeout is 30 seconds; timed-out executions return an error.
     },
     handler=_handle_run_skill_script,
     emoji="▶️",
-    danger_level="write",
+    danger_level=ToolDangerLevel.write,
 )

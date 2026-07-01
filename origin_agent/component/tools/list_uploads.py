@@ -9,6 +9,7 @@ import re
 from typing import Any, Dict, List
 
 from abstract.tools.registry import registry, tool_error, tool_result
+from entity.puretype import ToolDangerLevel
 from entity.constant import UPLOAD_FILENAME_TIME_FORMAT, UPLOAD_TIME_RE_PATTERN
 from system.sandbox import SandboxError
 from .filesystem import _s
@@ -148,5 +149,5 @@ Read-only query. No side effects.
     },
     handler=_handle_list_uploads,
     emoji="📂",
-    danger_level="readonly",
+    danger_level=ToolDangerLevel.readonly,
 )

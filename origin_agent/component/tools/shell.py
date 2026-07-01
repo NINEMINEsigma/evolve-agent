@@ -11,6 +11,7 @@ import subprocess  # nosec
 from typing import Any, Dict, List
 
 from abstract.tools.registry import registry, tool_error, tool_result
+from entity.puretype import ToolDangerLevel
 from entity.constant import NAMESPACE_PREFIXES
 from system.context import get_runtime_context
 from system.sandbox import SandboxError
@@ -173,5 +174,5 @@ Each invocation requires user approval (allow once / always allow / deny). Alway
     handler=_handle_run_command,
     is_async=True,
     emoji="💻",
-    danger_level="dangerous",
+    danger_level=ToolDangerLevel.dangerous,
 )

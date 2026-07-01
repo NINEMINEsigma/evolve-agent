@@ -14,7 +14,7 @@ from typing import Any, TYPE_CHECKING
 
 from pydantic import BaseModel
 
-from entity.puretype import Role
+from entity.puretype import Role, ToolDangerLevel
 
 if TYPE_CHECKING:
     from system.context import RuntimeContext
@@ -218,7 +218,7 @@ class BaseAgentLoop(ABC):
         entry = registry.get_entry(name)
         if entry is None:
             return False
-        return entry.danger_level == "readonly"
+        return entry.danger_level == ToolDangerLevel.readonly
 
     def _is_auto_approved_tool(self, name: str, args: dict) -> bool:
         """检查工具是否在自动批准白名单中。"""

@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Any, Dict, List
 
 from abstract.tools.registry import registry, tool_error, tool_result
+from entity.puretype import ToolDangerLevel
 from component.tools.filesystem import _s as _get_sandbox
 
 logger = logging.getLogger(__name__)
@@ -569,7 +570,7 @@ Generates a docx file from title, subtitle, and sections, saved under ws:documen
     },
     handler=_handle_write_docx,
     emoji="📝",
-    danger_level="write",
+    danger_level=ToolDangerLevel.write,
 )
 
 registry.register(
@@ -643,7 +644,7 @@ Generates an xlsx file from the sheets definition, saved under ws:documents/. Ea
     },
     handler=_handle_write_xlsx,
     emoji="📊",
-    danger_level="write",
+    danger_level=ToolDangerLevel.write,
 )
 
 registry.register(
@@ -713,7 +714,7 @@ Generates a pptx file from the slides list, saved under ws:documents/. Each slid
     },
     handler=_handle_write_pptx,
     emoji="📽️",
-    danger_level="write",
+    danger_level=ToolDangerLevel.write,
 )
 
 registry.register(
@@ -791,5 +792,5 @@ Generates a PDF from title, content, and sections, saved under ws:documents/. Us
     },
     handler=_handle_write_pdf,
     emoji="📄",
-    danger_level="write",
+    danger_level=ToolDangerLevel.write,
 )

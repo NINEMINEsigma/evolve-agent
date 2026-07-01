@@ -17,6 +17,8 @@ import threading
 import time
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
+from entity.puretype import ToolDangerLevel
+
 logger = logging.getLogger(__name__)
 
 
@@ -63,7 +65,7 @@ class ToolEntry:
         emoji: str = "",
         max_result_size_chars: Optional[int] = None,
         dynamic_schema_overrides: Optional[Callable] = None,
-        danger_level: str = "readonly",
+        danger_level: ToolDangerLevel = ToolDangerLevel.readonly,
         no_timeout: bool = False,
         availability: str = "every",
     ):
@@ -80,7 +82,7 @@ class ToolEntry:
         # 可选的零参数可调用对象，返回 schema 覆盖字典，
         # 在 get_definitions() 时应用。用于依赖运行时配置的字段。
         self.dynamic_schema_overrides: Optional[Callable] = dynamic_schema_overrides
-        self.danger_level: str = danger_level
+        self.danger_level: ToolDangerLevel = danger_level
         self.no_timeout: bool = no_timeout
         self.availability: str = availability
 
@@ -299,13 +301,10 @@ class ToolRegistry:
         entry: ToolEntry | None = self.get_entry(name)
         return entry.emoji if entry and entry.emoji else default
 
-    def get_danger_level(self, name: str) -> str:
-        """返回工具的危险等级，未注册时返回 "readonly"。
-
-        返回值: "readonly" | "write" | "dangerous"
-        """
+    def get_danger_level(self, name: str) -> ToolDangerLevel:
+        """返回工具的危险等级，未注册时返回 ``ToolDangerLevel.readonly``。"""
         entry: ToolEntry | None = self.get_entry(name)
-        return entry.danger_level if entry else "readonly"
+        return entry.danger_level if entry else ToolDangerLevel.readonly
 
     def get_tool_to_toolset_map(self) -> dict[str, str]:
         """返回 ``{tool_name: toolset_name}`` 映射。"""
@@ -362,7 +361,7 @@ class ToolRegistry:
         max_result_size_chars: Optional[int] = None,
         dynamic_schema_overrides: Optional[Callable] = None,
         override: bool = False,
-        danger_level: str = "readonly",
+        danger_level: ToolDangerLevel = ToolDangerLevel.readonly,
         no_timeout: bool = False,
         availability: str = "every",
     ) -> None:

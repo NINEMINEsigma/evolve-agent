@@ -8,6 +8,7 @@ from __future__ import annotations
 from typing import Any
 
 from abstract.tools.registry import registry, tool_error, tool_result
+from entity.puretype import ToolDangerLevel
 
 
 def _handle_list_tools(args: dict[str, Any]) -> dict:
@@ -16,15 +17,17 @@ def _handle_list_tools(args: dict[str, Any]) -> dict:
     在子 Agent 上下文中调用时，只返回该子 Agent 被授权的工具，
     避免子 Agent 看到全局清单后绕过沙箱。
     """
-    danger_level: str = str(args.get("danger_level", "")).strip()
+    danger_level_raw: str = str(args.get("danger_level", "")).strip()
 
     valid_levels = {"readonly", "write", "dangerous"}
-    if not danger_level:
+    if not danger_level_raw:
         return tool_error("'danger_level' is required")
-    if danger_level not in valid_levels:
+    if danger_level_raw not in valid_levels:
         return tool_error(
-            f"Invalid danger_level '{danger_level}'. Must be one of: {', '.join(sorted(valid_levels))}."
+            f"Invalid danger_level '{danger_level_raw}'. Must be one of: {', '.join(sorted(valid_levels))}."
         )
+
+    danger_level = ToolDangerLevel(danger_level_raw)
 
     # 子 Agent 沙箱：仅暴露被授权的工具
     allowed: set[str] | None = None
@@ -44,7 +47,7 @@ def _handle_list_tools(args: dict[str, Any]) -> dict:
     ]
     return tool_result(
         success=True,
-        danger_level=danger_level,
+        danger_level=danger_level.value,
         count=len(names),
         names=names,
     )
@@ -106,5 +109,5 @@ When called from a sub-agent, only tools authorized for that sub-agent are retur
     },
     handler=_handle_list_tools,
     emoji="🧰",
-    danger_level="readonly",
+    danger_level=ToolDangerLevel.readonly,
 )

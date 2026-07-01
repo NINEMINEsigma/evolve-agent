@@ -11,6 +11,7 @@ import logging
 from typing import Any, Dict, List
 
 from abstract.tools.registry import registry, tool_error, tool_result
+from entity.puretype import ToolDangerLevel
 from component.tools.filesystem import _s as _get_sandbox
 
 logger = logging.getLogger(__name__)
@@ -238,5 +239,5 @@ Writes headers and data rows based on columns or the keys of the first row dict.
     },
     handler=_handle_write_csv,
     emoji="📊",
-    danger_level="write",
+    danger_level=ToolDangerLevel.write,
 )

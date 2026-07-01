@@ -25,7 +25,7 @@ from component.llm import LLMClient, LLMResponse, StreamChunk, ToolCall, Usage
 from system.pathutils import find_repo_root
 from system.session_store import SessionStore
 from entity.constant import LOG_PREVIEW_CHARS, TOOL_RESULT_PREVIEW_CHARS, TOOL_RESULT_SAVE_THRESHOLD_CHARS, AUTO_TITLE_CONTENT_MAX, MAX_TOOL_TURNS
-from entity.puretype import Role
+from entity.puretype import Role, ToolDangerLevel
 from entry.base_agent_loop import BaseAgentLoop, Inbox, InboxMessage, ToolContext
 from entry.agent_sink import AgentSink, FrontendSink
 from entry.agent_support.messages import (
@@ -638,10 +638,10 @@ class ParentAgentLoop(BaseAgentLoop):
         # 审批流程
         _skip_dispatch = False
         result: dict | str = {}
-        danger_level: str = tool_registry.get_danger_level(tc.name)
+        danger_level: ToolDangerLevel = tool_registry.get_danger_level(tc.name)
         _handsfree_enabled = is_handsfree_mode(session_id)
-        _needs_approval = danger_level == "dangerous" or (
-            danger_level == "write" and _handsfree_enabled
+        _needs_approval = danger_level == ToolDangerLevel.dangerous or (
+            danger_level == ToolDangerLevel.write and _handsfree_enabled
         )
 
         if _needs_approval:

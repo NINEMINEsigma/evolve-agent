@@ -21,6 +21,7 @@ import subprocess
 from typing import Any, Dict
 
 from abstract.tools.registry import registry, tool_error, tool_result
+from entity.puretype import ToolDangerLevel
 from entity.constant import LOG_PREVIEW_CHARS, SUBPROCESS_TIMEOUT_DEFAULT
 
 logger = logging.getLogger(__name__)
@@ -358,7 +359,7 @@ Executes command on the target host via ssh and returns the output and exit code
     handler=_handle_ssh_exec,
     is_async=True,
     emoji="🖥",
-    danger_level="dangerous",
+    danger_level=ToolDangerLevel.dangerous,
 )
 
 registry.register(
@@ -452,7 +453,7 @@ Uploads local_path to remote_path on the target host via scp. Supports recursive
     handler=_handle_ssh_upload,
     is_async=True,
     emoji="📤",
-    danger_level="dangerous",
+    danger_level=ToolDangerLevel.dangerous,
 )
 
 registry.register(
@@ -546,5 +547,5 @@ Downloads the file or directory at remote_path from the target host to local_pat
     handler=_handle_ssh_download,
     is_async=True,
     emoji="📥",
-    danger_level="dangerous",
+    danger_level=ToolDangerLevel.dangerous,
 )

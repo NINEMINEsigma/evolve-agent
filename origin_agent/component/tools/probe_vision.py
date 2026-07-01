@@ -15,7 +15,7 @@ from typing import Any, Dict, TYPE_CHECKING
 from abstract.tools.registry import registry, tool_error, tool_result
 from component.llm import LLMClient
 from system.context import get_runtime_context
-from entity.puretype import Role
+from entity.puretype import Role, ToolDangerLevel
 
 if TYPE_CHECKING:
     from entry.base_agent_loop import ToolContext
@@ -263,7 +263,7 @@ On non-vision error:
     handler=_handle_probe_vision,
     is_async=True,
     emoji="👁️",
-    danger_level="readonly",
+    danger_level=ToolDangerLevel.readonly,
     no_timeout=True,
     availability="every",
 )

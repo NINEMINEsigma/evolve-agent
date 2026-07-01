@@ -9,6 +9,7 @@ import logging
 from typing import Any
 
 from abstract.tools.registry import registry, tool_error, tool_result
+from entity.puretype import ToolDangerLevel
 
 from ._store import _save_subagents, _subagent_registry
 
@@ -102,6 +103,6 @@ After deletion, the name cannot be used with run_subagent until it is re-registe
     },
     handler=_handle_unregister_subagent,
     emoji="🗑️",
-    danger_level="readonly",
+    danger_level=ToolDangerLevel.readonly,
     availability="main",
 )

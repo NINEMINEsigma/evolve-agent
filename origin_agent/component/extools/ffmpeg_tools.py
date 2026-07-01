@@ -13,6 +13,7 @@ import subprocess  # nosec
 from typing import Any, Dict, List
 
 from abstract.tools.registry import registry, tool_error, tool_result
+from entity.puretype import ToolDangerLevel
 from component.tools.filesystem import _s as _get_sandbox
 from entity.constant import FFMPEG_DEFAULT_TIMEOUT, SUBPROCESS_SHORT_TIMEOUT_DEFAULT
 from system.sandbox import SandboxError
@@ -656,7 +657,7 @@ Converts the input file to the format implied by the output extension. Extra ffm
     handler=_handle_convert_media,
     check_fn=_ffmpeg_available,
     emoji="🔄",
-    danger_level="write",
+    danger_level=ToolDangerLevel.write,
 )
 
 # -- extract_audio
@@ -744,7 +745,7 @@ Extracts audio from the input video and saves it to output. Default codec is lib
     handler=_handle_extract_audio,
     check_fn=_ffmpeg_available,
     emoji="🎵",
-    danger_level="write",
+    danger_level=ToolDangerLevel.write,
 )
 
 # -- trim_media

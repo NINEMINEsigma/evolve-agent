@@ -20,6 +20,7 @@ from datetime import datetime, timezone
 from typing import Any, Dict
 
 from abstract.tools.registry import registry, tool_error, tool_result
+from entity.puretype import ToolDangerLevel
 from entity.constant import EDIT_FILE_MAX_CHARS, FILE_SNIFF_BYTES, READ_FILE_DEFAULT_LIMIT, READ_FILE_MAX_LINES, WRITE_FILE_MAX_CHARS, WRITE_FILE_TRUNCATION_TAIL
 from system.sandbox import Access, Sandbox, SandboxError
 
@@ -343,7 +344,7 @@ When truncated, additionally includes `truncated=true` and `tail`:
     },
     handler=_handle_write,
     emoji="✏️",
-    danger_level="write",
+    danger_level=ToolDangerLevel.write,
 )
 
 
@@ -462,7 +463,7 @@ When truncated, additionally includes `truncated=true` and `tail`:
     },
     handler=_handle_append,
     emoji="📝",
-    danger_level="write",
+    danger_level=ToolDangerLevel.write,
 )
 
 
@@ -577,7 +578,7 @@ Deletes the specified file. If the path is a directory, returns an error directi
     },
     handler=_handle_delete,
     emoji="🗑️",
-    danger_level="write",
+    danger_level=ToolDangerLevel.write,
 )
 
 
@@ -719,7 +720,7 @@ Errors:
     },
     handler=_handle_edit,
     emoji="✂️",
-    danger_level="write",
+    danger_level=ToolDangerLevel.write,
 )
 
 
@@ -881,7 +882,7 @@ Copies the source file to the destination path. If the destination already exist
     },
     handler=_handle_copy,
     emoji="📋",
-    danger_level="write",
+    danger_level=ToolDangerLevel.write,
 )
 
 
@@ -959,7 +960,7 @@ Recursively copies the source directory to the destination path, including all s
     },
     handler=_handle_copy_folder,
     emoji="📂",
-    danger_level="write",
+    danger_level=ToolDangerLevel.write,
 )
 
 
@@ -1051,7 +1052,7 @@ Moves a file or directory to the destination path. If the destination includes a
     },
     handler=_handle_move,
     emoji="🚚",
-    danger_level="write",
+    danger_level=ToolDangerLevel.write,
 )
 
 
@@ -1153,7 +1154,7 @@ Renames the file to `new_name` within the same directory. The namespace prefix a
     },
     handler=_handle_rename,
     emoji="🏷️",
-    danger_level="write",
+    danger_level=ToolDangerLevel.write,
 )
 
 
@@ -1692,7 +1693,7 @@ Creates the specified directory. By default, also creates all missing parent dir
     },
     handler=_handle_create_folder,
     emoji="📁",
-    danger_level="readonly",
+    danger_level=ToolDangerLevel.readonly,
 )
 
 
@@ -1777,7 +1778,7 @@ Recursively deletes the specified directory and all its contents. The sandbox ha
     },
     handler=_handle_delete_folder,
     emoji="🗂️",
-    danger_level="write",
+    danger_level=ToolDangerLevel.write,
 )
 
 

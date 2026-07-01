@@ -9,6 +9,7 @@ from __future__ import annotations
 from typing import Any
 
 from abstract.tools.registry import registry, tool_error, tool_result
+from entity.puretype import ToolDangerLevel
 from system.sandbox import Sandbox
 
 
@@ -222,6 +223,6 @@ When queued:
     handler=_handle_run_subagent,
     is_async=True,
     emoji="🚀",
-    danger_level="readonly",
+    danger_level=ToolDangerLevel.readonly,
     availability="main",
 )

@@ -16,6 +16,7 @@ import sys
 from typing import Any, Dict, List
 
 from abstract.tools.registry import registry, tool_error, tool_result
+from entity.puretype import ToolDangerLevel
 from entity.constant import SUBPROCESS_TIMEOUT_DEFAULT
 
 logger = logging.getLogger(__name__)
@@ -150,5 +151,5 @@ Runs pip install to install the specified packages. Set upgrade=true to upgrade 
     handler=_handle_install_package,
     is_async=True,
     emoji="f4e6",
-    danger_level="dangerous",
+    danger_level=ToolDangerLevel.dangerous,
 )

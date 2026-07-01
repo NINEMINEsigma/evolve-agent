@@ -15,6 +15,7 @@ import logging
 from typing import TYPE_CHECKING, Any, Dict
 
 from abstract.tools.registry import registry, tool_error, tool_result
+from entity.puretype import ToolDangerLevel
 from abstract.tools.ui_event_router import ui_event_router
 
 if TYPE_CHECKING:
@@ -197,7 +198,7 @@ Creates or updates a progress bar identified by `task_id`. Reusing the same `tas
     handler=_handle_set_task_progress,
     is_async=True,
     emoji="📊",
-    danger_level="readonly",
+    danger_level=ToolDangerLevel.readonly,
     availability="main",
 )
 ui_event_router.register("set_task_progress", _emit_task_progress)
@@ -265,7 +266,7 @@ If `task_id` is provided and non-empty, removes only that specific bar. If omitt
     handler=_handle_clear_task_progress,
     is_async=True,
     emoji="🧹",
-    danger_level="readonly",
+    danger_level=ToolDangerLevel.readonly,
     availability="main",
 )
 ui_event_router.register("clear_task_progress", _emit_task_progress)

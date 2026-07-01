@@ -18,7 +18,7 @@ from typing import * # type: ignore
 
 from abstract.tools.registry import ToolEntry, registry as tool_registry
 from component.llm import LLMClient, LLMResponse, ToolCall
-from entity.puretype import Role
+from entity.puretype import Role, ToolDangerLevel
 from subagent.context import SubRuntimeContext
 from entry.base_agent_loop import BaseAgentLoop, UserMessage, ContextLimitMessage, ToolContext
 from entry.agent_sink import ParentAgentSink
@@ -182,7 +182,7 @@ class SubAgentLoop(BaseAgentLoop):
         entry = tool_registry.get_entry(name)
         if entry is None:
             return False
-        return entry.danger_level == "readonly"
+        return entry.danger_level == ToolDangerLevel.readonly
 
     @staticmethod
     def _is_auto_approved_tool(tc: ToolCall) -> bool:

@@ -13,6 +13,7 @@ import subprocess  # nosec
 from typing import Any, Dict, List
 
 from abstract.tools.registry import registry, tool_error, tool_result
+from entity.puretype import ToolDangerLevel
 from entity.constant import WRITE_FILE_MAX_CHARS, SUBPROCESS_TIMEOUT_DEFAULT
 from system.sandbox import Access, SandboxError, ResolvedPath
 
@@ -288,7 +289,7 @@ This is step 1 of the evolution cycle. After writing all changes, call `validate
     },
     handler=_handle_write_fork,
     emoji="🧬",
-    danger_level="write",
+    danger_level=ToolDangerLevel.write,
 )
 
 

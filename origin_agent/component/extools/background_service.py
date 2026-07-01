@@ -23,6 +23,7 @@ from pathlib import Path
 from typing import Any, Dict, List
 
 from abstract.tools.registry import registry, tool_error, tool_result
+from entity.puretype import ToolDangerLevel
 from entity.constant import NAMESPACE_PREFIXES, SUBPROCESS_SOFT_CLEANUP_WAIT_TIME
 
 logger = logging.getLogger(__name__)
@@ -381,7 +382,7 @@ Resolves sandbox logical paths in the command, then launches the subprocess in t
     handler=_handle_start_background_service,
     is_async=True,
     emoji="🔄",
-    danger_level="dangerous",
+    danger_level=ToolDangerLevel.dangerous,
     availability="main",
 )
 

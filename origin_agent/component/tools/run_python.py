@@ -20,6 +20,7 @@ import sys
 from typing import Any, Dict, List
 
 from abstract.tools.registry import registry, tool_error, tool_result
+from entity.puretype import ToolDangerLevel
 from system.sandbox import Access, SandboxError
 from entity.constant import SUBPROCESS_TIMEOUT_DEFAULT
 
@@ -229,5 +230,5 @@ Each invocation requires user approval (allow once / always allow / deny). Alway
     handler=_handle_run_python,
     is_async=True,
     emoji="🐍",
-    danger_level="dangerous",
+    danger_level=ToolDangerLevel.dangerous,
 )

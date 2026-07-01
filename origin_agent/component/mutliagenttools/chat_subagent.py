@@ -10,6 +10,7 @@ from __future__ import annotations
 from typing import Any
 
 from abstract.tools.registry import registry, tool_error, tool_result
+from entity.puretype import ToolDangerLevel
 
 
 async def _handle_chat_subagent(args: dict[str, Any]) -> dict:
@@ -148,6 +149,6 @@ If the sub-agent is still generating its current response, the call fails with:
     handler=_handle_chat_subagent,
     is_async=True,
     emoji="💬",
-    danger_level="readonly",
+    danger_level=ToolDangerLevel.readonly,
     availability="main",
 )

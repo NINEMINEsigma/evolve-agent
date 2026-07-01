@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any
 
 from abstract.tools.registry import registry, tool_error, tool_result
+from entity.puretype import ToolDangerLevel
 from component.tools.filesystem import _s as _get_sandbox
 from system.sandbox import SandboxError
 
@@ -271,7 +272,7 @@ Compresses the source (file or directory) into an archive at the output path. If
     },
     handler=_handle_compress,
     emoji="📦",
-    danger_level="readonly",
+    danger_level=ToolDangerLevel.readonly,
 )
 
 registry.register(
@@ -348,5 +349,5 @@ Decompresses the archive into the target directory. The target directory is auto
     },
     handler=_handle_decompress,
     emoji="📂",
-    danger_level="readonly",
+    danger_level=ToolDangerLevel.readonly,
 )
