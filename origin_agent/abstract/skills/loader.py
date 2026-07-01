@@ -9,68 +9,18 @@ Zero external dependencies — pure Python stdlib + ``hermes_skills.frontmatter`
 
 from __future__ import annotations
 
+import logging
 import os
 import re
 import subprocess  # nosec: intentional for inline shell expansion
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from entity.constant import DEFAULT_SKILLS_DIR, IGNORED_DIRS, _INLINE_SHELL_RE
+from entity.puretype import SkillPayload, SkillInfo
 from .frontmatter import parse_frontmatter
 
-
-# ---------------------------------------------------------------------------
-# Types
-# ---------------------------------------------------------------------------
-
-SkillPayload = dict[str, Any]
-"""Serializable dict representing a loaded skill.
-
-Keys:
-    success: bool
-    name: str
-    path: str (relative path within the skills directory)
-    skill_dir: str (absolute path to the skill directory)
-    content: str (rendered markdown body)
-    raw_content: str (unrendered markdown body)
-    frontmatter: dict
-    description: str
-    category: str | None
-    tags: list[str]
-    linked_files: dict[str, list[str]]
-    setup_needed: bool
-    setup_note: str | None
-    readiness_status: str
-    error: str | None (on failure)
-"""
-
-SkillInfo = dict[str, Any]
-"""Minimal skill metadata for listing.
-
-Keys:
-    name: str
-    description: str
-    category: str | None
-    tags: list[str]
-    path: str
-    skill_dir: str
-"""
-
-
-# ---------------------------------------------------------------------------
-# Constants
-# ---------------------------------------------------------------------------
-
-# Excluded directory/file patterns for linked-files scan (blacklist)
-IGNORED_DIRS: frozenset[str] = frozenset({
-    "__pycache__", ".git", ".github", ".hub", ".archive",
-    "node_modules", ".venv", "__pypackages__",
-})
-
-# Default skills directory name
-DEFAULT_SKILLS_DIR = "skills"
-
-# Inline shell pattern: {{ command }}
-_INLINE_SHELL_RE = re.compile(r"\u007b\u007b\s*(.+?)\s*\u007d\u007d")
+logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
@@ -437,12 +387,6 @@ def _check_setup_status(
     frontmatter: dict[str, Any], skill_dir: Path
 ) -> dict[str, Any]:
     """Check if a skill requires setup."""
-    metadata = frontmatter.get("metadata", {}) or {}
-    if isinstance(metadata, dict):
-        hermes_meta = metadata.get("hermes", {}) or {}
-    else:
-        hermes_meta = {}
-
     required_env = frontmatter.get("required_environment_variables", []) or []
     if isinstance(required_env, str):
         required_env = [required_env]

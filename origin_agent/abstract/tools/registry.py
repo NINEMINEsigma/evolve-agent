@@ -25,6 +25,7 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 
+# TODO: 考虑BaseModel重构
 class ToolEntry:
     """单个已注册工具的元数据。
 

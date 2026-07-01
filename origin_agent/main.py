@@ -17,6 +17,8 @@ from system.application import Application
 if TYPE_CHECKING:
     from system.context import RuntimeContext
 
+from entity.constant import CUSTOM_MODELS_DIR
+
 logger = logging.getLogger(__name__)
 
 # 模块级引用，指向运行中的 App 实例。
@@ -261,7 +263,7 @@ You can modify your own source code and complete evolution through the following
         _local_path_raw = (self.ctx.approval_model_path or "").strip().lower()
         if _local_path_raw not in _local_disabled:
             from system.pathutils import find_repo_root
-            gguf_path = find_repo_root() / "custom_models" / self.ctx.approval_model_path.strip()
+            gguf_path = find_repo_root() / CUSTOM_MODELS_DIR / self.ctx.approval_model_path.strip()
             if gguf_path.is_file():
                 try:
                     from third.llamaapis.system.builder import LlamaBuilder

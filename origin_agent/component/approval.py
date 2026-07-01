@@ -14,7 +14,7 @@
 - 远程 OpenAI 兼容 API：通过 approval_remote_* 配置，连接 LM Studio / 自定义服务商。
 CUDA 可用时本地模型自动全卸载到 GPU。
 """
-
+# TODO: 大量提示词没有独立成模板文件
 from __future__ import annotations
 
 import asyncio
@@ -26,14 +26,16 @@ from typing import Any, Awaitable, Callable, Dict, Optional, TYPE_CHECKING, cast
 
 import dirtyjson
 import openai
+from openai.types.chat import ChatCompletion
 from pydantic import BaseModel
 
 from component.llm import LLMClient
-from entity.constant import APPROVAL_MODEL_LOAD_TIMEOUT, APPROVAL_WAIT_TIMEOUT, LLM_RETRY_COUNT
+from entity.constant import APPROVAL_MODEL_LOAD_TIMEOUT, APPROVAL_WAIT_TIMEOUT, CUSTOM_MODELS_DIR, LLM_RETRY_COUNT
 from entity.puretype import Role
 
 if TYPE_CHECKING:
     from third.llamaapis import InferenceEngine
+    from system.context import RuntimeContext
 
 logger = logging.getLogger(__name__)
 
@@ -122,7 +124,7 @@ class FailedApprovalBackend(ApprovalBackend):
 class LocalApprovalBackend(ApprovalBackend):
     """基于 llama.cpp / llama-server 的本地审批后端。"""
 
-    def __init__(self, ctx: Any) -> None:
+    def __init__(self, ctx: RuntimeContext) -> None:
         self._ctx = ctx
         self._engine: InferenceEngine | None | object = None  # object sentinel for failed
 
@@ -138,7 +140,7 @@ class LocalApprovalBackend(ApprovalBackend):
             from third.llamaapis import InferenceEngine as LlamaEngine, ModelConfig
 
             root = find_repo_root()
-            model_path = str((root / "custom_models" / self._ctx.approval_model_path.strip()).resolve())
+            model_path = str((root / CUSTOM_MODELS_DIR / self._ctx.approval_model_path.strip()).resolve())
             cuda = bool(self._ctx.approval_model_cuda)
             n_gpu_layers = -1 if cuda else 0
 
@@ -188,7 +190,7 @@ class LocalApprovalBackend(ApprovalBackend):
             else:
                 internal_messages.append(user_message(content))
 
-        config = GenerationConfig(temperature=0.1, max_tokens=2048, thinking=False)
+        config = GenerationConfig(temperature=0.3, thinking=False)
         if json_schema is not None:
             config.json_schema = json_schema
         resp = await asyncio.to_thread(engine.chat, internal_messages, config)
@@ -202,7 +204,7 @@ class LocalApprovalBackend(ApprovalBackend):
 class RemoteApprovalBackend(ApprovalBackend):
     """基于 OpenAI 兼容 API 的远程审批后端（如 LM Studio）。"""
 
-    def __init__(self, ctx: Any) -> None:
+    def __init__(self, ctx: RuntimeContext) -> None:
         self._ctx = ctx
         self._client: openai.AsyncOpenAI | None = None
 
@@ -222,8 +224,7 @@ class RemoteApprovalBackend(ApprovalBackend):
         kwargs: dict[str, Any] = {
             "model": model,
             "messages": messages,
-            "temperature": 0.1,
-            "max_tokens": 2048,
+            "temperature": 0.3,
         }
         if json_schema is not None:
             kwargs["response_format"] = {
@@ -236,7 +237,7 @@ class RemoteApprovalBackend(ApprovalBackend):
             }
 
         try:
-            resp = await client.chat.completions.create(**kwargs)
+            resp: ChatCompletion = await client.chat.completions.create(**kwargs)
         except openai.APIStatusError as exc:
             # 若服务端不支持 json_schema（如部分旧 LM Studio），回退到普通请求
             if json_schema is not None and exc.status_code in (400, 422):
@@ -261,15 +262,15 @@ class RemoteApprovalBackend(ApprovalBackend):
 _LOCAL_DISABLED_VALUES: set[str] = {"", "false", "0", "no"}
 
 
-def _is_local_approval_enabled(ctx: Any) -> bool:
+def is_local_approval_enabled(ctx: RuntimeContext) -> bool:
     """判定当前是否启用本地审批模型。"""
     raw = (ctx.approval_model_path or "").strip().lower()
     return raw not in _LOCAL_DISABLED_VALUES
 
 
-def _create_approval_backend(ctx: Any) -> ApprovalBackend | None:
+def create_approval_backend(ctx: RuntimeContext) -> ApprovalBackend | None:
     """根据 RuntimeContext 创建对应的审批后端。"""
-    if _is_local_approval_enabled(ctx):
+    if is_local_approval_enabled(ctx):
         return LocalApprovalBackend(ctx)
     if ctx.approval_remote_base_url and ctx.approval_remote_model:
         return RemoteApprovalBackend(ctx)
@@ -415,8 +416,8 @@ async def _handsfree_confirm(
     )
     return ApprovalResult(
         action="deny",
-        deny_reason=f"审批模型连续解析失败: {last_error}" if last_error else "审批模型无法做出判断",
-        denied_by="model",
+        deny_reason=f"approval model continuous parsing failed: {last_error}" if last_error else "approval model cannot make a decision",
+        denied_by="approval model",
     )
 
 

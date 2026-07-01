@@ -114,8 +114,8 @@ class ApprovalBackendManager:
         if self._backend is not None:
             return self._backend
 
-        from component.approval import _create_approval_backend
-        self._backend = _create_approval_backend(self._ctx)
+        from component.approval import create_approval_backend
+        self._backend = create_approval_backend(self._ctx)
         if self._backend is None:
             self._failed = True
             return None

@@ -234,6 +234,7 @@ def _write_stderr_log_header(server_name: str) -> None:
 _MCP_AVAILABLE = False
 _MCP_HTTP_AVAILABLE = False
 _MCP_SAMPLING_TYPES = False
+ErrorData = None  # type checker fallback — always bound
 _MCP_NOTIFICATION_TYPES = False
 _MCP_MESSAGE_HANDLER_SUPPORTED = False
 # Conservative fallback for SDK builds that don't export LATEST_PROTOCOL_VERSION.
@@ -834,7 +835,7 @@ class SamplingHandler:
     @staticmethod
     def _error(message: str, code: int = -1):
         """Return ErrorData (MCP spec) or raise as fallback."""
-        if _MCP_SAMPLING_TYPES:
+        if ErrorData is not None:
             return ErrorData(code=code, message=message)
         raise Exception(message)
 

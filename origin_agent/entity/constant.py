@@ -1,6 +1,16 @@
 """全局常量定义。"""
 
+import re
 from datetime import timezone
+
+
+# ============================================================================
+# 自定义插件目录
+# ============================================================================
+
+# 本地 GGUF 模型文件存放目录名
+CUSTOM_MODELS_DIR: str = "custom_models"
+
 
 # ============================================================================
 # 截断/预览上限
@@ -191,3 +201,20 @@ CRON_MAX_JOBS_PER_SESSION: int = 20
 
 # 会话索引文件名
 SESSION_INDEX_FILENAME: str = "_sessions.json"
+
+
+# ============================================================================
+# Skill
+# ============================================================================
+
+# Skill 文件关联扫描排除的目录/文件模式（黑名单）
+IGNORED_DIRS: frozenset[str] = frozenset({
+    "__pycache__", ".git", ".github", ".hub", ".archive",
+    "node_modules", ".venv", "__pypackages__",
+})
+
+# 默认 skills 目录名称
+DEFAULT_SKILLS_DIR: str = "skills"
+
+# Inline shell 模板模式: {{ command }}
+_INLINE_SHELL_RE = re.compile(r"\u007b\u007b\s*(.+?)\s*\u007d\u007d")
