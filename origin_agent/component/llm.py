@@ -383,9 +383,15 @@ class LLMClient:
         state["pending_tool_buffers"] = tool_buffers
 
         if pending_finish_reason:
+            # 避免零值 usage 覆盖 usage-only chunk 已发出的真实 token 数
+            finish_usage = (
+                pending_finish_usage
+                if pending_finish_usage is not None and pending_finish_usage.total_tokens > 0
+                else None
+            )
             yield StreamChunk(
                 finish_reason=pending_finish_reason,
-                usage=pending_finish_usage or Usage(),
+                usage=finish_usage,
             )
 
 
