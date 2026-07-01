@@ -51,6 +51,8 @@ from urllib.parse import parse_qs, urlparse
 
 logger = logging.getLogger(__name__)
 
+from system.atomic_io import replace_atomic
+
 # OAuth 回调等待超时（秒）— 等待用户在浏览器中完成授权的时间
 _OAUTH_CALLBACK_TIMEOUT: float = 300.0
 
@@ -196,7 +198,7 @@ def _write_json(path: Path, data: dict) -> None:
             json.dump(data, fh, indent=2, default=str)
             fh.flush()
             os.fsync(fh.fileno())
-        os.replace(tmp, path)
+        replace_atomic(tmp, path)
     except OSError:
         try:
             tmp.unlink(missing_ok=True)

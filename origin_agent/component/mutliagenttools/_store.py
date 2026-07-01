@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any
 
 from entity.constant import SUBAGENT_STORE_FILENAME
+from system.atomic_io import write_text_atomic
 
 logger = logging.getLogger(__name__)
 
@@ -42,13 +43,11 @@ _subagent_registry: dict[str, dict[str, Any]] = {}
 def _save_subagents() -> None:
     """将当前注册表原子写入磁盘。失败时抛出异常。"""
     store_path = _get_store_path()
-    store_path.parent.mkdir(parents=True, exist_ok=True)
-    tmp_path = store_path.with_suffix(".tmp")
-    tmp_path.write_text(
+    write_text_atomic(
+        store_path,
         json.dumps(_subagent_registry, ensure_ascii=False, indent=2),
-        encoding="utf-8",
+        tmp_suffix=".tmp",
     )
-    tmp_path.replace(store_path)
 
 
 def _load_subagents() -> None:

@@ -11,6 +11,8 @@ from typing import Any
 
 from entity.puretype import Role
 
+from system.atomic_io import write_text_atomic
+
 
 class SessionStore:
     """封装单个 sessions 根目录下的会话文件读写。"""
@@ -54,7 +56,7 @@ class SessionStore:
     def overwrite_messages(self, session_id: str, entries: list[dict]) -> None:
         path = self.messages_path(session_id)
         lines = [json.dumps(m, ensure_ascii=False) + "\n" for m in entries]
-        self._write_text_atomic(path, "".join(lines))
+        write_text_atomic(path, "".join(lines))
 
     def remove_last_user_message(self, session_id: str) -> None:
         path = self.messages_path(session_id)
@@ -68,11 +70,11 @@ class SessionStore:
         if last.get("role") != Role.USER:
             return
         lines.pop()
-        self._write_text_atomic(path, "\n".join(lines) + "\n" if lines else "")
+        write_text_atomic(path, "\n".join(lines) + "\n" if lines else "")
 
     def write_token_usage(self, session_id: str, token_usage: int) -> None:
         payload = json.dumps({"token_usage": token_usage}, ensure_ascii=False)
-        self._write_text_atomic(self.token_usage_path(session_id), payload)
+        write_text_atomic(self.token_usage_path(session_id), payload)
 
     def read_token_usage(self, session_id: str) -> int:
         path = self.token_usage_path(session_id)
@@ -88,7 +90,7 @@ class SessionStore:
         return path.read_text(encoding="utf-8").strip()
 
     def write_summary(self, session_id: str, summary: str) -> None:
-        self._write_text_atomic(self.summary_path(session_id), summary)
+        write_text_atomic(self.summary_path(session_id), summary)
 
     def read_tool_resources(self, session_id: str) -> dict[str, Any]:
         path = self.tool_resources_path(session_id)
@@ -104,11 +106,5 @@ class SessionStore:
 
     def write_tool_resources(self, session_id: str, resources: dict[str, Any]) -> None:
         payload = json.dumps(resources, ensure_ascii=False, indent=2)
-        self._write_text_atomic(self.tool_resources_path(session_id), payload)
+        write_text_atomic(self.tool_resources_path(session_id), payload)
 
-    @staticmethod
-    def _write_text_atomic(path: Path, content: str) -> None:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        tmp = path.with_name(f".{path.name}.tmp")
-        tmp.write_text(content, encoding="utf-8")
-        tmp.replace(path)

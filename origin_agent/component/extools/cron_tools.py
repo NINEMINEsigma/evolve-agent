@@ -39,6 +39,7 @@ from typing import Any, Dict, List, Optional, Set
 from abstract.tools.registry import registry, tool_error, tool_result
 from entity.constant import CRON_STDOUT_PREVIEW_MAX_LENGTH, CRON_TASK_TIMEOUT, CRON_STORE_FILENAME, CRON_MIN_INTERVAL_SECONDS, CRON_MAX_JOBS_PER_SESSION
 from system.subprocess_utils import build_subprocess_env, completed_process_from_bytes, windows_process_group_flags
+from system.atomic_io import write_text_atomic
 
 logger = logging.getLogger(__name__)
 
@@ -242,12 +243,11 @@ def _save_all_tasks() -> None:
                 for tid, task in tasks.items():
                     payload[sid][tid] = _task_to_dict(task)
         # 原子写入：先写临时文件再重命名，防止进程崩溃时留下半写文件
-        tmp_path = store_path.with_suffix(".tmp")
-        tmp_path.write_text(
+        write_text_atomic(
+            store_path,
             json.dumps(payload, ensure_ascii=False, indent=2),
-            encoding="utf-8",
+            tmp_suffix=".tmp",
         )
-        tmp_path.replace(store_path)
     except Exception as exc:
         logger.error("Failed to save cron jobs: %s", exc)
 

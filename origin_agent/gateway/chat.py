@@ -17,6 +17,8 @@ from typing import Any, Dict, List, Optional, Union
 
 from pydantic import BaseModel
 
+from system.atomic_io import write_text_atomic
+
 logger = logging.getLogger(__name__)
 
 
@@ -288,12 +290,7 @@ class SessionManager:
                 clean: dict = dict(e)
                 clean.pop("parent", None)
                 clean_entries.append(clean)
-            # 1. 先写 tmp 文件，不影响 _index.json
-            tmp = idx.with_suffix(".json.tmp")
-            tmp.write_text(
-                json.dumps(clean_entries, ensure_ascii=False, indent=2),
-                encoding="utf-8",
-            )
+            content = json.dumps(clean_entries, ensure_ascii=False, indent=2)
             # 2. 备份当前文件（copy，不 rename，保证失败时 _index.json 仍在）
             if idx.exists():
                 import shutil
@@ -301,8 +298,8 @@ class SessionManager:
                     shutil.copy2(idx, idx.with_suffix(".json.bak"))
                 except Exception:
                     logger.warning("Failed to backup session index", exc_info=True)  # 备份失败不阻塞主流程
-            # 3. 原子替换
-            tmp.replace(idx)
+            # 3. 原子写入并替换
+            write_text_atomic(idx, content, tmp_suffix=".json.tmp")
         except Exception as exc:
             logger.exception("Failed to write session index")
 
@@ -633,9 +630,11 @@ class SessionManager:
             return
         try:
             path = self._tags_path()
-            tmp = path.with_suffix(".json.tmp")
-            tmp.write_text(json.dumps(tags, ensure_ascii=False, indent=2), encoding="utf-8")
-            tmp.replace(path)
+            write_text_atomic(
+                path,
+                json.dumps(tags, ensure_ascii=False, indent=2),
+                tmp_suffix=".json.tmp",
+            )
         except Exception as exc:
             logger.warning("Failed to write tags file: %s", exc)
 

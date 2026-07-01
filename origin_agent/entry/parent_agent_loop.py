@@ -365,9 +365,7 @@ class ParentAgentLoop(BaseAgentLoop):
 
                 # 执行工具调用
                 for tc in resp.tool_calls:
-                    tool_msg: dict[str, Any] = await self._execute_tool(
-                        tc.name, dict(tc.arguments) if tc.arguments else {}, tc.id, sid,
-                    )
+                    tool_msg: dict[str, Any] = await self._do_execute_tool(tc, sid)
                     messages.append(tool_msg)
                     self._append_history(tool_msg)
                     self._persist_message(sid, tool_msg)
@@ -567,6 +565,18 @@ class ParentAgentLoop(BaseAgentLoop):
     # ========================================================================
     # 工具执行
     # ========================================================================
+
+    # TODO: 和下方的_execute_tool, 谁作为impl需要进一步决策
+    async def _do_execute_tool(self, tc: ToolCall,
+                               session_id: str = "") -> dict[str, Any]:
+        """直接通过 ToolCall 实例执行单个工具调用。
+
+        NOTE: 保留 ``_execute_tool`` 的通用参数签名，以便非 LLM 来源或测试
+        直接按 name/args/id 调用；LLM 主链路统一走此 wrapper，避免调用点重复拆包。
+        """
+        return await self._execute_tool(
+            tc.name, tc.arguments, tc.id, session_id,
+        )
 
     async def _execute_tool(self, tool_name: str, args: dict,
                             tool_call_id: str = "",

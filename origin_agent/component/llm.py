@@ -15,7 +15,7 @@ import asyncio
 import logging
 import os
 from collections.abc import AsyncIterator
-from typing import Any, Dict, Iterator, List, Optional
+from typing import Any, Iterator, Optional
 
 import openai
 from pydantic import BaseModel, ConfigDict
@@ -155,7 +155,7 @@ class LLMClient:
                 return LLMResponse(
                     content=_extract_content(msg),
                     tool_calls=_extract_tool_calls(msg),
-                    finish_reason=_extract_finish_reason(choice),
+                    finish_reason=_extract_finish_reason(choice, "stop") or "stop",
                     reasoning_content=_extract_reasoning(msg),
                     usage=_extract_usage(completion),
                 )
@@ -200,6 +200,8 @@ class LLMClient:
                     reasoning_buffer: str = ""
                     tool_buffers: dict[int, dict[str, Any]] = {}
                     completed_tool_indices: set[int] = set()
+                    pending_finish_reason: str | None = None
+                    pending_finish_usage: Usage | None = None
 
                     async for chunk in stream:
                         # include_usage 模式下，OpenAI 在最终发送一个
@@ -242,37 +244,33 @@ class LLMClient:
                             if args_delta:
                                 buf["arguments"] += args_delta
 
-                            # 当收集到 id、name 且 finish_reason 出现时认为完整
-                            finish = _extract_finish_reason(choice)
-                            if finish and buf["id"] and buf["name"]:
-                                completed_tool_indices.add(idx)
-                                yield StreamChunk(
-                                    tool_call=ToolCall(
-                                        id=buf["id"],
-                                        name=buf["name"],
-                                        arguments=_safe_json_parse(buf["arguments"]),
-                                    )
-                                )
-
-                        finish = _extract_finish_reason(choice)
+                        # 某些 provider 会提前发送 finish_reason，此时 arguments 可能尚未
+                        # 累积完成。这里只记录 finish_reason，不提前 yield tool_call，
+                        # 等到流真正结束后再兜底输出所有未完成的 tool_call。
+                        finish = _extract_finish_reason(choice, None)
                         if finish:
-                            # 某些 provider 在 finish_reason 时仍未触发 tool_call 完成，兜底
-                            for idx, buf in tool_buffers.items():
-                                if idx in completed_tool_indices:
-                                    continue
-                                if buf["id"] and buf["name"]:
-                                    completed_tool_indices.add(idx)
-                                    yield StreamChunk(
-                                        tool_call=ToolCall(
-                                            id=buf["id"],
-                                            name=buf["name"],
-                                            arguments=_safe_json_parse(buf["arguments"]),
-                                        )
-                                    )
+                            pending_finish_reason = finish
+                            pending_finish_usage = _extract_usage(chunk)
+
+                    # 流结束：先 yield 所有未完成的 tool_call，再 yield finish_reason
+                    for idx, buf in tool_buffers.items():
+                        if idx in completed_tool_indices:
+                            continue
+                        if buf["id"] and buf["name"]:
+                            completed_tool_indices.add(idx)
                             yield StreamChunk(
-                                finish_reason=finish,
-                                usage=_extract_usage(chunk),
+                                tool_call=ToolCall(
+                                    id=buf["id"],
+                                    name=buf["name"],
+                                    arguments=_safe_json_parse(buf["arguments"]),
+                                )
                             )
+
+                    if pending_finish_reason:
+                        yield StreamChunk(
+                            finish_reason=pending_finish_reason,
+                            usage=pending_finish_usage or Usage(),
+                        )
 
                 return
             except (
@@ -356,7 +354,7 @@ def _extract_usage(obj: Any) -> Usage:
     )
 
 
-def _extract_finish_reason(choice: Any, default: str = "stop") -> str:
+def _extract_finish_reason(choice: Any, default: str|None) -> str|None:
     """从 choice 对象中提取 finish_reason，缺失时返回默认值。"""
     if choice is None:
         return default
@@ -365,6 +363,11 @@ def _extract_finish_reason(choice: Any, default: str = "stop") -> str:
 
 def _safe_json_parse(raw: str) -> dict[str, Any]:
     import dirtyjson
+
+    # 无参数工具的 arguments 可能为空字符串或仅含空白；
+    # 规范上应为 "{}", 但部分 OpenAI 兼容接口/模型返回 ""。
+    if isinstance(raw, str) and raw.strip() == "":
+        return {}
 
     try:
         result = dirtyjson.loads(raw)
