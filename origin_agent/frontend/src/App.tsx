@@ -170,6 +170,20 @@ export default function App() {
     });
   }, [ws.sessionId]);
 
+  // 子 Agent 停止或完成后，清理 targetSessionsMap 中已失效的 session id
+  useEffect(() => {
+    setTargetSessionsMap((prev) => {
+      const current = prev[ws.sessionId] || ["main"];
+      const activeIds = new Set(["main", ...Object.keys(ws.subagentSessions)]);
+      const cleaned = current.filter((id) => activeIds.has(id));
+      if (cleaned.length === 0 || !cleaned.includes("main")) {
+        return { ...prev, [ws.sessionId]: ["main"] };
+      }
+      if (cleaned.length === current.length) return prev;
+      return { ...prev, [ws.sessionId]: cleaned };
+    });
+  }, [ws.sessionId, ws.subagentSessions]);
+
   const [taskProgressCollapsed, setTaskProgressCollapsed] = useState(false);
   const [clipboardCollapsed, setClipboardCollapsed] = useState(false);
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; sid: string } | null>(null);

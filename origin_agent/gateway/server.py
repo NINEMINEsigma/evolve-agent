@@ -1203,7 +1203,16 @@ async def ws_chat(ws: WebSocket) -> None:
                                 logger.warning("Failed to get subagent snapshot for session=%s", sid, exc_info=True)
                             for sub_id in sub_ids:
                                 other_ids = [o for o in sub_ids if o != sub_id]
-                                other_names = [name_map.get(o, o) for o in other_ids]
+                                other_names: list[str] = []
+                                for o in other_ids:
+                                    name = name_map.get(o)
+                                    if name:
+                                        other_names.append(name)
+                                    else:
+                                        logger.warning(
+                                            "Skipping unnamed co-recipient session | parent=%s target=%s co_recipient=%s",
+                                            sid, sub_id, o,
+                                        )
                                 if also_main:
                                     other_names.append("the Parent Agent (main session)")
                                 subagent_tasks.append(
@@ -1219,8 +1228,17 @@ async def ws_chat(ws: WebSocket) -> None:
                     reply: str
                     if "main" in target_sessions:
                         main_content = content
-                        if sub_ids:
-                            sub_names = [name_map.get(s, s) for s in sub_ids]
+                        sub_names: list[str] = []
+                        for s in sub_ids:
+                            name = name_map.get(s)
+                            if name:
+                                sub_names.append(name)
+                            else:
+                                logger.warning(
+                                    "Skipping unnamed sub-agent target for main session | parent=%s target=%s",
+                                    sid, s,
+                                )
+                        if sub_names:
                             main_content = (
                                 f"[This message is also shared with sub-agents: {', '.join(sub_names)}]\n\n"
                                 f"{content}"
