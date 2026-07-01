@@ -24,7 +24,7 @@ from component.approval_allowlist import is_allowed as is_tool_allowlisted
 from component.llm import LLMClient, LLMResponse, StreamChunk, ToolCall, Usage
 from system.session_store import SessionStore
 from entity.constant import LOG_PREVIEW_CHARS, TOOL_RESULT_PREVIEW_CHARS, TOOL_RESULT_SAVE_THRESHOLD_CHARS, AUTO_TITLE_CONTENT_MAX, MAX_TOOL_TURNS
-from entity.puretype import Role, ToolDangerLevel
+from entity.puretype import Role, ToolAvailability, ToolDangerLevel
 from entry.base_agent_loop import BaseAgentLoop, Inbox, InboxMessage, ToolContext
 from entry.agent_sink import AgentSink, FrontendSink
 from entry.agent_support.messages import (
@@ -146,9 +146,9 @@ class ParentAgentLoop(BaseAgentLoop):
         return self._frontend_sink
 
     def _get_tool_definitions(self) -> list[dict]:
-        """返回主 Agent 可用的工具 schema（availability ∈ {every, parent} + memory 工具）。"""
+        """返回主 Agent 可用的工具 schema（availability 包含 MAIN 或 EVERY + memory 工具）。"""
         definitions: list[dict] = tool_registry.get_definitions_for_availability(
-            scope="main",
+            scope=ToolAvailability.MAIN,
         )
         # 合并 memory 工具 schema
         for schema in self._memory.get_tool_schemas():

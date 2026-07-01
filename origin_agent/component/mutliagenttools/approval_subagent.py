@@ -10,7 +10,7 @@ from __future__ import annotations
 from typing import Any
 
 from abstract.tools.registry import registry, tool_error, tool_result
-from entity.puretype import ToolDangerLevel
+from entity.puretype import ToolAvailability, ToolDangerLevel
 
 
 async def _handle_approval_subagent(args: dict[str, Any]) -> dict:
@@ -165,5 +165,5 @@ The optional 'feedback' field is a list of text responses from the sub-agent's o
     is_async=True,
     emoji="✅",
     danger_level=ToolDangerLevel.readonly,
-    availability="main",
+    availability=ToolAvailability.MAIN,
 )

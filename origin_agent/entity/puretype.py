@@ -2,7 +2,7 @@
 只含有不包含任何方法定义的类型定义
 """
 
-from enum import Enum
+from enum import Enum, IntFlag
 from pydantic import BaseModel, Field
 
 from typing import * # type: ignore
@@ -28,6 +28,19 @@ class ToolDangerLevel(str, Enum):
     readonly = "readonly"
     write = "write"
     dangerous = "dangerous"
+
+
+class ToolAvailability(IntFlag):
+    """工具的可用范围（位掩码）。
+
+    MAIN      : 仅主 agent 可用。
+    SUBAGENT  : 仅子 agent 可用。
+    EVERY     : 主 agent 与子 agent 均可用（MAIN | SUBAGENT）。
+    """
+
+    MAIN = 1
+    SUBAGENT = 2
+    EVERY = MAIN | SUBAGENT
 
 
 # ---------------------------------------------------------------------------

@@ -24,7 +24,7 @@ from entity.constant import (
     SUBAGENT_IDLE_TRIGGER_SECONDS,
     SUBAGENT_MAX_ACTIVE,
 )
-from entity.puretype import Role
+from entity.puretype import Role, ToolAvailability
 from abstract.tools.registry import registry as tool_registry
 from system.context import get_runtime_context
 from entry.parent_agent_loop import ParentAgentLoop
@@ -557,8 +557,8 @@ class _OrchestratorContext:
         return [{"session_id": entry.session_id, "subagent_name": entry.profile.get("name", "")}]
 
     def _build_tool_set(self) -> list[dict[str, Any]]:
-        """构建子 Agent 的工具集 — 仅包含 availability 为 every 或 subagent 的工具。"""
-        return tool_registry.get_definitions_for_availability("subagent")
+        """构建子 Agent 的工具集 — 仅包含 availability 包含 SUBAGENT 或 EVERY 的工具。"""
+        return tool_registry.get_definitions_for_availability(ToolAvailability.SUBAGENT)
 
     def _get_agent_loop(self) -> ParentAgentLoop | None:
         """解析当前父 session 对应的真实 ParentAgentLoop。

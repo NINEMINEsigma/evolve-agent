@@ -12,7 +12,7 @@ from typing import Any
 import logging
 
 from abstract.tools.registry import registry, tool_result
-from entity.puretype import ToolDangerLevel
+from entity.puretype import ToolAvailability, ToolDangerLevel
 
 from ._store import _subagent_registry
 
@@ -120,5 +120,5 @@ Read-only query with no side effects. Returns a dictionary keyed by sub-agent na
     is_async=True,
     emoji="📋",
     danger_level=ToolDangerLevel.readonly,
-    availability="main",
+    availability=ToolAvailability.MAIN,
 )

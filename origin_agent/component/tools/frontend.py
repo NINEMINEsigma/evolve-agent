@@ -15,6 +15,7 @@ from typing import Any, Dict
 
 from abstract.tools.registry import registry, tool_error, tool_result
 from entity.constant import SUBPROCESS_TIMEOUT_DEFAULT
+from entity.puretype import ToolAvailability
 from system.sandbox import Access, SandboxError
 
 logger = logging.getLogger(__name__)
@@ -229,5 +230,5 @@ Creates `node_modules/` and `dist/` in the target directory. Long-running (up to
     },
     handler=_handle_validate_frontend,
     emoji="🎨",
-    availability="main",
+    availability=ToolAvailability.MAIN,
 )

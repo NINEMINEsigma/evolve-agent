@@ -14,7 +14,7 @@ import logging
 from typing import TYPE_CHECKING, Any, Dict
 
 from abstract.tools.registry import registry, tool_error, tool_result
-from entity.puretype import ToolDangerLevel
+from entity.puretype import ToolAvailability, ToolDangerLevel
 from abstract.tools.ui_event_router import ui_event_router
 
 if TYPE_CHECKING:
@@ -166,7 +166,7 @@ Frontend UI only. Does not write to the system clipboard. Reusing the same `disp
     is_async=True,
     emoji="📋",
     danger_level=ToolDangerLevel.readonly,
-    availability="main",
+    availability=ToolAvailability.MAIN,
 )
 ui_event_router.register("set_clipboard_display", _emit_clipboard_display)
 
@@ -210,6 +210,6 @@ Proactively call this tool when you sense the user no longer needs a card, to ke
     is_async=True,
     emoji="🧹",
     danger_level=ToolDangerLevel.readonly,
-    availability="main",
+    availability=ToolAvailability.MAIN,
 )
 ui_event_router.register("clear_clipboard_display", _emit_clipboard_display)

@@ -15,7 +15,7 @@ import logging
 from typing import Any
 
 from abstract.tools.registry import registry, tool_error, tool_result
-from entity.puretype import ToolDangerLevel
+from entity.puretype import ToolAvailability, ToolDangerLevel
 
 logger = logging.getLogger(__name__)
 
@@ -152,5 +152,5 @@ The agent thread blocks until the user responds. Do not call this inside backgro
     emoji="❓",
     danger_level=ToolDangerLevel.readonly,
     no_timeout=True,
-    availability="main",
+    availability=ToolAvailability.MAIN,
 )

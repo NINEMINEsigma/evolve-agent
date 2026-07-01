@@ -23,7 +23,7 @@ from pathlib import Path
 from typing import Any, Dict, List
 
 from abstract.tools.registry import registry, tool_error, tool_result
-from entity.puretype import ToolDangerLevel
+from entity.puretype import ToolAvailability, ToolDangerLevel
 from entity.constant import NAMESPACE_PREFIXES, SUBPROCESS_SOFT_CLEANUP_WAIT_TIME
 
 logger = logging.getLogger(__name__)
@@ -383,7 +383,7 @@ Resolves sandbox logical paths in the command, then launches the subprocess in t
     is_async=True,
     emoji="🔄",
     danger_level=ToolDangerLevel.dangerous,
-    availability="main",
+    availability=ToolAvailability.MAIN,
 )
 
 registry.register(
@@ -450,5 +450,5 @@ Looks up the process by task_id, sends a termination signal, and waits up to 5 s
     handler=_handle_stop_background_service,
     is_async=True,
     emoji="⏹",
-    availability="main",
+    availability=ToolAvailability.MAIN,
 )

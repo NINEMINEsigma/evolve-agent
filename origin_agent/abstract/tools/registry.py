@@ -17,7 +17,7 @@ import threading
 import time
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
-from entity.puretype import ToolDangerLevel
+from entity.puretype import ToolAvailability, ToolDangerLevel
 
 logger = logging.getLogger(__name__)
 
@@ -67,7 +67,7 @@ class ToolEntry:
         dynamic_schema_overrides: Optional[Callable] = None,
         danger_level: ToolDangerLevel = ToolDangerLevel.readonly,
         no_timeout: bool = False,
-        availability: str = "every",
+        availability: ToolAvailability = ToolAvailability.EVERY,
     ):
         self.name: str = name
         self.toolset: str = toolset
@@ -84,7 +84,7 @@ class ToolEntry:
         self.dynamic_schema_overrides: Optional[Callable] = dynamic_schema_overrides
         self.danger_level: ToolDangerLevel = danger_level
         self.no_timeout: bool = no_timeout
-        self.availability: str = availability
+        self.availability: ToolAvailability = availability
 
 
 # ---------------------------------------------------------------------------
@@ -224,8 +224,8 @@ class ToolRegistry:
         entry: ToolEntry | None = self.get_entry(name)
         return entry.toolset if entry else None
 
-    def get_availability(self, name: str) -> str:
-        """返回工具的 availability 级别（``"every"`` | ``"main"`` | ``"subagent"``）。
+    def get_availability(self, name: str) -> ToolAvailability:
+        """返回工具的 availability 位掩码（``ToolAvailability``）。
 
         Raises:
             KeyError: 工具未注册。
@@ -237,26 +237,20 @@ class ToolRegistry:
 
     def get_definitions_for_availability(
         self,
-        scope: str,
+        scope: ToolAvailability,
         tool_names: set | None = None,
         quiet: bool = False,
     ) -> list[dict]:
         """返回指定 availability 范围的工具的 OpenAI 格式 schema。
 
-        *scope* 取值：
-        - ``"main"``: 返回 availability in (\"every\", \"main\") 的工具
-        - ``"subagent"``: 返回 availability in (\"every\", \"subagent\") 的工具
-        - ``"every"``: 返回所有 availability == \"every\" 的工具
+        *scope* 为 ``ToolAvailability`` 位掩码。工具 ``entry.availability``
+        与 *scope* 的按位与结果非零时可见。常见取值：
+        - ``ToolAvailability.MAIN``: 返回 ``MAIN`` 或 ``EVERY`` 的工具
+        - ``ToolAvailability.SUBAGENT``: 返回 ``SUBAGENT`` 或 ``EVERY`` 的工具
+        - ``ToolAvailability.EVERY``: 仅返回 ``EVERY`` 的工具
 
         若提供 *tool_names*，仅返回名称在该集合中的工具。
         """
-        if scope == "main":
-            allowed = {"every", "main"}
-        elif scope == "subagent":
-            allowed = {"every", "subagent"}
-        else:
-            allowed = {"every", "main", "subagent"}
-
         result: list[dict] = []
         check_results: dict[Callable, bool] = {}
         entries_by_name: dict[str, ToolEntry] = {
@@ -270,7 +264,7 @@ class ToolRegistry:
                 if tool_names is not None:
                     raise KeyError(f"Tool not registered: {name}")
                 continue
-            if entry.availability not in allowed:
+            if (entry.availability & scope) == 0:
                 if not quiet:
                     logger.debug("Tool %s filtered out (availability=%s, scope=%s)", name, entry.availability, scope)
                 continue
@@ -363,7 +357,7 @@ class ToolRegistry:
         override: bool = False,
         danger_level: ToolDangerLevel = ToolDangerLevel.readonly,
         no_timeout: bool = False,
-        availability: str = "every",
+        availability: ToolAvailability = ToolAvailability.EVERY,
     ) -> None:
         """注册工具。由每个工具文件在模块导入时调用。
 
