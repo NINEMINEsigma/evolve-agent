@@ -11,6 +11,7 @@ import threading
 from pathlib import Path
 from typing import Any, Dict, List
 
+from entity.constant import TOOL_ALLOWLIST_FILENAME
 from system.context import get_runtime_context
 
 logger = logging.getLogger(__name__)
@@ -20,7 +21,7 @@ _lock = threading.RLock()
 
 
 def _allowlist_path() -> Path:
-    return get_runtime_context().workspace / "tool_allowlist.json"
+    return get_runtime_context().workspace / TOOL_ALLOWLIST_FILENAME
 
 
 def _json_safe(value: Any) -> Any:

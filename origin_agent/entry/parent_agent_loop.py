@@ -86,7 +86,10 @@ class ParentAgentLoop(BaseAgentLoop):
         self._frontend_sink: FrontendSink = frontend_sink
         self._llm: LLMClient = LLMClient(app.runtime_context)
         self._memory: MemoryManager = MemoryManager()
-        self._memory_initialized: bool = False
+        # 记录已成功初始化的 memory provider 的对象 id。
+        # 使用集合而非全局布尔值，避免某个 provider 初始化失败后
+        # 被永久跳过；成功的 provider 不会重复初始化。
+        self._memory_initialized_ids: set[int] = set()
 
         # -- 工具调用事件回调（供 FrontendSink 推送） --
         self._tool_event_callback: Callable[[str, str, str, str], Awaitable[None]] | None = None
@@ -122,12 +125,9 @@ class ParentAgentLoop(BaseAgentLoop):
 
         # 从磁盘加载已有历史（resume / 重新连接场景）
         if self._session_store is not None:
-            try:
-                disk_history = self._session_store.read_messages(self.session_id)
-                if disk_history:
-                    self._history = disk_history
-            except Exception:
-                pass
+            disk_history = self._session_store.read_messages(self.session_id)
+            if disk_history:
+                self._history = disk_history
 
         # -- message hooks 缓存 --
         self._message_hooks_cache: list[dict] | None = None
@@ -225,7 +225,7 @@ class ParentAgentLoop(BaseAgentLoop):
 
     async def process_message(
         self,
-        user_message: str | list[dict[str, Any]],
+        user_message: str, # | list[dict[str, Any]],
     ) -> str:
         """处理一条用户消息，返回助手的回复。"""
         sid = self.session_id
@@ -243,14 +243,16 @@ class ParentAgentLoop(BaseAgentLoop):
             self._maybe_inject_inbox()
             self._append(sid, Role.USER, user_message)
 
-            # 延迟初始化 memory provider
-            if not self._memory_initialized:
-                for provider in self._memory.providers:
-                    try:
-                        provider.initialize(sid)
-                    except Exception:
-                        logger.exception("Failed to initialize memory provider for session=%s", sid)
-                self._memory_initialized = True
+            # 延迟初始化 memory provider：按 provider 跟踪成功状态，
+            # 失败者在后续消息处理时重试，避免一次失败导致永久跳过。
+            for provider in self._memory.providers:
+                if id(provider) in self._memory_initialized_ids:
+                    continue
+                try:
+                    provider.initialize(sid)
+                    self._memory_initialized_ids.add(id(provider))
+                except Exception:
+                    logger.exception("Failed to initialize memory provider for session=%s", sid)
 
             # memory 预取
             memory_ctx = self._memory.prefetch_all(
@@ -285,7 +287,7 @@ class ParentAgentLoop(BaseAgentLoop):
         self,
         sid: str,
         messages: list[dict[str, Any]],
-        user_message: str | list[dict[str, Any]],
+        user_message: str, # | list[dict[str, Any]],
     ) -> str:
         """执行 LLM 工具调用循环（含 inbox 消息消费）。"""
         self._cancel_event.clear()
@@ -808,7 +810,12 @@ class ParentAgentLoop(BaseAgentLoop):
                 self._append(old_sid, Role.USER, pending_user_message)
             return None
 
-        self._transfer_session_runtime_resources(old_sid, new_sid)
+        transfer_result = self._transfer_session_runtime_resources(old_sid, new_sid)
+        if transfer_result.get("tool_resources_error") or transfer_result.get("memory_init_failed"):
+            logger.warning(
+                "Session runtime resource transfer had issues | old=%s new=%s result=%s",
+                old_sid, new_sid, transfer_result,
+            )
         if pending_user_message is not None:
             self._append(new_sid, Role.USER, pending_user_message)
 
@@ -818,8 +825,12 @@ class ParentAgentLoop(BaseAgentLoop):
         )
         return new_sid
 
-    def _transfer_session_runtime_resources(self, old_sid: str, new_sid: str) -> None:
-        """将旧会话的运行态资源迁移到继承会话。"""
+    def _transfer_session_runtime_resources(self, old_sid: str, new_sid: str) -> dict[str, Any]:
+        """将旧会话的运行态资源迁移到继承会话。
+
+        返回迁移结果字典，供调用方记录或报告。
+        """
+        result: dict[str, Any] = {"old_sid": old_sid, "new_sid": new_sid}
         self._last_prompt_tokens = 0
         self._session_rotated_notify[old_sid] = new_sid
 
@@ -827,23 +838,34 @@ class ParentAgentLoop(BaseAgentLoop):
         idle_ts = self._last_idle_time.pop(old_sid, None)
         self._last_idle_time[new_sid] = idle_ts if idle_ts is not None else time.monotonic()
 
-        if not self._memory_initialized:
-            for provider in self._memory.providers:
-                try:
-                    provider.initialize(new_sid)
-                except Exception:
-                    logger.exception("Failed to initialize memory provider for session=%s", new_sid)
-            self._memory_initialized = True
+        # 初始化尚未成功的 memory provider
+        memory_init_failed: list[str] = []
+        for provider in self._memory.providers:
+            if id(provider) in self._memory_initialized_ids:
+                continue
+            try:
+                provider.initialize(new_sid)
+                self._memory_initialized_ids.add(id(provider))
+            except Exception as exc:
+                logger.exception("Failed to initialize memory provider for session=%s", new_sid)
+                memory_init_failed.append(str(exc))
+        result["memory_init_failed"] = memory_init_failed
 
+        # 迁移工具副作用资源
+        tool_resources_error: str | None = None
         if self._session_store is not None:
             try:
                 resources = self._session_store.read_tool_resources(old_sid)
                 self._session_store.write_tool_resources(new_sid, resources)
             except Exception as exc:
+                tool_resources_error = str(exc)
                 logger.exception(
                     "Failed to transfer tool resources from %s to %s: %s",
                     old_sid, new_sid, exc,
                 )
+        result["tool_resources_error"] = tool_resources_error
+
+        return result
 
     # ========================================================================
     # 磁盘持久化

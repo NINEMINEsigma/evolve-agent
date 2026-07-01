@@ -76,7 +76,7 @@ Thread safety:
     _lock so the code is safe regardless of GIL presence (e.g. Python 3.13+
     free-threading).
 """
-
+# TODO: 大量导入问题
 import asyncio
 import concurrent.futures
 import inspect
@@ -1767,7 +1767,7 @@ class MCPServerTask:
                 task.cancel()
             await asyncio.gather(*self._pending_refresh_tasks, return_exceptions=True)
             self._pending_refresh_tasks.clear()
-        for tool_name in list(getattr(self, "_registered_tool_names", [])):
+        for tool_name in list(self._registered_tool_names):
             registry.deregister(tool_name)
             _forget_mcp_tool_server(tool_name)
         self._registered_tool_names = []
