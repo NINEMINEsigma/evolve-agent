@@ -204,6 +204,14 @@ class LLMClient:
                     pending_finish_usage: Usage | None = None
 
                     async for chunk in stream:
+                        # TODO: include_usage 的 usage-only chunk 可能被 finish chunk 的零值 usage 覆盖。
+                        # OpenAI 流式接口在 stream_options.include_usage=True 时，通常会在 finish_reason
+                        # 之后再发一个 choices=[] 但带 usage 的独立 chunk。当前逻辑先把这个 usage 单独
+                        # yield 出去，随后又在带 finish_reason 的 chunk 上记录 pending_finish_usage；如果
+                        # 后者本身没有 usage，pending_finish_usage 就是零值，最终 finish chunk 会把真实
+                        # usage 覆盖为 0，导致 parent_agent_loop.py 抛出
+                        # "LLM provider did not return token usage for streaming response."。
+                        # 修复方向：维护一个跨 chunk 的最新非零 usage，避免用零值覆盖真实 usage。
                         # include_usage 模式下，OpenAI 在最终发送一个
                         # choices 为空但携带 usage 的独立 chunk，需要单独提取
                         if not chunk.choices and getattr(chunk, "usage", None):
