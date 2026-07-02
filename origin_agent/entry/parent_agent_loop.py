@@ -1,4 +1,4 @@
-"""ParentAgentLoop — 主 Agent 循环，继承 BaseAgentLoop。
+"""ParentAgentLoop — 主 Agent 循环，继承 BasePrivateChatAgentLoop。
 
 实现流式 LLM 调用、Memory 管理、session 旋转/归档、
 工具审批流程和前端事件推送。每个 session 对应一个实例。
@@ -25,7 +25,7 @@ from component.llm import LLMClient, LLMResponse, StreamChunk, ToolCall, Usage
 from system.session_store import SessionStore
 from entity.constant import LOG_PREVIEW_CHARS, TOOL_RESULT_PREVIEW_CHARS, TOOL_RESULT_SAVE_THRESHOLD_CHARS, AUTO_TITLE_CONTENT_MAX, MAX_TOOL_TURNS
 from entity.puretype import Role, ToolAvailability, ToolDangerLevel
-from entry.base_agent_loop import BaseAgentLoop, Inbox, InboxMessage, ToolContext
+from entry.base_agent_loop import BasePrivateChatAgentLoop, ToolContext
 from entry.agent_sink import AgentSink, FrontendSink
 from entry.agent_support.messages import (
     build_agent_system_prompt,
@@ -61,10 +61,10 @@ async def _close_async_iterator(ait: Any) -> None:
         logger.debug("Failed to close async iterator", exc_info=True)
 
 
-class ParentAgentLoop(BaseAgentLoop):
+class ParentAgentLoop(BasePrivateChatAgentLoop):
     """主 Agent 循环 — 每个 WebSocket session 一个实例。
 
-    继承 BaseAgentLoop，实现：
+    继承 BasePrivateChatAgentLoop，实现：
     - 流式 LLM（通过 LLMClient.chat_stream）
     - Memory 预取与同步
     - 上下文超限时的 session 旋转/归档

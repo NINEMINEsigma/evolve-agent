@@ -20,7 +20,7 @@ from abstract.tools.registry import ToolEntry, registry as tool_registry
 from component.llm import LLMClient, LLMResponse, ToolCall
 from entity.puretype import Role, ToolDangerLevel
 from subagent.context import SubRuntimeContext
-from entry.base_agent_loop import BaseAgentLoop, UserMessage, ContextLimitMessage, ToolContext
+from entry.base_agent_loop import BasePrivateChatAgentLoop, UserMessage, ContextLimitMessage, ToolContext
 from entry.agent_sink import ParentAgentSink
 
 logger = logging.getLogger(__name__)
@@ -73,10 +73,10 @@ class PendingToolCall:
         self.result: asyncio.Future = asyncio.get_event_loop().create_future()
 
 
-class SubAgentLoop(BaseAgentLoop):
+class SubAgentLoop(BasePrivateChatAgentLoop):
     """单个子 Agent 会话的 LLM 循环。
 
-    继承 BaseAgentLoop，实现子 Agent 特化的 LLM 客户端、收件箱和工具审批。
+    继承 BasePrivateChatAgentLoop，实现子 Agent 特化的 LLM 客户端、收件箱和工具审批。
     每个子 Agent 在独立的 asyncio.Task 中运行 ``run()``。
     """
 
@@ -110,7 +110,7 @@ class SubAgentLoop(BaseAgentLoop):
         self._llm: LLMClient = self._build_llm_client(ctx)   # 子 Agent 独立的 LLM 客户端
         self._on_message: Callable[[dict], None] | None = on_message  # 每轮 LLM 响应/工具调用即时推送回调
 
-        # 内部状态（_history / _inbox / _cancel_event 由 BaseAgentLoop 提供）
+        # 内部状态（_inbox / _cancel_event 由 BaseAgentLoop 提供；_history 由 BasePrivateChatAgentLoop 提供）
         self._outbox: list[str] = []                         # 发件箱：子 Agent 文本回复，父 Agent 通过 get_outbox() 收集
         self._pending_approvals: list[PendingToolCall] = []   # 等待父 Agent 审批的工具调用队列
         self._max_turns: int = max_turns                     # 最大工具调用轮次上限
@@ -597,7 +597,7 @@ class SubAgentLoop(BaseAgentLoop):
             "content": content,
         }
 
-    # -- BaseAgentLoop 抽象方法实现 ------------------------------------------
+    # -- BasePrivateChatAgentLoop 抽象方法实现 --------------------------------
 
     def _get_llm_client(self):
         return self._llm

@@ -1,7 +1,9 @@
-"""BaseAgentLoop 抽象基类 + Inbox/InboxMessage 消息队列。
+"""Agent Loop 抽象基类 + Inbox/InboxMessage 消息队列。
 
-所有 Agent 循环（ParentAgentLoop、SubAgentLoop）继承此基类。
-提供统一的 LLM-工具循环、收件箱机制和生命周期管理。
+所有 Agent 循环（ParentAgentLoop、SubAgentLoop、GroupChatLoop）继承 ``BaseAgentLoop``。
+``BaseAgentLoop`` 只提供所有循环共用的生命周期、收件箱机制和 sink 抽象；
+``BasePrivateChatAgentLoop`` 继承它，补充 1-on-1 私聊循环所需的标准历史、
+LLM 调用、工具执行、memory 和 hooks 能力。
 """
 
 from __future__ import annotations
@@ -152,33 +154,90 @@ class ToolContext(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# BaseAgentLoop — 抽象基类
+# BaseAgentLoop — 最基础 Agent 循环抽象基类
 # ---------------------------------------------------------------------------
 
 class BaseAgentLoop(ABC):
-    """Agent 循环抽象基类。
+    """所有 Agent 循环的最基础抽象基类。
+
+    子类必须实现：
+    - _get_sink() → AgentSink
+
+    可选覆盖：
+    - schedule_inbox_processing() → None
+    """
+
+    def __init__(self, app: Application, session_id: str) -> None:
+        self.session_id: str = session_id
+        self.app: Application = app
+        self._inbox: Inbox = Inbox()
+        self._cancel_event: asyncio.Event = asyncio.Event()
+
+    @property
+    def inbox(self) -> Inbox:
+        """公开的收件箱访问器，供 CronRouter 等外部组件投递消息。"""
+        return self._inbox
+
+    # -- 抽象方法 ---------------------------------------------------------
+
+    @abstractmethod
+    def _get_sink(self) -> AgentSink:
+        """返回当前 loop 的 AgentSink 实例。"""
+        ...
+
+    # -- 收件箱处理 -------------------------------------------------------
+
+    def schedule_inbox_processing(self) -> None:
+        """提示 loop 尽快处理 inbox 中的待处理消息。
+
+        默认空实现；需要即时消费 inbox 的 loop（如 ParentAgentLoop）可覆盖。
+        """
+        pass
+
+    def _flush_inbox(self) -> list[InboxMessage]:
+        """取出并返回所有待处理的收件箱消息。
+
+        子类可重写以处理特定类型的消息（如 ApprovalDecisionMessage）。
+        """
+        return self._inbox.get_pending()
+
+    # -- 取消控制 ---------------------------------------------------------
+
+    def interrupt(self) -> None:
+        """请求停止当前循环。"""
+        self._cancel_event.set()
+
+    def is_interrupted(self) -> bool:
+        """返回 True 表示存在活跃的中断请求。"""
+        return self._cancel_event.is_set()
+
+    async def _check_cancel(self) -> bool:
+        """检查取消事件，已中断则返回 True。"""
+        return self._cancel_event.is_set()
+
+
+# ---------------------------------------------------------------------------
+# BasePrivateChatAgentLoop — 1-on-1 私聊 Agent 循环基类
+# ---------------------------------------------------------------------------
+
+class BasePrivateChatAgentLoop(BaseAgentLoop):
+    """1-on-1 私聊 Agent 循环的抽象基类。
+
+    继承 ``BaseAgentLoop``，补充标准 OpenAI 格式历史、LLM 调用、工具执行、
+    memory 和 custom_hooks 能力。
 
     子类必须实现以下工厂方法：
     - _get_llm_client() → LLMClient
     - _get_context() → Any
-    - _get_sink() → AgentSink
     - _get_tool_definitions() → list[dict]
     - _on_context_over_limit() → None
     - _build_system_prompt() → list[str]
     """
 
     def __init__(self, app: Application, session_id: str) -> None:
-        self.session_id: str = session_id
-        self.app: Application = app
+        super().__init__(app, session_id)
         self._history: list[dict[str, Any]] = []
-        self._inbox: Inbox = Inbox()
-        self._cancel_event: asyncio.Event = asyncio.Event()
         self._message_hooks_cache: list[dict] | None = None
-
-    @property
-    def inbox(self) -> Inbox:
-        """公开的收件箱访问器，供 CronRouter 等外部组件投递消息。"""
-        return self._inbox
 
     # -- 抽象方法 ---------------------------------------------------------
 
@@ -190,11 +249,6 @@ class BaseAgentLoop(ABC):
     @abstractmethod
     def _get_context(self) -> Any:
         """返回当前 loop 的 RuntimeContext 或 SubRuntimeContext。"""
-        ...
-
-    @abstractmethod
-    def _get_sink(self) -> AgentSink:
-        """返回当前 loop 的 AgentSink 实例。"""
         ...
 
     @abstractmethod
@@ -287,29 +341,6 @@ class BaseAgentLoop(ABC):
             "name": tool_name,
             "content": content,
         }
-
-    # -- 收件箱处理 -------------------------------------------------------
-
-    def _flush_inbox(self) -> list[InboxMessage]:
-        """取出并返回所有待处理的收件箱消息。
-
-        子类可重写以处理特定类型的消息（如 ApprovalDecisionMessage）。
-        """
-        return self._inbox.get_pending()
-
-    # -- 取消控制 ---------------------------------------------------------
-
-    def interrupt(self) -> None:
-        """请求停止当前循环。"""
-        self._cancel_event.set()
-
-    def is_interrupted(self) -> bool:
-        """返回 True 表示存在活跃的中断请求。"""
-        return self._cancel_event.is_set()
-
-    async def _check_cancel(self) -> bool:
-        """检查取消事件，已中断则返回 True。"""
-        return self._cancel_event.is_set()
 
     # -- 历史管理 ---------------------------------------------------------
 
