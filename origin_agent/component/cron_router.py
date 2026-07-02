@@ -68,16 +68,14 @@ class CronRouter:
         loop.inbox.put(msg)
         loop.inbox.wake()
         logger.debug("CronRouter: dispatched %s to session=%s", task_id, session_id)
-        # 触发 loop 消费 inbox（仅 ParentAgentLoop 支持，SubAgentLoop 通过自身事件循环处理）
-        from entry.parent_agent_loop import ParentAgentLoop
-        if isinstance(loop, ParentAgentLoop):
-            try:
-                loop.schedule_inbox_processing()
-            except Exception:
-                # cron 结果已安全存入 inbox，调度失败不丢失数据；记录异常供排查
-                logger.exception(
-                    "Failed to schedule inbox processing for session=%s", session_id,
-                )
+        # 触发 loop 消费 inbox；基类默认空实现，ParentAgentLoop 等需要即时处理的 loop 会覆盖。
+        try:
+            loop.schedule_inbox_processing()
+        except Exception:
+            # cron 结果已安全存入 inbox，调度失败不丢失数据；记录异常供排查
+            logger.exception(
+                "Failed to schedule inbox processing for session=%s", session_id,
+            )
         return True
 
     # -- 任务注册表管理 ----------------------------------------------------------

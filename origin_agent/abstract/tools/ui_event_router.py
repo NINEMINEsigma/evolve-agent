@@ -1,7 +1,7 @@
 """UI 事件路由器 — 工具模块在此注册自己的前端推送 handler。
 
 工具文件通过模块级调用 ``ui_event_router.register(name, handler)``
-注册工具名到 emit handler 的映射。``BaseAgentLoop._execute_tool`` 执行完
+注册工具名到 emit handler 的映射。``BasePrivateChatAgentLoop._execute_tool`` 执行完
 工具后统一调用 ``ui_event_router.emit_for(...)``，无需感知具体工具名称
 
 或推送方式。
