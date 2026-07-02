@@ -10,7 +10,7 @@ from __future__ import annotations
 import json
 import logging
 from pathlib import Path
-from typing import Any, Dict, TYPE_CHECKING
+from typing import Any, TYPE_CHECKING
 
 from abstract.tools.registry import registry, tool_error, tool_result
 from component.llm import LLMClient
@@ -32,8 +32,9 @@ def _cache_path() -> Path:
     return get_runtime_context().workspace / "vision_capability_cache.json"
 
 
-def _cache_key(session_id: str, model: str) -> str:
-    return f"{session_id}:{model.lower()}"
+def _cache_key(model: str) -> str:
+    """缓存键仅按模型名称索引，全局复用。"""
+    return model.lower()
 
 
 def _load_cache() -> dict[str, bool]:
@@ -99,7 +100,7 @@ async def _handle_probe_vision(args: dict[str, Any], context: ToolContext | None
     if not model_name:
         return tool_error("No LLM model configured in RuntimeContext")
 
-    key = _cache_key(session_id, model_name)
+    key = _cache_key(model_name)
     cache = _load_cache()
     if not force and key in cache:
         capable: bool = cache[key]
@@ -130,7 +131,7 @@ async def _handle_probe_vision(args: dict[str, Any], context: ToolContext | None
     ]
 
     try:
-        resp = await client.chat(probe_messages)
+        await client.chat(probe_messages)
         # API 接受了图片即视为支持（不关心回答内容）
         cache[key] = True
         _save_cache(cache)

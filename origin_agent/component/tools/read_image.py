@@ -14,19 +14,21 @@ import base64
 import io
 import logging
 import mimetypes
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Optional, Tuple
 
 from abstract.tools.registry import registry, tool_error
+from system.context import get_runtime_context
 from system.sandbox import SandboxError
 from .filesystem import _s
+from .probe_vision import get_cached_vision_support
+
+logger = logging.getLogger(__name__)
 
 try:
     from PIL import Image as PILImage
 except Exception:  # pragma: no cover — PIL is optional
     logger.debug("PIL not available; image size parsing disabled", exc_info=True)
     PILImage = None  # type: ignore
-
-logger = logging.getLogger(__name__)
 
 
 _SUPPORTED_MIMES: set[str] = {
@@ -63,6 +65,26 @@ def _handle_read_image(args: dict[str, Any]) -> dict:
     path: str = str(args.get("path", "")).strip()
     if not path:
         return tool_error("path is required", path=path)
+
+    model_name: str = get_runtime_context().llm_model or ""
+    if not model_name:
+        return tool_error("No LLM model configured; cannot determine vision capability.", path=path)
+
+    vision_capable = get_cached_vision_support(model_name)
+    if vision_capable is None:
+        return tool_error(
+            f"Vision capability for model '{model_name}' has not been probed yet. "
+            "Please call `probe_vision_capability` first.",
+            path=path,
+            model=model_name,
+        )
+    if vision_capable is False:
+        return tool_error(
+            f"Current model '{model_name}' does not support vision. "
+            "Switch to a vision-capable model to read images.",
+            path=path,
+            model=model_name,
+        )
 
     try:
         resolved = _s().resolve_read(path)
@@ -140,10 +162,15 @@ registry.register(
         "description": """Read an image file and return its content and metadata.
 
 ## Prerequisites
-Image must exist in agentspace (ws: or fork: namespace). Supported formats: PNG, JPEG, WebP, GIF, BMP, TIFF, SVG. Maximum file size: 20 MB.
+- `probe_vision_capability` must have been called for the current model and returned `capable=true`. If not probed, this tool returns an error prompting you to call `probe_vision_capability` first.
+- If the current model does not support vision, this tool returns an error and does NOT provide the image content.
+- Image must exist in agentspace (ws: or fork: namespace). Supported formats: PNG, JPEG, WebP, GIF, BMP, TIFF, SVG. Maximum file size: 20 MB.
 
 ## Effect
-Read-only. Does not modify any files.
+Read-only. Does not modify any files. Before reading, the tool checks the cached vision capability for the current model:
+- **Not probed**: returns an error asking to call `probe_vision_capability`.
+- **Non-vision model**: returns an error; no base64 image data is returned.
+- **Vision-capable model**: returns metadata plus the `_image` payload.
 
 ## Returns
 ```json
@@ -171,7 +198,8 @@ The agent does not need to handle this distinction.
 - Analyzing image content (requires a vision-capable model).
 
 ## Side Effects / Notes
-Path must include a namespace prefix (e.g. `ws:uploads/screenshot.png`); otherwise sandbox resolution fails. Uploaded files are located under `ws:uploads/`.""",
+- Always call `probe_vision_capability` before `read_image` to avoid unnecessary image reads.
+- Path must include a namespace prefix (e.g. `ws:uploads/screenshot.png`); otherwise sandbox resolution fails. Uploaded files are located under `ws:uploads/`.""",
         "parameters": {
             "type": "object",
             "properties": {
