@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import importlib.util
 import logging
+import sys
+import types
 from pathlib import Path
 from typing import * # type: ignore
 
@@ -25,14 +27,24 @@ def load_message_hooks(repo_root: Path, logger: logging.Logger) -> list[dict]:
         logger.info("Hooks directory does not exist: %s", hooks_dir)
         return hooks
 
+    # 创建/复用 custom_hooks 父包，使子模块处于隔离命名空间，
+    # 便于 easysave 通过 importlib.import_module 恢复其中定义的类。
+    parent_pkg = sys.modules.get("custom_hooks")
+    if parent_pkg is None:
+        parent_pkg = types.ModuleType("custom_hooks")
+        parent_pkg.__path__ = [str(hooks_dir)]
+        sys.modules["custom_hooks"] = parent_pkg
+
     for fpath in sorted(hooks_dir.glob("*.py")):
         if fpath.name.startswith("_"):
             continue
         try:
-            spec = importlib.util.spec_from_file_location(fpath.stem, fpath)
+            module_name = f"custom_hooks.{fpath.stem}"
+            spec = importlib.util.spec_from_file_location(module_name, fpath)
             if spec is None or spec.loader is None:
                 continue
             mod = importlib.util.module_from_spec(spec)
+            sys.modules[module_name] = mod
             spec.loader.exec_module(mod)
             if (
                 hasattr(mod, "hook_tag_name")
