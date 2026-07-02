@@ -102,6 +102,7 @@ async def push_subagent_update(
     status: str,
     feedback: list[dict[str, str]],
     pending_approvals: list[dict[str, Any]],
+    removed: bool = False,
 ) -> None:
     """将子 Agent 状态更新推送到前端 WebSocket。
 
@@ -123,6 +124,7 @@ async def push_subagent_update(
                     "status": status,
                     "feedback": feedback,
                     "pending_approvals": pending_approvals,
+                    "_removed": removed,
                 }, ensure_ascii=False),
             ).to_json()
         )

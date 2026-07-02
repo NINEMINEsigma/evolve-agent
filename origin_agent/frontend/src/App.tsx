@@ -143,6 +143,8 @@ export default function App() {
     subagentPanelWidthRef.current = subagentPanelWidth;
   }, [subagentPanelWidth]);
 
+  const prevSubagentIdsRef = useRef<Record<string, Set<string>>>({});
+
   const setSubagentPanelOpen = (value: boolean | ((prev: boolean) => boolean)) => {
     setSubagentPanelOpenMap((prev) => ({
       ...prev,
@@ -172,6 +174,13 @@ export default function App() {
 
   // 子 Agent 停止或完成后，清理 targetSessionsMap 中已失效的 session id
   useEffect(() => {
+    const currentIds = new Set(Object.keys(ws.subagentSessions));
+    const prevIds = prevSubagentIdsRef.current[ws.sessionId] || new Set();
+    prevSubagentIdsRef.current[ws.sessionId] = currentIds;
+
+    const hasRemoval = Array.from(prevIds).some((id) => !currentIds.has(id));
+    if (!hasRemoval) return;
+
     setTargetSessionsMap((prev) => {
       const current = prev[ws.sessionId] || ["main"];
       const activeIds = new Set(["main", ...Object.keys(ws.subagentSessions)]);
@@ -179,7 +188,6 @@ export default function App() {
       if (cleaned.length === 0 || !cleaned.includes("main")) {
         return { ...prev, [ws.sessionId]: ["main"] };
       }
-      if (cleaned.length === current.length) return prev;
       return { ...prev, [ws.sessionId]: cleaned };
     });
   }, [ws.sessionId, ws.subagentSessions]);

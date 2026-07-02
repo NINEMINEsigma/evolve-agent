@@ -1,6 +1,5 @@
-from typing import *
+from typing import * # type: ignore
 from collections.abc import Callable
-from typing import Any
 import argparse
 import os
 import logging

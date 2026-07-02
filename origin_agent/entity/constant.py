@@ -11,6 +11,9 @@ from datetime import timezone
 # 本地 GGUF 模型文件存放目录名
 CUSTOM_MODELS_DIR: str = "custom_models"
 
+# 自定义插件目录
+CUSTOM_TOOLS_DIR: str = "custom_tools"
+
 
 # ============================================================================
 # 内部文件位置
@@ -164,7 +167,7 @@ MAX_TOOL_TURNS: int = 90
 SUBAGENT_STORE_FILENAME: str = "subagents.json"
 
 # 子 Agent 最大同时活跃数量 — 超出上限的子 Agent 进入等待队列
-SUBAGENT_MAX_ACTIVE: int = 5
+SUBAGENT_MAX_ACTIVE: int = 50
 
 # DEPRECATED: SUBAGENT_READONLY_WHITELIST is no longer used.
 # Subagents now inherit all non-multiagent tools automatically.

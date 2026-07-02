@@ -422,6 +422,7 @@ class _OrchestratorContext:
                 status = "running"
             feedback: list[dict[str, Any]] = [event] if event else []
             pending = sub.pending_approvals_info if sub is not None else []
+            removed = sub is None
             await push_subagent_update(
                 parent_session_id=self._parent_session_id,
                 subagent_session_id=session_id,
@@ -429,6 +430,7 @@ class _OrchestratorContext:
                 status=status,
                 feedback=feedback,
                 pending_approvals=pending,
+                removed=removed,
             )
         except Exception as exc:
             logger.warning("WS push for subagent %s failed: %s", session_id, exc, exc_info=True)

@@ -17,7 +17,7 @@ from system.application import Application
 if TYPE_CHECKING:
     from system.context import RuntimeContext
 
-from entity.constant import CUSTOM_MODELS_DIR
+from entity.constant import CUSTOM_MODELS_DIR, CUSTOM_TOOLS_DIR
 
 logger = logging.getLogger(__name__)
 
@@ -160,9 +160,9 @@ class App:
             discover_builtin_tools(str(_agent_root / "component" / "tools"), "component.tools")
             discover_builtin_tools(str(_agent_root / "component" / "extools"), "component.extools")
             discover_builtin_tools(str(_agent_root / "component" / "mutliagenttools"), "component.mutliagenttools")
-            _custom_tools: Path = _root / "custom_tools"
+            _custom_tools: Path = _root / CUSTOM_TOOLS_DIR
             if _custom_tools.exists():
-                discover_builtin_tools(str(_custom_tools), "custom_tools")
+                discover_builtin_tools(str(_custom_tools), CUSTOM_TOOLS_DIR)
             # 注册 MCP 工具（桥接 + 连接 server）
             import component.mcp_tools  # noqa: F401 — 安装 MCP 回调
             component.mcp_tools.init_mcp(self.ctx)
