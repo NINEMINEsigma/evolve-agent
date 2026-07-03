@@ -7,6 +7,9 @@ from pydantic import BaseModel, Field
 
 from typing import * # type: ignore
 
+# ---------------------------------------------------------------------------
+# Flags and Enums
+# ---------------------------------------------------------------------------
 
 class Role(str, Enum):
     """OpenAI 消息格式中的会话角色。"""
