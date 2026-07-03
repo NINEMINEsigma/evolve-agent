@@ -1,53 +1,53 @@
-# Pre-Mortem Analysis Guide
+# 事前失效分析指南
 
-A pre-mortem assumes the plan has been implemented and failed catastrophically. Working backward from failure surfaces risks that forward planning misses.
+Pre-mortem 假设计划已经实现并发生了灾难性失败。从失败往回推，可以发现正向规划遗漏的风险。
 
-## When to Run
+## 何时运行
 
-Run after core decisions are resolved but before concluding the session. Do not skip this step for medium/deep sessions.
+在核心决策解决后、会话结束前运行。中度/深度会话不要跳过此步骤。
 
-## Procedure
+## 流程
 
-### Step 1: Set the scene
+### 步骤 1：设定场景
 
-> "It is six months from now. The system is in production and has failed badly. What happened?"
+> "现在是六个月后。系统已经上线并严重失败。发生了什么？"
 
-### Step 2: Generate failure modes
+### 步骤 2：生成失效模式
 
-Invent specific, plausible failure scenarios tied to decisions made in this session:
+发明与会话中决策相关的具体、可信的失效场景：
 
-| Failure mode | Likely cause | Early warning signal | Prevention |
+| 失效模式 | 可能原因 | 早期预警信号 | 预防措施 |
 |-------------|--------------|---------------------|------------|
-| <scenario> | <which decision went wrong> | <what metric/alert catches it> | <what would have prevented it> |
+| <场景> | <哪个决策出了问题> | <什么指标/告警能发现它> | <本可以如何预防> |
 
-Target 3-5 failure modes. Prioritize:
-1. Cascade failures (one bad decision breaks multiple subsystems)
-2. Silent failures (the system appears to work but produces wrong results)
-3. Scaling failures (works at small scale, breaks at large)
+目标 3–5 个失效模式。优先关注：
+1. 级联失效（一个错误决策破坏多个子系统）
+2. 静默失效（系统看似正常但结果错误）
+3. 规模失效（小规模可用，大规模崩溃）
 
-### Step 3: Identify the weakest decision
+### 步骤 3：识别最脆弱的决策
 
-Ask: "If only one decision from this session could be wrong, which would cause the most damage?"
+提问：“如果本次会话中只有一个决策可能是错的，哪个会造成最大损害？”
 
-Mark that decision as [RISKY] in the decision log and add a specific monitoring/mitigation plan.
+在决策日志中将该决策标记为 [RISKY]，并添加具体的监控/缓解计划。
 
-### Step 4: Extract risk register entries
+### 步骤 4：提取风险登记条目
 
-Every plausible failure mode becomes an entry in the decision log's Risk Register with:
-- **Severity**: high (system down), medium (degraded), low (inconvenience)
-- **Trigger condition**: when to escalate from monitoring to action
-- **Owner**: who is responsible for watching this risk
+每个合理的失效模式都将成为决策日志风险登记中的一条：
+- **严重等级**：高（系统宕机）、中（降级）、低（不便）
+- **触发条件**：何时从监控升级为行动
+- **负责人**：谁负责持续关注该风险
 
-## Example
+## 示例
 
-> **Failure mode**: "Orders are double-charged under load."
-> **Likely cause**: "We chose optimistic concurrency for the payment gateway (D3) but didn't implement idempotency keys."
-> **Early warning**: "Duplicate charge rate > 0.01%."
-> **Prevention**: "Add idempotency keys before going live; monitor charge uniqueness."
+> **失效模式**："高负载下订单被重复扣款。"
+> **可能原因**："我们为支付网关选择了乐观并发（D3），但没有实现幂等键。"
+> **早期预警**："重复扣款率 > 0.01%。"
+> **预防措施**："上线前添加幂等键；监控扣款唯一性。"
 
-## Rules
+## 规则
 
-- Do not accept vague risks like "performance issues" — demand specifics
-- Tie every risk back to a specific decision from this session
-- If a risk has no mitigation strategy, the decision is not ready to be marked [RESOLVED]
-- The pre-mortem is not about pessimism — it's about making the plan robust enough to survive reality
+- 不接受模糊风险如“性能问题”——要求具体
+- 每个风险都要关联到本次会话中的具体决策
+- 如果某个风险没有缓解策略，则该决策还不应标记为 [RESOLVED]
+- Pre-mortem 不是悲观——它是为了让计划足够坚韧，能够经受现实

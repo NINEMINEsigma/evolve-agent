@@ -5,12 +5,15 @@
 from __future__ import annotations
 
 import logging
+import re
 from typing import Any
 
 from abstract.tools.registry import registry, tool_error, tool_result
+from entity.constant import SUBAGENT_NAME_PATTERN
 from entity.puretype import ToolAvailability, ToolDangerLevel
 
-from ._store import _save_subagents, _subagent_registry
+from ._store import SubagentStore
+from system.context import get_runtime_context
 
 logger = logging.getLogger(__name__)
 
@@ -27,6 +30,11 @@ def _handle_register_subagent(args: dict[str, Any]) -> dict:
 
     if not name:
         return tool_error("'name' is required and must not be empty")
+    if not re.match(SUBAGENT_NAME_PATTERN, name):
+        return tool_error(
+            f"Subagent name '{name}' contains invalid characters. "
+            "Allowed: English letters, digits, Chinese characters, '_' and '-'."
+        )
     if not base_url:
         return tool_error("'base_url' is required and must not be empty")
     if not model:
@@ -46,14 +54,15 @@ def _handle_register_subagent(args: dict[str, Any]) -> dict:
         if not isinstance(p, str):
             return tool_error("'system_prompt_paths' must be a list of strings")
 
-    if name in _subagent_registry:
+    store = SubagentStore(get_runtime_context().agentspace)
+    if store.get(name) is not None:
         return tool_error(
             f"Subagent '{name}' already registered. "
             "Unregister it first if you need to replace.",
             registered=True,
         )
 
-    _subagent_registry[name] = {
+    profile = {
         "base_url": base_url,
         "model": model,
         "api_key": api_key if api_key is not None else None,
@@ -61,7 +70,14 @@ def _handle_register_subagent(args: dict[str, Any]) -> dict:
         "max_output_tokens": max_output_tokens,
         "max_context_tokens": max_context_tokens,
     }
-    _save_subagents()
+    try:
+        store.add(name, profile)
+    except FileExistsError:
+        return tool_error(
+            f"Subagent '{name}' already registered. "
+            "Unregister it first if you need to replace.",
+            registered=True,
+        )
     logger.info("Registered subagent: %s @ %s (%s)", name, base_url, model)
     return tool_result(
         success=True,
@@ -72,13 +88,16 @@ def _handle_register_subagent(args: dict[str, Any]) -> dict:
 
 def _handle_register_subagent_from_parent(args: dict[str, Any]) -> dict:
     """以主 Agent 当前 LLM 配置为模板注册子 Agent，只需提供 name。"""
-    from system.context import get_runtime_context
-
     name: str = str(args.get("name", "")).strip()
     system_prompt_paths: list[str] = args.get("system_prompt_paths") or []
 
     if not name:
         return tool_error("'name' is required and must not be empty")
+    if not re.match(SUBAGENT_NAME_PATTERN, name):
+        return tool_error(
+            f"Subagent name '{name}' contains invalid characters. "
+            "Allowed: English letters, digits, Chinese characters, '_' and '-'."
+        )
 
     if not isinstance(system_prompt_paths, list):
         return tool_error("'system_prompt_paths' must be a list of strings")
@@ -86,7 +105,8 @@ def _handle_register_subagent_from_parent(args: dict[str, Any]) -> dict:
         if not isinstance(p, str):
             return tool_error("'system_prompt_paths' must be a list of strings")
 
-    if name in _subagent_registry:
+    store = SubagentStore(get_runtime_context().agentspace)
+    if store.get(name) is not None:
         return tool_error(
             f"Subagent '{name}' already registered. "
             "Unregister it first if you need to replace.",
@@ -95,7 +115,7 @@ def _handle_register_subagent_from_parent(args: dict[str, Any]) -> dict:
 
     ctx = get_runtime_context()
 
-    _subagent_registry[name] = {
+    profile = {
         "base_url": ctx.llm_base_url,
         "model": ctx.llm_model,
         "api_key": ctx.llm_api_key or None,
@@ -103,7 +123,14 @@ def _handle_register_subagent_from_parent(args: dict[str, Any]) -> dict:
         "max_output_tokens": ctx.llm_max_output_tokens,
         "max_context_tokens": ctx.llm_max_context_tokens,
     }
-    _save_subagents()
+    try:
+        store.add(name, profile)
+    except FileExistsError:
+        return tool_error(
+            f"Subagent '{name}' already registered. "
+            "Unregister it first if you need to replace.",
+            registered=True,
+        )
     logger.info(
         "Registered subagent '%s' from parent config: %s @ %s",
         name, ctx.llm_model, ctx.llm_base_url,

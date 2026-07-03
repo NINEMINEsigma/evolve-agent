@@ -10,7 +10,10 @@ from typing import Any
 
 from abstract.tools.registry import registry, tool_error, tool_result
 from entity.puretype import ToolAvailability, ToolDangerLevel
+from system.context import get_runtime_context
 from system.sandbox import Sandbox
+
+from ._store import SubagentStore
 
 
 async def _handle_run_subagent(args: dict[str, Any]) -> dict:
@@ -49,13 +52,13 @@ async def _handle_run_subagent(args: dict[str, Any]) -> dict:
     if message_type not in ("direct", "overheard"):
         return tool_error("'message_type' must be 'direct' or 'overheard'")
 
-    from ._store import _subagent_registry
-
-
-    if name not in _subagent_registry:
-        return tool_error(f"Subagent '{name}' not found. Register it first.")
-
-    profile = _subagent_registry[name]
+    store = SubagentStore(get_runtime_context().agentspace)
+    profile = store.get(name)
+    if profile is None:
+        return tool_error(
+            f"Subagent '{name}' not found. "
+            "The registry may be corrupted; please re-register."
+        )
 
     # 校验 system_prompt_paths
     system_prompt_paths = profile.get("system_prompt_paths") or []
@@ -66,7 +69,6 @@ async def _handle_run_subagent(args: dict[str, Any]) -> dict:
             return tool_error("'system_prompt_paths' must be a list of strings")
     if len(system_prompt_paths) != len(set(system_prompt_paths)):
         return tool_error("Duplicate paths found in 'system_prompt_paths'")
-    from system.context import get_runtime_context
     sandbox = Sandbox(get_runtime_context())
     for p in system_prompt_paths:
         if not sandbox.exists(p):

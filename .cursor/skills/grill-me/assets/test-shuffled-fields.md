@@ -1,7 +1,7 @@
-# Decision Log — Test Shuffled Fields
+# Decision Log — 字段顺序测试
 
 **Date**: 2026-07-03
-**Topic**: Testing parser robustness
+**Topic**: 测试解析器鲁棒性
 **Depth**: light
 **Status**: complete
 
@@ -9,29 +9,29 @@
 
 ## Decisions
 
-### D1: Field Order Test Alpha
+### D1: 字段顺序测试 Alpha
 
-**Answer**: We chose option A because it's simpler.
+**Answer**: 我们选择选项 A，因为它更简单。
 **Status**: [RESOLVED]
-**Downstream impact**: D2 (next decision)
-**Trade-off accepted**: Less flexibility for faster delivery
-**Question**: Which option should we pick?
+**Downstream impact**: D2（下一个决策）
+**Trade-off accepted**: 以灵活性换取更快交付
+**Question**: 我们应该选择哪个选项？
 
 ---
 
-### D2: Field Order Test Beta
+### D2: 字段顺序测试 Beta
 
 **Status**: [RISKY]
-**Question**: How do we handle failure?
-**Answer**: Retry with exponential backoff.
-**Downstream impact**: None (leaf)
+**Question**: 我们如何处理失败？
+**Answer**: 使用指数退避重试。
+**Downstream impact**: None（叶子节点）
 
 ---
 
-### D3: Missing Optional Fields
+### D3: 缺少可选字段
 
 **Status**: [DEFERRED]
-**Question**: What about future scaling?
-**Answer**: We'll address this in Q3.
+**Question**: 未来扩展怎么办？
+**Answer**: 我们将在 Q3 处理。
 
 ---

@@ -1,8 +1,8 @@
-"""多 Agent 工具层 — 全局子 Agent 注册表（持久化到磁盘）。
+"""多 Agent 工具层 — 子 Agent 注册表磁盘存储。
 
-模块导入时自动从磁盘加载已有注册项。
-同目录下各工具模块通过 ``_subagent_registry`` 读写，
-写操作后需显式调用 ``_save_subagents()`` 落盘。
+每个子 Agent 独立持久化到 ``agentspace/subagents/<name>-setting.json``，
+并通过 ``agentspace/subagents/_index.json`` 维护已注册名称列表。
+所有访问通过 ``SubagentStore`` CRUD API，禁止直接操作内部数据结构。
 """
 
 from __future__ import annotations
@@ -12,59 +12,154 @@ import logging
 from pathlib import Path
 from typing import Any
 
-from entity.constant import SUBAGENT_STORE_FILENAME
+from entity.constant import (
+    SUBAGENT_DIR_NAME,
+    SUBAGENT_INDEX_FILENAME,
+    SUBAGENT_SETTING_SUFFIX,
+)
 from system.atomic_io import write_text_atomic
 
 logger = logging.getLogger(__name__)
 
 
-# ── 持久化路径 ─────────────────────────────────────────────────────
+class SubagentStore:
+    """子 Agent 注册表磁盘存储。
 
-def _get_store_path() -> Path:
-    """返回子 Agent 注册表持久化文件路径。
-
-    从 ``RuntimeContext.workspace`` 获取实际工作空间路径。
-    RuntimeContext 未初始化时抛出 RuntimeError。
+    每次操作均真实读写磁盘，不维护内存缓存。
     """
-    from system.context import get_runtime_context
 
-    ctx = get_runtime_context()
-    return ctx.workspace / SUBAGENT_STORE_FILENAME
+    def __init__(self, agentspace: Path | str) -> None:
+        self._agentspace = Path(agentspace)
 
-# ── 内存注册表 ─────────────────────────────────────────────────────
+    # ── 路径辅助 ─────────────────────────────────────────────────────
 
-# key: name, value: {"base_url": str, "model": str, "api_key": str | None}
-_subagent_registry: dict[str, dict[str, Any]] = {}
+    def _subagents_dir(self) -> Path:
+        """返回子 Agent 配置存放目录。"""
+        return self._agentspace / SUBAGENT_DIR_NAME
 
+    def _setting_path(self, name: str) -> Path:
+        """返回指定 name 的 setting 文件路径。"""
+        return self._subagents_dir() / f"{name}{SUBAGENT_SETTING_SUFFIX}"
 
-def get_subagent_registry() -> dict[str, dict[str, Any]]:
-    return _subagent_registry
+    def _index_path(self) -> Path:
+        """返回索引文件路径。"""
+        return self._subagents_dir() / SUBAGENT_INDEX_FILENAME
 
+    # ── 公开 CRUD ────────────────────────────────────────────────────
 
-# ── 持久化辅助 ─────────────────────────────────────────────────────
+    def get(self, name: str) -> dict[str, Any] | None:
+        """读取指定 name 的配置。
 
+        Returns:
+            配置字典；文件不存在时返回 ``None``；JSON 损坏时抛出 ``ValueError``。
+        """
+        path = self._setting_path(name)
+        if not path.exists():
+            return None
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError as exc:
+            raise ValueError(f"Corrupted setting file for subagent '{name}': {exc}") from exc
+        if not isinstance(data, dict):
+            raise ValueError(f"Corrupted setting file for subagent '{name}': expected dict")
+        return data
 
-def _save_subagents() -> None:
-    """将当前注册表原子写入磁盘。失败时抛出异常。"""
-    store_path = _get_store_path()
-    write_text_atomic(
-        store_path,
-        json.dumps(_subagent_registry, ensure_ascii=False, indent=2),
-        tmp_suffix=".tmp",
-    )
+    def list(self) -> dict[str, dict[str, Any]]:
+        """返回所有有效子 Agent 配置。
 
+        读取索引后逐个校验对应 setting 文件；缺失或损坏的 name 会被
+        从索引中移除并写回。
+        """
+        names = self._read_index()
+        valid: dict[str, dict[str, Any]] = {}
+        stale: list[str] = []
 
-def _load_subagents() -> None:
-    """从磁盘加载注册表到内存。失败时抛出异常。"""
-    global _subagent_registry
-    store_path = _get_store_path()
-    if not store_path.exists():
-        return
-    raw = json.loads(store_path.read_text(encoding="utf-8"))
-    if isinstance(raw, dict):
-        _subagent_registry = raw
-        logger.info("Loaded %d subagents from disk", len(_subagent_registry))
+        for name in names:
+            try:
+                profile = self.get(name)
+            except ValueError:
+                logger.warning("Removing stale subagent '%s' due to corrupted setting", name)
+                stale.append(name)
+                continue
+            if profile is None:
+                logger.warning("Removing stale subagent '%s' with missing setting file", name)
+                stale.append(name)
+                continue
+            valid[name] = profile
 
+        if stale:
+            cleaned = [n for n in names if n not in stale]
+            self._write_index(cleaned)
 
-# ── 启动时自动加载 ─────────────────────────────────────────────────
-_load_subagents()
+        return valid
+
+    def add(self, name: str, profile: dict[str, Any]) -> None:
+        """新增一个子 Agent 配置。
+
+        若对应 setting 文件已存在则抛出 ``FileExistsError``，不覆盖。
+        写入 setting 文件后更新索引。
+
+        TODO: 如果观测到并发注册冲突，请在此引入 threading.RLock。
+        """
+        path = self._setting_path(name)
+        if path.exists():
+            raise FileExistsError(f"Subagent '{name}' already exists.")
+
+        self._subagents_dir().mkdir(parents=True, exist_ok=True)
+        write_text_atomic(
+            path,
+            json.dumps(profile, ensure_ascii=False, indent=2),
+            tmp_suffix=".tmp",
+        )
+        logger.info("Persisted setting for subagent: %s", name)
+
+        names = self._read_index()
+        if name not in names:
+            names.append(name)
+            self._write_index(names)
+
+    def remove(self, name: str) -> bool:
+        """删除指定 name 的子 Agent 配置及索引项。
+
+        返回是否实际删除了 setting 文件。
+
+        TODO: 如果观测到并发注销冲突，请在此引入 threading.RLock。
+        """
+        path = self._setting_path(name)
+        existed = path.exists()
+        if existed:
+            path.unlink()
+            logger.info("Removed setting for subagent: %s", name)
+
+        names = self._read_index()
+        if name in names:
+            names.remove(name)
+            self._write_index(names)
+
+        return existed
+
+    # ── 索引读写 ─────────────────────────────────────────────────────
+
+    def _read_index(self) -> list[str]:
+        """读取索引文件；不存在或损坏时返回空列表。"""
+        path = self._index_path()
+        if not path.exists():
+            return []
+        try:
+            raw = json.loads(path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError as exc:
+            logger.warning("Corrupted subagent index, treating as empty: %s", exc)
+            return []
+        if not isinstance(raw, list):
+            logger.warning("Invalid subagent index format, treating as empty")
+            return []
+        return [str(item) for item in raw if isinstance(item, str)]
+
+    def _write_index(self, names: list[str]) -> None:
+        """原子写入索引文件。"""
+        self._subagents_dir().mkdir(parents=True, exist_ok=True)
+        write_text_atomic(
+            self._index_path(),
+            json.dumps(names, ensure_ascii=False, indent=2),
+            tmp_suffix=".tmp",
+        )

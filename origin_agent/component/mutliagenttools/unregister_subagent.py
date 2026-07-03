@@ -11,7 +11,8 @@ from typing import Any
 from abstract.tools.registry import registry, tool_error, tool_result
 from entity.puretype import ToolAvailability, ToolDangerLevel
 
-from ._store import _save_subagents, _subagent_registry
+from ._store import SubagentStore
+from system.context import get_runtime_context
 
 logger = logging.getLogger(__name__)
 
@@ -23,14 +24,14 @@ def _handle_unregister_subagent(args: dict[str, Any]) -> dict:
     if not name:
         return tool_error("'name' is required and must not be empty")
 
-    if name not in _subagent_registry:
+    store = SubagentStore(get_runtime_context().agentspace)
+    if store.get(name) is None:
         return tool_error(
             f"Subagent '{name}' not found.",
             found=False,
         )
 
-    del _subagent_registry[name]
-    _save_subagents()
+    store.remove(name)
     logger.info("Unregistered subagent: %s", name)
     return tool_result(
         success=True,
