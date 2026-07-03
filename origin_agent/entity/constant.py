@@ -33,6 +33,9 @@ TOOL_ALLOWLIST_FILENAME: str = "tool_allowlist.json"
 # 会话索引文件名 — 存放于 workspace/ 下
 SESSION_INDEX_FILENAME: str = "_sessions.json"
 
+# easysave 会话索引的 namespace key
+SESSION_EASYSAVE_KEY: str = "_sessions"
+
 
 # ============================================================================
 # 截断/预览上限

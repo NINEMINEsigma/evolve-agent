@@ -229,7 +229,7 @@ You can modify your own source code and complete evolution through the following
             try:
                 from memory.provider import EasysaveMemoryProvider
                 mem: EasysaveMemoryProvider = EasysaveMemoryProvider(
-                    memory_dir=str(self.ctx.workspace / "memory")
+                    memory_dir=self.ctx.workspace / "memory"
                 )
                 agent_loop.add_memory_provider(mem)
                 logger.info("EasysaveMemoryProvider registered")

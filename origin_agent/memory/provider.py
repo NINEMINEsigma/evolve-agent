@@ -8,19 +8,10 @@ from __future__ import annotations
 
 import json
 import logging
-import sys
 from pathlib import Path
 from typing import Any, Dict, List
 
-from entity.constant import SESSION_INDEX_FILENAME
-
-# 确保 third/ 可导入
-from system.pathutils import find_repo_root
-
-_THIRD: Path = find_repo_root() / "third"
-for _p in (_THIRD, _THIRD / "easysave"):
-    if str(_p) not in sys.path:
-        sys.path.insert(0, str(_p))
+from entity.constant import SESSION_EASYSAVE_KEY, SESSION_INDEX_FILENAME
 
 from easysave import save, load  # type: ignore[import]
 
@@ -36,8 +27,8 @@ class EasysaveMemoryProvider(MemoryProvider):
     provider 还跟踪一个全局 session ID 列表以支持跨 session 回忆。
     """
 
-    def __init__(self, memory_dir: str | Path = "") -> None:
-        self._dir: Path = Path(memory_dir) if memory_dir else Path("workspace/memory")
+    def __init__(self, memory_dir: str | Path) -> None:
+        self._dir: Path = Path(memory_dir)
         self._dir.mkdir(parents=True, exist_ok=True)
         self._session_id: str = ""
         self._index: dict[str, Any] = {}
@@ -56,7 +47,7 @@ class EasysaveMemoryProvider(MemoryProvider):
         # 加载或创建 session 索引
         idx_path: Path = self._dir / SESSION_INDEX_FILENAME
         try:
-            self._index = load("_sessions", str(idx_path)) or {}
+            self._index = load(SESSION_EASYSAVE_KEY, str(idx_path), dict[str, Any]) or {}
         except Exception:
             logger.exception("Failed to load session index from %s, resetting to empty", idx_path)
             self._index = {}

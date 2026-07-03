@@ -3,6 +3,7 @@ from pydantic import BaseModel, Field, PrivateAttr
 from entity.puretype import Role
 from entity.constant import USER_CHARACTER_NAME
 from system.templates import get_templates_dir
+from easysave import save, load
 
 
 class MessageBlock(BaseModel):
@@ -56,7 +57,7 @@ class BaseMessage(BaseModel):
     content: str|list[MessageBlock] = Field(..., description="The content of the message")
     role: Role = Field(..., description="The role of the message")
 
-    def as_string(self, 
+    def as_content(self, 
         # 当前作为运行中的agent的角色
         current_character_agent:str, 
         **kwargs
@@ -105,7 +106,7 @@ class BaseMessage(BaseModel):
         Returns:
             dict: 转换后的openai协议的消息格式
         '''
-        content = self.as_string(current_character_agent, **kwargs)
+        content = self.as_content(current_character_agent, **kwargs)
         if content is None:
             return None
         return {
@@ -119,7 +120,7 @@ class CharacterMessage(BaseMessage):
 
 
 class CharacterSystemMessage(CharacterMessage):
-    def as_string(self,
+    def as_content(self,
         # 当前作为运行中的agent的角色
         current_character_agent:str, 
         **kwargs
@@ -129,7 +130,7 @@ class CharacterSystemMessage(CharacterMessage):
         '''
         if current_character_agent != self.character_name:
             return None
-        return super().as_string(current_character_agent, **kwargs)
+        return super().as_content(current_character_agent, **kwargs)
 
 
 _Role_Prefix_Template: str|None = None
@@ -168,7 +169,7 @@ class CharacterConversationMessage(CharacterMessage):
     tool_calls: list[ToolCall]|None = Field(None, description="The tool calls of the message")
 
 
-    def as_string(self,
+    def as_content(self,
         # 当前作为运行中的agent的角色
         current_character_agent:str, 
         **kwargs
@@ -177,7 +178,7 @@ class CharacterConversationMessage(CharacterMessage):
         获取角色对话消息的字符串内容, 如果不可见将被略过, 可见时将会对所有非消息接收者第一人称的消息都施加前缀修饰
         '''
         global _Role_Prefix_Template
-        raw_message = super().as_string(current_character_agent, **kwargs)
+        raw_message = super().as_content(current_character_agent, **kwargs)
         # 如果当前角色不在可见角色列表中, 则略过
         if self.visible_characters and current_character_agent not in self.visible_characters:
             return None
@@ -213,7 +214,7 @@ class CharacterConversationMessage(CharacterMessage):
             # 以特殊用户消息的形式提供给目标agent
             raw_message["role"] = Role.USER.value
             return raw_message
-        if self.reasoning:
+        if self.character_name == current_character_agent and self.reasoning:
             raw_message[self.reasoning_field_name] = self.reasoning
         if self.tool_calls:
             raw_message["tool_calls"] = [tool_call.as_object() for tool_call in self.tool_calls]
@@ -227,6 +228,8 @@ class ToolResultMessage(CharacterMessage):
     tool_call_id: str = Field(..., description="The id of the tool call")
 
     def as_message(self, current_character_agent: str, **kwargs) -> dict | None:
+        if current_character_agent != self.character_name:
+            return None
         raw_message = super().as_message(current_character_agent, **kwargs)
         if raw_message is None:
             return None
@@ -235,6 +238,23 @@ class ToolResultMessage(CharacterMessage):
 
 
 class History(BaseModel):
+    # TODO: 需要解决以下问题
+    # 场景 1：部分失败与重试
+    # agent A 发起 tool_call，但执行过程中网络中断，tool_result 未能及时生成。
+    # 当 A 重新加载 History 后，它的上下文中会包含未配对的 tool_calls（有 tool_call 但没有 tool_result）。
+    # OpenAI 协议要求 tool role 消息必须紧跟在对应的 assistant tool_call 之后。这种断层可能导致 LLM 报错或行为异常。
+    # 场景 2：可见性动态变化
+    # 假设某条 CharacterConversationMessage 初始 visible_characters=["agent-A"]，后续你希望让 agent-B 也能看到。
+    # 当前设计把可见性作为消息不可变属性，修改它需要重建消息对象。你是否接受这种“不可变消息”的语义？
+    # 场景 3：用户编辑历史消息
+    # 前端允许用户编辑自己的消息。如果用户编辑了一条已经被多个 agent 消费过的消息，是否需要通知所有相关 agent 重新生成？
+    # 当前 History.get_messages() 是幂等的，但编辑会改变源数据，可能让某些 agent 的上下文与前端展示不一致。
+    # 场景 4：并发子 agent 同时发言
+    # agent-A 和 agent-B 同时生成回复，都产生了新的 CharacterConversationMessage。
+    # 如果它们都写入同一个 History，消息顺序如何确定？是否需要由父 orchestrator 统一排序后再追加？
+    # 场景 5：工具调用者被移除
+    # agent-A 调用了工具并等待结果，但在结果返回前 agent-A 被终止或从会话中移除。
+    # ToolResultMessage.character_name 指向一个不存在的 agent，这条 tool_result 将无处可去，成为孤儿消息。
     messages: list[BaseMessage] = Field(..., description="The messages of the history")
 
     def get_messages(self, current_character_agent: str, **kwargs) -> list[dict]:
