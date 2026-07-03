@@ -37,6 +37,10 @@ def _get_store_path() -> Path:
 _subagent_registry: dict[str, dict[str, Any]] = {}
 
 
+def get_subagent_registry() -> dict[str, dict[str, Any]]:
+    return _subagent_registry
+
+
 # ── 持久化辅助 ─────────────────────────────────────────────────────
 
 
