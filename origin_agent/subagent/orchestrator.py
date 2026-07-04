@@ -23,6 +23,7 @@ from entity.constant import (
     MAX_TOOL_TURNS,
     SUBAGENT_IDLE_TRIGGER_SECONDS,
     SUBAGENT_MAX_ACTIVE,
+    USER_CHARACTER_NAME,
     History_Version as __History_Version__,
 )
 from entity.messages import CharacterConversationMessage, ToolResultMessage
@@ -169,12 +170,14 @@ class _OrchestratorContext:
                 "session_id": session_id,
                 "error": "Sub-agent not found (may have been stopped or completed).",
             }
-        sub.inject_parent_message(message, "User", "user_direct", co_recipients)
+        sub.inject_parent_message(
+            message, "User", "user_direct", co_recipients, character_name=USER_CHARACTER_NAME
+        )
         wrapped = format_user_message("User", "user_direct", message, co_recipients)
         await self._push_subagent_ws(
             session_id,
             self._subagent_names.get(session_id, ""),
-            {"role": "user", "content": wrapped},
+            {"role": "user", "content": wrapped, "character_name": USER_CHARACTER_NAME},
         )
         return {"success": True, "session_id": session_id}
 
@@ -219,13 +222,16 @@ class _OrchestratorContext:
                 "note": "Sub-agent has already produced feedback that you have not yet received. Please review the feedback first, then decide whether and how to reply via chat_subagent.",
             }
         # 没有未送达反馈，正常发送
-        sub.inject_parent_message(message, user_name, message_type, co_recipients)
+        character_name = self._agent_loop.current_character_agent
+        sub.inject_parent_message(
+            message, user_name, message_type, co_recipients, character_name=character_name
+        )
         # 推送父→子消息到前端子会话面板
         wrapped = format_user_message(user_name, message_type, message, co_recipients)
         await self._push_subagent_ws(
             session_id,
             self._subagent_names.get(session_id, ""),
-            {"role": "user", "content": wrapped},
+            {"role": "user", "content": wrapped, "character_name": character_name},
         )
         return {
             "success": True,
@@ -341,6 +347,7 @@ class _OrchestratorContext:
         self._waiting_queue.clear()
 
     def get_snapshot(self) -> dict[str, dict[str, Any]]:
+        # TODO: msg.content没有多模态
         """返回所有活跃子会话的快照（供前端刷新时拉取）。"""
         snap: dict[str, dict[str, Any]] = {}
         for session_id, sub in self._active.items():
@@ -349,17 +356,30 @@ class _OrchestratorContext:
                 if msg.role == Role.SYSTEM:
                     continue
                 if msg.role == Role.USER:
-                    feedback.append({"role": "user", "content": str(msg.content)})
+                    feedback.append({
+                        "role": "user",
+                        "content": str(msg.content),
+                        "character_name": getattr(msg, "character_name", None) or USER_CHARACTER_NAME,
+                    })
                 elif msg.role == Role.ASSISTANT:
                     content = str(msg.content)
                     reasoning = msg.reasoning if isinstance(msg, CharacterConversationMessage) else None
+                    character_name = getattr(msg, "character_name", None)
                     if content:
-                        item: dict[str, Any] = {"role": "assistant", "content": content}
+                        item: dict[str, Any] = {
+                            "role": "assistant",
+                            "content": content,
+                            "character_name": character_name,
+                        }
                         if reasoning:
                             item["reasoning"] = str(reasoning)
                         feedback.append(item)
                     elif reasoning:
-                        feedback.append({"role": "reasoning", "reasoning": str(reasoning)})
+                        feedback.append({
+                            "role": "reasoning",
+                            "reasoning": str(reasoning),
+                            "character_name": character_name,
+                        })
                     if isinstance(msg, CharacterConversationMessage) and msg.tool_calls:
                         for tc in msg.tool_calls:
                             feedback.append({
@@ -367,12 +387,14 @@ class _OrchestratorContext:
                                 "tool_call_id": tc.id,
                                 "tool_name": tc.function.name,
                                 "tool_args": tc.function.arguments,
+                                "character_name": character_name,
                             })
                 elif msg.role == Role.TOOL and isinstance(msg, ToolResultMessage):
                     feedback.append({
                         "role": "tool_result",
                         "tool_call_id": msg.tool_call_id,
                         "content": str(msg.content),
+                        "character_name": getattr(msg, "character_name", None),
                     })
             status = "completed" if sub.completed else ("terminated" if sub.terminated else "running")
             snap[session_id] = {
@@ -454,7 +476,13 @@ class _OrchestratorContext:
                 session_id, profile.get("_name", ""), event,
             ))
 
-        loop = SubAgentLoop(ctx, session_id, tools, MAX_TOOL_TURNS, on_message=_push_msg, parent_session_id=self._parent_session_id, name=profile.get("_name", ""))
+        loop = SubAgentLoop(
+            ctx, session_id, tools, MAX_TOOL_TURNS,
+            on_message=_push_msg,
+            parent_session_id=self._parent_session_id,
+            parent_character_agent=self._agent_loop.current_character_agent,
+            name=profile.get("_name", ""),
+        )
         self._active[session_id] = loop
         self._subagent_names[session_id] = profile.get("_name", "")
 
@@ -527,10 +555,11 @@ class _OrchestratorContext:
 
         # 推送 initial_prompt 到前端面板
         wrapped_initial = format_user_message(user_name, message_type, initial_prompt)
+        initial_character_name = USER_CHARACTER_NAME if message_type == "user_direct" else self._agent_loop.current_character_agent
         await self._push_subagent_ws(
             session_id,
             profile.get("_name", ""),
-            {"role": "user", "content": wrapped_initial},
+            {"role": "user", "content": wrapped_initial, "character_name": initial_character_name},
         )
 
         task = asyncio.create_task(loop.run(initial_prompt, user_name, message_type), name=f"subagent-{session_id[:16]}")
@@ -628,6 +657,7 @@ class _OrchestratorContext:
     async def _collect_and_inject(self, loop: ParentAgentLoop) -> None:
         """收集所有活跃子 Agent 的 outbox 和待审批队列，注入父 Agent。"""
         messages: list[str] = []
+        source_session_ids: list[str] = []
 
         for session_id, sub in list(self._active.items()):
             parts: list[str] = []
@@ -649,6 +679,7 @@ class _OrchestratorContext:
 
             if len(parts) > 1:
                 messages.append("\n".join(parts))
+                source_session_ids.append(session_id)
 
             status = "completed" if sub.completed else ("terminated" if sub.terminated else "running")
             try:
@@ -677,8 +708,14 @@ class _OrchestratorContext:
             "or stop the sub-agent when its task is complete.\n\n"
         ) + "\n\n".join(messages)
 
+        # 单条反馈时，使用对应子 Agent 的名字作为头像/tooltip；
+        # 多条合并时无法区分，回退到默认
+        character_name = USER_CHARACTER_NAME
+        if len(source_session_ids) == 1:
+            character_name = self._subagent_names.get(source_session_ids[0], USER_CHARACTER_NAME)
+
         try:
-            await loop.process_message(full_message)
+            await loop.process_message(full_message, character_name=character_name)
             logger.debug("Subagent result injected to parent | parent=%s entries=%d", self._parent_session_id, len(messages))
         except Exception as exc:
             logger.exception(

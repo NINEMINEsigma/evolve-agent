@@ -165,6 +165,10 @@ class ParentAgentLoop(BasePrivateChatAgentLoop):
     def current_character_agent(self) -> str:
         return MAIN_AGENT_CHARACTER_NAME
 
+    @property
+    def user_character_name(self) -> str:
+        return USER_CHARACTER_NAME
+
     def _get_llm_client(self) -> LLMClient:
         return self._llm
 
@@ -251,6 +255,7 @@ class ParentAgentLoop(BasePrivateChatAgentLoop):
         user_message: str, # | list[dict[str, Any]],
         *,
         skip_append: bool = False,
+        character_name: str = USER_CHARACTER_NAME,
     ) -> str:
         """处理一条用户消息，返回助手的回复。
 
@@ -258,6 +263,8 @@ class ParentAgentLoop(BasePrivateChatAgentLoop):
             user_message: 用户消息内容。
             skip_append: 为 True 时不追加/广播用户消息（调用方已处理），
                          用于 gateway 在发送给子 agent 前已经自定义过显示内容的情况。
+            character_name: 该用户消息的发出者角色名；默认 end-user，
+                            子 Agent 反馈回收时传入对应子 Agent 名。
         """
         sid = self.session_id
         self._interrupted = False
@@ -273,7 +280,7 @@ class ParentAgentLoop(BasePrivateChatAgentLoop):
             # 先消费 inbox 遗留消息（如上回合未被消费的 cron 结果），再追加用户消息
             self._maybe_inject_inbox()
             if not skip_append:
-                await self.append_user_message(user_message)
+                await self.append_user_message(user_message, character_name=character_name)
 
             # 延迟初始化 memory provider：按 provider 跟踪成功状态，
             # 失败者在后续消息处理时重试，避免一次失败导致永久跳过。
@@ -442,9 +449,12 @@ class ParentAgentLoop(BasePrivateChatAgentLoop):
         if not pending:
             return False
         merged = "\n\n".join(msg.to_text() for msg in pending)
+        # TODO: 下方注释有待考虑, 或者不再合并直接多条usermessage插回历史
+        # 所有 InboxMessage 子类都已自带 character_name，直接取首条作为合并后的发出者
+        character_name = pending[0].character_name if len(pending) == 1 else USER_CHARACTER_NAME
         message = CharacterConversationMessage.from_text(
             role=Role.USER,
-            character_name=USER_CHARACTER_NAME,
+            character_name=character_name,
             text=merged,
             visible_characters=[self.current_character_agent],
         )
@@ -766,17 +776,22 @@ class ParentAgentLoop(BasePrivateChatAgentLoop):
     # 历史 / 消息构建
     # ========================================================================
 
-    async def append_user_message(self, content: Any, *, display_content: Any | None = None) -> int:
+    async def append_user_message(
+        self, content: Any, *,
+        display_content: Any | None = None,
+        character_name: str = USER_CHARACTER_NAME,
+    ) -> int:
         """把用户消息加入 History 并回显到前端，返回消息索引。
 
         Args:
             content: 实际存入历史供 LLM 消费的内容。
             display_content: 回显给前端显示的内容；默认与 content 相同。
+            character_name: 该用户消息的发出者角色名；默认 end-user。
         """
-        index = self._append(self.session_id, Role.USER, content)
+        index = self._append(self.session_id, Role.USER, content, character_name=character_name)
         await self._frontend_sink.emit_user_message(
             self.session_id, display_content if display_content is not None else content,
-            USER_CHARACTER_NAME, index,
+            character_name, index,
         )
         return index
 
@@ -784,8 +799,11 @@ class ParentAgentLoop(BasePrivateChatAgentLoop):
         self, session_id: str, role: Role,
         content: str | list[dict[str, Any]],
         reasoning_content: str | None = None,
+        character_name: str | None = None,
     ) -> int:
         """追加一条用户/assistant 消息到 History 并持久化，返回消息索引。"""
+        if character_name is None:
+            character_name = self.current_character_agent if role == Role.ASSISTANT else USER_CHARACTER_NAME
         if isinstance(content, str):
             message_content: str | list[ImageBlock | TextBlock] = content
         else:
@@ -793,7 +811,7 @@ class ParentAgentLoop(BasePrivateChatAgentLoop):
         if isinstance(message_content, str):
             message = CharacterConversationMessage.from_text(
                 role=role,
-                character_name=self.current_character_agent if role == Role.ASSISTANT else USER_CHARACTER_NAME,
+                character_name=character_name,
                 text=message_content,
                 visible_characters=[self.current_character_agent] if role == Role.USER else None,
                 reasoning=reasoning_content,
@@ -801,7 +819,7 @@ class ParentAgentLoop(BasePrivateChatAgentLoop):
         else:
             message = CharacterConversationMessage(
                 role=role,
-                character_name=self.current_character_agent if role == Role.ASSISTANT else USER_CHARACTER_NAME,
+                character_name=character_name,
                 content=message_content,
                 visible_characters=[self.current_character_agent] if role == Role.USER else None,
                 reasoning=reasoning_content,

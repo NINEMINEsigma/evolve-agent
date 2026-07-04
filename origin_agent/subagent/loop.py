@@ -18,7 +18,7 @@ from typing import * # type: ignore
 
 from abstract.tools.registry import ToolEntry, registry as tool_registry
 from component.llm import LLMClient, LLMResponse, ToolCall
-from entity.constant import USER_CHARACTER_NAME, History_Version as __History_Version__
+from entity.constant import MAIN_AGENT_CHARACTER_NAME, USER_CHARACTER_NAME, History_Version as __History_Version__
 from entity.messages import (
     History,
     CharacterConversationMessage,
@@ -98,6 +98,7 @@ class SubAgentLoop(BasePrivateChatAgentLoop):
         # TODO: 真的可能为空吗
         on_message: Callable[[dict], None]|None = None, 
         parent_session_id: str = "",
+        parent_character_agent: str = "",
         name: str = "",
     ) -> None:
         from system.application import Application
@@ -107,6 +108,7 @@ class SubAgentLoop(BasePrivateChatAgentLoop):
         self._name: str = name                              # 子 Agent 注册名，用于历史保存路径
         self._ctx: SubRuntimeContext = ctx                   # 子 Agent 的独立运行时上下文（LLM 配置、system prompt）
         self._parent_session_id: str = parent_session_id     # 父 Agent 的 session ID，用于审批回源
+        self._parent_character_agent: str = parent_character_agent  # 父 Agent 当前角色名，即子会话的"用户"
         self._tools: list[dict[str, Any]] = tools            # OpenAI function-calling 格式的工具 schema 列表
 
         # 当前子 Agent 被授权的工具名集合 — 用于运行时强制隔离
@@ -172,6 +174,10 @@ class SubAgentLoop(BasePrivateChatAgentLoop):
     @property
     def current_character_agent(self) -> str:
         return self._name
+
+    @property
+    def user_character_name(self) -> str:
+        return self._parent_character_agent# or MAIN_AGENT_CHARACTER_NAME
 
     def _get_llm_client(self) -> LLMClient:
         return self._llm
@@ -245,10 +251,11 @@ class SubAgentLoop(BasePrivateChatAgentLoop):
             _cron.register(self.session_id, self)
         try:
             # 注入初始用户消息（system prompt 由 _build_history_messages 通过 _build_system_prompt 处理）
+            initial_character_name = USER_CHARACTER_NAME if message_type == "user_direct" else (self._parent_character_agent or MAIN_AGENT_CHARACTER_NAME)
             self._history.add_message(
                 CharacterConversationMessage.from_text(
                     role=Role.USER,
-                    character_name=USER_CHARACTER_NAME,
+                    character_name=initial_character_name,
                     text=format_user_message(user_name, message_type, initial_prompt),
                     visible_characters=[self.current_character_agent],
                 )
@@ -293,7 +300,8 @@ class SubAgentLoop(BasePrivateChatAgentLoop):
 
                 # 推送 assistant 文本（若与 tool_calls 同帧）
                 if resp.content:
-                    self._emit("assistant", content=resp.content, reasoning=reasoning_text)
+                    self._emit("assistant", content=resp.content, reasoning=reasoning_text,
+                               character_name=self.current_character_agent)
 
                 # 存储带 tool_calls 的 assistant 消息
                 tool_calls_data: list[HistoryToolCall] = [
@@ -362,11 +370,21 @@ class SubAgentLoop(BasePrivateChatAgentLoop):
                 _cron.unregister(self.session_id)
             self._terminated = True
 
-    def inject_parent_message(self, text: str, user_name: str, message_type: str, co_recipients: list[str] | None = None) -> None:
+    def inject_parent_message(
+        self,
+        text: str,
+        user_name: str,
+        message_type: str,
+        co_recipients: list[str] | None = None,
+        *,
+        character_name: str | None = None,
+    ) -> None:
         """父 Agent 或用户直接发送来的消息，投递到收件箱。"""
         self._last_message_from_parent = (message_type != "user_direct")
         content = format_user_message(user_name, message_type, text, co_recipients)
-        self._inbox.put(UserMessage(content=content))
+        if character_name is None:
+            character_name = USER_CHARACTER_NAME if message_type == "user_direct" else MAIN_AGENT_CHARACTER_NAME
+        self._inbox.put(UserMessage(content=content, character_name=character_name))
         self._wake_event.set()
 
     def approve_tools(self, decisions: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -459,10 +477,13 @@ class SubAgentLoop(BasePrivateChatAgentLoop):
         if not msgs:
             return False
         merged = "\n\n".join(msg.to_text() for msg in msgs)
+        # TODO: 下方注释有待考虑, 或者不再合并直接多条usermessage插回历史
+        # 所有 InboxMessage 子类都已自带 character_name，直接取首条作为合并后的发出者
+        character_name = msgs[0].character_name if len(msgs) == 1 else USER_CHARACTER_NAME
         self._history.add_message(
             CharacterConversationMessage.from_text(
                 role=Role.USER,
-                character_name=USER_CHARACTER_NAME,
+                character_name=character_name,
                 text=merged,
                 visible_characters=[self.current_character_agent],
             )

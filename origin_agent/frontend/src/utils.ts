@@ -153,7 +153,7 @@ export function subagentFeedbackToChatMessages(session: SubagentSession): ChatMe
 
     switch (role) {
       case "user":
-        messages.push({ role: "user", content: msg.content || "", id });
+        messages.push({ role: "user", content: msg.content || "", id, characterName: msg.character_name });
         break;
       case "assistant":
         messages.push({
@@ -161,6 +161,7 @@ export function subagentFeedbackToChatMessages(session: SubagentSession): ChatMe
           content: msg.content || "",
           id,
           reasoningContent: msg.reasoning,
+          characterName: msg.character_name,
         });
         break;
       case "reasoning":
@@ -169,6 +170,7 @@ export function subagentFeedbackToChatMessages(session: SubagentSession): ChatMe
           content: "",
           id,
           reasoningContent: msg.reasoning || msg.content,
+          characterName: msg.character_name,
         });
         break;
       case "tool_call": {

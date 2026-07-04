@@ -18,6 +18,7 @@ from pydantic import BaseModel
 
 from entity.puretype import Role, ToolDangerLevel
 from entity.messages import History, BaseMessage, ToolResultMessage
+from entity.constant import USER_CHARACTER_NAME
 from entry.agent_support.messages import build_turn_messages, load_message_hooks
 from entry.agent_support.multimodal import tool_result_to_content, content_to_text
 from system.pathutils import find_repo_root
@@ -37,6 +38,7 @@ logger = logging.getLogger(__name__)
 class InboxMessage(BaseModel):
     """收件箱消息基类。"""
     content: str = ""
+    character_name: str
 
     def to_text(self) -> str:
         """转换为注入 LLM 历史的文本。子类按需重写。"""
@@ -45,6 +47,7 @@ class InboxMessage(BaseModel):
 
 class UserMessage(InboxMessage):
     """来自用户/父Agent的文本消息。"""
+    character_name: str = USER_CHARACTER_NAME
 
 
 class ApprovalDecisionMessage(InboxMessage):
@@ -70,6 +73,7 @@ class CronResultMessage(InboxMessage):
 class ContextLimitMessage(InboxMessage):
     """上下文超限通知。"""
     saved_path: str | None = None
+    character_name: str = "system"
 
     def to_text(self) -> str:
         return f"[system] Context limit reached. Session saved to: {self.saved_path or 'unknown'}"
@@ -185,6 +189,15 @@ class BaseAgentLoop(ABC):
     @abstractmethod
     def _get_sink(self) -> AgentSink:
         """返回当前 loop 的 AgentSink 实例。"""
+        ...
+
+    @property
+    @abstractmethod
+    def user_character_name(self) -> str:
+        """返回当前 loop 的"用户"角色名：向本 loop 发消息的发出者角色名。
+
+        主会话里是真正的 end-user；子会话里是其"父 Agent"当前角色名。
+        """
         ...
 
     @abstractmethod
