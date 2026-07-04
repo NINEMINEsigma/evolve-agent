@@ -49,6 +49,8 @@ export interface WSMessage {
   reasoning_delta?: string;
   finish_reason?: string;
   target_sessions?: string[];
+  character_name?: string;
+  index?: number;
 }
 
 export interface ConfirmRequest {
@@ -159,6 +161,7 @@ export interface SubagentMessage {
   tool_call_id?: string;
   tool_args?: Record<string, unknown>;
   reasoning?: string;
+  character_name?: string;
 }
 
 export interface SubagentSession {

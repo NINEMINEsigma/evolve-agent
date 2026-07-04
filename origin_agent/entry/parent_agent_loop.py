@@ -249,8 +249,16 @@ class ParentAgentLoop(BasePrivateChatAgentLoop):
     async def process_message(
         self,
         user_message: str, # | list[dict[str, Any]],
+        *,
+        skip_append: bool = False,
     ) -> str:
-        """处理一条用户消息，返回助手的回复。"""
+        """处理一条用户消息，返回助手的回复。
+
+        Args:
+            user_message: 用户消息内容。
+            skip_append: 为 True 时不追加/广播用户消息（调用方已处理），
+                         用于 gateway 在发送给子 agent 前已经自定义过显示内容的情况。
+        """
         sid = self.session_id
         self._interrupted = False
         self._processing = True
@@ -264,7 +272,8 @@ class ParentAgentLoop(BasePrivateChatAgentLoop):
         async with self._process_lock:
             # 先消费 inbox 遗留消息（如上回合未被消费的 cron 结果），再追加用户消息
             self._maybe_inject_inbox()
-            self._append(sid, Role.USER, user_message)
+            if not skip_append:
+                await self.append_user_message(user_message)
 
             # 延迟初始化 memory provider：按 provider 跟踪成功状态，
             # 失败者在后续消息处理时重试，避免一次失败导致永久跳过。
@@ -476,16 +485,10 @@ class ParentAgentLoop(BasePrivateChatAgentLoop):
             # 推送 ASSISTANT_MESSAGE 到前端（server.py 的 process_message 路径会自动做，
             # 但 process_inbox 是异步调度触发的，需要自己推）
             if reply:
-                from gateway.chat import Message, MessageType
                 try:
-                    msg = Message(
-                        type=MessageType.ASSISTANT_MESSAGE,
-                        session_id=sid,
-                        content=reply,
+                    await self._frontend_sink.emit_assistant_message(
+                        sid, reply, self.current_character_agent,
                     )
-                    ws = self._frontend_sink.get_ws(sid)
-                    if ws is not None:
-                        await ws.send_text(msg.to_json())
                 except Exception as exc:
                     logger.exception("Failed to send ASSISTANT_MESSAGE for inbox processing: %s", exc)
 
@@ -538,6 +541,7 @@ class ParentAgentLoop(BasePrivateChatAgentLoop):
                     await self._frontend_sink.emit_stream_delta(
                         session_id, stream_id,
                         delta=chunk.content_delta,
+                        character_name=self.current_character_agent,
                     )
 
                 if chunk.reasoning_delta:
@@ -545,6 +549,7 @@ class ParentAgentLoop(BasePrivateChatAgentLoop):
                     await self._frontend_sink.emit_stream_delta(
                         session_id, stream_id,
                         reasoning_delta=chunk.reasoning_delta,
+                        character_name=self.current_character_agent,
                     )
 
                 if chunk.tool_call:
@@ -556,6 +561,7 @@ class ParentAgentLoop(BasePrivateChatAgentLoop):
                             "name": chunk.tool_call.name,
                             "arguments": chunk.tool_call.arguments,
                         },
+                        character_name=self.current_character_agent,
                     )
 
                 if chunk.usage:
@@ -760,12 +766,26 @@ class ParentAgentLoop(BasePrivateChatAgentLoop):
     # 历史 / 消息构建
     # ========================================================================
 
+    async def append_user_message(self, content: Any, *, display_content: Any | None = None) -> int:
+        """把用户消息加入 History 并回显到前端，返回消息索引。
+
+        Args:
+            content: 实际存入历史供 LLM 消费的内容。
+            display_content: 回显给前端显示的内容；默认与 content 相同。
+        """
+        index = self._append(self.session_id, Role.USER, content)
+        await self._frontend_sink.emit_user_message(
+            self.session_id, display_content if display_content is not None else content,
+            USER_CHARACTER_NAME, index,
+        )
+        return index
+
     def _append(
         self, session_id: str, role: Role,
         content: str | list[dict[str, Any]],
         reasoning_content: str | None = None,
-    ) -> None:
-        """追加一条用户/assistant 消息到 History 并持久化。"""
+    ) -> int:
+        """追加一条用户/assistant 消息到 History 并持久化，返回消息索引。"""
         if isinstance(content, str):
             message_content: str | list[ImageBlock | TextBlock] = content
         else:
@@ -789,8 +809,9 @@ class ParentAgentLoop(BasePrivateChatAgentLoop):
                 message_suffix=None,
                 tool_calls=None,
             )
-        self._history.add_message(message)
+        index = self._history.add_message(message)
         self._persist_message(session_id)
+        return index
 
     @staticmethod
     def _blocks_from_dicts(blocks: list[dict[str, Any]]) -> list[ImageBlock | TextBlock]:
@@ -1233,7 +1254,7 @@ class ParentAgentLoop(BasePrivateChatAgentLoop):
             else:
                 content = self._extract_text(raw_content)
             entry: dict[str, Any] = {
-                "role": str(msg.role),
+                "role": msg.role.value,
                 "content": content,
                 "index": index,
                 "character_name": msg.character_name if isinstance(msg, CharacterConversationMessage) else self.current_character_agent,
@@ -1243,7 +1264,7 @@ class ParentAgentLoop(BasePrivateChatAgentLoop):
             if isinstance(msg, CharacterConversationMessage) and msg.reasoning:
                 entry["reasoning_content"] = msg.reasoning
             if msg.role == Role.SYSTEM:
-                entry["role"] = Role.SYSTEM
+                entry["role"] = Role.SYSTEM.value
             messages.append(entry)
         return messages
 
@@ -1261,7 +1282,7 @@ class ParentAgentLoop(BasePrivateChatAgentLoop):
             "updated": True,
             "session_id": self.session_id,
             "index": index,
-            "role": str(msg.role),
+            "role": msg.role.value,
             "content": self._extract_text(content),
         }
 

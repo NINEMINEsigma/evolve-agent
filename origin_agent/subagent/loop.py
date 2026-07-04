@@ -193,6 +193,15 @@ class SubAgentLoop(BasePrivateChatAgentLoop):
         logger.warning("SubAgent context limit reached | session=%s", self.session_id)
         self._outbox.append("[system] Context limit reached. Sub-agent may lose context.")
 
+    async def append_user_message(self, content: Any, *, display_content: Any | None = None) -> int:
+        """把用户消息加入子 Agent 历史并返回索引。"""
+        msg = CharacterConversationMessage.from_text(
+            role=Role.USER,
+            character_name=USER_CHARACTER_NAME,
+            text=content if isinstance(content, str) else str(content),
+        )
+        return self._history.add_message(msg)
+
     # ── 公共接口 ─────────────────────────────────────────────────────
 
     def _emit(self, role: str, **fields: Any) -> None:
@@ -273,7 +282,8 @@ class SubAgentLoop(BasePrivateChatAgentLoop):
                     self._history.add_message(assistant_msg)
                     if self._last_message_from_parent:
                         self._outbox.append(text)
-                    self._emit("assistant", content=text, reasoning=reasoning_text)
+                    self._emit("assistant", content=text, reasoning=reasoning_text,
+                               character_name=self.current_character_agent)
                     # LLM 给出纯文本即视作本轮对话结束，等待父 Agent 消息或取消
                     self._round_active = False
                     self._wake_event.clear()

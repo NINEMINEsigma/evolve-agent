@@ -154,6 +154,7 @@ def migrate_session(session_dir: Path) -> dict[str, Any]:
 
     # NOTE: 需要强制覆盖时, 不要执行该if
     if True and es_path.exists():
+    # if False and es_path.exists():
         report["errors"].append("history.es already exists; skipped")
         return report
 

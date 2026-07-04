@@ -309,11 +309,13 @@ const MessageItem = memo(function MessageItem({ message, archived, onImageClick,
 
   return (
     <div className={`message message-${m.role}`} data-message-id={m.id}>
-      <div className="message-avatar-wrapper" data-tooltip={displayName || m.role}>
-        <div className="message-avatar" style={m.role === "user" || m.role === "assistant" ? getAvatarStyle(displayName) : undefined}>
-          {m.role === "error" ? "!" : m.role === "tool" ? "T" : m.role === "system" ? "S" : getInitials(displayName || "")}
+      {m.role !== "tool" && (
+        <div className="message-avatar-wrapper" data-tooltip={displayName || m.role}>
+          <div className="message-avatar" style={m.role === "user" || m.role === "assistant" ? getAvatarStyle(displayName) : undefined}>
+            {m.role === "error" ? "!" : m.role === "system" ? "S" : getInitials(displayName || "")}
+          </div>
         </div>
-      </div>
+      )}
       <div className="message-bubble">
         {isTool && !editing ? (
           <div className="tool-call-block">

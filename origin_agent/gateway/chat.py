@@ -75,6 +75,8 @@ class Message(BaseModel):
     target_sessions: Optional[list[str]] = None  # USER_MESSAGE：目标会话列表
     # tool_call / tool_result 相关字段
     tool_call_id: str | None = None  # TOOL_CALL / TOOL_RESULT：工具调用 ID
+    character_name: str | None = None  # 消息发送者角色名
+    index: int | None = None  # 消息在持久化历史中的索引
 
     @classmethod
     def from_json(cls, raw: str) -> Message:
@@ -102,6 +104,8 @@ class Message(BaseModel):
             custom_text=data.get("custom_text"),
             target_sessions=data.get("target_sessions"),
             tool_call_id=data.get("tool_call_id"),
+            character_name=data.get("character_name"),
+            index=data.get("index"),
         )
 
     def to_json(self) -> str:
@@ -156,6 +160,10 @@ class Message(BaseModel):
             d["target_sessions"] = self.target_sessions
         if self.tool_call_id is not None:
             d["tool_call_id"] = self.tool_call_id
+        if self.character_name is not None:
+            d["character_name"] = self.character_name
+        if self.index is not None:
+            d["index"] = self.index
         return json.dumps(d, ensure_ascii=False)
 
 

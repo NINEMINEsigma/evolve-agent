@@ -27,7 +27,7 @@ from fastapi.staticfiles import StaticFiles
 
 from .chat import Message, MessageType
 from datetime import datetime, timezone
-from entity.constant import CRON_STDOUT_PREVIEW_MAX_LENGTH, SUBPROCESS_TIMEOUT_DEFAULT, UPLOAD_FILENAME_TIME_FORMAT
+from entity.constant import CRON_STDOUT_PREVIEW_MAX_LENGTH, SUBPROCESS_TIMEOUT_DEFAULT, UPLOAD_FILENAME_TIME_FORMAT, USER_CHARACTER_NAME
 from system.context import get_runtime_context
 from entry.parent_agent_loop import IncompatibleHistoryError
 
@@ -268,6 +268,7 @@ async def _send_tool_event(
             reasoning_delta=(data.get("reasoning_delta") if data else None),
             content=(json.dumps({"tool_call": data["tool_call"]}, ensure_ascii=False)
                      if data and data.get("tool_call") else None),
+            character_name=(data.get("character_name") if data else None),
         )
         try:
             await ws.send_text(msg.to_json())
@@ -615,13 +616,12 @@ async def regenerate_response(session_id: str):
             logger.warning("Failed to send regenerate_trim to session=%s", session_id, exc_info=True)
         # 复用 process_message 流程（流式事件自动推送到 ws）
         reply: str = await loop.process_message(content)
-        await ws.send_text(
-            Message(
-                type=MessageType.ASSISTANT_MESSAGE,
-                session_id=session_id,
-                content=reply,
-            ).to_json()
-        )
+        from system.application import Application
+        sink = Application.current().frontend_sink
+        if sink is not None:
+            await sink.emit_assistant_message(
+                session_id, reply, loop.current_character_agent,
+            )
     return {"regenerate": True, "session_id": session_id}
 
 
@@ -1206,6 +1206,12 @@ async def ws_chat(ws: WebSocket) -> None:
                     target_sessions: list[str] = msg.target_sessions or ["main"]
                     content = msg.content or ""
 
+                    # 把原始用户消息追加到历史（回显由 append_user_message 内部统一完成）
+                    try:
+                        await loop.append_user_message(content)
+                    except Exception as exc:
+                        logger.warning("Failed to append user message for session=%s: %s", sid, exc)
+
                     # 先并行/异步转发到选中的子会话（用户直接发送）
                     subagent_tasks: list[asyncio.Task] = []
                     sub_ids: list[str] = []
@@ -1266,7 +1272,7 @@ async def ws_chat(ws: WebSocket) -> None:
                             )
                         try:
                             reply = await loop.process_message(
-                                main_content
+                                main_content, skip_append=True
                             )
                         except Exception as exc:
                             logger.exception("Agent loop error for session=%s", sid)
@@ -1300,13 +1306,12 @@ async def ws_chat(ws: WebSocket) -> None:
                             ).to_json()
                         )
 
-                    await ws.send_text(
-                        Message(
-                            type=MessageType.ASSISTANT_MESSAGE,
-                            session_id=sid,
-                            content=reply,
-                        ).to_json()
-                    )
+                    from system.application import Application
+                    sink = Application.current().frontend_sink
+                    if sink is not None:
+                        await sink.emit_assistant_message(
+                            sid, reply, loop.current_character_agent,
+                        )
                     # 发送最终回复标记，兼容未启用流式的前端或 cron 回调路径
                     # 若前端已收到 stream_done，此消息会携带完整文本作为兜底
                     # 向前端发送实时 token 消耗更新

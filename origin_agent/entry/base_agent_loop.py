@@ -187,6 +187,19 @@ class BaseAgentLoop(ABC):
         """返回当前 loop 的 AgentSink 实例。"""
         ...
 
+    @abstractmethod
+    async def append_user_message(self, content: Any, *, display_content: Any | None = None) -> int:
+        """把用户消息加入本 loop 的历史/状态，返回其在持久化历史中的 index。
+
+        Args:
+            content: 实际存入历史供 LLM 消费的内容。
+            display_content: 回显给前端显示的内容；默认与 content 相同。
+
+        各具体 loop 自行决定存储方式；gateway 在收到 user_message 后调用此方法
+        获取 index，再通过 sink 把带 character_name 的消息回显给前端。
+        """
+        ...
+
     # -- 收件箱处理 -------------------------------------------------------
 
     def schedule_inbox_processing(self) -> None:

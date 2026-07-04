@@ -10,6 +10,12 @@
   to   { opacity: 1; transform: translateY(0); }
 }
 
+.message-avatar-wrapper {
+  display: flex;
+  align-self: flex-start;
+  flex-shrink: 0;
+}
+
 .message-avatar {
   width: 30px;
   height: 30px;
@@ -43,6 +49,10 @@
   background: transparent;
   color: var(--text-muted);
   font-size: 10px;
+}
+
+.message-tool .message-bubble {
+  margin-left: 40px;
 }
 
 .message-error .message-avatar {

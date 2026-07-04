@@ -53,9 +53,22 @@ class AgentSink(ABC):
         ...
 
     @abstractmethod
+    async def emit_user_message(self, session_id: str, content: Any,
+                                character_name: str, message_index: int) -> None:
+        """推送用户消息到前端。"""
+        ...
+
+    @abstractmethod
+    async def emit_assistant_message(self, session_id: str, content: Any,
+                                     character_name: str) -> None:
+        """推送 assistant 消息到前端。"""
+        ...
+
+    @abstractmethod
     async def emit_stream_delta(self, session_id: str, stream_id: str,
                                 delta: str = "", reasoning_delta: str = "",
-                                tool_call: dict | None = None) -> None:
+                                tool_call: dict | None = None,
+                                character_name: str | None = None) -> None:
         """推送流式增量。"""
         ...
 
@@ -267,9 +280,45 @@ class FrontendSink(AgentSink):
         await self._send_msg(session_id, "tool_result", tool_name, content,
                              tool_call_id=tool_call_id)
 
+    async def emit_user_message(self, session_id: str, content: Any,
+                                character_name: str, message_index: int) -> None:
+        from gateway.chat import Message, MessageType
+        ws = self._ws_sinks.get(session_id)
+        if ws is None:
+            return
+        msg = Message(
+            type=MessageType.USER_MESSAGE,
+            session_id=session_id,
+            content=content,
+            character_name=character_name,
+            index=message_index,
+        )
+        try:
+            await ws.send_text(msg.to_json())
+        except Exception:
+            logger.warning("Failed to send user_message to session=%s", session_id, exc_info=True)
+
+    async def emit_assistant_message(self, session_id: str, content: Any,
+                                     character_name: str) -> None:
+        from gateway.chat import Message, MessageType
+        ws = self._ws_sinks.get(session_id)
+        if ws is None:
+            return
+        msg = Message(
+            type=MessageType.ASSISTANT_MESSAGE,
+            session_id=session_id,
+            content=content,
+            character_name=character_name,
+        )
+        try:
+            await ws.send_text(msg.to_json())
+        except Exception:
+            logger.warning("Failed to send assistant_message to session=%s", session_id, exc_info=True)
+
     async def emit_stream_delta(self, session_id: str, stream_id: str,
                                 delta: str = "", reasoning_delta: str = "",
-                                tool_call: dict | None = None) -> None:
+                                tool_call: dict | None = None,
+                                character_name: str | None = None) -> None:
         data: dict = {"stream_id": stream_id}
         if delta:
             data["delta"] = delta
@@ -277,6 +326,8 @@ class FrontendSink(AgentSink):
             data["reasoning_delta"] = reasoning_delta
         if tool_call:
             data["tool_call"] = tool_call
+        if character_name:
+            data["character_name"] = character_name
         await self._send_msg(session_id, "stream_delta", "",
                              json.dumps(data, ensure_ascii=False))
 
@@ -331,6 +382,7 @@ class FrontendSink(AgentSink):
                 delta=data.get("delta"),
                 reasoning_delta=data.get("reasoning_delta"),
                 content=json.dumps({"tool_call": data["tool_call"]}) if data.get("tool_call") else None,
+                character_name=data.get("character_name"),
             )
         elif event_type == "stream_done":
             data = json.loads(payload)
@@ -455,11 +507,23 @@ class ParentAgentSink(AgentSink):
         self._loop._emit("tool_result", tool_call_id=tool_call_id,
                          tool_name=tool_name, content=content)
 
+    async def emit_user_message(self, session_id: str, content: Any,
+                                character_name: str, message_index: int) -> None:
+        # 子 Agent 的用户消息不直接显示在父会话主聊天区，由 subagent_update 处理
+        pass
+
+    async def emit_assistant_message(self, session_id: str, content: Any,
+                                     character_name: str) -> None:
+        # 子 Agent 的 assistant 消息不直接显示在父会话主聊天区，由 subagent_update 处理
+        pass
+
     async def emit_stream_delta(self, session_id: str, stream_id: str,
                                 delta: str = "", reasoning_delta: str = "",
-                                tool_call: dict | None = None) -> None:
+                                tool_call: dict | None = None,
+                                character_name: str | None = None) -> None:
         if delta:
-            self._loop._emit("assistant", content=delta, reasoning=reasoning_delta)
+            self._loop._emit("assistant", content=delta, reasoning=reasoning_delta,
+                             character_name=character_name)
 
     async def emit_stream_done(self, session_id: str, stream_id: str,
                                finish_reason: str = "stop") -> None:
