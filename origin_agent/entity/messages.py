@@ -347,7 +347,9 @@ class History(BaseModel):
 
     def add_message(self, message: BaseMessage) -> int:
         with self._io_locker:
-            # ToolResultMessage 必须与上一条 assistant 的 tool_calls 配对
+            # ToolResultMessage 必须与对应 assistant 的 tool_calls 配对。
+            # 由于多个 tool result 会顺序追加，不能只看 messages[-1]，
+            # 需要从后向前找到最近一条包含该 tool_call_id 的 assistant 消息。
             if isinstance(message, ToolResultMessage):
                 if not self.messages:
                     logger.warning(
@@ -355,17 +357,15 @@ class History(BaseModel):
                         message.tool_call_id,
                     )
                     return -1
-                last = self.messages[-1]
-                if isinstance(last, CharacterConversationMessage) and last.tool_calls:
-                    if not any(tc.id == message.tool_call_id for tc in last.tool_calls):
-                        logger.warning(
-                            "ToolResultMessage id=%s does not match last assistant tool_calls, skipping",
-                            message.tool_call_id,
-                        )
-                        return -1
-                else:
+                matched = False
+                for last in reversed(self.messages):
+                    if isinstance(last, CharacterConversationMessage) and last.tool_calls:
+                        if any(tc.id == message.tool_call_id for tc in last.tool_calls):
+                            matched = True
+                            break
+                if not matched:
                     logger.warning(
-                        "ToolResultMessage id=%s added after non-tool-calling message, skipping",
+                        "ToolResultMessage id=%s does not match any assistant tool_calls, skipping",
                         message.tool_call_id,
                     )
                     return -1
