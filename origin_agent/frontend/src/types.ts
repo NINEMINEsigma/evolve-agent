@@ -14,7 +14,7 @@ export type MessageContent = string | ContentBlock[];
 export type MessageType =
   | "system"
   | "user_message"
-  | "agent_message"
+  | "assistant_message"
   | "tool_call"
   | "tool_result"
   | "task_progress"
@@ -112,7 +112,7 @@ export interface CronTask {
 }
 
 export interface ChatMessage {
-  role: "user" | "agent" | "system" | "error" | "tool";
+  role: "user" | "assistant" | "system" | "error" | "tool";
   content: MessageContent;
   id: string;
   messageIndex?: number;

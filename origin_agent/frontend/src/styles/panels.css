@@ -317,7 +317,7 @@
 }
 
 .subagent-chat .message-user .message-bubble,
-.subagent-chat .message-agent .message-bubble,
+.subagent-chat .message-assistant .message-bubble,
 .subagent-chat .message-tool .message-bubble,
 .subagent-chat .message-system .message-bubble {
   max-width: 100%;
@@ -325,7 +325,7 @@
   border-radius: 8px;
 }
 
-.subagent-chat .message-agent .message-bubble,
+.subagent-chat .message-assistant .message-bubble,
 .subagent-chat .message-tool .message-bubble,
 .subagent-chat .message-system .message-bubble {
   background: var(--bg-tertiary);

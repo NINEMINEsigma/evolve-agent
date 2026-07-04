@@ -452,7 +452,7 @@ class ParentAgentLoop(BasePrivateChatAgentLoop):
 
         由后台线程通过 schedule_inbox_processing 异步调度，
         使用 _process_lock 保证不与 process_message 并发。
-        执行完毕后自动推送 AGENT_MESSAGE 到前端。
+        执行完毕后自动推送 ASSISTANT_MESSAGE 到前端。
         """
         async with self._process_lock:
             if self._cancel_event.is_set():
@@ -473,13 +473,13 @@ class ParentAgentLoop(BasePrivateChatAgentLoop):
                 self._processing = False
                 self._last_idle_time[self.session_id] = time.monotonic()
 
-            # 推送 AGENT_MESSAGE 到前端（server.py 的 process_message 路径会自动做，
+            # 推送 ASSISTANT_MESSAGE 到前端（server.py 的 process_message 路径会自动做，
             # 但 process_inbox 是异步调度触发的，需要自己推）
             if reply:
                 from gateway.chat import Message, MessageType
                 try:
                     msg = Message(
-                        type=MessageType.AGENT_MESSAGE,
+                        type=MessageType.ASSISTANT_MESSAGE,
                         session_id=sid,
                         content=reply,
                     )
@@ -487,7 +487,7 @@ class ParentAgentLoop(BasePrivateChatAgentLoop):
                     if ws is not None:
                         await ws.send_text(msg.to_json())
                 except Exception as exc:
-                    logger.exception("Failed to send AGENT_MESSAGE for inbox processing: %s", exc)
+                    logger.exception("Failed to send ASSISTANT_MESSAGE for inbox processing: %s", exc)
 
             return reply
 
@@ -1233,11 +1233,11 @@ class ParentAgentLoop(BasePrivateChatAgentLoop):
             else:
                 content = self._extract_text(raw_content)
             entry: dict[str, Any] = {
-                "role": "agent" if msg.role == Role.ASSISTANT else msg.role.value,
+                "role": str(msg.role),
                 "content": content,
                 "index": index,
-                "character_name": getattr(msg, "character_name", self.current_character_agent),
-                "visible_characters": getattr(msg, "visible_characters", None) or [],
+                "character_name": msg.character_name if isinstance(msg, CharacterConversationMessage) else self.current_character_agent,
+                "visible_characters": msg.visible_characters if isinstance(msg, CharacterConversationMessage) else None,
                 "requires_response": msg.role == Role.USER,
             }
             if isinstance(msg, CharacterConversationMessage) and msg.reasoning:
@@ -1261,7 +1261,7 @@ class ParentAgentLoop(BasePrivateChatAgentLoop):
             "updated": True,
             "session_id": self.session_id,
             "index": index,
-            "role": "agent" if msg.role == Role.ASSISTANT else msg.role.value,
+            "role": str(msg.role),
             "content": self._extract_text(content),
         }
 

@@ -276,7 +276,7 @@ const MessageItem = memo(function MessageItem({ message, archived, onImageClick,
       );
     }
 
-    if (m.role === "agent") {
+    if (m.role === "assistant") {
       return (
         <>
           {m.reasoningContent && (
@@ -304,13 +304,13 @@ const MessageItem = memo(function MessageItem({ message, archived, onImageClick,
     return renderBlocksContent(m.content, m.role);
   };
 
-  const displayName = m.characterName || (m.role === "user" ? "User" : m.role === "agent" ? "Agent" : undefined);
+  const displayName = m.characterName || (m.role === "user" ? "User" : m.role === "assistant" ? "Assistant" : undefined);
   const showMeta = m.visibleCharacters != null || m.requiresResponse != null;
 
   return (
     <div className={`message message-${m.role}`} data-message-id={m.id}>
       <div className="message-avatar-wrapper" data-tooltip={displayName || m.role}>
-        <div className="message-avatar" style={m.role === "user" || m.role === "agent" ? getAvatarStyle(displayName) : undefined}>
+        <div className="message-avatar" style={m.role === "user" || m.role === "assistant" ? getAvatarStyle(displayName) : undefined}>
           {m.role === "error" ? "!" : m.role === "tool" ? "T" : m.role === "system" ? "S" : getInitials(displayName || "")}
         </div>
       </div>

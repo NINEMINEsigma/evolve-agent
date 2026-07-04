@@ -103,7 +103,7 @@ export function useWebSocket() {
       if (prev && prev.id === streamId) return prev;
       reasoningStartRef.current = null;
       return {
-        role: "agent",
+        role: "assistant",
         content: "",
         id: streamId,
         reasoningContent: undefined,
@@ -400,7 +400,7 @@ export function useWebSocket() {
             const p = JSON.parse(data.assistant_text);
             const id = generateUUID();
             setMessages((prev) => [...prev, {
-              role: "agent",
+              role: "assistant",
               content: p.content || "",
               id,
               reasoningContent: p.reasoning || undefined,
@@ -416,10 +416,10 @@ export function useWebSocket() {
           fetchToolResources(msg.session_id);
         }
       }
-      else if (msg.type === "agent_message") {
+      else if (msg.type === "assistant_message") {
         setWaiting(false);
         ignoreStaleRef.current = false;
-        // stream_done 之后后端会发 agent_message 作为兜底，此时流式消息已固化，直接跳过
+        // stream_done 之后后端会发 assistant_message 作为兜底，此时流式消息已固化，直接跳过
         if (streamDoneRef.current) {
           streamDoneRef.current = false;
           fetchSessions();
@@ -430,7 +430,7 @@ export function useWebSocket() {
           flushStreamingMessage();
         } else {
           setMessages((prev) => [...prev, {
-            role: "agent",
+            role: "assistant",
             content: msg.content ?? "",
             id: generateUUID(),
             messageIndex: nextMessageIndex(prev),
@@ -455,7 +455,7 @@ export function useWebSocket() {
         setWaiting(false);
         ignoreStaleRef.current = false;
         flushStreamingMessage();
-        // 标记流式已完成，紧随的 agent_message 兜底消息应跳过
+        // 标记流式已完成，紧随的 assistant_message 兜底消息应跳过
         streamDoneRef.current = true;
       }
       else if (msg.type === "tool_call") {

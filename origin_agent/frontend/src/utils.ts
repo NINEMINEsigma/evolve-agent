@@ -128,7 +128,7 @@ export function extractMessageResources(messages: MessageResourceSource[]): Mess
       });
     }
 
-    if (m.role === "agent" && typeof m.content === "string") {
+    if (m.role === "assistant" && typeof m.content === "string") {
       const imgMatches = m.content.matchAll(/!\[(.*?)\]\(([^)]+)\)/g);
       for (const match of imgMatches) {
         const src = match[2];
@@ -157,7 +157,7 @@ export function subagentFeedbackToChatMessages(session: SubagentSession): ChatMe
         break;
       case "assistant":
         messages.push({
-          role: "agent",
+          role: "assistant",
           content: msg.content || "",
           id,
           reasoningContent: msg.reasoning,
@@ -165,7 +165,7 @@ export function subagentFeedbackToChatMessages(session: SubagentSession): ChatMe
         break;
       case "reasoning":
         messages.push({
-          role: "agent",
+          role: "assistant",
           content: "",
           id,
           reasoningContent: msg.reasoning || msg.content,

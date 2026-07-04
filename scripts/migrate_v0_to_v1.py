@@ -1,24 +1,47 @@
-"""迁移旧版 messages.jsonl 到新的 History / history.es 格式。
+"""迁移旧版 messages.jsonl 到新的 History / history.es (v1) 格式。
 
-扫描 workspace/logs/sessions/ 下的 messages.jsonl，将 OpenAI 格式消息
+扫描 workspace/sessions/ 下的 messages.jsonl，将 OpenAI 格式消息
 转换为 BaseMessage 子类，保存为 history.es。不删除原 messages.jsonl。
 """
 
 from __future__ import annotations
 
+import argparse
 import json
 import logging
 import sys
 from pathlib import Path
 from typing import Any
 
-# 将 origin_agent 加入导入路径，支持从仓库根目录运行
-REPO_ROOT = Path(__file__).resolve().parent.parent.parent
-ORIGIN_AGENT = REPO_ROOT / "origin_agent"
-if str(ORIGIN_AGENT) not in sys.path:
-    sys.path.insert(0, str(ORIGIN_AGENT))
+REPO_ROOT = Path(__file__).resolve().parent.parent
 
-from entity.constant import MAIN_AGENT_CHARACTER_NAME, USER_CHARACTER_NAME
+# 将仓库根目录加入导入路径，用于加载 config.py 与 origin_agent 模块
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+# 将 origin_agent 与 third 加入导入路径
+ORIGIN_AGENT = REPO_ROOT / "origin_agent"
+THIRD = REPO_ROOT / "third"
+for p in (ORIGIN_AGENT, THIRD):
+    if str(p) not in sys.path:
+        sys.path.insert(0, str(p))
+
+
+def _load_config(load_key: str) -> Any:
+    """非交互式加载 config.py 中的配置。
+
+    config.py 在模块导入时会解析 sys.argv，因此需要先临时注入 --load。
+    """
+    original_argv = sys.argv
+    sys.argv = [original_argv[0], "--load", load_key]
+    try:
+        import config
+    finally:
+        sys.argv = original_argv
+    return config
+
+
+from entity.constant import MAIN_AGENT_CHARACTER_NAME, USER_CHARACTER_NAME, History_Version as __History_Version__
 from entity.messages import (
     CharacterConversationMessage,
     FunctionCall,
@@ -129,7 +152,8 @@ def migrate_session(session_dir: Path) -> dict[str, Any]:
         report["errors"].append("messages.jsonl not found")
         return report
 
-    if es_path.exists():
+    # NOTE: 需要强制覆盖时, 不要执行该if
+    if True and es_path.exists():
         report["errors"].append("history.es already exists; skipped")
         return report
 
@@ -198,7 +222,7 @@ def migrate_session(session_dir: Path) -> dict[str, Any]:
     history.remove_unpaired_tool_calls()
 
     try:
-        save(f"history_{session_dir.name}", str(es_path), history)
+        save(__History_Version__, str(es_path), history)
     except Exception as exc:
         report["errors"].append(f"failed to save history.es: {exc}")
         return report
@@ -209,14 +233,21 @@ def migrate_session(session_dir: Path) -> dict[str, Any]:
 def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 
-    sessions_dir = Path("workspace/logs/sessions")
+    parser = argparse.ArgumentParser(description="迁移旧版 messages.jsonl 到 History / history.es")
+    parser.add_argument("--load", type=str, default="default", help="config.json 中的配置键（默认 default）")
+    parser.add_argument("--sessions-dir", type=str, default=None, help="sessions 目录路径（默认从 config.py 推导）")
+    args = parser.parse_args()
+
+    cfg = _load_config(args.load)
+    sessions_dir: Path
+    if args.sessions_dir:
+        sessions_dir = Path(args.sessions_dir)
+    else:
+        sessions_dir = cfg.workspace_path / "sessions"
+
     if not sessions_dir.exists():
-        alt = REPO_ROOT / "workspace" / "logs" / "sessions"
-        if alt.exists():
-            sessions_dir = alt
-        else:
-            logger.error("Session directory not found: %s", sessions_dir)
-            sys.exit(1)
+        logger.error("Session directory not found: %s", sessions_dir)
+        sys.exit(1)
 
     reports: list[dict[str, Any]] = []
     for session_dir in sorted(sessions_dir.iterdir()):

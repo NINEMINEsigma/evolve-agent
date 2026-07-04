@@ -617,7 +617,7 @@ async def regenerate_response(session_id: str):
         reply: str = await loop.process_message(content)
         await ws.send_text(
             Message(
-                type=MessageType.AGENT_MESSAGE,
+                type=MessageType.ASSISTANT_MESSAGE,
                 session_id=session_id,
                 content=reply,
             ).to_json()
@@ -1302,7 +1302,7 @@ async def ws_chat(ws: WebSocket) -> None:
 
                     await ws.send_text(
                         Message(
-                            type=MessageType.AGENT_MESSAGE,
+                            type=MessageType.ASSISTANT_MESSAGE,
                             session_id=sid,
                             content=reply,
                         ).to_json()

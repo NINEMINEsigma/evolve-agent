@@ -79,7 +79,7 @@ export default function ChatArea({ messages, waiting, archived, onImageClick, on
         )}
 
         {waiting && !streamingMessage && (
-          <div className="message message-agent" data-message-id="__waiting__">
+          <div className="message message-assistant" data-message-id="__waiting__">
             <div className="message-avatar">⚡</div>
             <div className="message-bubble">
               <div className="typing-indicator">

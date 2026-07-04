@@ -90,6 +90,12 @@ def _setup_logging(log_path: str | None, console: bool) -> None:
         ch.setFormatter(fmt)
         root.addHandler(ch)
 
+    # 让 uvicorn 的 logger 向根 logger 传播，确保 ASGI 异常进入文件日志。
+    for uvicorn_logger_name in ("uvicorn", "uvicorn.error", "uvicorn.access"):
+        uvicorn_logger = logging.getLogger(uvicorn_logger_name)
+        uvicorn_logger.handlers.clear()
+        uvicorn_logger.propagate = True
+
 
 # ---------------------------------------------------------------------------
 # 上下文构建器

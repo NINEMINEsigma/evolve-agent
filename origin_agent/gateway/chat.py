@@ -24,7 +24,7 @@ logger = logging.getLogger(__name__)
 
 class MessageType(str, Enum):
     USER_MESSAGE = "user_message"
-    AGENT_MESSAGE = "agent_message"
+    ASSISTANT_MESSAGE = "assistant_message"
     TOOL_CALL = "tool_call"
     TOOL_RESULT = "tool_result"
     CONFIRM_REQUEST = "confirm_request"
