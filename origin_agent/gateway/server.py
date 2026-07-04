@@ -29,15 +29,17 @@ from .chat import Message, MessageType
 from datetime import datetime, timezone
 from entity.constant import CRON_STDOUT_PREVIEW_MAX_LENGTH, SUBPROCESS_TIMEOUT_DEFAULT, UPLOAD_FILENAME_TIME_FORMAT
 from system.context import get_runtime_context
+from entry.parent_agent_loop import IncompatibleHistoryError
 
 if TYPE_CHECKING:
     from entry.parent_agent_loop import ParentAgentLoop
     from entry.agent_sink import FrontendSink
+    from gateway.session_manager import SessionManager
 
 logger = logging.getLogger(__name__)
 
 
-def _get_sm():
+def _get_sm() -> SessionManager|None:
     """返回 Application 的 SessionManager。"""
     from system.application import Application
     return Application.current().session_manager
@@ -1086,6 +1088,23 @@ async def ws_chat(ws: WebSocket) -> None:
                 frontend_sink=_app_inner.frontend_sink,
                 history_store_dir=_store_inner,
             )
+    except IncompatibleHistoryError as exc:
+        logger.warning("Removing incompatible session from index: %s", exc.session_id)
+        _sm = _get_sm()
+        if _sm is not None:
+            _sm.remove_from_index(exc.session_id)
+        try:
+            await ws.send_text(
+                Message(
+                    type=MessageType.ERROR,
+                    session_id=sid,
+                    message=f"会话 {exc.session_id} 的历史格式不兼容，已从索引移除。请运行迁移脚本后重连。",
+                ).to_json()
+            )
+            await ws.close()
+        except Exception:
+            logger.exception("Failed to notify frontend about incompatible history for session=%s", exc.session_id)
+        return
     except Exception as exc:
         logger.warning("Failed to create session loop for %s: %s", sid, exc)
 

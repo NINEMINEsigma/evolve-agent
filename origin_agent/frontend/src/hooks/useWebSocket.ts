@@ -325,6 +325,15 @@ export function useWebSocket() {
                 id: generateUUID(),
                 messageIndex: typeof m.index === "number" ? m.index : undefined,
               };
+              if (m.character_name) {
+                entry.characterName = m.character_name;
+              }
+              if (m.visible_characters) {
+                entry.visibleCharacters = m.visible_characters;
+              }
+              if (typeof m.requires_response === "boolean") {
+                entry.requiresResponse = m.requires_response;
+              }
               if (m.reasoning_content) {
                 entry.reasoningContent = m.reasoning_content;
               }

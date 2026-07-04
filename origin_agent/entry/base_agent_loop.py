@@ -17,7 +17,9 @@ from typing import Any, TYPE_CHECKING
 from pydantic import BaseModel
 
 from entity.puretype import Role, ToolDangerLevel
+from entity.messages import History, BaseMessage, ToolResultMessage
 from entry.agent_support.messages import build_turn_messages, load_message_hooks
+from entry.agent_support.multimodal import tool_result_to_content, content_to_text
 from system.pathutils import find_repo_root
 
 if TYPE_CHECKING:
@@ -236,10 +238,16 @@ class BasePrivateChatAgentLoop(BaseAgentLoop):
 
     def __init__(self, app: Application, session_id: str) -> None:
         super().__init__(app, session_id)
-        self._history: list[dict[str, Any]] = []
+        self._history: History = History(messages=[])
         self._message_hooks_cache: list[dict] | None = None
 
     # -- 抽象方法 ---------------------------------------------------------
+
+    @property
+    @abstractmethod
+    def current_character_agent(self) -> str:
+        """返回当前 loop 对应的 agent 角色名，用于 History 视图过滤。"""
+        ...
 
     @abstractmethod
     def _get_llm_client(self) -> Any:
@@ -287,8 +295,8 @@ class BasePrivateChatAgentLoop(BaseAgentLoop):
 
     async def _execute_tool(self, tool_name: str, args: dict,
                             tool_call_id: str = "",
-                            session_id: str = "") -> dict:
-        """执行单个工具调用，处理只读/审批分流。
+                            session_id: str = "") -> ToolResultMessage:
+        """执行单个工具调用，处理只读/审批分流，返回 ToolResultMessage。
 
         1. readonly 或白名单工具：直接执行
         2. 非 readonly：调用 sink.request_approval 等待审批
@@ -310,21 +318,19 @@ class BasePrivateChatAgentLoop(BaseAgentLoop):
                 session_id=session_id or self.session_id,
             )
             if approval.action == "deny":
-                return {
-                    "role": Role.TOOL,
-                    "tool_call_id": tool_call_id,
-                    "content": f"Tool execution denied: {approval.deny_reason or 'User rejected'}",
-                }
+                return ToolResultMessage(
+                    role=Role.TOOL,
+                    character_name=self.current_character_agent,
+                    tool_call_id=tool_call_id,
+                    content=f"Tool execution denied: {approval.deny_reason or 'User rejected'}",
+                )
 
         # 执行工具
         from abstract.tools.registry import registry
         from entry.base_agent_loop import ToolContext
         ctx = ToolContext(loop=self, session_id=self.session_id)
         result = await registry.async_dispatch(tool_name, args, context=ctx)
-        if isinstance(result, dict) and "error" in result:
-            content = json.dumps(result, ensure_ascii=False)
-        else:
-            content = json.dumps(result, ensure_ascii=False) if not isinstance(result, str) else result
+        content = tool_result_to_content(result)
 
         # 对前端 UI 类工具推送实时状态更新（工具模块自行注册事件类型）
         from abstract.tools.ui_event_router import ui_event_router
@@ -335,20 +341,20 @@ class BasePrivateChatAgentLoop(BaseAgentLoop):
             session_id or self.session_id,
         )
 
-        return {
-            "role": Role.TOOL,
-            "tool_call_id": tool_call_id,
-            "name": tool_name,
-            "content": content,
-        }
+        return ToolResultMessage(
+            role=Role.TOOL,
+            character_name=self.current_character_agent,
+            tool_call_id=tool_call_id,
+            content=content,
+        )
 
     # -- 历史管理 ---------------------------------------------------------
 
-    def _get_history(self) -> list[dict[str, Any]]:
+    def _get_history(self) -> History:
         return self._history
 
-    def _append_history(self, entry: dict[str, Any]) -> None:
-        self._history.append(entry)
+    def _append_history(self, message: BaseMessage) -> None:
+        self._history.add_message(message)
 
     def _load_message_hooks(self) -> list[dict]:
         """加载 custom_hooks 目录中的消息扩展 hook，结果按 loop 实例缓存。"""
@@ -382,6 +388,7 @@ class BasePrivateChatAgentLoop(BaseAgentLoop):
         messages, fixator_context = build_turn_messages(
             system_prompts=system_prompts,
             history=self._history,
+            current_character_agent=self.current_character_agent,
             session_id=self.session_id,
             workspace=workspace,
             memory_ctx=memory_ctx,

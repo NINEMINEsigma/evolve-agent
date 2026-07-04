@@ -50,7 +50,7 @@ export default function InputBar({
   const hasSubagents = activeSubagents.length > 0;
 
   const targetOptions: TargetSessionOption[] = [
-    { id: "main", name: "主会话", status: undefined },
+    { id: "main", name: "主会话" },
     ...activeSubagents
       .sort((a, b) => a.session_id.localeCompare(b.session_id))
       .map((s) => ({ id: s.session_id, name: s.name || s.session_id.slice(0, 12), status: s.status })),

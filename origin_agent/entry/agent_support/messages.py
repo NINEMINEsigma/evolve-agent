@@ -11,6 +11,7 @@ from typing import * # type: ignore
 
 from system.prompt import build_system_prompt
 from entity.puretype import Role
+from entity.messages import History
 
 if TYPE_CHECKING:
     from system.context import RuntimeContext
@@ -119,7 +120,8 @@ def build_agent_system_prompt(ctx: RuntimeContext, skill_blocks: list[str]) -> l
 
 def build_turn_messages(
     system_prompts: list[str],
-    history: list[dict[str, Any]],
+    history: History,
+    current_character_agent: str,
     session_id: str,
     workspace: str,
     memory_ctx: str,
@@ -131,9 +133,12 @@ def build_turn_messages(
         {"role": Role.SYSTEM, "content": sp} for sp in system_prompts
     ]
 
+    # 通过 History 获取当前 agent 的 OpenAI 格式视图
+    history_messages = history.to_openai(current_character_agent)
+
     # 找到最后一条 user 消息的位置
     last_user_idx = -1
-    for i, msg in enumerate(history):
+    for i, msg in enumerate(history_messages):
         if msg.get("role") == Role.USER:
             last_user_idx = i
 
@@ -158,22 +163,20 @@ def build_turn_messages(
 
     hooks_context = "\n".join(hooks_parts)
     fixator_context = "\n".join(fixator_parts)
-    logger.info("Appending hooks_context (%s) + fixator_context (%s) to user message", hooks_context, fixator_context)
+    logger.info("Appending hooks_context (%s) to user message; fixator_context (%s) will be persisted as message_suffix", hooks_context, fixator_context)
 
-    for i, msg in enumerate(history):
+    for i, msg in enumerate(history_messages):
         if i == last_user_idx and msg.get("role") == Role.USER:
             hooked_msg = dict(msg)
             hooked_content = hooked_msg.get("content", "")
-            original_content = msg.get("content", "")
 
-            # 发送用的消息：附加 memory + hooks_context + fixator_context
+            # 发送用的消息：附加 memory + hooks_context（非持久化）。
+            # fixator_context 通过 message_suffix 持久化到历史，History.to_openai 会自动追加。
             send_extras: list[str] = []
             if memory_ctx:
                 send_extras.append(f"<|im_memory_context_start|>\n{memory_ctx}\n<|im_memory_context_end|>")
             if hooks_context:
                 send_extras.append(hooks_context)
-            if fixator_context:
-                send_extras.append(fixator_context)
 
             if send_extras:
                 if isinstance(hooked_content, list):
@@ -190,20 +193,6 @@ def build_turn_messages(
                 hooked_msg["content"] = hooked_content
 
             messages.append(hooked_msg)
-
-            # 同时把 fixator_context 追加到历史中的原始 user 消息（保留在历史中）
-            if fixator_context:
-                if isinstance(original_content, list):
-                    appended = False
-                    for block in reversed(original_content):
-                        if isinstance(block, dict) and block.get("type") == "text":
-                            block["text"] = str(block.get("text", "")) + "\n" + fixator_context
-                            appended = True
-                            break
-                    if not appended:
-                        original_content.append({"type": "text", "text": fixator_context})
-                else:
-                    msg["content"] = str(original_content) + "\n" + fixator_context
         else:
             messages.append(msg)
 
@@ -212,11 +201,12 @@ def build_turn_messages(
 
 def build_full_history_messages(
     system_prompts: list[str],
-    history: list[dict[str, Any]],
+    history: History,
+    current_character_agent: str,
 ) -> list[dict[str, Any]]:
     """构建包含 system prompts 和完整历史的消息列表。"""
     messages: list[dict[str, Any]] = [
         {"role": Role.SYSTEM, "content": sp} for sp in system_prompts
     ]
-    messages.extend(history)
+    messages.extend(history.to_openai(current_character_agent))
     return messages

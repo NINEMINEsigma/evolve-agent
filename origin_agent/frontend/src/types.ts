@@ -128,6 +128,9 @@ export interface ChatMessage {
   playlistAutoplay?: boolean;
   reasoningContent?: string;
   reasoningDuration?: number;
+  characterName?: string;
+  visibleCharacters?: string[];
+  requiresResponse?: boolean;
 }
 
 export interface SessionInfo {

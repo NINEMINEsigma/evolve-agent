@@ -23,12 +23,13 @@ from entity.constant import (
     MAX_TOOL_TURNS,
     SUBAGENT_IDLE_TRIGGER_SECONDS,
     SUBAGENT_MAX_ACTIVE,
+    History_Version as __History_Version__,
 )
+from entity.messages import CharacterConversationMessage, ToolResultMessage
 from entity.puretype import Role, ToolAvailability
 from abstract.tools.registry import registry as tool_registry
 from system.context import get_runtime_context
 from entry.parent_agent_loop import ParentAgentLoop
-from system.convert import as_enum
 
 from .context import SubRuntimeContext, build_subagent_context
 from .loop import SUB_MESSAGE_SEPARATOR, SubAgentLoop, format_user_message
@@ -344,15 +345,14 @@ class _OrchestratorContext:
         snap: dict[str, dict[str, Any]] = {}
         for session_id, sub in self._active.items():
             feedback: list[dict[str, Any]] = []
-            for entry in sub._history:
-                role = entry.get("role")
-                if role == Role.SYSTEM:
+            for msg in sub._history.messages:
+                if msg.role == Role.SYSTEM:
                     continue
-                if role == Role.USER:
-                    feedback.append({"role": "user", "content": str(entry.get("content", ""))})
-                elif role == Role.ASSISTANT:
-                    content = str(entry.get("content", ""))
-                    reasoning = entry.get("reasoning_content")
+                if msg.role == Role.USER:
+                    feedback.append({"role": "user", "content": str(msg.content)})
+                elif msg.role == Role.ASSISTANT:
+                    content = str(msg.content)
+                    reasoning = msg.reasoning if isinstance(msg, CharacterConversationMessage) else None
                     if content:
                         item: dict[str, Any] = {"role": "assistant", "content": content}
                         if reasoning:
@@ -360,21 +360,19 @@ class _OrchestratorContext:
                         feedback.append(item)
                     elif reasoning:
                         feedback.append({"role": "reasoning", "reasoning": str(reasoning)})
-                    tool_calls = entry.get("tool_calls")
-                    if tool_calls and isinstance(tool_calls, list):
-                        for tc in tool_calls:
-                            fn = (tc.get("function") or {}) if isinstance(tc, dict) else {}
+                    if isinstance(msg, CharacterConversationMessage) and msg.tool_calls:
+                        for tc in msg.tool_calls:
                             feedback.append({
                                 "role": "tool_call",
-                                "tool_call_id": str(tc.get("id", "") if isinstance(tc, dict) else ""),
-                                "tool_name": str(fn.get("name", "")),
-                                "tool_args": fn.get("arguments") if isinstance(fn, dict) else {},
+                                "tool_call_id": tc.id,
+                                "tool_name": tc.function.name,
+                                "tool_args": tc.function.arguments,
                             })
-                elif role == Role.TOOL:
+                elif msg.role == Role.TOOL and isinstance(msg, ToolResultMessage):
                     feedback.append({
                         "role": "tool_result",
-                        "tool_call_id": str(entry.get("tool_call_id", "")),
-                        "content": str(entry.get("content", "")),
+                        "tool_call_id": msg.tool_call_id,
+                        "content": str(msg.content),
                     })
             status = "completed" if sub.completed else ("terminated" if sub.terminated else "running")
             snap[session_id] = {
@@ -461,60 +459,62 @@ class _OrchestratorContext:
         self._subagent_names[session_id] = profile.get("_name", "")
 
         if history_path:
-            loaded: list[dict[str, Any]] = []
-            with open(history_path, "r", encoding="utf-8") as f:
-                for line in f:
-                    line = line.strip()
-                    if not line:
-                        continue
-                    entry: dict[str, Any] = json.loads(line)
-                    if not isinstance(entry, dict):
-                        continue
-                    role = as_enum(entry.get("role"), Role)
-                    if role is None:
-                        continue
-                    if role == Role.SYSTEM:
-                        continue
-                    entry["role"] = role
-                    loaded.append(entry)
-            loop._history = loaded
-            for entry in loaded:
-                role = entry.get("role")
-                if role == Role.USER:
+            from easysave import load
+            from entity.messages import History, CharacterConversationMessage, ToolResultMessage
+
+            path = Path(history_path)
+            # TODO: 不存在应该失败, 实际上不应该静默吞没错误并成功开始
+            if path.exists():
+                try:
+                    loaded_history = load(__History_Version__, str(path), History)
+                    if isinstance(loaded_history, History):
+                        loaded_history.remove_unpaired_tool_calls()
+                        loop._history = loaded_history
+                    else:
+                        logger.warning("Loaded subagent history is not History instance: %s", type(loaded_history))
+                        loop._history = History(messages=[])
+                except Exception as exc:
+                    logger.warning("Failed to load subagent history from %s: %s", history_path, exc)
+                    loop._history = History(messages=[])
+            else:
+                loop._history = History(messages=[])
+
+            for msg in loop._history.messages:
+                if msg.role == Role.USER:
                     await self._push_subagent_ws(
                         session_id, profile.get("_name", ""),
-                        {"role": "user", "content": str(entry.get("content", ""))},
+                        {"role": "user", "content": str(msg.content)},
                     )
-                elif role == Role.ASSISTANT:
-                    content = str(entry.get("content", ""))
+                elif msg.role == Role.ASSISTANT:
+                    content = str(msg.content)
                     if content:
                         await self._push_subagent_ws(
                             session_id, profile.get("_name", ""),
                             {"role": "assistant", "content": content},
                         )
-                    for tc in (entry.get("tool_calls") or []):
-                        fn = (tc.get("function") or {}) if isinstance(tc, dict) else {}
-                        await self._push_subagent_ws(
-                            session_id, profile.get("_name", ""),
-                            {
-                                "role": "tool_call",
-                                "tool_call_id": str(tc.get("id", "") if isinstance(tc, dict) else ""),
-                                "tool_name": str(fn.get("name", "")),
-                                "tool_args": fn.get("arguments") if isinstance(fn, dict) else {},
-                            },
-                        )
-                elif role == Role.TOOL:
+                    if isinstance(msg, CharacterConversationMessage) and msg.tool_calls:
+                        for tc in msg.tool_calls:
+                            await self._push_subagent_ws(
+                                session_id, profile.get("_name", ""),
+                                {
+                                    "role": "tool_call",
+                                    "tool_call_id": tc.id,
+                                    "tool_name": tc.function.name,
+                                    "tool_args": tc.function.arguments,
+                                },
+                            )
+                elif msg.role == Role.TOOL and isinstance(msg, ToolResultMessage):
                     await self._push_subagent_ws(
                         session_id, profile.get("_name", ""),
                         {
                             "role": "tool_result",
-                            "tool_call_id": str(entry.get("tool_call_id", "")),
-                            "content": str(entry.get("content", "")),
+                            "tool_call_id": msg.tool_call_id,
+                            "content": str(msg.content),
                         },
                     )
             logger.info(
                 "Subagent history loaded | session=%s entries=%d",
-                session_id, len(loop._history),
+                session_id, loop._history.count,
             )
 
         # 立即推送 WS 通知前端面板
@@ -688,13 +688,13 @@ class _OrchestratorContext:
 
     @staticmethod
     def _history_path(session_id: str, name: str = "") -> Path:
-        """子 Agent 会话历史的存储路径。"""
+        """子 Agent 会话历史的存储路径（easysave 多态序列化格式）。"""
         ctx = get_runtime_context()
         dir = ctx.agentspace / "subagents"
         if name:
             dir = dir / name
         dir.mkdir(parents=True, exist_ok=True)
-        return dir / f"{session_id}.jsonl"
+        return dir / f"{session_id}.es"
 
 
 class SubAgentOrchestrator:

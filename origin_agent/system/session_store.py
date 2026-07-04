@@ -1,17 +1,25 @@
 """会话文件存储工具。
 
-保持现有磁盘格式：messages.jsonl、summary.txt、token_usage.json。
+新增 History 持久化格式：history.es（基于 easysave 多态序列化）。
+保留旧接口：messages.jsonl、summary.txt、token_usage.json 等，
+旧 JSONL 仅用于迁移脚本读取。
 """
 
 from __future__ import annotations
 
 import json
+import logging
 from pathlib import Path
 from typing import Any
 
 from entity.puretype import Role
+from entity.messages import History
+from entity.constant import History_Version as __SessionStore_Version__
+from easysave import save, load
 
 from system.atomic_io import write_text_atomic
+
+logger = logging.getLogger(__name__)
 
 
 class SessionStore:
@@ -34,6 +42,38 @@ class SessionStore:
 
     def tool_resources_path(self, session_id: str) -> Path:
         return self.session_dir(session_id) / "tool_resources.json"
+
+    def history_path(self, session_id: str) -> Path:
+        return self.session_dir(session_id) / "history.es"
+
+    def read_history(self, session_id: str) -> History | None:
+        """从 easysave 多态序列化文件读取 History 实例。"""
+        path = self.history_path(session_id)
+        if not path.exists():
+            return None
+        try:
+            data = load(__SessionStore_Version__, str(path), History)
+            if isinstance(data, History):
+                data.remove_unpaired_tool_calls()
+                return data
+            logger.error("Loaded history for session=%s is not History instance: %s", session_id, type(data))
+            return None
+        except KeyError as exc:
+            logger.exception("Failed to load history for session=%s: %s", session_id, exc)
+            return None
+        except Exception as exc:
+            logger.exception("Failed to load history for session=%s: %s", session_id, exc)
+            raise
+
+    def write_history(self, session_id: str, history: History) -> None:
+        """将 History 实例以 easysave 多态序列化写入磁盘。"""
+        path = self.history_path(session_id)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            save(__SessionStore_Version__, str(path), history)
+        except Exception as exc:
+            logger.exception("Failed to save history for session %s: %s", session_id, exc)
+            raise
 
     def append_message(self, session_id: str, entry: dict[str, Any]) -> None:
         path = self.messages_path(session_id)

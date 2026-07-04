@@ -11,7 +11,9 @@ import logging
 from pathlib import Path
 from typing import Any, Dict, List
 
-from entity.constant import SESSION_EASYSAVE_KEY, SESSION_INDEX_FILENAME
+from entity.constant import SESSION_EASYSAVE_KEY, SESSION_INDEX_FILENAME, History_Version as __History_Version__
+from entity.messages import History, CharacterConversationMessage, MessageBlock, TextBlock
+from entity.puretype import Role
 
 from easysave import save, load  # type: ignore[import]
 
@@ -98,18 +100,36 @@ class EasysaveMemoryProvider(MemoryProvider):
 
     def sync_turn(
         self,
-        user_message: str,
-        assistant_response: str,
+        history: History,
         *,
         session_id: str = "",
     ) -> None:
         sid: str = session_id or self._session_id
         if not sid:
             return
+
+        # 从 History 中提取最后一对 user/assistant 文本
+        user_text: str = ""
+        assistant_text: str = ""
+        found_user: bool = False
+        for msg in reversed(history.messages):
+            if isinstance(msg, CharacterConversationMessage):
+                if msg.role == Role.ASSISTANT and not assistant_text:
+                    assistant_text = self._extract_text(msg.content)
+                elif msg.role == Role.USER and not found_user:
+                    user_text = self._extract_text(msg.content)
+                    found_user = True
+            if found_user and assistant_text:
+                break
+
+        if not user_text:
+            logger.debug("No user message found in history for session=%s, skipping sync", sid)
+            return
+
         data: dict = self._load_session(sid) or {"session_id": sid, "turns": []}
         data["turns"].append({
-            "user": user_message,
-            "assistant": assistant_response,
+            "user": user_text,
+            "assistant": assistant_text,
         })
         self._save_session(sid, data)
 
@@ -189,16 +209,31 @@ class EasysaveMemoryProvider(MemoryProvider):
     def _session_path(self, session_id: str) -> Path:
         return self._dir / f"session_{session_id}.json"
 
+    @staticmethod
+    def _extract_text(content: str | list[MessageBlock]) -> str:
+        """从消息 content 中提取文本（兼容文本与 MessageBlock 列表）。"""
+        if isinstance(content, str):
+            return content
+        if isinstance(content, list):
+            parts: list[str] = []
+            for block in content:
+                if isinstance(block, TextBlock):
+                    parts.append(block.text)
+                else:
+                    parts.append(type(block).__name__)
+            return "\n".join(parts)
+        raise ValueError(f"Invalid content type: {type(content)}")
+
     def _load_session(self, session_id: str) -> dict[str, Any] | None:
         try:
-            return load(f"session_{session_id}", str(self._session_path(session_id)))
+            return load(__History_Version__, str(self._session_path(session_id)))
         except Exception:
-            logger.warning("Failed to load session %s", session_id, exc_info=True)
+            logger.exception("Failed to load session %s", session_id)
             return None
 
     def _save_session(self, session_id: str, data: dict[str, Any]) -> None:
         try:
-            save(f"session_{session_id}", str(self._session_path(session_id)), data)
+            save(__History_Version__, str(self._session_path(session_id)), data)
         except Exception as exc:
             logger.exception("Failed to save session %s: %s", session_id, exc)
 

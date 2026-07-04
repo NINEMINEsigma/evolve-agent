@@ -26,9 +26,11 @@ from __future__ import annotations
 import json
 import logging
 import re
-from typing import Any, Dict, List, Optional
+from typing import * # type: ignore
 
 from .provider import MemoryProvider
+if TYPE_CHECKING:
+    from ...entity.messages import History
 
 logger = logging.getLogger(__name__)
 
@@ -356,8 +358,7 @@ class MemoryManager:
 
     def sync_all(
         self,
-        user_msg: str,
-        asst_resp: str,
+        history: History,
         *,
         session_id: str = "",
     ) -> None:
@@ -365,7 +366,7 @@ class MemoryManager:
         failures: list[str] = []
         for provider in self._providers:
             try:
-                provider.sync_turn(user_msg, asst_resp, session_id=session_id)
+                provider.sync_turn(history, session_id=session_id)
             except Exception as e:
                 logger.warning(
                     "Memory provider '%s' sync_turn failed",

@@ -24,7 +24,9 @@ from __future__ import annotations
 
 import logging
 from abc import ABC, abstractmethod
-from typing import Any, Dict, List, Optional
+from typing import * # type: ignore
+if TYPE_CHECKING:
+    from ...entity.messages import History
 
 logger = logging.getLogger(__name__)
 
@@ -137,8 +139,7 @@ class MemoryProvider(ABC):
     @abstractmethod
     def sync_turn(
         self,
-        user_message: str,
-        assistant_response: str,
+        history: History,
         *,
         session_id: str = "",
     ) -> None:
@@ -149,10 +150,8 @@ class MemoryProvider(ABC):
 
         参数
         ----------
-        user_message : str
-            本回合的用户消息。
-        assistant_response : str
-            本回合的助手响应。
+        history : History
+            当前会话的完整历史。provider 从其中提取需要持久化的回合。
         session_id : str
             为服务并发 session 的 provider 提供 session 标识符。
         """

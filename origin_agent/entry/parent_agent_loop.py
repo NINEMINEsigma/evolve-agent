@@ -23,7 +23,16 @@ from component.approval_allowlist import add_allowed as add_tool_allowlist_entry
 from component.approval_allowlist import is_allowed as is_tool_allowlisted
 from component.llm import LLMClient, LLMResponse, StreamChunk, ToolCall, Usage
 from system.session_store import SessionStore
-from entity.constant import LOG_PREVIEW_CHARS, TOOL_RESULT_PREVIEW_CHARS, TOOL_RESULT_SAVE_THRESHOLD_CHARS, AUTO_TITLE_CONTENT_MAX, MAX_TOOL_TURNS
+from entity.constant import (
+    LOG_PREVIEW_CHARS,
+    TOOL_RESULT_PREVIEW_CHARS,
+    TOOL_RESULT_SAVE_THRESHOLD_CHARS,
+    AUTO_TITLE_CONTENT_MAX,
+    MAX_TOOL_TURNS,
+    MAIN_AGENT_CHARACTER_NAME,
+    USER_CHARACTER_NAME,
+)
+from entity.messages import History, CharacterConversationMessage, FunctionCall, ImageBlock, TextBlock, ToolResultMessage, ToolCall as HistoryToolCall
 from entity.puretype import Role, ToolAvailability, ToolDangerLevel
 from entry.base_agent_loop import BasePrivateChatAgentLoop, ToolContext
 from entry.agent_sink import AgentSink, FrontendSink
@@ -34,12 +43,21 @@ from entry.agent_support.messages import (
 )
 from entry.agent_support.multimodal import (
     build_image_content_blocks,
+    content_to_text,
     is_content_block_error,
     sanitize_image_payload,
     strip_image_blocks,
     summarize_message_for_log,
     supports_vision,
+    tool_result_to_content,
 )
+
+
+class IncompatibleHistoryError(Exception):
+    """会话历史格式不兼容，无法加载。"""
+    def __init__(self, session_id: str) -> None:
+        self.session_id = session_id
+        super().__init__(f"Session {session_id} history format is incompatible")
 
 if TYPE_CHECKING:
     from gateway.session_manager import SessionManager
@@ -122,9 +140,16 @@ class ParentAgentLoop(BasePrivateChatAgentLoop):
 
         # 从磁盘加载已有历史（resume / 重新连接场景）
         if self._session_store is not None:
-            disk_history = self._session_store.read_messages(self.session_id)
-            if disk_history:
-                self._history = disk_history
+            try:
+                disk_history = self._session_store.read_history(self.session_id)
+                if disk_history:
+                    self._history = disk_history
+            except Exception as exc:
+                logger.warning(
+                    "Session %s history incompatible or corrupt: %s",
+                    self.session_id, exc,
+                )
+                raise IncompatibleHistoryError(self.session_id) from exc
 
         # -- SubAgentOrchestrator（由 server 层注入） --
         self.subagent_orchestrator: Any = None
@@ -135,6 +160,10 @@ class ParentAgentLoop(BasePrivateChatAgentLoop):
     # ========================================================================
     # 抽象方法实现
     # ========================================================================
+
+    @property
+    def current_character_agent(self) -> str:
+        return MAIN_AGENT_CHARACTER_NAME
 
     def _get_llm_client(self) -> LLMClient:
         return self._llm
@@ -261,7 +290,10 @@ class ParentAgentLoop(BasePrivateChatAgentLoop):
             # 构建消息列表（hook / memory / fixator 由基类统一处理）
             messages, fixator_context = self._build_history_messages(user_message)
             if fixator_context:
-                self._update_last_user_message(sid, self._history[-1])
+                # 将 fixator_context 持久化为 message_suffix，然后重新构建消息，
+                # 避免 build_turn_messages 重复追加同一 suffix。
+                self._update_last_user_message(sid, fixator_context)
+                messages, _ = self._build_history_messages(user_message)
 
             try:
                 return await self._run_tool_loop(sid, messages, user_message)
@@ -342,7 +374,7 @@ class ParentAgentLoop(BasePrivateChatAgentLoop):
                     self._append(sid, Role.ASSISTANT, assistant_text,
                                  reasoning_content=resp.reasoning_content)
                     self._memory.sync_all(
-                        user_message, assistant_text, session_id=sid,
+                        self._history, session_id=sid,
                     )
                     return assistant_text
 
@@ -351,15 +383,19 @@ class ParentAgentLoop(BasePrivateChatAgentLoop):
 
                 # 执行工具调用
                 for tc in resp.tool_calls:
-                    tool_msg: dict[str, Any] = await self._do_execute_tool(tc, sid)
-                    messages.append(tool_msg)
-                    self._append_history(tool_msg)
-                    self._persist_message(sid, tool_msg)
+                    tool_msg = await self._do_execute_tool(tc, sid)
+                    openai_tool_msg = tool_msg.as_message(self.current_character_agent)
+                    if openai_tool_msg is not None:
+                        messages.append(openai_tool_msg)
+                    self._history.add_message(tool_msg)
+                    self._persist_message(sid)
                     self._push_usage_update(sid)
 
+                    # TODO: 缺乏注释
                     if tc.name == "evolve_code":
                         try:
-                            parsed: Any = json.loads(tool_msg["content"])
+                            content_text = content_to_text(tool_msg.content)
+                            parsed: Any = json.loads(content_text)
                             if parsed.get("evolved"):
                                 self._append(sid, Role.ASSISTANT, "Evolution complete, restarting to apply new code...")
                                 return "Evolution complete, restarting to apply new code..."
@@ -397,11 +433,18 @@ class ParentAgentLoop(BasePrivateChatAgentLoop):
         if not pending:
             return False
         merged = "\n\n".join(msg.to_text() for msg in pending)
-        entry: dict[str, Any] = {"role": Role.USER, "content": merged}
-        self._history.append(entry)
-        self._persist_message(self.session_id, entry)
+        message = CharacterConversationMessage.from_text(
+            role=Role.USER,
+            character_name=USER_CHARACTER_NAME,
+            text=merged,
+            visible_characters=[self.current_character_agent],
+        )
+        self._history.add_message(message)
+        self._persist_message(self.session_id)
         if target_messages is not None:
-            target_messages.append(dict(entry))
+            openai_msg = message.as_message(self.current_character_agent)
+            if openai_msg is not None:
+                target_messages.append(openai_msg)
         return True
 
     async def process_inbox(self) -> str | None:
@@ -559,7 +602,7 @@ class ParentAgentLoop(BasePrivateChatAgentLoop):
 
     # TODO: 和下方的_execute_tool, 谁作为impl需要进一步决策
     async def _do_execute_tool(self, tc: ToolCall,
-                               session_id: str = "") -> dict[str, Any]:
+                               session_id: str = "") -> ToolResultMessage:
         """直接通过 ToolCall 实例执行单个工具调用。
 
         NOTE: 保留 ``_execute_tool`` 的通用参数签名，以便非 LLM 来源或测试
@@ -571,15 +614,16 @@ class ParentAgentLoop(BasePrivateChatAgentLoop):
 
     async def _execute_tool(self, tool_name: str, args: dict,
                             tool_call_id: str = "",
-                            session_id: str = "") -> dict[str, Any]:
+                            session_id: str = "") -> ToolResultMessage:
         """执行单个工具调用，含审批流程。"""
         tc = ToolCall(id=tool_call_id, name=tool_name, arguments=args)
         if self._interrupted or self._cancel_event.is_set():
-            return {
-                "role": Role.TOOL,
-                "tool_call_id": tc.id,
-                "content": "Cancelled.",
-            }
+            return ToolResultMessage(
+                role=Role.TOOL,
+                character_name=self.current_character_agent,
+                tool_call_id=tc.id,
+                content="Cancelled.",
+            )
 
         args["_session_id"] = session_id
 
@@ -602,11 +646,12 @@ class ParentAgentLoop(BasePrivateChatAgentLoop):
                 session_id, tc.name, tc.id,
                 json.dumps(_result, ensure_ascii=False),
             )
-            return {
-                "role": Role.TOOL,
-                "tool_call_id": tc.id,
-                "content": json.dumps(_result, ensure_ascii=False),
-            }
+            return ToolResultMessage(
+                role=Role.TOOL,
+                character_name=self.current_character_agent,
+                tool_call_id=tc.id,
+                content=json.dumps(_result, ensure_ascii=False),
+            )
 
         logger.info("Tool call: %s args=%s", tc.name, tc.arguments)
 
@@ -687,10 +732,12 @@ class ParentAgentLoop(BasePrivateChatAgentLoop):
                 self._tool_stats[tc.name]["errors"] += 1
                 result = {"error": f"Tool execution failed: {type(exc).__name__}: {exc}"}
 
-        # 通知前端结果
-        content_str = json.dumps(result, ensure_ascii=False) if not isinstance(result, str) else result
+        # 统一转换为可保存到 History 的 content（支持 _image blocks）
+        content = tool_result_to_content(result)
+
+        # 通知前端结果时使用文本摘要，避免 base64 撑爆前端事件
         await self._frontend_sink.emit_tool_result(
-            session_id, tc.name, tc.id, content_str,
+            session_id, tc.name, tc.id, content_to_text(content),
         )
 
         # 对前端 UI 类工具推送实时状态更新
@@ -702,26 +749,66 @@ class ParentAgentLoop(BasePrivateChatAgentLoop):
             session_id or self.session_id,
         )
 
-        return {
-            "role": Role.TOOL,
-            "tool_call_id": tc.id,
-            "content": content_str,
-        }
+        return ToolResultMessage(
+            role=Role.TOOL,
+            character_name=self.current_character_agent,
+            tool_call_id=tc.id,
+            content=content,
+        )
 
     # ========================================================================
     # 历史 / 消息构建
     # ========================================================================
 
     def _append(
-        self, session_id: str, role: str,
+        self, session_id: str, role: Role,
         content: str | list[dict[str, Any]],
         reasoning_content: str | None = None,
     ) -> None:
-        entry: dict[str, Any] = {"role": role, "content": content}
-        if reasoning_content:
-            entry["reasoning_content"] = reasoning_content
-        self._history.append(entry)
-        self._persist_message(session_id, entry)
+        """追加一条用户/assistant 消息到 History 并持久化。"""
+        if isinstance(content, str):
+            message_content: str | list[ImageBlock | TextBlock] = content
+        else:
+            message_content = self._blocks_from_dicts(content)
+        if isinstance(message_content, str):
+            message = CharacterConversationMessage.from_text(
+                role=role,
+                character_name=self.current_character_agent if role == Role.ASSISTANT else USER_CHARACTER_NAME,
+                text=message_content,
+                visible_characters=[self.current_character_agent] if role == Role.USER else None,
+                reasoning=reasoning_content,
+            )
+        else:
+            message = CharacterConversationMessage(
+                role=role,
+                character_name=self.current_character_agent if role == Role.ASSISTANT else USER_CHARACTER_NAME,
+                content=message_content,
+                visible_characters=[self.current_character_agent] if role == Role.USER else None,
+                reasoning=reasoning_content,
+                reasoning_field_name="reasoning_content",
+                message_suffix=None,
+                tool_calls=None,
+            )
+        self._history.add_message(message)
+        self._persist_message(session_id)
+
+    @staticmethod
+    def _blocks_from_dicts(blocks: list[dict[str, Any]]) -> list[ImageBlock | TextBlock]:
+        """把 OpenAI 格式的 content block dict 列表转换为 MessageBlock 对象列表。"""
+        result: list[ImageBlock | TextBlock] = []
+        for block in blocks:
+            if not isinstance(block, dict):
+                continue
+            btype = block.get("type")
+            if btype == "text":
+                result.append(TextBlock(text=str(block.get("text", ""))))
+            elif btype == "image_url":
+                image_url_block = block.get("image_url")
+                if isinstance(image_url_block, dict):
+                    result.append(ImageBlock(image_url=str(image_url_block.get("url", ""))))
+                else:
+                    result.append(ImageBlock(image_url=str(image_url_block or "")))
+        return result
 
     def _get_memory_context(self, user_message: str) -> str:
         """主会话：通过 MemoryManager 预取当前回合的 memory 上下文。"""
@@ -735,28 +822,33 @@ class ParentAgentLoop(BasePrivateChatAgentLoop):
             self.app.runtime_context,
             self._collect_skill_prompts(),
         )
-        return build_full_history_messages(system_prompts, self._history)
+        return build_full_history_messages(
+            system_prompts, self._history, self.current_character_agent
+        )
 
     def _store_assistant_with_tools(
         self, session_id: str, resp: LLMResponse,
     ) -> None:
-        tool_calls_data: list[dict] = [
-            {
-                "id": tc.id,
-                "type": "function",
-                "function": {"name": tc.name, "arguments": json.dumps(tc.arguments, ensure_ascii=False)},
-            }
+        tool_calls_data: list[HistoryToolCall] = [
+            HistoryToolCall(
+                id=tc.id,
+                type="function",
+                function=FunctionCall(
+                    name=tc.name,
+                    arguments=json.dumps(tc.arguments, ensure_ascii=False),
+                ),
+            )
             for tc in resp.tool_calls
         ]
-        entry: dict[str, Any] = {
-            "role": Role.ASSISTANT,
-            "content": resp.content or "",
-            "tool_calls": tool_calls_data,
-        }
-        if resp.reasoning_content:
-            entry["reasoning_content"] = resp.reasoning_content
-        self._history.append(entry)
-        self._persist_message(session_id, entry)
+        message = CharacterConversationMessage.from_tool_calls(
+            role=Role.ASSISTANT,
+            character_name=self.current_character_agent,
+            content=resp.content or "",
+            tool_calls=tool_calls_data,
+            reasoning=resp.reasoning_content,
+        )
+        self._history.add_message(message)
+        self._persist_message(session_id)
 
     @staticmethod
     def _extract_text(content: Any) -> str:
@@ -765,7 +857,11 @@ class ParentAgentLoop(BasePrivateChatAgentLoop):
         if isinstance(content, list):
             parts: list[str] = []
             for block in content:
-                if isinstance(block, dict) and block.get("type") == "text":
+                if isinstance(block, TextBlock):
+                    parts.append(block.text)
+                elif isinstance(block, ImageBlock):
+                    parts.append("[image_url]")
+                elif isinstance(block, dict) and block.get("type") == "text":
                     parts.append(str(block.get("text", "")))
             return "\n".join(parts)
         return str(content or "")
@@ -863,15 +959,15 @@ class ParentAgentLoop(BasePrivateChatAgentLoop):
     def _history_path(self, session_id: str) -> Path | None:
         if self._session_store is None:
             return None
-        return self._session_store.messages_path(session_id)
+        return self._session_store.history_path(session_id)
 
-    def _persist_message(self, session_id: str, entry: dict) -> None:
+    def _persist_message(self, session_id: str) -> None:
         if self._session_store is None:
             return
         try:
-            self._session_store.append_message(session_id, entry)
+            self._session_store.write_history(session_id, self._history)
         except Exception as exc:
-            logger.exception("Failed to persist message for session %s: %s", session_id, exc)
+            logger.exception("Failed to persist history for session %s: %s", session_id, exc)
 
     def _persist_token_usage(self, session_id: str) -> None:
         if self._session_store is None:
@@ -891,37 +987,20 @@ class ParentAgentLoop(BasePrivateChatAgentLoop):
             return 0
 
     def _remove_last_user_message(self, session_id: str) -> None:
-        if self._history and self._history[-1].get("role") == Role.USER:
-            self._history.pop()
-        if self._session_store is None:
-            return
-        try:
-            self._session_store.remove_last_user_message(session_id)
-        except Exception as exc:
-            logger.exception(
-                "Failed to remove last user message from disk for session %s: %s",
-                session_id, exc,
-            )
+        """移除 History 中最后一条 user 消息并持久化。"""
+        messages = self._history.messages
+        if messages and messages[-1].role == Role.USER:
+            messages.pop()
+        self._overwrite_history_file(session_id)
 
-    def _update_last_user_message(self, session_id: str, entry: dict[str, Any]) -> None:
-        if self._session_store is None:
-            return
-        try:
-            path = self._history_path(session_id)
-            if not path or not path.exists():
-                return
-            lines = path.read_text(encoding="utf-8").splitlines()
-            if not lines:
-                return
-            last = json.loads(lines[-1])
-            if last.get("role") == Role.USER:
-                lines[-1] = json.dumps(entry, ensure_ascii=False)
-                path.write_text("\n".join(lines) + "\n", encoding="utf-8")
-        except Exception as exc:
-            logger.exception(
-                "Failed to update last user message for session %s: %s",
-                session_id, exc,
-            )
+    def _update_last_user_message(self, session_id: str, fixator_context: str) -> None:
+        """将 fixator_context 设为 History 中最后一条 user 消息的持久化 suffix。"""
+        for i in range(len(self._history.messages) - 1, -1, -1):
+            msg = self._history.messages[i]
+            if msg.role == Role.USER and isinstance(msg, CharacterConversationMessage):
+                self._history.messages[i] = msg.with_suffix(fixator_context)
+                break
+        self._overwrite_history_file(session_id)
 
     # ========================================================================
     # Session 终止 / 归档
@@ -957,9 +1036,9 @@ class ParentAgentLoop(BasePrivateChatAgentLoop):
             except Exception as exc:
                 logger.exception("Failed to write summary for session %s: %s", old_sid, exc)
 
-        # 同步 memory
+        # 同步 memory：传入旧 session 的完整 History
         try:
-            self._memory.sync_all("", summary, session_id=old_sid)
+            self._memory.sync_all(self._history, session_id=old_sid)
         except Exception:
             logger.exception("Failed to sync memory for session=%s", old_sid)
 
@@ -975,8 +1054,17 @@ class ParentAgentLoop(BasePrivateChatAgentLoop):
             new_sid: str = sm.create_with_context(context, parent_sid=old_sid, role=Role.USER)
             sm.archive(old_sid, continuation_sid=new_sid)
 
-            self._history = self._load_history_from_disk(new_sid)
+            # 新 session 以 summary 作为 user 消息开始
+            self._history = History(messages=[])
             self._last_prompt_tokens = 0
+            summary_msg = CharacterConversationMessage.from_text(
+                role=Role.USER,
+                character_name=USER_CHARACTER_NAME,
+                text=context,
+                visible_characters=[self.current_character_agent],
+            )
+            self._history.add_message(summary_msg)
+            self._persist_message(new_sid)
 
             # 迁移 cron 定时任务
             try:
@@ -995,14 +1083,15 @@ class ParentAgentLoop(BasePrivateChatAgentLoop):
         logger.info("Session terminated | old=%s summary=%d chars", old_sid, len(summary))
         return None
 
-    def _load_history_from_disk(self, session_id: str) -> list[dict]:
+    def _load_history_from_disk(self, session_id: str) -> History:
         if self._session_store is None:
-            return []
+            return History(messages=[])
         try:
-            return self._session_store.read_messages(session_id)
+            history = self._session_store.read_history(session_id)
+            return history if history is not None else History(messages=[])
         except Exception as exc:
             logger.exception("Failed to load history for session %s: %s", session_id, exc)
-            return []
+            return History(messages=[])
 
     async def _summarize_session_history(self, session_id: str) -> str:
         """用 LLM 对完整历史做压缩生成摘要。"""
@@ -1135,49 +1224,52 @@ class ParentAgentLoop(BasePrivateChatAgentLoop):
     # ========================================================================
 
     def get_session_messages(self) -> list[dict]:
-        history: list[dict[str, Any]] = list(self._history)
+        """返回前端展示所需的消息列表，包含多 agent 元数据。"""
         messages: list[dict] = []
-        for index, entry in enumerate(history):
-            role: str = entry.get("role", "")
-            content: str = self._extract_text(entry.get("content", ""))
-            if role == Role.USER:
-                messages.append({"role": Role.USER, "content": content, "index": index})
-            elif role == Role.ASSISTANT:
-                if not content and not entry.get("reasoning_content"):
-                    continue
-                msg: dict = {"role": "agent", "content": content, "index": index}
-                if entry.get("reasoning_content"):
-                    msg["reasoning_content"] = entry["reasoning_content"]
-                messages.append(msg)
-            elif role == Role.TOOL:
-                messages.append({"role": Role.TOOL, "content": content, "index": index})
-            elif role == Role.SYSTEM:
-                messages.append({"role": Role.SYSTEM, "content": content, "index": index})
+        for index, msg in enumerate(self._history.messages):
+            raw_content = msg.content
+            if isinstance(raw_content, list):
+                content: str | list[dict[str, Any]] = [b.as_object() for b in raw_content]
+            else:
+                content = self._extract_text(raw_content)
+            entry: dict[str, Any] = {
+                "role": "agent" if msg.role == Role.ASSISTANT else msg.role.value,
+                "content": content,
+                "index": index,
+                "character_name": getattr(msg, "character_name", self.current_character_agent),
+                "visible_characters": getattr(msg, "visible_characters", None) or [],
+                "requires_response": msg.role == Role.USER,
+            }
+            if isinstance(msg, CharacterConversationMessage) and msg.reasoning:
+                entry["reasoning_content"] = msg.reasoning
+            if msg.role == Role.SYSTEM:
+                entry["role"] = Role.SYSTEM
+            messages.append(entry)
         return messages
 
     def edit_session_message(self, index: int, content: str) -> dict:
         if not isinstance(index, int) or index < 0:
             return {"updated": False, "error": "invalid message index"}
-        if index >= len(self._history):
+        if index >= self._history.count:
             return {"updated": False, "error": "message index out of range"}
-        entry: dict[str, Any] = dict(self._history[index])
-        entry["content"] = content
-        self._history[index] = entry
+        msg = self._history.get_message(index)
+        if not isinstance(msg, CharacterConversationMessage):
+            return {"updated": False, "error": "message type not editable"}
+        self._history.messages[index] = msg.model_copy(update={"content": content})
         self._overwrite_history_file(self.session_id)
-        role: str = entry.get("role", "")
         return {
             "updated": True,
             "session_id": self.session_id,
             "index": index,
-            "role": "agent" if role == Role.ASSISTANT else role,
-            "content": self._extract_text(entry.get("content", "")),
+            "role": "agent" if msg.role == Role.ASSISTANT else msg.role.value,
+            "content": self._extract_text(content),
         }
 
     def _overwrite_history_file(self, session_id: str) -> None:
         if self._session_store is None:
             return
         try:
-            self._session_store.overwrite_messages(session_id, self._history)
+            self._session_store.write_history(session_id, self._history)
         except Exception as exc:
             logger.exception("Failed to overwrite history file for session %s: %s", session_id, exc)
 
@@ -1198,31 +1290,31 @@ class ParentAgentLoop(BasePrivateChatAgentLoop):
         """删除最后 count 个逻辑轮次的消息（从倒数第 count 条 user 起，覆盖其后所有 tool/assistant）。"""
         if count < 1:
             return {"deleted": False, "error": "count must be >= 1"}
-        user_indices = [i for i, m in enumerate(self._history) if m.get("role") == Role.USER]
+        user_indices = [i for i, m in enumerate(self._history.messages) if m.role == Role.USER]
         if not user_indices:
             return {"deleted": False, "error": "no user messages to delete"}
         if count > len(user_indices):
             return {"deleted": False, "error": f"only {len(user_indices)} user messages available"}
         remove_from = user_indices[-count]
-        self._history = self._history[:remove_from]
+        self._history.messages = self._history.messages[:remove_from]
         self._overwrite_history_file(self.session_id)
-        return {"deleted": True, "session_id": self.session_id, "remaining_count": len(self._history)}
+        return {"deleted": True, "session_id": self.session_id, "remaining_count": self._history.count}
 
     def regenerate_response(self) -> dict:
         """截断到最后一条 user 消息，返回其内容供重新生成。"""
-        user_indices = [i for i, m in enumerate(self._history) if m.get("role") == Role.USER]
+        user_indices = [i for i, m in enumerate(self._history.messages) if m.role == Role.USER]
         if not user_indices:
             return {"regenerate": False, "error": "no user message found"}
         last_user_idx = user_indices[-1]
-        last_user_content = self._extract_text(self._history[last_user_idx].get("content", ""))
+        last_user_content = self._extract_text(self._history.messages[last_user_idx].content)
         # 截断到 user 消息处（保留 user 本身，删除其后所有 assistant/tool）
-        self._history = self._history[:last_user_idx + 1]
+        self._history.messages = self._history.messages[:last_user_idx + 1]
         self._overwrite_history_file(self.session_id)
         return {
             "regenerate": True,
             "session_id": self.session_id,
             "last_user_content": last_user_content,
-            "remaining_count": len(self._history),
+            "remaining_count": self._history.count,
         }
 
     def get_tool_resources(self) -> dict:
@@ -1243,27 +1335,26 @@ class ParentAgentLoop(BasePrivateChatAgentLoop):
         if not sources:
             return {"error": "sources list is empty", "merged": False}
         # 收集各源 session 的历史消息
-        combined: list[dict] = []
+        combined = History(messages=[])
         for sid in sources:
             history = self._load_history_from_disk(sid)
             if history:
-                combined.extend(history)
+                combined.messages.extend(history.messages)
         # 创建新 session
         new_sid = self._session_manager.create_with_context(
             context="Merged session",
             parent_sid=sources[0],
             role=Role.SYSTEM,
         )
-        # 写入合并后的消息
+        # 写入合并后的历史
         if self._session_store is not None:
-            for entry in combined:
-                self._session_store.append_message(new_sid, entry)
+            self._session_store.write_history(new_sid, combined)
         # 归档源 sessions
         for sid in sources:
             self._session_manager.archive(sid, continuation_sid=new_sid)
         logger.info(
             "Sessions merged | new=%s sources=%s total_messages=%d",
-            new_sid, sources, len(combined),
+            new_sid, sources, combined.count,
         )
         return {"merged": True, "session_id": new_sid, "sources": sources}
 

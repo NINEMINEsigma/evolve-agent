@@ -117,7 +117,12 @@
   flex-direction: row-reverse;
 }
 
+.message-user .message-avatar-wrapper {
+  order: 2;
+}
+
 .message-user .message-bubble {
+  order: 1;
   background: var(--user-bubble);
   border: 1px solid var(--border);
   border-radius: 16px;
@@ -125,6 +130,7 @@
   max-width: 70%;
   margin-left: auto;
   margin-right: 0;
+  text-align: left;
 }
 
 .message-system {
@@ -354,6 +360,32 @@
   font-size: 11px;
   line-height: 1;
   color: var(--text-muted);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.message-meta-tags {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.message-meta-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 1px 5px;
+  border-radius: 10px;
+  background: var(--bg-hover);
+  color: var(--text-secondary);
+  font-size: 10px;
+  cursor: help;
+}
+
+.message-meta-tag-response {
+  background: rgba(var(--accent-rgb, 99, 102, 241), 0.15);
+  color: var(--accent);
 }
 
 .message-actions {

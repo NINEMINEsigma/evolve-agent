@@ -1,12 +1,37 @@
 import { memo, useMemo, useState, type WheelEvent } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { ChatMessage, ContentBlock } from "../types";
+import { ChatMessage, ContentBlock, MessageContent } from "../types";
 import CodeBlock from "./CodeBlock";
 import PlaylistPlayer from "./PlaylistPlayer";
 
 const LONG_MESSAGE_CHARS = 1200;
 const LONG_MESSAGE_LINES = 18;
+
+function hashString(str: string): number {
+  let hash = 0;
+  for (let i = 0; i < str.length; i++) {
+    const chr = str.charCodeAt(i);
+    hash = ((hash << 5) - hash) + chr;
+    hash |= 0;
+  }
+  return Math.abs(hash);
+}
+
+function hueFromString(str: string): number {
+  return hashString(str) % 360;
+}
+
+function getInitials(name: string): string {
+  return name.slice(0, 1).toUpperCase();
+}
+
+function getAvatarStyle(name?: string): React.CSSProperties {
+  if (!name) {
+    return { backgroundColor: "#666" };
+  }
+  return { backgroundColor: `hsl(${hueFromString(name)}, 65%, 45%)` };
+}
 
 const markdownComponentsBase = {
   code({ className, children, ...props }: any) {
@@ -69,7 +94,15 @@ const MessageItem = memo(function MessageItem({ message, archived, onImageClick,
 }) {
   const m = message;
   const [editing, setEditing] = useState(false);
-  const textContent = typeof m.content === "string" ? m.content : "";
+
+  const contentToText = (content: MessageContent): string => {
+    if (typeof content === "string") return content;
+    return content
+      .map((block) => (block.type === "text" ? block.text : "[image_url]"))
+      .join("\n");
+  };
+
+  const textContent = contentToText(m.content);
   const [draft, setDraft] = useState(textContent);
   const lineCount = textContent.split("\n").length;
   const isLong = textContent.length > LONG_MESSAGE_CHARS || lineCount > LONG_MESSAGE_LINES;
@@ -186,22 +219,21 @@ const MessageItem = memo(function MessageItem({ message, archived, onImageClick,
     </>
   );
 
-  const renderUserContent = () => {
-    const content = m.content;
+  const renderBlocksContent = (content: MessageContent, roleClass: string) => {
     if (typeof content === "string") {
-      return <pre className={`message-text message-text-${m.role}`}>{content}</pre>;
+      return <pre className={`message-text message-text-${roleClass}`}>{content}</pre>;
     }
 
     if (Array.isArray(content)) {
       const blocks = content as ContentBlock[];
       return (
-        <div className="message-user-mixed">
+        <div className="message-blocks">
           {blocks.map((block, idx) => {
             if (block.type === "text") {
               return (
-                <span key={`${m.id}-txt-${idx}`} className={`message-text message-text-${m.role}`}>
+                <pre key={`${m.id}-txt-${idx}`} className={`message-text message-text-${roleClass}`}>
                   {block.text}
-                </span>
+                </pre>
               );
             }
             if (block.type === "image_url") {
@@ -211,9 +243,9 @@ const MessageItem = memo(function MessageItem({ message, archived, onImageClick,
                   key={`${m.id}-img-${idx}`}
                   href="#"
                   onClick={(e) => { e.preventDefault(); onImageClick(src); }}
-                  className="message-user-img-link"
+                  className="message-img-link"
                 >
-                  <img src={src} alt={`图片 ${idx + 1}`} className="message-user-thumb" />
+                  <img src={src} alt={`图片 ${idx + 1}`} className="message-img-thumb" />
                 </a>
               );
             }
@@ -223,7 +255,7 @@ const MessageItem = memo(function MessageItem({ message, archived, onImageClick,
       );
     }
 
-    return <pre className={`message-text message-text-${m.role}`}>{String(content)}</pre>;
+    return <pre className={`message-text message-text-${roleClass}`}>{String(content)}</pre>;
   };
 
   const renderBody = () => {
@@ -253,28 +285,35 @@ const MessageItem = memo(function MessageItem({ message, archived, onImageClick,
               <div className="reasoning-content">{m.reasoningContent}</div>
             </details>
           )}
-          <ReactMarkdown remarkPlugins={[remarkGfm]} components={mdComponents}>
-            {textContent || ""}
-          </ReactMarkdown>
+          {typeof m.content === "string" ? (
+            <ReactMarkdown remarkPlugins={[remarkGfm]} components={mdComponents}>
+              {textContent || ""}
+            </ReactMarkdown>
+          ) : (
+            renderBlocksContent(m.content, m.role)
+          )}
           {streaming && <span className="streaming-cursor" />}
         </>
       );
     }
 
     if (m.role === "user") {
-      return renderUserContent();
+      return renderBlocksContent(m.content, m.role);
     }
 
-    return <pre className={`message-text message-text-${m.role}`}>{textContent}</pre>;
+    return renderBlocksContent(m.content, m.role);
   };
+
+  const displayName = m.characterName || (m.role === "user" ? "User" : m.role === "agent" ? "Agent" : undefined);
+  const showMeta = m.visibleCharacters != null || m.requiresResponse != null;
 
   return (
     <div className={`message message-${m.role}`} data-message-id={m.id}>
-      {m.role !== "user" && m.role !== "agent" && (
-        <div className="message-avatar">
-          {m.role === "error" ? "!" : m.role === "tool" ? "🔧" : "●"}
+      <div className="message-avatar-wrapper" data-tooltip={displayName || m.role}>
+        <div className="message-avatar" style={m.role === "user" || m.role === "agent" ? getAvatarStyle(displayName) : undefined}>
+          {m.role === "error" ? "!" : m.role === "tool" ? "T" : m.role === "system" ? "S" : getInitials(displayName || "")}
         </div>
-      )}
+      </div>
       <div className="message-bubble">
         {isTool && !editing ? (
           <div className="tool-call-block">
@@ -287,7 +326,7 @@ const MessageItem = memo(function MessageItem({ message, archived, onImageClick,
             </button>
             {!toolCollapsed && (
               <div className="tool-call-detail message-content-collapsed" onWheel={handoffWheelAtBoundary}>
-                <pre className="message-text message-text-tool">{textContent}</pre>
+                {renderBlocksContent(m.content, "tool")}
                 {renderAttachments()}
               </div>
             )}
@@ -304,6 +343,20 @@ const MessageItem = memo(function MessageItem({ message, archived, onImageClick,
         <div className="message-toolbar">
           <span className="message-meta">
             {m.edited ? "已编辑" : canEdit ? `#${m.messageIndex}` : ""}
+            {showMeta && (
+              <span className="message-meta-tags">
+                {m.visibleCharacters != null && m.visibleCharacters.length > 0 && (
+                  <span className="message-meta-tag" title={`Visible to: ${m.visibleCharacters.join(", ")}`}>
+                    V {m.visibleCharacters.length}
+                  </span>
+                )}
+                {m.requiresResponse && (
+                  <span className="message-meta-tag message-meta-tag-response">
+                    待响应
+                  </span>
+                )}
+              </span>
+            )}
           </span>
           <div className="message-actions">
             {isLong && (

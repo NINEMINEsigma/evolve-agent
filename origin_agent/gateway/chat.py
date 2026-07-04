@@ -493,6 +493,16 @@ class SessionManager:
                 shutil.rmtree(sdir)
         logger.debug("Session removed | id=%s", sid)
 
+    def remove_from_index(self, sid: str) -> None:
+        """仅从索引中移除 session，不删除磁盘目录（用于不兼容格式场景）。"""
+        self._sessions.pop(sid, None)
+        if self._store_dir:
+            with self._index_lock:
+                entries: list[dict] = self._read_index()
+                entries = [e for e in entries if e.get("id") != sid]
+                self._write_index(entries)
+        logger.warning("Session removed from index only (incompatible format) | id=%s", sid)
+
     def update_title(self, sid: str, title: str) -> None:
         """更新内存和磁盘中 session 的标题。"""
         if sid in self._sessions:
