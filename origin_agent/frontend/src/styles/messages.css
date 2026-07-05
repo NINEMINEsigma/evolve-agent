@@ -30,13 +30,16 @@
 }
 
 .message-assistant .message-avatar {
-  background: var(--accent-grad);
   color: #fff;
 }
 
 .message-user .message-avatar {
-  background: var(--bg-hover);
   color: var(--text-primary);
+}
+
+.message-avatar.waiting-avatar {
+  background: var(--accent-grad);
+  color: #fff;
 }
 
 .message-system .message-avatar {
