@@ -30,7 +30,7 @@ export function useWebSocket() {
   const [status, setStatus] = useState("connecting...");
   const [waiting, setWaiting] = useState(false);
   const [pendingConfirm, setPendingConfirm] = useState<ConfirmRequest | null>(null);
-  const [denyReason, setDenyReason] = useState("此操作可能带来安全风险");
+  const [denyReason, setDenyReason] = useState("用户不同意工具调用");
   const [pendingAsk, setPendingAsk] = useState<AskRequest | null>(null);
   const [askCustomText, setAskCustomText] = useState("");
   const [askSelectedOption, setAskSelectedOption] = useState<string | null>(null);
@@ -614,7 +614,7 @@ export function useWebSocket() {
       }
       else if (msg.type === "confirm_request") {
         if (msg.request_id) {
-          setDenyReason("此操作可能带来安全风险");
+          setDenyReason("用户不同意工具调用");
           setPendingConfirm({
             request_id: msg.request_id,
             content: typeof msg.content === "string" ? msg.content : "运行命令?",

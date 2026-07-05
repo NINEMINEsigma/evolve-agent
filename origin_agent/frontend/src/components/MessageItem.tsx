@@ -22,8 +22,15 @@ function hueFromString(str: string): number {
   return hashString(str) % 360;
 }
 
+const CHINESE_NICKNAME_PREFIXES = new Set(["小", "阿", "老", "大"]);
+
 function getInitials(name: string): string {
-  return name.slice(0, 1).toUpperCase();
+  if (!name) return "";
+  const first = name.slice(0, 1);
+  if (name.length >= 2 && CHINESE_NICKNAME_PREFIXES.has(first)) {
+    return name.slice(-1).toUpperCase();
+  }
+  return first.toUpperCase();
 }
 
 function getAvatarStyle(name?: string): React.CSSProperties {
