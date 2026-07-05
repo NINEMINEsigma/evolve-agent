@@ -112,6 +112,7 @@ class LLMClient:
         messages: list[dict[str, Any]],
         tools: Optional[list[dict[str, Any]]] = None,
         stream: bool = False,
+        response_format: Optional[dict[str, str]] = None,
     ) -> dict[str, Any]:
         kwargs: dict[str, Any] = {
             "model": self._model,
@@ -127,12 +128,15 @@ class LLMClient:
             kwargs["tools"] = tools
         if self._reasoning_effort:
             kwargs["reasoning_effort"] = self._reasoning_effort
+        if response_format:
+            kwargs["response_format"] = response_format
         return kwargs
 
     async def chat(
         self,
         messages: list[dict[str, Any]],
         tools: Optional[list[dict[str, Any]]] = None,
+        response_format: Optional[dict[str, str]] = None,
     ) -> LLMResponse:
         """发送聊天请求，返回结构化响应。
 
@@ -145,7 +149,10 @@ class LLMClient:
 
         返回包含 assistant 内容和工具调用的 :class:`LLMResponse`。
         """
-        kwargs = self._build_kwargs(messages, tools, stream=False)
+        kwargs = self._build_kwargs(
+            messages, tools, stream=False,
+            response_format=response_format,
+        )
 
         for attempt in range(LLM_RETRY_COUNT):
             try:
@@ -188,6 +195,7 @@ class LLMClient:
         self,
         messages: list[dict[str, Any]],
         tools: Optional[list[dict[str, Any]]] = None,
+        response_format: Optional[dict[str, str]] = None,
     ) -> AsyncIterator[StreamChunk]:
         """发送流式聊天请求，逐块返回增量内容。
 
@@ -213,7 +221,10 @@ class LLMClient:
                 else _build_resume_messages(original_messages, state)
             )
             try:
-                kwargs = self._build_kwargs(resume_messages, tools, stream=True)
+                kwargs = self._build_kwargs(
+                    resume_messages, tools, stream=True,
+                    response_format=response_format,
+                )
                 async with await self._client.chat.completions.create(**kwargs) as stream:
                     async for chunk in self._consume_one_stream(stream, state):
                         yield chunk

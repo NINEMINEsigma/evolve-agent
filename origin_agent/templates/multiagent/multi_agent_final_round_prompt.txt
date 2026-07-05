@@ -1,0 +1,1 @@
+[System Notice] This is the final round of the current conversation. You MUST NOT request any other agent to respond. Set `response_characters` to an empty array `[]` in your JSON reply.

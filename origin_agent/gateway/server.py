@@ -33,6 +33,7 @@ from entry.parent_agent_loop import IncompatibleHistoryError
 
 if TYPE_CHECKING:
     from entry.parent_agent_loop import ParentAgentLoop
+    from entry.base_agent_loop import BaseAgentLoop
     from entry.agent_sink import FrontendSink
     from gateway.session_manager import SessionManager
 
@@ -46,7 +47,7 @@ def _get_sm() -> SessionManager|None:
 
 
 def _get_loop(session_id: str):
-    """返回指定 session 的 ParentAgentLoop。"""
+    """返回指定 session 的 BaseAgentLoop（可能是 ParentAgentLoop 或 MultiAgentLoop）。"""
     sm = _get_sm()
     return sm.get_loop(session_id) if sm else None
 
@@ -62,8 +63,8 @@ def _get_ws(session_id: str):
 _agentspace_path: Path | None = None
 
 
-def set_agent_loop(loop: ParentAgentLoop) -> None:
-    """将 ParentAgentLoop 注入 Application 的 session_manager。
+def set_agent_loop(loop: BaseAgentLoop) -> None:
+    """将 BaseAgentLoop 注入 Application 的 session_manager。
 
     在启动流程中调用一次，之后所有 session 由 SessionManager 管理。
     """

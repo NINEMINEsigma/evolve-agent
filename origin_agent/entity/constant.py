@@ -202,6 +202,17 @@ SUBAGENT_NAME_PATTERN: str = r"^[a-zA-Z0-9\u4e00-\u9fa5_-]+$"
 # 子 Agent 最大同时活跃数量 — 超出上限的子 Agent 进入等待队列
 SUBAGENT_MAX_ACTIVE: int = 50
 
+
+# ============================================================================
+# 多 Agent 协作
+# ============================================================================
+
+# 多 Agent 级联对话最大递归深度 — 防止循环引用
+MULTI_AGENT_MAX_CASCADE_DEPTH: int = 10
+
+# 多 Agent 模式下 JSON 格式回复解析失败最大重试次数
+MULTI_AGENT_JSON_RETRIES: int = 2
+
 # DEPRECATED: SUBAGENT_READONLY_WHITELIST is no longer used.
 # Subagents now inherit all non-multiagent tools automatically.
 # Kept commented for reference.

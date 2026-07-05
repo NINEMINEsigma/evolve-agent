@@ -14,6 +14,7 @@ from gateway.chat import SessionManager as ChatSessionManager
 
 if TYPE_CHECKING:
     from entry.parent_agent_loop import ParentAgentLoop
+    from entry.base_agent_loop import BaseAgentLoop
 
 logger = logging.getLogger(__name__)
 
@@ -38,7 +39,7 @@ class SessionManager:
 
         self._app = Application.current()
         self._chat_sm = ChatSessionManager(store_path)
-        self._loops: dict[str, ParentAgentLoop] = {}
+        self._loops: dict[str, BaseAgentLoop] = {}
         self._store_path: str | None = store_path
 
     # -- 委托给底层 ChatSessionManager 的方法 --
@@ -76,8 +77,8 @@ class SessionManager:
         """未显式定义的方法委托给底层的 ChatSessionManager。"""
         return getattr(self._chat_sm, name)
 
-    def get_all_loops(self) -> dict[str, ParentAgentLoop]:
-        """返回所有活跃 loop 的 (session_id → ParentAgentLoop) 快照。"""
+    def get_all_loops(self) -> dict[str, BaseAgentLoop]:
+        """返回所有活跃 loop 的 (session_id → BaseAgentLoop) 快照。"""
         return dict(self._loops)
 
     # -- ParentAgentLoop 管理 --
@@ -87,16 +88,16 @@ class SessionManager:
         session_id: str,
         frontend_sink,
         history_store_dir: Path | None = None,
-    ) -> ParentAgentLoop:
-        """为 session 创建 ParentAgentLoop 实例。
+    ) -> BaseAgentLoop:
+        """为 session 创建或复用 loop 实例。
 
-        若已有活跃的 loop 实例则直接返回，避免 WebSocket
-        重连时丢失运行时状态。
+        若已有活跃的 loop 实例则直接返回（WebSocket 重连场景，
+        可能是 ParentAgentLoop 或 MultiAgentLoop），否则创建新的 ParentAgentLoop。
         """
-        # 已有 loop 则复用
+        # 已有 loop 则复用（可能是 MultiAgentLoop，因 replace_loop 已替换）
         existing = self._loops.get(session_id)
         if existing is not None:
-            logger.debug("Reusing existing ParentAgentLoop for session=%s", session_id)
+            logger.debug("Reusing existing loop for session=%s: %s", session_id, type(existing).__name__)
             return existing
 
         from entry.parent_agent_loop import ParentAgentLoop
@@ -116,8 +117,8 @@ class SessionManager:
 
         return loop
 
-    def get_loop(self, session_id: str) -> ParentAgentLoop | None:
-        """返回指定 session 的 ParentAgentLoop。"""
+    def get_loop(self, session_id: str) -> BaseAgentLoop | None:
+        """返回指定 session 的 BaseAgentLoop。"""
         return self._loops.get(session_id)
 
     def terminate_session(self, session_id: str) -> None:
@@ -128,6 +129,38 @@ class SessionManager:
             if self._app.cron_router is not None:
                 self._app.cron_router.unregister(session_id)
             logger.info("Session terminated: %s", session_id)
+
+    def replace_loop(self, session_id: str, new_loop: BaseAgentLoop) -> None:
+        """将 session 的当前 loop 替换为 new_loop（不可逆）。
+
+        旧 loop 被 interrupt 并从映射中移除；新 loop 继承 session_id
+        并重新注册到 CronRouter（如有需要）。
+
+        若 session_id 不在当前映射中，则直接注册新 loop。
+        """
+        old_loop = self._loops.pop(session_id, None)
+        if old_loop is not None:
+            old_loop.interrupt()
+            if self._app.cron_router is not None:
+                self._app.cron_router.unregister(session_id)
+            logger.info(
+                "Loop replaced for session=%s: %s → %s",
+                session_id,
+                type(old_loop).__name__,
+                type(new_loop).__name__,
+            )
+        else:
+            logger.info(
+                "Registering new loop for session=%s: %s",
+                session_id,
+                type(new_loop).__name__,
+            )
+
+        new_loop.session_id = session_id
+        self._loops[session_id] = new_loop
+
+        if self._app.cron_router is not None:
+            self._app.cron_router.register(session_id, new_loop)
 
     def rotate_session(self, old_sid: str, new_sid: str) -> None:
         """旋转 session：将 loop 从旧 ID 迁移到新 ID。"""
