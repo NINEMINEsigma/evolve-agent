@@ -44,6 +44,11 @@ async def _handle_enter_multi_agent(args: dict[str, Any]) -> dict:
     else:
         return tool_error(f"loop is not {ParentAgentLoop.__name__}")
 
+    # 将主 Agent 自身也加入参与者列表（它调用工具后自己也需要参与对话）
+    main_agent_name = parent_loop.current_character_agent
+    if main_agent_name not in agents:
+        agents.insert(0, main_agent_name)
+
     # 停止所有子 Agent
     if app.subagent_orchestrator is not None:
         await app.subagent_orchestrator.shutdown_parent(session_id)
@@ -87,6 +92,9 @@ async def _handle_enter_multi_agent(args: dict[str, Any]) -> dict:
     )
 
     app.session_manager.replace_loop(session_id, multi_loop)
+
+    # 切换后立即让主 Agent 发言一次，弥补 loop 切换导致的中途静默
+    await multi_loop._cascade([main_agent_name])
 
     return tool_result(
         success=True,

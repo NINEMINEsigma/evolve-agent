@@ -769,7 +769,11 @@ export function useWebSocket() {
     }
   }, []);
 
-  const send = useCallback((targetSessions: string[]) => {
+  const send = useCallback((
+    targetSessions: string[],
+    visible_characters?: string[],
+    response_characters?: string[],
+  ) => {
     const isArchived = sessions.find((s) => s.id === sessionId)?.status === "archived";
     if (!wsRef.current || waiting || wsRef.current.readyState !== WebSocket.OPEN || isArchived) return;
 
@@ -779,7 +783,13 @@ export function useWebSocket() {
 
     const content: MessageContent = blocks.length === 1 && blocks[0].type === "text" ? blocks[0].text : blocks;
 
-    wsRef.current.send(JSON.stringify({ type: "user_message", content, target_sessions: targetSessions }));
+    wsRef.current.send(JSON.stringify({
+      type: "user_message",
+      content,
+      target_sessions: targetSessions,
+      ...(visible_characters ? { visible_characters } : {}),
+      ...(response_characters ? { response_characters } : {}),
+    }));
     setInput("");
     setPendingImages([]);
     setWaiting(true);

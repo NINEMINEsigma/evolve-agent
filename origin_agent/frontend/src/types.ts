@@ -49,6 +49,8 @@ export interface WSMessage {
   reasoning_delta?: string;
   finish_reason?: string;
   target_sessions?: string[];
+  visible_characters?: string[];   // 多 Agent 模式：可见角色列表
+  response_characters?: string[];  // 多 Agent 模式：需响应角色列表
   character_name?: string;
   index?: number;
 }

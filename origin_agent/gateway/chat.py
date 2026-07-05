@@ -73,6 +73,9 @@ class Message(BaseModel):
     reasoning_delta: str | None = None  # STREAM_DELTA：reasoning 增量
     finish_reason: str | None = None    # STREAM_DONE：结束原因或错误
     target_sessions: Optional[list[str]] = None  # USER_MESSAGE：目标会话列表
+    # 多 Agent 模式：用户消息的可见性和响应指定
+    visible_characters: Optional[list[str]] = None   # USER_MESSAGE：可见角色列表
+    response_characters: Optional[list[str]] = None  # USER_MESSAGE：需响应角色列表
     # tool_call / tool_result 相关字段
     tool_call_id: str | None = None  # TOOL_CALL / TOOL_RESULT：工具调用 ID
     character_name: str | None = None  # 消息发送者角色名

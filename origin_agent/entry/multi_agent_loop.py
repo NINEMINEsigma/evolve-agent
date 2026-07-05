@@ -98,29 +98,111 @@ class MultiAgentLoop(BaseAgentLoop):
 
     # -- 公开接口 ----------------------------------------------------------
 
-    async def process_message(self, user_message: str) -> str:
+    # TODO: 多agent模式下每个agent的上下文其实都不一样, 
+    # 当第一个到达的时候就可以触发会话压缩和会话旋转了
+
+    @property
+    def current_character_agent(self) -> str:
+        """返回当前 loop 的代表角色名。多 Agent 模式下返回首个 Agent。"""
+        return self._agent_names[0] if self._agent_names else USER_CHARACTER_NAME
+
+    def pop_session_rotated(self) -> str | None:
+        """多 Agent 模式下不支持会话旋转，始终返回 None。"""
+        return None
+
+    def get_token_usage(self) -> int:
+        """多 Agent 模式暂不支持 token 统计。"""
+        return 0
+
+    def get_context_tokens(self) -> int:
+        """多 Agent 模式暂不支持上下文 token 统计。"""
+        return 0
+
+    def is_processing(self) -> bool:
+        """多 Agent 模式下始终返回 False（无长时间 tool loop）。"""
+        return False
+
+    def get_session_messages(self) -> list[dict]:
+        """返回 History 中所有消息的字典列表（供前端展示）。"""
+        result: list[dict] = []
+        for msg in self._history.messages:
+            entry: dict = {
+                "role": msg.role.value,
+                "content": str(msg.content) if not isinstance(msg.content, list) else "",
+            }
+            if hasattr(msg, "character_name"):
+                entry["character_name"] = getattr(msg, "character_name")
+            if hasattr(msg, "visible_characters") and getattr(msg, "visible_characters"):
+                entry["visible_characters"] = getattr(msg, "visible_characters")
+            result.append(entry)
+        return result
+
+    def clear_session(self) -> None:
+        """清空 History。"""
+        self._history.messages.clear()
+
+    def delete_session_messages(self, count: int = 1) -> dict:
+        """删除最近 N 条消息。"""
+        removed = min(count, len(self._history.messages))
+        for _ in range(removed):
+            self._history.messages.pop()
+        return {"deleted": removed, "session_id": self.session_id, "remaining_count": len(self._history.messages)}
+
+    def get_tool_resources(self) -> dict:
+        """多 Agent 模式暂不支持工具资源恢复。"""
+        # TODO: 需要补充
+        return {"task_progress": {}, "clipboard_display": {}}
+
+    async def terminate_session(self) -> dict:
+        """终结当前会话。"""
+        return {"terminated": True, "session_id": self.session_id}
+
+    async def merge_sessions(self, sources: list[str]) -> dict:
+        """多 Agent 模式暂不支持会话合并。"""
+        # TODO: 需要补充
+        return {"error": "merge not supported in multi-agent mode", "merged": False}
+
+    async def process_message(
+        self,
+        user_message: str,
+        *,
+        skip_append: bool = False,
+        character_name: str = USER_CHARACTER_NAME,
+        visible_characters: list[str] | None = None,
+        response_characters: list[str] | None = None,
+    ) -> str:
         """处理用户消息入口。
 
         每轮用户消息触发一次级联对话：
-        1. 追加用户消息到 History
-        2. 以所有 Agent 为初始响应者启动级联
+        1. 追加用户消息到 History（skip_append 为 True 时跳过）
+        2. 以指定的 response_characters 为初始响应者启动级联
+           - 若为 None，默认所有 Agent 响应
         3. 收集所有回复，拼接最终展示文本
+
+        visible_characters / response_characters 由用户从前端指定；
+        未指定时默认对全体可见、全体响应。
         """
         if self.is_interrupted():
             return ""
 
-        # 追加用户消息（对所有 Agent 可见，所有 Agent 应响应）
-        self._history.add_message(
-            CharacterConversationMessage.from_text(
-                role=Role.USER,
-                character_name=USER_CHARACTER_NAME,
-                text=user_message,
-                visible_characters=self._agent_names,
-            )
-        )
+        # 用户消息的可见角色
+        _visible = visible_characters if visible_characters else self._agent_names
+        # 初始响应角色
+        _response = response_characters if response_characters else self._agent_names
 
-        # 所有 Agent 作为初始响应者
-        await self._cascade(self._agent_names)
+        # 追加用户消息
+        if not skip_append:
+            self._history.add_message(
+                CharacterConversationMessage.from_text(
+                    role=Role.USER,
+                    character_name=USER_CHARACTER_NAME,
+                    text=user_message,
+                    visible_characters=_visible,
+                )
+            )
+
+        # 以用户指定的角色（或全体）作为初始响应者
+        await self._cascade(_response)
 
         # 收集本轮所有 Agent 的回复（用户消息之后的消息）
         responses: list[str] = []

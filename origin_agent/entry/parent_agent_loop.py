@@ -256,6 +256,7 @@ class ParentAgentLoop(BasePrivateChatAgentLoop):
         *,
         skip_append: bool = False,
         character_name: str = USER_CHARACTER_NAME,
+        **kwargs,
     ) -> str:
         """处理一条用户消息，返回助手的回复。
 

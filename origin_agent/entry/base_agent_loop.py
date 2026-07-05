@@ -213,6 +213,23 @@ class BaseAgentLoop(ABC):
         """
         ...
 
+    @abstractmethod
+    async def process_message(
+        self,
+        user_message: str,
+        *,
+        skip_append: bool = False,
+        character_name: str = USER_CHARACTER_NAME,
+        **kwargs
+    ) -> str:
+        """处理一条用户消息，返回助手的回复文本。
+
+        由 gateway 在收到来自前端的 user_message 后调用。
+        各具体 loop 自行实现消息处理逻辑（ParentAgentLoop 的 tool loop、
+        MultiAgentLoop 的级联对话等）。
+        """
+        ...
+
     # -- 收件箱处理 -------------------------------------------------------
 
     def schedule_inbox_processing(self) -> None:

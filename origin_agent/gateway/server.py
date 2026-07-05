@@ -1273,7 +1273,10 @@ async def ws_chat(ws: WebSocket) -> None:
                             )
                         try:
                             reply = await loop.process_message(
-                                main_content, skip_append=True
+                                main_content,
+                                skip_append=True,
+                                visible_characters=msg.visible_characters,
+                                response_characters=msg.response_characters,
                             )
                         except Exception as exc:
                             logger.exception("Agent loop error for session=%s", sid)
