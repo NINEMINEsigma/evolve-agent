@@ -16,6 +16,8 @@ History_Version = "v1"
 
 USER_CHARACTER_NAME: str = "end-user"
 MAIN_AGENT_CHARACTER_NAME: str = "main-agent"
+# 使用时用于在列表字段指代所有agents
+ALL_AGENTS_CHARACTER_REF_NAME: str = "all-agents"
 
 
 # ============================================================================

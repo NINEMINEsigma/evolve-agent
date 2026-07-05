@@ -169,6 +169,7 @@ class CharacterConversationMessage(CharacterMessage):
     # TODO: 可能需要运行时自动探查
     reasoning_field_name: str = Field("reasoning_content", description="The field name of the reasoning")
     visible_characters: list[str]|None = Field(None, description="The visible characters of the message")
+    response_characters: list[str]|None = Field(None, description="The characters needed to response of the message")
     # "tool_calls": [{"id": "list_uploads:0", "type": "function", "function": {"name": "list_uploads", "arguments": "{\"n\": 10}"}}]
     tool_calls: list[ToolCall]|None = Field(None, description="The tool calls of the message")
     message_suffix: str|None = Field(None, description="The suffix of the message, like hook messages")
