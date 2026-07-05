@@ -55,6 +55,7 @@
   align-items: center;
   gap: 8px;
   max-width: 0;
+  min-width: 0;
   opacity: 0;
   padding-left: 0;
   padding-right: 0;
