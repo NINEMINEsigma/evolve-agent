@@ -100,6 +100,7 @@ class MultiAgentLoop(BaseAgentLoop):
 
     # TODO: 多agent模式下每个agent的上下文其实都不一样, 
     # 当第一个到达的时候就可以触发会话压缩和会话旋转了
+    # TODO: 上下文超限检测和会话旋转（multi loop 当前不触发旋转）
 
     @property
     def current_character_agent(self) -> str:
@@ -216,6 +217,24 @@ class MultiAgentLoop(BaseAgentLoop):
 
     # -- 级联调度 ----------------------------------------------------------
 
+    def _get_available_agents(self, characters: list[str]) -> list[str]:
+        """从 SubagentStore 过滤出还有 profile 的 agent。
+
+        若某个 agent 的 subagent profile 已被其他会话删除，则将其从
+        response_characters 中移除，后续不再接受其响应。历史消息不受影响。
+        """
+        from component.mutliagenttools._store import SubagentStore
+        from system.context import get_runtime_context
+        store = SubagentStore(get_runtime_context().agentspace)
+        available = [c for c in characters if store.get(c) is not None]
+        dropped = set(characters) - set(available)
+        if dropped:
+            logger.warning(
+                "Subagent profiles dropped: %s; removing from response_characters (session=%s)",
+                dropped, self.session_id,
+            )
+        return available
+
     async def _cascade(
         self,
         response_characters: list[str],
@@ -231,6 +250,9 @@ class MultiAgentLoop(BaseAgentLoop):
         - 注入 final-round 提示词，告知 Agent 不得指定 response_characters
         - 代码层面强制忽略 Agent 输出的 response_characters
         """
+        # 运行时防御：过滤已删除 subagent profile 的角色
+        response_characters = self._get_available_agents(response_characters)
+
         if not response_characters or depth >= MULTI_AGENT_MAX_CASCADE_DEPTH:
             if depth >= MULTI_AGENT_MAX_CASCADE_DEPTH:
                 logger.warning(

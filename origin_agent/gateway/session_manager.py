@@ -11,10 +11,13 @@ from pathlib import Path
 from typing import Any, TYPE_CHECKING
 
 from gateway.chat import SessionManager as ChatSessionManager
+from entity.puretype import Loop, LoopMeta
+from system.session_store import SessionStore
 
 if TYPE_CHECKING:
     from entry.parent_agent_loop import ParentAgentLoop
     from entry.base_agent_loop import BaseAgentLoop
+    from entry.multi_agent_loop import MultiAgentLoop
 
 logger = logging.getLogger(__name__)
 
@@ -56,9 +59,12 @@ class SessionManager:
         return self._chat_sm.get_all()
 
     def create_with_context(
-        self, context: str, parent_sid: str | None = None, role: str = "user"
+        self, context: str, parent_sid: str | None = None, role: str = "user",
+        loop_meta: LoopMeta | None = None,
     ) -> str:
-        return self._chat_sm.create_with_context(context, parent_sid=parent_sid, role=role)
+        return self._chat_sm.create_with_context(
+            context, parent_sid=parent_sid, role=role, loop_meta=loop_meta,
+        )
 
     def archive(self, session_id: str, continuation_sid: str | None = None) -> None:
         self._chat_sm.archive(session_id, continuation_sid=continuation_sid)
@@ -92,7 +98,8 @@ class SessionManager:
         """为 session 创建或复用 loop 实例。
 
         若已有活跃的 loop 实例则直接返回（WebSocket 重连场景，
-        可能是 ParentAgentLoop 或 MultiAgentLoop），否则创建新的 ParentAgentLoop。
+        可能是 ParentAgentLoop 或 MultiAgentLoop），否则根据索引
+        中的 loop_type 创建对应的 loop 实例。
         """
         # 已有 loop 则复用（可能是 MultiAgentLoop，因 replace_loop 已替换）
         existing = self._loops.get(session_id)
@@ -100,6 +107,12 @@ class SessionManager:
             logger.debug("Reusing existing loop for session=%s: %s", session_id, type(existing).__name__)
             return existing
 
+        # 读取索引 loop_type，若为 multi 则创建 MultiAgentLoop
+        info = self._chat_sm.get(session_id)
+        if info and info.get("loop_type") == Loop.multi.value:
+            return self._create_multi_loop(session_id, frontend_sink, history_store_dir)
+
+        # 默认创建 ParentAgentLoop
         from entry.parent_agent_loop import ParentAgentLoop
 
         loop = ParentAgentLoop(
@@ -116,6 +129,110 @@ class SessionManager:
             self._app.cron_router.register(session_id, loop)
 
         return loop
+
+    def _create_multi_loop(
+        self,
+        session_id: str,
+        frontend_sink,
+        history_store_dir: Path | None = None,
+    ) -> BaseAgentLoop:
+        """根据索引中的 LoopMeta 重建 MultiAgentLoop。"""
+        from system.context import get_runtime_context
+        from component.mutliagenttools._store import SubagentStore
+        from component.llm import LLMClient
+        from entry.multi_agent_loop import MultiAgentLoop, AgentProfile
+        from system.templates import get_templates_dir
+        from abstract.tools.registry import registry as tool_registry
+        from entity.puretype import ToolAvailability
+
+        info = self._chat_sm.get(session_id)
+        agents_names: list[str] = (info.get("agents") or []) if info else []
+
+        # 从 SubagentStore 读取每个 agent 的 profile
+        store = SubagentStore(get_runtime_context().agentspace)
+        agent_profiles: dict[str, AgentProfile] = {}
+        parent_ctx = get_runtime_context()
+
+        for name in agents_names:
+            profile = store.get(name)
+            if profile is None:
+                logger.warning(
+                    "Subagent profile '%s' not found, skipping (session=%s)",
+                    name, session_id,
+                )
+                continue
+            # 用 profile 字段覆盖 parent_ctx 的 LLM 配置，构造 LLMClient
+            ctx = parent_ctx.model_copy(update={
+                "llm_api_key": profile.get("api_key") or parent_ctx.llm_api_key,
+                "llm_base_url": profile.get("base_url", parent_ctx.llm_base_url),
+                "llm_model": profile.get("model", parent_ctx.llm_model),
+                "llm_max_output_tokens": profile.get("max_output_tokens", parent_ctx.llm_max_output_tokens),
+                "llm_max_context_tokens": profile.get("max_context_tokens", parent_ctx.llm_max_context_tokens),
+                "llm_temperature": parent_ctx.llm_temperature,
+            })
+            llm_client = LLMClient(ctx)
+
+            # 加载多 Agent 系统提示词模板
+            template_path = get_templates_dir() / "multiagent" / "multi_agent_system_prompt.txt"
+            with open(template_path, "r", encoding="utf-8") as f:
+                system_prompt_template = f.read()
+            system_prompt = system_prompt_template.replace("{{CHARACTER_NAME}}", name)
+
+            # 工具集：排除 multiagent 工具集
+            tools = tool_registry.get_definitions_for_availability(
+                scope=ToolAvailability.MAIN,
+            )
+            multiagent_tool_names: set[str] = set(
+                tool_registry.get_tool_names_for_toolset("multiagent"),
+            )
+            tools = [t for t in tools if t.get("function", {}).get("name") not in multiagent_tool_names]
+
+            agent_profiles[name] = AgentProfile(
+                character_name=name,
+                system_prompt=system_prompt,
+                tools=tools,
+                llm_client=llm_client,
+            )
+
+        if not agent_profiles:
+            logger.error(
+                "No valid agent profiles found for multi session=%s; falling back to ParentAgentLoop",
+                session_id,
+            )
+            from entry.parent_agent_loop import ParentAgentLoop
+            loop = ParentAgentLoop(
+                app=self._app,
+                session_id=session_id,
+                frontend_sink=frontend_sink,
+                history_store_dir=history_store_dir,
+            )
+            loop.set_session_manager(self)
+            self._loops[session_id] = loop
+            if self._app.cron_router is not None:
+                self._app.cron_router.register(session_id, loop)
+            return loop
+
+        # 读取 history.es
+        ss = SessionStore(history_store_dir) if history_store_dir else None
+        history = None
+        if ss is not None:
+            history = ss.read_history(session_id)
+
+        from entity.messages import History
+        if history is None:
+            history = History(messages=[])
+
+        multi_loop: MultiAgentLoop = MultiAgentLoop(
+            app=self._app,
+            session_id=session_id,
+            history=history,
+            agents=agent_profiles,
+            sink=frontend_sink,
+        )
+        self._loops[session_id] = multi_loop
+        if self._app.cron_router is not None:
+            self._app.cron_router.register(session_id, multi_loop)
+        return multi_loop
 
     def get_loop(self, session_id: str) -> BaseAgentLoop | None:
         """返回指定 session 的 BaseAgentLoop。"""
@@ -134,7 +251,7 @@ class SessionManager:
         """将 session 的当前 loop 替换为 new_loop（不可逆）。
 
         旧 loop 被 interrupt 并从映射中移除；新 loop 继承 session_id
-        并重新注册到 CronRouter（如有需要）。
+        并重新注册到 CronRouter（如有需要）。同时更新索引中的 LoopMeta。
 
         若 session_id 不在当前映射中，则直接注册新 loop。
         """
@@ -161,6 +278,14 @@ class SessionManager:
 
         if self._app.cron_router is not None:
             self._app.cron_router.register(session_id, new_loop)
+
+        # 更新索引中的 LoopMeta
+        from entry.multi_agent_loop import MultiAgentLoop
+        if isinstance(new_loop, MultiAgentLoop):
+            agents = list(new_loop._agents.keys())
+            self._chat_sm.update_loop_type(session_id, Loop.multi.value, agents)
+        else:
+            self._chat_sm.update_loop_type(session_id, Loop.parent.value)
 
     def rotate_session(self, old_sid: str, new_sid: str) -> None:
         """旋转 session：将 loop 从旧 ID 迁移到新 ID。"""

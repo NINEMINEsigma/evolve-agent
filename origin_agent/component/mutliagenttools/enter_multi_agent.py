@@ -49,6 +49,17 @@ async def _handle_enter_multi_agent(args: dict[str, Any]) -> dict:
     if main_agent_name not in agents:
         agents.insert(0, main_agent_name)
 
+    # 前置校验：除主 Agent 外，所有参与者必须有对应的 subagent profile
+    from component.mutliagenttools._store import SubagentStore
+    from system.context import get_runtime_context
+    store = SubagentStore(get_runtime_context().agentspace)
+    missing = [name for name in agents if name != main_agent_name and store.get(name) is None]
+    if missing:
+        return tool_error(
+            f"Subagent profiles not found: {', '.join(missing)}. "
+            "Register them first using register_subagent or register_subagent_from_parent."
+        )
+
     # 停止所有子 Agent
     if app.subagent_orchestrator is not None:
         await app.subagent_orchestrator.shutdown_parent(session_id)

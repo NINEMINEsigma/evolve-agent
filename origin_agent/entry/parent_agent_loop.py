@@ -1091,7 +1091,21 @@ class ParentAgentLoop(BasePrivateChatAgentLoop):
 
         if rotate:
             context: str = self._build_inherited_context(old_sid, summary)
-            new_sid: str = sm.create_with_context(context, parent_sid=old_sid, role=Role.USER)
+
+            # 读取当前 session 的 LoopMeta 供旋转继承
+            loop_meta = None
+            if self._session_manager is not None:
+                info = self._session_manager.get(old_sid)
+                if info:
+                    from entity.puretype import LoopMeta as _LoopMeta, Loop as _Loop
+                    loop_type = info.get("loop_type", "parent")
+                    agents = info.get("agents")
+                    loop_meta = _LoopMeta(loopType=_Loop(loop_type), agents=agents)
+
+            new_sid: str = sm.create_with_context(
+                context, parent_sid=old_sid, role=Role.USER,
+                loop_meta=loop_meta,
+            )
             sm.archive(old_sid, continuation_sid=new_sid)
 
             # 新 session 以 summary 作为 user 消息开始

@@ -18,6 +18,7 @@ from typing import Any, Dict, List, Optional, Union
 from pydantic import BaseModel
 
 from system.atomic_io import write_text_atomic
+from entity.puretype import LoopMeta
 
 logger = logging.getLogger(__name__)
 
@@ -274,7 +275,7 @@ class SessionManager:
 
     @staticmethod
     def _upgrade_index_entries(entries: list[dict]) -> list[dict]:
-        """将旧格式索引中的 parent 升级为 parents 数组，并补齐 tags。"""
+        """将旧格式索引中的 parent 升级为 parents 数组，并补齐 tags / loop_type / agents。"""
         for entry in entries:
             if "parent" in entry and "parents" not in entry:
                 p = entry.pop("parent")
@@ -283,6 +284,10 @@ class SessionManager:
                 entry["parents"] = []
             if "tags" not in entry:
                 entry["tags"] = []
+            if "loop_type" not in entry:
+                entry["loop_type"] = "parent"
+            if "agents" not in entry:
+                entry["agents"] = None
         return entries
 
     def _write_index(self, entries: list[dict]) -> None:
@@ -344,6 +349,8 @@ class SessionManager:
                     "pinned": entry.get("pinned", False),
                     "last_activity_at": entry.get("last_activity_at", entry.get("created_at", 0)),
                     "tags": entry.get("tags", []),
+                    "loop_type": entry.get("loop_type", "parent"),
+                    "agents": entry.get("agents"),
                 }
         if entries:
             logger.info("Loaded %d sessions from disk", len(entries))
@@ -405,7 +412,7 @@ class SessionManager:
             "status": "active", "created_at": now, "title": "",
             "parents": effective_parents, "continuation": None,
             "pinned": False, "last_activity_at": now,
-            "tags": [],
+            "tags": [], "loop_type": "parent", "agents": None,
         }
         # 持久化到磁盘
         if self._store_dir:
@@ -415,7 +422,7 @@ class SessionManager:
                     "id": sid, "created_at": now, "status": "active", "title": "",
                     "parents": effective_parents, "continuation": None,
                     "pinned": False, "last_activity_at": now,
-                    "tags": [],
+                    "tags": [], "loop_type": "parent", "agents": None,
                 })
                 self._write_index(entries)
             (self._store_dir / sid).mkdir(parents=True, exist_ok=True)
@@ -449,9 +456,13 @@ class SessionManager:
         parent_sid: str | None = None,
         parents: list[str] | None = None,
         role: str = "system",
+        loop_meta: LoopMeta | None = None,
     ) -> str:
         """创建新会话并以指定角色的消息作为初始内容。支持多父合并。"""
         new_sid: str = self.create(parent_sid=parent_sid, parents=parents)
+        # 如果提供了 loop_meta，更新新 session 的 loop_type 和 agents
+        if loop_meta is not None:
+            self.update_loop_type(new_sid, loop_meta.loopType.value, loop_meta.agents)
         # 写入初始消息到 JSONL
         sdir: Path | None = self._store_dir / new_sid if self._store_dir else None
         if sdir:
@@ -482,6 +493,21 @@ class SessionManager:
                     self._write_index(entries)
         logger.info("Session created | new=%s parents=%s role=%s", new_sid, parents or [parent_sid], role)
         return new_sid
+
+    def update_loop_type(self, sid: str, loop_type: str, agents: list[str] | None = None) -> None:
+        """更新 session 的 loop 类型和 agents 列表，同步写入内存和磁盘索引。"""
+        if sid in self._sessions:
+            self._sessions[sid]["loop_type"] = loop_type
+            self._sessions[sid]["agents"] = agents
+        if self._store_dir:
+            with self._index_lock:
+                entries: list[dict] = self._read_index()
+                for e in entries:
+                    if e.get("id") == sid:
+                        e["loop_type"] = loop_type
+                        e["agents"] = agents
+                        break
+                self._write_index(entries)
 
     def exists(self, sid: str) -> bool:
         return sid in self._sessions
@@ -584,6 +610,8 @@ class SessionManager:
             "pinned": info.get("pinned", False),
             "last_activity_at": info.get("last_activity_at", info.get("created_at", 0)),
             "tags": info.get("tags", []),
+            "loop_type": info.get("loop_type", "parent"),
+            "agents": info.get("agents"),
         }
 
     def cleanup_expired(self) -> int:
@@ -610,6 +638,8 @@ class SessionManager:
                 "pinned": info.get("pinned", False),
                 "last_activity_at": info.get("last_activity_at", info.get("created_at", 0)),
                 "tags": info.get("tags", []),
+                "loop_type": info.get("loop_type", "parent"),
+                "agents": info.get("agents"),
             })
         items.sort(key=lambda s: (-int(s["pinned"]), -s["last_activity_at"]))
         return items
