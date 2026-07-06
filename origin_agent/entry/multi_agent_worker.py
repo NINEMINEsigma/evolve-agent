@@ -94,7 +94,7 @@ class MultiAgentWorker:
         1. 插入 system_prompt 到消息列表头部
         2. 循环: LLM 调用 → 检查 tool_calls → 执行工具 → 追加结果
         3. 当 LLM 返回纯文本时 → 解析 JSON → 推送干净内容到前端 → 返回 WorkerResult
-        4. JSON 解析失败时重试（最多 2 次）
+        4. JSON 解析失败或返回空内容时重试（最多 MULTI_AGENT_JSON_RETRIES 次）
         """
         # 在消息列表头部插入 system prompt
         full_messages = [
@@ -102,9 +102,17 @@ class MultiAgentWorker:
             *self._messages,
         ]
 
+        # 本地重试计数器：空 content / JSON 解析失败共享同一上限
+        retries = 0
+
         for turn in range(MAX_TOOL_TURNS):
             if self._loop.is_interrupted():
                 return await self._error_result("Interrupted")
+
+            logger.info(
+                "MultiAgentWorker turn start | session=%s character=%s turn=%d messages_len=%d retries=%d",
+                self._loop.session_id, self.character_name, turn, len(full_messages), retries,
+            )
 
             # 调用 LLM（流式 + JSON 模式）
             response = await self._call_llm(full_messages)
@@ -134,11 +142,46 @@ class MultiAgentWorker:
 
             # 纯文本响应 → 尝试解析 JSON
             text = response.get("content", "")
-            if not text:
-                return await self._error_result("Empty response")
+            logger.info(
+                "MultiAgentWorker raw text | session=%s character=%s turn=%d text_len=%d text=%r",
+                self._loop.session_id, self.character_name, turn, len(text), text,
+            )
+
+            # 空或全空白 content：可能是 DeepSeek JSON Output 的已知问题，进入重试
+            if not text or not text.strip():
+                logger.warning(
+                    "MultiAgentWorker empty/blank response | session=%s character=%s turn=%d retries=%d max=%d",
+                    self._loop.session_id, self.character_name, turn, retries, MULTI_AGENT_JSON_RETRIES,
+                )
+                if retries < MULTI_AGENT_JSON_RETRIES:
+                    retries += 1
+                    logger.warning(
+                        "Empty/blank response for agent=%s, retrying (%d/%d)",
+                        self.character_name, retries, MULTI_AGENT_JSON_RETRIES,
+                    )
+                    full_messages.append({"role": "assistant", "content": text})
+                    full_messages.append(
+                        {
+                            "role": "user",
+                            "content": (
+                                "你的上一个回复是空内容。"
+                                '请严格按照 {"content": "...", "visible_characters": [...], "response_characters": [...]} 的格式回复，'
+                                "不要输出空内容，也不要输出 JSON 之外的任何内容。"
+                            ),
+                        }
+                    )
+                    continue
+                return await self._error_result(
+                    f"Max retries ({MULTI_AGENT_JSON_RETRIES}) exceeded for empty/blank response",
+                    raw_text=text,
+                )
 
             parsed = self._parse_json_safe(text)
             if parsed is not None:
+                logger.info(
+                    "MultiAgentWorker JSON parse success | session=%s character=%s turn=%d parsed=%s",
+                    self._loop.session_id, self.character_name, turn, parsed,
+                )
                 clean_content = parsed.get("content", "")
                 if clean_content:
                     await self._emit_text(clean_content)
@@ -156,18 +199,17 @@ class MultiAgentWorker:
                 )
 
             # JSON 解析失败，如果还有重试次数则重试
-            retries_used = response.get("json_retries", 0)
-            if retries_used < MULTI_AGENT_JSON_RETRIES:
+            logger.warning(
+                "MultiAgentWorker JSON parse failed | session=%s character=%s turn=%d retries=%d max=%d",
+                self._loop.session_id, self.character_name, turn, retries, MULTI_AGENT_JSON_RETRIES,
+            )
+            if retries < MULTI_AGENT_JSON_RETRIES:
+                retries += 1
                 logger.warning(
                     "JSON parse failed for agent=%s, retrying (%d/%d)",
-                    self.character_name, retries_used + 1, MULTI_AGENT_JSON_RETRIES,
+                    self.character_name, retries, MULTI_AGENT_JSON_RETRIES,
                 )
-                full_messages.append(
-                    {
-                        "role": "assistant",
-                        "content": text,
-                    }
-                )
+                full_messages.append({"role": "assistant", "content": text})
                 full_messages.append(
                     {
                         "role": "user",
@@ -178,12 +220,11 @@ class MultiAgentWorker:
                         ),
                     }
                 )
-                response["json_retries"] = retries_used + 1
                 continue
 
             # 重试耗尽
             return await self._error_result(
-                f"JSON parse failed after {MULTI_AGENT_JSON_RETRIES} retries",
+                f"Max retries ({MULTI_AGENT_JSON_RETRIES}) exceeded for JSON parse",
                 raw_text=text,
             )
 
@@ -254,6 +295,18 @@ class MultiAgentWorker:
                     )
         finally:
             await self._close_stream(stream)
+
+        logger.info(
+            "MultiAgentWorker LLM response | session=%s character=%s content_len=%d reasoning_len=%d tool_calls=%d error=%s stream_buffer_len=%d content_preview=%r",
+            self._loop.session_id,
+            self.character_name,
+            len(content),
+            len(reasoning),
+            len(tool_calls),
+            error,
+            len(stream_buffer),
+            content[:500],
+        )
 
         result: dict[str, Any] = {
             "content": content.strip() if content else None,

@@ -211,7 +211,7 @@ SUBAGENT_MAX_ACTIVE: int = 50
 MULTI_AGENT_MAX_CASCADE_DEPTH: int = 10
 
 # 多 Agent 模式下 JSON 格式回复解析失败最大重试次数
-MULTI_AGENT_JSON_RETRIES: int = 2
+MULTI_AGENT_JSON_RETRIES: int = 5
 
 # DEPRECATED: SUBAGENT_READONLY_WHITELIST is no longer used.
 # Subagents now inherit all non-multiagent tools automatically.

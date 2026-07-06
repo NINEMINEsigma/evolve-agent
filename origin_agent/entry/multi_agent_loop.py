@@ -8,7 +8,6 @@ MultiAgentLoop — 多 Agent 广播协作循环。
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
 from typing import Any, TYPE_CHECKING
 
@@ -95,7 +94,7 @@ class MultiAgentLoop(BaseAgentLoop):
     async def append_user_message(
         self, content: Any, *, display_content: Any | None = None
     ) -> int:
-        """追加用户消息到 History。"""
+        """追加用户消息到 History 并回显到前端。"""
         msg = CharacterConversationMessage.from_text(
             role=Role.USER,
             character_name=USER_CHARACTER_NAME,
@@ -103,6 +102,12 @@ class MultiAgentLoop(BaseAgentLoop):
             visible_characters=self._agent_names,
         )
         idx = self._history.add_message(msg)
+        await self._sink.emit_user_message(
+            self.session_id,
+            display_content if display_content is not None else str(content),
+            USER_CHARACTER_NAME,
+            idx,
+        )
         logger.info(
             "Appended user message | session=%s index=%d content=%s",
             self.session_id, idx, summarize_message_for_log(content),
@@ -429,6 +434,10 @@ class MultiAgentLoop(BaseAgentLoop):
 
         # 最后一轮：加载并追加 final-round 提示词后缀
         system_prompt = profile.system_prompt
+        logger.info(
+            "Agent worker system prompt | session=%s character=%s is_final=%s prompt_len=%d",
+            self.session_id, character_name, is_final_round, len(system_prompt),
+        )
         if is_final_round:
             global _Final_Round_Prompt
             if _Final_Round_Prompt is None:
@@ -436,6 +445,10 @@ class MultiAgentLoop(BaseAgentLoop):
                 with open(template_path, "r", encoding="utf-8") as f:
                     _Final_Round_Prompt = f.read()
             system_prompt = system_prompt + "\n\n" + _Final_Round_Prompt
+            logger.info(
+                "Agent worker final round prompt appended | session=%s character=%s new_prompt_len=%d",
+                self.session_id, character_name, len(system_prompt),
+            )
 
         worker = MultiAgentWorker(
             character_name=character_name,
