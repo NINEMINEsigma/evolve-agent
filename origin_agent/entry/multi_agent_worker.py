@@ -270,10 +270,15 @@ class MultiAgentWorker:
         func = tc["function"]
         tool_name = func["name"]
 
-        try:
-            args = json.loads(func["arguments"])
-        except json.JSONDecodeError:
-            args = {}
+        # TODO: 防御性编程
+        arguments = func["arguments"]
+        if isinstance(arguments, str):
+            try:
+                args = json.loads(arguments)
+            except json.JSONDecodeError:
+                args = {}
+        else:
+            args = arguments if isinstance(arguments, dict) else {}
 
         # 委托给所属 loop 的 _execute_tool（包含审批逻辑）
         # pyright: ignore[reportPrivateUsage] — 合法使用 protected 方法，Worker 与 Loop 紧密协作

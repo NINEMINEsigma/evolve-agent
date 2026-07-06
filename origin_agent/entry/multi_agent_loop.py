@@ -230,6 +230,8 @@ class MultiAgentLoop(BaseAgentLoop):
         store = SubagentStore(get_runtime_context().agentspace)
         available = [c for c in characters if store.get(c) is not None]
         dropped = set(characters) - set(available)
+        if dropped and MAIN_AGENT_CHARACTER_NAME in dropped:
+            dropped.remove(MAIN_AGENT_CHARACTER_NAME)
         if dropped:
             logger.warning(
                 "Subagent profiles dropped: %s; removing from response_characters (session=%s)",
