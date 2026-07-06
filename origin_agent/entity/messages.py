@@ -165,14 +165,22 @@ class ToolCall(BaseModel):
 
 
 class CharacterConversationMessage(CharacterMessage):
-    reasoning: str|None = Field(None, description="The reasoning of the message")
+    reasoning: str|None                 = Field(default=None, 
+                                                description="The reasoning of the message")
     # TODO: 可能需要运行时自动探查
-    reasoning_field_name: str = Field("reasoning_content", description="The field name of the reasoning")
-    visible_characters: list[str]|None = Field(None, description="The visible characters of the message")
-    response_characters: list[str]|None = Field(None, description="The characters needed to response of the message")
-    # "tool_calls": [{"id": "list_uploads:0", "type": "function", "function": {"name": "list_uploads", "arguments": "{\"n\": 10}"}}]
-    tool_calls: list[ToolCall]|None = Field(None, description="The tool calls of the message")
-    message_suffix: str|None = Field(None, description="The suffix of the message, like hook messages")
+    reasoning_field_name: str           = Field(default="reasoning_content", 
+                                                description="The field name of the reasoning")
+    visible_characters: list[str]|None  = Field(default=None, 
+                                                description="The visible characters of the message")
+    response_characters: list[str]|None = Field(default=None, 
+                                                description="The characters needed to response of the message")
+    # "tool_calls": [{"id": "list_uploads:0", "type": "function", "function": {
+    #   "name": "list_uploads", "arguments": "{\"n\": 10}"}
+    # }]
+    tool_calls: list[ToolCall]|None     = Field(default=None, 
+                                                description="The tool calls of the message")
+    message_suffix: str|None            = Field(default=None, 
+                                                description="The suffix of the message, like hook messages")
 
     @classmethod
     def from_text(
@@ -316,23 +324,6 @@ class ToolResultMessage(CharacterMessage):
 
 
 class History(BaseModel):
-    # TODO: 需要解决以下问题
-    # 场景 1：部分失败与重试
-    # agent A 发起 tool_call，但执行过程中网络中断，tool_result 未能及时生成。
-    # 当 A 重新加载 History 后，它的上下文中会包含未配对的 tool_calls（有 tool_call 但没有 tool_result）。
-    # OpenAI 协议要求 tool role 消息必须紧跟在对应的 assistant tool_call 之后。这种断层可能导致 LLM 报错或行为异常。
-    # 场景 2：可见性动态变化
-    # 假设某条 CharacterConversationMessage 初始 visible_characters=["agent-A"]，后续你希望让 agent-B 也能看到。
-    # 当前设计把可见性作为消息不可变属性，修改它需要重建消息对象。你是否接受这种“不可变消息”的语义？
-    # 场景 3：用户编辑历史消息
-    # 前端允许用户编辑自己的消息。如果用户编辑了一条已经被多个 agent 消费过的消息，是否需要通知所有相关 agent 重新生成？
-    # 当前 History.get_messages() 是幂等的，但编辑会改变源数据，可能让某些 agent 的上下文与前端展示不一致。
-    # 场景 4：并发子 agent 同时发言
-    # agent-A 和 agent-B 同时生成回复，都产生了新的 CharacterConversationMessage。
-    # 如果它们都写入同一个 History，消息顺序如何确定？是否需要由父 orchestrator 统一排序后再追加？
-    # 场景 5：工具调用者被移除
-    # agent-A 调用了工具并等待结果，但在结果返回前 agent-A 被终止或从会话中移除。
-    # ToolResultMessage.character_name 指向一个不存在的 agent，这条 tool_result 将无处可去，成为孤儿消息。
     messages: list[BaseMessage] = Field(..., description="The messages of the history")
     _io_locker: Lock = PrivateAttr(default_factory=Lock)
 

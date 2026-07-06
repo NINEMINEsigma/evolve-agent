@@ -177,14 +177,10 @@ class Message(BaseModel):
 
 
 class SessionManager:
-    """使用 TTL 过期和磁盘持久化跟踪 WebSocket session。
-
+    """
     每个连接的客户端获得唯一 session_id。
-    Session 在 30 分钟不活动后过期。
     Session 元数据持久化到 JSON 索引文件，使列表在 server 重启后仍然存在。
     """
-
-    _SESSION_TTL: int = 1800  # 30 分钟
 
     def __init__(self, store_path: str | None = None) -> None:
         import time
