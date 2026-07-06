@@ -215,7 +215,9 @@ class MultiAgentLoop(BaseAgentLoop):
                     text = msg.content if isinstance(msg.content, str) else str(msg.content)
                     responses.append(f"[{msg.character_name}]: {text}")
 
-        return "\n\n".join(responses) if responses else ""
+        # 每个 agent 已通过 emit_stream_delta + emit_stream_done 独立推送到前端，
+        # 不再需要在此返回拼接文本给 gateway 用于 assistant_message。
+        return ""
 
     # -- 级联调度 ----------------------------------------------------------
 

@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import uuid
 from collections.abc import AsyncIterator
 from typing import Any, TYPE_CHECKING
 
@@ -83,6 +84,8 @@ class MultiAgentWorker:
         self._llm: LLMClient = llm_client
         self._sink: AgentSink = sink
         self._loop: BaseAgentLoop = loop
+        # 每个 worker 实例使用独立 stream_id，防止级联多轮时前端叠加/覆盖消息
+        self._stream_id: str = f"multi_{character_name}_{uuid.uuid4().hex[:8]}"
 
     async def run(self) -> WorkerResult:
         """执行完整的 tool loop + JSON 输出。
@@ -90,7 +93,7 @@ class MultiAgentWorker:
         流程:
         1. 插入 system_prompt 到消息列表头部
         2. 循环: LLM 调用 → 检查 tool_calls → 执行工具 → 追加结果
-        3. 当 LLM 返回纯文本时 → 解析 JSON → 返回 WorkerResult
+        3. 当 LLM 返回纯文本时 → 解析 JSON → 推送干净内容到前端 → 返回 WorkerResult
         4. JSON 解析失败时重试（最多 2 次）
         """
         # 在消息列表头部插入 system prompt
@@ -101,7 +104,7 @@ class MultiAgentWorker:
 
         for turn in range(MAX_TOOL_TURNS):
             if self._loop.is_interrupted():
-                return self._error_result("Interrupted")
+                return await self._error_result("Interrupted")
 
             # 调用 LLM（流式 + JSON 模式）
             response = await self._call_llm(full_messages)
@@ -111,7 +114,7 @@ class MultiAgentWorker:
                     "LLM error for agent=%s: %s",
                     self.character_name, response["error"],
                 )
-                return self._error_result(f"LLM error: {response['error']}")
+                return await self._error_result(f"LLM error: {response['error']}")
 
             # 有 tool_calls → 执行工具 → 追加到消息列表 → 继续循环
             if response.get("tool_calls"):
@@ -132,10 +135,19 @@ class MultiAgentWorker:
             # 纯文本响应 → 尝试解析 JSON
             text = response.get("content", "")
             if not text:
-                return self._error_result("Empty response")
+                return await self._error_result("Empty response")
 
             parsed = self._parse_json_safe(text)
             if parsed is not None:
+                clean_content = parsed.get("content", "")
+                if clean_content:
+                    await self._emit_text(clean_content)
+                else:
+                    # 内容为空时至少发送 stream_done，避免前端 streamingMessage 悬空
+                    await self._sink.emit_stream_done(
+                        self._loop.session_id,
+                        self._stream_id,
+                    )
                 return WorkerResult(
                     character_name=self.character_name,
                     parsed_json=AgentResponse(**parsed),
@@ -170,13 +182,13 @@ class MultiAgentWorker:
                 continue
 
             # 重试耗尽
-            return self._error_result(
+            return await self._error_result(
                 f"JSON parse failed after {MULTI_AGENT_JSON_RETRIES} retries",
                 raw_text=text,
             )
 
         # tool loop 超过最大轮数
-        return self._error_result(
+        return await self._error_result(
             f"Max tool turns ({MAX_TOOL_TURNS}) exceeded"
         )
 
@@ -188,7 +200,8 @@ class MultiAgentWorker:
         """流式调用 LLM，收集 content / tool_calls / reasoning。
 
         使用 response_format={'type': 'json_object'} 约束 JSON 输出。
-        同时通过 sink 将 token 流式推送到前端。
+        **不在此处推送 content_delta 到前端**——原始内容是 JSON 格式，
+        由上层 ``run()`` 在解析后推送干净的 content 字段。
         """
         content: str = ""
         reasoning: str = ""
@@ -215,12 +228,6 @@ class MultiAgentWorker:
                 if chunk.content_delta:
                     content += chunk.content_delta
                     stream_buffer.append(chunk.content_delta)
-                    await self._sink.emit_stream_delta(
-                        self._loop.session_id,
-                        f"multi_{self.character_name}",
-                        delta=chunk.content_delta,
-                        character_name=self.character_name,
-                    )
 
                 if chunk.reasoning_delta:
                     reasoning += chunk.reasoning_delta
@@ -237,7 +244,7 @@ class MultiAgentWorker:
                     tool_calls.append(tc_dict)
                     await self._sink.emit_stream_delta(
                         self._loop.session_id,
-                        f"multi_{self.character_name}",
+                        self._stream_id,
                         tool_call={
                             "id": chunk.tool_call.id,
                             "name": chunk.tool_call.name,
@@ -336,21 +343,43 @@ class MultiAgentWorker:
 
     # -- 辅助方法 ---------------------------------------------------------
 
-    def _error_result(
+    async def _error_result(
         self,
         error: str,
         raw_text: str = "",
     ) -> WorkerResult:
-        """构造错误占位 JSON 结果。"""
+        """构造错误占位 JSON 结果，同时推送错误文本到前端。"""
+        text = f"[{self.character_name} 响应失败: {error}]"
+        await self._emit_text(text)
         return WorkerResult(
             character_name=self.character_name,
             parsed_json=AgentResponse(
-                content=f"[{self.character_name} 响应失败: {error}]",
+                content=text,
                 visible_characters=[],
                 response_characters=[],
                 reasoning=None,
             ),
             raw_json=raw_text,
+        )
+
+    async def _emit_text(self, text: str) -> None:
+        """将一段文本以流式方式推送到前端（stream_delta + stream_done）。
+
+        仅在 ``_call_llm`` 未推送 content_delta 的前提下使用——
+        ``_call_llm`` 已不再推送原始 JSON，由本方法在 JSON 解析后
+        推送干净的 content 字段，确保前端显示的是可读文本。
+        """
+        stream_id = self._stream_id
+        if text:
+            await self._sink.emit_stream_delta(
+                self._loop.session_id,
+                stream_id,
+                delta=text,
+                character_name=self.character_name,
+            )
+        await self._sink.emit_stream_done(
+            self._loop.session_id,
+            stream_id,
         )
 
     @staticmethod

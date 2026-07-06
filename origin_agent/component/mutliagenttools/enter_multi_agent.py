@@ -92,7 +92,9 @@ async def _handle_enter_multi_agent(args: dict[str, Any]) -> dict:
     for name in agents:
         if name == main_agent_name:
             skill_blocks = collect_skill_prompts()
-            prompt = "\n\n".join(build_agent_system_prompt(parent_loop._get_context(), skill_blocks))
+            main_prompt = "\n\n".join(build_agent_system_prompt(parent_loop._get_context(), skill_blocks))
+            # 追加多 Agent JSON 响应格式指令，使主 agent 知晓如何构建 JSON 输出
+            prompt = main_prompt + "\n\n" + system_prompt_template.replace("{{CHARACTER_NAME}}", name)
         else:
             prompt = system_prompt_template.replace("{{CHARACTER_NAME}}", name)
         agent_profiles[name] = AgentProfile(

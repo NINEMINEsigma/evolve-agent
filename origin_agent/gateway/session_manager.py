@@ -178,7 +178,9 @@ class SessionManager:
                 ctx = parent_ctx
                 llm_client = LLMClient(ctx)
                 skill_blocks = collect_skill_prompts()
-                system_prompt = "\n\n".join(build_agent_system_prompt(ctx, skill_blocks))
+                main_prompt = "\n\n".join(build_agent_system_prompt(ctx, skill_blocks))
+                # 追加多 Agent JSON 响应格式指令
+                system_prompt = main_prompt + "\n\n" + system_prompt_template.replace("{{CHARACTER_NAME}}", name)
             else:
                 profile = store.get(name)
                 if profile is None:

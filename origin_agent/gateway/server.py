@@ -1312,7 +1312,8 @@ async def ws_chat(ws: WebSocket) -> None:
 
                     from system.application import Application
                     sink = Application.current().frontend_sink
-                    if sink is not None:
+                    # MultiAgentLoop 返回空字符串表示各 agent 已独立推送，跳过冗余的 assistant_message
+                    if sink is not None and reply:
                         await sink.emit_assistant_message(
                             sid, reply, loop.current_character_agent,
                         )
