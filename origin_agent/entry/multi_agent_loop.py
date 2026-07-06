@@ -22,10 +22,12 @@ from entity.constant import (
     MAIN_AGENT_CHARACTER_NAME,
     USER_CHARACTER_NAME,
     MULTI_AGENT_MAX_CASCADE_DEPTH,
+    LOG_PREVIEW_CHARS,
 )
 from system.templates import get_templates_dir
 from entry.base_agent_loop import BaseAgentLoop
 from entry.multi_agent_worker import WorkerResult, MultiAgentWorker
+from entry.agent_support.multimodal import summarize_message_for_log
 
 if TYPE_CHECKING:
     from system.application import Application
@@ -76,6 +78,10 @@ class MultiAgentLoop(BaseAgentLoop):
         self._agents: dict[str, AgentProfile] = agents
         self._sink: AgentSink = sink
         self._agent_names: list[str] = list(agents.keys())
+        logger.info(
+            "MultiAgentLoop initialized | session=%s agents=%d",
+            session_id, len(self._agent_names),
+        )
 
     # -- BaseAgentLoop 抽象方法实现 ----------------------------------------
 
@@ -96,7 +102,12 @@ class MultiAgentLoop(BaseAgentLoop):
             text=str(content),
             visible_characters=self._agent_names,
         )
-        return self._history.add_message(msg)
+        idx = self._history.add_message(msg)
+        logger.info(
+            "Appended user message | session=%s index=%d content=%s",
+            self.session_id, idx, summarize_message_for_log(content),
+        )
+        return idx
 
     # -- 公开接口 ----------------------------------------------------------
 
@@ -143,13 +154,20 @@ class MultiAgentLoop(BaseAgentLoop):
     def clear_session(self) -> None:
         """清空 History。"""
         self._history.messages.clear()
+        logger.info("Cleared multi-agent session | session=%s", self.session_id)
 
     def delete_session_messages(self, count: int = 1) -> dict:
         """删除最近 N 条消息。"""
-        removed = min(count, len(self._history.messages))
+        before = len(self._history.messages)
+        removed = min(count, before)
         for _ in range(removed):
             self._history.messages.pop()
-        return {"deleted": removed, "session_id": self.session_id, "remaining_count": len(self._history.messages)}
+        result = {"deleted": removed, "session_id": self.session_id, "remaining_count": len(self._history.messages)}
+        logger.info(
+            "Deleted session messages | session=%s requested=%d removed=%d remaining=%d",
+            self.session_id, count, removed, result["remaining_count"],
+        )
+        return result
 
     def get_tool_resources(self) -> dict:
         """多 Agent 模式暂不支持工具资源恢复。"""
@@ -158,11 +176,16 @@ class MultiAgentLoop(BaseAgentLoop):
 
     async def terminate_session(self) -> dict:
         """终结当前会话。"""
+        logger.info("Terminating multi-agent session | session=%s", self.session_id)
         return {"terminated": True, "session_id": self.session_id}
 
     async def merge_sessions(self, sources: list[str]) -> dict:
         """多 Agent 模式暂不支持会话合并。"""
         # TODO: 需要补充
+        logger.warning(
+            "Merge sessions not supported in multi-agent mode | session=%s sources=%s",
+            self.session_id, sources,
+        )
         return {"error": "merge not supported in multi-agent mode", "merged": False}
 
     async def process_message(
@@ -173,6 +196,7 @@ class MultiAgentLoop(BaseAgentLoop):
         character_name: str = USER_CHARACTER_NAME,
         visible_characters: list[str] | None = None,
         response_characters: list[str] | None = None,
+        **kwargs,
     ) -> str:
         """处理用户消息入口。
 
@@ -186,12 +210,18 @@ class MultiAgentLoop(BaseAgentLoop):
         未指定时默认对全体可见、全体响应。
         """
         if self.is_interrupted():
+            logger.warning("process_message skipped: loop interrupted | session=%s", self.session_id)
             return ""
 
         # 用户消息的可见角色
         _visible = visible_characters if visible_characters else self._agent_names
         # 初始响应角色
         _response = response_characters if response_characters else self._agent_names
+
+        logger.info(
+            "Received user message | session=%s content=%s visible=%s response=%s",
+            self.session_id, summarize_message_for_log(user_message), _visible, _response,
+        )
 
         # 追加用户消息
         if not skip_append:
@@ -202,6 +232,10 @@ class MultiAgentLoop(BaseAgentLoop):
                     text=user_message,
                     visible_characters=_visible,
                 )
+            )
+            logger.info(
+                "Appended user message to history | session=%s visible=%s",
+                self.session_id, _visible,
             )
 
         # 以用户指定的角色（或全体）作为初始响应者
@@ -214,6 +248,11 @@ class MultiAgentLoop(BaseAgentLoop):
                 if msg.character_name in self._agents:
                     text = msg.content if isinstance(msg.content, str) else str(msg.content)
                     responses.append(f"[{msg.character_name}]: {text}")
+
+        logger.info(
+            "Cascade completed | session=%s responses=%d",
+            self.session_id, len(responses),
+        )
 
         # 每个 agent 已通过 emit_stream_delta + emit_stream_done 独立推送到前端，
         # 不再需要在此返回拼接文本给 gateway 用于 assistant_message。
@@ -286,9 +325,9 @@ class MultiAgentLoop(BaseAgentLoop):
         if not valid_chars:
             return
 
-        logger.debug(
-            "Cascade depth=%d, agents=%s, final=%s, session=%s",
-            depth, valid_chars, is_final_round, self.session_id,
+        logger.info(
+            "Cascade round start | session=%s depth=%d agents=%s final=%s",
+            self.session_id, depth, valid_chars, is_final_round,
         )
 
         # 并发启动所有 worker（最后一轮传递 is_final_round）
@@ -313,6 +352,10 @@ class MultiAgentLoop(BaseAgentLoop):
                 )
 
         if not results:
+            logger.warning(
+                "No agent responses in cascade round | session=%s depth=%d",
+                self.session_id, depth,
+            )
             return
 
         # 按完成顺序串行写入 History（_io_locker 保证线程安全）
@@ -326,6 +369,14 @@ class MultiAgentLoop(BaseAgentLoop):
             # 最后一轮：强制忽略 response_characters
             if is_final_round:
                 response = []
+
+            preview = content_text[:LOG_PREVIEW_CHARS] + "..." if len(content_text) > LOG_PREVIEW_CHARS else content_text
+            logger.info(
+                "Agent response | session=%s character=%s depth=%d content=%s visible=%s response=%s",
+                self.session_id, result.character_name, depth, preview,
+                visible if visible else [],
+                response if response else [],
+            )
 
             msg = CharacterConversationMessage(
                 role=Role.ASSISTANT,
@@ -348,7 +399,14 @@ class MultiAgentLoop(BaseAgentLoop):
                         next_chars.add(rc)
 
         # 递归触发下一轮级联
-        await self._cascade(list(next_chars), depth + 1)
+        try:
+            await self._cascade(list(next_chars), depth + 1)
+        except Exception:
+            logger.exception(
+                "Cascade recursion failed | session=%s depth=%d next=%s",
+                self.session_id, depth, list(next_chars),
+            )
+            raise
 
     # -- 单 Agent 执行 -----------------------------------------------------
 
@@ -363,6 +421,11 @@ class MultiAgentLoop(BaseAgentLoop):
 
         # 构建该 Agent 视角的 History 视图
         history_view = self._history.get_messages(character_name)
+
+        logger.info(
+            "Agent worker start | session=%s character=%s history_len=%d final=%s",
+            self.session_id, character_name, len(history_view), is_final_round,
+        )
 
         # 最后一轮：加载并追加 final-round 提示词后缀
         system_prompt = profile.system_prompt
@@ -384,4 +447,17 @@ class MultiAgentLoop(BaseAgentLoop):
             loop=self,
         )
 
-        return await worker.run()
+        try:
+            result = await worker.run()
+        except Exception:
+            logger.exception(
+                "Agent worker run failed | session=%s character=%s final=%s",
+                self.session_id, character_name, is_final_round,
+            )
+            raise
+
+        logger.info(
+            "Agent worker done | session=%s character=%s",
+            self.session_id, character_name,
+        )
+        return result
