@@ -525,7 +525,7 @@ async def delete_session(session_id: str):
 
 @app.put("/api/sessions/{session_id}/messages/{message_index}")
 async def update_session_message(session_id: str, message_index: int, req: Request):
-    """编辑指定 session 中一条历史消息的正文，不触发重新生成。"""
+    """编辑指定 session 中一条历史消息的正文或 visible_characters，不触发重新生成。"""
     body: dict = {}
     try:
         body = await req.json()
@@ -533,6 +533,7 @@ async def update_session_message(session_id: str, message_index: int, req: Reque
         logger.warning("Failed to parse edit message request body for session=%s", session_id, exc_info=True)
         body = {}
     content = body.get("content")
+    visible_characters = body.get("visible_characters")
     info = _get_sm().get(session_id)
     if info and info.get("status") == "archived":
         result = {"updated": False, "error": "archived session cannot be edited", "session_id": session_id}
@@ -544,7 +545,7 @@ async def update_session_message(session_id: str, message_index: int, req: Reque
     loop = _get_loop(session_id)
     if loop is None:
         return {"updated": False, "error": "agent loop not ready", "session_id": session_id}
-    result = loop.edit_session_message(message_index, content)
+    result = loop.edit_session_message(message_index, content, visible_characters)
     status_code = 200 if result.get("updated") else 400
     return HTMLResponse(
         json.dumps(result, ensure_ascii=False),
@@ -1165,6 +1166,11 @@ async def ws_chat(ws: WebSocket) -> None:
             usage: int = loop.get_token_usage()
             context: int = loop.get_context_tokens()
             processing: bool = loop.is_processing()
+            # 检查是否多 agent 模式，携带 agents 列表
+            agents_info: list[str] | None = None
+            from entry.multi_agent_loop import MultiAgentLoop
+            if isinstance(loop, MultiAgentLoop):
+                agents_info = list(loop._agent_names)
             await ws.send_text(
                 Message(
                     type=MessageType.SYSTEM,
@@ -1174,6 +1180,7 @@ async def ws_chat(ws: WebSocket) -> None:
                         "token_usage": usage,
                         "context_tokens": context,
                         "processing": processing,
+                        "agents": agents_info,
                     }, ensure_ascii=False),
                 ).to_json()
             )

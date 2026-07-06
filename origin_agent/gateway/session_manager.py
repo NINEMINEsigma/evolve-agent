@@ -261,7 +261,7 @@ class SessionManager:
                 self._app.cron_router.unregister(session_id)
             logger.info("Session terminated: %s", session_id)
 
-    def replace_loop(self, session_id: str, new_loop: BaseAgentLoop) -> None:
+    async def replace_loop(self, session_id: str, new_loop: BaseAgentLoop) -> None:
         """将 session 的当前 loop 替换为 new_loop（不可逆）。
 
         旧 loop 被 interrupt 并从映射中移除；新 loop 继承 session_id
@@ -298,6 +298,20 @@ class SessionManager:
         if isinstance(new_loop, MultiAgentLoop):
             agents = list(new_loop._agents.keys())
             self._chat_sm.update_loop_type(session_id, Loop.multi.value, agents)
+            # 通知前端 agents 列表已变更
+            try:
+                sink = self._app.frontend_sink
+                if sink is not None:
+                    import json as _json
+                    ws = sink.get_ws(session_id)
+                    if ws is not None:
+                        await ws.send_text(_json.dumps({
+                            "type": "system",
+                            "session_id": session_id,
+                            "content": _json.dumps({"agents": agents}),
+                        }, ensure_ascii=False))
+            except Exception:
+                logger.warning("Failed to push agents for session=%s", session_id, exc_info=True)
         else:
             self._chat_sm.update_loop_type(session_id, Loop.parent.value)
 

@@ -117,7 +117,7 @@ async def _handle_enter_multi_agent(args: dict[str, Any]) -> dict:
         sink=sink,
     )
 
-    app.session_manager.replace_loop(session_id, multi_loop)
+    await app.session_manager.replace_loop(session_id, multi_loop)
 
     # 切换前清理父 loop 最后一条未完成的 assistant tool_calls
     for i in range(len(history.messages) - 1, -1, -1):

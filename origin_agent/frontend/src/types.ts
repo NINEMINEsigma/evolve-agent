@@ -135,6 +135,7 @@ export interface ChatMessage {
   characterName?: string;
   visibleCharacters?: string[];
   requiresResponse?: boolean;
+  responseCharacters?: string[];
 }
 
 export interface SessionInfo {

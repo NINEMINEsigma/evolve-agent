@@ -250,7 +250,11 @@ class CharacterConversationMessage(CharacterMessage):
         global _Role_Prefix_Template
         raw_message = super().as_content(current_character_agent, **kwargs)
         # 如果当前角色不在可见角色列表中, 则略过
-        if self.visible_characters and current_character_agent not in self.visible_characters:
+        # "all-agents" 简写表示对全体可见
+        from entity.constant import ALL_AGENTS_CHARACTER_REF_NAME
+        if (self.visible_characters and 
+            current_character_agent not in self.visible_characters and
+            ALL_AGENTS_CHARACTER_REF_NAME not in self.visible_characters):
             return None
         # 如果当前是消息接收者第一人称的消息, 则直接返回原始消息
         if current_character_agent == self.character_name:

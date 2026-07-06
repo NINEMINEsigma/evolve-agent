@@ -44,6 +44,7 @@ export function useWebSocket() {
   const [taskProgress, setTaskProgress] = useState<Record<string, TaskProgress>>({});
   const [clipboardDisplays, setClipboardDisplays] = useState<Record<string, ClipboardDisplay>>({});
   const [subagentSessionsMap, setSubagentSessionsMap] = useState<Record<string, Record<string, SubagentSession>>>({});
+  const [agents, setAgents] = useState<string[]>([]);
 
   // 当前会话派生的子会话列表
   const subagentSessions = useMemo(() => subagentSessionsMap[sessionId] || {}, [subagentSessionsMap, sessionId]);
@@ -332,6 +333,9 @@ export function useWebSocket() {
               if (m.visible_characters) {
                 entry.visibleCharacters = m.visible_characters;
               }
+              if (m.response_characters && m.response_characters.length > 0) {
+                entry.responseCharacters = m.response_characters;
+              }
               if (typeof m.requires_response === "boolean") {
                 entry.requiresResponse = m.requires_response;
               }
@@ -360,6 +364,11 @@ export function useWebSocket() {
               isAtBottomRef.current = true;
               instantScrollRef.current = true;
               setMessages(history);
+            }
+            if (data.agents && Array.isArray(data.agents)) {
+              setAgents(data.agents);
+            } else if ("agents" in data) {
+              setAgents([]);
             }
             if (data.token_usage !== undefined) setTokenUsage(data.token_usage);
             if (data.context_tokens !== undefined) setContextTokens(data.context_tokens);
@@ -397,6 +406,25 @@ export function useWebSocket() {
             addMessage("system", `✅ 上传成功：${data.filename || "文件"} → ${data.path}`);
             return;
           }
+          if (data.agents && Array.isArray(data.agents)) {
+            setAgents(data.agents);
+            return;
+          }
+          if ("agents" in data) {
+            setAgents([]);
+            return;
+          }
+          if (data.stream_meta) {
+            const meta = data.stream_meta as { stream_id: string; visible_characters?: string[]; response_characters?: string[] };
+            setMessages((prev) => prev.map((m) =>
+              m.id === meta.stream_id ? {
+                ...m,
+                visibleCharacters: meta.visible_characters,
+                responseCharacters: meta.response_characters,
+              } : m
+            ));
+            return;
+          }
           if (data.assistant_text) {
             const p = JSON.parse(data.assistant_text);
             const id = generateUUID();
@@ -424,6 +452,8 @@ export function useWebSocket() {
           id: generateUUID(),
           characterName: msg.character_name,
           messageIndex: typeof msg.index === "number" ? msg.index : undefined,
+          visibleCharacters: msg.visible_characters ?? undefined,
+          responseCharacters: msg.response_characters ?? undefined,
         }]);
       }
       else if (msg.type === "assistant_message") {
@@ -445,6 +475,8 @@ export function useWebSocket() {
             id: generateUUID(),
             characterName: msg.character_name,
             messageIndex: nextMessageIndex(prev),
+            visibleCharacters: msg.visible_characters ?? undefined,
+            responseCharacters: msg.response_characters ?? undefined,
           }]);
         }
         fetchSessions();
@@ -692,6 +724,22 @@ export function useWebSocket() {
       addMessage("error", `重新生成失败：${data.error || "unknown error"}`);
     }
   }, [sessionId, addMessage]);
+
+  const updateMessageVisibility = useCallback(async (messageIndex: number, visibleCharacters: string[]) => {
+    try {
+      const resp = await fetch(`/api/sessions/${sessionId}/messages/${messageIndex}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ visible_characters: visibleCharacters }),
+      });
+      const data = await resp.json().catch(() => ({}));
+      if (resp.ok && data.updated) {
+        setMessages((prev) => prev.map((m) =>
+          m.messageIndex === messageIndex ? { ...m, visibleCharacters: data.visible_characters ?? visibleCharacters } : m
+        ));
+      }
+    } catch {}
+  }, [sessionId]);
 
   const respondConfirm = useCallback((action: string, denyReasonText?: string, deniedBy?: string) => {
     if (!pendingConfirm) return;
@@ -1322,6 +1370,7 @@ export function useWebSocket() {
     pendingImages,
     streamingMessage,
     allTags,
+    agents,
     ignoreStaleRef,
     lastRecvAtRef,
     lastPongAtRef,
@@ -1353,6 +1402,7 @@ export function useWebSocket() {
     editMessage,
     deleteMessages,
     regenerateResponse,
+    updateMessageVisibility,
     addMessage,
     fetchSessions,
     fetchAllTags,

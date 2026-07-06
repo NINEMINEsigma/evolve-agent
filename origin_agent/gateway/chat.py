@@ -110,6 +110,8 @@ class Message(BaseModel):
             tool_call_id=data.get("tool_call_id"),
             character_name=data.get("character_name"),
             index=data.get("index"),
+            visible_characters=data.get("visible_characters"),
+            response_characters=data.get("response_characters"),
         )
 
     def to_json(self) -> str:
@@ -168,6 +170,10 @@ class Message(BaseModel):
             d["character_name"] = self.character_name
         if self.index is not None:
             d["index"] = self.index
+        if self.visible_characters is not None:
+            d["visible_characters"] = self.visible_characters
+        if self.response_characters is not None:
+            d["response_characters"] = self.response_characters
         return json.dumps(d, ensure_ascii=False)
 
 

@@ -127,10 +127,14 @@ export default function App() {
   const [subagentPanelOpenMap, setSubagentPanelOpenMap] = useState<Record<string, boolean>>({});
   const [activeSubagentIdMap, setActiveSubagentIdMap] = useState<Record<string, string | null>>({});
   const [targetSessionsMap, setTargetSessionsMap] = useState<Record<string, string[]>>({});
+  const [visibleCharactersMap, setVisibleCharactersMap] = useState<Record<string, string[]>>({});
+  const [responseCharactersMap, setResponseCharactersMap] = useState<Record<string, string[]>>({});
 
   const subagentPanelOpen = subagentPanelOpenMap[ws.sessionId] || false;
   const activeSubagentId = activeSubagentIdMap[ws.sessionId] || null;
   const targetSessions = targetSessionsMap[ws.sessionId] || ["main"];
+  const visibleCharacters = visibleCharactersMap[ws.sessionId] || ["all-agents"];
+  const responseCharacters = responseCharactersMap[ws.sessionId] || ["main-agent"];
 
   const [subagentPanelWidth, setSubagentPanelWidth] = useState(() => {
     const saved = localStorage.getItem("evolve_subagent_panel_width");
@@ -162,6 +166,63 @@ export default function App() {
       ...prev,
       [ws.sessionId]: typeof value === "function" ? value(prev[ws.sessionId] || ["main"]) : value,
     }));
+  };
+
+  const onToggleAgentState = (agentName: string) => {
+    // 先把 all-agents 展开为实际 agents
+    let curVisible = visibleCharacters.includes("all-agents")
+      ? ws.agents
+      : [...visibleCharacters];
+    let curResponse = [...responseCharacters];
+    const vis = curVisible.includes(agentName);
+    const res = curResponse.includes(agentName);
+
+    if (!vis && !res) {
+      // none -> visible only
+      curVisible.push(agentName);
+      curResponse = curResponse.filter((a) => a !== agentName);
+    } else if (vis && !res) {
+      // visible -> response
+      if (!curResponse.includes(agentName)) curResponse.push(agentName);
+    } else {
+      // response -> none
+      curVisible = curVisible.filter((a) => a !== agentName);
+      curResponse = curResponse.filter((a) => a !== agentName);
+    }
+    // 如果全部可见则缩回 all-agents 简写
+    const allVisible = ws.agents.length > 0 && ws.agents.every((a) => curVisible.includes(a));
+    const newVisible = allVisible ? ["all-agents"] : curVisible;
+    setVisibleCharactersMap((prev) => ({ ...prev, [ws.sessionId]: newVisible }));
+    setResponseCharactersMap((prev) => ({ ...prev, [ws.sessionId]: curResponse }));
+  };
+
+  const onToggleMessageVisibility = (messageId: string, agentName: string) => {
+    const msg = ws.messages.find((m) => m.id === messageId);
+    if (msg == null || typeof msg.messageIndex !== "number") return;
+    let curVisible = [...(msg.visibleCharacters || ["all-agents"])];
+    let curResponse = [...(msg.responseCharacters || [])];
+    // 展开 all-agents
+    if (curVisible.includes("all-agents")) {
+      curVisible = (ws.agents.length > 0 ? ws.agents : curVisible.filter((a) => a !== "all-agents"));
+    }
+    const vis = curVisible.includes(agentName);
+    const res = curResponse.includes(agentName);
+    if (!vis && !res) {
+      curVisible.push(agentName);
+      curResponse = curResponse.filter((a) => a !== agentName);
+    } else if (vis && !res) {
+      if (!curResponse.includes(agentName)) curResponse.push(agentName);
+    } else {
+      curVisible = curVisible.filter((a) => a !== agentName);
+      curResponse = curResponse.filter((a) => a !== agentName);
+    }
+    const allVisible = ws.agents.length > 0 && ws.agents.every((a) => curVisible.includes(a));
+    const newVisible = allVisible ? ["all-agents"] : curVisible;
+    ws.updateMessageVisibility(msg.messageIndex, newVisible);
+    // 立即更新本地消息状态
+    ws.setMessages((prev) => prev.map((m) =>
+      m.id === messageId ? { ...m, visibleCharacters: newVisible, responseCharacters: curResponse } : m
+    ));
   };
 
   // 切换主会话时重置目标选择为默认值（仅对没有记录的新会话生效）
@@ -394,6 +455,7 @@ export default function App() {
           lastRecvAtRef={ws.lastRecvAtRef}
           lastPongAtRef={ws.lastPongAtRef}
           recvTick={ws.recvTick}
+          agents={ws.agents}
         />
 
         <TaskProgressPanel
@@ -421,6 +483,8 @@ export default function App() {
           chatAreaRef={ws.chatAreaRef}
           onDropFiles={ws.handleFileUpload}
           streamingMessage={ws.streamingMessage}
+          agents={ws.agents}
+          onToggleMessageVisibility={onToggleMessageVisibility}
         />
 
         <CronCountdown cronTasks={ws.cronTasks} />
@@ -437,7 +501,7 @@ export default function App() {
           uploading={ws.uploading}
           archived={currentSessionArchived}
           onSend={() => {
-            ws.send(targetSessions);
+            ws.send(targetSessions, visibleCharacters, responseCharacters);
           }}
           onUpload={ws.handleFileInputChange}
           onUploadClick={ws.handleUploadClick}
@@ -450,6 +514,10 @@ export default function App() {
           subagentSessions={ws.subagentSessions}
           targetSessions={targetSessions}
           setTargetSessions={setTargetSessions}
+          agents={ws.agents}
+          visibleCharacters={visibleCharacters}
+          responseCharacters={responseCharacters}
+          onToggleAgentState={onToggleAgentState}
         />
 
         <ConfirmDialog

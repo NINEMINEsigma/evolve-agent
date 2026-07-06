@@ -48,6 +48,7 @@ class WorkerResult(BaseModel):
     parsed_json: AgentResponse = Field(..., description="解析后的 Agent JSON 响应")
     raw_json: str = Field("", description="原始 JSON 文本")
     stream_buffer: list[str] = Field(default_factory=list, description="流式 token 缓冲")
+    stream_id: str = Field("", description="Worker 的流式标识，用于前端关联元数据")
 
 
 class MultiAgentWorker:
@@ -196,6 +197,7 @@ class MultiAgentWorker:
                     parsed_json=AgentResponse(**parsed),
                     raw_json=text,
                     stream_buffer=response.get("stream_buffer", []),
+                    stream_id=self._stream_id,
                 )
 
             # JSON 解析失败，如果还有重试次数则重试
@@ -413,6 +415,7 @@ class MultiAgentWorker:
                 reasoning=None,
             ),
             raw_json=raw_text,
+            stream_id=self._stream_id,
         )
 
     async def _emit_text(self, text: str) -> None:

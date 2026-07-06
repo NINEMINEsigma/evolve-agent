@@ -1275,14 +1275,18 @@ class ParentAgentLoop(BasePrivateChatAgentLoop):
                 "visible_characters": msg.visible_characters if isinstance(msg, CharacterConversationMessage) else None,
                 "requires_response": msg.role == Role.USER,
             }
-            if isinstance(msg, CharacterConversationMessage) and msg.reasoning:
-                entry["reasoning_content"] = msg.reasoning
+            if isinstance(msg, CharacterConversationMessage):
+                if msg.response_characters:
+                    entry["response_characters"] = msg.response_characters
+                if msg.reasoning:
+                    entry["reasoning_content"] = msg.reasoning
             if msg.role == Role.SYSTEM:
                 entry["role"] = Role.SYSTEM.value
             messages.append(entry)
         return messages
 
-    def edit_session_message(self, index: int, content: str) -> dict:
+    def edit_session_message(self, index: int, content: str | None = None,
+                             visible_characters: list[str] | None = None) -> dict:
         if not isinstance(index, int) or index < 0:
             return {"updated": False, "error": "invalid message index"}
         if index >= self._history.count:
@@ -1290,15 +1294,23 @@ class ParentAgentLoop(BasePrivateChatAgentLoop):
         msg = self._history.get_message(index)
         if not isinstance(msg, CharacterConversationMessage):
             return {"updated": False, "error": "message type not editable"}
-        self._history.messages[index] = msg.model_copy(update={"content": content})
+        updates: dict = {}
+        if content is not None:
+            updates["content"] = content
+        if visible_characters is not None:
+            updates["visible_characters"] = visible_characters
+        self._history.messages[index] = msg.model_copy(update=updates)
         self._overwrite_history_file(self.session_id)
-        return {
+        result: dict = {
             "updated": True,
             "session_id": self.session_id,
             "index": index,
             "role": msg.role.value,
-            "content": self._extract_text(content),
+            "content": self._extract_text(self._history.messages[index].content),
         }
+        if visible_characters is not None:
+            result["visible_characters"] = visible_characters
+        return result
 
     def _overwrite_history_file(self, session_id: str) -> None:
         if self._session_store is None:

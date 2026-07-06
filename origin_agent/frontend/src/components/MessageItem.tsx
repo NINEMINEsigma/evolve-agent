@@ -88,7 +88,7 @@ const markdownComponentsBase = {
   },
 };
 
-const MessageItem = memo(function MessageItem({ message, archived, onImageClick, onToggleCollapse, onEditMessage, onDeleteMessages, onRegenerateResponse, isLastUserMessage, streaming }: {
+const MessageItem = memo(function MessageItem({ message, archived, onImageClick, onToggleCollapse, onEditMessage, onDeleteMessages, onRegenerateResponse, isLastUserMessage, streaming, agents, onToggleMessageVisibility }: {
   message: ChatMessage;
   archived: boolean;
   onImageClick: (src: string) => void;
@@ -98,6 +98,8 @@ const MessageItem = memo(function MessageItem({ message, archived, onImageClick,
   onRegenerateResponse?: () => void;
   isLastUserMessage?: boolean;
   streaming?: boolean;
+  agents?: string[];
+  onToggleMessageVisibility?: (messageId: string, agentName: string) => void;
 }) {
   const m = message;
   const [editing, setEditing] = useState(false);
@@ -393,6 +395,28 @@ const MessageItem = memo(function MessageItem({ message, archived, onImageClick,
               </button>
             )}
           </div>
+          {agents && agents.length > 0 && message.visibleCharacters != null && (
+            <div className="message-visibility-row">
+              {agents.map((agent) => {
+                const curVisible = message.visibleCharacters || [];
+                const isAll = curVisible.includes("all-agents");
+                const isVisible = isAll || curVisible.includes(agent);
+                const isResponse = (message.responseCharacters || []).includes(agent);
+                const stateLabel = isResponse ? agent + " · 需响应" : isVisible ? agent + " · 仅可见" : agent + " · 隐藏";
+                const stateClass = isResponse ? "state-response" : isVisible ? "state-visible" : "state-none";
+                return (
+                  <button
+                    key={agent}
+                    type="button"
+                    className={`message-visibility-dot ${stateClass}`}
+                    onClick={() => onToggleMessageVisibility?.(message.id, agent)}
+                    data-tooltip={stateLabel}
+                    title={stateLabel}
+                  />
+                );
+              })}
+            </div>
+          )}
         </div>
       </div>
     </div>

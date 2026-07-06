@@ -281,7 +281,9 @@ class FrontendSink(AgentSink):
                              tool_call_id=tool_call_id)
 
     async def emit_user_message(self, session_id: str, content: Any,
-                                character_name: str, message_index: int) -> None:
+                                character_name: str, message_index: int,
+                                visible_characters: list[str] | None = None,
+                                response_characters: list[str] | None = None) -> None:
         from gateway.chat import Message, MessageType
         ws = self._ws_sinks.get(session_id)
         if ws is None:
@@ -292,6 +294,8 @@ class FrontendSink(AgentSink):
             content=content,
             character_name=character_name,
             index=message_index,
+            visible_characters=visible_characters,
+            response_characters=response_characters,
         )
         try:
             await ws.send_text(msg.to_json())
@@ -299,7 +303,9 @@ class FrontendSink(AgentSink):
             logger.warning("Failed to send user_message to session=%s", session_id, exc_info=True)
 
     async def emit_assistant_message(self, session_id: str, content: Any,
-                                     character_name: str) -> None:
+                                     character_name: str,
+                                     visible_characters: list[str] | None = None,
+                                     response_characters: list[str] | None = None) -> None:
         from gateway.chat import Message, MessageType
         ws = self._ws_sinks.get(session_id)
         if ws is None:
@@ -309,6 +315,8 @@ class FrontendSink(AgentSink):
             session_id=session_id,
             content=content,
             character_name=character_name,
+            visible_characters=visible_characters,
+            response_characters=response_characters,
         )
         try:
             await ws.send_text(msg.to_json())

@@ -8,6 +8,7 @@ MultiAgentLoop — 多 Agent 广播协作循环。
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 from typing import Any, TYPE_CHECKING
 
@@ -31,6 +32,7 @@ from entry.agent_support.multimodal import summarize_message_for_log
 if TYPE_CHECKING:
     from system.application import Application
     from entry.agent_sink import AgentSink
+    from entity.messages import ToolResultMessage
 
 logger = logging.getLogger(__name__)
 
@@ -149,10 +151,13 @@ class MultiAgentLoop(BaseAgentLoop):
                 "role": msg.role.value,
                 "content": str(msg.content) if not isinstance(msg.content, list) else "",
             }
+            # 大量可被代替的反射
             if hasattr(msg, "character_name"):
                 entry["character_name"] = getattr(msg, "character_name")
             if hasattr(msg, "visible_characters") and getattr(msg, "visible_characters"):
                 entry["visible_characters"] = getattr(msg, "visible_characters")
+            if hasattr(msg, "response_characters") and getattr(msg, "response_characters"):
+                entry["response_characters"] = getattr(msg, "response_characters")
             result.append(entry)
         return result
 
@@ -160,6 +165,117 @@ class MultiAgentLoop(BaseAgentLoop):
         """清空 History。"""
         self._history.messages.clear()
         logger.info("Cleared multi-agent session | session=%s", self.session_id)
+
+    def edit_session_message(self, index: int, content: str | None = None,
+                             visible_characters: list[str] | None = None) -> dict:
+        """编辑指定索引的消息内容或 visible_characters。
+        至少提供 content 或 visible_characters 之一。
+        """
+        if not isinstance(index, int) or index < 0:
+            return {"updated": False, "error": "invalid message index"}
+        if index >= len(self._history.messages):
+            return {"updated": False, "error": "message index out of range"}
+        msg = self._history.messages[index]
+        if not hasattr(msg, "visible_characters"):
+            return {"updated": False, "error": "message does not support visibility"}
+        updates: dict = {}
+        if content is not None:
+            updates["content"] = content
+        if visible_characters is not None:
+            updates["visible_characters"] = visible_characters
+        self._history.messages[index] = msg.model_copy(update=updates)
+        return {
+            "updated": True,
+            "session_id": self.session_id,
+            "index": index,
+            "role": msg.role.value,
+            "content": str(self._history.messages[index].content),
+            "visible_characters": visible_characters,
+        }
+
+    async def _execute_tool(self, tool_name: str, args: dict,
+                            tool_call_id: str = "",
+                            session_id: str = "") -> "ToolResultMessage":
+        """多 Agent 模式下执行工具，含审批流程。"""
+        from entity.messages import ToolResultMessage
+        from entity.puretype import Role, ToolDangerLevel
+        from abstract.tools.registry import registry as tool_registry
+        from component.approval import is_handsfree_mode, request_user_confirm
+        from component.approval_allowlist import is_allowed as is_tool_allowlisted
+        from component.approval_allowlist import add_allowed as add_tool_allowlist_entry
+
+        sid = session_id or self.session_id
+        if self.is_interrupted():
+            return ToolResultMessage(
+                role=Role.TOOL,
+                character_name=self.current_character_agent,
+                tool_call_id=tool_call_id,
+                content="Cancelled.",
+            )
+
+        danger_level: ToolDangerLevel = tool_registry.get_danger_level(tool_name)
+        _handsfree = is_handsfree_mode(sid)
+        # dangerous 一定审批；write 仅脱手模式审批；readonly/safe 直接执行
+        _needs_approval = danger_level == ToolDangerLevel.dangerous or (
+            danger_level == ToolDangerLevel.write and _handsfree
+        )
+
+        _skip_dispatch = False
+        if _needs_approval:
+            _approval_args = {k: v for k, v in args.items() if k != "_session_id"}
+            if is_tool_allowlisted(tool_name, _approval_args):
+                args["_pre_approved"] = True
+                args["_approval_action"] = "allow_once"
+            else:
+                if _handsfree:
+                    # 脱手模式：approval 模型自动审批
+                    approval = await request_user_confirm(
+                        sid, tool_name, _approval_args,
+                        reason=str(args.get("reason", "")),
+                        content=f"Tool: {tool_name}\nParameters: {json.dumps(_approval_args, ensure_ascii=False)[:500]}",
+                    )
+                else:
+                    # 正常模式：通过 WebSocket 通知用户确认
+                    approval = await self._sink.request_approval(
+                        tool_name=tool_name,
+                        args=_approval_args,
+                        reason=str(args.get("reason", "")),
+                        content=f"Tool: {tool_name}\nParameters: {json.dumps(_approval_args, ensure_ascii=False)[:500]}",
+                        session_id=sid,
+                    )
+                if approval.action == "deny":
+                    source_label = {"model": "approval model", "user": "user", "system": "system"}.get(
+                        approval.denied_by, "system"
+                    )
+                    return ToolResultMessage(
+                        role=Role.TOOL,
+                        character_name=self.current_character_agent,
+                        tool_call_id=tool_call_id,
+                        content=json.dumps({
+                            "error": f"[{source_label} denied] {approval.deny_reason or 'unknown reason'}",
+                            "denied": True,
+                            "denied_by": approval.denied_by,
+                        }, ensure_ascii=False),
+                    )
+                elif approval.action == "allow_always" and not _handsfree:
+                    add_tool_allowlist_entry(tool_name, _approval_args)
+                args["_pre_approved"] = True
+                args["_approval_action"] = approval.action
+
+        try:
+            from entry.base_agent_loop import ToolContext
+            ctx = ToolContext(loop=self, session_id=sid)
+            result = await tool_registry.async_dispatch(tool_name, args, context=ctx)
+        except Exception as exc:
+            logger.exception("Tool %s dispatch error for multi-agent: %s", tool_name, exc)
+            result = {"error": f"Tool execution failed: {type(exc).__name__}: {exc}"}
+
+        return ToolResultMessage(
+            role=Role.TOOL,
+            character_name=self.current_character_agent,
+            tool_call_id=tool_call_id,
+            content=json.dumps(result, ensure_ascii=False) if isinstance(result, dict) else str(result),
+        )
 
     def delete_session_messages(self, count: int = 1) -> dict:
         """删除最近 N 条消息。"""
@@ -218,10 +334,15 @@ class MultiAgentLoop(BaseAgentLoop):
             logger.warning("process_message skipped: loop interrupted | session=%s", self.session_id)
             return ""
 
-        # 用户消息的可见角色
+        # 用户消息的可见角色 — "all-agents" 简写展开
         _visible = visible_characters if visible_characters else self._agent_names
+        from entity.constant import ALL_AGENTS_CHARACTER_REF_NAME
+        if _visible == [ALL_AGENTS_CHARACTER_REF_NAME]:
+            _visible = self._agent_names
         # 初始响应角色
         _response = response_characters if response_characters else self._agent_names
+        if _response == [ALL_AGENTS_CHARACTER_REF_NAME]:
+            _response = self._agent_names
 
         logger.info(
             "Received user message | session=%s content=%s visible=%s response=%s",
@@ -396,6 +517,32 @@ class MultiAgentLoop(BaseAgentLoop):
             )
 
             self._history.add_message(msg)
+
+            # 推送可见性/响应元数据给前端，用 stream_id 关联流式消息
+            if result.stream_id and (visible or response):
+                try:
+                    await self._sink.emit_stream_done(
+                        self.session_id,
+                        result.stream_id,
+                        finish_reason="stop",
+                    )
+                    # 通过 system 消息推送元数据
+                    from gateway.chat import Message, MessageType
+                    ws = getattr(self._sink, '_ws_sinks', {}).get(self.session_id)
+                    if ws:
+                        await ws.send_text(Message(
+                            type=MessageType.SYSTEM,
+                            session_id=self.session_id,
+                            content=json.dumps({
+                                "stream_meta": {
+                                    "stream_id": result.stream_id,
+                                    "visible_characters": visible if visible else [],
+                                    "response_characters": response if response else [],
+                                },
+                            }, ensure_ascii=False),
+                        ).to_json())
+                except Exception:
+                    logger.debug("Failed to push visibility metadata for stream=%s", result.stream_id, exc_info=True)
 
             # 收集下一轮需要响应的 Agent（最后一轮跳过）
             if not is_final_round:

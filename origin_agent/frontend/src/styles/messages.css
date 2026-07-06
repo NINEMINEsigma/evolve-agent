@@ -629,3 +629,42 @@
   .message-avatar { width: 26px; height: 26px; font-size: 11px; }
   .message-assistant .message-bubble { padding: 8px 10px; }
 }
+
+/* ── Multi-agent message visibility row ── */
+.message-visibility-row {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  padding: 4px 0 0 0;
+  flex-wrap: wrap;
+  border-top: 1px solid var(--border);
+  margin-top: 4px;
+}
+
+.message-visibility-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  border: 1px solid var(--border-strong);
+  background: var(--bg-tertiary);
+  cursor: pointer;
+  transition: all 0.15s;
+  padding: 0;
+  flex-shrink: 0;
+}
+
+.message-visibility-dot.state-visible {
+  background: var(--accent);
+  border-color: var(--accent);
+  box-shadow: 0 0 4px var(--accent-glow);
+}
+
+.message-visibility-dot.state-response {
+  background: #06b6d4;
+  border-color: #06b6d4;
+  box-shadow: 0 0 6px rgba(6, 182, 212, 0.5);
+}
+
+.message-visibility-dot.state-none {
+  opacity: 0.22;
+}

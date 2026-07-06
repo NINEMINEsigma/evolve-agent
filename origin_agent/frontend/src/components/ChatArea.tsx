@@ -16,9 +16,11 @@ interface ChatAreaProps {
   onDropFiles: (files: FileList) => void;
   streamingMessage?: ChatMessage | null;
   chatAreaRef?: React.RefObject<HTMLDivElement>;
+  agents?: string[];
+  onToggleMessageVisibility?: (messageId: string, agentName: string) => void;
 }
 
-export default function ChatArea({ messages, waiting, archived, onImageClick, onToggleCollapse, onEditMessage, onDeleteMessages, onRegenerateResponse, bottomRef, onDropFiles, streamingMessage, chatAreaRef: externalChatAreaRef }: ChatAreaProps) {
+export default function ChatArea({ messages, waiting, archived, onImageClick, onToggleCollapse, onEditMessage, onDeleteMessages, onRegenerateResponse, bottomRef, onDropFiles, streamingMessage, chatAreaRef: externalChatAreaRef, agents, onToggleMessageVisibility }: ChatAreaProps) {
   const [dragOver, setDragOver] = useState(false);
   const internalChatAreaRef = useRef<HTMLDivElement>(null);
   const chatAreaRef = externalChatAreaRef || internalChatAreaRef;
@@ -40,6 +42,8 @@ export default function ChatArea({ messages, waiting, archived, onImageClick, on
         onDeleteMessages={onDeleteMessages}
         onRegenerateResponse={onRegenerateResponse}
         isLastUserMessage={m.id === lastUserMsgId}
+        agents={agents}
+        onToggleMessageVisibility={onToggleMessageVisibility}
       />
     )),
     [messages, archived, onImageClick, onToggleCollapse, onEditMessage, onDeleteMessages, onRegenerateResponse, lastUserMsgId]
