@@ -144,6 +144,11 @@ class SessionManager:
         from system.templates import get_templates_dir
         from abstract.tools.registry import registry as tool_registry
         from entity.puretype import ToolAvailability
+        from entity.constant import MAIN_AGENT_CHARACTER_NAME
+        from entry.agent_support.messages import (
+            build_agent_system_prompt,
+            collect_skill_prompts,
+        )
 
         info = self._chat_sm.get(session_id)
         agents_names: list[str] = (info.get("agents") or []) if info else []
@@ -153,39 +158,46 @@ class SessionManager:
         agent_profiles: dict[str, AgentProfile] = {}
         parent_ctx = get_runtime_context()
 
+        # 加载多 Agent 系统提示词模板
+        template_path = get_templates_dir() / "multiagent" / "multi_agent_system_prompt.txt"
+        with open(template_path, "r", encoding="utf-8") as f:
+            system_prompt_template = f.read()
+
+        # 工具集：排除 multiagent 工具集
+        tools = tool_registry.get_definitions_for_availability(
+            scope=ToolAvailability.MAIN,
+        )
+        multiagent_tool_names: set[str] = set(
+            tool_registry.get_tool_names_for_toolset("multiagent"),
+        )
+        tools = [t for t in tools if t.get("function", {}).get("name") not in multiagent_tool_names]
+
         for name in agents_names:
-            profile = store.get(name)
-            if profile is None:
-                logger.warning(
-                    "Subagent profile '%s' not found, skipping (session=%s)",
-                    name, session_id,
-                )
-                continue
-            # 用 profile 字段覆盖 parent_ctx 的 LLM 配置，构造 LLMClient
-            ctx = parent_ctx.model_copy(update={
-                "llm_api_key": profile.get("api_key") or parent_ctx.llm_api_key,
-                "llm_base_url": profile.get("base_url", parent_ctx.llm_base_url),
-                "llm_model": profile.get("model", parent_ctx.llm_model),
-                "llm_max_output_tokens": profile.get("max_output_tokens", parent_ctx.llm_max_output_tokens),
-                "llm_max_context_tokens": profile.get("max_context_tokens", parent_ctx.llm_max_context_tokens),
-                "llm_temperature": parent_ctx.llm_temperature,
-            })
-            llm_client = LLMClient(ctx)
-
-            # 加载多 Agent 系统提示词模板
-            template_path = get_templates_dir() / "multiagent" / "multi_agent_system_prompt.txt"
-            with open(template_path, "r", encoding="utf-8") as f:
-                system_prompt_template = f.read()
-            system_prompt = system_prompt_template.replace("{{CHARACTER_NAME}}", name)
-
-            # 工具集：排除 multiagent 工具集
-            tools = tool_registry.get_definitions_for_availability(
-                scope=ToolAvailability.MAIN,
-            )
-            multiagent_tool_names: set[str] = set(
-                tool_registry.get_tool_names_for_toolset("multiagent"),
-            )
-            tools = [t for t in tools if t.get("function", {}).get("name") not in multiagent_tool_names]
+            if name == MAIN_AGENT_CHARACTER_NAME:
+                # 主 Agent 不是 subagent：使用 parent context 的 LLM 和原有系统提示词
+                ctx = parent_ctx
+                llm_client = LLMClient(ctx)
+                skill_blocks = collect_skill_prompts()
+                system_prompt = "\n\n".join(build_agent_system_prompt(ctx, skill_blocks))
+            else:
+                profile = store.get(name)
+                if profile is None:
+                    logger.warning(
+                        "Subagent profile '%s' not found, skipping (session=%s)",
+                        name, session_id,
+                    )
+                    continue
+                # 用 profile 字段覆盖 parent_ctx 的 LLM 配置，构造 LLMClient
+                ctx = parent_ctx.model_copy(update={
+                    "llm_api_key": profile.get("api_key") or parent_ctx.llm_api_key,
+                    "llm_base_url": profile.get("base_url", parent_ctx.llm_base_url),
+                    "llm_model": profile.get("model", parent_ctx.llm_model),
+                    "llm_max_output_tokens": profile.get("max_output_tokens", parent_ctx.llm_max_output_tokens),
+                    "llm_max_context_tokens": profile.get("max_context_tokens", parent_ctx.llm_max_context_tokens),
+                    "llm_temperature": parent_ctx.llm_temperature,
+                })
+                llm_client = LLMClient(ctx)
+                system_prompt = system_prompt_template.replace("{{CHARACTER_NAME}}", name)
 
             agent_profiles[name] = AgentProfile(
                 character_name=name,

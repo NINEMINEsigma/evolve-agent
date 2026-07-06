@@ -79,9 +79,19 @@ async def _handle_enter_multi_agent(args: dict[str, Any]) -> dict:
     tools = [t for t in tools if t.get("function", {}).get("name") not in multiagent_tool_names]
 
     # 为每个 Agent 构造 Profile
+    # 主 Agent 保留原有系统提示词，子 Agent 使用多 Agent 协作模板
+    from entry.agent_support.messages import (
+        build_agent_system_prompt,
+        collect_skill_prompts,
+    )
+
     agent_profiles: dict[str, AgentProfile] = {}
     for name in agents:
-        prompt = system_prompt_template.replace("{{CHARACTER_NAME}}", name)
+        if name == main_agent_name:
+            skill_blocks = collect_skill_prompts()
+            prompt = "\n\n".join(build_agent_system_prompt(parent_loop._get_context(), skill_blocks))
+        else:
+            prompt = system_prompt_template.replace("{{CHARACTER_NAME}}", name)
         agent_profiles[name] = AgentProfile(
             character_name=name,
             system_prompt=prompt,

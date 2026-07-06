@@ -118,6 +118,32 @@ def build_agent_system_prompt(ctx: RuntimeContext, skill_blocks: list[str]) -> l
     )
 
 
+def collect_skill_prompts(skills_dir: Path | str = Path("skills")) -> list[str]:
+    """生成 skill 名称和描述清单，避免全量内容注入 system prompt。"""
+    blocks: list[str] = []
+    try:
+        from abstract.skills.loader import list_skills
+
+        skills: list[dict] = list_skills(skills_dir=Path(skills_dir))
+        if skills:
+            lines: list[str] = [
+                "Available skills (use list_skills to see details, use recall_skill to load one):",
+                "",
+            ]
+            for s in skills:
+                name: str = s.get("name", "")
+                description: str = s.get("description", "")
+                line = f"- {name}"
+                if description:
+                    line += f": {description}"
+                lines.append(line)
+            blocks.append("\n".join(lines))
+        return blocks
+    except Exception as e:
+        logger.exception("Failed to collect skill prompts: %s", e)
+        return []
+
+
 def build_turn_messages(
     system_prompts: list[str],
     history: History,

@@ -1219,28 +1219,9 @@ class ParentAgentLoop(BasePrivateChatAgentLoop):
 
         Skill 的完整内容通过 ``list_skills`` 和 ``recall_skill`` 工具按需加载。
         """
-        blocks: list[str] = []
-        try:
-            from pathlib import Path
-            from abstract.skills.loader import list_skills
-            skills: list[dict] = list_skills(skills_dir=Path("skills"))
-            if skills:
-                lines: list[str] = [
-                    "Available skills (use list_skills to see details, use recall_skill to load one):",
-                    "",
-                ]
-                for s in skills:
-                    name: str = s.get("name", "")
-                    description: str = s.get("description", "")
-                    line = f"- {name}"
-                    if description:
-                        line += f": {description}"
-                    lines.append(line)
-                blocks.append("\n".join(lines))
-            return blocks
-        except Exception as e:
-            logger.exception("Failed to collect skill prompts: %s", e)
-            return []
+        from entry.agent_support.messages import collect_skill_prompts
+
+        return collect_skill_prompts()
 
     # ========================================================================
     # Usage 推送

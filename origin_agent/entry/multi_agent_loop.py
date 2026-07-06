@@ -19,6 +19,7 @@ from entity.messages import (
 )
 from entity.puretype import Role
 from entity.constant import (
+    MAIN_AGENT_CHARACTER_NAME,
     USER_CHARACTER_NAME,
     MULTI_AGENT_MAX_CASCADE_DEPTH,
 )
@@ -47,6 +48,7 @@ class AgentProfile:
         llm_client: Any,
     ) -> None:
         self.character_name: str = character_name
+        # TODO: 必须改成多条, 为了支持主agent和子agent的复杂提示词, 实际上并不能被合并
         self.system_prompt: str = system_prompt
         self.tools: list[dict] = tools
         self.llm_client: Any = llm_client
@@ -217,7 +219,7 @@ class MultiAgentLoop(BaseAgentLoop):
 
     # -- 级联调度 ----------------------------------------------------------
 
-    def _get_available_agents(self, characters: list[str]) -> list[str]:
+    def _get_available_subagents(self, characters: list[str]) -> list[str]:
         """从 SubagentStore 过滤出还有 profile 的 agent。
 
         若某个 agent 的 subagent profile 已被其他会话删除，则将其从
@@ -250,8 +252,12 @@ class MultiAgentLoop(BaseAgentLoop):
         - 注入 final-round 提示词，告知 Agent 不得指定 response_characters
         - 代码层面强制忽略 Agent 输出的 response_characters
         """
+        is_contains_main_agent = MAIN_AGENT_CHARACTER_NAME in response_characters
         # 运行时防御：过滤已删除 subagent profile 的角色
-        response_characters = self._get_available_agents(response_characters)
+        response_characters = self._get_available_subagents(response_characters)
+        # 恢复主agent, 因_get_available_subagents会删除主agent
+        if is_contains_main_agent:
+            response_characters.append(MAIN_AGENT_CHARACTER_NAME)
 
         if not response_characters or depth >= MULTI_AGENT_MAX_CASCADE_DEPTH:
             if depth >= MULTI_AGENT_MAX_CASCADE_DEPTH:
