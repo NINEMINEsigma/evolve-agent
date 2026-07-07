@@ -181,6 +181,8 @@ class CharacterConversationMessage(CharacterMessage):
                                                 description="The tool calls of the message")
     message_suffix: str|None            = Field(default=None, 
                                                 description="The suffix of the message, like hook messages")
+    dynamic_message_suffix: str|None    = Field(default=None,
+                                                description="The suffix of the last user message, like hook messages")                                            
 
     def with_suffix(self, message_suffix: str | None) -> "CharacterConversationMessage":
         """返回带新 message_suffix 的副本（不影响原对象）。"""
@@ -190,27 +192,30 @@ class CharacterConversationMessage(CharacterMessage):
         self,
         # 当前作为运行中的agent的角色
         current_character_agent:str, 
+        is_last_user_message: bool = False,
         **kwargs
         ) -> str|list[MessageBlock]|None:
         '''
         获取角色对话消息的字符串内容, 如果不可见将被略过, 可见时将会对所有非消息接收者第一人称的消息都施加前缀修饰
         '''
+        is_self_current = self.character_name == current_character_agent
+
         # 非持久化注入的suffix
-        non_persistent_injection_suffix = kwargs.get("non_persistent_injection_suffix", "")
-        if non_persistent_injection_suffix:
-            del kwargs["non_persistent_injection_suffix"]
+        non_persistent_injection_suffix = ""
+        if is_last_user_message:
+            non_persistent_injection_suffix = self.dynamic_message_suffix
 
         global _Role_Prefix_Template
         raw_message = super().as_content(current_character_agent, **kwargs)
-        # 如果当前角色不在可见角色列表中, 则略过
+        # 如果当前角色不在可见角色列表中, 则略过(自己不会被略过)
         # "all-agents" 简写表示对全体可见
         from entity.constant import ALL_AGENTS_CHARACTER_REF_NAME
-        if (self.visible_characters and 
+        if is_self_current == False and (self.visible_characters and 
             current_character_agent not in self.visible_characters and
             ALL_AGENTS_CHARACTER_REF_NAME not in self.visible_characters):
             return None
         # 如果当前是消息接收者第一人称的消息, 则直接返回原始消息
-        if current_character_agent == self.character_name:
+        if is_self_current:
             return raw_message
         # 如果前缀模板未加载, 则加载
         if _Role_Prefix_Template is None:
@@ -223,7 +228,7 @@ class CharacterConversationMessage(CharacterMessage):
             prefix = prefix.replace("{{VISIBLE_CHARACTERS}}", f"{', '.join(self.visible_characters)} and the {USER_CHARACTER_NAME}")
         else:
             prefix = prefix.replace("{{VISIBLE_CHARACTERS}}", f"Just {USER_CHARACTER_NAME}")
-        # 返回前缀修饰后的消息
+        # 返回修饰后的消息
         return f"{prefix}\n---\n{raw_message}\n---\n{self.message_suffix}{non_persistent_injection_suffix}"
 
     def as_message(self,
@@ -281,11 +286,14 @@ class ToolResultMessage(CharacterMessage):
 
 
 class History(BaseModel):
-    messages: list[BaseMessage] = Field(..., description="The messages of the history")
+    messages: list[BaseMessage] = Field(default=[], description="The messages of the history")
+    last_user_message: CharacterConversationMessage|None = Field(default=None, description="The last user message of the history")
     _io_locker: Lock = PrivateAttr(default_factory=Lock)
 
     def get_messages(self, current_character_agent: str, **kwargs) -> list[dict]:
-        result = [message.as_message(current_character_agent, **kwargs)
+        result = [message.as_message(
+                    current_character_agent=current_character_agent, is_last_user_message=message == self.last_user_message, 
+                    **kwargs)
             for message in self.messages
             ]
         return [i for i in result if i is not None]
@@ -293,6 +301,14 @@ class History(BaseModel):
     def to_openai(self, current_character_agent: str, **kwargs) -> list[dict]:
         """get_messages 的别名，语义上明确表示转换为 OpenAI 格式。"""
         return self.get_messages(current_character_agent, **kwargs)
+
+    def _update_last_user_message(self) -> None:
+        for message in reversed(self.messages):
+            if isinstance(message, CharacterConversationMessage):
+                if message.role == Role.USER:
+                    self.last_user_message = message
+                    return
+        self.last_user_message = None
 
     def add_message(self, message: BaseMessage) -> int:
         with self._io_locker:
@@ -319,6 +335,7 @@ class History(BaseModel):
                     )
                     return -1
             self.messages.append(message)
+            self._update_last_user_message()
             return len(self.messages) - 1
 
     def insert_message(self, message: BaseMessage, index: int) -> bool:
@@ -326,6 +343,7 @@ class History(BaseModel):
             if index < 0 or index > len(self.messages):
                 return False
             self.messages.insert(index, message)
+            self._update_last_user_message()
             return True
         return False
 
@@ -334,6 +352,7 @@ class History(BaseModel):
             if index < 0 or index >= len(self.messages):
                 return False
             self.messages.pop(index)
+            self._update_last_user_message()
             return True
         return False
 

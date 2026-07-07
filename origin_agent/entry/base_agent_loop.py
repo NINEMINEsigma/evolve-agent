@@ -19,8 +19,12 @@ from pydantic import BaseModel
 from entity.puretype import Role, ToolDangerLevel
 from entity.messages import History, BaseMessage, ToolResultMessage
 from entity.constant import USER_CHARACTER_NAME
-from entry.agent_support.messages import build_turn_messages, load_message_hooks
-from entry.agent_support.multimodal import tool_result_to_content, content_to_text
+from entry.agent_support.messages import (
+    build_turn_messages,
+    collect_all_hooks_context,
+    load_message_hooks,
+)
+from entry.agent_support.multimodal import tool_result_to_content
 from system.pathutils import find_repo_root
 
 if TYPE_CHECKING:
@@ -178,6 +182,7 @@ class BaseAgentLoop(ABC):
         self.app: Application = app
         self._inbox: Inbox = Inbox()
         self._cancel_event: asyncio.Event = asyncio.Event()
+        self._message_hooks_cache: list[dict] | None = None
 
     @property
     def inbox(self) -> Inbox:
@@ -260,6 +265,63 @@ class BaseAgentLoop(ABC):
         """检查取消事件，已中断则返回 True。"""
         return self._cancel_event.is_set()
 
+    # -- Hook 支持（所有 loop 共享）----------------------------------------
+
+    def _load_message_hooks(self) -> list[dict]:
+        """加载 custom_hooks 目录中的消息扩展 hook，结果按 loop 实例缓存。"""
+        if self._message_hooks_cache is not None:
+            return self._message_hooks_cache
+        hooks = load_message_hooks(find_repo_root(), logger)
+        self._message_hooks_cache = hooks
+        return hooks
+
+    def _get_workspace(self) -> str:
+        """返回当前 loop 使用的 workspace 路径。"""
+        return (
+            str(self.app.runtime_context.workspace)
+            if self.app.runtime_context is not None
+            else str(find_repo_root())
+        )
+
+    def _collect_hooks_context(
+        self,
+        session_id: str | None = None,
+    ) -> tuple[str, str]:
+        """收集 custom_hooks 的实时上下文。
+
+        返回 (hooks_context, fixator_context)。hooks_context 只应作非持久化注入；
+        fixator_context 应持久化为用户消息的 message_suffix。
+        通过 collect_all_hooks_context 只遍历一次 hooks，避免重复调用 tag_fn。
+        """
+        sid = session_id or self.session_id
+        hooks = self._load_message_hooks()
+        workspace = self._get_workspace()
+        return collect_all_hooks_context(
+            hooks=hooks,
+            session_id=sid,
+            workspace=workspace,
+            runtime_ctx=self.app.runtime_context,
+        )
+
+    def _set_dynamic_suffix(
+        self,
+        history: History,
+        hooks_context: str,
+        memory_ctx: str = "",
+    ) -> None:
+        """把非持久化的 hooks_context / memory_ctx 设置到 History 最后一条 user 消息。
+
+        由 CharacterConversationMessage.as_content 在 is_last_user_message=True 时自动附加。
+        """
+        if history.last_user_message is None:
+            return
+        parts: list[str] = []
+        if memory_ctx:
+            parts.append(f"<|im_memory_context_start|>\n{memory_ctx}\n<|im_memory_context_end|>")
+        if hooks_context:
+            parts.append(hooks_context)
+        history.last_user_message.dynamic_message_suffix = "\n".join(parts) if parts else None
+
 
 # ---------------------------------------------------------------------------
 # BasePrivateChatAgentLoop — 1-on-1 私聊 Agent 循环基类
@@ -282,7 +344,6 @@ class BasePrivateChatAgentLoop(BaseAgentLoop):
     def __init__(self, app: Application, session_id: str) -> None:
         super().__init__(app, session_id)
         self._history: History = History(messages=[])
-        self._message_hooks_cache: list[dict] | None = None
 
     # -- 抽象方法 ---------------------------------------------------------
 
@@ -399,14 +460,6 @@ class BasePrivateChatAgentLoop(BaseAgentLoop):
     def _append_history(self, message: BaseMessage) -> None:
         self._history.add_message(message)
 
-    def _load_message_hooks(self) -> list[dict]:
-        """加载 custom_hooks 目录中的消息扩展 hook，结果按 loop 实例缓存。"""
-        if self._message_hooks_cache is not None:
-            return self._message_hooks_cache
-        hooks = load_message_hooks(find_repo_root(), logger)
-        self._message_hooks_cache = hooks
-        return hooks
-
     def _get_memory_context(self, user_message: str) -> str:
         """返回当前回合的 memory 上下文；子类可重写，默认空。"""
         _ = user_message  # 基类默认不使用，子类重写时消费
@@ -414,28 +467,16 @@ class BasePrivateChatAgentLoop(BaseAgentLoop):
 
     def _build_history_messages(
         self, user_message: str = ""
-    ) -> tuple[list[dict[str, Any]], str]:
-        """构建发送给 LLM 的完整历史消息列表（含 system prompt + hooks + memory）。
+    ) -> list[dict[str, Any]]:
+        """构建发送给 LLM 的完整历史消息列表（含 system prompt）。
 
-        返回 (messages, fixator_context)。fixator_context 由 hook_fixator 产生，
-        调用方如需持久化到磁盘可据此判断。
+        hooks_context / memory_ctx 已在追加用户消息时通过
+        History.last_user_message.dynamic_message_suffix 注入，本函数不再处理。
         """
+        _ = user_message  # 保留签名兼容，实际注入逻辑已前移到 append_user_message
         system_prompts = self._build_system_prompt()
-        memory_ctx = self._get_memory_context(user_message)
-        hooks = self._load_message_hooks()
-        workspace = (
-            str(self.app.runtime_context.workspace)
-            if self.app.runtime_context is not None
-            else str(find_repo_root())
-        )
-        messages, fixator_context = build_turn_messages(
+        return build_turn_messages(
             system_prompts=system_prompts,
             history=self._history,
             current_character_agent=self.current_character_agent,
-            session_id=self.session_id,
-            workspace=workspace,
-            memory_ctx=memory_ctx,
-            hooks=hooks,
-            runtime_ctx=self.app.runtime_context,
         )
-        return messages, fixator_context

@@ -116,14 +116,18 @@ class MultiAgentLoop(BaseAgentLoop):
     ) -> int:
         """追加用户消息到 History 并回显到前端。"""
         _visible = visible_characters if visible_characters else self._agent_names
+        hooks_context, fixator_context = self._collect_hooks_context()
         msg = CharacterConversationMessage(
             role=Role.USER,
             character_name=USER_CHARACTER_NAME,
             content=str(content),
             visible_characters=_visible,
             response_characters=response_characters,
+            message_suffix=fixator_context or None,
+            dynamic_message_suffix=hooks_context or None,
         )
         idx = self._history.add_message(msg)
+        self._persist_message(self.session_id)
         await self._sink.emit_user_message(
             self.session_id,
             display_content if display_content is not None else str(content),
@@ -418,20 +422,15 @@ class MultiAgentLoop(BaseAgentLoop):
 
         # 追加用户消息
         if not skip_append:
-            self._history.add_message(
-                CharacterConversationMessage(
-                    role=Role.USER,
-                    character_name=USER_CHARACTER_NAME,
-                    content=user_message,
-                    visible_characters=_visible,
-                    response_characters=_response,
-                )
+            await self.append_user_message(
+                user_message,
+                visible_characters=_visible,
+                response_characters=_response,
             )
             logger.info(
                 "Appended user message to history | session=%s visible=%s",
                 self.session_id, _visible,
             )
-            self._persist_message(self.session_id)
 
         # 以用户指定的角色（或全体）作为初始响应者
         await self._cascade(_response)
@@ -650,7 +649,8 @@ class MultiAgentLoop(BaseAgentLoop):
         """
         profile = self._agents[character_name]
 
-        # 构建该 Agent 视角的 History 视图
+        # 构建该 Agent 视角的 History 视图；
+        # dynamic_message_suffix 已在 append_user_message 中设置，由 History 自动附加。
         history_view = self._history.get_messages(character_name)
 
         logger.info(

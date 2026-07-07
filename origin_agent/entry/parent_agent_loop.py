@@ -39,7 +39,6 @@ from entry.agent_sink import AgentSink, FrontendSink
 from entry.agent_support.messages import (
     build_agent_system_prompt,
     build_full_history_messages,
-    collect_hooks_context,
 )
 from entry.agent_support.multimodal import (
     build_image_content_blocks,
@@ -304,13 +303,8 @@ class ParentAgentLoop(BasePrivateChatAgentLoop):
                     sid = new_sid
                     self.session_id = new_sid
 
-            # 构建消息列表（hook / memory / fixator 由基类统一处理）
-            messages, fixator_context = self._build_history_messages(user_message)
-            if fixator_context:
-                # 将 fixator_context 持久化为 message_suffix，然后重新构建消息，
-                # 避免 build_turn_messages 重复追加同一 suffix。
-                self._update_last_user_message(sid, fixator_context)
-                messages, _ = self._build_history_messages(user_message)
+            # 构建消息列表（hook / memory / fixator 已在 append_user_message 中注入）
+            messages = self._build_history_messages(user_message)
 
             try:
                 return await self._run_tool_loop(sid, messages, user_message)
@@ -790,7 +784,22 @@ class ParentAgentLoop(BasePrivateChatAgentLoop):
             display_content: 回显给前端显示的内容；默认与 content 相同。
             character_name: 该用户消息的发出者角色名；默认 end-user。
         """
-        index = self._append(self.session_id, Role.USER, content, character_name=character_name)
+        hooks_context, fixator_context = self._collect_hooks_context()
+        memory_ctx = self._get_memory_context(str(content))
+
+        dynamic_parts: list[str] = []
+        if memory_ctx:
+            dynamic_parts.append(f"<|im_memory_context_start|>\n{memory_ctx}\n<|im_memory_context_end|>")
+        if hooks_context:
+            dynamic_parts.append(hooks_context)
+        dynamic_suffix = "\n".join(dynamic_parts) if dynamic_parts else None
+
+        index = self._append(
+            self.session_id, Role.USER, content,
+            character_name=character_name,
+            message_suffix=fixator_context or None,
+            dynamic_message_suffix=dynamic_suffix,
+        )
         await self._frontend_sink.emit_user_message(
             self.session_id, display_content if display_content is not None else content,
             character_name, index,
@@ -802,6 +811,8 @@ class ParentAgentLoop(BasePrivateChatAgentLoop):
         content: str | list[dict[str, Any]],
         reasoning_content: str | None = None,
         character_name: str | None = None,
+        message_suffix: str | None = None,
+        dynamic_message_suffix: str | None = None,
     ) -> int:
         """追加一条用户/assistant 消息到 History 并持久化，返回消息索引。"""
         # TODO: 这条函数可能有问题
@@ -818,6 +829,8 @@ class ParentAgentLoop(BasePrivateChatAgentLoop):
                 content=message_content,
                 visible_characters=[self.current_character_agent] if role == Role.USER else None,
                 reasoning=reasoning_content,
+                message_suffix=message_suffix,
+                dynamic_message_suffix=dynamic_message_suffix,
             )
         else:
             message = CharacterConversationMessage(
@@ -827,7 +840,8 @@ class ParentAgentLoop(BasePrivateChatAgentLoop):
                 visible_characters=[self.current_character_agent] if role == Role.USER else None,
                 reasoning=reasoning_content,
                 reasoning_field_name="reasoning_content",
-                message_suffix=None,
+                message_suffix=message_suffix,
+                dynamic_message_suffix=dynamic_message_suffix,
                 tool_calls=None,
             )
         index = self._history.add_message(message)
@@ -1033,15 +1047,7 @@ class ParentAgentLoop(BasePrivateChatAgentLoop):
         messages = self._history.messages
         if messages and messages[-1].role == Role.USER:
             messages.pop()
-        self._overwrite_history_file(session_id)
-
-    def _update_last_user_message(self, session_id: str, fixator_context: str) -> None:
-        """将 fixator_context 设为 History 中最后一条 user 消息的持久化 suffix。"""
-        for i in range(len(self._history.messages) - 1, -1, -1):
-            msg = self._history.messages[i]
-            if msg.role == Role.USER and isinstance(msg, CharacterConversationMessage):
-                self._history.messages[i] = msg.with_suffix(fixator_context)
-                break
+            self._history._update_last_user_message()
         self._overwrite_history_file(session_id)
 
     # ========================================================================
@@ -1209,12 +1215,8 @@ class ParentAgentLoop(BasePrivateChatAgentLoop):
     # ========================================================================
 
     def _get_hooks_context(self, session_id: str) -> str:
-        return collect_hooks_context(
-            self._load_message_hooks(),
-            session_id,
-            str(self.app.runtime_context.workspace),
-            self.app.runtime_context,
-        )
+        hooks_context, _ = self._collect_hooks_context(session_id=session_id)
+        return hooks_context
 
     def _collect_skill_prompts(self) -> list[str]:
         """生成 skill 名称和描述清单，避免全量内容注入 system prompt。
@@ -1358,6 +1360,7 @@ class ParentAgentLoop(BasePrivateChatAgentLoop):
             return {"deleted": False, "error": f"only {len(user_indices)} user messages available"}
         remove_from = user_indices[-count]
         self._history.messages = self._history.messages[:remove_from]
+        self._history._update_last_user_message()
         self._overwrite_history_file(self.session_id)
         return {"deleted": True, "session_id": self.session_id, "remaining_count": self._history.count}
 
