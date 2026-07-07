@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+from pathlib import Path
 from typing import Any, TYPE_CHECKING
 
 from entity.messages import (
@@ -25,6 +26,7 @@ from entity.constant import (
     LOG_PREVIEW_CHARS,
 )
 from system.templates import get_templates_dir
+from system.session_store import SessionStore
 from entry.base_agent_loop import BaseAgentLoop
 from entry.multi_agent_worker import WorkerResult, MultiAgentWorker
 from entry.agent_support.multimodal import summarize_message_for_log
@@ -73,21 +75,34 @@ class MultiAgentLoop(BaseAgentLoop):
         history: History,
         agents: dict[str, AgentProfile],
         sink: AgentSink,
+        history_store_dir: Path | None = None,
     ) -> None:
         super().__init__(app, session_id)
         self._history: History = history
         self._agents: dict[str, AgentProfile] = agents
         self._sink: AgentSink = sink
         self._agent_names: list[str] = list(agents.keys())
+        self._session_store: SessionStore | None = (
+            SessionStore(history_store_dir) if history_store_dir else None
+        )
         logger.info(
-            "MultiAgentLoop initialized | session=%s agents=%d",
-            session_id, len(self._agent_names),
+            "MultiAgentLoop initialized | session=%s agents=%d history_store=%s",
+            session_id, len(self._agent_names), bool(history_store_dir),
         )
 
     # -- BaseAgentLoop 抽象方法实现 ----------------------------------------
 
     def _get_sink(self) -> AgentSink:
         return self._sink
+
+    def _persist_message(self, session_id: str) -> None:
+        """将当前 History 持久化到磁盘。"""
+        if self._session_store is None:
+            return
+        try:
+            self._session_store.write_history(session_id, self._history)
+        except Exception as exc:
+            logger.exception("Failed to persist history for session %s: %s", session_id, exc)
 
     @property
     def user_character_name(self) -> str:
@@ -363,6 +378,7 @@ class MultiAgentLoop(BaseAgentLoop):
                 "Appended user message to history | session=%s visible=%s",
                 self.session_id, _visible,
             )
+            self._persist_message(self.session_id)
 
         # 以用户指定的角色（或全体）作为初始响应者
         await self._cascade(_response)
@@ -517,6 +533,7 @@ class MultiAgentLoop(BaseAgentLoop):
             )
 
             self._history.add_message(msg)
+            self._persist_message(self.session_id)
 
             # 推送可见性/响应元数据给前端，用 stream_id 关联流式消息
             if result.stream_id and (visible or response):

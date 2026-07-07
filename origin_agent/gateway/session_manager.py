@@ -242,6 +242,7 @@ class SessionManager:
             history=history,
             agents=agent_profiles,
             sink=frontend_sink,
+            history_store_dir=history_store_dir,
         )
         self._loops[session_id] = multi_loop
         if self._app.cron_router is not None:

@@ -115,6 +115,7 @@ async def _handle_enter_multi_agent(args: dict[str, Any]) -> dict:
         history=history,
         agents=agent_profiles,
         sink=sink,
+        history_store_dir=parent_loop._history_store_dir,
     )
 
     await app.session_manager.replace_loop(session_id, multi_loop)
