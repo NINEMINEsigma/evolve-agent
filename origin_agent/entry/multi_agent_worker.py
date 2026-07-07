@@ -281,7 +281,7 @@ class MultiAgentWorker:
                         "type": "function",
                         "function": {
                             "name": chunk.tool_call.name,
-                            "arguments": chunk.tool_call.arguments,
+                            "arguments": json.dumps(chunk.tool_call.arguments, ensure_ascii=False),
                         },
                     }
                     tool_calls.append(tc_dict)
