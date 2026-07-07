@@ -25,7 +25,7 @@ from entity.constant import (
     MULTI_AGENT_MAX_CASCADE_DEPTH,
     LOG_PREVIEW_CHARS,
 )
-from system.templates import get_templates_dir
+from system.templates import get_templates_dir, render_multi_agent_prompt
 from system.session_store import SessionStore
 from entry.base_agent_loop import BaseAgentLoop
 from entry.multi_agent_worker import WorkerResult, MultiAgentWorker
@@ -195,6 +195,10 @@ class MultiAgentLoop(BaseAgentLoop):
                 entry["visible_characters"] = getattr(msg, "visible_characters")
             if hasattr(msg, "response_characters") and getattr(msg, "response_characters"):
                 entry["response_characters"] = getattr(msg, "response_characters")
+            if hasattr(msg, "message_suffix") and getattr(msg, "message_suffix"):
+                entry["message_suffix"] = getattr(msg, "message_suffix")
+            if hasattr(msg, "dynamic_message_suffix") and getattr(msg, "dynamic_message_suffix"):
+                entry["dynamic_message_suffix"] = getattr(msg, "dynamic_message_suffix")
             if isinstance(msg, CharacterConversationMessage):
                 if msg.reasoning:
                     entry["reasoning_content"] = msg.reasoning
@@ -567,6 +571,10 @@ class MultiAgentLoop(BaseAgentLoop):
                 content_text = f"[{result.character_name} 没有返回有效内容]"
 
             visible = parsed.visible_characters
+            # TODO: 有待考量
+            # agent 未指定可见范围时，默认对当前全部 agent 可见
+            if not visible:
+                visible = list(self._agent_names)
             response = list(parsed.response_characters)
 
             # 最后一轮：强制忽略 response_characters
@@ -669,7 +677,7 @@ class MultiAgentLoop(BaseAgentLoop):
             if _Final_Round_Prompt is None:
                 template_path = get_templates_dir() / "multiagent" / "multi_agent_final_round_prompt.txt"
                 with open(template_path, "r", encoding="utf-8") as f:
-                    _Final_Round_Prompt = f.read()
+                    _Final_Round_Prompt = render_multi_agent_prompt(f.read(), character_name)
             system_prompt = system_prompt + "\n\n" + _Final_Round_Prompt
             logger.info(
                 "Agent worker final round prompt appended | session=%s character=%s new_prompt_len=%d",

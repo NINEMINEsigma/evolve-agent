@@ -141,7 +141,7 @@ class SessionManager:
         from component.mutliagenttools._store import SubagentStore
         from component.llm import LLMClient
         from entry.multi_agent_loop import MultiAgentLoop, AgentProfile
-        from system.templates import get_templates_dir
+        from system.templates import get_templates_dir, render_multi_agent_prompt
         from abstract.tools.registry import registry as tool_registry
         from entity.puretype import ToolAvailability
         from entity.constant import MAIN_AGENT_CHARACTER_NAME
@@ -179,8 +179,8 @@ class SessionManager:
                 llm_client = LLMClient(ctx)
                 skill_blocks = collect_skill_prompts()
                 main_prompt = "\n\n".join(build_agent_system_prompt(ctx, skill_blocks))
-                # 追加多 Agent JSON 响应格式指令
-                system_prompt = main_prompt + "\n\n" + system_prompt_template.replace("{{CHARACTER_NAME}}", name)
+                # 追加多 Agent 路由格式指令
+                system_prompt = main_prompt + "\n\n" + render_multi_agent_prompt(system_prompt_template, name)
             else:
                 profile = store.get(name)
                 if profile is None:
@@ -199,7 +199,7 @@ class SessionManager:
                     "llm_temperature": parent_ctx.llm_temperature,
                 })
                 llm_client = LLMClient(ctx)
-                system_prompt = system_prompt_template.replace("{{CHARACTER_NAME}}", name)
+                system_prompt = render_multi_agent_prompt(system_prompt_template, name)
 
             agent_profiles[name] = AgentProfile(
                 character_name=name,

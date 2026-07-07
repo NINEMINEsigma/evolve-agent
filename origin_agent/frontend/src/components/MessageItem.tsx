@@ -267,6 +267,24 @@ const MessageItem = memo(function MessageItem({ message, archived, onImageClick,
     return <pre className={`message-text message-text-${roleClass}`}>{String(content)}</pre>;
   };
 
+  const renderContextExtension = () => {
+    const hasSuffix = m.messageSuffix || m.dynamicMessageSuffix;
+    if (!hasSuffix) return null;
+    return (
+      <details className="context-extension-block">
+        <summary className="context-extension-summary">上下文扩展</summary>
+        <div className="context-extension-content">
+          {m.dynamicMessageSuffix && (
+            <pre className="context-extension-part">{m.dynamicMessageSuffix}</pre>
+          )}
+          {m.messageSuffix && (
+            <pre className="context-extension-part">{m.messageSuffix}</pre>
+          )}
+        </div>
+      </details>
+    );
+  };
+
   const renderBody = () => {
     if (editing) {
       return (
@@ -301,13 +319,19 @@ const MessageItem = memo(function MessageItem({ message, archived, onImageClick,
           ) : (
             renderBlocksContent(m.content, m.role)
           )}
+          {renderContextExtension()}
           {streaming && <span className="streaming-cursor" />}
         </>
       );
     }
 
     if (m.role === "user") {
-      return renderBlocksContent(m.content, m.role);
+      return (
+        <>
+          {renderBlocksContent(m.content, m.role)}
+          {renderContextExtension()}
+        </>
+      );
     }
 
     return renderBlocksContent(m.content, m.role);

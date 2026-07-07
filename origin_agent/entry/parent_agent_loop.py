@@ -1282,6 +1282,10 @@ class ParentAgentLoop(BasePrivateChatAgentLoop):
             if isinstance(msg, CharacterConversationMessage):
                 if msg.response_characters:
                     entry["response_characters"] = msg.response_characters
+                if msg.message_suffix:
+                    entry["message_suffix"] = msg.message_suffix
+                if msg.dynamic_message_suffix:
+                    entry["dynamic_message_suffix"] = msg.dynamic_message_suffix
                 if msg.reasoning:
                     entry["reasoning_content"] = msg.reasoning
                 if msg.tool_calls:

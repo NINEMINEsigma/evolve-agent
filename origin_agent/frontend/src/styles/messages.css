@@ -126,6 +126,68 @@
   overflow-y: auto;
 }
 
+/* ── Context extension block (message_suffix / dynamic_message_suffix) ── */
+.context-extension-block {
+  margin-top: 8px;
+  color: var(--text-muted);
+  overflow: hidden;
+  border-left: 2px solid var(--border);
+  padding-left: 10px;
+}
+
+.context-extension-summary {
+  padding: 2px 0;
+  font-size: 12px;
+  color: var(--text-muted);
+  cursor: pointer;
+  user-select: none;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  list-style: none;
+}
+
+.context-extension-summary::-webkit-details-marker {
+  display: none;
+}
+
+.context-extension-summary::before {
+  content: ">";
+  font-size: 11px;
+  font-weight: 700;
+  transition: transform 0.15s;
+  color: var(--text-muted);
+}
+
+.context-extension-block[open] .context-extension-summary::before {
+  transform: rotate(90deg);
+}
+
+.context-extension-summary:hover {
+  color: var(--text-secondary);
+}
+
+.context-extension-content {
+  padding: 4px 0 8px 18px;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--text-secondary);
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 240px;
+  overflow-y: auto;
+}
+
+.context-extension-part {
+  margin: 0 0 6px 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.context-extension-part:last-child {
+  margin-bottom: 0;
+}
+
 .message-assistant .message-bubble {
   flex-direction: row-reverse;
 }

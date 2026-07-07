@@ -3,7 +3,7 @@ MultiAgentWorker — 单 Agent tool loop 执行器。
 
 在多 Agent 协作模式中，每个被指定响应的 Agent 通过本 worker
 执行完整的 tool loop：LLM → tool_calls → 工具执行 → 结果追加 → 循环，
-最终以 JSON 格式输出（含 visible_characters / response_characters）。
+最终以自然语言 + DSL 路由标签输出（@visible(...) / @response(...)）。
 """
 
 from __future__ import annotations
@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 import uuid
 from collections.abc import AsyncIterator
 from typing import Any, TYPE_CHECKING
@@ -21,7 +22,11 @@ from entity.puretype import Role
 from entity.messages import ToolResultMessage, CharacterConversationMessage, FunctionCall, ToolCall as HistoryToolCall
 from entity.constant import (
     MAX_TOOL_TURNS,
-    MULTI_AGENT_JSON_RETRIES,
+    ALL_AGENTS_CHARACTER_REF_NAME,
+    MULTI_AGENT_ROUTING_TAG_VISIBLE,
+    MULTI_AGENT_ROUTING_TAG_RESPONSE,
+    MULTI_AGENT_ROUTING_RESPONSE_NONE,
+    MULTI_AGENT_ROUTING_RESPONSE_NULL,
 )
 from entry.base_agent_loop import BaseAgentLoop
 
@@ -33,20 +38,20 @@ logger = logging.getLogger(__name__)
 
 
 class AgentResponse(BaseModel):
-    """多 Agent 模式下单个 Agent 的 JSON 响应结构。"""
+    """多 Agent 模式下单个 Agent 的解析后响应结构。"""
 
-    content: str = Field("", description="Agent 的自然语言回复文本")
+    content: str = Field("", description="Agent 的自然语言回复文本（已剥离路由标签）")
     visible_characters: list[str] = Field(default_factory=list, description="能看到此消息的角色名列表")
     response_characters: list[str] = Field(default_factory=list, description="需要回复的角色名列表")
     reasoning: str | None = Field(default=None, description="LLM 推理内容（仅在支持 thinking 的 provider 下存在）")
 
 
 class WorkerResult(BaseModel):
-    """Worker 执行结果，包含解析后的 JSON 路由元数据。"""
+    """Worker 执行结果，包含解析后的 DSL 路由元数据。"""
 
     character_name: str = Field(..., description="当前 Agent 的角色名")
-    parsed_json: AgentResponse = Field(..., description="解析后的 Agent JSON 响应")
-    raw_json: str = Field("", description="原始 JSON 文本")
+    parsed_json: AgentResponse = Field(..., description="解析后的 Agent 响应")
+    raw_json: str = Field("", description="原始 LLM 文本")
     stream_buffer: list[str] = Field(default_factory=list, description="流式 token 缓冲")
     stream_id: str = Field("", description="Worker 的流式标识，用于前端关联元数据")
 
@@ -55,14 +60,14 @@ class MultiAgentWorker:
     """单个 Agent 的 tool loop 执行器。
 
     在独立上下文中执行 LLM → tool_calls → 工具执行 → 循环，
-    最终输出 JSON 格式响应。
+    最终输出自然语言 + DSL 路由标签。
 
     参数:
         character_name: 当前 Agent 的角色名
         system_prompt: Agent 的系统提示词
         history: 该 Agent 视角的 History 视图（已过滤的 OpenAI 消息列表）
         tools: 该 Agent 可用的工具定义列表
-        llm_client: LLM 客户端（需支持 chat_stream + response_format）
+        llm_client: LLM 客户端（需支持 chat_stream）
         sink: 前端流式输出 sink
         loop: 所属 MultiAgentLoop 实例（用于工具审批和执行）
     """
@@ -88,45 +93,64 @@ class MultiAgentWorker:
         # 每个 worker 实例使用独立 stream_id，防止级联多轮时前端叠加/覆盖消息
         self._stream_id: str = f"multi_{character_name}_{uuid.uuid4().hex[:8]}"
 
-    def _append_retry_prompt(
-        self,
-        *,
-        text: str,
-        retries: int,
-        turn: int,
-        full_messages: list[dict[str, Any]],
-        error_reason: str,
-        user_feedback: str,
-    ) -> int:
-        """对空/空白/无效 JSON 响应追加重试提示。
+    @staticmethod
+    def _parse_routing_tags(text: str) -> AgentResponse:
+        """从自然语言文本中解析 DSL 路由标签。
 
-        如果重试次数未耗尽，把当前 assistant 消息和 user 反馈追加到
-        ``full_messages``，并返回递增后的 retries。
-        如果已耗尽，返回原 retries 值（调用方通过 ``new > old`` 判断是否继续重试）。
+        支持格式：
+        - @visible(Noire, 杏)
+        - @response(Noire)
+        - @response(none)
+        - @visible(all) / @visible(all-agents)
+
+        返回的 AgentResponse.content 已剥离所有路由标签。
+        若未命中任何标签，visible_characters 与 response_characters 均为空列表
+        （由外层补全默认值）。
         """
-        logger.warning(
-            "MultiAgentWorker %s | session=%s character=%s turn=%d retries=%d max=%d",
-            error_reason, self._loop.session_id, self.character_name, turn, retries, MULTI_AGENT_JSON_RETRIES,
+        if not text:
+            return AgentResponse(content="", visible_characters=[], response_characters=[])
+
+        # 匹配 @visible(...) 或 @response(...)
+        tag_pattern = re.compile(r"@(\w+)\((.*?)\)")
+        visible_characters: list[str] = []
+        response_characters: list[str] = []
+
+        def split_names(payload: str) -> list[str]:
+            return [n.strip() for n in payload.split(",") if n.strip()]
+
+        def process_match(match: re.Match) -> str:
+            nonlocal visible_characters, response_characters
+            key = match.group(1).lower()
+            payload = match.group(2).strip()
+            if key == MULTI_AGENT_ROUTING_TAG_VISIBLE:
+                if payload.lower() == ALL_AGENTS_CHARACTER_REF_NAME:
+                    visible_characters = [ALL_AGENTS_CHARACTER_REF_NAME]
+                else:
+                    visible_characters = split_names(payload)
+            elif key == MULTI_AGENT_ROUTING_TAG_RESPONSE:
+                if payload.lower() in (MULTI_AGENT_ROUTING_RESPONSE_NONE, MULTI_AGENT_ROUTING_RESPONSE_NULL, ""):
+                    response_characters = []
+                else:
+                    response_characters = split_names(payload)
+            return ""
+
+        clean_text = tag_pattern.sub(process_match, text)
+        clean_text = clean_text.strip()
+        clean_text = re.sub(r"\n{3,}", "\n\n", clean_text)
+
+        return AgentResponse(
+            content=clean_text,
+            visible_characters=visible_characters,
+            response_characters=response_characters,
         )
-        if retries >= MULTI_AGENT_JSON_RETRIES:
-            return retries
-        new_retries = retries + 1
-        logger.warning(
-            "%s for agent=%s, retrying (%d/%d)",
-            error_reason, self.character_name, new_retries, MULTI_AGENT_JSON_RETRIES,
-        )
-        full_messages.append({"role": "assistant", "content": text})
-        full_messages.append({"role": "user", "content": user_feedback})
-        return new_retries
 
     async def run(self) -> WorkerResult:
-        """执行完整的 tool loop + JSON 输出。
+        """执行完整的 tool loop + DSL 路由标签输出。
 
         流程:
         1. 插入 system_prompt 到消息列表头部
         2. 循环: LLM 调用 → 检查 tool_calls → 执行工具 → 追加结果
-        3. 当 LLM 返回纯文本时 → 解析 JSON → 推送干净内容到前端 → 返回 WorkerResult
-        4. JSON 解析失败或返回空内容时重试（最多 MULTI_AGENT_JSON_RETRIES 次）
+        3. 当 LLM 返回纯文本时 → 解析 DSL 标签 → 推送干净内容到前端 → 返回 WorkerResult
         """
         # 在消息列表头部插入 system prompt
         full_messages = [
@@ -134,19 +158,16 @@ class MultiAgentWorker:
             *self._messages,
         ]
 
-        # 本地重试计数器：空 content / JSON 解析失败共享同一上限
-        retries = 0
-
         for turn in range(MAX_TOOL_TURNS):
             if self._loop.is_interrupted():
                 return await self._error_result("Interrupted")
 
             logger.info(
-                "MultiAgentWorker turn start | session=%s character=%s turn=%d messages_len=%d retries=%d",
-                self._loop.session_id, self.character_name, turn, len(full_messages), retries,
+                "MultiAgentWorker turn start | session=%s character=%s turn=%d messages_len=%d",
+                self._loop.session_id, self.character_name, turn, len(full_messages),
             )
 
-            # 调用 LLM（流式 + JSON 模式）
+            # 调用 LLM（流式，自然语言输出）
             response = await self._call_llm(full_messages)
 
             if response.get("error"):
@@ -241,91 +262,39 @@ class MultiAgentWorker:
 
                 continue
 
-            # 纯文本响应 → 尝试解析 JSON
+            # 纯文本响应 → 解析 DSL 标签
             text = response.get("content", "")
             logger.info(
                 "MultiAgentWorker raw text | session=%s character=%s turn=%d text_len=%d text=%r",
                 self._loop.session_id, self.character_name, turn, len(text), text,
             )
 
-            # 空或全空白 content：可能是 DeepSeek JSON Output 的已知问题，进入重试
             if not text or not text.strip():
-                new_retries = self._append_retry_prompt(
-                    text=text,
-                    retries=retries,
-                    turn=turn,
-                    full_messages=full_messages,
-                    error_reason="empty/blank response",
-                    user_feedback=(
-                        "你的上一个回复是空内容。"
-                        '请严格按照 {"content": "...", "visible_characters": [...], "response_characters": [...]} 的格式回复，'
-                        "不要输出空内容，也不要输出 JSON 之外的任何内容。"
-                    ),
-                )
-                if new_retries > retries:
-                    retries = new_retries
-                    continue
                 return await self._error_result(
-                    f"Max retries ({MULTI_AGENT_JSON_RETRIES}) exceeded for empty/blank response",
+                    "Empty response",
                     raw_text=text,
                 )
 
-            parsed = self._parse_json_safe(text)
-            if parsed is not None:
-                logger.info(
-                    "MultiAgentWorker JSON parse success | session=%s character=%s turn=%d parsed=%s",
-                    self._loop.session_id, self.character_name, turn, parsed,
-                )
-                clean_content = parsed.get("content", "")
-                # 合法 JSON 但 content 为空/仅空白：同样视为无效响应，进入重试
-                if not clean_content or not clean_content.strip():
-                    new_retries = self._append_retry_prompt(
-                        text=text,
-                        retries=retries,
-                        turn=turn,
-                        full_messages=full_messages,
-                        error_reason="empty JSON content field",
-                        user_feedback=(
-                            "你的上一个回复是合法 JSON，但 `content` 字段为空。"
-                            '请严格按照 {"content": "...", "visible_characters": [...], "response_characters": [...]} 的格式回复，'
-                            "`content` 必须包含自然语言回复，不能为空或仅含空白。"
-                        ),
-                    )
-                    if new_retries > retries:
-                        retries = new_retries
-                        continue
-                    return await self._error_result(
-                        f"Max retries ({MULTI_AGENT_JSON_RETRIES}) exceeded for empty JSON content",
-                        raw_text=text,
-                    )
-                await self._emit_text(clean_content)
-                return WorkerResult(
-                    character_name=self.character_name,
-                    parsed_json=AgentResponse(**parsed),
-                    raw_json=text,
-                    stream_buffer=response.get("stream_buffer", []),
-                    stream_id=self._stream_id,
+            parsed = self._parse_routing_tags(text)
+            logger.info(
+                "MultiAgentWorker DSL parse | session=%s character=%s turn=%d parsed=%s",
+                self._loop.session_id, self.character_name, turn, parsed,
+            )
+
+            # DSL 解析后 content 为空/仅空白：兜底提示
+            if not parsed.content or not parsed.content.strip():
+                return await self._error_result(
+                    "Empty content after stripping routing tags",
+                    raw_text=text,
                 )
 
-            # JSON 解析失败，如果还有重试次数则重试
-            new_retries = self._append_retry_prompt(
-                text=text,
-                retries=retries,
-                turn=turn,
-                full_messages=full_messages,
-                error_reason="JSON parse failed",
-                user_feedback=(
-                    "你的上一个回复不是合法的 JSON 格式。"
-                    '请严格按照 {"content": "...", "visible_characters": [...], "response_characters": [...]} 的格式回复，'
-                    "不要包含任何 JSON 之外的内容。"
-                ),
-            )
-            if new_retries > retries:
-                retries = new_retries
-                continue
-            return await self._error_result(
-                f"Max retries ({MULTI_AGENT_JSON_RETRIES}) exceeded for JSON parse",
-                raw_text=text,
+            await self._emit_text(parsed.content)
+            return WorkerResult(
+                character_name=self.character_name,
+                parsed_json=parsed,
+                raw_json=text,
+                stream_buffer=response.get("stream_buffer", []),
+                stream_id=self._stream_id,
             )
 
         # tool loop 超过最大轮数
@@ -340,8 +309,9 @@ class MultiAgentWorker:
     ) -> dict[str, Any]:
         """流式调用 LLM，收集 content / tool_calls / reasoning。
 
-        使用 response_format={'type': 'json_object'} 约束 JSON 输出。
-        **不在此处推送 content_delta 到前端**——原始内容是 JSON 格式，
+        多 Agent 模式下不再使用 response_format 强制 JSON，
+        由模型在自然语言中嵌入 DSL 路由标签。
+        **不在此处推送 content_delta 到前端**——原始内容可能含 DSL 标签，
         由上层 ``run()`` 在解析后推送干净的 content 字段。
         """
         content: str = ""
@@ -355,7 +325,6 @@ class MultiAgentWorker:
             stream = self._llm.chat_stream(
                 messages,
                 tools=self._tools,
-                response_format={"type": "json_object"},
             )
 
             async for chunk in stream:
@@ -452,39 +421,6 @@ class MultiAgentWorker:
 
         return result_msg
 
-    # -- JSON 解析 --------------------------------------------------------
-
-    @staticmethod
-    def _parse_json_safe(text: str) -> dict | None:
-        """安全解析 JSON，支持从混杂文本中提取第一个合法 JSON 对象。"""
-        if not text:
-            return None
-
-        # 先尝试直接解析
-        try:
-            return json.loads(text)
-        except json.JSONDecodeError:
-            pass
-
-        # 尝试提取第一个 { ... } 完整 JSON 块
-        start = text.find("{")
-        if start == -1:
-            return None
-
-        depth = 0
-        for i in range(start, len(text)):
-            if text[i] == "{":
-                depth += 1
-            elif text[i] == "}":
-                depth -= 1
-                if depth == 0:
-                    try:
-                        return json.loads(text[start : i + 1])
-                    except json.JSONDecodeError:
-                        return None
-
-        return None
-
     # -- 辅助方法 ---------------------------------------------------------
 
     async def _error_result(
@@ -492,7 +428,7 @@ class MultiAgentWorker:
         error: str,
         raw_text: str = "",
     ) -> WorkerResult:
-        """构造错误占位 JSON 结果，同时推送错误文本到前端。"""
+        """构造错误占位结果，同时推送错误文本到前端。"""
         text = f"[{self.character_name} 响应失败: {error}]"
         await self._emit_text(text)
         return WorkerResult(
@@ -511,7 +447,7 @@ class MultiAgentWorker:
         """将一段文本以流式方式推送到前端（stream_delta + stream_done）。
 
         仅在 ``_call_llm`` 未推送 content_delta 的前提下使用——
-        ``_call_llm`` 已不再推送原始 JSON，由本方法在 JSON 解析后
+        ``_call_llm`` 已不再推送原始内容，由本方法在 DSL 解析后
         推送干净的 content 字段，确保前端显示的是可读文本。
         """
         stream_id = self._stream_id

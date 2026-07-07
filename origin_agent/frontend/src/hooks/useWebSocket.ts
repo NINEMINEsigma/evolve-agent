@@ -368,6 +368,12 @@ export function useWebSocket() {
               if (typeof m.requires_response === "boolean") {
                 entry.requiresResponse = m.requires_response;
               }
+              if (m.message_suffix) {
+                entry.messageSuffix = m.message_suffix;
+              }
+              if (m.dynamic_message_suffix) {
+                entry.dynamicMessageSuffix = m.dynamic_message_suffix;
+              }
               if (m.reasoning_content) {
                 entry.reasoningContent = m.reasoning_content;
               }
@@ -483,6 +489,8 @@ export function useWebSocket() {
           messageIndex: typeof msg.index === "number" ? msg.index : undefined,
           visibleCharacters: msg.visible_characters ?? undefined,
           responseCharacters: msg.response_characters ?? undefined,
+          messageSuffix: (msg as any).message_suffix ?? undefined,
+          dynamicMessageSuffix: (msg as any).dynamic_message_suffix ?? undefined,
         }]);
       }
       else if (msg.type === "assistant_message") {
@@ -506,6 +514,8 @@ export function useWebSocket() {
             messageIndex: nextMessageIndex(prev),
             visibleCharacters: msg.visible_characters ?? undefined,
             responseCharacters: msg.response_characters ?? undefined,
+            messageSuffix: (msg as any).message_suffix ?? undefined,
+            dynamicMessageSuffix: (msg as any).dynamic_message_suffix ?? undefined,
           }]);
         }
         fetchSessions();

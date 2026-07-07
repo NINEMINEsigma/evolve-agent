@@ -16,7 +16,7 @@ from entity.puretype import Role, ToolAvailability, ToolDangerLevel
 from entity.messages import CharacterConversationMessage
 from entry.parent_agent_loop import ParentAgentLoop
 from system.application import Application
-from system.templates import get_templates_dir
+from system.templates import get_templates_dir, render_multi_agent_prompt
 from entry.multi_agent_loop import MultiAgentLoop, AgentProfile
 
 
@@ -93,10 +93,10 @@ async def _handle_enter_multi_agent(args: dict[str, Any]) -> dict:
         if name == main_agent_name:
             skill_blocks = collect_skill_prompts()
             main_prompt = "\n\n".join(build_agent_system_prompt(parent_loop._get_context(), skill_blocks))
-            # 追加多 Agent JSON 响应格式指令，使主 agent 知晓如何构建 JSON 输出
-            prompt = main_prompt + "\n\n" + system_prompt_template.replace("{{CHARACTER_NAME}}", name)
+            # 追加多 Agent 路由格式指令，使主 agent 知晓如何构建 DSL 输出
+            prompt = main_prompt + "\n\n" + render_multi_agent_prompt(system_prompt_template, name)
         else:
-            prompt = system_prompt_template.replace("{{CHARACTER_NAME}}", name)
+            prompt = render_multi_agent_prompt(system_prompt_template, name)
         agent_profiles[name] = AgentProfile(
             character_name=name,
             system_prompt=prompt,
