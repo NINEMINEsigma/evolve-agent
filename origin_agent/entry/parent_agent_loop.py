@@ -1282,6 +1282,18 @@ class ParentAgentLoop(BasePrivateChatAgentLoop):
                     entry["response_characters"] = msg.response_characters
                 if msg.reasoning:
                     entry["reasoning_content"] = msg.reasoning
+                if msg.tool_calls:
+                    entry["tool_calls"] = [
+                        {
+                            "id": tc.id,
+                            "type": tc.type,
+                            "function": {
+                                "name": tc.function.name,
+                                "arguments": tc.function.arguments,
+                            },
+                        }
+                        for tc in msg.tool_calls
+                    ]
             if msg.role == Role.SYSTEM:
                 entry["role"] = Role.SYSTEM.value
             messages.append(entry)

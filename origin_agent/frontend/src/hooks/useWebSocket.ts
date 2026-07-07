@@ -320,7 +320,36 @@ export function useWebSocket() {
             return;
           }
           if (data.session_history) {
-            const history = data.session_history.map((m: any) => {
+            const history = data.session_history.flatMap((m: any) => {
+              // 把带 tool_calls 的 assistant 消息展开为 tool 消息，避免刷新后显示空消息
+              if (m.role === "assistant" && Array.isArray(m.tool_calls) && m.tool_calls.length > 0) {
+                return m.tool_calls.map((tc: any) => {
+                  const toolName = tc.function?.name || "tool";
+                  let toolArgs = tc.function?.arguments || {};
+                  if (typeof toolArgs === "string") {
+                    try {
+                      toolArgs = JSON.parse(toolArgs);
+                    } catch {
+                      toolArgs = {};
+                    }
+                  }
+                  const argsStr = toolArgs && typeof toolArgs === "object"
+                    ? "(" + Object.entries(toolArgs)
+                        .map(([k, v]) => `${k}=${JSON.stringify(v)}`)
+                        .join(", ") + ")"
+                    : "";
+                  const callerPrefix = m.character_name ? `${m.character_name} ` : "";
+                  return {
+                    role: "tool",
+                    content: `${callerPrefix}⚡ ${toolName} ${argsStr}`,
+                    id: generateUUID(),
+                    toolName,
+                    toolArgs,
+                    characterName: m.character_name,
+                    messageIndex: typeof m.index === "number" ? m.index : undefined,
+                  };
+                });
+              }
               const entry: any = {
                 role: m.role,
                 content: m.content,
