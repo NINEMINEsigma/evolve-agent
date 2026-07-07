@@ -88,6 +88,37 @@ class MultiAgentWorker:
         # 每个 worker 实例使用独立 stream_id，防止级联多轮时前端叠加/覆盖消息
         self._stream_id: str = f"multi_{character_name}_{uuid.uuid4().hex[:8]}"
 
+    def _append_retry_prompt(
+        self,
+        *,
+        text: str,
+        retries: int,
+        turn: int,
+        full_messages: list[dict[str, Any]],
+        error_reason: str,
+        user_feedback: str,
+    ) -> int:
+        """对空/空白/无效 JSON 响应追加重试提示。
+
+        如果重试次数未耗尽，把当前 assistant 消息和 user 反馈追加到
+        ``full_messages``，并返回递增后的 retries。
+        如果已耗尽，返回原 retries 值（调用方通过 ``new > old`` 判断是否继续重试）。
+        """
+        logger.warning(
+            "MultiAgentWorker %s | session=%s character=%s turn=%d retries=%d max=%d",
+            error_reason, self._loop.session_id, self.character_name, turn, retries, MULTI_AGENT_JSON_RETRIES,
+        )
+        if retries >= MULTI_AGENT_JSON_RETRIES:
+            return retries
+        new_retries = retries + 1
+        logger.warning(
+            "%s for agent=%s, retrying (%d/%d)",
+            error_reason, self.character_name, new_retries, MULTI_AGENT_JSON_RETRIES,
+        )
+        full_messages.append({"role": "assistant", "content": text})
+        full_messages.append({"role": "user", "content": user_feedback})
+        return new_retries
+
     async def run(self) -> WorkerResult:
         """执行完整的 tool loop + JSON 输出。
 
@@ -219,27 +250,20 @@ class MultiAgentWorker:
 
             # 空或全空白 content：可能是 DeepSeek JSON Output 的已知问题，进入重试
             if not text or not text.strip():
-                logger.warning(
-                    "MultiAgentWorker empty/blank response | session=%s character=%s turn=%d retries=%d max=%d",
-                    self._loop.session_id, self.character_name, turn, retries, MULTI_AGENT_JSON_RETRIES,
+                new_retries = self._append_retry_prompt(
+                    text=text,
+                    retries=retries,
+                    turn=turn,
+                    full_messages=full_messages,
+                    error_reason="empty/blank response",
+                    user_feedback=(
+                        "你的上一个回复是空内容。"
+                        '请严格按照 {"content": "...", "visible_characters": [...], "response_characters": [...]} 的格式回复，'
+                        "不要输出空内容，也不要输出 JSON 之外的任何内容。"
+                    ),
                 )
-                if retries < MULTI_AGENT_JSON_RETRIES:
-                    retries += 1
-                    logger.warning(
-                        "Empty/blank response for agent=%s, retrying (%d/%d)",
-                        self.character_name, retries, MULTI_AGENT_JSON_RETRIES,
-                    )
-                    full_messages.append({"role": "assistant", "content": text})
-                    full_messages.append(
-                        {
-                            "role": "user",
-                            "content": (
-                                "你的上一个回复是空内容。"
-                                '请严格按照 {"content": "...", "visible_characters": [...], "response_characters": [...]} 的格式回复，'
-                                "不要输出空内容，也不要输出 JSON 之外的任何内容。"
-                            ),
-                        }
-                    )
+                if new_retries > retries:
+                    retries = new_retries
                     continue
                 return await self._error_result(
                     f"Max retries ({MULTI_AGENT_JSON_RETRIES}) exceeded for empty/blank response",
@@ -253,14 +277,28 @@ class MultiAgentWorker:
                     self._loop.session_id, self.character_name, turn, parsed,
                 )
                 clean_content = parsed.get("content", "")
-                if clean_content:
-                    await self._emit_text(clean_content)
-                else:
-                    # 内容为空时至少发送 stream_done，避免前端 streamingMessage 悬空
-                    await self._sink.emit_stream_done(
-                        self._loop.session_id,
-                        self._stream_id,
+                # 合法 JSON 但 content 为空/仅空白：同样视为无效响应，进入重试
+                if not clean_content or not clean_content.strip():
+                    new_retries = self._append_retry_prompt(
+                        text=text,
+                        retries=retries,
+                        turn=turn,
+                        full_messages=full_messages,
+                        error_reason="empty JSON content field",
+                        user_feedback=(
+                            "你的上一个回复是合法 JSON，但 `content` 字段为空。"
+                            '请严格按照 {"content": "...", "visible_characters": [...], "response_characters": [...]} 的格式回复，'
+                            "`content` 必须包含自然语言回复，不能为空或仅含空白。"
+                        ),
                     )
+                    if new_retries > retries:
+                        retries = new_retries
+                        continue
+                    return await self._error_result(
+                        f"Max retries ({MULTI_AGENT_JSON_RETRIES}) exceeded for empty JSON content",
+                        raw_text=text,
+                    )
+                await self._emit_text(clean_content)
                 return WorkerResult(
                     character_name=self.character_name,
                     parsed_json=AgentResponse(**parsed),
@@ -270,30 +308,21 @@ class MultiAgentWorker:
                 )
 
             # JSON 解析失败，如果还有重试次数则重试
-            logger.warning(
-                "MultiAgentWorker JSON parse failed | session=%s character=%s turn=%d retries=%d max=%d",
-                self._loop.session_id, self.character_name, turn, retries, MULTI_AGENT_JSON_RETRIES,
+            new_retries = self._append_retry_prompt(
+                text=text,
+                retries=retries,
+                turn=turn,
+                full_messages=full_messages,
+                error_reason="JSON parse failed",
+                user_feedback=(
+                    "你的上一个回复不是合法的 JSON 格式。"
+                    '请严格按照 {"content": "...", "visible_characters": [...], "response_characters": [...]} 的格式回复，'
+                    "不要包含任何 JSON 之外的内容。"
+                ),
             )
-            if retries < MULTI_AGENT_JSON_RETRIES:
-                retries += 1
-                logger.warning(
-                    "JSON parse failed for agent=%s, retrying (%d/%d)",
-                    self.character_name, retries, MULTI_AGENT_JSON_RETRIES,
-                )
-                full_messages.append({"role": "assistant", "content": text})
-                full_messages.append(
-                    {
-                        "role": "user",
-                        "content": (
-                            "你的上一个回复不是合法的 JSON 格式。"
-                            '请严格按照 {"content": "...", "visible_characters": [...], "response_characters": [...]} 的格式回复，'
-                            "不要包含任何 JSON 之外的内容。"
-                        ),
-                    }
-                )
+            if new_retries > retries:
+                retries = new_retries
                 continue
-
-            # 重试耗尽
             return await self._error_result(
                 f"Max retries ({MULTI_AGENT_JSON_RETRIES}) exceeded for JSON parse",
                 raw_text=text,

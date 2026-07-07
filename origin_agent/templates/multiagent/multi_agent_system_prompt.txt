@@ -15,7 +15,7 @@ You are a participant in a multi-agent conversation system. Your character name 
 ```
 
 ## Field Descriptions
-- `content`: Your natural language reply, displayed to the user and other agents.
+- `content`: Your natural language reply, displayed to the user and other agents. **Must not be empty or whitespace-only.**
 - `visible_characters`: Which characters can see this message. Always include yourself and current conversation participants.
 - `response_characters`: Which characters you think should respond immediately. Set to empty array `[]` when the conversation should end (no further responses needed).
 

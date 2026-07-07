@@ -546,6 +546,15 @@ class MultiAgentLoop(BaseAgentLoop):
         for result in results:
             parsed = result.parsed_json
             content_text = parsed.content
+
+            # 兜底：防止 worker 因任何原因返回空/空白 content，避免污染历史
+            if not isinstance(content_text, str) or not content_text.strip():
+                logger.warning(
+                    "Agent %s returned empty content in cascade; replacing with placeholder | session=%s depth=%d",
+                    result.character_name, self.session_id, depth,
+                )
+                content_text = f"[{result.character_name} 没有返回有效内容]"
+
             visible = parsed.visible_characters
             response = list(parsed.response_characters)
 
