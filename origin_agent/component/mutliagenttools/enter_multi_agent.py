@@ -130,10 +130,10 @@ async def _handle_enter_multi_agent(args: dict[str, Any]) -> dict:
         ):
             history.messages[i] = msg.model_copy(update={"tool_calls": None})
             history.messages = history.messages[:i+1]
-            history.add_message(CharacterConversationMessage.from_text(
+            history.add_message(CharacterConversationMessage(
                 role=Role.USER,
                 character_name="system",
-                text="[System Result] Enter multi-agent mode successfully",
+                content="[System Result] Enter multi-agent mode successfully",
                 visible_characters=[main_agent_name],
             ))
             break

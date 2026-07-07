@@ -58,8 +58,8 @@ class AudioBlock(MessageBlock):
 
 
 class BaseMessage(BaseModel):
-    content: str|list[MessageBlock] = Field(..., description="The content of the message")
-    role: Role = Field(..., description="The role of the message")
+    content: str|list[MessageBlock] = Field(description="The content of the message")
+    role: Role = Field(description="The role of the message")
 
     def as_content(self, 
         # 当前作为运行中的agent的角色
@@ -182,53 +182,6 @@ class CharacterConversationMessage(CharacterMessage):
     message_suffix: str|None            = Field(default=None, 
                                                 description="The suffix of the message, like hook messages")
 
-    @classmethod
-    def from_text(
-        cls,
-        role: Role,
-        character_name: str,
-        text: str,
-        *,
-        visible_characters: list[str] | None = None,
-        reasoning: str | None = None,
-        message_suffix: str | None = None,
-    ) -> "CharacterConversationMessage":
-        """从纯文本构造对话消息。"""
-        return cls(
-            role=role,
-            character_name=character_name,
-            content=text,
-            visible_characters=visible_characters,
-            reasoning=reasoning,
-            message_suffix=message_suffix,
-            reasoning_field_name="reasoning_content",
-            tool_calls=None,
-        )
-
-    @classmethod
-    def from_tool_calls(
-        cls,
-        role: Role,
-        character_name: str,
-        content: str,
-        tool_calls: list[ToolCall],
-        *,
-        visible_characters: list[str] | None = None,
-        reasoning: str | None = None,
-        message_suffix: str | None = None,
-    ) -> "CharacterConversationMessage":
-        """从 tool_calls 构造 assistant 消息。"""
-        return cls(
-            role=role,
-            character_name=character_name,
-            content=content,
-            tool_calls=tool_calls,
-            visible_characters=visible_characters,
-            reasoning=reasoning,
-            message_suffix=message_suffix,
-            reasoning_field_name="reasoning_content",
-        )
-
     def with_suffix(self, message_suffix: str | None) -> "CharacterConversationMessage":
         """返回带新 message_suffix 的副本（不影响原对象）。"""
         return self.model_copy(update={"message_suffix": message_suffix})
@@ -299,7 +252,7 @@ class ToolResultMessage(CharacterMessage):
     '''
     工具调用结果
     '''
-    tool_call_id: str = Field(..., description="The id of the tool call")
+    tool_call_id: str = Field(description="The id of the tool call")
 
     @classmethod
     def from_result(

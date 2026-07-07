@@ -453,10 +453,10 @@ class ParentAgentLoop(BasePrivateChatAgentLoop):
         # TODO: 下方注释有待考虑, 或者不再合并直接多条usermessage插回历史
         # 所有 InboxMessage 子类都已自带 character_name，直接取首条作为合并后的发出者
         character_name = pending[0].character_name if len(pending) == 1 else USER_CHARACTER_NAME
-        message = CharacterConversationMessage.from_text(
+        message = CharacterConversationMessage(
             role=Role.USER,
             character_name=character_name,
-            text=merged,
+            content=merged,
             visible_characters=[self.current_character_agent],
         )
         self._history.add_message(message)
@@ -781,6 +781,7 @@ class ParentAgentLoop(BasePrivateChatAgentLoop):
         self, content: Any, *,
         display_content: Any | None = None,
         character_name: str = USER_CHARACTER_NAME,
+        **kwargs: Any,
     ) -> int:
         """把用户消息加入 History 并回显到前端，返回消息索引。
 
@@ -803,6 +804,7 @@ class ParentAgentLoop(BasePrivateChatAgentLoop):
         character_name: str | None = None,
     ) -> int:
         """追加一条用户/assistant 消息到 History 并持久化，返回消息索引。"""
+        # TODO: 这条函数可能有问题
         if character_name is None:
             character_name = self.current_character_agent if role == Role.ASSISTANT else USER_CHARACTER_NAME
         if isinstance(content, str):
@@ -810,10 +812,10 @@ class ParentAgentLoop(BasePrivateChatAgentLoop):
         else:
             message_content = self._blocks_from_dicts(content)
         if isinstance(message_content, str):
-            message = CharacterConversationMessage.from_text(
+            message = CharacterConversationMessage(
                 role=role,
                 character_name=character_name,
-                text=message_content,
+                content=message_content,
                 visible_characters=[self.current_character_agent] if role == Role.USER else None,
                 reasoning=reasoning_content,
             )
@@ -880,7 +882,7 @@ class ParentAgentLoop(BasePrivateChatAgentLoop):
             )
             for tc in resp.tool_calls
         ]
-        message = CharacterConversationMessage.from_tool_calls(
+        message = CharacterConversationMessage(
             role=Role.ASSISTANT,
             character_name=self.current_character_agent,
             content=resp.content or "",
@@ -1111,10 +1113,10 @@ class ParentAgentLoop(BasePrivateChatAgentLoop):
             # 新 session 以 summary 作为 user 消息开始
             self._history = History(messages=[])
             self._last_prompt_tokens = 0
-            summary_msg = CharacterConversationMessage.from_text(
+            summary_msg = CharacterConversationMessage(
                 role=Role.USER,
                 character_name=USER_CHARACTER_NAME,
-                text=context,
+                content=context,
                 visible_characters=[self.current_character_agent],
             )
             self._history.add_message(summary_msg)

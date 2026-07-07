@@ -109,14 +109,19 @@ class MultiAgentLoop(BaseAgentLoop):
         return USER_CHARACTER_NAME
 
     async def append_user_message(
-        self, content: Any, *, display_content: Any | None = None
+        self, content: Any, *, display_content: Any | None = None,
+        visible_characters: list[str] | None = None,
+        response_characters: list[str] | None = None,
+        **kwargs,
     ) -> int:
         """追加用户消息到 History 并回显到前端。"""
-        msg = CharacterConversationMessage.from_text(
+        _visible = visible_characters if visible_characters else self._agent_names
+        msg = CharacterConversationMessage(
             role=Role.USER,
             character_name=USER_CHARACTER_NAME,
-            text=str(content),
-            visible_characters=self._agent_names,
+            content=str(content),
+            visible_characters=_visible,
+            response_characters=response_characters,
         )
         idx = self._history.add_message(msg)
         await self._sink.emit_user_message(
@@ -124,6 +129,8 @@ class MultiAgentLoop(BaseAgentLoop):
             display_content if display_content is not None else str(content),
             USER_CHARACTER_NAME,
             idx,
+            visible_characters=_visible,
+            response_characters=response_characters,
         )
         logger.info(
             "Appended user message | session=%s index=%d content=%s",
@@ -367,11 +374,12 @@ class MultiAgentLoop(BaseAgentLoop):
         # 追加用户消息
         if not skip_append:
             self._history.add_message(
-                CharacterConversationMessage.from_text(
+                CharacterConversationMessage(
                     role=Role.USER,
                     character_name=USER_CHARACTER_NAME,
-                    text=user_message,
+                    content=user_message,
                     visible_characters=_visible,
+                    response_characters=_response,
                 )
             )
             logger.info(

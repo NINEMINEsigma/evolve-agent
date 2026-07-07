@@ -201,7 +201,7 @@ class BaseAgentLoop(ABC):
         ...
 
     @abstractmethod
-    async def append_user_message(self, content: Any, *, display_content: Any | None = None) -> int:
+    async def append_user_message(self, content: Any, *, display_content: Any | None = None, **kwargs: Any) -> int:
         """把用户消息加入本 loop 的历史/状态，返回其在持久化历史中的 index。
 
         Args:

@@ -54,13 +54,17 @@ class AgentSink(ABC):
 
     @abstractmethod
     async def emit_user_message(self, session_id: str, content: Any,
-                                character_name: str, message_index: int) -> None:
+                                character_name: str, message_index: int,
+                                visible_characters: list[str] | None = None,
+                                response_characters: list[str] | None = None) -> None:
         """推送用户消息到前端。"""
         ...
 
     @abstractmethod
     async def emit_assistant_message(self, session_id: str, content: Any,
-                                     character_name: str) -> None:
+                                     character_name: str,
+                                     visible_characters: list[str] | None = None,
+                                     response_characters: list[str] | None = None) -> None:
         """推送 assistant 消息到前端。"""
         ...
 
@@ -516,12 +520,16 @@ class ParentAgentSink(AgentSink):
                          tool_name=tool_name, content=content)
 
     async def emit_user_message(self, session_id: str, content: Any,
-                                character_name: str, message_index: int) -> None:
+                                character_name: str, message_index: int,
+                                visible_characters: list[str] | None = None,
+                                response_characters: list[str] | None = None) -> None:
         # 子 Agent 的用户消息不直接显示在父会话主聊天区，由 subagent_update 处理
         pass
 
     async def emit_assistant_message(self, session_id: str, content: Any,
-                                     character_name: str) -> None:
+                                     character_name: str,
+                                     visible_characters: list[str] | None = None,
+                                     response_characters: list[str] | None = None) -> None:
         # 子 Agent 的 assistant 消息不直接显示在父会话主聊天区，由 subagent_update 处理
         pass
 

@@ -1216,7 +1216,11 @@ async def ws_chat(ws: WebSocket) -> None:
 
                     # 把原始用户消息追加到历史（回显由 append_user_message 内部统一完成）
                     try:
-                        await loop.append_user_message(content)
+                        await loop.append_user_message(
+                            content,
+                            visible_characters=msg.visible_characters,
+                            response_characters=msg.response_characters,
+                        )
                     except Exception as exc:
                         logger.warning("Failed to append user message for session=%s: %s", sid, exc)
 
