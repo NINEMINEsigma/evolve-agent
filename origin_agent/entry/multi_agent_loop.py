@@ -29,7 +29,7 @@ from system.templates import get_templates_dir
 from system.session_store import SessionStore
 from entry.base_agent_loop import BaseAgentLoop
 from entry.multi_agent_worker import WorkerResult, MultiAgentWorker
-from entry.agent_support.multimodal import summarize_message_for_log
+from entry.agent_support.multimodal import content_to_text, summarize_message_for_log
 
 if TYPE_CHECKING:
     from system.application import Application
@@ -206,6 +206,7 @@ class MultiAgentLoop(BaseAgentLoop):
         if visible_characters is not None:
             updates["visible_characters"] = visible_characters
         self._history.messages[index] = msg.model_copy(update=updates)
+        self._persist_message(self.session_id)
         return {
             "updated": True,
             "session_id": self.session_id,
@@ -213,6 +214,23 @@ class MultiAgentLoop(BaseAgentLoop):
             "role": msg.role.value,
             "content": str(self._history.messages[index].content),
             "visible_characters": visible_characters,
+        }
+
+    def regenerate_response(self) -> dict:
+        """截断到最后一条 user 消息，返回其内容供重新生成。"""
+        user_indices = [i for i, m in enumerate(self._history.messages) if m.role == Role.USER]
+        if not user_indices:
+            return {"regenerate": False, "error": "no user message found"}
+        last_user_idx = user_indices[-1]
+        last_user_content = content_to_text(self._history.messages[last_user_idx].content)
+        # 截断到 user 消息处（保留 user 本身，删除其后所有 assistant/tool）
+        self._history.messages = self._history.messages[:last_user_idx + 1]
+        self._persist_message(self.session_id)
+        return {
+            "regenerate": True,
+            "session_id": self.session_id,
+            "last_user_content": last_user_content,
+            "remaining_count": self._history.count,
         }
 
     async def _execute_tool(self, tool_name: str, args: dict,
@@ -300,17 +318,16 @@ class MultiAgentLoop(BaseAgentLoop):
         )
 
     def delete_session_messages(self, count: int = 1) -> dict:
-        """删除最近 N 条消息。"""
-        before = len(self._history.messages)
-        removed = min(count, before)
-        for _ in range(removed):
-            self._history.messages.pop()
-        result = {"deleted": removed, "session_id": self.session_id, "remaining_count": len(self._history.messages)}
-        logger.info(
-            "Deleted session messages | session=%s requested=%d removed=%d remaining=%d",
-            self.session_id, count, removed, result["remaining_count"],
-        )
-        return result
+        """删除最后 count 个逻辑轮次的消息（从倒数第 count 条 user 起，覆盖其后所有 tool/assistant）。"""
+        user_indices = [i for i, m in enumerate(self._history.messages) if m.role == Role.USER]
+        if not user_indices:
+            return {"deleted": False, "error": "no user messages to delete"}
+        if count > len(user_indices):
+            return {"deleted": False, "error": f"only {len(user_indices)} user messages available"}
+        remove_from = user_indices[-count]
+        self._history.messages = self._history.messages[:remove_from]
+        self._persist_message(self.session_id)
+        return {"deleted": True, "session_id": self.session_id, "remaining_count": self._history.count}
 
     def get_tool_resources(self) -> dict:
         """多 Agent 模式暂不支持工具资源恢复。"""
