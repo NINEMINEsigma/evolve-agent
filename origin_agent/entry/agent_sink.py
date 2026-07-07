@@ -42,13 +42,15 @@ class AgentSink(ABC):
 
     @abstractmethod
     async def emit_tool_call(self, session_id: str, tool_name: str,
-                             tool_call_id: str, args: dict) -> None:
+                             tool_call_id: str, args: dict,
+                             character_name: str | None = None) -> None:
         """推送 tool_call 事件。"""
         ...
 
     @abstractmethod
     async def emit_tool_result(self, session_id: str, tool_name: str,
-                               tool_call_id: str, content: str) -> None:
+                               tool_call_id: str, content: str,
+                               character_name: str | None = None) -> None:
         """推送 tool_result 事件。"""
         ...
 
@@ -275,14 +277,18 @@ class FrontendSink(AgentSink):
     # -- 事件推送 --
 
     async def emit_tool_call(self, session_id: str, tool_name: str,
-                             tool_call_id: str, args: dict) -> None:
+                             tool_call_id: str, args: dict,
+                             character_name: str | None = None) -> None:
         await self._send_msg(session_id, "tool_call", tool_name,
-                             json.dumps(args, ensure_ascii=False))
+                             json.dumps(args, ensure_ascii=False),
+                             character_name=character_name)
 
     async def emit_tool_result(self, session_id: str, tool_name: str,
-                               tool_call_id: str, content: str) -> None:
+                               tool_call_id: str, content: str,
+                               character_name: str | None = None) -> None:
         await self._send_msg(session_id, "tool_result", tool_name, content,
-                             tool_call_id=tool_call_id)
+                             tool_call_id=tool_call_id,
+                             character_name=character_name)
 
     async def emit_user_message(self, session_id: str, content: Any,
                                 character_name: str, message_index: int,
@@ -371,7 +377,8 @@ class FrontendSink(AgentSink):
 
     async def _send_msg(self, session_id: str, event_type: str,
                         tool_name: str, payload: str, *,
-                        tool_call_id: str = "") -> None:
+                        tool_call_id: str = "",
+                        character_name: str | None = None) -> None:
         """通过 WebSocket 推送一条事件消息。"""
         ws = self._ws_sinks.get(session_id)
         if ws is None:
@@ -381,11 +388,13 @@ class FrontendSink(AgentSink):
         if event_type == "tool_call":
             msg_type = MessageType.TOOL_CALL
             data = json.loads(payload) if payload else None
-            msg = Message(type=msg_type, session_id=session_id, tool=tool_name, args=data)
+            msg = Message(type=msg_type, session_id=session_id, tool=tool_name, args=data,
+                          character_name=character_name)
         elif event_type == "tool_result":
             msg_type = MessageType.TOOL_RESULT
             msg = Message(type=msg_type, session_id=session_id, tool=tool_name,
-                          result=payload, tool_call_id=tool_call_id)
+                          result=payload, tool_call_id=tool_call_id,
+                          character_name=character_name)
         elif event_type == "stream_delta":
             data = json.loads(payload)
             msg = Message(
@@ -510,12 +519,14 @@ class ParentAgentSink(AgentSink):
             return ApprovalResult(action="deny", deny_reason=str(exc), denied_by="parent_agent")
 
     async def emit_tool_call(self, session_id: str, tool_name: str,
-                             tool_call_id: str, args: dict) -> None:
+                             tool_call_id: str, args: dict,
+                             character_name: str | None = None) -> None:
         self._loop._emit("tool_call", tool_call_id=tool_call_id,
                          tool_name=tool_name, tool_args=args)
 
     async def emit_tool_result(self, session_id: str, tool_name: str,
-                               tool_call_id: str, content: str) -> None:
+                               tool_call_id: str, content: str,
+                               character_name: str | None = None) -> None:
         self._loop._emit("tool_result", tool_call_id=tool_call_id,
                          tool_name=tool_name, content=content)
 

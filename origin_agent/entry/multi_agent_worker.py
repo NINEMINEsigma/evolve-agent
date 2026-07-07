@@ -18,7 +18,7 @@ from typing import Any, TYPE_CHECKING
 from pydantic import BaseModel, Field
 
 from entity.puretype import Role
-from entity.messages import ToolResultMessage
+from entity.messages import ToolResultMessage, CharacterConversationMessage, FunctionCall, ToolCall as HistoryToolCall
 from entity.constant import (
     MAX_TOOL_TURNS,
     MULTI_AGENT_JSON_RETRIES,
@@ -125,19 +125,88 @@ class MultiAgentWorker:
                 )
                 return await self._error_result(f"LLM error: {response['error']}")
 
-            # 有 tool_calls → 执行工具 → 追加到消息列表 → 继续循环
+            # 有 tool_calls → 写入共享 History → 发送标准事件 → 执行工具 → 继续循环
             if response.get("tool_calls"):
-                full_messages.append(
-                    {
-                        "role": "assistant",
-                        "content": response.get("content"),
-                        "tool_calls": response["tool_calls"],
-                    }
-                )
+                raw_tc_list = response["tool_calls"]
 
-                for tc in response["tool_calls"]:
-                    tool_msg = await self._execute_tool_call(tc)
-                    full_messages.append(tool_msg)
+                # 1. 构造 History 格式的 ToolCall 列表
+                history_tool_calls: list[HistoryToolCall] = []
+                for tc in raw_tc_list:
+                    func = tc["function"]
+                    args_str = func["arguments"] if isinstance(func["arguments"], str) else json.dumps(func["arguments"], ensure_ascii=False)
+                    history_tool_calls.append(HistoryToolCall(
+                        id=tc["id"],
+                        type="function",
+                        function=FunctionCall(name=func["name"], arguments=args_str),
+                    ))
+
+                # 2. 发送标准 tool_call 事件到前端
+                for tc in raw_tc_list:
+                    func = tc["function"]
+                    raw_args = func["arguments"]
+                    if isinstance(raw_args, str):
+                        try:
+                            raw_args = json.loads(raw_args)
+                        except json.JSONDecodeError:
+                            raw_args = {}
+                    await self._sink.emit_tool_call(
+                        self._loop.session_id,
+                        func["name"],
+                        tc["id"],
+                        raw_args,
+                        character_name=self.character_name,
+                    )
+
+                # 3. 写入 assistant message（含 tool_calls）到共享 History，并追加到本地 LLM 上下文
+                msg_content = response.get("content") or ""
+                assistant_msg = CharacterConversationMessage(
+                    role=Role.ASSISTANT,
+                    character_name=self.character_name,
+                    content=msg_content,
+                    tool_calls=history_tool_calls,
+                    visible_characters=[self.character_name],
+                )
+                self._loop._history.add_message(assistant_msg)
+                self._loop._persist_message(self._loop.session_id)
+
+                # assistant 消息（含 tool_calls）必须在 tool 结果之前追加到本地 LLM 上下文
+                full_messages.append({
+                    "role": "assistant",
+                    "content": response.get("content"),
+                    "tool_calls": raw_tc_list,
+                })
+
+                # 4. 执行工具，写入结果到 History，发送 tool_result 到前端
+                for tc in raw_tc_list:
+                    result_msg = await self._execute_tool_call(tc)
+
+                    # 设置 character_name 为仅调用方可见
+                    if result_msg.character_name != self.character_name:
+                        result_msg = result_msg.model_copy(update={"character_name": self.character_name})
+
+                    # 写入共享 History
+                    self._loop._history.add_message(result_msg)
+                    self._loop._persist_message(self._loop.session_id)
+
+                    # 发送标准 tool_result 事件到前端
+                    content_text = result_msg.content
+                    if isinstance(content_text, list):
+                        from entry.agent_support.multimodal import content_to_text
+                        content_text = content_to_text(content_text)
+                    await self._sink.emit_tool_result(
+                        self._loop.session_id,
+                        tc["function"]["name"],
+                        tc["id"],
+                        str(content_text),
+                        character_name=self.character_name,
+                    )
+
+                    # 追加 tool 结果到本地 LLM 上下文（跟在 assistant tool_calls 之后）
+                    full_messages.append({
+                        "role": "tool",
+                        "tool_call_id": result_msg.tool_call_id,
+                        "content": str(content_text),
+                    })
 
                 continue
 
@@ -285,16 +354,6 @@ class MultiAgentWorker:
                         },
                     }
                     tool_calls.append(tc_dict)
-                    await self._sink.emit_stream_delta(
-                        self._loop.session_id,
-                        self._stream_id,
-                        tool_call={
-                            "id": chunk.tool_call.id,
-                            "name": chunk.tool_call.name,
-                            "arguments": chunk.tool_call.arguments,
-                        },
-                        character_name=self.character_name,
-                    )
         finally:
             await self._close_stream(stream)
 
@@ -327,8 +386,8 @@ class MultiAgentWorker:
 
     async def _execute_tool_call(
         self, tc: dict[str, Any]
-    ) -> dict[str, Any]:
-        """执行单个工具调用，返回 OpenAI 格式的 tool role 消息。"""
+    ) -> ToolResultMessage:
+        """执行单个工具调用，返回 ToolResultMessage。"""
         func = tc["function"]
         tool_name = func["name"]
 
@@ -351,17 +410,18 @@ class MultiAgentWorker:
             session_id=self._loop.session_id,
         )
 
+        # 确保 character_name 指向调用的 agent（_loop._execute_tool 使用 current_character_agent 可能不准确）
+        if result_msg.character_name != self.character_name:
+            result_msg = result_msg.model_copy(update={"character_name": self.character_name})
+
         content = result_msg.content
         if isinstance(content, list):
             # 多模态内容块 → 转换为纯文本
             from entry.agent_support.multimodal import content_to_text
             content = content_to_text(content)
+            result_msg = result_msg.model_copy(update={"content": content})
 
-        return {
-            "role": "tool",
-            "tool_call_id": tc["id"],
-            "content": str(content),
-        }
+        return result_msg
 
     # -- JSON 解析 --------------------------------------------------------
 

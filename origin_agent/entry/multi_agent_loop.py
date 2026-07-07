@@ -167,19 +167,35 @@ class MultiAgentLoop(BaseAgentLoop):
 
     def get_session_messages(self) -> list[dict]:
         """返回 History 中所有消息的字典列表（供前端展示）。"""
+        from entity.messages import CharacterConversationMessage, MessageBlock
+
         result: list[dict] = []
-        for msg in self._history.messages:
+        for index, msg in enumerate(self._history.messages):
+            raw_content = msg.content
+            if isinstance(raw_content, list):
+                content: str | list[dict] = [
+                    b.as_object() if isinstance(b, MessageBlock) else b
+                    for b in raw_content
+                ]
+            else:
+                content = str(raw_content)
             entry: dict = {
                 "role": msg.role.value,
-                "content": str(msg.content) if not isinstance(msg.content, list) else "",
+                "content": content,
+                "index": index,
             }
-            # 大量可被代替的反射
+            # TODO: 应该减少反射的使用
             if hasattr(msg, "character_name"):
                 entry["character_name"] = getattr(msg, "character_name")
             if hasattr(msg, "visible_characters") and getattr(msg, "visible_characters"):
                 entry["visible_characters"] = getattr(msg, "visible_characters")
             if hasattr(msg, "response_characters") and getattr(msg, "response_characters"):
                 entry["response_characters"] = getattr(msg, "response_characters")
+            if isinstance(msg, CharacterConversationMessage):
+                if msg.reasoning:
+                    entry["reasoning_content"] = msg.reasoning
+                if msg.role == Role.USER:
+                    entry["requires_response"] = True
             result.append(entry)
         return result
 

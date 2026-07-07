@@ -510,7 +510,16 @@ export function useWebSocket() {
               .map(([k, v]) => `${k}=${JSON.stringify(v)}`)
               .join(", ") + ")"
           : "";
-        addMessage("tool", `⚡ ${msg.tool} ${argsStr}`);
+        const callerPrefix = msg.character_name ? `${msg.character_name} ` : "";
+        setMessages((prev) => [...prev, {
+          role: "tool",
+          content: `${callerPrefix}⚡ ${msg.tool} ${argsStr}`,
+          id: generateUUID(),
+          toolName: msg.tool,
+          toolArgs: msg.args,
+          characterName: msg.character_name,
+          messageIndex: nextMessageIndex(prev),
+        }]);
       }
       else if (msg.type === "tool_result") {
         if (ignoreStaleRef.current) return;
@@ -520,6 +529,7 @@ export function useWebSocket() {
           role: "tool",
           content: parsed.content ?? `✅ ${msg.tool} → ${raw.slice(0, 2000)}`,
           id: generateUUID(),
+          characterName: msg.character_name,
           imageMarkdown: parsed.imageMarkdown,
           downloadInfo: parsed.downloadInfo,
           audioUrl: parsed.audioUrl,
