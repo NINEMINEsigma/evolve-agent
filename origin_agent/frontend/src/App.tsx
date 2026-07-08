@@ -487,6 +487,7 @@ export function ChatApp() {
           streamingMessage={ws.streamingMessage}
           agents={ws.agents}
           onToggleMessageVisibility={onToggleMessageVisibility}
+          onScrollToBottom={() => ws.scrollToBottomIfAtBottom(true)}
         />
 
         <CronCountdown cronTasks={ws.cronTasks} />

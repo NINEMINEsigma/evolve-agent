@@ -1491,6 +1491,7 @@ export function useWebSocket() {
     connect,
     updateSessionTags,
     attachScrollListener,
+    scrollToBottomIfAtBottom,
     // refs
     wsRef,
     bottomRef,
