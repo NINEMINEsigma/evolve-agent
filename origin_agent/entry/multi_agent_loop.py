@@ -85,9 +85,21 @@ class MultiAgentLoop(BaseAgentLoop):
         self._session_store: SessionStore | None = (
             SessionStore(history_store_dir) if history_store_dir else None
         )
+
+        # token 消耗统计：从磁盘恢复历史累计值，避免从普通模式切换后覆盖已有消耗
+        self._token_usage: int = 0
+        self._last_prompt_tokens: int = 0
+        if self._session_store is not None:
+            try:
+                self._token_usage = self._session_store.read_token_usage(session_id)
+            except Exception as exc:
+                logger.warning(
+                    "Failed to load token usage for session %s: %s", session_id, exc
+                )
+
         logger.info(
-            "MultiAgentLoop initialized | session=%s agents=%d history_store=%s",
-            session_id, len(self._agent_names), bool(history_store_dir),
+            "MultiAgentLoop initialized | session=%s agents=%d history_store=%s token_usage=%d",
+            session_id, len(self._agent_names), bool(history_store_dir), self._token_usage,
         )
 
     # -- BaseAgentLoop 抽象方法实现 ----------------------------------------
@@ -103,6 +115,26 @@ class MultiAgentLoop(BaseAgentLoop):
             self._session_store.write_history(session_id, self._history)
         except Exception as exc:
             logger.exception("Failed to persist history for session %s: %s", session_id, exc)
+
+    def _persist_token_usage(self, session_id: str) -> None:
+        """将累计 token 消耗持久化到磁盘。"""
+        if self._session_store is None:
+            return
+        try:
+            self._session_store.write_token_usage(session_id, self._token_usage)
+        except Exception as exc:
+            logger.exception("Failed to persist token usage for session %s: %s", session_id, exc)
+
+    async def _push_usage_update(self, session_id: str) -> None:
+        """向前端推送 token 消耗更新。"""
+        try:
+            await self._sink.emit_usage_update(
+                session_id, self._token_usage, self._last_prompt_tokens
+            )
+        except Exception:
+            logger.warning(
+                "Failed to push usage update for session=%s", session_id, exc_info=True
+            )
 
     @property
     def user_character_name(self) -> str:
@@ -160,12 +192,16 @@ class MultiAgentLoop(BaseAgentLoop):
         return None
 
     def get_token_usage(self) -> int:
-        """多 Agent 模式暂不支持 token 统计。"""
-        return 0
+        """返回会话级累计总 token 消耗（含普通模式已累积部分）。"""
+        return self._token_usage
 
     def get_context_tokens(self) -> int:
-        """多 Agent 模式暂不支持上下文 token 统计。"""
-        return 0
+        """返回最近一次 LLM 调用的 prompt_tokens。
+
+        多 Agent 模式下各 agent 的上下文不同，该值仅为最近一次 agent 调用的上下文快照，
+        不代表整个多 Agent 会话的统一上下文占用。
+        """
+        return self._last_prompt_tokens
 
     def is_processing(self) -> bool:
         """多 Agent 模式下始终返回 False（无长时间 tool loop）。"""
@@ -705,10 +741,36 @@ class MultiAgentLoop(BaseAgentLoop):
                 "Agent worker run failed | session=%s character=%s final=%s",
                 self.session_id, character_name, is_final_round,
             )
+            # 即使 worker 异常，也要把已累加的 token 消耗同步回 loop，避免部分消耗丢失
+            self._aggregate_worker_usage(worker)
             raise
 
+        self._aggregate_worker_usage(worker, result)
+
         logger.info(
-            "Agent worker done | session=%s character=%s",
-            self.session_id, character_name,
+            "Agent worker done | session=%s character=%s token_usage=%d",
+            self.session_id, character_name, self._token_usage,
         )
         return result
+
+    def _aggregate_worker_usage(
+        self,
+        worker: MultiAgentWorker,
+        result: WorkerResult | None = None,
+    ) -> None:
+        """将 worker 的 token 消耗聚合到 loop 级累计值，并持久化、推送前端。"""
+        total_token_usage = result.total_token_usage if result is not None else worker._total_token_usage
+        last_prompt_tokens = result.last_prompt_tokens if result is not None else worker._last_prompt_tokens
+
+        if total_token_usage:
+            self._token_usage += total_token_usage
+            self._last_prompt_tokens = last_prompt_tokens
+            self._persist_token_usage(self.session_id)
+            # 异步推送在前端展示；_push_usage_update 内部捕获异常，不会阻塞级联
+            try:
+                asyncio.get_running_loop().create_task(
+                    self._push_usage_update(self.session_id)
+                )
+            except RuntimeError:
+                # 无运行事件循环时（如同步测试场景），忽略推送
+                pass

@@ -54,6 +54,8 @@ class WorkerResult(BaseModel):
     raw_json: str = Field("", description="原始 LLM 文本")
     stream_buffer: list[str] = Field(default_factory=list, description="流式 token 缓冲")
     stream_id: str = Field("", description="Worker 的流式标识，用于前端关联元数据")
+    total_token_usage: int = Field(0, description="该 worker 本次执行累计消耗的 total_tokens")
+    last_prompt_tokens: int = Field(0, description="该 worker 最后一次 LLM 调用的 prompt_tokens")
 
 
 class MultiAgentWorker:
@@ -92,6 +94,9 @@ class MultiAgentWorker:
         self._loop: BaseAgentLoop = loop
         # 每个 worker 实例使用独立 stream_id，防止级联多轮时前端叠加/覆盖消息
         self._stream_id: str = f"multi_{character_name}_{uuid.uuid4().hex[:8]}"
+        # 累计 token 消耗与最近一次上下文 token 数
+        self._total_token_usage: int = 0
+        self._last_prompt_tokens: int = 0
 
     @staticmethod
     def _parse_routing_tags(text: str) -> AgentResponse:
@@ -295,6 +300,8 @@ class MultiAgentWorker:
                 raw_json=text,
                 stream_buffer=response.get("stream_buffer", []),
                 stream_id=self._stream_id,
+                total_token_usage=self._total_token_usage,
+                last_prompt_tokens=self._last_prompt_tokens,
             )
 
         # tool loop 超过最大轮数
@@ -341,6 +348,11 @@ class MultiAgentWorker:
 
                 if chunk.reasoning_delta:
                     reasoning += chunk.reasoning_delta
+
+                # 收集 LLM 返回的 token 消耗；过滤零值避免 finish chunk 覆盖真实 usage
+                if chunk.usage and chunk.usage.total_tokens > 0:
+                    self._total_token_usage += chunk.usage.total_tokens
+                    self._last_prompt_tokens = chunk.usage.prompt_tokens
 
                 if chunk.tool_call:
                     tc_dict = {
@@ -441,6 +453,8 @@ class MultiAgentWorker:
             ),
             raw_json=raw_text,
             stream_id=self._stream_id,
+            total_token_usage=self._total_token_usage,
+            last_prompt_tokens=self._last_prompt_tokens,
         )
 
     async def _emit_text(self, text: str) -> None:
