@@ -124,7 +124,13 @@ if __name__ == "__main__":
         slow_agent_space.mkdir(parents=True, exist_ok=True) # 创建slow agent空间
         # 复制源代码到代理空间
         shutil.copytree(source, fast_agent_space, dirs_exist_ok=True) # 复制源代码到fast agent空间
+        pnpm_lock_yaml = fast_agent_space/"frontend"/"pnpm-lock.yaml"
+        if pnpm_lock_yaml.exists():
+            pnpm_lock_yaml.unlink()
         shutil.copytree(source, slow_agent_space, dirs_exist_ok=True) # 复制源代码到slow agent空间
+        pnpm_lock_yaml = slow_agent_space/"frontend"/"pnpm-lock.yaml"
+        if pnpm_lock_yaml.exists():
+            pnpm_lock_yaml.unlink()
     while True:
         logger.info(f"Running fast agent")
         try:

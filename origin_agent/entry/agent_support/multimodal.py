@@ -1,14 +1,16 @@
 """多模态消息工具 — 供 AgentLoop 使用。
 
 包含 content block 拒绝检测、图片剥离、vision 缓存查询、
-_image payload 构造与脱敏。
+_image payload 构造与脱敏，以及 tool result 到 content 的统一转换。
 """
 
 from __future__ import annotations
 
 import json
 import logging
-from typing import Any, Dict, List
+from typing import Any
+
+from entity.messages import ImageBlock, MessageBlock, TextBlock
 
 logger = logging.getLogger(__name__)
 
@@ -80,19 +82,65 @@ def supports_vision(model: str) -> bool:
     return True
 
 
-def build_image_content_blocks(image: dict, text_payload: str) -> list[dict]:
+def build_image_content_blocks(image: dict, text_payload: str) -> list[MessageBlock]:
     """构造 OpenAI 格式的 image_url + text content blocks。"""
     b64: str = str(image.get("base64", ""))
     mime: str = str(image.get("mime_type", "image/png"))
     if not b64:
-        return []
+        return [TextBlock(text=text_payload)]
     return [
-        {
-            "type": "image_url",
-            "image_url": {"url": f"data:{mime};base64,{b64}"},
-        },
-        {"type": "text", "text": text_payload},
+        ImageBlock(image_url=f"data:{mime};base64,{b64}"),
+        TextBlock(text=text_payload),
     ]
+
+
+def tool_result_to_content(result: Any) -> str | list[MessageBlock]:
+    """把工具返回结果转换为 ToolResultMessage 可用的 content。
+
+    - 字符串：原样返回。
+    - 含 _image 字段的 dict：生成 [ImageBlock, TextBlock]。
+    - 其他 dict：json.dumps 成字符串。
+    - 其他：str(result)。
+    """
+    if isinstance(result, str):
+        return result
+    if isinstance(result, dict):
+        image = result.get("_image")
+        if isinstance(image, dict) and image.get("base64"):
+            return build_image_content_blocks(image, json.dumps(result, ensure_ascii=False))
+        return json.dumps(result, ensure_ascii=False)
+    if isinstance(result, list):
+        # 如果工具已经返回 MessageBlock 列表，直接透传
+        if all(isinstance(b, MessageBlock) for b in result):
+            return result  # type: ignore[return-value]
+    return str(result)
+
+
+def content_to_text(content: str | list[Any] | None) -> str:
+    """把 content（字符串或 block 列表）转成适合日志/前端展示/事件推送的纯文本。"""
+    if content is None:
+        return ""
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts: list[str] = []
+        for block in content:
+            if isinstance(block, TextBlock):
+                parts.append(block.text)
+            elif isinstance(block, ImageBlock):
+                parts.append("[image_url]")
+            elif isinstance(block, dict):
+                btype = block.get("type")
+                if btype == "text":
+                    parts.append(str(block.get("text", "")))
+                elif btype == "image_url":
+                    parts.append("[image_url]")
+                else:
+                    parts.append(f"[{btype}]")
+            else:
+                parts.append(str(block))
+        return "\n".join(parts)
+    return str(content)
 
 
 def sanitize_image_payload(result: dict, keep_metadata: bool = True) -> dict:
@@ -106,35 +154,12 @@ def sanitize_image_payload(result: dict, keep_metadata: bool = True) -> dict:
     return pr_copy
 
 
-def summarize_message_for_log(content: str | list[dict[str, Any]], max_text_len: int = 300) -> str:
+def summarize_message_for_log(content: str | list[Any] | None, max_text_len: int = 30000) -> str:
     """将用户消息（纯文本或多模态 blocks）转为适合日志的短字符串。
 
     图片 block 会被替换为 [image_url] 占位符，避免 base64 撑爆日志。
     """
-    if isinstance(content, str):
-        if len(content) <= max_text_len:
-            return content
-        return content[:max_text_len] + "..."
-
-    parts: list[str] = []
-    for block in content:
-        if not isinstance(block, dict):
-            parts.append(str(block))
-            continue
-        btype = block.get("type")
-        if btype == "text":
-            parts.append(str(block.get("text", "")))
-        elif btype == "image_url":
-            url = block.get("image_url", {}).get("url", "")
-            if url.startswith("data:"):
-                mime = url.split(";")[0].split(":")[1] if ";" in url else "image"
-                parts.append(f"[{mime}]")
-            else:
-                parts.append("[image_url]")
-        else:
-            parts.append(f"[{btype}]")
-
-    summary = " | ".join(parts)
-    if len(summary) > max_text_len:
-        summary = summary[:max_text_len] + "..."
-    return summary
+    summary = content_to_text(content)
+    if len(summary) <= max_text_len:
+        return summary
+    return summary[:max_text_len] + "..."

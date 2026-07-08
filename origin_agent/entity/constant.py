@@ -3,6 +3,22 @@
 import re
 from datetime import timezone
 
+# ============================================================================
+# 版本定义
+# ============================================================================
+
+History_Version = "v1"
+
+
+# ============================================================================
+# 用户与主agent的角色名定义
+# ============================================================================
+
+USER_CHARACTER_NAME: str = "end-user"
+MAIN_AGENT_CHARACTER_NAME: str = "main-agent"
+# 使用时用于在列表字段指代所有agents
+ALL_AGENTS_CHARACTER_REF_NAME: str = "all-agents"
+
 
 # ============================================================================
 # 自定义插件目录
@@ -24,6 +40,9 @@ TOOL_ALLOWLIST_FILENAME: str = "tool_allowlist.json"
 
 # 会话索引文件名 — 存放于 workspace/ 下
 SESSION_INDEX_FILENAME: str = "_sessions.json"
+
+# easysave 会话索引的 namespace key
+SESSION_EASYSAVE_KEY: str = "_sessions"
 
 
 # ============================================================================
@@ -164,10 +183,43 @@ MAX_TOOL_TURNS: int = 90
 # ============================================================================
 
 # 子 Agent 注册表持久化文件名 — 存放于 workspace/ 下
+# DEPRECATED: 已改为每个 subagent 独立存储在 agentspace/subagents/ 下，
+# 保留此常量仅作为历史兼容参考。
 SUBAGENT_STORE_FILENAME: str = "subagents.json"
+
+# 子 Agent 配置存放目录名（位于 agentspace 下）
+SUBAGENT_DIR_NAME: str = "subagents"
+
+# 单个子 Agent 配置文件后缀
+SUBAGENT_SETTING_SUFFIX: str = "-setting.json"
+
+# 子 Agent 注册表索引文件名
+SUBAGENT_INDEX_FILENAME: str = "_index.json"
+
+# 子 Agent 注册名允许的字符：英文字母、数字、中文、下划线、连字符
+SUBAGENT_NAME_PATTERN: str = r"^[a-zA-Z0-9\u4e00-\u9fa5_-]+$"
 
 # 子 Agent 最大同时活跃数量 — 超出上限的子 Agent 进入等待队列
 SUBAGENT_MAX_ACTIVE: int = 50
+
+
+# ============================================================================
+# 多 Agent 协作
+# ============================================================================
+
+# 多 Agent 级联对话最大递归深度 — 防止循环引用
+MULTI_AGENT_MAX_CASCADE_DEPTH: int = 10
+
+# 多 Agent 模式下 JSON 格式回复解析失败最大重试次数
+MULTI_AGENT_JSON_RETRIES: int = 5
+
+# 多 Agent DSL 路由标签名
+MULTI_AGENT_ROUTING_TAG_VISIBLE: str = "visible"
+MULTI_AGENT_ROUTING_TAG_RESPONSE: str = "response"
+
+# @response(...) 中表示"无响应"的简写
+MULTI_AGENT_ROUTING_RESPONSE_NONE: str = "none"
+MULTI_AGENT_ROUTING_RESPONSE_NULL: str = "null"
 
 # DEPRECATED: SUBAGENT_READONLY_WHITELIST is no longer used.
 # Subagents now inherit all non-multiagent tools automatically.

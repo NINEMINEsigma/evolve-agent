@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 # ── handler ────────────────────────────────────────────────────
 
 
-def _handle_get_secret_key(args: dict[str, Any]) -> str:
+def _handle_get_secret_key(args: dict[str, Any]) -> dict:
     """返回固定的测试密码。"""
     return tool_result(password="sk-test-password-12345")
 

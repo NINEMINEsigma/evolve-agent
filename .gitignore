@@ -201,3 +201,6 @@ custom_models/*.gguf
 
 # task
 /.tasks/
+
+# decision logs / grilled docs
+/docs/

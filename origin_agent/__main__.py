@@ -26,6 +26,13 @@ _AGENT_DIR: str = str(get_agent_dir())
 if _AGENT_DIR not in sys.path:
     sys.path.insert(0, _AGENT_DIR)
 
+# 将 third-party 包目录加入 sys.path，使 ``from easysave import ...``
+# 等第三方依赖在任意模块中都能直接导入，避免每个模块重复注入路径。
+_THIRD_DIR: Path = find_repo_root() / "third"
+for _p in (_THIRD_DIR, _THIRD_DIR / "easysave"):
+    if str(_p) not in sys.path:
+        sys.path.insert(0, str(_p))
+
 from main import App  # noqa: E402
 from system.context import RuntimeContext  # noqa: E402
 from system.convert import as_bool
@@ -82,6 +89,12 @@ def _setup_logging(log_path: str | None, console: bool) -> None:
         ch.setLevel(logging.INFO)
         ch.setFormatter(fmt)
         root.addHandler(ch)
+
+    # 让 uvicorn 的 logger 向根 logger 传播，确保 ASGI 异常进入文件日志。
+    for uvicorn_logger_name in ("uvicorn", "uvicorn.error", "uvicorn.access"):
+        uvicorn_logger = logging.getLogger(uvicorn_logger_name)
+        uvicorn_logger.handlers.clear()
+        uvicorn_logger.propagate = True
 
 
 # ---------------------------------------------------------------------------

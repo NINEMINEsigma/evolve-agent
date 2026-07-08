@@ -1,12 +1,53 @@
 import { memo, useMemo, useState, type WheelEvent } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { ChatMessage, ContentBlock } from "../types";
+import remarkBreaks from "remark-breaks";
+import rehypeRaw from "rehype-raw";
+import { ChatMessage, ContentBlock, MessageContent } from "../types";
 import CodeBlock from "./CodeBlock";
 import PlaylistPlayer from "./PlaylistPlayer";
+import SafeHtml from "./SafeHtml";
 
 const LONG_MESSAGE_CHARS = 1200;
 const LONG_MESSAGE_LINES = 18;
+
+function hashString(str: string): number {
+  let hash = 0;
+  for (let i = 0; i < str.length; i++) {
+    const chr = str.charCodeAt(i);
+    hash = ((hash << 5) - hash) + chr;
+    hash |= 0;
+  }
+  return Math.abs(hash);
+}
+
+function hueFromString(str: string): number {
+  return hashString(str) % 360;
+}
+
+// 判断文本中是否包含需要完整注入执行的 <script> 标签；普通 HTML 标签通过 rehype-raw 在 ReactMarkdown 中混合渲染
+const SCRIPT_TAG_RE = /<script\b[^>]*>(?:[\s\S]*?)<\/script\s*>|<script\b[^>]*\/>/i;
+function containsScript(text: string): boolean {
+  return SCRIPT_TAG_RE.test(text);
+}
+
+const CHINESE_NICKNAME_PREFIXES = new Set(["小", "阿", "老", "大"]);
+
+function getInitials(name: string): string {
+  if (!name) return "";
+  const first = name.slice(0, 1);
+  if (name.length >= 2 && CHINESE_NICKNAME_PREFIXES.has(first)) {
+    return name.slice(-1).toUpperCase();
+  }
+  return first.toUpperCase();
+}
+
+function getAvatarStyle(name?: string): React.CSSProperties {
+  if (!name) {
+    return { backgroundColor: "#666" };
+  }
+  return { backgroundColor: `hsl(${hueFromString(name)}, 65%, 45%)` };
+}
 
 const markdownComponentsBase = {
   code({ className, children, ...props }: any) {
@@ -54,9 +95,33 @@ const markdownComponentsBase = {
       </a>
     );
   },
+  div({ className, style, children }: any) {
+    return <div className={className} style={style}>{children}</div>;
+  },
+  span({ className, style, children }: any) {
+    return <span className={className} style={style}>{children}</span>;
+  },
+  button({ className, style, type, onClick, disabled, children }: any) {
+    return <button className={className} style={style} type={type} onClick={onClick} disabled={disabled}>{children}</button>;
+  },
+  style({ children }: any) {
+    return <style>{children}</style>;
+  },
+  details({ className, style, children }: any) {
+    return <details className={className} style={style}>{children}</details>;
+  },
+  summary({ className, style, children }: any) {
+    return <summary className={className} style={style}>{children}</summary>;
+  },
+  progress({ className, style, value, max, children }: any) {
+    return <progress className={className} style={style} value={value} max={max}>{children}</progress>;
+  },
+  meter({ className, style, value, min, max, low, high, optimum, children }: any) {
+    return <meter className={className} style={style} value={value} min={min} max={max} low={low} high={high} optimum={optimum}>{children}</meter>;
+  },
 };
 
-const MessageItem = memo(function MessageItem({ message, archived, onImageClick, onToggleCollapse, onEditMessage, onDeleteMessages, onRegenerateResponse, isLastUserMessage, streaming }: {
+const MessageItem = memo(function MessageItem({ message, archived, onImageClick, onToggleCollapse, onEditMessage, onDeleteMessages, onRegenerateResponse, isLastUserMessage, streaming, agents, onToggleMessageVisibility }: {
   message: ChatMessage;
   archived: boolean;
   onImageClick: (src: string) => void;
@@ -66,10 +131,20 @@ const MessageItem = memo(function MessageItem({ message, archived, onImageClick,
   onRegenerateResponse?: () => void;
   isLastUserMessage?: boolean;
   streaming?: boolean;
+  agents?: string[];
+  onToggleMessageVisibility?: (messageId: string, agentName: string) => void;
 }) {
   const m = message;
   const [editing, setEditing] = useState(false);
-  const textContent = typeof m.content === "string" ? m.content : "";
+
+  const contentToText = (content: MessageContent): string => {
+    if (typeof content === "string") return content;
+    return content
+      .map((block) => (block.type === "text" ? block.text : "[image_url]"))
+      .join("\n");
+  };
+
+  const textContent = contentToText(m.content);
   const [draft, setDraft] = useState(textContent);
   const lineCount = textContent.split("\n").length;
   const isLong = textContent.length > LONG_MESSAGE_CHARS || lineCount > LONG_MESSAGE_LINES;
@@ -77,8 +152,8 @@ const MessageItem = memo(function MessageItem({ message, archived, onImageClick,
   const toolCollapsed = isTool && !streaming && m.collapsed !== false;
   const collapsed = !isTool && !streaming && isLong && m.collapsed !== false;
   const canEdit = !archived && !streaming && typeof m.messageIndex === "number" && typeof m.content === "string";
-  const canDelete = !archived && !streaming && isLastUserMessage;
-  const canRegenerate = !archived && !streaming && m.role === "user" && isLastUserMessage;
+  const canDelete = !archived && !streaming && isLastUserMessage && typeof m.messageIndex === "number";
+  const canRegenerate = !archived && !streaming && m.role === "user" && isLastUserMessage && typeof m.messageIndex === "number";
 
   const mdComponents = useMemo(() => ({
     ...markdownComponentsBase,
@@ -186,22 +261,21 @@ const MessageItem = memo(function MessageItem({ message, archived, onImageClick,
     </>
   );
 
-  const renderUserContent = () => {
-    const content = m.content;
+  const renderBlocksContent = (content: MessageContent, roleClass: string) => {
     if (typeof content === "string") {
-      return <pre className={`message-text message-text-${m.role}`}>{content}</pre>;
+      return <pre className={`message-text message-text-${roleClass}`}>{content}</pre>;
     }
 
     if (Array.isArray(content)) {
       const blocks = content as ContentBlock[];
       return (
-        <div className="message-user-mixed">
+        <div className="message-blocks">
           {blocks.map((block, idx) => {
             if (block.type === "text") {
               return (
-                <span key={`${m.id}-txt-${idx}`} className={`message-text message-text-${m.role}`}>
+                <pre key={`${m.id}-txt-${idx}`} className={`message-text message-text-${roleClass}`}>
                   {block.text}
-                </span>
+                </pre>
               );
             }
             if (block.type === "image_url") {
@@ -211,9 +285,9 @@ const MessageItem = memo(function MessageItem({ message, archived, onImageClick,
                   key={`${m.id}-img-${idx}`}
                   href="#"
                   onClick={(e) => { e.preventDefault(); onImageClick(src); }}
-                  className="message-user-img-link"
+                  className="message-img-link"
                 >
-                  <img src={src} alt={`图片 ${idx + 1}`} className="message-user-thumb" />
+                  <img src={src} alt={`图片 ${idx + 1}`} className="message-img-thumb" />
                 </a>
               );
             }
@@ -223,7 +297,25 @@ const MessageItem = memo(function MessageItem({ message, archived, onImageClick,
       );
     }
 
-    return <pre className={`message-text message-text-${m.role}`}>{String(content)}</pre>;
+    return <pre className={`message-text message-text-${roleClass}`}>{String(content)}</pre>;
+  };
+
+  const renderContextExtension = () => {
+    const hasSuffix = m.messageSuffix || m.dynamicMessageSuffix;
+    if (!hasSuffix) return null;
+    return (
+      <details className="context-extension-block">
+        <summary className="context-extension-summary">上下文扩展</summary>
+        <div className="context-extension-content">
+          {m.dynamicMessageSuffix && (
+            <pre className="context-extension-part">{m.dynamicMessageSuffix}</pre>
+          )}
+          {m.messageSuffix && (
+            <pre className="context-extension-part">{m.messageSuffix}</pre>
+          )}
+        </div>
+      </details>
+    );
   };
 
   const renderBody = () => {
@@ -244,7 +336,7 @@ const MessageItem = memo(function MessageItem({ message, archived, onImageClick,
       );
     }
 
-    if (m.role === "agent") {
+    if (m.role === "assistant") {
       return (
         <>
           {m.reasoningContent && (
@@ -253,26 +345,49 @@ const MessageItem = memo(function MessageItem({ message, archived, onImageClick,
               <div className="reasoning-content">{m.reasoningContent}</div>
             </details>
           )}
-          <ReactMarkdown remarkPlugins={[remarkGfm]} components={mdComponents}>
-            {textContent || ""}
-          </ReactMarkdown>
+          {typeof m.content === "string" ? (
+            containsScript(textContent) ? (
+              <SafeHtml html={textContent} />
+            ) : (
+              <ReactMarkdown
+                remarkPlugins={[remarkGfm, remarkBreaks]}
+                rehypePlugins={[rehypeRaw]}
+                components={mdComponents}
+              >
+                {textContent || ""}
+              </ReactMarkdown>
+            )
+          ) : (
+            renderBlocksContent(m.content, m.role)
+          )}
+          {renderContextExtension()}
           {streaming && <span className="streaming-cursor" />}
         </>
       );
     }
 
     if (m.role === "user") {
-      return renderUserContent();
+      return (
+        <>
+          {renderBlocksContent(m.content, m.role)}
+          {renderContextExtension()}
+        </>
+      );
     }
 
-    return <pre className={`message-text message-text-${m.role}`}>{textContent}</pre>;
+    return renderBlocksContent(m.content, m.role);
   };
+
+  const displayName = m.characterName || (m.role === "user" ? "User" : m.role === "assistant" ? "Assistant" : undefined);
+  const showMeta = m.visibleCharacters != null || m.requiresResponse != null;
 
   return (
     <div className={`message message-${m.role}`} data-message-id={m.id}>
-      {m.role !== "user" && m.role !== "agent" && (
-        <div className="message-avatar">
-          {m.role === "error" ? "!" : m.role === "tool" ? "🔧" : "●"}
+      {(m.role === "user" || m.role === "assistant" || m.role === "error") && (
+        <div className="message-avatar-wrapper" data-tooltip={displayName || m.role}>
+          <div className="message-avatar" style={m.role === "user" || m.role === "assistant" ? getAvatarStyle(displayName) : undefined}>
+            {m.role === "error" ? "!" : getInitials(displayName || "")}
+          </div>
         </div>
       )}
       <div className="message-bubble">
@@ -287,7 +402,7 @@ const MessageItem = memo(function MessageItem({ message, archived, onImageClick,
             </button>
             {!toolCollapsed && (
               <div className="tool-call-detail message-content-collapsed" onWheel={handoffWheelAtBoundary}>
-                <pre className="message-text message-text-tool">{textContent}</pre>
+                {renderBlocksContent(m.content, "tool")}
                 {renderAttachments()}
               </div>
             )}
@@ -304,6 +419,20 @@ const MessageItem = memo(function MessageItem({ message, archived, onImageClick,
         <div className="message-toolbar">
           <span className="message-meta">
             {m.edited ? "已编辑" : canEdit ? `#${m.messageIndex}` : ""}
+            {showMeta && (
+              <span className="message-meta-tags">
+                {m.visibleCharacters != null && m.visibleCharacters.length > 0 && (
+                  <span className="message-meta-tag" title={`Visible to: ${m.visibleCharacters.join(", ")}`}>
+                    V {m.visibleCharacters.length}
+                  </span>
+                )}
+                {m.requiresResponse && (
+                  <span className="message-meta-tag message-meta-tag-response">
+                    待响应
+                  </span>
+                )}
+              </span>
+            )}
           </span>
           <div className="message-actions">
             {isLong && (
@@ -331,6 +460,28 @@ const MessageItem = memo(function MessageItem({ message, archived, onImageClick,
               </button>
             )}
           </div>
+          {agents && agents.length > 0 && message.visibleCharacters != null && (
+            <div className="message-visibility-row">
+              {agents.map((agent) => {
+                const curVisible = message.visibleCharacters || [];
+                const isAll = curVisible.includes("all-agents");
+                const isVisible = isAll || curVisible.includes(agent);
+                const isResponse = (message.responseCharacters || []).includes(agent);
+                const stateLabel = isResponse ? agent + " · 需响应" : isVisible ? agent + " · 仅可见" : agent + " · 隐藏";
+                const stateClass = isResponse ? "state-response" : isVisible ? "state-visible" : "state-none";
+                return (
+                  <button
+                    key={agent}
+                    type="button"
+                    className={`message-visibility-dot ${stateClass}`}
+                    onClick={() => onToggleMessageVisibility?.(message.id, agent)}
+                    data-tooltip={stateLabel}
+                    title={stateLabel}
+                  />
+                );
+              })}
+            </div>
+          )}
         </div>
       </div>
     </div>

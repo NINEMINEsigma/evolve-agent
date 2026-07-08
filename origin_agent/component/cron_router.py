@@ -64,6 +64,7 @@ class CronRouter:
             name=name,
             exit_code=exit_code,
             stdout_preview=stdout_preview,
+            character_name=loop.user_character_name,
         )
         loop.inbox.put(msg)
         loop.inbox.wake()

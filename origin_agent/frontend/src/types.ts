@@ -1,3 +1,18 @@
+export interface FileEntry {
+  name: string;
+  type: "file" | "dir";
+}
+
+export interface OpenTab {
+  id: string;
+  path: string;
+  name: string;
+  content: string;
+  originalContent: string;
+  isDirty: boolean;
+  language: string;
+}
+
 export interface TextContentBlock {
   type: "text";
   text: string;
@@ -14,7 +29,7 @@ export type MessageContent = string | ContentBlock[];
 export type MessageType =
   | "system"
   | "user_message"
-  | "agent_message"
+  | "assistant_message"
   | "tool_call"
   | "tool_result"
   | "task_progress"
@@ -49,6 +64,11 @@ export interface WSMessage {
   reasoning_delta?: string;
   finish_reason?: string;
   target_sessions?: string[];
+  visible_characters?: string[];   // 多 Agent 模式：可见角色列表
+  response_characters?: string[];  // 多 Agent 模式：需响应角色列表
+  character_name?: string;
+  index?: number;
+  client_message_id?: string;
 }
 
 export interface ConfirmRequest {
@@ -112,9 +132,10 @@ export interface CronTask {
 }
 
 export interface ChatMessage {
-  role: "user" | "agent" | "system" | "error" | "tool";
+  role: "user" | "assistant" | "system" | "error" | "tool";
   content: MessageContent;
   id: string;
+  clientMessageId?: string;
   messageIndex?: number;
   edited?: boolean;
   collapsed?: boolean;
@@ -128,6 +149,12 @@ export interface ChatMessage {
   playlistAutoplay?: boolean;
   reasoningContent?: string;
   reasoningDuration?: number;
+  characterName?: string;
+  visibleCharacters?: string[];
+  requiresResponse?: boolean;
+  responseCharacters?: string[];
+  messageSuffix?: string;
+  dynamicMessageSuffix?: string;
 }
 
 export interface SessionInfo {
@@ -156,6 +183,7 @@ export interface SubagentMessage {
   tool_call_id?: string;
   tool_args?: Record<string, unknown>;
   reasoning?: string;
+  character_name?: string;
 }
 
 export interface SubagentSession {

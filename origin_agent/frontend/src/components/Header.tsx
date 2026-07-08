@@ -20,6 +20,7 @@ interface HeaderProps {
   lastRecvAtRef?: React.RefObject<number>;
   lastPongAtRef?: React.RefObject<number>;
   recvTick?: number;
+  agents?: string[];
 }
 
 export default function Header({
@@ -42,6 +43,7 @@ export default function Header({
   lastRecvAtRef,
   lastPongAtRef,
   recvTick,
+  agents,
 }: HeaderProps) {
   const [cmdMenuOpen, setCmdMenuOpen] = useState(false);
   const [menuPos, setMenuPos] = useState<{ top: number; left: number } | null>(null);
@@ -84,7 +86,7 @@ export default function Header({
   const handleShutdownApprovalModel = async () => {
     setCmdMenuOpen(false);
     setMenuPos(null);
-    if (!window.confirm("确定要关闭审批模型 (llama-server) 吗？关闭后将释放显存，脱手模式不可用。")) return;
+    if (!window.confirm("确定要卸载审批模型 (llama-server) 吗？关闭后将释放显存，脱手模式不可用。")) return;
     setShuttingDown(true);
     try {
       const resp = await fetch("/api/shutdown-approval-model", { method: "POST" });
@@ -94,7 +96,7 @@ export default function Header({
         onToggleHandsfree(false);
         alert("审批模型已关闭，显存已释放。");
       } else {
-        alert("关闭审批模型失败。");
+        alert("卸载审批模型失败。");
       }
     } catch {
       alert("请求失败，请检查网络。");
@@ -157,7 +159,7 @@ export default function Header({
               style={showApprovalUI ? undefined : { opacity: 0.45, cursor: "not-allowed", userSelect: "none" }}
               data-tooltip={showApprovalUI ? "" : "审批模型未加载"}
             >
-              关闭审批模型
+              卸载审批模型
             </div>
           </div>
         )}
@@ -170,13 +172,16 @@ export default function Header({
             status === "已连接" ? "connected" : "",
             status.startsWith("重连中") ? "reconnecting" : "",
             status === "已断开" || status === "连接失败 — 已达到最大重试次数" ? "disconnected" : "",
+            agents && agents.length > 0 ? "multi-agent" : "",
           ].filter(Boolean).join(" ")}
+          data-tooltip={agents && agents.length > 0 ? `Multi-Agent 模式 · Agents: ${agents.join(", ")}` : undefined}
         >
           <span className="status-dot" />
-          <span className="pill-label">Evolve Agent</span>
+          <span className="pill-label">{agents && agents.length > 0 ? "Evolve Agent · Multi" : "Evolve Agent"}</span>
           <span className="pill-detail">
             <span className="pill-status">{status}</span>
             {llmModelName && <span className="pill-model">{llmModelName}</span>}
+            {agents && agents.length > 0 && <span className="pill-agent-count">{agents.length} agents</span>}
           </span>
           <span className="pill-ripple" aria-hidden />
           <span className="pill-ripple" aria-hidden />

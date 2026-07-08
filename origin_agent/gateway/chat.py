@@ -18,13 +18,14 @@ from typing import Any, Dict, List, Optional, Union
 from pydantic import BaseModel
 
 from system.atomic_io import write_text_atomic
+from entity.puretype import LoopMeta
 
 logger = logging.getLogger(__name__)
 
 
 class MessageType(str, Enum):
     USER_MESSAGE = "user_message"
-    AGENT_MESSAGE = "agent_message"
+    ASSISTANT_MESSAGE = "assistant_message"
     TOOL_CALL = "tool_call"
     TOOL_RESULT = "tool_result"
     CONFIRM_REQUEST = "confirm_request"
@@ -43,6 +44,7 @@ class MessageType(str, Enum):
     PING = "ping"
     PONG = "pong"
     SUBAGENT_UPDATE = "subagent_update"
+    AGENTSPACE_LOCK = "agentspace_lock"
 
 
 class Message(BaseModel):
@@ -73,8 +75,16 @@ class Message(BaseModel):
     reasoning_delta: str | None = None  # STREAM_DELTA：reasoning 增量
     finish_reason: str | None = None    # STREAM_DONE：结束原因或错误
     target_sessions: Optional[list[str]] = None  # USER_MESSAGE：目标会话列表
+    # 多 Agent 模式：用户消息的可见性和响应指定
+    visible_characters: Optional[list[str]] = None   # USER_MESSAGE：可见角色列表
+    response_characters: Optional[list[str]] = None  # USER_MESSAGE：需响应角色列表
     # tool_call / tool_result 相关字段
     tool_call_id: str | None = None  # TOOL_CALL / TOOL_RESULT：工具调用 ID
+    character_name: str | None = None  # 消息发送者角色名
+    index: int | None = None  # 消息在持久化历史中的索引
+    client_message_id: str | None = None  # 前端生成的乐观消息 ID，用于回显去重
+    message_suffix: str | None = None  # 用户消息固定后缀（如 fixator 上下文）
+    dynamic_message_suffix: str | None = None  # 用户消息动态后缀（如 memory/hooks 上下文）
 
     @classmethod
     def from_json(cls, raw: str) -> Message:
@@ -102,6 +112,13 @@ class Message(BaseModel):
             custom_text=data.get("custom_text"),
             target_sessions=data.get("target_sessions"),
             tool_call_id=data.get("tool_call_id"),
+            character_name=data.get("character_name"),
+            index=data.get("index"),
+            client_message_id=data.get("client_message_id"),
+            visible_characters=data.get("visible_characters"),
+            response_characters=data.get("response_characters"),
+            message_suffix=data.get("message_suffix"),
+            dynamic_message_suffix=data.get("dynamic_message_suffix"),
         )
 
     def to_json(self) -> str:
@@ -156,6 +173,20 @@ class Message(BaseModel):
             d["target_sessions"] = self.target_sessions
         if self.tool_call_id is not None:
             d["tool_call_id"] = self.tool_call_id
+        if self.character_name is not None:
+            d["character_name"] = self.character_name
+        if self.index is not None:
+            d["index"] = self.index
+        if self.client_message_id is not None:
+            d["client_message_id"] = self.client_message_id
+        if self.visible_characters is not None:
+            d["visible_characters"] = self.visible_characters
+        if self.response_characters is not None:
+            d["response_characters"] = self.response_characters
+        if self.message_suffix is not None:
+            d["message_suffix"] = self.message_suffix
+        if self.dynamic_message_suffix is not None:
+            d["dynamic_message_suffix"] = self.dynamic_message_suffix
         return json.dumps(d, ensure_ascii=False)
 
 
@@ -166,14 +197,10 @@ class Message(BaseModel):
 
 
 class SessionManager:
-    """使用 TTL 过期和磁盘持久化跟踪 WebSocket session。
-
+    """
     每个连接的客户端获得唯一 session_id。
-    Session 在 30 分钟不活动后过期。
     Session 元数据持久化到 JSON 索引文件，使列表在 server 重启后仍然存在。
     """
-
-    _SESSION_TTL: int = 1800  # 30 分钟
 
     def __init__(self, store_path: str | None = None) -> None:
         import time
@@ -267,7 +294,7 @@ class SessionManager:
 
     @staticmethod
     def _upgrade_index_entries(entries: list[dict]) -> list[dict]:
-        """将旧格式索引中的 parent 升级为 parents 数组，并补齐 tags。"""
+        """将旧格式索引中的 parent 升级为 parents 数组，并补齐 tags / loop_type / agents。"""
         for entry in entries:
             if "parent" in entry and "parents" not in entry:
                 p = entry.pop("parent")
@@ -276,6 +303,10 @@ class SessionManager:
                 entry["parents"] = []
             if "tags" not in entry:
                 entry["tags"] = []
+            if "loop_type" not in entry:
+                entry["loop_type"] = "parent"
+            if "agents" not in entry:
+                entry["agents"] = None
         return entries
 
     def _write_index(self, entries: list[dict]) -> None:
@@ -337,6 +368,8 @@ class SessionManager:
                     "pinned": entry.get("pinned", False),
                     "last_activity_at": entry.get("last_activity_at", entry.get("created_at", 0)),
                     "tags": entry.get("tags", []),
+                    "loop_type": entry.get("loop_type", "parent"),
+                    "agents": entry.get("agents"),
                 }
         if entries:
             logger.info("Loaded %d sessions from disk", len(entries))
@@ -398,7 +431,7 @@ class SessionManager:
             "status": "active", "created_at": now, "title": "",
             "parents": effective_parents, "continuation": None,
             "pinned": False, "last_activity_at": now,
-            "tags": [],
+            "tags": [], "loop_type": "parent", "agents": None,
         }
         # 持久化到磁盘
         if self._store_dir:
@@ -408,7 +441,7 @@ class SessionManager:
                     "id": sid, "created_at": now, "status": "active", "title": "",
                     "parents": effective_parents, "continuation": None,
                     "pinned": False, "last_activity_at": now,
-                    "tags": [],
+                    "tags": [], "loop_type": "parent", "agents": None,
                 })
                 self._write_index(entries)
             (self._store_dir / sid).mkdir(parents=True, exist_ok=True)
@@ -442,9 +475,13 @@ class SessionManager:
         parent_sid: str | None = None,
         parents: list[str] | None = None,
         role: str = "system",
+        loop_meta: LoopMeta | None = None,
     ) -> str:
         """创建新会话并以指定角色的消息作为初始内容。支持多父合并。"""
         new_sid: str = self.create(parent_sid=parent_sid, parents=parents)
+        # 如果提供了 loop_meta，更新新 session 的 loop_type 和 agents
+        if loop_meta is not None:
+            self.update_loop_type(new_sid, loop_meta.loopType.value, loop_meta.agents)
         # 写入初始消息到 JSONL
         sdir: Path | None = self._store_dir / new_sid if self._store_dir else None
         if sdir:
@@ -476,6 +513,21 @@ class SessionManager:
         logger.info("Session created | new=%s parents=%s role=%s", new_sid, parents or [parent_sid], role)
         return new_sid
 
+    def update_loop_type(self, sid: str, loop_type: str, agents: list[str] | None = None) -> None:
+        """更新 session 的 loop 类型和 agents 列表，同步写入内存和磁盘索引。"""
+        if sid in self._sessions:
+            self._sessions[sid]["loop_type"] = loop_type
+            self._sessions[sid]["agents"] = agents
+        if self._store_dir:
+            with self._index_lock:
+                entries: list[dict] = self._read_index()
+                for e in entries:
+                    if e.get("id") == sid:
+                        e["loop_type"] = loop_type
+                        e["agents"] = agents
+                        break
+                self._write_index(entries)
+
     def exists(self, sid: str) -> bool:
         return sid in self._sessions
 
@@ -492,6 +544,16 @@ class SessionManager:
             if sdir.exists():
                 shutil.rmtree(sdir)
         logger.debug("Session removed | id=%s", sid)
+
+    def remove_from_index(self, sid: str) -> None:
+        """仅从索引中移除 session，不删除磁盘目录（用于不兼容格式场景）。"""
+        self._sessions.pop(sid, None)
+        if self._store_dir:
+            with self._index_lock:
+                entries: list[dict] = self._read_index()
+                entries = [e for e in entries if e.get("id") != sid]
+                self._write_index(entries)
+        logger.warning("Session removed from index only (incompatible format) | id=%s", sid)
 
     def update_title(self, sid: str, title: str) -> None:
         """更新内存和磁盘中 session 的标题。"""
@@ -567,6 +629,8 @@ class SessionManager:
             "pinned": info.get("pinned", False),
             "last_activity_at": info.get("last_activity_at", info.get("created_at", 0)),
             "tags": info.get("tags", []),
+            "loop_type": info.get("loop_type", "parent"),
+            "agents": info.get("agents"),
         }
 
     def cleanup_expired(self) -> int:
@@ -593,6 +657,8 @@ class SessionManager:
                 "pinned": info.get("pinned", False),
                 "last_activity_at": info.get("last_activity_at", info.get("created_at", 0)),
                 "tags": info.get("tags", []),
+                "loop_type": info.get("loop_type", "parent"),
+                "agents": info.get("agents"),
             })
         items.sort(key=lambda s: (-int(s["pinned"]), -s["last_activity_at"]))
         return items

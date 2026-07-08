@@ -42,20 +42,42 @@ class AgentSink(ABC):
 
     @abstractmethod
     async def emit_tool_call(self, session_id: str, tool_name: str,
-                             tool_call_id: str, args: dict) -> None:
+                             tool_call_id: str, args: dict,
+                             character_name: str | None = None) -> None:
         """推送 tool_call 事件。"""
         ...
 
     @abstractmethod
     async def emit_tool_result(self, session_id: str, tool_name: str,
-                               tool_call_id: str, content: str) -> None:
+                               tool_call_id: str, content: str,
+                               character_name: str | None = None) -> None:
         """推送 tool_result 事件。"""
+        ...
+
+    @abstractmethod
+    async def emit_user_message(self, session_id: str, content: Any,
+                                character_name: str, message_index: int,
+                                visible_characters: list[str] | None = None,
+                                response_characters: list[str] | None = None,
+                                client_message_id: str | None = None,
+                                message_suffix: str | None = None,
+                                dynamic_message_suffix: str | None = None) -> None:
+        """推送用户消息到前端。"""
+        ...
+
+    @abstractmethod
+    async def emit_assistant_message(self, session_id: str, content: Any,
+                                     character_name: str,
+                                     visible_characters: list[str] | None = None,
+                                     response_characters: list[str] | None = None) -> None:
+        """推送 assistant 消息到前端。"""
         ...
 
     @abstractmethod
     async def emit_stream_delta(self, session_id: str, stream_id: str,
                                 delta: str = "", reasoning_delta: str = "",
-                                tool_call: dict | None = None) -> None:
+                                tool_call: dict | None = None,
+                                character_name: str | None = None) -> None:
         """推送流式增量。"""
         ...
 
@@ -86,6 +108,16 @@ class AgentSink(ABC):
     @abstractmethod
     async def emit_subagent_update(self, session_id: str, payload: dict) -> None:
         """推送子 Agent 状态更新。"""
+        ...
+
+    @abstractmethod
+    async def emit_system_message(self, session_id: str, content: str) -> None:
+        """推送系统消息到前端。
+
+        Args:
+            session_id: 目标会话 ID。
+            content: 系统消息文本内容。
+        """
         ...
 
 
@@ -258,18 +290,72 @@ class FrontendSink(AgentSink):
     # -- 事件推送 --
 
     async def emit_tool_call(self, session_id: str, tool_name: str,
-                             tool_call_id: str, args: dict) -> None:
+                             tool_call_id: str, args: dict,
+                             character_name: str | None = None) -> None:
         await self._send_msg(session_id, "tool_call", tool_name,
-                             json.dumps(args, ensure_ascii=False))
+                             json.dumps(args, ensure_ascii=False),
+                             character_name=character_name)
 
     async def emit_tool_result(self, session_id: str, tool_name: str,
-                               tool_call_id: str, content: str) -> None:
+                               tool_call_id: str, content: str,
+                               character_name: str | None = None) -> None:
         await self._send_msg(session_id, "tool_result", tool_name, content,
-                             tool_call_id=tool_call_id)
+                             tool_call_id=tool_call_id,
+                             character_name=character_name)
+
+    async def emit_user_message(self, session_id: str, content: Any,
+                                character_name: str, message_index: int,
+                                visible_characters: list[str] | None = None,
+                                response_characters: list[str] | None = None,
+                                client_message_id: str | None = None,
+                                message_suffix: str | None = None,
+                                dynamic_message_suffix: str | None = None) -> None:
+        from gateway.chat import Message, MessageType
+        ws = self._ws_sinks.get(session_id)
+        if ws is None:
+            return
+        msg = Message(
+            type=MessageType.USER_MESSAGE,
+            session_id=session_id,
+            content=content,
+            character_name=character_name,
+            index=message_index,
+            visible_characters=visible_characters,
+            response_characters=response_characters,
+            client_message_id=client_message_id,
+            message_suffix=message_suffix,
+            dynamic_message_suffix=dynamic_message_suffix,
+        )
+        try:
+            await ws.send_text(msg.to_json())
+        except Exception:
+            logger.warning("Failed to send user_message to session=%s", session_id, exc_info=True)
+
+    async def emit_assistant_message(self, session_id: str, content: Any,
+                                     character_name: str,
+                                     visible_characters: list[str] | None = None,
+                                     response_characters: list[str] | None = None) -> None:
+        from gateway.chat import Message, MessageType
+        ws = self._ws_sinks.get(session_id)
+        if ws is None:
+            return
+        msg = Message(
+            type=MessageType.ASSISTANT_MESSAGE,
+            session_id=session_id,
+            content=content,
+            character_name=character_name,
+            visible_characters=visible_characters,
+            response_characters=response_characters,
+        )
+        try:
+            await ws.send_text(msg.to_json())
+        except Exception:
+            logger.warning("Failed to send assistant_message to session=%s", session_id, exc_info=True)
 
     async def emit_stream_delta(self, session_id: str, stream_id: str,
                                 delta: str = "", reasoning_delta: str = "",
-                                tool_call: dict | None = None) -> None:
+                                tool_call: dict | None = None,
+                                character_name: str | None = None) -> None:
         data: dict = {"stream_id": stream_id}
         if delta:
             data["delta"] = delta
@@ -277,6 +363,8 @@ class FrontendSink(AgentSink):
             data["reasoning_delta"] = reasoning_delta
         if tool_call:
             data["tool_call"] = tool_call
+        if character_name:
+            data["character_name"] = character_name
         await self._send_msg(session_id, "stream_delta", "",
                              json.dumps(data, ensure_ascii=False))
 
@@ -306,9 +394,28 @@ class FrontendSink(AgentSink):
         await self._send_msg(session_id, "subagent_update", "",
                              json.dumps(payload, ensure_ascii=False))
 
+    async def emit_system_message(self, session_id: str, content: str) -> None:
+        """推送系统消息到前端。"""
+        try:
+            ws = self._ws_sinks.get(session_id)
+            if ws is None:
+                return
+            from gateway.chat import Message, MessageType
+            msg = Message(
+                type=MessageType.SYSTEM,
+                session_id=session_id,
+                content=content,
+            )
+            await ws.send_text(msg.to_json())
+        except Exception:
+            logger.warning(
+                "Failed to send system message | session=%s", session_id, exc_info=True,
+            )
+
     async def _send_msg(self, session_id: str, event_type: str,
                         tool_name: str, payload: str, *,
-                        tool_call_id: str = "") -> None:
+                        tool_call_id: str = "",
+                        character_name: str | None = None) -> None:
         """通过 WebSocket 推送一条事件消息。"""
         ws = self._ws_sinks.get(session_id)
         if ws is None:
@@ -318,11 +425,13 @@ class FrontendSink(AgentSink):
         if event_type == "tool_call":
             msg_type = MessageType.TOOL_CALL
             data = json.loads(payload) if payload else None
-            msg = Message(type=msg_type, session_id=session_id, tool=tool_name, args=data)
+            msg = Message(type=msg_type, session_id=session_id, tool=tool_name, args=data,
+                          character_name=character_name)
         elif event_type == "tool_result":
             msg_type = MessageType.TOOL_RESULT
             msg = Message(type=msg_type, session_id=session_id, tool=tool_name,
-                          result=payload, tool_call_id=tool_call_id)
+                          result=payload, tool_call_id=tool_call_id,
+                          character_name=character_name)
         elif event_type == "stream_delta":
             data = json.loads(payload)
             msg = Message(
@@ -331,6 +440,7 @@ class FrontendSink(AgentSink):
                 delta=data.get("delta"),
                 reasoning_delta=data.get("reasoning_delta"),
                 content=json.dumps({"tool_call": data["tool_call"]}) if data.get("tool_call") else None,
+                character_name=data.get("character_name"),
             )
         elif event_type == "stream_done":
             data = json.loads(payload)
@@ -446,20 +556,41 @@ class ParentAgentSink(AgentSink):
             return ApprovalResult(action="deny", deny_reason=str(exc), denied_by="parent_agent")
 
     async def emit_tool_call(self, session_id: str, tool_name: str,
-                             tool_call_id: str, args: dict) -> None:
+                             tool_call_id: str, args: dict,
+                             character_name: str | None = None) -> None:
         self._loop._emit("tool_call", tool_call_id=tool_call_id,
                          tool_name=tool_name, tool_args=args)
 
     async def emit_tool_result(self, session_id: str, tool_name: str,
-                               tool_call_id: str, content: str) -> None:
+                               tool_call_id: str, content: str,
+                               character_name: str | None = None) -> None:
         self._loop._emit("tool_result", tool_call_id=tool_call_id,
                          tool_name=tool_name, content=content)
 
+    async def emit_user_message(self, session_id: str, content: Any,
+                                character_name: str, message_index: int,
+                                visible_characters: list[str] | None = None,
+                                response_characters: list[str] | None = None,
+                                client_message_id: str | None = None,
+                                message_suffix: str | None = None,
+                                dynamic_message_suffix: str | None = None) -> None:
+        # 子 Agent 的用户消息不直接显示在父会话主聊天区，由 subagent_update 处理
+        pass
+
+    async def emit_assistant_message(self, session_id: str, content: Any,
+                                     character_name: str,
+                                     visible_characters: list[str] | None = None,
+                                     response_characters: list[str] | None = None) -> None:
+        # 子 Agent 的 assistant 消息不直接显示在父会话主聊天区，由 subagent_update 处理
+        pass
+
     async def emit_stream_delta(self, session_id: str, stream_id: str,
                                 delta: str = "", reasoning_delta: str = "",
-                                tool_call: dict | None = None) -> None:
+                                tool_call: dict | None = None,
+                                character_name: str | None = None) -> None:
         if delta:
-            self._loop._emit("assistant", content=delta, reasoning=reasoning_delta)
+            self._loop._emit("assistant", content=delta, reasoning=reasoning_delta,
+                             character_name=character_name)
 
     async def emit_stream_done(self, session_id: str, stream_id: str,
                                finish_reason: str = "stop") -> None:
@@ -533,4 +664,18 @@ class ParentAgentSink(AgentSink):
         except Exception:
             logger.warning(
                 "Failed to forward subagent_update to parent session=%s", session_id, exc_info=True
+            )
+
+    async def emit_system_message(self, session_id: str, content: str) -> None:
+        """转发系统消息到父 Agent 前端。"""
+        try:
+            from system.application import Application
+            sink = Application.current().frontend_sink
+            if sink is not None:
+                await sink.emit_system_message(
+                    self._loop._parent_session_id, content,
+                )
+        except Exception:
+            logger.warning(
+                "Failed to forward system message to parent session=%s", session_id, exc_info=True,
             )

@@ -21,30 +21,33 @@ from typing import * # type: ignore
 from urllib.parse import parse_qs, quote
 
 import uvicorn
-from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
 from .chat import Message, MessageType
 from datetime import datetime, timezone
-from entity.constant import CRON_STDOUT_PREVIEW_MAX_LENGTH, SUBPROCESS_TIMEOUT_DEFAULT, UPLOAD_FILENAME_TIME_FORMAT
+from entity.constant import CRON_STDOUT_PREVIEW_MAX_LENGTH, SUBPROCESS_TIMEOUT_DEFAULT, UPLOAD_FILENAME_TIME_FORMAT, USER_CHARACTER_NAME
 from system.context import get_runtime_context
+from entry.parent_agent_loop import IncompatibleHistoryError
 
 if TYPE_CHECKING:
     from entry.parent_agent_loop import ParentAgentLoop
+    from entry.base_agent_loop import BaseAgentLoop
     from entry.agent_sink import FrontendSink
+    from gateway.session_manager import SessionManager
 
 logger = logging.getLogger(__name__)
 
 
-def _get_sm():
+def _get_sm() -> SessionManager|None:
     """返回 Application 的 SessionManager。"""
     from system.application import Application
     return Application.current().session_manager
 
 
 def _get_loop(session_id: str):
-    """返回指定 session 的 ParentAgentLoop。"""
+    """返回指定 session 的 BaseAgentLoop（可能是 ParentAgentLoop 或 MultiAgentLoop）。"""
     sm = _get_sm()
     return sm.get_loop(session_id) if sm else None
 
@@ -60,8 +63,8 @@ def _get_ws(session_id: str):
 _agentspace_path: Path | None = None
 
 
-def set_agent_loop(loop: ParentAgentLoop) -> None:
-    """将 ParentAgentLoop 注入 Application 的 session_manager。
+def set_agent_loop(loop: BaseAgentLoop) -> None:
+    """将 BaseAgentLoop 注入 Application 的 session_manager。
 
     在启动流程中调用一次，之后所有 session 由 SessionManager 管理。
     """
@@ -266,6 +269,7 @@ async def _send_tool_event(
             reasoning_delta=(data.get("reasoning_delta") if data else None),
             content=(json.dumps({"tool_call": data["tool_call"]}, ensure_ascii=False)
                      if data and data.get("tool_call") else None),
+            character_name=(data.get("character_name") if data else None),
         )
         try:
             await ws.send_text(msg.to_json())
@@ -371,6 +375,125 @@ if _FRONTEND_DIST.is_dir():
     if assets_dir.is_dir():
         app.mount("/assets", StaticFiles(directory=str(assets_dir)), name="assets")
     logger.info("Frontend dist found at %s (build=%s)", _FRONTEND_DIST, _BUILD_HASH or "unknown")
+
+# ---------------------------------------------------------------------------
+# Agentspace lock & operation log
+# ---------------------------------------------------------------------------
+
+import time as _time
+
+_agentspace_lock: dict = {"locked": False, "locked_by": None, "locked_at": None}
+"""agentspace 互斥锁状态。agent 工具调用链通过 acquire/release 管理。"""
+
+_agentspace_pending_changes: dict[str, str] = {}
+"""用户操作日志（内存中维护最终状态）: path -> operation (edit/create/delete/rename)"""
+
+
+def _to_logical_path(relative: str) -> str:
+    """将 API 传入的相对路径转换为 Sandbox 逻辑路径。
+
+    去除首尾 /，拒绝包含 .. 或绝对路径的输入，返回 ws:{relative}。
+    """
+    if not relative:
+        return "ws:"
+    cleaned = relative.strip("/")
+    if ".." in cleaned.split("/") or cleaned.startswith("/"):
+        raise ValueError(f"Invalid path: {relative!r}")
+    return f"ws:{cleaned}"
+
+
+def _record_agentspace_change(operation: str, path: str, old_path: str | None = None) -> None:
+    """记录用户对 agentspace 的操作。按路径合并最终状态。
+
+    规则：
+    - 同路径后操作覆盖前操作
+    - 创建后被删除可抵消
+    - 重命名清除旧路径
+    """
+    global _agentspace_pending_changes
+    if _agentspace_lock["locked"]:
+        return
+    op = operation
+    if op == "rename" and old_path:
+        _agentspace_pending_changes.pop(old_path, None)
+        _agentspace_pending_changes[path] = "edit"
+    elif op == "delete":
+        existing = _agentspace_pending_changes.get(path)
+        if existing == "create":
+            _agentspace_pending_changes.pop(path, None)
+        else:
+            _agentspace_pending_changes[path] = "delete"
+    elif op == "create":
+        _agentspace_pending_changes[path] = "create"
+    elif op == "edit":
+        existing = _agentspace_pending_changes.get(path)
+        if existing != "create":
+            _agentspace_pending_changes[path] = "edit"
+
+
+def _flush_pending_changes() -> str | None:
+    """将操作日志写入 ws:.agentspace/operations.jsonl，返回变更摘要，清空内存。"""
+    global _agentspace_pending_changes
+    if not _agentspace_pending_changes:
+        return None
+    lines: list[str] = ["User changes in agentspace:"]
+    label_map = {"edit": "modified", "create": "created", "delete": "deleted", "rename": "renamed"}
+    for path, op in _agentspace_pending_changes.items():
+        label = label_map.get(op, op)
+        lines.append(f"- {label}: {path}")
+    summary = "\n".join(lines)
+    try:
+        from system.context import get_runtime_context
+        from system.sandbox import Sandbox
+        ctx = get_runtime_context()
+        sandbox = Sandbox(ctx)
+        sandbox.write("ws:.agentspace/operations.jsonl", summary)
+    except Exception as exc:
+        logger.warning("Failed to flush agentspace changes to disk: %s", exc)
+    _agentspace_pending_changes = {}
+    return summary
+
+
+def acquire_agentspace_lock(locked_by: str) -> None:
+    """获取 agentspace 锁。由 agent 工具调用链入口调用。"""
+    global _agentspace_lock
+    _agentspace_lock["locked"] = True
+    _agentspace_lock["locked_by"] = locked_by
+    _agentspace_lock["locked_at"] = _time.time()
+    _push_agentspace_lock_state()
+
+
+def release_agentspace_lock() -> None:
+    """释放 agentspace 锁。由 agent 工具调用链结束时调用。"""
+    global _agentspace_lock
+    _agentspace_lock["locked"] = False
+    _agentspace_lock["locked_by"] = None
+    _agentspace_lock["locked_at"] = None
+    _push_agentspace_lock_state()
+
+
+def _push_agentspace_lock_state() -> None:
+    """向所有连接的 WebSocket 推送当前锁状态。"""
+    try:
+        from system.application import Application
+        from gateway.chat import Message, MessageType
+        import asyncio as _asyncio
+        sink = Application.current().frontend_sink
+        if sink is None:
+            return
+        payload = json.dumps({"locked": _agentspace_lock["locked"], "locked_by": _agentspace_lock["locked_by"]})
+        for sid in list(sink._ws_map.keys()):
+            ws = sink._ws_map.get(sid)
+            if ws is None:
+                continue
+            try:
+                _asyncio.ensure_future(ws.send_text(
+                    Message(type=MessageType.AGENTSPACE_LOCK, session_id=sid, content=payload).to_json()
+                ))
+            except Exception:
+                pass
+    except Exception as exc:
+        logger.warning("Failed to push agentspace lock state: %s", exc)
 
 # ---------------------------------------------------------------------------
 # 路由
@@ -521,7 +644,7 @@ async def delete_session(session_id: str):
 
 @app.put("/api/sessions/{session_id}/messages/{message_index}")
 async def update_session_message(session_id: str, message_index: int, req: Request):
-    """编辑指定 session 中一条历史消息的正文，不触发重新生成。"""
+    """编辑指定 session 中一条历史消息的正文或 visible_characters，不触发重新生成。"""
     body: dict = {}
     try:
         body = await req.json()
@@ -529,6 +652,7 @@ async def update_session_message(session_id: str, message_index: int, req: Reque
         logger.warning("Failed to parse edit message request body for session=%s", session_id, exc_info=True)
         body = {}
     content = body.get("content")
+    visible_characters = body.get("visible_characters")
     info = _get_sm().get(session_id)
     if info and info.get("status") == "archived":
         result = {"updated": False, "error": "archived session cannot be edited", "session_id": session_id}
@@ -540,7 +664,7 @@ async def update_session_message(session_id: str, message_index: int, req: Reque
     loop = _get_loop(session_id)
     if loop is None:
         return {"updated": False, "error": "agent loop not ready", "session_id": session_id}
-    result = loop.edit_session_message(message_index, content)
+    result = loop.edit_session_message(message_index, content, visible_characters)
     status_code = 200 if result.get("updated") else 400
     return HTMLResponse(
         json.dumps(result, ensure_ascii=False),
@@ -613,13 +737,12 @@ async def regenerate_response(session_id: str):
             logger.warning("Failed to send regenerate_trim to session=%s", session_id, exc_info=True)
         # 复用 process_message 流程（流式事件自动推送到 ws）
         reply: str = await loop.process_message(content)
-        await ws.send_text(
-            Message(
-                type=MessageType.AGENT_MESSAGE,
-                session_id=session_id,
-                content=reply,
-            ).to_json()
-        )
+        from system.application import Application
+        sink = Application.current().frontend_sink
+        if sink is not None:
+            await sink.emit_assistant_message(
+                session_id, reply, loop.current_character_agent,
+            )
     return {"regenerate": True, "session_id": session_id}
 
 
@@ -902,6 +1025,201 @@ async def shutdown_approval_model_endpoint():
         return {"ok": False, "error": str(exc)}
 
 
+# ---------------------------------------------------------------------------
+# Agentspace file API
+# ---------------------------------------------------------------------------
+
+
+@app.get("/api/agentspace/list")
+async def agentspace_list(path: str = ""):
+    """列出 agentspace 目录内容。
+
+    返回 { entries: [{ name: string, type: "file"|"dir" }] }。
+    目录不存在时返回空列表。
+    """
+    try:
+        logical = _to_logical_path(path)
+        from system.context import get_runtime_context
+        from system.sandbox import Sandbox
+        sandbox = Sandbox(get_runtime_context())
+        names = sandbox.list_dir(logical)
+        entries: list[dict[str, str]] = []
+        for name in names:
+            entry_path = f"{logical}/{name}" if logical != "ws:" else f"ws:{name}"
+            entry_type = "dir" if sandbox.is_dir(entry_path) else "file"
+            entries.append({"name": name, "type": entry_type})
+        return {"entries": entries}
+    except (ValueError, PermissionError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except Exception as exc:
+        logger.warning("agentspace list failed for path=%r: %s", path, exc)
+        raise HTTPException(status_code=500, detail="Internal error")
+
+
+@app.get("/api/agentspace/read")
+async def agentspace_read(path: str = ""):
+    """读取 agentspace 文件内容。
+
+    返回 { content: string }。文件不存在时返回 404。
+    """
+    if not path:
+        raise HTTPException(status_code=400, detail="path required")
+    try:
+        logical = _to_logical_path(path)
+        from system.context import get_runtime_context
+        from system.sandbox import Sandbox
+        sandbox = Sandbox(get_runtime_context())
+        content = sandbox.read(logical, limit=0)
+        return {"content": content}
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except PermissionError as exc:
+        if "not found" in str(exc).lower():
+            raise HTTPException(status_code=404, detail=str(exc))
+        raise HTTPException(status_code=403, detail=str(exc))
+    except Exception as exc:
+        logger.warning("agentspace read failed for path=%r: %s", path, exc)
+        raise HTTPException(status_code=500, detail="Internal error")
+
+
+@app.post("/api/agentspace/write")
+async def agentspace_write(req: Request):
+    """写入/覆盖 agentspace 文件。
+
+    body: { path: string, content: string } → { success: true }
+    锁定时禁止写入。
+    """
+    body = await req.json()
+    path = body.get("path", "")
+    content = body.get("content", "")
+    if not path:
+        raise HTTPException(status_code=400, detail="path required")
+    if _agentspace_lock["locked"]:
+        raise HTTPException(status_code=423, detail="Agentspace is locked by agent")
+    try:
+        logical = _to_logical_path(path)
+        from system.context import get_runtime_context
+        from system.sandbox import Sandbox
+        sandbox = Sandbox(get_runtime_context())
+        sandbox.write(logical, content)
+        _record_agentspace_change("edit", path)
+        return {"success": True}
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc))
+    except Exception as exc:
+        logger.warning("agentspace write failed for path=%r: %s", path, exc)
+        raise HTTPException(status_code=500, detail="Internal error")
+
+
+@app.post("/api/agentspace/mkdir")
+async def agentspace_mkdir(req: Request):
+    """创建 agentspace 目录（含父目录）。
+
+    body: { path: string } → { success: true }
+    锁定时禁止创建。
+    """
+    body = await req.json()
+    path = body.get("path", "")
+    if not path:
+        raise HTTPException(status_code=400, detail="path required")
+    if _agentspace_lock["locked"]:
+        raise HTTPException(status_code=423, detail="Agentspace is locked by agent")
+    try:
+        logical = _to_logical_path(path)
+        from system.context import get_runtime_context
+        from system.sandbox import Sandbox
+        sandbox = Sandbox(get_runtime_context())
+        sandbox.create_folder(logical, parents=True)
+        _record_agentspace_change("create", path)
+        return {"success": True}
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc))
+    except Exception as exc:
+        logger.warning("agentspace mkdir failed for path=%r: %s", path, exc)
+        raise HTTPException(status_code=500, detail="Internal error")
+
+
+@app.post("/api/agentspace/delete")
+async def agentspace_delete(req: Request):
+    """删除 agentspace 文件或空目录。
+
+    body: { path: string } → { success: true }
+    锁定时禁止删除。
+    """
+    body = await req.json()
+    path = body.get("path", "")
+    if not path:
+        raise HTTPException(status_code=400, detail="path required")
+    if _agentspace_lock["locked"]:
+        raise HTTPException(status_code=423, detail="Agentspace is locked by agent")
+    try:
+        logical = _to_logical_path(path)
+        from system.context import get_runtime_context
+        from system.sandbox import Sandbox
+        sandbox = Sandbox(get_runtime_context())
+        if sandbox.is_dir(logical):
+            sandbox.delete_folder(logical)
+        else:
+            sandbox.delete(logical)
+        _record_agentspace_change("delete", path)
+        return {"success": True}
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc))
+    except Exception as exc:
+        logger.warning("agentspace delete failed for path=%r: %s", path, exc)
+        raise HTTPException(status_code=500, detail="Internal error")
+
+
+@app.post("/api/agentspace/rename")
+async def agentspace_rename(req: Request):
+    """重命名/移动 agentspace 文件或目录。
+
+    body: { oldPath: string, newPath: string } → { success: true }
+    锁定时禁止重命名。
+    """
+    body = await req.json()
+    old_path = body.get("oldPath", "")
+    new_path = body.get("newPath", "")
+    if not old_path or not new_path:
+        raise HTTPException(status_code=400, detail="oldPath and newPath required")
+    if _agentspace_lock["locked"]:
+        raise HTTPException(status_code=423, detail="Agentspace is locked by agent")
+    try:
+        old_logical = _to_logical_path(old_path)
+        new_logical = _to_logical_path(new_path)
+        from system.context import get_runtime_context
+        from system.sandbox import Sandbox
+        sandbox = Sandbox(get_runtime_context())
+        sandbox.move(old_logical, new_logical)
+        _record_agentspace_change("rename", new_path, old_path=old_path)
+        return {"success": True}
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc))
+    except Exception as exc:
+        logger.warning("agentspace rename failed old=%r new=%r: %s", old_path, new_path, exc)
+        raise HTTPException(status_code=500, detail="Internal error")
+
+
+@app.get("/api/agentspace/lock")
+async def agentspace_lock_status():
+    """查询 agentspace 锁状态。
+
+    返回 { locked: bool, locked_by: string|null }
+    """
+    return {
+        "locked": _agentspace_lock["locked"],
+        "locked_by": _agentspace_lock["locked_by"],
+    }
+
+
 @app.get("/{full_path:path}")
 async def spa_fallback(full_path: str):
     """SPA 客户端路由的兜底处理。
@@ -1086,6 +1404,23 @@ async def ws_chat(ws: WebSocket) -> None:
                 frontend_sink=_app_inner.frontend_sink,
                 history_store_dir=_store_inner,
             )
+    except IncompatibleHistoryError as exc:
+        logger.warning("Removing incompatible session from index: %s", exc.session_id)
+        _sm = _get_sm()
+        if _sm is not None:
+            _sm.remove_from_index(exc.session_id)
+        try:
+            await ws.send_text(
+                Message(
+                    type=MessageType.ERROR,
+                    session_id=sid,
+                    message=f"会话 {exc.session_id} 的历史格式不兼容，已从索引移除。请运行迁移脚本后重连。",
+                ).to_json()
+            )
+            await ws.close()
+        except Exception:
+            logger.exception("Failed to notify frontend about incompatible history for session=%s", exc.session_id)
+        return
     except Exception as exc:
         logger.warning("Failed to create session loop for %s: %s", sid, exc)
 
@@ -1145,6 +1480,11 @@ async def ws_chat(ws: WebSocket) -> None:
             usage: int = loop.get_token_usage()
             context: int = loop.get_context_tokens()
             processing: bool = loop.is_processing()
+            # 检查是否多 agent 模式，携带 agents 列表
+            agents_info: list[str] | None = None
+            from entry.multi_agent_loop import MultiAgentLoop
+            if isinstance(loop, MultiAgentLoop):
+                agents_info = list(loop._agent_names)
             await ws.send_text(
                 Message(
                     type=MessageType.SYSTEM,
@@ -1154,6 +1494,7 @@ async def ws_chat(ws: WebSocket) -> None:
                         "token_usage": usage,
                         "context_tokens": context,
                         "processing": processing,
+                        "agents": agents_info,
                     }, ensure_ascii=False),
                 ).to_json()
             )
@@ -1186,6 +1527,17 @@ async def ws_chat(ws: WebSocket) -> None:
                 if loop is not None:
                     target_sessions: list[str] = msg.target_sessions or ["main"]
                     content = msg.content or ""
+
+                    # 把原始用户消息追加到历史（回显由 append_user_message 内部统一完成）
+                    try:
+                        await loop.append_user_message(
+                            content,
+                            visible_characters=msg.visible_characters,
+                            response_characters=msg.response_characters,
+                            client_message_id=msg.client_message_id,
+                        )
+                    except Exception as exc:
+                        logger.warning("Failed to append user message for session=%s: %s", sid, exc)
 
                     # 先并行/异步转发到选中的子会话（用户直接发送）
                     subagent_tasks: list[asyncio.Task] = []
@@ -1247,7 +1599,10 @@ async def ws_chat(ws: WebSocket) -> None:
                             )
                         try:
                             reply = await loop.process_message(
-                                main_content
+                                main_content,
+                                skip_append=True,
+                                visible_characters=msg.visible_characters,
+                                response_characters=msg.response_characters,
                             )
                         except Exception as exc:
                             logger.exception("Agent loop error for session=%s", sid)
@@ -1281,13 +1636,13 @@ async def ws_chat(ws: WebSocket) -> None:
                             ).to_json()
                         )
 
-                    await ws.send_text(
-                        Message(
-                            type=MessageType.AGENT_MESSAGE,
-                            session_id=sid,
-                            content=reply,
-                        ).to_json()
-                    )
+                    from system.application import Application
+                    sink = Application.current().frontend_sink
+                    # MultiAgentLoop 返回空字符串表示各 agent 已独立推送，跳过冗余的 assistant_message
+                    if sink is not None and reply:
+                        await sink.emit_assistant_message(
+                            sid, reply, loop.current_character_agent,
+                        )
                     # 发送最终回复标记，兼容未启用流式的前端或 cron 回调路径
                     # 若前端已收到 stream_done，此消息会携带完整文本作为兜底
                     # 向前端发送实时 token 消耗更新

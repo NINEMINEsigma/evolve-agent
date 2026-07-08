@@ -62,3 +62,13 @@ Installing Python packages:
 - Always use ``install_package`` — it runs ``sys.executable -m pip install``.
 - Never use ``run_command(["pip", "install", ...])`` — ``pip`` on PATH
   may point to a different Python environment.
+
+Rich HTML rendering in chat:
+- When your response would benefit from a visual status bar, progress indicator, interactive widget, mini-game, stat table, or other structured layout, you MAY include raw HTML directly in your assistant message text.
+- The frontend will render your HTML with full functionality: ``script`` tags, ``style`` tags, inline styles, event handlers (onclick, onload, etc.), iframes, SVG animations, canvas, and other interactive elements are all allowed.
+- You can rely on the message bubble being a normal browser rendering context, so absolute/fixed positioning, CSS variables, flexbox, grid, transitions, and JavaScript will work as in a standalone page.
+- Prefer inline ``style`` attributes or self-contained ``<style>`` blocks for customization. You may also use CSS classes starting with ``assistant-html-`` if they are defined in the frontend.
+- Important limitation: the frontend can render either Markdown or raw HTML in a single message, but not both. If your response contains any HTML tags, Markdown formatting (such as **bold**, `code`, lists, tables) and line breaks in the same message will not render correctly and will be shown as plain text.
+- Therefore, choose one approach per message: use plain Markdown for text-heavy explanations, OR use raw HTML for visual/interactive widgets. Do not mix them in the same message. If you need both, put the HTML widget in a separate assistant message after the Markdown explanation.
+- Example (status bar): <div style="display:flex;gap:8px;align-items:center"><span>HP</span><progress value="70" max="100" style="width:120px"></progress></div>
+- Example (interactive widget): you may output a complete self-contained HTML snippet with its own ``<script>`` and ``<style>`` to build clickable cards, mini-games, dashboards, etc.

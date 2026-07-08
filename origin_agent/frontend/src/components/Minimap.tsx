@@ -15,7 +15,7 @@ interface MinimapBlock {
 
 const ROLE_COLORS: Record<string, string> = {
   user: "#2563a3",
-  agent: "#15803d",
+  assistant: "#15803d",
   system: "#4a4a4a",
   error: "#b91c1c",
   tool: "#b45309",
@@ -51,8 +51,8 @@ export default function Minimap({ messages, chatAreaRef }: MinimapProps) {
       const height = Math.max((el.offsetHeight / scrollHeight) * clientHeight, 2);
       const role = el.classList.contains("message-user")
         ? "user"
-        : el.classList.contains("message-agent")
-          ? "agent"
+        : el.classList.contains("message-assistant")
+          ? "assistant"
           : el.classList.contains("message-error")
             ? "error"
             : el.classList.contains("message-tool")

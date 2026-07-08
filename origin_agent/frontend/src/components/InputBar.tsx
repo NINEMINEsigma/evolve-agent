@@ -21,6 +21,11 @@ interface InputBarProps {
   subagentSessions: Record<string, SubagentSession>;
   targetSessions: string[];
   setTargetSessions: (ids: string[]) => void;
+  // multi-agent visibility
+  agents: string[];
+  visibleCharacters: string[];
+  responseCharacters: string[];
+  onToggleAgentState: (agentName: string) => void;
 }
 
 export default function InputBar({
@@ -41,6 +46,10 @@ export default function InputBar({
   subagentSessions,
   targetSessions,
   setTargetSessions,
+  agents,
+  visibleCharacters,
+  responseCharacters,
+  onToggleAgentState,
 }: InputBarProps) {
   if (archived) return null;
 
@@ -50,7 +59,7 @@ export default function InputBar({
   const hasSubagents = activeSubagents.length > 0;
 
   const targetOptions: TargetSessionOption[] = [
-    { id: "main", name: "主会话", status: undefined },
+    { id: "main", name: "主会话" },
     ...activeSubagents
       .sort((a, b) => a.session_id.localeCompare(b.session_id))
       .map((s) => ({ id: s.session_id, name: s.name || s.session_id.slice(0, 12), status: s.status })),
@@ -81,7 +90,7 @@ export default function InputBar({
               <button
                 key={opt.id}
                 type="button"
-                className={`input-target-chip ${active ? "active" : ""} input-target-chip-${opt.status || "main"}`}
+                className={`input-target-chip ${active ? "active" : ""} input-target-chip-${(opt as any).status || "main"}`}
                 onClick={() => toggleTarget(opt.id)}
                 data-tooltip={tooltip}
                 title={opt.name}
@@ -89,6 +98,28 @@ export default function InputBar({
                 <span className="input-target-chip-dot" />
                 {opt.name}
               </button>
+              );
+            })}
+          </div>
+        )}
+        {agents.length > 0 && (
+          <div className="input-agent-row">
+            {agents.map((agent) => {
+              const isVisible = visibleCharacters.includes(agent) || visibleCharacters.includes("all-agents");
+              const isResponse = responseCharacters.includes(agent);
+              const stateLabel = isResponse ? "需响应" : isVisible ? "仅可见" : "不可见";
+              const stateClass = isResponse ? "state-response" : isVisible ? "state-visible" : "state-none";
+              return (
+                <button
+                  key={agent}
+                  type="button"
+                  className={`input-agent-chip ${stateClass}`}
+                  onClick={() => onToggleAgentState(agent)}
+                  data-tooltip={`${agent} · ${stateLabel}`}
+                >
+                  <span className="input-agent-chip-dot" />
+                  {agent}
+                </button>
               );
             })}
           </div>
@@ -130,6 +161,17 @@ export default function InputBar({
             <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2">
               <path d="M22 2L11 13" />
               <path d="M22 2L15 22L11 13L2 9L22 2Z" />
+            </svg>
+          </button>
+          <button
+            className="agentspace-fab"
+            data-tooltip="打开 Agentspace 编辑器"
+            type="button"
+            onClick={() => window.open("/agentspace", "_blank")}
+          >
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z" />
+              <path d="M10 13l4-4M14 9h-4v4" />
             </svg>
           </button>
           <button

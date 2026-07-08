@@ -7,6 +7,9 @@ from pydantic import BaseModel, Field
 
 from typing import * # type: ignore
 
+# ---------------------------------------------------------------------------
+# Flags and Enums
+# ---------------------------------------------------------------------------
 
 class Role(str, Enum):
     """OpenAI 消息格式中的会话角色。"""
@@ -79,3 +82,26 @@ Keys:
     path: str
     skill_dir: str
 """
+
+
+# ---------------------------------------------------------------------------
+# Loop Types
+# ---------------------------------------------------------------------------
+
+class Loop(str, Enum):
+    '''
+    用于映射运行时主会话使用的loop
+    '''
+    parent = "parent"
+    multi = "multi"
+
+
+class LoopMeta(BaseModel):
+    loopType: Loop = Loop.parent
+    '''
+    对应的loop类型
+    '''
+    agents: list[str]|None = None
+    '''
+    mutli loop时用于指定导入的agents
+    '''

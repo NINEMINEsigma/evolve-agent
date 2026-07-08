@@ -7,14 +7,14 @@
 
 from __future__ import annotations
 
-from typing import Any
-
 import logging
+from typing import Any
 
 from abstract.tools.registry import registry, tool_result
 from entity.puretype import ToolAvailability, ToolDangerLevel
 
-from ._store import _subagent_registry
+from ._store import SubagentStore
+from system.context import get_runtime_context
 
 logger = logging.getLogger(__name__)
 
@@ -46,8 +46,9 @@ async def _handle_list_subagents(args: dict[str, Any]) -> dict:
             logger.warning("Failed to get subagent snapshot for session=%s", parent_session_id, exc_info=True)
 
     # 为每个注册项注入 session 字段
+    store = SubagentStore(get_runtime_context().agentspace)
     agents: dict[str, dict[str, Any]] = {}
-    for name, config in _subagent_registry.items():
+    for name, config in store.list().items():
         entry = dict(config)
         entry["session"] = name_to_session.get(name, None)
         agents[name] = entry
