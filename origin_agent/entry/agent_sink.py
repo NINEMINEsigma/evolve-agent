@@ -59,7 +59,9 @@ class AgentSink(ABC):
                                 character_name: str, message_index: int,
                                 visible_characters: list[str] | None = None,
                                 response_characters: list[str] | None = None,
-                                client_message_id: str | None = None) -> None:
+                                client_message_id: str | None = None,
+                                message_suffix: str | None = None,
+                                dynamic_message_suffix: str | None = None) -> None:
         """推送用户消息到前端。"""
         ...
 
@@ -305,7 +307,9 @@ class FrontendSink(AgentSink):
                                 character_name: str, message_index: int,
                                 visible_characters: list[str] | None = None,
                                 response_characters: list[str] | None = None,
-                                client_message_id: str | None = None) -> None:
+                                client_message_id: str | None = None,
+                                message_suffix: str | None = None,
+                                dynamic_message_suffix: str | None = None) -> None:
         from gateway.chat import Message, MessageType
         ws = self._ws_sinks.get(session_id)
         if ws is None:
@@ -319,6 +323,8 @@ class FrontendSink(AgentSink):
             visible_characters=visible_characters,
             response_characters=response_characters,
             client_message_id=client_message_id,
+            message_suffix=message_suffix,
+            dynamic_message_suffix=dynamic_message_suffix,
         )
         try:
             await ws.send_text(msg.to_json())
@@ -565,7 +571,9 @@ class ParentAgentSink(AgentSink):
                                 character_name: str, message_index: int,
                                 visible_characters: list[str] | None = None,
                                 response_characters: list[str] | None = None,
-                                client_message_id: str | None = None) -> None:
+                                client_message_id: str | None = None,
+                                message_suffix: str | None = None,
+                                dynamic_message_suffix: str | None = None) -> None:
         # 子 Agent 的用户消息不直接显示在父会话主聊天区，由 subagent_update 处理
         pass
 

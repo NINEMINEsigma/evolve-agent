@@ -169,6 +169,8 @@ class MultiAgentLoop(BaseAgentLoop):
             visible_characters=_visible,
             response_characters=response_characters,
             client_message_id=client_message_id,
+            message_suffix=fixator_context or None,
+            dynamic_message_suffix=hooks_context or None,
         )
         logger.info(
             "Appended user message | session=%s index=%d content=%s",

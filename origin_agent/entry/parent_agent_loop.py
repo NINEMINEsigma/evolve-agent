@@ -805,6 +805,8 @@ class ParentAgentLoop(BasePrivateChatAgentLoop):
             self.session_id, display_content if display_content is not None else content,
             character_name, index,
             client_message_id=client_message_id,
+            message_suffix=fixator_context or None,
+            dynamic_message_suffix=dynamic_suffix,
         )
         return index
 
