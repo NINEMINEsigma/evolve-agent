@@ -17,8 +17,8 @@ from entity.puretype import Role, ToolAvailability, ToolDangerLevel
 from entity.messages import CharacterConversationMessage
 from entry.parent_agent_loop import ParentAgentLoop
 from system.application import Application
-from system.templates import get_templates_dir, render_multi_agent_prompt
-from entry.multi_agent_loop import MultiAgentLoop, AgentProfile
+from system.templates import get_templates_dir
+from entry.multi_agent_loop import MultiAgentLoop
 
 logger = logging.getLogger(__name__)
 
@@ -76,50 +76,32 @@ async def _handle_enter_multi_agent(args: dict[str, Any]) -> dict:
         system_prompt_template = f.read()
 
     # 获取父 Agent 的 LLM client 和工具定义
-    llm_client = parent_loop._get_llm_client()
-    tools = parent_loop._get_tool_definitions()
-
-    # 过滤掉 multiagent 工具集（进入多 Agent 模式后禁用）
     from abstract.tools.registry import registry as tool_registry
-    multiagent_tool_names: set[str] = set(tool_registry.get_tool_names_for_toolset("multiagent"))
-    tools = [t for t in tools if t.get("function", {}).get("name") not in multiagent_tool_names]
-
-    # 为每个 Agent 构造 Profile
-    # 主 Agent 保留原有系统提示词段落，子 Agent 注入注册时保存的人设提示词文件
-    from entry.agent_support.messages import (
-        build_agent_system_prompt,
-        collect_skill_prompts,
+    from component.mutliagenttools.profile_builder import (
+        build_multi_agent_tools,
+        build_agent_profiles,
     )
     from system.sandbox import Sandbox
 
+    tools = build_multi_agent_tools(tool_registry)
+    llm_client = parent_loop._get_llm_client()
     sandbox = Sandbox(get_runtime_context())
 
-    agent_profiles: dict[str, AgentProfile] = {}
-    for name in agents:
-        multi_agent_common_prompt = render_multi_agent_prompt(system_prompt_template, name)
-        if name == main_agent_name:
-            skill_blocks = collect_skill_prompts()
-            persona_prompts = build_agent_system_prompt(parent_loop._get_context(), skill_blocks)
-        else:
-            profile_data = store.get(name) or {}
-            prompt_paths = profile_data.get("system_prompt_paths") or []
-            persona_prompts: list[str] = []
-            for p in prompt_paths:
-                if sandbox.exists(p):
-                    persona_prompts.append(sandbox.read(p, limit=0))
-                else:
-                    logger.warning(
-                        "Subagent %s system prompt path not found: %s",
-                        name, p,
-                    )
+    agent_profiles = build_agent_profiles(
+        agents=agents,
+        main_agent_name=main_agent_name,
+        parent_ctx=parent_loop._get_context(),
+        llm_client_factory=lambda name, profile: llm_client,
+        system_prompt_template=system_prompt_template,
+        sandbox=sandbox,
+        store=store,
+        session_id=session_id,
+        skip_missing_subagent=False,
+    )
 
-        system_prompts = persona_prompts + [multi_agent_common_prompt]
-        agent_profiles[name] = AgentProfile(
-            character_name=name,
-            system_prompts=system_prompts,
-            tools=tools,
-            llm_client=llm_client,
-        )
+    # 回填统一 tools（build_agent_profiles 返回时 tools 为空列表）
+    for profile in agent_profiles.values():
+        profile.tools = tools
 
     # 获取共享 History 和 sink
     history = parent_loop._history

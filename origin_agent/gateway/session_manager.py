@@ -140,25 +140,22 @@ class SessionManager:
         from system.context import get_runtime_context
         from component.mutliagenttools._store import SubagentStore
         from component.llm import LLMClient
-        from entry.multi_agent_loop import MultiAgentLoop, AgentProfile
-        from system.templates import get_templates_dir, render_multi_agent_prompt
+        from entry.multi_agent_loop import MultiAgentLoop
+        from system.templates import get_templates_dir
         from abstract.tools.registry import registry as tool_registry
-        from entity.puretype import ToolAvailability
         from entity.constant import MAIN_AGENT_CHARACTER_NAME
-        from entry.agent_support.messages import (
-            build_agent_system_prompt,
-            collect_skill_prompts,
-        )
         from system.sandbox import Sandbox
+        from component.mutliagenttools.profile_builder import (
+            build_multi_agent_tools,
+            build_agent_profiles,
+        )
 
         info = self._chat_sm.get(session_id)
         agents_names: list[str] = (info.get("agents") or []) if info else []
 
-        # 从 SubagentStore 读取每个 agent 的 profile
-        store = SubagentStore(get_runtime_context().agentspace)
-        agent_profiles: dict[str, AgentProfile] = {}
         parent_ctx = get_runtime_context()
         sandbox = Sandbox(parent_ctx)
+        store = SubagentStore(parent_ctx.agentspace)
 
         # 加载多 Agent 系统提示词模板
         template_path = get_templates_dir() / "multiagent" / "multi_agent_system_prompt.txt"
@@ -166,58 +163,33 @@ class SessionManager:
             system_prompt_template = f.read()
 
         # 工具集：排除 multiagent 工具集
-        tools = tool_registry.get_definitions_for_availability(
-            scope=ToolAvailability.MAIN,
-        )
-        multiagent_tool_names: set[str] = set(
-            tool_registry.get_tool_names_for_toolset("multiagent"),
-        )
-        tools = [t for t in tools if t.get("function", {}).get("name") not in multiagent_tool_names]
+        tools = build_multi_agent_tools(tool_registry)
 
-        for name in agents_names:
-            multi_agent_common_prompt = render_multi_agent_prompt(system_prompt_template, name)
-            if name == MAIN_AGENT_CHARACTER_NAME:
-                # 主 Agent 不是 subagent：使用 parent context 的 LLM 和原有系统提示词
-                ctx = parent_ctx
-                llm_client = LLMClient(ctx)
-                skill_blocks = collect_skill_prompts()
-                persona_prompts = build_agent_system_prompt(ctx, skill_blocks)
-            else:
-                profile = store.get(name)
-                if profile is None:
-                    logger.warning(
-                        "Subagent profile '%s' not found, skipping (session=%s)",
-                        name, session_id,
-                    )
-                    continue
-                # 用 profile 字段覆盖 parent_ctx 的 LLM 配置，构造 LLMClient
-                ctx = parent_ctx.model_copy(update={
+        agent_profiles = build_agent_profiles(
+            agents=agents_names,
+            main_agent_name=MAIN_AGENT_CHARACTER_NAME,
+            parent_ctx=parent_ctx,
+            llm_client_factory=lambda name, profile: (
+                LLMClient(parent_ctx) if name == MAIN_AGENT_CHARACTER_NAME
+                else LLMClient(parent_ctx.model_copy(update={
                     "llm_api_key": profile.get("api_key") or parent_ctx.llm_api_key,
                     "llm_base_url": profile.get("base_url", parent_ctx.llm_base_url),
                     "llm_model": profile.get("model", parent_ctx.llm_model),
                     "llm_max_output_tokens": profile.get("max_output_tokens", parent_ctx.llm_max_output_tokens),
                     "llm_max_context_tokens": profile.get("max_context_tokens", parent_ctx.llm_max_context_tokens),
                     "llm_temperature": parent_ctx.llm_temperature,
-                })
-                llm_client = LLMClient(ctx)
-                prompt_paths = profile.get("system_prompt_paths") or []
-                persona_prompts: list[str] = []
-                for p in prompt_paths:
-                    if sandbox.exists(p):
-                        persona_prompts.append(sandbox.read(p, limit=0))
-                    else:
-                        logger.warning(
-                            "Subagent %s system prompt path not found: %s (session=%s)",
-                            name, p, session_id,
-                        )
+                }))
+            ),
+            system_prompt_template=system_prompt_template,
+            sandbox=sandbox,
+            store=store,
+            session_id=session_id,
+            skip_missing_subagent=True,
+        )
 
-            system_prompts = persona_prompts + [multi_agent_common_prompt]
-            agent_profiles[name] = AgentProfile(
-                character_name=name,
-                system_prompts=system_prompts,
-                tools=tools,
-                llm_client=llm_client,
-            )
+        # 回填统一 tools
+        for profile in agent_profiles.values():
+            profile.tools = tools
 
         if not agent_profiles:
             logger.error(
