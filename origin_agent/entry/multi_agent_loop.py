@@ -112,6 +112,7 @@ class MultiAgentLoop(BaseAgentLoop):
         self, content: Any, *, display_content: Any | None = None,
         visible_characters: list[str] | None = None,
         response_characters: list[str] | None = None,
+        client_message_id: str | None = None,
         **kwargs,
     ) -> int:
         """追加用户消息到 History 并回显到前端。"""
@@ -135,6 +136,7 @@ class MultiAgentLoop(BaseAgentLoop):
             idx,
             visible_characters=_visible,
             response_characters=response_characters,
+            client_message_id=client_message_id,
         )
         logger.info(
             "Appended user message | session=%s index=%d content=%s",

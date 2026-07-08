@@ -58,7 +58,8 @@ class AgentSink(ABC):
     async def emit_user_message(self, session_id: str, content: Any,
                                 character_name: str, message_index: int,
                                 visible_characters: list[str] | None = None,
-                                response_characters: list[str] | None = None) -> None:
+                                response_characters: list[str] | None = None,
+                                client_message_id: str | None = None) -> None:
         """推送用户消息到前端。"""
         ...
 
@@ -293,7 +294,8 @@ class FrontendSink(AgentSink):
     async def emit_user_message(self, session_id: str, content: Any,
                                 character_name: str, message_index: int,
                                 visible_characters: list[str] | None = None,
-                                response_characters: list[str] | None = None) -> None:
+                                response_characters: list[str] | None = None,
+                                client_message_id: str | None = None) -> None:
         from gateway.chat import Message, MessageType
         ws = self._ws_sinks.get(session_id)
         if ws is None:
@@ -306,6 +308,7 @@ class FrontendSink(AgentSink):
             index=message_index,
             visible_characters=visible_characters,
             response_characters=response_characters,
+            client_message_id=client_message_id,
         )
         try:
             await ws.send_text(msg.to_json())
@@ -533,7 +536,8 @@ class ParentAgentSink(AgentSink):
     async def emit_user_message(self, session_id: str, content: Any,
                                 character_name: str, message_index: int,
                                 visible_characters: list[str] | None = None,
-                                response_characters: list[str] | None = None) -> None:
+                                response_characters: list[str] | None = None,
+                                client_message_id: str | None = None) -> None:
         # 子 Agent 的用户消息不直接显示在父会话主聊天区，由 subagent_update 处理
         pass
 

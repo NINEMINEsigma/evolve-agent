@@ -119,8 +119,8 @@ const MessageItem = memo(function MessageItem({ message, archived, onImageClick,
   const toolCollapsed = isTool && !streaming && m.collapsed !== false;
   const collapsed = !isTool && !streaming && isLong && m.collapsed !== false;
   const canEdit = !archived && !streaming && typeof m.messageIndex === "number" && typeof m.content === "string";
-  const canDelete = !archived && !streaming && isLastUserMessage;
-  const canRegenerate = !archived && !streaming && m.role === "user" && isLastUserMessage;
+  const canDelete = !archived && !streaming && isLastUserMessage && typeof m.messageIndex === "number";
+  const canRegenerate = !archived && !streaming && m.role === "user" && isLastUserMessage && typeof m.messageIndex === "number";
 
   const mdComponents = useMemo(() => ({
     ...markdownComponentsBase,

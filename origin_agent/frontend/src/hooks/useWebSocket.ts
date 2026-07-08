@@ -481,17 +481,38 @@ export function useWebSocket() {
         }
       }
       else if (msg.type === "user_message") {
-        setMessages((prev) => [...prev, {
-          role: "user",
-          content: msg.content ?? "",
-          id: generateUUID(),
-          characterName: msg.character_name,
-          messageIndex: typeof msg.index === "number" ? msg.index : undefined,
-          visibleCharacters: msg.visible_characters ?? undefined,
-          responseCharacters: msg.response_characters ?? undefined,
-          messageSuffix: (msg as any).message_suffix ?? undefined,
-          dynamicMessageSuffix: (msg as any).dynamic_message_suffix ?? undefined,
-        }]);
+        const incomingClientId = (msg as any).client_message_id as string | undefined;
+        setMessages((prev) => {
+          // 如果匹配到本地乐观插入的消息，则更新它（去重）
+          if (incomingClientId && prev.some((m) => m.clientMessageId === incomingClientId)) {
+            return prev.map((m) =>
+              m.clientMessageId === incomingClientId
+                ? {
+                    ...m,
+                    content: msg.content ?? m.content,
+                    characterName: msg.character_name ?? m.characterName,
+                    messageIndex: typeof msg.index === "number" ? msg.index : m.messageIndex,
+                    visibleCharacters: msg.visible_characters ?? m.visibleCharacters,
+                    responseCharacters: msg.response_characters ?? m.responseCharacters,
+                    messageSuffix: (msg as any).message_suffix ?? m.messageSuffix,
+                    dynamicMessageSuffix: (msg as any).dynamic_message_suffix ?? m.dynamicMessageSuffix,
+                  }
+                : m
+            );
+          }
+          return [...prev, {
+            role: "user",
+            content: msg.content ?? "",
+            id: generateUUID(),
+            clientMessageId: incomingClientId,
+            characterName: msg.character_name,
+            messageIndex: typeof msg.index === "number" ? msg.index : undefined,
+            visibleCharacters: msg.visible_characters ?? undefined,
+            responseCharacters: msg.response_characters ?? undefined,
+            messageSuffix: (msg as any).message_suffix ?? undefined,
+            dynamicMessageSuffix: (msg as any).dynamic_message_suffix ?? undefined,
+          }];
+        });
       }
       else if (msg.type === "assistant_message") {
         setWaiting(false);
@@ -879,11 +900,23 @@ export function useWebSocket() {
     if (!hasContent) return;
 
     const content: MessageContent = blocks.length === 1 && blocks[0].type === "text" ? blocks[0].text : blocks;
+    const clientMessageId = generateUUID();
+
+    // 乐观地先把用户消息显示在本地，避免等待后端回显
+    setMessages((prev) => [...prev, {
+      role: "user",
+      content,
+      id: clientMessageId,
+      clientMessageId,
+      visibleCharacters: visible_characters,
+      responseCharacters: response_characters,
+    }]);
 
     wsRef.current.send(JSON.stringify({
       type: "user_message",
       content,
       target_sessions: targetSessions,
+      client_message_id: clientMessageId,
       ...(visible_characters ? { visible_characters } : {}),
       ...(response_characters ? { response_characters } : {}),
     }));

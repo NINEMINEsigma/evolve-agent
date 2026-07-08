@@ -53,6 +53,7 @@ export interface WSMessage {
   response_characters?: string[];  // 多 Agent 模式：需响应角色列表
   character_name?: string;
   index?: number;
+  client_message_id?: string;
 }
 
 export interface ConfirmRequest {
@@ -119,6 +120,7 @@ export interface ChatMessage {
   role: "user" | "assistant" | "system" | "error" | "tool";
   content: MessageContent;
   id: string;
+  clientMessageId?: string;
   messageIndex?: number;
   edited?: boolean;
   collapsed?: boolean;

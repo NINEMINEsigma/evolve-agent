@@ -775,6 +775,7 @@ class ParentAgentLoop(BasePrivateChatAgentLoop):
         self, content: Any, *,
         display_content: Any | None = None,
         character_name: str = USER_CHARACTER_NAME,
+        client_message_id: str | None = None,
         **kwargs: Any,
     ) -> int:
         """把用户消息加入 History 并回显到前端，返回消息索引。
@@ -803,6 +804,7 @@ class ParentAgentLoop(BasePrivateChatAgentLoop):
         await self._frontend_sink.emit_user_message(
             self.session_id, display_content if display_content is not None else content,
             character_name, index,
+            client_message_id=client_message_id,
         )
         return index
 

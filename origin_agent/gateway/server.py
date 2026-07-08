@@ -1220,6 +1220,7 @@ async def ws_chat(ws: WebSocket) -> None:
                             content,
                             visible_characters=msg.visible_characters,
                             response_characters=msg.response_characters,
+                            client_message_id=msg.client_message_id,
                         )
                     except Exception as exc:
                         logger.warning("Failed to append user message for session=%s: %s", sid, exc)

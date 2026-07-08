@@ -81,6 +81,7 @@ class Message(BaseModel):
     tool_call_id: str | None = None  # TOOL_CALL / TOOL_RESULT：工具调用 ID
     character_name: str | None = None  # 消息发送者角色名
     index: int | None = None  # 消息在持久化历史中的索引
+    client_message_id: str | None = None  # 前端生成的乐观消息 ID，用于回显去重
 
     @classmethod
     def from_json(cls, raw: str) -> Message:
@@ -110,6 +111,7 @@ class Message(BaseModel):
             tool_call_id=data.get("tool_call_id"),
             character_name=data.get("character_name"),
             index=data.get("index"),
+            client_message_id=data.get("client_message_id"),
             visible_characters=data.get("visible_characters"),
             response_characters=data.get("response_characters"),
         )
@@ -170,6 +172,8 @@ class Message(BaseModel):
             d["character_name"] = self.character_name
         if self.index is not None:
             d["index"] = self.index
+        if self.client_message_id is not None:
+            d["client_message_id"] = self.client_message_id
         if self.visible_characters is not None:
             d["visible_characters"] = self.visible_characters
         if self.response_characters is not None:
