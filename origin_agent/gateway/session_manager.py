@@ -149,6 +149,7 @@ class SessionManager:
             build_agent_system_prompt,
             collect_skill_prompts,
         )
+        from system.sandbox import Sandbox
 
         info = self._chat_sm.get(session_id)
         agents_names: list[str] = (info.get("agents") or []) if info else []
@@ -157,6 +158,7 @@ class SessionManager:
         store = SubagentStore(get_runtime_context().agentspace)
         agent_profiles: dict[str, AgentProfile] = {}
         parent_ctx = get_runtime_context()
+        sandbox = Sandbox(parent_ctx)
 
         # 加载多 Agent 系统提示词模板
         template_path = get_templates_dir() / "multiagent" / "multi_agent_system_prompt.txt"
@@ -173,14 +175,13 @@ class SessionManager:
         tools = [t for t in tools if t.get("function", {}).get("name") not in multiagent_tool_names]
 
         for name in agents_names:
+            multi_agent_common_prompt = render_multi_agent_prompt(system_prompt_template, name)
             if name == MAIN_AGENT_CHARACTER_NAME:
                 # 主 Agent 不是 subagent：使用 parent context 的 LLM 和原有系统提示词
                 ctx = parent_ctx
                 llm_client = LLMClient(ctx)
                 skill_blocks = collect_skill_prompts()
-                main_prompt = "\n\n".join(build_agent_system_prompt(ctx, skill_blocks))
-                # 追加多 Agent 路由格式指令
-                system_prompt = main_prompt + "\n\n" + render_multi_agent_prompt(system_prompt_template, name)
+                persona_prompts = build_agent_system_prompt(ctx, skill_blocks)
             else:
                 profile = store.get(name)
                 if profile is None:
@@ -199,11 +200,21 @@ class SessionManager:
                     "llm_temperature": parent_ctx.llm_temperature,
                 })
                 llm_client = LLMClient(ctx)
-                system_prompt = render_multi_agent_prompt(system_prompt_template, name)
+                prompt_paths = profile.get("system_prompt_paths") or []
+                persona_prompts: list[str] = []
+                for p in prompt_paths:
+                    if sandbox.exists(p):
+                        persona_prompts.append(sandbox.read(p, limit=0))
+                    else:
+                        logger.warning(
+                            "Subagent %s system prompt path not found: %s (session=%s)",
+                            name, p, session_id,
+                        )
 
+            system_prompts = persona_prompts + [multi_agent_common_prompt]
             agent_profiles[name] = AgentProfile(
                 character_name=name,
-                system_prompt=system_prompt,
+                system_prompts=system_prompts,
                 tools=tools,
                 llm_client=llm_client,
             )

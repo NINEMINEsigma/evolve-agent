@@ -48,13 +48,12 @@ class AgentProfile:
     def __init__(
         self,
         character_name: str,
-        system_prompt: str,
+        system_prompts: list[str],
         tools: list[dict],
         llm_client: Any,
     ) -> None:
         self.character_name: str = character_name
-        # TODO: 必须改成多条, 为了支持主agent和子agent的复杂提示词, 实际上并不能被合并
-        self.system_prompt: str = system_prompt
+        self.system_prompts: list[str] = system_prompts
         self.tools: list[dict] = tools
         self.llm_client: Any = llm_client
 
@@ -668,11 +667,11 @@ class MultiAgentLoop(BaseAgentLoop):
             self.session_id, character_name, len(history_view), is_final_round,
         )
 
-        # 最后一轮：加载并追加 final-round 提示词后缀
-        system_prompt = profile.system_prompt
+        # 最后一轮：追加 final-round 提示词
+        system_prompts = profile.system_prompts
         logger.info(
-            "Agent worker system prompt | session=%s character=%s is_final=%s prompt_len=%d",
-            self.session_id, character_name, is_final_round, len(system_prompt),
+            "Agent worker system prompts | session=%s character=%s is_final=%s prompt_count=%d total_len=%d",
+            self.session_id, character_name, is_final_round, len(system_prompts), sum(len(p) for p in system_prompts),
         )
         if is_final_round:
             global _Final_Round_Prompt
@@ -680,15 +679,15 @@ class MultiAgentLoop(BaseAgentLoop):
                 template_path = get_templates_dir() / "multiagent" / "multi_agent_final_round_prompt.txt"
                 with open(template_path, "r", encoding="utf-8") as f:
                     _Final_Round_Prompt = render_multi_agent_prompt(f.read(), character_name)
-            system_prompt = system_prompt + "\n\n" + _Final_Round_Prompt
+            system_prompts = system_prompts + [_Final_Round_Prompt]
             logger.info(
-                "Agent worker final round prompt appended | session=%s character=%s new_prompt_len=%d",
-                self.session_id, character_name, len(system_prompt),
+                "Agent worker final round prompt appended | session=%s character=%s new_prompt_count=%d",
+                self.session_id, character_name, len(system_prompts),
             )
 
         worker = MultiAgentWorker(
             character_name=character_name,
-            system_prompt=system_prompt,
+            system_prompts=system_prompts,
             history=history_view,
             tools=profile.tools,
             llm_client=profile.llm_client,

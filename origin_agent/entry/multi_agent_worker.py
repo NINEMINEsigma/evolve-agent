@@ -76,7 +76,7 @@ class MultiAgentWorker:
         self,
         *,
         character_name: str,
-        system_prompt: str,
+        system_prompts: list[str],
         history: list[dict[str, Any]],
         tools: list[dict[str, Any]],
         llm_client: LLMClient,
@@ -84,7 +84,7 @@ class MultiAgentWorker:
         loop: BaseAgentLoop,
     ) -> None:
         self.character_name: str = character_name
-        self._system_prompt: str = system_prompt
+        self._system_prompts: list[str] = system_prompts
         self._messages: list[dict[str, Any]] = history
         self._tools: list[dict[str, Any]] = tools
         self._llm: LLMClient = llm_client
@@ -152,11 +152,11 @@ class MultiAgentWorker:
         2. 循环: LLM 调用 → 检查 tool_calls → 执行工具 → 追加结果
         3. 当 LLM 返回纯文本时 → 解析 DSL 标签 → 推送干净内容到前端 → 返回 WorkerResult
         """
-        # 在消息列表头部插入 system prompt
+        # 在消息列表头部插入多条 system prompt
         full_messages = [
-            {"role": "system", "content": self._system_prompt},
-            *self._messages,
-        ]
+            {"role": Role.SYSTEM.value, "content": prompt}
+            for prompt in self._system_prompts
+        ] + self._messages
 
         for turn in range(MAX_TOOL_TURNS):
             if self._loop.is_interrupted():

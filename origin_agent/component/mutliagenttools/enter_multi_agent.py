@@ -9,6 +9,7 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 from abstract.tools.registry import registry, tool_error, tool_result
@@ -18,6 +19,8 @@ from entry.parent_agent_loop import ParentAgentLoop
 from system.application import Application
 from system.templates import get_templates_dir, render_multi_agent_prompt
 from entry.multi_agent_loop import MultiAgentLoop, AgentProfile
+
+logger = logging.getLogger(__name__)
 
 
 async def _handle_enter_multi_agent(args: dict[str, Any]) -> dict:
@@ -82,24 +85,38 @@ async def _handle_enter_multi_agent(args: dict[str, Any]) -> dict:
     tools = [t for t in tools if t.get("function", {}).get("name") not in multiagent_tool_names]
 
     # 为每个 Agent 构造 Profile
-    # 主 Agent 保留原有系统提示词，子 Agent 使用多 Agent 协作模板
+    # 主 Agent 保留原有系统提示词段落，子 Agent 注入注册时保存的人设提示词文件
     from entry.agent_support.messages import (
         build_agent_system_prompt,
         collect_skill_prompts,
     )
+    from system.sandbox import Sandbox
+
+    sandbox = Sandbox(get_runtime_context())
 
     agent_profiles: dict[str, AgentProfile] = {}
     for name in agents:
+        multi_agent_common_prompt = render_multi_agent_prompt(system_prompt_template, name)
         if name == main_agent_name:
             skill_blocks = collect_skill_prompts()
-            main_prompt = "\n\n".join(build_agent_system_prompt(parent_loop._get_context(), skill_blocks))
-            # 追加多 Agent 路由格式指令，使主 agent 知晓如何构建 DSL 输出
-            prompt = main_prompt + "\n\n" + render_multi_agent_prompt(system_prompt_template, name)
+            persona_prompts = build_agent_system_prompt(parent_loop._get_context(), skill_blocks)
         else:
-            prompt = render_multi_agent_prompt(system_prompt_template, name)
+            profile_data = store.get(name) or {}
+            prompt_paths = profile_data.get("system_prompt_paths") or []
+            persona_prompts: list[str] = []
+            for p in prompt_paths:
+                if sandbox.exists(p):
+                    persona_prompts.append(sandbox.read(p, limit=0))
+                else:
+                    logger.warning(
+                        "Subagent %s system prompt path not found: %s",
+                        name, p,
+                    )
+
+        system_prompts = persona_prompts + [multi_agent_common_prompt]
         agent_profiles[name] = AgentProfile(
             character_name=name,
-            system_prompt=prompt,
+            system_prompts=system_prompts,
             tools=tools,
             llm_client=llm_client,
         )
