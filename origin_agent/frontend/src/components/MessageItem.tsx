@@ -1,6 +1,8 @@
 import { memo, useMemo, useState, type WheelEvent } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import remarkBreaks from "remark-breaks";
+import rehypeRaw from "rehype-raw";
 import { ChatMessage, ContentBlock, MessageContent } from "../types";
 import CodeBlock from "./CodeBlock";
 import PlaylistPlayer from "./PlaylistPlayer";
@@ -23,10 +25,10 @@ function hueFromString(str: string): number {
   return hashString(str) % 360;
 }
 
-// 粗略判断一段文本是否包含需要渲染的 HTML 标签（支持开标签、自闭合、void 标签）
-const HTML_TAG_RE = /<[a-zA-Z][^>]*(?:\/>|>)/;
-function containsHtml(text: string): boolean {
-  return HTML_TAG_RE.test(text);
+// 判断文本中是否包含需要完整注入执行的 <script> 标签；普通 HTML 标签通过 rehype-raw 在 ReactMarkdown 中混合渲染
+const SCRIPT_TAG_RE = /<script\b[^>]*>(?:[\s\S]*?)<\/script\s*>|<script\b[^>]*\/>/i;
+function containsScript(text: string): boolean {
+  return SCRIPT_TAG_RE.test(text);
 }
 
 const CHINESE_NICKNAME_PREFIXES = new Set(["小", "阿", "老", "大"]);
@@ -92,6 +94,30 @@ const markdownComponentsBase = {
         {children}
       </a>
     );
+  },
+  div({ className, style, children }: any) {
+    return <div className={className} style={style}>{children}</div>;
+  },
+  span({ className, style, children }: any) {
+    return <span className={className} style={style}>{children}</span>;
+  },
+  button({ className, style, type, onClick, disabled, children }: any) {
+    return <button className={className} style={style} type={type} onClick={onClick} disabled={disabled}>{children}</button>;
+  },
+  style({ children }: any) {
+    return <style>{children}</style>;
+  },
+  details({ className, style, children }: any) {
+    return <details className={className} style={style}>{children}</details>;
+  },
+  summary({ className, style, children }: any) {
+    return <summary className={className} style={style}>{children}</summary>;
+  },
+  progress({ className, style, value, max, children }: any) {
+    return <progress className={className} style={style} value={value} max={max}>{children}</progress>;
+  },
+  meter({ className, style, value, min, max, low, high, optimum, children }: any) {
+    return <meter className={className} style={style} value={value} min={min} max={max} low={low} high={high} optimum={optimum}>{children}</meter>;
   },
 };
 
@@ -320,10 +346,14 @@ const MessageItem = memo(function MessageItem({ message, archived, onImageClick,
             </details>
           )}
           {typeof m.content === "string" ? (
-            containsHtml(textContent) ? (
+            containsScript(textContent) ? (
               <SafeHtml html={textContent} />
             ) : (
-              <ReactMarkdown remarkPlugins={[remarkGfm]} components={mdComponents}>
+              <ReactMarkdown
+                remarkPlugins={[remarkGfm, remarkBreaks]}
+                rehypePlugins={[rehypeRaw]}
+                components={mdComponents}
+              >
                 {textContent || ""}
               </ReactMarkdown>
             )

@@ -541,6 +541,11 @@
 .message-bubble h2 { font-size: 1.15em; }
 .message-bubble h3 { font-size: 1.05em; }
 
+.message-bubble p {
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
 .message-bubble p:first-child { margin-top: 0; }
 .message-bubble p:last-child  { margin-bottom: 0; }
 
