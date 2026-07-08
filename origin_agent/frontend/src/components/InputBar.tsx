@@ -164,6 +164,17 @@ export default function InputBar({
             </svg>
           </button>
           <button
+            className="agentspace-fab"
+            data-tooltip="打开 Agentspace 编辑器"
+            type="button"
+            onClick={() => window.open("/agentspace", "_blank")}
+          >
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z" />
+              <path d="M10 13l4-4M14 9h-4v4" />
+            </svg>
+          </button>
+          <button
             className="interrupt-btn"
             onClick={onInterrupt}
             data-tooltip="中断当前 Agent 工作"

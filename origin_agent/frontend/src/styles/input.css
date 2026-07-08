@@ -207,6 +207,27 @@
   color: var(--text-secondary);
 }
 
+/* ── Agentspace FAB ── */
+.agentspace-fab {
+  width: 34px;
+  height: 34px;
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  background: var(--bg-tertiary);
+  color: var(--fg-secondary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+  flex-shrink: 0;
+}
+.agentspace-fab:hover {
+  background: var(--bg-hover);
+  color: var(--fg-primary);
+  border-color: var(--border-strong);
+}
+
 /* ── File upload ── */
 .file-input-hidden {
   display: none;

@@ -86,7 +86,7 @@ export default function Header({
   const handleShutdownApprovalModel = async () => {
     setCmdMenuOpen(false);
     setMenuPos(null);
-    if (!window.confirm("确定要关闭审批模型 (llama-server) 吗？关闭后将释放显存，脱手模式不可用。")) return;
+    if (!window.confirm("确定要卸载审批模型 (llama-server) 吗？关闭后将释放显存，脱手模式不可用。")) return;
     setShuttingDown(true);
     try {
       const resp = await fetch("/api/shutdown-approval-model", { method: "POST" });
@@ -96,7 +96,7 @@ export default function Header({
         onToggleHandsfree(false);
         alert("审批模型已关闭，显存已释放。");
       } else {
-        alert("关闭审批模型失败。");
+        alert("卸载审批模型失败。");
       }
     } catch {
       alert("请求失败，请检查网络。");
@@ -159,7 +159,7 @@ export default function Header({
               style={showApprovalUI ? undefined : { opacity: 0.45, cursor: "not-allowed", userSelect: "none" }}
               data-tooltip={showApprovalUI ? "" : "审批模型未加载"}
             >
-              关闭审批模型
+              卸载审批模型
             </div>
           </div>
         )}

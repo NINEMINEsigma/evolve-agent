@@ -115,7 +115,7 @@ WS /ws/chat?resume=<sid>
 | POST | `/api/ask/{request_id}` | 提问响应 |
 | POST | `/api/interrupt/{session_id}` | 中断会话 |
 | POST | `/api/file-picker` | 系统文件选择器 |
-| POST | `/api/shutdown-approval-model` | 关闭审批模型服务 |
+| POST | `/api/shutdown-approval-model` | 卸载审批模型服务 |
 
 ### 后台任务
 
