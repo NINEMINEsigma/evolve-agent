@@ -108,6 +108,16 @@ class AgentSink(ABC):
         """推送子 Agent 状态更新。"""
         ...
 
+    @abstractmethod
+    async def emit_system_message(self, session_id: str, content: str) -> None:
+        """推送系统消息到前端。
+
+        Args:
+            session_id: 目标会话 ID。
+            content: 系统消息文本内容。
+        """
+        ...
+
 
 class FrontendSink(AgentSink):
     """主 Agent 的交互抽象 — 通过 WebSocket 与前端用户通信。
@@ -378,6 +388,24 @@ class FrontendSink(AgentSink):
         await self._send_msg(session_id, "subagent_update", "",
                              json.dumps(payload, ensure_ascii=False))
 
+    async def emit_system_message(self, session_id: str, content: str) -> None:
+        """推送系统消息到前端。"""
+        try:
+            ws = self._ws_sinks.get(session_id)
+            if ws is None:
+                return
+            from gateway.chat import Message, MessageType
+            msg = Message(
+                type=MessageType.SYSTEM,
+                session_id=session_id,
+                content=content,
+            )
+            await ws.send_text(msg.to_json())
+        except Exception:
+            logger.warning(
+                "Failed to send system message | session=%s", session_id, exc_info=True,
+            )
+
     async def _send_msg(self, session_id: str, event_type: str,
                         tool_name: str, payload: str, *,
                         tool_call_id: str = "",
@@ -628,4 +656,18 @@ class ParentAgentSink(AgentSink):
         except Exception:
             logger.warning(
                 "Failed to forward subagent_update to parent session=%s", session_id, exc_info=True
+            )
+
+    async def emit_system_message(self, session_id: str, content: str) -> None:
+        """转发系统消息到父 Agent 前端。"""
+        try:
+            from system.application import Application
+            sink = Application.current().frontend_sink
+            if sink is not None:
+                await sink.emit_system_message(
+                    self._loop._parent_session_id, content,
+                )
+        except Exception:
+            logger.warning(
+                "Failed to forward system message to parent session=%s", session_id, exc_info=True,
             )

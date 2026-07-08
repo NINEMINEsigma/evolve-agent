@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+from collections import deque
 from pathlib import Path
 from typing import Any, TYPE_CHECKING
 
@@ -482,40 +483,29 @@ class MultiAgentLoop(BaseAgentLoop):
     async def _cascade(
         self,
         response_characters: list[str],
-        depth: int = 0,
     ) -> None:
-        """递归级联核心。
+        """串行动态队列级联调度。
 
-        并发启动所有 ``response_characters`` 指定的 Agent worker，
-        按完成顺序串行写入 History，提取下一轮 response_characters，
-        递归直到无人被指定或达到最大深度。
+        按原始 response_characters 顺序初始化动态队列，严格串行执行：
+        每步弹出一个 Agent，**等待其完全完成（含 tool loop 和 History 写入）**后，
+        再启动下一个。Agent 响应中指定的 response_characters 会动态调整队列：
+        - 已在队列中：移到队首（优先执行）
+        - 不在队列中：加到队尾
+        - 自我指定：忽略
 
-        最后一轮（depth == MAX-1）时：
-        - 注入 final-round 提示词，告知 Agent 不得指定 response_characters
-        - 代码层面强制忽略 Agent 输出的 response_characters
+        最大深度按步数计算：len(agents) * MULTI_AGENT_MAX_CASCADE_DEPTH。
+        剩余步数 ≤ 3 时注入 final-round 提示词强制收敛。
+        任一 Agent 响应或代码异常直接中断队列，发送系统消息报错。
         """
+        # ── 构建初始队列 ──
         is_contains_main_agent = MAIN_AGENT_CHARACTER_NAME in response_characters
-        # 运行时防御：过滤已删除 subagent profile 的角色
-        response_characters = self._get_available_subagents(response_characters)
-        # 恢复主agent, 因_get_available_subagents会删除主agent
+        filtered = self._get_available_subagents(response_characters)
         if is_contains_main_agent:
-            response_characters.append(MAIN_AGENT_CHARACTER_NAME)
-
-        if not response_characters or depth >= MULTI_AGENT_MAX_CASCADE_DEPTH:
-            if depth >= MULTI_AGENT_MAX_CASCADE_DEPTH:
-                logger.warning(
-                    "Cascade depth limit (%d) reached for session=%s",
-                    MULTI_AGENT_MAX_CASCADE_DEPTH,
-                    self.session_id,
-                )
-            return
-
-        # 是否最后一轮（下一轮将超过最大深度）
-        is_final_round = (depth == MULTI_AGENT_MAX_CASCADE_DEPTH - 1)
+            filtered.append(MAIN_AGENT_CHARACTER_NAME)
 
         # 过滤不存在的 Agent 名
-        valid_chars = [c for c in response_characters if c in self._agents]
-        invalid_chars = set(response_characters) - set(valid_chars)
+        valid_chars = [c for c in filtered if c in self._agents]
+        invalid_chars = set(filtered) - set(valid_chars)
         if invalid_chars:
             logger.warning(
                 "Ignoring unknown response_characters: %s", invalid_chars
@@ -524,70 +514,69 @@ class MultiAgentLoop(BaseAgentLoop):
         if not valid_chars:
             return
 
+        queue: deque[str] = deque(valid_chars)
+        step: int = 0
+        max_steps: int = len(self._agents) * MULTI_AGENT_MAX_CASCADE_DEPTH
+
         logger.info(
-            "Cascade round start | session=%s depth=%d agents=%s final=%s",
-            self.session_id, depth, valid_chars, is_final_round,
+            "Cascade start (serial) | session=%s queue=%s max_steps=%d",
+            self.session_id, list(queue), max_steps,
         )
 
-        # 并发启动所有 worker（最后一轮传递 is_final_round）
-        tasks: list[asyncio.Task[WorkerResult]] = []
-        for char_name in valid_chars:
-            task = asyncio.create_task(
-                self._run_single_agent(char_name, is_final_round=is_final_round),
-                name=f"multi_agent_{char_name}_{depth}",
-            )
-            tasks.append(task)
+        while queue and step < max_steps:
+            char = queue.popleft()
 
-        # 等待所有 worker 完成（任一失败不影响其他）
-        results: list[WorkerResult] = []
-        for task in asyncio.as_completed(tasks):
+            # 跳过无效 Agent
+            if char not in self._agents:
+                continue
+
+            is_final = (max_steps - step) <= 3
+
+            logger.info(
+                "Cascade step | session=%s step=%d/%d character=%s final=%s queue=%s",
+                self.session_id, step, max_steps, char, is_final, list(queue),
+            )
+
+            # ── 执行单个 Agent ──
             try:
-                result = await task
-                results.append(result)
-            except Exception:
+                result = await self._run_single_agent(char, is_final_round=is_final)
+            except Exception as exc:
                 logger.exception(
-                    "Agent worker failed for session=%s",
-                    self.session_id,
+                    "Agent worker failed, cascade interrupted | session=%s character=%s step=%d",
+                    self.session_id, char, step,
                 )
+                await self._sink.emit_system_message(
+                    self.session_id,
+                    json.dumps({
+                        "cascade_error": True,
+                        "agent": char,
+                        "step": step,
+                        "error": f"{type(exc).__name__}: {exc}",
+                    }, ensure_ascii=False),
+                )
+                return
 
-        if not results:
-            logger.warning(
-                "No agent responses in cascade round | session=%s depth=%d",
-                self.session_id, depth,
-            )
-            return
-
-        # 按完成顺序串行写入 History（_io_locker 保证线程安全）
-        next_chars: set[str] = set()
-        for result in results:
+            # ── 解析结果并写入 History ──
             parsed = result.parsed_json
             content_text = parsed.content
 
-            # 兜底：防止 worker 因任何原因返回空/空白 content，避免污染历史
             if not isinstance(content_text, str) or not content_text.strip():
                 logger.warning(
-                    "Agent %s returned empty content in cascade; replacing with placeholder | session=%s depth=%d",
-                    result.character_name, self.session_id, depth,
+                    "Agent %s returned empty content in cascade; replacing with placeholder | session=%s step=%d",
+                    result.character_name, self.session_id, step,
                 )
                 content_text = f"[{result.character_name} 没有返回有效内容]"
 
-            visible = parsed.visible_characters
-            # TODO: 有待考量
-            # agent 未指定可见范围时，默认对当前全部 agent 可见
-            if not visible:
-                visible = list(self._agent_names)
-            response = list(parsed.response_characters)
+            visible = parsed.visible_characters if parsed.visible_characters else list(self._agent_names)
 
             # 最后一轮：强制忽略 response_characters
-            if is_final_round:
-                response = []
+            response = list(parsed.response_characters) if not is_final else []
 
             preview = content_text[:LOG_PREVIEW_CHARS] + "..." if len(content_text) > LOG_PREVIEW_CHARS else content_text
             logger.info(
-                "Agent response | session=%s character=%s depth=%d content=%s visible=%s response=%s",
-                self.session_id, result.character_name, depth, preview,
-                visible if visible else [],
-                response if response else [],
+                "Agent response | session=%s character=%s step=%d content=%s visible=%s response=%s",
+                self.session_id, result.character_name, step, preview,
+                visible, response,
             )
 
             msg = CharacterConversationMessage(
@@ -605,7 +594,7 @@ class MultiAgentLoop(BaseAgentLoop):
             self._history.add_message(msg)
             self._persist_message(self.session_id)
 
-            # 推送可见性/响应元数据给前端，用 stream_id 关联流式消息
+            # 推送可见性/响应元数据给前端
             if result.stream_id and (visible or response):
                 try:
                     await self._sink.emit_stream_done(
@@ -613,39 +602,53 @@ class MultiAgentLoop(BaseAgentLoop):
                         result.stream_id,
                         finish_reason="stop",
                     )
-                    # 通过 system 消息推送元数据
-                    from gateway.chat import Message, MessageType
-                    ws = getattr(self._sink, '_ws_sinks', {}).get(self.session_id)
-                    if ws:
-                        await ws.send_text(Message(
-                            type=MessageType.SYSTEM,
-                            session_id=self.session_id,
-                            content=json.dumps({
-                                "stream_meta": {
-                                    "stream_id": result.stream_id,
-                                    "visible_characters": visible if visible else [],
-                                    "response_characters": response if response else [],
-                                },
-                            }, ensure_ascii=False),
-                        ).to_json())
+                    await self._sink.emit_system_message(
+                        self.session_id,
+                        json.dumps({
+                            "stream_meta": {
+                                "stream_id": result.stream_id,
+                                "visible_characters": visible,
+                                "response_characters": response,
+                            },
+                        }, ensure_ascii=False),
+                    )
                 except Exception:
                     logger.debug("Failed to push visibility metadata for stream=%s", result.stream_id, exc_info=True)
 
-            # 收集下一轮需要响应的 Agent（最后一轮跳过）
-            if not is_final_round:
+            # ── 动态调整队列 ──
+            if not is_final:
                 for rc in response:
-                    if rc in self._agents:
-                        next_chars.add(rc)
+                    # 过滤：仅保留有效 Agent，排除自我指定
+                    if rc not in self._agents or rc == char:
+                        continue
+                    if rc in queue:
+                        # 已在队列中：移到队首
+                        queue.remove(rc)
+                        queue.appendleft(rc)
+                        logger.info(
+                            "Queue reorder: %s moved to front | session=%s step=%d",
+                            rc, self.session_id, step,
+                        )
+                    else:
+                        # 不在队列中：加到队尾
+                        queue.append(rc)
+                        logger.info(
+                            "Queue append: %s added to back | session=%s step=%d",
+                            rc, self.session_id, step,
+                        )
 
-        # 递归触发下一轮级联
-        try:
-            await self._cascade(list(next_chars), depth + 1)
-        except Exception:
-            logger.exception(
-                "Cascade recursion failed | session=%s depth=%d next=%s",
-                self.session_id, depth, list(next_chars),
+            step += 1
+
+        if step >= max_steps:
+            logger.warning(
+                "Cascade step limit (%d) reached for session=%s",
+                max_steps, self.session_id,
             )
-            raise
+
+        logger.info(
+            "Cascade completed (serial) | session=%s steps=%d",
+            self.session_id, step,
+        )
 
     # -- 单 Agent 执行 -----------------------------------------------------
 
