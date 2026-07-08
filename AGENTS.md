@@ -1,16 +1,15 @@
 # Evolve Agent — AGENTS.md
 
-> ⚠️ **极度重要 — 绝对禁止** ⚠️
+> **Hard rules — violating any of these corrupts the build or loses work**
 >
-> **不要在 `origin_agent/frontend/` 目录下执行 `pnpm install`、`pnpm build`、`pnpm dev` 或任何其他 pnpm/npm 命令。**
->
-> `origin_agent/` 是唯一的持久化源码真相源。`run.py` 启动时会将 `origin_agent/` 复制到 `workspace/fast_agent_space/`，前端构建由该副本中的 `__main__.py` 自动执行（运行 `pnpm install && pnpm run build`）。在 `origin_agent/frontend/` 下运行 pnpm 会创建 `node_modules/` / `dist/`，下次 `--fouce_init` 时可能被复制进 workspace，污染构建环境。
->
-> **同时绝对禁止在任何位置执行 `npx tsc`、`pnpm exec tsc`、`npm run typecheck`、`npm run lint` 等以“验证”为目的的构建/类型/语法检查命令。**
->
-> **严格禁止在任何位置执行 `python run.py`、`python check_env.py` 或任何其他构建/运行/启动/验证命令，除非用户明确授权。** 修改源码后不得主动替用户运行验证，必须由用户自行决定是否以及何时启动。
->
-> **即使用户主动要求，也绝对禁止代其执行构建、运行或验证命令；请直接拒绝并告知用户自行在本地执行。** 如果用户报构建错误，你只能修改源码，不能通过执行任何命令来“验证”或“复现”。
+> - **Never run pnpm/npm in `origin_agent/frontend/`.** Builds only happen inside `workspace/fast_agent_space/frontend/` at runtime. Running pnpm in `origin_agent/` creates `node_modules/`/`dist/` that can be copied into workspace on `--fouce_init` and break builds.
+> - **Never run validation commands for the user.** No `npx tsc`, `pnpm exec tsc`, `npm run typecheck`, `npm run lint`, `pnpm build`, `python check_env.py`, etc. If the user reports a build error, only edit source code; do not reproduce or validate by running commands.
+> - **Never run `python run.py` / `python check_env.py` or start the app unless the user explicitly authorizes it.**
+> - **Never execute `origin_agent/` directly.** `run.py` copies it to `workspace/fast_agent_space/` and runs that copy. No `python origin_agent/__main__.py`, no `sys.path`/`cwd` tricks pointing at `origin_agent/`.
+> - **Never read, search, or modify `workspace/` code files.** They are disposable runtime copies of `origin_agent/`. Non-code files (logs, JSON, `.lock`) are readable but not writable.
+> - **Git is read-only.** Only `git diff` and `git log` are allowed. All write git operations (`add`, `commit`, `push`, `checkout`, `branch`, etc.) must be done by the user.
+> - **No batch-editing scripts.** Make targeted, reviewable edits.
+> - **Do not switch RIPER-5 modes without explicit approval.** Especially never jump from RESEARCH/PLAN to EXECUTE without the user saying so.
 
 ## Startup
 
@@ -18,90 +17,53 @@
 python run.py --load <config_key>
 ```
 
-Requires `OPENAI_API_KEY`. Optional `OPENAI_BASE_URL` to override the LLM endpoint. Web UI at `http://127.0.0.1:8765`.
+- Requires `OPENAI_API_KEY`. `OPENAI_BASE_URL` overrides the endpoint.
+- Web UI: `http://127.0.0.1:8765`.
+- `config.py` prompts interactively if neither `--load` nor `--save` is given. In agent/non-interactive sessions always pass `--load <key>` or `--save <key>`.
+- `config.json` is gitignored and contains the unencrypted API key. Do not commit it.
+- `--fouce_init` is intentionally misspelled. When `true` in the loaded config, `--load` wipes `workspace/` and recopies `origin_agent/` on every start. Use `fouce_init: false` for persistent workspaces.
+- Common CLI overrides: `--fouce_init`, `--llm_model`, `--llm_base_url`, `--llm_api_key`, `--llm_temperature`, `--llm_max_context_tokens`, `--llm_max_output_tokens`, `--llm_reasoning_effort`, `--approval_model`, `--approval_model_cuda`, `--gateway_host`, `--gateway_port`, `--console_log`.
 
-CLI flags (override `config.py` defaults): `--fouce_init`, `--approval_model`, `--approval_model_cuda`, `--llm_model`, `--llm_temperature`, `--llm_max_context_tokens`, `--llm_max_output_tokens`, `--llm_reasoning_effort`, `--gateway_host`, `--gateway_port`, `--console_log`.
-
-Environment check: `python check_env.py --cuda`
-
-### Configuration gotchas
-
-- `config.py` prompts interactively for a config key unless `--load <key>` or `--save <key>` is given. In non-interactive/agent sessions always pass `--load <key>` for an existing key in `config.json`, or `--save <key>` to create one.
-- `config.json` contains an unencrypted API key and is gitignored. Do not commit it.
-- Inspect the loaded config key for `fouce_init`: if `true`, `--load` it wipes `workspace/` on each start. Use a key with `fouce_init: false` for persistent workspaces.
-
-## Iron rules
-
-- **Never execute `origin_agent/` directly.** `run.py` copies it to `workspace/fast_agent_space/` before running. No: `origin_agent/__main__.py` direct execution, `pnpm install/build/dev` in `origin_agent/frontend/`, or using `origin_agent/` paths in `sys.path` or `cwd`.
-- **Never run validation commands on behalf of the user.** This includes `npx tsc`, `pnpm exec tsc`, `npm run typecheck`, `npm run lint`, `pnpm build`, `python check_env.py`, or any other command whose purpose is to verify builds/types/syntax. When the user reports a build error, only edit source code; never try to reproduce or validate by running commands.
-- **Never modify `workspace/` code files** (`.py`, `.js`, `.ts`, `.tsx`, `.css`). They are runtime copies — changes are lost on re-init. Non-code files (logs, JSON) are readable but not writable.
-- **Never read or search `workspace/` code files.** Do not use them as code evidence; they are runtime copies of `origin_agent/`.
-- **Never use scripts to batch-edit source files.** Make targeted, reviewable edits.
-- `origin_agent/frontend/` is not at the repo root, so static type/IDE awareness may be inaccurate. Before relying on frontend type checks or builds, stop and notify the user.
-- **Git 操作仅限于 `git diff` 和 `git log`（只读查询）。禁止使用任何写入性 git 命令，包括但不限于 `git add`、`git commit`、`git push`、`git checkout`、`git branch`、`git merge`、`git rebase`、`git reset`、`git stash`、`git revert` 等。所有 git 写入操作必须由用户手动执行。**
-- **绝对禁止在 RIPER-5 模式之间擅自切换，尤其禁止未经用户明确批准就从 PLAN/RESEARCH 跳到 EXECUTE 模式。** 必须先建立完整计划、获得明确的批准信号（例如用户回复“批准”“ENTER EXECUTE MODE”或同等含义的指令）后，才能修改任何文件。未经批准的自主代码修改属于严重违规。
-
-## Git commit style
-
-- 使用中文提交信息，前缀采用仓库已有标签：`[feature]`、`[fix]`、`[refactor]`、`[docs]` 等。
-- 提交首行格式：`[标签] 简短描述（50 字以内）`。
-- 需要时追加正文说明，使用 `- ` 列出改动要点。
-- 示例：
-  ```
-  [fix] 修复 ssh 审批弹窗 command 类型错误导致前端黑屏
-
-  - ConfirmDialog 兼容 command 为字符串（ssh_exec）或数组（run_command）
-  - 新增 ErrorBoundary，避免模态组件渲染异常导致整个 App 被卸载
-  ```
-
-## Architecture
+## Repository layout
 
 ```
-origin_agent/        ← sole source of truth (edit here)
+origin_agent/        ← sole source of truth — edit here
 workspace/
-  fast_agent_space/    running agent copy
-  slow_agent_space/    evolution target (fork:)
-  .fallback/           previous fast backup (for repair)
-  agentspace/          agent I/O workspace (ws:)
-  logs/                sessions, evolution status
-third/               ← git submodules: easysave, filesystem, llamaapis
+  fast_agent_space/  ← running agent copy
+  slow_agent_space/  ← evolution target (fork:)
+  .fallback/         ← previous fast backup
+  agentspace/        ← agent I/O workspace (ws:)
+  logs/              ← sessions, evolution status
+third/               ← git submodules (easysave, llamaapis, filesystem)
+skills/              ← runtime skill files, gitignored
 ```
 
 - No CI/CD, no test framework, no lint/typecheck. Pure runtime code evolution.
-- `pyrightconfig.json` adds `origin_agent/` and `third/` to `extraPaths`.
-- `skills/` at repo root is seeded at runtime and gitignored; do not commit it.
-
-## Tool registration style
-
-When adding new `registry.register(...)` tools, follow the convention in `component/tools/`:
-
-- `schema["description"]` is written in English.
-- The line immediately above the `description` string is a Chinese comment explaining the tool behavior.
-
-Tools auto-discovered by AST scan (`abstract/tools/discover.py`) scanning for module-level `registry.register()` calls. Sources:
-
-- `component/tools/` — core (filesystem, code, shell, frontend, skills, read_image, run_python)
-- `component/extools/` — extras (web_search, web_fetch, csv_tools, excel_tools, docx_tools, pdf_tools, diff_tools, ffmpeg_tools, diagram, display, docgen_tools, excalidraw_render, gui_windows, pip, ssh_tools, web_browser)
-- `custom_tools/` — user-defined, auto-discovered if directory exists
+- `pyrightconfig.json` adds `./origin_agent` and `./third` to `extraPaths`.
+- `skills/` is created at runtime and gitignored; do not commit it.
+- `pre-skills/` contains built-in skill templates for self-evolution.
 
 ## Lifecycle (run.py)
 
-1. First run or `--fouce_init`: wipe `workspace/*`, copy `origin_agent/` to both `fast_agent_space/` and `slow_agent_space/`.
-2. Run `fast_agent_space/__main__.py`.
-3. Exit code `0` = normal stop. `-1` = evolution swap (fast → .fallback, slow → fast, restart). Other = fallback mode (run `.fallback/__main__.py` to repair).
+1. First run or `--fouce_init`: copies `origin_agent/` into both `workspace/fast_agent_space/` and `workspace/slow_agent_space/`.
+2. Runs `fast_agent_space/__main__.py`.
+3. Exit codes:
+   - `0` — normal stop
+   - `-1` / `4294967295` — evolution succeeded; run.py swaps slow→fast and restarts
+   - anything else — runtime error; run.py enters fallback mode and runs `.fallback/__main__.py` to repair
 
-## Sandbox
+## Sandbox paths
 
-All file operations use logical path prefixes. No bare paths, no `..`, no absolute paths.
+All file operations use logical prefixes. No bare paths, `..`, or absolute paths.
 
-| Prefix | Maps to | Mode | Permission |
-|--------|---------|------|------------|
-| `fork:` | `slow_agent_space/` | fast | rw |
-| `ws:` | `agentspace/` | fast / fallback | rw |
-| `fix:` | `.fallback/` | fallback | rw |
-| `skills:` | repo-root `skills/` | fast / fallback | rw |
+| Prefix   | Maps to                          | Modes           | Permission |
+|----------|----------------------------------|-----------------|------------|
+| `fork:`  | `workspace/slow_agent_space/`    | fast            | rw         |
+| `ws:`    | `workspace/agentspace/`          | fast / fallback | rw         |
+| `fix:`   | `workspace/.fallback/`           | fallback        | rw         |
+| `skills:`| repo-root `skills/`              | fast / fallback | rw         |
 
-There is **no** `self:` namespace. Agent reads its own source from `fork:` (which starts as a copy of `origin_agent/`).
+There is no `self:` namespace. Read your own source with `fork:`.
 
 ## Evolution flow
 
@@ -109,40 +71,64 @@ There is **no** `self:` namespace. Agent reads its own source from `fork:` (whic
 read_file (fork:path) → write_fork / edit_file (fork:path) → validate_code → [validate_frontend if frontend changed] → evolve_code
 ```
 
-- `read_own_source` is **disabled** (handler exists but not registered). Use `read_file` with `fork:` prefix instead.
-- `write_fork` supports 3 modes: full overwrite (content), incremental edit (old_string+new_string), append (content+append=true). Max 1000 chars for overwrite, 10 lines for append.
-- `edit_file` (filesystem.py): same-purpose incremental edit using `fork:`/`ws:`/`fix:`/`skills:` prefix.
-- `validate_code`: AST syntax check on `fork:` all `.py` files.
-- `validate_frontend`: runs `pnpm install && pnpm run build` on the target frontend dir (default `fork:frontend`). Required if frontend touched.
-- `evolve_code` calls `finalize_evolution()` → py_compile deep check → triggers exit code -1.
-- `fouce_init` is intentionally misspelled (not `force_init`).
-- `diff_fast_fork`: compare `fast_agent_space/` vs `fork:` before swapping; skip `evolve_code` if identical.
+- `read_own_source` exists but is **disabled**; use `read_file` with `fork:`.
+- `write_fork` modes: full overwrite (max 1000 chars), incremental edit (`old_string`+`new_string`), append (`content`+`append=true`, max 10 lines).
+- `edit_file` (filesystem.py) does incremental edits using `fork:`/`ws:`/`fix:`/`skills:` prefixes.
+- `validate_code`: AST syntax check across all `.py` files in `fork:`.
+- `validate_frontend`: runs `pnpm install && pnpm run build` in the target frontend dir (default `fork:frontend`). Required if frontend files changed.
+- `evolve_code`: deep `py_compile` check, then exits with `-1` to trigger the swap.
+- `diff_fast_fork`: compares `fast_agent_space/` with `fork:`; skip `evolve_code` if identical.
 
-## Template system
+## Tool registration
 
-Assembled by `system/prompt.py`. Detects `templates/zh/` existence → defaults to Chinese. Hierarchy: `GENE > SOUL > base > modes/{fast,fallback} > tools > memory > skills`.
+Tools are auto-discovered by AST scan (`abstract/tools/discover.py`) looking for module-level `registry.register()` calls. Sources:
 
-## Approval (component/approval.py)
+- `origin_agent/component/tools/` — core
+- `origin_agent/component/extools/` — extras
+- `custom_tools/` — user-defined, loaded if directory exists
+- MCP servers — bridged via `component/mcp_tools.py`
 
-- **Normal mode**: user confirms tools via WebSocket frontend prompt.
-- **Adventure mode**: local GGUF model auto-approves. Enabled by default if a GGUF model is found in `custom_models/` (default filename `Qwen3.5-0.8B-Q8_0.gguf`). Explicit flags: `--approval_model <gguf>` and optional `--approval_model_cuda`. Uses `third/llamaapis` (llama.cpp subprocess wrapper).
+When adding `registry.register(...)`:
+
+- `schema["description"]` is written in English.
+- The line immediately above `description` is a Chinese comment explaining behavior.
 
 ## Frontend
 
-React + Vite + TypeScript in `origin_agent/frontend/`. Uses pnpm (**pnpm.cmd** on Windows). Auto-built at startup (`_build_frontend()` in `__main__.py`): `pnpm install && pnpm run build` inside the running agent directory (i.e. `workspace/fast_agent_space/frontend/`). Build failure → exit code 1 → orchestrator enters fallback mode.
+React + Vite + TypeScript in `origin_agent/frontend/`. Package scripts are `dev`, `build` (`tsc -b && vite build`), `preview`.
 
-## Memory
+The frontend is auto-built at startup by `__main__.py::_build_frontend()` inside the running agent directory (`workspace/fast_agent_space/frontend/`) using `pnpm install && pnpm run build`. Build failure returns exit code `1` and triggers fallback mode.
 
-`memory/provider.py`: `EasysaveMemoryProvider` backed by `third/easysave`. Sessions persisted to `workspace/logs/sessions/` (JSONL) with `_index.json` metadata. Evolution status at `workspace/logs/evolution.status` (JSON array).
+Because `origin_agent/frontend/` is not at the repo root, IDE/static type awareness may be inaccurate. Do not rely on frontend type checks or builds without telling the user.
+
+## Approval
+
+- **Normal mode**: user confirms tools via the WebSocket frontend.
+- **Adventure/handsfree mode**: local GGUF model auto-approves. Auto-enabled if a `.gguf` is found in `custom_models/` (default `Qwen3.5-0.8B-Q8_0.gguf`). Explicit flags: `--approval_model <gguf>`, `--approval_model_cuda`. Uses `third/llamaapis` (llama.cpp wrapper).
 
 ## Windows specifics
 
 - Python command is `python` (not `python3`).
-- Native executables (pnpm, etc.) invoked as `pnpm.cmd`.
+- Invoke native executables as `pnpm.cmd`.
 - Process tree kill uses `taskkill /T /F`.
 - Sandbox subprocess uses `CREATE_NEW_PROCESS_GROUP`.
-- `signal.add_signal_handler` unavailable → falls back to `signal.signal`.
+- `signal.add_signal_handler` is unavailable; falls back to `signal.signal`.
 
-## pre-skills/
+## Git commit style
 
-`pre-skills/` contains built-in skill templates for agent self-evolution (evolve-architect, evolve-code-engineer, evolve-code-validator, evolve-debugger, evolve-frontend-builder, etc.). These are reference guides; the agent can load them as skills at runtime.
+Use Chinese commit messages with repo prefixes: `[feature]`, `[fix]`, `[refactor]`, `[docs]`, etc.
+
+```
+[fix] 修复 ssh 审批弹窗 command 类型错误导致前端黑屏
+
+- ConfirmDialog 兼容 command 为字符串（ssh_exec）或数组（run_command）
+- 新增 ErrorBoundary，避免模态组件渲染异常导致整个 App 被卸载
+```
+
+## Memory
+
+`memory/provider.py` implements `EasysaveMemoryProvider` backed by `third/easysave`. Sessions persist to `workspace/logs/sessions/` (JSONL with `_index.json` metadata). Evolution status is at `workspace/logs/evolution.status` (JSON array).
+
+## Template system
+
+Assembled by `system/prompt.py`. Detects `templates/zh/` existence and defaults to Chinese. Hierarchy: `GENE > SOUL > base > modes/{fast,fallback} > tools > memory > skills`.

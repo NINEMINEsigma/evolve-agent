@@ -4,6 +4,7 @@ import remarkGfm from "remark-gfm";
 import { ChatMessage, ContentBlock, MessageContent } from "../types";
 import CodeBlock from "./CodeBlock";
 import PlaylistPlayer from "./PlaylistPlayer";
+import SafeHtml from "./SafeHtml";
 
 const LONG_MESSAGE_CHARS = 1200;
 const LONG_MESSAGE_LINES = 18;
@@ -20,6 +21,12 @@ function hashString(str: string): number {
 
 function hueFromString(str: string): number {
   return hashString(str) % 360;
+}
+
+// 粗略判断一段文本是否包含需要渲染的 HTML 标签（支持开标签、自闭合、void 标签）
+const HTML_TAG_RE = /<[a-zA-Z][^>]*(?:\/>|>)/;
+function containsHtml(text: string): boolean {
+  return HTML_TAG_RE.test(text);
 }
 
 const CHINESE_NICKNAME_PREFIXES = new Set(["小", "阿", "老", "大"]);
@@ -313,9 +320,13 @@ const MessageItem = memo(function MessageItem({ message, archived, onImageClick,
             </details>
           )}
           {typeof m.content === "string" ? (
-            <ReactMarkdown remarkPlugins={[remarkGfm]} components={mdComponents}>
-              {textContent || ""}
-            </ReactMarkdown>
+            containsHtml(textContent) ? (
+              <SafeHtml html={textContent} />
+            ) : (
+              <ReactMarkdown remarkPlugins={[remarkGfm]} components={mdComponents}>
+                {textContent || ""}
+              </ReactMarkdown>
+            )
           ) : (
             renderBlocksContent(m.content, m.role)
           )}

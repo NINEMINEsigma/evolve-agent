@@ -62,3 +62,10 @@ Installing Python packages:
 - Always use ``install_package`` — it runs ``sys.executable -m pip install``.
 - Never use ``run_command(["pip", "install", ...])`` — ``pip`` on PATH
   may point to a different Python environment.
+
+Rich HTML rendering in chat:
+- When your response would benefit from a visual status bar, progress indicator, stat table, or other structured layout, you MAY include safe HTML directly in your assistant message text.
+- Allowed tags include: div, span, p, progress, meter, table, tr, td, th, svg, img, and similar static presentation elements.
+- You MUST NOT include: script tags, iframes, objects, embeds, forms, input elements, event handlers (onclick, onload, etc.), or javascript: URLs.
+- Prefer inline ``style`` attributes for customization. You may also use CSS classes starting with ``assistant-html-`` if they are defined in the frontend.
+- Example: <div style="display:flex;gap:8px;align-items:center"><span>HP</span><progress value="70" max="100" style="width:120px"></progress></div>

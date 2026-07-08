@@ -730,3 +730,65 @@
 .message-visibility-dot.state-none {
   opacity: 0.22;
 }
+
+/* ── Assistant HTML status-bar helpers ── */
+.assistant-html-status-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+  padding: 8px 12px;
+  border-radius: var(--radius-sm);
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--border);
+  margin: 0.4em 0;
+}
+
+.assistant-html-stat-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  padding: 4px 0;
+}
+
+.assistant-html-stat-label {
+  color: var(--text-secondary);
+  font-size: 13px;
+}
+
+.assistant-html-stat-value {
+  color: var(--text-primary);
+  font-weight: 600;
+  font-size: 13px;
+}
+
+.assistant-html-progress {
+  width: 100%;
+  height: 8px;
+  border-radius: 4px;
+  overflow: hidden;
+  background: var(--bg-tertiary);
+}
+
+.assistant-html-progress-bar {
+  height: 100%;
+  border-radius: 4px;
+  background: linear-gradient(90deg, #4facfe 0%, #00f2fe 100%);
+  transition: width 0.3s ease;
+}
+
+.assistant-html-meter {
+  width: 100%;
+  height: 10px;
+}
+
+.assistant-html-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--bg-hover);
+  color: var(--text-secondary);
+  font-size: 12px;
+}
