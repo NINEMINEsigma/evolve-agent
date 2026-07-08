@@ -1120,6 +1120,8 @@ export function useWebSocket() {
     }
     localStorage.removeItem("evolve_session_id");
     setMessages([]);
+    setAgents([]);
+    setInput("");
     setSessionId("");
     setWaiting(false);
     setPendingConfirm(null);
@@ -1142,6 +1144,8 @@ export function useWebSocket() {
     }
     localStorage.setItem("evolve_session_id", sid);
     setMessages([]);
+    setAgents([]);
+    setInput("");
     setSessionId(sid);
     setWaiting(false);
     setPendingConfirm(null);
