@@ -19,6 +19,11 @@
   --accent-glow:  rgba(167, 139, 250, 0.45);
   --accent-grad:  linear-gradient(135deg, #7c3aed 0%, #6366f1 100%);
 
+  /* Multi-agent — teal → blue */
+  --multi-accent:      #22d3ee;
+  --multi-accent-grad: linear-gradient(135deg, #06b6d4 0%, #3b82f6 100%);
+  --multi-accent-glow: rgba(34, 211, 238, 0.45);
+
   /* Surfaces */
   --user-bubble: #1f1f29;
 

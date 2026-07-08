@@ -21,6 +21,11 @@ interface InputBarProps {
   subagentSessions: Record<string, SubagentSession>;
   targetSessions: string[];
   setTargetSessions: (ids: string[]) => void;
+  // multi-agent visibility
+  agents: string[];
+  visibleCharacters: string[];
+  responseCharacters: string[];
+  onToggleAgentState: (agentName: string) => void;
 }
 
 export default function InputBar({
@@ -41,6 +46,10 @@ export default function InputBar({
   subagentSessions,
   targetSessions,
   setTargetSessions,
+  agents,
+  visibleCharacters,
+  responseCharacters,
+  onToggleAgentState,
 }: InputBarProps) {
   if (archived) return null;
 
@@ -81,7 +90,7 @@ export default function InputBar({
               <button
                 key={opt.id}
                 type="button"
-                className={`input-target-chip ${active ? "active" : ""} input-target-chip-${opt.status || "main"}`}
+                className={`input-target-chip ${active ? "active" : ""} input-target-chip-${(opt as any).status || "main"}`}
                 onClick={() => toggleTarget(opt.id)}
                 data-tooltip={tooltip}
                 title={opt.name}
@@ -89,6 +98,28 @@ export default function InputBar({
                 <span className="input-target-chip-dot" />
                 {opt.name}
               </button>
+              );
+            })}
+          </div>
+        )}
+        {agents.length > 0 && (
+          <div className="input-agent-row">
+            {agents.map((agent) => {
+              const isVisible = visibleCharacters.includes(agent) || visibleCharacters.includes("all-agents");
+              const isResponse = responseCharacters.includes(agent);
+              const stateLabel = isResponse ? "需响应" : isVisible ? "仅可见" : "不可见";
+              const stateClass = isResponse ? "state-response" : isVisible ? "state-visible" : "state-none";
+              return (
+                <button
+                  key={agent}
+                  type="button"
+                  className={`input-agent-chip ${stateClass}`}
+                  onClick={() => onToggleAgentState(agent)}
+                  data-tooltip={`${agent} · ${stateLabel}`}
+                >
+                  <span className="input-agent-chip-dot" />
+                  {agent}
+                </button>
               );
             })}
           </div>

@@ -58,8 +58,8 @@ class AudioBlock(MessageBlock):
 
 
 class BaseMessage(BaseModel):
-    content: str|list[MessageBlock] = Field(..., description="The content of the message")
-    role: Role = Field(..., description="The role of the message")
+    content: str|list[MessageBlock] = Field(description="The content of the message")
+    role: Role = Field(description="The role of the message")
 
     def as_content(self, 
         # 当前作为运行中的agent的角色
@@ -165,60 +165,24 @@ class ToolCall(BaseModel):
 
 
 class CharacterConversationMessage(CharacterMessage):
-    reasoning: str|None = Field(None, description="The reasoning of the message")
+    reasoning: str|None                 = Field(default=None, 
+                                                description="The reasoning of the message")
     # TODO: 可能需要运行时自动探查
-    reasoning_field_name: str = Field("reasoning_content", description="The field name of the reasoning")
-    visible_characters: list[str]|None = Field(None, description="The visible characters of the message")
-    # "tool_calls": [{"id": "list_uploads:0", "type": "function", "function": {"name": "list_uploads", "arguments": "{\"n\": 10}"}}]
-    tool_calls: list[ToolCall]|None = Field(None, description="The tool calls of the message")
-    message_suffix: str|None = Field(None, description="The suffix of the message, like hook messages")
-
-    @classmethod
-    def from_text(
-        cls,
-        role: Role,
-        character_name: str,
-        text: str,
-        *,
-        visible_characters: list[str] | None = None,
-        reasoning: str | None = None,
-        message_suffix: str | None = None,
-    ) -> "CharacterConversationMessage":
-        """从纯文本构造对话消息。"""
-        return cls(
-            role=role,
-            character_name=character_name,
-            content=text,
-            visible_characters=visible_characters,
-            reasoning=reasoning,
-            message_suffix=message_suffix,
-            reasoning_field_name="reasoning_content",
-            tool_calls=None,
-        )
-
-    @classmethod
-    def from_tool_calls(
-        cls,
-        role: Role,
-        character_name: str,
-        content: str,
-        tool_calls: list[ToolCall],
-        *,
-        visible_characters: list[str] | None = None,
-        reasoning: str | None = None,
-        message_suffix: str | None = None,
-    ) -> "CharacterConversationMessage":
-        """从 tool_calls 构造 assistant 消息。"""
-        return cls(
-            role=role,
-            character_name=character_name,
-            content=content,
-            tool_calls=tool_calls,
-            visible_characters=visible_characters,
-            reasoning=reasoning,
-            message_suffix=message_suffix,
-            reasoning_field_name="reasoning_content",
-        )
+    reasoning_field_name: str           = Field(default="reasoning_content", 
+                                                description="The field name of the reasoning")
+    visible_characters: list[str]|None  = Field(default=None, 
+                                                description="The visible characters of the message")
+    response_characters: list[str]|None = Field(default=None, 
+                                                description="The characters needed to response of the message")
+    # "tool_calls": [{"id": "list_uploads:0", "type": "function", "function": {
+    #   "name": "list_uploads", "arguments": "{\"n\": 10}"}
+    # }]
+    tool_calls: list[ToolCall]|None     = Field(default=None, 
+                                                description="The tool calls of the message")
+    message_suffix: str|None            = Field(default=None, 
+                                                description="The suffix of the message, like hook messages")
+    dynamic_message_suffix: str|None    = Field(default=None,
+                                                description="The suffix of the last user message, like hook messages")                                            
 
     def with_suffix(self, message_suffix: str | None) -> "CharacterConversationMessage":
         """返回带新 message_suffix 的副本（不影响原对象）。"""
@@ -228,23 +192,30 @@ class CharacterConversationMessage(CharacterMessage):
         self,
         # 当前作为运行中的agent的角色
         current_character_agent:str, 
+        is_last_user_message: bool = False,
         **kwargs
         ) -> str|list[MessageBlock]|None:
         '''
         获取角色对话消息的字符串内容, 如果不可见将被略过, 可见时将会对所有非消息接收者第一人称的消息都施加前缀修饰
         '''
+        is_self_current = self.character_name == current_character_agent
+
         # 非持久化注入的suffix
-        non_persistent_injection_suffix = kwargs.get("non_persistent_injection_suffix", "")
-        if non_persistent_injection_suffix:
-            del kwargs["non_persistent_injection_suffix"]
+        non_persistent_injection_suffix = ""
+        if is_last_user_message:
+            non_persistent_injection_suffix = self.dynamic_message_suffix
 
         global _Role_Prefix_Template
         raw_message = super().as_content(current_character_agent, **kwargs)
-        # 如果当前角色不在可见角色列表中, 则略过
-        if self.visible_characters and current_character_agent not in self.visible_characters:
+        # 如果当前角色不在可见角色列表中, 则略过(自己不会被略过)
+        # "all-agents" 简写表示对全体可见
+        from entity.constant import ALL_AGENTS_CHARACTER_REF_NAME
+        if is_self_current == False and (self.visible_characters and 
+            current_character_agent not in self.visible_characters and
+            ALL_AGENTS_CHARACTER_REF_NAME not in self.visible_characters):
             return None
         # 如果当前是消息接收者第一人称的消息, 则直接返回原始消息
-        if current_character_agent == self.character_name:
+        if is_self_current:
             return raw_message
         # 如果前缀模板未加载, 则加载
         if _Role_Prefix_Template is None:
@@ -257,7 +228,7 @@ class CharacterConversationMessage(CharacterMessage):
             prefix = prefix.replace("{{VISIBLE_CHARACTERS}}", f"{', '.join(self.visible_characters)} and the {USER_CHARACTER_NAME}")
         else:
             prefix = prefix.replace("{{VISIBLE_CHARACTERS}}", f"Just {USER_CHARACTER_NAME}")
-        # 返回前缀修饰后的消息
+        # 返回修饰后的消息
         return f"{prefix}\n---\n{raw_message}\n---\n{self.message_suffix}{non_persistent_injection_suffix}"
 
     def as_message(self,
@@ -286,7 +257,7 @@ class ToolResultMessage(CharacterMessage):
     '''
     工具调用结果
     '''
-    tool_call_id: str = Field(..., description="The id of the tool call")
+    tool_call_id: str = Field(description="The id of the tool call")
 
     @classmethod
     def from_result(
@@ -315,28 +286,14 @@ class ToolResultMessage(CharacterMessage):
 
 
 class History(BaseModel):
-    # TODO: 需要解决以下问题
-    # 场景 1：部分失败与重试
-    # agent A 发起 tool_call，但执行过程中网络中断，tool_result 未能及时生成。
-    # 当 A 重新加载 History 后，它的上下文中会包含未配对的 tool_calls（有 tool_call 但没有 tool_result）。
-    # OpenAI 协议要求 tool role 消息必须紧跟在对应的 assistant tool_call 之后。这种断层可能导致 LLM 报错或行为异常。
-    # 场景 2：可见性动态变化
-    # 假设某条 CharacterConversationMessage 初始 visible_characters=["agent-A"]，后续你希望让 agent-B 也能看到。
-    # 当前设计把可见性作为消息不可变属性，修改它需要重建消息对象。你是否接受这种“不可变消息”的语义？
-    # 场景 3：用户编辑历史消息
-    # 前端允许用户编辑自己的消息。如果用户编辑了一条已经被多个 agent 消费过的消息，是否需要通知所有相关 agent 重新生成？
-    # 当前 History.get_messages() 是幂等的，但编辑会改变源数据，可能让某些 agent 的上下文与前端展示不一致。
-    # 场景 4：并发子 agent 同时发言
-    # agent-A 和 agent-B 同时生成回复，都产生了新的 CharacterConversationMessage。
-    # 如果它们都写入同一个 History，消息顺序如何确定？是否需要由父 orchestrator 统一排序后再追加？
-    # 场景 5：工具调用者被移除
-    # agent-A 调用了工具并等待结果，但在结果返回前 agent-A 被终止或从会话中移除。
-    # ToolResultMessage.character_name 指向一个不存在的 agent，这条 tool_result 将无处可去，成为孤儿消息。
-    messages: list[BaseMessage] = Field(..., description="The messages of the history")
+    messages: list[BaseMessage] = Field(default=[], description="The messages of the history")
+    last_user_message: CharacterConversationMessage|None = Field(default=None, description="The last user message of the history")
     _io_locker: Lock = PrivateAttr(default_factory=Lock)
 
     def get_messages(self, current_character_agent: str, **kwargs) -> list[dict]:
-        result = [message.as_message(current_character_agent, **kwargs)
+        result = [message.as_message(
+                    current_character_agent=current_character_agent, is_last_user_message=message == self.last_user_message, 
+                    **kwargs)
             for message in self.messages
             ]
         return [i for i in result if i is not None]
@@ -344,6 +301,14 @@ class History(BaseModel):
     def to_openai(self, current_character_agent: str, **kwargs) -> list[dict]:
         """get_messages 的别名，语义上明确表示转换为 OpenAI 格式。"""
         return self.get_messages(current_character_agent, **kwargs)
+
+    def _update_last_user_message(self) -> None:
+        for message in reversed(self.messages):
+            if isinstance(message, CharacterConversationMessage):
+                if message.role == Role.USER:
+                    self.last_user_message = message
+                    return
+        self.last_user_message = None
 
     def add_message(self, message: BaseMessage) -> int:
         with self._io_locker:
@@ -370,6 +335,7 @@ class History(BaseModel):
                     )
                     return -1
             self.messages.append(message)
+            self._update_last_user_message()
             return len(self.messages) - 1
 
     def insert_message(self, message: BaseMessage, index: int) -> bool:
@@ -377,6 +343,7 @@ class History(BaseModel):
             if index < 0 or index > len(self.messages):
                 return False
             self.messages.insert(index, message)
+            self._update_last_user_message()
             return True
         return False
 
@@ -385,6 +352,7 @@ class History(BaseModel):
             if index < 0 or index >= len(self.messages):
                 return False
             self.messages.pop(index)
+            self._update_last_user_message()
             return True
         return False
 

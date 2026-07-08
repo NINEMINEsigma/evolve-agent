@@ -44,6 +44,7 @@ export function useWebSocket() {
   const [taskProgress, setTaskProgress] = useState<Record<string, TaskProgress>>({});
   const [clipboardDisplays, setClipboardDisplays] = useState<Record<string, ClipboardDisplay>>({});
   const [subagentSessionsMap, setSubagentSessionsMap] = useState<Record<string, Record<string, SubagentSession>>>({});
+  const [agents, setAgents] = useState<string[]>([]);
 
   // 当前会话派生的子会话列表
   const subagentSessions = useMemo(() => subagentSessionsMap[sessionId] || {}, [subagentSessionsMap, sessionId]);
@@ -319,7 +320,36 @@ export function useWebSocket() {
             return;
           }
           if (data.session_history) {
-            const history = data.session_history.map((m: any) => {
+            const history = data.session_history.flatMap((m: any) => {
+              // 把带 tool_calls 的 assistant 消息展开为 tool 消息，避免刷新后显示空消息
+              if (m.role === "assistant" && Array.isArray(m.tool_calls) && m.tool_calls.length > 0) {
+                return m.tool_calls.map((tc: any) => {
+                  const toolName = tc.function?.name || "tool";
+                  let toolArgs = tc.function?.arguments || {};
+                  if (typeof toolArgs === "string") {
+                    try {
+                      toolArgs = JSON.parse(toolArgs);
+                    } catch {
+                      toolArgs = {};
+                    }
+                  }
+                  const argsStr = toolArgs && typeof toolArgs === "object"
+                    ? "(" + Object.entries(toolArgs)
+                        .map(([k, v]) => `${k}=${JSON.stringify(v)}`)
+                        .join(", ") + ")"
+                    : "";
+                  const callerPrefix = m.character_name ? `${m.character_name} ` : "";
+                  return {
+                    role: "tool",
+                    content: `${callerPrefix}⚡ ${toolName} ${argsStr}`,
+                    id: generateUUID(),
+                    toolName,
+                    toolArgs,
+                    characterName: m.character_name,
+                    messageIndex: typeof m.index === "number" ? m.index : undefined,
+                  };
+                });
+              }
               const entry: any = {
                 role: m.role,
                 content: m.content,
@@ -332,8 +362,17 @@ export function useWebSocket() {
               if (m.visible_characters) {
                 entry.visibleCharacters = m.visible_characters;
               }
+              if (m.response_characters && m.response_characters.length > 0) {
+                entry.responseCharacters = m.response_characters;
+              }
               if (typeof m.requires_response === "boolean") {
                 entry.requiresResponse = m.requires_response;
+              }
+              if (m.message_suffix) {
+                entry.messageSuffix = m.message_suffix;
+              }
+              if (m.dynamic_message_suffix) {
+                entry.dynamicMessageSuffix = m.dynamic_message_suffix;
               }
               if (m.reasoning_content) {
                 entry.reasoningContent = m.reasoning_content;
@@ -360,6 +399,11 @@ export function useWebSocket() {
               isAtBottomRef.current = true;
               instantScrollRef.current = true;
               setMessages(history);
+            }
+            if (data.agents && Array.isArray(data.agents)) {
+              setAgents(data.agents);
+            } else if ("agents" in data) {
+              setAgents([]);
             }
             if (data.token_usage !== undefined) setTokenUsage(data.token_usage);
             if (data.context_tokens !== undefined) setContextTokens(data.context_tokens);
@@ -397,6 +441,25 @@ export function useWebSocket() {
             addMessage("system", `✅ 上传成功：${data.filename || "文件"} → ${data.path}`);
             return;
           }
+          if (data.agents && Array.isArray(data.agents)) {
+            setAgents(data.agents);
+            return;
+          }
+          if ("agents" in data) {
+            setAgents([]);
+            return;
+          }
+          if (data.stream_meta) {
+            const meta = data.stream_meta as { stream_id: string; visible_characters?: string[]; response_characters?: string[] };
+            setMessages((prev) => prev.map((m) =>
+              m.id === meta.stream_id ? {
+                ...m,
+                visibleCharacters: meta.visible_characters,
+                responseCharacters: meta.response_characters,
+              } : m
+            ));
+            return;
+          }
           if (data.assistant_text) {
             const p = JSON.parse(data.assistant_text);
             const id = generateUUID();
@@ -418,13 +481,38 @@ export function useWebSocket() {
         }
       }
       else if (msg.type === "user_message") {
-        setMessages((prev) => [...prev, {
-          role: "user",
-          content: msg.content ?? "",
-          id: generateUUID(),
-          characterName: msg.character_name,
-          messageIndex: typeof msg.index === "number" ? msg.index : undefined,
-        }]);
+        const incomingClientId = (msg as any).client_message_id as string | undefined;
+        setMessages((prev) => {
+          // 如果匹配到本地乐观插入的消息，则更新它（去重）
+          if (incomingClientId && prev.some((m) => m.clientMessageId === incomingClientId)) {
+            return prev.map((m) =>
+              m.clientMessageId === incomingClientId
+                ? {
+                    ...m,
+                    content: msg.content ?? m.content,
+                    characterName: msg.character_name ?? m.characterName,
+                    messageIndex: typeof msg.index === "number" ? msg.index : m.messageIndex,
+                    visibleCharacters: msg.visible_characters ?? m.visibleCharacters,
+                    responseCharacters: msg.response_characters ?? m.responseCharacters,
+                    messageSuffix: (msg as any).message_suffix ?? m.messageSuffix,
+                    dynamicMessageSuffix: (msg as any).dynamic_message_suffix ?? m.dynamicMessageSuffix,
+                  }
+                : m
+            );
+          }
+          return [...prev, {
+            role: "user",
+            content: msg.content ?? "",
+            id: generateUUID(),
+            clientMessageId: incomingClientId,
+            characterName: msg.character_name,
+            messageIndex: typeof msg.index === "number" ? msg.index : undefined,
+            visibleCharacters: msg.visible_characters ?? undefined,
+            responseCharacters: msg.response_characters ?? undefined,
+            messageSuffix: (msg as any).message_suffix ?? undefined,
+            dynamicMessageSuffix: (msg as any).dynamic_message_suffix ?? undefined,
+          }];
+        });
       }
       else if (msg.type === "assistant_message") {
         setWaiting(false);
@@ -445,6 +533,10 @@ export function useWebSocket() {
             id: generateUUID(),
             characterName: msg.character_name,
             messageIndex: nextMessageIndex(prev),
+            visibleCharacters: msg.visible_characters ?? undefined,
+            responseCharacters: msg.response_characters ?? undefined,
+            messageSuffix: (msg as any).message_suffix ?? undefined,
+            dynamicMessageSuffix: (msg as any).dynamic_message_suffix ?? undefined,
           }]);
         }
         fetchSessions();
@@ -478,7 +570,16 @@ export function useWebSocket() {
               .map(([k, v]) => `${k}=${JSON.stringify(v)}`)
               .join(", ") + ")"
           : "";
-        addMessage("tool", `⚡ ${msg.tool} ${argsStr}`);
+        const callerPrefix = msg.character_name ? `${msg.character_name} ` : "";
+        setMessages((prev) => [...prev, {
+          role: "tool",
+          content: `${callerPrefix}⚡ ${msg.tool} ${argsStr}`,
+          id: generateUUID(),
+          toolName: msg.tool,
+          toolArgs: msg.args,
+          characterName: msg.character_name,
+          messageIndex: nextMessageIndex(prev),
+        }]);
       }
       else if (msg.type === "tool_result") {
         if (ignoreStaleRef.current) return;
@@ -488,6 +589,7 @@ export function useWebSocket() {
           role: "tool",
           content: parsed.content ?? `✅ ${msg.tool} → ${raw.slice(0, 2000)}`,
           id: generateUUID(),
+          characterName: msg.character_name,
           imageMarkdown: parsed.imageMarkdown,
           downloadInfo: parsed.downloadInfo,
           audioUrl: parsed.audioUrl,
@@ -693,6 +795,22 @@ export function useWebSocket() {
     }
   }, [sessionId, addMessage]);
 
+  const updateMessageVisibility = useCallback(async (messageIndex: number, visibleCharacters: string[]) => {
+    try {
+      const resp = await fetch(`/api/sessions/${sessionId}/messages/${messageIndex}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ visible_characters: visibleCharacters }),
+      });
+      const data = await resp.json().catch(() => ({}));
+      if (resp.ok && data.updated) {
+        setMessages((prev) => prev.map((m) =>
+          m.messageIndex === messageIndex ? { ...m, visibleCharacters: data.visible_characters ?? visibleCharacters } : m
+        ));
+      }
+    } catch {}
+  }, [sessionId]);
+
   const respondConfirm = useCallback((action: string, denyReasonText?: string, deniedBy?: string) => {
     if (!pendingConfirm) return;
     const payload: Record<string, string> = { action };
@@ -769,7 +887,11 @@ export function useWebSocket() {
     }
   }, []);
 
-  const send = useCallback((targetSessions: string[]) => {
+  const send = useCallback((
+    targetSessions: string[],
+    visible_characters?: string[],
+    response_characters?: string[],
+  ) => {
     const isArchived = sessions.find((s) => s.id === sessionId)?.status === "archived";
     if (!wsRef.current || waiting || wsRef.current.readyState !== WebSocket.OPEN || isArchived) return;
 
@@ -778,8 +900,26 @@ export function useWebSocket() {
     if (!hasContent) return;
 
     const content: MessageContent = blocks.length === 1 && blocks[0].type === "text" ? blocks[0].text : blocks;
+    const clientMessageId = generateUUID();
 
-    wsRef.current.send(JSON.stringify({ type: "user_message", content, target_sessions: targetSessions }));
+    // 乐观地先把用户消息显示在本地，避免等待后端回显
+    setMessages((prev) => [...prev, {
+      role: "user",
+      content,
+      id: clientMessageId,
+      clientMessageId,
+      visibleCharacters: visible_characters,
+      responseCharacters: response_characters,
+    }]);
+
+    wsRef.current.send(JSON.stringify({
+      type: "user_message",
+      content,
+      target_sessions: targetSessions,
+      client_message_id: clientMessageId,
+      ...(visible_characters ? { visible_characters } : {}),
+      ...(response_characters ? { response_characters } : {}),
+    }));
     setInput("");
     setPendingImages([]);
     setWaiting(true);
@@ -1312,6 +1452,7 @@ export function useWebSocket() {
     pendingImages,
     streamingMessage,
     allTags,
+    agents,
     ignoreStaleRef,
     lastRecvAtRef,
     lastPongAtRef,
@@ -1343,6 +1484,7 @@ export function useWebSocket() {
     editMessage,
     deleteMessages,
     regenerateResponse,
+    updateMessageVisibility,
     addMessage,
     fetchSessions,
     fetchAllTags,

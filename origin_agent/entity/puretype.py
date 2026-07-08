@@ -82,3 +82,26 @@ Keys:
     path: str
     skill_dir: str
 """
+
+
+# ---------------------------------------------------------------------------
+# Loop Types
+# ---------------------------------------------------------------------------
+
+class Loop(str, Enum):
+    '''
+    用于映射运行时主会话使用的loop
+    '''
+    parent = "parent"
+    multi = "multi"
+
+
+class LoopMeta(BaseModel):
+    loopType: Loop = Loop.parent
+    '''
+    对应的loop类型
+    '''
+    agents: list[str]|None = None
+    '''
+    mutli loop时用于指定导入的agents
+    '''

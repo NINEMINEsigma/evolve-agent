@@ -82,27 +82,51 @@ def _call_hook_with_runtime_ctx(fn, session_id: str, workspace: str, runtime_ctx
         raise
 
 
-def collect_hooks_context(
+def _collect_hook_parts(
     hooks: list[dict],
     session_id: str,
     workspace: str,
     runtime_ctx: "RuntimeContext | None" = None,
-) -> str:
-    """收集 custom_hooks 的实时上下文。新 hook 可通过 **kwargs 接收 runtime_ctx。"""
-    parts: list[str] = []
+) -> tuple[list[str], list[str]]:
+    """分别收集 hook_message（非持久化）和 hook_fixator（持久化）的原始片段。"""
+    hooks_parts: list[str] = []
+    fixator_parts: list[str] = []
     for hook in hooks:
         try:
             tag = _call_hook_with_runtime_ctx(hook["tag_fn"], session_id, workspace, runtime_ctx)
-            if tag:
+            if not tag:
+                continue
+            if callable(hook.get("msg_fn")):
                 msg = _call_hook_with_runtime_ctx(hook["msg_fn"], session_id, workspace, runtime_ctx)
                 if msg:
-                    part = f"<|im_{tag}_start|>{msg}<|im_{tag}_end|>"
-                    parts.append(part)
+                    hooks_parts.append(f"<|im_{tag}_start|>{msg}<|im_{tag}_end|>")
+            if callable(hook.get("fixator_fn")):
+                fix = _call_hook_with_runtime_ctx(hook["fixator_fn"], session_id, workspace, runtime_ctx)
+                if fix:
+                    fixator_parts.append(f"<|im_{tag}_fixator_start|>{fix}<|im_{tag}_fixator_end|>")
         except Exception:
             logger.warning("Failed to collect hook context", exc_info=True)
-    result = "\n".join(parts)
-    logger.info("Collected hooks context (%d chars): %s", len(result), result[:500])
-    return result
+    return hooks_parts, fixator_parts
+
+
+def collect_all_hooks_context(
+    hooks: list[dict],
+    session_id: str,
+    workspace: str,
+    runtime_ctx: "RuntimeContext | None" = None,
+) -> tuple[str, str]:
+    """一次性收集 custom_hooks 的 hooks_context 和 fixator_context。
+
+    只遍历 hooks 一次，避免重复调用同一个 hook 的 tag_fn 导致状态/计时器紊乱。
+    """
+    hooks_parts, fixator_parts = _collect_hook_parts(hooks, session_id, workspace, runtime_ctx)
+    hooks_context = "\n".join(hooks_parts)
+    fixator_context = "\n".join(fixator_parts)
+    logger.info(
+        "Collected all hooks context | hooks=%d chars, fixator=%d chars",
+        len(hooks_context), len(fixator_context),
+    )
+    return hooks_context, fixator_context
 
 
 def build_agent_system_prompt(ctx: RuntimeContext, skill_blocks: list[str]) -> list[str]:
@@ -118,85 +142,48 @@ def build_agent_system_prompt(ctx: RuntimeContext, skill_blocks: list[str]) -> l
     )
 
 
+def collect_skill_prompts(skills_dir: Path | str = Path("skills")) -> list[str]:
+    """生成 skill 名称和描述清单，避免全量内容注入 system prompt。"""
+    blocks: list[str] = []
+    try:
+        from abstract.skills.loader import list_skills
+
+        skills: list[dict] = list_skills(skills_dir=Path(skills_dir))
+        if skills:
+            lines: list[str] = [
+                "Available skills (use list_skills to see details, use recall_skill to load one):",
+                "",
+            ]
+            for s in skills:
+                name: str = s.get("name", "")
+                description: str = s.get("description", "")
+                line = f"- {name}"
+                if description:
+                    line += f": {description}"
+                lines.append(line)
+            blocks.append("\n".join(lines))
+        return blocks
+    except Exception as e:
+        logger.exception("Failed to collect skill prompts: %s", e)
+        return []
+
+
 def build_turn_messages(
     system_prompts: list[str],
     history: History,
     current_character_agent: str,
-    session_id: str,
-    workspace: str,
-    memory_ctx: str,
-    hooks: list[dict],
-    runtime_ctx: "RuntimeContext | None" = None,
-) -> tuple[list[dict[str, Any]], str]:
-    """构建当前回合发送给 LLM 的消息列表。返回 (messages, fixator_context)。"""
+) -> list[dict[str, Any]]:
+    """构建当前回合发送给 LLM 的消息列表。
+
+    假设调用方已经把 hooks_context / memory_ctx 等非持久化内容通过
+    history.last_user_message.dynamic_message_suffix 注入；本函数只负责
+    system prompt 与 history.to_openai 的拼接。
+    """
     messages: list[dict[str, Any]] = [
         {"role": Role.SYSTEM, "content": sp} for sp in system_prompts
     ]
-
-    # 通过 History 获取当前 agent 的 OpenAI 格式视图
-    history_messages = history.to_openai(current_character_agent)
-
-    # 找到最后一条 user 消息的位置
-    last_user_idx = -1
-    for i, msg in enumerate(history_messages):
-        if msg.get("role") == Role.USER:
-            last_user_idx = i
-
-    # 分别收集 hook_message（仅发送）和 hook_fixator（发送 + 历史保留）内容
-    hooks_parts: list[str] = []
-    fixator_parts: list[str] = []
-    for hook in hooks:
-        try:
-            tag = _call_hook_with_runtime_ctx(hook["tag_fn"], session_id, workspace, runtime_ctx)
-            if not tag:
-                continue
-            if callable(hook.get("msg_fn")):
-                msg = _call_hook_with_runtime_ctx(hook["msg_fn"], session_id, workspace, runtime_ctx)
-                if msg:
-                    hooks_parts.append(f"<|im_{tag}_start|>{msg}<|im_{tag}_end|>")
-            if callable(hook.get("fixator_fn")):
-                fix = _call_hook_with_runtime_ctx(hook["fixator_fn"], session_id, workspace, runtime_ctx)
-                if fix:
-                    fixator_parts.append(f"<|im_{tag}_fixator_start|>\n{fix}\n<|im_{tag}_fixator_end|>")
-        except Exception:
-            logger.warning("Failed to collect hook context", exc_info=True)
-
-    hooks_context = "\n".join(hooks_parts)
-    fixator_context = "\n".join(fixator_parts)
-    logger.info("Appending hooks_context (%s) to user message; fixator_context (%s) will be persisted as message_suffix", hooks_context, fixator_context)
-
-    for i, msg in enumerate(history_messages):
-        if i == last_user_idx and msg.get("role") == Role.USER:
-            hooked_msg = dict(msg)
-            hooked_content = hooked_msg.get("content", "")
-
-            # 发送用的消息：附加 memory + hooks_context（非持久化）。
-            # fixator_context 通过 message_suffix 持久化到历史，History.to_openai 会自动追加。
-            send_extras: list[str] = []
-            if memory_ctx:
-                send_extras.append(f"<|im_memory_context_start|>\n{memory_ctx}\n<|im_memory_context_end|>")
-            if hooks_context:
-                send_extras.append(hooks_context)
-
-            if send_extras:
-                if isinstance(hooked_content, list):
-                    appended = False
-                    for block in reversed(hooked_content):
-                        if isinstance(block, dict) and block.get("type") == "text":
-                            block["text"] = str(block.get("text", "")) + "\n" + "\n".join(send_extras)
-                            appended = True
-                            break
-                    if not appended:
-                        hooked_content.append({"type": "text", "text": "\n".join(send_extras)})
-                else:
-                    hooked_content = str(hooked_content) + "\n" + "\n".join(send_extras)
-                hooked_msg["content"] = hooked_content
-
-            messages.append(hooked_msg)
-        else:
-            messages.append(msg)
-
-    return messages, fixator_context
+    messages.extend(history.to_openai(current_character_agent))
+    return messages
 
 
 def build_full_history_messages(

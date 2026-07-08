@@ -33,6 +33,7 @@ from entry.parent_agent_loop import IncompatibleHistoryError
 
 if TYPE_CHECKING:
     from entry.parent_agent_loop import ParentAgentLoop
+    from entry.base_agent_loop import BaseAgentLoop
     from entry.agent_sink import FrontendSink
     from gateway.session_manager import SessionManager
 
@@ -46,7 +47,7 @@ def _get_sm() -> SessionManager|None:
 
 
 def _get_loop(session_id: str):
-    """返回指定 session 的 ParentAgentLoop。"""
+    """返回指定 session 的 BaseAgentLoop（可能是 ParentAgentLoop 或 MultiAgentLoop）。"""
     sm = _get_sm()
     return sm.get_loop(session_id) if sm else None
 
@@ -62,8 +63,8 @@ def _get_ws(session_id: str):
 _agentspace_path: Path | None = None
 
 
-def set_agent_loop(loop: ParentAgentLoop) -> None:
-    """将 ParentAgentLoop 注入 Application 的 session_manager。
+def set_agent_loop(loop: BaseAgentLoop) -> None:
+    """将 BaseAgentLoop 注入 Application 的 session_manager。
 
     在启动流程中调用一次，之后所有 session 由 SessionManager 管理。
     """
@@ -524,7 +525,7 @@ async def delete_session(session_id: str):
 
 @app.put("/api/sessions/{session_id}/messages/{message_index}")
 async def update_session_message(session_id: str, message_index: int, req: Request):
-    """编辑指定 session 中一条历史消息的正文，不触发重新生成。"""
+    """编辑指定 session 中一条历史消息的正文或 visible_characters，不触发重新生成。"""
     body: dict = {}
     try:
         body = await req.json()
@@ -532,6 +533,7 @@ async def update_session_message(session_id: str, message_index: int, req: Reque
         logger.warning("Failed to parse edit message request body for session=%s", session_id, exc_info=True)
         body = {}
     content = body.get("content")
+    visible_characters = body.get("visible_characters")
     info = _get_sm().get(session_id)
     if info and info.get("status") == "archived":
         result = {"updated": False, "error": "archived session cannot be edited", "session_id": session_id}
@@ -543,7 +545,7 @@ async def update_session_message(session_id: str, message_index: int, req: Reque
     loop = _get_loop(session_id)
     if loop is None:
         return {"updated": False, "error": "agent loop not ready", "session_id": session_id}
-    result = loop.edit_session_message(message_index, content)
+    result = loop.edit_session_message(message_index, content, visible_characters)
     status_code = 200 if result.get("updated") else 400
     return HTMLResponse(
         json.dumps(result, ensure_ascii=False),
@@ -1164,6 +1166,11 @@ async def ws_chat(ws: WebSocket) -> None:
             usage: int = loop.get_token_usage()
             context: int = loop.get_context_tokens()
             processing: bool = loop.is_processing()
+            # 检查是否多 agent 模式，携带 agents 列表
+            agents_info: list[str] | None = None
+            from entry.multi_agent_loop import MultiAgentLoop
+            if isinstance(loop, MultiAgentLoop):
+                agents_info = list(loop._agent_names)
             await ws.send_text(
                 Message(
                     type=MessageType.SYSTEM,
@@ -1173,6 +1180,7 @@ async def ws_chat(ws: WebSocket) -> None:
                         "token_usage": usage,
                         "context_tokens": context,
                         "processing": processing,
+                        "agents": agents_info,
                     }, ensure_ascii=False),
                 ).to_json()
             )
@@ -1208,7 +1216,12 @@ async def ws_chat(ws: WebSocket) -> None:
 
                     # 把原始用户消息追加到历史（回显由 append_user_message 内部统一完成）
                     try:
-                        await loop.append_user_message(content)
+                        await loop.append_user_message(
+                            content,
+                            visible_characters=msg.visible_characters,
+                            response_characters=msg.response_characters,
+                            client_message_id=msg.client_message_id,
+                        )
                     except Exception as exc:
                         logger.warning("Failed to append user message for session=%s: %s", sid, exc)
 
@@ -1272,7 +1285,10 @@ async def ws_chat(ws: WebSocket) -> None:
                             )
                         try:
                             reply = await loop.process_message(
-                                main_content, skip_append=True
+                                main_content,
+                                skip_append=True,
+                                visible_characters=msg.visible_characters,
+                                response_characters=msg.response_characters,
                             )
                         except Exception as exc:
                             logger.exception("Agent loop error for session=%s", sid)
@@ -1308,7 +1324,8 @@ async def ws_chat(ws: WebSocket) -> None:
 
                     from system.application import Application
                     sink = Application.current().frontend_sink
-                    if sink is not None:
+                    # MultiAgentLoop 返回空字符串表示各 agent 已独立推送，跳过冗余的 assistant_message
+                    if sink is not None and reply:
                         await sink.emit_assistant_message(
                             sid, reply, loop.current_character_agent,
                         )

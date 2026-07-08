@@ -88,7 +88,7 @@ const markdownComponentsBase = {
   },
 };
 
-const MessageItem = memo(function MessageItem({ message, archived, onImageClick, onToggleCollapse, onEditMessage, onDeleteMessages, onRegenerateResponse, isLastUserMessage, streaming }: {
+const MessageItem = memo(function MessageItem({ message, archived, onImageClick, onToggleCollapse, onEditMessage, onDeleteMessages, onRegenerateResponse, isLastUserMessage, streaming, agents, onToggleMessageVisibility }: {
   message: ChatMessage;
   archived: boolean;
   onImageClick: (src: string) => void;
@@ -98,6 +98,8 @@ const MessageItem = memo(function MessageItem({ message, archived, onImageClick,
   onRegenerateResponse?: () => void;
   isLastUserMessage?: boolean;
   streaming?: boolean;
+  agents?: string[];
+  onToggleMessageVisibility?: (messageId: string, agentName: string) => void;
 }) {
   const m = message;
   const [editing, setEditing] = useState(false);
@@ -117,8 +119,8 @@ const MessageItem = memo(function MessageItem({ message, archived, onImageClick,
   const toolCollapsed = isTool && !streaming && m.collapsed !== false;
   const collapsed = !isTool && !streaming && isLong && m.collapsed !== false;
   const canEdit = !archived && !streaming && typeof m.messageIndex === "number" && typeof m.content === "string";
-  const canDelete = !archived && !streaming && isLastUserMessage;
-  const canRegenerate = !archived && !streaming && m.role === "user" && isLastUserMessage;
+  const canDelete = !archived && !streaming && isLastUserMessage && typeof m.messageIndex === "number";
+  const canRegenerate = !archived && !streaming && m.role === "user" && isLastUserMessage && typeof m.messageIndex === "number";
 
   const mdComponents = useMemo(() => ({
     ...markdownComponentsBase,
@@ -265,6 +267,24 @@ const MessageItem = memo(function MessageItem({ message, archived, onImageClick,
     return <pre className={`message-text message-text-${roleClass}`}>{String(content)}</pre>;
   };
 
+  const renderContextExtension = () => {
+    const hasSuffix = m.messageSuffix || m.dynamicMessageSuffix;
+    if (!hasSuffix) return null;
+    return (
+      <details className="context-extension-block">
+        <summary className="context-extension-summary">上下文扩展</summary>
+        <div className="context-extension-content">
+          {m.dynamicMessageSuffix && (
+            <pre className="context-extension-part">{m.dynamicMessageSuffix}</pre>
+          )}
+          {m.messageSuffix && (
+            <pre className="context-extension-part">{m.messageSuffix}</pre>
+          )}
+        </div>
+      </details>
+    );
+  };
+
   const renderBody = () => {
     if (editing) {
       return (
@@ -299,13 +319,19 @@ const MessageItem = memo(function MessageItem({ message, archived, onImageClick,
           ) : (
             renderBlocksContent(m.content, m.role)
           )}
+          {renderContextExtension()}
           {streaming && <span className="streaming-cursor" />}
         </>
       );
     }
 
     if (m.role === "user") {
-      return renderBlocksContent(m.content, m.role);
+      return (
+        <>
+          {renderBlocksContent(m.content, m.role)}
+          {renderContextExtension()}
+        </>
+      );
     }
 
     return renderBlocksContent(m.content, m.role);
@@ -393,6 +419,28 @@ const MessageItem = memo(function MessageItem({ message, archived, onImageClick,
               </button>
             )}
           </div>
+          {agents && agents.length > 0 && message.visibleCharacters != null && (
+            <div className="message-visibility-row">
+              {agents.map((agent) => {
+                const curVisible = message.visibleCharacters || [];
+                const isAll = curVisible.includes("all-agents");
+                const isVisible = isAll || curVisible.includes(agent);
+                const isResponse = (message.responseCharacters || []).includes(agent);
+                const stateLabel = isResponse ? agent + " · 需响应" : isVisible ? agent + " · 仅可见" : agent + " · 隐藏";
+                const stateClass = isResponse ? "state-response" : isVisible ? "state-visible" : "state-none";
+                return (
+                  <button
+                    key={agent}
+                    type="button"
+                    className={`message-visibility-dot ${stateClass}`}
+                    onClick={() => onToggleMessageVisibility?.(message.id, agent)}
+                    data-tooltip={stateLabel}
+                    title={stateLabel}
+                  />
+                );
+              })}
+            </div>
+          )}
         </div>
       </div>
     </div>

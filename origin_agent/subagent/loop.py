@@ -199,12 +199,12 @@ class SubAgentLoop(BasePrivateChatAgentLoop):
         logger.warning("SubAgent context limit reached | session=%s", self.session_id)
         self._outbox.append("[system] Context limit reached. Sub-agent may lose context.")
 
-    async def append_user_message(self, content: Any, *, display_content: Any | None = None) -> int:
+    async def append_user_message(self, content: Any, *, display_content: Any | None = None, **kwargs: Any) -> int:
         """把用户消息加入子 Agent 历史并返回索引。"""
-        msg = CharacterConversationMessage.from_text(
+        msg = CharacterConversationMessage(
             role=Role.USER,
             character_name=USER_CHARACTER_NAME,
-            text=content if isinstance(content, str) else str(content),
+            content=content if isinstance(content, str) else str(content),
         )
         return self._history.add_message(msg)
 
@@ -253,10 +253,10 @@ class SubAgentLoop(BasePrivateChatAgentLoop):
             # 注入初始用户消息（system prompt 由 _build_history_messages 通过 _build_system_prompt 处理）
             initial_character_name = USER_CHARACTER_NAME if message_type == "user_direct" else (self._parent_character_agent or MAIN_AGENT_CHARACTER_NAME)
             self._history.add_message(
-                CharacterConversationMessage.from_text(
+                CharacterConversationMessage(
                     role=Role.USER,
                     character_name=initial_character_name,
-                    text=format_user_message(user_name, message_type, initial_prompt),
+                    content=format_user_message(user_name, message_type, initial_prompt),
                     visible_characters=[self.current_character_agent],
                 )
             )
@@ -280,10 +280,10 @@ class SubAgentLoop(BasePrivateChatAgentLoop):
                 if not resp.tool_calls:
                     # 文本回复 — 推入发件箱并发给前端
                     text = resp.content or ""
-                    assistant_msg = CharacterConversationMessage.from_text(
+                    assistant_msg = CharacterConversationMessage(
                         role=Role.ASSISTANT,
                         character_name=self.current_character_agent,
-                        text=text,
+                        content=text,
                         reasoning=reasoning_text,
                     )
                     self._history.add_message(assistant_msg)
@@ -315,7 +315,7 @@ class SubAgentLoop(BasePrivateChatAgentLoop):
                     )
                     for tc in resp.tool_calls
                 ]
-                assistant_msg = CharacterConversationMessage.from_tool_calls(
+                assistant_msg = CharacterConversationMessage(
                     role=Role.ASSISTANT,
                     character_name=self.current_character_agent,
                     content=resp.content or "",
@@ -481,10 +481,10 @@ class SubAgentLoop(BasePrivateChatAgentLoop):
         # 所有 InboxMessage 子类都已自带 character_name，直接取首条作为合并后的发出者
         character_name = msgs[0].character_name if len(msgs) == 1 else USER_CHARACTER_NAME
         self._history.add_message(
-            CharacterConversationMessage.from_text(
+            CharacterConversationMessage(
                 role=Role.USER,
                 character_name=character_name,
-                text=merged,
+                content=merged,
                 visible_characters=[self.current_character_agent],
             )
         )
