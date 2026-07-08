@@ -11,6 +11,8 @@ def hook_tag_name(**kwargs) -> str:
 
 def hook_message(session_id: str = "", workspace: str = "", **kwargs) -> str:
     cache_path = Path(workspace) / "session_cache" / "session_track_hook.json"
+    # 父目录可能不存在，需先创建，否则写入时触发 FileNotFoundError
+    cache_path.parent.mkdir(parents=True, exist_ok=True)
     if not cache_path.exists():
         with open(cache_path, "w", encoding="utf-8") as f:
             json.dump({"session_queue": [session_id]}, f, ensure_ascii=False)

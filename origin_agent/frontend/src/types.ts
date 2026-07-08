@@ -1,3 +1,18 @@
+export interface FileEntry {
+  name: string;
+  type: "file" | "dir";
+}
+
+export interface OpenTab {
+  id: string;
+  path: string;
+  name: string;
+  content: string;
+  originalContent: string;
+  isDirty: boolean;
+  language: string;
+}
+
 export interface TextContentBlock {
   type: "text";
   text: string;

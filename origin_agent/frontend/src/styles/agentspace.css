@@ -1,0 +1,397 @@
+/* ── agentspace 页面布局 ── */
+
+.agentspace-layout {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  background: var(--bg-primary, #1e1e1e);
+  color: var(--fg-primary, #cccccc);
+  font-family: -apple-system, "Segoe UI", sans-serif;
+  font-size: 13px;
+}
+
+/* ── Top Bar ── */
+
+.agentspace-topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 36px;
+  padding: 0 12px;
+  background: var(--bg-secondary, #252526);
+  border-bottom: 1px solid var(--border, #3c3c3c);
+  flex-shrink: 0;
+}
+
+.agentspace-topbar-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--fg-primary, #cccccc);
+}
+
+.agentspace-topbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.agentspace-topbar-btn {
+  background: transparent;
+  border: 1px solid var(--border, #3c3c3c);
+  color: var(--fg-secondary, #999);
+  font-size: 12px;
+  padding: 2px 10px;
+  border-radius: 3px;
+  cursor: pointer;
+}
+
+.agentspace-topbar-btn:hover {
+  background: var(--bg-tertiary, #2d2d2d);
+  color: var(--fg-primary, #ccc);
+}
+
+.agentspace-lock-indicator {
+  color: #cc6633;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+/* ── Main Layout ── */
+
+.agentspace-main {
+  display: flex;
+  flex: 1;
+  overflow: hidden;
+}
+
+/* ── Sidebar ── */
+
+.agentspace-sidebar {
+  width: 260px;
+  flex-shrink: 0;
+  overflow-y: auto;
+  background: var(--bg-secondary, #252526);
+  border-right: 1px solid var(--border, #3c3c3c);
+}
+
+/* ── Content ── */
+
+.agentspace-content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  overflow: hidden;
+}
+
+/* ── File Tree ── */
+
+.agentspace-file-tree {
+  user-select: none;
+}
+
+.agentspace-file-tree-toolbar {
+  display: flex;
+  gap: 4px;
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--border, #3c3c3c);
+}
+
+.agentspace-toolbar-btn {
+  background: transparent;
+  border: 1px solid var(--border, #3c3c3c);
+  color: var(--fg-secondary, #999);
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 3px;
+  cursor: pointer;
+}
+
+.agentspace-toolbar-btn:hover:not(:disabled) {
+  background: var(--bg-tertiary, #2d2d2d);
+  color: var(--fg-primary, #ccc);
+}
+
+.agentspace-toolbar-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.agentspace-file-tree-list {
+  padding: 4px 0;
+}
+
+.agentspace-file-item {
+  display: flex;
+  align-items: center;
+  height: 22px;
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  gap: 4px;
+  padding-right: 8px;
+}
+
+.agentspace-file-item:hover {
+  background: var(--highlight-hover, #2a2d2e);
+}
+
+.agentspace-file-item-active {
+  background: var(--highlight-active, #37373d);
+}
+
+.agentspace-file-icon {
+  color: var(--fg-secondary, #999);
+  font-size: 12px;
+  width: 14px;
+  text-align: center;
+  flex-shrink: 0;
+}
+
+.agentspace-file-name {
+  font-size: 13px;
+  color: var(--fg-primary, #ccc);
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ── Context Menu ── */
+
+.agentspace-context-menu {
+  background: var(--bg-tertiary, #252526);
+  border: 1px solid var(--border, #3c3c3c);
+  box-shadow: 0 2px 8px rgba(0,0,0,0.4);
+  z-index: 100;
+  border-radius: 4px;
+  padding: 4px 0;
+  min-width: 120px;
+}
+
+.agentspace-context-menu-item {
+  padding: 4px 12px;
+  font-size: 12px;
+  cursor: pointer;
+  color: var(--fg-primary, #ccc);
+}
+
+.agentspace-context-menu-item:hover {
+  background: var(--highlight-active, #37373d);
+}
+
+/* ── Editor ── */
+
+.agentspace-editor {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.agentspace-editor-empty {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--fg-muted, #6e6e6e);
+  font-size: 14px;
+}
+
+/* ── Tab Bar ── */
+
+.agentspace-tab-bar {
+  display: flex;
+  align-items: center;
+  height: 35px;
+  background: var(--tab-inactive, #2d2d2d);
+  overflow: hidden;
+  flex-shrink: 0;
+}
+
+.agentspace-tab {
+  display: flex;
+  align-items: center;
+  height: 35px;
+  min-width: 100px;
+  max-width: 180px;
+  padding: 0 10px;
+  font-size: 12px;
+  cursor: pointer;
+  border-right: 1px solid var(--border, #3c3c3c);
+  gap: 6px;
+  background: var(--tab-inactive, #2d2d2d);
+  color: var(--fg-secondary, #999);
+}
+
+.agentspace-tab-active {
+  background: var(--tab-active, #1e1e1e);
+  color: var(--fg-primary, #fff);
+  border-bottom: 1px solid var(--accent-blue, #007acc);
+}
+
+.agentspace-tab:hover {
+  background: var(--tab-hover, #2e2e2e);
+}
+
+.agentspace-tab-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agentspace-tab-dirty {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--fg-primary, #fff);
+  flex-shrink: 0;
+}
+
+.agentspace-tab-close {
+  background: transparent;
+  border: none;
+  color: var(--fg-secondary, #999);
+  cursor: pointer;
+  font-size: 14px;
+  padding: 0 2px;
+  line-height: 1;
+}
+
+.agentspace-tab-close:hover {
+  color: var(--fg-primary, #fff);
+  background: var(--bg-quaternary, #3c3c3c);
+  border-radius: 3px;
+}
+
+/* ── Editor Body ── */
+
+.agentspace-editor-body {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* ── Status Bar ── */
+
+.agentspace-status-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 22px;
+  padding: 0 8px;
+  background: var(--status-bar-bg, #007acc);
+  color: var(--status-bar-fg, #fff);
+  font-size: 12px;
+  flex-shrink: 0;
+}
+
+.agentspace-status-left,
+.agentspace-status-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.agentspace-status-item {
+  padding: 0 4px;
+}
+
+.agentspace-status-locked {
+  color: #ffcc66;
+  font-weight: 600;
+}
+
+/* ── Dialog ── */
+
+.agentspace-dialog-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 200;
+}
+
+.agentspace-dialog {
+  background: var(--bg-secondary, #252526);
+  border: 1px solid var(--border, #3c3c3c);
+  border-radius: 6px;
+  padding: 16px 20px;
+  min-width: 280px;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.5);
+}
+
+.agentspace-dialog h3 {
+  margin: 0 0 12px;
+  font-size: 14px;
+  color: var(--fg-primary, #ccc);
+}
+
+.agentspace-dialog-input {
+  width: 100%;
+  background: var(--bg-primary, #1e1e1e);
+  border: 1px solid var(--border, #3c3c3c);
+  color: var(--fg-primary, #ccc);
+  padding: 6px 8px;
+  font-size: 13px;
+  border-radius: 3px;
+  outline: none;
+  box-sizing: border-box;
+  font-family: inherit;
+}
+
+.agentspace-dialog-input:focus {
+  border-color: var(--accent-blue, #007acc);
+}
+
+.agentspace-dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.agentspace-dialog-actions button {
+  background: var(--bg-tertiary, #3c3c3c);
+  border: 1px solid var(--border, #3c3c3c);
+  color: var(--fg-primary, #ccc);
+  font-size: 12px;
+  padding: 4px 12px;
+  border-radius: 3px;
+  cursor: pointer;
+}
+
+.agentspace-dialog-actions button:last-child {
+  background: var(--accent-blue, #007acc);
+  border-color: var(--accent-blue, #007acc);
+}
+
+.agentspace-dialog-actions button:hover {
+  opacity: 0.85;
+}
+
+/* ── Error Toast ── */
+
+.agentspace-error-toast {
+  position: fixed;
+  bottom: 32px;
+  right: 20px;
+  background: #d32f2f;
+  color: #fff;
+  padding: 8px 16px;
+  border-radius: 4px;
+  font-size: 13px;
+  cursor: pointer;
+  z-index: 300;
+  max-width: 400px;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.4);
+}
+
+.agentspace-error-close {
+  margin-left: 12px;
+  font-weight: bold;
+  font-size: 16px;
+}

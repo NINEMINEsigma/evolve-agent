@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { Routes, Route } from "react-router-dom";
 import { useWebSocket } from "./hooks/useWebSocket";
 import Sidebar from "./components/Sidebar";
 import Header from "./components/Header";
@@ -15,6 +16,7 @@ import SubagentCountdown from "./components/SubagentCountdown";
 import Lightbox from "./components/Lightbox";
 import TagEditor from "./components/TagEditor";
 import ErrorBoundary from "./components/ErrorBoundary";
+import Agentspace from "./pages/Agentspace";
 import { SessionInfo } from "./types";
 
 const TOOLTIP_MARGIN = 10;
@@ -118,7 +120,7 @@ function useGlobalTooltip() {
   }, []);
 }
 
-export default function App() {
+export function ChatApp() {
   useGlobalTooltip();
   const ws = useWebSocket();
   const [lightboxSrc, setLightboxSrc] = useState<string | null>(null);
@@ -604,5 +606,14 @@ export default function App() {
       )}
       </div>
     </ErrorBoundary>
+  );
+}
+
+export default function App() {
+  return (
+    <Routes>
+      <Route path="/" element={<ChatApp />} />
+      <Route path="/agentspace/*" element={<Agentspace />} />
+    </Routes>
   );
 }
