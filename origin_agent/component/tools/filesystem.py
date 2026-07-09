@@ -23,6 +23,7 @@ from abstract.tools.registry import registry, tool_error, tool_result
 from entity.puretype import ToolDangerLevel
 from entity.constant import EDIT_FILE_MAX_CHARS, FILE_SNIFF_BYTES, READ_FILE_DEFAULT_LIMIT, READ_FILE_MAX_LINES, WRITE_FILE_MAX_CHARS, WRITE_FILE_TRUNCATION_TAIL
 from system.sandbox import Access, Sandbox, SandboxError
+from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
@@ -1339,8 +1340,14 @@ def _handle_grep(args: dict[str, Any]) -> dict:
     except SandboxError as exc:
         return tool_error(str(exc), path=path)
 
-    if not resolved.real.is_dir():
-        return tool_error(f"Not a directory: {path}")
+    # 收集待搜索文件列表：文件直接搜索，目录递归搜索
+    files: list[Path] = []
+    if resolved.real.is_file():
+        files = [resolved.real]
+    elif resolved.real.is_dir():
+        files = [p for p in resolved.real.rglob("*") if p.is_file()]
+    else:
+        return tool_error(f"Not a file or directory: {path}")
 
     try:
         regex = re.compile(pattern)
@@ -1348,9 +1355,7 @@ def _handle_grep(args: dict[str, Any]) -> dict:
         return tool_error(f"Invalid regex pattern: {exc}")
 
     matches: list[dict[str, Any]] = []
-    for p in resolved.real.rglob("*"):
-        if not p.is_file():
-            continue
+    for p in files:
         if p.stat().st_size > max_file_size:
             continue
         if not _is_text_file(p):
@@ -1365,10 +1370,14 @@ def _handle_grep(args: dict[str, Any]) -> dict:
         lines = content.splitlines()
         for i, line in enumerate(lines):
             if regex.search(line):
-                rel = p.relative_to(resolved.real).as_posix()
+                if resolved.real.is_file():
+                    file_path = path
+                else:
+                    rel = p.relative_to(resolved.real).as_posix()
+                    file_path = f"{resolved.namespace}:{rel}"
                 matches.append(
                     {
-                        "file": f"{resolved.namespace}:{rel}",
+                        "file": file_path,
                         "line": i + 1,
                         "match": line,
                         "context_before": lines[max(0, i - context_lines) : i],
@@ -1408,19 +1417,19 @@ def _handle_grep(args: dict[str, Any]) -> dict:
 
 
 # -- grep
-# 按正则表达式递归搜索目录中文本文件的内容。
+# 在目录或单个文件中按正则表达式递归搜索文本文件的内容。
 # 自动跳过二进制文件（通过扩展名 + 空字节探测）和超大文件。
 # 返回匹配项的文件路径、行号、匹配文本及周围上下文行。
 # 结果超过 limit 时自动写入 ws:logs/ 下的日志文件。
 #
 # ## 前置条件
-# - 搜索路径必须是一个存在的目录。
+# - 搜索路径必须是一个存在的目录或文件。
 # - 路径必须使用命名空间前缀。
 # - pattern 必须是有效的 Python 正则表达式。
 #
 # ## 调用效果
-# 递归遍历目录中的文本文件，用正则表达式搜索内容。
-# 自动跳过二进制文件（通过白名单扩展名 + 前 {FILE_SNIFF_BYTES} 字节的空字节探测）、
+# 当路径为目录时递归遍历其中的文本文件，当路径为文件时只搜索该文件。
+# 用正则表达式搜索内容。自动跳过二进制文件（通过白名单扩展名 + 前 {FILE_SNIFF_BYTES} 字节的空字节探测）、
 # 超过 max_file_size 字节的文件、以及无法以 UTF-8 解码的文件。
 # 每条匹配返回文件路径、行号、匹配行文本、前后上下文行。
 # 结果超过 limit 条时，完整列表写入 ws:logs/grep_<timestamp>.log。
@@ -1449,15 +1458,15 @@ registry.register(
     name="grep",
     toolset="filesystem",
     schema={
-        "description": f"""Recursively search text file contents using a regex pattern in a directory. Automatically skips binary files (by extension + null-byte sniffing) and oversized files. Returns matches with file path, line number, matched text, and surrounding context lines. If results exceed the limit, the full list is written to a log file under ws:logs/.
+        "description": f"""Recursively search text file contents using a regex pattern in a directory or a single file. Automatically skips binary files (by extension + null-byte sniffing) and oversized files. Returns matches with file path, line number, matched text, and surrounding context lines. If results exceed the limit, the full list is written to a log file under ws:logs/.
 
 ## Prerequisites
-- The search path must be an existing directory.
+- The search path must be an existing directory or file.
 - The path must use a namespace prefix.
 - The pattern must be a valid Python regex.
 
 ## Effect
-Recursively traverses text files in the directory, searching contents with a regex pattern. Automatically skips binary files (via allowlist extension + null-byte probe on first {FILE_SNIFF_BYTES} bytes), files larger than max_file_size, and files that cannot be decoded as UTF-8. Each match returns file path, line number, matched line text, and surrounding context lines. When results exceed the limit, the full list is written to ws:logs/grep_<timestamp>.log.
+When the path is a directory, recursively traverses text files in it; when it is a single file, searches only that file. Searches contents with a regex pattern. Automatically skips binary files (via allowlist extension + null-byte probe on first {FILE_SNIFF_BYTES} bytes), files larger than max_file_size, and files that cannot be decoded as UTF-8. Each match returns file path, line number, matched line text, and surrounding context lines. When results exceed the limit, the full list is written to ws:logs/grep_<timestamp>.log.
 
 ## Returns
 When results fit within the limit:
@@ -1484,8 +1493,8 @@ When results exceed the limit:
             "properties": {
                 "path": {
                     "type": "string",
-                    # 要搜索的目录逻辑路径（如 'ws:'、'fork:src'）。必须使用命名空间前缀。
-                    "description": "Directory logical path to search in (e.g. 'ws:', 'fork:src'). Must use a namespace prefix.",
+                    # 要搜索的目录或文件逻辑路径（如 'ws:'、'fork:src'、'ws:eve-site.html'）。必须使用命名空间前缀。
+                    "description": "Directory or file logical path to search in (e.g. 'ws:', 'fork:src', 'ws:eve-site.html'). Must use a namespace prefix.",
                 },
                 "pattern": {
                     "type": "string",
