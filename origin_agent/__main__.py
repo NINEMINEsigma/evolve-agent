@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import datetime
+import hashlib
 import json
 import logging
 import os
@@ -149,7 +150,101 @@ def _build_context(cli: dict) -> RuntimeContext:
 # Main
 # ---------------------------------------------------------------------------
 
-def _build_frontend() -> bool:
+# ── 前端构建签名 ──────────────────────────────────────────────────────
+
+_SIGNATURE_FILE = ".frontend_build_signature.json"
+
+# 签名源文件清单（相对 frontend_dir）
+_SIGNATURE_SOURCES = [
+    "package.json",
+    ".npmrc",
+    "pnpm-workspace.yaml",
+    "tsconfig.json",
+    "tsconfig.app.json",
+    "tsconfig.node.json",
+    "vite.config.ts",
+    "index.html",
+]
+
+
+def _compute_frontend_signature(frontend_dir: Path) -> str:
+    """计算 frontend 构建输入的确定性签名。
+
+    对每个源文件计算 ``sha256(relpath + "\\0" + bytes)``，
+    按哈希值字典序排序后聚合为最终签名字符串。
+
+    不存在的可选文件（如 public/）直接跳过；
+    读取失败时抛异常由调用方处理（触发强制重建）。
+    """
+    logger = logging.getLogger("agent.frontend.signature")
+    hasher = hashlib.sha256()
+    file_hashes: list[str] = []
+
+    def _hash_file(file_path: Path) -> None:
+        """对文件内容做 sha256，将 hex 加入列表。"""
+        file_hash = hashlib.sha256()
+        # 相对路径 + 分隔符 + 文件内容，确保重命名也会导致签名变化
+        rel = file_path.relative_to(frontend_dir).as_posix()
+        file_hash.update(rel.encode("utf-8"))
+        file_hash.update(b"\0")
+        file_hash.update(file_path.read_bytes())
+        file_hashes.append(file_hash.hexdigest())
+
+    # 根目录级的签名源文件
+    for name in _SIGNATURE_SOURCES:
+        fp = frontend_dir / name
+        if fp.is_file():
+            _hash_file(fp)
+
+    # src/ 目录下的所有文件（递归）
+    src_dir = frontend_dir / "src"
+    if src_dir.is_dir():
+        for fp in sorted(src_dir.rglob("*")):
+            if fp.is_file() and fp.name != _SIGNATURE_FILE:
+                _hash_file(fp)
+
+    # public/ 目录（可选）
+    public_dir = frontend_dir / "public"
+    if public_dir.is_dir():
+        for fp in sorted(public_dir.rglob("*")):
+            if fp.is_file():
+                _hash_file(fp)
+
+    # 排序后聚合成最终签名
+    file_hashes.sort()
+    for h in file_hashes:
+        hasher.update(h.encode("utf-8"))
+        hasher.update(b"\n")
+    final = hasher.hexdigest()
+    logger.debug("Computed signature: %s (%d source files)", final[:16], len(file_hashes))
+    return final
+
+
+def _read_build_signature(frontend_dir: Path) -> str | None:
+    """读取之前保存的构建签名。
+
+    文件不存在或 JSON 格式错误时返回 None。
+    """
+    sig_file = frontend_dir / _SIGNATURE_FILE
+    if not sig_file.is_file():
+        return None
+    try:
+        data = json.loads(sig_file.read_text(encoding="utf-8"))
+        return data.get("signature")
+    except (json.JSONDecodeError, KeyError):
+        return None
+
+
+def _write_build_signature(frontend_dir: Path, signature: str) -> None:
+    """写入构建签名到隐藏文件。"""
+    sig_file = frontend_dir / _SIGNATURE_FILE
+    sig_file.write_text(
+        json.dumps({"signature": signature}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+
+
+def _build_frontend(force: bool = False) -> bool:
     """在前端目录中运行 ``pnpm install && pnpm run build``。
 
     前端位于 *AGENT_DIR* 下（例如 ``origin_agent/frontend/`` 或
@@ -164,6 +259,20 @@ def _build_frontend() -> bool:
         return True  # 无前端需要构建
 
     logger: logging.Logger = logging.getLogger("agent.frontend")
+
+    # ── 签名检查：不强制构建且签名匹配且产物存在时跳过 ──
+    if not force:
+        try:
+            current_sig = _compute_frontend_signature(frontend_dir)
+            stored_sig = _read_build_signature(frontend_dir)
+            dist_index = frontend_dir / "dist" / "index.html"
+            if stored_sig and current_sig == stored_sig and dist_index.is_file():
+                logger.info("Frontend build up-to-date, skipping (%s source files matched)", frontend_dir)
+                return True
+        except Exception:
+            # 签名计算失败（读取异常等）→ 回退到强制构建
+            logger.debug("Signature check failed, will rebuild", exc_info=True)
+
     logger.info("Building frontend in %s ...", frontend_dir)
 
     def _log_output(proc: subprocess.CompletedProcess, label: str) -> None:
@@ -203,6 +312,12 @@ def _build_frontend() -> bool:
         )
         _log_output(build_proc, "build")
         build_proc.check_returncode()
+        # 构建成功后写入签名，用于下次启动的比较
+        try:
+            sig = _compute_frontend_signature(frontend_dir)
+            _write_build_signature(frontend_dir, sig)
+        except Exception:
+            logger.debug("Failed to write build signature", exc_info=True)
         logger.info("Frontend build complete → %s", frontend_dir / "dist")
         return True
     except subprocess.CalledProcessError as exc:
@@ -250,7 +365,8 @@ def main() -> int:
     )
 
     # ---- 构建前端（失败则致命）----
-    if not _build_frontend():
+    frontend_force_build = as_bool(cli.get("frontend_force_build", False))
+    if not _build_frontend(force=frontend_force_build):
         logger.critical("Frontend build FAILED — aborting start")
         return 1  # 非零，非(-1) → 触发 run.py fallback 分支
 
