@@ -44,32 +44,28 @@ SUB_MESSAGE_SEPARATOR = "[Sub Session Message]"
 
 def format_user_message(user_name: str, message_type: str, content: str, co_recipients: list[str] | None = None) -> str:
     """包装进入子 Agent 的用户消息，明确标识真实发送者身份。"""
-    if message_type == "direct":
-        header = f"[your direct conversation partner in this turn: {user_name}]"
-        description = (
-            f'The following message is addressed to you directly by "{user_name}".\n'
-            f'Even if the content mentions or quotes someone else, that other person is being relayed by {user_name}.\n'
-            f'Respond to {user_name}, not to anyone mentioned inside the message.'
-        )
-    elif message_type == "overheard":
-        header = f"[The speaker of this message in this turn: {user_name}]"
-        description = (
-            f'You are hearing a message that was spoken by "{user_name}".\n'
-            f'This message may not be addressed to you; {user_name} may be talking to someone else or simply being quoted.\n'
-            f'Do not assume you must reply unless the content explicitly asks something of you.'
-        )
-    elif message_type == "user_direct":
-        header = f"[Direct message from the end user: {user_name}]"
-        description = (
-            f'The following message is sent directly to you by the end user "{user_name}", '
-            f'not relayed by the parent agent. Respond to {user_name} directly.'
-        )
-    else:
+    from system.templates import read_template
+
+    template_map = {
+        "direct": "subagent/user_message_direct.txt",
+        "overheard": "subagent/user_message_overheard.txt",
+        "user_direct": "subagent/user_message_user_direct.txt",
+    }
+    template_name = template_map.get(message_type)
+    if template_name is None:
         raise ValueError(f"Unknown message_type: {message_type}")
-    if co_recipients:
-        description += f"\n\n(This message is also shared with: {', '.join(co_recipients)}.)"
-    # TODO: 使用---作为分割, 当前并不统一
-    return f"{header}\n\n{description}\n\n---\n\n{content}"
+
+    template = read_template(template_name)
+    co_str = (
+        f"\n\n(This message is also shared with: {', '.join(co_recipients)}.)"
+        if co_recipients else ""
+    )
+    return (
+        template
+        .replace("{{user_name}}", user_name)
+        .replace("{{content}}", content)
+        .replace("{{co_recipients_suffix}}", co_str)
+    )
 
 
 class PendingToolCall:

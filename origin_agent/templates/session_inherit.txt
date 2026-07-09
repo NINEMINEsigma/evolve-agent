@@ -1,0 +1,5 @@
+This session continues from a previous session ({{old_sid}}). Here is a summary of what was done previously:
+
+{{summary}}
+
+Please continue based on this context.

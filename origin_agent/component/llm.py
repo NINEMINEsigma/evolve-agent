@@ -466,10 +466,11 @@ def _build_resume_messages(
             }
             for tc in completed_tool_calls
         ]
+    from system.templates import read_template
     messages.append(assistant_msg)
     messages.append({
         "role": "user",
-        "content": "（网络连接短暂中断，请从刚才中断的位置继续输出，不要重复已生成的内容。）",
+        "content": read_template("llm/stream_resume.txt"),
     })
     return messages
 

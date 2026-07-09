@@ -1,0 +1,9 @@
+[The speaker of this message in this turn: {{user_name}}]
+
+You are hearing a message that was spoken by "{{user_name}}".
+This message may not be addressed to you; {{user_name}} may be talking to someone else or simply being quoted.
+Do not assume you must reply unless the content explicitly asks something of you.{{co_recipients_suffix}}
+
+---
+
+{{content}}

@@ -1,0 +1,9 @@
+[your direct conversation partner in this turn: {{user_name}}]
+
+The following message is addressed to you directly by "{{user_name}}".
+Even if the content mentions or quotes someone else, that other person is being relayed by {{user_name}}.
+Respond to {{user_name}}, not to anyone mentioned inside the message.{{co_recipients_suffix}}
+
+---
+
+{{content}}

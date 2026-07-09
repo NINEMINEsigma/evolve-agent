@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Any, Awaitable, Callable, Dict, List, TYPE_CHECKING
 
 from abstract.memory.manager import MemoryManager
+from system.templates import read_template
 from abstract.tools.registry import ToolEntry, registry as tool_registry
 from component.approval import ApprovalResult, ask_agent_reason, is_handsfree_mode, request_user_confirm
 from component.approval_allowlist import add_allowed as add_tool_allowlist_entry
@@ -1164,16 +1165,12 @@ class ParentAgentLoop(BasePrivateChatAgentLoop):
         messages = self._get_full_history(session_id)
         if not messages:
             return ""
-        # TODO: 总结过短, 截断剩余文本过少, 提示词模板没有分离
-        summary_prompt = (
-            "Summarize the following conversation history into a concise summary "
-            "that captures the key context, actions taken, and decisions made. "
-            "Keep it under 2000 characters."
-        )
+        system_prompt = read_template("compress.txt")
+        user_prompt = read_template("compress_input.txt").replace("{{old_text}}", json.dumps(messages, ensure_ascii=False)[:30000])
         try:
             resp = await self._llm.chat([
-                {"role": "user", "content": summary_prompt},
-                {"role": "user", "content": json.dumps(messages, ensure_ascii=False)[:30000]},
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
             ])
             return resp.content or ""
         except Exception as exc:
@@ -1186,14 +1183,11 @@ class ParentAgentLoop(BasePrivateChatAgentLoop):
         if not messages:
             return []
         try:
-            # TODO: 提示词模板没有分离, 截断剩余文本过少
-            tag_prompt = (
-                "Based on the conversation, generate 3-5 concise tags (single words or short phrases) "
-                "that best categorize the session's topics. Return them as a JSON array of strings."
-            )
+            system_prompt = read_template("session_tags.txt")
+            user_prompt = read_template("session_tags_input.txt").replace("{{old_text}}", json.dumps(messages, ensure_ascii=False)[:20000])
             resp = await self._llm.chat([
-                {"role": "user", "content": tag_prompt},
-                {"role": "user", "content": json.dumps(messages, ensure_ascii=False)[:20000]},
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
             ])
             content = resp.content or ""
             try:
@@ -1208,11 +1202,7 @@ class ParentAgentLoop(BasePrivateChatAgentLoop):
 
     def _build_inherited_context(self, old_sid: str, summary: str) -> str:
         """为继承会话构建初始上下文消息。"""
-        return (
-            f"This session continues from a previous session ({old_sid}). "
-            f"Here is a summary of what was done previously:\n\n{summary}\n\n"
-            f"Please continue based on this context."
-        )
+        return read_template("session_inherit.txt").replace("{{old_sid}}", old_sid).replace("{{summary}}", summary)
 
     # ========================================================================
     # Hooks / Skill prompts
@@ -1435,14 +1425,12 @@ class ParentAgentLoop(BasePrivateChatAgentLoop):
         messages = self._get_full_history(self.session_id)
         if not messages:
             return ""
-        title_prompt = (
-            "Generate a concise title (max 50 characters) for this conversation. "
-            "Return only the title text, no quotes or formatting."
-        )
+        system_prompt = read_template("auto_title.txt")
+        user_prompt = read_template("auto_title_input.txt").replace("{{context}}", json.dumps(messages, ensure_ascii=False)[:AUTO_TITLE_CONTENT_MAX])
         try:
             resp = await self._llm.chat([
-                {"role": "user", "content": title_prompt},
-                {"role": "user", "content": json.dumps(messages, ensure_ascii=False)[:AUTO_TITLE_CONTENT_MAX]},
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
             ])
             title = (resp.content or "").strip().strip("\"'")[:50]
             return title

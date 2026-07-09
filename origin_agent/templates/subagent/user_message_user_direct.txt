@@ -1,0 +1,7 @@
+[Direct message from the end user: {{user_name}}]
+
+The following message is sent directly to you by the end user "{{user_name}}", not relayed by the parent agent. Respond to {{user_name}} directly.{{co_recipients_suffix}}
+
+---
+
+{{content}}

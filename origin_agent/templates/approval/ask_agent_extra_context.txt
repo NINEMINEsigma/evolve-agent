@@ -1,0 +1,3 @@
+[Additional Context]
+The following context was attached to the user's latest message and may be relevant to answering the approval model's question:
+{{extra_context}}

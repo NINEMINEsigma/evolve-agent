@@ -370,14 +370,13 @@ async def _handsfree_confirm(
 
                     # 将Agent的回答追加到 messages，下一轮循环重新审批
                     current_messages.append({"role": "assistant", "content": resp_content or ""})
+                    from system.templates import read_template
                     current_messages.append({
                         "role": "user",
-                        "content": (
-                            f"[Dialog round {dialog_turn + 1}]\n"
-                            f"Approval model's question: {ask_question}\n"
-                            f"Agent's answer: {agent_answer}\n\n"
-                            f"Please re-evaluate the safety of this tool call based on the Agent's answer above."
-                        ),
+                        "content": read_template("approval/dialog_re_evaluate.txt")
+                            .replace("{{dialog_turn}}", str(dialog_turn + 1))
+                            .replace("{{ask_question}}", ask_question)
+                            .replace("{{agent_answer}}", agent_answer),
                     })
                     messages.extend(current_messages[2:])  # 保留 system + 原始 user，追加对话
                     dialog_turn += 1
@@ -498,21 +497,16 @@ async def ask_agent_reason(
     返回：
         主模型的回答文本
     """
-    from system.pathutils import get_templates_dir
+    from system.templates import read_template
 
     ask_prompt = (
-        (get_templates_dir() / "approval" / "ask_agent_prompt.md").read_text(encoding="utf-8")
+        read_template("approval/ask_agent_prompt.md")
         .replace("{{tool_name}}", tool_name)
         .replace("{{question}}", question)
         .replace("{{tool_args_json}}", json.dumps(tool_args, ensure_ascii=False, indent=2))
     )
     if extra_context:
-        ask_prompt += (
-            f"\n\n[Additional Context]\n"
-            f"The following context was attached to the user's latest message "
-            f"and may be relevant to answering the approval model's question:\n"
-            f"{extra_context}"
-        )
+        ask_prompt += "\n\n" + read_template("approval/ask_agent_extra_context.txt").replace("{{extra_context}}", extra_context)
     try:
         resp = await llm.chat(
             [{"role": Role.USER, "content": ask_prompt}],

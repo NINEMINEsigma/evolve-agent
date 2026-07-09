@@ -1,4 +1,1 @@
-Summarize the key points and decisions of the following conversation. Output only the summary.
-Conversation:
-{{old_text}}
-Summary:
+Summarize the following conversation history into a concise summary that captures the key context, actions taken, and decisions made. Keep it under 2000 characters.
