@@ -59,6 +59,8 @@ class LLMResponse(BaseModel):
     finish_reason: str = "stop"
     reasoning_content: str | None = None
     """DeepSeek thinking-mode 载荷 — 在后续回合中必须回传。"""
+    reasoning_field_name: str | None = None
+    """原始响应中携带 reasoning 的字段名，用于在后续回传时保持字段一致。"""
     usage: Usage = Usage()
 
 
@@ -69,6 +71,8 @@ class StreamChunk(BaseModel):
     content_delta: str | None = None
     reasoning_delta: str | None = None
     """DeepSeek thinking-mode 增量 — 仅用于展示。"""
+    reasoning_field_name: str | None = None
+    """当前 reasoning_delta 对应的原始字段名（如 reasoning_content / reasoning）。"""
     tool_call: ToolCall | None = None
     """当前 chunk 中首次完整出现的 tool_call（用于工具调用开始通知）。"""
     finish_reason: str | None = None
@@ -162,11 +166,13 @@ class LLMClient:
                 choice: Any = completion.choices[0]
                 msg: Any = choice.message
 
+                reasoning_value, reasoning_field = _extract_reasoning_with_field(msg)
                 return LLMResponse(
                     content=_extract_content(msg),
                     tool_calls=_extract_tool_calls(msg),
                     finish_reason=_extract_finish_reason(choice, "stop") or "stop",
-                    reasoning_content=_extract_reasoning(msg),
+                    reasoning_content=reasoning_value,
+                    reasoning_field_name=reasoning_field,
                     usage=_extract_usage(completion),
                 )
             except (
@@ -209,6 +215,7 @@ class LLMClient:
         state: dict[str, Any] = {
             "content": "",
             "reasoning": "",
+            "reasoning_field_name": None,
             "completed_tool_calls": [],
             "pending_tool_buffers": {},
             "finish_reason": None,
@@ -299,16 +306,6 @@ class LLMClient:
 
         try:
             async for chunk in stream:
-                # TODO: include_usage 的 usage-only chunk 可能被 finish chunk 的零值 usage 覆盖。
-                # OpenAI 流式接口在 stream_options.include_usage=True 时，通常会在 finish_reason
-                # 之后再发一个 choices=[] 但带 usage 的独立 chunk。当前逻辑先把这个 usage 单独
-                # yield 出去，随后又在带 finish_reason 的 chunk 上记录 pending_finish_usage；如果
-                # 后者本身没有 usage，pending_finish_usage 就是零值，最终 finish chunk 会把真实
-                # usage 覆盖为 0，导致 parent_agent_loop.py 抛出
-                # "LLM provider did not return token usage for streaming response."。
-                # 修复方向：维护一个跨 chunk 的最新非零 usage，避免用零值覆盖真实 usage。
-                # include_usage 模式下，OpenAI 在最终发送一个
-                # choices 为空但携带 usage 的独立 chunk，需要单独提取
                 if not chunk.choices and getattr(chunk, "usage", None):
                     yield StreamChunk(usage=_extract_usage(chunk))
                     continue
@@ -321,7 +318,8 @@ class LLMClient:
                     continue
 
                 content_delta = _extract_content(delta)
-                reasoning_delta = _extract_reasoning(delta) or ""
+                reasoning_delta, reasoning_field = _extract_reasoning_with_field(delta)
+                reasoning_delta = reasoning_delta or ""
 
                 if content_delta:
                     content_buffer += content_delta
@@ -331,7 +329,12 @@ class LLMClient:
                 if reasoning_delta:
                     reasoning_buffer += reasoning_delta
                     state["reasoning"] = reasoning_buffer
-                    yield StreamChunk(reasoning_delta=reasoning_delta)
+                    if reasoning_field:
+                        state["reasoning_field_name"] = reasoning_field
+                    yield StreamChunk(
+                        reasoning_delta=reasoning_delta,
+                        reasoning_field_name=reasoning_field,
+                    )
 
                 # 累积 tool_calls
                 for idx, tc_id, name_delta, args_delta in _iter_delta_tool_calls(delta):
@@ -453,7 +456,8 @@ def _build_resume_messages(
         "content": assistant_content or " ",
     }
     if assistant_reasoning:
-        assistant_msg["reasoning_content"] = assistant_reasoning
+        field_name = state.get("reasoning_field_name") or "reasoning_content"
+        assistant_msg[field_name] = assistant_reasoning
     if completed_tool_calls:
         assistant_msg["tool_calls"] = [
             {
@@ -490,6 +494,25 @@ def _extract_content(obj: Any) -> str:
     return getattr(obj, "content", None) or ""
 
 
+def _extract_reasoning_with_field(obj: Any) -> tuple[str | None, str | None]:
+    """从 OpenAI SDK 的 delta/message 对象中提取 reasoning 内容及其原始字段名。
+
+    不同 provider / SDK 版本对 reasoning 字段的命名和暴露方式不同：
+      - DeepSeek: ``reasoning_content``
+      - 某些 OpenAI 兼容接口: ``reasoning``
+      - 标准 OpenAI ``ChoiceDelta``: 可能不存在该字段
+
+    返回 ``(值, 字段名)``；未找到时返回 ``(None, None)``。
+    """
+    if obj is None:
+        return None, None
+    for attr in ("reasoning_content", "reasoning"):
+        value = getattr(obj, attr, None)
+        if value:
+            return value, attr
+    return None, None
+
+
 def _extract_reasoning(obj: Any) -> str | None:
     """从 OpenAI SDK 的 delta/message 对象中提取 reasoning 内容。
 
@@ -501,13 +524,7 @@ def _extract_reasoning(obj: Any) -> str | None:
     统一在此函数内做防御式提取，上层无需关心兼容细节，也便于
     后续升级为按 provider 配置的适配器模式。
     """
-    if obj is None:
-        return None
-    for attr in ("reasoning_content", "reasoning"):
-        value = getattr(obj, attr, None)
-        if value:
-            return value
-    return None
+    return _extract_reasoning_with_field(obj)[0]
 
 
 def _extract_usage(obj: Any) -> Usage:

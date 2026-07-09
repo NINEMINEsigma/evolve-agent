@@ -14,7 +14,6 @@
 - 远程 OpenAI 兼容 API：通过 approval_remote_* 配置，连接 LM Studio / 自定义服务商。
 CUDA 可用时本地模型自动全卸载到 GPU。
 """
-# TODO: 大量提示词没有独立成模板文件
 from __future__ import annotations
 
 import asyncio

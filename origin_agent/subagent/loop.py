@@ -281,6 +281,7 @@ class SubAgentLoop(BasePrivateChatAgentLoop):
                         character_name=self.current_character_agent,
                         content=text,
                         reasoning=reasoning_text,
+                        reasoning_field_name=resp.reasoning_field_name,
                     )
                     self._history.add_message(assistant_msg)
                     if self._last_message_from_parent:
@@ -317,6 +318,7 @@ class SubAgentLoop(BasePrivateChatAgentLoop):
                     content=resp.content or "",
                     tool_calls=tool_calls_data,
                     reasoning=reasoning_text,
+                    reasoning_field_name=resp.reasoning_field_name,
                 )
                 self._history.add_message(assistant_msg)
 

@@ -624,7 +624,6 @@ class MultiAgentLoop(BaseAgentLoop):
                 visible_characters=visible if visible else None,
                 response_characters=response if response else None,
                 reasoning=None,
-                reasoning_field_name="reasoning_content",
                 tool_calls=None,
                 message_suffix=None,
             )

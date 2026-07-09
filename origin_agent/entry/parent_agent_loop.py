@@ -356,8 +356,11 @@ class ParentAgentLoop(BasePrivateChatAgentLoop):
                 if self._cancel_event.is_set():
                     await self._emit_stream_done(sid, stream_id, "cancelled")
                     if resp.content:
-                        self._append(sid, Role.ASSISTANT, resp.content,
-                                     reasoning_content=resp.reasoning_content)
+                        self._append(
+                            sid, Role.ASSISTANT, resp.content,
+                            reasoning_content=resp.reasoning_content,
+                            reasoning_field_name=resp.reasoning_field_name,
+                        )
                         return resp.content
                     return "Cancelled."
 
@@ -383,8 +386,11 @@ class ParentAgentLoop(BasePrivateChatAgentLoop):
 
                 if not resp.tool_calls:
                     assistant_text = resp.content or ""
-                    self._append(sid, Role.ASSISTANT, assistant_text,
-                                 reasoning_content=resp.reasoning_content)
+                    self._append(
+                        sid, Role.ASSISTANT, assistant_text,
+                        reasoning_content=resp.reasoning_content,
+                        reasoning_field_name=resp.reasoning_field_name,
+                    )
                     self._memory.sync_all(
                         self._history, session_id=sid,
                     )
@@ -527,6 +533,7 @@ class ParentAgentLoop(BasePrivateChatAgentLoop):
 
         content: str = ""
         reasoning_content: str = ""
+        reasoning_field_name: str | None = None
         tool_calls: list[ToolCall] = []
         finish_reason: str = "stop"
         usage: dict[str, int] = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
@@ -552,6 +559,8 @@ class ParentAgentLoop(BasePrivateChatAgentLoop):
 
                 if chunk.reasoning_delta:
                     reasoning_content += chunk.reasoning_delta
+                    if chunk.reasoning_field_name:
+                        reasoning_field_name = chunk.reasoning_field_name
                     await self._frontend_sink.emit_stream_delta(
                         session_id, stream_id,
                         reasoning_delta=chunk.reasoning_delta,
@@ -601,6 +610,7 @@ class ParentAgentLoop(BasePrivateChatAgentLoop):
             tool_calls=tool_calls,
             finish_reason=finish_reason,
             reasoning_content=reasoning_content or None,
+            reasoning_field_name=reasoning_field_name,
             usage=Usage(
                 prompt_tokens=usage["prompt_tokens"],
                 completion_tokens=usage["completion_tokens"],
@@ -815,6 +825,7 @@ class ParentAgentLoop(BasePrivateChatAgentLoop):
         self, session_id: str, role: Role,
         content: str | list[dict[str, Any]],
         reasoning_content: str | None = None,
+        reasoning_field_name: str | None = None,
         character_name: str | None = None,
         message_suffix: str | None = None,
         dynamic_message_suffix: str | None = None,
@@ -834,6 +845,7 @@ class ParentAgentLoop(BasePrivateChatAgentLoop):
                 content=message_content,
                 visible_characters=[self.current_character_agent] if role == Role.USER else None,
                 reasoning=reasoning_content,
+                reasoning_field_name=reasoning_field_name,
                 message_suffix=message_suffix,
                 dynamic_message_suffix=dynamic_message_suffix,
             )
@@ -844,7 +856,7 @@ class ParentAgentLoop(BasePrivateChatAgentLoop):
                 content=message_content,
                 visible_characters=[self.current_character_agent] if role == Role.USER else None,
                 reasoning=reasoning_content,
-                reasoning_field_name="reasoning_content",
+                reasoning_field_name=reasoning_field_name,
                 message_suffix=message_suffix,
                 dynamic_message_suffix=dynamic_message_suffix,
                 tool_calls=None,
@@ -907,6 +919,7 @@ class ParentAgentLoop(BasePrivateChatAgentLoop):
             content=resp.content or "",
             tool_calls=tool_calls_data,
             reasoning=resp.reasoning_content,
+            reasoning_field_name=resp.reasoning_field_name,
         )
         self._history.add_message(message)
         self._persist_message(session_id)

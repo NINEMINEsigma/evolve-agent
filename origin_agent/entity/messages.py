@@ -167,7 +167,7 @@ class ToolCall(BaseModel):
 class CharacterConversationMessage(CharacterMessage):
     reasoning: str|None                 = Field(default=None, 
                                                 description="The reasoning of the message")
-    # TODO: 可能需要运行时自动探查
+    # 字段名应由 LLM 响应实际使用的 provider 字段决定；默认仅作为无响应信息时的兜底。
     reasoning_field_name: str           = Field(default="reasoning_content", 
                                                 description="The field name of the reasoning")
     visible_characters: list[str]|None  = Field(default=None, 
