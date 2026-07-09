@@ -217,8 +217,8 @@ def _build_frontend() -> bool:
         logger.error("Frontend build FAILED: %s", detail)
         return False
     except FileNotFoundError:
-        logger.warning("pnpm not found — skipping frontend build")
-        return True  # 非致命
+        logger.error("pnpm not found — frontend build is required")
+        return False
 
 
 def main() -> int:
