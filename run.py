@@ -105,7 +105,7 @@ def _build_base_args():
         "--approval_remote_api_key",    quote(approval_remote_api_key),
         "--approval_remote_model",      quote(approval_remote_model),
         "--merge_concat_threshold",     quote(merge_concat_threshold),
-        "--frontend_force_build",       quote("true" if fouce_init else "false"),
+        "--frontend_force_build",       quote("true" if frontend_force_build else "false"),
     ]
 
 

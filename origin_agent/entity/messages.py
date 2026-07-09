@@ -168,7 +168,7 @@ class CharacterConversationMessage(CharacterMessage):
     reasoning: str|None                 = Field(default=None, 
                                                 description="The reasoning of the message")
     # 字段名应由 LLM 响应实际使用的 provider 字段决定；默认仅作为无响应信息时的兜底。
-    reasoning_field_name: str           = Field(default="reasoning_content", 
+    reasoning_field_name: str|None      = Field(default="reasoning_content", 
                                                 description="The field name of the reasoning")
     visible_characters: list[str]|None  = Field(default=None, 
                                                 description="The visible characters of the message")
@@ -246,7 +246,7 @@ class CharacterConversationMessage(CharacterMessage):
             # 以特殊用户消息的形式提供给目标agent
             raw_message["role"] = Role.USER.value
             return raw_message
-        if self.character_name == current_character_agent and self.reasoning:
+        if self.character_name == current_character_agent and self.reasoning_field_name  and self.reasoning:
             raw_message[self.reasoning_field_name] = self.reasoning
         if self.character_name == current_character_agent and self.tool_calls:
             raw_message["tool_calls"] = [tool_call.as_object() for tool_call in self.tool_calls]

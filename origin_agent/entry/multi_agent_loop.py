@@ -623,7 +623,7 @@ class MultiAgentLoop(BaseAgentLoop):
                 content=str(content_text),
                 visible_characters=visible if visible else None,
                 response_characters=response if response else None,
-                reasoning=None,
+                reasoning=result.parsed_json.reasoning,
                 tool_calls=None,
                 message_suffix=None,
             )

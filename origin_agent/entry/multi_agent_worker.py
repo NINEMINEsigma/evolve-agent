@@ -56,6 +56,7 @@ class WorkerResult(BaseModel):
     stream_id: str = Field("", description="Worker 的流式标识，用于前端关联元数据")
     total_token_usage: int = Field(0, description="该 worker 本次执行累计消耗的 total_tokens")
     last_prompt_tokens: int = Field(0, description="该 worker 最后一次 LLM 调用的 prompt_tokens")
+    reasoning: str | None = Field(default=None, description="LLM 推理内容（仅在支持 thinking 的 provider 下存在）")
 
 
 class MultiAgentWorker:
@@ -180,7 +181,10 @@ class MultiAgentWorker:
                     "LLM error for agent=%s: %s",
                     self.character_name, response["error"],
                 )
-                return await self._error_result(f"LLM error: {response['error']}")
+                return await self._error_result(
+                    f"LLM error: {response['error']}",
+                    reasoning=response.get("reasoning"),
+                )
 
             # 有 tool_calls → 写入共享 History → 发送标准事件 → 执行工具 → 继续循环
             if response.get("tool_calls"):
@@ -222,6 +226,7 @@ class MultiAgentWorker:
                     content=msg_content,
                     tool_calls=history_tool_calls,
                     visible_characters=[self.character_name],
+                    reasoning=response.get("reasoning"),
                 )
                 self._loop._history.add_message(assistant_msg)
                 self._loop._persist_message(self._loop.session_id)
@@ -278,9 +283,11 @@ class MultiAgentWorker:
                 return await self._error_result(
                     "Empty response",
                     raw_text=text,
+                    reasoning=response.get("reasoning"),
                 )
 
             parsed = self._parse_routing_tags(text)
+            parsed.reasoning = response.get("reasoning")
             logger.info(
                 "MultiAgentWorker DSL parse | session=%s character=%s turn=%d parsed=%s",
                 self._loop.session_id, self.character_name, turn, parsed,
@@ -291,9 +298,14 @@ class MultiAgentWorker:
                 return await self._error_result(
                     "Empty content after stripping routing tags",
                     raw_text=text,
+                    reasoning=response.get("reasoning"),
                 )
 
-            await self._emit_text(parsed.content)
+            # content 已在 _call_llm() 流式生成过程中逐段推送，这里只需发送 stream_done 固化消息
+            await self._sink.emit_stream_done(
+                self._loop.session_id,
+                self._stream_id,
+            )
             return WorkerResult(
                 character_name=self.character_name,
                 parsed_json=parsed,
@@ -302,6 +314,7 @@ class MultiAgentWorker:
                 stream_id=self._stream_id,
                 total_token_usage=self._total_token_usage,
                 last_prompt_tokens=self._last_prompt_tokens,
+                reasoning=response.get("reasoning"),
             )
 
         # tool loop 超过最大轮数
@@ -314,13 +327,7 @@ class MultiAgentWorker:
     async def _call_llm(
         self, messages: list[dict[str, Any]]
     ) -> dict[str, Any]:
-        """流式调用 LLM，收集 content / tool_calls / reasoning。
-
-        多 Agent 模式下不再使用 response_format 强制 JSON，
-        由模型在自然语言中嵌入 DSL 路由标签。
-        **不在此处推送 content_delta 到前端**——原始内容可能含 DSL 标签，
-        由上层 ``run()`` 在解析后推送干净的 content 字段。
-        """
+        """流式调用 LLM，边收边推送增量到前端，并收集 content / tool_calls / reasoning。"""
         content: str = ""
         reasoning: str = ""
         tool_calls: list[dict[str, Any]] = []
@@ -345,9 +352,21 @@ class MultiAgentWorker:
                 if chunk.content_delta:
                     content += chunk.content_delta
                     stream_buffer.append(chunk.content_delta)
+                    await self._sink.emit_stream_delta(
+                        self._loop.session_id,
+                        self._stream_id,
+                        delta=chunk.content_delta,
+                        character_name=self.character_name,
+                    )
 
                 if chunk.reasoning_delta:
                     reasoning += chunk.reasoning_delta
+                    await self._sink.emit_stream_delta(
+                        self._loop.session_id,
+                        self._stream_id,
+                        reasoning_delta=chunk.reasoning_delta,
+                        character_name=self.character_name,
+                    )
 
                 # 收集 LLM 返回的 token 消耗；过滤零值避免 finish chunk 覆盖真实 usage
                 if chunk.usage and chunk.usage.total_tokens > 0:
@@ -439,6 +458,7 @@ class MultiAgentWorker:
         self,
         error: str,
         raw_text: str = "",
+        reasoning: str | None = None,
     ) -> WorkerResult:
         """构造错误占位结果，同时推送错误文本到前端。"""
         text = f"[{self.character_name} 响应失败: {error}]"
@@ -449,12 +469,13 @@ class MultiAgentWorker:
                 content=text,
                 visible_characters=[],
                 response_characters=[],
-                reasoning=None,
+                reasoning=reasoning,
             ),
             raw_json=raw_text,
             stream_id=self._stream_id,
             total_token_usage=self._total_token_usage,
             last_prompt_tokens=self._last_prompt_tokens,
+            reasoning=reasoning,
         )
 
     async def _emit_text(self, text: str) -> None:
