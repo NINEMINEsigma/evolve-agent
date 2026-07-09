@@ -136,7 +136,6 @@ class App:
         """创建 uvicorn server 并作为后台 task 运行。"""
         try:
             from gateway.server import create_server, set_agent_loop, set_agentspace_path
-            from dashboard.server import set_agent_loop as set_dashboard_agent_loop
         except ImportError as exc:
             logger.warning("Gateway unavailable (import error): %s", exc)
             self._shutdown_event.set()
@@ -240,7 +239,6 @@ You can modify your own source code and complete evolution through the following
             from gateway.server import _send_tool_event
             agent_loop.set_tool_event_callback(_send_tool_event)
             set_agent_loop(agent_loop)
-            set_dashboard_agent_loop(agent_loop)
             set_agentspace_path(self.ctx.agentspace)
 
             # ---- 创建 SubAgentOrchestrator ----

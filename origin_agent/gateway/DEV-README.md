@@ -124,20 +124,6 @@ WS /ws/chat?resume=<sid>
 | GET/POST | `/api/sessions/{id}/background-tasks` | 后台任务列表/停止 |
 | GET/POST | `/api/sessions/{id}/cron-tasks/...` | Cron 任务列表/触发/取消 |
 
-### Dashboard
-
-| 方法 | 端点 | 说明 |
-|------|------|------|
-| GET | `/dashboard` | Web 管理面板 |
-| GET | `/api/status` | 运行状态 |
-| GET | `/api/logs` | 日志 |
-| GET | `/api/memory` | 记忆 |
-| GET | `/api/skills` | 技能 |
-| GET | `/api/evolution/history` | 进化历史 |
-| GET | `/api/stats/token-usage` | Token 使用统计 |
-| GET | `/api/stats/tool-calls` | 工具调用统计 |
-| GET | `/api/stats/session-activity` | 会话活动统计 |
-
 ### 静态文件
 
 | 方法 | 端点 | 说明 |
@@ -161,17 +147,3 @@ WS /ws/chat?resume=<sid>
 
 全局会话索引：`workspace/sessions/_index.json`。
 
----
-
-## Dashboard
-
-`dashboard/server.py` 是一个独立的 FastAPI 子应用，由 `gateway/server.py` 挂载到 `/dashboard`。它提供：
-
-- 运行状态概览
-- 日志查询
-- 记忆浏览
-- 技能列表
-- 进化历史
-- Token / 工具调用 / 会话活动统计
-
-Dashboard 与主网关共享 `RuntimeContext`，只读访问运行时数据。

@@ -17,6 +17,7 @@ from typing import Any, TYPE_CHECKING
 from entity.messages import (
     History,
     CharacterConversationMessage,
+    CharacterMessage,
     MessageBlock,
 )
 from entity.puretype import Role
@@ -228,17 +229,16 @@ class MultiAgentLoop(BaseAgentLoop):
                 "content": content,
                 "index": index,
             }
-            # TODO: 应该减少反射的使用
-            if hasattr(msg, "character_name"):
-                entry["character_name"] = getattr(msg, "character_name")
-            if hasattr(msg, "visible_characters") and getattr(msg, "visible_characters"):
-                entry["visible_characters"] = getattr(msg, "visible_characters")
-            if hasattr(msg, "response_characters") and getattr(msg, "response_characters"):
-                entry["response_characters"] = getattr(msg, "response_characters")
-            if hasattr(msg, "message_suffix") and getattr(msg, "message_suffix"):
-                entry["message_suffix"] = getattr(msg, "message_suffix")
-            if hasattr(msg, "dynamic_message_suffix") and getattr(msg, "dynamic_message_suffix"):
-                entry["dynamic_message_suffix"] = getattr(msg, "dynamic_message_suffix")
+            if isinstance(msg, CharacterMessage):
+                entry["character_name"] = msg.character_name
+            if isinstance(msg, CharacterConversationMessage) and msg.visible_characters:
+                entry["visible_characters"] = msg.visible_characters
+            if isinstance(msg, CharacterConversationMessage) and msg.response_characters:
+                entry["response_characters"] = msg.response_characters
+            if isinstance(msg, CharacterConversationMessage) and msg.message_suffix:
+                entry["message_suffix"] = msg.message_suffix
+            if isinstance(msg, CharacterConversationMessage) and msg.dynamic_message_suffix:
+                entry["dynamic_message_suffix"] = msg.dynamic_message_suffix
             if isinstance(msg, CharacterConversationMessage):
                 if msg.reasoning:
                     entry["reasoning_content"] = msg.reasoning
@@ -274,7 +274,7 @@ class MultiAgentLoop(BaseAgentLoop):
         if index >= len(self._history.messages):
             return {"updated": False, "error": "message index out of range"}
         msg = self._history.messages[index]
-        if not hasattr(msg, "visible_characters"):
+        if not isinstance(msg, CharacterConversationMessage):
             return {"updated": False, "error": "message does not support visibility"}
         updates: dict = {}
         if content is not None:

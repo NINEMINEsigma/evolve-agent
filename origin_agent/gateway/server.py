@@ -341,14 +341,6 @@ async def _app_lifespan(app: FastAPI):
 
 app: FastAPI = FastAPI(title="Evolve Agent Gateway", lifespan=_app_lifespan)
 
-# ---- dashboard 路由 ----
-try:
-    from dashboard.server import register_dashboard_routes
-    register_dashboard_routes(app)
-    logger.info("Dashboard routes registered → /dashboard")
-except Exception as exc:
-    logger.warning("Dashboard unavailable: %s", exc)
-
 # ---------------------------------------------------------------------------
 # 构建前端产物发现
 # ---------------------------------------------------------------------------
