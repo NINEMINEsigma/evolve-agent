@@ -314,11 +314,9 @@ class MultiAgentLoop(BaseAgentLoop):
                             session_id: str = "") -> "ToolResultMessage":
         """多 Agent 模式下执行工具，含审批流程。"""
         from entity.messages import ToolResultMessage
-        from entity.puretype import Role, ToolDangerLevel
+        from entity.puretype import Role
         from abstract.tools.registry import registry as tool_registry
-        from component.approval import is_handsfree_mode, request_user_confirm
-        from component.approval_allowlist import is_allowed as is_tool_allowlisted
-        from component.approval_allowlist import add_allowed as add_tool_allowlist_entry
+        from entry.approval_executor import execute_with_approval
 
         sid = session_id or self.session_id
         if self.is_interrupted():
@@ -329,54 +327,20 @@ class MultiAgentLoop(BaseAgentLoop):
                 content="Cancelled.",
             )
 
-        danger_level: ToolDangerLevel = tool_registry.get_danger_level(tool_name)
-        _handsfree = is_handsfree_mode(sid)
-        # dangerous 一定审批；write 仅脱手模式审批；readonly/safe 直接执行
-        _needs_approval = danger_level == ToolDangerLevel.dangerous or (
-            danger_level == ToolDangerLevel.write and _handsfree
+        outcome = await execute_with_approval(
+            tool_name=tool_name,
+            args=args,
+            session_id=sid,
+            sink=self._sink,
         )
 
-        _skip_dispatch = False
-        if _needs_approval:
-            _approval_args = {k: v for k, v in args.items() if k != "_session_id"}
-            if is_tool_allowlisted(tool_name, _approval_args):
-                args["_pre_approved"] = True
-                args["_approval_action"] = "allow_once"
-            else:
-                if _handsfree:
-                    # 脱手模式：approval 模型自动审批
-                    approval = await request_user_confirm(
-                        sid, tool_name, _approval_args,
-                        reason=str(args.get("reason", "")),
-                        content=f"Tool: {tool_name}\nParameters: {json.dumps(_approval_args, ensure_ascii=False)[:500]}",
-                    )
-                else:
-                    # 正常模式：通过 WebSocket 通知用户确认
-                    approval = await self._sink.request_approval(
-                        tool_name=tool_name,
-                        args=_approval_args,
-                        reason=str(args.get("reason", "")),
-                        content=f"Tool: {tool_name}\nParameters: {json.dumps(_approval_args, ensure_ascii=False)[:500]}",
-                        session_id=sid,
-                    )
-                if approval.action == "deny":
-                    source_label = {"model": "approval model", "user": "user", "system": "system"}.get(
-                        approval.denied_by, "system"
-                    )
-                    return ToolResultMessage(
-                        role=Role.TOOL,
-                        character_name=self.current_character_agent,
-                        tool_call_id=tool_call_id,
-                        content=json.dumps({
-                            "error": f"[{source_label} denied] {approval.deny_reason or 'unknown reason'}",
-                            "denied": True,
-                            "denied_by": approval.denied_by,
-                        }, ensure_ascii=False),
-                    )
-                elif approval.action == "allow_always" and not _handsfree:
-                    add_tool_allowlist_entry(tool_name, _approval_args)
-                args["_pre_approved"] = True
-                args["_approval_action"] = approval.action
+        if outcome.denied:
+            return ToolResultMessage(
+                role=Role.TOOL,
+                character_name=self.current_character_agent,
+                tool_call_id=tool_call_id,
+                content=json.dumps(outcome.deny_result, ensure_ascii=False),
+            )
 
         try:
             from entry.base_agent_loop import ToolContext

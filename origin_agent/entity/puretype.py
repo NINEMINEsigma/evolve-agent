@@ -105,3 +105,22 @@ class LoopMeta(BaseModel):
     '''
     mutli loop时用于指定导入的agents
     '''
+
+
+# ---------------------------------------------------------------------------
+# Approval Types
+# ---------------------------------------------------------------------------
+
+class ApprovalOutcome(BaseModel):
+    """
+    审批流程的最终结果。
+    """
+    denied: bool = False
+    """
+    审批结果为 deny
+    """
+    deny_result: dict | None = None
+    """
+    deny 时的错误 dict，包含 error/denied/denied_by 字段
+    """
+    approved_args: dict = Field(default_factory=dict, description="审批通过后的 args 引用（已原地设置 _pre_approved / _approval_action）")

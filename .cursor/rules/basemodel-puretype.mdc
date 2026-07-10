@@ -1,0 +1,61 @@
+---
+description: 规范 Python 类定义，要求所有类尽量继承 BaseModel，纯数据类集中放在 puretype.py 中
+alwaysApply: true
+---
+
+# 类定义规范
+
+## 1. 尽量使用 BaseModel
+
+项目内所有类，在语义上适合作为数据模型时，应尽量直接或间接继承 `pydantic.BaseModel`。
+
+```python
+from pydantic import BaseModel
+
+# 直接继承
+class User(BaseModel):
+    name: str
+    age: int
+
+# 间接继承
+class Entity(BaseModel):
+    id: str
+
+class User(Entity):
+    name: str
+```
+
+例外：
+- 明确需要自定义元类或 Mixin，且 BaseModel 会导致冲突时。
+- 运行时工具类、异常类、枚举类、ABC 抽象基类等不适合作为数据模型的场景。
+
+## 2. 不带方法的类应定义在 puretype.py
+
+仅包含字段、不含任何方法（包括 `__init__`、普通方法、类方法、静态方法、property 等）的纯数据类，应集中定义在 `puretype.py` 中。
+
+```python
+# puretype.py
+from pydantic import BaseModel
+
+class UserInfo(BaseModel):
+    name: str
+    email: str
+
+class TaskPayload(BaseModel):
+    task_id: str
+    args: dict
+```
+
+判定标准：
+- 如果类中只有字段定义，没有方法体，则属于 pure type。
+- 如果类中需要方法、校验器（`@field_validator` / `@model_validator`）或业务逻辑，则不应放在 `puretype.py`，而应放在对应业务模块中。
+
+## 3. 文件组织原则
+
+| 场景 | 位置 |
+|------|------|
+| 纯数据类（无方法） | `puretype.py` |
+| 带验证/转换/业务方法的模型 | 对应业务模块 |
+| 工具类 / 异常类 / 枚举 | 按职责分散到各模块 |
+
+新增纯数据类时，先判断是否有方法；没有则优先放入 `puretype.py`。

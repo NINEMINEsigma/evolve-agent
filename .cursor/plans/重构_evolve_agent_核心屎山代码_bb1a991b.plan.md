@@ -10,7 +10,7 @@ todos:
     status: pending
   - id: p1-approval
     content: 新建 entry/approval_executor.py，提取并统一 parent_agent_loop.py 与 multi_agent_loop.py 的审批逻辑
-    status: pending
+    status: completed
   - id: p1-cron
     content: 重构 component/extools/cron_tools.py，提取公共 task 操作函数，消除 API 层与 Handler 层重复
     status: pending
