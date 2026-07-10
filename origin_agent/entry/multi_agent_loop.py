@@ -108,35 +108,6 @@ class MultiAgentLoop(BaseAgentLoop, IMainSessionLoop):
     def _get_sink(self) -> AgentSink:
         return self._sink
 
-    def _persist_message(self, session_id: str) -> None:
-        """将当前 History 持久化到磁盘。"""
-        if self._session_store is None:
-            return
-        try:
-            self._session_store.write_history(session_id, self._history)
-        except Exception as exc:
-            logger.exception("Failed to persist history for session %s: %s", session_id, exc)
-
-    def _persist_token_usage(self, session_id: str) -> None:
-        """将累计 token 消耗持久化到磁盘。"""
-        if self._session_store is None:
-            return
-        try:
-            self._session_store.write_token_usage(session_id, self._token_usage)
-        except Exception as exc:
-            logger.exception("Failed to persist token usage for session %s: %s", session_id, exc)
-
-    async def _push_usage_update(self, session_id: str) -> None:
-        """向前端推送 token 消耗更新。"""
-        try:
-            await self._sink.emit_usage_update(
-                session_id, self._token_usage, self._last_prompt_tokens
-            )
-        except Exception:
-            logger.warning(
-                "Failed to push usage update for session=%s", session_id, exc_info=True
-            )
-
     @property
     def user_character_name(self) -> str:
         return USER_CHARACTER_NAME
@@ -190,10 +161,6 @@ class MultiAgentLoop(BaseAgentLoop, IMainSessionLoop):
         """返回当前 loop 的代表角色名。多 Agent 模式下返回首个 Agent。"""
         return self._agent_names[0] if self._agent_names else USER_CHARACTER_NAME
 
-    def pop_session_rotated(self) -> str | None:
-        """多 Agent 模式下不支持会话旋转，始终返回 None。"""
-        return None
-
     def get_token_usage(self) -> int:
         """返回会话级累计总 token 消耗（含普通模式已累积部分）。"""
         return self._token_usage
@@ -205,10 +172,6 @@ class MultiAgentLoop(BaseAgentLoop, IMainSessionLoop):
         不代表整个多 Agent 会话的统一上下文占用。
         """
         return self._last_prompt_tokens
-
-    def is_processing(self) -> bool:
-        """多 Agent 模式下始终返回 False（无长时间 tool loop）。"""
-        return False
 
     def get_session_messages(self) -> list[dict]:
         """返回 History 中所有消息的字典列表（供前端展示）。"""
@@ -356,18 +319,6 @@ class MultiAgentLoop(BaseAgentLoop, IMainSessionLoop):
             tool_call_id=tool_call_id,
             content=json.dumps(result, ensure_ascii=False) if isinstance(result, dict) else str(result),
         )
-
-    def delete_session_messages(self, count: int = 1) -> dict:
-        """删除最后 count 个逻辑轮次的消息（从倒数第 count 条 user 起，覆盖其后所有 tool/assistant）。"""
-        user_indices = [i for i, m in enumerate(self._history.messages) if m.role == Role.USER]
-        if not user_indices:
-            return {"deleted": False, "error": "no user messages to delete"}
-        if count > len(user_indices):
-            return {"deleted": False, "error": f"only {len(user_indices)} user messages available"}
-        remove_from = user_indices[-count]
-        self._history.messages = self._history.messages[:remove_from]
-        self._persist_message(self.session_id)
-        return {"deleted": True, "session_id": self.session_id, "remaining_count": self._history.count}
 
     def get_tool_resources(self) -> dict:
         """多 Agent 模式暂不支持工具资源恢复。"""

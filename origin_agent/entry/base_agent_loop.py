@@ -11,21 +11,24 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import shutil
 from abc import ABC, abstractmethod
+from pathlib import Path
 from typing import Any, TYPE_CHECKING
 
 from pydantic import BaseModel
 
 from entity.puretype import Role, ToolDangerLevel
-from entity.messages import History, BaseMessage, ToolResultMessage
+from entity.messages import History, BaseMessage, ToolResultMessage, CharacterConversationMessage
 from entity.constant import USER_CHARACTER_NAME
 from entry.agent_support.messages import (
     build_turn_messages,
     collect_all_hooks_context,
     load_message_hooks,
 )
-from entry.agent_support.multimodal import tool_result_to_content
+from entry.agent_support.multimodal import tool_result_to_content, content_to_text
 from system.pathutils import find_repo_root
+from system.session_store import SessionStore
 
 if TYPE_CHECKING:
     from system.context import RuntimeContext
@@ -183,6 +186,10 @@ class BaseAgentLoop(ABC):
         self._inbox: Inbox = Inbox()
         self._cancel_event: asyncio.Event = asyncio.Event()
         self._message_hooks_cache: list[dict] | None = None
+        self._history: History = History(messages=[])
+        self._session_store: SessionStore | None = None
+        self._token_usage: int = 0
+        self._last_prompt_tokens: int = 0
 
     @property
     def inbox(self) -> Inbox:
@@ -264,6 +271,205 @@ class BaseAgentLoop(ABC):
     async def _check_cancel(self) -> bool:
         """检查取消事件，已中断则返回 True。"""
         return self._cancel_event.is_set()
+
+    # -- token 追踪（所有 loop 共享，可被子类覆盖）-------------------------
+
+    def get_token_usage(self) -> int:
+        if self._token_usage:
+            return self._token_usage
+        if self._session_store is not None:
+            try:
+                disk_usage = self._session_store.read_token_usage(self.session_id)
+            except Exception:
+                logger.exception("Failed to load token usage for session=%s", self.session_id)
+                disk_usage = 0
+            if disk_usage:
+                self._token_usage = disk_usage
+            return disk_usage
+        return 0
+
+    def get_context_tokens(self) -> int:
+        return self._last_prompt_tokens
+
+    async def _push_usage_update(self, session_id: str) -> None:
+        """推送 token 消耗到前端。"""
+        try:
+            await self._get_sink().emit_usage_update(
+                session_id, self._token_usage, self._last_prompt_tokens,
+            )
+        except Exception:
+            logger.warning("Failed to push usage update for session=%s", session_id, exc_info=True)
+
+    def _persist_token_usage(self, session_id: str) -> None:
+        if self._session_store is None:
+            return
+        try:
+            self._session_store.write_token_usage(session_id, self._token_usage)
+        except Exception as exc:
+            logger.exception("Failed to persist token usage for session %s: %s", session_id, exc)
+
+    # -- 持久化（所有 loop 共享）-------------------------------------------
+
+    def _persist_message(self, session_id: str) -> None:
+        if self._session_store is None:
+            return
+        try:
+            self._session_store.write_history(session_id, self._history)
+        except Exception as exc:
+            logger.exception("Failed to persist history for session %s: %s", session_id, exc)
+
+    def _overwrite_history_file(self, session_id: str) -> None:
+        if self._session_store is None:
+            return
+        try:
+            self._session_store.write_history(session_id, self._history)
+        except Exception as exc:
+            logger.exception("Failed to overwrite history file for session %s: %s", session_id, exc)
+
+    def _remove_last_user_message(self, session_id: str) -> None:
+        """移除 History 中最后一条 user 消息并持久化。"""
+        messages = self._history.messages
+        if messages and messages[-1].role == Role.USER:
+            messages.pop()
+            self._history._update_last_user_message()
+        self._overwrite_history_file(session_id)
+
+    def clear_session(self) -> None:
+        """清理当前 session 的持久化数据。"""
+        if self._session_store is None:
+            return
+        session_path = self._session_store.session_dir(self.session_id)
+        if session_path.exists():
+            shutil.rmtree(str(session_path), ignore_errors=True)
+            logger.info("Cleared persisted data for session %s", self.session_id)
+
+    def get_session_messages(self) -> list[dict]:
+        """返回前端展示所需的消息列表，包含多 agent 元数据。"""
+        messages: list[dict] = []
+        for index, msg in enumerate(self._history.messages):
+            raw_content = msg.content
+            if isinstance(raw_content, list):
+                content: str | list[dict[str, Any]] = [b.as_object() for b in raw_content]
+            else:
+                content = content_to_text(raw_content)
+            entry: dict[str, Any] = {
+                "role": msg.role.value,
+                "content": content,
+                "index": index,
+                "character_name": msg.character_name if isinstance(msg, CharacterConversationMessage) else getattr(self, 'current_character_agent', 'assistant'),
+                "visible_characters": msg.visible_characters if isinstance(msg, CharacterConversationMessage) else None,
+                "requires_response": msg.role == Role.USER,
+            }
+            if isinstance(msg, CharacterConversationMessage):
+                if msg.response_characters:
+                    entry["response_characters"] = msg.response_characters
+                if msg.message_suffix:
+                    entry["message_suffix"] = msg.message_suffix
+                if msg.dynamic_message_suffix:
+                    entry["dynamic_message_suffix"] = msg.dynamic_message_suffix
+                if msg.reasoning:
+                    entry["reasoning_content"] = msg.reasoning
+                if msg.tool_calls:
+                    entry["tool_calls"] = [
+                        {
+                            "id": tc.id,
+                            "type": tc.type,
+                            "function": {
+                                "name": tc.function.name,
+                                "arguments": tc.function.arguments,
+                            },
+                        }
+                        for tc in msg.tool_calls
+                    ]
+            if msg.role == Role.SYSTEM:
+                entry["role"] = Role.SYSTEM.value
+            messages.append(entry)
+        return messages
+
+    def edit_session_message(self, index: int, content: str | None = None,
+                             visible_characters: list[str] | None = None) -> dict:
+        if not isinstance(index, int) or index < 0:
+            return {"updated": False, "error": "invalid message index"}
+        if index >= self._history.count:
+            return {"updated": False, "error": "message index out of range"}
+        msg = self._history.get_message(index)
+        if not isinstance(msg, CharacterConversationMessage):
+            return {"updated": False, "error": "message type not editable"}
+        updates: dict = {}
+        if content is not None:
+            updates["content"] = content
+        if visible_characters is not None:
+            updates["visible_characters"] = visible_characters
+        self._history.messages[index] = msg.model_copy(update=updates)
+        self._overwrite_history_file(self.session_id)
+        result: dict = {
+            "updated": True,
+            "session_id": self.session_id,
+            "index": index,
+            "role": msg.role.value,
+            "content": content_to_text(self._history.messages[index].content),
+        }
+        if visible_characters is not None:
+            result["visible_characters"] = visible_characters
+        return result
+
+    def delete_session_messages(self, count: int = 1) -> dict:
+        """删除最后 count 个逻辑轮次的消息（从倒数第 count 条 user 起，覆盖其后所有 tool/assistant）。"""
+        if count < 1:
+            return {"deleted": False, "error": "count must be >= 1"}
+        user_indices = [i for i, m in enumerate(self._history.messages) if m.role == Role.USER]
+        if not user_indices:
+            return {"deleted": False, "error": "no user messages to delete"}
+        if count > len(user_indices):
+            return {"deleted": False, "error": f"only {len(user_indices)} user messages available"}
+        remove_from = user_indices[-count]
+        self._history.messages = self._history.messages[:remove_from]
+        self._history._update_last_user_message()
+        self._overwrite_history_file(self.session_id)
+        return {"deleted": True, "session_id": self.session_id, "remaining_count": self._history.count}
+
+    def regenerate_response(self) -> dict:
+        """截断到最后一条 user 消息，返回其内容供重新生成。"""
+        user_indices = [i for i, m in enumerate(self._history.messages) if m.role == Role.USER]
+        if not user_indices:
+            return {"regenerate": False, "error": "no user message found"}
+        last_user_idx = user_indices[-1]
+        last_user_content = content_to_text(self._history.messages[last_user_idx].content)
+        self._history.messages = self._history.messages[:last_user_idx + 1]
+        self._overwrite_history_file(self.session_id)
+        return {
+            "regenerate": True,
+            "session_id": self.session_id,
+            "last_user_content": last_user_content,
+            "remaining_count": self._history.count,
+        }
+
+    def get_tool_resources(self) -> dict:
+        """返回 session 的可恢复工具副作用资源快照。"""
+        if self._session_store is None:
+            return {"task_progress": {}, "clipboard_display": {}}
+        return self._session_store.read_tool_resources(self.session_id)
+
+    # -- IMainSessionLoop 默认实现 ----------------------------------------
+
+    def pop_session_rotated(self) -> str | None:
+        """取出并移除 session 旋转通知。默认返回 None。"""
+        return None
+
+    def is_processing(self) -> bool:
+        """返回当前是否正在处理消息。默认返回 False。"""
+        return False
+
+    async def terminate_session(self) -> dict:
+        """终结当前会话。默认返回简单确认。子类可覆盖。"""
+        logger.info("Terminating session (base): %s", self.session_id)
+        return {"terminated": True, "session_id": self.session_id}
+
+    async def merge_sessions(self, sources: list[str]) -> dict:
+        """合并多个源会话到一个新会话。默认不支持。"""
+        logger.warning("Merge sessions not supported in this loop | session=%s sources=%s",
+                       self.session_id, sources)
+        return {"error": "merge not supported in this loop", "merged": False}
 
     # -- Hook 支持（所有 loop 共享）----------------------------------------
 
@@ -374,7 +580,6 @@ class BasePrivateChatAgentLoop(BaseAgentLoop):
 
     def __init__(self, app: Application, session_id: str) -> None:
         super().__init__(app, session_id)
-        self._history: History = History(messages=[])
 
     # -- 抽象方法 ---------------------------------------------------------
 
