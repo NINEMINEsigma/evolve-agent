@@ -26,6 +26,7 @@ from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
 from .chat import Message, MessageType
+from .message_router import MessageRouter
 from datetime import datetime, timezone
 from entity.constant import CRON_STDOUT_PREVIEW_MAX_LENGTH, SUBPROCESS_TIMEOUT_DEFAULT, UPLOAD_FILENAME_TIME_FORMAT, USER_CHARACTER_NAME
 from system.context import get_runtime_context
@@ -148,20 +149,6 @@ def configure_sessions(store_path: str | None = None) -> None:
         sm = _get_sm()
         if sm:
             sm.set_store_dir(store_path)
-
-
-def _extract_text(content: Any) -> str:
-    """从消息 content 中提取纯文本（处理 string 和 list 两种格式）。"""
-    if isinstance(content, str):
-        return content
-    if isinstance(content, list):
-        parts: list[str] = []
-        for block in content:
-            if isinstance(block, dict) and block.get("type") == "text":
-                parts.append(str(block.get("text", "")))
-        return "\n".join(parts)
-    return str(content or "")
-
 
 
 async def _send_tool_event(
@@ -1232,137 +1219,6 @@ async def spa_fallback(full_path: str):
     raise HTTPException(status_code=404, detail=f"Not found: {full_path}")
 
 
-# -- 文件上传处理 --------------------------------------------------------
-
-
-async def _handle_file_upload(ws: WebSocket, sid: str, msg: Message) -> None:
-    """处理 FILE_UPLOAD 消息：优先硬链接，fallback 到复制或 base64 解码。"""
-    import base64
-    import os
-    import shutil
-    import uuid
-
-    filename: str = (msg.filename or "uploaded_file").strip()
-    mime_type: str = (msg.mime_type or "application/octet-stream").strip()
-    file_data: str = (msg.file_data or "").strip()
-    local_path: str | None = msg.local_path
-
-    # 清理文件名中的路径遍历字符
-    safe_name: str = filename.replace("\\", "/").split("/")[-1]
-    if not safe_name:
-        safe_name = "uploaded_file"
-
-    timestamp: str = datetime.now(timezone.utc).strftime(UPLOAD_FILENAME_TIME_FORMAT)
-    unique_name: str = f"{timestamp}_{uuid.uuid4().hex[:8]}_{safe_name}"
-    if not _agentspace_path:
-        logger.error("agentspace path not set, cannot accept file uploads")
-        await ws.send_text(
-            Message(
-                type=MessageType.SYSTEM,
-                session_id=sid,
-                content=json.dumps({"uploaded": False, "error": "agentspace_not_configured"}),
-            ).to_json()
-        )
-        return
-    upload_dir: Path = _agentspace_path / "uploads"
-    upload_dir.mkdir(parents=True, exist_ok=True)
-    dest: Path = upload_dir / unique_name
-
-    # -- 硬链接优先 ---------------------------------------------------------
-    if local_path:
-        src: Path = Path(local_path)
-        if src.is_file():
-            try:
-                os.link(str(src), str(dest))
-                logger.info("File hard-linked | session=%s src=%s dest=%s", sid, src, dest)
-                await ws.send_text(
-                    Message(
-                        type=MessageType.SYSTEM,
-                        session_id=sid,
-                        content=json.dumps({
-                            "uploaded": True,
-                            "path": f"ws:uploads/{unique_name}",
-                            "filename": safe_name,
-                            "size": src.stat().st_size,
-                            "method": "hardlink",
-                        }),
-                    ).to_json()
-                )
-                return
-            except OSError as exc:
-                # 跨设备等 -> 回退到复制
-                logger.info("Hard link failed, fallback to copy | session=%s err=%s", sid, exc)
-                try:
-                    shutil.copy2(str(src), str(dest))
-                    logger.info("File copied (hardlink fallback) | session=%s src=%s dest=%s", sid, src, dest)
-                    await ws.send_text(
-                        Message(
-                            type=MessageType.SYSTEM,
-                            session_id=sid,
-                            content=json.dumps({
-                                "uploaded": True,
-                                "path": f"ws:uploads/{unique_name}",
-                                "filename": safe_name,
-                                "size": src.stat().st_size,
-                                "method": "copy",
-                            }),
-                        ).to_json()
-                    )
-                    return
-                except OSError as exc2:
-                    logger.error("File copy also failed | session=%s err=%s", sid, exc2)
-                    await ws.send_text(
-                        Message(
-                            type=MessageType.ERROR,
-                            session_id=sid,
-                            message=f"File link/copy failed: {exc2}",
-                        ).to_json()
-                    )
-                    return
-
-    # -- Base64 写入 --------------------------------------------------------
-    if not file_data:
-        await ws.send_text(
-            Message(
-                type=MessageType.ERROR,
-                session_id=sid,
-                message="File upload failed: file content is empty",
-            ).to_json()
-        )
-        return
-
-    try:
-        raw_bytes: bytes = base64.b64decode(file_data)
-        dest.write_bytes(raw_bytes)
-    except Exception as exc:
-        logger.exception("File upload failed for session=%s", sid)
-        await ws.send_text(
-            Message(
-                type=MessageType.ERROR,
-                session_id=sid,
-                message=f"File save failed: {exc}",
-            ).to_json()
-        )
-        return
-
-    logical_path: str = f"ws:uploads/{unique_name}"
-    logger.info("File uploaded (base64) | session=%s path=%s size=%d", sid, logical_path, len(raw_bytes))
-
-    await ws.send_text(
-        Message(
-            type=MessageType.SYSTEM,
-            session_id=sid,
-            content=json.dumps({
-                "uploaded": True,
-                "path": logical_path,
-                "filename": safe_name,
-                "mime_type": mime_type,
-                "size": len(raw_bytes),
-            }, ensure_ascii=False),
-        ).to_json()
-    )
-
-
 @app.websocket("/ws/chat")
 async def ws_chat(ws: WebSocket) -> None:
     """WebSocket 聊天端点：接收用户消息，转发给 AgentLoop，返回回复。"""
@@ -1494,172 +1350,8 @@ async def ws_chat(ws: WebSocket) -> None:
                 ).to_json()
             )
 
-        async def _handle_user_message(msg: Message) -> None:
-            """后台处理用户消息，不阻塞 WebSocket 消息循环。"""
-            nonlocal sid
-            try:
-                # 从首条用户消息自动生成标题
-                session_info: dict | None = _get_sm().get(sid)
-                if session_info and not session_info.get("title") and msg.content:
-                    text_content: str = _extract_text(msg.content)
-                    title: str = text_content.strip()[:30]
-                    if len(text_content.strip()) > 30:
-                        title += "..."
-                    _get_sm().update_title(sid, title)
-                _get_sm().update_last_activity(sid)
-                # 拦截 archived 会话的新消息
-                _session_info = _get_sm().get(sid)
-                if _session_info and _session_info.get("status") == "archived":
-                    await ws.send_text(
-                        Message(
-                            type=MessageType.ERROR,
-                            session_id=sid,
-                            message="This session has been archived. Please switch to the continuation session or create a new one.",
-                        ).to_json()
-                    )
-                    return
-                loop = _get_loop(sid)
-                if loop is not None:
-                    target_sessions: list[str] = msg.target_sessions or ["main"]
-                    content = msg.content or ""
-
-                    # 把原始用户消息追加到历史（回显由 append_user_message 内部统一完成）
-                    try:
-                        await loop.append_user_message(
-                            content,
-                            visible_characters=msg.visible_characters,
-                            response_characters=msg.response_characters,
-                            client_message_id=msg.client_message_id,
-                        )
-                    except Exception as exc:
-                        logger.warning("Failed to append user message for session=%s: %s", sid, exc)
-
-                    # 先并行/异步转发到选中的子会话（用户直接发送）
-                    subagent_tasks: list[asyncio.Task] = []
-                    sub_ids: list[str] = []
-                    name_map: dict[str, str] = {}
-                    if any(t != "main" for t in target_sessions):
-                        try:
-                            orch = get_subagent_orchestrator()
-                            sub_ids = [t for t in target_sessions if t != "main"]
-                            also_main = "main" in target_sessions
-                            # 建立 session_id -> name 映射
-                            try:
-                                snapshot = orch.get_snapshot(parent_session_id=sid)
-                                for sess_id, info in snapshot.items():
-                                    name_map[sess_id] = info.get("name", "")
-                            except Exception:
-                                logger.warning("Failed to get subagent snapshot for session=%s", sid, exc_info=True)
-                            for sub_id in sub_ids:
-                                other_ids = [o for o in sub_ids if o != sub_id]
-                                other_names: list[str] = []
-                                for o in other_ids:
-                                    name = name_map.get(o)
-                                    if name:
-                                        other_names.append(name)
-                                    else:
-                                        logger.warning(
-                                            "Skipping unnamed co-recipient session | parent=%s target=%s co_recipient=%s",
-                                            sid, sub_id, o,
-                                        )
-                                if also_main:
-                                    other_names.append("the Parent Agent (main session)")
-                                subagent_tasks.append(
-                                    asyncio.create_task(
-                                        orch.chat_user_direct(parent_session_id=sid, session_id=sub_id, message=str(content), co_recipients=other_names),
-                                        name=f"user-to-subagent-{sub_id[:16]}",
-                                    )
-                                )
-                        except Exception as exc:
-                            logger.warning("Failed to dispatch subagent messages: %s", exc)
-
-                    # 主会话处理
-                    reply: str
-                    if "main" in target_sessions:
-                        main_content = content
-                        sub_names: list[str] = []
-                        for s in sub_ids:
-                            name = name_map.get(s)
-                            if name:
-                                sub_names.append(name)
-                            else:
-                                logger.warning(
-                                    "Skipping unnamed sub-agent target for main session | parent=%s target=%s",
-                                    sid, s,
-                                )
-                        if sub_names:
-                            main_content = (
-                                f"[This message is also shared with sub-agents: {', '.join(sub_names)}]\n\n"
-                                f"{content}"
-                            )
-                        try:
-                            reply = await loop.process_message(
-                                main_content,
-                                skip_append=True,
-                                visible_characters=msg.visible_characters,
-                                response_characters=msg.response_characters,
-                            )
-                        except Exception as exc:
-                            logger.exception("Agent loop error for session=%s", sid)
-                            reply = f"Internal error: {exc}"
-                    else:
-                        reply = "Message forwarded to sub-agent(s)."
-
-                    # 等待子会话转发完成（不阻塞主会话回复已生成）
-                    if subagent_tasks:
-                        results = await asyncio.gather(*subagent_tasks, return_exceptions=True)
-                        for idx, res in enumerate(results):
-                            if isinstance(res, Exception):
-                                logger.warning("Subagent forward failed: %s", res)
-
-                    # 检查 ParentAgentLoop 是否旋转了会话（归档+新会话）
-                    _old: str = sid
-                    _rotated: str | None = loop.pop_session_rotated()
-                    if _rotated:
-                        from system.application import Application as _FSApp
-                        _FSApp.current().frontend_sink.unregister_ws(_old)  # 清理旧 session 映射
-                        _FSApp.current().frontend_sink.register_ws(_rotated, ws)  # 注册新 sid 到 WebSocket 映射
-                        sid = _rotated
-                        await ws.send_text(
-                            Message(
-                                type=MessageType.SYSTEM,
-                                content=json.dumps({
-                                    "action": "session_rotated",
-                                    "new_sid": sid,
-                                    "old_sid": _old,
-                                }),
-                            ).to_json()
-                        )
-
-                    from system.application import Application
-                    sink = Application.current().frontend_sink
-                    # MultiAgentLoop 返回空字符串表示各 agent 已独立推送，跳过冗余的 assistant_message
-                    if sink is not None and reply:
-                        await sink.emit_assistant_message(
-                            sid, reply, loop.current_character_agent,
-                        )
-                    # 发送最终回复标记，兼容未启用流式的前端或 cron 回调路径
-                    # 若前端已收到 stream_done，此消息会携带完整文本作为兜底
-                    # 向前端发送实时 token 消耗更新
-                    try:
-                        await ws.send_text(
-                            Message(
-                                type=MessageType.SYSTEM,
-                                session_id=sid,
-                                content=json.dumps({
-                                    "token_usage": loop.get_token_usage(),
-                                    "context_tokens": loop.get_context_tokens(),
-                                }),
-                            ).to_json()
-                        )
-                    except Exception:
-                        logger.exception("Failed to send token usage update for session=%s", sid)
-                    # 发送 agent 响应后，检查本回合是否请求了
-                    # 代码进化完成，若是则触发优雅关闭。
-                    from main import trigger_evolution_shutdown
-                    trigger_evolution_shutdown()
-            except Exception as exc:
-                logger.exception("User message handler error for session=%s: %s", sid, exc)
+        # 创建消息路由器 — 所有消息处理委托给 MessageRouter
+        router = MessageRouter(ws, sid, agentspace_path=_agentspace_path)
 
         while True:
             # Note: 进化关闭（exit -1）期间，uvicorn 会取消所有待处理
@@ -1671,7 +1363,6 @@ async def ws_chat(ws: WebSocket) -> None:
             msg: Message
             try:
                 msg = Message.from_json(raw)
-                msg.session_id = sid  # 信任 server 而非 client
             except (ValueError, KeyError) as exc:
                 await ws.send_text(
                     Message(
@@ -1682,71 +1373,11 @@ async def ws_chat(ws: WebSocket) -> None:
                 )
                 continue
 
-            # 按类型路由
-            if msg.type == MessageType.USER_MESSAGE:
-                # agent loop 未配置时返回错误并断开连接（启动阶段保护）
-                if _get_loop(sid) is None:
-                    logger.error("ParentAgentLoop not configured; cannot handle chat messages")
-                    await ws.send_text(
-                        Message(
-                            type=MessageType.ERROR,
-                            session_id=sid,
-                            message="Agent loop not ready. Please wait and try again.",
-                        ).to_json()
-                    )
-                    return
-                # 后台执行，不阻塞 WebSocket 消息循环
-                asyncio.create_task(
-                    _handle_user_message(msg),
-                    name=f"user-msg-{sid[:8]}",
-                )
-
-            elif msg.type == MessageType.CONFIRM_RESPONSE:
-                if msg.request_id is not None and msg.action is not None:
-                    from system.application import Application
-                    sink = Application.current().frontend_sink
-                    if sink:
-                        sink.resolve_confirm(msg.request_id, msg.action, deny_reason=msg.deny_reason, denied_by=msg.denied_by or "user")
-
-            elif msg.type == MessageType.ASK_RESPONSE:
-                if msg.request_id is not None:
-                    from system.application import Application
-                    sink = Application.current().frontend_sink
-                    if sink:
-                        sink.resolve_ask(msg.request_id, option=msg.option, custom_text=msg.custom_text)
-
-            elif msg.type == MessageType.INTERRUPT:
-                loop = _get_loop(sid)
-                if loop is not None:
-                    loop.interrupt()
-
-            elif msg.type == MessageType.FILE_UPLOAD:
-                await _handle_file_upload(ws, sid, msg)
-
-            elif msg.type == MessageType.HANDSFREE_MODE:
-                from component.approval import set_handsfree_mode
-                enabled = msg.content is not None and (str(msg.content).lower() in ("true", "1", "on"))
-                set_handsfree_mode(sid, enabled)
-
-            elif msg.type == MessageType.PING:
-                await ws.send_text(
-                    Message(
-                        type=MessageType.PONG,
-                        session_id=sid,
-                    ).to_json()
-                )
-
-            elif msg.type == MessageType.SYSTEM:
-                logger.info("System message from session=%s: %s", sid, msg.content)
-
-            else:
-                await ws.send_text(
-                    Message(
-                        type=MessageType.ERROR,
-                        session_id=sid,
-                        message=f"Unsupported message type: {msg.type.value}",
-                    ).to_json()
-                )
+            ok: bool = await router.route(msg)
+            if not ok:
+                return
+            # session 旋转后同步 sid
+            sid = router.sid
 
     except WebSocketDisconnect:
         logger.info("WebSocket disconnected | session=%s", sid)

@@ -22,7 +22,7 @@ todos:
     status: pending
   - id: p2-ws-chat
     content: 拆分 gateway/server.py 的 ws_chat，新建 gateway/message_router.py 处理消息路由
-    status: pending
+    status: completed
   - id: p2-parent-loop
     content: 拆分 entry/parent_agent_loop.py 的 ParentAgentLoop，提取 session_manager/tool_executor/stream_consumer
     status: pending
