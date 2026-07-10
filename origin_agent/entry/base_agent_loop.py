@@ -324,6 +324,37 @@ class BaseAgentLoop(ABC):
 
 
 # ---------------------------------------------------------------------------
+# IMainSessionLoop — 主会话 loop 接口
+# ---------------------------------------------------------------------------
+
+class IMainSessionLoop(ABC):
+    """主会话 loop 接口（C#-style interface）。
+
+    只声明主会话（ParentAgentLoop / MultiAgentLoop）特有的能力，
+    不继承 BaseAgentLoop，以避免与 BasePrivateChatAgentLoop 形成菱形继承。
+    子 Agent 的 loop 不应继承此类。
+    """
+    @property
+    def loop(self) -> BaseAgentLoop:
+        """返回当前 loop 的实例。"""
+        if isinstance(self, BaseAgentLoop):
+            return self
+        raise ValueError("current instance is not a BaseAgentLoop")
+
+    @abstractmethod
+    def pop_session_rotated(self) -> str | None:
+        """取出并移除 session 旋转通知（old_sid → new_sid）。"""
+
+    @abstractmethod
+    def get_token_usage(self) -> int:
+        """返回当前会话累计 token 消耗。"""
+
+    @abstractmethod
+    def get_context_tokens(self) -> int:
+        """返回当前上下文 token 数。"""
+
+
+# ---------------------------------------------------------------------------
 # BasePrivateChatAgentLoop — 1-on-1 私聊 Agent 循环基类
 # ---------------------------------------------------------------------------
 

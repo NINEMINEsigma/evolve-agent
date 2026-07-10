@@ -34,7 +34,7 @@ from entity.constant import (
 from entity.messages import History, CharacterConversationMessage, FunctionCall, ImageBlock, TextBlock, ToolResultMessage, ToolCall as HistoryToolCall
 from entity.puretype import Role, ToolAvailability, ApprovalOutcome
 from component.approval import execute_with_approval
-from entry.base_agent_loop import BasePrivateChatAgentLoop, ToolContext
+from entry.base_agent_loop import BasePrivateChatAgentLoop, IMainSessionLoop, ToolContext
 from entry.agent_sink import AgentSink, FrontendSink
 from entry.agent_support.messages import (
     build_agent_system_prompt,
@@ -78,7 +78,7 @@ async def _close_async_iterator(ait: Any) -> None:
         logger.debug("Failed to close async iterator", exc_info=True)
 
 
-class ParentAgentLoop(BasePrivateChatAgentLoop):
+class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
     """主 Agent 循环 — 每个 WebSocket session 一个实例。
 
     继承 BasePrivateChatAgentLoop，实现：

@@ -37,6 +37,7 @@ from entity.constant import UPLOAD_FILENAME_TIME_FORMAT
 if TYPE_CHECKING:
     from entry.parent_agent_loop import ParentAgentLoop
     from entry.multi_agent_loop import MultiAgentLoop
+    from entry.base_agent_loop import IMainSessionLoop
     from gateway.session_manager import SessionManager
     from subagent.orchestrator import SubAgentOrchestrator
 
@@ -514,7 +515,7 @@ class MessageRouter:
 
         return reply
 
-    async def _handle_session_rotation(self, loop: ParentAgentLoop | MultiAgentLoop) -> None:
+    async def _handle_session_rotation(self, loop: IMainSessionLoop) -> None:
         """检查并处理会话旋转（归档+新会话），更新 self.sid 和 WebSocket 映射。"""
         _old: str = self.sid
         _rotated: str | None = loop.pop_session_rotated()
@@ -550,7 +551,7 @@ class MessageRouter:
                 self.sid, reply, loop.current_character_agent,
             )
 
-    async def _send_token_update(self, loop: ParentAgentLoop | MultiAgentLoop) -> None:
+    async def _send_token_update(self, loop: IMainSessionLoop) -> None:
         """向前端发送实时 token 消耗更新。"""
         try:
             await self.ws.send_text(

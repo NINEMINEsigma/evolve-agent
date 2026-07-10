@@ -34,7 +34,7 @@ from entry.parent_agent_loop import IncompatibleHistoryError
 
 if TYPE_CHECKING:
     from entry.parent_agent_loop import ParentAgentLoop
-    from entry.base_agent_loop import BaseAgentLoop
+    from entry.base_agent_loop import BaseAgentLoop, IMainSessionLoop
     from entry.agent_sink import FrontendSink
     from gateway.session_manager import SessionManager
 

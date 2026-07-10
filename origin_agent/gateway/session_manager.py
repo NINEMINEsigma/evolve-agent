@@ -15,8 +15,7 @@ from entity.puretype import Loop, LoopMeta
 from system.session_store import SessionStore
 
 if TYPE_CHECKING:
-    from entry.parent_agent_loop import ParentAgentLoop
-    from entry.base_agent_loop import BaseAgentLoop
+    from entry.base_agent_loop import IMainSessionLoop
     from entry.multi_agent_loop import MultiAgentLoop
 
 logger = logging.getLogger(__name__)
@@ -42,7 +41,7 @@ class SessionManager:
 
         self._app = Application.current()
         self._chat_sm = ChatSessionManager(store_path)
-        self._loops: dict[str, BaseAgentLoop] = {}
+        self._loops: dict[str, IMainSessionLoop] = {}
         self._store_path: str | None = store_path
 
     # -- 委托给底层 ChatSessionManager 的方法 --
@@ -83,8 +82,8 @@ class SessionManager:
         """未显式定义的方法委托给底层的 ChatSessionManager。"""
         return getattr(self._chat_sm, name)
 
-    def get_all_loops(self) -> dict[str, BaseAgentLoop]:
-        """返回所有活跃 loop 的 (session_id → BaseAgentLoop) 快照。"""
+    def get_all_loops(self) -> dict[str, IMainSessionLoop]:
+        """返回所有活跃 loop 的 (session_id → IMainSessionLoop) 快照。"""
         return dict(self._loops)
 
     # -- ParentAgentLoop 管理 --
@@ -94,7 +93,7 @@ class SessionManager:
         session_id: str,
         frontend_sink,
         history_store_dir: Path | None = None,
-    ) -> BaseAgentLoop:
+    ) -> IMainSessionLoop:
         """为 session 创建或复用 loop 实例。
 
         若已有活跃的 loop 实例则直接返回（WebSocket 重连场景，
@@ -126,7 +125,7 @@ class SessionManager:
 
         # 注册到 CronRouter，使 cron 结果能投递到该 loop 的 inbox
         if self._app.cron_router is not None:
-            self._app.cron_router.register(session_id, loop)
+            self._app.cron_router.register(session_id, loop.loop)
 
         return loop
 
@@ -135,7 +134,7 @@ class SessionManager:
         session_id: str,
         frontend_sink,
         history_store_dir: Path | None = None,
-    ) -> BaseAgentLoop:
+    ) -> IMainSessionLoop:
         """根据索引中的 LoopMeta 重建 MultiAgentLoop。"""
         from system.context import get_runtime_context
         from component.mutliagenttools._store import SubagentStore
@@ -232,20 +231,20 @@ class SessionManager:
             self._app.cron_router.register(session_id, multi_loop)
         return multi_loop
 
-    def get_loop(self, session_id: str) -> BaseAgentLoop | None:
-        """返回指定 session 的 BaseAgentLoop。"""
+    def get_loop(self, session_id: str) -> IMainSessionLoop | None:
+        """返回指定 session 的 IMainSessionLoop。"""
         return self._loops.get(session_id)
 
     def terminate_session(self, session_id: str) -> None:
         """终止 session：中断 loop 并清理。"""
         loop = self._loops.pop(session_id, None)
         if loop is not None:
-            loop.interrupt()
+            loop.loop.interrupt()
             if self._app.cron_router is not None:
                 self._app.cron_router.unregister(session_id)
             logger.info("Session terminated: %s", session_id)
 
-    async def replace_loop(self, session_id: str, new_loop: BaseAgentLoop) -> None:
+    async def replace_loop(self, session_id: str, new_loop: IMainSessionLoop) -> None:
         """将 session 的当前 loop 替换为 new_loop（不可逆）。
 
         旧 loop 被 interrupt 并从映射中移除；新 loop 继承 session_id
@@ -255,7 +254,7 @@ class SessionManager:
         """
         old_loop = self._loops.pop(session_id, None)
         if old_loop is not None:
-            old_loop.interrupt()
+            old_loop.loop.interrupt()
             if self._app.cron_router is not None:
                 self._app.cron_router.unregister(session_id)
             logger.info(
@@ -271,11 +270,11 @@ class SessionManager:
                 type(new_loop).__name__,
             )
 
-        new_loop.session_id = session_id
+        new_loop.loop.session_id = session_id
         self._loops[session_id] = new_loop
 
         if self._app.cron_router is not None:
-            self._app.cron_router.register(session_id, new_loop)
+            self._app.cron_router.register(session_id, new_loop.loop)
 
         # 更新索引中的 LoopMeta
         from entry.multi_agent_loop import MultiAgentLoop
@@ -305,8 +304,8 @@ class SessionManager:
         if loop is not None:
             if self._app.cron_router is not None:
                 self._app.cron_router.unregister(old_sid)
-            loop.session_id = new_sid
+            loop.loop.session_id = new_sid
             self._loops[new_sid] = loop
             if self._app.cron_router is not None:
-                self._app.cron_router.register(new_sid, loop)
+                self._app.cron_router.register(new_sid, loop.loop)
             logger.info("Session rotated: %s → %s", old_sid, new_sid)

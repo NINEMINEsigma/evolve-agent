@@ -29,7 +29,7 @@ from entity.constant import (
 )
 from system.templates import get_templates_dir, render_multi_agent_prompt
 from system.session_store import SessionStore
-from entry.base_agent_loop import BaseAgentLoop
+from entry.base_agent_loop import BaseAgentLoop, IMainSessionLoop
 from entry.multi_agent_worker import WorkerResult, MultiAgentWorker
 from entry.agent_support.multimodal import content_to_text, summarize_message_for_log
 
@@ -60,7 +60,7 @@ class AgentProfile:
         self.llm_client: Any = llm_client
 
 
-class MultiAgentLoop(BaseAgentLoop):
+class MultiAgentLoop(BaseAgentLoop, IMainSessionLoop):
     """多 Agent 广播协作循环。
 
     持有共享 History 实例，管理多 Agent 并发响应的调度和级联。
