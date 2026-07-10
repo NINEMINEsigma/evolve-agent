@@ -261,31 +261,38 @@ class MultiAgentLoop(BaseAgentLoop, IMainSessionLoop):
         if not user_indices:
             return {"regenerate": False, "error": "no user message found"}
         last_user_idx = user_indices[-1]
-        last_user_content = content_to_text(self._history.messages[last_user_idx].content)
+        last_user_msg = self._history.messages[last_user_idx]
+        last_user_content = content_to_text(last_user_msg.content)
         # 截断到 user 消息处（保留 user 本身，删除其后所有 assistant/tool）
         self._history.messages = self._history.messages[:last_user_idx + 1]
         self._persist_message(self.session_id)
-        return {
+        result: dict = {
             "regenerate": True,
             "session_id": self.session_id,
             "last_user_content": last_user_content,
             "remaining_count": self._history.count,
         }
+        if isinstance(last_user_msg, CharacterConversationMessage):
+            result["visible_characters"] = last_user_msg.visible_characters
+            result["response_characters"] = last_user_msg.response_characters
+        return result
 
     async def _execute_tool(self, tool_name: str, args: dict,
                             tool_call_id: str = "",
-                            session_id: str = "") -> "ToolResultMessage":
+                            session_id: str = "",
+                            character_name: str | None = None) -> "ToolResultMessage":
         """多 Agent 模式下执行工具，含审批流程。"""
         from entity.messages import ToolResultMessage
         from entity.puretype import Role
         from abstract.tools.registry import registry as tool_registry
         from component.approval import execute_with_approval
 
+        char_name = character_name or self.current_character_agent
         sid = session_id or self.session_id
         if self.is_interrupted():
             return ToolResultMessage(
                 role=Role.TOOL,
-                character_name=self.current_character_agent,
+                character_name=char_name,
                 tool_call_id=tool_call_id,
                 content="Cancelled.",
             )
@@ -300,7 +307,7 @@ class MultiAgentLoop(BaseAgentLoop, IMainSessionLoop):
         if outcome.denied:
             return ToolResultMessage(
                 role=Role.TOOL,
-                character_name=self.current_character_agent,
+                character_name=char_name,
                 tool_call_id=tool_call_id,
                 content=json.dumps(outcome.deny_result, ensure_ascii=False),
             )
@@ -315,7 +322,7 @@ class MultiAgentLoop(BaseAgentLoop, IMainSessionLoop):
 
         return ToolResultMessage(
             role=Role.TOOL,
-            character_name=self.current_character_agent,
+            character_name=char_name,
             tool_call_id=tool_call_id,
             content=json.dumps(result, ensure_ascii=False) if isinstance(result, dict) else str(result),
         )

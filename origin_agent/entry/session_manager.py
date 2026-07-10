@@ -260,7 +260,7 @@ class LoopSessionManager:
                 character_name=USER_CHARACTER_NAME,
                 content=context,
                 visible_characters=[
-                    getattr(self._loop, 'current_character_agent', 'assistant'),
+                    self._loop.current_character_agent,
                 ],
             )
             self._loop._history.add_message(summary_msg)

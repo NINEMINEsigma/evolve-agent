@@ -437,6 +437,7 @@ class MultiAgentWorker:
             args=args,
             tool_call_id=tc["id"],
             session_id=self._loop.session_id,
+            character_name=self.character_name,
         )
 
         # 确保 character_name 指向调用的 agent（_loop._execute_tool 使用 current_character_agent 可能不准确）

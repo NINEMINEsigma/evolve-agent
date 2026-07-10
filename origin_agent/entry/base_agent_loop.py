@@ -434,15 +434,20 @@ class BaseAgentLoop(ABC):
         if not user_indices:
             return {"regenerate": False, "error": "no user message found"}
         last_user_idx = user_indices[-1]
-        last_user_content = content_to_text(self._history.messages[last_user_idx].content)
+        last_user_msg = self._history.messages[last_user_idx]
+        last_user_content = content_to_text(last_user_msg.content)
         self._history.messages = self._history.messages[:last_user_idx + 1]
         self._overwrite_history_file(self.session_id)
-        return {
+        result: dict = {
             "regenerate": True,
             "session_id": self.session_id,
             "last_user_content": last_user_content,
             "remaining_count": self._history.count,
         }
+        if isinstance(last_user_msg, CharacterConversationMessage):
+            result["visible_characters"] = last_user_msg.visible_characters
+            result["response_characters"] = last_user_msg.response_characters
+        return result
 
     def get_tool_resources(self) -> dict:
         """返回 session 的可恢复工具副作用资源快照。"""
@@ -546,6 +551,11 @@ class IMainSessionLoop(ABC):
         if isinstance(self, BaseAgentLoop):
             return self
         raise ValueError("current instance is not a BaseAgentLoop")
+
+    @property
+    @abstractmethod
+    def current_character_agent(self) -> str:
+        """返回当前 loop 对应的 agent 角色名，用于 History 视图过滤。"""
 
     @abstractmethod
     def pop_session_rotated(self) -> str | None:

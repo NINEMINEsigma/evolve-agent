@@ -713,10 +713,15 @@ async def regenerate_response(session_id: str):
             logger.warning("Failed to send regenerate_trim to session=%s", session_id, exc_info=True)
         # 复用 process_message 流程（流式事件自动推送到 ws）
         # 历史已包含最后一条 user 消息，避免重复追加
-        reply: str = await loop.loop.process_message(content, skip_append=True)
+        reply: str = await loop.loop.process_message(
+            content,
+            skip_append=True,
+            visible_characters=result.get("visible_characters"),
+            response_characters=result.get("response_characters"),
+        )
         from system.application import Application
         sink = Application.current().frontend_sink
-        if sink is not None:
+        if sink is not None and reply:
             await sink.emit_assistant_message(
                 session_id, reply, loop.current_character_agent,
             )
