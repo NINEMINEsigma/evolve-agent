@@ -302,7 +302,8 @@ class History(BaseModel):
         """get_messages 的别名，语义上明确表示转换为 OpenAI 格式。"""
         return self.get_messages(current_character_agent, **kwargs)
 
-    def _update_last_user_message(self) -> None:
+    def update_last_user_message(self) -> None:
+        """重新计算并更新 last_user_message 缓存。"""
         for message in reversed(self.messages):
             if isinstance(message, CharacterConversationMessage):
                 if message.role == Role.USER:
@@ -335,7 +336,7 @@ class History(BaseModel):
                     )
                     return -1
             self.messages.append(message)
-            self._update_last_user_message()
+            self.update_last_user_message()
             return len(self.messages) - 1
 
     def insert_message(self, message: BaseMessage, index: int) -> bool:
@@ -343,7 +344,7 @@ class History(BaseModel):
             if index < 0 or index > len(self.messages):
                 return False
             self.messages.insert(index, message)
-            self._update_last_user_message()
+            self.update_last_user_message()
             return True
         return False
 
@@ -352,7 +353,7 @@ class History(BaseModel):
             if index < 0 or index >= len(self.messages):
                 return False
             self.messages.pop(index)
-            self._update_last_user_message()
+            self.update_last_user_message()
             return True
         return False
 

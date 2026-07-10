@@ -263,7 +263,7 @@ def _ws_path(*parts: str) -> tuple[Path, str]:
     sb = _get_sandbox()
     if sb is not None:
         try:
-            agentspace = sb._ctx.agentspace
+            agentspace = sb.agentspace
             fs_path = (agentspace / rel.replace("/", "\\")).resolve()
             fs_path.parent.mkdir(parents=True, exist_ok=True)
             return fs_path, rel

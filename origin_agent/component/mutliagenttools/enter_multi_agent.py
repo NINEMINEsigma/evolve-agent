@@ -104,8 +104,8 @@ async def _handle_enter_multi_agent(args: dict[str, Any]) -> dict:
         profile.tools = tools
 
     # 获取共享 History 和 sink
-    history = parent_loop._history
-    sink = parent_loop._get_sink()
+    history = parent_loop.history
+    sink = parent_loop.get_sink()
 
     # 创建 MultiAgentLoop 并替换
     multi_loop = MultiAgentLoop(

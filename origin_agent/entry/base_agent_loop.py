@@ -159,11 +159,11 @@ class ToolContext(BaseModel):
 
     @property
     def sink(self) -> AgentSink:
-        return self.loop._get_sink()
+        return self.loop.get_sink()
 
     @property
     def is_interrupted(self) -> bool:
-        return self.loop._cancel_event.is_set()
+        return self.loop.is_interrupted()
 
 
 # ---------------------------------------------------------------------------
@@ -204,7 +204,7 @@ class BaseAgentLoop(ABC):
     # -- 抽象方法 ---------------------------------------------------------
 
     @abstractmethod
-    def _get_sink(self) -> AgentSink:
+    def get_sink(self) -> AgentSink:
         """返回当前 loop 的 AgentSink 实例。"""
         ...
 
@@ -269,6 +269,11 @@ class BaseAgentLoop(ABC):
         """请求停止当前循环。"""
         self._cancel_event.set()
 
+    @property
+    def cancel_event(self) -> asyncio.Event:
+        """只读返回取消事件，供外部流式消费者检查中断状态。"""
+        return self._cancel_event
+
     def is_interrupted(self) -> bool:
         """返回 True 表示存在活跃的中断请求。"""
         return self._cancel_event.is_set()
@@ -299,7 +304,7 @@ class BaseAgentLoop(ABC):
     async def _push_usage_update(self, session_id: str) -> None:
         """推送 token 消耗到前端。"""
         try:
-            await self._get_sink().emit_usage_update(
+            await self.get_sink().emit_usage_update(
                 session_id, self._token_usage, self._last_prompt_tokens,
             )
         except Exception:
@@ -314,6 +319,19 @@ class BaseAgentLoop(ABC):
             logger.exception("Failed to persist token usage for session %s: %s", session_id, exc)
 
     # -- 持久化（所有 loop 共享）-------------------------------------------
+
+    @property
+    def history(self) -> History:
+        """返回当前 loop 的 History 实例（只读访问）。"""
+        return self._history
+
+    def set_session_id(self, session_id: str) -> None:
+        """设置当前 loop 的 session ID（供 gateway 层旋转/替换 loop 时使用）。"""
+        self.session_id = session_id
+
+    def persist_history(self, session_id: str) -> None:
+        """将当前 History 持久化到磁盘。"""
+        self._persist_message(session_id)
 
     def _persist_message(self, session_id: str) -> None:
         if self._session_store is None:
@@ -336,7 +354,7 @@ class BaseAgentLoop(ABC):
         messages = self._history.messages
         if messages and messages[-1].role == Role.USER:
             messages.pop()
-            self._history._update_last_user_message()
+            self._history.update_last_user_message()
         self._overwrite_history_file(session_id)
 
     def clear_session(self) -> None:
@@ -429,7 +447,7 @@ class BaseAgentLoop(ABC):
             return {"deleted": False, "error": f"only {len(user_indices)} user messages available"}
         remove_from = user_indices[-count]
         self._history.messages = self._history.messages[:remove_from]
-        self._history._update_last_user_message()
+        self._history.update_last_user_message()
         self._overwrite_history_file(self.session_id)
         return {"deleted": True, "session_id": self.session_id, "remaining_count": self._history.count}
 
@@ -519,10 +537,10 @@ class BaseAgentLoop(ABC):
             runtime_ctx=self.app.runtime_context,
         )
 
-    def _get_hooks_context(self, session_id: str) -> str:
+    def get_hooks_context(self, session_id: str) -> str:
         """返回 custom_hooks 的实时上下文（非持久化注入）。
 
-        是 ``_collect_hooks_context`` 的便捷封装，只返回 hooks_context 部分。
+        是 ``get_hooks_context`` 的便捷封装，只返回 hooks_context 部分。
         """
         hooks_context, _ = self._collect_hooks_context(session_id=session_id)
         return hooks_context
@@ -677,7 +695,7 @@ class BasePrivateChatAgentLoop(BaseAgentLoop):
         # 注入 session_id 到 args 中（兼容旧工具 handler）
         args["_session_id"] = session_id or self.session_id
 
-        sink = self._get_sink()
+        sink = self.get_sink()
         is_readonly = self._is_readonly_tool(tool_name)
         is_auto = self._is_auto_approved_tool(tool_name, args)
 

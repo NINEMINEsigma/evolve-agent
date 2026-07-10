@@ -132,6 +132,14 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
         # -- 子 Agent 周期收集器用的空闲时间戳 --
         self._last_idle_time: dict[str, float] = {session_id: time.monotonic()}
 
+    def get_last_idle_time(self, session_id: str) -> float | None:
+        """返回指定 session 上次进入空闲的时间戳，不存在时返回 None。"""
+        return self._last_idle_time.get(session_id)
+
+    def update_last_idle_time(self, session_id: str) -> None:
+        """更新指定 session 的空闲时间戳。"""
+        self._last_idle_time[session_id] = time.monotonic()
+
         # -- 子 Agent 编排器（由 server 层注入） --
         self.subagent_orchestrator: Any = None
 
@@ -156,7 +164,7 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
     def _get_context(self) -> RuntimeContext:
         return self.app.runtime_context
 
-    def _get_sink(self) -> AgentSink:
+    def get_sink(self) -> AgentSink:
         return self._frontend_sink
 
     def _get_tool_definitions(self) -> list[dict]:
@@ -591,6 +599,89 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
         return build_full_history_messages(
             system_prompts, self._history, self.current_character_agent,
         )
+
+    # ------------------------------------------------------------------
+    # 公共生命周期/状态访问接口（供 LoopSessionManager 等外部调用）
+    # ------------------------------------------------------------------
+
+    @property
+    def session_store(self) -> SessionStore | None:
+        """返回当前 loop 的 session 持久化存储。"""
+        return self._session_store
+
+    @property
+    def memory(self) -> MemoryManager:
+        """返回当前 loop 的 memory 管理器。"""
+        return self._memory
+
+    @property
+    def memory_initialized_ids(self) -> set[int]:
+        """返回已初始化 memory provider 的 id 集合（只读视图）。"""
+        return set(self._memory_initialized_ids)
+
+    def is_memory_initialized(self, provider_id: int) -> bool:
+        """检查指定 memory provider 是否已初始化。"""
+        return provider_id in self._memory_initialized_ids
+
+    def mark_memory_initialized(self, provider_id: int) -> None:
+        """标记指定 memory provider 已初始化。"""
+        self._memory_initialized_ids.add(provider_id)
+
+    @property
+    def session_manager(self) -> SessionManager | None:
+        """返回当前 loop 关联的 gateway SessionManager。"""
+        return self._session_manager
+
+    @property
+    def llm(self) -> LLMClient:
+        """返回当前 loop 的 LLM 客户端。"""
+        return self._llm
+
+    @property
+    def last_prompt_tokens(self) -> int:
+        """返回最近一次 prompt 的 token 数。"""
+        return self._last_prompt_tokens
+
+    @last_prompt_tokens.setter
+    def last_prompt_tokens(self, value: int) -> None:
+        """设置最近一次 prompt 的 token 数。"""
+        self._last_prompt_tokens = value
+
+    def get_full_history(self, session_id: str) -> list[dict[str, Any]]:
+        """返回完整历史消息（供外部生命周期管理使用）。"""
+        return self._get_full_history(session_id)
+
+    def append_history(
+        self, session_id: str, role: Role,
+        content: str | list[dict[str, Any]],
+        **kwargs: Any,
+    ) -> int:
+        """追加一条消息到历史并持久化。"""
+        return self._append(session_id, role, content, **kwargs)
+
+    def remove_last_user_message(self, session_id: str) -> None:
+        """移除 History 中最后一条 user 消息并持久化。"""
+        self._remove_last_user_message(session_id)
+
+    def build_inherited_context(self, old_sid: str, summary: str) -> str:
+        """为继承会话构建初始上下文消息。"""
+        from system.templates import read_template
+        return (
+            read_template("session_inherit.txt")
+            .replace("{{old_sid}}", old_sid)
+            .replace("{{summary}}", summary)
+        )
+
+    def reset_history(self, session_id: str | None = None) -> None:
+        """清空当前历史并可选持久化。"""
+        self._history = History(messages=[])
+        self._last_prompt_tokens = 0
+        if session_id is not None:
+            self._persist_message(session_id)
+
+    def load_history(self, history: History) -> None:
+        """从外部加载历史到当前 loop。"""
+        self._history = history
 
     def _store_assistant_with_tools(
         self, session_id: str, resp: LLMResponse,

@@ -74,6 +74,13 @@ class _OrchestratorContext:
         self._interrupted: bool = False
         self._shutting_down: bool = False
 
+    def start_background_cycle(self) -> None:
+        """启动该上下文的周期循环后台任务。"""
+        self._background_task = asyncio.create_task(
+            self._cycle_loop(),
+            name=f"subagent-cycle-{self._parent_session_id[:16]}",
+        )
+
     # ── 启动 ────────────────────────────────────────────────────────
 
     async def launch(
@@ -150,9 +157,7 @@ class _OrchestratorContext:
 
     def _drain_outbox(self, sub: SubAgentLoop) -> list[str]:
         """清空并返回子 Agent 的发件箱内容。"""
-        outbox = sub.outbox
-        sub._outbox.clear()
-        return list(outbox)
+        return sub.get_outbox()
 
     async def chat_user_direct(self, session_id: str, message: str, co_recipients: list[str] | None = None) -> dict[str, Any]:
         """最终用户直接向子会话发送消息（支持 FIFO 排队）。"""
@@ -352,7 +357,7 @@ class _OrchestratorContext:
         snap: dict[str, dict[str, Any]] = {}
         for session_id, sub in self._active.items():
             feedback: list[dict[str, Any]] = []
-            for msg in sub._history.messages:
+            for msg in sub.history.messages:
                 if msg.role == Role.SYSTEM:
                     continue
                 if msg.role == Role.USER:
@@ -497,17 +502,17 @@ class _OrchestratorContext:
                     loaded_history = load(__History_Version__, str(path), History)
                     if isinstance(loaded_history, History):
                         loaded_history.remove_unpaired_tool_calls()
-                        loop._history = loaded_history
+                        loop.load_history(loaded_history)
                     else:
                         logger.warning("Loaded subagent history is not History instance: %s", type(loaded_history))
-                        loop._history = History(messages=[])
+                        loop.load_history(History(messages=[]))
                 except Exception as exc:
                     logger.warning("Failed to load subagent history from %s: %s", history_path, exc)
-                    loop._history = History(messages=[])
+                    loop.load_history(History(messages=[]))
             else:
-                loop._history = History(messages=[])
+                loop.load_history(History(messages=[]))
 
-            for msg in loop._history.messages:
+            for msg in loop.history.messages:
                 if msg.role == Role.USER:
                     await self._push_subagent_ws(
                         session_id, profile.get("_name", ""),
@@ -542,7 +547,7 @@ class _OrchestratorContext:
                     )
             logger.info(
                 "Subagent history loaded | session=%s entries=%d",
-                session_id, loop._history.count,
+                session_id, loop.history.count,
             )
 
         # 立即推送 WS 通知前端面板
@@ -627,11 +632,11 @@ class _OrchestratorContext:
             if loop is None:
                 continue
 
-            last_idle = loop._last_idle_time
-            if not isinstance(last_idle, dict):
+            last_idle = loop.get_last_idle_time(self._parent_session_id)
+            if last_idle is None:
                 continue
 
-            idle_sec = _time_module.monotonic() - last_idle.get(self._parent_session_id, 0)
+            idle_sec = _time_module.monotonic() - last_idle
 
             # 每轮推送倒计时到前端
             if self._active:
@@ -663,8 +668,7 @@ class _OrchestratorContext:
             parts: list[str] = []
             parts.append(f"session_id: {session_id}")
 
-            outbox = sub.outbox
-            sub._outbox.clear()
+            outbox = sub.get_outbox()
             if outbox:
                 merged = SUB_MESSAGE_SEPARATOR.join(outbox)
                 parts.append(f"feedback:\n  {merged}")
@@ -749,12 +753,10 @@ class SubAgentOrchestrator:
         """获取或创建指定父会话的上下文。"""
         if parent_session_id not in self._contexts:
             assert self._agent_loop is not None, "set_agent_loop() must be called before any context operation"
-            self._contexts[parent_session_id] = _OrchestratorContext(parent_session_id, self._agent_loop)
+            ctx = _OrchestratorContext(parent_session_id, self._agent_loop)
+            self._contexts[parent_session_id] = ctx
             # 启动后台周期任务
-            self._contexts[parent_session_id]._background_task = asyncio.create_task(
-                self._contexts[parent_session_id]._cycle_loop(),
-                name=f"subagent-cycle-{parent_session_id[:16]}",
-            )
+            ctx.start_background_cycle()
         return self._contexts[parent_session_id]
 
     # ── 公共代理方法 ─────────────────────────────────────────────────

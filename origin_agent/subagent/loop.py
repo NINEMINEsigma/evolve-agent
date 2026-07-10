@@ -181,7 +181,7 @@ class SubAgentLoop(BasePrivateChatAgentLoop):
     def _get_context(self) -> SubRuntimeContext:
         return self._ctx
 
-    def _get_sink(self) -> AgentSink:
+    def get_sink(self) -> AgentSink:
         return ParentAgentSink(self)
 
     def _get_tool_definitions(self) -> list[dict[str, Any]]:
@@ -204,7 +204,49 @@ class SubAgentLoop(BasePrivateChatAgentLoop):
         )
         return self._history.add_message(msg)
 
+    async def process_message(
+        self,
+        user_message: str,
+        *,
+        skip_append: bool = False,
+        character_name: str = USER_CHARACTER_NAME,
+        **kwargs
+    ) -> str:
+        """子 Agent 不通过此路径接收消息；使用 inject_parent_message() + run() 替代。"""
+        raise NotImplementedError(
+            "SubAgentLoop does not support process_message(). "
+            "Use inject_parent_message() + run() instead."
+        )
+
     # ── 公共接口 ─────────────────────────────────────────────────────
+
+    @property
+    def parent_session_id(self) -> str:
+        """返回父 Agent 的 session ID。"""
+        return self._parent_session_id
+
+    def get_outbox(self) -> list[str]:
+        """返回并清空当前发件箱内容。"""
+        outbox = list(self._outbox)
+        self._outbox.clear()
+        return outbox
+
+    def set_paused(self) -> None:
+        """暂停子 Agent 循环，等待外部审批决策。"""
+        self._paused_event.clear()
+
+    def clear_paused(self) -> None:
+        """恢复子 Agent 循环。"""
+        self._paused_event.set()
+
+    def add_pending_approval(self, pending: PendingToolCall) -> None:
+        """将挂起的工具调用加入审批队列并暂停循环。"""
+        self._pending_approvals.append(pending)
+        self.set_paused()
+
+    def emit_event(self, role: str, **fields: Any) -> None:
+        """向前端推送一条结构化事件（公共接口）。"""
+        self._emit(role, **fields)
 
     def _emit(self, role: str, **fields: Any) -> None:
         """向前端推送一条结构化事件。
@@ -429,6 +471,10 @@ class SubAgentLoop(BasePrivateChatAgentLoop):
     def stop(self) -> None:
         """强制终止子 Agent。"""
         self._cancel_event.set()
+
+    def load_history(self, history: History) -> None:
+        """加载外部历史到子 Agent 循环中。"""
+        self._history = history
 
     def save_history(self, path: Path) -> None:
         """将 History 实例以 easysave 多态序列化写入磁盘。"""

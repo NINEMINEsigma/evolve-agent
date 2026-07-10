@@ -456,8 +456,7 @@ def _push_agentspace_lock_state() -> None:
         if sink is None:
             return
         payload = json.dumps({"locked": _agentspace_lock["locked"], "locked_by": _agentspace_lock["locked_by"]})
-        for sid in list(sink._ws_map.keys()):
-            ws = sink._ws_map.get(sid)
+        for sid, ws in sink.get_all_ws().items():
             if ws is None:
                 continue
             try:

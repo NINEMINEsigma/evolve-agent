@@ -58,7 +58,7 @@ def _resolve_ws_path(path: str) -> tuple[Path, Path | None]:
     if sb is not None:
         try:
             resolved = sb.resolve_read(path)
-            agentspace = sb._ctx.agentspace
+            agentspace = sb.agentspace
             return resolved.real, agentspace
         except Exception:
             logger.warning("Failed to resolve diagram path: %s", path, exc_info=True)
@@ -79,7 +79,7 @@ def _resolve_ws_dir_for_write(path: str) -> tuple[Path, Path | None]:
     sb = _get_sandbox()
     if sb is not None:
         try:
-            agentspace = sb._ctx.agentspace
+            agentspace = sb.agentspace
             if path.startswith("ws:"):
                 rel = path[3:].lstrip("/\\")
                 return agentspace / rel, agentspace

@@ -270,7 +270,7 @@ class SessionManager:
                 type(new_loop).__name__,
             )
 
-        new_loop.loop.session_id = session_id
+        new_loop.loop.set_session_id(session_id)
         self._loops[session_id] = new_loop
 
         if self._app.cron_router is not None:
@@ -279,7 +279,7 @@ class SessionManager:
         # 更新索引中的 LoopMeta
         from entry.multi_agent_loop import MultiAgentLoop
         if isinstance(new_loop, MultiAgentLoop):
-            agents = list(new_loop._agents.keys())
+            agents = list(new_loop.get_agents().keys())
             self._chat_sm.update_loop_type(session_id, Loop.multi.value, agents)
             # 通知前端 agents 列表已变更
             try:
@@ -304,7 +304,7 @@ class SessionManager:
         if loop is not None:
             if self._app.cron_router is not None:
                 self._app.cron_router.unregister(old_sid)
-            loop.loop.session_id = new_sid
+            loop.loop.set_session_id(new_sid)
             self._loops[new_sid] = loop
             if self._app.cron_router is not None:
                 self._app.cron_router.register(new_sid, loop.loop)

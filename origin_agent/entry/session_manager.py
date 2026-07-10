@@ -56,17 +56,17 @@ class LoopSessionManager:
     # ------------------------------------------------------------------
 
     def initialize(self) -> None:
-        """从磁盘加载已有历史并设置到 loop._history。
+        """从磁盘加载已有历史并设置到 loop history。
 
         若历史格式不兼容则抛出 IncompatibleHistoryError。
         """
-        if self._loop._session_store is not None:
+        if self._loop.session_store is not None:
             try:
-                disk_history = self._loop._session_store.read_history(
+                disk_history = self._loop.session_store.read_history(
                     self._loop.session_id,
                 )
                 if disk_history:
-                    self._loop._history = disk_history
+                    self._loop.load_history(disk_history)
             except Exception as exc:
                 logger.warning(
                     "Session %s history incompatible or corrupt: %s",
@@ -81,7 +81,7 @@ class LoopSessionManager:
 
     def is_context_over_limit(self, safety_margin: int = 5000) -> bool:
         """判断当前 token 数加上 safety_margin 是否超过配置上限。"""
-        current_tokens: int = self._loop._last_prompt_tokens
+        current_tokens: int = self._loop.last_prompt_tokens
         if current_tokens == 0:
             return False
         ctx = self._loop.app.runtime_context
@@ -104,12 +104,12 @@ class LoopSessionManager:
 
         old_sid: str = session_id
         if pending_user_message is not None:
-            self._loop._remove_last_user_message(old_sid)
+            self._loop.remove_last_user_message(old_sid)
 
         new_sid: str | None = await self._terminate_session(old_sid, rotate=True)
         if not new_sid:
             if pending_user_message is not None:
-                self._loop._append(old_sid, Role.USER, pending_user_message)
+                self._loop.append_history(old_sid, Role.USER, pending_user_message)
             return None
 
         transfer_result = self._transfer_session_runtime_resources(old_sid, new_sid)
@@ -119,7 +119,7 @@ class LoopSessionManager:
                 old_sid, new_sid, transfer_result,
             )
         if pending_user_message is not None:
-            self._loop._append(new_sid, Role.USER, pending_user_message)
+            self._loop.append_history(new_sid, Role.USER, pending_user_message)
 
         logger.info(
             "Session context exceeded limit and continued | old=%s new=%s",
@@ -132,17 +132,17 @@ class LoopSessionManager:
     ) -> dict[str, Any]:
         """将旧会话的运行态资源迁移到继承会话。"""
         result: dict[str, Any] = {"old_sid": old_sid, "new_sid": new_sid}
-        self._loop._last_prompt_tokens = 0
+        self._loop.last_prompt_tokens = 0
         self._session_rotated_notify[old_sid] = new_sid
 
         # 迁移 memory provider
         memory_init_failed: list[str] = []
-        for provider in self._loop._memory.providers:
-            if id(provider) in self._loop._memory_initialized_ids:
+        for provider in self._loop.memory.providers:
+            if self._loop.is_memory_initialized(id(provider)):
                 continue
             try:
                 provider.initialize(new_sid)
-                self._loop._memory_initialized_ids.add(id(provider))
+                self._loop.mark_memory_initialized(id(provider))
             except Exception as exc:
                 logger.exception(
                     "Failed to initialize memory provider for session=%s", new_sid,
@@ -152,10 +152,10 @@ class LoopSessionManager:
 
         # 迁移工具副作用资源
         tool_resources_error: str | None = None
-        if self._loop._session_store is not None:
+        if self._loop.session_store is not None:
             try:
-                resources = self._loop._session_store.read_tool_resources(old_sid)
-                self._loop._session_store.write_tool_resources(new_sid, resources)
+                resources = self._loop.session_store.read_tool_resources(old_sid)
+                self._loop.session_store.write_tool_resources(new_sid, resources)
             except Exception as exc:
                 tool_resources_error = str(exc)
                 logger.exception(
@@ -185,7 +185,7 @@ class LoopSessionManager:
         self, session_id: str, rotate: bool = False,
     ) -> str | None:
         """终结会话：归档 + 压缩（生成摘要），可选创建继承会话。"""
-        sm = self._loop._session_manager
+        sm = self._loop.session_manager
         if sm is None:
             return None
 
@@ -208,9 +208,9 @@ class LoopSessionManager:
             summary = await self._summarize_session_history(old_sid)
 
         # 写入摘要
-        if self._loop._session_store is not None:
+        if self._loop.session_store is not None:
             try:
-                self._loop._session_store.write_summary(old_sid, summary)
+                self._loop.session_store.write_summary(old_sid, summary)
             except Exception as exc:
                 logger.exception(
                     "Failed to write summary for session %s: %s", old_sid, exc,
@@ -218,8 +218,8 @@ class LoopSessionManager:
 
         # 同步 memory
         try:
-            self._loop._memory.sync_all(
-                self._loop._history, session_id=old_sid,
+            self._loop.memory.sync_all(
+                self._loop.history, session_id=old_sid,
             )
         except Exception:
             logger.exception("Failed to sync memory for session=%s", old_sid)
@@ -253,8 +253,8 @@ class LoopSessionManager:
             sm.archive(old_sid, continuation_sid=new_sid)
 
             # 新 session 以 summary 作为 user 消息开始
-            self._loop._history = History(messages=[])
-            self._loop._last_prompt_tokens = 0
+            self._loop.load_history(History(messages=[]))
+            self._loop.last_prompt_tokens = 0
             summary_msg = CharacterConversationMessage(
                 role=Role.USER,
                 character_name=USER_CHARACTER_NAME,
@@ -263,8 +263,8 @@ class LoopSessionManager:
                     self._loop.current_character_agent,
                 ],
             )
-            self._loop._history.add_message(summary_msg)
-            self._loop._persist_message(new_sid)
+            self._loop.history.add_message(summary_msg)
+            self._loop.persist_history(new_sid)
 
             # 迁移 cron 定时任务
             try:
@@ -293,7 +293,7 @@ class LoopSessionManager:
 
     async def _summarize_session_history(self, session_id: str) -> str:
         """用 LLM 对完整历史做压缩生成摘要。"""
-        messages = self._loop._get_full_history(session_id)
+        messages = self._loop.get_full_history(session_id)
         if not messages:
             return ""
         system_prompt = read_template("compress.txt")
@@ -301,7 +301,7 @@ class LoopSessionManager:
             "{{old_text}}", json.dumps(messages, ensure_ascii=False)[:30000],
         )
         try:
-            resp = await self._loop._llm.chat([
+            resp = await self._loop.llm.chat([
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt},
             ])
@@ -312,7 +312,7 @@ class LoopSessionManager:
 
     async def _generate_session_tags(self, session_id: str) -> list[str]:
         """用 LLM 生成会话分类标签。"""
-        messages = self._loop._get_full_history(session_id)
+        messages = self._loop.get_full_history(session_id)
         if not messages:
             return []
         try:
@@ -321,7 +321,7 @@ class LoopSessionManager:
                 "{{old_text}}",
                 json.dumps(messages, ensure_ascii=False)[:AUTO_TAGS_CONTENT_MAX],
             )
-            resp = await self._loop._llm.chat([
+            resp = await self._loop.llm.chat([
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt},
             ])

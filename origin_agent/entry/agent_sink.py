@@ -154,6 +154,10 @@ class FrontendSink(AgentSink):
     def get_ws(self, session_id: str) -> WebSocket | None:
         return self._ws_sinks.get(session_id)
 
+    def get_all_ws(self) -> dict[str, WebSocket]:
+        """返回所有已注册 WebSocket 的快照副本。"""
+        return dict(self._ws_sinks)
+
     # -- 审批请求 --
 
     async def request_approval(self, tool_name: str, args: dict,
@@ -503,9 +507,9 @@ class ParentAgentSink(AgentSink):
         from subagent.loop import PendingToolCall
 
         # 脱手模式：直接向父 session 发起审批（走 approval 模型）
-        if is_handsfree_mode(self._loop._parent_session_id):
+        if is_handsfree_mode(self._loop.parent_session_id):
             result = await request_user_confirm(
-                session_id=self._loop._parent_session_id,
+                session_id=self._loop.parent_session_id,
                 tool_name=tool_name,
                 args=args,
                 reason=reason or "Sub-agent initiated tool call",
@@ -518,10 +522,9 @@ class ParentAgentSink(AgentSink):
         tool_call_id = uuid.uuid4().hex[:8]
         tc = ToolCall(id=tool_call_id, name=tool_name, arguments=args)
         pending = PendingToolCall(tc)
-        self._loop._pending_approvals.append(pending)
-        self._loop._paused_event.clear()
+        self._loop.add_pending_approval(pending)
 
-        self._loop._emit(
+        self._loop.emit_event(
             "approval_pending",
             tool_call_id=tool_call_id,
             tool_name=tool_name,
@@ -531,7 +534,7 @@ class ParentAgentSink(AgentSink):
         try:
             result = await pending.result
             if result["approved"]:
-                self._loop._emit(
+                self._loop.emit_event(
                     "approval_decision",
                     tool_call_id=tool_call_id,
                     tool_name=tool_name,
@@ -540,7 +543,7 @@ class ParentAgentSink(AgentSink):
                 return ApprovalResult(action="allow_once", denied_by="")
             else:
                 reason_text = result.get("reason", "Rejected by parent agent.")
-                self._loop._emit(
+                self._loop.emit_event(
                     "approval_decision",
                     tool_call_id=tool_call_id,
                     tool_name=tool_name,
@@ -548,7 +551,7 @@ class ParentAgentSink(AgentSink):
                 )
                 return ApprovalResult(action="deny", deny_reason=reason_text, denied_by="parent_agent")
         except RuntimeError as exc:
-            self._loop._emit(
+            self._loop.emit_event(
                 "approval_decision",
                 tool_call_id=tool_call_id,
                 tool_name=tool_name,
@@ -559,13 +562,13 @@ class ParentAgentSink(AgentSink):
     async def emit_tool_call(self, session_id: str, tool_name: str,
                              tool_call_id: str, args: dict,
                              character_name: str | None = None) -> None:
-        self._loop._emit("tool_call", tool_call_id=tool_call_id,
+        self._loop.emit_event("tool_call", tool_call_id=tool_call_id,
                          tool_name=tool_name, tool_args=args)
 
     async def emit_tool_result(self, session_id: str, tool_name: str,
                                tool_call_id: str, content: str,
                                character_name: str | None = None) -> None:
-        self._loop._emit("tool_result", tool_call_id=tool_call_id,
+        self._loop.emit_event("tool_result", tool_call_id=tool_call_id,
                          tool_name=tool_name, content=content)
 
     async def emit_user_message(self, session_id: str, content: Any,
@@ -590,7 +593,7 @@ class ParentAgentSink(AgentSink):
                                 tool_call: dict | None = None,
                                 character_name: str | None = None) -> None:
         if delta:
-            self._loop._emit("assistant", content=delta, reasoning=reasoning_delta,
+            self._loop.emit_event("assistant", content=delta, reasoning=reasoning_delta,
                              character_name=character_name)
 
     async def emit_stream_done(self, session_id: str, stream_id: str,
@@ -601,7 +604,7 @@ class ParentAgentSink(AgentSink):
             sink = Application.current().frontend_sink
             if sink is not None:
                 await sink.emit_stream_done(
-                    self._loop._parent_session_id, stream_id, finish_reason,
+                    self._loop.parent_session_id, stream_id, finish_reason,
                 )
         except Exception:
             logger.warning(
@@ -616,7 +619,7 @@ class ParentAgentSink(AgentSink):
             sink = Application.current().frontend_sink
             if sink is not None:
                 await sink.emit_usage_update(
-                    self._loop._parent_session_id, token_usage, context_tokens,
+                    self._loop.parent_session_id, token_usage, context_tokens,
                 )
         except Exception:
             logger.warning(
@@ -631,7 +634,7 @@ class ParentAgentSink(AgentSink):
             sink = Application.current().frontend_sink
             if sink is not None:
                 await sink.emit_progress(
-                    self._loop._parent_session_id, tool_name, payload,
+                    self._loop.parent_session_id, tool_name, payload,
                 )
         except Exception:
             logger.warning(
@@ -646,7 +649,7 @@ class ParentAgentSink(AgentSink):
             sink = Application.current().frontend_sink
             if sink is not None:
                 await sink.emit_clipboard_display(
-                    self._loop._parent_session_id, tool_name, payload,
+                    self._loop.parent_session_id, tool_name, payload,
                 )
         except Exception:
             logger.warning(
@@ -660,7 +663,7 @@ class ParentAgentSink(AgentSink):
             sink = Application.current().frontend_sink
             if sink is not None:
                 await sink.emit_subagent_update(
-                    self._loop._parent_session_id, payload,
+                    self._loop.parent_session_id, payload,
                 )
         except Exception:
             logger.warning(
@@ -674,7 +677,7 @@ class ParentAgentSink(AgentSink):
             sink = Application.current().frontend_sink
             if sink is not None:
                 await sink.emit_system_message(
-                    self._loop._parent_session_id, content,
+                    self._loop.parent_session_id, content,
                 )
         except Exception:
             logger.warning(

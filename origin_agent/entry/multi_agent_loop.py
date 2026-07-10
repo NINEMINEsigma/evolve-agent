@@ -108,12 +108,16 @@ class MultiAgentLoop(BaseAgentLoop, IMainSessionLoop):
 
     # -- BaseAgentLoop 抽象方法实现 ----------------------------------------
 
-    def _get_sink(self) -> AgentSink:
+    def get_sink(self) -> AgentSink:
         return self._sink
 
     @property
     def user_character_name(self) -> str:
         return USER_CHARACTER_NAME
+
+    def get_agents(self) -> dict[str, AgentProfile]:
+        """返回当前多 Agent loop 中的 agent 配置档案副本。"""
+        return dict(self._agents)
 
     async def append_user_message(
         self, content: Any, *, display_content: Any | None = None,
@@ -739,8 +743,8 @@ class MultiAgentLoop(BaseAgentLoop, IMainSessionLoop):
         result: WorkerResult | None = None,
     ) -> None:
         """将 worker 的 token 消耗聚合到 loop 级累计值，并持久化、推送前端。"""
-        total_token_usage = result.total_token_usage if result is not None else worker._total_token_usage
-        last_prompt_tokens = result.last_prompt_tokens if result is not None else worker._last_prompt_tokens
+        total_token_usage = result.total_token_usage if result is not None else worker.total_token_usage
+        last_prompt_tokens = result.last_prompt_tokens if result is not None else worker.last_prompt_tokens
 
         if total_token_usage:
             self._token_usage += total_token_usage

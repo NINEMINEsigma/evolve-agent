@@ -52,7 +52,7 @@ class ToolExecutor:
         args = dict(tc.arguments)
 
         # 取消检查
-        if self._loop.is_interrupted() or self._loop._cancel_event.is_set():
+        if self._loop.loop.is_interrupted() or self._loop.loop.is_interrupted():
             return ToolResultMessage(
                 role=Role.TOOL,
                 character_name=self._loop.current_character_agent,
@@ -78,7 +78,7 @@ class ToolExecutor:
                 ),
                 "_parse_failed": True,
             }
-            await self._loop._get_sink().emit_tool_result(
+            await self._loop.loop.get_sink().emit_tool_result(
                 session_id, tc.name, tc.id,
                 json.dumps(_result, ensure_ascii=False),
             )
@@ -97,13 +97,13 @@ class ToolExecutor:
         self._tool_stats[tc.name]["calls"] += 1
 
         # 通知前端 tool_call 事件
-        await self._loop.loop._get_sink().emit_tool_call(
+        await self._loop.loop.get_sink().emit_tool_call(
             session_id, tc.name, tc.id, args,
         )
 
         # 审批流程
         _approval_args = {k: v for k, v in args.items() if k != "_session_id"}
-        _hooks_ctx = self._loop.loop._get_hooks_context(session_id)
+        _hooks_ctx = self._loop.loop.get_hooks_context(session_id)
 
         ask_agent_callback: Callable[[str], Awaitable[str]] | None = None
         if self._llm is not None:
@@ -118,7 +118,7 @@ class ToolExecutor:
             tool_name=tc.name,
             args=args,
             session_id=session_id,
-            sink=self._loop.loop._get_sink(),
+            sink=self._loop.loop.get_sink(),
             ask_agent_callback=ask_agent_callback,
             hooks_context=_hooks_ctx,
         )
@@ -147,7 +147,7 @@ class ToolExecutor:
         content = tool_result_to_content(result)
 
         # 通知前端结果（使用文本摘要，避免 base64 撑爆前端事件）
-        await self._loop.loop._get_sink().emit_tool_result(
+        await self._loop.loop.get_sink().emit_tool_result(
             session_id, tc.name, tc.id, content_to_text(content),
         )
 
@@ -155,7 +155,7 @@ class ToolExecutor:
         await ui_event_router.emit_for(
             tc.name,
             result,
-            self._loop.loop._get_sink(),
+            self._loop.loop.get_sink(),
             session_id,
         )
 

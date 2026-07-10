@@ -98,13 +98,23 @@ class MultiAgentWorker:
             llm=self._llm,
             sink=self._sink,
             character_name=self.character_name,
-            cancel_event=self._loop.loop._cancel_event,
+            cancel_event=self._loop.loop.cancel_event,
         )
         # 工具执行器：复用 ParentAgentLoop 的统一执行逻辑
         self._tool_executor = ToolExecutor(loop=self._loop, llm=self._llm)
         # 累计 token 消耗与最近一次上下文 token 数
         self._total_token_usage: int = 0
         self._last_prompt_tokens: int = 0
+
+    @property
+    def total_token_usage(self) -> int:
+        """返回该 worker 累计消耗的 total_tokens。"""
+        return self._total_token_usage
+
+    @property
+    def last_prompt_tokens(self) -> int:
+        """返回该 worker 最近一次 LLM 调用的 prompt_tokens。"""
+        return self._last_prompt_tokens
 
     @staticmethod
     def _parse_routing_tags(text: str) -> AgentResponse:
@@ -251,8 +261,8 @@ class MultiAgentWorker:
                     visible_characters=[self.character_name],
                     reasoning=resp.reasoning_content,
                 )
-                self._loop.loop._history.add_message(assistant_msg)
-                self._loop.loop._persist_message(self._loop.loop.session_id)
+                self._loop.loop.history.add_message(assistant_msg)
+                self._loop.loop.persist_history(self._loop.loop.session_id)
 
                 full_messages.append({
                     "role": "assistant",
@@ -269,8 +279,8 @@ class MultiAgentWorker:
                         tool_msg = tool_msg.model_copy(update={"character_name": self.character_name})
 
                     # 写入共享 History
-                    self._loop.loop._history.add_message(tool_msg)
-                    self._loop.loop._persist_message(self._loop.loop.session_id)
+                    self._loop.loop.history.add_message(tool_msg)
+                    self._loop.loop.persist_history(self._loop.loop.session_id)
 
                     # 发送标准 tool_result 事件到前端
                     content_text = tool_msg.content
