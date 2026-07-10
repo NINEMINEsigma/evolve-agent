@@ -17,7 +17,7 @@ from typing import Any, TYPE_CHECKING
 
 from entity.messages import History, CharacterConversationMessage
 from entity.puretype import Role
-from entity.constant import AUTO_TITLE_CONTENT_MAX, USER_CHARACTER_NAME
+from entity.constant import AUTO_TITLE_CONTENT_MAX, AUTO_TAGS_CONTENT_MAX, USER_CHARACTER_NAME
 from system.templates import read_template
 from system.session_store import SessionStore
 
@@ -319,7 +319,7 @@ class LoopSessionManager:
             system_prompt = read_template("session_tags.txt")
             user_prompt = read_template("session_tags_input.txt").replace(
                 "{{old_text}}",
-                json.dumps(messages, ensure_ascii=False)[:20000],
+                json.dumps(messages, ensure_ascii=False)[:AUTO_TAGS_CONTENT_MAX],
             )
             resp = await self._loop._llm.chat([
                 {"role": "system", "content": system_prompt},

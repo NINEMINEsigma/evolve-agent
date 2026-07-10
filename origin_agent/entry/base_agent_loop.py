@@ -574,6 +574,14 @@ class IMainSessionLoop(ABC):
     def get_context_tokens(self) -> int:
         """返回当前上下文 token 数。"""
 
+    @abstractmethod
+    async def auto_generate_title(self) -> str:
+        """根据会话历史自动生成标题。"""
+
+    @abstractmethod
+    async def regenerate_session_tags(self) -> list[str]:
+        """根据会话历史重新生成标签列表。"""
+
 
 # ---------------------------------------------------------------------------
 # BasePrivateChatAgentLoop — 1-on-1 私聊 Agent 循环基类

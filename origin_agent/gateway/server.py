@@ -31,10 +31,11 @@ from datetime import datetime, timezone
 from entity.constant import CRON_STDOUT_PREVIEW_MAX_LENGTH, SUBPROCESS_TIMEOUT_DEFAULT, UPLOAD_FILENAME_TIME_FORMAT, USER_CHARACTER_NAME
 from system.context import get_runtime_context
 from entry.parent_agent_loop import IncompatibleHistoryError
+from entry.base_agent_loop import IMainSessionLoop
 
 if TYPE_CHECKING:
     from entry.parent_agent_loop import ParentAgentLoop
-    from entry.base_agent_loop import BaseAgentLoop, IMainSessionLoop
+    from entry.base_agent_loop import BaseAgentLoop
     from entry.agent_sink import FrontendSink
     from gateway.session_manager import SessionManager
 
@@ -749,6 +750,8 @@ async def auto_title_session(session_id: str):
     loop = _get_loop(session_id)
     if loop is not None:
         title = await loop.auto_generate_title()
+    else:
+        logger.warning("Failed to auto-generate title for session=%s", session_id)
     if title:
         _get_sm().update_title(session_id, title)
     return {"title": title, "session_id": session_id}
@@ -761,6 +764,8 @@ async def auto_tags_session(session_id: str):
     loop = _get_loop(session_id)
     if loop is not None:
         tags = await loop.regenerate_session_tags()
+    else:
+        logger.warning("Failed to auto-generate tags for session=%s", session_id)
     return {"tags": tags, "session_id": session_id}
 
 

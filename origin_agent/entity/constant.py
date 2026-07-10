@@ -60,11 +60,17 @@ TOOL_RESULT_PREVIEW_CHARS: int = 2000
 # TODO: 以后还需要更优的策略
 TOOL_RESULT_SAVE_THRESHOLD_CHARS: int = 1000000
 
+# 自动内容截断长度（字符数）— 用于自动内容截断
+AUTO_CONTENT_MAX: int = 500000
+
 # 自动标题生成时单条消息内容截断长度（字符数）— user/assistant 消息过长时截断后拼入 prompt
-AUTO_TITLE_CONTENT_MAX: int = 5000
+AUTO_TITLE_CONTENT_MAX: int = AUTO_CONTENT_MAX
+
+# 会话标签生成时历史消息 JSON 截断长度（字符数）— 控制 tags prompt 的上下文长度
+AUTO_TAGS_CONTENT_MAX: int = AUTO_CONTENT_MAX
 
 # 会话合并时直接拼接摘要的字符阈值，超过则截断
-MERGE_CONCAT_THRESHOLD: int = 500000
+MERGE_CONCAT_THRESHOLD: int = AUTO_CONTENT_MAX
 
 
 # ============================================================================

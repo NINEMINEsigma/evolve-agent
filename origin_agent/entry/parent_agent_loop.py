@@ -27,6 +27,7 @@ from system.session_store import SessionStore
 from entity.constant import (
     LOG_PREVIEW_CHARS,
     AUTO_TITLE_CONTENT_MAX,
+    AUTO_TAGS_CONTENT_MAX,
     MAX_TOOL_TURNS,
     MAIN_AGENT_CHARACTER_NAME,
     USER_CHARACTER_NAME,
@@ -695,7 +696,7 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
             system_prompt = read_template("session_tags.txt")
             user_prompt = read_template("session_tags_input.txt").replace(
                 "{{old_text}}",
-                json.dumps(messages, ensure_ascii=False)[:20000],
+                json.dumps(messages, ensure_ascii=False)[:AUTO_TAGS_CONTENT_MAX],
             )
             resp = await self._llm.chat([
                 {"role": "system", "content": system_prompt},
