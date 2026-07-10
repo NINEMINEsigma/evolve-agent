@@ -326,7 +326,21 @@ export function useSessionStore(callbacks: SessionStoreCallbacks = {}): SessionS
         if (data.session_history) {
           const history = data.session_history.flatMap((m: any) => {
             if (m.role === "assistant" && Array.isArray(m.tool_calls) && m.tool_calls.length > 0) {
-              return m.tool_calls.map((tc: any) => {
+              // 先构造 assistant 消息（保留中间文本 content），再展开 tool_calls
+              const assistantEntry: any = {
+                role: m.role,
+                content: m.content,
+                id: generateUUID(),
+                messageIndex: typeof m.index === "number" ? m.index : undefined,
+              };
+              if (m.character_name) assistantEntry.characterName = m.character_name;
+              if (m.visible_characters) assistantEntry.visibleCharacters = m.visible_characters;
+              if (m.response_characters && m.response_characters.length > 0) {
+                assistantEntry.responseCharacters = m.response_characters;
+              }
+              if (m.reasoning_content) assistantEntry.reasoningContent = m.reasoning_content;
+
+              const toolEntries = m.tool_calls.map((tc: any) => {
                 const toolName = tc.function?.name || "tool";
                 let toolArgs = tc.function?.arguments || {};
                 if (typeof toolArgs === "string") {
@@ -352,6 +366,8 @@ export function useSessionStore(callbacks: SessionStoreCallbacks = {}): SessionS
                   messageIndex: typeof m.index === "number" ? m.index : undefined,
                 };
               });
+
+              return [assistantEntry, ...toolEntries];
             }
             const entry: any = {
               role: m.role,
