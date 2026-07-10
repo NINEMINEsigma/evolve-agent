@@ -307,7 +307,7 @@ class SubAgentLoop(BasePrivateChatAgentLoop):
                 self._round_active = True  # 新一轮响应开始
 
                 # 调用 LLM（基类 _build_history_messages 统一处理 system prompt + hooks + memory）
-                messages, _ = self._build_history_messages()
+                messages = self._build_history_messages()
                 resp: LLMResponse = await self._llm.chat(messages, self._tools)
 
                 if self._cancel_event.is_set():
