@@ -45,8 +45,8 @@ async def _handle_enter_multi_agent(args: dict[str, Any]) -> dict:
     _parent_loop = app.session_manager.get_loop(session_id)
     if _parent_loop is None:
         return tool_error(f"No active loop found for session {session_id}")
-    elif isinstance(_parent_loop, ParentAgentLoop):
-        parent_loop = _parent_loop
+    elif isinstance(_parent_loop.loop, ParentAgentLoop):
+        parent_loop = _parent_loop.loop
     else:
         return tool_error(f"loop is not {ParentAgentLoop.__name__}")
 
@@ -114,7 +114,7 @@ async def _handle_enter_multi_agent(args: dict[str, Any]) -> dict:
         history=history,
         agents=agent_profiles,
         sink=sink,
-        history_store_dir=parent_loop._history_store_dir,
+        history_store_dir=parent_loop.history_store_dir,
     )
 
     await app.session_manager.replace_loop(session_id, multi_loop)

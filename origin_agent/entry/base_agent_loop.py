@@ -192,6 +192,11 @@ class BaseAgentLoop(ABC):
         self._last_prompt_tokens: int = 0
 
     @property
+    def history_store_dir(self) -> Path | None:
+        """统一返回当前 loop 的 session 持久化根目录。"""
+        return self._session_store.base_dir if self._session_store else None
+
+    @property
     def inbox(self) -> Inbox:
         """公开的收件箱访问器，供 CronRouter 等外部组件投递消息。"""
         return self._inbox
