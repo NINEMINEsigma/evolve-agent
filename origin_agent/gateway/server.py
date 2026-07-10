@@ -163,12 +163,9 @@ async def _send_tool_event(
         logger.info("[ws push] session=%s type=%s tool=%s payload_len=%d", session_id, event_type, tool_name, len(payload))
     # 如果 session 已被中断，跳过发送工具事件。
     loop = _get_loop(session_id)
-    if loop is not None and hasattr(loop, "is_interrupted"):
-        try:
-            if loop.is_interrupted():
-                return
-        except Exception:
-            logger.warning("Failed to check interrupt state for session=%s", session_id, exc_info=True)
+    if loop is not None:
+        if loop.loop.is_interrupted():
+            return
 
     ws: WebSocket | None = _get_ws(session_id)
     if ws is None:
@@ -204,8 +201,8 @@ async def _send_tool_event(
         return
 
     # Handle task_progress events
+    data: dict | None
     if event_type == "task_progress":
-        data: dict | None
         try:
             data = json.loads(payload)
         except json.JSONDecodeError:
@@ -224,7 +221,6 @@ async def _send_tool_event(
 
     # Handle clipboard_display events
     if event_type == "clipboard_display":
-        data: dict | None
         try:
             data = json.loads(payload)
         except json.JSONDecodeError:
@@ -243,7 +239,6 @@ async def _send_tool_event(
 
     # Handle stream delta events
     if event_type == "stream_delta":
-        data: dict | None
         try:
             data = json.loads(payload)
         except json.JSONDecodeError:
@@ -283,7 +278,6 @@ async def _send_tool_event(
         return
 
     msg_type: MessageType = MessageType.TOOL_CALL if event_type == "tool_call" else MessageType.TOOL_RESULT
-    data: dict | None
     try:
         data = json.loads(payload)
     except json.JSONDecodeError:
@@ -538,7 +532,7 @@ async def get_session_tool_resources(session_id: str):
     loop = _get_loop(session_id)
     if loop is None:
         return {"session_id": session_id, "task_progress": {}, "clipboard_display": {}}
-    resources = loop.get_tool_resources()
+    resources = loop.loop.get_tool_resources()
     return {
         "session_id": session_id,
         "task_progress": resources.get("task_progress", {}),
@@ -604,7 +598,7 @@ async def http_interrupt(session_id: str):
     ``process_message()`` 阻塞时仍能生效。"""
     loop = _get_loop(session_id)
     if loop is not None:
-        loop.interrupt()
+        loop.loop.interrupt()
     return {"interrupted": True, "session_id": session_id}
 
 
@@ -614,7 +608,7 @@ async def delete_session(session_id: str):
     _get_sm().remove(session_id)
     loop = _get_loop(session_id)
     if loop is not None:
-        loop.clear_session()
+        loop.loop.clear_session()
     # 停止该主会话下的所有子 Agent 并清理上下文
     try:
         orch = get_subagent_orchestrator()
@@ -646,7 +640,7 @@ async def update_session_message(session_id: str, message_index: int, req: Reque
     loop = _get_loop(session_id)
     if loop is None:
         return {"updated": False, "error": "agent loop not ready", "session_id": session_id}
-    result = loop.edit_session_message(message_index, content, visible_characters)
+    result = loop.loop.edit_session_message(message_index, content, visible_characters)
     status_code = 200 if result.get("updated") else 400
     return HTMLResponse(
         json.dumps(result, ensure_ascii=False),
@@ -669,7 +663,7 @@ async def delete_session_messages(session_id: str, count: int = 1):
     loop = _get_loop(session_id)
     if loop is None:
         return {"deleted": False, "error": "agent loop not ready"}
-    result = loop.delete_session_messages(count)
+    result = loop.loop.delete_session_messages(count)
     status_code = 200 if result.get("deleted") else 400
     return HTMLResponse(
         json.dumps(result, ensure_ascii=False),
@@ -693,7 +687,7 @@ async def regenerate_response(session_id: str):
     if loop is None:
         return {"regenerate": False, "error": "agent loop not ready"}
     # 先截断历史
-    result = loop.regenerate_response()
+    result = loop.loop.regenerate_response()
     if not result.get("regenerate"):
         return HTMLResponse(
             json.dumps(result, ensure_ascii=False),
@@ -718,7 +712,8 @@ async def regenerate_response(session_id: str):
         except Exception:
             logger.warning("Failed to send regenerate_trim to session=%s", session_id, exc_info=True)
         # 复用 process_message 流程（流式事件自动推送到 ws）
-        reply: str = await loop.process_message(content)
+        # 历史已包含最后一条 user 消息，避免重复追加
+        reply: str = await loop.loop.process_message(content, skip_append=True)
         from system.application import Application
         sink = Application.current().frontend_sink
         if sink is not None:
@@ -775,7 +770,7 @@ async def terminate_session_endpoint(session_id: str):
         logger.warning("Failed to terminate subagents for session=%s", session_id, exc_info=True)
     loop = _get_loop(session_id)
     if loop is not None:
-        result = await loop.terminate_session()
+        result = await loop.loop.terminate_session()
         return result
     return {"terminated": False, "error": "agent loop not ready", "session_id": session_id}
 
@@ -807,7 +802,7 @@ async def merge_sessions_endpoint(req: Request):
     sm = _get_sm()
     if sm is not None:
         for _, loop in sm.get_all_loops().items():
-            result = await loop.merge_sessions(sources)
+            result = await loop.loop.merge_sessions(sources)
             return result
     return {"error": "agent loop not ready", "merged": False}
 
@@ -820,7 +815,7 @@ async def branch_session_endpoint(session_id: str):
         return {"error": err, "merged": False}
     loop = _get_loop(session_id)
     if loop is not None:
-        result = await loop.merge_sessions([session_id])
+        result = await loop.loop.merge_sessions([session_id])
         return result
     return {"error": "agent loop not ready", "session_id": session_id}
 
