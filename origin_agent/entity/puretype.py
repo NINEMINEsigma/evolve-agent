@@ -156,3 +156,21 @@ class ToolAllowlistEntry(BaseModel):
     """
     标准化的工具参数字典（已排除内部标记字段）
     """
+
+
+# ---------------------------------------------------------------------------
+# Cron Types
+# ---------------------------------------------------------------------------
+
+class CronTaskInfo(BaseModel):
+    """定时任务信息（供 Handler 层与 API 层共用）。"""
+    task_id: str
+    name: str
+    schedule_type: str
+    schedule_value: str
+    command: list[str]
+    should_schedule: bool
+    next_run: str | None = None  # ISO 格式时间戳，未调度时为 None
+    run_count: int = 0
+    last_run: str | None = None  # ISO 格式时间戳，从未执行时为 None
+    log_path: str = ""

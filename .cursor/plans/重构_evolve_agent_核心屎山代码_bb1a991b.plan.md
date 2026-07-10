@@ -13,7 +13,7 @@ todos:
     status: completed
   - id: p1-cron
     content: 重构 component/extools/cron_tools.py，提取公共 task 操作函数，消除 API 层与 Handler 层重复
-    status: pending
+    status: completed
   - id: p1-gui
     content: 重构 component/extools/gui_windows.py，用模块级导入或装饰器消除 13 段重复导入块
     status: pending
