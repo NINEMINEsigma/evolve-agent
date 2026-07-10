@@ -15,7 +15,7 @@ from typing import * # type: ignore
 
 if TYPE_CHECKING:
     from fastapi import WebSocket
-    from component.approval import ApprovalResult
+    from entity.puretype import ApprovalResult
     from subagent.loop import SubAgentLoop
 
 logger = logging.getLogger(__name__)
@@ -160,7 +160,7 @@ class FrontendSink(AgentSink):
                                reason: str = "", content: str = "",
                                session_id: str = "") -> "ApprovalResult":
         """向 WebSocket 发送 confirm_request 并等待前端响应。"""
-        from component.approval import ApprovalResult
+        from entity.puretype import ApprovalResult
 
         request_id: str = uuid.uuid4().hex[:8]
         loop: asyncio.AbstractEventLoop = asyncio.get_event_loop()
@@ -206,7 +206,7 @@ class FrontendSink(AgentSink):
                         deny_reason: str | None = None,
                         denied_by: str = "user") -> bool:
         """解析前端发来的审批结果。"""
-        from component.approval import ApprovalResult
+        from entity.puretype import ApprovalResult
         fut = self._pending_confirms.pop(request_id, None)
         self._confirm_session_map.pop(request_id, None)
         if fut and not fut.done():
@@ -215,7 +215,7 @@ class FrontendSink(AgentSink):
         return False
 
     def _deny_session_confirms(self, session_id: str) -> None:
-        from component.approval import ApprovalResult
+        from entity.puretype import ApprovalResult
         for rid in list(self._confirm_session_map.keys()):
             if self._confirm_session_map.get(rid) == session_id:
                 self.resolve_confirm(rid, "deny", deny_reason="WebSocket disconnected", denied_by="system")
@@ -497,7 +497,8 @@ class ParentAgentSink(AgentSink):
         父 Agent 通过 approve_subagent 工具回调 approve_tools() 驱动 Future。
         """
         import uuid
-        from component.approval import ApprovalResult, is_handsfree_mode, request_user_confirm
+        from entity.puretype import ApprovalResult
+        from component.approval import is_handsfree_mode, request_user_confirm
         from component.llm import ToolCall
         from subagent.loop import PendingToolCall
 

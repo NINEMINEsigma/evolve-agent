@@ -124,3 +124,35 @@ class ApprovalOutcome(BaseModel):
     deny 时的错误 dict，包含 error/denied/denied_by 字段
     """
     approved_args: dict = Field(default_factory=dict, description="审批通过后的 args 引用（已原地设置 _pre_approved / _approval_action）")
+
+
+class ApprovalResult(BaseModel):
+    """
+    单次审批结果。与 ApprovalOutcome 不同，此类型直接对应审批后的 action 决策。
+    """
+    action: str
+    """
+    "allow_once" | "allow_always" | "deny"
+    """
+    deny_reason: str | None = None
+    """
+    拒绝原因，仅 action == "deny" 时有效
+    """
+    denied_by: str = "system"
+    """
+    拒绝来源："model"（脱手模式LLM）、"user"（人工）、"system"（超时/断开等）
+    """
+
+
+class ToolAllowlistEntry(BaseModel):
+    """
+    工具 allowlist 中的单条永久授权记录。
+    """
+    tool: str
+    """
+    工具名称
+    """
+    args: dict = Field(default_factory=dict)
+    """
+    标准化的工具参数字典（已排除内部标记字段）
+    """

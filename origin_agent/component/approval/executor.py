@@ -12,10 +12,11 @@ import logging
 from typing import Any, Awaitable, Callable, TYPE_CHECKING
 
 from abstract.tools.registry import registry as tool_registry
-from component.approval import ApprovalResult, is_handsfree_mode, request_user_confirm
-from component.approval_allowlist import add_allowed as add_tool_allowlist_entry
-from component.approval_allowlist import is_allowed as is_tool_allowlisted
-from entity.puretype import ApprovalOutcome, ToolDangerLevel
+from entity.puretype import ApprovalResult, ApprovalOutcome, ToolDangerLevel
+from component.approval.handsfree import is_handsfree_mode
+from component.approval.core import request_user_confirm
+from component.approval.allowlist import add_allowed as add_tool_allowlist_entry
+from component.approval.allowlist import is_allowed as is_tool_allowlisted
 
 if TYPE_CHECKING:
     from entry.agent_sink import AgentSink
@@ -60,7 +61,7 @@ async def execute_with_approval(
     args: dict,
     session_id: str,
     *,
-    sink: AgentSink,
+    sink: "AgentSink",
     ask_agent_callback: Callable[[str], Awaitable[str]] | None = None,
     hooks_context: str = "",
 ) -> ApprovalOutcome:

@@ -33,7 +33,7 @@ from entity.constant import (
 )
 from entity.messages import History, CharacterConversationMessage, FunctionCall, ImageBlock, TextBlock, ToolResultMessage, ToolCall as HistoryToolCall
 from entity.puretype import Role, ToolAvailability, ApprovalOutcome
-from entry.approval_executor import execute_with_approval
+from component.approval import execute_with_approval
 from entry.base_agent_loop import BasePrivateChatAgentLoop, ToolContext
 from entry.agent_sink import AgentSink, FrontendSink
 from entry.agent_support.messages import (

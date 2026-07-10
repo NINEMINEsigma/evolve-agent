@@ -316,7 +316,7 @@ class MultiAgentLoop(BaseAgentLoop):
         from entity.messages import ToolResultMessage
         from entity.puretype import Role
         from abstract.tools.registry import registry as tool_registry
-        from entry.approval_executor import execute_with_approval
+        from component.approval import execute_with_approval
 
         sid = session_id or self.session_id
         if self.is_interrupted():

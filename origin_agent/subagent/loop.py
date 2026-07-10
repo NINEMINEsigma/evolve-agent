@@ -232,7 +232,7 @@ class SubAgentLoop(BasePrivateChatAgentLoop):
     def _is_auto_approved_tool(self, name: str, args: dict) -> bool:
         """检查工具调用是否在 allowlist 中（始终自动批准）。"""
         try:
-            from component.approval_allowlist import is_allowed
+            from component.approval.allowlist import is_allowed
             return is_allowed(name, args)
         except Exception:
             logger.warning("Failed to check approval allowlist for subagent tool=%s", name, exc_info=True)

@@ -391,7 +391,7 @@ class BasePrivateChatAgentLoop(BaseAgentLoop):
     def _is_auto_approved_tool(self, name: str, args: dict) -> bool:
         """检查工具是否在自动批准白名单中。"""
         try:
-            from component.approval_allowlist import is_allowed
+            from component.approval.allowlist import is_allowed
             return is_allowed(name, args)
         except Exception:
             logger.exception("Failed to check approval allowlist for tool=%s", name)
