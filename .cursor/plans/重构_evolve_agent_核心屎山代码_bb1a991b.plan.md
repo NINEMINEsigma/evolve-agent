@@ -31,16 +31,16 @@ todos:
     status: pending
   - id: p3-websocket
     content: 拆分 frontend/src/hooks/useWebSocket.ts 为 connection/session/upload/subagent 四个独立 hook
-    status: pending
+    status: completed
   - id: p3-app
     content: 拆分 frontend/src/App.tsx，提取 Layout 和 ChatContextMenu 组件
-    status: pending
+    status: completed
   - id: p3-message
     content: 拆分 frontend/src/components/MessageItem.tsx，提取 MessageBody/MessageEditor/MessageAttachments 并补全类型
-    status: pending
+    status: completed
   - id: p3-header-dialog
     content: 简化 Header.tsx props，将 ConfirmDialog.tsx 的 toolTitle IIFE 改为查表映射
-    status: pending
+    status: completed
 isProject: false
 ---
 

@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState, useEffect } from "react";
+import { useConnectionDiagnostics } from "../context/ConnectionDiagnosticsContext";
 
 interface HeaderProps {
   status: string;
@@ -13,13 +14,6 @@ interface HeaderProps {
   sidebarCollapsed: boolean;
   onToggleSidebar: () => void;
   onToggleHandsfree: (enabled: boolean) => void;
-  waiting?: boolean;
-  pendingConfirm?: { request_id: string } | null;
-  streamingMessage?: { id: string } | null;
-  ignoreStaleRef?: React.RefObject<boolean>;
-  lastRecvAtRef?: React.RefObject<number>;
-  lastPongAtRef?: React.RefObject<number>;
-  recvTick?: number;
   agents?: string[];
 }
 
@@ -36,13 +30,6 @@ export default function Header({
   sidebarCollapsed,
   onToggleSidebar,
   onToggleHandsfree,
-  waiting,
-  pendingConfirm,
-  streamingMessage,
-  ignoreStaleRef,
-  lastRecvAtRef,
-  lastPongAtRef,
-  recvTick,
   agents,
 }: HeaderProps) {
   const [cmdMenuOpen, setCmdMenuOpen] = useState(false);
@@ -130,15 +117,7 @@ export default function Header({
             {sessionId}
           </span>
         )}
-        <DebugBadges
-          waiting={waiting}
-          pendingConfirm={pendingConfirm}
-          streamingMessage={streamingMessage}
-          ignoreStaleRef={ignoreStaleRef}
-          lastRecvAtRef={lastRecvAtRef}
-          lastPongAtRef={lastPongAtRef}
-          recvTick={recvTick}
-        />
+        <DebugBadges />
         <button
           ref={cmdBtnRef}
           className="header-action-btn"
@@ -216,31 +195,10 @@ export default function Header({
   );
 }
 
-function DebugBadges({
-  waiting,
-  pendingConfirm,
-  streamingMessage,
-  ignoreStaleRef,
-  lastRecvAtRef,
-  lastPongAtRef,
-  recvTick,
-}: {
-  waiting?: boolean;
-  pendingConfirm?: { request_id: string } | null;
-  streamingMessage?: { id: string } | null;
-  ignoreStaleRef?: React.RefObject<boolean>;
-  lastRecvAtRef?: React.RefObject<number>;
-  lastPongAtRef?: React.RefObject<number>;
-  recvTick?: number;
-})
-{
-  const [, forceRender] = useState(0);
-  useEffect(() => {
-    const id = setInterval(() => forceRender((v) => v + 1), 500);
-    return () => clearInterval(id);
-  }, []);
+function DebugBadges() {
+  const { waiting, pendingConfirm, streamingMessage, ignoreStaleRef, lastRecvAtRef, lastPongAtRef, recvTick, now } =
+    useConnectionDiagnostics();
 
-  const now = Date.now();
   const lastRecv = lastRecvAtRef?.current ?? now;
   const lastPong = lastPongAtRef?.current ?? now;
   const recvStall = now - lastRecv;
