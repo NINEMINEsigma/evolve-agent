@@ -614,13 +614,10 @@ class MultiAgentLoop(BaseAgentLoop, IMainSessionLoop):
             self._persist_message(self.session_id)
 
             # 推送可见性/响应元数据给前端
+            # 注意：MultiAgentWorker 已经在每轮 LLM 调用后发送过 stream_done，
+            # 此处只需发送 system_message 关联元数据，避免重复固化。
             if result.stream_id and (visible or response):
                 try:
-                    await self._sink.emit_stream_done(
-                        self.session_id,
-                        result.stream_id,
-                        finish_reason="stop",
-                    )
                     await self._sink.emit_system_message(
                         self.session_id,
                         json.dumps({

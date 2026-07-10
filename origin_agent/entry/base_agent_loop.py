@@ -519,6 +519,14 @@ class BaseAgentLoop(ABC):
             runtime_ctx=self.app.runtime_context,
         )
 
+    def _get_hooks_context(self, session_id: str) -> str:
+        """返回 custom_hooks 的实时上下文（非持久化注入）。
+
+        是 ``_collect_hooks_context`` 的便捷封装，只返回 hooks_context 部分。
+        """
+        hooks_context, _ = self._collect_hooks_context(session_id=session_id)
+        return hooks_context
+
     def _set_dynamic_suffix(
         self,
         history: History,

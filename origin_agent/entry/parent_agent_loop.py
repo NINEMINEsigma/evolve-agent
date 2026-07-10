@@ -111,7 +111,7 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
         self._lifecycle.initialize()
 
         # -- 工具执行器 --
-        self._tool_executor: ToolExecutor = ToolExecutor(loop=self)
+        self._tool_executor: ToolExecutor = ToolExecutor(loop=self, llm=self._llm)
 
         # -- LLM 流消费器 --
         self._stream_consumer: StreamConsumer = StreamConsumer(
@@ -636,10 +636,6 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
     # ========================================================================
     # Hooks / Skill prompts
     # ========================================================================
-
-    def _get_hooks_context(self, session_id: str) -> str:
-        hooks_context, _ = self._collect_hooks_context(session_id=session_id)
-        return hooks_context
 
     def _collect_skill_prompts(self) -> list[str]:
         from entry.agent_support.messages import collect_skill_prompts

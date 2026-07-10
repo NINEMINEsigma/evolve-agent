@@ -10,14 +10,14 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import Any, TYPE_CHECKING
+from typing import Any, Awaitable, Callable, TYPE_CHECKING
 
 from entity.puretype import Role
 from entity.messages import ToolResultMessage
+from entry.base_agent_loop import BaseAgentLoop, ToolContext, IMainSessionLoop
 
 if TYPE_CHECKING:
-    from component.llm import ToolCall
-    from entry.parent_agent_loop import ParentAgentLoop
+    from component.llm import ToolCall, LLMClient
 
 logger = logging.getLogger(__name__)
 
@@ -25,14 +25,12 @@ logger = logging.getLogger(__name__)
 class ToolExecutor:
     """执行单个工具调用，处理审批、分发和事件推送。
 
-    TODO: 当前仅被 ParentAgentLoop 独享；MultiAgentLoop._execute_tool 走了自己独立的简化
-    审批路径，未复用此模块。待后续评估是否需要收窄接口或改为同时适配两种 loop。
-
-    由 ParentAgentLoop 持有，每个 tool_call 调用一次 ``execute()``。
+    由 IMainSessionLoop 持有，每个 tool_call 调用一次 ``execute()``。
     """
 
-    def __init__(self, loop: ParentAgentLoop) -> None:
+    def __init__(self, loop: IMainSessionLoop, llm: LLMClient) -> None:
         self._loop = loop
+        self._llm = llm
         self._tool_stats: dict[str, dict[str, int]] = {}
 
     # -- 公开 API ----------------------------------------------------------
@@ -50,7 +48,6 @@ class ToolExecutor:
         from component.approval import execute_with_approval, ask_agent_reason as _ask_agent_reason
         from abstract.tools.registry import registry as tool_registry
         from abstract.tools.ui_event_router import ui_event_router
-        from entry.base_agent_loop import ToolContext
 
         args = dict(tc.arguments)
 
@@ -100,26 +97,29 @@ class ToolExecutor:
         self._tool_stats[tc.name]["calls"] += 1
 
         # 通知前端 tool_call 事件
-        await self._loop._get_sink().emit_tool_call(
+        await self._loop.loop._get_sink().emit_tool_call(
             session_id, tc.name, tc.id, args,
         )
 
         # 审批流程
         _approval_args = {k: v for k, v in args.items() if k != "_session_id"}
-        _hooks_ctx = self._loop._get_hooks_context(session_id)
+        _hooks_ctx = self._loop.loop._get_hooks_context(session_id)
 
-        async def _ask_agent_callback_impl(q: str) -> str:
-            return await _ask_agent_reason(
-                self._loop._llm, tc.name, _approval_args, q,
-                extra_context=_hooks_ctx,
-            )
+        ask_agent_callback: Callable[[str], Awaitable[str]] | None = None
+        if self._llm is not None:
+            async def _ask_agent_callback_impl(q: str) -> str:
+                return await _ask_agent_reason(
+                    self._llm, tc.name, _approval_args, q,
+                    extra_context=_hooks_ctx,
+                )
+            ask_agent_callback = _ask_agent_callback_impl
 
         outcome = await execute_with_approval(
             tool_name=tc.name,
             args=args,
             session_id=session_id,
-            sink=self._loop._get_sink(),
-            ask_agent_callback=_ask_agent_callback_impl,
+            sink=self._loop.loop._get_sink(),
+            ask_agent_callback=ask_agent_callback,
             hooks_context=_hooks_ctx,
         )
 
@@ -131,7 +131,7 @@ class ToolExecutor:
 
         if not _skip_dispatch:
             try:
-                ctx = ToolContext(loop=self._loop, session_id=self._loop.session_id)
+                ctx = ToolContext(loop=self._loop, session_id=self._loop.loop.session_id)
                 result = await tool_registry.async_dispatch(
                     tc.name, args, context=ctx,
                 )
@@ -147,7 +147,7 @@ class ToolExecutor:
         content = tool_result_to_content(result)
 
         # 通知前端结果（使用文本摘要，避免 base64 撑爆前端事件）
-        await self._loop._get_sink().emit_tool_result(
+        await self._loop.loop._get_sink().emit_tool_result(
             session_id, tc.name, tc.id, content_to_text(content),
         )
 
@@ -155,7 +155,7 @@ class ToolExecutor:
         await ui_event_router.emit_for(
             tc.name,
             result,
-            self._loop._get_sink(),
+            self._loop.loop._get_sink(),
             session_id,
         )
 
