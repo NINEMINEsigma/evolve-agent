@@ -497,11 +497,14 @@ _NO_CACHE: dict[str, str] = {"Cache-Control": "no-cache, no-store, must-revalida
 
 @app.get("/")
 async def index():
-    """返回构建后的 React 前端，未构建时报错并退出。"""
+    """返回构建后的 React 前端，未构建时返回 HTTP 500 错误。"""
     index_html: Path = _FRONTEND_DIST / "index.html"
     if not index_html.exists():
         logger.error("Frontend not built: %s missing", index_html)
-        sys.exit(0)
+        return HTMLResponse(
+            "Frontend not built. Please run the build first.",
+            status_code=500,
+        )
     return HTMLResponse(
         index_html.read_text(encoding="utf-8"),
         headers=_NO_CACHE,
@@ -1681,10 +1684,17 @@ async def ws_chat(ws: WebSocket) -> None:
 
             # 按类型路由
             if msg.type == MessageType.USER_MESSAGE:
-                # agent loop 未配置时直接报错退出（启动阶段保护）
+                # agent loop 未配置时返回错误并断开连接（启动阶段保护）
                 if _get_loop(sid) is None:
                     logger.error("ParentAgentLoop not configured; cannot handle chat messages")
-                    sys.exit(0)
+                    await ws.send_text(
+                        Message(
+                            type=MessageType.ERROR,
+                            session_id=sid,
+                            message="Agent loop not ready. Please wait and try again.",
+                        ).to_json()
+                    )
+                    return
                 # 后台执行，不阻塞 WebSocket 消息循环
                 asyncio.create_task(
                     _handle_user_message(msg),

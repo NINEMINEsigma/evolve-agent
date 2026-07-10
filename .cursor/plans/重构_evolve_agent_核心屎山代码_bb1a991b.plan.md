@@ -4,7 +4,7 @@ overview: 基于 `shitscan_report.md` 的验证结果，按风险优先级分四
 todos:
   - id: p0-sys-exit
     content: 修复 gateway/server.py index() 路由的 sys.exit(0)，改为返回 HTTP 500 错误响应
-    status: pending
+    status: completed
   - id: p0-mcp-logging
     content: 为 abstract/mcp/client.py 核心调用链的裸 except Exception 补充上下文日志，拆分 CancelledError 与业务异常
     status: pending
