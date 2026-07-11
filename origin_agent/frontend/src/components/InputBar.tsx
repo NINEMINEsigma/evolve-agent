@@ -83,14 +83,14 @@ export default function InputBar({
       <div className="input-bar-inner">
         {hasSubagents && (
           <div className="input-target-row">
-            {targetOptions.map((opt) => {
+            {targetOptions.map((opt: TargetSessionOption) => {
               const active = targetSessions.includes(opt.id);
               const tooltip = `${opt.name} · 当前消息${active ? "将会" : "不会"}发送至该会话`;
               return (
               <button
                 key={opt.id}
                 type="button"
-                className={`input-target-chip ${active ? "active" : ""} input-target-chip-${(opt as any).status || "main"}`}
+                className={`input-target-chip ${active ? "active" : ""} input-target-chip-${opt.status || "main"}`}
                 onClick={() => toggleTarget(opt.id)}
                 data-tooltip={tooltip}
                 title={opt.name}

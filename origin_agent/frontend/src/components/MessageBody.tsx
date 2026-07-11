@@ -8,10 +8,10 @@ import { ChatMessage, ContentBlock, MessageContent } from "../types";
 import CodeBlock from "./CodeBlock";
 import SafeHtml from "./SafeHtml";
 
-// 判断文本中是否包含需要完整注入执行的 <script> 标签；普通 HTML 标签通过 rehype-raw 在 ReactMarkdown 中混合渲染
-const SCRIPT_TAG_RE = /<script\b[^>]*>(?:[\s\S]*?)<\/script\s*>|<script\b[^>]*\/>/i;
-function containsScript(text: string): boolean {
-  return SCRIPT_TAG_RE.test(text);
+// 当文本包含 script、style、link、iframe 等标签时，需要完整隔离渲染，避免 CSS/JS 污染外层页面
+const SANDBOX_TAG_RE = /<script\b|<style\b|<link\b|<iframe\b|<object\b|<embed\b/i;
+function needsSandbox(text: string): boolean {
+  return SANDBOX_TAG_RE.test(text);
 }
 
 export function contentToText(content: MessageContent): string {
@@ -208,7 +208,7 @@ export default function MessageBody({ message, streaming, onImageClick }: Messag
           </details>
         )}
         {typeof m.content === "string" ? (
-          containsScript(textContent) ? (
+          needsSandbox(textContent) ? (
             <SafeHtml html={textContent} />
           ) : (
             <ReactMarkdown
