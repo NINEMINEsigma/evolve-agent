@@ -447,6 +447,8 @@ class MultiAgentLoop(BaseAgentLoop, IMainSessionLoop):
         visible_characters / response_characters 由用户从前端指定；
         未指定时默认对全体可见、全体响应。
         """
+        # 新消息到达时重置中断状态，允许用户从停止状态恢复
+        self._cancel_event.clear()
         if self.is_interrupted():
             logger.warning("process_message skipped: loop interrupted | session=%s", self.session_id)
             return ""
