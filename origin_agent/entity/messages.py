@@ -3,7 +3,7 @@ import logging
 from pydantic import BaseModel, Field, PrivateAttr
 from entity.puretype import Role
 from entity.constant import USER_CHARACTER_NAME
-from system.templates import get_templates_dir
+from system.templates import get_templates_dir, read_template
 from easysave import save, load
 from threading import Lock
 
@@ -138,6 +138,7 @@ class CharacterSystemMessage(CharacterMessage):
 
 
 _Role_Prefix_Template: str|None = None
+_Identity_Prefix_Template: str|None = None
 
 
 class FunctionCall(BaseModel):
@@ -219,15 +220,29 @@ class CharacterConversationMessage(CharacterMessage):
             return raw_message
         # 如果前缀模板未加载, 则加载
         if _Role_Prefix_Template is None:
-            template_path = get_templates_dir() / "messages" / "role_prefix.txt"
-            with open(template_path, "r", encoding="utf-8") as f:
-                _Role_Prefix_Template = f.read()
+            _Role_Prefix_Template = read_template("messages/role_prefix.txt")
+        # 加载身份前缀模板（仅在最后一条消息前使用）
+        if is_last_user_message:
+            global _Identity_Prefix_Template
+            if _Identity_Prefix_Template is None:
+                _Identity_Prefix_Template = read_template("messages/identity_prefix.txt")
         # 替换前缀模板中的占位符
-        prefix = _Role_Prefix_Template.replace("{{MESSAGE_SENDER}}", self.character_name)
+        prefix = _Role_Prefix_Template
+        response_characters = self.response_characters
+        if response_characters:
+            response_str = ", ".join(response_characters)
+        else:
+            response_str = "the current agent"
+        prefix = prefix.replace("{{RESPONSE_CHARACTERS}}", response_str)
+        prefix = prefix.replace("{{MESSAGE_SENDER}}", self.character_name)
         if self.visible_characters:
             prefix = prefix.replace("{{VISIBLE_CHARACTERS}}", f"{', '.join(self.visible_characters)} and the {USER_CHARACTER_NAME}")
         else:
             prefix = prefix.replace("{{VISIBLE_CHARACTERS}}", f"Just {USER_CHARACTER_NAME}")
+        # 如果是最后一条用户消息，在最前面加入身份声明
+        if is_last_user_message:
+            identity_line = _Identity_Prefix_Template.replace("{{CURRENT_CHARACTER}}", current_character_agent)
+            prefix = identity_line + prefix
         # 返回修饰后的消息
         return f"{prefix}\n---\n{raw_message}\n---\n{self.message_suffix}{non_persistent_injection_suffix}"
 

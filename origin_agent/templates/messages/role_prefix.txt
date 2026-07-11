@@ -1,3 +1,5 @@
+The sender of this message has designated these agents as next responders: {{RESPONSE_CHARACTERS}}
+
 This message was sent by: {{MESSAGE_SENDER}}
 
 This message is only visible to the following character: {{VISIBLE_CHARACTERS}}
