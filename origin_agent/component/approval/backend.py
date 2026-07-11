@@ -18,6 +18,7 @@ import openai
 from openai.types.chat import ChatCompletion
 
 from entity.constant import APPROVAL_MODEL_LOAD_TIMEOUT, CUSTOM_MODELS_DIR
+from entity.puretype import Role
 
 if TYPE_CHECKING:
     from third.llamaapis import InferenceEngine
@@ -122,7 +123,7 @@ class LocalApprovalBackend(ApprovalBackend):
         for m in messages:
             role = m.get("role", "user")
             content = m.get("content", "")
-            if role == "system":
+            if role == Role.SYSTEM.value:
                 internal_messages.append(system_message(content))
             else:
                 internal_messages.append(user_message(content))

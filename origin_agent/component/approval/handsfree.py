@@ -12,8 +12,8 @@ from typing import Any, Awaitable, Callable, Optional, cast
 
 import dirtyjson
 
-from entity.constant import LLM_RETRY_COUNT
-from entity.puretype import ApprovalResult
+from entity.constant import LLM_RETRY_COUNT, SYSTEM_CHARACTER_NAME
+from entity.puretype import ApprovalResult, Role
 
 logger = logging.getLogger(__name__)
 
@@ -78,7 +78,7 @@ async def _handsfree_confirm(
         backend = None
     if backend is None:
         logger.warning("Approver not available — handsfree mode deny")
-        return ApprovalResult(action="deny", deny_reason="Approval backend unavailable, auto-denied", denied_by="system")
+        return ApprovalResult(action="deny", deny_reason="Approval backend unavailable, auto-denied", denied_by=SYSTEM_CHARACTER_NAME)
 
     from system.pathutils import find_repo_root, get_templates_dir
 
@@ -96,8 +96,8 @@ async def _handsfree_confirm(
     user_prompt = json.dumps(user_prompt_data, ensure_ascii=False)
 
     messages: list[dict[str, Any]] = [
-        {"role": "system", "content": system_prompt},
-        {"role": "user", "content": user_prompt},
+        {"role": Role.SYSTEM.value, "content": system_prompt},
+        {"role": Role.USER.value, "content": user_prompt},
     ]
 
     dialog_turn = 0
@@ -139,10 +139,10 @@ async def _handsfree_confirm(
                     )
 
                     # 将Agent的回答追加到 messages，下一轮循环重新审批
-                    current_messages.append({"role": "assistant", "content": resp_content or ""})
+                    current_messages.append({"role": Role.ASSISTANT.value, "content": resp_content or ""})
                     from system.templates import read_template
                     current_messages.append({
-                        "role": "user",
+                        "role": Role.USER.value,
                         "content": read_template("approval/dialog_re_evaluate.txt")
                             .replace("{{dialog_turn}}", str(dialog_turn + 1))
                             .replace("{{ask_question}}", ask_question)
@@ -171,7 +171,7 @@ async def _handsfree_confirm(
                 if attempt < LLM_RETRY_COUNT:
                     _ct = (get_templates_dir() / "approval" / "correction_hint.md").read_text(encoding="utf-8")
                     current_messages.append({
-                        "role": "user",
+                        "role": Role.USER.value,
                         "content": _ct.replace("{{error}}", str(exc)).replace("{{raw_output}}", resp_content or "<not available>"),
                     })
 

@@ -20,7 +20,7 @@ from pydantic import BaseModel
 
 from entity.puretype import Role, ToolDangerLevel
 from entity.messages import History, BaseMessage, ToolResultMessage, CharacterConversationMessage
-from entity.constant import USER_CHARACTER_NAME
+from entity.constant import USER_CHARACTER_NAME, SYSTEM_CHARACTER_NAME
 from entry.agent_support.messages import (
     build_turn_messages,
     collect_all_hooks_context,
@@ -45,7 +45,7 @@ logger = logging.getLogger(__name__)
 class InboxMessage(BaseModel):
     """收件箱消息基类。"""
     content: str = ""
-    character_name: str
+    character_name: str = SYSTEM_CHARACTER_NAME
 
     def to_text(self) -> str:
         """转换为注入 LLM 历史的文本。子类按需重写。"""
@@ -57,6 +57,7 @@ class UserMessage(InboxMessage):
     character_name: str = USER_CHARACTER_NAME
 
 
+# TODO: 目前似乎没有被使用到
 class ApprovalDecisionMessage(InboxMessage):
     """父Agent对工具审批的决定。"""
     decision: dict[str, Any]
@@ -80,7 +81,6 @@ class CronResultMessage(InboxMessage):
 class ContextLimitMessage(InboxMessage):
     """上下文超限通知。"""
     saved_path: str | None = None
-    character_name: str = "system"
 
     def to_text(self) -> str:
         return f"[system] Context limit reached. Session saved to: {self.saved_path or 'unknown'}"

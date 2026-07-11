@@ -23,6 +23,7 @@ from entity.constant import (
     MAX_TOOL_TURNS,
     SUBAGENT_IDLE_TRIGGER_SECONDS,
     SUBAGENT_MAX_ACTIVE,
+    SYSTEM_CHARACTER_NAME,
     USER_CHARACTER_NAME,
     History_Version as __History_Version__,
 )
@@ -607,8 +608,12 @@ class _OrchestratorContext:
             sm = Application.current().session_manager
             if sm is not None:
                 loop = sm.get_loop(self._parent_session_id)
-                if loop is not None:
-                    return loop
+                if loop is None:
+                    return None
+                real_loop = loop.loop
+                if real_loop is None or isinstance(real_loop, ParentAgentLoop):
+                    return real_loop
+                raise ValueError(f"ParentAgentLoop not found for parent session {self._parent_session_id}")
         except Exception:
             logger.warning(
                 "Failed to resolve real ParentAgentLoop for parent=%s; falling back to bootstrap loop",
@@ -712,14 +717,8 @@ class _OrchestratorContext:
             "or stop the sub-agent when its task is complete.\n\n"
         ) + "\n\n".join(messages)
 
-        # 单条反馈时，使用对应子 Agent 的名字作为头像/tooltip；
-        # 多条合并时无法区分，回退到默认
-        character_name = USER_CHARACTER_NAME
-        if len(source_session_ids) == 1:
-            character_name = self._subagent_names.get(source_session_ids[0], USER_CHARACTER_NAME)
-
         try:
-            await loop.process_message(full_message, character_name=character_name)
+            await loop.process_message(full_message, character_name=SYSTEM_CHARACTER_NAME)
             logger.debug("Subagent result injected to parent | parent=%s entries=%d", self._parent_session_id, len(messages))
         except Exception as exc:
             logger.exception(

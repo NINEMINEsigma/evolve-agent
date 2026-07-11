@@ -520,18 +520,15 @@ class SubAgentLoop(BasePrivateChatAgentLoop):
         msgs = self._inbox.get_pending()
         if not msgs:
             return False
-        merged = "\n\n".join(msg.to_text() for msg in msgs)
-        # TODO: 下方注释有待考虑, 或者不再合并直接多条usermessage插回历史
-        # 所有 InboxMessage 子类都已自带 character_name，直接取首条作为合并后的发出者
-        character_name = msgs[0].character_name if len(msgs) == 1 else USER_CHARACTER_NAME
-        self._history.add_message(
-            CharacterConversationMessage(
-                role=Role.USER,
-                character_name=character_name,
-                content=merged,
-                visible_characters=[self.current_character_agent],
+        for pending_message in msgs:
+            self._history.add_message(
+                CharacterConversationMessage(
+                    role=Role.USER,
+                    character_name=pending_message.character_name,
+                    content=pending_message.to_text(),
+                    visible_characters=[self.current_character_agent],
+                )
             )
-        )
         return True
 
     async def _queue_for_approval(self, tc: ToolCall) -> ToolResultMessage:

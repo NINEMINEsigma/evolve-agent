@@ -31,6 +31,7 @@ from entity.constant import (
     MAX_TOOL_TURNS,
     MAIN_AGENT_CHARACTER_NAME,
     USER_CHARACTER_NAME,
+    SYSTEM_CHARACTER_NAME,
 )
 from entity.messages import (
     History,
@@ -38,6 +39,7 @@ from entity.messages import (
     FunctionCall,
     ImageBlock,
     TextBlock,
+    MessageBlock,
     ToolCall as HistoryToolCall,
 )
 from entity.puretype import Role, ToolAvailability
@@ -414,24 +416,19 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
         pending = self._inbox.get_pending()
         if not pending:
             return False
-        merged = "\n\n".join(msg.to_text() for msg in pending)
-        character_name = (
-            pending[0].character_name
-            if len(pending) == 1
-            else USER_CHARACTER_NAME
-        )
-        message = CharacterConversationMessage(
-            role=Role.USER,
-            character_name=character_name,
-            content=merged,
-            visible_characters=[self.current_character_agent],
-        )
-        self._history.add_message(message)
-        self._persist_message(self.session_id)
-        if target_messages is not None:
-            openai_msg = message.as_message(self.current_character_agent)
-            if openai_msg is not None:
-                target_messages.append(openai_msg)
+        for pending_message in pending:
+            message = CharacterConversationMessage(
+                role=Role.USER,
+                character_name=pending_message.character_name,
+                content=pending_message.to_text(),
+                visible_characters=[self.current_character_agent],
+            )
+            self._history.add_message(message)
+            self._persist_message(self.session_id)
+            if target_messages is not None:
+                openai_msg = message.as_message(self.current_character_agent)
+                if openai_msg is not None:
+                    target_messages.append(openai_msg)
         return True
 
     async def process_inbox(self) -> str | None:
@@ -529,8 +526,9 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
                 if role == Role.ASSISTANT
                 else USER_CHARACTER_NAME
             )
+        message_content: str | list[MessageBlock]
         if isinstance(content, str):
-            message_content: str | list[ImageBlock | TextBlock] = content
+            message_content = content
         else:
             message_content = self._blocks_from_dicts(content)
         if isinstance(message_content, str):
@@ -567,8 +565,8 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
     @staticmethod
     def _blocks_from_dicts(
         blocks: list[dict[str, Any]],
-    ) -> list[ImageBlock | TextBlock]:
-        result: list[ImageBlock | TextBlock] = []
+    ) -> list[MessageBlock]:
+        result: list[MessageBlock] = []
         for block in blocks:
             if not isinstance(block, dict):
                 continue
@@ -765,8 +763,8 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
         )
         try:
             resp = await self._llm.chat([
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt},
+                {"role": Role.SYSTEM.value, "content": system_prompt},
+                {"role": Role.USER.value, "content": user_prompt},
             ])
             title = (resp.content or "").strip().strip("\"'")[:50]
             return title
@@ -786,8 +784,8 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
                 json.dumps(messages, ensure_ascii=False)[:AUTO_TAGS_CONTENT_MAX],
             )
             resp = await self._llm.chat([
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt},
+                {"role": Role.SYSTEM.value, "content": system_prompt},
+                {"role": Role.USER.value, "content": user_prompt},
             ])
             content = resp.content or ""
             try:
@@ -897,7 +895,7 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
         summary_history = History(messages=[
             CharacterConversationMessage(
                 role=Role.USER,
-                character_name=USER_CHARACTER_NAME,
+                character_name=SYSTEM_CHARACTER_NAME,
                 content=context,
                 visible_characters=[self.current_character_agent],
             ),

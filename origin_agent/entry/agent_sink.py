@@ -12,10 +12,11 @@ import logging
 import uuid
 from abc import ABC, abstractmethod
 from typing import * # type: ignore
+from entity.constant import SYSTEM_CHARACTER_NAME
+from entity.puretype import ApprovalResult
 
 if TYPE_CHECKING:
     from fastapi import WebSocket
-    from entity.puretype import ApprovalResult
     from subagent.loop import SubAgentLoop
 
 logger = logging.getLogger(__name__)
@@ -177,7 +178,7 @@ class FrontendSink(AgentSink):
         if ws is None:
             self._pending_confirms.pop(request_id, None)
             self._confirm_session_map.pop(request_id, None)
-            return ApprovalResult(action="deny", deny_reason="WebSocket not connected", denied_by="system")
+            return ApprovalResult(action="deny", deny_reason="WebSocket not connected", denied_by=SYSTEM_CHARACTER_NAME)
 
         try:
             from gateway.chat import Message, MessageType
@@ -198,14 +199,14 @@ class FrontendSink(AgentSink):
             self._pending_confirms.pop(request_id, None)
             self._confirm_session_map.pop(request_id, None)
             logger.exception("Failed to send confirm_request to session=%s: %s", session_id, exc)
-            return ApprovalResult(action="deny", deny_reason=f"Failed to push to frontend: {exc}", denied_by="system")
+            return ApprovalResult(action="deny", deny_reason=f"Failed to push to frontend: {exc}", denied_by=SYSTEM_CHARACTER_NAME)
 
         try:
             return await fut
         except asyncio.CancelledError:
             self._pending_confirms.pop(request_id, None)
             self._confirm_session_map.pop(request_id, None)
-            return ApprovalResult(action="deny", deny_reason="Cancelled", denied_by="system")
+            return ApprovalResult(action="deny", deny_reason="Cancelled", denied_by=SYSTEM_CHARACTER_NAME)
 
     def resolve_confirm(self, request_id: str, action: str,
                         deny_reason: str | None = None,
@@ -223,7 +224,7 @@ class FrontendSink(AgentSink):
         from entity.puretype import ApprovalResult
         for rid in list(self._confirm_session_map.keys()):
             if self._confirm_session_map.get(rid) == session_id:
-                self.resolve_confirm(rid, "deny", deny_reason="WebSocket disconnected", denied_by="system")
+                self.resolve_confirm(rid, "deny", deny_reason="WebSocket disconnected", denied_by=SYSTEM_CHARACTER_NAME)
 
     # -- 提问请求 --
 

@@ -14,6 +14,7 @@ from typing import Any
 
 from abstract.tools.registry import registry, tool_error, tool_result
 from entity.puretype import Role, ToolAvailability, ToolDangerLevel
+from entity.constant import SYSTEM_CHARACTER_NAME
 from entity.messages import CharacterConversationMessage
 from entry.parent_agent_loop import ParentAgentLoop
 from system.application import Application
@@ -131,7 +132,7 @@ async def _handle_enter_multi_agent(args: dict[str, Any]) -> dict:
             history.messages = history.messages[:i+1]
             history.add_message(CharacterConversationMessage(
                 role=Role.USER,
-                character_name="system",
+                character_name=SYSTEM_CHARACTER_NAME,
                 content="[System Result] Enter multi-agent mode successfully",
                 visible_characters=[main_agent_name],
             ))

@@ -13,6 +13,7 @@ from typing import Any, Awaitable, Callable, TYPE_CHECKING
 
 from abstract.tools.registry import registry as tool_registry
 from entity.puretype import ApprovalResult, ApprovalOutcome, ToolDangerLevel
+from entity.constant import SYSTEM_CHARACTER_NAME
 from component.approval.handsfree import is_handsfree_mode
 from component.approval.core import request_user_confirm
 from component.approval.allowlist import add_allowed as add_tool_allowlist_entry
@@ -32,9 +33,11 @@ def _build_approval_content(tool_name: str, approval_args: dict) -> str:
 
 def _build_deny_result(approval: ApprovalResult) -> dict:
     """根据 ApprovalResult 构建统一的 deny 错误 dict。"""
-    source_label = {"model": "approval model", "user": "user", "system": "system"}.get(
-        approval.denied_by, "system"
-    )
+    source_label = {
+        "model": "approval model", 
+        "user": "user", 
+        "system": SYSTEM_CHARACTER_NAME
+        }.get(approval.denied_by, SYSTEM_CHARACTER_NAME)
     return {
         "error": f"[{source_label} denied] {approval.deny_reason or 'unknown reason'}",
         "denied": True,

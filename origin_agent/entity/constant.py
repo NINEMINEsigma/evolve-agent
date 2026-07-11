@@ -14,6 +14,7 @@ History_Version = "v1"
 # 用户与主agent的角色名定义
 # ============================================================================
 
+SYSTEM_CHARACTER_NAME: str = "system"
 USER_CHARACTER_NAME: str = "end-user"
 MAIN_AGENT_CHARACTER_NAME: str = "main-agent"
 # 使用时用于在列表字段指代所有agents

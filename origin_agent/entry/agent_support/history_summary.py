@@ -10,6 +10,7 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
+from entity.puretype import Role
 from system.templates import read_template
 from entity.constant import SUMMARY_INPUT_MAX_CHARS
 
@@ -127,8 +128,8 @@ async def summarize_history(history: History, llm: LLMClient) -> str:
 
     try:
         resp = await llm.chat([
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_prompt},
+            {"role": Role.SYSTEM.value, "content": system_prompt},
+            {"role": Role.USER.value, "content": user_prompt},
         ])
         result = resp.content or ""
         result = result.strip()

@@ -313,8 +313,8 @@ class LoopSessionManager:
                 json.dumps(messages, ensure_ascii=False)[:AUTO_TAGS_CONTENT_MAX],
             )
             resp = await self._loop.llm.chat([
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt},
+                {"role": Role.SYSTEM.value, "content": system_prompt},
+                {"role": Role.USER.value, "content": user_prompt},
             ])
             content = resp.content or ""
             try:

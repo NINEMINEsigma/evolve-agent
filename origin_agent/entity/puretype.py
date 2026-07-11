@@ -6,6 +6,7 @@ from enum import Enum, IntFlag
 from pydantic import BaseModel, Field
 
 from typing import * # type: ignore
+from entity.constant import SYSTEM_CHARACTER_NAME
 
 # ---------------------------------------------------------------------------
 # Flags and Enums
@@ -138,9 +139,9 @@ class ApprovalResult(BaseModel):
     """
     拒绝原因，仅 action == "deny" 时有效
     """
-    denied_by: str = "system"
+    denied_by: str = SYSTEM_CHARACTER_NAME
     """
-    拒绝来源："model"（脱手模式LLM）、"user"（人工）、"system"（超时/断开等）
+    拒绝来源："model"（脱手模式LLM）、"user"（人工）、SYSTEM_CHARACTER_NAME（超时/断开等）
     """
 
 
