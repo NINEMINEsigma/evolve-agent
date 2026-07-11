@@ -44,32 +44,28 @@ SUB_MESSAGE_SEPARATOR = "[Sub Session Message]"
 
 def format_user_message(user_name: str, message_type: str, content: str, co_recipients: list[str] | None = None) -> str:
     """包装进入子 Agent 的用户消息，明确标识真实发送者身份。"""
-    if message_type == "direct":
-        header = f"[your direct conversation partner in this turn: {user_name}]"
-        description = (
-            f'The following message is addressed to you directly by "{user_name}".\n'
-            f'Even if the content mentions or quotes someone else, that other person is being relayed by {user_name}.\n'
-            f'Respond to {user_name}, not to anyone mentioned inside the message.'
-        )
-    elif message_type == "overheard":
-        header = f"[The speaker of this message in this turn: {user_name}]"
-        description = (
-            f'You are hearing a message that was spoken by "{user_name}".\n'
-            f'This message may not be addressed to you; {user_name} may be talking to someone else or simply being quoted.\n'
-            f'Do not assume you must reply unless the content explicitly asks something of you.'
-        )
-    elif message_type == "user_direct":
-        header = f"[Direct message from the end user: {user_name}]"
-        description = (
-            f'The following message is sent directly to you by the end user "{user_name}", '
-            f'not relayed by the parent agent. Respond to {user_name} directly.'
-        )
-    else:
+    from system.templates import read_template
+
+    template_map = {
+        "direct": "subagent/user_message_direct.txt",
+        "overheard": "subagent/user_message_overheard.txt",
+        "user_direct": "subagent/user_message_user_direct.txt",
+    }
+    template_name = template_map.get(message_type)
+    if template_name is None:
         raise ValueError(f"Unknown message_type: {message_type}")
-    if co_recipients:
-        description += f"\n\n(This message is also shared with: {', '.join(co_recipients)}.)"
-    # TODO: 使用---作为分割, 当前并不统一
-    return f"{header}\n\n{description}\n\n---\n\n{content}"
+
+    template = read_template(template_name)
+    co_str = (
+        f"\n\n(This message is also shared with: {', '.join(co_recipients)}.)"
+        if co_recipients else ""
+    )
+    return (
+        template
+        .replace("{{user_name}}", user_name)
+        .replace("{{content}}", content)
+        .replace("{{co_recipients_suffix}}", co_str)
+    )
 
 
 class PendingToolCall:
@@ -185,7 +181,7 @@ class SubAgentLoop(BasePrivateChatAgentLoop):
     def _get_context(self) -> SubRuntimeContext:
         return self._ctx
 
-    def _get_sink(self) -> AgentSink:
+    def get_sink(self) -> AgentSink:
         return ParentAgentSink(self)
 
     def _get_tool_definitions(self) -> list[dict[str, Any]]:
@@ -208,7 +204,49 @@ class SubAgentLoop(BasePrivateChatAgentLoop):
         )
         return self._history.add_message(msg)
 
+    async def process_message(
+        self,
+        user_message: str,
+        *,
+        skip_append: bool = False,
+        character_name: str = USER_CHARACTER_NAME,
+        **kwargs
+    ) -> str:
+        """子 Agent 不通过此路径接收消息；使用 inject_parent_message() + run() 替代。"""
+        raise NotImplementedError(
+            "SubAgentLoop does not support process_message(). "
+            "Use inject_parent_message() + run() instead."
+        )
+
     # ── 公共接口 ─────────────────────────────────────────────────────
+
+    @property
+    def parent_session_id(self) -> str:
+        """返回父 Agent 的 session ID。"""
+        return self._parent_session_id
+
+    def get_outbox(self) -> list[str]:
+        """返回并清空当前发件箱内容。"""
+        outbox = list(self._outbox)
+        self._outbox.clear()
+        return outbox
+
+    def set_paused(self) -> None:
+        """暂停子 Agent 循环，等待外部审批决策。"""
+        self._paused_event.clear()
+
+    def clear_paused(self) -> None:
+        """恢复子 Agent 循环。"""
+        self._paused_event.set()
+
+    def add_pending_approval(self, pending: PendingToolCall) -> None:
+        """将挂起的工具调用加入审批队列并暂停循环。"""
+        self._pending_approvals.append(pending)
+        self.set_paused()
+
+    def emit_event(self, role: str, **fields: Any) -> None:
+        """向前端推送一条结构化事件（公共接口）。"""
+        self._emit(role, **fields)
 
     def _emit(self, role: str, **fields: Any) -> None:
         """向前端推送一条结构化事件。
@@ -236,7 +274,7 @@ class SubAgentLoop(BasePrivateChatAgentLoop):
     def _is_auto_approved_tool(self, name: str, args: dict) -> bool:
         """检查工具调用是否在 allowlist 中（始终自动批准）。"""
         try:
-            from component.approval_allowlist import is_allowed
+            from component.approval.allowlist import is_allowed
             return is_allowed(name, args)
         except Exception:
             logger.warning("Failed to check approval allowlist for subagent tool=%s", name, exc_info=True)
@@ -269,7 +307,7 @@ class SubAgentLoop(BasePrivateChatAgentLoop):
                 self._round_active = True  # 新一轮响应开始
 
                 # 调用 LLM（基类 _build_history_messages 统一处理 system prompt + hooks + memory）
-                messages, _ = self._build_history_messages()
+                messages = self._build_history_messages()
                 resp: LLMResponse = await self._llm.chat(messages, self._tools)
 
                 if self._cancel_event.is_set():
@@ -285,6 +323,7 @@ class SubAgentLoop(BasePrivateChatAgentLoop):
                         character_name=self.current_character_agent,
                         content=text,
                         reasoning=reasoning_text,
+                        reasoning_field_name=resp.reasoning_field_name,
                     )
                     self._history.add_message(assistant_msg)
                     if self._last_message_from_parent:
@@ -321,6 +360,7 @@ class SubAgentLoop(BasePrivateChatAgentLoop):
                     content=resp.content or "",
                     tool_calls=tool_calls_data,
                     reasoning=reasoning_text,
+                    reasoning_field_name=resp.reasoning_field_name,
                 )
                 self._history.add_message(assistant_msg)
 
@@ -432,6 +472,10 @@ class SubAgentLoop(BasePrivateChatAgentLoop):
         """强制终止子 Agent。"""
         self._cancel_event.set()
 
+    def load_history(self, history: History) -> None:
+        """加载外部历史到子 Agent 循环中。"""
+        self._history = history
+
     def save_history(self, path: Path) -> None:
         """将 History 实例以 easysave 多态序列化写入磁盘。"""
         from easysave import save
@@ -476,18 +520,15 @@ class SubAgentLoop(BasePrivateChatAgentLoop):
         msgs = self._inbox.get_pending()
         if not msgs:
             return False
-        merged = "\n\n".join(msg.to_text() for msg in msgs)
-        # TODO: 下方注释有待考虑, 或者不再合并直接多条usermessage插回历史
-        # 所有 InboxMessage 子类都已自带 character_name，直接取首条作为合并后的发出者
-        character_name = msgs[0].character_name if len(msgs) == 1 else USER_CHARACTER_NAME
-        self._history.add_message(
-            CharacterConversationMessage(
-                role=Role.USER,
-                character_name=character_name,
-                content=merged,
-                visible_characters=[self.current_character_agent],
+        for pending_message in msgs:
+            self._history.add_message(
+                CharacterConversationMessage(
+                    role=Role.USER,
+                    character_name=pending_message.character_name,
+                    content=pending_message.to_text(),
+                    visible_characters=[self.current_character_agent],
+                )
             )
-        )
         return True
 
     async def _queue_for_approval(self, tc: ToolCall) -> ToolResultMessage:

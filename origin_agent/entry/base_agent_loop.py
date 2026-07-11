@@ -11,21 +11,24 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import shutil
 from abc import ABC, abstractmethod
+from pathlib import Path
 from typing import Any, TYPE_CHECKING
 
 from pydantic import BaseModel
 
 from entity.puretype import Role, ToolDangerLevel
-from entity.messages import History, BaseMessage, ToolResultMessage
-from entity.constant import USER_CHARACTER_NAME
+from entity.messages import History, BaseMessage, ToolResultMessage, CharacterConversationMessage
+from entity.constant import USER_CHARACTER_NAME, SYSTEM_CHARACTER_NAME
 from entry.agent_support.messages import (
     build_turn_messages,
     collect_all_hooks_context,
     load_message_hooks,
 )
-from entry.agent_support.multimodal import tool_result_to_content
+from entry.agent_support.multimodal import tool_result_to_content, content_to_text
 from system.pathutils import find_repo_root
+from system.session_store import SessionStore
 
 if TYPE_CHECKING:
     from system.context import RuntimeContext
@@ -42,7 +45,7 @@ logger = logging.getLogger(__name__)
 class InboxMessage(BaseModel):
     """收件箱消息基类。"""
     content: str = ""
-    character_name: str
+    character_name: str = SYSTEM_CHARACTER_NAME
 
     def to_text(self) -> str:
         """转换为注入 LLM 历史的文本。子类按需重写。"""
@@ -54,6 +57,7 @@ class UserMessage(InboxMessage):
     character_name: str = USER_CHARACTER_NAME
 
 
+# TODO: 目前似乎没有被使用到
 class ApprovalDecisionMessage(InboxMessage):
     """父Agent对工具审批的决定。"""
     decision: dict[str, Any]
@@ -77,7 +81,6 @@ class CronResultMessage(InboxMessage):
 class ContextLimitMessage(InboxMessage):
     """上下文超限通知。"""
     saved_path: str | None = None
-    character_name: str = "system"
 
     def to_text(self) -> str:
         return f"[system] Context limit reached. Session saved to: {self.saved_path or 'unknown'}"
@@ -156,11 +159,11 @@ class ToolContext(BaseModel):
 
     @property
     def sink(self) -> AgentSink:
-        return self.loop._get_sink()
+        return self.loop.get_sink()
 
     @property
     def is_interrupted(self) -> bool:
-        return self.loop._cancel_event.is_set()
+        return self.loop.is_interrupted()
 
 
 # ---------------------------------------------------------------------------
@@ -183,6 +186,15 @@ class BaseAgentLoop(ABC):
         self._inbox: Inbox = Inbox()
         self._cancel_event: asyncio.Event = asyncio.Event()
         self._message_hooks_cache: list[dict] | None = None
+        self._history: History = History(messages=[])
+        self._session_store: SessionStore | None = None
+        self._token_usage: int = 0
+        self._last_prompt_tokens: int = 0
+
+    @property
+    def history_store_dir(self) -> Path | None:
+        """统一返回当前 loop 的 session 持久化根目录。"""
+        return self._session_store.base_dir if self._session_store else None
 
     @property
     def inbox(self) -> Inbox:
@@ -192,7 +204,7 @@ class BaseAgentLoop(ABC):
     # -- 抽象方法 ---------------------------------------------------------
 
     @abstractmethod
-    def _get_sink(self) -> AgentSink:
+    def get_sink(self) -> AgentSink:
         """返回当前 loop 的 AgentSink 实例。"""
         ...
 
@@ -257,6 +269,11 @@ class BaseAgentLoop(ABC):
         """请求停止当前循环。"""
         self._cancel_event.set()
 
+    @property
+    def cancel_event(self) -> asyncio.Event:
+        """只读返回取消事件，供外部流式消费者检查中断状态。"""
+        return self._cancel_event
+
     def is_interrupted(self) -> bool:
         """返回 True 表示存在活跃的中断请求。"""
         return self._cancel_event.is_set()
@@ -264,6 +281,223 @@ class BaseAgentLoop(ABC):
     async def _check_cancel(self) -> bool:
         """检查取消事件，已中断则返回 True。"""
         return self._cancel_event.is_set()
+
+    # -- token 追踪（所有 loop 共享，可被子类覆盖）-------------------------
+
+    def get_token_usage(self) -> int:
+        if self._token_usage:
+            return self._token_usage
+        if self._session_store is not None:
+            try:
+                disk_usage = self._session_store.read_token_usage(self.session_id)
+            except Exception:
+                logger.exception("Failed to load token usage for session=%s", self.session_id)
+                disk_usage = 0
+            if disk_usage:
+                self._token_usage = disk_usage
+            return disk_usage
+        return 0
+
+    def get_context_tokens(self) -> int:
+        return self._last_prompt_tokens
+
+    async def _push_usage_update(self, session_id: str) -> None:
+        """推送 token 消耗到前端。"""
+        try:
+            await self.get_sink().emit_usage_update(
+                session_id, self._token_usage, self._last_prompt_tokens,
+            )
+        except Exception:
+            logger.warning("Failed to push usage update for session=%s", session_id, exc_info=True)
+
+    def _persist_token_usage(self, session_id: str) -> None:
+        if self._session_store is None:
+            return
+        try:
+            self._session_store.write_token_usage(session_id, self._token_usage)
+        except Exception as exc:
+            logger.exception("Failed to persist token usage for session %s: %s", session_id, exc)
+
+    # -- 持久化（所有 loop 共享）-------------------------------------------
+
+    @property
+    def history(self) -> History:
+        """返回当前 loop 的 History 实例（只读访问）。"""
+        return self._history
+
+    def set_session_id(self, session_id: str) -> None:
+        """设置当前 loop 的 session ID（供 gateway 层旋转/替换 loop 时使用）。"""
+        self.session_id = session_id
+
+    def persist_history(self, session_id: str) -> None:
+        """将当前 History 持久化到磁盘。"""
+        self._persist_message(session_id)
+
+    def _persist_message(self, session_id: str) -> None:
+        if self._session_store is None:
+            return
+        try:
+            self._session_store.write_history(session_id, self._history)
+        except Exception as exc:
+            logger.exception("Failed to persist history for session %s: %s", session_id, exc)
+
+    def _overwrite_history_file(self, session_id: str) -> None:
+        if self._session_store is None:
+            return
+        try:
+            self._session_store.write_history(session_id, self._history)
+        except Exception as exc:
+            logger.exception("Failed to overwrite history file for session %s: %s", session_id, exc)
+
+    def _remove_last_user_message(self, session_id: str) -> None:
+        """移除 History 中最后一条 user 消息并持久化。"""
+        messages = self._history.messages
+        if messages and messages[-1].role == Role.USER:
+            messages.pop()
+            self._history.update_last_user_message()
+        self._overwrite_history_file(session_id)
+
+    def clear_session(self) -> None:
+        """清理当前 session 的持久化数据。"""
+        if self._session_store is None:
+            return
+        session_path = self._session_store.session_dir(self.session_id)
+        if session_path.exists():
+            shutil.rmtree(str(session_path), ignore_errors=True)
+            logger.info("Cleared persisted data for session %s", self.session_id)
+
+    def get_session_messages(self) -> list[dict]:
+        """返回前端展示所需的消息列表，包含多 agent 元数据。"""
+        messages: list[dict] = []
+        for index, msg in enumerate(self._history.messages):
+            raw_content = msg.content
+            if isinstance(raw_content, list):
+                content: str | list[dict[str, Any]] = [b.as_object() for b in raw_content]
+            else:
+                content = content_to_text(raw_content)
+            entry: dict[str, Any] = {
+                "role": msg.role.value,
+                "content": content,
+                "index": index,
+                "character_name": msg.character_name if isinstance(msg, CharacterConversationMessage) else getattr(self, 'current_character_agent', 'assistant'),
+                "visible_characters": msg.visible_characters if isinstance(msg, CharacterConversationMessage) else None,
+                "requires_response": msg.role == Role.USER,
+            }
+            if isinstance(msg, CharacterConversationMessage):
+                if msg.response_characters:
+                    entry["response_characters"] = msg.response_characters
+                if msg.message_suffix:
+                    entry["message_suffix"] = msg.message_suffix
+                if msg.dynamic_message_suffix:
+                    entry["dynamic_message_suffix"] = msg.dynamic_message_suffix
+                if msg.reasoning:
+                    entry["reasoning_content"] = msg.reasoning
+                if msg.tool_calls:
+                    entry["tool_calls"] = [
+                        {
+                            "id": tc.id,
+                            "type": tc.type,
+                            "function": {
+                                "name": tc.function.name,
+                                "arguments": tc.function.arguments,
+                            },
+                        }
+                        for tc in msg.tool_calls
+                    ]
+            if msg.role == Role.SYSTEM:
+                entry["role"] = Role.SYSTEM.value
+            messages.append(entry)
+        return messages
+
+    def edit_session_message(self, index: int, content: str | None = None,
+                             visible_characters: list[str] | None = None) -> dict:
+        if not isinstance(index, int) or index < 0:
+            return {"updated": False, "error": "invalid message index"}
+        if index >= self._history.count:
+            return {"updated": False, "error": "message index out of range"}
+        msg = self._history.get_message(index)
+        if not isinstance(msg, CharacterConversationMessage):
+            return {"updated": False, "error": "message type not editable"}
+        updates: dict = {}
+        if content is not None:
+            updates["content"] = content
+        if visible_characters is not None:
+            updates["visible_characters"] = visible_characters
+        self._history.messages[index] = msg.model_copy(update=updates)
+        self._overwrite_history_file(self.session_id)
+        result: dict = {
+            "updated": True,
+            "session_id": self.session_id,
+            "index": index,
+            "role": msg.role.value,
+            "content": content_to_text(self._history.messages[index].content),
+        }
+        if visible_characters is not None:
+            result["visible_characters"] = visible_characters
+        return result
+
+    def delete_session_messages(self, count: int = 1) -> dict:
+        """删除最后 count 个逻辑轮次的消息（从倒数第 count 条 user 起，覆盖其后所有 tool/assistant）。"""
+        if count < 1:
+            return {"deleted": False, "error": "count must be >= 1"}
+        user_indices = [i for i, m in enumerate(self._history.messages) if m.role == Role.USER]
+        if not user_indices:
+            return {"deleted": False, "error": "no user messages to delete"}
+        if count > len(user_indices):
+            return {"deleted": False, "error": f"only {len(user_indices)} user messages available"}
+        remove_from = user_indices[-count]
+        self._history.messages = self._history.messages[:remove_from]
+        self._history.update_last_user_message()
+        self._overwrite_history_file(self.session_id)
+        return {"deleted": True, "session_id": self.session_id, "remaining_count": self._history.count}
+
+    def regenerate_response(self) -> dict:
+        """截断到最后一条 user 消息，返回其内容供重新生成。"""
+        user_indices = [i for i, m in enumerate(self._history.messages) if m.role == Role.USER]
+        if not user_indices:
+            return {"regenerate": False, "error": "no user message found"}
+        last_user_idx = user_indices[-1]
+        last_user_msg = self._history.messages[last_user_idx]
+        last_user_content = content_to_text(last_user_msg.content)
+        self._history.messages = self._history.messages[:last_user_idx + 1]
+        self._overwrite_history_file(self.session_id)
+        result: dict = {
+            "regenerate": True,
+            "session_id": self.session_id,
+            "last_user_content": last_user_content,
+            "remaining_count": self._history.count,
+        }
+        if isinstance(last_user_msg, CharacterConversationMessage):
+            result["visible_characters"] = last_user_msg.visible_characters
+            result["response_characters"] = last_user_msg.response_characters
+        return result
+
+    def get_tool_resources(self) -> dict:
+        """返回 session 的可恢复工具副作用资源快照。"""
+        if self._session_store is None:
+            return {"task_progress": {}, "clipboard_display": {}}
+        return self._session_store.read_tool_resources(self.session_id)
+
+    # -- IMainSessionLoop 默认实现 ----------------------------------------
+
+    def pop_session_rotated(self) -> str | None:
+        """取出并移除 session 旋转通知。默认返回 None。"""
+        return None
+
+    def is_processing(self) -> bool:
+        """返回当前是否正在处理消息。默认返回 False。"""
+        return False
+
+    async def terminate_session(self) -> dict:
+        """终结当前会话。默认返回简单确认。子类可覆盖。"""
+        logger.info("Terminating session (base): %s", self.session_id)
+        return {"terminated": True, "session_id": self.session_id}
+
+    async def merge_sessions(self, sources: list[str]) -> dict:
+        """合并多个源会话到一个新会话。默认不支持。"""
+        logger.warning("Merge sessions not supported in this loop | session=%s sources=%s",
+                       self.session_id, sources)
+        return {"error": "merge not supported in this loop", "merged": False}
 
     # -- Hook 支持（所有 loop 共享）----------------------------------------
 
@@ -303,6 +537,14 @@ class BaseAgentLoop(ABC):
             runtime_ctx=self.app.runtime_context,
         )
 
+    def get_hooks_context(self, session_id: str) -> str:
+        """返回 custom_hooks 的实时上下文（非持久化注入）。
+
+        是 ``get_hooks_context`` 的便捷封装，只返回 hooks_context 部分。
+        """
+        hooks_context, _ = self._collect_hooks_context(session_id=session_id)
+        return hooks_context
+
     def _set_dynamic_suffix(
         self,
         history: History,
@@ -321,6 +563,54 @@ class BaseAgentLoop(ABC):
         if hooks_context:
             parts.append(hooks_context)
         history.last_user_message.dynamic_message_suffix = "\n".join(parts) if parts else None
+
+
+# ---------------------------------------------------------------------------
+# IMainSessionLoop — 主会话 loop 接口
+# ---------------------------------------------------------------------------
+
+class IMainSessionLoop(ABC):
+    """主会话 loop 接口（C#-style interface）。
+
+    只声明主会话（ParentAgentLoop / MultiAgentLoop）特有的能力，
+    不继承 BaseAgentLoop，以避免与 BasePrivateChatAgentLoop 形成菱形继承。
+    子 Agent 的 loop 不应继承此类。
+    """
+    @property
+    def loop(self) -> BaseAgentLoop:
+        """返回当前 loop 的实例。"""
+        if isinstance(self, BaseAgentLoop):
+            return self
+        raise ValueError("current instance is not a BaseAgentLoop")
+
+    @property
+    @abstractmethod
+    def current_character_agent(self) -> str:
+        """返回当前 loop 对应的 agent 角色名，用于 History 视图过滤。"""
+
+    @abstractmethod
+    def pop_session_rotated(self) -> str | None:
+        """取出并移除 session 旋转通知（old_sid → new_sid）。"""
+
+    @abstractmethod
+    def get_token_usage(self) -> int:
+        """返回当前会话累计 token 消耗。"""
+
+    @abstractmethod
+    def get_context_tokens(self) -> int:
+        """返回当前上下文 token 数。"""
+
+    @abstractmethod
+    async def auto_generate_title(self) -> str:
+        """根据会话历史自动生成标题。"""
+
+    @abstractmethod
+    async def regenerate_session_tags(self) -> list[str]:
+        """根据会话历史重新生成标签列表。"""
+
+    @abstractmethod
+    async def regenerate_summary_for_session(self, session_id: str) -> str:
+        """重新生成指定会话的摘要（可为任意 session_id，不要求当前活跃）。"""
 
 
 # ---------------------------------------------------------------------------
@@ -343,7 +633,6 @@ class BasePrivateChatAgentLoop(BaseAgentLoop):
 
     def __init__(self, app: Application, session_id: str) -> None:
         super().__init__(app, session_id)
-        self._history: History = History(messages=[])
 
     # -- 抽象方法 ---------------------------------------------------------
 
@@ -391,7 +680,7 @@ class BasePrivateChatAgentLoop(BaseAgentLoop):
     def _is_auto_approved_tool(self, name: str, args: dict) -> bool:
         """检查工具是否在自动批准白名单中。"""
         try:
-            from component.approval_allowlist import is_allowed
+            from component.approval.allowlist import is_allowed
             return is_allowed(name, args)
         except Exception:
             logger.exception("Failed to check approval allowlist for tool=%s", name)
@@ -410,7 +699,7 @@ class BasePrivateChatAgentLoop(BaseAgentLoop):
         # 注入 session_id 到 args 中（兼容旧工具 handler）
         args["_session_id"] = session_id or self.session_id
 
-        sink = self._get_sink()
+        sink = self.get_sink()
         is_readonly = self._is_readonly_tool(tool_name)
         is_auto = self._is_auto_approved_tool(tool_name, args)
 

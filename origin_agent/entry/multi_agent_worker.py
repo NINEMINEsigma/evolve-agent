@@ -8,12 +8,10 @@ MultiAgentWorker — 单 Agent tool loop 执行器。
 
 from __future__ import annotations
 
-import asyncio
 import json
 import logging
 import re
 import uuid
-from collections.abc import AsyncIterator
 from typing import Any, TYPE_CHECKING
 
 from pydantic import BaseModel, Field
@@ -28,11 +26,13 @@ from entity.constant import (
     MULTI_AGENT_ROUTING_RESPONSE_NONE,
     MULTI_AGENT_ROUTING_RESPONSE_NULL,
 )
-from entry.base_agent_loop import BaseAgentLoop
+from entry.base_agent_loop import BaseAgentLoop, IMainSessionLoop
+from entry.stream_consumer import StreamConsumer
+from entry.tool_executor import ToolExecutor
 
 if TYPE_CHECKING:
     from entry.agent_sink import AgentSink
-    from component.llm import LLMClient, StreamChunk
+    from component.llm import LLMClient, LLMResponse
 
 logger = logging.getLogger(__name__)
 
@@ -56,6 +56,7 @@ class WorkerResult(BaseModel):
     stream_id: str = Field("", description="Worker 的流式标识，用于前端关联元数据")
     total_token_usage: int = Field(0, description="该 worker 本次执行累计消耗的 total_tokens")
     last_prompt_tokens: int = Field(0, description="该 worker 最后一次 LLM 调用的 prompt_tokens")
+    reasoning: str | None = Field(default=None, description="LLM 推理内容（仅在支持 thinking 的 provider 下存在）")
 
 
 class MultiAgentWorker:
@@ -83,7 +84,7 @@ class MultiAgentWorker:
         tools: list[dict[str, Any]],
         llm_client: LLMClient,
         sink: AgentSink,
-        loop: BaseAgentLoop,
+        loop: IMainSessionLoop,
     ) -> None:
         self.character_name: str = character_name
         self._system_prompts: list[str] = system_prompts
@@ -91,12 +92,29 @@ class MultiAgentWorker:
         self._tools: list[dict[str, Any]] = tools
         self._llm: LLMClient = llm_client
         self._sink: AgentSink = sink
-        self._loop: BaseAgentLoop = loop
-        # 每个 worker 实例使用独立 stream_id，防止级联多轮时前端叠加/覆盖消息
-        self._stream_id: str = f"multi_{character_name}_{uuid.uuid4().hex[:8]}"
+        self._loop: IMainSessionLoop = loop
+        # 流式消费器：每轮 LLM 调用会生成独立 stream_id，避免多轮文本互相覆盖
+        self._stream_consumer = StreamConsumer(
+            llm=self._llm,
+            sink=self._sink,
+            character_name=self.character_name,
+            cancel_event=self._loop.loop.cancel_event,
+        )
+        # 工具执行器：复用 ParentAgentLoop 的统一执行逻辑
+        self._tool_executor = ToolExecutor(loop=self._loop, llm=self._llm)
         # 累计 token 消耗与最近一次上下文 token 数
         self._total_token_usage: int = 0
         self._last_prompt_tokens: int = 0
+
+    @property
+    def total_token_usage(self) -> int:
+        """返回该 worker 累计消耗的 total_tokens。"""
+        return self._total_token_usage
+
+    @property
+    def last_prompt_tokens(self) -> int:
+        """返回该 worker 最近一次 LLM 调用的 prompt_tokens。"""
+        return self._last_prompt_tokens
 
     @staticmethod
     def _parse_routing_tags(text: str) -> AgentResponse:
@@ -164,96 +182,115 @@ class MultiAgentWorker:
         ] + self._messages
 
         for turn in range(MAX_TOOL_TURNS):
-            if self._loop.is_interrupted():
-                return await self._error_result("Interrupted")
+            # 每轮 LLM 调用使用独立 stream_id，确保前端把本轮文本固化为独立消息
+            stream_id = f"multi_{self.character_name}_{uuid.uuid4().hex[:8]}_{turn}"
+            if self._loop.loop.is_interrupted():
+                return await self._error_result("Interrupted", stream_id=stream_id)
 
             logger.info(
                 "MultiAgentWorker turn start | session=%s character=%s turn=%d messages_len=%d",
-                self._loop.session_id, self.character_name, turn, len(full_messages),
+                self._loop.loop.session_id, self.character_name, turn, len(full_messages),
             )
 
-            # 调用 LLM（流式，自然语言输出）
-            response = await self._call_llm(full_messages)
-
-            if response.get("error"):
-                logger.error(
-                    "LLM error for agent=%s: %s",
-                    self.character_name, response["error"],
+            try:
+                resp = await self._stream_consumer.consume(
+                    self._loop.loop.session_id,
+                    full_messages,
+                    self._tools,
+                    stream_id,
                 )
-                return await self._error_result(f"LLM error: {response['error']}")
+            except Exception as exc:
+                logger.exception(
+                    "LLM error for agent=%s: %s",
+                    self.character_name, exc,
+                )
+                return await self._error_result(
+                    f"LLM error: {exc}",
+                    stream_id=stream_id,
+                )
+
+            # 发送 stream_done，固化本轮自然语言文本到前端
+            await self._sink.emit_stream_done(
+                self._loop.loop.session_id,
+                stream_id,
+                resp.finish_reason,
+            )
+
+            # 收集 token 消耗
+            if resp.usage and resp.usage.total_tokens > 0:
+                self._total_token_usage += resp.usage.total_tokens
+                self._last_prompt_tokens = resp.usage.prompt_tokens
 
             # 有 tool_calls → 写入共享 History → 发送标准事件 → 执行工具 → 继续循环
-            if response.get("tool_calls"):
-                raw_tc_list = response["tool_calls"]
-
-                # 1. 构造 History 格式的 ToolCall 列表
+            if resp.tool_calls:
+                # 1. 构造 History 格式的 ToolCall 列表 和 OpenAI 格式的 raw list
                 history_tool_calls: list[HistoryToolCall] = []
-                for tc in raw_tc_list:
-                    func = tc["function"]
-                    args_str = func["arguments"] if isinstance(func["arguments"], str) else json.dumps(func["arguments"], ensure_ascii=False)
+                raw_tc_list: list[dict[str, Any]] = []
+                for tc in resp.tool_calls:
+                    args_str = json.dumps(tc.arguments, ensure_ascii=False)
                     history_tool_calls.append(HistoryToolCall(
-                        id=tc["id"],
+                        id=tc.id,
                         type="function",
-                        function=FunctionCall(name=func["name"], arguments=args_str),
+                        function=FunctionCall(name=tc.name, arguments=args_str),
                     ))
+                    raw_tc_list.append({
+                        "id": tc.id,
+                        "type": "function",
+                        "function": {
+                            "name": tc.name,
+                            "arguments": args_str,
+                        },
+                    })
 
                 # 2. 发送标准 tool_call 事件到前端
-                for tc in raw_tc_list:
-                    func = tc["function"]
-                    raw_args = func["arguments"]
-                    if isinstance(raw_args, str):
-                        try:
-                            raw_args = json.loads(raw_args)
-                        except json.JSONDecodeError:
-                            raw_args = {}
+                for tc in resp.tool_calls:
                     await self._sink.emit_tool_call(
-                        self._loop.session_id,
-                        func["name"],
-                        tc["id"],
-                        raw_args,
+                        self._loop.loop.session_id,
+                        tc.name,
+                        tc.id,
+                        tc.arguments,
                         character_name=self.character_name,
                     )
 
                 # 3. 写入 assistant message（含 tool_calls）到共享 History，并追加到本地 LLM 上下文
-                msg_content = response.get("content") or ""
                 assistant_msg = CharacterConversationMessage(
                     role=Role.ASSISTANT,
                     character_name=self.character_name,
-                    content=msg_content,
+                    content=resp.content or "",
                     tool_calls=history_tool_calls,
                     visible_characters=[self.character_name],
+                    reasoning=resp.reasoning_content,
                 )
-                self._loop._history.add_message(assistant_msg)
-                self._loop._persist_message(self._loop.session_id)
+                self._loop.loop.history.add_message(assistant_msg)
+                self._loop.loop.persist_history(self._loop.loop.session_id)
 
-                # assistant 消息（含 tool_calls）必须在 tool 结果之前追加到本地 LLM 上下文
                 full_messages.append({
                     "role": "assistant",
-                    "content": response.get("content"),
+                    "content": resp.content,
                     "tool_calls": raw_tc_list,
                 })
 
                 # 4. 执行工具，写入结果到 History，发送 tool_result 到前端
-                for tc in raw_tc_list:
-                    result_msg = await self._execute_tool_call(tc)
+                for tc in resp.tool_calls:
+                    tool_msg = await self._tool_executor.execute(tc, self._loop.loop.session_id)
 
                     # 设置 character_name 为仅调用方可见
-                    if result_msg.character_name != self.character_name:
-                        result_msg = result_msg.model_copy(update={"character_name": self.character_name})
+                    if tool_msg.character_name != self.character_name:
+                        tool_msg = tool_msg.model_copy(update={"character_name": self.character_name})
 
                     # 写入共享 History
-                    self._loop._history.add_message(result_msg)
-                    self._loop._persist_message(self._loop.session_id)
+                    self._loop.loop.history.add_message(tool_msg)
+                    self._loop.loop.persist_history(self._loop.loop.session_id)
 
                     # 发送标准 tool_result 事件到前端
-                    content_text = result_msg.content
+                    content_text = tool_msg.content
                     if isinstance(content_text, list):
                         from entry.agent_support.multimodal import content_to_text
                         content_text = content_to_text(content_text)
                     await self._sink.emit_tool_result(
-                        self._loop.session_id,
-                        tc["function"]["name"],
-                        tc["id"],
+                        self._loop.loop.session_id,
+                        tc.name,
+                        tc.id,
                         str(content_text),
                         character_name=self.character_name,
                     )
@@ -261,29 +298,31 @@ class MultiAgentWorker:
                     # 追加 tool 结果到本地 LLM 上下文（跟在 assistant tool_calls 之后）
                     full_messages.append({
                         "role": "tool",
-                        "tool_call_id": result_msg.tool_call_id,
+                        "tool_call_id": tool_msg.tool_call_id,
                         "content": str(content_text),
                     })
 
                 continue
 
             # 纯文本响应 → 解析 DSL 标签
-            text = response.get("content", "")
+            text = resp.content or ""
             logger.info(
                 "MultiAgentWorker raw text | session=%s character=%s turn=%d text_len=%d text=%r",
-                self._loop.session_id, self.character_name, turn, len(text), text,
+                self._loop.loop.session_id, self.character_name, turn, len(text), text,
             )
 
             if not text or not text.strip():
                 return await self._error_result(
                     "Empty response",
                     raw_text=text,
+                    reasoning=resp.reasoning_content,
                 )
 
             parsed = self._parse_routing_tags(text)
+            parsed.reasoning = resp.reasoning_content
             logger.info(
                 "MultiAgentWorker DSL parse | session=%s character=%s turn=%d parsed=%s",
-                self._loop.session_id, self.character_name, turn, parsed,
+                self._loop.loop.session_id, self.character_name, turn, parsed,
             )
 
             # DSL 解析后 content 为空/仅空白：兜底提示
@@ -291,147 +330,25 @@ class MultiAgentWorker:
                 return await self._error_result(
                     "Empty content after stripping routing tags",
                     raw_text=text,
+                    reasoning=resp.reasoning_content,
                 )
 
-            await self._emit_text(parsed.content)
             return WorkerResult(
                 character_name=self.character_name,
                 parsed_json=parsed,
                 raw_json=text,
-                stream_buffer=response.get("stream_buffer", []),
-                stream_id=self._stream_id,
+                stream_buffer=[],
+                stream_id=stream_id,
                 total_token_usage=self._total_token_usage,
                 last_prompt_tokens=self._last_prompt_tokens,
+                reasoning=resp.reasoning_content,
             )
 
         # tool loop 超过最大轮数
         return await self._error_result(
-            f"Max tool turns ({MAX_TOOL_TURNS}) exceeded"
+            f"Max tool turns ({MAX_TOOL_TURNS}) exceeded",
+            stream_id=stream_id,
         )
-
-    # -- LLM 调用 ---------------------------------------------------------
-
-    async def _call_llm(
-        self, messages: list[dict[str, Any]]
-    ) -> dict[str, Any]:
-        """流式调用 LLM，收集 content / tool_calls / reasoning。
-
-        多 Agent 模式下不再使用 response_format 强制 JSON，
-        由模型在自然语言中嵌入 DSL 路由标签。
-        **不在此处推送 content_delta 到前端**——原始内容可能含 DSL 标签，
-        由上层 ``run()`` 在解析后推送干净的 content 字段。
-        """
-        content: str = ""
-        reasoning: str = ""
-        tool_calls: list[dict[str, Any]] = []
-        stream_buffer: list[str] = []
-        error: str | None = None
-        stream = None
-
-        try:
-            stream = self._llm.chat_stream(
-                messages,
-                tools=self._tools,
-            )
-
-            async for chunk in stream:
-                if self._loop.is_interrupted():
-                    break
-
-                if chunk.error:
-                    error = chunk.error
-                    break
-
-                if chunk.content_delta:
-                    content += chunk.content_delta
-                    stream_buffer.append(chunk.content_delta)
-
-                if chunk.reasoning_delta:
-                    reasoning += chunk.reasoning_delta
-
-                # 收集 LLM 返回的 token 消耗；过滤零值避免 finish chunk 覆盖真实 usage
-                if chunk.usage and chunk.usage.total_tokens > 0:
-                    self._total_token_usage += chunk.usage.total_tokens
-                    self._last_prompt_tokens = chunk.usage.prompt_tokens
-
-                if chunk.tool_call:
-                    tc_dict = {
-                        "id": chunk.tool_call.id,
-                        "type": "function",
-                        "function": {
-                            "name": chunk.tool_call.name,
-                            "arguments": json.dumps(chunk.tool_call.arguments, ensure_ascii=False),
-                        },
-                    }
-                    tool_calls.append(tc_dict)
-        finally:
-            await self._close_stream(stream)
-
-        logger.info(
-            "MultiAgentWorker LLM response | session=%s character=%s content_len=%d reasoning_len=%d tool_calls=%d error=%s stream_buffer_len=%d content_preview=%r",
-            self._loop.session_id,
-            self.character_name,
-            len(content),
-            len(reasoning),
-            len(tool_calls),
-            error,
-            len(stream_buffer),
-            content[:500],
-        )
-
-        result: dict[str, Any] = {
-            "content": content.strip() if content else None,
-            "reasoning": reasoning.strip() if reasoning else None,
-            "tool_calls": tool_calls if tool_calls else None,
-            "stream_buffer": stream_buffer,
-            "json_retries": 0,
-        }
-
-        if error:
-            result["error"] = error
-
-        return result
-
-    # -- 工具执行 ---------------------------------------------------------
-
-    async def _execute_tool_call(
-        self, tc: dict[str, Any]
-    ) -> ToolResultMessage:
-        """执行单个工具调用，返回 ToolResultMessage。"""
-        func = tc["function"]
-        tool_name = func["name"]
-
-        # TODO: 防御性编程
-        arguments = func["arguments"]
-        if isinstance(arguments, str):
-            try:
-                args = json.loads(arguments)
-            except json.JSONDecodeError:
-                args = {}
-        else:
-            args = arguments if isinstance(arguments, dict) else {}
-
-        # 委托给所属 loop 的 _execute_tool（包含审批逻辑）
-        # pyright: ignore[reportPrivateUsage] — 合法使用 protected 方法，Worker 与 Loop 紧密协作
-        result_msg: ToolResultMessage = await self._loop._execute_tool(
-            tool_name=tool_name,
-            args=args,
-            tool_call_id=tc["id"],
-            session_id=self._loop.session_id,
-        )
-
-        # 确保 character_name 指向调用的 agent（_loop._execute_tool 使用 current_character_agent 可能不准确）
-        if result_msg.character_name != self.character_name:
-            result_msg = result_msg.model_copy(update={"character_name": self.character_name})
-
-        content = result_msg.content
-        if isinstance(content, list):
-            # 多模态内容块 → 转换为纯文本
-            from entry.agent_support.multimodal import content_to_text
-            content = content_to_text(content)
-            result_msg = result_msg.model_copy(update={"content": content})
-
-        return result_msg
 
     # -- 辅助方法 ---------------------------------------------------------
 
@@ -439,53 +356,43 @@ class MultiAgentWorker:
         self,
         error: str,
         raw_text: str = "",
+        reasoning: str | None = None,
+        stream_id: str = "",
     ) -> WorkerResult:
         """构造错误占位结果，同时推送错误文本到前端。"""
         text = f"[{self.character_name} 响应失败: {error}]"
-        await self._emit_text(text)
+        stream_id = stream_id or f"multi_{self.character_name}_{uuid.uuid4().hex[:8]}_error"
+        await self._emit_text(text, stream_id=stream_id)
         return WorkerResult(
             character_name=self.character_name,
             parsed_json=AgentResponse(
                 content=text,
                 visible_characters=[],
                 response_characters=[],
-                reasoning=None,
+                reasoning=reasoning,
             ),
             raw_json=raw_text,
-            stream_id=self._stream_id,
+            stream_id=stream_id,
             total_token_usage=self._total_token_usage,
             last_prompt_tokens=self._last_prompt_tokens,
+            reasoning=reasoning,
         )
 
-    async def _emit_text(self, text: str) -> None:
+    async def _emit_text(self, text: str, stream_id: str = "") -> None:
         """将一段文本以流式方式推送到前端（stream_delta + stream_done）。
 
-        仅在 ``_call_llm`` 未推送 content_delta 的前提下使用——
-        ``_call_llm`` 已不再推送原始内容，由本方法在 DSL 解析后
-        推送干净的 content 字段，确保前端显示的是可读文本。
+        仅在流式消费器未主动推送 content 的前提下使用，用于错误兜底文本展示。
         """
-        stream_id = self._stream_id
+        stream_id = stream_id or f"multi_{self.character_name}_{uuid.uuid4().hex[:8]}"
         if text:
             await self._sink.emit_stream_delta(
-                self._loop.session_id,
+                self._loop.loop.session_id,
                 stream_id,
                 delta=text,
                 character_name=self.character_name,
             )
         await self._sink.emit_stream_done(
-            self._loop.session_id,
+            self._loop.loop.session_id,
             stream_id,
         )
 
-    @staticmethod
-    async def _close_stream(stream: AsyncIterator[StreamChunk] | None) -> None:
-        """安全关闭异步流迭代器。"""
-        if stream is None:
-            return
-        try:
-            if hasattr(stream, "aclose"):
-                await stream.aclose()
-            elif hasattr(stream, "close"):
-                stream.close()
-        except Exception:
-            pass

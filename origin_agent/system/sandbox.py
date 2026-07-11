@@ -210,6 +210,11 @@ class Sandbox:
 
         return ResolvedPath(logical=logical, real=real, namespace=ns)
 
+    @property
+    def agentspace(self) -> Path:
+        """返回当前沙盒的 ws: 命名空间根目录。"""
+        return self._ctx.agentspace
+
     def resolve_read(self, logical: str) -> ResolvedPath:
         return self.resolve(logical, Access.READ)
 

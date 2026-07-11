@@ -1,8 +1,7 @@
 """会话文件存储工具。
 
-新增 History 持久化格式：history.es（基于 easysave 多态序列化）。
-保留旧接口：messages.jsonl、summary.txt、token_usage.json 等，
-旧 JSONL 仅用于迁移脚本读取。
+会话历史使用 history.es（基于 easysave 多态序列化）持久化。
+同时管理 summary.txt、token_usage.json、tool_resources.json 等辅助文件。
 """
 
 from __future__ import annotations
@@ -12,7 +11,6 @@ import logging
 from pathlib import Path
 from typing import Any
 
-from entity.puretype import Role
 from entity.messages import History
 from entity.constant import History_Version as __SessionStore_Version__
 from easysave import save, load
@@ -30,9 +28,6 @@ class SessionStore:
 
     def session_dir(self, session_id: str) -> Path:
         return self.base_dir / session_id
-
-    def messages_path(self, session_id: str) -> Path:
-        return self.session_dir(session_id) / "messages.jsonl"
 
     def summary_path(self, session_id: str) -> Path:
         return self.session_dir(session_id) / "summary.txt"
@@ -74,43 +69,6 @@ class SessionStore:
         except Exception as exc:
             logger.exception("Failed to save history for session %s: %s", session_id, exc)
             raise
-
-    def append_message(self, session_id: str, entry: dict[str, Any]) -> None:
-        path = self.messages_path(session_id)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        with open(path, "a", encoding="utf-8") as f:
-            f.write(json.dumps(entry, ensure_ascii=False) + "\n")
-
-    def read_messages(self, session_id: str) -> list[dict]:
-        path = self.messages_path(session_id)
-        if not path.exists():
-            return []
-        entries: list[dict] = []
-        with open(path, "r", encoding="utf-8") as f:
-            for line in f:
-                line = line.strip()
-                if line:
-                    entries.append(json.loads(line))
-        return entries
-
-    def overwrite_messages(self, session_id: str, entries: list[dict]) -> None:
-        path = self.messages_path(session_id)
-        lines = [json.dumps(m, ensure_ascii=False) + "\n" for m in entries]
-        write_text_atomic(path, "".join(lines))
-
-    def remove_last_user_message(self, session_id: str) -> None:
-        path = self.messages_path(session_id)
-        if not path.exists():
-            return
-        text = path.read_text(encoding="utf-8")
-        lines = text.strip().split("\n") if text.strip() else []
-        if not lines:
-            return
-        last = json.loads(lines[-1])
-        if last.get("role") != Role.USER:
-            return
-        lines.pop()
-        write_text_atomic(path, "\n".join(lines) + "\n" if lines else "")
 
     def write_token_usage(self, session_id: str, token_usage: int) -> None:
         payload = json.dumps({"token_usage": token_usage}, ensure_ascii=False)

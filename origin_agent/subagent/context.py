@@ -96,16 +96,6 @@ async def build_subagent_context(
 
 
 def _default_system_prompt() -> str:
-    """从模板文件读取内置默认系统提示词。
-
-    模板路径：templates/subagent/subagent_system.txt
-    """
+    """从模板文件读取内置默认系统提示词。"""
     from system.templates import read_template
-    prompt = read_template("subagent/subagent_system.txt")
-    if not prompt:
-        # 兜底：极简提示词
-        return (
-            "You are a sub-agent. Your user is the parent agent. "
-            "Respond naturally; your messages are delivered to the parent agent automatically."
-        )
-    return prompt
+    return read_template("subagent/subagent_system.txt")

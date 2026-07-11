@@ -12,10 +12,11 @@ import logging
 import uuid
 from abc import ABC, abstractmethod
 from typing import * # type: ignore
+from entity.constant import SYSTEM_CHARACTER_NAME
+from entity.puretype import ApprovalResult
 
 if TYPE_CHECKING:
     from fastapi import WebSocket
-    from component.approval import ApprovalResult
     from subagent.loop import SubAgentLoop
 
 logger = logging.getLogger(__name__)
@@ -50,7 +51,8 @@ class AgentSink(ABC):
     @abstractmethod
     async def emit_tool_result(self, session_id: str, tool_name: str,
                                tool_call_id: str, content: str,
-                               character_name: str | None = None) -> None:
+                               character_name: str | None = None,
+                               tool_call_meta: dict | None = None) -> None:
         """推送 tool_result 事件。"""
         ...
 
@@ -154,13 +156,17 @@ class FrontendSink(AgentSink):
     def get_ws(self, session_id: str) -> WebSocket | None:
         return self._ws_sinks.get(session_id)
 
+    def get_all_ws(self) -> dict[str, WebSocket]:
+        """返回所有已注册 WebSocket 的快照副本。"""
+        return dict(self._ws_sinks)
+
     # -- 审批请求 --
 
     async def request_approval(self, tool_name: str, args: dict,
                                reason: str = "", content: str = "",
                                session_id: str = "") -> "ApprovalResult":
         """向 WebSocket 发送 confirm_request 并等待前端响应。"""
-        from component.approval import ApprovalResult
+        from entity.puretype import ApprovalResult
 
         request_id: str = uuid.uuid4().hex[:8]
         loop: asyncio.AbstractEventLoop = asyncio.get_event_loop()
@@ -172,7 +178,7 @@ class FrontendSink(AgentSink):
         if ws is None:
             self._pending_confirms.pop(request_id, None)
             self._confirm_session_map.pop(request_id, None)
-            return ApprovalResult(action="deny", deny_reason="WebSocket not connected", denied_by="system")
+            return ApprovalResult(action="deny", deny_reason="WebSocket not connected", denied_by=SYSTEM_CHARACTER_NAME)
 
         try:
             from gateway.chat import Message, MessageType
@@ -193,20 +199,20 @@ class FrontendSink(AgentSink):
             self._pending_confirms.pop(request_id, None)
             self._confirm_session_map.pop(request_id, None)
             logger.exception("Failed to send confirm_request to session=%s: %s", session_id, exc)
-            return ApprovalResult(action="deny", deny_reason=f"Failed to push to frontend: {exc}", denied_by="system")
+            return ApprovalResult(action="deny", deny_reason=f"Failed to push to frontend: {exc}", denied_by=SYSTEM_CHARACTER_NAME)
 
         try:
             return await fut
         except asyncio.CancelledError:
             self._pending_confirms.pop(request_id, None)
             self._confirm_session_map.pop(request_id, None)
-            return ApprovalResult(action="deny", deny_reason="Cancelled", denied_by="system")
+            return ApprovalResult(action="deny", deny_reason="Cancelled", denied_by=SYSTEM_CHARACTER_NAME)
 
     def resolve_confirm(self, request_id: str, action: str,
                         deny_reason: str | None = None,
                         denied_by: str = "user") -> bool:
         """解析前端发来的审批结果。"""
-        from component.approval import ApprovalResult
+        from entity.puretype import ApprovalResult
         fut = self._pending_confirms.pop(request_id, None)
         self._confirm_session_map.pop(request_id, None)
         if fut and not fut.done():
@@ -215,10 +221,10 @@ class FrontendSink(AgentSink):
         return False
 
     def _deny_session_confirms(self, session_id: str) -> None:
-        from component.approval import ApprovalResult
+        from entity.puretype import ApprovalResult
         for rid in list(self._confirm_session_map.keys()):
             if self._confirm_session_map.get(rid) == session_id:
-                self.resolve_confirm(rid, "deny", deny_reason="WebSocket disconnected", denied_by="system")
+                self.resolve_confirm(rid, "deny", deny_reason="WebSocket disconnected", denied_by=SYSTEM_CHARACTER_NAME)
 
     # -- 提问请求 --
 
@@ -298,10 +304,12 @@ class FrontendSink(AgentSink):
 
     async def emit_tool_result(self, session_id: str, tool_name: str,
                                tool_call_id: str, content: str,
-                               character_name: str | None = None) -> None:
+                               character_name: str | None = None,
+                               tool_call_meta: dict | None = None) -> None:
         await self._send_msg(session_id, "tool_result", tool_name, content,
                              tool_call_id=tool_call_id,
-                             character_name=character_name)
+                             character_name=character_name,
+                             tool_call_meta=tool_call_meta)
 
     async def emit_user_message(self, session_id: str, content: Any,
                                 character_name: str, message_index: int,
@@ -415,7 +423,8 @@ class FrontendSink(AgentSink):
     async def _send_msg(self, session_id: str, event_type: str,
                         tool_name: str, payload: str, *,
                         tool_call_id: str = "",
-                        character_name: str | None = None) -> None:
+                        character_name: str | None = None,
+                        tool_call_meta: dict | None = None) -> None:
         """通过 WebSocket 推送一条事件消息。"""
         ws = self._ws_sinks.get(session_id)
         if ws is None:
@@ -431,7 +440,8 @@ class FrontendSink(AgentSink):
             msg_type = MessageType.TOOL_RESULT
             msg = Message(type=msg_type, session_id=session_id, tool=tool_name,
                           result=payload, tool_call_id=tool_call_id,
-                          character_name=character_name)
+                          character_name=character_name,
+                          tool_call_meta=tool_call_meta)
         elif event_type == "stream_delta":
             data = json.loads(payload)
             msg = Message(
@@ -497,14 +507,15 @@ class ParentAgentSink(AgentSink):
         父 Agent 通过 approve_subagent 工具回调 approve_tools() 驱动 Future。
         """
         import uuid
-        from component.approval import ApprovalResult, is_handsfree_mode, request_user_confirm
+        from entity.puretype import ApprovalResult
+        from component.approval import is_handsfree_mode, request_user_confirm
         from component.llm import ToolCall
         from subagent.loop import PendingToolCall
 
         # 脱手模式：直接向父 session 发起审批（走 approval 模型）
-        if is_handsfree_mode(self._loop._parent_session_id):
+        if is_handsfree_mode(self._loop.parent_session_id):
             result = await request_user_confirm(
-                session_id=self._loop._parent_session_id,
+                session_id=self._loop.parent_session_id,
                 tool_name=tool_name,
                 args=args,
                 reason=reason or "Sub-agent initiated tool call",
@@ -517,10 +528,9 @@ class ParentAgentSink(AgentSink):
         tool_call_id = uuid.uuid4().hex[:8]
         tc = ToolCall(id=tool_call_id, name=tool_name, arguments=args)
         pending = PendingToolCall(tc)
-        self._loop._pending_approvals.append(pending)
-        self._loop._paused_event.clear()
+        self._loop.add_pending_approval(pending)
 
-        self._loop._emit(
+        self._loop.emit_event(
             "approval_pending",
             tool_call_id=tool_call_id,
             tool_name=tool_name,
@@ -530,7 +540,7 @@ class ParentAgentSink(AgentSink):
         try:
             result = await pending.result
             if result["approved"]:
-                self._loop._emit(
+                self._loop.emit_event(
                     "approval_decision",
                     tool_call_id=tool_call_id,
                     tool_name=tool_name,
@@ -539,7 +549,7 @@ class ParentAgentSink(AgentSink):
                 return ApprovalResult(action="allow_once", denied_by="")
             else:
                 reason_text = result.get("reason", "Rejected by parent agent.")
-                self._loop._emit(
+                self._loop.emit_event(
                     "approval_decision",
                     tool_call_id=tool_call_id,
                     tool_name=tool_name,
@@ -547,7 +557,7 @@ class ParentAgentSink(AgentSink):
                 )
                 return ApprovalResult(action="deny", deny_reason=reason_text, denied_by="parent_agent")
         except RuntimeError as exc:
-            self._loop._emit(
+            self._loop.emit_event(
                 "approval_decision",
                 tool_call_id=tool_call_id,
                 tool_name=tool_name,
@@ -558,13 +568,14 @@ class ParentAgentSink(AgentSink):
     async def emit_tool_call(self, session_id: str, tool_name: str,
                              tool_call_id: str, args: dict,
                              character_name: str | None = None) -> None:
-        self._loop._emit("tool_call", tool_call_id=tool_call_id,
+        self._loop.emit_event("tool_call", tool_call_id=tool_call_id,
                          tool_name=tool_name, tool_args=args)
 
     async def emit_tool_result(self, session_id: str, tool_name: str,
                                tool_call_id: str, content: str,
-                               character_name: str | None = None) -> None:
-        self._loop._emit("tool_result", tool_call_id=tool_call_id,
+                               character_name: str | None = None,
+                               tool_call_meta: dict | None = None) -> None:
+        self._loop.emit_event("tool_result", tool_call_id=tool_call_id,
                          tool_name=tool_name, content=content)
 
     async def emit_user_message(self, session_id: str, content: Any,
@@ -589,7 +600,7 @@ class ParentAgentSink(AgentSink):
                                 tool_call: dict | None = None,
                                 character_name: str | None = None) -> None:
         if delta:
-            self._loop._emit("assistant", content=delta, reasoning=reasoning_delta,
+            self._loop.emit_event("assistant", content=delta, reasoning=reasoning_delta,
                              character_name=character_name)
 
     async def emit_stream_done(self, session_id: str, stream_id: str,
@@ -600,7 +611,7 @@ class ParentAgentSink(AgentSink):
             sink = Application.current().frontend_sink
             if sink is not None:
                 await sink.emit_stream_done(
-                    self._loop._parent_session_id, stream_id, finish_reason,
+                    self._loop.parent_session_id, stream_id, finish_reason,
                 )
         except Exception:
             logger.warning(
@@ -615,7 +626,7 @@ class ParentAgentSink(AgentSink):
             sink = Application.current().frontend_sink
             if sink is not None:
                 await sink.emit_usage_update(
-                    self._loop._parent_session_id, token_usage, context_tokens,
+                    self._loop.parent_session_id, token_usage, context_tokens,
                 )
         except Exception:
             logger.warning(
@@ -630,7 +641,7 @@ class ParentAgentSink(AgentSink):
             sink = Application.current().frontend_sink
             if sink is not None:
                 await sink.emit_progress(
-                    self._loop._parent_session_id, tool_name, payload,
+                    self._loop.parent_session_id, tool_name, payload,
                 )
         except Exception:
             logger.warning(
@@ -645,7 +656,7 @@ class ParentAgentSink(AgentSink):
             sink = Application.current().frontend_sink
             if sink is not None:
                 await sink.emit_clipboard_display(
-                    self._loop._parent_session_id, tool_name, payload,
+                    self._loop.parent_session_id, tool_name, payload,
                 )
         except Exception:
             logger.warning(
@@ -659,7 +670,7 @@ class ParentAgentSink(AgentSink):
             sink = Application.current().frontend_sink
             if sink is not None:
                 await sink.emit_subagent_update(
-                    self._loop._parent_session_id, payload,
+                    self._loop.parent_session_id, payload,
                 )
         except Exception:
             logger.warning(
@@ -673,7 +684,7 @@ class ParentAgentSink(AgentSink):
             sink = Application.current().frontend_sink
             if sink is not None:
                 await sink.emit_system_message(
-                    self._loop._parent_session_id, content,
+                    self._loop.parent_session_id, content,
                 )
         except Exception:
             logger.warning(

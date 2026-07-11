@@ -79,7 +79,7 @@ def _make_output_path(subdir: str, ext: str) -> tuple[Path, str]:
     sb = _get_sandbox()
     if sb is not None:
         try:
-            agentspace = sb._ctx.agentspace
+            agentspace = sb.agentspace
             out_dir = agentspace / subdir
             out_dir.mkdir(parents=True, exist_ok=True)
             name = f"{uuid.uuid4().hex[:12]}.{ext}"

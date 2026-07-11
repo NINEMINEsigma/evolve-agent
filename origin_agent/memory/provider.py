@@ -62,14 +62,8 @@ class EasysaveMemoryProvider(MemoryProvider):
         sessions: list = self._index.get("sessions", [])
         if not sessions:
             return ""
-        return (
-            "You have persistent memory of {n} previous session(s). "
-            "Use the `recall_memory` tool to search past conversations. "
-            "The search only supports single keyword matching — always try "
-            "one concise keyword at a time (e.g. \"novel\" rather than "
-            "\"write a novel story\"). "
-            "You can also use `remember` to explicitly store facts."
-        ).format(n=len(sessions))
+        from system.templates import read_template
+        return read_template("memory/system_prompt_block.txt").replace("{{n}}", str(len(sessions)))
 
     # TODO: 这里可能可以提供一些分词以其优化和匹配
     def prefetch(self, query: str, *, session_id: str = "") -> str:

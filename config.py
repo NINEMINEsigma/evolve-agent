@@ -19,6 +19,7 @@ argparse_parser.add_argument("--console_log", type=bool, default=argparse.SUPPRE
 argparse_parser.add_argument("--fast_agent_space_path", type=str, default=argparse.SUPPRESS)
 argparse_parser.add_argument("--slow_agent_space_path", type=str, default=argparse.SUPPRESS)
 argparse_parser.add_argument("--fouce_init", action="store_true", default=argparse.SUPPRESS)
+argparse_parser.add_argument("--frontend_force_build", action="store_true", default=argparse.SUPPRESS)
 argparse_parser.add_argument("--gateway_host", type=str, default=argparse.SUPPRESS)
 argparse_parser.add_argument("--gateway_port", type=int, default=argparse.SUPPRESS)
 
@@ -99,6 +100,7 @@ class Config(BaseModel):
     agentspace_path_name: str = "agentspace"
     logs_path_name: str = "logs"
     mcp_config_path_name: str = "mcp_config.json"
+    frontend_force_build: bool = False
 
 base_config: Config|None = None
 # 运行时类型转换器：将用户输入字符串转为对应类型
@@ -150,6 +152,7 @@ fast_agent_space_path:  str     = current_config.fast_agent_space_path
 slow_agent_space_path:  str     = current_config.slow_agent_space_path
 # runtime
 fouce_init:             bool    = current_config.fouce_init
+frontend_force_build:   bool    = current_config.frontend_force_build
 # gateway
 gateway_host:           str     = current_config.gateway_host
 gateway_port:           int     = current_config.gateway_port

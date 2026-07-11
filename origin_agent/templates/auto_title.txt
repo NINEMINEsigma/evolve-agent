@@ -1,4 +1,1 @@
-Summarize the conversation topic in no more than 20 words. Output only the title.
-Conversation:
-{{context}}
-Title:
+Generate a concise title (max 50 characters) for this conversation. Return only the title text, no quotes or formatting.

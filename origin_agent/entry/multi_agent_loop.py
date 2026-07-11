@@ -14,9 +14,11 @@ from collections import deque
 from pathlib import Path
 from typing import Any, TYPE_CHECKING
 
+from component.llm import LLMClient
 from entity.messages import (
     History,
     CharacterConversationMessage,
+    CharacterMessage,
     MessageBlock,
 )
 from entity.puretype import Role
@@ -25,10 +27,12 @@ from entity.constant import (
     USER_CHARACTER_NAME,
     MULTI_AGENT_MAX_CASCADE_DEPTH,
     LOG_PREVIEW_CHARS,
+    AUTO_TITLE_CONTENT_MAX,
+    AUTO_TAGS_CONTENT_MAX,
 )
-from system.templates import get_templates_dir, render_multi_agent_prompt
+from system.templates import get_templates_dir, render_multi_agent_prompt, read_template
 from system.session_store import SessionStore
-from entry.base_agent_loop import BaseAgentLoop
+from entry.base_agent_loop import BaseAgentLoop, IMainSessionLoop
 from entry.multi_agent_worker import WorkerResult, MultiAgentWorker
 from entry.agent_support.multimodal import content_to_text, summarize_message_for_log
 
@@ -51,15 +55,15 @@ class AgentProfile:
         character_name: str,
         system_prompts: list[str],
         tools: list[dict],
-        llm_client: Any,
+        llm_client: LLMClient,
     ) -> None:
         self.character_name: str = character_name
         self.system_prompts: list[str] = system_prompts
         self.tools: list[dict] = tools
-        self.llm_client: Any = llm_client
+        self.llm_client: LLMClient = llm_client
 
 
-class MultiAgentLoop(BaseAgentLoop):
+class MultiAgentLoop(BaseAgentLoop, IMainSessionLoop):
     """多 Agent 广播协作循环。
 
     持有共享 History 实例，管理多 Agent 并发响应的调度和级联。
@@ -104,41 +108,16 @@ class MultiAgentLoop(BaseAgentLoop):
 
     # -- BaseAgentLoop 抽象方法实现 ----------------------------------------
 
-    def _get_sink(self) -> AgentSink:
+    def get_sink(self) -> AgentSink:
         return self._sink
-
-    def _persist_message(self, session_id: str) -> None:
-        """将当前 History 持久化到磁盘。"""
-        if self._session_store is None:
-            return
-        try:
-            self._session_store.write_history(session_id, self._history)
-        except Exception as exc:
-            logger.exception("Failed to persist history for session %s: %s", session_id, exc)
-
-    def _persist_token_usage(self, session_id: str) -> None:
-        """将累计 token 消耗持久化到磁盘。"""
-        if self._session_store is None:
-            return
-        try:
-            self._session_store.write_token_usage(session_id, self._token_usage)
-        except Exception as exc:
-            logger.exception("Failed to persist token usage for session %s: %s", session_id, exc)
-
-    async def _push_usage_update(self, session_id: str) -> None:
-        """向前端推送 token 消耗更新。"""
-        try:
-            await self._sink.emit_usage_update(
-                session_id, self._token_usage, self._last_prompt_tokens
-            )
-        except Exception:
-            logger.warning(
-                "Failed to push usage update for session=%s", session_id, exc_info=True
-            )
 
     @property
     def user_character_name(self) -> str:
         return USER_CHARACTER_NAME
+
+    def get_agents(self) -> dict[str, AgentProfile]:
+        """返回当前多 Agent loop 中的 agent 配置档案副本。"""
+        return dict(self._agents)
 
     async def append_user_message(
         self, content: Any, *, display_content: Any | None = None,
@@ -189,10 +168,6 @@ class MultiAgentLoop(BaseAgentLoop):
         """返回当前 loop 的代表角色名。多 Agent 模式下返回首个 Agent。"""
         return self._agent_names[0] if self._agent_names else USER_CHARACTER_NAME
 
-    def pop_session_rotated(self) -> str | None:
-        """多 Agent 模式下不支持会话旋转，始终返回 None。"""
-        return None
-
     def get_token_usage(self) -> int:
         """返回会话级累计总 token 消耗（含普通模式已累积部分）。"""
         return self._token_usage
@@ -205,9 +180,62 @@ class MultiAgentLoop(BaseAgentLoop):
         """
         return self._last_prompt_tokens
 
-    def is_processing(self) -> bool:
-        """多 Agent 模式下始终返回 False（无长时间 tool loop）。"""
-        return False
+    # -- 自动生成标题 / 标签 ------------------------------------------------
+
+    def _resolve_llm_client(self) -> LLMClient | None:
+        """返回当前用于生成标题/标签的 LLM 客户端，首选当前代表 Agent。"""
+        agent = self._agents.get(self.current_character_agent)
+        if agent is None and self._agents:
+            agent = next(iter(self._agents.values()))
+        return agent.llm_client if agent else None
+
+    async def auto_generate_title(self) -> str:
+        """根据会话历史自动生成标题。"""
+        messages = self.get_session_messages()
+        if not messages:
+            return ""
+        system_prompt = read_template("auto_title.txt")
+        user_prompt = read_template("auto_title_input.txt").replace(
+            "{{context}}",
+            json.dumps(messages, ensure_ascii=False)[:AUTO_TITLE_CONTENT_MAX],
+        )
+        llm_client = self._resolve_llm_client()
+        if llm_client is None:
+            return ""
+        try:
+            resp = await llm_client.chat([
+                {"role":  Role.SYSTEM.value, "content": system_prompt},
+                {"role": Role.USER.value, "content": user_prompt},
+            ])
+            return (resp.content or "").strip().strip("\"'")[:50]
+        except Exception as exc:
+            logger.exception("Failed to auto-generate title in multi-agent: %s", exc)
+            return ""
+
+    async def regenerate_session_tags(self) -> list[str]:
+        """根据会话历史重新生成标签列表。"""
+        messages = self.get_session_messages()
+        if not messages:
+            return []
+        llm_client = self._resolve_llm_client()
+        if llm_client is None:
+            return []
+        try:
+            system_prompt = read_template("session_tags.txt")
+            user_prompt = read_template("session_tags_input.txt").replace(
+                "{{old_text}}",
+                json.dumps(messages, ensure_ascii=False)[:AUTO_TAGS_CONTENT_MAX],
+            )
+            resp = await llm_client.chat([
+                {"role": Role.SYSTEM.value, "content": system_prompt},
+                {"role": Role.USER.value, "content": user_prompt},
+            ])
+            tags = json.loads(resp.content or "[]")
+            if isinstance(tags, list):
+                return [str(t) for t in tags[:5]]
+        except Exception as exc:
+            logger.exception("Failed to generate session tags in multi-agent: %s", exc)
+        return []
 
     def get_session_messages(self) -> list[dict]:
         """返回 History 中所有消息的字典列表（供前端展示）。"""
@@ -228,17 +256,16 @@ class MultiAgentLoop(BaseAgentLoop):
                 "content": content,
                 "index": index,
             }
-            # TODO: 应该减少反射的使用
-            if hasattr(msg, "character_name"):
-                entry["character_name"] = getattr(msg, "character_name")
-            if hasattr(msg, "visible_characters") and getattr(msg, "visible_characters"):
-                entry["visible_characters"] = getattr(msg, "visible_characters")
-            if hasattr(msg, "response_characters") and getattr(msg, "response_characters"):
-                entry["response_characters"] = getattr(msg, "response_characters")
-            if hasattr(msg, "message_suffix") and getattr(msg, "message_suffix"):
-                entry["message_suffix"] = getattr(msg, "message_suffix")
-            if hasattr(msg, "dynamic_message_suffix") and getattr(msg, "dynamic_message_suffix"):
-                entry["dynamic_message_suffix"] = getattr(msg, "dynamic_message_suffix")
+            if isinstance(msg, CharacterMessage):
+                entry["character_name"] = msg.character_name
+            if isinstance(msg, CharacterConversationMessage) and msg.visible_characters:
+                entry["visible_characters"] = msg.visible_characters
+            if isinstance(msg, CharacterConversationMessage) and msg.response_characters:
+                entry["response_characters"] = msg.response_characters
+            if isinstance(msg, CharacterConversationMessage) and msg.message_suffix:
+                entry["message_suffix"] = msg.message_suffix
+            if isinstance(msg, CharacterConversationMessage) and msg.dynamic_message_suffix:
+                entry["dynamic_message_suffix"] = msg.dynamic_message_suffix
             if isinstance(msg, CharacterConversationMessage):
                 if msg.reasoning:
                     entry["reasoning_content"] = msg.reasoning
@@ -274,7 +301,7 @@ class MultiAgentLoop(BaseAgentLoop):
         if index >= len(self._history.messages):
             return {"updated": False, "error": "message index out of range"}
         msg = self._history.messages[index]
-        if not hasattr(msg, "visible_characters"):
+        if not isinstance(msg, CharacterConversationMessage):
             return {"updated": False, "error": "message does not support visibility"}
         updates: dict = {}
         if content is not None:
@@ -298,85 +325,56 @@ class MultiAgentLoop(BaseAgentLoop):
         if not user_indices:
             return {"regenerate": False, "error": "no user message found"}
         last_user_idx = user_indices[-1]
-        last_user_content = content_to_text(self._history.messages[last_user_idx].content)
+        last_user_msg = self._history.messages[last_user_idx]
+        last_user_content = content_to_text(last_user_msg.content)
         # 截断到 user 消息处（保留 user 本身，删除其后所有 assistant/tool）
         self._history.messages = self._history.messages[:last_user_idx + 1]
         self._persist_message(self.session_id)
-        return {
+        result: dict = {
             "regenerate": True,
             "session_id": self.session_id,
             "last_user_content": last_user_content,
             "remaining_count": self._history.count,
         }
+        if isinstance(last_user_msg, CharacterConversationMessage):
+            result["visible_characters"] = last_user_msg.visible_characters
+            result["response_characters"] = last_user_msg.response_characters
+        return result
 
     async def _execute_tool(self, tool_name: str, args: dict,
                             tool_call_id: str = "",
-                            session_id: str = "") -> "ToolResultMessage":
+                            session_id: str = "",
+                            character_name: str | None = None) -> "ToolResultMessage":
         """多 Agent 模式下执行工具，含审批流程。"""
         from entity.messages import ToolResultMessage
-        from entity.puretype import Role, ToolDangerLevel
+        from entity.puretype import Role
         from abstract.tools.registry import registry as tool_registry
-        from component.approval import is_handsfree_mode, request_user_confirm
-        from component.approval_allowlist import is_allowed as is_tool_allowlisted
-        from component.approval_allowlist import add_allowed as add_tool_allowlist_entry
+        from component.approval import execute_with_approval
 
+        char_name = character_name or self.current_character_agent
         sid = session_id or self.session_id
         if self.is_interrupted():
             return ToolResultMessage(
                 role=Role.TOOL,
-                character_name=self.current_character_agent,
+                character_name=char_name,
                 tool_call_id=tool_call_id,
                 content="Cancelled.",
             )
 
-        danger_level: ToolDangerLevel = tool_registry.get_danger_level(tool_name)
-        _handsfree = is_handsfree_mode(sid)
-        # dangerous 一定审批；write 仅脱手模式审批；readonly/safe 直接执行
-        _needs_approval = danger_level == ToolDangerLevel.dangerous or (
-            danger_level == ToolDangerLevel.write and _handsfree
+        outcome = await execute_with_approval(
+            tool_name=tool_name,
+            args=args,
+            session_id=sid,
+            sink=self._sink,
         )
 
-        _skip_dispatch = False
-        if _needs_approval:
-            _approval_args = {k: v for k, v in args.items() if k != "_session_id"}
-            if is_tool_allowlisted(tool_name, _approval_args):
-                args["_pre_approved"] = True
-                args["_approval_action"] = "allow_once"
-            else:
-                if _handsfree:
-                    # 脱手模式：approval 模型自动审批
-                    approval = await request_user_confirm(
-                        sid, tool_name, _approval_args,
-                        reason=str(args.get("reason", "")),
-                        content=f"Tool: {tool_name}\nParameters: {json.dumps(_approval_args, ensure_ascii=False)[:500]}",
-                    )
-                else:
-                    # 正常模式：通过 WebSocket 通知用户确认
-                    approval = await self._sink.request_approval(
-                        tool_name=tool_name,
-                        args=_approval_args,
-                        reason=str(args.get("reason", "")),
-                        content=f"Tool: {tool_name}\nParameters: {json.dumps(_approval_args, ensure_ascii=False)[:500]}",
-                        session_id=sid,
-                    )
-                if approval.action == "deny":
-                    source_label = {"model": "approval model", "user": "user", "system": "system"}.get(
-                        approval.denied_by, "system"
-                    )
-                    return ToolResultMessage(
-                        role=Role.TOOL,
-                        character_name=self.current_character_agent,
-                        tool_call_id=tool_call_id,
-                        content=json.dumps({
-                            "error": f"[{source_label} denied] {approval.deny_reason or 'unknown reason'}",
-                            "denied": True,
-                            "denied_by": approval.denied_by,
-                        }, ensure_ascii=False),
-                    )
-                elif approval.action == "allow_always" and not _handsfree:
-                    add_tool_allowlist_entry(tool_name, _approval_args)
-                args["_pre_approved"] = True
-                args["_approval_action"] = approval.action
+        if outcome.denied:
+            return ToolResultMessage(
+                role=Role.TOOL,
+                character_name=char_name,
+                tool_call_id=tool_call_id,
+                content=json.dumps(outcome.deny_result, ensure_ascii=False),
+            )
 
         try:
             from entry.base_agent_loop import ToolContext
@@ -388,22 +386,10 @@ class MultiAgentLoop(BaseAgentLoop):
 
         return ToolResultMessage(
             role=Role.TOOL,
-            character_name=self.current_character_agent,
+            character_name=char_name,
             tool_call_id=tool_call_id,
             content=json.dumps(result, ensure_ascii=False) if isinstance(result, dict) else str(result),
         )
-
-    def delete_session_messages(self, count: int = 1) -> dict:
-        """删除最后 count 个逻辑轮次的消息（从倒数第 count 条 user 起，覆盖其后所有 tool/assistant）。"""
-        user_indices = [i for i, m in enumerate(self._history.messages) if m.role == Role.USER]
-        if not user_indices:
-            return {"deleted": False, "error": "no user messages to delete"}
-        if count > len(user_indices):
-            return {"deleted": False, "error": f"only {len(user_indices)} user messages available"}
-        remove_from = user_indices[-count]
-        self._history.messages = self._history.messages[:remove_from]
-        self._persist_message(self.session_id)
-        return {"deleted": True, "session_id": self.session_id, "remaining_count": self._history.count}
 
     def get_tool_resources(self) -> dict:
         """多 Agent 模式暂不支持工具资源恢复。"""
@@ -423,6 +409,22 @@ class MultiAgentLoop(BaseAgentLoop):
             self.session_id, sources,
         )
         return {"error": "merge not supported in multi-agent mode", "merged": False}
+
+    async def regenerate_summary_for_session(self, session_id: str) -> str:
+        """重新生成指定会话的摘要。"""
+        if self._session_store is None:
+            return ""
+        history = self._session_store.read_history(session_id)
+        if history is None or history.count == 0:
+            return ""
+        llm = self._resolve_llm_client()
+        if llm is None:
+            return ""
+        from entry.agent_support.history_summary import summarize_history
+        summary = await summarize_history(history, llm)
+        if summary:
+            self._session_store.write_summary(session_id, summary)
+        return summary
 
     async def process_message(
         self,
@@ -445,6 +447,8 @@ class MultiAgentLoop(BaseAgentLoop):
         visible_characters / response_characters 由用户从前端指定；
         未指定时默认对全体可见、全体响应。
         """
+        # 新消息到达时重置中断状态，允许用户从停止状态恢复
+        self._cancel_event.clear()
         if self.is_interrupted():
             logger.warning("process_message skipped: loop interrupted | session=%s", self.session_id)
             return ""
@@ -623,8 +627,7 @@ class MultiAgentLoop(BaseAgentLoop):
                 content=str(content_text),
                 visible_characters=visible if visible else None,
                 response_characters=response if response else None,
-                reasoning=None,
-                reasoning_field_name="reasoning_content",
+                reasoning=result.parsed_json.reasoning,
                 tool_calls=None,
                 message_suffix=None,
             )
@@ -633,13 +636,10 @@ class MultiAgentLoop(BaseAgentLoop):
             self._persist_message(self.session_id)
 
             # 推送可见性/响应元数据给前端
+            # 注意：MultiAgentWorker 已经在每轮 LLM 调用后发送过 stream_done，
+            # 此处只需发送 system_message 关联元数据，避免重复固化。
             if result.stream_id and (visible or response):
                 try:
-                    await self._sink.emit_stream_done(
-                        self.session_id,
-                        result.stream_id,
-                        finish_reason="stop",
-                    )
                     await self._sink.emit_system_message(
                         self.session_id,
                         json.dumps({
@@ -761,8 +761,8 @@ class MultiAgentLoop(BaseAgentLoop):
         result: WorkerResult | None = None,
     ) -> None:
         """将 worker 的 token 消耗聚合到 loop 级累计值，并持久化、推送前端。"""
-        total_token_usage = result.total_token_usage if result is not None else worker._total_token_usage
-        last_prompt_tokens = result.last_prompt_tokens if result is not None else worker._last_prompt_tokens
+        total_token_usage = result.total_token_usage if result is not None else worker.total_token_usage
+        last_prompt_tokens = result.last_prompt_tokens if result is not None else worker.last_prompt_tokens
 
         if total_token_usage:
             self._token_usage += total_token_usage

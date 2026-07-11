@@ -18,7 +18,7 @@ from typing import Any, Dict, List, Optional, Union
 from pydantic import BaseModel
 
 from system.atomic_io import write_text_atomic
-from entity.puretype import LoopMeta
+from entity.puretype import LoopMeta, Role
 
 logger = logging.getLogger(__name__)
 
@@ -85,6 +85,7 @@ class Message(BaseModel):
     client_message_id: str | None = None  # 前端生成的乐观消息 ID，用于回显去重
     message_suffix: str | None = None  # 用户消息固定后缀（如 fixator 上下文）
     dynamic_message_suffix: str | None = None  # 用户消息动态后缀（如 memory/hooks 上下文）
+    tool_call_meta: Optional[dict[str, Any]] = None  # TOOL_RESULT：工具调用时间元信息
 
     @classmethod
     def from_json(cls, raw: str) -> Message:
@@ -119,6 +120,7 @@ class Message(BaseModel):
             response_characters=data.get("response_characters"),
             message_suffix=data.get("message_suffix"),
             dynamic_message_suffix=data.get("dynamic_message_suffix"),
+            tool_call_meta=data.get("tool_call_meta"),
         )
 
     def to_json(self) -> str:
@@ -187,6 +189,8 @@ class Message(BaseModel):
             d["message_suffix"] = self.message_suffix
         if self.dynamic_message_suffix is not None:
             d["dynamic_message_suffix"] = self.dynamic_message_suffix
+        if self.tool_call_meta is not None:
+            d["tool_call_meta"] = self.tool_call_meta
         return json.dumps(d, ensure_ascii=False)
 
 
@@ -474,7 +478,7 @@ class SessionManager:
         content: str,
         parent_sid: str | None = None,
         parents: list[str] | None = None,
-        role: str = "system",
+        role: Role = Role.SYSTEM,
         loop_meta: LoopMeta | None = None,
     ) -> str:
         """创建新会话并以指定角色的消息作为初始内容。支持多父合并。"""
@@ -482,35 +486,21 @@ class SessionManager:
         # 如果提供了 loop_meta，更新新 session 的 loop_type 和 agents
         if loop_meta is not None:
             self.update_loop_type(new_sid, loop_meta.loopType.value, loop_meta.agents)
-        # 写入初始消息到 JSONL
-        sdir: Path | None = self._store_dir / new_sid if self._store_dir else None
-        if sdir:
-            sdir.mkdir(parents=True, exist_ok=True)
-            msg_path: Path = sdir / "messages.jsonl"
-            entry: dict = {"role": role, "content": content}
-            try:
-                with open(msg_path, "a", encoding="utf-8") as f:
-                    f.write(json.dumps(entry, ensure_ascii=False) + "\n")
-            except Exception as exc:
-                logger.warning("Failed to write context for session %s: %s", new_sid, exc)
-        # 更新主父会话的 continuation（仅第一个父节点）
-        primary_parent: str | None = None
-        if parents:
-            primary_parent = parents[0]
-        elif parent_sid:
-            primary_parent = parent_sid
-        if primary_parent and primary_parent in self._sessions:
-            self._sessions[primary_parent]["continuation"] = new_sid
-            # 同步更新父会话索引持久化，确保重启后 continuation 关系可恢复
-            if self._store_dir:
-                with self._index_lock:
-                    entries = self._read_index()
-                    for e in entries:
-                        if e.get("id") == primary_parent:
-                            e["continuation"] = new_sid
-                            break
-                    self._write_index(entries)
-        logger.info("Session created | new=%s parents=%s role=%s", new_sid, parents or [parent_sid], role)
+        # 更新所有父会话的 continuation
+        new_info = self._sessions.get(new_sid, {})
+        effective_parents: list[str] = new_info.get("parents", [])
+        for parent_id in effective_parents:
+            if parent_id in self._sessions:
+                self._sessions[parent_id]["continuation"] = new_sid
+        # 同步更新父会话索引持久化，确保重启后 continuation 关系可恢复
+        if self._store_dir and effective_parents:
+            with self._index_lock:
+                entries = self._read_index()
+                for e in entries:
+                    if e.get("id") in effective_parents:
+                        e["continuation"] = new_sid
+                self._write_index(entries)
+        logger.info("Session created | new=%s parents=%s role=%s", new_sid, parents or [parent_sid], role.value)
         return new_sid
 
     def update_loop_type(self, sid: str, loop_type: str, agents: list[str] | None = None) -> None:

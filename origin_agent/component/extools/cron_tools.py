@@ -32,12 +32,12 @@ import sys
 import threading
 import time
 import uuid
-from dataclasses import dataclass, field
+from pydantic import BaseModel, ConfigDict, PrivateAttr
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Set
+from typing import Any, Optional, Set
 
 from abstract.tools.registry import registry, tool_error, tool_result
-from entity.puretype import ToolDangerLevel
+from entity.puretype import ToolDangerLevel, CronTaskInfo
 from entity.constant import CRON_STDOUT_PREVIEW_MAX_LENGTH, CRON_TASK_TIMEOUT, CRON_STORE_FILENAME, CRON_MIN_INTERVAL_SECONDS, CRON_MAX_JOBS_PER_SESSION
 from system.subprocess_utils import build_subprocess_env, completed_process_from_bytes, windows_process_group_flags
 from system.atomic_io import write_text_atomic
@@ -148,15 +148,17 @@ def _next_cron_time(
 # ── 任务数据结构 ───────────────────────────────────────────
 
 
-@dataclass
-class _CronTask:
+class _CronTask(BaseModel):
+    """定时任务实体。_timer 为内部私有属性，不参与序列化。"""
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
     task_id: str
     session_id: str
-    name: str
+    name: str = ""
     schedule_type: str  # "interval" | "cron"
     schedule_value: str
-    command: list[str]
-    cwd: str
+    command: list[str] = []
+    cwd: str = "ws:"
     should_schedule: bool = True  # 控制任务是否继续被 Timer 调度；False 时停止后续执行
     next_run: float = 0.0
     run_count: int = 0
@@ -165,7 +167,24 @@ class _CronTask:
     skip_agent_notify: bool = False  # 用户显式取消时设为 True，抑制在途执行完成后的通知
     is_wait: bool = False  # 为 True 时不执行任何脚本，仅返回固定提醒内容
     wait_message: str = ""  # wait 任务触发时返回的固定内容
-    _timer: Optional[threading.Timer] = field(default=None, repr=False)
+    _timer: Optional[threading.Timer] = PrivateAttr(default=None)
+
+    def has_timer(self) -> bool:
+        """返回任务是否关联了活跃 timer。"""
+        return self._timer is not None
+
+    def cancel_timer(self) -> None:
+        """取消并清空当前 timer（幂等）。"""
+        if self._timer is not None:
+            self._timer.cancel()
+            self._timer = None
+
+    def set_timer(self, timer: threading.Timer) -> None:
+        """取消旧 timer 并设置、启动新 timer。"""
+        self.cancel_timer()
+        self._timer = timer
+        self._timer.daemon = True
+        self._timer.start()
 
 
 # ── 任务注册表 ──────────────────────────────────────────────
@@ -191,45 +210,13 @@ def _notify_cron_event(
 
 
 def _task_to_dict(task: _CronTask) -> dict:
-    """将 _CronTask 序列化为字典（不含 _timer）。"""
-    return {
-        "task_id": task.task_id,
-        "session_id": task.session_id,
-        "name": task.name,
-        "schedule_type": task.schedule_type,
-        "schedule_value": task.schedule_value,
-        "command": task.command,
-        "cwd": task.cwd,
-        "should_schedule": task.should_schedule,
-        "next_run": task.next_run,
-        "run_count": task.run_count,
-        "last_run": task.last_run,
-        "log_path": task.log_path,
-        "skip_agent_notify": task.skip_agent_notify,
-        "is_wait": task.is_wait,
-        "wait_message": task.wait_message,
-    }
+    """将 _CronTask 序列化为字典（_timer 由 PrivateAttr 自动排除）。"""
+    return task.model_dump()
 
 
 def _task_from_dict(data: dict) -> _CronTask:
     """从字典反序列化为 _CronTask。"""
-    return _CronTask(
-        task_id=data["task_id"],
-        session_id=data["session_id"],
-        name=data.get("name", ""),
-        schedule_type=data["schedule_type"],
-        schedule_value=data["schedule_value"],
-        command=list(data.get("command", [])),
-        cwd=data.get("cwd", "ws:"),
-        should_schedule=data.get("should_schedule", True),
-        next_run=float(data.get("next_run", 0.0)),
-        run_count=int(data.get("run_count", 0)),
-        last_run=float(data.get("last_run", 0.0)),
-        log_path=data.get("log_path", ""),
-        skip_agent_notify=data.get("skip_agent_notify", False),
-        is_wait=data.get("is_wait", False),
-        wait_message=data.get("wait_message", ""),
-    )
+    return _CronTask(**data)
 
 
 def _save_all_tasks() -> None:
@@ -237,9 +224,9 @@ def _save_all_tasks() -> None:
     try:
         store_path = _get_cron_store_path()
         store_path.parent.mkdir(parents=True, exist_ok=True)
-        with _get_cr()._lock:
+        with _get_cr().locked():
             payload: dict[str, dict[str, dict]] = {}
-            for sid, tasks in _get_cr()._tasks.items():
+            for sid, tasks in _get_cr().get_all_tasks().items():
                 payload[sid] = {}
                 for tid, task in tasks.items():
                     payload[sid][tid] = _task_to_dict(task)
@@ -272,10 +259,8 @@ def _load_all_tasks() -> None:
         for tid, data in tasks.items():
             try:
                 task = _task_from_dict(data)
-                with _get_cr()._lock:
-                    if sid not in _get_cr()._tasks:
-                        _get_cr()._tasks[sid] = {}
-                    _get_cr()._tasks[sid][tid] = task
+                with _get_cr().locked():
+                    _get_cr().add_task(sid, tid, task)
                 if task.should_schedule:
                     # 重新计算 next_run
                     _restore_and_schedule_task(task)
@@ -320,15 +305,13 @@ def cleanup_session_cron_jobs(session_id: str) -> int:
     注意：此函数不再由 WebSocket 断开自动调用。
     仅在需要显式清理某个会话的所有任务时使用。
     """
-    with _get_cr()._lock:
-        session_tasks = _get_cr()._tasks.pop(session_id, {})
+    with _get_cr().locked():
+        session_tasks = _get_cr().pop_session_tasks(session_id)
 
     count = 0
     for task in session_tasks.values():
         task.should_schedule = False
-        if task._timer:
-            task._timer.cancel()
-            task._timer = None
+        task.cancel_timer()
         count += 1
 
     if count:
@@ -343,18 +326,17 @@ def migrate_session_cron_jobs(old_sid: str, new_sid: str) -> int:
     更新每个任务的 session_id，取消旧 timer 并用新 session_id 重新调度。
     返回迁移的任务数量。
     """
-    with _get_cr()._lock:
-        session_tasks = _get_cr()._tasks.pop(old_sid, {})
+    with _get_cr().locked():
+        session_tasks = _get_cr().pop_session_tasks(old_sid)
         if not session_tasks:
             return 0
-        _get_cr()._tasks[new_sid] = session_tasks
+        for task in session_tasks.values():
+            _get_cr().add_task(new_sid, task.task_id, task)
 
     count = 0
     for task in session_tasks.values():
         task.session_id = new_sid
-        if task._timer:
-            task._timer.cancel()
-            task._timer = None
+        task.cancel_timer()
         _schedule_next(task)
         count += 1
 
@@ -401,14 +383,12 @@ def _resolve_log_path(log_path: str) -> str | None:
 
 def _schedule_next(task: _CronTask) -> None:
     """计算并安排任务的下次执行（Timer 一次性触发）。"""
-    with _get_cr()._lock:
+    with _get_cr().locked():
         if not task.should_schedule:
             return
 
         # 取消旧的 timer（如果有）
-        if task._timer is not None:
-            task._timer.cancel()
-            task._timer = None
+        task.cancel_timer()
 
         now = time.time()
 
@@ -428,20 +408,15 @@ def _schedule_next(task: _CronTask) -> None:
                 return
 
         delay = max(0.1, task.next_run - now)
-        task._timer = threading.Timer(
-            delay, _run_task_wrapper, args=[task.task_id, task.session_id],
+        task.set_timer(
+            threading.Timer(delay, _run_task_wrapper, args=[task.task_id, task.session_id]),
         )
-        task._timer.daemon = True
-        task._timer.start()
 
 
 def _run_task_wrapper(task_id: str, session_id: str) -> None:
     """Timer 回调包装：在持有锁的情况下查找任务，然后执行。"""
-    with _get_cr()._lock:
-        session_tasks = _get_cr()._tasks.get(session_id)
-        if not session_tasks:
-            return
-        task = session_tasks.get(task_id)
+    with _get_cr().locked():
+        task = _get_cr().get_task(session_id, task_id)
         if not task or not task.should_schedule:
             return
 
@@ -545,6 +520,82 @@ def _run_task(task: _CronTask) -> None:
         )
 
 
+# ── 公共辅助（消除 Handler 层与 API 层重复）──────────────────
+
+
+def _build_task_info(task: _CronTask) -> CronTaskInfo:
+    """从 _CronTask 构建前端需要的 task 信息实体。"""
+    return CronTaskInfo(
+        task_id=task.task_id,
+        name=task.name,
+        schedule_type=task.schedule_type,
+        schedule_value=task.schedule_value,
+        command=task.command,
+        should_schedule=task.should_schedule,
+        next_run=(
+            datetime.datetime.fromtimestamp(
+                task.next_run, tz=datetime.timezone.utc,
+            ).isoformat()
+            if task.next_run
+            else None
+        ),
+        run_count=task.run_count,
+        last_run=(
+            datetime.datetime.fromtimestamp(
+                task.last_run, tz=datetime.timezone.utc,
+            ).isoformat()
+            if task.last_run
+            else None
+        ),
+        log_path=task.log_path,
+    )
+
+
+def _find_task(session_id: str, task_id: str) -> _CronTask | None:
+    """在锁保护下查找任务（不弹出）。"""
+    with _get_cr().locked():
+        return _get_cr().get_task(session_id, task_id)
+
+
+def _pop_task(session_id: str, task_id: str) -> _CronTask | None:
+    """在锁保护下弹出并返回任务。"""
+    with _get_cr().locked():
+        return _get_cr().remove_task(session_id, task_id)
+
+
+def _do_cancel_task(task: _CronTask, session_id: str) -> dict[str, Any]:
+    """执行取消任务的公共操作：停止调度、取消 timer、持久化。"""
+    task.should_schedule = False
+    task.skip_agent_notify = True
+    task.cancel_timer()
+    _save_all_tasks()
+    logger.info(
+        "Cron job cancelled | task=%s session=%s",
+        task.task_id, session_id,
+    )
+    return {
+        "task_id": task.task_id,
+        "name": task.name,
+        "message": f"Cancelled: {task.name or task.task_id}",
+    }
+
+
+def _do_trigger_task(task: _CronTask, session_id: str) -> dict[str, Any]:
+    """执行立即触发任务的公共操作：取消 timer、启动新线程。"""
+    task.cancel_timer()
+    t = threading.Thread(target=_run_task, args=[task], daemon=True)
+    t.start()
+    logger.info(
+        "Cron job triggered | task=%s session=%s",
+        task.task_id, session_id,
+    )
+    return {
+        "task_id": task.task_id,
+        "name": task.name,
+        "message": f"Triggered: {task.name or task.task_id}",
+    }
+
+
 # ── 工具 handler ─────────────────────────────────────────────
 
 
@@ -591,8 +642,8 @@ async def _handle_schedule_cron(args: dict[str, Any]) -> dict:
             return tool_error(f"Invalid cron expression: {exc}")
 
     # ── 任务数量限制 ──
-    with _get_cr()._lock:
-        current_count = len(_get_cr()._tasks.get(session_id, {}))
+    with _get_cr().locked():
+        current_count = len(_get_cr().get_session_tasks(session_id))
     if current_count >= CRON_MAX_JOBS_PER_SESSION:
         return tool_error(
             f"Maximum {CRON_MAX_JOBS_PER_SESSION} cron jobs per session reached"
@@ -615,10 +666,8 @@ async def _handle_schedule_cron(args: dict[str, Any]) -> dict:
         log_path=log_path,
     )
 
-    with _get_cr()._lock:
-        if session_id not in _get_cr()._tasks:
-            _get_cr()._tasks[session_id] = {}
-        _get_cr()._tasks[session_id][task_id] = task
+    with _get_cr().locked():
+        _get_cr().add_task(session_id, task_id, task)
 
     # 计算首次执行时间并启动调度
     if schedule_type == "interval":
@@ -658,42 +707,11 @@ async def _handle_list_cron_jobs(args: dict[str, Any]) -> dict:
     """列出当前会话的所有定时任务。"""
     session_id: str = str(args.get("_session_id", ""))
 
-    with _get_cr()._lock:
-        session_tasks = _get_cr()._tasks.get(session_id, {})
-        tasks: list[dict] = []
-        for task in session_tasks.values():
-            tasks.append(
-                {
-                    "task_id": task.task_id,
-                    "name": task.name,
-                    "schedule_type": task.schedule_type,
-                    "schedule_value": task.schedule_value,
-                    "command": task.command,
-                    "should_schedule": task.should_schedule,
-                    "next_run": (
-                        datetime.datetime.fromtimestamp(
-                            task.next_run, tz=datetime.timezone.utc,
-                        ).isoformat()
-                        if task.next_run
-                        else None
-                    ),
-                    "run_count": task.run_count,
-                    "last_run": (
-                        datetime.datetime.fromtimestamp(
-                            task.last_run, tz=datetime.timezone.utc,
-                        ).isoformat()
-                        if task.last_run
-                        else None
-                    ),
-                    "log_path": task.log_path,
-                }
-            )
+    with _get_cr().locked():
+        session_tasks = _get_cr().get_session_tasks(session_id)
+        tasks = [_build_task_info(t).model_dump() for t in session_tasks.values()]
 
-    return tool_result(
-        success=True,
-        count=len(tasks),
-        tasks=tasks,
-    )
+    return tool_result(success=True, count=len(tasks), tasks=tasks)
 
 
 async def _handle_cancel_cron_job(args: dict[str, Any]) -> dict:
@@ -704,31 +722,12 @@ async def _handle_cancel_cron_job(args: dict[str, Any]) -> dict:
     if not task_id:
         return tool_error("'task_id' is required")
 
-    with _get_cr()._lock:
-        session_tasks = _get_cr()._tasks.get(session_id, {})
-        task = session_tasks.pop(task_id, None)
-
+    task = _pop_task(session_id, task_id)
     if not task:
         return tool_error(f"Task not found: {task_id}")
 
-    task.should_schedule = False
-    task.skip_agent_notify = True
-    if task._timer:
-        task._timer.cancel()
-        task._timer = None
-
-    _save_all_tasks()
-
-    logger.info(
-        "Cron job cancelled | task=%s session=%s", task_id, session_id,
-    )
-
-    return tool_result(
-        success=True,
-        task_id=task_id,
-        name=task.name,
-        message=f"Cancelled cron job: {task.name or task_id}",
-    )
+    result = _do_cancel_task(task, session_id)
+    return tool_result(success=True, **result)
 
 
 async def _handle_run_cron_job_now(args: dict[str, Any]) -> dict:
@@ -739,32 +738,12 @@ async def _handle_run_cron_job_now(args: dict[str, Any]) -> dict:
     if not task_id:
         return tool_error("'task_id' is required")
 
-    with _get_cr()._lock:
-        task = _get_cr()._tasks.get(session_id, {}).get(task_id)
-
+    task = _find_task(session_id, task_id)
     if not task:
         return tool_error(f"Task not found: {task_id}")
 
-    # 取消当前 timer，避免冲突
-    if task._timer:
-        task._timer.cancel()
-        task._timer = None
-
-    # 在新线程中立即执行
-    t = threading.Thread(target=_run_task, args=[task], daemon=True)
-    t.start()
-
-    logger.info(
-        "Cron job triggered manually | task=%s session=%s",
-        task_id, session_id,
-    )
-
-    return tool_result(
-        success=True,
-        task_id=task_id,
-        name=task.name,
-        message=f"Triggered immediate execution of cron job: {task.name or task_id}",
-    )
+    result = _do_trigger_task(task, session_id)
+    return tool_result(success=True, **result)
 
 
 async def _handle_reschedule_cron_job(args: dict[str, Any]) -> dict:
@@ -775,15 +754,15 @@ async def _handle_reschedule_cron_job(args: dict[str, Any]) -> dict:
     if not task_id:
         return tool_error("'task_id' is required")
 
-    with _get_cr()._lock:
-        source_task = _get_cr()._tasks.get(session_id, {}).get(task_id)
+    with _get_cr().locked():
+        source_task = _get_cr().get_task(session_id, task_id)
 
     if not source_task:
         return tool_error(f"Task not found: {task_id}")
 
     # ── 任务数量限制 ──
-    with _get_cr()._lock:
-        current_count = len(_get_cr()._tasks.get(session_id, {}))
+    with _get_cr().locked():
+        current_count = len(_get_cr().get_session_tasks(session_id))
     if current_count >= CRON_MAX_JOBS_PER_SESSION:
         return tool_error(
             f"Maximum {CRON_MAX_JOBS_PER_SESSION} cron jobs per session reached"
@@ -806,10 +785,8 @@ async def _handle_reschedule_cron_job(args: dict[str, Any]) -> dict:
         log_path=log_path,
     )
 
-    with _get_cr()._lock:
-        if session_id not in _get_cr()._tasks:
-            _get_cr()._tasks[session_id] = {}
-        _get_cr()._tasks[session_id][new_task_id] = new_task
+    with _get_cr().locked():
+        _get_cr().add_task(session_id, new_task_id, new_task)
 
     # 计算首次执行时间并启动调度
     if new_task.schedule_type == "interval":
@@ -857,8 +834,8 @@ async def _handle_wait_cron(args: dict[str, Any]) -> dict:
         return tool_error(f"Duration must be at least {CRON_MIN_INTERVAL_SECONDS} seconds")
 
     # ── 同一会话最多一个 pending 的 wait 任务 ──
-    with _get_cr()._lock:
-        session_tasks = _get_cr()._tasks.get(session_id)
+    with _get_cr().locked():
+        session_tasks = _get_cr().get_session_tasks(session_id)
         if session_tasks:
             for tid, existing in list(session_tasks.items()):
                 if existing.is_wait:
@@ -869,17 +846,16 @@ async def _handle_wait_cron(args: dict[str, Any]) -> dict:
                             "before creating a new one."
                         )
                     # 已终止的 wait 自动清理
-                    if existing._timer:
-                        existing._timer.cancel()
-                    del session_tasks[tid]
+                    existing.cancel_timer()
+                    _get_cr().remove_task(session_id, tid)
                     logger.info(
                         "Cleaned up completed wait task | old_task=%s session=%s",
                         tid, session_id,
                     )
 
     # ── 任务数量限制 ──
-    with _get_cr()._lock:
-        current_count = len(_get_cr()._tasks.get(session_id, {}))
+    with _get_cr().locked():
+        current_count = len(_get_cr().get_session_tasks(session_id))
     if current_count >= CRON_MAX_JOBS_PER_SESSION:
         return tool_error(
             f"Maximum {CRON_MAX_JOBS_PER_SESSION} cron jobs per session reached"
@@ -902,10 +878,8 @@ async def _handle_wait_cron(args: dict[str, Any]) -> dict:
         wait_message=message,
     )
 
-    with _get_cr()._lock:
-        if session_id not in _get_cr()._tasks:
-            _get_cr()._tasks[session_id] = {}
-        _get_cr()._tasks[session_id][task_id] = task
+    with _get_cr().locked():
+        _get_cr().add_task(session_id, task_id, task)
 
     task.next_run = time.time() + duration_sec
     _schedule_next(task)
@@ -934,71 +908,32 @@ async def _handle_wait_cron(args: dict[str, Any]) -> dict:
 
 # ── 公开 API（供 gateway/server.py 调用）────────────────────
 
-def list_cron_tasks_for_session(session_id: str) -> list[dict[str, Any]]:
+def list_cron_tasks_for_session(session_id: str) -> list[CronTaskInfo]:
     """返回指定会话的所有定时任务。"""
-    with _get_cr()._lock:
-        session_tasks = _get_cr()._tasks.get(session_id, {})
-        tasks: list[dict[str, Any]] = []
-        for task in session_tasks.values():
-            tasks.append(
-                {
-                    "task_id": task.task_id,
-                    "name": task.name,
-                    "schedule_type": task.schedule_type,
-                    "schedule_value": task.schedule_value,
-                    "command": task.command,
-                    "should_schedule": task.should_schedule,
-                    "next_run": (
-                        datetime.datetime.fromtimestamp(
-                            task.next_run, tz=datetime.timezone.utc,
-                        ).isoformat()
-                        if task.next_run
-                        else None
-                    ),
-                    "run_count": task.run_count,
-                    "last_run": (
-                        datetime.datetime.fromtimestamp(
-                            task.last_run, tz=datetime.timezone.utc,
-                        ).isoformat()
-                        if task.last_run
-                        else None
-                    ),
-                    "log_path": task.log_path,
-                }
-            )
+    with _get_cr().locked():
+        session_tasks = _get_cr().get_session_tasks(session_id)
+        tasks = [_build_task_info(t) for t in session_tasks.values()]
     return tasks
 
 
+# TODO: 返回值字典混淆, 应该优化数据结构
 def trigger_cron_task(session_id: str, task_id: str) -> dict[str, Any]:
     """立即触发指定定时任务执行一次。"""
-    with _get_cr()._lock:
-        task = _get_cr()._tasks.get(session_id, {}).get(task_id)
+    task = _find_task(session_id, task_id)
     if not task:
         return {"success": False, "message": f"Task not found: {task_id}"}
-    if task._timer:
-        task._timer.cancel()
-        task._timer = None
-    t = threading.Thread(target=_run_task, args=[task], daemon=True)
-    t.start()
-    logger.info("Cron job triggered manually via API | task=%s session=%s", task_id, session_id)
-    return {"success": True, "task_id": task_id, "name": task.name, "message": f"Triggered: {task.name or task_id}"}
+    result = _do_trigger_task(task, session_id)
+    return {"success": True, **result}
 
 
+# TODO: 返回值字典混淆, 应该优化数据结构
 def cancel_cron_task(session_id: str, task_id: str) -> dict[str, Any]:
     """取消指定定时任务。"""
-    with _get_cr()._lock:
-        session_tasks = _get_cr()._tasks.get(session_id, {})
-        task = session_tasks.pop(task_id, None)
+    task = _pop_task(session_id, task_id)
     if not task:
         return {"success": False, "message": f"Task not found: {task_id}"}
-    task.should_schedule = False
-    task.skip_agent_notify = True
-    if task._timer:
-        task._timer.cancel()
-        task._timer = None
-    _save_all_tasks()
-    logger.info("Cron job cancelled via API | task=%s session=%s", task_id, session_id)
-    return {"success": True, "task_id": task_id, "name": task.name, "message": f"Cancelled: {task.name or task_id}"}
+    result = _do_cancel_task(task, session_id)
+    return {"success": True, **result}
 
 
 # ── 注册 ─────────────────────────────────────────────────────

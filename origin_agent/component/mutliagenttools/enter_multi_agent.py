@@ -14,6 +14,7 @@ from typing import Any
 
 from abstract.tools.registry import registry, tool_error, tool_result
 from entity.puretype import Role, ToolAvailability, ToolDangerLevel
+from entity.constant import SYSTEM_CHARACTER_NAME
 from entity.messages import CharacterConversationMessage
 from entry.parent_agent_loop import ParentAgentLoop
 from system.application import Application
@@ -45,8 +46,8 @@ async def _handle_enter_multi_agent(args: dict[str, Any]) -> dict:
     _parent_loop = app.session_manager.get_loop(session_id)
     if _parent_loop is None:
         return tool_error(f"No active loop found for session {session_id}")
-    elif isinstance(_parent_loop, ParentAgentLoop):
-        parent_loop = _parent_loop
+    elif isinstance(_parent_loop.loop, ParentAgentLoop):
+        parent_loop = _parent_loop.loop
     else:
         return tool_error(f"loop is not {ParentAgentLoop.__name__}")
 
@@ -104,8 +105,8 @@ async def _handle_enter_multi_agent(args: dict[str, Any]) -> dict:
         profile.tools = tools
 
     # 获取共享 History 和 sink
-    history = parent_loop._history
-    sink = parent_loop._get_sink()
+    history = parent_loop.history
+    sink = parent_loop.get_sink()
 
     # 创建 MultiAgentLoop 并替换
     multi_loop = MultiAgentLoop(
@@ -114,7 +115,7 @@ async def _handle_enter_multi_agent(args: dict[str, Any]) -> dict:
         history=history,
         agents=agent_profiles,
         sink=sink,
-        history_store_dir=parent_loop._history_store_dir,
+        history_store_dir=parent_loop.history_store_dir,
     )
 
     await app.session_manager.replace_loop(session_id, multi_loop)
@@ -131,7 +132,7 @@ async def _handle_enter_multi_agent(args: dict[str, Any]) -> dict:
             history.messages = history.messages[:i+1]
             history.add_message(CharacterConversationMessage(
                 role=Role.USER,
-                character_name="system",
+                character_name=SYSTEM_CHARACTER_NAME,
                 content="[System Result] Enter multi-agent mode successfully",
                 visible_characters=[main_agent_name],
             ))

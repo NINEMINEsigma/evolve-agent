@@ -16,6 +16,7 @@ import logging
 
 from evolve.validator import validate_directory, summary
 from system.sandbox import Sandbox
+from system.templates import read_template
 from typing import Any
 from entity.constant import SUBPROCESS_TIMEOUT_DEFAULT
 
@@ -70,11 +71,7 @@ def finalize_evolution(
         return {
                 "evolved": False,
                 "validation": report,
-                "hint": (
-                    "Fix the errors above using write_fork, then call "
-                    "validate_code to check syntax, then call evolve_code "
-                    "again when all files pass."
-                ),
+                "hint": read_template("evolve/evolution_failed_hint.txt"),
             }
 
     # ---- 2. 验证通过 — 触发交换 ----
@@ -91,10 +88,7 @@ def finalize_evolution(
     return {
             "evolved": True,
             "validation": report,
-            "message": (
-                "All {n} files validated. The orchestrator will now swap "
-                "slow→fast and restart with the evolved code."
-            ).format(n=report["total"]),
+            "message": read_template("evolve/evolution_success_message.txt").replace("{{n}}", str(report["total"])),
     }
 
 

@@ -1,4 +1,9 @@
-Summarize the key points and decisions of the following conversation. Output only the summary.
-Conversation:
-{{old_text}}
-Summary:
+Summarize the conversation history below. Your summary should be structured and retain the following key information:
+
+1. **Goal & Intent**: What the user wanted to accomplish. Any ongoing tasks or objectives.
+2. **Actions & Decisions**: What was done, what tools were called, what decisions were made.
+3. **Files & Code Changes**: Specific file paths modified, created, or analyzed. Key code changes or architectural decisions.
+4. **Outcomes & Results**: What succeeded, what failed, any error messages or important tool outputs.
+5. **Open Issues**: What remains unresolved, what blocked progress, what needs follow-up.
+
+Output ONLY the summary text. Do NOT include greetings, explanations, or phrases like "Summary:" or "Here is the summary". Write in the same language as the conversation.

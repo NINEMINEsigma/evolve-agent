@@ -30,6 +30,10 @@ class CronRouter:
         self._tasks: dict[str, dict[str, Any]] = {}
         self._lock: threading.RLock = threading.RLock()
 
+    def locked(self):
+        """返回底层锁，供 ``with cron_router.locked():`` 使用。"""
+        return self._lock
+
     # -- 路由管理 ----------------------------------------------------------------
 
     def register(self, session_id: str, loop: BaseAgentLoop) -> None:
@@ -101,6 +105,10 @@ class CronRouter:
     def get_session_tasks(self, session_id: str) -> dict[str, Any]:
         """返回指定 session 的所有任务。"""
         return self._tasks.get(session_id, {})
+
+    def get_all_tasks(self) -> dict[str, dict[str, Any]]:
+        """返回所有任务注册表的快照。"""
+        return {sid: dict(tasks) for sid, tasks in self._tasks.items()}
 
     def pop_session_tasks(self, session_id: str) -> dict[str, Any]:
         """弹出并返回指定 session 的所有任务。"""

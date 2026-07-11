@@ -1,0 +1,2 @@
+[subagent-result]
+This is a sub-agent feedback message visible only to you (the parent agent); the end user does not directly see it. The sub-agent's 'user' is you — it sends feedback, asks questions, and requests tool approvals through you. You decide how to respond: approve/reject tools, send chat messages, or stop the sub-agent when its task is complete.

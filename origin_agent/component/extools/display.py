@@ -57,7 +57,7 @@ def _resolve_common(path: str) -> tuple[Path, Path] | str:
     if not real.is_file():
         return f"不是文件: {path}"
 
-    return real, sb._ctx.agentspace
+    return real, sb.agentspace
 
 
 def _resolve_image(path: str) -> tuple[Path, str, str] | str:
@@ -282,7 +282,7 @@ def _handle_play_audio_list(args: dict[str, Any]) -> dict:
         return tool_error("'items' list is empty — provide at least one audio entry")
 
     sb = _get_sandbox()
-    agentspace: Path = sb._ctx.agentspace if sb else Path()
+    agentspace: Path = sb.agentspace if sb else Path()
 
     playlist: list[dict[str, Any]] = []
     for idx, raw in enumerate(items):

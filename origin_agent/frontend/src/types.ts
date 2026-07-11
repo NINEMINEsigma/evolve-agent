@@ -69,6 +69,16 @@ export interface WSMessage {
   character_name?: string;
   index?: number;
   client_message_id?: string;
+  tool_call_meta?: ToolCallMeta;   // TOOL_RESULT：工具调用时间元信息
+}
+
+export interface ToolCallMeta {
+  application_time: string;         // 人类可读的申请时间，如 "2026-07-11 14:30:25.123"
+  application_time_ms: number;      // 绝对毫秒时间戳
+  approval_duration_ms: number;     // 审批耗时（毫秒），readonly 工具为 0
+  invocation_start_offset_ms: number; // 从申请到开始调用 handler 的毫秒偏移
+  invocation_duration_ms: number;   // handler 实际执行的毫秒数
+  end_time_offset_ms: number;       // 从申请到工具调用完成的毫秒偏移
 }
 
 export interface ConfirmRequest {
@@ -155,6 +165,7 @@ export interface ChatMessage {
   responseCharacters?: string[];
   messageSuffix?: string;
   dynamicMessageSuffix?: string;
+  toolCallMeta?: ToolCallMeta;   // 工具调用时间元信息
 }
 
 export interface SessionInfo {

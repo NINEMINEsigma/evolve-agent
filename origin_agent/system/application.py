@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING, Optional
 if TYPE_CHECKING:
     from system.context import RuntimeContext
     from gateway.session_manager import SessionManager
-    from component.approval import ApprovalBackend
+    from component.approval.backend import ApprovalBackend
     from component.cron_router import CronRouter
     from abstract.tools.registry import ToolRegistry
     from entry.base_agent_loop import BaseAgentLoop
