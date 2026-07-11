@@ -31,6 +31,7 @@ from entity.messages import CharacterConversationMessage, ToolResultMessage
 from entity.puretype import Role, ToolAvailability
 from abstract.tools.registry import registry as tool_registry
 from system.context import get_runtime_context
+from system.templates import read_template
 from entry.parent_agent_loop import ParentAgentLoop
 
 from .context import SubRuntimeContext, build_subagent_context
@@ -707,15 +708,8 @@ class _OrchestratorContext:
         if not messages:
             return
 
-        full_message = (
-            "[subagent-result]\n"
-            "This is a sub-agent feedback message visible only to you (the parent agent); "
-            "the end user does not directly see it. "
-            "The sub-agent's 'user' is you — it sends feedback, asks questions, "
-            "and requests tool approvals through you. "
-            "You decide how to respond: approve/reject tools, send chat messages, "
-            "or stop the sub-agent when its task is complete.\n\n"
-        ) + "\n\n".join(messages)
+        prefix = read_template("subagent/result_message.txt")
+        full_message = prefix + "\n\n" + "\n\n".join(messages)
 
         try:
             await loop.process_message(full_message, character_name=SYSTEM_CHARACTER_NAME)
