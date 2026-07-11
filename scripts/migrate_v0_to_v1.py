@@ -115,20 +115,12 @@ def _make_conversation_message(
     visible_characters: list[str] | None = None,
 ) -> CharacterConversationMessage:
     """根据 content 类型构造 CharacterConversationMessage。"""
-    if tool_calls:
-        return CharacterConversationMessage.from_tool_calls(
-            role=role,
-            character_name=character_name,
-            content=content if isinstance(content, str) else "",
-            tool_calls=tool_calls,
-            reasoning=reasoning,
-            visible_characters=visible_characters,
-        )
-    return CharacterConversationMessage.from_text(
+    return CharacterConversationMessage(
         role=role,
         character_name=character_name,
-        text=content if isinstance(content, str) else json.dumps([b.as_object() for b in content], ensure_ascii=False),
+        content=content,
         reasoning=reasoning,
+        tool_calls=tool_calls,
         visible_characters=visible_characters,
     )
 
