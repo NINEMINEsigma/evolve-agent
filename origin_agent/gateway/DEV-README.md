@@ -140,7 +140,6 @@ WS /ws/chat?resume=<sid>
 | 文件 | 说明 |
 |---|---|
 | `history.es` | 新版消息历史（v1，easysave 多态序列化） |
-| `messages.jsonl` | 旧版消息历史（v0，兼容/迁移用） |
 | `summary.txt` | 会话摘要 |
 | `token_usage.json` | token 消耗 |
 | `tool_resources.json` | 任务进度、剪贴板展示等 |

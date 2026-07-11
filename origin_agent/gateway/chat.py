@@ -482,17 +482,6 @@ class SessionManager:
         # 如果提供了 loop_meta，更新新 session 的 loop_type 和 agents
         if loop_meta is not None:
             self.update_loop_type(new_sid, loop_meta.loopType.value, loop_meta.agents)
-        # 写入初始消息到 JSONL
-        sdir: Path | None = self._store_dir / new_sid if self._store_dir else None
-        if sdir:
-            sdir.mkdir(parents=True, exist_ok=True)
-            msg_path: Path = sdir / "messages.jsonl"
-            entry: dict = {"role": role.value, "content": content}
-            try:
-                with open(msg_path, "a", encoding="utf-8") as f:
-                    f.write(json.dumps(entry, ensure_ascii=False) + "\n")
-            except Exception as exc:
-                logger.warning("Failed to write context for session %s: %s", new_sid, exc)
         # 更新所有父会话的 continuation
         new_info = self._sessions.get(new_sid, {})
         effective_parents: list[str] = new_info.get("parents", [])
