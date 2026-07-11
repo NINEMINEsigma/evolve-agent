@@ -768,6 +768,16 @@ async def auto_tags_session(session_id: str):
     return {"tags": tags, "session_id": session_id}
 
 
+@app.post("/api/sessions/{session_id}/regenerate-summary")
+async def regenerate_summary_endpoint(session_id: str):
+    """重新生成指定会话的摘要。"""
+    loop = _get_loop(session_id)
+    if loop is not None:
+        summary = await loop.regenerate_summary_for_session(session_id)
+        return {"success": bool(summary), "summary": summary}
+    return {"success": False, "error": "agent loop not ready", "session_id": session_id}
+
+
 @app.post("/api/sessions/{session_id}/terminate")
 async def terminate_session_endpoint(session_id: str):
     """手动终结指定会话：归档 + 压缩（生成摘要），不旋转。"""

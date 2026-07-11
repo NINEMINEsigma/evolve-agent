@@ -293,22 +293,13 @@ class LoopSessionManager:
 
     async def _summarize_session_history(self, session_id: str) -> str:
         """用 LLM 对完整历史做压缩生成摘要。"""
-        messages = self._loop.get_full_history(session_id)
-        if not messages:
+        if self._loop.session_store is None:
             return ""
-        system_prompt = read_template("compress.txt")
-        user_prompt = read_template("compress_input.txt").replace(
-            "{{old_text}}", json.dumps(messages, ensure_ascii=False)[:30000],
-        )
-        try:
-            resp = await self._loop.llm.chat([
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt},
-            ])
-            return resp.content or ""
-        except Exception as exc:
-            logger.exception("Failed to generate session summary: %s", exc)
+        history = self._loop.session_store.read_history(session_id)
+        if history is None or history.count == 0:
             return ""
+        from entry.agent_support.history_summary import summarize_history
+        return await summarize_history(history, self._loop.llm)
 
     async def _generate_session_tags(self, session_id: str) -> list[str]:
         """用 LLM 生成会话分类标签。"""

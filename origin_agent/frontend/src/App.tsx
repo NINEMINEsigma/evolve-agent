@@ -56,6 +56,7 @@ function ChatApp() {
           onBranch={ws.branchSession}
           onTerminate={ws.terminateSession}
           onDelete={ws.deleteSession}
+          onRegenerateSummary={ws.regenerateSummary}
         />
         {tagEditorSession && (
           <TagEditor

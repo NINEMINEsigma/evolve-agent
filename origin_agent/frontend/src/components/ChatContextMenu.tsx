@@ -15,6 +15,7 @@ interface ChatContextMenuProps {
   onBranch: (sid: string) => void;
   onTerminate: (sid: string) => void;
   onDelete: (sid: string) => void;
+  onRegenerateSummary: (sid: string) => void;
 }
 
 export default function ChatContextMenu({
@@ -31,6 +32,7 @@ export default function ChatContextMenu({
   onBranch,
   onTerminate,
   onDelete,
+  onRegenerateSummary,
 }: ChatContextMenuProps) {
   const menuRef = useRef<HTMLDivElement>(null);
 
@@ -85,9 +87,11 @@ export default function ChatContextMenu({
         session={session}
         sid={contextMenu.sid}
         terminating={terminatingSessions.has(contextMenu.sid)}
+        generatingTitle={generatingTitleSessions.has(contextMenu.sid)}
         onClose={onClose}
         onBranch={onBranch}
         onTerminate={onTerminate}
+        onRegenerateSummary={onRegenerateSummary}
       />
       <div className="context-menu-separator" />
       <ContextMenuItem
@@ -124,24 +128,35 @@ function SessionLifecycleItem({
   session,
   sid,
   terminating,
+  generatingTitle,
   onClose,
   onBranch,
   onTerminate,
+  onRegenerateSummary,
 }: {
   session?: SessionInfo;
   sid: string;
   terminating: boolean;
+  generatingTitle: boolean;
   onClose: () => void;
   onBranch: (sid: string) => void;
   onTerminate: (sid: string) => void;
+  onRegenerateSummary: (sid: string) => void;
 }) {
   if (!session) return null;
   if (session.status === "archived") {
     return (
-      <ContextMenuItem
-        onClick={() => { onClose(); onBranch(sid); }}
-        label="继续此会话"
-      />
+      <>
+        <ContextMenuItem
+          onClick={() => { onClose(); onBranch(sid); }}
+          label="继续此会话"
+        />
+        <ContextMenuItem
+          disabled={generatingTitle}
+          onClick={() => { if (!generatingTitle) { onClose(); onRegenerateSummary(sid); } }}
+          label={generatingTitle ? "⏳ 生成摘要中..." : "重新生成摘要"}
+        />
+      </>
     );
   }
   return (

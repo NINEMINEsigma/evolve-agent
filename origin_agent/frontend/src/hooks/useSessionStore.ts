@@ -129,6 +129,7 @@ export interface SessionStore {
   deleteSession: (sid: string) => void;
   autoTitleSession: (sid: string) => void;
   autoTagSession: (sid: string) => void;
+  regenerateSummary: (sid: string) => void;
   terminateSession: (sid: string) => void;
   togglePinSession: (sid: string) => void;
   mergeSessions: (sources: string[]) => void;
@@ -888,6 +889,25 @@ export function useSessionStore(callbacks: SessionStoreCallbacks = {}): SessionS
       });
   }, [fetchSessions, fetchAllTags]);
 
+  const regenerateSummary = useCallback((sid: string) => {
+    setGeneratingTitleSessions((prev) => new Set(prev).add(sid));
+    fetch(`/api/sessions/${sid}/regenerate-summary`, { method: "POST" })
+      .then((r) => r.json())
+      .then((data) => {
+        if (data.success) {
+          fetchSessions();
+        }
+      })
+      .catch(() => {})
+      .finally(() => {
+        setGeneratingTitleSessions((prev) => {
+          const next = new Set(prev);
+          next.delete(sid);
+          return next;
+        });
+      });
+  }, [fetchSessions]);
+
   const terminateSession = useCallback((sid: string) => {
     setTerminatingSessions((prev) => new Set(prev).add(sid));
     addMessage("system", "⏳ 正在终结会话，请稍候...");
@@ -1082,6 +1102,7 @@ export function useSessionStore(callbacks: SessionStoreCallbacks = {}): SessionS
     deleteSession,
     autoTitleSession,
     autoTagSession,
+    regenerateSummary,
     terminateSession,
     togglePinSession,
     mergeSessions,

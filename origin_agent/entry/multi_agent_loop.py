@@ -410,6 +410,22 @@ class MultiAgentLoop(BaseAgentLoop, IMainSessionLoop):
         )
         return {"error": "merge not supported in multi-agent mode", "merged": False}
 
+    async def regenerate_summary_for_session(self, session_id: str) -> str:
+        """重新生成指定会话的摘要。"""
+        if self._session_store is None:
+            return ""
+        history = self._session_store.read_history(session_id)
+        if history is None or history.count == 0:
+            return ""
+        llm = self._resolve_llm_client()
+        if llm is None:
+            return ""
+        from entry.agent_support.history_summary import summarize_history
+        summary = await summarize_history(history, llm)
+        if summary:
+            self._session_store.write_summary(session_id, summary)
+        return summary
+
     async def process_message(
         self,
         user_message: str,

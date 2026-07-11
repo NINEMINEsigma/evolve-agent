@@ -386,6 +386,7 @@ export function useWebSocket() {
     deleteSession,
     autoTitleSession: session.autoTitleSession,
     autoTagSession: session.autoTagSession,
+    regenerateSummary: session.regenerateSummary,
     terminateSession: session.terminateSession,
     togglePinSession: session.togglePinSession,
     mergeSessions: session.mergeSessions,

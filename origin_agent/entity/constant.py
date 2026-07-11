@@ -72,6 +72,12 @@ AUTO_TAGS_CONTENT_MAX: int = AUTO_CONTENT_MAX
 # 会话合并时直接拼接摘要的字符阈值，超过则截断
 MERGE_CONCAT_THRESHOLD: int = AUTO_CONTENT_MAX
 
+# 会话摘要生成时历史输入截断上限（字符数）— 暂时设为极大值，后续再细化
+SUMMARY_INPUT_MAX_CHARS: int = 1_000_000_000
+
+# 多源会话合并时摘要拼接截断上限（字符数）— 暂时设为极大值
+MERGE_SUMMARY_CONCAT_MAX_CHARS: int = 1_000_000_000
+
 
 # ============================================================================
 # 超时

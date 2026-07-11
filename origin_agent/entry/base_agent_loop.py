@@ -608,6 +608,10 @@ class IMainSessionLoop(ABC):
     async def regenerate_session_tags(self) -> list[str]:
         """根据会话历史重新生成标签列表。"""
 
+    @abstractmethod
+    async def regenerate_summary_for_session(self, session_id: str) -> str:
+        """重新生成指定会话的摘要（可为任意 session_id，不要求当前活跃）。"""
+
 
 # ---------------------------------------------------------------------------
 # BasePrivateChatAgentLoop — 1-on-1 私聊 Agent 循环基类
