@@ -816,6 +816,8 @@ export function useSessionStore(callbacks: SessionStoreCallbacks = {}): SessionS
     setHandsfreeMode(false);
     setClipboardDisplays({});
     setTaskProgress({});
+    setTokenUsage(0);
+    setContextTokens(0);
     ignoreStaleRef.current = false;
   }, []);
 
@@ -830,6 +832,8 @@ export function useSessionStore(callbacks: SessionStoreCallbacks = {}): SessionS
     setPendingConfirm(null);
     setClipboardDisplays({});
     setTaskProgress({});
+    setTokenUsage(0);
+    setContextTokens(0);
     ignoreStaleRef.current = false;
   }, [sessionId]);
 
