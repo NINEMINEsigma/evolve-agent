@@ -609,6 +609,7 @@ export function useSessionStore(callbacks: SessionStoreCallbacks = {}): SessionS
         playlist: parsed.playlist,
         playlistAutoplay: parsed.playlistAutoplay ?? false,
         messageIndex: nextMessageIndex(prev),
+        toolCallMeta: msg.tool_call_meta as import("../types").ToolCallMeta | undefined,
       }]);
       return;
     }

@@ -281,6 +281,15 @@
   overflow-x: hidden;
 }
 
+.tool-call-meta {
+  margin-top: 6px;
+  padding-top: 4px;
+  font-size: 11px;
+  color: var(--text-muted);
+  border-top: 1px solid var(--border);
+  font-family: var(--font-mono, monospace);
+}
+
 .message-text-tool {
   color: var(--text-muted);
   font-size: 12px;

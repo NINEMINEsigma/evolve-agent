@@ -85,6 +85,7 @@ class Message(BaseModel):
     client_message_id: str | None = None  # 前端生成的乐观消息 ID，用于回显去重
     message_suffix: str | None = None  # 用户消息固定后缀（如 fixator 上下文）
     dynamic_message_suffix: str | None = None  # 用户消息动态后缀（如 memory/hooks 上下文）
+    tool_call_meta: Optional[dict[str, Any]] = None  # TOOL_RESULT：工具调用时间元信息
 
     @classmethod
     def from_json(cls, raw: str) -> Message:
@@ -119,6 +120,7 @@ class Message(BaseModel):
             response_characters=data.get("response_characters"),
             message_suffix=data.get("message_suffix"),
             dynamic_message_suffix=data.get("dynamic_message_suffix"),
+            tool_call_meta=data.get("tool_call_meta"),
         )
 
     def to_json(self) -> str:
@@ -187,6 +189,8 @@ class Message(BaseModel):
             d["message_suffix"] = self.message_suffix
         if self.dynamic_message_suffix is not None:
             d["dynamic_message_suffix"] = self.dynamic_message_suffix
+        if self.tool_call_meta is not None:
+            d["tool_call_meta"] = self.tool_call_meta
         return json.dumps(d, ensure_ascii=False)
 
 

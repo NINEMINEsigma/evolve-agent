@@ -123,6 +123,13 @@ const MessageItem = memo(function MessageItem({
               <div className="tool-call-detail message-content-collapsed" onWheel={handoffWheelAtBoundary}>
                 <MessageBody message={m} onImageClick={onImageClick} />
                 <MessageAttachments message={m} onImageClick={onImageClick} />
+                {m.toolCallMeta && (
+                  <div className="tool-call-meta">
+                    申请 {m.toolCallMeta.application_time}
+                    {m.toolCallMeta.approval_duration_ms > 0 && ` | 审批 ${m.toolCallMeta.approval_duration_ms}ms`}
+                    {m.toolCallMeta.invocation_duration_ms !== undefined && ` | 调用 ${m.toolCallMeta.invocation_duration_ms}ms`}
+                  </div>
+                )}
               </div>
             )}
           </div>

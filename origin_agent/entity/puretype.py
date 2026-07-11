@@ -144,6 +144,27 @@ class ApprovalResult(BaseModel):
     """
 
 
+class ToolCallMeta(BaseModel):
+    """工具调用的时间元信息。
+
+    在 ToolExecutor 中自动收集并注入到工具返回结果的 ``_meta`` 字段。
+    ``application_time`` 为人类可读的本地时间字符串，精确到毫秒；
+    其余字段均为相对于 ``application_time_ms`` 的毫秒偏移。
+    """
+    application_time: str
+    """人类可读的申请时间，格式 ``YYYY-MM-DD HH:MM:SS.mmm``。"""
+    application_time_ms: int
+    """申请时间的绝对毫秒时间戳，供机器计算使用。"""
+    approval_duration_ms: int
+    """审批耗时（毫秒），readonly 工具为 0。"""
+    invocation_start_offset_ms: int
+    """从申请到开始调用 handler 的毫秒偏移。"""
+    invocation_duration_ms: int
+    """handler 实际执行的毫秒数。"""
+    end_time_offset_ms: int
+    """从申请到工具调用完成的毫秒偏移。"""
+
+
 class ToolAllowlistEntry(BaseModel):
     """
     工具 allowlist 中的单条永久授权记录。
