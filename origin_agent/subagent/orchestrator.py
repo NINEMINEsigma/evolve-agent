@@ -614,7 +614,8 @@ class _OrchestratorContext:
                 real_loop = loop.loop
                 if real_loop is None or isinstance(real_loop, ParentAgentLoop):
                     return real_loop
-                raise ValueError(f"ParentAgentLoop not found for parent session {self._parent_session_id}")
+                # raise ValueError(f"ParentAgentLoop not found for parent session {self._parent_session_id}")
+                return None
         except Exception:
             logger.warning(
                 "Failed to resolve real ParentAgentLoop for parent=%s; falling back to bootstrap loop",
