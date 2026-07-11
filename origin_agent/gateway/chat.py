@@ -18,7 +18,7 @@ from typing import Any, Dict, List, Optional, Union
 from pydantic import BaseModel
 
 from system.atomic_io import write_text_atomic
-from entity.puretype import LoopMeta
+from entity.puretype import LoopMeta, Role
 
 logger = logging.getLogger(__name__)
 
@@ -474,7 +474,7 @@ class SessionManager:
         content: str,
         parent_sid: str | None = None,
         parents: list[str] | None = None,
-        role: str = "system",
+        role: Role = Role.SYSTEM,
         loop_meta: LoopMeta | None = None,
     ) -> str:
         """创建新会话并以指定角色的消息作为初始内容。支持多父合并。"""
@@ -487,30 +487,27 @@ class SessionManager:
         if sdir:
             sdir.mkdir(parents=True, exist_ok=True)
             msg_path: Path = sdir / "messages.jsonl"
-            entry: dict = {"role": role, "content": content}
+            entry: dict = {"role": role.value, "content": content}
             try:
                 with open(msg_path, "a", encoding="utf-8") as f:
                     f.write(json.dumps(entry, ensure_ascii=False) + "\n")
             except Exception as exc:
                 logger.warning("Failed to write context for session %s: %s", new_sid, exc)
-        # 更新主父会话的 continuation（仅第一个父节点）
-        primary_parent: str | None = None
-        if parents:
-            primary_parent = parents[0]
-        elif parent_sid:
-            primary_parent = parent_sid
-        if primary_parent and primary_parent in self._sessions:
-            self._sessions[primary_parent]["continuation"] = new_sid
-            # 同步更新父会话索引持久化，确保重启后 continuation 关系可恢复
-            if self._store_dir:
-                with self._index_lock:
-                    entries = self._read_index()
-                    for e in entries:
-                        if e.get("id") == primary_parent:
-                            e["continuation"] = new_sid
-                            break
-                    self._write_index(entries)
-        logger.info("Session created | new=%s parents=%s role=%s", new_sid, parents or [parent_sid], role)
+        # 更新所有父会话的 continuation
+        new_info = self._sessions.get(new_sid, {})
+        effective_parents: list[str] = new_info.get("parents", [])
+        for parent_id in effective_parents:
+            if parent_id in self._sessions:
+                self._sessions[parent_id]["continuation"] = new_sid
+        # 同步更新父会话索引持久化，确保重启后 continuation 关系可恢复
+        if self._store_dir and effective_parents:
+            with self._index_lock:
+                entries = self._read_index()
+                for e in entries:
+                    if e.get("id") in effective_parents:
+                        e["continuation"] = new_sid
+                self._write_index(entries)
+        logger.info("Session created | new=%s parents=%s role=%s", new_sid, parents or [parent_sid], role.value)
         return new_sid
 
     def update_loop_type(self, sid: str, loop_type: str, agents: list[str] | None = None) -> None:

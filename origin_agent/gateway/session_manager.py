@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any, TYPE_CHECKING
 
 from gateway.chat import SessionManager as ChatSessionManager
-from entity.puretype import Loop, LoopMeta
+from entity.puretype import Loop, LoopMeta, Role
 from system.session_store import SessionStore
 
 if TYPE_CHECKING:
@@ -58,11 +58,14 @@ class SessionManager:
         return self._chat_sm.get_all()
 
     def create_with_context(
-        self, context: str, parent_sid: str | None = None, role: str = "user",
+        self, context: str, parent_sid: str | None = None,
+        parents: list[str] | None = None,
+        role: Role = Role.USER,
         loop_meta: LoopMeta | None = None,
     ) -> str:
         return self._chat_sm.create_with_context(
-            context, parent_sid=parent_sid, role=role, loop_meta=loop_meta,
+            context, parent_sid=parent_sid, parents=parents,
+            role=role, loop_meta=loop_meta,
         )
 
     def archive(self, session_id: str, continuation_sid: str | None = None) -> None:

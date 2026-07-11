@@ -890,7 +890,7 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
             context=context,
             parent_sid=sources[0],
             parents=sources,
-            role=Role.USER.value,
+            role=Role.USER,
         )
 
         # 写入仅含 summary 消息的历史
