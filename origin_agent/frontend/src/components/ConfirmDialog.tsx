@@ -16,12 +16,15 @@ export default function ConfirmDialog({
 }: ConfirmDialogProps) {
   if (!pendingConfirm) return null;
 
+  const emoji = pendingConfirm.emoji ?? "⚡";
   const toolTitle = getToolTitle(pendingConfirm.tool);
 
   return (
     <div className="confirm-overlay">
       <div className="confirm-dialog">
-        <div className="confirm-title">{toolTitle}</div>
+        <div className="confirm-title">
+          {emoji} {toolTitle}
+        </div>
         <div className="confirm-body">
           <pre className="confirm-cmd" style={{ maxHeight: "40vh", overflowY: "auto" }}>
             {Array.isArray(pendingConfirm.command)

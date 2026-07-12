@@ -395,6 +395,7 @@ class _OrchestratorContext:
                                 "tool_name": tc.function.name,
                                 "tool_args": tc.function.arguments,
                                 "character_name": character_name,
+                                "emoji": tool_registry.get_emoji(tc.function.name),
                             })
                 elif msg.role == Role.TOOL and isinstance(msg, ToolResultMessage):
                     feedback.append({
@@ -536,6 +537,7 @@ class _OrchestratorContext:
                                     "tool_call_id": tc.id,
                                     "tool_name": tc.function.name,
                                     "tool_args": tc.function.arguments,
+                                    "emoji": tool_registry.get_emoji(tc.function.name),
                                 },
                             )
                 elif msg.role == Role.TOOL and isinstance(msg, ToolResultMessage):

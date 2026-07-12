@@ -70,6 +70,7 @@ export interface WSMessage {
   index?: number;
   client_message_id?: string;
   tool_call_meta?: ToolCallMeta;   // TOOL_RESULT：工具调用时间元信息
+  emoji?: string;                  // 工具调用/审批请求的图标
 }
 
 export interface ToolCallMeta {
@@ -87,6 +88,7 @@ export interface ConfirmRequest {
   command?: string[];
   reason?: string;
   tool?: string;
+  emoji?: string;
 }
 
 export interface AskRequest {
@@ -166,6 +168,7 @@ export interface ChatMessage {
   messageSuffix?: string;
   dynamicMessageSuffix?: string;
   toolCallMeta?: ToolCallMeta;   // 工具调用时间元信息
+  emoji?: string;                  // 工具调用/审批请求的图标
 }
 
 export interface SessionInfo {
@@ -195,6 +198,7 @@ export interface SubagentMessage {
   tool_args?: Record<string, unknown>;
   reasoning?: string;
   character_name?: string;
+  emoji?: string;
 }
 
 export interface SubagentSession {

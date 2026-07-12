@@ -27,6 +27,7 @@ from fastapi.staticfiles import StaticFiles
 
 from .chat import Message, MessageType
 from .message_router import MessageRouter
+from abstract.tools.registry import registry
 from datetime import datetime, timezone
 from entity.constant import CRON_STDOUT_PREVIEW_MAX_LENGTH, SUBPROCESS_TIMEOUT_DEFAULT, UPLOAD_FILENAME_TIME_FORMAT, USER_CHARACTER_NAME
 from system.context import get_runtime_context
@@ -291,6 +292,7 @@ async def _send_tool_event(
         tool=tool_name,
         args=data if event_type == "tool_call" else None,
         result=(payload if event_type == "tool_result" else None),
+        emoji=registry.get_emoji(tool_name) if event_type == "tool_call" else None,
     )
     try:
         await ws.send_text(msg.to_json())

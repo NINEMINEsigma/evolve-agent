@@ -78,7 +78,7 @@ class Message(BaseModel):
     # 多 Agent 模式：用户消息的可见性和响应指定
     visible_characters: Optional[list[str]] = None   # USER_MESSAGE：可见角色列表
     response_characters: Optional[list[str]] = None  # USER_MESSAGE：需响应角色列表
-    # tool_call / tool_result 相关字段
+    # tool_call / tool_result / confirm_request 相关字段
     tool_call_id: str | None = None  # TOOL_CALL / TOOL_RESULT：工具调用 ID
     character_name: str | None = None  # 消息发送者角色名
     index: int | None = None  # 消息在持久化历史中的索引
@@ -86,6 +86,7 @@ class Message(BaseModel):
     message_suffix: str | None = None  # 用户消息固定后缀（如 fixator 上下文）
     dynamic_message_suffix: str | None = None  # 用户消息动态后缀（如 memory/hooks 上下文）
     tool_call_meta: Optional[dict[str, Any]] = None  # TOOL_RESULT：工具调用时间元信息
+    emoji: Optional[str] = None  # 工具调用/审批请求的图标
 
     @classmethod
     def from_json(cls, raw: str) -> Message:
@@ -121,6 +122,7 @@ class Message(BaseModel):
             message_suffix=data.get("message_suffix"),
             dynamic_message_suffix=data.get("dynamic_message_suffix"),
             tool_call_meta=data.get("tool_call_meta"),
+            emoji=data.get("emoji"),
         )
 
     def to_json(self) -> str:
@@ -191,6 +193,8 @@ class Message(BaseModel):
             d["dynamic_message_suffix"] = self.dynamic_message_suffix
         if self.tool_call_meta is not None:
             d["tool_call_meta"] = self.tool_call_meta
+        if self.emoji is not None:
+            d["emoji"] = self.emoji
         return json.dumps(d, ensure_ascii=False)
 
 

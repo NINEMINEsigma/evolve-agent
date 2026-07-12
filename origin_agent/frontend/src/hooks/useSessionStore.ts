@@ -359,12 +359,13 @@ export function useSessionStore(callbacks: SessionStoreCallbacks = {}): SessionS
                 const callerPrefix = m.character_name ? `${m.character_name} ` : "";
                 return {
                   role: "tool",
-                  content: `${callerPrefix}⚡ ${toolName} ${argsStr}`,
+                  content: `${callerPrefix}${m.emoji || "⚡"} ${toolName} ${argsStr}`,
                   id: generateUUID(),
                   toolName,
                   toolArgs,
                   characterName: m.character_name,
                   messageIndex: typeof m.index === "number" ? m.index : undefined,
+                  emoji: m.emoji,
                 };
               });
 
@@ -583,12 +584,13 @@ export function useSessionStore(callbacks: SessionStoreCallbacks = {}): SessionS
       const callerPrefix = msg.character_name ? `${msg.character_name} ` : "";
       setMessages((prev) => [...prev, {
         role: "tool",
-        content: `${callerPrefix}⚡ ${msg.tool} ${argsStr}`,
+        content: `${callerPrefix}${msg.emoji || "⚡"} ${msg.tool} ${argsStr}`,
         id: generateUUID(),
         toolName: msg.tool,
         toolArgs: msg.args,
         characterName: msg.character_name,
         messageIndex: nextMessageIndex(prev),
+        emoji: msg.emoji,
       }]);
       return;
     }
@@ -687,6 +689,7 @@ export function useSessionStore(callbacks: SessionStoreCallbacks = {}): SessionS
           command: (msg.args as Record<string, unknown>)?.command as string[] | undefined,
           reason: (msg.args as Record<string, unknown>)?.reason as string | undefined,
           tool: msg.tool ?? undefined,
+          emoji: msg.emoji,
         });
       }
       return;
