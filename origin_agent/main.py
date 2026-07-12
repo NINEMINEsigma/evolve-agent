@@ -224,17 +224,6 @@ You can modify your own source code and complete evolution through the following
                 history_store_dir=Path(history_path) if history_path else None,
             )
 
-            # 注册持久化 memory provider
-            try:
-                from memory.provider import EasysaveMemoryProvider
-                mem: EasysaveMemoryProvider = EasysaveMemoryProvider(
-                    memory_dir=self.ctx.workspace / "memory"
-                )
-                agent_loop.add_memory_provider(mem)
-                logger.info("EasysaveMemoryProvider registered")
-            except Exception as exc:
-                logger.warning("Memory provider unavailable: %s", exc)
-
             # 将工具事件流连接到前端
             from gateway.server import _send_tool_event
             agent_loop.set_tool_event_callback(_send_tool_event)

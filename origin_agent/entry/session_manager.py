@@ -113,7 +113,7 @@ class LoopSessionManager:
             return None
 
         transfer_result = self._transfer_session_runtime_resources(old_sid, new_sid)
-        if transfer_result.get("tool_resources_error") or transfer_result.get("memory_init_failed"):
+        if transfer_result.get("tool_resources_error"):
             logger.warning(
                 "Session runtime resource transfer had issues | old=%s new=%s result=%s",
                 old_sid, new_sid, transfer_result,
@@ -134,21 +134,6 @@ class LoopSessionManager:
         result: dict[str, Any] = {"old_sid": old_sid, "new_sid": new_sid}
         self._loop.last_prompt_tokens = 0
         self._session_rotated_notify[old_sid] = new_sid
-
-        # 迁移 memory provider
-        memory_init_failed: list[str] = []
-        for provider in self._loop.memory.providers:
-            if self._loop.is_memory_initialized(id(provider)):
-                continue
-            try:
-                provider.initialize(new_sid)
-                self._loop.mark_memory_initialized(id(provider))
-            except Exception as exc:
-                logger.exception(
-                    "Failed to initialize memory provider for session=%s", new_sid,
-                )
-                memory_init_failed.append(str(exc))
-        result["memory_init_failed"] = memory_init_failed
 
         # 迁移工具副作用资源
         tool_resources_error: str | None = None
@@ -215,14 +200,6 @@ class LoopSessionManager:
                 logger.exception(
                     "Failed to write summary for session %s: %s", old_sid, exc,
                 )
-
-        # 同步 memory
-        try:
-            self._loop.memory.sync_all(
-                self._loop.history, session_id=old_sid,
-            )
-        except Exception:
-            logger.exception("Failed to sync memory for session=%s", old_sid)
 
         # 自动分类标签
         tags: list[str] = await self._generate_session_tags(old_sid)

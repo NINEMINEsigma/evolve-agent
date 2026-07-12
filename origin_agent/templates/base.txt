@@ -23,7 +23,6 @@ Skills:
 Available subsystems:
 - LLM client: OpenAI-compatible API. Configurable via env vars (OPENAI_API_KEY, OPENAI_BASE_URL, LLM_MODEL).
 - Tool registry (abstract/tools): tools registered via registry.register() at import time.
-- Memory manager (abstract/memory): persistent memory via EasysaveMemoryProvider.
 
 Running environment:
 - The ``ws:`` namespace maps to the workspace directory.  Shell commands

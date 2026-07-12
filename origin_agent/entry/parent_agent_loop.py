@@ -19,7 +19,6 @@ import uuid
 from pathlib import Path
 from typing import Any, Awaitable, Callable, Dict, List, TYPE_CHECKING
 
-from abstract.memory.manager import MemoryManager
 from abstract.tools.registry import registry as tool_registry
 from component.approval import ask_agent_reason
 from component.llm import LLMClient, LLMResponse, ToolCall
@@ -98,8 +97,6 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
         super().__init__(app, session_id)
         self._frontend_sink: FrontendSink = frontend_sink
         self._llm: LLMClient = LLMClient(app.runtime_context)
-        self._memory: MemoryManager = MemoryManager()
-        self._memory_initialized_ids: set[int] = set()
 
         self._session_store = (
             SessionStore(history_store_dir)
@@ -170,12 +167,10 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
         return self._frontend_sink
 
     def _get_tool_definitions(self) -> list[dict]:
-        """返回主 Agent 可用的工具 schema（availability 包含 MAIN 或 EVERY + memory 工具）。"""
+        """返回主 Agent 可用的工具 schema（availability 包含 MAIN 或 EVERY）。"""
         definitions: list[dict] = tool_registry.get_definitions_for_availability(
             scope=ToolAvailability.MAIN,
         )
-        for schema in self._memory.get_tool_schemas():
-            definitions.append({"type": "function", "function": schema})
         return definitions if definitions else []
 
     async def _on_context_over_limit(self) -> None:
@@ -206,9 +201,6 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
 
     def set_session_manager(self, manager: Any) -> None:
         self._session_manager = manager
-
-    def add_memory_provider(self, provider: Any) -> None:
-        self._memory.add_provider(provider)
 
     def pop_session_rotated(self) -> str | None:
         return self._lifecycle.pop_session_rotated()
@@ -244,18 +236,6 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
             self._maybe_inject_inbox()
             if not skip_append:
                 await self.append_user_message(user_message, character_name=character_name)
-
-            # 延迟初始化 memory provider
-            for provider in self._memory.providers:
-                if id(provider) in self._memory_initialized_ids:
-                    continue
-                try:
-                    provider.initialize(sid)
-                    self._memory_initialized_ids.add(id(provider))
-                except Exception:
-                    logger.exception(
-                        "Failed to initialize memory provider for session=%s", sid,
-                    )
 
             # 历史过长时自动终结会话
             if self._lifecycle.is_context_over_limit():
@@ -360,7 +340,6 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
                         reasoning_content=resp.reasoning_content,
                         reasoning_field_name=resp.reasoning_field_name,
                     )
-                    self._memory.sync_all(self._history, session_id=sid)
                     return assistant_text
 
                 # 存储 assistant 消息（含 tool_calls）
@@ -484,13 +463,8 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
         **kwargs: Any,
     ) -> int:
         hooks_context, fixator_context = self._collect_hooks_context()
-        memory_ctx = self._get_memory_context(str(content))
 
         dynamic_parts: list[str] = []
-        if memory_ctx:
-            dynamic_parts.append(
-                f"<|im_memory_context_start|>\n{memory_ctx}\n<|im_memory_context_end|>",
-            )
         if hooks_context:
             dynamic_parts.append(hooks_context)
         dynamic_suffix = "\n".join(dynamic_parts) if dynamic_parts else None
@@ -583,12 +557,6 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
                     result.append(ImageBlock(image_url=str(image_url_block or "")))
         return result
 
-    def _get_memory_context(self, user_message: str) -> str:
-        return self._memory.prefetch_all(
-            self._extract_text(user_message),
-            session_id=self.session_id,
-        )
-
     def _get_full_history(self, session_id: str) -> list[dict[str, Any]]:
         system_prompts: list[str] = build_agent_system_prompt(
             self.app.runtime_context,
@@ -606,24 +574,6 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
     def session_store(self) -> SessionStore | None:
         """返回当前 loop 的 session 持久化存储。"""
         return self._session_store
-
-    @property
-    def memory(self) -> MemoryManager:
-        """返回当前 loop 的 memory 管理器。"""
-        return self._memory
-
-    @property
-    def memory_initialized_ids(self) -> set[int]:
-        """返回已初始化 memory provider 的 id 集合（只读视图）。"""
-        return set(self._memory_initialized_ids)
-
-    def is_memory_initialized(self, provider_id: int) -> bool:
-        """检查指定 memory provider 是否已初始化。"""
-        return provider_id in self._memory_initialized_ids
-
-    def mark_memory_initialized(self, provider_id: int) -> None:
-        """标记指定 memory provider 已初始化。"""
-        self._memory_initialized_ids.add(provider_id)
 
     @property
     def session_manager(self) -> SessionManager | None:

@@ -1,6 +1,6 @@
 # abstract/ — 抽象层
 
-`abstract/` 是 Evolve Agent 的抽象层，定义工具注册表、AST 发现、记忆、技能、插件、MCP 客户端等核心抽象。这些模块不依赖具体实现，可被 `component/`、`memory/`、`custom_tools/` 等复用。
+`abstract/` 是 Evolve Agent 的抽象层，定义工具注册表、AST 发现、技能、插件、MCP 客户端等核心抽象。这些模块不依赖具体实现，可被 `component/`、`custom_tools/` 等复用。
 
 ---
 
@@ -12,10 +12,6 @@ abstract/
 │   ├── registry.py          ← 工具注册表
 │   ├── discover.py          ← AST 自动发现
 │   └── ui_event_router.py   ← UI 事件路由
-├── memory/
-│   ├── provider.py          ← MemoryProvider 抽象基类
-│   ├── manager.py           ← MemoryManager 编排
-│   └── sanitize.py          ← 上下文清洗
 ├── skills/
 │   ├── frontmatter.py       ← frontmatter 解析
 │   ├── loader.py            ← 技能加载
@@ -63,31 +59,6 @@ abstract/
 - 提供工具级前端 emit handler 注册。
 - 工具执行后由 `emit_for()` 统一分发事件到前端，例如 `task_progress`、`clipboard_display`、`subagent_update`。
 - 避免工具直接耦合 WebSocket 细节。
-
----
-
-## 记忆系统
-
-### `abstract/memory/provider.py`
-
-`MemoryProvider` 抽象基类，定义：
-
-- `prefetch(session_id, context)`：预取记忆上下文。
-- `sync(session_id, history)`：同步历史到记忆。
-- `tools()`：返回该 provider 提供的工具（如 `recall_memory`、`remember`）。
-
-### `abstract/memory/manager.py`
-
-`MemoryManager` 编排：
-
-- 一个内置 memory provider + 最多一个外部 provider。
-- `prefetch_all()`：预取所有 provider 的上下文。
-- `sync_all()`：将历史同步到所有 provider。
-- 流式/一次性上下文清洗，剥离 memory context fence tag。
-
-### `abstract/memory/sanitize.py`
-
-独立的上下文清洗器，用于剥离记忆相关的 fence tag。注意：当前与 `manager.py` 使用的 fence tag 不完全一致（manager 用 `<|im_memory_context_start|>`，sanitize 用 `<memory-context>`），这是已知实现分裂。
 
 ---
 
