@@ -359,7 +359,7 @@ class _OrchestratorContext:
         snap: dict[str, dict[str, Any]] = {}
         for session_id, sub in self._active.items():
             feedback: list[dict[str, Any]] = []
-            for msg in sub.history.messages:
+            for msg in sub.history.iter_messages():
                 if msg.role == Role.SYSTEM:
                     continue
                 if msg.role == Role.USER:
@@ -507,14 +507,14 @@ class _OrchestratorContext:
                         loop.load_history(loaded_history)
                     else:
                         logger.warning("Loaded subagent history is not History instance: %s", type(loaded_history))
-                        loop.load_history(History(messages=[]))
+                        loop.load_history(History())
                 except Exception as exc:
                     logger.warning("Failed to load subagent history from %s: %s", history_path, exc)
-                    loop.load_history(History(messages=[]))
+                    loop.load_history(History())
             else:
-                loop.load_history(History(messages=[]))
+                loop.load_history(History())
 
-            for msg in loop.history.messages:
+            for msg in loop.history.iter_messages():
                 if msg.role == Role.USER:
                     await self._push_subagent_ws(
                         session_id, profile.get("_name", ""),

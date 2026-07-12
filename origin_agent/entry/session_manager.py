@@ -230,7 +230,7 @@ class LoopSessionManager:
             sm.archive(old_sid, continuation_sid=new_sid)
 
             # 新 session 以 summary 作为 user 消息开始
-            self._loop.load_history(History(messages=[]))
+            self._loop.load_history(History())
             self._loop.last_prompt_tokens = 0
             summary_msg = CharacterConversationMessage(
                 role=Role.USER,

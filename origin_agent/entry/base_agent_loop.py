@@ -186,7 +186,7 @@ class BaseAgentLoop(ABC):
         self._inbox: Inbox = Inbox()
         self._cancel_event: asyncio.Event = asyncio.Event()
         self._message_hooks_cache: list[dict] | None = None
-        self._history: History = History(messages=[])
+        self._history: History = History()
         self._session_store: SessionStore | None = None
         self._token_usage: int = 0
         self._last_prompt_tokens: int = 0
@@ -329,6 +329,7 @@ class BaseAgentLoop(ABC):
         """设置当前 loop 的 session ID（供 gateway 层旋转/替换 loop 时使用）。"""
         self.session_id = session_id
 
+    # TODO: 以下三个函数完全没有差异
     def persist_history(self, session_id: str) -> None:
         """将当前 History 持久化到磁盘。"""
         self._persist_message(session_id)
@@ -351,10 +352,10 @@ class BaseAgentLoop(ABC):
 
     def _remove_last_user_message(self, session_id: str) -> None:
         """移除 History 中最后一条 user 消息并持久化。"""
-        messages = self._history.messages
-        if messages and messages[-1].role == Role.USER:
-            messages.pop()
-            self._history.update_last_user_message()
+        if self._history.count > 0:
+            last_msg = self._history.get_message(self._history.count - 1)
+            if last_msg.role == Role.USER:
+                self._history.remove_last_message()
         self._overwrite_history_file(session_id)
 
     def clear_session(self) -> None:
@@ -369,7 +370,7 @@ class BaseAgentLoop(ABC):
     def get_session_messages(self) -> list[dict]:
         """返回前端展示所需的消息列表，包含多 agent 元数据。"""
         messages: list[dict] = []
-        for index, msg in enumerate(self._history.messages):
+        for index, msg in enumerate(self._history.iter_messages()):
             raw_content = msg.content
             if isinstance(raw_content, list):
                 content: str | list[dict[str, Any]] = [b.as_object() for b in raw_content]
@@ -409,6 +410,7 @@ class BaseAgentLoop(ABC):
             messages.append(entry)
         return messages
 
+    # TODO: 重编辑缺少多模态支持
     def edit_session_message(self, index: int, content: str | None = None,
                              visible_characters: list[str] | None = None) -> dict:
         if not isinstance(index, int) or index < 0:
@@ -423,14 +425,15 @@ class BaseAgentLoop(ABC):
             updates["content"] = content
         if visible_characters is not None:
             updates["visible_characters"] = visible_characters
-        self._history.messages[index] = msg.model_copy(update=updates)
+        updated_msg = msg.model_copy(update=updates)
+        self._history.set_message(index, updated_msg)
         self._overwrite_history_file(self.session_id)
         result: dict = {
             "updated": True,
             "session_id": self.session_id,
             "index": index,
             "role": msg.role.value,
-            "content": content_to_text(self._history.messages[index].content),
+            "content": content_to_text(updated_msg.content),
         }
         if visible_characters is not None:
             result["visible_characters"] = visible_characters
@@ -440,26 +443,21 @@ class BaseAgentLoop(ABC):
         """删除最后 count 个逻辑轮次的消息（从倒数第 count 条 user 起，覆盖其后所有 tool/assistant）。"""
         if count < 1:
             return {"deleted": False, "error": "count must be >= 1"}
-        user_indices = [i for i, m in enumerate(self._history.messages) if m.role == Role.USER]
-        if not user_indices:
+        remove_from = self._history.find_last_user_message_index(count=count)
+        if remove_from is None:
             return {"deleted": False, "error": "no user messages to delete"}
-        if count > len(user_indices):
-            return {"deleted": False, "error": f"only {len(user_indices)} user messages available"}
-        remove_from = user_indices[-count]
-        self._history.messages = self._history.messages[:remove_from]
-        self._history.update_last_user_message()
+        self._history.truncate_to(remove_from)
         self._overwrite_history_file(self.session_id)
         return {"deleted": True, "session_id": self.session_id, "remaining_count": self._history.count}
 
     def regenerate_response(self) -> dict:
         """截断到最后一条 user 消息，返回其内容供重新生成。"""
-        user_indices = [i for i, m in enumerate(self._history.messages) if m.role == Role.USER]
-        if not user_indices:
+        last_user_idx = self._history.find_last_user_message_index(count=1)
+        if last_user_idx is None:
             return {"regenerate": False, "error": "no user message found"}
-        last_user_idx = user_indices[-1]
-        last_user_msg = self._history.messages[last_user_idx]
+        last_user_msg = self._history.get_message(last_user_idx)
         last_user_content = content_to_text(last_user_msg.content)
-        self._history.messages = self._history.messages[:last_user_idx + 1]
+        self._history.truncate_to(last_user_idx + 1)
         self._overwrite_history_file(self.session_id)
         result: dict = {
             "regenerate": True,

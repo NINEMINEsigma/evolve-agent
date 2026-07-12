@@ -219,7 +219,7 @@ class SessionManager:
 
         from entity.messages import History
         if history is None:
-            history = History(messages=[])
+            history = History()
 
         multi_loop: MultiAgentLoop = MultiAgentLoop(
             app=self._app,

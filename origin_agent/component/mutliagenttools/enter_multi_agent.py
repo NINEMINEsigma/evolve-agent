@@ -121,22 +121,22 @@ async def _handle_enter_multi_agent(args: dict[str, Any]) -> dict:
     await app.session_manager.replace_loop(session_id, multi_loop)
 
     # 切换前清理父 loop 最后一条未完成的 assistant tool_calls
-    for i in range(len(history.messages) - 1, -1, -1):
-        msg = history.messages[i]
-        if (
-            isinstance(msg, CharacterConversationMessage)
-            and msg.role == Role.ASSISTANT
-            and msg.tool_calls
-        ):
-            history.messages[i] = msg.model_copy(update={"tool_calls": None})
-            history.messages = history.messages[:i+1]
-            history.add_message(CharacterConversationMessage(
-                role=Role.USER,
-                character_name=SYSTEM_CHARACTER_NAME,
-                content="[System Result] Enter multi-agent mode successfully",
-                visible_characters=[main_agent_name],
-            ))
-            break
+    idx, msg = history.find_last_message(
+        lambda m: (
+            isinstance(m, CharacterConversationMessage)
+            and m.role == Role.ASSISTANT
+            and bool(m.tool_calls)
+        )
+    )
+    if idx >= 0:
+        history.set_message(idx, msg.model_copy(update={"tool_calls": None}))
+        history.truncate_to(idx + 1)
+        history.add_message(CharacterConversationMessage(
+            role=Role.USER,
+            character_name=SYSTEM_CHARACTER_NAME,
+            content="[System Result] Enter multi-agent mode successfully",
+            visible_characters=[main_agent_name],
+        ))
 
     return tool_result(
         success=True,

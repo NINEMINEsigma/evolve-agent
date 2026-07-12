@@ -622,7 +622,7 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
 
     def reset_history(self, session_id: str | None = None) -> None:
         """清空当前历史并可选持久化。"""
-        self._history = History(messages=[])
+        self._history = History()
         self._last_prompt_tokens = 0
         if session_id is not None:
             self._persist_message(session_id)
@@ -842,14 +842,13 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
         )
 
         # 写入仅含 summary 消息的历史
-        summary_history = History(messages=[
-            CharacterConversationMessage(
+        summary_history = History()
+        summary_history.add_message(CharacterConversationMessage(
                 role=Role.USER,
                 character_name=SYSTEM_CHARACTER_NAME,
                 content=context,
                 visible_characters=[self.current_character_agent],
-            ),
-        ])
+            ))
         self._session_store.write_history(new_sid, summary_history)
 
         # 归档源 sessions
@@ -864,15 +863,15 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
 
     def _load_history_from_disk(self, session_id: str) -> History:
         if self._session_store is None:
-            return History(messages=[])
+            return History()
         try:
             history = self._session_store.read_history(session_id)
-            return history if history is not None else History(messages=[])
+            return history if history is not None else History()
         except Exception as exc:
             logger.exception(
                 "Failed to load history for session %s: %s", session_id, exc,
             )
-            return History(messages=[])
+            return History()
 
     def is_processing(self) -> bool:
         return self._processing

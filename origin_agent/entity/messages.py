@@ -399,3 +399,65 @@ class History(BaseModel):
     def count(self) -> int:
         with self._io_locker:
             return len(self.messages)
+
+    # ---- 新增封装方法 ----
+
+    def iter_messages(self) -> Iterator[BaseMessage]:
+        """只读迭代消息列表（返回快照副本的迭代器）。"""
+        with self._io_locker:
+            return iter(list(self.messages))
+
+    def set_message(self, index: int, message: BaseMessage) -> None:
+        """替换指定索引的消息。"""
+        with self._io_locker:
+            if index < 0 or index >= len(self.messages):
+                return
+            self.messages[index] = message
+            self.update_last_user_message()
+
+    def truncate_to(self, index: int) -> None:
+        """截断消息列表到指定索引（保留 messages[:index]）。"""
+        with self._io_locker:
+            self.messages = self.messages[:index]
+            self.update_last_user_message()
+
+    def clear_messages(self) -> None:
+        """清空全部消息。"""
+        with self._io_locker:
+            self.messages.clear()
+            self.update_last_user_message()
+
+    def remove_last_message(self) -> BaseMessage | None:
+        """弹出并返回最后一条消息；列表为空时返回 None。"""
+        with self._io_locker:
+            if not self.messages:
+                return None
+            msg = self.messages.pop()
+            self.update_last_user_message()
+            return msg
+
+    def find_last_user_message_index(self, count: int = 1) -> int | None:
+        """返回从后往前第 count 条 Role.USER 消息的索引。
+
+        count=1 返回最后一条 user 消息的索引，不存在时返回 None。
+        """
+        with self._io_locker:
+            user_indices = [i for i, m in enumerate(self.messages) if m.role == Role.USER]
+            if not user_indices or count < 1 or count > len(user_indices):
+                return None
+            return user_indices[-count]
+
+    def find_last_message(
+        self,
+        predicate: Callable[[BaseMessage], bool],
+    ) -> tuple[int, BaseMessage] | tuple[int, None]:
+        """从后向前查找第一条满足 predicate 的消息，返回 (index, message)。
+
+        未找到时返回 (-1, None)。
+        """
+        with self._io_locker:
+            for i in range(len(self.messages) - 1, -1, -1):
+                msg = self.messages[i]
+                if predicate(msg):
+                    return (i, msg)
+            return (-1, None)

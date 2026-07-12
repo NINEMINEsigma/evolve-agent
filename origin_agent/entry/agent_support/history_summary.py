@@ -36,7 +36,7 @@ def history_to_summary_text(history: History) -> str:
 
     lines: list[str] = []
 
-    for msg in history.messages:
+    for msg in history.iter_messages():
         role_str = _role_display(msg)
         if role_str is None:
             continue
