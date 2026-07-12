@@ -162,8 +162,6 @@
   min-width: 0;
   overflow: hidden;
   justify-content: flex-end;
-  container-type: inline-size;
-  container-name: header-right;
 }
 
 .session-badge {
@@ -248,6 +246,7 @@
   overflow: hidden;
   text-overflow: ellipsis;
   max-width: 100%;
+  flex-shrink: 0;
 }
 
 .header-action-btn {
@@ -439,7 +438,7 @@
   font-family: "SF Mono", "Fira Code", monospace;
 }
 
-@container header-right (max-width: 520px) {
+@media (max-width: 900px) {
   .token-badge {
     display: none;
   }
@@ -448,7 +447,7 @@
   }
 }
 
-@container header-right (max-width: 380px) {
+@media (max-width: 768px) {
   .session-badge {
     display: none;
   }
