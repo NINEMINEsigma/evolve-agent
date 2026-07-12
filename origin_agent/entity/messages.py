@@ -3,8 +3,7 @@ import logging
 from pydantic import BaseModel, Field, PrivateAttr
 from entity.puretype import Role
 from entity.constant import USER_CHARACTER_NAME
-from system.templates import get_templates_dir, read_template
-from easysave import save, load
+from system.templates import read_template
 from threading import Lock
 
 logger = logging.getLogger(__name__)
@@ -201,18 +200,6 @@ class CharacterConversationMessage(CharacterMessage):
     '''
     动态消息后缀
     '''
-    # ----------------------------------------
-    # v3字段区域
-    # ----------------------------------------
-    dynamic_positive_suffix: list[str]|None = None
-    '''
-    动态正向消息后缀, 用于长期记忆方案
-    '''
-    dynamic_negative_suffix: list[str]|None = None
-    '''
-    动态负向消息后缀, 用于长期记忆方案
-    '''
-
 
     def with_suffix(
         self, 
