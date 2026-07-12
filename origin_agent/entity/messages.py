@@ -166,28 +166,61 @@ class ToolCall(BaseModel):
 
 
 class CharacterConversationMessage(CharacterMessage):
-    reasoning: str|None                 = Field(default=None, 
-                                                description="The reasoning of the message")
+    # ----------------------------------------
+    # v1字段区域
+    # ----------------------------------------
+    '''
+    角色对话消息, 始终被消息的发起者和用户可见, 其余agent可见性由字段控制
+    '''
+    reasoning: str|None = None
+    '''
+    思考内容
+    '''
     # 字段名应由 LLM 响应实际使用的 provider 字段决定；默认仅作为无响应信息时的兜底。
-    reasoning_field_name: str|None      = Field(default="reasoning_content", 
-                                                description="The field name of the reasoning")
-    visible_characters: list[str]|None  = Field(default=None, 
-                                                description="The visible characters of the message")
-    response_characters: list[str]|None = Field(default=None, 
-                                                description="The characters needed to response of the message")
-    # "tool_calls": [{"id": "list_uploads:0", "type": "function", "function": {
-    #   "name": "list_uploads", "arguments": "{\"n\": 10}"}
-    # }]
-    tool_calls: list[ToolCall]|None     = Field(default=None, 
-                                                description="The tool calls of the message")
-    message_suffix: str|None            = Field(default=None, 
-                                                description="The suffix of the message, like hook messages")
-    dynamic_message_suffix: str|None    = Field(default=None,
-                                                description="The suffix of the last user message, like hook messages")                                            
+    reasoning_field_name: str|None = "reasoning_content"
+    '''
+    思考内容字段名
+    '''
+    visible_characters: list[str]|None = None
+    '''
+    可见角色列表, 为空时仅用户和自己可见
+    '''
+    response_characters: list[str]|None = None
+    '''
+    需要响应的角色列表, 为空时表示所有角色都需要响应
+    '''
+    tool_calls: list[ToolCall]|None = None
+    '''
+    工具调用列表
+    '''
+    message_suffix: str|None = None
+    '''
+    消息后缀
+    '''
+    dynamic_message_suffix: str|None = None
+    '''
+    动态消息后缀
+    '''
+    # ----------------------------------------
+    # v3字段区域
+    # ----------------------------------------
+    dynamic_positive_suffix: list[str]|None = None
+    '''
+    动态正向消息后缀, 用于长期记忆方案
+    '''
+    dynamic_negative_suffix: list[str]|None = None
+    '''
+    动态负向消息后缀, 用于长期记忆方案
+    '''
 
-    def with_suffix(self, message_suffix: str | None) -> "CharacterConversationMessage":
-        """返回带新 message_suffix 的副本（不影响原对象）。"""
-        return self.model_copy(update={"message_suffix": message_suffix})
+
+    def with_suffix(
+        self, 
+        message_suffix: str | None, 
+        dynamic_positive_suffix: list[str] | None = None, 
+        dynamic_negative_suffix: list[str] | None = None) -> "CharacterConversationMessage":
+        """返回带新 message_suffix, dynamic_positive_suffix, dynamic_negative_suffix 的副本（不影响原对象）。"""
+        return self.model_copy(update={"message_suffix": message_suffix, "dynamic_positive_suffix": dynamic_positive_suffix, "dynamic_negative_suffix": dynamic_negative_suffix})
 
     def as_content(
         self,
@@ -305,7 +338,7 @@ class History(BaseModel):
     last_user_message: CharacterConversationMessage|None = Field(default=None, description="The last user message of the history")
     _io_locker: Lock = PrivateAttr(default_factory=Lock)
 
-    def get_messages(self, current_character_agent: str, **kwargs) -> list[dict]:
+    def get_messages(self, *, current_character_agent: str, **kwargs) -> list[dict]:
         result = [message.as_message(
                     current_character_agent=current_character_agent, is_last_user_message=message == self.last_user_message, 
                     **kwargs)
@@ -315,7 +348,9 @@ class History(BaseModel):
 
     def to_openai(self, current_character_agent: str, **kwargs) -> list[dict]:
         """get_messages 的别名，语义上明确表示转换为 OpenAI 格式。"""
-        return self.get_messages(current_character_agent, **kwargs)
+        return self.get_messages(
+            current_character_agent=current_character_agent, 
+            **kwargs)
 
     def update_last_user_message(self) -> None:
         """重新计算并更新 last_user_message 缓存。"""
@@ -350,6 +385,10 @@ class History(BaseModel):
                         message.tool_call_id,
                     )
                     return -1
+            if isinstance(message, CharacterConversationMessage):
+                # 上下文编排, 通过RAG等手段获取关于这条消息的正面与负面相关记忆
+                # 形成类似奖惩机制的关联性长期记忆
+                pass
             self.messages.append(message)
             self.update_last_user_message()
             return len(self.messages) - 1

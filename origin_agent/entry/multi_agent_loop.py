@@ -702,7 +702,9 @@ class MultiAgentLoop(BaseAgentLoop, IMainSessionLoop):
 
         # 构建该 Agent 视角的 History 视图；
         # dynamic_message_suffix 已在 append_user_message 中设置，由 History 自动附加。
-        history_view = self._history.get_messages(character_name)
+        history_view = self._history.get_messages(
+            current_character_agent=character_name,
+            )
 
         logger.info(
             "Agent worker start | session=%s character=%s history_len=%d final=%s",
