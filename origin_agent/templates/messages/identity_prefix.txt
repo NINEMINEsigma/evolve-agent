@@ -1,1 +1,1 @@
-This message is the user's last message in the current conversation, you are {{CURRENT_CHARACTER}}
+This message is the user's latest message in the current conversation, you are {{CURRENT_CHARACTER}}
