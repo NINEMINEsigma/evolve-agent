@@ -81,6 +81,7 @@ def discover_builtin_tools(tools_dir: str, package_prefix: str) -> list[str]:
         if path.name in _EXCLUDED_FILENAMES:
             continue
         if path.stem.startswith("_"):
+            logger.info("discover_builtin_tools: skip (ignore) %s", path.name)
             continue
         if not _module_registers_tools(path):
             logger.info("discover_builtin_tools: skip (no registry.register) %s", path.name)

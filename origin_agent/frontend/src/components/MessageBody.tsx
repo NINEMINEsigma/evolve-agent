@@ -7,6 +7,7 @@ import type { Components } from "react-markdown";
 import { ChatMessage, ContentBlock, MessageContent } from "../types";
 import CodeBlock from "./CodeBlock";
 import SafeHtml from "./SafeHtml";
+import MermaidRenderer from "./MermaidRenderer";
 
 // 当文本包含 script、style、link、iframe 等标签时，需要完整隔离渲染，避免 CSS/JS 污染外层页面
 const SANDBOX_TAG_RE = /<script\b|<style\b|<link\b|<iframe\b|<object\b|<embed\b/i;
@@ -177,6 +178,24 @@ export default function MessageBody({ message, streaming, onImageClick }: Messag
   const mdComponents = useMemo(
     () => ({
       ...markdownComponentsBase,
+      code({ inline, className, children, ...props }: React.HTMLAttributes<HTMLElement> & { inline?: boolean }) {
+        const match = /language-(\w+)/.exec(className || "");
+        const code = String(children).replace(/\n$/, "");
+        if (!inline && match) {
+          if (match[1] === "mermaid") {
+            if (streaming) {
+              return <CodeBlock language="mermaid" code={code} />;
+            }
+            return <MermaidRenderer definition={code} />;
+          }
+          return <CodeBlock language={match[1]} code={code} />;
+        }
+        return (
+          <code className={className} {...props}>
+            {children}
+          </code>
+        );
+      },
       img({ src, alt }: React.ImgHTMLAttributes<HTMLImageElement>) {
         return (
           <a href="#" onClick={(e) => { e.preventDefault(); onImageClick(src!); }} className="message-img-link">
@@ -185,7 +204,7 @@ export default function MessageBody({ message, streaming, onImageClick }: Messag
         );
       },
     }),
-    [onImageClick]
+    [onImageClick, streaming]
   );
 
   const reasoningLabel = useMemo(() => {

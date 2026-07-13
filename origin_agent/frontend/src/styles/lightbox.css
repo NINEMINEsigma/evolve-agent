@@ -74,6 +74,17 @@
   background: rgba(239, 68, 68, 0.8);
 }
 
+/* Mermaid SVG in lightbox */
+.mermaid-lightbox-svg {
+  max-width: 92vw;
+  max-height: 92vh;
+  overflow: auto;
+}
+
+.mermaid-lightbox-svg svg {
+  display: block;
+}
+
 @keyframes fadeIn {
   from { opacity: 0; }
   to { opacity: 1; }

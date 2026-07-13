@@ -93,9 +93,6 @@ SUBPROCESS_SHORT_TIMEOUT_DEFAULT: int = 5
 # 子进程软清理等待时间, 到时后强杀进程
 SUBPROCESS_SOFT_CLEANUP_WAIT_TIME: int = 5
 
-# Playwright 页面操作默认超时（毫秒）— 用于 Mermaid/Excalidraw 等浏览器渲染场景
-PLAYWRIGHT_PAGE_TIMEOUT_MS: int = 120000
-
 # 审批模型加载等待超时（秒）— 等待本地 GGUF 模型从 loading 变为 ready
 APPROVAL_MODEL_LOAD_TIMEOUT: int = 120
 
