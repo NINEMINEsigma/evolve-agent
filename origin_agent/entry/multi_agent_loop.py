@@ -291,57 +291,6 @@ class MultiAgentLoop(BaseAgentLoop, IMainSessionLoop):
         self._history.clear_messages()
         logger.info("Cleared multi-agent session | session=%s", self.session_id)
 
-    # TODO: 这两个函数与BaseAgentLoop中的函数完全一致
-    # def edit_session_message(self, index: int, content: str | None = None,
-    #                          visible_characters: list[str] | None = None) -> dict:
-    #     """编辑指定索引的消息内容或 visible_characters。
-    #     至少提供 content 或 visible_characters 之一。
-    #     """
-    #     if not isinstance(index, int) or index < 0:
-    #         return {"updated": False, "error": "invalid message index"}
-    #     if index >= self._history.count:
-    #         return {"updated": False, "error": "message index out of range"}
-    #     msg = self._history.get_message(index)
-    #     if not isinstance(msg, CharacterConversationMessage):
-    #         return {"updated": False, "error": "message does not support visibility"}
-    #     updates: dict = {}
-    #     if content is not None:
-    #         updates["content"] = content
-    #     if visible_characters is not None:
-    #         updates["visible_characters"] = visible_characters
-    #     updated_msg = msg.model_copy(update=updates)
-    #     self._history.set_message(index, updated_msg)
-    #     self._persist_message(self.session_id)
-    #     return {
-    #         "updated": True,
-    #         "session_id": self.session_id,
-    #         "index": index,
-    #         "role": msg.role.value,
-    #         "content": str(updated_msg.content),
-    #         "visible_characters": visible_characters,
-    #     }
-
-    # def regenerate_response(self) -> dict:
-    #     """截断到最后一条 user 消息，返回其内容供重新生成。"""
-    #     last_user_idx = self._history.find_last_user_message_index(count=1)
-    #     if last_user_idx is None:
-    #         return {"regenerate": False, "error": "no user message found"}
-    #     last_user_msg = self._history.get_message(last_user_idx)
-    #     last_user_content = content_to_text(last_user_msg.content)
-    #     # 截断到 user 消息处（保留 user 本身，删除其后所有 assistant/tool）
-    #     self._history.truncate_to(last_user_idx + 1)
-    #     self._persist_message(self.session_id)
-    #     result: dict = {
-    #         "regenerate": True,
-    #         "session_id": self.session_id,
-    #         "last_user_content": last_user_content,
-    #         "remaining_count": self._history.count,
-    #     }
-    #     if isinstance(last_user_msg, CharacterConversationMessage):
-    #         result["visible_characters"] = last_user_msg.visible_characters
-    #         result["response_characters"] = last_user_msg.response_characters
-    #     return result
-
     async def _execute_tool(self, tool_name: str, args: dict,
                             tool_call_id: str = "",
                             session_id: str = "",
