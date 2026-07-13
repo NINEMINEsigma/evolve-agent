@@ -416,7 +416,9 @@ export function useWebSocket() {
     instantScrollRef,
     fileInputRef: upload.fileInputRef,
     // computed
-    sidebarSessions: session.sidebarSessions,
+    sidebarItems: session.sidebarItems,
+    expandedClusters: session.expandedClusters,
+    toggleCluster: session.toggleCluster,
     sessionResources: session.sessionResources,
   };
 }

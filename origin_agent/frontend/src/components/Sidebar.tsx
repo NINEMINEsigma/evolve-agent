@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { SessionInfo } from "../types";
+import { SessionInfo, SessionCluster, SidebarItem } from "../types";
 import { formatTime } from "../utils";
 
 interface SidebarProps {
@@ -17,7 +17,9 @@ interface SidebarProps {
   onSwitchSession: (sid: string) => void;
   onContextMenu: (e: React.MouseEvent, sid: string) => void;
   onMergeSessions: (sources: string[]) => void;
-  sidebarSessions: SessionInfo[];
+  sidebarItems: SidebarItem[];
+  expandedClusters: Set<string>;
+  toggleCluster: (id: string) => void;
 }
 
 function sessionLabel(s: SessionInfo) {
@@ -66,6 +68,7 @@ function SessionListItem({
   onToggleMergeSelect,
   onSwitchSession,
   onContextMenu,
+  indent = 0,
 }: {
   session: SessionInfo;
   sessionId: string;
@@ -75,6 +78,7 @@ function SessionListItem({
   onToggleMergeSelect: (sid: string) => void;
   onSwitchSession: (sid: string) => void;
   onContextMenu: (e: React.MouseEvent, sid: string) => void;
+  indent?: number;
 }) {
   const isArchived = s.status === "archived";
   const canSelectForMerge = mergeMode && isArchived;
@@ -91,6 +95,7 @@ function SessionListItem({
     <div
       data-tooltip={relationTooltip || buildTooltip(s)}
       className={`session-item ${s.id === sessionId ? "active" : ""} ${isArchived ? "archived" : ""} ${isParentOfCurrent ? "parent-session" : ""} ${isContinuationOfCurrent ? "continuation-session" : ""} ${mergeMode && !isArchived ? "merge-unavailable" : ""} ${mergeMode && selectedForMerge.has(s.id) ? "merge-selected" : ""}`}
+      style={{ paddingLeft: 16 + indent }}
       onClick={() => {
         if (canSelectForMerge) onToggleMergeSelect(s.id);
         else if (!mergeMode) onSwitchSession(s.id);
@@ -140,6 +145,92 @@ function SessionListItem({
   );
 }
 
+function ClusterItem({
+  cluster,
+  expanded,
+  sessionId,
+  sessions,
+  mergeMode,
+  selectedForMerge,
+  onToggle,
+  onToggleMergeSelect,
+  onSwitchSession,
+  onContextMenu,
+}: {
+  cluster: SessionCluster;
+  expanded: boolean;
+  sessionId: string;
+  sessions: SessionInfo[];
+  mergeMode: boolean;
+  selectedForMerge: Set<string>;
+  onToggle: () => void;
+  onToggleMergeSelect: (sid: string) => void;
+  onSwitchSession: (sid: string) => void;
+  onContextMenu: (e: React.MouseEvent, sid: string) => void;
+}) {
+  const hasActive = cluster.members.some((m) => m.id === sessionId);
+  const currentSession = sessions.find((s) => s.id === sessionId);
+  const parentSessions = currentSession?.parents
+    ?.map((pid) => sessions.find((s) => s.id === pid))
+    .filter((s): s is SessionInfo => Boolean(s)) ?? [];
+  const continuationSession = currentSession?.continuation
+    ? sessions.find((s) => s.id === currentSession.continuation)
+    : undefined;
+  return (
+    <div className={`cluster ${hasActive ? "cluster-active" : ""}`}>
+      <div
+        className={`cluster-item ${hasActive ? "cluster-item-active" : ""}`}
+        onClick={onToggle}
+        data-tooltip={`${cluster.members.length} 个会话`}
+      >
+        <span className="cluster-title">
+          {cluster.pinned && <span className="pinned-mark" data-tooltip="已收藏">★</span>}
+          {cluster.title}
+        </span>
+        <span className="cluster-count">{cluster.members.length}</span>
+      </div>
+      {expanded && (
+        <div className="cluster-members">
+          {cluster.members.map((s) => (
+            <div key={s.id}>
+              <SessionListItem
+                session={s}
+                sessionId={sessionId}
+                sessions={sessions}
+                mergeMode={mergeMode}
+                selectedForMerge={selectedForMerge}
+                onToggleMergeSelect={onToggleMergeSelect}
+                onSwitchSession={onSwitchSession}
+                onContextMenu={onContextMenu}
+                indent={4}
+              />
+              {s.id === sessionId && (parentSessions.length > 0 || continuationSession) && (
+                <div className="relation-shortcuts">
+                  {parentSessions.map((parent) => (
+                    <RelatedSessionShortcut
+                      key={parent.id}
+                      session={parent}
+                      kind="parent"
+                      onSwitchSession={onSwitchSession}
+                    />
+                  ))}
+                  {continuationSession && (
+                    <RelatedSessionShortcut
+                      session={continuationSession}
+                      kind="continuation"
+                      onSwitchSession={onSwitchSession}
+                    />
+                  )}
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function Sidebar({
   collapsed,
   sessions,
@@ -155,7 +246,9 @@ export default function Sidebar({
   onSwitchSession,
   onContextMenu,
   onMergeSessions,
-  sidebarSessions,
+  sidebarItems,
+  expandedClusters,
+  toggleCluster,
 }: SidebarProps) {
   const [searchFocused, setSearchFocused] = useState(false);
   const currentSession = sessions.find((s) => s.id === sessionId);
@@ -227,42 +320,58 @@ export default function Sidebar({
         </div>
       </div>
       <div className="session-list">
-        {sidebarSessions.length === 0 ? (
+        {sidebarItems.length === 0 ? (
           <div className="session-empty">无匹配会话</div>
         ) : (
-          sidebarSessions.map((s) => (
-            <div key={s.id}>
-              <SessionListItem
-                session={s}
+          sidebarItems.map((item) =>
+            item.kind === "cluster" ? (
+              <ClusterItem
+                key={item.cluster.id}
+                cluster={item.cluster}
+                expanded={expandedClusters.has(item.cluster.id)}
                 sessionId={sessionId}
                 sessions={sessions}
                 mergeMode={mergeMode}
                 selectedForMerge={selectedForMerge}
+                onToggle={() => toggleCluster(item.cluster.id)}
                 onToggleMergeSelect={onToggleMergeSelect}
                 onSwitchSession={onSwitchSession}
                 onContextMenu={onContextMenu}
               />
-              {s.id === sessionId && (parentSessions.length > 0 || continuationSession) && (
-                <div className="relation-shortcuts">
-                  {parentSessions.map((parent) => (
-                    <RelatedSessionShortcut
-                      key={parent.id}
-                      session={parent}
-                      kind="parent"
-                      onSwitchSession={onSwitchSession}
-                    />
-                  ))}
-                  {continuationSession && (
-                    <RelatedSessionShortcut
-                      session={continuationSession}
-                      kind="continuation"
-                      onSwitchSession={onSwitchSession}
-                    />
-                  )}
-                </div>
-              )}
-            </div>
-          ))
+            ) : (
+              <div key={item.session.id}>
+                <SessionListItem
+                  session={item.session}
+                  sessionId={sessionId}
+                  sessions={sessions}
+                  mergeMode={mergeMode}
+                  selectedForMerge={selectedForMerge}
+                  onToggleMergeSelect={onToggleMergeSelect}
+                  onSwitchSession={onSwitchSession}
+                  onContextMenu={onContextMenu}
+                />
+                {item.session.id === sessionId && (parentSessions.length > 0 || continuationSession) && (
+                  <div className="relation-shortcuts">
+                    {parentSessions.map((parent) => (
+                      <RelatedSessionShortcut
+                        key={parent.id}
+                        session={parent}
+                        kind="parent"
+                        onSwitchSession={onSwitchSession}
+                      />
+                    ))}
+                    {continuationSession && (
+                      <RelatedSessionShortcut
+                        session={continuationSession}
+                        kind="continuation"
+                        onSwitchSession={onSwitchSession}
+                      />
+                    )}
+                  </div>
+                )}
+              </div>
+            )
+          )
         )}
       </div>
       {mergeMode && (

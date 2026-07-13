@@ -216,7 +216,9 @@ export default function Layout({ ws, onContextMenu }: LayoutProps) {
           ws.setMergeMode(false);
           ws.setSelectedForMerge(new Set());
         }}
-        sidebarSessions={ws.sidebarSessions}
+        sidebarItems={ws.sidebarItems}
+        expandedClusters={ws.expandedClusters}
+        toggleCluster={ws.toggleCluster}
       />
 
       {isMobile && !sidebarCollapsed && (

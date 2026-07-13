@@ -288,7 +288,7 @@ def _build_frontend(force: bool = False) -> bool:
     try:
         pnpm: str = "pnpm.cmd" if sys.platform == "win32" else "pnpm"
         # 强制非交互模式：避免 pnpm 在子进程中弹出 ConfirmPrompt 导致 readline 崩溃
-        env: dict[str, str] = {**os.environ, "CI": "true"}
+        env: dict[str, str] = {**os.environ, "CI": "true", "NODE_OPTIONS": "--max-old-space-size=4096"}
         # pnpm install
         install_proc = subprocess.run(
             [pnpm, "install"],

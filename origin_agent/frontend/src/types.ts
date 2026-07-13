@@ -184,6 +184,19 @@ export interface SessionInfo {
   tags?: string[];
 }
 
+export interface SessionCluster {
+  id: string;
+  created_at: number;
+  title: string;
+  pinned: boolean;
+  last_activity_at: number;
+  members: SessionInfo[];
+}
+
+export type SidebarItem =
+  | { kind: "session"; session: SessionInfo }
+  | { kind: "cluster"; cluster: SessionCluster };
+
 export interface PendingApproval {
   tool_call_id: string;
   tool_name: string;

@@ -77,7 +77,7 @@ export default function InputBar({
     { id: "main", name: "主会话" },
     ...activeSubagents
       .sort((a, b) => a.session_id.localeCompare(b.session_id))
-      .map((s) => ({ id: s.session_id, name: s.name || s.session_id.slice(0, 12), status: s.status })),
+      .map<TargetSessionOption>((s) => ({ id: s.session_id, name: s.name || s.session_id.slice(0, 12), status: s.status })),
   ];
 
   const toggleTarget = (id: string) => {

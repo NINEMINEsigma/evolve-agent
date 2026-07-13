@@ -9,6 +9,7 @@ import {
   ClipboardDisplay,
   CronTask,
   SessionInfo,
+  SidebarItem,
   WSMessage,
   MessageContent,
 } from "../types";
@@ -136,7 +137,9 @@ export interface SessionStore {
   branchSession: (sid: string) => void;
   toggleMergeSelect: (sid: string) => void;
   updateSessionTags: (sid: string, tags: string[]) => Promise<string[]>;
-  sidebarSessions: SessionInfo[];
+  sidebarItems: SidebarItem[];
+  expandedClusters: Set<string>;
+  toggleCluster: (id: string) => void;
   sessionResources: import("../utils").MessageResources;
 }
 
@@ -178,6 +181,7 @@ export function useSessionStore(callbacks: SessionStoreCallbacks = {}): SessionS
   const [generatingTagSessions, setGeneratingTagSessions] = useState<Set<string>>(new Set());
   const [streamingMessage, setStreamingMessage] = useState<ChatMessage | null>(null);
   const [allTags, setAllTags] = useState<string[]>([]);
+  const [expandedClusters, setExpandedClusters] = useState<Set<string>>(new Set());
 
   const messagesRef = useRef<ChatMessage[]>([]);
   useEffect(() => {
@@ -1008,21 +1012,104 @@ export function useSessionStore(callbacks: SessionStoreCallbacks = {}): SessionS
     });
   }, [sessions]);
 
-  const sidebarSessions = useMemo(() => {
-    const q = searchQuery.toLowerCase().trim();
-    const filtered = q
-      ? sessions.filter((s) => {
-          const text = (s.title || s.id).toLowerCase();
-          if (text.includes(q)) return true;
-          const tags = s.tags || [];
-          return tags.some((t) => t.toLowerCase().includes(q));
-        })
-      : sessions;
-    return filtered.sort((a, b) => {
-      if (Number(b.pinned) !== Number(a.pinned)) return Number(b.pinned) - Number(a.pinned);
-      return (b.last_activity_at || b.created_at) - (a.last_activity_at || a.created_at);
+  function buildSidebarItems(sessions: SessionInfo[]): SidebarItem[] {
+    const sessionById = new Map<string, SessionInfo>();
+    sessions.forEach((s) => sessionById.set(s.id, s));
+
+    const adj = new Map<string, Set<string>>();
+    sessions.forEach((s) => {
+      if (!adj.has(s.id)) adj.set(s.id, new Set());
+      (s.parents || []).forEach((pid) => {
+        if (sessionById.has(pid)) {
+          adj.get(s.id)!.add(pid);
+          if (!adj.has(pid)) adj.set(pid, new Set());
+          adj.get(pid)!.add(s.id);
+        }
+      });
+      if (s.continuation && sessionById.has(s.continuation)) {
+        adj.get(s.id)!.add(s.continuation);
+        if (!adj.has(s.continuation)) adj.set(s.continuation, new Set());
+        adj.get(s.continuation)!.add(s.id);
+      }
     });
-  }, [sessions, searchQuery]);
+
+    const visited = new Set<string>();
+    const items: SidebarItem[] = [];
+
+    function dfs(start: string, component: SessionInfo[]) {
+      visited.add(start);
+      const s = sessionById.get(start);
+      if (s) component.push(s);
+      (adj.get(start) || []).forEach((next) => {
+        if (!visited.has(next)) dfs(next, component);
+      });
+    }
+
+    sessions.forEach((s) => {
+      if (!visited.has(s.id)) {
+        const component: SessionInfo[] = [];
+        dfs(s.id, component);
+        if (component.length === 1) {
+          const session = component[0];
+          items.push({ kind: "session", session });
+        } else if (component.length > 1) {
+          component.sort((a, b) => (b.last_activity_at || b.created_at) - (a.last_activity_at || a.created_at));
+          const head = component[0];
+          items.push({
+            kind: "cluster",
+            cluster: {
+              id: head.id,
+              created_at: head.created_at,
+              title: head.title || head.id.slice(0, 8) + "...",
+              pinned: component.some((m) => m.pinned),
+              last_activity_at: Math.max(...component.map((m) => m.last_activity_at || m.created_at)),
+              members: component,
+            },
+          });
+        }
+      }
+    });
+
+    items.sort((a, b) => {
+      const aPinned = a.kind === "session" ? a.session.pinned : a.cluster.pinned;
+      const bPinned = b.kind === "session" ? b.session.pinned : b.cluster.pinned;
+      if (Number(bPinned) !== Number(aPinned)) return Number(bPinned) - Number(aPinned);
+      const aTime = a.kind === "session" ? a.session.last_activity_at || a.session.created_at : a.cluster.last_activity_at;
+      const bTime = b.kind === "session" ? b.session.last_activity_at || b.session.created_at : b.cluster.last_activity_at;
+      return bTime - aTime;
+    });
+
+    return items;
+  }
+
+  const toggleCluster = useCallback((id: string) => {
+    setExpandedClusters((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }, []);
+
+  const sidebarItems = useMemo(() => {
+    const q = searchQuery.toLowerCase().trim();
+    if (q || mergeMode) {
+      const filtered = q
+        ? sessions.filter((s) => {
+            const text = (s.title || s.id).toLowerCase();
+            if (text.includes(q)) return true;
+            const tags = s.tags || [];
+            return tags.some((t) => t.toLowerCase().includes(q));
+          })
+        : sessions;
+      const sorted = filtered.sort((a, b) => {
+        if (Number(b.pinned) !== Number(a.pinned)) return Number(b.pinned) - Number(a.pinned);
+        return (b.last_activity_at || b.created_at) - (a.last_activity_at || a.created_at);
+      });
+      return sorted.map((s) => ({ kind: "session", session: s }) as SidebarItem);
+    }
+    return buildSidebarItems(sessions);
+  }, [sessions, searchQuery, mergeMode]);
 
   const sessionResources = useMemo(() => extractMessageResources(messages), [messages]);
 
@@ -1088,6 +1175,7 @@ export function useSessionStore(callbacks: SessionStoreCallbacks = {}): SessionS
     streamingMessageRef,
     allTags,
     setAllTags,
+    expandedClusters,
     ignoreStaleRef,
     streamDoneRef,
     addMessage,
@@ -1113,7 +1201,8 @@ export function useSessionStore(callbacks: SessionStoreCallbacks = {}): SessionS
     branchSession,
     toggleMergeSelect,
     updateSessionTags,
-    sidebarSessions,
+    sidebarItems,
+    toggleCluster,
     sessionResources,
   };
 }
