@@ -510,9 +510,8 @@ class ParentAgentSink(AgentSink):
         父 Agent 通过 approve_subagent 工具回调 approve_tools() 驱动 Future。
         """
         import uuid
-        from entity.puretype import ApprovalResult
+        from entity.puretype import ApprovalResult, ToolCall
         from component.approval import is_handsfree_mode, request_user_confirm
-        from component.llm import ToolCall
         from subagent.loop import PendingToolCall
 
         # 脱手模式：直接向父 session 发起审批（走 approval 模型）

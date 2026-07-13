@@ -15,7 +15,7 @@ from system.templates import read_template
 from entity.constant import SUMMARY_INPUT_MAX_CHARS
 
 if TYPE_CHECKING:
-    from component.llm import LLMClient
+    from abstract.llm.client import BaseLLMClient
     from entity.messages import BaseMessage, History, MessageBlock
 
 logger = logging.getLogger(__name__)
@@ -117,7 +117,7 @@ def _safe_media_ref(kind: str, url: str) -> str:
     return f"[{kind}: {short}]"
 
 
-async def summarize_history(history: History, llm: LLMClient) -> str:
+async def summarize_history(history: History, llm: BaseLLMClient) -> str:
     """用 LLM 对 History 实例做压缩生成摘要。
 
     组合 history_to_summary_text() 与 compress / compress_input 模板。

@@ -17,7 +17,8 @@ from pathlib import Path
 from typing import * # type: ignore
 
 from abstract.tools.registry import ToolEntry, registry as tool_registry
-from component.llm import LLMClient, LLMResponse, ToolCall
+from component.llm import OpenAILLMClient
+from entity.puretype import LLMResponse, ToolCall
 from entity.constant import MAIN_AGENT_CHARACTER_NAME, USER_CHARACTER_NAME, History_Version as __History_Version__
 from entity.messages import (
     History,
@@ -114,7 +115,7 @@ class SubAgentLoop(BasePrivateChatAgentLoop):
         }
         self._allowed_tool_names.discard("")
 
-        self._llm: LLMClient = self._build_llm_client(ctx)   # 子 Agent 独立的 LLM 客户端
+        self._llm: OpenAILLMClient = self._build_llm_client(ctx)   # 子 Agent 独立的 LLM 客户端
         self._on_message: Callable[[dict], None] | None = on_message  # 每轮 LLM 响应/工具调用即时推送回调
 
         # 内部状态（_inbox / _cancel_event 由 BaseAgentLoop 提供；_history 由 BasePrivateChatAgentLoop 提供）
@@ -137,33 +138,29 @@ class SubAgentLoop(BasePrivateChatAgentLoop):
 
     # ── 构造 LLM 客户端 ────────────────────────────────────────────
 
-    def _build_llm_client(self, ctx: Any) -> LLMClient:
+    def _build_llm_client(self, ctx: Any) -> OpenAILLMClient:
         """用 SubRuntimeContext 构建独立的 LLM 客户端。
 
-        通过设置环境变量 + 临时 RuntimeContext 的技巧复用 LLMClient。
-        更好的方式是直接传参，但 LLMClient 构造函数依赖 RuntimeContext。
-        这里创建一个最小化的模拟对象。
+        优先使用子 Agent profile 中的 LLM 配置，缺失时兜底到父 Agent。
         """
-        # 获取父 Agent 的 API key 作为兜底
         import os
-        parent_api_key = os.environ.get("OPENAI_API_KEY", "")
-        if not parent_api_key:
-            try:
-                from system.context import get_runtime_context
-                parent_api_key = get_runtime_context().llm_api_key
-            except Exception:
-                logger.warning("Failed to load parent API key for subagent; using empty fallback", exc_info=True)
+        from system.context import get_runtime_context
 
-        class _MockCtx:
-            llm_api_key = ctx.api_key or parent_api_key or os.environ.get("OPENAI_API_KEY", "")
-            llm_base_url = ctx.base_url
-            llm_model = ctx.model
-            llm_temperature = ctx.temperature
-            llm_max_output_tokens = ctx.max_output_tokens
-            llm_max_context_tokens = ctx.max_context_tokens
-            llm_reasoning_effort = ""
+        parent_ctx = get_runtime_context()
+        api_key = ctx.api_key or os.environ.get("OPENAI_API_KEY", "") or parent_ctx.llm_api_key
+        base_url = ctx.base_url or parent_ctx.llm_base_url
+        model = ctx.model or parent_ctx.llm_model
+        temperature = ctx.temperature if ctx.temperature is not None else parent_ctx.llm_temperature
+        max_output_tokens = ctx.max_output_tokens or parent_ctx.llm_max_output_tokens
 
-        return LLMClient(_MockCtx())  # type: ignore[arg-type]
+        return OpenAILLMClient(
+            api_key=api_key,
+            base_url=base_url,
+            model=model,
+            temperature=temperature,
+            max_output_tokens=max_output_tokens,
+            reasoning_effort="",
+        )
 
     # ── 基类抽象方法实现 ─────────────────────────────────────────────
 
@@ -175,7 +172,7 @@ class SubAgentLoop(BasePrivateChatAgentLoop):
     def user_character_name(self) -> str:
         return self._parent_character_agent# or MAIN_AGENT_CHARACTER_NAME
 
-    def _get_llm_client(self) -> LLMClient:
+    def _get_llm_client(self) -> OpenAILLMClient:
         return self._llm
 
     def _get_context(self) -> SubRuntimeContext:

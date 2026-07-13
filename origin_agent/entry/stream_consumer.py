@@ -10,7 +10,8 @@ import asyncio
 import logging
 from typing import Any, TYPE_CHECKING
 
-from component.llm import LLMClient, LLMResponse, Usage
+from abstract.llm.client import BaseLLMClient
+from entity.puretype import LLMResponse, Usage
 
 if TYPE_CHECKING:
     from entry.agent_sink import AgentSink
@@ -38,7 +39,7 @@ class StreamConsumer:
 
     def __init__(
         self,
-        llm: LLMClient,
+        llm: BaseLLMClient,
         sink: AgentSink,
         character_name: str,
         cancel_event: asyncio.Event,

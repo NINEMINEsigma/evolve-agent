@@ -14,7 +14,7 @@ from typing import Any, Awaitable, Callable, Optional, TYPE_CHECKING
 from entity.puretype import ApprovalResult, Role
 
 if TYPE_CHECKING:
-    from component.llm import LLMClient
+    from abstract.llm.client import BaseLLMClient
 
 logger = logging.getLogger(__name__)
 
@@ -75,7 +75,7 @@ async def request_user_confirm(
 # ---------------------------------------------------------------------------
 
 async def ask_agent_reason(
-    llm: "LLMClient",
+    llm: BaseLLMClient,
     tool_name: str,
     tool_args: dict,
     question: str,
@@ -87,7 +87,7 @@ async def ask_agent_reason(
     主模型的回答会追加到提示词中供审批模型重新评估。
 
     参数：
-        llm:       Agent 主模型 LLMClient 实例
+        llm:       Agent 主模型 BaseLLMClient 实例
         tool_name: 被审批的工具名
         tool_args: 工具参数字典
         question:  审批模型提出的问题

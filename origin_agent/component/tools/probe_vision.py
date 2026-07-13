@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Any, TYPE_CHECKING
 
 from abstract.tools.registry import registry, tool_error, tool_result
-from component.llm import LLMClient
+from component.llm import OpenAILLMClient
 from system.context import get_runtime_context
 from entity.puretype import Role, ToolAvailability, ToolDangerLevel
 
@@ -114,7 +114,7 @@ async def _handle_probe_vision(args: dict[str, Any], context: ToolContext | None
             ),
         )
 
-    client = LLMClient(ctx)
+    client = OpenAILLMClient.from_context(ctx)
     probe_messages: list[dict] = [
         {
             "role": Role.USER,

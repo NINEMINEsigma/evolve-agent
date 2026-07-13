@@ -141,7 +141,7 @@ class SessionManager:
         """根据索引中的 LoopMeta 重建 MultiAgentLoop。"""
         from system.context import get_runtime_context
         from component.mutliagenttools._store import SubagentStore
-        from component.llm import LLMClient
+        from component.llm import OpenAILLMClient
         from entry.multi_agent_loop import MultiAgentLoop
         from system.templates import get_templates_dir
         from abstract.tools.registry import registry as tool_registry
@@ -172,15 +172,15 @@ class SessionManager:
             main_agent_name=MAIN_AGENT_CHARACTER_NAME,
             parent_ctx=parent_ctx,
             llm_client_factory=lambda name, profile: (
-                LLMClient(parent_ctx) if name == MAIN_AGENT_CHARACTER_NAME
-                else LLMClient(parent_ctx.model_copy(update={
-                    "llm_api_key": profile.get("api_key") or parent_ctx.llm_api_key,
-                    "llm_base_url": profile.get("base_url", parent_ctx.llm_base_url),
-                    "llm_model": profile.get("model", parent_ctx.llm_model),
-                    "llm_max_output_tokens": profile.get("max_output_tokens", parent_ctx.llm_max_output_tokens),
-                    "llm_max_context_tokens": profile.get("max_context_tokens", parent_ctx.llm_max_context_tokens),
-                    "llm_temperature": parent_ctx.llm_temperature,
-                }))
+                OpenAILLMClient.from_context(parent_ctx) if name == MAIN_AGENT_CHARACTER_NAME
+                else OpenAILLMClient(
+                    api_key=profile.get("api_key") or parent_ctx.llm_api_key,
+                    base_url=profile.get("base_url", parent_ctx.llm_base_url),
+                    model=profile.get("model", parent_ctx.llm_model),
+                    temperature=parent_ctx.llm_temperature,
+                    max_output_tokens=profile.get("max_output_tokens", parent_ctx.llm_max_output_tokens),
+                    reasoning_effort=parent_ctx.llm_reasoning_effort or "",
+                )
             ),
             system_prompt_template=system_prompt_template,
             sandbox=sandbox,

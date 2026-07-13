@@ -622,7 +622,7 @@ class BasePrivateChatAgentLoop(BaseAgentLoop):
     memory 和 custom_hooks 能力。
 
     子类必须实现以下工厂方法：
-    - _get_llm_client() → LLMClient
+    - _get_llm_client() → BaseLLMClient 或具体实现类
     - _get_context() → Any
     - _get_tool_definitions() → list[dict]
     - _on_context_over_limit() → None
@@ -642,7 +642,7 @@ class BasePrivateChatAgentLoop(BaseAgentLoop):
 
     @abstractmethod
     def _get_llm_client(self) -> Any:
-        """返回当前 loop 的 LLMClient 实例。"""
+        """返回当前 loop 的 LLM 客户端实例。"""
         ...
 
     @abstractmethod

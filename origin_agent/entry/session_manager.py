@@ -22,7 +22,7 @@ from system.templates import read_template
 from system.session_store import SessionStore
 
 if TYPE_CHECKING:
-    from component.llm import LLMClient
+    from component.llm import OpenAILLMClient
     from entry.parent_agent_loop import ParentAgentLoop
 
 logger = logging.getLogger(__name__)

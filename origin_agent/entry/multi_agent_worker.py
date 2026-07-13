@@ -32,7 +32,8 @@ from entry.tool_executor import ToolExecutor
 
 if TYPE_CHECKING:
     from entry.agent_sink import AgentSink
-    from component.llm import LLMClient, LLMResponse
+    from abstract.llm.client import BaseLLMClient
+    from entity.puretype import LLMResponse
 
 logger = logging.getLogger(__name__)
 
@@ -82,7 +83,7 @@ class MultiAgentWorker:
         system_prompts: list[str],
         history: list[dict[str, Any]],
         tools: list[dict[str, Any]],
-        llm_client: LLMClient,
+        llm_client: BaseLLMClient,
         sink: AgentSink,
         loop: IMainSessionLoop,
     ) -> None:
@@ -90,7 +91,7 @@ class MultiAgentWorker:
         self._system_prompts: list[str] = system_prompts
         self._messages: list[dict[str, Any]] = history
         self._tools: list[dict[str, Any]] = tools
-        self._llm: LLMClient = llm_client
+        self._llm: BaseLLMClient = llm_client
         self._sink: AgentSink = sink
         self._loop: IMainSessionLoop = loop
         # 流式消费器：每轮 LLM 调用会生成独立 stream_id，避免多轮文本互相覆盖

@@ -14,12 +14,12 @@ import time
 from datetime import datetime
 from typing import Any, Awaitable, Callable, TYPE_CHECKING
 
-from entity.puretype import Role, ToolCallMeta
+from entity.puretype import Role, ToolCallMeta, ToolCall
 from entity.messages import ToolResultMessage
 from entry.base_agent_loop import BaseAgentLoop, ToolContext, IMainSessionLoop
 
 if TYPE_CHECKING:
-    from component.llm import ToolCall, LLMClient
+    from abstract.llm.client import BaseLLMClient
 
 logger = logging.getLogger(__name__)
 
@@ -30,7 +30,7 @@ class ToolExecutor:
     由 IMainSessionLoop 持有，每个 tool_call 调用一次 ``execute()``。
     """
 
-    def __init__(self, loop: IMainSessionLoop, llm: LLMClient) -> None:
+    def __init__(self, loop: IMainSessionLoop, llm: BaseLLMClient) -> None:
         self._loop = loop
         self._llm = llm
         self._tool_stats: dict[str, dict[str, int]] = {}

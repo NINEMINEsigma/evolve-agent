@@ -3,7 +3,7 @@
 """
 
 from enum import Enum, IntFlag
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from typing import * # type: ignore
 from entity.constant import SYSTEM_CHARACTER_NAME
@@ -196,3 +196,55 @@ class CronTaskInfo(BaseModel):
     run_count: int = 0
     last_run: str | None = None  # ISO 格式时间戳，从未执行时为 None
     log_path: str = ""
+
+
+# ---------------------------------------------------------------------------
+# LLM Types
+# ---------------------------------------------------------------------------
+
+class ToolCall(BaseModel):
+    """LLM 返回的工具调用描述。"""
+    model_config = ConfigDict(frozen=True)
+
+    id: str
+    name: str
+    arguments: dict[str, Any] = {}
+
+
+class Usage(BaseModel):
+    """LLM 提供商返回的 token 消耗。"""
+    model_config = ConfigDict(frozen=True)
+
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
+    total_tokens: int = 0
+
+
+class LLMResponse(BaseModel):
+    """非流式 LLM 响应的完整内容。"""
+    model_config = ConfigDict(frozen=True)
+
+    content: str = ""
+    tool_calls: list[ToolCall] = []
+    finish_reason: str = "stop"
+    reasoning_content: str | None = None
+    """DeepSeek thinking-mode 载荷 — 在后续回合中必须回传。"""
+    reasoning_field_name: str | None = None
+    """原始响应中携带 reasoning 的字段名，用于在后续回传时保持字段一致。"""
+    usage: Usage = Usage()
+
+
+class StreamChunk(BaseModel):
+    """流式 LLM 响应的一个片段。"""
+    model_config = ConfigDict(frozen=True)
+
+    content_delta: str | None = None
+    reasoning_delta: str | None = None
+    """DeepSeek thinking-mode 增量 — 仅用于展示。"""
+    reasoning_field_name: str | None = None
+    """当前 reasoning_delta 对应的原始字段名（如 reasoning_content / reasoning）。"""
+    tool_call: ToolCall | None = None
+    """当前 chunk 中首次完整出现的 tool_call（用于工具调用开始通知）。"""
+    finish_reason: str | None = None
+    usage: Usage | None = None
+    error: str | None = None

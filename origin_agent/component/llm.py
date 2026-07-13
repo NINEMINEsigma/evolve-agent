@@ -16,68 +16,18 @@ import json
 import logging
 import os
 from collections.abc import AsyncIterator
-from typing import Any, Iterator, Optional
+from typing import Any, Optional
 
 import httpcore
 import httpx
 import openai
-from pydantic import BaseModel, ConfigDict
 
-from system.context import RuntimeContext
+from abstract.llm.client import BaseLLMClient
+from entity.puretype import LLMResponse, StreamChunk, ToolCall, Usage
 from entity.constant import TOOL_RESULT_PREVIEW_CHARS, LLM_RETRY_COUNT, BACKOFF_BASE
+from system.context import RuntimeContext
 
 logger = logging.getLogger(__name__)
-
-
-# ---------------------------------------------------------------------------
-# 响应类型
-# ---------------------------------------------------------------------------
-
-
-class ToolCall(BaseModel):
-    model_config = ConfigDict(frozen=True)
-
-    id: str
-    name: str
-    arguments: dict[str, Any] = {}
-
-
-class Usage(BaseModel):
-    """LLM 提供商返回的 token 消耗。"""
-    model_config = ConfigDict(frozen=True)
-
-    prompt_tokens: int = 0
-    completion_tokens: int = 0
-    total_tokens: int = 0
-
-
-class LLMResponse(BaseModel):
-    model_config = ConfigDict(frozen=True)
-
-    content: str = ""
-    tool_calls: list[ToolCall] = []
-    finish_reason: str = "stop"
-    reasoning_content: str | None = None
-    """DeepSeek thinking-mode 载荷 — 在后续回合中必须回传。"""
-    reasoning_field_name: str | None = None
-    """原始响应中携带 reasoning 的字段名，用于在后续回传时保持字段一致。"""
-    usage: Usage = Usage()
-
-
-class StreamChunk(BaseModel):
-    """流式响应的一个片段。"""
-    model_config = ConfigDict(frozen=True)
-
-    content_delta: str | None = None
-    reasoning_delta: str | None = None
-    """DeepSeek thinking-mode 增量 — 仅用于展示。"""
-    reasoning_field_name: str | None = None
-    """当前 reasoning_delta 对应的原始字段名（如 reasoning_content / reasoning）。"""
-    tool_call: ToolCall | None = None
-    """当前 chunk 中首次完整出现的 tool_call（用于工具调用开始通知）。"""
-    finish_reason: str | None = None
-    usage: Usage | None = None
-    error: str | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -85,29 +35,52 @@ class StreamChunk(BaseModel):
 # ---------------------------------------------------------------------------
 
 
-class LLMClient:
+# TODO: 大量引用还未抽象化 BaseLLMClient
+class OpenAILLMClient(BaseLLMClient):
     """OpenAI SDK 的薄封装。
 
-    参数从 RuntimeContext 的 LLM 字段获取。
+    接收 ``api_key``、``base_url``、``model``、``temperature``、
+    ``max_output_tokens``、``reasoning_effort`` 等具体参数。
     ``api_key`` 兜底到 ``OPENAI_API_KEY`` 环境变量。
+
+    如需从 ``RuntimeContext`` 构造，使用 :meth:`from_context`。
     """
 
-    def __init__(self, ctx: RuntimeContext) -> None:
-        api_key: str = ctx.llm_api_key or os.environ.get("OPENAI_API_KEY", "")
+    def __init__(
+        self,
+        api_key: str,
+        base_url: str,
+        model: str,
+        temperature: float,
+        max_output_tokens: int,
+        reasoning_effort: str = "",
+    ) -> None:
         if not api_key:
             logger.warning(
                 "No LLM API key configured — set OPENAI_API_KEY env var "
-                "or pass it via RuntimeContext"
+                "or pass it via constructor"
             )
 
         self._client: openai.AsyncOpenAI = openai.AsyncOpenAI(
             api_key=api_key,
-            base_url=ctx.llm_base_url,
+            base_url=base_url,
         )
-        self._model: str = ctx.llm_model
-        self._temperature: float = ctx.llm_temperature
-        self._max_tokens: int = ctx.llm_max_output_tokens
-        self._reasoning_effort: str = ctx.llm_reasoning_effort or ""
+        self._model: str = model
+        self._temperature: float = temperature
+        self._max_tokens: int = max_output_tokens
+        self._reasoning_effort: str = reasoning_effort
+
+    @classmethod
+    def from_context(cls, ctx: RuntimeContext) -> OpenAILLMClient:
+        """从 RuntimeContext 构造 OpenAI LLM 客户端。"""
+        return cls(
+            api_key=ctx.llm_api_key or os.environ.get("OPENAI_API_KEY", ""),
+            base_url=ctx.llm_base_url,
+            model=ctx.llm_model,
+            temperature=ctx.llm_temperature,
+            max_output_tokens=ctx.llm_max_output_tokens,
+            reasoning_effort=ctx.llm_reasoning_effort or "",
+        )
 
     # -- 公开 API ----------------------------------------------------------
 

@@ -3,7 +3,7 @@
 
 提取 enter_multi_agent.py 与 session_manager.py 中重复的
 AgentProfile 构造逻辑，通过 llm_client_factory 回调保留
-两处对 LLMClient 获取方式的差异。
+两处对 LLM 客户端获取方式的差异。
 """
 
 from __future__ import annotations
@@ -14,7 +14,7 @@ from typing import Any, Callable, TYPE_CHECKING
 from system.sandbox import Sandbox
 from system.templates import render_multi_agent_prompt
 from component.mutliagenttools._store import SubagentStore
-from component.llm import LLMClient
+from abstract.llm.client import BaseLLMClient
 from entry.agent_support.messages import (
     build_agent_system_prompt,
     collect_skill_prompts,
@@ -43,7 +43,7 @@ def build_agent_profiles(
     agents: list[str],
     main_agent_name: str,
     parent_ctx: RuntimeContext,
-    llm_client_factory: Callable[[str, dict[str, Any] | None], LLMClient],
+    llm_client_factory: Callable[[str, dict[str, Any] | None], BaseLLMClient],
     system_prompt_template: str,
     sandbox: Sandbox,
     store: SubagentStore,
@@ -57,7 +57,7 @@ def build_agent_profiles(
         agents: 参与协作的 agent 名称列表。
         main_agent_name: 主 agent 名称。
         parent_ctx: 父 agent 的 RuntimeContext。
-        llm_client_factory: 接收 (name, profile_or_none) 返回 LLMClient。
+        llm_client_factory: 接收 (name, profile_or_none) 返回 BaseLLMClient。
             主 agent 调用时 profile_or_none 为 None；子 agent 调用时为 SubagentStore profile dict。
         system_prompt_template: 多 Agent 协作模板原文。
         sandbox: 用于读取 system_prompt_paths 的沙盒实例。

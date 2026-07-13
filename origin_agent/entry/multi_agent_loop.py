@@ -14,7 +14,7 @@ from collections import deque
 from pathlib import Path
 from typing import Any, TYPE_CHECKING
 
-from component.llm import LLMClient
+from abstract.llm.client import BaseLLMClient
 from entity.messages import (
     History,
     CharacterConversationMessage,
@@ -55,12 +55,12 @@ class AgentProfile:
         character_name: str,
         system_prompts: list[str],
         tools: list[dict],
-        llm_client: LLMClient,
+        llm_client: BaseLLMClient,
     ) -> None:
         self.character_name: str = character_name
         self.system_prompts: list[str] = system_prompts
         self.tools: list[dict] = tools
-        self.llm_client: LLMClient = llm_client
+        self.llm_client: BaseLLMClient = llm_client
 
 
 class MultiAgentLoop(BaseAgentLoop, IMainSessionLoop):
@@ -182,7 +182,7 @@ class MultiAgentLoop(BaseAgentLoop, IMainSessionLoop):
 
     # -- 自动生成标题 / 标签 ------------------------------------------------
 
-    def _resolve_llm_client(self) -> LLMClient | None:
+    def _resolve_llm_client(self) -> BaseLLMClient | None:
         """返回当前用于生成标题/标签的 LLM 客户端，首选当前代表 Agent。"""
         agent = self._agents.get(self.current_character_agent)
         if agent is None and self._agents:
