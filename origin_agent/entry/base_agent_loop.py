@@ -31,6 +31,7 @@ from system.pathutils import find_repo_root
 from system.session_store import SessionStore
 
 if TYPE_CHECKING:
+    from abstract.llm.client import BaseLLMClient
     from system.context import RuntimeContext
     from system.application import Application
     from entry.agent_sink import AgentSink
@@ -641,7 +642,7 @@ class BasePrivateChatAgentLoop(BaseAgentLoop):
         ...
 
     @abstractmethod
-    def _get_llm_client(self) -> Any:
+    def _get_llm_client(self) -> BaseLLMClient:
         """返回当前 loop 的 LLM 客户端实例。"""
         ...
 

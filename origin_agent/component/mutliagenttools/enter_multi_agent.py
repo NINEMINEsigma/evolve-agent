@@ -13,6 +13,7 @@ import logging
 from typing import Any
 
 from abstract.tools.registry import registry, tool_error, tool_result
+from abstract.llm.loader import create_llm_client
 from entity.puretype import Role, ToolAvailability, ToolDangerLevel
 from entity.constant import SYSTEM_CHARACTER_NAME
 from entity.messages import CharacterConversationMessage
@@ -64,7 +65,7 @@ async def _handle_enter_multi_agent(args: dict[str, Any]) -> dict:
     if missing:
         return tool_error(
             f"Subagent profiles not found: {', '.join(missing)}. "
-            "Register them first using register_subagent or register_subagent_from_parent."
+            "Register them first using register_subagent_from_parent."
         )
 
     # 停止所有子 Agent
@@ -85,14 +86,18 @@ async def _handle_enter_multi_agent(args: dict[str, Any]) -> dict:
     from system.sandbox import Sandbox
 
     tools = build_multi_agent_tools(tool_registry)
-    llm_client = parent_loop._get_llm_client()
-    sandbox = Sandbox(get_runtime_context())
+    parent_ctx = get_runtime_context()
+    sandbox = Sandbox(parent_ctx)
 
     agent_profiles = build_agent_profiles(
         agents=agents,
         main_agent_name=main_agent_name,
         parent_ctx=parent_loop._get_context(),
-        llm_client_factory=lambda name, profile: llm_client,
+        llm_client_factory=lambda name, profile: create_llm_client(
+            parent_ctx.llm_client_name,
+            parent_ctx,
+            profile=profile if name != main_agent_name else None,
+        ),
         system_prompt_template=system_prompt_template,
         sandbox=sandbox,
         store=store,

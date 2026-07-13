@@ -42,6 +42,8 @@ argparse_parser.add_argument("--llm_max_output_tokens", type=int, default=argpar
 argparse_parser.add_argument("--llm_temperature", type=float, default=argparse.SUPPRESS)
 # 可选值：e.g. "low" / "medium" / "high"，空字符串表示不启用
 argparse_parser.add_argument("--llm_reasoning_effort", type=str, default=argparse.SUPPRESS)
+# 选择 LLM 客户端实现模块（custom_llm_client 目录下对应名称的 .py 文件）
+argparse_parser.add_argument("--client", type=str, default=argparse.SUPPRESS)
 # 会话合并时直接拼接摘要的字符阈值，超过则截断
 argparse_parser.add_argument("--merge_concat_threshold", type=int, default=argparse.SUPPRESS)
 
@@ -88,6 +90,7 @@ class Config(BaseModel):
     llm_max_output_tokens: int = 384000
     llm_temperature: float = 0.95
     llm_reasoning_effort: str = "medium"
+    llm_client_name: str = "openai_client"
     merge_concat_threshold: int = 50000
     approval_model: str = check_default_approval_model_path
     approval_model_n_ctx: int = 65536
@@ -164,6 +167,7 @@ llm_max_context_tokens: int     = current_config.llm_max_context_tokens
 llm_max_output_tokens:  int     = current_config.llm_max_output_tokens
 llm_temperature:        float   = current_config.llm_temperature
 llm_reasoning_effort:   str     = current_config.llm_reasoning_effort 
+llm_client_name:        str     = current_config.llm_client_name
 # merge
 merge_concat_threshold: int     = current_config.merge_concat_threshold
 # approval model

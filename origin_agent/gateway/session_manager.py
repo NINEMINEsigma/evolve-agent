@@ -141,7 +141,7 @@ class SessionManager:
         """根据索引中的 LoopMeta 重建 MultiAgentLoop。"""
         from system.context import get_runtime_context
         from component.mutliagenttools._store import SubagentStore
-        from component.llm import OpenAILLMClient
+        from abstract.llm.loader import create_llm_client
         from entry.multi_agent_loop import MultiAgentLoop
         from system.templates import get_templates_dir
         from abstract.tools.registry import registry as tool_registry
@@ -171,16 +171,10 @@ class SessionManager:
             agents=agents_names,
             main_agent_name=MAIN_AGENT_CHARACTER_NAME,
             parent_ctx=parent_ctx,
-            llm_client_factory=lambda name, profile: (
-                OpenAILLMClient.from_context(parent_ctx) if name == MAIN_AGENT_CHARACTER_NAME
-                else OpenAILLMClient(
-                    api_key=profile.get("api_key") or parent_ctx.llm_api_key,
-                    base_url=profile.get("base_url", parent_ctx.llm_base_url),
-                    model=profile.get("model", parent_ctx.llm_model),
-                    temperature=parent_ctx.llm_temperature,
-                    max_output_tokens=profile.get("max_output_tokens", parent_ctx.llm_max_output_tokens),
-                    reasoning_effort=parent_ctx.llm_reasoning_effort or "",
-                )
+            llm_client_factory=lambda name, profile: create_llm_client(
+                parent_ctx.llm_client_name,
+                parent_ctx,
+                profile=profile if name != MAIN_AGENT_CHARACTER_NAME else None,
             ),
             system_prompt_template=system_prompt_template,
             sandbox=sandbox,

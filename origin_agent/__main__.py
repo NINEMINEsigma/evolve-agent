@@ -132,6 +132,7 @@ def _build_context(cli: dict) -> RuntimeContext:
         llm_max_context_tokens  = int(cli["llm_max_context_tokens"]),
         llm_max_output_tokens   = int(cli["llm_max_output_tokens"]),
         llm_reasoning_effort    = str(cli["llm_reasoning_effort"]),
+        llm_client_name         = str(cli.get("client", "openai_client")),
         # 脱手模式审批模型配置
         approval_model_path     = str(cli.get("approval_model_path", "")),
         approval_model_n_ctx    = int(cli.get("approval_model_n_ctx", APPROVAL_MODEL_N_CTX_DEFAULT)),

@@ -96,6 +96,7 @@ def _build_base_args():
         "--llm_max_output_tokens",  quote(llm_max_output_tokens),
         "--llm_temperature",        quote(llm_temperature),
         "--llm_reasoning_effort",   quote(llm_reasoning_effort),
+        "--client",                 quote(llm_client_name),
         "--mcp_config_path",        quote(mcp_config_path),
         "--approval_model_path",    quote(approval_model_path),
         "--approval_model_n_ctx",   quote(approval_model_n_ctx),

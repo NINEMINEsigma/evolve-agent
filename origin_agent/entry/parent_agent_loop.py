@@ -21,7 +21,8 @@ from typing import Any, Awaitable, Callable, Dict, List, TYPE_CHECKING
 
 from abstract.tools.registry import registry as tool_registry
 from component.approval import ask_agent_reason
-from component.llm import OpenAILLMClient
+from abstract.llm.client import BaseLLMClient
+from abstract.llm.loader import create_llm_client
 from entity.puretype import LLMResponse, ToolCall, Role, ToolAvailability
 from system.session_store import SessionStore
 from entity.constant import (
@@ -96,7 +97,10 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
     ) -> None:
         super().__init__(app, session_id)
         self._frontend_sink: FrontendSink = frontend_sink
-        self._llm: OpenAILLMClient = OpenAILLMClient.from_context(app.runtime_context)
+        self._llm: BaseLLMClient = create_llm_client(
+            app.runtime_context.llm_client_name,
+            app.runtime_context,
+        )
 
         self._session_store = (
             SessionStore(history_store_dir)
@@ -157,7 +161,7 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
     def user_character_name(self) -> str:
         return USER_CHARACTER_NAME
 
-    def _get_llm_client(self) -> OpenAILLMClient:
+    def _get_llm_client(self) -> BaseLLMClient:
         return self._llm
 
     def _get_context(self) -> RuntimeContext:
@@ -581,7 +585,7 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
         return self._session_manager
 
     @property
-    def llm(self) -> OpenAILLMClient:
+    def llm(self) -> BaseLLMClient:
         """返回当前 loop 的 LLM 客户端。"""
         return self._llm
 

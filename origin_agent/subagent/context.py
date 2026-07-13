@@ -35,6 +35,9 @@ class SubRuntimeContext(BaseModel):
     max_context_tokens: int
     """上下文窗口 token 上限，用于旋转控制（来自注册表）。"""
 
+    client_type: str = "openai_client"
+    """LLM 客户端模块名，继承自主 Agent（来自注册表或 RuntimeContext 兜底）。"""
+
     system_prompts: list[str]
     """系统提示词列表（每项为独立 system message，来自注册表 system_prompt_paths 或内置默认模板）。"""
 
@@ -91,6 +94,7 @@ async def build_subagent_context(
         temperature=temperature,
         max_output_tokens=int(profile.get("max_output_tokens", 0)),
         max_context_tokens=int(profile.get("max_context_tokens", 0)),
+        client_type=profile.get("client_type", parent_ctx.llm_client_name),
         system_prompts=prompts,
     )
 

@@ -7,5 +7,6 @@
 from __future__ import annotations
 
 from abstract.llm.client import BaseLLMClient
+from abstract.llm.loader import create_llm_client
 
-__all__ = ["BaseLLMClient"]
+__all__ = ["BaseLLMClient", "create_llm_client"]
