@@ -17,9 +17,10 @@ from typing import Any, TYPE_CHECKING
 
 from entity.messages import History, CharacterConversationMessage
 from entity.puretype import Role
-from entity.constant import AUTO_TITLE_CONTENT_MAX, AUTO_TAGS_CONTENT_MAX, USER_CHARACTER_NAME
+from entity.constant import AUTO_TITLE_CONTENT_MAX, AUTO_TAGS_CONTENT_MAX, USER_CHARACTER_NAME, INHERIT_LAST_ROUNDS
 from system.templates import read_template
 from system.session_store import SessionStore
+from entry.agent_support.history_summary import extract_last_rounds
 
 if TYPE_CHECKING:
     from abstract.llm.client import BaseLLMClient
@@ -222,6 +223,31 @@ class LoopSessionManager:
                     loop_meta = _LoopMeta(
                         loopType=_Loop(loop_type), agents=agents,
                     )
+
+            # 提取旧会话尾部轮次文本，追加到 context
+            tail_rounds_text = ""
+            if self._loop.session_store is not None:
+                try:
+                    old_history = self._loop.session_store.read_history(old_sid)
+                    if old_history is not None and old_history.count > 0:
+                        from entry.agent_support.history_summary import messages_to_text
+                        tail_msgs = extract_last_rounds(
+                            old_history,
+                            rounds=INHERIT_LAST_ROUNDS,
+                            include_tool_messages=False,
+                        )
+                        if tail_msgs:
+                            tail_text = messages_to_text(tail_msgs)
+                            tail_rounds_text = (
+                                "\n\n## Recent conversation rounds\n" + tail_text
+                            )
+                except Exception as exc:
+                    logger.exception(
+                        "Failed to extract tail rounds for session old=%s: %s",
+                        old_sid, exc,
+                    )
+            if tail_rounds_text:
+                context += tail_rounds_text
 
             new_sid: str = sm.create_with_context(
                 context, parent_sid=old_sid, role=Role.USER,

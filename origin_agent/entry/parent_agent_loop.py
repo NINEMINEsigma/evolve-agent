@@ -33,6 +33,7 @@ from entity.constant import (
     MAIN_AGENT_CHARACTER_NAME,
     USER_CHARACTER_NAME,
     SYSTEM_CHARACTER_NAME,
+    INHERIT_LAST_ROUNDS,
 )
 from entity.messages import (
     History,
@@ -844,6 +845,28 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
             parents=sources,
             role=Role.USER,
         )
+
+        # 从各源会话附加尾部轮次文本到 context
+        from entry.agent_support.history_summary import messages_to_text, extract_last_rounds
+        tail_blocks: list[str] = []
+        for sid in sources:
+            try:
+                src_history = self._session_store.read_history(sid)
+                if src_history is None or src_history.count == 0:
+                    continue
+                tail_msgs = extract_last_rounds(
+                    src_history,
+                    rounds=INHERIT_LAST_ROUNDS,
+                    include_tool_messages=False,
+                )
+                if tail_msgs:
+                    tail_blocks.append(
+                        f"### Source session {sid}\n" + messages_to_text(tail_msgs)
+                    )
+            except Exception as exc:
+                logger.exception("Failed to append tail rounds for source=%s: %s", sid, exc)
+        if tail_blocks:
+            context += "\n\n## Recent conversation rounds\n" + "\n\n---\n\n".join(tail_blocks)
 
         # 写入仅含 summary 消息的历史
         summary_history = History()
