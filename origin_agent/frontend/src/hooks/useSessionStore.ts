@@ -133,7 +133,7 @@ export interface SessionStore {
   regenerateSummary: (sid: string) => void;
   terminateSession: (sid: string) => void;
   togglePinSession: (sid: string) => void;
-  mergeSessions: (sources: string[]) => void;
+  mergeSessions: (sources: string[]) => Promise<string | undefined>;
   branchSession: (sid: string) => void;
   toggleMergeSelect: (sid: string) => void;
   updateSessionTags: (sid: string, tags: string[]) => Promise<string[]>;
@@ -946,20 +946,20 @@ export function useSessionStore(callbacks: SessionStoreCallbacks = {}): SessionS
       .catch(() => {});
   }, [fetchSessions]);
 
-  const mergeSessions = useCallback((sources: string[]) => {
+  const mergeSessions = useCallback((sources: string[]): Promise<string | undefined> => {
     const validSources = sources.filter((sid) => {
       const session = sessions.find((s) => s.id === sid);
       return session && session.status === "archived";
     });
     if (validSources.length < 1) {
       console.warn("[merge] 没有可合并的已归档会话");
-      return;
+      return Promise.resolve(undefined);
     }
     if (validSources.length !== sources.length) {
       const skipped = sources.filter((sid) => !validSources.includes(sid));
       console.warn(`[merge] 以下未归档会话被排除: ${skipped.join(", ")}`);
     }
-    fetch("/api/sessions/merge", {
+    return fetch("/api/sessions/merge", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ sources: validSources }),
@@ -967,12 +967,13 @@ export function useSessionStore(callbacks: SessionStoreCallbacks = {}): SessionS
       .then((r) => r.json())
       .then((data) => {
         if (data.session_id) {
-          switchSession(data.session_id);
           fetchSessions();
+          return data.session_id as string;
         }
+        return undefined;
       })
-      .catch(() => {});
-  }, [switchSession, fetchSessions, sessions]);
+      .catch(() => undefined);
+  }, [fetchSessions, sessions]);
 
   const branchSession = useCallback((sid: string) => mergeSessions([sid]), [mergeSessions]);
 

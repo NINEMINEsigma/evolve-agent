@@ -218,6 +218,16 @@ export function useWebSocket() {
     connRef.current.connect(sid);
   }, []);
 
+  const mergeSessions = useCallback(async (sources: string[]) => {
+    if (!sessionRef.current) return;
+    const newSid = await session.mergeSessions(sources);
+    if (newSid) {
+      connRef.current.disconnect();
+      sessionRef.current.switchSession(newSid);
+      connRef.current.connect(newSid);
+    }
+  }, [session.mergeSessions]);
+
   const deleteSession = useCallback((sid: string) => {
     if (!sessionRef.current) return;
     if (!confirm("确定要删除这个会话吗？此操作不可撤销。")) return;
@@ -389,7 +399,7 @@ export function useWebSocket() {
     regenerateSummary: session.regenerateSummary,
     terminateSession: session.terminateSession,
     togglePinSession: session.togglePinSession,
-    mergeSessions: session.mergeSessions,
+    mergeSessions,
     branchSession: session.branchSession,
     toggleMergeSelect: session.toggleMergeSelect,
     respondConfirm,

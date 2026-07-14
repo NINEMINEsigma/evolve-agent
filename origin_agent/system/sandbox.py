@@ -223,16 +223,6 @@ class Sandbox:
 
     # -- 子进程（同样受沙盒约束） ----------------------------------------
 
-    # 工具允许执行的命令（按 basename 匹配）。
-    # _ALLOWED_COMMANDS: frozenset[str] = frozenset({
-    #     "python", "python3", "pip", "pnpm", "git", "cmd", "curl"
-    # })
-
-    # @property
-    # def allowed_commands(self) -> frozenset[str]:
-    #     """公开只读的命令允许列表。"""
-    #     return self._ALLOWED_COMMANDS
-
     def run(
         self,
         args: list[str],

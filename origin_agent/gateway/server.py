@@ -386,6 +386,7 @@ def _record_agentspace_change(operation: str, path: str, old_path: str | None = 
     - 创建后被删除可抵消
     - 重命名清除旧路径
     """
+    # TODO: 需要检查当前逻辑是否正确
     global _agentspace_pending_changes
     if _agentspace_lock["locked"]:
         return

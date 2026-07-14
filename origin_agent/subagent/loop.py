@@ -574,6 +574,7 @@ class SubAgentLoop(BasePrivateChatAgentLoop):
                 )
                 return await self._execute_approved_tool(tc)
             else:
+                # TODO: 似乎拒绝分支输出错误内容
                 self._emit(
                     "approval_decision",
                     tool_call_id=tc.id,

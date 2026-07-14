@@ -8,7 +8,7 @@
   - ToolExecutor（工具审批/分发/事件）
   - StreamConsumer（LLM 流消费）
 """
-
+# TODO: 大量在Messages格式化解构中没有对齐类型的问题
 from __future__ import annotations
 
 import asyncio
@@ -142,6 +142,7 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
         """返回指定 session 上次进入空闲的时间戳，不存在时返回 None。"""
         return self._last_idle_time.get(session_id)
 
+    # TODO: 未被使用
     def update_last_idle_time(self, session_id: str) -> None:
         """更新指定 session 的空闲时间戳。"""
         self._last_idle_time[session_id] = time.monotonic()
