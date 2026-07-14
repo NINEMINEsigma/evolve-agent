@@ -17,6 +17,7 @@ from typing import Any, TYPE_CHECKING
 from abstract.llm.client import BaseLLMClient
 from entity.messages import (
     History,
+    BaseMessage,
     CharacterConversationMessage,
     CharacterMessage,
     MessageBlock,
@@ -204,8 +205,8 @@ class MultiAgentLoop(BaseAgentLoop, IMainSessionLoop):
             return ""
         try:
             resp = await llm_client.chat([
-                {"role":  Role.SYSTEM.value, "content": system_prompt},
-                {"role": Role.USER.value, "content": user_prompt},
+                BaseMessage(role=Role.SYSTEM, content=system_prompt),
+                BaseMessage(role=Role.USER, content=user_prompt),
             ])
             return (resp.content or "").strip().strip("\"'")[:50]
         except Exception as exc:
@@ -227,8 +228,8 @@ class MultiAgentLoop(BaseAgentLoop, IMainSessionLoop):
                 json.dumps(messages, ensure_ascii=False)[:AUTO_TAGS_CONTENT_MAX],
             )
             resp = await llm_client.chat([
-                {"role": Role.SYSTEM.value, "content": system_prompt},
-                {"role": Role.USER.value, "content": user_prompt},
+                BaseMessage(role=Role.SYSTEM, content=system_prompt),
+                BaseMessage(role=Role.USER, content=user_prompt),
             ])
             tags = json.loads(resp.content or "[]")
             if isinstance(tags, list):

@@ -755,7 +755,7 @@ class BasePrivateChatAgentLoop(BaseAgentLoop):
 
     def _build_history_messages(
         self, user_message: str = ""
-    ) -> list[dict[str, Any]]:
+    ) -> list[BaseMessage]:
         """构建发送给 LLM 的完整历史消息列表（含 system prompt）。
 
         hooks_context / memory_ctx 已在追加用户消息时通过

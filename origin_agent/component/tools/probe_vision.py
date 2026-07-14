@@ -16,6 +16,7 @@ from abstract.tools.registry import registry, tool_error, tool_result
 from abstract.llm.loader import create_llm_client
 from system.context import get_runtime_context
 from entity.puretype import Role, ToolAvailability, ToolDangerLevel
+from entity.messages import BaseMessage, ImageBlock, TextBlock
 
 if TYPE_CHECKING:
     from entry.base_agent_loop import ToolContext
@@ -115,19 +116,11 @@ async def _handle_probe_vision(args: dict[str, Any], context: ToolContext | None
         )
 
     client = create_llm_client(ctx.llm_client_name, ctx)
-    probe_messages: list[dict] = [
-        {
-            "role": Role.USER,
-            "content": [
-                {
-                    "type": "image_url",
-                    "image_url": {
-                        "url": f"data:image/png;base64,{_DUMMY_PNG_B64}",
-                    },
-                },
-                {"type": "text", "text": "What is this?"},
-            ],
-        }
+    probe_messages: list[BaseMessage] = [
+        BaseMessage(role=Role.USER, content=[
+            ImageBlock(image_url=f"data:image/png;base64,{_DUMMY_PNG_B64}"),
+            TextBlock(text="What is this?"),
+        ]),
     ]
 
     try:

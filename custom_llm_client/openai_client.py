@@ -23,6 +23,7 @@ import httpx
 import openai
 
 from abstract.llm.client import BaseLLMClient
+from entity.messages import BaseMessage
 from entity.puretype import LLMResponse, StreamChunk, ToolCall, Usage
 from entity.constant import TOOL_RESULT_PREVIEW_CHARS, LLM_RETRY_COUNT, BACKOFF_BASE
 from system.context import RuntimeContext
@@ -82,6 +83,25 @@ class OpenAILLMClient(BaseLLMClient):
             reasoning_effort=ctx.llm_reasoning_effort or "",
         )
 
+    # -- 内部消息转换 --------------------------------------------------
+
+    def _convert_messages(
+        self,
+        messages: list[BaseMessage],
+        character: str = "",
+    ) -> list[dict[str, Any]]:
+        """将 ``BaseMessage`` 对象列表转换为 OpenAI 协议格式的 dict 列表。
+
+        对每条消息调用 ``as_message(current_character_agent=character)``，
+        跳过返回 ``None`` 的消息（不可见）。等价于旧 ``History.get_messages()`` 的转换逻辑。
+        """
+        result = []
+        for message in messages:
+            converted = message.as_message(current_character_agent=character)
+            if converted is not None:
+                result.append(converted)
+        return result
+
     # -- 公开 API ----------------------------------------------------------
 
     def _build_kwargs(
@@ -111,23 +131,24 @@ class OpenAILLMClient(BaseLLMClient):
 
     async def chat(
         self,
-        messages: list[dict[str, Any]],
+        messages: list[BaseMessage],
         tools: Optional[list[dict[str, Any]]] = None,
         response_format: Optional[dict[str, str]] = None,
+        character: str = "",
     ) -> LLMResponse:
         """发送聊天请求，返回结构化响应。
 
         对 transient 网络错误（连接中断、超时、限流、5xx）
         自动进行指数退避重试，最多 ``LLM_RETRY_COUNT`` 次。
 
-        *messages* 为 OpenAI 格式的消息字典列表
-        （``{"role": "...", "content": "..."}``）。
+        *messages* 为 ``BaseMessage`` 对象列表，在内部转换为 OpenAI 协议格式后发送。
         *tools* 为可选的 OpenAI 格式工具 schema 列表。
 
         返回包含 assistant 内容和工具调用的 :class:`LLMResponse`。
         """
+        messages_dict = self._convert_messages(messages, character)
         kwargs = self._build_kwargs(
-            messages, tools, stream=False,
+            messages_dict, tools, stream=False,
             response_format=response_format,
         )
 
@@ -172,9 +193,10 @@ class OpenAILLMClient(BaseLLMClient):
 
     async def chat_stream(
         self,
-        messages: list[dict[str, Any]],
+        messages: list[BaseMessage],
         tools: Optional[list[dict[str, Any]]] = None,
         response_format: Optional[dict[str, str]] = None,
+        character: str = "",
     ) -> AsyncIterator[StreamChunk]:
         """发送流式聊天请求，逐块返回增量内容。
 
@@ -184,7 +206,8 @@ class OpenAILLMClient(BaseLLMClient):
         当底层连接在流传输过程中中断时，会尝试把已收到的内容拼回 prompt
         并重新发起请求，让 LLM 从断点继续生成（应用层伪续传）。
         """
-        original_messages: list[dict[str, Any]] = list(messages)
+        messages_dict = self._convert_messages(messages, character)
+        original_messages: list[dict[str, Any]] = list(messages_dict)
         state: dict[str, Any] = {
             "content": "",
             "reasoning": "",

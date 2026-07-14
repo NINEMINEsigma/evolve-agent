@@ -37,6 +37,7 @@ from entity.constant import (
 )
 from entity.messages import (
     History,
+    BaseMessage,
     CharacterConversationMessage,
     FunctionCall,
     ImageBlock,
@@ -562,7 +563,7 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
                     result.append(ImageBlock(image_url=str(image_url_block or "")))
         return result
 
-    def _get_full_history(self, session_id: str) -> list[dict[str, Any]]:
+    def _get_full_history(self, session_id: str) -> list[BaseMessage]:
         system_prompts: list[str] = build_agent_system_prompt(
             self.app.runtime_context,
             self._collect_skill_prompts(),
@@ -600,7 +601,7 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
         """设置最近一次 prompt 的 token 数。"""
         self._last_prompt_tokens = value
 
-    def get_full_history(self, session_id: str) -> list[dict[str, Any]]:
+    def get_full_history(self, session_id: str) -> list[BaseMessage]:
         """返回完整历史消息（供外部生命周期管理使用）。"""
         return self._get_full_history(session_id)
 
@@ -707,20 +708,25 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
     # ========================================================================
 
     async def auto_generate_title(self) -> str:
-        messages = self._get_full_history(self.session_id)
-        if not messages:
+        raw_messages = self._get_full_history(self.session_id)
+        if not raw_messages:
             return ""
         from system.templates import read_template
         system_prompt = read_template("auto_title.txt")
+        # 将 BaseMessage 列表转为 JSON 可序列化的 dict 列表（供模板使用）
+        messages_json = [
+            d for m in raw_messages
+            if (d := m.as_message(current_character_agent=self.current_character_agent)) is not None
+        ]
         user_prompt = read_template("auto_title_input.txt").replace(
             "{{context}}",
-            json.dumps(messages, ensure_ascii=False)[:AUTO_TITLE_CONTENT_MAX],
+            json.dumps(messages_json, ensure_ascii=False)[:AUTO_TITLE_CONTENT_MAX],
         )
         try:
             resp = await self._llm.chat([
-                {"role": Role.SYSTEM.value, "content": system_prompt},
-                {"role": Role.USER.value, "content": user_prompt},
-            ])
+                BaseMessage(role=Role.SYSTEM, content=system_prompt),
+                BaseMessage(role=Role.USER, content=user_prompt),
+            ], character=self.current_character_agent)
             title = (resp.content or "").strip().strip("\"'")[:50]
             return title
         except Exception as exc:
@@ -728,20 +734,25 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
             return ""
 
     async def regenerate_session_tags(self) -> list[str]:
-        messages = self._get_full_history(self.session_id)
-        if not messages:
+        raw_messages = self._get_full_history(self.session_id)
+        if not raw_messages:
             return []
         from system.templates import read_template
         try:
             system_prompt = read_template("session_tags.txt")
+            # 将 BaseMessage 列表转为 JSON 可序列化的 dict 列表（供模板使用）
+            messages_json = [
+                d for m in raw_messages
+                if (d := m.as_message(current_character_agent=self.current_character_agent)) is not None
+            ]
             user_prompt = read_template("session_tags_input.txt").replace(
                 "{{old_text}}",
-                json.dumps(messages, ensure_ascii=False)[:AUTO_TAGS_CONTENT_MAX],
+                json.dumps(messages_json, ensure_ascii=False)[:AUTO_TAGS_CONTENT_MAX],
             )
             resp = await self._llm.chat([
-                {"role": Role.SYSTEM.value, "content": system_prompt},
-                {"role": Role.USER.value, "content": user_prompt},
-            ])
+                BaseMessage(role=Role.SYSTEM, content=system_prompt),
+                BaseMessage(role=Role.USER, content=user_prompt),
+            ], character=self.current_character_agent)
             content = resp.content or ""
             try:
                 tags = json.loads(content)

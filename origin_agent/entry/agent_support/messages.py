@@ -11,7 +11,7 @@ from typing import * # type: ignore
 
 from system.prompt import build_system_prompt
 from entity.puretype import Role
-from entity.messages import History
+from entity.messages import History, BaseMessage, CharacterSystemMessage
 
 if TYPE_CHECKING:
     from system.context import RuntimeContext
@@ -172,15 +172,15 @@ def build_full_history_messages(
     system_prompts: list[str],
     history: History,
     current_character_agent: str,
-) -> list[dict[str, Any]]:
+) -> list[BaseMessage]:
     """构建包含 system prompts 和完整历史的消息列表。
 
     假设调用方已经把 hooks_context / memory_ctx 等非持久化内容通过
     history.last_user_message.dynamic_message_suffix 注入；本函数只负责
     system prompt 与 History.get_messages 的拼接。
     """
-    messages: list[dict[str, Any]] = [
-        {"role": Role.SYSTEM, "content": sp} for sp in system_prompts
+    messages: list[BaseMessage] = [
+        CharacterSystemMessage(role=Role.SYSTEM, character_name=current_character_agent, content=sp) for sp in system_prompts
     ]
     messages.extend(history.get_messages(current_character_agent=current_character_agent))
     return messages

@@ -17,7 +17,7 @@ from typing import Any, TYPE_CHECKING
 from pydantic import BaseModel, Field
 
 from entity.puretype import Role
-from entity.messages import ToolResultMessage, CharacterConversationMessage, FunctionCall, ToolCall as HistoryToolCall
+from entity.messages import ToolResultMessage, CharacterConversationMessage, CharacterSystemMessage, FunctionCall, ToolCall as HistoryToolCall, BaseMessage
 from entity.constant import (
     MAX_TOOL_TURNS,
     ALL_AGENTS_CHARACTER_REF_NAME,
@@ -81,7 +81,7 @@ class MultiAgentWorker:
         *,
         character_name: str,
         system_prompts: list[str],
-        history: list[dict[str, Any]],
+        history: list[BaseMessage],
         tools: list[dict[str, Any]],
         llm_client: BaseLLMClient,
         sink: AgentSink,
@@ -89,7 +89,7 @@ class MultiAgentWorker:
     ) -> None:
         self.character_name: str = character_name
         self._system_prompts: list[str] = system_prompts
-        self._messages: list[dict[str, Any]] = history
+        self._messages: list[BaseMessage] = history
         self._tools: list[dict[str, Any]] = tools
         self._llm: BaseLLMClient = llm_client
         self._sink: AgentSink = sink
@@ -177,8 +177,8 @@ class MultiAgentWorker:
         3. 当 LLM 返回纯文本时 → 解析 DSL 标签 → 推送干净内容到前端 → 返回 WorkerResult
         """
         # 在消息列表头部插入多条 system prompt
-        full_messages = [
-            {"role": Role.SYSTEM.value, "content": prompt}
+        full_messages: list[BaseMessage] = [
+            CharacterSystemMessage(role=Role.SYSTEM, character_name=self.character_name, content=prompt)
             for prompt in self._system_prompts
         ] + self._messages
 
@@ -224,9 +224,8 @@ class MultiAgentWorker:
 
             # 有 tool_calls → 写入共享 History → 发送标准事件 → 执行工具 → 继续循环
             if resp.tool_calls:
-                # 1. 构造 History 格式的 ToolCall 列表 和 OpenAI 格式的 raw list
+                # 1. 构造 History 格式的 ToolCall 列表
                 history_tool_calls: list[HistoryToolCall] = []
-                raw_tc_list: list[dict[str, Any]] = []
                 for tc in resp.tool_calls:
                     args_str = json.dumps(tc.arguments, ensure_ascii=False)
                     history_tool_calls.append(HistoryToolCall(
@@ -234,14 +233,6 @@ class MultiAgentWorker:
                         type="function",
                         function=FunctionCall(name=tc.name, arguments=args_str),
                     ))
-                    raw_tc_list.append({
-                        "id": tc.id,
-                        "type": "function",
-                        "function": {
-                            "name": tc.name,
-                            "arguments": args_str,
-                        },
-                    })
 
                 # 2. 发送标准 tool_call 事件到前端
                 for tc in resp.tool_calls:
@@ -265,11 +256,7 @@ class MultiAgentWorker:
                 self._loop.loop.history.add_message(assistant_msg)
                 self._loop.loop.persist_history(self._loop.loop.session_id)
 
-                full_messages.append({
-                    "role": "assistant",
-                    "content": resp.content,
-                    "tool_calls": raw_tc_list,
-                })
+                full_messages.append(assistant_msg)
 
                 # 4. 执行工具，写入结果到 History，发送 tool_result 到前端
                 for tc in resp.tool_calls:
@@ -297,11 +284,7 @@ class MultiAgentWorker:
                     )
 
                     # 追加 tool 结果到本地 LLM 上下文（跟在 assistant tool_calls 之后）
-                    full_messages.append({
-                        "role": "tool",
-                        "tool_call_id": tool_msg.tool_call_id,
-                        "content": str(content_text),
-                    })
+                    full_messages.append(tool_msg)
 
                 continue
 

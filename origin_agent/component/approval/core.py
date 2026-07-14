@@ -12,6 +12,7 @@ import logging
 from typing import Any, Awaitable, Callable, Optional, TYPE_CHECKING
 
 from entity.puretype import ApprovalResult, Role
+from entity.messages import BaseMessage
 
 if TYPE_CHECKING:
     from abstract.llm.client import BaseLLMClient
@@ -108,7 +109,7 @@ async def ask_agent_reason(
         ask_prompt += "\n\n" + read_template("approval/ask_agent_extra_context.txt").replace("{{extra_context}}", extra_context)
     try:
         resp = await llm.chat(
-            [{"role": Role.USER, "content": ask_prompt}],
+            [BaseMessage(role=Role.USER, content=ask_prompt)],
             tools=[],
         )
         return resp.content or "(Agent did not provide an explanation)"

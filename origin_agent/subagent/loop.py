@@ -296,7 +296,7 @@ class SubAgentLoop(BasePrivateChatAgentLoop):
 
                 # 调用 LLM（基类 _build_history_messages 统一处理 system prompt + hooks + memory）
                 messages = self._build_history_messages()
-                resp: LLMResponse = await self._llm.chat(messages, self._tools)
+                resp: LLMResponse = await self._llm.chat(messages, self._tools, character=self.current_character_agent)
 
                 if self._cancel_event.is_set():
                     return
@@ -382,9 +382,7 @@ class SubAgentLoop(BasePrivateChatAgentLoop):
                     # 检测工具失败并放入 outbox，让父 Agent 知道（防止默认成功假设）
                     self._maybe_record_tool_failure(tc.name, raw_content)
 
-                    openai_tool_msg = tool_msg.as_message(self.current_character_agent)
-                    if openai_tool_msg is not None:
-                        messages.append(openai_tool_msg)
+                    messages.append(tool_msg)
                     self._history.add_message(tool_msg)
 
                 # 工具结果已收集，本轮响应结束；注入收件箱（若有）后立刻进入下一轮 LLM 推理

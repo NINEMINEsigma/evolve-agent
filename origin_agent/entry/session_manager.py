@@ -15,7 +15,7 @@ import logging
 from pathlib import Path
 from typing import Any, TYPE_CHECKING
 
-from entity.messages import History, CharacterConversationMessage
+from entity.messages import History, CharacterConversationMessage, BaseMessage
 from entity.puretype import Role
 from entity.constant import AUTO_TITLE_CONTENT_MAX, AUTO_TAGS_CONTENT_MAX, USER_CHARACTER_NAME, INHERIT_LAST_ROUNDS
 from system.templates import read_template
@@ -311,14 +311,19 @@ class LoopSessionManager:
             return []
         try:
             system_prompt = read_template("session_tags.txt")
+            # Convert BaseMessage list to serializable dicts for JSON template
+            messages_json = [
+                d for m in messages
+                if (d := m.as_message(current_character_agent=self._loop.current_character_agent)) is not None
+            ]
             user_prompt = read_template("session_tags_input.txt").replace(
                 "{{old_text}}",
-                json.dumps(messages, ensure_ascii=False)[:AUTO_TAGS_CONTENT_MAX],
+                json.dumps(messages_json, ensure_ascii=False)[:AUTO_TAGS_CONTENT_MAX],
             )
             resp = await self._loop.llm.chat([
-                {"role": Role.SYSTEM.value, "content": system_prompt},
-                {"role": Role.USER.value, "content": user_prompt},
-            ])
+                BaseMessage(role=Role.SYSTEM, content=system_prompt),
+                BaseMessage(role=Role.USER, content=user_prompt),
+            ], character=self._loop.current_character_agent)
             content = resp.content or ""
             try:
                 tags = json.loads(content)

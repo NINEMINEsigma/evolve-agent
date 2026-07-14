@@ -12,6 +12,7 @@ from typing import Any, TYPE_CHECKING
 
 from abstract.llm.client import BaseLLMClient
 from entity.puretype import LLMResponse, Usage, ToolCall
+from entity.messages import BaseMessage
 
 if TYPE_CHECKING:
     from entry.agent_sink import AgentSink
@@ -52,7 +53,7 @@ class StreamConsumer:
     async def consume(
         self,
         session_id: str,
-        messages: list[dict[str, Any]],
+        messages: list[BaseMessage],
         tools: list[dict[str, Any]] | None,
         stream_id: str,
     ) -> LLMResponse:
@@ -69,7 +70,7 @@ class StreamConsumer:
         }
         stream_error: str | None = None
 
-        stream = self._llm.chat_stream(messages, tools=tools)
+        stream = self._llm.chat_stream(messages, tools=tools, character=self._character_name)
         try:
             async for chunk in stream:
                 if ev.is_set():

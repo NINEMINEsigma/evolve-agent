@@ -13,6 +13,7 @@ import logging
 from typing import TYPE_CHECKING
 
 from entity.puretype import Role
+from entity.messages import BaseMessage
 from system.templates import read_template
 from entity.constant import SUMMARY_INPUT_MAX_CHARS, INHERIT_LAST_ROUNDS, TOOL_RESULT_PREVIEW_CHARS
 
@@ -199,8 +200,8 @@ async def summarize_history(history: History, llm: BaseLLMClient) -> str:
 
     try:
         resp = await llm.chat([
-            {"role": Role.SYSTEM.value, "content": system_prompt},
-            {"role": Role.USER.value, "content": user_prompt},
+            BaseMessage(role=Role.SYSTEM, content=system_prompt),
+            BaseMessage(role=Role.USER, content=user_prompt),
         ])
         result = resp.content or ""
         result = result.strip()

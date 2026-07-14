@@ -74,7 +74,7 @@ sequenceDiagram
 
     GW->>PAL: process_message(user_message)
     PAL->>PAL: append_user_message, persist history
-    PAL->>MS: build_turn_messages()
+    PAL->>MS: build_full_history_messages()
     MS->>MS: load custom_hooks, memory, system prompt
     MS-->>PAL: messages list
     PAL->>LLM: chat_stream(messages)

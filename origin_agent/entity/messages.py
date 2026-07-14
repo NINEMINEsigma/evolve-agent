@@ -321,17 +321,37 @@ class ToolResultMessage(CharacterMessage):
 
 
 class History(BaseModel):
-    messages: list[BaseMessage] = Field(default=[], description="The messages of the history")
+    messages: list[BaseMessage] = Field(default_factory=list, description="The messages of the history")
     last_user_message: CharacterConversationMessage|None = Field(default=None, description="The last user message of the history")
     _io_locker: Lock = PrivateAttr(default_factory=Lock)
 
-    def get_messages(self, *, current_character_agent: str, **kwargs) -> list[dict]:
+    def to_openai_format(self, *, current_character_agent: str, **kwargs) -> list[dict]:
+        """将历史消息转换为 OpenAI 协议格式的字典列表（默认转换实现）。
+
+        ``get_messages()`` 返回原始 ``BaseMessage`` 对象列表，
+        此方法负责格式转换。调用方（特别是 ``BaseLLMClient`` 子类）
+        可在内部调用此方法完成默认的 OpenAI 格式转换。
+        """
         result = [message.as_message(
                     current_character_agent=current_character_agent, is_last_user_message=message == self.last_user_message, 
                     **kwargs)
             for message in self.messages
             ]
         return [i for i in result if i is not None]
+
+    def get_messages(self, *, current_character_agent: str) -> list[BaseMessage]:
+        """返回过滤后对当前 agent 可见的原始 BaseMessage 对象列表。
+
+        由 ``BaseLLMClient.chat()`` 接收，客户端在发送前自行转换格式。
+        """
+        result: list[BaseMessage] = []
+        for message in self.messages:
+            # TODO: 没有独立函数用于检验
+            # as_content 返回 None 表示对当前 agent 不可见
+            if message.as_content(current_character_agent) is None:
+                continue
+            result.append(message)
+        return result
 
     def update_last_user_message(self) -> None:
         """重新计算并更新 last_user_message 缓存。"""
