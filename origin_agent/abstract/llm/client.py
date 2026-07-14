@@ -40,7 +40,7 @@ class BaseLLMClient(ABC):
         *messages* 为 ``BaseMessage`` 对象列表，子类在发送前自行转换为 wire format。
         *tools* 为可选的 OpenAI 格式工具 schema 列表。
         *response_format* 用于指定结构化输出格式（如 json_object）。
-        *character* 当前运行中的 agent 角色名，用于 ``as_message()`` 内的可见性过滤和前缀修饰。
+        *character* 当前运行中的 agent 角色名，用于消息转换时的可见性过滤和前缀修饰（发送前由 LLM 客户端自行调用 ``to_openai_message()``）。
         """
         raise NotImplementedError
 
@@ -57,7 +57,7 @@ class BaseLLMClient(ABC):
         实现应支持 content 增量、reasoning 增量、tool_calls 累积输出，
         并在流结束时发出带 ``finish_reason`` 的 chunk。
 
-        *character* 当前运行中的 agent 角色名，用于 ``as_message()`` 内的可见性过滤和前缀修饰。
+        *character* 当前运行中的 agent 角色名，用于消息转换时的可见性过滤和前缀修饰（发送前由 LLM 客户端自行调用 ``to_openai_message()``）。
         """
         raise NotImplementedError
         yield None  # noqa

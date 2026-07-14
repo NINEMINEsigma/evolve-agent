@@ -744,7 +744,7 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
             # 将 BaseMessage 列表转为 JSON 可序列化的 dict 列表（供模板使用）
             messages_json = [
                 d for m in raw_messages
-                if (d := to_openai_message(m, current_character_agent=self.current_character_agent)) is not None
+                if (d := to_summary_dict(m, current_character_agent=self.current_character_agent)) is not None
             ]
             user_prompt = read_template("session_tags_input.txt").replace(
                 "{{old_text}}",
@@ -759,6 +759,8 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
                 tags = json.loads(content)
                 if isinstance(tags, list):
                     return [str(t) for t in tags[:5]]
+                elif content:
+                    return [str(content)]
             except json.JSONDecodeError:
                 pass
         except Exception as exc:
