@@ -22,7 +22,7 @@ from entity.puretype import Role, ToolDangerLevel
 from entity.messages import History, BaseMessage, ToolResultMessage, CharacterConversationMessage
 from entity.constant import USER_CHARACTER_NAME, SYSTEM_CHARACTER_NAME
 from entry.agent_support.messages import (
-    build_turn_messages,
+    build_full_history_messages,
     collect_all_hooks_context,
     load_message_hooks,
 )
@@ -761,9 +761,8 @@ class BasePrivateChatAgentLoop(BaseAgentLoop):
         hooks_context / memory_ctx 已在追加用户消息时通过
         History.last_user_message.dynamic_message_suffix 注入，本函数不再处理。
         """
-        _ = user_message  # 保留签名兼容，实际注入逻辑已前移到 append_user_message
         system_prompts = self._build_system_prompt()
-        return build_turn_messages(
+        return build_full_history_messages(
             system_prompts=system_prompts,
             history=self._history,
             current_character_agent=self.current_character_agent,

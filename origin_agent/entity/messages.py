@@ -333,12 +333,6 @@ class History(BaseModel):
             ]
         return [i for i in result if i is not None]
 
-    def to_openai(self, current_character_agent: str, **kwargs) -> list[dict]:
-        """get_messages 的别名，语义上明确表示转换为 OpenAI 格式。"""
-        return self.get_messages(
-            current_character_agent=current_character_agent, 
-            **kwargs)
-
     def update_last_user_message(self) -> None:
         """重新计算并更新 last_user_message 缓存。"""
         for message in reversed(self.messages):

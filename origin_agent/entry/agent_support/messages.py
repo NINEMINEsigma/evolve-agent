@@ -168,32 +168,19 @@ def collect_skill_prompts(skills_dir: Path | str = Path("skills")) -> list[str]:
         return []
 
 
-def build_turn_messages(
-    system_prompts: list[str],
-    history: History,
-    current_character_agent: str,
-) -> list[dict[str, Any]]:
-    """构建当前回合发送给 LLM 的消息列表。
-
-    假设调用方已经把 hooks_context / memory_ctx 等非持久化内容通过
-    history.last_user_message.dynamic_message_suffix 注入；本函数只负责
-    system prompt 与 history.to_openai 的拼接。
-    """
-    messages: list[dict[str, Any]] = [
-        {"role": Role.SYSTEM, "content": sp} for sp in system_prompts
-    ]
-    messages.extend(history.to_openai(current_character_agent))
-    return messages
-
-
 def build_full_history_messages(
     system_prompts: list[str],
     history: History,
     current_character_agent: str,
 ) -> list[dict[str, Any]]:
-    """构建包含 system prompts 和完整历史的消息列表。"""
+    """构建包含 system prompts 和完整历史的消息列表。
+
+    假设调用方已经把 hooks_context / memory_ctx 等非持久化内容通过
+    history.last_user_message.dynamic_message_suffix 注入；本函数只负责
+    system prompt 与 History.get_messages 的拼接。
+    """
     messages: list[dict[str, Any]] = [
         {"role": Role.SYSTEM, "content": sp} for sp in system_prompts
     ]
-    messages.extend(history.to_openai(current_character_agent))
+    messages.extend(history.get_messages(current_character_agent=current_character_agent))
     return messages
