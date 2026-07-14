@@ -94,29 +94,6 @@ class BaseMessage(BaseModel):
                     result[i] = cur.as_object() # type: ignore
         return result
 
-    def as_message(self, 
-        # 当前作为运行中的agent的角色
-        current_character_agent:str, 
-        **kwargs
-        ) -> dict|None:
-        '''
-        将message转换为openai协议的消息格式, 并合成必要的前缀后缀以及格式化
-
-        Args:
-            current_character_agent: 当前作为运行中的agent的角色
-            kwargs: 格式化参数
-
-        Returns:
-            dict: 转换后的openai协议的消息格式
-        '''
-        content = self.as_content(current_character_agent, **kwargs)
-        if content is None:
-            return None
-        return {
-            "role": self.role.value,
-            "content": content
-        }
-
 
 class CharacterMessage(BaseMessage):
     character_name: str = Field(..., description="The character name of the message")
@@ -266,27 +243,6 @@ class CharacterConversationMessage(CharacterMessage):
         # 返回修饰后的消息
         return f"{prefix}\n---\n{raw_message}\n---\n{self.message_suffix}{non_persistent_injection_suffix}"
 
-    def as_message(self,
-        # 当前作为运行中的agent的角色
-        current_character_agent:str, 
-        **kwargs
-        ) -> dict|None:
-        '''
-        将message转换为openai协议的消息格式, 并合成必要的前缀后缀以及格式化
-        '''
-        raw_message = super().as_message(current_character_agent, **kwargs)
-        if raw_message is None:
-            return None
-        if current_character_agent != self.character_name:
-            # 以特殊用户消息的形式提供给目标agent
-            raw_message["role"] = Role.USER.value
-            return raw_message
-        if self.character_name == current_character_agent and self.reasoning_field_name  and self.reasoning:
-            raw_message[self.reasoning_field_name] = self.reasoning
-        if self.character_name == current_character_agent and self.tool_calls:
-            raw_message["tool_calls"] = [tool_call.as_object() for tool_call in self.tool_calls]
-        return raw_message
-
 
 class ToolResultMessage(CharacterMessage):
     '''
@@ -310,34 +266,12 @@ class ToolResultMessage(CharacterMessage):
             content=tool_result_to_content(result),
         )
 
-    def as_message(self, current_character_agent: str, **kwargs) -> dict | None:
-        if current_character_agent != self.character_name:
-            return None
-        raw_message = super().as_message(current_character_agent, **kwargs)
-        if raw_message is None:
-            return None
-        raw_message["tool_call_id"] = self.tool_call_id
-        return raw_message
 
 
 class History(BaseModel):
     messages: list[BaseMessage] = Field(default_factory=list, description="The messages of the history")
     last_user_message: CharacterConversationMessage|None = Field(default=None, description="The last user message of the history")
     _io_locker: Lock = PrivateAttr(default_factory=Lock)
-
-    def to_openai_format(self, *, current_character_agent: str, **kwargs) -> list[dict]:
-        """将历史消息转换为 OpenAI 协议格式的字典列表（默认转换实现）。
-
-        ``get_messages()`` 返回原始 ``BaseMessage`` 对象列表，
-        此方法负责格式转换。调用方（特别是 ``BaseLLMClient`` 子类）
-        可在内部调用此方法完成默认的 OpenAI 格式转换。
-        """
-        result = [message.as_message(
-                    current_character_agent=current_character_agent, is_last_user_message=message == self.last_user_message, 
-                    **kwargs)
-            for message in self.messages
-            ]
-        return [i for i in result if i is not None]
 
     def get_messages(self, *, current_character_agent: str) -> list[BaseMessage]:
         """返回过滤后对当前 agent 可见的原始 BaseMessage 对象列表。

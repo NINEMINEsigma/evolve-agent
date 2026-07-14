@@ -23,6 +23,7 @@ import httpx
 import openai
 
 from abstract.llm.client import BaseLLMClient
+from abstract.llm.formats import to_openai_message
 from entity.messages import BaseMessage
 from entity.puretype import LLMResponse, StreamChunk, ToolCall, Usage
 from entity.constant import TOOL_RESULT_PREVIEW_CHARS, LLM_RETRY_COUNT, BACKOFF_BASE
@@ -97,7 +98,7 @@ class OpenAILLMClient(BaseLLMClient):
         """
         result = []
         for message in messages:
-            converted = message.as_message(current_character_agent=character)
+            converted = to_openai_message(message, current_character_agent=character)
             if converted is not None:
                 result.append(converted)
         return result
@@ -447,31 +448,46 @@ def _build_resume_messages(
     assistant_reasoning: str | None = state.get("reasoning") or None
     completed_tool_calls: list[ToolCall] = state.get("completed_tool_calls", [])
 
-    assistant_msg: dict[str, Any] = {
-        "role": "assistant",
-        "content": assistant_content or " ",
-    }
-    if assistant_reasoning:
-        field_name = state.get("reasoning_field_name") or "reasoning_content"
-        assistant_msg[field_name] = assistant_reasoning
-    if completed_tool_calls:
-        assistant_msg["tool_calls"] = [
-            {
-                "id": tc.id,
-                "type": "function",
-                "function": {
-                    "name": tc.name,
-                    "arguments": json.dumps(tc.arguments, ensure_ascii=False),
-                },
-            }
-            for tc in completed_tool_calls
-        ]
+    # Build assistant message via entity + formatter instead of raw dict
+    from entity.messages import ToolCall as MsgToolCall, FunctionCall as MsgFunctionCall
+    from entity.messages import CharacterConversationMessage as EntityCharConvMsg
+    from entity.puretype import Role
+
+    msg_tool_calls: list[MsgToolCall] = [
+        MsgToolCall(
+            id=tc.id,
+            type="function",
+            function=MsgFunctionCall(
+                name=tc.name,
+                arguments=json.dumps(tc.arguments, ensure_ascii=False),
+            ),
+        )
+        for tc in completed_tool_calls
+    ] if completed_tool_calls else []
+
+    assistant_entity = EntityCharConvMsg(
+        role=Role.ASSISTANT,
+        character_name="",
+        content=assistant_content or " ",
+        reasoning=assistant_reasoning,
+        reasoning_field_name=state.get("reasoning_field_name") or "reasoning_content",
+        tool_calls=msg_tool_calls or None,
+    )
+    converted = to_openai_message(assistant_entity, current_character_agent="")
+    if converted:
+        messages.append(converted)
+
+    # User resume prompt via entity + formatter
     from system.templates import read_template
-    messages.append(assistant_msg)
-    messages.append({
-        "role": "user",
-        "content": read_template("llm/stream_resume.txt"),
-    })
+    from entity.messages import BaseMessage as EntityMsg
+    user_entity = EntityMsg(
+        role=Role.USER,
+        content=read_template("llm/stream_resume.txt"),
+    )
+    converted_user = to_openai_message(user_entity, current_character_agent="")
+    if converted_user:
+        messages.append(converted_user)
+
     return messages
 
 

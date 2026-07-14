@@ -243,6 +243,8 @@ class MultiAgentLoop(BaseAgentLoop, IMainSessionLoop):
         from entity.messages import CharacterConversationMessage, MessageBlock
 
         result: list[dict] = []
+        # TODO(step6): 与 base_agent_loop.get_session_messages() 存在大量重复，
+        #             应提取公共的前端展示序列化函数，见 formats.py
         for index, msg in enumerate(self._history.iter_messages()):
             raw_content = msg.content
             if isinstance(raw_content, list):

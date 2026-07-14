@@ -371,6 +371,8 @@ class BaseAgentLoop(ABC):
     def get_session_messages(self) -> list[dict]:
         """返回前端展示所需的消息列表，包含多 agent 元数据。"""
         messages: list[dict] = []
+        # TODO(step6): 与 multi_agent_loop.get_session_messages() 存在大量重复，
+        #             应提取公共的前端展示序列化函数，见 formats.py
         for index, msg in enumerate(self._history.iter_messages()):
             raw_content = msg.content
             if isinstance(raw_content, list):

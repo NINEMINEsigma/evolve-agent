@@ -23,6 +23,7 @@ from abstract.tools.registry import registry as tool_registry
 from component.approval import ask_agent_reason
 from abstract.llm.client import BaseLLMClient
 from abstract.llm.loader import create_llm_client
+from abstract.llm.formats import to_openai_message, to_summary_dict
 from entity.puretype import LLMResponse, ToolCall, Role, ToolAvailability
 from system.session_store import SessionStore
 from entity.constant import (
@@ -354,7 +355,7 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
                 # 委托给 ToolExecutor 执行工具调用
                 for tc in resp.tool_calls:
                     tool_msg = await self._tool_executor.execute(tc, sid)
-                    openai_tool_msg = tool_msg.as_message(self.current_character_agent)
+                    openai_tool_msg = to_openai_message(tool_msg, current_character_agent=self.current_character_agent)
                     if openai_tool_msg is not None:
                         messages.append(openai_tool_msg)
                     self._history.add_message(tool_msg)
@@ -411,7 +412,7 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
             self._history.add_message(message)
             self._persist_message(self.session_id)
             if target_messages is not None:
-                openai_msg = message.as_message(self.current_character_agent)
+                openai_msg = to_openai_message(message, current_character_agent=self.current_character_agent)
                 if openai_msg is not None:
                     target_messages.append(openai_msg)
         return True
@@ -716,7 +717,7 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
         # 将 BaseMessage 列表转为 JSON 可序列化的 dict 列表（供模板使用）
         messages_json = [
             d for m in raw_messages
-            if (d := m.as_message(current_character_agent=self.current_character_agent)) is not None
+            if (d := to_summary_dict(m, current_character_agent=self.current_character_agent)) is not None
         ]
         user_prompt = read_template("auto_title_input.txt").replace(
             "{{context}}",
@@ -743,7 +744,7 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
             # 将 BaseMessage 列表转为 JSON 可序列化的 dict 列表（供模板使用）
             messages_json = [
                 d for m in raw_messages
-                if (d := m.as_message(current_character_agent=self.current_character_agent)) is not None
+                if (d := to_openai_message(m, current_character_agent=self.current_character_agent)) is not None
             ]
             user_prompt = read_template("session_tags_input.txt").replace(
                 "{{old_text}}",

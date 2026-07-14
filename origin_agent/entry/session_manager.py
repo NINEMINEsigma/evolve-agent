@@ -21,6 +21,7 @@ from entity.constant import AUTO_TITLE_CONTENT_MAX, AUTO_TAGS_CONTENT_MAX, USER_
 from system.templates import read_template
 from system.session_store import SessionStore
 from entry.agent_support.history_summary import extract_last_rounds
+from abstract.llm.formats import to_openai_message, to_summary_dict
 
 if TYPE_CHECKING:
     from abstract.llm.client import BaseLLMClient
@@ -314,7 +315,7 @@ class LoopSessionManager:
             # Convert BaseMessage list to serializable dicts for JSON template
             messages_json = [
                 d for m in messages
-                if (d := m.as_message(current_character_agent=self._loop.current_character_agent)) is not None
+                if (d := to_summary_dict(m, current_character_agent=self._loop.current_character_agent)) is not None
             ]
             user_prompt = read_template("session_tags_input.txt").replace(
                 "{{old_text}}",
