@@ -410,6 +410,14 @@ class BaseAgentLoop(ABC):
                     ]
             if msg.role == Role.SYSTEM:
                 entry["role"] = Role.SYSTEM.value
+            if isinstance(msg, ToolResultMessage):
+                content_str = content_to_text(raw_content)
+                try:
+                    parsed = json.loads(content_str)
+                    if isinstance(parsed, dict) and "_meta" in parsed:
+                        entry["tool_call_meta"] = parsed["_meta"]
+                except (json.JSONDecodeError, TypeError):
+                    pass
             messages.append(entry)
         return messages
 

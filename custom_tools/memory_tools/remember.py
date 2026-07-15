@@ -18,7 +18,7 @@ def _handle_remember(args: dict[str, Any], context: ToolContext | None = None) -
     """记住一条信息。"""
     id = args["id"]
     message = args["content"]
-    is_overwrite = args["is_overwrite"]
+    is_overwrite = args.get("is_overwrite", False)
     if context:
         memory_data_file = (context.runtime_context.agentspace/"memory_data.json").absolute()
         memory_data: dict[str, str]

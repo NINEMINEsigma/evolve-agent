@@ -404,6 +404,9 @@ export function useSessionStore(callbacks: SessionStoreCallbacks = {}): SessionS
               }
               if (parsed.content !== undefined) entry.content = parsed.content;
             }
+            if (m.tool_call_meta) {
+              entry.toolCallMeta = m.tool_call_meta;
+            }
             return entry;
           });
           if (history.length) {

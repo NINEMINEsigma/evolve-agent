@@ -234,17 +234,7 @@ class MultiAgentWorker:
                         function=FunctionCall(name=tc.name, arguments=args_str),
                     ))
 
-                # 2. 发送标准 tool_call 事件到前端
-                for tc in resp.tool_calls:
-                    await self._sink.emit_tool_call(
-                        self._loop.loop.session_id,
-                        tc.name,
-                        tc.id,
-                        tc.arguments,
-                        character_name=self.character_name,
-                    )
-
-                # 3. 写入 assistant message（含 tool_calls）到共享 History，并追加到本地 LLM 上下文
+                # 2. 写入 assistant message（含 tool_calls）到共享 History，并追加到本地 LLM 上下文
                 assistant_msg = CharacterConversationMessage(
                     role=Role.ASSISTANT,
                     character_name=self.character_name,
@@ -258,30 +248,17 @@ class MultiAgentWorker:
 
                 full_messages.append(assistant_msg)
 
-                # 4. 执行工具，写入结果到 History，发送 tool_result 到前端
+                # 3. 执行工具，写入结果到 History
+                #    tool_call/tool_result 前端事件由 ToolExecutor 内部统一发送，此处不再重复
                 for tc in resp.tool_calls:
-                    tool_msg = await self._tool_executor.execute(tc, self._loop.loop.session_id)
-
-                    # 设置 character_name 为仅调用方可见
-                    if tool_msg.character_name != self.character_name:
-                        tool_msg = tool_msg.model_copy(update={"character_name": self.character_name})
+                    tool_msg = await self._tool_executor.execute(
+                        tc, self._loop.loop.session_id,
+                        character_name=self.character_name,
+                    )
 
                     # 写入共享 History
                     self._loop.loop.history.add_message(tool_msg)
                     self._loop.loop.persist_history(self._loop.loop.session_id)
-
-                    # 发送标准 tool_result 事件到前端
-                    content_text = tool_msg.content
-                    if isinstance(content_text, list):
-                        from entry.agent_support.multimodal import content_to_text
-                        content_text = content_to_text(content_text)
-                    await self._sink.emit_tool_result(
-                        self._loop.loop.session_id,
-                        tc.name,
-                        tc.id,
-                        str(content_text),
-                        character_name=self.character_name,
-                    )
 
                     # 追加 tool 结果到本地 LLM 上下文（跟在 assistant tool_calls 之后）
                     full_messages.append(tool_msg)

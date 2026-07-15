@@ -240,7 +240,7 @@ class MultiAgentLoop(BaseAgentLoop, IMainSessionLoop):
 
     def get_session_messages(self) -> list[dict]:
         """返回 History 中所有消息的字典列表（供前端展示）。"""
-        from entity.messages import CharacterConversationMessage, MessageBlock
+        from entity.messages import CharacterConversationMessage, MessageBlock, ToolResultMessage
 
         result: list[dict] = []
         # TODO(step6): 与 base_agent_loop.get_session_messages() 存在大量重复，
@@ -286,6 +286,14 @@ class MultiAgentLoop(BaseAgentLoop, IMainSessionLoop):
                         }
                         for tc in msg.tool_calls
                     ]
+            if isinstance(msg, ToolResultMessage):
+                content_str = str(raw_content) if not isinstance(raw_content, list) else ""
+                try:
+                    parsed = json.loads(content_str)
+                    if isinstance(parsed, dict) and "_meta" in parsed:
+                        entry["tool_call_meta"] = parsed["_meta"]
+                except (json.JSONDecodeError, TypeError):
+                    pass
             result.append(entry)
         return result
 

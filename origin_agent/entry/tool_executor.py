@@ -44,12 +44,24 @@ class ToolExecutor:
         self,
         tc: ToolCall,
         session_id: str,
+        *,
+        character_name: str | None = None,
     ) -> ToolResultMessage:
-        """执行单个工具调用，返回 ToolResultMessage。"""
+        """执行单个工具调用，返回 ToolResultMessage。
+
+        Args:
+            tc: 工具调用描述。
+            session_id: 当前会话 ID。
+            character_name: 发起此工具调用的角色名；
+                MultiAgent 模式下由 worker 传入对应 Agent 名称，
+                默认回退到 loop.current_character_agent。
+        """
         from entity.constant import LOG_PREVIEW_CHARS
         from component.approval import execute_with_approval, ask_agent_reason as _ask_agent_reason
         from abstract.tools.registry import registry as tool_registry
         from abstract.tools.ui_event_router import ui_event_router
+
+        char_name = character_name or self._loop.current_character_agent
 
         # -- 记录申请时间（审批流程之前） --
         start_mono: float = time.monotonic()
@@ -73,7 +85,7 @@ class ToolExecutor:
             _cancelled_result: dict = {"error": "Cancelled.", "_meta": _meta.model_dump()}
             return ToolResultMessage(
                 role=Role.TOOL,
-                character_name=self._loop.current_character_agent,
+                character_name=char_name,
                 tool_call_id=tc.id,
                 content=json.dumps(_cancelled_result, ensure_ascii=False),
             )
@@ -108,11 +120,12 @@ class ToolExecutor:
             await self._loop.loop.get_sink().emit_tool_result(
                 session_id, tc.name, tc.id,
                 json.dumps(_result, ensure_ascii=False),
+                character_name=char_name,
                 tool_call_meta=_meta.model_dump(),
             )
             return ToolResultMessage(
                 role=Role.TOOL,
-                character_name=self._loop.current_character_agent,
+                character_name=char_name,
                 tool_call_id=tc.id,
                 content=json.dumps(_result, ensure_ascii=False),
             )
@@ -127,6 +140,7 @@ class ToolExecutor:
         # 通知前端 tool_call 事件
         await self._loop.loop.get_sink().emit_tool_call(
             session_id, tc.name, tc.id, args,
+            character_name=char_name,
         )
 
         # 审批流程
@@ -204,6 +218,7 @@ class ToolExecutor:
         # 通知前端结果（使用文本摘要，避免 base64 撑爆前端事件）
         await self._loop.loop.get_sink().emit_tool_result(
             session_id, tc.name, tc.id, content_to_text(content),
+            character_name=char_name,
             tool_call_meta=_meta.model_dump(),
         )
 
@@ -217,7 +232,7 @@ class ToolExecutor:
 
         return ToolResultMessage(
             role=Role.TOOL,
-            character_name=self._loop.current_character_agent,
+            character_name=char_name,
             tool_call_id=tc.id,
             content=content,
         )
