@@ -1,17 +1,21 @@
 from __future__ import annotations
 
-from easysave import save, load
 import logging
 from typing import * # type: ignore
 
 from abstract.tools.registry import registry, tool_result
+from custom_tools.memory_tools._store import (
+    FALLBACK_SESSION,
+    load_all_memory,
+    save_all_memory,
+    ensure_session_memory,
+    collect_merged_memory,
+)
 
 if TYPE_CHECKING:
     from entry.base_agent_loop import ToolContext
 
 logger = logging.getLogger(__name__)
-
-__VERSION__ = "v0"
 
 
 def _handle_remember(args: dict[str, Any], context: ToolContext | None = None) -> dict:
@@ -20,16 +24,17 @@ def _handle_remember(args: dict[str, Any], context: ToolContext | None = None) -
     message = args["content"]
     is_overwrite = args.get("is_overwrite", False)
     if context:
-        memory_data_file = (context.runtime_context.agentspace/"memory_data.json").absolute()
-        memory_data: dict[str, str]
-        if memory_data_file.exists():
-            memory_data = load(__VERSION__, str(memory_data_file), dict[str, str])
-        else:
-            memory_data = {}
-        if id in memory_data and not is_overwrite:
-            return tool_result(success=False, message=f"id {id} is already exists and overwrite is not allowed.Current content: {memory_data[id]}")
-        memory_data[id] = message
-        save(__VERSION__, str(memory_data_file), memory_data)
+        memory_data_file = (context.runtime_context.agentspace / "memory_data.json").absolute()
+        session_id = context.session_id or FALLBACK_SESSION
+        data = load_all_memory(memory_data_file)
+        # 冲突检查针对合并视图（含父链继承的记忆）
+        merged = collect_merged_memory(data, session_id)
+        if id in merged and not is_overwrite:
+            return tool_result(success=False, message=f"id {id} is already exists and overwrite is not allowed. Current content: {merged[id]}")
+        # 写入当前会话自身的 dict，并刷新 __parents__ 引用
+        session_mem = ensure_session_memory(data, session_id)
+        session_mem[id] = message
+        save_all_memory(memory_data_file, data)
     return tool_result(success=True, message=f"id {id} has been remembered.")
 
 
@@ -41,9 +46,10 @@ registry.register(
     schema={
         # 将一条信息持久化到记忆存储，供后续会话通过 remember_memory hook 读取。
         # 使用 id 作为唯一键，content 作为记忆内容。
-        # 若 id 已存在且 is_overwrite 为 false，则保留原内容并返回错误。
+        # 若 id 已存在（含父会话继承的记忆）且 is_overwrite 为 false，则保留原内容并返回错误。
+        # 记忆按会话隔离：写入当前会话自身的存储，子会话通过引用继承。
         # 前置条件：无。
-        # 调用效果：将 {id: content} 写入 agentspace 中的记忆文件。
+        # 调用效果：将 {id: content} 写入当前会话在 agentspace 记忆文件中的分区。
         # 返回值：{ success: bool, message: string }
         # 何时使用：
         #   - 【最高优先级】用户表达愤怒、失望、强烈负面情绪时，必须立即记录错误和纠正要求。
@@ -56,7 +62,7 @@ registry.register(
 None.
 
 ## Effect
-Stores the provided content under the given id in the agent's memory file. If the id already exists and is_overwrite is false, the existing entry is preserved and an error is returned.
+Stores the provided content under the given id in the current session's memory partition. The memory is session-isolated: child sessions inherit parent session memories via reference. If the id already exists (including inherited memories from parent sessions) and is_overwrite is false, the existing entry is preserved and an error is returned.
 
 ## Returns
 ```json
@@ -101,8 +107,8 @@ Writes to the agent's memory file on disk. Repeated calls with the same id may o
                 },
                 "is_overwrite": {
                     "type": "boolean",
-                    # 当 id 已存在时，是否覆盖原有内容。默认 false。
-                    "description": """Whether to overwrite an existing entry with the same id. Defaults to false.""",
+                    # 当 id 已存在（含父会话继承的记忆）时，是否覆盖原有内容。默认 false。
+                    "description": """Whether to overwrite an existing entry with the same id (including inherited memories from parent sessions). Defaults to false.""",
                     "default": False,
                 },
             },
