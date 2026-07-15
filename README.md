@@ -105,7 +105,7 @@ origin_agent/
 ├── entity/                ← 常量与纯类型定义
 │   ├── constant.py
 │   ├── messages.py        ← 消息 / History 模型（BaseMessage 体系）
-│   └── puretype.py        ← LLMResponse, StreamChunk, Role, ToolAvailability 等
+│   └── puretype.py        ← MessageType, Message, LLMResponse, StreamChunk, Role 等纯类型
 ├── system/                ← 基础设施
 │   ├── application.py     ← Application 全局单例（装配所有子系统）
 │   ├── sandbox.py         ← 路径沙盒（fork:/ws:/fix: 命名空间）

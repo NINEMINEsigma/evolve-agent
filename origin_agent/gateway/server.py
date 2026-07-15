@@ -121,18 +121,21 @@ async def push_subagent_update(
     import json as _json
     try:
         await ws.send_text(
-            Message(
-                type=MessageType.SUBAGENT_UPDATE,
-                session_id=parent_session_id,
-                result=_json.dumps({
-                    "session_id": subagent_session_id,
-                    "name": subagent_name,
-                    "status": status,
-                    "feedback": feedback,
-                    "pending_approvals": pending_approvals,
-                    "_removed": removed,
-                }, ensure_ascii=False),
-            ).to_json()
+            json.dumps(
+                Message(
+                    type=MessageType.SUBAGENT_UPDATE,
+                    session_id=parent_session_id,
+                    result=_json.dumps({
+                        "session_id": subagent_session_id,
+                        "name": subagent_name,
+                        "status": status,
+                        "feedback": feedback,
+                        "pending_approvals": pending_approvals,
+                        "_removed": removed,
+                    }, ensure_ascii=False),
+                ).model_dump(exclude_none=True),
+                ensure_ascii=False,
+            )
         )
     except Exception as exc:
         logger.warning("Failed to push subagent update to session=%s: %s", parent_session_id, exc, exc_info=True)
@@ -180,7 +183,7 @@ async def _send_tool_event(
             content=json.dumps({"assistant_text": payload}),
         )
         try:
-            await ws.send_text(msg.to_json())
+            await ws.send_text(json.dumps(msg.model_dump(exclude_none=True), ensure_ascii=False))
         except Exception:
             logger.warning("Failed to push assistant_text to session=%s", session_id, exc_info=True)
         return
@@ -197,7 +200,7 @@ async def _send_tool_event(
             content=payload,
         )
         try:
-            await ws.send_text(msg.to_json())
+            await ws.send_text(json.dumps(msg.model_dump(exclude_none=True), ensure_ascii=False))
         except Exception:
             logger.warning("Failed to push usage_update to session=%s", session_id, exc_info=True)
         return
@@ -216,7 +219,7 @@ async def _send_tool_event(
             result=(payload if data else None),
         )
         try:
-            await ws.send_text(msg.to_json())
+            await ws.send_text(json.dumps(msg.model_dump(exclude_none=True), ensure_ascii=False))
         except Exception:
             logger.warning("Failed to push task_progress to session=%s", session_id, exc_info=True)
         return
@@ -234,7 +237,7 @@ async def _send_tool_event(
             result=(payload if data else None),
         )
         try:
-            await ws.send_text(msg.to_json())
+            await ws.send_text(json.dumps(msg.model_dump(exclude_none=True), ensure_ascii=False))
         except Exception:
             logger.warning("Failed to push clipboard_display to session=%s", session_id, exc_info=True)
         return
@@ -256,7 +259,7 @@ async def _send_tool_event(
             character_name=(data.get("character_name") if data else None),
         )
         try:
-            await ws.send_text(msg.to_json())
+            await ws.send_text(json.dumps(msg.model_dump(exclude_none=True), ensure_ascii=False))
         except Exception:
             logger.warning("Failed to push stream_delta to session=%s", session_id, exc_info=True)
         return
@@ -274,7 +277,7 @@ async def _send_tool_event(
             finish_reason=(data.get("finish_reason") if data else None),
         )
         try:
-            await ws.send_text(msg.to_json())
+            await ws.send_text(json.dumps(msg.model_dump(exclude_none=True), ensure_ascii=False))
         except Exception:
             logger.warning("Failed to push stream_done to session=%s", session_id, exc_info=True)
         return
@@ -295,7 +298,7 @@ async def _send_tool_event(
         emoji=registry.get_emoji(tool_name) if event_type == "tool_call" else None,
     )
     try:
-        await ws.send_text(msg.to_json())
+        await ws.send_text(json.dumps(msg.model_dump(exclude_none=True), ensure_ascii=False))
         if event_type not in ("stream_delta", "usage_update"):
             logger.info("[ws push ok] session=%s type=%s tool=%s", session_id, event_type, tool_name)
     except Exception:
@@ -464,7 +467,7 @@ def _push_agentspace_lock_state() -> None:
                 continue
             try:
                 _asyncio.ensure_future(ws.send_text(
-                    Message(type=MessageType.AGENTSPACE_LOCK, session_id=sid, content=payload).to_json()
+                    json.dumps(Message(type=MessageType.AGENTSPACE_LOCK, session_id=sid, content=payload).model_dump(exclude_none=True), ensure_ascii=False)
                 ))
             except Exception:
                 pass
@@ -703,14 +706,17 @@ async def regenerate_response(session_id: str):
     if ws:
         try:
             await ws.send_text(
-                Message(
-                    type=MessageType.SYSTEM,
-                    session_id=session_id,
-                    content=json.dumps({
-                        "regenerate_trim": True,
-                        "keep_count": result.get("remaining_count", 0),
-                    }),
-                ).to_json()
+                json.dumps(
+                    Message(
+                        type=MessageType.SYSTEM,
+                        session_id=session_id,
+                        content=json.dumps({
+                            "regenerate_trim": True,
+                            "keep_count": result.get("remaining_count", 0),
+                        }),
+                    ).model_dump(exclude_none=True),
+                    ensure_ascii=False,
+                )
             )
         except Exception:
             logger.warning("Failed to send regenerate_trim to session=%s", session_id, exc_info=True)
@@ -1279,11 +1285,14 @@ async def ws_chat(ws: WebSocket) -> None:
             _sm.remove_from_index(exc.session_id)
         try:
             await ws.send_text(
-                Message(
-                    type=MessageType.ERROR,
-                    session_id=sid,
-                    message=f"会话 {exc.session_id} 的历史格式不兼容，已从索引移除。请运行迁移脚本后重连。",
-                ).to_json()
+                json.dumps(
+                    Message(
+                        type=MessageType.ERROR,
+                        session_id=sid,
+                        message=f"会话 {exc.session_id} 的历史格式不兼容，已从索引移除。请运行迁移脚本后重连。",
+                    ).model_dump(exclude_none=True),
+                    ensure_ascii=False,
+                )
             )
             await ws.close()
         except Exception:
@@ -1295,21 +1304,27 @@ async def ws_chat(ws: WebSocket) -> None:
     try:
         # 发送欢迎消息
         await ws.send_text(
-            Message(
-                type=MessageType.SYSTEM,
-                session_id=sid,
-                content="Connected to Evolve Agent",
-            ).to_json()
+            json.dumps(
+                Message(
+                    type=MessageType.SYSTEM,
+                    session_id=sid,
+                    content="Connected to Evolve Agent",
+                ).model_dump(exclude_none=True),
+                ensure_ascii=False,
+            )
         )
 
         # 发送构建哈希，使前端能检测进化并自动重载
         if _BUILD_HASH:
             await ws.send_text(
-                Message(
-                    type=MessageType.SYSTEM,
-                    session_id=sid,
-                    content=json.dumps({"build_hash": _BUILD_HASH}),
-                ).to_json()
+                json.dumps(
+                    Message(
+                        type=MessageType.SYSTEM,
+                        session_id=sid,
+                        content=json.dumps({"build_hash": _BUILD_HASH}),
+                    ).model_dump(exclude_none=True),
+                    ensure_ascii=False,
+                )
             )
 
         # 发送服务端信息：上下文窗口、审批模型配置
@@ -1325,46 +1340,53 @@ async def ws_chat(ws: WebSocket) -> None:
                 model_name = ctx.approval_remote_model or ""
                 model_available = bool(ctx.approval_remote_base_url and ctx.approval_remote_model)
             await ws.send_text(
-                Message(
-                    type=MessageType.SYSTEM,
-                    session_id=sid,
-                    content=json.dumps({
-                        "server_info": {
-                            "llm_max_context_tokens": ctx.llm_max_context_tokens,
-                            "llm_model": ctx.llm_model,
-                            "approval_model_name": model_name,
-                            "approval_model_available": model_available,
-                        },
-                    }),
-                ).to_json()
+                json.dumps(
+                    Message(
+                        type=MessageType.SYSTEM,
+                        session_id=sid,
+                        content=json.dumps({
+                            "server_info": {
+                                "llm_max_context_tokens": ctx.llm_max_context_tokens,
+                                "llm_model": ctx.llm_model,
+                                "approval_model_name": model_name,
+                                "approval_model_available": model_available,
+                            },
+                        }),
+                    ).model_dump(exclude_none=True),
+                    ensure_ascii=False,
+                )
             )
         except Exception:
             logger.warning("RuntimeContext not initialized, skipping server_info push", exc_info=True)  # fallback 模式可能无 LLM
 
         # 恢复 session 时回放会话历史，使前端不为空白
-        loop = _get_loop(resume)
-        if resume and _get_sm().exists(resume) and loop is not None:
-            history: list[dict] = loop.get_session_messages()
-            usage: int = loop.get_token_usage()
-            context: int = loop.get_context_tokens()
-            processing: bool = loop.is_processing()
-            # 检查是否多 agent 模式，携带 agents 列表
-            agents_info: list[str] | None = None
-            from entry.multi_agent_loop import MultiAgentLoop
-            if isinstance(loop, MultiAgentLoop):
-                agents_info = list(loop._agent_names)
-            await ws.send_text(
-                Message(
-                    type=MessageType.SYSTEM,
-                    session_id=sid,
-                    content=json.dumps({
-                        "session_history": history,
-                        "token_usage": usage,
-                        "context_tokens": context,
-                        "processing": processing,
-                        "agents": agents_info,
-                    }, ensure_ascii=False),
-                ).to_json()
+        if resume and _get_sm().exists(resume):
+            loop = _get_loop(resume)
+            if loop is not None:
+                history: list[dict] = loop.loop.get_session_messages()
+                usage: int = loop.get_token_usage()
+                context: int = loop.get_context_tokens()
+                processing: bool = loop.loop.is_processing()
+                # 检查是否多 agent 模式，携带 agents 列表
+                agents_info: list[str] | None = None
+                from entry.multi_agent_loop import MultiAgentLoop
+                if isinstance(loop, MultiAgentLoop):
+                    agents_info = list(loop._agent_names)
+                await ws.send_text(
+                json.dumps(
+                    Message(
+                        type=MessageType.SYSTEM,
+                        session_id=sid,
+                        content=json.dumps({
+                            "session_history": history,
+                            "token_usage": usage,
+                            "context_tokens": context,
+                            "processing": processing,
+                            "agents": agents_info,
+                        }, ensure_ascii=False),
+                    ).model_dump(exclude_none=True),
+                    ensure_ascii=False,
+                )
             )
 
         # 创建消息路由器 — 所有消息处理委托给 MessageRouter
@@ -1379,14 +1401,17 @@ async def ws_chat(ws: WebSocket) -> None:
             # 解析接收到的消息
             msg: Message
             try:
-                msg = Message.from_json(raw)
+                msg = Message.model_validate_json(raw)
             except (ValueError, KeyError) as exc:
                 await ws.send_text(
-                    Message(
-                        type=MessageType.ERROR,
-                        session_id=sid,
-                        message=f"Invalid message: {exc}",
-                    ).to_json()
+                    json.dumps(
+                        Message(
+                            type=MessageType.ERROR,
+                            session_id=sid,
+                            message=f"Invalid message: {exc}",
+                        ).model_dump(exclude_none=True),
+                        ensure_ascii=False,
+                    )
                 )
                 continue
 

@@ -116,11 +116,14 @@ class MessageRouter:
             if _get_loop(self.sid) is None:
                 logger.error("ParentAgentLoop not configured; cannot handle chat messages")
                 await self.ws.send_text(
-                    Message(
-                        type=MessageType.ERROR,
-                        session_id=self.sid,
-                        message="Agent loop not ready. Please wait and try again.",
-                    ).to_json()
+                    json.dumps(
+                        Message(
+                            type=MessageType.ERROR,
+                            session_id=self.sid,
+                            message="Agent loop not ready. Please wait and try again.",
+                        ).model_dump(exclude_none=True),
+                        ensure_ascii=False,
+                    )
                 )
                 return False
             # 后台执行，不阻塞 WebSocket 消息循环
@@ -171,11 +174,14 @@ class MessageRouter:
             session_info = _get_sm().get(self.sid)
             if session_info and session_info.get("status") == "archived":
                 await self.ws.send_text(
-                    Message(
-                        type=MessageType.ERROR,
-                        session_id=self.sid,
-                        message="This session has been archived. Please switch to the continuation session or create a new one.",
-                    ).to_json()
+                    json.dumps(
+                        Message(
+                            type=MessageType.ERROR,
+                            session_id=self.sid,
+                            message="This session has been archived. Please switch to the continuation session or create a new one.",
+                        ).model_dump(exclude_none=True),
+                        ensure_ascii=False,
+                    )
                 )
                 return
 
@@ -270,11 +276,14 @@ class MessageRouter:
         if not self.agentspace_path:
             logger.error("agentspace path not set, cannot accept file uploads")
             await self.ws.send_text(
-                Message(
-                    type=MessageType.SYSTEM,
-                    session_id=self.sid,
-                    content=json.dumps({"uploaded": False, "error": "agentspace_not_configured"}),
-                ).to_json()
+                json.dumps(
+                    Message(
+                        type=MessageType.SYSTEM,
+                        session_id=self.sid,
+                        content=json.dumps({"uploaded": False, "error": "agentspace_not_configured"}),
+                    ).model_dump(exclude_none=True),
+                    ensure_ascii=False,
+                )
             )
             return
 
@@ -290,25 +299,7 @@ class MessageRouter:
                     os.link(str(src), str(dest))
                     logger.info("File hard-linked | session=%s src=%s dest=%s", self.sid, src, dest)
                     await self.ws.send_text(
-                        Message(
-                            type=MessageType.SYSTEM,
-                            session_id=self.sid,
-                            content=json.dumps({
-                                "uploaded": True,
-                                "path": f"ws:uploads/{unique_name}",
-                                "filename": safe_name,
-                                "size": src.stat().st_size,
-                                "method": "hardlink",
-                            }),
-                        ).to_json()
-                    )
-                    return
-                except OSError as exc:
-                    logger.info("Hard link failed, fallback to copy | session=%s err=%s", self.sid, exc)
-                    try:
-                        shutil.copy2(str(src), str(dest))
-                        logger.info("File copied (hardlink fallback) | session=%s src=%s dest=%s", self.sid, src, dest)
-                        await self.ws.send_text(
+                        json.dumps(
                             Message(
                                 type=MessageType.SYSTEM,
                                 session_id=self.sid,
@@ -317,30 +308,60 @@ class MessageRouter:
                                     "path": f"ws:uploads/{unique_name}",
                                     "filename": safe_name,
                                     "size": src.stat().st_size,
-                                    "method": "copy",
+                                    "method": "hardlink",
                                 }),
-                            ).to_json()
+                            ).model_dump(exclude_none=True),
+                            ensure_ascii=False,
+                        )
+                    )
+                    return
+                except OSError as exc:
+                    logger.info("Hard link failed, fallback to copy | session=%s err=%s", self.sid, exc)
+                    try:
+                        shutil.copy2(str(src), str(dest))
+                        logger.info("File copied (hardlink fallback) | session=%s src=%s dest=%s", self.sid, src, dest)
+                        await self.ws.send_text(
+                            json.dumps(
+                                Message(
+                                    type=MessageType.SYSTEM,
+                                    session_id=self.sid,
+                                    content=json.dumps({
+                                        "uploaded": True,
+                                        "path": f"ws:uploads/{unique_name}",
+                                        "filename": safe_name,
+                                        "size": src.stat().st_size,
+                                        "method": "copy",
+                                    }),
+                                ).model_dump(exclude_none=True),
+                                ensure_ascii=False,
+                            )
                         )
                         return
                     except OSError as exc2:
                         logger.error("File copy also failed | session=%s err=%s", self.sid, exc2)
                         await self.ws.send_text(
-                            Message(
-                                type=MessageType.ERROR,
-                                session_id=self.sid,
-                                message=f"File link/copy failed: {exc2}",
-                            ).to_json()
+                            json.dumps(
+                                Message(
+                                    type=MessageType.ERROR,
+                                    session_id=self.sid,
+                                    message=f"File link/copy failed: {exc2}",
+                                ).model_dump(exclude_none=True),
+                                ensure_ascii=False,
+                            )
                         )
                         return
 
         # -- Base64 写入 ---------------------------------------------------
         if not file_data:
             await self.ws.send_text(
-                Message(
-                    type=MessageType.ERROR,
-                    session_id=self.sid,
-                    message="File upload failed: file content is empty",
-                ).to_json()
+                json.dumps(
+                    Message(
+                        type=MessageType.ERROR,
+                        session_id=self.sid,
+                        message="File upload failed: file content is empty",
+                    ).model_dump(exclude_none=True),
+                    ensure_ascii=False,
+                )
             )
             return
 
@@ -350,11 +371,14 @@ class MessageRouter:
         except Exception as exc:
             logger.exception("File upload failed for session=%s", self.sid)
             await self.ws.send_text(
-                Message(
-                    type=MessageType.ERROR,
-                    session_id=self.sid,
-                    message=f"File save failed: {exc}",
-                ).to_json()
+                json.dumps(
+                    Message(
+                        type=MessageType.ERROR,
+                        session_id=self.sid,
+                        message=f"File save failed: {exc}",
+                    ).model_dump(exclude_none=True),
+                    ensure_ascii=False,
+                )
             )
             return
 
@@ -362,17 +386,20 @@ class MessageRouter:
         logger.info("File uploaded (base64) | session=%s path=%s size=%d", self.sid, logical_path, len(raw_bytes))
 
         await self.ws.send_text(
-            Message(
-                type=MessageType.SYSTEM,
-                session_id=self.sid,
-                content=json.dumps({
-                    "uploaded": True,
-                    "path": logical_path,
-                    "filename": safe_name,
-                    "mime_type": mime_type,
-                    "size": len(raw_bytes),
-                }, ensure_ascii=False),
-            ).to_json()
+            json.dumps(
+                Message(
+                    type=MessageType.SYSTEM,
+                    session_id=self.sid,
+                    content=json.dumps({
+                        "uploaded": True,
+                        "path": logical_path,
+                        "filename": safe_name,
+                        "mime_type": mime_type,
+                        "size": len(raw_bytes),
+                    }, ensure_ascii=False),
+                ).model_dump(exclude_none=True),
+                ensure_ascii=False,
+            )
         )
 
     async def handle_handsfree_mode(self, msg: Message) -> None:
@@ -384,10 +411,13 @@ class MessageRouter:
     async def handle_ping(self) -> None:
         """处理心跳。"""
         await self.ws.send_text(
-            Message(
-                type=MessageType.PONG,
-                session_id=self.sid,
-            ).to_json()
+            json.dumps(
+                Message(
+                    type=MessageType.PONG,
+                    session_id=self.sid,
+                ).model_dump(exclude_none=True),
+                ensure_ascii=False,
+            )
         )
 
     async def handle_system_message(self, msg: Message) -> None:
@@ -397,11 +427,14 @@ class MessageRouter:
     async def handle_unsupported(self, msg: Message) -> None:
         """处理不支持的消息类型。"""
         await self.ws.send_text(
-            Message(
-                type=MessageType.ERROR,
-                session_id=self.sid,
-                message=f"Unsupported message type: {msg.type.value}",
-            ).to_json()
+            json.dumps(
+                Message(
+                    type=MessageType.ERROR,
+                    session_id=self.sid,
+                    message=f"Unsupported message type: {msg.type.value}",
+                ).model_dump(exclude_none=True),
+                ensure_ascii=False,
+            )
         )
 
     # -- handle_user_message 子方法 ---------------------------------------
@@ -530,14 +563,17 @@ class MessageRouter:
         self.sid = _rotated
 
         await self.ws.send_text(
-            Message(
-                type=MessageType.SYSTEM,
-                content=json.dumps({
-                    "action": "session_rotated",
-                    "new_sid": self.sid,
-                    "old_sid": _old,
-                }),
-            ).to_json()
+            json.dumps(
+                Message(
+                    type=MessageType.SYSTEM,
+                    content=json.dumps({
+                        "action": "session_rotated",
+                        "new_sid": self.sid,
+                        "old_sid": _old,
+                    }),
+                ).model_dump(exclude_none=True),
+                ensure_ascii=False,
+            )
         )
 
     async def _emit_assistant_reply(self, loop: ParentAgentLoop | MultiAgentLoop, reply: str) -> None:
@@ -555,14 +591,17 @@ class MessageRouter:
         """向前端发送实时 token 消耗更新。"""
         try:
             await self.ws.send_text(
-                Message(
-                    type=MessageType.SYSTEM,
-                    session_id=self.sid,
-                    content=json.dumps({
-                        "token_usage": loop.get_token_usage(),
-                        "context_tokens": loop.get_context_tokens(),
-                    }),
-                ).to_json()
+                json.dumps(
+                    Message(
+                        type=MessageType.SYSTEM,
+                        session_id=self.sid,
+                        content=json.dumps({
+                            "token_usage": loop.get_token_usage(),
+                            "context_tokens": loop.get_context_tokens(),
+                        }),
+                    ).model_dump(exclude_none=True),
+                    ensure_ascii=False,
+                )
             )
         except Exception:
             logger.exception("Failed to send token usage update for session=%s", self.sid)

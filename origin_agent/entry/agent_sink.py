@@ -196,7 +196,7 @@ class FrontendSink(AgentSink):
                 content=content,
                 emoji=registry.get_emoji(tool_name),
             )
-            await ws.send_text(msg.to_json())
+            await ws.send_text(json.dumps(msg.model_dump(exclude_none=True), ensure_ascii=False))
         except Exception as exc:
             self._pending_confirms.pop(request_id, None)
             self._confirm_session_map.pop(request_id, None)
@@ -337,7 +337,7 @@ class FrontendSink(AgentSink):
             dynamic_message_suffix=dynamic_message_suffix,
         )
         try:
-            await ws.send_text(msg.to_json())
+            await ws.send_text(json.dumps(msg.model_dump(exclude_none=True), ensure_ascii=False))
         except Exception:
             logger.warning("Failed to send user_message to session=%s", session_id, exc_info=True)
 
@@ -358,7 +358,7 @@ class FrontendSink(AgentSink):
             response_characters=response_characters,
         )
         try:
-            await ws.send_text(msg.to_json())
+            await ws.send_text(json.dumps(msg.model_dump(exclude_none=True), ensure_ascii=False))
         except Exception:
             logger.warning("Failed to send assistant_message to session=%s", session_id, exc_info=True)
 
@@ -416,7 +416,7 @@ class FrontendSink(AgentSink):
                 session_id=session_id,
                 content=content,
             )
-            await ws.send_text(msg.to_json())
+            await ws.send_text(json.dumps(msg.model_dump(exclude_none=True), ensure_ascii=False))
         except Exception:
             logger.warning(
                 "Failed to send system message | session=%s", session_id, exc_info=True,
@@ -477,7 +477,7 @@ class FrontendSink(AgentSink):
             return
 
         try:
-            await ws.send_text(msg.to_json())
+            await ws.send_text(json.dumps(msg.model_dump(exclude_none=True), ensure_ascii=False))
         except Exception:
             logger.warning(
                 "Failed to send %s event to session=%s", event_type, session_id, exc_info=True
