@@ -94,9 +94,11 @@ async def _handle_enter_multi_agent(args: dict[str, Any]) -> dict:
         main_agent_name=main_agent_name,
         parent_ctx=parent_loop._get_context(),
         llm_client_factory=lambda name, profile: create_llm_client(
-            parent_ctx.llm_client_name,
+            # 子 Agent 优先使用注册时冻结的 client_type，保证协议与 base_url 一致；
+            # 主 Agent 用当前运行配置的客户端类型。
+            profile.client_type if profile is not None else parent_ctx.llm_client_name,
             parent_ctx,
-            profile=profile if name != main_agent_name else None,
+            profile=profile.model_dump() if profile is not None else None,
         ),
         system_prompt_template=system_prompt_template,
         sandbox=sandbox,

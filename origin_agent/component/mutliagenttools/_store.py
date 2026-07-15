@@ -10,13 +10,13 @@ from __future__ import annotations
 import json
 import logging
 from pathlib import Path
-from typing import Any
 
 from entity.constant import (
     SUBAGENT_DIR_NAME,
     SUBAGENT_INDEX_FILENAME,
     SUBAGENT_SETTING_SUFFIX,
 )
+from entity.puretype import SubagentProfile
 from system.atomic_io import write_text_atomic
 
 logger = logging.getLogger(__name__)
@@ -47,31 +47,29 @@ class SubagentStore:
 
     # ── 公开 CRUD ────────────────────────────────────────────────────
 
-    def get(self, name: str) -> dict[str, Any] | None:
+    def get(self, name: str) -> SubagentProfile | None:
         """读取指定 name 的配置。
 
         Returns:
-            配置字典；文件不存在时返回 ``None``；JSON 损坏时抛出 ``ValueError``。
+            SubagentProfile 实例；文件不存在时返回 None；JSON 损坏时抛出 ValueError。
         """
         path = self._setting_path(name)
         if not path.exists():
             return None
+        raw = path.read_text(encoding="utf-8")
         try:
-            data = json.loads(path.read_text(encoding="utf-8"))
-        except json.JSONDecodeError as exc:
+            return SubagentProfile.model_validate_json(raw)
+        except Exception as exc:
             raise ValueError(f"Corrupted setting file for subagent '{name}': {exc}") from exc
-        if not isinstance(data, dict):
-            raise ValueError(f"Corrupted setting file for subagent '{name}': expected dict")
-        return data
 
-    def list(self) -> dict[str, dict[str, Any]]:
+    def list(self) -> dict[str, SubagentProfile]:
         """返回所有有效子 Agent 配置。
 
         读取索引后逐个校验对应 setting 文件；缺失或损坏的 name 会被
         从索引中移除并写回。
         """
         names = self._read_index()
-        valid: dict[str, dict[str, Any]] = {}
+        valid: dict[str, SubagentProfile] = {}
         stale: list[str] = []
 
         for name in names:
@@ -93,7 +91,7 @@ class SubagentStore:
 
         return valid
 
-    def add(self, name: str, profile: dict[str, Any]) -> None:
+    def add(self, name: str, profile: SubagentProfile) -> None:
         """新增一个子 Agent 配置。
 
         若对应 setting 文件已存在则抛出 ``FileExistsError``，不覆盖。
@@ -108,7 +106,7 @@ class SubagentStore:
         self._subagents_dir().mkdir(parents=True, exist_ok=True)
         write_text_atomic(
             path,
-            json.dumps(profile, ensure_ascii=False, indent=2),
+            profile.model_dump_json(indent=2),
             tmp_suffix=".tmp",
         )
         logger.info("Persisted setting for subagent: %s", name)

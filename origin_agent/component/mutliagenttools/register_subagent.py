@@ -10,7 +10,7 @@ from typing import Any
 
 from abstract.tools.registry import registry, tool_error, tool_result
 from entity.constant import SUBAGENT_NAME_PATTERN
-from entity.puretype import ToolAvailability, ToolDangerLevel
+from entity.puretype import ToolAvailability, ToolDangerLevel, SubagentProfile
 
 from ._store import SubagentStore
 from system.context import get_runtime_context
@@ -47,15 +47,15 @@ def _handle_register_subagent_from_parent(args: dict[str, Any]) -> dict:
 
     ctx = get_runtime_context()
 
-    profile = {
-        "base_url": ctx.llm_base_url,
-        "model": ctx.llm_model,
-        "api_key": ctx.llm_api_key or None,
-        "system_prompt_paths": system_prompt_paths,
-        "max_output_tokens": ctx.llm_max_output_tokens,
-        "max_context_tokens": ctx.llm_max_context_tokens,
-        "client_type": ctx.llm_client_name,
-    }
+    profile = SubagentProfile(
+        base_url=ctx.llm_base_url,
+        model=ctx.llm_model,
+        api_key=ctx.llm_api_key or None,
+        system_prompt_paths=system_prompt_paths,
+        max_output_tokens=ctx.llm_max_output_tokens,
+        max_context_tokens=ctx.llm_max_context_tokens,
+        client_type=ctx.llm_client_name,
+    )
     try:
         store.add(name, profile)
     except FileExistsError:

@@ -248,3 +248,32 @@ class StreamChunk(BaseModel):
     finish_reason: str | None = None
     usage: Usage | None = None
     error: str | None = None
+
+
+# ---------------------------------------------------------------------------
+# Subagent Types
+# ---------------------------------------------------------------------------
+
+class SubagentProfile(BaseModel):
+    """子 Agent 注册时冻结的 LLM 配置快照，持久化到 agentspace/subagents/。"""
+
+    base_url: str
+    """LLM API 端点地址。"""
+
+    model: str
+    """模型名称。"""
+
+    api_key: str | None = None
+    """API 密钥，本地模型可省略。"""
+
+    system_prompt_paths: list[str] = Field(default_factory=list)
+    """自定义系统提示词文件路径列表（沙箱逻辑路径）。"""
+
+    max_output_tokens: int = 0
+    """单次 LLM 输出的最大 token 数。"""
+
+    max_context_tokens: int = 0
+    """上下文窗口 token 上限，用于旋转控制。"""
+
+    client_type: str = "openai_client"
+    """LLM 客户端模块名，对应 custom_llm_client/<name>.py。"""

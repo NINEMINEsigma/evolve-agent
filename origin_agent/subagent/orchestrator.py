@@ -28,7 +28,7 @@ from entity.constant import (
     History_Version as __History_Version__,
 )
 from entity.messages import CharacterConversationMessage, ToolResultMessage
-from entity.puretype import Role, ToolAvailability
+from entity.puretype import Role, ToolAvailability, SubagentProfile
 from abstract.tools.registry import registry as tool_registry
 from system.context import get_runtime_context
 from system.templates import read_template
@@ -46,7 +46,8 @@ class WaitingEntry:
     def __init__(
         self,
         session_id: str,
-        profile: dict[str, Any],
+        name: str,
+        profile: SubagentProfile,
         temperature: float,
         initial_prompt: str,
         user_name: str,
@@ -54,7 +55,8 @@ class WaitingEntry:
         history_path: str = "",
     ) -> None:
         self.session_id: str = session_id
-        self.profile: dict[str, Any] = profile
+        self.name: str = name
+        self.profile: SubagentProfile = profile
         self.temperature: float = temperature
         self.initial_prompt: str = initial_prompt
         self.user_name: str = user_name
@@ -87,7 +89,8 @@ class _OrchestratorContext:
 
     async def launch(
         self,
-        profile: dict[str, Any],
+        name: str,
+        profile: SubagentProfile,
         temperature: float,
         initial_prompt: str,
         user_name: str,
@@ -96,8 +99,6 @@ class _OrchestratorContext:
         history_path: str | None = None,
     ) -> dict[str, Any]:
         """启动一个子 Agent 会话。"""
-        name = profile.get("_name", "")
-
         # 同一主会话下同一 subagent 只能有一个活跃或排队实例
         for active_sid, active_name in self._subagent_names.items():
             if active_name == name:
@@ -108,7 +109,7 @@ class _OrchestratorContext:
                         "error": f"Sub-agent '{name}' is already active in this parent session.",
                     }
         for i, entry in enumerate(self._waiting_queue):
-            if entry.profile.get("_name") == name:
+            if entry.name == name:
                 return {
                     "success": False,
                     "error": (
@@ -125,6 +126,7 @@ class _OrchestratorContext:
             self._waiting_queue.append(
                 WaitingEntry(
                     session_id=session_id,
+                    name=name,
                     profile=profile,
                     temperature=temperature,
                     initial_prompt=initial_prompt,
@@ -146,7 +148,7 @@ class _OrchestratorContext:
 
         # 立即启动
         await self._start_subagent(
-            session_id, profile, temperature,
+            session_id, name, profile, temperature,
             initial_prompt, user_name, message_type, history_path,
         )
         return {
@@ -466,7 +468,8 @@ class _OrchestratorContext:
     async def _start_subagent(
         self,
         session_id: str,
-        profile: dict[str, Any],
+        name: str,
+        profile: SubagentProfile,
         temperature: float,
         initial_prompt: str,
         user_name: str,
@@ -481,7 +484,7 @@ class _OrchestratorContext:
 
         def _push_msg(event: dict[str, Any]) -> None:
             asyncio.create_task(self._push_subagent_ws(
-                session_id, profile.get("_name", ""), event,
+                session_id, name, event,
             ))
 
         loop = SubAgentLoop(
@@ -489,10 +492,10 @@ class _OrchestratorContext:
             on_message=_push_msg,
             parent_session_id=self._parent_session_id,
             parent_character_agent=self._agent_loop.current_character_agent,
-            name=profile.get("_name", ""),
+            name=name,
         )
         self._active[session_id] = loop
-        self._subagent_names[session_id] = profile.get("_name", "")
+        self._subagent_names[session_id] = name
 
         if history_path:
             from easysave import load
@@ -518,20 +521,20 @@ class _OrchestratorContext:
             for msg in loop.history.iter_messages():
                 if msg.role == Role.USER:
                     await self._push_subagent_ws(
-                        session_id, profile.get("_name", ""),
+                        session_id, name,
                         {"role": "user", "content": str(msg.content)},
                     )
                 elif msg.role == Role.ASSISTANT:
                     content = str(msg.content)
                     if content:
                         await self._push_subagent_ws(
-                            session_id, profile.get("_name", ""),
+                            session_id, name,
                             {"role": "assistant", "content": content},
                         )
                     if isinstance(msg, CharacterConversationMessage) and msg.tool_calls:
                         for tc in msg.tool_calls:
                             await self._push_subagent_ws(
-                                session_id, profile.get("_name", ""),
+                                session_id, name,
                                 {
                                     "role": "tool_call",
                                     "tool_call_id": tc.id,
@@ -542,7 +545,7 @@ class _OrchestratorContext:
                             )
                 elif msg.role == Role.TOOL and isinstance(msg, ToolResultMessage):
                     await self._push_subagent_ws(
-                        session_id, profile.get("_name", ""),
+                        session_id, name,
                         {
                             "role": "tool_result",
                             "tool_call_id": msg.tool_call_id,
@@ -557,7 +560,7 @@ class _OrchestratorContext:
         # 立即推送 WS 通知前端面板
         await self._push_subagent_ws(
             session_id,
-            profile.get("_name", ""),
+            name,
             {"role": "status", "content": "started"},
             status_override="running",
         )
@@ -567,7 +570,7 @@ class _OrchestratorContext:
         initial_character_name = USER_CHARACTER_NAME if message_type == "user_direct" else self._agent_loop.current_character_agent
         await self._push_subagent_ws(
             session_id,
-            profile.get("_name", ""),
+            name,
             {"role": "user", "content": wrapped_initial, "character_name": initial_character_name},
         )
 
@@ -586,6 +589,7 @@ class _OrchestratorContext:
         entry = self._waiting_queue.popleft()
         await self._start_subagent(
             entry.session_id,
+            entry.name,
             entry.profile,
             entry.temperature,
             entry.initial_prompt,
@@ -594,7 +598,7 @@ class _OrchestratorContext:
             entry.history_path or None,
         )
         logger.info("Subagent activated from queue | session=%s", entry.session_id)
-        return [{"session_id": entry.session_id, "subagent_name": entry.profile.get("name", "")}]
+        return [{"session_id": entry.session_id, "subagent_name": entry.name}]
 
     def _build_tool_set(self) -> list[dict[str, Any]]:
         """构建子 Agent 的工具集 — 仅包含 availability 包含 SUBAGENT 或 EVERY 的工具。"""

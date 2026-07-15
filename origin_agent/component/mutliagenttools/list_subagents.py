@@ -49,7 +49,7 @@ async def _handle_list_subagents(args: dict[str, Any]) -> dict:
     store = SubagentStore(get_runtime_context().agentspace)
     agents: dict[str, dict[str, Any]] = {}
     for name, config in store.list().items():
-        entry = dict(config)
+        entry = config.model_dump()
         entry["session"] = name_to_session.get(name, None)
         agents[name] = entry
 

@@ -15,6 +15,7 @@ from system.sandbox import Sandbox
 from system.templates import render_multi_agent_prompt
 from component.mutliagenttools._store import SubagentStore
 from abstract.llm.client import BaseLLMClient
+from entity.puretype import SubagentProfile
 from entry.agent_support.messages import (
     build_agent_system_prompt,
     collect_skill_prompts,
@@ -43,7 +44,7 @@ def build_agent_profiles(
     agents: list[str],
     main_agent_name: str,
     parent_ctx: RuntimeContext,
-    llm_client_factory: Callable[[str, dict[str, Any] | None], BaseLLMClient],
+    llm_client_factory: Callable[[str, SubagentProfile | None], BaseLLMClient],
     system_prompt_template: str,
     sandbox: Sandbox,
     store: SubagentStore,
@@ -58,7 +59,7 @@ def build_agent_profiles(
         main_agent_name: 主 agent 名称。
         parent_ctx: 父 agent 的 RuntimeContext。
         llm_client_factory: 接收 (name, profile_or_none) 返回 BaseLLMClient。
-            主 agent 调用时 profile_or_none 为 None；子 agent 调用时为 SubagentStore profile dict。
+            主 agent 调用时 profile_or_none 为 None；子 agent 调用时为 SubagentProfile 实例。
         system_prompt_template: 多 Agent 协作模板原文。
         sandbox: 用于读取 system_prompt_paths 的沙盒实例。
         store: SubagentStore 实例。
@@ -87,8 +88,12 @@ def build_agent_profiles(
                     name, session_id,
                 )
                 continue
-            profile = profile or {}
-            prompt_paths = profile.get("system_prompt_paths") or []
+            if profile is None:
+                raise ValueError(
+                    f"Subagent profile '{name}' not found (session={session_id}). "
+                    "Register it first using register_subagent_from_parent."
+                )
+            prompt_paths = profile.system_prompt_paths
             persona_prompts: list[str] = []
             for p in prompt_paths:
                 if sandbox.exists(p):

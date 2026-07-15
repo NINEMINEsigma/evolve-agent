@@ -139,7 +139,7 @@ class SubAgentLoop(BasePrivateChatAgentLoop):
 
     # ── 构造 LLM 客户端 ────────────────────────────────────────────
 
-    def _build_llm_client(self, ctx: Any) -> BaseLLMClient:
+    def _build_llm_client(self, ctx: SubRuntimeContext) -> BaseLLMClient:
         """用 SubRuntimeContext 构建独立的 LLM 客户端。
 
         优先使用子 Agent profile 中的 LLM 配置，缺失时兜底到父 Agent。
@@ -148,7 +148,7 @@ class SubAgentLoop(BasePrivateChatAgentLoop):
 
         parent_ctx = get_runtime_context()
         return create_llm_client(
-            ctx.client_type or parent_ctx.llm_client_name,
+            ctx.client_type,
             parent_ctx,
             profile=ctx.model_dump(),
         )
