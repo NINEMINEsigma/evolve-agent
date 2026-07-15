@@ -29,6 +29,8 @@ classDiagram
         +is_processing()
         +terminate_session()
         +merge_sessions()
+        +persist_history()
+        +load_history()
         #_check_cancel()
         #_push_usage_update()
         #_persist_token_usage()
@@ -36,7 +38,6 @@ classDiagram
         #_overwrite_history_file()
         #_remove_last_user_message()
         #_load_message_hooks()
-        #_get_workspace()
         #_collect_hooks_context()
         #_get_hooks_context()
         #_set_dynamic_suffix()
@@ -57,7 +58,6 @@ classDiagram
         #_execute_tool()
         #_get_history()
         #_append_history()
-        #_get_memory_context()
         #_build_history_messages()
     }
 
@@ -69,13 +69,12 @@ classDiagram
         +get_context_tokens()*
         +auto_generate_title()*
         +regenerate_session_tags()*
+        +regenerate_summary_for_session()*
     }
 
     class ParentAgentLoop {
         #_frontend_sink
         #_llm
-        #_memory
-        #_memory_initialized_ids
         #_lifecycle
         #_tool_executor
         #_stream_consumer
@@ -102,7 +101,6 @@ classDiagram
         #_maybe_inject_inbox()
         #_append()
         #_blocks_from_dicts()
-        #_get_memory_context()
         #_get_full_history()
         #_store_assistant_with_tools()
         #_extract_text()
@@ -158,6 +156,7 @@ classDiagram
         +run()
         #_parse_routing_tags()
         #_error_result()
+        #_emit_text()
     }
 
     class ToolExecutor {
@@ -166,6 +165,14 @@ classDiagram
         #_tool_stats
         +get_tool_stats()
         +execute()
+    }
+
+    class StreamConsumer {
+        #_llm
+        #_sink
+        #_character_name
+        #_cancel_event
+        +consume()
     }
 
     class AgentSink {
@@ -193,6 +200,7 @@ classDiagram
         +register_ws()
         +unregister_ws()
         +get_ws()
+        +get_all_ws()
         +request_approval()
         +resolve_confirm()
         #_deny_session_confirms()
@@ -306,6 +314,80 @@ classDiagram
         +rotate_session()
     }
 
+    class MessageRouter {
+        +ws
+        +sid
+        +agentspace_path
+        +route()
+        #handle_user_message()
+        #handle_confirm_response()
+        #handle_ask_response()
+        #handle_interrupt()
+        #handle_file_upload()
+        #handle_handsfree_mode()
+        #handle_ping()
+        #handle_system_message()
+        #handle_unsupported()
+        #_auto_generate_title()
+        #_dispatch_subagent_messages()
+        #_process_main_session()
+        #_handle_session_rotation()
+        #_emit_assistant_reply()
+        #_send_token_update()
+    }
+
+    class Application {
+        +runtime_context
+        +session_manager
+        +approval_backend_manager
+        +cron_router
+        +tool_registry
+        +frontend_sink
+        +subagent_orchestrator
+        #_shutdown_event
+        +current()$
+        +link_shutdown_event()
+        +shutdown()
+    }
+
+    class ApprovalBackendManager {
+        #_ctx
+        #_backend
+        #_failed
+        +get_backend()
+        +shutdown()
+    }
+
+    class BaseLLMClient {
+        +chat()*
+        +chat_stream()*
+    }
+
+    class AgentProfile {
+        +character_name
+        +system_prompts
+        +tools
+        +llm_client
+    }
+
+    class AgentResponse {
+        +content
+        +visible_characters
+        +response_characters
+        +reasoning
+    }
+
+    class WorkerResult {
+        +character_name
+        +parsed_json
+        +raw_json
+        +stream_buffer
+        +stream_id
+        +total_token_usage
+        +last_prompt_tokens
+        +reasoning
+    }
+
     class Sandbox {
         #_ctx
         +resolve()
@@ -350,17 +432,30 @@ classDiagram
     BasePrivateChatAgentLoop <|-- SubAgentLoop
     IMainSessionLoop <|.. ParentAgentLoop
     IMainSessionLoop <|.. MultiAgentLoop
+    AgentSink <|-- FrontendSink
+    AgentSink <|-- ParentAgentSink
+    BaseLLMClient <|-- OpenAIClient
+    BaseLLMClient <|-- AnthropicClient
     MultiAgentLoop --> MultiAgentWorker : creates
+    MultiAgentLoop --> AgentProfile : holds
+    MultiAgentWorker --> WorkerResult : returns
+    MultiAgentWorker --> AgentResponse : parses
     ParentAgentLoop --> ToolExecutor : creates
+    ParentAgentLoop --> StreamConsumer : creates
     ParentAgentLoop --> FrontendSink : holds
     ParentAgentLoop --> LoopSessionManager : creates
     ParentAgentLoop --> _OrchestratorContext : has via SubAgentOrchestrator
     ParentAgentLoop --> SessionManager : registered by
     SubAgentLoop --> ParentAgentSink : creates
-    AgentSink <|-- FrontendSink
-    AgentSink <|-- ParentAgentSink
     _OrchestratorContext --> SubAgentLoop : manages
     SessionManager --> IMainSessionLoop : manages
+    MessageRouter --> SessionManager : uses
+    MessageRouter --> IMainSessionLoop : routes to
+    Application --> SessionManager : holds
+    Application --> ApprovalBackendManager : holds
+    Application --> FrontendSink : holds
+    Application --> SubAgentOrchestrator : holds
+    ApprovalBackendManager --> ApprovalBackend : manages
     Sandbox --> RuntimeContext : holds
     CronRouter --> _CronTask : manages
 ```
@@ -383,9 +478,7 @@ classDiagram
 | `_remove_last_user_message()` | `BaseAgentLoop` | method | 类内部使用 |
 | `_update_last_user_message()` | `History` | method | 被 `BaseAgentLoop._remove_last_user_message()` 调用，属于跨类访问 |
 | `_frontend_sink` | `ParentAgentLoop` | `FrontendSink` | sink 实例 |
-| `_llm` | `ParentAgentLoop` | `LLMClient` | LLM 客户端 |
-| `_memory` | `ParentAgentLoop` | `MemoryManager` | memory 管理 |
-| `_memory_initialized_ids` | `ParentAgentLoop` | `set[int]` | 已初始化 memory provider |
+| `_llm` | `ParentAgentLoop` | `BaseLLMClient` | LLM 客户端（通过 `create_llm_client()` 工厂构造） |
 | `_lifecycle` | `ParentAgentLoop` | `LoopSessionManager` | session 生命周期管理 |
 | `_tool_executor` | `ParentAgentLoop` | `ToolExecutor` | 工具执行器 |
 | `_stream_consumer` | `ParentAgentLoop` | `StreamConsumer` | 流消费器 |
@@ -395,13 +488,27 @@ classDiagram
 | `_event_loop` | `ParentAgentLoop` | `asyncio.AbstractEventLoop \| None` | 事件循环引用 |
 | `_last_idle_time` | `ParentAgentLoop` | `dict[str, float]` | 空闲时间戳 |
 | `_session_manager` | `ParentAgentLoop` | `SessionManager \| None` | gateway session manager |
-| `_agents` | `MultiAgentLoop` | `dict[str, AgentProfile]` | Agent 配置 |
+| `_agents` | `MultiAgentLoop` | `dict[str, AgentProfile]` | Agent 配置档案 |
 | `_sink` | `MultiAgentLoop` | `AgentSink` | sink |
 | `_agent_names` | `MultiAgentLoop` | `list[str]` | agent 名列表 |
+| `_system_prompts` | `MultiAgentWorker` | `list[str]` | Agent 系统提示词 |
+| `_messages` | `MultiAgentWorker` | `list[BaseMessage]` | 该 Agent 视角的历史消息 |
+| `_tools` | `MultiAgentWorker` | `list[dict]` | 该 Agent 可用的工具定义 |
+| `_llm` | `MultiAgentWorker` | `BaseLLMClient` | LLM 客户端 |
+| `_sink` | `MultiAgentWorker` | `AgentSink` | 前端流式输出 sink |
+| `_loop` | `MultiAgentWorker` | `IMainSessionLoop` | 所属 MultiAgentLoop 引用 |
+| `_stream_consumer` | `MultiAgentWorker` | `StreamConsumer` | 流消费器（每轮独立 stream_id） |
+| `_tool_executor` | `MultiAgentWorker` | `ToolExecutor` | 工具执行器（复用统一逻辑） |
 | `_total_token_usage` | `MultiAgentWorker` | `int` | 被 `MultiAgentLoop._aggregate_worker_usage` 读取 |
 | `_last_prompt_tokens` | `MultiAgentWorker` | `int` | 被 `MultiAgentLoop._aggregate_worker_usage` 读取 |
+| `_llm` | `StreamConsumer` | `BaseLLMClient` | LLM 客户端 |
+| `_sink` | `StreamConsumer` | `AgentSink` | 前端 sink |
+| `_character_name` | `StreamConsumer` | `str` | 当前角色名 |
+| `_cancel_event` | `StreamConsumer` | `asyncio.Event` | 取消信号 |
 | `_loop` | `ToolExecutor` | `IMainSessionLoop` | 持有 loop 引用，访问其内部字段 |
-| `_ws_sinks` | `FrontendSink` | `dict[str, WebSocket]` | 实际字段名；`gateway/server.py` 误用 `_ws_map` |
+| `_llm` | `ToolExecutor` | `BaseLLMClient` | LLM 客户端（用于 ask_agent_reason） |
+| `_tool_stats` | `ToolExecutor` | `dict[str, dict[str, int]]` | 工具调用统计 |
+| `_ws_sinks` | `FrontendSink` | `dict[str, WebSocket]` | session_id → WebSocket 映射 |
 | `_pending_confirms` | `FrontendSink` | `dict[str, Future]` | 外部解析确认结果 |
 | `_confirm_session_map` | `FrontendSink` | `dict[str, str]` | 外部映射确认到 session |
 | `_pending_asks` | `FrontendSink` | `dict[str, Future]` | 外部解析提问结果 |
@@ -413,9 +520,27 @@ classDiagram
 | `_emit()` | `SubAgentLoop` | method | 被 `ParentAgentSink` 调用 |
 | `_parent_session_id` | `SubAgentLoop` | `str` | 被 `ParentAgentSink` 读取 |
 | `_loop` | `LoopSessionManager` | `ParentAgentLoop` | 大量访问 loop 的 protected 字段 |
+| `_history_store_dir` | `LoopSessionManager` | `Path \| None` | 历史存储目录 |
+| `_session_rotated_notify` | `LoopSessionManager` | `dict[str, str]` | session 旋转通知 |
 | `_agent_loop` | `_OrchestratorContext` | `ParentAgentLoop` | 访问父 loop 的 `current_character_agent` 等 |
 | `_active` / `_active_task` | `_OrchestratorContext` | `dict` | 管理 SubAgentLoop 实例 |
 | `_loops` | `SessionManager` | `dict[str, IMainSessionLoop]` | 管理 loop 映射 |
+| `ws` | `MessageRouter` | `WebSocket` | WebSocket 连接引用 |
+| `sid` | `MessageRouter` | `str` | 当前 session_id（旋转时更新） |
+| `agentspace_path` | `MessageRouter` | `Path \| None` | 文件上传目标目录 |
+| `runtime_context` | `Application` | `RuntimeContext` | 运行时上下文 |
+| `session_manager` | `Application` | `SessionManager \| None` | session 管理器 |
+| `approval_backend_manager` | `Application` | `ApprovalBackendManager \| None` | 审批后端管理器 |
+| `cron_router` | `Application` | `CronRouter \| None` | Cron 路由器 |
+| `tool_registry` | `Application` | `ToolRegistry \| None` | 工具注册表 |
+| `frontend_sink` | `Application` | `FrontendSink \| None` | 前端 sink |
+| `subagent_orchestrator` | `Application` | `SubAgentOrchestrator \| None` | 子 Agent 编排器 |
+| `_backend` | `ApprovalBackendManager` | `ApprovalBackend \| None` | 审批后端实例（懒加载） |
+| `_failed` | `ApprovalBackendManager` | `bool` | 审批后端是否不可用 |
+| `character_name` | `AgentProfile` | `str` | Agent 角色名 |
+| `system_prompts` | `AgentProfile` | `list[str]` | 系统提示词列表 |
+| `tools` | `AgentProfile` | `list[dict]` | 工具定义列表 |
+| `llm_client` | `AgentProfile` | `BaseLLMClient` | LLM 客户端实例 |
 | `_ctx` | `Sandbox` | `RuntimeContext` | 被多个 extools 直接访问 `sb._ctx.agentspace` |
 | `_tasks` | `CronRouter` | `dict[str, dict[str, _CronTask]]` | 被 cron_tools 模块级函数直接访问 |
 | `_lock` | `CronRouter` | `threading.Lock` | 被 cron_tools 模块级函数直接访问 |
@@ -432,32 +557,80 @@ classDiagram
 | `BaseAgentLoop._remove_last_user_message` | `_update_last_user_message()` | `History` | `entry/base_agent_loop.py` | 跨类调用 History 的 protected 方法 |
 | `MultiAgentLoop._aggregate_worker_usage` | `_total_token_usage` | `MultiAgentWorker` | `entry/multi_agent_loop.py` | 读取 worker 内部 token 统计 |
 | `MultiAgentLoop._aggregate_worker_usage` | `_last_prompt_tokens` | `MultiAgentWorker` | `entry/multi_agent_loop.py` | 读取 worker 内部 token 统计 |
-| `MultiAgentWorker.__init__` | `_cancel_event` | `IMainSessionLoop.loop` (`BaseAgentLoop`) | `entry/multi_agent_worker.py` | 通过 `self._loop.loop._cancel_event` 读取 |
-| `MultiAgentWorker.run` | `_history` / `_persist_message()` | `MultiAgentLoop` | `entry/multi_agent_worker.py` | 通过 `self._loop.loop._history` / `_persist_message` 访问 |
-| `ToolExecutor.execute` | `_cancel_event` / `_get_sink()` / `_get_hooks_context()` / `session_id` | `BaseAgentLoop` (via `IMainSessionLoop.loop`) | `entry/tool_executor.py` | 通过 `self._loop.loop._xxx` 访问 loop 内部 |
+| `MultiAgentLoop._run_single_agent` | `cancel_event` / `history` / `persist_history` / `session_id` | `BaseAgentLoop` (via `IMainSessionLoop.loop`) | `entry/multi_agent_loop.py` | 通过 `self._loop.loop._xxx` 访问 loop 内部 |
+| `MultiAgentWorker.__init__` | `_cancel_event` | `BaseAgentLoop` (via `IMainSessionLoop.loop`) | `entry/multi_agent_worker.py` | 通过 `self._loop.loop.cancel_event` 读取 |
+| `MultiAgentWorker.run` | `_history` / `persist_history()` | `MultiAgentLoop` (via `IMainSessionLoop.loop`) | `entry/multi_agent_worker.py` | 通过 `self._loop.loop.history` / `persist_history` 访问 |
+| `ToolExecutor.execute` | `cancel_event` / `get_sink()` / `get_hooks_context()` / `session_id` | `BaseAgentLoop` (via `IMainSessionLoop.loop`) | `entry/tool_executor.py` | 通过 `self._loop.loop._xxx` 访问 loop 内部 |
 | `ToolExecutor.execute` | `is_interrupted()` / `current_character_agent` | `IMainSessionLoop` / `BaseAgentLoop` | `entry/tool_executor.py` | 访问 loop 状态 |
 | `ParentAgentSink.request_approval` | `_parent_session_id`, `_pending_approvals`, `_paused_event`, `_emit()` | `SubAgentLoop` | `entry/agent_sink.py` | 直接访问子 agent 内部字段/方法 |
 | `ParentAgentSink.emit_*` | `_emit()` / `_parent_session_id` | `SubAgentLoop` | `entry/agent_sink.py` | 转发事件时读取子 agent 内部 |
+| `ParentAgentSink.emit_stream_done` | `frontend_sink` | `Application` | `entry/agent_sink.py` | 通过 `Application.current().frontend_sink` 转发到父会话前端 |
 | `LoopSessionManager.initialize` | `_session_store`, `_history`, `session_id` | `ParentAgentLoop` | `entry/session_manager.py` | 初始化时读写 loop 内部 |
 | `LoopSessionManager.is_context_over_limit` | `_last_prompt_tokens`, `app.runtime_context` | `ParentAgentLoop` | `entry/session_manager.py` | 读取 loop 内部 token 和配置 |
-| `LoopSessionManager.rotate_session_for_continuation` | `_remove_last_user_message`, `_append`, `_history`, `_last_prompt_tokens`, `_memory`, `_memory_initialized_ids`, `_session_store`, `_session_manager`, `_llm`, `_get_full_history` | `ParentAgentLoop` | `entry/session_manager.py` | 旋转时大量调用 loop 内部 |
-| `LoopSessionManager._terminate_session` | `_session_manager`, `_session_store`, `_history`, `_memory`, `_llm`, `_get_full_history`, `_build_inherited_context` | `ParentAgentLoop` | `entry/session_manager.py` | 终结会话时大量调用 loop 内部 |
+| `LoopSessionManager.rotate_session_for_continuation` | `_remove_last_user_message`, `_append`, `_history`, `_last_prompt_tokens`, `_session_store`, `_session_manager`, `_llm`, `load_history`, `persist_history` | `ParentAgentLoop` | `entry/session_manager.py` | 旋转时大量调用 loop 内部 |
+| `LoopSessionManager._terminate_session` | `_session_manager`, `_session_store`, `_history`, `_llm`, `get_full_history` | `ParentAgentLoop` | `entry/session_manager.py` | 终结会话时大量调用 loop 内部 |
 | `_OrchestratorContext._drain_outbox` | `_outbox` | `SubAgentLoop` | `subagent/orchestrator.py` | 直接读取并清空 outbox |
 | `_OrchestratorContext.get_snapshot` | `_history.messages`, `pending_approvals_info` | `SubAgentLoop` | `subagent/orchestrator.py` | 读取子 agent 历史 |
 | `_OrchestratorContext._start_subagent` | `_history` | `SubAgentLoop` | `subagent/orchestrator.py` | 加载历史时覆盖 `_history` |
 | `_OrchestratorContext._cycle_loop` | `_last_idle_time` | `ParentAgentLoop` | `subagent/orchestrator.py` | 读取父 loop 空闲时间 |
 | `_OrchestratorContext._collect_and_inject` | `outbox` / `_outbox` | `SubAgentLoop` | `subagent/orchestrator.py` | 收集并清空 outbox |
 | `_OrchestratorContext._collect_and_inject` | `process_message()` | `ParentAgentLoop` | `subagent/orchestrator.py` | 调用父 loop 公共方法 |
-| `gateway/server._push_agentspace_lock_state` | `_ws_map` (应为 `_ws_sinks`) | `FrontendSink` | `gateway/server.py:459` | 访问了不存在的字段，疑似 bug |
-| `gateway/server._send_tool_event` | `loop.loop.is_interrupted()` | `BaseAgentLoop` | `gateway/server.py` | 检查 loop 中断状态 |
-| `gateway/server._get_loop` | `session_id` | `IMainSessionLoop` / `BaseAgentLoop` | `gateway/server.py` | 获取 loop 后外部操作 |
+| `MessageRouter.route` | `get_loop()` | `SessionManager` | `gateway/message_router.py` | 通过 `_get_sm().get_loop()` 获取 loop |
+| `MessageRouter._handle_session_rotation` | `unregister_ws()` / `register_ws()` | `FrontendSink` | `gateway/message_router.py` | 旋转时更新 WebSocket 映射 |
+| `MessageRouter._dispatch_subagent_messages` | `get_snapshot()` / `chat_user_direct()` | `SubAgentOrchestrator` | `gateway/message_router.py` | 转发消息到子 Agent |
 | `gateway/session_manager.replace_loop` | `_agents` | `MultiAgentLoop` | `gateway/session_manager.py` | 读取 multi loop 的 agents |
 | `gateway/session_manager.replace_loop` / `rotate_session` | `session_id` | `BaseAgentLoop` | `gateway/session_manager.py` | 写入 loop 的 session_id |
-| `FrontendSink` 外部 | `_ws_sinks`, `_pending_confirms`, `_confirm_session_map`, `_pending_asks`, `_ask_session_map` | `FrontendSink` | `gateway/server.py` (待确认) | gateway 管理前端连接与审批结果 |
+| `FrontendSink` 外部 | `_ws_sinks`, `_pending_confirms`, `_confirm_session_map`, `_pending_asks`, `_ask_session_map` | `FrontendSink` | `gateway/message_router.py` | MessageRouter 解析确认和提问结果 |
 | `SubAgentLoop` 外部 | `_outbox` | `SubAgentLoop` | `subagent/orchestrator.py` | orchestrator 读取子 agent outbox |
 | `SubAgentLoop` 外部 | `_history` | `SubAgentLoop` | `subagent/orchestrator.py` | orchestrator 读取子 agent history |
 | `cron_tools` 模块函数 | `_lock`, `_tasks` | `CronRouter` | `component/extools/cron_tools.py` | 直接访问 CronRouter 内部字段 |
 | `cron_tools` 模块函数 | `_timer` | `_CronTask` | `component/extools/cron_tools.py` | 直接访问任务内部 timer |
 | `diagram.py` / `mermaid_tools.py` / `docgen_tools.py` / `web_browser.py` | `_ctx` | `Sandbox` | `component/extools/*.py` | 直接访问 Sandbox 的 `_ctx` 获取 agentspace |
+| 全局 `Application.current()` | `session_manager`, `frontend_sink`, `subagent_orchestrator`, `approval_backend_manager` | `Application` | 多处 | 各模块通过单例访问子系统 |
 
-> 注：子类对父类 protected 字段的 `self._x` 访问（如 `ParentAgentLoop` 访问 `self._history`）属于合法继承访问，不列入“外部访问”。
+> 注：子类对父类 protected 字段的 `self._x` 访问（如 `ParentAgentLoop` 访问 `self._history`）属于合法继承访问，不列入"外部访问"。
+
+---
+
+## Pydantic 数据模型
+
+以下类继承 `pydantic.BaseModel`，属于纯数据结构或带轻量验证的响应模型：
+
+| 类 | 定义文件 | 继承 | 说明 |
+|---|---|---|---|
+| `InboxMessage` | `entry/base_agent_loop.py` | `BaseModel` | 收件箱消息基类，含 `to_text()` |
+| `UserMessage` | `entry/base_agent_loop.py` | `InboxMessage` | 用户消息 |
+| `ApprovalDecisionMessage` | `entry/base_agent_loop.py` | `InboxMessage` | 审批决定消息（当前未使用） |
+| `CronResultMessage` | `entry/base_agent_loop.py` | `InboxMessage` | Cron 任务结果消息 |
+| `AgentResponse` | `entry/multi_agent_worker.py` | `BaseModel` | 多 Agent 模式下单 Agent 的解析后响应 |
+| `WorkerResult` | `entry/multi_agent_worker.py` | `BaseModel` | Worker 执行结果，含 DSL 路由元数据 |
+
+---
+
+## 关键设计变更记录
+
+### Memory 系统移除
+
+`ParentAgentLoop` 中原有的 `_memory`（`MemoryManager`）和 `_memory_initialized_ids`（`set[int]`）字段已移除。`add_memory_provider()` 方法仍保留但为空实现，以保持接口兼容性。`LoopSessionManager` 中涉及 memory 的迁移逻辑已移除。
+
+### LLM 抽象层引入
+
+`ParentAgentLoop._llm` 类型从具体的 `LLMClient` 变为 `BaseLLMClient`（抽象基类）。实际客户端通过 `abstract/llm/loader.py::create_llm_client()` 工厂从 `custom_llm_client/` 动态加载。内置实现：`openai_client.py`、`anthropic_client.py`。
+
+`abstract/llm/formats.py` 提供 `to_openai_message()` 和 `messages_to_anthropic_list()` 两种 wire format 转换器，供 LLM 客户端复用。
+
+### Application 单例
+
+`system/application.py::Application` 作为进程级唯一单例，替代了原有的模块级全局变量。所有子系统（`SessionManager`、`FrontendSink`、`SubAgentOrchestrator`、`ApprovalBackendManager`、`CronRouter`、`ToolRegistry`）通过 `Application.current()` 访问。
+
+### Approval 目录化
+
+`component/approval/` 从单文件重构为目录，包含：`__init__.py`（公共接口）、`backend.py`（`ApprovalBackend` / `LocalApprovalBackend`）、`executor.py`（`execute_with_approval`）、`allowlist.py`（白名单逻辑）、`handsfree.py`（脱手模式）。`ApprovalBackendManager` 由 `Application` 持有，管理审批后端的懒加载和生命周期。
+
+### MessageRouter 拆分
+
+`gateway/message_router.py::MessageRouter` 从 `gateway/server.py` 的 `ws_chat` 中拆分，负责所有 WebSocket 消息类型的分发处理。`server.py` 仅保留 WebSocket 连接生命周期管理。
+
+### MultiAgentWorker 独立工具执行
+
+`MultiAgentWorker` 内部创建独立的 `StreamConsumer` 和 `ToolExecutor` 实例，复用 `ParentAgentLoop` 的统一工具执行逻辑，但拥有独立的 stream_id 生成和 token 统计。
