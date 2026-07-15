@@ -92,7 +92,6 @@ def messages_to_openai_list(
 
 def to_summary_dict(
     message: BaseMessage,
-    current_character_agent: str,
 ) -> dict[str, Any] | None:
     """Convert a ``BaseMessage`` to a minimal dict for LLM prompt templates.
 
@@ -102,13 +101,9 @@ def to_summary_dict(
     role-prefix and identity-prefix decorations — none of which are useful
     for auto-title / auto-tag / history-summary contexts.
 
-    Messages not visible to *current_character_agent* are filtered out
-    (returns ``None``), using the same visibility rule as the full converter.
+    No visibility filtering — title/tag/summary generation requires all messages,
+    including those not visible to the current agent.
     """
-    # Visibility gate: borrow as_content() which returns None when invisible
-    if message.as_content(current_character_agent) is None:
-        return None
-
     # Extract raw text directly from .content field, skipping non-text blocks
     raw = message.content
     if isinstance(raw, str):

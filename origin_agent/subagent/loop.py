@@ -166,6 +166,9 @@ class SubAgentLoop(BasePrivateChatAgentLoop):
     def _get_llm_client(self) -> BaseLLMClient:
         return self._llm
 
+    def _get_session_info_llm_client(self) -> BaseLLMClient | None:
+        return self._llm
+
     def _get_context(self) -> SubRuntimeContext:
         return self._ctx
 

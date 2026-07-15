@@ -17,11 +17,11 @@ from typing import Any, TYPE_CHECKING
 
 from entity.messages import History, CharacterConversationMessage, BaseMessage
 from entity.puretype import Role
-from entity.constant import AUTO_TITLE_CONTENT_MAX, AUTO_TAGS_CONTENT_MAX, USER_CHARACTER_NAME, INHERIT_LAST_ROUNDS
+from entity.constant import USER_CHARACTER_NAME, INHERIT_LAST_ROUNDS
 from system.templates import read_template
 from system.session_store import SessionStore
 from entry.agent_support.history_summary import extract_last_rounds
-from abstract.llm.formats import to_openai_message, to_summary_dict
+from abstract.llm.formats import to_openai_message
 
 if TYPE_CHECKING:
     from abstract.llm.client import BaseLLMClient
@@ -304,35 +304,8 @@ class LoopSessionManager:
         return await summarize_history(history, self._loop.llm)
 
     async def _generate_session_tags(self, session_id: str) -> list[str]:
-        """用 LLM 生成会话分类标签。"""
-        messages = self._loop.get_full_history(session_id)
-        if not messages:
-            return []
-        try:
-            system_prompt = read_template("session_tags.txt")
-            # Convert BaseMessage list to serializable dicts for JSON template
-            messages_json = [
-                d for m in messages
-                if (d := to_summary_dict(m, current_character_agent=self._loop.current_character_agent)) is not None
-            ]
-            user_prompt = read_template("session_tags_input.txt").replace(
-                "{{old_text}}",
-                json.dumps(messages_json, ensure_ascii=False)[:AUTO_TAGS_CONTENT_MAX],
-            )
-            resp = await self._loop.llm.chat([
-                BaseMessage(role=Role.SYSTEM, content=system_prompt),
-                BaseMessage(role=Role.USER, content=user_prompt),
-            ], character=self._loop.current_character_agent)
-            content = resp.content or ""
-            try:
-                tags = json.loads(content)
-                if isinstance(tags, list):
-                    return [str(t) for t in tags[:5]]
-            except json.JSONDecodeError:
-                pass
-        except Exception as exc:
-            logger.exception("Failed to generate session tags: %s", exc)
-        return []
+        """委托 loop.regenerate_session_tags() 生成会话分类标签。"""
+        return await self._loop.regenerate_session_tags()
 
     def _build_inherited_context(self, old_sid: str, summary: str) -> str:
         """为继承会话构建初始上下文消息。"""

@@ -791,6 +791,10 @@ async def auto_tags_session(session_id: str):
     loop = _get_loop(session_id)
     if loop is not None:
         tags = await loop.regenerate_session_tags()
+        if tags:
+            sm = _get_sm()
+            if sm is not None:
+                sm.set_session_tags(session_id, tags)
     else:
         logger.warning("Failed to auto-generate tags for session=%s", session_id)
     return {"tags": tags, "session_id": session_id}

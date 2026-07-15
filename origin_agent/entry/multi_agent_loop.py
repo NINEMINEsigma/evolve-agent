@@ -17,7 +17,6 @@ from typing import Any, TYPE_CHECKING
 from abstract.llm.client import BaseLLMClient
 from entity.messages import (
     History,
-    BaseMessage,
     CharacterConversationMessage,
     CharacterMessage,
     MessageBlock,
@@ -28,10 +27,8 @@ from entity.constant import (
     USER_CHARACTER_NAME,
     MULTI_AGENT_MAX_CASCADE_DEPTH,
     LOG_PREVIEW_CHARS,
-    AUTO_TITLE_CONTENT_MAX,
-    AUTO_TAGS_CONTENT_MAX,
 )
-from system.templates import get_templates_dir, render_multi_agent_prompt, read_template
+from system.templates import get_templates_dir, render_multi_agent_prompt
 from system.session_store import SessionStore
 from entry.base_agent_loop import BaseAgentLoop, IMainSessionLoop
 from entry.multi_agent_worker import WorkerResult, MultiAgentWorker
@@ -181,62 +178,14 @@ class MultiAgentLoop(BaseAgentLoop, IMainSessionLoop):
         """
         return self._last_prompt_tokens
 
-    # -- 自动生成标题 / 标签 ------------------------------------------------
+    # -- LLM 客户端 -------------------------------------------------------
 
-    def _resolve_llm_client(self) -> BaseLLMClient | None:
-        """返回当前用于生成标题/标签的 LLM 客户端，首选当前代表 Agent。"""
-        agent = self._agents.get(self.current_character_agent)
+    def _get_session_info_llm_client(self) -> BaseLLMClient | None:
+        """返回用于生成标题/标签/摘要等会话信息的 LLM 客户端，首选主 Agent 配置。"""
+        agent = self._agents.get(MAIN_AGENT_CHARACTER_NAME)
         if agent is None and self._agents:
             agent = next(iter(self._agents.values()))
         return agent.llm_client if agent else None
-
-    async def auto_generate_title(self) -> str:
-        """根据会话历史自动生成标题。"""
-        messages = self.get_session_messages()
-        if not messages:
-            return ""
-        system_prompt = read_template("auto_title.txt")
-        user_prompt = read_template("auto_title_input.txt").replace(
-            "{{context}}",
-            json.dumps(messages, ensure_ascii=False)[:AUTO_TITLE_CONTENT_MAX],
-        )
-        llm_client = self._resolve_llm_client()
-        if llm_client is None:
-            return ""
-        try:
-            resp = await llm_client.chat([
-                BaseMessage(role=Role.SYSTEM, content=system_prompt),
-                BaseMessage(role=Role.USER, content=user_prompt),
-            ])
-            return (resp.content or "").strip().strip("\"'")[:50]
-        except Exception as exc:
-            logger.exception("Failed to auto-generate title in multi-agent: %s", exc)
-            return ""
-
-    async def regenerate_session_tags(self) -> list[str]:
-        """根据会话历史重新生成标签列表。"""
-        messages = self.get_session_messages()
-        if not messages:
-            return []
-        llm_client = self._resolve_llm_client()
-        if llm_client is None:
-            return []
-        try:
-            system_prompt = read_template("session_tags.txt")
-            user_prompt = read_template("session_tags_input.txt").replace(
-                "{{old_text}}",
-                json.dumps(messages, ensure_ascii=False)[:AUTO_TAGS_CONTENT_MAX],
-            )
-            resp = await llm_client.chat([
-                BaseMessage(role=Role.SYSTEM, content=system_prompt),
-                BaseMessage(role=Role.USER, content=user_prompt),
-            ])
-            tags = json.loads(resp.content or "[]")
-            if isinstance(tags, list):
-                return [str(t) for t in tags[:5]]
-        except Exception as exc:
-            logger.exception("Failed to generate session tags in multi-agent: %s", exc)
-        return []
 
     def get_session_messages(self) -> list[dict]:
         """返回 History 中所有消息的字典列表（供前端展示）。"""
@@ -370,22 +319,6 @@ class MultiAgentLoop(BaseAgentLoop, IMainSessionLoop):
             self.session_id, sources,
         )
         return {"error": "merge not supported in multi-agent mode", "merged": False}
-
-    async def regenerate_summary_for_session(self, session_id: str) -> str:
-        """重新生成指定会话的摘要。"""
-        if self._session_store is None:
-            return ""
-        history = self._session_store.read_history(session_id)
-        if history is None or history.count == 0:
-            return ""
-        llm = self._resolve_llm_client()
-        if llm is None:
-            return ""
-        from entry.agent_support.history_summary import summarize_history
-        summary = await summarize_history(history, llm)
-        if summary:
-            self._session_store.write_summary(session_id, summary)
-        return summary
 
     async def process_message(
         self,

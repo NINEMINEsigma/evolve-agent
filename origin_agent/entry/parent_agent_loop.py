@@ -23,13 +23,10 @@ from abstract.tools.registry import registry as tool_registry
 from component.approval import ask_agent_reason
 from abstract.llm.client import BaseLLMClient
 from abstract.llm.loader import create_llm_client
-from abstract.llm.formats import to_summary_dict
 from entity.puretype import LLMResponse, ToolCall, Role, ToolAvailability
 from system.session_store import SessionStore
 from entity.constant import (
     LOG_PREVIEW_CHARS,
-    AUTO_TITLE_CONTENT_MAX,
-    AUTO_TAGS_CONTENT_MAX,
     MAX_TOOL_TURNS,
     MAIN_AGENT_CHARACTER_NAME,
     USER_CHARACTER_NAME,
@@ -166,6 +163,9 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
         return USER_CHARACTER_NAME
 
     def _get_llm_client(self) -> BaseLLMClient:
+        return self._llm
+
+    def _get_session_info_llm_client(self) -> BaseLLMClient | None:
         return self._llm
 
     def _get_context(self) -> RuntimeContext:
@@ -702,88 +702,12 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
             )
 
     # ========================================================================
-    # 自动生成标题 / 标签
-    # ========================================================================
-
-    async def auto_generate_title(self) -> str:
-        raw_messages = self._get_full_history(self.session_id)
-        if not raw_messages:
-            return ""
-        from system.templates import read_template
-        system_prompt = read_template("auto_title.txt")
-        # 将 BaseMessage 列表转为 JSON 可序列化的 dict 列表（供模板使用）
-        messages_json = [
-            d for m in raw_messages
-            if (d := to_summary_dict(m, current_character_agent=self.current_character_agent)) is not None
-        ]
-        user_prompt = read_template("auto_title_input.txt").replace(
-            "{{context}}",
-            json.dumps(messages_json, ensure_ascii=False)[:AUTO_TITLE_CONTENT_MAX],
-        )
-        try:
-            resp = await self._llm.chat([
-                BaseMessage(role=Role.SYSTEM, content=system_prompt),
-                BaseMessage(role=Role.USER, content=user_prompt),
-            ], character=self.current_character_agent)
-            title = (resp.content or "").strip().strip("\"'")[:50]
-            return title
-        except Exception as exc:
-            logger.exception("Failed to auto-generate title: %s", exc)
-            return ""
-
-    async def regenerate_session_tags(self) -> list[str]:
-        raw_messages = self._get_full_history(self.session_id)
-        if not raw_messages:
-            return []
-        from system.templates import read_template
-        try:
-            system_prompt = read_template("session_tags.txt")
-            # 将 BaseMessage 列表转为 JSON 可序列化的 dict 列表（供模板使用）
-            messages_json = [
-                d for m in raw_messages
-                if (d := to_summary_dict(m, current_character_agent=self.current_character_agent)) is not None
-            ]
-            user_prompt = read_template("session_tags_input.txt").replace(
-                "{{old_text}}",
-                json.dumps(messages_json, ensure_ascii=False)[:AUTO_TAGS_CONTENT_MAX],
-            )
-            resp = await self._llm.chat([
-                BaseMessage(role=Role.SYSTEM, content=system_prompt),
-                BaseMessage(role=Role.USER, content=user_prompt),
-            ], character=self.current_character_agent)
-            content = resp.content or ""
-            try:
-                tags = json.loads(content)
-                if isinstance(tags, list):
-                    return [str(t) for t in tags[:5]]
-                elif content:
-                    return [str(content)]
-            except json.JSONDecodeError:
-                pass
-        except Exception as exc:
-            logger.exception("Failed to generate session tags: %s", exc)
-        return []
-
-    # ========================================================================
     # 会话管理（业务级）
     # ========================================================================
 
     async def terminate_session(self) -> dict:
         await self._lifecycle.terminate_session()
         return {"terminated": True, "session_id": self.session_id}
-
-    async def regenerate_summary_for_session(self, session_id: str) -> str:
-        """重新生成指定会话的摘要（可为任意 session_id，不要求当前活跃）。"""
-        if self._session_store is None:
-            return ""
-        history = self._session_store.read_history(session_id)
-        if history is None or history.count == 0:
-            return ""
-        from entry.agent_support.history_summary import summarize_history
-        summary = await summarize_history(history, self._llm)
-        if summary:
-            self._session_store.write_summary(session_id, summary)
-        return summary
 
     async def merge_sessions(self, sources: list[str]) -> dict:
         """合并多个已归档会话到一个新会话，基于摘要而非完整历史。

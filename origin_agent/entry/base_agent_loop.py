@@ -20,7 +20,10 @@ from pydantic import BaseModel
 
 from entity.puretype import Role, ToolDangerLevel
 from entity.messages import History, BaseMessage, ToolResultMessage, CharacterConversationMessage
-from entity.constant import USER_CHARACTER_NAME, SYSTEM_CHARACTER_NAME
+from entity.constant import (
+    USER_CHARACTER_NAME, SYSTEM_CHARACTER_NAME,
+    AUTO_TITLE_CONTENT_MAX, AUTO_TAGS_CONTENT_MAX,
+)
 from entry.agent_support.messages import (
     build_full_history_messages,
     collect_all_hooks_context,
@@ -207,6 +210,17 @@ class BaseAgentLoop(ABC):
     @abstractmethod
     def get_sink(self) -> AgentSink:
         """返回当前 loop 的 AgentSink 实例。"""
+        ...
+
+    @property
+    @abstractmethod
+    def current_character_agent(self) -> str:
+        """返回当前 loop 对应的 agent 角色名，用于 History 视图过滤。"""
+        ...
+
+    @abstractmethod
+    def _get_session_info_llm_client(self) -> BaseLLMClient | None:
+        """返回用于生成标题/标签/摘要等会话信息的 LLM 客户端，无可用时返回 None。"""
         ...
 
     @property
@@ -508,6 +522,105 @@ class BaseAgentLoop(ABC):
                        self.session_id, sources)
         return {"error": "merge not supported in this loop", "merged": False}
 
+    # -- 标题 / 标签 / 摘要生成（全量消息，不做可见性过滤）------------------
+
+    async def auto_generate_title(self) -> str:
+        """根据会话历史自动生成标题。"""
+        from abstract.llm.formats import to_summary_dict
+        from system.templates import read_template
+
+        messages = [m for m in self._history.iter_messages() if isinstance(m, CharacterConversationMessage)]
+        if not messages:
+            return ""
+        llm = self._get_session_info_llm_client()
+        if llm is None:
+            return ""
+        system_prompt = read_template("auto_title.txt")
+        messages_json = [
+            d for m in messages
+            if (d := to_summary_dict(m)) is not None
+        ]
+        user_prompt = read_template("auto_title_input.txt").replace(
+            "{{context}}",
+            json.dumps(messages_json, ensure_ascii=False)[-AUTO_TITLE_CONTENT_MAX:],
+        )
+        try:
+            resp = await llm.chat([
+                BaseMessage(role=Role.SYSTEM, content=system_prompt),
+                BaseMessage(role=Role.USER, content=user_prompt),
+            ], character=self.current_character_agent)
+            return (resp.content or "").strip().strip("\"'")[:50]
+        except Exception as exc:
+            logger.exception("Failed to auto-generate title: %s", exc)
+            return ""
+
+    async def regenerate_session_tags(self) -> list[str]:
+        """根据会话历史重新生成标签列表。"""
+        from abstract.llm.formats import to_summary_dict
+        from system.templates import read_template
+
+        messages = [m for m in self._history.iter_messages() if isinstance(m, CharacterConversationMessage)]
+        if not messages:
+            logger.warning("No messages to regenerate session tags")
+            return []
+        llm = self._get_session_info_llm_client()
+        if llm is None:
+            logger.warning("No LLM client to regenerate session tags")
+            return []
+        try:
+            system_prompt = read_template("session_tags.txt")
+            # 获取已有标签池供 LLM 参考，优先复用已有标签
+            existing_tags_hint = ""
+            try:
+                from system.application import Application
+                sm = Application.current().session_manager
+                if sm is not None:
+                    all_tags = sm.get_all_tags()
+                    if all_tags:
+                        existing_tags_hint = (
+                            "\n\nExisting tags in the system (prefer reusing these when applicable): "
+                            + ", ".join(all_tags)
+                        )
+            except Exception:
+                pass
+            system_prompt = system_prompt.replace("{{existing_tags}}", existing_tags_hint)
+            messages_json = [
+                d for m in messages
+                if (d := to_summary_dict(m)) is not None
+            ]
+            user_prompt = read_template("session_tags_input.txt").replace(
+                "{{old_text}}",
+                json.dumps(messages_json, ensure_ascii=False)[-AUTO_TAGS_CONTENT_MAX:],
+            )
+            resp = await llm.chat([
+                BaseMessage(role=Role.SYSTEM, content=system_prompt),
+                BaseMessage(role=Role.USER, content=user_prompt),
+            ], character=self.current_character_agent)
+            logger.info("Session tags response: %s", str(resp))
+            result = json.loads(resp.content)
+            if isinstance(result, list) == False:
+                raise ValueError("session tags response is not a list")
+            return result
+        except Exception as exc:
+            logger.exception("Failed to regenerate session tags: %s", exc)
+        return []
+
+    async def regenerate_summary_for_session(self, session_id: str) -> str:
+        """重新生成指定会话的摘要（可为任意 session_id，不要求当前活跃）。"""
+        if self._session_store is None:
+            return ""
+        history = self._session_store.read_history(session_id)
+        if history is None or history.count == 0:
+            return ""
+        llm = self._get_session_info_llm_client()
+        if llm is None:
+            return ""
+        from entry.agent_support.history_summary import summarize_history
+        summary = await summarize_history(history, llm)
+        if summary:
+            self._session_store.write_summary(session_id, summary)
+        return summary
+
     # -- Hook 支持（所有 loop 共享）----------------------------------------
 
     def _load_message_hooks(self) -> list[dict]:
@@ -633,7 +746,6 @@ class BasePrivateChatAgentLoop(BaseAgentLoop):
     memory 和 custom_hooks 能力。
 
     子类必须实现以下工厂方法：
-    - _get_llm_client() → BaseLLMClient 或具体实现类
     - _get_context() → Any
     - _get_tool_definitions() → list[dict]
     - _on_context_over_limit() → None
@@ -644,17 +756,6 @@ class BasePrivateChatAgentLoop(BaseAgentLoop):
         super().__init__(app, session_id)
 
     # -- 抽象方法 ---------------------------------------------------------
-
-    @property
-    @abstractmethod
-    def current_character_agent(self) -> str:
-        """返回当前 loop 对应的 agent 角色名，用于 History 视图过滤。"""
-        ...
-
-    @abstractmethod
-    def _get_llm_client(self) -> BaseLLMClient:
-        """返回当前 loop 的 LLM 客户端实例。"""
-        ...
 
     @abstractmethod
     def _get_context(self) -> Any:
