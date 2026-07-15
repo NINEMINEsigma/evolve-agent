@@ -218,11 +218,9 @@ class LoopSessionManager:
             if sm is not None:
                 info = sm.get(old_sid)
                 if info:
-                    from entity.puretype import LoopMeta as _LoopMeta, Loop as _Loop
-                    loop_type = info.get("loop_type", "parent")
-                    agents = info.get("agents")
+                    from entity.puretype import LoopMeta as _LoopMeta
                     loop_meta = _LoopMeta(
-                        loopType=_Loop(loop_type), agents=agents,
+                        loopType=info.loop_type, agents=info.agents,
                     )
 
             # 提取旧会话尾部轮次文本，追加到 context

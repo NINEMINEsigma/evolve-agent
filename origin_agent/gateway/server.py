@@ -30,6 +30,7 @@ from .message_router import MessageRouter
 from abstract.tools.registry import registry
 from datetime import datetime, timezone
 from entity.constant import CRON_STDOUT_PREVIEW_MAX_LENGTH, SUBPROCESS_TIMEOUT_DEFAULT, UPLOAD_FILENAME_TIME_FORMAT, USER_CHARACTER_NAME, UPLOADS_DIR_NAME, UPLOADS_WS_PREFIX, STATIC_FILE_HTTP_PREFIX
+from entity.puretype import SessionStatus
 from system.context import get_runtime_context
 from entry.parent_agent_loop import IncompatibleHistoryError
 from entry.base_agent_loop import IMainSessionLoop
@@ -636,7 +637,7 @@ async def update_session_message(session_id: str, message_index: int, req: Reque
     content = body.get("content")
     visible_characters = body.get("visible_characters")
     info = _get_sm().get(session_id)
-    if info and info.get("status") == "archived":
+    if info and info.status == SessionStatus.archived:
         result = {"updated": False, "error": "archived session cannot be edited", "session_id": session_id}
         return HTMLResponse(
             json.dumps(result, ensure_ascii=False),
@@ -659,7 +660,7 @@ async def update_session_message(session_id: str, message_index: int, req: Reque
 async def delete_session_messages(session_id: str, count: int = 1):
     """删除最后 count 个逻辑轮次的消息（从倒数第 count 条 user 起，覆盖其后所有 tool/assistant）。"""
     info = _get_sm().get(session_id)
-    if info and info.get("status") == "archived":
+    if info and info.status == SessionStatus.archived:
         result = {"deleted": False, "error": "archived session"}
         return HTMLResponse(
             json.dumps(result, ensure_ascii=False),
@@ -682,7 +683,7 @@ async def delete_session_messages(session_id: str, count: int = 1):
 async def regenerate_response(session_id: str):
     """重新生成最后一条 user 消息的响应：截断历史，重新调用 process_message。"""
     info = _get_sm().get(session_id)
-    if info and info.get("status") == "archived":
+    if info and info.status == SessionStatus.archived:
         result = {"regenerate": False, "error": "archived session"}
         return HTMLResponse(
             json.dumps(result, ensure_ascii=False),

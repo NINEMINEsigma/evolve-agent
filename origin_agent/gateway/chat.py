@@ -18,7 +18,7 @@ from typing import Any, Dict, List, Optional, Union
 from pydantic import BaseModel
 
 from system.atomic_io import write_text_atomic
-from entity.puretype import LoopMeta, Role
+from entity.puretype import LoopMeta, Role, SessionInfo, SessionStatus, Loop
 
 logger = logging.getLogger(__name__)
 
@@ -41,7 +41,7 @@ class SessionManager:
 
     def __init__(self, store_path: str | None = None) -> None:
         import time
-        self._sessions: dict[str, dict] = {}  # sid -> {status, created_at, title, tags}
+        self._sessions: dict[str, SessionInfo] = {}  # sid -> SessionInfo
         self._store_dir: Path | None = Path(store_path) if store_path else None
         self._index_lock: threading.Lock = threading.Lock()
         self._tags: list[str] = []
@@ -196,39 +196,43 @@ class SessionManager:
         for entry in entries:
             sid: str = entry.get("id", "")
             if sid:
-                self._sessions[sid] = {
-                    "status": entry.get("status", "active"),
-                    "created_at": entry.get("created_at", 0),
-                    "title": entry.get("title", ""),
-                    "parents": entry.get("parents", []),
-                    "continuation": entry.get("continuation"),
-                    "pinned": entry.get("pinned", False),
-                    "last_activity_at": entry.get("last_activity_at", entry.get("created_at", 0)),
-                    "tags": entry.get("tags", []),
-                    "loop_type": entry.get("loop_type", "parent"),
-                    "agents": entry.get("agents"),
-                }
+                parents_list: list[str] = entry.get("parents", [])
+                self._sessions[sid] = SessionInfo(
+                    id=sid,
+                    status=entry.get("status", "active"),
+                    created_at=entry.get("created_at", 0),
+                    title=entry.get("title", ""),
+                    parents=parents_list,
+                    parent=parents_list[0] if parents_list else None,
+                    continuation=entry.get("continuation"),
+                    pinned=entry.get("pinned", False),
+                    last_activity_at=entry.get("last_activity_at", entry.get("created_at", 0)),
+                    tags=entry.get("tags", []),
+                    loop_type=entry.get("loop_type", "parent"),
+                    agents=entry.get("agents"),
+                )
         if entries:
             logger.info("Loaded %d sessions from disk", len(entries))
             # 双向修复父子会话关系：从磁盘加载后确保 continuation 与 parents 严格一致
             changed = False
             for sid, info in self._sessions.items():
-                parents: list[str] = info.get("parents", [])
-                continuation: str | None = info.get("continuation")
+                parents: list[str] = info.parents
+                continuation: str | None = info.continuation
                 # 修复A：如果本会话的 continuation 指向某个子，但该子未以本会话为 parent，则补入
                 if continuation and continuation in self._sessions:
                     child = self._sessions[continuation]
-                    child_parents: list[str] = child.get("parents", [])
+                    child_parents: list[str] = child.parents
                     if sid not in child_parents:
                         child_parents.insert(0, sid)
-                        child["parents"] = child_parents
+                        child.parents = child_parents
+                        child.parent = child_parents[0] if child_parents else None
                         changed = True
                 # 修复B：如果本会话的 parents[0] 指向某个父，但该父未以本会话为 continuation，则修正
                 if parents:
                     primary_parent: str = parents[0]
                     if primary_parent in self._sessions:
-                        if self._sessions[primary_parent].get("continuation") != sid:
-                            self._sessions[primary_parent]["continuation"] = sid
+                        if self._sessions[primary_parent].continuation != sid:
+                            self._sessions[primary_parent].continuation = sid
                             changed = True
             if changed:
                 with self._index_lock:
@@ -236,9 +240,9 @@ class SessionManager:
                     for e in entries:
                         sid = e.get("id", "")
                         if sid in self._sessions:
-                            e["parents"] = self._sessions[sid].get("parents", [])
-                            e["continuation"] = self._sessions[sid].get("continuation")
-                            e["tags"] = self._sessions[sid].get("tags", [])
+                            e["parents"] = self._sessions[sid].parents
+                            e["continuation"] = self._sessions[sid].continuation
+                            e["tags"] = self._sessions[sid].tags
                     self._write_index(entries)
                 logger.info("Fixed session parent-child inconsistencies and synced to disk")
 
@@ -264,22 +268,16 @@ class SessionManager:
             effective_parents = list(parents)
         if parent_sid and parent_sid not in effective_parents:
             effective_parents.insert(0, parent_sid)
-        self._sessions[sid] = {
-            "status": "active", "created_at": now, "title": "",
-            "parents": effective_parents, "continuation": None,
-            "pinned": False, "last_activity_at": now,
-            "tags": [], "loop_type": "parent", "agents": None,
-        }
+        self._sessions[sid] = SessionInfo(
+            id=sid, created_at=now, parents=effective_parents,
+            parent=effective_parents[0] if effective_parents else None,
+            last_activity_at=now,
+        )
         # 持久化到磁盘
         if self._store_dir:
             with self._index_lock:
                 entries: list[dict] = self._read_index()
-                entries.append({
-                    "id": sid, "created_at": now, "status": "active", "title": "",
-                    "parents": effective_parents, "continuation": None,
-                    "pinned": False, "last_activity_at": now,
-                    "tags": [], "loop_type": "parent", "agents": None,
-                })
+                entries.append(self._sessions[sid].model_dump())
                 self._write_index(entries)
             (self._store_dir / sid).mkdir(parents=True, exist_ok=True)
         logger.debug("Session created | id=%s parents=%s", sid, effective_parents)
@@ -288,9 +286,9 @@ class SessionManager:
     def archive(self, sid: str, continuation_sid: str | None = None) -> None:
         """将会话标记为已归档，不可再对话。"""
         if sid in self._sessions:
-            self._sessions[sid]["status"] = "archived"
+            self._sessions[sid].status = SessionStatus.archived
             if continuation_sid is not None:
-                self._sessions[sid]["continuation"] = continuation_sid
+                self._sessions[sid].continuation = continuation_sid
         if self._store_dir:
             with self._index_lock:
                 entries: list[dict] = self._read_index()
@@ -301,7 +299,7 @@ class SessionManager:
                             e["continuation"] = continuation_sid
                         # 保留 tags 字段
                         if "tags" not in e:
-                            e["tags"] = self._sessions.get(sid, {}).get("tags", [])
+                            e["tags"] = self._sessions[sid].tags if sid in self._sessions else []
                         break
                 self._write_index(entries)
         logger.info("Session archived | id=%s continuation=%s", sid, continuation_sid)
@@ -318,13 +316,13 @@ class SessionManager:
         new_sid: str = self.create(parent_sid=parent_sid, parents=parents)
         # 如果提供了 loop_meta，更新新 session 的 loop_type 和 agents
         if loop_meta is not None:
-            self.update_loop_type(new_sid, loop_meta.loopType.value, loop_meta.agents)
+            self.update_loop_type(new_sid, loop_meta.loopType, loop_meta.agents)
         # 更新所有父会话的 continuation
-        new_info = self._sessions.get(new_sid, {})
-        effective_parents: list[str] = new_info.get("parents", [])
+        new_info = self._sessions.get(new_sid)
+        effective_parents: list[str] = new_info.parents if new_info else []
         for parent_id in effective_parents:
             if parent_id in self._sessions:
-                self._sessions[parent_id]["continuation"] = new_sid
+                self._sessions[parent_id].continuation = new_sid
         # 同步更新父会话索引持久化，确保重启后 continuation 关系可恢复
         if self._store_dir and effective_parents:
             with self._index_lock:
@@ -336,11 +334,11 @@ class SessionManager:
         logger.info("Session created | new=%s parents=%s role=%s", new_sid, parents or [parent_sid], role.value)
         return new_sid
 
-    def update_loop_type(self, sid: str, loop_type: str, agents: list[str] | None = None) -> None:
+    def update_loop_type(self, sid: str, loop_type: Loop, agents: list[str] | None = None) -> None:
         """更新 session 的 loop 类型和 agents 列表，同步写入内存和磁盘索引。"""
         if sid in self._sessions:
-            self._sessions[sid]["loop_type"] = loop_type
-            self._sessions[sid]["agents"] = agents
+            self._sessions[sid].loop_type = loop_type
+            self._sessions[sid].agents = agents
         if self._store_dir:
             with self._index_lock:
                 entries: list[dict] = self._read_index()
@@ -381,7 +379,7 @@ class SessionManager:
     def update_title(self, sid: str, title: str) -> None:
         """更新内存和磁盘中 session 的标题。"""
         if sid in self._sessions:
-            self._sessions[sid]["title"] = title
+            self._sessions[sid].title = title
         if self._store_dir:
             with self._index_lock:
                 entries: list[dict] = self._read_index()
@@ -390,18 +388,11 @@ class SessionManager:
                         e["title"] = title
                         break
                 else:
-                    info = self._sessions.get(sid, {})
-                    entries.append({
-                        "id": sid,
-                        "created_at": info.get("created_at", 0),
-                        "status": "active",
-                        "title": title,
-                        "parents": info.get("parents", []),
-                        "continuation": info.get("continuation"),
-                        "pinned": info.get("pinned", False),
-                        "last_activity_at": info.get("last_activity_at", info.get("created_at", 0)),
-                        "tags": info.get("tags", []),
-                    })
+                    info = self._sessions.get(sid)
+                    if info:
+                        new_entry = info.model_dump()
+                        new_entry["title"] = title
+                        entries.append(new_entry)
                 self._write_index(entries)
 
     def update_last_activity(self, sid: str) -> None:
@@ -409,7 +400,7 @@ class SessionManager:
         import time
         now: float = time.time()
         if sid in self._sessions:
-            self._sessions[sid]["last_activity_at"] = now
+            self._sessions[sid].last_activity_at = now
         if self._store_dir:
             with self._index_lock:
                 entries: list[dict] = self._read_index()
@@ -423,8 +414,8 @@ class SessionManager:
         """切换 session 的置顶状态，返回新的 pinned 值。"""
         if sid not in self._sessions:
             return False
-        new_val: bool = not self._sessions[sid].get("pinned", False)
-        self._sessions[sid]["pinned"] = new_val
+        new_val: bool = not self._sessions[sid].pinned
+        self._sessions[sid].pinned = new_val
         if self._store_dir:
             with self._index_lock:
                 entries: list[dict] = self._read_index()
@@ -435,55 +426,22 @@ class SessionManager:
                 self._write_index(entries)
         return new_val
 
-    def get(self, sid: str) -> dict | None:
+    def get(self, sid: str) -> SessionInfo | None:
         """返回单个 session 及其完整元数据，不存在时返回 None。"""
-        info: dict | None = self._sessions.get(sid)
-        if info is None:
-            return None
-        parents: list[str] = info.get("parents", [])
-        return {
-            "id": sid,
-            "created_at": info.get("created_at", 0),
-            "status": info.get("status", "unknown"),
-            "title": info.get("title", ""),
-            "parents": parents,
-            "parent": parents[0] if parents else None,
-            "continuation": info.get("continuation"),
-            "pinned": info.get("pinned", False),
-            "last_activity_at": info.get("last_activity_at", info.get("created_at", 0)),
-            "tags": info.get("tags", []),
-            "loop_type": info.get("loop_type", "parent"),
-            "agents": info.get("agents"),
-        }
+        return self._sessions.get(sid)
 
     def cleanup_expired(self) -> int:
         # 禁用过期清理：会话应永久保留在索引中，避免历史丢失。
         return 0
 
-    def get_all(self) -> list[dict]:
+    def get_all(self) -> list[SessionInfo]:
         """返回所有 session 及其元数据的列表。
 
         排序规则：置顶的 session 排在最前面；
         同一层级内按 last_activity_at 降序（最近的在前）。
         """
-        items: list[dict] = []
-        for sid, info in self._sessions.items():
-            parents: list[str] = info.get("parents", [])
-            items.append({
-                "id": sid,
-                "created_at": info.get("created_at", 0),
-                "status": info.get("status", "unknown"),
-                "title": info.get("title", ""),
-                "parents": parents,
-                "parent": parents[0] if parents else None,
-                "continuation": info.get("continuation"),
-                "pinned": info.get("pinned", False),
-                "last_activity_at": info.get("last_activity_at", info.get("created_at", 0)),
-                "tags": info.get("tags", []),
-                "loop_type": info.get("loop_type", "parent"),
-                "agents": info.get("agents"),
-            })
-        items.sort(key=lambda s: (-int(s["pinned"]), -s["last_activity_at"]))
+        items: list[SessionInfo] = list(self._sessions.values())
+        items.sort(key=lambda s: (-int(s.pinned), -s.last_activity_at))
         return items
 
     @staticmethod
@@ -546,7 +504,7 @@ class SessionManager:
         """更新会话标签并同步全局标签。返回最终有效的标签列表。"""
         valid = [t for t in tags if self.validate_tag(t)]
         if sid in self._sessions:
-            self._sessions[sid]["tags"] = valid
+            self._sessions[sid].tags = valid
         if self._store_dir:
             with self._index_lock:
                 entries: list[dict] = self._read_index()
@@ -555,18 +513,11 @@ class SessionManager:
                         e["tags"] = valid
                         break
                 else:
-                    info = self._sessions.get(sid, {})
-                    entries.append({
-                        "id": sid,
-                        "created_at": info.get("created_at", 0),
-                        "status": info.get("status", "active"),
-                        "title": info.get("title", ""),
-                        "parents": info.get("parents", []),
-                        "continuation": info.get("continuation"),
-                        "pinned": info.get("pinned", False),
-                        "last_activity_at": info.get("last_activity_at", info.get("created_at", 0)),
-                        "tags": valid,
-                    })
+                    info = self._sessions.get(sid)
+                    if info:
+                        new_entry = info.model_dump()
+                        new_entry["tags"] = valid
+                        entries.append(new_entry)
                 self._write_index(entries)
         self.add_tags(valid)
         return valid
@@ -577,7 +528,7 @@ class SessionManager:
             info = self._sessions.get(sid)
             if info is None:
                 return f"session {sid} not found"
-            if info.get("status") != "archived":
+            if info.status != SessionStatus.archived:
                 return f"session {sid} is not archived"
         return None
 

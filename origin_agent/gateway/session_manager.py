@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any, TYPE_CHECKING
 
 from gateway.chat import SessionManager as ChatSessionManager
-from entity.puretype import Loop, LoopMeta, Role
+from entity.puretype import Loop, LoopMeta, Role, SessionInfo
 from system.session_store import SessionStore
 
 if TYPE_CHECKING:
@@ -50,11 +50,11 @@ class SessionManager:
     def chat_manager(self) -> ChatSessionManager:
         return self._chat_sm
 
-    def get(self, session_id: str) -> dict | None:
-        """返回 session 元数据（兼容旧接口）。"""
+    def get(self, session_id: str) -> SessionInfo | None:
+        """返回 session 元数据。"""
         return self._chat_sm.get(session_id)
 
-    def get_all(self) -> list[dict]:
+    def get_all(self) -> list[SessionInfo]:
         return self._chat_sm.get_all()
 
     def create_with_context(
@@ -111,7 +111,7 @@ class SessionManager:
 
         # 读取索引 loop_type，若为 multi 则创建 MultiAgentLoop
         info = self._chat_sm.get(session_id)
-        if info and info.get("loop_type") == Loop.multi.value:
+        if info and info.loop_type == Loop.multi:
             return self._create_multi_loop(session_id, frontend_sink, history_store_dir)
 
         # 默认创建 ParentAgentLoop
@@ -153,7 +153,7 @@ class SessionManager:
         )
 
         info = self._chat_sm.get(session_id)
-        agents_names: list[str] = (info.get("agents") or []) if info else []
+        agents_names: list[str] = (info.agents or []) if info else []
 
         parent_ctx = get_runtime_context()
         sandbox = Sandbox(parent_ctx)
@@ -279,7 +279,7 @@ class SessionManager:
         from entry.multi_agent_loop import MultiAgentLoop
         if isinstance(new_loop, MultiAgentLoop):
             agents = list(new_loop.get_agents().keys())
-            self._chat_sm.update_loop_type(session_id, Loop.multi.value, agents)
+            self._chat_sm.update_loop_type(session_id, Loop.multi, agents)
             # 通知前端 agents 列表已变更
             try:
                 sink = self._app.frontend_sink
@@ -295,7 +295,7 @@ class SessionManager:
             except Exception:
                 logger.warning("Failed to push agents for session=%s", session_id, exc_info=True)
         else:
-            self._chat_sm.update_loop_type(session_id, Loop.parent.value)
+            self._chat_sm.update_loop_type(session_id, Loop.parent)
 
     def rotate_session(self, old_sid: str, new_sid: str) -> None:
         """旋转 session：将 loop 从旧 ID 迁移到新 ID。"""

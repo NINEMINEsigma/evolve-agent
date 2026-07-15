@@ -97,6 +97,12 @@ class Loop(str, Enum):
     multi = "multi"
 
 
+class SessionStatus(str, Enum):
+    """会话生命周期状态。"""
+    active = "active"
+    archived = "archived"
+
+
 class LoopMeta(BaseModel):
     loopType: Loop = Loop.parent
     '''
@@ -282,6 +288,50 @@ class SubagentProfile(BaseModel):
 # ---------------------------------------------------------------------------
 # Chat / Gateway Types
 # ---------------------------------------------------------------------------
+
+class SessionInfo(BaseModel):
+    """会话元数据，用于 SessionManager._sessions 的内部存储与对外输出。
+
+    `parent` 是 `parents[0]` 的冗余字段，供前端直接消费；
+    磁盘持久化时由 `_write_index` 的 `clean.pop("parent")` 剔除，不冗余存储。
+    """
+
+    id: str
+    """会话 ID（= _sessions 的 key）。"""
+
+    status: SessionStatus = SessionStatus.active
+    """会话生命周期状态。"""
+
+    created_at: float = 0.0
+    """创建时间（Unix 时间戳）。"""
+
+    title: str = ""
+    """会话标题。"""
+
+    parents: list[str] = Field(default_factory=list)
+    """父会话 ID 列表（支持多父合并）。"""
+
+    parent: str | None = None
+    """parents[0] if parents else None — 冗余字段，供前端直接消费。"""
+
+    continuation: str | None = None
+    """后续会话 ID（归档时指向继承者）。"""
+
+    pinned: bool = False
+    """是否置顶。"""
+
+    last_activity_at: float = 0.0
+    """最后活动时间（Unix 时间戳）。"""
+
+    tags: list[str] = Field(default_factory=list)
+    """会话标签列表。"""
+
+    loop_type: Loop = Loop.parent
+    """运行时主会话使用的 loop 类型。"""
+
+    agents: list[str] | None = None
+    """multi loop 时指定的 agents 列表。"""
+
 
 class MessageType(str, Enum):
     """WebSocket 消息类型枚举。"""

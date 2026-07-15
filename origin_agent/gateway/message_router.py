@@ -33,6 +33,7 @@ from fastapi import WebSocket
 
 from .chat import Message, MessageType
 from entity.constant import UPLOAD_FILENAME_TIME_FORMAT, UPLOADS_DIR_NAME, UPLOADS_WS_PREFIX
+from entity.puretype import SessionInfo, SessionStatus
 
 if TYPE_CHECKING:
     from entry.parent_agent_loop import ParentAgentLoop
@@ -172,7 +173,7 @@ class MessageRouter:
 
             # 拦截 archived 会话的新消息
             session_info = _get_sm().get(self.sid)
-            if session_info and session_info.get("status") == "archived":
+            if session_info and session_info.status == SessionStatus.archived:
                 await self.ws.send_text(
                     json.dumps(
                         Message(
@@ -441,8 +442,8 @@ class MessageRouter:
 
     def _auto_generate_title(self, content: Any) -> None:
         """从首条用户消息自动生成标题。"""
-        session_info: dict | None = _get_sm().get(self.sid)
-        if session_info and not session_info.get("title") and content:
+        session_info: SessionInfo | None = _get_sm().get(self.sid)
+        if session_info and not session_info.title and content:
             text_content: str = _extract_text(content)
             title: str = text_content.strip()[:30]
             if len(text_content.strip()) > 30:
