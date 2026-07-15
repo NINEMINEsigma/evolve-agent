@@ -23,7 +23,7 @@ from abstract.tools.registry import registry as tool_registry
 from component.approval import ask_agent_reason
 from abstract.llm.client import BaseLLMClient
 from abstract.llm.loader import create_llm_client
-from abstract.llm.formats import to_openai_message, to_summary_dict
+from abstract.llm.formats import to_summary_dict
 from entity.puretype import LLMResponse, ToolCall, Role, ToolAvailability
 from system.session_store import SessionStore
 from entity.constant import (
@@ -265,7 +265,7 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
     async def _run_tool_loop(
         self,
         sid: str,
-        messages: list[dict[str, Any]],
+        messages: list[BaseMessage],
         user_message: str,
     ) -> str:
         """执行 LLM 工具调用循环（含 inbox 消息消费）。"""
@@ -356,9 +356,7 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
                 # 委托给 ToolExecutor 执行工具调用
                 for tc in resp.tool_calls:
                     tool_msg = await self._tool_executor.execute(tc, sid)
-                    openai_tool_msg = to_openai_message(tool_msg, current_character_agent=self.current_character_agent)
-                    if openai_tool_msg is not None:
-                        messages.append(openai_tool_msg)
+                    messages.append(tool_msg)
                     self._history.add_message(tool_msg)
                     self._persist_message(sid)
                     await self._push_usage_update(sid)
@@ -398,7 +396,7 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
     # ========================================================================
 
     def _maybe_inject_inbox(
-        self, target_messages: list[dict[str, Any]] | None = None,
+        self, target_messages: list[BaseMessage] | None = None,
     ) -> bool:
         pending = self._inbox.get_pending()
         if not pending:
@@ -413,9 +411,7 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
             self._history.add_message(message)
             self._persist_message(self.session_id)
             if target_messages is not None:
-                openai_msg = to_openai_message(message, current_character_agent=self.current_character_agent)
-                if openai_msg is not None:
-                    target_messages.append(openai_msg)
+                target_messages.append(message)
         return True
 
     async def process_inbox(self) -> str | None:

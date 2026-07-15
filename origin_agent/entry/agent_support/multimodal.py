@@ -10,7 +10,7 @@ import json
 import logging
 from typing import Any
 
-from entity.messages import ImageBlock, MessageBlock, TextBlock
+from entity.messages import BaseMessage, ImageBlock, MessageBlock, TextBlock
 
 logger = logging.getLogger(__name__)
 
@@ -38,33 +38,32 @@ def is_content_block_error(exc: Exception) -> bool:
     return False
 
 
-def strip_image_blocks(messages: list[dict[str, Any]], session_id: str) -> int:
-    """移除消息列表中所有含 image_url 的 content blocks，转为纯文本。
+def strip_image_blocks(messages: list[BaseMessage], session_id: str) -> int:
+    """移除 BaseMessage 列表中所有含 image 的 content blocks，转为纯文本。
 
     返回被剥离的图片数量。
     """
     stripped: int = 0
     for msg in messages:
-        content = msg.get("content")
+        content = msg.content
         if not isinstance(content, list):
             continue
-        new_blocks: list[dict] = []
+        new_blocks: list[MessageBlock] = []
         has_image: bool = False
         for block in content:
-            if isinstance(block, dict) and block.get("type") == "image_url":
+            if isinstance(block, ImageBlock):
                 has_image = True
                 stripped += 1
-                new_blocks.append({
-                    "type": "text",
-                    "text": "[Image content stripped — current model does not support vision]",
-                })
+                new_blocks.append(TextBlock(
+                    text="[Image content stripped — current model does not support vision]",
+                ))
             else:
                 new_blocks.append(block)
         if has_image:
-            msg["content"] = new_blocks
+            msg.content = new_blocks
     if stripped:
         logger.info(
-            "Stripped %d image_url block(s) from messages (session=%s)",
+            "Stripped %d image block(s) from messages (session=%s)",
             stripped, session_id,
         )
     return stripped
