@@ -3,8 +3,9 @@
 
 切换后不可逆，所有活跃子 Agent 将被停止，multiagent 工具集将被禁用。
 此后所有用户消息均由 MultiAgentLoop 处理：所有参与 Agent 共享同一份对话历史，
-每条用户消息触发一轮并发响应；Agent 可在回复中通过 response_characters 指定
-下一轮的响应者，按轮次级联直到无人指定或达到最大深度。
+每条用户消息触发一轮串行级联响应：初始响应者组成队列逐个执行，
+每个 Agent 完成后可通过 response_characters 动态指定后续响应者，
+级联持续直到队列清空或达到最大深度。
 """
 
 from __future__ import annotations
@@ -163,8 +164,10 @@ registry.register(
         #
         # ## 功能
         # 把当前活跃主会话从 ParentAgentLoop 永久切换到 MultiAgentLoop。
-        # 进入后所有参与 Agent 共享同一份对话历史，用户每条消息触发一轮并发响应；
-        # Agent 可在 JSON 回复中通过 response_characters 指定下一轮响应者，按轮次级联直到结束。
+        # 进入后所有参与 Agent 共享同一份对话历史，用户每条消息触发一轮串行级联响应：
+        # 初始 response_characters 组成队列，Agent 逐个执行，每个完成后可通过
+        # response_characters 动态指定后续响应者（已在队列中则移到队首，不在则加到队尾），
+        # 级联持续直到队列清空或达到最大深度。
         #
         # ## 前置条件
         # - 仅有活跃的主会话可以调用；子 Agent 会话不支持。
@@ -175,8 +178,8 @@ registry.register(
         # - 所有活跃子 Agent 将被停止并清理。
         # - multiagent 工具集（run_subagent、chat_subagent 等）将被禁用。
         # - 此后所有用户消息由 MultiAgentLoop 处理：所有 Agent 共享同一 History，
-        #   每条消息触发一轮 Agent 并发响应；每个 Agent 以 JSON 格式输出，
-        #   通过 visible_characters 控制消息可见性，通过 response_characters 指定下一轮响应的 Agent。
+        #   每条消息触发一轮串行级联响应：Agent 按队列逐个执行，每个以 JSON 格式输出，
+        #   通过 visible_characters 控制消息可见性，通过 response_characters 动态指定后续响应的 Agent。
         # - 级联按轮次进行，直到没有 Agent 指定下一响应者，或达到最大深度限制。
         #
         # ## 返回
@@ -205,8 +208,9 @@ registry.register(
 - All active sub-agents will be stopped and cleaned up.
 - The multiagent toolset (run_subagent, chat_subagent, etc.) will be disabled.
 - From then on, all user messages are handled by MultiAgentLoop. All participating agents share the same conversation history.
-- Each user message triggers one round of concurrent responses from the currently designated agents.
-- Every agent reply is JSON and may use `response_characters` to name the agents that should respond in the next round; rounds cascade until no next agents are named or the maximum depth is reached.
+- Each user message triggers one round of serial cascading responses: the initial `response_characters` form a queue, agents execute one at a time, each waiting for the previous to fully complete before starting.
+- Every agent reply is JSON and may use `response_characters` to dynamically adjust the queue — agents already queued are moved to the front, new agents are appended to the back, self-nomination is ignored.
+- The cascade continues until the queue is empty or the maximum depth (len(agents) * cascade_depth) is reached.
 
 ## Returns
 ```json

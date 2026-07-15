@@ -1,7 +1,7 @@
 """
 MultiAgentLoop — 多 Agent 广播协作循环。
 
-继承 BaseAgentLoop，管理共享 History + 多 Agent 并发调度 + 级联递归。
+继承 BaseAgentLoop，管理共享 History + 多 Agent 串行级联调度。
 自身不直接调用 LLM，而是将每个 Agent 的执行委托给 MultiAgentWorker。
 """
 
@@ -67,7 +67,7 @@ class AgentProfile:
 class MultiAgentLoop(BaseAgentLoop, IMainSessionLoop):
     """多 Agent 广播协作循环。
 
-    持有共享 History 实例，管理多 Agent 并发响应的调度和级联。
+    持有共享 History 实例，管理多 Agent 串行响应的调度和级联。
     每条消息通过 ``visible_characters`` 控制可见性，
     通过 ``response_characters`` 指定下一轮响应的 Agent。
     """
@@ -395,7 +395,7 @@ class MultiAgentLoop(BaseAgentLoop, IMainSessionLoop):
         1. 追加用户消息到 History（skip_append 为 True 时跳过）
         2. 以指定的 response_characters 为初始响应者启动级联
            - 若为 None，默认所有 Agent 响应
-        3. 收集所有回复，拼接最终展示文本
+        3. 各 Agent 回复已通过 sink 独立推送前端，本方法返回空字符串
 
         visible_characters / response_characters 由用户从前端指定；
         未指定时默认对全体可见、全体响应。
@@ -490,7 +490,7 @@ class MultiAgentLoop(BaseAgentLoop, IMainSessionLoop):
 
         最大深度按步数计算：len(agents) * MULTI_AGENT_MAX_CASCADE_DEPTH。
         剩余步数 ≤ 3 时注入 final-round 提示词强制收敛。
-        任一 Agent 响应或代码异常直接中断队列，发送系统消息报错。
+        Agent 响应正常时继续处理队列中下一个；仅当代码异常时中断队列并发送系统消息报错。
         """
         # ── 构建初始队列 ──
         is_contains_main_agent = MAIN_AGENT_CHARACTER_NAME in response_characters
