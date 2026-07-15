@@ -43,7 +43,7 @@ argparse_parser.add_argument("--llm_temperature", type=float, default=argparse.S
 # 可选值：e.g. "low" / "medium" / "high"，空字符串表示不启用
 argparse_parser.add_argument("--llm_reasoning_effort", type=str, default=argparse.SUPPRESS)
 # 选择 LLM 客户端实现模块（custom_llm_client 目录下对应名称的 .py 文件）
-argparse_parser.add_argument("--client", type=str, default=argparse.SUPPRESS)
+argparse_parser.add_argument("--llm_client_name", type=str, default=argparse.SUPPRESS)
 # 会话合并时直接拼接摘要的字符阈值，超过则截断
 argparse_parser.add_argument("--merge_concat_threshold", type=int, default=argparse.SUPPRESS)
 

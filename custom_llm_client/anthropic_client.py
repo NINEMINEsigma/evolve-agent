@@ -8,8 +8,8 @@
 （api_key、base_url、model、temperature、max_output_tokens），
 密钥通过环境变量兜底（``ANTHROPIC_API_KEY``）。
 
- Anthropic 协议没有原生的 ``reasoning_content`` / ``response_format`` 字段，
- 因此 reasoning 字段不传入 Anthropic，``response_format`` 在本实现中忽略。
+支持 thinking（reasoning）内容的解析与续传。
+``response_format`` 在本实现中忽略。
 """
 
 from __future__ import annotations
@@ -17,15 +17,17 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
-import re
 from collections.abc import AsyncIterator
 from typing import Any, Optional
 
 import anthropic
 import dirtyjson
+import httpcore
+import httpx
+import json
 
 from abstract.llm.client import BaseLLMClient
-from abstract.llm.formats import messages_to_openai_list
+from abstract.llm.formats import messages_to_anthropic_list
 from entity.messages import BaseMessage
 from entity.puretype import LLMResponse, StreamChunk, ToolCall, Usage
 from entity.constant import (
@@ -123,10 +125,9 @@ class AnthropicLLMClient(BaseLLMClient):
         对 transient 网络错误（连接中断、超时、限流、5xx）
         自动进行指数退避重试，最多 ``LLM_RETRY_COUNT`` 次。
         """
-        openai_messages = messages_to_openai_list(
+        anthropic_messages, system = messages_to_anthropic_list(
             messages, current_character_agent=character
         )
-        anthropic_messages, system = _openai_messages_to_anthropic(openai_messages)
         anthropic_tools = _openai_tools_to_anthropic(tools) if tools else None
         kwargs = self._build_kwargs(
             anthropic_messages, system, anthropic_tools, stream=False
@@ -175,35 +176,60 @@ class AnthropicLLMClient(BaseLLMClient):
     ) -> AsyncIterator[StreamChunk]:
         """发送流式聊天请求，逐块返回增量内容。
 
-        支持 content 增量、tool_use 的完整输出，并在流结束时发出带
-        ``finish_reason`` 的 chunk。出现可恢复网络错误时按配置次数重试。
+        支持 content 增量、reasoning 增量、tool_use 的完整输出，并在流结束时发出带
+        ``finish_reason`` 的 chunk。流中断时支持断点续传。
         """
-        openai_messages = messages_to_openai_list(
+        anthropic_messages, system = messages_to_anthropic_list(
             messages, current_character_agent=character
         )
-        anthropic_messages, system = _openai_messages_to_anthropic(openai_messages)
+        original_messages: list[dict[str, Any]] = list(anthropic_messages)
         anthropic_tools = _openai_tools_to_anthropic(tools) if tools else None
-        kwargs = self._build_kwargs(
-            anthropic_messages, system, anthropic_tools, stream=True
-        )
+        state: dict[str, Any] = {
+            "content": "",
+            "reasoning": "",
+            "reasoning_field_name": "reasoning_content",
+            "completed_tool_calls": [],
+            "finish_reason": None,
+        }
 
-        has_yielded = False
         for attempt in range(LLM_RETRY_COUNT):
+            resume_messages = (
+                original_messages
+                if attempt == 0
+                else _build_resume_messages(original_messages, state)
+            )
             try:
+                kwargs = self._build_kwargs(
+                    resume_messages, system, anthropic_tools, stream=True
+                )
                 stream = await self._client.messages.create(**kwargs)
                 async with stream:
-                    async for chunk in self._consume_one_stream(stream):
-                        has_yielded = True
+                    async for chunk in self._consume_one_stream(stream, state):
                         yield chunk
                 return
+            except _StreamInterruptedError:
+                logger.warning(
+                    "Anthropic stream interrupted (attempt %d/%d), resuming from breakpoint...",
+                    attempt + 1,
+                    LLM_RETRY_COUNT,
+                )
+                if attempt < LLM_RETRY_COUNT - 1:
+                    wait: float = BACKOFF_BASE * (2 ** attempt)
+                    await asyncio.sleep(wait)
+                else:
+                    logger.error("Anthropic stream resume attempts exhausted")
+                    yield StreamChunk(
+                        error="Anthropic stream interrupted and resume attempts exhausted."
+                    )
+                    return
             except (
                 anthropic.APIConnectionError,
                 anthropic.APITimeoutError,
                 anthropic.RateLimitError,
                 anthropic.InternalServerError,
             ) as exc:
-                if not has_yielded and attempt < LLM_RETRY_COUNT - 1:
-                    wait: float = BACKOFF_BASE * (2 ** attempt)
+                if attempt < LLM_RETRY_COUNT - 1:
+                    wait = BACKOFF_BASE * (2 ** attempt)
                     logger.warning(
                         "Anthropic stream transient error (attempt %d/%d): %s. Retrying in %.1fs...",
                         attempt + 1,
@@ -232,6 +258,7 @@ class AnthropicLLMClient(BaseLLMClient):
     async def _consume_one_stream(
         self,
         stream: Any,
+        state: dict[str, Any],
     ) -> AsyncIterator[StreamChunk]:
         """消费单条 Anthropic 流，产出增量并返回结束状态。
 
@@ -240,242 +267,192 @@ class AnthropicLLMClient(BaseLLMClient):
         """
         current_tool_use: dict[str, Any] | None = None
         pending_tool_input: str = ""
+        current_thinking: bool = False
+        reasoning_buffer: str = state.get("reasoning", "")
         finish_reason: str | None = None
         pending_usage: Usage | None = None
 
-        async for event in stream:
-            event_type = getattr(event, "type", None)
-            if event_type is None:
-                continue
-
-            if event_type == "message_start":
-                message = getattr(event, "message", None)
-                if message is not None:
-                    usage = _extract_usage(message)
-                    if usage.total_tokens > 0:
-                        yield StreamChunk(usage=usage)
-
-            elif event_type == "content_block_start":
-                block = getattr(event, "content_block", None)
-                if block is not None and getattr(block, "type", None) == "tool_use":
-                    current_tool_use = {
-                        "id": getattr(block, "id", ""),
-                        "name": getattr(block, "name", ""),
-                    }
-                    pending_tool_input = ""
-
-            elif event_type == "content_block_delta":
-                delta = getattr(event, "delta", None)
-                if delta is None:
+        try:
+            async for event in stream:
+                event_type = getattr(event, "type", None)
+                if event_type is None:
                     continue
-                delta_type = getattr(delta, "type", None)
-                if delta_type == "text_delta":
-                    text = getattr(delta, "text", "")
-                    if text:
-                        yield StreamChunk(content_delta=text)
-                elif delta_type == "tool_use_delta":
-                    partial = getattr(delta, "partial_json", "") or ""
-                    pending_tool_input += partial
 
-            elif event_type == "content_block_stop":
-                if current_tool_use is not None:
+                if event_type == "message_start":
+                    message = getattr(event, "message", None)
+                    if message is not None:
+                        usage = _extract_usage(message)
+                        if usage.total_tokens > 0:
+                            yield StreamChunk(usage=usage)
+
+                elif event_type == "content_block_start":
                     block = getattr(event, "content_block", None)
-                    final_input = getattr(block, "input", None)
-                    if final_input is not None and isinstance(final_input, dict):
-                        arguments = final_input
-                    else:
-                        arguments = _safe_json_parse(pending_tool_input)
-                    tc = ToolCall(
-                        id=current_tool_use["id"],
-                        name=current_tool_use["name"],
-                        arguments=arguments,
+                    if block is not None:
+                        block_type = getattr(block, "type", None)
+                        if block_type == "thinking":
+                            current_thinking = True
+                        elif block_type == "tool_use":
+                            current_tool_use = {
+                                "id": getattr(block, "id", ""),
+                                "name": getattr(block, "name", ""),
+                            }
+                            pending_tool_input = ""
+
+                elif event_type == "content_block_delta":
+                    delta = getattr(event, "delta", None)
+                    if delta is None:
+                        continue
+                    delta_type = getattr(delta, "type", None)
+                    if delta_type == "text_delta":
+                        text = getattr(delta, "text", "")
+                        if text:
+                            state["content"] = state.get("content", "") + text
+                            yield StreamChunk(content_delta=text)
+                    elif delta_type == "thinking_delta":
+                        thinking_text = getattr(delta, "thinking", "")
+                        if thinking_text:
+                            reasoning_buffer += thinking_text
+                            state["reasoning"] = reasoning_buffer
+                            yield StreamChunk(
+                                reasoning_delta=thinking_text,
+                                reasoning_field_name="reasoning_content",
+                            )
+                    elif delta_type == "tool_use_delta":
+                        partial = getattr(delta, "partial_json", "") or ""
+                        pending_tool_input += partial
+
+                elif event_type == "content_block_stop":
+                    if current_thinking:
+                        current_thinking = False
+                    elif current_tool_use is not None:
+                        block = getattr(event, "content_block", None)
+                        final_input = getattr(block, "input", None)
+                        if final_input is not None and isinstance(final_input, dict):
+                            arguments = final_input
+                        else:
+                            arguments = _safe_json_parse(pending_tool_input)
+                        tc = ToolCall(
+                            id=current_tool_use["id"],
+                            name=current_tool_use["name"],
+                            arguments=arguments,
+                        )
+                        state["completed_tool_calls"].append(tc)
+                        yield StreamChunk(tool_call=tc)
+                        current_tool_use = None
+                        pending_tool_input = ""
+
+                elif event_type == "message_delta":
+                    delta = getattr(event, "delta", None)
+                    if delta is not None:
+                        stop = getattr(delta, "stop_reason", None)
+                        if stop:
+                            finish_reason = _map_stop_reason(stop)
+                    usage = _extract_usage(event)
+                    if usage.total_tokens > 0:
+                        pending_usage = usage
+
+                elif event_type == "message_stop":
+                    # 流正常结束，finish_reason 已在 message_delta 中记录
+                    pass
+
+        except Exception as exc:
+            if _is_retriable_stream_error(exc):
+                # 固化已完成的 tool_calls（包括未收到 content_block_stop 的当前 tool_use）
+                if current_tool_use is not None and current_tool_use.get("id") and current_tool_use.get("name"):
+                    arguments = _safe_json_parse(pending_tool_input)
+                    state["completed_tool_calls"].append(
+                        ToolCall(
+                            id=current_tool_use["id"],
+                            name=current_tool_use["name"],
+                            arguments=arguments,
+                        )
                     )
-                    yield StreamChunk(tool_call=tc)
-                    current_tool_use = None
-                    pending_tool_input = ""
-
-            elif event_type == "message_delta":
-                delta = getattr(event, "delta", None)
-                if delta is not None:
-                    stop = getattr(delta, "stop_reason", None)
-                    if stop:
-                        finish_reason = _map_stop_reason(stop)
-                usage = _extract_usage(event)
-                if usage.total_tokens > 0:
-                    pending_usage = usage
-
-            elif event_type == "message_stop":
-                # 流正常结束，finish_reason 已在 message_delta 中记录
-                pass
+                state["content"] = state.get("content", "")
+                state["reasoning"] = reasoning_buffer
+                raise _StreamInterruptedError(state) from exc
+            raise
 
         if finish_reason:
             yield StreamChunk(finish_reason=finish_reason, usage=pending_usage)
 
 
 # ---------------------------------------------------------------------------
-# 消息 / 工具转换
+# 续传 / 重试辅助
 # ---------------------------------------------------------------------------
 
 
-def _openai_messages_to_anthropic(
-    openai_messages: list[dict[str, Any]],
-) -> tuple[list[dict[str, Any]], str]:
-    """将 OpenAI 格式消息转换为 Anthropic Messages API 格式。
+class _StreamInterruptedError(Exception):
+    """流式响应因可恢复网络错误中断，携带当前已累积状态。"""
 
-    Anthropic 要求：
-      - system 提示只能作为顶层 ``system`` 参数，不能穿插在 messages 中。
-      - 工具调用结果（tool_result）必须放在 user 消息的 content 列表里。
-      - 助手消息的 tool_calls 需要转换为 ``tool_use`` content block。
+    def __init__(self, state: dict[str, Any]) -> None:
+        self.state = state
+
+
+def _is_retriable_stream_error(exc: Exception) -> bool:
+    """判断异常是否为流式传输过程中可恢复的网络错误。"""
+    retriable_types: tuple[type[Exception], ...] = (
+        anthropic.APIConnectionError,
+        anthropic.APITimeoutError,
+        anthropic.InternalServerError,
+    )
+    if isinstance(exc, retriable_types):
+        return True
+    if isinstance(exc, (httpx.ReadError, httpx.ConnectError, httpx.TimeoutException)):
+        return True
+    if isinstance(exc, (httpcore.ReadError, httpcore.ConnectError, httpcore.ConnectTimeout)):
+        return True
+    return False
+
+
+def _build_resume_messages(
+    original_messages: list[dict[str, Any]],
+    state: dict[str, Any],
+) -> list[dict[str, Any]]:
+    """根据已收状态构造续传 messages（Anthropic 格式）。
+
+    在原消息列表后追加 assistant 消息（包含已生成的 thinking / text /
+    tool_use content blocks），再追加一条 user 提示让 LLM 从断点继续。
     """
-    system_parts: list[str] = []
-    anthropic_messages: list[dict[str, Any]] = []
-    pending_tool_results: list[dict[str, Any]] = []
+    messages: list[dict[str, Any]] = list(original_messages)
+    assistant_content: list[dict[str, Any]] = []
 
-    def _flush_tool_results() -> None:
-        nonlocal pending_tool_results
-        if pending_tool_results:
-            anthropic_messages.append({
-                "role": "user",
-                "content": pending_tool_results,
-            })
-            pending_tool_results = []
-
-    for msg in openai_messages:
-        role = msg.get("role")
-        content = msg.get("content")
-
-        if role == "system":
-            system_parts.extend(_extract_text_from_content(content))
-            continue
-
-        if role == "tool":
-            pending_tool_results.append(_build_tool_result_block(msg))
-            continue
-
-        _flush_tool_results()
-
-        anthropic_content = _openai_content_to_anthropic(content)
-        if role == "assistant":
-            tool_calls = msg.get("tool_calls")
-            if tool_calls:
-                for tc in tool_calls:
-                    anthropic_content.append(_tool_call_to_tool_use(tc))
-
-        if not anthropic_content:
-            # Anthropic 不接受空 content 的消息，跳过
-            continue
-
-        anthropic_messages.append({
-            "role": role,
-            "content": anthropic_content,
+    # thinking block 优先放在最前面（与 Anthropic 原始输出顺序一致）
+    reasoning = state.get("reasoning")
+    if reasoning:
+        assistant_content.append({
+            "type": "thinking",
+            "thinking": reasoning,
+            "signature": "",
         })
 
-    _flush_tool_results()
+    content = state.get("content")
+    if content:
+        assistant_content.append({"type": "text", "text": content})
 
-    system = "\n\n".join(system_parts) if system_parts else ""
-    return anthropic_messages, system
+    for tc in state.get("completed_tool_calls", []):
+        assistant_content.append({
+            "type": "tool_use",
+            "id": tc.id,
+            "name": tc.name,
+            "input": tc.arguments,
+        })
 
+    if not assistant_content:
+        assistant_content.append({"type": "text", "text": " "})
 
-def _extract_text_from_content(content: Any) -> list[str]:
-    """从 OpenAI  content 中提取文本片段。"""
-    if isinstance(content, str):
-        return [content] if content.strip() else []
-    if isinstance(content, list):
-        texts: list[str] = []
-        for block in content:
-            if isinstance(block, dict) and block.get("type") == "text":
-                text = block.get("text", "")
-                if text:
-                    texts.append(text)
-        return texts
-    return []
+    messages.append({"role": "assistant", "content": assistant_content})
 
-
-def _openai_content_to_anthropic(content: Any) -> list[dict[str, Any]]:
-    """将 OpenAI 的字符串或 content block 列表转换为 Anthropic content block 列表。"""
-    if content is None:
-        return []
-    if isinstance(content, str):
-        return [{"type": "text", "text": content}] if content else []
-
-    if isinstance(content, list):
-        blocks: list[dict[str, Any]] = []
-        for block in content:
-            if not isinstance(block, dict):
-                continue
-            block_type = block.get("type")
-            if block_type == "text":
-                text = block.get("text", "")
-                if text:
-                    blocks.append({"type": "text", "text": text})
-            elif block_type == "image_url":
-                image_url = block.get("image_url", {})
-                url = image_url.get("url", "") if isinstance(image_url, dict) else ""
-                image_block = _image_url_to_anthropic_image(url)
-                if image_block is not None:
-                    blocks.append(image_block)
-        return blocks
-
-    return []
+    from system.templates import read_template
+    messages.append({
+        "role": "user",
+        "content": [{"type": "text", "text": read_template("llm/stream_resume.txt")}],
+    })
+    return messages
 
 
-def _image_url_to_anthropic_image(url: str) -> dict[str, Any] | None:
-    """将 OpenAI image_url 转换为 Anthropic image block。"""
-    if not url:
-        return None
-
-    # 支持 base64 data URL，例如 data:image/png;base64,...
-    if url.startswith("data:"):
-        match = re.match(r"data:([^;]+);base64,(.+)", url)
-        if match:
-            media_type = match.group(1)
-            data = match.group(2)
-            return {
-                "type": "image",
-                "source": {
-                    "type": "base64",
-                    "media_type": media_type,
-                    "data": data,
-                },
-            }
-        return None
-
-    return {
-        "type": "image",
-        "source": {"type": "url", "url": url},
-    }
-
-
-def _build_tool_result_block(msg: dict[str, Any]) -> dict[str, Any]:
-    """将 OpenAI tool 消息转换为 Anthropic tool_result block。"""
-    content = msg.get("content")
-    anthropic_content: Any
-    if isinstance(content, list):
-        anthropic_content = _openai_content_to_anthropic(content)
-    elif isinstance(content, str):
-        anthropic_content = content
-    else:
-        anthropic_content = ""
-
-    return {
-        "type": "tool_result",
-        "tool_use_id": msg.get("tool_call_id", ""),
-        "content": anthropic_content,
-    }
-
-
-def _tool_call_to_tool_use(tc: dict[str, Any]) -> dict[str, Any]:
-    """将 OpenAI tool_call 转换为 Anthropic tool_use block。"""
-    tc_id = tc.get("id", "")
-    function = tc.get("function", {}) or {}
-    name = function.get("name", "")
-    arguments = function.get("arguments", "{}") or "{}"
-    return {
-        "type": "tool_use",
-        "id": tc_id,
-        "name": name,
-        "input": _safe_json_parse(arguments),
-    }
+# ---------------------------------------------------------------------------
+# 工具 schema 转换
+# ---------------------------------------------------------------------------
 
 
 def _openai_tools_to_anthropic(
@@ -516,12 +493,15 @@ def _ensure_input_schema(parameters: Any) -> dict[str, Any]:
 def _parse_message(response: Any) -> LLMResponse:
     """从 Anthropic Message 对象解析 LLMResponse。"""
     content = ""
+    reasoning_content = ""
     tool_calls: list[ToolCall] = []
 
     for block in response.content or []:
         block_type = getattr(block, "type", None)
         if block_type == "text":
             content += getattr(block, "text", "") or ""
+        elif block_type == "thinking":
+            reasoning_content += getattr(block, "thinking", "") or ""
         elif block_type == "tool_use":
             tool_calls.append(_parse_tool_use_block(block))
 
@@ -529,6 +509,8 @@ def _parse_message(response: Any) -> LLMResponse:
         content=content,
         tool_calls=tool_calls,
         finish_reason=_map_stop_reason(getattr(response, "stop_reason", None)),
+        reasoning_content=reasoning_content or None,
+        reasoning_field_name="reasoning_content" if reasoning_content else None,
         usage=_extract_usage(response),
     )
 
