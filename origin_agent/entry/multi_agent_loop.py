@@ -491,6 +491,11 @@ class MultiAgentLoop(BaseAgentLoop, IMainSessionLoop):
         最大深度按步数计算：len(agents) * MULTI_AGENT_MAX_CASCADE_DEPTH。
         剩余步数 ≤ 3 时注入 final-round 提示词强制收敛。
         Agent 响应正常时继续处理队列中下一个；仅当代码异常时中断队列并发送系统消息报错。
+
+        发起者自动回调：当 Agent A 指定 B/C 响应后，A 的 pending 集合记录 {B, C}。
+        每个 agent 完成时从所有 pending 中移除自身；当某发起者的 pending 清空时，
+        该发起者自动入队（移到队首），每个 agent 每次级联最多自动回调 1 次。
+        显式指定的 response_characters 不受回调次数限制。
         """
         # ── 构建初始队列 ──
         is_contains_main_agent = MAIN_AGENT_CHARACTER_NAME in response_characters
@@ -512,6 +517,11 @@ class MultiAgentLoop(BaseAgentLoop, IMainSessionLoop):
         queue: deque[str] = deque(valid_chars)
         step: int = 0
         max_steps: int = len(self._agents) * MULTI_AGENT_MAX_CASCADE_DEPTH
+
+        # 发起者 pending 跟踪：initiator -> {待响应的 agent 名集合}
+        pending_map: dict[str, set[str]] = {}
+        # 发起者已自动回调次数：initiator -> 0 或 1
+        callback_count: dict[str, int] = {}
 
         logger.info(
             "Cascade start (serial) | session=%s queue=%s max_steps=%d",
@@ -606,8 +616,16 @@ class MultiAgentLoop(BaseAgentLoop, IMainSessionLoop):
                 except Exception:
                     logger.debug("Failed to push visibility metadata for stream=%s", result.stream_id, exc_info=True)
 
-            # ── 动态调整队列 ──
+            # ── 动态调整队列 + 发起者 pending 回调 ──
             if not is_final:
+                # 1. 登记发起者的 pending（仅当 response 非空时）
+                if response:
+                    valid_targets = {rc for rc in response if rc in self._agents and rc != char}
+                    if valid_targets:
+                        pending_map[char] = valid_targets
+                        callback_count.setdefault(char, 0)
+
+                # 2. 显式 response_characters 入队逻辑（不变）
                 for rc in response:
                     # 过滤：仅保留有效 Agent，排除自我指定
                     if rc not in self._agents or rc == char:
@@ -626,6 +644,20 @@ class MultiAgentLoop(BaseAgentLoop, IMainSessionLoop):
                         logger.info(
                             "Queue append: %s added to back | session=%s step=%d",
                             rc, self.session_id, step,
+                        )
+
+                # 3. 当前完成的 agent 从所有 pending 中移除，检查回调触发
+                for initiator, pending in list(pending_map.items()):
+                    pending.discard(char)
+                    if not pending and callback_count.get(initiator, 0) == 0:
+                        # pending 清空且该 initiator 尚未回调过
+                        if initiator in queue:
+                            queue.remove(initiator)
+                        queue.appendleft(initiator)
+                        callback_count[initiator] = 1
+                        logger.info(
+                            "Callback enqueue: %s (pending cleared) | session=%s step=%d",
+                            initiator, self.session_id, step,
                         )
 
             step += 1
