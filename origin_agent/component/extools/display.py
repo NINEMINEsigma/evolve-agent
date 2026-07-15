@@ -15,6 +15,7 @@ from typing import Any, Dict
 
 from abstract.tools.registry import registry, tool_error, tool_result
 from component.tools.filesystem import _s as _get_sandbox
+from entity.constant import STATIC_FILE_HTTP_PREFIX
 
 logger = logging.getLogger(__name__)
 
@@ -76,9 +77,9 @@ def _resolve_image(path: str) -> tuple[Path, str, str] | str:
     mime = _MIME_MAP.get(ext, "application/octet-stream")
     try:
         rel = real.relative_to(agentspace)
-        http_url = f"/uploads/{rel.as_posix()}"
+        http_url = f"{STATIC_FILE_HTTP_PREFIX}/{rel.as_posix()}"
     except ValueError:
-        http_url = f"/uploads/{real.name}"
+        http_url = f"{STATIC_FILE_HTTP_PREFIX}/{real.name}"
 
     return real, mime, http_url
 
@@ -188,9 +189,9 @@ def _handle_play_audio(args: dict[str, Any]) -> dict:
         size = real.stat().st_size
         try:
             rel = real.relative_to(agentspace)
-            audio_url = f"/uploads/{rel.as_posix()}"
+            audio_url = f"{STATIC_FILE_HTTP_PREFIX}/{rel.as_posix()}"
         except ValueError:
-            audio_url = f"/uploads/{real.name}"
+            audio_url = f"{STATIC_FILE_HTTP_PREFIX}/{real.name}"
 
     if url:
         audio_url = url
@@ -248,9 +249,9 @@ def _resolve_audio_item(raw: Any, agentspace: Path) -> dict[str, Any] | str:
         size = real.stat().st_size
         try:
             rel = real.relative_to(agentspace)
-            audio_url = f"/uploads/{rel.as_posix()}"
+            audio_url = f"{STATIC_FILE_HTTP_PREFIX}/{rel.as_posix()}"
         except ValueError:
-            audio_url = f"/uploads/{real.name}"
+            audio_url = f"{STATIC_FILE_HTTP_PREFIX}/{real.name}"
         if not title:
             title = real.stem
 

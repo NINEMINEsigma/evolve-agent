@@ -146,6 +146,16 @@ NAMESPACE_PREFIXES: tuple[str, ...] = ("ws:", "fork:", "fix:", "skills:")
 # 上传
 # ============================================================================
 
+# agentspace 下的上传子目录名 — 文件上传的目标物理目录
+UPLOADS_DIR_NAME: str = "uploads"
+
+# 上传文件在沙箱中的逻辑路径前缀 — 如 ws:uploads/screenshot.png
+UPLOADS_WS_PREFIX: str = f"ws:{UPLOADS_DIR_NAME}/"
+
+# 静态文件 HTTP 路由前缀 — 前端通过此 URL 访问 agentspace 下的文件
+# 注意：此路由名恰好与上传目录名相同，但服务于整个 agentspace（不仅是 uploads 子目录）
+STATIC_FILE_HTTP_PREFIX: str = "/uploads"
+
 # 文件名示例：20250617_123045_utc_a1b2c3d4_filename.ext
 UPLOAD_TIME_RE_PATTERN = r"^(\d{8}_\d{6}_utc)_[a-f0-9]{8}_(.+)$"
 

@@ -29,7 +29,7 @@ from .chat import Message, MessageType
 from .message_router import MessageRouter
 from abstract.tools.registry import registry
 from datetime import datetime, timezone
-from entity.constant import CRON_STDOUT_PREVIEW_MAX_LENGTH, SUBPROCESS_TIMEOUT_DEFAULT, UPLOAD_FILENAME_TIME_FORMAT, USER_CHARACTER_NAME
+from entity.constant import CRON_STDOUT_PREVIEW_MAX_LENGTH, SUBPROCESS_TIMEOUT_DEFAULT, UPLOAD_FILENAME_TIME_FORMAT, USER_CHARACTER_NAME, UPLOADS_DIR_NAME, UPLOADS_WS_PREFIX, STATIC_FILE_HTTP_PREFIX
 from system.context import get_runtime_context
 from entry.parent_agent_loop import IncompatibleHistoryError
 from entry.base_agent_loop import IMainSessionLoop
@@ -941,7 +941,7 @@ async def file_picker():
         logger.error("agentspace path not set, cannot accept file picker uploads")
         return {"uploaded": False, "error": "agentspace_not_configured"}
 
-    upload_dir: Path = _agentspace_path / "uploads"
+    upload_dir: Path = _agentspace_path / UPLOADS_DIR_NAME
     upload_dir.mkdir(parents=True, exist_ok=True)
 
     results: list[dict] = []
@@ -967,7 +967,7 @@ async def file_picker():
         logger.info("File %s | picker src=%s dest=%s", method, src, dest)
         results.append({
             "uploaded": True,
-            "path": f"ws:uploads/{unique_name}",
+            "path": f"{UPLOADS_WS_PREFIX}{unique_name}",
             "filename": safe_name,
             "size": dest.stat().st_size,
             "method": method,
@@ -976,7 +976,7 @@ async def file_picker():
     return {"uploaded": True, "files": results}
 
 
-@app.get("/uploads/{file_path:path}")
+@app.get(STATIC_FILE_HTTP_PREFIX + "/{file_path:path}")
 async def serve_workspace_file(file_path: str):
     """提供 ws: 命名空间下文件的 HTTP 访问，供前端展示图片等静态文件。"""
     if not _agentspace_path:

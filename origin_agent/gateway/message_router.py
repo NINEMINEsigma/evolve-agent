@@ -32,7 +32,7 @@ from typing import *
 from fastapi import WebSocket
 
 from .chat import Message, MessageType
-from entity.constant import UPLOAD_FILENAME_TIME_FORMAT
+from entity.constant import UPLOAD_FILENAME_TIME_FORMAT, UPLOADS_DIR_NAME, UPLOADS_WS_PREFIX
 
 if TYPE_CHECKING:
     from entry.parent_agent_loop import ParentAgentLoop
@@ -287,7 +287,7 @@ class MessageRouter:
             )
             return
 
-        upload_dir: Path = self.agentspace_path / "uploads"
+        upload_dir: Path = self.agentspace_path / UPLOADS_DIR_NAME
         upload_dir.mkdir(parents=True, exist_ok=True)
         dest: Path = upload_dir / unique_name
 
@@ -305,7 +305,7 @@ class MessageRouter:
                                 session_id=self.sid,
                                 content=json.dumps({
                                     "uploaded": True,
-                                    "path": f"ws:uploads/{unique_name}",
+                                    "path": f"{UPLOADS_WS_PREFIX}{unique_name}",
                                     "filename": safe_name,
                                     "size": src.stat().st_size,
                                     "method": "hardlink",
@@ -327,7 +327,7 @@ class MessageRouter:
                                     session_id=self.sid,
                                     content=json.dumps({
                                         "uploaded": True,
-                                        "path": f"ws:uploads/{unique_name}",
+                                        "path": f"{UPLOADS_WS_PREFIX}{unique_name}",
                                         "filename": safe_name,
                                         "size": src.stat().st_size,
                                         "method": "copy",
@@ -382,7 +382,7 @@ class MessageRouter:
             )
             return
 
-        logical_path: str = f"ws:uploads/{unique_name}"
+        logical_path: str = f"{UPLOADS_WS_PREFIX}{unique_name}"
         logger.info("File uploaded (base64) | session=%s path=%s size=%d", self.sid, logical_path, len(raw_bytes))
 
         await self.ws.send_text(

@@ -19,7 +19,7 @@ from typing import Any, Dict, List
 
 from abstract.tools.registry import registry, tool_error, tool_result
 from component.tools.filesystem import _s as _get_sandbox
-from entity.constant import SUBPROCESS_SHORT_TIMEOUT_DEFAULT
+from entity.constant import SUBPROCESS_SHORT_TIMEOUT_DEFAULT, STATIC_FILE_HTTP_PREFIX
 
 logger = logging.getLogger(__name__)
 
@@ -439,7 +439,7 @@ def _handle_browser_screenshot(args: dict[str, Any]) -> dict:
             cmd_parts.append("--full")
         _run_ab(*cmd_parts)
 
-        md_link = f"![screenshot](/uploads/{rel_path})"
+        md_link = f"![screenshot]({STATIC_FILE_HTTP_PREFIX}/{rel_path})"
         return tool_result(
             path=f"ws:{rel_path}",
             markdown=md_link,
