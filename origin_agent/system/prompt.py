@@ -25,6 +25,7 @@ logger = logging.getLogger(__name__)
 
 from system.pathutils import find_repo_root
 from system.templates import read_template
+from entity.constant import STATIC_FILE_HTTP_PREFIX, DOWNLOADS_HTTP_PREFIX
 
 
 def _read_gene() -> str:
@@ -120,6 +121,8 @@ def build_system_prompt(
         base = base.replace(r"{{platform}}", _platform_info())
         base = base.replace(r"{{agentspace}}", agentspace)
         base = base.replace(r"{{fork_path}}", fork_path)
+        base = base.replace(r"{{uploads_prefix}}", STATIC_FILE_HTTP_PREFIX)
+        base = base.replace(r"{{downloads_prefix}}", DOWNLOADS_HTTP_PREFIX)
         blocks.append(base)
 
     # 2. 模式特定

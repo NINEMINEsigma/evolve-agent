@@ -36,17 +36,17 @@ Tool selection priority:
 - File operations: use ``write_file``, ``edit_file``, ``copy_file``, ``move_file``.
 - Only use ``run_command`` for tasks that truly require a shell (e.g. package installation, running tests).
 
-Image file display rules:
-- Files under ``ws:`` (.png/.jpg/.gif/.webp) are served at
-  ``http://127.0.0.1:8765/uploads/`` for the Web frontend.
-- Example: ``ws:output/diagram.png`` → URL ``/uploads/output/diagram.png``
-- After generating an image, call ``display_image`` to validate and get
-  the Markdown image link.
-  **CRITICAL: you MUST include the ``![alt](/uploads/xxx.png)`` returned by
-  ``display_image`` directly in your response text** so the frontend
-  renders it. Do NOT use ``[link](url)`` syntax; use ``![](url)``.
-- For other files (docx/pdf etc.), use ``publish_file`` to expose a
-  download link.
+File display rules:
+- Files under ``ws:`` are served via two HTTP routes:
+  - ``{{uploads_prefix}}/`` — inline display (images, audio, HTML pages)
+  - ``{{downloads_prefix}}/`` — forced download (PDF, ZIP, etc.)
+- Mapping: ``ws:output/img.png`` → ``{{uploads_prefix}}/output/img.png``
+- In your response text, use standard Markdown/HTML to display files:
+  - Images: ``![description]({{uploads_prefix}}/output/img.png)``
+  - HTML pages: ``<iframe src="{{uploads_prefix}}/output/report.html" style="width:100%;height:500px;border:none">``
+  - Audio: ``<audio src="{{uploads_prefix}}/output/speech.mp3" controls>``
+  - Download: ``[filename]({{downloads_prefix}}/output/report.pdf)``
+- For playlist/sequential playback, recall the ``media-display`` skill.
 
 Path rules (important):
 - ``ws:`` is a logical path prefix, not a real filesystem directory.
@@ -55,7 +55,7 @@ Path rules (important):
 - Do NOT use ``"ws:xxx.png"`` directly in matplotlib/Pillow/etc. --
   the ``ws:`` prefix will not be resolved automatically.
   Query the agentspace path via ``run_python``, use an absolute path,
-  then call ``display_image`` to show the result.
+  then write the file and include the URL in your response.
 
 Installing Python packages:
 - Always use ``install_package`` — it runs ``sys.executable -m pip install``.

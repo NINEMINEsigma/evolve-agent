@@ -9,8 +9,9 @@ import CodeBlock from "./CodeBlock";
 import SafeHtml from "./SafeHtml";
 import MermaidRenderer from "./MermaidRenderer";
 
-// 当文本包含 script、style、link、iframe 等标签时，需要完整隔离渲染，避免 CSS/JS 污染外层页面
-const SANDBOX_TAG_RE = /<script\b|<style\b|<link\b|<iframe\b|<object\b|<embed\b/i;
+// 当文本包含 script、style、link 等标签时，需要完整隔离渲染，避免 CSS/JS 污染外层页面
+// iframe 不在此列——<iframe src="url"> 本身就是浏览器沙盒，走 ReactMarkdown 管线即可
+const SANDBOX_TAG_RE = /<script\b|<style\b|<link\b|<object\b|<embed\b/i;
 function needsSandbox(text: string): boolean {
   return SANDBOX_TAG_RE.test(text);
 }
@@ -100,6 +101,25 @@ const markdownComponentsBase: Components = {
   },
   meter({ className, style, value, min, max, low, high, optimum, children }: React.MeterHTMLAttributes<HTMLMeterElement>) {
     return <meter className={className} style={style} value={value} min={min} max={max} low={low} high={high} optimum={optimum}>{children}</meter>;
+  },
+  iframe({ src, style, className, ...props }: React.IframeHTMLAttributes<HTMLIFrameElement>) {
+    // <iframe src="url"> 直接在 ReactMarkdown 中渲染，浏览器原生沙盒隔离内容
+    const defaultStyle: React.CSSProperties = {
+      width: "100%",
+      height: "400px",
+      border: "none",
+      borderRadius: "12px",
+      margin: "6px 0",
+    };
+    return (
+      <iframe
+        src={src}
+        className={className}
+        style={{ ...defaultStyle, ...(style as React.CSSProperties) }}
+        sandbox="allow-scripts allow-same-origin allow-popups allow-forms"
+        {...props}
+      />
+    );
   },
 };
 

@@ -156,6 +156,9 @@ UPLOADS_WS_PREFIX: str = f"ws:{UPLOADS_DIR_NAME}/"
 # 注意：此路由名恰好与上传目录名相同，但服务于整个 agentspace（不仅是 uploads 子目录）
 STATIC_FILE_HTTP_PREFIX: str = "/uploads"
 
+# 下载路由 HTTP 前缀 — 触发浏览器 attachment 下载
+DOWNLOADS_HTTP_PREFIX: str = "/downloads"
+
 # 文件名示例：20250617_123045_utc_a1b2c3d4_filename.ext
 UPLOAD_TIME_RE_PATTERN = r"^(\d{8}_\d{6}_utc)_[a-f0-9]{8}_(.+)$"
 

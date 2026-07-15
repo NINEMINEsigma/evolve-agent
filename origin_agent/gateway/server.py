@@ -29,7 +29,7 @@ from .chat import Message, MessageType
 from .message_router import MessageRouter
 from abstract.tools.registry import registry
 from datetime import datetime, timezone
-from entity.constant import CRON_STDOUT_PREVIEW_MAX_LENGTH, SUBPROCESS_TIMEOUT_DEFAULT, UPLOAD_FILENAME_TIME_FORMAT, USER_CHARACTER_NAME, UPLOADS_DIR_NAME, UPLOADS_WS_PREFIX, STATIC_FILE_HTTP_PREFIX
+from entity.constant import CRON_STDOUT_PREVIEW_MAX_LENGTH, SUBPROCESS_TIMEOUT_DEFAULT, UPLOAD_FILENAME_TIME_FORMAT, USER_CHARACTER_NAME, UPLOADS_DIR_NAME, UPLOADS_WS_PREFIX, STATIC_FILE_HTTP_PREFIX, DOWNLOADS_HTTP_PREFIX
 from entity.puretype import SessionStatus
 from system.context import get_runtime_context
 from entry.parent_agent_loop import IncompatibleHistoryError
@@ -481,6 +481,24 @@ def _push_agentspace_lock_state() -> None:
 
 
 _NO_CACHE: dict[str, str] = {"Cache-Control": "no-cache, no-store, must-revalidate", "Pragma": "no-cache"}
+
+# 文本类 MIME 需要追加 charset=utf-8
+_TEXT_MIME_PREFIXES = ("text/", "application/json", "application/xml", "application/javascript")
+_TEXT_MIME_EXTS = {".html", ".htm", ".md", ".txt", ".log", ".json", ".csv", ".py", ".js", ".css",
+                   ".xml", ".yaml", ".yml", ".toml", ".ini", ".cfg", ".conf", ".svg"}
+
+
+def _guess_media_type_with_charset(path: Path) -> str:
+    """根据扩展名猜测 MIME 类型，文本类自动追加 charset=utf-8。"""
+    import mimetypes
+    ext = path.suffix.lower()
+    mime, _ = mimetypes.guess_type(str(path))
+    if mime is None:
+        mime = "application/octet-stream"
+    if mime.startswith(_TEXT_MIME_PREFIXES) or ext in _TEXT_MIME_EXTS:
+        if "charset" not in mime:
+            mime = f"{mime}; charset=utf-8"
+    return mime
 
 
 @app.get("/")
@@ -979,7 +997,11 @@ async def file_picker():
 
 @app.get(STATIC_FILE_HTTP_PREFIX + "/{file_path:path}")
 async def serve_workspace_file(file_path: str):
-    """提供 ws: 命名空间下文件的 HTTP 访问，供前端展示图片等静态文件。"""
+    """提供 ws: 命名空间下文件的 HTTP 访问，供前端展示图片等静态文件。
+
+    对文本类 MIME 自动追加 charset=utf-8，避免中文乱码；
+    统一添加 no-cache 头，确保文件更新后立即生效。
+    """
     if not _agentspace_path:
         return HTMLResponse("Upload service not available", status_code=503)
     # 防止路径遍历
@@ -988,10 +1010,12 @@ async def serve_workspace_file(file_path: str):
         return HTMLResponse("Forbidden", status_code=403)
     if not resolved.exists() or not resolved.is_file():
         return HTMLResponse("File not found", status_code=404)
-    return FileResponse(str(resolved))
+    # 文本类 MIME 追加 charset=utf-8
+    media_type = _guess_media_type_with_charset(resolved)
+    return FileResponse(str(resolved), media_type=media_type, headers=_NO_CACHE)
 
 
-@app.get("/downloads/{file_path:path}")
+@app.get(DOWNLOADS_HTTP_PREFIX + "/{file_path:path}")
 async def download_workspace_file(file_path: str):
     """提供 ws: 命名空间下文件的 HTTP 下载（强制 Content-Disposition: attachment）。"""
     if not _agentspace_path:

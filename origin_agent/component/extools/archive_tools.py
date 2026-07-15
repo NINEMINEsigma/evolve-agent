@@ -216,7 +216,7 @@ registry.register(
         # ```
         #
         # ## 何时使用
-        # - 打包多份文件以便用 publish_file 一次性发送。
+        # - 打包多份文件以便通过 /downloads/ 路由一次性发送。
         # - 打包文件或目录用于传输或归档。
         # - 备份目录结构。
         #
@@ -239,7 +239,7 @@ Compresses the source (file or directory) into an archive at the output path. If
 ```
 
 ## When to Use
-- Package multiple files so they can be sent as a single archive via publish_file.
+- Package multiple files so they can be sent as a single archive via the /downloads/ route.
 - Package files or directories for transfer or archiving.
 - Back up a directory structure.
 
