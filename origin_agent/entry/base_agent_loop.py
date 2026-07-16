@@ -23,6 +23,7 @@ from entity.messages import History, BaseMessage, ToolResultMessage, CharacterCo
 from entity.constant import (
     USER_CHARACTER_NAME, SYSTEM_CHARACTER_NAME,
     AUTO_TITLE_CONTENT_MAX, AUTO_TAGS_CONTENT_MAX,
+    META_EXTRACTOR_CHARACTER,
 )
 from entry.agent_support.messages import (
     build_full_history_messages,
@@ -548,7 +549,7 @@ class BaseAgentLoop(ABC):
             resp = await llm.chat([
                 BaseMessage(role=Role.SYSTEM, content=system_prompt),
                 BaseMessage(role=Role.USER, content=user_prompt),
-            ], character=self.current_character_agent)
+            ], character=META_EXTRACTOR_CHARACTER)
             return (resp.content or "").strip().strip("\"'")[:50]
         except Exception as exc:
             logger.exception("Failed to auto-generate title: %s", exc)
@@ -595,7 +596,7 @@ class BaseAgentLoop(ABC):
             resp = await llm.chat([
                 BaseMessage(role=Role.SYSTEM, content=system_prompt),
                 BaseMessage(role=Role.USER, content=user_prompt),
-            ], character=self.current_character_agent)
+            ], character=META_EXTRACTOR_CHARACTER, response_format={"type": "json_object"})
             logger.info("Session tags response: %s", str(resp))
             result = json.loads(resp.content)
             if isinstance(result, list) == False:

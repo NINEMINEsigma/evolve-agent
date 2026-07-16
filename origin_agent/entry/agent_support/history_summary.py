@@ -15,7 +15,7 @@ from typing import TYPE_CHECKING
 from entity.puretype import Role
 from entity.messages import BaseMessage
 from system.templates import read_template
-from entity.constant import SUMMARY_INPUT_MAX_CHARS, INHERIT_LAST_ROUNDS, TOOL_RESULT_PREVIEW_CHARS
+from entity.constant import SUMMARY_INPUT_MAX_CHARS, INHERIT_LAST_ROUNDS, TOOL_RESULT_PREVIEW_CHARS, META_EXTRACTOR_CHARACTER
 
 if TYPE_CHECKING:
     from abstract.llm.client import BaseLLMClient
@@ -189,10 +189,15 @@ def _safe_media_ref(kind: str, url: str) -> str:
     return f"[{kind}: {short}]"
 
 
-async def summarize_history(history: History, llm: BaseLLMClient) -> str:
+async def summarize_history(
+    history: History,
+    llm: BaseLLMClient,
+    character: str = META_EXTRACTOR_CHARACTER,
+) -> str:
     """用 LLM 对 History 实例做压缩生成摘要。
 
     组合 history_to_summary_text() 与 compress / compress_input 模板。
+    *character* 声明元数据提取器身份，与 agent 角色隔离。
     """
     text: str = history_to_summary_text(history)
     system_prompt: str = read_template("compress.txt")
@@ -202,7 +207,7 @@ async def summarize_history(history: History, llm: BaseLLMClient) -> str:
         resp = await llm.chat([
             BaseMessage(role=Role.SYSTEM, content=system_prompt),
             BaseMessage(role=Role.USER, content=user_prompt),
-        ])
+        ], character=character)
         result = resp.content or ""
         result = result.strip()
         # 兼容旧版模板输出的 "Summary:" 前缀
