@@ -43,6 +43,58 @@ def _s() -> Sandbox:
 
 
 # ---------------------------------------------------------------------------
+# LSP diagnostics 附加（写入/编辑后自动附加）
+# ---------------------------------------------------------------------------
+
+# pyright 支持的代码文件扩展名
+_LSP_CODE_EXTENSIONS: frozenset[str] = frozenset({".py"})
+
+_LSP_DIAGNOSTICS_SETTLE_TIME: float = 0.8  # didChange 后等待 diagnostics 推送的短暂 sleep
+
+
+def _try_attach_lsp_diagnostics(logical_path: str, content: str) -> list[dict] | None:
+    """写入/编辑后尝试附加 LSP diagnostics。
+
+    条件: LSP 已启动 + 文件在 LSP 根目录范围内 + 文件是 .py 代码文件。
+    流程: notify_did_change → sleep → get_cached_diagnostics → 序列化。
+    不满足条件或 LSP 未启动时返回 None（不附加字段）。
+    """
+    try:
+        from system.lsp import get_lsp_manager
+        manager = get_lsp_manager()
+        if not manager.is_ready():
+            return None
+    except Exception:
+        return None
+
+    # 检查文件扩展名
+    if Path(logical_path.split(":")[-1]).suffix.lower() not in _LSP_CODE_EXTENSIONS:
+        return None
+
+    # 检查文件是否在 LSP workspace 范围内
+    try:
+        resolved = _s().resolve_read(logical_path)
+    except SandboxError:
+        return None
+    if not manager.is_in_workspace(resolved.real):
+        return None
+
+    # 发送 didChange 通知
+    uri = resolved.real.as_uri()
+    manager.notify_did_change(logical_path, content, _s())
+
+    # 短暂等待 diagnostics 推送
+    import time as _time
+    _time.sleep(_LSP_DIAGNOSTICS_SETTLE_TIME)
+
+    # 从缓存读取
+    diags = manager.get_cached_diagnostics(uri)
+    if not diags:
+        return None
+    return [d.model_dump() for d in diags]
+
+
+# ---------------------------------------------------------------------------
 # 工具 handler
 # ---------------------------------------------------------------------------
 
@@ -92,18 +144,22 @@ def _handle_write(args: dict[str, Any]) -> dict:
         )
     try:
         _s().write(path, content)
+        _lsp_diags = _try_attach_lsp_diagnostics(path, content)
         if truncated:
-            return tool_result(
+            result = tool_result(
                 success=True, path=path, 
                 bytes=len(content.encode("utf-8")),
                 truncated=True,
                 tail=tail,
             )
         else:
-            return tool_result(
+            result = tool_result(
                 success=True, path=path, 
                 bytes=len(content.encode("utf-8")),
             )
+        if _lsp_diags is not None:
+            result["diagnostics"] = _lsp_diags
+        return result
     except SandboxError as exc:
         return tool_error(str(exc), path=path)
 
@@ -733,7 +789,11 @@ def _handle_edit(args: dict[str, Any]) -> dict:
     except SandboxError as exc:
         return tool_error(str(exc), path=path)
 
-    return tool_result(success=True, path=path, replaced=True)
+    _lsp_diags = _try_attach_lsp_diagnostics(path, new_content)
+    result = tool_result(success=True, path=path, replaced=True)
+    if _lsp_diags is not None:
+        result["diagnostics"] = _lsp_diags
+    return result
 
 
 registry.register(

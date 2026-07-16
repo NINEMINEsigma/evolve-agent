@@ -117,6 +117,15 @@ class App:
         except Exception as exc:
             logger.warning("Background service cleanup failed: %s", exc)
 
+        # ---- 清理 LSP 进程 ----
+        try:
+            from system.lsp import cleanup_lsp
+            killed = await asyncio.to_thread(cleanup_lsp)
+            if killed:
+                logger.info("Cleaned up LSP server process")
+        except Exception as exc:
+            logger.warning("LSP cleanup failed: %s", exc)
+
         # ---- 关闭 Application 子系统 ----
         try:
             await Application.current().shutdown()
