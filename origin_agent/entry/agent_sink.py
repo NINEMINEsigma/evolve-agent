@@ -30,7 +30,7 @@ class AgentSink(ABC):
 
     @abstractmethod
     async def ask_question(self, question: str, options: list[dict] | None = None,
-                           allow_custom: bool = True, session_id: str = "") -> dict:
+                           session_id: str = "") -> dict:
         """向用户提问，等待回答后返回结果。"""
         ...
 
@@ -231,7 +231,7 @@ class FrontendSink(AgentSink):
     # -- 提问请求 --
 
     async def ask_question(self, question: str, options: list[dict] | None = None,
-                           allow_custom: bool = True, session_id: str = "") -> dict:
+                           session_id: str = "") -> dict:
         """向 WebSocket 发送 ask_request 并等待前端响应。"""
         request_id: str = uuid.uuid4().hex[:8]
         loop: asyncio.AbstractEventLoop = asyncio.get_event_loop()
@@ -252,7 +252,6 @@ class FrontendSink(AgentSink):
                 "request_id": request_id,
                 "question": question,
                 "options": options or [],
-                "allow_custom": allow_custom,
             }, ensure_ascii=False))
         except Exception as exc:
             self._pending_asks.pop(request_id, None)
@@ -495,7 +494,7 @@ class ParentAgentSink(AgentSink):
         self._loop = loop
 
     async def ask_question(self, question: str, options: list[dict] | None = None,
-                           allow_custom: bool = True, session_id: str = "") -> dict:
+                           session_id: str = "") -> dict:
         """子 Agent 不支持直接提问。"""
         return {"error": "SubAgent does not support ask_question — use parent agent tools instead"}
 

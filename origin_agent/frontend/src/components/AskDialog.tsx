@@ -40,18 +40,16 @@ export default function AskDialog({
               ))}
             </div>
           )}
-          {pendingAsk.allow_custom !== false && (
-            <textarea
-              className="ask-custom-input"
-              value={askCustomText}
-              onChange={(e) => {
-                setAskCustomText(e.target.value);
-                if (e.target.value) setAskSelectedOption(null);
-              }}
-              placeholder="输入自定义内容..."
-              rows={3}
-            />
-          )}
+          <textarea
+            className="ask-custom-input"
+            value={askCustomText}
+            onChange={(e) => {
+              setAskCustomText(e.target.value);
+              if (e.target.value) setAskSelectedOption(null);
+            }}
+            placeholder="输入自定义内容..."
+            rows={3}
+          />
         </div>
         <div className="confirm-actions">
           <button

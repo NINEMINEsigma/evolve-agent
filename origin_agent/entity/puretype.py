@@ -380,7 +380,6 @@ class Message(BaseModel):
     # ask_request / ask_response 相关字段
     question: str | None = None    # ASK_REQUEST：问题文本
     options: Optional[list] = None    # ASK_REQUEST：选项列表 [{label, value}]
-    allow_custom: Optional[bool] = None  # ASK_REQUEST：是否允许自定义输入
     option: str | None = None      # ASK_RESPONSE：选中的选项值
     custom_text: str | None = None # ASK_RESPONSE：自定义输入文本
     # stream 相关字段

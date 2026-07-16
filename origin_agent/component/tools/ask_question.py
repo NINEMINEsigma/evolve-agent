@@ -28,13 +28,11 @@ async def _handle_ask_question(args: dict[str, Any]) -> dict:
     预期参数：
         question:   str       — 要问的问题
         options:    list[dict] — 预设选项列表，每项 {label, value}（可选）
-        allow_custom: bool    — 是否允许用户自定义输入（默认 true）
     """
     from system.application import Application
 
     question: str = str(args.get("question", "")).strip()
     raw_options: Any = args.get("options")
-    allow_custom: bool = bool(args.get("allow_custom", True))
     session_id: str = str(args.get("_session_id", ""))
 
     if not question:
@@ -52,10 +50,6 @@ async def _handle_ask_question(args: dict[str, Any]) -> dict:
             elif isinstance(item, str):
                 options.append({"label": item, "value": item})
 
-    if not options:
-        # 无预设选项时默认允许自定义输入
-        allow_custom = True
-
     if not session_id:
         return tool_error("Missing session_id, cannot send question")
 
@@ -66,7 +60,6 @@ async def _handle_ask_question(args: dict[str, Any]) -> dict:
     result = await sink.ask_question(
         question=question,
         options=options,
-        allow_custom=allow_custom,
         session_id=session_id,
     )
 
@@ -94,7 +87,8 @@ registry.register(
         # 未选择也未输入时 answered=false。
         # 典型场景：需要用户决策（文件处理方式、多选一）、收集偏好、确认操作。
         # 副作用：agent 线程阻塞直到用户响应，不应在后台任务中调用。
-        "description": """Ask the current user a question with preset options to choose from, and optionally allow custom input.
+        # 备注：用户始终可以自定义输入回答，不受 options 限制。
+        "description": """Ask the current user a question with preset options to choose from. The user can always type a custom answer regardless of the preset options.
 
 ## Prerequisites
 An active WebSocket connection is required (the frontend must be online). Calling without one will fail.
@@ -134,14 +128,8 @@ The agent thread blocks until the user responds. Do not call this inside backgro
                         "required": ["label", "value"],
                     },
                     # 预设选项列表。每项包含 label（显示文本）和 value（返回值）。
-                    # 为空或不传时仅允许自定义输入，allow_custom 自动变为 true。
-                    "description": """List of preset options, each with a `label` (display text) and `value` (returned value). When empty or omitted, only custom input is allowed and `allow_custom` is forced to `true`.""",
-                },
-                "allow_custom": {
-                    "type": "boolean",
-                    # 是否允许自由文本输入（默认 true）。false 时用户必须从 options 中选择。
-                    "description": """Whether to allow free-text custom input (default `true`). When `false`, the user must choose from the preset `options`.""",
-                    "default": True,
+                    # 用户始终可以自定义输入回答，与预设选项并存。
+                    "description": """List of preset options, each with a `label` (display text) and `value` (returned value). The user can always type a custom answer regardless.""",
                 },
             },
             "required": ["question"],

@@ -56,7 +56,6 @@ export interface WSMessage {
   action?: string;
   question?: string;
   options?: Array<{ label: string; value: string }>;
-  allow_custom?: boolean;
   option?: string;
   custom_text?: string;
   stream_id?: string;
@@ -95,7 +94,6 @@ export interface AskRequest {
   request_id: string;
   question: string;
   options?: Array<{ label: string; value: string }>;
-  allow_custom?: boolean;
 }
 
 export interface DownloadInfo {

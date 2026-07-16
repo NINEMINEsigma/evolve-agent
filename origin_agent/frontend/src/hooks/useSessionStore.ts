@@ -710,7 +710,6 @@ export function useSessionStore(callbacks: SessionStoreCallbacks = {}): SessionS
           request_id: msg.request_id,
           question: msg.question ?? "",
           options: msg.options,
-          allow_custom: msg.allow_custom ?? true,
         });
       }
     }
