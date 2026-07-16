@@ -1,5 +1,6 @@
 import { useRef, useState, useEffect } from "react";
 import { useConnectionDiagnostics } from "../context/ConnectionDiagnosticsContext";
+import { exportSession } from "../utils/exportSession";
 
 interface HeaderProps {
   status: string;
@@ -182,6 +183,17 @@ export default function Header({
             className="context-menu cmd-menu-dropdown"
             style={{ position: "fixed", top: menuPos.top, left: menuPos.left }}
           >
+            <div
+              className="context-menu-item"
+              onClick={() => {
+                setCmdMenuOpen(false);
+                setMenuPos(null);
+                exportSession(sessionId || "session");
+              }}
+              data-tooltip="导出当前会话为可分享的静态 HTML 文件"
+            >
+              导出会话
+            </div>
             <div
               className={`context-menu-item ${showApprovalUI ? "context-menu-item-danger" : ""}`}
               onClick={showApprovalUI ? handleShutdownApprovalModel : undefined}

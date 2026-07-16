@@ -189,7 +189,7 @@ export default function SafeHtml({ html, className }: SafeHtmlProps) {
       srcDoc={buildShellDocument(id)}
       onLoad={() => setLoaded(true)}
       style={iframeStyle}
-      sandbox="allow-scripts allow-popups allow-forms"
+      sandbox="allow-scripts allow-popups allow-forms allow-same-origin"
       title="agent-rendered-content"
     />
   );
