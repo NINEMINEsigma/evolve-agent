@@ -138,9 +138,6 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
         # -- 子 Agent 编排器（由 server 层注入） --
         self.subagent_orchestrator: Any = None
 
-        # -- session manager 引用（由 server 层注入，用于旋转/归档） --
-        self._session_manager: SessionManager | None = None
-
     def get_last_idle_time(self, session_id: str) -> float | None:
         """返回指定 session 上次进入空闲的时间戳，不存在时返回 None。"""
         return self._last_idle_time.get(session_id)
@@ -209,9 +206,6 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
         self, cb: Callable[[str, str, str, str], Awaitable[None]]
     ) -> None:
         self._tool_event_callback = cb
-
-    def set_session_manager(self, manager: Any) -> None:
-        self._session_manager = manager
 
     def pop_session_rotated(self) -> str | None:
         return self._lifecycle.pop_session_rotated()
@@ -583,11 +577,6 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
         return self._session_store
 
     @property
-    def session_manager(self) -> SessionManager | None:
-        """返回当前 loop 关联的 gateway SessionManager。"""
-        return self._session_manager
-
-    @property
     def llm(self) -> BaseLLMClient:
         """返回当前 loop 的 LLM 客户端。"""
         return self._llm
@@ -727,7 +716,6 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
             return {"error": "session store not available", "merged": False}
 
         # 收集各源 session 的摘要，缺失时自动生成
-        from entity.constant import MERGE_SUMMARY_CONCAT_MAX_CHARS
         from entry.agent_support.history_summary import summarize_history
         summaries: list[str] = []
         for sid in sources:
@@ -766,10 +754,8 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
                 .replace("{{summary}}", summaries[0])
             )
         else:
-            # 多源合并：按顺序拼接，阈值截断
+            # 多源合并：直接拼接，不截断
             joined = "\n\n---\n\n".join(summaries)
-            if len(joined) > MERGE_SUMMARY_CONCAT_MAX_CHARS:
-                joined = joined[:MERGE_SUMMARY_CONCAT_MAX_CHARS] + "\n\n... [truncated]"
             context = (
                 f"This session merges multiple previous sessions. "
                 f"Here are their summaries:\n\n"

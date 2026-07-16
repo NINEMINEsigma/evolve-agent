@@ -46,6 +46,7 @@ if TYPE_CHECKING:
     from system.context import RuntimeContext
     from system.application import Application
     from entry.agent_sink import AgentSink
+    from gateway.session_manager import SessionManager
 
 logger = logging.getLogger(__name__)
 
@@ -288,11 +289,23 @@ class BaseAgentLoop(ABC):
         self._session_store: SessionStore | None = None
         self._token_usage: int = 0
         self._last_prompt_tokens: int = 0
+        # gateway SessionManager 引用（由 server 层注入，用于旋转/归档）；
+        # 仅主会话 loop 使用，子 Agent loop 保持 None
+        self._session_manager: SessionManager | None = None
 
     @property
     def history_store_dir(self) -> Path | None:
         """统一返回当前 loop 的 session 持久化根目录。"""
         return self._session_store.base_dir if self._session_store else None
+
+    def set_session_manager(self, manager: SessionManager) -> None:
+        """注入 gateway SessionManager，用于旋转/归档等操作。"""
+        self._session_manager = manager
+
+    @property
+    def session_manager(self) -> SessionManager | None:
+        """返回当前 loop 关联的 gateway SessionManager（未注入时为 None）。"""
+        return self._session_manager
 
     @property
     def inbox(self) -> Inbox:
@@ -635,7 +648,7 @@ class BaseAgentLoop(ABC):
             ], character=META_EXTRACTOR_CHARACTER, response_format={"type": "json_object"})
             logger.info("Session tags response: %s", str(resp))
             result = json.loads(resp.content)
-            if isinstance(result, list) == False:
+            if not isinstance(result, list):
                 raise ValueError("session tags response is not a list")
             return result
         except Exception as exc:

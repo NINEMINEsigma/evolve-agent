@@ -76,9 +76,6 @@ MERGE_CONCAT_THRESHOLD: int = AUTO_CONTENT_MAX
 # 会话摘要生成时历史输入截断上限（字符数）— 暂时设为极大值，后续再细化
 SUMMARY_INPUT_MAX_CHARS: int = 1_000_000_000
 
-# 多源会话合并时摘要拼接截断上限（字符数）— 暂时设为极大值
-MERGE_SUMMARY_CONCAT_MAX_CHARS: int = 1_000_000_000
-
 # 会话旋转/合并继承时，旧会话保留的尾部轮次数
 INHERIT_LAST_ROUNDS: int = 10
 

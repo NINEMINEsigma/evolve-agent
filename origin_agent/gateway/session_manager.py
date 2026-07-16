@@ -225,6 +225,7 @@ class SessionManager:
             sink=frontend_sink,
             history_store_dir=history_store_dir,
         )
+        multi_loop.set_session_manager(self)
         self._loops[session_id] = multi_loop
         if self._app.cron_router is not None:
             self._app.cron_router.register(session_id, multi_loop)
