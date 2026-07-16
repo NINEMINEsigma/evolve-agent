@@ -176,19 +176,41 @@ class ToolExecutor:
         if not _skip_dispatch:
             invocation_start: float = time.monotonic()
             invocation_start_offset_ms: int = int((invocation_start - start_mono) * 1000)
+
+            # availability scope 校验：拦截不在当前 loop scope 内的工具
+            _scope = self._loop.get_tool_availability_scope()
             try:
-                ctx = ToolContext(loop=self._loop, session_id=self._loop.loop.session_id)
-                result = await tool_registry.async_dispatch(
-                    tc.name, args, context=ctx,
-                )
-            except Exception as exc:
-                logger.exception("Tool %s dispatch error: %s", tc.name, exc)
+                _tool_availability = tool_registry.get_availability(tc.name)
+            except KeyError:
+                logger.warning("Tool %s not registered, blocking dispatch", tc.name)
                 self._tool_stats[tc.name]["errors"] += 1
-                result = {
-                    "error": f"Tool execution failed: {type(exc).__name__}: {exc}",
-                }
-            invocation_duration_ms: int = int((time.monotonic() - invocation_start) * 1000)
-            end_time_offset_ms: int = int((time.monotonic() - start_mono) * 1000)
+                result = {"error": f"Unknown tool: {tc.name}"}
+                invocation_duration_ms = 0
+                end_time_offset_ms = int((time.monotonic() - start_mono) * 1000)
+            else:
+                if (_tool_availability & _scope) == 0:
+                    logger.warning(
+                        "Tool %s blocked (availability=%s, scope=%s)",
+                        tc.name, _tool_availability, _scope,
+                    )
+                    self._tool_stats[tc.name]["errors"] += 1
+                    result = {"error": f"Tool '{tc.name}' is not available in the current mode."}
+                    invocation_duration_ms = 0
+                    end_time_offset_ms = int((time.monotonic() - start_mono) * 1000)
+                else:
+                    try:
+                        ctx = ToolContext(loop=self._loop, session_id=self._loop.loop.session_id)
+                        result = await tool_registry.async_dispatch(
+                            tc.name, args, context=ctx,
+                        )
+                    except Exception as exc:
+                        logger.exception("Tool %s dispatch error: %s", tc.name, exc)
+                        self._tool_stats[tc.name]["errors"] += 1
+                        result = {
+                            "error": f"Tool execution failed: {type(exc).__name__}: {exc}",
+                        }
+                    invocation_duration_ms = int((time.monotonic() - invocation_start) * 1000)
+                    end_time_offset_ms = int((time.monotonic() - start_mono) * 1000)
         else:
             # 审批拒绝：没有实际调用
             invocation_start_offset_ms = 0

@@ -166,7 +166,7 @@ Frontend UI only. Does not write to the system clipboard. Reusing the same `disp
     is_async=True,
     emoji="📋",
     danger_level=ToolDangerLevel.readonly,
-    availability=ToolAvailability.MAIN,
+    availability=ToolAvailability.MAIN | ToolAvailability.MULTI_AGENT,
 )
 ui_event_router.register("set_clipboard_display", _emit_clipboard_display)
 
@@ -210,6 +210,6 @@ Proactively call this tool when you sense the user no longer needs a card, to ke
     is_async=True,
     emoji="🧹",
     danger_level=ToolDangerLevel.readonly,
-    availability=ToolAvailability.MAIN,
+    availability=ToolAvailability.MAIN | ToolAvailability.MULTI_AGENT,
 )
 ui_event_router.register("clear_clipboard_display", _emit_clipboard_display)

@@ -198,6 +198,9 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
             self._collect_skill_prompts(),
         )
 
+    def get_tool_availability_scope(self) -> ToolAvailability:
+        return ToolAvailability.MAIN
+
     # ========================================================================
     # 公共 API
     # ========================================================================

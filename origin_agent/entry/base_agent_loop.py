@@ -18,7 +18,7 @@ from typing import Any, TYPE_CHECKING
 
 from pydantic import BaseModel
 
-from entity.puretype import Role, ToolDangerLevel, SessionMessageEntry
+from entity.puretype import Role, ToolDangerLevel, ToolAvailability, SessionMessageEntry
 from entity.messages import (
     History,
     BaseMessage,
@@ -770,6 +770,13 @@ class IMainSessionLoop(ABC):
     @abstractmethod
     async def regenerate_summary_for_session(self, session_id: str) -> str:
         """重新生成指定会话的摘要（可为任意 session_id，不要求当前活跃）。"""
+
+    @abstractmethod
+    def get_tool_availability_scope(self) -> ToolAvailability:
+        """返回当前 loop 的工具可用性 scope。
+
+        dispatch 层用 (entry.availability & scope) == 0 拦截不在当前 scope 内的工具。
+        """
 
 
 # ---------------------------------------------------------------------------

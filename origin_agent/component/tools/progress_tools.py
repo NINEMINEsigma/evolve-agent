@@ -199,7 +199,7 @@ Creates or updates a progress bar identified by `task_id`. Reusing the same `tas
     is_async=True,
     emoji="📊",
     danger_level=ToolDangerLevel.readonly,
-    availability=ToolAvailability.MAIN,
+    availability=ToolAvailability.MAIN | ToolAvailability.MULTI_AGENT,
 )
 ui_event_router.register("set_task_progress", _emit_task_progress)
 
@@ -267,6 +267,6 @@ If `task_id` is provided and non-empty, removes only that specific bar. If omitt
     is_async=True,
     emoji="🧹",
     danger_level=ToolDangerLevel.readonly,
-    availability=ToolAvailability.MAIN,
+    availability=ToolAvailability.MAIN | ToolAvailability.MULTI_AGENT,
 )
 ui_event_router.register("clear_task_progress", _emit_task_progress)

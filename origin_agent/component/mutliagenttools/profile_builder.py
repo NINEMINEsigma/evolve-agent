@@ -30,14 +30,15 @@ logger = logging.getLogger(__name__)
 
 
 def build_multi_agent_tools(tool_registry: ToolRegistry) -> list[dict]:
-    """返回多 Agent 模式下可用的工具定义：MAIN 工具集排除 multiagent 工具集。"""
+    """返回多 Agent 模式下可用的工具定义。
+
+    通过 availability scope 直接筛选，无需手动排除 toolset。
+    """
     from entity.puretype import ToolAvailability
 
-    tools = tool_registry.get_definitions_for_availability(scope=ToolAvailability.MAIN)
-    multiagent_tool_names: set[str] = set(
-        tool_registry.get_tool_names_for_toolset("multiagent"),
+    return tool_registry.get_definitions_for_availability(
+        scope=ToolAvailability.MULTI_AGENT,
     )
-    return [t for t in tools if t.get("function", {}).get("name") not in multiagent_tool_names]
 
 
 def build_agent_profiles(
@@ -78,7 +79,11 @@ def build_agent_profiles(
 
         if name == main_agent_name:
             skill_blocks = collect_skill_prompts()
-            persona_prompts = build_agent_system_prompt(parent_ctx, skill_blocks)
+            from entity.puretype import ToolAvailability
+            persona_prompts = build_agent_system_prompt(
+                parent_ctx, skill_blocks,
+                tool_availability_scope=ToolAvailability.MULTI_AGENT,
+            )
             llm_client = llm_client_factory(name, None)
         else:
             profile = store.get(name)

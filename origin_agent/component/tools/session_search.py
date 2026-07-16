@@ -318,7 +318,7 @@ Full-text mode may take several seconds when many sessions exist.
     is_async=False,
     emoji="🔍",
     danger_level=ToolDangerLevel.readonly,
-    availability=ToolAvailability.MAIN,
+    availability=ToolAvailability.MAIN | ToolAvailability.MULTI_AGENT,
 )
 
 # 获取指定会话的消息内容或消息总数。
@@ -396,5 +396,5 @@ Loading a session's history may cause a brief delay. Out-of-range indices are si
     is_async=False,
     emoji="📜",
     danger_level=ToolDangerLevel.readonly,
-    availability=ToolAvailability.MAIN,
+    availability=ToolAvailability.MAIN | ToolAvailability.MULTI_AGENT,
 )

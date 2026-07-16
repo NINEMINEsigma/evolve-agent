@@ -37,14 +37,16 @@ class ToolDangerLevel(str, Enum):
 class ToolAvailability(IntFlag):
     """工具的可用范围（位掩码）。
 
-    MAIN      : 仅主 agent 可用。
-    SUBAGENT  : 仅子 agent 可用。
-    EVERY     : 主 agent 与子 agent 均可用（MAIN | SUBAGENT）。
+    MAIN        : 仅 ParentAgent 可用。
+    SUBAGENT    : 仅子 agent 可用。
+    MULTI_AGENT : 多 Agent 协作模式可用。
+    EVERY       : 所有模式均可用（MAIN | SUBAGENT | MULTI_AGENT）。
     """
 
     MAIN = 1
     SUBAGENT = 2
-    EVERY = MAIN | SUBAGENT
+    MULTI_AGENT = 4
+    EVERY = MAIN | SUBAGENT | MULTI_AGENT
 
 
 # ---------------------------------------------------------------------------

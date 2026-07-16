@@ -140,5 +140,5 @@ The agent thread blocks until the user responds. Do not call this inside backgro
     emoji="❓",
     danger_level=ToolDangerLevel.readonly,
     no_timeout=True,
-    availability=ToolAvailability.MAIN,
+    availability=ToolAvailability.MAIN | ToolAvailability.MULTI_AGENT,
 )

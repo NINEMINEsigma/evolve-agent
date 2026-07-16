@@ -19,7 +19,7 @@ from entity.messages import (
     History,
     CharacterConversationMessage,
 )
-from entity.puretype import Role
+from entity.puretype import Role, ToolAvailability
 from entity.constant import (
     MAIN_AGENT_CHARACTER_NAME,
     USER_CHARACTER_NAME,
@@ -189,6 +189,9 @@ class MultiAgentLoop(BaseAgentLoop, IMainSessionLoop):
         """清空 History。"""
         self._history.clear_messages()
         logger.info("Cleared multi-agent session | session=%s", self.session_id)
+
+    def get_tool_availability_scope(self) -> ToolAvailability:
+        return ToolAvailability.MULTI_AGENT
 
     async def _execute_tool(self, tool_name: str, args: dict,
                             tool_call_id: str = "",
