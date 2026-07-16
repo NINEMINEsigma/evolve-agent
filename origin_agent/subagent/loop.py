@@ -29,7 +29,7 @@ from entity.messages import (
     ToolResultMessage,
     ToolCall as HistoryToolCall,
 )
-from entity.puretype import Role, ToolDangerLevel
+from entity.puretype import Role
 from subagent.context import SubRuntimeContext
 from entry.agent_sink import AgentSink, ParentAgentSink
 from entry.base_agent_loop import BasePrivateChatAgentLoop, UserMessage, ContextLimitMessage, ToolContext
@@ -258,11 +258,19 @@ class SubAgentLoop(BasePrivateChatAgentLoop):
         except Exception:
             logger.warning("Failed to emit subagent event role=%s", role, exc_info=True)
 
-    def _is_readonly_tool(self, name: str) -> bool:
+    def _is_auto_executable(self, name: str) -> bool:
+        """判断工具是否可直接执行（无需审批）。
+
+        基于 SUB_SESSION_POLICY：子会话的工具审批由主 agent 审批，
+        因此采用更严格的阈值——readonly 直接执行，write/dangerous 需审批。
+        """
         entry = tool_registry.get_entry(name)
         if entry is None:
             return False
-        return entry.danger_level == ToolDangerLevel.readonly
+        from component.approval.policy import needs_approval as _policy_needs_approval, SUB_SESSION_POLICY
+        from component.approval.handsfree import is_handsfree_mode
+        handsfree = is_handsfree_mode(self._parent_session_id)
+        return not _policy_needs_approval(SUB_SESSION_POLICY, entry.danger_level, handsfree)
 
     def _is_auto_approved_tool(self, name: str, args: dict) -> bool:
         """检查工具调用是否在 allowlist 中（始终自动批准）。"""
@@ -370,7 +378,7 @@ class SubAgentLoop(BasePrivateChatAgentLoop):
                         tool_args=dict(tc.arguments) if tc.arguments else {},
                     )
 
-                    if self._is_readonly_tool(tc.name) or self._is_auto_approved_tool(tc.name, dict(tc.arguments) if tc.arguments else {}):
+                    if self._is_auto_executable(tc.name) or self._is_auto_approved_tool(tc.name, dict(tc.arguments) if tc.arguments else {}):
                         tool_msg = await self._execute_approved_tool(tc)
                     else:
                         tool_msg = await self._queue_for_approval(tc)
@@ -461,9 +469,10 @@ class SubAgentLoop(BasePrivateChatAgentLoop):
         """加载外部历史到子 Agent 循环中。"""
         self._history = history
 
-    def save_history(self, path: Path) -> None:
+    def save_history(self, session_id: str | Path) -> None:
         """将 History 实例以 easysave 多态序列化写入磁盘。"""
         from easysave import save
+        path = Path(session_id)
         path.parent.mkdir(parents=True, exist_ok=True)
         try:
             save(__History_Version__, str(path), self._history)

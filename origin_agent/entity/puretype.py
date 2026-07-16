@@ -34,6 +34,20 @@ class ToolDangerLevel(str, Enum):
     dangerous = "dangerous"
 
 
+class ApprovalPolicy(BaseModel):
+    """审批策略：定义在特定会话角色下，哪些 danger_level 需要审批。
+
+    主会话与子会话的差异在于审批来源：主会话直接由用户/脱手模型审批，
+    子会话的工具审批由主 agent 代为审批，因此子会话采用更严格的阈值。
+
+    normal_requires    : 正常模式下需要审批的 danger_level 集合。
+    handsfree_requires : 脱手模式下需要审批的 danger_level 集合。
+    """
+
+    normal_requires: set[ToolDangerLevel]
+    handsfree_requires: set[ToolDangerLevel]
+
+
 class ToolAvailability(IntFlag):
     """工具的可用范围（位掩码）。
 

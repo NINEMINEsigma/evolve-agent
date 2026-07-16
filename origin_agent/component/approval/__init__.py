@@ -7,11 +7,12 @@
 - core:      统一审批入口与 Agent 主模型提问回调
 - executor:  工具审批执行器（封装 dangerous/write 判断、白名单、审批流程）
 - allowlist: 工具 allowlist 持久化
+- policy:    审批策略定义（ApprovalPolicy 数据类 + needs_approval 函数 + 预设策略常量）
 
 重新导出策略：保持旧路径兼容，from component.approval import Xxx 继续可用。
 """
 
-from entity.puretype import ApprovalResult, ApprovalOutcome
+from entity.puretype import ApprovalResult, ApprovalOutcome, ApprovalPolicy
 from component.approval.backend import (
     ApprovalBackend,
     FailedApprovalBackend,
@@ -28,10 +29,12 @@ from component.approval.handsfree import (
 from component.approval.core import request_user_confirm, ask_agent_reason
 from component.approval.executor import execute_with_approval
 from component.approval.allowlist import is_allowed, add_allowed
+from component.approval.policy import needs_approval, MAIN_SESSION_POLICY, SUB_SESSION_POLICY
 
 __all__ = [
     "ApprovalResult",
     "ApprovalOutcome",
+    "ApprovalPolicy",
     "ApprovalBackend",
     "FailedApprovalBackend",
     "LocalApprovalBackend",
@@ -46,4 +49,7 @@ __all__ = [
     "execute_with_approval",
     "is_allowed",
     "add_allowed",
+    "needs_approval",
+    "MAIN_SESSION_POLICY",
+    "SUB_SESSION_POLICY",
 ]
