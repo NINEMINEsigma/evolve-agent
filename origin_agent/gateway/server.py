@@ -1392,7 +1392,10 @@ async def ws_chat(ws: WebSocket) -> None:
         if resume and _get_sm().exists(resume):
             loop = _get_loop(resume)
             if loop is not None:
-                history: list[dict] = loop.loop.get_session_messages()
+                history: list[dict] = [
+                    e.model_dump(exclude_none=True)
+                    for e in loop.loop.get_session_messages()
+                ]
                 usage: int = loop.get_token_usage()
                 context: int = loop.get_context_tokens()
                 processing: bool = loop.loop.is_processing()

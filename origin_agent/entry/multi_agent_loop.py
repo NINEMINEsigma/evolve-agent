@@ -18,8 +18,6 @@ from abstract.llm.client import BaseLLMClient
 from entity.messages import (
     History,
     CharacterConversationMessage,
-    CharacterMessage,
-    MessageBlock,
 )
 from entity.puretype import Role
 from entity.constant import (
@@ -186,65 +184,6 @@ class MultiAgentLoop(BaseAgentLoop, IMainSessionLoop):
         if agent is None and self._agents:
             agent = next(iter(self._agents.values()))
         return agent.llm_client if agent else None
-
-    def get_session_messages(self) -> list[dict]:
-        """返回 History 中所有消息的字典列表（供前端展示）。"""
-        from entity.messages import CharacterConversationMessage, MessageBlock, ToolResultMessage
-
-        result: list[dict] = []
-        # TODO(step6): 与 base_agent_loop.get_session_messages() 存在大量重复，
-        #             应提取公共的前端展示序列化函数，见 formats.py
-        for index, msg in enumerate(self._history.iter_messages()):
-            raw_content = msg.content
-            if isinstance(raw_content, list):
-                content: str | list[dict] = [
-                    b.as_object() if isinstance(b, MessageBlock) else b
-                    for b in raw_content
-                ]
-            else:
-                content = str(raw_content)
-            entry: dict = {
-                "role": msg.role.value,
-                "content": content,
-                "index": index,
-            }
-            if isinstance(msg, CharacterMessage):
-                entry["character_name"] = msg.character_name
-            if isinstance(msg, CharacterConversationMessage) and msg.visible_characters:
-                entry["visible_characters"] = msg.visible_characters
-            if isinstance(msg, CharacterConversationMessage) and msg.response_characters:
-                entry["response_characters"] = msg.response_characters
-            if isinstance(msg, CharacterConversationMessage) and msg.message_suffix:
-                entry["message_suffix"] = msg.message_suffix
-            if isinstance(msg, CharacterConversationMessage) and msg.dynamic_message_suffix:
-                entry["dynamic_message_suffix"] = msg.dynamic_message_suffix
-            if isinstance(msg, CharacterConversationMessage):
-                if msg.reasoning:
-                    entry["reasoning_content"] = msg.reasoning
-                if msg.role == Role.USER:
-                    entry["requires_response"] = True
-                if msg.tool_calls:
-                    entry["tool_calls"] = [
-                        {
-                            "id": tc.id,
-                            "type": tc.type,
-                            "function": {
-                                "name": tc.function.name,
-                                "arguments": tc.function.arguments,
-                            },
-                        }
-                        for tc in msg.tool_calls
-                    ]
-            if isinstance(msg, ToolResultMessage):
-                content_str = str(raw_content) if not isinstance(raw_content, list) else ""
-                try:
-                    parsed = json.loads(content_str)
-                    if isinstance(parsed, dict) and "_meta" in parsed:
-                        entry["tool_call_meta"] = parsed["_meta"]
-                except (json.JSONDecodeError, TypeError):
-                    pass
-            result.append(entry)
-        return result
 
     def clear_session(self) -> None:
         """清空 History。"""

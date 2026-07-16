@@ -401,3 +401,27 @@ class Message(BaseModel):
     dynamic_message_suffix: str | None = None  # 用户消息动态后缀（如 memory/hooks 上下文）
     tool_call_meta: Optional[dict[str, Any]] = None  # TOOL_RESULT：工具调用时间元信息
     emoji: Optional[str] = None  # 工具调用/审批请求的图标
+
+
+# ---------------------------------------------------------------------------
+# Session Message Entry — 前端会话历史展示用的单条消息序列化模型
+# ---------------------------------------------------------------------------
+
+class SessionMessageEntry(BaseModel):
+    """前端会话历史展示用的单条消息序列化模型。
+
+    替代旧版 get_session_messages 中跨模块传播的 dict[str, Any]。
+    所有可选字段默认 None，序列化时通过 exclude_none=True 省略。
+    """
+    role: str
+    content: str | list[dict[str, Any]]
+    index: int
+    character_name: str | None = None
+    visible_characters: list[str] | None = None
+    response_characters: list[str] | None = None
+    message_suffix: str | None = None
+    dynamic_message_suffix: str | None = None
+    reasoning_content: str | None = None
+    requires_response: bool | None = None
+    tool_calls: list[dict[str, Any]] | None = None
+    tool_call_meta: dict[str, Any] | None = None

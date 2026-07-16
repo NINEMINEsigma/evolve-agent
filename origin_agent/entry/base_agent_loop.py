@@ -18,8 +18,15 @@ from typing import Any, TYPE_CHECKING
 
 from pydantic import BaseModel
 
-from entity.puretype import Role, ToolDangerLevel
-from entity.messages import History, BaseMessage, ToolResultMessage, CharacterConversationMessage
+from entity.puretype import Role, ToolDangerLevel, SessionMessageEntry
+from entity.messages import (
+    History,
+    BaseMessage,
+    ToolResultMessage,
+    CharacterConversationMessage,
+    CharacterMessage,
+    MessageBlock,
+)
 from entity.constant import (
     USER_CHARACTER_NAME, SYSTEM_CHARACTER_NAME,
     AUTO_TITLE_CONTENT_MAX, AUTO_TAGS_CONTENT_MAX,
@@ -169,6 +176,92 @@ class ToolContext(BaseModel):
     @property
     def is_interrupted(self) -> bool:
         return self.loop.is_interrupted()
+
+
+# ---------------------------------------------------------------------------
+# _serialize_message_entry — 公共消息序列化函数
+# ---------------------------------------------------------------------------
+
+def _serialize_message_entry(
+    msg: BaseMessage,
+    index: int,
+    fallback_character: str = "assistant",
+) -> SessionMessageEntry:
+    """将单条 History 消息序列化为前端展示用的 SessionMessageEntry。
+
+    统一 BaseAgentLoop / MultiAgentLoop 两处 get_session_messages 的序列化逻辑，
+    修复 MultiAgentLoop 中 str(raw_content) 的 bug（应使用 content_to_text）。
+    """
+    raw_content = msg.content
+    if isinstance(raw_content, list):
+        content: str | list[dict[str, Any]] = [
+            b.as_object() if isinstance(b, MessageBlock) else b
+            for b in raw_content
+        ]
+    else:
+        content = content_to_text(raw_content)
+
+    # character_name: CharacterMessage 有角色名，否则回退到 fallback
+    character_name = (
+        msg.character_name
+        if isinstance(msg, CharacterMessage)
+        else fallback_character
+    )
+
+    # CharacterConversationMessage 专属字段
+    visible_characters: list[str] | None = None
+    response_characters: list[str] | None = None
+    message_suffix: str | None = None
+    dynamic_message_suffix: str | None = None
+    reasoning_content: str | None = None
+    tool_calls: list[dict[str, Any]] | None = None
+
+    if isinstance(msg, CharacterConversationMessage):
+        visible_characters = msg.visible_characters or None
+        response_characters = msg.response_characters or None
+        message_suffix = msg.message_suffix or None
+        dynamic_message_suffix = msg.dynamic_message_suffix or None
+        reasoning_content = msg.reasoning or None
+        if msg.tool_calls:
+            tool_calls = [
+                {
+                    "id": tc.id,
+                    "type": tc.type,
+                    "function": {
+                        "name": tc.function.name,
+                        "arguments": tc.function.arguments,
+                    },
+                }
+                for tc in msg.tool_calls
+            ]
+
+    requires_response = True if msg.role == Role.USER else None
+
+    # ToolResultMessage._meta 提取
+    tool_call_meta: dict[str, Any] | None = None
+    if isinstance(msg, ToolResultMessage):
+        content_str = content_to_text(raw_content)
+        try:
+            parsed = json.loads(content_str)
+            if isinstance(parsed, dict) and "_meta" in parsed:
+                tool_call_meta = parsed["_meta"]
+        except (json.JSONDecodeError, TypeError):
+            pass
+
+    return SessionMessageEntry(
+        role=msg.role.value,
+        content=content,
+        index=index,
+        character_name=character_name,
+        visible_characters=visible_characters,
+        response_characters=response_characters,
+        message_suffix=message_suffix,
+        dynamic_message_suffix=dynamic_message_suffix,
+        reasoning_content=reasoning_content,
+        requires_response=requires_response,
+        tool_calls=tool_calls,
+        tool_call_meta=tool_call_meta,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -383,58 +476,13 @@ class BaseAgentLoop(ABC):
             shutil.rmtree(str(session_path), ignore_errors=True)
             logger.info("Cleared persisted data for session %s", self.session_id)
 
-    def get_session_messages(self) -> list[dict]:
+    def get_session_messages(self) -> list[SessionMessageEntry]:
         """返回前端展示所需的消息列表，包含多 agent 元数据。"""
-        messages: list[dict] = []
-        # TODO(step6): 与 multi_agent_loop.get_session_messages() 存在大量重复，
-        #             应提取公共的前端展示序列化函数，见 formats.py
-        for index, msg in enumerate(self._history.iter_messages()):
-            raw_content = msg.content
-            if isinstance(raw_content, list):
-                content: str | list[dict[str, Any]] = [b.as_object() for b in raw_content]
-            else:
-                content = content_to_text(raw_content)
-            entry: dict[str, Any] = {
-                "role": msg.role.value,
-                "content": content,
-                "index": index,
-                "character_name": msg.character_name if isinstance(msg, CharacterConversationMessage) else getattr(self, 'current_character_agent', 'assistant'),
-                "visible_characters": msg.visible_characters if isinstance(msg, CharacterConversationMessage) else None,
-                "requires_response": msg.role == Role.USER,
-            }
-            if isinstance(msg, CharacterConversationMessage):
-                if msg.response_characters:
-                    entry["response_characters"] = msg.response_characters
-                if msg.message_suffix:
-                    entry["message_suffix"] = msg.message_suffix
-                if msg.dynamic_message_suffix:
-                    entry["dynamic_message_suffix"] = msg.dynamic_message_suffix
-                if msg.reasoning:
-                    entry["reasoning_content"] = msg.reasoning
-                if msg.tool_calls:
-                    entry["tool_calls"] = [
-                        {
-                            "id": tc.id,
-                            "type": tc.type,
-                            "function": {
-                                "name": tc.function.name,
-                                "arguments": tc.function.arguments,
-                            },
-                        }
-                        for tc in msg.tool_calls
-                    ]
-            if msg.role == Role.SYSTEM:
-                entry["role"] = Role.SYSTEM.value
-            if isinstance(msg, ToolResultMessage):
-                content_str = content_to_text(raw_content)
-                try:
-                    parsed = json.loads(content_str)
-                    if isinstance(parsed, dict) and "_meta" in parsed:
-                        entry["tool_call_meta"] = parsed["_meta"]
-                except (json.JSONDecodeError, TypeError):
-                    pass
-            messages.append(entry)
-        return messages
+        fallback = self.current_character_agent
+        return [
+            _serialize_message_entry(msg, index, fallback_character=fallback)
+            for index, msg in enumerate(self._history.iter_messages())
+        ]
 
     # TODO: 重编辑缺少多模态支持
     def edit_session_message(self, index: int, content: str | None = None,
