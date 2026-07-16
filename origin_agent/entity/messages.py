@@ -2,7 +2,7 @@ from typing import * # type: ignore
 import logging
 from pydantic import BaseModel, Field, PrivateAttr
 from entity.puretype import Role
-from entity.constant import USER_CHARACTER_NAME
+from entity.constant import USER_CHARACTER_NAME, ALL_AGENTS_CHARACTER_REF_NAME
 from system.templates import read_template
 from threading import Lock
 
@@ -94,9 +94,17 @@ class BaseMessage(BaseModel):
                     result[i] = cur.as_object() # type: ignore
         return result
 
+    def is_visible_to(self, current_character_agent: str) -> bool:
+        """纯可见性判断，无副作用。"""
+        return True
+
 
 class CharacterMessage(BaseMessage):
     character_name: str = Field(..., description="The character name of the message")
+
+    def is_visible_to(self, current_character_agent: str) -> bool:
+        # 角色作用域消息默认仅对自身可见
+        return self.character_name == current_character_agent
 
 
 class CharacterSystemMessage(CharacterMessage):
@@ -186,6 +194,17 @@ class CharacterConversationMessage(CharacterMessage):
             "message_suffix": message_suffix, 
             })
 
+    def is_visible_to(self, current_character_agent: str) -> bool:
+        # 自己始终可见
+        if self.character_name == current_character_agent:
+            return True
+        # visible_characters 为空/None 时仅自己可见 — 非自身角色不可见
+        if not self.visible_characters:
+            return False
+        # 显式列表检查（含 all-agents 通配）
+        return (current_character_agent in self.visible_characters or
+                ALL_AGENTS_CHARACTER_REF_NAME in self.visible_characters)
+
     def as_content(
         self,
         # 当前作为运行中的agent的角色
@@ -196,6 +215,10 @@ class CharacterConversationMessage(CharacterMessage):
         '''
         获取角色对话消息的字符串内容, 如果不可见将被略过, 可见时将会对所有非消息接收者第一人称的消息都施加前缀修饰
         '''
+        # 可见性前置检查 — 避免不可见消息的格式化开销
+        if not self.is_visible_to(current_character_agent):
+            return None
+
         is_self_current = self.character_name == current_character_agent
 
         # 非持久化注入的suffix
@@ -205,13 +228,6 @@ class CharacterConversationMessage(CharacterMessage):
 
         global _Role_Prefix_Template
         raw_message = super().as_content(current_character_agent, **kwargs)
-        # 如果当前角色不在可见角色列表中, 则略过(自己不会被略过)
-        # "all-agents" 简写表示对全体可见
-        from entity.constant import ALL_AGENTS_CHARACTER_REF_NAME
-        if is_self_current == False and (self.visible_characters and 
-            current_character_agent not in self.visible_characters and
-            ALL_AGENTS_CHARACTER_REF_NAME not in self.visible_characters):
-            return None
         # 如果当前是消息接收者第一人称的消息, 则直接返回原始消息
         if is_self_current:
             return raw_message
@@ -280,9 +296,7 @@ class History(BaseModel):
         """
         result: list[BaseMessage] = []
         for message in self.messages:
-            # TODO: 没有独立函数用于检验
-            # as_content 返回 None 表示对当前 agent 不可见
-            if message.as_content(current_character_agent) is None:
+            if not message.is_visible_to(current_character_agent):
                 continue
             result.append(message)
         return result

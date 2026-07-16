@@ -183,7 +183,7 @@ def _toolresult_to_openai_dict(
 
     Injects the ``tool_call_id`` field (OpenAI-specific).
     """
-    if current_character_agent != message.character_name:
+    if not message.is_visible_to(current_character_agent):
         return None
     raw = _base_to_openai_dict(message, current_character_agent, **kwargs)
     if raw is None:
@@ -347,7 +347,7 @@ def messages_to_anthropic_list(
 
         # tool result 消息缓冲到 pending_tool_results
         if isinstance(msg, ToolResultMessage):
-            if msg.character_name != current_character_agent:
+            if not msg.is_visible_to(current_character_agent):
                 continue
             content = msg.as_content(current_character_agent, **kwargs)
             anthropic_content = _content_to_anthropic_blocks(content)
