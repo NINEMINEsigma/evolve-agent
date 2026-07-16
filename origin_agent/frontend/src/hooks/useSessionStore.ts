@@ -224,20 +224,49 @@ export function useSessionStore(callbacks: SessionStoreCallbacks = {}): SessionS
   }, [nextMessageIndex]);
 
   const flushStreamingMessage = useCallback(() => {
-    setStreamingMessage((prev) => {
-      if (!prev) return null;
+    // 通过 ref 同步读取当前 streaming message，避免在 setStreamingMessage updater
+    // 内部嵌套 setMessages（React 反模式，会导致 flush 的消息排在后续直接 setMessages 之后）
+    const prev = streamingMessageRef.current;
+    if (!prev) {
+      setStreamingMessage(null);
+      return;
+    }
+    let finalPrev = prev;
+    if (reasoningStartRef.current && prev.reasoningContent) {
+      const duration = Math.round((Date.now() - reasoningStartRef.current) / 1000);
+      finalPrev = { ...prev, reasoningDuration: duration };
+      reasoningStartRef.current = null;
+    }
+    setMessages((m) => {
+      const exists = m.some((x) => x.id === finalPrev.id);
+      return exists ? m.map((x) => (x.id === finalPrev.id ? finalPrev : x)) : [...m, finalPrev];
+    });
+    setStreamingMessage(null);
+  }, []);
+
+  // 合并 flush streaming message 和 append 新消息为单次 setMessages 调用，
+  // 保证 flush 的 agent 文本在 append 的 tool_call 之前，避免中间渲染闪烁
+  const flushAndAppend = useCallback((appendItem: ChatMessage) => {
+    const prev = streamingMessageRef.current;
+    let toFlush: ChatMessage | null = null;
+    if (prev) {
       let finalPrev = prev;
       if (reasoningStartRef.current && prev.reasoningContent) {
         const duration = Math.round((Date.now() - reasoningStartRef.current) / 1000);
         finalPrev = { ...prev, reasoningDuration: duration };
         reasoningStartRef.current = null;
       }
-      setMessages((m) => {
-        const exists = m.some((x) => x.id === finalPrev.id);
-        return exists ? m.map((x) => (x.id === finalPrev.id ? finalPrev : x)) : [...m, finalPrev];
-      });
-      return null;
+      toFlush = finalPrev;
+    }
+    setMessages((m) => {
+      let next = m;
+      if (toFlush) {
+        const exists = m.some((x) => x.id === toFlush!.id);
+        next = exists ? m.map((x) => (x.id === toFlush!.id ? toFlush! : x)) : [...m, toFlush!];
+      }
+      return [...next, appendItem];
     });
+    setStreamingMessage(null);
   }, []);
 
   const appendStreamingDelta = useCallback((
@@ -582,23 +611,22 @@ export function useSessionStore(callbacks: SessionStoreCallbacks = {}): SessionS
 
     if (msg.type === "tool_call") {
       if (ignoreStaleRef.current) return;
-      flushStreamingMessage();
       const argsStr = msg.args
         ? "(" + Object.entries(msg.args)
             .map(([k, v]) => `${k}=${JSON.stringify(v)}`)
             .join(", ") + ")"
         : "";
       const callerPrefix = msg.character_name ? `${msg.character_name} ` : "";
-      setMessages((prev) => [...prev, {
+      flushAndAppend({
         role: "tool",
         content: `${callerPrefix}${msg.emoji || "⚡"} ${msg.tool} ${argsStr}`,
         id: generateUUID(),
         toolName: msg.tool,
         toolArgs: msg.args,
         characterName: msg.character_name,
-        messageIndex: nextMessageIndex(prev),
+        messageIndex: nextMessageIndex(messagesRef.current),
         emoji: msg.emoji,
-      }]);
+      });
       return;
     }
 
@@ -713,7 +741,7 @@ export function useSessionStore(callbacks: SessionStoreCallbacks = {}): SessionS
         });
       }
     }
-  }, [addMessage, appendStreamingDelta, fetchSessions, flushStreamingMessage, nextMessageIndex, sessionId]);
+  }, [addMessage, appendStreamingDelta, fetchSessions, flushAndAppend, flushStreamingMessage, nextMessageIndex, sessionId]);
 
   const toggleMessageCollapse = useCallback((id: string) => {
     setMessages((prev) => prev.map((m) => (
