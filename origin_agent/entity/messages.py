@@ -180,11 +180,11 @@ class CharacterConversationMessage(CharacterMessage):
 
     def with_suffix(
         self, 
-        message_suffix: str | None, 
-        dynamic_positive_suffix: list[str] | None = None, 
-        dynamic_negative_suffix: list[str] | None = None) -> "CharacterConversationMessage":
+        message_suffix: str | None) -> "CharacterConversationMessage":
         """返回带新 message_suffix, dynamic_positive_suffix, dynamic_negative_suffix 的副本（不影响原对象）。"""
-        return self.model_copy(update={"message_suffix": message_suffix, "dynamic_positive_suffix": dynamic_positive_suffix, "dynamic_negative_suffix": dynamic_negative_suffix})
+        return self.model_copy(update={
+            "message_suffix": message_suffix, 
+            })
 
     def as_content(
         self,
