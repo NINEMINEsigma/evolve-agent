@@ -73,7 +73,7 @@ class ToolExecutor:
         args = dict(tc.arguments)
 
         # 取消检查
-        if self._loop.loop.is_interrupted() or self._loop.loop.is_interrupted():
+        if self._loop.loop.is_interrupted():
             _meta = ToolCallMeta(
                 application_time=application_time,
                 application_time_ms=application_time_ms,
