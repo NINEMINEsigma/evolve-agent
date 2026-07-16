@@ -438,26 +438,14 @@ class BaseAgentLoop(ABC):
         """设置当前 loop 的 session ID（供 gateway 层旋转/替换 loop 时使用）。"""
         self.session_id = session_id
 
-    # TODO: 以下三个函数完全没有差异
-    def persist_history(self, session_id: str) -> None:
+    def save_history(self, session_id: str) -> None:
         """将当前 History 持久化到磁盘。"""
-        self._persist_message(session_id)
-
-    def _persist_message(self, session_id: str) -> None:
         if self._session_store is None:
             return
         try:
             self._session_store.write_history(session_id, self._history)
         except Exception as exc:
-            logger.exception("Failed to persist history for session %s: %s", session_id, exc)
-
-    def _overwrite_history_file(self, session_id: str) -> None:
-        if self._session_store is None:
-            return
-        try:
-            self._session_store.write_history(session_id, self._history)
-        except Exception as exc:
-            logger.exception("Failed to overwrite history file for session %s: %s", session_id, exc)
+            logger.exception("Failed to save history for session %s: %s", session_id, exc)
 
     def _remove_last_user_message(self, session_id: str) -> None:
         """移除 History 中最后一条 user 消息并持久化。"""
@@ -465,7 +453,7 @@ class BaseAgentLoop(ABC):
             last_msg = self._history.get_message(self._history.count - 1)
             if last_msg.role == Role.USER:
                 self._history.remove_last_message()
-        self._overwrite_history_file(session_id)
+        self.save_history(session_id)
 
     def clear_session(self) -> None:
         """清理当前 session 的持久化数据。"""
@@ -501,7 +489,7 @@ class BaseAgentLoop(ABC):
             updates["visible_characters"] = visible_characters
         updated_msg = msg.model_copy(update=updates)
         self._history.set_message(index, updated_msg)
-        self._overwrite_history_file(self.session_id)
+        self.save_history(self.session_id)
         result: dict = {
             "updated": True,
             "session_id": self.session_id,
@@ -521,7 +509,7 @@ class BaseAgentLoop(ABC):
         if remove_from is None:
             return {"deleted": False, "error": "no user messages to delete"}
         self._history.truncate_to(remove_from)
-        self._overwrite_history_file(self.session_id)
+        self.save_history(self.session_id)
         return {"deleted": True, "session_id": self.session_id, "remaining_count": self._history.count}
 
     def regenerate_response(self) -> dict:
@@ -532,7 +520,7 @@ class BaseAgentLoop(ABC):
         last_user_msg = self._history.get_message(last_user_idx)
         last_user_content = content_to_text(last_user_msg.content)
         self._history.truncate_to(last_user_idx + 1)
-        self._overwrite_history_file(self.session_id)
+        self.save_history(self.session_id)
         result: dict = {
             "regenerate": True,
             "session_id": self.session_id,

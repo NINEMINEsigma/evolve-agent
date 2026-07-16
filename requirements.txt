@@ -15,3 +15,4 @@ pygetwindow>=0.0.9; sys_platform == 'darwin' or sys_platform == 'win32'
 Pillow>=10.0.0
 dirtyjson
 pyright
+py7zr>=0.20.0

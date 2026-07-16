@@ -135,7 +135,7 @@ class MultiAgentLoop(BaseAgentLoop, IMainSessionLoop):
             dynamic_message_suffix=hooks_context or None,
         )
         idx = self._history.add_message(msg)
-        self._persist_message(self.session_id)
+        self.save_history(self.session_id)
         await self._sink.emit_user_message(
             self.session_id,
             display_content if display_content is not None else str(content),
@@ -476,7 +476,7 @@ class MultiAgentLoop(BaseAgentLoop, IMainSessionLoop):
             )
 
             self._history.add_message(msg)
-            self._persist_message(self.session_id)
+            self.save_history(self.session_id)
 
             # 推送可见性/响应元数据给前端
             # 注意：MultiAgentWorker 已经在每轮 LLM 调用后发送过 stream_done，

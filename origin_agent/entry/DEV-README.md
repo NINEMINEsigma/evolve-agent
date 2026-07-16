@@ -34,7 +34,7 @@ entry/
   - `Inbox` 带类型消息队列（`UserMessage`、`ApprovalDecisionMessage`、`CronResultMessage` 等）。
   - 取消控制（`interrupt()`、`is_interrupted()`）。
   - `ToolContext` 注入到工具 handler，替代旧的全局 `get_runtime_context()`。
-  - 通用持久化方法：`_persist_message()`、`persist_history()`、`load_history()`。
+  - 通用持久化方法：`save_history()`、`load_history()`。
   - Token 统计：`_token_usage`、`_last_prompt_tokens`。
   - Hooks 加载与上下文收集：`_load_message_hooks()`、`_collect_hooks_context()`。
 

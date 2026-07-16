@@ -244,7 +244,7 @@ class MultiAgentWorker:
                     reasoning=resp.reasoning_content,
                 )
                 self._loop.loop.history.add_message(assistant_msg)
-                self._loop.loop.persist_history(self._loop.loop.session_id)
+                self._loop.loop.save_history(self._loop.loop.session_id)
 
                 full_messages.append(assistant_msg)
 
@@ -258,7 +258,7 @@ class MultiAgentWorker:
 
                     # 写入共享 History
                     self._loop.loop.history.add_message(tool_msg)
-                    self._loop.loop.persist_history(self._loop.loop.session_id)
+                    self._loop.loop.save_history(self._loop.loop.session_id)
 
                     # 追加 tool 结果到本地 LLM 上下文（跟在 assistant tool_calls 之后）
                     full_messages.append(tool_msg)

@@ -37,7 +37,7 @@ class LoopSessionManager:
     和合并（存在 TODO 标记），因此未使用此模块。若未来多 Agent 模式需支持 session
     旋转/归档，需将此模块的类型标注收窄到共享接口。
 
-    session 持久化的通用方法（_persist_message、_overwrite_history_file 等）
+    session 持久化的通用方法（save_history 等）
     已下沉到 BaseAgentLoop，本类只负责 session 旋转/归档/摘要/标签等
     高层级生命周期逻辑。
     """
@@ -266,7 +266,7 @@ class LoopSessionManager:
                 ],
             )
             self._loop.history.add_message(summary_msg)
-            self._loop.persist_history(new_sid)
+            self._loop.save_history(new_sid)
 
             # 迁移 cron 定时任务
             try:

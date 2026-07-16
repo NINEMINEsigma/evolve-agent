@@ -26,7 +26,7 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 # shutil.make_archive 的 format 参数
-_SHUTIL_FORMATS: frozenset[str] = frozenset({"zip", "tar", "gztar", "bztar", "xztar"})
+_SHUTIL_FORMATS: frozenset[str] = frozenset({"zip", "tar", "gztar", "bztar", "xztar", "7z"})
 
 # tarfile 的 mode 映射
 _TAR_WRITE_MODES: dict[str, str] = {
@@ -61,6 +61,8 @@ def _infer_format(path: Path) -> str:
         return "xztar"
     if name.endswith(".tar"):
         return "tar"
+    if name.endswith(".7z"):
+        return "7z"
     return ""
 
 
@@ -117,6 +119,19 @@ def _handle_compress(args: dict[str, Any]) -> dict:
                             abs_path = Path(root) / f
                             arcname = abs_path.relative_to(r_src.real)
                             zf.write(abs_path, arcname)
+        elif fmt == "7z":
+            try:
+                import py7zr
+            except ImportError:
+                return tool_error(
+                    "py7zr is not installed. Install it with: pip install py7zr",
+                    source=source, output=output, format=fmt,
+                )
+            with py7zr.SevenZipFile(str(r_out.real), "w") as zf:
+                if r_src.real.is_file():
+                    zf.write(r_src.real, arcname=r_src.real.name)
+                else:
+                    zf.writeall(r_src.real, arcname=r_src.real.name)
         else:
             with tarfile.open(str(r_out.real), _TAR_WRITE_MODES[fmt]) as tf: # type: ignore
                 tf.add(r_src.real, arcname=r_src.real.name)
@@ -176,6 +191,16 @@ def _handle_decompress(args: dict[str, Any]) -> dict:
         if fmt == "zip":
             with zipfile.ZipFile(str(r_src.real), "r") as zf:
                 zf.extractall(r_out.real)
+        elif fmt == "7z":
+            try:
+                import py7zr
+            except ImportError:
+                return tool_error(
+                    "py7zr is not installed. Install it with: pip install py7zr",
+                    source=source, output_dir=output_dir, format=fmt,
+                )
+            with py7zr.SevenZipFile(str(r_src.real), "r") as zf:
+                zf.extractall(path=str(r_out.real))
         else:
             with tarfile.open(str(r_src.real), _TAR_READ_MODES[fmt]) as tf: # type: ignore
                 tf.extractall(r_out.real)
@@ -224,7 +249,7 @@ registry.register(
         # - ⚠️ output 已存在时被无条件删除后重新创建。
         # - 压缩目录时，压缩包内包含目录本身作为根条目（非仅内容）。
         # - 目录压缩自动递归处理。
-        "description": """Compress a file or directory into an archive. Supported formats: zip, tar, gztar, bztar, xztar. ⚠️ If the output path already exists, it is automatically deleted and recreated.
+        "description": """Compress a file or directory into an archive. Supported formats: zip, tar, gztar, bztar, xztar, 7z. ⚠️ If the output path already exists, it is automatically deleted and recreated.
 
 ## Prerequisites
 - The source file or directory must exist.
@@ -262,9 +287,9 @@ Compresses the source (file or directory) into an archive at the output path. If
                 },
                 "format": {
                     "type": "string",
-                    # 压缩格式：zip、tar、gztar、bztar、xztar。
-                    "description": "Archive format. Supported: zip, tar, gztar, bztar, xztar.",
-                    "enum": ["zip", "tar", "gztar", "bztar", "xztar"],
+                    # 压缩格式：zip、tar、gztar、bztar、xztar、7z。
+                    "description": "Archive format. Supported: zip, tar, gztar, bztar, xztar, 7z.",
+                    "enum": ["zip", "tar", "gztar", "bztar", "xztar", "7z"],
                 },
             },
             "required": ["source", "output", "format"],
@@ -300,9 +325,9 @@ registry.register(
         #
         # ## 副作用/注意
         # - 写入文件系统。目标目录自动创建。
-        # - format 自动推断规则：.zip→zip, .tar.gz/.tgz→gztar, .tar.bz2/.tbz2→bztar, .tar.xz/.txz→xztar, .tar→tar。
+        # - format 自动推断规则：.zip→zip, .tar.gz/.tgz→gztar, .tar.bz2/.tbz2→bztar, .tar.xz/.txz→xztar, .tar→tar, .7z→7z。
         # - 无法推断格式时需明确指定 format。
-        "description": """Decompress an archive into a directory. Supported formats: zip, tar, gztar, bztar, xztar. Format is auto-inferred from filename suffix when not specified.
+        "description": """Decompress an archive into a directory. Supported formats: zip, tar, gztar, bztar, xztar, 7z. Format is auto-inferred from filename suffix when not specified.
 
 ## Prerequisites
 - The source archive must exist.
@@ -321,7 +346,7 @@ Decompresses the archive into the target directory. The target directory is auto
 
 ## Side Effects / Notes
 - Writes to the file system. Target directory is auto-created.
-- Auto-inference: .zip→zip, .tar.gz/.tgz→gztar, .tar.bz2/.tbz2→bztar, .tar.xz/.txz→xztar, .tar→tar.
+- Auto-inference: .zip→zip, .tar.gz/.tgz→gztar, .tar.bz2/.tbz2→bztar, .tar.xz/.txz→xztar, .tar→tar, .7z→7z.
 - If format cannot be inferred, specify it explicitly.""",
         "parameters": {
             "type": "object",
@@ -339,8 +364,8 @@ Decompresses the archive into the target directory. The target directory is auto
                 "format": {
                     "type": "string",
                     # 压缩格式。留空时自动根据文件名后缀推断。
-                    "description": "Archive format. Leave empty to auto-infer from filename suffix. Supported: zip, tar, gztar, bztar, xztar.",
-                    "enum": ["", "zip", "tar", "gztar", "bztar", "xztar"],
+                    "description": "Archive format. Leave empty to auto-infer from filename suffix. Supported: zip, tar, gztar, bztar, xztar, 7z.",
+                    "enum": ["", "zip", "tar", "gztar", "bztar", "xztar", "7z"],
                     "default": "",
                 },
             },

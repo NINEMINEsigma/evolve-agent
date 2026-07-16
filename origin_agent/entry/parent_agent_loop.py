@@ -358,7 +358,7 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
                     tool_msg = await self._tool_executor.execute(tc, sid)
                     messages.append(tool_msg)
                     self._history.add_message(tool_msg)
-                    self._persist_message(sid)
+                    self.save_history(sid)
                     await self._push_usage_update(sid)
 
                     if tc.name == "evolve_code":
@@ -409,7 +409,7 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
                 visible_characters=[self.current_character_agent],
             )
             self._history.add_message(message)
-            self._persist_message(self.session_id)
+            self.save_history(self.session_id)
             if target_messages is not None:
                 target_messages.append(message)
         return True
@@ -537,7 +537,7 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
                 tool_calls=None,
             )
         index = self._history.add_message(message)
-        self._persist_message(session_id)
+        self.save_history(session_id)
         return index
 
     @staticmethod
@@ -629,7 +629,7 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
         self._history = History()
         self._last_prompt_tokens = 0
         if session_id is not None:
-            self._persist_message(session_id)
+            self.save_history(session_id)
 
     def load_history(self, history: History) -> None:
         """从外部加载历史到当前 loop。"""
@@ -658,7 +658,7 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
             reasoning_field_name=resp.reasoning_field_name,
         )
         self._history.add_message(message)
-        self._persist_message(session_id)
+        self.save_history(session_id)
 
     @staticmethod
     def _extract_text(content: Any) -> str:
