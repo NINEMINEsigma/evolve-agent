@@ -189,7 +189,7 @@ category: core
 You can modify your own source code and complete evolution through the following tools:
 
 1. Use the filesystem tool to read source code from ``fork:``
-2. ``write_fork`` or ``edit_file`` — write evolved code to fork: or ws:
+2. ``write_file`` or ``edit_file`` — write evolved code to fork: or ws:
 3. ``validate_code`` — check syntax
 4. ``diff_fast_fork`` — diff fast fork and save diff file
 5. ``evolve_code`` — deep validate and trigger swap

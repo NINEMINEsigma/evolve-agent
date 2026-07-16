@@ -52,8 +52,8 @@ All changes go through the evolution system:
 read_file: {"path": "fork:frontend/src/components/Chat/Message.tsx"}
 
 # Modify and write back
-write_fork: {
-  "file": "frontend/src/components/Chat/Message.tsx",
+edit_file: {
+  "path": "fork:frontend/src/components/Chat/Message.tsx",
   "old_string": "...",
   "new_string": "..."
 }

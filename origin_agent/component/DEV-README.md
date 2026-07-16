@@ -41,7 +41,7 @@ component/
 | 工具文件 | 主要工具 | 用途 |
 |----------|----------|------|
 | `filesystem.py` | `read_file`, `write_file`, `edit_file`, `list_directory`, `delete_file`, `copy_file`, `move_file`, `rename_file`, `search_files`, `grep`, `file_exists` | 沙盒内文件操作 |
-| `code.py` | `write_fork`, `validate_code`, `evolve_code` | 自我进化 |
+| `code.py` | `validate_code`, `evolve_code` | 自我进化 |
 | `shell.py` | `run_command` 等 | 子进程执行 |
 | `frontend.py` | `validate_frontend` | 前端构建验证 |
 | `skills.py` | `load_skill`, `list_skills` | 技能管理 |

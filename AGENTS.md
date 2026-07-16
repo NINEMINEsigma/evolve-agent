@@ -68,11 +68,11 @@ There is no `self:` namespace. Read your own source with `fork:`.
 ## Evolution flow
 
 ```
-read_file (fork:path) → write_fork / edit_file (fork:path) → validate_code → [validate_frontend if frontend changed] → evolve_code
+read_file (fork:path) → write_file / edit_file (fork:path) → validate_code → [validate_frontend if frontend changed] → evolve_code
 ```
 
 - `read_own_source` exists but is **disabled**; use `read_file` with `fork:`.
-- `write_fork` modes: full overwrite (max 1000 chars), incremental edit (`old_string`+`new_string`), append (`content`+`append=true`, max 10 lines).
+- `write_file` (filesystem.py) does full overwrites using `fork:`/`ws:`/`fix:`/`skills:` prefixes; `edit_file` does incremental edits.
 - `edit_file` (filesystem.py) does incremental edits using `fork:`/`ws:`/`fix:`/`skills:` prefixes.
 - `validate_code`: AST syntax check across all `.py` files in `fork:`.
 - `validate_frontend`: runs `pnpm install && pnpm run build` in the target frontend dir (default `fork:frontend`). Required if frontend files changed.

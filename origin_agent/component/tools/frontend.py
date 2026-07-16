@@ -175,7 +175,7 @@ registry.register(
     toolset="frontend",
     schema={
         # 验证前端代码能否构建。在 fork:frontend 目录下运行 pnpm install && pnpm run build。
-        # 前置条件：已通过 write_fork 修改了 frontend/ 下的 .tsx/.ts/.css 文件。仅 fast 模式下可用。
+        # 前置条件：已通过 write_file/edit_file 修改了 frontend/ 下的 .tsx/.ts/.css 文件。仅 fast 模式下可用。
         # path 默认 'fork:frontend'（进化目标目录）。可指定其他逻辑路径。
         # 调用效果：在目标目录中执行 pnpm install 和 pnpm run build（CI=true 非交互模式），捕获 TypeScript 和构建错误。
         # 成功返回：{ valid: true, stage: "build", exit_code: 0, build_output, message }
@@ -185,7 +185,7 @@ registry.register(
         "description": """Validate frontend code by running `pnpm install && pnpm run build` in the target frontend directory.
 
 ## Prerequisites
-- Frontend files (`.tsx`, `.ts`, `.css`) have been modified via `write_fork`.
+- Frontend files (`.tsx`, `.ts`, `.css`) have been modified via `write_file` or `edit_file` with `fork:` prefix.
 - Only available in fast mode.
 
 ## Effect

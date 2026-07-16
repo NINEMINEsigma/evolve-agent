@@ -32,20 +32,18 @@ Bare filenames resolve to `self:` namespace (agent's current runtime). Always re
 
 ## Writing Evolution Code
 
-Use `write_fork` tool with **bare filenames**:
+Use `write_file` or `edit_file` with `fork:` prefix:
 
 ```
-write_fork: {"file": "main.py", "content": "..."}
-write_fork: {"file": "evolve/code.py", "content": "..."}
+write_file: {"path": "fork:main.py", "content": "..."}
+edit_file: {"path": "fork:evolve/code.py", "old_string": "...", "new_string": "..."}
 ```
-
-Bare filenames resolve to `fork:` namespace (`slow_agent_space/`). This is the **only** way to write evolved code.
 
 ## Evolution Workflow
 
 1. **Analyze** — Read existing code with `read_own_source`
 2. **Plan** — Determine which files need changes and why
-3. **Write** — Use `write_fork` to write modified code to `fork:` namespace
+3. **Write** — Use `write_file` or `edit_file` to write modified code to `fork:` namespace
 4. **Validate** — Call `evolve_code` tool to trigger validation
 5. **Finalize** — If validation passes, agent exits with code -1; orchestrator swaps slow→fast and restarts
 

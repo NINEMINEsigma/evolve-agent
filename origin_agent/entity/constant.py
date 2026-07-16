@@ -120,11 +120,11 @@ SUBAGENT_IDLE_TRIGGER_SECONDS: int = 20
 # 文件系统 I/O 限制
 # ============================================================================
 
-# write_file / write_fork 完全覆盖模式的内容上限（字符数）
-WRITE_FILE_MAX_CHARS: int = 10000
+# write_file 完全覆盖模式的内容上限（字符数）
+WRITE_FILE_MAX_CHARS: int = 100000
 
 # edit_file 增量编辑模式的内容上限（字符数）
-EDIT_FILE_MAX_CHARS: int = 10000
+EDIT_FILE_MAX_CHARS: int = 100000
 
 # read_file 单次读取最大行数（硬上限）
 READ_FILE_MAX_LINES: int = 2000
