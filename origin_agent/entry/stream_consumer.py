@@ -31,11 +31,8 @@ async def _close_async_iterator(ait: Any) -> None:
 class StreamConsumer:
     """消费一条 LLM 流式响应，边收边推送增量到前端。
 
-    TODO: 当前仅被 ParentAgentLoop 独享；MultiAgentLoop 的流消费走 MultiAgentWorker 内部，
-    未复用此模块。此模块接收独立依赖（llm / sink / character_name / cancel_event），
-    本身不绑定任何 loop 类型，可考虑后续由 MultiAgentWorker 直接组合使用。
-
-    由 ParentAgentLoop 持有，每个 LLM 调用创建一次 ``consume()``。
+    每个 LLM 调用创建一次 ``consume()``。
+    接收独立依赖（llm / sink / character_name / cancel_event），本身不绑定任何 loop 类型。
     """
 
     def __init__(
