@@ -240,24 +240,10 @@ class MultiAgentLoop(BaseAgentLoop, IMainSessionLoop):
             content=json.dumps(result, ensure_ascii=False) if isinstance(result, dict) else str(result),
         )
 
-    def get_tool_resources(self) -> dict:
-        """多 Agent 模式暂不支持工具资源恢复。"""
-        # TODO: 需要补充
-        return {"task_progress": {}, "clipboard_display": {}}
-
     async def terminate_session(self) -> dict:
         """终结当前会话。"""
         logger.info("Terminating multi-agent session | session=%s", self.session_id)
         return {"terminated": True, "session_id": self.session_id}
-
-    async def merge_sessions(self, sources: list[str]) -> dict:
-        """多 Agent 模式暂不支持会话合并。"""
-        # TODO: 需要补充
-        logger.warning(
-            "Merge sessions not supported in multi-agent mode | session=%s sources=%s",
-            self.session_id, sources,
-        )
-        return {"error": "merge not supported in multi-agent mode", "merged": False}
 
     async def process_message(
         self,
