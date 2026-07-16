@@ -12,6 +12,7 @@ import asyncio
 import json
 import logging
 import time as _time_module
+from datetime import datetime
 from contextvars import ContextVar
 from pathlib import Path
 from typing import * # type: ignore
@@ -33,6 +34,7 @@ from subagent.context import SubRuntimeContext
 from entry.agent_sink import AgentSink, ParentAgentSink
 from entry.base_agent_loop import BasePrivateChatAgentLoop, UserMessage, ContextLimitMessage, ToolContext
 from entry.agent_support.multimodal import content_to_text, tool_result_to_content
+from entry.tool_post_dispatch import finalize_tool_result
 
 logger = logging.getLogger(__name__)
 
@@ -373,16 +375,10 @@ class SubAgentLoop(BasePrivateChatAgentLoop):
                     else:
                         tool_msg = await self._queue_for_approval(tc)
 
-                    # 推送 tool_result 事件
-                    raw_content = content_to_text(tool_msg.content)
-                    self._emit(
-                        "tool_result",
-                        tool_call_id=tc.id,
-                        tool_name=tc.name,
-                        content=raw_content,
-                    )
+                    # tool_result 事件已由 finalize_tool_result 统一推送，此处不再重复
 
                     # 检测工具失败并放入 outbox，让父 Agent 知道（防止默认成功假设）
+                    raw_content = content_to_text(tool_msg.content)
                     self._maybe_record_tool_failure(tc.name, raw_content)
 
                     messages.append(tool_msg)
@@ -598,7 +594,7 @@ class SubAgentLoop(BasePrivateChatAgentLoop):
             return self._make_tool_msg(tc.id, f"Tool call rejected: {exc}")
 
     async def _execute_approved_tool(self, tc: ToolCall) -> ToolResultMessage:
-        """执行已获批准的工具调用。"""
+        """执行已获批准的工具调用，补齐 _meta 注入和 UI 事件推送。"""
         # 沙箱隔离：拒绝授权清单之外的工具
         if tc.name not in self._allowed_tool_names:
             return self._make_tool_msg(
@@ -611,7 +607,17 @@ class SubAgentLoop(BasePrivateChatAgentLoop):
                     ),
                 },
             )
+
+        # 记录申请时间（审批已在 _queue_for_approval 中完成，此处不计量审批耗时）
+        start_mono: float = _time_module.monotonic()
+        application_time_ms: int = int(_time_module.time() * 1000)
+        application_time: str = datetime.fromtimestamp(
+            _time_module.time()
+        ).strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
+
         timeout: int = self._ctx.tool_timeout
+        invocation_start: float = start_mono
+        invocation_start_offset_ms: int = 0
         try:
             if tool_registry.get_entry(tc.name) is None:
                 return self._make_tool_msg(tc.id, f"Tool '{tc.name}' not found in registry")
@@ -628,21 +634,64 @@ class SubAgentLoop(BasePrivateChatAgentLoop):
             tool_ctx = ToolContext(loop=self, session_id=self.session_id)
             coro = tool_registry.async_dispatch(tc.name, args, context=tool_ctx)
 
+            invocation_start = _time_module.monotonic()
+            invocation_start_offset_ms = int((invocation_start - start_mono) * 1000)
+
             if timeout:
                 result = await asyncio.wait_for(coro, timeout=timeout)
             else:
                 result = await coro
 
-            return self._make_tool_msg(tc.id, tool_result_to_content(result))
+            invocation_duration_ms: int = int((_time_module.monotonic() - invocation_start) * 1000)
+            end_time_offset_ms: int = int((_time_module.monotonic() - start_mono) * 1000)
+
+            return await finalize_tool_result(
+                result,
+                tool_name=tc.name,
+                application_time=application_time,
+                application_time_ms=application_time_ms,
+                approval_duration_ms=0,
+                invocation_start_offset_ms=invocation_start_offset_ms,
+                invocation_duration_ms=invocation_duration_ms,
+                end_time_offset_ms=end_time_offset_ms,
+                sink=self.get_sink(),
+                session_id=self.session_id,
+                tool_call_id=tc.id,
+                character_name=self.current_character_agent,
+            )
         except asyncio.TimeoutError:
-            return self._make_tool_msg(
-                tc.id,
+            invocation_duration_ms = int((_time_module.monotonic() - invocation_start) * 1000)
+            end_time_offset_ms = int((_time_module.monotonic() - start_mono) * 1000)
+            return await finalize_tool_result(
                 {"success": False, "error": f"Tool execution timed out ({timeout}s)"},
+                tool_name=tc.name,
+                application_time=application_time,
+                application_time_ms=application_time_ms,
+                approval_duration_ms=0,
+                invocation_start_offset_ms=invocation_start_offset_ms,
+                invocation_duration_ms=invocation_duration_ms,
+                end_time_offset_ms=end_time_offset_ms,
+                sink=self.get_sink(),
+                session_id=self.session_id,
+                tool_call_id=tc.id,
+                character_name=self.current_character_agent,
             )
         except Exception as exc:
-            return self._make_tool_msg(
-                tc.id,
+            invocation_duration_ms = int((_time_module.monotonic() - invocation_start) * 1000)
+            end_time_offset_ms = int((_time_module.monotonic() - start_mono) * 1000)
+            return await finalize_tool_result(
                 {"success": False, "error": f"Tool execution failed: {exc}"},
+                tool_name=tc.name,
+                application_time=application_time,
+                application_time_ms=application_time_ms,
+                approval_duration_ms=0,
+                invocation_start_offset_ms=invocation_start_offset_ms,
+                invocation_duration_ms=invocation_duration_ms,
+                end_time_offset_ms=end_time_offset_ms,
+                sink=self.get_sink(),
+                session_id=self.session_id,
+                tool_call_id=tc.id,
+                character_name=self.current_character_agent,
             )
         finally:
             current_subagent_loop.set(None)

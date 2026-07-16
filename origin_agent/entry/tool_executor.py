@@ -17,6 +17,7 @@ from typing import Any, Awaitable, Callable, TYPE_CHECKING
 from entity.puretype import Role, ToolCallMeta, ToolCall
 from entity.messages import ToolResultMessage
 from entry.base_agent_loop import BaseAgentLoop, ToolContext, IMainSessionLoop
+from entry.tool_post_dispatch import finalize_tool_result
 
 if TYPE_CHECKING:
     from abstract.llm.client import BaseLLMClient
@@ -59,7 +60,6 @@ class ToolExecutor:
         from entity.constant import LOG_PREVIEW_CHARS
         from component.approval import execute_with_approval, ask_agent_reason as _ask_agent_reason
         from abstract.tools.registry import registry as tool_registry
-        from abstract.tools.ui_event_router import ui_event_router
 
         char_name = character_name or self._loop.current_character_agent
 
@@ -168,9 +168,9 @@ class ToolExecutor:
         approval_duration_ms: int = int((time.monotonic() - approval_start) * 1000)
 
         _skip_dispatch = False
-        result: dict | str | None = {}
+        result: dict | str = {}
         if outcome.denied:
-            result = outcome.deny_result
+            result = outcome.deny_result or {"error": "Tool denied"}
             _skip_dispatch = True
 
         if not _skip_dispatch:
@@ -217,44 +217,17 @@ class ToolExecutor:
             invocation_duration_ms = 0
             end_time_offset_ms = approval_duration_ms
 
-        # 构建 _meta
-        _meta = ToolCallMeta(
+        return await finalize_tool_result(
+            result,
+            tool_name=tc.name,
             application_time=application_time,
             application_time_ms=application_time_ms,
             approval_duration_ms=approval_duration_ms,
             invocation_start_offset_ms=invocation_start_offset_ms,
             invocation_duration_ms=invocation_duration_ms,
             end_time_offset_ms=end_time_offset_ms,
-        )
-
-        # 注入 _meta 到结果
-        if isinstance(result, dict):
-            result["_meta"] = _meta.model_dump()
-        else:
-            result = {"result": result, "_meta": _meta.model_dump()}
-
-        # 统一转换为可保存到 History 的 content
-        from entry.agent_support.multimodal import tool_result_to_content, content_to_text
-        content = tool_result_to_content(result)
-
-        # 通知前端结果（使用文本摘要，避免 base64 撑爆前端事件）
-        await self._loop.loop.get_sink().emit_tool_result(
-            session_id, tc.name, tc.id, content_to_text(content),
-            character_name=char_name,
-            tool_call_meta=_meta.model_dump(),
-        )
-
-        # 对前端 UI 类工具推送实时状态更新
-        await ui_event_router.emit_for(
-            tc.name,
-            result,
-            self._loop.loop.get_sink(),
-            session_id,
-        )
-
-        return ToolResultMessage(
-            role=Role.TOOL,
-            character_name=char_name,
+            sink=self._loop.loop.get_sink(),
+            session_id=session_id,
             tool_call_id=tc.id,
-            content=content,
+            character_name=char_name,
         )

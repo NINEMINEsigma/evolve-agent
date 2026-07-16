@@ -5,7 +5,7 @@
   - ``clear_task_progress`` — 清除进度条
 
 进度条状态由前端维护，后端工具仅负责生成携带进度元数据的结果，
-由 ``AgentLoop._execute_tool`` 检测后通过 ``task_progress`` 事件推送到前端。
+由 ``finalize_tool_result`` 检测后通过 ``task_progress`` 事件推送到前端。
 """
 
 from __future__ import annotations

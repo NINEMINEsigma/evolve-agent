@@ -335,7 +335,6 @@ class History(BaseModel):
             self.messages.insert(index, message)
             self.update_last_user_message()
             return True
-        return False
 
     def remove_message(self, index: int) -> bool:
         with self._io_locker:

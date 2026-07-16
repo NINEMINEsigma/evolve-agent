@@ -193,56 +193,6 @@ class MultiAgentLoop(BaseAgentLoop, IMainSessionLoop):
     def get_tool_availability_scope(self) -> ToolAvailability:
         return ToolAvailability.MULTI_AGENT
 
-    async def _execute_tool(self, tool_name: str, args: dict,
-                            tool_call_id: str = "",
-                            session_id: str = "",
-                            character_name: str | None = None) -> "ToolResultMessage":
-        """多 Agent 模式下执行工具，含审批流程。"""
-        from entity.messages import ToolResultMessage
-        from entity.puretype import Role
-        from abstract.tools.registry import registry as tool_registry
-        from component.approval import execute_with_approval
-
-        char_name = character_name or self.current_character_agent
-        sid = session_id or self.session_id
-        if self.is_interrupted():
-            return ToolResultMessage(
-                role=Role.TOOL,
-                character_name=char_name,
-                tool_call_id=tool_call_id,
-                content="Cancelled.",
-            )
-
-        outcome = await execute_with_approval(
-            tool_name=tool_name,
-            args=args,
-            session_id=sid,
-            sink=self._sink,
-        )
-
-        if outcome.denied:
-            return ToolResultMessage(
-                role=Role.TOOL,
-                character_name=char_name,
-                tool_call_id=tool_call_id,
-                content=json.dumps(outcome.deny_result, ensure_ascii=False),
-            )
-
-        try:
-            from entry.base_agent_loop import ToolContext
-            ctx = ToolContext(loop=self, session_id=sid)
-            result = await tool_registry.async_dispatch(tool_name, args, context=ctx)
-        except Exception as exc:
-            logger.exception("Tool %s dispatch error for multi-agent: %s", tool_name, exc)
-            result = {"error": f"Tool execution failed: {type(exc).__name__}: {exc}"}
-
-        return ToolResultMessage(
-            role=Role.TOOL,
-            character_name=char_name,
-            tool_call_id=tool_call_id,
-            content=json.dumps(result, ensure_ascii=False) if isinstance(result, dict) else str(result),
-        )
-
     async def terminate_session(self) -> dict:
         """终结当前会话。"""
         logger.info("Terminating multi-agent session | session=%s", self.session_id)

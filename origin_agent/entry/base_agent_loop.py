@@ -18,7 +18,7 @@ from typing import Any, TYPE_CHECKING
 
 from pydantic import BaseModel
 
-from entity.puretype import Role, ToolDangerLevel, ToolAvailability, SessionMessageEntry
+from entity.puretype import Role, ToolAvailability, SessionMessageEntry
 from entity.messages import (
     History,
     BaseMessage,
@@ -37,7 +37,7 @@ from entry.agent_support.messages import (
     collect_all_hooks_context,
     load_message_hooks,
 )
-from entry.agent_support.multimodal import tool_result_to_content, content_to_text
+from entry.agent_support.multimodal import content_to_text
 from system.pathutils import find_repo_root
 from system.session_store import SessionStore
 
@@ -820,80 +820,6 @@ class BasePrivateChatAgentLoop(BaseAgentLoop):
     def _build_system_prompt(self) -> list[str]:
         """构建系统提示词段落列表。"""
         ...
-
-    # -- 工具执行 ---------------------------------------------------------
-
-    def _is_readonly_tool(self, name: str) -> bool:
-        """检查工具是否为 readOnly（无需审批直接执行）。"""
-        from abstract.tools.registry import registry
-        entry = registry.get_entry(name)
-        if entry is None:
-            return False
-        return entry.danger_level == ToolDangerLevel.readonly
-
-    def _is_auto_approved_tool(self, name: str, args: dict) -> bool:
-        """检查工具是否在自动批准白名单中。"""
-        try:
-            from component.approval.allowlist import is_allowed
-            return is_allowed(name, args)
-        except Exception:
-            logger.exception("Failed to check approval allowlist for tool=%s", name)
-            return False
-
-    async def _execute_tool(self, tool_name: str, args: dict,
-                            tool_call_id: str = "",
-                            session_id: str = "") -> ToolResultMessage:
-        """执行单个工具调用，处理只读/审批分流，返回 ToolResultMessage。
-
-        1. readonly 或白名单工具：直接执行
-        2. 非 readonly：调用 sink.request_approval 等待审批
-        3. 审批通过：执行工具
-        4. 审批拒绝：返回拒绝信息
-        """
-        # 注入 session_id 到 args 中（兼容旧工具 handler）
-        args["_session_id"] = session_id or self.session_id
-
-        sink = self.get_sink()
-        is_readonly = self._is_readonly_tool(tool_name)
-        is_auto = self._is_auto_approved_tool(tool_name, args)
-
-        if not is_readonly and not is_auto:
-            # 需要审批
-            approval = await sink.request_approval(
-                tool_name=tool_name,
-                args=args,
-                session_id=session_id or self.session_id,
-            )
-            if approval.action == "deny":
-                return ToolResultMessage(
-                    role=Role.TOOL,
-                    character_name=self.current_character_agent,
-                    tool_call_id=tool_call_id,
-                    content=f"Tool execution denied: {approval.deny_reason or 'User rejected'}",
-                )
-
-        # 执行工具
-        from abstract.tools.registry import registry
-        from entry.base_agent_loop import ToolContext
-        ctx = ToolContext(loop=self, session_id=self.session_id)
-        result = await registry.async_dispatch(tool_name, args, context=ctx)
-        content = tool_result_to_content(result)
-
-        # 对前端 UI 类工具推送实时状态更新（工具模块自行注册事件类型）
-        from abstract.tools.ui_event_router import ui_event_router
-        await ui_event_router.emit_for(
-            tool_name,
-            result,
-            sink,
-            session_id or self.session_id,
-        )
-
-        return ToolResultMessage(
-            role=Role.TOOL,
-            character_name=self.current_character_agent,
-            tool_call_id=tool_call_id,
-            content=content,
-        )
 
     # -- 历史管理 ---------------------------------------------------------
 

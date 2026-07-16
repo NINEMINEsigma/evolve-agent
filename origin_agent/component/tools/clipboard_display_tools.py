@@ -4,7 +4,7 @@
   - ``set_clipboard_display``  — 创建或更新可复制展示区域
   - ``clear_clipboard_display`` — 清除展示区域
 
-由 ``AgentLoop._execute_tool`` 检测后通过 ``clipboard_display`` 事件推送到前端。
+由 ``finalize_tool_result`` 检测后通过 ``clipboard_display`` 事件推送到前端。
 """
 
 from __future__ import annotations

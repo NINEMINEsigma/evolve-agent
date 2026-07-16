@@ -131,7 +131,7 @@ component/
 
 ### 审批流程
 
-1. `ToolExecutor.execute()` 或 `MultiAgentLoop._execute_tool()` 调用 `execute_with_approval()`。
+1. `ToolExecutor.execute()` 调用 `execute_with_approval()`。
 2. `execute_with_approval` 判断工具危险等级与白名单。
 3. 若工具在 allowlist 中或危险等级为 `readonly`，直接执行。
 4. 否则进入审批流程：
