@@ -199,7 +199,7 @@ class ToolExecutor:
                     end_time_offset_ms = int((time.monotonic() - start_mono) * 1000)
                 else:
                     try:
-                        ctx = ToolContext(loop=self._loop, session_id=self._loop.loop.session_id)
+                        ctx = ToolContext(loop=self._loop, session_id=session_id)
                         result = await tool_registry.async_dispatch(
                             tc.name, args, context=ctx,
                         )
