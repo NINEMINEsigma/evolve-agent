@@ -48,6 +48,9 @@ export default function Layout({ ws, onContextMenu }: LayoutProps) {
 
   const prevSubagentIdsRef = useRef<Record<string, Set<string>>>({});
   const [isMobile, setIsMobile] = useState(false);
+  const [taskProgressCollapsed, setTaskProgressCollapsed] = useState(false);
+  const [clipboardCollapsed, setClipboardCollapsed] = useState(false);
+  const [headerCollapsed, setHeaderCollapsed] = useState(false);
 
   const setSubagentPanelOpen = (value: boolean | ((prev: boolean) => boolean)) => {
     setSubagentPanelOpenMap((prev) => ({
@@ -74,9 +77,11 @@ export default function Layout({ ws, onContextMenu }: LayoutProps) {
     const onChange = (e: MediaQueryListEvent) => {
       setIsMobile(e.matches);
       setSidebarCollapsed(e.matches);
+      setTaskProgressCollapsed(e.matches);
     };
     setIsMobile(mq.matches);
     setSidebarCollapsed(mq.matches);
+    setTaskProgressCollapsed(mq.matches);
     mq.addEventListener("change", onChange);
     return () => mq.removeEventListener("change", onChange);
   }, []);
@@ -189,8 +194,6 @@ export default function Layout({ ws, onContextMenu }: LayoutProps) {
   }, []);
 
   const currentSessionArchived = ws.sessions.find((s) => s.id === ws.sessionId)?.status === "archived";
-  const [taskProgressCollapsed, setTaskProgressCollapsed] = useState(false);
-  const [clipboardCollapsed, setClipboardCollapsed] = useState(false);
 
   return (
     <>
@@ -240,6 +243,9 @@ export default function Layout({ ws, onContextMenu }: LayoutProps) {
           onToggleSidebar={() => setSidebarCollapsed((v) => !v)}
           onToggleHandsfree={ws.toggleHandsfree}
           agents={ws.agents}
+          collapsed={headerCollapsed}
+          onToggleCollapse={() => setHeaderCollapsed((v) => !v)}
+          isMobile={isMobile}
         />
 
         <TaskProgressPanel

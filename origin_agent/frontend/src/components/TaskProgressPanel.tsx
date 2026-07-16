@@ -8,9 +8,25 @@ interface TaskProgressPanelProps {
 
 export default function TaskProgressPanel({
   taskProgress,
+  collapsed,
 }: TaskProgressPanelProps) {
   const items = Object.values(taskProgress);
   if (items.length === 0) return null;
+
+  if (collapsed) {
+    // 折叠态：仅保留一个 1px 的指示线，提示有活跃任务
+    return (
+      <div className="task-progress-strip-panel task-progress-collapsed" aria-label="任务进度（已折叠）">
+        {items.slice(0, 1).map((tp) => (
+          <div
+            key={tp.task_id}
+            className="task-progress-strip-fill task-progress-strip-fill-static"
+            style={{ width: `${Math.max(0, Math.min(100, tp.percent))}%` }}
+          />
+        ))}
+      </div>
+    );
+  }
 
   return (
     <div className="task-progress-strip-panel" aria-label="任务进度">

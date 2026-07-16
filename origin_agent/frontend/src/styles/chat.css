@@ -118,6 +118,41 @@
 @media (max-width: 768px) {
   .scroll-to-bottom {
     right: 12px;
-    bottom: 12px;
+    /* 移到输入框上方，避免被遮挡 */
+    bottom: 80px;
+    z-index: 11;
+  }
+}
+
+/* ── Minimap toggle (折叠/展开) ── */
+.minimap-toggle {
+  position: absolute;
+  right: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 20px;
+  height: 48px;
+  border: 1px solid var(--border);
+  border-right: none;
+  border-radius: 8px 0 0 8px;
+  background: var(--bg-secondary);
+  color: var(--text-muted);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 5;
+  transition: background 0.15s, color 0.15s;
+  padding: 0;
+}
+
+.minimap-toggle:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+@media (max-width: 768px) {
+  .minimap {
+    width: 60px;
   }
 }
