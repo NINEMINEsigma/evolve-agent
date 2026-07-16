@@ -135,6 +135,12 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
         # -- 子 Agent 周期收集器用的空闲时间戳 --
         self._last_idle_time: dict[str, float] = {session_id: time.monotonic()}
 
+        # -- 子 Agent 编排器（由 server 层注入） --
+        self.subagent_orchestrator: Any = None
+
+        # -- session manager 引用（由 server 层注入，用于旋转/归档） --
+        self._session_manager: SessionManager | None = None
+
     def get_last_idle_time(self, session_id: str) -> float | None:
         """返回指定 session 上次进入空闲的时间戳，不存在时返回 None。"""
         return self._last_idle_time.get(session_id)
@@ -143,12 +149,6 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
     def update_last_idle_time(self, session_id: str) -> None:
         """更新指定 session 的空闲时间戳。"""
         self._last_idle_time[session_id] = time.monotonic()
-
-        # -- 子 Agent 编排器（由 server 层注入） --
-        self.subagent_orchestrator: Any = None
-
-        # -- session manager 引用（由 server 层注入，用于旋转/归档） --
-        self._session_manager: SessionManager | None = None
 
     # ========================================================================
     # 抽象方法实现
