@@ -254,7 +254,9 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
             messages = self._build_history_messages(user_message)
 
             try:
-                return await self._run_tool_loop(sid, messages, user_message)
+                reply = await self._run_tool_loop(sid, messages, user_message)
+                logger.info("Reply sent | session=%s reply=%s", sid, summarize_message_for_log(reply))
+                return reply
             finally:
                 self._processing = False
                 self._last_idle_time[self.session_id] = time.monotonic()
@@ -698,7 +700,9 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
     # ========================================================================
 
     async def terminate_session(self) -> dict:
+        logger.info("Terminating session (parent) | session=%s", self.session_id)
         await self._lifecycle.terminate_session()
+        logger.info("Terminate session ok (parent) | session=%s", self.session_id)
         return {"terminated": True, "session_id": self.session_id}
 
     async def merge_sessions(self, sources: list[str]) -> dict:

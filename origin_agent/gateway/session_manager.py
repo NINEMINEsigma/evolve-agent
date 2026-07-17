@@ -69,9 +69,11 @@ class SessionManager:
         )
 
     def archive(self, session_id: str, continuation_sid: str | None = None) -> None:
+        logger.info("Archive session | session=%s continuation=%s", session_id, continuation_sid)
         self._chat_sm.archive(session_id, continuation_sid=continuation_sid)
 
     def set_session_tags(self, session_id: str, tags: list[str]) -> None:
+        logger.info("Set session tags | session=%s tags=%s", session_id, tags)
         self._chat_sm.set_session_tags(session_id, tags)
 
     def set_store_dir(self, path: str) -> None:

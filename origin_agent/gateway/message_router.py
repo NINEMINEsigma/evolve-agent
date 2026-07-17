@@ -240,6 +240,7 @@ class MessageRouter:
     async def handle_confirm_response(self, msg: Message) -> None:
         """处理审批响应。"""
         if msg.request_id is not None and msg.action is not None:
+            logger.info("WS confirm response | session=%s request_id=%s action=%s", self.sid, msg.request_id, msg.action)
             from system.application import Application
             sink = Application.current().frontend_sink
             if sink:
@@ -248,6 +249,7 @@ class MessageRouter:
     async def handle_ask_response(self, msg: Message) -> None:
         """处理提问响应。"""
         if msg.request_id is not None:
+            logger.info("WS ask response | session=%s request_id=%s", self.sid, msg.request_id)
             from system.application import Application
             sink = Application.current().frontend_sink
             if sink:
@@ -255,6 +257,7 @@ class MessageRouter:
 
     async def handle_interrupt(self) -> None:
         """处理中断请求。"""
+        logger.info("WS interrupt | session=%s", self.sid)
         loop = _get_loop(self.sid)
         if loop is not None:
             loop.interrupt()
@@ -407,6 +410,7 @@ class MessageRouter:
         """处理脱手模式切换。"""
         from component.approval import set_handsfree_mode
         enabled = msg.content is not None and (str(msg.content).lower() in ("true", "1", "on"))
+        logger.info("Handsfree mode toggle | session=%s enabled=%s", self.sid, enabled)
         set_handsfree_mode(self.sid, enabled)
 
     async def handle_ping(self) -> None:

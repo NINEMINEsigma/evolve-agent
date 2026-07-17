@@ -214,12 +214,15 @@ class FrontendSink(AgentSink):
                         deny_reason: str | None = None,
                         denied_by: str = "user") -> bool:
         """解析前端发来的审批结果。"""
+        logger.info("Resolve confirm | request_id=%s action=%s denied_by=%s", request_id, action, denied_by)
         from entity.puretype import ApprovalResult
         fut = self._pending_confirms.pop(request_id, None)
         self._confirm_session_map.pop(request_id, None)
         if fut and not fut.done():
             fut.set_result(ApprovalResult(action=action, deny_reason=deny_reason, denied_by=denied_by))
+            logger.info("Resolve confirm ok | request_id=%s action=%s", request_id, action)
             return True
+        logger.warning("Resolve confirm fail | request_id=%s (no pending future)", request_id)
         return False
 
     def _deny_session_confirms(self, session_id: str) -> None:
@@ -281,12 +284,15 @@ class FrontendSink(AgentSink):
     def resolve_ask(self, request_id: str, option: str | None = None,
                     custom_text: str | None = None) -> bool:
         """解析前端发来的提问结果。"""
+        logger.info("Resolve ask | request_id=%s option=%s", request_id, option)
         fut = self._pending_asks.pop(request_id, None)
         self._ask_session_map.pop(request_id, None)
         if fut and not fut.done():
             result = json.dumps({"option": option, "custom_text": custom_text}, ensure_ascii=False)
             fut.set_result(result)
+            logger.info("Resolve ask ok | request_id=%s", request_id)
             return True
+        logger.warning("Resolve ask fail | request_id=%s (no pending future)", request_id)
         return False
 
     def _deny_session_asks(self, session_id: str) -> None:

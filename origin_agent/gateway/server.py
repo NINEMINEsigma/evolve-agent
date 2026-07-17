@@ -548,6 +548,7 @@ async def update_session_tags(session_id: str, req: Request):
         return {"updated": False, "error": "tags must be an array", "session_id": session_id}
     tags: list[str] = [str(t).strip() for t in raw_tags]
     valid = _get_sm().set_session_tags(session_id, tags)
+    logger.info("Update tags | session=%s tags=%s", session_id, valid)
     return {"updated": True, "session_id": session_id, "tags": valid}
 
 
@@ -596,6 +597,7 @@ async def http_confirm(request_id: str, req: Request):
     sink = Application.current().frontend_sink
     if sink:
         sink.resolve_confirm(request_id, action, deny_reason=deny_reason, denied_by=denied_by)
+    logger.info("HTTP confirm | request_id=%s action=%s denied_by=%s", request_id, action, denied_by)
     return {"resolved": True, "request_id": request_id, "action": action}
 
 
@@ -614,6 +616,7 @@ async def http_ask(request_id: str, req: Request):
     sink = Application.current().frontend_sink
     if sink:
         sink.resolve_ask(request_id, option=option, custom_text=custom_text)
+    logger.info("HTTP ask response | request_id=%s option=%s", request_id, option)
     return {"resolved": True, "request_id": request_id, "option": option, "custom_text": custom_text}
 
 
@@ -621,6 +624,7 @@ async def http_ask(request_id: str, req: Request):
 async def http_interrupt(session_id: str):
     """通过 HTTP 处理中断请求，使其在 WS handler 被
     ``process_message()`` 阻塞时仍能生效。"""
+    logger.info("HTTP interrupt | session=%s", session_id)
     loop = _get_loop(session_id)
     if loop is not None:
         loop.loop.interrupt()
@@ -630,6 +634,7 @@ async def http_interrupt(session_id: str):
 @app.delete("/api/sessions/{session_id}")
 async def delete_session(session_id: str):
     """删除 session 及其持久化数据。"""
+    logger.info("Delete session | session=%s", session_id)
     _get_sm().remove(session_id)
     loop = _get_loop(session_id)
     if loop is not None:
@@ -640,12 +645,14 @@ async def delete_session(session_id: str):
         await orch.shutdown_parent(session_id)
     except Exception:
         logger.warning("Failed to shutdown subagents for session=%s", session_id, exc_info=True)
+    logger.info("Delete session ok | session=%s", session_id)
     return {"deleted": True, "session_id": session_id}
 
 
 @app.put("/api/sessions/{session_id}/messages/{message_index}")
 async def update_session_message(session_id: str, message_index: int, req: Request):
     """编辑指定 session 中一条历史消息的正文或 visible_characters，不触发重新生成。"""
+    logger.info("Edit message request | session=%s index=%d", session_id, message_index)
     body: dict = {}
     try:
         body = await req.json()
@@ -667,6 +674,7 @@ async def update_session_message(session_id: str, message_index: int, req: Reque
         return {"updated": False, "error": "agent loop not ready", "session_id": session_id}
     result = loop.loop.edit_session_message(message_index, content, visible_characters)
     status_code = 200 if result.get("updated") else 400
+    logger.info("Edit message result | session=%s index=%d updated=%s", session_id, message_index, result.get("updated"))
     return HTMLResponse(
         json.dumps(result, ensure_ascii=False),
         media_type="application/json",
@@ -677,6 +685,7 @@ async def update_session_message(session_id: str, message_index: int, req: Reque
 @app.delete("/api/sessions/{session_id}/messages")
 async def delete_session_messages(session_id: str, count: int = 1):
     """删除最后 count 个逻辑轮次的消息（从倒数第 count 条 user 起，覆盖其后所有 tool/assistant）。"""
+    logger.info("Delete messages request | session=%s count=%d", session_id, count)
     info = _get_sm().get(session_id)
     if info and info.status == SessionStatus.archived:
         result = {"deleted": False, "error": "archived session"}
@@ -690,6 +699,7 @@ async def delete_session_messages(session_id: str, count: int = 1):
         return {"deleted": False, "error": "agent loop not ready"}
     result = loop.loop.delete_session_messages(count)
     status_code = 200 if result.get("deleted") else 400
+    logger.info("Delete messages result | session=%s count=%d deleted=%s remaining=%s", session_id, count, result.get("deleted"), result.get("remaining_count"))
     return HTMLResponse(
         json.dumps(result, ensure_ascii=False),
         media_type="application/json",
@@ -700,6 +710,7 @@ async def delete_session_messages(session_id: str, count: int = 1):
 @app.post("/api/sessions/{session_id}/regenerate")
 async def regenerate_response(session_id: str):
     """重新生成最后一条 user 消息的响应：截断历史，重新调用 process_message。"""
+    logger.info("Regenerate request | session=%s", session_id)
     info = _get_sm().get(session_id)
     if info and info.status == SessionStatus.archived:
         result = {"regenerate": False, "error": "archived session"}
@@ -753,7 +764,9 @@ async def regenerate_response(session_id: str):
             await sink.emit_assistant_message(
                 session_id, reply, loop.current_character_agent,
             )
+    logger.info("Regenerate ok | session=%s", session_id)
     return {"regenerate": True, "session_id": session_id}
+
 
 
 @app.put("/api/sessions/{session_id}/title")
@@ -767,6 +780,7 @@ async def update_session_title(session_id: str, req: Request):
         logger.warning("Failed to parse title request body for session=%s", session_id, exc_info=True)
         title = ""
     _get_sm().update_title(session_id, title)
+    logger.info("Update title | session=%s title=%s", session_id, title)
     return {"updated": True, "session_id": session_id, "title": title}
 
 
@@ -781,6 +795,7 @@ async def auto_title_session(session_id: str):
         logger.warning("Failed to auto-generate title for session=%s", session_id)
     if title:
         _get_sm().update_title(session_id, title)
+    logger.info("Auto title | session=%s title=%s", session_id, title)
     return {"title": title, "session_id": session_id}
 
 
@@ -797,12 +812,14 @@ async def auto_tags_session(session_id: str):
                 sm.set_session_tags(session_id, tags)
     else:
         logger.warning("Failed to auto-generate tags for session=%s", session_id)
+    logger.info("Auto tags | session=%s tags=%s", session_id, tags)
     return {"tags": tags, "session_id": session_id}
 
 
 @app.post("/api/sessions/{session_id}/regenerate-summary")
 async def regenerate_summary_endpoint(session_id: str):
     """重新生成指定会话的摘要。"""
+    logger.info("Regenerate summary | session=%s", session_id)
     loop = _get_loop(session_id)
     if loop is not None:
         summary = await loop.regenerate_summary_for_session(session_id)
@@ -813,6 +830,7 @@ async def regenerate_summary_endpoint(session_id: str):
 @app.post("/api/sessions/{session_id}/terminate")
 async def terminate_session_endpoint(session_id: str):
     """手动终结指定会话：归档 + 压缩（生成摘要），不旋转。"""
+    logger.info("Terminate session | session=%s", session_id)
     # 先停止该父会话的所有子 Agent 会话
     try:
         orch = get_subagent_orchestrator()
@@ -822,7 +840,9 @@ async def terminate_session_endpoint(session_id: str):
     loop = _get_loop(session_id)
     if loop is not None:
         result = await loop.loop.terminate_session()
+        logger.info("Terminate session ok | session=%s terminated=%s", session_id, result.get("terminated"))
         return result
+    logger.warning("Terminate session fail | session=%s error=agent loop not ready", session_id)
     return {"terminated": False, "error": "agent loop not ready", "session_id": session_id}
 
 
@@ -830,6 +850,7 @@ async def terminate_session_endpoint(session_id: str):
 async def pin_session_endpoint(session_id: str):
     """切换 session 置顶状态。"""
     pinned: bool = _get_sm().toggle_pin(session_id)
+    logger.info("Toggle pin | session=%s pinned=%s", session_id, pinned)
     return {"pinned": pinned, "session_id": session_id}
 
 
@@ -845,6 +866,7 @@ async def merge_sessions_endpoint(req: Request):
     except Exception:
         logger.warning("Failed to parse merge request body", exc_info=True)
     sources: list[str] = body.get("sources", [])
+    logger.info("Merge sessions | sources=%s", sources)
     if not sources:
         return {"error": "sources array required", "merged": False}
     err = _get_sm().validate_merge_sources(sources)
@@ -861,6 +883,7 @@ async def merge_sessions_endpoint(req: Request):
 @app.post("/api/sessions/{session_id}/branch")
 async def branch_session_endpoint(session_id: str):
     """从指定会话创建分支延续（单源 merge 的快捷端点）。"""
+    logger.info("Branch session | source=%s", session_id)
     err = _get_sm().validate_merge_sources([session_id])
     if err:
         return {"error": err, "merged": False}
@@ -882,8 +905,10 @@ async def list_background_tasks_endpoint(session_id: str):
 @app.post("/api/sessions/{session_id}/background-tasks/{task_id}/stop")
 async def stop_background_task_endpoint(session_id: str, task_id: str):
     """停止指定的后台任务。"""
+    logger.info("Stop background task | session=%s task_id=%s", session_id, task_id)
     from component.extools.background_service import stop_background_task
     result = stop_background_task(task_id)
+    logger.info("Stop background task ok | session=%s task_id=%s result=%s", session_id, task_id, result)
     return result
 
 
@@ -898,6 +923,7 @@ async def list_cron_tasks_endpoint(session_id: str):
 @app.post("/api/sessions/{session_id}/cron-tasks/{task_id}/trigger")
 async def trigger_cron_task_endpoint(session_id: str, task_id: str):
     """立即触发指定的定时任务执行一次。"""
+    logger.info("Trigger cron task | session=%s task_id=%s", session_id, task_id)
     from component.extools.cron_tools import trigger_cron_task
     result = trigger_cron_task(session_id, task_id)
     return result
@@ -906,6 +932,7 @@ async def trigger_cron_task_endpoint(session_id: str, task_id: str):
 @app.post("/api/sessions/{session_id}/cron-tasks/{task_id}/cancel")
 async def cancel_cron_task_endpoint(session_id: str, task_id: str):
     """取消指定的定时任务。"""
+    logger.info("Cancel cron task | session=%s task_id=%s", session_id, task_id)
     from component.extools.cron_tools import cancel_cron_task
     result = cancel_cron_task(session_id, task_id)
     return result
@@ -1048,6 +1075,7 @@ async def download_workspace_file(file_path: str):
 @app.post("/api/shutdown-approval-model")
 async def shutdown_approval_model_endpoint():
     """关闭本地审批模型 (llama-server) 以释放显存。"""
+    logger.info("Shutdown approval model")
     try:
         from system.application import Application
         mgr = Application.current().approval_backend_manager
@@ -1130,6 +1158,7 @@ async def agentspace_write(req: Request):
         raise HTTPException(status_code=400, detail="path required")
     if _agentspace_lock["locked"]:
         raise HTTPException(status_code=423, detail="Agentspace is locked by agent")
+    logger.info("Agentspace write | path=%s", path)
     try:
         logical = _to_logical_path(path)
         from system.context import get_runtime_context
@@ -1137,6 +1166,7 @@ async def agentspace_write(req: Request):
         sandbox = Sandbox(get_runtime_context())
         sandbox.write(logical, content)
         _record_agentspace_change("edit", path)
+        logger.info("Agentspace write ok | path=%s", path)
         return {"success": True}
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
@@ -1160,6 +1190,7 @@ async def agentspace_mkdir(req: Request):
         raise HTTPException(status_code=400, detail="path required")
     if _agentspace_lock["locked"]:
         raise HTTPException(status_code=423, detail="Agentspace is locked by agent")
+    logger.info("Agentspace mkdir | path=%s", path)
     try:
         logical = _to_logical_path(path)
         from system.context import get_runtime_context
@@ -1167,6 +1198,7 @@ async def agentspace_mkdir(req: Request):
         sandbox = Sandbox(get_runtime_context())
         sandbox.create_folder(logical, parents=True)
         _record_agentspace_change("create", path)
+        logger.info("Agentspace mkdir ok | path=%s", path)
         return {"success": True}
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
@@ -1190,6 +1222,7 @@ async def agentspace_delete(req: Request):
         raise HTTPException(status_code=400, detail="path required")
     if _agentspace_lock["locked"]:
         raise HTTPException(status_code=423, detail="Agentspace is locked by agent")
+    logger.info("Agentspace delete | path=%s", path)
     try:
         logical = _to_logical_path(path)
         from system.context import get_runtime_context
@@ -1200,6 +1233,7 @@ async def agentspace_delete(req: Request):
         else:
             sandbox.delete(logical)
         _record_agentspace_change("delete", path)
+        logger.info("Agentspace delete ok | path=%s", path)
         return {"success": True}
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
@@ -1224,6 +1258,7 @@ async def agentspace_rename(req: Request):
         raise HTTPException(status_code=400, detail="oldPath and newPath required")
     if _agentspace_lock["locked"]:
         raise HTTPException(status_code=423, detail="Agentspace is locked by agent")
+    logger.info("Agentspace rename | old=%s new=%s", old_path, new_path)
     try:
         old_logical = _to_logical_path(old_path)
         new_logical = _to_logical_path(new_path)
@@ -1232,6 +1267,7 @@ async def agentspace_rename(req: Request):
         sandbox = Sandbox(get_runtime_context())
         sandbox.move(old_logical, new_logical)
         _record_agentspace_change("rename", new_path, old_path=old_path)
+        logger.info("Agentspace rename ok | old=%s new=%s", old_path, new_path)
         return {"success": True}
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))

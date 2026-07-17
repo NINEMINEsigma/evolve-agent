@@ -364,7 +364,7 @@ class SessionManager:
             sdir: Path = self._store_dir / sid
             if sdir.exists():
                 shutil.rmtree(sdir)
-        logger.debug("Session removed | id=%s", sid)
+        logger.info("Session removed | id=%s", sid)
 
     def remove_from_index(self, sid: str) -> None:
         """仅从索引中移除 session，不删除磁盘目录（用于不兼容格式场景）。"""
@@ -378,6 +378,7 @@ class SessionManager:
 
     def update_title(self, sid: str, title: str) -> None:
         """更新内存和磁盘中 session 的标题。"""
+        logger.info("Update title | session=%s title=%s", sid, title)
         if sid in self._sessions:
             self._sessions[sid].title = title
         if self._store_dir:
@@ -424,6 +425,7 @@ class SessionManager:
                         e["pinned"] = new_val
                         break
                 self._write_index(entries)
+        logger.info("Toggle pin | session=%s pinned=%s", sid, new_val)
         return new_val
 
     def get(self, sid: str) -> SessionInfo | None:
