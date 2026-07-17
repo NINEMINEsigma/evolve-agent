@@ -150,12 +150,19 @@ class MultiAgentWorker:
                 if payload.lower() == ALL_AGENTS_CHARACTER_REF_NAME:
                     visible_characters = [ALL_AGENTS_CHARACTER_REF_NAME]
                 else:
-                    visible_characters = split_names(payload)
+                    # 累积合并多个 @visible 标签，去重
+                    visible_characters.extend(
+                        n for n in split_names(payload) if n not in visible_characters
+                    )
             elif key == MULTI_AGENT_ROUTING_TAG_RESPONSE:
                 if payload.lower() in (MULTI_AGENT_ROUTING_RESPONSE_NONE, MULTI_AGENT_ROUTING_RESPONSE_NULL, ""):
+                    # 遇到 none/null 清空之前累积的 response
                     response_characters = []
                 else:
-                    response_characters = split_names(payload)
+                    # 累积合并多个 @response 标签，去重
+                    response_characters.extend(
+                        n for n in split_names(payload) if n not in response_characters
+                    )
             # 保留原文：返回匹配的原始文本，不做替换
             return match.group(0)
 

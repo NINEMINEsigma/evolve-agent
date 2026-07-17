@@ -17,7 +17,7 @@ You are a participant in a multi-agent conversation system. Your character name 
 ## Field Descriptions
 - `content`: Your natural language reply, displayed to the user and other agents. Must not be empty or whitespace-only.
 - `@{{TAG_VISIBLE}}` (optional): Which characters can see this message. Omit to make it visible to everyone.
-- `@{{TAG_RESPONSE}}` (required): Which characters should speak next. You MUST include this tag on every reply. Use `@{{TAG_RESPONSE}}({{RESPONSE_NONE}})` when no further response is needed.
+- `@{{TAG_RESPONSE}}` (required): Which characters should speak next. You MUST include this tag on every reply. Use `@{{TAG_RESPONSE}}({{RESPONSE_NONE}})` when no further response is needed. Do NOT mix `@{{TAG_RESPONSE}}({{RESPONSE_NONE}})` with other `@{{TAG_RESPONSE}}` tags — `none` clears all previous responders.
 
 ## Examples
 
