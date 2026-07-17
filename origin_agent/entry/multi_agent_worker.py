@@ -119,7 +119,7 @@ class MultiAgentWorker:
 
     @staticmethod
     def _parse_routing_tags(text: str) -> AgentResponse:
-        """从自然语言文本中解析 DSL 路由标签。
+        """从自然语言文本中旁路解析 DSL 路由标签。
 
         支持格式：
         - @visible(Noire, 杏)
@@ -127,9 +127,9 @@ class MultiAgentWorker:
         - @response(none)
         - @visible(all) / @visible(all-agents)
 
-        返回的 AgentResponse.content 已剥离所有路由标签。
-        若未命中任何标签，visible_characters 与 response_characters 均为空列表
-        （由外层补全默认值）。
+        content 保留原始全文（含标签），不剥离、不修改。
+        visible_characters / response_characters 作为旁路结构化字段返回。
+        若未命中任何标签，二者均为空列表（由外层补全默认值）。
         """
         if not text:
             return AgentResponse(content="", visible_characters=[], response_characters=[])
@@ -156,14 +156,14 @@ class MultiAgentWorker:
                     response_characters = []
                 else:
                     response_characters = split_names(payload)
-            return ""
+            # 保留原文：返回匹配的原始文本，不做替换
+            return match.group(0)
 
-        clean_text = tag_pattern.sub(process_match, text)
-        clean_text = clean_text.strip()
-        clean_text = re.sub(r"\n{3,}", "\n\n", clean_text)
+        # 旁路提取路由标签值，content 保留原始全文
+        tag_pattern.sub(process_match, text)
 
         return AgentResponse(
-            content=clean_text,
+            content=text,
             visible_characters=visible_characters,
             response_characters=response_characters,
         )
@@ -285,14 +285,6 @@ class MultiAgentWorker:
                 "MultiAgentWorker DSL parse | session=%s character=%s turn=%d parsed=%s",
                 self._loop.loop.session_id, self.character_name, turn, parsed,
             )
-
-            # DSL 解析后 content 为空/仅空白：兜底提示
-            if not parsed.content or not parsed.content.strip():
-                return await self._error_result(
-                    "Empty content after stripping routing tags",
-                    raw_text=text,
-                    reasoning=resp.reasoning_content,
-                )
 
             return WorkerResult(
                 character_name=self.character_name,
