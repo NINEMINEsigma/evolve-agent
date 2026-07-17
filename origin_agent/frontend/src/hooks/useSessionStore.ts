@@ -1084,14 +1084,19 @@ export function useSessionStore(callbacks: SessionStoreCallbacks = {}): SessionS
           const session = component[0];
           items.push({ kind: "session", session });
         } else if (component.length > 1) {
+          // 簇 ID 绑定 created_at 最早的成员（对话树根节点），确保跨 fetchSessions 不漂移
+          const root = component.reduce((min, s) =>
+            (s.created_at < min.created_at) ? s : min
+          );
+          // 显示标题取最近活跃成员，与 ID 解耦
           component.sort((a, b) => (b.last_activity_at || b.created_at) - (a.last_activity_at || a.created_at));
-          const head = component[0];
+          const mostRecent = component[0];
           items.push({
             kind: "cluster",
             cluster: {
-              id: head.id,
-              created_at: head.created_at,
-              title: head.title || head.id.slice(0, 8) + "...",
+              id: root.id,
+              created_at: root.created_at,
+              title: mostRecent.title || mostRecent.id.slice(0, 8) + "...",
               pinned: component.some((m) => m.pinned),
               last_activity_at: Math.max(...component.map((m) => m.last_activity_at || m.created_at)),
               members: component,
@@ -1141,6 +1146,20 @@ export function useSessionStore(callbacks: SessionStoreCallbacks = {}): SessionS
     }
     return buildSidebarItems(sessions);
   }, [sessions, searchQuery, mergeMode]);
+
+  // 自动展开包含当前活跃会话的簇，确保切换会话后簇不会意外收起
+  useEffect(() => {
+    if (!sessionId) return;
+    const activeCluster = sidebarItems.find(
+      (item) => item.kind === "cluster" && item.cluster.members.some((m) => m.id === sessionId)
+    );
+    if (activeCluster && activeCluster.kind === "cluster") {
+      const cid = activeCluster.cluster.id;
+      if (!expandedClusters.has(cid)) {
+        setExpandedClusters((prev) => new Set(prev).add(cid));
+      }
+    }
+  }, [sidebarItems, sessionId, expandedClusters]);
 
   const sessionResources = useMemo(() => extractMessageResources(messages), [messages]);
 

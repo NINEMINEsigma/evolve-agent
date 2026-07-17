@@ -153,8 +153,8 @@ def sanitize_image_payload(result: dict, keep_metadata: bool = True) -> dict:
     return pr_copy
 
 
-def summarize_message_for_log(content: str | list[Any] | None, max_text_len: int = 30000) -> str:
-    """将用户消息（纯文本或多模态 blocks）转为适合日志的短字符串。
+def summarize_message_for_log(content: str | list[Any] | None, max_text_len: int = 300) -> str:
+    """将消息（纯文本或多模态 blocks）转为适合日志的短字符串。
 
     图片 block 会被替换为 [image_url] 占位符，避免 base64 撑爆日志。
     """

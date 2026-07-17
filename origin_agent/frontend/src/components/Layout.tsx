@@ -271,6 +271,7 @@ export default function Layout({ ws, onContextMenu }: LayoutProps) {
           onRegenerateResponse={ws.regenerateResponse}
           bottomRef={ws.bottomRef}
           chatAreaRef={ws.chatAreaRef}
+          contentRef={ws.contentRef}
           onDropFiles={ws.handleFileUpload}
           streamingMessage={ws.streamingMessage}
           agents={ws.agents}

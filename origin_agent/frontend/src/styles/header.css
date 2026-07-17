@@ -35,6 +35,8 @@
   padding: 5px 16px;
   border-radius: 999px;
   background: var(--accent-grad);
+  background-size: 200% 200%;
+  animation: gradientFlow 3s ease infinite;
   color: #fff;
   font-size: 13px;
   font-weight: 600;
@@ -127,9 +129,14 @@
   }
 }
 
+@keyframes gradientFlow {
+  0% { background-position: 0% 50%; }
+  100% { background-position: 200% 50%; }
+}
+
 .header-pill.disconnected,
 .header-pill.reconnecting {
-  animation: pillBlink 1s ease-in-out infinite;
+  animation: pillBlink 1s ease-in-out infinite, gradientFlow 3s ease infinite;
 }
 
 @keyframes pillBlink {
@@ -515,6 +522,7 @@
 /* ── Multi-agent header pill ── */
 .header-pill.multi-agent {
   background: var(--multi-accent-grad);
+  background-size: 200% 200%;
   box-shadow: 0 4px 14px -4px var(--multi-accent-glow);
 }
 

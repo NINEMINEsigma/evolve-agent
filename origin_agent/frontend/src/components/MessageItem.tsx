@@ -141,7 +141,10 @@ const MessageItem = memo(function MessageItem({
             {editing ? (
               <MessageEditor
                 message={m}
-                onSave={(content) => onEditMessage(m.id, content)}
+                onSave={async (content) => {
+                  await onEditMessage(m.id, content);
+                  setEditing(false);
+                }}
                 onCancel={() => setEditing(false)}
               />
             ) : (
