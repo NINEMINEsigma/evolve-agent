@@ -1,12 +1,13 @@
 /**
  * 在 assistant 消息气泡中通过 iframe 渲染 AI 输出的原始 HTML。
  *
- * 使用 iframe + srcDoc 把 agent 内容隔离在独立文档中，CSS 和 JS 不会污染外层页面；
- * 同时通过 postMessage 把内容高度同步给父组件，让 iframe 高度自适应内容，
- * 避免内部出现滚动条或过大空白。
+ * 使用 iframe 把 agent 内容隔离在独立文档中，CSS 和 JS 不会污染外层页面；
+ * 通过 postMessage 向 iframe 内部发送完整 HTML，由 iframe 内部脚本只更新 body 内容，
+ * 避免 srcDoc 每次变化都导致整页重新加载，从而消除流式输出时的闪烁。
+ * 同时通过 postMessage 把内容高度同步给父组件，让 iframe 高度自适应内容。
  */
 
-import React, { useEffect, useId, useMemo, useState } from "react";
+import React, { useEffect, useId, useRef, useState } from "react";
 
 interface SafeHtmlProps {
   html: string;
@@ -24,11 +25,14 @@ const BASE_RESET_STYLE = `
   body { overflow: hidden; }
 `;
 
-function buildHeightSyncScript(instanceId: string): string {
+const DYNAMIC_MARKER = "data-safe-html-dynamic";
+
+function buildShellScript(instanceId: string): string {
   return `
 <script>
 (function () {
   const id = ${JSON.stringify(instanceId)};
+  const DYNAMIC_MARKER = ${JSON.stringify(DYNAMIC_MARKER)};
   let lastHeight = 0;
 
   function sendHeight() {
@@ -36,7 +40,6 @@ function buildHeightSyncScript(instanceId: string): string {
     const html = document.documentElement;
     if (!body || !html) return;
 
-    // 优先使用 body 实际内容高度，避免 html.scrollHeight 包含额外空白
     const bodyHeight = Math.max(
       body.getBoundingClientRect().height,
       body.scrollHeight,
@@ -47,12 +50,64 @@ function buildHeightSyncScript(instanceId: string): string {
     if (height === lastHeight) return;
     lastHeight = height;
     if (window.parent && window.parent !== window) {
-      window.parent.postMessage(
-        { type: "safe-html-resize", id, height },
-        "*"
-      );
+      window.parent.postMessage({ type: "safe-html-resize", id, height }, "*");
     }
   }
+
+  function reexecuteScripts(root) {
+    root.querySelectorAll("script").forEach((oldScript) => {
+      const newScript = document.createElement("script");
+      for (let i = 0; i < oldScript.attributes.length; i++) {
+        const attr = oldScript.attributes[i];
+        newScript.setAttribute(attr.name, attr.value);
+      }
+      newScript.textContent = oldScript.textContent;
+      oldScript.replaceWith(newScript);
+    });
+  }
+
+  function clearDynamicHead() {
+    document.head.querySelectorAll("[" + DYNAMIC_MARKER + "]").forEach((el) => el.remove());
+  }
+
+  function setHeadFromHtml(headHtml) {
+    if (!headHtml) return;
+    const temp = document.createElement("div");
+    temp.innerHTML = headHtml;
+    temp.querySelectorAll("style, link, script, meta, title, base").forEach((tag) => {
+      tag.setAttribute(DYNAMIC_MARKER, "true");
+      document.head.appendChild(tag);
+    });
+    reexecuteScripts(document.head);
+  }
+
+  function updateHtml(rawHtml) {
+    try {
+      let bodyHtml = rawHtml || "";
+      let headHtml = "";
+
+      if (/<html\\b/i.test(rawHtml)) {
+        const bodyMatch = rawHtml.match(/<body[^>]*>([\\s\\S]*)<\\/body>/i);
+        if (bodyMatch) bodyHtml = bodyMatch[1];
+        const headMatch = rawHtml.match(/<head[^>]*>([\\s\\S]*)<\\/head>/i);
+        if (headMatch) headHtml = headMatch[1];
+      }
+
+      clearDynamicHead();
+      if (headHtml) setHeadFromHtml(headHtml);
+      document.body.innerHTML = bodyHtml;
+      reexecuteScripts(document.body);
+      sendHeight();
+    } catch (err) {
+      console.error("[SafeHtml] updateHtml failed:", err);
+    }
+  }
+
+  window.addEventListener("message", (event) => {
+    if (!event.data || event.data.type !== "safe-html-update") return;
+    if (event.data.id !== id) return;
+    updateHtml(event.data.html);
+  });
 
   sendHeight();
 
@@ -78,13 +133,8 @@ function buildHeightSyncScript(instanceId: string): string {
   `.trim();
 }
 
-function buildHtmlDocument(rawHtml: string, instanceId: string): string {
-  const script = buildHeightSyncScript(instanceId);
-
-  if (/<html\b/i.test(rawHtml) && /<\/body>/i.test(rawHtml)) {
-    return rawHtml.replace(/<\/body>/i, `${script}\n</body>`);
-  }
-
+function buildShellDocument(instanceId: string): string {
+  const script = buildShellScript(instanceId);
   return `<!DOCTYPE html>
 <html>
 <head>
@@ -92,15 +142,27 @@ function buildHtmlDocument(rawHtml: string, instanceId: string): string {
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <style>${BASE_RESET_STYLE}</style>
 </head>
-<body>${rawHtml}${script}</body>
+<body>${script}</body>
 </html>`;
 }
 
 export default function SafeHtml({ html, className }: SafeHtmlProps) {
   const [height, setHeight] = useState(0);
+  const [loaded, setLoaded] = useState(false);
   const id = useId();
+  const iframeRef = useRef<HTMLIFrameElement>(null);
 
-  const srcDoc = useMemo(() => buildHtmlDocument(html, id), [html, id]);
+  const sendHtml = (targetHtml: string) => {
+    const contentWindow = iframeRef.current?.contentWindow;
+    if (!contentWindow) return;
+    contentWindow.postMessage({ type: "safe-html-update", id, html: targetHtml }, "*");
+  };
+
+  useEffect(() => {
+    if (loaded) {
+      sendHtml(html);
+    }
+  }, [html, loaded, id]);
 
   useEffect(() => {
     const handleMessage = (event: MessageEvent) => {
@@ -122,10 +184,12 @@ export default function SafeHtml({ html, className }: SafeHtmlProps) {
 
   return (
     <iframe
+      ref={iframeRef}
       className={`safe-html-iframe ${className || ""}`.trim()}
-      srcDoc={srcDoc}
+      srcDoc={buildShellDocument(id)}
+      onLoad={() => setLoaded(true)}
       style={iframeStyle}
-      sandbox="allow-scripts allow-popups allow-forms"
+      sandbox="allow-scripts allow-popups allow-forms allow-same-origin"
       title="agent-rendered-content"
     />
   );

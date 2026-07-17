@@ -400,7 +400,7 @@ if __name__ == "__main__":
 
 3. **Fix and retry**:
    ```
-   write_fork: {"file": "broken.py", "old_string": "...", "new_string": "..."}
+   edit_file: {"path": "fork:broken.py", "old_string": "...", "new_string": "..."}
    validate_code: {"file": "broken.py"}
    ```
 

@@ -35,6 +35,8 @@
   padding: 5px 16px;
   border-radius: 999px;
   background: var(--accent-grad);
+  background-size: 200% 200%;
+  animation: gradientFlow 3s ease infinite;
   color: #fff;
   font-size: 13px;
   font-weight: 600;
@@ -127,9 +129,14 @@
   }
 }
 
+@keyframes gradientFlow {
+  0% { background-position: 0% 50%; }
+  100% { background-position: 200% 50%; }
+}
+
 .header-pill.disconnected,
 .header-pill.reconnecting {
-  animation: pillBlink 1s ease-in-out infinite;
+  animation: pillBlink 1s ease-in-out infinite, gradientFlow 3s ease infinite;
 }
 
 @keyframes pillBlink {
@@ -162,8 +169,6 @@
   min-width: 0;
   overflow: hidden;
   justify-content: flex-end;
-  container-type: inline-size;
-  container-name: header-right;
 }
 
 .session-badge {
@@ -248,6 +253,7 @@
   overflow: hidden;
   text-overflow: ellipsis;
   max-width: 100%;
+  flex-shrink: 0;
 }
 
 .header-action-btn {
@@ -439,7 +445,7 @@
   font-family: "SF Mono", "Fira Code", monospace;
 }
 
-@container header-right (max-width: 520px) {
+@media (max-width: 900px) {
   .token-badge {
     display: none;
   }
@@ -448,7 +454,7 @@
   }
 }
 
-@container header-right (max-width: 380px) {
+@media (max-width: 768px) {
   .session-badge {
     display: none;
   }
@@ -471,17 +477,52 @@
   .app-header { padding: 8px 12px; }
   .header-pill { padding: 4px 10px; font-size: 11px; }
   .token-badge { display: none; }
-  .session-badge {
-    max-width: 80px;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
+  .session-badge { display: none; }
+}
+
+/* ── Header collapse (mobile) ── */
+.app-header-collapsed {
+  padding: 6px 12px;
+  min-height: 36px;
+  grid-template-columns: auto 1fr auto;
+}
+
+.app-header-collapsed .header-left {
+  gap: 6px;
+}
+
+.app-header-collapsed .header-center {
+  gap: 4px;
+}
+
+.app-header-collapsed .header-right {
+  gap: 4px;
+}
+
+.header-collapse-btn {
+  width: 28px;
+  height: 28px;
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.15s, color 0.15s;
+  flex-shrink: 0;
+}
+
+.header-collapse-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
 }
 
 /* ── Multi-agent header pill ── */
 .header-pill.multi-agent {
   background: var(--multi-accent-grad);
+  background-size: 200% 200%;
   box-shadow: 0 4px 14px -4px var(--multi-accent-glow);
 }
 

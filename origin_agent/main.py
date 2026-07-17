@@ -117,6 +117,15 @@ class App:
         except Exception as exc:
             logger.warning("Background service cleanup failed: %s", exc)
 
+        # ---- 清理 LSP 进程 ----
+        try:
+            from system.lsp import cleanup_lsp
+            killed = await asyncio.to_thread(cleanup_lsp)
+            if killed:
+                logger.info("Cleaned up LSP server process")
+        except Exception as exc:
+            logger.warning("LSP cleanup failed: %s", exc)
+
         # ---- 关闭 Application 子系统 ----
         try:
             await Application.current().shutdown()
@@ -189,7 +198,7 @@ category: core
 You can modify your own source code and complete evolution through the following tools:
 
 1. Use the filesystem tool to read source code from ``fork:``
-2. ``write_fork`` or ``edit_file`` — write evolved code to fork: or ws:
+2. ``write_file`` or ``edit_file`` — write evolved code to fork: or ws:
 3. ``validate_code`` — check syntax
 4. ``diff_fast_fork`` — diff fast fork and save diff file
 5. ``evolve_code`` — deep validate and trigger swap
@@ -223,17 +232,6 @@ You can modify your own source code and complete evolution through the following
                 frontend_sink=FrontendSink(),
                 history_store_dir=Path(history_path) if history_path else None,
             )
-
-            # 注册持久化 memory provider
-            try:
-                from memory.provider import EasysaveMemoryProvider
-                mem: EasysaveMemoryProvider = EasysaveMemoryProvider(
-                    memory_dir=self.ctx.workspace / "memory"
-                )
-                agent_loop.add_memory_provider(mem)
-                logger.info("EasysaveMemoryProvider registered")
-            except Exception as exc:
-                logger.warning("Memory provider unavailable: %s", exc)
 
             # 将工具事件流连接到前端
             from gateway.server import _send_tool_event

@@ -14,12 +14,13 @@ import time
 from datetime import datetime
 from typing import Any, Awaitable, Callable, TYPE_CHECKING
 
-from entity.puretype import Role, ToolCallMeta
+from entity.puretype import Role, ToolCallMeta, ToolCall
 from entity.messages import ToolResultMessage
 from entry.base_agent_loop import BaseAgentLoop, ToolContext, IMainSessionLoop
+from entry.tool_post_dispatch import finalize_tool_result
 
 if TYPE_CHECKING:
-    from component.llm import ToolCall, LLMClient
+    from abstract.llm.client import BaseLLMClient
 
 logger = logging.getLogger(__name__)
 
@@ -30,7 +31,7 @@ class ToolExecutor:
     由 IMainSessionLoop 持有，每个 tool_call 调用一次 ``execute()``。
     """
 
-    def __init__(self, loop: IMainSessionLoop, llm: LLMClient) -> None:
+    def __init__(self, loop: IMainSessionLoop, llm: BaseLLMClient) -> None:
         self._loop = loop
         self._llm = llm
         self._tool_stats: dict[str, dict[str, int]] = {}
@@ -44,12 +45,23 @@ class ToolExecutor:
         self,
         tc: ToolCall,
         session_id: str,
+        *,
+        character_name: str | None = None,
     ) -> ToolResultMessage:
-        """执行单个工具调用，返回 ToolResultMessage。"""
+        """执行单个工具调用，返回 ToolResultMessage。
+
+        Args:
+            tc: 工具调用描述。
+            session_id: 当前会话 ID。
+            character_name: 发起此工具调用的角色名；
+                MultiAgent 模式下由 worker 传入对应 Agent 名称，
+                默认回退到 loop.current_character_agent。
+        """
         from entity.constant import LOG_PREVIEW_CHARS
         from component.approval import execute_with_approval, ask_agent_reason as _ask_agent_reason
         from abstract.tools.registry import registry as tool_registry
-        from abstract.tools.ui_event_router import ui_event_router
+
+        char_name = character_name or self._loop.current_character_agent
 
         # -- 记录申请时间（审批流程之前） --
         start_mono: float = time.monotonic()
@@ -61,7 +73,7 @@ class ToolExecutor:
         args = dict(tc.arguments)
 
         # 取消检查
-        if self._loop.loop.is_interrupted() or self._loop.loop.is_interrupted():
+        if self._loop.loop.is_interrupted():
             _meta = ToolCallMeta(
                 application_time=application_time,
                 application_time_ms=application_time_ms,
@@ -73,7 +85,7 @@ class ToolExecutor:
             _cancelled_result: dict = {"error": "Cancelled.", "_meta": _meta.model_dump()}
             return ToolResultMessage(
                 role=Role.TOOL,
-                character_name=self._loop.current_character_agent,
+                character_name=char_name,
                 tool_call_id=tc.id,
                 content=json.dumps(_cancelled_result, ensure_ascii=False),
             )
@@ -108,11 +120,12 @@ class ToolExecutor:
             await self._loop.loop.get_sink().emit_tool_result(
                 session_id, tc.name, tc.id,
                 json.dumps(_result, ensure_ascii=False),
+                character_name=char_name,
                 tool_call_meta=_meta.model_dump(),
             )
             return ToolResultMessage(
                 role=Role.TOOL,
-                character_name=self._loop.current_character_agent,
+                character_name=char_name,
                 tool_call_id=tc.id,
                 content=json.dumps(_result, ensure_ascii=False),
             )
@@ -127,6 +140,7 @@ class ToolExecutor:
         # 通知前端 tool_call 事件
         await self._loop.loop.get_sink().emit_tool_call(
             session_id, tc.name, tc.id, args,
+            character_name=char_name,
         )
 
         # 审批流程
@@ -154,70 +168,66 @@ class ToolExecutor:
         approval_duration_ms: int = int((time.monotonic() - approval_start) * 1000)
 
         _skip_dispatch = False
-        result: dict | str | None = {}
+        result: dict | str = {}
         if outcome.denied:
-            result = outcome.deny_result
+            result = outcome.deny_result or {"error": "Tool denied"}
             _skip_dispatch = True
 
         if not _skip_dispatch:
             invocation_start: float = time.monotonic()
             invocation_start_offset_ms: int = int((invocation_start - start_mono) * 1000)
+
+            # availability scope 校验：拦截不在当前 loop scope 内的工具
+            _scope = self._loop.get_tool_availability_scope()
             try:
-                ctx = ToolContext(loop=self._loop, session_id=self._loop.loop.session_id)
-                result = await tool_registry.async_dispatch(
-                    tc.name, args, context=ctx,
-                )
-            except Exception as exc:
-                logger.exception("Tool %s dispatch error: %s", tc.name, exc)
+                _tool_availability = tool_registry.get_availability(tc.name)
+            except KeyError:
+                logger.warning("Tool %s not registered, blocking dispatch", tc.name)
                 self._tool_stats[tc.name]["errors"] += 1
-                result = {
-                    "error": f"Tool execution failed: {type(exc).__name__}: {exc}",
-                }
-            invocation_duration_ms: int = int((time.monotonic() - invocation_start) * 1000)
-            end_time_offset_ms: int = int((time.monotonic() - start_mono) * 1000)
+                result = {"error": f"Unknown tool: {tc.name}"}
+                invocation_duration_ms = 0
+                end_time_offset_ms = int((time.monotonic() - start_mono) * 1000)
+            else:
+                if (_tool_availability & _scope) == 0:
+                    logger.warning(
+                        "Tool %s blocked (availability=%s, scope=%s)",
+                        tc.name, _tool_availability, _scope,
+                    )
+                    self._tool_stats[tc.name]["errors"] += 1
+                    result = {"error": f"Tool '{tc.name}' is not available in the current mode."}
+                    invocation_duration_ms = 0
+                    end_time_offset_ms = int((time.monotonic() - start_mono) * 1000)
+                else:
+                    try:
+                        ctx = ToolContext(loop=self._loop, session_id=session_id)
+                        result = await tool_registry.async_dispatch(
+                            tc.name, args, context=ctx,
+                        )
+                    except Exception as exc:
+                        logger.exception("Tool %s dispatch error: %s", tc.name, exc)
+                        self._tool_stats[tc.name]["errors"] += 1
+                        result = {
+                            "error": f"Tool execution failed: {type(exc).__name__}: {exc}",
+                        }
+                    invocation_duration_ms = int((time.monotonic() - invocation_start) * 1000)
+                    end_time_offset_ms = int((time.monotonic() - start_mono) * 1000)
         else:
             # 审批拒绝：没有实际调用
             invocation_start_offset_ms = 0
             invocation_duration_ms = 0
             end_time_offset_ms = approval_duration_ms
 
-        # 构建 _meta
-        _meta = ToolCallMeta(
+        return await finalize_tool_result(
+            result,
+            tool_name=tc.name,
             application_time=application_time,
             application_time_ms=application_time_ms,
             approval_duration_ms=approval_duration_ms,
             invocation_start_offset_ms=invocation_start_offset_ms,
             invocation_duration_ms=invocation_duration_ms,
             end_time_offset_ms=end_time_offset_ms,
-        )
-
-        # 注入 _meta 到结果
-        if isinstance(result, dict):
-            result["_meta"] = _meta.model_dump()
-        else:
-            result = {"result": result, "_meta": _meta.model_dump()}
-
-        # 统一转换为可保存到 History 的 content
-        from entry.agent_support.multimodal import tool_result_to_content, content_to_text
-        content = tool_result_to_content(result)
-
-        # 通知前端结果（使用文本摘要，避免 base64 撑爆前端事件）
-        await self._loop.loop.get_sink().emit_tool_result(
-            session_id, tc.name, tc.id, content_to_text(content),
-            tool_call_meta=_meta.model_dump(),
-        )
-
-        # 对前端 UI 类工具推送实时状态更新
-        await ui_event_router.emit_for(
-            tc.name,
-            result,
-            self._loop.loop.get_sink(),
-            session_id,
-        )
-
-        return ToolResultMessage(
-            role=Role.TOOL,
-            character_name=self._loop.current_character_agent,
+            sink=self._loop.loop.get_sink(),
+            session_id=session_id,
             tool_call_id=tc.id,
-            content=content,
+            character_name=char_name,
         )

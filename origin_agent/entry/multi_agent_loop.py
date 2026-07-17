@@ -1,7 +1,7 @@
 """
 MultiAgentLoop — 多 Agent 广播协作循环。
 
-继承 BaseAgentLoop，管理共享 History + 多 Agent 并发调度 + 级联递归。
+继承 BaseAgentLoop，管理共享 History + 多 Agent 串行级联调度。
 自身不直接调用 LLM，而是将每个 Agent 的执行委托给 MultiAgentWorker。
 """
 
@@ -14,23 +14,20 @@ from collections import deque
 from pathlib import Path
 from typing import Any, TYPE_CHECKING
 
-from component.llm import LLMClient
+from abstract.llm.client import BaseLLMClient
 from entity.messages import (
     History,
     CharacterConversationMessage,
-    CharacterMessage,
-    MessageBlock,
 )
-from entity.puretype import Role
+from entity.puretype import Role, ToolAvailability
 from entity.constant import (
     MAIN_AGENT_CHARACTER_NAME,
     USER_CHARACTER_NAME,
     MULTI_AGENT_MAX_CASCADE_DEPTH,
     LOG_PREVIEW_CHARS,
-    AUTO_TITLE_CONTENT_MAX,
-    AUTO_TAGS_CONTENT_MAX,
+    INHERIT_LAST_ROUNDS,
 )
-from system.templates import get_templates_dir, render_multi_agent_prompt, read_template
+from system.templates import get_templates_dir, render_multi_agent_prompt
 from system.session_store import SessionStore
 from entry.base_agent_loop import BaseAgentLoop, IMainSessionLoop
 from entry.multi_agent_worker import WorkerResult, MultiAgentWorker
@@ -55,18 +52,18 @@ class AgentProfile:
         character_name: str,
         system_prompts: list[str],
         tools: list[dict],
-        llm_client: LLMClient,
+        llm_client: BaseLLMClient,
     ) -> None:
         self.character_name: str = character_name
         self.system_prompts: list[str] = system_prompts
         self.tools: list[dict] = tools
-        self.llm_client: LLMClient = llm_client
+        self.llm_client: BaseLLMClient = llm_client
 
 
 class MultiAgentLoop(BaseAgentLoop, IMainSessionLoop):
     """多 Agent 广播协作循环。
 
-    持有共享 History 实例，管理多 Agent 并发响应的调度和级联。
+    持有共享 History 实例，管理多 Agent 串行响应的调度和级联。
     每条消息通过 ``visible_characters`` 控制可见性，
     通过 ``response_characters`` 指定下一轮响应的 Agent。
     """
@@ -139,7 +136,7 @@ class MultiAgentLoop(BaseAgentLoop, IMainSessionLoop):
             dynamic_message_suffix=hooks_context or None,
         )
         idx = self._history.add_message(msg)
-        self._persist_message(self.session_id)
+        self.save_history(self.session_id)
         await self._sink.emit_user_message(
             self.session_id,
             display_content if display_content is not None else str(content),
@@ -180,251 +177,150 @@ class MultiAgentLoop(BaseAgentLoop, IMainSessionLoop):
         """
         return self._last_prompt_tokens
 
-    # -- 自动生成标题 / 标签 ------------------------------------------------
+    # -- LLM 客户端 -------------------------------------------------------
 
-    def _resolve_llm_client(self) -> LLMClient | None:
-        """返回当前用于生成标题/标签的 LLM 客户端，首选当前代表 Agent。"""
-        agent = self._agents.get(self.current_character_agent)
+    def _get_session_info_llm_client(self) -> BaseLLMClient | None:
+        """返回用于生成标题/标签/摘要等会话信息的 LLM 客户端，首选主 Agent 配置。"""
+        agent = self._agents.get(MAIN_AGENT_CHARACTER_NAME)
         if agent is None and self._agents:
             agent = next(iter(self._agents.values()))
         return agent.llm_client if agent else None
 
-    async def auto_generate_title(self) -> str:
-        """根据会话历史自动生成标题。"""
-        messages = self.get_session_messages()
-        if not messages:
-            return ""
-        system_prompt = read_template("auto_title.txt")
-        user_prompt = read_template("auto_title_input.txt").replace(
-            "{{context}}",
-            json.dumps(messages, ensure_ascii=False)[:AUTO_TITLE_CONTENT_MAX],
-        )
-        llm_client = self._resolve_llm_client()
-        if llm_client is None:
-            return ""
-        try:
-            resp = await llm_client.chat([
-                {"role":  Role.SYSTEM.value, "content": system_prompt},
-                {"role": Role.USER.value, "content": user_prompt},
-            ])
-            return (resp.content or "").strip().strip("\"'")[:50]
-        except Exception as exc:
-            logger.exception("Failed to auto-generate title in multi-agent: %s", exc)
-            return ""
-
-    async def regenerate_session_tags(self) -> list[str]:
-        """根据会话历史重新生成标签列表。"""
-        messages = self.get_session_messages()
-        if not messages:
-            return []
-        llm_client = self._resolve_llm_client()
-        if llm_client is None:
-            return []
-        try:
-            system_prompt = read_template("session_tags.txt")
-            user_prompt = read_template("session_tags_input.txt").replace(
-                "{{old_text}}",
-                json.dumps(messages, ensure_ascii=False)[:AUTO_TAGS_CONTENT_MAX],
-            )
-            resp = await llm_client.chat([
-                {"role": Role.SYSTEM.value, "content": system_prompt},
-                {"role": Role.USER.value, "content": user_prompt},
-            ])
-            tags = json.loads(resp.content or "[]")
-            if isinstance(tags, list):
-                return [str(t) for t in tags[:5]]
-        except Exception as exc:
-            logger.exception("Failed to generate session tags in multi-agent: %s", exc)
-        return []
-
-    def get_session_messages(self) -> list[dict]:
-        """返回 History 中所有消息的字典列表（供前端展示）。"""
-        from entity.messages import CharacterConversationMessage, MessageBlock
-
-        result: list[dict] = []
-        for index, msg in enumerate(self._history.messages):
-            raw_content = msg.content
-            if isinstance(raw_content, list):
-                content: str | list[dict] = [
-                    b.as_object() if isinstance(b, MessageBlock) else b
-                    for b in raw_content
-                ]
-            else:
-                content = str(raw_content)
-            entry: dict = {
-                "role": msg.role.value,
-                "content": content,
-                "index": index,
-            }
-            if isinstance(msg, CharacterMessage):
-                entry["character_name"] = msg.character_name
-            if isinstance(msg, CharacterConversationMessage) and msg.visible_characters:
-                entry["visible_characters"] = msg.visible_characters
-            if isinstance(msg, CharacterConversationMessage) and msg.response_characters:
-                entry["response_characters"] = msg.response_characters
-            if isinstance(msg, CharacterConversationMessage) and msg.message_suffix:
-                entry["message_suffix"] = msg.message_suffix
-            if isinstance(msg, CharacterConversationMessage) and msg.dynamic_message_suffix:
-                entry["dynamic_message_suffix"] = msg.dynamic_message_suffix
-            if isinstance(msg, CharacterConversationMessage):
-                if msg.reasoning:
-                    entry["reasoning_content"] = msg.reasoning
-                if msg.role == Role.USER:
-                    entry["requires_response"] = True
-                if msg.tool_calls:
-                    entry["tool_calls"] = [
-                        {
-                            "id": tc.id,
-                            "type": tc.type,
-                            "function": {
-                                "name": tc.function.name,
-                                "arguments": tc.function.arguments,
-                            },
-                        }
-                        for tc in msg.tool_calls
-                    ]
-            result.append(entry)
-        return result
-
     def clear_session(self) -> None:
         """清空 History。"""
-        self._history.messages.clear()
+        self._history.clear_messages()
         logger.info("Cleared multi-agent session | session=%s", self.session_id)
 
-    def edit_session_message(self, index: int, content: str | None = None,
-                             visible_characters: list[str] | None = None) -> dict:
-        """编辑指定索引的消息内容或 visible_characters。
-        至少提供 content 或 visible_characters 之一。
-        """
-        if not isinstance(index, int) or index < 0:
-            return {"updated": False, "error": "invalid message index"}
-        if index >= len(self._history.messages):
-            return {"updated": False, "error": "message index out of range"}
-        msg = self._history.messages[index]
-        if not isinstance(msg, CharacterConversationMessage):
-            return {"updated": False, "error": "message does not support visibility"}
-        updates: dict = {}
-        if content is not None:
-            updates["content"] = content
-        if visible_characters is not None:
-            updates["visible_characters"] = visible_characters
-        self._history.messages[index] = msg.model_copy(update=updates)
-        self._persist_message(self.session_id)
-        return {
-            "updated": True,
-            "session_id": self.session_id,
-            "index": index,
-            "role": msg.role.value,
-            "content": str(self._history.messages[index].content),
-            "visible_characters": visible_characters,
-        }
-
-    def regenerate_response(self) -> dict:
-        """截断到最后一条 user 消息，返回其内容供重新生成。"""
-        user_indices = [i for i, m in enumerate(self._history.messages) if m.role == Role.USER]
-        if not user_indices:
-            return {"regenerate": False, "error": "no user message found"}
-        last_user_idx = user_indices[-1]
-        last_user_msg = self._history.messages[last_user_idx]
-        last_user_content = content_to_text(last_user_msg.content)
-        # 截断到 user 消息处（保留 user 本身，删除其后所有 assistant/tool）
-        self._history.messages = self._history.messages[:last_user_idx + 1]
-        self._persist_message(self.session_id)
-        result: dict = {
-            "regenerate": True,
-            "session_id": self.session_id,
-            "last_user_content": last_user_content,
-            "remaining_count": self._history.count,
-        }
-        if isinstance(last_user_msg, CharacterConversationMessage):
-            result["visible_characters"] = last_user_msg.visible_characters
-            result["response_characters"] = last_user_msg.response_characters
-        return result
-
-    async def _execute_tool(self, tool_name: str, args: dict,
-                            tool_call_id: str = "",
-                            session_id: str = "",
-                            character_name: str | None = None) -> "ToolResultMessage":
-        """多 Agent 模式下执行工具，含审批流程。"""
-        from entity.messages import ToolResultMessage
-        from entity.puretype import Role
-        from abstract.tools.registry import registry as tool_registry
-        from component.approval import execute_with_approval
-
-        char_name = character_name or self.current_character_agent
-        sid = session_id or self.session_id
-        if self.is_interrupted():
-            return ToolResultMessage(
-                role=Role.TOOL,
-                character_name=char_name,
-                tool_call_id=tool_call_id,
-                content="Cancelled.",
-            )
-
-        outcome = await execute_with_approval(
-            tool_name=tool_name,
-            args=args,
-            session_id=sid,
-            sink=self._sink,
-        )
-
-        if outcome.denied:
-            return ToolResultMessage(
-                role=Role.TOOL,
-                character_name=char_name,
-                tool_call_id=tool_call_id,
-                content=json.dumps(outcome.deny_result, ensure_ascii=False),
-            )
-
-        try:
-            from entry.base_agent_loop import ToolContext
-            ctx = ToolContext(loop=self, session_id=sid)
-            result = await tool_registry.async_dispatch(tool_name, args, context=ctx)
-        except Exception as exc:
-            logger.exception("Tool %s dispatch error for multi-agent: %s", tool_name, exc)
-            result = {"error": f"Tool execution failed: {type(exc).__name__}: {exc}"}
-
-        return ToolResultMessage(
-            role=Role.TOOL,
-            character_name=char_name,
-            tool_call_id=tool_call_id,
-            content=json.dumps(result, ensure_ascii=False) if isinstance(result, dict) else str(result),
-        )
-
-    def get_tool_resources(self) -> dict:
-        """多 Agent 模式暂不支持工具资源恢复。"""
-        # TODO: 需要补充
-        return {"task_progress": {}, "clipboard_display": {}}
+    def get_tool_availability_scope(self) -> ToolAvailability:
+        return ToolAvailability.MULTI_AGENT
 
     async def terminate_session(self) -> dict:
-        """终结当前会话。"""
+        """终结当前会话：中断级联 + 生成摘要 + 归档。"""
         logger.info("Terminating multi-agent session | session=%s", self.session_id)
+        # 1. 中断级联，使 _cascade 在下一个 step 退出
+        self.interrupt()
+        # 2. 生成并持久化摘要（复用 BaseAgentLoop.regenerate_summary_for_session）
+        if self._session_store is not None:
+            try:
+                await self.regenerate_summary_for_session(self.session_id)
+            except Exception:
+                logger.exception(
+                    "Failed to generate summary for session=%s", self.session_id,
+                )
+        # 3. 归档（通过 gateway SessionManager）
+        if self.session_manager is not None:
+            try:
+                self.session_manager.archive(self.session_id, continuation_sid=None)
+            except Exception:
+                logger.exception(
+                    "Failed to archive session=%s", self.session_id,
+                )
         return {"terminated": True, "session_id": self.session_id}
 
     async def merge_sessions(self, sources: list[str]) -> dict:
-        """多 Agent 模式暂不支持会话合并。"""
-        # TODO: 需要补充
-        logger.warning(
-            "Merge sessions not supported in multi-agent mode | session=%s sources=%s",
-            self.session_id, sources,
-        )
-        return {"error": "merge not supported in multi-agent mode", "merged": False}
+        """从源会话摘要创建继承会话，新会话降级为普通模式。
 
-    async def regenerate_summary_for_session(self, session_id: str) -> str:
-        """重新生成指定会话的摘要。"""
+        多 agent 会话的摘要继承了多 agent 的对话历史，但新会话本身
+        以普通模式（ParentAgentLoop）启动，用户可在此基础上继续对话。
+        """
+        if self.session_manager is None:
+            return {"error": "session manager not available", "merged": False}
+        if not sources:
+            return {"error": "sources list is empty", "merged": False}
         if self._session_store is None:
-            return ""
-        history = self._session_store.read_history(session_id)
-        if history is None or history.count == 0:
-            return ""
-        llm = self._resolve_llm_client()
-        if llm is None:
-            return ""
-        from entry.agent_support.history_summary import summarize_history
-        summary = await summarize_history(history, llm)
-        if summary:
-            self._session_store.write_summary(session_id, summary)
-        return summary
+            return {"error": "session store not available", "merged": False}
+
+        from entry.agent_support.history_summary import (
+            summarize_history, messages_to_text, extract_last_rounds,
+        )
+        from system.templates import read_template
+
+        # 收集各源 session 的摘要，缺失时自动生成
+        summaries: list[str] = []
+        for sid in sources:
+            summary = self._session_store.read_summary(sid)
+            logger.info(
+                "merge_sessions: source=%s summary_len=%d",
+                sid, len(summary),
+            )
+            if not summary:
+                history = self._session_store.read_history(sid)
+                if history and history.count > 0:
+                    llm = self._get_session_info_llm_client()
+                    if llm is not None:
+                        summary = await summarize_history(history, llm)
+                    if summary:
+                        self._session_store.write_summary(sid, summary)
+            if summary:
+                summaries.append(f"[Session {sid}]: {summary}")
+
+        if not summaries:
+            return {"error": "no summaries found for source sessions", "merged": False}
+
+        # 构建初始上下文
+        if len(summaries) == 1:
+            context = (
+                read_template("session_inherit.txt")
+                .replace("{{old_sid}}", sources[0])
+                .replace("{{summary}}", summaries[0])
+            )
+        else:
+            # 多源合并：直接拼接，不截断
+            joined = "\n\n---\n\n".join(summaries)
+            context = (
+                f"This session merges multiple previous sessions. "
+                f"Here are their summaries:\n\n"
+                f"{joined}"
+            )
+
+        # 创建新 session（降级为普通模式，不传 loop_meta）
+        new_sid = self.session_manager.create_with_context(
+            context=context,
+            parent_sid=sources[0],
+            parents=sources,
+            role=Role.USER,
+        )
+
+        # 追加各源会话尾部轮次文本
+        tail_blocks: list[str] = []
+        for sid in sources:
+            try:
+                src_history = self._session_store.read_history(sid)
+                if src_history is None or src_history.count == 0:
+                    continue
+                tail_msgs = extract_last_rounds(
+                    src_history,
+                    rounds=INHERIT_LAST_ROUNDS,
+                    include_tool_messages=False,
+                )
+                if tail_msgs:
+                    tail_blocks.append(
+                        f"### Source session {sid}\n" + messages_to_text(tail_msgs)
+                    )
+            except Exception:
+                logger.exception("Failed to append tail rounds for source=%s", sid)
+        if tail_blocks:
+            context += "\n\n## Recent conversation rounds\n" + "\n\n---\n\n".join(tail_blocks)
+
+        # 写入仅含 summary 消息的历史
+        summary_history = History()
+        summary_history.add_message(CharacterConversationMessage(
+            role=Role.USER,
+            character_name=USER_CHARACTER_NAME,
+            content=context,
+            visible_characters=[self.current_character_agent],
+        ))
+        self._session_store.write_history(new_sid, summary_history)
+
+        # 归档源 sessions
+        for sid in sources:
+            self.session_manager.archive(sid, continuation_sid=new_sid)
+
+        logger.info(
+            "Multi-agent sessions merged | new=%s sources=%s summaries=%d",
+            new_sid, sources, len(summaries),
+        )
+        return {"merged": True, "session_id": new_sid, "sources": sources}
 
     async def process_message(
         self,
@@ -442,7 +338,7 @@ class MultiAgentLoop(BaseAgentLoop, IMainSessionLoop):
         1. 追加用户消息到 History（skip_append 为 True 时跳过）
         2. 以指定的 response_characters 为初始响应者启动级联
            - 若为 None，默认所有 Agent 响应
-        3. 收集所有回复，拼接最终展示文本
+        3. 各 Agent 回复已通过 sink 独立推送前端，本方法返回空字符串
 
         visible_characters / response_characters 由用户从前端指定；
         未指定时默认对全体可见、全体响应。
@@ -485,7 +381,7 @@ class MultiAgentLoop(BaseAgentLoop, IMainSessionLoop):
 
         # 收集本轮所有 Agent 的回复（用户消息之后的消息）
         responses: list[str] = []
-        for msg in self._history.messages:
+        for msg in self._history.iter_messages():
             if isinstance(msg, CharacterConversationMessage) and msg.role == Role.ASSISTANT:
                 if msg.character_name in self._agents:
                     text = msg.content if isinstance(msg.content, str) else str(msg.content)
@@ -537,7 +433,12 @@ class MultiAgentLoop(BaseAgentLoop, IMainSessionLoop):
 
         最大深度按步数计算：len(agents) * MULTI_AGENT_MAX_CASCADE_DEPTH。
         剩余步数 ≤ 3 时注入 final-round 提示词强制收敛。
-        任一 Agent 响应或代码异常直接中断队列，发送系统消息报错。
+        Agent 响应正常时继续处理队列中下一个；仅当代码异常时中断队列并发送系统消息报错。
+
+        发起者自动回调：当 Agent A 指定 B/C 响应后，A 的 pending 集合记录 {B, C}。
+        每个 agent 完成时从所有 pending 中移除自身；当某发起者的 pending 清空时，
+        该发起者自动入队（移到队首），每个 agent 每次级联最多自动回调 1 次。
+        显式指定的 response_characters 不受回调次数限制。
         """
         # ── 构建初始队列 ──
         is_contains_main_agent = MAIN_AGENT_CHARACTER_NAME in response_characters
@@ -560,6 +461,11 @@ class MultiAgentLoop(BaseAgentLoop, IMainSessionLoop):
         step: int = 0
         max_steps: int = len(self._agents) * MULTI_AGENT_MAX_CASCADE_DEPTH
 
+        # 发起者 pending 跟踪：initiator -> {待响应的 agent 名集合}
+        pending_map: dict[str, set[str]] = {}
+        # 发起者已自动回调次数：initiator -> 0 或 1
+        callback_count: dict[str, int] = {}
+
         logger.info(
             "Cascade start (serial) | session=%s queue=%s max_steps=%d",
             self.session_id, list(queue), max_steps,
@@ -567,6 +473,14 @@ class MultiAgentLoop(BaseAgentLoop, IMainSessionLoop):
 
         while queue and step < max_steps:
             char = queue.popleft()
+
+            # 中断检查：用户请求停止时立即退出级联
+            if self.is_interrupted():
+                logger.info(
+                    "Cascade interrupted by user | session=%s step=%d character=%s",
+                    self.session_id, step, char,
+                )
+                return
 
             # 跳过无效 Agent
             if char not in self._agents:
@@ -602,13 +516,6 @@ class MultiAgentLoop(BaseAgentLoop, IMainSessionLoop):
             parsed = result.parsed_json
             content_text = parsed.content
 
-            if not isinstance(content_text, str) or not content_text.strip():
-                logger.warning(
-                    "Agent %s returned empty content in cascade; replacing with placeholder | session=%s step=%d",
-                    result.character_name, self.session_id, step,
-                )
-                content_text = f"[{result.character_name} 没有返回有效内容]"
-
             visible = parsed.visible_characters if parsed.visible_characters else list(self._agent_names)
 
             # 最后一轮：强制忽略 response_characters
@@ -633,7 +540,7 @@ class MultiAgentLoop(BaseAgentLoop, IMainSessionLoop):
             )
 
             self._history.add_message(msg)
-            self._persist_message(self.session_id)
+            self.save_history(self.session_id)
 
             # 推送可见性/响应元数据给前端
             # 注意：MultiAgentWorker 已经在每轮 LLM 调用后发送过 stream_done，
@@ -653,8 +560,16 @@ class MultiAgentLoop(BaseAgentLoop, IMainSessionLoop):
                 except Exception:
                     logger.debug("Failed to push visibility metadata for stream=%s", result.stream_id, exc_info=True)
 
-            # ── 动态调整队列 ──
+            # ── 动态调整队列 + 发起者 pending 回调 ──
             if not is_final:
+                # 1. 登记发起者的 pending（仅当 response 非空时）
+                if response:
+                    valid_targets = {rc for rc in response if rc in self._agents and rc != char}
+                    if valid_targets:
+                        pending_map[char] = valid_targets
+                        callback_count.setdefault(char, 0)
+
+                # 2. 显式 response_characters 入队逻辑（不变）
                 for rc in response:
                     # 过滤：仅保留有效 Agent，排除自我指定
                     if rc not in self._agents or rc == char:
@@ -673,6 +588,20 @@ class MultiAgentLoop(BaseAgentLoop, IMainSessionLoop):
                         logger.info(
                             "Queue append: %s added to back | session=%s step=%d",
                             rc, self.session_id, step,
+                        )
+
+                # 3. 当前完成的 agent 从所有 pending 中移除，检查回调触发
+                for initiator, pending in list(pending_map.items()):
+                    pending.discard(char)
+                    if not pending and callback_count.get(initiator, 0) == 0:
+                        # pending 清空且该 initiator 尚未回调过
+                        if initiator in queue:
+                            queue.remove(initiator)
+                        queue.appendleft(initiator)
+                        callback_count[initiator] = 1
+                        logger.info(
+                            "Callback enqueue: %s (pending cleared) | session=%s step=%d",
+                            initiator, self.session_id, step,
                         )
 
             step += 1
@@ -701,7 +630,9 @@ class MultiAgentLoop(BaseAgentLoop, IMainSessionLoop):
 
         # 构建该 Agent 视角的 History 视图；
         # dynamic_message_suffix 已在 append_user_message 中设置，由 History 自动附加。
-        history_view = self._history.get_messages(character_name)
+        history_view = self._history.get_messages(
+            current_character_agent=character_name,
+            )
 
         logger.info(
             "Agent worker start | session=%s character=%s history_len=%d final=%s",

@@ -12,12 +12,15 @@ import asyncio
 import json
 import logging
 import time as _time_module
+from datetime import datetime
 from contextvars import ContextVar
 from pathlib import Path
 from typing import * # type: ignore
 
 from abstract.tools.registry import ToolEntry, registry as tool_registry
-from component.llm import LLMClient, LLMResponse, ToolCall
+from abstract.llm.client import BaseLLMClient
+from abstract.llm.loader import create_llm_client
+from entity.puretype import LLMResponse, ToolCall
 from entity.constant import MAIN_AGENT_CHARACTER_NAME, USER_CHARACTER_NAME, History_Version as __History_Version__
 from entity.messages import (
     History,
@@ -26,11 +29,12 @@ from entity.messages import (
     ToolResultMessage,
     ToolCall as HistoryToolCall,
 )
-from entity.puretype import Role, ToolDangerLevel
+from entity.puretype import Role
 from subagent.context import SubRuntimeContext
 from entry.agent_sink import AgentSink, ParentAgentSink
 from entry.base_agent_loop import BasePrivateChatAgentLoop, UserMessage, ContextLimitMessage, ToolContext
 from entry.agent_support.multimodal import content_to_text, tool_result_to_content
+from entry.tool_post_dispatch import finalize_tool_result
 
 logger = logging.getLogger(__name__)
 
@@ -114,7 +118,7 @@ class SubAgentLoop(BasePrivateChatAgentLoop):
         }
         self._allowed_tool_names.discard("")
 
-        self._llm: LLMClient = self._build_llm_client(ctx)   # 子 Agent 独立的 LLM 客户端
+        self._llm: BaseLLMClient = self._build_llm_client(ctx)   # 子 Agent 独立的 LLM 客户端
         self._on_message: Callable[[dict], None] | None = on_message  # 每轮 LLM 响应/工具调用即时推送回调
 
         # 内部状态（_inbox / _cancel_event 由 BaseAgentLoop 提供；_history 由 BasePrivateChatAgentLoop 提供）
@@ -137,33 +141,19 @@ class SubAgentLoop(BasePrivateChatAgentLoop):
 
     # ── 构造 LLM 客户端 ────────────────────────────────────────────
 
-    def _build_llm_client(self, ctx: Any) -> LLMClient:
+    def _build_llm_client(self, ctx: SubRuntimeContext) -> BaseLLMClient:
         """用 SubRuntimeContext 构建独立的 LLM 客户端。
 
-        通过设置环境变量 + 临时 RuntimeContext 的技巧复用 LLMClient。
-        更好的方式是直接传参，但 LLMClient 构造函数依赖 RuntimeContext。
-        这里创建一个最小化的模拟对象。
+        优先使用子 Agent profile 中的 LLM 配置，缺失时兜底到父 Agent。
         """
-        # 获取父 Agent 的 API key 作为兜底
-        import os
-        parent_api_key = os.environ.get("OPENAI_API_KEY", "")
-        if not parent_api_key:
-            try:
-                from system.context import get_runtime_context
-                parent_api_key = get_runtime_context().llm_api_key
-            except Exception:
-                logger.warning("Failed to load parent API key for subagent; using empty fallback", exc_info=True)
+        from system.context import get_runtime_context
 
-        class _MockCtx:
-            llm_api_key = ctx.api_key or parent_api_key or os.environ.get("OPENAI_API_KEY", "")
-            llm_base_url = ctx.base_url
-            llm_model = ctx.model
-            llm_temperature = ctx.temperature
-            llm_max_output_tokens = ctx.max_output_tokens
-            llm_max_context_tokens = ctx.max_context_tokens
-            llm_reasoning_effort = ""
-
-        return LLMClient(_MockCtx())  # type: ignore[arg-type]
+        parent_ctx = get_runtime_context()
+        return create_llm_client(
+            ctx.client_type,
+            parent_ctx,
+            profile=ctx.model_dump(),
+        )
 
     # ── 基类抽象方法实现 ─────────────────────────────────────────────
 
@@ -175,7 +165,10 @@ class SubAgentLoop(BasePrivateChatAgentLoop):
     def user_character_name(self) -> str:
         return self._parent_character_agent# or MAIN_AGENT_CHARACTER_NAME
 
-    def _get_llm_client(self) -> LLMClient:
+    def _get_llm_client(self) -> BaseLLMClient:
+        return self._llm
+
+    def _get_session_info_llm_client(self) -> BaseLLMClient | None:
         return self._llm
 
     def _get_context(self) -> SubRuntimeContext:
@@ -265,11 +258,19 @@ class SubAgentLoop(BasePrivateChatAgentLoop):
         except Exception:
             logger.warning("Failed to emit subagent event role=%s", role, exc_info=True)
 
-    def _is_readonly_tool(self, name: str) -> bool:
+    def _is_auto_executable(self, name: str) -> bool:
+        """判断工具是否可直接执行（无需审批）。
+
+        基于 SUB_SESSION_POLICY：子会话的工具审批由主 agent 审批，
+        因此采用更严格的阈值——readonly 直接执行，write/dangerous 需审批。
+        """
         entry = tool_registry.get_entry(name)
         if entry is None:
             return False
-        return entry.danger_level == ToolDangerLevel.readonly
+        from component.approval.policy import needs_approval as _policy_needs_approval, SUB_SESSION_POLICY
+        from component.approval.handsfree import is_handsfree_mode
+        handsfree = is_handsfree_mode(self._parent_session_id)
+        return not _policy_needs_approval(SUB_SESSION_POLICY, entry.danger_level, handsfree)
 
     def _is_auto_approved_tool(self, name: str, args: dict) -> bool:
         """检查工具调用是否在 allowlist 中（始终自动批准）。"""
@@ -308,7 +309,7 @@ class SubAgentLoop(BasePrivateChatAgentLoop):
 
                 # 调用 LLM（基类 _build_history_messages 统一处理 system prompt + hooks + memory）
                 messages = self._build_history_messages()
-                resp: LLMResponse = await self._llm.chat(messages, self._tools)
+                resp: LLMResponse = await self._llm.chat(messages, self._tools, character=self.current_character_agent)
 
                 if self._cancel_event.is_set():
                     return
@@ -377,26 +378,18 @@ class SubAgentLoop(BasePrivateChatAgentLoop):
                         tool_args=dict(tc.arguments) if tc.arguments else {},
                     )
 
-                    if self._is_readonly_tool(tc.name) or self._is_auto_approved_tool(tc.name, dict(tc.arguments) if tc.arguments else {}):
+                    if self._is_auto_executable(tc.name) or self._is_auto_approved_tool(tc.name, dict(tc.arguments) if tc.arguments else {}):
                         tool_msg = await self._execute_approved_tool(tc)
                     else:
                         tool_msg = await self._queue_for_approval(tc)
 
-                    # 推送 tool_result 事件
-                    raw_content = content_to_text(tool_msg.content)
-                    self._emit(
-                        "tool_result",
-                        tool_call_id=tc.id,
-                        tool_name=tc.name,
-                        content=raw_content,
-                    )
+                    # tool_result 事件已由 finalize_tool_result 统一推送，此处不再重复
 
                     # 检测工具失败并放入 outbox，让父 Agent 知道（防止默认成功假设）
+                    raw_content = content_to_text(tool_msg.content)
                     self._maybe_record_tool_failure(tc.name, raw_content)
 
-                    openai_tool_msg = tool_msg.as_message(self.current_character_agent)
-                    if openai_tool_msg is not None:
-                        messages.append(openai_tool_msg)
+                    messages.append(tool_msg)
                     self._history.add_message(tool_msg)
 
                 # 工具结果已收集，本轮响应结束；注入收件箱（若有）后立刻进入下一轮 LLM 推理
@@ -476,9 +469,10 @@ class SubAgentLoop(BasePrivateChatAgentLoop):
         """加载外部历史到子 Agent 循环中。"""
         self._history = history
 
-    def save_history(self, path: Path) -> None:
+    def save_history(self, session_id: str | Path) -> None:
         """将 History 实例以 easysave 多态序列化写入磁盘。"""
         from easysave import save
+        path = Path(session_id)
         path.parent.mkdir(parents=True, exist_ok=True)
         try:
             save(__History_Version__, str(path), self._history)
@@ -588,6 +582,7 @@ class SubAgentLoop(BasePrivateChatAgentLoop):
                 )
                 return await self._execute_approved_tool(tc)
             else:
+                # TODO: 似乎拒绝分支输出错误内容
                 self._emit(
                     "approval_decision",
                     tool_call_id=tc.id,
@@ -608,7 +603,7 @@ class SubAgentLoop(BasePrivateChatAgentLoop):
             return self._make_tool_msg(tc.id, f"Tool call rejected: {exc}")
 
     async def _execute_approved_tool(self, tc: ToolCall) -> ToolResultMessage:
-        """执行已获批准的工具调用。"""
+        """执行已获批准的工具调用，补齐 _meta 注入和 UI 事件推送。"""
         # 沙箱隔离：拒绝授权清单之外的工具
         if tc.name not in self._allowed_tool_names:
             return self._make_tool_msg(
@@ -621,7 +616,17 @@ class SubAgentLoop(BasePrivateChatAgentLoop):
                     ),
                 },
             )
+
+        # 记录申请时间（审批已在 _queue_for_approval 中完成，此处不计量审批耗时）
+        start_mono: float = _time_module.monotonic()
+        application_time_ms: int = int(_time_module.time() * 1000)
+        application_time: str = datetime.fromtimestamp(
+            _time_module.time()
+        ).strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
+
         timeout: int = self._ctx.tool_timeout
+        invocation_start: float = start_mono
+        invocation_start_offset_ms: int = 0
         try:
             if tool_registry.get_entry(tc.name) is None:
                 return self._make_tool_msg(tc.id, f"Tool '{tc.name}' not found in registry")
@@ -638,21 +643,64 @@ class SubAgentLoop(BasePrivateChatAgentLoop):
             tool_ctx = ToolContext(loop=self, session_id=self.session_id)
             coro = tool_registry.async_dispatch(tc.name, args, context=tool_ctx)
 
+            invocation_start = _time_module.monotonic()
+            invocation_start_offset_ms = int((invocation_start - start_mono) * 1000)
+
             if timeout:
                 result = await asyncio.wait_for(coro, timeout=timeout)
             else:
                 result = await coro
 
-            return self._make_tool_msg(tc.id, tool_result_to_content(result))
+            invocation_duration_ms: int = int((_time_module.monotonic() - invocation_start) * 1000)
+            end_time_offset_ms: int = int((_time_module.monotonic() - start_mono) * 1000)
+
+            return await finalize_tool_result(
+                result,
+                tool_name=tc.name,
+                application_time=application_time,
+                application_time_ms=application_time_ms,
+                approval_duration_ms=0,
+                invocation_start_offset_ms=invocation_start_offset_ms,
+                invocation_duration_ms=invocation_duration_ms,
+                end_time_offset_ms=end_time_offset_ms,
+                sink=self.get_sink(),
+                session_id=self.session_id,
+                tool_call_id=tc.id,
+                character_name=self.current_character_agent,
+            )
         except asyncio.TimeoutError:
-            return self._make_tool_msg(
-                tc.id,
+            invocation_duration_ms = int((_time_module.monotonic() - invocation_start) * 1000)
+            end_time_offset_ms = int((_time_module.monotonic() - start_mono) * 1000)
+            return await finalize_tool_result(
                 {"success": False, "error": f"Tool execution timed out ({timeout}s)"},
+                tool_name=tc.name,
+                application_time=application_time,
+                application_time_ms=application_time_ms,
+                approval_duration_ms=0,
+                invocation_start_offset_ms=invocation_start_offset_ms,
+                invocation_duration_ms=invocation_duration_ms,
+                end_time_offset_ms=end_time_offset_ms,
+                sink=self.get_sink(),
+                session_id=self.session_id,
+                tool_call_id=tc.id,
+                character_name=self.current_character_agent,
             )
         except Exception as exc:
-            return self._make_tool_msg(
-                tc.id,
+            invocation_duration_ms = int((_time_module.monotonic() - invocation_start) * 1000)
+            end_time_offset_ms = int((_time_module.monotonic() - start_mono) * 1000)
+            return await finalize_tool_result(
                 {"success": False, "error": f"Tool execution failed: {exc}"},
+                tool_name=tc.name,
+                application_time=application_time,
+                application_time_ms=application_time_ms,
+                approval_duration_ms=0,
+                invocation_start_offset_ms=invocation_start_offset_ms,
+                invocation_duration_ms=invocation_duration_ms,
+                end_time_offset_ms=end_time_offset_ms,
+                sink=self.get_sink(),
+                session_id=self.session_id,
+                tool_call_id=tc.id,
+                character_name=self.current_character_agent,
             )
         finally:
             current_subagent_loop.set(None)

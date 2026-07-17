@@ -258,7 +258,7 @@ Organize tools by `toolset`:
 | Toolset | Purpose | Examples |
 |---------|---------|----------|
 | `filesystem` | File operations | read_file, write_file |
-| `code` | Code evolution | write_fork, validate_code |
+| `code` | Code evolution | validate_code, evolve_code |
 | `shell` | System commands | run_command |
 | `frontend` | Frontend build | validate_frontend |
 | `skills` | Skill management | learn_skill, recall_skill |

@@ -63,6 +63,7 @@ export function useWebSocket() {
   // ── scroll anchors ──
   const bottomRef = useRef<HTMLDivElement | null>(null);
   const chatAreaRef = useRef<HTMLDivElement | null>(null);
+  const contentRef = useRef<HTMLDivElement | null>(null);
   const isAtBottomRef = useRef(true);
   const instantScrollRef = useRef(false);
   const programmaticScrollingRef = useRef(false);
@@ -218,6 +219,26 @@ export function useWebSocket() {
     connRef.current.connect(sid);
   }, []);
 
+  const mergeSessions = useCallback(async (sources: string[]) => {
+    if (!sessionRef.current) return;
+    const newSid = await session.mergeSessions(sources);
+    if (newSid) {
+      connRef.current.disconnect();
+      sessionRef.current.switchSession(newSid);
+      connRef.current.connect(newSid);
+    }
+  }, [session.mergeSessions]);
+
+  const branchSession = useCallback(async (sid: string) => {
+    if (!sessionRef.current) return;
+    const newSid = await sessionRef.current.mergeSessions([sid]);
+    if (newSid) {
+      connRef.current.disconnect();
+      sessionRef.current.switchSession(newSid);
+      connRef.current.connect(newSid);
+    }
+  }, []);
+
   const deleteSession = useCallback((sid: string) => {
     if (!sessionRef.current) return;
     if (!confirm("确定要删除这个会话吗？此操作不可撤销。")) return;
@@ -314,6 +335,20 @@ export function useWebSocket() {
     }
   }, [session.streamingMessage?.content, session.streamingMessage?.reasoningContent, scrollToBottomIfAtBottom]);
 
+  // ── ResizeObserver 追底: 异步渲染导致内容高度增长时自动追底 ──
+  useEffect(() => {
+    const content = contentRef.current;
+    if (!content) return;
+    const observer = new ResizeObserver(() => {
+      if (isAtBottomRef.current) {
+        instantScrollRef.current = true;
+        scrollToBottomIfAtBottom(true);
+      }
+    });
+    observer.observe(content);
+    return () => observer.disconnect();
+  }, [scrollToBottomIfAtBottom]);
+
   return {
     // state
     messages: session.messages,
@@ -389,8 +424,8 @@ export function useWebSocket() {
     regenerateSummary: session.regenerateSummary,
     terminateSession: session.terminateSession,
     togglePinSession: session.togglePinSession,
-    mergeSessions: session.mergeSessions,
-    branchSession: session.branchSession,
+    mergeSessions,
+    branchSession,
     toggleMergeSelect: session.toggleMergeSelect,
     respondConfirm,
     respondAsk,
@@ -412,11 +447,14 @@ export function useWebSocket() {
     wsRef: conn.wsRef,
     bottomRef,
     chatAreaRef,
+    contentRef,
     isAtBottomRef,
     instantScrollRef,
     fileInputRef: upload.fileInputRef,
     // computed
-    sidebarSessions: session.sidebarSessions,
+    sidebarItems: session.sidebarItems,
+    expandedClusters: session.expandedClusters,
+    toggleCluster: session.toggleCluster,
     sessionResources: session.sessionResources,
   };
 }

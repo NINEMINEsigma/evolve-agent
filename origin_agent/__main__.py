@@ -132,6 +132,7 @@ def _build_context(cli: dict) -> RuntimeContext:
         llm_max_context_tokens  = int(cli["llm_max_context_tokens"]),
         llm_max_output_tokens   = int(cli["llm_max_output_tokens"]),
         llm_reasoning_effort    = str(cli["llm_reasoning_effort"]),
+        llm_client_name         = str(cli.get("client", "openai_client")),
         # 脱手模式审批模型配置
         approval_model_path     = str(cli.get("approval_model_path", "")),
         approval_model_n_ctx    = int(cli.get("approval_model_n_ctx", APPROVAL_MODEL_N_CTX_DEFAULT)),
@@ -287,7 +288,7 @@ def _build_frontend(force: bool = False) -> bool:
     try:
         pnpm: str = "pnpm.cmd" if sys.platform == "win32" else "pnpm"
         # 强制非交互模式：避免 pnpm 在子进程中弹出 ConfirmPrompt 导致 readline 崩溃
-        env: dict[str, str] = {**os.environ, "CI": "true"}
+        env: dict[str, str] = {**os.environ, "CI": "true", "NODE_OPTIONS": "--max-old-space-size=4096"}
         # pnpm install
         install_proc = subprocess.run(
             [pnpm, "install"],

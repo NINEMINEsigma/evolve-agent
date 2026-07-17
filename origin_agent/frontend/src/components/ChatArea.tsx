@@ -13,6 +13,7 @@ interface ChatAreaProps {
   onDeleteMessages: (count: number) => void;
   onRegenerateResponse: () => void;
   bottomRef: React.RefObject<HTMLDivElement>;
+  contentRef?: React.RefObject<HTMLDivElement>;
   onDropFiles: (files: FileList) => void;
   streamingMessage?: ChatMessage | null;
   chatAreaRef?: React.RefObject<HTMLDivElement>;
@@ -21,11 +22,23 @@ interface ChatAreaProps {
   onScrollToBottom?: () => void;
 }
 
-export default function ChatArea({ messages, waiting, archived, onImageClick, onToggleCollapse, onEditMessage, onDeleteMessages, onRegenerateResponse, bottomRef, onDropFiles, streamingMessage, chatAreaRef: externalChatAreaRef, agents, onToggleMessageVisibility, onScrollToBottom }: ChatAreaProps) {
+export default function ChatArea({ messages, waiting, archived, onImageClick, onToggleCollapse, onEditMessage, onDeleteMessages, onRegenerateResponse, bottomRef, contentRef: externalContentRef, onDropFiles, streamingMessage, chatAreaRef: externalChatAreaRef, agents, onToggleMessageVisibility, onScrollToBottom }: ChatAreaProps) {
   const [dragOver, setDragOver] = useState(false);
   const [showScrollButton, setShowScrollButton] = useState(false);
+  const [minimapCollapsed, setMinimapCollapsed] = useState(false);
   const internalChatAreaRef = useRef<HTMLDivElement>(null);
+  const internalContentRef = useRef<HTMLDivElement>(null);
   const chatAreaRef = externalChatAreaRef || internalChatAreaRef;
+  const contentRef = externalContentRef || internalContentRef;
+
+  // 移动端默认折叠 minimap
+  useEffect(() => {
+    const mq = window.matchMedia("(max-width: 768px)");
+    setMinimapCollapsed(mq.matches);
+    const onChange = (e: MediaQueryListEvent) => setMinimapCollapsed(e.matches);
+    mq.addEventListener("change", onChange);
+    return () => mq.removeEventListener("change", onChange);
+  }, []);
 
   useEffect(() => {
     const chat = chatAreaRef.current;
@@ -82,31 +95,33 @@ export default function ChatArea({ messages, waiting, archived, onImageClick, on
           }
         }}
       >
-        {messageList}
+        <div className="chat-content" ref={contentRef}>
+          {messageList}
 
-        {streamingMessage && (
-          <MessageItem
-            message={streamingMessage}
-            archived={archived}
-            onImageClick={onImageClick}
-            onToggleCollapse={onToggleCollapse}
-            onEditMessage={onEditMessage}
-            onDeleteMessages={onDeleteMessages}
-            onRegenerateResponse={onRegenerateResponse}
-            streaming
-          />
-        )}
+          {streamingMessage && (
+            <MessageItem
+              message={streamingMessage}
+              archived={archived}
+              onImageClick={onImageClick}
+              onToggleCollapse={onToggleCollapse}
+              onEditMessage={onEditMessage}
+              onDeleteMessages={onDeleteMessages}
+              onRegenerateResponse={onRegenerateResponse}
+              streaming
+            />
+          )}
 
-        {waiting && !streamingMessage && (
-          <div className="message message-assistant" data-message-id="__waiting__">
-            <div className="message-avatar waiting-avatar">⚡</div>
-            <div className="message-bubble">
-              <div className="typing-indicator">
-                <span /><span /><span />
+          {waiting && !streamingMessage && (
+            <div className="message message-assistant" data-message-id="__waiting__">
+              <div className="message-avatar waiting-avatar">⚡</div>
+              <div className="message-bubble">
+                <div className="typing-indicator">
+                  <span /><span /><span />
+                </div>
               </div>
             </div>
-          </div>
-        )}
+          )}
+        </div>
         <div ref={bottomRef} />
       </main>
       {onScrollToBottom && showScrollButton && (
@@ -122,7 +137,22 @@ export default function ChatArea({ messages, waiting, archived, onImageClick, on
           </svg>
         </button>
       )}
-      <Minimap messages={messages} chatAreaRef={chatAreaRef} />
+      {!minimapCollapsed && <Minimap messages={messages} chatAreaRef={chatAreaRef} />}
+      <button
+        type="button"
+        className="minimap-toggle"
+        onClick={() => setMinimapCollapsed((v) => !v)}
+        aria-label={minimapCollapsed ? "展开预览条" : "收起预览条"}
+        title={minimapCollapsed ? "展开预览条" : "收起预览条"}
+      >
+        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2">
+          {minimapCollapsed ? (
+            <path d="M15 18l-6-6 6-6" />
+          ) : (
+            <path d="M9 18l6-6-6-6" />
+          )}
+        </svg>
+      </button>
     </div>
   );
 }

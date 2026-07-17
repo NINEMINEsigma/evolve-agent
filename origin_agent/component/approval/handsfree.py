@@ -14,6 +14,8 @@ import dirtyjson
 
 from entity.constant import LLM_RETRY_COUNT, SYSTEM_CHARACTER_NAME
 from entity.puretype import ApprovalResult, Role
+from abstract.llm.formats import to_openai_message
+from entity.messages import BaseMessage as ApprovalBaseMessage
 
 logger = logging.getLogger(__name__)
 
@@ -95,10 +97,11 @@ async def _handsfree_confirm(
         user_prompt_data["context"] = extra_context
     user_prompt = json.dumps(user_prompt_data, ensure_ascii=False)
 
-    messages: list[dict[str, Any]] = [
-        {"role": Role.SYSTEM.value, "content": system_prompt},
-        {"role": Role.USER.value, "content": user_prompt},
-    ]
+    sys_msg = to_openai_message(ApprovalBaseMessage(role=Role.SYSTEM, content=system_prompt), current_character_agent="")
+    user_msg = to_openai_message(ApprovalBaseMessage(role=Role.USER, content=user_prompt), current_character_agent="")
+    assert sys_msg is not None, "system approval prompt should never be invisible"
+    assert user_msg is not None, "user approval prompt should never be invisible"
+    messages: list[dict[str, Any]] = [sys_msg, user_msg]
 
     dialog_turn = 0
     last_error: str | None = None
@@ -139,15 +142,22 @@ async def _handsfree_confirm(
                     )
 
                     # 将Agent的回答追加到 messages，下一轮循环重新审批
-                    current_messages.append({"role": Role.ASSISTANT.value, "content": resp_content or ""})
+                    assistant_msg = to_openai_message(
+                        ApprovalBaseMessage(role=Role.ASSISTANT, content=resp_content or ""),
+                        current_character_agent="",
+                    )
+                    if assistant_msg is not None:
+                        current_messages.append(assistant_msg)
                     from system.templates import read_template
-                    current_messages.append({
-                        "role": Role.USER.value,
-                        "content": read_template("approval/dialog_re_evaluate.txt")
+                    user_re_eval = to_openai_message(
+                        ApprovalBaseMessage(role=Role.USER, content=read_template("approval/dialog_re_evaluate.txt")
                             .replace("{{dialog_turn}}", str(dialog_turn + 1))
                             .replace("{{ask_question}}", ask_question)
-                            .replace("{{agent_answer}}", agent_answer),
-                    })
+                            .replace("{{agent_answer}}", agent_answer)),
+                        current_character_agent="",
+                    )
+                    if user_re_eval is not None:
+                        current_messages.append(user_re_eval)
                     messages.extend(current_messages[2:])  # 保留 system + 原始 user，追加对话
                     dialog_turn += 1
                     break  # 跳出重试循环，进入 while 下一轮
@@ -170,10 +180,12 @@ async def _handsfree_confirm(
                 )
                 if attempt < LLM_RETRY_COUNT:
                     _ct = (get_templates_dir() / "approval" / "correction_hint.md").read_text(encoding="utf-8")
-                    current_messages.append({
-                        "role": Role.USER.value,
-                        "content": _ct.replace("{{error}}", str(exc)).replace("{{raw_output}}", resp_content or "<not available>"),
-                    })
+                    correction_msg = to_openai_message(
+                        ApprovalBaseMessage(role=Role.USER, content=_ct.replace("{{error}}", str(exc)).replace("{{raw_output}}", resp_content or "<not available>")),
+                        current_character_agent="",
+                    )
+                    if correction_msg is not None:
+                        current_messages.append(correction_msg)
 
         # 重试循环全部失败 → 退出 while，最终返回 deny
         if last_error:

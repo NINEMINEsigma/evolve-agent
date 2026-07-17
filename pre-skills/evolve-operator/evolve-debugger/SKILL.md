@@ -26,7 +26,7 @@ Guide for debugging and troubleshooting in evolve-agent's self-evolving system.
 ```
 read_file: {"path": "fork:problematic.py", "offset": 40, "limit": 10}
 → Identify the issue
-→ write_fork: {"file": "problematic.py", "old_string": "...", "new_string": "..."}
+→ edit_file: {"path": "fork:problematic.py", "old_string": "...", "new_string": "..."}
 → validate_code: {"file": "problematic.py"}
 → evolve_code: {}
 ```

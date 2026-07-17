@@ -27,8 +27,10 @@ from fastapi.staticfiles import StaticFiles
 
 from .chat import Message, MessageType
 from .message_router import MessageRouter
+from abstract.tools.registry import registry
 from datetime import datetime, timezone
-from entity.constant import CRON_STDOUT_PREVIEW_MAX_LENGTH, SUBPROCESS_TIMEOUT_DEFAULT, UPLOAD_FILENAME_TIME_FORMAT, USER_CHARACTER_NAME
+from entity.constant import CRON_STDOUT_PREVIEW_MAX_LENGTH, SUBPROCESS_TIMEOUT_DEFAULT, UPLOAD_FILENAME_TIME_FORMAT, USER_CHARACTER_NAME, UPLOADS_DIR_NAME, UPLOADS_WS_PREFIX, STATIC_FILE_HTTP_PREFIX, DOWNLOADS_HTTP_PREFIX
+from entity.puretype import SessionStatus
 from system.context import get_runtime_context
 from entry.parent_agent_loop import IncompatibleHistoryError
 from entry.base_agent_loop import IMainSessionLoop
@@ -120,18 +122,21 @@ async def push_subagent_update(
     import json as _json
     try:
         await ws.send_text(
-            Message(
-                type=MessageType.SUBAGENT_UPDATE,
-                session_id=parent_session_id,
-                result=_json.dumps({
-                    "session_id": subagent_session_id,
-                    "name": subagent_name,
-                    "status": status,
-                    "feedback": feedback,
-                    "pending_approvals": pending_approvals,
-                    "_removed": removed,
-                }, ensure_ascii=False),
-            ).to_json()
+            json.dumps(
+                Message(
+                    type=MessageType.SUBAGENT_UPDATE,
+                    session_id=parent_session_id,
+                    result=_json.dumps({
+                        "session_id": subagent_session_id,
+                        "name": subagent_name,
+                        "status": status,
+                        "feedback": feedback,
+                        "pending_approvals": pending_approvals,
+                        "_removed": removed,
+                    }, ensure_ascii=False),
+                ).model_dump(exclude_none=True),
+                ensure_ascii=False,
+            )
         )
     except Exception as exc:
         logger.warning("Failed to push subagent update to session=%s: %s", parent_session_id, exc, exc_info=True)
@@ -179,7 +184,7 @@ async def _send_tool_event(
             content=json.dumps({"assistant_text": payload}),
         )
         try:
-            await ws.send_text(msg.to_json())
+            await ws.send_text(json.dumps(msg.model_dump(exclude_none=True), ensure_ascii=False))
         except Exception:
             logger.warning("Failed to push assistant_text to session=%s", session_id, exc_info=True)
         return
@@ -196,7 +201,7 @@ async def _send_tool_event(
             content=payload,
         )
         try:
-            await ws.send_text(msg.to_json())
+            await ws.send_text(json.dumps(msg.model_dump(exclude_none=True), ensure_ascii=False))
         except Exception:
             logger.warning("Failed to push usage_update to session=%s", session_id, exc_info=True)
         return
@@ -215,7 +220,7 @@ async def _send_tool_event(
             result=(payload if data else None),
         )
         try:
-            await ws.send_text(msg.to_json())
+            await ws.send_text(json.dumps(msg.model_dump(exclude_none=True), ensure_ascii=False))
         except Exception:
             logger.warning("Failed to push task_progress to session=%s", session_id, exc_info=True)
         return
@@ -233,7 +238,7 @@ async def _send_tool_event(
             result=(payload if data else None),
         )
         try:
-            await ws.send_text(msg.to_json())
+            await ws.send_text(json.dumps(msg.model_dump(exclude_none=True), ensure_ascii=False))
         except Exception:
             logger.warning("Failed to push clipboard_display to session=%s", session_id, exc_info=True)
         return
@@ -255,7 +260,7 @@ async def _send_tool_event(
             character_name=(data.get("character_name") if data else None),
         )
         try:
-            await ws.send_text(msg.to_json())
+            await ws.send_text(json.dumps(msg.model_dump(exclude_none=True), ensure_ascii=False))
         except Exception:
             logger.warning("Failed to push stream_delta to session=%s", session_id, exc_info=True)
         return
@@ -273,7 +278,7 @@ async def _send_tool_event(
             finish_reason=(data.get("finish_reason") if data else None),
         )
         try:
-            await ws.send_text(msg.to_json())
+            await ws.send_text(json.dumps(msg.model_dump(exclude_none=True), ensure_ascii=False))
         except Exception:
             logger.warning("Failed to push stream_done to session=%s", session_id, exc_info=True)
         return
@@ -291,9 +296,10 @@ async def _send_tool_event(
         tool=tool_name,
         args=data if event_type == "tool_call" else None,
         result=(payload if event_type == "tool_result" else None),
+        emoji=registry.get_emoji(tool_name) if event_type == "tool_call" else None,
     )
     try:
-        await ws.send_text(msg.to_json())
+        await ws.send_text(json.dumps(msg.model_dump(exclude_none=True), ensure_ascii=False))
         if event_type not in ("stream_delta", "usage_update"):
             logger.info("[ws push ok] session=%s type=%s tool=%s", session_id, event_type, tool_name)
     except Exception:
@@ -384,6 +390,7 @@ def _record_agentspace_change(operation: str, path: str, old_path: str | None = 
     - 创建后被删除可抵消
     - 重命名清除旧路径
     """
+    # TODO: 需要检查当前逻辑是否正确
     global _agentspace_pending_changes
     if _agentspace_lock["locked"]:
         return
@@ -461,7 +468,7 @@ def _push_agentspace_lock_state() -> None:
                 continue
             try:
                 _asyncio.ensure_future(ws.send_text(
-                    Message(type=MessageType.AGENTSPACE_LOCK, session_id=sid, content=payload).to_json()
+                    json.dumps(Message(type=MessageType.AGENTSPACE_LOCK, session_id=sid, content=payload).model_dump(exclude_none=True), ensure_ascii=False)
                 ))
             except Exception:
                 pass
@@ -474,6 +481,24 @@ def _push_agentspace_lock_state() -> None:
 
 
 _NO_CACHE: dict[str, str] = {"Cache-Control": "no-cache, no-store, must-revalidate", "Pragma": "no-cache"}
+
+# 文本类 MIME 需要追加 charset=utf-8
+_TEXT_MIME_PREFIXES = ("text/", "application/json", "application/xml", "application/javascript")
+_TEXT_MIME_EXTS = {".html", ".htm", ".md", ".txt", ".log", ".json", ".csv", ".py", ".js", ".css",
+                   ".xml", ".yaml", ".yml", ".toml", ".ini", ".cfg", ".conf", ".svg"}
+
+
+def _guess_media_type_with_charset(path: Path) -> str:
+    """根据扩展名猜测 MIME 类型，文本类自动追加 charset=utf-8。"""
+    import mimetypes
+    ext = path.suffix.lower()
+    mime, _ = mimetypes.guess_type(str(path))
+    if mime is None:
+        mime = "application/octet-stream"
+    if mime.startswith(_TEXT_MIME_PREFIXES) or ext in _TEXT_MIME_EXTS:
+        if "charset" not in mime:
+            mime = f"{mime}; charset=utf-8"
+    return mime
 
 
 @app.get("/")
@@ -523,6 +548,7 @@ async def update_session_tags(session_id: str, req: Request):
         return {"updated": False, "error": "tags must be an array", "session_id": session_id}
     tags: list[str] = [str(t).strip() for t in raw_tags]
     valid = _get_sm().set_session_tags(session_id, tags)
+    logger.info("Update tags | session=%s tags=%s", session_id, valid)
     return {"updated": True, "session_id": session_id, "tags": valid}
 
 
@@ -571,6 +597,7 @@ async def http_confirm(request_id: str, req: Request):
     sink = Application.current().frontend_sink
     if sink:
         sink.resolve_confirm(request_id, action, deny_reason=deny_reason, denied_by=denied_by)
+    logger.info("HTTP confirm | request_id=%s action=%s denied_by=%s", request_id, action, denied_by)
     return {"resolved": True, "request_id": request_id, "action": action}
 
 
@@ -589,6 +616,7 @@ async def http_ask(request_id: str, req: Request):
     sink = Application.current().frontend_sink
     if sink:
         sink.resolve_ask(request_id, option=option, custom_text=custom_text)
+    logger.info("HTTP ask response | request_id=%s option=%s", request_id, option)
     return {"resolved": True, "request_id": request_id, "option": option, "custom_text": custom_text}
 
 
@@ -596,6 +624,7 @@ async def http_ask(request_id: str, req: Request):
 async def http_interrupt(session_id: str):
     """通过 HTTP 处理中断请求，使其在 WS handler 被
     ``process_message()`` 阻塞时仍能生效。"""
+    logger.info("HTTP interrupt | session=%s", session_id)
     loop = _get_loop(session_id)
     if loop is not None:
         loop.loop.interrupt()
@@ -605,6 +634,7 @@ async def http_interrupt(session_id: str):
 @app.delete("/api/sessions/{session_id}")
 async def delete_session(session_id: str):
     """删除 session 及其持久化数据。"""
+    logger.info("Delete session | session=%s", session_id)
     _get_sm().remove(session_id)
     loop = _get_loop(session_id)
     if loop is not None:
@@ -615,12 +645,14 @@ async def delete_session(session_id: str):
         await orch.shutdown_parent(session_id)
     except Exception:
         logger.warning("Failed to shutdown subagents for session=%s", session_id, exc_info=True)
+    logger.info("Delete session ok | session=%s", session_id)
     return {"deleted": True, "session_id": session_id}
 
 
 @app.put("/api/sessions/{session_id}/messages/{message_index}")
 async def update_session_message(session_id: str, message_index: int, req: Request):
     """编辑指定 session 中一条历史消息的正文或 visible_characters，不触发重新生成。"""
+    logger.info("Edit message request | session=%s index=%d", session_id, message_index)
     body: dict = {}
     try:
         body = await req.json()
@@ -630,7 +662,7 @@ async def update_session_message(session_id: str, message_index: int, req: Reque
     content = body.get("content")
     visible_characters = body.get("visible_characters")
     info = _get_sm().get(session_id)
-    if info and info.get("status") == "archived":
+    if info and info.status == SessionStatus.archived:
         result = {"updated": False, "error": "archived session cannot be edited", "session_id": session_id}
         return HTMLResponse(
             json.dumps(result, ensure_ascii=False),
@@ -642,6 +674,7 @@ async def update_session_message(session_id: str, message_index: int, req: Reque
         return {"updated": False, "error": "agent loop not ready", "session_id": session_id}
     result = loop.loop.edit_session_message(message_index, content, visible_characters)
     status_code = 200 if result.get("updated") else 400
+    logger.info("Edit message result | session=%s index=%d updated=%s", session_id, message_index, result.get("updated"))
     return HTMLResponse(
         json.dumps(result, ensure_ascii=False),
         media_type="application/json",
@@ -652,8 +685,9 @@ async def update_session_message(session_id: str, message_index: int, req: Reque
 @app.delete("/api/sessions/{session_id}/messages")
 async def delete_session_messages(session_id: str, count: int = 1):
     """删除最后 count 个逻辑轮次的消息（从倒数第 count 条 user 起，覆盖其后所有 tool/assistant）。"""
+    logger.info("Delete messages request | session=%s count=%d", session_id, count)
     info = _get_sm().get(session_id)
-    if info and info.get("status") == "archived":
+    if info and info.status == SessionStatus.archived:
         result = {"deleted": False, "error": "archived session"}
         return HTMLResponse(
             json.dumps(result, ensure_ascii=False),
@@ -665,6 +699,7 @@ async def delete_session_messages(session_id: str, count: int = 1):
         return {"deleted": False, "error": "agent loop not ready"}
     result = loop.loop.delete_session_messages(count)
     status_code = 200 if result.get("deleted") else 400
+    logger.info("Delete messages result | session=%s count=%d deleted=%s remaining=%s", session_id, count, result.get("deleted"), result.get("remaining_count"))
     return HTMLResponse(
         json.dumps(result, ensure_ascii=False),
         media_type="application/json",
@@ -675,8 +710,9 @@ async def delete_session_messages(session_id: str, count: int = 1):
 @app.post("/api/sessions/{session_id}/regenerate")
 async def regenerate_response(session_id: str):
     """重新生成最后一条 user 消息的响应：截断历史，重新调用 process_message。"""
+    logger.info("Regenerate request | session=%s", session_id)
     info = _get_sm().get(session_id)
-    if info and info.get("status") == "archived":
+    if info and info.status == SessionStatus.archived:
         result = {"regenerate": False, "error": "archived session"}
         return HTMLResponse(
             json.dumps(result, ensure_ascii=False),
@@ -700,14 +736,17 @@ async def regenerate_response(session_id: str):
     if ws:
         try:
             await ws.send_text(
-                Message(
-                    type=MessageType.SYSTEM,
-                    session_id=session_id,
-                    content=json.dumps({
-                        "regenerate_trim": True,
-                        "keep_count": result.get("remaining_count", 0),
-                    }),
-                ).to_json()
+                json.dumps(
+                    Message(
+                        type=MessageType.SYSTEM,
+                        session_id=session_id,
+                        content=json.dumps({
+                            "regenerate_trim": True,
+                            "keep_count": result.get("remaining_count", 0),
+                        }),
+                    ).model_dump(exclude_none=True),
+                    ensure_ascii=False,
+                )
             )
         except Exception:
             logger.warning("Failed to send regenerate_trim to session=%s", session_id, exc_info=True)
@@ -725,7 +764,9 @@ async def regenerate_response(session_id: str):
             await sink.emit_assistant_message(
                 session_id, reply, loop.current_character_agent,
             )
+    logger.info("Regenerate ok | session=%s", session_id)
     return {"regenerate": True, "session_id": session_id}
+
 
 
 @app.put("/api/sessions/{session_id}/title")
@@ -739,6 +780,7 @@ async def update_session_title(session_id: str, req: Request):
         logger.warning("Failed to parse title request body for session=%s", session_id, exc_info=True)
         title = ""
     _get_sm().update_title(session_id, title)
+    logger.info("Update title | session=%s title=%s", session_id, title)
     return {"updated": True, "session_id": session_id, "title": title}
 
 
@@ -753,6 +795,7 @@ async def auto_title_session(session_id: str):
         logger.warning("Failed to auto-generate title for session=%s", session_id)
     if title:
         _get_sm().update_title(session_id, title)
+    logger.info("Auto title | session=%s title=%s", session_id, title)
     return {"title": title, "session_id": session_id}
 
 
@@ -763,14 +806,20 @@ async def auto_tags_session(session_id: str):
     loop = _get_loop(session_id)
     if loop is not None:
         tags = await loop.regenerate_session_tags()
+        if tags:
+            sm = _get_sm()
+            if sm is not None:
+                sm.set_session_tags(session_id, tags)
     else:
         logger.warning("Failed to auto-generate tags for session=%s", session_id)
+    logger.info("Auto tags | session=%s tags=%s", session_id, tags)
     return {"tags": tags, "session_id": session_id}
 
 
 @app.post("/api/sessions/{session_id}/regenerate-summary")
 async def regenerate_summary_endpoint(session_id: str):
     """重新生成指定会话的摘要。"""
+    logger.info("Regenerate summary | session=%s", session_id)
     loop = _get_loop(session_id)
     if loop is not None:
         summary = await loop.regenerate_summary_for_session(session_id)
@@ -781,6 +830,7 @@ async def regenerate_summary_endpoint(session_id: str):
 @app.post("/api/sessions/{session_id}/terminate")
 async def terminate_session_endpoint(session_id: str):
     """手动终结指定会话：归档 + 压缩（生成摘要），不旋转。"""
+    logger.info("Terminate session | session=%s", session_id)
     # 先停止该父会话的所有子 Agent 会话
     try:
         orch = get_subagent_orchestrator()
@@ -790,7 +840,9 @@ async def terminate_session_endpoint(session_id: str):
     loop = _get_loop(session_id)
     if loop is not None:
         result = await loop.loop.terminate_session()
+        logger.info("Terminate session ok | session=%s terminated=%s", session_id, result.get("terminated"))
         return result
+    logger.warning("Terminate session fail | session=%s error=agent loop not ready", session_id)
     return {"terminated": False, "error": "agent loop not ready", "session_id": session_id}
 
 
@@ -798,6 +850,7 @@ async def terminate_session_endpoint(session_id: str):
 async def pin_session_endpoint(session_id: str):
     """切换 session 置顶状态。"""
     pinned: bool = _get_sm().toggle_pin(session_id)
+    logger.info("Toggle pin | session=%s pinned=%s", session_id, pinned)
     return {"pinned": pinned, "session_id": session_id}
 
 
@@ -813,6 +866,7 @@ async def merge_sessions_endpoint(req: Request):
     except Exception:
         logger.warning("Failed to parse merge request body", exc_info=True)
     sources: list[str] = body.get("sources", [])
+    logger.info("Merge sessions | sources=%s", sources)
     if not sources:
         return {"error": "sources array required", "merged": False}
     err = _get_sm().validate_merge_sources(sources)
@@ -829,6 +883,7 @@ async def merge_sessions_endpoint(req: Request):
 @app.post("/api/sessions/{session_id}/branch")
 async def branch_session_endpoint(session_id: str):
     """从指定会话创建分支延续（单源 merge 的快捷端点）。"""
+    logger.info("Branch session | source=%s", session_id)
     err = _get_sm().validate_merge_sources([session_id])
     if err:
         return {"error": err, "merged": False}
@@ -850,8 +905,10 @@ async def list_background_tasks_endpoint(session_id: str):
 @app.post("/api/sessions/{session_id}/background-tasks/{task_id}/stop")
 async def stop_background_task_endpoint(session_id: str, task_id: str):
     """停止指定的后台任务。"""
+    logger.info("Stop background task | session=%s task_id=%s", session_id, task_id)
     from component.extools.background_service import stop_background_task
     result = stop_background_task(task_id)
+    logger.info("Stop background task ok | session=%s task_id=%s result=%s", session_id, task_id, result)
     return result
 
 
@@ -866,6 +923,7 @@ async def list_cron_tasks_endpoint(session_id: str):
 @app.post("/api/sessions/{session_id}/cron-tasks/{task_id}/trigger")
 async def trigger_cron_task_endpoint(session_id: str, task_id: str):
     """立即触发指定的定时任务执行一次。"""
+    logger.info("Trigger cron task | session=%s task_id=%s", session_id, task_id)
     from component.extools.cron_tools import trigger_cron_task
     result = trigger_cron_task(session_id, task_id)
     return result
@@ -874,6 +932,7 @@ async def trigger_cron_task_endpoint(session_id: str, task_id: str):
 @app.post("/api/sessions/{session_id}/cron-tasks/{task_id}/cancel")
 async def cancel_cron_task_endpoint(session_id: str, task_id: str):
     """取消指定的定时任务。"""
+    logger.info("Cancel cron task | session=%s task_id=%s", session_id, task_id)
     from component.extools.cron_tools import cancel_cron_task
     result = cancel_cron_task(session_id, task_id)
     return result
@@ -932,7 +991,7 @@ async def file_picker():
         logger.error("agentspace path not set, cannot accept file picker uploads")
         return {"uploaded": False, "error": "agentspace_not_configured"}
 
-    upload_dir: Path = _agentspace_path / "uploads"
+    upload_dir: Path = _agentspace_path / UPLOADS_DIR_NAME
     upload_dir.mkdir(parents=True, exist_ok=True)
 
     results: list[dict] = []
@@ -958,7 +1017,7 @@ async def file_picker():
         logger.info("File %s | picker src=%s dest=%s", method, src, dest)
         results.append({
             "uploaded": True,
-            "path": f"ws:uploads/{unique_name}",
+            "path": f"{UPLOADS_WS_PREFIX}{unique_name}",
             "filename": safe_name,
             "size": dest.stat().st_size,
             "method": method,
@@ -967,9 +1026,13 @@ async def file_picker():
     return {"uploaded": True, "files": results}
 
 
-@app.get("/uploads/{file_path:path}")
+@app.get(STATIC_FILE_HTTP_PREFIX + "/{file_path:path}")
 async def serve_workspace_file(file_path: str):
-    """提供 ws: 命名空间下文件的 HTTP 访问，供前端展示图片等静态文件。"""
+    """提供 ws: 命名空间下文件的 HTTP 访问，供前端展示图片等静态文件。
+
+    对文本类 MIME 自动追加 charset=utf-8，避免中文乱码；
+    统一添加 no-cache 头，确保文件更新后立即生效。
+    """
     if not _agentspace_path:
         return HTMLResponse("Upload service not available", status_code=503)
     # 防止路径遍历
@@ -978,10 +1041,12 @@ async def serve_workspace_file(file_path: str):
         return HTMLResponse("Forbidden", status_code=403)
     if not resolved.exists() or not resolved.is_file():
         return HTMLResponse("File not found", status_code=404)
-    return FileResponse(str(resolved))
+    # 文本类 MIME 追加 charset=utf-8
+    media_type = _guess_media_type_with_charset(resolved)
+    return FileResponse(str(resolved), media_type=media_type, headers=_NO_CACHE)
 
 
-@app.get("/downloads/{file_path:path}")
+@app.get(DOWNLOADS_HTTP_PREFIX + "/{file_path:path}")
 async def download_workspace_file(file_path: str):
     """提供 ws: 命名空间下文件的 HTTP 下载（强制 Content-Disposition: attachment）。"""
     if not _agentspace_path:
@@ -1010,6 +1075,7 @@ async def download_workspace_file(file_path: str):
 @app.post("/api/shutdown-approval-model")
 async def shutdown_approval_model_endpoint():
     """关闭本地审批模型 (llama-server) 以释放显存。"""
+    logger.info("Shutdown approval model")
     try:
         from system.application import Application
         mgr = Application.current().approval_backend_manager
@@ -1092,6 +1158,7 @@ async def agentspace_write(req: Request):
         raise HTTPException(status_code=400, detail="path required")
     if _agentspace_lock["locked"]:
         raise HTTPException(status_code=423, detail="Agentspace is locked by agent")
+    logger.info("Agentspace write | path=%s", path)
     try:
         logical = _to_logical_path(path)
         from system.context import get_runtime_context
@@ -1099,6 +1166,7 @@ async def agentspace_write(req: Request):
         sandbox = Sandbox(get_runtime_context())
         sandbox.write(logical, content)
         _record_agentspace_change("edit", path)
+        logger.info("Agentspace write ok | path=%s", path)
         return {"success": True}
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
@@ -1122,6 +1190,7 @@ async def agentspace_mkdir(req: Request):
         raise HTTPException(status_code=400, detail="path required")
     if _agentspace_lock["locked"]:
         raise HTTPException(status_code=423, detail="Agentspace is locked by agent")
+    logger.info("Agentspace mkdir | path=%s", path)
     try:
         logical = _to_logical_path(path)
         from system.context import get_runtime_context
@@ -1129,6 +1198,7 @@ async def agentspace_mkdir(req: Request):
         sandbox = Sandbox(get_runtime_context())
         sandbox.create_folder(logical, parents=True)
         _record_agentspace_change("create", path)
+        logger.info("Agentspace mkdir ok | path=%s", path)
         return {"success": True}
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
@@ -1152,6 +1222,7 @@ async def agentspace_delete(req: Request):
         raise HTTPException(status_code=400, detail="path required")
     if _agentspace_lock["locked"]:
         raise HTTPException(status_code=423, detail="Agentspace is locked by agent")
+    logger.info("Agentspace delete | path=%s", path)
     try:
         logical = _to_logical_path(path)
         from system.context import get_runtime_context
@@ -1162,6 +1233,7 @@ async def agentspace_delete(req: Request):
         else:
             sandbox.delete(logical)
         _record_agentspace_change("delete", path)
+        logger.info("Agentspace delete ok | path=%s", path)
         return {"success": True}
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
@@ -1186,6 +1258,7 @@ async def agentspace_rename(req: Request):
         raise HTTPException(status_code=400, detail="oldPath and newPath required")
     if _agentspace_lock["locked"]:
         raise HTTPException(status_code=423, detail="Agentspace is locked by agent")
+    logger.info("Agentspace rename | old=%s new=%s", old_path, new_path)
     try:
         old_logical = _to_logical_path(old_path)
         new_logical = _to_logical_path(new_path)
@@ -1194,6 +1267,7 @@ async def agentspace_rename(req: Request):
         sandbox = Sandbox(get_runtime_context())
         sandbox.move(old_logical, new_logical)
         _record_agentspace_change("rename", new_path, old_path=old_path)
+        logger.info("Agentspace rename ok | old=%s new=%s", old_path, new_path)
         return {"success": True}
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
@@ -1276,11 +1350,14 @@ async def ws_chat(ws: WebSocket) -> None:
             _sm.remove_from_index(exc.session_id)
         try:
             await ws.send_text(
-                Message(
-                    type=MessageType.ERROR,
-                    session_id=sid,
-                    message=f"会话 {exc.session_id} 的历史格式不兼容，已从索引移除。请运行迁移脚本后重连。",
-                ).to_json()
+                json.dumps(
+                    Message(
+                        type=MessageType.ERROR,
+                        session_id=sid,
+                        message=f"会话 {exc.session_id} 的历史格式不兼容，已从索引移除。请运行迁移脚本后重连。",
+                    ).model_dump(exclude_none=True),
+                    ensure_ascii=False,
+                )
             )
             await ws.close()
         except Exception:
@@ -1292,21 +1369,27 @@ async def ws_chat(ws: WebSocket) -> None:
     try:
         # 发送欢迎消息
         await ws.send_text(
-            Message(
-                type=MessageType.SYSTEM,
-                session_id=sid,
-                content="Connected to Evolve Agent",
-            ).to_json()
+            json.dumps(
+                Message(
+                    type=MessageType.SYSTEM,
+                    session_id=sid,
+                    content="Connected to Evolve Agent",
+                ).model_dump(exclude_none=True),
+                ensure_ascii=False,
+            )
         )
 
         # 发送构建哈希，使前端能检测进化并自动重载
         if _BUILD_HASH:
             await ws.send_text(
-                Message(
-                    type=MessageType.SYSTEM,
-                    session_id=sid,
-                    content=json.dumps({"build_hash": _BUILD_HASH}),
-                ).to_json()
+                json.dumps(
+                    Message(
+                        type=MessageType.SYSTEM,
+                        session_id=sid,
+                        content=json.dumps({"build_hash": _BUILD_HASH}),
+                    ).model_dump(exclude_none=True),
+                    ensure_ascii=False,
+                )
             )
 
         # 发送服务端信息：上下文窗口、审批模型配置
@@ -1322,46 +1405,56 @@ async def ws_chat(ws: WebSocket) -> None:
                 model_name = ctx.approval_remote_model or ""
                 model_available = bool(ctx.approval_remote_base_url and ctx.approval_remote_model)
             await ws.send_text(
-                Message(
-                    type=MessageType.SYSTEM,
-                    session_id=sid,
-                    content=json.dumps({
-                        "server_info": {
-                            "llm_max_context_tokens": ctx.llm_max_context_tokens,
-                            "llm_model": ctx.llm_model,
-                            "approval_model_name": model_name,
-                            "approval_model_available": model_available,
-                        },
-                    }),
-                ).to_json()
+                json.dumps(
+                    Message(
+                        type=MessageType.SYSTEM,
+                        session_id=sid,
+                        content=json.dumps({
+                            "server_info": {
+                                "llm_max_context_tokens": ctx.llm_max_context_tokens,
+                                "llm_model": ctx.llm_model,
+                                "approval_model_name": model_name,
+                                "approval_model_available": model_available,
+                            },
+                        }),
+                    ).model_dump(exclude_none=True),
+                    ensure_ascii=False,
+                )
             )
         except Exception:
             logger.warning("RuntimeContext not initialized, skipping server_info push", exc_info=True)  # fallback 模式可能无 LLM
 
         # 恢复 session 时回放会话历史，使前端不为空白
-        loop = _get_loop(resume)
-        if resume and _get_sm().exists(resume) and loop is not None:
-            history: list[dict] = loop.get_session_messages()
-            usage: int = loop.get_token_usage()
-            context: int = loop.get_context_tokens()
-            processing: bool = loop.is_processing()
-            # 检查是否多 agent 模式，携带 agents 列表
-            agents_info: list[str] | None = None
-            from entry.multi_agent_loop import MultiAgentLoop
-            if isinstance(loop, MultiAgentLoop):
-                agents_info = list(loop._agent_names)
-            await ws.send_text(
-                Message(
-                    type=MessageType.SYSTEM,
-                    session_id=sid,
-                    content=json.dumps({
-                        "session_history": history,
-                        "token_usage": usage,
-                        "context_tokens": context,
-                        "processing": processing,
-                        "agents": agents_info,
-                    }, ensure_ascii=False),
-                ).to_json()
+        if resume and _get_sm().exists(resume):
+            loop = _get_loop(resume)
+            if loop is not None:
+                history: list[dict] = [
+                    e.model_dump(exclude_none=True)
+                    for e in loop.loop.get_session_messages()
+                ]
+                usage: int = loop.get_token_usage()
+                context: int = loop.get_context_tokens()
+                processing: bool = loop.loop.is_processing()
+                # 检查是否多 agent 模式，携带 agents 列表
+                agents_info: list[str] | None = None
+                from entry.multi_agent_loop import MultiAgentLoop
+                if isinstance(loop, MultiAgentLoop):
+                    agents_info = list(loop._agent_names)
+                await ws.send_text(
+                json.dumps(
+                    Message(
+                        type=MessageType.SYSTEM,
+                        session_id=sid,
+                        content=json.dumps({
+                            "session_history": history,
+                            "token_usage": usage,
+                            "context_tokens": context,
+                            "processing": processing,
+                            "agents": agents_info,
+                        }, ensure_ascii=False),
+                    ).model_dump(exclude_none=True),
+                    ensure_ascii=False,
+                )
             )
 
         # 创建消息路由器 — 所有消息处理委托给 MessageRouter
@@ -1376,14 +1469,17 @@ async def ws_chat(ws: WebSocket) -> None:
             # 解析接收到的消息
             msg: Message
             try:
-                msg = Message.from_json(raw)
+                msg = Message.model_validate_json(raw)
             except (ValueError, KeyError) as exc:
                 await ws.send_text(
-                    Message(
-                        type=MessageType.ERROR,
-                        session_id=sid,
-                        message=f"Invalid message: {exc}",
-                    ).to_json()
+                    json.dumps(
+                        Message(
+                            type=MessageType.ERROR,
+                            session_id=sid,
+                            message=f"Invalid message: {exc}",
+                        ).model_dump(exclude_none=True),
+                        ensure_ascii=False,
+                    )
                 )
                 continue
 

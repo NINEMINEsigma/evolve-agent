@@ -76,8 +76,13 @@ MERGE_CONCAT_THRESHOLD: int = AUTO_CONTENT_MAX
 # 会话摘要生成时历史输入截断上限（字符数）— 暂时设为极大值，后续再细化
 SUMMARY_INPUT_MAX_CHARS: int = 1_000_000_000
 
-# 多源会话合并时摘要拼接截断上限（字符数）— 暂时设为极大值
-MERGE_SUMMARY_CONCAT_MAX_CHARS: int = 1_000_000_000
+# 会话旋转/合并继承时，旧会话保留的尾部轮次数
+INHERIT_LAST_ROUNDS: int = 10
+
+# 元数据提取器角色名 — 用于标题/标签/摘要生成时 LLM 客户端的 character 参数，
+# 明确声明"这不是 agent 在说话，是元数据提取工具在工作"。
+# 对 BaseMessage 无技术效果，但语义上隔离了 agent 角色和元数据生成角色。
+META_EXTRACTOR_CHARACTER: str = "__meta_extractor__"
 
 
 # ============================================================================
@@ -92,9 +97,6 @@ SUBPROCESS_SHORT_TIMEOUT_DEFAULT: int = 5
 
 # 子进程软清理等待时间, 到时后强杀进程
 SUBPROCESS_SOFT_CLEANUP_WAIT_TIME: int = 5
-
-# Playwright 页面操作默认超时（毫秒）— 用于 Mermaid/Excalidraw 等浏览器渲染场景
-PLAYWRIGHT_PAGE_TIMEOUT_MS: int = 120000
 
 # 审批模型加载等待超时（秒）— 等待本地 GGUF 模型从 loading 变为 ready
 APPROVAL_MODEL_LOAD_TIMEOUT: int = 120
@@ -120,11 +122,11 @@ SUBAGENT_IDLE_TRIGGER_SECONDS: int = 20
 # 文件系统 I/O 限制
 # ============================================================================
 
-# write_file / write_fork 完全覆盖模式的内容上限（字符数）
-WRITE_FILE_MAX_CHARS: int = 10000
+# write_file 完全覆盖模式的内容上限（字符数）
+WRITE_FILE_MAX_CHARS: int = 100000
 
 # edit_file 增量编辑模式的内容上限（字符数）
-EDIT_FILE_MAX_CHARS: int = 10000
+EDIT_FILE_MAX_CHARS: int = 100000
 
 # read_file 单次读取最大行数（硬上限）
 READ_FILE_MAX_LINES: int = 2000
@@ -145,6 +147,19 @@ NAMESPACE_PREFIXES: tuple[str, ...] = ("ws:", "fork:", "fix:", "skills:")
 # ============================================================================
 # 上传
 # ============================================================================
+
+# agentspace 下的上传子目录名 — 文件上传的目标物理目录
+UPLOADS_DIR_NAME: str = "uploads"
+
+# 上传文件在沙箱中的逻辑路径前缀 — 如 ws:uploads/screenshot.png
+UPLOADS_WS_PREFIX: str = f"ws:{UPLOADS_DIR_NAME}/"
+
+# 静态文件 HTTP 路由前缀 — 前端通过此 URL 访问 agentspace 下的文件
+# 注意：此路由名恰好与上传目录名相同，但服务于整个 agentspace（不仅是 uploads 子目录）
+STATIC_FILE_HTTP_PREFIX: str = "/uploads"
+
+# 下载路由 HTTP 前缀 — 触发浏览器 attachment 下载
+DOWNLOADS_HTTP_PREFIX: str = "/downloads"
 
 # 文件名示例：20250617_123045_utc_a1b2c3d4_filename.ext
 UPLOAD_TIME_RE_PATTERN = r"^(\d{8}_\d{6}_utc)_[a-f0-9]{8}_(.+)$"

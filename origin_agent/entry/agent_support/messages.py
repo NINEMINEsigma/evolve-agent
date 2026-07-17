@@ -10,8 +10,8 @@ from pathlib import Path
 from typing import * # type: ignore
 
 from system.prompt import build_system_prompt
-from entity.puretype import Role
-from entity.messages import History
+from entity.puretype import Role, ToolAvailability
+from entity.messages import History, BaseMessage, CharacterSystemMessage
 
 if TYPE_CHECKING:
     from system.context import RuntimeContext
@@ -129,7 +129,11 @@ def collect_all_hooks_context(
     return hooks_context, fixator_context
 
 
-def build_agent_system_prompt(ctx: RuntimeContext, skill_blocks: list[str]) -> list[str]:
+def build_agent_system_prompt(
+    ctx: RuntimeContext,
+    skill_blocks: list[str],
+    tool_availability_scope: ToolAvailability = ToolAvailability.MAIN,
+) -> list[str]:
     """构建 Agent 使用的 system prompt 段落列表。"""
     return build_system_prompt(
         mode=ctx.mode,
@@ -139,6 +143,7 @@ def build_agent_system_prompt(ctx: RuntimeContext, skill_blocks: list[str]) -> l
         fork_path=str(ctx.fork_path),
         fix_fork_path=str(ctx.fix_path) if ctx.fix_path else "",
         fix_log_path=str(ctx.fix_log_path or ""),
+        tool_availability_scope=tool_availability_scope,
     )
 
 
@@ -168,32 +173,19 @@ def collect_skill_prompts(skills_dir: Path | str = Path("skills")) -> list[str]:
         return []
 
 
-def build_turn_messages(
-    system_prompts: list[str],
-    history: History,
-    current_character_agent: str,
-) -> list[dict[str, Any]]:
-    """构建当前回合发送给 LLM 的消息列表。
-
-    假设调用方已经把 hooks_context / memory_ctx 等非持久化内容通过
-    history.last_user_message.dynamic_message_suffix 注入；本函数只负责
-    system prompt 与 history.to_openai 的拼接。
-    """
-    messages: list[dict[str, Any]] = [
-        {"role": Role.SYSTEM, "content": sp} for sp in system_prompts
-    ]
-    messages.extend(history.to_openai(current_character_agent))
-    return messages
-
-
 def build_full_history_messages(
     system_prompts: list[str],
     history: History,
     current_character_agent: str,
-) -> list[dict[str, Any]]:
-    """构建包含 system prompts 和完整历史的消息列表。"""
-    messages: list[dict[str, Any]] = [
-        {"role": Role.SYSTEM, "content": sp} for sp in system_prompts
+) -> list[BaseMessage]:
+    """构建包含 system prompts 和完整历史的消息列表。
+
+    假设调用方已经把 hooks_context / memory_ctx 等非持久化内容通过
+    history.last_user_message.dynamic_message_suffix 注入；本函数只负责
+    system prompt 与 History.get_messages 的拼接。
+    """
+    messages: list[BaseMessage] = [
+        CharacterSystemMessage(role=Role.SYSTEM, character_name=current_character_agent, content=sp) for sp in system_prompts
     ]
-    messages.extend(history.to_openai(current_character_agent))
+    messages.extend(history.get_messages(current_character_agent=current_character_agent))
     return messages

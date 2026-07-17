@@ -77,7 +77,20 @@ export function useGlobalTooltip() {
       showTooltip(target, tooltipText);
     };
 
-    const onMouseLeave = () => {
+    const onMouseLeave = (e: MouseEvent) => {
+      const target = e.target as HTMLElement;
+      const related = e.relatedTarget as Node | null;
+      // relatedTarget 为 null 说明鼠标离开了视口，直接隐藏
+      if (!related) {
+        hideTooltip();
+        return;
+      }
+      // 从触发源向上查找最近的 tooltip 宿主元素（带 data-tooltip）
+      const host = target.closest("[data-tooltip]");
+      if (host && (host === related || host.contains(related))) {
+        // 鼠标仍在宿主元素范围内（只是从子元素移到另一个子元素），不隐藏
+        return;
+      }
       hideTooltip();
     };
 

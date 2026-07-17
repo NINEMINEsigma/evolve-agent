@@ -383,7 +383,7 @@ Resolves sandbox logical paths in the command, then launches the subprocess in t
     is_async=True,
     emoji="🔄",
     danger_level=ToolDangerLevel.dangerous,
-    availability=ToolAvailability.MAIN,
+    availability=ToolAvailability.MAIN | ToolAvailability.MULTI_AGENT,
 )
 
 registry.register(
@@ -450,5 +450,5 @@ Looks up the process by task_id, sends a termination signal, and waits up to 5 s
     handler=_handle_stop_background_service,
     is_async=True,
     emoji="⏹",
-    availability=ToolAvailability.MAIN,
+    availability=ToolAvailability.MAIN | ToolAvailability.MULTI_AGENT,
 )

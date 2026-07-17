@@ -17,7 +17,7 @@ from typing import Any, TYPE_CHECKING
 from pydantic import BaseModel, Field
 
 from entity.puretype import Role
-from entity.messages import ToolResultMessage, CharacterConversationMessage, FunctionCall, ToolCall as HistoryToolCall
+from entity.messages import ToolResultMessage, CharacterConversationMessage, CharacterSystemMessage, FunctionCall, ToolCall as HistoryToolCall, BaseMessage
 from entity.constant import (
     MAX_TOOL_TURNS,
     ALL_AGENTS_CHARACTER_REF_NAME,
@@ -32,7 +32,8 @@ from entry.tool_executor import ToolExecutor
 
 if TYPE_CHECKING:
     from entry.agent_sink import AgentSink
-    from component.llm import LLMClient, LLMResponse
+    from abstract.llm.client import BaseLLMClient
+    from entity.puretype import LLMResponse
 
 logger = logging.getLogger(__name__)
 
@@ -80,17 +81,17 @@ class MultiAgentWorker:
         *,
         character_name: str,
         system_prompts: list[str],
-        history: list[dict[str, Any]],
+        history: list[BaseMessage],
         tools: list[dict[str, Any]],
-        llm_client: LLMClient,
+        llm_client: BaseLLMClient,
         sink: AgentSink,
         loop: IMainSessionLoop,
     ) -> None:
         self.character_name: str = character_name
         self._system_prompts: list[str] = system_prompts
-        self._messages: list[dict[str, Any]] = history
+        self._messages: list[BaseMessage] = history
         self._tools: list[dict[str, Any]] = tools
-        self._llm: LLMClient = llm_client
+        self._llm: BaseLLMClient = llm_client
         self._sink: AgentSink = sink
         self._loop: IMainSessionLoop = loop
         # 流式消费器：每轮 LLM 调用会生成独立 stream_id，避免多轮文本互相覆盖
@@ -118,7 +119,7 @@ class MultiAgentWorker:
 
     @staticmethod
     def _parse_routing_tags(text: str) -> AgentResponse:
-        """从自然语言文本中解析 DSL 路由标签。
+        """从自然语言文本中旁路解析 DSL 路由标签。
 
         支持格式：
         - @visible(Noire, 杏)
@@ -126,9 +127,9 @@ class MultiAgentWorker:
         - @response(none)
         - @visible(all) / @visible(all-agents)
 
-        返回的 AgentResponse.content 已剥离所有路由标签。
-        若未命中任何标签，visible_characters 与 response_characters 均为空列表
-        （由外层补全默认值）。
+        content 保留原始全文（含标签），不剥离、不修改。
+        visible_characters / response_characters 作为旁路结构化字段返回。
+        若未命中任何标签，二者均为空列表（由外层补全默认值）。
         """
         if not text:
             return AgentResponse(content="", visible_characters=[], response_characters=[])
@@ -149,20 +150,27 @@ class MultiAgentWorker:
                 if payload.lower() == ALL_AGENTS_CHARACTER_REF_NAME:
                     visible_characters = [ALL_AGENTS_CHARACTER_REF_NAME]
                 else:
-                    visible_characters = split_names(payload)
+                    # 累积合并多个 @visible 标签，去重
+                    visible_characters.extend(
+                        n for n in split_names(payload) if n not in visible_characters
+                    )
             elif key == MULTI_AGENT_ROUTING_TAG_RESPONSE:
                 if payload.lower() in (MULTI_AGENT_ROUTING_RESPONSE_NONE, MULTI_AGENT_ROUTING_RESPONSE_NULL, ""):
+                    # 遇到 none/null 清空之前累积的 response
                     response_characters = []
                 else:
-                    response_characters = split_names(payload)
-            return ""
+                    # 累积合并多个 @response 标签，去重
+                    response_characters.extend(
+                        n for n in split_names(payload) if n not in response_characters
+                    )
+            # 保留原文：返回匹配的原始文本，不做替换
+            return match.group(0)
 
-        clean_text = tag_pattern.sub(process_match, text)
-        clean_text = clean_text.strip()
-        clean_text = re.sub(r"\n{3,}", "\n\n", clean_text)
+        # 旁路提取路由标签值，content 保留原始全文
+        tag_pattern.sub(process_match, text)
 
         return AgentResponse(
-            content=clean_text,
+            content=text,
             visible_characters=visible_characters,
             response_characters=response_characters,
         )
@@ -176,8 +184,8 @@ class MultiAgentWorker:
         3. 当 LLM 返回纯文本时 → 解析 DSL 标签 → 推送干净内容到前端 → 返回 WorkerResult
         """
         # 在消息列表头部插入多条 system prompt
-        full_messages = [
-            {"role": Role.SYSTEM.value, "content": prompt}
+        full_messages: list[BaseMessage] = [
+            CharacterSystemMessage(role=Role.SYSTEM, character_name=self.character_name, content=prompt)
             for prompt in self._system_prompts
         ] + self._messages
 
@@ -223,9 +231,8 @@ class MultiAgentWorker:
 
             # 有 tool_calls → 写入共享 History → 发送标准事件 → 执行工具 → 继续循环
             if resp.tool_calls:
-                # 1. 构造 History 格式的 ToolCall 列表 和 OpenAI 格式的 raw list
+                # 1. 构造 History 格式的 ToolCall 列表
                 history_tool_calls: list[HistoryToolCall] = []
-                raw_tc_list: list[dict[str, Any]] = []
                 for tc in resp.tool_calls:
                     args_str = json.dumps(tc.arguments, ensure_ascii=False)
                     history_tool_calls.append(HistoryToolCall(
@@ -233,26 +240,8 @@ class MultiAgentWorker:
                         type="function",
                         function=FunctionCall(name=tc.name, arguments=args_str),
                     ))
-                    raw_tc_list.append({
-                        "id": tc.id,
-                        "type": "function",
-                        "function": {
-                            "name": tc.name,
-                            "arguments": args_str,
-                        },
-                    })
 
-                # 2. 发送标准 tool_call 事件到前端
-                for tc in resp.tool_calls:
-                    await self._sink.emit_tool_call(
-                        self._loop.loop.session_id,
-                        tc.name,
-                        tc.id,
-                        tc.arguments,
-                        character_name=self.character_name,
-                    )
-
-                # 3. 写入 assistant message（含 tool_calls）到共享 History，并追加到本地 LLM 上下文
+                # 2. 写入 assistant message（含 tool_calls）到共享 History，并追加到本地 LLM 上下文
                 assistant_msg = CharacterConversationMessage(
                     role=Role.ASSISTANT,
                     character_name=self.character_name,
@@ -262,45 +251,24 @@ class MultiAgentWorker:
                     reasoning=resp.reasoning_content,
                 )
                 self._loop.loop.history.add_message(assistant_msg)
-                self._loop.loop.persist_history(self._loop.loop.session_id)
+                self._loop.loop.save_history(self._loop.loop.session_id)
 
-                full_messages.append({
-                    "role": "assistant",
-                    "content": resp.content,
-                    "tool_calls": raw_tc_list,
-                })
+                full_messages.append(assistant_msg)
 
-                # 4. 执行工具，写入结果到 History，发送 tool_result 到前端
+                # 3. 执行工具，写入结果到 History
+                #    tool_call/tool_result 前端事件由 ToolExecutor 内部统一发送，此处不再重复
                 for tc in resp.tool_calls:
-                    tool_msg = await self._tool_executor.execute(tc, self._loop.loop.session_id)
-
-                    # 设置 character_name 为仅调用方可见
-                    if tool_msg.character_name != self.character_name:
-                        tool_msg = tool_msg.model_copy(update={"character_name": self.character_name})
-
-                    # 写入共享 History
-                    self._loop.loop.history.add_message(tool_msg)
-                    self._loop.loop.persist_history(self._loop.loop.session_id)
-
-                    # 发送标准 tool_result 事件到前端
-                    content_text = tool_msg.content
-                    if isinstance(content_text, list):
-                        from entry.agent_support.multimodal import content_to_text
-                        content_text = content_to_text(content_text)
-                    await self._sink.emit_tool_result(
-                        self._loop.loop.session_id,
-                        tc.name,
-                        tc.id,
-                        str(content_text),
+                    tool_msg = await self._tool_executor.execute(
+                        tc, self._loop.loop.session_id,
                         character_name=self.character_name,
                     )
 
+                    # 写入共享 History
+                    self._loop.loop.history.add_message(tool_msg)
+                    self._loop.loop.save_history(self._loop.loop.session_id)
+
                     # 追加 tool 结果到本地 LLM 上下文（跟在 assistant tool_calls 之后）
-                    full_messages.append({
-                        "role": "tool",
-                        "tool_call_id": tool_msg.tool_call_id,
-                        "content": str(content_text),
-                    })
+                    full_messages.append(tool_msg)
 
                 continue
 
@@ -324,14 +292,6 @@ class MultiAgentWorker:
                 "MultiAgentWorker DSL parse | session=%s character=%s turn=%d parsed=%s",
                 self._loop.loop.session_id, self.character_name, turn, parsed,
             )
-
-            # DSL 解析后 content 为空/仅空白：兜底提示
-            if not parsed.content or not parsed.content.strip():
-                return await self._error_result(
-                    "Empty content after stripping routing tags",
-                    raw_text=text,
-                    reasoning=resp.reasoning_content,
-                )
 
             return WorkerResult(
                 character_name=self.character_name,

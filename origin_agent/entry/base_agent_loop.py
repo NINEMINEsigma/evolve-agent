@@ -18,22 +18,35 @@ from typing import Any, TYPE_CHECKING
 
 from pydantic import BaseModel
 
-from entity.puretype import Role, ToolDangerLevel
-from entity.messages import History, BaseMessage, ToolResultMessage, CharacterConversationMessage
-from entity.constant import USER_CHARACTER_NAME, SYSTEM_CHARACTER_NAME
+from entity.puretype import Role, ToolAvailability, SessionMessageEntry
+from entity.messages import (
+    History,
+    BaseMessage,
+    ToolResultMessage,
+    CharacterConversationMessage,
+    CharacterMessage,
+    MessageBlock,
+)
+from entity.constant import (
+    USER_CHARACTER_NAME, SYSTEM_CHARACTER_NAME,
+    AUTO_TITLE_CONTENT_MAX, AUTO_TAGS_CONTENT_MAX,
+    META_EXTRACTOR_CHARACTER,
+)
 from entry.agent_support.messages import (
-    build_turn_messages,
+    build_full_history_messages,
     collect_all_hooks_context,
     load_message_hooks,
 )
-from entry.agent_support.multimodal import tool_result_to_content, content_to_text
+from entry.agent_support.multimodal import content_to_text
 from system.pathutils import find_repo_root
 from system.session_store import SessionStore
 
 if TYPE_CHECKING:
+    from abstract.llm.client import BaseLLMClient
     from system.context import RuntimeContext
     from system.application import Application
     from entry.agent_sink import AgentSink
+    from gateway.session_manager import SessionManager
 
 logger = logging.getLogger(__name__)
 
@@ -167,6 +180,92 @@ class ToolContext(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# _serialize_message_entry — 公共消息序列化函数
+# ---------------------------------------------------------------------------
+
+def _serialize_message_entry(
+    msg: BaseMessage,
+    index: int,
+    fallback_character: str = "assistant",
+) -> SessionMessageEntry:
+    """将单条 History 消息序列化为前端展示用的 SessionMessageEntry。
+
+    统一 BaseAgentLoop / MultiAgentLoop 两处 get_session_messages 的序列化逻辑，
+    修复 MultiAgentLoop 中 str(raw_content) 的 bug（应使用 content_to_text）。
+    """
+    raw_content = msg.content
+    if isinstance(raw_content, list):
+        content: str | list[dict[str, Any]] = [
+            b.as_object() if isinstance(b, MessageBlock) else b
+            for b in raw_content
+        ]
+    else:
+        content = content_to_text(raw_content)
+
+    # character_name: CharacterMessage 有角色名，否则回退到 fallback
+    character_name = (
+        msg.character_name
+        if isinstance(msg, CharacterMessage)
+        else fallback_character
+    )
+
+    # CharacterConversationMessage 专属字段
+    visible_characters: list[str] | None = None
+    response_characters: list[str] | None = None
+    message_suffix: str | None = None
+    dynamic_message_suffix: str | None = None
+    reasoning_content: str | None = None
+    tool_calls: list[dict[str, Any]] | None = None
+
+    if isinstance(msg, CharacterConversationMessage):
+        visible_characters = msg.visible_characters or None
+        response_characters = msg.response_characters or None
+        message_suffix = msg.message_suffix or None
+        dynamic_message_suffix = msg.dynamic_message_suffix or None
+        reasoning_content = msg.reasoning or None
+        if msg.tool_calls:
+            tool_calls = [
+                {
+                    "id": tc.id,
+                    "type": tc.type,
+                    "function": {
+                        "name": tc.function.name,
+                        "arguments": tc.function.arguments,
+                    },
+                }
+                for tc in msg.tool_calls
+            ]
+
+    requires_response = True if msg.role == Role.USER else None
+
+    # ToolResultMessage._meta 提取
+    tool_call_meta: dict[str, Any] | None = None
+    if isinstance(msg, ToolResultMessage):
+        content_str = content_to_text(raw_content)
+        try:
+            parsed = json.loads(content_str)
+            if isinstance(parsed, dict) and "_meta" in parsed:
+                tool_call_meta = parsed["_meta"]
+        except (json.JSONDecodeError, TypeError):
+            pass
+
+    return SessionMessageEntry(
+        role=msg.role.value,
+        content=content,
+        index=index,
+        character_name=character_name,
+        visible_characters=visible_characters,
+        response_characters=response_characters,
+        message_suffix=message_suffix,
+        dynamic_message_suffix=dynamic_message_suffix,
+        reasoning_content=reasoning_content,
+        requires_response=requires_response,
+        tool_calls=tool_calls,
+        tool_call_meta=tool_call_meta,
+    )
+
+
+# ---------------------------------------------------------------------------
 # BaseAgentLoop — 最基础 Agent 循环抽象基类
 # ---------------------------------------------------------------------------
 
@@ -186,15 +285,27 @@ class BaseAgentLoop(ABC):
         self._inbox: Inbox = Inbox()
         self._cancel_event: asyncio.Event = asyncio.Event()
         self._message_hooks_cache: list[dict] | None = None
-        self._history: History = History(messages=[])
+        self._history: History = History()
         self._session_store: SessionStore | None = None
         self._token_usage: int = 0
         self._last_prompt_tokens: int = 0
+        # gateway SessionManager 引用（由 server 层注入，用于旋转/归档）；
+        # 仅主会话 loop 使用，子 Agent loop 保持 None
+        self._session_manager: SessionManager | None = None
 
     @property
     def history_store_dir(self) -> Path | None:
         """统一返回当前 loop 的 session 持久化根目录。"""
         return self._session_store.base_dir if self._session_store else None
+
+    def set_session_manager(self, manager: SessionManager) -> None:
+        """注入 gateway SessionManager，用于旋转/归档等操作。"""
+        self._session_manager = manager
+
+    @property
+    def session_manager(self) -> SessionManager | None:
+        """返回当前 loop 关联的 gateway SessionManager（未注入时为 None）。"""
+        return self._session_manager
 
     @property
     def inbox(self) -> Inbox:
@@ -206,6 +317,17 @@ class BaseAgentLoop(ABC):
     @abstractmethod
     def get_sink(self) -> AgentSink:
         """返回当前 loop 的 AgentSink 实例。"""
+        ...
+
+    @property
+    @abstractmethod
+    def current_character_agent(self) -> str:
+        """返回当前 loop 对应的 agent 角色名，用于 History 视图过滤。"""
+        ...
+
+    @abstractmethod
+    def _get_session_info_llm_client(self) -> BaseLLMClient | None:
+        """返回用于生成标题/标签/摘要等会话信息的 LLM 客户端，无可用时返回 None。"""
         ...
 
     @property
@@ -267,6 +389,7 @@ class BaseAgentLoop(ABC):
 
     def interrupt(self) -> None:
         """请求停止当前循环。"""
+        logger.info("Interrupt requested | session=%s", self.session_id)
         self._cancel_event.set()
 
     @property
@@ -329,36 +452,26 @@ class BaseAgentLoop(ABC):
         """设置当前 loop 的 session ID（供 gateway 层旋转/替换 loop 时使用）。"""
         self.session_id = session_id
 
-    def persist_history(self, session_id: str) -> None:
+    def save_history(self, session_id: str) -> None:
         """将当前 History 持久化到磁盘。"""
-        self._persist_message(session_id)
-
-    def _persist_message(self, session_id: str) -> None:
         if self._session_store is None:
             return
         try:
             self._session_store.write_history(session_id, self._history)
         except Exception as exc:
-            logger.exception("Failed to persist history for session %s: %s", session_id, exc)
-
-    def _overwrite_history_file(self, session_id: str) -> None:
-        if self._session_store is None:
-            return
-        try:
-            self._session_store.write_history(session_id, self._history)
-        except Exception as exc:
-            logger.exception("Failed to overwrite history file for session %s: %s", session_id, exc)
+            logger.exception("Failed to save history for session %s: %s", session_id, exc)
 
     def _remove_last_user_message(self, session_id: str) -> None:
         """移除 History 中最后一条 user 消息并持久化。"""
-        messages = self._history.messages
-        if messages and messages[-1].role == Role.USER:
-            messages.pop()
-            self._history.update_last_user_message()
-        self._overwrite_history_file(session_id)
+        if self._history.count > 0:
+            last_msg = self._history.get_message(self._history.count - 1)
+            if last_msg.role == Role.USER:
+                self._history.remove_last_message()
+        self.save_history(session_id)
 
     def clear_session(self) -> None:
         """清理当前 session 的持久化数据。"""
+        logger.info("Clearing session | session=%s", self.session_id)
         if self._session_store is None:
             return
         session_path = self._session_store.session_dir(self.session_id)
@@ -366,101 +479,74 @@ class BaseAgentLoop(ABC):
             shutil.rmtree(str(session_path), ignore_errors=True)
             logger.info("Cleared persisted data for session %s", self.session_id)
 
-    def get_session_messages(self) -> list[dict]:
+    def get_session_messages(self) -> list[SessionMessageEntry]:
         """返回前端展示所需的消息列表，包含多 agent 元数据。"""
-        messages: list[dict] = []
-        for index, msg in enumerate(self._history.messages):
-            raw_content = msg.content
-            if isinstance(raw_content, list):
-                content: str | list[dict[str, Any]] = [b.as_object() for b in raw_content]
-            else:
-                content = content_to_text(raw_content)
-            entry: dict[str, Any] = {
-                "role": msg.role.value,
-                "content": content,
-                "index": index,
-                "character_name": msg.character_name if isinstance(msg, CharacterConversationMessage) else getattr(self, 'current_character_agent', 'assistant'),
-                "visible_characters": msg.visible_characters if isinstance(msg, CharacterConversationMessage) else None,
-                "requires_response": msg.role == Role.USER,
-            }
-            if isinstance(msg, CharacterConversationMessage):
-                if msg.response_characters:
-                    entry["response_characters"] = msg.response_characters
-                if msg.message_suffix:
-                    entry["message_suffix"] = msg.message_suffix
-                if msg.dynamic_message_suffix:
-                    entry["dynamic_message_suffix"] = msg.dynamic_message_suffix
-                if msg.reasoning:
-                    entry["reasoning_content"] = msg.reasoning
-                if msg.tool_calls:
-                    entry["tool_calls"] = [
-                        {
-                            "id": tc.id,
-                            "type": tc.type,
-                            "function": {
-                                "name": tc.function.name,
-                                "arguments": tc.function.arguments,
-                            },
-                        }
-                        for tc in msg.tool_calls
-                    ]
-            if msg.role == Role.SYSTEM:
-                entry["role"] = Role.SYSTEM.value
-            messages.append(entry)
-        return messages
+        fallback = self.current_character_agent
+        return [
+            _serialize_message_entry(msg, index, fallback_character=fallback)
+            for index, msg in enumerate(self._history.iter_messages())
+        ]
 
+    # TODO: 重编辑缺少多模态支持
     def edit_session_message(self, index: int, content: str | None = None,
                              visible_characters: list[str] | None = None) -> dict:
+        logger.info("Edit message | session=%s index=%d", self.session_id, index)
         if not isinstance(index, int) or index < 0:
+            logger.warning("Edit message fail | session=%s error=invalid index", self.session_id)
             return {"updated": False, "error": "invalid message index"}
         if index >= self._history.count:
+            logger.warning("Edit message fail | session=%s index=%d error=out of range", self.session_id, index)
             return {"updated": False, "error": "message index out of range"}
         msg = self._history.get_message(index)
         if not isinstance(msg, CharacterConversationMessage):
+            logger.warning("Edit message fail | session=%s index=%d error=type not editable", self.session_id, index)
             return {"updated": False, "error": "message type not editable"}
         updates: dict = {}
         if content is not None:
             updates["content"] = content
         if visible_characters is not None:
             updates["visible_characters"] = visible_characters
-        self._history.messages[index] = msg.model_copy(update=updates)
-        self._overwrite_history_file(self.session_id)
+        updated_msg = msg.model_copy(update=updates)
+        self._history.set_message(index, updated_msg)
+        self.save_history(self.session_id)
         result: dict = {
             "updated": True,
             "session_id": self.session_id,
             "index": index,
             "role": msg.role.value,
-            "content": content_to_text(self._history.messages[index].content),
+            "content": content_to_text(updated_msg.content),
         }
         if visible_characters is not None:
             result["visible_characters"] = visible_characters
+        logger.info("Edit message ok | session=%s index=%d role=%s", self.session_id, index, msg.role.value)
         return result
 
     def delete_session_messages(self, count: int = 1) -> dict:
         """删除最后 count 个逻辑轮次的消息（从倒数第 count 条 user 起，覆盖其后所有 tool/assistant）。"""
+        logger.info("Delete messages | session=%s count=%d", self.session_id, count)
         if count < 1:
+            logger.warning("Delete messages fail | session=%s error=count must be >= 1", self.session_id)
             return {"deleted": False, "error": "count must be >= 1"}
-        user_indices = [i for i, m in enumerate(self._history.messages) if m.role == Role.USER]
-        if not user_indices:
+        remove_from = self._history.find_last_user_message_index(count=count)
+        if remove_from is None:
+            logger.warning("Delete messages fail | session=%s error=no user messages to delete", self.session_id)
             return {"deleted": False, "error": "no user messages to delete"}
-        if count > len(user_indices):
-            return {"deleted": False, "error": f"only {len(user_indices)} user messages available"}
-        remove_from = user_indices[-count]
-        self._history.messages = self._history.messages[:remove_from]
-        self._history.update_last_user_message()
-        self._overwrite_history_file(self.session_id)
+        self._history.truncate_to(remove_from)
+        self.save_history(self.session_id)
+        logger.info("Delete messages ok | session=%s removed_from=%d remaining=%d", self.session_id, remove_from, self._history.count)
         return {"deleted": True, "session_id": self.session_id, "remaining_count": self._history.count}
 
     def regenerate_response(self) -> dict:
         """截断到最后一条 user 消息，返回其内容供重新生成。"""
-        user_indices = [i for i, m in enumerate(self._history.messages) if m.role == Role.USER]
-        if not user_indices:
+        logger.info("Regenerate response | session=%s", self.session_id)
+        last_user_idx = self._history.find_last_user_message_index(count=1)
+        if last_user_idx is None:
+            logger.warning("Regenerate response fail | session=%s error=no user message found", self.session_id)
             return {"regenerate": False, "error": "no user message found"}
-        last_user_idx = user_indices[-1]
-        last_user_msg = self._history.messages[last_user_idx]
+        last_user_msg = self._history.get_message(last_user_idx)
         last_user_content = content_to_text(last_user_msg.content)
-        self._history.messages = self._history.messages[:last_user_idx + 1]
-        self._overwrite_history_file(self.session_id)
+        self._history.truncate_to(last_user_idx + 1)
+        self.save_history(self.session_id)
         result: dict = {
             "regenerate": True,
             "session_id": self.session_id,
@@ -470,6 +556,7 @@ class BaseAgentLoop(ABC):
         if isinstance(last_user_msg, CharacterConversationMessage):
             result["visible_characters"] = last_user_msg.visible_characters
             result["response_characters"] = last_user_msg.response_characters
+        logger.info("Regenerate response ok | session=%s remaining=%d", self.session_id, self._history.count)
         return result
 
     def get_tool_resources(self) -> dict:
@@ -498,6 +585,105 @@ class BaseAgentLoop(ABC):
         logger.warning("Merge sessions not supported in this loop | session=%s sources=%s",
                        self.session_id, sources)
         return {"error": "merge not supported in this loop", "merged": False}
+
+    # -- 标题 / 标签 / 摘要生成（全量消息，不做可见性过滤）------------------
+
+    async def auto_generate_title(self) -> str:
+        """根据会话历史自动生成标题。"""
+        from abstract.llm.formats import to_summary_dict
+        from system.templates import read_template
+
+        messages = [m for m in self._history.iter_messages() if isinstance(m, CharacterConversationMessage)]
+        if not messages:
+            return ""
+        llm = self._get_session_info_llm_client()
+        if llm is None:
+            return ""
+        system_prompt = read_template("auto_title.txt")
+        messages_json = [
+            d for m in messages
+            if (d := to_summary_dict(m)) is not None
+        ]
+        user_prompt = read_template("auto_title_input.txt").replace(
+            "{{context}}",
+            json.dumps(messages_json, ensure_ascii=False)[-AUTO_TITLE_CONTENT_MAX:],
+        )
+        try:
+            resp = await llm.chat([
+                BaseMessage(role=Role.SYSTEM, content=system_prompt),
+                BaseMessage(role=Role.USER, content=user_prompt),
+            ], character=META_EXTRACTOR_CHARACTER)
+            return (resp.content or "").strip().strip("\"'")[:50]
+        except Exception as exc:
+            logger.exception("Failed to auto-generate title: %s", exc)
+            return ""
+
+    async def regenerate_session_tags(self) -> list[str]:
+        """根据会话历史重新生成标签列表。"""
+        from abstract.llm.formats import to_summary_dict
+        from system.templates import read_template
+
+        messages = [m for m in self._history.iter_messages() if isinstance(m, CharacterConversationMessage)]
+        if not messages:
+            logger.warning("No messages to regenerate session tags")
+            return []
+        llm = self._get_session_info_llm_client()
+        if llm is None:
+            logger.warning("No LLM client to regenerate session tags")
+            return []
+        try:
+            system_prompt = read_template("session_tags.txt")
+            # 获取已有标签池供 LLM 参考，优先复用已有标签
+            existing_tags_hint = ""
+            try:
+                from system.application import Application
+                sm = Application.current().session_manager
+                if sm is not None:
+                    all_tags = sm.get_all_tags()
+                    if all_tags:
+                        existing_tags_hint = (
+                            "\n\nExisting tags in the system (prefer reusing these when applicable): "
+                            + ", ".join(all_tags)
+                        )
+            except Exception:
+                pass
+            system_prompt = system_prompt.replace("{{existing_tags}}", existing_tags_hint)
+            messages_json = [
+                d for m in messages
+                if (d := to_summary_dict(m)) is not None
+            ]
+            user_prompt = read_template("session_tags_input.txt").replace(
+                "{{old_text}}",
+                json.dumps(messages_json, ensure_ascii=False)[-AUTO_TAGS_CONTENT_MAX:],
+            )
+            resp = await llm.chat([
+                BaseMessage(role=Role.SYSTEM, content=system_prompt),
+                BaseMessage(role=Role.USER, content=user_prompt),
+            ], character=META_EXTRACTOR_CHARACTER, response_format={"type": "json_object"})
+            logger.info("Session tags response, tags: %s | reasoning: %s", resp.content, resp.reasoning_content)
+            result = json.loads(resp.content)
+            if not isinstance(result, list):
+                raise ValueError("session tags response is not a list")
+            return result
+        except Exception as exc:
+            logger.exception("Failed to regenerate session tags: %s", exc)
+        return []
+
+    async def regenerate_summary_for_session(self, session_id: str) -> str:
+        """重新生成指定会话的摘要（可为任意 session_id，不要求当前活跃）。"""
+        if self._session_store is None:
+            return ""
+        history = self._session_store.read_history(session_id)
+        if history is None or history.count == 0:
+            return ""
+        llm = self._get_session_info_llm_client()
+        if llm is None:
+            return ""
+        from entry.agent_support.history_summary import summarize_history
+        summary = await summarize_history(history, llm)
+        if summary:
+            self._session_store.write_summary(session_id, summary)
+        return summary
 
     # -- Hook 支持（所有 loop 共享）----------------------------------------
 
@@ -612,6 +798,13 @@ class IMainSessionLoop(ABC):
     async def regenerate_summary_for_session(self, session_id: str) -> str:
         """重新生成指定会话的摘要（可为任意 session_id，不要求当前活跃）。"""
 
+    @abstractmethod
+    def get_tool_availability_scope(self) -> ToolAvailability:
+        """返回当前 loop 的工具可用性 scope。
+
+        dispatch 层用 (entry.availability & scope) == 0 拦截不在当前 scope 内的工具。
+        """
+
 
 # ---------------------------------------------------------------------------
 # BasePrivateChatAgentLoop — 1-on-1 私聊 Agent 循环基类
@@ -624,7 +817,6 @@ class BasePrivateChatAgentLoop(BaseAgentLoop):
     memory 和 custom_hooks 能力。
 
     子类必须实现以下工厂方法：
-    - _get_llm_client() → LLMClient
     - _get_context() → Any
     - _get_tool_definitions() → list[dict]
     - _on_context_over_limit() → None
@@ -635,17 +827,6 @@ class BasePrivateChatAgentLoop(BaseAgentLoop):
         super().__init__(app, session_id)
 
     # -- 抽象方法 ---------------------------------------------------------
-
-    @property
-    @abstractmethod
-    def current_character_agent(self) -> str:
-        """返回当前 loop 对应的 agent 角色名，用于 History 视图过滤。"""
-        ...
-
-    @abstractmethod
-    def _get_llm_client(self) -> Any:
-        """返回当前 loop 的 LLMClient 实例。"""
-        ...
 
     @abstractmethod
     def _get_context(self) -> Any:
@@ -667,80 +848,6 @@ class BasePrivateChatAgentLoop(BaseAgentLoop):
         """构建系统提示词段落列表。"""
         ...
 
-    # -- 工具执行 ---------------------------------------------------------
-
-    def _is_readonly_tool(self, name: str) -> bool:
-        """检查工具是否为 readOnly（无需审批直接执行）。"""
-        from abstract.tools.registry import registry
-        entry = registry.get_entry(name)
-        if entry is None:
-            return False
-        return entry.danger_level == ToolDangerLevel.readonly
-
-    def _is_auto_approved_tool(self, name: str, args: dict) -> bool:
-        """检查工具是否在自动批准白名单中。"""
-        try:
-            from component.approval.allowlist import is_allowed
-            return is_allowed(name, args)
-        except Exception:
-            logger.exception("Failed to check approval allowlist for tool=%s", name)
-            return False
-
-    async def _execute_tool(self, tool_name: str, args: dict,
-                            tool_call_id: str = "",
-                            session_id: str = "") -> ToolResultMessage:
-        """执行单个工具调用，处理只读/审批分流，返回 ToolResultMessage。
-
-        1. readonly 或白名单工具：直接执行
-        2. 非 readonly：调用 sink.request_approval 等待审批
-        3. 审批通过：执行工具
-        4. 审批拒绝：返回拒绝信息
-        """
-        # 注入 session_id 到 args 中（兼容旧工具 handler）
-        args["_session_id"] = session_id or self.session_id
-
-        sink = self.get_sink()
-        is_readonly = self._is_readonly_tool(tool_name)
-        is_auto = self._is_auto_approved_tool(tool_name, args)
-
-        if not is_readonly and not is_auto:
-            # 需要审批
-            approval = await sink.request_approval(
-                tool_name=tool_name,
-                args=args,
-                session_id=session_id or self.session_id,
-            )
-            if approval.action == "deny":
-                return ToolResultMessage(
-                    role=Role.TOOL,
-                    character_name=self.current_character_agent,
-                    tool_call_id=tool_call_id,
-                    content=f"Tool execution denied: {approval.deny_reason or 'User rejected'}",
-                )
-
-        # 执行工具
-        from abstract.tools.registry import registry
-        from entry.base_agent_loop import ToolContext
-        ctx = ToolContext(loop=self, session_id=self.session_id)
-        result = await registry.async_dispatch(tool_name, args, context=ctx)
-        content = tool_result_to_content(result)
-
-        # 对前端 UI 类工具推送实时状态更新（工具模块自行注册事件类型）
-        from abstract.tools.ui_event_router import ui_event_router
-        await ui_event_router.emit_for(
-            tool_name,
-            result,
-            sink,
-            session_id or self.session_id,
-        )
-
-        return ToolResultMessage(
-            role=Role.TOOL,
-            character_name=self.current_character_agent,
-            tool_call_id=tool_call_id,
-            content=content,
-        )
-
     # -- 历史管理 ---------------------------------------------------------
 
     def _get_history(self) -> History:
@@ -756,15 +863,14 @@ class BasePrivateChatAgentLoop(BaseAgentLoop):
 
     def _build_history_messages(
         self, user_message: str = ""
-    ) -> list[dict[str, Any]]:
+    ) -> list[BaseMessage]:
         """构建发送给 LLM 的完整历史消息列表（含 system prompt）。
 
         hooks_context / memory_ctx 已在追加用户消息时通过
         History.last_user_message.dynamic_message_suffix 注入，本函数不再处理。
         """
-        _ = user_message  # 保留签名兼容，实际注入逻辑已前移到 append_user_message
         system_prompts = self._build_system_prompt()
-        return build_turn_messages(
+        return build_full_history_messages(
             system_prompts=system_prompts,
             history=self._history,
             current_character_agent=self.current_character_agent,

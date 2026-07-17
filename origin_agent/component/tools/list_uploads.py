@@ -10,7 +10,7 @@ from typing import Any, Dict, List
 
 from abstract.tools.registry import registry, tool_error, tool_result
 from entity.puretype import ToolDangerLevel
-from entity.constant import UPLOAD_FILENAME_TIME_FORMAT, UPLOAD_TIME_RE_PATTERN
+from entity.constant import UPLOAD_FILENAME_TIME_FORMAT, UPLOAD_TIME_RE_PATTERN, UPLOADS_WS_PREFIX
 from system.sandbox import SandboxError
 from .filesystem import _s
 
@@ -49,7 +49,7 @@ def _handle_list_uploads(args: dict[str, Any]) -> dict:
         n = 100
 
     try:
-        names: list[str] = _s().list_dir("ws:uploads/")
+        names: list[str] = _s().list_dir(UPLOADS_WS_PREFIX)
     except SandboxError as exc:
         # uploads 目录可能还不存在
         logger.info("uploads directory not available: %s", exc)
@@ -58,7 +58,7 @@ def _handle_list_uploads(args: dict[str, Any]) -> dict:
     entries: list[dict] = []
     for name in names:
         try:
-            r = _s().resolve_read(f"ws:uploads/{name}")
+            r = _s().resolve_read(f"{UPLOADS_WS_PREFIX}{name}")
             st = r.real.stat()
 
             upload_dt = _parse_upload_time(name)
@@ -76,7 +76,7 @@ def _handle_list_uploads(args: dict[str, Any]) -> dict:
                 "upload_time": upload_time,
                 "upload_time_ts": upload_ts,
                 "mtime": _format_time(st.st_mtime),
-                "path": f"ws:uploads/{name}",
+                "path": f"{UPLOADS_WS_PREFIX}{name}",
             })
         except Exception as exc:
             logger.warning("Skipping upload entry %s: %s", name, exc, exc_info=True)

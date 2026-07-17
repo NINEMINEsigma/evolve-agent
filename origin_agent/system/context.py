@@ -69,6 +69,7 @@ class RuntimeContext(BaseModel):
     llm_temperature: float = 0.7
     llm_max_output_tokens: int = 4096
     llm_reasoning_effort: str = ""
+    llm_client_name: str = "openai_client"
     """模型 reasoning_effort 参数值（如 "low" / "medium" / "high"），空字符串表示不启用。"""
 
     # -- 工具执行超时 ---------------------------------------------

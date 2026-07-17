@@ -9,6 +9,7 @@ import {
   ClipboardDisplay,
   CronTask,
   SessionInfo,
+  SidebarItem,
   WSMessage,
   MessageContent,
 } from "../types";
@@ -132,11 +133,13 @@ export interface SessionStore {
   regenerateSummary: (sid: string) => void;
   terminateSession: (sid: string) => void;
   togglePinSession: (sid: string) => void;
-  mergeSessions: (sources: string[]) => void;
+  mergeSessions: (sources: string[]) => Promise<string | undefined>;
   branchSession: (sid: string) => void;
   toggleMergeSelect: (sid: string) => void;
   updateSessionTags: (sid: string, tags: string[]) => Promise<string[]>;
-  sidebarSessions: SessionInfo[];
+  sidebarItems: SidebarItem[];
+  expandedClusters: Set<string>;
+  toggleCluster: (id: string) => void;
   sessionResources: import("../utils").MessageResources;
 }
 
@@ -178,6 +181,7 @@ export function useSessionStore(callbacks: SessionStoreCallbacks = {}): SessionS
   const [generatingTagSessions, setGeneratingTagSessions] = useState<Set<string>>(new Set());
   const [streamingMessage, setStreamingMessage] = useState<ChatMessage | null>(null);
   const [allTags, setAllTags] = useState<string[]>([]);
+  const [expandedClusters, setExpandedClusters] = useState<Set<string>>(new Set());
 
   const messagesRef = useRef<ChatMessage[]>([]);
   useEffect(() => {
@@ -220,20 +224,49 @@ export function useSessionStore(callbacks: SessionStoreCallbacks = {}): SessionS
   }, [nextMessageIndex]);
 
   const flushStreamingMessage = useCallback(() => {
-    setStreamingMessage((prev) => {
-      if (!prev) return null;
+    // 通过 ref 同步读取当前 streaming message，避免在 setStreamingMessage updater
+    // 内部嵌套 setMessages（React 反模式，会导致 flush 的消息排在后续直接 setMessages 之后）
+    const prev = streamingMessageRef.current;
+    if (!prev) {
+      setStreamingMessage(null);
+      return;
+    }
+    let finalPrev = prev;
+    if (reasoningStartRef.current && prev.reasoningContent) {
+      const duration = Math.round((Date.now() - reasoningStartRef.current) / 1000);
+      finalPrev = { ...prev, reasoningDuration: duration };
+      reasoningStartRef.current = null;
+    }
+    setMessages((m) => {
+      const exists = m.some((x) => x.id === finalPrev.id);
+      return exists ? m.map((x) => (x.id === finalPrev.id ? finalPrev : x)) : [...m, finalPrev];
+    });
+    setStreamingMessage(null);
+  }, []);
+
+  // 合并 flush streaming message 和 append 新消息为单次 setMessages 调用，
+  // 保证 flush 的 agent 文本在 append 的 tool_call 之前，避免中间渲染闪烁
+  const flushAndAppend = useCallback((appendItem: ChatMessage) => {
+    const prev = streamingMessageRef.current;
+    let toFlush: ChatMessage | null = null;
+    if (prev) {
       let finalPrev = prev;
       if (reasoningStartRef.current && prev.reasoningContent) {
         const duration = Math.round((Date.now() - reasoningStartRef.current) / 1000);
         finalPrev = { ...prev, reasoningDuration: duration };
         reasoningStartRef.current = null;
       }
-      setMessages((m) => {
-        const exists = m.some((x) => x.id === finalPrev.id);
-        return exists ? m.map((x) => (x.id === finalPrev.id ? finalPrev : x)) : [...m, finalPrev];
-      });
-      return null;
+      toFlush = finalPrev;
+    }
+    setMessages((m) => {
+      let next = m;
+      if (toFlush) {
+        const exists = m.some((x) => x.id === toFlush!.id);
+        next = exists ? m.map((x) => (x.id === toFlush!.id ? toFlush! : x)) : [...m, toFlush!];
+      }
+      return [...next, appendItem];
     });
+    setStreamingMessage(null);
   }, []);
 
   const appendStreamingDelta = useCallback((
@@ -359,12 +392,13 @@ export function useSessionStore(callbacks: SessionStoreCallbacks = {}): SessionS
                 const callerPrefix = m.character_name ? `${m.character_name} ` : "";
                 return {
                   role: "tool",
-                  content: `${callerPrefix}⚡ ${toolName} ${argsStr}`,
+                  content: `${callerPrefix}${m.emoji || "⚡"} ${toolName} ${argsStr}`,
                   id: generateUUID(),
                   toolName,
                   toolArgs,
                   characterName: m.character_name,
                   messageIndex: typeof m.index === "number" ? m.index : undefined,
+                  emoji: m.emoji,
                 };
               });
 
@@ -398,6 +432,9 @@ export function useSessionStore(callbacks: SessionStoreCallbacks = {}): SessionS
                 entry.playlistAutoplay = parsed.playlistAutoplay;
               }
               if (parsed.content !== undefined) entry.content = parsed.content;
+            }
+            if (m.tool_call_meta) {
+              entry.toolCallMeta = m.tool_call_meta;
             }
             return entry;
           });
@@ -574,22 +611,22 @@ export function useSessionStore(callbacks: SessionStoreCallbacks = {}): SessionS
 
     if (msg.type === "tool_call") {
       if (ignoreStaleRef.current) return;
-      flushStreamingMessage();
       const argsStr = msg.args
         ? "(" + Object.entries(msg.args)
             .map(([k, v]) => `${k}=${JSON.stringify(v)}`)
             .join(", ") + ")"
         : "";
       const callerPrefix = msg.character_name ? `${msg.character_name} ` : "";
-      setMessages((prev) => [...prev, {
+      flushAndAppend({
         role: "tool",
-        content: `${callerPrefix}⚡ ${msg.tool} ${argsStr}`,
+        content: `${callerPrefix}${msg.emoji || "⚡"} ${msg.tool} ${argsStr}`,
         id: generateUUID(),
         toolName: msg.tool,
         toolArgs: msg.args,
         characterName: msg.character_name,
-        messageIndex: nextMessageIndex(prev),
-      }]);
+        messageIndex: nextMessageIndex(messagesRef.current),
+        emoji: msg.emoji,
+      });
       return;
     }
 
@@ -687,6 +724,7 @@ export function useSessionStore(callbacks: SessionStoreCallbacks = {}): SessionS
           command: (msg.args as Record<string, unknown>)?.command as string[] | undefined,
           reason: (msg.args as Record<string, unknown>)?.reason as string | undefined,
           tool: msg.tool ?? undefined,
+          emoji: msg.emoji,
         });
       }
       return;
@@ -700,11 +738,10 @@ export function useSessionStore(callbacks: SessionStoreCallbacks = {}): SessionS
           request_id: msg.request_id,
           question: msg.question ?? "",
           options: msg.options,
-          allow_custom: msg.allow_custom ?? true,
         });
       }
     }
-  }, [addMessage, appendStreamingDelta, fetchSessions, flushStreamingMessage, nextMessageIndex, sessionId]);
+  }, [addMessage, appendStreamingDelta, fetchSessions, flushAndAppend, flushStreamingMessage, nextMessageIndex, sessionId]);
 
   const toggleMessageCollapse = useCallback((id: string) => {
     setMessages((prev) => prev.map((m) => (
@@ -939,20 +976,20 @@ export function useSessionStore(callbacks: SessionStoreCallbacks = {}): SessionS
       .catch(() => {});
   }, [fetchSessions]);
 
-  const mergeSessions = useCallback((sources: string[]) => {
+  const mergeSessions = useCallback((sources: string[]): Promise<string | undefined> => {
     const validSources = sources.filter((sid) => {
       const session = sessions.find((s) => s.id === sid);
       return session && session.status === "archived";
     });
     if (validSources.length < 1) {
       console.warn("[merge] 没有可合并的已归档会话");
-      return;
+      return Promise.resolve(undefined);
     }
     if (validSources.length !== sources.length) {
       const skipped = sources.filter((sid) => !validSources.includes(sid));
       console.warn(`[merge] 以下未归档会话被排除: ${skipped.join(", ")}`);
     }
-    fetch("/api/sessions/merge", {
+    return fetch("/api/sessions/merge", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ sources: validSources }),
@@ -960,12 +997,13 @@ export function useSessionStore(callbacks: SessionStoreCallbacks = {}): SessionS
       .then((r) => r.json())
       .then((data) => {
         if (data.session_id) {
-          switchSession(data.session_id);
           fetchSessions();
+          return data.session_id as string;
         }
+        return undefined;
       })
-      .catch(() => {});
-  }, [switchSession, fetchSessions, sessions]);
+      .catch(() => undefined);
+  }, [fetchSessions, sessions]);
 
   const branchSession = useCallback((sid: string) => mergeSessions([sid]), [mergeSessions]);
 
@@ -1005,21 +1043,123 @@ export function useSessionStore(callbacks: SessionStoreCallbacks = {}): SessionS
     });
   }, [sessions]);
 
-  const sidebarSessions = useMemo(() => {
-    const q = searchQuery.toLowerCase().trim();
-    const filtered = q
-      ? sessions.filter((s) => {
-          const text = (s.title || s.id).toLowerCase();
-          if (text.includes(q)) return true;
-          const tags = s.tags || [];
-          return tags.some((t) => t.toLowerCase().includes(q));
-        })
-      : sessions;
-    return filtered.sort((a, b) => {
-      if (Number(b.pinned) !== Number(a.pinned)) return Number(b.pinned) - Number(a.pinned);
-      return (b.last_activity_at || b.created_at) - (a.last_activity_at || a.created_at);
+  function buildSidebarItems(sessions: SessionInfo[]): SidebarItem[] {
+    const sessionById = new Map<string, SessionInfo>();
+    sessions.forEach((s) => sessionById.set(s.id, s));
+
+    const adj = new Map<string, Set<string>>();
+    sessions.forEach((s) => {
+      if (!adj.has(s.id)) adj.set(s.id, new Set());
+      (s.parents || []).forEach((pid) => {
+        if (sessionById.has(pid)) {
+          adj.get(s.id)!.add(pid);
+          if (!adj.has(pid)) adj.set(pid, new Set());
+          adj.get(pid)!.add(s.id);
+        }
+      });
+      if (s.continuation && sessionById.has(s.continuation)) {
+        adj.get(s.id)!.add(s.continuation);
+        if (!adj.has(s.continuation)) adj.set(s.continuation, new Set());
+        adj.get(s.continuation)!.add(s.id);
+      }
     });
-  }, [sessions, searchQuery]);
+
+    const visited = new Set<string>();
+    const items: SidebarItem[] = [];
+
+    function dfs(start: string, component: SessionInfo[]) {
+      visited.add(start);
+      const s = sessionById.get(start);
+      if (s) component.push(s);
+      (adj.get(start) || []).forEach((next) => {
+        if (!visited.has(next)) dfs(next, component);
+      });
+    }
+
+    sessions.forEach((s) => {
+      if (!visited.has(s.id)) {
+        const component: SessionInfo[] = [];
+        dfs(s.id, component);
+        if (component.length === 1) {
+          const session = component[0];
+          items.push({ kind: "session", session });
+        } else if (component.length > 1) {
+          // 簇 ID 绑定 created_at 最早的成员（对话树根节点），确保跨 fetchSessions 不漂移
+          const root = component.reduce((min, s) =>
+            (s.created_at < min.created_at) ? s : min
+          );
+          // 显示标题取最近活跃成员，与 ID 解耦
+          component.sort((a, b) => (b.last_activity_at || b.created_at) - (a.last_activity_at || a.created_at));
+          const mostRecent = component[0];
+          items.push({
+            kind: "cluster",
+            cluster: {
+              id: root.id,
+              created_at: root.created_at,
+              title: mostRecent.title || mostRecent.id.slice(0, 8) + "...",
+              pinned: component.some((m) => m.pinned),
+              last_activity_at: Math.max(...component.map((m) => m.last_activity_at || m.created_at)),
+              members: component,
+            },
+          });
+        }
+      }
+    });
+
+    items.sort((a, b) => {
+      const aPinned = a.kind === "session" ? a.session.pinned : a.cluster.pinned;
+      const bPinned = b.kind === "session" ? b.session.pinned : b.cluster.pinned;
+      if (Number(bPinned) !== Number(aPinned)) return Number(bPinned) - Number(aPinned);
+      const aTime = a.kind === "session" ? a.session.last_activity_at || a.session.created_at : a.cluster.last_activity_at;
+      const bTime = b.kind === "session" ? b.session.last_activity_at || b.session.created_at : b.cluster.last_activity_at;
+      return bTime - aTime;
+    });
+
+    return items;
+  }
+
+  const toggleCluster = useCallback((id: string) => {
+    setExpandedClusters((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }, []);
+
+  const sidebarItems = useMemo(() => {
+    const q = searchQuery.toLowerCase().trim();
+    if (q || mergeMode) {
+      const filtered = q
+        ? sessions.filter((s) => {
+            const text = (s.title || s.id).toLowerCase();
+            if (text.includes(q)) return true;
+            const tags = s.tags || [];
+            return tags.some((t) => t.toLowerCase().includes(q));
+          })
+        : sessions;
+      const sorted = filtered.sort((a, b) => {
+        if (Number(b.pinned) !== Number(a.pinned)) return Number(b.pinned) - Number(a.pinned);
+        return (b.last_activity_at || b.created_at) - (a.last_activity_at || a.created_at);
+      });
+      return sorted.map((s) => ({ kind: "session", session: s }) as SidebarItem);
+    }
+    return buildSidebarItems(sessions);
+  }, [sessions, searchQuery, mergeMode]);
+
+  // 自动展开包含当前活跃会话的簇，确保切换会话后簇不会意外收起
+  useEffect(() => {
+    if (!sessionId) return;
+    const activeCluster = sidebarItems.find(
+      (item) => item.kind === "cluster" && item.cluster.members.some((m) => m.id === sessionId)
+    );
+    if (activeCluster && activeCluster.kind === "cluster") {
+      const cid = activeCluster.cluster.id;
+      if (!expandedClusters.has(cid)) {
+        setExpandedClusters((prev) => new Set(prev).add(cid));
+      }
+    }
+  }, [sidebarItems, sessionId, expandedClusters]);
 
   const sessionResources = useMemo(() => extractMessageResources(messages), [messages]);
 
@@ -1085,6 +1225,7 @@ export function useSessionStore(callbacks: SessionStoreCallbacks = {}): SessionS
     streamingMessageRef,
     allTags,
     setAllTags,
+    expandedClusters,
     ignoreStaleRef,
     streamDoneRef,
     addMessage,
@@ -1110,7 +1251,8 @@ export function useSessionStore(callbacks: SessionStoreCallbacks = {}): SessionS
     branchSession,
     toggleMergeSelect,
     updateSessionTags,
-    sidebarSessions,
+    sidebarItems,
+    toggleCluster,
     sessionResources,
   };
 }

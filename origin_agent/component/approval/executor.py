@@ -18,6 +18,7 @@ from component.approval.handsfree import is_handsfree_mode
 from component.approval.core import request_user_confirm
 from component.approval.allowlist import add_allowed as add_tool_allowlist_entry
 from component.approval.allowlist import is_allowed as is_tool_allowlisted
+from component.approval.policy import needs_approval as _policy_needs_approval, MAIN_SESSION_POLICY
 
 if TYPE_CHECKING:
     from entry.agent_sink import AgentSink
@@ -46,17 +47,16 @@ def _build_deny_result(approval: ApprovalResult) -> dict:
 
 
 def _needs_approval(tool_name: str, session_id: str) -> bool:
-    """判断工具是否需要审批。
+    """判断工具是否需要审批（主会话策略）。
 
+    委托到 needs_approval，使用 MAIN_SESSION_POLICY：
     - dangerous 级别始终需要
     - write 级别仅在脱手模式下需要
-    - readonly/safe 直接执行
+    - readonly 直接执行
     """
     danger_level: ToolDangerLevel = tool_registry.get_danger_level(tool_name)
     handsfree = is_handsfree_mode(session_id)
-    return danger_level == ToolDangerLevel.dangerous or (
-        danger_level == ToolDangerLevel.write and handsfree
-    )
+    return _policy_needs_approval(MAIN_SESSION_POLICY, danger_level, handsfree)
 
 
 async def execute_with_approval(

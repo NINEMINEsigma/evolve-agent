@@ -42,7 +42,7 @@ write_file: {"path": "ws:output/result.json", "content": "..."}
 write_file: {"path": "ws:notes/plan.md", "content": "...", "append": false}
 ```
 
-For code evolution, prefer `write_fork` (resolves to `fork:` automatically).
+For code evolution, use `write_file` or `edit_file` with `fork:` prefix (e.g. `fork:main.py`).
 
 ## Listing Directories
 
@@ -97,12 +97,12 @@ Access depends on runtime mode:
 When evolving code, always use `fork:` namespace:
 
 ```
-# Correct
-write_fork: {"file": "main.py", "content": "..."}
+# Correct (write new file or full overwrite)
+write_file: {"path": "fork:main.py", "content": "..."}
 read_own_source: {"file": "main.py"}  # Reads from self:
 
-# Also correct (explicit)
-write_file: {"path": "fork:main.py", "content": "..."}
+# Correct (incremental edit)
+edit_file: {"path": "fork:main.py", "old_string": "...", "new_string": "..."}
 read_file: {"path": "fork:main.py"}
 ```
 

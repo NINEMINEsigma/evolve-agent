@@ -10,6 +10,8 @@ from pydantic import BaseModel
 from system.context import RuntimeContext
 from system.sandbox import Sandbox
 
+from entity.puretype import SubagentProfile
+
 
 class SubRuntimeContext(BaseModel):
     """子 Agent 的不可变运行时配置。
@@ -35,6 +37,9 @@ class SubRuntimeContext(BaseModel):
     max_context_tokens: int
     """上下文窗口 token 上限，用于旋转控制（来自注册表）。"""
 
+    client_type: str = "openai_client"
+    """LLM 客户端模块名，继承自主 Agent（来自注册表或 RuntimeContext 兜底）。"""
+
     system_prompts: list[str]
     """系统提示词列表（每项为独立 system message，来自注册表 system_prompt_paths 或内置默认模板）。"""
 
@@ -43,14 +48,14 @@ class SubRuntimeContext(BaseModel):
 
 
 async def build_subagent_context(
-    profile: dict,
+    profile: SubagentProfile,
     temperature: float,
     parent_ctx: RuntimeContext,
 ) -> SubRuntimeContext:
     """从注册表配置构建 SubRuntimeContext。
 
     Args:
-        profile: 注册表中的子 Agent 配置字典。
+        profile: 子 Agent 注册配置（SubagentProfile）。
         temperature: run_subagent 调用时传入的采样温度。
         parent_ctx: 父 Agent 的 RuntimeContext，用于创建沙盒实例解析路径。
 
@@ -72,7 +77,7 @@ async def build_subagent_context(
         prompts.append(tools_doc)
 
     # 3. 用户自定义角色提示词
-    system_prompt_paths: list[str] = profile.get("system_prompt_paths") or []
+    system_prompt_paths: list[str] = profile.system_prompt_paths
     sandbox = Sandbox(parent_ctx)
     for prompt_path in system_prompt_paths:
         resolved = sandbox.resolve_read(prompt_path)
@@ -85,12 +90,13 @@ async def build_subagent_context(
             prompts.append(custom_prompt)
 
     return SubRuntimeContext(
-        base_url=str(profile.get("base_url", "")),
-        model=str(profile.get("model", "")),
-        api_key=profile.get("api_key"),
+        base_url=profile.base_url,
+        model=profile.model,
+        api_key=profile.api_key,
         temperature=temperature,
-        max_output_tokens=int(profile.get("max_output_tokens", 0)),
-        max_context_tokens=int(profile.get("max_context_tokens", 0)),
+        max_output_tokens=profile.max_output_tokens,
+        max_context_tokens=profile.max_context_tokens,
+        client_type=profile.client_type,
         system_prompts=prompts,
     )
 

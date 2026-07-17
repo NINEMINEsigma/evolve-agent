@@ -43,6 +43,58 @@ def _s() -> Sandbox:
 
 
 # ---------------------------------------------------------------------------
+# LSP diagnostics 附加（写入/编辑后自动附加）
+# ---------------------------------------------------------------------------
+
+# pyright 支持的代码文件扩展名
+_LSP_CODE_EXTENSIONS: frozenset[str] = frozenset({".py"})
+
+_LSP_DIAGNOSTICS_SETTLE_TIME: float = 0.8  # didChange 后等待 diagnostics 推送的短暂 sleep
+
+
+def _try_attach_lsp_diagnostics(logical_path: str, content: str) -> list[dict] | None:
+    """写入/编辑后尝试附加 LSP diagnostics。
+
+    条件: LSP 已启动 + 文件在 LSP 根目录范围内 + 文件是 .py 代码文件。
+    流程: notify_did_change → sleep → get_cached_diagnostics → 序列化。
+    不满足条件或 LSP 未启动时返回 None（不附加字段）。
+    """
+    try:
+        from system.lsp import get_lsp_manager
+        manager = get_lsp_manager()
+        if not manager.is_ready():
+            return None
+    except Exception:
+        return None
+
+    # 检查文件扩展名
+    if Path(logical_path.split(":")[-1]).suffix.lower() not in _LSP_CODE_EXTENSIONS:
+        return None
+
+    # 检查文件是否在 LSP workspace 范围内
+    try:
+        resolved = _s().resolve_read(logical_path)
+    except SandboxError:
+        return None
+    if not manager.is_in_workspace(resolved.real):
+        return None
+
+    # 发送 didChange 通知
+    uri = resolved.real.as_uri()
+    manager.notify_did_change(logical_path, content, _s())
+
+    # 短暂等待 diagnostics 推送
+    import time as _time
+    _time.sleep(_LSP_DIAGNOSTICS_SETTLE_TIME)
+
+    # 从缓存读取
+    diags = manager.get_cached_diagnostics(uri)
+    if not diags:
+        return None
+    return [d.model_dump() for d in diags]
+
+
+# ---------------------------------------------------------------------------
 # 工具 handler
 # ---------------------------------------------------------------------------
 
@@ -92,18 +144,22 @@ def _handle_write(args: dict[str, Any]) -> dict:
         )
     try:
         _s().write(path, content)
+        _lsp_diags = _try_attach_lsp_diagnostics(path, content)
         if truncated:
-            return tool_result(
+            result = tool_result(
                 success=True, path=path, 
                 bytes=len(content.encode("utf-8")),
                 truncated=True,
                 tail=tail,
             )
         else:
-            return tool_result(
+            result = tool_result(
                 success=True, path=path, 
                 bytes=len(content.encode("utf-8")),
             )
+        if _lsp_diags is not None:
+            result["diagnostics"] = _lsp_diags
+        return result
     except SandboxError as exc:
         return tool_error(str(exc), path=path)
 
@@ -583,31 +639,78 @@ Deletes the specified file. If the path is a directory, returns an error directi
 )
 
 
+def _find_ranges(
+    content: str, start_marker: str, end_marker: str,
+) -> list[tuple[int, int]]:
+    """扫描 content 中所有 start_marker..end_marker 区间（含标记本身）。
+
+    返回 [(start_idx, end_idx), ...]，其中 start_idx 是 start_marker 的起始位置，
+    end_idx 是 end_marker 结束后的位置（即区间为 content[start_idx:end_idx]）。
+    找到 start_marker 后从其后搜索最近的 end_marker；未配对的 start_marker 跳过。
+    """
+    ranges: list[tuple[int, int]] = []
+    search_from = 0
+    while True:
+        s_idx = content.find(start_marker, search_from)
+        if s_idx == -1:
+            break
+        e_start = s_idx + len(start_marker)
+        e_idx = content.find(end_marker, e_start)
+        if e_idx == -1:
+            break
+        e_end = e_idx + len(end_marker)
+        ranges.append((s_idx, e_end))
+        search_from = e_end
+    return ranges
+
+
 def _handle_edit(args: dict[str, Any]) -> dict:
-    """精准文本替换 — 查找并替换一处精确匹配。"""
+    """文本替换 — 支持 exact / regex / range 三种匹配模式。"""
     path: str = str(args.get("path", "")).strip()
     old_string: str = str(args.get("old_string", ""))
     new_string: str = str(args.get("new_string", ""))
     replace_all: bool = bool(args.get("replace_all", False))
+    match_mode: str = str(args.get("match_mode", "exact")).strip()
+    start_marker: str = str(args.get("start_marker", ""))
+    end_marker: str = str(args.get("end_marker", ""))
 
     if not path:
         return tool_error("path is required")
-    if not old_string:
-        return tool_error("old_string is required")
-    if len(old_string) > EDIT_FILE_MAX_CHARS:
-        return tool_error(
-            f"old_string exceeds {EDIT_FILE_MAX_CHARS} characters (got {len(old_string)}). "
-            "Use a smaller, unique snippet with surrounding context instead.",
-            path=path,
-        )
+
+    # --- 通用长度校验 ---
     if len(new_string) > EDIT_FILE_MAX_CHARS:
         return tool_error(
             f"new_string exceeds {EDIT_FILE_MAX_CHARS} characters (got {len(new_string)}). "
             "Split the change into multiple sequential edit_file calls.",
             path=path,
         )
-    if old_string == new_string:
-        return tool_error("old_string and new_string are identical — nothing to change", path=path)
+
+    if match_mode == "range":
+        # range 模式：start_marker + end_marker + new_string 必填，old_string 忽略
+        if not start_marker:
+            return tool_error("start_marker is required when match_mode='range'", path=path)
+        if not end_marker:
+            return tool_error("end_marker is required when match_mode='range'", path=path)
+        if len(start_marker) > EDIT_FILE_MAX_CHARS:
+            return tool_error(
+                f"start_marker exceeds {EDIT_FILE_MAX_CHARS} characters (got {len(start_marker)}).",
+                path=path,
+            )
+        if len(end_marker) > EDIT_FILE_MAX_CHARS:
+            return tool_error(
+                f"end_marker exceeds {EDIT_FILE_MAX_CHARS} characters (got {len(end_marker)}).",
+                path=path,
+            )
+    else:
+        # exact / regex 模式：old_string + new_string 必填
+        if not old_string:
+            return tool_error("old_string is required")
+        if len(old_string) > EDIT_FILE_MAX_CHARS:
+            return tool_error(
+                f"old_string exceeds {EDIT_FILE_MAX_CHARS} characters (got {len(old_string)}). "
+                "Use a smaller, unique snippet with surrounding context instead.",
+                path=path,
+            )
 
     if not _s().exists(path):
         return tool_error("File not found — use write_file to create it first", path=path)
@@ -617,80 +720,163 @@ def _handle_edit(args: dict[str, Any]) -> dict:
     except SandboxError as exc:
         return tool_error(str(exc), path=path)
 
-    if old_string not in content:
-        return tool_error("old_string not found in file", path=path)
+    # --- exact 模式（默认，向后兼容） ---
+    if match_mode == "exact":
+        if old_string == new_string:
+            return tool_error("old_string and new_string are identical — nothing to change", path=path)
+        if old_string not in content:
+            return tool_error("old_string not found in file", path=path)
+        if replace_all:
+            new_content = content.replace(old_string, new_string)
+        else:
+            count = content.count(old_string)
+            if count > 1:
+                return tool_error(
+                    f"old_string matches {count} locations. Use more surrounding "
+                    f"context to make it unique, or set replace_all=true.",
+                    path=path, matches=count,
+                )
+            new_content = content.replace(old_string, new_string, 1)
 
-    if replace_all:
-        new_content: str = content.replace(old_string, new_string)
-    else:
-        count: int = content.count(old_string)
-        if count > 1:
+    # --- regex 模式 ---
+    elif match_mode == "regex":
+        if old_string == new_string:
+            return tool_error("old_string and new_string are identical — nothing to change", path=path)
+        try:
+            pattern = re.compile(old_string)
+        except re.error as exc:
+            return tool_error(f"Invalid regex pattern: {exc}", path=path)
+        matches = pattern.findall(content)
+        if not matches:
+            return tool_error("regex pattern did not match anything in file", path=path)
+        if replace_all:
+            new_content = pattern.sub(new_string, content)
+        else:
+            if len(matches) > 1:
+                return tool_error(
+                    f"regex matches {len(matches)} locations. "
+                    f"Use replace_all=true or make the pattern more specific.",
+                    path=path, matches=len(matches),
+                )
+            new_content = pattern.sub(new_string, content, count=1)
+
+    # --- range 模式 ---
+    elif match_mode == "range":
+        ranges = _find_ranges(content, start_marker, end_marker)
+        if not ranges:
+            if start_marker not in content:
+                return tool_error("start_marker not found in file", path=path)
+            return tool_error("end_marker not found after start_marker", path=path)
+        if not replace_all and len(ranges) > 1:
             return tool_error(
-                f"old_string matches {count} locations. Use more surrounding "
-                f"context to make it unique, or set replace_all=true.",
-                path=path, matches=count,
+                f"range matches {len(ranges)} locations. "
+                f"Use replace_all=true or use more specific markers.",
+                path=path, matches=len(ranges),
             )
-        new_content = content.replace(old_string, new_string, 1)
+        # 逆序替换以避免偏移
+        new_content = content
+        for s_idx, e_end in reversed(ranges if replace_all else ranges[:1]):
+            new_content = new_content[:s_idx] + new_string + new_content[e_end:]
+
+    else:
+        return tool_error(
+            f"Invalid match_mode '{match_mode}'. Valid values: exact, regex, range.",
+            path=path,
+        )
 
     try:
         _s().write(path, new_content)
     except SandboxError as exc:
         return tool_error(str(exc), path=path)
 
-    return tool_result(success=True, path=path, replaced=True)
+    _lsp_diags = _try_attach_lsp_diagnostics(path, new_content)
+    result = tool_result(success=True, path=path, replaced=True)
+    if _lsp_diags is not None:
+        result["diagnostics"] = _lsp_diags
+    return result
 
 
 registry.register(
     name="edit_file",
     toolset="filesystem",
     schema={
-        # 通过替换 old_string 为 new_string 来精准编辑文件。
-        # 默认情况下，old_string 必须仅匹配一次 — 包含足够的周围上下文（前后各 2-3 行）使其唯一。
-        # old_string 和 new_string 各自不能超过 {EDIT_FILE_MAX_CHARS} 字符，且不能相同。
+        # 通过替换匹配文本为 new_string 来编辑文件。支持三种匹配模式：
+        #   - exact（默认）：old_string 精确匹配，必须唯一出现或设置 replace_all=true。
+        #   - regex：old_string 作为正则 pattern，new_string 支持 \1 反向引用。
+        #   - range：通过 start_marker 和 end_marker 定位整个区间（含标记），替换为 new_string。
+        #
+        # exact / regex 模式下 old_string 必填，range 模式下 start_marker + end_marker 必填。
+        # old_string / start_marker / end_marker / new_string 各自不能超过 {EDIT_FILE_MAX_CHARS} 字符。
         # 仅需修改几行时使用此工具替代 write_file — 避免重新发送整个文件内容。
         # 如需更大更改，请多次顺序调用 edit_file。
         #
         # 使用方式：
         # - 必须先使用 read_file 查看当前内容及行号。
-        # - 从 read_file 输出中选取 old_string 时，保留行号前缀之后的精确缩进。
-        # - 包含 2-3 行周围上下文以确保唯一匹配。
-        # - 设置 replace_all=true 可替换所有匹配项（跳过唯一性检查）。
+        # - exact 模式：从 read_file 输出中选取 old_string，保留行号前缀之后的精确缩进。
+        # - exact 模式：包含 2-3 行周围上下文以确保唯一匹配。
+        # - regex 模式：old_string 为 Python 正则表达式，new_string 可用 \1 等反向引用。
+        # - range 模式：start_marker 到其后最近 end_marker（含两端）的整个区间被替换。
+        # - 设置 replace_all=true 可替换所有匹配项（跳过唯一性检查），所有模式通用。
         # - 修改少量行时始终优先使用此工具替代 write_file。
         #
         # 参数：
-        #   path:       带命名空间前缀的逻辑路径（ws:/fork:/fix:/skills:）（必需）
-        #   old_string: 要查找并替换的精确文本，最多 {EDIT_FILE_MAX_CHARS} 字符（必需）
-        #   new_string: 替换文本，使用 '' 表示删除，最多 {EDIT_FILE_MAX_CHARS} 字符（必需）
-        #   replace_all: 替换所有匹配项而非仅第一处（默认 false）
+        #   path:         带命名空间前缀的逻辑路径（ws:/fork:/fix:/skills:）（必需）
+        #   new_string:   替换文本，使用 '' 表示删除，最多 {EDIT_FILE_MAX_CHARS} 字符（必需）
+        #   match_mode:   匹配模式：exact | regex | range（默认 exact）
+        #   old_string:   exact/regex 模式下要查找的文本或正则，最多 {EDIT_FILE_MAX_CHARS} 字符
+        #   start_marker: range 模式下区间起始标记（必需）
+        #   end_marker:   range 模式下区间结束标记（必需）
+        #   replace_all:  替换所有匹配项而非仅第一处（默认 false）
         #
         # 错误：
-        #   - 文件中未找到 old_string → 编辑失败，返回描述性错误
-        #   - old_string 匹配到 2+ 处（当 replace_all=false 时）→ 编辑失败，
-        #     提示设置 replace_all=true 或添加更多周围上下文
+        #   - exact: 文件中未找到 old_string → 编辑失败
+        #   - exact: old_string 匹配到 2+ 处（replace_all=false）→ 提示设 replace_all=true 或加上下文
+        #   - regex: 正则编译失败 → 返回 re.error 详情
+        #   - regex: 正则未匹配 → 编辑失败
+        #   - regex: 正则匹配 2+ 处（replace_all=false）→ 提示设 replace_all=true 或收窄 pattern
+        #   - range: start_marker 未找到 → 编辑失败
+        #   - range: start_marker 后无 end_marker → 编辑失败
+        #   - range: 匹配 2+ 个区间（replace_all=false）→ 提示设 replace_all=true 或用更具体标记
         #   - 文件不存在 → 提示先使用 write_file 创建
-        #   - 字符串相同 → 无变更，报错
-        "description": f"""Precisely edit a file by replacing old_string with new_string. By default, old_string must match exactly once — include enough surrounding context (2-3 lines before and after) to make it unique. Both old_string and new_string are limited to {EDIT_FILE_MAX_CHARS} characters each and must not be identical. Use this instead of write_file when only a few lines need changing — avoids resending the entire file content. For larger changes, make multiple sequential edit_file calls.
+        #   - 字符串相同（exact/regex）→ 无变更，报错
+        "description": f"""Edit a file by replacing matched text with new_string. Supports three matching modes via `match_mode`:
+
+- **exact** (default): `old_string` must match exactly once (or set `replace_all=true`). Classic find-and-replace.
+- **regex**: `old_string` is a Python regex pattern; `new_string` supports backreferences (\\1, \\2, ...).
+- **range**: Replace the entire region from `start_marker` to the nearest `end_marker` (both markers included) with `new_string`.
+
+All modes share `replace_all` (default false): when false, multiple matches return an error; when true, all matches are replaced.
+
+Both `old_string` and `new_string` are limited to {EDIT_FILE_MAX_CHARS} characters each. Use this instead of write_file when only a few lines need changing — avoids resending the entire file content. For larger changes, make multiple sequential edit_file calls.
 
 Usage:
 - You must use read_file first to inspect current content with line numbers.
-- When picking old_string from read_file output, preserve exact indentation
-  as it appears AFTER the line number prefix.
-- Include 2-3 lines of surrounding context to ensure a unique match.
-- Set replace_all=true to replace all occurrences (skips uniqueness check).
+- exact: pick old_string from read_file output, preserve exact indentation after the line number prefix. Include 2-3 lines of surrounding context for uniqueness.
+- regex: old_string is a Python regex. new_string can use \\1 backreferences.
+- range: provide start_marker and end_marker. The entire span from start_marker to the nearest end_marker (inclusive) is replaced by new_string.
+- Set replace_all=true to replace all matches (skips uniqueness check).
 - ALWAYS prefer editing existing files over write_file for small changes.
 
 Parameters:
-  path:       Logical path with namespace prefix (ws:/fork:/fix:/skills:) (required)
-  old_string: Exact text to find and replace, max {EDIT_FILE_MAX_CHARS} chars (required)
-  new_string: Replacement text, use '' to delete, max {EDIT_FILE_MAX_CHARS} chars (required)
-  replace_all: Replace all occurrences instead of just one (default false)
+  path:         Logical path with namespace prefix (ws:/fork:/fix:/skills:) (required)
+  new_string:   Replacement text, use '' to delete, max {EDIT_FILE_MAX_CHARS} chars (required)
+  match_mode:   Matching mode: exact | regex | range (default exact)
+  old_string:   Text to find (exact) or regex pattern (regex mode), max {EDIT_FILE_MAX_CHARS} chars. Required for exact/regex, ignored for range.
+  start_marker: Range start marker. Required for range mode, ignored otherwise.
+  end_marker:   Range end marker. Required for range mode, ignored otherwise.
+  replace_all:  Replace all matches instead of just the first one (default false, all modes)
 
 Errors:
-  - old_string not found in file → edit fails, return descriptive error
-  - old_string matches 2+ locations (when replace_all=false) → edit fails,
-    tell caller to set replace_all=true or add more surrounding context
+  - exact: old_string not found in file → edit fails
+  - exact: old_string matches 2+ locations (replace_all=false) → set replace_all=true or add context
+  - regex: invalid regex pattern → returns re.error detail
+  - regex: pattern did not match → edit fails
+  - regex: pattern matches 2+ locations (replace_all=false) → set replace_all=true or narrow the pattern
+  - range: start_marker not found → edit fails
+  - range: end_marker not found after start_marker → edit fails
+  - range: 2+ ranges matched (replace_all=false) → set replace_all=true or use more specific markers
   - File does not exist → error telling caller to use write_file first
-  - Strings identical → error, nothing to change""",
+  - Strings identical (exact/regex) → error, nothing to change""",
         "parameters": {
             "type": "object",
             "properties": {
@@ -699,24 +885,41 @@ Errors:
                     # 逻辑路径（ws:/fork:/fix:/skills: 前缀）。
                     "description": "Logical path (ws:/fork:/fix:/skills: prefix).",
                 },
-                "old_string": {
-                    "type": "string",
-                    # 要查找并替换的精确文本。
-                    "description": "Exact text to find and replace.",
-                },
                 "new_string": {
                     "type": "string",
                     # 替换文本（使用 '' 表示删除）。
                     "description": "Replacement text (use '' to delete).",
                 },
+                "match_mode": {
+                    "type": "string",
+                    # 匹配模式：exact（精确匹配，默认）、regex（正则匹配）、range（首尾标记区间）。
+                    "enum": ["exact", "regex", "range"],
+                    "description": "Matching mode: 'exact' (default, precise string match), 'regex' (old_string as Python regex), 'range' (replace from start_marker to nearest end_marker, inclusive).",
+                    "default": "exact",
+                },
+                "old_string": {
+                    "type": "string",
+                    # exact 模式下为要查找的精确文本；regex 模式下为正则 pattern。range 模式下忽略。
+                    "description": "Text to find (exact mode) or regex pattern (regex mode). Ignored in range mode.",
+                },
+                "start_marker": {
+                    "type": "string",
+                    # range 模式下区间起始标记。exact/regex 模式下忽略。
+                    "description": "Range start marker. The region from this marker to the nearest end_marker (inclusive) is replaced. Only used when match_mode='range'.",
+                },
+                "end_marker": {
+                    "type": "string",
+                    # range 模式下区间结束标记。exact/regex 模式下忽略。
+                    "description": "Range end marker. Only used when match_mode='range'. The region from start_marker to the nearest end_marker (inclusive) is replaced.",
+                },
                 "replace_all": {
                     "type": "boolean",
-                    # 如为 true，替换所有匹配项而非仅替换第一处（默认 false）。
-                    "description": "If true, replace ALL occurrences instead of just the first one (default false).",
+                    # 如为 true，替换所有匹配项而非仅替换第一处（默认 false，所有模式通用）。
+                    "description": "If true, replace ALL matches instead of just the first one (default false, applies to all modes).",
                     "default": False,
                 },
             },
-            "required": ["path", "old_string", "new_string"],
+            "required": ["path", "new_string"],
         },
     },
     handler=_handle_edit,

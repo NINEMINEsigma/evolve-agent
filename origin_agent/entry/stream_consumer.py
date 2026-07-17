@@ -10,7 +10,9 @@ import asyncio
 import logging
 from typing import Any, TYPE_CHECKING
 
-from component.llm import LLMClient, LLMResponse, Usage
+from abstract.llm.client import BaseLLMClient
+from entity.puretype import LLMResponse, Usage, ToolCall
+from entity.messages import BaseMessage
 
 if TYPE_CHECKING:
     from entry.agent_sink import AgentSink
@@ -29,16 +31,13 @@ async def _close_async_iterator(ait: Any) -> None:
 class StreamConsumer:
     """消费一条 LLM 流式响应，边收边推送增量到前端。
 
-    TODO: 当前仅被 ParentAgentLoop 独享；MultiAgentLoop 的流消费走 MultiAgentWorker 内部，
-    未复用此模块。此模块接收独立依赖（llm / sink / character_name / cancel_event），
-    本身不绑定任何 loop 类型，可考虑后续由 MultiAgentWorker 直接组合使用。
-
-    由 ParentAgentLoop 持有，每个 LLM 调用创建一次 ``consume()``。
+    每个 LLM 调用创建一次 ``consume()``。
+    接收独立依赖（llm / sink / character_name / cancel_event），本身不绑定任何 loop 类型。
     """
 
     def __init__(
         self,
-        llm: LLMClient,
+        llm: BaseLLMClient,
         sink: AgentSink,
         character_name: str,
         cancel_event: asyncio.Event,
@@ -51,7 +50,7 @@ class StreamConsumer:
     async def consume(
         self,
         session_id: str,
-        messages: list[dict[str, Any]],
+        messages: list[BaseMessage],
         tools: list[dict[str, Any]] | None,
         stream_id: str,
     ) -> LLMResponse:
@@ -61,14 +60,14 @@ class StreamConsumer:
         content: str = ""
         reasoning_content: str = ""
         reasoning_field_name: str | None = None
-        tool_calls: list[Any] = []  # component.llm.ToolCall
+        tool_calls: list[ToolCall] = [] 
         finish_reason: str = "stop"
         usage_dict: dict[str, int] = {
             "prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0,
         }
         stream_error: str | None = None
 
-        stream = self._llm.chat_stream(messages, tools=tools)
+        stream = self._llm.chat_stream(messages, tools=tools, character=self._character_name)
         try:
             async for chunk in stream:
                 if ev.is_set():

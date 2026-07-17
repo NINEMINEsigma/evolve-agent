@@ -1,5 +1,6 @@
 import { useRef, useState, useEffect } from "react";
 import { useConnectionDiagnostics } from "../context/ConnectionDiagnosticsContext";
+import { exportSession } from "../utils/exportSession";
 
 interface HeaderProps {
   status: string;
@@ -15,6 +16,9 @@ interface HeaderProps {
   onToggleSidebar: () => void;
   onToggleHandsfree: (enabled: boolean) => void;
   agents?: string[];
+  collapsed?: boolean;
+  onToggleCollapse?: () => void;
+  isMobile?: boolean;
 }
 
 export default function Header({
@@ -31,6 +35,9 @@ export default function Header({
   onToggleSidebar,
   onToggleHandsfree,
   agents,
+  collapsed,
+  onToggleCollapse,
+  isMobile,
 }: HeaderProps) {
   const [cmdMenuOpen, setCmdMenuOpen] = useState(false);
   const [menuPos, setMenuPos] = useState<{ top: number; left: number } | null>(null);
@@ -94,8 +101,52 @@ export default function Header({
 
   const showApprovalUI = approvalModelAvailable && !modelClosed;
 
+  // 移动端折叠态：只显示精简条
+  if (isMobile && collapsed) {
+    return (
+      <header className="app-header app-header-collapsed">
+        <div className="header-left">
+          <button
+            className="sidebar-toggle"
+            onClick={onToggleSidebar}
+            data-tooltip={sidebarCollapsed ? "展开侧栏" : "收起侧栏"}
+          >
+            {sidebarCollapsed ? (
+              <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M9 18l6-6-6-6" />
+              </svg>
+            ) : (
+              <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M15 18l-6-6 6-6" />
+              </svg>
+            )}
+          </button>
+        </div>
+        <div className="header-center">
+          <div
+            className={["header-pill", status === "已连接" ? "connected" : "", status.startsWith("重连中") ? "reconnecting" : "", status === "已断开" || status === "连接失败 — 已达到最大重试次数" ? "disconnected" : ""].filter(Boolean).join(" ")}
+          >
+            <span className="status-dot" />
+            <span className="pill-label">Evolve Agent</span>
+          </div>
+        </div>
+        <div className="header-right">
+          <button
+            className="header-collapse-btn"
+            onClick={onToggleCollapse}
+            data-tooltip="展开顶部栏"
+          >
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="M18 15l-6-6-6 6" />
+            </svg>
+          </button>
+        </div>
+      </header>
+    );
+  }
+
   return (
-    <header className="app-header">
+    <header className={`app-header ${isMobile && collapsed ? "app-header-collapsed" : ""}`}>
       <div className="header-left">
         <button
           className="sidebar-toggle"
@@ -132,6 +183,17 @@ export default function Header({
             className="context-menu cmd-menu-dropdown"
             style={{ position: "fixed", top: menuPos.top, left: menuPos.left }}
           >
+            <div
+              className="context-menu-item"
+              onClick={() => {
+                setCmdMenuOpen(false);
+                setMenuPos(null);
+                exportSession(sessionId || "session");
+              }}
+              data-tooltip="导出当前会话为可分享的静态 HTML 文件"
+            >
+              导出会话
+            </div>
             <div
               className={`context-menu-item ${showApprovalUI ? "context-menu-item-danger" : ""}`}
               onClick={showApprovalUI ? handleShutdownApprovalModel : undefined}
@@ -190,6 +252,17 @@ export default function Header({
             tokenUsage={tokenUsage}
           />
         </div>
+      )}
+      {isMobile && onToggleCollapse && (
+        <button
+          className="header-collapse-btn"
+          onClick={onToggleCollapse}
+          data-tooltip="收起顶部栏"
+        >
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2">
+            <path d="M6 9l6 6 6-6" />
+          </svg>
+        </button>
       )}
     </header>
   );

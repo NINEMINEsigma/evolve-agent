@@ -25,6 +25,8 @@ logger = logging.getLogger(__name__)
 
 from system.pathutils import find_repo_root
 from system.templates import read_template
+from entity.constant import STATIC_FILE_HTTP_PREFIX, DOWNLOADS_HTTP_PREFIX
+from entity.puretype import ToolAvailability
 
 
 def _read_gene() -> str:
@@ -81,6 +83,7 @@ def build_system_prompt(
     fork_path: str = "",
     fix_fork_path: str = "",
     fix_log_path: str = "",
+    tool_availability_scope: ToolAvailability = ToolAvailability.MAIN,
 ) -> list[str]:
     """从分层模板组装完整的 system prompt 列表。
 
@@ -95,6 +98,9 @@ def build_system_prompt(
     fork_path / fix_fork_path / fix_log_path:
         模板文件中 ``{fork_path}`` / ``{fix_fork_path}`` / ``{fix_log_path}``
         占位符的真实路径（通过 .format() 将 ``{{var}}`` 转换后再替换）。
+    tool_availability_scope:
+        当前 loop 的工具可用性 scope。仅当 scope 包含 ``MAIN`` 位时
+        才注入 sub-agent 工具使用说明段落。
 
     返回
     -------
@@ -120,6 +126,8 @@ def build_system_prompt(
         base = base.replace(r"{{platform}}", _platform_info())
         base = base.replace(r"{{agentspace}}", agentspace)
         base = base.replace(r"{{fork_path}}", fork_path)
+        base = base.replace(r"{{uploads_prefix}}", STATIC_FILE_HTTP_PREFIX)
+        base = base.replace(r"{{downloads_prefix}}", DOWNLOADS_HTTP_PREFIX)
         blocks.append(base)
 
     # 2. 模式特定
@@ -133,6 +141,12 @@ def build_system_prompt(
     tools: str = read_template("tools.txt")
     if tools:
         blocks.append(tools)
+
+    # 3a. Sub-agent 工具说明 — 仅在 MAIN scope 下注入
+    if tool_availability_scope & ToolAvailability.MAIN:
+        subagent_tools: str = read_template("tools_subagent.txt")
+        if subagent_tools:
+            blocks.append(subagent_tools)
 
     # 4. 额外块（skills、memory provider 等）
     if extra_blocks:

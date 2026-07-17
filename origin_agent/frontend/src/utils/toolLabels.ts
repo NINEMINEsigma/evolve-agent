@@ -27,7 +27,5 @@ const TOOL_LABELS: Array<[string, string]> = [
   ["pdf", "确认 PDF 操作"],
   ["csv", "确认 CSV 操作"],
   ["ffmpeg", "确认 FFmpeg 操作"],
-  ["diagram", "确认图表操作"],
-  ["mermaid", "确认 Mermaid 操作"],
   ["gui", "确认 GUI 操作"],
 ];

@@ -178,10 +178,11 @@ export function subagentFeedbackToChatMessages(session: SubagentSession): ChatMe
         const argsStr = msg.tool_args ? `(${JSON.stringify(msg.tool_args)})` : "()";
         messages.push({
           role: "tool",
-          content: `⚡ ${toolName}${argsStr}`,
+          content: `${msg.emoji || "⚡"} ${toolName}${argsStr}`,
           id,
           toolName,
           toolArgs: msg.tool_args,
+          emoji: msg.emoji,
         });
         break;
       }
@@ -252,4 +253,11 @@ export function generateUUID(): string {
   bytes[8] = (bytes[8] & 0x3f) | 0x80;
   const hex = Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+}
+
+export function escapeHtml(text: string): string {
+  return text
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
 }

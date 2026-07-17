@@ -61,9 +61,7 @@ async def _handle_run_subagent(args: dict[str, Any]) -> dict:
         )
 
     # 校验 system_prompt_paths
-    system_prompt_paths = profile.get("system_prompt_paths") or []
-    if not isinstance(system_prompt_paths, list):
-        return tool_error("'system_prompt_paths' must be a list of strings")
+    system_prompt_paths = profile.system_prompt_paths
     for p in system_prompt_paths:
         if not isinstance(p, str):
             return tool_error("'system_prompt_paths' must be a list of strings")
@@ -86,12 +84,12 @@ async def _handle_run_subagent(args: dict[str, Any]) -> dict:
         resolved_history_path = str(resolved.real)
 
     # 通过编排器启动子 Agent
-    profile["_name"] = name  # 注入注册名供编排器推送 WS 时使用
     try:
         from system.application import Application
         orch = Application.current().subagent_orchestrator
         result = await orch.launch(
             parent_session_id=parent_session_id,
+            name=name,
             profile=profile,
             temperature=temperature,
             initial_prompt=initial_prompt,

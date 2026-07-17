@@ -210,7 +210,7 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 10px 8px 10px 22px;
+  padding: 10px 8px 10px 16px;
   cursor: pointer;
   transition: background 0.12s ease;
   border-radius: 0;
@@ -256,7 +256,7 @@
 
 .session-item-title {
   flex: 1;
-  font-size: 10px;
+  font-size: 13px;
   color: var(--text-secondary);
   white-space: nowrap;
   overflow: hidden;
@@ -513,4 +513,98 @@
   text-align: center;
   user-select: none;
   flex-shrink: 0;
+}
+
+/* ── Session clusters ── */
+.cluster {
+  display: flex;
+  flex-direction: column;
+  position: relative;
+  padding-left: 6px; /* 与平铺会话的 active 竖线对齐 */
+}
+
+.cluster::before {
+  content: "";
+  position: absolute;
+  left: 6px;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: #3a3a4a; /* 与 .session-item::before 默认色一致 */
+}
+
+.cluster-active::before {
+  background: #3b82f6; /* 当前会话在簇内时高亮 */
+}
+
+.cluster-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 8px 10px 16px; /* 文本与平铺会话文本左对齐 */
+  cursor: pointer;
+  transition: background 0.12s ease;
+  position: relative;
+  min-height: 40px;
+}
+
+.cluster-item::before {
+  /* 从左侧树形竖线到标题的横线，与 .cluster::before 竖线连通 */
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 16px;
+  height: 2px;
+  background: #3a3a4a;
+  pointer-events: none;
+}
+
+.cluster-item-active::before {
+  background: #3b82f6;
+}
+
+.cluster-item:hover {
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.cluster-item-active {
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.cluster-item-active .cluster-title {
+  color: var(--text-primary);
+  font-weight: 500;
+}
+
+.cluster-title {
+  flex: 1;
+  font-size: 13px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.cluster-count {
+  font-size: 11px;
+  color: var(--text-muted);
+  background: var(--bg-tertiary);
+  padding: 2px 6px;
+  border-radius: 999px;
+  min-width: 18px;
+  text-align: center;
+  flex-shrink: 0;
+}
+
+.cluster-members {
+  display: flex;
+  flex-direction: column;
+  padding-left: 0;
+  margin-left: 6px; /* 成员与簇竖线之间保持适当间距 */
+  /* 成员左侧复用 .cluster::before 的竖线，通过 margin-left 留空 */
 }

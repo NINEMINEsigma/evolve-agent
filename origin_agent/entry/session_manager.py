@@ -15,14 +15,16 @@ import logging
 from pathlib import Path
 from typing import Any, TYPE_CHECKING
 
-from entity.messages import History, CharacterConversationMessage
+from entity.messages import History, CharacterConversationMessage, BaseMessage
 from entity.puretype import Role
-from entity.constant import AUTO_TITLE_CONTENT_MAX, AUTO_TAGS_CONTENT_MAX, USER_CHARACTER_NAME
+from entity.constant import USER_CHARACTER_NAME, INHERIT_LAST_ROUNDS
 from system.templates import read_template
 from system.session_store import SessionStore
+from entry.agent_support.history_summary import extract_last_rounds
+from abstract.llm.formats import to_openai_message
 
 if TYPE_CHECKING:
-    from component.llm import LLMClient
+    from abstract.llm.client import BaseLLMClient
     from entry.parent_agent_loop import ParentAgentLoop
 
 logger = logging.getLogger(__name__)
@@ -35,7 +37,7 @@ class LoopSessionManager:
     和合并（存在 TODO 标记），因此未使用此模块。若未来多 Agent 模式需支持 session
     旋转/归档，需将此模块的类型标注收窄到共享接口。
 
-    session 持久化的通用方法（_persist_message、_overwrite_history_file 等）
+    session 持久化的通用方法（save_history 等）
     已下沉到 BaseAgentLoop，本类只负责 session 旋转/归档/摘要/标签等
     高层级生命周期逻辑。
     """
@@ -113,7 +115,7 @@ class LoopSessionManager:
             return None
 
         transfer_result = self._transfer_session_runtime_resources(old_sid, new_sid)
-        if transfer_result.get("tool_resources_error") or transfer_result.get("memory_init_failed"):
+        if transfer_result.get("tool_resources_error"):
             logger.warning(
                 "Session runtime resource transfer had issues | old=%s new=%s result=%s",
                 old_sid, new_sid, transfer_result,
@@ -134,21 +136,6 @@ class LoopSessionManager:
         result: dict[str, Any] = {"old_sid": old_sid, "new_sid": new_sid}
         self._loop.last_prompt_tokens = 0
         self._session_rotated_notify[old_sid] = new_sid
-
-        # 迁移 memory provider
-        memory_init_failed: list[str] = []
-        for provider in self._loop.memory.providers:
-            if self._loop.is_memory_initialized(id(provider)):
-                continue
-            try:
-                provider.initialize(new_sid)
-                self._loop.mark_memory_initialized(id(provider))
-            except Exception as exc:
-                logger.exception(
-                    "Failed to initialize memory provider for session=%s", new_sid,
-                )
-                memory_init_failed.append(str(exc))
-        result["memory_init_failed"] = memory_init_failed
 
         # 迁移工具副作用资源
         tool_resources_error: str | None = None
@@ -216,14 +203,6 @@ class LoopSessionManager:
                     "Failed to write summary for session %s: %s", old_sid, exc,
                 )
 
-        # 同步 memory
-        try:
-            self._loop.memory.sync_all(
-                self._loop.history, session_id=old_sid,
-            )
-        except Exception:
-            logger.exception("Failed to sync memory for session=%s", old_sid)
-
         # 自动分类标签
         tags: list[str] = await self._generate_session_tags(old_sid)
         if tags and sm is not None:
@@ -239,12 +218,35 @@ class LoopSessionManager:
             if sm is not None:
                 info = sm.get(old_sid)
                 if info:
-                    from entity.puretype import LoopMeta as _LoopMeta, Loop as _Loop
-                    loop_type = info.get("loop_type", "parent")
-                    agents = info.get("agents")
+                    from entity.puretype import LoopMeta as _LoopMeta
                     loop_meta = _LoopMeta(
-                        loopType=_Loop(loop_type), agents=agents,
+                        loopType=info.loop_type, agents=info.agents,
                     )
+
+            # 提取旧会话尾部轮次文本，追加到 context
+            tail_rounds_text = ""
+            if self._loop.session_store is not None:
+                try:
+                    old_history = self._loop.session_store.read_history(old_sid)
+                    if old_history is not None and old_history.count > 0:
+                        from entry.agent_support.history_summary import messages_to_text
+                        tail_msgs = extract_last_rounds(
+                            old_history,
+                            rounds=INHERIT_LAST_ROUNDS,
+                            include_tool_messages=False,
+                        )
+                        if tail_msgs:
+                            tail_text = messages_to_text(tail_msgs)
+                            tail_rounds_text = (
+                                "\n\n## Recent conversation rounds\n" + tail_text
+                            )
+                except Exception as exc:
+                    logger.exception(
+                        "Failed to extract tail rounds for session old=%s: %s",
+                        old_sid, exc,
+                    )
+            if tail_rounds_text:
+                context += tail_rounds_text
 
             new_sid: str = sm.create_with_context(
                 context, parent_sid=old_sid, role=Role.USER,
@@ -253,7 +255,7 @@ class LoopSessionManager:
             sm.archive(old_sid, continuation_sid=new_sid)
 
             # 新 session 以 summary 作为 user 消息开始
-            self._loop.load_history(History(messages=[]))
+            self._loop.load_history(History())
             self._loop.last_prompt_tokens = 0
             summary_msg = CharacterConversationMessage(
                 role=Role.USER,
@@ -264,7 +266,7 @@ class LoopSessionManager:
                 ],
             )
             self._loop.history.add_message(summary_msg)
-            self._loop.persist_history(new_sid)
+            self._loop.save_history(new_sid)
 
             # 迁移 cron 定时任务
             try:
@@ -302,30 +304,8 @@ class LoopSessionManager:
         return await summarize_history(history, self._loop.llm)
 
     async def _generate_session_tags(self, session_id: str) -> list[str]:
-        """用 LLM 生成会话分类标签。"""
-        messages = self._loop.get_full_history(session_id)
-        if not messages:
-            return []
-        try:
-            system_prompt = read_template("session_tags.txt")
-            user_prompt = read_template("session_tags_input.txt").replace(
-                "{{old_text}}",
-                json.dumps(messages, ensure_ascii=False)[:AUTO_TAGS_CONTENT_MAX],
-            )
-            resp = await self._loop.llm.chat([
-                {"role": Role.SYSTEM.value, "content": system_prompt},
-                {"role": Role.USER.value, "content": user_prompt},
-            ])
-            content = resp.content or ""
-            try:
-                tags = json.loads(content)
-                if isinstance(tags, list):
-                    return [str(t) for t in tags[:5]]
-            except json.JSONDecodeError:
-                pass
-        except Exception as exc:
-            logger.exception("Failed to generate session tags: %s", exc)
-        return []
+        """委托 loop.regenerate_session_tags() 生成会话分类标签。"""
+        return await self._loop.regenerate_session_tags()
 
     def _build_inherited_context(self, old_sid: str, summary: str) -> str:
         """为继承会话构建初始上下文消息。"""

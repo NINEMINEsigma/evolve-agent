@@ -1,7 +1,6 @@
 ---
 alwaysApply: true
 ---
-
 ## 工具注册
 
 自动发现机制通过 AST 扫描被指定的目录中所有 .py 文件，只要模块级别包含 registry.register() 调用就会被自动导入。新文件无需额外注册。

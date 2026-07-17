@@ -30,7 +30,7 @@ class AgentSink(ABC):
 
     @abstractmethod
     async def ask_question(self, question: str, options: list[dict] | None = None,
-                           allow_custom: bool = True, session_id: str = "") -> dict:
+                           session_id: str = "") -> dict:
         """向用户提问，等待回答后返回结果。"""
         ...
 
@@ -182,6 +182,7 @@ class FrontendSink(AgentSink):
 
         try:
             from gateway.chat import Message, MessageType
+            from abstract.tools.registry import registry
             # 前端期望 request_id/tool/args/content 在消息顶层
             display_args = dict(args)
             if reason:
@@ -193,8 +194,9 @@ class FrontendSink(AgentSink):
                 tool=tool_name,
                 args=display_args,
                 content=content,
+                emoji=registry.get_emoji(tool_name),
             )
-            await ws.send_text(msg.to_json())
+            await ws.send_text(json.dumps(msg.model_dump(exclude_none=True), ensure_ascii=False))
         except Exception as exc:
             self._pending_confirms.pop(request_id, None)
             self._confirm_session_map.pop(request_id, None)
@@ -212,12 +214,15 @@ class FrontendSink(AgentSink):
                         deny_reason: str | None = None,
                         denied_by: str = "user") -> bool:
         """解析前端发来的审批结果。"""
+        logger.info("Resolve confirm | request_id=%s action=%s denied_by=%s", request_id, action, denied_by)
         from entity.puretype import ApprovalResult
         fut = self._pending_confirms.pop(request_id, None)
         self._confirm_session_map.pop(request_id, None)
         if fut and not fut.done():
             fut.set_result(ApprovalResult(action=action, deny_reason=deny_reason, denied_by=denied_by))
+            logger.info("Resolve confirm ok | request_id=%s action=%s", request_id, action)
             return True
+        logger.warning("Resolve confirm fail | request_id=%s (no pending future)", request_id)
         return False
 
     def _deny_session_confirms(self, session_id: str) -> None:
@@ -229,7 +234,7 @@ class FrontendSink(AgentSink):
     # -- 提问请求 --
 
     async def ask_question(self, question: str, options: list[dict] | None = None,
-                           allow_custom: bool = True, session_id: str = "") -> dict:
+                           session_id: str = "") -> dict:
         """向 WebSocket 发送 ask_request 并等待前端响应。"""
         request_id: str = uuid.uuid4().hex[:8]
         loop: asyncio.AbstractEventLoop = asyncio.get_event_loop()
@@ -250,7 +255,6 @@ class FrontendSink(AgentSink):
                 "request_id": request_id,
                 "question": question,
                 "options": options or [],
-                "allow_custom": allow_custom,
             }, ensure_ascii=False))
         except Exception as exc:
             self._pending_asks.pop(request_id, None)
@@ -280,12 +284,15 @@ class FrontendSink(AgentSink):
     def resolve_ask(self, request_id: str, option: str | None = None,
                     custom_text: str | None = None) -> bool:
         """解析前端发来的提问结果。"""
+        logger.info("Resolve ask | request_id=%s option=%s", request_id, option)
         fut = self._pending_asks.pop(request_id, None)
         self._ask_session_map.pop(request_id, None)
         if fut and not fut.done():
             result = json.dumps({"option": option, "custom_text": custom_text}, ensure_ascii=False)
             fut.set_result(result)
+            logger.info("Resolve ask ok | request_id=%s", request_id)
             return True
+        logger.warning("Resolve ask fail | request_id=%s (no pending future)", request_id)
         return False
 
     def _deny_session_asks(self, session_id: str) -> None:
@@ -335,7 +342,7 @@ class FrontendSink(AgentSink):
             dynamic_message_suffix=dynamic_message_suffix,
         )
         try:
-            await ws.send_text(msg.to_json())
+            await ws.send_text(json.dumps(msg.model_dump(exclude_none=True), ensure_ascii=False))
         except Exception:
             logger.warning("Failed to send user_message to session=%s", session_id, exc_info=True)
 
@@ -356,7 +363,7 @@ class FrontendSink(AgentSink):
             response_characters=response_characters,
         )
         try:
-            await ws.send_text(msg.to_json())
+            await ws.send_text(json.dumps(msg.model_dump(exclude_none=True), ensure_ascii=False))
         except Exception:
             logger.warning("Failed to send assistant_message to session=%s", session_id, exc_info=True)
 
@@ -414,7 +421,7 @@ class FrontendSink(AgentSink):
                 session_id=session_id,
                 content=content,
             )
-            await ws.send_text(msg.to_json())
+            await ws.send_text(json.dumps(msg.model_dump(exclude_none=True), ensure_ascii=False))
         except Exception:
             logger.warning(
                 "Failed to send system message | session=%s", session_id, exc_info=True,
@@ -430,12 +437,13 @@ class FrontendSink(AgentSink):
         if ws is None:
             return
         from gateway.chat import Message, MessageType
+        from abstract.tools.registry import registry
 
         if event_type == "tool_call":
             msg_type = MessageType.TOOL_CALL
             data = json.loads(payload) if payload else None
             msg = Message(type=msg_type, session_id=session_id, tool=tool_name, args=data,
-                          character_name=character_name)
+                          character_name=character_name, emoji=registry.get_emoji(tool_name))
         elif event_type == "tool_result":
             msg_type = MessageType.TOOL_RESULT
             msg = Message(type=msg_type, session_id=session_id, tool=tool_name,
@@ -474,7 +482,7 @@ class FrontendSink(AgentSink):
             return
 
         try:
-            await ws.send_text(msg.to_json())
+            await ws.send_text(json.dumps(msg.model_dump(exclude_none=True), ensure_ascii=False))
         except Exception:
             logger.warning(
                 "Failed to send %s event to session=%s", event_type, session_id, exc_info=True
@@ -492,7 +500,7 @@ class ParentAgentSink(AgentSink):
         self._loop = loop
 
     async def ask_question(self, question: str, options: list[dict] | None = None,
-                           allow_custom: bool = True, session_id: str = "") -> dict:
+                           session_id: str = "") -> dict:
         """子 Agent 不支持直接提问。"""
         return {"error": "SubAgent does not support ask_question — use parent agent tools instead"}
 
@@ -507,9 +515,8 @@ class ParentAgentSink(AgentSink):
         父 Agent 通过 approve_subagent 工具回调 approve_tools() 驱动 Future。
         """
         import uuid
-        from entity.puretype import ApprovalResult
+        from entity.puretype import ApprovalResult, ToolCall
         from component.approval import is_handsfree_mode, request_user_confirm
-        from component.llm import ToolCall
         from subagent.loop import PendingToolCall
 
         # 脱手模式：直接向父 session 发起审批（走 approval 模型）

@@ -67,6 +67,22 @@
   white-space: nowrap;
 }
 
+/* ── Task progress collapsed ── */
+.task-progress-collapsed {
+  padding: 0;
+  height: 1px;
+  overflow: hidden;
+}
+
+.task-progress-strip-fill-static {
+  position: absolute;
+  top: 0;
+  left: 0;
+  height: 1px;
+  border-radius: 0;
+  box-shadow: none;
+}
+
 /* ── Clipboard display panel ── */
 .clipboard-display-panel {
   padding: 10px 16px;

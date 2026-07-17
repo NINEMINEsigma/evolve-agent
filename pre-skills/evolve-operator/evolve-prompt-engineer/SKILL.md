@@ -405,8 +405,8 @@ When evolving templates through `fork:`:
 
 2. **Modify incrementally**:
    ```
-   write_fork: {
-     "file": "templates/base.txt",
+   edit_file: {
+     "path": "fork:templates/base.txt",
      "old_string": "...",
      "new_string": "..."
    }

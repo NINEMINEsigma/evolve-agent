@@ -56,7 +56,6 @@ export interface WSMessage {
   action?: string;
   question?: string;
   options?: Array<{ label: string; value: string }>;
-  allow_custom?: boolean;
   option?: string;
   custom_text?: string;
   stream_id?: string;
@@ -70,6 +69,7 @@ export interface WSMessage {
   index?: number;
   client_message_id?: string;
   tool_call_meta?: ToolCallMeta;   // TOOL_RESULT：工具调用时间元信息
+  emoji?: string;                  // 工具调用/审批请求的图标
 }
 
 export interface ToolCallMeta {
@@ -87,13 +87,13 @@ export interface ConfirmRequest {
   command?: string[];
   reason?: string;
   tool?: string;
+  emoji?: string;
 }
 
 export interface AskRequest {
   request_id: string;
   question: string;
   options?: Array<{ label: string; value: string }>;
-  allow_custom?: boolean;
 }
 
 export interface DownloadInfo {
@@ -166,6 +166,7 @@ export interface ChatMessage {
   messageSuffix?: string;
   dynamicMessageSuffix?: string;
   toolCallMeta?: ToolCallMeta;   // 工具调用时间元信息
+  emoji?: string;                  // 工具调用/审批请求的图标
 }
 
 export interface SessionInfo {
@@ -181,6 +182,19 @@ export interface SessionInfo {
   tags?: string[];
 }
 
+export interface SessionCluster {
+  id: string;
+  created_at: number;
+  title: string;
+  pinned: boolean;
+  last_activity_at: number;
+  members: SessionInfo[];
+}
+
+export type SidebarItem =
+  | { kind: "session"; session: SessionInfo }
+  | { kind: "cluster"; cluster: SessionCluster };
+
 export interface PendingApproval {
   tool_call_id: string;
   tool_name: string;
@@ -195,6 +209,7 @@ export interface SubagentMessage {
   tool_args?: Record<string, unknown>;
   reasoning?: string;
   character_name?: string;
+  emoji?: string;
 }
 
 export interface SubagentSession {

@@ -815,3 +815,37 @@
   min-height: 60px;
   background: transparent;
 }
+
+/* ── Mermaid renderer ── */
+.mermaid-svg-container {
+  display: flex;
+  justify-content: center;
+  cursor: zoom-in;
+  margin: 4px 0;
+  max-width: 100%;
+  overflow-x: auto;
+  padding: 8px;
+  border-radius: 4px;
+  background: var(--bg-tertiary, #2a2a2a);
+}
+
+.mermaid-svg-container svg {
+  max-width: 100%;
+  height: auto;
+}
+
+.mermaid-loading {
+  color: var(--text-muted);
+  font-size: 12px;
+  padding: 4px 0;
+  margin: 0;
+}
+
+.mermaid-error {
+  color: var(--danger);
+  font-size: 12px;
+  padding: 4px 0;
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+}

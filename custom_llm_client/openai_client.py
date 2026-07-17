@@ -16,68 +16,20 @@ import json
 import logging
 import os
 from collections.abc import AsyncIterator
-from typing import Any, Iterator, Optional
+from typing import* # type: ignore
 
 import httpcore
 import httpx
 import openai
-from pydantic import BaseModel, ConfigDict
 
-from system.context import RuntimeContext
+from abstract.llm.client import BaseLLMClient
+from abstract.llm.formats import messages_to_openai_list, to_openai_message
+from entity.messages import BaseMessage
+from entity.puretype import LLMResponse, StreamChunk, ToolCall, Usage
 from entity.constant import TOOL_RESULT_PREVIEW_CHARS, LLM_RETRY_COUNT, BACKOFF_BASE
+from system.context import RuntimeContext
 
 logger = logging.getLogger(__name__)
-
-
-# ---------------------------------------------------------------------------
-# 响应类型
-# ---------------------------------------------------------------------------
-
-
-class ToolCall(BaseModel):
-    model_config = ConfigDict(frozen=True)
-
-    id: str
-    name: str
-    arguments: dict[str, Any] = {}
-
-
-class Usage(BaseModel):
-    """LLM 提供商返回的 token 消耗。"""
-    model_config = ConfigDict(frozen=True)
-
-    prompt_tokens: int = 0
-    completion_tokens: int = 0
-    total_tokens: int = 0
-
-
-class LLMResponse(BaseModel):
-    model_config = ConfigDict(frozen=True)
-
-    content: str = ""
-    tool_calls: list[ToolCall] = []
-    finish_reason: str = "stop"
-    reasoning_content: str | None = None
-    """DeepSeek thinking-mode 载荷 — 在后续回合中必须回传。"""
-    reasoning_field_name: str | None = None
-    """原始响应中携带 reasoning 的字段名，用于在后续回传时保持字段一致。"""
-    usage: Usage = Usage()
-
-
-class StreamChunk(BaseModel):
-    """流式响应的一个片段。"""
-    model_config = ConfigDict(frozen=True)
-
-    content_delta: str | None = None
-    reasoning_delta: str | None = None
-    """DeepSeek thinking-mode 增量 — 仅用于展示。"""
-    reasoning_field_name: str | None = None
-    """当前 reasoning_delta 对应的原始字段名（如 reasoning_content / reasoning）。"""
-    tool_call: ToolCall | None = None
-    """当前 chunk 中首次完整出现的 tool_call（用于工具调用开始通知）。"""
-    finish_reason: str | None = None
-    usage: Usage | None = None
-    error: str | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -85,29 +37,54 @@ class StreamChunk(BaseModel):
 # ---------------------------------------------------------------------------
 
 
-class LLMClient:
+# TODO: 大量引用还未抽象化 BaseLLMClient
+class OpenAILLMClient(BaseLLMClient):
     """OpenAI SDK 的薄封装。
 
-    参数从 RuntimeContext 的 LLM 字段获取。
+    接收 ``api_key``、``base_url``、``model``、``temperature``、
+    ``max_output_tokens``、``reasoning_effort`` 等具体参数。
     ``api_key`` 兜底到 ``OPENAI_API_KEY`` 环境变量。
+
+    如需从 ``RuntimeContext`` 构造，使用 :meth:`from_context`。
     """
 
-    def __init__(self, ctx: RuntimeContext) -> None:
-        api_key: str = ctx.llm_api_key or os.environ.get("OPENAI_API_KEY", "")
+    def __init__(
+        self,
+        api_key: str,
+        base_url: str,
+        model: str,
+        temperature: float,
+        max_output_tokens: int,
+        reasoning_effort: str = "",
+    ) -> None:
         if not api_key:
             logger.warning(
                 "No LLM API key configured — set OPENAI_API_KEY env var "
-                "or pass it via RuntimeContext"
+                "or pass it via constructor"
             )
 
         self._client: openai.AsyncOpenAI = openai.AsyncOpenAI(
             api_key=api_key,
-            base_url=ctx.llm_base_url,
+            base_url=base_url,
         )
-        self._model: str = ctx.llm_model
-        self._temperature: float = ctx.llm_temperature
-        self._max_tokens: int = ctx.llm_max_output_tokens
-        self._reasoning_effort: str = ctx.llm_reasoning_effort or ""
+        self._model: str = model
+        self._temperature: float = temperature
+        self._max_tokens: int = max_output_tokens
+        self._reasoning_effort: str = reasoning_effort
+
+    @classmethod
+    def from_context(cls, ctx: RuntimeContext) -> OpenAILLMClient:
+        """从 RuntimeContext 构造 OpenAI LLM 客户端。"""
+        return cls(
+            api_key=ctx.llm_api_key or os.environ.get("OPENAI_API_KEY", ""),
+            base_url=ctx.llm_base_url,
+            model=ctx.llm_model,
+            temperature=ctx.llm_temperature,
+            max_output_tokens=ctx.llm_max_output_tokens,
+            reasoning_effort=ctx.llm_reasoning_effort or "",
+        )
+
+    # -- 内部消息转换 --------------------------------------------------
 
     # -- 公开 API ----------------------------------------------------------
 
@@ -138,23 +115,24 @@ class LLMClient:
 
     async def chat(
         self,
-        messages: list[dict[str, Any]],
+        messages: list[BaseMessage],
         tools: Optional[list[dict[str, Any]]] = None,
         response_format: Optional[dict[str, str]] = None,
+        character: str = "",
     ) -> LLMResponse:
         """发送聊天请求，返回结构化响应。
 
         对 transient 网络错误（连接中断、超时、限流、5xx）
         自动进行指数退避重试，最多 ``LLM_RETRY_COUNT`` 次。
 
-        *messages* 为 OpenAI 格式的消息字典列表
-        （``{"role": "...", "content": "..."}``）。
+        *messages* 为 ``BaseMessage`` 对象列表，在内部转换为 OpenAI 协议格式后发送。
         *tools* 为可选的 OpenAI 格式工具 schema 列表。
 
         返回包含 assistant 内容和工具调用的 :class:`LLMResponse`。
         """
+        messages_dict = messages_to_openai_list(messages, current_character_agent=character)
         kwargs = self._build_kwargs(
-            messages, tools, stream=False,
+            messages_dict, tools, stream=False,
             response_format=response_format,
         )
 
@@ -199,9 +177,10 @@ class LLMClient:
 
     async def chat_stream(
         self,
-        messages: list[dict[str, Any]],
+        messages: list[BaseMessage],
         tools: Optional[list[dict[str, Any]]] = None,
         response_format: Optional[dict[str, str]] = None,
+        character: str = "",
     ) -> AsyncIterator[StreamChunk]:
         """发送流式聊天请求，逐块返回增量内容。
 
@@ -211,7 +190,8 @@ class LLMClient:
         当底层连接在流传输过程中中断时，会尝试把已收到的内容拼回 prompt
         并重新发起请求，让 LLM 从断点继续生成（应用层伪续传）。
         """
-        original_messages: list[dict[str, Any]] = list(messages)
+        messages_dict = messages_to_openai_list(messages, current_character_agent=character)
+        original_messages: list[dict[str, Any]] = list(messages_dict)
         state: dict[str, Any] = {
             "content": "",
             "reasoning": "",
@@ -451,31 +431,46 @@ def _build_resume_messages(
     assistant_reasoning: str | None = state.get("reasoning") or None
     completed_tool_calls: list[ToolCall] = state.get("completed_tool_calls", [])
 
-    assistant_msg: dict[str, Any] = {
-        "role": "assistant",
-        "content": assistant_content or " ",
-    }
-    if assistant_reasoning:
-        field_name = state.get("reasoning_field_name") or "reasoning_content"
-        assistant_msg[field_name] = assistant_reasoning
-    if completed_tool_calls:
-        assistant_msg["tool_calls"] = [
-            {
-                "id": tc.id,
-                "type": "function",
-                "function": {
-                    "name": tc.name,
-                    "arguments": json.dumps(tc.arguments, ensure_ascii=False),
-                },
-            }
-            for tc in completed_tool_calls
-        ]
+    # Build assistant message via entity + formatter instead of raw dict
+    from entity.messages import ToolCall as MsgToolCall, FunctionCall as MsgFunctionCall
+    from entity.messages import CharacterConversationMessage as EntityCharConvMsg
+    from entity.puretype import Role
+
+    msg_tool_calls: list[MsgToolCall] = [
+        MsgToolCall(
+            id=tc.id,
+            type="function",
+            function=MsgFunctionCall(
+                name=tc.name,
+                arguments=json.dumps(tc.arguments, ensure_ascii=False),
+            ),
+        )
+        for tc in completed_tool_calls
+    ] if completed_tool_calls else []
+
+    assistant_entity = EntityCharConvMsg(
+        role=Role.ASSISTANT,
+        character_name="",
+        content=assistant_content or " ",
+        reasoning=assistant_reasoning,
+        reasoning_field_name=state.get("reasoning_field_name") or "reasoning_content",
+        tool_calls=msg_tool_calls or None,
+    )
+    converted = to_openai_message(assistant_entity, current_character_agent="")
+    if converted:
+        messages.append(converted)
+
+    # User resume prompt via entity + formatter
     from system.templates import read_template
-    messages.append(assistant_msg)
-    messages.append({
-        "role": "user",
-        "content": read_template("llm/stream_resume.txt"),
-    })
+    from entity.messages import BaseMessage as EntityMsg
+    user_entity = EntityMsg(
+        role=Role.USER,
+        content=read_template("llm/stream_resume.txt"),
+    )
+    converted_user = to_openai_message(user_entity, current_character_agent="")
+    if converted_user:
+        messages.append(converted_user)
+
     return messages
 
 
@@ -645,3 +640,30 @@ def _iter_delta_tool_calls(
             name_delta = getattr(function, "name", None) or None
             arguments_delta = getattr(function, "arguments", None) or None
         yield idx, tc_id, name_delta, arguments_delta
+
+
+# ---------------------------------------------------------------------------
+# 模块工厂
+# ---------------------------------------------------------------------------
+
+
+def create_llm_client(
+    runtime_context: RuntimeContext,
+    profile: dict[str, Any] | None = None,
+) -> OpenAILLMClient:
+    """按 RuntimeContext 或 profile 构造 OpenAI 兼容 LLM 客户端。
+
+    *profile* 为 None 时直接使用 *runtime_context*；否则从 *profile* 读取配置，
+    缺失字段回退到 *runtime_context*。
+    """
+    if profile is None:
+        return OpenAILLMClient.from_context(runtime_context)
+
+    return OpenAILLMClient(
+        api_key=profile.get("api_key") or runtime_context.llm_api_key or os.environ.get("OPENAI_API_KEY", ""),
+        base_url=profile.get("base_url", runtime_context.llm_base_url),
+        model=profile.get("model", runtime_context.llm_model),
+        temperature=profile.get("temperature", runtime_context.llm_temperature),
+        max_output_tokens=profile.get("max_output_tokens", runtime_context.llm_max_output_tokens),
+        reasoning_effort=profile.get("reasoning_effort", runtime_context.llm_reasoning_effort or ""),
+    )

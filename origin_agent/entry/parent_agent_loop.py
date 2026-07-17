@@ -8,7 +8,7 @@
   - ToolExecutor（工具审批/分发/事件）
   - StreamConsumer（LLM 流消费）
 """
-
+# TODO: 大量在Messages格式化解构中没有对齐类型的问题
 from __future__ import annotations
 
 import asyncio
@@ -19,22 +19,23 @@ import uuid
 from pathlib import Path
 from typing import Any, Awaitable, Callable, Dict, List, TYPE_CHECKING
 
-from abstract.memory.manager import MemoryManager
 from abstract.tools.registry import registry as tool_registry
 from component.approval import ask_agent_reason
-from component.llm import LLMClient, LLMResponse, ToolCall
+from abstract.llm.client import BaseLLMClient
+from abstract.llm.loader import create_llm_client
+from entity.puretype import LLMResponse, ToolCall, Role, ToolAvailability
 from system.session_store import SessionStore
 from entity.constant import (
     LOG_PREVIEW_CHARS,
-    AUTO_TITLE_CONTENT_MAX,
-    AUTO_TAGS_CONTENT_MAX,
     MAX_TOOL_TURNS,
     MAIN_AGENT_CHARACTER_NAME,
     USER_CHARACTER_NAME,
     SYSTEM_CHARACTER_NAME,
+    INHERIT_LAST_ROUNDS,
 )
 from entity.messages import (
     History,
+    BaseMessage,
     CharacterConversationMessage,
     FunctionCall,
     ImageBlock,
@@ -42,7 +43,6 @@ from entity.messages import (
     MessageBlock,
     ToolCall as HistoryToolCall,
 )
-from entity.puretype import Role, ToolAvailability
 from entry.base_agent_loop import BasePrivateChatAgentLoop, IMainSessionLoop
 from entry.agent_sink import AgentSink, FrontendSink
 from entry.agent_support.messages import (
@@ -97,9 +97,10 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
     ) -> None:
         super().__init__(app, session_id)
         self._frontend_sink: FrontendSink = frontend_sink
-        self._llm: LLMClient = LLMClient(app.runtime_context)
-        self._memory: MemoryManager = MemoryManager()
-        self._memory_initialized_ids: set[int] = set()
+        self._llm: BaseLLMClient = create_llm_client(
+            app.runtime_context.llm_client_name,
+            app.runtime_context,
+        )
 
         self._session_store = (
             SessionStore(history_store_dir)
@@ -134,19 +135,17 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
         # -- 子 Agent 周期收集器用的空闲时间戳 --
         self._last_idle_time: dict[str, float] = {session_id: time.monotonic()}
 
+        # -- 子 Agent 编排器（由 server 层注入） --
+        self.subagent_orchestrator: Any = None
+
     def get_last_idle_time(self, session_id: str) -> float | None:
         """返回指定 session 上次进入空闲的时间戳，不存在时返回 None。"""
         return self._last_idle_time.get(session_id)
 
+    # TODO: 未被使用
     def update_last_idle_time(self, session_id: str) -> None:
         """更新指定 session 的空闲时间戳。"""
         self._last_idle_time[session_id] = time.monotonic()
-
-        # -- 子 Agent 编排器（由 server 层注入） --
-        self.subagent_orchestrator: Any = None
-
-        # -- session manager 引用（由 server 层注入，用于旋转/归档） --
-        self._session_manager: SessionManager | None = None
 
     # ========================================================================
     # 抽象方法实现
@@ -160,7 +159,10 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
     def user_character_name(self) -> str:
         return USER_CHARACTER_NAME
 
-    def _get_llm_client(self) -> LLMClient:
+    def _get_llm_client(self) -> BaseLLMClient:
+        return self._llm
+
+    def _get_session_info_llm_client(self) -> BaseLLMClient | None:
         return self._llm
 
     def _get_context(self) -> RuntimeContext:
@@ -170,12 +172,10 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
         return self._frontend_sink
 
     def _get_tool_definitions(self) -> list[dict]:
-        """返回主 Agent 可用的工具 schema（availability 包含 MAIN 或 EVERY + memory 工具）。"""
+        """返回主 Agent 可用的工具 schema（availability 包含 MAIN 或 EVERY）。"""
         definitions: list[dict] = tool_registry.get_definitions_for_availability(
             scope=ToolAvailability.MAIN,
         )
-        for schema in self._memory.get_tool_schemas():
-            definitions.append({"type": "function", "function": schema})
         return definitions if definitions else []
 
     async def _on_context_over_limit(self) -> None:
@@ -195,6 +195,9 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
             self._collect_skill_prompts(),
         )
 
+    def get_tool_availability_scope(self) -> ToolAvailability:
+        return ToolAvailability.MAIN
+
     # ========================================================================
     # 公共 API
     # ========================================================================
@@ -203,12 +206,6 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
         self, cb: Callable[[str, str, str, str], Awaitable[None]]
     ) -> None:
         self._tool_event_callback = cb
-
-    def set_session_manager(self, manager: Any) -> None:
-        self._session_manager = manager
-
-    def add_memory_provider(self, provider: Any) -> None:
-        self._memory.add_provider(provider)
 
     def pop_session_rotated(self) -> str | None:
         return self._lifecycle.pop_session_rotated()
@@ -245,18 +242,6 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
             if not skip_append:
                 await self.append_user_message(user_message, character_name=character_name)
 
-            # 延迟初始化 memory provider
-            for provider in self._memory.providers:
-                if id(provider) in self._memory_initialized_ids:
-                    continue
-                try:
-                    provider.initialize(sid)
-                    self._memory_initialized_ids.add(id(provider))
-                except Exception:
-                    logger.exception(
-                        "Failed to initialize memory provider for session=%s", sid,
-                    )
-
             # 历史过长时自动终结会话
             if self._lifecycle.is_context_over_limit():
                 new_sid: str | None = await self._lifecycle.rotate_session_for_continuation(
@@ -269,7 +254,9 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
             messages = self._build_history_messages(user_message)
 
             try:
-                return await self._run_tool_loop(sid, messages, user_message)
+                reply = await self._run_tool_loop(sid, messages, user_message)
+                logger.info("Reply sent | session=%s reply=%s", sid, summarize_message_for_log(reply))
+                return reply
             finally:
                 self._processing = False
                 self._last_idle_time[self.session_id] = time.monotonic()
@@ -277,7 +264,7 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
     async def _run_tool_loop(
         self,
         sid: str,
-        messages: list[dict[str, Any]],
+        messages: list[BaseMessage],
         user_message: str,
     ) -> str:
         """执行 LLM 工具调用循环（含 inbox 消息消费）。"""
@@ -360,7 +347,6 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
                         reasoning_content=resp.reasoning_content,
                         reasoning_field_name=resp.reasoning_field_name,
                     )
-                    self._memory.sync_all(self._history, session_id=sid)
                     return assistant_text
 
                 # 存储 assistant 消息（含 tool_calls）
@@ -369,11 +355,9 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
                 # 委托给 ToolExecutor 执行工具调用
                 for tc in resp.tool_calls:
                     tool_msg = await self._tool_executor.execute(tc, sid)
-                    openai_tool_msg = tool_msg.as_message(self.current_character_agent)
-                    if openai_tool_msg is not None:
-                        messages.append(openai_tool_msg)
+                    messages.append(tool_msg)
                     self._history.add_message(tool_msg)
-                    self._persist_message(sid)
+                    self.save_history(sid)
                     await self._push_usage_update(sid)
 
                     if tc.name == "evolve_code":
@@ -411,7 +395,7 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
     # ========================================================================
 
     def _maybe_inject_inbox(
-        self, target_messages: list[dict[str, Any]] | None = None,
+        self, target_messages: list[BaseMessage] | None = None,
     ) -> bool:
         pending = self._inbox.get_pending()
         if not pending:
@@ -424,11 +408,9 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
                 visible_characters=[self.current_character_agent],
             )
             self._history.add_message(message)
-            self._persist_message(self.session_id)
+            self.save_history(self.session_id)
             if target_messages is not None:
-                openai_msg = message.as_message(self.current_character_agent)
-                if openai_msg is not None:
-                    target_messages.append(openai_msg)
+                target_messages.append(message)
         return True
 
     async def process_inbox(self) -> str | None:
@@ -484,13 +466,8 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
         **kwargs: Any,
     ) -> int:
         hooks_context, fixator_context = self._collect_hooks_context()
-        memory_ctx = self._get_memory_context(str(content))
 
         dynamic_parts: list[str] = []
-        if memory_ctx:
-            dynamic_parts.append(
-                f"<|im_memory_context_start|>\n{memory_ctx}\n<|im_memory_context_end|>",
-            )
         if hooks_context:
             dynamic_parts.append(hooks_context)
         dynamic_suffix = "\n".join(dynamic_parts) if dynamic_parts else None
@@ -559,7 +536,7 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
                 tool_calls=None,
             )
         index = self._history.add_message(message)
-        self._persist_message(session_id)
+        self.save_history(session_id)
         return index
 
     @staticmethod
@@ -583,13 +560,7 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
                     result.append(ImageBlock(image_url=str(image_url_block or "")))
         return result
 
-    def _get_memory_context(self, user_message: str) -> str:
-        return self._memory.prefetch_all(
-            self._extract_text(user_message),
-            session_id=self.session_id,
-        )
-
-    def _get_full_history(self, session_id: str) -> list[dict[str, Any]]:
+    def _get_full_history(self, session_id: str) -> list[BaseMessage]:
         system_prompts: list[str] = build_agent_system_prompt(
             self.app.runtime_context,
             self._collect_skill_prompts(),
@@ -608,30 +579,7 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
         return self._session_store
 
     @property
-    def memory(self) -> MemoryManager:
-        """返回当前 loop 的 memory 管理器。"""
-        return self._memory
-
-    @property
-    def memory_initialized_ids(self) -> set[int]:
-        """返回已初始化 memory provider 的 id 集合（只读视图）。"""
-        return set(self._memory_initialized_ids)
-
-    def is_memory_initialized(self, provider_id: int) -> bool:
-        """检查指定 memory provider 是否已初始化。"""
-        return provider_id in self._memory_initialized_ids
-
-    def mark_memory_initialized(self, provider_id: int) -> None:
-        """标记指定 memory provider 已初始化。"""
-        self._memory_initialized_ids.add(provider_id)
-
-    @property
-    def session_manager(self) -> SessionManager | None:
-        """返回当前 loop 关联的 gateway SessionManager。"""
-        return self._session_manager
-
-    @property
-    def llm(self) -> LLMClient:
+    def llm(self) -> BaseLLMClient:
         """返回当前 loop 的 LLM 客户端。"""
         return self._llm
 
@@ -645,7 +593,7 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
         """设置最近一次 prompt 的 token 数。"""
         self._last_prompt_tokens = value
 
-    def get_full_history(self, session_id: str) -> list[dict[str, Any]]:
+    def get_full_history(self, session_id: str) -> list[BaseMessage]:
         """返回完整历史消息（供外部生命周期管理使用）。"""
         return self._get_full_history(session_id)
 
@@ -672,10 +620,10 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
 
     def reset_history(self, session_id: str | None = None) -> None:
         """清空当前历史并可选持久化。"""
-        self._history = History(messages=[])
+        self._history = History()
         self._last_prompt_tokens = 0
         if session_id is not None:
-            self._persist_message(session_id)
+            self.save_history(session_id)
 
     def load_history(self, history: History) -> None:
         """从外部加载历史到当前 loop。"""
@@ -704,7 +652,7 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
             reasoning_field_name=resp.reasoning_field_name,
         )
         self._history.add_message(message)
-        self._persist_message(session_id)
+        self.save_history(session_id)
 
     @staticmethod
     def _extract_text(content: Any) -> str:
@@ -748,76 +696,14 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
             )
 
     # ========================================================================
-    # 自动生成标题 / 标签
-    # ========================================================================
-
-    async def auto_generate_title(self) -> str:
-        messages = self._get_full_history(self.session_id)
-        if not messages:
-            return ""
-        from system.templates import read_template
-        system_prompt = read_template("auto_title.txt")
-        user_prompt = read_template("auto_title_input.txt").replace(
-            "{{context}}",
-            json.dumps(messages, ensure_ascii=False)[:AUTO_TITLE_CONTENT_MAX],
-        )
-        try:
-            resp = await self._llm.chat([
-                {"role": Role.SYSTEM.value, "content": system_prompt},
-                {"role": Role.USER.value, "content": user_prompt},
-            ])
-            title = (resp.content or "").strip().strip("\"'")[:50]
-            return title
-        except Exception as exc:
-            logger.exception("Failed to auto-generate title: %s", exc)
-            return ""
-
-    async def regenerate_session_tags(self) -> list[str]:
-        messages = self._get_full_history(self.session_id)
-        if not messages:
-            return []
-        from system.templates import read_template
-        try:
-            system_prompt = read_template("session_tags.txt")
-            user_prompt = read_template("session_tags_input.txt").replace(
-                "{{old_text}}",
-                json.dumps(messages, ensure_ascii=False)[:AUTO_TAGS_CONTENT_MAX],
-            )
-            resp = await self._llm.chat([
-                {"role": Role.SYSTEM.value, "content": system_prompt},
-                {"role": Role.USER.value, "content": user_prompt},
-            ])
-            content = resp.content or ""
-            try:
-                tags = json.loads(content)
-                if isinstance(tags, list):
-                    return [str(t) for t in tags[:5]]
-            except json.JSONDecodeError:
-                pass
-        except Exception as exc:
-            logger.exception("Failed to generate session tags: %s", exc)
-        return []
-
-    # ========================================================================
     # 会话管理（业务级）
     # ========================================================================
 
     async def terminate_session(self) -> dict:
+        logger.info("Terminating session (parent) | session=%s", self.session_id)
         await self._lifecycle.terminate_session()
+        logger.info("Terminate session ok (parent) | session=%s", self.session_id)
         return {"terminated": True, "session_id": self.session_id}
-
-    async def regenerate_summary_for_session(self, session_id: str) -> str:
-        """重新生成指定会话的摘要（可为任意 session_id，不要求当前活跃）。"""
-        if self._session_store is None:
-            return ""
-        history = self._session_store.read_history(session_id)
-        if history is None or history.count == 0:
-            return ""
-        from entry.agent_support.history_summary import summarize_history
-        summary = await summarize_history(history, self._llm)
-        if summary:
-            self._session_store.write_summary(session_id, summary)
-        return summary
 
     async def merge_sessions(self, sources: list[str]) -> dict:
         """合并多个已归档会话到一个新会话，基于摘要而非完整历史。
@@ -834,7 +720,6 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
             return {"error": "session store not available", "merged": False}
 
         # 收集各源 session 的摘要，缺失时自动生成
-        from entity.constant import MERGE_SUMMARY_CONCAT_MAX_CHARS
         from entry.agent_support.history_summary import summarize_history
         summaries: list[str] = []
         for sid in sources:
@@ -873,10 +758,8 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
                 .replace("{{summary}}", summaries[0])
             )
         else:
-            # 多源合并：按顺序拼接，阈值截断
+            # 多源合并：直接拼接，不截断
             joined = "\n\n---\n\n".join(summaries)
-            if len(joined) > MERGE_SUMMARY_CONCAT_MAX_CHARS:
-                joined = joined[:MERGE_SUMMARY_CONCAT_MAX_CHARS] + "\n\n... [truncated]"
             context = (
                 f"This session merges multiple previous sessions. "
                 f"Here are their summaries:\n\n"
@@ -891,15 +774,36 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
             role=Role.USER,
         )
 
+        # 从各源会话附加尾部轮次文本到 context
+        from entry.agent_support.history_summary import messages_to_text, extract_last_rounds
+        tail_blocks: list[str] = []
+        for sid in sources:
+            try:
+                src_history = self._session_store.read_history(sid)
+                if src_history is None or src_history.count == 0:
+                    continue
+                tail_msgs = extract_last_rounds(
+                    src_history,
+                    rounds=INHERIT_LAST_ROUNDS,
+                    include_tool_messages=False,
+                )
+                if tail_msgs:
+                    tail_blocks.append(
+                        f"### Source session {sid}\n" + messages_to_text(tail_msgs)
+                    )
+            except Exception as exc:
+                logger.exception("Failed to append tail rounds for source=%s: %s", sid, exc)
+        if tail_blocks:
+            context += "\n\n## Recent conversation rounds\n" + "\n\n---\n\n".join(tail_blocks)
+
         # 写入仅含 summary 消息的历史
-        summary_history = History(messages=[
-            CharacterConversationMessage(
+        summary_history = History()
+        summary_history.add_message(CharacterConversationMessage(
                 role=Role.USER,
                 character_name=SYSTEM_CHARACTER_NAME,
                 content=context,
                 visible_characters=[self.current_character_agent],
-            ),
-        ])
+            ))
         self._session_store.write_history(new_sid, summary_history)
 
         # 归档源 sessions
@@ -914,15 +818,15 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
 
     def _load_history_from_disk(self, session_id: str) -> History:
         if self._session_store is None:
-            return History(messages=[])
+            return History()
         try:
             history = self._session_store.read_history(session_id)
-            return history if history is not None else History(messages=[])
+            return history if history is not None else History()
         except Exception as exc:
             logger.exception(
                 "Failed to load history for session %s: %s", session_id, exc,
             )
-            return History(messages=[])
+            return History()
 
     def is_processing(self) -> bool:
         return self._processing
