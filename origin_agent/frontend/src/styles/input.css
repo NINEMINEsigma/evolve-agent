@@ -442,4 +442,95 @@
   background: currentColor;
 }
 
+/* ── Mention chip (inline tag in input) ── */
+.input-mention-chip {
+  display: inline-block;
+  padding: 1px 6px;
+  margin: 0 2px;
+  border-radius: var(--radius-sm);
+  background: var(--accent-soft, rgba(124, 58, 237, 0.12));
+  color: var(--accent, #7c3aed);
+  border: 1px solid var(--accent, #7c3aed);
+  font-size: 13px;
+  font-family: ui-monospace, "Cascadia Code", "SF Mono", Consolas, monospace;
+  user-select: none;
+  white-space: nowrap;
+  vertical-align: baseline;
+}
 
+/* ── Mention floating menu ── */
+.mention-menu {
+  position: fixed;
+  z-index: 10000;
+  min-width: 240px;
+  max-width: 380px;
+  max-height: 240px;
+  overflow-y: auto;
+  background: var(--bg-elevated, #1e1e2e);
+  border: 1px solid var(--border-strong, #45475a);
+  border-radius: var(--radius, 12px);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.45);
+  padding: 4px;
+  scrollbar-width: thin;
+}
+
+.mention-menu::-webkit-scrollbar {
+  width: 6px;
+}
+.mention-menu::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 3px;
+}
+
+.mention-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border-radius: var(--radius-sm, 8px);
+  cursor: pointer;
+  transition: background 0.1s;
+}
+
+.mention-item.active {
+  background: var(--bg-hover, #313244);
+}
+
+.mention-item-icon {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  color: var(--text-muted, #a6adc8);
+}
+
+.mention-item.active .mention-item-icon {
+  color: var(--accent, #7c3aed);
+}
+
+.mention-item-text {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  overflow: hidden;
+}
+
+.mention-item-label {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-primary, #cdd6f4);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.mention-item-desc {
+  font-size: 11px;
+  color: var(--text-muted, #a6adc8);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}

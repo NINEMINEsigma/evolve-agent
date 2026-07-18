@@ -211,6 +211,11 @@ export function useUploadManager({
       }
       if (node.nodeType === Node.ELEMENT_NODE) {
         const el = node as HTMLElement;
+        // mention chip: 直接把标签文本 @ws:... 或 /skill:... 加入纯文本流
+        if (el.classList?.contains("input-mention-chip")) {
+          currentText += el.textContent || "";
+          return;
+        }
         if (imagePositions.has(el)) {
           flushText();
           blocks.push({ type: "image_url", image_url: { url: imagePositions.get(el)!.dataUrl } });

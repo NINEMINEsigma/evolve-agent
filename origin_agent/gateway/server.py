@@ -1290,6 +1290,35 @@ async def agentspace_lock_status():
     }
 
 
+@app.get("/api/skills/list")
+async def skills_list():
+    """列出所有可用 skill，供前端 @/ 补全菜单使用。
+
+    返回 { skills: [{ name, description, category }] }
+    """
+    try:
+        from abstract.skills.loader import list_skills
+        from system.pathutils import find_repo_root
+        skills_dir = find_repo_root() / "skills"
+        if not skills_dir.exists():
+            return {"skills": [], "total": 0}
+        skills = list_skills(skills_dir=skills_dir)
+        return {
+            "skills": [
+                {
+                    "name": s.get("name", ""),
+                    "description": s.get("description", ""),
+                    "category": s.get("category"),
+                }
+                for s in skills
+            ],
+            "total": len(skills),
+        }
+    except Exception as exc:
+        logger.warning("Failed to list skills for API: %s", exc, exc_info=True)
+        return {"skills": [], "total": 0, "error": str(exc)}
+
+
 @app.get("/{full_path:path}")
 async def spa_fallback(full_path: str):
     """SPA 客户端路由的兜底处理。
