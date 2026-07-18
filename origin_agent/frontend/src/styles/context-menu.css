@@ -3,6 +3,8 @@
   position: fixed;
   z-index: 200;
   min-width: 150px;
+  max-height: calc(100vh - 16px);
+  overflow-y: auto;
   background: var(--bg-secondary);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);

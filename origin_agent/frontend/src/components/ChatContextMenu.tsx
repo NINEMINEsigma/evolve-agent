@@ -1,4 +1,4 @@
-import { useRef, useEffect } from "react";
+import { useRef, useEffect, useLayoutEffect, useState } from "react";
 import { SessionInfo } from "../types";
 
 interface ChatContextMenuProps {
@@ -35,6 +35,25 @@ export default function ChatContextMenu({
   onRegenerateSummary,
 }: ChatContextMenuProps) {
   const menuRef = useRef<HTMLDivElement>(null);
+  const [adjustedPos, setAdjustedPos] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
+
+  // 测量菜单实际尺寸并修正位置，防止靠近视口边缘时菜单越界导致无法点击
+  useLayoutEffect(() => {
+    if (!contextMenu || !menuRef.current) return;
+    const rect = menuRef.current.getBoundingClientRect();
+    const margin = 8;
+    let x = contextMenu.x;
+    let y = contextMenu.y;
+    if (y + rect.height > window.innerHeight - margin) {
+      y = window.innerHeight - rect.height - margin;
+    }
+    if (y < margin) y = margin;
+    if (x + rect.width > window.innerWidth - margin) {
+      x = window.innerWidth - rect.width - margin;
+    }
+    if (x < margin) x = margin;
+    setAdjustedPos({ x, y });
+  }, [contextMenu]);
 
   useEffect(() => {
     const handler = (e: MouseEvent) => {
@@ -63,7 +82,7 @@ export default function ChatContextMenu({
     <div
       ref={menuRef}
       className="context-menu"
-      style={{ left: contextMenu.x, top: contextMenu.y }}
+      style={{ left: adjustedPos.x, top: adjustedPos.y }}
     >
       <ContextMenuItem
         disabled={generatingTitleSessions.has(contextMenu.sid)}
