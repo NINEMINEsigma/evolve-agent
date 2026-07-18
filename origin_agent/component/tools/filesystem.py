@@ -165,43 +165,59 @@ def _handle_write(args: dict[str, Any]) -> dict:
 
 
 def _handle_list(args: dict[str, Any]) -> dict:
-    path: str = str(args.get("path", "")).strip()
-    if not path:
-        return tool_error("path is required", path=path)
-    try:
-        raw: list[str] = _s().list_dir(path)
-        resolved = _s().resolve_read(path)
-        entries: list[str] = []
-        for name in raw:
-            p = resolved.real / name
-            entries.append(f"{name}/" if p.is_dir() else name)
-        return tool_result(entries=entries, path=path, count=len(entries))
-    except SandboxError as exc:
-        return tool_error(str(exc), path=path)
+    paths_raw = args.get("paths", [])
+    if not isinstance(paths_raw, list) or not paths_raw:
+        return tool_error("paths is required as a non-empty array of strings")
+    results: list[dict] = []
+    succeeded = 0
+    failed = 0
+    for p in paths_raw:
+        path = str(p).strip()
+        if not path:
+            results.append({"path": str(p), "success": False, "error": "path is empty"})
+            failed += 1
+            continue
+        try:
+            raw: list[str] = _s().list_dir(path)
+            resolved = _s().resolve_read(path)
+            entries: list[str] = []
+            for name in raw:
+                fp = resolved.real / name
+                entries.append(f"{name}/" if fp.is_dir() else name)
+            results.append({"path": path, "success": True, "entries": entries, "count": len(entries)})
+            succeeded += 1
+        except SandboxError as exc:
+            results.append({"path": path, "success": False, "error": str(exc)})
+            failed += 1
+    return tool_result(results=results, summary={"total": len(results), "succeeded": succeeded, "failed": failed})
 
 
 def _handle_delete(args: dict[str, Any]) -> dict:
-    path: str = str(args.get("path", "")).strip()
-    if not path:
-        return tool_error("path is required", path=path)
-    try:
-        if _s().is_dir(path):
-            return tool_error(
-                "Path is a directory — use delete_folder for directories",
-                path=path,
-            )
-        _s().delete(path)
-        return tool_result(success=True, path=path, deleted=True)
-    except SandboxError as exc:
-        return tool_error(str(exc), path=path)
+    paths_raw = args.get("paths", [])
+    if not isinstance(paths_raw, list) or not paths_raw:
+        return tool_error("paths is required as a non-empty array of strings")
+    results: list[dict] = []
+    succeeded = 0
+    failed = 0
+    for p in paths_raw:
+        path = str(p).strip()
+        if not path:
+            results.append({"path": str(p), "success": False, "error": "path is empty"})
+            failed += 1
+            continue
+        try:
+            if _s().is_dir(path):
+                results.append({"path": path, "success": False, "error": "Path is a directory — use delete_folder for directories"})
+                failed += 1
+                continue
+            _s().delete(path)
+            results.append({"path": path, "success": True, "deleted": True})
+            succeeded += 1
+        except SandboxError as exc:
+            results.append({"path": path, "success": False, "error": str(exc)})
+            failed += 1
+    return tool_result(results=results, summary={"total": len(results), "succeeded": succeeded, "failed": failed})
 
-
-def _handle_exists(args: dict[str, Any]) -> dict:
-    path: str = str(args.get("path", "")).strip()
-    if not path:
-        return tool_error("path is required", path=path)
-    exists: bool = _s().exists(path)
-    return tool_result(exists=exists, path=path)
 
 
 # ---------------------------------------------------------------------------
@@ -221,6 +237,23 @@ def _param(path_desc: str, required: bool = True) -> dict[str, Any]:
             },
         },
         "required": (["path"] if required else []),
+    }
+
+
+def _param_paths(paths_desc: str) -> dict[str, Any]:
+    """生成 paths: array of strings 的 parameters schema 片段。"""
+    return {
+        "type": "object",
+        "properties": {
+            "paths": {
+                "type": "array",
+                "items": {"type": "string"},
+                # 逻辑路径列表（{paths_desc}）。每个路径必须使用命名空间前缀：fork:、ws:、fix: 或 skills:。
+                "description": f"Logical paths ({paths_desc}). "
+                "Each must use a namespace prefix: fork:, ws:, fix:, or skills:.",
+            },
+        },
+        "required": ["paths"],
     }
 
 
@@ -525,55 +558,56 @@ When truncated, additionally includes `truncated=true` and `tail`:
 
 
 # -- list_directory
-# 列出目录内容。返回条目名称列表，目录名称以 "/" 结尾便于区分。
+# 列出多个目录内容。返回条目名称列表，目录名称以 "/" 结尾便于区分。
 # 可使用任意命名空间前缀（ws:、fork:、fix:、skills:）。
 #
 # ## 前置条件
 # 目录必须存在。
 #
 # ## 调用效果
-# 列出目录中的文件和子目录名称（不是完整路径）。
-# 目录条目以 "/" 后缀标识。返回结果包含条目总数 `count`。
+# 列出每个目录中的文件和子目录名称（不是完整路径）。
+# 目录条目以 "/" 后缀标识。每个成功结果包含条目总数 `count`。
+# 部分目录失败不影响其他目录的列出。
 #
 # ## 返回
 # ```json
-# {"entries": ["file.py", "subdir/", "data.json"], "path": "ws:src", "count": 3}
+# {"results": [{"path": "ws:src", "success": true, "entries": ["file.py", "subdir/"], "count": 2}], "summary": {"total": 1, "succeeded": 1, "failed": 0}}
 # ```
 #
 # ## 何时使用
 # - 浏览目录结构，确认文件/目录存在。
 # - 为 read_file、delete_file 等工具提供精确的路径。
+# - 检查文件/目录是否存在及类型：列出父目录后检查目标名称是否出现（带 "/" 后缀=目录，不带=文件）。
 #
 # ## 副作用/注意
 # - 无副作用，只读查询。
-# - 目录不存在或沙箱拒绝访问返回错误。
-# - 不能列出单个文件（需使用 file_exists 或 is_file）。
+# - 目录不存在或沙箱拒绝访问时该路径标记为失败，不影响其他路径。
 registry.register(
     name="list_directory",
     toolset="filesystem",
     schema={
-        "description": """List directory contents. Returns entry names; directory entries are suffixed with '/' for easy identification. Any namespace prefix (ws:, fork:, fix:, skills:) can be used.
+        "description": """List contents of multiple directories. Returns entry names; directory entries are suffixed with '/' for easy identification. Any namespace prefix (ws:, fork:, fix:, skills:) can be used. Best-effort: all paths are attempted, each result reports success or failure.
 
 ## Prerequisites
-The directory must exist.
+The directories must exist.
 
 ## Effect
-Lists files and subdirectory names (not full paths) inside the directory. Directory entries are suffixed with '/'. The result includes a `count` of entries.
+Lists files and subdirectory names (not full paths) inside each directory. Directory entries are suffixed with '/'. Each successful result includes a `count` of entries. Failures for individual paths do not affect others.
 
 ## Returns
 ```json
-{"entries": ["file.py", "subdir/", "data.json"], "path": "ws:src", "count": 3}
+{"results": [{"path": "ws:src", "success": true, "entries": ["file.py", "subdir/"], "count": 2}], "summary": {"total": 1, "succeeded": 1, "failed": 0}}
 ```
 
 ## When to Use
 - Browse directory structure to confirm file/directory existence.
 - Provide exact paths for tools like read_file, delete_file.
+- Check file/directory existence and type: list the parent directory and inspect whether the target name appears in entries (with '/' suffix = directory, without = file).
 
 ## Side Effects / Notes
 - No side effects, read-only query.
-- Directory not found or sandbox access denied returns a descriptive error.
-- Cannot list a single file (use file_exists or is_file instead).""",
-        "parameters": _param("directory to list"),
+- Directory not found or sandbox access denied marks that path as failed; other paths are unaffected.""",
+        "parameters": _param_paths("directories to list"),
     },
     handler=_handle_list,
     emoji="📂",
@@ -581,7 +615,7 @@ Lists files and subdirectory names (not full paths) inside the directory. Direct
 
 
 # -- delete_file
-# 删除文件。仅允许可写命名空间（ws:、fork:、fix:、skills:）。
+# 删除多个文件。仅允许可写命名空间（ws:、fork:、fix:、skills:）。
 # 如需删除目录，使用 delete_folder。
 #
 # ## 前置条件
@@ -589,11 +623,12 @@ Lists files and subdirectory names (not full paths) inside the directory. Direct
 # - 路径必须使用可写命名空间前缀。
 #
 # ## 调用效果
-# 删除指定文件。如果路径是目录，返回错误并提示使用 delete_folder。
+# 逐个删除指定文件。如果某个路径是目录，该路径标记为失败并提示使用 delete_folder。
+# 部分文件失败不影响其他文件的删除。
 #
 # ## 返回
 # ```json
-# {"success": true, "path": "ws:temp.txt", "deleted": true}
+# {"results": [{"path": "ws:a.txt", "success": true, "deleted": true}, {"path": "ws:b.txt", "success": false, "error": "File not found"}], "summary": {"total": 2, "succeeded": 1, "failed": 1}}
 # ```
 #
 # ## 何时使用
@@ -608,18 +643,18 @@ registry.register(
     name="delete_file",
     toolset="filesystem",
     schema={
-        "description": """Delete a file. Only writable namespaces are allowed (ws:, fork:, fix:, skills:). For directory deletion, use delete_folder.
+        "description": """Delete multiple files. Only writable namespaces are allowed (ws:, fork:, fix:, skills:). For directory deletion, use delete_folder. Best-effort: all paths are attempted, each result reports success or failure.
 
 ## Prerequisites
-- The file must exist and must not be a directory.
-- The path must use a writable namespace prefix.
+- Files must exist and must not be directories.
+- Paths must use a writable namespace prefix.
 
 ## Effect
-Deletes the specified file. If the path is a directory, returns an error directing the caller to use delete_folder.
+Deletes each specified file. If a path is a directory, that path is marked as failed with a message directing the caller to use delete_folder. Failures for individual paths do not affect others.
 
 ## Returns
 ```json
-{"success": true, "path": "ws:temp.txt", "deleted": true}
+{"results": [{"path": "ws:a.txt", "success": true, "deleted": true}, {"path": "ws:b.txt", "success": false, "error": "File not found"}], "summary": {"total": 2, "succeeded": 1, "failed": 1}}
 ```
 
 ## When to Use
@@ -630,8 +665,7 @@ Deletes the specified file. If the path is a directory, returns an error directi
 - DANGEROUS: Deletion is irreversible (no trash/recycle bin in the sandbox).
 - Read-only namespaces return an access error.
 - Does not accept directory paths; use delete_folder for directories.""",
-        # 要删除的文件路径
-        "parameters": _param("file to delete"),
+        "parameters": _param_paths("files to delete"),
     },
     handler=_handle_delete,
     emoji="🗑️",
@@ -927,62 +961,6 @@ Errors:
     danger_level=ToolDangerLevel.write,
 )
 
-
-# -- file_exists
-# 检查文件或目录是否存在。支持所有命名空间（ws:、fork:、fix:、skills:）。
-# 不区分文件还是目录——路径存在即返回 true。
-# 如需区分文件/目录，使用 is_file 或 is_directory。
-#
-# ## 前置条件
-# 无。路径不存在返回 false，不报错。
-#
-# ## 调用效果
-# 无副作用，纯查询。返回布尔值表示路径是否存在。
-#
-# ## 返回
-# ```json
-# {"exists": true, "path": "ws:example.txt"}
-# ```
-#
-# ## 何时使用
-# - 在 read_file、delete_file 等操作前确认文件存在。
-# - 检查文件是否已被创建或删除。
-#
-# ## 副作用/注意
-# - 无副作用，只读查询。
-# - 不区分文件与目录。
-# - 路径格式无效（如缺少命名空间前缀）可能返回错误。
-registry.register(
-    name="file_exists",
-    toolset="filesystem",
-    schema={
-        "description": """Check if a file or directory exists (all namespaces). Does not distinguish between files and directories — returns true if the path exists. Use is_file or is_directory to check the type.
-
-## Prerequisites
-None. Non-existent paths return false, not an error.
-
-## Effect
-No side effects, read-only query. Returns a boolean indicating whether the path exists.
-
-## Returns
-```json
-{"exists": true, "path": "ws:example.txt"}
-```
-
-## When to Use
-- Confirm a file exists before read_file, delete_file, etc.
-- Check whether a file has been created or deleted.
-
-## Side Effects / Notes
-- No side effects, read-only query.
-- Does not distinguish between files and directories.
-- Invalid path format (e.g. missing namespace prefix) may return an error.""",
-        # 要检查的文件或目录路径
-        "parameters": _param("file or directory to check", required=True),
-    },
-    handler=_handle_exists,
-    emoji="🔍",
-)
 
 
 # -- copy_file
@@ -1824,19 +1802,31 @@ No side effects, read-only query. Returns the absolute disk path corresponding t
 
 
 def _handle_create_folder(args: dict[str, Any]) -> dict:
-    path: str = str(args.get("path", "")).strip()
-    if not path:
-        return tool_error("path is required", path=path)
-    try:
-        parents: bool = bool(args.get("parents", True))
-        _s().create_folder(path, parents=parents)
-        return tool_result(success=True, path=path, created=True)
-    except SandboxError as exc:
-        return tool_error(str(exc), path=path)
+    paths_raw = args.get("paths", [])
+    if not isinstance(paths_raw, list) or not paths_raw:
+        return tool_error("paths is required as a non-empty array of strings")
+    parents: bool = bool(args.get("parents", True))
+    results: list[dict] = []
+    succeeded = 0
+    failed = 0
+    for p in paths_raw:
+        path = str(p).strip()
+        if not path:
+            results.append({"path": str(p), "success": False, "error": "path is empty"})
+            failed += 1
+            continue
+        try:
+            _s().create_folder(path, parents=parents)
+            results.append({"path": path, "success": True, "created": True})
+            succeeded += 1
+        except SandboxError as exc:
+            results.append({"path": path, "success": False, "error": str(exc)})
+            failed += 1
+    return tool_result(results=results, summary={"total": len(results), "succeeded": succeeded, "failed": failed})
 
 
 # -- create_folder
-# 创建目录。路径必须使用命名空间前缀（ws:、fork:、fix:、skills:）。
+# 创建多个目录。路径必须使用命名空间前缀（ws:、fork:、fix:、skills:）。
 # 默认自动创建所有缺失的父目录。
 # 目录已存在时返回成功（幂等操作）。
 #
@@ -1844,12 +1834,12 @@ def _handle_create_folder(args: dict[str, Any]) -> dict:
 # - 路径所在命名空间必须是可写的。
 #
 # ## 调用效果
-# 创建指定目录。默认同时创建所有缺失的父目录（parents=true）。
-# 如果目录已存在，不会报错（幂等）。
+# 逐个创建指定目录。默认同时创建所有缺失的父目录（parents=true）。
+# 如果目录已存在，不会报错（幂等）。部分目录失败不影响其他目录的创建。
 #
 # ## 返回
 # ```json
-# {"success": true, "path": "ws:src/subdir", "created": true}
+# {"results": [{"path": "ws:src/subdir", "success": true, "created": true}], "summary": {"total": 1, "succeeded": 1, "failed": 0}}
 # ```
 #
 # ## 何时使用
@@ -1864,21 +1854,21 @@ registry.register(
     name="create_folder",
     toolset="filesystem",
     schema={
-        "description": """Create a directory. Path must use a namespace prefix (ws:, fork:, fix:, skills:). By default, all missing parent directories are created automatically. Idempotent — returns success if the directory already exists.
+        "description": """Create multiple directories. Paths must use a namespace prefix (ws:, fork:, fix:, skills:). By default, all missing parent directories are created automatically. Idempotent — returns success if the directory already exists. Best-effort: all paths are attempted, each result reports success or failure.
 
 ## Prerequisites
 The path namespace must be writable.
 
 ## Effect
-Creates the specified directory. By default, also creates all missing parent directories (parents=true). If the directory already exists, no error is raised (idempotent).
+Creates each specified directory. By default, also creates all missing parent directories (parents=true). If a directory already exists, no error is raised (idempotent). Failures for individual paths do not affect others.
 
 ## Returns
 ```json
-{"success": true, "path": "ws:src/subdir", "created": true}
+{"results": [{"path": "ws:src/subdir", "success": true, "created": true}], "summary": {"total": 1, "succeeded": 1, "failed": 0}}
 ```
 
 ## When to Use
-- Ensure a target directory exists before writing files.
+- Ensure target directories exist before writing files.
 - Organize directory structure.
 
 ## Side Effects / Notes
@@ -1888,10 +1878,11 @@ Creates the specified directory. By default, also creates all missing parent dir
         "parameters": {
             "type": "object",
             "properties": {
-                "path": {
-                    "type": "string",
-                    # 要创建的目录逻辑路径（命名空间前缀 + 相对路径）。
-                    "description": "Directory logical path to create (namespace prefix + relative path).",
+                "paths": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Logical paths (directories to create). "
+                    "Each must use a namespace prefix: fork:, ws:, fix:, or skills:.",
                 },
                 "parents": {
                     "type": "boolean",
@@ -1900,7 +1891,7 @@ Creates the specified directory. By default, also creates all missing parent dir
                     "default": True,
                 },
             },
-            "required": ["path"],
+            "required": ["paths"],
         },
     },
     handler=_handle_create_folder,
@@ -1915,18 +1906,30 @@ Creates the specified directory. By default, also creates all missing parent dir
 
 
 def _handle_delete_folder(args: dict[str, Any]) -> dict:
-    path: str = str(args.get("path", "")).strip()
-    if not path:
-        return tool_error("path is required", path=path)
-    try:
-        _s().delete_folder(path)
-        return tool_result(success=True, path=path, deleted=True)
-    except SandboxError as exc:
-        return tool_error(str(exc), path=path)
+    paths_raw = args.get("paths", [])
+    if not isinstance(paths_raw, list) or not paths_raw:
+        return tool_error("paths is required as a non-empty array of strings")
+    results: list[dict] = []
+    succeeded = 0
+    failed = 0
+    for p in paths_raw:
+        path = str(p).strip()
+        if not path:
+            results.append({"path": str(p), "success": False, "error": "path is empty"})
+            failed += 1
+            continue
+        try:
+            _s().delete_folder(path)
+            results.append({"path": path, "success": True, "deleted": True})
+            succeeded += 1
+        except SandboxError as exc:
+            results.append({"path": path, "success": False, "error": str(exc)})
+            failed += 1
+    return tool_result(results=results, summary={"total": len(results), "succeeded": succeeded, "failed": failed})
 
 
 # -- delete_folder
-# 递归删除目录及其所有内容。
+# 递归删除多个目录及其所有内容。
 # 路径必须使用可写命名空间前缀（ws:、fork:、fix:、skills:）。
 # ⚠️ 危险操作：会递归删除目录中的所有文件和子目录，不可恢复。
 #
@@ -1935,11 +1938,12 @@ def _handle_delete_folder(args: dict[str, Any]) -> dict:
 # - 路径所在命名空间必须是可写的。
 #
 # ## 调用效果
-# 递归删除指定目录及其所有内容。沙箱无回收站，删除后不可恢复。
+# 逐个递归删除指定目录及其所有内容。沙箱无回收站，删除后不可恢复。
+# 部分目录失败不影响其他目录的删除。
 #
 # ## 返回
 # ```json
-# {"success": true, "path": "ws:temp", "deleted": true}
+# {"results": [{"path": "ws:temp", "success": true, "deleted": true}], "summary": {"total": 1, "succeeded": 1, "failed": 0}}
 # ```
 #
 # ## 何时使用
@@ -1954,205 +1958,33 @@ registry.register(
     name="delete_folder",
     toolset="filesystem",
     schema={
-        "description": """Recursively delete a directory and all its contents. Path must use a writable namespace prefix (ws:, fork:, fix:, skills:). ⚠️ DANGEROUS: this recursively removes all files and subdirectories with no way to recover.
+        "description": """Recursively delete multiple directories and all their contents. Paths must use a writable namespace prefix (ws:, fork:, fix:, skills:). DANGEROUS: this recursively removes all files and subdirectories with no way to recover. Best-effort: all paths are attempted, each result reports success or failure.
 
 ## Prerequisites
-- The directory must exist.
+- The directories must exist.
 - The path namespace must be writable.
 
 ## Effect
-Recursively deletes the specified directory and all its contents. The sandbox has no trash/recycle bin — deletion is irreversible.
+Recursively deletes each specified directory and all its contents. The sandbox has no trash/recycle bin — deletion is irreversible. Failures for individual paths do not affect others.
 
 ## Returns
 ```json
-{"success": true, "path": "ws:temp", "deleted": true}
+{"results": [{"path": "ws:temp", "success": true, "deleted": true}], "summary": {"total": 1, "succeeded": 1, "failed": 0}}
 ```
 
 ## When to Use
-- Clean up an entire directory tree.
+- Clean up entire directory trees.
 - Prepare for copy_folder (delete destination first if it already exists).
 
 ## Side Effects / Notes
-- ⚠️ DANGEROUS: Recursive deletion, irreversible.
+- DANGEROUS: Recursive deletion, irreversible.
 - Only accepts directory paths; use delete_file for single files.
 - Returns an error if the path points to a file.""",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "path": {
-                    "type": "string",
-                    # 要删除的目录逻辑路径（命名空间前缀 + 相对路径）。
-                    "description": "Directory logical path to delete (namespace prefix + relative path).",
-                },
-            },
-            "required": ["path"],
-        },
+        "parameters": _param_paths("directories to delete"),
     },
     handler=_handle_delete_folder,
     emoji="🗂️",
     danger_level=ToolDangerLevel.write,
-)
-
-
-# -- is_file
-# 判断路径是否为文件
-# Check if a path is a file (not a directory)
-
-
-def _handle_is_file(args: dict[str, Any]) -> dict:
-    path: str = str(args.get("path", "")).strip()
-    if not path:
-        return tool_error("path is required", path=path)
-    try:
-        result: bool = _s().is_file(path)
-        return tool_result(is_file=result, path=path)
-    except SandboxError as exc:
-        return tool_error(str(exc), path=path)
-
-
-# -- is_file
-# 判断路径是否为文件（不是目录）。路径必须使用命名空间前缀。
-# 路径不存在时返回 false（不报错）。
-#
-# ## 前置条件
-# 无。路径不存在返回 false，不报错。
-#
-# ## 调用效果
-# 无副作用，纯查询。返回布尔值表示路径是否指向一个文件。
-#
-# ## 返回
-# ```json
-# {"is_file": true, "path": "ws:example.txt"}
-# ```
-#
-# ## 何时使用
-# - 在 read_file、delete_file 等操作前确认路径是文件而非目录。
-# - 配合 file_exists 使用：先检查存在，再检查类型。
-#
-# ## 副作用/注意
-# - 无副作用，只读查询。
-# - 路径不存在返回 false。
-# - 路径指向目录也返回 false。
-registry.register(
-    name="is_file",
-    toolset="filesystem",
-    schema={
-        "description": """Check whether a path is a file (not a directory). Path must use a namespace prefix. Returns false if the path does not exist (no error).
-
-## Prerequisites
-None. Non-existent paths return false, not an error.
-
-## Effect
-No side effects, read-only query. Returns a boolean indicating whether the path points to a file.
-
-## Returns
-```json
-{"is_file": true, "path": "ws:example.txt"}
-```
-
-## When to Use
-- Confirm a path is a file (not a directory) before read_file, delete_file, etc.
-- Use with file_exists: check existence first, then check type.
-
-## Side Effects / Notes
-- No side effects, read-only query.
-- Returns false if the path does not exist.
-- Returns false if the path points to a directory.""",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "path": {
-                    "type": "string",
-                    # 要检查的逻辑路径（命名空间前缀 + 相对路径）。
-                    "description": "Logical path to check (namespace prefix + relative path).",
-                },
-            },
-            "required": ["path"],
-        },
-    },
-    handler=_handle_is_file,
-    emoji="📄",
-)
-
-
-# -- is_directory
-# 判断路径是否为目录
-# Check if a path is a directory
-
-
-def _handle_is_directory(args: dict[str, Any]) -> dict:
-    path: str = str(args.get("path", "")).strip()
-    if not path:
-        return tool_error("path is required", path=path)
-    try:
-        result: bool = _s().is_dir(path)
-        return tool_result(is_directory=result, path=path)
-    except SandboxError as exc:
-        return tool_error(str(exc), path=path)
-
-
-# -- is_directory
-# 判断路径是否为目录。路径必须使用命名空间前缀。
-# 路径不存在时返回 false（不报错）。
-#
-# ## 前置条件
-# 无。路径不存在返回 false，不报错。
-#
-# ## 调用效果
-# 无副作用，纯查询。返回布尔值表示路径是否指向一个目录。
-#
-# ## 返回
-# ```json
-# {"is_directory": true, "path": "ws:src"}
-# ```
-#
-# ## 何时使用
-# - 在 list_directory、delete_folder 等操作前确认路径是目录。
-# - 配合 file_exists 使用：先检查存在，再检查类型。
-#
-# ## 副作用/注意
-# - 无副作用，只读查询。
-# - 路径不存在返回 false。
-# - 路径指向文件也返回 false。
-registry.register(
-    name="is_directory",
-    toolset="filesystem",
-    schema={
-        "description": """Check whether a path is a directory. Path must use a namespace prefix. Returns false if the path does not exist (no error).
-
-## Prerequisites
-None. Non-existent paths return false, not an error.
-
-## Effect
-No side effects, read-only query. Returns a boolean indicating whether the path points to a directory.
-
-## Returns
-```json
-{"is_directory": true, "path": "ws:src"}
-```
-
-## When to Use
-- Confirm a path is a directory before list_directory, delete_folder, etc.
-- Use with file_exists: check existence first, then check type.
-
-## Side Effects / Notes
-- No side effects, read-only query.
-- Returns false if the path does not exist.
-- Returns false if the path points to a file.""",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "path": {
-                    "type": "string",
-                    # 要检查的逻辑路径（命名空间前缀 + 相对路径）。
-                    "description": "Logical path to check (namespace prefix + relative path).",
-                },
-            },
-            "required": ["path"],
-        },
-    },
-    handler=_handle_is_directory,
-    emoji="📁",
 )
 
 
@@ -2162,30 +1994,43 @@ No side effects, read-only query. Returns a boolean indicating whether the path 
 
 
 def _handle_count_lines(args: dict[str, Any]) -> dict:
-    path: str = str(args.get("path", "")).strip()
-    if not path:
-        return tool_error("path is required", path=path)
-    try:
-        total: int = _s().count_lines(path)
-        return tool_result(total_lines=total, path=path)
-    except SandboxError as exc:
-        return tool_error(str(exc), path=path)
+    paths_raw = args.get("paths", [])
+    if not isinstance(paths_raw, list) or not paths_raw:
+        return tool_error("paths is required as a non-empty array of strings")
+    results: list[dict] = []
+    succeeded = 0
+    failed = 0
+    for p in paths_raw:
+        path = str(p).strip()
+        if not path:
+            results.append({"path": str(p), "success": False, "error": "path is empty"})
+            failed += 1
+            continue
+        try:
+            total: int = _s().count_lines(path)
+            results.append({"path": path, "success": True, "total_lines": total})
+            succeeded += 1
+        except SandboxError as exc:
+            results.append({"path": path, "success": False, "error": str(exc)})
+            failed += 1
+    return tool_result(results=results, summary={"total": len(results), "succeeded": succeeded, "failed": failed})
 
 
 # -- count_lines
-# 返回文件的总行数。路径必须使用命名空间前缀。
+# 返回多个文件的总行数。路径必须使用命名空间前缀。
 # 在调用 read_file 的 offset 前了解文件边界时有用。
 #
 # ## 前置条件
 # 文件必须存在。
 #
 # ## 调用效果
-# 无副作用，纯查询。返回文件的总行数。
+# 无副作用，纯查询。逐个返回文件的总行数。
 # 用于辅助 read_file 的分页策略：先 count_lines 确定文件大小，再逐页读取。
+# 部分文件失败不影响其他文件的查询。
 #
 # ## 返回
 # ```json
-# {"total_lines": 150, "path": "ws:example.txt"}
+# {"results": [{"path": "ws:example.txt", "success": true, "total_lines": 150}], "summary": {"total": 1, "succeeded": 1, "failed": 0}}
 # ```
 #
 # ## 何时使用
@@ -2194,23 +2039,23 @@ def _handle_count_lines(args: dict[str, Any]) -> dict:
 #
 # ## 副作用/注意
 # - 无副作用，只读查询。
-# - 文件不存在返回错误。
+# - 文件不存在时该路径标记为失败，不影响其他路径。
 # - 用于 read_file 的分页策略：total_lines 配合 limit 确定 offset 范围。
 registry.register(
     name="count_lines",
     toolset="filesystem",
     schema={
-        "description": """Return the total number of lines in a file. Path must use a namespace prefix. Useful to know file bounds before calling read_file with offset for paginated reading.
+        "description": """Return the total number of lines in multiple files. Paths must use a namespace prefix. Useful to know file bounds before calling read_file with offset for paginated reading. Best-effort: all paths are attempted, each result reports success or failure.
 
 ## Prerequisites
-The file must exist.
+The files must exist.
 
 ## Effect
-No side effects, read-only query. Returns the total line count of the file. Used to plan pagination strategy with read_file: count_lines first, then read in pages.
+No side effects, read-only query. Returns the total line count for each file. Used to plan pagination strategy with read_file: count_lines first, then read in pages. Failures for individual paths do not affect others.
 
 ## Returns
 ```json
-{"total_lines": 150, "path": "ws:example.txt"}
+{"results": [{"path": "ws:example.txt", "success": true, "total_lines": 150}], "summary": {"total": 1, "succeeded": 1, "failed": 0}}
 ```
 
 ## When to Use
@@ -2219,19 +2064,9 @@ No side effects, read-only query. Returns the total line count of the file. Used
 
 ## Side Effects / Notes
 - No side effects, read-only query.
-- Returns an error if the file does not exist.
+- Files that do not exist are marked as failed; other paths are unaffected.
 - Use with read_file for pagination: total_lines + limit determines offset range.""",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "path": {
-                    "type": "string",
-                    # 文件逻辑路径（命名空间前缀 + 相对路径）。
-                    "description": "File logical path (namespace prefix + relative path).",
-                },
-            },
-            "required": ["path"],
-        },
+        "parameters": _param_paths("files to count lines"),
     },
     handler=_handle_count_lines,
     emoji="📏",
