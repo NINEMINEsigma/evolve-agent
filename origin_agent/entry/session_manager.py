@@ -17,11 +17,9 @@ from typing import Any, TYPE_CHECKING
 
 from entity.messages import History, CharacterConversationMessage, BaseMessage
 from entity.puretype import Role
-from entity.constant import USER_CHARACTER_NAME, INHERIT_LAST_ROUNDS
+from entity.constant import USER_CHARACTER_NAME
 from system.templates import read_template
 from system.session_store import SessionStore
-from entry.agent_support.history_summary import extract_last_rounds
-from abstract.llm.formats import to_openai_message
 
 if TYPE_CHECKING:
     from abstract.llm.client import BaseLLMClient
@@ -102,7 +100,6 @@ class LoopSessionManager:
     ) -> str | None:
         """终结旧会话并创建继承会话，返回新 session_id 或 None。"""
         from entity.puretype import Role
-        from entity.constant import USER_CHARACTER_NAME
 
         old_sid: str = session_id
         if pending_user_message is not None:
@@ -178,6 +175,52 @@ class LoopSessionManager:
 
         old_sid: str = session_id
 
+        if rotate:
+            # 读取当前 session 的 LoopMeta 供旋转继承
+            loop_meta = None
+            info = sm.get(old_sid)
+            if info:
+                from entity.puretype import LoopMeta as _LoopMeta
+                loop_meta = _LoopMeta(
+                    loopType=info.loop_type, agents=info.agents,
+                )
+
+            new_sid = await terminate_and_rotate_session(
+                session_id=old_sid,
+                session_store=self._loop.session_store,
+                session_manager=sm,
+                llm=self._loop.llm,
+                loop_meta=loop_meta,
+                current_character_agent=self._loop.current_character_agent,
+                history_store_dir=self._history_store_dir,
+            )
+
+            if new_sid:
+                # 自动分类标签（在公共函数归档前补充）
+                tags: list[str] = await self._generate_session_tags(old_sid)
+                if tags:
+                    sm.set_session_tags(old_sid, tags)
+                    logger.info("Auto-classified tags for session %s: %s", old_sid, tags)
+
+                # ParentAgentLoop 特有的后置操作：重置内存历史
+                self._loop.load_history(History())
+                self._loop.last_prompt_tokens = 0
+                summary_msg = CharacterConversationMessage(
+                    role=Role.USER,
+                    character_name=USER_CHARACTER_NAME,
+                    content=self._build_inherited_context(old_sid, self._loop.session_store.read_summary(old_sid) if self._loop.session_store else ""),
+                    visible_characters=[
+                        self._loop.current_character_agent,
+                    ],
+                )
+                self._loop.history.add_message(summary_msg)
+                self._loop.save_history(new_sid)
+
+                self._session_rotated_notify[old_sid] = new_sid
+
+            return new_sid
+
+        # rotate=False：仅归档 + 摘要，不创建继承会话
         # 读取已持久化摘要
         summary: str = ""
         if self._history_store_dir:
@@ -204,85 +247,11 @@ class LoopSessionManager:
                 )
 
         # 自动分类标签
-        tags: list[str] = await self._generate_session_tags(old_sid)
+        tags = await self._generate_session_tags(old_sid)
         if tags and sm is not None:
             sm.set_session_tags(old_sid, tags)
             logger.info("Auto-classified tags for session %s: %s", old_sid, tags)
         sm.archive(old_sid, continuation_sid=None)
-
-        if rotate:
-            context: str = self._build_inherited_context(old_sid, summary)
-
-            # 读取当前 session 的 LoopMeta 供旋转继承
-            loop_meta = None
-            if sm is not None:
-                info = sm.get(old_sid)
-                if info:
-                    from entity.puretype import LoopMeta as _LoopMeta
-                    loop_meta = _LoopMeta(
-                        loopType=info.loop_type, agents=info.agents,
-                    )
-
-            # 提取旧会话尾部轮次文本，追加到 context
-            tail_rounds_text = ""
-            if self._loop.session_store is not None:
-                try:
-                    old_history = self._loop.session_store.read_history(old_sid)
-                    if old_history is not None and old_history.count > 0:
-                        from entry.agent_support.history_summary import messages_to_text
-                        tail_msgs = extract_last_rounds(
-                            old_history,
-                            rounds=INHERIT_LAST_ROUNDS,
-                            include_tool_messages=False,
-                        )
-                        if tail_msgs:
-                            tail_text = messages_to_text(tail_msgs)
-                            tail_rounds_text = (
-                                "\n\n## Recent conversation rounds\n" + tail_text
-                            )
-                except Exception as exc:
-                    logger.exception(
-                        "Failed to extract tail rounds for session old=%s: %s",
-                        old_sid, exc,
-                    )
-            if tail_rounds_text:
-                context += tail_rounds_text
-
-            new_sid: str = sm.create_with_context(
-                context, parent_sid=old_sid, role=Role.USER,
-                loop_meta=loop_meta,
-            )
-            sm.archive(old_sid, continuation_sid=new_sid)
-
-            # 新 session 以 summary 作为 user 消息开始
-            self._loop.load_history(History())
-            self._loop.last_prompt_tokens = 0
-            summary_msg = CharacterConversationMessage(
-                role=Role.USER,
-                character_name=USER_CHARACTER_NAME,
-                content=context,
-                visible_characters=[
-                    self._loop.current_character_agent,
-                ],
-            )
-            self._loop.history.add_message(summary_msg)
-            self._loop.save_history(new_sid)
-
-            # 迁移 cron 定时任务
-            try:
-                from component.extools import cron_tools
-                cron_tools.migrate_session_cron_jobs(old_sid, new_sid)
-            except Exception:
-                logger.exception(
-                    "Failed to migrate cron jobs from %s to %s", old_sid, new_sid,
-                )
-
-            self._session_rotated_notify[old_sid] = new_sid
-            logger.info(
-                "Session terminated and rotated | old=%s new=%s summary=%d chars",
-                old_sid, new_sid, len(summary),
-            )
-            return new_sid
 
         logger.info(
             "Session terminated | old=%s summary=%d chars", old_sid, len(summary),
@@ -314,3 +283,141 @@ class LoopSessionManager:
             .replace("{{old_sid}}", old_sid)
             .replace("{{summary}}", summary)
         )
+
+
+# ---------------------------------------------------------------------------
+# 公共旋转函数 — 供 ParentAgentLoop 和 MultiAgentLoop 共用
+# ---------------------------------------------------------------------------
+
+
+async def terminate_and_rotate_session(
+    *,
+    session_id: str,
+    session_store: SessionStore | None,
+    session_manager: Any,
+    llm: BaseLLMClient | None,
+    loop_meta: Any | None = None,
+    current_character_agent: str = "",
+    history_store_dir: Path | None = None,
+) -> str | None:
+    """终结会话：生成摘要、归档、创建继承会话（可选传入 LoopMeta）。
+
+    Args:
+        session_id: 要终结的会话 ID。
+        session_store: 会话持久化存储。
+        session_manager: gateway 层 SessionManager（create_with_context / archive / set_session_tags）。
+        llm: 用于生成摘要的 LLM 客户端。
+        loop_meta: 旋转后新会话的 LoopMeta（普通模式为 None，多 Agent 模式为 Loop.multi）。
+        current_character_agent: 当前角色名，用于构造继承会话的初始消息。
+        history_store_dir: 历史存储目录，用于读取已持久化摘要。
+
+    Returns:
+        新 session_id 或 None（失败时）。
+    """
+    from entity.puretype import Role, LoopMeta as _LoopMeta
+    from entity.constant import USER_CHARACTER_NAME, INHERIT_LAST_ROUNDS
+    from entity.messages import History, CharacterConversationMessage
+    from system.templates import read_template
+    from entry.agent_support.history_summary import summarize_history, extract_last_rounds, messages_to_text
+
+    old_sid: str = session_id
+
+    # 1. 读取已持久化摘要
+    summary: str = ""
+    if history_store_dir:
+        summary_path = history_store_dir / old_sid / "summary.txt"
+        if summary_path.exists():
+            try:
+                summary = summary_path.read_text(encoding="utf-8")
+            except Exception:
+                logger.exception(
+                    "Failed to read persisted summary for session=%s", old_sid,
+                )
+
+    # 2. 若无持久化摘要，则 LLM 压缩生成
+    if not summary and session_store is not None and llm is not None:
+        history = session_store.read_history(old_sid)
+        if history is not None and history.count > 0:
+            summary = await summarize_history(history, llm)
+
+    # 3. 写入摘要
+    if session_store is not None:
+        try:
+            session_store.write_summary(old_sid, summary)
+        except Exception as exc:
+            logger.exception(
+                "Failed to write summary for session %s: %s", old_sid, exc,
+            )
+
+    # 4. 归档
+    session_manager.archive(old_sid, continuation_sid=None)
+
+    if not summary:
+        logger.info(
+            "Session terminated (no rotation, no summary) | old=%s", old_sid,
+        )
+        return None
+
+    # 5. 构建继承上下文
+    context: str = (
+        read_template("session_inherit.txt")
+        .replace("{{old_sid}}", old_sid)
+        .replace("{{summary}}", summary)
+    )
+
+    # 6. 提取旧会话尾部轮次文本
+    tail_rounds_text = ""
+    if session_store is not None:
+        try:
+            old_history = session_store.read_history(old_sid)
+            if old_history is not None and old_history.count > 0:
+                tail_msgs = extract_last_rounds(
+                    old_history,
+                    rounds=INHERIT_LAST_ROUNDS,
+                    include_tool_messages=False,
+                )
+                if tail_msgs:
+                    tail_text = messages_to_text(tail_msgs)
+                    tail_rounds_text = (
+                        "\n\n## Recent conversation rounds\n" + tail_text
+                    )
+        except Exception as exc:
+            logger.exception(
+                "Failed to extract tail rounds for session old=%s: %s",
+                old_sid, exc,
+            )
+    if tail_rounds_text:
+        context += tail_rounds_text
+
+    # 7. 创建继承会话（传入 LoopMeta 保持模式继承）
+    new_sid: str = session_manager.create_with_context(
+        context, parent_sid=old_sid, role=Role.USER,
+        loop_meta=loop_meta,
+    )
+    session_manager.archive(old_sid, continuation_sid=new_sid)
+
+    # 8. 写入仅含 summary 消息的历史到新会话
+    summary_history = History()
+    summary_history.add_message(CharacterConversationMessage(
+        role=Role.USER,
+        character_name=USER_CHARACTER_NAME,
+        content=context,
+        visible_characters=[current_character_agent] if current_character_agent else None,
+    ))
+    if session_store is not None:
+        session_store.write_history(new_sid, summary_history)
+
+    # 9. 迁移 cron 定时任务
+    try:
+        from component.extools import cron_tools
+        cron_tools.migrate_session_cron_jobs(old_sid, new_sid)
+    except Exception:
+        logger.exception(
+            "Failed to migrate cron jobs from %s to %s", old_sid, new_sid,
+        )
+
+    logger.info(
+        "Session terminated and rotated | old=%s new=%s summary=%d chars",
+        old_sid, new_sid, len(summary),
+    )
+    return new_sid

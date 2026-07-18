@@ -56,22 +56,17 @@ component/
 
 ### 扩展工具集（`component/extools/`）
 
-> **命名约定变更**：重型导入的扩展工具文件已使用下划线前缀（`_csv_tools.py`、`_docx_tools.py` 等），通过惰性导入避免启动时加载不必要的依赖。无前缀的文件（`archive_tools.py`、`cron_tools.py` 等）为轻量工具，直接导入。
-
 | 工具文件 | 用途 |
 |----------|------|
-| `web_search.py` / `web_fetch.py` / `_web_browser.py` | 网络搜索、抓取、浏览器自动化 |
+| `web_search.py` / `web_fetch.py` | 网络搜索与抓取 |
 | `ssh_tools.py` | SSH 远程执行 |
 | `cron_tools.py` | 一次性/周期性后台定时任务 |
-| `_csv_tools.py` / `excel_tools.py` / `_docx_tools.py` / `_pdf_tools.py` | 文档处理 |
-| `_ffmpeg_tools.py` | 音视频处理 |
-| `diagram.py` / `mermaid_tools.py` / `_docgen_tools.py` | 图表与文档渲染 |
 | `background_service.py` | 后台服务管理 |
 | `pip.py` | Python 包管理 |
-| `_gui_windows.py` | Windows GUI 自动化 |
 | `archive_tools.py` | 归档工具 |
 | `diff_tools.py` | diff 工具 |
-| `display.py` | 显示工具 |
+
+> **已移除的工具**：CSV / Excel / DOCX / PDF / 音视频处理 / 浏览器自动化 / GUI 自动化 / 图表生成等文档与媒体处理能力已从 extools 中移除。这些能力应通过 skill 实现（在 `pre-skills/` 或 `skills/` 中编写对应的 `SKILL.md` 和辅助脚本）。
 
 ### 多代理工具（`component/mutliagenttools/`）
 

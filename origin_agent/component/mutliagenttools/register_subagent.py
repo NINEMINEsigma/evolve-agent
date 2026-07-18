@@ -10,7 +10,7 @@ from typing import Any
 
 from abstract.tools.registry import registry, tool_error, tool_result
 from entity.constant import SUBAGENT_NAME_PATTERN
-from entity.puretype import ToolAvailability, ToolDangerLevel, SubagentProfile
+from entity.puretype import ToolAvailability, ToolDangerLevel, AgentConfig
 
 from ._store import SubagentStore
 from system.context import get_runtime_context
@@ -47,7 +47,7 @@ def _handle_register_subagent_from_parent(args: dict[str, Any]) -> dict:
 
     ctx = get_runtime_context()
 
-    profile = SubagentProfile(
+    profile = AgentConfig(
         base_url=ctx.llm_base_url,
         model=ctx.llm_model,
         api_key=ctx.llm_api_key or None,

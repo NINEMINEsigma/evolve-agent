@@ -10,7 +10,7 @@ from pydantic import BaseModel
 from system.context import RuntimeContext
 from system.sandbox import Sandbox
 
-from entity.puretype import SubagentProfile
+from entity.puretype import AgentConfig
 
 
 class SubRuntimeContext(BaseModel):
@@ -48,14 +48,14 @@ class SubRuntimeContext(BaseModel):
 
 
 async def build_subagent_context(
-    profile: SubagentProfile,
+    profile: AgentConfig,
     temperature: float,
     parent_ctx: RuntimeContext,
 ) -> SubRuntimeContext:
     """从注册表配置构建 SubRuntimeContext。
 
     Args:
-        profile: 子 Agent 注册配置（SubagentProfile）。
+        profile: 子 Agent 注册配置（AgentConfig）。
         temperature: run_subagent 调用时传入的采样温度。
         parent_ctx: 父 Agent 的 RuntimeContext，用于创建沙盒实例解析路径。
 

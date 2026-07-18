@@ -273,11 +273,14 @@ class StreamChunk(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# Subagent Types
+# Agent Config Types
 # ---------------------------------------------------------------------------
 
-class SubagentProfile(BaseModel):
-    """子 Agent 注册时冻结的 LLM 配置快照，持久化到 agentspace/subagents/。"""
+class AgentConfig(BaseModel):
+    """Agent 的可序列化配置，主 Agent 和子 Agent 共用。
+
+    子 Agent 持久化到 agentspace/subagents/；主 Agent 在运行时从 RuntimeContext 构造，不持久化。
+    """
 
     base_url: str
     """LLM API 端点地址。"""

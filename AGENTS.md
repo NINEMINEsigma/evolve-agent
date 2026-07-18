@@ -127,8 +127,12 @@ Use Chinese commit messages with repo prefixes: `[feature]`, `[fix]`, `[refactor
 
 ## Memory
 
-`memory/provider.py` implements `EasysaveMemoryProvider` backed by `third/easysave`. Sessions persist to `workspace/logs/sessions/` (JSONL with `_index.json` metadata). Evolution status is at `workspace/logs/evolution.status` (JSON array).
+记忆系统由 `custom_tools/memory_tools/` 实现（非核心模块），包含 `remember` 和 `forget` 两个工具。底层通过 `custom_tools/memory_tools/_store.py` 基于 easysave 对象引用机制实现会话隔离与父链继承：记忆数据存储在 `agentspace/memory_data.json`，每个会话拥有独立分区，子会话通过 `__parents__` 引用链自动继承父会话记忆。`custom_hooks/memory_hook.py` 作为消息 hook 在每轮 LLM 调用前自动将合并后的记忆注入用户消息上下文。
+
+## Sessions & Evolution status
+
+Sessions persist to `workspace/logs/sessions/` (JSONL with `_index.json` metadata). Evolution status is at `workspace/logs/evolution.status` (JSON array).
 
 ## Template system
 
-Assembled by `system/prompt.py`. Detects `templates/zh/` existence and defaults to Chinese. Hierarchy: `GENE > SOUL > base > modes/{fast,fallback} > tools > memory > skills`.
+Assembled by `system/prompt.py`. Detects `templates/zh/` existence and defaults to Chinese. Hierarchy: `GENE > SOUL > base > modes/{fast,fallback} > tools > skills`.

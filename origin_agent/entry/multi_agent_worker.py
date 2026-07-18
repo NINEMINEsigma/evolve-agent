@@ -58,6 +58,7 @@ class WorkerResult(BaseModel):
     total_token_usage: int = Field(0, description="该 worker 本次执行累计消耗的 total_tokens")
     last_prompt_tokens: int = Field(0, description="该 worker 最后一次 LLM 调用的 prompt_tokens")
     reasoning: str | None = Field(default=None, description="LLM 推理内容（仅在支持 thinking 的 provider 下存在）")
+    context_over_limit: bool = Field(default=False, description="当前 Agent 上下文是否超限")
 
 
 class MultiAgentWorker:
@@ -86,6 +87,8 @@ class MultiAgentWorker:
         llm_client: BaseLLMClient,
         sink: AgentSink,
         loop: IMainSessionLoop,
+        max_context_tokens: int = 0,
+        max_output_tokens: int = 0,
     ) -> None:
         self.character_name: str = character_name
         self._system_prompts: list[str] = system_prompts
@@ -106,6 +109,9 @@ class MultiAgentWorker:
         # 累计 token 消耗与最近一次上下文 token 数
         self._total_token_usage: int = 0
         self._last_prompt_tokens: int = 0
+        # per-agent 上下文限制（0 表示未配置，跳过超限检测）
+        self._max_context_tokens: int = max_context_tokens
+        self._max_output_tokens: int = max_output_tokens
 
     @property
     def total_token_usage(self) -> int:
@@ -228,6 +234,31 @@ class MultiAgentWorker:
             if resp.usage and resp.usage.total_tokens > 0:
                 self._total_token_usage += resp.usage.total_tokens
                 self._last_prompt_tokens = resp.usage.prompt_tokens
+
+            # ── 超限检测 ──
+            # 每次LLM响应后检查，与普通模式主会话一致
+            if self._last_prompt_tokens > 0 and self._max_context_tokens > 0:
+                max_output = self._max_output_tokens if self._max_output_tokens > 0 else 4096
+                if (self._last_prompt_tokens + max_output + 5000) > self._max_context_tokens:
+                    logger.warning(
+                        "Context over limit | session=%s character=%s turn=%d "
+                        "prompt_tokens=%d max_context=%d",
+                        self._loop.loop.session_id, self.character_name, turn,
+                        self._last_prompt_tokens, self._max_context_tokens,
+                    )
+                    return WorkerResult(
+                        character_name=self.character_name,
+                        parsed_json=AgentResponse(
+                            content=f"[{self.character_name} 上下文超限，会话将被旋转]",
+                        ),
+                        raw_json="",
+                        stream_buffer=[],
+                        stream_id=stream_id,
+                        total_token_usage=self._total_token_usage,
+                        last_prompt_tokens=self._last_prompt_tokens,
+                        reasoning=resp.reasoning_content,
+                        context_over_limit=True,
+                    )
 
             # 有 tool_calls → 写入共享 History → 发送标准事件 → 执行工具 → 继续循环
             if resp.tool_calls:

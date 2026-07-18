@@ -1,7 +1,8 @@
 """多 Agent 工具层 — 子 Agent 注册表磁盘存储。
 
-每个子 Agent 独立持久化到 ``agentspace/subagents/<name>-setting.json``，
+每个子 Agent 独立持久化到 ``agentspace/subagents/<name>.es``，
 并通过 ``agentspace/subagents/_index.json`` 维护已注册名称列表。
+序列化/反序列化通过 easysave 实现，使用版本 key 隔离格式版本。
 所有访问通过 ``SubagentStore`` CRUD API，禁止直接操作内部数据结构。
 """
 
@@ -11,15 +12,20 @@ import json
 import logging
 from pathlib import Path
 
+from easysave import save, load
+
 from entity.constant import (
     SUBAGENT_DIR_NAME,
     SUBAGENT_INDEX_FILENAME,
     SUBAGENT_SETTING_SUFFIX,
 )
-from entity.puretype import SubagentProfile
+from entity.puretype import AgentConfig
 from system.atomic_io import write_text_atomic
 
 logger = logging.getLogger(__name__)
+
+# easysave 版本 key — 用于序列化格式版本隔离
+__VERSION__ = "v1"
 
 
 class SubagentStore:
@@ -47,29 +53,31 @@ class SubagentStore:
 
     # ── 公开 CRUD ────────────────────────────────────────────────────
 
-    def get(self, name: str) -> SubagentProfile | None:
+    def get(self, name: str) -> AgentConfig | None:
         """读取指定 name 的配置。
 
         Returns:
-            SubagentProfile 实例；文件不存在时返回 None；JSON 损坏时抛出 ValueError。
+            AgentConfig 实例；文件不存在或版本 key 不匹配时返回 None；反序列化损坏时抛出 ValueError。
         """
         path = self._setting_path(name)
         if not path.exists():
             return None
-        raw = path.read_text(encoding="utf-8")
         try:
-            return SubagentProfile.model_validate_json(raw)
+            return load(__VERSION__, str(path), AgentConfig)
+        except (FileNotFoundError, KeyError):
+            # 文件不存在或版本 key 不匹配（旧格式）
+            return None
         except Exception as exc:
             raise ValueError(f"Corrupted setting file for subagent '{name}': {exc}") from exc
 
-    def list(self) -> dict[str, SubagentProfile]:
+    def list(self) -> dict[str, AgentConfig]:
         """返回所有有效子 Agent 配置。
 
         读取索引后逐个校验对应 setting 文件；缺失或损坏的 name 会被
         从索引中移除并写回。
         """
         names = self._read_index()
-        valid: dict[str, SubagentProfile] = {}
+        valid: dict[str, AgentConfig] = {}
         stale: list[str] = []
 
         for name in names:
@@ -91,7 +99,7 @@ class SubagentStore:
 
         return valid
 
-    def add(self, name: str, profile: SubagentProfile) -> None:
+    def add(self, name: str, profile: AgentConfig) -> None:
         """新增一个子 Agent 配置。
 
         若对应 setting 文件已存在则抛出 ``FileExistsError``，不覆盖。
@@ -104,11 +112,7 @@ class SubagentStore:
             raise FileExistsError(f"Subagent '{name}' already exists.")
 
         self._subagents_dir().mkdir(parents=True, exist_ok=True)
-        write_text_atomic(
-            path,
-            profile.model_dump_json(indent=2),
-            tmp_suffix=".tmp",
-        )
+        save(__VERSION__, str(path), profile)
         logger.info("Persisted setting for subagent: %s", name)
 
         names = self._read_index()

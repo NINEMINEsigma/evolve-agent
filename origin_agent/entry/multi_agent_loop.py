@@ -19,7 +19,7 @@ from entity.messages import (
     History,
     CharacterConversationMessage,
 )
-from entity.puretype import Role, ToolAvailability
+from entity.puretype import Role, ToolAvailability, AgentConfig, LoopMeta, Loop
 from entity.constant import (
     MAIN_AGENT_CHARACTER_NAME,
     USER_CHARACTER_NAME,
@@ -45,7 +45,7 @@ _Final_Round_Prompt: str | None = None
 
 
 class AgentProfile:
-    """单个 Agent 的配置档案。"""
+    """单个 Agent 的运行时档案，持有可序列化配置 + 不可序列化的运行时资源。"""
 
     def __init__(
         self,
@@ -53,11 +53,13 @@ class AgentProfile:
         system_prompts: list[str],
         tools: list[dict],
         llm_client: BaseLLMClient,
+        config: AgentConfig,
     ) -> None:
         self.character_name: str = character_name
         self.system_prompts: list[str] = system_prompts
         self.tools: list[dict] = tools
         self.llm_client: BaseLLMClient = llm_client
+        self.config: AgentConfig = config
 
 
 class MultiAgentLoop(BaseAgentLoop, IMainSessionLoop):
@@ -90,6 +92,8 @@ class MultiAgentLoop(BaseAgentLoop, IMainSessionLoop):
         # token 消耗统计：从磁盘恢复历史累计值，避免从普通模式切换后覆盖已有消耗
         self._token_usage: int = 0
         self._last_prompt_tokens: int = 0
+        # 旋转通知：old_sid → new_sid（供 gateway 层 pop_session_rotated 读取）
+        self._session_rotated_notify: dict[str, str] = {}
         if self._session_store is not None:
             try:
                 self._token_usage = self._session_store.read_token_usage(session_id)
@@ -156,9 +160,76 @@ class MultiAgentLoop(BaseAgentLoop, IMainSessionLoop):
 
     # -- 公开接口 ----------------------------------------------------------
 
-    # TODO: 多agent模式下每个agent的上下文其实都不一样, 
-    # 当第一个到达的时候就可以触发会话压缩和会话旋转了
-    # TODO: 上下文超限检测和会话旋转（multi loop 当前不触发旋转）
+    # 上下文超限检测已在 MultiAgentWorker tool loop 内 per-agent 实现（见 _cascade 中的 context_over_limit 检查）。
+    # 以下 _is_context_over_limit 仅为 process_message 级别的兜底检测。
+
+    def _is_context_over_limit(self, safety_margin: int = 5000) -> bool:
+        """检查最后一次 LLM 调用的 prompt_tokens 是否超过全局上下文上限。
+
+        per-agent 的超限检测已在 Worker tool loop 内通过 max_context_tokens 完成，
+        此方法作为兜底：当 Worker 使用全局 RuntimeContext 配置时（max_context_tokens=0），
+        回退到全局上限检测。
+        """
+        if self._last_prompt_tokens == 0:
+            return False
+        ctx = self.app.runtime_context
+        return (
+            self._last_prompt_tokens + ctx.llm_max_output_tokens + safety_margin
+        ) > ctx.llm_max_context_tokens
+
+    async def _rotate_session_for_context_limit(self) -> str | None:
+        """上下文超限时终结当前会话并创建继承会话（多 Agent 模式）。
+
+        新会话继承原会话的 agents 列表，以多 Agent 模式重建。
+        """
+        from entry.session_manager import terminate_and_rotate_session
+
+        old_sid = self.session_id
+        loop_meta = LoopMeta(loopType=Loop.multi, agents=list(self._agents.keys()))
+
+        # 确定历史存储目录
+        history_store_dir = None
+        if self._session_store is not None:
+            history_store_dir = self._session_store.base_dir
+
+        # 获取用于生成摘要的 LLM 客户端
+        llm = self._get_session_info_llm_client()
+
+        # 获取 gateway 层 SessionManager
+        sm = self.session_manager
+        if sm is None:
+            logger.warning("Cannot rotate: session_manager is None | session=%s", old_sid)
+            return None
+
+        try:
+            new_sid = await terminate_and_rotate_session(
+                session_id=old_sid,
+                session_store=self._session_store,
+                session_manager=sm,
+                llm=llm,
+                loop_meta=loop_meta,
+                current_character_agent=self.current_character_agent,
+                history_store_dir=history_store_dir,
+            )
+        except Exception:
+            logger.exception(
+                "Failed to rotate session for context limit | session=%s", old_sid,
+            )
+            return None
+
+        if new_sid:
+            self.session_id = new_sid
+            self._last_prompt_tokens = 0
+            self._session_rotated_notify[old_sid] = new_sid
+            logger.info(
+                "Multi-agent session rotated for context limit | old=%s new=%s",
+                old_sid, new_sid,
+            )
+        return new_sid
+
+    def pop_session_rotated(self) -> str | None:
+        """取出并移除旋转通知（old_sid → new_sid），供 gateway 层读取。"""
+        return self._session_rotated_notify.pop(self.session_id, None)
 
     @property
     def current_character_agent(self) -> str:
@@ -379,6 +450,14 @@ class MultiAgentLoop(BaseAgentLoop, IMainSessionLoop):
         # 以用户指定的角色（或全体）作为初始响应者
         await self._cascade(_response)
 
+        # 超限检测触发后旋转会话
+        if self._last_prompt_tokens > 0 and self._is_context_over_limit():
+            logger.warning(
+                "Context limit reached after cascade, rotating | session=%s",
+                self.session_id,
+            )
+            await self._rotate_session_for_context_limit()
+
         # 收集本轮所有 Agent 的回复（用户消息之后的消息）
         responses: list[str] = []
         for msg in self._history.iter_messages():
@@ -511,6 +590,15 @@ class MultiAgentLoop(BaseAgentLoop, IMainSessionLoop):
                     }, ensure_ascii=False),
                 )
                 return
+
+            # ── 超限检查：任一 Agent 超限则立即中断级联 ──
+            if result.context_over_limit:
+                logger.warning(
+                    "Context over limit detected, cascade interrupted | "
+                    "session=%s character=%s step=%d",
+                    self.session_id, char, step,
+                )
+                break
 
             # ── 解析结果并写入 History ──
             parsed = result.parsed_json
@@ -665,6 +753,8 @@ class MultiAgentLoop(BaseAgentLoop, IMainSessionLoop):
             llm_client=profile.llm_client,
             sink=self._sink,
             loop=self,
+            max_context_tokens=profile.config.max_context_tokens,
+            max_output_tokens=profile.config.max_output_tokens,
         )
 
         try:

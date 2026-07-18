@@ -28,7 +28,7 @@ from entity.constant import (
     History_Version as __History_Version__,
 )
 from entity.messages import CharacterConversationMessage, ToolResultMessage
-from entity.puretype import Role, ToolAvailability, SubagentProfile
+from entity.puretype import Role, ToolAvailability, AgentConfig
 from abstract.tools.registry import registry as tool_registry
 from system.context import get_runtime_context
 from system.templates import read_template
@@ -47,7 +47,7 @@ class WaitingEntry:
         self,
         session_id: str,
         name: str,
-        profile: SubagentProfile,
+        profile: AgentConfig,
         temperature: float,
         initial_prompt: str,
         user_name: str,
@@ -56,7 +56,7 @@ class WaitingEntry:
     ) -> None:
         self.session_id: str = session_id
         self.name: str = name
-        self.profile: SubagentProfile = profile
+        self.profile: AgentConfig = profile
         self.temperature: float = temperature
         self.initial_prompt: str = initial_prompt
         self.user_name: str = user_name
@@ -90,7 +90,7 @@ class _OrchestratorContext:
     async def launch(
         self,
         name: str,
-        profile: SubagentProfile,
+        profile: AgentConfig,
         temperature: float,
         initial_prompt: str,
         user_name: str,
@@ -469,7 +469,7 @@ class _OrchestratorContext:
         self,
         session_id: str,
         name: str,
-        profile: SubagentProfile,
+        profile: AgentConfig,
         temperature: float,
         initial_prompt: str,
         user_name: str,

@@ -218,8 +218,8 @@ SUBAGENT_STORE_FILENAME: str = "subagents.json"
 # 子 Agent 配置存放目录名（位于 agentspace 下）
 SUBAGENT_DIR_NAME: str = "subagents"
 
-# 单个子 Agent 配置文件后缀
-SUBAGENT_SETTING_SUFFIX: str = "-setting.json"
+# 单个子 Agent 配置文件后缀（easysave 序列化格式）
+SUBAGENT_SETTING_SUFFIX: str = ".es"
 
 # 子 Agent 注册表索引文件名
 SUBAGENT_INDEX_FILENAME: str = "_index.json"
