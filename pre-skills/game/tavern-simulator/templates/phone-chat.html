@@ -1,0 +1,50 @@
+<!-- =============================================
+   phone-chat.html — 手机聊天界面组件
+   用法：直接复制完整HTML块到输出中
+   时间铁律：所有时间必须与剧情时间同步
+   ============================================= -->
+
+<!-- 聊天详情页 -->
+<div class="phone-wrap">
+  <div class="phone">
+    <div class="phone-scrn">
+      <div class="st-bar">
+        <span>{剧情时间}</span>
+        <span>📶 🔋87%</span>
+      </div>
+      <div class="wx-nav">
+        <span class="bk">‹</span>
+        <span class="nm">{联系人名字}</span>
+      </div>
+      <div class="chat-msgs">
+        <div class="tt">今天 {消息发出时间}</div>
+        <div class="mr in">
+          <div class="av {角色缩写}">缩写</div>
+          <div class="bb in">{消息内容}<div class="ts">{消息时间}</div></div>
+        </div>
+        <div class="mr out">
+          <div class="bb out">{你的回复}<div class="ts">{发送时间}</div></div>
+        </div>
+        <div style="text-align:center;font-size:10px;color:#b0b0b0;">—— 正在输入 ——</div>
+      </div>
+      <div class="chat-in">
+        <span class="pl">＋</span>
+        <span class="fd">输入消息…</span>
+        <span class="sd on">➤</span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- 聊天列表条目（多个条目叠放即为列表页） -->
+<div class="cl-item">
+  <div class="aw {角色缩写}">缩写</div>
+  <div class="if">
+    <div class="nn">{角色名}</div>
+    <div class="pr">{最后一条消息预览}</div>
+  </div>
+  <div class="mt">
+    <div class="tm">{最后消息时间}</div>
+    <div class="bdg">{未读数}</div>
+  </div>
+</div>

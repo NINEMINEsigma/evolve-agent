@@ -101,7 +101,11 @@ const MessageItem = memo(function MessageItem({
   const showMeta = m.visibleCharacters != null || m.requiresResponse != null;
 
   return (
-    <div className={`message message-${m.role}`} data-message-id={m.id}>
+    <div
+      className={`message message-${m.role}${streaming ? " message-streaming" : ""}`}
+      data-message-id={m.id}
+      style={{ "--msg-hue": hueFromString(displayName || "") } as React.CSSProperties}
+    >
       {(m.role === "user" || m.role === "assistant" || m.role === "error") && (
         <div className="message-avatar-wrapper" data-tooltip={displayName || m.role}>
           <div className="message-avatar" style={m.role === "user" || m.role === "assistant" ? getAvatarStyle(displayName) : undefined}>

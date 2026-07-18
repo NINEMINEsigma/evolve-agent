@@ -1,0 +1,194 @@
+<!-- =============================================
+   ready-to-use.html — 可直接复用的完整输出骨架
+   粉色甜美主题，已填好色值，无需替换
+   使用方式：复制全文 → 替换 正文/六面板/选项 → 输出
+   ============================================= -->
+<div class="w" style="font-family:'Microsoft YaHei','PingFang SC',system-ui,sans-serif;margin:0 auto;padding:4px;width:100%;box-sizing:border-box;">
+
+<style>
+/* 🌸 粉色甜美 · 色值已固定 */
+.pn{font-size:14px;color:#4a2c40;line-height:1.5;background:linear-gradient(135deg,#fff0f5,#fef5f9);padding:0;border-radius:12px;margin:4px 0;overflow:hidden;border:1px solid rgba(216,27,96,0.1);}
+.pn[open]{padding:8px 0;}
+summary{cursor:pointer;padding:8px 12px;font-weight:600;display:flex;justify-content:space-between;align-items:center;background:linear-gradient(135deg,#ff7eb3,#ff758c);color:white;font-size:15px;margin:0;border-radius:12px;list-style:none;letter-spacing:0.5px;}
+.pn[open] summary{border-radius:0;margin:-8px 0 0 0;}
+summary:hover{filter:brightness(0.95);}
+.pn > div{padding:0 12px;}
+
+.si{display:block;margin:5px 0;background:rgba(255,255,255,0.75);border-radius:6px;padding:4px 12px;border:1px solid rgba(216,27,96,0.08);}
+.st{display:block;color:#4a2c40;font-size:11px;font-weight:600;letter-spacing:0.3px;margin:0 0 1px 0;border-left:3px solid #d81b60;padding-left:6px;}
+.sv{display:block;font-size:13px;color:#4a2c40;line-height:1.6;padding:0 0 3px 9px;}
+
+.sh{font-weight:bold;font-size:14px;color:#d81b60;margin:10px 0 4px;padding-left:8px;border-left:3px solid #ff7eb3;}
+.sf{display:block;margin:8px 0 4px;padding:6px 0 2px;font-size:10px;color:#b07a8f;text-align:center;border-top:1px dashed rgba(216,27,96,0.1);}
+
+.cc{display:block;margin:5px 0;background:rgba(255,255,255,0.7);border-radius:8px;padding:6px 12px;border:1px solid rgba(216,27,96,0.08);}
+.cn{font-weight:bold;font-size:14px;color:#d81b60;padding:0 0 4px;margin:0 0 4px 0;border-bottom:1px dashed rgba(216,27,96,0.1);}
+.cr{display:grid;grid-template-columns:auto 1fr;gap:2px 8px;padding:2px 0;font-size:12px;color:#4a2c40;}
+.cl{color:#b07a8f;font-weight:500;min-width:75px;}
+.cv{color:#4a2c40;}
+.cp{display:flex;align-items:center;gap:6px;padding:4px 0 2px;font-size:12px;}
+.cb{height:5px;border-radius:3px;background:rgba(0,0,0,0.06);overflow:hidden;flex:1;max-width:100px;}
+.cf{height:100%;border-radius:3px;background:linear-gradient(90deg,#ff7eb3,#ff758c);}
+
+.map-grid{display:grid;grid-template-columns:1fr 1fr;gap:4px 6px;margin:4px 0;}
+.map-item{display:flex;align-items:center;gap:6px;padding:5px 12px;margin:2px 0;background:rgba(255,255,255,0.55);border-radius:6px;font-size:12px;color:#4a2c40;border:1px solid rgba(216,27,96,0.06);}
+.map-item .dir{font-weight:600;color:#d81b60;min-width:24px;}
+.map-item .name{flex:1;}
+.map-item .status{font-size:10px;padding:1px 6px;border-radius:3px;white-space:nowrap;}
+.status-open{background:rgba(16,185,129,0.15);color:#059669;}
+.status-locked{background:rgba(239,68,68,0.1);color:#dc2626;}
+.status-occupied{background:rgba(245,158,11,0.12);color:#d97706;}
+.status-unknown{background:rgba(99,102,241,0.10);color:#6366f1;}
+
+.t{font-weight:bold;font-size:13px;color:#d81b60;margin:8px 0 2px;padding:4px 0 2px;border-bottom:1px dashed rgba(216,27,96,0.15);}
+.q{font-size:11px;color:#b07a8f;text-align:right;margin:0;padding:2px 0;}
+.memo-item{display:block;padding:5px 12px;margin:3px 0;background:rgba(255,255,255,0.55);border-radius:6px;font-size:12px;border-left:3px solid #ff7eb3;color:#4a2c40;}
+.memo-item.current{border-left-color:#d81b60;background:rgba(216,27,96,0.04);}
+.memo-item.lt{border-left-color:#b07a8f;background:rgba(255,255,255,0.35);}
+
+.dpc{margin:14px 0;padding:10px 14px;background:rgba(91,154,255,0.07);border-radius:8px;border-left:3px solid #5b9aff;}
+.dpn{font-weight:bold;color:#5b9aff;}
+.dtc{color:#6b9fff;}
+.dnpc{margin:14px 0;padding:10px 14px;background:rgba(233,69,96,0.06);border-radius:8px;border-left:3px solid #e94560;}
+.dnn{font-weight:bold;color:#e94560;}
+.dtn{color:#f08090;}
+
+.options{margin:20px 0 8px;padding:14px 16px;background:rgba(216,27,96,0.03);border-radius:10px;border:1px dashed rgba(216,27,96,0.15);}
+.ot{font-weight:bold;color:#d81b60;margin-bottom:8px;font-size:14px;}
+.oi{display:block;padding:8px 12px;margin:4px 0;color:#4a2c40;border-radius:6px;background:rgba(255,255,255,0.65);font-size:13px;cursor:pointer;transition:all 0.2s;border-left:3px solid transparent;user-select:none;}
+.oi:hover{background:rgba(216,27,96,0.08);border-left-color:#d81b60;padding-left:16px;}
+.oi:active{background:rgba(216,27,96,0.15);}
+.oc{display:block;padding:8px 12px;margin:4px 0;color:#b07a8f;border-radius:6px;background:rgba(255,255,255,0.35);font-size:13px;font-style:italic;cursor:pointer;transition:all 0.2s;border-left:3px solid transparent;}
+.oc:hover{background:rgba(216,27,96,0.05);border-left-color:#b07a8f;}
+
+@keyframes fadeS{0%{opacity:0;transform:translateY(-4px)}100%{opacity:1;transform:translateY(0)}}
+</style>
+
+<script>
+function copyOpt(txt,btn){
+  var text = txt.replace(/<br\s*\/?>/g,'\n');
+  if(navigator.clipboard && navigator.clipboard.writeText){
+    navigator.clipboard.writeText(text).then(function(){
+      var tip=btn.querySelector('.cp-hint')||(function(){var e=document.createElement('span');e.className='cp-hint';e.style.cssText='font-size:10px;color:#d81b60;margin-left:8px;';btn.appendChild(e);return e;})();
+      tip.textContent='✓ 已复制';setTimeout(function(){tip.textContent='';},1200);
+    }).catch(function(){fallbackCopy(text,btn);});
+  }else{fallbackCopy(text,btn);}
+}
+function fallbackCopy(txt,btn){
+  var ta=document.createElement('textarea');ta.value=txt;ta.style.position='fixed';ta.style.left='-9999px';document.body.appendChild(ta);ta.select();
+  try{document.execCommand('copy');var tip=btn.querySelector('.cp-hint')||(function(){var e=document.createElement('span');e.className='cp-hint';e.style.cssText='font-size:10px;color:#d81b60;margin-left:8px;';btn.appendChild(e);return e;})();tip.textContent='✓ 已复制';setTimeout(function(){tip.textContent='';},1200);}catch(e){}
+  document.body.removeChild(ta);
+}
+</script>
+
+<!-- ====== 正文 ====== -->
+<div class="nt">
+<p>正文内容——第三人称叙事，注重视觉·听觉·触觉·嗅觉。</p>
+<div class="dpc"><span class="dpn">你：</span><span class="dtc">「你说的话」</span></div>
+<div class="dnpc"><span class="dnn">角色名：</span><span class="dtn">「角色说的话」</span></div>
+</div>
+
+<!-- ====== 六面板 ====== -->
+<details class="pn" open>
+<summary>🌸 当前状态 <span style="font-size:11px;color:rgba(255,255,255,0.7);transition:transform 0.3s ease;">▼</span></summary>
+<div style="animation:fadeS 0.35s ease">
+<div class="si"><span class="st">👤 玩家</span><span class="sv">年龄·外貌·当前动作</span></div>
+<div class="si"><span class="st">🏛️ 地点</span><span class="sv">具体位置·空间特征</span></div>
+<div class="si"><span class="st">⏰ 时间</span><span class="sv">精确到分钟·当日信息</span></div>
+<div class="si"><span class="st">✨ 事件</span><span class="sv">当前正在发生的事</span></div>
+<div class="si"><span class="st">💌 互动</span><span class="sv">与他人的互动状态</span></div>
+<div class="si"><span class="st">🎭 氛围</span><span class="sv">视觉+听觉+嗅觉三层</span></div>
+<div class="si"><span class="st">⏳ 回合</span><span class="sv">第N回合</span></div>
+</div>
+</details>
+
+<details class="pn">
+<summary>👥 在场角色 <span style="font-size:11px;color:rgba(255,255,255,0.7);transition:transform 0.3s ease;">▼</span></summary>
+<div style="animation:fadeS 0.35s ease">
+<div class="sh">角色名 · 年龄 · 身份</div>
+<div class="si"><span class="st">外貌</span><span class="sv">描述</span></div>
+<div class="si"><span class="st">情绪</span><span class="sv">描述</span></div>
+<div class="si"><span class="st">反应</span><span class="sv">描述</span></div>
+</div>
+</details>
+
+<details class="pn">
+<summary>🎴 角色图鉴 <span style="font-size:11px;color:rgba(255,255,255,0.7);transition:transform 0.3s ease;">▼</span></summary>
+<div style="animation:fadeS 0.35s ease">
+<div class="cc">
+<div class="cn">📖 角色名</div>
+<div class="cr"><span class="cl">身体状态</span><span class="cv">描述</span></div>
+<div class="cr"><span class="cl">位置</span><span class="cv">描述</span></div>
+<div class="cr"><span class="cl">动作</span><span class="cv">描述</span></div>
+<div class="cr"><span class="cl">心理</span><span class="cv">「内心独白」</span></div>
+<div class="cp"><span class="cl">好感度</span><span class="cb"><div class="cf" style="width:XX%"></div></span><span style="font-size:11px;color:#b07a8f;">XX%</span></div>
+</div>
+</div>
+</details>
+
+<details class="pn">
+<summary>🗺️ 地图 <span style="font-size:11px;color:rgba(255,255,255,0.7);transition:transform 0.3s ease;">▼</span></summary>
+<div style="animation:fadeS 0.35s ease">
+<div class="sh">📍 当前位置 · 地点名</div>
+<div class="si"><span class="st">📐 布局</span><span class="sv">空间描述</span></div>
+<div class="sh" style="margin-top:8px;">🚪 相邻区域</div>
+<div class="map-grid">
+<div class="map-item"><span class="dir">⬆️</span><span class="name">地点A</span><span class="status status-open">🟢 可进入</span></div>
+<div class="map-item"><span class="dir">⬇️</span><span class="name">地点B</span><span class="status status-locked">🔴 已锁</span></div>
+<div class="map-item"><span class="dir">🚪</span><span class="name">地点C</span><span class="status status-occupied">🟡 有人</span></div>
+<div class="map-item"><span class="dir">➡️</span><span class="name">地点D</span><span class="status status-unknown">🔵 未知</span></div>
+</div>
+</div>
+</details>
+
+<details class="pn">
+<summary>📋 日程 <span style="font-size:11px;color:rgba(255,255,255,0.7);transition:transform 0.3s ease;">▼</span></summary>
+<div style="animation:fadeS 0.35s ease">
+<div class="sh">👩 角色A · 备注</div>
+<div class="si"><span class="st">📌 原计划</span><span class="sv">内容</span></div>
+<div class="si"><span class="st">📌 当前</span><span class="sv">内容</span></div>
+<div class="si"><span class="st">⏳ 接下来</span><span class="sv">内容</span></div>
+
+<div class="sh" style="margin-top:8px;">👧 角色B · 备注</div>
+<div class="si"><span class="st">📌 原计划</span><span class="sv">内容</span></div>
+<div class="si"><span class="st">⚠️ 已发生</span><span class="sv">内容</span></div>
+<div class="si"><span class="st">⏳ 下午</span><span class="sv">内容</span></div>
+</div>
+</details>
+
+<details class="pn">
+<summary>🧠 记忆区 <span style="font-size:11px;color:rgba(255,255,255,0.7);transition:transform 0.3s ease;">▼</span></summary>
+<div style="animation:fadeS 0.35s ease">
+<div class="t">📜 长期记忆</div>
+<div class="memo-item lt">[LT-1] 事件概要</div>
+<div class="memo-item lt">[LT-2] 事件概要</div>
+
+<div class="t">📜 短期记忆 — N / 5 条</div>
+<div class="memo-item current">[ST-1] ◀ 最新事件</div>
+<div class="memo-item">[ST-2] 前序事件</div>
+<div class="memo-item">[ST-3] 前序事件</div>
+<div class="q">✏️ 短期记忆 N / 5 条 · 写满时压缩为LT</div>
+
+<div class="t">📖 玩家设定</div>
+<div class="memo-item" style="border-left-color:#d81b60;">设定内容</div>
+</div>
+</details>
+
+<!-- ====== 选项 ====== -->
+<div class="options">
+<div class="ot">➤ 你会怎么做？</div>
+<div class="oi" onclick="copyOpt('选项1文本',this)">😏 选项1描述</div>
+<div class="oi" onclick="copyOpt('选项2文本',this)">🔥 选项2描述</div>
+<div class="oi" onclick="copyOpt('选项3文本',this)">🎯 选项3描述</div>
+<div class="oi" onclick="copyOpt('选项4文本',this)">💬 选项4描述</div>
+<div class="oi" onclick="copyOpt('选项5文本',this)">🚶 选项5描述</div>
+<div class="oc" onclick="copyOpt('✏️ [自定义行动]',this)">✏️ [自定义行动]</div>
+</div>
+<div style="font-size:10px;color:#b07a8f;text-align:center;margin:6px 0 0;">💡 点击选项即可复制到剪贴板</div>
+
+<script>
+(function(){document.querySelectorAll('.pn .arr').forEach(function(a){
+var d=a.closest('details');if(d){d.addEventListener('toggle',function(){
+a.style.transform=this.open?'rotate(180deg)':'rotate(0deg)';});});})();
+</script>
+</div>

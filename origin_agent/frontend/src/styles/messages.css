@@ -849,3 +849,38 @@
   white-space: pre-wrap;
   word-break: break-word;
 }
+
+/* ── Streaming border sweep glow ── */
+@property --border-angle {
+  syntax: "<angle>";
+  inherits: false;
+  initial-value: 0deg;
+}
+
+@keyframes border-sweep {
+  from { --border-angle: 0deg; }
+  to   { --border-angle: 360deg; }
+}
+
+.message-streaming.message-assistant .message-bubble {
+  border: 2px solid transparent;
+  border-radius: var(--radius-sm);
+  border-image-source: linear-gradient(
+    var(--border-angle),
+    hsl(var(--msg-hue), 65%, 45%),
+    transparent 30%,
+    hsl(var(--msg-hue), 65%, 45%) 60%,
+    transparent 80%
+  );
+  border-image-slice: 1;
+  animation: border-sweep 3s linear infinite;
+  overflow: hidden;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .message-streaming.message-assistant .message-bubble {
+    animation: none;
+    border: 1px solid hsl(var(--msg-hue), 65%, 45%, 0.3);
+    border-image: none;
+  }
+}

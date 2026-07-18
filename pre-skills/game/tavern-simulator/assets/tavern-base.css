@@ -1,0 +1,136 @@
+/* =============================================
+   tavern-base.css — Tavern Simulator 基础样式
+   使用方式：在HTML中内嵌此样式（replace_me：用实际色值替换）
+   ============================================= */
+
+/* ===== 基础面板 - 折叠时圆角，展开时顶部直角 ===== */
+.pn{font-size:14px;color:#正文色;line-height:1.5;background:背景渐变;padding:0;border-radius:12px;margin:4px 0;overflow:hidden;border:1px solid 边框色;}
+.pn[open]{padding:8px 0;}
+summary{cursor:pointer;padding:8px 12px;font-weight:600;display:flex;justify-content:space-between;align-items:center;background:标题渐变;color:white;font-size:15px;margin:0;border-radius:12px;list-style:none;letter-spacing:0.5px;}
+.pn[open] summary{border-radius:0;margin:-8px 0 0 0;}
+summary:hover{filter:brightness(0.95);}
+
+/* ===== 条目卡片 - block布局，永不错位 ===== */
+.si{display:block;margin:5px 0;background:rgba(255,255,255,0.75);border-radius:6px;padding:4px 12px;border:1px solid rgba(色值,0.08);}
+.st{display:block;color:#正文色;font-size:11px;font-weight:600;letter-spacing:0.3px;margin:0 0 1px 0;border-left:3px solid #强调色;padding-left:6px;}
+.sv{display:block;font-size:13px;color:#正文色;line-height:1.6;padding:0 0 3px 9px;}
+
+/* ===== 进度条 ===== */
+.sb{display:grid;grid-template-columns:1fr auto;align-items:center;gap:6px;padding:3px 10px;width:100%;box-sizing:border-box;}
+.bg{height:7px;background:rgba(色值,0.15);border-radius:4px;overflow:hidden;width:100%;}
+.fl{height:100%;border-radius:4px;background:进度条渐变;}
+.sn{font-size:11px;color:#数值色;font-weight:600;white-space:nowrap;text-align:right;min-width:36px;}
+
+/* ===== 地图网格 ===== */
+.map-grid{display:grid;grid-template-columns:1fr 1fr;gap:4px 8px;margin:4px 8px;}
+.map-item{display:flex;align-items:center;gap:6px;padding:5px 8px;background:rgba(255,255,255,0.55);border-radius:6px;font-size:12px;color:#正文色;border:1px solid rgba(色值,0.06);}
+.map-item .dir{font-weight:600;color:#标签色;min-width:24px;}
+.map-item .name{flex:1;}
+.map-item .status{font-size:10px;padding:1px 6px;border-radius:3px;white-space:nowrap;}
+.status-open{background:rgba(16,185,129,0.15);color:#059669;}
+.status-locked{background:rgba(239,68,68,0.1);color:#dc2626;}
+.status-occupied{background:rgba(245,158,11,0.12);color:#d97706;}
+
+/* ===== 分区与脚注 ===== */
+.sh{font-weight:bold;font-size:14px;color:#分区标题色;margin:10px 8px 4px;padding-left:8px;border-left:3px solid #强调色;}
+.sf{display:block;margin:8px 6px 4px;padding:6px 0 2px;font-size:10px;color:#脚注色;text-align:center;border-top:1px dashed rgba(色值,0.1);}
+
+/* ===== 角色图鉴卡片 ===== */
+.cc{display:flex;flex-direction:column;margin:5px 8px;background:rgba(255,255,255,0.7);border-radius:10px;padding:6px 0;border:1px solid rgba(色值,0.08);}
+.cn{font-weight:bold;font-size:14px;color:#标题色;padding:2px 12px 4px;border-bottom:1px dashed rgba(色值,0.1);margin:0 0 4px 0;}
+.cr{display:grid;grid-template-columns:auto 1fr;gap:2px 8px;padding:2px 12px;font-size:12px;color:#正文色;}
+.cl{color:#脚注色;font-weight:500;min-width:70px;}
+.cv{color:#正文色;}
+.cp{display:flex;align-items:center;gap:6px;padding:4px 12px 2px;font-size:12px;}
+.cb{height:5px;border-radius:3px;background:rgba(0,0,0,0.06);overflow:hidden;flex:1;max-width:100px;}
+.cf{height:100%;border-radius:3px;background:进度条渐变;}
+
+/* ===== 记忆区 ===== */
+.t{font-weight:bold;font-size:13px;color:#标题色;margin:8px 8px 2px;padding:4px 0 2px;border-bottom:1px dashed rgba(色值,0.15);}
+.q{font-size:11px;color:#脚注色;text-align:right;margin:0 8px 6px;padding:2px;}
+.memo-item{padding:5px 10px;margin:3px 8px;background:rgba(255,255,255,0.55);border-radius:6px;font-size:12px;border-left:3px solid #标签色;color:#正文色;}
+.memo-item.current{border-left-color:#强调色;background:rgba(强调色,0.04);}
+
+/* ===== 对话块 ===== */
+.dpc{margin:14px 0;padding:10px 14px;background:rgba(91,154,255,0.07);border-radius:8px;border-left:3px solid #5b9aff;}
+.dpn{font-weight:bold;color:#5b9aff;}
+.dtc{color:#6b9fff;}
+.dnpc{margin:14px 0;padding:10px 14px;background:rgba(233,69,96,0.06);border-radius:8px;border-left:3px solid #e94560;}
+.dnn{font-weight:bold;color:#e94560;}
+.dtn{color:#f08090;}
+
+/* ===== 选项（可点击复制） ===== */
+.options{margin:20px 0 8px;padding:14px 16px;background:rgba(色值,0.03);border-radius:10px;border:1px dashed rgba(色值,0.15);}
+.ot{font-weight:bold;color:#标题色;margin-bottom:8px;font-size:14px;}
+.oi{display:block;padding:8px 12px;margin:4px 0;color:#正文色;border-radius:6px;background:rgba(255,255,255,0.65);font-size:13px;cursor:pointer;transition:all 0.2s;border-left:3px solid transparent;user-select:none;}
+.oi:hover{background:rgba(强调色,0.08);border-left-color:#强调色;padding-left:16px;}
+.oi:active{background:rgba(强调色,0.15);}
+.oc{display:block;padding:8px 12px;margin:4px 0;color:#脚注色;border-radius:6px;background:rgba(255,255,255,0.35);font-size:13px;font-style:italic;cursor:pointer;transition:all 0.2s;border-left:3px solid transparent;}
+.oc:hover{background:rgba(强调色,0.05);border-left-color:#脚注色;}
+
+/* ===== 动画 ===== */
+@keyframes fadeS{0%{opacity:0;transform:translateY(-4px)}100%{opacity:1;transform:translateY(0)}}
+
+/* ===== 五套主题色（使用说明） =====
+ * 🌸 粉色甜美 | 校园/恋爱/日常
+ *   背景:#fff0f5→#fef5f9  标题:#d81b60  标签:#ff7eb3→#ff758c
+ *   正文:#4a2c40  强调:#d81b60  脚注:#b07a8f
+ *
+ * 🌙 暗黑哥特 | 奇幻/悬疑/战斗
+ *   背景:#1a1528→#0d0b15  标题:#c084fc  标签:#c084fc→#9b59b6
+ *   正文:#e8d4a8  强调:#c084fc  脚注:#8b7a9a
+ *
+ * 🌿 自然清新 | 冒险/田园/治愈
+ *   背景:#f0fdf4→#ecfdf5  标题:#059669  标签:#34d399→#10b981
+ *   正文:#064e3b  强调:#059669  脚注:#6b8a7b
+ *
+ * ⚔️ 沉稳史诗 | 战争/历史/王道
+ *   背景:#1e293b→#0f172a  标题:#f59e0b  标签:#f59e0b→#d97706
+ *   正文:#fef3c7  强调:#f59e0b  脚注:#a0865a
+ *
+ * 🎴 简约清爽 | 推理/科幻/悬疑
+ *   背景:#f0f4f8→#e2e8f0  标题:#1e293b  标签:#64748b→#475569
+ *   正文:#334155  强调:#3b82f6  脚注:#94a3b8
+ * ============================================= */
+
+/* =============================================
+   手机聊天界面组件 — 微信原生配色，不随主题变化
+   ============================================= */
+.phone-wrap{display:flex;justify-content:center;margin:12px 0;}
+.phone{width:280px;background:#1a1a1a;border-radius:24px;padding:6px;box-shadow:0 4px 24px rgba(0,0,0,0.2);}
+.phone-scrn{background:#ececec;border-radius:20px;overflow:hidden;display:flex;flex-direction:column;}
+.st-bar{display:flex;justify-content:space-between;align-items:center;padding:10px 18px 4px;font-size:11px;font-weight:600;color:#1a1a1a;}
+.wx-nav{display:flex;align-items:center;padding:6px 12px;background:#ededed;border-bottom:1px solid #d9d9d9;}
+.wx-nav .bk{font-size:18px;color:#101010;opacity:0.6;padding:0 4px 0 0;}
+.wx-nav .nm{flex:1;text-align:center;font-size:15px;font-weight:600;color:#1a1a1a;margin-right:22px;}
+.chat-msgs{padding:10px 12px;display:flex;flex-direction:column;gap:10px;height:340px;overflow-y:auto;}
+.chat-msgs::-webkit-scrollbar{width:2px;}
+.chat-msgs::-webkit-scrollbar-thumb{background:rgba(0,0,0,0.1);border-radius:2px;}
+.tt{text-align:center;font-size:10px;color:#8a8a8a;margin:2px 0;}
+.mr{display:flex;align-items:flex-end;gap:6px;}
+.mr.in{justify-content:flex-start;}
+.mr.out{justify-content:flex-end;}
+.av{width:30px;height:30px;border-radius:5px;flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:14px;color:white;}
+.av.zk{background:linear-gradient(135deg,#ff7eb3,#ff758c);}
+.av.lwq{background:linear-gradient(135deg,#74b9ff,#a29bfe);}
+/* 其他角色头像按性格自定义 */
+.bb{max-width:170px;padding:8px 12px;font-size:13px;line-height:1.5;word-break:break-word;border-radius:5px;}
+.bb.in{background:white;color:#1a1a1a;border-top-left-radius:2px;}
+.bb.out{background:#95ec69;color:#1a1a1a;border-top-right-radius:2px;}
+.bb .ts{font-size:9px;color:#8a8a8a;margin-top:3px;text-align:right;}
+.chat-in{display:flex;align-items:center;padding:6px 10px;background:#f7f7f7;border-top:1px solid #d9d9d9;gap:6px;}
+.chat-in .pl{font-size:14px;color:#8a8a8a;}
+.chat-in .fd{flex:1;background:white;border-radius:5px;padding:6px 10px;font-size:14px;color:#bbb;border:1px solid #d9d9d9;}
+.chat-in .sd{font-size:14px;color:#101010;opacity:0.4;padding:0 2px;}
+.chat-in .sd.on{opacity:0.8;}
+/* 聊天列表 */
+.cl-item{display:flex;align-items:center;padding:12px 14px;border-bottom:1px solid #e8e8e8;background:white;}
+.cl-item .aw{width:42px;height:42px;border-radius:7px;flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:18px;color:white;margin-right:10px;}
+.cl-item .aw.zk{background:linear-gradient(135deg,#ff7eb3,#ff758c);}
+.cl-item .aw.lwq{background:linear-gradient(135deg,#74b9ff,#a29bfe);}
+.cl-item .if{flex:1;min-width:0;}
+.cl-item .if .nn{font-size:15px;font-weight:600;color:#1a1a1a;}
+.cl-item .if .pr{font-size:12px;color:#8a8a8a;margin-top:1px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.cl-item .mt{text-align:right;flex-shrink:0;}
+.cl-item .mt .tm{font-size:10px;color:#b0b0b0;}
+.cl-item .mt .bdg{background:#f44336;color:white;font-size:10px;border-radius:50%;padding:1px 6px;display:inline-block;margin-top:4px;}
