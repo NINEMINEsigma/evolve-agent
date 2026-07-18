@@ -304,7 +304,7 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
                     )
 
                 if self._cancel_event.is_set():
-                    await self._emit_stream_done(sid, stream_id, "cancelled")
+                    await self._emit_stream_done(sid, stream_id, "cancelled", content=resp.content or "")
                     if resp.content:
                         self._append(
                             sid, Role.ASSISTANT, resp.content,
@@ -338,7 +338,7 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
                         else (resp.content or ""),
                     )
 
-                await self._emit_stream_done(sid, stream_id, resp.finish_reason)
+                await self._emit_stream_done(sid, stream_id, resp.finish_reason, content=resp.content or "")
 
                 if not resp.tool_calls:
                     assistant_text = resp.content or ""
@@ -684,10 +684,12 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
 
     async def _emit_stream_done(
         self, session_id: str, stream_id: str, finish_reason: str,
+        content: str = "",
     ) -> None:
         try:
             await self._frontend_sink.emit_stream_done(
                 session_id, stream_id, finish_reason,
+                content=content,
             )
         except Exception:
             logger.warning(

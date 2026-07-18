@@ -85,8 +85,13 @@ class AgentSink(ABC):
 
     @abstractmethod
     async def emit_stream_done(self, session_id: str, stream_id: str,
-                               finish_reason: str = "stop") -> None:
-        """推送流结束事件。"""
+                               finish_reason: str = "stop",
+                               content: str = "") -> None:
+        """推送流结束事件。
+
+        Args:
+            content: 本轮 LLM 响应的完整文本，供前端权威固化，避免 delta 累积竞态。
+        """
         ...
 
     @abstractmethod
@@ -384,10 +389,13 @@ class FrontendSink(AgentSink):
                              json.dumps(data, ensure_ascii=False))
 
     async def emit_stream_done(self, session_id: str, stream_id: str,
-                               finish_reason: str = "stop") -> None:
+                               finish_reason: str = "stop",
+                               content: str = "") -> None:
+        payload: dict = {"stream_id": stream_id, "finish_reason": finish_reason}
+        if content:
+            payload["content"] = content
         await self._send_msg(session_id, "stream_done", "",
-                             json.dumps({"stream_id": stream_id, "finish_reason": finish_reason},
-                                        ensure_ascii=False))
+                             json.dumps(payload, ensure_ascii=False))
 
     async def emit_usage_update(self, session_id: str, token_usage: int,
                                 context_tokens: int) -> None:
@@ -466,6 +474,7 @@ class FrontendSink(AgentSink):
                 type=MessageType.STREAM_DONE, session_id=session_id,
                 stream_id=data.get("stream_id"),
                 finish_reason=data.get("finish_reason"),
+                content=data.get("content"),
             )
         elif event_type == "usage_update":
             msg = Message(type=MessageType.SYSTEM, session_id=session_id, content=payload)
@@ -611,7 +620,8 @@ class ParentAgentSink(AgentSink):
                              character_name=character_name)
 
     async def emit_stream_done(self, session_id: str, stream_id: str,
-                               finish_reason: str = "stop") -> None:
+                               finish_reason: str = "stop",
+                               content: str = "") -> None:
         """转发流结束事件到父 Agent 前端。"""
         try:
             from system.application import Application
@@ -619,6 +629,7 @@ class ParentAgentSink(AgentSink):
             if sink is not None:
                 await sink.emit_stream_done(
                     self._loop.parent_session_id, stream_id, finish_reason,
+                    content=content,
                 )
         except Exception:
             logger.warning(

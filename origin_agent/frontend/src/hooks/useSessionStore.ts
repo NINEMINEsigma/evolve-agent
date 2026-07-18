@@ -604,6 +604,15 @@ export function useSessionStore(callbacks: SessionStoreCallbacks = {}): SessionS
     if (msg.type === "stream_done") {
       setWaiting(false);
       ignoreStaleRef.current = false;
+      // 后端在 stream_done 中附带完整 content，作为权威源同步覆盖 ref，
+      // 消除 delta 累积与 useEffect 异步同步之间的竞态
+      const doneContent = typeof msg.content === "string" ? msg.content : "";
+      if (doneContent && streamingMessageRef.current) {
+        streamingMessageRef.current = {
+          ...streamingMessageRef.current,
+          content: doneContent,
+        };
+      }
       flushStreamingMessage();
       streamDoneRef.current = true;
       return;

@@ -228,6 +228,7 @@ class MultiAgentWorker:
                 self._loop.loop.session_id,
                 stream_id,
                 resp.finish_reason,
+                content=resp.content or "",
             )
 
             # 收集 token 消耗
@@ -385,5 +386,6 @@ class MultiAgentWorker:
         await self._sink.emit_stream_done(
             self._loop.loop.session_id,
             stream_id,
+            content=text,
         )
 
