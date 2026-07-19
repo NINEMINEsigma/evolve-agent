@@ -294,7 +294,7 @@ export default function Sidebar({
             )}
           </div>
           <button
-            className={`icon-btn ${mergeMode ? 'active' : ''}`}
+            className={`icon-btn ${mergeMode ? 'active' : ''} ${searchFocused ? 'toolbar-btn-hidden' : ''}`}
             onClick={onToggleMergeMode}
             data-tooltip={mergeMode ? '退出多选' : '多选合并'}
             aria-label={mergeMode ? '退出多选' : '多选合并'}
@@ -307,7 +307,7 @@ export default function Sidebar({
             </svg>
           </button>
           <button
-            className="icon-btn"
+            className={`icon-btn ${searchFocused ? 'toolbar-btn-hidden' : ''}`}
             onClick={onNewChat}
             data-tooltip="新建会话"
             aria-label="新建会话"

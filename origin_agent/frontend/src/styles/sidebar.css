@@ -131,7 +131,7 @@
   color: var(--text-secondary);
   cursor: pointer;
   padding: 0;
-  transition: background 0.12s, color 0.12s;
+  transition: background 0.12s, color 0.12s, width 0.15s ease, opacity 0.15s ease, padding 0.15s ease;
 }
 
 .icon-btn:hover {
@@ -142,6 +142,14 @@
 .icon-btn.active {
   background: rgba(255, 255, 255, 0.08);
   color: var(--text-primary);
+}
+
+.icon-btn.toolbar-btn-hidden {
+  opacity: 0;
+  width: 0;
+  padding: 0;
+  overflow: hidden;
+  pointer-events: none;
 }
 
 .search-input::placeholder {
@@ -155,6 +163,10 @@
   padding: 8px 2px 2px;
   max-height: 92px;
   overflow-y: auto;
+}
+
+.search-input:focus ~ .search-tag-cloud {
+  max-height: 200px;
 }
 
 .search-tag-btn {
