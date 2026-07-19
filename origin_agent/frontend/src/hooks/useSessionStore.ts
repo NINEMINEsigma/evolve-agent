@@ -143,6 +143,21 @@ export interface SessionStore {
   sessionResources: import("../utils").MessageResources;
 }
 
+/**
+ * 检测流式消息在结束那一刻是否在 .chat-area 可视区域内。
+ * 在 flushStreamingMessage / flushAndAppend 中同步调用，
+ * 此时旧 DOM 尚未卸载，可准确取得消息元素与滚动容器的矩形交集。
+ */
+function isStreamingMessageVisible(messageId: string): boolean {
+  const msgEl = document.querySelector(`[data-message-id="${messageId}"]`);
+  if (!(msgEl instanceof HTMLElement)) return false;
+  const areaEl = msgEl.closest(".chat-area");
+  if (!(areaEl instanceof HTMLElement)) return false;
+  const msgRect = msgEl.getBoundingClientRect();
+  const areaRect = areaEl.getBoundingClientRect();
+  return msgRect.bottom > areaRect.top && msgRect.top < areaRect.bottom;
+}
+
 export function useSessionStore(callbacks: SessionStoreCallbacks = {}): SessionStore {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
@@ -237,6 +252,10 @@ export function useSessionStore(callbacks: SessionStoreCallbacks = {}): SessionS
       finalPrev = { ...prev, reasoningDuration: duration };
       reasoningStartRef.current = null;
     }
+    // 流式结束时若消息在视口内且非 tool 消息，预设不折叠
+    if (finalPrev.role !== "tool" && isStreamingMessageVisible(finalPrev.id)) {
+      finalPrev = { ...finalPrev, collapsed: false };
+    }
     setMessages((m) => {
       const exists = m.some((x) => x.id === finalPrev.id);
       return exists ? m.map((x) => (x.id === finalPrev.id ? finalPrev : x)) : [...m, finalPrev];
@@ -255,6 +274,10 @@ export function useSessionStore(callbacks: SessionStoreCallbacks = {}): SessionS
         const duration = Math.round((Date.now() - reasoningStartRef.current) / 1000);
         finalPrev = { ...prev, reasoningDuration: duration };
         reasoningStartRef.current = null;
+      }
+      // 流式结束时若消息在视口内且非 tool 消息，预设不折叠
+      if (finalPrev.role !== "tool" && isStreamingMessageVisible(finalPrev.id)) {
+        finalPrev = { ...finalPrev, collapsed: false };
       }
       toFlush = finalPrev;
     }
