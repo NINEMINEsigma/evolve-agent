@@ -283,7 +283,6 @@ class ToolResultMessage(CharacterMessage):
         )
 
 
-
 class History(BaseModel):
     messages: list[BaseMessage] = Field(default_factory=list, description="The messages of the history")
     last_user_message: CharacterConversationMessage|None = Field(default=None, description="The last user message of the history")

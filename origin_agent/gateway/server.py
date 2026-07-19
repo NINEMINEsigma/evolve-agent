@@ -29,7 +29,7 @@ from .chat import Message, MessageType
 from .message_router import MessageRouter
 from abstract.tools.registry import registry
 from datetime import datetime, timezone
-from entity.constant import CRON_STDOUT_PREVIEW_MAX_LENGTH, SUBPROCESS_TIMEOUT_DEFAULT, UPLOAD_FILENAME_TIME_FORMAT, USER_CHARACTER_NAME, UPLOADS_DIR_NAME, UPLOADS_WS_PREFIX, STATIC_FILE_HTTP_PREFIX, DOWNLOADS_HTTP_PREFIX
+from entity.constant import CRON_STDOUT_PREVIEW_MAX_LENGTH, SUBPROCESS_TIMEOUT_DEFAULT, UPLOAD_FILENAME_TIME_FORMAT, USER_CHARACTER_NAME, UPLOADS_DIR_NAME, UPLOADS_WS_PREFIX, STATIC_FILE_HTTP_PREFIX, DOWNLOADS_HTTP_PREFIX, SYSTEM_CHARACTER_NAME
 from entity.puretype import SessionStatus
 from system.context import get_runtime_context
 from entry.parent_agent_loop import IncompatibleHistoryError
@@ -639,6 +639,12 @@ async def delete_session(session_id: str):
     loop = _get_loop(session_id)
     if loop is not None:
         loop.loop.clear_session()
+    # 清理该会话注册的所有动态端点
+    try:
+        from component.extools.dynamic_endpoint_tools import cleanup_session_endpoints
+        cleanup_session_endpoints(session_id)
+    except Exception:
+        logger.warning("Failed to cleanup dynamic endpoints for session=%s", session_id, exc_info=True)
     # 停止该主会话下的所有子 Agent 并清理上下文
     try:
         orch = get_subagent_orchestrator()
@@ -936,6 +942,114 @@ async def cancel_cron_task_endpoint(session_id: str, task_id: str):
     from component.extools.cron_tools import cancel_cron_task
     result = cancel_cron_task(session_id, task_id)
     return result
+
+
+@app.post("/dynamic/{session_id}/{agent_name}/{endpoint_id}")
+async def dynamic_endpoint_handler(
+    session_id: str,
+    agent_name: str,
+    endpoint_id: str,
+    req: Request,
+):
+    """动态端点回调 — 向指定会话中的指定 agent 投递仅自身可见的系统消息。
+
+    agent 通过 ``register_dynamic_endpoint`` 工具注册端点后，在消息气泡中
+    渲染按钮（走 SafeHtml iframe 路径），用户点击按钮时通过 fetch POST 触发
+    此端点。POST body 的 ``message`` 字段成为投递给 agent 的消息内容。
+
+    消息格式: ``[dynamic-endpoint] {endpoint_id}\\n{message}``
+    """
+    from component.extools.dynamic_endpoint_tools import lookup_endpoint
+
+    info = lookup_endpoint(endpoint_id)
+    if info is None:
+        return HTMLResponse(
+            json.dumps({"error": "endpoint not found", "endpoint_id": endpoint_id}),
+            media_type="application/json",
+            status_code=404,
+        )
+
+    # 验证三要素匹配
+    if info.get("session_id") != session_id or info.get("agent_name") != agent_name:
+        logger.warning(
+            "Dynamic endpoint mismatch | endpoint=%s expected sid=%s agent=%s got sid=%s agent=%s",
+            endpoint_id, info.get("session_id"), info.get("agent_name"),
+            session_id, agent_name,
+        )
+        return HTMLResponse(
+            json.dumps({"error": "endpoint mismatch", "endpoint_id": endpoint_id}),
+            media_type="application/json",
+            status_code=404,
+        )
+
+    # 读取 POST body
+    body: dict = {}
+    try:
+        body = await req.json()
+    except Exception:
+        logger.warning(
+            "Failed to parse dynamic endpoint body | endpoint=%s", endpoint_id, exc_info=True,
+        )
+        return HTMLResponse(
+            json.dumps({"error": "invalid JSON body"}),
+            media_type="application/json",
+            status_code=400,
+        )
+
+    message: str = str(body.get("message", ""))
+
+    loop = _get_loop(session_id)
+    if loop is None:
+        return HTMLResponse(
+            json.dumps({"error": "agent loop not ready", "session_id": session_id}),
+            media_type="application/json",
+            status_code=503,
+        )
+
+    # 构造消息文本，格式参考 CronResultMessage.to_text()
+    text: str = f"[dynamic-endpoint] {endpoint_id}\n{message}"
+
+    # 统一通过 IMainSessionLoop.loop 获取 BaseAgentLoop 后调用 process_message
+    # — ParentAgentLoop 的 **kwargs 会吞掉 visible_characters/response_characters，
+    #   MultiAgentLoop 显式接受
+    try:
+        reply = await loop.loop.process_message(
+            text,
+            character_name=SYSTEM_CHARACTER_NAME,
+            visible_characters=[agent_name],
+            response_characters=[agent_name],
+        )
+    except Exception as exc:
+        logger.exception(
+            "Dynamic endpoint dispatch failed | endpoint=%s session=%s agent=%s",
+            endpoint_id, session_id, agent_name,
+        )
+        return HTMLResponse(
+            json.dumps({"error": f"dispatch failed: {exc}", "endpoint_id": endpoint_id}),
+            media_type="application/json",
+            status_code=500,
+        )
+
+    logger.info(
+        "Dynamic endpoint triggered | endpoint=%s session=%s agent=%s",
+        endpoint_id, session_id, agent_name,
+    )
+
+    # 推送 assistant 回复到前端（process_message 只返回文本，由调用方推送）
+    from system.application import Application
+    sink = Application.current().frontend_sink
+    if sink is not None and reply:
+        try:
+            await sink.emit_assistant_message(
+                session_id, reply, loop.current_character_agent,
+            )
+        except Exception:
+            logger.warning(
+                "Failed to emit assistant message for dynamic endpoint | session=%s",
+                session_id, exc_info=True,
+            )
+
+    return {"delivered": True, "endpoint_id": endpoint_id, "session_id": session_id}
 
 
 @app.post("/api/file-picker")

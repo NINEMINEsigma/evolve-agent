@@ -158,7 +158,7 @@ class ToolContext(BaseModel):
     """
     model_config = {"arbitrary_types_allowed": True}
 
-    loop: Any  # BaseAgentLoop 实例
+    loop: BaseAgentLoop
     session_id: str = ""
 
     @property
