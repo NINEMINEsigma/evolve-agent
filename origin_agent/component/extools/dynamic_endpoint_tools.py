@@ -1,9 +1,10 @@
 """动态端点工具 — agent 为自身注册 HTTP POST 端点，供前端按钮触发回调。
 
-属于 extools，模块导入时通过 ``registry.register()`` 注册两个工具：
+属于 extools，模块导入时通过 ``registry.register()`` 注册三个工具：
 
   - ``register_dynamic_endpoint``   — 注册端点，返回 URL
   - ``unregister_dynamic_endpoint`` — 解除注册
+  - ``list_dynamic_endpoints``      — 列出当前会话的端点
 
 注册表为内存态，不持久化，进程重启后端点失效。
 会话删除时自动清理关联端点。
@@ -19,7 +20,6 @@ from __future__ import annotations
 import logging
 import threading
 import time
-import uuid
 from typing import Any
 
 from abstract.tools.registry import registry, tool_error, tool_result
@@ -29,8 +29,9 @@ from entity.puretype import ToolAvailability, ToolDangerLevel
 logger = logging.getLogger(__name__)
 
 # ── 内存注册表 ───────────────────────────────────────────────
-# endpoint_id → {"session_id": str, "agent_name": str, "created_at": float}
+# endpoint_name → {"session_id": str, "agent_name": str, "name": str, "created_at": float}
 # 不持久化，进程重启后全部失效。
+# key 是 endpoint name（即 URL 路径段），全局唯一。
 
 _dynamic_endpoints: dict[str, dict[str, Any]] = {}
 _endpoint_lock = threading.Lock()
@@ -39,13 +40,13 @@ _endpoint_lock = threading.Lock()
 # ── 公开 API（供 gateway/server.py 调用）────────────────────
 
 
-def lookup_endpoint(endpoint_id: str) -> dict[str, Any] | None:
-    """查注册表，返回 ``{session_id, agent_name, created_at}`` 或 ``None``。
+def lookup_endpoint(endpoint_name: str) -> dict[str, Any] | None:
+    """查注册表，返回 ``{session_id, agent_name, name, created_at}`` 或 ``None``。
 
     线程安全，持锁读取后立即释放。
     """
     with _endpoint_lock:
-        return _dynamic_endpoints.get(endpoint_id)
+        return _dynamic_endpoints.get(endpoint_name)
 
 
 def cleanup_session_endpoints(session_id: str) -> int:
@@ -78,13 +79,14 @@ async def _handle_register_dynamic_endpoint(
 ) -> dict:
     """注册一个动态 HTTP 端点，返回 URL 供 agent 在消息中渲染按钮。
 
-    端点路径格式为 ``/dynamic/{session_id}/{agent_name}/{endpoint_id}``。
+    端点路径格式为 ``/dynamic/{session_id}/{agent_name}/{name}``。
     agent 获得 URL 后，在消息中输出包含 ``<script>`` 标签的 HTML
     （触发 SafeHtml iframe 渲染），按钮点击时 ``fetch(url, {method:'POST', body: JSON.stringify({message: '...'})})``
     触发端点，端点向该 agent 投递一条格式为
-    ``[dynamic-endpoint] {endpoint_id}\\n{message}`` 的系统消息。
+    ``[dynamic-endpoint] {name}\\n{message}`` 的系统消息。
     """
     session_id: str = str(args.get("_session_id", ""))
+    name: str = str(args.get("name", "")).strip()
 
     # 从 ToolContext 获取当前 agent 角色名
     agent_name: str = ""
@@ -98,28 +100,44 @@ async def _handle_register_dynamic_endpoint(
         return tool_error("'_session_id' is required (injected by tool executor)")
     if not agent_name:
         return tool_error("Could not determine current agent name from context")
+    if not name:
+        return tool_error("'name' is required — it becomes part of the URL path")
 
-    endpoint_id: str = uuid.uuid4().hex[:12]
-    url: str = f"/dynamic/{session_id}/{agent_name}/{endpoint_id}"
+    # 校验 name 只含路径安全字符
+    safe_name = name.replace("/", "_").replace(" ", "-")
+    if not safe_name or any(c in safe_name for c in "{}<>\"#?"):
+        return tool_error(f"'name' contains invalid characters for URL path: {name!r}")
 
+    # 同一 session+agent 下 name 必须唯一
     with _endpoint_lock:
-        _dynamic_endpoints[endpoint_id] = {
+        for info in _dynamic_endpoints.values():
+            if (info.get("session_id") == session_id
+                    and info.get("agent_name") == agent_name
+                    and info.get("name") == safe_name):
+                return tool_error(
+                    f"Endpoint name '{safe_name}' already registered for this session+agent"
+                )
+
+        _dynamic_endpoints[safe_name] = {
             "session_id": session_id,
             "agent_name": agent_name,
+            "name": safe_name,
             "created_at": time.time(),
         }
 
+    url: str = f"/dynamic/{session_id}/{agent_name}/{safe_name}"
+
     logger.info(
-        "Dynamic endpoint registered | endpoint=%s session=%s agent=%s url=%s",
-        endpoint_id, session_id, agent_name, url,
+        "Dynamic endpoint registered | name=%s session=%s agent=%s url=%s",
+        safe_name, session_id, agent_name, url,
     )
 
     return tool_result(
         success=True,
-        endpoint_id=endpoint_id,
+        name=safe_name,
         url=url,
         agent_name=agent_name,
-        message=f"Dynamic endpoint registered. POST to {url} with body {{\"message\": \"...\"}} to deliver a system message to yourself.",
+        message=f"Dynamic endpoint '{safe_name}' registered. POST to {url} with body {{\"message\": \"...\"}} to deliver a system message to yourself.",
     )
 
 
@@ -128,28 +146,53 @@ async def _handle_unregister_dynamic_endpoint(
     context: ToolContext | None = None,  # noqa: ARG001 — 签名与 registry dispatch 一致
 ) -> dict:
     """解除注册指定端点，后续 POST 请求将返回 404。"""
-    endpoint_id: str = str(args.get("endpoint_id", "")).strip()
+    name: str = str(args.get("name", "")).strip()
 
-    if not endpoint_id:
-        return tool_error("'endpoint_id' is required")
+    if not name:
+        return tool_error("'name' is required")
 
     with _endpoint_lock:
-        removed = _dynamic_endpoints.pop(endpoint_id, None)
+        removed = _dynamic_endpoints.pop(name, None)
 
     if removed is None:
-        return tool_error(f"Endpoint not found: {endpoint_id}")
+        return tool_error(f"Endpoint not found: {name}")
 
     logger.info(
-        "Dynamic endpoint unregistered | endpoint=%s session=%s agent=%s",
-        endpoint_id, removed.get("session_id"), removed.get("agent_name"),
+        "Dynamic endpoint unregistered | name=%s session=%s agent=%s",
+        name, removed.get("session_id"), removed.get("agent_name"),
     )
 
     return tool_result(
         success=True,
         unregistered=True,
-        endpoint_id=endpoint_id,
-        message=f"Endpoint {endpoint_id} unregistered. POST requests to it will now return 404.",
+        name=name,
+        message=f"Endpoint '{name}' unregistered. POST requests to it will now return 404.",
     )
+
+
+async def _handle_list_dynamic_endpoints(
+    args: dict[str, Any],
+    context: ToolContext | None = None,  # noqa: ARG001 — 签名与 registry dispatch 一致
+) -> dict:
+    """列出当前会话的所有动态端点。"""
+    session_id: str = str(args.get("_session_id", ""))
+
+    if not session_id:
+        return tool_error("'_session_id' is required (injected by tool executor)")
+
+    with _endpoint_lock:
+        endpoints = [
+            {
+                "name": info.get("name", ""),
+                "url": f"/dynamic/{info.get('session_id', '')}/{info.get('agent_name', '')}/{info.get('name', '')}",
+                "agent_name": info.get("agent_name", ""),
+                "created_at": info.get("created_at", 0),
+            }
+            for info in _dynamic_endpoints.values()
+            if info.get("session_id") == session_id
+        ]
+
+    return tool_result(success=True, count=len(endpoints), endpoints=endpoints)
 
 
 # ── 注册 ─────────────────────────────────────────────────────
@@ -191,11 +234,11 @@ registry.register(
 No special prerequisites. Any agent in any session can call this. The current agent name and session_id are automatically obtained from the ToolContext.
 
 ## Effect
-Creates an in-memory endpoint registration with path format /dynamic/{session_id}/{agent_name}/{endpoint_id}. The registry is memory-only; endpoints are lost on process restart and auto-cleaned when the session is deleted.
+Creates an in-memory endpoint registration with path format /dynamic/{session_id}/{agent_name}/{name}. The registry is memory-only; endpoints are lost on process restart and auto-cleaned when the session is deleted.
 
 ## Returns
 ```json
-{"success": true, "endpoint_id": "abc123", "url": "/dynamic/sid/agent/abc123", "agent_name": "...", "message": "..."}
+{"success": true, "name": "my-button", "url": "/dynamic/sid/agent/my-button", "agent_name": "...", "message": "..."}
 ```
 
 ## When to Use
@@ -206,7 +249,7 @@ Creates an in-memory endpoint registration with path format /dynamic/{session_id
 - Memory-only write, no persistence side effects.
 - When outputting a button, you MUST include a <script> tag in the HTML to trigger the SafeHtml iframe rendering path. A bare <button onclick="..."> without <script> goes through ReactMarkdown where onclick does not work.
 - The POST body's `message` field becomes the message content delivered to the agent.
-- The delivered message format is: [dynamic-endpoint] {endpoint_id}\\n{message}.
+- The delivered message format is: [dynamic-endpoint] {name}\\n{message}.
 - Endpoints have no authentication, consistent with existing APIs (localhost trust model).
 - Use unregister_dynamic_endpoint to remove the endpoint when no longer needed.""",
         "parameters": {
@@ -217,8 +260,13 @@ Creates an in-memory endpoint registration with path format /dynamic/{session_id
                     # 注册此端点的原因说明。
                     "description": """Reason for registering this dynamic endpoint.""",
                 },
+                "name": {
+                    "type": "string",
+                    # 端点名称，直接作为 URL 路径段。同一 session+agent 下必须唯一。
+                    "description": """Name for the endpoint, used directly as the URL path segment (/dynamic/{session_id}/{agent_name}/{name}). Must be unique per session+agent. Allowed characters: alphanumeric, hyphens, underscores.""",
+                },
             },
-            "required": ["reason"],
+            "required": ["reason", "name"],
         },
     },
     handler=_handle_register_dynamic_endpoint,
@@ -235,14 +283,14 @@ registry.register(
         # 解除注册指定端点，后续 POST 请求将返回 404。
         #
         # ## 前置条件
-        # endpoint_id 必须是由 register_dynamic_endpoint 返回的有效 ID。
+        # name 必须是由 register_dynamic_endpoint 注册的有效端点名称。
         #
         # ## 调用效果
         # 从内存注册表中删除该端点，后续 POST 请求将因找不到注册而返回 404。
         #
         # ## 返回
         # ```json
-        # {"success": true, "unregistered": true, "endpoint_id": "abc123", "message": "..."}
+        # {"success": true, "unregistered": true, "name": "my-button", "message": "..."}
         # ```
         #
         # ## 何时使用
@@ -252,17 +300,17 @@ registry.register(
         # ## 副作用/注意
         # - 仅内存操作，无持久化影响。
         # - 已经发出的 POST 请求不受影响（在途请求仍会处理）。
-        "description": """Unregister a dynamic endpoint by its endpoint_id. Subsequent POST requests to it will return 404.
+        "description": """Unregister a dynamic endpoint by its name. Subsequent POST requests to it will return 404.
 
 ## Prerequisites
-endpoint_id must be a valid ID returned by register_dynamic_endpoint.
+name must be a valid endpoint name returned by register_dynamic_endpoint.
 
 ## Effect
 Removes the endpoint from the in-memory registry. Subsequent POST requests will fail with 404 because the endpoint no longer exists.
 
 ## Returns
 ```json
-{"success": true, "unregistered": true, "endpoint_id": "abc123", "message": "..."}
+{"success": true, "unregistered": true, "name": "my-button", "message": "..."}
 ```
 
 ## When to Use
@@ -275,18 +323,72 @@ Removes the endpoint from the in-memory registry. Subsequent POST requests will 
         "parameters": {
             "type": "object",
             "properties": {
-                "endpoint_id": {
+                "name": {
                     "type": "string",
-                    # register_dynamic_endpoint 返回的端点 ID。
-                    "description": """endpoint_id returned by register_dynamic_endpoint.""",
+                    # register_dynamic_endpoint 注册时使用的端点名称。
+                    "description": """Name of the endpoint to unregister (same name used in register_dynamic_endpoint).""",
                 },
             },
-            "required": ["endpoint_id"],
+            "required": ["name"],
         },
     },
     handler=_handle_unregister_dynamic_endpoint,
     is_async=True,
     emoji="✂",
+    danger_level=ToolDangerLevel.readonly,
+    availability=ToolAvailability.MAIN | ToolAvailability.MULTI_AGENT,
+)
+
+registry.register(
+    name="list_dynamic_endpoints",
+    toolset="dynamic",
+    schema={
+        # 列出当前会话的所有动态端点。
+        #
+        # ## 前置条件
+        # 无。
+        #
+        # ## 调用效果
+        # 返回当前会话中所有已注册的动态端点，包括 endpoint_id、name、url 等信息。
+        #
+        # ## 返回
+        # ```json
+        # {"success": true, "count": 2, "endpoints": [{"endpoint_id": "...", "name": "...", "url": "...", "agent_name": "...", "created_at": 1234567890}]}
+        # ```
+        #
+        # ## 何时使用
+        # - 查看当前有哪些动态端点。
+        # - 获取 endpoint_id 以便取消注册。
+        #
+        # ## 副作用/注意
+        # - 纯查询，不会修改端点状态。
+        "description": """List all registered dynamic endpoints for the current session.
+
+## Prerequisites
+None.
+
+## Effect
+Returns metadata for all dynamic endpoints in the current session, including endpoint_id, name, url, agent_name, and created_at.
+
+## Returns
+```json
+{"success": true, "count": 2, "endpoints": [{"endpoint_id": "...", "name": "...", "url": "/dynamic/sid/agent/eid", "agent_name": "...", "created_at": 1234567890}]}
+```
+
+## When to Use
+- Check what dynamic endpoints are currently registered.
+- Obtain endpoint_id values for unregister_dynamic_endpoint.
+
+## Side Effects / Notes
+- Read-only query; does not modify endpoint state.""",
+        "parameters": {
+            "type": "object",
+            "properties": {},
+        },
+    },
+    handler=_handle_list_dynamic_endpoints,
+    is_async=True,
+    emoji="📋",
     danger_level=ToolDangerLevel.readonly,
     availability=ToolAvailability.MAIN | ToolAvailability.MULTI_AGENT,
 )

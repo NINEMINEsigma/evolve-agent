@@ -944,11 +944,11 @@ async def cancel_cron_task_endpoint(session_id: str, task_id: str):
     return result
 
 
-@app.post("/dynamic/{session_id}/{agent_name}/{endpoint_id}")
+@app.post("/dynamic/{session_id}/{agent_name}/{endpoint_name}")
 async def dynamic_endpoint_handler(
     session_id: str,
     agent_name: str,
-    endpoint_id: str,
+    endpoint_name: str,
     req: Request,
 ):
     """动态端点回调 — 向指定会话中的指定 agent 投递仅自身可见的系统消息。
@@ -957,14 +957,14 @@ async def dynamic_endpoint_handler(
     渲染按钮（走 SafeHtml iframe 路径），用户点击按钮时通过 fetch POST 触发
     此端点。POST body 的 ``message`` 字段成为投递给 agent 的消息内容。
 
-    消息格式: ``[dynamic-endpoint] {endpoint_id}\\n{message}``
+    消息格式: ``[dynamic-endpoint] {endpoint_name} ({endpoint_name})\\n{message}``
     """
     from component.extools.dynamic_endpoint_tools import lookup_endpoint
 
-    info = lookup_endpoint(endpoint_id)
+    info = lookup_endpoint(endpoint_name)
     if info is None:
         return HTMLResponse(
-            json.dumps({"error": "endpoint not found", "endpoint_id": endpoint_id}),
+            json.dumps({"error": "endpoint not found", "endpoint_name": endpoint_name}),
             media_type="application/json",
             status_code=404,
         )
@@ -973,11 +973,11 @@ async def dynamic_endpoint_handler(
     if info.get("session_id") != session_id or info.get("agent_name") != agent_name:
         logger.warning(
             "Dynamic endpoint mismatch | endpoint=%s expected sid=%s agent=%s got sid=%s agent=%s",
-            endpoint_id, info.get("session_id"), info.get("agent_name"),
+            endpoint_name, info.get("session_id"), info.get("agent_name"),
             session_id, agent_name,
         )
         return HTMLResponse(
-            json.dumps({"error": "endpoint mismatch", "endpoint_id": endpoint_id}),
+            json.dumps({"error": "endpoint mismatch", "endpoint_name": endpoint_name}),
             media_type="application/json",
             status_code=404,
         )
@@ -1007,7 +1007,7 @@ async def dynamic_endpoint_handler(
         )
 
     # 构造消息文本，格式参考 CronResultMessage.to_text()
-    text: str = f"[dynamic-endpoint] {endpoint_id}\n{message}"
+    text: str = f"[dynamic-endpoint] {endpoint_name}\n{message}"
 
     # 统一通过 IMainSessionLoop.loop 获取 BaseAgentLoop 后调用 process_message
     # — ParentAgentLoop 的 **kwargs 会吞掉 visible_characters/response_characters，
@@ -1022,17 +1022,17 @@ async def dynamic_endpoint_handler(
     except Exception as exc:
         logger.exception(
             "Dynamic endpoint dispatch failed | endpoint=%s session=%s agent=%s",
-            endpoint_id, session_id, agent_name,
+            endpoint_name, session_id, agent_name,
         )
         return HTMLResponse(
-            json.dumps({"error": f"dispatch failed: {exc}", "endpoint_id": endpoint_id}),
+            json.dumps({"error": f"dispatch failed: {exc}", "endpoint_name": endpoint_name}),
             media_type="application/json",
             status_code=500,
         )
 
     logger.info(
         "Dynamic endpoint triggered | endpoint=%s session=%s agent=%s",
-        endpoint_id, session_id, agent_name,
+        endpoint_name, session_id, agent_name,
     )
 
     # 推送 assistant 回复到前端（process_message 只返回文本，由调用方推送）
@@ -1049,7 +1049,7 @@ async def dynamic_endpoint_handler(
                 session_id, exc_info=True,
             )
 
-    return {"delivered": True, "endpoint_id": endpoint_id, "session_id": session_id}
+    return {"delivered": True, "endpoint_name": endpoint_name, "session_id": session_id}
 
 
 @app.post("/api/file-picker")

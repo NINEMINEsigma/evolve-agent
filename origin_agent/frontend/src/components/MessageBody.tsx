@@ -12,8 +12,16 @@ import MermaidRenderer from "./MermaidRenderer";
 // 当文本包含 script、style、link 等标签时，需要完整隔离渲染，避免 CSS/JS 污染外层页面
 // iframe 不在此列——<iframe src="url"> 本身就是浏览器沙盒，走 ReactMarkdown 管线即可
 const SANDBOX_TAG_RE = /<script\b|<style\b|<link\b|<object\b|<embed\b/i;
+
+// 剥离围栏代码块和行内代码内容后检测，避免代码中的标签字面量触发误判
+function stripCodeForDetection(text: string): string {
+  return text
+    .replace(/(`{3,}|~{3,})[^\n]*\n[\s\S]*?\1/g, "")  // 围栏代码块
+    .replace(/`+[^`\n]*?`+/g, "");                      // 行内代码
+}
+
 function needsSandbox(text: string): boolean {
-  return SANDBOX_TAG_RE.test(text);
+  return SANDBOX_TAG_RE.test(stripCodeForDetection(text));
 }
 
 export function contentToText(content: MessageContent): string {
