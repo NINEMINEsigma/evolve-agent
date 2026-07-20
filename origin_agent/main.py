@@ -168,6 +168,7 @@ class App:
             discover_builtin_tools(str(_agent_root / "component" / "tools"), "component.tools")
             discover_builtin_tools(str(_agent_root / "component" / "extools"), "component.extools")
             discover_builtin_tools(str(_agent_root / "component" / "mutliagenttools"), "component.mutliagenttools")
+            discover_builtin_tools(str(_agent_root / "component" / "automation"), "component.automation")
             _custom_tools: Path = _root / CUSTOM_TOOLS_DIR
             if _custom_tools.exists():
                 discover_builtin_tools(str(_custom_tools), CUSTOM_TOOLS_DIR)
