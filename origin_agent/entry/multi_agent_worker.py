@@ -195,6 +195,7 @@ class MultiAgentWorker:
             for prompt in self._system_prompts
         ] + self._messages
 
+        stream_id = ""  # 兜底初值：若循环体未执行，_error_result 会自动生成
         for turn in range(MAX_TOOL_TURNS):
             # 每轮 LLM 调用使用独立 stream_id，确保前端把本轮文本固化为独立消息
             stream_id = f"multi_{self.character_name}_{uuid.uuid4().hex[:8]}_{turn}"
@@ -301,6 +302,24 @@ class MultiAgentWorker:
 
                     # 追加 tool 结果到本地 LLM 上下文（跟在 assistant tool_calls 之后）
                     full_messages.append(tool_msg)
+
+                # 工具执行后检查中断：如 exit_multi_agent 等工具替换了 loop，
+                # 立即停止 worker，不再进入下一轮 LLM 调用
+                if self._loop.loop.is_interrupted():
+                    logger.info(
+                        "Worker interrupted after tool execution | session=%s character=%s turn=%d",
+                        self._loop.loop.session_id, self.character_name, turn,
+                    )
+                    return WorkerResult(
+                        character_name=self.character_name,
+                        parsed_json=AgentResponse(content=""),
+                        raw_json="",
+                        stream_buffer=[],
+                        stream_id=stream_id,
+                        total_token_usage=self._total_token_usage,
+                        last_prompt_tokens=self._last_prompt_tokens,
+                        reasoning=resp.reasoning_content,
+                    )
 
                 continue
 

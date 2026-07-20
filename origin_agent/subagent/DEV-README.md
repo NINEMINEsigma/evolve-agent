@@ -56,7 +56,7 @@ graph TD
 
 ### 2. 多 Agent 协作模式（MultiAgent）
 
-通过 `enter_multi_agent` 工具切换，不可逆。切换后所有用户消息由 `MultiAgentLoop` 处理：
+通过 `enter_multi_agent` 工具切换。切换后所有用户消息由 `MultiAgentLoop` 处理：
 
 - 所有参与 Agent 共享同一份对话历史（`History`）。
 - 每条用户消息触发一轮串行级联响应。
@@ -133,7 +133,8 @@ graph TD
 | `chat_subagent` | 向活跃子代理发消息，进入 inbox，当前 tool-call 链结束后注入；若子代理还有未读反馈则调用失败。 |
 | `approval_subagent` | 批量审批/拒绝子代理的工具调用。 |
 | `stop_subagent` | 强制停止子代理，保存会话历史，并可能从队列中激活下一个。 |
-| `enter_multi_agent` | 将当前主会话切换到多 Agent 协作模式（不可逆）。停止所有活跃子 Agent，multiagent 工具集将被禁用。 |
+| `enter_multi_agent` | 将当前主会话切换到多 Agent 协作模式。停止所有活跃子 Agent，multiagent 工具集将被禁用。可通过 `exit_multi_agent` 退出。 |
+| `exit_multi_agent` | 退出多 Agent 协作模式，回到普通模式。共享对话历史保留。 |
 | `agents_group` | **当前未实现**，调用会抛出 `NotImplementedError`。 |
 
 ---

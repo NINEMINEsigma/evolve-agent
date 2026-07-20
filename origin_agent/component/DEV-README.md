@@ -81,7 +81,7 @@ component/
 | `chat_subagent.py` | `chat_subagent` | 向子 Agent 发消息 |
 | `stop_subagent.py` | `stop_subagent` | 停止子 Agent |
 | `approval_subagent.py` | `approval_subagent` | 审批子 Agent 的工具调用 |
-| `enter_multi_agent.py` | `enter_multi_agent` | 切换到多 Agent 协作模式（不可逆） |
+| `enter_multi_agent.py` | `enter_multi_agent` | 切换到多 Agent 协作模式 |
 | `agents_group.py` | `agents_group` | Agent 分组管理 |
 | `_store.py` | — | `SubagentStore`：子 Agent 注册表磁盘存储 |
 | `profile_builder.py` | — | `build_multi_agent_tools()`：多 Agent 模式工具过滤 |

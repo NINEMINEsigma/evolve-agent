@@ -59,19 +59,20 @@ summary:hover{filter:brightness(0.95);}
 </style>
 
 <script>
-function copyOpt(txt,btn){
-  var text = txt.replace(/<br\s*\/?>/g,'\n');
-  if(navigator.clipboard && navigator.clipboard.writeText){
-    navigator.clipboard.writeText(text).then(function(){
-      var tip=btn.querySelector('.cp-hint')||(function(){var e=document.createElement('span');e.className='cp-hint';e.style.cssText='font-size:10px;color:{强调色};margin-left:8px;';btn.appendChild(e);return e;})();
-      tip.textContent='✓ 已复制';setTimeout(function(){tip.textContent='';},1200);
-    }).catch(function(){fallbackCopy(text,btn);});
-  }else{fallbackCopy(text,btn);}
-}
-function fallbackCopy(txt,btn){
-  var ta=document.createElement('textarea');ta.value=txt;ta.style.position='fixed';ta.style.left='-9999px';document.body.appendChild(ta);ta.select();
-  try{document.execCommand('copy');var tip=btn.querySelector('.cp-hint')||(function(){var e=document.createElement('span');e.className='cp-hint';e.style.cssText='font-size:10px;color:{强调色};margin-left:8px;';btn.appendChild(e);return e;})();tip.textContent='✓ 已复制';setTimeout(function(){tip.textContent='';},1200);}catch(e){}
-  document.body.removeChild(ta);
+function chooseOpt(msg){
+  var el = document.getElementById('opt-fb');
+  if(el) el.textContent = '⏳ 发送中...';
+  fetch('{endpoint_url}', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({message: msg})
+  }).then(function(r){
+    if(el) el.textContent = r.ok ? '✅ 已发送，剧情推进中...' : '❌ 发送失败';
+    setTimeout(function(){ if(el) el.textContent = ''; }, 2500);
+  }).catch(function(){
+    if(el) el.textContent = '❌ 网络错误';
+    setTimeout(function(){ if(el) el.textContent = ''; }, 2500);
+  });
 }
 </script>
 
@@ -157,11 +158,12 @@ function fallbackCopy(txt,btn){
 <!-- ====== 选项 ====== -->
 <div class="options">
 <div class="ot">➤ 你会怎么做？</div>
-<div class="oi" onclick="copyOpt('选项1文本',this)">😏 选项1描述</div>
-<div class="oi" onclick="copyOpt('选项2文本',this)">🔥 选项2描述</div>
-<div class="oc" onclick="copyOpt('✏️ [自定义行动]',this)">✏️ [自定义行动]</div>
+<div class="oi" onclick="chooseOpt('选项1描述')">😏 选项1描述</div>
+<div class="oi" onclick="chooseOpt('选项2描述')">🔥 选项2描述</div>
+<div class="oc" onclick="chooseOpt('✏️ [自定义行动]')">✏️ [自定义行动]</div>
 </div>
-<div style="font-size:10px;color:{脚注色};text-align:right;margin:2px 8px 0;">💡 点击选项即可复制到剪贴板</div>
+<div id="opt-fb" style="font-size:12px;color:{强调色};text-align:center;margin:6px 0 0;min-height:18px;"></div>
+<div style="font-size:10px;color:{脚注色};text-align:right;margin:2px 8px 0;">💡 点击选项直接推进剧情</div>
 
 <script>
 (function(){document.querySelectorAll('.pn .arr, .pn summary .arr').forEach(function(a){

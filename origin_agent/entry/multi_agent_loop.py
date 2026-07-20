@@ -600,6 +600,15 @@ class MultiAgentLoop(BaseAgentLoop, IMainSessionLoop):
                 )
                 break
 
+            # ── 中断检查：loop 被替换（如 exit_multi_agent）后立即退出 ──
+            if self.is_interrupted():
+                logger.info(
+                    "Cascade interrupted after agent run, skipping history write | "
+                    "session=%s character=%s step=%d",
+                    self.session_id, char, step,
+                )
+                return
+
             # ── 解析结果并写入 History ──
             parsed = result.parsed_json
             content_text = parsed.content

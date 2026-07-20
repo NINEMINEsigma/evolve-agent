@@ -247,7 +247,7 @@ class SessionManager:
             logger.info("Session terminated: %s", session_id)
 
     async def replace_loop(self, session_id: str, new_loop: IMainSessionLoop) -> None:
-        """将 session 的当前 loop 替换为 new_loop（不可逆）。
+        """将 session 的当前 loop 替换为 new_loop。
 
         旧 loop 被 interrupt 并从映射中移除；新 loop 继承 session_id
         并重新注册到 CronRouter（如有需要）。同时更新索引中的 LoopMeta。
@@ -299,6 +299,20 @@ class SessionManager:
                 logger.warning("Failed to push agents for session=%s", session_id, exc_info=True)
         else:
             self._chat_sm.update_loop_type(session_id, Loop.parent)
+            # 通知前端 agents 列表已清空（退出多 Agent 模式）
+            try:
+                sink = self._app.frontend_sink
+                if sink is not None:
+                    import json as _json
+                    ws = sink.get_ws(session_id)
+                    if ws is not None:
+                        await ws.send_text(_json.dumps({
+                            "type": "system",
+                            "session_id": session_id,
+                            "content": _json.dumps({"agents": []}),
+                        }, ensure_ascii=False))
+            except Exception:
+                logger.warning("Failed to push agents clear for session=%s", session_id, exc_info=True)
 
     def rotate_session(self, old_sid: str, new_sid: str) -> None:
         """旋转 session：将 loop 从旧 ID 迁移到新 ID。"""

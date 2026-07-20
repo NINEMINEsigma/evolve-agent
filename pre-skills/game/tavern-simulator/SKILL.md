@@ -17,7 +17,7 @@ tags:
 Agent 扮演酒馆系统（叙述者和管理者），负责：
 - 管理所有NPC角色，推进剧情发展
 - 维护六面板状态栏（置于正文之后、选项之前）
-- 提供分支选项供玩家选择（**支持点击复制到剪贴板**）
+- 提供分支选项供玩家选择（**支持点击直接推进剧情**）
 - 适配任何题材：推理悬疑、校园日常、奇幻冒险、历史史诗、科幻惊悚等
 
 ---
@@ -104,7 +104,7 @@ Agent 扮演酒馆系统（叙述者和管理者），负责：
 | `.dtn` | NPC对话文字 | 粉色对话内容 |
 | `.options` | 选项容器 | 带虚线边框的选项区域 |
 | `.ot` | 选项标题 | 「➤ 你会怎么做？」标题 |
-| `.oi` | 选项条目 | 可点击的选项，点击复制到剪贴板 |
+| `.oi` | 选项条目 | 可点击的选项，点击直接通知Agent推进剧情 |
 | `.oc` | 自定义选项 | 斜体灰色自定义选项 |
 
 ### 角色图鉴面板规范
@@ -156,17 +156,49 @@ Agent 扮演酒馆系统（叙述者和管理者），负责：
 - 自定义选项固定标注：`✏️ [自定义行动]`
 - 选项之间留适当间距，鼠标悬停有反馈效果
 
-#### 点击复制功能
-每个选项必须支持**点击复制到剪贴板**。每个选项使用 `onclick="copyOpt('文本',this)"`。
+#### 动态端点通知
 
-**完整 copyOpt 和 fallbackCopy 的 JS 函数见** `read_skill_file("tavern-simulator", "templates/full-html-skeleton.html")`
+当需要实现「点击选项 → Agent自动推进剧情」的实时交互时，可结合 register_dynamic_endpoint 工具使用。
 
+**工作流程：**
+
+1. Agent 渲染剧情前先调用 `register_dynamic_endpoint` 注册一个端点，拿到唯一 URL
+2. 选项按钮的 onclick 中调用 chooseOpt 函数
+3. chooseOpt 直接向端点 URL 发送 POST 请求，附带用户选择的描述文本
+4. Agent 收到系统消息后，根据选项内容自动推进剧情
+5. 剧情结束后调用 `unregister_dynamic_endpoint` 清理端点
+
+**chooseOpt 函数说明：**
+
+追加到模板 `<script>` 标签中。函数接收一个参数：
+- msg（string）：通知Agent的选项描述文本，作为 POST 请求的 message 字段
+
+函数逻辑：
+1. 查找页面中 id 为 opt-fb 的元素，显示「发送中...」
+2. 发起 fetch POST 请求到端点 URL，请求体为 JSON 格式 {message: msg}
+3. 请求成功则显示「已发送，剧情推进中...」，失败则显示「发送失败」
+4. 2.5 秒后自动清空状态文字
+
+**选项的 onclick 写法：**
 ```html
-<div class="oi" onclick="copyOpt('选项文本',this)">😏 选项描述</div>
-<div class="oc" onclick="copyOpt('✏️ [自定义行动] —— 描述',this)">✏️ [自定义行动]</div>
+<div class="oi" onclick="chooseOpt('选项描述')">😏 选项描述</div>
+<div class="oc" onclick="chooseOpt('✏️ [自定义行动]')">✏️ [自定义行动]</div>
 ```
 
-提示文字：`<div style="font-size:10px;color:{脚注色};text-align:right;margin:2px 8px 0;">💡 点击选项即可复制到剪贴板</div>`
+**脚注文字：**
+```html
+<div style="font-size:10px;color:{脚注色};text-align:right;margin:2px 8px 0;">💡 点击选项直接推进剧情</div>
+```
+
+**状态反馈元素（追加在选项区与脚注之间）：**
+```html
+<div id="opt-fb" style="font-size:12px;color:{强调色};text-align:center;margin:6px 0 0;min-height:18px;"></div>
+```
+
+**注意事项：**
+- 端点可跨回合复用，无需每轮重新注册
+- 一次注册持续使用，直到剧情线结束或场景切换时调用 `unregister_dynamic_endpoint` 清理
+- 端点方案强制执行，不再支持传统复制到剪贴板
 
 ### 四、手机聊天界面组件（📱）
 
@@ -493,8 +525,9 @@ Agent 扮演酒馆系统（叙述者和管理者），负责：
 11. **地图含相邻地点**：地图面板必须列出相邻区域及其可达状态（🟢可进入/🔴已锁/🟡有人/🔵需绕行）
 12. **进度条防溢出**：百分比使用 `grid-template-columns: 1fr auto` 布局
 13. **记忆区只记真实**：短期记忆只存放已真实发生过的事件
-14. **选项可点击复制**：每个选项使用 `onclick="copyOpt(...)"` 实现
+14. **选项可点击推进**：每个选项使用 `onclick="chooseOpt('描述')"` 实现点击直接通知Agent（需配合 register_dynamic_endpoint）
 15. **角色图鉴实时更新**：身体状态、心理状态和好感度应随剧情推进动态变化
 16. **手机UI时间同步**：手机界面的状态栏时间、消息时间必须与剧情时间严格一致，禁止写死
 17. **手机消息沉浸渲染**：当剧情涉及收发手机消息时，**必须主动使用手机聊天界面组件**（`templates/phone-chat.html`）来渲染对话内容，而非用纯文字叙述。消息内容在手机界面中展示，收/发消息前后的心理活动、环境描写可用正常叙事，但对话本身要用手机UI呈现
 18. **纯HTML输出不混Markdown**：酒馆剧情卡牌必须是纯HTML，不得混入任何Markdown格式（`**粗体**`、`` `行内代码` ``、`- 列表`、`> 引用`等）。如需额外说明，分两条消息发送：先发纯HTML卡牌，再单独发文字消息
+19. **动态端点生命周期管理**：使用动态端点增强时，渲染前先 `register_dynamic_endpoint`，渲染后将 URL 填入模板 `{endpoint_url}` 占位符，结束后及时 `unregister_dynamic_endpoint` 清理，不留残留
