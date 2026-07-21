@@ -67,6 +67,10 @@
   flex: 1;
   min-width: 0;
   max-width: 100%;
+  /* 基态 blur(0) 是 backdrop-filter 可过渡的前提（none 不可插值） */
+  backdrop-filter: blur(0px);
+  -webkit-backdrop-filter: blur(0px);
+  transition: background-color 0.25s ease, backdrop-filter 0.25s ease, -webkit-backdrop-filter 0.25s ease;
 }
 
 .message-assistant .message-bubble {
@@ -206,6 +210,24 @@
   margin-left: auto;
   margin-right: 0;
   text-align: left;
+}
+
+/* ── 悬停毛玻璃：模糊气泡背后的等高线，显隐随基态 transition 渐变 ── */
+.message:hover .message-bubble {
+  backdrop-filter: blur(10px) saturate(150%);
+  -webkit-backdrop-filter: blur(10px) saturate(150%);
+}
+
+.message-assistant:hover .message-bubble,
+.message-system:hover .message-bubble,
+.message-tool:hover .message-bubble,
+.message-error:hover .message-bubble {
+  background: rgba(19, 19, 25, 0.35);
+  border-radius: var(--radius-sm);
+}
+
+.message-user:hover .message-bubble {
+  background: rgba(31, 31, 41, 0.35);
 }
 
 .message-system {

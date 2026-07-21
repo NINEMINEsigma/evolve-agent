@@ -147,7 +147,7 @@ export function useWebSocket() {
       const behavior = instantScrollRef.current ? "auto" : "smooth";
       instantScrollRef.current = false;
       programmaticScrollingRef.current = true;
-      bottom.scrollIntoView({ behavior });
+      bottom.scrollIntoView({ behavior, block: "end" });
       if (chat) {
         lastScrollTopRef.current = chat.scrollTop;
       }
