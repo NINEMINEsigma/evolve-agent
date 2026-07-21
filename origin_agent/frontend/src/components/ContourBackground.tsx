@@ -31,8 +31,6 @@ const NORM_LEN = 2000;
 const MINOR_ALPHA = 0.16;
 const MAJOR_ALPHA = 0.34;
 const GLOW_ALPHA = 0.07;
-// 中心柱最低保留透明度（保证文字区干净）
-const CENTER_ALPHA = 0.35;
 // 无 seedKey 时的固定种子
 const FALLBACK_SEED = 0x9e3779b9;
 // --accent 解析失败时的回退色
@@ -41,13 +39,21 @@ const FALLBACK_RGB = "167, 139, 250";
 export default function ContourBackground({ scrollRef, contentRef, messages, seedKey }: ContourBackgroundProps) {
   const [isMobile, setIsMobile] = useState(false);
   const [layout, setLayout] = useState({ scrollHeight: 0, tileCount: 0 });
+  const [ready, setReady] = useState(false);
   const canvasMap = useRef(new Map<number, HTMLCanvasElement>());
   const influencesRef = useRef<MessageInfluence[]>([]);
   const versionRef = useRef(0);
+  const readyRef = useRef(false);
   const renderedVersion = useRef(new Map<number, number>());
   const visibleTiles = useRef(new Set<number>());
   const debounceTimer = useRef<number | null>(null);
   const seed = seedKey ? seedFromString(seedKey) : FALLBACK_SEED;
+
+  // 会话切换 → 重新隐藏，待新一轮异步渲染完成后淡入
+  useEffect(() => {
+    readyRef.current = false;
+    setReady(false);
+  }, [seedKey]);
 
   // 移动端隐藏背景
   useEffect(() => {
@@ -78,13 +84,15 @@ export default function ContourBackground({ scrollRef, contentRef, messages, see
         y0,
         y1: y0 + rect.height,
         strength: Math.min(1, Math.log(1 + len) / Math.log(1 + NORM_LEN)),
+        // 横向位置由消息 id 哈希散布：隆起呈斑块而非全宽条带
+        u: id ? seedFromString(id) / 4294967296 : 0.5,
       });
     });
     influencesRef.current = influences;
   }, [scrollRef, contentRef, messages]);
 
-  // 绘制单个块：等值线 + 中心柱降透明度
-  const renderTile = useCallback((index: number) => {
+  // 绘制单个块：分片异步描等值线，被中止则保持过期标记等待重绘
+  const renderTile = useCallback(async (index: number) => {
     const canvas = canvasMap.current.get(index);
     const main = scrollRef.current;
     if (!canvas || !main) return;
@@ -106,30 +114,35 @@ export default function ContourBackground({ scrollRef, contentRef, messages, see
     }
 
     const params: TerrainParams = { seed, width: w, influences: influencesRef.current };
+    const v = versionRef.current;
     ctx.clearRect(0, 0, w, h);
     ctx.save();
     ctx.translate(0, -y0);
-    strokeContours(ctx, params, { x0: 0, y0, w, h }, {
+    await strokeContours(ctx, params, { x0: 0, y0, w, h }, {
       cell: CELL,
       levels: LEVELS,
       majorEvery: MAJOR_EVERY,
       minorStyle: `rgba(${rgb}, ${MINOR_ALPHA})`,
       majorStyle: `rgba(${rgb}, ${MAJOR_ALPHA})`,
       glowStyle: `rgba(${rgb}, ${GLOW_ALPHA})`,
-    });
+    }, () => versionRef.current !== v);
     ctx.restore();
 
-    // destination-in 水平渐变：中心柱降到 CENTER_ALPHA，边缘保持不透明
-    ctx.globalCompositeOperation = "destination-in";
-    const grad = ctx.createLinearGradient(0, 0, w, 0);
-    grad.addColorStop(0, "rgba(0, 0, 0, 1)");
-    grad.addColorStop(0.5, `rgba(0, 0, 0, ${CENTER_ALPHA})`);
-    grad.addColorStop(1, "rgba(0, 0, 0, 1)");
-    ctx.fillStyle = grad;
-    ctx.fillRect(0, 0, w, h);
-    ctx.globalCompositeOperation = "source-over";
+    // 渲染期间数据已过期：不登记版本，等待下轮防抖重绘
+    if (versionRef.current !== v) return;
+    renderedVersion.current.set(index, v);
 
-    renderedVersion.current.set(index, versionRef.current);
+    // 所有可见块首帧齐备 → 容器淡入（一次性，此后增量重绘不再重复）
+    if (!readyRef.current && visibleTiles.current.size > 0) {
+      let allDone = true;
+      visibleTiles.current.forEach((i) => {
+        if (renderedVersion.current.get(i) !== versionRef.current) allDone = false;
+      });
+      if (allDone) {
+        readyRef.current = true;
+        setReady(true);
+      }
+    }
   }, [scrollRef, seed]);
 
   // 让所有可见且过期的块重绘
@@ -203,7 +216,7 @@ export default function ContourBackground({ scrollRef, contentRef, messages, see
   if (isMobile) return null;
 
   return (
-    <div className="contour-bg" aria-hidden="true">
+    <div className={`contour-bg${ready ? " ready" : ""}`} aria-hidden="true">
       {Array.from({ length: layout.tileCount }, (_, i) => {
         const tileHeight = Math.min(TILE_HEIGHT, Math.max(0, layout.scrollHeight - i * TILE_HEIGHT));
         return (

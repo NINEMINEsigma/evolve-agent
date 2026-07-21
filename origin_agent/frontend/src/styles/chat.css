@@ -36,6 +36,12 @@
   inset: 0;
   pointer-events: none;
   z-index: 0;
+  opacity: 0;
+  transition: opacity 0.9s ease;
+}
+
+.contour-bg.ready {
+  opacity: 1;
 }
 
 .contour-bg-tile {

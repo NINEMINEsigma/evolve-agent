@@ -4,6 +4,7 @@ export interface MessageInfluence {
   y0: number;
   y1: number;
   strength: number;
+  u: number;
 }
 
 export interface TerrainParams {
@@ -35,12 +36,10 @@ const BASE_AMP = 0.55;
 const UPLIFT_MAX = 0.9;
 // 基础噪声特征尺度（px）
 const NOISE_SCALE = 260;
-// 侧翼隆起峰值距中线的最大距离（px）
-const FLANK_MAX_DIST = 360;
-// 侧翼隆起峰值距中线的宽度比例
-const FLANK_WIDTH_RATIO = 0.28;
-// 侧翼剖面横向高斯 σ（px）
-const FLANK_SIGMA = 140;
+// 域扭曲幅度（px）
+const WARP_AMP = 160;
+// 域扭曲噪声特征尺度（px）
+const WARP_SCALE = 380;
 // 消息纵向高斯 σ 的最小值（px）
 const MIN_BAND_SIGMA = 120;
 // 消息纵向高斯 σ 相对消息高度的比例
@@ -114,51 +113,58 @@ export function messageLength(m: ChatMessage): number {
   return len;
 }
 
-/* ── 侧翼剖面：中线为 0，峰值在距中线 flankDist 处 ── */
-function flankProfile(x: number, width: number): number {
-  const flankDist = Math.min(FLANK_MAX_DIST, width * FLANK_WIDTH_RATIO);
-  const dx = Math.abs(x - width / 2) - flankDist;
-  return Math.exp(-(dx * dx) / (2 * FLANK_SIGMA * FLANK_SIGMA));
-}
-
 /* ── 文档坐标 (x, y) 处的地形高度 ── */
 export function terrainHeight(x: number, y: number, params: TerrainParams): number {
-  const base = BASE_AMP * fbm(x / NOISE_SCALE, y / NOISE_SCALE, params.seed);
+  // 域扭曲：两个独立低频噪声分别扰动 x/y，打散全幅面的规则秩序
+  const qx = fbm(x / WARP_SCALE, y / WARP_SCALE, params.seed + 7001, 3);
+  const qy = fbm(x / WARP_SCALE, y / WARP_SCALE, params.seed + 13003, 3);
+  const wx = x + (qx - 0.5) * 2 * WARP_AMP;
+  const wy = y + (qy - 0.5) * 2 * WARP_AMP;
+
+  const base = BASE_AMP * fbm(wx / NOISE_SCALE, wy / NOISE_SCALE, params.seed);
   let uplift = 0;
-  if (params.influences.length > 0) {
-    const flank = flankProfile(x, params.width);
-    if (flank > 0.001) {
-      for (const inf of params.influences) {
-        const cy = (inf.y0 + inf.y1) / 2;
-        const sigmaY = Math.max(MIN_BAND_SIGMA, (inf.y1 - inf.y0) * BAND_SIGMA_RATIO);
-        const dy = y - cy;
-        // 3σ 之外的高斯贡献可忽略，长会话下显著减少计算量
-        if (Math.abs(dy) > 3 * sigmaY) continue;
-        uplift += inf.strength * Math.exp(-(dy * dy) / (2 * sigmaY * sigmaY));
-      }
-      uplift *= UPLIFT_MAX * flank;
-    }
+  for (const inf of params.influences) {
+    const cy = (inf.y0 + inf.y1) / 2;
+    const sigma = Math.max(MIN_BAND_SIGMA, (inf.y1 - inf.y0) * BAND_SIGMA_RATIO);
+    const dy = wy - cy;
+    // 3σ 之外的高斯贡献可忽略，长会话下显著减少计算量
+    if (Math.abs(dy) > 3 * sigma) continue;
+    const dx = wx - inf.u * params.width;
+    uplift += inf.strength * Math.exp(-(dx * dx + dy * dy) / (2 * sigma * sigma));
   }
-  return base + uplift;
+  return base + uplift * UPLIFT_MAX;
 }
 
-/* ── marching squares：对 region 内的每个等值层级描边 ── */
-export function strokeContours(
+/* ── 让出主线程的时间切片点 ── */
+function yieldMain(): Promise<void> {
+  return new Promise((r) => setTimeout(r, 0));
+}
+
+/* ── marching squares：对 region 内的每个等值层级描边（分片异步，可中止） ── */
+export async function strokeContours(
   ctx: CanvasRenderingContext2D,
   params: TerrainParams,
   region: ContourRegion,
-  opts: ContourStyleOptions
-): void {
+  opts: ContourStyleOptions,
+  shouldAbort?: () => boolean
+): Promise<void> {
   const { cell, levels, majorEvery, minorStyle, majorStyle, glowStyle } = opts;
   const cols = Math.ceil(region.w / cell) + 1;
   const rows = Math.ceil(region.h / cell) + 1;
   if (cols < 2 || rows < 2) return;
 
+  // 采样是 CPU 大头，按行块切片让出主线程
   const grid = new Float32Array(cols * rows);
-  for (let r = 0; r < rows; r++) {
-    for (let c = 0; c < cols; c++) {
-      grid[r * cols + c] = terrainHeight(region.x0 + c * cell, region.y0 + r * cell, params);
+  const ROW_CHUNK = 32;
+  for (let r0 = 0; r0 < rows; r0 += ROW_CHUNK) {
+    const rEnd = Math.min(rows, r0 + ROW_CHUNK);
+    for (let r = r0; r < rEnd; r++) {
+      for (let c = 0; c < cols; c++) {
+        grid[r * cols + c] = terrainHeight(region.x0 + c * cell, region.y0 + r * cell, params);
+      }
     }
+    await yieldMain();
+    if (shouldAbort?.()) return;
   }
 
   for (let li = 0; li < levels; li++) {
@@ -212,5 +218,8 @@ export function strokeContours(
     ctx.strokeStyle = major ? majorStyle : minorStyle;
     ctx.lineWidth = major ? 2.5 : 1.5;
     ctx.stroke();
+    // 每个层级描完后让出主线程
+    await yieldMain();
+    if (shouldAbort?.()) return;
   }
 }
