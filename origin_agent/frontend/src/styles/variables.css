@@ -14,6 +14,7 @@
 
   /* Accent — purple */
   --accent:       #a78bfa;
+  --accent-rgb:   167, 139, 250;
   --accent-hover: #7c3aed;
   --accent-soft:  rgba(124, 58, 237, 0.14);
   --accent-glow:  rgba(167, 139, 250, 0.45);

@@ -264,6 +264,7 @@ export default function Layout({ ws, onContextMenu }: LayoutProps) {
           messages={ws.messages}
           waiting={ws.waiting}
           archived={currentSessionArchived}
+          sessionId={ws.sessionId}
           onImageClick={setLightboxSrc}
           onToggleCollapse={ws.toggleMessageCollapse}
           onEditMessage={ws.editMessage}

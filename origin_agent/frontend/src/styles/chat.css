@@ -12,6 +12,7 @@
   overflow-y: auto;
   padding: 20px 20px 120px 20px;
   min-width: 0;
+  position: relative;
   scrollbar-width: none;
   -ms-overflow-style: none;
 }
@@ -25,6 +26,23 @@
   display: flex;
   flex-direction: column;
   gap: 6px;
+  position: relative;
+  z-index: 1;
+}
+
+/* ── Contour background (消息联动等高线背景) ── */
+.contour-bg {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+}
+
+.contour-bg-tile {
+  position: absolute;
+  left: 0;
+  width: 100%;
+  display: block;
 }
 
 .chat-area-drag-over {
