@@ -37,11 +37,18 @@
   pointer-events: none;
   z-index: 0;
   opacity: 0;
-  transition: opacity 0.9s ease;
+  filter: blur(0);
+  transition: opacity 0.9s ease, filter 0.5s ease;
 }
 
 .contour-bg.ready {
   opacity: 1;
+}
+
+.contour-bg.buffering {
+  filter: blur(6px);
+  opacity: 0.45;
+  transition: filter 0.3s ease, opacity 0.3s ease;
 }
 
 .contour-bg-tile {

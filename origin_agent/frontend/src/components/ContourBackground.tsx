@@ -50,11 +50,20 @@ export default function ContourBackground({ scrollRef, contentRef, messages, see
   // 缓存 .chat-area 的 padding，避免每次测量都调用 getComputedStyle
   const paddingRef = useRef({ top: 0, bottom: 0 });
   const seed = seedKey ? seedFromString(seedKey) : FALLBACK_SEED;
+  // 三阶段状态机：idle → buffering（仅模糊） → computing（离屏渲染） → idle
+  const phaseRef = useRef<'idle' | 'buffering' | 'computing'>('idle');
+  const [buffering, setBuffering] = useState(false);
 
   // 会话切换 → 重新隐藏，待新一轮异步渲染完成后淡入
   useEffect(() => {
     readyRef.current = false;
+    phaseRef.current = 'idle';
     setReady(false);
+    setBuffering(false);
+    if (debounceTimer.current != null) {
+      window.clearTimeout(debounceTimer.current);
+      debounceTimer.current = null;
+    }
   }, [seedKey]);
 
   // 移动端隐藏背景
@@ -104,7 +113,7 @@ export default function ContourBackground({ scrollRef, contentRef, messages, see
     influencesRef.current = influences;
   }, [scrollRef, contentRef, messages]);
 
-  // 绘制单个块：分片异步描等值线，被中止则保持过期标记等待重绘
+  // 绘制单个块：离屏渲染完成后同步拷贝到可见 canvas，被中止则丢弃离屏内容
   const renderTile = useCallback(async (index: number) => {
     const canvas = canvasMap.current.get(index);
     const main = scrollRef.current;
@@ -118,11 +127,11 @@ export default function ContourBackground({ scrollRef, contentRef, messages, see
       ? content.scrollHeight + paddingRef.current.top + paddingRef.current.bottom
       : main.scrollHeight;
     const h = Math.min(TILE_HEIGHT, Math.max(0, effectiveScrollHeight - y0));
-    if (w <= 0 || h <= 0) return;
-    if (canvas.width !== w) canvas.width = w;
-    if (canvas.height !== h) canvas.height = h;
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return;
+    if (w <= 0 || h <= 0) {
+      // 标记完成以避免该 tile 阻塞整体退出
+      renderedVersion.current.set(index, versionRef.current);
+      return;
+    }
 
     let rgb = FALLBACK_RGB;
     const raw = getComputedStyle(document.documentElement).getPropertyValue("--accent").trim();
@@ -132,12 +141,18 @@ export default function ContourBackground({ scrollRef, contentRef, messages, see
       rgb = `${(v >> 16) & 255}, ${(v >> 8) & 255}, ${v & 255}`;
     }
 
+    // 离屏 canvas：新内容先画到这里，完成后一次性拷贝到可见 canvas
+    const offscreen = document.createElement('canvas');
+    offscreen.width = w;
+    offscreen.height = h;
+    const offCtx = offscreen.getContext('2d');
+    if (!offCtx) return;
+
     const params: TerrainParams = { seed, width: w, influences: influencesRef.current };
     const v = versionRef.current;
-    ctx.clearRect(0, 0, w, h);
-    ctx.save();
-    ctx.translate(0, -y0);
-    await strokeContours(ctx, params, { x0: 0, y0, w, h }, {
+    offCtx.save();
+    offCtx.translate(0, -y0);
+    await strokeContours(offCtx, params, { x0: 0, y0, w, h }, {
       cell: CELL,
       levels: LEVELS,
       majorEvery: MAJOR_EVERY,
@@ -145,21 +160,34 @@ export default function ContourBackground({ scrollRef, contentRef, messages, see
       majorStyle: `rgba(${rgb}, ${MAJOR_ALPHA})`,
       glowStyle: `rgba(${rgb}, ${GLOW_ALPHA})`,
     }, () => versionRef.current !== v);
-    ctx.restore();
+    offCtx.restore();
 
-    // 渲染期间数据已过期：不登记版本，等待下轮防抖重绘
+    // 渲染被中止：丢弃离屏内容，不拷贝，不登记版本
     if (versionRef.current !== v) return;
+
+    // 同步拷贝离屏 → 可见（亚毫秒级，用户无感知）
+    if (canvas.width !== w) canvas.width = w;
+    if (canvas.height !== h) canvas.height = h;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+    ctx.clearRect(0, 0, w, h);
+    ctx.drawImage(offscreen, 0, 0);
+
     renderedVersion.current.set(index, v);
 
-    // 所有可见块首帧齐备 → 容器淡入（一次性，此后增量重绘不再重复）
-    if (!readyRef.current && visibleTiles.current.size > 0) {
+    // 所有可见 tile 完成 → 退出缓冲/完成初始化
+    if (visibleTiles.current.size > 0) {
       let allDone = true;
       visibleTiles.current.forEach((i) => {
         if (renderedVersion.current.get(i) !== versionRef.current) allDone = false;
       });
       if (allDone) {
-        readyRef.current = true;
-        setReady(true);
+        phaseRef.current = 'idle';
+        setBuffering(false);
+        if (!readyRef.current) {
+          readyRef.current = true;
+          setReady(true);
+        }
       }
     }
   }, [scrollRef, seed]);
@@ -174,10 +202,19 @@ export default function ContourBackground({ scrollRef, contentRef, messages, see
   // 防抖重测：消息或尺寸变化后统一刷新
   const scheduleRefresh = useCallback(() => {
     if (debounceTimer.current != null) window.clearTimeout(debounceTimer.current);
+
+    // 已初始化 → 进入缓冲态（仅 CSS 模糊，不计算）
+    if (readyRef.current) {
+      phaseRef.current = 'buffering';
+      setBuffering(true);
+    }
+
     debounceTimer.current = window.setTimeout(() => {
       debounceTimer.current = null;
       measure();
       versionRef.current += 1;
+      phaseRef.current = 'computing';
+
       const main = scrollRef.current;
       const content = contentRef.current;
       // 用 .chat-content 的 scrollHeight 加 padding 替代 .chat-area 的 scrollHeight，
@@ -191,6 +228,18 @@ export default function ContourBackground({ scrollRef, contentRef, messages, see
           ? prev
           : { scrollHeight, tileCount }
       );
+
+      // 边界：无可见 tile → 直接退出缓冲
+      if (visibleTiles.current.size === 0) {
+        phaseRef.current = 'idle';
+        setBuffering(false);
+        if (!readyRef.current) {
+          readyRef.current = true;
+          setReady(true);
+        }
+        return;
+      }
+
       renderVisibleStale();
     }, DEBOUNCE);
   }, [measure, scrollRef, renderVisibleStale]);
@@ -228,7 +277,7 @@ export default function ContourBackground({ scrollRef, contentRef, messages, see
           if (Number.isNaN(index)) continue;
           if (entry.isIntersecting) {
             visibleTiles.current.add(index);
-            if (renderedVersion.current.get(index) !== versionRef.current) renderTile(index);
+            if (phaseRef.current !== 'buffering' && renderedVersion.current.get(index) !== versionRef.current) renderTile(index);
           } else {
             visibleTiles.current.delete(index);
           }
@@ -243,7 +292,7 @@ export default function ContourBackground({ scrollRef, contentRef, messages, see
   if (isMobile) return null;
 
   return (
-    <div className={`contour-bg${ready ? " ready" : ""}`} aria-hidden="true">
+    <div className={`contour-bg${ready ? " ready" : ""}${buffering ? " buffering" : ""}`} aria-hidden="true">
       {Array.from({ length: layout.tileCount }, (_, i) => {
         const tileHeight = Math.min(TILE_HEIGHT, Math.max(0, layout.scrollHeight - i * TILE_HEIGHT));
         return (
