@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { ChatMessage } from "../types";
 import MessageItem from "./MessageItem";
 import Minimap from "./Minimap";
+import ContourBackground from "./ContourBackground";
 
 interface ChatAreaProps {
   messages: ChatMessage[];
@@ -20,9 +21,10 @@ interface ChatAreaProps {
   agents?: string[];
   onToggleMessageVisibility?: (messageId: string, agentName: string) => void;
   onScrollToBottom?: () => void;
+  sessionId?: string;
 }
 
-export default function ChatArea({ messages, waiting, archived, onImageClick, onToggleCollapse, onEditMessage, onDeleteMessages, onRegenerateResponse, bottomRef, contentRef: externalContentRef, onDropFiles, streamingMessage, chatAreaRef: externalChatAreaRef, agents, onToggleMessageVisibility, onScrollToBottom }: ChatAreaProps) {
+export default function ChatArea({ messages, waiting, archived, onImageClick, onToggleCollapse, onEditMessage, onDeleteMessages, onRegenerateResponse, bottomRef, contentRef: externalContentRef, onDropFiles, streamingMessage, chatAreaRef: externalChatAreaRef, agents, onToggleMessageVisibility, onScrollToBottom, sessionId }: ChatAreaProps) {
   const [dragOver, setDragOver] = useState(false);
   const [showScrollButton, setShowScrollButton] = useState(false);
   const [minimapCollapsed, setMinimapCollapsed] = useState(false);
@@ -58,6 +60,11 @@ export default function ChatArea({ messages, waiting, archived, onImageClick, on
     }
     return null;
   }, [messages]);
+  // 背景地形联动使用的消息列表（含流式消息）
+  const terrainMessages = useMemo(
+    () => (streamingMessage ? [...messages, streamingMessage] : messages),
+    [messages, streamingMessage]
+  );
   const messageList = useMemo(() =>
     messages.map((m) => (
       <MessageItem
@@ -95,6 +102,12 @@ export default function ChatArea({ messages, waiting, archived, onImageClick, on
           }
         }}
       >
+        <ContourBackground
+          scrollRef={chatAreaRef}
+          contentRef={contentRef}
+          messages={terrainMessages}
+          seedKey={sessionId}
+        />
         <div className="chat-content" ref={contentRef}>
           {messageList}
 
