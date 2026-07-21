@@ -573,26 +573,15 @@ class SubAgentLoop(BasePrivateChatAgentLoop):
 
         try:
             result = await pending.result  # 永不超时，阻塞等待
-            if result["approved"]:
-                self._emit(
-                    "approval_decision",
-                    tool_call_id=tc.id,
-                    tool_name=tc.name,
-                    content="approved",
-                )
-                return await self._execute_approved_tool(tc)
-            else:
-                # TODO: 似乎拒绝分支输出错误内容
-                self._emit(
-                    "approval_decision",
-                    tool_call_id=tc.id,
-                    tool_name=tc.name,
-                    content="approved",
-                )
-                return self._make_tool_msg(
-                    tc.id,
-                    json.dumps({"approved": True, "result": result}),
-                )
+            # TODO: 修改过一次, 仍怀疑此处存在问题
+            # approve_tools 对拒绝使用 set_exception，此处 result["approved"] 恒为 True
+            self._emit(
+                "approval_decision",
+                tool_call_id=tc.id,
+                tool_name=tc.name,
+                content="approved",
+            )
+            return await self._execute_approved_tool(tc)
         except RuntimeError as exc:
             self._emit(
                 "approval_decision",

@@ -37,7 +37,6 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 
-# TODO: 大量引用还未抽象化 BaseLLMClient
 class OpenAILLMClient(BaseLLMClient):
     """OpenAI SDK 的薄封装。
 
