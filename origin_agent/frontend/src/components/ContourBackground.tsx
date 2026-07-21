@@ -47,6 +47,8 @@ export default function ContourBackground({ scrollRef, contentRef, messages, see
   const renderedVersion = useRef(new Map<number, number>());
   const visibleTiles = useRef(new Set<number>());
   const debounceTimer = useRef<number | null>(null);
+  // 缓存 .chat-area 的 padding，避免每次测量都调用 getComputedStyle
+  const paddingRef = useRef({ top: 0, bottom: 0 });
   const seed = seedKey ? seedFromString(seedKey) : FALLBACK_SEED;
 
   // 会话切换 → 重新隐藏，待新一轮异步渲染完成后淡入
@@ -63,6 +65,17 @@ export default function ContourBackground({ scrollRef, contentRef, messages, see
     mq.addEventListener("change", onChange);
     return () => mq.removeEventListener("change", onChange);
   }, []);
+
+  // 初始化 padding 缓存，用于计算基于内容高度的有效 scrollHeight
+  useEffect(() => {
+    const main = scrollRef.current;
+    if (!main) return;
+    const style = getComputedStyle(main);
+    paddingRef.current = {
+      top: parseInt(style.paddingTop) || 0,
+      bottom: parseInt(style.paddingBottom) || 0,
+    };
+  }, [scrollRef]);
 
   // 测量每条消息的文档纵向条带，按内容长度换算隆起强度
   const measure = useCallback(() => {
@@ -95,10 +108,16 @@ export default function ContourBackground({ scrollRef, contentRef, messages, see
   const renderTile = useCallback(async (index: number) => {
     const canvas = canvasMap.current.get(index);
     const main = scrollRef.current;
+    const content = contentRef.current;
     if (!canvas || !main) return;
     const w = main.clientWidth;
     const y0 = index * TILE_HEIGHT;
-    const h = Math.min(TILE_HEIGHT, Math.max(0, main.scrollHeight - y0));
+    // 用 .chat-content 的 scrollHeight 加 padding 替代 .chat-area 的 scrollHeight，
+    // 避免 absolute positioned canvas 块撑大 scrollHeight 形成循环依赖
+    const effectiveScrollHeight = content
+      ? content.scrollHeight + paddingRef.current.top + paddingRef.current.bottom
+      : main.scrollHeight;
+    const h = Math.min(TILE_HEIGHT, Math.max(0, effectiveScrollHeight - y0));
     if (w <= 0 || h <= 0) return;
     if (canvas.width !== w) canvas.width = w;
     if (canvas.height !== h) canvas.height = h;
@@ -160,7 +179,12 @@ export default function ContourBackground({ scrollRef, contentRef, messages, see
       measure();
       versionRef.current += 1;
       const main = scrollRef.current;
-      const scrollHeight = main ? main.scrollHeight : 0;
+      const content = contentRef.current;
+      // 用 .chat-content 的 scrollHeight 加 padding 替代 .chat-area 的 scrollHeight，
+      // 避免 absolute positioned canvas 块撑大 scrollHeight 形成循环依赖
+      const scrollHeight = content
+        ? content.scrollHeight + paddingRef.current.top + paddingRef.current.bottom
+        : (main ? main.scrollHeight : 0);
       const tileCount = Math.ceil(scrollHeight / TILE_HEIGHT);
       setLayout((prev) =>
         prev.scrollHeight === scrollHeight && prev.tileCount === tileCount
@@ -194,6 +218,9 @@ export default function ContourBackground({ scrollRef, contentRef, messages, see
   useEffect(() => {
     const main = scrollRef.current;
     if (!main) return;
+    // tileCount 变化时清理残留的 visibleTiles，避免已卸载的 tile index 阻止 ready
+    visibleTiles.current.clear();
+    renderedVersion.current.clear();
     const io = new IntersectionObserver(
       (entries) => {
         for (const entry of entries) {

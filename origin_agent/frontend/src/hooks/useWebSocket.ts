@@ -141,16 +141,13 @@ export function useWebSocket() {
 
   const scrollToBottomIfAtBottom = useCallback((force = false) => {
     const chat = chatAreaRef.current;
-    const bottom = bottomRef.current;
-    if (!bottom) return;
+    if (!chat) return;
     if (force || isAtBottomRef.current) {
       const behavior = instantScrollRef.current ? "auto" : "smooth";
       instantScrollRef.current = false;
       programmaticScrollingRef.current = true;
-      bottom.scrollIntoView({ behavior, block: "end" });
-      if (chat) {
-        lastScrollTopRef.current = chat.scrollTop;
-      }
+      chat.scrollTo({ top: chat.scrollHeight, behavior });
+      lastScrollTopRef.current = chat.scrollTop;
       programmaticScrollingRef.current = false;
     } else {
       instantScrollRef.current = false;
