@@ -988,7 +988,7 @@ async def dynamic_endpoint_handler(
         body = await req.json()
     except Exception:
         logger.warning(
-            "Failed to parse dynamic endpoint body | endpoint=%s", endpoint_id, exc_info=True,
+            "Failed to parse dynamic endpoint body | endpoint=%s", endpoint_name, exc_info=True,
         )
         return HTMLResponse(
             json.dumps({"error": "invalid JSON body"}),

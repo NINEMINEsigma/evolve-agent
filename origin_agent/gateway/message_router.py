@@ -56,7 +56,7 @@ def _get_sm() -> SessionManager | None:
     return Application.current().session_manager
 
 
-def _get_loop(session_id: str) -> ParentAgentLoop | MultiAgentLoop | None:
+def _get_loop(session_id: str) -> IMainSessionLoop | None:
     """返回指定 session 的 BaseAgentLoop（实际为 ParentAgentLoop 或 MultiAgentLoop）。"""
     sm = _get_sm()
     return sm.get_loop(session_id) if sm else None
@@ -195,7 +195,7 @@ class MessageRouter:
 
             # 把原始用户消息追加到历史
             try:
-                await loop.append_user_message(
+                await loop.loop.append_user_message(
                     content,
                     visible_characters=msg.visible_characters,
                     response_characters=msg.response_characters,
@@ -259,8 +259,8 @@ class MessageRouter:
         """处理中断请求。"""
         logger.info("WS interrupt | session=%s", self.sid)
         loop = _get_loop(self.sid)
-        if loop is not None:
-            loop.interrupt()
+        if loop is not None and loop.loop is not None:
+            loop.loop.interrupt()
 
     async def handle_file_upload(self, msg: Message) -> None:
         """处理文件上传：优先硬链接，fallback 到复制或 base64 解码。"""
@@ -513,7 +513,7 @@ class MessageRouter:
 
     async def _process_main_session(
         self,
-        loop: ParentAgentLoop | MultiAgentLoop,
+        loop: IMainSessionLoop,
         content: str,
         msg: Message,
         target_sessions: list[str],
@@ -541,7 +541,7 @@ class MessageRouter:
                 f"{content}"
             )
         try:
-            reply = await loop.process_message(
+            reply = await loop.loop.process_message(
                 main_content,
                 skip_append=True,
                 visible_characters=msg.visible_characters,
@@ -581,7 +581,7 @@ class MessageRouter:
             )
         )
 
-    async def _emit_assistant_reply(self, loop: ParentAgentLoop | MultiAgentLoop, reply: str) -> None:
+    async def _emit_assistant_reply(self, loop: IMainSessionLoop, reply: str) -> None:
         """发送 assistant 回复到前端。MultiAgentLoop 空回复跳过。"""
         if not reply:
             return
