@@ -57,7 +57,7 @@ class ToolExecutor:
                 MultiAgent 模式下由 worker 传入对应 Agent 名称，
                 默认回退到 loop.current_character_agent。
         """
-        from entity.constant import LOG_PREVIEW_CHARS
+        from entity.constant import LOG_PREVIEW_CHARS, TOOL_RESULT_LOG_ARGUMENT_CHARS
         from component.approval import execute_with_approval, ask_agent_reason as _ask_agent_reason
         from abstract.tools.registry import registry as tool_registry
 
@@ -130,7 +130,10 @@ class ToolExecutor:
                 content=json.dumps(_result, ensure_ascii=False),
             )
 
-        logger.info("Tool call: %s args=%s", tc.name, tc.arguments)
+        logtc_arguments_strs = []
+        for k, v in tc.arguments.items():
+            logtc_arguments_strs.append(f"{k}={v[:TOOL_RESULT_LOG_ARGUMENT_CHARS]}")
+        logger.info("Tool call: %s | %s", tc.name, " ".join(logtc_arguments_strs))
 
         # 统计
         if tc.name not in self._tool_stats:

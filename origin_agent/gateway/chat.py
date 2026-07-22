@@ -183,8 +183,9 @@ class SessionManager:
         if self._store_dir is None:
             try:
                 from system.context import get_runtime_context
+                from entity.constant import SESSIONS_DIR_NAME
                 ws: Path = get_runtime_context().workspace
-                candidate: Path = ws / "sessions"
+                candidate: Path = ws / SESSIONS_DIR_NAME
                 if candidate.exists():
                     self._store_dir = candidate
             except Exception:

@@ -1,8 +1,7 @@
 """文件系统工具 — 所有路径均为逻辑路径（带命名空间前缀）。
 
 模块导入时通过 ``registry.register()`` 注册。
-每个工具 handler 通过共享的 ``Sandbox`` 实例解析路径
-（由 ``main.py`` 在 agent 循环启动前通过 ``set_sandbox()`` 设置）。
+每个工具 handler 通过 ``Application.current().sandbox`` 获取共享的 ``Sandbox`` 实例解析路径。
 
 路径格式：``namespace:relative/path``
   - ``fork:``    读写（进化代码目标）
@@ -27,19 +26,11 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
-# 由 main.py 在 agent 循环启动前填充。
-_sandbox: Sandbox | None = None
-
-
-def set_sandbox(s: Sandbox) -> None:
-    global _sandbox
-    _sandbox = s
-
 
 def _s() -> Sandbox:
-    if _sandbox is None:
-        raise RuntimeError("Sandbox not initialized — call set_sandbox() first")
-    return _sandbox
+    """委托到 Application.sandbox property。"""
+    from system.application import Application
+    return Application.current().sandbox
 
 
 # ---------------------------------------------------------------------------

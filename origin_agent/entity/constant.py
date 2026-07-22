@@ -42,6 +42,9 @@ TOOL_ALLOWLIST_FILENAME: str = "tool_allowlist.json"
 # 会话索引文件名 — 存放于 workspace/ 下
 SESSION_INDEX_FILENAME: str = "_sessions.json"
 
+# 会话存储目录名（位于 workspace/ 下）
+SESSIONS_DIR_NAME: str = "sessions"
+
 # easysave 会话索引的 namespace key
 SESSION_EASYSAVE_KEY: str = "_sessions"
 
@@ -55,6 +58,9 @@ LOG_PREVIEW_CHARS: int = 200
 
 # 工具结果/原始参数预览截断长度（字符数）— 用于工具返回值预览、JSON 参数预览
 TOOL_RESULT_PREVIEW_CHARS: int = 2000
+
+# 工具结果日志单个参数的截断长度（字符数）— 用于工具结果日志输出
+TOOL_RESULT_LOG_ARGUMENT_CHARS: int = 100
 
 # 工具结果完整内容保存截断阈值（字符数）— 超过时结果写入文件，仅返回预览
 # 目前设置为一百万, 尽可能不再阻塞大部分工具调用, 同时组织真正的无限大文件输出

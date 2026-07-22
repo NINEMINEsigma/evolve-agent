@@ -37,8 +37,6 @@ from entry.base_agent_loop import IMainSessionLoop
 
 if TYPE_CHECKING:
     from entry.parent_agent_loop import ParentAgentLoop
-    from entry.base_agent_loop import BaseAgentLoop
-    from entry.agent_sink import FrontendSink
     from gateway.session_manager import SessionManager
 
 logger = logging.getLogger(__name__)
@@ -65,24 +63,6 @@ def _get_ws(session_id: str):
 
 # agentspace 路径 — 由 main.py 在 server 启动前设置。
 _agentspace_path: Path | None = None
-
-
-def set_agent_loop(loop: BaseAgentLoop) -> None:
-    """将 BaseAgentLoop 注入 Application 的 session_manager。
-
-    在启动流程中调用一次，之后所有 session 由 SessionManager 管理。
-    """
-    from system.application import Application
-    from entry.agent_sink import FrontendSink
-
-    app = Application.current()
-    if app.session_manager is None:
-        logger.error("SessionManager not initialized — call Application.setup() first")
-        return
-
-    # 创建 FrontendSink 并注册到 Application
-    if app.frontend_sink is None:
-        app.frontend_sink = FrontendSink()
 
 
 async def shutdown_subagent_orchestrator() -> None:
@@ -1480,7 +1460,8 @@ async def ws_chat(ws: WebSocket) -> None:
         from system.application import Application as _AppInner
         _app_inner = _AppInner.current()
         if _app_inner.session_manager and _app_inner.frontend_sink:
-            _store_inner = _app_inner.runtime_context.workspace / "sessions"
+            from entity.constant import SESSIONS_DIR_NAME
+            _store_inner = _app_inner.runtime_context.workspace / SESSIONS_DIR_NAME
             _app_inner.session_manager.create_session(
                 session_id=sid,
                 frontend_sink=_app_inner.frontend_sink,

@@ -144,32 +144,22 @@ class App:
     async def _start_gateway(self) -> None:
         """创建 uvicorn server 并作为后台 task 运行。"""
         try:
-            from gateway.server import create_server, set_agent_loop, set_agentspace_path
+            from gateway.server import create_server, set_agentspace_path
         except ImportError as exc:
             logger.warning("Gateway unavailable (import error): %s", exc)
             self._shutdown_event.set()
             return
 
-        # ---- 创建 Application 单例（最先，确保后续模块导入时可访问）----
-        from system.application import Application, ApprovalBackendManager
-        from gateway.session_manager import SessionManager
-        from component.cron_router import CronRouter
-        from abstract.tools.registry import registry as tool_registry
+        # ---- 创建 Application 单例并初始化子系统 ----
+        from system.application import Application
 
         app = Application(self.ctx)
-        # CronRouter 无外部依赖，提前装配供 discover 导入 cron_tools 时使用
-        app.cron_router = CronRouter()
-        app.tool_registry = tool_registry
         app.link_shutdown_event(self._shutdown_event)
+        app.init()
 
-        # ---- 初始化 sandbox + 工具 ----
+        # ---- 工具发现 ----
         try:
-            from system.sandbox import Sandbox
-            _sandbox: Sandbox = Sandbox(self.ctx)
-            # 先注入 sandbox 到唯一入口（在 discover 之前完成）
             import component.tools.filesystem as _fs
-            _fs.set_sandbox(_sandbox)
-            # AST 自动发现并注册工具模块
             from abstract.tools.discover import discover_builtin_tools
             from system.pathutils import find_repo_root, get_agent_dir
             import sys
@@ -194,27 +184,22 @@ class App:
             logger.warning("Sandbox/tools unavailable: %s", exc)
             self._shutdown_event.set()
 
-        # ---- 装配剩余 Application 子系统（依赖已注册的工具）----
-        app.session_manager = SessionManager(str(self.ctx.workspace / "sessions"))
-        app.approval_backend_manager = ApprovalBackendManager(self.ctx)
-
         # ---- 创建 agent 循环 ----
         agent_loop: AgentLoop | None = None
         try:
             from entry.parent_agent_loop import ParentAgentLoop as AgentLoop
-            from entry.agent_sink import FrontendSink
-            history_path: str = str(self.ctx.workspace / "sessions")
+            from entity.constant import SESSIONS_DIR_NAME
+            history_path: str = str(self.ctx.workspace / SESSIONS_DIR_NAME)
             agent_loop = AgentLoop(
                 Application.current(),
                 session_id="__bootstrap__",
-                frontend_sink=FrontendSink(),
+                frontend_sink=Application.current().frontend_sink,
                 history_store_dir=Path(history_path) if history_path else None,
             )
 
             # 将工具事件流连接到前端
             from gateway.server import _send_tool_event
             agent_loop.set_tool_event_callback(_send_tool_event)
-            set_agent_loop(agent_loop)
             set_agentspace_path(self.ctx.agentspace)
 
             # ---- 创建 SubAgentOrchestrator ----

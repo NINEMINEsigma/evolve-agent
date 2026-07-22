@@ -1346,10 +1346,3 @@ Waits non-blockingly for the specified number of seconds, then sends a [cron-res
     emoji="⏳",
     danger_level=ToolDangerLevel.readonly,
 )
-
-
-# ── 进程启动时自动加载持久化的任务 ───────────────────────────
-try:
-    _load_all_tasks()
-except Exception:
-    logger.exception("Failed to load persisted cron jobs on startup")

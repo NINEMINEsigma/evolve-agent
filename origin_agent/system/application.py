@@ -1,20 +1,21 @@
 """Application 唯一全局单例 — 装配所有子系统。
 
 所有业务对象通过 Application.current() 访问，避免模块级全局变量。
+子系统在 init() 中 eager 初始化，通过 @property 只读暴露，防止意外赋值。
 """
 
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from system.context import RuntimeContext
+    from system.sandbox import Sandbox
     from gateway.session_manager import SessionManager
     from component.approval.backend import ApprovalBackend
     from component.cron_router import CronRouter
     from abstract.tools.registry import ToolRegistry
-    from entry.base_agent_loop import BaseAgentLoop
     from entry.agent_sink import FrontendSink
     from subagent.orchestrator import SubAgentOrchestrator
 
@@ -30,28 +31,104 @@ class Application:
     用法::
 
         app = Application(runtime_ctx)
-        # 装配子系统
-        app.session_manager = SessionManager(app)
-        # 访问依赖
-        loop = Application.current().session_manager.get_loop(sid)
+        app.init()           # 构造后立刻调用，初始化所有子系统
+        # 后续通过 app.cron_router / app.session_manager 等只读访问
     """
 
     def __init__(self, runtime_context: RuntimeContext) -> None:
         global _app
-        self.runtime_context:           RuntimeContext = runtime_context
+        self.runtime_context: RuntimeContext = runtime_context
 
-        # -- 子系统（由启动流程装配） --
-        self.session_manager:           SessionManager | None = None
-        self.approval_backend_manager:  ApprovalBackendManager | None = None
-        self.cron_router:               CronRouter | None = None
-        self.tool_registry:             ToolRegistry | None = None
-        self.frontend_sink:             FrontendSink | None = None
-        self.subagent_orchestrator:     SubAgentOrchestrator | None = None
+        # -- 子系统 private fields（由 init() 创建，@property 只读暴露）--
+        self._sandbox:                   Sandbox | None = None
+        self._cron_router:               CronRouter | None = None
+        self._session_manager:           SessionManager | None = None
+        self._frontend_sink:             FrontendSink | None = None
+        self._approval_backend_manager:  ApprovalBackendManager | None = None
+
+        # -- 外部注入的复杂对象（private field + setter property）--
+        # TODO: subagent_orchestrator 改为 init() 中初始化或懒加载
+        #   原因：依赖 agent_loop，需引入 Application.agent_loop property 后才能懒加载
+        self._subagent_orchestrator:      SubAgentOrchestrator | None = None
 
         # -- 关闭信号（与 main.py 的 App 共享） --
-        self._shutdown_event:           object | None = None  # asyncio.Event
+        self._shutdown_event:             object | None = None  # asyncio.Event
 
         _app = self
+
+    def init(self) -> None:
+        """构造后立刻调用，初始化所有无复杂依赖的子系统。
+
+        依赖：RuntimeContext 已 set（由 __main__.py 保证）。
+        本方法在 _app = self 之后调用，因此 Application.current() 可用。
+        """
+        # 1. Sandbox — 纯构造，只依赖 RuntimeContext
+        from system.sandbox import Sandbox
+        self._sandbox = Sandbox(self.runtime_context)
+
+        # 2. CronRouter — 构造后从磁盘恢复持久化任务
+        #    _load_all_tasks 内部调用 _get_cr() → Application.current().cron_router，
+        #    此时 self._cron_router 已设好，不会重入问题。
+        from component.cron_router import CronRouter
+        self._cron_router = CronRouter()
+        from component.extools.cron_tools import _load_all_tasks
+        _load_all_tasks()
+
+        # 3. SessionManager — 纯构造，只需 sessions 目录路径
+        from gateway.session_manager import SessionManager
+        from entity.constant import SESSIONS_DIR_NAME
+        self._session_manager = SessionManager(
+            str(self.runtime_context.workspace / SESSIONS_DIR_NAME)
+        )
+
+        # 4. FrontendSink — 纯构造，无依赖
+        from entry.agent_sink import FrontendSink
+        self._frontend_sink = FrontendSink()
+
+        # 5. ApprovalBackendManager — 构造同步，异步 is_available() 在运行时才调用
+        self._approval_backend_manager = ApprovalBackendManager(self.runtime_context)
+
+        logger.info("Application initialized | subsystems ready")
+
+    # ── 只读 property（init() 创建，外部不可赋值）──────────────
+
+    @property
+    def sandbox(self) -> Sandbox:
+        return self._sandbox  # type: ignore[return-value]
+
+    @property
+    def cron_router(self) -> CronRouter:
+        return self._cron_router  # type: ignore[return-value]
+
+    @property
+    def session_manager(self) -> SessionManager:
+        return self._session_manager  # type: ignore[return-value]
+
+    @property
+    def frontend_sink(self) -> FrontendSink:
+        return self._frontend_sink  # type: ignore[return-value]
+
+    @property
+    def approval_backend_manager(self) -> ApprovalBackendManager:
+        return self._approval_backend_manager  # type: ignore[return-value]
+
+    @property
+    def tool_registry(self) -> ToolRegistry:
+        """全局工具注册表。"""
+        from abstract.tools.registry import registry
+        return registry
+
+    # ── setter property（外部注入的复杂对象）──────────────────
+
+    @property
+    def subagent_orchestrator(self) -> SubAgentOrchestrator | None:
+        return self._subagent_orchestrator
+
+    @subagent_orchestrator.setter
+    def subagent_orchestrator(self, value: SubAgentOrchestrator | None) -> None:
+        self._subagent_orchestrator = value
+
+    # ── 单例访问 ──────────────────────────────────────────────
 
     @staticmethod
     def current() -> Application:
@@ -70,23 +147,23 @@ class Application:
         logger.info("Application shutdown initiated")
         failures: list[str] = []
         # 1. 停止 cron 后台任务
-        if self.cron_router is not None:
+        if self._cron_router is not None:
             try:
-                await self.cron_router.shutdown()
+                await self._cron_router.shutdown()
             except Exception as exc:
                 logger.exception("CronRouter shutdown failed: %s", exc)
                 failures.append(f"CronRouter: {exc}")
         # 2. 停止审批后端
-        if self.approval_backend_manager is not None:
+        if self._approval_backend_manager is not None:
             try:
-                await self.approval_backend_manager.shutdown()
+                await self._approval_backend_manager.shutdown()
             except Exception as exc:
                 logger.exception("ApprovalBackendManager shutdown failed: %s", exc)
                 failures.append(f"ApprovalBackendManager: {exc}")
         # 3. 停止子 Agent 编排器
-        if self.subagent_orchestrator is not None:
+        if self._subagent_orchestrator is not None:
             try:
-                await self.subagent_orchestrator.shutdown_all()
+                await self._subagent_orchestrator.shutdown_all()
             except Exception as exc:
                 logger.exception("SubAgentOrchestrator shutdown failed: %s", exc)
                 failures.append(f"SubAgentOrchestrator: {exc}")
