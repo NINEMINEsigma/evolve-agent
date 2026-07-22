@@ -150,6 +150,18 @@ class App:
             self._shutdown_event.set()
             return
 
+        # ---- 创建 Application 单例（最先，确保后续模块导入时可访问）----
+        from system.application import Application, ApprovalBackendManager
+        from gateway.session_manager import SessionManager
+        from component.cron_router import CronRouter
+        from abstract.tools.registry import registry as tool_registry
+
+        app = Application(self.ctx)
+        # CronRouter 无外部依赖，提前装配供 discover 导入 cron_tools 时使用
+        app.cron_router = CronRouter()
+        app.tool_registry = tool_registry
+        app.link_shutdown_event(self._shutdown_event)
+
         # ---- 初始化 sandbox + 工具 ----
         try:
             from system.sandbox import Sandbox
@@ -182,44 +194,9 @@ class App:
             logger.warning("Sandbox/tools unavailable: %s", exc)
             self._shutdown_event.set()
 
-        # ---- 初始化 skills 目录 ----
-        _skills_dir: Path = Path("skills")
-        _skills_dir.mkdir(parents=True, exist_ok=True)
-        _seed: Path = _skills_dir / "self-evolution" / "SKILL.md"
-        if not _seed.exists():
-            _seed.parent.mkdir(parents=True, exist_ok=True)
-            _seed.write_text("""---
-name: self-evolution
-description: "Evolve Agent Self-Evolution Guide"
-category: core
----
-
-# Self-Evolution
-
-You can modify your own source code and complete evolution through the following tools:
-
-1. Use the filesystem tool to read source code from ``fork:``
-2. ``write_file`` or ``edit_file`` — write evolved code to fork: or ws:
-3. ``validate_code`` — check syntax
-4. ``diff_fast_fork`` — diff fast fork and save diff file
-5. ``evolve_code`` — deep validate and trigger swap
-""", encoding="utf-8")
-            logger.info("Seeded skill: self-evolution")
-
-        # ---- 创建 Application 单例并装配子系统 ----
-        from system.application import Application, ApprovalBackendManager
-        from gateway.session_manager import SessionManager
-        from component.cron_router import CronRouter
-        from abstract.tools.registry import registry as tool_registry
-
-        app = Application(self.ctx)
+        # ---- 装配剩余 Application 子系统（依赖已注册的工具）----
         app.session_manager = SessionManager(str(self.ctx.workspace / "sessions"))
         app.approval_backend_manager = ApprovalBackendManager(self.ctx)
-        app.cron_router = CronRouter()
-        app.tool_registry = tool_registry
-        # 绑定关闭事件，供子系统优雅退出使用
-        app.link_shutdown_event(self._shutdown_event)
-        # _app 已在 Application.__init__ 中设为全局单例
 
         # ---- 创建 agent 循环 ----
         agent_loop: AgentLoop | None = None

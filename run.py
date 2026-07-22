@@ -116,23 +116,22 @@ if __name__ == "__main__":
     source = Path(origin_agent_codes_path)
     if (agentspace_path_name / "SOUL.md").exists() == False:
         shutil.copy("SOUL.md", agentspace_path_name / "SOUL.md")
-    if fouce_init or (workspace_path / "init.lock").exists() == False:
-        (workspace_path / "init.lock").touch()
-        # 保持代理空间干净，删除代理空间并重新创建
-        # 不再尝试每次都删除代理空间，避免前端可能的重新下载
-        # shutil.rmtree(fast_agent_space)
-        fast_agent_space.mkdir(parents=True, exist_ok=True) # 创建fast agent空间
+    if fouce_init:
+        fallback_space = workspace_path / ".fallback"
         shutil.rmtree(slow_agent_space, ignore_errors=True) # 删除slow agent空间
+        shutil.rmtree(fallback_space, ignore_errors=True) # 删除备份空间
+
         slow_agent_space.mkdir(parents=True, exist_ok=True) # 创建slow agent空间
-        # 复制源代码到代理空间
+        fast_agent_space.mkdir(parents=True, exist_ok=True) # 创建fast agent空间
+        fallback_space.mkdir(parents=True, exist_ok=True) # 创建备份空间
+
+        pnpm_lock_yaml = source/"frontend"/"pnpm-lock.yaml"
+        if pnpm_lock_yaml.exists():
+            pnpm_lock_yaml.unlink()
+
         shutil.copytree(source, fast_agent_space, dirs_exist_ok=True) # 复制源代码到fast agent空间
-        pnpm_lock_yaml = fast_agent_space/"frontend"/"pnpm-lock.yaml"
-        if pnpm_lock_yaml.exists():
-            pnpm_lock_yaml.unlink()
         shutil.copytree(source, slow_agent_space, dirs_exist_ok=True) # 复制源代码到slow agent空间
-        pnpm_lock_yaml = slow_agent_space/"frontend"/"pnpm-lock.yaml"
-        if pnpm_lock_yaml.exists():
-            pnpm_lock_yaml.unlink()
+        shutil.copytree(source, fallback_space, dirs_exist_ok=True) # 复制源代码到备份空间
     while True:
         logger.info(f"Running fast agent")
         try:
