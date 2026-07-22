@@ -132,8 +132,8 @@ class ToolExecutor:
 
         logtc_arguments_strs = []
         for k, v in tc.arguments.items():
-            logtc_arguments_strs.append(f"{k}={v[:TOOL_RESULT_LOG_ARGUMENT_CHARS]}")
-        logger.info("Tool call: %s | %s", tc.name, " ".join(logtc_arguments_strs))
+            logtc_arguments_strs.append(f"{k}={str(v)[:TOOL_RESULT_LOG_ARGUMENT_CHARS]}")
+        logger.info("Tool call: %s | %s", tc.name, "\n".join(logtc_arguments_strs))
 
         # 统计
         if tc.name not in self._tool_stats:
