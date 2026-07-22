@@ -9,10 +9,14 @@
 from __future__ import annotations
 
 import logging
-from typing import Any
+from typing import * # type: ignore
 
 from abstract.tools.registry import registry, tool_error, tool_result
 from system.sandbox import SandboxError
+
+if TYPE_CHECKING:
+    from cv2.typing import MatLike
+
 
 logger = logging.getLogger(__name__)
 
@@ -42,6 +46,25 @@ from component.tools.filesystem import _s as _get_sandbox  # noqa: E402
 
 def _s():
     return _get_sandbox()
+
+
+def _imread_unicode(path: str, flags: int) -> "MatLike | None":
+    """读取可能包含非 ASCII 字符路径的图片。
+
+    cv2.imread 在 Windows 上使用 C 标准 API 打开文件，
+    不支持 Unicode 路径（如中文文件名）。
+    使用 numpy.fromfile + cv2.imdecode 替代。
+    """
+    import cv2
+    import numpy as np
+
+    try:
+        data = np.fromfile(path, dtype=np.uint8)
+    except OSError:
+        return None
+    if data.size == 0:
+        return None
+    return cv2.imdecode(data, flags)
 
 
 # ---------------------------------------------------------------------------
@@ -81,8 +104,8 @@ def _handle_template_match(args: dict[str, Any]) -> dict:
         return tool_error(f"Template not found: {template_path}", template_path=template_path)
 
     # 加载图片
-    screenshot = cv2.imread(str(ss_resolved.real), cv2.IMREAD_COLOR)
-    template = cv2.imread(str(tpl_resolved.real), cv2.IMREAD_COLOR)
+    screenshot = _imread_unicode(str(ss_resolved.real), cv2.IMREAD_COLOR)
+    template = _imread_unicode(str(tpl_resolved.real), cv2.IMREAD_COLOR)
 
     if screenshot is None:
         return tool_error(f"Failed to read screenshot: {screenshot_path}", screenshot_path=screenshot_path)
@@ -123,13 +146,10 @@ def _handle_template_match(args: dict[str, Any]) -> dict:
 
     # 执行模板匹配
     result = cv2.matchTemplate(search_area, template, method)
-    _min_val, max_val, _min_loc, max_loc = cv2.minMaxLoc(result)
 
-    # 根据匹配方法判断使用 max_loc 还是 min_loc
+    # 根据匹配方法判断使用最大值还是最小值
     # SQDIFF 和 SQDIFF_NORMED 用最小值，其余用最大值
     use_max = method not in (cv2.TM_SQDIFF, cv2.TM_SQDIFF_NORMED)
-    best_score = max_val if use_max else 1.0 - _min_val
-    best_loc = max_loc if use_max else _min_loc
 
     # 收集所有超过阈值的结果（多匹配）
     matches: list[dict] = []
@@ -215,6 +235,12 @@ registry.register(
     name="template_match",
     toolset="automation",
     schema={
+        # 在截图中用 OpenCV 模板匹配定位目标，返回匹配坐标框选。
+        # 前置条件：需安装 opencv-python；截图和模板图片须在沙箱（ws:）中。
+        # 调用效果：使用 cv2.matchTemplate 查找模板，返回阈值以上的所有匹配并按分数降序排列。
+        # 返回值：matched、match_count、matches 列表、best 最佳匹配。
+        # 典型场景：screen_capture 截图后定位 UI 元素，为 mouse_click 提供坐标。
+        # 副作用：只读操作，不修改文件；NMS 去重重叠率 >50% 的匹配。
         "description": """Find a template image within a screenshot using OpenCV template matching.
 
 ## Prerequisites
@@ -263,24 +289,29 @@ Optional `roi` parameter limits the search area to `[x, y, w, h]` within the scr
             "properties": {
                 "screenshot_path": {
                     "type": "string",
+                    # 截图图片的沙箱路径（ws: 命名空间，如 ws:uploads/screenshot_001.png）。
                     "description": "Sandbox path of the screenshot image (ws: namespace, e.g. 'ws:uploads/screenshot_001.png').",
                 },
                 "template_path": {
                     "type": "string",
+                    # 模板图片的沙箱路径（ws: 命名空间，如 ws:uploads/button.png）。
                     "description": "Sandbox path of the template image to search for (ws: namespace, e.g. 'ws:uploads/button.png').",
                 },
                 "threshold": {
                     "type": "number",
+                    # 匹配置信度阈值（0-1），仅返回分数 >= 阈值的匹配，默认 0.7。
                     "description": "Match confidence threshold (0-1). Only matches with score >= threshold are returned. Default: 0.7.",
                     "default": 0.7,
                 },
                 "roi": {
                     "type": "array",
                     "items": {"type": "integer"},
+                    # 感兴趣区域 [x, y, w, h]，限定截图内的搜索范围，加速匹配并减少误匹配，默认全图。
                     "description": "Region of interest [x, y, w, h] to limit the search area within the screenshot. Default: full image.",
                 },
                 "method": {
                     "type": "integer",
+                    # OpenCV 模板匹配方法，默认 5（TM_CCOEFF_NORMED），详见 cv2.TemplateMatchModes 文档。
                     "description": "OpenCV template matching method. Default: 5 (TM_CCOEFF_NORMED). See cv2.TemplateMatchModes docs.",
                     "default": 5,
                 },

@@ -1,18 +1,18 @@
-"""窗口焦点工具 — 通过窗口标题定位 Win32 窗口并将其设为前台焦点。
+"""窗口焦点工具 — 通过 HWND 将指定窗口设为前台焦点。
 
 模块导入时通过 ``registry.register()`` 注册。
 
 仅兼容 Windows。使用 ``ctypes`` 调用 ``user32.dll`` Win32 API，
 无第三方依赖。
 
-共享函数 ``_find_window_by_title`` 供 ``screen_capture.py`` 复用。
+使用前应先调用 ``window_find`` 获取目标窗口的 HWND。
 """
 
 from __future__ import annotations
 
 import ctypes
 import logging
-from typing import Any, Optional
+from typing import Any
 
 from abstract.tools.registry import registry, tool_error, tool_result
 
@@ -23,110 +23,105 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 _SW_RESTORE: int = 9  # SW_RESTORE — 恢复最小化/最大化的窗口
-_GW_ENABLED: int = 2  # GW_ENABLED — 仅枚举可见且可用的窗口
 
-# Win32 函数类型
-_EnumWindowsProc = ctypes.WINFUNCTYPE(
-    ctypes.c_bool,  # 返回值：True 继续枚举
-    ctypes.c_void_p,  # hwnd
-    ctypes.c_void_p,  # lParam
-)
+_VK_MENU: int = 0x12  # VK_MENU — Alt 键
+_KEYEVENTF_KEYUP: int = 0x0002  # keybd_event: 按键释放标志
+_HWND_TOP: int = 0  # SetWindowPos: 置顶（非 TOPMOST）
+_SWP_NOSIZE: int = 0x0001  # SetWindowPos: 保持大小
+_SWP_NOMOVE: int = 0x0002  # SetWindowPos: 保持位置
+_SWP_SHOWWINDOW: int = 0x0040  # SetWindowPos: 显示窗口
 
 
 # ---------------------------------------------------------------------------
-# 共享窗口查找函数
+# 窗口焦点核心
 # ---------------------------------------------------------------------------
 
 
-def _find_window_by_title(title: str) -> Optional[int]:
-    """通过标题部分匹配查找顶层窗口 HWND。
+def _bring_to_foreground(hwnd: int) -> bool:
+    """强制将窗口置顶到前台。
 
-    遍历所有可见顶层窗口，返回第一个标题中包含 *title* 的窗口 HWND。
-    找不到时返回 None。
+    采用多级降级策略，确保对最小化、后台、被遮挡的窗口均有效：
+
+    1. ``ShowWindow(SW_RESTORE)`` — 恢复最小化/最大化窗口
+    2. ``BringWindowToTop`` — 提升 z-order
+    3. 模拟 Alt 键按下/释放 — 解除 Windows 前台锁定
+    4. ``SetForegroundWindow`` — 设为前台
+    5. ``AttachThreadInput`` fallback — 附加线程输入后重试
+
+    返回 ``SetForegroundWindow`` 的返回值（True 表示成功）。
     """
-    title_lower: str = title.lower()
-    found_hwnd: list[int] = []
+    user32 = ctypes.windll.user32
+    kernel32 = ctypes.windll.kernel32
 
-    def _enum_callback(hwnd: int, lparam: int) -> bool:
-        # 跳过不可见窗口
-        if not ctypes.windll.user32.IsWindowVisible(hwnd):
-            return True
+    # ① 恢复窗口（最小化/最大化 → 正常）
+    user32.ShowWindow(hwnd, _SW_RESTORE)
 
-        # 获取窗口标题
-        length: int = ctypes.windll.user32.GetWindowTextLengthW(hwnd)
-        if length == 0:
-            return True
-        buffer = ctypes.create_unicode_buffer(length + 1)
-        ctypes.windll.user32.GetWindowTextW(hwnd, buffer, length + 1)
+    # ② 提升 z-order
+    user32.BringWindowToTop(hwnd)
 
-        if title_lower in buffer.value.lower():
-            found_hwnd.append(hwnd)
-            return False  # 找到后停止枚举
+    # ③ 模拟 Alt 键按下再释放，欺骗系统认为有用户输入，
+    #    从而解除前台锁定，使 SetForegroundWindow 可以跨进程生效
+    user32.keybd_event(_VK_MENU, 0, 0, 0)            # Alt down
+    user32.keybd_event(_VK_MENU, 0, _KEYEVENTF_KEYUP, 0)  # Alt up
 
-        return True
+    # ④ 尝试设为前台
+    success: bool = bool(user32.SetForegroundWindow(hwnd))
 
-    ctypes.windll.user32.EnumWindows(_EnumWindowsProc(_enum_callback), 0)
+    # ⑤ 若失败，通过 AttachThreadInput 附加线程输入后重试
+    if not success:
+        current_tid = kernel32.GetCurrentThreadId()
+        target_tid = user32.GetWindowThreadProcessId(hwnd, None)
+        if current_tid != target_tid:
+            user32.AttachThreadInput(target_tid, current_tid, True)
+            try:
+                user32.BringWindowToTop(hwnd)
+                success = bool(user32.SetForegroundWindow(hwnd))
+            finally:
+                user32.AttachThreadInput(target_tid, current_tid, False)
 
-    return found_hwnd[0] if found_hwnd else None
+    # ⑥ 最终兜底：用 SetWindowPos 强制 z-order 置顶并显示
+    if not success:
+        user32.SetWindowPos(
+            hwnd, _HWND_TOP, 0, 0, 0, 0,
+            _SWP_NOMOVE | _SWP_NOSIZE | _SWP_SHOWWINDOW,
+        )
+        success = bool(user32.SetForegroundWindow(hwnd))
+
+    return success
+
+
+def _is_valid_window(hwnd: int) -> bool:
+    """检查 HWND 是否指向一个存在的可见窗口。"""
+    user32 = ctypes.windll.user32
+    if not user32.IsWindow(hwnd):
+        return False
+    return bool(user32.IsWindowVisible(hwnd))
 
 
 # ---------------------------------------------------------------------------
-# 窗口焦点 handler
+# Handler
 # ---------------------------------------------------------------------------
 
 
 def _handle_window_focus(args: dict[str, Any]) -> dict:
-    """通过窗口标题定位窗口并将其设为前台焦点。"""
-    window_title: str = str(args.get("window_title", "")).strip()
+    """通过 HWND 将窗口设为前台焦点。"""
+    hwnd: int = int(args.get("hwnd", 0))
 
-    if not window_title:
-        return tool_error("window_title is required")
+    if hwnd <= 0:
+        return tool_error("hwnd is required (positive integer)")
 
-    hwnd: Optional[int] = _find_window_by_title(window_title)
-    if hwnd is None:
-        return tool_error(
-            f"No window found with title containing '{window_title}'",
-            window_title=window_title,
-        )
+    if not _is_valid_window(hwnd):
+        return tool_error(f"Invalid or invisible window: hwnd={hwnd}", hwnd=hwnd)
 
-    # 恢复窗口（如果最小化或最大化）
-    ctypes.windll.user32.ShowWindow(hwnd, _SW_RESTORE)
+    focused: bool = _bring_to_foreground(hwnd)
 
-    # SetForegroundWindow 在跨进程时可能失败（前台锁定限制）。
-    # 通过 AttachThreadInput 绕过：附加目标窗口的线程输入到当前线程，
-    # 使 SetForegroundWindow 获得权限。
-    _attach_and_focus(hwnd)
-
-    logger.info("window_focus | title='%s' hwnd=%d", window_title, hwnd)
+    logger.info("window_focus | hwnd=%d focused=%s", hwnd, focused)
 
     return tool_result(
         success=True,
-        window_title=window_title,
         hwnd=hwnd,
+        foreground=focused,
     )
-
-
-def _attach_and_focus(hwnd: int) -> None:
-    """绕过 Windows 前台锁定限制，强制将窗口设为前台。
-
-    通过 ``AttachThreadInput`` 将目标窗口的线程输入队列附加到当前线程，
-    使 ``SetForegroundWindow`` 获得 ALTER 权限。
-    """
-    user32 = ctypes.windll.user32
-
-    # 获取当前线程 ID 和目标窗口线程 ID
-    current_tid = user32.GetCurrentThreadId()
-    target_tid = user32.GetWindowThreadProcessId(hwnd, None)
-
-    if current_tid != target_tid:
-        # 附加线程输入
-        user32.AttachThreadInput(target_tid, current_tid, True)
-        try:
-            user32.SetForegroundWindow(hwnd)
-        finally:
-            user32.AttachThreadInput(target_tid, current_tid, False)
-    else:
-        user32.SetForegroundWindow(hwnd)
 
 
 # ---------------------------------------------------------------------------
@@ -137,38 +132,45 @@ registry.register(
     name="window_focus",
     toolset="automation",
     schema={
-        "description": """Bring a window to the foreground by its title.
+        # 通过 HWND 将窗口设为前台焦点。
+        # 前置条件：仅 Windows；需先用 window_find 获取 HWND。
+        # 调用效果：恢复最小化/最大化窗口并强制置顶到前台，采用多级降级策略。
+        # 返回值：hwnd、foreground（是否成功置顶）。
+        # 典型场景：在执行需要窗口在前台的鼠标/键盘自动化之前调用。
+        # 副作用：改变前台窗口，可能打断用户当前焦点。
+        "description": """Bring a window to the foreground by its HWND.
 
 ## Prerequisites
 - Windows only.
-- The target window must exist and be visible.
+- Use `window_find` first to obtain the HWND of the target window.
 
 ## Effect
-Searches all visible top-level windows for one whose title contains the given `window_title` (case-insensitive partial match). If found, restores the window (if minimized/maximized) and brings it to the foreground using `SetForegroundWindow`.
+Restores the window (if minimized/maximized) and brings it to the foreground using `SetForegroundWindow`. Uses a multi-level fallback strategy: ShowWindow → BringWindowToTop → Alt key trick → SetForegroundWindow → AttachThreadInput → SetWindowPos.
 
 ## Returns
 ```json
-{"success": true, "window_title": "...", "hwnd": 12345}
+{"success": true, "hwnd": 12345, "foreground": true}
 ```
 
 ## When to Use
-- Before taking a screenshot of a specific window.
-- Before performing mouse/keyboard automation on a target application.
+- After `window_find` to bring the target window to the front.
+- Before performing mouse/keyboard automation that requires the window to be in the foreground.
 - To ensure the target window is active and visible.
 
 ## Side Effects / Notes
 - Changes the foreground window, which may disrupt the user's current focus.
 - Uses `AttachThreadInput` to bypass Windows foreground locking restrictions.
-- If multiple windows match the title, the first one found is selected.""",
+- The `foreground` field indicates whether `SetForegroundWindow` reported success.""",
         "parameters": {
             "type": "object",
             "properties": {
-                "window_title": {
-                    "type": "string",
-                    "description": "Partial window title to search for (case-insensitive). The first matching visible top-level window will be focused.",
+                "hwnd": {
+                    "type": "integer",
+                    # 窗口句柄（HWND），由 window_find 工具返回。
+                    "description": "Window handle (HWND) obtained from `window_find`.",
                 },
             },
-            "required": ["window_title"],
+            "required": ["hwnd"],
         },
     },
     handler=_handle_window_focus,

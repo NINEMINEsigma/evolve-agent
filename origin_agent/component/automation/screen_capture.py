@@ -5,7 +5,7 @@
 仅兼容 Windows。使用 ``ctypes`` 调用 Win32 API 实现后台截屏
 （窗口被遮挡时仍可截取），通过 PIL 保存图片到 agentspace。
 
-复用 ``window_focus.py`` 中的 ``_find_window_by_title`` 定位窗口。
+使用前应先调用 ``window_find`` 获取目标窗口的 HWND。
 """
 
 from __future__ import annotations
@@ -13,10 +13,14 @@ from __future__ import annotations
 import ctypes
 import logging
 import time
-from typing import Any, Optional
+from typing import * # type: ignore
 
 from abstract.tools.registry import registry, tool_error, tool_result
 from system.sandbox import SandboxError
+
+if TYPE_CHECKING:
+    from PIL import Image as PILImage
+
 
 logger = logging.getLogger(__name__)
 
@@ -90,7 +94,7 @@ def _s():
 # ---------------------------------------------------------------------------
 
 
-def _capture_window(hwnd: int) -> Any:
+def _capture_window(hwnd: int) -> "PILImage.Image | None":
     """通过 PrintWindow 后台截取窗口内容，返回 PIL Image 或 None。
 
     使用 PrintWindow(PW_RENDERFULLCONTENT) 获取后台渲染内容。
@@ -137,7 +141,7 @@ def _capture_window(hwnd: int) -> Any:
         bmi = _BITMAPINFO()
         bmi.bmiHeader.biSize = ctypes.sizeof(_BITMAPINFOHEADER)
         bmi.bmiHeader.biWidth = width
-        bmi.bmiHeader.biHeight = height  # 正值 = bottom-up 位图
+        bmi.bmiHeader.biHeight = -height  # 负值 = top-down 位图（像素从顶行到底行排列）
         bmi.bmiHeader.biPlanes = 1
         bmi.bmiHeader.biBitCount = 32
         bmi.bmiHeader.biCompression = 0  # BI_RGB
@@ -146,6 +150,7 @@ def _capture_window(hwnd: int) -> Any:
         gdi32.GetDIBits(mfc_dc, bitmap, 0, height, pixel_buffer, ctypes.byref(bmi), 0)
 
         # 构造 PIL Image — BGRA → RGBA → RGB
+        # orientation=1: top-down（负 biHeight 的 GDI 位图，数据从顶行到底行），PIL 无需翻转
         img = PILImage.frombuffer("RGBA", (width, height), bytes(pixel_buffer), "raw", "BGRA", 0, 1)
         img = img.convert("RGB")
 
@@ -164,28 +169,22 @@ def _capture_window(hwnd: int) -> Any:
 
 
 def _handle_screen_capture(args: dict[str, Any]) -> dict:
-    """通过窗口标题截取窗口内容并保存到 agentspace。"""
-    from .window_focus import _find_window_by_title
-
-    window_title: str = str(args.get("window_title", "")).strip()
+    """通过 HWND 截取窗口内容并保存到 agentspace。"""
+    hwnd: int = int(args.get("hwnd", 0))
     save_path: str = str(args.get("save_path", "")).strip()
 
-    if not window_title:
-        return tool_error("window_title is required")
+    if hwnd <= 0:
+        return tool_error("hwnd is required (positive integer)")
 
-    hwnd: Optional[int] = _find_window_by_title(window_title)
-    if hwnd is None:
-        return tool_error(
-            f"No window found with title containing '{window_title}'",
-            window_title=window_title,
-        )
+    if not ctypes.windll.user32.IsWindow(hwnd):
+        return tool_error(f"Invalid window handle: hwnd={hwnd}", hwnd=hwnd)
 
     # 截取窗口
     img = _capture_window(hwnd)
     if img is None:
         return tool_error(
             f"Failed to capture window content (hwnd={hwnd})",
-            window_title=window_title,
+            hwnd=hwnd,
         )
 
     width, height = img.width, img.height
@@ -201,16 +200,15 @@ def _handle_screen_capture(args: dict[str, Any]) -> dict:
         resolved.real.parent.mkdir(parents=True, exist_ok=True)
         img.save(str(resolved.real), format="PNG")
     except SandboxError as exc:
-        return tool_error(str(exc), window_title=window_title, save_path=save_path)
+        return tool_error(str(exc), hwnd=hwnd, save_path=save_path)
     except Exception as exc:
-        return tool_error(f"Failed to save screenshot: {exc}", window_title=window_title)
+        return tool_error(f"Failed to save screenshot: {exc}", hwnd=hwnd)
 
-    logger.info("screen_capture | title='%s' hwnd=%d → %s (%dx%d)",
-                window_title, hwnd, save_path, width, height)
+    logger.info("screen_capture | hwnd=%d → %s (%dx%d)",
+                hwnd, save_path, width, height)
 
     return tool_result(
         success=True,
-        window_title=window_title,
         hwnd=hwnd,
         path=save_path,
         width=width,
@@ -226,26 +224,32 @@ registry.register(
     name="screen_capture",
     toolset="automation",
     schema={
+        # 通过 HWND 后台截取窗口内容并保存到 agentspace（窗口被遮挡时仍可截取）。
+        # 前置条件：仅 Windows；需安装 Pillow；需先用 window_find 获取 HWND。
+        # 调用效果：使用 PrintWindow 后台渲染窗口内容，保存为 PNG 到沙箱。
+        # 返回值：hwnd、path（沙箱路径）、width、height。
+        # 典型场景：自动化流程中截图 → 模板匹配 → 点击的第一步。
+        # 副作用：在 agentspace 创建 PNG 文件；不返回 base64 内容。
         "description": """Capture a screenshot of a specific window (even if obscured) and save it to agentspace.
 
 ## Prerequisites
 - Windows only.
-- The target window must exist and be visible.
 - Pillow (PIL) must be installed.
+- Use `window_find` first to obtain the HWND of the target window.
 
 ## Effect
-Locates the window by partial title match (case-insensitive), then uses `PrintWindow` with `PW_RENDERFULLCONTENT` to capture its content — even when the window is behind other windows. The screenshot is saved as a PNG file to agentspace.
+Uses `PrintWindow` with `PW_RENDERFULLCONTENT` to capture the window content — even when the window is behind other windows. The screenshot is saved as a PNG file to agentspace. Coordinates in the screenshot are relative to the window's client area (top-left = 0,0), matching the coordinate system used by `mouse_click` in background mode.
 
 ## Returns
 ```json
-{"success": true, "window_title": "...", "hwnd": 12345, "path": "ws:uploads/screenshot_20260101_120000.png", "width": 1920, "height": 1080}
+{"success": true, "hwnd": 12345, "path": "ws:uploads/screenshot_20260101_120000.png", "width": 1920, "height": 1080}
 ```
 The `path` is a sandbox logical path (ws: namespace). Use it with `template_match` or `read_image` to process the screenshot.
 
 ## When to Use
-- Before running `template_match` to locate UI elements on screen.
-- To inspect the current state of an application window.
-- As the first step in an automation flow: capture → match → click.
+- After `window_find` to capture the current state of a window.
+- As the first step in an automation flow: `window_find` → `screen_capture` → `template_match` → `mouse_click`.
+- The screenshot coordinates align with `mouse_click` background mode (both use window client-area coordinates).
 
 ## Side Effects / Notes
 - Creates a PNG file in agentspace (default: `ws:uploads/screenshot_{timestamp}.png`).
@@ -256,16 +260,18 @@ The `path` is a sandbox logical path (ws: namespace). Use it with `template_matc
         "parameters": {
             "type": "object",
             "properties": {
-                "window_title": {
-                    "type": "string",
-                    "description": "Partial window title to search for (case-insensitive). The first matching visible window will be captured.",
+                "hwnd": {
+                    "type": "integer",
+                    # 窗口句柄（HWND），由 window_find 工具返回。
+                    "description": "Window handle (HWND) obtained from `window_find`.",
                 },
                 "save_path": {
                     "type": "string",
+                    # 截图保存的沙箱路径，省略时默认为 ws:uploads/screenshot_{timestamp}.png。
                     "description": "Sandbox path to save the screenshot (e.g. 'ws:uploads/my_screenshot.png'). If omitted, defaults to 'ws:uploads/screenshot_{timestamp}.png'.",
                 },
             },
-            "required": ["window_title"],
+            "required": ["hwnd"],
         },
     },
     handler=_handle_screen_capture,
