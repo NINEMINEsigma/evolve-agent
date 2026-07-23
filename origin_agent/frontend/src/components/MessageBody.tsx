@@ -4,6 +4,8 @@ import remarkGfm from "remark-gfm";
 import remarkBreaks from "remark-breaks";
 import rehypeRaw from "rehype-raw";
 import type { Components } from "react-markdown";
+import JsonView from "react18-json-view";
+import "react18-json-view/src/style.css";
 import { ChatMessage, ContentBlock, MessageContent } from "../types";
 import CodeBlock from "./CodeBlock";
 import SafeHtml from "./SafeHtml";
@@ -282,6 +284,29 @@ export default function MessageBody({ message, streaming, onImageClick }: Messag
         <ContextExtension message={m} />
       </>
     );
+  }
+
+  if (m.role === "tool") {
+    // tool_call（有 toolArgs）：纯文本摘要
+    if (m.toolArgs) {
+      return renderBlocksContent(m.content, m.role, m.id, onImageClick);
+    }
+    // tool_result：尝试 JSON 渲染
+    const contentStr = typeof m.content === "string" ? m.content : "";
+    try {
+      const parsed = JSON.parse(contentStr);
+      return (
+        <>
+          <div className="tool-json-view">
+            <JsonView src={parsed} collapsed={2} displaySize />
+          </div>
+          <ContextExtension message={m} />
+        </>
+      );
+    } catch {
+      // parse 失败：纯文本 fallback
+      return renderBlocksContent(m.content, m.role, m.id, onImageClick);
+    }
   }
 
   return renderBlocksContent(m.content, m.role, m.id, onImageClick);

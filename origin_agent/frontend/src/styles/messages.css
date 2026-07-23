@@ -303,6 +303,21 @@
   overflow-x: hidden;
 }
 
+.tool-call-detail-error {
+  border-left-color: #d16969;
+}
+
+.tool-json-view {
+  padding: 4px 0;
+  font-family: var(--font-mono, "SF Mono", "Fira Code", Menlo, Consolas, monospace);
+  font-size: 12px;
+}
+
+.tool-json-view > div {
+  background: transparent;
+  color: var(--text-primary, #e0e0e0);
+}
+
 .tool-call-meta {
   margin-top: 6px;
   padding-top: 4px;

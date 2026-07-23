@@ -124,7 +124,7 @@ const MessageItem = memo(function MessageItem({
               {textContent.length > 80 ? textContent.slice(0, 80) + '...' : textContent}
             </button>
             {!toolCollapsed && (
-              <div className="tool-call-detail message-content-collapsed" onWheel={handoffWheelAtBoundary}>
+              <div className={`tool-call-detail message-content-collapsed${m.isError ? " tool-call-detail-error" : ""}`} onWheel={handoffWheelAtBoundary}>
                 <MessageBody message={m} onImageClick={onImageClick} />
                 <MessageAttachments message={m} onImageClick={onImageClick} />
                 {m.toolCallMeta && (

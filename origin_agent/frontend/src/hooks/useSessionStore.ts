@@ -455,6 +455,7 @@ export function useSessionStore(callbacks: SessionStoreCallbacks = {}): SessionS
                 entry.playlistAutoplay = parsed.playlistAutoplay;
               }
               if (parsed.content !== undefined) entry.content = parsed.content;
+              if (parsed.isError) entry.isError = parsed.isError;
             }
             if (m.tool_call_meta) {
               entry.toolCallMeta = m.tool_call_meta;
@@ -668,7 +669,7 @@ export function useSessionStore(callbacks: SessionStoreCallbacks = {}): SessionS
       const parsed = parseToolResult(raw, msg.tool);
       setMessages((prev) => [...prev, {
         role: "tool",
-        content: parsed.content ?? `✅ ${msg.tool} → ${raw.slice(0, 2000)}`,
+        content: parsed.content ?? raw,
         id: generateUUID(),
         characterName: msg.character_name,
         imageMarkdown: parsed.imageMarkdown,
@@ -679,6 +680,7 @@ export function useSessionStore(callbacks: SessionStoreCallbacks = {}): SessionS
         playlistAutoplay: parsed.playlistAutoplay ?? false,
         messageIndex: nextMessageIndex(prev),
         toolCallMeta: msg.tool_call_meta as import("../types").ToolCallMeta | undefined,
+        isError: parsed.isError,
       }]);
       return;
     }

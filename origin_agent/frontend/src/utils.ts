@@ -24,6 +24,7 @@ export interface ParsedToolResult {
   audioAutoplay?: boolean;
   playlist?: PlaylistEntry[];
   playlistAutoplay?: boolean;
+  isError?: boolean;
 }
 
 export interface MessageResources {
@@ -33,21 +34,13 @@ export interface MessageResources {
 }
 
 export function parseToolResult(raw: string, toolName?: string): ParsedToolResult {
-  const prefix = toolName ? `✅ ${toolName} → ` : "";
-  const fallbackLimit = toolName ? 2000 : raw.length;
-  const messageLimit = toolName ? 200 : raw.length;
-
   try {
     const parsed = JSON.parse(raw);
-    const message = typeof parsed.message === "string" ? parsed.message : "";
-    const result: ParsedToolResult = {};
+    const isError = !!parsed.error;
+    const result: ParsedToolResult = { isError };
 
-    if (parsed.markdown) {
-      result.imageMarkdown = parsed.markdown;
-      result.content = prefix + message.slice(0, messageLimit);
-      return result;
-    }
-
+    // 提取特殊字段（由前端独立组件渲染）
+    if (parsed.markdown) result.imageMarkdown = parsed.markdown;
     if (parsed.download_url) {
       result.downloadInfo = {
         url: parsed.download_url,
@@ -55,33 +48,27 @@ export function parseToolResult(raw: string, toolName?: string): ParsedToolResul
         description: parsed.description,
         size: parsed.size,
       };
-      result.content = prefix + message.slice(0, messageLimit);
-      return result;
     }
-
     if (parsed.audio_url) {
       result.audioUrl = parsed.audio_url;
       result.audioAutoplay = toolName ? parsed.autoplay === true : false;
-      result.content = prefix + message.slice(0, messageLimit);
-      return result;
     }
-
     if (parsed.playlist) {
       result.playlist = parsed.playlist;
       result.playlistAutoplay = toolName ? parsed.autoplay === true : false;
-      result.content = prefix + message.slice(0, messageLimit);
-      return result;
     }
 
-    if (message) {
-      result.content = prefix + message.slice(0, messageLimit);
-      return result;
+    // 移除所有下划线开头的字段（_meta, _image, _note, _parse_failed 等）
+    const cleaned: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(parsed)) {
+      if (!k.startsWith("_")) cleaned[k] = v;
     }
 
-    result.content = prefix + raw.slice(0, fallbackLimit);
+    // content 始终为完整 JSON（pretty-print）
+    result.content = JSON.stringify(cleaned, null, 2);
     return result;
   } catch {
-    return { content: prefix + raw.slice(0, fallbackLimit) };
+    return { content: raw, isError: false };
   }
 }
 

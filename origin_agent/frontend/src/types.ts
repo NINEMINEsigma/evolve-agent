@@ -167,6 +167,7 @@ export interface ChatMessage {
   dynamicMessageSuffix?: string;
   toolCallMeta?: ToolCallMeta;   // 工具调用时间元信息
   emoji?: string;                  // 工具调用/审批请求的图标
+  isError?: boolean;               // 工具结果是否为错误
 }
 
 export interface SessionInfo {
