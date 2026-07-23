@@ -4,6 +4,8 @@ import { BrowserRouter } from "react-router-dom";
 import App from "./App";
 import "./styles/variables.css";
 import "./styles/base.css";
+import "./styles/splash.css";
+import "./styles/skeleton.css";
 import "./styles/sidebar.css";
 import "./styles/header.css";
 import "./styles/chat.css";

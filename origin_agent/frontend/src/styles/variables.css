@@ -38,4 +38,19 @@
   /* Shape */
   --radius:    14px;
   --radius-sm: 8px;
+
+  /* Animation */
+  --duration-fast:   150ms;
+  --duration-normal: 250ms;
+  --duration-slow:   800ms;
+  --ease-out:        cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-in-out:     cubic-bezier(0.65, 0, 0.35, 1);
+
+  /* Skeleton */
+  --skeleton-bg:     rgba(255, 255, 255, 0.04);
+  --skeleton-pulse:  rgba(255, 255, 255, 0.08);
+
+  /* Glow */
+  --glow-soft:  0 0 20px rgba(167, 139, 250, 0.15);
+  --glow-strong: 0 0 30px rgba(167, 139, 250, 0.25);
 }
