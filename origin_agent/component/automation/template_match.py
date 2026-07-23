@@ -1,4 +1,4 @@
-"""模板匹配工具 — 在截图中用 OpenCV 模板匹配定位目标，返回匹配坐标框选。
+"""模板匹配工具 — 在图片中用 OpenCV 模板匹配定位目标，返回匹配坐标框选。
 
 模块导入时通过 ``registry.register()`` 注册。
 
@@ -72,65 +72,32 @@ def _imread_unicode(path: str, flags: int) -> "MatLike | None":
 # ---------------------------------------------------------------------------
 
 
-def _handle_template_match(args: dict[str, Any]) -> dict:
-    """在截图中用 OpenCV 模板匹配定位目标。"""
+def _match_single(
+    image: "MatLike",
+    template: "MatLike",
+    threshold: float,
+    roi: list[int] | None,
+    method: int,
+) -> dict:
+    """对单张模板执行匹配，返回 matched / match_count / matches / best。"""
     import cv2
     import numpy as np
-
-    screenshot_path: str = str(args.get("screenshot_path", "")).strip()
-    template_path: str = str(args.get("template_path", "")).strip()
-    threshold: float = float(args.get("threshold", 0.7))
-    roi: list[int] | None = args.get("roi")
-    method: int = int(args.get("method", cv2.TM_CCOEFF_NORMED))
-
-    # 参数校验
-    if not screenshot_path:
-        return tool_error("screenshot_path is required")
-    if not template_path:
-        return tool_error("template_path is required")
-    if threshold < 0 or threshold > 1:
-        return tool_error(f"threshold must be in [0, 1], got {threshold}")
-
-    # 通过沙箱解析路径并读取图片
-    try:
-        ss_resolved = _s().resolve_read(screenshot_path)
-        tpl_resolved = _s().resolve_read(template_path)
-    except SandboxError as exc:
-        return tool_error(str(exc), screenshot_path=screenshot_path, template_path=template_path)
-
-    if not ss_resolved.real.is_file():
-        return tool_error(f"Screenshot not found: {screenshot_path}", screenshot_path=screenshot_path)
-    if not tpl_resolved.real.is_file():
-        return tool_error(f"Template not found: {template_path}", template_path=template_path)
-
-    # 加载图片
-    screenshot = _imread_unicode(str(ss_resolved.real), cv2.IMREAD_COLOR)
-    template = _imread_unicode(str(tpl_resolved.real), cv2.IMREAD_COLOR)
-
-    if screenshot is None:
-        return tool_error(f"Failed to read screenshot: {screenshot_path}", screenshot_path=screenshot_path)
-    if template is None:
-        return tool_error(f"Failed to read template: {template_path}", template_path=template_path)
 
     # ROI 区域裁剪
     roi_offset_x: int = 0
     roi_offset_y: int = 0
-    search_area = screenshot
+    search_area = image
 
     if roi is not None:
         if not isinstance(roi, list) or len(roi) != 4:
-            return tool_error("roi must be [x, y, w, h] (4 integers)")
+            return {"error": "roi must be [x, y, w, h] (4 integers)"}
         rx, ry, rw, rh = roi
-        # 坐标边界检查
-        h_img, w_img = screenshot.shape[:2]
-        if rx < 0 or ry < 0 or rw <= 0 or rh <= 0:
-            return tool_error(f"roi values must be non-negative and w,h > 0, got {roi}")
+        h_img, w_img = image.shape[:2]
+        if rx < 0 or ry < 0 or rw <= 0 or rh < 0:
+            return {"error": f"roi values must be non-negative and w,h > 0, got {roi}"}
         if rx + rw > w_img or ry + rh > h_img:
-            return tool_error(
-                f"roi [{rx},{ry},{rw},{rh}] exceeds screenshot bounds ({w_img}x{h_img})",
-                screenshot_path=screenshot_path,
-            )
-        search_area = screenshot[ry:ry + rh, rx:rx + rw]
+            return {"error": f"roi [{rx},{ry},{rw},{rh}] exceeds image bounds ({w_img}x{h_img})"}
+        search_area = image[ry:ry + rh, rx:rx + rw]
         roi_offset_x = rx
         roi_offset_y = ry
 
@@ -138,61 +105,118 @@ def _handle_template_match(args: dict[str, Any]) -> dict:
     th, tw = template.shape[:2]
     sh, sw = search_area.shape[:2]
     if tw > sw or th > sh:
-        return tool_error(
-            f"Template ({tw}x{th}) is larger than search area ({sw}x{sh})",
-            screenshot_path=screenshot_path,
-            template_path=template_path,
-        )
+        return {"error": f"Template ({tw}x{th}) is larger than search area ({sw}x{sh})"}
 
     # 执行模板匹配
     result = cv2.matchTemplate(search_area, template, method)
-
-    # 根据匹配方法判断使用最大值还是最小值
-    # SQDIFF 和 SQDIFF_NORMED 用最小值，其余用最大值
     use_max = method not in (cv2.TM_SQDIFF, cv2.TM_SQDIFF_NORMED)
 
-    # 收集所有超过阈值的结果（多匹配）
     matches: list[dict] = []
-
     if use_max:
-        # 对于 CCORR/CCOEFF 系列，值越大越匹配
         locs = np.where(result >= threshold)
     else:
-        # 对于 SQDIFF 系列，值越小越匹配
-        locs = np.where(result <= (1.0 - threshold))
+        locs = np.where(result < (1.0 - threshold))
 
     for pt in zip(*locs[::-1]):
-        # 将 ROI 内的坐标转换回原图坐标
         x = int(pt[0]) + roi_offset_x
         y = int(pt[1]) + roi_offset_y
         score = float(result[pt[1], pt[0]])
         if not use_max:
-            score = 1.0 - score  # SQDIFF 反转分数
+            score = 1.0 - score
         matches.append({"x": x, "y": y, "w": tw, "h": th, "score": round(score, 4)})
 
-    # 去重：合并相邻的匹配点（NMS 简化版）
     matches = _nms(matches, tw, th)
-
-    # 按分数降序排序
     matches.sort(key=lambda m: m["score"], reverse=True)
-
     best_match = matches[0] if matches else None
 
-    logger.info(
-        "template_match | screenshot=%s template=%s threshold=%.2f → %d matches, best_score=%.4f",
-        screenshot_path, template_path, threshold, len(matches),
-        best_match["score"] if best_match else 0,
-    )
+    return {
+        "matched": len(matches) > 0,
+        "match_count": len(matches),
+        "matches": matches,
+        "best": best_match,
+    }
 
+
+def _handle_template_match(args: dict[str, Any]) -> dict:
+    """在图片中用 OpenCV 模板匹配定位目标，支持多模板批量匹配。"""
+    import cv2
+
+    image_path: str = str(args.get("image", "")).strip()
+    template_paths_raw = args.get("template_paths", [])
+    threshold: float = float(args.get("threshold", 0.7))
+    roi: list[int] | None = args.get("roi")
+    method: int = int(args.get("method", cv2.TM_CCOEFF_NORMED))
+
+    # 参数校验
+    if not image_path:
+        return tool_error("image is required")
+    if not isinstance(template_paths_raw, list) or not template_paths_raw:
+        return tool_error("template_paths is required as a non-empty array of strings")
+    if threshold < 0 or threshold > 1:
+        return tool_error(f"threshold must be in [0, 1], got {threshold}")
+
+    template_paths = [str(tp).strip() for tp in template_paths_raw]
+
+    # 通过沙箱解析源图路径并读取
+    try:
+        img_resolved = _s().resolve_read(image_path)
+    except SandboxError as exc:
+        return tool_error(str(exc), image=image_path)
+
+    if not img_resolved.real.is_file():
+        return tool_error(f"Image not found: {image_path}", image=image_path)
+
+    image = _imread_unicode(str(img_resolved.real), cv2.IMREAD_COLOR)
+    if image is None:
+        return tool_error(f"Failed to read image: {image_path}", image=image_path)
+
+    # 逐模板匹配
+    results: dict[str, dict] = {}
+    matched_count = 0
+
+    for tp in template_paths:
+        if not tp:
+            results[tp] = {"matched": False, "match_count": 0, "matches": [], "best": None, "error": "template path is empty"}
+            continue
+
+        try:
+            tpl_resolved = _s().resolve_read(tp)
+        except SandboxError as exc:
+            results[tp] = {"matched": False, "match_count": 0, "matches": [], "best": None, "error": str(exc)}
+            continue
+
+        if not tpl_resolved.real.is_file():
+            results[tp] = {"matched": False, "match_count": 0, "matches": [], "best": None, "error": f"Template not found: {tp}"}
+            continue
+
+        template = _imread_unicode(str(tpl_resolved.real), cv2.IMREAD_COLOR)
+        if template is None:
+            results[tp] = {"matched": False, "match_count": 0, "matches": [], "best": None, "error": f"Failed to read template: {tp}"}
+            continue
+
+        single_result = _match_single(image, template, threshold, roi, method)
+        if "error" in single_result:
+            results[tp] = {"matched": False, "match_count": 0, "matches": [], "best": None, "error": single_result["error"]}
+        else:
+            results[tp] = single_result
+            if single_result["matched"]:
+                matched_count += 1
+
+        logger.info(
+            "template_match | image=%s template=%s → %d matches, best_score=%.4f",
+            image_path, tp, single_result.get("match_count", 0),
+            single_result["best"]["score"] if single_result.get("best") else 0,
+        )
+
+    total = len(results)
     return tool_result(
         success=True,
-        matched=len(matches) > 0,
-        match_count=len(matches),
-        matches=matches,
-        best=best_match,
-        screenshot_path=screenshot_path,
-        template_path=template_path,
+        image=image_path,
+        results=results,
+        summary={"total": total, "matched": matched_count, "unmatched": total - matched_count},
         threshold=threshold,
+        roi=roi,
+        method=method,
     )
 
 
@@ -235,67 +259,82 @@ registry.register(
     name="template_match",
     toolset="automation",
     schema={
-        # 在截图中用 OpenCV 模板匹配定位目标，返回匹配坐标框选。
-        # 前置条件：需安装 opencv-python；截图和模板图片须在沙箱（ws:）中。
-        # 调用效果：使用 cv2.matchTemplate 查找模板，返回阈值以上的所有匹配并按分数降序排列。
-        # 返回值：matched、match_count、matches 列表、best 最佳匹配。
+        # 在图片中用 OpenCV 模板匹配定位目标，返回匹配坐标框选。
+        # 前置条件：需安装 opencv-python；图片和模板须在沙箱（ws:）中。
+        # 调用效果：对每张模板执行 cv2.matchTemplate，返回阈值以上的所有匹配并按分数降序排列。
+        # 返回值：results 以模板路径为键，每项含 matched、match_count、matches 列表、best 最佳匹配。
         # 典型场景：screen_capture 截图后定位 UI 元素，为 mouse_click 提供坐标。
         # 副作用：只读操作，不修改文件；NMS 去重重叠率 >50% 的匹配。
-        "description": """Find a template image within a screenshot using OpenCV template matching.
+        "description": """Find template images within an image using OpenCV template matching.
 
 ## Prerequisites
 - `opencv-python` (cv2) must be installed.
-- Both screenshot and template images must exist in agentspace (ws: namespace).
-- Template must be smaller than or equal to the screenshot (or ROI area).
+- Both the source image and template images must exist in agentspace (ws: namespace).
+- Each template must be smaller than or equal to the source image (or ROI area).
 
 ## Effect
-Uses `cv2.matchTemplate` to locate the template image within the screenshot. Returns all matching locations above the threshold, sorted by score (descending). Non-maximum suppression (NMS) is applied to remove duplicate matches.
+Uses `cv2.matchTemplate` to locate each template image within the source image. Supports multiple templates in a single call — each template is matched independently. Returns matching locations above the threshold for each template, sorted by score (descending). Non-maximum suppression (NMS) is applied to remove duplicate matches.
 
 ## Returns
 ```json
 {
   "success": true,
-  "matched": true,
-  "match_count": 3,
-  "matches": [
-    {"x": 100, "y": 200, "w": 50, "h": 30, "score": 0.95},
-    {"x": 300, "y": 200, "w": 50, "h": 30, "score": 0.85}
-  ],
-  "best": {"x": 100, "y": 200, "w": 50, "h": 30, "score": 0.95},
-  "screenshot_path": "ws:uploads/screenshot_001.png",
-  "template_path": "ws:uploads/button.png",
-  "threshold": 0.7
+  "image": "ws:uploads/screenshot_001.png",
+  "results": {
+    "ws:uploads/button_a.png": {
+      "matched": true,
+      "match_count": 2,
+      "matches": [
+        {"x": 100, "y": 200, "w": 50, "h": 30, "score": 0.95},
+        {"x": 300, "y": 200, "w": 50, "h": 30, "score": 0.85}
+      ],
+      "best": {"x": 100, "y": 200, "w": 50, "h": 30, "score": 0.95}
+    },
+    "ws:uploads/button_b.png": {
+      "matched": false,
+      "match_count": 0,
+      "matches": [],
+      "best": null
+    }
+  },
+  "summary": {"total": 2, "matched": 1, "unmatched": 1},
+  "threshold": 0.7,
+  "roi": null,
+  "method": 5
 }
 ```
-`x, y` is the top-left corner of the match in the original screenshot coordinate system. `w, h` is the template dimensions. `score` is the match confidence (0-1, higher is better).
+`x, y` is the top-left corner of the match in the original image coordinate system. `w, h` is the template dimensions. `score` is the match confidence (0-1, higher is better).
 
-When `matched` is false, `matches` is empty and `best` is null.
+When a template's `matched` is false, its `matches` is empty and `best` is null. If a template file could not be read, an `error` field is included instead.
 
 ## When to Use
 - After `screen_capture` to locate UI elements (buttons, icons, text regions) on screen.
 - To find coordinates for `mouse_click` — use the `best` match's center: `x + w/2`, `y + h/2`.
+- To match multiple UI elements in a single call — pass multiple template paths.
 - To verify whether a specific UI state is present.
 
 ## ROI (Region of Interest)
-Optional `roi` parameter limits the search area to `[x, y, w, h]` within the screenshot. This speeds up matching and reduces false positives. Returned coordinates are in the original screenshot's coordinate system.
+Optional `roi` parameter limits the search area to `[x, y, w, h]` within the source image. This applies to all templates uniformly. Speeds up matching and reduces false positives. Returned coordinates are in the original image's coordinate system.
 
 ## Side Effects / Notes
 - Read-only operation — does not modify any files.
 - Requires `opencv-python` and `numpy` installed.
 - Default matching method is `TM_CCOEFF_NORMED` (method=5), which is illumination-invariant and recommended by MAA.
-- NMS overlap threshold is 0.5 — matches overlapping by more than 50% are deduplicated.""",
+- NMS overlap threshold is 0.5 — matches overlapping by more than 50% are deduplicated.
+- `threshold`, `roi`, and `method` apply uniformly to all templates.""",
         "parameters": {
             "type": "object",
             "properties": {
-                "screenshot_path": {
+                "image": {
                     "type": "string",
-                    # 截图图片的沙箱路径（ws: 命名空间，如 ws:uploads/screenshot_001.png）。
-                    "description": "Sandbox path of the screenshot image (ws: namespace, e.g. 'ws:uploads/screenshot_001.png').",
+                    # 源图片的沙箱路径（ws: 命名空间，如 ws:uploads/screenshot_001.png）。
+                    "description": "Sandbox path of the source image to search in (ws: namespace, e.g. 'ws:uploads/screenshot_001.png').",
                 },
-                "template_path": {
-                    "type": "string",
-                    # 模板图片的沙箱路径（ws: 命名空间，如 ws:uploads/button.png）。
-                    "description": "Sandbox path of the template image to search for (ws: namespace, e.g. 'ws:uploads/button.png').",
+                "template_paths": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    # 模板图片的沙箱路径列表（ws: 命名空间），支持多模板批量匹配。
+                    "description": "Sandbox paths of template images to search for (ws: namespace). Supports multiple templates for batch matching.",
                 },
                 "threshold": {
                     "type": "number",
@@ -306,8 +345,8 @@ Optional `roi` parameter limits the search area to `[x, y, w, h]` within the scr
                 "roi": {
                     "type": "array",
                     "items": {"type": "integer"},
-                    # 感兴趣区域 [x, y, w, h]，限定截图内的搜索范围，加速匹配并减少误匹配，默认全图。
-                    "description": "Region of interest [x, y, w, h] to limit the search area within the screenshot. Default: full image.",
+                    # 感兴趣区域 [x, y, w, h]，限定源图内的搜索范围，加速匹配并减少误匹配，默认全图。
+                    "description": "Region of interest [x, y, w, h] to limit the search area within the source image. Default: full image.",
                 },
                 "method": {
                     "type": "integer",
@@ -316,7 +355,7 @@ Optional `roi` parameter limits the search area to `[x, y, w, h]` within the scr
                     "default": 5,
                 },
             },
-            "required": ["screenshot_path", "template_path"],
+            "required": ["image", "template_paths"],
         },
     },
     handler=_handle_template_match,
