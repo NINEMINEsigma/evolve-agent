@@ -313,9 +313,8 @@
   font-size: 12px;
 }
 
-.tool-json-view > div {
-  background: transparent;
-  color: var(--text-primary, #e0e0e0);
+.tool-json-view .json-view--string {
+  white-space: pre-wrap;
 }
 
 .tool-call-meta {

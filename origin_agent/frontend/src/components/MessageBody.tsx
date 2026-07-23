@@ -287,9 +287,13 @@ export default function MessageBody({ message, streaming, onImageClick }: Messag
   }
 
   if (m.role === "tool") {
-    // tool_call（有 toolArgs）：纯文本摘要
+    // tool_call（有 toolArgs）：用 JsonView 渲染参数对象
     if (m.toolArgs) {
-      return renderBlocksContent(m.content, m.role, m.id, onImageClick);
+      return (
+        <div className="tool-json-view">
+          <JsonView src={m.toolArgs} collapsed={1} displaySize collapseStringsAfterLength={99999} />
+        </div>
+      );
     }
     // tool_result：尝试 JSON 渲染
     const contentStr = typeof m.content === "string" ? m.content : "";
@@ -298,7 +302,7 @@ export default function MessageBody({ message, streaming, onImageClick }: Messag
       return (
         <>
           <div className="tool-json-view">
-            <JsonView src={parsed} collapsed={2} displaySize />
+            <JsonView src={parsed} collapsed={2} displaySize collapseStringsAfterLength={99999} />
           </div>
           <ContextExtension message={m} />
         </>
