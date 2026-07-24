@@ -38,7 +38,7 @@ import asyncio
 import logging
 import threading
 from dataclasses import dataclass, field
-from typing import Any, Optional
+from typing import Any
 
 from .oauth import _OAUTH_CALLBACK_TIMEOUT
 
@@ -71,8 +71,8 @@ class _ProviderEntry:
     """
 
     server_url: str
-    oauth_config: Optional[dict]
-    provider: Optional[Any] = None
+    oauth_config: dict | None
+    provider: Any | None = None
     last_mtime_ns: int = 0
     lock: asyncio.Lock = field(default_factory=asyncio.Lock)
     pending_401: dict[str, "asyncio.Future[bool]"] = field(default_factory=dict)
@@ -330,7 +330,7 @@ def _make_hermes_provider_class() -> type|None:
 
 
 # Cached at import time. Tested and used by :class:`MCPOAuthManager`.
-_HERMES_PROVIDER_CLS: Optional[type] = _make_hermes_provider_class()
+_HERMES_PROVIDER_CLS: type | None = _make_hermes_provider_class()
 
 
 # ---------------------------------------------------------------------------
@@ -356,7 +356,7 @@ class MCPOAuthManager:
         self,
         server_name: str,
         server_url: str,
-        oauth_config: Optional[dict],
+        oauth_config: dict | None,
     ) -> Any|None:
         """Return a cached OAuth provider for ``server_name`` or build one.
 
@@ -589,7 +589,7 @@ class MCPOAuthManager:
 # ---------------------------------------------------------------------------
 
 
-_MANAGER: Optional[MCPOAuthManager] = None
+_MANAGER: MCPOAuthManager | None = None
 _MANAGER_LOCK = threading.Lock()
 
 

@@ -14,7 +14,7 @@ import base64
 import io
 import logging
 import mimetypes
-from typing import Any, Optional, Tuple
+from typing import Any
 
 from abstract.tools.registry import registry, tool_error
 from system.context import get_runtime_context
@@ -49,7 +49,7 @@ def _guess_mime(path: str) -> str:
     return mime or "application/octet-stream"
 
 
-def _parse_size(raw_bytes: bytes, mime_type: str) -> Tuple[Optional[int], Optional[int]]:
+def _parse_size(raw_bytes: bytes, mime_type: str) -> tuple[int | None, int | None]:
     """用 Pillow 解析图片宽高；SVG 返回 (None, None)。"""
     if mime_type == "image/svg+xml" or PILImage is None:
         return None, None

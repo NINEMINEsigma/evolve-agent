@@ -14,7 +14,7 @@ import os
 import re
 import subprocess  # nosec: intentional for inline shell expansion
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 
 from entity.constant import DEFAULT_SKILLS_DIR, IGNORED_DIRS, _INLINE_SHELL_RE
 from entity.puretype import SkillPayload, SkillInfo
@@ -30,13 +30,13 @@ logger = logging.getLogger(__name__)
 
 def load_skill(
     name_or_path: str,
-    skills_dir: Optional[Path] = None,
-    external_dirs: Optional[list[Path]] = None,
+    skills_dir: Path | None = None,
+    external_dirs: list[Path] | None = None,
     task_id: str | None = None,
     preprocess: bool = True,
     inline_shell: bool = False,
     inline_shell_timeout: int = 10,
-    template_vars: Optional[dict[str, str]] = None,
+    template_vars: dict[str, str] | None = None,
 ) -> SkillPayload:
     """Load a skill by name or path.
 
@@ -122,10 +122,10 @@ def load_skill(
 
 
 def list_skills(
-    skills_dir: Optional[Path] = None,
-    external_dirs: Optional[list[Path]] = None,
+    skills_dir: Path | None = None,
+    external_dirs: list[Path] | None = None,
     category: str | None = None,
-    disabled: Optional[list[str]] = None,
+    disabled: list[str] | None = None,
 ) -> list[SkillInfo]:
     """List all available skills with minimal metadata.
 
@@ -291,7 +291,7 @@ def _default_template_vars(task_id: str | None = None) -> dict[str, str]:
 
 
 def _substitute_template_vars(
-    content: str, skill_dir: Optional[Path], vars: dict[str, str]
+    content: str, skill_dir: Path | None, vars: dict[str, str]
 ) -> str:
     """Replace ``{{ var_name }}`` placeholders with values from *vars*.
 
@@ -316,7 +316,7 @@ def _substitute_template_vars(
 
 
 def _expand_inline_shell(
-    content: str, skill_dir: Optional[Path], timeout: int = 10
+    content: str, skill_dir: Path | None, timeout: int = 10
 ) -> str:
     """Execute ``{{ shell command }}`` blocks and replace with output.
 

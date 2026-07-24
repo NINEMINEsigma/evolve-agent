@@ -92,7 +92,7 @@ import time
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List
 from urllib.parse import urlparse
 
 from system.convert import as_bool
@@ -122,10 +122,10 @@ class MCPServerRegistry:
         on_register_alias: Called with ``(alias, toolset_name)`` to register
             a toolset alias.
     """
-    on_register: Optional[Callable[..., None]] = None
-    on_deregister: Optional[Callable[[str], None]] = None
-    on_get_toolset: Optional[Callable[[str], str | None]] = None
-    on_register_alias: Optional[Callable[[str, str], None]] = None
+    on_register: Callable[..., None] | None = None
+    on_deregister: Callable[[str], None] | None = None
+    on_get_toolset: Callable[[str], str | None] | None = None
+    on_register_alias: Callable[[str, str], None] | None = None
 
     def register(self, name: str, schema: dict, handler: Callable, **kwargs) -> None:
         """Register a tool via the callback if set."""
@@ -171,7 +171,7 @@ _tool_registry = MCPServerRegistry()
 #
 # Fallback is os.devnull if opening the log file fails for any reason.
 
-_mcp_stderr_log_fh: Optional[Any] = None
+_mcp_stderr_log_fh: Any | None = None
 _mcp_stderr_log_lock = threading.Lock()
 
 
@@ -355,7 +355,7 @@ _ENV_VAR_PATTERN = re.compile(r"\$\{([^}]+)\}")
 # Security helpers
 # ---------------------------------------------------------------------------
 
-def _build_safe_env(user_env: Optional[dict]) -> dict:
+def _build_safe_env(user_env: dict | None) -> dict:
     """Build a filtered environment dict for stdio subprocesses.
 
     Only passes through safe baseline variables (PATH, HOME, etc.) and XDG_*
@@ -1096,9 +1096,9 @@ class MCPServerTask:
 
     def __init__(self, name: str):
         self.name = name
-        self.session: Optional[Any] = None
+        self.session: Any | None = None
         self.tool_timeout: float = _DEFAULT_TOOL_TIMEOUT
-        self._task: Optional[asyncio.Task] = None
+        self._task: asyncio.Task | None = None
         self._ready = asyncio.Event()
         self._shutdown_event = asyncio.Event()
         # Set by tool handlers on auth failure after manager.handle_401()
@@ -1108,9 +1108,9 @@ class MCPServerTask:
         # rebuilt with fresh credentials.
         self._reconnect_event = asyncio.Event()
         self._tools: list = []
-        self._error: Optional[Exception] = None
+        self._error: Exception | None = None
         self._config: dict = {}
-        self._sampling: Optional[SamplingHandler] = None
+        self._sampling: SamplingHandler | None = None
         self._registered_tool_names: list[str] = []
         self._auth_type: str = ""
         self._refresh_lock = asyncio.Lock()
@@ -1127,7 +1127,7 @@ class MCPServerTask:
         # server's real advertised capabilities (``.capabilities.resources``,
         # ``.capabilities.prompts``) instead of assuming every ``ClientSession``
         # method attribute corresponds to a supported server method. See #18051.
-        self.initialize_result: Optional[Any] = None
+        self.initialize_result: Any | None = None
 
     def _is_http(self) -> bool:
         """Check if this server uses HTTP transport."""
@@ -2149,8 +2149,8 @@ _parallel_safe_servers: set = set()
 _mcp_tool_server_names: dict[str, str] = {}
 
 # Dedicated event loop running in a background daemon thread.
-_mcp_loop: Optional[asyncio.AbstractEventLoop] = None
-_mcp_thread: Optional[threading.Thread] = None
+_mcp_loop: asyncio.AbstractEventLoop | None = None
+_mcp_thread: threading.Thread | None = None
 
 # Protects _mcp_loop, _mcp_thread, _servers, _parallel_safe_servers,
 # _mcp_tool_server_names, and _stdio_pids.

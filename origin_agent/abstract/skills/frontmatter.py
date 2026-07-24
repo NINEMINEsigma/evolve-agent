@@ -21,7 +21,7 @@ Usage::
 from __future__ import annotations
 
 import re
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Tuple
 
 
 # ---------------------------------------------------------------------------
@@ -182,7 +182,7 @@ def _parse_list_block(
       - | multiline
     """
     i = start
-    list_indent: Optional[int] = None
+    list_indent: int | None = None
 
     while i < end:
         line = lines[i]
@@ -249,7 +249,7 @@ def _parse_multiline_value(
     key_indent = len(lines[start]) - len(lines[start].lstrip())
 
     if indicator in ("|", ">"):
-        body_indent: Optional[int] = None
+        body_indent: int | None = None
         collected: list[str] = []
         while i < end:
             line = lines[i]

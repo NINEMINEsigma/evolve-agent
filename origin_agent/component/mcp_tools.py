@@ -16,7 +16,7 @@ from __future__ import annotations
 import json
 import logging
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional
+from typing import TYPE_CHECKING, Any, Callable, Dict, List
 
 if TYPE_CHECKING:
     from system.context import RuntimeContext
@@ -103,7 +103,7 @@ except ImportError as exc:
 # ---------------------------------------------------------------------------
 
 
-def _load_mcp_config(path: Optional[Path]) -> dict[str, dict]:
+def _load_mcp_config(path: Path | None) -> dict[str, dict]:
     """从 JSON 配置文件加载 MCP server 配置。
 
     支持的格式：:

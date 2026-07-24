@@ -34,7 +34,7 @@ import time
 import uuid
 from pydantic import BaseModel, ConfigDict, PrivateAttr
 from pathlib import Path
-from typing import Any, Optional, Set
+from typing import Any, Set
 
 from abstract.tools.registry import registry, tool_error, tool_result
 from entity.puretype import ToolDangerLevel, CronTaskInfo
@@ -126,7 +126,7 @@ def _match_cron(cron_expr: str, dt: datetime.datetime) -> bool:
 
 def _next_cron_time(
     cron_expr: str,
-    after: Optional[datetime.datetime] = None,
+    after: datetime.datetime | None = None,
 ) -> datetime.datetime:
     """计算给定 cron 表达式的下一个执行时间。
 
@@ -167,7 +167,7 @@ class _CronTask(BaseModel):
     skip_agent_notify: bool = False  # 用户显式取消时设为 True，抑制在途执行完成后的通知
     is_wait: bool = False  # 为 True 时不执行任何脚本，仅返回固定提醒内容
     wait_message: str = ""  # wait 任务触发时返回的固定内容
-    _timer: Optional[threading.Timer] = PrivateAttr(default=None)
+    _timer: threading.Timer | None = PrivateAttr(default=None)
 
     def has_timer(self) -> bool:
         """返回任务是否关联了活跃 timer。"""

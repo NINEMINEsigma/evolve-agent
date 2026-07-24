@@ -19,7 +19,6 @@ from __future__ import annotations
 import logging
 import sys
 from pathlib import Path
-from typing import Optional
 
 logger = logging.getLogger(__name__)
 
@@ -77,7 +76,7 @@ def _read_if_exists(path: Path) -> str:
 
 def build_system_prompt(
     mode: str = "fast",
-    extra_blocks: Optional[list[str]] = None,
+    extra_blocks: list[str] | None = None,
     workspace: Path | str = "",
     agentspace: str = "",
     fork_path: str = "",

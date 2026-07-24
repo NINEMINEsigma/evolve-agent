@@ -8,7 +8,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-from typing import Any, Awaitable, Callable, Optional, cast
+from typing import Any, Awaitable, Callable, cast
 
 import dirtyjson
 
@@ -58,7 +58,7 @@ APPROVAL_JSON_SCHEMA: dict[str, Any] = {
 
 async def _handsfree_confirm(
     tool_name: str, args: dict, reason: str, content: str,
-    ask_agent_callback: Optional[Callable[[str], Awaitable[str]]] = None,
+    ask_agent_callback: Callable[[str], Awaitable[str]] | None = None,
     max_dialog_turns: int = 2,
     extra_context: str | None = None,
 ) -> ApprovalResult:

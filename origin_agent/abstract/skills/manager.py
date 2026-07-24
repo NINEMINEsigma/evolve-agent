@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import shutil
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Tuple
 
 from entity.constant import DEFAULT_SKILLS_DIR
 from entity.puretype import SkillPayload
@@ -24,13 +24,13 @@ from .loader import (
 
 def create_skill(
     name: str,
-    skills_dir: Optional[Path] = None,
+    skills_dir: Path | None = None,
     description: str = "",
     category: str | None = None,
     content: str = "",
     author: str = "Evolve-Agent",
     version: str = "1.0.0",
-    tags: Optional[list[str]] = None,
+    tags: list[str] | None = None,
     **extra_frontmatter: Any,
 ) -> SkillPayload:
     """Create a new skill on disk.
@@ -116,10 +116,10 @@ def create_skill(
 
 def update_skill(
     name_or_path: str,
-    skills_dir: Optional[Path] = None,
+    skills_dir: Path | None = None,
     description: str | None = None,
     content: str | None = None,
-    tags: Optional[list[str]] = None,
+    tags: list[str] | None = None,
     **frontmatter_updates: Any,
 ) -> SkillPayload:
     """Update an existing skill's frontmatter and/or body.
@@ -167,7 +167,7 @@ def update_skill(
 
 def delete_skill(
     name_or_path: str,
-    skills_dir: Optional[Path] = None,
+    skills_dir: Path | None = None,
 ) -> dict[str, Any]:
     """Delete a skill and its directory.
 
@@ -201,7 +201,7 @@ def write_skill_file(
     name: str,
     subpath: str,
     content: str,
-    skills_dir: Optional[Path] = None,
+    skills_dir: Path | None = None,
 ) -> dict[str, Any]:
     """Write a file into an existing skill's directory.
 
@@ -248,7 +248,7 @@ def write_skill_file(
 def read_skill_file(
     name: str,
     subpath: str,
-    skills_dir: Optional[Path] = None,
+    skills_dir: Path | None = None,
 ) -> dict[str, Any]:
     """Read a file from an existing skill's directory.
 

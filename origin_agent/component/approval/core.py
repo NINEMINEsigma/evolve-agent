@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import Any, Awaitable, Callable, Optional, TYPE_CHECKING
+from typing import Any, Awaitable, Callable, TYPE_CHECKING
 
 from entity.puretype import ApprovalResult, Role
 from entity.messages import BaseMessage
@@ -30,7 +30,7 @@ async def request_user_confirm(
     args: dict,
     reason: str,
     content: str,
-    ask_agent_callback: Optional[Callable[[str], Awaitable[str]]] = None,
+    ask_agent_callback: Callable[[str], Awaitable[str]] | None = None,
     extra_context: str | None = None,
 ) -> ApprovalResult:
     """统一审批入口。

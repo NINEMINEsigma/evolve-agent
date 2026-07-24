@@ -15,7 +15,7 @@ import json
 import logging
 import threading
 import time
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Tuple
 
 from entity.puretype import ToolAvailability, ToolDangerLevel
 
@@ -58,13 +58,13 @@ class ToolEntry:
         toolset: str,
         schema: dict,
         handler: Callable,
-        check_fn: Optional[Callable] = None,
-        requires_env: Optional[list[str]] = None,
+        check_fn: Callable | None = None,
+        requires_env: list[str] | None = None,
         is_async: bool = False,
         description: str = "",
         emoji: str = "",
-        max_result_size_chars: Optional[int] = None,
-        dynamic_schema_overrides: Optional[Callable] = None,
+        max_result_size_chars: int | None = None,
+        dynamic_schema_overrides: Callable | None = None,
         danger_level: ToolDangerLevel = ToolDangerLevel.readonly,
         no_timeout: bool = False,
         availability: ToolAvailability = ToolAvailability.EVERY,
@@ -73,15 +73,15 @@ class ToolEntry:
         self.toolset: str = toolset
         self.schema: dict = schema
         self.handler: Callable = handler
-        self.check_fn: Optional[Callable] = check_fn
+        self.check_fn: Callable | None = check_fn
         self.requires_env: list[str] = requires_env or []
         self.is_async: bool = is_async
         self.description: str = description
         self.emoji: str = emoji
-        self.max_result_size_chars: Optional[int] = max_result_size_chars
+        self.max_result_size_chars: int | None = max_result_size_chars
         # 可选的零参数可调用对象，返回 schema 覆盖字典，
         # 在 get_definitions() 时应用。用于依赖运行时配置的字段。
-        self.dynamic_schema_overrides: Optional[Callable] = dynamic_schema_overrides
+        self.dynamic_schema_overrides: Callable | None = dynamic_schema_overrides
         self.danger_level: ToolDangerLevel = danger_level
         self.no_timeout: bool = no_timeout
         self.availability: ToolAvailability = availability
@@ -190,7 +190,7 @@ class ToolRegistry:
         """返回 toolset 可用性检查的稳定快照。"""
         return self._snapshot_state()[1]
 
-    def _evaluate_toolset_check(self, toolset: str, check: Optional[Callable]) -> bool:
+    def _evaluate_toolset_check(self, toolset: str, check: Callable | None) -> bool:
         """运行 toolset 检查，缺失或失败时视为可用。"""
         if not check:
             return True
@@ -347,13 +347,13 @@ class ToolRegistry:
         toolset: str,
         schema: dict,
         handler: Callable,
-        check_fn: Optional[Callable] = None,
-        requires_env: Optional[list[str]] = None,
+        check_fn: Callable | None = None,
+        requires_env: list[str] | None = None,
         is_async: bool = False,
         description: str = "",
         emoji: str = "",
-        max_result_size_chars: Optional[int] = None,
-        dynamic_schema_overrides: Optional[Callable] = None,
+        max_result_size_chars: int | None = None,
+        dynamic_schema_overrides: Callable | None = None,
         override: bool = False,
         danger_level: ToolDangerLevel = ToolDangerLevel.readonly,
         no_timeout: bool = False,
@@ -553,7 +553,7 @@ class ToolRegistry:
     def get_max_result_size(
         self,
         name: str,
-        default: Optional[int] = None,
+        default: int | None = None,
     ) -> int:
         """返回每个工具的最大结果大小，或 *default*（或全局默认值）。"""
         entry: ToolEntry | None = self.get_entry(name)
@@ -717,7 +717,7 @@ def tool_error(message: str, **extra: Any) -> dict:
     return result
 
 
-def tool_result(data: Optional[dict] = None, **kwargs: Any) -> dict:
+def tool_result(data: dict | None = None, **kwargs: Any) -> dict:
     """返回工具 handler 的结果 dict。
 
     接受 dict 位置参数 *或* 关键字参数（不能混用）：

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Optional
 
 from pydantic import BaseModel, ConfigDict
 
@@ -49,10 +48,10 @@ class RuntimeContext(BaseModel):
 
     # -- fallback 模式字段 -----------------------------------------------
 
-    fix_path: Optional[Path] = None
+    fix_path: Path | None = None
     """mode=='fallback' 时，需要修复的目录（损坏的 fast）。"""
 
-    fix_log_path: Optional[Path] = None
+    fix_log_path: Path | None = None
     """mode=='fallback' 时，需要参考的错误日志路径。"""
 
     # -- Gateway 配置 -----------------------------------------------------

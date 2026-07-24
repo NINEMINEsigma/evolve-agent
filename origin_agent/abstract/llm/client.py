@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from collections.abc import AsyncIterator
-from typing import Any, Optional
+from typing import Any
 
 from entity.messages import BaseMessage
 from entity.puretype import LLMResponse, StreamChunk
@@ -31,8 +31,8 @@ class BaseLLMClient(ABC):
     async def chat(
         self,
         messages: list[BaseMessage],
-        tools: Optional[list[dict[str, Any]]] = None,
-        response_format: Optional[dict[str, str]] = None,
+        tools: list[dict[str, Any]] | None = None,
+        response_format: dict[str, str] | None = None,
         character: str = "",
     ) -> LLMResponse:
         """发送聊天请求，返回完整结构化响应。
@@ -48,8 +48,8 @@ class BaseLLMClient(ABC):
     async def chat_stream(
         self,
         messages: list[BaseMessage],
-        tools: Optional[list[dict[str, Any]]] = None,
-        response_format: Optional[dict[str, str]] = None,
+        tools: list[dict[str, Any]] | None = None,
+        response_format: dict[str, str] | None = None,
         character: str = "",
     ) -> AsyncIterator[StreamChunk]:
         """发送流式聊天请求，逐块返回增量内容。
