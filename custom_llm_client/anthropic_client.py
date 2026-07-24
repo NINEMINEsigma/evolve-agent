@@ -29,7 +29,7 @@ import json
 from abstract.llm.client import BaseLLMClient
 from abstract.llm.formats import messages_to_anthropic_list
 from entity.messages import BaseMessage
-from entity.puretype import LLMResponse, StreamChunk, ToolCall, Usage
+from entity.puretype import LLMResponse, StreamChunk, ToolCallRequest, Usage
 from entity.constant import (
     BACKOFF_BASE,
     LLM_RETRY_COUNT,
@@ -331,7 +331,7 @@ class AnthropicLLMClient(BaseLLMClient):
                             arguments = final_input
                         else:
                             arguments = _safe_json_parse(pending_tool_input)
-                        tc = ToolCall(
+                        tc = ToolCallRequest(
                             id=current_tool_use["id"],
                             name=current_tool_use["name"],
                             arguments=arguments,
@@ -361,7 +361,7 @@ class AnthropicLLMClient(BaseLLMClient):
                 if current_tool_use is not None and current_tool_use.get("id") and current_tool_use.get("name"):
                     arguments = _safe_json_parse(pending_tool_input)
                     state["completed_tool_calls"].append(
-                        ToolCall(
+                        ToolCallRequest(
                             id=current_tool_use["id"],
                             name=current_tool_use["name"],
                             arguments=arguments,
@@ -494,7 +494,7 @@ def _parse_message(response: Any) -> LLMResponse:
     """从 Anthropic Message 对象解析 LLMResponse。"""
     content = ""
     reasoning_content = ""
-    tool_calls: list[ToolCall] = []
+    tool_calls: list[ToolCallRequest] = []
 
     for block in response.content or []:
         block_type = getattr(block, "type", None)
@@ -515,14 +515,14 @@ def _parse_message(response: Any) -> LLMResponse:
     )
 
 
-def _parse_tool_use_block(block: Any) -> ToolCall:
+def _parse_tool_use_block(block: Any) -> ToolCallRequest:
     """将 Anthropic tool_use block 解析为 ToolCall。"""
     tc_id = getattr(block, "id", "")
     name = getattr(block, "name", "")
     input_dict = getattr(block, "input", {}) or {}
     if not isinstance(input_dict, dict):
         input_dict = {}
-    return ToolCall(id=tc_id, name=name, arguments=input_dict)
+    return ToolCallRequest(id=tc_id, name=name, arguments=input_dict)
 
 
 def _map_stop_reason(stop_reason: Any) -> str:

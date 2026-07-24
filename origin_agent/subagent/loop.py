@@ -20,7 +20,7 @@ from typing import * # type: ignore
 from abstract.tools.registry import ToolEntry, registry as tool_registry
 from abstract.llm.client import BaseLLMClient
 from abstract.llm.loader import create_llm_client
-from entity.puretype import LLMResponse, ToolCall
+from entity.puretype import LLMResponse, ToolCallRequest
 from entity.constant import MAIN_AGENT_CHARACTER_NAME, USER_CHARACTER_NAME, History_Version as __History_Version__
 from entity.messages import (
     History,
@@ -75,11 +75,11 @@ def format_user_message(user_name: str, message_type: str, content: str, co_reci
 class PendingToolCall:
     """挂起的工具调用条目。"""
 
-    def __init__(self, tool_call: ToolCall) -> None:
+    def __init__(self, tool_call: ToolCallRequest) -> None:
         self.tool_call_id: str = tool_call.id
         self.name: str = tool_call.name
         self.arguments: dict[str, Any] = dict(tool_call.arguments) if tool_call.arguments else {}
-        self.result: asyncio.Future = asyncio.get_event_loop().create_future()
+        self.result: asyncio.Future = asyncio.get_running_loop().create_future()
 
 
 class SubAgentLoop(BasePrivateChatAgentLoop):
@@ -525,7 +525,7 @@ class SubAgentLoop(BasePrivateChatAgentLoop):
             )
         return True
 
-    async def _queue_for_approval(self, tc: ToolCall) -> ToolResultMessage:
+    async def _queue_for_approval(self, tc: ToolCallRequest) -> ToolResultMessage:
         """将工具调用加入待审批队列并阻塞等待结果。
 
         子 Agent 进入暂停状态，直到父 Agent 通过 approve_tools() 审批。
@@ -591,7 +591,7 @@ class SubAgentLoop(BasePrivateChatAgentLoop):
             )
             return self._make_tool_msg(tc.id, f"Tool call rejected: {exc}")
 
-    async def _execute_approved_tool(self, tc: ToolCall) -> ToolResultMessage:
+    async def _execute_approved_tool(self, tc: ToolCallRequest) -> ToolResultMessage:
         """执行已获批准的工具调用，补齐 _meta 注入和 UI 事件推送。"""
         # 沙箱隔离：拒绝授权清单之外的工具
         if tc.name not in self._allowed_tool_names:

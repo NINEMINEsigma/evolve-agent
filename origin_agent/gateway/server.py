@@ -447,6 +447,15 @@ def _push_agentspace_lock_state() -> None:
             if ws is None:
                 continue
             try:
+                # NOTE: fire-and-forget 通知，仅用于前端 UI 实时刷新锁状态。
+                #   锁正确性由全局 _agentspace_lock dict 保证，不依赖此推送；
+                #   前端另有 GET /api/agentspace/lock/status 可轮询兜底。
+                #   已知局限（不影响锁正确性）：
+                #     1. ensure_future 要求当前线程有 running loop，否则抛 RuntimeError
+                #        被外层 except 吞掉 → 推送静默失败，前端不更新。
+                #     2. 返回的 Task 未持有引用，可能被 GC 回收导致协程取消。
+                #     3. 内层 except 静默吞错，单连接持续失败时无日志可排查。
+                #   彻底修复需用 run_coroutine_threadsafe(coro, loop) 并持有 Task 引用。
                 _asyncio.ensure_future(ws.send_text(
                     json.dumps(Message(type=MessageType.AGENTSPACE_LOCK, session_id=sid, content=payload).model_dump(exclude_none=True), ensure_ascii=False)
                 ))
@@ -736,20 +745,21 @@ async def regenerate_response(session_id: str):
             )
         except Exception:
             logger.warning("Failed to send regenerate_trim to session=%s", session_id, exc_info=True)
-        # 复用 process_message 流程（流式事件自动推送到 ws）
-        # 历史已包含最后一条 user 消息，避免重复追加
-        reply: str = await loop.loop.process_message(
-            content,
-            skip_append=True,
-            visible_characters=result.get("visible_characters"),
-            response_characters=result.get("response_characters"),
+    # 没有前端连接时只重新生成并尽力而为推送
+    # 复用 process_message 流程（流式事件自动推送到 ws）
+    # 历史已包含最后一条 user 消息，避免重复追加
+    reply: str = await loop.loop.process_message(
+        content,
+        skip_append=True,
+        visible_characters=result.get("visible_characters"),
+        response_characters=result.get("response_characters"),
+    )
+    from system.application import Application
+    sink = Application.current().frontend_sink
+    if sink is not None and reply:
+        await sink.emit_assistant_message(
+            session_id, reply, loop.current_character_agent,
         )
-        from system.application import Application
-        sink = Application.current().frontend_sink
-        if sink is not None and reply:
-            await sink.emit_assistant_message(
-                session_id, reply, loop.current_character_agent,
-            )
     logger.info("Regenerate ok | session=%s", session_id)
     return {"regenerate": True, "session_id": session_id}
 
@@ -1056,7 +1066,7 @@ async def file_picker():
     print(json.dumps(list(files)))
     """)
 
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     try:
         result = await loop.run_in_executor(
             None,

@@ -121,6 +121,7 @@ class CharacterSystemMessage(CharacterMessage):
         return super().as_content(current_character_agent, **kwargs)
 
 
+# TODO: 需要优化存储位置
 _Role_Prefix_Template: str|None = None
 _Identity_Prefix_Template: str|None = None
 
@@ -356,7 +357,6 @@ class History(BaseModel):
             self.messages.pop(index)
             self.update_last_user_message()
             return True
-        return False
 
     def remove_unpaired_tool_calls(self) -> None:
         """移除所有没有对应 ToolResultMessage 的 tool_calls。"""

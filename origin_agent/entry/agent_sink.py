@@ -174,7 +174,7 @@ class FrontendSink(AgentSink):
         from entity.puretype import ApprovalResult
 
         request_id: str = uuid.uuid4().hex[:8]
-        loop: asyncio.AbstractEventLoop = asyncio.get_event_loop()
+        loop: asyncio.AbstractEventLoop = asyncio.get_running_loop()
         fut: asyncio.Future[ApprovalResult] = loop.create_future()
         self._pending_confirms[request_id] = fut
         self._confirm_session_map[request_id] = session_id
@@ -242,7 +242,7 @@ class FrontendSink(AgentSink):
                            session_id: str = "") -> dict:
         """向 WebSocket 发送 ask_request 并等待前端响应。"""
         request_id: str = uuid.uuid4().hex[:8]
-        loop: asyncio.AbstractEventLoop = asyncio.get_event_loop()
+        loop: asyncio.AbstractEventLoop = asyncio.get_running_loop()
         fut: asyncio.Future[str] = loop.create_future()
         self._pending_asks[request_id] = fut
         self._ask_session_map[request_id] = session_id
@@ -524,7 +524,7 @@ class ParentAgentSink(AgentSink):
         父 Agent 通过 approve_subagent 工具回调 approve_tools() 驱动 Future。
         """
         import uuid
-        from entity.puretype import ApprovalResult, ToolCall
+        from entity.puretype import ApprovalResult, ToolCallRequest
         from component.approval import is_handsfree_mode, request_user_confirm
         from subagent.loop import PendingToolCall
 
@@ -542,7 +542,7 @@ class ParentAgentSink(AgentSink):
 
         # 正常模式：创建 PendingToolCall 入队列，等待父 Agent 审批
         tool_call_id = uuid.uuid4().hex[:8]
-        tc = ToolCall(id=tool_call_id, name=tool_name, arguments=args)
+        tc = ToolCallRequest(id=tool_call_id, name=tool_name, arguments=args)
         pending = PendingToolCall(tc)
         self._loop.add_pending_approval(pending)
 

@@ -25,7 +25,7 @@ import openai
 from abstract.llm.client import BaseLLMClient
 from abstract.llm.formats import messages_to_openai_list, to_openai_message
 from entity.messages import BaseMessage
-from entity.puretype import LLMResponse, StreamChunk, ToolCall, Usage
+from entity.puretype import LLMResponse, StreamChunk, ToolCallRequest, Usage
 from entity.constant import TOOL_RESULT_PREVIEW_CHARS, LLM_RETRY_COUNT, BACKOFF_BASE
 from system.context import RuntimeContext
 
@@ -348,7 +348,7 @@ class OpenAILLMClient(BaseLLMClient):
                     if buf["id"] and buf["name"]:
                         completed_tool_indices.add(idx)
                         state["completed_tool_calls"].append(
-                            ToolCall(
+                            ToolCallRequest(
                                 id=buf["id"],
                                 name=buf["name"],
                                 arguments=_safe_json_parse(buf["arguments"]),
@@ -365,7 +365,7 @@ class OpenAILLMClient(BaseLLMClient):
                 continue
             if buf["id"] and buf["name"]:
                 completed_tool_indices.add(idx)
-                tc = ToolCall(
+                tc = ToolCallRequest(
                     id=buf["id"],
                     name=buf["name"],
                     arguments=_safe_json_parse(buf["arguments"]),
@@ -428,7 +428,7 @@ def _build_resume_messages(
     messages: list[dict[str, Any]] = list(original_messages)
     assistant_content: str = state.get("content", "")
     assistant_reasoning: str | None = state.get("reasoning") or None
-    completed_tool_calls: list[ToolCall] = state.get("completed_tool_calls", [])
+    completed_tool_calls: list[ToolCallRequest] = state.get("completed_tool_calls", [])
 
     # Build assistant message via entity + formatter instead of raw dict
     from entity.messages import ToolCall as MsgToolCall, FunctionCall as MsgFunctionCall
@@ -577,7 +577,7 @@ def _safe_json_parse(raw: str) -> dict[str, Any]:
     return {"_parse_error": True, "_raw_preview": raw[:TOOL_RESULT_PREVIEW_CHARS]}
 
 
-def _parse_tool_call(tc: Any) -> ToolCall | None:
+def _parse_tool_call(tc: Any) -> ToolCallRequest | None:
     """从完整的 tool_call 对象解析为 ToolCall。
 
     对字段缺失做防御式处理：``id``、``function.name`` 任一缺失时返回 ``None``。
@@ -592,21 +592,21 @@ def _parse_tool_call(tc: Any) -> ToolCall | None:
     if not name:
         return None
     arguments = getattr(function, "arguments", None) or ""
-    return ToolCall(
+    return ToolCallRequest(
         id=tc_id,
         name=name,
         arguments=_safe_json_parse(arguments),
     )
 
 
-def _extract_tool_calls(obj: Any) -> list[ToolCall]:
+def _extract_tool_calls(obj: Any) -> list[ToolCallRequest]:
     """从 message 对象中提取完整的 tool_calls 列表。"""
     if obj is None:
         return []
     tool_calls = getattr(obj, "tool_calls", None)
     if not tool_calls:
         return []
-    result: list[ToolCall] = []
+    result: list[ToolCallRequest] = []
     for tc in tool_calls:
         parsed = _parse_tool_call(tc)
         if parsed:

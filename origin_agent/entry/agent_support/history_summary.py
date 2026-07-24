@@ -24,7 +24,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-def messages_to_text(messages: list) -> str:
+def messages_to_text(messages: list[BaseMessage]) -> str:
     """把一系列 ``BaseMessage`` 转换为适合 LLM 阅读的纯文本。
 
     格式：每条消息以 ``## ROLE`` 开头，按需输出 tool_call/tool_result 行。
@@ -38,14 +38,14 @@ def messages_to_text(messages: list) -> str:
     lines: list[str] = []
 
     for msg in messages:
-        role_str = _role_display(msg)
-        if role_str is None:
+        character_str = _character_display(msg)
+        if character_str is None:
             continue
 
         # 工具结果消息：紧凑输出 + 截断
         if isinstance(msg, ToolResultMessage):
             text = _content_to_text(msg.content)
-            lines.append(f"## {role_str} ({msg.tool_call_id})")
+            lines.append(f"## {character_str} ({msg.tool_call_id})")
             if len(text) > TOOL_RESULT_PREVIEW_CHARS:
                 lines.append(text[:TOOL_RESULT_PREVIEW_CHARS] + "...")
             else:
@@ -57,7 +57,7 @@ def messages_to_text(messages: list) -> str:
         if isinstance(msg, CharacterConversationMessage) and msg.tool_calls:
             content_text = _content_to_text(msg.content)
             if content_text:
-                lines.append(f"## {role_str}")
+                lines.append(f"## {character_str}")
                 lines.append(content_text)
             for tc in msg.tool_calls:
                 args_excerpt = tc.function.arguments[:200]
@@ -68,7 +68,7 @@ def messages_to_text(messages: list) -> str:
         # 普通 user / assistant
         content_text = _content_to_text(msg.content)
         if content_text:
-            lines.append(f"## {role_str}")
+            lines.append(f"## {character_str}")
             lines.append(content_text)
             lines.append("")
 
@@ -128,11 +128,17 @@ def extract_last_rounds(
     return result
 
 
-def _role_display(msg) -> str | None:
-    """返回消息角色的显示名称。跳过 system 角色。"""
-    from entity.messages import CharacterSystemMessage
+def _character_display(msg: BaseMessage) -> str | None:
+    """返回消息角色的显示名称。跳过 system 角色。
+
+    优先使用 character_name（多 Agent 模式下区分各 agent 身份），
+    非 CharacterMessage 时回退到 role.value。
+    """
+    from entity.messages import CharacterSystemMessage, CharacterMessage
     if isinstance(msg, CharacterSystemMessage):
         return None
+    if isinstance(msg, CharacterMessage):
+        return msg.character_name
     try:
         return str(msg.role.value).upper()
     except Exception:

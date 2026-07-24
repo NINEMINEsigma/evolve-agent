@@ -25,7 +25,6 @@ from entity.constant import (
     USER_CHARACTER_NAME,
     MULTI_AGENT_MAX_CASCADE_DEPTH,
     LOG_PREVIEW_CHARS,
-    INHERIT_LAST_ROUNDS,
 )
 from system.templates import get_templates_dir, render_multi_agent_prompt
 from system.session_store import SessionStore
@@ -287,111 +286,6 @@ class MultiAgentLoop(BaseAgentLoop, IMainSessionLoop):
                     "Failed to archive session=%s", self.session_id,
                 )
         return {"terminated": True, "session_id": self.session_id}
-
-    async def merge_sessions(self, sources: list[str]) -> dict:
-        """从源会话摘要创建继承会话，新会话降级为普通模式。
-
-        多 agent 会话的摘要继承了多 agent 的对话历史，但新会话本身
-        以普通模式（ParentAgentLoop）启动，用户可在此基础上继续对话。
-        """
-        if self.session_manager is None:
-            return {"error": "session manager not available", "merged": False}
-        if not sources:
-            return {"error": "sources list is empty", "merged": False}
-        if self._session_store is None:
-            return {"error": "session store not available", "merged": False}
-
-        from entry.agent_support.history_summary import (
-            summarize_history, messages_to_text, extract_last_rounds,
-        )
-        from system.templates import read_template
-
-        # 收集各源 session 的摘要，缺失时自动生成
-        summaries: list[str] = []
-        for sid in sources:
-            summary = self._session_store.read_summary(sid)
-            logger.info(
-                "merge_sessions: source=%s summary_len=%d",
-                sid, len(summary),
-            )
-            if not summary:
-                history = self._session_store.read_history(sid)
-                if history and history.count > 0:
-                    llm = self._get_session_info_llm_client()
-                    if llm is not None:
-                        summary = await summarize_history(history, llm)
-                    if summary:
-                        self._session_store.write_summary(sid, summary)
-            if summary:
-                summaries.append(f"[Session {sid}]: {summary}")
-
-        if not summaries:
-            return {"error": "no summaries found for source sessions", "merged": False}
-
-        # 构建初始上下文
-        if len(summaries) == 1:
-            context = (
-                read_template("session_inherit.txt")
-                .replace("{{old_sid}}", sources[0])
-                .replace("{{summary}}", summaries[0])
-            )
-        else:
-            # 多源合并：直接拼接，不截断
-            joined = "\n\n---\n\n".join(summaries)
-            context = (
-                f"This session merges multiple previous sessions. "
-                f"Here are their summaries:\n\n"
-                f"{joined}"
-            )
-
-        # 创建新 session（降级为普通模式，不传 loop_meta）
-        new_sid = self.session_manager.create_with_context(
-            context=context,
-            parent_sid=sources[0],
-            parents=sources,
-            role=Role.USER,
-        )
-
-        # 追加各源会话尾部轮次文本
-        tail_blocks: list[str] = []
-        for sid in sources:
-            try:
-                src_history = self._session_store.read_history(sid)
-                if src_history is None or src_history.count == 0:
-                    continue
-                tail_msgs = extract_last_rounds(
-                    src_history,
-                    rounds=INHERIT_LAST_ROUNDS,
-                    include_tool_messages=False,
-                )
-                if tail_msgs:
-                    tail_blocks.append(
-                        f"### Source session {sid}\n" + messages_to_text(tail_msgs)
-                    )
-            except Exception:
-                logger.exception("Failed to append tail rounds for source=%s", sid)
-        if tail_blocks:
-            context += "\n\n## Recent conversation rounds\n" + "\n\n---\n\n".join(tail_blocks)
-
-        # 写入仅含 summary 消息的历史
-        summary_history = History()
-        summary_history.add_message(CharacterConversationMessage(
-            role=Role.USER,
-            character_name=USER_CHARACTER_NAME,
-            content=context,
-            visible_characters=[self.current_character_agent],
-        ))
-        self._session_store.write_history(new_sid, summary_history)
-
-        # 归档源 sessions
-        for sid in sources:
-            self.session_manager.archive(sid, continuation_sid=new_sid)
-
-        logger.info(
-            "Multi-agent sessions merged | new=%s sources=%s summaries=%d",
-            new_sid, sources, len(summaries),
-        )
-        return {"merged": True, "session_id": new_sid, "sources": sources}
 
     async def process_message(
         self,

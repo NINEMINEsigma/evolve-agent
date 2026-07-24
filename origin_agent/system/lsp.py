@@ -147,9 +147,13 @@ class LSPManager:
 
             # 获取或创建事件循环
             try:
-                self._loop = asyncio.get_event_loop()
+                self._loop = asyncio.get_running_loop()
+                if self._loop is None:
+                    raise RuntimeError("No running event loop found")
             except RuntimeError:
                 self._loop = asyncio.new_event_loop()
+                if self._loop is None:
+                    raise RuntimeError("Failed to create new event loop")
 
             # 启动子进程
             try:

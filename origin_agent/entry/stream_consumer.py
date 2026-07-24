@@ -11,7 +11,7 @@ import logging
 from typing import Any, TYPE_CHECKING
 
 from abstract.llm.client import BaseLLMClient
-from entity.puretype import LLMResponse, Usage, ToolCall
+from entity.puretype import LLMResponse, Usage, ToolCallRequest
 from entity.messages import BaseMessage
 
 if TYPE_CHECKING:
@@ -60,7 +60,7 @@ class StreamConsumer:
         content: str = ""
         reasoning_content: str = ""
         reasoning_field_name: str | None = None
-        tool_calls: list[ToolCall] = [] 
+        tool_calls: list[ToolCallRequest] = [] 
         finish_reason: str = "stop"
         usage_dict: dict[str, int] = {
             "prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0,

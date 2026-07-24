@@ -14,7 +14,7 @@ import time
 from datetime import datetime
 from typing import Any, Awaitable, Callable, TYPE_CHECKING
 
-from entity.puretype import Role, ToolCallMeta, ToolCall
+from entity.puretype import Role, ToolCallMeta, ToolCallRequest
 from entity.messages import ToolResultMessage
 from entry.base_agent_loop import BaseAgentLoop, ToolContext, IMainSessionLoop
 from entry.tool_post_dispatch import finalize_tool_result
@@ -43,7 +43,7 @@ class ToolExecutor:
 
     async def execute(
         self,
-        tc: ToolCall,
+        tc: ToolCallRequest,
         session_id: str,
         *,
         character_name: str | None = None,

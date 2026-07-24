@@ -224,7 +224,7 @@ class CronTaskInfo(BaseModel):
 # LLM Types
 # ---------------------------------------------------------------------------
 
-class ToolCall(BaseModel):
+class ToolCallRequest(BaseModel):
     """LLM 返回的工具调用描述。"""
     model_config = ConfigDict(frozen=True)
 
@@ -247,7 +247,7 @@ class LLMResponse(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     content: str = ""
-    tool_calls: list[ToolCall] = []
+    tool_calls: list[ToolCallRequest] = []
     finish_reason: str = "stop"
     reasoning_content: str | None = None
     """DeepSeek thinking-mode 载荷 — 在后续回合中必须回传。"""
@@ -265,7 +265,7 @@ class StreamChunk(BaseModel):
     """DeepSeek thinking-mode 增量 — 仅用于展示。"""
     reasoning_field_name: str | None = None
     """当前 reasoning_delta 对应的原始字段名（如 reasoning_content / reasoning）。"""
-    tool_call: ToolCall | None = None
+    tool_call: ToolCallRequest | None = None
     """当前 chunk 中首次完整出现的 tool_call（用于工具调用开始通知）。"""
     finish_reason: str | None = None
     usage: Usage | None = None

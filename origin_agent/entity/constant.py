@@ -286,7 +286,7 @@ CRON_STORE_FILENAME: str = "cron_jobs.json"
 
 # Cron 定时任务 stdout 预览最大长度（传给 Agent 的预览字符数）
 # 超过此长度时，Agent 会收到提示去日志文件查看完整输出
-CRON_STDOUT_PREVIEW_MAX_LENGTH = 5000
+CRON_STDOUT_PREVIEW_MAX_LENGTH: int = 5000
 
 # Cron 最小可设间隔/等待秒数（schedule_cron 和 wait_cron 共用）
 CRON_MIN_INTERVAL_SECONDS: int = 3
