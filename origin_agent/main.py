@@ -144,9 +144,22 @@ class App:
     async def _start_gateway(self) -> None:
         """创建 uvicorn server 并作为后台 task 运行。"""
         try:
-            from gateway.server import create_server, set_agentspace_path
+            from gateway.server import create_server, set_agentspace_path, check_port_available
         except ImportError as exc:
             logger.warning("Gateway unavailable (import error): %s", exc)
+            self._shutdown_event.set()
+            return
+
+        # ---- 端口可用性检查（早失败，避免无效初始化）----
+        host: str = self.ctx.gateway_host
+        port: int = self.ctx.gateway_port
+        if not check_port_available(host, port):
+            logger.error(
+                "Gateway port %d on %s is already in use — aborting "
+                "(exit 0, no fallback)",
+                port, host,
+            )
+            self._exit_code = 0
             self._shutdown_event.set()
             return
 
@@ -242,8 +255,6 @@ class App:
                     gguf_path,
                 )
 
-        host: str = self.ctx.gateway_host
-        port: int = self.ctx.gateway_port
         self._gateway_server = create_server(host=host, port=port)
         self._gateway_task = asyncio.create_task(
             self._gateway_server.serve(),  # type: ignore[union-attr]

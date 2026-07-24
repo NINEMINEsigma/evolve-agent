@@ -1648,6 +1648,21 @@ async def ws_chat(ws: WebSocket) -> None:
 # ---------------------------------------------------------------------------
 
 
+def check_port_available(host: str, port: int) -> bool:
+    """探测端口是否可用（未被其他进程占用）。
+
+    通过尝试 bind 临时 TCP socket 判断。
+    返回 True 表示端口空闲，可以启动 server。
+    """
+    import socket
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        try:
+            sock.bind((host, port))
+            return True
+        except OSError:
+            return False
+
+
 def create_server(host: str | None = None, port: int | None = None) -> uvicorn.Server:
     """创建 uvicorn Server 实例。
 
