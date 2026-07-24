@@ -1,11 +1,14 @@
 /* ── Drawer ── */
+/* fixed 脱离文档流：辐条不占 flex 空间，hover 膨胀不产生水平滚动条，
+   DOM 移除/添加不改变主内容区宽度，避免触发等高线 ResizeObserver 重绘 */
 .right-trigger-strip {
   display: flex;
   flex-direction: column;
   width: 8px;
   height: 100%;
-  flex-shrink: 0;
-  position: relative;
+  position: fixed;
+  top: 0;
+  right: 0;
   z-index: 100;
 }
 

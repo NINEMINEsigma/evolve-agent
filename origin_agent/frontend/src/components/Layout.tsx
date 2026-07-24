@@ -199,6 +199,7 @@ export default function Layout({ ws, onContextMenu }: LayoutProps) {
     <>
       <Sidebar
         collapsed={sidebarCollapsed}
+        isMobile={isMobile}
         sessions={ws.sessions}
         sessionId={ws.sessionId}
         searchQuery={ws.searchQuery}
@@ -339,7 +340,7 @@ export default function Layout({ ws, onContextMenu }: LayoutProps) {
           >
             <span className="right-trigger-icon">◀</span>
           </div>
-          {Object.keys(ws.subagentSessions).length > 0 && !subagentPanelOpen && (
+          {Object.keys(ws.subagentSessions).length > 0 && (
             <div
               className="right-trigger-bar subagent-trigger-bar"
               onClick={() => setSubagentPanelOpen(true)}

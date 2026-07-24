@@ -346,6 +346,9 @@ export function useWebSocket() {
     return () => observer.disconnect();
   }, [scrollToBottomIfAtBottom]);
 
+  // ── computed ──
+  const isReady = conn.status === "已连接";
+
   return {
     // state
     messages: session.messages,
@@ -449,6 +452,7 @@ export function useWebSocket() {
     instantScrollRef,
     fileInputRef: upload.fileInputRef,
     // computed
+    isReady,
     sidebarItems: session.sidebarItems,
     expandedClusters: session.expandedClusters,
     toggleCluster: session.toggleCluster,

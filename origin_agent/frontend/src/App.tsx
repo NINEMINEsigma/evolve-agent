@@ -1,10 +1,13 @@
 import { useCallback, useEffect, useState } from "react";
 import { Routes, Route } from "react-router-dom";
+import { AnimatePresence } from "framer-motion";
 import { useWebSocket } from "./hooks/useWebSocket";
 import { useGlobalTooltip } from "./hooks/useGlobalTooltip";
 import Layout from "./components/Layout";
 import ChatContextMenu from "./components/ChatContextMenu";
 import TagEditor from "./components/TagEditor";
+import SplashScreen from "./components/SplashScreen";
+import SkeletonScreen from "./components/SkeletonScreen";
 import { ConnectionDiagnosticsProvider } from "./context/ConnectionDiagnosticsContext";
 import ErrorBoundary from "./components/ErrorBoundary";
 import Agentspace from "./pages/Agentspace";
@@ -13,6 +16,7 @@ import { SessionInfo } from "./types";
 function ChatApp() {
   useGlobalTooltip();
   const ws = useWebSocket();
+  const [showSplash, setShowSplash] = useState(true);
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; sid: string } | null>(null);
   const [tagEditorSession, setTagEditorSession] = useState<SessionInfo | null>(null);
 
@@ -28,6 +32,7 @@ function ChatApp() {
 
   return (
     <ErrorBoundary>
+      {/* 正常内容始终渲染，开屏/骨架屏作为覆盖层 */}
       <div className="app">
         <ConnectionDiagnosticsProvider
           value={{
@@ -70,6 +75,20 @@ function ChatApp() {
           />
         )}
       </div>
+
+      {/* 开屏动画覆盖层 */}
+      <AnimatePresence mode="wait">
+        {showSplash && (
+          <SplashScreen key="splash" onFinish={() => setShowSplash(false)} />
+        )}
+      </AnimatePresence>
+
+      {/* 骨架屏覆盖层：开屏结束后且 WebSocket 未就绪时显示 */}
+      <AnimatePresence mode="wait">
+        {!showSplash && !ws.isReady && (
+          <SkeletonScreen key="skeleton" />
+        )}
+      </AnimatePresence>
     </ErrorBoundary>
   );
 }
