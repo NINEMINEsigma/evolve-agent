@@ -199,6 +199,7 @@ export default function Layout({ ws, onContextMenu }: LayoutProps) {
     <>
       <Sidebar
         collapsed={sidebarCollapsed}
+        isMobile={isMobile}
         sessions={ws.sessions}
         sessionId={ws.sessionId}
         searchQuery={ws.searchQuery}

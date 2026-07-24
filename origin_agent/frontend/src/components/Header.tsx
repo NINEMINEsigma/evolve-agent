@@ -148,21 +148,23 @@ export default function Header({
   return (
     <header className={`app-header ${isMobile && collapsed ? "app-header-collapsed" : ""}`}>
       <div className="header-left">
-        <button
-          className="sidebar-toggle"
-          onClick={onToggleSidebar}
-          data-tooltip={sidebarCollapsed ? "展开侧栏" : "收起侧栏"}
-        >
-          {sidebarCollapsed ? (
-            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2">
-              <path d="M9 18l6-6-6-6" />
-            </svg>
-          ) : (
-            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2">
-              <path d="M15 18l-6-6 6-6" />
-            </svg>
-          )}
-        </button>
+        {isMobile && (
+          <button
+            className="sidebar-toggle"
+            onClick={onToggleSidebar}
+            data-tooltip={sidebarCollapsed ? "展开侧栏" : "收起侧栏"}
+          >
+            {sidebarCollapsed ? (
+              <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M9 18l6-6-6-6" />
+              </svg>
+            ) : (
+              <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M15 18l-6-6 6-6" />
+              </svg>
+            )}
+          </button>
+        )}
         {sessionId && (
           <span className="session-badge" data-tooltip="刷新页面后自动恢复此会话">
             {sessionId}

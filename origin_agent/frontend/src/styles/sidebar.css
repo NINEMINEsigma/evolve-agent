@@ -622,3 +622,45 @@
   margin-left: 6px; /* 成员与簇竖线之间保持适当间距 */
   /* 成员左侧复用 .cluster::before 的竖线，通过 margin-left 留空 */
 }
+
+/* ── Desktop edge drawer (auto-hide sidebar, ≥769px) ── */
+@media (min-width: 769px) {
+  .sidebar-hotzone {
+    position: fixed;
+    left: 0;
+    top: 56px;
+    bottom: 0;
+    width: 24px;
+    z-index: 25;
+  }
+
+  .sidebar.drawer-hidden,
+  .sidebar.drawer-peek,
+  .sidebar.drawer-open {
+    position: fixed;
+    left: 0;
+    top: 56px;
+    bottom: 0;
+    z-index: 30;
+    width: 220px;
+    background: rgba(var(--bg-secondary-rgb), 0.72);
+    backdrop-filter: blur(18px) saturate(1.4);
+    -webkit-backdrop-filter: blur(18px) saturate(1.4);
+    border-right: 1px solid var(--border-strong);
+    border-radius: 0 12px 12px 0;
+    box-shadow: 4px 0 32px rgba(0, 0, 0, 0.45);
+    transition: transform var(--duration-normal) var(--ease-out);
+  }
+
+  .sidebar.drawer-hidden {
+    transform: translateX(-100%);
+  }
+
+  .sidebar.drawer-peek {
+    transform: translateX(calc(-100% + 12px));
+  }
+
+  .sidebar.drawer-open {
+    transform: translateX(0);
+  }
+}

@@ -1,9 +1,11 @@
 import { useState } from "react";
 import { SessionInfo, SessionCluster, SidebarItem } from "../types";
 import { formatTime } from "../utils";
+import { useEdgeDrawer } from "../hooks/useEdgeDrawer";
 
 interface SidebarProps {
   collapsed?: boolean;
+  isMobile?: boolean;
   sessions: SessionInfo[];
   sessionId: string;
   searchQuery: string;
@@ -249,8 +251,10 @@ export default function Sidebar({
   sidebarItems,
   expandedClusters,
   toggleCluster,
+  isMobile,
 }: SidebarProps) {
   const [searchFocused, setSearchFocused] = useState(false);
+  const drawer = useEdgeDrawer({ active: !isMobile });
   const currentSession = sessions.find((s) => s.id === sessionId);
   const parentSessions = currentSession?.parents
     ?.map((pid) => sessions.find((s) => s.id === pid))
@@ -258,8 +262,13 @@ export default function Sidebar({
   const continuationSession = currentSession?.continuation
     ? sessions.find((s) => s.id === currentSession.continuation)
     : undefined;
+  const asideClassName = isMobile
+    ? `sidebar ${collapsed ? "collapsed" : ""}`
+    : `sidebar drawer-${drawer.phase}`;
   return (
-    <aside className={`sidebar ${collapsed ? 'collapsed' : ''}`}>
+    <>
+      {!isMobile && <div className="sidebar-hotzone" {...drawer.hotzoneProps} />}
+      <aside className={asideClassName} {...(isMobile ? {} : drawer.drawerProps)}>
       <div className="sidebar-header">
         <div className="sidebar-toolbar">
           <div className="sidebar-search">
@@ -389,5 +398,6 @@ export default function Sidebar({
         </div>
       )}
     </aside>
+    </>
   );
 }
