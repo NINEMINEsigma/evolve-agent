@@ -31,6 +31,9 @@ Evolve Agent 支持多种启动方式：
 # 交互式创建或选择配置
 python run.py
 
+# 使用 rich TUI 向导选择/编辑配置（分组面板 + 字段校验）
+python run.py --interactive
+
 # 加载已保存的配置键
 python run.py --load <config_key>
 
@@ -41,8 +44,11 @@ python run.py --save <config_key> --llm_model deepseek-v4-flash
 python run.py --load <config_key> --fouce_init
 ```
 
+`--interactive` 模式提供基于 `rich` 的可视化配置向导：列出已有 profile 供选择，按分组（LLM / 审批模型 / Workspace / 网关 / 运行时）逐项编辑，内置字段校验（端口范围、温度区间、枚举值等），编辑完成后可选择是否保存。CLI 参数可与 `--interactive` 组合使用，作为各字段的初始覆盖值。
+
 常用 CLI 参数可覆盖 `config.py` 默认值：
 
+- `--interactive`：启动 rich TUI 配置向导
 - `--fouce_init`：强制重新初始化 workspace
 - `--llm_model`, `--llm_base_url`, `--llm_api_key`
 - `--llm_temperature`, `--llm_max_context_tokens`, `--llm_max_output_tokens`, `--llm_reasoning_effort`

@@ -126,14 +126,8 @@ if args.load:
 elif args.save:
     save(args.save, "config.json", current_config)
 elif args.interactive:
-    config_field_key = input("config key：") or "default"
-    for field, field_info in Config.model_fields.items():
-        value = input(f"{field} (default: {getattr(current_config, field)})：")
-        if value:
-            target_type = field_info.default.__class__
-            converter = _type_converters.get(target_type, str)
-            setattr(current_config, field, converter(value))
-    save(config_field_key, "config.json", current_config)
+    from config_tui import run_interactive
+    current_config = run_interactive(current_config, cli_overrides)
 else:
     config_field_key = input("config key：") or "default"
     if contains(config_field_key, "config.json"):
