@@ -18,6 +18,27 @@
 └──────────┴────────────────────────────────────────────┴──────┘
 ```
 
+> 启动屏（`SplashScreen`）和骨架屏（`SkeletonScreen`）作为覆盖层叠加在整体布局之上，分别用于开屏动画和首次连接前的占位。
+
+---
+
+## 应用框架与加载层
+
+文件：`origin_agent/frontend/src/App.tsx`
+
+| 中文名称 | 代码标识 | 说明 |
+|---|---|---|
+| 应用根组件 | `App` / `ChatApp` | 路由入口；管理 `SplashScreen`、`ChatContextMenu`、`TagEditor` 等顶层覆盖层；外层套 `ErrorBoundary` |
+| 错误边界 | `ErrorBoundary` / `.error-boundary` | 组件渲染异常兜底，显示「界面渲染出错」+ 刷新按钮 |
+| 连接诊断上下文 | `ConnectionDiagnosticsProvider` / `useConnectionDiagnostics` | 全局 Provider，向 `DebugBadges` 等组件提供 WebSocket 连接状态（waiting / pendingConfirm / streamingMessage 等） |
+
+文件：`origin_agent/frontend/src/components/SplashScreen.tsx` · `origin_agent/frontend/src/components/SkeletonScreen.tsx`
+
+| 中文名称 | 代码标识 | 说明 |
+|---|---|---|
+| 启动屏 | `SplashScreen` / `.splash-screen` | 开屏动画，最少停留 800ms、最多 3000ms，可点击跳过 |
+| 骨架屏 | `SkeletonScreen` / `.skeleton-screen` | 首次 WebSocket 连接前的布局骨架占位（Header + Sidebar + 消息区轮廓） |
+
 ---
 
 ## 左侧导航栏（Sidebar）
@@ -85,6 +106,68 @@
 | 图片灯箱 | `Lightbox` | 图片放大查看 |
 | 确认对话框 | `ConfirmDialog` | 工具调用审批弹窗 |
 | 询问对话框 | `AskDialog` | Agent 提问弹窗 |
+
+### 聊天区内部组件
+
+文件：`origin_agent/frontend/src/components/ChatArea.tsx`
+
+| 中文名称 | 代码标识 | 说明 |
+|---|---|---|
+| 消息项 | `MessageItem` / `.message` | 单条消息容器：头像、角色名、长消息折叠（>1200 字符或 >18 行）、编辑入口 |
+| 消息体 | `MessageBody` | Markdown 渲染（GFM + breaks + raw）；reasoning 折叠；检测 `<script>`/`<style>` 等标签时切换到 `SafeHtml` 沙箱 |
+| 消息编辑器 | `MessageEditor` / `.message-edit-box` | 用户消息内联编辑（textarea + 保存/取消） |
+| 消息附件 | `MessageAttachments` | 图片缩略图、音频播放器、下载链接、播放列表 |
+| 代码块 | `CodeBlock` / `.code-block-wrapper` | 语法高亮（Prism oneDark）+ 一键复制 |
+| Mermaid 渲染器 | `MermaidRenderer` | Mermaid 图表渲染；点击放大为灯箱（缩放/平移，react-zoom-pan-pinch） |
+| 安全 HTML | `SafeHtml` | iframe 沙箱渲染 agent 输出的原始 HTML，postMessage 同步高度，避免流式闪烁 |
+| 等高线背景 | `ContourBackground` | 聊天区 canvas 等高线动态背景，受消息内容长度与 seed 影响 |
+| 小地图 | `Minimap` | 聊天区右侧消息流缩略导航，可拖拽跳转；移动端默认折叠 |
+| 回到底部按钮 | `.scroll-to-bottom-btn` | 滚动离开底部时出现的快捷回底按钮 |
+
+### 输入栏内部组件
+
+文件：`origin_agent/frontend/src/components/InputBar.tsx`
+
+| 中文名称 | 代码标识 | 说明 |
+|---|---|---|
+| 富文本输入 | `RichInput` | contenteditable 富文本输入框，支持图片粘贴、`@` 提及（文件/skill）、`/` 命令 |
+| @ 提及菜单 | `MentionMenu` / `.mention-menu` | `@` 或 `/` 触发的文件/skill 列表，Portal 渲染到 body，30s TTL 缓存 |
+| 待上传图片预览 | `pendingImages` / `.pending-image` | 输入栏上方显示待发送的图片缩略图，可移除 |
+| 目标会话选择器 | `targetSessions` | 选择消息发送目标（main / 子会话），位于输入栏工具区 |
+| 角色可见性控制 | `visibleCharacters` / `responseCharacters` | 多 Agent 模式下控制消息可见范围与响应角色 |
+
+### 会话操作弹层
+
+文件：`origin_agent/frontend/src/components/ChatContextMenu.tsx` · `TagEditor.tsx`
+
+| 中文名称 | 代码标识 | 说明 |
+|---|---|---|
+| 聊天右键菜单 | `ChatContextMenu` | 会话项右键菜单：自动标题、自动标签、置顶、分支、终止、删除、重生成摘要 |
+| 标签编辑器 | `TagEditor` | 会话标签编辑弹窗（仅限 1-5 个汉字或 1-10 个英文字母） |
+
+### 子会话与定时任务
+
+文件：`origin_agent/frontend/src/components/SubagentDrawer.tsx` · `SubagentPanel.tsx` · `SubagentCountdown.tsx` · `CronCountdown.tsx`
+
+| 中文名称 | 代码标识 | 说明 |
+|---|---|---|
+| 子会话抽屉 | `SubagentDrawer` / `SubagentCard` | 子会话全屏抽屉，含 `SubagentCard` 卡片和 `Minimap` |
+| 子会话倒计时 | `SubagentCountdown` / `.cron-countdown-strip` | 子会话空闲收集倒计时条（≤30s 显示） |
+| Cron 倒计时 | `CronCountdown` / `.cron-countdown-strip` | 定时任务下次执行倒计时条（≤60s 显示） |
+
+### 资源抽屉内部
+
+文件：`origin_agent/frontend/src/components/Drawer.tsx`
+
+| 中文名称 | 代码标识 | 说明 |
+|---|---|---|
+| 播放列表播放器 | `PlaylistPlayer` | 音频播放列表 UI（上一首/下一首/进度条/展开折叠） |
+
+### 遗留组件
+
+| 中文名称 | 代码标识 | 说明 |
+|---|---|---|
+| 剪贴板面板（旧版） | `ClipboardPanel` / `.clipboard-display-panel` | 与 `UnifiedPanel` 功能重叠的旧版组件，已被 `UnifiedPanel` 替代 |
 
 ## 通用术语
 
