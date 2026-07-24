@@ -36,14 +36,15 @@
 }
 
 /* ── Header skeleton ── */
+/* 桌面端稳态仅剩常驻 pill（顶部覆盖抽屉隐藏时），骨架屏与之对齐 */
 .skeleton-header {
   position: absolute;
   top: 0;
   left: 0;
   right: 0;
   height: 56px;
-  background: var(--bg-secondary);
-  border-bottom: 1px solid var(--border);
+  background: transparent;
+  border-bottom: none;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -67,6 +68,12 @@
   display: flex;
   align-items: center;
   gap: 6px;
+}
+
+/* 桌面端稳态下顶部栏左右内容隐藏，骨架屏同步（移动端在下方媒体查询还原） */
+.skeleton-header-left,
+.skeleton-header-right {
+  display: none;
 }
 
 .skeleton-pill {
@@ -95,7 +102,7 @@
   border-right: 1px solid var(--border);
   display: flex;
   flex-direction: column;
-  margin-top: 56px;
+  margin-top: 0;
 }
 
 .skeleton-sidebar-header {
@@ -141,7 +148,7 @@
   flex: 1;
   display: flex;
   flex-direction: column;
-  margin-top: 56px;
+  margin-top: 0;
   position: relative;
 }
 
@@ -227,7 +234,19 @@
 }
 
 /* ── Mobile adaptation ── */
+/* 移动端真实布局仍是 56px 流内 header，骨架屏还原为旧外观 */
 @media (max-width: 768px) {
+  .skeleton-header {
+    background: var(--bg-secondary);
+    border-bottom: 1px solid var(--border);
+  }
+  .skeleton-header-left,
+  .skeleton-header-right {
+    display: flex;
+  }
+  .skeleton-main {
+    margin-top: 56px;
+  }
   .skeleton-sidebar {
     display: none;
   }

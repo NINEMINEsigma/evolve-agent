@@ -43,6 +43,7 @@
 | 侧栏遮罩 | `.sidebar-backdrop` | 移动端侧栏浮层展开时的背景遮罩 |
 | 抽屉热区 | `.sidebar-hotzone` | 桌面端屏幕左缘 24px 隐形触发区，鼠标靠近时抽屉微微拉出 |
 | 抽屉状态 | `.drawer-hidden` / `.drawer-peek` / `.drawer-open` | 桌面端侧栏三态：隐藏 / 微微拉出 / 彻底拉出（磨砂玻璃浮层） |
+| 抽屉状态机 | `useEdgeDrawer` | 边缘抽屉三态状态机（hidden/peek/open），侧栏与顶部栏共用；`pinned` 选项在弹出层展开期间钉住抽屉 |
 
 ## 顶部栏（Header）
 
@@ -52,12 +53,16 @@
 
 | 中文名称 | 代码标识 | 说明 |
 |---|---|---|
-| 顶部栏 / 页头 | `Header` / `.app-header` | 三栏 grid：左 / 中 / 右 |
+| 顶部栏 / 页头 | `Header` / `.app-header` | 三栏 grid：左 / 中 / 右；桌面端为顶部覆盖抽屉，移动端为流内页头 |
+| 顶部栏覆盖层 | `.header-layer` | 桌面端 absolute 覆盖容器（z-index 90），自身不响应指针，子元素按需恢复 |
+| 顶部栏热区 | `.header-hotzone` | 桌面端顶部 20px 隐形触发区，鼠标靠近时抽屉拉出 |
+| 主徽章 dock | `.header-pill-dock` | 桌面端常驻的状态胶囊容器，bar 隐藏时 pill 依然可见可交互 |
+| 顶部抽屉状态 | `.header-drawer-hidden` / `.header-drawer-peek` / `.header-drawer-open` | 桌面端顶部栏三态：隐藏 / 探出 12px / 完全展开（磨砂玻璃浮层，背景板由 `::before` 承载） |
 | 侧栏开关按钮 | `.sidebar-toggle` | 位于顶部栏左侧，控制左侧导航栏收起/展开 |
 | 会话徽章 | `.session-badge` | 当前会话 ID，≤768px 隐藏 |
 | 调试徽章组 | `DebugBadges` / `.debug-badges` | 连接诊断徽章，≤1100px 隐藏 |
-| 命令菜单 | `.cmd-menu-dropdown`（⋮ 按钮触发） | 导出会话 / 卸载审批模型 |
-| 状态胶囊 | `.header-pill` | 居中渐变胶囊，hover 展开状态/模型名详情 |
+| 命令菜单 | `.cmd-menu-dropdown`（⋮ 按钮触发） | 导出会话 / 卸载审批模型；展开期间钉住顶部抽屉 |
+| 状态胶囊 | `HeaderPill` / `.header-pill` | 居中渐变胶囊，hover 展开状态/模型名详情；桌面端渲染于 dock，移动端渲染于中栏 |
 | 脱手模式徽章 | `.approval-model-badge` | 点击切换自动审批 |
 | 令牌徽章 | `.token-badge` | token 统计文本，≤900px 隐藏 |
 | 令牌环 | `TokenRing` / `.token-ring` | 上下文用量环形图，≤900px 显示 |

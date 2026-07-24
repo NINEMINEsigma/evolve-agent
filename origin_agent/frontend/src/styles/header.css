@@ -551,3 +551,68 @@
   height: 12px;
   background: rgba(255, 255, 255, 0.25);
 }
+
+/* ── Header drawer (desktop overlay) ── */
+/* 背景板必须由 ::before 承载、open 态必须为 transform: none 且不得使用 will-change：
+   backdrop-filter 与 transform 都会为 fixed 后代（.cmd-menu-dropdown）建立包含块 */
+.header-layer {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 90;
+  pointer-events: none;
+}
+
+.header-hotzone {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 20px;
+  pointer-events: auto;
+}
+
+.header-pill-dock {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 2;
+  pointer-events: auto;
+}
+
+.app-header.header-drawer {
+  z-index: 1;
+  background: transparent;
+  border-bottom: none;
+  box-shadow: none;
+  transition: transform var(--duration-normal) var(--ease-out);
+  /* layer 的 pointer-events: none 会被继承，bar 必须自行恢复才能接收 hover */
+  pointer-events: auto;
+}
+
+.app-header.header-drawer::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  background: rgba(var(--bg-secondary-rgb), 0.72);
+  backdrop-filter: blur(18px) saturate(1.4);
+  -webkit-backdrop-filter: blur(18px) saturate(1.4);
+  border-bottom: 1px solid var(--border-strong);
+  border-radius: 0 0 12px 12px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.45);
+}
+
+.app-header.header-drawer-hidden {
+  transform: translateY(-100%);
+}
+
+.app-header.header-drawer-peek {
+  transform: translateY(calc(-100% + 12px));
+}
+
+.app-header.header-drawer-open {
+  transform: none;
+}

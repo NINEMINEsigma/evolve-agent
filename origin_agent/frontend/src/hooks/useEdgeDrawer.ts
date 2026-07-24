@@ -9,6 +9,9 @@ export interface EdgeDrawerOptions {
   closeDelay?: number;
   /** 离开热区但未进入抽屉时的收回延迟 */
   peekCloseDelay?: number;
+  /** true 时强制保持 open（如抽屉内弹出菜单展开期间）；
+   *  解除后若热区与抽屉均未悬停则按 closeDelay 延迟收回，否则保持 */
+  pinned?: boolean;
 }
 
 export interface EdgeDrawer {
@@ -27,10 +30,15 @@ export function useEdgeDrawer({
   active = true,
   closeDelay = 400,
   peekCloseDelay = 250,
+  pinned = false,
 }: EdgeDrawerOptions = {}): EdgeDrawer {
   const [phase, setPhase] = useState<DrawerPhase>("hidden");
   const phaseRef = useRef<DrawerPhase>("hidden");
   const timerRef = useRef<number | null>(null);
+  // 热区/抽屉悬停实况：pinned 解除时据此决定保持还是收回
+  const hoverRef = useRef({ hotzone: false, drawer: false });
+  const pinnedRef = useRef(pinned);
+  pinnedRef.current = pinned;
 
   const setPhaseTracked = useCallback((next: DrawerPhase) => {
     phaseRef.current = next;
@@ -46,6 +54,7 @@ export function useEdgeDrawer({
 
   const scheduleHide = useCallback(
     (delay: number) => {
+      if (pinnedRef.current) return;
       clearTimer();
       timerRef.current = window.setTimeout(() => {
         timerRef.current = null;
@@ -62,23 +71,44 @@ export function useEdgeDrawer({
     }
   }, [active, clearTimer, setPhaseTracked]);
 
+  // 钉住期间强制 open；解除钉住时按当前悬停实况决定去留
+  useEffect(() => {
+    if (pinned) {
+      clearTimer();
+      setPhaseTracked("open");
+      return;
+    }
+    if (
+      phaseRef.current !== "hidden" &&
+      !hoverRef.current.hotzone &&
+      !hoverRef.current.drawer
+    ) {
+      scheduleHide(closeDelay);
+    }
+  }, [pinned, closeDelay, clearTimer, setPhaseTracked, scheduleHide]);
+
   useEffect(() => clearTimer, [clearTimer]);
 
   const onHotzoneEnter = useCallback(() => {
+    hoverRef.current.hotzone = true;
     clearTimer();
-    setPhaseTracked("peek");
+    // 钉住期间不得降级为 peek，否则弹出菜单会随抽屉收回而孤立
+    setPhaseTracked(pinnedRef.current ? "open" : "peek");
   }, [clearTimer, setPhaseTracked]);
 
   const onHotzoneLeave = useCallback(() => {
+    hoverRef.current.hotzone = false;
     if (phaseRef.current === "peek") scheduleHide(peekCloseDelay);
   }, [peekCloseDelay, scheduleHide]);
 
   const onDrawerEnter = useCallback(() => {
+    hoverRef.current.drawer = true;
     clearTimer();
     setPhaseTracked("open");
   }, [clearTimer, setPhaseTracked]);
 
   const onDrawerLeave = useCallback(() => {
+    hoverRef.current.drawer = false;
     scheduleHide(closeDelay);
   }, [closeDelay, scheduleHide]);
 

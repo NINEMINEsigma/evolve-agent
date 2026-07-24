@@ -1,5 +1,6 @@
 import { useRef, useState, useEffect } from "react";
 import { useConnectionDiagnostics } from "../context/ConnectionDiagnosticsContext";
+import { useEdgeDrawer } from "../hooks/useEdgeDrawer";
 import { exportSession } from "../utils/exportSession";
 
 interface HeaderProps {
@@ -44,6 +45,8 @@ export default function Header({
   const [modelClosed, setModelClosed] = useState(false);
   const [shuttingDown, setShuttingDown] = useState(false);
   const cmdBtnRef = useRef<HTMLButtonElement>(null);
+  // 桌面端顶部抽屉状态机；菜单展开期间钉住，断点切到移动端时强制归位
+  const drawer = useEdgeDrawer({ active: !isMobile, pinned: cmdMenuOpen });
 
   useEffect(() => {
     if (!cmdMenuOpen) return;
@@ -145,6 +148,95 @@ export default function Header({
     );
   }
 
+  // 桌面端：顶部覆盖抽屉——常驻 pill + 热区召唤的滑出 bar
+  if (!isMobile) {
+    return (
+      <div className="header-layer">
+        <div className="header-hotzone" {...drawer.hotzoneProps} />
+        <div className="header-pill-dock">
+          <HeaderPill status={status} agents={agents} llmModelName={llmModelName} />
+        </div>
+        <header
+          className={`app-header header-drawer header-drawer-${drawer.phase}`}
+          {...drawer.drawerProps}
+        >
+          <div className="header-left">
+            {sessionId && (
+              <span className="session-badge" data-tooltip="刷新页面后自动恢复此会话">
+                {sessionId}
+              </span>
+            )}
+            <DebugBadges />
+            <button
+              ref={cmdBtnRef}
+              className="header-action-btn"
+              onClick={toggleCmdMenu}
+              data-tooltip="命令菜单"
+              disabled={shuttingDown}
+            >
+              ⋮
+            </button>
+            {cmdMenuOpen && menuPos && (
+              <div
+                className="context-menu cmd-menu-dropdown"
+                style={{ position: "fixed", top: menuPos.top, left: menuPos.left }}
+              >
+                <div
+                  className="context-menu-item"
+                  onClick={() => {
+                    setCmdMenuOpen(false);
+                    setMenuPos(null);
+                    exportSession(sessionId || "session");
+                  }}
+                  data-tooltip="导出当前会话为可分享的静态 HTML 文件"
+                >
+                  导出会话
+                </div>
+                <div
+                  className={`context-menu-item ${showApprovalUI ? "context-menu-item-danger" : ""}`}
+                  onClick={showApprovalUI ? handleShutdownApprovalModel : undefined}
+                  style={showApprovalUI ? undefined : { opacity: 0.45, cursor: "not-allowed", userSelect: "none" }}
+                  data-tooltip={showApprovalUI ? "" : "审批模型未加载"}
+                >
+                  卸载审批模型
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* 中栏留空保持 1fr auto 1fr 网格平衡，pill 由 header-pill-dock 常驻 */}
+          <div className="header-center" />
+
+          {sessionId && (
+            <div className="header-right">
+              {showApprovalUI && (
+                <span
+                  className={[
+                    "approval-model-badge",
+                    handsfreeMode ? "handsfree-on" : "handsfree-off",
+                  ].filter(Boolean).join(" ")}
+                  data-tooltip={handsfreeMode ? "脱手模式已开启 — 工具调用由 AI 自动审批" : "脱手模式已关闭 — 工具调用需用户审批"}
+                  onClick={() => onToggleHandsfree(!handsfreeMode)}
+                >
+                  {handsfreeMode ? approvalModelName || "自动审批" : "脱手"}
+                </span>
+              )}
+              <span className="token-badge" data-tooltip={`累计消耗: ${tokenUsage.toLocaleString()}  |  已用上下文: ${contextTokens.toLocaleString()}  |  最大上下文: ${llmMaxContextTokens > 0 ? llmMaxContextTokens.toLocaleString() : "?"}`}>
+                累计 {tokenUsage.toLocaleString()} / 上下文 {contextTokens.toLocaleString()} / 上限 {llmMaxContextTokens > 0 ? llmMaxContextTokens.toLocaleString() : "?"}
+              </span>
+              <TokenRing
+                contextTokens={contextTokens}
+                llmMaxContextTokens={llmMaxContextTokens}
+                tokenUsage={tokenUsage}
+              />
+            </div>
+          )}
+        </header>
+      </div>
+    );
+  }
+
+  // 移动端全量（未折叠）：流内 header
   return (
     <header className={`app-header ${isMobile && collapsed ? "app-header-collapsed" : ""}`}>
       <div className="header-left">
@@ -209,26 +301,7 @@ export default function Header({
       </div>
 
       <div className="header-center">
-        <div
-          className={[
-            "header-pill",
-            status === "已连接" ? "connected" : "",
-            status.startsWith("重连中") ? "reconnecting" : "",
-            status === "已断开" || status === "连接失败 — 已达到最大重试次数" ? "disconnected" : "",
-            agents && agents.length > 0 ? "multi-agent" : "",
-          ].filter(Boolean).join(" ")}
-          data-tooltip={agents && agents.length > 0 ? `Multi-Agent 模式 · Agents: ${agents.join(", ")}` : undefined}
-        >
-          <span className="status-dot" />
-          <span className="pill-label">{agents && agents.length > 0 ? "Evolve Agent · Multi" : "Evolve Agent"}</span>
-          <span className="pill-detail">
-            <span className="pill-status">{status}</span>
-            {llmModelName && <span className="pill-model">{llmModelName}</span>}
-            {agents && agents.length > 0 && <span className="pill-agent-count">{agents.length} agents</span>}
-          </span>
-          <span className="pill-ripple" aria-hidden />
-          <span className="pill-ripple" aria-hidden />
-        </div>
+        <HeaderPill status={status} agents={agents} llmModelName={llmModelName} />
       </div>
 
       {sessionId && (
@@ -267,6 +340,39 @@ export default function Header({
         </button>
       )}
     </header>
+  );
+}
+
+function HeaderPill({
+  status,
+  agents,
+  llmModelName,
+}: {
+  status: string;
+  agents?: string[];
+  llmModelName: string;
+}) {
+  return (
+    <div
+      className={[
+        "header-pill",
+        status === "已连接" ? "connected" : "",
+        status.startsWith("重连中") ? "reconnecting" : "",
+        status === "已断开" || status === "连接失败 — 已达到最大重试次数" ? "disconnected" : "",
+        agents && agents.length > 0 ? "multi-agent" : "",
+      ].filter(Boolean).join(" ")}
+      data-tooltip={agents && agents.length > 0 ? `Multi-Agent 模式 · Agents: ${agents.join(", ")}` : undefined}
+    >
+      <span className="status-dot" />
+      <span className="pill-label">{agents && agents.length > 0 ? "Evolve Agent · Multi" : "Evolve Agent"}</span>
+      <span className="pill-detail">
+        <span className="pill-status">{status}</span>
+        {llmModelName && <span className="pill-model">{llmModelName}</span>}
+        {agents && agents.length > 0 && <span className="pill-agent-count">{agents.length} agents</span>}
+      </span>
+      <span className="pill-ripple" aria-hidden />
+      <span className="pill-ripple" aria-hidden />
+    </div>
   );
 }
 
