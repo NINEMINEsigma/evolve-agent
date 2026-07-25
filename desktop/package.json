@@ -1,0 +1,41 @@
+{
+  "name": "evolve-agent-desktop",
+  "version": "1.0.0",
+  "description": "Evolve Agent 桌面端启动器 — 配置管理 + 后端生命周期 + WebView",
+  "main": "src/main.js",
+  "scripts": {
+    "start": "electron .",
+    "build": "set CSC_IDENTITY_AUTO_DISCOVERY=false&& electron-builder --win",
+    "postinstall": "electron-builder install-app-deps"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": ["electron", "electron-builder"]
+  },
+  "devDependencies": {
+    "electron": "^33.0.0",
+    "electron-builder": "^25.0.0"
+  },
+  "build": {
+    "appId": "site.liubai.evolve-agent",
+    "productName": "EvolveAgent",
+    "directories": {
+      "output": "dist"
+    },
+    "win": {
+      "target": "nsis",
+      "icon": "assets/icon.ico",
+      "signAndEditExecutable": false
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true
+    },
+    "files": [
+      "src/**",
+      "renderer/**",
+      "assets/**",
+      "electron-builder.yml"
+    ]
+  }
+}

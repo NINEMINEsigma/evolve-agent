@@ -1,0 +1,15 @@
+appId: site.liubai.evolve-agent
+productName: EvolveAgent
+directories:
+  output: dist
+win:
+  target: nsis
+  icon: assets/icon.ico
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+files:
+  - src/**/*
+  - renderer/**/*
+  - assets/**/*

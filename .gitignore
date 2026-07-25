@@ -204,3 +204,8 @@ custom_models/*.gguf
 
 # decision logs / grilled docs
 /docs/
+
+# desktop (Electron)
+desktop/node_modules/
+desktop/dist/
+desktop/desktop-settings.json

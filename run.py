@@ -115,7 +115,10 @@ if __name__ == "__main__":
     slow_agent_space = (workspace_path/slow_agent_space_path)
     source = Path(origin_agent_codes_path)
     if (agentspace_path_name / "SOUL.md").exists() == False:
-        shutil.copy("SOUL.md", agentspace_path_name / "SOUL.md")
+        if Path("SOUL.md").exists():
+            shutil.copy("SOUL.md", agentspace_path_name / "SOUL.md")
+        else:
+            (agentspace_path_name / "SOUL.md").touch() # 创建空SOUL.md文件
     if fouce_init:
         fallback_space = workspace_path / ".fallback"
         shutil.rmtree(slow_agent_space, ignore_errors=True) # 删除slow agent空间
