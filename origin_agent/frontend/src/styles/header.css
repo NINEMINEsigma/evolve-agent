@@ -32,7 +32,6 @@
 .header-pill {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
   padding: 5px 16px;
   border-radius: 999px;
   background: var(--accent-grad);
@@ -149,18 +148,6 @@
     opacity: 0.55;
     filter: brightness(1.25);
   }
-}
-
-.header-pill .status-dot {
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: rgba(255, 255, 255, 0.55);
-}
-
-.header-pill.connected .status-dot {
-  background: #fff;
-  box-shadow: 0 0 6px #fff;
 }
 
 .header-right {

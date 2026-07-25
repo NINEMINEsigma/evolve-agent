@@ -129,7 +129,6 @@ export default function Header({
           <div
             className={["header-pill", status === "已连接" ? "connected" : "", status.startsWith("重连中") ? "reconnecting" : "", status === "已断开" || status === "连接失败 — 已达到最大重试次数" ? "disconnected" : ""].filter(Boolean).join(" ")}
           >
-            <span className="status-dot" />
             <span className="pill-label">Evolve Agent</span>
           </div>
         </div>
@@ -363,7 +362,6 @@ function HeaderPill({
       ].filter(Boolean).join(" ")}
       data-tooltip={agents && agents.length > 0 ? `Multi-Agent 模式 · Agents: ${agents.join(", ")}` : undefined}
     >
-      <span className="status-dot" />
       <span className="pill-label">{agents && agents.length > 0 ? "Evolve Agent · Multi" : "Evolve Agent"}</span>
       <span className="pill-detail">
         <span className="pill-status">{status}</span>
