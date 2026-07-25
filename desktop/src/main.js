@@ -2,10 +2,10 @@
  * main.js — Electron 主进程入口
  *
  * 职责：
- *   - 窗口管理（配置/日志窗口 + WebView 窗口）
+ *   - 窗口管理（控制窗口 + WebView 窗口 + 系统托盘）
  *   - IPC 注册（config:* + backend:* + settings:*）
- *   - 启动流程编排（拉起后端 → 轮询 /health → 加载 WebView）
- *   - 退出处理（后端退出 → 壳退出；进化重启 → 继续等待）
+ *   - 启动流程编排（拉起后端 → 轮询 /health → 加载 WebView → 最小化到托盘）
+ *   - 退出处理（仅托盘右键"退出"才真正退出）
  *
  * 打包后布局：
  *   EvolveAgent/
@@ -21,7 +21,7 @@
 
 'use strict';
 
-const { app, BrowserWindow, ipcMain } = require('electron');
+const { app, BrowserWindow, ipcMain, Tray, Menu, nativeImage } = require('electron');
 const fs = require('fs');
 const path = require('path');
 const { configManager, BackendManager } = require('./requires');
@@ -30,25 +30,22 @@ const { configManager, BackendManager } = require('./requires');
 
 const DESKTOP_DIR = __dirname;
 
-// 打包后: exe 同级目录 = 仓库根目录
-// 开发时: desktop/src/ 向上两层 = 仓库根目录
 const REPO_ROOT = app.isPackaged
   ? path.dirname(app.getPath('exe'))
   : path.resolve(DESKTOP_DIR, '..', '..');
 
 const RENDERER_DIR = app.isPackaged
-  ? path.join(DESKTOP_DIR, '..', 'renderer')   // asar 内
+  ? path.join(DESKTOP_DIR, '..', 'renderer')
   : path.join(DESKTOP_DIR, '..', 'renderer');
 
 const CONFIG_JSON = path.join(REPO_ROOT, 'config.json');
 const SETTINGS_JSON = path.join(REPO_ROOT, 'desktop-settings.json');
+const ICON_PATH = app.isPackaged
+  ? path.join(REPO_ROOT, 'resources', 'app.asar', 'assets', 'icon.ico')
+  : path.join(DESKTOP_DIR, '..', 'assets', 'icon.ico');
 
 // ── Python 路径探测 ───────────────────────────────────────
 
-/**
- * 探测默认 Python 路径。
- * 优先级: venv/Scripts/python.exe → venv/bin/python → 'python'
- */
 function detectPythonPath() {
   const venvScripts = path.join(REPO_ROOT, 'venv', 'Scripts', 'python.exe');
   const venvBin = path.join(REPO_ROOT, 'venv', 'bin', 'python');
@@ -59,9 +56,7 @@ function detectPythonPath() {
 
 // ── 壳设置 ────────────────────────────────────────────────
 
-const SETTINGS_DEFAULTS = {
-  pythonPath: '',   // 空字符串 = 自动探测
-};
+const SETTINGS_DEFAULTS = { pythonPath: '' };
 
 function loadSettings() {
   try {
@@ -78,10 +73,6 @@ function saveSettings(values) {
   fs.writeFileSync(SETTINGS_JSON, JSON.stringify(values, null, 2), 'utf-8');
 }
 
-/**
- * 获取实际使用的 Python 路径。
- * 优先级: 用户显式设置 → venv 自动探测 → 'python'
- */
 function getEffectivePythonPath() {
   const settings = loadSettings();
   if (settings.pythonPath && settings.pythonPath.trim()) {
@@ -96,6 +87,8 @@ let controlWindow = null;
 let webviewWindow = null;
 let backend = null;
 let backendRunning = false;
+let tray = null;
+let isQuitting = false;
 
 // ── 窗口创建 ──────────────────────────────────────────────
 
@@ -114,19 +107,32 @@ function createControlWindow() {
 
   controlWindow.loadFile(path.join(RENDERER_DIR, 'index.html'));
 
+  // 关闭按钮 → 最小化到托盘（不退出）
   controlWindow.on('close', (e) => {
-    if (backendRunning) {
+    if (!isQuitting) {
       e.preventDefault();
-      controlWindow.minimize();
+      controlWindow.hide();
     }
   });
 
   controlWindow.on('closed', () => {
     controlWindow = null;
+    updateTrayMenu();
   });
+
+  // 窗口显示/隐藏时刷新托盘菜单文本
+  controlWindow.on('show', () => updateTrayMenu());
+  controlWindow.on('hide', () => updateTrayMenu());
 }
 
 function createWebviewWindow(host, port) {
+  if (webviewWindow && !webviewWindow.isDestroyed()) {
+    // 已存在 → 显示并聚焦
+    webviewWindow.show();
+    webviewWindow.focus();
+    return;
+  }
+
   webviewWindow = new BrowserWindow({
     width: 1200,
     height: 800,
@@ -140,18 +146,106 @@ function createWebviewWindow(host, port) {
 
   webviewWindow.loadURL(`http://${host}:${port}`);
 
+  // 关闭按钮 → 隐藏窗口（不杀后端，不退出）
+  webviewWindow.on('close', (e) => {
+    if (!isQuitting) {
+      e.preventDefault();
+      webviewWindow.hide();
+    }
+  });
+
   webviewWindow.on('closed', () => {
     webviewWindow = null;
-    if (backend) backend.kill();
-    app.quit();
+    updateTrayMenu();
   });
+
+  // 窗口显示/隐藏时刷新托盘菜单文本
+  webviewWindow.on('show', () => updateTrayMenu());
+  webviewWindow.on('hide', () => updateTrayMenu());
+}
+
+// ── 系统托盘 ──────────────────────────────────────────────
+
+function createTray() {
+  let trayIcon;
+  try {
+    trayIcon = nativeImage.createFromPath(ICON_PATH);
+    if (trayIcon.isEmpty()) trayIcon = nativeImage.createEmpty();
+  } catch {
+    trayIcon = nativeImage.createEmpty();
+  }
+
+  tray = new Tray(trayIcon);
+  tray.setToolTip('Evolve Agent');
+
+  // 左键单击 → 切换控制窗口
+  tray.on('click', () => {
+    if (controlWindow && !controlWindow.isDestroyed()) {
+      if (controlWindow.isVisible()) {
+        controlWindow.hide();
+      } else {
+        controlWindow.show();
+        controlWindow.focus();
+      }
+    }
+  });
+
+  // 右键单击 → 动态构建菜单（每次右键都重建，确保文本反映实时状态）
+  tray.on('right-click', () => {
+    updateTrayMenu();
+  });
+}
+
+function updateTrayMenu() {
+  const contextMenu = Menu.buildFromTemplate([
+    {
+      label: controlWindow && !controlWindow.isDestroyed() && controlWindow.isVisible()
+        ? '隐藏控制窗口'
+        : '显示控制窗口',
+      click: () => {
+        if (controlWindow && !controlWindow.isDestroyed()) {
+          if (controlWindow.isVisible()) {
+            controlWindow.hide();
+          } else {
+            controlWindow.show();
+            controlWindow.focus();
+          }
+        }
+      },
+    },
+    {
+      label: webviewWindow && !webviewWindow.isDestroyed() && webviewWindow.isVisible()
+        ? '隐藏会话窗口'
+        : '显示会话窗口',
+      click: () => {
+        if (webviewWindow && !webviewWindow.isDestroyed()) {
+          if (webviewWindow.isVisible()) {
+            webviewWindow.hide();
+          } else {
+            webviewWindow.show();
+            webviewWindow.focus();
+          }
+        }
+      },
+      enabled: backendRunning,
+    },
+    { type: 'separator' },
+    {
+      label: '退出',
+      click: () => {
+        isQuitting = true;
+        if (backend) backend.kill();
+        app.quit();
+      },
+    },
+  ]);
+
+  tray.setContextMenu(contextMenu);
 }
 
 // ── IPC 注册 ──────────────────────────────────────────────
 
 function registerIpc() {
-  // ── 配置管理 ──────────────────────────────────────────
-
   ipcMain.handle('config:list-profiles', () => {
     try {
       return configManager.listProfiles(CONFIG_JSON);
@@ -175,11 +269,8 @@ function registerIpc() {
     return true;
   });
 
-  // ── 壳设置 ──────────────────────────────────────────
-
   ipcMain.handle('settings:load', () => {
     const settings = loadSettings();
-    // 如果用户未设置 pythonPath，返回自动探测的值供 UI 显示
     return {
       pythonPath: settings.pythonPath || '',
       detectedPythonPath: detectPythonPath(),
@@ -191,13 +282,12 @@ function registerIpc() {
     return true;
   });
 
-  // ── 后端生命周期 ──────────────────────────────────────
-
   ipcMain.on('backend:launch', (event, configKey, overrides, pythonPath) => {
     launchBackend(event, configKey, overrides, pythonPath);
   });
 
   ipcMain.on('backend:kill', () => {
+    isQuitting = true;
     if (backend) backend.kill();
     app.quit();
   });
@@ -208,24 +298,21 @@ function registerIpc() {
 function launchBackend(event, configKey, overrides, pythonPath) {
   backend = new BackendManager();
 
-  // Python 路径: 用户显式传入 > 壳设置 > venv 探测 > 'python'
   const py = (pythonPath && pythonPath.trim()) || getEffectivePythonPath();
 
-  // 构造 CLI 参数
   const cliArgs = ['run.py', '--load', configKey, '--console_log', 'true'];
   const overrideArgs = configManager.buildCliArgs(overrides || {});
   cliArgs.push(...overrideArgs);
 
-  // 注册日志回调 → 推送到 renderer
   backend.onLog((log) => {
     if (controlWindow && !controlWindow.isDestroyed()) {
       controlWindow.webContents.send('backend:log-line', log);
     }
   });
 
-  // 注册退出回调
   backend.onExit((exitCode) => {
     backendRunning = false;
+    updateTrayMenu();
 
     if (exitCode === -1) {
       sendStatus(event, 'evolving');
@@ -234,7 +321,19 @@ function launchBackend(event, configKey, overrides, pythonPath) {
 
     if (exitCode === 0) {
       sendStatus(event, 'stopped');
-      app.quit();
+      // 仅在用户主动退出时才真正退出
+      if (isQuitting) {
+        app.quit();
+      } else {
+        // 后端自行退出但用户未要求退出 → 显示通知，保持壳运行
+        if (controlWindow && !controlWindow.isDestroyed()) {
+          controlWindow.webContents.send('backend:log-line', {
+            stream: 'stderr',
+            line: '[launcher] 后端进程已停止（退出码 0）',
+            ts: Date.now(),
+          });
+        }
+      }
       return;
     }
 
@@ -245,22 +344,21 @@ function launchBackend(event, configKey, overrides, pythonPath) {
         line: `[launcher] 后端进程退出，退出码: ${exitCode}`,
         ts: Date.now(),
       });
+      // 显示控制窗口让用户看到错误
+      controlWindow.show();
     }
-    setTimeout(() => app.quit(), 3000);
+    // 不再强制退出 — 让用户通过托盘菜单手动退出
   });
 
-  // 拉起后端
   backend.start(REPO_ROOT, cliArgs, py);
   backendRunning = true;
   sendStatus(event, 'starting');
 
-  // 从 profile + 临时覆盖中读取 host/port
   const profileValues = configManager.loadProfile(CONFIG_JSON, configKey);
   const host = (overrides && overrides.gateway_host) || profileValues.gateway_host || '127.0.0.1';
   const port = (overrides && overrides.gateway_port) || profileValues.gateway_port || 8765;
   const healthHost = host === '0.0.0.0' ? '127.0.0.1' : host;
 
-  // 轮询 /health
   backend.waitForHealth(
     healthHost,
     port,
@@ -270,6 +368,13 @@ function launchBackend(event, configKey, overrides, pythonPath) {
         controlWindow.webContents.send('backend:health-ok');
       }
       createWebviewWindow(healthHost, port);
+
+      // 后端就绪后最小化控制窗口到托盘
+      if (controlWindow && !controlWindow.isDestroyed()) {
+        controlWindow.hide();
+      }
+
+      updateTrayMenu();
     },
     () => {
       sendStatus(event, 'timeout');
@@ -297,13 +402,15 @@ function sendStatus(event, status) {
 app.whenReady().then(() => {
   registerIpc();
   createControlWindow();
+  createTray();
 });
 
+// 窗口全部关闭时不退出（托盘保持运行）
 app.on('window-all-closed', () => {
-  if (backend) backend.kill();
-  app.quit();
+  // 不做任何事 — 窗口隐藏而非销毁
 });
 
+// 仅 isQuitting=true 时才真正退出
 app.on('before-quit', () => {
   if (backend) backend.kill();
 });
