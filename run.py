@@ -131,6 +131,9 @@ if __name__ == "__main__":
         pnpm_lock_yaml = source/"frontend"/"pnpm-lock.yaml"
         if pnpm_lock_yaml.exists():
             pnpm_lock_yaml.unlink()
+        fast_pnpm_lock_yaml = fast_agent_space/"frontend"/"pnpm-lock.yaml"
+        if fast_pnpm_lock_yaml.exists():
+            fast_pnpm_lock_yaml.unlink()
 
         shutil.copytree(source, fast_agent_space, dirs_exist_ok=True) # 复制源代码到fast agent空间
         shutil.copytree(source, slow_agent_space, dirs_exist_ok=True) # 复制源代码到slow agent空间
