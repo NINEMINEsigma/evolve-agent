@@ -34,7 +34,7 @@ import time
 import uuid
 from pydantic import BaseModel, ConfigDict, PrivateAttr
 from pathlib import Path
-from typing import Any, Set
+from typing import Any
 
 from abstract.tools.registry import registry, tool_error, tool_result
 from entity.puretype import ToolDangerLevel, CronTaskInfo
@@ -61,7 +61,7 @@ def _get_cron_store_path() -> Path:
 # ── cron 解析器（标准库实现）──────────────────────────────────
 
 
-def _parse_cron_field(field: str, min_val: int, max_val: int) -> Set[int]:
+def _parse_cron_field(field: str, min_val: int, max_val: int) -> set[int]:
     """解析单个 cron 字段，返回允许值的集合。
 
     支持的语法::
@@ -72,7 +72,7 @@ def _parse_cron_field(field: str, min_val: int, max_val: int) -> Set[int]:
         a,b,c    — 列表
         a-b/n    — 范围内每 n 个单位
     """
-    result: Set[int] = set()
+    result: set[int] = set()
     for part in field.split(","):
         part = part.strip()
         if part == "*":

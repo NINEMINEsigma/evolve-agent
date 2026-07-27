@@ -21,7 +21,7 @@ Usage::
 from __future__ import annotations
 
 import re
-from typing import Any, Dict, List, Tuple
+from typing import Any
 
 
 # ---------------------------------------------------------------------------
@@ -45,7 +45,7 @@ _CONTINUATION = re.compile(r"^(\s+)(.+)$")
 # ---------------------------------------------------------------------------
 
 
-def parse_frontmatter(content: str) -> Tuple[dict[str, Any], str]:
+def parse_frontmatter(content: str) -> tuple[dict[str, Any], str]:
     """Parse YAML frontmatter from *content*.
 
     Args:

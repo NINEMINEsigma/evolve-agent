@@ -15,7 +15,7 @@ import json
 import logging
 import threading
 import time
-from typing import Any, Callable, Dict, List, Tuple
+from typing import Any, Callable
 
 from entity.puretype import ToolAvailability, ToolDangerLevel
 
@@ -97,7 +97,7 @@ class ToolEntry:
 # ---------------------------------------------------------------------------
 
 _CHECK_FN_TTL_SECONDS: float = 30.0
-_check_fn_cache: dict[Callable, Tuple[float, bool]] = {}
+_check_fn_cache: dict[Callable, tuple[float, bool]] = {}
 _check_fn_cache_lock: threading.Lock = threading.Lock()
 
 DEFAULT_RESULT_SIZE_CHARS: int = 100000
@@ -107,7 +107,7 @@ def _check_fn_cached(fn: Callable) -> bool:
     """返回 bool(fn())，跨调用 TTL 缓存。异常吞没为 False。"""
     now: float = time.monotonic()
     with _check_fn_cache_lock:
-        cached: Tuple[float, bool] | None = _check_fn_cache.get(fn)
+        cached: tuple[float, bool] | None = _check_fn_cache.get(fn)
         if cached is not None:
             ts: float
             value: bool
@@ -177,7 +177,7 @@ class ToolRegistry:
 
     # -- 内部快照辅助方法 -----------------------------------------
 
-    def _snapshot_state(self) -> Tuple[list[ToolEntry], dict[str, Callable]]:
+    def _snapshot_state(self) -> tuple[list[ToolEntry], dict[str, Callable]]:
         """返回注册表条目和 toolset 检查的一致性快照。"""
         with self._lock:
             return list(self._tools.values()), dict(self._toolset_checks)
@@ -651,7 +651,7 @@ class ToolRegistry:
                     result[ts]["env_vars"].append(env)
         return result
 
-    def check_tool_availability(self, quiet: bool = False) -> Tuple[list[str], list[dict]]:
+    def check_tool_availability(self, quiet: bool = False) -> tuple[list[str], list[dict]]:
         """返回 ``(available_toolsets, unavailable_info)``。
 
         每个不可用条目::

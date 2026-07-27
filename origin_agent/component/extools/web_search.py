@@ -19,7 +19,7 @@ import re
 import urllib.error
 import urllib.parse
 import urllib.request
-from typing import Any, Dict, List, Tuple
+from typing import Any
 
 from abstract.tools.registry import registry, tool_error, tool_result
 from entity.constant import DEFAULT_USER_AGENT
@@ -148,7 +148,7 @@ def _parse_bing(html: str, max_results: int) -> list[dict[str, str]]:
 # ---------------------------------------------------------------------------
 
 
-def _search_ddg(query: str, max_results: int) -> Tuple[list[dict[str, str]] | None, str | None]:
+def _search_ddg(query: str, max_results: int) -> tuple[list[dict[str, str]] | None, str | None]:
     """Try searching via DuckDuckGo. Returns (results, error)."""
     encoded: str = urllib.parse.quote(query, safe="")
     search_url: str = f"{_DDG_LITE_URL}?q={encoded}"
@@ -168,7 +168,7 @@ def _search_ddg(query: str, max_results: int) -> Tuple[list[dict[str, str]] | No
         return None, f"{type(e).__name__}: {e}"
 
 
-def _search_bing(query: str, max_results: int) -> Tuple[list[dict[str, str]] | None, str | None]:
+def _search_bing(query: str, max_results: int) -> tuple[list[dict[str, str]] | None, str | None]:
     """Try searching via Bing. Returns (results, error)."""
     encoded: str = urllib.parse.quote(query, safe="")
     search_url: str = f"{_BING_SEARCH_URL}?q={encoded}"
