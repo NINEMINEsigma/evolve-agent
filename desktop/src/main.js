@@ -50,9 +50,13 @@ function detectPythonPath() {
   const venvScripts = path.join(REPO_ROOT, 'venv', 'Scripts', 'python.exe');
   const venvRootExe = path.join(REPO_ROOT, 'venv', 'python.exe');
   const venvBin = path.join(REPO_ROOT, 'venv', 'bin', 'python');
+  console.log('[launcher] REPO_ROOT:', REPO_ROOT);
+  console.log('[launcher] venvScripts exists:', fs.existsSync(venvScripts), venvScripts);
+  console.log('[launcher] venvRootExe exists:', fs.existsSync(venvRootExe), venvRootExe);
   if (fs.existsSync(venvScripts)) return venvScripts;
   if (fs.existsSync(venvRootExe)) return venvRootExe;
   if (fs.existsSync(venvBin)) return venvBin;
+  console.warn('[launcher] No venv python found, falling back to system python');
   return 'python';
 }
 
@@ -301,6 +305,8 @@ function launchBackend(event, configKey, overrides, pythonPath) {
   backend = new BackendManager();
 
   const py = (pythonPath && pythonPath.trim()) || getEffectivePythonPath();
+  console.log('[launcher] launchBackend | py:', py, '| REPO_ROOT:', REPO_ROOT);
+  console.log('[launcher] launchBackend | configKey:', configKey);
 
   const cliArgs = ['run.py', '--load', configKey, '--console_log', 'true'];
   const overrideArgs = configManager.buildCliArgs(overrides || {});

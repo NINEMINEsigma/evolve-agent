@@ -5,7 +5,7 @@
   "main": "src/main.js",
   "scripts": {
     "start": "electron .",
-    "prepare-embed": "powershell -ExecutionPolicy Bypass -File scripts/prepare-embed-python.ps1",
+    "prepare-embed": "powershell -ExecutionPolicy Bypass -File scripts/prepare-embed-python.ps1 -ConfigKey default",
     "build": "set CSC_IDENTITY_AUTO_DISCOVERY=false&& pnpm run prepare-embed && electron-builder --win",
     "postinstall": "electron-builder install-app-deps"
   },

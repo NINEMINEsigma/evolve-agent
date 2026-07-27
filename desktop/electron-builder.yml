@@ -18,6 +18,8 @@ files:
 extraFiles:
   - from: ../run.py
     to: run.py
+  - from: ../config.json.exmple
+    to: config.json
   - from: ../config.py
     to: config.py
   - from: ../config_tui.py
@@ -41,6 +43,8 @@ extraFiles:
       - "!**/.git"
       - "!**/__pycache__"
       - "!**/*.pyc"
+      - "!**/llamaapis/lib/llama.cpp/build"
+      - "!**/llamaapis/lib/llama.cpp/build-cuda"
   - from: ../custom_hooks
     to: custom_hooks
     filter:
@@ -66,3 +70,5 @@ extraFiles:
     filter:
       - "!**/__pycache__"
       - "!**/*.pyc"
+  - from: .frontend-staging/frontend
+    to: workspace/fast_agent_space/frontend

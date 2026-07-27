@@ -1,0 +1,34 @@
+{
+    "default": {
+        "__root": {
+            "__type": "config, Config",
+            "__value": {
+                "console_log": true,
+                "fast_agent_space_path": "fast_agent_space",
+                "slow_agent_space_path": "slow_agent_space",
+                "fouce_init": false,
+                "gateway_host": "127.0.0.1",
+                "gateway_port": 8765,
+                "llm_base_url": "https://opencode.ai/zen/go/v1",
+                "llm_model": "deepseek-v4-flash",
+                "llm_api_key": "",
+                "llm_max_context_tokens": 1000000,
+                "llm_max_output_tokens": 384000,
+                "llm_temperature": 1.1,
+                "llm_reasoning_effort": "high",
+                "merge_concat_threshold": 50000,
+                "approval_model": "0",
+                "approval_model_n_ctx": 65536,
+                "approval_model_cuda": true,
+                "approval_model_port": 8081,
+                "approval_remote_base_url": "https://opencode.ai/zen/go/v1",
+                "approval_remote_api_key": "",
+                "approval_remote_model": "deepseek-v4-flash",
+                "workspace_path": "workspace",
+                "agentspace_path_name": "agentspace",
+                "logs_path_name": "logs",
+                "mcp_config_path_name": "mcp_config.json"
+            }
+        }
+    }
+}

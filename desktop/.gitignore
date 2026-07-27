@@ -29,3 +29,6 @@ dist-ssr
 
 # 嵌入式 Python（构建时生成，不提交）
 venv/
+
+# 前端预构建暂存区（构建时生成，不提交）
+.frontend-staging/

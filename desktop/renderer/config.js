@@ -309,8 +309,8 @@ function onLaunch() {
     overrides[field] = workingValues[field];
   }
 
-  // Python 路径（从壳设置中读取）
-  const pythonPath = pythonPathInput.value.trim() || 'python';
+  // Python 路径（从壳设置中读取，空则由 main.js 的 detectPythonPath 接管）
+  const pythonPath = pythonPathInput.value.trim();
 
   // 标记已启动 + 禁用启动按钮
   backendLaunched = true;
