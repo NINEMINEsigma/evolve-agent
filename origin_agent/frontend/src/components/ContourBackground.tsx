@@ -121,11 +121,17 @@ export default function ContourBackground({ scrollRef, contentRef, messages, see
     if (!canvas || !main) return;
     const w = main.clientWidth;
     const y0 = index * TILE_HEIGHT;
+    // 每次渲染时重新读取 padding，因为空态/非空态的 padding-bottom 可能不同
+    const style = getComputedStyle(main);
+    const padTop = parseInt(style.paddingTop) || 0;
+    const padBottom = parseInt(style.paddingBottom) || 0;
     // 用 .chat-content 的 scrollHeight 加 padding 替代 .chat-area 的 scrollHeight，
-    // 避免 absolute positioned canvas 块撑大 scrollHeight 形成循环依赖
-    const effectiveScrollHeight = content
-      ? content.scrollHeight + paddingRef.current.top + paddingRef.current.bottom
-      : main.scrollHeight;
+    // 避免 absolute positioned canvas 块撑大 scrollHeight 形成循环依赖。
+    // 至少覆盖视口高度，防止无消息时背景拦腰折断
+    const effectiveScrollHeight = Math.max(
+      (content ? content.scrollHeight + padTop + padBottom : main.scrollHeight),
+      main.clientHeight
+    );
     const h = Math.min(TILE_HEIGHT, Math.max(0, effectiveScrollHeight - y0));
     if (w <= 0 || h <= 0) {
       // 标记完成以避免该 tile 阻塞整体退出
@@ -217,11 +223,21 @@ export default function ContourBackground({ scrollRef, contentRef, messages, see
 
       const main = scrollRef.current;
       const content = contentRef.current;
+      // 每次刷新时重新读取 padding，因为空态/非空态的 padding-bottom 可能不同
+      if (main) {
+        const style = getComputedStyle(main);
+        paddingRef.current = {
+          top: parseInt(style.paddingTop) || 0,
+          bottom: parseInt(style.paddingBottom) || 0,
+        };
+      }
       // 用 .chat-content 的 scrollHeight 加 padding 替代 .chat-area 的 scrollHeight，
-      // 避免 absolute positioned canvas 块撑大 scrollHeight 形成循环依赖
-      const scrollHeight = content
+      // 避免 absolute positioned canvas 块撑大 scrollHeight 形成循环依赖。
+      // 至少覆盖视口高度，防止无消息时背景拦腰折断
+      const rawScrollHeight = content
         ? content.scrollHeight + paddingRef.current.top + paddingRef.current.bottom
         : (main ? main.scrollHeight : 0);
+      const scrollHeight = main ? Math.max(rawScrollHeight, main.clientHeight) : rawScrollHeight;
       const tileCount = Math.ceil(scrollHeight / TILE_HEIGHT);
       setLayout((prev) =>
         prev.scrollHeight === scrollHeight && prev.tileCount === tileCount

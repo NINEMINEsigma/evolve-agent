@@ -279,40 +279,40 @@ export default function Layout({ ws, onContextMenu }: LayoutProps) {
           agents={ws.agents}
           onToggleMessageVisibility={onToggleMessageVisibility}
           onScrollToBottom={() => ws.scrollToBottomIfAtBottom(true)}
-        />
+        >
+          <CronCountdown cronTasks={ws.cronTasks} />
 
-        <CronCountdown cronTasks={ws.cronTasks} />
+          <SubagentCountdown
+            subagentSessions={ws.subagentSessions}
+            idleCountdown={ws.subagentIdleCountdown}
+          />
 
-        <SubagentCountdown
-          subagentSessions={ws.subagentSessions}
-          idleCountdown={ws.subagentIdleCountdown}
-        />
-
-        <InputBar
-          input={ws.input}
-          setInput={ws.setInput}
-          waiting={ws.waiting}
-          uploading={ws.uploading}
-          archived={currentSessionArchived}
-          onSend={() => {
-            ws.send(targetSessions, visibleCharacters, responseCharacters);
-          }}
-          onUpload={ws.handleFileInputChange}
-          onUploadClick={ws.handleUploadClick}
-          onInterrupt={ws.interrupt}
-          fileInputRef={ws.fileInputRef}
-          pendingImages={ws.pendingImages}
-          onRemovePendingImage={ws.removePendingImage}
-          onPasteImage={ws.handlePasteImages}
-          inputRef={ws.inputRef}
-          subagentSessions={ws.subagentSessions}
-          targetSessions={targetSessions}
-          setTargetSessions={setTargetSessions}
-          agents={ws.agents}
-          visibleCharacters={visibleCharacters}
-          responseCharacters={responseCharacters}
-          onToggleAgentState={onToggleAgentState}
-        />
+          <InputBar
+            input={ws.input}
+            setInput={ws.setInput}
+            waiting={ws.waiting}
+            uploading={ws.uploading}
+            archived={currentSessionArchived}
+            onSend={() => {
+              ws.send(targetSessions, visibleCharacters, responseCharacters);
+            }}
+            onUpload={ws.handleFileInputChange}
+            onUploadClick={ws.handleUploadClick}
+            onInterrupt={ws.interrupt}
+            fileInputRef={ws.fileInputRef}
+            pendingImages={ws.pendingImages}
+            onRemovePendingImage={ws.removePendingImage}
+            onPasteImage={ws.handlePasteImages}
+            inputRef={ws.inputRef}
+            subagentSessions={ws.subagentSessions}
+            targetSessions={targetSessions}
+            setTargetSessions={setTargetSessions}
+            agents={ws.agents}
+            visibleCharacters={visibleCharacters}
+            responseCharacters={responseCharacters}
+            onToggleAgentState={onToggleAgentState}
+          />
+        </ChatArea>
 
         <ConfirmDialog
           pendingConfirm={ws.pendingConfirm}

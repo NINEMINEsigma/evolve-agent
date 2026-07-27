@@ -22,9 +22,10 @@ interface ChatAreaProps {
   onToggleMessageVisibility?: (messageId: string, agentName: string) => void;
   onScrollToBottom?: () => void;
   sessionId?: string;
+  children?: React.ReactNode;
 }
 
-export default function ChatArea({ messages, waiting, archived, onImageClick, onToggleCollapse, onEditMessage, onDeleteMessages, onRegenerateResponse, bottomRef, contentRef: externalContentRef, onDropFiles, streamingMessage, chatAreaRef: externalChatAreaRef, agents, onToggleMessageVisibility, onScrollToBottom, sessionId }: ChatAreaProps) {
+export default function ChatArea({ messages, waiting, archived, onImageClick, onToggleCollapse, onEditMessage, onDeleteMessages, onRegenerateResponse, bottomRef, contentRef: externalContentRef, onDropFiles, streamingMessage, chatAreaRef: externalChatAreaRef, agents, onToggleMessageVisibility, onScrollToBottom, sessionId, children }: ChatAreaProps) {
   const [dragOver, setDragOver] = useState(false);
   const [showScrollButton, setShowScrollButton] = useState(false);
   const [minimapCollapsed, setMinimapCollapsed] = useState(false);
@@ -84,8 +85,13 @@ export default function ChatArea({ messages, waiting, archived, onImageClick, on
     [messages, archived, onImageClick, onToggleCollapse, onEditMessage, onDeleteMessages, onRegenerateResponse, lastUserMsgId]
   );
 
+  // 判断是否为空态：仅当无 user/assistant 消息时才算空态（系统消息不计入）
+  const hasConversation = messages.some((m) => m.role === "user" || m.role === "assistant");
+  const isEmpty = !hasConversation && !streamingMessage && !waiting;
+
   return (
     <div className="chat-area-wrapper">
+      <div className={`chat-area-container${isEmpty ? " chat-area-container-empty" : ""}`}>
       <main
         ref={chatAreaRef}
         className={`chat-area ${dragOver ? "chat-area-drag-over" : ""}`}
@@ -150,6 +156,8 @@ export default function ChatArea({ messages, waiting, archived, onImageClick, on
           </svg>
         </button>
       )}
+      {children}
+      </div>
       {!minimapCollapsed && <Minimap messages={messages} chatAreaRef={chatAreaRef} />}
       <button
         type="button"

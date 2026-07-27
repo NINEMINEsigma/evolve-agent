@@ -38,7 +38,7 @@ Agent 扮演酒馆系统（叙述者和管理者），负责：
 
 ### 整体容器
 
-整条消息包裹在一个独立的 HTML div 中（`.w`）。外层容器**不设固定宽度**，使用 `width:100%;margin:0 auto;padding:4px;box-sizing:border-box;` 实现全宽自适应。内嵌 `<style>` 定义全部样式，内嵌 `<script>` 处理交互（箭头旋转、折叠动画、点击复制）。
+整条消息包裹在一个独立的 HTML div 中（`.w`）。外层容器**不设固定宽度**，使用 `width:100%;margin:0 auto;padding:4px;box-sizing:border-box;` 实现全宽自适应。**必须设置背景色**（深色前景用 `background:#1a0f14`），否则在透明消息气泡的聊天界面中，背景会透过卡片导致文字不可见。内嵌 `<style>` 定义全部样式，内嵌 `<script>` 处理交互（箭头旋转、折叠动画、点击推进剧情）。
 
 **禁止**在正文中使用 Markdown 格式（如 `**粗体**`、`- 列表`、`> 引用`）——全部用 HTML 标签实现。整条消息要么全部是 HTML，要么全部是 Markdown（推荐HTML），不要混用。
 

@@ -6,6 +6,16 @@
   position: relative;
 }
 
+/* ── Chat area container (包裹 chat-area + input-bar，建立 input-bar 的定位上下文) ── */
+.chat-area-container {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  position: relative;
+  min-width: 0;
+}
+
 /* ── Chat area ── */
 .chat-area {
   flex: 1;
@@ -19,6 +29,11 @@
 
 .chat-area::-webkit-scrollbar {
   display: none;
+}
+
+/* 空态：减少底部 padding，让输入框居中时视觉更紧凑 */
+.chat-area-container-empty .chat-area {
+  padding-bottom: 20px;
 }
 
 /* ── Chat content (inner flex container for messages) ── */
