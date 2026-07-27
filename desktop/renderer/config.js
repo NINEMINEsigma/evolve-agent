@@ -111,20 +111,61 @@ async function onProfileChange() {
 // ── 新建 Profile ──────────────────────────────────────────
 
 async function onNewProfile() {
-  const name = prompt('请输入配置方案名称:');
-  if (!name || !name.trim()) return;
+  // Electron 不支持 window.prompt()，使用内联输入替代
+  const profileBar = document.querySelector('.profile-bar');
+  if (profileBar.classList.contains('editing')) return;
 
-  // 检查是否已存在
-  const profiles = await api.config.listProfiles();
-  if (profiles.includes(name)) {
-    alert(`配置方案 "${name}" 已存在`);
-    return;
+  const input = document.createElement('input');
+  input.type = 'text';
+  input.className = 'new-profile-input';
+  input.placeholder = '输入配置方案名称...';
+
+  const btnConfirm = document.createElement('button');
+  btnConfirm.className = 'btn btn-small btn-confirm-new';
+  btnConfirm.textContent = '确认';
+
+  const btnCancel = document.createElement('button');
+  btnCancel.className = 'btn btn-small';
+  btnCancel.textContent = '取消';
+
+  profileBar.classList.add('editing');
+  profileBar.insertBefore(input, btnNewProfile);
+  profileBar.insertBefore(btnConfirm, btnNewProfile);
+  profileBar.insertBefore(btnCancel, btnNewProfile);
+  input.focus();
+
+  function restore() {
+    profileBar.classList.remove('editing');
+    input.remove();
+    btnConfirm.remove();
+    btnCancel.remove();
   }
 
-  await api.config.createProfile(name);
-  await loadProfiles();
-  profileSelect.value = name;
-  await onProfileChange();
+  async function doCreate() {
+    const name = input.value.trim();
+    if (!name) { restore(); return; }
+
+    const profiles = await api.config.listProfiles();
+    if (profiles.includes(name)) {
+      alert(`配置方案 "${name}" 已存在`);
+      input.focus();
+      input.select();
+      return;
+    }
+
+    await api.config.createProfile(name);
+    restore();
+    await loadProfiles();
+    profileSelect.value = name;
+    await onProfileChange();
+  }
+
+  btnConfirm.addEventListener('click', doCreate);
+  btnCancel.addEventListener('click', restore);
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') { e.preventDefault(); doCreate(); }
+    else if (e.key === 'Escape') { e.preventDefault(); restore(); }
+  });
 }
 
 // ── 保存到 Profile ────────────────────────────────────────

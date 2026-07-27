@@ -331,3 +331,32 @@ body {
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: #333; border-radius: 4px; }
 ::-webkit-scrollbar-thumb:hover { background: #444; }
+
+/* ═══════════════ 新建 Profile 内联输入 ═══════════════ */
+
+.profile-bar.editing > #profile-select,
+.profile-bar.editing > #btn-new-profile,
+.profile-bar.editing > #btn-save-profile {
+  display: none;
+}
+
+.new-profile-input {
+  flex: 1;
+  padding: 6px 10px;
+  background: var(--bg-input);
+  color: var(--text);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius);
+  font-size: 13px;
+}
+
+.new-profile-input:focus {
+  outline: none;
+  border-color: var(--accent-hover);
+}
+
+.btn-confirm-new {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
