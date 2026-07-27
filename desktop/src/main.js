@@ -48,8 +48,10 @@ const ICON_PATH = app.isPackaged
 
 function detectPythonPath() {
   const venvScripts = path.join(REPO_ROOT, 'venv', 'Scripts', 'python.exe');
+  const venvRootExe = path.join(REPO_ROOT, 'venv', 'python.exe');
   const venvBin = path.join(REPO_ROOT, 'venv', 'bin', 'python');
   if (fs.existsSync(venvScripts)) return venvScripts;
+  if (fs.existsSync(venvRootExe)) return venvRootExe;
   if (fs.existsSync(venvBin)) return venvBin;
   return 'python';
 }

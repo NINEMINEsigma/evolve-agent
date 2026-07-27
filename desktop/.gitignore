@@ -26,3 +26,6 @@ dist-ssr
 
 #
 .env
+
+# 嵌入式 Python（构建时生成，不提交）
+venv/

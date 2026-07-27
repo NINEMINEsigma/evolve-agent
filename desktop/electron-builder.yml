@@ -13,3 +13,56 @@ files:
   - src/**/*
   - renderer/**/*
   - assets/**/*
+
+# 后端文件复制到安装目录（exe 同级），匹配 main.js 中 REPO_ROOT 的预期布局
+extraFiles:
+  - from: ../run.py
+    to: run.py
+  - from: ../config.py
+    to: config.py
+  - from: ../config_tui.py
+    to: config_tui.py
+  - from: ../check_env.py
+    to: check_env.py
+  - from: ../requirements.txt
+    to: requirements.txt
+  - from: ../SOUL.md
+    to: SOUL.md
+  - from: ../origin_agent
+    to: origin_agent
+    filter:
+      - "!**/__pycache__"
+      - "!**/*.pyc"
+      - "!**/node_modules"
+      - "!**/dist"
+  - from: ../third
+    to: third
+    filter:
+      - "!**/.git"
+      - "!**/__pycache__"
+      - "!**/*.pyc"
+  - from: ../custom_hooks
+    to: custom_hooks
+    filter:
+      - "!**/.git"
+      - "!**/__pycache__"
+      - "!**/*.pyc"
+  - from: ../custom_tools
+    to: custom_tools
+    filter:
+      - "!**/.git"
+      - "!**/__pycache__"
+      - "!**/*.pyc"
+  - from: ../custom_llm_client
+    to: custom_llm_client
+    filter:
+      - "!**/.git"
+      - "!**/__pycache__"
+      - "!**/*.pyc"
+  - from: ../pre-skills
+    to: skills
+  - from: ../venv
+    to: venv
+    filter:
+      - "!**/__pycache__"
+      - "!**/*.pyc"
