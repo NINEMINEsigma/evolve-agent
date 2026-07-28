@@ -79,7 +79,7 @@ After this response, the process exits with code -1. The orchestrator performs t
 
 When validation fails:
 1. Read the error details from the response
-2. Use `read_own_source` to examine the problematic file
+2. Use `read_file` with `fork:` prefix to examine the problematic file
 3. Fix the code with `write_file` or `edit_file` (with `fork:` prefix)
 4. Call `evolve_code` again
 

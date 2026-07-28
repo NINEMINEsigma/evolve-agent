@@ -99,7 +99,6 @@ When evolving code, always use `fork:` namespace:
 ```
 # Correct (write new file or full overwrite)
 write_file: {"path": "fork:main.py", "content": "..."}
-read_own_source: {"file": "main.py"}  # Reads from self:
 
 # Correct (incremental edit)
 edit_file: {"path": "fork:main.py", "old_string": "...", "new_string": "..."}

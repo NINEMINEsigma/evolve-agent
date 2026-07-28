@@ -21,14 +21,14 @@ Agent runs from `fast_agent_space/` but **must never modify it directly**. All e
 
 ## Reading Existing Code
 
-Use `read_own_source` tool with **bare filenames** (no namespace prefix):
+Use `read_file` tool with `fork:` prefix:
 
 ```
-read_own_source: {"file": "main.py"}
-read_own_source: {"file": "system/sandbox.py", "offset": 1, "limit": 50}
+read_file: {"path": "fork:main.py"}
+read_file: {"path": "fork:system/sandbox.py", "offset": 1, "limit": 50}
 ```
 
-Bare filenames resolve to `self:` namespace (agent's current runtime). Always read existing code before modifying it.
+Always read existing code via `fork:` (which maps to `slow_agent_space/`) before modifying it.
 
 ## Writing Evolution Code
 
@@ -41,7 +41,7 @@ edit_file: {"path": "fork:evolve/code.py", "old_string": "...", "new_string": ".
 
 ## Evolution Workflow
 
-1. **Analyze** — Read existing code with `read_own_source`
+1. **Analyze** — Read existing code with `read_file` and `fork:` prefix
 2. **Plan** — Determine which files need changes and why
 3. **Write** — Use `write_file` or `edit_file` to write modified code to `fork:` namespace
 4. **Validate** — Call `evolve_code` tool to trigger validation

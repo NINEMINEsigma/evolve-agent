@@ -197,17 +197,6 @@ Parameters:
 2. Translate all template files
 3. System auto-detects based on templates directory
 
-### Language Detection
-
-```python
-# In system/prompt.py
-def get_template_dir():
-    """Get appropriate template directory."""
-    if Path("templates/zh").exists():
-        return "templates/zh"
-    return "templates"  # Default English
-```
-
 ### Translation Guidelines
 
 When translating templates:

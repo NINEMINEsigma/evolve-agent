@@ -1,6 +1,6 @@
 # Evolve Agent — AGENTS.md
 
-> **Hard rules — violating any of these corrupts the build or loses work**
+> **Hard rules — violating these corrupts the build or loses work**
 >
 > - **Never run pnpm/npm in `origin_agent/frontend/`.** Builds only happen inside `workspace/fast_agent_space/frontend/` at runtime. Running pnpm in `origin_agent/` creates `node_modules/`/`dist/` that can be copied into workspace on `--fouce_init` and break builds.
 > - **Never run validation commands for the user.** No `npx tsc`, `pnpm exec tsc`, `npm run typecheck`, `npm run lint`, `pnpm build`, `python check_env.py`, etc. If the user reports a build error, only edit source code; do not reproduce or validate by running commands.
@@ -35,7 +35,7 @@ workspace/
   .fallback/         ← previous fast backup
   agentspace/        ← agent I/O workspace (ws:)
   logs/              ← sessions, evolution status
-third/               ← git submodules (easysave, llamaapis, filesystem)
+third/               ← git submodules (easysave, llamaapis)
 skills/              ← runtime skill files, gitignored
 ```
 
@@ -64,28 +64,30 @@ All file operations use logical prefixes. No bare paths, `..`, or absolute paths
 | `fix:`   | `workspace/.fallback/`           | fallback        | rw         |
 | `skills:`| repo-root `skills/`              | fast / fallback | rw         |
 
-There is no `self:` namespace. Read your own source with `fork:`.
+**No `self:` namespace.** Read agent source via `fork:` (which is `slow_agent_space/`, not the running `fast_agent_space/`).
 
 ## Evolution flow
 
 ```
-read_file (fork:path) → write_file / edit_file (fork:path) → validate_code → [validate_frontend if frontend changed] → evolve_code
+read_file (fork:path) → write_file / edit_file (fork:path)
+  → validate_code → [validate_frontend if frontend changed]
+  → evolve_code → exit -1 → run.py swaps slow→fast and restarts
 ```
 
-- `read_own_source` exists but is **disabled**; use `read_file` with `fork:`.
-- `write_file` (filesystem.py) does full overwrites using `fork:`/`ws:`/`fix:`/`skills:` prefixes; `edit_file` does incremental edits.
-- `edit_file` (filesystem.py) does incremental edits using `fork:`/`ws:`/`fix:`/`skills:` prefixes.
+- `read_file` / `write_file` / `edit_file` use `fork:`/`ws:`/`fix:`/`skills:` prefixes.
 - `validate_code`: AST syntax check across all `.py` files in `fork:`.
-- `validate_frontend`: runs `pnpm install && pnpm run build` in the target frontend dir (default `fork:frontend`). Required if frontend files changed.
+- `validate_frontend`: runs `pnpm install && pnpm run build` in target frontend dir (default `fork:frontend`). Required if frontend files changed.
 - `evolve_code`: deep `py_compile` check, then exits with `-1` to trigger the swap.
-- `diff_fast_fork`: compares `fast_agent_space/` with `fork:`; skip `evolve_code` if identical.
+- `diff_fast_fork` (in `extools/diff_tools.py`): compares `fast_agent_space/` with `fork:`; skip `evolve_code` if identical.
+- `diff_origin_fast`: compares `origin_agent/` with `fast_agent_space/`.
 
 ## Tool registration
 
 Tools are auto-discovered by AST scan (`abstract/tools/discover.py`) looking for module-level `registry.register()` calls. Sources:
 
-- `origin_agent/component/tools/` — core
-- `origin_agent/component/extools/` — extras
+- `origin_agent/component/tools/` — core (filesystem, code, frontend, skills, etc.)
+- `origin_agent/component/extools/` — extras (web, ssh, cron, diff, archive, pip, background_service, etc.)
+- `origin_agent/component/mutliagenttools/` — sub-agent/multi-agent tools (note directory name typo: `mutliagenttools`)
 - `custom_tools/` — user-defined, loaded if directory exists
 - MCP servers — bridged via `component/mcp_tools.py`
 
@@ -96,16 +98,30 @@ When adding `registry.register(...)`:
 
 ## Frontend
 
-React + Vite + TypeScript in `origin_agent/frontend/`. Package scripts are `dev`, `build` (`tsc -b && vite build`), `preview`.
+React + Vite + TypeScript in `origin_agent/frontend/`. Package scripts: `dev`, `build` (`tsc -b && vite build`), `preview`.
 
-The frontend is auto-built at startup by `__main__.py::_build_frontend()` inside the running agent directory (`workspace/fast_agent_space/frontend/`) using `pnpm install && pnpm run build`. Build failure returns exit code `1` and triggers fallback mode.
+Auto-built at startup by `__main__.py::_build_frontend()` inside the running agent directory (`workspace/fast_agent_space/frontend/`) using `pnpm install && pnpm run build`. Build failure returns exit code `1` and triggers fallback mode.
 
-Because `origin_agent/frontend/` is not at the repo root, IDE/static type awareness may be inaccurate. Do not rely on frontend type checks or builds without telling the user.
+Uses `frontend_build_signature` caching: source files are hashed before build; on subsequent starts, if the hash matches and `dist/` exists, the build is skipped. `--frontend_force_build` bypasses the cache.
+
+Because `origin_agent/frontend/` is not at the repo root, IDE static type awareness may be inaccurate. Do not rely on frontend type checks or builds without telling the user.
 
 ## Approval
 
 - **Normal mode**: user confirms tools via the WebSocket frontend.
-- **Adventure/handsfree mode**: local GGUF model auto-approves. Auto-enabled if a `.gguf` is found in `custom_models/` (default `Qwen3.5-0.8B-Q8_0.gguf`). Explicit flags: `--approval_model <gguf>`, `--approval_model_cuda`. Uses `third/llamaapis` (llama.cpp wrapper).
+- **Handsfree mode**: local GGUF model auto-approves. Auto-enabled if a `.gguf` is found in `custom_models/` (auto-detected at startup). Explicit flags: `--approval_model <gguf>`, `--approval_model_cuda`. Uses `third/llamaapis` (llama.cpp wrapper). Falls back to remote approval API if configured (`--approval_remote_*`) when no local model is found.
+- Approval module at `component/approval/`: `core.py`, `backend.py`, `executor.py`, `handsfree.py`, `allowlist.py`, `policy.py`.
+
+## Template system (system/prompt.py)
+
+Assembled by `system/prompt.py`. Hierarchy:
+
+1. `GENE.md` (project root) — immutable core identity
+2. `SOUL.md` (agentspace/) — editable personality (empty by default)
+3. `base.txt` — foundation prompt (always included)
+4. `modes/{fast,fallback}.txt` — mode-specific instructions
+5. `tools.txt` + `tools_subagent.txt` (only for MAIN scope)
+6. Extra blocks (skills, memory provider contexts, etc.)
 
 ## Windows specifics
 
@@ -133,7 +149,3 @@ Use Chinese commit messages with repo prefixes: `[feature]`, `[fix]`, `[refactor
 ## Sessions & Evolution status
 
 Sessions persist to `workspace/logs/sessions/` (JSONL with `_index.json` metadata). Evolution status is at `workspace/logs/evolution.status` (JSON array).
-
-## Template system
-
-Assembled by `system/prompt.py`. Detects `templates/zh/` existence and defaults to Chinese. Hierarchy: `GENE > SOUL > base > modes/{fast,fallback} > tools > skills`.
