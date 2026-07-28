@@ -22,7 +22,7 @@ python run.py --load <config_key>
 - `config.py` prompts interactively if neither `--load` nor `--save` is given. In agent/non-interactive sessions always pass `--load <key>` or `--save <key>`.
 - `--interactive` launches the `rich`-based TUI config wizard (`config_tui.py`): profile selection → grouped field editing with validation → optional save. CLI overrides (e.g. `--llm_model`) can be combined with `--interactive` to pre-fill values.
 - `config.json` is gitignored and contains the unencrypted API key. Do not commit it.
-- `--fouce_init` is intentionally misspelled. When `true` in the loaded config, `--load` wipes `workspace/` and recopies `origin_agent/` on every start. Use `fouce_init: false` for persistent workspaces.
+- `--fouce_init` is intentionally misspelled. When `true` in the loaded config, `--load` wipes `workspace/fast_agent_space/`, `workspace/slow_agent_space/`, and `workspace/.fallback/` (code directories only) and recopies `origin_agent/` into them. `workspace/agentspace/`, `workspace/logs/`, and session persistence (`workspace/sessions/`) are NOT affected. Use `fouce_init: false` for persistent workspaces.
 - Common CLI overrides: `--fouce_init`, `--llm_model`, `--llm_base_url`, `--llm_api_key`, `--llm_temperature`, `--llm_max_context_tokens`, `--llm_max_output_tokens`, `--llm_reasoning_effort`, `--approval_model`, `--approval_model_cuda`, `--gateway_host`, `--gateway_port`, `--console_log`, `--interactive`.
 
 ## Repository layout
