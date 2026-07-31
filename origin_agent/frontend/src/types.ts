@@ -181,6 +181,7 @@ export interface SessionInfo {
   parent?: string | null;
   continuation?: string | null;
   tags?: string[];
+  loop_type?: string;
 }
 
 export interface SessionCluster {

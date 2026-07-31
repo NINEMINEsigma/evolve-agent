@@ -126,6 +126,7 @@ export interface SessionStore {
   respondConfirm: (pendingConfirm: ConfirmRequest | null, action: string, denyReasonText?: string, deniedBy?: string) => void;
   respondAsk: (pendingAsk: AskRequest | null, option?: string, customText?: string) => void;
   newChat: () => void;
+  enterColloquy: () => void;
   switchSession: (sid: string) => void;
   deleteSession: (sid: string) => void;
   autoTitleSession: (sid: string) => void;
@@ -910,6 +911,11 @@ export function useSessionStore(callbacks: SessionStoreCallbacks = {}): SessionS
     ignoreStaleRef.current = false;
   }, [sessionId]);
 
+  const enterColloquy = useCallback(() => {
+    const COLLOQUY_SID = "____buildin_colloquy__";
+    switchSession(COLLOQUY_SID);
+  }, [switchSession]);
+
   const deleteSession = useCallback((sid: string) => {
     if (!confirm("确定要删除这个会话吗？此操作不可撤销。")) return;
     fetch(`/api/sessions/${sid}`, { method: "DELETE" })
@@ -1274,6 +1280,7 @@ export function useSessionStore(callbacks: SessionStoreCallbacks = {}): SessionS
     respondConfirm,
     respondAsk,
     newChat,
+    enterColloquy,
     switchSession,
     deleteSession,
     autoTitleSession,

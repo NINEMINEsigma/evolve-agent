@@ -324,3 +324,22 @@ DEFAULT_SKILLS_DIR: str = "skills"
 
 # Inline shell 模板模式: {{ command }}
 _INLINE_SHELL_RE = re.compile(r"\u007b\u007b\s*(.+?)\s*\u007d\u007d")
+
+
+# ============================================================================
+# Colloquy Loop (随意聊聊)
+# ============================================================================
+
+# 随意聊聊会话的固定 session ID
+COLLOQUY_SESSION_ID: str = "____buildin_colloquy__"
+
+# 滑动窗口压缩比例：将最早 N% 的消息压缩为一条摘要
+COLLOQUY_COMPRESS_RATIO: float = 0.3
+
+# 工具集白名单 — colloquy loop 仅允许这些 toolset 的工具
+# 包含 component/tools 和 component/extools 下所有 toolset 的并集
+COLLOQUY_TOOLSET_WHITELIST: frozenset[str] = frozenset({
+    "filesystem", "core", "progress", "lsp", "frontend", "code",
+    "clipboard", "skills", "shell", "python",
+    "extools", "cron", "background", "dynamic", "archive",
+})

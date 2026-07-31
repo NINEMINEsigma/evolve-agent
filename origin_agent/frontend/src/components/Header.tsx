@@ -162,7 +162,7 @@ export default function Header({
           <div className="header-left">
             {sessionId && (
               <span className="session-badge" data-tooltip="刷新页面后自动恢复此会话">
-                {sessionId}
+                {sessionId === "____buildin_colloquy__" ? "随意聊聊" : sessionId}
               </span>
             )}
             <DebugBadges />
@@ -258,7 +258,7 @@ export default function Header({
         )}
         {sessionId && (
           <span className="session-badge" data-tooltip="刷新页面后自动恢复此会话">
-            {sessionId}
+            {sessionId === "____buildin_colloquy__" ? "随意聊聊" : sessionId}
           </span>
         )}
         <DebugBadges />

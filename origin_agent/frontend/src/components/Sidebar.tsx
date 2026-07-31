@@ -16,6 +16,7 @@ interface SidebarProps {
   onToggleMergeMode: () => void;
   onToggleMergeSelect: (sid: string) => void;
   onNewChat: () => void;
+  onEnterColloquy: () => void;
   onSwitchSession: (sid: string) => void;
   onContextMenu: (e: React.MouseEvent, sid: string) => void;
   onMergeSessions: (sources: string[]) => void;
@@ -245,6 +246,7 @@ export default function Sidebar({
   onToggleMergeMode,
   onToggleMergeSelect,
   onNewChat,
+  onEnterColloquy,
   onSwitchSession,
   onContextMenu,
   onMergeSessions,
@@ -324,6 +326,16 @@ export default function Sidebar({
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <path d="M12 20h9" />
               <path d="M16.5 3.5a2.121 2.121 0 1 1 3 3L7 19l-4 1 1-4 12.5-12.5z" />
+            </svg>
+          </button>
+          <button
+            className={`colloquy-btn ${searchFocused ? 'toolbar-btn-hidden' : ''} ${sessionId === "____buildin_colloquy__" ? 'active' : ''}`}
+            onClick={onEnterColloquy}
+            data-tooltip="随意聊聊"
+            aria-label="随意聊聊"
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
             </svg>
           </button>
         </div>

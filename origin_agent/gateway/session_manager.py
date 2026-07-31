@@ -116,6 +116,10 @@ class SessionManager:
         if info and info.loop_type == Loop.multi:
             return self._create_multi_loop(session_id, frontend_sink, history_store_dir)
 
+        # 若为 colloquy 则创建 ColloquyLoop
+        if info and info.loop_type == Loop.colloquy:
+            return self._create_colloquy_loop(session_id, frontend_sink, history_store_dir)
+
         # 默认创建 ParentAgentLoop
         from entry.parent_agent_loop import ParentAgentLoop
 
@@ -233,6 +237,29 @@ class SessionManager:
             self._app.cron_router.register(session_id, multi_loop)
         return multi_loop
 
+    def _create_colloquy_loop(
+        self,
+        session_id: str,
+        frontend_sink,
+        history_store_dir: Path | None = None,
+    ) -> IMainSessionLoop:
+        """创建 ColloquyLoop 实例。"""
+        from entry.colloquy_loop import ColloquyLoop
+
+        loop = ColloquyLoop(
+            app=self._app,
+            session_id=session_id,
+            frontend_sink=frontend_sink,
+            history_store_dir=history_store_dir,
+        )
+        loop.set_session_manager(self)
+        self._loops[session_id] = loop
+
+        if self._app.cron_router is not None:
+            self._app.cron_router.register(session_id, loop.loop)
+
+        return loop
+
     def get_loop(self, session_id: str) -> IMainSessionLoop | None:
         """返回指定 session 的 IMainSessionLoop。"""
         return self._loops.get(session_id)
@@ -253,7 +280,14 @@ class SessionManager:
         并重新注册到 CronRouter（如有需要）。同时更新索引中的 LoopMeta。
 
         若 session_id 不在当前映射中，则直接注册新 loop。
+        colloquy session 不允许替换 loop 类型。
         """
+        # colloquy session 保护：不允许替换 loop
+        info = self._chat_sm.get(session_id)
+        if info and info.loop_type == Loop.colloquy:
+            logger.warning("Loop replace rejected for colloquy session | id=%s", session_id)
+            return
+
         old_loop = self._loops.pop(session_id, None)
         if old_loop is not None:
             old_loop.loop.interrupt()
@@ -325,3 +359,37 @@ class SessionManager:
             if self._app.cron_router is not None:
                 self._app.cron_router.register(new_sid, loop.loop)
             logger.info("Session rotated: %s → %s", old_sid, new_sid)
+
+    def ensure_colloquy_session(self) -> None:
+        """确保 colloquy session 存在，不存在则创建。
+
+        使用固定 ID 创建，设置 loop_type=colloquy、pinned=True、title="随意聊聊"。
+        """
+        from entity.constant import COLLOQUY_SESSION_ID
+
+        if self._chat_sm.exists(COLLOQUY_SESSION_ID):
+            logger.debug("Colloquy session already exists | id=%s", COLLOQUY_SESSION_ID)
+            return
+
+        # 使用固定 ID 创建 session
+        self._chat_sm.create(session_id=COLLOQUY_SESSION_ID)
+
+        # 设置元数据
+        info = self._chat_sm.get(COLLOQUY_SESSION_ID)
+        if info is not None:
+            info.loop_type = Loop.colloquy
+            info.pinned = True
+            info.title = "随意聊聊"
+            # 持久化到磁盘索引
+            if self._chat_sm._store_dir:
+                with self._chat_sm._index_lock:
+                    entries = self._chat_sm._read_index()
+                    for e in entries:
+                        if e.get("id") == COLLOQUY_SESSION_ID:
+                            e["loop_type"] = Loop.colloquy.value
+                            e["pinned"] = True
+                            e["title"] = "随意聊聊"
+                            break
+                    self._chat_sm._write_index(entries)
+
+        logger.info("Colloquy session created | id=%s", COLLOQUY_SESSION_ID)

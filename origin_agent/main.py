@@ -170,6 +170,10 @@ class App:
         app.link_shutdown_event(self._shutdown_event)
         app.init()
 
+        # ---- 确保 colloquy session 存在 ----
+        if app.session_manager is not None:
+            app.session_manager.ensure_colloquy_session()
+
         # ---- 工具发现 ----
         try:
             import component.tools.filesystem as _fs

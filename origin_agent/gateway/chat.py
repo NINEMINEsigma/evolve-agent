@@ -259,9 +259,10 @@ class SessionManager:
         self,
         parent_sid: str | None = None,
         parents: list[str] | None = None,
+        session_id: str | None = None,
     ) -> str:
         import time
-        sid: str = uuid.uuid4().hex[:12]
+        sid: str = session_id if session_id else uuid.uuid4().hex[:12]
         now: float = time.time()
         # 兼容旧参数：parent_sid 存在时纳入 parents
         effective_parents: list[str] = []
@@ -354,6 +355,12 @@ class SessionManager:
         return sid in self._sessions
 
     def remove(self, sid: str) -> None:
+        # colloquy session 不可删除
+        from entity.puretype import Loop
+        info = self._sessions.get(sid)
+        if info and info.loop_type == Loop.colloquy:
+            logger.warning("Colloquy session cannot be removed | id=%s", sid)
+            return
         self._sessions.pop(sid, None)
         # 清理磁盘
         if self._store_dir:
@@ -442,8 +449,13 @@ class SessionManager:
 
         排序规则：置顶的 session 排在最前面；
         同一层级内按 last_activity_at 降序（最近的在前）。
+        过滤掉 colloquy session（不在普通列表中显示）。
         """
-        items: list[SessionInfo] = list(self._sessions.values())
+        from entity.puretype import Loop
+        items: list[SessionInfo] = [
+            s for s in self._sessions.values()
+            if s.loop_type != Loop.colloquy
+        ]
         items.sort(key=lambda s: (-int(s.pinned), -s.last_activity_at))
         return items
 

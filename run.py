@@ -149,6 +149,7 @@ if __name__ == "__main__":
         if fast_pnpm_lock_yaml.exists():
             fast_pnpm_lock_yaml.unlink()
 
+    enable_fallback = fouce_init == False
     while True:
         logger.info(f"Running fast agent")
         try:
@@ -168,6 +169,7 @@ if __name__ == "__main__":
             break
         elif exit_code in (-1, 4294967295):
             logger.info(f"Slow agent was updated, fast agent will update to new version")
+            enable_fallback = True
             _append_evolve_event("backup", f"fast → .fallback")
             # 不再尝试每次都删除备份空间，避免前端可能的重新下载
             # shutil.rmtree(workspace_path / ".fallback")
@@ -181,6 +183,9 @@ if __name__ == "__main__":
             _append_evolve_event("complete", "swap finished, restarting")
         else:
             logger.error(f"Fast agent exited with unknown error: {exit_code}")
+            if not enable_fallback:
+                logger.error(f"Fallback is not enabled because current fallback version is from force init, exiting")
+                break
             if (workspace_path / ".fallback").exists() == False:
                 shutil.copytree(source, workspace_path / ".fallback", dirs_exist_ok=True) # 复制源代码到备份空间
             fallback_main = workspace_path / ".fallback" / "__main__.py"

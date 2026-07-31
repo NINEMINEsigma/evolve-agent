@@ -216,6 +216,14 @@ export function useWebSocket() {
     connRef.current.connect(sid);
   }, []);
 
+  const enterColloquy = useCallback(() => {
+    const COLLOQUY_SID = "____buildin_colloquy__";
+    if (!sessionRef.current) return;
+    connRef.current.disconnect();
+    sessionRef.current.switchSession(COLLOQUY_SID);
+    connRef.current.connect(COLLOQUY_SID);
+  }, []);
+
   const mergeSessions = useCallback(async (sources: string[]) => {
     if (!sessionRef.current) return;
     const newSid = await session.mergeSessions(sources);
@@ -417,6 +425,7 @@ export function useWebSocket() {
     handlePasteImages: upload.handlePasteImages,
     inputRef: upload.inputRef,
     newChat,
+    enterColloquy,
     switchSession,
     deleteSession,
     autoTitleSession: session.autoTitleSession,

@@ -196,6 +196,29 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
     def get_tool_availability_scope(self) -> ToolAvailability:
         return ToolAvailability.MAIN
 
+    # -- 超限检查步骤（可被子类覆写）-------------------------------------------
+
+    async def _check_over_limit_before_process(
+        self, sid: str, user_message: str,
+    ) -> str:
+        """process_message 入口处的超限检查：超限时旋转会话，返回可能更新后的 sid。"""
+        if self._lifecycle.is_context_over_limit():
+            new_sid: str | None = await self._lifecycle.rotate_session_for_continuation(
+                sid, pending_user_message=user_message,
+            )
+            if new_sid:
+                return new_sid
+        return sid
+
+    async def _check_over_limit_in_tool_loop(self, sid: str) -> str:
+        """_run_tool_loop 内每轮工具调用后的超限检查：超限时旋转会话，返回可能更新后的 sid。"""
+        if self._lifecycle.is_context_over_limit():
+            new_sid: str | None = await self._lifecycle.rotate_session_for_continuation(sid)
+            if new_sid:
+                self.session_id = new_sid
+                return new_sid
+        return sid
+
     # ========================================================================
     # 公共 API
     # ========================================================================
@@ -241,13 +264,8 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
                 await self.append_user_message(user_message, character_name=character_name)
 
             # 历史过长时自动终结会话
-            if self._lifecycle.is_context_over_limit():
-                new_sid: str | None = await self._lifecycle.rotate_session_for_continuation(
-                    sid, pending_user_message=user_message,
-                )
-                if new_sid:
-                    sid = new_sid
-                    self.session_id = new_sid
+            sid = await self._check_over_limit_before_process(sid, user_message)
+            self.session_id = sid
 
             messages = self._build_history_messages(user_message)
 
@@ -371,11 +389,7 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
                         except (json.JSONDecodeError, KeyError, TypeError):
                             pass
 
-                if self._lifecycle.is_context_over_limit():
-                    new_sid = await self._lifecycle.rotate_session_for_continuation(sid)
-                    if new_sid:
-                        sid = new_sid
-                        self.session_id = new_sid
+                sid = await self._check_over_limit_in_tool_loop(sid)
 
                 messages = self._get_full_history(sid)
 

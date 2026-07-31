@@ -152,6 +152,40 @@
   pointer-events: none;
 }
 
+/* 随意聊聊按钮 — 圆角特殊样式 */
+.colloquy-btn {
+  width: 28px;
+  height: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: 14px;
+  background: rgba(99, 102, 241, 0.12);
+  color: var(--text-secondary);
+  cursor: pointer;
+  padding: 0;
+  transition: background 0.12s, color 0.12s, width 0.15s ease, opacity 0.15s ease, padding 0.15s ease;
+}
+
+.colloquy-btn:hover {
+  background: rgba(99, 102, 241, 0.22);
+  color: var(--text-primary);
+}
+
+.colloquy-btn.active {
+  background: rgba(99, 102, 241, 0.3);
+  color: #c7d2fe;
+}
+
+.colloquy-btn.toolbar-btn-hidden {
+  opacity: 0;
+  width: 0;
+  padding: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+
 .search-input::placeholder {
   color: var(--text-muted);
 }

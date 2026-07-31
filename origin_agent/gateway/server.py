@@ -622,7 +622,16 @@ async def http_interrupt(session_id: str):
 
 @app.delete("/api/sessions/{session_id}")
 async def delete_session(session_id: str):
-    """删除 session 及其持久化数据。"""
+    """删除 session 及其持久化数据。colloquy session 不可删除。"""
+    from entity.puretype import Loop
+    info = _get_sm().get(session_id)
+    if info and info.loop_type == Loop.colloquy:
+        logger.warning("Delete session rejected (colloquy) | session=%s", session_id)
+        return HTMLResponse(
+            json.dumps({"deleted": False, "error": "colloquy session cannot be deleted"}, ensure_ascii=False),
+            media_type="application/json",
+            status_code=403,
+        )
     logger.info("Delete session | session=%s", session_id)
     _get_sm().remove(session_id)
     loop = _get_loop(session_id)
@@ -814,7 +823,16 @@ async def auto_tags_session(session_id: str):
 
 @app.post("/api/sessions/{session_id}/regenerate-summary")
 async def regenerate_summary_endpoint(session_id: str):
-    """重新生成指定会话的摘要。"""
+    """重新生成指定会话的摘要。colloquy session 不可手动压缩。"""
+    from entity.puretype import Loop
+    info = _get_sm().get(session_id)
+    if info and info.loop_type == Loop.colloquy:
+        logger.warning("Regenerate summary rejected (colloquy) | session=%s", session_id)
+        return HTMLResponse(
+            json.dumps({"success": False, "error": "colloquy session cannot be manually compressed"}, ensure_ascii=False),
+            media_type="application/json",
+            status_code=403,
+        )
     logger.info("Regenerate summary | session=%s", session_id)
     loop = _get_loop(session_id)
     if loop is not None:
@@ -825,7 +843,16 @@ async def regenerate_summary_endpoint(session_id: str):
 
 @app.post("/api/sessions/{session_id}/terminate")
 async def terminate_session_endpoint(session_id: str):
-    """手动终结指定会话：归档 + 压缩（生成摘要），不旋转。"""
+    """手动终结指定会话：归档 + 压缩（生成摘要），不旋转。colloquy session 不可终结。"""
+    from entity.puretype import Loop
+    info = _get_sm().get(session_id)
+    if info and info.loop_type == Loop.colloquy:
+        logger.warning("Terminate session rejected (colloquy) | session=%s", session_id)
+        return HTMLResponse(
+            json.dumps({"terminated": False, "error": "colloquy session cannot be terminated"}, ensure_ascii=False),
+            media_type="application/json",
+            status_code=403,
+        )
     logger.info("Terminate session | session=%s", session_id)
     # 先停止该父会话的所有子 Agent 会话
     try:

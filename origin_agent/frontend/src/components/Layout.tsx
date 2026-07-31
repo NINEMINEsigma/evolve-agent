@@ -213,6 +213,7 @@ export default function Layout({ ws, onContextMenu }: LayoutProps) {
         }}
         onToggleMergeSelect={ws.toggleMergeSelect}
         onNewChat={ws.newChat}
+        onEnterColloquy={ws.enterColloquy}
         onSwitchSession={ws.switchSession}
         onContextMenu={onContextMenu}
         onMergeSessions={(sources) => {

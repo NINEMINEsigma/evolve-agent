@@ -111,6 +111,7 @@ class Loop(str, Enum):
     '''
     parent = "parent"
     multi = "multi"
+    colloquy = "colloquy"
 
 
 class SessionStatus(str, Enum):
