@@ -896,7 +896,6 @@ export function useSessionStore(callbacks: SessionStoreCallbacks = {}): SessionS
 
   const switchSession = useCallback((sid: string) => {
     if (sid === sessionId) return;
-    localStorage.setItem("evolve_session_id", sid);
     setMessages([]);
     setAgents([]);
     setInput("");

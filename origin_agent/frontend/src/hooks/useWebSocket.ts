@@ -27,7 +27,7 @@ export function useWebSocket() {
       fetch(`/api/sessions/${sid}/tool-resources`).then((r) => r.json()),
       fetch(`/api/sessions/${sid}/subagents`).then((r) => r.json()),
     ]);
-    const activeSid = localStorage.getItem("evolve_session_id") || sid;
+    const activeSid = sessionRef.current?.sessionId || sid;
     if (activeSid !== sid) return;
     if (toolRes.status === "fulfilled") {
       const data = toolRes.value;
@@ -95,8 +95,7 @@ export function useWebSocket() {
 
   // ── connect on mount ──
   useEffect(() => {
-    const lastSid = localStorage.getItem("evolve_session_id") || "";
-    conn.connect(lastSid);
+    conn.connect();
     return () => conn.disconnect();
   }, [conn.connect, conn.disconnect]);
 
@@ -204,37 +203,41 @@ export function useWebSocket() {
   // ── actions ──
   const newChat = useCallback(() => {
     if (!sessionRef.current) return;
-    connRef.current.disconnect();
+    window.history.replaceState({}, "", "/");
+    conn.disconnect();
     sessionRef.current.newChat();
-    connRef.current.connect();
-  }, []);
+    conn.connect();
+  }, [conn.connect, conn.disconnect]);
 
   const switchSession = useCallback((sid: string) => {
     if (!sessionRef.current) return;
-    connRef.current.disconnect();
+    window.history.replaceState({}, "", `/?session=${sid}`);
+    conn.disconnect();
     sessionRef.current.switchSession(sid);
-    connRef.current.connect(sid);
-  }, []);
+    conn.connect(sid);
+  }, [conn.connect, conn.disconnect]);
 
   const mergeSessions = useCallback(async (sources: string[]) => {
     if (!sessionRef.current) return;
     const newSid = await session.mergeSessions(sources);
     if (newSid) {
-      connRef.current.disconnect();
+      window.history.replaceState({}, "", `/?session=${newSid}`);
+      conn.disconnect();
       sessionRef.current.switchSession(newSid);
-      connRef.current.connect(newSid);
+      conn.connect(newSid);
     }
-  }, [session.mergeSessions]);
+  }, [conn.connect, conn.disconnect, session.mergeSessions]);
 
   const branchSession = useCallback(async (sid: string) => {
     if (!sessionRef.current) return;
     const newSid = await sessionRef.current.mergeSessions([sid]);
     if (newSid) {
-      connRef.current.disconnect();
+      window.history.replaceState({}, "", `/?session=${newSid}`);
+      conn.disconnect();
       sessionRef.current.switchSession(newSid);
-      connRef.current.connect(newSid);
+      conn.connect(newSid);
     }
-  }, []);
+  }, [conn.connect, conn.disconnect]);
 
   const deleteSession = useCallback((sid: string) => {
     if (!sessionRef.current) return;
@@ -345,6 +348,15 @@ export function useWebSocket() {
     observer.observe(content);
     return () => observer.disconnect();
   }, [scrollToBottomIfAtBottom]);
+
+  // ── sync URL with session id ──
+  useEffect(() => {
+    if (!session.sessionId) return;
+    const urlSid = new URLSearchParams(window.location.search).get("session");
+    if (urlSid !== session.sessionId) {
+      window.history.replaceState({}, "", `/?session=${session.sessionId}`);
+    }
+  }, [session.sessionId]);
 
   // ── computed ──
   const isReady = conn.status === "已连接";
