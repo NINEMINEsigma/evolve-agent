@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { ChatMessage, CronTask } from "../types";
+import { ChatMessage, CronTask, DynamicEndpoint } from "../types";
 import { extractMessageResources } from "../utils";
 
 interface DrawerProps {
@@ -16,15 +16,17 @@ interface DrawerProps {
   }>>>;
   cronTasks: CronTask[];
   setCronTasks: React.Dispatch<React.SetStateAction<CronTask[]>>;
+  dynamicEndpoints: DynamicEndpoint[];
 }
 
 export default function Drawer({
   open, onClose, sessionId, messages, onImageClick,
-  bgTasks, setBgTasks, cronTasks, setCronTasks,
+  bgTasks, setBgTasks, cronTasks, setCronTasks, dynamicEndpoints,
 }: DrawerProps) {
   const [resourcesExpanded, setResourcesExpanded] = useState(true);
   const [backgroundExpanded, setBackgroundExpanded] = useState(true);
   const [cronExpanded, setCronExpanded] = useState(true);
+  const [dynamicEndpointsExpanded, setDynamicEndpointsExpanded] = useState(true);
 
   const { images, audios, downloads } = extractMessageResources(messages);
 
@@ -140,6 +142,32 @@ export default function Drawer({
                         <button className="cron-list-action trigger" onClick={() => fetch(`/api/sessions/${sessionId}/cron-tasks/${t.task_id}/trigger`, { method: "POST" }).then(() => setCronTasks((prev) => prev.map((x) => x.task_id === t.task_id ? { ...x, run_count: x.run_count + 1 } : x)))}>立即触发</button>
                         <button className="cron-list-action cancel" onClick={() => fetch(`/api/sessions/${sessionId}/cron-tasks/${t.task_id}/cancel`, { method: "POST" }).then(() => setCronTasks((prev) => prev.filter((x) => x.task_id !== t.task_id)))}>取消</button>
                       </div>
+                    </div>
+                  ))
+                )}
+              </div>
+            )}
+          </div>
+
+          {/* 动态端点区块 */}
+          <div className="drawer-section">
+            <div className="drawer-section-header" onClick={() => setDynamicEndpointsExpanded((v) => !v)}>
+              <span className={`drawer-arrow ${dynamicEndpointsExpanded ? "expanded" : ""}`}>▶</span>
+              <span className="drawer-section-title">动态端点 ({dynamicEndpoints.length})</span>
+            </div>
+            {dynamicEndpointsExpanded && (
+              <div className="drawer-section-body">
+                {dynamicEndpoints.length === 0 ? (
+                  <div className="drawer-empty">暂无动态端点</div>
+                ) : (
+                  dynamicEndpoints.map((ep) => (
+                    <div key={ep.name} className="task-list-item">
+                      <div className="task-list-header">
+                        <span className="task-list-name">{ep.name}</span>
+                        <span className="task-list-status">{ep.agent_name}</span>
+                      </div>
+                      <div className="task-list-meta">创建: {new Date(ep.created_at * 1000).toLocaleString()}</div>
+                      <div className="task-list-meta">{ep.url}</div>
                     </div>
                   ))
                 )}

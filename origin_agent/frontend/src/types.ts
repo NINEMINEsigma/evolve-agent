@@ -127,6 +127,13 @@ export interface ClipboardDisplay {
   content: string;
 }
 
+export interface DynamicEndpoint {
+  name: string;
+  url: string;
+  agent_name: string;
+  created_at: number;
+}
+
 export interface CronTask {
   task_id: string;
   session_id?: string;

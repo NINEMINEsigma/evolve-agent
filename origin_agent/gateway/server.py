@@ -544,14 +544,22 @@ async def update_session_tags(session_id: str, req: Request):
 @app.get("/api/sessions/{session_id}/tool-resources")
 async def get_session_tool_resources(session_id: str):
     """返回 session 的可恢复工具副作用资源快照。"""
+    from component.extools.dynamic_endpoint_tools import list_session_endpoints
+    endpoints = list_session_endpoints(session_id)
     loop = _get_loop(session_id)
     if loop is None:
-        return {"session_id": session_id, "task_progress": {}, "clipboard_display": {}}
+        return {
+            "session_id": session_id,
+            "task_progress": {},
+            "clipboard_display": {},
+            "dynamic_endpoints": endpoints,
+        }
     resources = loop.loop.get_tool_resources()
     return {
         "session_id": session_id,
         "task_progress": resources.get("task_progress", {}),
         "clipboard_display": resources.get("clipboard_display", {}),
+        "dynamic_endpoints": endpoints,
     }
 
 
@@ -637,12 +645,6 @@ async def delete_session(session_id: str):
     loop = _get_loop(session_id)
     if loop is not None:
         loop.loop.clear_session()
-    # 清理该会话注册的所有动态端点
-    try:
-        from component.extools.dynamic_endpoint_tools import cleanup_session_endpoints
-        cleanup_session_endpoints(session_id)
-    except Exception:
-        logger.warning("Failed to cleanup dynamic endpoints for session=%s", session_id, exc_info=True)
     # 停止该主会话下的所有子 Agent 并清理上下文
     try:
         orch = get_subagent_orchestrator()
@@ -987,10 +989,10 @@ async def dynamic_endpoint_handler(
         )
 
     # 验证三要素匹配
-    if info.get("session_id") != session_id or info.get("agent_name") != agent_name:
+    if info.session_id != session_id or info.agent_name != agent_name:
         logger.warning(
             "Dynamic endpoint mismatch | endpoint=%s expected sid=%s agent=%s got sid=%s agent=%s",
-            endpoint_name, info.get("session_id"), info.get("agent_name"),
+            endpoint_name, info.session_id, info.agent_name,
             session_id, agent_name,
         )
         return HTMLResponse(

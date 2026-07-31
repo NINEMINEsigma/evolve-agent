@@ -33,6 +33,7 @@ export function useWebSocket() {
       const data = toolRes.value;
       sessionRef.current?.setTaskProgress(data.task_progress || {});
       sessionRef.current?.setClipboardDisplays(data.clipboard_display || {});
+      sessionRef.current?.setDynamicEndpoints(data.dynamic_endpoints || []);
     }
     if (subagentRes.status === "fulfilled") {
       const data = subagentRes.value;
@@ -323,6 +324,8 @@ export function useWebSocket() {
         .then((r) => r.json())
         .then((d) => sessionRef.current?.setCronTasks(d.tasks || []))
         .catch(() => {});
+      // 动态端点等 tool-resources 随轮询刷新：agent 注册/注销端点后资源面板自动更新
+      fetchToolResourcesRef.current(sid);
     };
     fetchTasks();
     const iv = setInterval(fetchTasks, 3000);
@@ -402,6 +405,7 @@ export function useWebSocket() {
     setTaskProgress: session.setTaskProgress,
     clipboardDisplays: session.clipboardDisplays,
     setClipboardDisplays: session.setClipboardDisplays,
+    dynamicEndpoints: session.dynamicEndpoints,
     subagentSessions,
     llmMaxContextTokens: session.llmMaxContextTokens,
     llmModelName: session.llmModelName,

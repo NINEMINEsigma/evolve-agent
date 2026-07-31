@@ -284,6 +284,9 @@ MULTI_AGENT_ROUTING_RESPONSE_NULL: str = "null"
 # Cron 任务持久化文件名 — 存放于 workspace/ 下
 CRON_STORE_FILENAME: str = "cron_jobs.json"
 
+# 动态端点持久化文件名 — 存放于 workspace/ 下
+DYNAMIC_ENDPOINTS_STORE_FILENAME: str = "dynamic_endpoints.json"
+
 # Cron 定时任务 stdout 预览最大长度（传给 Agent 的预览字符数）
 # 超过此长度时，Agent 会收到提示去日志文件查看完整输出
 CRON_STDOUT_PREVIEW_MAX_LENGTH: int = 5000

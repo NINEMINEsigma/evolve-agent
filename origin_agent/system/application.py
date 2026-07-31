@@ -81,6 +81,10 @@ class Application:
             str(self.runtime_context.workspace / SESSIONS_DIR_NAME)
         )
 
+        # 3.5 动态端点恢复 — 依赖 SessionManager.exists 会话存在性检查，故放在其后
+        from component.extools.dynamic_endpoint_tools import _load_all_endpoints
+        _load_all_endpoints()
+
         # 4. FrontendSink — 纯构造，无依赖
         from entry.agent_sink import FrontendSink
         self._frontend_sink = FrontendSink()

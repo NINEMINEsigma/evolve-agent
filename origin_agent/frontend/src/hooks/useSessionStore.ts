@@ -7,6 +7,7 @@ import {
   PlaylistEntry,
   TaskProgress,
   ClipboardDisplay,
+  DynamicEndpoint,
   CronTask,
   SessionInfo,
   SidebarItem,
@@ -65,6 +66,8 @@ export interface SessionStore {
   setTaskProgress: React.Dispatch<React.SetStateAction<Record<string, TaskProgress>>>;
   clipboardDisplays: Record<string, ClipboardDisplay>;
   setClipboardDisplays: React.Dispatch<React.SetStateAction<Record<string, ClipboardDisplay>>>;
+  dynamicEndpoints: DynamicEndpoint[];
+  setDynamicEndpoints: React.Dispatch<React.SetStateAction<DynamicEndpoint[]>>;
   agents: string[];
   setAgents: React.Dispatch<React.SetStateAction<string[]>>;
   llmMaxContextTokens: number;
@@ -176,6 +179,7 @@ export function useSessionStore(callbacks: SessionStoreCallbacks = {}): SessionS
   const [handsfreeMode, setHandsfreeMode] = useState(false);
   const [taskProgress, setTaskProgress] = useState<Record<string, TaskProgress>>({});
   const [clipboardDisplays, setClipboardDisplays] = useState<Record<string, ClipboardDisplay>>({});
+  const [dynamicEndpoints, setDynamicEndpoints] = useState<DynamicEndpoint[]>([]);
   const [agents, setAgents] = useState<string[]>([]);
   const [llmMaxContextTokens, setLlmMaxContextTokens] = useState(0);
   const [llmModelName, setLlmModelName] = useState("");
@@ -499,6 +503,7 @@ export function useSessionStore(callbacks: SessionStoreCallbacks = {}): SessionS
           setTokenUsage(0);
           setClipboardDisplays({});
           setTaskProgress({});
+          setDynamicEndpoints([]);
           callbacksRef.current.onSessionRotated?.(data.new_sid, oldSid);
           callbacksRef.current.onSessionHistory?.(data.new_sid);
           fetchSessions();
@@ -890,6 +895,7 @@ export function useSessionStore(callbacks: SessionStoreCallbacks = {}): SessionS
     setHandsfreeMode(false);
     setClipboardDisplays({});
     setTaskProgress({});
+    setDynamicEndpoints([]);
     setTokenUsage(0);
     setContextTokens(0);
     ignoreStaleRef.current = false;
@@ -905,6 +911,7 @@ export function useSessionStore(callbacks: SessionStoreCallbacks = {}): SessionS
     setPendingConfirm(null);
     setClipboardDisplays({});
     setTaskProgress({});
+    setDynamicEndpoints([]);
     setTokenUsage(0);
     setContextTokens(0);
     ignoreStaleRef.current = false;
@@ -1235,6 +1242,8 @@ export function useSessionStore(callbacks: SessionStoreCallbacks = {}): SessionS
     setTaskProgress,
     clipboardDisplays,
     setClipboardDisplays,
+    dynamicEndpoints,
+    setDynamicEndpoints,
     agents,
     setAgents,
     llmMaxContextTokens,

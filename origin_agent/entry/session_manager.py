@@ -416,6 +416,15 @@ async def terminate_and_rotate_session(
             "Failed to migrate cron jobs from %s to %s", old_sid, new_sid,
         )
 
+    # 9.5 迁移动态端点（仅旋转路径经过本函数；手动终结不继承）
+    try:
+        from component.extools.dynamic_endpoint_tools import migrate_session_endpoints
+        migrate_session_endpoints(old_sid, new_sid)
+    except Exception:
+        logger.exception(
+            "Failed to migrate dynamic endpoints from %s to %s", old_sid, new_sid,
+        )
+
     logger.info(
         "Session terminated and rotated | old=%s new=%s summary=%d chars",
         old_sid, new_sid, len(summary),

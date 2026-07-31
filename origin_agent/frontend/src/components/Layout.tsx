@@ -363,6 +363,7 @@ export default function Layout({ ws, onContextMenu }: LayoutProps) {
         setBgTasks={ws.setBgTasks}
         cronTasks={ws.cronTasks}
         setCronTasks={ws.setCronTasks}
+        dynamicEndpoints={ws.dynamicEndpoints}
       />
 
       {subagentPanelOpen && (
