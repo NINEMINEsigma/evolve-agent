@@ -317,7 +317,7 @@ class AnthropicLLMClient(BaseLLMClient):
                                 reasoning_delta=thinking_text,
                                 reasoning_field_name="reasoning_content",
                             )
-                    elif delta_type == "tool_use_delta":
+                    elif delta_type in ("tool_use_delta", "input_json_delta"):
                         partial = getattr(delta, "partial_json", "") or ""
                         pending_tool_input += partial
 
@@ -329,8 +329,10 @@ class AnthropicLLMClient(BaseLLMClient):
                         final_input = getattr(block, "input", None)
                         if final_input is not None and isinstance(final_input, dict):
                             arguments = final_input
-                        else:
+                        elif pending_tool_input:
                             arguments = _safe_json_parse(pending_tool_input)
+                        else:
+                            arguments = {}
                         tc = ToolCallRequest(
                             id=current_tool_use["id"],
                             name=current_tool_use["name"],

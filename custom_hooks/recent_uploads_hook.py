@@ -46,8 +46,8 @@ def hook_message(runtime_ctx: RuntimeContext, **kwargs) -> str:
     agentspace: Path = runtime_ctx.agentspace
 
     upload_dir = agentspace / "uploads"
-    if not upload_dir.is_dir():
-        return json.dumps({"recent_uploads": [], "reason": "uploads directory not found"})
+    if not upload_dir.is_dir() or not upload_dir.exists():
+        return ""
 
     now = datetime.datetime.now(datetime.timezone.utc)
     recent: list[dict[str, Any]] = []

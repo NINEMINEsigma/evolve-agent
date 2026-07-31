@@ -29,6 +29,14 @@ When a tool is denied, you will see an error like::
   report the situation to the user and request intervention.
 - ``[system denied]`` — the approval system itself has a problem (model crash, load timeout, etc.).
   Notify the user that the approval system needs maintenance.
+  - **Important exception:** If the reason mentions "WebSocket not connected" or "WebSocket disconnected",
+    the user has simply not opened the frontend page (not a system crash).
+    In this case:
+    - Do **NOT** retry the same tool call.
+    - Do **NOT** run diagnostics or attempt to fix the system.
+    - Do **NOT** call any other tools that require user approval in the current turn.
+    - Skip the blocked tool and continue the task with alternative safe approaches,
+      or inform the user that you are waiting for them to reconnect.
 
 If you write evolved code to the fork_path and it passes validation, exit
 with code -1 to trigger the orchestrator's fast-slow swap.  Your current

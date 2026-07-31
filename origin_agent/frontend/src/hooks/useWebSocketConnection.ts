@@ -58,7 +58,8 @@ export function useWebSocketConnection(): WebSocketConnection {
   }, []);
 
   const connect = useCallback((resumeSid?: string) => {
-    const lastSid = resumeSid ?? localStorage.getItem("evolve_session_id") ?? "";
+    const urlSid = new URLSearchParams(window.location.search).get("session") ?? undefined;
+    const lastSid = (resumeSid || undefined) ?? urlSid ?? localStorage.getItem("evolve_session_id") ?? "";
     const qs = lastSid ? `?resume=${lastSid}` : "";
     const ws = new WebSocket(`ws://${location.host}/ws/chat${qs}`);
     wsRef.current = ws;

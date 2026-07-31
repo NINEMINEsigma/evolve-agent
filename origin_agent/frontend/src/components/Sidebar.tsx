@@ -53,8 +53,19 @@ function RelatedSessionShortcut({
       className={`relation-shortcut ${isParent ? "relation-shortcut-parent" : "relation-shortcut-continuation"}`}
       data-tooltip={isParent ? "当前会话继承自此会话" : "继承自当前会话"}
       onClick={(e) => {
+        if (e.ctrlKey || e.metaKey) {
+          window.open(`/?session=${session.id}`, "_blank");
+          return;
+        }
         e.stopPropagation();
         onSwitchSession(session.id);
+      }}
+      onAuxClick={(e) => {
+        if (e.button === 1) {
+          e.preventDefault();
+          e.stopPropagation();
+          window.open(`/?session=${session.id}`, "_blank");
+        }
       }}
     >
       <span className="relation-shortcut-title">{sessionLabel(session)}</span>
@@ -99,9 +110,19 @@ function SessionListItem({
       data-tooltip={relationTooltip || buildTooltip(s)}
       className={`session-item ${s.id === sessionId ? "active" : ""} ${isArchived ? "archived" : ""} ${isParentOfCurrent ? "parent-session" : ""} ${isContinuationOfCurrent ? "continuation-session" : ""} ${mergeMode && !isArchived ? "merge-unavailable" : ""} ${mergeMode && selectedForMerge.has(s.id) ? "merge-selected" : ""}`}
       style={{ paddingLeft: 16 + indent }}
-      onClick={() => {
+      onClick={(e) => {
+        if (e.ctrlKey || e.metaKey) {
+          window.open(`/?session=${s.id}`, "_blank");
+          return;
+        }
         if (canSelectForMerge) onToggleMergeSelect(s.id);
         else if (!mergeMode) onSwitchSession(s.id);
+      }}
+      onAuxClick={(e) => {
+        if (e.button === 1) {
+          e.preventDefault();
+          window.open(`/?session=${s.id}`, "_blank");
+        }
       }}
       onContextMenu={(e) => {
         if (!mergeMode) onContextMenu(e, s.id);
