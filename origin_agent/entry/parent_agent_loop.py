@@ -400,6 +400,10 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
             "Tool-call loop exceeded max turns (%d) for session=%s",
             _MAX_TOOL_TURNS, sid,
         )
+        await self._frontend_sink.emit_system_message(
+            sid,
+            f"工具调用已达 {_MAX_TOOL_TURNS} 轮上限，已自动终止。",
+        )
         return "I ran into an issue processing your request. Please try again."
 
     # ========================================================================
