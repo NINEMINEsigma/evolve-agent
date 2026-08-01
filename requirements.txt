@@ -11,3 +11,5 @@ dirtyjson
 # pyright
 py7zr
 rich
+# 可选：component/browser 工具组的 CDP 浏览器接管（未安装时工具自动隐藏，check_fn 控制）
+# playwright
