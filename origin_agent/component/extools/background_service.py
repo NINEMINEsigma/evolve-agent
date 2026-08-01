@@ -524,7 +524,7 @@ registry.register(
         #
         # ## 副作用/注意
         # - ⚠️ 进程在后台运行，agent 不会自动等待其完成。
-        # - 如需获取实时输出，需定期使用 read_file 读取 log_path。
+        # - 如需获取实时输出，需定期使用 Read 读取 log_path。
         # - agent 关闭时会调用 cleanup_background_services 强制清理所有残留进程。
         # - 错误调用可对系统造成毁灭性打击。
         "description": """Start a long-running service process in the background and return immediately without waiting for completion. Useful for web servers, API services, monitoring processes, etc.
@@ -548,7 +548,7 @@ Resolves sandbox logical paths in the command, then launches the subprocess in t
 
 ## Side Effects / Notes
 - ⚠️ The process runs in the background; the agent does not wait for it.
-- To check real-time output, periodically read the log_path with read_file.
+- To check real-time output, periodically read the log_path with Read.
 - On agent shutdown, cleanup_background_services force-terminates all remaining background processes.
 - Misuse can cause catastrophic damage.""",
         "parameters": {
@@ -834,9 +834,9 @@ registry.register(
         # 启动后台进程并监视其 stdout/stderr，按自适应间隔将增量输出
         # POST 到指定的动态端点。进程输出同时写入日志文件。
         #
-        # 重要：调用后无需主动轮询日志文件或使用 wait_cron + read_file
+        # 重要：调用后无需主动轮询日志文件或使用 wait_cron + Read
         # 组合检查输出。输出会自动通过动态端点回调为 [dynamic-endpoint]
-        # 消息唤醒 Agent。只在需要完整历史记录时才用 read_file 读取 log_path。
+        # 消息唤醒 Agent。只在需要完整历史记录时才用 Read 读取 log_path。
         #
         # ## 前置条件
         # - command 必须为非空字符串列表。
@@ -872,12 +872,12 @@ registry.register(
         # - 进程在后台运行，可能产生文件系统或网络副作用，danger_level 为 dangerous。
         # - 每次调用需要用户审批。
         # - 输出会自动通过 [dynamic-endpoint] 消息回调，不要主动轮询日志文件。
-        # - 日志文件保留完整记录，仅在需要回溯完整历史时用 read_file 读取。
+        # - 日志文件保留完整记录，仅在需要回溯完整历史时用 Read 读取。
         # - 进程退出后最终消息附带退出码。
         # - stop_background_service 停止时缓冲区内容通过返回值返回，不 POST。
         "description": """Start a background process and watch its stdout/stderr, posting incremental output to a dynamic endpoint at adaptive intervals.
 
-**IMPORTANT: After calling this tool, do NOT poll the log file or use wait_cron + read_file to check output.** The output is automatically POSTed to the dynamic endpoint and you will receive a [dynamic-endpoint] message when new output arrives. Only use read_file on log_path when you need the complete historical record.
+**IMPORTANT: After calling this tool, do NOT poll the log file or use wait_cron + Read to check output.** The output is automatically POSTed to the dynamic endpoint and you will receive a [dynamic-endpoint] message when new output arrives. Only use Read on log_path when you need the complete historical record.
 
 ## Prerequisites
 - command must be a non-empty list of strings.
@@ -906,13 +906,13 @@ You will receive output automatically via [dynamic-endpoint] messages — no pol
 - Monitor output of a long-running process.
 - Get faster notifications when output contains specific keywords.
 - Send process output to a dynamic endpoint to trigger callbacks.
-- Do NOT use this with wait_cron + read_file polling — the output comes to you automatically.
+- Do NOT use this with wait_cron + Read polling — the output comes to you automatically.
 
 ## Side Effects / Notes
 - The process runs in the background and may cause filesystem or network side effects; danger_level is dangerous.
 - Each invocation requires user approval.
 - Output is automatically sent via [dynamic-endpoint] messages; do NOT poll the log file.
-- The log file retains the complete record; use read_file only when you need full history.
+- The log file retains the complete record; use Read only when you need full history.
 - On process exit, a final message with the exit code is POSTed.
 - When stopped via stop_background_service, the remaining buffer is returned in the tool result, not POSTed.""",
         "parameters": {

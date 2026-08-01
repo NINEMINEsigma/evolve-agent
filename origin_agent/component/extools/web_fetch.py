@@ -168,7 +168,7 @@ registry.register(
         # ## 副作用/注意
         # - 依赖外部网络服务，可能因网络或反爬策略失败。
         # - HTML 转文本是尽力而为，复杂页面可能格式混乱。
-        # - 超大内容自动保存为文件，需用 read_file 读取完整内容。
+        # - 超大内容自动保存为文件，需用 Read 读取完整内容。
         "description": f"""Fetches a URL and returns its content as plain text. HTML pages are automatically converted to text (scripts and styles stripped). Useful for reading web pages, API responses, documentation, etc. Content exceeding {WEB_FETCH_MAX_CHARS} characters is saved to a file and a preview is returned.
 
 ## Prerequisites
@@ -195,7 +195,7 @@ Oversized:
 ## Side Effects / Notes
 - Depends on external network services; may fail due to network issues or anti-bot measures.
 - HTML-to-text conversion is best-effort; complex pages may have poor formatting.
-- Oversized content is automatically saved as a file; use read_file to retrieve the full content.""",
+- Oversized content is automatically saved as a file; use Read to retrieve the full content.""",
         "parameters": {
             "type": "object",
             "properties": {

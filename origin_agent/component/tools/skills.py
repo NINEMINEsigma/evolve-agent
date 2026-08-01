@@ -11,7 +11,7 @@ import logging
 from pathlib import Path
 from typing import Any, Dict, List
 
-from abstract.skills.manager import create_skill, delete_skill, update_skill, write_skill_file, read_skill_file
+from abstract.skills.manager import create_skill, delete_skill, update_skill, write_skill_file
 from abstract.skills.loader import list_skills, load_skill
 from abstract.tools.registry import registry, tool_error, tool_result
 from entity.puretype import ToolDangerLevel
@@ -184,33 +184,6 @@ def _handle_write_skill_file(args: dict[str, Any]) -> dict:
                 path=result.get("relative_path"),
             )
         return tool_error(result.get("error", "Unknown error"))
-    except Exception as exc:
-        return tool_error(str(exc))
-
-
-def _handle_read_skill_file(args: dict[str, Any]) -> dict:
-    """读取 skill 包内的附属文件内容。"""
-    name: str = str(args.get("name", "")).strip()
-    path: str = str(args.get("path", "")).strip()
-
-    if not name:
-        return tool_error("name is required")
-    if not path:
-        return tool_error("path is required")
-
-    try:
-        result: dict = read_skill_file(
-            name=name,
-            subpath=path,
-            skills_dir=_skills_dir(),
-        )
-        if result.get("success"):
-            return {
-                "name": name,
-                "path": result.get("relative_path"),
-                "content": result.get("content"),
-            }
-        return tool_error(result.get("error", "File not found"))
     except Exception as exc:
         return tool_error(str(exc))
 
@@ -663,72 +636,7 @@ The file content is determined entirely by the `content` parameter — no append
 )
 
 
-registry.register(
-    name="read_skill_file",
-    toolset="skills",
-    schema={
-        # 读取 skill 包内附属文件的内容（如 scripts/、references/ 等）。
-        #
-        # ## 前置条件
-        # 目标 skill 和文件必须已存在。
-        #
-        # ## 调用效果
-        # 读取 project-root/skills/<name>/<path> 的完整文件内容并返回。
-        # `path` 相对于 skill 根目录（如 `scripts/hello.py`）。
-        #
-        # ## 返回
-        # ```json
-        # {"name": "my-skill", "path": "scripts/hello.py", "content": "print('hello')"}
-        # ```
-        #
-        # ## 何时使用
-        # - 查看 skill 包中的脚本代码、参考文档等附属文件。
-        # - 检查 skill 附属文件的具体内容。
-        #
-        # ## 副作用/注意
-        # - 无副作用，纯查询。
-        # - 不存在的 skill 或文件返回错误。
-        "description": """Read the content of ancillary files inside a skill package (e.g. scripts/, references/).
 
-## Prerequisites
-The target skill and file must exist.
-
-## Effect
-Reads and returns the full content of project-root/skills/<name>/<path>.
-`path` is relative to the skill root directory (e.g. `scripts/hello.py`).
-
-## Returns
-```json
-{"name": "my-skill", "path": "scripts/hello.py", "content": "print('hello')"}
-```
-
-## When to Use
-- View script code, reference documents, and other ancillary files inside a skill package.
-- Inspect the specific content of a skill's ancillary files.
-
-## Side Effects / Notes
-- No side effects, read-only query.
-- Non-existent skills or files return an error.""",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "name": {
-                    "type": "string",
-                    # Skill 名称。
-                    "description": "Skill name.",
-                },
-                "path": {
-                    "type": "string",
-                    # 相对于 skill 目录的文件路径，如 scripts/hello.py
-                    "description": "File path relative to the skill directory, e.g. scripts/hello.py",
-                },
-            },
-            "required": ["name", "path"],
-        },
-    },
-    handler=_handle_read_skill_file,
-    emoji="📖",
-)
 
 
 registry.register(

@@ -101,21 +101,69 @@ def _handle_read(args: dict[str, Any]) -> dict:
         return tool_error("limit must be >= 1", path=path, limit=limit)
     if limit > READ_FILE_MAX_LINES:
         limit = READ_FILE_MAX_LINES
+
+    # 类型探测 — resolve_read 可能抛 SandboxError，is_dir/is_file 不抛错
     try:
-        content: str = _s().read(path, offset=offset, limit=limit)
+        resolved = _s().resolve_read(path)
+    except SandboxError as exc:
+        return tool_error(str(exc), path=path)
+
+    if not resolved.real.exists():
+        return tool_error("Path not found", path=path)
+
+    # 目录分支
+    if resolved.real.is_dir():
+        try:
+            raw: list[str] = _s().list_dir(path)
+        except SandboxError as exc:
+            return tool_error(str(exc), path=path)
+        entries: list[str] = []
+        for name in raw:
+            fp = resolved.real / name
+            entries.append(f"{name}/" if fp.is_dir() else name)
+        return {
+            "type": "directory",
+            "path": path,
+            "absolute_path": str(resolved.real),
+            "total_lines": 0,
+            "content": "",
+            "remaining": 0,
+            "offset": 0,
+            "limit": 0,
+            "entries": entries,
+            "count": len(entries),
+        }
+
+    # 文件分支
+    if resolved.real.is_file():
+        try:
+            content: str = _s().read(path, offset=offset, limit=limit)
+        except SandboxError as exc:
+            return tool_error(str(exc), path=path)
         lines: list[str] = content.splitlines()
         numbered: str = "\n".join(
             f"{offset + i + 1}: {line}" for i, line in enumerate(lines)
         )
-        total: int = _s().count_lines(path)
+        try:
+            total: int = _s().count_lines(path)
+        except SandboxError as exc:
+            return tool_error(str(exc), path=path)
         last_line: int = offset + len(lines)
         remaining: int = max(0, total - last_line)
-        return tool_result(
-            content=numbered, path=path, offset=offset, limit=limit,
-            total_lines=total, remaining=remaining,
-        )
-    except SandboxError as exc:
-        return tool_error(str(exc), path=path)
+        return {
+            "type": "file",
+            "path": path,
+            "absolute_path": str(resolved.real),
+            "total_lines": total,
+            "content": numbered,
+            "remaining": remaining,
+            "offset": offset,
+            "limit": limit,
+            "entries": [],
+            "count": None,
+        }
+
+    return tool_error("Unsupported path type — must be a file or directory", path=path)
 
 
 def _handle_write(args: dict[str, Any]) -> dict:
@@ -153,34 +201,6 @@ def _handle_write(args: dict[str, Any]) -> dict:
         return result
     except SandboxError as exc:
         return tool_error(str(exc), path=path)
-
-
-def _handle_list(args: dict[str, Any]) -> dict:
-    paths_raw = args.get("paths", [])
-    if not isinstance(paths_raw, list) or not paths_raw:
-        return tool_error("paths is required as a non-empty array of strings")
-    results: list[dict] = []
-    succeeded = 0
-    failed = 0
-    for p in paths_raw:
-        path = str(p).strip()
-        if not path:
-            results.append({"path": str(p), "success": False, "error": "path is empty"})
-            failed += 1
-            continue
-        try:
-            raw: list[str] = _s().list_dir(path)
-            resolved = _s().resolve_read(path)
-            entries: list[str] = []
-            for name in raw:
-                fp = resolved.real / name
-                entries.append(f"{name}/" if fp.is_dir() else name)
-            results.append({"path": path, "success": True, "entries": entries, "count": len(entries)})
-            succeeded += 1
-        except SandboxError as exc:
-            results.append({"path": path, "success": False, "error": str(exc)})
-            failed += 1
-    return tool_result(results=results, summary={"total": len(results), "succeeded": succeeded, "failed": failed})
 
 
 def _handle_delete(args: dict[str, Any]) -> dict:
@@ -248,21 +268,24 @@ def _param_paths(paths_desc: str) -> dict[str, Any]:
     }
 
 
-# -- read_file
+# -- Read 工具（统一文件/目录读取）
 registry.register(
-    name="read_file",
+    name="Read",
     toolset="filesystem",
     schema={
-        # 读取文件内容并附带行号。路径必须使用命名空间前缀：
-        # 'ws:' 用于 workspace 数据，'fork:' 用于进化代码，
-        # 'fix:' 用于修复目标，'skills:' 用于 skill 文件。
+        # 读取文件内容（带行号前缀、总行数、绝对路径）或列出目录条目。
+        # 支持命名空间前缀：ws:、fork:、fix:、skills: 及其他只读命名空间。
+        # 目录分支忽略 offset/limit，文件分支使用 offset/limit 分页。
         #
         # ## 前置条件
-        # 文件必须存在于命名空间对应路径。
+        # - 路径必须存在（文件或目录均可）。
+        # - 路径必须使用命名空间前缀。
         #
         # ## 调用效果
-        # 无副作用，纯查询。返回文件内容，每行前缀为 1-indexed 行号。
-        # 支持分页：offset（0-indexed 起始行）和 limit（最大行数，硬上限 {READ_FILE_MAX_LINES}，默认 {READ_FILE_DEFAULT_LIMIT}）。
+        # **文件分支**：返回文件内容，每行前缀为 1-indexed 行号。
+        # 支持 offset（0-indexed 起始行）和 limit（最大行数）分页。
+        # **目录分支**：返回条目名称列表，目录条目以 "/" 后缀标识。
+        # offset/limit 在目录分支中被忽略（固定填充为 0）。
         #
         # ## 返回
         # ```json
@@ -280,31 +303,37 @@ registry.register(
         # - 无副作用，纯查询。
         # - offset < 0 或 limit < 1 返回错误。
         # - 文件不存在或沙箱拒绝访问返回描述性错误。
-        "description": f"""Read file content with line numbers. Path must use a namespace prefix: 'ws:' for workspace data, 'fork:' for evolution code, 'fix:' for repair targets, 'skills:' for skill files.
+        "description": """Read file content (with line numbers, total lines, absolute path) or list directory entries. Supports namespace prefixes: ws:, fork:, fix:, skills:, and read-only namespaces.
 
 ## Prerequisites
-The file must exist at the namespace-resolved path.
+- The path must exist (file or directory).
+- The path must use a namespace prefix.
 
 ## Effect
-No side effects, read-only query. Returns file content with each line prefixed by a 1-indexed line number.
-Supports pagination via offset (0-indexed starting line) and limit (max lines, hard cap {READ_FILE_MAX_LINES}, default {READ_FILE_DEFAULT_LIMIT}).
+**File branch**: Returns file content prefixed with 1-indexed line numbers. Supports pagination via offset (0-indexed start) and limit (max lines).
+**Directory branch**: Returns entry names; directory entries suffixed with '/'. offset and limit are ignored for directories (filled as 0).
+Both branches return absolute_path (resolved absolute path), total_lines (line count; 0 for directories), entries (directory entries; empty array for files), and a type discriminant ("file" or "directory").
 
 ## Returns
+File branch:
 ```json
-{{"path": "ws:example.txt", "content": "1|first line\n2|second line", "total_lines": 100, "remaining": 98, "offset": 0, "limit": 100}}
+{"type": "file", "path": "ws:a.py", "absolute_path": "...", "total_lines": 100, "content": "1|...", "remaining": 98, "offset": 0, "limit": 100, "entries": [], "count": null}
 ```
-`total_lines` is the total line count of the file. `remaining` is how many lines remain after the last line read (0 means the read reached the end of file).
+Directory branch:
+```json
+{"type": "directory", "path": "ws:src", "absolute_path": "...", "total_lines": 0, "content": "", "remaining": 0, "offset": 0, "limit": 0, "entries": ["a.py", "sub/"], "count": 2}
+```
 
 ## When to Use
-- Inspect file content before editing.
-- Browse large files in pages.
-- Reference specific locations by line number.
-- Use `remaining` to determine whether another page of reading is needed.
+- Targets a file → file branch; targets a directory → directory branch.
+- Use skills: prefix to replace the old read_skill_file tool (e.g. Read(path="skills:my-skill/scripts/hello.py")).
+- Use absolute_path to resolve paths when you have a readable target.
 
 ## Side Effects / Notes
-- No side effects, read-only query.
-- offset < 0 or limit < 1 returns an error.
-- File not found or sandbox access denied returns a descriptive error.""",
+- No file system side effects, read-only query.
+- offset < 0 or limit out of range returns an error.
+- Non-existent or unsupported paths return a descriptive error.
+- For directories, offset/limit are ignored and filled as 0.""",
         "parameters": {
             "type": "object",
             "properties": {
@@ -548,63 +577,6 @@ When truncated, additionally includes `truncated=true` and `tail`:
 )
 
 
-# -- list_directory
-# 列出多个目录内容。返回条目名称列表，目录名称以 "/" 结尾便于区分。
-# 可使用任意命名空间前缀（ws:、fork:、fix:、skills:）。
-#
-# ## 前置条件
-# 目录必须存在。
-#
-# ## 调用效果
-# 列出每个目录中的文件和子目录名称（不是完整路径）。
-# 目录条目以 "/" 后缀标识。每个成功结果包含条目总数 `count`。
-# 部分目录失败不影响其他目录的列出。
-#
-# ## 返回
-# ```json
-# {"results": [{"path": "ws:src", "success": true, "entries": ["file.py", "subdir/"], "count": 2}], "summary": {"total": 1, "succeeded": 1, "failed": 0}}
-# ```
-#
-# ## 何时使用
-# - 浏览目录结构，确认文件/目录存在。
-# - 为 read_file、delete_file 等工具提供精确的路径。
-# - 检查文件/目录是否存在及类型：列出父目录后检查目标名称是否出现（带 "/" 后缀=目录，不带=文件）。
-#
-# ## 副作用/注意
-# - 无副作用，只读查询。
-# - 目录不存在或沙箱拒绝访问时该路径标记为失败，不影响其他路径。
-registry.register(
-    name="list_directory",
-    toolset="filesystem",
-    schema={
-        "description": """List contents of multiple directories. Returns entry names; directory entries are suffixed with '/' for easy identification. Any namespace prefix (ws:, fork:, fix:, skills:) can be used. Best-effort: all paths are attempted, each result reports success or failure.
-
-## Prerequisites
-The directories must exist.
-
-## Effect
-Lists files and subdirectory names (not full paths) inside each directory. Directory entries are suffixed with '/'. Each successful result includes a `count` of entries. Failures for individual paths do not affect others.
-
-## Returns
-```json
-{"results": [{"path": "ws:src", "success": true, "entries": ["file.py", "subdir/"], "count": 2}], "summary": {"total": 1, "succeeded": 1, "failed": 0}}
-```
-
-## When to Use
-- Browse directory structure to confirm file/directory existence.
-- Provide exact paths for tools like read_file, delete_file.
-- Check file/directory existence and type: list the parent directory and inspect whether the target name appears in entries (with '/' suffix = directory, without = file).
-
-## Side Effects / Notes
-- No side effects, read-only query.
-- Directory not found or sandbox access denied marks that path as failed; other paths are unaffected.""",
-        "parameters": _param_paths("directories to list"),
-    },
-    handler=_handle_list,
-    emoji="📂",
-)
-
-
 # -- delete_file
 # 删除多个文件。仅允许可写命名空间（ws:、fork:、fix:、skills:）。
 # 如需删除目录，使用 delete_folder。
@@ -836,8 +808,8 @@ registry.register(
         # 如需更大更改，请多次顺序调用 edit_file。
         #
         # 使用方式：
-        # - 必须先使用 read_file 查看当前内容及行号。
-        # - exact 模式：从 read_file 输出中选取 old_string，保留行号前缀之后的精确缩进。
+        # - 必须先使用 Read 查看当前内容及行号。
+        # - exact 模式：从 Read 输出中选取 old_string，保留行号前缀之后的精确缩进。
         # - exact 模式：包含 2-3 行周围上下文以确保唯一匹配。
         # - regex 模式：old_string 为 Python 正则表达式，new_string 可用 \1 等反向引用。
         # - range 模式：start_marker 到其后最近 end_marker（含两端）的整个区间被替换。
@@ -875,8 +847,8 @@ All modes share `replace_all` (default false): when false, multiple matches retu
 Both `old_string` and `new_string` are limited to {EDIT_FILE_MAX_CHARS} characters each. Use this instead of write_file when only a few lines need changing — avoids resending the entire file content. For larger changes, make multiple sequential edit_file calls.
 
 Usage:
-- You must use read_file first to inspect current content with line numbers.
-- exact: pick old_string from read_file output, preserve exact indentation after the line number prefix. Include 2-3 lines of surrounding context for uniqueness.
+- You must use Read first to inspect current content with line numbers.
+- exact: pick old_string from Read output, preserve exact indentation after the line number prefix. Include 2-3 lines of surrounding context for uniqueness.
 - regex: old_string is a Python regex. new_string can use \\1 backreferences.
 - range: provide start_marker and end_marker. The entire span from start_marker to the nearest end_marker (inclusive) is replaced by new_string.
 - Set replace_all=true to replace all matches (skips uniqueness check).
@@ -1618,7 +1590,7 @@ def _handle_grep(args: dict[str, Any]) -> dict:
 #
 # ## 何时使用
 # - 在代码库中搜索特定函数、变量、错误信息等。
-# - 配合 read_file 使用，根据 grep 结果的行号读取文件。
+# - 配合 Read 使用，根据 grep 结果的行号读取文件。
 #
 # ## 副作用/注意
 # - 无副作用，只读查询。
@@ -1652,7 +1624,7 @@ When results exceed the limit:
 
 ## When to Use
 - Search for specific functions, variables, error messages, etc. in a codebase.
-- Use with read_file by line number from grep results.
+- Use with Read by line number from grep results.
 
 ## Side Effects / Notes
 - No side effects, read-only query.
@@ -1700,91 +1672,8 @@ When results exceed the limit:
 )
 
 
-# -- resolve_path
-# 将沙盒逻辑路径解析为磁盘上的绝对路径
-# Resolve sandbox logical path to absolute filesystem path
 
 
-def _handle_resolve_path(args: dict[str, Any]) -> dict:
-    path: str = str(args.get("path", "")).strip()
-    if not path:
-        return tool_error("path is required", path=path)
-    try:
-        abs_path: str = _s().resolve_abs(path)
-        return tool_result(absolute_path=abs_path, logical_path=path)
-    except SandboxError as exc:
-        return tool_error(str(exc), path=path)
-
-
-# -- resolve_path
-# 将逻辑路径（如 ws:example.txt）解析为磁盘上的绝对路径。
-# 在必要时可用于获取绝对路径（例如传递给外部命令），
-# 但使用前必须提前告知用户并说明原因。
-# 路径必须使用命名空间前缀。
-#
-# ## 前置条件
-# 路径格式必须合法（命名空间前缀 + 相对路径）。
-# 目标文件或目录不需要存在。
-#
-# ## 调用效果
-# 无副作用，纯查询。返回逻辑路径对应的磁盘绝对路径字符串。
-# 不检查路径是否存在。
-#
-# ## 返回
-# ```json
-# {"absolute_path": "C:\\workspace\\agentspace\\example.txt", "logical_path": "ws:example.txt"}
-# ```
-#
-# ## 何时使用
-# - 必要场景（如传递给外部命令），但使用前必须提前告知用户。
-# - 调试路径解析问题。
-#
-# ## 副作用/注意
-# - 无副作用，只读查询。
-# - 不检查路径是否存在（只做解析）。
-# - **必须在调用前告知用户将要使用此工具并说明原因。**
-# - 结果应仅用于必要场景，不要硬编码绝对路径。
-registry.register(
-    name="resolve_path",
-    toolset="filesystem",
-    schema={
-        "description": """Resolve a logical path (e.g. ws:example.txt) to an absolute filesystem path. May be used when necessary to obtain an absolute path (e.g. to pass to an external command), but **the user must be informed beforehand** about why this is needed. Path must use a namespace prefix.
-
-## Prerequisites
-The path format must be valid (namespace prefix + relative path). The target file/directory does not need to exist.
-
-## Effect
-No side effects, read-only query. Returns the absolute disk path corresponding to the logical path. Does not check whether the path exists.
-
-## Returns
-```json
-{"absolute_path": "C:\\workspace\\agentspace\\example.txt", "logical_path": "ws:example.txt"}
-```
-
-## When to Use
-- When necessary (e.g. passing to an external command), but **must inform the user beforehand**.
-- Debugging path resolution issues.
-
-## Side Effects / Notes
-- No side effects, read-only query.
-- Does not check whether the path exists (resolution only).
-- **Must inform the user before calling this tool and explain why.**
-- Result should only be used when necessary; do not hardcode absolute paths.""",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "path": {
-                    "type": "string",
-                    # 逻辑路径（命名空间前缀 + 相对路径）。
-                    "description": "Logical path (namespace prefix + relative path).",
-                },
-            },
-            "required": ["path"],
-        },
-    },
-    handler=_handle_resolve_path,
-    emoji="📍",
-)
 
 
 # -- create_folder
@@ -1979,86 +1868,3 @@ Recursively deletes each specified directory and all its contents. The sandbox h
 )
 
 
-# -- count_lines
-# 返回文件的总行数，辅助 read_file 的分页读取
-# Return total number of lines in a file to assist paginated read_file
-
-
-def _handle_count_lines(args: dict[str, Any]) -> dict:
-    paths_raw = args.get("paths", [])
-    if not isinstance(paths_raw, list) or not paths_raw:
-        return tool_error("paths is required as a non-empty array of strings")
-    results: list[dict] = []
-    succeeded = 0
-    failed = 0
-    for p in paths_raw:
-        path = str(p).strip()
-        if not path:
-            results.append({"path": str(p), "success": False, "error": "path is empty"})
-            failed += 1
-            continue
-        try:
-            total: int = _s().count_lines(path)
-            results.append({"path": path, "success": True, "total_lines": total})
-            succeeded += 1
-        except SandboxError as exc:
-            results.append({"path": path, "success": False, "error": str(exc)})
-            failed += 1
-    return tool_result(results=results, summary={"total": len(results), "succeeded": succeeded, "failed": failed})
-
-
-# -- count_lines
-# 返回多个文件的总行数。路径必须使用命名空间前缀。
-# 在调用 read_file 的 offset 前了解文件边界时有用。
-#
-# ## 前置条件
-# 文件必须存在。
-#
-# ## 调用效果
-# 无副作用，纯查询。逐个返回文件的总行数。
-# 用于辅助 read_file 的分页策略：先 count_lines 确定文件大小，再逐页读取。
-# 部分文件失败不影响其他文件的查询。
-#
-# ## 返回
-# ```json
-# {"results": [{"path": "ws:example.txt", "success": true, "total_lines": 150}], "summary": {"total": 1, "succeeded": 1, "failed": 0}}
-# ```
-#
-# ## 何时使用
-# - 在分页读取文件前确定文件总行数。
-# - 快速了解文件大小。
-#
-# ## 副作用/注意
-# - 无副作用，只读查询。
-# - 文件不存在时该路径标记为失败，不影响其他路径。
-# - 用于 read_file 的分页策略：total_lines 配合 limit 确定 offset 范围。
-registry.register(
-    name="count_lines",
-    toolset="filesystem",
-    schema={
-        "description": """Return the total number of lines in multiple files. Paths must use a namespace prefix. Useful to know file bounds before calling read_file with offset for paginated reading. Best-effort: all paths are attempted, each result reports success or failure.
-
-## Prerequisites
-The files must exist.
-
-## Effect
-No side effects, read-only query. Returns the total line count for each file. Used to plan pagination strategy with read_file: count_lines first, then read in pages. Failures for individual paths do not affect others.
-
-## Returns
-```json
-{"results": [{"path": "ws:example.txt", "success": true, "total_lines": 150}], "summary": {"total": 1, "succeeded": 1, "failed": 0}}
-```
-
-## When to Use
-- Determine total line count before paginated reading.
-- Quickly estimate file size.
-
-## Side Effects / Notes
-- No side effects, read-only query.
-- Files that do not exist are marked as failed; other paths are unaffected.
-- Use with read_file for pagination: total_lines + limit determines offset range.""",
-        "parameters": _param_paths("files to count lines"),
-    },
-    handler=_handle_count_lines,
-    emoji="📏",
-)

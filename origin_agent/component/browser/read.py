@@ -189,7 +189,7 @@ registry.register(
         #
         # ## 副作用/注意
         # - 只读查询，不修改浏览器状态；正常模式下无需审批。
-        # - text 模式超限保存的文件为必定安全的网页文本，可用 read_file 读取全文。
+        # - text 模式超限保存的文件为必定安全的网页文本，可用 Read 读取全文。
         "description": f"""Structured read of a page element; `mode` selects the return shape.
 
 ## Prerequisites
@@ -229,7 +229,7 @@ text mode (oversized):
 
 ## Side Effects / Notes
 - Read-only; does not modify browser state; no approval needed in normal mode.
-- text-mode oversized saves are always-safe page text; use read_file for the full content.""",
+- text-mode oversized saves are always-safe page text; use Read for the full content.""",
         "parameters": {
             "type": "object",
             "properties": {

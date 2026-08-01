@@ -134,10 +134,10 @@ WRITE_FILE_MAX_CHARS: int = 100000
 # edit_file 增量编辑模式的内容上限（字符数）
 EDIT_FILE_MAX_CHARS: int = 100000
 
-# read_file 单次读取最大行数（硬上限）
+# Read 工具单次读取最大行数（硬上限）
 READ_FILE_MAX_LINES: int = 2000
 
-# read_file 默认返回行数
+# Read 工具默认返回行数
 READ_FILE_DEFAULT_LIMIT: int = 100
 
 # write_file / append_file 截断时返回的尾部字符数 — 用于作为 edit_file 的 old_string 或继续追加

@@ -110,7 +110,7 @@ registry.register(
         # 调用效果：只读查询，无副作用。
         # n: 返回数量，默认 10，最大 100。
         # 返回：{ files: [{ filename, size, upload_time, mtime, path }] }。upload_time 从文件名前缀时间戳解析（格式 YYYYMMDD_HHMMSS_utc_rand），旧文件回退到 mtime。
-        # 典型场景：查看用户刚上传了哪些文件；获取文件路径后配合 read_file/read_image 读取。
+        # 典型场景：查看用户刚上传了哪些文件；获取文件路径后配合 Read/read_image 读取。
         "description": """List the most recently uploaded files, sorted by upload time (newest first).
 
 ## Prerequisites
@@ -134,7 +134,7 @@ Read-only query. No side effects.
 
 ## When to Use
 - Checking what files the user recently uploaded.
-- Getting file paths to use with `read_file` or `read_image`.""",
+- Getting file paths to use with `Read` or `read_image`.""",
         "parameters": {
             "type": "object",
             "properties": {
