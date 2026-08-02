@@ -8,7 +8,6 @@ Zero external dependencies — pure Python stdlib + ``hermes_skills`` internals.
 
 from __future__ import annotations
 
-import shutil
 from pathlib import Path
 from typing import Any, Dict, List, Tuple
 
@@ -165,38 +164,6 @@ def update_skill(
     return load_skill(str(skill_md), skills_dir)
 
 
-def delete_skill(
-    name_or_path: str,
-    skills_dir: Path | None = None,
-) -> dict[str, Any]:
-    """Delete a skill and its directory.
-
-    Args:
-        name_or_path: Skill name or path.
-        skills_dir: Base skills directory.
-
-    Returns:
-        Dict with success status and message.
-    """
-    skills_dir = skills_dir or Path.cwd() / DEFAULT_SKILLS_DIR
-
-    payload = load_skill(name_or_path, skills_dir)
-    if not payload.get("success"):
-        return {"success": False, "error": payload.get("error", "Skill not found")}
-
-    skill_dir = Path(payload["skill_dir"])
-    if not skill_dir.exists():
-        return {"success": False, "error": f"Skill directory not found: {skill_dir}"}
-
-    shutil.rmtree(skill_dir)
-
-    return {
-        "success": True,
-        "message": f"Deleted skill '{payload.get('name', '')}'",
-        "path": str(skill_dir),
-    }
-
-
 def write_skill_file(
     name: str,
     subpath: str,
@@ -239,70 +206,6 @@ def write_skill_file(
 
     return {
         "success": True,
-        "path": str(target),
-        "relative_path": subpath,
-        "skill_dir": str(skill_dir),
-    }
-
-
-def read_skill_file(
-    name: str,
-    subpath: str,
-    skills_dir: Path | None = None,
-) -> dict[str, Any]:
-    """Read a file from an existing skill's directory.
-
-    Args:
-        name: Skill name.
-        subpath: Relative path within the skill directory.
-        skills_dir: Base skills directory.
-
-    Returns:
-        Dict with success status, content, and metadata.
-    """
-    skills_dir = skills_dir or Path.cwd() / DEFAULT_SKILLS_DIR
-
-    payload = load_skill(name, skills_dir)
-    if not payload.get("success"):
-        return {"success": False, "error": payload.get("error", "Skill not found")}
-
-    skill_dir = Path(payload["skill_dir"])
-    target = (skill_dir / subpath).resolve()
-
-    # Security: target must stay inside the skill directory
-    try:
-        target.relative_to(skill_dir.resolve())
-    except ValueError:
-        return {
-            "success": False,
-            "error": f"Path '{subpath}' escapes skill directory",
-        }
-
-    if not target.exists():
-        return {
-            "success": False,
-            "error": f"File not found: {subpath}",
-            "path": str(target),
-        }
-    if not target.is_file():
-        return {
-            "success": False,
-            "error": f"Not a file: {subpath}",
-            "path": str(target),
-        }
-
-    try:
-        file_content = target.read_text(encoding="utf-8")
-    except Exception as e:
-        return {
-            "success": False,
-            "error": f"Failed to read file: {e}",
-            "path": str(target),
-        }
-
-    return {
-        "success": True,
-        "content": file_content,
         "path": str(target),
         "relative_path": subpath,
         "skill_dir": str(skill_dir),

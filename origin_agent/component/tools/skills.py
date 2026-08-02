@@ -11,12 +11,10 @@ import logging
 from pathlib import Path
 from typing import Any, Dict, List
 
-from abstract.skills.manager import create_skill, delete_skill, update_skill, write_skill_file
+from abstract.skills.manager import create_skill, update_skill, write_skill_file
 from abstract.skills.loader import list_skills, load_skill
 from abstract.tools.registry import registry, tool_error, tool_result
-from entity.puretype import ToolDangerLevel
 
-from system.context import get_runtime_context
 from system.pathutils import find_repo_root
 
 logger = logging.getLogger(__name__)
@@ -31,7 +29,7 @@ def _skills_dir() -> Path:
 
 
 def _format_skill_list(skills_dir: Path | None = None) -> dict:
-    """返回所有已注册 skill 的格式化列表。"""
+    """返回所有已注册 skill 的格式化列表（含沙箱路径）。"""
     skills: list[dict]
     try:
         skills = list_skills(skills_dir=skills_dir or _skills_dir())
@@ -40,11 +38,16 @@ def _format_skill_list(skills_dir: Path | None = None) -> dict:
         return {"error": f"Failed to list skills: {exc}", "skills": []}
     result: list[dict] = []
     for s in skills:
+        rel_path: str = s.get("path", "")
+        sandbox_path: str = (
+            f"skills:{Path(rel_path).parent.as_posix()}/" if rel_path else ""
+        )
         result.append({
             "name": s.get("name", ""),
             "description": s.get("description", ""),
             "category": s.get("category"),
             "tags": s.get("tags", []),
+            "path": sandbox_path,
         })
     return {"skills": result, "total": len(result)}
 
@@ -57,7 +60,7 @@ def _handle_learn_skill(args: dict[str, Any]) -> dict:
     name: str = str(args.get("name", "")).strip()
     content: str = str(args.get("content", "")).strip()
     description: str = str(args.get("description", "")).strip()
-    category: str | None = str(args.get("category", "")).strip() or None
+    category: str = str(args.get("category", "")).strip()
     tags: list = args.get("tags", []) or []
     files: list[dict] = args.get("files", []) or []
 
@@ -65,6 +68,10 @@ def _handle_learn_skill(args: dict[str, Any]) -> dict:
         return tool_error("name is required")
     if not content:
         return tool_error("content is required")
+    if not category:
+        return tool_error("category is required")
+    if not tags or not isinstance(tags, list) or not all(str(t).strip() for t in tags):
+        return tool_error("tags is required as a non-empty array of strings")
 
     try:
         payload: dict = create_skill(
@@ -116,24 +123,7 @@ def _handle_learn_skill(args: dict[str, Any]) -> dict:
         return tool_error(str(exc))
 
 
-def _handle_list_skills(args: dict[str, Any]) -> dict:
-    """列出所有可用 skill。"""
-    return _format_skill_list(_skills_dir())
 
-
-def _handle_forget_skill(args: dict[str, Any]) -> dict:
-    """按名称删除 skill。"""
-    name: str = str(args.get("name", "")).strip()
-    if not name:
-        return tool_error("name is required")
-
-    try:
-        result: dict = delete_skill(name, skills_dir=_skills_dir())
-        if result.get("success"):
-            return tool_result(deleted=True, name=name)
-        return tool_error(result.get("error", "Unknown error deleting skill"))
-    except Exception as exc:
-        return tool_error(str(exc))
 
 
 def _handle_recall_skill(args: dict[str, Any]) -> dict:
@@ -159,73 +149,14 @@ def _handle_recall_skill(args: dict[str, Any]) -> dict:
         return tool_error(str(exc))
 
 
-def _handle_run_skill_script(args: dict[str, Any]) -> dict:
-    """在 skill 包目录下执行 scripts/ 中的脚本并返回结果。"""
-    import subprocess  # nosec: intentional for skill scripts
 
-    name: str = str(args.get("name", "")).strip()
-    script: str = str(args.get("script", "")).strip()
-    script_args: list = args.get("args", []) or []
-
-    if not name:
-        return tool_error("name is required")
-    if not script:
-        return tool_error("script is required")
-
-    try:
-        # Resolve skill directory
-        from abstract.skills.loader import load_skill as _load
-
-        payload: dict = _load(name, skills_dir=_skills_dir())
-        if not payload.get("success"):
-            return tool_error(payload.get("error", "Skill not found"))
-        skill_dir: str = str(payload.get("skill_dir", ""))
-        script_path: Path = Path(skill_dir) / "scripts" / script
-        script_path = script_path.resolve()
-
-        # Security: must be inside the skill's scripts/ directory
-        skill_resolved: Path = Path(skill_dir).resolve()
-        allowed_prefix: Path = skill_resolved / "scripts"
-        try:
-            script_path.relative_to(allowed_prefix)
-        except ValueError:
-            return tool_error(
-                f"Script '{script}' is not inside {skill_resolved.name}/scripts/"
-            )
-
-        if not script_path.exists():
-            return tool_error(
-                f"Script not found: {skill_resolved.name}/scripts/{script}"
-            )
-        if not script_path.is_file():
-            return tool_error(f"Not a file: {skill_resolved.name}/scripts/{script}")
-
-        cmd: list[str] = [str(script_path)] + [str(a) for a in script_args]
-        _timeout = get_runtime_context().tool_timeout
-        proc = subprocess.run(
-            cmd,
-            cwd=str(skill_resolved),
-            capture_output=True,
-            text=True,
-            timeout=_timeout,
-        )
-        return {
-            "stdout": proc.stdout,
-            "stderr": proc.stderr,
-            "exit_code": proc.returncode,
-            "success": proc.returncode == 0,
-        }
-    except subprocess.TimeoutExpired:
-        return tool_error(f"Script execution timed out ({_timeout}s)")
-    except Exception as exc:
-        return tool_error(str(exc))
 
 
 # ── 注册 ─────────────────────────────────────────────────────
 
 
 registry.register(
-    name="learn_skill",
+    name="CreateSkill",
     toolset="skills",
     schema={
         # 创建新 skill 或对已有 skill 进行较大程度的更改。Skill 是以目录形式存储在
@@ -297,14 +228,14 @@ The `files` parameter can write ancillary files (scripts, reference docs, etc.) 
                 },
                 "category": {
                     "type": "string",
-                    # 可选分类（如 'utility'、'knowledge'）。
-                    "description": "Optional category (e.g. 'utility', 'knowledge').",
+                    # 必填分类（如 'utility'、'knowledge'）。skill 创建于 skills/<category>/<name>/。
+                    "description": "Required category (e.g. 'utility', 'knowledge'). The skill is created under skills/<category>/<name>/.",
                 },
                 "tags": {
                     "type": "array",
                     "items": {"type": "string"},
-                    # 可选的筛选标签列表。
-                    "description": "Optional filtering tags.",
+                    # 必填的标签列表（非空数组）。
+                    "description": "Required filtering tags (non-empty array).",
                 },
                 "files": {
                     "type": "array",
@@ -328,7 +259,7 @@ The `files` parameter can write ancillary files (scripts, reference docs, etc.) 
                     "description": "Optional. List of ancillary files (scripts, reference docs, etc.) to write into the skill package. Each item requires 'path' (relative path, e.g. scripts/hello.py) and 'content' (file content).",
                 },
             },
-            "required": ["name", "content"],
+            "required": ["name", "content", "category", "tags"],
         },
     },
     handler=_handle_learn_skill,
@@ -337,185 +268,71 @@ The `files` parameter can write ancillary files (scripts, reference docs, etc.) 
 
 
 registry.register(
-    name="list_skills",
+    name="RecallSkill",
     toolset="skills",
     schema={
-        # 列出 project-root/skills/ 下所有可用 skill 的名称和描述。
+        # 加载 skill 的完整内容，或在无参数时列举全部可用 skill。
         #
         # ## 前置条件
         # 无。
         #
         # ## 调用效果
-        # 无副作用，纯查询。返回所有已注册 skill 的名称、描述、分类和标签。
+        # - 无 `name`：列举分支。返回所有已注册 skill 的 {name, description, category, tags, path}，
+        #   其中 path 为 skill 目录的沙箱路径（如 `skills:utility/foo/`），可直接用于 Read / CreateSkill / delete_folder。
+        # - 有 `name`：加载分支。返回该 skill 的完整内容（SKILL.md 正文、linked_files 等结构化信息），注入对话上下文。
         #
         # ## 返回
+        # 列举分支：
         # ```json
-        # {"skills": [{"name": "...", "description": "...", "category": "...", "tags": [...]}], "total": N}
+        # {"skills": [{"name": "...", "description": "...", "category": "...", "tags": [...], "path": "skills:..."}], "total": N}
+        # ```
+        # 加载分支：
+        # ```json
+        # {"name": "...", "description": "...", "category": "...", "content": "...", "linked_files": {...}, "skill_dir": "..."}
         # ```
         #
         # ## 何时使用
-        # - 查看当前有哪些 skill 可用。
-        # - 在调用 recall_skill 之前确认 skill 名称。
+        # - 先列举确认可用的 skill 及其路径。
+        # - 任务匹配某个 skill 时，传入 name 加载完整知识。
+        # - 对尚未加载过的 skill 应积极加载，尤其是提到相关关键词时。
         #
         # ## 副作用/注意
-        # - 纯查询，无副作用。
-        "description": """List the names and descriptions of all available skills under project-root/skills/.
+        # - 加载分支会把 skill 内容注入对话上下文，消耗 token 预算。
+        # - 加载不存在的 skill 返回错误。
+        "description": """Load the full content of a skill, or list all available skills when called without a name.
 
 ## Prerequisites
 None.
 
 ## Effect
-No side effects, read-only query. Returns the name, description, category, and tags of all registered skills.
+- Without `name` (list branch): returns {name, description, category, tags, path} for every registered skill, where `path` is the sandbox path of the skill directory (e.g. `skills:utility/foo/`) — directly usable with Read / CreateSkill / delete_folder.
+- With `name` (load branch): returns the skill's full content (SKILL.md body, linked_files, etc.) as structured information injected into the conversation context.
 
 ## Returns
+List branch:
 ```json
-{"skills": [{"name": "...", "description": "...", "category": "...", "tags": [...]}], "total": N}
+{"skills": [{"name": "...", "description": "...", "category": "...", "tags": [...], "path": "skills:..."}], "total": N}
+```
+Load branch:
+```json
+{"name": "...", "description": "...", "category": "...", "content": "...", "linked_files": {...}, "skill_dir": "..."}
 ```
 
 ## When to Use
-- Check what skills are currently available.
-- Confirm a skill name before calling recall_skill.
+- List available skills (and their sandbox paths) before selecting one.
+- Load a skill's full knowledge into context when a task matches its description.
+- Proactively load skills that have not been loaded yet, especially when related keywords are mentioned.
 
 ## Side Effects / Notes
-- Read-only query, no side effects.""",
-        "parameters": {
-            "type": "object",
-            "properties": {},
-        },
-    },
-    handler=_handle_list_skills,
-    emoji="📋",
-)
-
-
-registry.register(
-    name="forget_skill",
-    toolset="skills",
-    schema={
-        # 按名称删除 skill。从 project-root/skills/ 下移除整个 skill 目录及其所有附属文件。
-        #
-        # ## 前置条件
-        # 要删除的 skill 必须已存在。删除前必须征得用户明确确认。
-        #
-        # ## 调用效果
-        # 删除指定名称的 skill 目录及其中所有文件。不可恢复。
-        #
-        # ## 返回
-        # ```json
-        # {"deleted": true, "name": "my-skill"}
-        # ```
-        #
-        # ## 何时使用
-        # - 移除不再相关或有用的 skill。
-        # - 清理过时或错误的 skill。
-        #
-        # ## 副作用/注意
-        # - 永久删除文件系统中的 skill 目录，不可恢复。
-        # - 删除不存在的 skill 会返回错误。
-        "description": """Delete a skill by name. Removes the entire skill directory and all its ancillary files from project-root/skills/.
-
-## Prerequisites
-The skill to delete must exist. The user MUST explicitly confirm before deletion.
-
-## Effect
-Deletes the named skill directory and all files within it. Irreversible.
-
-## Returns
-```json
-{"deleted": true, "name": "my-skill"}
-```
-
-## When to Use
-- Remove skills that are no longer relevant or useful.
-- Clean up outdated or erroneous skills.
-
-## Side Effects / Notes
-- Permanently deletes the skill directory from the file system; cannot be undone.
-- Deleting a non-existent skill returns an error.""",
+- The load branch injects skill content into the conversation context, consuming token budget.
+- Loading a non-existent skill returns an error.""",
         "parameters": {
             "type": "object",
             "properties": {
                 "name": {
                     "type": "string",
-                    # 要删除的 skill 名称。
-                    "description": "The name of the skill to delete.",
-                },
-            },
-            "required": ["name"],
-        },
-    },
-    handler=_handle_forget_skill,
-    emoji="🗑️",
-)
-
-
-registry.register(
-    name="recall_skill",
-    toolset="skills",
-    schema={
-        # 将 skill 的完整内容加载到当前对话上下文中。
-        #
-        # ## 前置条件
-        # 要加载的 skill 必须已存在。
-        #
-        # ## 调用效果
-        # 若提供 `name`，返回该 skill 的完整内容（SKILL.md 正文、linked_files 等），内容会被注入到对话上下文中。
-        # 若不提供 `name`，列出所有可用 skill（等同于 list_skills）。
-        #
-        # ## 返回
-        # 成功时：
-        # ```json
-        # {"name": "...", "description": "...", "content": "...", "linked_files": {...}, "skill_dir": "..."}
-        # ```
-        # 无参数时：
-        # ```json
-        # {"skills": [...], "total": N}
-        # ```
-        #
-        # ## 何时使用
-        # - 任务匹配某个 skill 描述时，加载其完整知识到上下文。
-        # - 对尚未加载过的 skill 应积极 recall，尤其是提到相关关键词时。
-        # - 即使只是觉得某个 skill 可能相关，也应 recall 查看。
-        # - 查看 skill 的完整内容（包括附属文件）。
-        #
-        # ## 副作用/注意
-        # - Skill 内容会被注入到当前对话上下文，消耗 token 预算。
-        # - 不存在的 skill 返回错误。
-        "description": """Load the full content of a skill into the current conversation context.
-
-## Prerequisites
-The skill to recall must exist.
-
-## Effect
-If `name` is provided, returns the skill's full content (SKILL.md body, linked_files, etc.), which is injected into the conversation context.
-If `name` is omitted, lists all available skills (equivalent to list_skills).
-
-## Returns
-On success:
-```json
-{"name": "...", "description": "...", "content": "...", "linked_files": {...}, "skill_dir": "..."}
-```
-Without arguments:
-```json
-{"skills": [...], "total": N}
-```
-
-## When to Use
-- When a task matches a skill's description, load its full knowledge into context.
-- Proactively recall skills that have not been loaded yet, especially when related keywords are mentioned.
-- If a skill seems potentially relevant, recall it to check.
-- View a skill's complete content (including ancillary files).
-
-## Side Effects / Notes
-- Skill content is injected into the current conversation context, consuming token budget.
-- Recalling a non-existent skill returns an error.""",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "name": {
-                    "type": "string",
-                    # 要回忆的 skill 名称（省略则列出全部）。
-                    "description": "The name of the skill to recall (omit to list all).",
+                    # 要加载的 skill 名称（省略则列举全部 skill 及其沙箱路径）。
+                    "description": "The name of the skill to load (omit to list all skills with their sandbox paths).",
                 },
             },
         },
@@ -525,82 +342,3 @@ Without arguments:
 )
 
 
-registry.register(
-    name="run_skill_script",
-    toolset="skills",
-    schema={
-        # 执行 skill 包内 scripts/ 目录下的脚本并返回结果。
-        #
-        # ## 前置条件
-        # 目标 skill 和 scripts/ 下的脚本文件必须已存在。
-        #
-        # ## 调用效果
-        # 在 skill 目录上下文中执行 `scripts/<script>`，可选传递 `args` 作为命令行参数。
-        # 脚本必须在 skill 的 scripts/ 目录内，否则拒绝执行。
-        # 默认超时 30 秒，超时返回错误。
-        #
-        # ## 返回
-        # ```json
-        # {"stdout": "...", "stderr": "...", "exit_code": 0, "success": true}
-        # ```
-        #
-        # ## 何时使用
-        # - 运行 skill 附带的工具脚本。
-        # - 执行 skill 包中预定义的自动化流程。
-        #
-        # ## 副作用/注意
-        # - 脚本可能产生文件系统副作用。
-        # - 安全限制：脚本必须位于 skill 的 scripts/ 子目录内，禁止路径遍历。
-        # - 默认 30 秒超时。
-        # - 不存在的 skill 或脚本返回错误。
-        "description": """Execute a script from the scripts/ directory inside a skill package and return the result.
-
-## Prerequisites
-The target skill and the script file under scripts/ must exist.
-
-## Effect
-Executes `scripts/<script>` in the context of the skill directory, optionally passing `args` as command-line arguments.
-The script must reside inside the skill's scripts/ directory; otherwise execution is rejected.
-Default timeout is 30 seconds; timed-out executions return an error.
-
-## Returns
-```json
-{"stdout": "...", "stderr": "...", "exit_code": 0, "success": true}
-```
-
-## When to Use
-- Run utility scripts bundled with a skill.
-- Execute predefined automation workflows inside a skill package.
-
-## Side Effects / Notes
-- Scripts may produce file system side effects.
-- Security: scripts must be inside the skill's scripts/ subdirectory; path traversal is blocked.
-- Default 30-second timeout.
-- Non-existent skills or scripts return an error.""",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "name": {
-                    "type": "string",
-                    # Skill 名称。
-                    "description": "Skill name.",
-                },
-                "script": {
-                    "type": "string",
-                    # scripts/ 目录下的脚本文件名，如 hello.py
-                    "description": "Script filename under scripts/, e.g. hello.py",
-                },
-                "args": {
-                    "type": "array",
-                    "items": {"type": "string"},
-                    # 传递给脚本的命令行参数。
-                    "description": "Command-line arguments to pass to the script.",
-                },
-            },
-            "required": ["name", "script"],
-        },
-    },
-    handler=_handle_run_skill_script,
-    emoji="▶️",
-    danger_level=ToolDangerLevel.write,
-)

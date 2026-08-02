@@ -590,11 +590,6 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
     # ------------------------------------------------------------------
 
     @property
-    def session_store(self) -> SessionStore | None:
-        """返回当前 loop 的 session 持久化存储。"""
-        return self._session_store
-
-    @property
     def llm(self) -> BaseLLMClient:
         """返回当前 loop 的 LLM 客户端。"""
         return self._llm

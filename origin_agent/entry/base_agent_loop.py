@@ -299,6 +299,11 @@ class BaseAgentLoop(ABC):
         """统一返回当前 loop 的 session 持久化根目录。"""
         return self._session_store.base_dir if self._session_store else None
 
+    @property
+    def session_store(self) -> "SessionStore | None":
+        """返回当前 loop 的 session 持久化存储（未配置时为 None）。"""
+        return self._session_store
+
     def set_session_manager(self, manager: SessionManager) -> None:
         """注入 gateway SessionManager，用于旋转/归档等操作。"""
         self._session_manager = manager

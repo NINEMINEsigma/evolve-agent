@@ -19,6 +19,7 @@ from abstract.tools.ui_event_router import ui_event_router
 
 if TYPE_CHECKING:
     from entry.agent_sink import AgentSink
+    from entry.base_agent_loop import ToolContext
 
 logger = logging.getLogger(__name__)
 
@@ -26,6 +27,22 @@ logger = logging.getLogger(__name__)
 # ── 内部状态：session_id → {display_id → display_info} ─────────────────
 
 _display_registry: dict[str, dict[str, dict[str, Any]]] = {}
+
+
+def _persist_displays(session_id: str, context: ToolContext|None) -> None:
+    """将 clipboard_display 分区同步到磁盘（失败仅记日志，不阻塞工具流程）。"""
+    if not session_id or context is None:
+        return
+    store = context.loop.session_store
+    if store is None:
+        return
+    try:
+        store.update_tool_resources(
+            session_id, "clipboard_display",
+            dict(_display_registry.get(session_id, {})),
+        )
+    except Exception:
+        logger.warning("Failed to persist clipboard display | session=%s", session_id, exc_info=True)
 
 
 # ── emit handler ────────────────────────────────────────────────
@@ -42,7 +59,7 @@ async def _emit_clipboard_display(
 # ── handler ─────────────────────────────────────────────────────────
 
 
-async def _handle_set_clipboard_display(args: dict[str, Any]) -> dict:
+async def _handle_set_clipboard_display(args: dict[str, Any], context: ToolContext|None = None) -> dict:
     """创建或更新前端可复制展示区域。
 
     参数：
@@ -66,13 +83,14 @@ async def _handle_set_clipboard_display(args: dict[str, Any]) -> dict:
 
     if session_id:
         _display_registry.setdefault(session_id, {})[display_id] = info
+        _persist_displays(session_id, context)
 
     logger.info("Clipboard display updated | session=%s display=%s", session_id, display_id)
 
     return tool_result(**info)
 
 
-async def _handle_clear_clipboard_display(args: dict[str, Any]) -> dict:
+async def _handle_clear_clipboard_display(args: dict[str, Any], context: ToolContext|None = None) -> dict:
     """清除前端指定展示区域。
 
     参数：
@@ -90,6 +108,7 @@ async def _handle_clear_clipboard_display(args: dict[str, Any]) -> dict:
         else:
             cleared = list(_display_registry[session_id].keys())
             _display_registry[session_id].clear()
+        _persist_displays(session_id, context)
 
     logger.info("Clipboard display cleared | session=%s displays=%s", session_id, cleared)
 

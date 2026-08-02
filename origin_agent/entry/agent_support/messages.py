@@ -156,7 +156,7 @@ def collect_skill_prompts(skills_dir: Path | str = Path("skills")) -> list[str]:
         skills: list[dict] = list_skills(skills_dir=Path(skills_dir))
         if skills:
             lines: list[str] = [
-                "Available skills (use list_skills to see details, use recall_skill to load one):",
+                "Available skills (use RecallSkill to list all or load one):",
                 "",
             ]
             for s in skills:

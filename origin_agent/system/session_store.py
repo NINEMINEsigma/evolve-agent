@@ -106,3 +106,13 @@ class SessionStore:
         payload = json.dumps(resources, ensure_ascii=False, indent=2)
         write_text_atomic(self.tool_resources_path(session_id), payload)
 
+    def update_tool_resources(self, session_id: str, partition: str, values: dict[str, Any]) -> None:
+        """更新 tool_resources 的单个分区并原子写回。
+
+        分区合并（先读现有双分区结构，再覆盖指定分区），
+        避免 progress / clipboard 两模块各自写盘时互相覆盖。
+        """
+        resources = self.read_tool_resources(session_id)
+        resources[partition] = dict(values)
+        self.write_tool_resources(session_id, resources)
+

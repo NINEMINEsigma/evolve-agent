@@ -20,6 +20,7 @@ from abstract.tools.ui_event_router import ui_event_router
 
 if TYPE_CHECKING:
     from entry.agent_sink import AgentSink
+    from entry.base_agent_loop import ToolContext
 
 logger = logging.getLogger(__name__)
 
@@ -27,6 +28,22 @@ logger = logging.getLogger(__name__)
 # ── 内部状态：session_id → {task_id → progress_info} ─────────────────
 
 _progress_registry: dict[str, dict[str, dict[str, Any]]] = {}
+
+
+def _persist_progress(session_id: str, context: ToolContext|None) -> None:
+    """将 progress 分区同步到磁盘（失败仅记日志，不阻塞工具流程）。"""
+    if not session_id or context is None:
+        return
+    store = context.loop.session_store
+    if store is None:
+        return
+    try:
+        store.update_tool_resources(
+            session_id, "task_progress",
+            dict(_progress_registry.get(session_id, {})),
+        )
+    except Exception:
+        logger.warning("Failed to persist task progress | session=%s", session_id, exc_info=True)
 
 
 # ── emit handler ────────────────────────────────────────────────
@@ -43,7 +60,7 @@ async def _emit_task_progress(
 # ── handler ─────────────────────────────────────────────────────────
 
 
-async def _handle_set_task_progress(args: dict[str, Any]) -> dict:
+async def _handle_set_task_progress(args: dict[str, Any], context: Any = None) -> dict:
     """创建或更新前端进度条。
 
     参数：
@@ -80,6 +97,7 @@ async def _handle_set_task_progress(args: dict[str, Any]) -> dict:
 
     if session_id:
         _progress_registry.setdefault(session_id, {})[task_id] = info
+        _persist_progress(session_id, context)
 
     logger.info("Task progress updated | session=%s task=%s %d/%d (%.1f%%)",
                 session_id, task_id, current, total, percent)
@@ -87,7 +105,7 @@ async def _handle_set_task_progress(args: dict[str, Any]) -> dict:
     return tool_result(**info)
 
 
-async def _handle_clear_task_progress(args: dict[str, Any]) -> dict:
+async def _handle_clear_task_progress(args: dict[str, Any], context: ToolContext|None = None) -> dict:
     """清除前端指定进度条。
 
     参数：
@@ -105,6 +123,7 @@ async def _handle_clear_task_progress(args: dict[str, Any]) -> dict:
         else:
             cleared = list(_progress_registry[session_id].keys())
             _progress_registry[session_id].clear()
+        _persist_progress(session_id, context)
 
     logger.info("Task progress cleared | session=%s tasks=%s", session_id, cleared)
 

@@ -18,7 +18,7 @@ Self-identity system:
 Skills:
 - Reusable skill modules are stored under ``skills/``.
 - Only skill names and one-line descriptions are included in the system prompt by default.
-- To use a skill, first call ``list_skills`` to see what is available, then call ``recall_skill`` with the exact skill name to load its full content into the conversation context.
+- To use a skill, call ``RecallSkill`` without a name to see what is available; pass the exact skill name to load its full content into the conversation context.
 
 Available subsystems:
 - LLM client: OpenAI-compatible API. Configurable via env vars (OPENAI_API_KEY, OPENAI_BASE_URL, LLM_MODEL).
@@ -99,5 +99,5 @@ User mention tags (important):
   - ``/skill:skill-name`` — a reference to a skill by name.
 - These tags are plain text embedded in the user message; they are NOT automatically expanded.
 - When you see an ``@ws:...`` tag, use ``Read`` with the ``ws:`` path to read the referenced file, or use ``Read`` / ``search_files`` if it is a directory.
-- When you see a ``/skill:...`` tag, call ``recall_skill`` with the skill name to load its full content into context.
+- When you see a ``/skill:...`` tag, call ``RecallSkill`` with the skill name to load its full content into context.
 - Always honor these references proactively — they indicate the user wants you to use that file or skill in your response.
