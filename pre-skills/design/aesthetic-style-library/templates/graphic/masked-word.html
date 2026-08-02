@@ -1,0 +1,40 @@
+<!-- ==============================================================
+  平面设计风 · 字符遮罩上升动画
+  源码: kimi-agent-website/src/components/graphic/Hero.tsx
+============================================================== -->
+<style>
+.char-mask {
+  display: inline-block;
+  overflow: hidden;
+  vertical-align: bottom;
+}
+.char-mask span {
+  display: inline-block;
+  transform: translateY(110%);
+  animation: maskedRise 0.9s cubic-bezier(0.22,1,0.36,1) forwards;
+}
+@keyframes maskedRise {
+  to { transform: translateY(0%); }
+}
+.gx-super-title {
+  font-family: 'Archivo', sans-serif;
+  font-weight: 900;
+  font-size: clamp(64px, 13vw, 200px);
+  line-height: 0.85;
+  letter-spacing: -0.02em;
+}
+</style>
+
+<h1 class="gx-super-title" style="color:#111111;">
+  <span class="char-mask"><span>G</span></span>
+  <span class="char-mask"><span>R</span></span>
+  <span class="char-mask"><span>I</span></span>
+  <span class="char-mask"><span>D</span></span>
+  <span class="char-mask"><span>S</span></span>
+</h1>
+
+<!-- 几何色块：蓝色圆形 + 红色三角形 -->
+<div style="width:clamp(140px,28vw,420px);height:clamp(140px,28vw,420px);border-radius:50%;background:#0047FF;display:flex;align-items:center;justify-content:center;">
+  <span style="font-family:'Archivo',sans-serif;font-size:clamp(40px,7vw,110px);font-weight:900;color:#FFF;">Aa</span>
+</div>
+<div style="width:clamp(90px,16vw,240px);height:clamp(90px,16vw,240px);background:#E30613;clip-path:polygon(50% 0%, 100% 100%, 0% 100%);"></div>

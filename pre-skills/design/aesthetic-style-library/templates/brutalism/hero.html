@@ -1,0 +1,96 @@
+<!-- ==============================================================
+  网页野兽派 · 跑马灯 + 抖动标题 + 闪烁光标
+  源码: kimi-agent-website/src/components/brutalism/Hero.tsx + Marquee.tsx
+============================================================== -->
+<style>
+/* 跑马灯 */
+.brutal-marquee {
+  overflow: hidden;
+  white-space: nowrap;
+  border-top: 3px solid #000;
+  border-bottom: 3px solid #000;
+  background: #FFD400;
+  padding: 8px 0;
+  font-family: 'ZCOOL QingKe HuangYou', cursive;
+  font-size: clamp(18px, 3vw, 28px);
+  color: #000;
+}
+.brutal-marquee .track {
+  display: inline-block;
+  animation: marqueeScroll 20s linear infinite;
+}
+@keyframes marqueeScroll {
+  0% { transform: translateX(0); }
+  100% { transform: translateX(-50%); }
+}
+
+/* 硬边框 + 硬阴影 */
+.brutal-block {
+  border: 3px solid #000;
+  background: #FFF;
+  box-shadow: 6px 6px 0 #000;
+  padding: 24px 40px;
+}
+
+/* 闪烁光标 (硬阶跃) */
+.brutal-cursor {
+  animation: brutalBlink 1s step-end infinite;
+}
+@keyframes brutalBlink {
+  0%, 49% { opacity: 1; }
+  50%, 100% { opacity: 0; }
+}
+
+/* 字符抖动 */
+.brutal-shake {
+  display: inline-block;
+  animation: shake 0.2s linear;
+}
+@keyframes shake {
+  0% { transform: translate(0,0); }
+  25% { transform: translate(-3px,2px); }
+  50% { transform: translate(3px,-3px); }
+  75% { transform: translate(-2px,1px); }
+  100% { transform: translate(0,0); }
+}
+
+.bad-contact {
+  transition: color 0.05s;
+}
+</style>
+
+<!-- 跑马灯 -->
+<div class="brutal-marquee">
+  <div class="track">
+    ★ 欢迎来到网页野兽派展厅 ★ 没有设计 ★ 只有诚实 ★ WELCOME TO BRUTALISM ★ &nbsp;&nbsp;&nbsp;
+    ★ 欢迎来到网页野兽派展厅 ★ 没有设计 ★ 只有诚实 ★ WELCOME TO BRUTALISM ★ &nbsp;&nbsp;&nbsp;
+  </div>
+</div>
+
+<!-- 标题区 -->
+<div style="max-width:1200px;margin:0 auto;padding:48px 24px;">
+  <div class="brutal-block">
+    <h1 style="font-family:'ZCOOL QingKe HuangYou',cursive;font-size:clamp(56px,12vw,160px);line-height:0.95;color:#000;">
+      <span class="bad-contact" onmouseenter="this.style.color='#FF0000';setTimeout(()=>this.style.color='',100)">
+        网页
+      </span>
+      <span style="background:#FFD400;padding:0 4px;">野兽</span>
+      <span style="background:#FFD400;padding:0 4px;">派</span>
+    </h1>
+
+    <!-- 闪烁光标 -->
+    <p style="font-family:'Courier New',monospace;font-size:16px;margin-top:16px;color:#000;">
+      EX-06 · WEB BRUTALISM <span class="brutal-cursor">▮</span>
+    </p>
+  </div>
+
+  <!-- 档案信息 -->
+  <div style="margin-top:24px;font-family:'Courier New',monospace;font-size:13px;border:3px solid #000;background:#FFF;padding:16px 24px;box-shadow:6px 6px 0 #000;">
+    <table style="width:100%;border-collapse:collapse;">
+      <tr><td style="padding:4px 8px;font-weight:700;">风格编号</td><td>EX-06</td></tr>
+      <tr><td style="padding:4px 8px;font-weight:700;">风格名</td><td>网页野兽派</td></tr>
+      <tr><td style="padding:4px 8px;font-weight:700;">起源</td><td>1950s 粗野主义建筑 → 2010s 网页</td></tr>
+      <tr><td style="padding:4px 8px;font-weight:700;">代表色</td><td><span style="background:#FFD400;padding:0 4px;">#FFD400</span> / <span style="color:#0000EE;">#0000EE</span></td></tr>
+    </table>
+  </div>
+</div>

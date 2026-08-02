@@ -3,7 +3,13 @@ name: "tavern-simulator"
 description: "SillyTavern-style character roleplay engine. Load, parse, and perform in-character roleplay using character cards and world books. Trigger when the user provides a character card or world book to load, asks to start/continue a roleplay session, or requests tavern-style inference with structured state panels, color-coded dialogue, and branching options."
 version: 1.2.0
 author: "Evolve-Agent"
+category: game
 tags:
+  - roleplay
+  - tavern
+  - game
+  - character
+---
 ---
 
 # Tavern Simulator — SillyTavern 风格角色扮演引擎

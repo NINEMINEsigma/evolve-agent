@@ -1,0 +1,130 @@
+<!-- ==============================================================
+  工业科技风 · 波浪粒子网格（Canvas 2D 零依赖版）
+  源码: kimi-agent-website/src/components/industrial/ParticleGrid.tsx
+  描述: 72×46 网格粒子 (~3400点) + 线框，正弦波变形起伏，
+        鼠标视差，镜头推拉，滚动下沉。纯 Canvas 2D，无任何外部依赖。
+============================================================= -->
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{width:100%;height:100%;overflow:hidden;background:#07090D;font-family:'JetBrains Mono',monospace}
+#pg-canvas{display:block;position:fixed;inset:0;z-index:1}
+.pg-fallback{position:fixed;inset:0;z-index:0;background:radial-gradient(ellipse 70% 55% at 50% 62%,rgba(0,229,255,0.14),transparent 65%),linear-gradient(rgba(0,229,255,0.05)1px,transparent 1px),linear-gradient(90deg,rgba(0,229,255,0.05)1px,transparent 1px);background-size:100% 100%,40px 40px,40px 40px;pointer-events:none}
+</style>
+<div class="pg-fallback"></div>
+<canvas id="pg-canvas"></canvas>
+
+<script>
+(function(){
+  const canvas = document.getElementById('pg-canvas');
+  const ctx = canvas.getContext('2d');
+
+  const COLS = 72, ROWS = 46, SPACING = 20;
+  const W = COLS * SPACING, H = ROWS * SPACING;
+
+  let Ww, Wh;
+  function resize() {
+    Ww = window.innerWidth;
+    Wh = window.innerHeight;
+    canvas.width = Ww * devicePixelRatio;
+    canvas.height = Wh * devicePixelRatio;
+    canvas.style.width = Ww + 'px';
+    canvas.style.height = Wh + 'px';
+    ctx.scale(devicePixelRatio, devicePixelRatio);
+  }
+  resize();
+  addEventListener('resize', resize);
+
+  const mouse = { x: 0, y: 0 };
+  addEventListener('mousemove', e => {
+    mouse.x = (e.clientX / Ww) * 2 - 1;
+    mouse.y = -(e.clientY / Wh) * 2 + 1;
+  });
+
+  // 网格顶点
+  const verts = [];
+  for (let r = 0; r < ROWS; r++)
+    for (let c = 0; c < COLS; c++)
+      verts.push({
+        bx: (c / (COLS - 1) - 0.5) * W,
+        by: (r / (ROWS - 1) - 0.5) * H,
+        px: 0, py: 0, pz: 0,
+      });
+
+  const FOV = 500;
+  let camZ = 0, tCamZ = 0;
+  let rotX = -0.34, rotY = 0, tRotX = -0.34, tRotY = 0;
+  let gndY = 0;
+
+  function project(x, y, z) {
+    const cx = Math.cos(rotX), sx = Math.sin(rotX);
+    const cy = Math.cos(rotY), sy = Math.sin(rotY);
+    const x1 = x * cy - z * sy;
+    const y1 = y;
+    const z1 = x * sy + z * cy;
+    const x2 = x1;
+    const y2 = y1 * cx - z1 * sx;
+    const z2 = y1 * sx + z1 * cx;
+    const s = FOV / (FOV + z2 + camZ);
+    return { sx: x2 * s + Ww/2, sy: y2 * s + Wh/2 + gndY, s };
+  }
+
+  let t = 0;
+  function animate() {
+    t += 0.016;
+    const time = t;
+
+    // 镜头推拉
+    tCamZ = 80 + (Math.sin(time * 0.06) * 0.5 + 0.5) * 30;
+    camZ += (tCamZ - camZ) * 0.03;
+    // 鼠标视差
+    tRotY = -mouse.x * 0.035;
+    tRotX = -0.34 + mouse.y * 0.035;
+    rotY += (tRotY - rotY) * 0.05;
+    rotX += (tRotX - rotX) * 0.05;
+    // 滚动下沉
+    gndY = Math.min(scrollY / Math.max(innerHeight, 1), 1) * 200;
+
+    // 高度计算 + 投影
+    for (const v of verts) {
+      const z = Math.sin(v.bx * 0.02 + time * 0.55) * Math.cos(v.by * 0.02 + time * 0.42) * 36 +
+                Math.sin((v.bx + v.by) * 0.007 + time * 0.22) * 22;
+      const p = project(v.bx, v.by, z);
+      v.px = p.sx; v.py = p.sy; v.pz = p.s;
+    }
+
+    ctx.clearRect(0, 0, Ww, Wh);
+
+    // 线框
+    ctx.lineWidth = 0.5;
+    for (let r = 0; r < ROWS; r++) {
+      for (let c2 = 0; c2 < COLS; c2++) {
+        const idx = r * COLS + c2, v = verts[idx];
+        if (c2 < COLS - 1) {
+          const v2 = verts[idx + 1];
+          ctx.beginPath(); ctx.moveTo(v.px, v.py); ctx.lineTo(v2.px, v2.py);
+          ctx.strokeStyle = `rgba(0,229,255,${0.08 * v.pz})`;
+          ctx.stroke();
+        }
+        if (r < ROWS - 1) {
+          const v2 = verts[idx + COLS];
+          ctx.beginPath(); ctx.moveTo(v.px, v.py); ctx.lineTo(v2.px, v2.py);
+          ctx.strokeStyle = `rgba(0,229,255,${0.08 * v.pz})`;
+          ctx.stroke();
+        }
+      }
+    }
+
+    // 粒子点
+    for (const v of verts) {
+      if (v.pz < 0.1) continue;
+      ctx.beginPath();
+      ctx.arc(v.px, v.py, 1.2 * v.pz, 0, Math.PI * 2);
+      ctx.fillStyle = `rgba(0,229,255,${0.4 * v.pz})`;
+      ctx.fill();
+    }
+
+    requestAnimationFrame(animate);
+  }
+  animate();
+})();
+</script>

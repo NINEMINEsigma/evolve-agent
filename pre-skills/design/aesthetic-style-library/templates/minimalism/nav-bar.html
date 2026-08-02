@@ -1,0 +1,72 @@
+<!-- ==============================================================
+  极简主义 · 发丝线导航
+  源码: kimi-agent-website/src/components/minimalism/MinNav.tsx
+============================================================== -->
+<style>
+.min-nav {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 48px;
+  padding: 0 48px;
+  font-family: 'Inter Tight', sans-serif;
+  background: #FAFAF8;
+}
+.min-nav .brand {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+.min-nav .brand .num {
+  font-weight: 600;
+  font-size: 14px;
+  color: #1A1A1A;
+}
+.min-nav .brand .name {
+  font-family: 'Noto Serif SC', serif;
+  font-size: 14px;
+  color: #1A1A1A;
+}
+.min-nav .links {
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+}
+.min-nav .links .dot {
+  font-size: 13px;
+  font-weight: 300;
+  color: rgba(26,26,26,0.12);
+}
+.min-nav .links a {
+  font-size: 13px;
+  font-weight: 300;
+  color: #9A9A94;
+  text-decoration: none;
+  cursor: pointer;
+  transition: color 0.6s;
+}
+.min-nav .links a:hover { color: #1A1A1A; }
+.min-nav .hairline {
+  height: 1px;
+  background: rgba(26,26,26,0.12);
+}
+</style>
+
+<div>
+  <nav class="min-nav">
+    <div class="brand">
+      <span class="num">04</span>
+      <span class="name">极简主义</span>
+    </div>
+    <div class="links">
+      <a onclick="document.getElementById('principles')?.scrollIntoView({behavior:'smooth'})">原则</a>
+      <span class="dot">·</span>
+      <a onclick="document.getElementById('typography')?.scrollIntoView({behavior:'smooth'})">排印</a>
+      <span class="dot">·</span>
+      <a onclick="document.getElementById('works')?.scrollIntoView({behavior:'smooth'})">作品</a>
+      <span class="dot">·</span>
+      <a onclick="document.getElementById('whitespace')?.scrollIntoView({behavior:'smooth'})">留白</a>
+    </div>
+  </nav>
+  <div class="hairline"></div>
+</div>

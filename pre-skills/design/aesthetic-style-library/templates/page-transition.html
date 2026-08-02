@@ -1,0 +1,166 @@
+<!-- ==============================================================
+  全局页面过渡动画 · 色彩遮罩翻页 (Page Transition)
+  源码: kimi-agent-website/src/components/Layout.tsx
+  描述: 页面切换时，目标风格色块从下往上覆盖→再从上往下展开
+============================================================== -->
+<style>
+/* 页面过渡容器：放在 body 最内层 */
+.page-cover {
+  position: fixed;
+  inset: 0;
+  z-index: 70;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transform-origin: 50% 100%;
+  pointer-events: none;
+}
+.page-cover.reveal {
+  transform-origin: 50% 0%;
+}
+.page-cover .label {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 14px;
+  text-transform: uppercase;
+  letter-spacing: 0.3em;
+  color: #FFF;
+  mix-blend-mode: difference;
+  opacity: 0;
+}
+</style>
+
+<!-- ============================================================
+  过渡触发方式（JS 控制）
+  在单页应用或页面跳转时调用：
+
+  const transition = createPageTransition({
+    color: '#00E5FF',      // 目标风格的主色
+    label: 'INDUSTRIAL TECH', // 过渡时显示的文字
+  });
+  await transition.start();  // ① 遮罩从下覆盖（0.45s）
+  // 在这之后切换页面内容
+  await transition.reveal(); // ② 遮罩从上展开（0.45s）
+============================================================ -->
+<script>
+/**
+ * 创建页面过渡动画
+ * @param {Object} opts
+ * @param {string} opts.color - 遮罩颜色（目标风格 accent）
+ * @param {string} opts.label - 居中显示的风格名（英文大写）
+ * @returns {{ start: Function, reveal: Function }}
+ */
+function createPageTransition(opts = {}) {
+  const { color = '#000', label = '' } = opts;
+  const easeQuint = [0.76, 0, 0.24, 1];
+  let resolveStart, resolveReveal;
+
+  const cover = document.createElement('div');
+  cover.className = 'page-cover';
+  cover.style.background = color;
+
+  if (label) {
+    const span = document.createElement('span');
+    span.className = 'label';
+    span.textContent = label;
+    cover.appendChild(span);
+  }
+  document.body.appendChild(cover);
+
+  // 注入过渡样式（仅一次）
+  if (!document.getElementById('page-transition-style')) {
+    const s = document.createElement('style');
+    s.id = 'page-transition-style';
+    s.textContent = `
+      .page-cover {
+        position: fixed; inset: 0; z-index: 70;
+        display: flex; align-items: center; justify-content: center;
+        pointer-events: none;
+      }
+      .page-cover .label {
+        font-family: 'JetBrains Mono', monospace;
+        font-size: clamp(12px, 2vw, 18px);
+        text-transform: uppercase;
+        letter-spacing: 0.3em;
+        color: #FFF; mix-blend-mode: difference;
+        transition: opacity 0.2s;
+      }
+    `;
+    document.head.appendChild(s);
+  }
+
+  return {
+    /** 第一阶段：遮罩从下往上覆盖（scaleY 0→1） */
+    start() {
+      return new Promise(resolve => {
+        resolveStart = resolve;
+        cover.style.transformOrigin = '50% 100%';
+        cover.style.transform = 'scaleY(0)';
+        cover.style.transition = 'none';
+        // 强制 reflow
+        void cover.offsetHeight;
+        cover.style.transition = `transform 0.45s cubic-bezier(${easeQuint.join(',')})`;
+        cover.style.transform = 'scaleY(1)';
+        // label 淡入
+        const labelEl = cover.querySelector('.label');
+        if (labelEl) setTimeout(() => labelEl.style.opacity = '1', 100);
+        setTimeout(() => { resolveStart(); }, 450);
+      });
+    },
+    /** 第二阶段：遮罩从上往下展开（scaleY 1→0） */
+    reveal() {
+      return new Promise(resolve => {
+        resolveReveal = resolve;
+        const labelEl = cover.querySelector('.label');
+        if (labelEl) labelEl.style.opacity = '0';
+        cover.style.transformOrigin = '50% 0%';
+        cover.style.transition = `transform 0.45s cubic-bezier(${easeQuint.join(',')})`;
+        cover.style.transform = 'scaleY(0)';
+        setTimeout(() => {
+          cover.remove();
+          resolveReveal();
+        }, 450);
+      });
+    },
+  };
+}
+
+/*
+使用示例（伪代码）：
+
+async function navigateTo(path, styleColor, styleName) {
+  const t = createPageTransition({ color: styleColor, label: styleName });
+  await t.start();              // → 遮住页面
+  // 切换 DOM/路由内容
+  loadNewPage(path);
+  await t.reveal();             // → 展开新页面
+}
+*/
+</script>
+
+<!-- ============================================================
+  纯 CSS 演示（切换风格时用 JS 控制 class 即可）
+============================================================ -->
+<style>
+/* 页面过渡容器 纯 CSS 演示 */
+.demo-page-transition {
+  position: relative;
+  overflow: hidden;
+}
+.demo-cover {
+  position: absolute; inset: 0;
+  z-index: 10;
+  transform: scaleY(1);
+  transform-origin: 50% 100%;
+  transition: transform 0.45s cubic-bezier(0.76,0,0.24,1);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.demo-cover.hide {
+  transform: scaleY(0);
+}
+.demo-cover.reveal {
+  transform-origin: 50% 0%;
+  transform: scaleY(0);
+}
+</style>

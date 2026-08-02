@@ -1,0 +1,74 @@
+<!-- ==============================================================
+  二次元可爱风 · 拍立得相册卡片
+  源码: kimi-agent-website/src/components/kawaii/Gallery.tsx
+============================================================== -->
+<style>
+.polaroid-card {
+  background: #FFF;
+  padding: 12px;
+  padding-bottom: 48px;
+  border-radius: 6px;
+  box-shadow: 0 8px 24px rgba(255,158,199,0.25);
+  cursor: pointer;
+  transition: transform 0.3s, box-shadow 0.3s;
+  position: relative;
+}
+.polaroid-card:hover {
+  transform: scale(1.05) rotate(0deg) !important;
+  box-shadow: 0 10px 28px rgba(255,158,199,0.35);
+}
+.polaroid-card img {
+  width: 100%;
+  aspect-ratio: 1;
+  object-fit: cover;
+  border-radius: 4px;
+  transition: transform 0.5s;
+}
+.polaroid-card:hover img { transform: scale(1.08); }
+.polaroid-card .caption {
+  position: absolute;
+  bottom: 12px;
+  left: 0; right: 0;
+  text-align: center;
+  font-family: 'ZCOOL KuaiLe', cursive;
+  font-size: 16px;
+  color: #6B4A5E;
+}
+/* 和纸胶带 */
+.polaroid-card .tape {
+  position: absolute;
+  top: -12px;
+  left: 50%;
+  transform: translateX(-50%) rotate(-45deg);
+  width: 96px;
+  height: 28px;
+  z-index: 10;
+  clip-path: polygon(7px 0%, calc(100% - 7px) 0%, 100% 50%, calc(100% - 7px) 100%, 7px 100%, 0% 50%);
+}
+</style>
+
+<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:24px;max-width:800px;margin:0 auto;">
+  <div class="polaroid-card" style="transform:rotate(-3deg);">
+    <div class="tape" style="background:rgba(255,158,199,0.75);"></div>
+    <div style="overflow:hidden;border-radius:4px;">
+      <img src="https://placekitten.com/300/300" alt="示例照片">
+    </div>
+    <span class="caption">可爱照片 ♡</span>
+  </div>
+
+  <div class="polaroid-card" style="transform:rotate(2deg);">
+    <div class="tape" style="background:rgba(168,230,207,0.75);"></div>
+    <div style="overflow:hidden;border-radius:4px;">
+      <img src="https://placekitten.com/301/301" alt="示例照片">
+    </div>
+    <span class="caption">美好回忆 ✿</span>
+  </div>
+
+  <div class="polaroid-card" style="transform:rotate(-2deg);">
+    <div class="tape" style="background:rgba(184,167,249,0.75);"></div>
+    <div style="overflow:hidden;border-radius:4px;">
+      <img src="https://placekitten.com/302/302" alt="示例照片">
+    </div>
+    <span class="caption">出发去宇宙！</span>
+  </div>
+</div>

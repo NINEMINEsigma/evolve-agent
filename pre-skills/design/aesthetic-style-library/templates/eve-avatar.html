@@ -1,0 +1,161 @@
+<!-- ==============================================================
+  Eve · 猫娘头像组件（纯 CSS）
+  描述: 渐变光环 + 猫耳 + 异色瞳 + 胡须 + 铃铛 + 渐变标题
+  用法: 直接复制 html 到你的页面中，所有样式已内联
+============================================================= -->
+<style>
+/* ===== Eve 头像 ===== */
+.eve-avatar-wrap {
+  width: 140px;
+  height: 140px;
+  margin: 0 auto 24px;
+  position: relative;
+}
+
+/* 渐变光环 */
+.eve-ring {
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #7ec8e3, #9b59b6);
+  padding: 3px;
+  animation: eve-pulse 3s ease-in-out infinite;
+}
+@keyframes eve-pulse {
+  0%, 100% { box-shadow: 0 0 20px rgba(201,169,110,0.2); }
+  50% { box-shadow: 0 0 40px rgba(201,169,110,0.2), 0 0 60px rgba(126,200,227,0.15); }
+}
+
+/* 猫脸 */
+.eve-face {
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  background: #0d0b15;
+  position: relative;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* 猫耳 */
+.eve-ears {
+  position: absolute;
+  top: -8px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  gap: 70px;
+}
+.eve-ear {
+  width: 20px;
+  height: 28px;
+  background: linear-gradient(135deg, #7ec8e3, #9b59b6);
+  border-radius: 50% 50% 0 0;
+  transform-origin: bottom center;
+  animation: eve-ear 4s ease-in-out infinite;
+}
+.eve-ear.right { animation-delay: 0.5s; }
+@keyframes eve-ear {
+  0%, 90%, 100% { transform: rotate(0deg); }
+  92% { transform: rotate(-8deg); }
+  95% { transform: rotate(5deg); }
+  97% { transform: rotate(-3deg); }
+}
+
+/* 异色瞳 */
+.eve-eyes {
+  position: absolute;
+  top: 38px;
+  display: flex;
+  gap: 24px;
+}
+.eve-eye {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+}
+.eve-eye.left  { background: #7ec8e3; }  /* 冰蓝 */
+.eve-eye.right { background: #c084fc; }  /* 紫罗兰 */
+
+/* 胡须 */
+.eve-whiskers {
+  position: absolute;
+  bottom: 30px;
+  display: flex;
+  gap: 50px;
+}
+.eve-whisker {
+  width: 30px;
+  height: 1.5px;
+  background: #a89fba;
+  opacity: 0.5;
+}
+
+/* 铃铛 */
+.eve-bell {
+  position: absolute;
+  bottom: 8px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #c9a96e;
+  animation: eve-bell 2s ease-in-out infinite;
+  box-shadow: 0 0 8px rgba(201,169,110,0.3);
+}
+@keyframes eve-bell {
+  0%, 100% { transform: translateX(0); }
+  25% { transform: translateX(-4px); }
+  75% { transform: translateX(4px); }
+}
+
+/* ===== 渐变标题 ===== */
+.eve-title {
+  font-family: 'Playfair Display', serif;
+  font-size: 3rem;
+  font-weight: 700;
+  background: linear-gradient(135deg, #7ec8e3, #c084fc);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  letter-spacing: 2px;
+  text-align: center;
+}
+</style>
+
+<!-- 头像 -->
+<div class="eve-avatar-wrap">
+  <div class="eve-ring">
+    <div class="eve-face">
+      <div class="eve-ears">
+        <div class="eve-ear"></div>
+        <div class="eve-ear right"></div>
+      </div>
+      <div class="eve-eyes">
+        <div class="eve-eye left"></div>
+        <div class="eve-eye right"></div>
+      </div>
+      <!-- 左侧胡须 -->
+      <div class="eve-whiskers" style="left:calc(50% - 52px);">
+        <div class="eve-whisker"></div>
+        <div class="eve-whisker"></div>
+      </div>
+      <!-- 右侧胡须 -->
+      <div class="eve-whiskers" style="left:calc(50% + 52px);">
+        <div class="eve-whisker"></div>
+        <div class="eve-whisker"></div>
+      </div>
+      <!-- 铃铛 -->
+      <div class="eve-bell" style="left:calc(50% - 7px);"></div>
+    </div>
+  </div>
+</div>
+
+<!-- 标题 -->
+<div class="eve-title">✦ Eve ✦</div>
+
+<!-- 如需使用 Playfair Display 字体，请在 head 中添加： -->
+<!--
+<link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;700&display=swap" rel="stylesheet">
+-->

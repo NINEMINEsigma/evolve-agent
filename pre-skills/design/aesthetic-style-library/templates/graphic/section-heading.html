@@ -1,0 +1,52 @@
+<!-- ==============================================================
+  平面设计风 · 章节标题（红色 § 数字 + 双语标题）
+  源码: kimi-agent-website/src/components/graphic/SectionHeading.tsx
+============================================================== -->
+<style>
+.gx-section {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 20px 24px;
+  margin-bottom: 48px;
+}
+.gx-section-num {
+  font-family: 'Archivo', sans-serif;
+  font-weight: 900;
+  font-size: clamp(56px, 8vw, 96px);
+  line-height: 1;
+  color: #E30613;
+}
+.gx-section-zh {
+  font-family: 'Noto Sans SC', sans-serif;
+  font-size: clamp(28px, 4vw, 48px);
+  font-weight: 900;
+  line-height: 1;
+}
+.gx-section-en {
+  font-family: 'Archivo', sans-serif;
+  font-size: clamp(28px, 4vw, 48px);
+  font-weight: 900;
+  text-transform: uppercase;
+  line-height: 1;
+  letter-spacing: -0.02em;
+  color: #111111;
+}
+.gx-section-line {
+  margin-left: auto;
+  height: 2px;
+  width: 128px;
+  background: #111111;
+  align-self: center;
+}
+@media (max-width: 640px) {
+  .gx-section-line { display: none; }
+}
+</style>
+
+<div class="gx-section">
+  <span class="gx-section-num">§1</span>
+  <h2 class="gx-section-zh">设计原则</h2>
+  <span class="gx-section-en">/ PRINCIPLES</span>
+  <span class="gx-section-line"></span>
+</div>

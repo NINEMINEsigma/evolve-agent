@@ -1,0 +1,75 @@
+<!-- ==============================================================
+  HOME 风格 · 导航栏（毛玻璃 + 下划线动画）
+  源码: kimi-agent-website/src/pages/Home.tsx (HomeNav)
+============================================================== -->
+<style>
+.home-nav {
+  position: fixed;
+  inset: 0 0 auto 0;
+  height: 72px;
+  z-index: 40;
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border-bottom: 1px solid rgba(237,237,232,0.08);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 32px;
+  transition: background 0.3s;
+}
+.home-nav.scrolled {
+  background: rgba(16,16,20,0.8);
+}
+.home-nav .logo {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 13px;
+  letter-spacing: 0.25em;
+  color: #EDEDE8;
+  text-decoration: none;
+}
+.home-nav .links {
+  display: flex;
+  gap: 32px;
+}
+.home-nav .links a {
+  font-family: 'Noto Sans SC', sans-serif;
+  font-size: 13px;
+  color: #8A8A96;
+  text-decoration: none;
+  position: relative;
+  padding: 4px 0;
+  transition: color 0.3s;
+}
+.home-nav .links a:hover {
+  color: #EDEDE8;
+}
+.home-nav .links a::after {
+  content: '';
+  position: absolute;
+  bottom: -4px;
+  left: 0;
+  height: 1px;
+  width: 100%;
+  background: #EDEDE8;
+  transform: scaleX(0);
+  transform-origin: left;
+  transition: transform 0.3s;
+}
+.home-nav .links a:hover::after {
+  transform: scaleX(1);
+}
+</style>
+
+<nav class="home-nav" id="homeNav">
+  <a href="/" class="logo">AESTHETIC ATLAS</a>
+  <div class="links">
+    <a href="#rooms">展厅</a>
+    <a href="#manifesto">宣言</a>
+    <a href="#timeline">年表</a>
+  </div>
+</nav>
+<script>
+window.addEventListener('scroll', function() {
+  document.getElementById('homeNav').classList.toggle('scrolled', window.scrollY > 40);
+});
+</script>

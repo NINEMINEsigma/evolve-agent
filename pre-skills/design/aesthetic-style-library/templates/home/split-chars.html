@@ -1,0 +1,45 @@
+<!-- ==============================================================
+  HOME 风格 · 字符级入场动画
+  源码: kimi-agent-website/src/pages/Home.tsx (SplitChars)
+============================================================== -->
+<style>
+.char-block {
+  display: inline-block;
+  overflow: hidden;
+  vertical-align: bottom;
+}
+.char-block span {
+  display: inline-block;
+  will-change: transform;
+}
+</style>
+
+<p style="font-family:'Noto Serif SC',serif;font-size:clamp(28px,4.5vw,56px);font-weight:600;color:#EDEDE8;background:#101014;padding:32px 24px;border-radius:16px;text-align:center;">
+  <span class="char-block">
+    <span style="animation:charIn 1s 0.0s cubic-bezier(0.22,1,0.36,1) forwards;transform:translateY(110%) rotate(4deg);">审</span>
+  </span>
+  <span class="char-block">
+    <span style="animation:charIn 1s 0.035s cubic-bezier(0.22,1,0.36,1) forwards;transform:translateY(110%) rotate(4deg);">美</span>
+  </span>
+  <span class="char-block">
+    <span style="animation:charIn 1s 0.070s cubic-bezier(0.22,1,0.36,1) forwards;transform:translateY(110%) rotate(4deg);">不</span>
+  </span>
+  <span class="char-block">
+    <span style="animation:charIn 1s 0.105s cubic-bezier(0.22,1,0.36,1) forwards;transform:translateY(110%) rotate(4deg);">是</span>
+  </span>
+  <span class="char-block">
+    <span style="animation:charIn 1s 0.140s cubic-bezier(0.22,1,0.36,1) forwards;transform:translateY(110%) rotate(4deg);">装</span>
+  </span>
+  <span class="char-block">
+    <span style="animation:charIn 1s 0.175s cubic-bezier(0.22,1,0.36,1) forwards;transform:translateY(110%) rotate(4deg);">饰</span>
+  </span>
+  <span class="char-block">
+    <span style="animation:charIn 1s 0.210s cubic-bezier(0.22,1,0.36,1) forwards;transform:translateY(110%) rotate(4deg);">,</span>
+  </span>
+</p>
+
+<style>
+@keyframes charIn {
+  to { transform: translateY(0%) rotate(0deg); }
+}
+</style>

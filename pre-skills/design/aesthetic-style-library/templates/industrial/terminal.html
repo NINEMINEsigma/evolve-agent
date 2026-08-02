@@ -1,0 +1,26 @@
+<!-- ==============================================================
+  工业科技风 · 终端模拟器
+  源码: kimi-agent-website/src/components/industrial/TerminalSection.tsx
+============================================================== -->
+<div class="terminal" style="background:#0C1118;border:1px solid rgba(0,229,255,0.15);font-family:'JetBrains Mono',monospace;padding:20px 24px;">
+  <!-- 标题栏：红黄绿圆点 -->
+  <div style="display:flex;align-items:center;gap:8px;padding-bottom:12px;border-bottom:1px solid rgba(0,229,255,0.12);margin-bottom:16px;">
+    <span style="width:10px;height:10px;background:#FF2E88;"></span>
+    <span style="width:10px;height:10px;background:#FFB300;"></span>
+    <span style="width:10px;height:10px;background:#3DFF8C;"></span>
+    <span style="margin-left:12px;font-size:11px;letter-spacing:1px;text-transform:uppercase;color:rgba(201,212,224,0.5);">aether-terminal — tmux: 3.4</span>
+  </div>
+
+  <!-- 日志行（打字机效果） -->
+  <div id="terminal-body" style="font-size:13px;line-height:1.8;">
+    <div><span style="color:#3DFF8C;">aether@core:~$</span> <span style="color:#C9D4E0;">./status --all</span></div>
+    <div style="color:rgba(201,212,224,0.5);">> loading aesthetic module: INDUSTRIAL_TECH ... OK</div>
+    <div style="color:rgba(0,229,255,0.7);">> palette: #00E5FF / #FF2E88 / #07090D</div>
+    <div style="color:rgba(201,212,224,0.5);">> render specimen ... ██████████ 100%</div>
+    <div style="color:rgba(0,229,255,0.7);">> EXHIBIT_01 READY</div>
+    <div><span style="color:#3DFF8C;">aether@core:~$</span><span style="display:inline-block;width:8px;height:14px;background:#00E5FF;animation:terminalBlink 0.5s step-end infinite;vertical-align:middle;margin-left:4px;"></span></div>
+  </div>
+</div>
+<style>
+@keyframes terminalBlink { 0%,100% { opacity:1; } 50% { opacity:0; } }
+</style>

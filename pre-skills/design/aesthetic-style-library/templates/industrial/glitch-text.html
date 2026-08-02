@@ -1,0 +1,64 @@
+<!-- ==============================================================
+  工业科技风 · 色差故障文字
+  源码: kimi-agent-website/src/components/industrial/GlitchText.tsx
+============================================================== -->
+<style>
+/* 自动脉冲故障 (每 4 秒闪一次) */
+.glitch-auto {
+  position: relative;
+  display: inline-block;
+  animation: glitchPulse 4s 1.2s infinite;
+}
+@keyframes glitchPulse {
+  0%, 95% { text-shadow: none; transform: none; }
+  96% { text-shadow: 3px 0 #FF2E88, -3px 0 #00E5FF; transform: translateX(1px) skewX(-2deg); }
+  100% { text-shadow: none; transform: none; }
+}
+/* Hover 故障 */
+.glitch-hover {
+  position: relative;
+  display: inline-block;
+  transition: text-shadow 0.2s, transform 0.2s;
+  cursor: pointer;
+}
+.glitch-hover:hover {
+  text-shadow: 3px 0 #FF2E88, -3px 0 #00E5FF;
+  transform: translateX(1px) skewX(-2deg);
+}
+/* 全自动故障 (文字副本偏移) */
+.glitch-text {
+  position: relative;
+  display: inline-block;
+}
+.glitch-text::before,
+.glitch-text::after {
+  content: attr(data-text);
+  position: absolute;
+  top: 0; left: 0;
+  width: 100%; height: 100%;
+  pointer-events: none;
+}
+.glitch-text::before {
+  color: #FF2E88;
+  z-index: -1;
+  animation: glitchShift 4s 0.5s infinite;
+}
+.glitch-text::after {
+  color: #00E5FF;
+  z-index: -2;
+  animation: glitchShift 4s 1s infinite;
+}
+@keyframes glitchShift {
+  0%, 90%, 100% { transform: translate(0); }
+  92% { transform: translate(-3px, 1px); }
+  94% { transform: translate(2px, -1px); }
+  96% { transform: translate(-1px, 2px); }
+}
+</style>
+
+<!-- 使用示例 -->
+<span class="glitch-auto" style="font-family:'JetBrains Mono',monospace;font-size:24px;color:#C9D4E0;">CYBER</span>
+<br>
+<span class="glitch-hover" style="font-family:'JetBrains Mono',monospace;font-size:24px;color:#C9D4E0;">HOVER 触发故障</span>
+<br>
+<span class="glitch-text" data-text="故障文字" style="font-family:'JetBrains Mono',monospace;font-size:24px;color:#C9D4E0;">故障文字</span>

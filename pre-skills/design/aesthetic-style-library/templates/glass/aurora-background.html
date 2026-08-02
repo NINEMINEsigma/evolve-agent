@@ -1,0 +1,73 @@
+<!-- ==============================================================
+  玻璃拟态 · 深空极光背景 (120 颗星星 + 4 片极光)
+  源码: kimi-agent-website/src/components/glass/AuroraBackground.tsx
+============================================================== -->
+<style>
+@keyframes glass-drift-1 {
+  0% { transform: translate(0,0); }
+  25% { transform: translate(10vw, -6vh); }
+  50% { transform: translate(-6vw, 8vh); }
+  75% { transform: translate(-10vw, -4vh); }
+  100% { transform: translate(0,0); }
+}
+@keyframes glass-drift-2 {
+  0% { transform: translate(0,0); }
+  25% { transform: translate(-9vw, 7vh); }
+  50% { transform: translate(7vw, -8vh); }
+  75% { transform: translate(10vw, 5vh); }
+  100% { transform: translate(0,0); }
+}
+@keyframes glass-drift-3 {
+  0% { transform: translate(0,0); }
+  33% { transform: translate(8vw, 8vh); }
+  66% { transform: translate(-10vw, -7vh); }
+  100% { transform: translate(0,0); }
+}
+@keyframes glass-twinkle {
+  0%, 100% { opacity: var(--star-o); }
+  50% { opacity: 0.05; }
+}
+.aurora-bg {
+  position: fixed; inset: 0;
+  pointer-events: none;
+  z-index: 0;
+  overflow: hidden;
+  background: #0F1226;
+}
+</style>
+
+<div class="aurora-bg">
+  <!-- 4 片飘移极光 -->
+  <div style="position:absolute;width:55vw;height:55vw;left:-12vw;top:-14vh;border-radius:50%;background:radial-gradient(circle,#7C8CFF 0%,transparent 65%);filter:blur(80px);opacity:0.55;animation:glass-drift-1 28s ease-in-out infinite;"></div>
+  <div style="position:absolute;width:45vw;height:45vw;right:-10vw;top:6vh;border-radius:50%;background:radial-gradient(circle,#FF8FB2 0%,transparent 65%);filter:blur(80px);opacity:0.42;animation:glass-drift-2 35s ease-in-out infinite;"></div>
+  <div style="position:absolute;width:40vw;height:40vw;left:18vw;bottom:-18vh;border-radius:50%;background:radial-gradient(circle,#5EEAD4 0%,transparent 65%);filter:blur(80px);opacity:0.34;animation:glass-drift-3 24s ease-in-out infinite;"></div>
+  <div style="position:absolute;width:50vw;height:50vw;right:5vw;bottom:-10vh;border-radius:50%;background:radial-gradient(circle,#3B4ED8 0%,transparent 65%);filter:blur(80px);opacity:0.38;animation:glass-drift-2 30s ease-in-out infinite;animation-delay:-8s;"></div>
+
+  <!-- 120 颗星星 (通过 JS 生成) -->
+  <div id="star-container" style="position:absolute;inset:0;"></div>
+  <script>
+  (function() {
+    const container = document.getElementById('star-container');
+    if (!container) return;
+    for (let i = 0; i < 120; i++) {
+      const star = document.createElement('div');
+      const size = Math.random() < 0.5 ? 1 : 2;
+      const opacity = 0.15 + Math.random() * 0.65;
+      const twinkle = i % 3 === 0;
+      star.style.cssText = `
+        position: absolute;
+        left: ${Math.random() * 100}%;
+        top: ${Math.random() * 100}%;
+        width: ${size}px;
+        height: ${size}px;
+        background: #FFF;
+        border-radius: 50%;
+        opacity: ${opacity};
+        ${twinkle ? `animation: glass-twinkle ${2.4 + Math.random() * 3.6}s ${Math.random() * 6}s ease-in-out infinite;` : ''}
+        --star-o: ${opacity};
+      `;
+      container.appendChild(star);
+    }
+  })();
+  </script>
+</div>

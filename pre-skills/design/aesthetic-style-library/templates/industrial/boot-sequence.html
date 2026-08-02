@@ -1,0 +1,118 @@
+<!-- ==============================================================
+  工业科技风 · 系统启动序列 (BootOverlay)
+  源码: kimi-agent-website/src/components/industrial/Hero.tsx
+  描述: 全屏黑色遮罩 + 打字机输出启动日志，完成后向上卷起
+============================================================== -->
+<style>
+.boot-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #07090D;
+  animation: bootRollUp 0.6s cubic-bezier(0.76,0,0.24,1) forwards;
+  animation-delay: var(--boot-duration, 1.2s);
+  pointer-events: none;
+}
+@keyframes bootRollUp {
+  to { transform: translateY(-100%); }
+}
+.boot-screen {
+  max-width: 90vw;
+  width: 640px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 13px;
+  line-height: 1.8;
+  color: rgba(201,212,224,0.7);
+}
+.boot-line {
+  opacity: 0;
+  animation: bootAppear 0.03s forwards;
+}
+@keyframes bootAppear {
+  to { opacity: 1; }
+}
+.boot-line .ok { color: #3DFF8C; }
+.boot-line .cyan { color: #00E5FF; }
+.boot-line .warn { color: #FFB300; }
+.boot-cursor {
+  display: inline-block;
+  width: 8px;
+  height: 14px;
+  background: #00E5FF;
+  animation: bootBlink 0.5s step-end infinite;
+  vertical-align: middle;
+  margin-left: 4px;
+}
+@keyframes bootBlink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0; }
+}
+</style>
+
+<!-- 使用方式：将以下 HTML 放在页面 body 最顶部 -->
+<div class="boot-overlay" style="--boot-duration: 2.0s;">
+  <div class="boot-screen" id="boot-terminal">
+    <div class="boot-line" style="animation-delay:0.0s;"><span class="ok">[  OK  ]</span> Initializing AESTHETIC ATLAS kernel v2.4...</div>
+    <div class="boot-line" style="animation-delay:0.08s;"><span class="ok">[  OK  ]</span> Loading service mesh mesh::exhibit-relay...</div>
+    <div class="boot-line" style="animation-delay:0.16s;"><span class="warn">[ WARN ]</span> Certificate rotation in 7 days (cert::ae-01)</div>
+    <div class="boot-line" style="animation-delay:0.24s;"><span class="ok">[  OK  ]</span> Connecting to global backbone 6/6 nodes...</div>
+    <div class="boot-line" style="animation-delay:0.32s;"><span class="ok">[  OK  ]</span> GPU pool: 256 units online, 0 offline</div>
+    <div class="boot-line" style="animation-delay:0.40s;"><span class="cyan">[ INFO ]</span> Starting inference engine exhibit-engine::v1...</div>
+    <div class="boot-line" style="animation-delay:0.48s;"><span class="ok">[  OK  ]</span> Monitoring stack initialized (200+ metrics)</div>
+    <div class="boot-line" style="animation-delay:0.56s;"><span class="cyan">[ INFO ]</span> System ready. <span class="ok">Exhibit 01 · INDUSTRIAL</span></div>
+    <div class="boot-line" style="animation-delay:0.64s;">
+      <span class="ok">aether@core:~$</span> <span style="color:#C9D4E0;">./enter —style industrial</span>
+      <span class="boot-cursor"></span>
+    </div>
+  </div>
+</div>
+
+<!-- JS 版（自定义日志内容） -->
+<script>
+/**
+ * 创建启动序列
+ * 用法:
+ *   const done = showBootSequence([
+ *     { text: 'INIT SYSTEM ... OK', cls: 'ok', delay: 0 },
+ *     ...
+ *   ], { duration: 2000, onComplete: () => { ... } });
+ */
+function showBootSequence(lines, opts = {}) {
+  const { duration = 2000, bg = '#07090D' } = opts;
+  const overlay = document.createElement('div');
+  overlay.style.cssText = `position:fixed;inset:0;z-index:100;display:flex;align-items:center;justify-content:center;background:${bg};pointer-events:none;`;
+  const term = document.createElement('div');
+  term.style.cssText = 'max-width:90vw;width:640px;font-family:\'JetBrains Mono\',monospace;font-size:13px;line-height:1.8;color:rgba(201,212,224,0.7);';
+  overlay.appendChild(term);
+  document.body.appendChild(overlay);
+
+  lines.forEach((line, i) => {
+    const div = document.createElement('div');
+    div.style.cssText = `opacity:0;animation:bootAppear 0.03s ${i * 0.08}s forwards;`;
+    div.innerHTML = line.text;
+    term.appendChild(div);
+  });
+
+  // 光标
+  const cursorLine = document.createElement('div');
+  cursorLine.style.cssText = `opacity:0;animation:bootAppear 0.03s ${lines.length * 0.08}s forwards;`;
+  cursorLine.innerHTML = '<span style="color:#3DFF8C;">aether@core:~$</span> <span class="boot-cursor"></span>';
+  term.appendChild(cursorLine);
+
+  // 注入 cursor 样式
+  const style = document.createElement('style');
+  style.textContent = `@keyframes bootAppear{to{opacity:1}}.boot-cursor{display:inline-block;width:8px;height:14px;background:#00E5FF;animation:bootBlink 0.5s step-end infinite;vertical-align:middle;margin-left:4px}@keyframes bootBlink{0%,100%{opacity:1}50%{opacity:0}}`;
+  document.head.appendChild(style);
+
+  setTimeout(() => {
+    overlay.style.transition = 'transform 0.6s cubic-bezier(0.76,0,0.24,1)';
+    overlay.style.transform = 'translateY(-100%)';
+    setTimeout(() => { overlay.remove(); if (opts.onComplete) opts.onComplete(); }, 620);
+  }, duration);
+
+  return () => overlay.remove();
+}
+</script>

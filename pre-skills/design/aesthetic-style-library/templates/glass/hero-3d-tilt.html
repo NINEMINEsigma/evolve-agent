@@ -1,0 +1,85 @@
+<!-- ==============================================================
+  玻璃拟态 · 玻璃面板 + 3D 鼠标跟随
+  源码: kimi-agent-website/src/components/glass/Hero.tsx + shared.tsx
+============================================================== -->
+<style>
+.glass-card {
+  background: rgba(255,255,255,0.08);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid rgba(255,255,255,0.18);
+  border-radius: 32px;
+  padding: 48px 64px;
+  text-align: center;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.25), 0 24px 48px rgba(5,8,30,0.45);
+  transform-style: preserve-3d;
+  transition: box-shadow 0.3s;
+  width: min(680px, 86vw);
+}
+.glass-card h1 {
+  font-family: 'Outfit', sans-serif;
+  font-size: clamp(32px, 5vw, 56px);
+  font-weight: 700;
+  color: #EDEFFF;
+  margin-bottom: 16px;
+}
+.glass-card p {
+  font-family: 'Noto Sans SC', sans-serif;
+  font-size: 15px;
+  color: rgba(237,239,255,0.6);
+  font-weight: 300;
+  line-height: 1.6;
+}
+.glass-card .highlight {
+  position: absolute;
+  pointer-events: none;
+  inset: -1px;
+  border-radius: 32px;
+  background: radial-gradient(420px 300px at 30% 18%, rgba(255,255,255,0.12), transparent 70%);
+}
+</style>
+
+<div id="glass-card-3d" style="display:flex;align-items:center;justify-content:center;min-height:60vh;perspective:1200px;background:#0F1226;border-radius:24px;padding:24px;position:relative;overflow:hidden;">
+  <!-- 深空极光背景装饰 -->
+  <div style="position:absolute;width:55%;height:55%;left:-12%;top:-14%;border-radius:50%;background:radial-gradient(circle,#7C8CFF,transparent 65%);filter:blur(80px);opacity:0.45;pointer-events:none;"></div>
+  <div style="position:absolute;width:45%;height:45%;right:-10%;top:6%;border-radius:50%;background:radial-gradient(circle,#FF8FB2,transparent 65%);filter:blur(80px);opacity:0.35;pointer-events:none;"></div>
+  <div style="position:absolute;width:40%;height:40%;left:18%;bottom:-18%;border-radius:50%;background:radial-gradient(circle,#5EEAD4,transparent 65%);filter:blur(80px);opacity:0.3;pointer-events:none;"></div>
+
+  <div class="glass-card" id="glass-inner">
+    <div class="highlight" id="glass-hl"></div>
+    <h1>光，穿过界面。</h1>
+    <p>玻璃拟态将真实世界的材质感带入数字界面——<br>模糊、透明、光泽，在深空极光中呼吸。</p>
+  </div>
+</div>
+
+<script>
+(function() {
+  const card = document.getElementById('glass-inner');
+  if (!card) return;
+  const hl = document.getElementById('glass-hl');
+  let mx = 0, my = 0;
+  let targetX = 0, targetY = 0;
+
+  card.closest('#glass-card-3d').addEventListener('mousemove', function(e) {
+    const r = this.getBoundingClientRect();
+    targetX = (e.clientX - r.left) / r.width - 0.5;
+    targetY = (e.clientY - r.top) / r.height - 0.5;
+  });
+  this.addEventListener('mouseleave', function() {
+    targetX = 0; targetY = 0;
+  });
+
+  function animate() {
+    mx += (targetX - mx) * 0.12;
+    my += (targetY - my) * 0.12;
+    const rotX = -my * 8;
+    const rotY = mx * 8;
+    card.style.transform = `rotateX(${rotX}deg) rotateY(${rotY}deg)`;
+    if (hl) {
+      hl.style.transform = `translate(${-mx * 14}px, ${-my * 14}px)`;
+    }
+    requestAnimationFrame(animate);
+  }
+  animate();
+})();
+</script>

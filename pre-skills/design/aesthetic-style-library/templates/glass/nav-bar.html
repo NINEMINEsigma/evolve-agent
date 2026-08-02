@@ -1,0 +1,67 @@
+<!-- ==============================================================
+  玻璃拟态 · 胶囊导航栏
+  源码: kimi-agent-website/src/components/glass/GlassNav.tsx
+============================================================== -->
+<style>
+.glass-nav {
+  position: fixed;
+  left: 50%;
+  top: 20px;
+  transform: translateX(-50%);
+  display: flex;
+  height: 52px;
+  align-items: center;
+  gap: 20px;
+  padding: 0 24px;
+  border-radius: 999px;
+  background: rgba(255,255,255,0.08);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(255,255,255,0.18);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.25), 0 24px 48px rgba(5,8,30,0.45);
+  z-index: 50;
+  font-family: 'Outfit', 'Noto Sans SC', sans-serif;
+}
+.glass-nav .logo {
+  font-weight: 600;
+  font-size: 13px;
+  letter-spacing: 0.15em;
+  color: #FFF;
+  background: none;
+  border: none;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.glass-nav .links {
+  display: flex;
+  gap: 4px;
+}
+.glass-nav .links button {
+  font-size: 13px;
+  color: rgba(237,239,255,0.65);
+  background: none;
+  border: none;
+  padding: 6px 14px;
+  border-radius: 999px;
+  cursor: pointer;
+  transition: all 0.25s;
+  font-family: 'Noto Sans SC', sans-serif;
+}
+.glass-nav .links button:hover {
+  background: rgba(255,255,255,0.1);
+  color: #FFF;
+}
+@media (max-width: 640px) {
+  .glass-nav .links { display: none; }
+}
+</style>
+
+<nav class="glass-nav">
+  <button class="logo" onclick="window.scrollTo({top:0,behavior:'smooth'})">◍ EX-05 GLASS</button>
+  <div class="links">
+    <button onclick="document.getElementById('lab')?.scrollIntoView({behavior:'smooth'})">实验</button>
+    <button onclick="document.getElementById('gallery')?.scrollIntoView({behavior:'smooth'})">画廊</button>
+    <button onclick="document.getElementById('neu')?.scrollIntoView({behavior:'smooth'})">新拟物</button>
+    <button onclick="document.getElementById('kit')?.scrollIntoView({behavior:'smooth'})">组件</button>
+  </div>
+</nav>

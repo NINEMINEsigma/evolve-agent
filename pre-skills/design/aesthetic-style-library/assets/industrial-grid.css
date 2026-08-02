@@ -1,0 +1,26 @@
+/* ===== INDUSTRIAL 背景纹理 ===== */
+/* 40px 网格 + 8px 扫描线 + 径向霓虹光晕 */
+
+.industrial-bg {
+  background-color: #07090D;
+  background-image:
+    linear-gradient(rgba(0,229,255,0.05) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(0,229,255,0.05) 1px, transparent 1px);
+  background-size: 40px 40px;
+}
+
+.industrial-scanline {
+  background-image: repeating-linear-gradient(
+    0deg,
+    rgba(201,212,224,0.03) 0 1px,
+    transparent 1px 8px
+  );
+}
+
+.industrial-glow {
+  background: radial-gradient(
+    ellipse 70% 55% at 50% 62%,
+    rgba(0,229,255,0.14),
+    transparent 65%
+  );
+}

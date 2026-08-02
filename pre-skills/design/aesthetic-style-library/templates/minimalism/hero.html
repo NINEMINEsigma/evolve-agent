@@ -1,0 +1,84 @@
+<!-- ==============================================================
+  极简主义 · 呼吸指示线 + 极简 Hero
+  源码: kimi-agent-website/src/components/minimalism/MinHero.tsx
+============================================================== -->
+<style>
+.min-hero {
+  display: flex;
+  min-height: 100vh;
+  align-items: center;
+  justify-content: center;
+  background: #FAFAF8;
+  position: relative;
+}
+.min-hero .muted {
+  font-family: 'Inter Tight', sans-serif;
+  font-size: 11px;
+  font-weight: 300;
+  letter-spacing: 0.5em;
+  text-transform: uppercase;
+  color: #9A9A94;
+}
+.min-hero h1 {
+  font-family: 'Noto Serif SC', serif;
+  font-weight: 600;
+  font-size: clamp(36px, 5vw, 64px);
+  line-height: 1.4;
+  color: #1A1A1A;
+  margin-top: 40px;
+}
+.min-hero h1 .accent { color: #FF4D00; }
+.min-hero .hairline {
+  margin-top: 80px;
+  height: 1px;
+  width: 64px;
+  background: rgba(26,26,26,0.12);
+}
+.scroll-hint {
+  height: 40px;
+  width: 1px;
+  background: #1A1A1A;
+  animation: breathe 2.4s ease-in-out infinite;
+  transform-origin: top;
+}
+@keyframes breathe {
+  0%, 100% { transform: scaleY(1); }
+  50% { transform: scaleY(0.3); }
+}
+.min-archive {
+  position: absolute;
+  bottom: 48px;
+  left: 48px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.min-archive span {
+  font-family: 'Inter Tight', sans-serif;
+  font-size: 12px;
+  font-weight: 300;
+  color: #9A9A94;
+}
+</style>
+
+<section class="min-hero">
+  <div style="text-align:center;transform:translateY(-8vh);">
+    <p class="muted">EXHIBIT 04 — MINIMALISM</p>
+    <h1>
+      <span>少，</span>
+      <span>即是多</span>
+      <span class="accent">。</span>
+    </h1>
+    <div class="hairline"></div>
+  </div>
+
+  <div class="min-archive">
+    <span>起源 1960s</span>
+    <span>关键词:留白 克制 本质</span>
+    <span>LESS BUT BETTER</span>
+  </div>
+
+  <div style="position:absolute;bottom:48px;right:48px;">
+    <div class="scroll-hint"></div>
+  </div>
+</section>

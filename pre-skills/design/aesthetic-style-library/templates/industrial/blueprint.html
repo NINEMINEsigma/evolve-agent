@@ -1,0 +1,37 @@
+<!-- ==============================================================
+  工业科技风 · 蓝图标尺板
+  源码: kimi-agent-website/src/components/industrial/Blueprint.tsx
+============================================================== -->
+<div style="font-family:'JetBrains Mono',monospace;background:#0C1118;border:1px solid rgba(0,229,255,0.15);padding:24px;position:relative;overflow:hidden;">
+  <!-- 标尺线 X -->
+  <div style="display:flex;align-items:flex-end;height:24px;overflow:hidden;margin-bottom:8px;" aria-hidden="true">
+    <script>
+      for (let i = 0; i <= 80; i++) {
+        document.write(
+          '<div style="display:flex;flex-direction:column;align-items:center;justify-content:flex-end;width:10px;flex-shrink:0;">' +
+          (i % 10 === 0 ? '<span style="margin-bottom:2px;font-size:9px;color:rgba(201,212,224,0.4);">' + i + '</span>' : '') +
+          '<span style="width:1px;background:rgba(0,229,255,0.35);height:' + (i % 5 === 0 ? '8px' : '4px') + ';"></span>' +
+          '</div>'
+        );
+      }
+    </script>
+  </div>
+
+  <!-- 标注点组件 -->
+  <div style="position:relative;height:200px;background:rgba(0,229,255,0.03);border:1px solid rgba(0,229,255,0.08);">
+    <!-- 示例: 脉冲标注点 -->
+    <div style="position:absolute;left:30%;top:40%;z-index:10;">
+      <!-- 十字 -->
+      <span style="position:absolute;left:-10px;top:0;width:20px;height:1px;background:#00E5FF;"></span>
+      <span style="position:absolute;left:0;top:-10px;width:1px;height:20px;background:#00E5FF;"></span>
+      <!-- 脉冲环 -->
+      <span style="position:absolute;left:-14px;top:-14px;width:28px;height:28px;border:1px solid #00E5FF;border-radius:50%;animation:annotationPulse 1.6s ease-out infinite;"></span>
+    </div>
+    <style>
+      @keyframes annotationPulse {
+        0% { opacity: 0.7; transform: scale(0.5); }
+        100% { opacity: 0; transform: scale(1.8); }
+      }
+    </style>
+  </div>
+</div>
