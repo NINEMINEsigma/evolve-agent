@@ -108,7 +108,9 @@ async def _handle_clear_clipboard_display(args: dict[str, Any], context: ToolCon
         else:
             cleared = list(_display_registry[session_id].keys())
             _display_registry[session_id].clear()
-        _persist_displays(session_id, context)
+    # 无条件同步磁盘：registry 无该 session（如重启后）时也必须清空磁盘，
+    # 否则前端轮询会从 tool_resources.json 恢复已被清理的旧状态
+    _persist_displays(session_id, context)
 
     logger.info("Clipboard display cleared | session=%s displays=%s", session_id, cleared)
 

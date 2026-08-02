@@ -123,7 +123,9 @@ async def _handle_clear_task_progress(args: dict[str, Any], context: ToolContext
         else:
             cleared = list(_progress_registry[session_id].keys())
             _progress_registry[session_id].clear()
-        _persist_progress(session_id, context)
+    # 无条件同步磁盘：registry 无该 session（如重启后）时也必须清空磁盘，
+    # 否则前端轮询会从 tool_resources.json 恢复已被清理的旧状态
+    _persist_progress(session_id, context)
 
     logger.info("Task progress cleared | session=%s tasks=%s", session_id, cleared)
 
