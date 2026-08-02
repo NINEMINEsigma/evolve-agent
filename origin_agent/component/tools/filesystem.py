@@ -8,6 +8,11 @@
   - ``ws:``      读写（通用 agent 工作空间）
   - ``fix:``     读写（修复目标，仅 fallback 模式）
   - ``skills:``  读写（skill 文件目录）
+  - ``third:``   只读（第三方子模块）
+  - ``custom_hooks:``      只读（自定义钩子）
+  - ``custom_llm_client:`` 只读（自定义 LLM 客户端）
+  - ``custom_models:``     只读（本地模型文件）
+  - ``custom_tools:``      只读（自定义工具）
 """
 
 from __future__ import annotations

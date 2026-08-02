@@ -147,7 +147,11 @@ WRITE_FILE_TRUNCATION_TAIL: int = 25
 FILE_SNIFF_BYTES: int = 4096
 
 # 支持的命名空间前缀元组 — 用于命令参数中的逻辑路径解析
-NAMESPACE_PREFIXES: tuple[str, ...] = ("ws:", "fork:", "fix:", "skills:")
+# 只读命名空间（third:/custom_*:）映射项目根目录，仅允许 Read 访问。
+NAMESPACE_PREFIXES: tuple[str, ...] = (
+    "ws:", "fork:", "fix:", "skills:",
+    "third:", "custom_hooks:", "custom_llm_client:", "custom_models:", "custom_tools:",
+)
 
 
 # ============================================================================

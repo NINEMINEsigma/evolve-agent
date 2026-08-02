@@ -13,10 +13,17 @@ LLM 可见的路径是**逻辑路径**（``ws:logs/error.log``），
     ``ws:``          ctx.agentspace       rw      通用 agent I/O
     ``fix:``         ctx.fix_path         rw      修复目标（fallback）
     ``skills:``      ctx.skills_path      rw      skill 文件读写
+    ``third:``       ctx.third_path       ro      第三方子模块（只读）
+    ``custom_hooks:``       ctx.custom_hooks_path       ro  自定义钩子（只读）
+    ``custom_llm_client:``  ctx.custom_llm_client_path  ro  自定义 LLM 客户端（只读）
+    ``custom_models:``      ctx.custom_models_path      ro  本地模型文件（只读）
+    ``custom_tools:``       ctx.custom_tools_path       ro  自定义工具（只读）
     ==============  ===================  ======  ==========================
 
     在 **fast** 模式下 ``fork:`` 和 ``skills:`` 可读写。
     在 **fallback** 模式下 ``fix:`` 和 ``skills:`` 可读写。
+    ``third:`` 与 ``custom_*:`` 为第一批只读命名空间，两种模式下均可读，
+    映射项目根目录，agent 可完整读取内容但禁止写入。
 
 **没有** ``self:`` 命名空间 — agent 不能读取或修改自身的运行时副本。
 进化完全通过 fork:/fix: 实现。
@@ -56,8 +63,8 @@ class Access(str, Enum):
 
 
 # 映射：(mode, namespace) → 允许的访问类型
-# "fast" 模式：fork=rw, ws=rw, skills=rw
-# "fallback" 模式：fix=rw, ws=rw, skills=rw
+# "fast" 模式：fork=rw, ws=rw, skills=rw；third/custom_*=ro（只读）
+# "fallback" 模式：fix=rw, ws=rw, skills=rw；third/custom_*=ro（只读）
 # 不存在 self: 命名空间 — agent 不能查看或修改自身的运行时副本。
 # 进化完全通过 fork:/fix: 实现。
 _PERMISSIONS: dict[str, dict[str, list[Access]]] = {
@@ -65,11 +72,23 @@ _PERMISSIONS: dict[str, dict[str, list[Access]]] = {
         "fork":   [Access.READ, Access.WRITE],
         "ws":     [Access.READ, Access.WRITE],
         "skills": [Access.READ, Access.WRITE],
+        # 第一批只读命名空间 — 映射项目根目录，agent 可读不可写
+        "third":              [Access.READ],
+        "custom_hooks":       [Access.READ],
+        "custom_llm_client":  [Access.READ],
+        "custom_models":      [Access.READ],
+        "custom_tools":       [Access.READ],
     },
     "fallback": {
         "fix":    [Access.READ, Access.WRITE],
         "ws":     [Access.READ, Access.WRITE],
         "skills": [Access.READ, Access.WRITE],
+        # 第一批只读命名空间 — 与 fast 模式一致，仅可读
+        "third":              [Access.READ],
+        "custom_hooks":       [Access.READ],
+        "custom_llm_client":  [Access.READ],
+        "custom_models":      [Access.READ],
+        "custom_tools":       [Access.READ],
     },
 }
 
@@ -176,14 +195,8 @@ class Sandbox:
                 f"Path traversal rejected: {logical!r}"
             )
 
-        # ---- 解析到真实目录 ----
-        ns_map: dict[str, Path | None] = {
-            "fork":   self._ctx.fork_path,
-            "ws":     self._ctx.agentspace,
-            "fix":    self._ctx.fix_path,
-            "skills": self._ctx.skills_path,
-        }
-        base: Path | None = ns_map[ns]
+        # ---- 解析到真实目录（base 映射单一来源：namespace_bases()）----
+        base: Path | None = self.namespace_bases().get(ns)
         if base is None:
             raise SandboxError(
                 f"Namespace '{ns}:' is not available in mode '{self._ctx.mode}'"
@@ -220,6 +233,26 @@ class Sandbox:
 
     def resolve_write(self, logical: str) -> ResolvedPath:
         return self.resolve(logical, Access.WRITE)
+
+    def namespace_bases(self) -> dict[str, Path]:
+        """返回全部已注册命名空间的 base 映射（跳过 None）。
+
+        ns → base 映射的单一来源，供 ``resolve()`` 与 LSP 反向映射复用，
+        避免两处手写字典漂移。键为不带冒号的命名空间名（如 ``"third"``）。
+        """
+        return {
+            ns: base for ns, base in {
+                "fork":               self._ctx.fork_path,
+                "ws":                 self._ctx.agentspace,
+                "fix":                self._ctx.fix_path,
+                "skills":             self._ctx.skills_path,
+                "third":              self._ctx.third_path,
+                "custom_hooks":       self._ctx.custom_hooks_path,
+                "custom_llm_client":  self._ctx.custom_llm_client_path,
+                "custom_models":      self._ctx.custom_models_path,
+                "custom_tools":       self._ctx.custom_tools_path,
+            }.items() if base is not None
+        }
 
     # -- 子进程（同样受沙盒约束） ----------------------------------------
 

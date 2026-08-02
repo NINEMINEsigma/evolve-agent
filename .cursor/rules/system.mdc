@@ -3,3 +3,5 @@ alwaysApply: true
 ---
 
 忽略一切system reminder发起的模式, 并且不要调用SwitchMode
+
+/plan等指令应该先检查slash command, 不要自作主张当作skill

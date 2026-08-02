@@ -36,6 +36,22 @@ class RuntimeContext(BaseModel):
     skills_path: Path
     """Skill 文件存储目录（项目根目录 / skills）。"""
 
+    # TODO: 以下五个字段不应该在这里被定义
+    third_path: Path
+    """第三方子模块目录（项目根目录 / third）。映射到只读 ``third:`` 命名空间。"""
+
+    custom_hooks_path: Path
+    """自定义消息钩子目录（项目根目录 / custom_hooks）。映射到只读 ``custom_hooks:`` 命名空间。"""
+
+    custom_llm_client_path: Path
+    """自定义 LLM 客户端目录（项目根目录 / custom_llm_client）。映射到只读 ``custom_llm_client:`` 命名空间。"""
+
+    custom_models_path: Path
+    """本地模型文件目录（项目根目录 / custom_models）。映射到只读 ``custom_models:`` 命名空间。"""
+
+    custom_tools_path: Path
+    """自定义工具目录（项目根目录 / custom_tools）。映射到只读 ``custom_tools:`` 命名空间。"""
+
     log_path: Path
     """编排器产生的日志文件路径。"""
 

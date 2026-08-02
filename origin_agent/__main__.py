@@ -113,6 +113,13 @@ def _build_context(cli: dict) -> RuntimeContext:
         agentspace      = Path(cli["agentspace"]).resolve(),
         fork_path       = Path(cli["evolve"]).resolve() if "evolve" in cli else Path(cli["workspace"]).resolve() / "slow_agent_space",
         skills_path     = (find_repo_root() / "skills").resolve(),
+        # TODO: 不应该在这里被定义
+        # 只读命名空间 — 映射项目根下的 third 与 custom 系列目录（与 skills_path 同基准）
+        third_path              = (find_repo_root() / "third").resolve(),
+        custom_hooks_path       = (find_repo_root() / "custom_hooks").resolve(),
+        custom_llm_client_path  = (find_repo_root() / "custom_llm_client").resolve(),
+        custom_models_path      = (find_repo_root() / "custom_models").resolve(),
+        custom_tools_path       = (find_repo_root() / "custom_tools").resolve(),
         log_path        = Path(cli["log"]).resolve(),
         mode            = str(cli["mode"]),
         console_log     = as_bool(cli["console_log"]),

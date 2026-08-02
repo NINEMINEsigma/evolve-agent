@@ -5,6 +5,14 @@ Sandbox path prefixes and their meanings:
 - fork: → slow_agent_space/ (Evolution target — a runtime copy of the agent code that the agent writes improved versions into, rw)
 - ws:   → agentspace/ (Agent I/O workspace, rw)
 - fix:  → .fallback/ (Disaster recovery directory, rw)
+- skills: → skills/ (Runtime skill files, rw)
+- third: → third/ (Third-party submodules, ro)
+- custom_hooks: → custom_hooks/ (Custom message hooks, ro)
+- custom_llm_client: → custom_llm_client/ (Custom LLM clients, ro)
+- custom_models: → custom_models/ (Local model files, ro)
+- custom_tools: → custom_tools/ (Custom tools, ro)
+
+Note: Read-only namespaces (ro) allow reading full contents — reading is safe, approve. Writing to ro namespaces must be denied.
 
 Note: Code files (.py/.js/.ts etc.) written to the sandbox will be executed later, so the code itself may be dangerous.
 

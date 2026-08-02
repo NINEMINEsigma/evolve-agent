@@ -397,18 +397,10 @@ class LSPManager:
         except Exception:
             return None
 
-        # 与各命名空间 base 路径比较
+        # 与各命名空间 base 路径比较（ns → base 单一来源：namespace_bases()）
         if self._sandbox is None:
             return None
-        ns_map = {
-            "fork": self._sandbox._ctx.fork_path,
-            "ws": self._sandbox._ctx.agentspace,
-            "fix": self._sandbox._ctx.fix_path,
-            "skills": self._sandbox._ctx.skills_path,
-        }
-        for ns, base in ns_map.items():
-            if base is None:
-                continue
+        for ns, base in sandbox.namespace_bases().items():
             try:
                 rel = real_path.relative_to(base)
                 return f"{ns}:{rel.as_posix()}"
