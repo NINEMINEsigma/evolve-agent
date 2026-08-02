@@ -99,7 +99,7 @@ registry.register(
         #
         # ## 前置条件
         # 首次使用前必须向用户详细说明此工具的用途和风险，并询问用户明确意见（允许/禁止/条件允许）。
-        # 禁止使用此工具替代沙箱已有的文件读写和搜索操作（如 Read、write_file、grep 等）。
+        # 禁止使用此工具替代沙箱已有的文件读写和搜索操作（如 Read、Write、grep 等）。
         # 禁止用于执行安装命令（pip install、npm install 等）或需要较长时间运行的测试，此工具默认 30 秒超时。
         #
         # ## 调用效果
@@ -118,14 +118,14 @@ registry.register(
         #
         # ## 副作用/注意
         # - 错误调用可对整台机器造成毁灭性打击。
-        # - 禁止用于替代沙箱已有的文件读写和搜索操作（Read、write_file、grep、glob 等），这些操作有更安全的内置工具。
+        # - 禁止用于替代沙箱已有的文件读写和搜索操作（Read、Write、grep、glob 等），这些操作有更安全的内置工具。
         # - 禁止用于安装命令或长流程测试，默认 30 秒超时。
         # - 默认工作目录为 `ws:`（agentspace）。
         "description": """Execute shell commands in the sandbox.
 
 ## Prerequisites
 Before the first use, the agent MUST explain this tool's purpose and risks to the user in detail and ask for explicit consent (allow / deny / conditional allow).
-Do NOT use this tool to replace sandbox file I/O and search operations (Read, write_file, grep, glob, etc.).
+Do NOT use this tool to replace sandbox file I/O and search operations (Read, Write, grep, glob, etc.).
 Do NOT use this tool for install commands (pip install, npm install, etc.) or long-running tests; it has a default 30-second timeout.
 
 ## Effect
@@ -144,7 +144,7 @@ Each invocation requires user approval (allow once / always allow / deny). Alway
 
 ## Side Effects / Notes
 - Misuse can cause catastrophic damage to the entire machine.
-- Do NOT use this tool to replace sandbox file I/O and search operations (Read, write_file, grep, glob, etc.); those have safer built-in tools.
+- Do NOT use this tool to replace sandbox file I/O and search operations (Read, Write, grep, glob, etc.); those have safer built-in tools.
 - Do NOT use this tool for install commands or long-running tests; default timeout is 30 seconds.
 - Default working directory is `ws:` (agentspace).""",
         "parameters": {

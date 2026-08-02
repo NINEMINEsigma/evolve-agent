@@ -159,35 +159,6 @@ def _handle_recall_skill(args: dict[str, Any]) -> dict:
         return tool_error(str(exc))
 
 
-def _handle_write_skill_file(args: dict[str, Any]) -> dict:
-    """向已有 skill 包内写入附属文件。"""
-    name: str = str(args.get("name", "")).strip()
-    path: str = str(args.get("path", "")).strip()
-    content: str = str(args.get("content", ""))
-
-    if not name:
-        return tool_error("name is required")
-    if not path:
-        return tool_error("path is required")
-
-    try:
-        result: dict = write_skill_file(
-            name=name,
-            subpath=path,
-            content=content,
-            skills_dir=_skills_dir(),
-        )
-        if result.get("success"):
-            return tool_result(
-                written=True,
-                name=name,
-                path=result.get("relative_path"),
-            )
-        return tool_error(result.get("error", "Unknown error"))
-    except Exception as exc:
-        return tool_error(str(exc))
-
-
 def _handle_run_skill_script(args: dict[str, Any]) -> dict:
     """在 skill 包目录下执行 scripts/ 中的脚本并返回结果。"""
     import subprocess  # nosec: intentional for skill scripts
@@ -277,7 +248,7 @@ registry.register(
         # ## 何时使用
         # - 创建全新 skill。
         # - 对已有 skill 的主体内容进行较大程度更改。
-        # - 小范围修改或追加内容应使用沙箱内置的 edit_file 或 write_file，路径使用 `skills:` 前缀（如 `skills:my-skill/SKILL.md`）。
+        # - 小范围修改或追加内容应使用沙箱内置的 PatchEdit 或 Write，路径使用 `skills:` 前缀（如 `skills:my-skill/SKILL.md`）。
         #
         # ## 副作用/注意
         # - 写入 project-root/skills/ 下的文件系统。
@@ -300,7 +271,7 @@ The `files` parameter can write ancillary files (scripts, reference docs, etc.) 
 ## When to Use
 - Create a brand-new skill.
 - Make significant changes to an existing skill's main content.
-- For small edits or appending content, use the sandbox built-in edit_file or write_file with the `skills:` prefix (e.g. `skills:my-skill/SKILL.md`).
+- For small edits or appending content, use the sandbox built-in PatchEdit or Write with the `skills:` prefix (e.g. `skills:my-skill/SKILL.md`).
 
 ## Side Effects / Notes
 - Writes to the file system under project-root/skills/.
@@ -552,91 +523,6 @@ Without arguments:
     handler=_handle_recall_skill,
     emoji="🔍",
 )
-
-
-registry.register(
-    name="write_skill_file",
-    toolset="skills",
-    schema={
-        # 向已有 skill 包内写入附属文件（如 scripts/、references/ 等）。
-        #
-        # ## 前置条件
-        # 目标 skill 必须已存在。此工具用于写入附属文件，不应替代 learn_skill 写入主 SKILL.md。
-        #
-        # ## 调用效果
-        # 在 project-root/skills/<name>/ 目录下创建或覆盖由 `path` 指定的文件。
-        # `path` 相对于 skill 根目录（如 `scripts/hello.py` 对应 `project-root/skills/<name>/scripts/hello.py`）。
-        # 若文件已存在则覆盖，若父目录不存在则自动创建。
-        # 文件内容由 `content` 参数完整决定，不追加、不合并。
-        #
-        # ## 返回
-        # ```json
-        # {"written": true, "name": "my-skill", "path": "scripts/hello.py"}
-        # ```
-        #
-        # ## 何时使用
-        # - 在创建 skill 后补充脚本、模板、参考文档。
-        # - 向已有 skill 添加新的附属文件。
-        #
-        # ## 副作用/注意
-        # - 写入文件系统。
-        # - 同名文件会被覆盖。
-        # - 不存在的 skill 返回错误。
-        # - 不应替代 learn_skill 写入 SKILL.md 主文档。
-        "description": """Write ancillary files (e.g. scripts/, references/) into an existing skill package.
-
-## Prerequisites
-The target skill must exist. This tool is for ancillary files only; do not use it to write the main SKILL.md (use learn_skill instead).
-
-## Effect
-Creates or overwrites the file at `path` under project-root/skills/<name>/.
-`path` is relative to the skill root directory (e.g. `scripts/hello.py` → `project-root/skills/<name>/scripts/hello.py`).
-If the file already exists it is overwritten; missing parent directories are created automatically.
-The file content is determined entirely by the `content` parameter — no appending, no merging.
-
-## Returns
-```json
-{"written": true, "name": "my-skill", "path": "scripts/hello.py"}
-```
-
-## When to Use
-- Add scripts, templates, and reference documents after creating the skill.
-- Add new ancillary files to an existing skill.
-
-## Side Effects / Notes
-- Writes to the file system.
-- Existing files with the same name are overwritten.
-- Non-existent skills return an error.
-- Do not use this to write the SKILL.md main document; use learn_skill instead.""",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "name": {
-                    "type": "string",
-                    # Skill 名称。
-                    "description": "Skill name.",
-                },
-                "path": {
-                    "type": "string",
-                    # 相对于 skill 目录的文件路径，如 scripts/hello.py
-                    "description": "File path relative to the skill directory, e.g. scripts/hello.py",
-                },
-                "content": {
-                    "type": "string",
-                    # 文件内容。
-                    "description": "File content.",
-                },
-            },
-            "required": ["name", "path", "content"],
-        },
-    },
-    handler=_handle_write_skill_file,
-    emoji="📝",
-    danger_level=ToolDangerLevel.write,
-)
-
-
-
 
 
 registry.register(

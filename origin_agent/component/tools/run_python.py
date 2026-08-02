@@ -113,7 +113,7 @@ registry.register(
         #
         # ## 前置条件
         # 首次使用前必须向用户详细说明此工具的用途和风险，并询问用户明确意见（允许/禁止/条件允许）。
-        # 禁止使用此工具替代沙箱已有的文件读写和搜索操作（如 Read、write_file、grep 等）。
+        # 禁止使用此工具替代沙箱已有的文件读写和搜索操作（如 Read、Write、grep 等）。
         # 禁止用于执行下载任务或需要较长时间运行的服务。
         #
         # ## 模式
@@ -139,7 +139,7 @@ registry.register(
         #
         # ## 副作用/注意
         # - 错误调用可对整台机器造成毁灭性打击。
-        # - 禁止用于替代沙箱已有的文件读写和搜索操作（Read、write_file、grep、glob 等），这些操作有更安全的内置工具。
+        # - 禁止用于替代沙箱已有的文件读写和搜索操作（Read、Write、grep、glob 等），这些操作有更安全的内置工具。
         # - 禁止用于执行下载任务或需要较长时间运行的服务。
         # - `code` 和 `script` 互斥，同时提供会报错。
         # - `args` 仅在 script 模式生效。
@@ -149,7 +149,7 @@ registry.register(
 
 ## Prerequisites
 Before the first use, the agent MUST explain this tool's purpose and risks to the user in detail and ask for explicit consent (allow / deny / conditional allow).
-Do NOT use this tool to replace sandbox file I/O and search operations (Read, write_file, grep, glob, etc.).
+Do NOT use this tool to replace sandbox file I/O and search operations (Read, Write, grep, glob, etc.).
 Do NOT use this tool for downloads or services that require significant runtime.
 
 ## Modes
@@ -175,7 +175,7 @@ Each invocation requires user approval (allow once / always allow / deny). Alway
 
 ## Side Effects / Notes
 - Misuse can cause catastrophic damage to the entire machine.
-- Do NOT use this tool to replace sandbox file I/O and search operations (Read, write_file, grep, glob, etc.); those have safer built-in tools.
+- Do NOT use this tool to replace sandbox file I/O and search operations (Read, Write, grep, glob, etc.); those have safer built-in tools.
 - Do NOT use this tool for downloads or services that require significant runtime.
 - `code` and `script` are mutually exclusive; providing both returns an error.
 - `args` only takes effect in script mode.

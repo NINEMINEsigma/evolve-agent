@@ -4,4 +4,8 @@ description: 创建详尽的技术规范。补充阅读更加详细的相关代�
 
 ENTER PLAN MODE
 
-请使用 `plan-mode` skill，并在任务文件更新完成（可选）和计划确认后询问用户是否批准
+请使用 `plan-mode` skill，并开始制定计划.
+
+如果任务文件在research模式已经创建那么更新步骤并写入计划, 写入完成后使用 `plan-reviewer` subagent 审查任务文件中的计划.
+
+用户输入：$ARGUMENTS

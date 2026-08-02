@@ -111,7 +111,7 @@ class ToolExecutor:
                     "Tool call parameter parsing failed. Your arguments JSON is incomplete or malformed "
                     "(possibly truncated due to content being too long). Please try: "
                     "1) Split content into multiple writes, "
-                    "2) Use edit_file for incremental edits, "
+                    "2) Use PatchEdit for incremental edits, "
                     "3) Or reduce the amount of data written in a single call."
                 ),
                 "_parse_failed": True,

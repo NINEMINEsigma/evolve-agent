@@ -346,7 +346,7 @@ registry.register(
         # 前置条件：LSP 已通过 lsp_start 启动。
         # 调用效果：只读查询，返回 pyright 缓存中该文件的最新 diagnostics。
         # 返回：{diagnostics: [{severity, line, column, end_line, end_column, message, source, code}], count}
-        # 典型场景：write_file/edit_file 后检查代码错误；主动验证文件语义正确性。
+        # 典型场景：Write/PatchEdit 后检查代码错误；主动验证文件语义正确性。
         # 副作用：无。
         "description": """Get semantic diagnostics (errors, warnings, hints) for a file.
 
@@ -355,7 +355,7 @@ registry.register(
 - `file` must be provided.
 
 ## Effect
-Read-only query. Returns the latest cached diagnostics from pyright for the specified file. Diagnostics are automatically updated when files are modified via `write_file` or `edit_file`.
+Read-only query. Returns the latest cached diagnostics from pyright for the specified file. Diagnostics are automatically updated when files are modified via `Write` or `PatchEdit`.
 
 ## Returns
 ```json
@@ -454,7 +454,7 @@ registry.register(
         # 前置条件：LSP 已通过 lsp_start 启动。
         # 调用效果：指定文件时发送 didChange 全量替换通知；不指定时触发工作区重分析。
         # 返回：{refreshed: true, file?: "...", scope?: "workspace"}
-        # 典型场景：文件被外部手段修改后（绕过 write_file/edit_file），或索引过时时。
+        # 典型场景：文件被外部手段修改后（绕过 Write/PatchEdit），或索引过时时。
         # 副作用：清除该文件的 diagnostics 缓存（指定文件时）或全部缓存（工作区刷新时）。
         "description": """Manually refresh the LSP index for a specific file or the entire workspace.
 
@@ -476,7 +476,7 @@ Workspace refresh:
 ```
 
 ## When to Use
-- After a file was modified by external means (bypassing write_file/edit_file).
+- After a file was modified by external means (bypassing Write/PatchEdit).
 - When the LSP index appears stale or inconsistent.
 
 ## Side Effects

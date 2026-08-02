@@ -169,8 +169,14 @@ def _handle_read(args: dict[str, Any]) -> dict:
 def _handle_write(args: dict[str, Any]) -> dict:
     path: str = str(args.get("path", "")).strip()
     content: str = str(args.get("content", ""))
+    mode: str = str(args.get("mode", "overwrite")).strip()
     if not path:
         return tool_error("path is required", path=path)
+    if mode not in ("overwrite", "append"):
+        return tool_error(
+            f"Invalid mode '{mode}'. Valid values: overwrite, append.",
+            path=path,
+        )
     truncated: bool = False
     tail: str = ""
     if len(content) > WRITE_FILE_MAX_CHARS:
@@ -178,11 +184,16 @@ def _handle_write(args: dict[str, Any]) -> dict:
         content = content[:WRITE_FILE_MAX_CHARS]
         truncated = True
         logger.warning(
-            "write_file | content truncated from %d to %d chars | path=%s | tail=%s",
+            "Write | content truncated from %d to %d chars | path=%s | tail=%s",
             len(args.get("content", "")), WRITE_FILE_MAX_CHARS, path, repr(tail),
         )
     try:
-        _s().write(path, content)
+        if mode == "append":
+            if not _s().exists(path):
+                return tool_error("File not found — use Write with mode='overwrite' to create it first", path=path)
+            _s().append(path, content)
+        else:
+            _s().write(path, content)
         _lsp_diags = _try_attach_lsp_diagnostics(path, content)
         if truncated:
             result = tool_result(
@@ -368,22 +379,26 @@ Directory branch:
 )
 
 
-# -- write_file
+# -- Write
 registry.register(
-    name="write_file",
+    name="Write",
     toolset="filesystem",
     schema={
-        # 将内容写入文件。路径必须使用命名空间前缀。
+        # 将内容写入文件（覆写或追加）。路径必须使用命名空间前缀。
         #
         # ## 前置条件
-        # 确定文件不存在需要新建文件，或确定文件内容已完全无效需要覆写。
-        # 小范围修改或追加内容应使用 edit_file 或 append_file。
+        # - mode="overwrite"（默认）：确定文件不存在需要新建文件，或确定文件内容已完全无效需要覆写。
+        # - mode="append"：文件必须已存在。
+        # - 小范围修改应使用 PatchEdit。
         #
         # ## 调用效果
-        # 以 `content` 完整覆盖目标文件。若文件已存在则被覆盖，若不存在则创建。每次调用最多 {WRITE_FILE_MAX_CHARS} 个字符。
+        # 以 `content` 写入目标文件。每次调用最多 {WRITE_FILE_MAX_CHARS} 个字符。
+        # mode="overwrite"（默认）：完整覆盖，若文件已存在则被覆盖，若不存在则创建。
+        # mode="append"：追加到文件末尾，不影响已有内容；文件不存在时返回错误。
         # 超出限制时自动截断至 {WRITE_FILE_MAX_CHARS}，返回结果中 `truncated=true` 提示内容不完整。
-        # 同时返回 `tail` 字段（被截断内容的前 {WRITE_FILE_TRUNCATION_TAIL} 个字符），可作为 edit_file 的 old_string 继续写入，剩余内容也可用 append_file 追加。
+        # 同时返回 `tail` 字段（被截断内容的前 {WRITE_FILE_TRUNCATION_TAIL} 个字符），可作为 PatchEdit 的 old_string 继续写入，剩余内容也可用 Write(mode="append") 追加。
         # 不得使用 run_python 替代此工具写文件。
+        # 使用 `skills:` 前缀可写入 skill 包内文件（如 skills:my-skill/scripts/hello.py）。
         #
         # ## 返回
         # 未截断时：
@@ -394,27 +409,33 @@ registry.register(
         # ```json
         # {{"success": true, "path": "ws:example.txt", "bytes": {WRITE_FILE_MAX_CHARS}, "truncated": true, "tail": "..."}}
         # ```
-        # `tail` 为被截断部分的前 {WRITE_FILE_TRUNCATION_TAIL} 个字符，用作 edit_file 的 old_string。
+        # `tail` 为被截断部分的前 {WRITE_FILE_TRUNCATION_TAIL} 个字符，用作 PatchEdit 的 old_string。
         #
         # ## 何时使用
         # - 创建新文件。
         # - 完整覆写小文件（不超过 {WRITE_FILE_MAX_CHARS} 字符）。
+        # - 向已有文件末尾追加新内容（mode="append"）。
+        # - 写入 skill 附属文件（skills: 前缀，替代原 write_skill_file）。
         #
         # ## 副作用/注意
-        # - 写入文件系统，覆盖已有文件。
-        # - 超出 {WRITE_FILE_MAX_CHARS} 限制时自动截断，应继续用 `tail` 作为 old_string 调用 edit_file，或用 append_file 追加剩余内容。
+        # - 写入文件系统，mode="overwrite" 覆盖已有文件。
+        # - 超出 {WRITE_FILE_MAX_CHARS} 限制时自动截断，应继续用 `tail` 作为 old_string 调用 PatchEdit，或用 Write(mode="append") 追加剩余内容。
         # - 路径使用命名空间前缀：'ws:' 用于 workspace 数据，'fork:' 用于进化代码，'skills:' 用于 skill 文件。
-        "description": f"""Write content to a file. Path must use a namespace prefix.
+        "description": f"""Write content to a file (overwrite or append). Path must use a namespace prefix.
 
 ## Prerequisites
-The file must not exist yet (new file creation), or the file content is confirmed to be completely invalid and needs overwriting.
-For small edits or appending, use edit_file or append_file instead.
+- mode="overwrite" (default): The file does not exist yet (new file creation), or the file content is confirmed to be completely invalid and needs overwriting.
+- mode="append": The file must already exist.
+- For small edits, use PatchEdit instead.
 
 ## Effect
-Overwrites the target file entirely with `content`. Creates the file if it doesn't exist. Max {WRITE_FILE_MAX_CHARS} characters per call.
+Writes `content` to the target file. Max {WRITE_FILE_MAX_CHARS} characters per call.
+mode="overwrite" (default): Overwrites the target file entirely, creating it if it doesn't exist.
+mode="append": Appends to the end of the target file without affecting existing content; errors if the file doesn't exist.
 Content exceeding the limit is automatically truncated to {WRITE_FILE_MAX_CHARS}; the result includes `truncated=true` to indicate incomplete content.
-When truncated, a `tail` field is also returned containing the first {WRITE_FILE_TRUNCATION_TAIL} characters of the truncated portion — use it as the `old_string` for a follow-up edit_file call, and append the remaining content with append_file.
+When truncated, a `tail` field is also returned containing the first {WRITE_FILE_TRUNCATION_TAIL} characters of the truncated portion — use it as the `old_string` for a follow-up PatchEdit call, and append the remaining content with Write(mode="append").
 Do NOT use run_python as a substitute for this tool.
+Use the `skills:` prefix to write files inside a skill package (e.g. skills:my-skill/scripts/hello.py) — replaces the old write_skill_file tool.
 
 ## Returns
 Without truncation:
@@ -425,15 +446,17 @@ When truncated, additionally includes `truncated=true` and `tail`:
 ```json
 {{"success": true, "path": "ws:example.txt", "bytes": {WRITE_FILE_MAX_CHARS}, "truncated": true, "tail": "..."}}
 ```
-`tail` contains the first {WRITE_FILE_TRUNCATION_TAIL} characters of the truncated portion to use as old_string for edit_file.
+`tail` contains the first {WRITE_FILE_TRUNCATION_TAIL} characters of the truncated portion to use as old_string for PatchEdit.
 
 ## When to Use
 - Create new files.
 - Completely overwrite small files (within {WRITE_FILE_MAX_CHARS} characters).
+- Append new content to the end of an existing file (mode="append").
+- Write skill ancillary files (skills: prefix, replaces the old write_skill_file).
 
 ## Side Effects / Notes
-- Writes to the file system, overwriting existing files.
-- Content exceeding {WRITE_FILE_MAX_CHARS} is auto-truncated; continue with edit_file using `tail` as old_string, or use append_file to add the remaining content.
+- Writes to the file system; mode="overwrite" overwrites existing files.
+- Content exceeding {WRITE_FILE_MAX_CHARS} is auto-truncated; continue with PatchEdit using `tail` as old_string, or use Write(mode="append") to add the remaining content.
 - Use namespace prefixes: 'ws:' for workspace data, 'fork:' for evolution code, 'skills:' for skill files.""",
         "parameters": {
             "type": "object",
@@ -448,131 +471,19 @@ When truncated, additionally includes `truncated=true` and `tail`:
                     # 要写入文件的内容。最多 WRITE_FILE_MAX_CHARS 个字符。
                     "description": f"Content to write to the file. Max {WRITE_FILE_MAX_CHARS} characters.",
                 },
+                "mode": {
+                    "type": "string",
+                    # 写入模式：overwrite（默认，覆写或创建）、append（追加，文件必须存在）。
+                    "enum": ["overwrite", "append"],
+                    "description": "Write mode: 'overwrite' (default, overwrite or create) or 'append' (append to end, file must exist).",
+                    "default": "overwrite",
+                },
             },
             "required": ["path", "content"],
         },
     },
     handler=_handle_write,
     emoji="✏️",
-    danger_level=ToolDangerLevel.write,
-)
-
-
-# -- append_file
-def _handle_append(args: dict[str, Any]) -> dict:
-    path: str = str(args.get("path", "")).strip()
-    content: str = str(args.get("content", ""))
-    if not path:
-        return tool_error("path is required", path=path)
-    truncated: bool = False
-    tail: str = ""
-    if len(content) > WRITE_FILE_MAX_CHARS:
-        tail = content[WRITE_FILE_MAX_CHARS:WRITE_FILE_MAX_CHARS + WRITE_FILE_TRUNCATION_TAIL]
-        content = content[:WRITE_FILE_MAX_CHARS]
-        truncated = True
-        logger.warning(
-            "append_file | content truncated from %d to %d chars | path=%s | tail=%s",
-            len(args.get("content", "")), WRITE_FILE_MAX_CHARS, path, repr(tail),
-        )
-    if not _s().exists(path):
-        return tool_error("File not found — use write_file to create it first", path=path)
-    try:
-        _s().append(path, content)
-        if truncated:
-            return tool_result(
-                success=True, path=path,
-                bytes=len(content.encode("utf-8")),
-                truncated=True,
-                tail=tail,
-            )
-        else:
-            return tool_result(
-                success=True, path=path,
-                bytes=len(content.encode("utf-8")),
-            )
-    except SandboxError as exc:
-        return tool_error(str(exc), path=path)
-
-
-registry.register(
-    name="append_file",
-    toolset="filesystem",
-    schema={
-        # 将内容追加到文件末尾。路径必须使用命名空间前缀。
-        #
-        # ## 前置条件
-        # 文件必须已存在。使用 write_file 先创建文件。
-        #
-        # ## 调用效果
-        # 将 `content` 追加到目标文件末尾，不影响已有内容。每次调用最多 {WRITE_FILE_MAX_CHARS} 个字符。
-        # 超出限制时自动截断至 {WRITE_FILE_MAX_CHARS}，返回结果中 `truncated=true` 提示内容不完整，应继续用下一次 append_file 追加剩余内容。
-        #
-        # ## 返回
-        # 未截断时：
-        # ```json
-        # {{"success": true, "path": "ws:example.txt", "bytes": 42}}
-        # ```
-        # 截断时额外包含 `truncated=true` 和 `tail` 字段：
-        # ```json
-        # {{"success": true, "path": "ws:example.txt", "bytes": {WRITE_FILE_MAX_CHARS}, "truncated": true, "tail": "..."}}
-        # ```
-        # `tail` 为被截断部分的前 {WRITE_FILE_TRUNCATION_TAIL} 个字符。
-        #
-        # ## 何时使用
-        # - 向已有文件末尾追加新内容。
-        # - 配合 write_file 使用：先 write_file 创建，再 append_file 追加。
-        #
-        # ## 副作用/注意
-        # - 写入文件系统，追加到文件末尾。
-        # - 超出 {WRITE_FILE_MAX_CHARS} 限制时自动截断，`tail` 可协助继续用下一次 append_file 追加剩余内容。
-        # - 路径使用命名空间前缀：'ws:' 用于 workspace 数据，'fork:' 用于进化代码，'skills:' 用于 skill 文件。
-        "description": f"""Append content to the end of a file. Path must use a namespace prefix.
-
-## Prerequisites
-The file must already exist. Use write_file to create it first.
-
-## Effect
-Appends `content` to the end of the target file without affecting existing content. Max {WRITE_FILE_MAX_CHARS} characters per call.
-Content exceeding the limit is automatically truncated to {WRITE_FILE_MAX_CHARS}; the result includes `truncated=true` to indicate incomplete content — continue with another append_file call for the remainder.
-
-## Returns
-Without truncation:
-```json
-{{"success": true, "path": "ws:example.txt", "bytes": 42}}
-```
-When truncated, additionally includes `truncated=true` and `tail`:
-```json
-{{"success": true, "path": "ws:example.txt", "bytes": {WRITE_FILE_MAX_CHARS}, "truncated": true, "tail": "..."}}
-```
-`tail` contains the first {WRITE_FILE_TRUNCATION_TAIL} characters of the truncated portion.
-
-## When to Use
-- Append new content to the end of an existing file.
-- Use together with write_file: create with write_file, then append with append_file.
-
-## Side Effects / Notes
-- Writes to the file system, appending to the end of the file.
-- Content exceeding {WRITE_FILE_MAX_CHARS} is auto-truncated; use `tail` to help continue with another append_file call for the remainder.
-- Use namespace prefixes: 'ws:' for workspace data, 'fork:' for evolution code, 'skills:' for skill files.""",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "path": {
-                    "type": "string",
-                    # 逻辑路径。必须使用 ws:、fork: 或 skills: 前缀。
-                    "description": "Logical path. Must use ws:, fork:, or skills: prefix.",
-                },
-                "content": {
-                    "type": "string",
-                    # 要追加到文件末尾的内容。最多 WRITE_FILE_MAX_CHARS 个字符。
-                    "description": f"Content to append to the file. Max {WRITE_FILE_MAX_CHARS} characters.",
-                },
-            },
-            "required": ["path", "content"],
-        },
-    },
-    handler=_handle_append,
-    emoji="📝",
     danger_level=ToolDangerLevel.write,
 )
 
@@ -678,7 +589,7 @@ def _handle_edit(args: dict[str, Any]) -> dict:
     if len(new_string) > EDIT_FILE_MAX_CHARS:
         return tool_error(
             f"new_string exceeds {EDIT_FILE_MAX_CHARS} characters (got {len(new_string)}). "
-            "Split the change into multiple sequential edit_file calls.",
+            "Split the change into multiple sequential PatchEdit calls.",
             path=path,
         )
 
@@ -710,7 +621,7 @@ def _handle_edit(args: dict[str, Any]) -> dict:
             )
 
     if not _s().exists(path):
-        return tool_error("File not found — use write_file to create it first", path=path)
+        return tool_error("File not found — use Write to create it first", path=path)
 
     try:
         content: str = _s().read(path, limit=0)
@@ -794,7 +705,7 @@ def _handle_edit(args: dict[str, Any]) -> dict:
 
 
 registry.register(
-    name="edit_file",
+    name="PatchEdit",
     toolset="filesystem",
     schema={
         # 通过替换匹配文本为 new_string 来编辑文件。支持三种匹配模式：
@@ -804,8 +715,8 @@ registry.register(
         #
         # exact / regex 模式下 old_string 必填，range 模式下 start_marker + end_marker 必填。
         # old_string / start_marker / end_marker / new_string 各自不能超过 {EDIT_FILE_MAX_CHARS} 字符。
-        # 仅需修改几行时使用此工具替代 write_file — 避免重新发送整个文件内容。
-        # 如需更大更改，请多次顺序调用 edit_file。
+        # 仅需修改几行时使用此工具替代 Write — 避免重新发送整个文件内容。
+        # 如需更大更改，请多次顺序调用 PatchEdit。
         #
         # 使用方式：
         # - 必须先使用 Read 查看当前内容及行号。
@@ -814,7 +725,7 @@ registry.register(
         # - regex 模式：old_string 为 Python 正则表达式，new_string 可用 \1 等反向引用。
         # - range 模式：start_marker 到其后最近 end_marker（含两端）的整个区间被替换。
         # - 设置 replace_all=true 可替换所有匹配项（跳过唯一性检查），所有模式通用。
-        # - 修改少量行时始终优先使用此工具替代 write_file。
+        # - 修改少量行时始终优先使用此工具替代 Write。
         #
         # 参数：
         #   path:         带命名空间前缀的逻辑路径（ws:/fork:/fix:/skills:）（必需）
@@ -834,7 +745,7 @@ registry.register(
         #   - range: start_marker 未找到 → 编辑失败
         #   - range: start_marker 后无 end_marker → 编辑失败
         #   - range: 匹配 2+ 个区间（replace_all=false）→ 提示设 replace_all=true 或用更具体标记
-        #   - 文件不存在 → 提示先使用 write_file 创建
+        #   - 文件不存在 → 提示先使用 Write 创建
         #   - 字符串相同（exact/regex）→ 无变更，报错
         "description": f"""Edit a file by replacing matched text with new_string. Supports three matching modes via `match_mode`:
 
@@ -844,7 +755,7 @@ registry.register(
 
 All modes share `replace_all` (default false): when false, multiple matches return an error; when true, all matches are replaced.
 
-Both `old_string` and `new_string` are limited to {EDIT_FILE_MAX_CHARS} characters each. Use this instead of write_file when only a few lines need changing — avoids resending the entire file content. For larger changes, make multiple sequential edit_file calls.
+Both `old_string` and `new_string` are limited to {EDIT_FILE_MAX_CHARS} characters each. Use this instead of Write when only a few lines need changing — avoids resending the entire file content. For larger changes, make multiple sequential PatchEdit calls.
 
 Usage:
 - You must use Read first to inspect current content with line numbers.
@@ -852,7 +763,7 @@ Usage:
 - regex: old_string is a Python regex. new_string can use \\1 backreferences.
 - range: provide start_marker and end_marker. The entire span from start_marker to the nearest end_marker (inclusive) is replaced by new_string.
 - Set replace_all=true to replace all matches (skips uniqueness check).
-- ALWAYS prefer editing existing files over write_file for small changes.
+- ALWAYS prefer editing existing files over Write for small changes.
 
 Parameters:
   path:         Logical path with namespace prefix (ws:/fork:/fix:/skills:) (required)
@@ -872,7 +783,7 @@ Errors:
   - range: start_marker not found → edit fails
   - range: end_marker not found after start_marker → edit fails
   - range: 2+ ranges matched (replace_all=false) → set replace_all=true or use more specific markers
-  - File does not exist → error telling caller to use write_file first
+  - File does not exist → error telling caller to use Write first
   - Strings identical (exact/regex) → error, nothing to change""",
         "parameters": {
             "type": "object",

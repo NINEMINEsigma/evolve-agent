@@ -100,7 +100,7 @@ def _handle_validate_code(args: dict[str, Any]) -> dict:
 def _handle_evolve_code(args: dict[str, Any]) -> dict:
     """完成代码进化：验证 fork 然后触发热替换。
 
-    agent 通过 write_file/edit_file 将进化代码写入 fork: 并通过 validate_code
+    agent 通过 Write/PatchEdit 将进化代码写入 fork: 并通过 validate_code
     检查语法后，调用此工具运行彻底验证（语法 + 编译检查），
     如果全部通过则通知编排器执行 slow→fast 交换。
 
@@ -131,7 +131,7 @@ registry.register(
     toolset="code",
     schema={
         # 用 ast.parse() 检查 fork: 命名空间中 Python 文件的语法错误。
-        # 前置条件：已通过 write_file/edit_file 将进化代码写入 fork:。仅 fast 模式下可用。
+        # 前置条件：已通过 Write/PatchEdit 将进化代码写入 fork:。仅 fast 模式下可用。
         # file: 可选。指定时只验证该文件（裸名或 'fork:xxx.py'）；省略时验证 fork: 下所有 .py 文件。
         # 调用效果：只读分析，不修改任何文件。
         # 返回：{ valid: bool, results: [{ file, status: "ok"|"syntax_error"|"error", line?, offset?, message? }] }
@@ -139,7 +139,7 @@ registry.register(
         "description": """Check Python source files in the fork: namespace for syntax errors using ast.parse().
 
 ## Prerequisites
-Evolved code must have been written to fork: via `write_file` or `edit_file` with `fork:` prefix. Only available in fast mode.
+Evolved code must have been written to fork: via `Write` or `PatchEdit` with `fork:` prefix. Only available in fast mode.
 
 ## Effect
 Read-only analysis. Does not modify any files.
@@ -156,7 +156,7 @@ Read-only analysis. Does not modify any files.
 `valid` is `true` only when all files have status `"ok"`.
 
 ## When to Use
-Evolution workflow step 2 — call after writing evolved code via `write_file`/`edit_file` and before `evolve_code` to ensure syntax correctness.""",
+Evolution workflow step 2 — call after writing evolved code via `Write`/`PatchEdit` and before `evolve_code` to ensure syntax correctness.""",
         "parameters": {
             "type": "object",
             "properties": {
@@ -178,7 +178,7 @@ registry.register(
     toolset="code",
     schema={
         # 完成代码进化周期 — 进化工作流最后一步。
-        # 前置条件：已通过 write_file/edit_file 写入进化代码 + validate_code 语法检查通过（修改前端时还需 validate_frontend）。
+        # 前置条件：已通过 Write/PatchEdit 写入进化代码 + validate_code 语法检查通过（修改前端时还需 validate_frontend）。
         # 调用效果：对 fork: 下所有 .py 文件运行彻底验证（语法 + 可选编译检查），全部通过后进程以退出码 -1 退出，编排器执行 slow→fast 交换并重启。
         # deep=true（默认）：语法 + py_compile 子进程编译检查（更彻底但更慢）。
         # deep=false：仅语法检查（更快）。
@@ -188,7 +188,7 @@ registry.register(
         "description": """Complete the code evolution cycle — final step of the evolution workflow.
 
 ## Prerequisites
-- Evolved source code has been written to fork: via `write_file` or `edit_file` with `fork:` prefix.
+- Evolved source code has been written to fork: via `Write` or `PatchEdit` with `fork:` prefix.
 - Syntax check via `validate_code` has passed.
 - If frontend files were modified, `validate_frontend` must also have passed.
 - Only available in fast mode.
@@ -207,11 +207,11 @@ Runs thorough validation (syntax + optional compile check) on all `.py` files in
 ```
 **Failure** — agent can fix errors and retry:
 ```json
-{ "evolved": false, "validation": { "valid": false, "total": N, "ok": N, "errors": N, "details": [...] }, "hint": "Fix the errors above using write_file or edit_file with fork: prefix, then call validate_code..." }
+{ "evolved": false, "validation": { "valid": false, "total": N, "ok": N, "errors": N, "details": [...] }, "hint": "Fix the errors above using Write or PatchEdit with fork: prefix, then call validate_code..." }
 ```
 
 ## When to Use
-Evolution workflow step 3 — call after writing evolved code via `write_file`/`edit_file` + `validate_code` (and optionally `validate_frontend`). This is the commit point; once called successfully, the current agent session ends.
+Evolution workflow step 3 — call after writing evolved code via `Write`/`PatchEdit` + `validate_code` (and optionally `validate_frontend`). This is the commit point; once called successfully, the current agent session ends.
 
 ## Side Effects
 On success, the current agent process exits. The success response is never seen by the calling agent. On failure, the agent continues and can fix issues then retry.""",
