@@ -1,6 +1,6 @@
 ---
 name: research-mode
-description: RIPER-5 协议模式1：信息收集和深入理解。读取文件、理解代码结构、分析系统架构、识别技术约束。当用户进入 RESEARCH 模式、说"ENTER RESEARCH MODE"、需要信息收集、代码调查、架构分析或深入理解现有代码时使用。默认在每次新对话开始时处于此模式。
+description: RIPER-5 协议模式1：信息收集和深入理解。读取文件、理解代码结构、分析系统架构、识别技术约束。仅由 /research slash command 展开后调用，模型禁止自主加载。新对话默认处于 RESEARCH 模式，但本 skill 文件只在命令展开或显式指示时读取。
 disable-model-invocation: true
 ---
 
