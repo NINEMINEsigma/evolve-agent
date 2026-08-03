@@ -6,7 +6,7 @@
                 "console_log": true,
                 "fast_agent_space_path": "fast_agent_space",
                 "slow_agent_space_path": "slow_agent_space",
-                "fouce_init": false,
+                "force_init": false,
                 "gateway_host": "127.0.0.1",
                 "gateway_port": 8765,
                 "llm_base_url": "https://opencode.ai/zen/go/v1",

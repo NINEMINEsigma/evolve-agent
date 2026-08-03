@@ -41,7 +41,7 @@ python run.py --load <config_key>
 python run.py --save <config_key> --llm_model deepseek-v4-flash
 
 # 强制重新初始化 workspace（首次运行或需要重置时）
-python run.py --load <config_key> --fouce_init
+python run.py --load <config_key> --force_init
 ```
 
 `--interactive` 模式提供基于 `rich` 的可视化配置向导：列出已有 profile 供选择，按分组（LLM / 审批模型 / Workspace / 网关 / 运行时）逐项编辑，内置字段校验（端口范围、温度区间、枚举值等），编辑完成后可选择是否保存。CLI 参数可与 `--interactive` 组合使用，作为各字段的初始覆盖值。
@@ -49,7 +49,7 @@ python run.py --load <config_key> --fouce_init
 常用 CLI 参数可覆盖 `config.py` 默认值：
 
 - `--interactive`：启动 rich TUI 配置向导
-- `--fouce_init`：强制重新初始化 workspace
+- `--force_init`：强制重新初始化 workspace
 - `--llm_model`, `--llm_base_url`, `--llm_api_key`
 - `--llm_temperature`, `--llm_max_context_tokens`, `--llm_max_output_tokens`, `--llm_reasoning_effort`
 - `--approval_model`, `--approval_model_cuda`, `--approval_model_port`
@@ -449,7 +449,7 @@ Agent 通过 `fork:` 读取自身源码副本，不存在 `self:` 命名空间�
 | `gateway_host` | `127.0.0.1` | Web 网关地址 |
 | `gateway_port` | `8765` | Web 网关端口 |
 | `console_log` | `True` | 是否在控制台输出日志 |
-| `fouce_init` | `False` | 强制重新初始化 workspace |
+| `force_init` | `False` | 强制重新初始化 workspace |
 | `workspace_path` | `workspace` | workspace 根目录 |
 | `fast_agent_space_path` | `fast_agent_space` | fast 副本目录 |
 | `slow_agent_space_path` | `slow_agent_space` | slow 副本目录 |

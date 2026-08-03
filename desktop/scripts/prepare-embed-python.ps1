@@ -13,7 +13,7 @@
     run into desktop/.frontend-staging/frontend/ so electron-builder can
     package them into the install directory's workspace/fast_agent_space/frontend/.
 
-    Because origin_agent/frontend/ has NO dist/, fouce_init's
+    Because origin_agent/frontend/ has NO dist/, force_init's
     shutil.copytree(origin_agent, fast, dirs_exist_ok=True) will NOT
     overwrite the pre-placed dist/ in workspace/fast_agent_space/frontend/.
 

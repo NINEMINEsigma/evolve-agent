@@ -13,7 +13,7 @@ const FIELD_TYPES = {
   console_log:               'bool',
   fast_agent_space_path:     'str',
   slow_agent_space_path:     'str',
-  fouce_init:                'bool',
+  force_init:                'bool',
   frontend_force_build:      'bool',
   gateway_host:              'str',
   gateway_port:              'int',
@@ -45,7 +45,7 @@ const FIELD_DEFAULTS = {
   console_log:               true,
   fast_agent_space_path:     'fast_agent_space',
   slow_agent_space_path:     'slow_agent_space',
-  fouce_init:                false,
+  force_init:                false,
   frontend_force_build:      false,
   gateway_host:              '127.0.0.1',
   gateway_port:              8765,
@@ -93,7 +93,7 @@ const FIELD_GROUPS = {
     'gateway_host', 'gateway_port',
   ],
   '运行时': [
-    'console_log', 'fouce_init',
+    'console_log', 'force_init',
     'frontend_force_build', 'merge_concat_threshold',
   ],
 };
@@ -154,7 +154,7 @@ const FIELD_VALIDATORS = {
 // 其余字段：CLI 中作为 --key value 对出现
 
 const STORE_TRUE_FIELDS = new Set([
-  'fouce_init',
+  'force_init',
   'approval_model_cuda',
   'frontend_force_build',
 ]);
@@ -163,7 +163,7 @@ const CLI_ARG_MAP = {
   console_log:              '--console_log',
   fast_agent_space_path:    '--fast_agent_space_path',
   slow_agent_space_path:    '--slow_agent_space_path',
-  fouce_init:               '--fouce_init',
+  force_init:               '--force_init',
   frontend_force_build:     '--frontend_force_build',
   gateway_host:             '--gateway_host',
   gateway_port:             '--gateway_port',

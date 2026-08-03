@@ -4,7 +4,7 @@
 
 ## 硬性警告（违反会破坏构建或丢失工作）
 
-- **严禁在 `origin_agent/frontend/` 运行 pnpm/npm。** 前端构建只发生在运行时 `workspace/fast_agent_space/frontend/` 内。在 `origin_agent/` 运行 pnpm 会生成 `node_modules/`/`dist/`，`--fouce_init` 会把它们复制进 workspace 并破坏构建。
+- **严禁在 `origin_agent/frontend/` 运行 pnpm/npm。** 前端构建只发生在运行时 `workspace/fast_agent_space/frontend/` 内。在 `origin_agent/` 运行 pnpm 会生成 `node_modules/`/`dist/`，`--force_init` 会把它们复制进 workspace 并破坏构建。
 - **严禁替用户运行任何校验命令。** 包括 `npx tsc`、`pnpm exec tsc`、`npm run typecheck`、`npm run lint`、`pnpm build`、`python check_env.py` 等。用户报告构建错误时只修改源码，不得通过运行命令复现或验证。
 - **严禁未经用户明确授权运行 `python run.py` / `python check_env.py` 或启动应用。**
 - **严禁直接执行 `origin_agent/`。** `run.py` 会将其复制到 `workspace/fast_agent_space/` 并运行那个副本。禁止 `python origin_agent/__main__.py`，禁止任何通过 `sys.path`/`cwd` 技巧指向 `origin_agent/` 的做法。
@@ -31,7 +31,7 @@ custom_*、skills/    ← 根目录扩展点；skills/ 运行时生成
 ## 启动与生命周期
 
 - `python run.py --load <config_key>`（config.py 中 `--load`/`--save`/`--interactive` 互斥；无参数时交互式提示）。`config.json` 存密钥且被 gitignore。
-- **`--fouce_init` 是故意拼错的**（force）：`true` 时 run.py 删除三个 workspace 空间并重拷 `origin_agent/`，同时**删除 `origin_agent/frontend/pnpm-lock.yaml`**（run.py:131-133）。持久化开发用 `fouce_init: false`。
+- **`--force_init`**：`true` 时 run.py 删除三个 workspace 空间并重拷 `origin_agent/`，同时**删除 `origin_agent/frontend/pnpm-lock.yaml`**（run.py:131-133）。持久化开发用 `force_init: false`。历史注记：旧拼写 `fouce_init` 为拼写错误，已修复；config.py 含兼容迁移块（自动迁移旧 config.json 键），移除时机由用户决定。
 - run.py 永不执行 `origin_agent/`，而是循环运行 `workspace/fast_agent_space/__main__.py`：
   - 退出码 `0` → 正常停止
   - 退出码 `-1` / `4294967295` → 进化成功：fast→.fallback 备份、slow→fast 交换、重启

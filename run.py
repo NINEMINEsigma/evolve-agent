@@ -119,7 +119,7 @@ if __name__ == "__main__":
             shutil.copy("SOUL.md", agentspace_path_name / "SOUL.md")
         else:
             (agentspace_path_name / "SOUL.md").touch() # 创建空SOUL.md文件
-    if fouce_init:
+    if force_init:
         fallback_space = workspace_path / ".fallback"
         shutil.rmtree(slow_agent_space, ignore_errors=True) # 删除slow agent空间
         shutil.rmtree(fallback_space, ignore_errors=True) # 删除备份空间
@@ -149,7 +149,7 @@ if __name__ == "__main__":
         if fast_pnpm_lock_yaml.exists():
             fast_pnpm_lock_yaml.unlink()
 
-    enable_fallback = fouce_init == False
+    enable_fallback = force_init == False
     while True:
         logger.info(f"Running fast agent")
         try:

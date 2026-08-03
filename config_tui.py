@@ -15,6 +15,7 @@ from rich.table import Table
 from rich.prompt import Prompt, Confirm
 
 from third.easysave import save, load, contains
+from config import _migrate_legacy_force_init
 
 
 # ── 字段分组 ──────────────────────────────────────────────
@@ -38,7 +39,7 @@ FIELD_GROUPS: dict[str, list[str]] = {
         "gateway_host", "gateway_port",
     ],
     "运行时": [
-        "console_log", "fouce_init",
+        "console_log", "force_init",
         "frontend_force_build", "merge_concat_threshold",
     ],
 }
@@ -111,7 +112,7 @@ FIELD_VALIDATORS: dict[str, Callable[[str, Any], tuple[bool, str]]] = {
     "llm_base_url":               _validate_url,
     "approval_remote_base_url":  _validate_url,
     "console_log":                _validate_bool,
-    "fouce_init":                 _validate_bool,
+    "force_init":                 _validate_bool,
     "approval_model_cuda":       _validate_bool,
     "frontend_force_build":       _validate_bool,
 }
@@ -237,6 +238,7 @@ def run_interactive(
     # Step 2: 加载 + CLI 覆盖
     if contains(profile_key, config_path):
         working = load(profile_key, config_path)
+        _migrate_legacy_force_init(working, profile_key)
         console.print(f"[green]已加载 profile '{profile_key}'[/green]")
     else:
         working = Config()
