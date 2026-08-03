@@ -23,6 +23,12 @@ logger = logging.getLogger(__name__)
 class SessionStore:
     """封装单个 sessions 根目录下的会话文件读写。"""
 
+    # 工具副作用资源分区 → 独立文件（磁盘唯一真相，分区写互不干扰）
+    _PARTITION_FILES: dict[str, str] = {
+        "task_progress": "task_progress.json",
+        "clipboard_display": "clipboard_display.json",
+    }
+
     def __init__(self, base_dir: Path | str) -> None:
         self.base_dir = Path(base_dir)
 
@@ -36,7 +42,36 @@ class SessionStore:
         return self.session_dir(session_id) / "token_usage.json"
 
     def tool_resources_path(self, session_id: str) -> Path:
+        # 旧单文件（仅兼容读取，不再写入）
         return self.session_dir(session_id) / "tool_resources.json"
+
+    def partition_path(self, session_id: str, partition: str) -> Path:
+        """返回指定资源分区的独立文件路径。"""
+        return self.session_dir(session_id) / self._PARTITION_FILES[partition]
+
+    def read_partition(self, session_id: str, partition: str) -> dict[str, Any]:
+        """读单个分区；分区文件不存在时回退读旧单文件 tool_resources.json 对应键。
+
+        必须逐分区判断文件存在（不能"任一分区存在就整体走分区"），
+        否则 clear 只写 task_progress.json 后 clipboard_display 仍读旧单文件残留。
+        """
+        path = self.partition_path(session_id, partition)
+        if path.is_file():
+            data = json.loads(path.read_text(encoding="utf-8"))
+            return data if isinstance(data, dict) else {}
+        legacy = self.tool_resources_path(session_id)
+        if legacy.is_file():
+            data = json.loads(legacy.read_text(encoding="utf-8"))
+            if isinstance(data, dict):
+                value = data.get(partition)
+                return value if isinstance(value, dict) else {}
+        return {}
+
+    def write_partition(self, session_id: str, partition: str, values: dict[str, Any]) -> None:
+        """原子写单个资源分区文件（write_text_atomic 自动建目录）。"""
+        path = self.partition_path(session_id, partition)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        write_text_atomic(path, json.dumps(dict(values), ensure_ascii=False, indent=2))
 
     def history_path(self, session_id: str) -> Path:
         return self.session_dir(session_id) / "history.es"
@@ -91,28 +126,19 @@ class SessionStore:
         write_text_atomic(self.summary_path(session_id), summary)
 
     def read_tool_resources(self, session_id: str) -> dict[str, Any]:
-        path = self.tool_resources_path(session_id)
-        if not path.exists():
-            return {"task_progress": {}, "clipboard_display": {}}
-        data = json.loads(path.read_text(encoding="utf-8"))
-        if not isinstance(data, dict):
-            return {"task_progress": {}, "clipboard_display": {}}
+        """合并读全部分区（兼容旧单文件逐分区回退）。"""
         return {
-            "task_progress": data.get("task_progress", {}) if isinstance(data.get("task_progress"), dict) else {},
-            "clipboard_display": data.get("clipboard_display", {}) if isinstance(data.get("clipboard_display"), dict) else {},
+            "task_progress": self.read_partition(session_id, "task_progress"),
+            "clipboard_display": self.read_partition(session_id, "clipboard_display"),
         }
 
     def write_tool_resources(self, session_id: str, resources: dict[str, Any]) -> None:
-        payload = json.dumps(resources, ensure_ascii=False, indent=2)
-        write_text_atomic(self.tool_resources_path(session_id), payload)
+        """按分区逐个写（会话轮转迁移用，签名保持兼容）。"""
+        for partition, values in resources.items():
+            if partition in self._PARTITION_FILES:
+                self.write_partition(session_id, partition, values)
 
     def update_tool_resources(self, session_id: str, partition: str, values: dict[str, Any]) -> None:
-        """更新 tool_resources 的单个分区并原子写回。
-
-        分区合并（先读现有双分区结构，再覆盖指定分区），
-        避免 progress / clipboard 两模块各自写盘时互相覆盖。
-        """
-        resources = self.read_tool_resources(session_id)
-        resources[partition] = dict(values)
-        self.write_tool_resources(session_id, resources)
+        """单分区整体覆盖写（工具模块调用点），不再读-改-写整文件。"""
+        self.write_partition(session_id, partition, values)
 

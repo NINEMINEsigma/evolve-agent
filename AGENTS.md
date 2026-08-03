@@ -1,151 +1,79 @@
 # Evolve Agent — AGENTS.md
 
-> **Hard rules — violating these corrupts the build or loses work**
->
-> - **Never run pnpm/npm in `origin_agent/frontend/`.** Builds only happen inside `workspace/fast_agent_space/frontend/` at runtime. Running pnpm in `origin_agent/` creates `node_modules/`/`dist/` that can be copied into workspace on `--fouce_init` and break builds.
-> - **Never run validation commands for the user.** No `npx tsc`, `pnpm exec tsc`, `npm run typecheck`, `npm run lint`, `pnpm build`, `python check_env.py`, etc. If the user reports a build error, only edit source code; do not reproduce or validate by running commands.
-> - **Never run `python run.py` / `python check_env.py` or start the app unless the user explicitly authorizes it.**
-> - **Never execute `origin_agent/` directly.** `run.py` copies it to `workspace/fast_agent_space/` and runs that copy. No `python origin_agent/__main__.py`, no `sys.path`/`cwd` tricks pointing at `origin_agent/`.
-> - **Never read, search, or modify `workspace/` code files.** They are disposable runtime copies of `origin_agent/`. Non-code files (logs, JSON, `.lock`) are readable but not writable.
-> - **Git is read-only.** Only `git diff` and `git log` are allowed. All write git operations (`add`, `commit`, `push`, `checkout`, `branch`, etc.) must be done by the user.
-> - **No batch-editing scripts.** Make targeted, reviewable edits.
-> - **Do not switch RIPER-5 modes without explicit approval.** Especially never jump from RESEARCH/PLAN to EXECUTE without the user saying so.
+> 本文件只收录硬性警告与严禁事项，是唯一可信的仓库指引。任何其他描述性文档/段落都可能严重过时，一律以源码为准，不要依赖历史文档中的架构说明。
 
-## Startup
+## 硬性警告（违反会破坏构建或丢失工作）
 
-```bash
-python run.py --load <config_key>
-```
+- **严禁在 `origin_agent/frontend/` 运行 pnpm/npm。** 前端构建只发生在运行时 `workspace/fast_agent_space/frontend/` 内。在 `origin_agent/` 运行 pnpm 会生成 `node_modules/`/`dist/`，`--fouce_init` 会把它们复制进 workspace 并破坏构建。
+- **严禁替用户运行任何校验命令。** 包括 `npx tsc`、`pnpm exec tsc`、`npm run typecheck`、`npm run lint`、`pnpm build`、`python check_env.py` 等。用户报告构建错误时只修改源码，不得通过运行命令复现或验证。
+- **严禁未经用户明确授权运行 `python run.py` / `python check_env.py` 或启动应用。**
+- **严禁直接执行 `origin_agent/`。** `run.py` 会将其复制到 `workspace/fast_agent_space/` 并运行那个副本。禁止 `python origin_agent/__main__.py`，禁止任何通过 `sys.path`/`cwd` 技巧指向 `origin_agent/` 的做法。
+- **严禁读取、搜索或修改 `workspace/` 下的代码文件。** 它们是 `origin_agent/` 的可丢弃运行时副本。非代码文件（日志、JSON、`.lock`）只读不写。
+- **Git 只读。** 只允许 `git diff` 和 `git log`。所有写操作（`add`、`commit`、`push`、`checkout`、`branch` 等）必须由用户本人执行。
+- **严禁批量编辑脚本。** 只做有针对性的、可逐条审查的修改。
+- **未经明确批准不得切换 RIPER-5 模式。** 尤其严禁未经用户许可从 RESEARCH/PLAN 跳到 EXECUTE。
 
-- Requires `OPENAI_API_KEY`. `OPENAI_BASE_URL` overrides the endpoint.
-- Web UI: `http://127.0.0.1:8765`.
-- `config.py` prompts interactively if neither `--load` nor `--save` is given. In agent/non-interactive sessions always pass `--load <key>` or `--save <key>`.
-- `--interactive` launches the `rich`-based TUI config wizard (`config_tui.py`): profile selection → grouped field editing with validation → optional save. CLI overrides (e.g. `--llm_model`) can be combined with `--interactive` to pre-fill values.
-- `config.json` is gitignored and contains the unencrypted API key. Do not commit it.
-- `--fouce_init` is intentionally misspelled. When `true` in the loaded config, `--load` wipes `workspace/fast_agent_space/`, `workspace/slow_agent_space/`, and `workspace/.fallback/` (code directories only) and recopies `origin_agent/` into them. `workspace/agentspace/`, `workspace/logs/`, and session persistence (`workspace/sessions/`) are NOT affected. Use `fouce_init: false` for persistent workspaces.
-- Common CLI overrides: `--fouce_init`, `--llm_model`, `--llm_base_url`, `--llm_api_key`, `--llm_temperature`, `--llm_max_context_tokens`, `--llm_max_output_tokens`, `--llm_reasoning_effort`, `--approval_model`, `--approval_model_cuda`, `--gateway_host`, `--gateway_port`, `--console_log`, `--interactive`.
-
-## Repository layout
+## 仓库布局
 
 ```
-origin_agent/        ← sole source of truth — edit here
+origin_agent/        ← 唯一源码真相源（编辑这里）
 workspace/
-  fast_agent_space/  ← running agent copy
-  slow_agent_space/  ← evolution target (fork:)
-  .fallback/         ← previous fast backup
-  agentspace/        ← agent I/O workspace (ws:)
-  logs/              ← sessions, evolution status
-third/               ← git submodules (easysave, llamaapis)
-skills/              ← runtime skill files, gitignored
+  fast_agent_space/  ← 当前运行的 agent 副本
+  slow_agent_space/  ← 进化目标（fork:）
+  .fallback/         ← 上一次 fast 的备份 / fallback 修复体（fix:）
+  agentspace/        ← agent 通用 I/O（ws:），含 SOUL.md、uploads/
+  sessions/          ← 会话历史与索引
+  logs/              ← 运行日志、evolution.status
+third/               ← git 子模块（easysave、llamaapis），只读
+custom_*、skills/    ← 根目录扩展点；skills/ 运行时生成
 ```
 
-- No CI/CD, no test framework, no lint/typecheck. Pure runtime code evolution.
-- `pyrightconfig.json` adds `./origin_agent` and `./third` to `extraPaths`.
-- `skills/` is created at runtime and gitignored; do not commit it.
-- `pre-skills/` contains built-in skill templates for self-evolution.
+## 启动与生命周期
 
-## Lifecycle (run.py)
+- `python run.py --load <config_key>`（config.py 中 `--load`/`--save`/`--interactive` 互斥；无参数时交互式提示）。`config.json` 存密钥且被 gitignore。
+- **`--fouce_init` 是故意拼错的**（force）：`true` 时 run.py 删除三个 workspace 空间并重拷 `origin_agent/`，同时**删除 `origin_agent/frontend/pnpm-lock.yaml`**（run.py:131-133）。持久化开发用 `fouce_init: false`。
+- run.py 永不执行 `origin_agent/`，而是循环运行 `workspace/fast_agent_space/__main__.py`：
+  - 退出码 `0` → 正常停止
+  - 退出码 `-1` / `4294967295` → 进化成功：fast→.fallback 备份、slow→fast 交换、重启
+  - 其他 → 进入 fallback：运行 `.fallback/__main__.py --mode fallback --fix_fork <fast>` 修复
+- 入口链：`__main__.py`（CLI 解析 + 前端构建 + 日志）→ `main.py::App`（uvicorn gateway）→ `system/application.py::Application`（单例，初始化各子系统）。
+- 前端在 agent 目录内由 `_build_frontend()` 用 `pnpm install && pnpm run build`（`CI=true`，`pnpm.cmd` on Windows）构建；构建失败返回退出码 1 触发 fallback。构建结果按 `.frontend_build_signature.json` 签名缓存跳过。
 
-1. First run or `--fouce_init`: copies `origin_agent/` into both `workspace/fast_agent_space/` and `workspace/slow_agent_space/`.
-2. Runs `fast_agent_space/__main__.py`.
-3. Exit codes:
-   - `0` — normal stop
-   - `-1` / `4294967295` — evolution succeeded; run.py swaps slow→fast and restarts
-   - anything else — runtime error; run.py enters fallback mode and runs `.fallback/__main__.py` to repair
+## 沙盒命名空间（system/sandbox.py）
 
-## Sandbox paths
+所有工具文件操作必须使用逻辑前缀，禁止裸路径/`..`/绝对路径。
 
-All file operations use logical prefixes. No bare paths, `..`, or absolute paths.
+| 前缀 | 映射 | fast 模式 | fallback 模式 |
+|---|---|---|---|
+| `fork:` | `slow_agent_space/` | rw | — |
+| `fix:` | `.fallback/` | — | rw |
+| `ws:` | `agentspace/` | rw | rw |
+| `skills:` | 根目录 `skills/` | rw | rw |
+| `third:` / `custom_hooks:` / `custom_llm_client:` / `custom_models:` / `custom_tools:` | 项目根对应目录 | ro | ro |
 
-| Prefix   | Maps to                          | Modes           | Permission |
-|----------|----------------------------------|-----------------|------------|
-| `fork:`  | `workspace/slow_agent_space/`    | fast            | rw         |
-| `ws:`    | `workspace/agentspace/`          | fast / fallback | rw         |
-| `fix:`   | `workspace/.fallback/`           | fallback        | rw         |
-| `skills:`| repo-root `skills/`              | fast / fallback | rw         |
+**没有 `self:` 命名空间** — agent 不能读写自身运行副本，进化只通过 `fork:`/`fix:`。
 
-**No `self:` namespace.** Read agent source via `fork:` (which is `slow_agent_space/`, not the running `fast_agent_space/`).
+## 工具注册
 
-## Evolution flow
+- 模块级 `registry.register()` 调用由 AST 扫描自动发现（`abstract/tools/discover.py`，main.py:187-194）。
+- 内置来源：`component/tools/`（核心）、`component/extools/`（web/ssh/cron/…）、`component/mutliagenttools/`（**目录名拼错**）、`component/automation/`（桌面自动化）、`component/browser/`（浏览器控制）+ 根目录 `custom_tools/`（存在即加载）+ MCP 桥接（`component/mcp_tools.py`，配置在 `workspace/mcp_config.json`）。
+- 工具 schema 的 `description` 用英文，紧邻其上注释为中文。
 
-```
-read_file (fork:path) → write_file / edit_file (fork:path)
-  → validate_code → [validate_frontend if frontend changed]
-  → evolve_code → exit -1 → run.py swaps slow→fast and restarts
-```
+## 模板系统（system/prompt.py）
 
-- `read_file` / `write_file` / `edit_file` use `fork:`/`ws:`/`fix:`/`skills:` prefixes.
-- `validate_code`: AST syntax check across all `.py` files in `fork:`.
-- `validate_frontend`: runs `pnpm install && pnpm run build` in target frontend dir (default `fork:frontend`). Required if frontend files changed.
-- `evolve_code`: deep `py_compile` check, then exits with `-1` to trigger the swap.
-- `diff_fast_fork` (in `extools/diff_tools.py`): compares `fast_agent_space/` with `fork:`; skip `evolve_code` if identical.
-- `diff_origin_fast`: compares `origin_agent/` with `fast_agent_space/`.
+组装顺序：根目录 `GENE.md`（不可变身份）→ `agentspace/SOUL.md`（可编辑个性，run.py 首次启动时创建/复制）→ `templates/base.txt` → `templates/modes/{fast,fallback}.txt` → `templates/tools.txt` → `tools_subagent.txt`（仅 MAIN scope）→ 额外块。
 
-## Tool registration
+## 审批（脱手模式）
 
-Tools are auto-discovered by AST scan (`abstract/tools/discover.py`) looking for module-level `registry.register()` calls. Sources:
+- 正常模式：前端 WebSocket 弹窗确认。
+- 脱手模式：本地 GGUF 自动审批。启动时自动检测 `custom_models/*.gguf`（跳过 mmproj 文件）；`--approval_model` 只存文件名。无本地模型时 fallback 到远程端点（`--approval_remote_*`），两者皆无时脱手模式不可用。
+- 实现：`component/approval/`（core/backend/executor/allowlist/handsfree）+ `system/application.py` 的 `ApprovalBackendManager`。
 
-- `origin_agent/component/tools/` — core (filesystem, code, frontend, skills, etc.)
-- `origin_agent/component/extools/` — extras (web, ssh, cron, diff, archive, pip, background_service, etc.)
-- `origin_agent/component/mutliagenttools/` — sub-agent/multi-agent tools (note directory name typo: `mutliagenttools`)
-- `custom_tools/` — user-defined, loaded if directory exists
-- MCP servers — bridged via `component/mcp_tools.py`
+## 会话与记忆
 
-When adding `registry.register(...)`:
+- 会话持久化在 `workspace/sessions/`（不是 logs/）：每会话 `history.es`（easysave 序列化）+ `summary.txt`/`token_usage.json`/`tool_resources.json`；元数据索引 + `tags.json` 由 `gateway/chat.py::SessionManager` 管理。
+- 记忆系统在 `custom_tools/memory_tools/`（remember/forget 工具），`custom_hooks/memory_hook.py` 在每轮注入上下文；`custom_hooks/` 还含 time、session_track、recent_uploads、agentspace_changes 钩子。
 
-- `schema["description"]` is written in English.
-- The line immediately above `description` is a Chinese comment explaining behavior.
+## Windows 细节
 
-## Frontend
-
-React + Vite + TypeScript in `origin_agent/frontend/`. Package scripts: `dev`, `build` (`tsc -b && vite build`), `preview`.
-
-Auto-built at startup by `__main__.py::_build_frontend()` inside the running agent directory (`workspace/fast_agent_space/frontend/`) using `pnpm install && pnpm run build`. Build failure returns exit code `1` and triggers fallback mode.
-
-Uses `frontend_build_signature` caching: source files are hashed before build; on subsequent starts, if the hash matches and `dist/` exists, the build is skipped. `--frontend_force_build` bypasses the cache.
-
-Because `origin_agent/frontend/` is not at the repo root, IDE static type awareness may be inaccurate. Do not rely on frontend type checks or builds without telling the user.
-
-## Approval
-
-- **Normal mode**: user confirms tools via the WebSocket frontend.
-- **Handsfree mode**: local GGUF model auto-approves. Auto-enabled if a `.gguf` is found in `custom_models/` (auto-detected at startup). Explicit flags: `--approval_model <gguf>`, `--approval_model_cuda`. Uses `third/llamaapis` (llama.cpp wrapper). Falls back to remote approval API if configured (`--approval_remote_*`) when no local model is found.
-- Approval module at `component/approval/`: `core.py`, `backend.py`, `executor.py`, `handsfree.py`, `allowlist.py`, `policy.py`.
-
-## Template system (system/prompt.py)
-
-Assembled by `system/prompt.py`. Hierarchy:
-
-1. `GENE.md` (project root) — immutable core identity
-2. `SOUL.md` (agentspace/) — editable personality (empty by default)
-3. `base.txt` — foundation prompt (always included)
-4. `modes/{fast,fallback}.txt` — mode-specific instructions
-5. `tools.txt` + `tools_subagent.txt` (only for MAIN scope)
-6. Extra blocks (skills, memory provider contexts, etc.)
-
-## Windows specifics
-
-- Python command is `python` (not `python3`).
-- Invoke native executables as `pnpm.cmd`.
-- Process tree kill uses `taskkill /T /F`.
-- Sandbox subprocess uses `CREATE_NEW_PROCESS_GROUP`.
-- `signal.add_signal_handler` is unavailable; falls back to `signal.signal`.
-
-## Git commit style
-
-Use Chinese commit messages with repo prefixes: `[feature]`, `[fix]`, `[refactor]`, `[docs]`, etc.
-
-```
-[fix] 修复 ssh 审批弹窗 command 类型错误导致前端黑屏
-
-- ConfirmDialog 兼容 command 为字符串（ssh_exec）或数组（run_command）
-- 新增 ErrorBoundary，避免模态组件渲染异常导致整个 App 被卸载
-```
-
-## Memory
-
-记忆系统由 `custom_tools/memory_tools/` 实现（非核心模块），包含 `remember` 和 `forget` 两个工具。底层通过 `custom_tools/memory_tools/_store.py` 基于 easysave 对象引用机制实现会话隔离与父链继承：记忆数据存储在 `agentspace/memory_data.json`，每个会话拥有独立分区，子会话通过 `__parents__` 引用链自动继承父会话记忆。`custom_hooks/memory_hook.py` 作为消息 hook 在每轮 LLM 调用前自动将合并后的记忆注入用户消息上下文。
-
-## Sessions & Evolution status
-
-Sessions persist to `workspace/logs/sessions/` (JSONL with `_index.json` metadata). Evolution status is at `workspace/logs/evolution.status` (JSON array).
+- Python 命令是 `python`（非 python3）；原生可执行文件调用 `pnpm.cmd`；进程树终止用 `taskkill /T /F`；沙盒子进程用 `CREATE_NEW_PROCESS_GROUP`；`add_signal_handler` 不可用，回退 `signal.signal`。

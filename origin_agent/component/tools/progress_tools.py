@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import TYPE_CHECKING, Any, Dict
+from typing import TYPE_CHECKING, Any
 
 from abstract.tools.registry import registry, tool_error, tool_result
 from entity.puretype import ToolAvailability, ToolDangerLevel
@@ -23,27 +23,6 @@ if TYPE_CHECKING:
     from entry.base_agent_loop import ToolContext
 
 logger = logging.getLogger(__name__)
-
-
-# ── 内部状态：session_id → {task_id → progress_info} ─────────────────
-
-_progress_registry: dict[str, dict[str, dict[str, Any]]] = {}
-
-
-def _persist_progress(session_id: str, context: ToolContext|None) -> None:
-    """将 progress 分区同步到磁盘（失败仅记日志，不阻塞工具流程）。"""
-    if not session_id or context is None:
-        return
-    store = context.loop.session_store
-    if store is None:
-        return
-    try:
-        store.update_tool_resources(
-            session_id, "task_progress",
-            dict(_progress_registry.get(session_id, {})),
-        )
-    except Exception:
-        logger.warning("Failed to persist task progress | session=%s", session_id, exc_info=True)
 
 
 # ── emit handler ────────────────────────────────────────────────
@@ -95,9 +74,16 @@ async def _handle_set_task_progress(args: dict[str, Any], context: Any = None) -
         "status": status or "running",
     }
 
-    if session_id:
-        _progress_registry.setdefault(session_id, {})[task_id] = info
-        _persist_progress(session_id, context)
+    # 磁盘为唯一真相：写当前会话分区（store 为 None（子 agent / 未配置
+    # history_store_dir）或 session_id 为空时跳过落盘，照常推送增量事件）
+    store = context.loop.session_store if context else None
+    if session_id and store is not None:
+        try:
+            values = store.read_partition(session_id, "task_progress")
+            values[task_id] = info
+            store.update_tool_resources(session_id, "task_progress", values)
+        except Exception:
+            logger.warning("Failed to persist task progress | session=%s", session_id, exc_info=True)
 
     logger.info("Task progress updated | session=%s task=%s %d/%d (%.1f%%)",
                 session_id, task_id, current, total, percent)
@@ -115,17 +101,21 @@ async def _handle_clear_task_progress(args: dict[str, Any], context: ToolContext
     session_id: str = str(args.get("_session_id", ""))
 
     cleared: list[str] = []
-    if session_id and session_id in _progress_registry:
-        if task_id:
-            if task_id in _progress_registry[session_id]:
-                del _progress_registry[session_id][task_id]
-                cleared.append(task_id)
-        else:
-            cleared = list(_progress_registry[session_id].keys())
-            _progress_registry[session_id].clear()
-    # 无条件同步磁盘：registry 无该 session（如重启后）时也必须清空磁盘，
-    # 否则前端轮询会从 tool_resources.json 恢复已被清理的旧状态
-    _persist_progress(session_id, context)
+    # 磁盘为唯一真相：直接读分区删除（store 为 None 时不落盘，照常返回 cleared）
+    store = context.loop.session_store if context else None
+    if session_id and store is not None:
+        try:
+            values = store.read_partition(session_id, "task_progress")
+            if task_id:
+                if task_id in values:
+                    del values[task_id]
+                    cleared.append(task_id)
+            else:
+                cleared = list(values.keys())
+                values.clear()
+            store.update_tool_resources(session_id, "task_progress", values)
+        except Exception:
+            logger.warning("Failed to persist cleared task progress | session=%s", session_id, exc_info=True)
 
     logger.info("Task progress cleared | session=%s tasks=%s", session_id, cleared)
 

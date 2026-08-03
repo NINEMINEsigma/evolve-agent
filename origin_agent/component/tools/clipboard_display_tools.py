@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import TYPE_CHECKING, Any, Dict
+from typing import TYPE_CHECKING, Any
 
 from abstract.tools.registry import registry, tool_error, tool_result
 from entity.puretype import ToolAvailability, ToolDangerLevel
@@ -22,27 +22,6 @@ if TYPE_CHECKING:
     from entry.base_agent_loop import ToolContext
 
 logger = logging.getLogger(__name__)
-
-
-# ── 内部状态：session_id → {display_id → display_info} ─────────────────
-
-_display_registry: dict[str, dict[str, dict[str, Any]]] = {}
-
-
-def _persist_displays(session_id: str, context: ToolContext|None) -> None:
-    """将 clipboard_display 分区同步到磁盘（失败仅记日志，不阻塞工具流程）。"""
-    if not session_id or context is None:
-        return
-    store = context.loop.session_store
-    if store is None:
-        return
-    try:
-        store.update_tool_resources(
-            session_id, "clipboard_display",
-            dict(_display_registry.get(session_id, {})),
-        )
-    except Exception:
-        logger.warning("Failed to persist clipboard display | session=%s", session_id, exc_info=True)
 
 
 # ── emit handler ────────────────────────────────────────────────
@@ -81,9 +60,15 @@ async def _handle_set_clipboard_display(args: dict[str, Any], context: ToolConte
         "content": content,
     }
 
-    if session_id:
-        _display_registry.setdefault(session_id, {})[display_id] = info
-        _persist_displays(session_id, context)
+    # 磁盘为唯一真相：写当前会话分区（store 为 None 或 session_id 为空时跳过落盘）
+    store = context.loop.session_store if context else None
+    if session_id and store is not None:
+        try:
+            values = store.read_partition(session_id, "clipboard_display")
+            values[display_id] = info
+            store.update_tool_resources(session_id, "clipboard_display", values)
+        except Exception:
+            logger.warning("Failed to persist clipboard display | session=%s", session_id, exc_info=True)
 
     logger.info("Clipboard display updated | session=%s display=%s", session_id, display_id)
 
@@ -100,17 +85,21 @@ async def _handle_clear_clipboard_display(args: dict[str, Any], context: ToolCon
     session_id: str = str(args.get("_session_id", ""))
 
     cleared: list[str] = []
-    if session_id and session_id in _display_registry:
-        if display_id:
-            if display_id in _display_registry[session_id]:
-                del _display_registry[session_id][display_id]
-                cleared.append(display_id)
-        else:
-            cleared = list(_display_registry[session_id].keys())
-            _display_registry[session_id].clear()
-    # 无条件同步磁盘：registry 无该 session（如重启后）时也必须清空磁盘，
-    # 否则前端轮询会从 tool_resources.json 恢复已被清理的旧状态
-    _persist_displays(session_id, context)
+    # 磁盘为唯一真相：直接读分区删除（store 为 None 时不落盘，照常返回 cleared）
+    store = context.loop.session_store if context else None
+    if session_id and store is not None:
+        try:
+            values = store.read_partition(session_id, "clipboard_display")
+            if display_id:
+                if display_id in values:
+                    del values[display_id]
+                    cleared.append(display_id)
+            else:
+                cleared = list(values.keys())
+                values.clear()
+            store.update_tool_resources(session_id, "clipboard_display", values)
+        except Exception:
+            logger.warning("Failed to persist cleared clipboard display | session=%s", session_id, exc_info=True)
 
     logger.info("Clipboard display cleared | session=%s displays=%s", session_id, cleared)
 

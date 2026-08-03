@@ -18,6 +18,7 @@ tags:
 > - **展示**：产出的 HTML 页面通过 `/uploads/` 路由嵌入聊天展示
 > - **工具映射**：原文中的 WebFetch 对应本系统 `web_fetch` 工具
 > - **许可证**：Apache 2.0（详见本技能目录 LICENSE.txt）
+> - **工程实现补充**：通用智能体工具包的 Web 前端工程实现指南（React+TS+Vite+Tailwind+shadcn/ui、初始化/构建/调试、诚实原则）已并入 `references/toolkit-webapp-frontend.md`——实现阶段按此执行，本文件负责设计方向
 
 This skill guides creation of distinctive, production-grade frontend interfaces that avoid generic "AI slop" aesthetics. Implement real working code with exceptional attention to aesthetic details and creative choices.
 

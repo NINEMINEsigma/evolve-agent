@@ -18,6 +18,7 @@ tags:
 > - **依赖**：`openpyxl`、`pandas` 等若缺失，用 `install_package` 安装
 > - **展示**：产出的 .xlsx 通过 `/downloads/` 路由提供下载
 > - **许可证**：本技能为**专有（Proprietary）**授权，仅限本地使用，勿再分发
+> - **方法论补充**：通用智能体工具包的金融建模子工作流（三表模型/DCF/可比公司）与公式验证硬规则已并入 `references/toolkit-methodology.md`——金融建模任务必读
 
 # Requirements for Outputs
 

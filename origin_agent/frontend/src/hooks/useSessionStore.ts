@@ -692,6 +692,8 @@ export function useSessionStore(callbacks: SessionStoreCallbacks = {}): SessionS
     }
 
     if (msg.type === "task_progress") {
+      // 会话隔离双保险：事件必须属于当前会话，防止跨会话资源串入
+      if (msg.session_id && msg.session_id !== sessionId) return;
       const raw = msg.result ?? "";
       try {
         const data = JSON.parse(raw);
@@ -723,6 +725,8 @@ export function useSessionStore(callbacks: SessionStoreCallbacks = {}): SessionS
     }
 
     if (msg.type === "clipboard_display") {
+      // 会话隔离双保险：事件必须属于当前会话
+      if (msg.session_id && msg.session_id !== sessionId) return;
       const raw = msg.result ?? "";
       try {
         const data = JSON.parse(raw);

@@ -18,6 +18,7 @@ tags:
 > - **依赖**：所需工具（如 `pandoc`、`docx-js`、python-docx 等）若缺失，用 `install_package` 安装
 > - **展示**：产出的 .docx 通过 `/downloads/` 路由提供下载给主人
 > - **许可证**：本技能为**专有（Proprietary）**授权，仅限本地使用，勿再分发
+> - **方法论补充**：通用智能体工具包（Universal Agent Toolkit）的工作流/质量标准/交付检查清单已并入 `references/toolkit-methodology.md`——创建/编辑/交付时按需阅读
 
 # DOCX creation, editing, and analysis
 

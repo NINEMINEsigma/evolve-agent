@@ -27,8 +27,10 @@ export function useWebSocket() {
       fetch(`/api/sessions/${sid}/tool-resources`).then((r) => r.json()),
       fetch(`/api/sessions/${sid}/subagents`).then((r) => r.json()),
     ]);
-    const activeSid = sessionRef.current?.sessionId || sid;
-    if (activeSid !== sid) return;
+    const activeSid = sessionRef.current?.sessionId;
+    // sessionId 为空（newChat 后新 sid 未返回）时拒绝应用任何 in-flight 数据，
+    // 否则旧会话资源会串入新会话（原 `|| sid` 竞态缺陷）
+    if (!activeSid || activeSid !== sid) return;
     if (toolRes.status === "fulfilled") {
       const data = toolRes.value;
       sessionRef.current?.setTaskProgress(data.task_progress || {});

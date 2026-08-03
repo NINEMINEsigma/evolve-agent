@@ -113,7 +113,7 @@ def build_system_prompt(
     if gene:
         blocks.append(gene)
 
-    # 0a. SOUL — 人+AI 共同编辑的个性/风格（agentspace/SOUL.soul）
+    # 0a. SOUL — 人+AI 共同编辑的个性/风格（agentspace/SOUL.md）
     workspace_path: Path = Path(workspace) if workspace else Path()
     soul: str = _read_soul(Path(agentspace) if agentspace else Path())
     if soul:

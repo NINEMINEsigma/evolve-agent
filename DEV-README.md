@@ -53,16 +53,16 @@ workspace/
 
 | 模块 | 职责 | 详细文档 |
 |---|---|---|
-| `entry/` | Agent 主循环与抽象：`BaseAgentLoop`、`ParentAgentLoop`、`MultiAgentLoop`、`AgentSink`、`ToolExecutor`、`StreamConsumer` | [entry/DEV-README.md](origin_agent/entry/DEV-README.md) |
+| `entry/` | Agent 主循环与抽象：`BaseAgentLoop`、`ParentAgentLoop`、`ColloquyLoop`、`MultiAgentLoop`、`AgentSink`、`ToolExecutor`、`StreamConsumer` | [entry/DEV-README.md](origin_agent/entry/DEV-README.md) |
 | `subagent/` | 子代理编排与生命周期：`SubAgentOrchestrator`、`SubAgentLoop` | [subagent/DEV-README.md](origin_agent/subagent/DEV-README.md) |
-| `gateway/` | WebSocket / HTTP 网关、消息路由、会话管理、Dashboard | [gateway/DEV-README.md](origin_agent/gateway/DEV-README.md) |
-| `component/` | 工具实现、审批系统（目录化）、MCP 桥接、Cron 路由 | [component/DEV-README.md](origin_agent/component/DEV-README.md) |
+| `gateway/` | WebSocket / HTTP 网关、消息路由、会话管理 | [gateway/DEV-README.md](origin_agent/gateway/DEV-README.md) |
+| `component/` | 工具实现、审批系统（目录化）、MCP 桥接、Cron 路由、桌面自动化（`automation/`）、浏览器控制（`browser/`） | [component/DEV-README.md](origin_agent/component/DEV-README.md) |
 | `abstract/` | 抽象层：LLM 客户端、工具注册表、AST 发现、技能、插件、MCP 客户端 | [abstract/DEV-README.md](origin_agent/abstract/DEV-README.md) |
 | `frontend/` | React + Vite + TypeScript 前端 | [frontend/DEV-README.md](origin_agent/frontend/DEV-README.md) |
-| `system/` | 基础设施：`Application`、`RuntimeContext`、沙盒、路径工具、会话存储、模板、转换工具 | 见下文 |
+| `system/` | 基础设施：`Application`、`RuntimeContext`、沙盒、路径工具、会话存储、模板、LSP（`lsp.py`）、转换工具 | 见下文 |
 | `evolve/` | 进化系统：代码交换与验证 | 见下文 |
 | `entity/` | 常量与纯类型定义：`messages.py`（`BaseMessage` 体系）、`puretype.py`、`constant.py` | 见相关模块文档 |
-| `templates/` | Prompt 模板与模式切换（含 `multiagent/`、`evolve/`、`llm/`、`messages/` 子目录） | 见 `system/prompt.py` |
+| `templates/` | Prompt 模板 `.txt` 文件与模式切换（含 `modes/`、`multiagent/`、`subagent/`、`approval/`、`evolve/`、`llm/`、`messages/` 子目录） | 见 `system/prompt.py` |
 
 ---
 
@@ -128,6 +128,11 @@ Evolve Agent 内置两套多代理运行时：
 - `MultiAgentWorker` 是单个 Agent 的一轮响应执行器，由 `MultiAgentLoop` 创建并聚合 token 统计。
 - 多 Agent 模式下 multiagent 工具集被禁用。
 
+### Colloquy（随意聊聊）
+
+- 内置的固定闲聊会话（session ID `____buildin_colloquy__`，常量 `COLLOQUY_SESSION_ID`），启动时由 `main.py` 调用 `SessionManager.ensure_colloquy_session()` 确保存在，不出现在普通会话列表中且不可删除。
+- 由 `entry/colloquy_loop.py::ColloquyLoop`（继承 `ParentAgentLoop`）处理，仅暴露白名单工具集（`COLLOQUY_TOOLSET_WHITELIST`，filesystem/skills/shell/python 等，不含进化工具），超长历史按 `COLLOQUY_COMPRESS_RATIO` 滑动窗口压缩为摘要。
+
 ---
 
 ## 路径沙盒
@@ -140,8 +145,15 @@ Evolve Agent 内置两套多代理运行时：
 | `ws:` | `workspace/agentspace/` | fast / fallback | 通用 I/O |
 | `fix:` | `workspace/.fallback/` | fallback | 修复目标 |
 | `skills:` | `skills/` | fast / fallback | 技能读写 |
+| `third:` | `third/` | fast / fallback | 第三方子模块（只读） |
+| `custom_hooks:` | `custom_hooks/` | fast / fallback | 自定义钩子（只读） |
+| `custom_llm_client:` | `custom_llm_client/` | fast / fallback | 自定义 LLM 客户端（只读） |
+| `custom_models:` | `custom_models/` | fast / fallback | 本地模型文件（只读） |
+| `custom_tools:` | `custom_tools/` | fast / fallback | 自定义工具（只读） |
 
-沙盒实现位于 `system/sandbox.py`。
+**没有 `self:` 命名空间** — agent 不能读取或修改自身运行时副本，进化完全通过 `fork:`/`fix:` 实现。
+
+沙盒实现位于 `system/sandbox.py`（权限表 `_PERMISSIONS`，映射 `namespace_bases()`）。
 
 ---
 
@@ -150,7 +162,7 @@ Evolve Agent 内置两套多代理运行时：
 系统提供多个热扩展点，无需修改核心源码：
 
 - **自定义工具**：在 `custom_tools/` 目录下编写 `.py` 文件，使用 `registry.register()` 注册，启动时由 AST 扫描自动发现。
-- **自定义 LLM 客户端**：在 `custom_llm_client/` 目录下编写 `.py` 文件，暴露 `create_llm_client(runtime_context, profile)` 工厂函数，返回 `BaseLLMClient` 子类实例。内置 `openai_client.py` 和 `anthropic_client.py`。
+- **自定义 LLM 客户端**：在 `custom_llm_client/` 目录下编写 `.py` 文件，暴露 `create_llm_client(runtime_context, profile)` 工厂函数，返回 `BaseLLMClient` 子类实例。内置 `openai_client.py`、`anthropic_client.py` 和 `kscc_client.py`。
 - **自定义钩子**：在 `custom_hooks/` 下实现 `hook_tag_name()` 与 `hook_message()`，返回的上下文块会追加到用户消息末尾。
 - **本地模型**：在 `custom_models/` 下放置 `.gguf` 文件，可作为 Adventure 审批模型自动加载。
 - **技能文件**：运行时 `skills/` 目录存放 `SKILL.md`，通过 `load_skill` / `list_skills` 工具加载。`pre-skills/` 提供参考模板。
@@ -166,11 +178,12 @@ Evolve Agent 内置两套多代理运行时：
 - `system/application.py`：`Application` 进程级唯一单例，持有所有子系统引用（`RuntimeContext`、`SessionManager`、`ToolRegistry`、`ApprovalBackend`、`CronRouter`、`SubAgentOrchestrator` 等）。通过 `Application.current()` 访问，避免模块级全局变量。
 - `system/context.py`：`RuntimeContext`，贯穿整个应用的生命周期上下文。
 - `system/sandbox.py`：路径沙盒与命名空间解析。
-- `system/session_store.py`：单个会话的文件读写（`history.es`、`messages.jsonl`、`summary.txt` 等）。
+- `system/session_store.py`：单个会话的文件读写（`history.es`、`summary.txt`、`token_usage.json`、`tool_resources.json` 等；旧版 `messages.jsonl` 已由 `scripts/migrate_v0_to_v1.py` 迁移到 v1 格式）。
 - `system/prompt.py` / `system/templates.py`：System Prompt 组装与模板渲染。
 - `system/convert.py`：类型转换工具（`as_enum()`、`as_bool()`）。
 - `system/error_utils.py`：异常降级与日志辅助，用于可恢复副作用失败时记录日志但不中断主流程。
 - `system/pathutils.py` / `system/atomic_io.py` / `system/subprocess_utils.py`：路径、IO、子进程工具。
+- `system/lsp.py`：LSP 服务器进程管理与诊断（`component/tools/lsp.py` 工具调用；App 关闭时清理 LSP 进程）。
 
 ### `evolve/`
 

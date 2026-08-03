@@ -17,6 +17,7 @@ tags:
 > - **依赖**：Python 库（`pypdf`、`pymupdf`、`reportlab` 等）若缺失，用 `install_package` 安装
 > - **展示**：产出的 .pdf 通过 `/downloads/` 路由提供下载
 > - **许可证**：本技能为**专有（Proprietary）**授权，仅限本地使用，勿再分发
+> - **方法论补充**：通用智能体工具包的 PDF 生成方法论（HTML/LaTeX 路线、封面风格、引用格式 GB/T 7714/APA、大纲必遵、先搜后写）已并入 `references/toolkit-methodology.md`——从零生成 PDF 时先读
 
 # PDF Processing Guide
 

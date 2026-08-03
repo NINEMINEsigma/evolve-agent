@@ -1,23 +1,14 @@
 /* ── Task progress strip ── */
-/* 进度条 absolute 悬浮于输入框上方：宽度公式与 .input-bar 完全一致（左右对齐），bottom 由 Layout 实时测量传入 */
+/* 进度条内联于 .input-bar（输入框上方）：相对定位随输入框移动，零测量 */
 .task-progress-strip-panel {
-  position: absolute;
-  left: 50%;
-  transform: translateX(-50%);
+  position: relative;
   display: flex;
   flex-direction: column;
   gap: 2px;
-  width: calc(100% - 40px);
-  max-width: 900px;
-  bottom: 84px;
+  width: 100%;
+  margin-bottom: 4px;
   background: transparent;
   z-index: 12;
-}
-
-@media (max-width: 768px) {
-  .task-progress-strip-panel {
-    width: calc(100% - 24px);
-  }
 }
 
 .task-progress-strip-item {

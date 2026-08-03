@@ -1,7 +1,8 @@
 import type { ChangeEvent, RefObject } from "react";
 import RichInput from "./RichInput";
+import TaskProgressPanel from "./TaskProgressPanel";
 import type { PendingImage } from "../hooks/useWebSocket";
-import type { SubagentSession, TargetSessionOption } from "../types";
+import type { SubagentSession, TargetSessionOption, TaskProgress } from "../types";
 import { escapeHtml } from "../utils";
 
 interface InputBarProps {
@@ -10,6 +11,11 @@ interface InputBarProps {
   waiting: boolean;
   uploading: boolean;
   archived: boolean;
+  /** 空态（无对话）时隐藏进度条 */
+  chatEmpty: boolean;
+  taskProgress: Record<string, TaskProgress>;
+  taskProgressCollapsed: boolean;
+  onToggleTaskProgressCollapse: () => void;
   onSend: () => void;
   onUpload: (e: ChangeEvent<HTMLInputElement>) => void;
   onUploadClick: () => Promise<void>;
@@ -35,6 +41,10 @@ export default function InputBar({
   waiting,
   uploading,
   archived,
+  chatEmpty,
+  taskProgress,
+  taskProgressCollapsed,
+  onToggleTaskProgressCollapse,
   onSend,
   onUpload,
   onUploadClick,
@@ -95,6 +105,13 @@ export default function InputBar({
 
   return (
     <footer className="input-bar">
+      {!chatEmpty && (
+        <TaskProgressPanel
+          taskProgress={taskProgress}
+          collapsed={taskProgressCollapsed}
+          onToggleCollapse={onToggleTaskProgressCollapse}
+        />
+      )}
       <div className="input-bar-inner">
         {hasSubagents && (
           <div className="input-target-row">
