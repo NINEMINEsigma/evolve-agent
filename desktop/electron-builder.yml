@@ -18,7 +18,7 @@ files:
 extraFiles:
   - from: ../run.py
     to: run.py
-  - from: ../config.json.exmple
+  - from: ../config.json.example
     to: config.json
   - from: ../config.py
     to: config.py

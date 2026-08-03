@@ -1,6 +1,6 @@
 # subagent/ — 子代理与多代理系统
 
-`subagent/` 与 `component/mutliagenttools/` 共同实现 Evolve Agent 的多代理运行时。它包含两套系统：主 Agent → 子 Agent 的编排模式，以及多 Agent 广播协作模式。
+`subagent/` 与 `component/multiagenttools/` 共同实现 Evolve Agent 的多代理运行时。它包含两套系统：主 Agent → 子 Agent 的编排模式，以及多 Agent 广播协作模式。
 
 ---
 
@@ -12,7 +12,7 @@ subagent/
 ├── loop.py                  ← SubAgentLoop（子代理循环实现）
 └── context.py               ← SubRuntimeContext（子代理运行时上下文构建）
 
-component/mutliagenttools/   ← 多代理 / 子代理工具
+component/multiagenttools/   ← 多代理 / 子代理工具
 ├── register_subagent.py     ← register_subagent / register_subagent_from_parent
 ├── unregister_subagent.py   ← unregister_subagent
 ├── list_subagents.py        ← list_subagents
@@ -104,7 +104,7 @@ graph TD
 
 ### `SubagentStore`
 
-`component/mutliagenttools/_store.py` 中的子代理注册表磁盘存储：
+`component/multiagenttools/_store.py` 中的子代理注册表磁盘存储：
 
 - 每个子 Agent 独立持久化到 `agentspace/subagents/<name>-setting.json`。
 - 通过 `agentspace/subagents/_index.json` 维护已注册名称列表。
@@ -113,7 +113,7 @@ graph TD
 
 ### `profile_builder`
 
-`component/mutliagenttools/profile_builder.py` 提供多 Agent 模式的 Profile 构造逻辑：
+`component/multiagenttools/profile_builder.py` 提供多 Agent 模式的 Profile 构造逻辑：
 
 - `build_multi_agent_tools(tool_registry)`：返回多 Agent 模式下可用的工具定义（MAIN 工具集排除 multiagent 工具集）。
 - `build_agent_profile()`：为多 Agent 模式中的单个 Agent 构造 `AgentProfile`（系统提示词、工具列表、LLM 客户端）。

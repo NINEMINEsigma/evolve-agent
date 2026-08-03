@@ -377,7 +377,7 @@ class MultiAgentLoop(BaseAgentLoop, IMainSessionLoop):
         若某个 agent 的 subagent profile 已被其他会话删除，则将其从
         response_characters 中移除，后续不再接受其响应。历史消息不受影响。
         """
-        from component.mutliagenttools._store import SubagentStore
+        from component.multiagenttools._store import SubagentStore
         from system.context import get_runtime_context
         store = SubagentStore(get_runtime_context().agentspace)
         available = [c for c in characters if store.get(c) is not None]

@@ -165,7 +165,7 @@ create_llm_client(name, runtime_context, profile) -> BaseLLMClient
 |---|---|
 | `BaseLLMClient` | `custom_llm_client/openai_client.py`、`custom_llm_client/anthropic_client.py` |
 | `to_openai_message()` / `messages_to_anthropic_list()` | 被 `custom_llm_client/` 中的客户端调用 |
-| `ToolRegistry` | `component/extools/`、`component/mutliagenttools/`、`custom_tools/` |
+| `ToolRegistry` | `component/extools/`、`component/multiagenttools/`、`custom_tools/` |
 | `SkillManager` | `component/extools/` 中的 `load_skill` / `list_skills` 工具 |
 | `MCPClient` | `component/mcp_tools.py` |
 | `PluginDiscover` | 启动时扫描 `plugins/` 目录 |

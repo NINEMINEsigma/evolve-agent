@@ -104,7 +104,7 @@ origin_agent/
 ├── component/             ← 具体实现
 │   ├── tools/             ← 核心工具（filesystem, code, shell, frontend 等）
 │   ├── extools/           ← 扩展工具集（web_search, cron, ssh, browser 等）
-│   ├── mutliagenttools/   ← 多代理/子代理工具集
+│   ├── multiagenttools/   ← 多代理/子代理工具集
 │   ├── approval/          ← 统一审批模块（core + backend + executor + handsfree + allowlist）
 │   ├── mcp_tools.py       ← MCP 工具桥接
 │   └── cron_router.py     ← Cron 任务路由
@@ -202,7 +202,7 @@ origin_agent/
   - `_gui_windows.py` — Windows GUI 自动化
   - `background_service.py` — 后台服务管理
   - `pip.py` — Python 包管理
-- `mutliagenttools/`：多代理 / 子代理工具集（register/unregister/run/chat/approval/stop/list_subagent/enter_multi_agent 等），由 `subagent/orchestrator.py` 调度。
+- `multiagenttools/`：多代理 / 子代理工具集（register/unregister/run/chat/approval/stop/list_subagent/enter_multi_agent 等），由 `subagent/orchestrator.py` 调度。
 
 ## 工具系统
 

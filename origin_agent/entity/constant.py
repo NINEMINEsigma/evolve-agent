@@ -39,9 +39,6 @@ CUSTOM_TOOLS_DIR: str = "custom_tools"
 # 工具 allowlist 持久化文件名 — 存放于 workspace/ 下，用于记录用户始终允许的工具调用
 TOOL_ALLOWLIST_FILENAME: str = "tool_allowlist.json"
 
-# 会话索引文件名 — 存放于 workspace/ 下
-SESSION_INDEX_FILENAME: str = "_sessions.json"
-
 # 会话存储目录名（位于 workspace/ 下）
 SESSIONS_DIR_NAME: str = "sessions"
 
@@ -260,7 +257,8 @@ MULTI_AGENT_ROUTING_RESPONSE_NONE: str = "none"
 MULTI_AGENT_ROUTING_RESPONSE_NULL: str = "null"
 
 # DEPRECATED: SUBAGENT_READONLY_WHITELIST is no longer used.
-# Subagents now inherit all non-multiagent tools automatically.
+# 子代理工具集由 ToolRegistry.get_definitions_for_availability(ToolAvailability.SUBAGENT)
+# 按 availability 位掩码过滤决定（SUBAGENT 或 EVERY 可见），不再维护白名单。
 # Kept commented for reference.
 # SUBAGENT_READONLY_WHITELIST: list[str] = [
 #     "list_tools",

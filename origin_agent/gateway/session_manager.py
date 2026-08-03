@@ -146,14 +146,14 @@ class SessionManager:
     ) -> IMainSessionLoop:
         """根据索引中的 LoopMeta 重建 MultiAgentLoop。"""
         from system.context import get_runtime_context
-        from component.mutliagenttools._store import SubagentStore
+        from component.multiagenttools._store import SubagentStore
         from abstract.llm.loader import create_llm_client
         from entry.multi_agent_loop import MultiAgentLoop
         from system.templates import get_templates_dir
         from abstract.tools.registry import registry as tool_registry
         from entity.constant import MAIN_AGENT_CHARACTER_NAME
         from system.sandbox import Sandbox
-        from component.mutliagenttools.profile_builder import (
+        from component.multiagenttools.profile_builder import (
             build_multi_agent_tools,
             build_agent_profiles,
         )

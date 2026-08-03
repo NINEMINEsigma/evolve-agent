@@ -17,7 +17,7 @@ component/
 │   └── allowlist.py           ← 工具 allowlist 持久化
 ├── tools/                    ← 核心工具
 ├── extools/                  ← 扩展工具集（下划线前缀为重模块的惰性导入）
-├── mutliagenttools/          ← 多代理 / 子代理工具
+├── multiagenttools/          ← 多代理 / 子代理工具
 ├── mcp_tools.py              ← MCP 工具桥接
 └── cron_router.py            ← Cron 任务路由
 ```
@@ -32,7 +32,7 @@ component/
 
 - `component/tools/` — 核心工具
 - `component/extools/` — 扩展工具
-- `component/mutliagenttools/` — 多代理工具
+- `component/multiagenttools/` — 多代理工具
 - `custom_tools/` — 用户自定义工具（若目录存在）
 - MCP server — 通过 `component/mcp_tools.py` 桥接
 
@@ -68,7 +68,7 @@ component/
 
 > **已移除的工具**：CSV / Excel / DOCX / PDF / 音视频处理 / 浏览器自动化 / GUI 自动化 / 图表生成等文档与媒体处理能力已从 extools 中移除。这些能力应通过 skill 实现（在 `pre-skills/` 或 `skills/` 中编写对应的 `SKILL.md` 和辅助脚本）。
 
-### 多代理工具（`component/mutliagenttools/`）
+### 多代理工具（`component/multiagenttools/`）
 
 详见 `../subagent/DEV-README.md`。
 

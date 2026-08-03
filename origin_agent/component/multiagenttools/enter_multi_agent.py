@@ -56,7 +56,7 @@ async def _handle_enter_multi_agent(args: dict[str, Any]) -> dict:
     main_agent_name = parent_loop.current_character_agent
 
     # 确定参与者列表：优先使用显式传入的 agents，缺省时使用全部已注册子 Agent
-    from component.mutliagenttools._store import SubagentStore
+    from component.multiagenttools._store import SubagentStore
     from system.context import get_runtime_context
     store = SubagentStore(get_runtime_context().agentspace)
 
@@ -95,7 +95,7 @@ async def _handle_enter_multi_agent(args: dict[str, Any]) -> dict:
 
     # 获取父 Agent 的 LLM client 和工具定义
     from abstract.tools.registry import registry as tool_registry
-    from component.mutliagenttools.profile_builder import (
+    from component.multiagenttools.profile_builder import (
         build_multi_agent_tools,
         build_agent_profiles,
     )

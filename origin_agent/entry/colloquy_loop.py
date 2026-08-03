@@ -1,7 +1,7 @@
 """ColloquyLoop — "随意聊聊"会话循环，继承 ParentAgentLoop。
 
 与 ParentAgentLoop 的差异：
-- 工具集仅限 component/tools 和 component/extools（排除 mutliagenttools/automation/MCP）
+- 工具集仅限 component/tools 和 component/extools（排除 multiagenttools/automation/MCP）
 - 会话永不旋转/过期，不可删除/终结
 - 上下文超限时采用滑动窗口压缩最早 30% 消息，而非旋转会话
 """

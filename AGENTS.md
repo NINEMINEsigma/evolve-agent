@@ -56,7 +56,7 @@ custom_*、skills/    ← 根目录扩展点；skills/ 运行时生成
 ## 工具注册
 
 - 模块级 `registry.register()` 调用由 AST 扫描自动发现（`abstract/tools/discover.py`，main.py:187-194）。
-- 内置来源：`component/tools/`（核心）、`component/extools/`（web/ssh/cron/…）、`component/mutliagenttools/`（**目录名拼错**）、`component/automation/`（桌面自动化）、`component/browser/`（浏览器控制）+ 根目录 `custom_tools/`（存在即加载）+ MCP 桥接（`component/mcp_tools.py`，配置在 `workspace/mcp_config.json`）。
+- 内置来源：`component/tools/`（核心）、`component/extools/`（web/ssh/cron/…）、`component/multiagenttools/`（多代理 / 子代理工具）、`component/automation/`（桌面自动化）、`component/browser/`（浏览器控制）+ 根目录 `custom_tools/`（存在即加载）+ MCP 桥接（`component/mcp_tools.py`，配置在 `workspace/mcp_config.json`）。
 - 工具 schema 的 `description` 用英文，紧邻其上注释为中文。
 
 ## 模板系统（system/prompt.py）

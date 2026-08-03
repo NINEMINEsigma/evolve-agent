@@ -114,7 +114,7 @@ Evolve Agent 内置两套多代理运行时：
 
 - `subagent/orchestrator.py` 的 `SubAgentOrchestrator` 按父会话维护子代理上下文。
 - 每个子代理是独立的 `SubAgentLoop`（继承 `BasePrivateChatAgentLoop`），拥有独立的 LLM 配置与历史。
-- `component/mutliagenttools/` 提供注册、启动、对话、审批、停止、列表等工具。
+- `component/multiagenttools/` 提供注册、启动、对话、审批、停止、列表等工具。
 - 子代理的工具可见性由 `availability` 位掩码控制：通常只能看到标记为 `SUBAGENT` 或 `EVERY` 的工具。
 - 审批结果和子代理输出会周期性注入父 Agent 的消息循环。
 

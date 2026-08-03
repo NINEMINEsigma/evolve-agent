@@ -186,7 +186,7 @@ class App:
                 sys.path.insert(0, str(_root))
             discover_builtin_tools(str(_agent_root / "component" / "tools"), "component.tools")
             discover_builtin_tools(str(_agent_root / "component" / "extools"), "component.extools")
-            discover_builtin_tools(str(_agent_root / "component" / "mutliagenttools"), "component.mutliagenttools")
+            discover_builtin_tools(str(_agent_root / "component" / "multiagenttools"), "component.multiagenttools")
             discover_builtin_tools(str(_agent_root / "component" / "automation"), "component.automation")
             discover_builtin_tools(str(_agent_root / "component" / "browser"), "component.browser")
             _custom_tools: Path = _root / CUSTOM_TOOLS_DIR

@@ -12,7 +12,7 @@ from typing import Callable, TYPE_CHECKING
 
 from system.sandbox import Sandbox
 from system.templates import render_multi_agent_prompt
-from component.mutliagenttools._store import SubagentStore
+from component.multiagenttools._store import SubagentStore
 from abstract.llm.client import BaseLLMClient
 from entity.puretype import AgentConfig
 from entry.agent_support.messages import (
