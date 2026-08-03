@@ -4,11 +4,14 @@ interface TaskProgressPanelProps {
   taskProgress: Record<string, TaskProgress>;
   collapsed: boolean;
   onToggleCollapse: () => void;
+  /** 定位偏移：由父级测量输入框位置后传入，覆盖 CSS 兜底 bottom */
+  style?: React.CSSProperties;
 }
 
 export default function TaskProgressPanel({
   taskProgress,
   collapsed,
+  style,
 }: TaskProgressPanelProps) {
   const items = Object.values(taskProgress);
   if (items.length === 0) return null;
@@ -16,7 +19,11 @@ export default function TaskProgressPanel({
   if (collapsed) {
     // 折叠态：仅保留一个 1px 的指示线，提示有活跃任务
     return (
-      <div className="task-progress-strip-panel task-progress-collapsed" aria-label="任务进度（已折叠）">
+      <div
+        className="task-progress-strip-panel task-progress-collapsed"
+        style={style}
+        aria-label="任务进度（已折叠）"
+      >
         {items.slice(0, 1).map((tp) => (
           <div
             key={tp.task_id}
@@ -29,7 +36,7 @@ export default function TaskProgressPanel({
   }
 
   return (
-    <div className="task-progress-strip-panel" aria-label="任务进度">
+    <div className="task-progress-strip-panel" style={style} aria-label="任务进度">
       {items.map((tp) => (
         <div key={tp.task_id} className="task-progress-strip-item">
           <div

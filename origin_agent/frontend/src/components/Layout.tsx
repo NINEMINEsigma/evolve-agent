@@ -51,6 +51,8 @@ export default function Layout({ ws, onContextMenu }: LayoutProps) {
   const [taskProgressCollapsed, setTaskProgressCollapsed] = useState(false);
   const [clipboardCollapsed, setClipboardCollapsed] = useState(false);
   const [headerCollapsed, setHeaderCollapsed] = useState(false);
+  // 进度条悬浮偏移：测量输入框顶部距容器底部的距离，使进度条精确位于输入框上方
+  const [taskProgressOffset, setTaskProgressOffset] = useState(84);
 
   const setSubagentPanelOpen = (value: boolean | ((prev: boolean) => boolean)) => {
     setSubagentPanelOpenMap((prev) => ({
@@ -119,6 +121,31 @@ export default function Layout({ ws, onContextMenu }: LayoutProps) {
     const cleanup = ws.attachScrollListener();
     return cleanup;
   }, [ws.attachScrollListener]);
+
+  // 测量输入框位置，实时同步进度条的 bottom 偏移（InputBar 为 absolute 悬浮，高度可变）
+  useEffect(() => {
+    const container = document.querySelector(".chat-area-container");
+    const inputBar = document.querySelector(".input-bar");
+    if (!container || !inputBar) return;
+    const update = () => {
+      // 空态输入框垂直居中（bottom: 50%），进度条不跟随，保持底部固定偏移，避免卡在画面中央
+      if (container.classList.contains("chat-area-container-empty")) {
+        setTaskProgressOffset(84);
+        return;
+      }
+      const cRect = container.getBoundingClientRect();
+      const iRect = inputBar.getBoundingClientRect();
+      setTaskProgressOffset(Math.max(0, Math.round(cRect.bottom - iRect.top) + 8));
+    };
+    update();
+    const ro = new ResizeObserver(update);
+    ro.observe(inputBar);
+    window.addEventListener("resize", update);
+    return () => {
+      ro.disconnect();
+      window.removeEventListener("resize", update);
+    };
+  }, [ws.sessionId]);
 
   const onToggleAgentState = (agentName: string) => {
     let curVisible = visibleCharacters.includes("all-agents")
@@ -250,12 +277,6 @@ export default function Layout({ ws, onContextMenu }: LayoutProps) {
           isMobile={isMobile}
         />
 
-        <TaskProgressPanel
-          taskProgress={ws.taskProgress}
-          collapsed={taskProgressCollapsed}
-          onToggleCollapse={() => setTaskProgressCollapsed((v) => !v)}
-        />
-
         <UnifiedPanel
           clipboardDisplays={ws.clipboardDisplays}
           collapsed={clipboardCollapsed}
@@ -286,6 +307,13 @@ export default function Layout({ ws, onContextMenu }: LayoutProps) {
           <SubagentCountdown
             subagentSessions={ws.subagentSessions}
             idleCountdown={ws.subagentIdleCountdown}
+          />
+
+          <TaskProgressPanel
+            taskProgress={ws.taskProgress}
+            collapsed={taskProgressCollapsed}
+            onToggleCollapse={() => setTaskProgressCollapsed((v) => !v)}
+            style={{ bottom: taskProgressOffset }}
           />
 
           <InputBar
