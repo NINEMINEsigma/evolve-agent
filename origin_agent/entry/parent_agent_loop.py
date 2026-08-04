@@ -39,6 +39,7 @@ from entity.messages import (
     ImageBlock,
     TextBlock,
     MessageBlock,
+    ToolResultMessage,
     ToolCall as HistoryToolCall,
 )
 from entry.base_agent_loop import BasePrivateChatAgentLoop, IMainSessionLoop
@@ -54,7 +55,7 @@ from entry.agent_support.multimodal import (
     summarize_message_for_log,
 )
 from entry.session_manager import LoopSessionManager
-from entry.tool_executor import ToolExecutor
+from entry.tool_executor import ToolExecutor, _interrupted_result
 from entry.stream_consumer import StreamConsumer
 
 if TYPE_CHECKING:
@@ -369,25 +370,48 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
                 self._store_assistant_with_tools(sid, resp)
 
                 # 委托给 ToolExecutor 执行工具调用
-                for tc in resp.tool_calls:
-                    tool_msg = await self._tool_executor.execute(tc, sid)
-                    messages.append(tool_msg)
-                    self._history.add_message(tool_msg)
-                    self.save_history(sid)
-                    await self._push_usage_update(sid)
+                try:
+                    for tc in resp.tool_calls:
+                        tool_msg = await self._tool_executor.execute(tc, sid)
+                        messages.append(tool_msg)
+                        self._history.add_message(tool_msg)
+                        self.save_history(sid)
+                        await self._push_usage_update(sid)
 
-                    if tc.name == "evolve_code":
-                        try:
-                            content_text = content_to_text(tool_msg.content)
-                            parsed: Any = json.loads(content_text)
-                            if parsed.get("evolved"):
-                                self._append(
-                                    sid, Role.ASSISTANT,
-                                    "Evolution complete, restarting to apply new code...",
-                                )
-                                return "Evolution complete, restarting to apply new code..."
-                        except (json.JSONDecodeError, KeyError, TypeError):
-                            pass
+                        if tc.name == "evolve_code":
+                            try:
+                                content_text = content_to_text(tool_msg.content)
+                                parsed: Any = json.loads(content_text)
+                                if parsed.get("evolved"):
+                                    self._append(
+                                        sid, Role.ASSISTANT,
+                                        "Evolution complete, restarting to apply new code...",
+                                    )
+                                    return "Evolution complete, restarting to apply new code..."
+                            except (json.JSONDecodeError, KeyError, TypeError):
+                                pass
+                except BaseException:
+                    # 兜底：execute 内部审批/dispatch/finalize 已保护，但
+                    # execute 协程被外部取消（asyncio task cancel）或 get_hooks_context
+                    # 等未保护 await 点抛异常时仍会穿透。此处为未执行的 tool_calls
+                    # 补中断结果，保证 History 配对后停止响应
+                    logger.exception("Tool loop failed for session=%s", sid)
+                    _assistant_ids = {t.id for t in resp.tool_calls}
+                    _executed_ids = {
+                        m.tool_call_id
+                        for m in self._history.iter_messages()
+                        if isinstance(m, ToolResultMessage) and m.tool_call_id in _assistant_ids
+                    }
+                    for tc in resp.tool_calls:
+                        if tc.id in _executed_ids:
+                            continue
+                        tool_msg = _interrupted_result(
+                            tc, self.current_character_agent, "unexpected",
+                        )
+                        messages.append(tool_msg)
+                        self._history.add_message(tool_msg)
+                        self.save_history(sid)
+                    return "Interrupted."
 
                 sid = await self._check_over_limit_in_tool_loop(sid)
 

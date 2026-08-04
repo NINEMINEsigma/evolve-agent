@@ -359,7 +359,11 @@ class History(BaseModel):
             return True
 
     def remove_unpaired_tool_calls(self) -> None:
-        """移除所有没有对应 ToolResultMessage 的 tool_calls。"""
+        """移除所有没有对应 ToolResultMessage 的 tool_calls。
+
+        某 assistant 消息的 tool_calls 被全部剔除后置为 None，
+        避免向 LLM 发送空 tool_calls 数组。
+        """
         with self._io_locker:
             result_ids: set[str] = {
                 msg.tool_call_id
@@ -368,10 +372,11 @@ class History(BaseModel):
             }
             for msg in self.messages:
                 if isinstance(msg, CharacterConversationMessage) and msg.tool_calls:
-                    msg.tool_calls = [
+                    kept = [
                         tc for tc in msg.tool_calls
                         if tc.id in result_ids
                     ]
+                    msg.tool_calls = kept if kept else None
 
     def at_message(self, message: BaseMessage) -> int:
         with self._io_locker:

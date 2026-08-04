@@ -37,6 +37,7 @@ from __future__ import annotations
 import logging
 import subprocess  # nosec
 import sys
+import threading
 from enum import Enum
 from pathlib import Path
 from typing import TYPE_CHECKING, Dict, List
@@ -154,6 +155,10 @@ class Sandbox:
 
     def __init__(self, ctx: RuntimeContext) -> None:
         self._ctx: RuntimeContext = ctx
+        # 活动子进程登记（session_id -> [Popen]），供中断路径 kill_active 终止。
+        # Sandbox 为全局单例，多个会话/线程并发调用 run()，需锁保护。
+        self._active_procs: dict[str, list[subprocess.Popen]] = {}
+        self._procs_lock: threading.Lock = threading.Lock()
 
     # -- 路径解析 ----------------------------------------------------
 
@@ -265,6 +270,7 @@ class Sandbox:
         extra_env: dict[str, str] | None = None,
         encoding: str = "utf-8",
         errors: str | None = None,
+        session_id: str = "",
     ) -> subprocess.CompletedProcess:
         """以沙盒化工作目录运行子进程。
 
@@ -276,6 +282,7 @@ class Sandbox:
 
         *encoding* — 子进程输出的文本编码（默认 ``"utf-8"``）。
         *errors* — 解码错误的处理方案（例如 ``"replace"``）。
+        *session_id* — 发起会话 ID，用于中断路径按会话终止活动进程。
 
         如果命令不允许或路径逃逸沙盒，抛出 ``SandboxError``。
         """
@@ -328,6 +335,8 @@ class Sandbox:
             # 但我们将使用 taskkill 进行更可靠的进程树终止。
             popen_kwargs["creationflags"] = windows_process_group_flags()
         proc: subprocess.Popen = subprocess.Popen(args, **popen_kwargs)
+        with self._procs_lock:
+            self._active_procs.setdefault(session_id, []).append(proc)
         stdout: bytes
         stderr: bytes
         try:
@@ -342,6 +351,14 @@ class Sandbox:
             raise subprocess.TimeoutExpired(
                 cmd=args[0], timeout=timeout, output="", stderr="",
             )
+        finally:
+            # 移除登记。kill_active 可能已清空整个 key（列表为空或 key 已删），须判空。
+            with self._procs_lock:
+                proc_list = self._active_procs.get(session_id)
+                if proc_list and proc in proc_list:
+                    proc_list.remove(proc)
+                    if not proc_list:
+                        self._active_procs.pop(session_id, None)
 
         return completed_process_from_bytes(
             args=args,
@@ -349,6 +366,27 @@ class Sandbox:
             stdout=stdout,
             stderr=stderr,
         )
+
+    def kill_active(self, session_id: str) -> None:
+        """终止指定 session 登记的所有活动子进程树；session_id 为空串时终止全部。
+
+        在事件循环线程调用（ToolExecutor 中断路径）。_kill_proc_tree 为同步
+        taskkill 子进程调用（毫秒级）；proc.wait 限制单进程等待上限 1 秒，
+        避免事件循环长阻塞。幂等：仅终止 poll() 仍为 None 的进程。
+        """
+        with self._procs_lock:
+            if session_id:
+                procs = self._active_procs.pop(session_id, [])
+            else:
+                procs = [p for v in self._active_procs.values() for p in v]
+                self._active_procs.clear()
+        for proc in procs:
+            if proc.poll() is None:
+                _kill_proc_tree(proc.pid)
+                try:
+                    proc.wait(timeout=1)
+                except Exception:
+                    pass
 
     # -- 工具辅助方法 --------------------------------------------------
 

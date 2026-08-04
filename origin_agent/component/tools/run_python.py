@@ -46,6 +46,8 @@ async def _handle_run_python(args: dict[str, Any]) -> dict:
     python_path: str = str(args.get("python_path", "")).strip()
     cwd: str = str(args.get("cwd", "ws:")).strip()
     timeout: int = int(args.get("timeout", SUBPROCESS_TIMEOUT_DEFAULT))
+    # ToolExecutor 已注入 _session_id，用于中断时按会话终止子进程
+    session_id: str = str(args.get("_session_id", ""))
 
     if not code and not script:
         return tool_error("Either 'code' or 'script' is required")
@@ -78,16 +80,16 @@ async def _handle_run_python(args: dict[str, Any]) -> dict:
             cmd_parts.extend(extra_args)
 
     # 审批由 AgentLoop 统一入口处理（handler 内不再重复确认）
-    return _execute(cmd_parts, cwd, timeout)
+    return _execute(cmd_parts, cwd, timeout, session_id)
 
 
-def _execute(cmd_parts: list[str], cwd: str, timeout: int = SUBPROCESS_TIMEOUT_DEFAULT) -> dict:
+def _execute(cmd_parts: list[str], cwd: str, timeout: int = SUBPROCESS_TIMEOUT_DEFAULT, session_id: str = "") -> dict:
     """执行已批准的命令并返回结果。"""
     logger.info("run_python | cwd=%s cmd=%s", cwd, cmd_parts)
     result: subprocess.CompletedProcess
     try:
         _enc = locale.getpreferredencoding(False) or sys.getfilesystemencoding() or "utf-8"
-        result = _s().run(cmd_parts, cwd_ns=cwd, timeout=timeout, encoding=_enc, errors="replace")
+        result = _s().run(cmd_parts, cwd_ns=cwd, timeout=timeout, encoding=_enc, errors="replace", session_id=session_id)
     except SandboxError as exc:
         return tool_error(str(exc))
     except subprocess.TimeoutExpired:

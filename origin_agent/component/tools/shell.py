@@ -37,6 +37,8 @@ async def _handle_run_command(args: dict[str, Any]) -> dict:
     """
     raw_cmd: Any = args.get("command")
     cwd: str = str(args.get("cwd", "ws:")).strip()
+    # ToolExecutor 已注入 _session_id，用于中断时按会话终止子进程
+    session_id: str = str(args.get("_session_id", ""))
 
     # ── 验证命令 ──
     if not raw_cmd or not isinstance(raw_cmd, list):
@@ -46,10 +48,10 @@ async def _handle_run_command(args: dict[str, Any]) -> dict:
         return tool_error("'command' must be a non-empty list")
 
     # 审批由 AgentLoop 统一入口处理（handler 内不再重复确认）
-    return _execute(cmd_parts, cwd)
+    return _execute(cmd_parts, cwd, session_id)
 
 
-def _execute(cmd_parts: list[str], cwd: str) -> dict:
+def _execute(cmd_parts: list[str], cwd: str, session_id: str = "") -> dict:
     """执行已受信任 / 已批准的命令并返回结果。"""
     # if cmd_parts and cmd_parts[0] not in _s().allowed_commands:
     #     return tool_error(f"Command '{cmd_parts[0]}' not in the allowed list")
@@ -70,7 +72,7 @@ def _execute(cmd_parts: list[str], cwd: str) -> dict:
     logger.info("run_command | cwd=%s cmd=%s", cwd, cmd_parts)
     result: subprocess.CompletedProcess
     try:
-        result = _s().run(resolved_parts, cwd_ns=cwd)
+        result = _s().run(resolved_parts, cwd_ns=cwd, session_id=session_id)
     except SandboxError as exc:
         return tool_error(str(exc))
     except subprocess.TimeoutExpired:

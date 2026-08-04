@@ -28,7 +28,7 @@ from entity.constant import (
 )
 from entry.base_agent_loop import BaseAgentLoop, IMainSessionLoop
 from entry.stream_consumer import StreamConsumer
-from entry.tool_executor import ToolExecutor
+from entry.tool_executor import ToolExecutor, _interrupted_result
 
 if TYPE_CHECKING:
     from entry.agent_sink import AgentSink
@@ -290,18 +290,52 @@ class MultiAgentWorker:
 
                 # 3. 执行工具，写入结果到 History
                 #    tool_call/tool_result 前端事件由 ToolExecutor 内部统一发送，此处不再重复
-                for tc in resp.tool_calls:
-                    tool_msg = await self._tool_executor.execute(
-                        tc, self._loop.loop.session_id,
-                        character_name=self.character_name,
+                try:
+                    for tc in resp.tool_calls:
+                        tool_msg = await self._tool_executor.execute(
+                            tc, self._loop.loop.session_id,
+                            character_name=self.character_name,
+                        )
+
+                        # 写入共享 History
+                        self._loop.loop.history.add_message(tool_msg)
+                        self._loop.loop.save_history(self._loop.loop.session_id)
+
+                        # 追加 tool 结果到本地 LLM 上下文（跟在 assistant tool_calls 之后）
+                        full_messages.append(tool_msg)
+                except BaseException:
+                    # 兜底：execute 内部审批/dispatch/finalize 已保护，但
+                    # execute 协程被外部取消（asyncio task cancel）或未保护 await 点
+                    # 抛异常时仍会穿透。此处为未执行的 tool_calls 补中断结果，
+                    # 保证共享 History 配对后停止响应
+                    logger.exception(
+                        "Worker tool loop failed | session=%s character=%s turn=%d",
+                        self._loop.loop.session_id, self.character_name, turn,
                     )
-
-                    # 写入共享 History
-                    self._loop.loop.history.add_message(tool_msg)
-                    self._loop.loop.save_history(self._loop.loop.session_id)
-
-                    # 追加 tool 结果到本地 LLM 上下文（跟在 assistant tool_calls 之后）
-                    full_messages.append(tool_msg)
+                    _assistant_ids = {t.id for t in resp.tool_calls}
+                    _executed_ids = {
+                        m.tool_call_id
+                        for m in self._loop.loop.history.iter_messages()
+                        if isinstance(m, ToolResultMessage) and m.tool_call_id in _assistant_ids
+                    }
+                    for tc in resp.tool_calls:
+                        if tc.id in _executed_ids:
+                            continue
+                        tool_msg = _interrupted_result(
+                            tc, self.character_name, "unexpected",
+                        )
+                        self._loop.loop.history.add_message(tool_msg)
+                        self._loop.loop.save_history(self._loop.loop.session_id)
+                    return WorkerResult(
+                        character_name=self.character_name,
+                        parsed_json=AgentResponse(content=""),
+                        raw_json="",
+                        stream_buffer=[],
+                        stream_id=stream_id,
+                        total_token_usage=self._total_token_usage,
+                        last_prompt_tokens=self._last_prompt_tokens,
+                        reasoning=resp.reasoning_content,
+                    )
 
                 # 工具执行后检查中断：如 exit_multi_agent 等工具替换了 loop，
                 # 立即停止 worker，不再进入下一轮 LLM 调用

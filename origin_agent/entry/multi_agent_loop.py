@@ -310,6 +310,10 @@ class MultiAgentLoop(BaseAgentLoop, IMainSessionLoop):
         """
         # 新消息到达时重置中断状态，允许用户从停止状态恢复
         self._cancel_event.clear()
+        # 发送前强制配对：清理上次中断/异常残留的无配对 tool_calls
+        # （multi_agent 不走 build_full_history_messages，此处为唯一清理点）
+        self._history.remove_unpaired_tool_calls()
+        self.save_history(self.session_id)
         if self.is_interrupted():
             logger.warning("process_message skipped: loop interrupted | session=%s", self.session_id)
             return ""

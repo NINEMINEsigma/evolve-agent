@@ -35,6 +35,7 @@ from entry.agent_sink import AgentSink, ParentAgentSink
 from entry.base_agent_loop import BasePrivateChatAgentLoop, UserMessage, ContextLimitMessage, ToolContext
 from entry.agent_support.multimodal import content_to_text, tool_result_to_content
 from entry.tool_post_dispatch import finalize_tool_result
+from entry.tool_executor import _interrupted_result
 
 logger = logging.getLogger(__name__)
 
@@ -366,31 +367,55 @@ class SubAgentLoop(BasePrivateChatAgentLoop):
                 self._history.add_message(assistant_msg)
 
                 # 处理工具调用 — readonly 直接执行；其它工具入审批队列阻塞等待
-                for tc in resp.tool_calls:
-                    if self._cancel_event.is_set():
-                        return
+                try:
+                    for i, tc in enumerate(resp.tool_calls):
+                        # 中断：为当前及剩余未执行 tool_calls 补中断结果后停止响应
+                        if self._cancel_event.is_set():
+                            for remaining in resp.tool_calls[i:]:
+                                self._history.add_message(_interrupted_result(
+                                    remaining, self.current_character_agent, "pending",
+                                ))
+                            return
 
-                    # 推送 tool_call 事件
-                    self._emit(
-                        "tool_call",
-                        tool_call_id=tc.id,
-                        tool_name=tc.name,
-                        tool_args=dict(tc.arguments) if tc.arguments else {},
+                        # 推送 tool_call 事件
+                        self._emit(
+                            "tool_call",
+                            tool_call_id=tc.id,
+                            tool_name=tc.name,
+                            tool_args=dict(tc.arguments) if tc.arguments else {},
+                        )
+
+                        if self._is_auto_executable(tc.name) or self._is_auto_approved_tool(tc.name, dict(tc.arguments) if tc.arguments else {}):
+                            tool_msg = await self._execute_approved_tool(tc)
+                        else:
+                            tool_msg = await self._queue_for_approval(tc)
+
+                        # tool_result 事件已由 finalize_tool_result 统一推送，此处不再重复
+
+                        # 检测工具失败并放入 outbox，让父 Agent 知道（防止默认成功假设）
+                        raw_content = content_to_text(tool_msg.content)
+                        self._maybe_record_tool_failure(tc.name, raw_content)
+
+                        messages.append(tool_msg)
+                        self._history.add_message(tool_msg)
+                except BaseException:
+                    # 异常兜底：为未执行的 tool_calls 补中断结果，保证 History 配对后停止响应
+                    logger.exception(
+                        "SubAgent tool loop failed | session=%s", self.session_id,
                     )
-
-                    if self._is_auto_executable(tc.name) or self._is_auto_approved_tool(tc.name, dict(tc.arguments) if tc.arguments else {}):
-                        tool_msg = await self._execute_approved_tool(tc)
-                    else:
-                        tool_msg = await self._queue_for_approval(tc)
-
-                    # tool_result 事件已由 finalize_tool_result 统一推送，此处不再重复
-
-                    # 检测工具失败并放入 outbox，让父 Agent 知道（防止默认成功假设）
-                    raw_content = content_to_text(tool_msg.content)
-                    self._maybe_record_tool_failure(tc.name, raw_content)
-
-                    messages.append(tool_msg)
-                    self._history.add_message(tool_msg)
+                    _assistant_ids = {t.id for t in resp.tool_calls}
+                    _executed_ids = {
+                        m.tool_call_id
+                        for m in self._history.iter_messages()
+                        if isinstance(m, ToolResultMessage) and m.tool_call_id in _assistant_ids
+                    }
+                    for tc in resp.tool_calls:
+                        if tc.id in _executed_ids:
+                            continue
+                        self._history.add_message(_interrupted_result(
+                            tc, self.current_character_agent, "unexpected",
+                        ))
+                    return
 
                 # 工具结果已收集，本轮响应结束；注入收件箱（若有）后立刻进入下一轮 LLM 推理
                 self._round_active = False
@@ -533,14 +558,30 @@ class SubAgentLoop(BasePrivateChatAgentLoop):
         from component.approval import is_handsfree_mode, request_user_confirm
 
         if is_handsfree_mode(self._parent_session_id):
-            result = await request_user_confirm(
+            # 脱手模式审批同样可中断：中断时取消审批任务并返回强制中断失败结果
+            confirm_task = asyncio.ensure_future(request_user_confirm(
                 session_id=self._parent_session_id,
                 tool_name=tc.name,
                 args=dict(tc.arguments) if tc.arguments else {},
                 reason="Sub-agent initiated tool call",
                 content=f"Sub-agent {tc.name} tool call",
                 ask_agent_callback=None,
-            )
+            ))
+            cancel_wait = asyncio.ensure_future(self._cancel_event.wait())
+            try:
+                done, _ = await asyncio.wait(
+                    {confirm_task, cancel_wait}, return_when=asyncio.FIRST_COMPLETED,
+                )
+            finally:
+                cancel_wait.cancel()
+            if confirm_task not in done:
+                confirm_task.cancel()
+                try:
+                    await confirm_task
+                except (asyncio.CancelledError, Exception):
+                    pass
+                return _interrupted_result(tc, self.current_character_agent, "approval")
+            result = confirm_task.result()
             if result.action in ("allow_once", "allow_always"):
                 self._emit(
                     "approval_decision",
@@ -572,7 +613,23 @@ class SubAgentLoop(BasePrivateChatAgentLoop):
         )
 
         try:
-            result = await pending.result  # 永不超时，阻塞等待
+            # 可中断等待：中断时取消审批 future，返回强制中断失败结果
+            result_task = asyncio.ensure_future(pending.result)
+            cancel_wait = asyncio.ensure_future(self._cancel_event.wait())
+            try:
+                done, _ = await asyncio.wait(
+                    {result_task, cancel_wait}, return_when=asyncio.FIRST_COMPLETED,
+                )
+            finally:
+                cancel_wait.cancel()
+            if result_task not in done:
+                result_task.cancel()
+                try:
+                    await result_task
+                except (asyncio.CancelledError, Exception):
+                    pass
+                return _interrupted_result(tc, self.current_character_agent, "approval")
+            result = result_task.result()
             # TODO: 修改过一次, 仍怀疑此处存在问题
             # approve_tools 对拒绝使用 set_exception，此处 result["approved"] 恒为 True
             self._emit(
@@ -582,7 +639,8 @@ class SubAgentLoop(BasePrivateChatAgentLoop):
                 content="approved",
             )
             return await self._execute_approved_tool(tc)
-        except RuntimeError as exc:
+        except Exception as exc:
+            # 仅捕获常规异常（含 approve_tools 的 RuntimeError 拒绝）；CancelledError/SystemExit 放行
             self._emit(
                 "approval_decision",
                 tool_call_id=tc.id,
@@ -635,10 +693,51 @@ class SubAgentLoop(BasePrivateChatAgentLoop):
             invocation_start = _time_module.monotonic()
             invocation_start_offset_ms = int((invocation_start - start_mono) * 1000)
 
-            if timeout:
-                result = await asyncio.wait_for(coro, timeout=timeout)
+            # 可中断等待：同时响应中断、超时与正常完成
+            dispatch_task = asyncio.ensure_future(coro)
+            cancel_wait = asyncio.ensure_future(self._cancel_event.wait())
+            timeout_task = asyncio.ensure_future(asyncio.sleep(timeout)) if timeout else None
+            try:
+                if timeout_task is not None:
+                    done, _ = await asyncio.wait(
+                        {dispatch_task, cancel_wait, timeout_task},
+                        return_when=asyncio.FIRST_COMPLETED,
+                    )
+                else:
+                    done, _ = await asyncio.wait(
+                        {dispatch_task, cancel_wait},
+                        return_when=asyncio.FIRST_COMPLETED,
+                    )
+            finally:
+                cancel_wait.cancel()
+                if timeout_task is not None:
+                    timeout_task.cancel()
+            if dispatch_task in done and not dispatch_task.cancelled():
+                result = dispatch_task.result()
+            elif timeout_task is not None and timeout_task in done:
+                # 超时：取消 dispatch，走既有 TimeoutError 分支
+                dispatch_task.cancel()
+                try:
+                    await dispatch_task
+                except (asyncio.CancelledError, Exception):
+                    pass
+                raise asyncio.TimeoutError()
             else:
-                result = await coro
+                # 中断：取消 dispatch，尽力 kill 子进程（run_command / run_python 登记的 Popen），
+                # 返回强制中断失败结果
+                dispatch_task.cancel()
+                try:
+                    await dispatch_task
+                except (asyncio.CancelledError, Exception):
+                    pass
+                try:
+                    from system.application import Application
+                    Application.current().sandbox.kill_active(self.session_id)
+                except Exception:
+                    logger.warning(
+                        "kill_active failed for session=%s", self.session_id, exc_info=True,
+                    )
+                return _interrupted_result(tc, self.current_character_agent, "dispatch")
 
             invocation_duration_ms: int = int((_time_module.monotonic() - invocation_start) * 1000)
             end_time_offset_ms: int = int((_time_module.monotonic() - start_mono) * 1000)

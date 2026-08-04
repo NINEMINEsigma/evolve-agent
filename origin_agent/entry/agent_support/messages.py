@@ -187,5 +187,8 @@ def build_full_history_messages(
     messages: list[BaseMessage] = [
         CharacterSystemMessage(role=Role.SYSTEM, character_name=current_character_agent, content=sp) for sp in system_prompts
     ]
+    # 发送前强制配对：清理上次中断/异常残留的无配对 tool_calls，避免 LLM 400。
+    # 幂等——仅剔除无对应 ToolResultMessage 的 tool_calls，不影响正常配对消息。
+    history.remove_unpaired_tool_calls()
     messages.extend(history.get_messages(current_character_agent=current_character_agent))
     return messages

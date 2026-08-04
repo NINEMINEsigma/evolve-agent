@@ -8,6 +8,7 @@ registry 分发、异常转换、前端事件推送和 UI 事件路由。
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import time
@@ -25,6 +26,37 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+class ToolInterrupted(Exception):
+    """内部中断信号：可中断等待被 cancel_event 打断时抛出。
+
+    携带 phase 字段（"approval" / "dispatch"），由调用方
+    ``except ToolInterrupted as ti`` 捕获后用 ``ti.phase``
+    构造统一的中断失败结果。
+    """
+
+    def __init__(self, phase: str) -> None:
+        super().__init__(f"Tool call interrupted during {phase}")
+        self.phase: str = phase
+
+
+def _interrupted_result(tc: ToolCallRequest, char_name: str, phase: str) -> ToolResultMessage:
+    """构造强制中断失败消息，作为未完成工具调用的占位结果。
+
+    phase 取值：pending（入口/审批前）、approval、dispatch、unexpected（异常兜底）。
+    该结果写入 History 后与 assistant 的 tool_calls 配对，保证消息序列合法。
+    """
+    return ToolResultMessage(
+        role=Role.TOOL,
+        character_name=char_name,
+        tool_call_id=tc.id,
+        content=json.dumps({
+            "error": "Tool call interrupted by user",
+            "_interrupted": True,
+            "_interrupted_phase": phase,
+        }, ensure_ascii=False),
+    )
+
+
 class ToolExecutor:
     """执行单个工具调用，处理审批、分发和事件推送。
 
@@ -40,6 +72,37 @@ class ToolExecutor:
 
     def get_tool_stats(self) -> dict[str, dict[str, int]]:
         return {name: dict(stats) for name, stats in self._tool_stats.items()}
+
+    async def _await_or_cancel(self, coro: Awaitable[Any], phase: str) -> Any:
+        """等待 coro 完成或中断触发。
+
+        - 正常完成：返回 coro 结果（内部异常由 async_dispatch 等已转为错误结果）。
+        - 中断触发（cancel_event 置位）：取消 coro 任务并抛 ToolInterrupted(phase)，
+          由调用方捕获后转统一中断失败结果。
+        """
+        task = asyncio.ensure_future(coro)
+        interrupt_wait = asyncio.ensure_future(self._loop.loop.cancel_event.wait())
+        try:
+            done, _ = await asyncio.wait(
+                {task, interrupt_wait},
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+        finally:
+            interrupt_wait.cancel()
+        if task in done and not task.cancelled():
+            try:
+                return task.result()
+            except Exception as exc:
+                # 正常完成路径防御：handler 异常已由 async_dispatch 转为错误结果，
+                # 此处仅兜底非常规异常；SystemExit/KeyboardInterrupt 放行
+                return {"error": f"{type(exc).__name__}: {exc}"}
+        # 中断分支：取消任务并吞掉 CancelledError
+        task.cancel()
+        try:
+            await task
+        except (asyncio.CancelledError, Exception):
+            pass
+        raise ToolInterrupted(phase)
 
     async def execute(
         self,
@@ -72,23 +135,9 @@ class ToolExecutor:
 
         args = dict(tc.arguments)
 
-        # 取消检查
+        # 取消检查：中断时返回统一强制中断失败结果（保证与 assistant tool_calls 配对）
         if self._loop.loop.is_interrupted():
-            _meta = ToolCallMeta(
-                application_time=application_time,
-                application_time_ms=application_time_ms,
-                approval_duration_ms=0,
-                invocation_start_offset_ms=0,
-                invocation_duration_ms=0,
-                end_time_offset_ms=0,
-            )
-            _cancelled_result: dict = {"error": "Cancelled.", "_meta": _meta.model_dump()}
-            return ToolResultMessage(
-                role=Role.TOOL,
-                character_name=char_name,
-                tool_call_id=tc.id,
-                content=json.dumps(_cancelled_result, ensure_ascii=False),
-            )
+            return _interrupted_result(tc, char_name, "pending")
 
         args["_session_id"] = session_id
 
@@ -160,14 +209,21 @@ class ToolExecutor:
             ask_agent_callback = _ask_agent_callback_impl
 
         approval_start: float = time.monotonic()
-        outcome = await execute_with_approval(
-            tool_name=tc.name,
-            args=args,
-            session_id=session_id,
-            sink=self._loop.loop.get_sink(),
-            ask_agent_callback=ask_agent_callback,
-            hooks_context=_hooks_ctx,
-        )
+        try:
+            outcome = await self._await_or_cancel(
+                execute_with_approval(
+                    tool_name=tc.name,
+                    args=args,
+                    session_id=session_id,
+                    sink=self._loop.loop.get_sink(),
+                    ask_agent_callback=ask_agent_callback,
+                    hooks_context=_hooks_ctx,
+                ),
+                "approval",
+            )
+        except ToolInterrupted as ti:
+            # 取消审批 task 触发 request_approval 的 CancelledError 分支，自行清理 pending confirms
+            return _interrupted_result(tc, char_name, ti.phase)
         approval_duration_ms: int = int((time.monotonic() - approval_start) * 1000)
 
         _skip_dispatch = False
@@ -179,6 +235,10 @@ class ToolExecutor:
         if not _skip_dispatch:
             invocation_start: float = time.monotonic()
             invocation_start_offset_ms: int = int((invocation_start - start_mono) * 1000)
+
+            # dispatch 前再次检查中断（缩短审批返回后→分发前的竞态窗口）
+            if self._loop.loop.is_interrupted():
+                return _interrupted_result(tc, char_name, "pending")
 
             # availability scope 校验：拦截不在当前 loop scope 内的工具
             _scope = self._loop.get_tool_availability_scope()
@@ -202,10 +262,24 @@ class ToolExecutor:
                     end_time_offset_ms = int((time.monotonic() - start_mono) * 1000)
                 else:
                     try:
-                        ctx = ToolContext(loop=self._loop, session_id=session_id)
-                        result = await tool_registry.async_dispatch(
-                            tc.name, args, context=ctx,
-                        )
+                        ctx = ToolContext(loop=self._loop.loop, session_id=session_id)
+                        try:
+                            result = await self._await_or_cancel(
+                                tool_registry.async_dispatch(
+                                    tc.name, args, context=ctx,
+                                ),
+                                "dispatch",
+                            )
+                        except ToolInterrupted as ti:
+                            # 尽力 kill 子进程（run_command / run_python 登记的 Popen）
+                            try:
+                                from system.application import Application
+                                Application.current().sandbox.kill_active(session_id)
+                            except Exception:
+                                logger.warning(
+                                    "kill_active failed for session=%s", session_id, exc_info=True,
+                                )
+                            return _interrupted_result(tc, char_name, ti.phase)
                     except Exception as exc:
                         logger.exception("Tool %s dispatch error: %s", tc.name, exc)
                         self._tool_stats[tc.name]["errors"] += 1
@@ -220,17 +294,24 @@ class ToolExecutor:
             invocation_duration_ms = 0
             end_time_offset_ms = approval_duration_ms
 
-        return await finalize_tool_result(
-            result,
-            tool_name=tc.name,
-            application_time=application_time,
-            application_time_ms=application_time_ms,
-            approval_duration_ms=approval_duration_ms,
-            invocation_start_offset_ms=invocation_start_offset_ms,
-            invocation_duration_ms=invocation_duration_ms,
-            end_time_offset_ms=end_time_offset_ms,
-            sink=self._loop.loop.get_sink(),
-            session_id=session_id,
-            tool_call_id=tc.id,
-            character_name=char_name,
-        )
+        try:
+            return await finalize_tool_result(
+                result,
+                tool_name=tc.name,
+                application_time=application_time,
+                application_time_ms=application_time_ms,
+                approval_duration_ms=approval_duration_ms,
+                invocation_start_offset_ms=invocation_start_offset_ms,
+                invocation_duration_ms=invocation_duration_ms,
+                end_time_offset_ms=end_time_offset_ms,
+                sink=self._loop.loop.get_sink(),
+                session_id=session_id,
+                tool_call_id=tc.id,
+                character_name=char_name,
+            )
+        except BaseException:
+            # finalize（content 转换/事件推送）异常时以中断结果兜底，保证 execute 不向调用方抛异常
+            logger.exception(
+                "finalize_tool_result failed | session=%s tool=%s", session_id, tc.name,
+            )
+            return _interrupted_result(tc, char_name, "unexpected")
