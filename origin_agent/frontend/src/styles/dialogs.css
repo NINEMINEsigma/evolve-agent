@@ -1,40 +1,4 @@
-/* ── Confirm dialog ── */
-.confirm-overlay {
-  position: fixed;
-  inset: 0;
-  background: rgba(0, 0, 0, 0.6);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 100;
-}
-
-.confirm-dialog {
-  background: var(--bg-secondary);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  padding: 24px;
-  max-width: 640px;
-  max-height: min(80vh, 520px);
-  width: 90%;
-  display: flex;
-  flex-direction: column;
-}
-
-.confirm-title {
-  font-weight: 600;
-  font-size: 16px;
-  margin-bottom: 12px;
-  flex-shrink: 0;
-}
-
-.confirm-body {
-  margin-bottom: 12px;
-  overflow-y: auto;
-  flex: 1;
-  min-height: 0;
-}
-
+/* ── Confirm dialog 私有样式（共享窗框样式见 modal.css） ── */
 .confirm-cmd {
   background: var(--bg-tertiary);
   padding: 10px 14px;
@@ -52,45 +16,6 @@
   margin-top: 8px;
   font-size: 13px;
   color: var(--text-secondary);
-}
-
-.confirm-actions {
-  display: flex;
-  gap: 10px;
-  justify-content: flex-end;
-  flex-shrink: 0;
-  padding-top: 12px;
-  border-top: 1px solid var(--border);
-}
-
-.confirm-deny,
-.confirm-once,
-.confirm-always {
-  padding: 8px 16px;
-  border: none;
-  border-radius: var(--radius-sm);
-  font-size: 14px;
-  cursor: pointer;
-}
-
-.confirm-deny {
-  background: var(--bg-hover);
-  color: var(--text-primary);
-}
-
-.confirm-once {
-  background: var(--bg-tertiary);
-  color: var(--text-primary);
-  border: 1px solid var(--border);
-}
-
-.confirm-always {
-  background: var(--accent);
-  color: #fff;
-}
-
-.confirm-always:hover {
-  background: var(--accent-hover);
 }
 
 /* ── Ask dialog (agent questions) ── */
@@ -154,7 +79,7 @@
 }
 
 /* ── Tag editor ── */
-.tag-editor .confirm-body {
+.tag-editor .modal-body {
   min-height: 160px;
 }
 

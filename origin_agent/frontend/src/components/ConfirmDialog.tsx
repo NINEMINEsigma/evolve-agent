@@ -1,5 +1,6 @@
 import { ConfirmRequest } from "../types";
 import { getToolTitle } from "../utils/toolLabels";
+import ModalWindow from "./primitives/ModalWindow";
 
 interface ConfirmDialogProps {
   pendingConfirm: ConfirmRequest | null;
@@ -20,42 +21,39 @@ export default function ConfirmDialog({
   const toolTitle = getToolTitle(pendingConfirm.tool);
 
   return (
-    <div className="confirm-overlay">
-      <div className="confirm-dialog">
-        <div className="confirm-title">
-          {emoji} {toolTitle}
-        </div>
-        <div className="confirm-body">
-          <pre className="confirm-cmd" style={{ maxHeight: "40vh", overflowY: "auto" }}>
-            {Array.isArray(pendingConfirm.command)
-              ? pendingConfirm.command.join(" ")
-              : (pendingConfirm.command ?? pendingConfirm.content)}
-          </pre>
-          {pendingConfirm.reason && (
-            <div className="confirm-reason">原因: {pendingConfirm.reason}</div>
-          )}
-          <textarea
-            className="confirm-deny-reason"
-            value={denyReason}
-            onChange={(e) => setDenyReason(e.target.value)}
-            placeholder="输入拒绝原因..."
-            rows={2}
-          />
-        </div>
-        <div className="confirm-actions">
+    <ModalWindow
+      title={`${emoji} ${toolTitle}`}
+      actions={
+        <>
           <button
-            className="confirm-deny"
+            className="modal-btn modal-btn--secondary"
             onClick={() => onRespond("deny", denyReason, "user")}>
             拒绝
           </button>
-          <button className="confirm-once" onClick={() => onRespond("allow_once")}>
+          <button className="modal-btn modal-btn--neutral" onClick={() => onRespond("allow_once")}>
             允许一次
           </button>
-          <button className="confirm-always" onClick={() => onRespond("allow_always")}>
+          <button className="modal-btn modal-btn--primary" onClick={() => onRespond("allow_always")}>
             始终允许
           </button>
-        </div>
-      </div>
-    </div>
+        </>
+      }
+    >
+      <pre className="confirm-cmd">
+        {Array.isArray(pendingConfirm.command)
+          ? pendingConfirm.command.join(" ")
+          : (pendingConfirm.command ?? pendingConfirm.content)}
+      </pre>
+      {pendingConfirm.reason && (
+        <div className="confirm-reason">原因: {pendingConfirm.reason}</div>
+      )}
+      <textarea
+        className="confirm-deny-reason"
+        value={denyReason}
+        onChange={(e) => setDenyReason(e.target.value)}
+        placeholder="输入拒绝原因..."
+        rows={2}
+      />
+    </ModalWindow>
   );
 }

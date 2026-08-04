@@ -12,6 +12,7 @@ import "./styles/chat.css";
 import "./styles/messages.css";
 import "./styles/playlist.css";
 import "./styles/lightbox.css";
+import "./styles/modal.css";
 import "./styles/dialogs.css";
 import "./styles/panels.css";
 import "./styles/drawer.css";
