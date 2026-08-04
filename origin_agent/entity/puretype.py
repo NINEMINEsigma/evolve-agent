@@ -525,3 +525,37 @@ class LSPSymbol(BaseModel):
     end_column: int
     detail: str | None = None
     children: list["LSPSymbol"] = Field(default_factory=list)
+
+
+# ---------------------------------------------------------------------------
+# Runtime Types
+# ---------------------------------------------------------------------------
+
+class SystemInfo(BaseModel):
+    """运行时宿主系统信息，用于注入 base.txt 占位符。"""
+
+    user_name: str = ""
+    """当前操作系统用户名。"""
+
+    host_name: str = ""
+    """当前主机名。"""
+
+    os_info: str = ""
+    """操作系统平台描述（如 Windows-11-10.0.22631-SP0）。"""
+
+
+# ---------------------------------------------------------------------------
+# Tool Result Types
+# ---------------------------------------------------------------------------
+
+class ShowApiKeyResult(BaseModel):
+    """show_llm_api_key 工具的返回摘要（不含明文 key）。"""
+
+    configured: bool
+    """api_key 是否已配置。"""
+
+    masked: str = ""
+    """脱敏后的 key（如 sk-***wxyz），未配置时为空串。"""
+
+    message: str = ""
+    """面向用户的说明文本。"""

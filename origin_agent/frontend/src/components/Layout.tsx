@@ -11,6 +11,7 @@ import SubagentCountdown from "./SubagentCountdown";
 import Lightbox from "./Lightbox";
 import ConfirmDialog from "./ConfirmDialog";
 import AskDialog from "./AskDialog";
+import SecretBanner from "./SecretBanner";
 import type { WebSocketState } from "../hooks/useWebSocket";
 
 interface LayoutProps {
@@ -257,6 +258,11 @@ export default function Layout({ ws, onContextMenu }: LayoutProps) {
           clipboardDisplays={ws.clipboardDisplays}
           collapsed={clipboardCollapsed}
           onToggleCollapse={() => setClipboardCollapsed((v) => !v)}
+        />
+
+        <SecretBanner
+          banner={ws.secretBanner}
+          onDismiss={() => ws.setSecretBanner(null)}
         />
 
         <ChatArea

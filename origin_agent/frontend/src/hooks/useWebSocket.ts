@@ -407,6 +407,8 @@ export function useWebSocket() {
     setTaskProgress: session.setTaskProgress,
     clipboardDisplays: session.clipboardDisplays,
     setClipboardDisplays: session.setClipboardDisplays,
+    secretBanner: session.secretBanner,
+    setSecretBanner: session.setSecretBanner,
     dynamicEndpoints: session.dynamicEndpoints,
     subagentSessions,
     llmMaxContextTokens: session.llmMaxContextTokens,

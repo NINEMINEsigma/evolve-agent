@@ -144,6 +144,7 @@ def build_agent_system_prompt(
         fix_fork_path=str(ctx.fix_path) if ctx.fix_path else "",
         fix_log_path=str(ctx.fix_log_path or ""),
         tool_availability_scope=tool_availability_scope,
+        runtime_ctx=ctx,
     )
 
 

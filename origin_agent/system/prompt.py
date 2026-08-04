@@ -24,8 +24,9 @@ logger = logging.getLogger(__name__)
 
 from system.pathutils import find_repo_root
 from system.templates import read_template
+from system.context import RuntimeContext
 from entity.constant import STATIC_FILE_HTTP_PREFIX, DOWNLOADS_HTTP_PREFIX
-from entity.puretype import ToolAvailability
+from entity.puretype import SystemInfo, ToolAvailability
 
 
 def _read_gene() -> str:
@@ -63,6 +64,27 @@ def _platform_info() -> str:
     )
 
 
+def _system_info() -> SystemInfo:
+    """收集宿主系统信息，单项失败时回退为空串。"""
+    import getpass
+    import socket
+    import platform
+
+    try:
+        user = getpass.getuser()
+    except Exception:
+        user = ""
+    try:
+        host = socket.gethostname()
+    except Exception:
+        host = ""
+    try:
+        os_info = platform.platform()
+    except Exception:
+        os_info = ""
+    return SystemInfo(user_name=user, host_name=host, os_info=os_info)
+
+
 def _read_if_exists(path: Path) -> str:
     """返回文件内容的去空白字符串，缺失时返回 ''。"""
     if not path.is_file():
@@ -83,6 +105,7 @@ def build_system_prompt(
     fix_fork_path: str = "",
     fix_log_path: str = "",
     tool_availability_scope: ToolAvailability = ToolAvailability.MAIN,
+    runtime_ctx: RuntimeContext | None = None,   # 运行时配置：注入 base.txt 占位符
 ) -> list[str]:
     """从分层模板组装完整的 system prompt 列表。
 
@@ -127,6 +150,24 @@ def build_system_prompt(
         base = base.replace(r"{{fork_path}}", fork_path)
         base = base.replace(r"{{uploads_prefix}}", STATIC_FILE_HTTP_PREFIX)
         base = base.replace(r"{{downloads_prefix}}", DOWNLOADS_HTTP_PREFIX)
+        # 1b. 运行时配置占位符（缺省兜底 "未配置"）
+        if runtime_ctx is not None:
+            sys_info = _system_info()
+            runtime_values = {
+                "{{mode}}": runtime_ctx.mode,
+                "{{llm_model}}": runtime_ctx.llm_model,
+                "{{llm_base_url}}": runtime_ctx.llm_base_url,
+                "{{llm_max_context_tokens}}": str(runtime_ctx.llm_max_context_tokens),
+                "{{llm_max_output_tokens}}": str(runtime_ctx.llm_max_output_tokens),
+                "{{llm_reasoning_effort}}": runtime_ctx.llm_reasoning_effort,
+                "{{llm_client_name}}": runtime_ctx.llm_client_name,
+                "{{git_remotes}}": runtime_ctx.git_remotes,
+                "{{user_name}}": sys_info.user_name,
+                "{{host_name}}": sys_info.host_name,
+                "{{os_info}}": sys_info.os_info,
+            }
+            for k, v in runtime_values.items():
+                base = base.replace(k, (v or "未配置").strip())
         blocks.append(base)
 
     # 2. 模式特定

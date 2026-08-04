@@ -920,3 +920,80 @@
     border-image: none;
   }
 }
+
+/* ── Secret banner（密钥展示，fixed 顶部居中，自动消失）── */
+.secret-banner {
+  position: fixed;
+  top: 64px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 1000;
+  width: min(560px, calc(100vw - 32px));
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+  padding: 10px 14px;
+  font-size: 13px;
+}
+
+.secret-banner-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 6px;
+}
+
+.secret-banner-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.secret-banner-close {
+  font-size: 16px;
+  line-height: 1;
+  padding: 2px 6px;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  border-radius: 4px;
+}
+
+.secret-banner-close:hover {
+  color: var(--text-primary);
+  background: var(--bg-hover);
+}
+
+.secret-banner-content {
+  margin: 0 0 8px;
+  padding: 8px 10px;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text-primary);
+  font-family: var(--font-mono, monospace);
+  font-size: 12px;
+  line-height: 1.45;
+  word-break: break-all;
+  white-space: pre-wrap;
+  user-select: all;
+}
+
+.secret-banner-copy {
+  font-size: 12px;
+  padding: 4px 14px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg-hover);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+
+.secret-banner-copy:hover {
+  background: var(--accent);
+  color: #fff;
+  border-color: var(--accent);
+}

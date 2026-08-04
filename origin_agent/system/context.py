@@ -87,6 +87,9 @@ class RuntimeContext(BaseModel):
     llm_client_name: str = "openai_client"
     """模型 reasoning_effort 参数值（如 "low" / "medium" / "high"），空字符串表示不启用。"""
 
+    git_remotes: str = ""
+    """宿主仓库 remote 列表（``name=url`` 每行一个），由 run.py 启动时读取注入。"""
+
     # -- 工具执行超时 ---------------------------------------------
 
     tool_timeout: int = 30

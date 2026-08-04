@@ -55,6 +55,31 @@ for module in Path("third").iterdir():
 '''
 
 
+# ── git remote 收集（注入 system prompt）─────────────────────────────
+def _collect_git_remotes() -> str:
+    """读取宿主仓库 git remote（只读），失败返回空串。"""
+    try:
+        out = subprocess.run(
+            ["git", "remote", "-v"],
+            capture_output=True, text=True, encoding="utf-8", timeout=10,
+        )
+        if out.returncode != 0:
+            return ""
+        lines, seen = [], set()
+        for line in out.stdout.splitlines():
+            parts = line.split("\t")
+            if len(parts) >= 2:
+                name, url = parts[0], parts[1].split(" ")[0]
+                if (name, url) not in seen:
+                    seen.add((name, url))
+                    lines.append(f"{name}={url}")
+        return "\n".join(lines)
+    except Exception:
+        return ""
+
+
+git_remotes = _collect_git_remotes()
+
 # ── evolution status journal ─────────────────────────────────────────
 _EVOLVE_STATUS_PATH = logs_path_name / "evolution.status"
 
@@ -107,6 +132,7 @@ def _build_base_args():
         "--approval_remote_model",      quote(approval_remote_model),
         "--merge_concat_threshold",     quote(merge_concat_threshold),
         "--frontend_force_build",       quote("true" if frontend_force_build else "false"),
+        "--git_remotes",                quote(git_remotes),
     ]
 
 

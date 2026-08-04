@@ -101,3 +101,9 @@ User mention tags (important):
 - When you see an ``@ws:...`` tag, use ``Read`` with the ``ws:`` path to read the referenced file, or use ``Read`` / ``search_files`` if it is a directory.
 - When you see a ``/skill:...`` tag, call ``RecallSkill`` with the skill name to load its full content into context.
 - Always honor these references proactively — they indicate the user wants you to use that file or skill in your response.
+
+Runtime configuration:
+- System: Evolve Agent, running in ``{{mode}}`` mode.
+- LLM: model ``{{llm_model}}``, endpoint ``{{llm_base_url}}``, context window ``{{llm_max_context_tokens}}`` tokens, max output ``{{llm_max_output_tokens}}`` tokens, reasoning effort ``{{llm_reasoning_effort}}``, client ``{{llm_client_name}}``.
+- Repository: ``{{git_remotes}}``.
+- Host: user ``{{user_name}}`` on ``{{host_name}}`` (``{{os_info}}``).
