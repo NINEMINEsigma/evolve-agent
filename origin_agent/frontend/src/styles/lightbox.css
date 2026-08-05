@@ -2,8 +2,8 @@
 .lightbox-backdrop {
   position: fixed;
   inset: 0;
-  z-index: 9999;
-  background: rgba(0, 0, 0, 0.85);
+  z-index: var(--z-top);
+  background: rgba(var(--black-rgb), 0.85);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -30,8 +30,8 @@
   max-height: 92vh;
   width: auto;
   height: auto;
-  border-radius: 8px;
-  box-shadow: 0 4px 32px rgba(0, 0, 0, 0.5);
+  border-radius: var(--radius-sm);
+  box-shadow: 0 4px 32px rgba(var(--black-rgb), 0.5);
   user-select: none;
   -webkit-user-drag: none;
 }
@@ -40,38 +40,38 @@
   position: fixed;
   top: 16px;
   right: 16px;
-  z-index: 10000;
+  z-index: var(--z-above-all);
   display: flex;
   gap: 8px;
   padding: 8px;
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   background: rgba(30, 30, 30, 0.7);
   backdrop-filter: blur(6px);
-  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.4);
+  box-shadow: 0 2px 12px rgba(var(--black-rgb), 0.4);
 }
 
 .lightbox-btn {
-  width: 36px;
-  height: 36px;
+  width: var(--icon-btn-md);
+  height: var(--icon-btn-md);
   display: flex;
   align-items: center;
   justify-content: center;
   border: none;
   border-radius: 6px;
-  color: #fff;
-  background: rgba(255, 255, 255, 0.12);
+  color: var(--text-white);
+  background: rgba(var(--white-rgb), 0.12);
   font-size: 20px;
   line-height: 1;
   cursor: pointer;
-  transition: background 0.15s ease;
+  transition: background var(--duration-fast) ease;
 }
 
 .lightbox-btn:hover {
-  background: rgba(255, 255, 255, 0.25);
+  background: rgba(var(--white-rgb), 0.25);
 }
 
 .lightbox-btn-close:hover {
-  background: rgba(239, 68, 68, 0.8);
+  background: rgba(var(--danger-rgb), 0.8);
 }
 
 /* Mermaid SVG in lightbox */

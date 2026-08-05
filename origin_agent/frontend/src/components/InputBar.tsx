@@ -4,6 +4,7 @@ import TaskProgressPanel from "./TaskProgressPanel";
 import type { PendingImage } from "../hooks/useWebSocket";
 import type { SubagentSession, TargetSessionOption, TaskProgress } from "../types";
 import { escapeHtml } from "../utils";
+import { SID_DISPLAY_LEN } from "../constants/session";
 
 interface InputBarProps {
   input: string;
@@ -87,7 +88,7 @@ export default function InputBar({
     { id: "main", name: "主会话" },
     ...activeSubagents
       .sort((a, b) => a.session_id.localeCompare(b.session_id))
-      .map<TargetSessionOption>((s) => ({ id: s.session_id, name: s.name || s.session_id.slice(0, 12), status: s.status })),
+      .map<TargetSessionOption>((s) => ({ id: s.session_id, name: s.name || s.session_id.slice(0, SID_DISPLAY_LEN), status: s.status })),
   ];
 
   const toggleTarget = (id: string) => {

@@ -30,7 +30,7 @@
 }
 
 .message-assistant .message-avatar {
-  color: #fff;
+  color: var(--text-white);
 }
 
 .message-user .message-avatar {
@@ -39,7 +39,7 @@
 
 .message-avatar.waiting-avatar {
   background: var(--accent-grad);
-  color: #fff;
+  color: var(--text-white);
 }
 
 .message-system .message-avatar {
@@ -60,7 +60,7 @@
 
 .message-error .message-avatar {
   background: var(--danger);
-  color: #fff;
+  color: var(--text-white);
 }
 
 .message-bubble {
@@ -70,7 +70,7 @@
   /* 基态 blur(0) 是 backdrop-filter 可过渡的前提（none 不可插值） */
   backdrop-filter: blur(0px);
   -webkit-backdrop-filter: blur(0px);
-  transition: background-color 0.25s ease, backdrop-filter 0.25s ease, -webkit-backdrop-filter 0.25s ease;
+  transition: background-color var(--duration-normal) ease, backdrop-filter var(--duration-normal) ease, -webkit-backdrop-filter var(--duration-normal) ease;
 }
 
 .message-assistant .message-bubble {
@@ -107,7 +107,7 @@
   content: ">";
   font-size: 11px;
   font-weight: 700;
-  transition: transform 0.15s;
+  transition: transform var(--duration-fast);
   color: var(--text-muted);
 }
 
@@ -159,7 +159,7 @@
   content: ">";
   font-size: 11px;
   font-weight: 700;
-  transition: transform 0.15s;
+  transition: transform var(--duration-fast);
   color: var(--text-muted);
 }
 
@@ -267,7 +267,7 @@
   border: 0;
   border-radius: var(--radius-sm);
   background: transparent;
-  transition: color 0.15s;
+  transition: color var(--duration-fast);
   list-style: none;
   display: flex;
   align-items: center;
@@ -286,7 +286,7 @@
 .tool-call-summary::before {
   content: '▶';
   font-size: 9px;
-  transition: transform 0.15s;
+  transition: transform var(--duration-fast);
   color: var(--text-muted);
 }
 
@@ -350,7 +350,7 @@
   border-radius: 6px;
   border: 1px solid var(--border);
   cursor: pointer;
-  transition: opacity 0.15s;
+  transition: opacity var(--duration-fast);
 }
 .tool-image:hover {
   opacity: 0.85;
@@ -378,7 +378,7 @@
   height: auto;
   border-radius: 6px;
   cursor: pointer;
-  transition: opacity 0.15s;
+  transition: opacity var(--duration-fast);
 }
 .message-img:hover {
   opacity: 0.85;
@@ -448,7 +448,7 @@
   height: 100%;
   object-fit: cover;
   cursor: pointer;
-  transition: opacity 0.15s;
+  transition: opacity var(--duration-fast);
 }
 
 .message-user-thumb:hover {
@@ -468,7 +468,7 @@
   min-height: 0;
   margin-top: 6px;
   opacity: 0;
-  transition: opacity 0.15s;
+  transition: opacity var(--duration-fast);
 }
 
 .message:hover .message-toolbar,
@@ -518,14 +518,14 @@
 .message-actions button,
 .message-edit-actions button {
   border: 0;
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   background: transparent;
   color: var(--text-muted);
   font-size: 12px;
   line-height: 1;
   padding: 2px 5px;
   cursor: pointer;
-  transition: background 0.15s, color 0.15s;
+  transition: background var(--duration-fast), color var(--duration-fast);
 }
 
 .message-actions button:hover,
@@ -655,16 +655,16 @@
   font-size: 12px;
   padding: 3px 10px;
   border: 1px solid var(--border);
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   background: var(--bg-tertiary);
   color: var(--text-secondary);
   cursor: pointer;
-  transition: background 0.15s, color 0.15s, border-color 0.15s;
+  transition: background var(--duration-fast), color var(--duration-fast), border-color var(--duration-fast);
 }
 
 .code-block-copy:hover {
   background: var(--accent);
-  color: #fff;
+  color: var(--text-white);
   border-color: var(--accent);
 }
 
@@ -676,8 +676,8 @@
 .message-bubble :not(pre) > code {
   background: var(--bg-tertiary);
   padding: 2px 6px;
-  border-radius: 4px;
-  color: #e5c07b;
+  border-radius: var(--radius-xs);
+  color: var(--code-amber);
 }
 
 /* ── Typing indicator ── */
@@ -729,7 +729,7 @@
 }
 
 .download-btn:hover {
-  background: rgba(124, 58, 237, 0.22);
+  background: rgba(var(--accent-hover-rgb), 0.22);
 }
 
 .download-size {
@@ -760,7 +760,7 @@
   border: 1px solid var(--border-strong);
   background: var(--bg-tertiary);
   cursor: pointer;
-  transition: all 0.15s;
+  transition: all var(--duration-fast);
   padding: 0;
   flex-shrink: 0;
 }
@@ -772,9 +772,9 @@
 }
 
 .message-visibility-dot.state-response {
-  background: #06b6d4;
-  border-color: #06b6d4;
-  box-shadow: 0 0 6px rgba(6, 182, 212, 0.5);
+  background: var(--multi-accent-base);
+  border-color: var(--multi-accent-base);
+  box-shadow: 0 0 6px rgba(var(--multi-accent-base-rgb), 0.5);
 }
 
 .message-visibility-dot.state-none {
@@ -789,7 +789,7 @@
   align-items: center;
   padding: 8px 12px;
   border-radius: var(--radius-sm);
-  background: rgba(255, 255, 255, 0.05);
+  background: rgba(var(--white-rgb), 0.05);
   border: 1px solid var(--border);
   margin: 0.4em 0;
 }
@@ -816,14 +816,14 @@
 .assistant-html-progress {
   width: 100%;
   height: 8px;
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   overflow: hidden;
   background: var(--bg-tertiary);
 }
 
 .assistant-html-progress-bar {
   height: 100%;
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   background: linear-gradient(90deg, #4facfe 0%, #00f2fe 100%);
   transition: width 0.3s ease;
 }
@@ -861,7 +861,7 @@
   max-width: 100%;
   overflow-x: auto;
   padding: 8px;
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   background: var(--bg-tertiary, #2a2a2a);
 }
 
@@ -927,12 +927,12 @@
   top: 64px;
   left: 50%;
   transform: translateX(-50%);
-  z-index: 1000;
+  z-index: var(--z-banner);
   width: min(560px, calc(100vw - 32px));
   background: var(--bg-secondary);
   border: 1px solid var(--border);
-  border-radius: 8px;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+  border-radius: var(--radius-sm);
+  box-shadow: 0 8px 24px rgba(var(--black-rgb), 0.35);
   padding: 10px 14px;
   font-size: 13px;
 }
@@ -958,7 +958,7 @@
   background: transparent;
   color: var(--text-muted);
   cursor: pointer;
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
 }
 
 .secret-banner-close:hover {
@@ -985,15 +985,15 @@
   font-size: 12px;
   padding: 4px 14px;
   border: 1px solid var(--border);
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   background: var(--bg-hover);
   color: var(--text-secondary);
   cursor: pointer;
-  transition: background 0.15s, color 0.15s, border-color 0.15s;
+  transition: background var(--duration-fast), color var(--duration-fast), border-color var(--duration-fast);
 }
 
 .secret-banner-copy:hover {
   background: var(--accent);
-  color: #fff;
+  color: var(--text-white);
   border-color: var(--accent);
 }

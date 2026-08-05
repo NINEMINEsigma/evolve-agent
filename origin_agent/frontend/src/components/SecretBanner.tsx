@@ -1,9 +1,9 @@
 import { useEffect } from "react";
 import type { ClipboardDisplay } from "../types";
+import { TIMING } from "../constants/timing";
 
 // 密钥展示横幅：fixed 顶部居中，60 秒自动消失，点击复制后立即消失。
 // 与常驻 ClipboardPanel 无关 —— 一次性展示，不进入面板、不落盘。
-const BANNER_TTL_MS = 60_000;
 
 interface SecretBannerProps {
   banner: ClipboardDisplay | null;
@@ -14,7 +14,7 @@ export default function SecretBanner({ banner, onDismiss }: SecretBannerProps) {
   // banner 变化时重置定时器；复制成功/关闭按钮/超时都会触发 onDismiss
   useEffect(() => {
     if (!banner) return;
-    const timer = setTimeout(onDismiss, BANNER_TTL_MS);
+    const timer = setTimeout(onDismiss, TIMING.BANNER_TTL);
     return () => clearTimeout(timer);
   }, [banner, onDismiss]);
 

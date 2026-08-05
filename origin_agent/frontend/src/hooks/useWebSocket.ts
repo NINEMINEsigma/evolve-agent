@@ -1,6 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef } from "react";
 import { MessageContent, WSMessage, SubagentSession } from "../types";
 import { generateUUID } from "../utils";
+import { WS_OUT } from "../constants/ws";
+import { COLLOQUY_SID } from "../constants/session";
+import { TIMING } from "../constants/timing";
 import { useWebSocketConnection } from "./useWebSocketConnection";
 import { useSessionStore } from "./useSessionStore";
 import { useUploadManager } from "./useUploadManager";
@@ -186,7 +189,7 @@ export function useWebSocket() {
     }]);
 
     c.send({
-      type: "user_message",
+      type: WS_OUT.USER_MESSAGE,
       content,
       target_sessions: targetSessions,
       client_message_id: clientMessageId,
@@ -221,7 +224,6 @@ export function useWebSocket() {
   }, [conn.connect, conn.disconnect]);
 
   const enterColloquy = useCallback(() => {
-    const COLLOQUY_SID = "____buildin_colloquy__";
     if (!sessionRef.current) return;
     connRef.current.disconnect();
     sessionRef.current.switchSession(COLLOQUY_SID);
@@ -277,7 +279,7 @@ export function useWebSocket() {
     s.setHandsfreeMode(enabled);
     if (c.wsRef.current?.readyState === WebSocket.OPEN) {
       c.send({
-        type: "handsfree_mode",
+        type: WS_OUT.HANDSFREE_MODE,
         content: enabled ? "true" : "false",
       });
     }
@@ -330,7 +332,7 @@ export function useWebSocket() {
       fetchToolResourcesRef.current(sid);
     };
     fetchTasks();
-    const iv = setInterval(fetchTasks, 3000);
+    const iv = setInterval(fetchTasks, TIMING.TASK_POLL_INTERVAL);
     return () => clearInterval(iv);
   }, [session.sessionId]);
 

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { SessionInfo } from "../types";
 import ModalWindow from "./primitives/ModalWindow";
+import { SID_SHORT_LEN } from "../constants/session";
 
 interface TagEditorProps {
   session: SessionInfo | undefined;
@@ -86,7 +87,7 @@ export default function TagEditor({ session, allTags, onClose, onSave }: TagEdit
         </>
       }
     >
-      <div className="tag-editor-subtitle">{session.title || session.id.slice(0, 8)}</div>
+      <div className="tag-editor-subtitle">{session.title || session.id.slice(0, SID_SHORT_LEN)}</div>
 
       <div className="tag-editor-tags">
         {draft.length === 0 && <span className="tag-editor-empty">暂无标签</span>}

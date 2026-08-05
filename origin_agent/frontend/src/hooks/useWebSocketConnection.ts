@@ -1,5 +1,8 @@
 import { useCallback, useRef, useState } from "react";
 import { WSMessage } from "../types";
+import { STORAGE_KEYS } from "../constants/storage";
+import { WS_IN, WS_OUT } from "../constants/ws";
+import { TIMING } from "../constants/timing";
 
 export interface WebSocketConnectionHandlers {
   onOpen?: () => void;
@@ -59,7 +62,7 @@ export function useWebSocketConnection(): WebSocketConnection {
 
   const connect = useCallback((resumeSid?: string) => {
     const urlSid = new URLSearchParams(window.location.search).get("session") ?? undefined;
-    const lastSid = (resumeSid || undefined) ?? urlSid ?? localStorage.getItem("evolve_session_id") ?? "";
+    const lastSid = (resumeSid || undefined) ?? urlSid ?? localStorage.getItem(STORAGE_KEYS.SESSION_ID) ?? "";
     const qs = lastSid ? `?resume=${lastSid}` : "";
     const ws = new WebSocket(`ws://${location.host}/ws/chat${qs}`);
     wsRef.current = ws;
@@ -71,9 +74,9 @@ export function useWebSocketConnection(): WebSocketConnection {
       if (keepaliveRef.current) clearInterval(keepaliveRef.current);
       keepaliveRef.current = setInterval(() => {
         if (ws.readyState === WebSocket.OPEN) {
-          ws.send(JSON.stringify({ type: "ping" }));
+          ws.send(JSON.stringify({ type: WS_OUT.PING }));
         }
-      }, 20000);
+      }, TIMING.WS_KEEPALIVE);
       handlersRef.current.onOpen?.();
     };
 
@@ -82,11 +85,11 @@ export function useWebSocketConnection(): WebSocketConnection {
       setStatus("已断开");
       handlersRef.current.onClose?.();
       if (manualRef.current) return;
-      if (reconnectRef.current >= 10) {
+      if (reconnectRef.current >= TIMING.WS_MAX_RECONNECT_TRIES) {
         setStatus("连接失败 — 已达到最大重试次数");
         return;
       }
-      const delay = Math.min(1000 * Math.pow(2, reconnectRef.current), 30000);
+      const delay = Math.min(TIMING.WS_RECONNECT_BASE * Math.pow(2, reconnectRef.current), TIMING.WS_MAX_RECONNECT_DELAY);
       reconnectRef.current += 1;
       setStatus(`重连中 (${(delay / 1000).toFixed(0)}s)...`);
       timerRef.current = setTimeout(() => connect(lastSid), delay);
@@ -99,7 +102,7 @@ export function useWebSocketConnection(): WebSocketConnection {
       setRecvTick((v) => v + 1);
       const payloadLen = typeof e.data === "string" ? e.data.length : 0;
       console.debug(`[ws recv] type=${msg.type} len=${payloadLen} at=${now}`);
-      if (msg.type === "pong") {
+      if (msg.type === WS_IN.PONG) {
         lastPongAtRef.current = now;
       }
       handlersRef.current.onMessage?.(msg);

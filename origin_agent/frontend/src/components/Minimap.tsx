@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 import { ChatMessage } from "../types";
+import { DIMENSIONS } from "../constants/dimensions";
 
 interface MinimapProps {
   messages: ChatMessage[];
@@ -70,7 +71,7 @@ export default function Minimap({ messages, chatAreaRef }: MinimapProps) {
     setMinimapHeight(clientHeight);
     setViewport({
       top: (chat.scrollTop / scrollHeight) * clientHeight,
-      height: Math.max(clientHeight * scale, 24),
+      height: Math.max(clientHeight * scale, DIMENSIONS.MINIMAP_MIN_HEIGHT),
     });
   }, [chatAreaRef]);
 

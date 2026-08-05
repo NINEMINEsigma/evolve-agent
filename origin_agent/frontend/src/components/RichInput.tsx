@@ -1,6 +1,8 @@
 import React, { useCallback, useEffect, useImperativeHandle, useRef, useState, type ClipboardEvent, type KeyboardEvent } from "react";
 import type { PendingImage } from "../hooks/useWebSocket";
 import MentionMenu, { type MentionItem } from "./MentionMenu";
+import { DIMENSIONS } from "../constants/dimensions";
+import { TIMING } from "../constants/timing";
 
 interface RichInputProps {
   value: string;
@@ -159,7 +161,7 @@ const RichInput = React.forwardRef<HTMLDivElement, RichInputProps>(function Rich
     const el = divRef.current;
     if (!el) return;
     el.style.height = "auto";
-    el.style.height = Math.min(el.scrollHeight, 200) + "px";
+    el.style.height = Math.min(el.scrollHeight, DIMENSIONS.INPUT_MAX_SCROLL) + "px";
   };
 
   // ── mention 核心逻辑 ─────────────────────────────────────────
@@ -204,9 +206,8 @@ const RichInput = React.forwardRef<HTMLDivElement, RichInputProps>(function Rich
     const probeRect = probeRange.getBoundingClientRect();
 
     // 判断下方空间是否足够，不够则向上展开
-    const MENU_MAX_H = 244;
     const spaceBelow = window.innerHeight - probeRect.bottom;
-    const openUpward = spaceBelow < MENU_MAX_H && probeRect.top > MENU_MAX_H;
+    const openUpward = spaceBelow < DIMENSIONS.MENU_MAX_HEIGHT && probeRect.top > DIMENSIONS.MENU_MAX_HEIGHT;
     const menuX = probeRect.left;
     const menuY = openUpward ? probeRect.top : probeRect.bottom;
 
@@ -243,7 +244,7 @@ const RichInput = React.forwardRef<HTMLDivElement, RichInputProps>(function Rich
           ? prev
           : { ...prev, items, selectedIndex: 0 },
       );
-    }, 180);
+    }, TIMING.INPUT_DEBOUNCE);
 
     return () => {
       if (loadTimer.current) clearTimeout(loadTimer.current);
@@ -401,7 +402,7 @@ const RichInput = React.forwardRef<HTMLDivElement, RichInputProps>(function Rich
       if (!active?.closest?.(".mention-menu")) {
         setMention(MENTION_NONE);
       }
-    }, 150);
+    }, TIMING.MENU_SCROLL_DEBOUNCE);
     notifyChange();
   };
 

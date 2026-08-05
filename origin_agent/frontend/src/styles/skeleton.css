@@ -2,7 +2,7 @@
 .skeleton-screen {
   position: fixed;
   inset: 0;
-  z-index: 9998;
+  z-index: var(--z-splash);
   display: flex;
   background: var(--bg-primary);
   overflow: hidden;
@@ -42,14 +42,14 @@
   top: 0;
   left: 0;
   right: 0;
-  height: 56px;
+  height: var(--header-height);
   background: transparent;
   border-bottom: none;
   display: flex;
   align-items: center;
   justify-content: space-between;
   padding: 0 20px;
-  z-index: 10;
+  z-index: var(--z-content);
 }
 
 .skeleton-header-left {
@@ -96,7 +96,7 @@
 
 /* ── Sidebar skeleton ── */
 .skeleton-sidebar {
-  width: 220px;
+  width: var(--sidebar-width);
   flex-shrink: 0;
   background: var(--bg-secondary);
   border-right: 1px solid var(--border);
@@ -214,8 +214,8 @@
 }
 
 .skeleton-input-btn {
-  width: 36px;
-  height: 36px;
+  width: var(--icon-btn-md);
+  height: var(--icon-btn-md);
   border-radius: 50%;
 }
 

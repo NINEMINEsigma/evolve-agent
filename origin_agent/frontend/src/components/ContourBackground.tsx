@@ -7,6 +7,7 @@ import {
   type MessageInfluence,
   type TerrainParams,
 } from "../utils/terrain";
+import { DIMENSIONS } from "../constants/dimensions";
 
 interface ContourBackgroundProps {
   scrollRef: React.RefObject<HTMLElement>;
@@ -68,7 +69,7 @@ export default function ContourBackground({ scrollRef, contentRef, messages, see
 
   // 移动端隐藏背景
   useEffect(() => {
-    const mq = window.matchMedia("(max-width: 768px)");
+    const mq = window.matchMedia(`(max-width: ${DIMENSIONS.MOBILE_BREAKPOINT}px)`);
     const onChange = (e: MediaQueryListEvent) => setIsMobile(e.matches);
     setIsMobile(mq.matches);
     mq.addEventListener("change", onChange);

@@ -42,7 +42,7 @@
   flex-direction: column;
   gap: 6px;
   position: relative;
-  z-index: 1;
+  z-index: var(--z-base);
 }
 
 /* ── Contour background (消息联动等高线背景) ── */
@@ -50,7 +50,7 @@
   position: absolute;
   inset: 0;
   pointer-events: none;
-  z-index: 0;
+  z-index: var(--z-base);
   opacity: 0;
   filter: blur(0);
   transition: opacity 0.9s ease, filter 0.5s ease;
@@ -76,8 +76,8 @@
 .chat-area-drag-over {
   outline: 2px dashed var(--accent);
   outline-offset: -4px;
-  background: rgba(124, 58, 237, 0.05);
-  box-shadow: inset 0 0 40px rgba(124, 58, 237, 0.08);
+  background: rgba(var(--accent-hover-rgb), 0.05);
+  box-shadow: inset 0 0 40px rgba(var(--accent-hover-rgb), 0.08);
 }
 
 /* ── Minimap ── */
@@ -116,7 +116,7 @@
   position: absolute;
   left: 0;
   right: 0;
-  background: rgba(0, 0, 0, 0.55);
+  background: rgba(var(--black-rgb), 0.55);
   pointer-events: none;
 }
 
@@ -132,11 +132,11 @@
   position: absolute;
   left: 3px;
   right: 3px;
-  border: 1px solid rgba(255, 255, 255, 0.55);
-  background: rgba(255, 255, 255, 0.08);
-  border-radius: 4px;
+  border: 1px solid rgba(var(--white-rgb), 0.55);
+  background: rgba(var(--white-rgb), 0.08);
+  border-radius: var(--radius-xs);
   pointer-events: none;
-  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.3);
+  box-shadow: 0 0 0 1px rgba(var(--black-rgb), 0.3);
 }
 
 /* ── Scroll to bottom button ── */
@@ -144,8 +144,8 @@
   position: absolute;
   right: 20px;
   bottom: 20px;
-  width: 40px;
-  height: 40px;
+  width: var(--icon-btn-lg);
+  height: var(--icon-btn-lg);
   border-radius: 50%;
   border: 1px solid var(--border);
   background: var(--bg-secondary);
@@ -154,17 +154,17 @@
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
+  box-shadow: 0 4px 12px rgba(var(--black-rgb), 0.25);
   transition: opacity var(--duration-normal) var(--ease-out), transform var(--duration-normal) var(--ease-out), background var(--duration-fast) var(--ease-out), color var(--duration-fast) var(--ease-out), border-color var(--duration-fast) var(--ease-out), box-shadow var(--duration-normal) var(--ease-out);
-  z-index: 10;
+  z-index: var(--z-content);
 }
 
 .scroll-to-bottom:hover {
   background: var(--accent);
-  color: #fff;
+  color: var(--text-white);
   border-color: var(--accent);
   transform: translateY(-2px);
-  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.35), 0 0 16px var(--accent-glow);
+  box-shadow: 0 6px 20px rgba(var(--black-rgb), 0.35), 0 0 16px var(--accent-glow);
 }
 
 @media (max-width: 768px) {
@@ -172,7 +172,7 @@
     right: 12px;
     /* 移到输入框上方，避免被遮挡 */
     bottom: 80px;
-    z-index: 11;
+    z-index: var(--z-content);
   }
 }
 
@@ -193,8 +193,8 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  z-index: 5;
-  transition: background 0.15s, color 0.15s;
+  z-index: var(--z-content);
+  transition: background var(--duration-fast), color var(--duration-fast);
   padding: 0;
 }
 

@@ -1,13 +1,11 @@
 import { useEffect, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import "../styles/splash.css";
+import { TIMING } from "../constants/timing";
 
 interface SplashScreenProps {
   onFinish: () => void;
 }
-
-const MIN_DISPLAY_TIME = 800;
-const MAX_DISPLAY_TIME = 3000;
 
 export default function SplashScreen({ onFinish }: SplashScreenProps) {
   const [exiting, setExiting] = useState(false);
@@ -15,13 +13,13 @@ export default function SplashScreen({ onFinish }: SplashScreenProps) {
   useEffect(() => {
     const minTimer = setTimeout(() => {
       setExiting(true);
-      setTimeout(onFinish, 500);
-    }, MIN_DISPLAY_TIME);
+      setTimeout(onFinish, TIMING.SPLASH_FADE_DELAY);
+    }, TIMING.SPLASH_MIN_DISPLAY);
 
     const maxTimer = setTimeout(() => {
       setExiting(true);
-      setTimeout(onFinish, 500);
-    }, MAX_DISPLAY_TIME);
+      setTimeout(onFinish, TIMING.SPLASH_FADE_DELAY);
+    }, TIMING.SPLASH_MAX_DISPLAY);
 
     return () => {
       clearTimeout(minTimer);
@@ -32,7 +30,7 @@ export default function SplashScreen({ onFinish }: SplashScreenProps) {
   const handleSkip = () => {
     if (exiting) return;
     setExiting(true);
-    setTimeout(onFinish, 500);
+    setTimeout(onFinish, TIMING.SPLASH_FADE_DELAY);
   };
 
   return (

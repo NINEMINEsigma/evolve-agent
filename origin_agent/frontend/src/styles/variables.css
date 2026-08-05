@@ -54,4 +54,69 @@
   /* Glow */
   --glow-soft:  0 0 20px rgba(167, 139, 250, 0.15);
   --glow-strong: 0 0 30px rgba(167, 139, 250, 0.25);
+
+  /* Z-index layers (低→高) */
+  --z-base:       0;      /* 背景装饰/内容基础 */
+  --z-content:    10;     /* 结构/导航/内容控件 */
+  --z-sidebar:    20;     /* 侧边栏/抽屉叠层 */
+  --z-header:     90;     /* header 叠层 */
+  --z-overlay:    100;    /* 模态/对话框/遮罩/菜单 */
+  --z-banner:     1000;   /* 通知横幅 */
+  --z-splash:     9998;   /* 骨架屏/启动屏 */
+  --z-top:        9999;   /* tooltip/lightbox */
+  --z-above-all:  10000;  /* mention menu (必须盖过一切) */
+
+  /* Agentspace (VS Code 风格独立配色) */
+  --fg-primary:       #ccc;      /* 前景色（主文本） */
+  --fg-secondary:     #999;      /* 前景色（次要文本） */
+  --fg-muted:         #6e6e6e;   /* 前景色（静默文本） */
+  --accent-blue:      #007acc;   /* 强调蓝（活动状态、聚焦边框） */
+  --bg-quaternary:    #3c3c3c;   /* 第四级背景（hover 按钮） */
+  --highlight-hover:  #2a2d2e;   /* 列表项 hover 高亮 */
+  --highlight-active: #37373d;  /* 列表项 active 高亮 */
+  --tab-inactive:     #2d2d2d;  /* 非活动标签背景 */
+  --tab-active:       #1e1e1e;  /* 活动标签背景 */
+  --tab-hover:        #2e2e2e;  /* 标签 hover 背景 */
+  --status-bar-bg:    #007acc;  /* 状态栏背景 */
+  --status-bar-fg:    #fff;     /* 状态栏前景 */
+
+  /* Radius scale */
+  --radius-xs: 4px;    /* 小圆角（按钮、标签） */
+
+  /* Component sizes */
+  --icon-btn-lg:  40px;  /* 大图标按钮 */
+  --icon-btn-md:  36px;  /* 中图标按钮（最常用） */
+  --icon-btn-sm:  28px;  /* 小图标按钮 */
+  --header-height: 56px; /* 顶栏高度 */
+  --sidebar-width: 220px;/* 侧边栏宽度 */
+
+  /* Text */
+  --text-white: #fff;       /* 高对比白色文本 */
+
+  /* Status colors */
+  --status-success:        #22c55e;
+  --status-success-rgb:    34, 197, 94;
+  --status-info:           #3b82f6;
+  --status-info-rgb:       59, 130, 246;
+  --status-warning:        #ffcc00;
+  --status-warning-rgb:    255, 204, 0;
+  --status-error:          #ff3b30;
+  --status-error-rgb:      255, 59, 48;
+
+  /* Extended accent */
+  --multi-bright:          #64d2ff;
+  --multi-bright-rgb:      100, 210, 255;
+  --multi-accent-base:     #06b6d4;
+  --multi-accent-base-rgb: 6, 182, 212;
+
+  /* RGB triplets (for rgba() composition) */
+  --white-rgb: 255, 255, 255;
+  --black-rgb: 0, 0, 0;
+  --accent-hover-rgb: 124, 58, 237;
+  --danger-rgb: 239, 68, 68;   /* = --danger 的 RGB */
+
+  /* Surface */
+  --surface-tag:    #3a3a4a;   /* 会话标签背景 */
+  --code-amber:     #e5c07b;   /* 代码琥珀色 */
+  --text-indigo:    #c7d2fe;   /* 浅靛色文本 */
 }

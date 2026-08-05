@@ -2,6 +2,8 @@ import { useRef, useState, useEffect } from "react";
 import { useConnectionDiagnostics } from "../context/ConnectionDiagnosticsContext";
 import { useEdgeDrawer } from "../hooks/useEdgeDrawer";
 import { exportSession } from "../utils/exportSession";
+import { COLLOQUY_SID } from "../constants/session";
+import { TIMING } from "../constants/timing";
 
 interface HeaderProps {
   status: string;
@@ -162,7 +164,7 @@ export default function Header({
           <div className="header-left">
             {sessionId && (
               <span className="session-badge" data-tooltip="刷新页面后自动恢复此会话">
-                {sessionId === "____buildin_colloquy__" ? "随意聊聊" : sessionId}
+                {sessionId === COLLOQUY_SID ? "随意聊聊" : sessionId}
               </span>
             )}
             <DebugBadges />
@@ -258,7 +260,7 @@ export default function Header({
         )}
         {sessionId && (
           <span className="session-badge" data-tooltip="刷新页面后自动恢复此会话">
-            {sessionId === "____buildin_colloquy__" ? "随意聊聊" : sessionId}
+            {sessionId === COLLOQUY_SID ? "随意聊聊" : sessionId}
           </span>
         )}
         <DebugBadges />
@@ -383,7 +385,7 @@ function DebugBadges() {
   const recvStall = now - lastRecv;
   const pongStall = now - lastPong;
   const active = waiting || !!streamingMessage;
-  const recvStallThreshold = active ? 2000 : 30000;
+  const recvStallThreshold = active ? TIMING.RECV_STALL_ACTIVE : TIMING.RECV_STALL_INACTIVE;
 
   return (
     <span className="debug-badges" key={recvTick}>
@@ -416,7 +418,7 @@ function DebugBadges() {
           接收正常
         </span>
       )}
-      {pongStall >= 35000 && (
+      {pongStall >= TIMING.PONG_STALL && (
         <span className="debug-badge warn" title={`last pong ${(pongStall / 1000).toFixed(1)}s ago`}>
           心跳异常
         </span>

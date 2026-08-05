@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import type { CronTask } from "../types";
+import { TIMING } from "../constants/timing";
 
 function formatCountdown(ms: number) {
   const seconds = Math.max(0, Math.ceil(ms / 1000));
@@ -10,7 +11,7 @@ export default function CronCountdown({ cronTasks }: { cronTasks: CronTask[] }) 
   const [now, setNow] = useState(() => Date.now());
 
   useEffect(() => {
-    const timer = window.setInterval(() => setNow(Date.now()), 1000);
+    const timer = window.setInterval(() => setNow(Date.now()), TIMING.CRON_TICK);
     return () => window.clearInterval(timer);
   }, []);
 
@@ -25,9 +26,9 @@ export default function CronCountdown({ cronTasks }: { cronTasks: CronTask[] }) 
   if (!nextTask) return null;
 
   const remainingMs = nextTask.nextAt - now;
-  if (remainingMs <= 0 || remainingMs > 60_000) return null;
+  if (remainingMs <= 0 || remainingMs > TIMING.CRON_WINDOW) return null;
 
-  const remainingPercent = Math.max(0, Math.min(100, (remainingMs / 60_000) * 100));
+  const remainingPercent = Math.max(0, Math.min(100, (remainingMs / TIMING.CRON_WINDOW) * 100));
   const taskName = nextTask.task.name || nextTask.task.task_id;
 
   return (

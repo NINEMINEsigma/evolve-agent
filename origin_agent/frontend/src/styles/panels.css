@@ -8,13 +8,13 @@
   width: 100%;
   margin-bottom: 4px;
   background: transparent;
-  z-index: 12;
+  z-index: var(--z-content);
 }
 
 .task-progress-strip-item {
   position: relative;
   height: 3px;
-  background: rgba(167, 139, 250, 0.16);
+  background: rgba(var(--accent-rgb), 0.16);
   border-radius: 999px;
   overflow: visible;
 }
@@ -26,8 +26,8 @@
   height: 100%;
   background: var(--accent-grad);
   border-radius: 999px;
-  box-shadow: 0 0 10px rgba(167, 139, 250, 0.45);
-  transition: width 0.25s ease;
+  box-shadow: 0 0 10px rgba(var(--accent-rgb), 0.45);
+  transition: width var(--duration-normal) ease;
 }
 
 .task-progress-tooltip {
@@ -42,12 +42,12 @@
   color: var(--text-primary);
   font-size: 12px;
   line-height: 1.35;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.28);
+  box-shadow: 0 8px 24px rgba(var(--black-rgb), 0.28);
   opacity: 0;
   transform: translateY(3px);
   pointer-events: none;
   transition: opacity 0.12s ease, transform 0.12s ease;
-  z-index: 20;
+  z-index: var(--z-sidebar);
 }
 
 .task-progress-strip-item:hover .task-progress-tooltip {
@@ -115,16 +115,16 @@
   font-size: 12px;
   padding: 3px 10px;
   border: 1px solid var(--border);
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   background: var(--bg-hover);
   color: var(--text-secondary);
   cursor: pointer;
-  transition: background 0.15s, color 0.15s, border-color 0.15s;
+  transition: background var(--duration-fast), color var(--duration-fast), border-color var(--duration-fast);
 }
 
 .clipboard-display-copy:hover {
   background: var(--accent);
-  color: #fff;
+  color: var(--text-white);
   border-color: var(--accent);
 }
 
@@ -155,7 +155,7 @@
   user-select: none;
   background: var(--bg-secondary);
   border-bottom: 1px solid var(--border);
-  transition: background 0.15s;
+  transition: background var(--duration-fast);
 }
 
 .panel-header:hover {
@@ -196,10 +196,10 @@
   top: 0;
   right: 0;
   height: 100%;
-  background: #ff3b30;
+  background: var(--status-error);
   border-radius: 999px;
   box-shadow: 0 0 8px rgba(255, 59, 48, 0.55);
-  transition: width 0.25s linear;
+  transition: width var(--duration-normal) linear;
 }
 
 .cron-countdown-tooltip {
@@ -217,12 +217,12 @@
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.28);
+  box-shadow: 0 8px 24px rgba(var(--black-rgb), 0.28);
   opacity: 0;
   transform: translateY(3px);
   pointer-events: none;
   transition: opacity 0.12s ease, transform 0.12s ease;
-  z-index: 20;
+  z-index: var(--z-sidebar);
 }
 
 .cron-countdown-strip:hover .cron-countdown-tooltip {
@@ -266,11 +266,11 @@
   margin-bottom: 12px;
   background: var(--bg-tertiary);
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
 }
 
 .subagent-card.active {
-  border-left: 3px solid #64d2ff;
+  border-left: 3px solid var(--multi-bright);
 }
 
 .subagent-card.inactive {
@@ -333,7 +333,7 @@
 .subagent-chat .message-system .message-bubble {
   max-width: 100%;
   padding: 8px 10px;
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
 }
 
 .subagent-chat .message-assistant .message-bubble,
@@ -393,7 +393,7 @@
   font-size: 11px;
   font-weight: 600;
   padding: 2px 8px;
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
 }
 
 .subagent-status-running {
@@ -403,17 +403,17 @@
 
 .subagent-status-waiting {
   background: rgba(255, 204, 0, 0.15);
-  color: #ffcc00;
+  color: var(--status-warning);
 }
 
 .subagent-status-completed {
-  background: rgba(100, 210, 255, 0.15);
-  color: #64d2ff;
+  background: rgba(var(--multi-bright-rgb), 0.15);
+  color: var(--multi-bright);
 }
 
 .subagent-status-terminated {
   background: rgba(255, 59, 48, 0.15);
-  color: #ff3b30;
+  color: var(--status-error);
 }
 
 .subagent-status-container {
@@ -427,8 +427,8 @@
   font-weight: 600;
   color: var(--accent);
   padding: 2px 8px;
-  background: rgba(100, 210, 255, 0.12);
-  border-radius: 4px;
+  background: rgba(var(--multi-bright-rgb), 0.12);
+  border-radius: var(--radius-xs);
 }
 
 .subagent-section-title {

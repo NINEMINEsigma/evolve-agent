@@ -2,6 +2,8 @@ import { useState } from "react";
 import { SessionInfo, SessionCluster, SidebarItem } from "../types";
 import { formatTime } from "../utils";
 import { useEdgeDrawer } from "../hooks/useEdgeDrawer";
+import { COLLOQUY_SID, SID_SHORT_LEN } from "../constants/session";
+import { DIMENSIONS } from "../constants/dimensions";
 
 interface SidebarProps {
   collapsed?: boolean;
@@ -26,7 +28,7 @@ interface SidebarProps {
 }
 
 function sessionLabel(s: SessionInfo) {
-  return s.title || s.id.slice(0, 8) + "...";
+  return s.title || s.id.slice(0, SID_SHORT_LEN) + "...";
 }
 
 function buildTooltip(s: SessionInfo): string {
@@ -109,7 +111,7 @@ function SessionListItem({
     <div
       data-tooltip={relationTooltip || buildTooltip(s)}
       className={`session-item ${s.id === sessionId ? "active" : ""} ${isArchived ? "archived" : ""} ${isParentOfCurrent ? "parent-session" : ""} ${isContinuationOfCurrent ? "continuation-session" : ""} ${mergeMode && !isArchived ? "merge-unavailable" : ""} ${mergeMode && selectedForMerge.has(s.id) ? "merge-selected" : ""}`}
-      style={{ paddingLeft: 16 + indent }}
+      style={{ paddingLeft: DIMENSIONS.TREE_INDENT + indent }}
       onClick={(e) => {
         if (e.ctrlKey || e.metaKey) {
           window.open(`/?session=${s.id}`, "_blank");
@@ -350,7 +352,7 @@ export default function Sidebar({
             </svg>
           </button>
           <button
-            className={`colloquy-btn ${searchFocused ? 'toolbar-btn-hidden' : ''} ${sessionId === "____buildin_colloquy__" ? 'active' : ''}`}
+            className={`colloquy-btn ${searchFocused ? 'toolbar-btn-hidden' : ''} ${sessionId === COLLOQUY_SID ? 'active' : ''}`}
             onClick={onEnterColloquy}
             data-tooltip="随意聊聊"
             aria-label="随意聊聊"

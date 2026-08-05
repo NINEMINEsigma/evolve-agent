@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import type { FileEntry } from "../../types";
 import PopupLayer from "../primitives/PopupLayer";
+import { DIMENSIONS } from "../../constants/dimensions";
 
 interface FileTreeProps {
   entries: FileEntry[];
@@ -69,7 +70,7 @@ function FileTreeNode({
     <div>
       <div
         className={`agentspace-file-item ${isActive ? "agentspace-file-item-active" : ""}`}
-        style={{ paddingLeft: 16 + depth * 16 }}
+        style={{ paddingLeft: DIMENSIONS.TREE_INDENT + depth * DIMENSIONS.TREE_INDENT }}
         onClick={handleClick}
         onContextMenu={handleContextMenu}
       >

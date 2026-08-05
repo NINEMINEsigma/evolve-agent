@@ -3,9 +3,8 @@ import { ChatMessage } from "../types";
 import MessageBody, { contentToText } from "./MessageBody";
 import MessageEditor from "./MessageEditor";
 import MessageAttachments from "./MessageAttachments";
-
-const LONG_MESSAGE_CHARS = 1200;
-const LONG_MESSAGE_LINES = 18;
+import { CONTENT_PREVIEW_LEN } from "../constants/session";
+import { DIMENSIONS } from "../constants/dimensions";
 
 function hashString(str: string): number {
   let hash = 0;
@@ -69,7 +68,7 @@ const MessageItem = memo(function MessageItem({
 
   const textContent = contentToText(m.content);
   const lineCount = textContent.split("\n").length;
-  const isLong = textContent.length > LONG_MESSAGE_CHARS || lineCount > LONG_MESSAGE_LINES;
+  const isLong = textContent.length > DIMENSIONS.LONG_MESSAGE_CHARS || lineCount > DIMENSIONS.LONG_MESSAGE_LINES;
   const isTool = m.role === "tool";
   const toolCollapsed = isTool && !streaming && m.collapsed !== false;
   const collapsed = !isTool && !streaming && isLong && m.collapsed !== false;
@@ -121,7 +120,7 @@ const MessageItem = memo(function MessageItem({
               className={`tool-call-summary ${toolCollapsed ? "" : "tool-call-summary-open"}`}
               onClick={() => onToggleCollapse(m.id)}
             >
-              {textContent.length > 80 ? textContent.slice(0, 80) + '...' : textContent}
+              {textContent.length > CONTENT_PREVIEW_LEN ? textContent.slice(0, CONTENT_PREVIEW_LEN) + '...' : textContent}
             </button>
             {!toolCollapsed && (
               <div className={`tool-call-detail message-content-collapsed${m.isError ? " tool-call-detail-error" : ""}`} onWheel={handoffWheelAtBoundary}>

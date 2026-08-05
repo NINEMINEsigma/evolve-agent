@@ -9,7 +9,7 @@
   position: fixed;
   top: 0;
   right: 0;
-  z-index: 100;
+  z-index: var(--z-overlay);
 }
 
 .right-trigger-bar {
@@ -22,7 +22,7 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  transition: width 0.2s ease, background 0.15s;
+  transition: width 0.2s ease, background var(--duration-fast);
   opacity: 0.6;
   position: relative;
 }
@@ -36,13 +36,13 @@
   font-size: 10px;
   color: var(--text-secondary);
   opacity: 0;
-  transition: opacity 0.15s;
+  transition: opacity var(--duration-fast);
   user-select: none;
 }
 
 .right-trigger-bar:hover .right-trigger-icon {
   opacity: 1;
-  color: #fff;
+  color: var(--text-white);
 }
 
 .resource-trigger-bar {
@@ -54,18 +54,18 @@
 }
 
 .subagent-trigger-bar {
-  background: rgba(100, 210, 255, 0.25);
+  background: rgba(var(--multi-bright-rgb), 0.25);
 }
 
 .subagent-trigger-bar:hover {
-  background: #64d2ff;
+  background: var(--multi-bright);
 }
 
 .drawer-overlay {
   position: fixed;
   inset: 0;
-  z-index: 250;
-  background: rgba(0, 0, 0, 0.5);
+  z-index: var(--z-overlay);
+  background: rgba(var(--black-rgb), 0.5);
   animation: fadeIn 0.2s ease;
 }
 
@@ -77,7 +77,7 @@
   max-width: 90vw;
   height: 100%;
   background: var(--bg-secondary);
-  box-shadow: -8px 0 24px rgba(0, 0, 0, 0.4);
+  box-shadow: -8px 0 24px rgba(var(--black-rgb), 0.4);
   display: flex;
   flex-direction: column;
   animation: slideInRight 0.2s ease;
@@ -112,8 +112,8 @@
 }
 
 .drawer-close {
-  width: 28px;
-  height: 28px;
+  width: var(--icon-btn-sm);
+  height: var(--icon-btn-sm);
   border: none;
   border-radius: 6px;
   background: transparent;
@@ -123,12 +123,12 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  transition: background 0.15s, color 0.15s;
+  transition: background var(--duration-fast), color var(--duration-fast);
 }
 
 .drawer-close:hover {
   background: var(--danger);
-  color: #fff;
+  color: var(--text-white);
 }
 
 .drawer-body {
@@ -150,17 +150,17 @@
   padding: 12px 16px;
   cursor: pointer;
   user-select: none;
-  transition: background 0.15s;
+  transition: background var(--duration-fast);
 }
 
 .drawer-section-header:hover {
-  background: rgba(255, 255, 255, 0.04);
+  background: rgba(var(--white-rgb), 0.04);
 }
 
 .drawer-arrow {
   font-size: 11px;
   color: var(--text-muted);
-  transition: transform 0.15s;
+  transition: transform var(--duration-fast);
   display: inline-block;
   width: 14px;
   text-align: center;
@@ -219,7 +219,7 @@
   border-radius: 6px;
   border: 1px solid var(--border);
   cursor: pointer;
-  transition: opacity 0.15s;
+  transition: opacity var(--duration-fast);
 }
 
 .resource-img-thumb:hover {
@@ -267,17 +267,17 @@
   margin-left: auto;
   padding: 4px 10px;
   border: 1px solid var(--accent);
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   background: var(--accent-soft);
   color: var(--accent);
   font-size: 12px;
   text-decoration: none;
   cursor: pointer;
-  transition: background 0.15s;
+  transition: background var(--duration-fast);
 }
 
 .resource-download-link:hover {
-  background: rgba(124, 58, 237, 0.22);
+  background: rgba(var(--accent-hover-rgb), 0.22);
 }
 
 /* ── Task list (background) ── */
@@ -349,15 +349,15 @@
 .task-list-action {
   padding: 4px 12px;
   border: none;
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   font-size: 12px;
   cursor: pointer;
-  transition: background 0.15s;
+  transition: background var(--duration-fast);
 }
 
 .task-list-action.stop {
   background: var(--danger);
-  color: #fff;
+  color: var(--text-white);
 }
 
 .task-list-action.stop:hover {
@@ -439,15 +439,15 @@
 .cron-list-action {
   padding: 4px 12px;
   border: none;
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   font-size: 12px;
   cursor: pointer;
-  transition: background 0.15s;
+  transition: background var(--duration-fast);
 }
 
 .cron-list-action.trigger {
   background: var(--accent);
-  color: #fff;
+  color: var(--text-white);
 }
 
 .cron-list-action.trigger:hover {
@@ -461,7 +461,7 @@
 
 .cron-list-action.cancel:hover {
   background: var(--danger);
-  color: #fff;
+  color: var(--text-white);
 }
 
 /* ── Subagent Panel (VSCode tabs style) ── */
@@ -484,8 +484,8 @@
   cursor: col-resize;
   background: transparent;
   position: relative;
-  z-index: 10;
-  transition: background 0.15s;
+  z-index: var(--z-content);
+  transition: background var(--duration-fast);
 }
 
 .subagent-panel-resize-handle:hover,
@@ -529,7 +529,7 @@
   border-bottom: 2px solid transparent;
   cursor: pointer;
   white-space: nowrap;
-  transition: color 0.15s, background 0.15s, border-color 0.15s;
+  transition: color var(--duration-fast), background var(--duration-fast), border-color var(--duration-fast);
   flex-shrink: 0;
 }
 
@@ -562,20 +562,20 @@
 }
 
 .subagent-tab-status.subagent-status-waiting {
-  background: #ffcc00;
+  background: var(--status-warning);
 }
 
 .subagent-tab-status.subagent-status-completed {
-  background: #64d2ff;
+  background: var(--multi-bright);
 }
 
 .subagent-tab-status.subagent-status-terminated {
-  background: #ff3b30;
+  background: var(--status-error);
 }
 
 .subagent-panel-collapse {
-  width: 28px;
-  height: 28px;
+  width: var(--icon-btn-sm);
+  height: var(--icon-btn-sm);
   margin: 0 8px;
   border: none;
   border-radius: 6px;
@@ -586,7 +586,7 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  transition: background 0.15s, color 0.15s;
+  transition: background var(--duration-fast), color var(--duration-fast);
   flex-shrink: 0;
 }
 

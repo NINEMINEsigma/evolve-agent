@@ -4,6 +4,7 @@ import EditorArea from "../components/agentspace/EditorArea";
 import StatusBar from "../components/agentspace/StatusBar";
 import { useAgentspace } from "../hooks/useAgentspace";
 import "../styles/agentspace.css";
+import { TIMING } from "../constants/timing";
 
 export default function Agentspace() {
   const as = useAgentspace();
@@ -23,7 +24,7 @@ export default function Agentspace() {
   // 轮询锁状态
   useEffect(() => {
     as.loadLockStatus();
-    const interval = setInterval(() => as.loadLockStatus(), 3000);
+    const interval = setInterval(() => as.loadLockStatus(), TIMING.LOCK_POLL_INTERVAL);
     return () => clearInterval(interval);
   }, [as.loadLockStatus]);
 

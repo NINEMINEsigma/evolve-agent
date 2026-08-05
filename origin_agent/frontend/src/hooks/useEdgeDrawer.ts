@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { TIMING } from "../constants/timing";
 
 export type DrawerPhase = "hidden" | "peek" | "open";
 
@@ -28,8 +29,8 @@ export interface EdgeDrawer {
  */
 export function useEdgeDrawer({
   active = true,
-  closeDelay = 400,
-  peekCloseDelay = 250,
+  closeDelay = TIMING.EDGE_DRAWER_CLOSE,
+  peekCloseDelay = TIMING.EDGE_DRAWER_PEEK,
   pinned = false,
 }: EdgeDrawerOptions = {}): EdgeDrawer {
   const [phase, setPhase] = useState<DrawerPhase>("hidden");

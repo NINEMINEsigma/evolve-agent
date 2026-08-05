@@ -1,6 +1,6 @@
 /* ── Context menu ── */
 .context-menu {
-  z-index: 200;
+  z-index: var(--z-overlay);
   min-width: 150px;
   max-height: calc(100vh - 16px);
   overflow-y: auto;
@@ -8,7 +8,7 @@
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   padding: 4px 0;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+  box-shadow: 0 4px 16px rgba(var(--black-rgb), 0.4);
 }
 
 .context-menu-item {
@@ -29,7 +29,7 @@
 }
 
 .context-menu-item-danger:hover {
-  background: rgba(239, 68, 68, 0.15);
+  background: rgba(var(--danger-rgb), 0.15);
 }
 
 .context-menu-item-disabled {

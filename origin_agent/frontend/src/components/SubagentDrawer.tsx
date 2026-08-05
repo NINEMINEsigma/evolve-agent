@@ -3,6 +3,7 @@ import { SubagentSession } from "../types";
 import MessageItem from "./MessageItem";
 import Minimap from "./Minimap";
 import { subagentFeedbackToChatMessages } from "../utils";
+import { SID_DISPLAY_LEN } from "../constants/session";
 
 interface SubagentDrawerProps {
   open: boolean;
@@ -140,7 +141,7 @@ export function SubagentCard({ session, collapsed, onToggleCollapse, disableTogg
       <div className={`subagent-info ${disableToggle ? "no-toggle" : ""}`} onClick={disableToggle ? undefined : onToggleCollapse}>
       <span className="subagent-name">
         <span className="subagent-collapse-arrow">{collapsed ? "▶" : "▼"}</span>
-        {session.name || session.session_id.slice(0, 12)}
+        {session.name || session.session_id.slice(0, SID_DISPLAY_LEN)}
         <span className="subagent-feedback-count">
           {session.feedback.length} 条
         </span>

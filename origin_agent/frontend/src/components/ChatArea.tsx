@@ -3,6 +3,7 @@ import { ChatMessage } from "../types";
 import MessageItem from "./MessageItem";
 import Minimap from "./Minimap";
 import ContourBackground from "./ContourBackground";
+import { DIMENSIONS } from "../constants/dimensions";
 
 interface ChatAreaProps {
   messages: ChatMessage[];
@@ -47,7 +48,7 @@ export default function ChatArea({ messages, waiting, archived, onImageClick, on
     const chat = chatAreaRef.current;
     if (!chat) return;
     const onScroll = () => {
-      const isAtBottom = chat.scrollHeight - chat.scrollTop - chat.clientHeight <= 20;
+      const isAtBottom = chat.scrollHeight - chat.scrollTop - chat.clientHeight <= DIMENSIONS.SCROLL_BOTTOM_THRESHOLD;
       setShowScrollButton(!isAtBottom);
     };
     chat.addEventListener("scroll", onScroll, { passive: true });

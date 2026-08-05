@@ -1,4 +1,5 @@
 import type { ChatMessage, DownloadInfo, PlaylistEntry, SubagentSession } from "./types";
+import { WS_IN } from "./constants/ws";
 
 export function formatTimeSec(sec: number): string {
   if (!isFinite(sec) || sec < 0) return "0:00";
@@ -160,7 +161,7 @@ export function subagentFeedbackToChatMessages(session: SubagentSession): ChatMe
           characterName: msg.character_name,
         });
         break;
-      case "tool_call": {
+      case WS_IN.TOOL_CALL: {
         const toolName = msg.tool_name || "";
         const argsStr = msg.tool_args ? `(${JSON.stringify(msg.tool_args)})` : "()";
         messages.push({
@@ -173,7 +174,7 @@ export function subagentFeedbackToChatMessages(session: SubagentSession): ChatMe
         });
         break;
       }
-      case "tool_result":
+      case WS_IN.TOOL_RESULT:
         messages.push({
           role: "tool",
           content: msg.content || "",

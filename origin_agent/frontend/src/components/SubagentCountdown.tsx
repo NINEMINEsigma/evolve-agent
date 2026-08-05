@@ -21,7 +21,7 @@ export default function SubagentCountdown({
     <div className="cron-countdown-strip" aria-label="子会话空闲收集倒计时">
       <div
         className="cron-countdown-strip-fill"
-        style={{ background: "#64d2ff", boxShadow: "0 0 8px rgba(100, 210, 255, 0.55)", width: `${percent}%` }}
+        style={{ background: "var(--multi-bright)", boxShadow: "0 0 8px rgba(var(--multi-bright-rgb), 0.55)", width: `${percent}%` }}
       />
       <div className="cron-countdown-tooltip">
         子会话 · {runningCount} 活跃 · {idleCountdown}s 后收集

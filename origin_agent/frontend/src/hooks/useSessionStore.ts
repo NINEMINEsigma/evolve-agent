@@ -15,6 +15,9 @@ import {
   MessageContent,
 } from "../types";
 import { parseToolResult, generateUUID, extractMessageResources } from "../utils";
+import { STORAGE_KEYS } from "../constants/storage";
+import { WS_IN } from "../constants/ws";
+import { COLLOQUY_SID, SID_SHORT_LEN } from "../constants/session";
 
 export interface SessionStoreCallbacks {
   onSessionHistory?: (sid: string) => void;
@@ -364,20 +367,20 @@ export function useSessionStore(callbacks: SessionStoreCallbacks = {}): SessionS
   }, []);
 
   const handleMessage = useCallback((msg: WSMessage) => {
-    if (msg.type === "pong") return; // connection hook handles pong
+    if (msg.type === WS_IN.PONG) return; // connection hook handles pong
 
-    if (msg.type === "system") {
+    if (msg.type === WS_IN.SYSTEM) {
       const raw = typeof msg.content === "string" ? msg.content : JSON.stringify(msg.content ?? "");
       try {
         const data = JSON.parse(raw);
         if (data.build_hash) {
-          const lastHash = localStorage.getItem("evolve_build_hash") || "";
+          const lastHash = localStorage.getItem(STORAGE_KEYS.BUILD_HASH) || "";
           if (lastHash && lastHash !== data.build_hash) {
-            localStorage.setItem("evolve_build_hash", data.build_hash);
+            localStorage.setItem(STORAGE_KEYS.BUILD_HASH, data.build_hash);
             window.location.reload();
             return;
           }
-          localStorage.setItem("evolve_build_hash", data.build_hash);
+          localStorage.setItem(STORAGE_KEYS.BUILD_HASH, data.build_hash);
           return;
         }
         if (data.server_info) {
@@ -483,7 +486,7 @@ export function useSessionStore(callbacks: SessionStoreCallbacks = {}): SessionS
           if (data.processing) setWaiting(true);
           if (msg.session_id) {
             setSessionId(msg.session_id);
-            localStorage.setItem("evolve_session_id", msg.session_id);
+            localStorage.setItem(STORAGE_KEYS.SESSION_ID, msg.session_id);
             callbacksRef.current.onSessionHistory?.(msg.session_id);
           }
           return;
@@ -501,7 +504,7 @@ export function useSessionStore(callbacks: SessionStoreCallbacks = {}): SessionS
         if (data.action === "session_rotated") {
           const oldSid = sessionId;
           setSessionId(data.new_sid);
-          localStorage.setItem("evolve_session_id", data.new_sid);
+          localStorage.setItem(STORAGE_KEYS.SESSION_ID, data.new_sid);
           setMessages([]);
           setTokenUsage(0);
           setClipboardDisplays({});
@@ -552,13 +555,13 @@ export function useSessionStore(callbacks: SessionStoreCallbacks = {}): SessionS
       addMessage("system", raw);
       if (msg.session_id) {
         setSessionId(msg.session_id);
-        localStorage.setItem("evolve_session_id", msg.session_id);
+        localStorage.setItem(STORAGE_KEYS.SESSION_ID, msg.session_id);
         callbacksRef.current.onSessionHistory?.(msg.session_id);
       }
       return;
     }
 
-    if (msg.type === "user_message") {
+    if (msg.type === WS_IN.USER_MESSAGE) {
       const incomingClientId = (msg as any).client_message_id as string | undefined;
       setMessages((prev) => {
         if (incomingClientId && prev.some((m) => m.clientMessageId === incomingClientId)) {
@@ -593,7 +596,7 @@ export function useSessionStore(callbacks: SessionStoreCallbacks = {}): SessionS
       return;
     }
 
-    if (msg.type === "assistant_message") {
+    if (msg.type === WS_IN.ASSISTANT_MESSAGE) {
       setWaiting(false);
       ignoreStaleRef.current = false;
       if (streamDoneRef.current) {
@@ -620,7 +623,7 @@ export function useSessionStore(callbacks: SessionStoreCallbacks = {}): SessionS
       return;
     }
 
-    if (msg.type === "stream_delta") {
+    if (msg.type === WS_IN.STREAM_DELTA) {
       if (ignoreStaleRef.current) return;
       const delta = msg.delta || "";
       const reasoningDelta = msg.reasoning_delta;
@@ -635,7 +638,7 @@ export function useSessionStore(callbacks: SessionStoreCallbacks = {}): SessionS
       return;
     }
 
-    if (msg.type === "stream_done") {
+    if (msg.type === WS_IN.STREAM_DONE) {
       setWaiting(false);
       ignoreStaleRef.current = false;
       // 后端在 stream_done 中附带完整 content，作为权威源同步覆盖 ref，
@@ -652,7 +655,7 @@ export function useSessionStore(callbacks: SessionStoreCallbacks = {}): SessionS
       return;
     }
 
-    if (msg.type === "tool_call") {
+    if (msg.type === WS_IN.TOOL_CALL) {
       if (ignoreStaleRef.current) return;
       const argsStr = msg.args
         ? "(" + Object.entries(msg.args)
@@ -673,7 +676,7 @@ export function useSessionStore(callbacks: SessionStoreCallbacks = {}): SessionS
       return;
     }
 
-    if (msg.type === "tool_result") {
+    if (msg.type === WS_IN.TOOL_RESULT) {
       if (ignoreStaleRef.current) return;
       const raw = msg.result ?? "";
       const parsed = parseToolResult(raw, msg.tool);
@@ -695,7 +698,7 @@ export function useSessionStore(callbacks: SessionStoreCallbacks = {}): SessionS
       return;
     }
 
-    if (msg.type === "task_progress") {
+    if (msg.type === WS_IN.TASK_PROGRESS) {
       // 会话隔离双保险：事件必须属于当前会话，防止跨会话资源串入
       if (msg.session_id && msg.session_id !== sessionId) return;
       const raw = msg.result ?? "";
@@ -728,7 +731,7 @@ export function useSessionStore(callbacks: SessionStoreCallbacks = {}): SessionS
       return;
     }
 
-    if (msg.type === "clipboard_display") {
+    if (msg.type === WS_IN.CLIPBOARD_DISPLAY) {
       // 会话隔离双保险：事件必须属于当前会话
       if (msg.session_id && msg.session_id !== sessionId) return;
       const raw = msg.result ?? "";
@@ -765,12 +768,12 @@ export function useSessionStore(callbacks: SessionStoreCallbacks = {}): SessionS
       return;
     }
 
-    if (msg.type === "error") {
+    if (msg.type === WS_IN.ERROR) {
       addMessage("error", msg.message ?? "");
       return;
     }
 
-    if (msg.type === "confirm_request") {
+    if (msg.type === WS_IN.CONFIRM_REQUEST) {
       if (msg.request_id) {
         setDenyReason("用户不同意工具调用");
         setPendingConfirm({
@@ -785,7 +788,7 @@ export function useSessionStore(callbacks: SessionStoreCallbacks = {}): SessionS
       return;
     }
 
-    if (msg.type === "ask_request") {
+    if (msg.type === WS_IN.ASK_REQUEST) {
       if (msg.request_id && msg.question) {
         setAskCustomText("");
         setAskSelectedOption(null);
@@ -900,7 +903,7 @@ export function useSessionStore(callbacks: SessionStoreCallbacks = {}): SessionS
   }, []);
 
   const newChat = useCallback(() => {
-    localStorage.removeItem("evolve_session_id");
+    localStorage.removeItem(STORAGE_KEYS.SESSION_ID);
     setMessages([]);
     setAgents([]);
     setInput("");
@@ -935,7 +938,6 @@ export function useSessionStore(callbacks: SessionStoreCallbacks = {}): SessionS
   }, [sessionId]);
 
   const enterColloquy = useCallback(() => {
-    const COLLOQUY_SID = "____buildin_colloquy__";
     switchSession(COLLOQUY_SID);
   }, [switchSession]);
 
@@ -1095,7 +1097,7 @@ export function useSessionStore(callbacks: SessionStoreCallbacks = {}): SessionS
   const toggleMergeSelect = useCallback((sid: string) => {
     const session = sessions.find((s) => s.id === sid);
     if (!session || session.status !== "archived") {
-      console.warn(`[merge] 会话 ${sid.slice(0, 8)} 未归档，不可合并`);
+      console.warn(`[merge] 会话 ${sid.slice(0, SID_SHORT_LEN)} 未归档，不可合并`);
       return;
     }
     setSelectedForMerge((prev) => {
@@ -1159,7 +1161,7 @@ export function useSessionStore(callbacks: SessionStoreCallbacks = {}): SessionS
             cluster: {
               id: root.id,
               created_at: root.created_at,
-              title: mostRecent.title || mostRecent.id.slice(0, 8) + "...",
+              title: mostRecent.title || mostRecent.id.slice(0, SID_SHORT_LEN) + "...",
               pinned: component.some((m) => m.pinned),
               last_activity_at: Math.max(...component.map((m) => m.last_activity_at || m.created_at)),
               members: component,

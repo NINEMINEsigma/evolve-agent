@@ -161,9 +161,9 @@
 .agentspace-context-menu {
   background: var(--bg-tertiary, #252526);
   border: 1px solid var(--border, #3c3c3c);
-  box-shadow: 0 2px 8px rgba(0,0,0,0.4);
-  z-index: 100;
-  border-radius: 4px;
+  box-shadow: 0 2px 8px rgba(var(--black-rgb), 0.4);
+  z-index: var(--z-overlay);
+  border-radius: var(--radius-xs);
   padding: 4px 0;
   min-width: 120px;
 }
@@ -226,7 +226,7 @@
 
 .agentspace-tab-active {
   background: var(--tab-active, #1e1e1e);
-  color: var(--fg-primary, #fff);
+  color: var(--text-white);
   border-bottom: 1px solid var(--accent-blue, #007acc);
 }
 
@@ -245,7 +245,7 @@
   width: 6px;
   height: 6px;
   border-radius: 50%;
-  background: var(--fg-primary, #fff);
+  background: var(--text-white);
   flex-shrink: 0;
 }
 
@@ -260,7 +260,7 @@
 }
 
 .agentspace-tab-close:hover {
-  color: var(--fg-primary, #fff);
+  color: var(--text-white);
   background: var(--bg-quaternary, #3c3c3c);
   border-radius: 3px;
 }
@@ -308,11 +308,11 @@
 .agentspace-dialog-overlay {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.5);
+  background: rgba(var(--black-rgb), 0.5);
   display: flex;
   align-items: center;
   justify-content: center;
-  z-index: 200;
+  z-index: var(--z-overlay);
 }
 
 .agentspace-dialog {
@@ -321,7 +321,7 @@
   border-radius: 6px;
   padding: 16px 20px;
   min-width: 280px;
-  box-shadow: 0 4px 16px rgba(0,0,0,0.5);
+  box-shadow: 0 4px 16px rgba(var(--black-rgb), 0.5);
 }
 
 .agentspace-dialog h3 {
@@ -380,14 +380,14 @@
   bottom: 32px;
   right: 20px;
   background: #d32f2f;
-  color: #fff;
+  color: var(--text-white);
   padding: 8px 16px;
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   font-size: 13px;
   cursor: pointer;
-  z-index: 300;
+  z-index: var(--z-overlay);
   max-width: 400px;
-  box-shadow: 0 2px 8px rgba(0,0,0,0.4);
+  box-shadow: 0 2px 8px rgba(var(--black-rgb), 0.4);
 }
 
 .agentspace-error-close {

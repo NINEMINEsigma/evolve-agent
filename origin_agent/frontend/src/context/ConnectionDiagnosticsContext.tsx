@@ -1,4 +1,5 @@
 import React, { createContext, useContext, useEffect, useState } from "react";
+import { TIMING } from "../constants/timing";
 
 export interface ConnectionDiagnostics {
   waiting?: boolean;
@@ -31,7 +32,7 @@ export function useConnectionDiagnostics(): ConnectionDiagnostics & { now: numbe
   const [now, setNow] = useState(Date.now());
 
   useEffect(() => {
-    const id = setInterval(() => setNow(Date.now()), 500);
+    const id = setInterval(() => setNow(Date.now()), TIMING.DIAGNOSTICS_TICK);
     return () => clearInterval(id);
   }, []);
 

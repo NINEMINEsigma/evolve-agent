@@ -1,6 +1,8 @@
 import { useState, useEffect } from "react";
 import { SubagentCard } from "./SubagentDrawer";
 import { SubagentSession } from "../types";
+import { SID_DISPLAY_LEN } from "../constants/session";
+import { DIMENSIONS } from "../constants/dimensions";
 
 interface SubagentPanelProps {
   open: boolean;
@@ -17,7 +19,7 @@ export default function SubagentPanel({
   subagentSessions,
   activeId,
   onSelect,
-  width = 420,
+  width = DIMENSIONS.SUBAGENT_PANEL_DEFAULT,
 }: SubagentPanelProps) {
   const items = Object.values(subagentSessions);
   const [openTick, setOpenTick] = useState(0);
@@ -50,7 +52,7 @@ export default function SubagentPanel({
               title={s.name || s.session_id}
             >
               <span className="subagent-tab-name">
-                {s.name || s.session_id.slice(0, 12)}
+                {s.name || s.session_id.slice(0, SID_DISPLAY_LEN)}
               </span>
               <span className={`subagent-tab-status subagent-status-${s.status}`} />
             </button>

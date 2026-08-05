@@ -13,6 +13,8 @@ import ConfirmDialog from "./ConfirmDialog";
 import AskDialog from "./AskDialog";
 import SecretBanner from "./SecretBanner";
 import type { WebSocketState } from "../hooks/useWebSocket";
+import { STORAGE_KEYS } from "../constants/storage";
+import { DIMENSIONS } from "../constants/dimensions";
 
 interface LayoutProps {
   ws: WebSocketState;
@@ -36,9 +38,9 @@ export default function Layout({ ws, onContextMenu }: LayoutProps) {
   const responseCharacters = responseCharactersMap[ws.sessionId] || ["main-agent"];
 
   const [subagentPanelWidth, setSubagentPanelWidth] = useState(() => {
-    const saved = localStorage.getItem("evolve_subagent_panel_width");
-    const parsed = saved ? parseInt(saved, 10) : 420;
-    return isNaN(parsed) ? 420 : parsed;
+    const saved = localStorage.getItem(STORAGE_KEYS.SUBAGENT_PANEL_WIDTH);
+    const parsed = saved ? parseInt(saved, 10) : DIMENSIONS.SUBAGENT_PANEL_DEFAULT;
+    return isNaN(parsed) ? DIMENSIONS.SUBAGENT_PANEL_DEFAULT : parsed;
   });
   const [resizingPanel, setResizingPanel] = useState(false);
   const subagentPanelWidthRef = useRef(subagentPanelWidth);
@@ -73,7 +75,7 @@ export default function Layout({ ws, onContextMenu }: LayoutProps) {
 
   // 移动端默认折叠侧边栏
   useEffect(() => {
-    const mq = window.matchMedia("(max-width: 768px)");
+    const mq = window.matchMedia(`(max-width: ${DIMENSIONS.MOBILE_BREAKPOINT}px)`);
     const onChange = (e: MediaQueryListEvent) => {
       setIsMobile(e.matches);
       setSidebarCollapsed(e.matches);
@@ -178,7 +180,7 @@ export default function Layout({ ws, onContextMenu }: LayoutProps) {
 
     const handleMove = (ev: PointerEvent) => {
       const delta = startX - ev.clientX;
-      const newWidth = Math.max(280, Math.min(800, startWidth + delta));
+      const newWidth = Math.max(DIMENSIONS.SUBAGENT_PANEL_MIN, Math.min(DIMENSIONS.SUBAGENT_PANEL_MAX, startWidth + delta));
       setSubagentPanelWidth(newWidth);
     };
 
@@ -186,7 +188,7 @@ export default function Layout({ ws, onContextMenu }: LayoutProps) {
       setResizingPanel(false);
       window.removeEventListener("pointermove", handleMove);
       window.removeEventListener("pointerup", handleUp);
-      localStorage.setItem("evolve_subagent_panel_width", String(subagentPanelWidthRef.current));
+      localStorage.setItem(STORAGE_KEYS.SUBAGENT_PANEL_WIDTH, String(subagentPanelWidthRef.current));
     };
 
     window.addEventListener("pointermove", handleMove);

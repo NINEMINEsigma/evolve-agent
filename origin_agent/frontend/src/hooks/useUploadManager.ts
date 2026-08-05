@@ -1,8 +1,8 @@
 import { useCallback, useRef, useState } from "react";
 import { ChatMessage, ContentBlock, DownloadInfo, MessageContent, PlaylistEntry, SessionInfo } from "../types";
 import { generateUUID } from "../utils";
-
-const MAX_PASTE_IMAGE_SIZE = 20 * 1024 * 1024;
+import { WS_OUT } from "../constants/ws";
+import { DIMENSIONS } from "../constants/dimensions";
 
 export interface PendingImage {
   id: string;
@@ -73,7 +73,7 @@ export function useUploadManager({
       if (localPath) {
         wsRef.current!.send(
           JSON.stringify({
-            type: "file_upload",
+            type: WS_OUT.FILE_UPLOAD,
             filename: file.name,
             mime_type: file.type || "application/octet-stream",
             local_path: localPath,
@@ -94,7 +94,7 @@ export function useUploadManager({
         const base64 = (reader.result as string).split(",")[1] || "";
         wsRef.current!.send(
           JSON.stringify({
-            type: "file_upload",
+            type: WS_OUT.FILE_UPLOAD,
             filename: file.name,
             mime_type: file.type || "application/octet-stream",
             file_data: base64,
@@ -123,7 +123,7 @@ export function useUploadManager({
         resolve(null);
         return;
       }
-      if (file.size > MAX_PASTE_IMAGE_SIZE) {
+      if (file.size > DIMENSIONS.MAX_PASTE_IMAGE_SIZE) {
         addMessage("error", `图片超过 20MB 限制：${file.name}`);
         resolve(null);
         return;

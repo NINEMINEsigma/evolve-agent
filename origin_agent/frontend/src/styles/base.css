@@ -40,14 +40,14 @@ html, body, #root {
   background: transparent;
 }
 *::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.10);
+  background: rgba(var(--white-rgb), 0.10);
   border-radius: 999px;
   border: 2px solid transparent;
   background-clip: padding-box;
   min-height: 30px;
 }
 *::-webkit-scrollbar-thumb:hover {
-  background: rgba(167, 139, 250, 0.40);
+  background: rgba(var(--accent-rgb), 0.40);
   background-clip: padding-box;
 }
 *::-webkit-scrollbar-corner {
@@ -56,7 +56,7 @@ html, body, #root {
 
 * {
   scrollbar-width: thin;
-  scrollbar-color: rgba(255, 255, 255, 0.12) transparent;
+  scrollbar-color: rgba(var(--white-rgb), 0.12) transparent;
 }
 
 @media (max-width: 768px) {

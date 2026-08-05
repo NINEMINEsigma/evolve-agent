@@ -1,4 +1,5 @@
 import { useEffect } from "react";
+import { TIMING } from "../constants/timing";
 
 const TOOLTIP_MARGIN = 10;
 const TOOLTIP_ARROW = 6;
@@ -66,7 +67,7 @@ export function useGlobalTooltip() {
       if (hideTimer) clearTimeout(hideTimer);
       hideTimer = setTimeout(() => {
         tooltip.classList.remove("visible");
-      }, 80);
+      }, TIMING.TOOLTIP_HIDE_DELAY);
     };
 
     const onMouseEnter = (e: MouseEvent) => {

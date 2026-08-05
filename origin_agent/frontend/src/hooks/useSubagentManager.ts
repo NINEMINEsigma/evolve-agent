@@ -1,5 +1,6 @@
 import { useCallback, useState } from "react";
 import { SubagentSession, WSMessage } from "../types";
+import { CONTENT_PREVIEW_LEN } from "../constants/session";
 
 export interface SubagentManager {
   subagentSessionsMap: Record<string, Record<string, SubagentSession>>;
@@ -27,10 +28,10 @@ export function useSubagentManager(): SubagentManager {
           continue;
         }
         const snapIds = new Set(
-          (snap.feedback || []).map((f) => `${f.role}::${f.content?.slice(0, 80)}::${f.tool_call_id || ""}`)
+          (snap.feedback || []).map((f) => `${f.role}::${f.content?.slice(0, CONTENT_PREVIEW_LEN)}::${f.tool_call_id || ""}`)
         );
         const wsOnly = (existing.feedback || []).filter(
-          (f) => !snapIds.has(`${f.role}::${f.content?.slice(0, 80)}::${f.tool_call_id || ""}`)
+          (f) => !snapIds.has(`${f.role}::${f.content?.slice(0, CONTENT_PREVIEW_LEN)}::${f.tool_call_id || ""}`)
         );
         merged[sKey] = {
           ...snap,
