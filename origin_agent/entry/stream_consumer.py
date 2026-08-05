@@ -124,10 +124,11 @@ class StreamConsumer:
             raise RuntimeError(stream_error)
 
         if not ev.is_set() and usage_dict["total_tokens"] == 0:
-            raise RuntimeError(
-                "LLM provider did not return token usage for streaming response. "
-                "Provider must support stream_options.include_usage."
+            logger.warning(
+                "LLM provider did not return token usage for streaming response.",
             )
+            # NOTE: 借用404代指无效的total_tokens
+            usage_dict["total_tokens"] = 404
 
         return LLMResponse(
             content=content,
