@@ -115,7 +115,7 @@ class SessionStore:
         if not path.exists():
             return TokenUsageRecord()
         data = json.loads(path.read_text(encoding="utf-8"))
-        return TokenUsageRecord.model_validate_json(data)
+        return TokenUsageRecord.model_validate(data)
 
     def read_summary(self, session_id: str) -> str:
         path = self.summary_path(session_id)

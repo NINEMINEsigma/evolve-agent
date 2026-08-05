@@ -24,7 +24,7 @@ import openai
 
 from abstract.llm.client import BaseLLMClient
 from abstract.llm.formats import messages_to_openai_list, to_openai_message
-from entity.messages import BaseMessage
+from entity.messages import BaseMessage, CharacterConversationMessage
 from entity.puretype import LLMResponse, StreamChunk, ToolCallRequest, Usage
 from entity.constant import TOOL_RESULT_PREVIEW_CHARS, LLM_RETRY_COUNT, BACKOFF_BASE
 from system.context import RuntimeContext
@@ -118,6 +118,8 @@ class OpenAILLMClient(BaseLLMClient):
         tools: Optional[list[dict[str, Any]]] = None,
         response_format: Optional[dict[str, str]] = None,
         character: str = "",
+        *,
+        last_user_message: CharacterConversationMessage | None = None,
     ) -> LLMResponse:
         """发送聊天请求，返回结构化响应。
 
@@ -129,7 +131,10 @@ class OpenAILLMClient(BaseLLMClient):
 
         返回包含 assistant 内容和工具调用的 :class:`LLMResponse`。
         """
-        messages_dict = messages_to_openai_list(messages, current_character_agent=character)
+        messages_dict = messages_to_openai_list(
+            messages, current_character_agent=character,
+            last_user_message=last_user_message,
+        )
         kwargs = self._build_kwargs(
             messages_dict, tools, stream=False,
             response_format=response_format,
@@ -180,6 +185,8 @@ class OpenAILLMClient(BaseLLMClient):
         tools: Optional[list[dict[str, Any]]] = None,
         response_format: Optional[dict[str, str]] = None,
         character: str = "",
+        *,
+        last_user_message: CharacterConversationMessage | None = None,
     ) -> AsyncIterator[StreamChunk]:
         """发送流式聊天请求，逐块返回增量内容。
 
@@ -189,7 +196,10 @@ class OpenAILLMClient(BaseLLMClient):
         当底层连接在流传输过程中中断时，会尝试把已收到的内容拼回 prompt
         并重新发起请求，让 LLM 从断点继续生成（应用层伪续传）。
         """
-        messages_dict = messages_to_openai_list(messages, current_character_agent=character)
+        messages_dict = messages_to_openai_list(
+            messages, current_character_agent=character,
+            last_user_message=last_user_message,
+        )
         original_messages: list[dict[str, Any]] = list(messages_dict)
         state: dict[str, Any] = {
             "content": "",

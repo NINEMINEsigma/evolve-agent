@@ -71,26 +71,22 @@ def to_openai_message(
 def messages_to_openai_list(
     messages: list[BaseMessage],
     current_character_agent: str,
+    *,
+    last_user_message: CharacterConversationMessage | None = None,
     **kwargs: Any,
 ) -> list[dict[str, Any]]:
     """Convert a list of ``BaseMessage`` to a list of OpenAI protocol dicts.
 
-    This is the batch equivalent of ``to_openai_message()``, intended for
-    LLM client implementors that need to prepare the full message array
-    in one call.
+    ``last_user_message`` 用于标记 ``is_last_user_message=True``，
+    使 ``CharacterConversationMessage.as_content`` 附加 ``dynamic_message_suffix``。
+    传入的对象应与 ``messages`` 列表中的同一个对象引用匹配。
     """
-    # 找到最后一条 CharacterConversationMessage (role=USER)，标记 is_last_user_message
-    last_user_idx: int = -1
-    for i, m in enumerate(messages):
-        if (
-            isinstance(m, CharacterConversationMessage)
-            and m.role == Role.USER
-        ):
-            last_user_idx = i
-
     result: list[dict[str, Any]] = []
-    for i, m in enumerate(messages):
-        is_last = (i == last_user_idx)
+    for m in messages:
+        is_last = (
+            last_user_message is not None
+            and m is last_user_message
+        )
         d = to_openai_message(
             m, current_character_agent,
             is_last_user_message=is_last, **kwargs,
@@ -304,11 +300,16 @@ def _tool_call_to_anthropic_tool_use(tc: MsgToolCall) -> dict[str, Any]:
 def messages_to_anthropic_list(
     messages: list[BaseMessage],
     current_character_agent: str,
+    *,
+    last_user_message: CharacterConversationMessage | None = None,
     **kwargs: Any,
 ) -> tuple[list[dict[str, Any]], str]:
     """将 ``list[BaseMessage]`` 直接转换为 Anthropic Messages API 格式。
 
     返回 ``(anthropic_messages, system_text)``。
+
+    ``last_user_message`` 用于标记 ``is_last_user_message=True``，
+    使 ``CharacterConversationMessage.as_content`` 附加 ``dynamic_message_suffix``。
 
     Anthropic 要求：
       - system 提示只能作为顶层 ``system`` 参数，不能穿插在 messages 中。
@@ -320,15 +321,6 @@ def messages_to_anthropic_list(
     anthropic_messages: list[dict[str, Any]] = []
     pending_tool_results: list[dict[str, Any]] = []
 
-    # 找到最后一条 CharacterConversationMessage (role=USER)，标记 is_last_user_message
-    last_user_idx: int = -1
-    for i, m in enumerate(messages):
-        if (
-            isinstance(m, CharacterConversationMessage)
-            and m.role == Role.USER
-        ):
-            last_user_idx = i
-
     def _flush_tool_results() -> None:
         nonlocal pending_tool_results
         if pending_tool_results:
@@ -338,7 +330,7 @@ def messages_to_anthropic_list(
             })
             pending_tool_results = []
 
-    for i, msg in enumerate(messages):
+    for msg in messages:
         # system 消息提取到顶层
         if isinstance(msg, CharacterSystemMessage):
             content = msg.as_content(current_character_agent, **kwargs)
@@ -388,7 +380,10 @@ def messages_to_anthropic_list(
 
         # 角色对话消息
         if isinstance(msg, CharacterConversationMessage):
-            is_last_user = (i == last_user_idx)
+            is_last_user = (
+                last_user_message is not None
+                and msg is last_user_message
+            )
             content = msg.as_content(current_character_agent, is_last_user_message=is_last_user, **kwargs)
             if content is None:
                 continue

@@ -302,6 +302,7 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
                         sid, messages,
                         self._get_tool_definitions(),
                         stream_id,
+                        last_user_message=self._history.last_user_message,
                     )
                 except Exception as llm_exc:
                     if is_content_block_error(llm_exc):

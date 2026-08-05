@@ -28,7 +28,7 @@ import json
 
 from abstract.llm.client import BaseLLMClient
 from abstract.llm.formats import messages_to_anthropic_list
-from entity.messages import BaseMessage
+from entity.messages import BaseMessage, CharacterConversationMessage
 from entity.puretype import LLMResponse, StreamChunk, ToolCallRequest, Usage
 from entity.constant import (
     BACKOFF_BASE,
@@ -119,6 +119,8 @@ class AnthropicLLMClient(BaseLLMClient):
         tools: Optional[list[dict[str, Any]]] = None,
         response_format: Optional[dict[str, str]] = None,
         character: str = "",
+        *,
+        last_user_message: CharacterConversationMessage | None = None,
     ) -> LLMResponse:
         """发送聊天请求，返回结构化响应。
 
@@ -126,7 +128,8 @@ class AnthropicLLMClient(BaseLLMClient):
         自动进行指数退避重试，最多 ``LLM_RETRY_COUNT`` 次。
         """
         anthropic_messages, system = messages_to_anthropic_list(
-            messages, current_character_agent=character
+            messages, current_character_agent=character,
+            last_user_message=last_user_message,
         )
         anthropic_tools = _openai_tools_to_anthropic(tools) if tools else None
         kwargs = self._build_kwargs(
@@ -173,6 +176,8 @@ class AnthropicLLMClient(BaseLLMClient):
         tools: Optional[list[dict[str, Any]]] = None,
         response_format: Optional[dict[str, str]] = None,
         character: str = "",
+        *,
+        last_user_message: CharacterConversationMessage | None = None,
     ) -> AsyncIterator[StreamChunk]:
         """发送流式聊天请求，逐块返回增量内容。
 
@@ -180,7 +185,8 @@ class AnthropicLLMClient(BaseLLMClient):
         ``finish_reason`` 的 chunk。流中断时支持断点续传。
         """
         anthropic_messages, system = messages_to_anthropic_list(
-            messages, current_character_agent=character
+            messages, current_character_agent=character,
+            last_user_message=last_user_message,
         )
         original_messages: list[dict[str, Any]] = list(anthropic_messages)
         anthropic_tools = _openai_tools_to_anthropic(tools) if tools else None

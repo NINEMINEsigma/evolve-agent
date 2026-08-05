@@ -12,7 +12,7 @@ from typing import Any, TYPE_CHECKING
 
 from abstract.llm.client import BaseLLMClient
 from entity.puretype import LLMResponse, Usage, ToolCallRequest
-from entity.messages import BaseMessage
+from entity.messages import BaseMessage, CharacterConversationMessage
 
 if TYPE_CHECKING:
     from entry.agent_sink import AgentSink
@@ -53,6 +53,8 @@ class StreamConsumer:
         messages: list[BaseMessage],
         tools: list[dict[str, Any]] | None,
         stream_id: str,
+        *,
+        last_user_message: CharacterConversationMessage | None = None,
     ) -> LLMResponse:
         """消费流式响应，返回聚合后的 LLMResponse。"""
         ev = self._cancel_event
@@ -60,14 +62,17 @@ class StreamConsumer:
         content: str = ""
         reasoning_content: str = ""
         reasoning_field_name: str | None = None
-        tool_calls: list[ToolCallRequest] = [] 
+        tool_calls: list[ToolCallRequest] = []
         finish_reason: str = "stop"
         usage_dict: dict[str, int] = {
             "prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0,
         }
         stream_error: str | None = None
 
-        stream = self._llm.chat_stream(messages, tools=tools, character=self._character_name)
+        stream = self._llm.chat_stream(
+            messages, tools=tools, character=self._character_name,
+            last_user_message=last_user_message,
+        )
         try:
             async for chunk in stream:
                 if ev.is_set():

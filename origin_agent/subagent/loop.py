@@ -310,7 +310,10 @@ class SubAgentLoop(BasePrivateChatAgentLoop):
 
                 # 调用 LLM（基类 _build_history_messages 统一处理 system prompt + hooks + memory）
                 messages = self._build_history_messages()
-                resp: LLMResponse = await self._llm.chat(messages, self._tools, character=self.current_character_agent)
+                resp: LLMResponse = await self._llm.chat(
+                    messages, self._tools, character=self.current_character_agent,
+                    last_user_message=self._history.last_user_message,
+                )
 
                 if self._cancel_event.is_set():
                     return

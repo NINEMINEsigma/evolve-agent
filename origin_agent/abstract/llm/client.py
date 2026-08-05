@@ -10,7 +10,7 @@ from abc import ABC, abstractmethod
 from collections.abc import AsyncIterator
 from typing import Any
 
-from entity.messages import BaseMessage
+from entity.messages import BaseMessage, CharacterConversationMessage
 from entity.puretype import LLMResponse, StreamChunk
 
 
@@ -34,6 +34,8 @@ class BaseLLMClient(ABC):
         tools: list[dict[str, Any]] | None = None,
         response_format: dict[str, str] | None = None,
         character: str = "",
+        *,
+        last_user_message: CharacterConversationMessage | None = None,
     ) -> LLMResponse:
         """发送聊天请求，返回完整结构化响应。
 
@@ -41,6 +43,7 @@ class BaseLLMClient(ABC):
         *tools* 为可选的 OpenAI 格式工具 schema 列表。
         *response_format* 用于指定结构化输出格式（如 json_object）。
         *character* 当前运行中的 agent 角色名，用于消息转换时的可见性过滤和前缀修饰（发送前由 LLM 客户端自行调用 ``to_openai_message()``）。
+        *last_user_message* 用于标记 ``is_last_user_message``，使 ``dynamic_message_suffix`` 被附加。
         """
         raise NotImplementedError
 
@@ -51,6 +54,8 @@ class BaseLLMClient(ABC):
         tools: list[dict[str, Any]] | None = None,
         response_format: dict[str, str] | None = None,
         character: str = "",
+        *,
+        last_user_message: CharacterConversationMessage | None = None,
     ) -> AsyncIterator[StreamChunk]:
         """发送流式聊天请求，逐块返回增量内容。
 
@@ -58,6 +63,7 @@ class BaseLLMClient(ABC):
         并在流结束时发出带 ``finish_reason`` 的 chunk。
 
         *character* 当前运行中的 agent 角色名，用于消息转换时的可见性过滤和前缀修饰（发送前由 LLM 客户端自行调用 ``to_openai_message()``）。
+        *last_user_message* 用于标记 ``is_last_user_message``，使 ``dynamic_message_suffix`` 被附加。
         """
         raise NotImplementedError
         yield None  # noqa
