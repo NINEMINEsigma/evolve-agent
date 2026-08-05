@@ -19,7 +19,7 @@ from entity.messages import (
     History,
     CharacterConversationMessage,
 )
-from entity.puretype import Role, ToolAvailability, AgentConfig, LoopMeta, Loop
+from entity.puretype import Role, ToolAvailability, AgentConfig, LoopMeta, Loop, TokenUsageRecord
 from entity.constant import (
     MAIN_AGENT_CHARACTER_NAME,
     USER_CHARACTER_NAME,
@@ -89,13 +89,12 @@ class MultiAgentLoop(BaseAgentLoop, IMainSessionLoop):
         )
 
         # token 消耗统计：从磁盘恢复历史累计值，避免从普通模式切换后覆盖已有消耗
-        self._token_usage: int = 0
-        self._last_prompt_tokens: int = 0
+        self._token_record: TokenUsageRecord = TokenUsageRecord()
         # 旋转通知：old_sid → new_sid（供 gateway 层 pop_session_rotated 读取）
         self._session_rotated_notify: dict[str, str] = {}
         if self._session_store is not None:
             try:
-                self._token_usage = self._session_store.read_token_usage(session_id)
+                self._token_record = self._session_store.read_token_usage(session_id)
             except Exception as exc:
                 logger.warning(
                     "Failed to load token usage for session %s: %s", session_id, exc
@@ -103,7 +102,7 @@ class MultiAgentLoop(BaseAgentLoop, IMainSessionLoop):
 
         logger.info(
             "MultiAgentLoop initialized | session=%s agents=%d history_store=%s token_usage=%d",
-            session_id, len(self._agent_names), bool(history_store_dir), self._token_usage,
+            session_id, len(self._agent_names), bool(history_store_dir), self._token_record.token_usage,
         )
 
     # -- BaseAgentLoop 抽象方法实现 ----------------------------------------
@@ -169,11 +168,11 @@ class MultiAgentLoop(BaseAgentLoop, IMainSessionLoop):
         此方法作为兜底：当 Worker 使用全局 RuntimeContext 配置时（max_context_tokens=0），
         回退到全局上限检测。
         """
-        if self._last_prompt_tokens == 0:
+        if self._token_record.prompt_tokens == 0:
             return False
         ctx = self.app.runtime_context
         return (
-            self._last_prompt_tokens + ctx.llm_max_output_tokens + safety_margin
+            self._token_record.prompt_tokens + ctx.llm_max_output_tokens + safety_margin
         ) > ctx.llm_max_context_tokens
 
     async def _rotate_session_for_context_limit(self) -> str | None:
@@ -218,7 +217,7 @@ class MultiAgentLoop(BaseAgentLoop, IMainSessionLoop):
 
         if new_sid:
             self.session_id = new_sid
-            self._last_prompt_tokens = 0
+            self._token_record = TokenUsageRecord()
             self._session_rotated_notify[old_sid] = new_sid
             logger.info(
                 "Multi-agent session rotated for context limit | old=%s new=%s",
@@ -237,7 +236,8 @@ class MultiAgentLoop(BaseAgentLoop, IMainSessionLoop):
 
     def get_token_usage(self) -> int:
         """返回会话级累计总 token 消耗（含普通模式已累积部分）。"""
-        return self._token_usage
+        # NOTE: 不调用 _ensure_token_record_loaded — MultiAgentLoop 在构造函数中已从磁盘恢复
+        return self._token_record.token_usage
 
     def get_context_tokens(self) -> int:
         """返回最近一次 LLM 调用的 prompt_tokens。
@@ -245,7 +245,8 @@ class MultiAgentLoop(BaseAgentLoop, IMainSessionLoop):
         多 Agent 模式下各 agent 的上下文不同，该值仅为最近一次 agent 调用的上下文快照，
         不代表整个多 Agent 会话的统一上下文占用。
         """
-        return self._last_prompt_tokens
+        # NOTE: 不调用 _ensure_token_record_loaded — MultiAgentLoop 在构造函数中已从磁盘恢复
+        return self._token_record.prompt_tokens
 
     # -- LLM 客户端 -------------------------------------------------------
 
@@ -349,7 +350,7 @@ class MultiAgentLoop(BaseAgentLoop, IMainSessionLoop):
         await self._cascade(_response)
 
         # 超限检测触发后旋转会话
-        if self._last_prompt_tokens > 0 and self._is_context_over_limit():
+        if self._token_record.prompt_tokens > 0 and self._is_context_over_limit():
             logger.warning(
                 "Context limit reached after cascade, rotating | session=%s",
                 self.session_id,
@@ -679,7 +680,7 @@ class MultiAgentLoop(BaseAgentLoop, IMainSessionLoop):
 
         logger.info(
             "Agent worker done | session=%s character=%s token_usage=%d",
-            self.session_id, character_name, self._token_usage,
+            self.session_id, character_name, self._token_record.token_usage,
         )
         return result
 
@@ -693,8 +694,8 @@ class MultiAgentLoop(BaseAgentLoop, IMainSessionLoop):
         last_prompt_tokens = result.last_prompt_tokens if result is not None else worker.last_prompt_tokens
 
         if total_token_usage:
-            self._token_usage += total_token_usage
-            self._last_prompt_tokens = last_prompt_tokens
+            self._token_record.token_usage += total_token_usage
+            self._token_record.prompt_tokens = last_prompt_tokens
             self._persist_token_usage(self.session_id)
             # 异步推送在前端展示；_push_usage_update 内部捕获异常，不会阻塞级联
             try:

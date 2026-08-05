@@ -48,10 +48,6 @@ disable-model-invocation: true
 
    你必须通过调用指令（如 `Get-Date`）获取当前的时间，因为你的知识库中的时间是冻结的。
 
-   ```java
-   mkdir -p .tasks && touch ".tasks/${TASK_FILE_NAME}_[TASK_IDENTIFIER].md"
-   ```
-
 3. 分析与任务相关的代码：
    - 识别核心文件/功能
    - 追踪代码流程
@@ -59,9 +55,7 @@ disable-model-invocation: true
 
 ## 思考过程
 
-```java
-嗯... [具有系统思维方法的推理过程]
-```
+具有系统思维方法的推理过程
 
 ## 输出格式
 

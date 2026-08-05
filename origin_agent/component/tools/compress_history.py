@@ -95,7 +95,7 @@ async def _handle_compress_history(args: dict[str, Any], context: "ToolContext")
     loop.save_history(session_id)
 
     # 9. 重置 token 计数
-    loop._last_prompt_tokens = 0
+    loop._token_record.prompt_tokens = 0
 
     # 10. 通知前端
     await context.sink.emit_system_message(session_id, "压缩完成")

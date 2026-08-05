@@ -18,7 +18,7 @@ from typing import Any, TYPE_CHECKING
 
 from pydantic import BaseModel
 
-from entity.puretype import Role, ToolAvailability, SessionMessageEntry
+from entity.puretype import Role, ToolAvailability, SessionMessageEntry, TokenUsageRecord
 from entity.messages import (
     History,
     BaseMessage,
@@ -288,8 +288,7 @@ class BaseAgentLoop(ABC):
         self._message_hooks_cache: list[dict] | None = None
         self._history: History = History()
         self._session_store: SessionStore | None = None
-        self._token_usage: int = 0
-        self._last_prompt_tokens: int = 0
+        self._token_record: TokenUsageRecord = TokenUsageRecord()
         # gateway SessionManager 引用（由 server 层注入，用于旋转/归档）；
         # 仅主会话 loop 使用，子 Agent loop 保持 None
         self._session_manager: SessionManager | None = None
@@ -413,28 +412,33 @@ class BaseAgentLoop(ABC):
 
     # -- token 追踪（所有 loop 共享，可被子类覆盖）-------------------------
 
+    def _ensure_token_record_loaded(self) -> None:
+        """首次访问时从磁盘恢复 token 使用记录（幂等）。"""
+        if self._token_record.token_usage or self._token_record.prompt_tokens:
+            return
+        if self._session_store is None:
+            return
+        try:
+            record = self._session_store.read_token_usage(self.session_id)
+        except Exception:
+            logger.exception("Failed to load token usage for session=%s", self.session_id)
+            return
+        if record.token_usage or record.prompt_tokens:
+            self._token_record = record
+
     def get_token_usage(self) -> int:
-        if self._token_usage:
-            return self._token_usage
-        if self._session_store is not None:
-            try:
-                disk_usage = self._session_store.read_token_usage(self.session_id)
-            except Exception:
-                logger.exception("Failed to load token usage for session=%s", self.session_id)
-                disk_usage = 0
-            if disk_usage:
-                self._token_usage = disk_usage
-            return disk_usage
-        return 0
+        self._ensure_token_record_loaded()
+        return self._token_record.token_usage
 
     def get_context_tokens(self) -> int:
-        return self._last_prompt_tokens
+        self._ensure_token_record_loaded()
+        return self._token_record.prompt_tokens
 
     async def _push_usage_update(self, session_id: str) -> None:
         """推送 token 消耗到前端。"""
         try:
             await self.get_sink().emit_usage_update(
-                session_id, self._token_usage, self._last_prompt_tokens,
+                session_id, self._token_record.token_usage, self._token_record.prompt_tokens,
             )
         except Exception:
             logger.warning("Failed to push usage update for session=%s", session_id, exc_info=True)
@@ -443,7 +447,7 @@ class BaseAgentLoop(ABC):
         if self._session_store is None:
             return
         try:
-            self._session_store.write_token_usage(session_id, self._token_usage)
+            self._session_store.write_token_usage(session_id, self._token_record)
         except Exception as exc:
             logger.exception("Failed to persist token usage for session %s: %s", session_id, exc)
 

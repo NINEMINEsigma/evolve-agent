@@ -23,7 +23,7 @@ from abstract.tools.registry import registry as tool_registry
 from component.approval import ask_agent_reason
 from abstract.llm.client import BaseLLMClient
 from abstract.llm.loader import create_llm_client
-from entity.puretype import LLMResponse, ToolCallRequest, Role, ToolAvailability
+from entity.puretype import LLMResponse, ToolCallRequest, Role, ToolAvailability, TokenUsageRecord
 from system.session_store import SessionStore
 from entity.constant import (
     LOG_PREVIEW_CHARS,
@@ -332,8 +332,8 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
                     return "Cancelled."
 
                 if resp.usage.prompt_tokens:
-                    self._last_prompt_tokens = resp.usage.prompt_tokens
-                    self._token_usage += resp.usage.total_tokens
+                    self._token_record.prompt_tokens = resp.usage.prompt_tokens
+                    self._token_record.token_usage += resp.usage.total_tokens
                     self._persist_token_usage(sid)
                 await self._push_usage_update(sid)
 
@@ -621,12 +621,12 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
     @property
     def last_prompt_tokens(self) -> int:
         """返回最近一次 prompt 的 token 数。"""
-        return self._last_prompt_tokens
+        return self._token_record.prompt_tokens
 
     @last_prompt_tokens.setter
     def last_prompt_tokens(self, value: int) -> None:
         """设置最近一次 prompt 的 token 数。"""
-        self._last_prompt_tokens = value
+        self._token_record.prompt_tokens = value
 
     def get_full_history(self, session_id: str) -> list[BaseMessage]:
         """返回完整历史消息（供外部生命周期管理使用）。"""
@@ -656,7 +656,7 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
     def reset_history(self, session_id: str | None = None) -> None:
         """清空当前历史并可选持久化。"""
         self._history = History()
-        self._last_prompt_tokens = 0
+        self._token_record = TokenUsageRecord()
         if session_id is not None:
             self.save_history(session_id)
 

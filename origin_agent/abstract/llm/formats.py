@@ -79,10 +79,25 @@ def messages_to_openai_list(
     LLM client implementors that need to prepare the full message array
     in one call.
     """
-    return [
-        d for m in messages
-        if (d := to_openai_message(m, current_character_agent, **kwargs)) is not None
-    ]
+    # 找到最后一条 CharacterConversationMessage (role=USER)，标记 is_last_user_message
+    last_user_idx: int = -1
+    for i, m in enumerate(messages):
+        if (
+            isinstance(m, CharacterConversationMessage)
+            and m.role == Role.USER
+        ):
+            last_user_idx = i
+
+    result: list[dict[str, Any]] = []
+    for i, m in enumerate(messages):
+        is_last = (i == last_user_idx)
+        d = to_openai_message(
+            m, current_character_agent,
+            is_last_user_message=is_last, **kwargs,
+        )
+        if d is not None:
+            result.append(d)
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -305,6 +320,15 @@ def messages_to_anthropic_list(
     anthropic_messages: list[dict[str, Any]] = []
     pending_tool_results: list[dict[str, Any]] = []
 
+    # 找到最后一条 CharacterConversationMessage (role=USER)，标记 is_last_user_message
+    last_user_idx: int = -1
+    for i, m in enumerate(messages):
+        if (
+            isinstance(m, CharacterConversationMessage)
+            and m.role == Role.USER
+        ):
+            last_user_idx = i
+
     def _flush_tool_results() -> None:
         nonlocal pending_tool_results
         if pending_tool_results:
@@ -314,7 +338,7 @@ def messages_to_anthropic_list(
             })
             pending_tool_results = []
 
-    for msg in messages:
+    for i, msg in enumerate(messages):
         # system 消息提取到顶层
         if isinstance(msg, CharacterSystemMessage):
             content = msg.as_content(current_character_agent, **kwargs)
@@ -364,7 +388,8 @@ def messages_to_anthropic_list(
 
         # 角色对话消息
         if isinstance(msg, CharacterConversationMessage):
-            content = msg.as_content(current_character_agent, **kwargs)
+            is_last_user = (i == last_user_idx)
+            content = msg.as_content(current_character_agent, is_last_user_message=is_last_user, **kwargs)
             if content is None:
                 continue
 

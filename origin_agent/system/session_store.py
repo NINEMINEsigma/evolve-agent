@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any
 
 from entity.messages import History
+from entity.puretype import TokenUsageRecord
 from entity.constant import History_Version as __SessionStore_Version__
 from easysave import save, load
 
@@ -105,16 +106,16 @@ class SessionStore:
             logger.exception("Failed to save history for session %s: %s", session_id, exc)
             raise
 
-    def write_token_usage(self, session_id: str, token_usage: int) -> None:
-        payload = json.dumps({"token_usage": token_usage}, ensure_ascii=False)
+    def write_token_usage(self, session_id: str, record: TokenUsageRecord) -> None:
+        payload = record.model_dump_json()
         write_text_atomic(self.token_usage_path(session_id), payload)
 
-    def read_token_usage(self, session_id: str) -> int:
+    def read_token_usage(self, session_id: str) -> TokenUsageRecord:
         path = self.token_usage_path(session_id)
         if not path.exists():
-            return 0
+            return TokenUsageRecord()
         data = json.loads(path.read_text(encoding="utf-8"))
-        return int(data.get("token_usage", 0))
+        return TokenUsageRecord.model_validate_json(data)
 
     def read_summary(self, session_id: str) -> str:
         path = self.summary_path(session_id)

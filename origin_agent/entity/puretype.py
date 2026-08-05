@@ -562,3 +562,17 @@ class ShowApiKeyResult(BaseModel):
 
     message: str = ""
     """面向用户的说明文本。"""
+
+
+# ---------------------------------------------------------------------------
+# Token Usage Types
+# ---------------------------------------------------------------------------
+
+class TokenUsageRecord(BaseModel):
+    """token 使用量持久化结构，对应 token_usage.json。"""
+
+    token_usage: int = 0
+    """会话累计 token 总消耗量。"""
+
+    prompt_tokens: int = 0
+    """最近一次 LLM 调用的 prompt token 数（已消耗上下文）。"""

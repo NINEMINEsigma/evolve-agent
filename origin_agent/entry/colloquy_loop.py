@@ -123,7 +123,7 @@ class ColloquyLoop(ParentAgentLoop):
             0,
         )
         self.save_history(sid)
-        self._last_prompt_tokens = 0
+        self._token_record.prompt_tokens = 0
 
         # 7. 通知前端
         await self._frontend_sink.emit_system_message(sid, "压缩完成")
