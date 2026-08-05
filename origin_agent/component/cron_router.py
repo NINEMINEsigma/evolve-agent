@@ -11,7 +11,7 @@ import threading
 from typing import Any, TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from entry.base_agent_loop import BaseAgentLoop, CronResultMessage
+    from entry.base_agent_loop import BaseAgentLoop
 
 logger = logging.getLogger(__name__)
 
@@ -68,7 +68,6 @@ class CronRouter:
             name=name,
             exit_code=exit_code,
             stdout_preview=stdout_preview,
-            character_name=loop.user_character_name,
         )
         loop.inbox.put(msg)
         loop.inbox.wake()
