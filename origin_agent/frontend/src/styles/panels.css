@@ -85,13 +85,7 @@
   box-shadow: none;
 }
 
-/* ── Clipboard display panel ── */
-.clipboard-display-panel {
-  padding: 10px 16px;
-  background: var(--bg-secondary);
-  border-bottom: 1px solid var(--border);
-}
-
+/* ── Clipboard display items (shared) ── */
 .clipboard-display-item {
   margin-bottom: 8px;
 }
@@ -183,8 +177,7 @@
   padding: 2px 6px;
 }
 
-.task-progress-panel.collapsed .task-progress-item,
-.clipboard-display-panel.collapsed .clipboard-display-item {
+.task-progress-panel.collapsed .task-progress-item {
   display: none;
 }
 
@@ -367,86 +360,15 @@
   font-size: 11px;
 }
 
-/* ── Unified Panel (剪切板 + 子会话) ── */
+/* ── Clipboard Panel ── */
 .unified-panel {
   padding: 0;
   background: var(--bg-secondary);
   border-bottom: 1px solid var(--border);
 }
 
-.unified-tabs {
-  display: flex;
-  gap: 0;
-  padding: 0 16px;
-  background: var(--bg-secondary);
-  border-bottom: 1px solid var(--border);
-}
-
-.unified-tab {
-  padding: 8px 16px;
-  font-size: 13px;
-  font-weight: 500;
-  color: var(--text-muted);
-  background: transparent;
-  border: none;
-  border-bottom: 2px solid transparent;
-  cursor: pointer;
-  transition: color 0.15s, border-color 0.15s;
-}
-
-.unified-tab:hover {
-  color: var(--text-primary);
-}
-
-.unified-tab.active {
-  color: var(--accent);
-  border-bottom-color: var(--accent);
-}
-
 .unified-content {
   padding: 10px 16px;
-}
-
-.unified-item {
-  /* single item view */
-}
-
-.unified-nav {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 12px;
-  margin-bottom: 8px;
-}
-
-.unified-nav-btn {
-  padding: 4px 10px;
-  font-size: 13px;
-  color: var(--text-muted);
-  background: var(--bg-tertiary);
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  cursor: pointer;
-  transition: background 0.15s, color 0.15s;
-}
-
-.unified-nav-btn:hover {
-  background: var(--bg-hover);
-  color: var(--text-primary);
-}
-
-.unified-nav-label {
-  font-size: 12px;
-  color: var(--text-muted);
-  min-width: 40px;
-  text-align: center;
-}
-
-.unified-empty {
-  padding: 12px 0;
-  font-size: 13px;
-  color: var(--text-muted);
-  text-align: center;
 }
 
 /* ── Subagent display ── */
@@ -518,8 +440,7 @@
   margin-bottom: 6px;
 }
 
-/* ── Unified panel collapsed ── */
-.unified-panel.collapsed .unified-tabs,
+/* ── Clipboard panel collapsed ── */
 .unified-panel.collapsed .unified-content {
   display: none;
 }

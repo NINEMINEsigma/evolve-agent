@@ -100,11 +100,10 @@ frontend/
 
 | 组件 | 职责 |
 |---|---|
-| `UnifiedPanel.tsx` | 统一侧面板容器 |
+| `ClipboardPanel.tsx` | 剪贴板展示面板 |
 | `SubagentPanel.tsx` | 子代理状态面板 |
 | `SubagentDrawer.tsx` | 子代理抽屉 |
 | `TaskProgressPanel.tsx` | 任务进度面板 |
-| `ClipboardPanel.tsx` | 剪贴板展示 |
 | `PlaylistPlayer.tsx` | 播放列表播放器 |
 | `CronCountdown.tsx` / `SubagentCountdown.tsx` | 倒计时组件 |
 

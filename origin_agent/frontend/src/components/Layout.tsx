@@ -3,7 +3,7 @@ import Sidebar from "./Sidebar";
 import Header from "./Header";
 import ChatArea from "./ChatArea";
 import InputBar from "./InputBar";
-import UnifiedPanel from "./UnifiedPanel";
+import ClipboardPanel from "./ClipboardPanel";
 import Drawer from "./Drawer";
 import SubagentPanel from "./SubagentPanel";
 import CronCountdown from "./CronCountdown";
@@ -254,7 +254,7 @@ export default function Layout({ ws, onContextMenu }: LayoutProps) {
           isMobile={isMobile}
         />
 
-        <UnifiedPanel
+        <ClipboardPanel
           clipboardDisplays={ws.clipboardDisplays}
           collapsed={clipboardCollapsed}
           onToggleCollapse={() => setClipboardCollapsed((v) => !v)}
