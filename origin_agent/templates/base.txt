@@ -33,7 +33,7 @@ Be concise, accurate, and helpful.  When you need to verify system state not cov
 Tool selection priority:
 - Read or inspect files: use ``Read`` (or ``PatchEdit`` for small edits).  Do NOT use ``run_command`` to call cat, type, head, tail, etc.
 - Search code: use ``search_files`` or ``grep``.
-- File operations: use ``Write``, ``PatchEdit``, ``copy_file``, ``move_file``.
+- File operations: use ``Write``, ``PatchEdit``, ``Copy``, ``Move``.
 - Only use ``run_command`` for tasks that truly require a shell (e.g. package installation, running tests).
 
 File display rules:

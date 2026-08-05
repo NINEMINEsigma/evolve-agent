@@ -40,7 +40,7 @@ component/
 
 | 工具文件 | 主要工具 | 用途 |
 |----------|----------|------|
-| `filesystem.py` | `Read`, `Write`, `PatchEdit`, `delete_file`, `copy_file`, `move_file`, `rename_file`, `search_files`, `grep`, `file_exists` | 沙盒内文件操作 |
+| `filesystem.py` | `Read`, `Write`, `PatchEdit`, `Delete`, `Copy`, `Move`, `search_files`, `grep`, `file_exists` | 沙盒内文件操作 |
 | `code.py` | `validate_code`, `evolve_code` | 自我进化 |
 | `shell.py` | `run_command` 等 | 子进程执行 |
 | `frontend.py` | `validate_frontend` | 前端构建验证 |
@@ -59,7 +59,6 @@ component/
 | 工具文件 | 用途 |
 |----------|------|
 | `web_search.py` / `web_fetch.py` | 网络搜索与抓取 |
-| `ssh_tools.py` | SSH 远程执行 |
 | `cron_tools.py` | 一次性/周期性后台定时任务 |
 | `background_service.py` | 后台服务管理 |
 | `pip.py` | Python 包管理 |

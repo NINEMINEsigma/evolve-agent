@@ -53,7 +53,7 @@ registry.register(
         # 处于排队状态（尚未活跃）的子 Agent 会被移除，且不保存历史。
         # 如果等待队列非空，当前子 Agent 停止后会自动激活下一个排队的子 Agent。
         # 获得 history_path 后，你必须主动询问用户是否需要将历史文件保存到更持久的位置。
-        # 如果需要保存，使用 copy_file 或 move_file 工具将文件从原始路径复制/移动到用户指定的位置（如 ws: 下的专门目录），并重命名为具有标识性的名称。
+        # 如果需要保存，使用 Copy 或 Move 工具将文件从原始路径复制/移动到用户指定的位置（如 ws: 下的专门目录），并重命名为具有标识性的名称。
         #
         # ## 返回
         # ```json
@@ -83,7 +83,7 @@ An already-completed sub-agent cannot be stopped again.
 Queued (not yet active) sub-agents are removed without saving history.
 If the waiting queue is non-empty, the next queued sub-agent is automatically activated after this one stops.
 
-After receiving history_path, you MUST proactively ask the user whether to persist the history file to a more permanent location. If the user wants to save it, use copy_file or move_file to copy/move the file from the original path to a user-specified location (e.g. a dedicated directory under ws:), and rename it to a descriptive name (including the sub-agent name and task summary).
+After receiving history_path, you MUST proactively ask the user whether to persist the history file to a more permanent location. If the user wants to save it, use Copy or Move to copy/move the file from the original path to a user-specified location (e.g. a dedicated directory under ws:), and rename it to a descriptive name (including the sub-agent name and task summary).
 
 ## Returns
 ```json

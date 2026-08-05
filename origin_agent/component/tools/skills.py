@@ -278,7 +278,7 @@ registry.register(
         #
         # ## 调用效果
         # - 无 `name`：列举分支。返回所有已注册 skill 的 {name, description, category, tags, path}，
-        #   其中 path 为 skill 目录的沙箱路径（如 `skills:utility/foo/`），可直接用于 Read / CreateSkill / delete_folder。
+        #   其中 path 为 skill 目录的沙箱路径（如 `skills:utility/foo/`），可直接用于 Read / CreateSkill / Delete。
         # - 有 `name`：加载分支。返回该 skill 的完整内容（SKILL.md 正文、linked_files 等结构化信息），注入对话上下文。
         #
         # ## 返回
@@ -305,7 +305,7 @@ registry.register(
 None.
 
 ## Effect
-- Without `name` (list branch): returns {name, description, category, tags, path} for every registered skill, where `path` is the sandbox path of the skill directory (e.g. `skills:utility/foo/`) — directly usable with Read / CreateSkill / delete_folder.
+- Without `name` (list branch): returns {name, description, category, tags, path} for every registered skill, where `path` is the sandbox path of the skill directory (e.g. `skills:utility/foo/`) — directly usable with Read / CreateSkill / Delete.
 - With `name` (load branch): returns the skill's full content (SKILL.md body, linked_files, etc.) as structured information injected into the conversation context.
 
 ## Returns

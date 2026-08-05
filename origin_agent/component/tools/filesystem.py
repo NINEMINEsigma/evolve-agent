@@ -234,10 +234,9 @@ def _handle_delete(args: dict[str, Any]) -> dict:
             continue
         try:
             if _s().is_dir(path):
-                results.append({"path": path, "success": False, "error": "Path is a directory — use delete_folder for directories"})
-                failed += 1
-                continue
-            _s().delete(path)
+                _s().delete_folder(path)
+            else:
+                _s().delete(path)
             results.append({"path": path, "success": True, "deleted": True})
             succeeded += 1
         except SandboxError as exc:
@@ -493,17 +492,17 @@ When truncated, additionally includes `truncated=true` and `tail`:
 )
 
 
-# -- delete_file
-# 删除多个文件。仅允许可写命名空间（ws:、fork:、fix:、skills:）。
-# 如需删除目录，使用 delete_folder。
+# -- Delete
+# 删除多个文件或目录。仅允许可写命名空间（ws:、fork:、fix:、skills:）。
+# 根据路径类型自动分流：文件 → 直接删除；目录 → 递归删除整个目录树。
 #
 # ## 前置条件
-# - 文件必须存在且不是目录。
+# - 路径必须存在。
 # - 路径必须使用可写命名空间前缀。
 #
 # ## 调用效果
-# 逐个删除指定文件。如果某个路径是目录，该路径标记为失败并提示使用 delete_folder。
-# 部分文件失败不影响其他文件的删除。
+# 逐个删除指定路径。文件分支删除单个文件；目录分支递归删除目录及其所有内容。
+# 部分路径失败不影响其他路径的删除。
 #
 # ## 返回
 # ```json
@@ -511,25 +510,24 @@ When truncated, additionally includes `truncated=true` and `tail`:
 # ```
 #
 # ## 何时使用
-# - 删除不再需要的文件。
-# - 清理 workspace 中的临时文件。
+# - 删除不再需要的文件或目录。
+# - 清理 workspace 中的临时文件/目录。
 #
 # ## 副作用/注意
-# - 危险操作：删除后无法恢复（沙箱无回收站）。
+# - ⚠️ 危险操作：删除后无法恢复（沙箱无回收站）；目录分支为递归删除。
 # - 只读命名空间返回访问错误。
-# - 不接受目录路径；非空目录使用 delete_folder。
 registry.register(
-    name="delete_file",
+    name="Delete",
     toolset="filesystem",
     schema={
-        "description": """Delete multiple files. Only writable namespaces are allowed (ws:, fork:, fix:, skills:). For directory deletion, use delete_folder. Best-effort: all paths are attempted, each result reports success or failure.
+        "description": """Delete multiple files or directories. Only writable namespaces are allowed (ws:, fork:, fix:, skills:). The branch is auto-detected from the path type: files are deleted directly; directories are deleted recursively with all their contents. Best-effort: all paths are attempted, each result reports success or failure.
 
 ## Prerequisites
-- Files must exist and must not be directories.
+- The paths must exist.
 - Paths must use a writable namespace prefix.
 
 ## Effect
-Deletes each specified file. If a path is a directory, that path is marked as failed with a message directing the caller to use delete_folder. Failures for individual paths do not affect others.
+Deletes each specified path. File branch deletes a single file; directory branch recursively deletes the directory and all its contents. Failures for individual paths do not affect others.
 
 ## Returns
 ```json
@@ -537,14 +535,13 @@ Deletes each specified file. If a path is a directory, that path is marked as fa
 ```
 
 ## When to Use
-- Remove files that are no longer needed.
-- Clean up temporary files in the workspace.
+- Remove files or directories that are no longer needed.
+- Clean up temporary files/directories in the workspace.
 
 ## Side Effects / Notes
-- DANGEROUS: Deletion is irreversible (no trash/recycle bin in the sandbox).
-- Read-only namespaces return an access error.
-- Does not accept directory paths; use delete_folder for directories.""",
-        "parameters": _param_paths("files to delete"),
+- DANGEROUS: Deletion is irreversible (no trash/recycle bin in the sandbox); directory branch is recursive.
+- Read-only namespaces return an access error.""",
+        "parameters": _param_paths("files or directories to delete"),
     },
     handler=_handle_delete,
     emoji="🗑️",
@@ -842,7 +839,7 @@ Errors:
 
 
 
-# -- copy_file
+# -- Copy
 def _handle_copy(args: dict[str, Any]) -> dict:
     source: str = str(args.get("source", "")).strip()
     destination: str = str(args.get("destination", "")).strip()
@@ -851,37 +848,34 @@ def _handle_copy(args: dict[str, Any]) -> dict:
     if not destination:
         return tool_error("destination is required")
     try:
-        _s().copy(source, destination)
-        return tool_result(success=True, source=source, destination=destination)
-    except SandboxError as exc:
-        return tool_error(str(exc), source=source, destination=destination)
-
-
-def _handle_copy_folder(args: dict[str, Any]) -> dict:
-    source: str = str(args.get("source", "")).strip()
-    destination: str = str(args.get("destination", "")).strip()
-    if not source:
-        return tool_error("source is required")
-    if not destination:
-        return tool_error("destination is required")
-    try:
-        _s().copy_folder(source, destination)
+        resolved = _s().resolve_read(source)
+        if not resolved.real.exists():
+            return tool_error("Source not found", source=source)
+        if resolved.real.is_file():
+            _s().copy(source, destination)
+        elif resolved.real.is_dir():
+            _s().copy_folder(source, destination)
+        else:
+            return tool_error("Source must be a file or directory", source=source)
         return tool_result(success=True, source=source, destination=destination)
     except SandboxError as exc:
         return tool_error(str(exc), source=source, destination=destination)
 
 
 # -- copy_file
-# 复制文件。源路径和目标路径均需使用命名空间前缀（ws:、fork:、fix:、skills:）。
+# 复制文件或目录。源路径和目标路径均需使用命名空间前缀（ws:、fork:、fix:、skills:）。
 # 支持跨命名空间复制（如从 fork: 复制到 ws:）。
+# 根据源路径类型自动分流：
+#   - 文件分支：目标已存在则被覆盖。
+#   - 目录分支：递归复制整个目录树，目标路径必须**不存在**（shutil.copytree 限制），需先 Delete 再 Copy。
 #
 # ## 前置条件
-# - 源文件必须存在。
+# - 源文件或目录必须存在。
 # - 目标路径不能与源路径相同。
 # - 目标路径所在命名空间必须是可写的。
 #
 # ## 调用效果
-# 将源文件完整复制到目标路径。如果目标已存在，会被覆盖。
+# 将源文件/目录复制到目标路径。文件分支目标已存在则覆盖；目录分支目标必须不存在。
 # 返回 source 和 destination 确认路径。
 #
 # ## 返回
@@ -890,26 +884,28 @@ def _handle_copy_folder(args: dict[str, Any]) -> dict:
 # ```
 #
 # ## 何时使用
-# - 在不同命名空间之间复制文件（如从 fork: 复制到 ws:）。
-# - 备份文件到同一命名空间下的不同路径。
+# - 在不同命名空间之间复制文件/目录（如从 fork: 复制到 ws:）。
+# - 备份文件/目录到同一命名空间下的不同路径。
 #
 # ## 副作用/注意
-# - 写入文件系统。目标已存在则被覆盖。
-# - 不支持复制目录（只复制单个文件）。
+# - 写入文件系统。文件分支目标已存在则被覆盖。
+# - 目录分支目标路径必须**不存在**（与文件分支不同，copytree 不覆盖）。
 # - 跨命名空间复制时，目标命名空间必须可写。
 registry.register(
-    name="copy_file",
+    name="Copy",
     toolset="filesystem",
     schema={
-        "description": """Copy a file. Both source and destination must use a namespace prefix (ws:, fork:, fix:, skills:). Supports cross-namespace copying (e.g. from fork: to ws:).
+        "description": """Copy a file or directory. Both source and destination must use a namespace prefix (ws:, fork:, fix:, skills:). Supports cross-namespace copying (e.g. from fork: to ws:). The branch is auto-detected from the source type:
+- **File branch**: copies a single file; the destination is overwritten if it already exists.
+- **Directory branch**: recursively copies the whole directory tree; the destination must **not** already exist (shutil.copytree limitation) — delete it first with Delete if needed.
 
 ## Prerequisites
-- The source file must exist.
+- The source file or directory must exist.
 - The destination must not be the same path as the source.
 - The destination namespace must be writable.
 
 ## Effect
-Copies the source file to the destination path. If the destination already exists, it will be overwritten. Returns both source and destination paths for confirmation.
+Copies the source file/directory to the destination path. File branch overwrites an existing destination; directory branch requires the destination to not exist. Returns both source and destination paths for confirmation.
 
 ## Returns
 ```json
@@ -917,25 +913,25 @@ Copies the source file to the destination path. If the destination already exist
 ```
 
 ## When to Use
-- Copy files between different namespaces (e.g. from fork: to ws:).
-- Back up files to a different path within the same namespace.
+- Copy files/directories between different namespaces (e.g. from fork: to ws:).
+- Back up files/directories to a different path within the same namespace.
 
 ## Side Effects / Notes
-- Writes to the file system. Overwrites the destination if it already exists.
-- Does not support directories (single file copy only).
+- Writes to the file system. File branch overwrites the destination if it already exists.
+- Directory branch requires the destination to **not** exist (unlike the file branch, copytree does not overwrite).
 - Cross-namespace copy requires a writable destination namespace.""",
         "parameters": {
             "type": "object",
             "properties": {
                 "source": {
                     "type": "string",
-                    # 要复制的源文件逻辑路径（命名空间前缀 + 路径）。
-                    "description": "Source file logical path (namespace prefix + path).",
+                    # 要复制的源文件/目录逻辑路径（命名空间前缀 + 路径）。
+                    "description": "Source file/directory logical path (namespace prefix + path).",
                 },
                 "destination": {
                     "type": "string",
-                    # 目标文件逻辑路径（命名空间前缀 + 路径）。
-                    "description": "Destination file logical path (namespace prefix + path).",
+                    # 目标文件/目录逻辑路径（命名空间前缀 + 路径）。目录分支时目标必须不存在。
+                    "description": "Destination file/directory logical path (namespace prefix + path). Must not exist for the directory branch.",
                 },
             },
             "required": ["source", "destination"],
@@ -947,82 +943,6 @@ Copies the source file to the destination path. If the destination already exist
 )
 
 
-# -- copy_folder
-# 递归复制目录。源路径和目标路径均需使用命名空间前缀（ws:、fork:、fix:、skills:）。
-# 支持跨命名空间复制。目标路径**不能已存在**，这是 shutil.copytree 的限制。
-#
-# ## 前置条件
-# - 源目录必须存在。
-# - 目标路径**不能已存在**。
-# - 目标路径所在命名空间必须是可写的。
-#
-# ## 调用效果
-# 将源目录递归复制到目标路径（包括所有子文件/子目录）。
-# 返回 source 和 destination 确认路径。
-#
-# ## 返回
-# ```json
-# {"success": true, "source": "fork:src", "destination": "ws:backup/src"}
-# ```
-#
-# ## 何时使用
-# - 备份整个目录到另一个命名空间。
-# - 在进化流程中复制代码目录。
-#
-# ## 副作用/注意
-# - 写入文件系统。
-# - 目标路径必须**不存在**（与 copy_file 不同，copytree 不覆盖）。
-# - 如果需要覆盖，先 delete_folder 再 copy_folder。
-# - 不支持复制单个文件（使用 copy_file）。
-registry.register(
-    name="copy_folder",
-    toolset="filesystem",
-    schema={
-        "description": """Recursively copy a directory. Both source and destination must use a namespace prefix (ws:, fork:, fix:, skills:). Supports cross-namespace copying.
-
-## Prerequisites
-- The source directory must exist.
-- The destination path must **not** already exist (limitation of shutil.copytree).
-- The destination namespace must be writable.
-
-## Effect
-Recursively copies the source directory to the destination path, including all subdirectories and files. Returns both source and destination paths for confirmation.
-
-## Returns
-```json
-{"success": true, "source": "fork:src", "destination": "ws:backup/src"}
-```
-
-## When to Use
-- Back up an entire directory to another namespace.
-- Copy code directories during the evolution workflow.
-
-## Side Effects / Notes
-- Writes to the file system.
-- The destination path must **not** already exist (unlike copy_file, copytree does not overwrite).
-- To overwrite, first delete_folder then copy_folder.
-- Does not support single file copy (use copy_file).""",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "source": {
-                    "type": "string",
-                    # 源目录逻辑路径（命名空间前缀 + 路径）。
-                    "description": "Source directory logical path (namespace prefix + path).",
-                },
-                "destination": {
-                    "type": "string",
-                    # 目标目录逻辑路径（命名空间前缀 + 路径）。必须不存在。
-                    "description": "Destination directory logical path (namespace prefix + path). Must not already exist.",
-                },
-            },
-            "required": ["source", "destination"],
-        },
-    },
-    handler=_handle_copy_folder,
-    emoji="📂",
-    danger_level=ToolDangerLevel.write,
-)
 
 
 # -- move_file
@@ -1040,7 +960,7 @@ def _handle_move(args: dict[str, Any]) -> dict:
         return tool_error(str(exc), source=source, destination=destination)
 
 
-# -- move_file
+# -- Move
 # 移动或重命名文件/目录。目标路径可包含新名称，从而实现重命名。
 # 源和目标路径均需使用命名空间前缀（ws:、fork:、fix:、skills:）。
 # 支持跨命名空间移动（实现为复制+删除，非原子操作）。
@@ -1068,7 +988,7 @@ def _handle_move(args: dict[str, Any]) -> dict:
 # - 源路径在移动后不再存在。
 # - 跨命名空间移动使用 shutil.move（内部复制后删除），不是原子操作。
 registry.register(
-    name="move_file",
+    name="Move",
     toolset="filesystem",
     schema={
         "description": """Move or rename a file/directory. The destination can include a new name, effectively renaming. Both source and destination must use a namespace prefix (ws:, fork:, fix:, skills:). Supports cross-namespace moving (implemented as copy + delete, not atomic).
@@ -1117,106 +1037,6 @@ Moves a file or directory to the destination path. If the destination includes a
 )
 
 
-# -- rename_file
-def _handle_rename(args: dict[str, Any]) -> dict:
-    path: str = str(args.get("path", "")).strip()
-    new_name: str = str(args.get("new_name", "")).strip()
-    if not path:
-        return tool_error("path is required")
-    if not new_name:
-        return tool_error("new_name is required")
-    # Rename within the same directory: find parent dir, build destination with new name
-    # 在同一目录下重命名：找出父目录，用新名称拼出目标路径
-    import re as _re
-    m = _re.match(r"^([a-zA-Z]+:)(.*/)?([^/]+)$", path)
-    if not m:
-        return tool_error(
-            "unable to parse path — ensure it has a namespace prefix and filename",
-            path=path,
-        )
-    ns_prefix: str = m.group(1)
-    parent_dir: str = m.group(2) or ""
-    destination: str = f"{ns_prefix}{parent_dir}{new_name}"
-    try:
-        _s().move(path, destination)
-        return tool_result(success=True, source=path, destination=destination)
-    except SandboxError as exc:
-        return tool_error(str(exc), source=path, destination=destination)
-
-
-# -- rename_file
-# 在同一目录下重命名文件。路径和命名空间前缀不变。
-# 只需提供新文件名（不含路径），工具自动在同一目录下完成重命名。
-# 如需跨目录移动或重命名目录，使用 move_file。
-#
-# ## 前置条件
-# - 文件必须存在。
-# - 新文件名不能与同一目录下的现有文件/目录冲突。
-# - 文件所在命名空间必须是可写的。
-#
-# ## 调用效果
-# 在同一目录下将文件更名为 `new_name`。路径前缀和命名空间保持不变。
-# 返回 source 和 destination 确认路径变化。
-#
-# ## 返回
-# ```json
-# {"success": true, "source": "ws:src/old.py", "destination": "ws:src/new.py"}
-# ```
-#
-# ## 何时使用
-# - 仅需更改文件名，不改变路径。
-#
-# ## 副作用/注意
-# - 写入文件系统。
-# - 只支持文件重命名，不支持目录（使用 move_file）。
-# - 跨目录移动使用 move_file。
-registry.register(
-    name="rename_file",
-    toolset="filesystem",
-    schema={
-        "description": """Rename a file within the same directory. The path and namespace prefix remain unchanged. Only the new filename (no path) is needed — the tool automatically renames within the same directory. For cross-directory moves or renaming directories, use move_file.
-
-## Prerequisites
-- The file must exist.
-- The new name must not conflict with an existing file/directory in the same directory.
-- The file's namespace must be writable.
-
-## Effect
-Renames the file to `new_name` within the same directory. The namespace prefix and path stay the same. Returns both source and destination paths.
-
-## Returns
-```json
-{"success": true, "source": "ws:src/old.py", "destination": "ws:src/new.py"}
-```
-
-## When to Use
-- Change only the filename without changing the path.
-
-## Side Effects / Notes
-- Writes to the file system.
-- Only supports files, not directories (use move_file for directories).
-- For cross-directory moves, use move_file.""",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "path": {
-                    "type": "string",
-                    # 要重命名的文件逻辑路径（命名空间前缀 + 完整路径）。
-                    "description": "File logical path to rename (namespace prefix + full path).",
-                },
-                "new_name": {
-                    "type": "string",
-                    # 新文件名（仅文件名，不含路径）。
-                    "description": "New filename (filename only, no path).",
-                },
-            },
-            "required": ["path", "new_name"],
-        },
-    },
-    handler=_handle_rename,
-    emoji="🏷️",
-    danger_level=ToolDangerLevel.write,
-)
 
 
 # -- search_files
@@ -1693,94 +1513,6 @@ Creates each specified directory. By default, also creates all missing parent di
     handler=_handle_create_folder,
     emoji="📁",
     danger_level=ToolDangerLevel.readonly,
-)
-
-
-# -- delete_folder
-# 递归删除目录及其所有内容
-# Recursively delete a directory and all its contents
-
-
-def _handle_delete_folder(args: dict[str, Any]) -> dict:
-    paths_raw = args.get("paths", [])
-    if not isinstance(paths_raw, list) or not paths_raw:
-        return tool_error("paths is required as a non-empty array of strings")
-    results: list[dict] = []
-    succeeded = 0
-    failed = 0
-    for p in paths_raw:
-        path = str(p).strip()
-        if not path:
-            results.append({"path": str(p), "success": False, "error": "path is empty"})
-            failed += 1
-            continue
-        try:
-            _s().delete_folder(path)
-            results.append({"path": path, "success": True, "deleted": True})
-            succeeded += 1
-        except SandboxError as exc:
-            results.append({"path": path, "success": False, "error": str(exc)})
-            failed += 1
-    return tool_result(results=results, summary={"total": len(results), "succeeded": succeeded, "failed": failed})
-
-
-# -- delete_folder
-# 递归删除多个目录及其所有内容。
-# 路径必须使用可写命名空间前缀（ws:、fork:、fix:、skills:）。
-# ⚠️ 危险操作：会递归删除目录中的所有文件和子目录，不可恢复。
-#
-# ## 前置条件
-# - 目录必须存在。
-# - 路径所在命名空间必须是可写的。
-#
-# ## 调用效果
-# 逐个递归删除指定目录及其所有内容。沙箱无回收站，删除后不可恢复。
-# 部分目录失败不影响其他目录的删除。
-#
-# ## 返回
-# ```json
-# {"results": [{"path": "ws:temp", "success": true, "deleted": true}], "summary": {"total": 1, "succeeded": 1, "failed": 0}}
-# ```
-#
-# ## 何时使用
-# - 清理整个目录树。
-# - 为 copy_folder 做准备（目标已存在时需要先删除）。
-#
-# ## 副作用/注意
-# - ⚠️ 危险操作：递归删除，不可恢复。
-# - 只接受目录路径；删除单个文件使用 delete_file。
-# - 路径指向文件时返回错误。
-registry.register(
-    name="delete_folder",
-    toolset="filesystem",
-    schema={
-        "description": """Recursively delete multiple directories and all their contents. Paths must use a writable namespace prefix (ws:, fork:, fix:, skills:). DANGEROUS: this recursively removes all files and subdirectories with no way to recover. Best-effort: all paths are attempted, each result reports success or failure.
-
-## Prerequisites
-- The directories must exist.
-- The path namespace must be writable.
-
-## Effect
-Recursively deletes each specified directory and all its contents. The sandbox has no trash/recycle bin — deletion is irreversible. Failures for individual paths do not affect others.
-
-## Returns
-```json
-{"results": [{"path": "ws:temp", "success": true, "deleted": true}], "summary": {"total": 1, "succeeded": 1, "failed": 0}}
-```
-
-## When to Use
-- Clean up entire directory trees.
-- Prepare for copy_folder (delete destination first if it already exists).
-
-## Side Effects / Notes
-- DANGEROUS: Recursive deletion, irreversible.
-- Only accepts directory paths; use delete_file for single files.
-- Returns an error if the path points to a file.""",
-        "parameters": _param_paths("directories to delete"),
-    },
-    handler=_handle_delete_folder,
-    emoji="🗂️",
-    danger_level=ToolDangerLevel.write,
 )
 
 
