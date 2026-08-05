@@ -478,7 +478,6 @@
 
 /* ── Mention floating menu ── */
 .mention-menu {
-  position: fixed;
   z-index: 10000;
   min-width: 240px;
   max-width: 380px;

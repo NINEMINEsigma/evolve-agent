@@ -1,0 +1,4 @@
+/* ── Popup layer primitive（弹出浮层基元，配套 components/primitives/PopupLayer.tsx） ── */
+.popup-layer {
+  position: fixed;
+}

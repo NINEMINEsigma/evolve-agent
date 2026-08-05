@@ -1,5 +1,5 @@
-import { useRef, useEffect, useLayoutEffect, useState } from "react";
 import { SessionInfo } from "../types";
+import PopupLayer from "./primitives/PopupLayer";
 
 interface ChatContextMenuProps {
   contextMenu: { x: number; y: number; sid: string } | null;
@@ -34,55 +34,15 @@ export default function ChatContextMenu({
   onDelete,
   onRegenerateSummary,
 }: ChatContextMenuProps) {
-  const menuRef = useRef<HTMLDivElement>(null);
-  const [adjustedPos, setAdjustedPos] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
-
-  // 测量菜单实际尺寸并修正位置，防止靠近视口边缘时菜单越界导致无法点击
-  useLayoutEffect(() => {
-    if (!contextMenu || !menuRef.current) return;
-    const rect = menuRef.current.getBoundingClientRect();
-    const margin = 8;
-    let x = contextMenu.x;
-    let y = contextMenu.y;
-    if (y + rect.height > window.innerHeight - margin) {
-      y = window.innerHeight - rect.height - margin;
-    }
-    if (y < margin) y = margin;
-    if (x + rect.width > window.innerWidth - margin) {
-      x = window.innerWidth - rect.width - margin;
-    }
-    if (x < margin) x = margin;
-    setAdjustedPos({ x, y });
-  }, [contextMenu]);
-
-  useEffect(() => {
-    const handler = (e: MouseEvent) => {
-      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
-        onClose();
-      }
-    };
-    const escHandler = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
-    };
-    if (contextMenu) {
-      document.addEventListener("mousedown", handler);
-      document.addEventListener("keydown", escHandler);
-    }
-    return () => {
-      document.removeEventListener("mousedown", handler);
-      document.removeEventListener("keydown", escHandler);
-    };
-  }, [contextMenu, onClose]);
-
   if (!contextMenu) return null;
 
   const session = sessions.find((s) => s.id === contextMenu.sid);
 
   return (
-    <div
-      ref={menuRef}
+    <PopupLayer
+      position={{ x: contextMenu.x, y: contextMenu.y }}
+      onClose={onClose}
       className="context-menu"
-      style={{ left: adjustedPos.x, top: adjustedPos.y }}
     >
       <ContextMenuItem
         disabled={generatingTitleSessions.has(contextMenu.sid)}
@@ -118,7 +78,7 @@ export default function ChatContextMenu({
         onClick={() => { onClose(); onDelete(contextMenu.sid); }}
         label="删除会话"
       />
-    </div>
+    </PopupLayer>
   );
 }
 

@@ -1,6 +1,5 @@
 /* ── Context menu ── */
 .context-menu {
-  position: fixed;
   z-index: 200;
   min-width: 150px;
   max-height: calc(100vh - 16px);

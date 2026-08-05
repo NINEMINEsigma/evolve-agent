@@ -1,5 +1,6 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { FileEntry } from "../../types";
+import PopupLayer from "../primitives/PopupLayer";
 
 interface FileTreeProps {
   entries: FileEntry[];
@@ -59,6 +60,11 @@ function FileTreeNode({
     setContextMenu({ x: e.clientX, y: e.clientY });
   };
 
+  // disabled（agentspace locked）期间右键置位的陈旧 state 随解锁清除，防止解锁后菜单凭空弹出
+  useEffect(() => {
+    if (disabled) setContextMenu(null);
+  }, [disabled]);
+
   return (
     <div>
       <div
@@ -92,10 +98,10 @@ function FileTreeNode({
       )}
 
       {contextMenu && !disabled && (
-        <div
+        <PopupLayer
+          position={contextMenu}
+          onClose={() => setContextMenu(null)}
           className="agentspace-context-menu"
-          style={{ left: contextMenu.x, top: contextMenu.y, position: "fixed" }}
-          onClick={() => setContextMenu(null)}
         >
           <div
             className="agentspace-context-menu-item"
@@ -117,15 +123,7 @@ function FileTreeNode({
           >
             Rename
           </div>
-        </div>
-      )}
-
-      {contextMenu && (
-        <div
-          className="agentspace-context-menu-backdrop"
-          onClick={() => setContextMenu(null)}
-          style={{ position: "fixed", inset: 0, zIndex: 99 }}
-        />
+        </PopupLayer>
       )}
     </div>
   );

@@ -1,5 +1,5 @@
 import { useEffect, useRef } from "react";
-import { createPortal } from "react-dom";
+import PopupLayer from "./primitives/PopupLayer";
 
 export interface MentionItem {
   id: string;
@@ -39,16 +39,12 @@ export default function MentionMenu({
 
   if (items.length === 0) return null;
 
-  // 用 Portal 渲染到 body，绕过祖先 transform 对 position:fixed 的降级
-  return createPortal(
-    <div
+  return (
+    <PopupLayer
+      position={{ x: position.x, y: position.y }}
       className="mention-menu"
-      style={{
-        left: position.x,
-        top: position.y,
-        transform: position.openUpward ? "translateY(-100%)" : undefined,
-      }}
-      ref={listRef}
+      style={position.openUpward ? { transform: "translateY(-100%)" } : undefined}
+      containerRef={listRef}
     >
       {items.map((item, i) => (
         <div
@@ -74,7 +70,6 @@ export default function MentionMenu({
           </span>
         </div>
       ))}
-    </div>,
-    document.body,
+    </PopupLayer>
   );
 }
