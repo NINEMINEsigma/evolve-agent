@@ -95,7 +95,7 @@ The `/downloads/` route sets `Content-Disposition: attachment`, so the browser w
 
 ## Workflow
 
-1. Generate or save the file to a `ws:` path using `write_file` or `run_python`
+1. Generate or save the file to a `ws:` path using `Write` or `run_python`
 2. Determine the HTTP URL by stripping `ws:` and prepending the appropriate route
 3. Write the Markdown/HTML directly in your response text
 4. The frontend renders it automatically via ReactMarkdown + rehypeRaw

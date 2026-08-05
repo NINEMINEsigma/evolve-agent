@@ -31,10 +31,10 @@ Agent 扮演酒馆系统（叙述者和管理者），负责：
 ## 资产索引
 
 本 Skill 的样式和模板存储在以下文件中，使用前需读取：
-- `read_skill_file("tavern-simulator", "assets/tavern-base.css")` — 所有CSS样式 + 手机UI样式 + 五套主题色
-- `read_skill_file("tavern-simulator", "templates/full-html-skeleton.html")` — 完整HTML输出骨架（含JS）
-- `read_skill_file("tavern-simulator", "templates/phone-chat.html")` — 手机聊天界面组件
-- `read_skill_file("tavern-simulator", "templates/panel-examples.html")` — 各面板的HTML模板示例
+- `Read("skills:game/tavern-simulator/assets/tavern-base.css")` — 所有CSS样式 + 手机UI样式 + 五套主题色
+- `Read("skills:game/tavern-simulator/templates/full-html-skeleton.html")` — 完整HTML输出骨架（含JS）
+- `Read("skills:game/tavern-simulator/templates/phone-chat.html")` — 手机聊天界面组件
+- `Read("skills:game/tavern-simulator/templates/panel-examples.html")` — 各面板的HTML模板示例
 
 **输出流程**：读取 `assets/tavern-base.css` 获取样式 → 读取 `templates/full-html-skeleton.html` 获取骨架 → 按规范填充六面板内容 → 添加选项。
 
@@ -68,8 +68,8 @@ Agent 扮演酒馆系统（叙述者和管理者），负责：
 - 面板**默认收起为佳**。需要强调首回合信息时，可为「当前状态」面板设置 `open` 属性
 - 箭头使用 JS 监听 `toggle` 事件实现旋转（收起→▶ 展开→▼）
 - 每个面板独立折叠，互不影响
-- **完整 CSS 和 JS 见** `read_skill_file("tavern-simulator", "assets/tavern-base.css")`
-- **完整 HTML 骨架见** `read_skill_file("tavern-simulator", "templates/full-html-skeleton.html")`
+- **完整 CSS 和 JS 见** `Read("skills:game/tavern-simulator/assets/tavern-base.css")`
+- **完整 HTML 骨架见** `Read("skills:game/tavern-simulator/templates/full-html-skeleton.html")`
 
 #### 状态栏 CSS 类名体系
 
@@ -125,7 +125,7 @@ Agent 扮演酒馆系统（叙述者和管理者），负责：
 | 心理状态 | 一句带「」的内心独白 |
 | 好感度 | 进度条 + 百分比 |
 
-**HTML 模板见** `read_skill_file("tavern-simulator", "templates/panel-examples.html")`
+**HTML 模板见** `Read("skills:game/tavern-simulator/templates/panel-examples.html")`
 
 ### 二、正文
 
@@ -236,8 +236,8 @@ Agent 扮演酒馆系统（叙述者和管理者），负责：
 | `.chat-in` | 输入区 | 加号+输入框+发送 |
 | `.cl-item` | 聊天列表条目 | 列表页用 |
 
-**完整 CSS 见** `read_skill_file("tavern-simulator", "assets/tavern-base.css")`（文件后半部分）
-**完整 HTML 模板见** `read_skill_file("tavern-simulator", "templates/phone-chat.html")`
+**完整 CSS 见** `Read("skills:game/tavern-simulator/assets/tavern-base.css")`（文件后半部分）
+**完整 HTML 模板见** `Read("skills:game/tavern-simulator/templates/phone-chat.html")`
 
 #### 使用场景
 - 展示角色之间的幕后对话
@@ -255,7 +255,7 @@ Agent 扮演酒馆系统（叙述者和管理者），负责：
 | ⚔️ 沉稳史诗 | 战争/历史/王道 | `#1e293b→#0f172a` | `#f59e0b` | `#f59e0b→#d97706` | `#fef3c7` | `#f59e0b` | `#a0865a` |
 | 🎴 简约清爽 | 推理/科幻/悬疑 | `#f0f4f8→#e2e8f0` | `#1e293b` | `#64748b→#475569` | `#334155` | `#3b82f6` | `#94a3b8` |
 
-> 完整 CSS 代码（含各主题色值变量）见 `read_skill_file("tavern-simulator", "assets/tavern-base.css")` 底部注释。
+> 完整 CSS 代码（含各主题色值变量）见 `Read("skills:game/tavern-simulator/assets/tavern-base.css")` 底部注释。
 
 ---
 
@@ -349,7 +349,7 @@ Agent 扮演酒馆系统（叙述者和管理者），负责：
 - **心理状态**：一句带「」的内心独白
 - **好感度**：进度条+百分比
 
-**HTML 模板见** `read_skill_file("tavern-simulator", "templates/panel-examples.html")`
+**HTML 模板见** `Read("skills:game/tavern-simulator/templates/panel-examples.html")`
 
 ### 4. 地图写法规范
 

@@ -38,17 +38,17 @@ tags: [skill, creator, eval, benchmark, workflow]
 | 维度 | 原版（Claude Code） | 本系统（Evolve Agent） |
 |:-----|:-----|:-----|
 | 平台 | Linux/macOS | **Windows** |
-| 技能注册 | Claude 插件市场 / 上传 | `skills/<name>/` 目录含 `SKILL.md` 即被 `list_skills` 自动扫描 |
-| 创建/编辑 | Claude Code 文件工具 | `learn_skill`（新建/覆盖）、`Write`/`PatchEdit`（小编辑）、`Read`（读取） |
-| 测试执行 | `claude -p` 子进程 | `run_subagent`（子代理加载技能）或本会话 `recall_skill` 后测试 |
+| 技能注册 | Claude 插件市场 / 上传 | `skills/<name>/` 目录含 `SKILL.md` 即被 `RecallSkill` 自动扫描 |
+| 创建/编辑 | Claude Code 文件工具 | `CreateSkill`（新建/覆盖）、`Write`/`PatchEdit`（小编辑）、`Read`（读取） |
+| 测试执行 | `claude -p` 子进程 | `run_subagent`（子代理加载技能）或本会话 `RecallSkill` 后测试 |
 | 展示 | `webbrowser.open()` 本地服务器 | `eval-viewer/generate_review.py --static` 生成 HTML → `/uploads/` + iframe 嵌入聊天 |
 | 反馈 | 浏览器下载 `feedback.json` | 主人在聊天里直接反馈，或用 `register_dynamic_endpoint` 收集 |
 | 后台服务 | `nohup ... &` / `kill $PID` | `start_background_service` / `stop_background_service` |
-| 复制快照 | `cp -r` | `copy_folder` |
+| 复制快照 | `cp -r` | `Copy` |
 | 进度跟踪 | TodoList | `set_task_progress` |
 | 外部调研 | MCP | `web_search` / `web_fetch` / 子代理 |
-| 触发机制 | Claude `available_skills` | `list_skills` 的 name+description 常驻，描述匹配决定是否 `recall_skill` |
-| 脚本执行 | `python scripts/x.py` 直接运行 | `run_command` 全路径调用；脚本路径以 `recall_skill` 返回的 `skill_dir` 为准（见「运行与评估测试用例」开头） |
+| 触发机制 | Claude `available_skills` | `RecallSkill` 的 name+description 常驻，描述匹配决定是否 `RecallSkill` |
+| 脚本执行 | `python scripts/x.py` 直接运行 | `run_command` 全路径调用；脚本路径以 `RecallSkill` 返回的 `skill_dir` 为准（见「运行与评估测试用例」开头） |
 | 子代理 | 一次性任务子进程 | 需先 `register_subagent` 注册 profile；`run_subagent` 返回 `session_id`，结果异步注入父会话、无时序字段 |
 
 **脚本可用性：**
@@ -200,7 +200,7 @@ Output: feat(auth): implement JWT-based authentication
 
 目录层级：`eval-<ID>/<配置>/run-<M>/`——配置如 `with_skill`、`without_skill`、`old_skill`；`run-<M>` 是运行编号（单次运行就用 `run-1`，多次重复运行取均值时递增）。每次运行的产物放 `run-<M>/outputs/`，`grading.json` 和 `timing.json` 直接放在 `run-<M>/` 下。聚合脚本与查看器都依赖这个层级，缺了 `run-<M>` 层会一次运行都识别不到。
 
-本技能自身的安装位置（`<SKILL_DIR>`）：本技能可能被改名、移动或放入 category 子目录，其他用户的安装位置也可能不同——**不要假设目录名是 `skill-creator`**。以 `recall_skill` 返回的 `skill_dir` 为准：取其位于 `skills/` 下的相对部分拼成 `skills:<相对目录>` 逻辑路径（`run_command` 会自动展开 `skills:` 前缀），或直接使用返回的绝对路径。下文所有 `<SKILL_DIR>` 均指此；`agents/`、`references/`、`scripts/` 等技能内部相对路径也按 `skill_dir` 解析。
+本技能自身的安装位置（`<SKILL_DIR>`）：本技能可能被改名、移动或放入 category 子目录，其他用户的安装位置也可能不同——**不要假设目录名是 `skill-creator`**。以 `RecallSkill` 返回的 `skill_dir` 为准：取其位于 `skills/` 下的相对部分拼成 `skills:<相对目录>` 逻辑路径（`run_command` 会自动展开 `skills:` 前缀），或直接使用返回的绝对路径。下文所有 `<SKILL_DIR>` 均指此；`agents/`、`references/`、`scripts/` 等技能内部相对路径也按 `skill_dir` 解析。
 
 ### 第1步：在同一回合生成所有运行（带技能 AND 基线）
 
@@ -227,7 +227,7 @@ Execute this task:
 
 **基线运行**（相同提示词，基线取决于上下文）：
 - **创建新技能**：完全没有技能。相同提示词，无技能路径，保存到 `without_skill/run-1/outputs/`。
-- **改进已有技能**：旧版本。编辑前先快照技能（`copy_folder <skill-path> <workspace>/skill-snapshot/`），然后让基线子代理指向快照。保存到 `old_skill/run-1/outputs/`。
+- **改进已有技能**：旧版本。编辑前先快照技能（`Copy <skill-path> <workspace>/skill-snapshot/`），然后让基线子代理指向快照。保存到 `old_skill/run-1/outputs/`。
 
 为每个测试用例写一个 `eval_metadata.json`（断言暂时可以为空）。根据测试内容给每个 eval 一个描述性名称——不要只叫「eval-0」。目录也用这个名字。如果本轮使用新的或修改过的 eval 提示词，为每个新的 eval 目录创建这些文件——不要假设它们从上轮延续。
 
@@ -425,7 +425,7 @@ SKILL.md frontmatter 中的 description 字段是决定 Agent 是否调用技能
 
 ### 触发机制如何工作
 
-理解触发机制有助于设计更好的评估查询。技能以 name + description 出现在 `list_skills` 中，Agent 根据描述决定是否 `recall_skill` 加载技能。重要的一点：Agent 只为无法轻松自行处理的任务咨询技能——简单的单步查询（如「read this PDF」）可能不会触发技能，即使描述完美匹配，因为 Agent 可以用基本工具直接处理。复杂、多步或专门化的查询在描述匹配时可靠触发技能。
+理解触发机制有助于设计更好的评估查询。技能以 name + description 出现在 `RecallSkill` 中，Agent 根据描述决定是否 `RecallSkill` 加载技能。重要的一点：Agent 只为无法轻松自行处理的任务咨询技能——简单的单步查询（如「read this PDF」）可能不会触发技能，即使描述完美匹配，因为 Agent 可以用基本工具直接处理。复杂、多步或专门化的查询在描述匹配时可靠触发技能。
 
 这意味着评估查询要有实质内容，让 Agent 确实受益于咨询技能。简单查询如「read file X」是糟糕的测试用例——无论描述质量如何它们都不会触发技能。
 

@@ -8,7 +8,7 @@ Apache License, Version 2.0.
 
 Localization modifications: Eve (Evolve Agent), 2026-08-02.
 - Windows platform adaptation
-- Evolve Agent toolchain integration (run_subagent / learn_skill / /uploads/ display)
+- Evolve Agent toolchain integration (run_subagent / CreateSkill / /uploads/ display)
 - Removed Claude Code CLI dependencies (archived under scripts/_legacy_claude_code/)
 - quick_validate.py rewritten as pure stdlib with Evolve Agent frontmatter fields
 

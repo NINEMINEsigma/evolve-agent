@@ -14,8 +14,8 @@
 
 | 改动 | 说明 |
 |:-----|:-----|
-| 平台适配 | 移除 `nohup` / `kill` / `cp -r` / `open` 等 Unix 命令，改用 `start_background_service` / `copy_folder` / `/uploads/` 展示 |
-| 工具链适配 | `claude -p` → `run_subagent` / `recall_skill`；MCP → `web_search` / `web_fetch`；TodoList → `set_task_progress` |
+| 平台适配 | 移除 `nohup` / `kill` / `cp -r` / `open` 等 Unix 命令，改用 `start_background_service` / `Copy` / `/uploads/` 展示 |
+| 工具链适配 | `claude -p` → `run_subagent` / `RecallSkill`；MCP → `web_search` / `web_fetch`；TodoList → `set_task_progress` |
 | 展示适配 | 查看器改用 `--static` 静态 HTML 模式，经 `/uploads/` 嵌入聊天 |
 | 脚本处理 | 绑定 Claude CLI 的 `run_eval.py` / `run_loop.py` / `improve_description.py` / `generate_report.py` 归档至 `scripts/_legacy_claude_code/`；`quick_validate.py` 重写为纯 stdlib（无 PyYAML 依赖）并适配本系统 frontmatter 扩展字段 |
 | 工作区约定 | 评估工作区统一放 `ws:evals/<skill-name>-workspace/` |
@@ -49,8 +49,8 @@ skill-creator/
 
 ## 快速开始
 
-1. 技能文件放入 `skills/<name>/`，含 `SKILL.md` 即被 `list_skills` 自动注册
-2. 用 `recall_skill("skill-creator")` 加载本技能
+1. 技能文件放入 `skills/<name>/`，含 `SKILL.md` 即被 `RecallSkill` 自动注册
+2. 用 `RecallSkill("skill-creator")` 加载本技能
 3. 按 SKILL.md 的「创建技能 → 测试 → 评估 → 迭代」流程操作
 4. 校验技能：`python scripts/quick_validate.py <skill-dir>`
 5. 打包分发：`python scripts/package_skill.py <skill-dir> [output-dir]`

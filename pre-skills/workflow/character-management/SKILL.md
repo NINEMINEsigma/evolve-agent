@@ -128,10 +128,10 @@ characters/
 create_folder(path="ws:characters/<角色名>/")
 
 # 编写 profile.md
-write_file(path="ws:characters/<角色名>/profile.md", content="...")
+Write(path="ws:characters/<角色名>/profile.md", content="...")
 
 # （可选）编写 outfits.md
-write_file(path="ws:characters/<角色名>/outfits.md", content="...")
+Write(path="ws:characters/<角色名>/outfits.md", content="...")
 ```
 
 ### 步骤 2：注册 subagent
@@ -155,7 +155,7 @@ register_subagent_from_parent(
 ## 更新已有角色的流程
 
 ### 修改 profile.md
-直接用 `edit_file`修改，subagent 下次启动时会自动读取最新内容（无需重新注册）。
+直接用 `PatchEdit`修改，subagent 下次启动时会自动读取最新内容（无需重新注册）。
 
 ### 重新注册 subagent
 只在以下情况需要重新注册：
@@ -206,7 +206,7 @@ stop_result = stop_subagent(session_id="...")
 # 返回: {"session_path": "ws:subagents/角色名/xxx.jsonl"}
 
 # 2. 将 session_path 复制到角色的 history.jsonl（覆盖）
-copy_file(
+Copy(
     source="ws:subagents/角色名/xxx.jsonl",
     destination="ws:characters/角色名/history.jsonl"
 )
