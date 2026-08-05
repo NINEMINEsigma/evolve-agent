@@ -70,6 +70,7 @@ export interface WSMessage {
   client_message_id?: string;
   tool_call_meta?: ToolCallMeta;   // TOOL_RESULT：工具调用时间元信息
   emoji?: string;                  // 工具调用/审批请求的图标
+  danger_level?: string;           // CONFIRM_REQUEST：工具危险等级
 }
 
 export interface ToolCallMeta {
@@ -88,6 +89,7 @@ export interface ConfirmRequest {
   reason?: string;
   tool?: string;
   emoji?: string;
+  danger_level?: string;
 }
 
 export interface AskRequest {

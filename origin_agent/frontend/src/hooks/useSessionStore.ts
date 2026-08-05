@@ -783,6 +783,7 @@ export function useSessionStore(callbacks: SessionStoreCallbacks = {}): SessionS
           reason: (msg.args as Record<string, unknown>)?.reason as string | undefined,
           tool: msg.tool ?? undefined,
           emoji: msg.emoji,
+          danger_level: msg.danger_level,
         });
       }
       return;

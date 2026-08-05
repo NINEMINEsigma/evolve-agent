@@ -412,6 +412,12 @@ class History(BaseModel):
             self.messages = self.messages[:index]
             self.update_last_user_message()
 
+    def truncate_from(self, index: int) -> None:
+        """截断消息列表从指定索引开始（保留 messages[index:]，丢弃 messages[:index]）。"""
+        with self._io_locker:
+            self.messages = self.messages[index:]
+            self.update_last_user_message()
+
     def clear_messages(self) -> None:
         """清空全部消息。"""
         with self._io_locker:

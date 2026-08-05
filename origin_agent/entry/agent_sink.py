@@ -200,6 +200,7 @@ class FrontendSink(AgentSink):
                 args=display_args,
                 content=content,
                 emoji=registry.get_emoji(tool_name),
+                danger_level=str(registry.get_danger_level(tool_name).value),
             )
             await ws.send_text(json.dumps(msg.model_dump(exclude_none=True), ensure_ascii=False))
         except Exception as exc:

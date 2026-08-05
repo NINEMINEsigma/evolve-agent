@@ -19,7 +19,8 @@ def _handle_list_tools(args: dict[str, Any]) -> dict:
     """
     danger_level_raw: str = str(args.get("danger_level", "")).strip()
 
-    valid_levels = {"readonly", "write", "dangerous"}
+    # TODO: 需要使用非硬编码的方案
+    valid_levels = {"readonly", "write", "dangerous", "critical"}
     if not danger_level_raw:
         return tool_error("'danger_level' is required")
     if danger_level_raw not in valid_levels:
@@ -75,6 +76,7 @@ None.
 | `readonly` | Operations fully confined within the sandbox, no external system impact. |
 | `write` | May have indirect impact (e.g. writing scripts that won't auto-execute but could contain high-risk code). |
 | `dangerous` | Misuse can directly cause catastrophic damage to the entire machine or critical assets. |
+| `critical` | Operation may be safe, but user must explicitly approve every call. Cannot be auto-approved or added to allowlist. |
 
 ## Effect
 No side effects, read-only query.
@@ -101,7 +103,8 @@ When called from a sub-agent, only tools authorized for that sub-agent are retur
 
 - `readonly` — sandbox-confined, no external impact.
 - `write` — may have indirect impact.
-- `dangerous` — capable of catastrophic direct damage.""",
+- `dangerous` — capable of catastrophic direct damage.
+- `critical` — user must explicitly approve every call, cannot be auto-approved.""",
                 },
             },
             "required": ["danger_level"],

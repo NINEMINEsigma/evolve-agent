@@ -94,18 +94,23 @@ async def execute_with_approval(
     # 构建审批用参数（去除内部 _session_id）
     approval_args = {k: v for k, v in args.items() if k != "_session_id"}
 
-    # 白名单检查：匹配则跳过审批，直接允许
-    if is_tool_allowlisted(tool_name, approval_args):
-        args["_pre_approved"] = True
-        args["_approval_action"] = "allow_once"
-        return ApprovalOutcome(denied=False, approved_args=args)
+    # 获取 danger_level 用于 critical 级别特殊处理
+    danger_level: ToolDangerLevel = tool_registry.get_danger_level(tool_name)
+
+    # critical 级别：始终需要审批，跳过 allowlist 检查
+    if danger_level != ToolDangerLevel.critical:
+        # 白名单检查：匹配则跳过审批，直接允许
+        if is_tool_allowlisted(tool_name, approval_args):
+            args["_pre_approved"] = True
+            args["_approval_action"] = "allow_once"
+            return ApprovalOutcome(denied=False, approved_args=args)
 
     # 请求审批
     handsfree = is_handsfree_mode(session_id)
     approval: ApprovalResult
 
-    if handsfree:
-        # 脱手模式：通过 approval 模型（本地/远程）自动审批
+    if handsfree and danger_level != ToolDangerLevel.critical:
+        # 脱手模式（非 critical）：通过 approval 模型（本地/远程）自动审批
         # 若未提供回调，使用空回调兜底
         async def _empty_callback(_q: str) -> str:
             return ""
@@ -119,7 +124,7 @@ async def execute_with_approval(
             extra_context=hooks_context if hooks_context else None,
         )
     else:
-        # 正常模式：通过 AgentSink 请求前端用户审批
+        # 正常模式 或 critical 级别：通过 AgentSink 请求前端用户审批
         approval = await sink.request_approval(
             tool_name=tool_name,
             args=approval_args,
@@ -136,8 +141,8 @@ async def execute_with_approval(
             approved_args=args,
         )
 
-    # 允许：非脱手模式的 allow_always 加入白名单
-    if approval.action == "allow_always" and not handsfree:
+    # 允许：非脱手模式的 allow_always 加入白名单（critical 级别除外）
+    if approval.action == "allow_always" and not handsfree and danger_level != ToolDangerLevel.critical:
         add_tool_allowlist_entry(tool_name, approval_args)
 
     args["_pre_approved"] = True

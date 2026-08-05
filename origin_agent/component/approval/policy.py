@@ -22,15 +22,16 @@ def needs_approval(
     return danger_level in requires
 
 
-# 主会话策略：主会话直接面对用户，正常模式仅 dangerous 需审批，脱手模式 write + dangerous 需审批
+# 主会话策略：主会话直接面对用户，正常模式仅 dangerous+critical 需审批，
+# 脱手模式 write+dangerous+critical 需审批（critical 始终走前端用户审批，不走审批模型）
 MAIN_SESSION_POLICY = ApprovalPolicy(
-    normal_requires={ToolDangerLevel.dangerous},
-    handsfree_requires={ToolDangerLevel.write, ToolDangerLevel.dangerous},
+    normal_requires={ToolDangerLevel.dangerous, ToolDangerLevel.critical},
+    handsfree_requires={ToolDangerLevel.write, ToolDangerLevel.dangerous, ToolDangerLevel.critical},
 )
 
 # 子会话策略：子会话的工具审批由主 agent 审批，因此采用更严格的阈值，
-# write + dangerous 在两种模式下均需审批
+# write+dangerous+critical 在两种模式下均需审批
 SUB_SESSION_POLICY = ApprovalPolicy(
-    normal_requires={ToolDangerLevel.write, ToolDangerLevel.dangerous},
-    handsfree_requires={ToolDangerLevel.write, ToolDangerLevel.dangerous},
+    normal_requires={ToolDangerLevel.write, ToolDangerLevel.dangerous, ToolDangerLevel.critical},
+    handsfree_requires={ToolDangerLevel.write, ToolDangerLevel.dangerous, ToolDangerLevel.critical},
 )

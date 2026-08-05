@@ -256,28 +256,6 @@ MULTI_AGENT_ROUTING_TAG_RESPONSE: str = "response"
 MULTI_AGENT_ROUTING_RESPONSE_NONE: str = "none"
 MULTI_AGENT_ROUTING_RESPONSE_NULL: str = "null"
 
-# DEPRECATED: SUBAGENT_READONLY_WHITELIST is no longer used.
-# 子代理工具集由 ToolRegistry.get_definitions_for_availability(ToolAvailability.SUBAGENT)
-# 按 availability 位掩码过滤决定（SUBAGENT 或 EVERY 可见），不再维护白名单。
-# Kept commented for reference.
-# SUBAGENT_READONLY_WHITELIST: list[str] = [
-#     "list_tools",
-#     "list_uploads",
-#     "read_file",
-#     "probe_vision_capability",
-#     "read_image",
-#     "read_csv",
-#     "read_docx",
-#     "read_excel",
-#     "read_pdf",
-#     "list_directory",
-#     "search_files",
-#     "grep",
-#     "web_fetch",
-#     "web_search",
-#     "media_info",
-# ]
-
 
 # ============================================================================
 # Cron
@@ -348,3 +326,15 @@ COLLOQUY_TOOLSET_WHITELIST: frozenset[str] = frozenset({
     "clipboard", "skills", "shell", "python",
     "extools", "cron", "background", "dynamic", "archive",
 })
+
+# 压缩工具默认保留最近轮次数
+COMPRESS_HISTORY_DEFAULT_KEEP_ROUNDS: int = 10
+
+# 压缩工具保留轮次的最小值
+COMPRESS_HISTORY_MIN_KEEP_ROUNDS: int = 3
+
+# 压缩工具保留轮次的最大值
+COMPRESS_HISTORY_MAX_KEEP_ROUNDS: int = 20
+
+# 压缩工具要求的最小历史消息数
+COMPRESS_HISTORY_MIN_MESSAGES: int = 5

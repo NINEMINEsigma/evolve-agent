@@ -27,11 +27,13 @@ class ToolDangerLevel(str, Enum):
     readonly    : 永远安全且可逆
     write       : 可能产生被用于不可逆影响的产物
     dangerous   : 可能导致不可逆的危险影响, 必须经审批后执行
+    critical    : 操作本身可能安全，但用户必须亲自许可，不可由模型代审批
     """
 
     readonly = "readonly"
     write = "write"
     dangerous = "dangerous"
+    critical = "critical"
 
 
 class ApprovalPolicy(BaseModel):
@@ -432,6 +434,7 @@ class Message(BaseModel):
     dynamic_message_suffix: str | None = None  # 用户消息动态后缀（如 memory/hooks 上下文）
     tool_call_meta: dict[str, Any] | None = None  # TOOL_RESULT：工具调用时间元信息
     emoji: str | None = None  # 工具调用/审批请求的图标
+    danger_level: str | None = None  # CONFIRM_REQUEST：工具危险等级
 
 
 # ---------------------------------------------------------------------------

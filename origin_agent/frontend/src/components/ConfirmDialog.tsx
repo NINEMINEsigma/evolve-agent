@@ -19,6 +19,7 @@ export default function ConfirmDialog({
 
   const emoji = pendingConfirm.emoji ?? "⚡";
   const toolTitle = getToolTitle(pendingConfirm.tool);
+  const isCritical = pendingConfirm.danger_level === "critical";
 
   return (
     <ModalWindow
@@ -33,9 +34,11 @@ export default function ConfirmDialog({
           <button className="modal-btn modal-btn--neutral" onClick={() => onRespond("allow_once")}>
             允许一次
           </button>
-          <button className="modal-btn modal-btn--primary" onClick={() => onRespond("allow_always")}>
-            始终允许
-          </button>
+          {!isCritical && (
+            <button className="modal-btn modal-btn--primary" onClick={() => onRespond("allow_always")}>
+              始终允许
+            </button>
+          )}
         </>
       }
     >
