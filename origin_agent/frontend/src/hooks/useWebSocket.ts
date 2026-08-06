@@ -417,6 +417,7 @@ export function useWebSocket() {
     llmModelName: session.llmModelName,
     approvalModelName: session.approvalModelName,
     approvalModelAvailable: session.approvalModelAvailable,
+    approvalModelType: session.approvalModelType,
     mergeMode: session.mergeMode,
     setMergeMode: session.setMergeMode,
     selectedForMerge: session.selectedForMerge,

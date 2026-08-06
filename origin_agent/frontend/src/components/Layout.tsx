@@ -246,6 +246,7 @@ export default function Layout({ ws, onContextMenu }: LayoutProps) {
           handsfreeMode={ws.handsfreeMode}
           approvalModelAvailable={ws.approvalModelAvailable}
           approvalModelName={ws.approvalModelName}
+          approvalModelType={ws.approvalModelType}
           llmModelName={ws.llmModelName}
           sidebarCollapsed={sidebarCollapsed}
           onToggleSidebar={() => setSidebarCollapsed((v) => !v)}

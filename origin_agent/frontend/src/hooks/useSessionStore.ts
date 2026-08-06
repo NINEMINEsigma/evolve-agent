@@ -83,6 +83,8 @@ export interface SessionStore {
   setApprovalModelName: React.Dispatch<React.SetStateAction<string>>;
   approvalModelAvailable: boolean;
   setApprovalModelAvailable: React.Dispatch<React.SetStateAction<boolean>>;
+  approvalModelType: string;
+  setApprovalModelType: React.Dispatch<React.SetStateAction<string>>;
   mergeMode: boolean;
   setMergeMode: React.Dispatch<React.SetStateAction<boolean>>;
   selectedForMerge: Set<string>;
@@ -191,6 +193,7 @@ export function useSessionStore(callbacks: SessionStoreCallbacks = {}): SessionS
   const [llmModelName, setLlmModelName] = useState("");
   const [approvalModelName, setApprovalModelName] = useState("");
   const [approvalModelAvailable, setApprovalModelAvailable] = useState(false);
+  const [approvalModelType, setApprovalModelType] = useState("");
   const [mergeMode, setMergeMode] = useState(false);
   const [selectedForMerge, setSelectedForMerge] = useState<Set<string>>(new Set());
   const [bgTasks, setBgTasks] = useState<Array<{
@@ -389,6 +392,7 @@ export function useSessionStore(callbacks: SessionStoreCallbacks = {}): SessionS
           setLlmModelName(info.llm_model || "");
           setApprovalModelName(info.approval_model_name || "");
           setApprovalModelAvailable(info.approval_model_available || false);
+          setApprovalModelType(info.approval_model_type || "");
           return;
         }
         if (data.session_history) {
@@ -1276,6 +1280,8 @@ export function useSessionStore(callbacks: SessionStoreCallbacks = {}): SessionS
     setApprovalModelName,
     approvalModelAvailable,
     setApprovalModelAvailable,
+    approvalModelType,
+    setApprovalModelType,
     mergeMode,
     setMergeMode,
     selectedForMerge,

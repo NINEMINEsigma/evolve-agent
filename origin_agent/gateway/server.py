@@ -1564,9 +1564,11 @@ async def ws_chat(ws: WebSocket) -> None:
             if _local_raw not in _local_disabled:
                 model_name: str = Path(ctx.approval_model_path).name if ctx.approval_model_path else ""
                 model_available: bool = bool(ctx.approval_model_path)
+                model_type = "local"
             else:
                 model_name = ctx.approval_remote_model or ""
                 model_available = bool(ctx.approval_remote_base_url and ctx.approval_remote_model)
+                model_type = "remote"
             await ws.send_text(
                 json.dumps(
                     Message(
@@ -1578,6 +1580,7 @@ async def ws_chat(ws: WebSocket) -> None:
                                 "llm_model": ctx.llm_model,
                                 "approval_model_name": model_name,
                                 "approval_model_available": model_available,
+                                "approval_model_type": model_type,
                             },
                         }),
                     ).model_dump(exclude_none=True),

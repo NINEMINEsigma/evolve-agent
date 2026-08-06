@@ -14,6 +14,7 @@ interface HeaderProps {
   handsfreeMode: boolean;
   approvalModelAvailable: boolean;
   approvalModelName: string;
+  approvalModelType: string;
   llmModelName: string;
   sidebarCollapsed: boolean;
   onToggleSidebar: () => void;
@@ -33,6 +34,7 @@ export default function Header({
   handsfreeMode,
   approvalModelAvailable,
   approvalModelName,
+  approvalModelType,
   llmModelName,
   sidebarCollapsed,
   onToggleSidebar,
@@ -85,7 +87,7 @@ export default function Header({
   const handleShutdownApprovalModel = async () => {
     setCmdMenuOpen(false);
     setMenuPos(null);
-    if (!window.confirm("确定要卸载审批模型 (llama-server) 吗？关闭后将释放显存，脱手模式不可用。")) return;
+    if (!window.confirm("确定要卸载审批模型 (llama-server) 吗？关闭后将释放显存，脱手模式开关仍可使用。")) return;
     setShuttingDown(true);
     try {
       const resp = await fetch("/api/shutdown-approval-model", { method: "POST" });
@@ -104,7 +106,8 @@ export default function Header({
     }
   };
 
-  const showApprovalUI = approvalModelAvailable && !modelClosed;
+  const showHandsfreeToggle = approvalModelAvailable;
+  const showUnloadMenu = approvalModelAvailable && !modelClosed && approvalModelType === "local";
 
   // 移动端折叠态：只显示精简条
   if (isMobile && collapsed) {
@@ -193,14 +196,14 @@ export default function Header({
                 >
                   导出会话
                 </div>
+                {showUnloadMenu && (
                 <div
-                  className={`context-menu-item ${showApprovalUI ? "context-menu-item-danger" : ""}`}
-                  onClick={showApprovalUI ? handleShutdownApprovalModel : undefined}
-                  style={showApprovalUI ? undefined : { opacity: 0.45, cursor: "not-allowed", userSelect: "none" }}
-                  data-tooltip={showApprovalUI ? "" : "审批模型未加载"}
+                  className="context-menu-item context-menu-item-danger"
+                  onClick={handleShutdownApprovalModel}
                 >
                   卸载审批模型
                 </div>
+                )}
               </div>
             )}
           </div>
@@ -210,7 +213,7 @@ export default function Header({
 
           {sessionId && (
             <div className="header-right">
-              {showApprovalUI && (
+              {showHandsfreeToggle && (
                 <span
                   className={[
                     "approval-model-badge",
@@ -289,14 +292,14 @@ export default function Header({
             >
               导出会话
             </div>
+            {showUnloadMenu && (
             <div
-              className={`context-menu-item ${showApprovalUI ? "context-menu-item-danger" : ""}`}
-              onClick={showApprovalUI ? handleShutdownApprovalModel : undefined}
-              style={showApprovalUI ? undefined : { opacity: 0.45, cursor: "not-allowed", userSelect: "none" }}
-              data-tooltip={showApprovalUI ? "" : "审批模型未加载"}
+              className="context-menu-item context-menu-item-danger"
+              onClick={handleShutdownApprovalModel}
             >
               卸载审批模型
             </div>
+            )}
           </div>
         )}
       </div>
@@ -307,7 +310,7 @@ export default function Header({
 
       {sessionId && (
         <div className="header-right">
-          {showApprovalUI && (
+          {showHandsfreeToggle && (
             <span
               className={[
                 "approval-model-badge",
