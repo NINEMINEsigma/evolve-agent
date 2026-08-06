@@ -39,7 +39,7 @@
     left: 0;
     right: 0;
     bottom: 0;
-    z-index: var(--z-sidebar);
+    z-index: calc(var(--z-sidebar) - 1);
     background: rgba(var(--black-rgb), 0.35);
   }
 }
