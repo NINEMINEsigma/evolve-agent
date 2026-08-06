@@ -283,7 +283,7 @@ CRON_MAX_JOBS_PER_SESSION: int = 20
 # ============================================================================
 
 # Watching 服务长短间隔的最小值（秒）
-WATCHING_MIN_INTERVAL: int = 3
+WATCHING_MIN_INTERVAL: int = 10
 
 # Watching 服务默认长间隔（秒）— 无标识符命中时使用
 WATCHING_DEFAULT_LONG_INTERVAL: int = 180

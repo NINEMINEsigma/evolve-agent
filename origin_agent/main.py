@@ -110,7 +110,7 @@ class App:
 
         # ---- 清理后台服务进程 ----
         try:
-            from component.extools.background_service import cleanup_background_services
+            from component.extools.bg_registry import cleanup_background_services
             killed = await asyncio.to_thread(cleanup_background_services)
             if killed:
                 logger.info("Cleaned up %d background service(s)", killed)

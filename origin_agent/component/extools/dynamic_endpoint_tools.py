@@ -302,6 +302,18 @@ async def _handle_unregister_dynamic_endpoint(
 
     _delete_endpoint_on_disk(name)
 
+    # 级联停止引用此端点的 watching service
+    try:
+        from component.extools.bg_registry import stop_watching_by_endpoint
+        stopped_count = stop_watching_by_endpoint(name)
+        if stopped_count:
+            logger.info(
+                "Cascade stopped %d watching service(s) for endpoint %s",
+                stopped_count, name,
+            )
+    except Exception:
+        logger.warning("Failed to cascade stop watching services for %s", name, exc_info=True)
+
     logger.info(
         "Dynamic endpoint unregistered | name=%s session=%s agent=%s",
         name, removed.session_id, removed.agent_name,

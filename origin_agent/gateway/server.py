@@ -922,7 +922,7 @@ async def branch_session_endpoint(session_id: str):
 @app.get("/api/sessions/{session_id}/background-tasks")
 async def list_background_tasks_endpoint(session_id: str):
     """列出指定会话的所有后台任务。"""
-    from component.extools.background_service import list_background_tasks
+    from component.extools.bg_registry import list_background_tasks
     tasks = list_background_tasks(session_id)
     return {"tasks": tasks}
 
@@ -931,7 +931,7 @@ async def list_background_tasks_endpoint(session_id: str):
 async def stop_background_task_endpoint(session_id: str, task_id: str):
     """停止指定的后台任务。"""
     logger.info("Stop background task | session=%s task_id=%s", session_id, task_id)
-    from component.extools.background_service import stop_background_task
+    from component.extools.bg_registry import stop_background_task
     result = stop_background_task(task_id)
     logger.info("Stop background task ok | session=%s task_id=%s result=%s", session_id, task_id, result)
     return result
