@@ -173,10 +173,28 @@ def _handle_read(args: dict[str, Any]) -> dict:
 
 def _handle_write(args: dict[str, Any]) -> dict:
     path: str = str(args.get("path", "")).strip()
-    content: str = str(args.get("content", ""))
+    has_content = "content" in args and args["content"] is not None
+    content: str = str(args["content"]) if has_content else ""
     mode: str = str(args.get("mode", "overwrite")).strip()
     if not path:
         return tool_error("path is required", path=path)
+
+    # -- 目录创建分支：content 缺失或为 None --
+    if not has_content:
+        try:
+            already_exists = _s().is_dir(path)
+            if not already_exists:
+                if _s().exists(path):
+                    return tool_error(f"Path already exists as a file: {path}", path=path)
+                _s().create_folder(path, parents=True)
+            return tool_result(
+                success=True, path=path,
+                type="directory", already_exists=already_exists,
+            )
+        except SandboxError as exc:
+            return tool_error(str(exc), path=path)
+
+    # -- 文件写入分支 --
     if mode not in ("overwrite", "append"):
         return tool_error(
             f"Invalid mode '{mode}'. Valid values: overwrite, append.",
@@ -202,15 +220,17 @@ def _handle_write(args: dict[str, Any]) -> dict:
         _lsp_diags = _try_attach_lsp_diagnostics(path, content)
         if truncated:
             result = tool_result(
-                success=True, path=path, 
+                success=True, path=path,
                 bytes=len(content.encode("utf-8")),
                 truncated=True,
                 tail=tail,
+                type="file",
             )
         else:
             result = tool_result(
-                success=True, path=path, 
+                success=True, path=path,
                 bytes=len(content.encode("utf-8")),
+                type="file",
             )
         if _lsp_diags is not None:
             result["diagnostics"] = _lsp_diags
@@ -388,12 +408,17 @@ registry.register(
     name="Write",
     toolset="filesystem",
     schema={
-        # 将内容写入文件（覆写或追加）。路径必须使用命名空间前缀。
+        # 将内容写入文件（覆写或追加），或在省略 content 时创建目录。路径必须使用命名空间前缀。
         #
         # ## 前置条件
         # - mode="overwrite"（默认）：确定文件不存在需要新建文件，或确定文件内容已完全无效需要覆写。
         # - mode="append"：文件必须已存在。
         # - 小范围修改应使用 PatchEdit。
+        #
+        # ## 目录创建模式
+        # 当 `content` 省略或为 null 时，`path` 被视为目录路径，递归创建该目录（含所有父目录）。
+        # 目录已存在时返回 `already_exists: true`，不报错。
+        # 此模式下 `mode` 参数无意义，被忽略。
         #
         # ## 调用效果
         # 以 `content` 写入目标文件。每次调用最多 {WRITE_FILE_MAX_CHARS} 个字符。
@@ -405,17 +430,22 @@ registry.register(
         # 使用 `skills:` 前缀可写入 skill 包内文件（如 skills:my-skill/scripts/hello.py）。
         #
         # ## 返回
-        # 未截断时：
+        # 文件写入（未截断）：
         # ```json
-        # {{"success": true, "path": "ws:example.txt", "bytes": 42}}
+        # {{"success": true, "path": "ws:example.txt", "bytes": 42, "type": "file"}}
         # ```
-        # 截断时额外包含 `truncated=true` 和 `tail` 字段：
+        # 文件写入（截断时额外包含 `truncated=true` 和 `tail` 字段）：
         # ```json
-        # {{"success": true, "path": "ws:example.txt", "bytes": {WRITE_FILE_MAX_CHARS}, "truncated": true, "tail": "..."}}
+        # {{"success": true, "path": "ws:example.txt", "bytes": {WRITE_FILE_MAX_CHARS}, "truncated": true, "tail": "...", "type": "file"}}
         # ```
         # `tail` 为被截断部分的前 {WRITE_FILE_TRUNCATION_TAIL} 个字符，用作 PatchEdit 的 old_string。
+        # 目录创建：
+        # ```json
+        # {{"success": true, "path": "ws:src/subdir", "type": "directory", "already_exists": false}}
+        # ```
         #
         # ## 何时使用
+        # - 创建目录（省略 content，path 被视为目录路径）。
         # - 创建新文件。
         # - 完整覆写小文件（不超过 {WRITE_FILE_MAX_CHARS} 字符）。
         # - 向已有文件末尾追加新内容（mode="append"）。
@@ -425,7 +455,7 @@ registry.register(
         # - 写入文件系统，mode="overwrite" 覆盖已有文件。
         # - 超出 {WRITE_FILE_MAX_CHARS} 限制时自动截断，应继续用 `tail` 作为 old_string 调用 PatchEdit，或用 Write(mode="append") 追加剩余内容。
         # - 路径使用命名空间前缀：'ws:' 用于 workspace 数据，'fork:' 用于进化代码，'skills:' 用于 skill 文件。
-        "description": f"""Write content to a file (overwrite or append). Path must use a namespace prefix.
+        "description": f"""Write content to a file (overwrite or append), or create a directory when content is omitted. Path must use a namespace prefix.
 
 ## Prerequisites
 - mode="overwrite" (default): The file does not exist yet (new file creation), or the file content is confirmed to be completely invalid and needs overwriting.
@@ -433,7 +463,8 @@ registry.register(
 - For small edits, use PatchEdit instead.
 
 ## Effect
-Writes `content` to the target file. Max {WRITE_FILE_MAX_CHARS} characters per call.
+If `content` is omitted or null, `path` is treated as a directory path — creates it recursively (including all parent directories). If the directory already exists, returns `already_exists: true` (no error). In this mode, the `mode` parameter is ignored.
+When `content` is provided, writes it to the target file. Max {WRITE_FILE_MAX_CHARS} characters per call.
 mode="overwrite" (default): Overwrites the target file entirely, creating it if it doesn't exist.
 mode="append": Appends to the end of the target file without affecting existing content; errors if the file doesn't exist.
 Content exceeding the limit is automatically truncated to {WRITE_FILE_MAX_CHARS}; the result includes `truncated=true` to indicate incomplete content.
@@ -442,17 +473,22 @@ Do NOT use run_python as a substitute for this tool.
 Use the `skills:` prefix to write files inside a skill package (e.g. skills:my-skill/scripts/hello.py) — replaces the old write_skill_file tool.
 
 ## Returns
-Without truncation:
+File write (without truncation):
 ```json
-{{"success": true, "path": "ws:example.txt", "bytes": 42}}
+{{"success": true, "path": "ws:example.txt", "bytes": 42, "type": "file"}}
 ```
-When truncated, additionally includes `truncated=true` and `tail`:
+File write (truncated, additionally includes `truncated=true` and `tail`):
 ```json
-{{"success": true, "path": "ws:example.txt", "bytes": {WRITE_FILE_MAX_CHARS}, "truncated": true, "tail": "..."}}
+{{"success": true, "path": "ws:example.txt", "bytes": {WRITE_FILE_MAX_CHARS}, "truncated": true, "tail": "...", "type": "file"}}
 ```
 `tail` contains the first {WRITE_FILE_TRUNCATION_TAIL} characters of the truncated portion to use as old_string for PatchEdit.
+Directory creation (content omitted):
+```json
+{{"success": true, "path": "ws:src/subdir", "type": "directory", "already_exists": false}}
+```
 
 ## When to Use
+- Create directories (omit `content`; path is treated as a directory path).
 - Create new files.
 - Completely overwrite small files (within {WRITE_FILE_MAX_CHARS} characters).
 - Append new content to the end of an existing file (mode="append").
@@ -472,8 +508,8 @@ When truncated, additionally includes `truncated=true` and `tail`:
                 },
                 "content": {
                     "type": "string",
-                    # 要写入文件的内容。最多 WRITE_FILE_MAX_CHARS 个字符。
-                    "description": f"Content to write to the file. Max {WRITE_FILE_MAX_CHARS} characters.",
+                    # 要写入文件的内容。最多 WRITE_FILE_MAX_CHARS 个字符。省略或为 null 时，path 被视为目录路径创建目录。
+                    "description": f"Content to write to the file. Max {WRITE_FILE_MAX_CHARS} characters. Omit or set to null to create a directory at `path` instead of writing a file.",
                 },
                 "mode": {
                     "type": "string",
@@ -483,7 +519,7 @@ When truncated, additionally includes `truncated=true` and `tail`:
                     "default": "overwrite",
                 },
             },
-            "required": ["path", "content"],
+            "required": ["path"],
         },
     },
     handler=_handle_write,
@@ -1406,113 +1442,4 @@ When results exceed the limit:
     handler=_handle_grep,
     emoji="🔎",
 )
-
-
-
-
-
-
-# -- create_folder
-# 创建目录（包括父目录）
-# Create directory (including parent directories)
-
-
-def _handle_create_folder(args: dict[str, Any]) -> dict:
-    paths_raw = args.get("paths", [])
-    if not isinstance(paths_raw, list) or not paths_raw:
-        return tool_error("paths is required as a non-empty array of strings")
-    parents: bool = bool(args.get("parents", True))
-    results: list[dict] = []
-    succeeded = 0
-    failed = 0
-    for p in paths_raw:
-        path = str(p).strip()
-        if not path:
-            results.append({"path": str(p), "success": False, "error": "path is empty"})
-            failed += 1
-            continue
-        try:
-            _s().create_folder(path, parents=parents)
-            results.append({"path": path, "success": True, "created": True})
-            succeeded += 1
-        except SandboxError as exc:
-            results.append({"path": path, "success": False, "error": str(exc)})
-            failed += 1
-    return tool_result(results=results, summary={"total": len(results), "succeeded": succeeded, "failed": failed})
-
-
-# -- create_folder
-# 创建多个目录。路径必须使用命名空间前缀（ws:、fork:、fix:、skills:）。
-# 默认自动创建所有缺失的父目录。
-# 目录已存在时返回成功（幂等操作）。
-#
-# ## 前置条件
-# - 路径所在命名空间必须是可写的。
-#
-# ## 调用效果
-# 逐个创建指定目录。默认同时创建所有缺失的父目录（parents=true）。
-# 如果目录已存在，不会报错（幂等）。部分目录失败不影响其他目录的创建。
-#
-# ## 返回
-# ```json
-# {"results": [{"path": "ws:src/subdir", "success": true, "created": true}], "summary": {"total": 1, "succeeded": 1, "failed": 0}}
-# ```
-#
-# ## 何时使用
-# - 在写入文件前确保目标目录存在。
-# - 组织目录结构。
-#
-# ## 副作用/注意
-# - 写入文件系统。
-# - 默认创建所有父目录（类似 mkdir -p）。
-# - 目录已存在时静默成功（幂等）。
-registry.register(
-    name="create_folder",
-    toolset="filesystem",
-    schema={
-        "description": """Create multiple directories. Paths must use a namespace prefix (ws:, fork:, fix:, skills:). By default, all missing parent directories are created automatically. Idempotent — returns success if the directory already exists. Best-effort: all paths are attempted, each result reports success or failure.
-
-## Prerequisites
-The path namespace must be writable.
-
-## Effect
-Creates each specified directory. By default, also creates all missing parent directories (parents=true). If a directory already exists, no error is raised (idempotent). Failures for individual paths do not affect others.
-
-## Returns
-```json
-{"results": [{"path": "ws:src/subdir", "success": true, "created": true}], "summary": {"total": 1, "succeeded": 1, "failed": 0}}
-```
-
-## When to Use
-- Ensure target directories exist before writing files.
-- Organize directory structure.
-
-## Side Effects / Notes
-- Writes to the file system.
-- Creates all parent directories by default (like mkdir -p).
-- Idempotent — silently succeeds if the directory already exists.""",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "paths": {
-                    "type": "array",
-                    "items": {"type": "string"},
-                    "description": "Logical paths (directories to create). "
-                    "Each must use a namespace prefix: fork:, ws:, fix:, or skills:.",
-                },
-                "parents": {
-                    "type": "boolean",
-                    # 是否同时创建缺失的父目录（默认 true）。
-                    "description": "Whether to also create missing parent directories (default true).",
-                    "default": True,
-                },
-            },
-            "required": ["paths"],
-        },
-    },
-    handler=_handle_create_folder,
-    emoji="📁",
-    danger_level=ToolDangerLevel.readonly,
-)
-
 

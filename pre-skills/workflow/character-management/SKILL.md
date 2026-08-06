@@ -124,8 +124,8 @@ characters/
 
 ### 步骤 1：创建文件夹和文件
 ```python
-# 创建角色文件夹
-create_folder(path="ws:characters/<角色名>/")
+# 创建角色文件夹（Write 不带 content 即创建目录）
+Write(path="ws:characters/<角色名>/")
 
 # 编写 profile.md
 Write(path="ws:characters/<角色名>/profile.md", content="...")
