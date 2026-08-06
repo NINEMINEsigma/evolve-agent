@@ -77,7 +77,7 @@ async def _handle_ask_question(args: dict[str, Any]) -> dict:
 # ── 注册 ─────────────────────────────────────────────────────
 
 registry.register(
-    name="ask_question",
+    name="Ask",
     toolset="core",
     schema={
         # 向当前用户提问，支持预设选项和自定义输入。

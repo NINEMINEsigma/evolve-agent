@@ -85,7 +85,7 @@ WS /ws/chat?resume=<sid>
 |---|---|
 | `user_message` | 用户发送的文本/图片消息 |
 | `confirm_response` | 审批确认/拒绝 |
-| `ask_response` | ask_question 回答 |
+| `ask_response` | Ask 回答 |
 | `interrupt` | 中断当前处理 |
 | `file_upload` | 文件上传 |
 | `handsfree_mode` | 切换免审批模式 |

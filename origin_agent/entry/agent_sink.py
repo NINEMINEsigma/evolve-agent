@@ -512,7 +512,7 @@ class ParentAgentSink(AgentSink):
     async def ask_question(self, question: str, options: list[dict] | None = None,
                            session_id: str = "") -> dict:
         """子 Agent 不支持直接提问。"""
-        return {"error": "SubAgent does not support ask_question — use parent agent tools instead"}
+        return {"error": "SubAgent does not support Ask — use parent agent tools instead"}
 
     async def request_approval(self, tool_name: str, args: dict,
                                reason: str = "", content: str = "",

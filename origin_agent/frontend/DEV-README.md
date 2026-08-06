@@ -93,7 +93,7 @@ frontend/
 | 组件 | 职责 |
 |---|---|
 | `ConfirmDialog.tsx` | 工具审批弹窗（兼容 command 为字符串或数组） |
-| `AskDialog.tsx` | `ask_question` 弹窗 |
+| `AskDialog.tsx` | `Ask` 弹窗 |
 | `TagEditor.tsx` | 会话标签编辑 |
 
 ### 面板

@@ -17,7 +17,7 @@ tags:
 > 本技能源自 Kimi Agent（Moonshot AI）深度研究技能，由 Eve（Evolve Agent）按主人指示本地化，转为**本地系统专用**（已移除原专有许可证，不再对外分发）。
 >
 > - **平台**：Windows。原 Kimi 环境的 `/mnt/agents/output/` 已改为本系统 `ws:output/`（逻辑路径，实际为 agentspace/output/）
-> - **工具映射**：`ask_question` → 本系统 `ask_question`；搜索用 `web_search` / `web_fetch`；Python 用 `run_python`；文件用 `Write` / `Read`
+> - **工具映射**：`ask_question` → 本系统 `Ask`；搜索用 `web_search` / `web_fetch`；Python 用 `run_python`；文件用 `Write` / `Read`
 > - **多格式输出**：docx/pdf/pptx/xlsx 对应本系统 `office/` 分类下的同名技能；webapp 产物经 `/uploads/` 展示
 > - **可视化**：ECharts 图表通过 Python（pyecharts）生成后导出静态图片嵌入报告
 
@@ -28,7 +28,7 @@ Conduct thorough, multi-dimensional research on complex questions using file cre
 ## Research & Discovery Phase (The 10+ Step Loop)
 
 1.  **Read Attached Files**: Start by checking any attachments to understand the background information.
-2.  **Clarify Intent**: Ask targeted clarification questions **via the `ask_question` tool** to ensure you fully understand their goals before proceeding.
+2.  **Clarify Intent**: Ask targeted clarification questions **via the `Ask` tool** to ensure you fully understand their goals before proceeding.
 3.  **Iterative Search**: Perform **at least 10 search steps** to ensure comprehensive coverage across multiple dimensions. Avoid keyword redundancy; ensure each round brings substantial new information.
 4.  **Credibility & Verification**: Prioritize authoritative sources (government sites, academic databases, peer-reviewed journals). **Never fabricate data.** Every statistic and claim must be accurate and traceable.
 5.  **Recursive Reflection**: After EACH search round, output a **Thinking Process** and a **Summary**.

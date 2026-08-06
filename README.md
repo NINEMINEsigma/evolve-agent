@@ -186,7 +186,7 @@ origin_agent/
   - `allowlist.py`：只读 / 自动通过工具的允许列表。
 - `mcp_tools.py`：将 MCP server 的工具桥接到 `ToolRegistry`。
 - `cron_router.py`：Cron 后台任务的路由与生命周期管理。
-- `tools/`：核心工具（filesystem、code、shell、frontend、skills、read_image、run_python、ask_question、progress_tools、clipboard_display_tools、list_tools、list_uploads、probe_vision 等）。
+- `tools/`：核心工具（filesystem、code、shell、frontend、skills、read_image、run_python、Ask、progress_tools、clipboard_display_tools、list_tools、list_uploads、probe_vision 等）。
 - `extools/`：扩展工具集。部分重量级工具文件以 `_` 前缀标记，由对应的轻量级注册文件 re-export：
   - `web_search.py` / `web_fetch.py` — 网络搜索、抓取
   - `_web_browser.py`（注册入口） — 浏览器自动化
@@ -226,7 +226,7 @@ origin_agent/
 | `skills.py` | `load_skill`, `list_skills` | 技能管理 |
 | `read_image.py` | `read_image` | 图像读取 |
 | `run_python.py` | `run_python` | Python 代码执行 |
-| `ask_question.py` | `ask_question` | 向前端提问 |
+| `ask_question.py` | `Ask` | 向前端提问 |
 | `progress_tools.py` | `update_task_progress`, `clear_task_progress` | 任务进度 |
 | `clipboard_display_tools.py` | `update_clipboard_display`, `clear_clipboard_display` | 剪贴板展示 |
 | `list_tools.py` | `list_tools` | 列出所有已注册工具 |

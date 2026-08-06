@@ -47,7 +47,7 @@ component/
 | `skills.py` | `load_skill`, `list_skills` | 技能管理 |
 | `read_image.py` | `read_image` | 图像读取 |
 | `run_python.py` | `run_python` | Python 代码执行 |
-| `ask_question.py` | `ask_question` | 向前端提问 |
+| `ask_question.py` | `Ask` | 向前端提问 |
 | `progress_tools.py` | `update_task_progress`, `clear_task_progress` | 任务进度 |
 | `clipboard_display_tools.py` | `update_clipboard_display`, `clear_clipboard_display` | 剪贴板展示 |
 | `list_tools.py` | `list_tools` | 列出工具 |
