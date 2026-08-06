@@ -66,6 +66,8 @@ argparse_parser.add_argument("--approval_model_port", type=int, default=argparse
 argparse_parser.add_argument("--approval_remote_base_url", type=str, default=argparse.SUPPRESS)
 argparse_parser.add_argument("--approval_remote_api_key", type=str, default=argparse.SUPPRESS)
 argparse_parser.add_argument("--approval_remote_model", type=str, default=argparse.SUPPRESS)
+# 远程审批模型的 LLM 客户端插件名（custom_llm_client 目录下对应 .py 文件名）
+argparse_parser.add_argument("--approval_remote_client_name", type=str, default=argparse.SUPPRESS)
 
 #----------
 # workspace
@@ -104,6 +106,7 @@ class Config(BaseModel):
     approval_remote_base_url: str = ""
     approval_remote_api_key: str = ""
     approval_remote_model: str = ""
+    approval_remote_client_name: str = "openai_client"
     workspace_path: str = "workspace"
     agentspace_path_name: str = "agentspace"
     logs_path_name: str = "logs"
@@ -235,6 +238,7 @@ approval_model_port:         int  = current_config.approval_model_port
 approval_remote_base_url:    str  = current_config.approval_remote_base_url
 approval_remote_api_key:     str  = current_config.approval_remote_api_key
 approval_remote_model:       str  = current_config.approval_remote_model
+approval_remote_client_name: str  = current_config.approval_remote_client_name
 
 # ----------
 # 审批模型本地/远程二选一，配置阶段完成判定与存在性检查

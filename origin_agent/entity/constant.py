@@ -201,6 +201,18 @@ WEB_FETCH_MAX_CHARS: int = 50000
 # 审批模型上下文窗口 token 数默认值
 APPROVAL_MODEL_N_CTX_DEFAULT: int = 4096
 
+# 远程审批 json_schema 能力缓存文件名（存放于 workspace/ 下）
+APPROVAL_JSON_SCHEMA_CACHE_FILENAME: str = "approval_json_schema_cache.json"
+
+# Vision 能力缓存文件名（存放于 workspace/ 下）
+VISION_CAPABILITY_CACHE_FILENAME: str = "vision_capability_cache.json"
+
+# 远程审批 response_format 中 json_schema 的名称
+APPROVAL_RESPONSE_FORMAT_NAME: str = "approval_decision"
+
+# 本地审批模型禁用值 — 配置为这些值时视为未启用本地审批
+APPROVAL_LOCAL_DISABLED_VALUES: frozenset[str] = frozenset({"", "false", "0", "no"})
+
 # 所有LLM解析的重试次数
 LLM_RETRY_COUNT: int = 3
 

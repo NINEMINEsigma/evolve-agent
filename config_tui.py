@@ -29,7 +29,7 @@ FIELD_GROUPS: dict[str, list[str]] = {
         "approval_model", "approval_model_n_ctx",
         "approval_model_cuda", "approval_model_port",
         "approval_remote_base_url", "approval_remote_api_key",
-        "approval_remote_model",
+        "approval_remote_model", "approval_remote_client_name",
     ],
     "Workspace": [
         "workspace_path", "agentspace_path_name",

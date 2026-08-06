@@ -118,6 +118,9 @@ class RuntimeContext(BaseModel):
     approval_remote_model: str = ""
     """远程审批模型名称。"""
 
+    approval_remote_client_name: str = "openai_client"
+    """远程审批模型的 LLM 客户端插件名（custom_llm_client 目录下对应 .py 文件名）。"""
+
     # -- MCP 配置 -------------------------------------------------
 
     mcp_config_path: str | None = None

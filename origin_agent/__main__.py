@@ -149,6 +149,7 @@ def _build_context(cli: dict) -> RuntimeContext:
         approval_remote_base_url= str(cli.get("approval_remote_base_url", "")),
         approval_remote_api_key = str(cli.get("approval_remote_api_key", "")),
         approval_remote_model   = str(cli.get("approval_remote_model", "")),
+        approval_remote_client_name = str(cli.get("approval_remote_client_name", "openai_client")),
         mcp_config_path         = cli["mcp_config_path"],
         # 会话合并配置
         merge_concat_threshold  = int(cli.get("merge_concat_threshold", 50000)),

@@ -15,6 +15,7 @@ from typing import Any, TYPE_CHECKING
 from abstract.tools.registry import registry, tool_error, tool_result
 from abstract.llm.loader import create_llm_client
 from system.context import get_runtime_context
+from entity.constant import VISION_CAPABILITY_CACHE_FILENAME
 from entity.puretype import Role, ToolAvailability, ToolDangerLevel
 from entity.messages import BaseMessage, ImageBlock, TextBlock
 
@@ -30,7 +31,7 @@ _DUMMY_PNG_B64: str = (
 
 
 def _cache_path() -> Path:
-    return get_runtime_context().workspace / "vision_capability_cache.json"
+    return get_runtime_context().workspace / VISION_CAPABILITY_CACHE_FILENAME
 
 
 def _cache_key(model: str) -> str:
