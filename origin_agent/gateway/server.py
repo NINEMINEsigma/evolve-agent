@@ -1457,8 +1457,14 @@ async def spa_fallback(full_path: str):
     """SPA 客户端路由的兜底处理。
 
     必须在所有 API 路由之后定义，确保 API 优先匹配。
-    返回构建后的 index.html，前端未构建时返回 404。
+    若请求路径对应 dist/ 下的真实文件（如 icon.ico），直接返回该文件；
+    否则返回构建后的 index.html，前端未构建时返回 404。
     """
+    # 先尝试作为 dist/ 下的静态文件返回（favicon 等 public 资源）
+    candidate: Path = _FRONTEND_DIST / full_path
+    if full_path and candidate.is_file():
+        media_type = _guess_media_type_with_charset(candidate)
+        return FileResponse(str(candidate), media_type=media_type, headers=_NO_CACHE)
     index_html: Path = _FRONTEND_DIST / "index.html"
     if index_html.exists():
         return HTMLResponse(
