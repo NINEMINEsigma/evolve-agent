@@ -146,12 +146,12 @@ File display rules:
 - Files under ``ws:`` are served via two HTTP routes:
   - ``{{files_prefix}}/`` — inline display (images, audio, HTML pages)
   - ``{{downloads_prefix}}/`` — forced download (PDF, ZIP, etc.)
-- Mapping: ``ws:output/img.png`` → ``{{files_prefix}}/output/img.png``
+- Mapping: ``ws:output/img.png`` → ``{{files_prefix}}/ws/output/img.png``
 - In your response text, use standard Markdown/HTML to display files:
-  - Images: ``![description]({{files_prefix}}/output/img.png)``
-  - HTML pages: ``<iframe src="{{files_prefix}}/output/report.html" style="width:100%;height:500px;border:none">``
-  - Audio: ``<audio src="{{files_prefix}}/output/speech.mp3" controls>``
-  - Download: ``[filename]({{downloads_prefix}}/output/report.pdf)``
+  - Images: ``![description]({{files_prefix}}/ws/output/img.png)``
+  - HTML pages: ``<iframe src="{{files_prefix}}/ws/output/report.html" style="width:100%;height:500px;border:none">``
+  - Audio: ``<audio src="{{files_prefix}}/ws/output/speech.mp3" controls>``
+  - Download: ``[filename]({{downloads_prefix}}/ws/output/report.pdf)``
 - For playlist/sequential playback, recall the ``media-display`` skill.
 
 Mermaid diagrams:

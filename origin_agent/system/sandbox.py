@@ -42,7 +42,7 @@ from enum import Enum
 from pathlib import Path
 from typing import TYPE_CHECKING, Dict, List
 
-from entity.constant import NAMESPACE_PREFIXES
+from entity.constant import Namespace, is_namespaced_path
 from system.context import get_runtime_context
 from system.subprocess_utils import build_subprocess_env, completed_process_from_bytes, windows_process_group_flags
 
@@ -70,26 +70,26 @@ class Access(str, Enum):
 # 进化完全通过 fork:/fix: 实现。
 _PERMISSIONS: dict[str, dict[str, list[Access]]] = {
     "fast": {
-        "fork":   [Access.READ, Access.WRITE],
-        "ws":     [Access.READ, Access.WRITE],
-        "skills": [Access.READ, Access.WRITE],
+        Namespace.FORK.value:   [Access.READ, Access.WRITE],
+        Namespace.WS.value:     [Access.READ, Access.WRITE],
+        Namespace.SKILLS.value: [Access.READ, Access.WRITE],
         # 第一批只读命名空间 — 映射项目根目录，agent 可读不可写
-        "third":              [Access.READ],
-        "custom_hooks":       [Access.READ],
-        "custom_llm_client":  [Access.READ],
-        "custom_models":      [Access.READ],
-        "custom_tools":       [Access.READ],
+        Namespace.THIRD.value:              [Access.READ],
+        Namespace.CUSTOM_HOOKS.value:      [Access.READ],
+        Namespace.CUSTOM_LLM_CLIENT.value: [Access.READ],
+        Namespace.CUSTOM_MODELS.value:     [Access.READ],
+        Namespace.CUSTOM_TOOLS.value:      [Access.READ],
     },
     "fallback": {
-        "fix":    [Access.READ, Access.WRITE],
-        "ws":     [Access.READ, Access.WRITE],
-        "skills": [Access.READ, Access.WRITE],
+        Namespace.FIX.value:    [Access.READ, Access.WRITE],
+        Namespace.WS.value:     [Access.READ, Access.WRITE],
+        Namespace.SKILLS.value: [Access.READ, Access.WRITE],
         # 第一批只读命名空间 — 与 fast 模式一致，仅可读
-        "third":              [Access.READ],
-        "custom_hooks":       [Access.READ],
-        "custom_llm_client":  [Access.READ],
-        "custom_models":      [Access.READ],
-        "custom_tools":       [Access.READ],
+        Namespace.THIRD.value:              [Access.READ],
+        Namespace.CUSTOM_HOOKS.value:      [Access.READ],
+        Namespace.CUSTOM_LLM_CLIENT.value: [Access.READ],
+        Namespace.CUSTOM_MODELS.value:     [Access.READ],
+        Namespace.CUSTOM_TOOLS.value:      [Access.READ],
     },
 }
 
@@ -247,15 +247,15 @@ class Sandbox:
         """
         return {
             ns: base for ns, base in {
-                "fork":               self._ctx.fork_path,
-                "ws":                 self._ctx.agentspace,
-                "fix":                self._ctx.fix_path,
-                "skills":             self._ctx.skills_path,
-                "third":              self._ctx.third_path,
-                "custom_hooks":       self._ctx.custom_hooks_path,
-                "custom_llm_client":  self._ctx.custom_llm_client_path,
-                "custom_models":      self._ctx.custom_models_path,
-                "custom_tools":       self._ctx.custom_tools_path,
+                Namespace.FORK.value:               self._ctx.fork_path,
+                Namespace.WS.value:                 self._ctx.agentspace,
+                Namespace.FIX.value:                self._ctx.fix_path,
+                Namespace.SKILLS.value:             self._ctx.skills_path,
+                Namespace.THIRD.value:              self._ctx.third_path,
+                Namespace.CUSTOM_HOOKS.value:       self._ctx.custom_hooks_path,
+                Namespace.CUSTOM_LLM_CLIENT.value:  self._ctx.custom_llm_client_path,
+                Namespace.CUSTOM_MODELS.value:      self._ctx.custom_models_path,
+                Namespace.CUSTOM_TOOLS.value:       self._ctx.custom_tools_path,
             }.items() if base is not None
         }
 
@@ -308,7 +308,7 @@ class Sandbox:
 
         # -- 验证任何看起来像逻辑路径的参数 --
         for arg in args:
-            if ":" in arg and any(arg.startswith(p) for p in NAMESPACE_PREFIXES):
+            if ":" in arg and is_namespaced_path(arg):
                 raise SandboxError(
                     f"Path arguments to subprocess commands must be resolved "
                     f"by the tool handler before calling sandbox.run(). "

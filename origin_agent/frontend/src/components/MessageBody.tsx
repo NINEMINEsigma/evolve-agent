@@ -10,6 +10,7 @@ import { ChatMessage, ContentBlock, MessageContent } from "../types";
 import CodeBlock from "./CodeBlock";
 import SafeHtml from "./SafeHtml";
 import MermaidRenderer from "./MermaidRenderer";
+import { renderToolResult } from "./ToolResultRenderer";
 
 // 当文本包含 script、style、link 等标签时，需要完整隔离渲染，避免 CSS/JS 污染外层页面
 // iframe 不在此列——<iframe src="url"> 本身就是浏览器沙盒，走 ReactMarkdown 管线即可
@@ -299,6 +300,15 @@ export default function MessageBody({ message, streaming, onImageClick }: Messag
     const contentStr = typeof m.content === "string" ? m.content : "";
     try {
       const parsed = JSON.parse(contentStr);
+      const specialized = renderToolResult(m.toolName, parsed, onImageClick);
+      if (specialized) {
+        return (
+          <>
+            {specialized}
+            <ContextExtension message={m} />
+          </>
+        );
+      }
       return (
         <>
           <div className="tool-json-view">

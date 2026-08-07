@@ -1159,42 +1159,48 @@ async def file_picker():
     return {"uploaded": True, "files": results}
 
 
-@app.get(STATIC_FILE_HTTP_PREFIX + "/{file_path:path}")
-async def serve_workspace_file(file_path: str):
-    """提供 ws: 命名空间下文件的 HTTP 访问，供前端展示图片等静态文件。
+@app.get(STATIC_FILE_HTTP_PREFIX + "/{namespace}/{file_path:path}")
+async def serve_workspace_file(namespace: str, file_path: str):
+    """提供沙盒命名空间下文件的 HTTP 访问，供前端展示图片等静态文件。
 
-    对文本类 MIME 自动追加 charset=utf-8，避免中文乱码；
-    统一添加 no-cache 头，确保文件更新后立即生效。
+    URL 格式: /files/{namespace}/{file_path}
+    例如: /files/ws/uploads/test.png → agentspace/uploads/test.png
+
+    命名空间不带冒号，由 f-string 拼接逻辑路径传给 Sandbox.resolve_read()。
+    通过沙盒复用路径解析、权限校验和路径遍历防护。
     """
-    if not _agentspace_path:
-        return HTMLResponse("Upload service not available", status_code=503)
-    # 防止路径遍历
-    resolved = (_agentspace_path / file_path).resolve()
-    if not str(resolved).startswith(str(_agentspace_path.resolve())):
-        return HTMLResponse("Forbidden", status_code=403)
-    if not resolved.exists() or not resolved.is_file():
+    from system.sandbox import Sandbox, SandboxError
+
+    logical = f"{namespace}:{file_path}"
+    try:
+        sandbox = Sandbox(get_runtime_context())
+        resolved = sandbox.resolve_read(logical)
+    except SandboxError as exc:
+        return HTMLResponse(str(exc), status_code=403)
+    if not resolved.real.exists() or not resolved.real.is_file():
         return HTMLResponse("File not found", status_code=404)
-    # 文本类 MIME 追加 charset=utf-8
-    media_type = _guess_media_type_with_charset(resolved)
-    return FileResponse(str(resolved), media_type=media_type, headers=_NO_CACHE)
+    media_type = _guess_media_type_with_charset(resolved.real)
+    return FileResponse(str(resolved.real), media_type=media_type, headers=_NO_CACHE)
 
 
-@app.get(DOWNLOADS_HTTP_PREFIX + "/{file_path:path}")
-async def download_workspace_file(file_path: str):
-    """提供 ws: 命名空间下文件的 HTTP 下载（强制 Content-Disposition: attachment）。"""
-    if not _agentspace_path:
-        return HTMLResponse("Download service not available", status_code=503)
-    # 防止路径遍历
-    resolved = (_agentspace_path / file_path).resolve()
-    if not str(resolved).startswith(str(_agentspace_path.resolve())):
-        return HTMLResponse("Forbidden", status_code=403)
-    if not resolved.exists() or not resolved.is_file():
+@app.get(DOWNLOADS_HTTP_PREFIX + "/{namespace}/{file_path:path}")
+async def download_workspace_file(namespace: str, file_path: str):
+    """提供沙盒命名空间下文件的 HTTP 下载（强制 Content-Disposition: attachment）。"""
+    from system.sandbox import Sandbox, SandboxError
+
+    logical = f"{namespace}:{file_path}"
+    try:
+        sandbox = Sandbox(get_runtime_context())
+        resolved = sandbox.resolve_read(logical)
+    except SandboxError as exc:
+        return HTMLResponse(str(exc), status_code=403)
+    if not resolved.real.exists() or not resolved.real.is_file():
         return HTMLResponse("File not found", status_code=404)
-    filename = resolved.name
+    filename = resolved.real.name
     # RFC 5987: non-ASCII filename needs filename* with UTF-8 encoding
     safe_ascii = re.sub(r'[^\x20-\x7e]', '_', filename)
     return FileResponse(
-        str(resolved),
+        str(resolved.real),
         media_type="application/octet-stream",
         headers={
             "Content-Disposition": (

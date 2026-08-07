@@ -143,12 +143,35 @@ WRITE_FILE_TRUNCATION_TAIL: int = 25
 # 文件类型嗅探采样字节数 — 通过检查前 N 字节中是否含空字节判断是否为文本文件
 FILE_SNIFF_BYTES: int = 4096
 
-# 支持的命名空间前缀元组 — 用于命令参数中的逻辑路径解析
-# 只读命名空间（third:/custom_*:）映射项目根目录，仅允许 Read 访问。
-NAMESPACE_PREFIXES: tuple[str, ...] = (
-    "ws:", "fork:", "fix:", "skills:",
-    "third:", "custom_hooks:", "custom_llm_client:", "custom_models:", "custom_tools:",
-)
+# ============================================================================
+# 沙盒命名空间
+# ============================================================================
+
+from enum import Enum
+
+
+class Namespace(str, Enum):
+    """沙盒命名空间枚举。值不带冒号，冒号在路径解析/生成时拼接。"""
+
+    WS = "ws"
+    FORK = "fork"
+    FIX = "fix"
+    SKILLS = "skills"
+    THIRD = "third"
+    CUSTOM_HOOKS = "custom_hooks"
+    CUSTOM_LLM_CLIENT = "custom_llm_client"
+    CUSTOM_MODELS = "custom_models"
+    CUSTOM_TOOLS = "custom_tools"
+
+
+def is_namespaced_path(path: str) -> bool:
+    """检查字符串是否以已知命名空间前缀开头（如 ws:xxx, fork:xxx）。"""
+    return any(path.startswith(ns.value + ":") for ns in Namespace)
+
+
+# 支持的命名空间前缀元组 — 从 Namespace 枚举派生
+# 只读命名空间（third/custom_*）映射项目根目录，仅允许 Read 访问。
+NAMESPACE_PREFIXES: tuple[str, ...] = tuple(ns.value for ns in Namespace)
 
 
 # ============================================================================
@@ -159,7 +182,7 @@ NAMESPACE_PREFIXES: tuple[str, ...] = (
 UPLOADS_DIR_NAME: str = "uploads"
 
 # 上传文件在沙箱中的逻辑路径前缀 — 如 ws:uploads/screenshot.png
-UPLOADS_WS_PREFIX: str = f"ws:{UPLOADS_DIR_NAME}/"
+UPLOADS_WS_PREFIX: str = f"{Namespace.WS.value}:{UPLOADS_DIR_NAME}/"
 
 # 静态文件 HTTP 路由前缀 — 前端通过此 URL 访问 ws: 命名空间下的文件
 # 路由映射 ws: 根目录，故 ws:uploads/x.png → /files/uploads/x.png

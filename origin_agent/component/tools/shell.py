@@ -12,7 +12,7 @@ from typing import Any, Dict, List
 
 from abstract.tools.registry import registry, tool_error, tool_result
 from entity.puretype import ToolDangerLevel
-from entity.constant import NAMESPACE_PREFIXES
+from entity.constant import is_namespaced_path
 from system.context import get_runtime_context
 from system.sandbox import SandboxError
 
@@ -60,7 +60,7 @@ def _execute(cmd_parts: list[str], cwd: str, session_id: str = "") -> dict:
     # sandbox.run() 要求 tool handler 预先展开，不接收未解析的逻辑路径。
     resolved_parts: list[str] = []
     for part in cmd_parts:
-        if any(part.startswith(p) for p in NAMESPACE_PREFIXES):
+        if is_namespaced_path(part):
             try:
                 r = _s().resolve_read(part)
                 resolved_parts.append(str(r.real))

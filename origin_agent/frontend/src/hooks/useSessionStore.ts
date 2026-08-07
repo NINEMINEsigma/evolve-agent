@@ -689,6 +689,7 @@ export function useSessionStore(callbacks: SessionStoreCallbacks = {}): SessionS
         content: parsed.content ?? raw,
         id: generateUUID(),
         characterName: msg.character_name,
+        toolName: msg.tool,
         imageMarkdown: parsed.imageMarkdown,
         downloadInfo: parsed.downloadInfo,
         audioUrl: parsed.audioUrl,
