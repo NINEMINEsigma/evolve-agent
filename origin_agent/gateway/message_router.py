@@ -33,7 +33,7 @@ from fastapi import WebSocket
 
 from .chat import Message, MessageType
 from entity.constant import UPLOAD_FILENAME_TIME_FORMAT, UPLOADS_DIR_NAME, UPLOADS_WS_PREFIX
-from entity.puretype import SessionInfo, SessionStatus
+from entity.puretype import SessionInfo, SessionStatus, ClientInfo
 
 if TYPE_CHECKING:
     from entry.parent_agent_loop import ParentAgentLoop
@@ -170,6 +170,20 @@ class MessageRouter:
         try:
             self._auto_generate_title(msg.content)
             _get_sm().update_last_activity(self.sid)
+
+            # 提取前端携带的客户端信息并合并 IP
+            if msg.client_info:
+                sm = _get_sm()
+                if sm is not None:
+                    existing = sm.get_client_info(self.sid)
+                    current_ip = existing.client_ip if existing else ""
+                    sm.set_client_info(self.sid, ClientInfo(
+                        device_type=str(msg.client_info.get("device_type", "")),
+                        browser=str(msg.client_info.get("browser", "")),
+                        client_ip=current_ip,
+                        frontend_version=str(msg.client_info.get("frontend_version", "")),
+                        screen_orientation=str(msg.client_info.get("screen_orientation", "")),
+                    ))
 
             # 拦截 archived 会话的新消息
             session_info = _get_sm().get(self.sid)

@@ -30,7 +30,7 @@ from .message_router import MessageRouter
 from abstract.tools.registry import registry
 from datetime import datetime, timezone
 from entity.constant import CRON_STDOUT_PREVIEW_MAX_LENGTH, SUBPROCESS_TIMEOUT_DEFAULT, UPLOAD_FILENAME_TIME_FORMAT, USER_CHARACTER_NAME, UPLOADS_DIR_NAME, UPLOADS_WS_PREFIX, STATIC_FILE_HTTP_PREFIX, DOWNLOADS_HTTP_PREFIX, SYSTEM_CHARACTER_NAME
-from entity.puretype import SessionStatus
+from entity.puretype import SessionStatus, ClientInfo
 from system.context import get_runtime_context
 from entry.parent_agent_loop import IncompatibleHistoryError
 from entry.base_agent_loop import IMainSessionLoop
@@ -1499,6 +1499,20 @@ async def ws_chat(ws: WebSocket) -> None:
     from system.application import Application as _AppInnerNew
     _AppInnerNew.current().frontend_sink.register_ws(sid, ws)  # 注册用于工具事件流推送
     logger.info("WebSocket connected | session=%s", sid)
+
+    # 提取客户端 IP 并存入 SessionManager
+    try:
+        client_ip: str = ws.client.host if ws.client else ""
+    except Exception:
+        client_ip = ""
+    if client_ip:
+        sm = _get_sm()
+        if sm is not None:
+            existing = sm.get_client_info(sid)
+            if existing:
+                sm.set_client_info(sid, existing.model_copy(update={"client_ip": client_ip}))
+            else:
+                sm.set_client_info(sid, ClientInfo(client_ip=client_ip))
 
     # 为当前 session 创建专属 ParentAgentLoop，使 proxy 能正确路由调用
     try:

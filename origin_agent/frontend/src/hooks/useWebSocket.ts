@@ -4,6 +4,7 @@ import { generateUUID } from "../utils";
 import { WS_OUT } from "../constants/ws";
 import { COLLOQUY_SID } from "../constants/session";
 import { TIMING } from "../constants/timing";
+import { collectClientInfo } from "../constants/clientInfo";
 import { useWebSocketConnection } from "./useWebSocketConnection";
 import { useSessionStore } from "./useSessionStore";
 import { useUploadManager } from "./useUploadManager";
@@ -193,6 +194,7 @@ export function useWebSocket() {
       content,
       target_sessions: targetSessions,
       client_message_id: clientMessageId,
+      client_info: collectClientInfo(),
       ...(visible_characters ? { visible_characters } : {}),
       ...(response_characters ? { response_characters } : {}),
     });

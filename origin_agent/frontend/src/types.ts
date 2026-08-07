@@ -71,6 +71,7 @@ export interface WSMessage {
   tool_call_meta?: ToolCallMeta;   // TOOL_RESULT：工具调用时间元信息
   emoji?: string;                  // 工具调用/审批请求的图标
   danger_level?: string;           // CONFIRM_REQUEST：工具危险等级
+  client_info?: Record<string, string>;   // USER_MESSAGE：前端客户端信息
 }
 
 export interface ToolCallMeta {

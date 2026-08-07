@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any, TYPE_CHECKING
 
 from gateway.chat import SessionManager as ChatSessionManager
-from entity.puretype import Loop, LoopMeta, Role, SessionInfo
+from entity.puretype import Loop, LoopMeta, Role, SessionInfo, ClientInfo
 from system.session_store import SessionStore
 
 if TYPE_CHECKING:
@@ -43,6 +43,7 @@ class SessionManager:
         self._chat_sm = ChatSessionManager(store_path)
         self._loops: dict[str, IMainSessionLoop] = {}
         self._store_path: str | None = store_path
+        self._client_infos: dict[str, ClientInfo] = {}
 
     # -- 委托给底层 ChatSessionManager 的方法 --
 
@@ -78,6 +79,16 @@ class SessionManager:
 
     def set_store_dir(self, path: str) -> None:
         self._chat_sm.set_store_dir(path)
+
+    def get_client_info(self, session_id: str) -> ClientInfo | None:
+        """返回指定 session 的客户端信息，不存在时返回 None。"""
+        return self._client_infos.get(session_id)
+
+    def set_client_info(self, session_id: str, info: ClientInfo) -> None:
+        """更新指定 session 的客户端信息。"""
+        self._client_infos[session_id] = info
+        logger.info("Client info updated | session=%s ip=%s device=%s",
+                     session_id, info.client_ip, info.device_type)
 
     def get_all_tags(self) -> list[str]:
         return self._chat_sm.get_all_tags()
@@ -267,6 +278,7 @@ class SessionManager:
     def terminate_session(self, session_id: str) -> None:
         """终止 session：中断 loop 并清理。"""
         loop = self._loops.pop(session_id, None)
+        self._client_infos.pop(session_id, None)
         if loop is not None:
             loop.loop.interrupt()
             if self._app.cron_router is not None:
@@ -358,6 +370,9 @@ class SessionManager:
             self._loops[new_sid] = loop
             if self._app.cron_router is not None:
                 self._app.cron_router.register(new_sid, loop.loop)
+            ci = self._client_infos.pop(old_sid, None)
+            if ci is not None:
+                self._client_infos[new_sid] = ci
             logger.info("Session rotated: %s → %s", old_sid, new_sid)
 
     def ensure_colloquy_session(self) -> None:
