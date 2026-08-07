@@ -146,25 +146,17 @@ def content_to_text(content: str | list[Any] | None) -> str:
         return ""
     if isinstance(content, str):
         return _strip_internal_fields(content)
-    if isinstance(content, list):
+    else:
         parts: list[str] = []
         for block in content:
+            # 跳过多模态块，避免输出非JSON的占位符
             if isinstance(block, TextBlock):
                 parts.append(_strip_internal_fields(block.text))
-            elif isinstance(block, ImageBlock):
-                parts.append("[image_url]")
             elif isinstance(block, dict):
                 btype = block.get("type")
                 if btype == "text":
                     parts.append(_strip_internal_fields(str(block.get("text", ""))))
-                elif btype == "image_url":
-                    parts.append("[image_url]")
-                else:
-                    parts.append(f"[{btype}]")
-            else:
-                parts.append(str(block))
         return "\n".join(parts)
-    return str(content)
 
 
 def sanitize_image_payload(result: dict, keep_metadata: bool = True) -> dict:

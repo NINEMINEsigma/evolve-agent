@@ -145,6 +145,7 @@ def _character_display(msg: BaseMessage) -> str | None:
         return "?"
 
 
+# TODO: 多模块块并不应该直接转换为base64文本然后以文本传回
 def _content_to_text(content: str | list | None) -> str:
     """把 content（str / list[MessageBlock] / None）转为纯文本。
 
