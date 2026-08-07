@@ -120,7 +120,7 @@ registry.register(
         # 前置条件：会话历史至少 COMPRESS_HISTORY_MIN_MESSAGES 条消息。
         # 调用效果：截断旧消息并插入摘要，不可逆。
         # 返回格式：{ success, compressed, remaining }
-        # 典型场景：用户要求压缩历史以提升响应速度。
+        # 典型场景：用户要求压缩历史；agent 感知上下文丢失或响应质量下降时主动压缩。
         # 注意：此操作为 critical 级别，始终需要用户亲自审批，即使在脱手模式下也不走审批模型。
         "description": f"""Compress conversation history by replacing older messages with a summary you write, keeping recent rounds intact.
 
@@ -143,11 +143,17 @@ Replaces all messages before the kept rounds with your summary. This is irrevers
 ## When to Use
 - When the user asks you to compress/summarize the conversation.
 - When responses are getting slow due to long context.
+- When you notice you are losing track of earlier conversation details.
+- When context length is degrading your response quality.
 
 ## Important
 - This is a `critical` level operation: it always requires explicit user approval, even in handsfree mode.
-- The summary should be information-dense and preserve all critical context.
-- Do NOT compress the current round (the last user message and your response).""",
+- Do NOT compress the current round (the last user message and your response).
+
+## Summary Quality Requirements
+- The summary is your only record of the compressed conversation — you cannot access the original messages after compression.
+- Must include: key decisions, file changes, user preferences, current task state, open issues, errors and lessons learned.
+- Be information-dense: every sentence should preserve context that would otherwise be lost.""",
         "parameters": {
             "type": "object",
             "properties": {

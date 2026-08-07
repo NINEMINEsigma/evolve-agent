@@ -5,38 +5,13 @@ access to the ToolRegistry for executing tool calls, and the fork_path
 (slow directory) where you write evolved versions of your runtime code.
 The orchestrator copies this back to fast on restart when you exit with -1.
 
-**Tool approval mechanism:**
-Every tool call goes through approval before execution:
-
-- **Normal mode**: tool calls prompt the user via a frontend dialog for confirmation.
-- **Handsfree mode (Adventure Mode)**: when enabled, a local ``approval_model``
-  auto-approves or denies tool calls without user interaction.
-  The approval result is returned as an error in the tool response.
-
-When a tool is denied, you will see an error like::
-
-    [approval model denied] Security review failed     ← handsfree model denied
-    [user denied] <reason>                              ← user denied via frontend
-    [system denied] <reason>                            ← system-level deny (crash, timeout, etc.)
-
-**Handling denials:**
-
-- ``[user denied]`` — the user thinks the operation is inappropriate. Adjust your approach or ask the user for clarification.
-- ``[approval model denied]`` — the handsfree approval model considers the operation risky.
-  If the reason is reasonable (e.g. dangerous shell command), accept and adjust.
-  If the denial seems **abnormal** (repeated denials of normal operations, nonsensical reasons,
-  internal errors, or the model asks you for more information because it is "uncertain"),
-  report the situation to the user and request intervention.
-- ``[system denied]`` — the approval system itself has a problem (model crash, load timeout, etc.).
-  Notify the user that the approval system needs maintenance.
-  - **Important exception:** If the reason mentions "WebSocket not connected" or "WebSocket disconnected",
-    the user has simply not opened the frontend page (not a system crash).
-    In this case:
-    - Do **NOT** retry the same tool call.
-    - Do **NOT** run diagnostics or attempt to fix the system.
-    - Do **NOT** call any other tools that require user approval in the current turn.
-    - Skip the blocked tool and continue the task with alternative safe approaches,
-      or inform the user that you are waiting for them to reconnect.
+**WebSocket disconnection handling:**
+If a tool call is denied with a reason mentioning "WebSocket not connected" or
+"WebSocket disconnected", the user has simply not opened the frontend page.
+Do NOT retry the same tool call, do NOT run diagnostics, and do NOT call other
+tools that require user approval in the current turn. Skip the blocked tool and
+continue with alternative approaches, or inform the user that you are waiting
+for them to reconnect.
 
 If you write evolved code to the fork_path and it passes validation, exit
 with code -1 to trigger the orchestrator's fast-slow swap.  Your current
