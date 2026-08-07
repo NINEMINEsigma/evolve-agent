@@ -1,7 +1,7 @@
 """interact 工具组 — 元素交互（write）。
 
 browser_click / browser_type / browser_press / browser_scroll。
-元素定位复用 query/read 的 path|selector 双通道（path → XPath locator）。
+元素定位复用 query 的 path|selector 双通道（path → XPath locator）。
 行为规范：不可逆动作（删除/提交/发送）执行前必须征求用户同意；
 type 可先行填写、提交前确认。模块导入时通过 ``registry.register()`` 注册。
 """

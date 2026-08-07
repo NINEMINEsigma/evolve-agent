@@ -75,7 +75,7 @@ registry.register(
         # - 目标标签页已存在（可用 browser_list_tabs 确认）。
         #
         # ## 调用效果
-        # tab 定位规则与 browser_read_page 相同（index 或 url/title 子串）；
+        # tab 定位规则与 browser_screenshot 相同（index 或 url/title 子串）；
         # 未命中返回错误并请求用户手动操作——本工具不会自动打开任何页面。
         # 截图写入 ws:logs/browser_screenshots/{{uuid}}.png，full_page=true 时截取整页。
         #
@@ -85,7 +85,7 @@ registry.register(
         # ```
         #
         # ## 何时使用
-        # - browser_read_page 的文本不足以判断页面状态（布局、图片、验证码、弹窗等）。
+        # - browser_screenshot 是了解页面视觉状态的主要手段（布局、图片、验证码、弹窗等）。
         # - 用 Read 读取 saved_to 路径即可看到与用户视野一致的画面。
         #
         # ## 副作用/注意
@@ -97,7 +97,7 @@ registry.register(
 - The target tab must already exist (confirm with browser_list_tabs).
 
 ## Effect
-Tab location follows the same rules as browser_read_page (0-based index, or URL/title substring). If no tab matches, an error is returned asking the user to act manually — this tool never opens pages on its own. The screenshot is written to ws:logs/browser_screenshots/{uuid}.png; pass full_page=true to capture the entire scrollable page.
+Tab location follows the same rules as browser_screenshot (0-based index, or URL/title substring). If no tab matches, an error is returned asking the user to act manually — this tool never opens pages on its own. The screenshot is written to ws:logs/browser_screenshots/{uuid}.png; pass full_page=true to capture the entire scrollable page.
 
 ## Returns
 ```json
@@ -105,7 +105,7 @@ Tab location follows the same rules as browser_read_page (0-based index, or URL/
 ```
 
 ## When to Use
-- When text from browser_read_page is insufficient to judge page state (layout, images, captchas, modals).
+- When you need to judge page state visually (layout, images, captchas, modals).
 - Use Read on the saved_to path to see the same view as the user.
 
 ## Side Effects / Notes

@@ -127,10 +127,10 @@ for src, cnt in sorted(d['by_source'].items(), key=lambda x: -x[1]):
 
 ```bash
 # stderr 进度不会干扰管道
-python crawl_people.py --quiet 2>/dev/null | python process.py   ← 干净的 JSON
+python crawl_people.py --quiet 2>/dev/null | python process.py   ← 干净的 JSON（Linux/macOS；Windows 用 `2>NUL`）
 
 # 想同时看进度和结果
-python crawl_people.py 2>&1 | tee output.log
+python crawl_people.py 2>&1 | tee output.log   ← Linux/macOS；Windows PowerShell 用 `Tee-Object output.log`
 ```
 
 `--quiet` 参数可减少 stderr 的输出量。

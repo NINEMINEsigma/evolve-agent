@@ -1,7 +1,6 @@
 ---
 name: xlsx
 description: "Use this skill any time a spreadsheet file is the primary input or output. This means any task where the user wants to: open, read, edit, or fix an existing .xlsx, .xlsm, .csv, or .tsv file (e.g., adding columns, computing formulas, formatting, charting, cleaning messy data); create a new spreadsheet from scratch or from other data sources; or convert between tabular file formats. Trigger especially when the user references a spreadsheet file by name or path — even casually (like \"the xlsx in my downloads\") — and wants something done to it or produced from it. Also trigger for cleaning or restructuring messy tabular data files (malformed rows, misplaced headers, junk data) into proper spreadsheets. The deliverable must be a spreadsheet file. Do NOT trigger when the primary deliverable is a Word document, HTML report, standalone Python script, database pipeline, or Google Sheets API integration, even if tabular data is involved."
-license: Proprietary. LICENSE.txt has complete terms
 category: office
 tags:
   - xlsx
@@ -12,12 +11,11 @@ tags:
 
 > **Evolve Agent 本地化注记**
 >
-> 本技能源自 Anthropic 官方 skills 仓库，由 Eve（Evolve Agent）本地化接入。
+> 本技能由 Eve（Evolve Agent）本地化接入。
 >
 > - **平台**：Windows。文中 `python3` 一律用 `python`；Shell 命令通过 `run_command` 执行
 > - **依赖**：`openpyxl`、`pandas` 等若缺失，用 `install_package` 安装
 > - **展示**：产出的 .xlsx 通过 `/downloads/` 路由提供下载
-> - **许可证**：本技能为**专有（Proprietary）**授权，仅限本地使用，勿再分发
 > - **方法论补充**：通用智能体工具包的金融建模子工作流（三表模型/DCF/可比公司）与公式验证硬规则已并入 `references/toolkit-methodology.md`——金融建模任务必读
 
 # Requirements for Outputs
@@ -87,7 +85,7 @@ A user may ask you to create, edit, or analyze the contents of an .xlsx file. Yo
 
 ## Important Requirements
 
-**LibreOffice Required for Formula Recalculation**: You can assume LibreOffice is installed for recalculating formula values using the `scripts/recalc.py` script. The script automatically configures LibreOffice on first run, including in sandboxed environments where Unix sockets are restricted (handled by `scripts/office/soffice.py`)
+**LibreOffice Required for Formula Recalculation**: You can assume LibreOffice is installed for recalculating formula values using the `scripts/recalc.py` script. The script automatically configures LibreOffice on first run; `scripts/office/soffice.py` 已跨平台化（Windows 下自动定位 `soffice.exe`，宏目录用 `%APPDATA%/LibreOffice`）
 
 ## Reading and analyzing data
 

@@ -1,6 +1,6 @@
 ---
 name: skill-creator
-description: 创建新技能、修改和改进已有技能、测量技能表现的完整工作流。当用户想从零创建技能、编辑或优化已有技能、运行技能测试评估、用方差分析对比基准性能、或优化技能描述以提升触发准确率时使用。Evolve Agent 系统专用版本（源自 Anthropic skills 仓库，已完成 Windows 平台与工具链本地化）。
+description: 创建新技能、修改和改进已有技能、测量技能表现的完整工作流。当用户想从零创建技能、编辑或优化已有技能、运行技能测试评估、用方差分析对比基准性能、或优化技能描述以提升触发准确率时使用。Evolve Agent 系统专用版本（已完成 Windows 平台与工具链本地化）。
 version: 2.0.0
 author: Eve (Evolve Agent)
 category: workflow
@@ -33,7 +33,7 @@ tags: [skill, creator, eval, benchmark, workflow]
 
 ## 本系统适配说明（重要，先读）
 
-本技能源自 Anthropic 官方 `skills` 仓库（Apache 2.0），已针对 **Evolve Agent** 系统本地化。与原版的差异：
+本技能已针对 **Evolve Agent** 系统本地化。与原版的差异：
 
 | 维度 | 原版（Claude Code） | 本系统（Evolve Agent） |
 |:-----|:-----|:-----|
@@ -90,7 +90,7 @@ tags: [skill, creator, eval, benchmark, workflow]
 基于用户访谈，填写以下组成部分：
 
 - **name**：技能标识符（kebab-case）
-- **description**：何时触发、做什么。这是主要的触发机制——既要写它做什么，也要写具体的使用场景。所有「何时使用」的信息放这里，不要放正文。注意：当前模型有「欠触发」倾向——不在该用技能时使用。为对抗这一点，把描述写得「pushy」一点。例如不要写「How to build a simple fast dashboard to display internal Anthropic data.」，而要写「How to build a simple fast dashboard to display internal Anthropic data. Make sure to use this skill whenever the user mentions dashboards, data visualization, internal metrics, or wants to display any kind of company data, even if they don't explicitly ask for a 'dashboard.'」
+- **description**：何时触发、做什么。这是主要的触发机制——既要写它做什么，也要写具体的使用场景。所有「何时使用」的信息放这里，不要放正文。注意：当前模型有「欠触发」倾向——不在该用技能时使用。为对抗这一点，把描述写得「pushy」一点。例如不要写「How to build a simple fast dashboard to display internal metrics.」，而要写「How to build a simple fast dashboard to display internal metrics. Make sure to use this skill whenever the user mentions dashboards, data visualization, internal metrics, or wants to display any kind of company data, even if they don't explicitly ask for a 'dashboard.'」
 - **compatibility**：所需工具、依赖（可选，很少需要）
 - **version / author / category / tags**：本系统支持的扩展字段（可选，推荐填写——`category` 用于分类，`tags` 用于过滤）
 - **技能正文** :)

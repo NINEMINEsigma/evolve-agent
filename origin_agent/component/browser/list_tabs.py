@@ -47,7 +47,7 @@ registry.register(
     toolset="browser",
     schema={
         # 枚举已接管浏览器中的全部标签页，返回 index/title/url 列表。
-        # index 可直接作为 browser_read_page / browser_screenshot 的 tab 参数。
+        # index 可直接作为 browser_screenshot / browser_query / browser_click 等工具的 tab 参数。
         #
         # ## 前置条件
         # - 已成功调用 browser_connect（或连接仍可自动重建）。
@@ -66,7 +66,7 @@ registry.register(
         #
         # ## 副作用/注意
         # - 只读操作，不修改浏览器状态。
-        "description": """Lists all tabs in the connected browser with index, title, and URL. The index can be passed directly as the `tab` argument of browser_read_page / browser_screenshot.
+        "description": """Lists all tabs in the connected browser with index, title, and URL. The index can be passed directly as the `tab` argument of browser_screenshot / browser_query / browser_click / browser_type.
 
 ## Prerequisites
 - browser_connect must have succeeded (or the connection can still be re-established automatically).

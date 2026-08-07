@@ -1,7 +1,6 @@
 ---
 name: pptx
 description: "Use this skill any time a .pptx file is involved in any way — as input, output, or both. This includes: creating slide decks, pitch decks, or presentations; reading, parsing, or extracting text from any .pptx file (even if the extracted content will be used elsewhere, like in an email or summary); editing, modifying, or updating existing presentations; combining or splitting slide files; working with templates, layouts, speaker notes, or comments. Trigger whenever the user mentions \"deck,\" \"slides,\" \"presentation,\" or references a .pptx filename, regardless of what they plan to do with the content afterward. If a .pptx file needs to be opened, created, or touched, use this skill."
-license: Proprietary. LICENSE.txt has complete terms
 category: office
 tags:
   - pptx
@@ -12,12 +11,11 @@ tags:
 
 > **Evolve Agent 本地化注记**
 >
-> 本技能源自 Anthropic 官方 skills 仓库，由 Eve（Evolve Agent）本地化接入。
+> 本技能由 Eve（Evolve Agent）本地化接入。
 >
 > - **平台**：Windows。文中 `python3` 一律用 `python`；Shell 命令通过 `run_command` 执行
 > - **依赖**：`markitdown`、`python-pptx`、`pptxgenjs` 等若缺失，用 `install_package` 安装
 > - **展示**：产出的 .pptx 通过 `/downloads/` 路由提供下载
-> - **许可证**：本技能为**专有（Proprietary）**授权，仅限本地使用，勿再分发
 > - **方法论补充**：通用智能体工具包的 PPT 设计方法论（中间格式 DSL、四步工作流、设计系统/模板/风格迁移、图像素材规范、反 AI 腔文案）已并入 `references/toolkit-methodology.md`——生成/编辑演示文稿时先读
 
 # PPTX Skill
@@ -244,5 +242,5 @@ pdftoppm -jpeg -r 150 -f N -l N output.pdf slide-fixed
 - `pip install "markitdown[pptx]"` - text extraction
 - `pip install Pillow` - thumbnail grids
 - `npm install -g pptxgenjs` - creating from scratch
-- LibreOffice (`soffice`) - PDF conversion (auto-configured for sandboxed environments via `scripts/office/soffice.py`)
-- Poppler (`pdftoppm`) - PDF to images
+- LibreOffice (`soffice`) - PDF conversion (handled by `scripts/office/soffice.py`, cross-platform; Windows 下需先安装 LibreOffice)
+- Poppler (`pdftoppm`) - PDF to images（Windows 下需安装 poppler 并加入 PATH）

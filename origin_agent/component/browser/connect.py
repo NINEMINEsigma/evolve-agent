@@ -52,7 +52,7 @@ registry.register(
         #
         # ## 调用效果
         # 经 CDP 附加到正在运行的浏览器。所有现有标签页随后可被
-        # browser_list_tabs / browser_read_page / browser_screenshot 访问。
+        # browser_list_tabs / browser_screenshot / browser_query / browser_click 访问。
         # 连接跨调用复用；浏览器以调试端口重启后自动重连。
         #
         # ## 返回
@@ -73,7 +73,7 @@ registry.register(
 - The playwright package must be installed (this tool is hidden otherwise).
 
 ## Effect
-Attaches to the running browser over CDP. All existing tabs become accessible to browser_list_tabs / browser_read_page / browser_screenshot. The connection is reused across calls and re-established automatically if lost.
+Attaches to the running browser over CDP. All existing tabs become accessible to browser_list_tabs / browser_screenshot / browser_query / browser_click. The connection is reused across calls and re-established automatically if lost.
 
 ## Returns
 ```json

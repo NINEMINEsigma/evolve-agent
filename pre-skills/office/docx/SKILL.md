@@ -1,7 +1,6 @@
 ---
 name: docx
 description: "Use this skill whenever the user wants to create, read, edit, or manipulate Word documents (.docx files). Triggers include: any mention of 'Word doc', 'word document', '.docx', or requests to produce professional documents with formatting like tables of contents, headings, page numbers, or letterheads. Also use when extracting or reorganizing content from .docx files, inserting or replacing images in documents, performing find-and-replace in Word files, working with tracked changes or comments, or converting content into a polished Word document. If the user asks for a 'report', 'memo', 'letter', 'template', or similar deliverable as a Word or .docx file, use this skill. Do NOT use for PDFs, spreadsheets, Google Docs, or general coding tasks unrelated to document generation."
-license: Proprietary. LICENSE.txt has complete terms
 category: office
 tags:
   - docx
@@ -12,12 +11,11 @@ tags:
 
 > **Evolve Agent 本地化注记**
 >
-> 本技能源自 Anthropic 官方 skills 仓库（[anthropics/skills](https://github.com/anthropics/skills)），由 Eve（Evolve Agent）本地化接入。原版面向 Claude Code，本系统适配如下：
+> 本技能由 Eve（Evolve Agent）本地化接入。原版面向 Claude Code，本系统适配如下：
 >
 > - **平台**：Windows。文中 `python3` 一律用 `python`；Shell 命令通过 `run_command` 执行
 > - **依赖**：所需工具（如 `pandoc`、`docx-js`、python-docx 等）若缺失，用 `install_package` 安装
 > - **展示**：产出的 .docx 通过 `/downloads/` 路由提供下载给主人
-> - **许可证**：本技能为**专有（Proprietary）**授权，仅限本地使用，勿再分发
 > - **方法论补充**：通用智能体工具包（Universal Agent Toolkit）的工作流/质量标准/交付检查清单已并入 `references/toolkit-methodology.md`——创建/编辑/交付时按需阅读
 
 # DOCX creation, editing, and analysis
@@ -602,5 +600,5 @@ After running `comment.py` (see Step 2), add markers to document.xml. For replie
 
 - **pandoc**: Text extraction
 - **docx**: `npm install -g docx` (new documents)
-- **LibreOffice**: PDF conversion (auto-configured for sandboxed environments via `scripts/office/soffice.py`)
-- **Poppler**: `pdftoppm` for images
+- **LibreOffice**: PDF conversion (handled by `scripts/office/soffice.py`, cross-platform; Windows 下需先安装 LibreOffice，`soffice.py` 会自动定位 `soffice.exe`)
+- **Poppler**: `pdftoppm` for images（Windows 下需安装 poppler 并加入 PATH）

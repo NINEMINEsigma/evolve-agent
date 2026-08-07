@@ -10,12 +10,13 @@ import subprocess
 import sys
 from pathlib import Path
 
-from office.soffice import get_soffice_env
+from office.soffice import get_soffice_env, get_soffice_bin
 
 from openpyxl import load_workbook
 
 MACRO_DIR_MACOS = "~/Library/Application Support/LibreOffice/4/user/basic/Standard"
 MACRO_DIR_LINUX = "~/.config/libreoffice/4/user/basic/Standard"
+MACRO_DIR_WINDOWS = "%APPDATA%/LibreOffice/4/user/basic/Standard"
 MACRO_FILENAME = "Module1.xba"
 
 RECALCULATE_MACRO = """<?xml version="1.0" encoding="UTF-8"?>
@@ -40,9 +41,12 @@ def has_gtimeout():
 
 
 def setup_libreoffice_macro():
-    macro_dir = os.path.expanduser(
-        MACRO_DIR_MACOS if platform.system() == "Darwin" else MACRO_DIR_LINUX
-    )
+    if platform.system() == "Windows":
+        macro_dir = os.path.expandvars(MACRO_DIR_WINDOWS)
+    else:
+        macro_dir = os.path.expanduser(
+            MACRO_DIR_MACOS if platform.system() == "Darwin" else MACRO_DIR_LINUX
+        )
     macro_file = os.path.join(macro_dir, MACRO_FILENAME)
 
     if (
@@ -53,7 +57,7 @@ def setup_libreoffice_macro():
 
     if not os.path.exists(macro_dir):
         subprocess.run(
-            ["soffice", "--headless", "--terminate_after_init"],
+            [get_soffice_bin(), "--headless", "--terminate_after_init"],
             capture_output=True,
             timeout=10,
             env=get_soffice_env(),
@@ -77,19 +81,26 @@ def recalc(filename, timeout=30):
         return {"error": "Failed to setup LibreOffice macro"}
 
     cmd = [
-        "soffice",
+        get_soffice_bin(),
         "--headless",
         "--norestore",
         "vnd.sun.star.script:Standard.Module1.RecalculateAndSave?language=Basic&location=application",
         abs_path,
     ]
 
-    if platform.system() == "Linux":
+    run_kwargs = dict(capture_output=True, text=True, env=get_soffice_env())
+    if platform.system() == "Windows":
+        # Windows has no `timeout` command; use subprocess timeout instead.
+        run_kwargs["timeout"] = timeout
+    elif platform.system() == "Linux":
         cmd = ["timeout", str(timeout)] + cmd
     elif platform.system() == "Darwin" and has_gtimeout():
         cmd = ["gtimeout", str(timeout)] + cmd
 
-    result = subprocess.run(cmd, capture_output=True, text=True, env=get_soffice_env())
+    try:
+        result = subprocess.run(cmd, **run_kwargs)
+    except subprocess.TimeoutExpired:
+        return {"error": f"LibreOffice recalculation timed out after {timeout}s"}
 
     if result.returncode != 0 and result.returncode != 124:  
         error_msg = result.stderr or "Unknown error during recalculation"

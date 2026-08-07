@@ -1,7 +1,8 @@
 """browser_query — 在页面中定位元素，产出可复用的元素引用（readonly）。
 
 按 CSS/XPath 选择器或子树文本定位，返回元素引用列表（含 path），
-供 browser_read 消费。模块导入时通过 ``registry.register()`` 注册。
+供 browser_click / browser_type / browser_press / browser_scroll 等交互工具使用。
+模块导入时通过 ``registry.register()`` 注册。
 """
 
 from __future__ import annotations
@@ -80,7 +81,7 @@ registry.register(
     name="browser_query",
     toolset="browser",
     schema={
-        # 在页面中定位元素，返回元素引用列表（含 path），供 browser_read 使用。
+        # 在页面中定位元素，返回元素引用列表（含 path），供 browser_click / browser_type 等交互工具使用。
         #
         # ## 前置条件
         # - 已成功调用 browser_connect；目标标签页存在。
@@ -96,17 +97,17 @@ registry.register(
         # ```json
         # {"matches": [{"path": "0.2.1", "tag": "a", "id": "", "class": "", "text": "...", "child_count": 0, "leaf": true}], "total": 1, "truncated": false}
         # ```
-        # path 可直接作为 browser_read 的 path 参数。
+        # path 可直接作为 browser_click / browser_type 等交互工具的 path 参数。
         #
         # ## 何时使用
         # - 需要精确定位页面元素（按钮、链接、输入框、内容区块）时。
-        # - browser_read 之前先确认目标元素存在及其 path。
+        # - browser_click / browser_type 等交互操作之前先确认目标元素存在及其 path。
         # - 深嵌套页面优先用语义 selector（main/article/section）直达正文容器，
-        #   再配合 browser_read(mode="text") 通读，避免从 body 逐层下钻。
+        #   避免从 body 逐层下钻。
         #
         # ## 副作用/注意
         # - 只读查询，不修改浏览器状态；正常模式下无需审批。
-        "description": """Locates elements in the page and returns reusable element references (including path) for browser_read.
+        "description": """Locates elements in the page and returns reusable element references (including path) for browser_click / browser_type / browser_press / browser_scroll.
 
 ## Prerequisites
 - browser_connect must have succeeded; the target tab must exist.
@@ -121,12 +122,12 @@ registry.register(
 ```json
 {"matches": [{"path": "0.2.1", "tag": "a", "id": "", "class": "", "text": "...", "child_count": 0, "leaf": true}], "total": 1, "truncated": false}
 ```
-The path can be passed directly as the path argument of browser_read.
+The path can be passed directly as the path argument of browser_click / browser_type / browser_press / browser_scroll.
 
 ## When to Use
 - Pinpoint page elements (buttons, links, inputs, content blocks).
-- Confirm a target element exists and get its path before browser_read.
-- On deeply nested pages, prefer semantic selectors (main/article/section) to jump straight to the content container, then use browser_read(mode="text") for a fast full read instead of drilling from body.
+- Confirm a target element exists and get its path before browser_click / browser_type / browser_press / browser_scroll.
+- On deeply nested pages, prefer semantic selectors (main/article/section) to jump straight to the content container instead of drilling from body.
 
 ## Side Effects / Notes
 - Read-only; does not modify browser state; no approval needed in normal mode.""",

@@ -2,13 +2,10 @@
 
 > 创建新技能、改进已有技能、评估技能表现、优化触发描述的完整工作流。
 
-## 来源声明
-
-本技能源自 **Anthropic 官方 skills 仓库**（[anthropics/skills](https://github.com/anthropics/skills)）中的
-`skill-creator` 示例技能，遵循 **Apache License 2.0**。
+## 本地化说明
 
 由 **Eve（Evolve Agent）** 于 2026-08-02 完成 **Windows 平台 + Evolve Agent 工具链本地化改造**，
-作为 Evolve Agent 系统的内置技能使用。修改后的作品仍按 Apache License 2.0 分发。
+作为 Evolve Agent 系统的内置技能使用。
 
 ## 本地化改动摘要
 
@@ -25,7 +22,6 @@
 ```
 skill-creator/
 ├── SKILL.md                      ← 主文档（方法论 + 本地化操作指南）
-├── LICENSE.txt                   ← Apache 2.0（含来源与修改声明）
 ├── README.md                     ← 本文件
 ├── agents/
 │   ├── grader.md                 ← 评分子代理提示词
@@ -54,7 +50,3 @@ skill-creator/
 3. 按 SKILL.md 的「创建技能 → 测试 → 评估 → 迭代」流程操作
 4. 校验技能：`python scripts/quick_validate.py <skill-dir>`
 5. 打包分发：`python scripts/package_skill.py <skill-dir> [output-dir]`
-
-## License
-
-Apache License 2.0 — 详见 `LICENSE.txt`。

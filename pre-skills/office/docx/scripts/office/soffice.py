@@ -1,28 +1,55 @@
 """
-Helper for running LibreOffice (soffice) in environments where AF_UNIX
-sockets may be blocked (e.g., sandboxed VMs).  Detects the restriction
-at runtime and applies an LD_PRELOAD shim if needed.
+Helper for running LibreOffice (soffice) across platforms.
+
+- Windows: calls soffice.exe directly (no shim needed).
+- Linux/macOS: detects AF_UNIX socket restrictions (e.g., sandboxed VMs)
+  and applies an LD_PRELOAD shim if needed.
 
 Usage:
-    from office.soffice import run_soffice, get_soffice_env
+    from office.soffice import run_soffice, get_soffice_env, get_soffice_bin
 
     # Option 1 – run soffice directly
     result = run_soffice(["--headless", "--convert-to", "pdf", "input.docx"])
 
     # Option 2 – get env dict for your own subprocess calls
     env = get_soffice_env()
-    subprocess.run(["soffice", ...], env=env)
+    subprocess.run([get_soffice_bin(), ...], env=env)
 """
 
 import os
+import platform
+import shutil
 import socket
 import subprocess
 import tempfile
 from pathlib import Path
 
 
+def get_soffice_bin() -> str:
+    """Return the soffice executable name/path for the current platform."""
+    if platform.system() == "Windows":
+        # LibreOffice on Windows ships soffice.exe (and soffice.com).
+        found = shutil.which("soffice.exe") or shutil.which("soffice.com")
+        if found:
+            return found
+        # Common install locations fallback
+        for candidate in (
+            r"C:\Program Files\LibreOffice\program\soffice.exe",
+            r"C:\Program Files (x86)\LibreOffice\program\soffice.exe",
+        ):
+            if os.path.exists(candidate):
+                return candidate
+        return "soffice.exe"
+    return "soffice"
+
+
 def get_soffice_env() -> dict:
     env = os.environ.copy()
+
+    if platform.system() == "Windows":
+        # Windows LibreOffice does not need SAL_USE_VCLPLUGIN nor the shim.
+        return env
+
     env["SAL_USE_VCLPLUGIN"] = "svp"
 
     if _needs_shim():
@@ -34,7 +61,7 @@ def get_soffice_env() -> dict:
 
 def run_soffice(args: list[str], **kwargs) -> subprocess.CompletedProcess:
     env = get_soffice_env()
-    return subprocess.run(["soffice"] + args, env=env, **kwargs)
+    return subprocess.run([get_soffice_bin()] + args, env=env, **kwargs)
 
 
 
@@ -98,6 +125,7 @@ static void init(void) {
     real_accept     = dlsym(RTLD_NEXT, "accept");
     real_close      = dlsym(RTLD_NEXT, "close");
     real_read       = dlsym(RTLD_NEXT, "read");
+
     for (int i = 0; i < 1024; i++) {
         peer_of[i] = -1;
         wake_r[i]  = -1;

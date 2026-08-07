@@ -10,11 +10,10 @@ tags:
 
 > **Evolve Agent 本地化注记**
 >
-> 本技能源自 Anthropic 官方 skills 仓库，由 Eve（Evolve Agent）本地化接入。
+> 本技能由 Eve（Evolve Agent）本地化接入。
 >
 > - **说明**：本技能是文档共创流程指导，平台中性。文中「a fresh Claude」指用新会话/子代理（`run_subagent`）做读者测试
 > - **产出**：文档内容直接输出到聊天或写入 `ws:` 文件，需交付 .docx/.pdf 时配合 `docx` / `pdf` 技能
-> - **许可证**：Apache 2.0
 
 # Doc Co-Authoring Workflow
 
