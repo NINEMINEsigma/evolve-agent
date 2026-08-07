@@ -17,8 +17,11 @@
 
 from __future__ import annotations
 
+import base64
+import io
 import json
 import logging
+import mimetypes
 import re
 from datetime import datetime, timezone
 from typing import Any, Dict
@@ -27,7 +30,17 @@ from abstract.tools.registry import registry, tool_error, tool_result
 from entity.puretype import ToolDangerLevel
 from entity.constant import EDIT_FILE_MAX_CHARS, FILE_SNIFF_BYTES, READ_FILE_DEFAULT_LIMIT, READ_FILE_MAX_LINES, WRITE_FILE_MAX_CHARS, WRITE_FILE_TRUNCATION_TAIL
 from system.sandbox import Access, Sandbox, SandboxError
+from system.context import get_runtime_context
 from pathlib import Path
+
+try:
+    from PIL import Image as PILImage
+except Exception:  # pragma: no cover — PIL is optional
+    logger = logging.getLogger(__name__)
+    logger.debug("PIL not available; image size parsing disabled", exc_info=True)
+    PILImage = None  # type: ignore
+
+from .probe_vision import get_cached_vision_support
 
 logger = logging.getLogger(__name__)
 
@@ -36,6 +49,40 @@ def _s() -> Sandbox:
     """委托到 Application.sandbox property。"""
     from system.application import Application
     return Application.current().sandbox
+
+
+# ---------------------------------------------------------------------------
+# 图片读取支持（从 read_image.py 合并）
+# ---------------------------------------------------------------------------
+
+_SUPPORTED_MIMES: set[str] = {
+    "image/png",
+    "image/jpeg",
+    "image/webp",
+    "image/gif",
+    "image/bmp",
+    "image/tiff",
+    "image/svg+xml",
+}
+
+_MAX_IMAGE_SIZE: int = 20 * 1024 * 1024
+
+
+def _guess_mime(path: str) -> str:
+    mime, _ = mimetypes.guess_type(path)
+    return mime or "application/octet-stream"
+
+
+def _parse_size(raw_bytes: bytes, mime_type: str) -> tuple[int | None, int | None]:
+    """用 Pillow 解析图片宽高；SVG 返回 (None, None)。"""
+    if mime_type == "image/svg+xml" or PILImage is None:
+        return None, None
+    try:
+        with PILImage.open(io.BytesIO(raw_bytes)) as im:
+            return im.width, im.height
+    except Exception:
+        logger.warning("Failed to parse image dimensions", exc_info=True)
+        return None, None
 
 
 # ---------------------------------------------------------------------------
@@ -141,6 +188,77 @@ def _handle_read(args: dict[str, Any]) -> dict:
 
     # 文件分支
     if resolved.real.is_file():
+        # --- 图片分支（MIME 自动检测，从 read_image.py 合并）---
+        mime_type = _guess_mime(str(resolved.real))
+        if mime_type in _SUPPORTED_MIMES:
+            # vision 预检
+            model_name: str = get_runtime_context().llm_model or ""
+            if not model_name:
+                return tool_error(
+                    "No LLM model configured; cannot determine vision capability.",
+                    path=path,
+                )
+            vision_capable = get_cached_vision_support(model_name)
+            if vision_capable is None:
+                return tool_error(
+                    f"Vision capability for model '{model_name}' has not been probed yet. "
+                    "Please call `probe_vision_capability` first.",
+                    path=path,
+                    model=model_name,
+                )
+            if vision_capable is False:
+                return tool_error(
+                    f"Current model '{model_name}' does not support vision. "
+                    "Switch to a vision-capable model to read images.",
+                    path=path,
+                    model=model_name,
+                )
+            # 大小检查
+            file_size: int = resolved.real.stat().st_size
+            if file_size > _MAX_IMAGE_SIZE:
+                return tool_error(
+                    f"Image too large: {file_size} bytes (max {_MAX_IMAGE_SIZE})",
+                    path=path,
+                    size=file_size,
+                )
+            # 读取 + base64
+            try:
+                raw_bytes: bytes = resolved.real.read_bytes()
+                b64: str = base64.b64encode(raw_bytes).decode("ascii")
+            except Exception as exc:
+                return tool_error(f"Failed to read image: {exc}", path=path)
+            width, height = _parse_size(raw_bytes, mime_type)
+            logger.info(
+                "read_image | path=%s mime=%s size=%d w=%s h=%s",
+                path, mime_type, file_size, width, height,
+            )
+            return {
+                "type": "image",
+                "path": path,
+                "absolute_path": str(resolved.real),
+                "mime_type": mime_type,
+                "size": file_size,
+                "width": width,
+                "height": height,
+                "_image": {
+                    "base64": b64,
+                    "mime_type": mime_type,
+                },
+                "_note": (
+                    "Image metadata returned. width/height are parsed via Pillow "
+                    "(None for SVG or on failure). If the model supports vision, "
+                    "the image content is attached as a multimodal block for direct analysis; "
+                    "otherwise you will receive only the text metadata without the image content."
+                ),
+                "total_lines": 0,
+                "content": "",
+                "remaining": 0,
+                "offset": 0,
+                "limit": 0,
+                "entries": [],
+                "count": None,
+            }
+        # --- 文本分支（原有逻辑，无修改）---
         try:
             content: str = _s().read(path, offset=offset, limit=limit)
         except SandboxError as exc:
@@ -303,24 +421,34 @@ def _param_paths(paths_desc: str) -> dict[str, Any]:
     }
 
 
-# -- Read 工具（统一文件/目录读取）
+# -- Read 工具（统一文件/目录/图片读取）
 registry.register(
     name="Read",
     toolset="filesystem",
     schema={
-        # 读取文件内容（带行号前缀、总行数、绝对路径）或列出目录条目。
+        # 读取文件内容（带行号前缀、总行数、绝对路径）、列出目录条目、或读取图片文件（按 MIME 自动检测）。
         # 支持命名空间前缀：ws:、fork:、fix:、skills: 及其他只读命名空间。
-        # 目录分支忽略 offset/limit，文件分支使用 offset/limit 分页。
+        # 目录分支忽略 offset/limit，文件分支使用 offset/limit 分页，图片分支忽略 offset/limit。
+        #
+        # ## 图片分支（MIME 自动检测）
+        # 当文件 MIME 类型命中图片白名单（PNG/JPEG/WebP/GIF/BMP/TIFF/SVG）时自动走图片分支。
+        # 前置条件：probe_vision_capability 必须已探测且 capable=true，否则返回错误不读文件。
+        # 支持最大 20MB。返回 type:"image"，含 path、mime_type、size、width、height、_image（base64+mime_type）、_note。
+        # _image 载荷由 AgentLoop 自动处理：vision 模型作为多模态 content block 送入 LLM，非 vision 模型剥离为文本元数据。
+        # offset/limit 在图片分支中被忽略（固定填充为 0）。
         #
         # ## 前置条件
         # - 路径必须存在（文件或目录均可）。
         # - 路径必须使用命名空间前缀。
+        # - 图片分支额外要求：probe_vision_capability 已探测且 capable=true。
         #
         # ## 调用效果
         # **文件分支**：返回文件内容，每行前缀为 1-indexed 行号。
         # 支持 offset（0-indexed 起始行）和 limit（最大行数）分页。
         # **目录分支**：返回条目名称列表，目录条目以 "/" 后缀标识。
         # offset/limit 在目录分支中被忽略（固定填充为 0）。
+        # **图片分支**：按 MIME 自动检测，返回图片元数据 + _image base64 载荷。
+        # offset/limit 在图片分支中被忽略（固定填充为 0）。
         #
         # ## 返回
         # ```json
@@ -333,21 +461,25 @@ registry.register(
         # - 分页浏览大文件。
         # - 通过行号引用具体位置。
         # - 利用 `remaining` 判断是否需要继续分页读取。
+        # - 读取图片文件（需 vision 模型，先调 probe_vision_capability）。
         #
         # ## 副作用/注意
         # - 无副作用，纯查询。
         # - offset < 0 或 limit < 1 返回错误。
         # - 文件不存在或沙箱拒绝访问返回描述性错误。
-        "description": """Read file content (with line numbers, total lines, absolute path) or list directory entries. Supports namespace prefixes: ws:, fork:, fix:, skills:, and read-only namespaces.
+        # - 图片分支：未探测 vision 或模型不支持 vision 时返回错误，不读取文件。
+        "description": """Read file content (with line numbers, total lines, absolute path), list directory entries, or read an image file (auto-detected by MIME type). Supports namespace prefixes: ws:, fork:, fix:, skills:, and read-only namespaces.
 
 ## Prerequisites
 - The path must exist (file or directory).
 - The path must use a namespace prefix.
+- Image branch additionally requires `probe_vision_capability` to have been called and returned `capable=true`.
 
 ## Effect
 **File branch**: Returns file content prefixed with 1-indexed line numbers. Supports pagination via offset (0-indexed start) and limit (max lines).
 **Directory branch**: Returns entry names; directory entries suffixed with '/'. offset and limit are ignored for directories (filled as 0).
-Both branches return absolute_path (resolved absolute path), total_lines (line count; 0 for directories), entries (directory entries; empty array for files), and a type discriminant ("file" or "directory").
+**Image branch**: Auto-detected by MIME type (PNG, JPEG, WebP, GIF, BMP, TIFF, SVG; max 20 MB). Returns metadata plus the `_image` payload (base64 + mime_type). offset and limit are ignored for images (filled as 0).
+All branches return absolute_path (resolved absolute path), total_lines (line count; 0 for directories/images), entries (directory entries; empty array for files/images), and a type discriminant ("file", "directory", or "image").
 
 ## Returns
 File branch:
@@ -358,17 +490,24 @@ Directory branch:
 ```json
 {"type": "directory", "path": "ws:src", "absolute_path": "...", "total_lines": 0, "content": "", "remaining": 0, "offset": 0, "limit": 0, "entries": ["a.py", "sub/"], "count": 2}
 ```
+Image branch:
+```json
+{"type": "image", "path": "ws:uploads/screenshot.png", "absolute_path": "...", "mime_type": "image/png", "size": 12345, "width": 800, "height": 600, "_image": {"base64": "...", "mime_type": "image/png"}, "_note": "Image metadata returned...", "total_lines": 0, "content": "", "remaining": 0, "offset": 0, "limit": 0, "entries": [], "count": null}
+```
+`width`/`height` are parsed via Pillow; `null` for SVG or on parse failure. The `_image` payload is auto-handled by AgentLoop: vision-capable models receive it as a multimodal content block; non-vision models get only text metadata.
 
 ## When to Use
-- Targets a file → file branch; targets a directory → directory branch.
+- Targets a file → file branch; targets a directory → directory branch; image files → image branch (auto-detected).
 - Use skills: prefix to replace the old read_skill_file tool (e.g. Read(path="skills:my-skill/scripts/hello.py")).
 - Use absolute_path to resolve paths when you have a readable target.
+- Read image files (requires vision-capable model; call `probe_vision_capability` first).
 
 ## Side Effects / Notes
 - No file system side effects, read-only query.
 - offset < 0 or limit out of range returns an error.
 - Non-existent or unsupported paths return a descriptive error.
-- For directories, offset/limit are ignored and filled as 0.""",
+- For directories and images, offset/limit are ignored and filled as 0.
+- Image branch: returns an error if vision capability has not been probed or the model does not support vision; the file is not read in this case.""",
         "parameters": {
             "type": "object",
             "properties": {
@@ -400,6 +539,7 @@ Directory branch:
     },
     handler=_handle_read,
     emoji="📖",
+    no_timeout=True,
 )
 
 

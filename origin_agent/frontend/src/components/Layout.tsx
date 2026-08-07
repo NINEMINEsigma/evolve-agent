@@ -230,6 +230,7 @@ export default function Layout({ ws, onContextMenu }: LayoutProps) {
         sidebarItems={ws.sidebarItems}
         expandedClusters={ws.expandedClusters}
         toggleCluster={ws.toggleCluster}
+        isReady={ws.isReady}
       />
 
       {isMobile && !sidebarCollapsed && (
@@ -286,6 +287,7 @@ export default function Layout({ ws, onContextMenu }: LayoutProps) {
           agents={ws.agents}
           onToggleMessageVisibility={onToggleMessageVisibility}
           onScrollToBottom={() => ws.scrollToBottomIfAtBottom(true)}
+          isReady={ws.isReady}
         >
           <CronCountdown cronTasks={ws.cronTasks} />
 

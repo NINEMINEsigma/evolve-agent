@@ -77,7 +77,7 @@ async def finalize_tool_result(
     # 转换为可保存到 History 的 content
     content = tool_result_to_content(result)
 
-    # 推送前端 tool_result 事件（使用文本摘要，避免 base64 撑爆前端事件）
+    # 推送前端 tool_result 事件（content_to_text 内部过滤 _ 前缀字段，避免 base64 撑爆前端）
     await sink.emit_tool_result(
         session_id, tool_name, tool_call_id, content_to_text(content),
         character_name=character_name,

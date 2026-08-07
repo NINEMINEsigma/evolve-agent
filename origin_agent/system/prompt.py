@@ -148,7 +148,7 @@ def build_system_prompt(
         base = base.replace(r"{{platform}}", _platform_info())
         base = base.replace(r"{{agentspace}}", agentspace)
         base = base.replace(r"{{fork_path}}", fork_path)
-        base = base.replace(r"{{uploads_prefix}}", STATIC_FILE_HTTP_PREFIX)
+        base = base.replace(r"{{files_prefix}}", STATIC_FILE_HTTP_PREFIX)
         base = base.replace(r"{{downloads_prefix}}", DOWNLOADS_HTTP_PREFIX)
         # 1b. 运行时配置占位符（缺省兜底 "未配置"）
         if runtime_ctx is not None:

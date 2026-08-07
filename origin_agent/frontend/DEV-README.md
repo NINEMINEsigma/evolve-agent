@@ -83,7 +83,6 @@ frontend/
 | `Drawer.tsx` | 侧边抽屉容器 |
 | `ErrorBoundary.tsx` | 错误边界，防止模态组件异常卸载整个 App |
 | `SplashScreen.tsx` | 开屏动画，最少停留 800ms、最多 3000ms，可点击跳过 |
-| `SkeletonScreen.tsx` | 首次 WebSocket 连接前的布局骨架占位 |
 | `ContourBackground.tsx` | 聊天区 canvas 等高线动态背景 |
 
 ### 聊天区域
@@ -188,7 +187,7 @@ frontend/
 | `modal.css` | 模态窗口 |
 | `popup.css` | 弹出层 |
 | `splash.css` | 启动屏 |
-| `skeleton.css` | 骨架屏 |
+| `skeleton.css` | 组件级骨架占位样式（shimmer 动画） |
 
 ---
 

@@ -244,7 +244,7 @@ Uses `PrintWindow` with `PW_RENDERFULLCONTENT` to capture the window content —
 ```json
 {"success": true, "hwnd": 12345, "path": "ws:uploads/screenshot_20260101_120000.png", "width": 1920, "height": 1080}
 ```
-The `path` is a sandbox logical path (ws: namespace). Use it with `template_match` or `read_image` to process the screenshot.
+The `path` is a sandbox logical path (ws: namespace). Use it with `template_match` or `Read` to process the screenshot.
 
 ## When to Use
 - After `window_find` to capture the current state of a window.

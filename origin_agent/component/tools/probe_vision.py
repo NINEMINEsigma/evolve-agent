@@ -201,7 +201,7 @@ registry.register(
             #
             # ## 何时使用
             # - 模型变更后确认 vision 能力。
-            # - 调用图片相关工具（read_image 等）前验证模型不会拒绝图片内容。
+            # - 调用 Read 读取图片前验证模型不会拒绝图片内容。
             #
             # ## 副作用/注意
             # - 每次未缓存的探测消耗恰好一次 API 请求。
@@ -236,7 +236,7 @@ On non-vision error:
 
 ## When to Use
 - After the model changes, confirm vision capability.
-- Before calling image-based tools (read_image, etc.), verify the model won't reject image content.
+- Before using Read on image files, verify the model won't reject image content.
 
 ## Side Effects / Notes
 - Each uncached probe consumes exactly one API request.

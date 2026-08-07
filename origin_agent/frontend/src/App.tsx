@@ -7,7 +7,6 @@ import Layout from "./components/Layout";
 import ChatContextMenu from "./components/ChatContextMenu";
 import TagEditor from "./components/TagEditor";
 import SplashScreen from "./components/SplashScreen";
-import SkeletonScreen from "./components/SkeletonScreen";
 import { ConnectionDiagnosticsProvider } from "./context/ConnectionDiagnosticsContext";
 import ErrorBoundary from "./components/ErrorBoundary";
 import Agentspace from "./pages/Agentspace";
@@ -80,13 +79,6 @@ function ChatApp() {
       <AnimatePresence mode="wait">
         {showSplash && (
           <SplashScreen key="splash" onFinish={() => setShowSplash(false)} />
-        )}
-      </AnimatePresence>
-
-      {/* 骨架屏覆盖层：开屏结束后且 WebSocket 未就绪时显示 */}
-      <AnimatePresence mode="wait">
-        {!showSplash && !ws.isReady && (
-          <SkeletonScreen key="skeleton" />
         )}
       </AnimatePresence>
     </ErrorBoundary>

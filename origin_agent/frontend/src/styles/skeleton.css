@@ -1,13 +1,3 @@
-/* ── Skeleton Screen ── */
-.skeleton-screen {
-  position: fixed;
-  inset: 0;
-  z-index: var(--z-splash);
-  display: flex;
-  background: var(--bg-primary);
-  overflow: hidden;
-}
-
 /* ── Skeleton base ── */
 .skeleton-item {
   background: var(--skeleton-bg);
@@ -35,97 +25,7 @@
   100% { transform: translateX(100%); }
 }
 
-/* ── Header skeleton ── */
-/* 桌面端稳态仅剩常驻 pill（顶部覆盖抽屉隐藏时），骨架屏与之对齐 */
-.skeleton-header {
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  height: var(--header-height);
-  background: transparent;
-  border-bottom: none;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 0 20px;
-  z-index: var(--z-content);
-}
-
-.skeleton-header-left {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-
-.skeleton-header-center {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.skeleton-header-right {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
-/* 桌面端稳态下顶部栏左右内容隐藏，骨架屏同步（移动端在下方媒体查询还原） */
-.skeleton-header-left,
-.skeleton-header-right {
-  display: none;
-}
-
-.skeleton-pill {
-  width: 140px;
-  height: 32px;
-  border-radius: 999px;
-}
-
-.skeleton-badge {
-  width: 80px;
-  height: 24px;
-  border-radius: 999px;
-}
-
-.skeleton-icon {
-  width: 30px;
-  height: 30px;
-  border-radius: 6px;
-}
-
 /* ── Sidebar skeleton ── */
-.skeleton-sidebar {
-  width: var(--sidebar-width);
-  flex-shrink: 0;
-  background: var(--bg-secondary);
-  border-right: 1px solid var(--border);
-  display: flex;
-  flex-direction: column;
-  margin-top: 0;
-}
-
-.skeleton-sidebar-header {
-  padding: 10px 12px;
-  border-bottom: 1px solid var(--border);
-  display: flex;
-  gap: 8px;
-}
-
-.skeleton-search {
-  flex: 1;
-  height: 28px;
-  border-radius: var(--radius-sm);
-}
-
-.skeleton-sidebar-list {
-  flex: 1;
-  padding: 8px 0;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
 .skeleton-session {
   height: 40px;
   margin: 0 8px;
@@ -143,24 +43,7 @@
   background: var(--border);
 }
 
-/* ── Main content skeleton ── */
-.skeleton-main {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  margin-top: 0;
-  position: relative;
-}
-
-.skeleton-chat {
-  flex: 1;
-  padding: 20px;
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-  overflow: hidden;
-}
-
+/* ── ChatArea skeleton ── */
 .skeleton-message {
   display: flex;
   gap: 12px;
@@ -189,67 +72,8 @@
   height: 100px;
 }
 
-/* ── Input skeleton ── */
-.skeleton-input {
-  position: absolute;
-  bottom: 16px;
-  left: 50%;
-  transform: translateX(-50%);
-  width: calc(100% - 40px);
-  max-width: 900px;
-  height: 56px;
-  background: var(--bg-tertiary);
-  border: 1px solid var(--border);
-  border-radius: 24px;
-  padding: 6px 10px;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.skeleton-input-field {
-  flex: 1;
-  height: 40px;
-  border-radius: var(--radius);
-}
-
-.skeleton-input-btn {
-  width: var(--icon-btn-md);
-  height: var(--icon-btn-md);
-  border-radius: 50%;
-}
-
-/* ── Skeleton exit animation ── */
-.skeleton-screen-exit {
-  animation: skeletonExit 0.3s var(--ease-out) forwards;
-}
-
-@keyframes skeletonExit {
-  from {
-    opacity: 1;
-  }
-  to {
-    opacity: 0;
-  }
-}
-
 /* ── Mobile adaptation ── */
-/* 移动端真实布局仍是 56px 流内 header，骨架屏还原为旧外观 */
 @media (max-width: 768px) {
-  .skeleton-header {
-    background: var(--bg-secondary);
-    border-bottom: 1px solid var(--border);
-  }
-  .skeleton-header-left,
-  .skeleton-header-right {
-    display: flex;
-  }
-  .skeleton-main {
-    margin-top: 56px;
-  }
-  .skeleton-sidebar {
-    display: none;
-  }
   .skeleton-message {
     max-width: 90%;
   }

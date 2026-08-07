@@ -25,6 +25,7 @@ interface SidebarProps {
   sidebarItems: SidebarItem[];
   expandedClusters: Set<string>;
   toggleCluster: (id: string) => void;
+  isReady: boolean;
 }
 
 function sessionLabel(s: SessionInfo) {
@@ -277,6 +278,7 @@ export default function Sidebar({
   expandedClusters,
   toggleCluster,
   isMobile,
+  isReady,
 }: SidebarProps) {
   const [searchFocused, setSearchFocused] = useState(false);
   const drawer = useEdgeDrawer({ active: !isMobile });
@@ -365,7 +367,13 @@ export default function Sidebar({
       </div>
       <div className="session-list">
         {sidebarItems.length === 0 ? (
-          <div className="session-empty">无匹配会话</div>
+          isReady ? (
+            <div className="session-empty">无匹配会话</div>
+          ) : (
+            Array.from({ length: 8 }).map((_, i) => (
+              <div key={i} className="skeleton-item skeleton-session" />
+            ))
+          )
         ) : (
           sidebarItems.map((item) =>
             item.kind === "cluster" ? (

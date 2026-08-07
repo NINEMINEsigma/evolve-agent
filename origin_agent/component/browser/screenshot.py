@@ -1,7 +1,7 @@
 """browser_screenshot — 对已接管浏览器中的指定标签页截图（write）。
 
 截图经 sandbox resolve_write 直接写入 ws:logs/browser_screenshots/，
-返回 ws: 逻辑路径，可配合 read_image 查看页面画面。
+返回 ws: 逻辑路径，可配合 Read 查看页面画面。
 模块导入时通过 ``registry.register()`` 注册。
 """
 
@@ -86,7 +86,7 @@ registry.register(
         #
         # ## 何时使用
         # - browser_read_page 的文本不足以判断页面状态（布局、图片、验证码、弹窗等）。
-        # - 用 read_image 读取 saved_to 路径即可看到与用户视野一致的画面。
+        # - 用 Read 读取 saved_to 路径即可看到与用户视野一致的画面。
         #
         # ## 副作用/注意
         # - 只读操作，不修改浏览器状态；截图文件持久化在 agentspace 中。
@@ -106,7 +106,7 @@ Tab location follows the same rules as browser_read_page (0-based index, or URL/
 
 ## When to Use
 - When text from browser_read_page is insufficient to judge page state (layout, images, captchas, modals).
-- Use read_image on the saved_to path to see the same view as the user.
+- Use Read on the saved_to path to see the same view as the user.
 
 ## Side Effects / Notes
 - Read-only; does not modify browser state. Screenshot files persist in the agentspace.""",

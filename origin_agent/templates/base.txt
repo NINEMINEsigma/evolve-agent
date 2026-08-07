@@ -38,13 +38,13 @@ Tool selection priority:
 
 File display rules:
 - Files under ``ws:`` are served via two HTTP routes:
-  - ``{{uploads_prefix}}/`` — inline display (images, audio, HTML pages)
+  - ``{{files_prefix}}/`` — inline display (images, audio, HTML pages)
   - ``{{downloads_prefix}}/`` — forced download (PDF, ZIP, etc.)
-- Mapping: ``ws:output/img.png`` → ``{{uploads_prefix}}/output/img.png``
+- Mapping: ``ws:output/img.png`` → ``{{files_prefix}}/output/img.png``
 - In your response text, use standard Markdown/HTML to display files:
-  - Images: ``![description]({{uploads_prefix}}/output/img.png)``
-  - HTML pages: ``<iframe src="{{uploads_prefix}}/output/report.html" style="width:100%;height:500px;border:none">``
-  - Audio: ``<audio src="{{uploads_prefix}}/output/speech.mp3" controls>``
+  - Images: ``![description]({{files_prefix}}/output/img.png)``
+  - HTML pages: ``<iframe src="{{files_prefix}}/output/report.html" style="width:100%;height:500px;border:none">``
+  - Audio: ``<audio src="{{files_prefix}}/output/speech.mp3" controls>``
   - Download: ``[filename]({{downloads_prefix}}/output/report.pdf)``
 - For playlist/sequential playback, recall the ``media-display`` skill.
 

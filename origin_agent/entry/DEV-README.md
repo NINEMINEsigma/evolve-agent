@@ -22,6 +22,9 @@ entry/
     ├── messages.py               ← 消息组装：system prompt + hooks + history
     ├── history_summary.py        ← 会话历史摘要与文本转换
     └── multimodal.py             ← 多模态处理与 content block 清洗
+                                 NOTE: content_to_text 会自动过滤 JSON 中所有 _ 前缀字段（_image/_meta/_note），
+                                       避免 base64 等载荷泄露到前端/日志。_meta 等字段通过 emit_tool_result
+                                       的 tool_call_meta 参数独立传递，不受此过滤影响。
 ```
 
 ---

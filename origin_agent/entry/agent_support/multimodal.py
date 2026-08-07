@@ -115,23 +115,48 @@ def tool_result_to_content(result: Any) -> str | list[MessageBlock]:
     return str(result)
 
 
+def _strip_internal_fields(text: str) -> str:
+    """从 JSON 字符串中移除所有下划线前缀字段（_image、_meta、_note 等内部载荷）。
+
+    解析失败时原样返回，不影响非 JSON 文本。
+    """
+    # NOTE: 此过滤仅作用于 content_to_text 产出的文本副本（用于前端展示/日志）。
+    # _meta 等内部字段的权威传递路径是 emit_tool_result 的 tool_call_meta 关键字参数，
+    # 不经过此函数，因此过滤不会影响前端接收 _meta。
+    stripped = text.lstrip()
+    if not stripped or stripped[0] != "{":
+        return text
+    try:
+        parsed = json.loads(text)
+    except (json.JSONDecodeError, ValueError):
+        return text
+    if not isinstance(parsed, dict):
+        return text
+    filtered = {k: v for k, v in parsed.items() if not k.startswith("_")}
+    return json.dumps(filtered, ensure_ascii=False)
+
+
 def content_to_text(content: str | list[Any] | None) -> str:
-    """把 content（字符串或 block 列表）转成适合日志/前端展示/事件推送的纯文本。"""
+    """把 content（字符串或 block 列表）转成适合日志/前端展示/事件推送的纯文本。
+
+    自动过滤 JSON 文本中所有下划线前缀的内部字段（_image、_meta 等），
+    避免 base64 等大体积载荷撑爆前端事件和日志。
+    """
     if content is None:
         return ""
     if isinstance(content, str):
-        return content
+        return _strip_internal_fields(content)
     if isinstance(content, list):
         parts: list[str] = []
         for block in content:
             if isinstance(block, TextBlock):
-                parts.append(block.text)
+                parts.append(_strip_internal_fields(block.text))
             elif isinstance(block, ImageBlock):
                 parts.append("[image_url]")
             elif isinstance(block, dict):
                 btype = block.get("type")
                 if btype == "text":
-                    parts.append(str(block.get("text", "")))
+                    parts.append(_strip_internal_fields(str(block.get("text", ""))))
                 elif btype == "image_url":
                     parts.append("[image_url]")
                 else:

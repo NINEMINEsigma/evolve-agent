@@ -161,9 +161,9 @@ UPLOADS_DIR_NAME: str = "uploads"
 # 上传文件在沙箱中的逻辑路径前缀 — 如 ws:uploads/screenshot.png
 UPLOADS_WS_PREFIX: str = f"ws:{UPLOADS_DIR_NAME}/"
 
-# 静态文件 HTTP 路由前缀 — 前端通过此 URL 访问 agentspace 下的文件
-# 注意：此路由名恰好与上传目录名相同，但服务于整个 agentspace（不仅是 uploads 子目录）
-STATIC_FILE_HTTP_PREFIX: str = "/uploads"
+# 静态文件 HTTP 路由前缀 — 前端通过此 URL 访问 ws: 命名空间下的文件
+# 路由映射 ws: 根目录，故 ws:uploads/x.png → /files/uploads/x.png
+STATIC_FILE_HTTP_PREFIX: str = "/files"
 
 # 下载路由 HTTP 前缀 — 触发浏览器 attachment 下载
 DOWNLOADS_HTTP_PREFIX: str = "/downloads"

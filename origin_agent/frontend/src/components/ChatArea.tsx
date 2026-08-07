@@ -24,9 +24,10 @@ interface ChatAreaProps {
   onScrollToBottom?: () => void;
   sessionId?: string;
   children?: React.ReactNode;
+  isReady?: boolean;
 }
 
-export default function ChatArea({ messages, waiting, archived, onImageClick, onToggleCollapse, onEditMessage, onDeleteMessages, onRegenerateResponse, bottomRef, contentRef: externalContentRef, onDropFiles, streamingMessage, chatAreaRef: externalChatAreaRef, agents, onToggleMessageVisibility, onScrollToBottom, sessionId, children }: ChatAreaProps) {
+export default function ChatArea({ messages, waiting, archived, onImageClick, onToggleCollapse, onEditMessage, onDeleteMessages, onRegenerateResponse, bottomRef, contentRef: externalContentRef, onDropFiles, streamingMessage, chatAreaRef: externalChatAreaRef, agents, onToggleMessageVisibility, onScrollToBottom, sessionId, children, isReady }: ChatAreaProps) {
   const [dragOver, setDragOver] = useState(false);
   const [showScrollButton, setShowScrollButton] = useState(false);
   const [minimapCollapsed, setMinimapCollapsed] = useState(false);
@@ -89,6 +90,7 @@ export default function ChatArea({ messages, waiting, archived, onImageClick, on
   // 判断是否为空态：仅当无 user/assistant 消息时才算空态（系统消息不计入）
   const hasConversation = messages.some((m) => m.role === "user" || m.role === "assistant");
   const isEmpty = !hasConversation && !streamingMessage && !waiting;
+  const showSkeleton = isEmpty && !isReady;
 
   return (
     <div className="chat-area-wrapper">
@@ -116,30 +118,53 @@ export default function ChatArea({ messages, waiting, archived, onImageClick, on
           seedKey={sessionId}
         />
         <div className="chat-content" ref={contentRef}>
-          {messageList}
-
-          {streamingMessage && (
-            <MessageItem
-              message={streamingMessage}
-              archived={archived}
-              onImageClick={onImageClick}
-              onToggleCollapse={onToggleCollapse}
-              onEditMessage={onEditMessage}
-              onDeleteMessages={onDeleteMessages}
-              onRegenerateResponse={onRegenerateResponse}
-              streaming
-            />
-          )}
-
-          {waiting && !streamingMessage && (
-            <div className="message message-assistant" data-message-id="__waiting__">
-              <div className="message-avatar waiting-avatar">⚡</div>
-              <div className="message-bubble">
-                <div className="typing-indicator">
-                  <span /><span /><span />
-                </div>
+          {showSkeleton ? (
+            <>
+              <div className="skeleton-message">
+                <div className="skeleton-item skeleton-avatar" />
+                <div className="skeleton-item skeleton-bubble" />
               </div>
-            </div>
+              <div className="skeleton-message skeleton-message-user">
+                <div className="skeleton-item skeleton-avatar" />
+                <div className="skeleton-item skeleton-bubble" />
+              </div>
+              <div className="skeleton-message skeleton-message-long">
+                <div className="skeleton-item skeleton-avatar" />
+                <div className="skeleton-item skeleton-bubble" />
+              </div>
+              <div className="skeleton-message">
+                <div className="skeleton-item skeleton-avatar" />
+                <div className="skeleton-item skeleton-bubble" />
+              </div>
+            </>
+          ) : (
+            <>
+              {messageList}
+
+              {streamingMessage && (
+                <MessageItem
+                  message={streamingMessage}
+                  archived={archived}
+                  onImageClick={onImageClick}
+                  onToggleCollapse={onToggleCollapse}
+                  onEditMessage={onEditMessage}
+                  onDeleteMessages={onDeleteMessages}
+                  onRegenerateResponse={onRegenerateResponse}
+                  streaming
+                />
+              )}
+
+              {waiting && !streamingMessage && (
+                <div className="message message-assistant" data-message-id="__waiting__">
+                  <div className="message-avatar waiting-avatar">⚡</div>
+                  <div className="message-bubble">
+                    <div className="typing-indicator">
+                      <span /><span /><span />
+                    </div>
+                  </div>
+                </div>
+              )}
+            </>
           )}
         </div>
         <div ref={bottomRef} />
