@@ -14,10 +14,13 @@ component/
 │   ├── core.py               ← request_user_confirm / ask_agent_reason
 │   ├── executor.py           ← execute_with_approval 统一执行器
 │   ├── handsfree.py          ← 脱手模式状态管理 + LLM 审批流程
-│   └── allowlist.py           ← 工具 allowlist 持久化
+│   ├── allowlist.py           ← 工具 allowlist 持久化
+│   └── policy.py             ← 审批策略（needs_approval + 预设策略常量）
 ├── tools/                    ← 核心工具
-├── extools/                  ← 扩展工具集（下划线前缀为重模块的惰性导入）
+├── extools/                  ← 扩展工具集
 ├── multiagenttools/          ← 多代理 / 子代理工具
+├── browser/                  ← 浏览器控制工具
+├── automation/               ← 桌面自动化工具
 ├── mcp_tools.py              ← MCP 工具桥接
 └── cron_router.py            ← Cron 任务路由
 ```
@@ -33,6 +36,8 @@ component/
 - `component/tools/` — 核心工具
 - `component/extools/` — 扩展工具
 - `component/multiagenttools/` — 多代理工具
+- `component/browser/` — 浏览器控制工具
+- `component/automation/` — 桌面自动化工具
 - `custom_tools/` — 用户自定义工具（若目录存在）
 - MCP server — 通过 `component/mcp_tools.py` 桥接
 
@@ -53,6 +58,10 @@ component/
 | `list_tools.py` | `list_tools` | 列出工具 |
 | `list_uploads.py` | `list_uploads` | 列出上传文件 |
 | `probe_vision.py` | `probe_vision` | 探测模型视觉能力 |
+| `compress_history.py` | `compress_history` | 会话历史压缩 |
+| `session_search.py` | `session_search` | 会话内容搜索 |
+| `show_api_key_tool.py` | `show_api_key` | 显示当前 API 密钥 |
+| `lsp.py` | LSP 诊断 | LSP 服务器进程管理与代码诊断 |
 
 ### 扩展工具集（`component/extools/`）
 
@@ -60,7 +69,8 @@ component/
 |----------|------|
 | `web_search.py` / `web_fetch.py` | 网络搜索与抓取 |
 | `cron_tools.py` | 一次性/周期性后台定时任务 |
-| `background_service.py` | 后台服务管理 |
+| `background_service.py` / `bg_registry.py` | 后台服务管理与注册 |
+| `dynamic_endpoint_tools.py` | 动态端点工具 |
 | `pip.py` | Python 包管理 |
 | `archive_tools.py` | 归档工具 |
 | `diff_tools.py` | diff 工具 |
@@ -81,7 +91,8 @@ component/
 | `stop_subagent.py` | `stop_subagent` | 停止子 Agent |
 | `approval_subagent.py` | `approval_subagent` | 审批子 Agent 的工具调用 |
 | `enter_multi_agent.py` | `enter_multi_agent` | 切换到多 Agent 协作模式 |
-| `agents_group.py` | `agents_group` | Agent 分组管理 |
+| `exit_multi_agent.py` | `exit_multi_agent` | 退出多 Agent 协作模式 |
+| `agents_group.py` | `agents_group` | Agent 分组管理（当前未实现） |
 | `_store.py` | — | `SubagentStore`：子 Agent 注册表磁盘存储 |
 | `profile_builder.py` | — | `build_multi_agent_tools()`：多 Agent 模式工具过滤 |
 
@@ -91,7 +102,7 @@ component/
 
 ### `component/approval/`（目录化重构）
 
-原 `component/approval.py` 单文件已重构为目录，按职责拆分为 5 个子模块。`__init__.py` 重新导出所有公共接口，保持 `from component.approval import Xxx` 旧路径兼容。
+原 `component/approval.py` 单文件已重构为目录，按职责拆分为 7 个子模块。`__init__.py` 重新导出所有公共接口，保持 `from component.approval import Xxx` 旧路径兼容。
 
 #### `approval/backend.py` — 审批后端
 
@@ -122,6 +133,13 @@ component/
 #### `approval/allowlist.py` — 工具白名单
 
 - `is_allowed(tool_name, session_id)` / `add_allowed(tool_name, session_id)`：工具 allowlist 持久化，命中白名单的工具无需弹窗或模型审批。
+
+#### `approval/policy.py` — 审批策略
+
+- `needs_approval(policy, danger_level, handsfree) -> bool`：根据策略和脱手模式判断工具是否需要审批。
+- `MAIN_SESSION_POLICY`：主会话策略（正常模式仅 dangerous+critical 需审批，脱手模式 write+dangerous+critical 需审批）。
+- `SUB_SESSION_POLICY`：子会话策略（write+dangerous+critical 在两种模式下均需审批）。
+- `ApprovalPolicy` 数据类定义在 `entity/puretype.py`。
 
 ### 审批流程
 

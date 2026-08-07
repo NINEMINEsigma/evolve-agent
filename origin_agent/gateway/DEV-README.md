@@ -1,6 +1,6 @@
 # gateway/ — WebSocket / HTTP 网关与会话管理
 
-`gateway/` 负责 Evolve Agent 对外的所有网络交互：前端 WebSocket 长连接、消息路由、REST API、会话生命周期管理以及 Dashboard。
+`gateway/` 负责 Evolve Agent 对外的所有网络交互：前端 WebSocket 长连接、消息路由、REST API 以及会话生命周期管理。
 
 ---
 
@@ -10,12 +10,9 @@
 gateway/
 ├── server.py                ← FastAPI 应用本体：静态资源、REST API、WS 路由
 ├── message_router.py        ← MessageRouter：WebSocket 消息按类型分发
-├── chat.py                  ← ChatSessionManager：会话索引、归档、合并、分支
+├── chat.py                  ← SessionManager：会话索引、归档、合并、分支
 ├── session_manager.py       ← SessionManager：session_id → IMainSessionLoop 映射
 └── __init__.py
-
-dashboard/
-└── server.py                ← Web 管理面板（被 gateway/server.py 挂载）
 ```
 
 ---
@@ -26,8 +23,8 @@ dashboard/
 |---|---|
 | `server.py` | FastAPI 应用：挂载前端静态文件、注册 REST 路由、运行 `WS /ws/chat`、管理 WebSocket 连接生命周期。消息处理委托给 `MessageRouter`。 |
 | `message_router.py` | `MessageRouter`：将 WebSocket 消息按类型分发到对应的处理方法。从 `server.py` 的 `ws_chat` 中拆分，负责所有消息类型的处理逻辑。 |
-| `chat.py` | `ChatSessionManager`：维护会话元数据索引（`_index.json`），提供会话的创建、归档、删除、合并、分支、标签、标题等操作。 |
-| `session_manager.py` | `SessionManager`：在 `ChatSessionManager` 之上维护 `session_id → IMainSessionLoop` 映射，负责创建/恢复会话、终止会话、会话旋转后的 Loop 切换。通过 `Application.current()` 访问单例。 |
+| `chat.py` | `SessionManager`：维护会话元数据索引（`_index.json`），提供会话的创建、归档、删除、合并、分支、标签、标题等操作。 |
+| `session_manager.py` | `SessionManager`：在 `chat.py` 的 `SessionManager` 之上维护 `session_id → IMainSessionLoop` 映射，负责创建/恢复会话、终止会话、会话旋转后的 Loop 切换。通过 `Application.current()` 访问单例。 |
 
 ---
 
@@ -137,6 +134,7 @@ WS /ws/chat?resume=<sid>
 | PUT | `/api/sessions/{id}/messages/{index}` | 编辑历史消息 |
 | DELETE | `/api/sessions/{id}/messages` | 清空历史消息 |
 | POST | `/api/sessions/{id}/regenerate` | 重新生成最后一条回复 |
+| POST | `/api/sessions/{id}/regenerate-summary` | 重新生成会话摘要 |
 
 ### 工具资源与子代理
 
@@ -163,6 +161,25 @@ WS /ws/chat?resume=<sid>
 |------|------|------|
 | GET | `/uploads/{path}` | 静态文件访问 |
 | GET | `/downloads/{path}` | 文件下载 |
+
+### Agentspace
+
+| 方法 | 端点 | 说明 |
+|------|------|------|
+| GET | `/api/agentspace/list` | Agentspace 文件列表 |
+| GET | `/api/agentspace/read` | Agentspace 文件读取 |
+| POST | `/api/agentspace/write` | Agentspace 文件写入 |
+| POST | `/api/agentspace/mkdir` | Agentspace 创建目录 |
+| POST | `/api/agentspace/delete` | Agentspace 删除文件 |
+| POST | `/api/agentspace/rename` | Agentspace 重命名 |
+| GET | `/api/agentspace/lock` | Agentspace 文件锁状态 |
+
+### 技能与动态端点
+
+| 方法 | 端点 | 说明 |
+|------|------|------|
+| GET | `/api/skills/list` | 技能列表 |
+| POST | `/dynamic/{session_id}/{agent_name}/{endpoint_name}` | 动态端点调用 |
 
 ---
 

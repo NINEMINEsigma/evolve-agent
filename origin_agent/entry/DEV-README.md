@@ -10,12 +10,14 @@
 entry/
 ├── base_agent_loop.py            ← BaseAgentLoop + BasePrivateChatAgentLoop + IMainSessionLoop
 ├── parent_agent_loop.py          ← 主 Agent 循环实现
+├── colloquy_loop.py              ← ColloquyLoop（闲聊循环，继承 ParentAgentLoop）
 ├── multi_agent_loop.py           ← 多 Agent 广播协作循环
 ├── multi_agent_worker.py         ← 单 Agent tool loop 执行器
 ├── agent_sink.py                 ← AgentSink / FrontendSink / ParentAgentSink
 ├── session_manager.py            ← LoopSessionManager（session 生命周期）
 ├── stream_consumer.py            ← StreamConsumer（LLM 流式响应消费器）
 ├── tool_executor.py              ← ToolExecutor（统一工具调用执行器）
+├── tool_post_dispatch.py         ← finalize_tool_result（工具后处理）
 └── agent_support/
     ├── messages.py               ← 消息组装：system prompt + hooks + history
     ├── history_summary.py        ← 会话历史摘要与文本转换

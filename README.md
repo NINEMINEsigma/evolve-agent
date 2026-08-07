@@ -136,6 +136,8 @@ origin_agent/
 │   ├── tool_executor.py   ← 工具执行器
 │   ├── stream_consumer.py ← 流式消费器
 │   ├── agent_sink.py      ← Agent 输出抽象（Frontend / Parent）
+│   ├── colloquy_loop.py   ← Colloquy 闲聊循环
+│   ├── tool_post_dispatch.py ← 工具后处理
 │   └── agent_support/     ← 消息组装、多模态、历史摘要
 ├── gateway/               ← WebSocket + HTTP 网关
 │   ├── server.py          ← FastAPI 服务器
@@ -184,25 +186,21 @@ origin_agent/
   - `executor.py`：审批执行器。
   - `handsfree.py`：Adventure 免审批模式（本地 GGUF 模型自动审批）。
   - `allowlist.py`：只读 / 自动通过工具的允许列表。
+  - `policy.py`：审批策略定义（`needs_approval()` + `MAIN_SESSION_POLICY` / `SUB_SESSION_POLICY` 常量）。
 - `mcp_tools.py`：将 MCP server 的工具桥接到 `ToolRegistry`。
 - `cron_router.py`：Cron 后台任务的路由与生命周期管理。
 - `tools/`：核心工具（filesystem、code、shell、frontend、skills、read_image、run_python、Ask、progress_tools、clipboard_display_tools、list_tools、list_uploads、probe_vision 等）。
-- `extools/`：扩展工具集。部分重量级工具文件以 `_` 前缀标记，由对应的轻量级注册文件 re-export：
+- `extools/`：扩展工具集：
   - `web_search.py` / `web_fetch.py` — 网络搜索、抓取
-  - `_web_browser.py`（注册入口） — 浏览器自动化
-  - `ssh_tools.py` — SSH 远程执行
   - `cron_tools.py` — 一次性/周期性后台定时任务
-  - `excel_tools.py` — Excel 处理
-  - `_csv_tools.py` / `_docx_tools.py` / `_pdf_tools.py` — 文档处理
-  - `_ffmpeg_tools.py` — 音视频处理
+  - `background_service.py` / `bg_registry.py` — 后台服务管理与注册
   - `archive_tools.py` — 归档工具
   - `diff_tools.py` — diff 工具
-  - `display.py` — 显示工具
-  - `_docgen_tools.py` — 文档生成
-  - `_gui_windows.py` — Windows GUI 自动化
-  - `background_service.py` — 后台服务管理
+  - `dynamic_endpoint_tools.py` — 动态端点工具
   - `pip.py` — Python 包管理
-- `multiagenttools/`：多代理 / 子代理工具集（register/unregister/run/chat/approval/stop/list_subagent/enter_multi_agent 等），由 `subagent/orchestrator.py` 调度。
+- `browser/`：浏览器控制工具（启动、导航、查询、截图、标签管理等）
+- `automation/`：桌面自动化工具（键鼠操作、窗口管理、屏幕截图、模板匹配等）
+- `multiagenttools/`：多代理 / 子代理工具集（register/unregister/run/chat/approval/stop/list_subagent/enter_multi_agent/exit_multi_agent 等），由 `subagent/orchestrator.py` 调度。
 
 ## 工具系统
 
@@ -232,25 +230,24 @@ origin_agent/
 | `list_tools.py` | `list_tools` | 列出所有已注册工具 |
 | `list_uploads.py` | `list_uploads` | 列出上传文件 |
 | `probe_vision.py` | `probe_vision` | 探测模型视觉能力 |
+| `compress_history.py` | `compress_history` | 会话历史压缩 |
+| `session_search.py` | `session_search` | 会话内容搜索 |
+| `show_api_key_tool.py` | `show_api_key` | 显示当前 API 密钥 |
+| `lsp.py` | LSP 诊断 | LSP 服务器进程管理与代码诊断 |
 
 ### 扩展工具集
 
-`component/extools/` 包含网络、定时、文档、媒体、浏览器自动化等工具：
+`component/extools/` 包含网络、定时、后台服务等扩展工具：
 
 - `web_search.py` / `web_fetch.py` — 网络搜索、抓取
-- `_web_browser.py` — 浏览器自动化（注册入口）
-- `ssh_tools.py` — SSH 远程执行
 - `cron_tools.py` — 一次性/周期性后台定时任务
-- `excel_tools.py` — Excel 处理
-- `_csv_tools.py` / `_docx_tools.py` / `_pdf_tools.py` — 文档处理
-- `_ffmpeg_tools.py` — 音视频处理
-- `_docgen_tools.py` — 文档生成
-- `_gui_windows.py` — Windows GUI 自动化
+- `background_service.py` / `bg_registry.py` — 后台服务管理与注册
 - `archive_tools.py` — 归档工具
 - `diff_tools.py` — diff 工具
-- `display.py` — 显示工具
-- `background_service.py` — 后台服务管理
+- `dynamic_endpoint_tools.py` — 动态端点工具
 - `pip.py` — Python 包管理
+
+> CSV / Excel / DOCX / PDF / 音视频处理 / 浏览器自动化 / GUI 自动化 / 图表生成等能力已从 extools 中移除，改由 skill 实现。浏览器控制见 `component/browser/`，桌面自动化见 `component/automation/`。
 
 ## 扩展机制
 
@@ -275,7 +272,7 @@ registry.register(
 
 ### custom_llm_client
 
-在 `custom_llm_client/` 目录下编写 `.py` 文件，暴露 `create_llm_client(runtime_context, profile)` 工厂函数，返回 `BaseLLMClient` 子类实例。启动时由 `abstract/llm/loader.py` 动态加载。内置 `openai_client.py` 和 `anthropic_client.py`。
+在 `custom_llm_client/` 目录下编写 `.py` 文件，暴露 `create_llm_client(runtime_context, profile)` 工厂函数，返回 `BaseLLMClient` 子类实例。启动时由 `abstract/llm/loader.py` 动态加载。内置 `openai_client.py`、`anthropic_client.py` 和 `kscc_client.py`。
 
 ```python
 from abstract.llm.client import BaseLLMClient
@@ -336,7 +333,7 @@ Agent 通过 `fork:` 读取自身源码副本，不存在 `self:` 命名空间�
 
 ### SessionManager
 
-`gateway/chat.py` 中的 `ChatSessionManager` 与 `gateway/session_manager.py` 中的 `SessionManager` 共同管理会话生命周期：
+`gateway/chat.py` 中的 `SessionManager` 与 `gateway/session_manager.py` 中的 `SessionManager` 共同管理会话生命周期：
 
 - 每个会话为 12 位十六进制 ID。
 - 索引持久化到 `workspace/sessions/_index.json`。
@@ -347,11 +344,12 @@ Agent 通过 `fork:` 读取自身源码副本，不存在 `self:` 命名空间�
 
 `system/session_store.py` 持久化单个会话数据：
 
-- `history.es`：新版消息历史（easysave 多态序列化，v1 格式）
-- `messages.jsonl`：旧版消息历史（v0 格式，兼容/迁移用）
+- `history.es`：消息历史（easysave 多态序列化，v1 格式）
 - `summary.txt`：会话摘要
 - `token_usage.json`：token 消耗
 - `tool_resources.json`：任务进度、剪贴板展示等
+
+> 旧版 `messages.jsonl`（v0 格式）已由 `scripts/migrate_v0_to_v1.py` 迁移到 v1 格式，不再由 SessionStore 读写。
 
 ### 自动标题与标签
 
@@ -375,7 +373,6 @@ Agent 通过 `fork:` 读取自身源码副本，不存在 `self:` 命名空间�
 |------|------|------|
 | GET | `/` | 前端 `index.html` |
 | GET | `/health` | 健康检查 |
-| GET | `/dashboard` | Web 管理面板 |
 | GET | `/api/sessions` | 会话列表 |
 | GET | `/api/tags` | 全局标签列表 |
 | PUT | `/api/sessions/{id}/tags` | 更新会话标签 |
@@ -399,14 +396,16 @@ Agent 通过 `fork:` 读取自身源码副本，不存在 `self:` 命名空间�
 | GET/POST | `/api/sessions/{id}/cron-tasks/...` | Cron 任务列表/触发/取消 |
 | GET | `/api/sessions/{id}/subagents` | 当前会话的子代理状态 |
 | POST | `/api/shutdown-approval-model` | 卸载审批模型服务 |
-| GET | `/api/status` | Dashboard 状态 |
-| GET | `/api/logs` | Dashboard 日志 |
-| GET | `/api/memory` | Dashboard 记忆 |
-| GET | `/api/skills` | Dashboard 技能 |
-| GET | `/api/evolution/history` | 进化历史 |
-| GET | `/api/stats/token-usage` | Token 使用统计 |
-| GET | `/api/stats/tool-calls` | 工具调用统计 |
-| GET | `/api/stats/session-activity` | 会话活动统计 |
+| POST | `/api/sessions/{id}/regenerate-summary` | 重新生成会话摘要 |
+| GET | `/api/agentspace/list` | Agentspace 文件列表 |
+| GET | `/api/agentspace/read` | Agentspace 文件读取 |
+| POST | `/api/agentspace/write` | Agentspace 文件写入 |
+| POST | `/api/agentspace/mkdir` | Agentspace 创建目录 |
+| POST | `/api/agentspace/delete` | Agentspace 删除文件 |
+| POST | `/api/agentspace/rename` | Agentspace 重命名 |
+| GET | `/api/agentspace/lock` | Agentspace 文件锁状态 |
+| GET | `/api/skills/list` | 技能列表 |
+| POST | `/dynamic/{session_id}/{agent_name}/{endpoint_name}` | 动态端点调用 |
 | GET | `/uploads/{path}` | 静态文件访问 |
 | GET | `/downloads/{path}` | 文件下载 |
 

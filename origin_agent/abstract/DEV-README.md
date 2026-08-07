@@ -61,7 +61,7 @@ create_llm_client(name, runtime_context, profile) -> BaseLLMClient
 - 调用模块暴露的 `create_llm_client(runtime_context, profile)` 工厂函数构造客户端实例。
 - 校验返回值是否为 `BaseLLMClient` 子类。
 - `list_llm_clients()` 返回目录下所有可选客户端模块名。
-- 内置实现：`openai_client.py`、`anthropic_client.py`。
+- 内置实现：`openai_client.py`、`anthropic_client.py`、`kscc_client.py`。
 
 #### `abstract/llm/formats.py` — wire format 转换器
 
@@ -153,7 +153,7 @@ create_llm_client(name, runtime_context, profile) -> BaseLLMClient
 - **并发工具调用**：可开关。
 - 凭据脱敏、提示注入扫描、重连退避。
 
-配置默认从 `~/.hermes/config.yaml` 的 `mcp_servers` 键读取；当通过 `component/mcp_tools.py` 调用 `register_mcp_servers(servers)` 时，使用传入的配置。
+配置通过 `component/mcp_tools.py` 调用 `register_mcp_servers(servers)` 时传入，默认读取 `workspace/mcp_config.json`。
 
 ---
 
@@ -163,7 +163,7 @@ create_llm_client(name, runtime_context, profile) -> BaseLLMClient
 
 | abstract | 具体实现 |
 |---|---|
-| `BaseLLMClient` | `custom_llm_client/openai_client.py`、`custom_llm_client/anthropic_client.py` |
+| `BaseLLMClient` | `custom_llm_client/openai_client.py`、`custom_llm_client/anthropic_client.py`、`custom_llm_client/kscc_client.py` |
 | `to_openai_message()` / `messages_to_anthropic_list()` | 被 `custom_llm_client/` 中的客户端调用 |
 | `ToolRegistry` | `component/extools/`、`component/multiagenttools/`、`custom_tools/` |
 | `SkillManager` | `component/extools/` 中的 `load_skill` / `list_skills` 工具 |

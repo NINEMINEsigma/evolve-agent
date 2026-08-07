@@ -436,6 +436,7 @@ classDiagram
     AgentSink <|-- ParentAgentSink
     BaseLLMClient <|-- OpenAIClient
     BaseLLMClient <|-- AnthropicClient
+    BaseLLMClient <|-- KsccClient
     MultiAgentLoop --> MultiAgentWorker : creates
     MultiAgentLoop --> AgentProfile : holds
     MultiAgentWorker --> WorkerResult : returns

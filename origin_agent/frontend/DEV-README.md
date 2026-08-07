@@ -13,10 +13,17 @@ frontend/
 │   ├── main.tsx             ← 入口
 │   ├── types.ts             ← 类型定义
 │   ├── utils.ts             ← 工具函数
+│   ├── declarations.d.ts    ← 全局类型声明
 │   ├── pages/
 │   │   └── Agentspace.tsx   ← Agentspace 页面（文件浏览器）
 │   ├── context/
 │   │   └── ConnectionDiagnosticsContext.tsx ← 连接诊断上下文
+│   ├── constants/
+│   │   ├── dimensions.ts    ← 尺寸常量
+│   │   ├── session.ts       ← 会话相关常量
+│   │   ├── storage.ts       ← localStorage 键名
+│   │   ├── timing.ts        ← 时间常量
+│   │   └── ws.ts            ← WebSocket 常量
 │   ├── hooks/
 │   │   ├── useWebSocket.ts          ← WebSocket 与状态管理核心
 │   │   ├── useWebSocketConnection.ts ← WebSocket 连接生命周期
@@ -24,16 +31,22 @@ frontend/
 │   │   ├── useSubagentManager.ts    ← 子代理状态管理
 │   │   ├── useUploadManager.ts      ← 文件上传管理
 │   │   ├── useAgentspace.ts         ← Agentspace 文件浏览
+│   │   ├── useEdgeDrawer.ts         ← 边缘抽屉三态状态机
 │   │   └── useGlobalTooltip.ts      ← 全局 tooltip
 │   ├── components/
 │   │   ├── agentspace/             ← Agentspace 文件浏览器组件
 │   │   │   ├── EditorArea.tsx
 │   │   │   ├── FileTree.tsx
 │   │   │   └── StatusBar.tsx
+│   │   ├── primitives/             ← 基础 UI 原语
+│   │   │   ├── ModalWindow.tsx
+│   │   │   └── PopupLayer.tsx
 │   │   └── ...                      ← 聊天、弹窗、面板等组件
 │   ├── styles/              ← CSS 样式
 │   └── utils/
-│       └── toolLabels.ts    ← 工具标签映射
+│       ├── toolLabels.ts    ← 工具标签映射
+│       ├── exportSession.ts ← 会话导出
+│       └── terrain.ts       ← 等高线背景生成
 ├── package.json
 ├── vite.config.ts
 ├── tsconfig*.json
@@ -69,6 +82,9 @@ frontend/
 | `Header.tsx` | 顶部工具栏、模型信息、设置入口 |
 | `Drawer.tsx` | 侧边抽屉容器 |
 | `ErrorBoundary.tsx` | 错误边界，防止模态组件异常卸载整个 App |
+| `SplashScreen.tsx` | 开屏动画，最少停留 800ms、最多 3000ms，可点击跳过 |
+| `SkeletonScreen.tsx` | 首次 WebSocket 连接前的布局骨架占位 |
+| `ContourBackground.tsx` | 聊天区 canvas 等高线动态背景 |
 
 ### 聊天区域
 
@@ -87,6 +103,8 @@ frontend/
 | `Lightbox.tsx` | 图片灯箱 |
 | `SafeHtml.tsx` | 安全 HTML 渲染 |
 | `Minimap.tsx` | 小地图导航 |
+| `MentionMenu.tsx` | `@` 提及菜单（文件/skill 列表，Portal 渲染） |
+| `SecretBanner.tsx` | 隐藏的彩蛋横幅 |
 
 ### 弹窗与对话框
 
@@ -95,6 +113,8 @@ frontend/
 | `ConfirmDialog.tsx` | 工具审批弹窗（兼容 command 为字符串或数组） |
 | `AskDialog.tsx` | `Ask` 弹窗 |
 | `TagEditor.tsx` | 会话标签编辑 |
+| `primitives/ModalWindow.tsx` | 模态窗口基础原语 |
+| `primitives/PopupLayer.tsx` | 弹出层基础原语 |
 
 ### 面板
 
@@ -131,6 +151,7 @@ frontend/
 | `useSubagentManager.ts` | 子代理状态管理：注册/启动/停止/审批/列表 |
 | `useUploadManager.ts` | 文件上传管理：拖拽上传、进度跟踪、文件选择器 |
 | `useAgentspace.ts` | Agentspace 文件浏览：文件树加载、文件读写、路径导航 |
+| `useEdgeDrawer.ts` | 边缘抽屉三态状态机（hidden/peek/open），侧栏与顶部栏共用 |
 | `useGlobalTooltip.ts` | 全局 tooltip 管理 |
 
 ---
@@ -164,6 +185,10 @@ frontend/
 | `context-menu.css` | 右键菜单 |
 | `tooltip.css` | 工具提示 |
 | `agentspace.css` | Agentspace 文件浏览器 |
+| `modal.css` | 模态窗口 |
+| `popup.css` | 弹出层 |
+| `splash.css` | 启动屏 |
+| `skeleton.css` | 骨架屏 |
 
 ---
 
