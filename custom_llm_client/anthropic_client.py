@@ -545,7 +545,12 @@ def _map_stop_reason(stop_reason: Any) -> str:
 
 
 def _extract_usage(obj: Any) -> Usage:
-    """从 Anthropic Message / MessageDelta 中提取 token 消耗。"""
+    """从 Anthropic Message / MessageDelta 中提取 token 消耗。
+
+    Anthropic prompt caching 时，``input_tokens`` 仅包含非缓存部分，
+    ``cache_read_input_tokens`` 和 ``cache_creation_input_tokens`` 包含
+    缓存命中的 prompt token 数。三者相加才是完整的 prompt token 总量。
+    """
     if obj is None:
         return Usage()
     usage = getattr(obj, "usage", None)
@@ -553,10 +558,13 @@ def _extract_usage(obj: Any) -> Usage:
         return Usage()
     input_tokens = getattr(usage, "input_tokens", 0) or 0
     output_tokens = getattr(usage, "output_tokens", 0) or 0
+    cache_read = getattr(usage, "cache_read_input_tokens", 0) or 0
+    cache_creation = getattr(usage, "cache_creation_input_tokens", 0) or 0
+    full_prompt = input_tokens + cache_read + cache_creation
     return Usage(
-        prompt_tokens=input_tokens,
+        prompt_tokens=full_prompt,
         completion_tokens=output_tokens,
-        total_tokens=input_tokens + output_tokens,
+        total_tokens=full_prompt + output_tokens,
     )
 
 

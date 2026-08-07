@@ -1,6 +1,6 @@
 {
   "name": "evolve-agent-desktop",
-  "version": "1.0.0",
+  "version": "1.2.0",
   "description": "Evolve Agent 桌面端启动器 — 配置管理 + 后端生命周期 + WebView",
   "main": "src/main.js",
   "scripts": {
