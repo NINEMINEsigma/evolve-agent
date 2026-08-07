@@ -167,6 +167,9 @@ async def find_page(browser: "Browser", tab: str) -> "Page | None":
 #   query_selector — CSS/XPath 定位，可选 text 过滤（交集）
 #   query_text     — 全文查找子树文本包含指定文本的"最深匹配"元素
 # 索引路径：点分隔数字（如 "0.2.1"），从 document.body 起算；空串 = 根。
+# # 标记 shadow 边界（如 "0.2.#.1.3" = body→children[0]→children[2]→
+#   shadowRoot→children[1]→children[3]），resolveByPath 遇 # 切换到 shadowRoot，
+#   pathOf 上溯到 ShadowRoot 时自动插入 # + shadow 内索引。
 # ---------------------------------------------------------------------------
 
 DOM_TEXT_SUMMARY_CHARS: int = 80
@@ -195,11 +198,24 @@ _DOM_SCRIPT: str = r"""(args) => {
     let cur = el;
     while (cur && cur !== document.body) {
       const parent = cur.parentElement;
-      if (!parent) break;
-      let idx = 0;
-      for (let i = 0; i < parent.children.length; i++) { if (parent.children[i] === cur) { idx = i; break; } }
-      path.unshift(idx);
-      cur = parent;
+      if (parent) {
+        let idx = 0;
+        for (let i = 0; i < parent.children.length; i++) { if (parent.children[i] === cur) { idx = i; break; } }
+        path.unshift(idx);
+        cur = parent;
+      } else {
+        // 尝试穿透 shadow 边界：parentNode 是 ShadowRoot 时，先记录在 shadowRoot.children 中的索引，再插入 #，最后跳到 host
+        const nodeParent = cur.parentNode;
+        if (nodeParent && nodeParent.host) {
+          let idx = 0;
+          for (let i = 0; i < nodeParent.children.length; i++) { if (nodeParent.children[i] === cur) { idx = i; break; } }
+          path.unshift(idx);
+          path.unshift('#');
+          cur = nodeParent.host;
+        } else {
+          break;
+        }
+      }
     }
     return path;
   };
@@ -207,20 +223,55 @@ _DOM_SCRIPT: str = r"""(args) => {
     if (!pathStr) return document.body;
     let el = document.body;
     for (const part of pathStr.split('.')) {
+      if (part === '#') {
+        if (!el.shadowRoot) return null;
+        el = el.shadowRoot;
+        continue;
+      }
       const idx = Number(part);
       if (!Number.isInteger(idx) || idx < 0 || idx >= el.children.length) return null;
       el = el.children[idx];
     }
     return el;
   };
+  const collectShadowRoots = () => {
+    const roots = [];
+    const walk = (el) => {
+      if (el.shadowRoot) {
+        roots.push(el.shadowRoot);
+        for (let i = 0; i < el.shadowRoot.children.length; i++) walk(el.shadowRoot.children[i]);
+      }
+      for (let i = 0; i < el.children.length; i++) walk(el.children[i]);
+    };
+    walk(document.body);
+    return roots;
+  };
   const queryNodes = (selector) => {
+    const nodes = [];
+    const seen = new Set();
+    const addUnique = (node) => { if (node && !seen.has(node)) { seen.add(node); nodes.push(node); } };
     if (selector.startsWith('/')) {
-      const res = document.evaluate(selector, document, null, XPathResult.ORDERED_NODE_SNAPSHOT_TYPE, null);
-      const nodes = [];
-      for (let i = 0; i < res.snapshotLength; i++) nodes.push(res.snapshotItem(i));
-      return nodes;
+      // XPath：在 document 上下文执行
+      try {
+        const res = document.evaluate(selector, document, null, XPathResult.ORDERED_NODE_SNAPSHOT_TYPE, null);
+        for (let i = 0; i < res.snapshotLength; i++) addUnique(res.snapshotItem(i));
+      } catch (e) {}
+      // 在每个 shadow root 上下文执行：//div 是绝对 XPath（从文档根开始），需转为 .//div（相对上下文节点）
+      for (const root of collectShadowRoots()) {
+        try {
+          const relSelector = selector.startsWith('//') ? '.' + selector : selector;
+          const res = document.evaluate(relSelector, root, null, XPathResult.ORDERED_NODE_SNAPSHOT_TYPE, null);
+          for (let i = 0; i < res.snapshotLength; i++) addUnique(res.snapshotItem(i));
+        } catch (e) {}
+      }
+    } else {
+      // CSS：在 document + 每个 shadow root 中执行 querySelectorAll
+      for (const el of document.querySelectorAll(selector)) addUnique(el);
+      for (const root of collectShadowRoots()) {
+        for (const el of root.querySelectorAll(selector)) addUnique(el);
+      }
     }
-    return Array.from(document.querySelectorAll(selector));
+    return nodes;
   };
   const childInfo = (el, basePath, idx) => ({
     index: idx,
@@ -231,6 +282,8 @@ _DOM_SCRIPT: str = r"""(args) => {
     text: textOf(el, summaryChars),
     child_count: el.children.length,
     leaf: el.children.length === 0,
+    has_shadow: !!el.shadowRoot,
+    shadow_child_count: el.shadowRoot ? el.shadowRoot.children.length : 0,
     ...(args.detailed ? {
       href: el.getAttribute('href') || '',
       src: el.getAttribute('src') || '',
@@ -245,6 +298,8 @@ _DOM_SCRIPT: str = r"""(args) => {
     self_text: directText(el),
     self_html: selfHtml(el),
     leaf: el.children.length === 0,
+    has_shadow: !!el.shadowRoot,
+    shadow_child_count: el.shadowRoot ? el.shadowRoot.children.length : 0,
     ...(args.detailed ? {
       href: el.getAttribute('href') || '',
       src: el.getAttribute('src') || '',
@@ -268,7 +323,18 @@ _DOM_SCRIPT: str = r"""(args) => {
       if (args.filter_text && (child.innerText || '').toLowerCase().indexOf(String(args.filter_text).toLowerCase()) === -1) continue;
       children.push(childInfo(child, basePath, i));
     }
-    return { element: elementInfo(el), children, total: children.length };
+    // Shadow DOM children
+    const shadowChildren = [];
+    if (el.shadowRoot) {
+      const shadowBasePath = basePath ? basePath + '.#' : '#';
+      for (let i = 0; i < el.shadowRoot.children.length; i++) {
+        const child = el.shadowRoot.children[i];
+        if (args.filter_tag && child.tagName.toLowerCase() !== args.filter_tag.toLowerCase()) continue;
+        if (args.filter_text && (child.innerText || '').toLowerCase().indexOf(String(args.filter_text).toLowerCase()) === -1) continue;
+        shadowChildren.push(childInfo(child, shadowBasePath, i));
+      }
+    }
+    return { element: elementInfo(el), children, shadow_children: shadowChildren, has_shadow: !!el.shadowRoot, total: children.length + shadowChildren.length };
   }
 
   if (args.op === 'query_selector') {
@@ -290,6 +356,8 @@ _DOM_SCRIPT: str = r"""(args) => {
         text: textOf(el, summaryChars),
         child_count: el.children.length,
         leaf: el.children.length === 0,
+        has_shadow: !!el.shadowRoot,
+        shadow_child_count: el.shadowRoot ? el.shadowRoot.children.length : 0,
       });
     }
     const total = matches.length;
@@ -305,6 +373,12 @@ _DOM_SCRIPT: str = r"""(args) => {
       for (let i = 0; i < el.children.length; i++) {
         if (walk(el.children[i])) childMatched = true;
       }
+      // 穿透 shadow root
+      if (el.shadowRoot) {
+        for (let i = 0; i < el.shadowRoot.children.length; i++) {
+          if (walk(el.shadowRoot.children[i])) childMatched = true;
+        }
+      }
       if (childMatched) return false;
       if ((el.innerText || '').toLowerCase().indexOf(needle) === -1) return false;
       const p = pathOf(el);
@@ -316,6 +390,8 @@ _DOM_SCRIPT: str = r"""(args) => {
         text: textOf(el, summaryChars),
         child_count: el.children.length,
         leaf: el.children.length === 0,
+        has_shadow: !!el.shadowRoot,
+        shadow_child_count: el.shadowRoot ? el.shadowRoot.children.length : 0,
       });
       return true;
     };
@@ -406,10 +482,14 @@ def path_to_xpath(path: str) -> str:
 
     0 基 index 转 XPath 1 基（`*[n+1]`），与 children 的 index 语义一致。
     非数字部分视为非法路径并抛出 ValueError，避免静默回退到根元素。
+    含 ``#`` 的 path 表示穿越 shadow 边界，无法表达为单一 XPath，
+    调用方应改用 ``path_to_playwright_selector`` + ``resolve_locator``。
     """
     path = path.strip()
     if not path:
         return "//body"
+    if '#' in path:
+        raise ValueError("path with '#' (shadow boundary) cannot be converted to XPath; use resolve_locator instead")
     indices: list[str] = []
     for part in path.split("."):
         part = part.strip()
@@ -419,12 +499,50 @@ def path_to_xpath(path: str) -> str:
     return "//body/" + "/".join(indices)
 
 
+def path_to_playwright_selector(path: str) -> str:
+    """含 ``#`` shadow 边界的索引路径 → Playwright CSS 链式 selector。
+
+    0 基 index 转 CSS 1 基 ``nth-child``，``#`` 分段用 `` >> css=`` 连接，
+    依赖 Playwright CSS 引擎穿透 open shadow root。
+    """
+    path = path.strip()
+    if not path:
+        return "css=body"
+    segments = path.split('#')
+    css_parts: list[str] = []
+    for seg_idx, segment in enumerate(segments):
+        indices = [x.strip() for x in segment.split('.') if x.strip()]
+        if not indices:
+            raise ValueError(f"empty segment in path: {path!r}")
+        if seg_idx == 0:
+            css = "body"
+            for idx in indices:
+                if not idx.isdigit():
+                    raise ValueError(f"invalid path segment: {idx!r}")
+                css += f" > *:nth-child({int(idx) + 1})"
+        else:
+            css = ""
+            for i, idx in enumerate(indices):
+                if not idx.isdigit():
+                    raise ValueError(f"invalid path segment: {idx!r}")
+                if i == 0:
+                    css = f"*:nth-child({int(idx) + 1})"
+                else:
+                    css += f" > *:nth-child({int(idx) + 1})"
+        css_parts.append(f"css={css}")
+    return " >> ".join(css_parts)
+
+
 def resolve_locator(page: "Page", path: str = "", selector: str = "") -> Any:
-    """按 *path*（XPath）或 *selector*（CSS）解析 playwright Locator。
+    """按 *path*（XPath 或 CSS 链式）或 *selector*（CSS）解析 playwright Locator。
 
     调用方以 ``locator.count() == 0`` 判断目标元素不存在；
     *path* 非法时抛出 ValueError。
+    含 ``#`` 的 path 表示穿越 shadow 边界，改用 CSS 链式 selector
+    （Playwright CSS 引擎默认穿透 open shadow root）。
     """
     if path:
+        if '#' in path:
+            return page.locator(path_to_playwright_selector(path))
         return page.locator(f"xpath={path_to_xpath(path)}")
     return page.locator(selector)
