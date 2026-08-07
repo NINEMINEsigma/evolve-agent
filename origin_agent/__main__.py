@@ -138,6 +138,7 @@ def _build_context(cli: dict) -> RuntimeContext:
         llm_model               = str(cli.get("llm_model", "")),
         llm_max_context_tokens  = int(cli["llm_max_context_tokens"]),
         llm_max_output_tokens   = int(cli["llm_max_output_tokens"]),
+        llm_temperature        = float(cli.get("llm_temperature", 1)),
         llm_reasoning_effort    = str(cli["llm_reasoning_effort"]),
         llm_client_name         = str(cli.get("client", "openai_client")),
         git_remotes             = str(cli.get("git_remotes", "")),
