@@ -46,6 +46,11 @@ export default function SecretBanner({ banner, onDismiss }: SecretBannerProps) {
       >
         复制
       </button>
+      <div
+        key={banner.display_id}
+        className="secret-banner-progress"
+        style={{ animationDuration: `${TIMING.BANNER_TTL}ms` }}
+      />
     </div>
   );
 }
