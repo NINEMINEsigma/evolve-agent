@@ -124,6 +124,39 @@ class AnthropicLLMClient(BaseLLMClient):
     ) -> LLMResponse:
         """发送聊天请求，返回结构化响应。
 
+        先尝试非流式请求；若 API 要求流式（10 分钟限制）则自动 fallback 到
+        chat_stream() 收集完整结果。
+        """
+        try:
+            return await self._chat_non_stream(
+                messages, tools, response_format, character,
+                last_user_message=last_user_message,
+            )
+        except Exception as exc:
+            if _is_streaming_required_error(exc):
+                logger.info(
+                    "Anthropic non-stream rejected (streaming required), "
+                    "falling back to chat_stream"
+                )
+                return await _collect_stream_to_response(
+                    self.chat_stream(
+                        messages, tools, response_format, character,
+                        last_user_message=last_user_message,
+                    )
+                )
+            raise
+
+    async def _chat_non_stream(
+        self,
+        messages: list[BaseMessage],
+        tools: Optional[list[dict[str, Any]]] = None,
+        response_format: Optional[dict[str, str]] = None,
+        character: str = "",
+        *,
+        last_user_message: CharacterConversationMessage | None = None,
+    ) -> LLMResponse:
+        """发送非流式聊天请求，返回结构化响应。
+
         对 transient 网络错误（连接中断、超时、限流、5xx）
         自动进行指数退避重试，最多 ``LLM_RETRY_COUNT`` 次。
         """
@@ -412,6 +445,11 @@ def _is_retriable_stream_error(exc: Exception) -> bool:
     return False
 
 
+def _is_streaming_required_error(exc: Exception) -> bool:
+    """检测异常是否为 Anthropic API 要求使用流式请求（10 分钟限制）。"""
+    return "streaming is required" in str(exc).lower()
+
+
 def _build_resume_messages(
     original_messages: list[dict[str, Any]],
     state: dict[str, Any],
@@ -496,6 +534,50 @@ def _ensure_input_schema(parameters: Any) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 # 响应解析
 # ---------------------------------------------------------------------------
+
+
+async def _collect_stream_to_response(
+    stream_gen: AsyncIterator[StreamChunk],
+) -> LLMResponse:
+    """将 chat_stream() 的异步迭代器收集为完整的 LLMResponse。"""
+    content = ""
+    reasoning_content = ""
+    reasoning_field_name: str | None = None
+    tool_calls: list[ToolCallRequest] = []
+    finish_reason = "stop"
+    usage = Usage()
+
+    async for chunk in stream_gen:
+        if chunk.error:
+            raise RuntimeError(chunk.error)
+        if chunk.content_delta:
+            content += chunk.content_delta
+        if chunk.reasoning_delta:
+            reasoning_content += chunk.reasoning_delta
+        if chunk.reasoning_field_name:
+            reasoning_field_name = chunk.reasoning_field_name
+        if chunk.tool_call:
+            tool_calls.append(chunk.tool_call)
+        if chunk.finish_reason:
+            finish_reason = chunk.finish_reason
+        if chunk.usage:
+            # 合并而非覆写：message_start 携带 prompt_tokens，
+            # message_delta 携带 completion_tokens，两者需叠加
+            usage = Usage(
+                prompt_tokens=chunk.usage.prompt_tokens or usage.prompt_tokens,
+                completion_tokens=chunk.usage.completion_tokens or usage.completion_tokens,
+                total_tokens=(chunk.usage.prompt_tokens or usage.prompt_tokens)
+                              + (chunk.usage.completion_tokens or usage.completion_tokens),
+            )
+
+    return LLMResponse(
+        content=content,
+        tool_calls=tool_calls,
+        finish_reason=finish_reason,
+        reasoning_content=reasoning_content or None,
+        reasoning_field_name=reasoning_field_name,
+        usage=usage,
+    )
 
 
 def _parse_message(response: Any) -> LLMResponse:
