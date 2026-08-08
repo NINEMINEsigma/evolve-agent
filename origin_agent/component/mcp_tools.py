@@ -16,7 +16,7 @@ from __future__ import annotations
 import json
 import logging
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Callable, Dict, List
+from typing import TYPE_CHECKING, Callable
 
 if TYPE_CHECKING:
     from system.context import RuntimeContext
@@ -34,8 +34,8 @@ _mcp_initialized: bool = False
 def _bridge_on_register(
     name: str,
     schema: dict,
-    handler: Callable[[dict, Any], str],
-    **kwargs: Any,
+    handler: Callable[..., str],
+    **kwargs: object,
 ) -> None:
     """MCP 工具注册回调 → 项目 ToolRegistry.register()。
 
@@ -222,12 +222,8 @@ def shutdown_mcp() -> None:
 def _get_registered_mcp_tools() -> list[str]:
     """返回当前已注册的所有 MCP 工具名列表。"""
     try:
-        from abstract.mcp.client import get_mcp_status
-        status = get_mcp_status()
-        tools = []
-        for server_state in status:
-            tools.extend(server_state.get("tools", []))
-        return tools
+        from abstract.mcp.client import _existing_tool_names
+        return _existing_tool_names()
     except Exception:
         return []
 

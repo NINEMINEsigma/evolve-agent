@@ -11,7 +11,7 @@ which handles discovery, dynamic client registration, PKCE, token exchange,
 refresh, and step-up authorization automatically.
 
 This module provides the glue:
-    - ``HermesTokenStorage``: persists tokens/client-info to disk so they
+    - ``McpTokenStorage``: persists tokens/client-info to disk so they
       survive across process restarts.
     - Callback server: ephemeral localhost HTTP server to capture the OAuth
       redirect with the authorization code.
@@ -29,7 +29,7 @@ Configuration in config.yaml::
           client_secret: "secret"               # confidential clients only
           scope: "read write"                   # default: server-provided
           redirect_port: 0                      # 0 = auto-pick free port
-          client_name: "My Custom Client"       # default: "Hermes Agent"
+          client_name: "My Custom Client"       # default: "Evolve-Agent"
 """
 
 import asyncio
@@ -46,7 +46,6 @@ import time
 import webbrowser
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
-from typing import Any
 from urllib.parse import parse_qs, urlparse
 
 logger = logging.getLogger(__name__)
@@ -103,19 +102,14 @@ _oauth_port: int | None = None
 # ---------------------------------------------------------------------------
 
 
-def _get_token_dir(data_dir: str | None = None) -> Path:
+def _get_token_dir() -> Path:
     """Return the directory for MCP OAuth token files.
 
-    Uses HERMES_HOME so each profile gets its own OAuth tokens.
-    Layout: ``HERMES_HOME/mcp-tokens/``
-
-    Args:
-        data_dir: Path to the Hermes data directory. Defaults to
-            ``~/.hermes`` (or the ``HERMES_HOME`` env var if set).
+    Layout: ``agentspace/mcp-tokens/``
     """
-    if data_dir is None:
-        data_dir = os.environ.get("HERMES_HOME", str(Path.home() / ".hermes"))
-    return Path(data_dir) / "mcp-tokens"
+    from system.context import get_runtime_context
+    ctx = get_runtime_context()
+    return ctx.agentspace / "mcp-tokens"
 
 
 def _safe_filename(name: str) -> str:
@@ -208,18 +202,18 @@ def _write_json(path: Path, data: dict) -> None:
 
 
 # ---------------------------------------------------------------------------
-# HermesTokenStorage -- persistent token/client-info on disk
+# McpTokenStorage -- persistent token/client-info on disk
 # ---------------------------------------------------------------------------
 
 
-class HermesTokenStorage:
+class McpTokenStorage:
     """Persist OAuth tokens and client registration to JSON files.
 
     File layout::
 
-        HERMES_HOME/mcp-tokens/<server_name>.json         -- tokens
-        HERMES_HOME/mcp-tokens/<server_name>.client.json   -- client info
-        HERMES_HOME/mcp-tokens/<server_name>.meta.json     -- oauth server metadata
+        agentspace/mcp-tokens/<server_name>.json         -- tokens
+        agentspace/mcp-tokens/<server_name>.client.json   -- client info
+        agentspace/mcp-tokens/<server_name>.meta.json     -- oauth server metadata
     """
 
     def __init__(self, server_name: str):
@@ -240,7 +234,7 @@ class HermesTokenStorage:
         data = _read_json(self._tokens_path())
         if data is None:
             return None
-        # Hermes records an absolute wall-clock ``expires_at`` alongside the
+        # The token storage records an absolute wall-clock ``expires_at`` alongside the
         # SDK's serialized token (see ``set_tokens``). On read we rewrite
         # ``expires_in`` to the remaining seconds so the SDK's downstream
         # ``update_token_expiry`` computes the correct absolute time and
@@ -358,7 +352,7 @@ def _make_callback_handler() -> tuple[type, dict]:
     OAuth redirect arrives.  Each call returns a fresh pair so concurrent
     flows don't stomp on each other.
     """
-    result: dict[str, Any] = {"auth_code": None, "state": None, "error": None}
+    result: dict[str, str | None] = {"auth_code": None, "state": None, "error": None}
 
     class _Handler(BaseHTTPRequestHandler):
         def do_GET(self) -> None:  # noqa: N802
@@ -373,7 +367,7 @@ def _make_callback_handler() -> tuple[type, dict]:
 
             body = (
                 "<html><body><h2>Authorization Successful</h2>"
-                "<p>You can close this tab and return to Hermes.</p></body></html>"
+                "<p>You can close this tab and return to the agent.</p></body></html>"
             ) if code else (
                 "<html><body><h2>Authorization Failed</h2>"
                 f"<p>Error: {error or 'unknown'}</p></body></html>"
@@ -383,7 +377,7 @@ def _make_callback_handler() -> tuple[type, dict]:
             self.end_headers()
             self.wfile.write(body.encode())
 
-        def log_message(self, fmt: str, *args: Any) -> None:
+        def log_message(self, fmt: str, *args: object) -> None:
             logger.debug("OAuth callback: %s", fmt % args)
 
     return _Handler, result
@@ -420,7 +414,7 @@ async def _redirect_handler(authorization_url: str) -> None:
             f"\n"
             f"    ssh -N -L {_oauth_port}:127.0.0.1:{_oauth_port} <user>@<this-host>\n"
             f"\n"
-            f"  Then open the URL above. See: https://hermes-agent.nousresearch.com/docs/guides/oauth-over-ssh\n",
+            f"  Then open the URL above.\n",
             file=sys.stderr,
         )
 
@@ -505,7 +499,7 @@ async def _wait_for_callback() -> tuple[str, str | None]:
 
 def remove_oauth_tokens(server_name: str) -> None:
     """Delete stored OAuth tokens and client info for a server."""
-    storage = HermesTokenStorage(server_name)
+    storage = McpTokenStorage(server_name)
     storage.remove()
     logger.info("OAuth tokens removed for '%s'", server_name)
 
@@ -514,7 +508,7 @@ def remove_oauth_tokens(server_name: str) -> None:
 # Extracted helpers (Task 3 of MCP OAuth consolidation)
 #
 # These compose into ``build_oauth_auth`` below, and are also used by
-# ``hermes_mcp.oauth_manager.MCPOAuthManager._build_provider`` so the two
+# ``abstract.mcp.oauth_manager.MCPOAuthManager._build_provider`` so the two
 # construction paths share one implementation.
 # ---------------------------------------------------------------------------
 
@@ -555,7 +549,7 @@ def _build_client_metadata(cfg: dict) -> "OAuthClientMetadata":
     scope = cfg.get("scope")
     redirect_uri = f"http://127.0.0.1:{port}/callback"
 
-    metadata_kwargs: dict[str, Any] = {
+    metadata_kwargs: dict[str, str | list[str] | list[AnyUrl]] = {
         "client_name": client_name,
         "redirect_uris": [AnyUrl(redirect_uri)],
         "grant_types": ["authorization_code", "refresh_token"],
@@ -571,7 +565,7 @@ def _build_client_metadata(cfg: dict) -> "OAuthClientMetadata":
 
 
 def _maybe_preregister_client(
-    storage: "HermesTokenStorage",
+    storage: "McpTokenStorage",
     cfg: dict,
     client_metadata: "OAuthClientMetadata",
 ) -> None:
@@ -582,7 +576,7 @@ def _maybe_preregister_client(
     port = cfg["_resolved_port"]
     redirect_uri = f"http://127.0.0.1:{port}/callback"
 
-    info_dict: dict[str, Any] = {
+    info_dict: dict[str, str | list[str]] = {
         "client_id": client_id,
         "redirect_uris": [redirect_uri],
         "grant_types": client_metadata.grant_types,
@@ -609,7 +603,7 @@ def build_oauth_auth(
     """Build an ``httpx.Auth``-compatible OAuth handler for an MCP server.
 
     Public API preserved for backwards compatibility. New code should use
-    :func:`hermes_mcp.oauth_manager.get_manager` so OAuth state is shared
+    :func:`abstract.mcp.oauth_manager.get_manager` so OAuth state is shared
     across config-time, runtime, and reconnect paths.
 
     Args:
@@ -630,7 +624,7 @@ def build_oauth_auth(
         return None
 
     cfg = dict(oauth_config or {})  # copy — we mutate _resolved_port
-    storage = HermesTokenStorage(server_name)
+    storage = McpTokenStorage(server_name)
 
     if not _is_interactive() and not storage.has_cached_tokens():
         logger.warning(

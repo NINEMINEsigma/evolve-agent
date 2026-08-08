@@ -3,10 +3,11 @@
 MCP (Model Context Protocol) Client Support
 
 Connects to external MCP servers via stdio, HTTP/StreamableHTTP, or SSE
-transport, discovers their tools, and registers them into the hermes-agent
+transport, discovers their tools, and registers them into the evolve-agent
 tool registry so the agent can call them like any built-in tool.
 
-Configuration is read from ~/.hermes/config.yaml under the ``mcp_servers`` key.
+Configuration is provided by ``component/mcp_tools.py`` via ``register_mcp_servers()``
+which reads from ``workspace/mcp_config.json``.
 The ``mcp`` Python package is optional -- if not installed, this module is a
 no-op and logs a debug message.
 
@@ -76,7 +77,6 @@ Thread safety:
     _lock so the code is safe regardless of GIL presence (e.g. Python 3.13+
     free-threading).
 """
-# TODO: 大量导入问题
 import asyncio
 import concurrent.futures
 import inspect
@@ -89,21 +89,24 @@ import shutil
 import sys
 import threading
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime
-from pathlib import Path
-from typing import Any, Callable, Dict, List
+from typing import IO, Callable, Coroutine, TYPE_CHECKING
+
 from urllib.parse import urlparse
 
 from system.convert import as_bool
 from entity.puretype import Role
 
+if TYPE_CHECKING:
+    from mcp import ClientSession
+
 logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
-# Callback-based registry for tool registration (standalone replacement for
-# Hermes' tools.registry.registry)
+# Callback-based registry for tool registration (replacement for
+# the project's ToolRegistry)
 # ---------------------------------------------------------------------------
 
 
@@ -166,16 +169,16 @@ _tool_registry = MCPServerRegistry()
 # corrupts the display and can hang the session.
 #
 # Instead we redirect every stdio MCP subprocess's stderr into a shared
-# per-profile log file (~/.hermes/logs/mcp-stderr.log), tagged with the
+# per-profile log file (agentspace/logs/mcp-stderr.log), tagged with the
 # server name so individual servers remain debuggable.
 #
 # Fallback is os.devnull if opening the log file fails for any reason.
 
-_mcp_stderr_log_fh: Any | None = None
+_mcp_stderr_log_fh: IO[str] | None = None
 _mcp_stderr_log_lock = threading.Lock()
 
 
-def _get_mcp_stderr_log() -> Any:
+def _get_mcp_stderr_log() -> IO[str]:
     """Return a shared append-mode file handle for MCP subprocess stderr.
 
     Opened once per process and reused for every stdio server.  Must have a
@@ -188,10 +191,9 @@ def _get_mcp_stderr_log() -> Any:
         if _mcp_stderr_log_fh is not None:
             return _mcp_stderr_log_fh
         try:
-            hermes_home = os.environ.get(
-                "HERMES_HOME", os.path.join(os.path.expanduser("~"), ".hermes")
-            )
-            log_dir = Path(hermes_home) / "logs"
+            from system.context import get_runtime_context
+            ctx = get_runtime_context()
+            log_dir = ctx.agentspace / "logs"
             log_dir.mkdir(parents=True, exist_ok=True)
             log_path = log_dir / "mcp-stderr.log"
             # Line-buffered so server output lands on disk promptly; errors=
@@ -294,6 +296,23 @@ try:
         logger.debug("MCP notification types not available -- dynamic tool discovery disabled")
 except ImportError:
     logger.debug("mcp package not installed -- MCP tool support disabled")
+    ClientSession = None  # type: ignore[assignment,misc]
+    StdioServerParameters = None  # type: ignore[assignment,misc]
+    stdio_client = None  # type: ignore[assignment,misc]
+    streamablehttp_client = None  # type: ignore[assignment,misc]
+    streamable_http_client = None  # type: ignore[assignment,misc]
+    sse_client = None  # type: ignore[assignment,misc]
+    CreateMessageResult = None  # type: ignore[assignment,misc]
+    CreateMessageResultWithTools = None  # type: ignore[assignment,misc]
+    SamplingCapability = None  # type: ignore[assignment,misc]
+    SamplingToolsCapability = None  # type: ignore[assignment,misc]
+    TextContent = None  # type: ignore[assignment,misc]
+    ToolUseContent = None  # type: ignore[assignment,misc]
+    ServerNotification = None  # type: ignore[assignment,misc]
+    ToolListChangedNotification = None  # type: ignore[assignment,misc]
+    PromptListChangedNotification = None  # type: ignore[assignment,misc]
+    ResourceListChangedNotification = None  # type: ignore[assignment,misc]
+    _MCP_NEW_HTTP = False
 
 
 def _check_message_handler_support() -> bool:
@@ -476,13 +495,7 @@ def _resolve_stdio_command(command: str, env: dict) -> tuple[str, dict]:
         if which_hit:
             resolved_command = which_hit
         elif resolved_command in {"npx", "npm", "node"}:
-            hermes_home = os.path.expanduser(
-                os.getenv(
-                    "HERMES_HOME", os.path.join(os.path.expanduser("~"), ".hermes")
-                )
-            )
             candidates = [
-                os.path.join(hermes_home, "node", "bin", resolved_command),
                 os.path.join(os.path.expanduser("~"), ".local", "bin", resolved_command),
             ]
             for candidate in candidates:
@@ -495,52 +508,6 @@ def _resolve_stdio_command(command: str, env: dict) -> tuple[str, dict]:
         resolved_env = _prepend_path(resolved_env, command_dir)
 
     return resolved_command, resolved_env
-
-
-# ---------------------------------------------------------------------------
-# MCP ImageContent block → Hermes MEDIA tag
-# ---------------------------------------------------------------------------
-
-
-def _mcp_image_extension_for_mime_type(mime_type: str) -> str:
-    """Return a reasonable file extension for an MCP image MIME type."""
-    import mimetypes
-    normalized = (mime_type or "").split(";", 1)[0].strip().lower()
-    if normalized in {"image/jpeg", "image/jpg"}:
-        return ".jpg"
-    return mimetypes.guess_extension(normalized) or ".png"
-
-
-def _cache_mcp_image_block(block) -> str:
-    """Cache an MCP ``ImageContent`` block to the shared image cache and
-    return a ``MEDIA:<path>`` tag that Hermes gateways know how to render.
-
-    Returns an empty string when *block* is not an image, when the base64
-    payload is malformed, or when the cache helper rejects the bytes (e.g.
-    non-image MIME masquerading as an image). Errors are logged, not raised:
-    a single bad block shouldn't kill the tool result, and the caller will
-    fall through to any text blocks that did parse.
-    """
-    import base64
-
-    # 跨块类型的 duck typing 检查：不同 MCP 内容块类型不一定都有 data/mimeType，
-    # 这里有意使用 getattr 来兼容多种块类型，而不是假设固定属性存在。
-    data = getattr(block, "data", None)
-    mime_type = getattr(block, "mimeType", None)
-    normalized_mime = str(mime_type or "").split(";", 1)[0].strip().lower()
-    if data is None or not normalized_mime.startswith("image/"):
-        return ""
-
-    try:
-        raw_bytes = base64.b64decode(data)
-    except (TypeError, ValueError) as exc:
-        logger.warning("MCP image block decode failed (%s): %s", normalized_mime, exc)
-        return ""
-
-    # Image caching is a Hermes gateway feature not available in the
-    # standalone hermes_mcp client. Image blocks are silently dropped.
-    logger.debug("MCP image caching skipped — standalone hermes_mcp client")
-    return ""
 
 
 # ---------------------------------------------------------------------------
@@ -557,7 +524,7 @@ class InvalidMcpUrlError(ValueError):
     """
 
 
-def _validate_remote_mcp_url(server_name: str, url: Any) -> str:
+def _validate_remote_mcp_url(server_name: str, url: object) -> str:
     """Return the URL as a string if it's a valid http(s) remote MCP URL.
 
     Raises :class:`InvalidMcpUrlError` otherwise with a message naming the
@@ -754,7 +721,7 @@ class SamplingHandler:
     # -- Message conversion --------------------------------------------------
 
     @staticmethod
-    def _extract_tool_result_text(block: Any) -> str:
+    def _extract_tool_result_text(block: object) -> str:
         """Extract text from a ToolResultContent block."""
         if not hasattr(block, "content") or block.content is None:
             return ""
@@ -1096,7 +1063,7 @@ class MCPServerTask:
 
     def __init__(self, name: str):
         self.name = name
-        self.session: Any | None = None
+        self.session: ClientSession | None = None
         self.tool_timeout: float = _DEFAULT_TOOL_TIMEOUT
         self._task: asyncio.Task | None = None
         self._ready = asyncio.Event()
@@ -1127,7 +1094,7 @@ class MCPServerTask:
         # server's real advertised capabilities (``.capabilities.resources``,
         # ``.capabilities.prompts``) instead of assuming every ``ClientSession``
         # method attribute corresponds to a supported server method. See #18051.
-        self.initialize_result: Any | None = None
+        self.initialize_result: object | None = None
 
     def _is_http(self) -> bool:
         """Check if this server uses HTTP transport."""
@@ -1230,7 +1197,6 @@ class MCPServerTask:
             }
             for tool_name in stale_tool_names:
                 registry.deregister(tool_name)
-                _forget_mcp_tool_server(tool_name)
 
             # 3. Re-register with fresh tool list
             self._tools = new_mcp_tools
@@ -1342,8 +1308,8 @@ class MCPServerTask:
         safe_env = _build_safe_env(user_env)
         command, safe_env = _resolve_stdio_command(command, safe_env)
 
-        # OSV malware check is a Hermes-specific feature not available in
-        # the standalone hermes_mcp client. Skip it.
+        # OSV malware check is not available in the
+        # standalone MCP client. Skip it.
 
         server_params = StdioServerParameters(
             command=command,
@@ -1361,7 +1327,7 @@ class MCPServerTask:
         # Redirect subprocess stderr into a shared log file so MCP servers
         # (FastMCP banners, slack-mcp startup JSON, etc.) don't dump onto
         # the user's TTY and corrupt the TUI.  Preserves debuggability via
-        # ~/.hermes/logs/mcp-stderr.log.
+        # workspace/logs/mcp-stderr.log.
         _write_stderr_log_header(self.name)
         _errlog = _get_mcp_stderr_log()
         try:
@@ -1545,7 +1511,7 @@ class MCPServerTask:
             }
             if _oauth_auth is not None:
                 _http_kwargs["auth"] = _oauth_auth
-            async with streamablehttp_client(url, **_http_kwargs) as (
+            async with streamablehttp_client(url, **_http_kwargs) as (  # type: ignore[deprecated]
                 read_stream, write_stream, _get_session_id,
             ):
                 async with ClientSession(read_stream, write_stream, **sampling_kwargs) as session:
@@ -1647,7 +1613,7 @@ class MCPServerTask:
                 # CancelledError inherits from BaseException (not Exception)
                 # in Python 3.11+, so the broad ``except Exception`` below
                 # would NOT catch it; we'd silently exit the reconnect loop
-                # and the MCP server would stay dead until Hermes is fully
+                # and the MCP server would stay dead until the agent is fully
                 # restarted. Re-raise so the task's cancellation propagates
                 # correctly to asyncio's task machinery and ``shutdown()``'s
                 # ``await self._task`` completes. See #9930.
@@ -1769,7 +1735,6 @@ class MCPServerTask:
             self._pending_refresh_tasks.clear()
         for tool_name in list(self._registered_tool_names):
             registry.deregister(tool_name)
-            _forget_mcp_tool_server(tool_name)
         self._registered_tool_names = []
         self.session = None
 
@@ -1997,9 +1962,9 @@ def _handle_auth_error_and_retry(
     return json.dumps({
         "error": (
             f"MCP server '{server_name}' requires re-authentication. "
-            f"Run `hermes mcp login {server_name}` (or delete the tokens "
-            f"file under ~/.hermes/mcp-tokens/ and restart). Do NOT retry "
-            f"this tool — ask the user to re-authenticate."
+            f"Delete the tokens file under agentspace/mcp-tokens/ and "
+            f"restart the agent. Do NOT retry this tool — ask the user "
+            f"to re-authenticate."
         ),
         "needs_reauth": True,
         "server": server_name,
@@ -2135,25 +2100,11 @@ def _handle_session_expired_and_retry(
     return None
 
 
-# Sanitized server names whose ``supports_parallel_tool_calls`` config is True.
-# Populated during ``register_mcp_servers()`` and queried by
-# ``is_mcp_tool_parallel_safe()`` for the parallel-execution check in run_agent.
-_parallel_safe_servers: set = set()
-
-# Exact MCP tool-name provenance. MCP tool names are formatted as
-# ``mcp_{sanitized_server}_{sanitized_tool}``, which is ambiguous when server
-# names contain underscores (``mcp_a_b_tool`` could be server ``a`` + tool
-# ``b_tool`` or server ``a_b`` + tool ``tool``). Keep the server component
-# captured at registration time so parallel safety never relies on prefix
-# guessing.
-_mcp_tool_server_names: dict[str, str] = {}
-
 # Dedicated event loop running in a background daemon thread.
 _mcp_loop: asyncio.AbstractEventLoop | None = None
 _mcp_thread: threading.Thread | None = None
 
-# Protects _mcp_loop, _mcp_thread, _servers, _parallel_safe_servers,
-# _mcp_tool_server_names, and _stdio_pids.
+# Protects _mcp_loop, _mcp_thread, _servers, and _stdio_pids.
 _lock = threading.Lock()
 
 # PIDs of stdio MCP server subprocesses.  Tracked so we can force-kill
@@ -2227,7 +2178,7 @@ def _ensure_mcp_loop():
         _mcp_thread.start()
 
 
-def _run_on_mcp_loop(coro_or_factory, timeout: float = 30):
+def _run_on_mcp_loop(coro_or_factory: Coroutine[object, object, object] | Callable[[], Coroutine[object, object, object]], timeout: float = 30):
     """Schedule a coroutine on the MCP event loop and block until done.
 
     Accepts either a coroutine object or a zero-arg callable that returns one.
@@ -2253,7 +2204,7 @@ def _run_on_mcp_loop(coro_or_factory, timeout: float = 30):
     deadline = None if timeout is None else start_time + timeout
 
     while True:
-        # Interrupt check removed — standalone hermes_mcp client
+        # Interrupt check removed — standalone MCP client
         if future.cancelled():
             raise InterruptedError("MCP call was cancelled")
 
@@ -2299,27 +2250,6 @@ def _interpolate_env_vars(value):
     return value
 
 
-def _load_mcp_config() -> dict[str, dict]:
-    """Read ``mcp_servers`` from the Hermes config file.
-
-    Returns a dict of ``{server_name: server_config}`` or empty dict.
-    Server config can contain either ``command``/``args``/``env`` for stdio
-    transport or ``url``/``headers`` for HTTP transport, plus optional
-    ``timeout``, ``connect_timeout``, and ``auth`` overrides.
-
-    ``${ENV_VAR}`` placeholders in string values are resolved from
-    ``os.environ`` (which includes ``~/.hermes/.env`` loaded at startup).
-    """
-    try:
-        # Standalone hermes_mcp: config is provided externally via
-        # register_mcp_servers() or discover_mcp_tools(). This function
-        # is a no-op stub that returns an empty dict.
-        return {}
-    except Exception as exc:
-        logger.warning("Failed to load MCP config: %s", exc, exc_info=True)
-        return {}
-
-
 # ---------------------------------------------------------------------------
 # Server connection helper
 # ---------------------------------------------------------------------------
@@ -2351,7 +2281,7 @@ def _make_tool_handler(server_name: str, tool_name: str, tool_timeout: float):
     ``handler(args_dict, **kwargs) -> str``
     """
 
-    def _handler(args: dict, **kwargs) -> str:
+    def _handler(args: dict, **_kwargs) -> str:
         # Circuit breaker: if this server has failed too many times
         # consecutively, short-circuit with a clear message so the model
         # stops retrying and uses alternative approaches (#10447).
@@ -2404,22 +2334,18 @@ def _make_tool_handler(server_name: str, tool_name: str, tool_timeout: float):
             # Collect text from content blocks. MCP tool results can also
             # include ImageContent blocks (screenshot / Blockbench / Playwright
             # etc.); cache those via the gateway's image-cache helper so they
-            # flow through Hermes' MEDIA: tag convention and out to messaging
+            # flow through the agent's MEDIA: tag convention and out to messaging
             # adapters that render images natively. Without this, image blocks
             # were silently dropped and the agent got an empty response.
             #
             # Distilled from #17915 (c3115644151) and #10848 (gnanirahulnutakki),
             # both too stale to cherry-pick. #10848's approach (integrate with
-            # Hermes' MEDIA tag + cache_image_from_bytes) was the cleaner of
+            # the MEDIA tag + cache_image_from_bytes) was the cleaner of
             # the two — plugs into existing infrastructure.
             parts: list[str] = []
             for block in (result.content or []):
                 if hasattr(block, "text") and block.text:
                     parts.append(block.text)
-                    continue
-                image_tag = _cache_mcp_image_block(block)
-                if image_tag:
-                    parts.append(image_tag)
             text_result = "\n".join(parts) if parts else ""
 
             # Combine content + structuredContent when both are present.
@@ -2491,7 +2417,7 @@ def _make_tool_handler(server_name: str, tool_name: str, tool_timeout: float):
 def _make_list_resources_handler(server_name: str, tool_timeout: float):
     """Return a sync handler that lists resources from an MCP server."""
 
-    def _handler(args: dict, **kwargs) -> str:
+    def _handler(_args: dict, **_kwargs) -> str:
         with _lock:
             server = _servers.get(server_name)
         if not server or not server.session:
@@ -2549,8 +2475,7 @@ def _make_list_resources_handler(server_name: str, tool_timeout: float):
 def _make_read_resource_handler(server_name: str, tool_timeout: float):
     """Return a sync handler that reads a resource by URI from an MCP server."""
 
-    def _handler(args: dict, **kwargs) -> str:
-        registry = _tool_registry
+    def _handler(args: dict, **_kwargs) -> str:
         with _lock:
             server = _servers.get(server_name)
         if not server or not server.session:
@@ -2608,7 +2533,7 @@ def _make_read_resource_handler(server_name: str, tool_timeout: float):
 def _make_list_prompts_handler(server_name: str, tool_timeout: float):
     """Return a sync handler that lists prompts from an MCP server."""
 
-    def _handler(args: dict, **kwargs) -> str:
+    def _handler(_args: dict, **_kwargs) -> str:
         with _lock:
             server = _servers.get(server_name)
         if not server or not server.session:
@@ -2671,8 +2596,7 @@ def _make_list_prompts_handler(server_name: str, tool_timeout: float):
 def _make_get_prompt_handler(server_name: str, tool_timeout: float):
     """Return a sync handler that gets a prompt by name from an MCP server."""
 
-    def _handler(args: dict, **kwargs) -> str:
-        registry = _tool_registry
+    def _handler(args: dict, **_kwargs) -> str:
         with _lock:
             server = _servers.get(server_name)
         if not server or not server.session:
@@ -2809,7 +2733,7 @@ def _normalize_mcp_input_schema(schema: dict | None) -> dict:
         return _strip_nullable_unions(node, keep_nullable_hint=True)
 
     def _strip_nullable_unions(node, keep_nullable_hint=True):
-        """Inline version of Hermes' strip_nullable_unions.
+        """Inline version of strip_nullable_unions.
 
         Strips ``null`` from ``anyOf``/``oneOf`` lists in JSON Schema nodes.
         When *keep_nullable_hint* is True, adds ``nullable: true`` to the
@@ -2904,7 +2828,7 @@ def _normalize_mcp_input_schema(schema: dict | None) -> dict:
 def sanitize_mcp_name_component(value: str) -> str:
     """Return an MCP name component safe for tool and prefix generation.
 
-    Preserves Hermes's historical behavior of converting hyphens to
+    Preserves the historical behavior of converting hyphens to
     underscores, and also replaces any other character outside
     ``[A-Za-z0-9_]`` with ``_`` so generated tool names are compatible with
     provider validation rules.
@@ -2913,7 +2837,7 @@ def sanitize_mcp_name_component(value: str) -> str:
 
 
 def _convert_mcp_schema(server_name: str, mcp_tool) -> dict:
-    """Convert an MCP tool listing to the Hermes registry schema format.
+    """Convert an MCP tool listing to the agent's registry schema format.
 
     Args:
         server_name: The logical server name for prefixing.
@@ -3006,7 +2930,7 @@ def _build_utility_schemas(server_name: str) -> list[dict]:
     ]
 
 
-def _normalize_name_filter(value: Any, label: str) -> set[str]:
+def _normalize_name_filter(value: str | list[str] | tuple[str, ...] | set[str] | None, label: str) -> set[str]:
     """Normalize include/exclude config to a set of tool names."""
     if value is None:
         return set()
@@ -3041,19 +2965,6 @@ _UTILITY_CAPABILITY_ATTRS = {
     "list_prompts": "prompts",
     "get_prompt": "prompts",
 }
-
-
-def _track_mcp_tool_server(tool_name: str, server_name: str) -> None:
-    """Remember the exact MCP server that registered *tool_name*."""
-    safe_server_name = sanitize_mcp_name_component(server_name)
-    with _lock:
-        _mcp_tool_server_names[tool_name] = safe_server_name
-
-
-def _forget_mcp_tool_server(tool_name: str) -> None:
-    """Forget MCP server provenance for a deregistered tool."""
-    with _lock:
-        _mcp_tool_server_names.pop(tool_name, None)
 
 
 def _select_utility_schemas(server_name: str, server: MCPServerTask, config: dict) -> list[dict]:
@@ -3190,7 +3101,6 @@ def _register_server_tools(name: str, server: MCPServerTask, config: dict) -> li
             is_async=False,
             description=schema["description"],
         )
-        _track_mcp_tool_server(tool_name_prefixed, name)
         registered_names.append(tool_name_prefixed)
 
     # Register MCP Resources & Prompts utility tools, filtered by config and
@@ -3227,7 +3137,6 @@ def _register_server_tools(name: str, server: MCPServerTask, config: dict) -> li
             is_async=False,
             description=schema["description"],
         )
-        _track_mcp_tool_server(util_name, name)
         registered_names.append(util_name)
 
     if registered_names:
@@ -3293,12 +3202,6 @@ def register_mcp_servers(servers: dict[str, dict]) -> list[str]:
             for k, v in servers.items()
             if k not in _servers and as_bool(v.get("enabled", True), default=True)
         }
-        # Track which servers opt-in to parallel tool calls (idempotent).
-        for srv_name, srv_cfg in servers.items():
-            if as_bool(srv_cfg.get("supports_parallel_tool_calls", False), default=False):
-                _parallel_safe_servers.add(sanitize_mcp_name_component(srv_name))
-            else:
-                _parallel_safe_servers.discard(sanitize_mcp_name_component(srv_name))
 
     if not new_servers:
         return _existing_tool_names()
@@ -3330,15 +3233,9 @@ def register_mcp_servers(servers: dict[str, dict]) -> list[str]:
     # Per-server timeouts are handled inside _discover_and_register_server.
     # The outer timeout is generous: 120s total for parallel discovery.
     #
-    # Temporarily clear the interrupt flag on the current thread so that MCP
-    # discovery is never cancelled by a stale interrupt from a prior agent
-    # session. In the standalone version, this interrupt handling is removed.
-    try:
-        _run_on_mcp_loop(_discover_all, timeout=120)
-    finally:
-        pass
+    _run_on_mcp_loop(_discover_all, timeout=120)
 
-    # Log a summary so ACP callers get visibility into what was registered.
+    # Log a summary so MCP callers get visibility into what was registered.
     with _lock:
         connected = [n for n in new_servers if n in _servers]
         new_tool_count = sum(
@@ -3355,93 +3252,20 @@ def register_mcp_servers(servers: dict[str, dict]) -> list[str]:
     return _existing_tool_names()
 
 
-def discover_mcp_tools() -> list[str]:
-    """Entry point: load config, connect to MCP servers, register tools.
-
-    Called from ``model_tools`` after ``discover_builtin_tools()``. Safe to call even when
-    the ``mcp`` package is not installed (returns empty list).
-
-    Idempotent for already-connected servers. If some servers failed on a
-    previous call, only the missing ones are retried.
-
-    Returns:
-        List of all registered MCP tool names.
-    """
-    if not _MCP_AVAILABLE:
-        logger.debug("MCP SDK not available -- skipping MCP tool discovery")
-        return []
-
-    servers = _load_mcp_config()
-    if not servers:
-        logger.debug("No MCP servers configured")
-        return []
-
-    with _lock:
-        new_server_names = [
-            name
-            for name, cfg in servers.items()
-            if name not in _servers and as_bool(cfg.get("enabled", True), default=True)
-        ]
-
-    tool_names = register_mcp_servers(servers)
-    if not new_server_names:
-        return tool_names
-
-    with _lock:
-        connected_server_names = [name for name in new_server_names if name in _servers]
-        new_tool_count = sum(
-            len(_servers[name]._registered_tool_names)
-            for name in connected_server_names
-        )
-
-    failed_count = len(new_server_names) - len(connected_server_names)
-    if new_tool_count or failed_count:
-        summary = f"  MCP: {new_tool_count} tool(s) from {len(connected_server_names)} server(s)"
-        if failed_count:
-            summary += f" ({failed_count} failed)"
-        logger.info(summary)
-
-    return tool_names
-
-
-def is_mcp_tool_parallel_safe(tool_name: str) -> bool:
-    """Check if an MCP tool belongs to a server that supports parallel tool calls.
-
-    MCP tool names follow the pattern ``mcp_{server}_{tool}``, but that string
-    shape is ambiguous when server names contain underscores. Use the exact
-    server provenance captured at registration time rather than prefix
-    matching, then check whether that server's config includes
-    ``supports_parallel_tool_calls: true``.
-
-    Returns False for non-MCP tools or tools from servers without the flag.
-    """
-    if not tool_name.startswith("mcp_"):
-        return False
-    with _lock:
-        server_name = _mcp_tool_server_names.get(tool_name)
-        return bool(server_name and server_name in _parallel_safe_servers)
-
-
 def get_mcp_status() -> list[dict]:
-    """Return status of all configured MCP servers for banner display.
+    """Return status of all connected MCP servers for banner display.
 
     Returns a list of dicts with keys: name, transport, tools, connected.
-    Includes both successfully connected servers and configured-but-failed ones.
+    Only includes servers that have been registered via register_mcp_servers().
     """
     result: list[dict] = []
-
-    # Get configured servers from config
-    configured = _load_mcp_config()
-    if not configured:
-        return result
 
     with _lock:
         active_servers = dict(_servers)
 
-    for name, cfg in configured.items():
-        transport = cfg.get("transport", "http") if "url" in cfg else "stdio"
-        server = active_servers.get(name)
-        if server and server.session is not None:
+    for name, server in active_servers.items():
+        transport = "http" if server._is_http() else "stdio"
+        if server.session is not None:
             entry = {
                 "name": name,
                 "transport": transport,
@@ -3458,72 +3282,6 @@ def get_mcp_status() -> list[dict]:
                 "tools": 0,
                 "connected": False,
             })
-
-    return result
-
-
-def probe_mcp_server_tools() -> dict[str, list[tuple]]:
-    """Temporarily connect to configured MCP servers and list their tools.
-
-    Designed for ``hermes tools`` interactive configuration — connects to each
-    enabled server, grabs tool names and descriptions, then disconnects.
-    Does NOT register tools in the Hermes registry.
-
-    Returns:
-        Dict mapping server name to list of (tool_name, description) tuples.
-        Servers that fail to connect are omitted from the result.
-    """
-    if not _MCP_AVAILABLE:
-        return {}
-
-    servers_config = _load_mcp_config()
-    if not servers_config:
-        return {}
-
-    enabled = {
-        k: v for k, v in servers_config.items()
-        if as_bool(v.get("enabled", True), default=True)
-    }
-    if not enabled:
-        return {}
-
-    _ensure_mcp_loop()
-
-    result: dict[str, list[tuple]] = {}
-    probed_servers: list[MCPServerTask] = []
-
-    async def _probe_all():
-        names = list(enabled.keys())
-        coros = []
-        for name, cfg in enabled.items():
-            ct = cfg.get("connect_timeout", _DEFAULT_CONNECT_TIMEOUT)
-            coros.append(asyncio.wait_for(_connect_server(name, cfg), timeout=ct))
-
-        outcomes = await asyncio.gather(*coros, return_exceptions=True)
-
-        for name, outcome in zip(names, outcomes):
-            if isinstance(outcome, Exception):
-                logger.debug("Probe: failed to connect to '%s': %s", name, outcome)
-                continue
-            probed_servers.append(outcome)
-            tools = []
-            for t in outcome._tools:
-                desc = t.description or ""
-                tools.append((t.name, desc))
-            result[name] = tools
-
-        # Shut down all probed connections
-        await asyncio.gather(
-            *(s.shutdown() for s in probed_servers),
-            return_exceptions=True,
-        )
-
-    try:
-        _run_on_mcp_loop(_probe_all, timeout=120)
-    except Exception as exc:
-        logger.debug("MCP probe failed: %s", exc)
-    finally:
-        _stop_mcp_loop()
 
     return result
 
@@ -3559,17 +3317,11 @@ def shutdown_mcp_servers():
     with _lock:
         loop = _mcp_loop
     if loop is not None and loop.is_running():
-        # standalone: asyncio.run_coroutine_threadsafe replaces safe_schedule_threadsafe
-        future = safe_schedule_threadsafe(
-            _shutdown(), loop,
-            logger=logger,
-            log_message="MCP shutdown: failed to schedule",
-        )
-        if future is not None:
-            try:
-                future.result(timeout=15)
-            except Exception as exc:
-                logger.debug("Error during MCP shutdown: %s", exc)
+        future = asyncio.run_coroutine_threadsafe(_shutdown(), loop)
+        try:
+            future.result(timeout=15)
+        except Exception as exc:
+            logger.debug("Error during MCP shutdown: %s", exc)
 
     _stop_mcp_loop()
 
@@ -3584,7 +3336,7 @@ def _kill_orphaned_mcp_children(include_active: bool = False) -> None:
     sessions are not disrupted.
 
     Sends SIGTERM, waits 2 seconds, then escalates to SIGKILL for any
-    survivors, avoiding shared-resource collisions when multiple hermes
+    survivors, avoiding shared-resource collisions when multiple agent
     processes run on the same host (each has its own ``_stdio_pids`` dict).
 
     With ``include_active=True`` also kills every PID in ``_stdio_pids`` —
