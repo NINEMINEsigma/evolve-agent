@@ -167,12 +167,19 @@ def init_mcp(ctx: RuntimeContext) -> list[str]:
         logger.debug("MCP already initialized, skipping")
         return _get_registered_mcp_tools()
 
-    config_path = ctx.mcp_config_path
-    if not config_path:
+    if not ctx.mcp_config_path:
         logger.info("No mcp_config_path set — MCP servers disabled")
         return []
 
-    servers = _load_mcp_config(Path(config_path))
+    config_path = Path(ctx.mcp_config_path)
+
+    # 配置文件不存在时创建空配置，供 agent 通过 ws: 命名空间自行编辑
+    if not config_path.exists():
+        config_path.parent.mkdir(parents=True, exist_ok=True)
+        config_path.write_text("{}", encoding="utf-8")
+        logger.info("Created empty MCP config at %s", config_path)
+
+    servers = _load_mcp_config(config_path)
     if not servers:
         logger.info("No MCP servers configured (empty config at %s)", config_path)
         return []

@@ -25,6 +25,8 @@ Skills:
 Available subsystems:
 - LLM client: OpenAI-compatible API. Configurable via env vars (OPENAI_API_KEY, OPENAI_BASE_URL, LLM_MODEL).
 - Tool registry (abstract/tools): tools registered via registry.register() at import time.
+- MCP (Model Context Protocol): external tool servers configured via ``{{mcp_config_path}}``.
+  Edit this file to add or remove MCP servers (stdio command or HTTP url).
 
 Running environment:
 - The ``ws:`` namespace maps to the workspace directory.  Shell commands

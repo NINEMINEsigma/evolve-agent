@@ -64,6 +64,22 @@ def _platform_info() -> str:
     )
 
 
+def _mcp_ws_path(ctx: RuntimeContext) -> str:
+    """将 ``mcp_config_path`` 转为 ``ws:`` 相对路径供系统提示词注入。
+
+    配置文件位于 agentspace 下，返回如 ``ws:mcp_config.json``。
+    路径未设置或无法计算时回退为 ``ws:mcp_config.json``。
+    """
+    fallback = "ws:mcp_config.json"
+    if not ctx.mcp_config_path:
+        return fallback
+    try:
+        rel = Path(ctx.mcp_config_path).relative_to(ctx.agentspace)
+        return f"ws:{rel.as_posix()}"
+    except ValueError:
+        return fallback
+
+
 def _system_info() -> SystemInfo:
     """收集宿主系统信息，单项失败时回退为空串。"""
     import getpass
@@ -165,6 +181,7 @@ def build_system_prompt(
                 "{{user_name}}": sys_info.user_name,
                 "{{host_name}}": sys_info.host_name,
                 "{{os_info}}": sys_info.os_info,
+                "{{mcp_config_path}}": _mcp_ws_path(runtime_ctx),
             }
             for k, v in runtime_values.items():
                 base = base.replace(k, (v or "未配置").strip())

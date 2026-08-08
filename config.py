@@ -275,4 +275,4 @@ if not _use_local_approval:
 workspace_path:         Path = Path(current_config.workspace_path)
 agentspace_path_name:   Path = workspace_path / current_config.agentspace_path_name
 logs_path_name:         Path = workspace_path / current_config.logs_path_name
-mcp_config_path:        Path = workspace_path / current_config.mcp_config_path_name
+mcp_config_path:        Path = agentspace_path_name / current_config.mcp_config_path_name
