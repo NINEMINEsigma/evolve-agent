@@ -3,8 +3,9 @@
 
 在每轮用户消息中，通过 hook_message 注入：
 1. 当前会话标题 + tags
-2. 父子会话簇（主链遍历 + 多父合并标注）
-3. 跨会话导航追踪（吸收原 session_track_hook 逻辑）
+2. 当前审批模式（handsfree / normal）
+3. 父子会话簇（主链遍历 + 多父合并标注）
+4. 跨会话导航追踪（吸收原 session_track_hook 逻辑）
 
 所有数据通过 Application.current().session_manager.get(sid) 获取 SessionInfo。
 """
@@ -190,6 +191,17 @@ def _format_navigation(session_id: str, workspace: str) -> str:
     )
 
 
+def _format_approval_mode(session_id: str) -> str:
+    """返回当前审批模式状态文本。"""
+    try:
+        from component.approval import is_handsfree_mode
+        mode = "handsfree" if is_handsfree_mode(session_id) else "normal"
+        return f"Approval: {mode}"
+    except Exception:
+        logger.debug("Failed to get approval mode", exc_info=True)
+        return ""
+
+
 def hook_message(session_id: str = "", workspace: str = "", **kwargs) -> str:
     try:
         from system.application import Application
@@ -215,6 +227,9 @@ def hook_message(session_id: str = "", workspace: str = "", **kwargs) -> str:
 
         # 拼接
         parts: list[str] = [f"Session: {title}{tags_str}"]
+        approval_text = _format_approval_mode(session_id)
+        if approval_text:
+            parts.append(approval_text)
         if cluster_text:
             parts.append(f"Cluster:\n{cluster_text}")
         if nav_text:
