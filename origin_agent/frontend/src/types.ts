@@ -230,6 +230,7 @@ export interface SubagentSession {
   status: "running" | "waiting" | "completed" | "terminated";
   feedback: SubagentMessage[];
   pending_approvals: PendingApproval[];
+  interactive?: boolean;
 }
 
 export interface TargetSessionOption {

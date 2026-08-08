@@ -28,14 +28,15 @@ from entity.constant import (
     History_Version as __History_Version__,
 )
 from entity.messages import CharacterConversationMessage, ToolResultMessage
-from entity.puretype import Role, ToolAvailability, AgentConfig
+from entity.puretype import Role, ToolAvailability, AgentConfig, ToolDangerLevel
 from abstract.tools.registry import registry as tool_registry
 from system.context import get_runtime_context
 from system.templates import read_template
 from entry.parent_agent_loop import ParentAgentLoop
 
-from .context import SubRuntimeContext, build_subagent_context
+from .context import SubRuntimeContext, build_subagent_context, build_taskagent_context
 from .loop import SUB_MESSAGE_SEPARATOR, SubAgentLoop, format_user_message
+from .taskloop import TaskAgentLoop
 
 logger = logging.getLogger(__name__)
 
@@ -155,6 +156,138 @@ class _OrchestratorContext:
             "success": True,
             "session_id": session_id,
             "waiting": False,
+        }
+
+    # ── taskagent 启动/停止 ─────────────────────────────────────────
+
+    async def launch_taskagent(
+        self,
+        parent_session_id: str,
+        prompt: str,
+        temperature: float,
+    ) -> dict[str, Any]:
+        """启动一次性 taskagent。"""
+        session_id = f"{parent_session_id}_{uuid.uuid4().hex[:12]}"
+
+        # 检查上限
+        if len(self._active) >= SUBAGENT_MAX_ACTIVE:
+            # taskagent 不进等待队列——直接拒绝
+            return {
+                "success": False,
+                "error": f"Active sub-agent limit reached ({SUBAGENT_MAX_ACTIVE}). Stop some sub-agents first.",
+            }
+
+        await self._start_taskagent(session_id, prompt, temperature)
+        return {
+            "success": True,
+            "session_id": session_id,
+            "waiting": False,
+        }
+
+    async def _start_taskagent(
+        self,
+        session_id: str,
+        prompt: str,
+        temperature: float,
+    ) -> None:
+        """创建 TaskAgentLoop 并以 asyncio.Task 启动。"""
+        parent_ctx = get_runtime_context()
+        ctx = await build_taskagent_context(parent_ctx, temperature)
+
+        tools = self._build_task_tool_set()
+
+        def _push_msg(event: dict[str, Any]) -> None:
+            asyncio.create_task(self._push_subagent_ws(
+                session_id, "taskagent", event,
+                interactive=False,
+            ))
+
+        loop = TaskAgentLoop(
+            ctx, session_id, tools, MAX_TOOL_TURNS,
+            on_message=_push_msg,
+            parent_session_id=self._parent_session_id,
+            parent_character_agent=self._agent_loop.current_character_agent,
+            name="taskagent",
+        )
+        self._active[session_id] = loop
+        self._subagent_names[session_id] = "taskagent"
+
+        # 推送 WS 通知前端面板
+        await self._push_subagent_ws(
+            session_id,
+            "taskagent",
+            {"role": "status", "content": "started"},
+            status_override="running",
+            interactive=False,
+        )
+
+        # 推送 initial_prompt 到前端面板
+        wrapped_initial = format_user_message(
+            self._agent_loop.current_character_agent, "direct", prompt,
+        )
+        await self._push_subagent_ws(
+            session_id,
+            "taskagent",
+            {"role": "user", "content": wrapped_initial,
+             "character_name": self._agent_loop.current_character_agent},
+            interactive=False,
+        )
+
+        task = asyncio.create_task(
+            loop.run(prompt, self._agent_loop.current_character_agent, "direct"),
+            name=f"taskagent-{session_id[:16]}",
+        )
+        self._active_task[session_id] = task
+
+        logger.info(
+            "Taskagent started | parent=%s session=%s model=%s tools=%d",
+            self._parent_session_id, session_id, ctx.model, len(tools),
+        )
+
+    async def stop_taskagent(self, session_id: str) -> dict[str, Any]:
+        """强制停止 taskagent — 不保存历史。"""
+        sub = self._active.get(session_id)
+        if sub is None:
+            return {
+                "success": False,
+                "session_id": session_id,
+                "error": "Task-agent not found.",
+            }
+
+        if sub.completed:
+            return {
+                "success": False,
+                "session_id": session_id,
+                "error": "Task-agent already completed.",
+            }
+
+        # 强制停止
+        sub.stop()
+
+        # 清理（不保存历史）
+        self._active.pop(session_id, None)
+        task = self._active_task.pop(session_id, None)
+        if task and not task.done():
+            task.cancel()
+        self._subagent_names.pop(session_id, None)
+
+        logger.info("Taskagent stopped | session=%s", session_id)
+
+        # 推送 terminated 状态到前端
+        await self._push_subagent_ws(
+            session_id,
+            "taskagent",
+            {"role": "terminated", "content": "task-agent stopped"},
+            status_override="terminated",
+            interactive=False,
+        )
+
+        # 级联出队
+        await self._activate_next()
+
+        return {
+            "success": True,
+            "session_id": session_id,
         }
 
     # ── 交互 ────────────────────────────────────────────────────────
@@ -413,6 +546,7 @@ class _OrchestratorContext:
                 "status": status,
                 "feedback": feedback,
                 "pending_approvals": sub.pending_approvals_info,
+                "interactive": not isinstance(sub, TaskAgentLoop),
             }
         return snap
 
@@ -435,11 +569,17 @@ class _OrchestratorContext:
         event: dict[str, Any] | None = None,
         *,
         status_override: str | None = None,
+        interactive: bool | None = None,
     ) -> None:
-        """推送一条结构化事件到前端面板。"""
+        """推送一条结构化事件到前端面板。
+
+        interactive 为 None 时自动推断：TaskAgentLoop → False，其他 → True。
+        """
         try:
             from gateway.server import push_subagent_update
             sub = self._active.get(session_id)
+            if interactive is None:
+                interactive = not isinstance(sub, TaskAgentLoop)
             if status_override is not None:
                 status = status_override
             elif sub is None:
@@ -461,6 +601,7 @@ class _OrchestratorContext:
                 feedback=feedback,
                 pending_approvals=pending,
                 removed=removed,
+                interactive=interactive,
             )
         except Exception as exc:
             logger.warning("WS push for subagent %s failed: %s", session_id, exc, exc_info=True)
@@ -604,6 +745,24 @@ class _OrchestratorContext:
         """构建子 Agent 的工具集 — 仅包含 availability 包含 SUBAGENT 或 EVERY 的工具。"""
         return tool_registry.get_definitions_for_availability(ToolAvailability.SUBAGENT)
 
+    def _build_task_tool_set(self) -> list[dict[str, Any]]:
+        """构建 taskagent 工具集 — 仅 TASKAGENT 作用域 + readonly 等级。
+
+        复用 get_definitions_for_availability 获取 OpenAI 包装格式的 schema，
+        然后按 danger_level 过滤为 readonly。
+        """
+        all_defs: list[dict] = tool_registry.get_definitions_for_availability(
+            ToolAvailability.TASKAGENT,
+        )
+        result: list[dict] = []
+        for schema in all_defs:
+            func: dict = schema.get("function") or {}
+            name: str = func.get("name", "")
+            entry = tool_registry.get_entry(name)
+            if entry is not None and entry.danger_level == ToolDangerLevel.readonly:
+                result.append(schema)
+        return result
+
     def _get_agent_loop(self) -> ParentAgentLoop | None:
         """解析当前父 session 对应的真实 ParentAgentLoop。
 
@@ -699,6 +858,7 @@ class _OrchestratorContext:
                 source_session_ids.append(session_id)
 
             status = "completed" if sub.completed else ("terminated" if sub.terminated else "running")
+            is_task = isinstance(sub, TaskAgentLoop)
             try:
                 from gateway.server import push_subagent_update
                 await push_subagent_update(
@@ -708,6 +868,7 @@ class _OrchestratorContext:
                     status=status,
                     feedback=[],
                     pending_approvals=pending,
+                    interactive=not is_task,
                 )
             except Exception as exc:
                 logger.debug("WS push failed for subagent %s: %s", session_id, exc)
@@ -726,6 +887,17 @@ class _OrchestratorContext:
                 "Failed to inject subagent result for parent=%s: %s",
                 self._parent_session_id, exc,
             )
+
+        # 清理已完成的 taskagent（一次性，不保存历史）
+        for session_id in list(self._active.keys()):
+            sub = self._active[session_id]
+            if isinstance(sub, TaskAgentLoop) and sub.completed:
+                self._active.pop(session_id, None)
+                task = self._active_task.pop(session_id, None)
+                if task and not task.done():
+                    task.cancel()
+                self._subagent_names.pop(session_id, None)
+                logger.info("Taskagent cleaned up | session=%s", session_id)
 
     @staticmethod
     def _history_path(session_id: str, name: str = "") -> Path:
@@ -775,6 +947,12 @@ class SubAgentOrchestrator:
 
     async def stop(self, parent_session_id: str, session_id: str) -> dict[str, Any]:
         return await self._get_context(parent_session_id).stop(session_id)
+
+    async def launch_taskagent(self, parent_session_id: str, prompt: str, temperature: float) -> dict[str, Any]:
+        return await self._get_context(parent_session_id).launch_taskagent(parent_session_id, prompt, temperature)
+
+    async def stop_taskagent(self, parent_session_id: str, session_id: str) -> dict[str, Any]:
+        return await self._get_context(parent_session_id).stop_taskagent(session_id)
 
     def interrupt(self, parent_session_id: str) -> None:
         self._get_context(parent_session_id).interrupt()

@@ -4,3 +4,8 @@ Sub-agent conventions:
 - Use chat_subagent only to reply to the sub-agent's questions, add missing context, or correct its direction AFTER you have received its latest response.
 - Do NOT call chat_subagent just to send the initial prompt; put all initial context into the initial_prompt parameter of run_subagent.
 - Within the same parent session, only one instance of a given sub-agent name can be active or queued at a time. If you need to restart a sub-agent, stop it first with stop_subagent.
+Task-agent conventions:
+- Use run_taskagent to launch a one-shot task agent with a single prompt. The task agent runs asynchronously with readonly tools only.
+- The result will be delivered as a [subagent-result] message when the task completes. Do not poll or chat with task agents.
+- Use stop_taskagent with the session_id if a task agent must be terminated early.
+- Task agents are fire-and-forget: no history is saved, no persistent session.

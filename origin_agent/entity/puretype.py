@@ -62,7 +62,10 @@ class ToolAvailability(IntFlag):
     MAIN = 1
     SUBAGENT = 2
     MULTI_AGENT = 4
-    EVERY = MAIN | SUBAGENT | MULTI_AGENT
+    TASKAGENT = 8
+    """仅一次性任务 Agent (TaskAgentLoop) 可用。"""
+    EVERY = MAIN | SUBAGENT | MULTI_AGENT | TASKAGENT
+    """所有模式均可用（MAIN | SUBAGENT | MULTI_AGENT | TASKAGENT）。"""
 
 
 # ---------------------------------------------------------------------------

@@ -80,7 +80,7 @@ export default function InputBar({
   };
 
   const activeSubagents = Object.values(subagentSessions).filter(
-    (s) => s.status === "running" || s.status === "waiting"
+    (s) => (s.status === "running" || s.status === "waiting") && s.interactive !== false
   );
   const hasSubagents = activeSubagents.length > 0;
 

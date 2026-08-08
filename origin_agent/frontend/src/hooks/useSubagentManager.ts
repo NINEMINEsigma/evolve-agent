@@ -103,6 +103,7 @@ export function useSubagentManager(): SubagentManager {
               status: data.status || existing?.status || "running",
               feedback: [...prevFeedback, ...realFeedback],
               pending_approvals: data.pending_approvals !== undefined ? newApprovals : prevApprovals,
+              interactive: data.interactive !== undefined ? data.interactive : (existing?.interactive ?? true),
             },
           },
         };

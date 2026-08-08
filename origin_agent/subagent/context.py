@@ -101,6 +101,34 @@ async def build_subagent_context(
     )
 
 
+async def build_taskagent_context(
+    parent_ctx: RuntimeContext,
+    temperature: float,
+) -> SubRuntimeContext:
+    """从父 Agent RuntimeContext 构建 taskagent 上下文。
+
+    继承父 Agent 的全部 LLM 配置，无系统提示词。
+
+    Args:
+        parent_ctx: 父 Agent 的 RuntimeContext。
+        temperature: 采样温度。
+
+    Returns:
+        SubRuntimeContext 实例，system_prompts 为空列表。
+    """
+    return SubRuntimeContext(
+        base_url=parent_ctx.llm_base_url,
+        model=parent_ctx.llm_model,
+        api_key=parent_ctx.llm_api_key or None,
+        temperature=temperature,
+        max_output_tokens=parent_ctx.llm_max_output_tokens,
+        max_context_tokens=parent_ctx.llm_max_context_tokens,
+        client_type=parent_ctx.llm_client_name,
+        system_prompts=[],
+        tool_timeout=parent_ctx.tool_timeout,
+    )
+
+
 def _default_system_prompt() -> str:
     """从模板文件读取内置默认系统提示词。"""
     from system.templates import read_template

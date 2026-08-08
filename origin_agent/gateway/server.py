@@ -90,11 +90,13 @@ async def push_subagent_update(
     feedback: list[dict[str, str]],
     pending_approvals: list[dict[str, Any]],
     removed: bool = False,
+    interactive: bool = True,
 ) -> None:
     """将子 Agent 状态更新推送到前端 WebSocket。
 
     前端 UnifiedPanel 接收此消息并更新子会话列表。
     feedback 每项为 {\"role\": \"assistant\"|\"tool\"|\"status\", \"content\": \"...\"}
+    interactive 为 False 时，前端不会在输入框目标列表中显示该子会话（taskagent 专用）。
     """
     ws = _get_ws(parent_session_id)
     if ws is None:
@@ -113,6 +115,7 @@ async def push_subagent_update(
                         "feedback": feedback,
                         "pending_approvals": pending_approvals,
                         "_removed": removed,
+                        "interactive": interactive,
                     }, ensure_ascii=False),
                 ).model_dump(exclude_none=True),
                 ensure_ascii=False,
