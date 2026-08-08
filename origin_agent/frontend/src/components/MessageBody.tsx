@@ -9,6 +9,7 @@ import "react18-json-view/src/style.css";
 import { ChatMessage, ContentBlock, MessageContent } from "../types";
 import CodeBlock from "./CodeBlock";
 import SafeHtml from "./SafeHtml";
+import IframeRenderer from "./IframeRenderer";
 import MermaidRenderer from "./MermaidRenderer";
 import { renderToolResult } from "./ToolResultRenderer";
 
@@ -113,24 +114,8 @@ const markdownComponentsBase: Components = {
   meter({ className, style, value, min, max, low, high, optimum, children }: React.MeterHTMLAttributes<HTMLMeterElement>) {
     return <meter className={className} style={style} value={value} min={min} max={max} low={low} high={high} optimum={optimum}>{children}</meter>;
   },
-  iframe({ src, style, className, ...props }: React.IframeHTMLAttributes<HTMLIFrameElement>) {
-    // <iframe src="url"> 直接在 ReactMarkdown 中渲染，浏览器原生沙盒隔离内容
-    const defaultStyle: React.CSSProperties = {
-      width: "100%",
-      height: "400px",
-      border: "none",
-      borderRadius: "12px",
-      margin: "6px 0",
-    };
-    return (
-      <iframe
-        src={src}
-        className={className}
-        style={{ ...defaultStyle, ...(style as React.CSSProperties) }}
-        sandbox="allow-scripts allow-same-origin allow-popups allow-forms"
-        {...props}
-      />
-    );
+  iframe(props: React.IframeHTMLAttributes<HTMLIFrameElement>) {
+    return <IframeRenderer {...props} />;
   },
 };
 

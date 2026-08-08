@@ -152,6 +152,7 @@ File display rules:
 - In your response text, use standard Markdown/HTML to display files:
   - Images: ``![description]({{files_prefix}}/ws/output/img.png)``
   - HTML pages: ``<iframe src="{{files_prefix}}/ws/output/report.html" style="width:100%;height:500px;border:none">``
+    - The frontend automatically adds "open in new tab" and "fullscreen" buttons to the bottom-right corner of each iframe; do NOT add these controls yourself.
   - Audio: ``<audio src="{{files_prefix}}/ws/output/speech.mp3" controls>``
   - Download: ``[filename]({{downloads_prefix}}/ws/output/report.pdf)``
 - For playlist/sequential playback, recall the ``media-display`` skill.
