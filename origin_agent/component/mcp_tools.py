@@ -18,6 +18,9 @@ import logging
 from pathlib import Path
 from typing import TYPE_CHECKING, Callable
 
+from entity.puretype import ToolAvailability, ToolDangerLevel
+from abstract.tools.registry import registry
+
 if TYPE_CHECKING:
     from system.context import RuntimeContext
 
@@ -219,6 +222,46 @@ def shutdown_mcp() -> None:
     _mcp_initialized = False
 
 
+def _handle_mcp_refresh(args: dict, **_kwargs) -> str:
+    """mcp_refresh 工具 handler — 热重载 MCP server 配置。
+
+    重新读取 mcp_config.json，对比当前连接做 diff：
+    断开已删除的 server、连接新增的 server、重试之前失败的 server。
+    """
+    from system.context import get_runtime_context
+
+    try:
+        ctx = get_runtime_context()
+    except RuntimeError as exc:
+        return json.dumps(
+            {"refreshed": False, "error": str(exc)},
+            ensure_ascii=False,
+        )
+
+    if not ctx.mcp_config_path:
+        return json.dumps(
+            {"refreshed": False, "error": "No mcp_config_path configured"},
+            ensure_ascii=False,
+        )
+
+    config_path = Path(ctx.mcp_config_path)
+    if not config_path.exists():
+        return json.dumps(
+            {"refreshed": True, "removed": [], "added": [], "failed": [], "status": []},
+            ensure_ascii=False,
+        )
+
+    servers = _load_mcp_config(config_path)
+
+    try:
+        from abstract.mcp.client import refresh_mcp_servers
+        result = refresh_mcp_servers(servers)
+    except Exception as exc:
+        result = {"refreshed": False, "error": str(exc)}
+
+    return json.dumps(result, ensure_ascii=False)
+
+
 def _get_registered_mcp_tools() -> list[str]:
     """返回当前已注册的所有 MCP 工具名列表。"""
     try:
@@ -230,3 +273,45 @@ def _get_registered_mcp_tools() -> list[str]:
 
 # 导入时副作用：只要 ``import component.mcp_tools``，回调即安装完成。
 # 后续需显式调用 ``init_mcp(ctx)`` 以连接 server。
+
+# ---------------------------------------------------------------------------
+# 工具注册 — mcp_refresh
+# ---------------------------------------------------------------------------
+
+# 热重载 MCP server 配置。无参数。
+# 重新读取 mcp_config.json，对比当前连接做 diff：
+#   - 断开并注销已从配置中删除的 server
+#   - 连接新增的 server（包括之前启动失败的）
+#   - 重置 circuit breaker 状态
+# 返回：{refreshed, removed, added, failed, status}
+registry.register(
+    name="mcp_refresh",
+    toolset="mcp",
+    schema={
+        "description": """Hot-reload MCP server connections from the config file.
+
+Re-reads ``mcp_config.json`` and applies a diff against the currently
+connected servers:
+
+- **Removed**: servers present in the config before but absent now (or
+  explicitly ``enabled: false``) are shut down and their tools deregistered.
+- **Added**: servers newly present in the config (including servers that
+  failed to connect at startup) are connected and their tools registered.
+- **Circuit breaker**: error counts are reset for all affected servers.
+
+No parameters. Returns a JSON object with keys:
+``refreshed`` (bool), ``removed`` (list), ``added`` (list),
+``failed`` (list), ``status`` (list of server status dicts).
+
+Use this after editing ``mcp_config.json`` to add, remove, or re-enable
+MCP servers without restarting the agent.""",
+        "parameters": {
+            "type": "object",
+            "properties": {},
+        },
+    },
+    handler=_handle_mcp_refresh,
+    is_async=False,
+    danger_level=ToolDangerLevel.readonly,
+    availability=ToolAvailability.MAIN,
+)

@@ -91,7 +91,7 @@ import threading
 import time
 from dataclasses import dataclass
 from datetime import datetime
-from typing import IO, Callable, Coroutine, TYPE_CHECKING
+from typing import IO, Any, Callable, Coroutine, TYPE_CHECKING
 
 from urllib.parse import urlparse
 
@@ -2178,7 +2178,7 @@ def _ensure_mcp_loop():
         _mcp_thread.start()
 
 
-def _run_on_mcp_loop(coro_or_factory: Coroutine[object, object, object] | Callable[[], Coroutine[object, object, object]], timeout: float = 30):
+def _run_on_mcp_loop(coro_or_factory: Coroutine[object, object, object] | Callable[[], Coroutine[object, object, object]], timeout: float = 30) -> Any:
     """Schedule a coroutine on the MCP event loop and block until done.
 
     Accepts either a coroutine object or a zero-arg callable that returns one.
@@ -3250,6 +3250,121 @@ def register_mcp_servers(servers: dict[str, dict]) -> list[str]:
         logger.info(summary)
 
     return _existing_tool_names()
+
+
+def refresh_mcp_servers(new_config: dict[str, dict]) -> dict:
+    """Hot-reload MCP servers via a diff against the current connection set.
+
+    Compares ``new_config`` (read from ``mcp_config.json`` by the caller)
+    against the currently connected ``_servers`` and applies the delta:
+
+    1. **Remove**: servers present in ``_servers`` but absent from
+       ``new_config`` (or explicitly ``enabled: false``) are shut down
+       and their tools deregistered.
+    2. **Add**: servers present in ``new_config`` but absent from
+       ``_servers`` (including previously-failed servers that never
+       entered ``_servers``) are connected and their tools registered.
+    3. **Reset circuit breaker**: error counts and breaker timestamps
+       are cleared for all affected servers.
+
+    Scope limitation: if a server name is unchanged but its config
+    content changed (e.g. different command args), the diff does NOT
+    detect it — the server keeps its old config. Only additions and
+    removals are handled.
+
+    Returns a dict with keys:
+        refreshed (bool), removed (list[str]), added (list[str]),
+        failed (list[str]), status (list[dict] from get_mcp_status()).
+    """
+    if not _MCP_AVAILABLE:
+        return {"refreshed": False, "error": "MCP SDK not available"}
+
+    # Filter to valid, enabled entries only
+    enabled: dict[str, dict] = {}
+    for name, cfg in new_config.items():
+        if isinstance(cfg, dict) and ("command" in cfg or "url" in cfg):
+            if as_bool(cfg.get("enabled", True), default=True):
+                enabled[name] = cfg
+
+    _ensure_mcp_loop()
+
+    # Snapshot current servers under lock for diff calculation
+    with _lock:
+        current_names = set(_servers.keys())
+    config_names = set(enabled.keys())
+
+    to_remove = current_names - config_names
+    to_add = config_names - current_names
+
+    if not to_remove and not to_add:
+        return {
+            "refreshed": True,
+            "removed": [],
+            "added": [],
+            "failed": [],
+            "status": get_mcp_status(),
+        }
+
+    async def _do_refresh():
+        removed: list[str] = []
+        added: list[str] = []
+        failed: list[str] = []
+
+        # --- Phase 1: shut down removed servers in parallel ---
+        if to_remove:
+            with _lock:
+                remove_servers = {n: _servers[n] for n in to_remove if n in _servers}
+
+            results = await asyncio.gather(
+                *(srv.shutdown() for srv in remove_servers.values()),
+                return_exceptions=True,
+            )
+            for name, result in zip(remove_servers.keys(), results):
+                if isinstance(result, Exception):
+                    logger.debug(
+                        "MCP refresh: error shutting down '%s': %s",
+                        name, result,
+                    )
+                removed.append(name)
+                _reset_server_error(name)
+
+            with _lock:
+                for name in to_remove:
+                    _servers.pop(name, None)
+
+        # --- Phase 2: connect new servers in parallel ---
+        if to_add:
+            results = await asyncio.gather(
+                *(_discover_and_register_server(n, enabled[n]) for n in to_add),
+                return_exceptions=True,
+            )
+            for name, result in zip(to_add, results):
+                if isinstance(result, Exception):
+                    failed.append(name)
+                    logger.warning(
+                        "MCP refresh: failed to connect '%s': %s",
+                        name, _format_connect_error(result),
+                    )
+                else:
+                    added.append(name)
+                    _reset_server_error(name)
+
+        return removed, added, failed
+
+    removed, added, failed = _run_on_mcp_loop(_do_refresh, timeout=120)
+
+    logger.info(
+        "MCP refresh complete: removed=%d, added=%d, failed=%d",
+        len(removed), len(added), len(failed),
+    )
+
+    return {
+        "refreshed": True,
+        "removed": removed,
+        "added": added,
+        "failed": failed,
+        "status": get_mcp_status(),
+    }
 
 
 def get_mcp_status() -> list[dict]:

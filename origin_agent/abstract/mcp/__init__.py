@@ -29,6 +29,7 @@ from .client import (
     SamplingHandler,
     _tool_registry,
     register_mcp_servers,
+    refresh_mcp_servers,
     shutdown_mcp_servers,
     get_mcp_status,
     _build_safe_env,
@@ -52,6 +53,7 @@ __all__ = [
     "SamplingHandler",
     "_tool_registry",
     "register_mcp_servers",
+    "refresh_mcp_servers",
     "shutdown_mcp_servers",
     "get_mcp_status",
     # Helpers
