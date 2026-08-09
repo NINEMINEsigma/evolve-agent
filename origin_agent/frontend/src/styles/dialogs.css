@@ -23,6 +23,13 @@
   max-height: min(80vh, 500px);
 }
 
+.ask-detail {
+  margin-bottom: 12px;
+  max-height: 300px;
+  overflow-y: auto;
+  padding: 0 4px;
+}
+
 .ask-options {
   display: flex;
   flex-direction: column;

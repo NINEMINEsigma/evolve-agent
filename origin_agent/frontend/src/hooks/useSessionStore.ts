@@ -801,6 +801,7 @@ export function useSessionStore(callbacks: SessionStoreCallbacks = {}): SessionS
         setPendingAsk({
           request_id: msg.request_id,
           question: msg.question ?? "",
+          detail: msg.detail,
           options: msg.options,
         });
       }

@@ -58,6 +58,7 @@ export interface WSMessage {
   options?: Array<{ label: string; value: string }>;
   option?: string;
   custom_text?: string;
+  detail?: string;                    // ASK_REQUEST：问题详细说明（markdown）
   stream_id?: string;
   delta?: string;
   reasoning_delta?: string;
@@ -96,6 +97,7 @@ export interface ConfirmRequest {
 export interface AskRequest {
   request_id: string;
   question: string;
+  detail?: string;                   // 问题详细说明（markdown 渲染）
   options?: Array<{ label: string; value: string }>;
 }
 

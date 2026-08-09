@@ -1,5 +1,6 @@
 import { AskRequest } from "../types";
 import ModalWindow from "./primitives/ModalWindow";
+import MarkdownRenderer from "./primitives/MarkdownRenderer";
 
 interface AskDialogProps {
   pendingAsk: AskRequest | null;
@@ -42,6 +43,11 @@ export default function AskDialog({
         </>
       }
     >
+      {pendingAsk.detail && (
+        <div className="ask-detail">
+          <MarkdownRenderer content={pendingAsk.detail} />
+        </div>
+      )}
       {pendingAsk.options && pendingAsk.options.length > 0 && (
         <div className="ask-options">
           {pendingAsk.options.map((opt) => (
