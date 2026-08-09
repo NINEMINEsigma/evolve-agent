@@ -4,6 +4,7 @@ import "react18-json-view/src/style.css";
 import { ChatMessage, ContentBlock, MessageContent } from "../types";
 import MarkdownRenderer from "./primitives/MarkdownRenderer";
 import { renderToolResult } from "./ToolResultRenderer";
+import DiffBlock from "./DiffBlock";
 
 export function contentToText(content: MessageContent): string {
   if (typeof content === "string") return content;
@@ -133,8 +134,19 @@ export default function MessageBody({ message, streaming, onImageClick }: Messag
   }
 
   if (m.role === "tool") {
-    // tool_call（有 toolArgs）：用 JsonView 渲染参数对象
+    // tool_call（有 toolArgs）
     if (m.toolArgs) {
+      // Write tool_call：content 存在时显示为全绿行 diff
+      if (m.toolName === "Write" && typeof m.toolArgs.content === "string") {
+        const isAppend = m.toolArgs.mode === "append";
+        return (
+          <>
+            {isAppend && <div className="diff-mode-label">追加</div>}
+            <DiffBlock oldText="" newText={m.toolArgs.content} />
+          </>
+        );
+      }
+      // 其他 tool_call：用 JsonView 渲染参数对象
       return (
         <div className="tool-json-view">
           <JsonView src={m.toolArgs} collapsed={1} displaySize collapseStringsAfterLength={99999} />

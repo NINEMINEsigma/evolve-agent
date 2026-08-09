@@ -814,6 +814,15 @@ def _handle_edit(args: dict[str, Any]) -> dict:
             return tool_error("old_string not found in file", path=path)
         if replace_all:
             new_content = content.replace(old_string, new_string)
+            diffs = []
+            search_from = 0
+            while True:
+                pos = content.find(old_string, search_from)
+                if pos == -1:
+                    break
+                start_line = content[:pos].count("\n") + 1
+                diffs.append([old_string, new_string, start_line])
+                search_from = pos + len(old_string)
         else:
             count = content.count(old_string)
             if count > 1:
@@ -823,6 +832,9 @@ def _handle_edit(args: dict[str, Any]) -> dict:
                     path=path, matches=count,
                 )
             new_content = content.replace(old_string, new_string, 1)
+            start_pos = content.find(old_string)
+            start_line = content[:start_pos].count("\n") + 1
+            diffs = [[old_string, new_string, start_line]]
 
     # --- regex 模式 ---
     elif match_mode == "regex":
@@ -832,19 +844,22 @@ def _handle_edit(args: dict[str, Any]) -> dict:
             pattern = re.compile(old_string)
         except re.error as exc:
             return tool_error(f"Invalid regex pattern: {exc}", path=path)
-        matches = pattern.findall(content)
-        if not matches:
+        iter_matches = list(pattern.finditer(content))
+        if not iter_matches:
             return tool_error("regex pattern did not match anything in file", path=path)
         if replace_all:
             new_content = pattern.sub(new_string, content)
+            diffs = [[m.group(0), m.expand(new_string), content[:m.start()].count("\n") + 1] for m in iter_matches]
         else:
-            if len(matches) > 1:
+            if len(iter_matches) > 1:
                 return tool_error(
-                    f"regex matches {len(matches)} locations. "
+                    f"regex matches {len(iter_matches)} locations. "
                     f"Use replace_all=true or make the pattern more specific.",
-                    path=path, matches=len(matches),
+                    path=path, matches=len(iter_matches),
                 )
             new_content = pattern.sub(new_string, content, count=1)
+            m = iter_matches[0]
+            diffs = [[m.group(0), m.expand(new_string), content[:m.start()].count("\n") + 1]]
 
     # --- range 模式 ---
     elif match_mode == "range":
@@ -859,9 +874,11 @@ def _handle_edit(args: dict[str, Any]) -> dict:
                 f"Use replace_all=true or use more specific markers.",
                 path=path, matches=len(ranges),
             )
+        target_ranges = ranges if replace_all else ranges[:1]
+        diffs = [[content[s:e], new_string, content[:s].count("\n") + 1] for s, e in target_ranges]
         # 逆序替换以避免偏移
         new_content = content
-        for s_idx, e_end in reversed(ranges if replace_all else ranges[:1]):
+        for s_idx, e_end in reversed(target_ranges):
             new_content = new_content[:s_idx] + new_string + new_content[e_end:]
 
     else:
@@ -876,7 +893,7 @@ def _handle_edit(args: dict[str, Any]) -> dict:
         return tool_error(str(exc), path=path)
 
     _lsp_diags = _try_attach_lsp_diagnostics(path, new_content)
-    result = tool_result(success=True, path=path, replaced=True)
+    result = tool_result(success=True, path=path, replaced=True, diffs=diffs)
     if _lsp_diags is not None:
         result["diagnostics"] = _lsp_diags
     return result

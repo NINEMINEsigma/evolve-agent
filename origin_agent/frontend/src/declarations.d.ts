@@ -10,6 +10,7 @@ declare module "react-syntax-highlighter" {
     showLineNumbers?: boolean;
     wrapLines?: boolean;
     lineNumberStyle?: React.CSSProperties;
+    startingLineNumber?: number;
     [key: string]: unknown;
   }
 

@@ -673,6 +673,74 @@
   font-size: 0.88em;
 }
 
+/* ── Diff block ── */
+.diff-mode-label {
+  font-size: 12px;
+  color: var(--text-muted);
+  padding: 4px 8px;
+  background: var(--bg-tertiary);
+  border-radius: var(--radius-xs) var(--radius-xs) 0 0;
+  border: 1px solid var(--border);
+  border-bottom: none;
+}
+
+.diff-block {
+  margin: 0.5em 0;
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  border: 1px solid var(--border);
+  font-family: "SF Mono", "Fira Code", "Fira Mono", Menlo, Consolas, monospace;
+  font-size: 0.85em;
+}
+
+.diff-block-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.diff-line {
+  display: flex;
+  padding: 0 8px;
+  white-space: pre;
+  line-height: 1.5;
+  overflow-x: auto;
+}
+
+.diff-line-add {
+  background: rgba(var(--status-success-rgb), 0.10);
+}
+
+.diff-line-del {
+  background: rgba(var(--status-error-rgb), 0.10);
+}
+
+.diff-line-plain {
+  background: transparent;
+}
+
+.diff-line-prefix {
+  width: 1.5em;
+  text-align: center;
+  color: var(--text-muted);
+  user-select: none;
+  flex-shrink: 0;
+}
+
+.diff-line-number {
+  width: 3em;
+  text-align: right;
+  padding-right: 8px;
+  color: var(--text-muted);
+  user-select: none;
+  flex-shrink: 0;
+  border-right: 1px solid var(--border);
+}
+
+.diff-line-content {
+  flex: 1;
+}
+
 .message-bubble :not(pre) > code {
   background: var(--bg-tertiary);
   padding: 2px 6px;
