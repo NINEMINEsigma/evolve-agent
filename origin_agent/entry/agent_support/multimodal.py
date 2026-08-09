@@ -11,6 +11,7 @@ import logging
 from typing import Any
 
 from entity.messages import BaseMessage, ImageBlock, MessageBlock, TextBlock
+from entity.puretype import MessageContent
 
 logger = logging.getLogger(__name__)
 
@@ -136,7 +137,7 @@ def _strip_internal_fields(text: str) -> str:
     return json.dumps(filtered, ensure_ascii=False)
 
 
-def content_to_text(content: str | list[Any] | None) -> str:
+def content_to_text(content: MessageContent|None) -> str:
     """把 content（字符串或 block 列表）转成适合日志/前端展示/事件推送的纯文本。
 
     自动过滤 JSON 文本中所有下划线前缀的内部字段（_image、_meta 等），
@@ -170,7 +171,7 @@ def sanitize_image_payload(result: dict, keep_metadata: bool = True) -> dict:
     return pr_copy
 
 
-def summarize_message_for_log(content: str | list[Any] | None, max_text_len: int = 300) -> str:
+def summarize_message_for_log(content: MessageContent|None, max_text_len: int = 300) -> str:
     """将消息（纯文本或多模态 blocks）转为适合日志的短字符串。
 
     图片 block 会被替换为 [image_url] 占位符，避免 base64 撑爆日志。

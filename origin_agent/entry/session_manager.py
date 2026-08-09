@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import Any, TYPE_CHECKING
 
 from entity.messages import History, CharacterConversationMessage, BaseMessage
-from entity.puretype import Role
+from entity.puretype import Role, MessageContent
 from entity.constant import USER_CHARACTER_NAME
 from system.templates import read_template
 from system.session_store import SessionStore
@@ -96,7 +96,7 @@ class LoopSessionManager:
     async def rotate_session_for_continuation(
         self,
         session_id: str,
-        pending_user_message: str | None = None,
+        pending_user_message: MessageContent | None = None,
     ) -> str | None:
         """终结旧会话并创建继承会话，返回新 session_id 或 None。"""
         from entity.puretype import Role

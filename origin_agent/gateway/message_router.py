@@ -33,7 +33,7 @@ from fastapi import WebSocket
 
 from .chat import Message, MessageType
 from entity.constant import UPLOAD_FILENAME_TIME_FORMAT, UPLOADS_DIR_NAME, UPLOADS_WS_PREFIX
-from entity.puretype import SessionInfo, SessionStatus, ClientInfo
+from entity.puretype import SessionInfo, SessionStatus, ClientInfo, MessageContent
 
 if TYPE_CHECKING:
     from entry.parent_agent_loop import ParentAgentLoop
@@ -528,7 +528,7 @@ class MessageRouter:
     async def _process_main_session(
         self,
         loop: IMainSessionLoop,
-        content: str,
+        content: MessageContent,
         msg: Message,
         target_sessions: list[str],
         sub_ids: list[str],
@@ -538,7 +538,7 @@ class MessageRouter:
         if "main" not in target_sessions:
             return "Message forwarded to sub-agent(s)."
 
-        main_content = content
+        main_content: MessageContent = content
         sub_names: list[str] = []
         for s in sub_ids:
             name = name_map.get(s)
@@ -550,10 +550,11 @@ class MessageRouter:
                     self.sid, s,
                 )
         if sub_names:
-            main_content = (
-                f"[This message is also shared with sub-agents: {', '.join(sub_names)}]\n\n"
-                f"{content}"
-            )
+            prefix = f"[This message is also shared with sub-agents: {', '.join(sub_names)}]\n\n"
+            if isinstance(content, list):
+                main_content = [{"type": "text", "text": prefix}] + content
+            else:
+                main_content = prefix + str(content)
         try:
             reply = await loop.loop.process_message(
                 main_content,

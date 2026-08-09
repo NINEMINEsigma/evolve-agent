@@ -1,7 +1,7 @@
 from typing import * # type: ignore
 import logging
 from pydantic import BaseModel, Field, PrivateAttr
-from entity.puretype import Role
+from entity.puretype import Role, MessageContent
 from entity.constant import USER_CHARACTER_NAME, ALL_AGENTS_CHARACTER_REF_NAME
 from system.templates import read_template
 from threading import Lock
@@ -64,7 +64,7 @@ class BaseMessage(BaseModel):
         # 当前作为运行中的agent的角色
         current_character_agent:str, 
         **kwargs
-        ) -> str|list|None:
+        ) -> MessageContent|None:
         '''
         将message转换为字符串或列表, 并合成必要的前缀后缀以及格式化
 
@@ -76,13 +76,16 @@ class BaseMessage(BaseModel):
             str|list: 转换后的字符串或列表
         '''
         content: str|list[MessageBlock]|list[Any] = self.content
+        result: MessageContent|None = None
+        # 当消息为纯文本时
         if isinstance(content, str):
             result = str(content)
             for key, value in kwargs.items():
                 result = result.replace("{{" + key + "}}", str(value))
+        # 当消息含有多模态块时
         else:
             e = len(content)
-            result = [None] * e
+            result = [None] * e # type: ignore
             for i in range(e):
                 cur = content[i]
                 if isinstance(cur, TextBlock):
@@ -112,7 +115,7 @@ class CharacterSystemMessage(CharacterMessage):
         # 当前作为运行中的agent的角色
         current_character_agent:str, 
         **kwargs
-        ) -> str|list[MessageBlock]|None:
+        ) -> str|list[dict[str, Any]]|None:
         '''
         如果不是当前角色的提示词, 被略过, 返回None
         '''
@@ -212,7 +215,7 @@ class CharacterConversationMessage(CharacterMessage):
         current_character_agent:str, 
         is_last_user_message: bool = False,
         **kwargs
-        ) -> str|list[MessageBlock]|None:
+        ) -> MessageContent|None:
         '''
         获取角色对话消息的字符串内容, 如果不可见将被略过, 可见时将会对所有非消息接收者第一人称的消息都施加前缀修饰
         '''
@@ -257,8 +260,17 @@ class CharacterConversationMessage(CharacterMessage):
         if is_last_user_message:
             identity_line = _Identity_Prefix_Template.replace("{{CURRENT_CHARACTER}}", current_character_agent)
             prefix = identity_line + prefix
-        # 返回修饰后的消息
-        return f"{prefix}\n---\n{raw_message}\n---\n{self.message_suffix}{non_persistent_injection_suffix}"
+        # 当消息含有多模态块时
+        if isinstance(raw_message, list):
+            result: list[dict[str, Any]] = [{"type": "text", "text": f"{prefix}\n---\n"}]
+            result.extend(raw_message)
+            suffix = f"\n---\n{self.message_suffix}{non_persistent_injection_suffix}"
+            if suffix.strip():
+                result.append({"type": "text", "text": suffix})
+            return result
+        # 当消息为纯文本时
+        else:
+            return f"{prefix}\n---\n{raw_message}\n---\n{self.message_suffix}{non_persistent_injection_suffix}"
 
 
 class ToolResultMessage(CharacterMessage):

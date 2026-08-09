@@ -18,7 +18,7 @@ from typing import Any, TYPE_CHECKING
 
 from pydantic import BaseModel
 
-from entity.puretype import Role, ToolAvailability, SessionMessageEntry, TokenUsageRecord
+from entity.puretype import Role, ToolAvailability, SessionMessageEntry, TokenUsageRecord, MessageContent
 from entity.messages import (
     History,
     BaseMessage,
@@ -360,7 +360,7 @@ class BaseAgentLoop(ABC):
     @abstractmethod
     async def process_message(
         self,
-        user_message: str,
+        user_message: MessageContent,
         *,
         skip_append: bool = False,
         character_name: str = USER_CHARACTER_NAME,
@@ -972,7 +972,7 @@ class BasePrivateChatAgentLoop(BaseAgentLoop):
         return ""
 
     def _build_history_messages(
-        self, user_message: str = ""
+        self, user_message: MessageContent = ""
     ) -> list[BaseMessage]:
         """构建发送给 LLM 的完整历史消息列表（含 system prompt）。
 

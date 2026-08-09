@@ -23,7 +23,7 @@ from abstract.tools.registry import registry as tool_registry
 from component.approval import ask_agent_reason
 from abstract.llm.client import BaseLLMClient
 from abstract.llm.loader import create_llm_client
-from entity.puretype import LLMResponse, ToolCallRequest, Role, ToolAvailability, TokenUsageRecord
+from entity.puretype import LLMResponse, ToolCallRequest, Role, ToolAvailability, TokenUsageRecord, MessageContent
 from system.session_store import SessionStore
 from entity.constant import (
     LOG_PREVIEW_CHARS,
@@ -200,7 +200,7 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
     # -- 超限检查步骤（可被子类覆写）-------------------------------------------
 
     async def _check_over_limit_before_process(
-        self, sid: str, user_message: str,
+        self, sid: str, user_message: MessageContent,
     ) -> str:
         """process_message 入口处的超限检查：超限时旋转会话，返回可能更新后的 sid。"""
         if self._lifecycle.is_context_over_limit():
@@ -244,7 +244,7 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
 
     async def process_message(
         self,
-        user_message: str,
+        user_message: MessageContent,
         *,
         skip_append: bool = False,
         character_name: str = USER_CHARACTER_NAME,
@@ -282,7 +282,7 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
         self,
         sid: str,
         messages: list[BaseMessage],
-        user_message: str,
+        user_message: MessageContent,
     ) -> str:
         """执行 LLM 工具调用循环（含 inbox 消息消费）。"""
         self._cancel_event.clear()

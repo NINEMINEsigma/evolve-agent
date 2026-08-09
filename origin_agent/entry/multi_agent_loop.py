@@ -19,7 +19,7 @@ from entity.messages import (
     History,
     CharacterConversationMessage,
 )
-from entity.puretype import Role, ToolAvailability, AgentConfig, LoopMeta, Loop, TokenUsageRecord
+from entity.puretype import Role, ToolAvailability, AgentConfig, LoopMeta, Loop, TokenUsageRecord, MessageContent
 from entity.constant import (
     MAIN_AGENT_CHARACTER_NAME,
     USER_CHARACTER_NAME,
@@ -290,7 +290,7 @@ class MultiAgentLoop(BaseAgentLoop, IMainSessionLoop):
 
     async def process_message(
         self,
-        user_message: str,
+        user_message: MessageContent,
         *,
         skip_append: bool = False,
         character_name: str = USER_CHARACTER_NAME,
