@@ -246,9 +246,8 @@ def _handle_read(args: dict[str, Any]) -> dict:
                 },
                 "_note": (
                     "Image metadata returned. width/height are parsed via Pillow "
-                    "(None for SVG or on failure). If the model supports vision, "
-                    "the image content is attached as a multimodal block for direct analysis; "
-                    "otherwise you will receive only the text metadata without the image content."
+                    "(None for SVG or on failure). The image content is attached "
+                    "as a multimodal block for direct analysis."
                 ),
                 "total_lines": 0,
                 "content": "",
@@ -434,7 +433,7 @@ registry.register(
         # 当文件 MIME 类型命中图片白名单（PNG/JPEG/WebP/GIF/BMP/TIFF/SVG）时自动走图片分支。
         # 前置条件：probe_vision_capability 必须已探测且 capable=true，否则返回错误不读文件。
         # 支持最大 20MB。返回 type:"image"，含 path、mime_type、size、width、height、_image（base64+mime_type）、_note。
-        # _image 载荷由 AgentLoop 自动处理：vision 模型作为多模态 content block 送入 LLM，非 vision 模型剥离为文本元数据。
+        # _image 载荷由 tool_result_to_content 提取并构造为 ImageBlock + TextBlock（元数据），base64 不进入 TextBlock。
         # offset/limit 在图片分支中被忽略（固定填充为 0）。
         #
         # ## 前置条件
@@ -478,7 +477,7 @@ registry.register(
 ## Effect
 **File branch**: Returns file content prefixed with 1-indexed line numbers. Supports pagination via offset (0-indexed start) and limit (max lines).
 **Directory branch**: Returns entry names; directory entries suffixed with '/'. offset and limit are ignored for directories (filled as 0).
-**Image branch**: Auto-detected by MIME type (PNG, JPEG, WebP, GIF, BMP, TIFF, SVG; max 20 MB). Returns metadata plus the `_image` payload (base64 + mime_type). offset and limit are ignored for images (filled as 0).
+**Image branch**: Auto-detected by MIME type (PNG, JPEG, WebP, GIF, BMP, TIFF, SVG; max 20 MB). Returns metadata plus the `_image` payload (base64 + mime_type). Requires a vision-capable model (`probe_vision_capability` must return `capable=true`); non-vision models get an error and the file is not read. offset and limit are ignored for images (filled as 0).
 All branches return absolute_path (resolved absolute path), total_lines (line count; 0 for directories/images), entries (directory entries; empty array for files/images), and a type discriminant ("file", "directory", or "image").
 
 ## Returns
@@ -494,13 +493,13 @@ Image branch:
 ```json
 {"type": "image", "path": "ws:uploads/screenshot.png", "absolute_path": "...", "mime_type": "image/png", "size": 12345, "width": 800, "height": 600, "_image": {"base64": "...", "mime_type": "image/png"}, "_note": "Image metadata returned...", "total_lines": 0, "content": "", "remaining": 0, "offset": 0, "limit": 0, "entries": [], "count": null}
 ```
-`width`/`height` are parsed via Pillow; `null` for SVG or on parse failure. The `_image` payload is auto-handled by AgentLoop: vision-capable models receive it as a multimodal content block; non-vision models get only text metadata.
+`width`/`height` are parsed via Pillow; `null` for SVG or on parse failure. The `_image` payload is extracted by `tool_result_to_content` into an `ImageBlock` (multimodal) and a `TextBlock` (metadata only, no base64).
 
 ## When to Use
 - Targets a file → file branch; targets a directory → directory branch; image files → image branch (auto-detected).
 - Use skills: prefix to replace the old read_skill_file tool (e.g. Read(path="skills:my-skill/scripts/hello.py")).
 - Use absolute_path to resolve paths when you have a readable target.
-- Read image files (requires vision-capable model; call `probe_vision_capability` first).
+- Read image files (requires vision-capable model; call `probe_vision_capability` first). Non-vision models will get an error and the file is not read.
 
 ## Side Effects / Notes
 - No file system side effects, read-only query.

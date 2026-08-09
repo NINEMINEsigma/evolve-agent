@@ -1,8 +1,8 @@
 """Vision 能力探测工具。
 
 使用当前 agent 的 LLM 配置发送一个仅含 dummy 图片的独立请求，
-检测模型是否接受 image_url content block。结果缓存到本地 JSON，
-避免重复探测。
+检测模型是否接受 image_url content block。每次调用覆盖缓存结果，
+一次探测全局生效，无需重复调用。
 """
 
 from __future__ import annotations
@@ -94,27 +94,12 @@ def _is_vision_rejection(exc: Exception) -> bool:
 
 async def _handle_probe_vision(args: dict[str, Any], context: ToolContext | None = None) -> dict:
     """探测当前配置的 LLM 模型是否支持 vision 输入。"""
-    force: bool = bool(args.get("force", False))
-
     ctx = context.runtime_context if context is not None else get_runtime_context()
     session_id = context.session_id if context is not None else ""
     model_name: str = ctx.llm_model or ""
-    if not model_name:
-        return tool_error("No LLM model configured in RuntimeContext")
 
     key = _cache_key(model_name)
     cache = _load_cache()
-    if not force and key in cache:
-        capable: bool = cache[key]
-        return tool_result(
-            capable=capable,
-            model=model_name,
-            source="cache",
-            message=(
-                f"Model {model_name} {'supports' if capable else 'does not support'} "
-                f"vision (cached)."
-            ),
-        )
 
     client = create_llm_client(ctx.llm_client_name, ctx)
     probe_messages: list[BaseMessage] = [
@@ -173,14 +158,10 @@ registry.register(
         "function": {
             "name": "probe_vision_capability",
             # 通过发送一张最小 dummy 图片（1x1 透明 PNG）测试当前 LLM 模型是否支持图片/vision 输入。
-            # 结果缓存到本地 JSON 文件，同一模型后续调用直接返回缓存结果，不消耗 API 请求。
-            #
-            # ## 前置条件
-            # 必须已配置 LLM 模型（RuntimeContext.llm_model 非空）。
+            # 每次调用都会重新探测并覆盖缓存结果，结果全局生效，无需重复调用。
             #
             # ## 调用效果
-            # 若缓存命中且 force=false，立即返回缓存结果。
-            # 若缓存未命中或 force=true，发送一次含 1x1 透明 PNG 的 chat 请求探测。
+            # 发送一次含 1x1 透明 PNG 的 chat 请求探测，覆盖缓存。
             # - API 接受请求 → 模型支持 vision → 结果缓存为 capable=true。
             # - API 以 vision 相关关键词拒绝图片内容块 → 结果缓存为 capable=false。
             # - API 因非 vision 错误（网络、认证、超时）失败 → 不写缓存，工具返回错误。
@@ -188,7 +169,7 @@ registry.register(
             # ## 返回
             # 成功时：
             # ```json
-            # {"capable": true, "model": "gpt-4o", "source": "probe|cache", "message": "..."}
+            # {"capable": true, "model": "gpt-4o", "source": "probe", "message": "..."}
             # ```
             # vision 拒绝时：
             # ```json
@@ -200,22 +181,18 @@ registry.register(
             # ```
             #
             # ## 何时使用
-            # - 模型变更后确认 vision 能力。
+            # - 需要确认当前模型是否支持 vision 输入时调用一次即可，结果全局缓存。
             # - 调用 Read 读取图片前验证模型不会拒绝图片内容。
             #
             # ## 副作用/注意
-            # - 每次未缓存的探测消耗恰好一次 API 请求。
+            # - 每次调用消耗恰好一次 API 请求。
             # - 缓存持久化到本地 JSON 文件（vision_capability_cache.json），跨会话保留直到运行时工作空间重置。
             # - 非 vision 错误（网络、认证、超时）不写入缓存，agent 可重试。
             "description": """Test whether the current LLM model supports image/vision input by sending a minimal dummy image (1x1 transparent PNG).
-Results are cached to a local JSON file; subsequent calls for the same model return the cached result immediately without consuming an API request.
-
-## Prerequisites
-An LLM model must be configured (RuntimeContext.llm_model must be non-empty).
+Each call re-probes and overwrites the cached result. The result is globally cached, so calling once is sufficient — no need to repeat.
 
 ## Effect
-If a cached result exists and `force` is false, returns the cached result immediately.
-If no cache exists or `force` is true, sends a single chat request with a 1x1 transparent PNG.
+Sends a single chat request with a 1x1 transparent PNG and overwrites the cache.
 - API accepts the request → model supports vision → result cached as `capable=true`.
 - API rejects the image content block with vision-related keywords → result cached as `capable=false`.
 - API fails with a non-vision error (network, auth, timeout) → no cache written, tool returns error.
@@ -223,7 +200,7 @@ If no cache exists or `force` is true, sends a single chat request with a 1x1 tr
 ## Returns
 On success:
 ```json
-{"capable": true, "model": "gpt-4o", "source": "probe|cache", "message": "..."}
+{"capable": true, "model": "gpt-4o", "source": "probe", "message": "..."}
 ```
 On vision rejection:
 ```json
@@ -235,23 +212,16 @@ On non-vision error:
 ```
 
 ## When to Use
-- After the model changes, confirm vision capability.
+- Call once to confirm whether the current model supports vision input; the result is globally cached.
 - Before using Read on image files, verify the model won't reject image content.
 
 ## Side Effects / Notes
-- Each uncached probe consumes exactly one API request.
+- Each call consumes exactly one API request.
 - Cache is persisted to a local JSON file (vision_capability_cache.json) and survives sessions until the runtime workspace is reset.
 - Non-vision errors (network, auth, timeout) are NOT cached; the agent can retry.""",
             "parameters": {
                 "type": "object",
-                "properties": {
-                    "force": {
-                        "type": "boolean",
-                        "default": False,
-                        # 若为 true，即使缓存中已有结果也重新探测。默认 false。
-                        "description": """If true, re-probe the model even when a cached result already exists. Default: false.""",
-                    },
-                },
+                "properties": {},
             },
         },
     },

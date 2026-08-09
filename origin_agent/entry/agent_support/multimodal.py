@@ -97,14 +97,14 @@ def tool_result_to_content(result: Any) -> str | list[MessageBlock]:
     """把工具返回结果转换为 ToolResultMessage 可用的 content。
 
     - 字符串：原样返回。
-    - 含 _image 字段的 dict：生成 [ImageBlock, TextBlock]。
+    - 含 _image 字段的 dict：pop _image 后生成 [ImageBlock, TextBlock（元数据，不含 base64）]。
     - 其他 dict：json.dumps 成字符串。
     - 其他：str(result)。
     """
     if isinstance(result, str):
         return result
     if isinstance(result, dict):
-        image = result.get("_image")
+        image = result.pop("_image", None)
         if isinstance(image, dict) and image.get("base64"):
             return build_image_content_blocks(image, json.dumps(result, ensure_ascii=False))
         return json.dumps(result, ensure_ascii=False)
