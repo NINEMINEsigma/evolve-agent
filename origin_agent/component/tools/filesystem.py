@@ -888,7 +888,9 @@ registry.register(
     schema={
         # 通过替换匹配文本为 new_string 来编辑文件。支持三种匹配模式：
         #   - exact（默认）：old_string 精确匹配，必须唯一出现或设置 replace_all=true。
-        #   - regex：old_string 作为正则 pattern，new_string 支持 \1 反向引用。
+        #   - regex：old_string 作为正则 pattern，new_string 支持 Python re.sub 替换语法：
+        #     \1~\99（编号组）、\g<1>（显式编号组，推荐）、\g<name>（命名组）、\g<0>（整个匹配）、\\（字面反斜杠）。
+        #     注意：$1、$& 等 JS/Perl 语法不被支持，会被当作字面文本。
         #   - range：通过 start_marker 和 end_marker 定位整个区间（含标记），替换为 new_string。
         #
         # exact / regex 模式下 old_string 必填，range 模式下 start_marker + end_marker 必填。
@@ -900,7 +902,7 @@ registry.register(
         # - 必须先使用 Read 查看当前内容及行号。
         # - exact 模式：从 Read 输出中选取 old_string，保留行号前缀之后的精确缩进。
         # - exact 模式：包含 2-3 行周围上下文以确保唯一匹配。
-        # - regex 模式：old_string 为 Python 正则表达式，new_string 可用 \1 等反向引用。
+        # - regex 模式：old_string 为 Python 正则表达式，new_string 用 \1 或 \g<1> 引用捕获组（不支持 $1）。
         # - range 模式：start_marker 到其后最近 end_marker（含两端）的整个区间被替换。
         # - 设置 replace_all=true 可替换所有匹配项（跳过唯一性检查），所有模式通用。
         # - 修改少量行时始终优先使用此工具替代 Write。
@@ -928,7 +930,7 @@ registry.register(
         "description": f"""Edit a file by replacing matched text with new_string. Supports three matching modes via `match_mode`:
 
 - **exact** (default): `old_string` must match exactly once (or set `replace_all=true`). Classic find-and-replace.
-- **regex**: `old_string` is a Python regex pattern; `new_string` supports backreferences (\\1, \\2, ...).
+- **regex**: `old_string` is a Python regex pattern. In `new_string`, use Python `re.sub` replacement syntax: `\\1`-`\\99` (numbered group), `\\g<1>` (explicit numbered, recommended), `\\g<name>` (named group via `(?P<name>...)`), `\\g<0>` (full match), `\\\\` (literal backslash). Do NOT use `$1` or `$&` — these are JS/Perl syntax and will be inserted as literal text.
 - **range**: Replace the entire region from `start_marker` to the nearest `end_marker` (both markers included) with `new_string`.
 
 All modes share `replace_all` (default false): when false, multiple matches return an error; when true, all matches are replaced.
@@ -938,7 +940,7 @@ Both `old_string` and `new_string` are limited to {EDIT_FILE_MAX_CHARS} characte
 Usage:
 - You must use Read first to inspect current content with line numbers.
 - exact: pick old_string from Read output, preserve exact indentation after the line number prefix. Include 2-3 lines of surrounding context for uniqueness.
-- regex: old_string is a Python regex. new_string can use \\1 backreferences.
+- regex: old_string is a Python regex. new_string uses Python replacement syntax: \\1, \\g<1>, \\g<name>, \\g<0>. Do NOT use $1 (JS/Perl) — it will be literal text.
 - range: provide start_marker and end_marker. The entire span from start_marker to the nearest end_marker (inclusive) is replaced by new_string.
 - Set replace_all=true to replace all matches (skips uniqueness check).
 - ALWAYS prefer editing existing files over Write for small changes.
