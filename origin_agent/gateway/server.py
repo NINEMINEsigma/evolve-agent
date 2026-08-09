@@ -1440,8 +1440,9 @@ async def skills_list():
     """
     try:
         from abstract.skills.loader import list_skills
-        from system.pathutils import find_repo_root
-        skills_dir = find_repo_root() / "skills"
+        from system.application import Application
+        from entity.constant import Namespace
+        skills_dir = Application.current().sandbox.get_base(Namespace.SKILLS)
         if not skills_dir.exists():
             return {"skills": [], "total": 0}
         skills = list_skills(skills_dir=skills_dir)

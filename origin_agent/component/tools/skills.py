@@ -15,7 +15,6 @@ from abstract.skills.manager import create_skill, update_skill, write_skill_file
 from abstract.skills.loader import list_skills, load_skill
 from abstract.tools.registry import registry, tool_error, tool_result
 
-from system.pathutils import find_repo_root
 
 logger = logging.getLogger(__name__)
 
@@ -24,8 +23,10 @@ logger = logging.getLogger(__name__)
 
 
 def _skills_dir() -> Path:
-    """返回规范的 skill 目录（项目根目录 / skills）。"""
-    return (find_repo_root() / "skills").resolve()
+    """返回规范的 skill 目录（通过 Sandbox 获取）。"""
+    from system.application import Application
+    from entity.constant import Namespace
+    return Application.current().sandbox.get_base(Namespace.SKILLS)
 
 
 def _format_skill_list(skills_dir: Path | None = None) -> dict:

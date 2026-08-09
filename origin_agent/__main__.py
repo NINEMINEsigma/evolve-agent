@@ -17,6 +17,7 @@ import subprocess
 import sys
 from pathlib import Path
 from system.pathutils import get_agent_dir, find_repo_root
+from entity.constant import Namespace
 
 # 确保 agent 自身目录在 sys.path 最前面，使
 # ``from main import App`` 和 ``from system.context import RuntimeContext``
@@ -29,7 +30,7 @@ if _AGENT_DIR not in sys.path:
 
 # 将 third-party 包目录加入 sys.path，使 ``from easysave import ...``
 # 等第三方依赖在任意模块中都能直接导入，避免每个模块重复注入路径。
-_THIRD_DIR: Path = find_repo_root() / "third"
+_THIRD_DIR: Path = find_repo_root() / Namespace.THIRD.value
 for _p in (_THIRD_DIR, _THIRD_DIR / "easysave"):
     if str(_p) not in sys.path:
         sys.path.insert(0, str(_p))
@@ -112,14 +113,6 @@ def _build_context(cli: dict) -> RuntimeContext:
         workspace       = Path(cli["workspace"]).resolve(),
         agentspace      = Path(cli["agentspace"]).resolve(),
         fork_path       = Path(cli["evolve"]).resolve() if "evolve" in cli else Path(cli["workspace"]).resolve() / "slow_agent_space",
-        skills_path     = (find_repo_root() / "skills").resolve(),
-        # TODO: 不应该在这里被定义
-        # 只读命名空间 — 映射项目根下的 third 与 custom 系列目录（与 skills_path 同基准）
-        third_path              = (find_repo_root() / "third").resolve(),
-        custom_hooks_path       = (find_repo_root() / "custom_hooks").resolve(),
-        custom_llm_client_path  = (find_repo_root() / "custom_llm_client").resolve(),
-        custom_models_path      = (find_repo_root() / "custom_models").resolve(),
-        custom_tools_path       = (find_repo_root() / "custom_tools").resolve(),
         log_path        = Path(cli["log"]).resolve(),
         mode            = str(cli["mode"]),
         console_log     = as_bool(cli["console_log"]),

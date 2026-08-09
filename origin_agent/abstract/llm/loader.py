@@ -15,7 +15,6 @@ from typing import Any
 
 from abstract.llm.client import BaseLLMClient
 from system.context import RuntimeContext
-from system.pathutils import find_repo_root
 
 logger = logging.getLogger(__name__)
 
@@ -28,7 +27,9 @@ def _ensure_namespace_package() -> None:
     """
     if "custom_llm_client" in sys.modules:
         return
-    client_dir = find_repo_root() / "custom_llm_client"
+    from system.application import Application
+    from entity.constant import Namespace
+    client_dir = Application.current().sandbox.get_base(Namespace.CUSTOM_LLM_CLIENT)
     pkg = types.ModuleType("custom_llm_client")
     pkg.__path__ = [str(client_dir)]
     sys.modules["custom_llm_client"] = pkg
@@ -82,7 +83,9 @@ def list_llm_clients() -> list[str]:
 
     仅列出以 ``.py`` 结尾且不是 ``_`` 开头的文件，并去掉 ``.py`` 后缀。
     """
-    client_dir = find_repo_root() / "custom_llm_client"
+    from system.application import Application
+    from entity.constant import Namespace
+    client_dir = Application.current().sandbox.get_base(Namespace.CUSTOM_LLM_CLIENT)
     if not client_dir.is_dir():
         return []
     return [

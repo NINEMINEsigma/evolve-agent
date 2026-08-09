@@ -19,10 +19,12 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-def load_message_hooks(repo_root: Path, logger: logging.Logger) -> list[dict]:
-    """加载 custom_hooks 中的消息扩展 hook。"""
+def load_message_hooks(hooks_dir: Path, logger: logging.Logger) -> list[dict]:
+    """加载 custom_hooks 中的消息扩展 hook。
+
+    hooks_dir 由调用方从 Sandbox.get_base(Namespace.CUSTOM_HOOKS) 获取。
+    """
     hooks: list[dict] = []
-    hooks_dir = repo_root / "custom_hooks"
     logger.info("Loading message hooks from %s", hooks_dir)
     if not hooks_dir.is_dir():
         logger.info("Hooks directory does not exist: %s", hooks_dir)
@@ -148,11 +150,16 @@ def build_agent_system_prompt(
     )
 
 
-def collect_skill_prompts(skills_dir: Path | str = Path("skills")) -> list[str]:
+def collect_skill_prompts(skills_dir: Path | None = None) -> list[str]:
     """生成 skill 名称和描述清单，避免全量内容注入 system prompt。"""
     blocks: list[str] = []
     try:
         from abstract.skills.loader import list_skills
+
+        if skills_dir is None:
+            from system.application import Application
+            from entity.constant import Namespace
+            skills_dir = Application.current().sandbox.get_base(Namespace.SKILLS)
 
         skills: list[dict] = list_skills(skills_dir=Path(skills_dir))
         if skills:

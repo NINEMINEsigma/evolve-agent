@@ -21,7 +21,6 @@ from entity.constant import (
     APPROVAL_LOCAL_DISABLED_VALUES,
     APPROVAL_JSON_SCHEMA_CACHE_FILENAME,
     APPROVAL_RESPONSE_FORMAT_NAME,
-    CUSTOM_MODELS_DIR,
 )
 from entity.messages import BaseMessage
 from entity.puretype import Role
@@ -81,11 +80,13 @@ class LocalApprovalBackend(ApprovalBackend):
             return self._engine  # type: ignore[return-value]
 
         try:
-            from system.pathutils import find_repo_root
+            from system.application import Application
+            from entity.constant import Namespace
             from third.llamaapis import InferenceEngine as LlamaEngine, ModelConfig
 
-            root = find_repo_root()
-            model_path = str((root / CUSTOM_MODELS_DIR / self._ctx.approval_model_path.strip()).resolve())
+            model_path = str(
+                Application.current().sandbox.get_base(Namespace.CUSTOM_MODELS) / self._ctx.approval_model_path.strip()
+            )
             cuda = bool(self._ctx.approval_model_cuda)
             n_gpu_layers = -1 if cuda else 0
 

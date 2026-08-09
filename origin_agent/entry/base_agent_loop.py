@@ -799,7 +799,9 @@ class BaseAgentLoop(ABC):
         """加载 custom_hooks 目录中的消息扩展 hook，结果按 loop 实例缓存。"""
         if self._message_hooks_cache is not None:
             return self._message_hooks_cache
-        hooks = load_message_hooks(find_repo_root(), logger)
+        from entity.constant import Namespace
+        hooks_dir: Path = self.app.sandbox.get_base(Namespace.CUSTOM_HOOKS)
+        hooks = load_message_hooks(hooks_dir, logger)
         self._message_hooks_cache = hooks
         return hooks
 

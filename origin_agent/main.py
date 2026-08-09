@@ -17,7 +17,7 @@ from system.application import Application
 if TYPE_CHECKING:
     from system.context import RuntimeContext
 
-from entity.constant import CUSTOM_MODELS_DIR, CUSTOM_TOOLS_DIR
+from entity.constant import Namespace
 
 logger = logging.getLogger(__name__)
 
@@ -189,9 +189,9 @@ class App:
             discover_builtin_tools(str(_agent_root / "component" / "multiagenttools"), "component.multiagenttools")
             discover_builtin_tools(str(_agent_root / "component" / "automation"), "component.automation")
             discover_builtin_tools(str(_agent_root / "component" / "browser"), "component.browser")
-            _custom_tools: Path = _root / CUSTOM_TOOLS_DIR
+            _custom_tools: Path = Application.current().sandbox.get_base(Namespace.CUSTOM_TOOLS)
             if _custom_tools.exists():
-                discover_builtin_tools(str(_custom_tools), CUSTOM_TOOLS_DIR)
+                discover_builtin_tools(str(_custom_tools), Namespace.CUSTOM_TOOLS.value)
             # 注册 MCP 工具（桥接 + 连接 server）
             import component.mcp_tools  # noqa: F401 — 安装 MCP 回调
             component.mcp_tools.init_mcp(self.ctx)
@@ -239,8 +239,7 @@ class App:
         _local_disabled = {"", "false", "0", "no"}
         _local_path_raw = (self.ctx.approval_model_path or "").strip().lower()
         if _local_path_raw not in _local_disabled:
-            from system.pathutils import find_repo_root
-            gguf_path = find_repo_root() / CUSTOM_MODELS_DIR / self.ctx.approval_model_path.strip()
+            gguf_path = Application.current().sandbox.get_base(Namespace.CUSTOM_MODELS) / self.ctx.approval_model_path.strip()
             if gguf_path.is_file():
                 try:
                     from third.llamaapis.system.builder import LlamaBuilder

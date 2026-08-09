@@ -12,12 +12,12 @@ LLM 可见的路径是**逻辑路径**（``ws:logs/error.log``），
     ``fork:``        ctx.fork_path        rw      读写进化代码
     ``ws:``          ctx.agentspace       rw      通用 agent I/O
     ``fix:``         ctx.fix_path         rw      修复目标（fallback）
-    ``skills:``      ctx.skills_path      rw      skill 文件读写
-    ``third:``       ctx.third_path       ro      第三方子模块（只读）
-    ``custom_hooks:``       ctx.custom_hooks_path       ro  自定义钩子（只读）
-    ``custom_llm_client:``  ctx.custom_llm_client_path  ro  自定义 LLM 客户端（只读）
-    ``custom_models:``      ctx.custom_models_path      ro  本地模型文件（只读）
-    ``custom_tools:``       ctx.custom_tools_path       ro  自定义工具（只读）
+    ``skills:``      find_repo_root()/skills   rw      skill 文件读写
+    ``third:``       find_repo_root()/third    ro      第三方子模块（只读）
+    ``custom_hooks:``       find_repo_root()/custom_hooks       ro  自定义钩子（只读）
+    ``custom_llm_client:``  find_repo_root()/custom_llm_client  ro  自定义 LLM 客户端（只读）
+    ``custom_models:``      find_repo_root()/custom_models      ro  本地模型文件（只读）
+    ``custom_tools:``       find_repo_root()/custom_tools       ro  自定义工具（只读）
     ==============  ===================  ======  ==========================
 
     在 **fast** 模式下 ``fork:`` 和 ``skills:`` 可读写。
@@ -44,6 +44,7 @@ from typing import TYPE_CHECKING, Dict, List
 
 from entity.constant import Namespace, is_namespaced_path
 from system.context import get_runtime_context
+from system.pathutils import find_repo_root
 from system.subprocess_utils import build_subprocess_env, completed_process_from_bytes, windows_process_group_flags
 
 from pydantic import BaseModel, ConfigDict
@@ -245,19 +246,34 @@ class Sandbox:
         ns → base 映射的单一来源，供 ``resolve()`` 与 LSP 反向映射复用，
         避免两处手写字典漂移。键为不带冒号的命名空间名（如 ``"third"``）。
         """
+        _repo_root = find_repo_root()
         return {
             ns: base for ns, base in {
                 Namespace.FORK.value:               self._ctx.fork_path,
                 Namespace.WS.value:                 self._ctx.agentspace,
                 Namespace.FIX.value:                self._ctx.fix_path,
-                Namespace.SKILLS.value:             self._ctx.skills_path,
-                Namespace.THIRD.value:              self._ctx.third_path,
-                Namespace.CUSTOM_HOOKS.value:       self._ctx.custom_hooks_path,
-                Namespace.CUSTOM_LLM_CLIENT.value:  self._ctx.custom_llm_client_path,
-                Namespace.CUSTOM_MODELS.value:      self._ctx.custom_models_path,
-                Namespace.CUSTOM_TOOLS.value:       self._ctx.custom_tools_path,
+                Namespace.SKILLS.value:             _repo_root / Namespace.SKILLS.value,
+                Namespace.THIRD.value:              _repo_root / Namespace.THIRD.value,
+                Namespace.CUSTOM_HOOKS.value:       _repo_root / Namespace.CUSTOM_HOOKS.value,
+                Namespace.CUSTOM_LLM_CLIENT.value:  _repo_root / Namespace.CUSTOM_LLM_CLIENT.value,
+                Namespace.CUSTOM_MODELS.value:      _repo_root / Namespace.CUSTOM_MODELS.value,
+                Namespace.CUSTOM_TOOLS.value:       _repo_root / Namespace.CUSTOM_TOOLS.value,
             }.items() if base is not None
         }
+
+    def get_base(self, ns: Namespace) -> Path:
+        """返回指定命名空间的物理根目录。
+
+        供需要物理路径的外部消费者（importlib 注册、工具发现等）使用，
+        而非沙盒文件操作。调用方应通过 ``Application.current().sandbox``
+        或等价途径获取 Sandbox 实例。
+        """
+        base: Path | None = self.namespace_bases().get(ns.value)
+        if base is None:
+            raise SandboxError(
+                f"Namespace '{ns.value}:' is not available in mode '{self._ctx.mode}'"
+            )
+        return base
 
     # -- 子进程（同样受沙盒约束） ----------------------------------------
 
