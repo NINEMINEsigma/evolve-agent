@@ -48,16 +48,7 @@ argparse_parser.add_argument("--llm_client_name", type=str, default=argparse.SUP
 # 会话合并时直接拼接摘要的字符阈值，超过则截断
 argparse_parser.add_argument("--merge_concat_threshold", type=int, default=argparse.SUPPRESS)
 
-# 冒险模式审批小模型 — 仅需文件名，agent 会自动从 custom_models/ 目录下加载
-check_default_approval_model_path = ""
-custom_models_dir = Path("custom_models")
-if custom_models_dir.is_dir():
-    for file_path in custom_models_dir.iterdir():
-        if "mmproj" in file_path.name:
-            continue
-        if file_path.suffix == ".gguf":
-            check_default_approval_model_path = file_path.name
-            break
+# 审批模型 — 仅需文件名，agent 会自动从 custom_models/ 目录下加载
 argparse_parser.add_argument("--approval_model", type=str, default=argparse.SUPPRESS)
 argparse_parser.add_argument("--approval_model_n_ctx", type=int, default=argparse.SUPPRESS)
 argparse_parser.add_argument("--approval_model_cuda", action="store_true", default=argparse.SUPPRESS)
@@ -68,6 +59,13 @@ argparse_parser.add_argument("--approval_remote_api_key", type=str, default=argp
 argparse_parser.add_argument("--approval_remote_model", type=str, default=argparse.SUPPRESS)
 # 远程审批模型的 LLM 客户端插件名（custom_llm_client 目录下对应 .py 文件名）
 argparse_parser.add_argument("--approval_remote_client_name", type=str, default=argparse.SUPPRESS)
+
+#----------
+# embedding 模型
+#----------
+argparse_parser.add_argument("--embedding_model", type=str, default=argparse.SUPPRESS)
+argparse_parser.add_argument("--embedding_model_cuda", action="store_true", default=argparse.SUPPRESS)
+argparse_parser.add_argument("--embedding_model_port", type=int, default=argparse.SUPPRESS)
 
 #----------
 # workspace
@@ -99,7 +97,7 @@ class Config(BaseModel):
     llm_reasoning_effort: str = "medium"
     llm_client_name: str = "openai_client"
     merge_concat_threshold: int = 50000
-    approval_model: str = check_default_approval_model_path
+    approval_model: str = ""
     approval_model_n_ctx: int = 65536
     approval_model_cuda: bool = True
     approval_model_port: int = 8081
@@ -107,6 +105,9 @@ class Config(BaseModel):
     approval_remote_api_key: str = ""
     approval_remote_model: str = ""
     approval_remote_client_name: str = "openai_client"
+    embedding_model: str = ""
+    embedding_model_cuda: bool = True
+    embedding_model_port: int = 8082
     workspace_path: str = "workspace"
     agentspace_path_name: str = "agentspace"
     logs_path_name: str = "logs"
@@ -239,6 +240,10 @@ approval_remote_base_url:    str  = current_config.approval_remote_base_url
 approval_remote_api_key:     str  = current_config.approval_remote_api_key
 approval_remote_model:       str  = current_config.approval_remote_model
 approval_remote_client_name: str  = current_config.approval_remote_client_name
+# embedding model
+embedding_model:             str  = current_config.embedding_model
+embedding_model_cuda:         bool = current_config.embedding_model_cuda
+embedding_model_port:         int  = current_config.embedding_model_port
 
 # ----------
 # 审批模型本地/远程二选一，配置阶段完成判定与存在性检查

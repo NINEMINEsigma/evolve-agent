@@ -31,6 +31,9 @@ FIELD_GROUPS: dict[str, list[str]] = {
         "approval_remote_base_url", "approval_remote_api_key",
         "approval_remote_model", "approval_remote_client_name",
     ],
+    "Embedding 模型": [
+        "embedding_model", "embedding_model_cuda", "embedding_model_port",
+    ],
     "Workspace": [
         "workspace_path", "agentspace_path_name",
         "logs_path_name", "mcp_config_path_name",
@@ -103,6 +106,7 @@ def _validate_bool(raw: str, _: Any) -> tuple[bool, str]:
 FIELD_VALIDATORS: dict[str, Callable[[str, Any], tuple[bool, str]]] = {
     "gateway_port":              _validate_port,
     "approval_model_port":       _validate_port,
+    "embedding_model_port":      _validate_port,
     "llm_temperature":            _validate_temperature,
     "llm_max_context_tokens":     _validate_positive_int,
     "llm_max_output_tokens":      _validate_positive_int,
@@ -114,6 +118,7 @@ FIELD_VALIDATORS: dict[str, Callable[[str, Any], tuple[bool, str]]] = {
     "console_log":                _validate_bool,
     "force_init":                 _validate_bool,
     "approval_model_cuda":       _validate_bool,
+    "embedding_model_cuda":      _validate_bool,
     "frontend_force_build":       _validate_bool,
 }
 

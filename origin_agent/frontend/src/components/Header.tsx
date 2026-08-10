@@ -15,6 +15,8 @@ interface HeaderProps {
   approvalModelAvailable: boolean;
   approvalModelName: string;
   approvalModelType: string;
+  embeddingModelName: string;
+  embeddingModelAvailable: boolean;
   llmModelName: string;
   sidebarCollapsed: boolean;
   onToggleSidebar: () => void;
@@ -35,6 +37,8 @@ export default function Header({
   approvalModelAvailable,
   approvalModelName,
   approvalModelType,
+  embeddingModelName,
+  embeddingModelAvailable,
   llmModelName,
   sidebarCollapsed,
   onToggleSidebar,
@@ -158,7 +162,7 @@ export default function Header({
       <div className="header-layer">
         <div className="header-hotzone" {...drawer.hotzoneProps} />
         <div className="header-pill-dock">
-          <HeaderPill status={status} agents={agents} llmModelName={llmModelName} />
+          <HeaderPill status={status} agents={agents} llmModelName={llmModelName} embeddingModelName={embeddingModelAvailable ? embeddingModelName : ""} />
         </div>
         <header
           className={`app-header header-drawer header-drawer-${drawer.phase}`}
@@ -305,7 +309,7 @@ export default function Header({
       </div>
 
       <div className="header-center">
-        <HeaderPill status={status} agents={agents} llmModelName={llmModelName} />
+        <HeaderPill status={status} agents={agents} llmModelName={llmModelName} embeddingModelName={embeddingModelAvailable ? embeddingModelName : ""} />
       </div>
 
       {sessionId && (
@@ -351,10 +355,12 @@ function HeaderPill({
   status,
   agents,
   llmModelName,
+  embeddingModelName,
 }: {
   status: string;
   agents?: string[];
   llmModelName: string;
+  embeddingModelName?: string;
 }) {
   return (
     <div
@@ -371,6 +377,7 @@ function HeaderPill({
       <span className="pill-detail">
         <span className="pill-status">{status}</span>
         {llmModelName && <span className="pill-model">{llmModelName}</span>}
+        {embeddingModelName && <span className="pill-model" data-tooltip="Embedding 模型">{embeddingModelName}</span>}
         {agents && agents.length > 0 && <span className="pill-agent-count">{agents.length} agents</span>}
       </span>
       <span className="pill-ripple" aria-hidden />
