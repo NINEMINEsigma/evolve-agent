@@ -2,6 +2,13 @@
 
 一个具备自我代码进化能力的人工智能代理。Agent 在运行时通过工具链读取自身源码副本、修改进化目标、验证并触发 **fast-slow 热交换**——编排器自动备份当前版本并替换为新代码，重启后以进化后的形态继续运行。若进化后运行异常，系统会自动进入 fallback 模式，由备份修复当前副本。
 
+## 环境要求
+
+- Python 3.10+
+- pnpm（前端构建依赖）
+- Windows 上需确保 `pnpm.cmd` 在 PATH 中
+- 可选：CUDA 环境与本地 GGUF 审批模型
+
 ## 安装
 
 克隆仓库并拉取子模块：
@@ -23,9 +30,7 @@ pip install -r requirements.txt
 python check_env.py --cuda
 ```
 
-## 启动
-
-Evolve Agent 支持多种启动方式：
+## 快速启动
 
 ```bash
 # 交互式创建或选择配置
@@ -46,7 +51,13 @@ python run.py --load <config_key> --force_init
 
 `--interactive` 模式提供基于 `rich` 的可视化配置向导：列出已有 profile 供选择，按分组（LLM / 审批模型 / Workspace / 网关 / 运行时）逐项编辑，内置字段校验（端口范围、温度区间、枚举值等），编辑完成后可选择是否保存。CLI 参数可与 `--interactive` 组合使用，作为各字段的初始覆盖值。
 
-常用 CLI 参数可覆盖 `config.py` 默认值：
+启动后访问 Web 界面：`http://127.0.0.1:8765`。
+
+> 配置持久化在 `config.json`（已 gitignore），其中包含 API 密钥，请勿提交。
+
+### 常用 CLI 参数
+
+以下参数可覆盖 `config.py` 默认值：
 
 - `--interactive`：启动 rich TUI 配置向导
 - `--force_init`：强制重新初始化 workspace
@@ -56,21 +67,42 @@ python run.py --load <config_key> --force_init
 - `--gateway_host`, `--gateway_port`
 - `--console_log`
 
-启动后访问 Web 界面：`http://127.0.0.1:8765`。
+## 配置项
 
-> 配置持久化在 `config.json`（已 gitignore），其中包含 API 密钥，请勿提交。
+`config.py` 中的主要字段与默认值：
 
-## 从旧版本迁移
+| 字段 | 默认值 | 说明 |
+|------|--------|------|
+| `llm_base_url` | `https://api.deepseek.com` | LLM API 地址 |
+| `llm_model` | `deepseek-v4-flash` | 模型名称 |
+| `llm_api_key` | `OPENAI_API_KEY` 环境变量 | API 密钥 |
+| `llm_max_context_tokens` | `1000000` | 最大上下文 token |
+| `llm_max_output_tokens` | `384000` | 最大输出 token |
+| `llm_temperature` | `0.95` | 采样温度 |
+| `llm_reasoning_effort` | `medium` | reasoning 力度 |
+| `llm_client_name` | `openai_client` | LLM 客户端插件名（`custom_llm_client/` 下的 .py 文件名） |
+| `gateway_host` | `127.0.0.1` | Web 网关地址 |
+| `gateway_port` | `8765` | Web 网关端口 |
+| `console_log` | `True` | 是否在控制台输出日志 |
+| `force_init` | `False` | 强制重新初始化 workspace |
+| `frontend_force_build` | `False` | 强制重新构建前端（跳过签名缓存） |
+| `workspace_path` | `workspace` | workspace 根目录 |
+| `fast_agent_space_path` | `fast_agent_space` | fast 副本目录 |
+| `slow_agent_space_path` | `slow_agent_space` | slow 副本目录 |
+| `agentspace_path_name` | `agentspace` | agent 工作目录名 |
+| `logs_path_name` | `logs` | 日志目录名 |
+| `mcp_config_path_name` | `mcp_config.json` | MCP 配置文件名 |
+| `merge_concat_threshold` | `50000` | 会话合并摘要截断阈值 |
+| `approval_model` | 自动检测 `custom_models/` 下首个 `.gguf` 文件 | 审批模型文件名（无则为空） |
+| `approval_model_n_ctx` | `65536` | 审批模型上下文窗口 |
+| `approval_model_cuda` | `True` | 审批模型使用 CUDA |
+| `approval_model_port` | `8081` | 审批模型服务端口 |
+| `approval_remote_base_url` | `""` | 远程审批端点 URL（本地模型不可用时 fallback） |
+| `approval_remote_api_key` | `""` | 远程审批端点 API 密钥 |
+| `approval_remote_model` | `""` | 远程审批模型名称 |
+| `approval_remote_client_name` | `openai_client` | 远程审批 LLM 客户端插件名 |
 
-如果你之前运行过旧版本，会话历史可能仍以 `messages.jsonl`（v0）格式保存在 `workspace/sessions/<session_id>/` 下。Evolve Agent 现在使用 `history.es`（v1）格式。
-
-运行迁移脚本，传参与 `run.py` 一致：
-
-```bash
-python scripts/migrate_v0_to_v1.py --load <config_key>
-```
-
-脚本会自动将该配置环境下的 v0 版本会话文件迁移至 v1。迁移完成后，原 `messages.jsonl` 不会被删除，可作为备份保留。
+> `--load` / `--save` / `--interactive` 三者互斥。无参数时交互式提示输入配置键。
 
 ## 核心机制：Fast-Slow-Fallback 演化循环
 
@@ -91,6 +123,20 @@ workspace/
 5. 编排器执行 `fast → .fallback` 备份、`slow → fast` 交换，重启 agent。
 6. 若进化后运行出错，编排器进入 fallback 模式，启动 `.fallback/` 中的备份修复 `fast_agent_space/`，修复成功后恢复运行。
 
+### 进化流程
+
+在对话中，agent 可通过以下工具链完成自我进化：
+
+1. `read_file` — 通过 `fork:` 前缀读取待进化代码。
+2. `write_file` 或 `edit_file` — 将改进代码写入 `fork:` 命名空间。
+3. `validate_code` — Python 语法与 AST 检查。
+4. `validate_frontend` — 若修改了前端文件，执行构建验证。
+5. `evolve_code` — 深度验证（含 `py_compile`）并触发 fast-slow 交换。
+
+验证通过后 agent 以退出码 `-1` 退出，`run.py` 自动执行 slow→fast 交换并重启。前端在检测到 `build_hash` 变化时会提示刷新。
+
+> 实际进化修复案例可参考[导出会话](.docs/c10b894cd4c1_2026-08-09-16-53-02.html)，其中展示了 agent 在运行时自主定位并修复多模态图片传递丢失等 bug 的完整过程。
+
 ## 项目结构
 
 ```
@@ -103,9 +149,11 @@ origin_agent/
 │   └── skills/            ← 技能解析、加载与生命周期管理
 ├── component/             ← 具体实现
 │   ├── tools/             ← 核心工具（filesystem, code, shell, frontend 等）
-│   ├── extools/           ← 扩展工具集（web_search, cron, ssh, browser 等）
+│   ├── extools/           ← 扩展工具集（web_search, cron, diff, archive 等）
 │   ├── multiagenttools/   ← 多代理/子代理工具集
-│   ├── approval/          ← 统一审批模块（core + backend + executor + handsfree + allowlist）
+│   ├── approval/          ← 统一审批模块（core + backend + executor + handsfree + allowlist + policy）
+│   ├── browser/           ← 浏览器控制工具（启动、导航、查询、截图、标签管理等）
+│   ├── automation/        ← 桌面自动化工具（键鼠操作、窗口管理、屏幕截图、模板匹配等）
 │   ├── mcp_tools.py       ← MCP 工具桥接
 │   └── cron_router.py     ← Cron 任务路由
 ├── entity/                ← 常量与纯类型定义
@@ -119,6 +167,7 @@ origin_agent/
 │   ├── context.py         ← RuntimeContext
 │   ├── session_store.py   ← 会话持久化
 │   ├── templates.py       ← 模板渲染
+│   ├── lsp.py             ← LSP 服务器进程管理与代码诊断
 │   ├── convert.py         ← 类型转换工具（as_enum, as_bool）
 │   ├── error_utils.py     ← 异常降级与日志辅助
 │   ├── pathutils.py       ← 路径工具
@@ -139,6 +188,11 @@ origin_agent/
 │   ├── colloquy_loop.py   ← Colloquy 闲聊循环
 │   ├── tool_post_dispatch.py ← 工具后处理
 │   └── agent_support/     ← 消息组装、多模态、历史摘要
+├── subagent/              ← 子代理系统
+│   ├── orchestrator.py    ← 子代理调度器
+│   ├── loop.py            ← 子代理循环
+│   ├── taskloop.py        ← 任务循环
+│   └── context.py        ← 子代理上下文
 ├── gateway/               ← WebSocket + HTTP 网关
 │   ├── server.py          ← FastAPI 服务器
 │   ├── message_router.py  ← WebSocket 消息路由
@@ -326,6 +380,11 @@ def create_llm_client(runtime_context, profile=None):
 | `ws:` | `workspace/agentspace/` | fast / fallback | 通用 I/O |
 | `fix:` | `workspace/.fallback/` | fallback | 修复目标 |
 | `skills:` | `skills/` | fast / fallback | 技能读写 |
+| `third:` | `third/` | 只读 | 引用子模块代码 |
+| `custom_hooks:` | `custom_hooks/` | 只读 | 引用自定义钩子 |
+| `custom_llm_client:` | `custom_llm_client/` | 只读 | 引用自定义 LLM 客户端 |
+| `custom_models:` | `custom_models/` | 只读 | 引用自定义模型文件 |
+| `custom_tools:` | `custom_tools/` | 只读 | 引用自定义工具 |
 
 Agent 通过 `fork:` 读取自身源码副本，不存在 `self:` 命名空间。
 
@@ -420,50 +479,14 @@ Agent 通过 `fork:` 读取自身源码副本，不存在 `self:` 命名空间�
 
 下行消息类型：`system`、`user_message`、`assistant_message`、`stream_delta`、`stream_done`、`tool_call`、`tool_result`、`task_progress`、`clipboard_display`、`subagent_update`、`confirm_request`、`ask_request`、`error`、`pong`。
 
-## 进化流程
+## 从旧版本迁移
 
-在对话中，agent 可通过以下工具链完成自我进化：
+如果你之前运行过旧版本，会话历史可能仍以 `messages.jsonl`（v0）格式保存在 `workspace/sessions/<session_id>/` 下。Evolve Agent 现在使用 `history.es`（v1）格式。
 
-1. `read_file` — 通过 `fork:` 前缀读取待进化代码。
-2. `write_file` 或 `edit_file` — 将改进代码写入 `fork:` 命名空间。
-3. `validate_code` — Python 语法与 AST 检查。
-4. `validate_frontend` — 若修改了前端文件，执行构建验证。
-5. `evolve_code` — 深度验证（含 `py_compile`）并触发 fast-slow 交换。
+运行迁移脚本，传参与 `run.py` 一致：
 
-验证通过后 agent 以退出码 `-1` 退出，`run.py` 自动执行 slow→fast 交换并重启。前端在检测到 `build_hash` 变化时会提示刷新。
+```bash
+python scripts/migrate_v0_to_v1.py --load <config_key>
+```
 
-## 配置项
-
-`config.py` 中的主要字段与默认值：
-
-| 字段 | 默认值 | 说明 |
-|------|--------|------|
-| `llm_base_url` | `https://api.deepseek.com` | LLM API 地址 |
-| `llm_model` | `deepseek-v4-flash` | 模型名称 |
-| `llm_api_key` | `OPENAI_API_KEY` 环境变量 | API 密钥 |
-| `llm_max_context_tokens` | `1000000` | 最大上下文 token |
-| `llm_max_output_tokens` | `384000` | 最大输出 token |
-| `llm_temperature` | `0.95` | 采样温度 |
-| `llm_reasoning_effort` | `medium` | reasoning 力度 |
-| `gateway_host` | `127.0.0.1` | Web 网关地址 |
-| `gateway_port` | `8765` | Web 网关端口 |
-| `console_log` | `True` | 是否在控制台输出日志 |
-| `force_init` | `False` | 强制重新初始化 workspace |
-| `workspace_path` | `workspace` | workspace 根目录 |
-| `fast_agent_space_path` | `fast_agent_space` | fast 副本目录 |
-| `slow_agent_space_path` | `slow_agent_space` | slow 副本目录 |
-| `agentspace_path_name` | `agentspace` | agent 工作目录名 |
-| `logs_path_name` | `logs` | 日志目录名 |
-| `mcp_config_path_name` | `mcp_config.json` | MCP 配置文件名 |
-| `approval_model` | `Qwen3.5-0.8B-Q8_0.gguf` | 审批模型文件名 |
-| `approval_model_n_ctx` | `65536` | 审批模型上下文窗口 |
-| `approval_model_cuda` | `True` | 审批模型使用 CUDA |
-| `approval_model_port` | `8081` | 审批模型服务端口 |
-| `merge_concat_threshold` | `50000` | 会话合并摘要截断阈值 |
-
-## 环境要求
-
-- Python 3.10+
-- pnpm（前端构建依赖）
-- Windows 上需确保 `pnpm.cmd` 在 PATH 中
-- 可选：CUDA 环境与本地 GGUF 审批模型
+脚本会自动将该配置环境下的 v0 版本会话文件迁移至 v1。迁移完成后，原 `messages.jsonl` 不会被删除，可作为备份保留。
