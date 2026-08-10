@@ -1,8 +1,9 @@
-"""测试 embedding 工具 — 传入两段文本，返回余弦相似度。
+"""测试 embedding 检索工具 — 传入一段文本，从当前会话历史中检索最相似的消息。
 
-用于验证 llamaapis embedding 端点是否跑通。
-启动一个独立的 llama-server 实例，通过 RuntimeContext 获取 embedding 模型配置，
-加载 custom_models 中指定的模型，对两段文本分别获取向量，计算余弦相似度后卸载。
+用于验证 embedding 异步更新 + 历史检索的完整链路。
+通过 EmbeddingBackendManager 获取查询文本的向量，
+再与当前会话历史中所有 CharacterConversationMessage 的已存储向量计算余弦相似度，
+返回相似度最高的前 5 条。
 """
 
 from __future__ import annotations
@@ -30,69 +31,81 @@ def _cosine_similarity(a: list[float], b: list[float]) -> float:
     return dot / (norm_a * norm_b)
 
 
-def _handle_test_custom_embedding(args: dict[str, Any], context: ToolContext | None = None) -> dict:
-    """对两段文本分别生成 embedding，返回余弦相似度。"""
-    text1 = args["text1"]
-    text2 = args["text2"]
+def _extract_text(content: Any) -> str:
+    """从 CharacterConversationMessage.content 提取纯文本预览。"""
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts: list[str] = []
+        for block in content:
+            if isinstance(block, dict) and block.get("type") == "text":
+                parts.append(str(block.get("text", "")))
+            elif hasattr(block, "text"):
+                parts.append(getattr(block, "text", ""))
+        return "\n".join(parts)
+    return str(content)
+
+
+async def _handle_test_custom_embedding(args: dict[str, Any], context: ToolContext | None = None) -> dict:
+    """对查询文本生成 embedding，从当前会话历史中检索最相似的消息。"""
+    query_text = args["text"]
 
     if context is None:
         return tool_result(success=False, message="ToolContext is required")
 
-    # ── 从 RuntimeContext 获取 embedding 模型配置 ──
-    ctx = context.runtime_context
-    model_name = ctx.embedding_model.strip()
-    if not model_name:
-        return tool_result(success=False, message="embedding_model is not configured (empty string in RuntimeContext)")
-
-    cuda = ctx.embedding_model_cuda
-    port = ctx.embedding_model_port
-
     try:
-        from entity.constant import Namespace
         from system.application import Application
-        from third.llamaapis import InferenceEngine, ModelConfig
+        from entity.messages import CharacterConversationMessage
     except Exception as exc:
         return tool_result(success=False, message=f"Import failed: {exc}")
 
-    # ── 定位模型文件 ──
-    models_dir = Application.current().sandbox.get_base(Namespace.CUSTOM_MODELS)
-    model_path = models_dir / model_name
+    # ── 通过 EmbeddingBackendManager 获取 embedding 后端 ──
+    app = Application.current()
+    backend = await app.embedding_backend_manager.get_backend()
+    if backend is None:
+        return tool_result(success=False, message="Embedding backend not available (embedding_model not configured or engine failed)")
 
-    if not model_path.is_file():
-        return tool_result(success=False, message=f"Model file not found: {model_path}")
+    # ── 获取查询文本的 embedding ──
+    resp = await backend.embed([query_text])
+    if resp is None or not resp:
+        return tool_result(success=False, message="Failed to generate embedding for query text")
+    query_vec = resp[0]
 
-    # ── 启动引擎并获取 embedding ──
-    engine: InferenceEngine | None = None
-    try:
-        engine = InferenceEngine(ModelConfig(
-            model_path=str(model_path),
-            n_ctx=2048,
-            n_gpu_layers=-1 if cuda else 0,
-            cuda=cuda,
-            port=port,
-            flash_attn=cuda,
-            auto_build=True,
-            embedding=True,
-        ))
-        # 一次性提交两条文本，减少一轮往返
-        resp = engine.embedding([text1, text2])
-        vec1 = resp.data[0].embedding if len(resp.data) > 0 else []
-        vec2 = resp.data[1].embedding if len(resp.data) > 1 else []
-        similarity = _cosine_similarity(vec1, vec2)
-        return tool_result(
-            success=True,
-            model=str(model_path.name),
-            dimensions=len(vec1),
-            similarity=round(similarity, 6),
-            text1_preview=text1[:100],
-            text2_preview=text2[:100],
-        )
-    except Exception as exc:
-        logger.exception("test_custom_embedding failed")
-        return tool_result(success=False, message=f"Embedding failed: {exc}")
-    finally:
-        if engine is not None:
-            engine.unload()
+    # ── 遍历会话历史，计算相似度 ──
+    history = context.loop.history
+    results: list[dict[str, Any]] = []
+
+    for index, msg in enumerate(history.iter_messages()):
+        if not isinstance(msg, CharacterConversationMessage):
+            continue
+
+        stored_vec = msg.get_embedding(backend.model_name)
+        if stored_vec is None:
+            continue
+
+        similarity = _cosine_similarity(query_vec, stored_vec)
+        text_preview = _extract_text(msg.content)[:200]
+
+        results.append({
+            "index": index,
+            "similarity": round(similarity, 6),
+            "role": msg.role.value,
+            "character": msg.character_name,
+            "preview": text_preview,
+        })
+
+    # ── 按相似度降序，取前 5 ──
+    results.sort(key=lambda x: x["similarity"], reverse=True)
+    top5 = results[:5]
+
+    return tool_result(
+        success=True,
+        model=backend.model_name,
+        dimensions=len(query_vec),
+        query_preview=query_text[:100],
+        total_with_embedding=len(results),
+        results=top5,
+    )
 
 
 # ── 注册 ─────────────────────────────────────────────────────
@@ -101,48 +114,49 @@ registry.register(
     name="test_custom_embedding",
     toolset="embedding_test",
     schema={
-        # 对两段文本分别生成 embedding 向量，计算余弦相似度。
-        # 从 RuntimeContext 读取 embedding_model / embedding_model_cuda / embedding_model_port 配置，
-        # 启动独立的 llama-server 实例（--embedding 模式），加载 custom_models 中指定的 GGUF 模型，
-        # 一次性提交两条文本到 /v1/embeddings 端点。
-        # 返回余弦相似度（-1 ~ 1，越接近 1 越相似）。
+        # 传入一段文本，通过 EmbeddingBackendManager 获取其 embedding 向量，
+        # 然后遍历当前会话历史中所有 CharacterConversationMessage 的已存储向量，
+        # 计算余弦相似度并按降序排列，返回最相似的前 5 条。
+        # 仅匹配已有相同 embedding_model 的消息；尚未完成嵌入计算的消息会被跳过。
         # 前置条件：config.json 中配置了 embedding_model，且对应文件存在于 custom_models/。
-        # 副作用：启动并终止一个 llama-server 子进程。
-        "description": """Compute the semantic similarity between two texts using embedding vectors.
+        # 依赖：EmbeddingBackendManager 已通过 Application.init() 初始化。
+        "description": """Search the current session history for messages semantically similar to the query text.
 
 ## Prerequisites
-`embedding_model` must be configured in config.json and the corresponding GGUF file must exist in custom_models/.
+`embedding_model` must be configured in config.json and the embedding backend must be available.
 
 ## Parameters
-- text1: The first text to compare.
-- text2: The second text to compare.
+- text: The query text to search for.
 
 ## Returns
 ```json
-{ "success": true, "model": "...", "dimensions": 1024, "similarity": 0.87, "text1_preview": "...", "text2_preview": "..." }
+{
+  "success": true,
+  "model": "bge-large-zh-v1.5-q4_k_m.gguf",
+  "dimensions": 1024,
+  "query_preview": "...",
+  "total_with_embedding": 15,
+  "results": [
+    { "index": 3, "similarity": 0.87, "role": "user", "character": "User", "preview": "..." },
+    ...
+  ]
+}
 ```
-The similarity is a cosine similarity score ranging from -1 to 1. A value closer to 1 means the two texts are semantically more similar.
-
-## Side Effects
-Starts and stops a llama-server subprocess (port from embedding_model_port config).""",
+Results are sorted by cosine similarity (descending), limited to top 5.
+Messages without a stored embedding vector are skipped.""",
         "parameters": {
             "type": "object",
             "properties": {
-                "text1": {
+                "text": {
                     "type": "string",
-                    # 第一段待比较的文本。
-                    "description": """The first text to compare.""",
-                },
-                "text2": {
-                    "type": "string",
-                    # 第二段待比较的文本。
-                    "description": """The second text to compare.""",
+                    # 待检索的查询文本。
+                    "description": """The query text to search for in session history.""",
                 },
             },
-            "required": ["text1", "text2"],
+            "required": ["text"],
         },
     },
     handler=_handle_test_custom_embedding,
-    is_async=False,
+    is_async=True,
     danger_level=ToolDangerLevel.readonly,
 )

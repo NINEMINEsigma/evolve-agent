@@ -26,6 +26,7 @@ from entity.messages import (
     CharacterConversationMessage,
     CharacterMessage,
     MessageBlock,
+    TextBlock,
 )
 from entity.constant import (
     USER_CHARACTER_NAME, SYSTEM_CHARACTER_NAME,
@@ -935,6 +936,7 @@ class BasePrivateChatAgentLoop(BaseAgentLoop):
 
     def __init__(self, app: Application, session_id: str) -> None:
         super().__init__(app, session_id)
+        self._pending_embedding_tasks: set[asyncio.Task] = set()
 
     # -- 抽象方法 ---------------------------------------------------------
 
@@ -985,3 +987,69 @@ class BasePrivateChatAgentLoop(BaseAgentLoop):
             history=self._history,
             current_character_agent=self.current_character_agent,
         )
+
+    # -- Embedding 异步更新 ---------------------------------------------
+
+    def _trigger_embedding_update(self, message: BaseMessage, index: int) -> None:
+        """为 CharacterConversationMessage 异步触发 embedding 计算。
+
+        fire-and-forget: 不阻塞主流程。计算完成后直接更新原消息对象并持久化。
+        非 CharacterConversationMessage 或无文本内容时静默跳过。
+        """
+        if not isinstance(message, CharacterConversationMessage):
+            return
+
+        # 提取 content 的纯文本部分（不包含 message_suffix / dynamic_message_suffix）
+        text = self._extract_content_text(message)
+        if not text.strip():
+            return
+
+        task = asyncio.create_task(self._compute_embedding(message, index, text))
+        self._pending_embedding_tasks.add(task)
+        task.add_done_callback(self._pending_embedding_tasks.discard)
+
+    @staticmethod
+    def _extract_content_text(message: CharacterConversationMessage) -> str:
+        """从 message.content 提取纯文本（多模态时拼接 TextBlock.text）。"""
+        content = message.content
+        if isinstance(content, str):
+            return content
+        if isinstance(content, list):
+            parts: list[str] = []
+            for block in content:
+                if isinstance(block, TextBlock):
+                    parts.append(block.text)
+            return "\n".join(parts)
+        return ""
+
+    async def _compute_embedding(
+        self, message: CharacterConversationMessage, index: int, text: str
+    ) -> None:
+        """后台计算 embedding 并回写到消息对象。"""
+        try:
+            from system.application import Application
+
+            backend_manager = Application.current().embedding_backend_manager
+            backend = await backend_manager.get_backend()
+            if backend is None:
+                return
+
+            # 已有可用向量时跳过
+            if message.get_embedding(backend.model_name) is not None:
+                return
+
+            resp = await backend.embed([text])
+            if resp is None or not resp:
+                return
+
+            # identity check（带越界保护）
+            try:
+                if self._history.get_message(index) is not message:
+                    return
+            except IndexError:
+                return
+
+            message.set_embedding(backend.model_name, resp[0])
+            await asyncio.to_thread(self.save_history, self.session_id)
+        except Exception:
+            logger.exception("Embedding update failed for index=%d", index)

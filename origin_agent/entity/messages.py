@@ -98,7 +98,7 @@ class BaseMessage(BaseModel):
         return result
 
     def is_visible_to(self, current_character_agent: str) -> bool:
-        """纯可见性判断，无副作用。"""
+        """纯可见性判断, 无副作用. """
         return True
 
 
@@ -164,7 +164,7 @@ class CharacterConversationMessage(CharacterMessage):
     '''
     思考内容
     '''
-    # 字段名应由 LLM 响应实际使用的 provider 字段决定；默认仅作为无响应信息时的兜底。
+    # 字段名应由 LLM 响应实际使用的 provider 字段决定；默认仅作为无响应信息时的兜底. 
     reasoning_field_name: str|None = "reasoning_content"
     '''
     思考内容字段名
@@ -190,10 +190,19 @@ class CharacterConversationMessage(CharacterMessage):
     动态消息后缀
     '''
 
+    # ----------------------------------------
+    # v2 字段区域
+    # ----------------------------------------
+    embedding_model: str|None = Field(default=None, description="The embedding model of the message")
+    embedding_vector: list[float]|None = Field(default=None, description="The embedding vector of the message")
+
+    # ----------------------------------------
+    # v1 方法区域
+    # ----------------------------------------
     def with_suffix(
         self, 
         message_suffix: str | None) -> "CharacterConversationMessage":
-        """返回带新 message_suffix, dynamic_positive_suffix, dynamic_negative_suffix 的副本（不影响原对象）。"""
+        """返回带新 message_suffix, dynamic_positive_suffix, dynamic_negative_suffix 的副本（不影响原对象）. """
         return self.model_copy(update={
             "message_suffix": message_suffix, 
             })
@@ -256,7 +265,7 @@ class CharacterConversationMessage(CharacterMessage):
             prefix = prefix.replace("{{VISIBLE_CHARACTERS}}", f"{', '.join(self.visible_characters)} and the {USER_CHARACTER_NAME}")
         else:
             prefix = prefix.replace("{{VISIBLE_CHARACTERS}}", f"Just {USER_CHARACTER_NAME}")
-        # 如果是最后一条用户消息，在最前面加入身份声明
+        # 如果是最后一条用户消息, 在最前面加入身份声明
         if is_last_user_message:
             identity_line = _Identity_Prefix_Template.replace("{{CURRENT_CHARACTER}}", current_character_agent)
             prefix = identity_line + prefix
@@ -272,6 +281,23 @@ class CharacterConversationMessage(CharacterMessage):
         else:
             return f"{prefix}\n---\n{raw_message}\n---\n{self.message_suffix}{non_persistent_injection_suffix}"
 
+    # ----------------------------------------
+    # v2 方法区域
+    # ----------------------------------------
+    def get_embedding(self, embedding_model: str) -> list[float]|None:
+        """
+        仅在embedding_model与当前消息的embedding_model相同时, 返回embedding_vector, 
+        否则都等同于不存在可用的向量
+        """
+        if self.embedding_model == embedding_model:
+            return self.embedding_vector
+        return None
+
+    def set_embedding(self, embedding_model: str, embedding_vector: list[float]) -> None:
+        """更新此消息的嵌入模型和向量。"""
+        self.embedding_model = embedding_model
+        self.embedding_vector = embedding_vector
+
 
 class ToolResultMessage(CharacterMessage):
     '''
@@ -286,7 +312,7 @@ class ToolResultMessage(CharacterMessage):
         character_name: str,
         result: Any,
     ) -> "ToolResultMessage":
-        """从工具返回结果构造 ToolResultMessage，自动识别 _image 并生成 content blocks。"""
+        """从工具返回结果构造 ToolResultMessage, 自动识别 _image 并生成 content blocks. """
         from entry.agent_support.multimodal import tool_result_to_content
         return cls(
             role=Role.TOOL,
@@ -297,14 +323,26 @@ class ToolResultMessage(CharacterMessage):
 
 
 class History(BaseModel):
+    # ----------------------------------------
+    # v1 字段区域
+    # ----------------------------------------
     messages: list[BaseMessage] = Field(default_factory=list, description="The messages of the history")
     last_user_message: CharacterConversationMessage|None = Field(default=None, description="The last user message of the history")
     _io_locker: Lock = PrivateAttr(default_factory=Lock)
 
-    def get_messages(self, *, current_character_agent: str) -> list[BaseMessage]:
-        """返回过滤后对当前 agent 可见的原始 BaseMessage 对象列表。
+    # ----------------------------------------
+    # v2 字段区域
+    # ----------------------------------------
+    embedding_model: str|None = Field(default=None, description="The embedding model of the history")
+    embedding_vector: list[float]|None = Field(default=None, description="The embedding vector of the history")
 
-        由 ``BaseLLMClient.chat()`` 接收，客户端在发送前自行转换格式。
+    # ----------------------------------------
+    # v1 方法区域
+    # ----------------------------------------
+    def get_messages(self, *, current_character_agent: str) -> list[BaseMessage]:
+        """返回过滤后对当前 agent 可见的原始 BaseMessage 对象列表. 
+
+        由 ``BaseLLMClient.chat()`` 接收, 客户端在发送前自行转换格式. 
         """
         result: list[BaseMessage] = []
         for message in self.messages:
@@ -314,7 +352,7 @@ class History(BaseModel):
         return result
 
     def update_last_user_message(self) -> None:
-        """重新计算并更新 last_user_message 缓存。"""
+        """重新计算并更新 last_user_message 缓存. """
         for message in reversed(self.messages):
             if isinstance(message, CharacterConversationMessage):
                 if message.role == Role.USER:
@@ -324,9 +362,9 @@ class History(BaseModel):
 
     def add_message(self, message: BaseMessage) -> int:
         with self._io_locker:
-            # ToolResultMessage 必须与对应 assistant 的 tool_calls 配对。
-            # 由于多个 tool result 会顺序追加，不能只看 messages[-1]，
-            # 需要从后向前找到最近一条包含该 tool_call_id 的 assistant 消息。
+            # ToolResultMessage 必须与对应 assistant 的 tool_calls 配对. 
+            # 由于多个 tool result 会顺序追加, 不能只看 messages[-1], 
+            # 需要从后向前找到最近一条包含该 tool_call_id 的 assistant 消息. 
             if isinstance(message, ToolResultMessage):
                 if not self.messages:
                     logger.warning(
@@ -371,10 +409,10 @@ class History(BaseModel):
             return True
 
     def remove_unpaired_tool_calls(self) -> None:
-        """移除所有没有对应 ToolResultMessage 的 tool_calls。
+        """移除所有没有对应 ToolResultMessage 的 tool_calls. 
 
-        某 assistant 消息的 tool_calls 被全部剔除后置为 None，
-        避免向 LLM 发送空 tool_calls 数组。
+        某 assistant 消息的 tool_calls 被全部剔除后置为 None, 
+        避免向 LLM 发送空 tool_calls 数组. 
         """
         with self._io_locker:
             result_ids: set[str] = {
@@ -403,15 +441,13 @@ class History(BaseModel):
         with self._io_locker:
             return len(self.messages)
 
-    # ---- 新增封装方法 ----
-
     def iter_messages(self) -> Iterator[BaseMessage]:
-        """只读迭代消息列表（返回快照副本的迭代器）。"""
+        """只读迭代消息列表（返回快照副本的迭代器）. """
         with self._io_locker:
             return iter(list(self.messages))
 
     def set_message(self, index: int, message: BaseMessage) -> None:
-        """替换指定索引的消息。"""
+        """替换指定索引的消息. """
         with self._io_locker:
             if index < 0 or index >= len(self.messages):
                 return
@@ -419,25 +455,25 @@ class History(BaseModel):
             self.update_last_user_message()
 
     def truncate_to(self, index: int) -> None:
-        """截断消息列表到指定索引（保留 messages[:index]）。"""
+        """截断消息列表到指定索引（保留 messages[:index]）. """
         with self._io_locker:
             self.messages = self.messages[:index]
             self.update_last_user_message()
 
     def truncate_from(self, index: int) -> None:
-        """截断消息列表从指定索引开始（保留 messages[index:]，丢弃 messages[:index]）。"""
+        """截断消息列表从指定索引开始（保留 messages[index:], 丢弃 messages[:index]）. """
         with self._io_locker:
             self.messages = self.messages[index:]
             self.update_last_user_message()
 
     def clear_messages(self) -> None:
-        """清空全部消息。"""
+        """清空全部消息. """
         with self._io_locker:
             self.messages.clear()
             self.update_last_user_message()
 
     def remove_last_message(self) -> BaseMessage | None:
-        """弹出并返回最后一条消息；列表为空时返回 None。"""
+        """弹出并返回最后一条消息；列表为空时返回 None. """
         with self._io_locker:
             if not self.messages:
                 return None
@@ -446,9 +482,9 @@ class History(BaseModel):
             return msg
 
     def find_last_user_message_index(self, count: int = 1) -> int | None:
-        """返回从后往前第 count 条 Role.USER 消息的索引。
+        """返回从后往前第 count 条 Role.USER 消息的索引. 
 
-        count=1 返回最后一条 user 消息的索引，不存在时返回 None。
+        count=1 返回最后一条 user 消息的索引, 不存在时返回 None. 
         """
         with self._io_locker:
             user_indices = [i for i, m in enumerate(self.messages) if m.role == Role.USER]
@@ -460,9 +496,9 @@ class History(BaseModel):
         self,
         predicate: Callable[[BaseMessage], bool],
     ) -> tuple[int, BaseMessage] | tuple[int, None]:
-        """从后向前查找第一条满足 predicate 的消息，返回 (index, message)。
+        """从后向前查找第一条满足 predicate 的消息, 返回 (index, message). 
 
-        未找到时返回 (-1, None)。
+        未找到时返回 (-1, None). 
         """
         with self._io_locker:
             for i in range(len(self.messages) - 1, -1, -1):
@@ -470,3 +506,20 @@ class History(BaseModel):
                 if predicate(msg):
                     return (i, msg)
             return (-1, None)
+
+    # ----------------------------------------
+    # v2 方法区域
+    # ----------------------------------------
+    def get_embedding(self, embedding_model: str) -> list[float]|None:
+        """
+        仅在embedding_model与当前历史记录的embedding_model相同时, 返回embedding_vector, 
+        否则都等同于不存在可用的向量
+        """
+        if self.embedding_model == embedding_model:
+            return self.embedding_vector
+        return None
+
+    def set_embedding(self, embedding_model: str, embedding_vector: list[float]) -> None:
+        """更新此历史记录的嵌入模型和向量。"""
+        self.embedding_model = embedding_model
+        self.embedding_vector = embedding_vector

@@ -448,8 +448,9 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
                 content=pending_message.to_text(),
                 visible_characters=[self.current_character_agent],
             )
-            self._history.add_message(message)
+            index = self._history.add_message(message)
             self.save_history(self.session_id)
+            self._trigger_embedding_update(message, index)
             if target_messages is not None:
                 target_messages.append(message)
         return True
@@ -578,6 +579,7 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
             )
         index = self._history.add_message(message)
         self.save_history(session_id)
+        self._trigger_embedding_update(message, index)
         return index
 
     @staticmethod
@@ -687,8 +689,9 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
             reasoning=resp.reasoning_content,
             reasoning_field_name=resp.reasoning_field_name,
         )
-        self._history.add_message(message)
+        index = self._history.add_message(message)
         self.save_history(session_id)
+        self._trigger_embedding_update(message, index)
 
     @staticmethod
     def _extract_text(content: Any) -> str:

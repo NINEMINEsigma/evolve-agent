@@ -213,8 +213,9 @@ class LoopSessionManager:
                         self._loop.current_character_agent,
                     ],
                 )
-                self._loop.history.add_message(summary_msg)
+                index = self._loop.history.add_message(summary_msg)
                 self._loop.save_history(new_sid)
+                self._loop._trigger_embedding_update(summary_msg, index)
 
                 self._session_rotated_notify[old_sid] = new_sid
 
