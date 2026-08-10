@@ -12,7 +12,8 @@ from entity.constant import SYSTEM_CHARACTER_NAME
 # Type Aliases
 # ---------------------------------------------------------------------------
 
-#: 序列化后的消息内容——纯文本或多模态 blocks 列表
+# 序列化后的消息内容——纯文本或多模态 blocks 列表
+# TODO: 存在一些误用
 MessageContent = str | list[dict[str, Any]]
 
 # ---------------------------------------------------------------------------
