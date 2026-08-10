@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ChatMessage } from "../types";
+import { ChatMessage, MessageContent } from "../types";
 import MessageItem from "./MessageItem";
 import Minimap from "./Minimap";
 import ContourBackground from "./ContourBackground";
@@ -11,7 +11,7 @@ interface ChatAreaProps {
   archived: boolean;
   onImageClick: (src: string) => void;
   onToggleCollapse: (id: string) => void;
-  onEditMessage: (id: string, content: string) => void | Promise<void>;
+  onEditMessage: (id: string, content: MessageContent) => void | Promise<void>;
   onDeleteMessages: (count: number) => void;
   onRegenerateResponse: () => void;
   bottomRef: React.RefObject<HTMLDivElement>;

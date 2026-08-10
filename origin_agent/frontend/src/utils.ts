@@ -1,4 +1,4 @@
-import type { ChatMessage, DownloadInfo, PlaylistEntry, SubagentSession } from "./types";
+import type { ChatMessage, ContentBlock, DownloadInfo, PendingImage, PlaylistEntry, SubagentSession } from "./types";
 import { WS_IN } from "./constants/ws";
 
 export function formatTimeSec(sec: number): string {
@@ -248,4 +248,86 @@ export function escapeHtml(text: string): string {
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;");
+}
+
+// ── 多模态内容转换工具 ──────────────────────────────────────
+
+/** 将 ContentBlock[] 转换为 RichInput 可用的 HTML，含内联图片 span。 */
+export function contentBlocksToHtml(blocks: ContentBlock[], images: PendingImage[]): string {
+  const imageMap = new Map(images.map((img) => [img.id, img]));
+  let html = "";
+  for (const block of blocks) {
+    if (block.type === "text") {
+      html += escapeHtml(block.text).replace(/\n/g, "<br/>");
+    } else if (block.type === "image_url") {
+      // 查找匹配的 PendingImage 以获取 id
+      const entry = Array.from(imageMap.entries()).find(([, img]) => img.dataUrl === block.image_url.url);
+      const id = entry ? entry[0] : generateUUID();
+      html += `<span class="input-inline-image" contenteditable="false" data-image-id="${id}"><img src="${block.image_url.url}" alt="" /><button type="button" class="input-inline-remove">x</button></span>`;
+    }
+  }
+  return html;
+}
+
+/** 从 RichInput 的 DOM 中按遍历顺序提取 ContentBlock[]。 */
+export function extractContentBlocks(el: HTMLDivElement | null, images: PendingImage[]): ContentBlock[] {
+  if (!el) return [];
+  const blocks: ContentBlock[] = [];
+  const imageMap = new Map(images.map((img) => [img.id, img]));
+
+  const imageNodes = el.querySelectorAll<HTMLSpanElement>(".input-inline-image");
+  if (imageNodes.length === 0) {
+    const text = (el.innerText || "").replace(/\u200B/g, "").replace(/\n{3,}/g, "\n\n").trim();
+    if (text) blocks.push({ type: "text", text });
+    return blocks;
+  }
+
+  const imagePositions = new Map<Node, PendingImage>();
+  imageNodes.forEach((node) => {
+    const id = node.dataset.imageId;
+    const img = id ? imageMap.get(id) : undefined;
+    if (img) imagePositions.set(node, img);
+  });
+
+  let currentText = "";
+  const flushText = () => {
+    const cleaned = currentText.replace(/\u200B/g, "").replace(/\n{3,}/g, "\n\n").trim();
+    if (cleaned) blocks.push({ type: "text", text: cleaned });
+    currentText = "";
+  };
+
+  const walk = (node: Node) => {
+    if (node.nodeType === Node.TEXT_NODE) {
+      currentText += node.textContent || "";
+      return;
+    }
+    if (node.nodeType === Node.ELEMENT_NODE) {
+      const el = node as HTMLElement;
+      if (el.classList?.contains("input-mention-chip")) {
+        currentText += el.textContent || "";
+        return;
+      }
+      if (imagePositions.has(el)) {
+        flushText();
+        blocks.push({ type: "image_url", image_url: { url: imagePositions.get(el)!.dataUrl } });
+        return;
+      }
+      for (const child of Array.from(el.childNodes)) {
+        if (child.nodeType === Node.ELEMENT_NODE && (child as HTMLElement).tagName === "BR") {
+          currentText += "\n";
+        } else {
+          walk(child);
+        }
+      }
+      if (el.tagName === "DIV") {
+        currentText += "\n";
+      }
+    }
+  };
+
+  for (const child of Array.from(el.childNodes)) {
+    walk(child);
+  }
+  flushText();
+  return blocks;
 }

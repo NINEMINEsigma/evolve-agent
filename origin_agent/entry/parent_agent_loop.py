@@ -49,6 +49,7 @@ from entry.agent_support.messages import (
     build_full_history_messages,
 )
 from entry.agent_support.multimodal import (
+    blocks_from_dicts,
     content_to_text,
     is_content_block_error,
     strip_image_blocks,
@@ -549,7 +550,7 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
         if isinstance(content, str):
             message_content = content
         else:
-            message_content = self._blocks_from_dicts(content)
+            message_content = blocks_from_dicts(content)
         if isinstance(message_content, str):
             message = CharacterConversationMessage(
                 role=role,
@@ -581,27 +582,6 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
         self.save_history(session_id)
         self._trigger_embedding_update(message, index)
         return index
-
-    @staticmethod
-    def _blocks_from_dicts(
-        blocks: list[dict[str, Any]],
-    ) -> list[MessageBlock]:
-        result: list[MessageBlock] = []
-        for block in blocks:
-            if not isinstance(block, dict):
-                continue
-            btype = block.get("type")
-            if btype == "text":
-                result.append(TextBlock(text=str(block.get("text", ""))))
-            elif btype == "image_url":
-                image_url_block = block.get("image_url")
-                if isinstance(image_url_block, dict):
-                    result.append(
-                        ImageBlock(image_url=str(image_url_block.get("url", ""))),
-                    )
-                else:
-                    result.append(ImageBlock(image_url=str(image_url_block or "")))
-        return result
 
     def _get_full_history(self, session_id: str) -> list[BaseMessage]:
         system_prompts: list[str] = build_agent_system_prompt(

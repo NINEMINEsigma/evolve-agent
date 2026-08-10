@@ -133,7 +133,7 @@ export interface SessionStore {
   fetchAllTags: () => void;
   handleMessage: (msg: WSMessage) => void;
   toggleMessageCollapse: (id: string) => void;
-  editMessage: (id: string, content: string) => Promise<void>;
+  editMessage: (id: string, content: MessageContent) => Promise<void>;
   deleteMessages: (count?: number) => Promise<void>;
   regenerateResponse: () => Promise<void>;
   updateMessageVisibility: (messageIndex: number, visibleCharacters: string[]) => Promise<void>;
@@ -822,7 +822,7 @@ export function useSessionStore(callbacks: SessionStoreCallbacks = {}): SessionS
     )));
   }, []);
 
-  const editMessage = useCallback(async (id: string, content: string) => {
+  const editMessage = useCallback(async (id: string, content: MessageContent) => {
     const target = messages.find((m) => m.id === id);
     if (!target || typeof target.messageIndex !== "number") {
       addMessage("error", "这条消息还没有可持久化的历史索引，无法编辑。");

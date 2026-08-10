@@ -39,7 +39,7 @@ from entry.agent_support.messages import (
     collect_all_hooks_context,
     load_message_hooks,
 )
-from entry.agent_support.multimodal import content_to_text
+from entry.agent_support.multimodal import content_to_text, blocks_from_dicts, content_to_serializable
 from system.pathutils import find_repo_root
 from system.session_store import SessionStore
 
@@ -498,8 +498,7 @@ class BaseAgentLoop(ABC):
             for index, msg in enumerate(self._history.iter_messages())
         ]
 
-    # TODO: 重编辑缺少多模态支持
-    def edit_session_message(self, index: int, content: str | None = None,
+    def edit_session_message(self, index: int, content: str | list[dict[str, Any]] | None = None,
                              visible_characters: list[str] | None = None) -> dict:
         logger.info("Edit message | session=%s index=%d", self.session_id, index)
         if not isinstance(index, int) or index < 0:
@@ -514,7 +513,10 @@ class BaseAgentLoop(ABC):
             return {"updated": False, "error": "message type not editable"}
         updates: dict = {}
         if content is not None:
-            updates["content"] = content
+            if isinstance(content, list):
+                updates["content"] = blocks_from_dicts(content)
+            else:
+                updates["content"] = content
         if visible_characters is not None:
             updates["visible_characters"] = visible_characters
         updated_msg = msg.model_copy(update=updates)
@@ -525,7 +527,7 @@ class BaseAgentLoop(ABC):
             "session_id": self.session_id,
             "index": index,
             "role": msg.role.value,
-            "content": content_to_text(updated_msg.content),
+            "content": content_to_serializable(updated_msg.content),
         }
         if visible_characters is not None:
             result["visible_characters"] = visible_characters

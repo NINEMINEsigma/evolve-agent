@@ -240,3 +240,9 @@ export interface TargetSessionOption {
   name: string;
   status?: SubagentSession["status"];
 }
+
+export interface PendingImage {
+  id: string;
+  file: File;
+  dataUrl: string;
+}

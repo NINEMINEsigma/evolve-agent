@@ -1,5 +1,5 @@
 import { memo, useState, type WheelEvent } from "react";
-import { ChatMessage } from "../types";
+import { ChatMessage, MessageContent } from "../types";
 import MessageBody, { contentToText } from "./MessageBody";
 import MessageEditor from "./MessageEditor";
 import MessageAttachments from "./MessageAttachments";
@@ -55,7 +55,7 @@ const MessageItem = memo(function MessageItem({
   archived: boolean;
   onImageClick: (src: string) => void;
   onToggleCollapse: (id: string) => void;
-  onEditMessage: (id: string, content: string) => void | Promise<void>;
+  onEditMessage: (id: string, content: MessageContent) => void | Promise<void>;
   onDeleteMessages?: (count: number) => void;
   onRegenerateResponse?: () => void;
   isLastUserMessage?: boolean;
@@ -72,7 +72,7 @@ const MessageItem = memo(function MessageItem({
   const isTool = m.role === "tool";
   const toolCollapsed = isTool && !streaming && m.collapsed !== false;
   const collapsed = !isTool && !streaming && isLong && m.collapsed !== false;
-  const canEdit = !archived && !streaming && typeof m.messageIndex === "number" && typeof m.content === "string";
+  const canEdit = !archived && !streaming && typeof m.messageIndex === "number";
   const canDelete = !archived && !streaming && isLastUserMessage && typeof m.messageIndex === "number";
   const canRegenerate = !archived && !streaming && m.role === "user" && isLastUserMessage && typeof m.messageIndex === "number";
 

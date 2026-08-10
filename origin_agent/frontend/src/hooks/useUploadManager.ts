@@ -1,14 +1,11 @@
 import { useCallback, useRef, useState } from "react";
 import { ChatMessage, ContentBlock, DownloadInfo, MessageContent, PlaylistEntry, SessionInfo } from "../types";
-import { generateUUID } from "../utils";
+import { generateUUID, extractContentBlocks as _extractContentBlocks } from "../utils";
 import { WS_OUT } from "../constants/ws";
 import { DIMENSIONS } from "../constants/dimensions";
 
-export interface PendingImage {
-  id: string;
-  file: File;
-  dataUrl: string;
-}
+export type { PendingImage } from "../types";
+import type { PendingImage } from "../types";
 
 export type AddMessageFn = (
   role: ChatMessage["role"],
@@ -178,68 +175,11 @@ export function useUploadManager({
     if (fileInputRef.current) fileInputRef.current.value = "";
   }, [handleFileUpload]);
 
-  const extractContentBlocks = useCallback((el: HTMLDivElement | null, images: PendingImage[]): ContentBlock[] => {
-    if (!el) return [];
-    const blocks: ContentBlock[] = [];
-    const imageMap = new Map(images.map((img) => [img.id, img]));
-
-    const imageNodes = el.querySelectorAll<HTMLSpanElement>(".input-inline-image");
-    if (imageNodes.length === 0) {
-      const text = (el.innerText || "").replace(/\u200B/g, "").replace(/\n{3,}/g, "\n\n").trim();
-      if (text) blocks.push({ type: "text", text });
-      return blocks;
-    }
-
-    const imagePositions = new Map<Node, PendingImage>();
-    imageNodes.forEach((node) => {
-      const id = node.dataset.imageId;
-      const img = id ? imageMap.get(id) : undefined;
-      if (img) imagePositions.set(node, img);
-    });
-
-    let currentText = "";
-    const flushText = () => {
-      const cleaned = currentText.replace(/\u200B/g, "").replace(/\n{3,}/g, "\n\n").trim();
-      if (cleaned) blocks.push({ type: "text", text: cleaned });
-      currentText = "";
-    };
-
-    const walk = (node: Node) => {
-      if (node.nodeType === Node.TEXT_NODE) {
-        currentText += node.textContent || "";
-        return;
-      }
-      if (node.nodeType === Node.ELEMENT_NODE) {
-        const el = node as HTMLElement;
-        // mention chip: 直接把标签文本 @ws:... 或 /skill:... 加入纯文本流
-        if (el.classList?.contains("input-mention-chip")) {
-          currentText += el.textContent || "";
-          return;
-        }
-        if (imagePositions.has(el)) {
-          flushText();
-          blocks.push({ type: "image_url", image_url: { url: imagePositions.get(el)!.dataUrl } });
-          return;
-        }
-        for (const child of Array.from(el.childNodes)) {
-          if (child.nodeType === Node.ELEMENT_NODE && (child as HTMLElement).tagName === "BR") {
-            currentText += "\n";
-          } else {
-            walk(child);
-          }
-        }
-        if (el.tagName === "DIV") {
-          currentText += "\n";
-        }
-      }
-    };
-
-    for (const child of Array.from(el.childNodes)) {
-      walk(child);
-    }
-    flushText();
-    return blocks;
-  }, []);
+  const extractContentBlocks = useCallback(
+    (el: HTMLDivElement | null, images: PendingImage[]): ContentBlock[] =>
+      _extractContentBlocks(el, images),
+    [],
+  );
 
   return {
     uploading,

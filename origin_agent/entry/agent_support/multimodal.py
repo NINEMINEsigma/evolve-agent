@@ -180,3 +180,30 @@ def summarize_message_for_log(content: str|list[MessageBlock]|None, max_text_len
     if len(summary) <= max_text_len:
         return summary
     return summary[:max_text_len] + "..."
+
+
+def blocks_from_dicts(blocks: list[dict[str, Any]]) -> list[MessageBlock]:
+    """将 list[dict] 转换为 list[MessageBlock]，供 edit_session_message 和 _append 共用。"""
+    result: list[MessageBlock] = []
+    for block in blocks:
+        if not isinstance(block, dict):
+            continue
+        btype = block.get("type")
+        if btype == "text":
+            result.append(TextBlock(text=str(block.get("text", ""))))
+        elif btype == "image_url":
+            image_url_block = block.get("image_url")
+            if isinstance(image_url_block, dict):
+                result.append(
+                    ImageBlock(image_url=str(image_url_block.get("url", ""))),
+                )
+            else:
+                result.append(ImageBlock(image_url=str(image_url_block or "")))
+    return result
+
+
+def content_to_serializable(content: str | list[MessageBlock]) -> str | list[dict[str, Any]]:
+    """将 content 序列化为前端可用的 str | list[dict]，供编辑响应使用。"""
+    if isinstance(content, str):
+        return content
+    return [b.as_object() if isinstance(b, MessageBlock) else b for b in content]
