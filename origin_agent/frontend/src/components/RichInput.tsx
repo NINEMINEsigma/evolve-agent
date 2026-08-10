@@ -428,30 +428,41 @@ const RichInput = React.forwardRef<HTMLDivElement, RichInputProps>(function Rich
 
   const handlePaste = async (e: ClipboardEvent<HTMLDivElement>) => {
     const items = e.clipboardData?.files;
-    if (!items || items.length === 0) return;
-    const imageFiles = Array.from(items).filter((f) => f.type.startsWith("image/"));
-    if (imageFiles.length === 0) return;
-    e.preventDefault();
+    const imageFiles = items ? Array.from(items).filter((f) => f.type.startsWith("image/")) : [];
 
-    for (const file of imageFiles) {
-      const result = await onPasteImage(file);
-      if (!result) continue;
-      const { id, dataUrl } = result;
-      const wrapper = document.createElement("span");
-      wrapper.className = "input-inline-image";
-      wrapper.contentEditable = "false";
-      wrapper.dataset.imageId = id;
-      wrapper.innerHTML = `<img src="${dataUrl}" alt="" /><button type="button" class="input-inline-remove">×</button>`;
-      wrapper.querySelector(".input-inline-remove")?.addEventListener("click", () => {
-        onRemoveImage(id);
-        wrapper.remove();
-        notifyChange();
-        autoResize();
-      });
-      insertNodeAtCursor(wrapper);
+    if (imageFiles.length > 0) {
+      e.preventDefault();
+      for (const file of imageFiles) {
+        const result = await onPasteImage(file);
+        if (!result) continue;
+        const { id, dataUrl } = result;
+        const wrapper = document.createElement("span");
+        wrapper.className = "input-inline-image";
+        wrapper.contentEditable = "false";
+        wrapper.dataset.imageId = id;
+        wrapper.innerHTML = `<img src="${dataUrl}" alt="" /><button type="button" class="input-inline-remove">×</button>`;
+        wrapper.querySelector(".input-inline-remove")?.addEventListener("click", () => {
+          onRemoveImage(id);
+          wrapper.remove();
+          notifyChange();
+          autoResize();
+        });
+        insertNodeAtCursor(wrapper);
+      }
+      notifyChange();
+      autoResize();
+      return;
     }
-    notifyChange();
-    autoResize();
+
+    // 拦截非图片文本粘贴，仅插入纯文本以去除 HTML 样式
+    const text = e.clipboardData?.getData("text/plain");
+    if (text !== undefined) {
+      e.preventDefault();
+      const textNode = document.createTextNode(text);
+      insertNodeAtCursor(textNode);
+      notifyChange();
+      autoResize();
+    }
   };
 
   const menuOpen = mention !== MENTION_NONE && mention.items.length > 0;
