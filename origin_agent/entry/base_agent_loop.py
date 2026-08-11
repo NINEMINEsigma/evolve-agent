@@ -1052,6 +1052,7 @@ class BasePrivateChatAgentLoop(BaseAgentLoop):
                 return
 
             message.set_embedding(backend.model_name, resp[0])
-            await asyncio.to_thread(self.save_history, self.session_id)
+            # 不在此处调用 save_history — 多个后台 Task 并发写入同一文件会导致 JSON 损坏。
+            # embedding 已写入内存中的消息对象，下次主流程的 save_history 会自然持久化。
         except Exception:
             logger.exception("Embedding update failed for index=%d", index)
