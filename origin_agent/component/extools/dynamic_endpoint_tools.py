@@ -175,14 +175,17 @@ def _load_all_endpoints() -> None:
 def list_session_endpoints(session_id: str) -> list[dict[str, Any]]:
     """返回指定会话的所有动态端点（序列化列表，供 API 层消费）。
 
-    返回 ``[{name, url, agent_name, created_at}]``，url 由会话与角色派生。
+    返回 ``[{name, url, absolute_url, agent_name, created_at}]``，url 由会话与角色派生。
     线程安全，持锁读取后立即释放。
     """
+    from system.context import get_runtime_context
+    ctx = get_runtime_context()
     with _endpoint_lock:
         return [
             {
                 "name": info.name,
                 "url": f"/dynamic/{info.session_id}/{info.agent_name}/{info.name}",
+                "absolute_url": f"http://{ctx.gateway_host}:{ctx.gateway_port}/dynamic/{info.session_id}/{info.agent_name}/{info.name}",
                 "agent_name": info.agent_name,
                 "created_at": info.created_at,
             }
@@ -270,6 +273,10 @@ async def _handle_register_dynamic_endpoint(
 
     url: str = f"/dynamic/{session_id}/{agent_name}/{safe_name}"
 
+    from system.context import get_runtime_context
+    ctx = get_runtime_context()
+    absolute_url: str = f"http://{ctx.gateway_host}:{ctx.gateway_port}{url}"
+
     logger.info(
         "Dynamic endpoint registered | name=%s session=%s agent=%s url=%s",
         safe_name, session_id, agent_name, url,
@@ -279,8 +286,9 @@ async def _handle_register_dynamic_endpoint(
         success=True,
         name=safe_name,
         url=url,
+        absolute_url=absolute_url,
         agent_name=agent_name,
-        message=f"Dynamic endpoint '{safe_name}' registered. POST to {url} with body {{\"message\": \"...\"}} to deliver a system message to yourself.",
+        _note=f"Dynamic endpoint '{safe_name}' registered. POST to {absolute_url} with body {{\"message\": \"...\"}} to deliver a system message to yourself.",
     )
 
 
@@ -362,7 +370,7 @@ registry.register(
         #
         # ## 返回
         # ```json
-        # {"success": true, "endpoint_id": "abc123", "url": "/dynamic/sid/agent/abc123", "agent_name": "...", "message": "..."}
+        # {"success": true, "name": "my-button", "url": "/dynamic/sid/agent/my-button", "absolute_url": "http://127.0.0.1:8765/dynamic/sid/agent/my-button", "agent_name": "...", "message": "..."}
         # ```
         #
         # ## 何时使用
@@ -386,7 +394,7 @@ Creates an endpoint registration with path format /dynamic/{session_id}/{agent_n
 
 ## Returns
 ```json
-{"success": true, "name": "my-button", "url": "/dynamic/sid/agent/my-button", "agent_name": "...", "message": "..."}
+{"success": true, "name": "my-button", "url": "/dynamic/sid/agent/my-button", "absolute_url": "http://127.0.0.1:8765/dynamic/sid/agent/my-button", "agent_name": "...", "message": "..."}
 ```
 
 ## When to Use
@@ -502,7 +510,7 @@ registry.register(
         #
         # ## 返回
         # ```json
-        # {"success": true, "count": 2, "endpoints": [{"endpoint_id": "...", "name": "...", "url": "...", "agent_name": "...", "created_at": 1234567890}]}
+        # {"success": true, "count": 2, "endpoints": [{"name": "...", "url": "/dynamic/sid/agent/eid", "absolute_url": "http://127.0.0.1:8765/dynamic/sid/agent/eid", "agent_name": "...", "created_at": 1234567890}]}
         # ```
         #
         # ## 何时使用
@@ -521,7 +529,7 @@ Returns metadata for all dynamic endpoints in the current session, including end
 
 ## Returns
 ```json
-{"success": true, "count": 2, "endpoints": [{"endpoint_id": "...", "name": "...", "url": "/dynamic/sid/agent/eid", "agent_name": "...", "created_at": 1234567890}]}
+{"success": true, "count": 2, "endpoints": [{"name": "...", "url": "/dynamic/sid/agent/eid", "absolute_url": "http://127.0.0.1:8765/dynamic/sid/agent/eid", "agent_name": "...", "created_at": 1234567890}]}
 ```
 
 ## When to Use

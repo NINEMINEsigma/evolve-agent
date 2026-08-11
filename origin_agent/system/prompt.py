@@ -182,6 +182,8 @@ def build_system_prompt(
                 "{{host_name}}": sys_info.host_name,
                 "{{os_info}}": sys_info.os_info,
                 "{{mcp_config_path}}": _mcp_ws_path(runtime_ctx),
+                "{{gateway_host}}": runtime_ctx.gateway_host,
+                "{{gateway_port}}": str(runtime_ctx.gateway_port),
             }
             for k, v in runtime_values.items():
                 base = base.replace(k, (v or "未配置").strip())

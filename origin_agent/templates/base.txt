@@ -35,6 +35,7 @@ Running environment:
 Runtime configuration:
 - System: Evolve Agent, running in ``{{mode}}`` mode.
 - LLM: model ``{{llm_model}}``, endpoint ``{{llm_base_url}}``, context window ``{{llm_max_context_tokens}}`` tokens, max output ``{{llm_max_output_tokens}}`` tokens, reasoning effort ``{{llm_reasoning_effort}}``, client ``{{llm_client_name}}``.
+- Gateway: ``http://{{gateway_host}}:{{gateway_port}}``.
 - Repository: ``{{git_remotes}}``.
 - Host: user ``{{user_name}}`` on ``{{host_name}}`` (``{{os_info}}``).
 
