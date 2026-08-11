@@ -183,7 +183,7 @@ registry.register(
         # deep=true（默认）：语法 + py_compile 子进程编译检查（更彻底但更慢）。
         # deep=false：仅语法检查（更快）。
         # 成功返回：{ evolved: true, validation: { valid, total, ok, errors, details }, message } — 进程随即退出，agent 不会收到此响应。
-        # 失败返回：{ evolved: false, validation: {...}, hint } — agent 可修复问题后重试。
+        # 失败返回：{ evolved: false, validation: {...}, _note } — agent 可修复问题后重试。
         # 注意：不会验证 TypeScript/前端构建，触碰前端代码需先调 validate_frontend。
         "description": """Complete the code evolution cycle — final step of the evolution workflow.
 
@@ -207,7 +207,7 @@ Runs thorough validation (syntax + optional compile check) on all `.py` files in
 ```
 **Failure** — agent can fix errors and retry:
 ```json
-{ "evolved": false, "validation": { "valid": false, "total": N, "ok": N, "errors": N, "details": [...] }, "hint": "Fix the errors above using Write or PatchEdit with fork: prefix, then call validate_code..." }
+{ "evolved": false, "validation": { "valid": false, "total": N, "ok": N, "errors": N, "details": [...] }, "_note": "Fix the errors above using Write or PatchEdit with fork: prefix, then call validate_code..." }
 ```
 
 ## When to Use

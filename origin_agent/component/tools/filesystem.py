@@ -1274,7 +1274,7 @@ def _handle_search_files(args: dict[str, Any]) -> dict:
         return tool_result(
             count=count,
             log_path=log_name,
-            note=f"Results exceeded {limit} matches. Full list written to log file.",
+            _note=f"Results exceeded {limit} matches. Full list written to log file.",
         )
 
     return tool_result(matches=matches, count=count)
@@ -1301,7 +1301,7 @@ def _handle_search_files(args: dict[str, Any]) -> dict:
 # ```
 # 结果超限时：
 # ```json
-# {"count": 150, "log_path": "ws:logs/search_files_20250314_120000.log", "note": "..."}
+# {"count": 150, "log_path": "ws:logs/search_files_20250314_120000.log", "_note": "..."}
 # ```
 #
 # ## 何时使用
@@ -1333,7 +1333,7 @@ When results fit within the limit:
 ```
 When results exceed the limit:
 ```json
-{"count": 150, "log_path": "ws:logs/search_files_20250314_120000.log", "note": "..."}
+{"count": 150, "log_path": "ws:logs/search_files_20250314_120000.log", "_note": "..."}
 ```
 
 ## When to Use
@@ -1484,7 +1484,7 @@ def _handle_grep(args: dict[str, Any]) -> dict:
         return tool_result(
             count=count,
             log_path=log_name,
-            note=f"Results exceeded {limit} matches. Full list written to log file.",
+            _note=f"Results exceeded {limit} matches. Full list written to log file.",
         )
 
     return tool_result(matches=matches, count=count)
@@ -1515,7 +1515,7 @@ def _handle_grep(args: dict[str, Any]) -> dict:
 # ```
 # 结果超限时：
 # ```json
-# {"count": 150, "log_path": "ws:logs/grep_20250314_120000.log", "note": "..."}
+# {"count": 150, "log_path": "ws:logs/grep_20250314_120000.log", "_note": "..."}
 # ```
 #
 # ## 何时使用
@@ -1549,7 +1549,7 @@ When results fit within the limit:
 ```
 When results exceed the limit:
 ```json
-{{"count": 150, "log_path": "ws:logs/grep_20250314_120000.log", "note": "..."}}
+{{"count": 150, "log_path": "ws:logs/grep_20250314_120000.log", "_note": "..."}}
 ```
 
 ## When to Use

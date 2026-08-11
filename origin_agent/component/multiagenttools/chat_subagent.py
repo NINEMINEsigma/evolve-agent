@@ -101,7 +101,7 @@ Do NOT use this tool solely to send the initial prompt — that should be passed
 The optional 'feedback' field is a list of text responses from the sub-agent's outbox collected at call time. Use it for instant feedback instead of waiting for the periodic collection cycle.
 If the sub-agent has already produced feedback that you have not yet received, the call fails with:
 ```json
-{"success": false, "feedback": ["..."], "note": "Sub-agent has already produced feedback that you have not yet received. Please review the feedback first, then decide whether and how to reply via chat_subagent."}
+{"success": false, "feedback": ["..."], "_note": "Sub-agent has already produced feedback that you have not yet received. Please review the feedback first, then decide whether and how to reply via chat_subagent."}
 ```
 You MUST review the returned `feedback` first, then decide whether and how to reply via `chat_subagent`.
 If the sub-agent is still generating its current response, the call fails with:

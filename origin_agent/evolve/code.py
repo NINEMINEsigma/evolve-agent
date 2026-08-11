@@ -11,9 +11,9 @@
 
 from __future__ import annotations
 
-import json
 import logging
 
+from abstract.tools.registry import tool_result, tool_error
 from evolve.validator import validate_directory, summary
 from system.sandbox import Sandbox
 from system.templates import read_template
@@ -51,11 +51,11 @@ def finalize_evolution(
     try:
         fork_resolved = sandbox.resolve_read("fork:")
     except Exception as exc:
-        return _json_error(f"Cannot resolve fork: namespace: {exc}")
+        return tool_error(f"Cannot resolve fork: namespace: {exc}", evolved=False)
 
     fork_dir: Any = fork_resolved.real
     if not fork_dir.is_dir():
-        return _json_error(f"Fork directory does not exist: {fork_dir}")
+        return tool_error(f"Fork directory does not exist: {fork_dir}", evolved=False)
 
     logger.info("Validating evolved code in %s (deep=%s)", fork_dir, deep)
 
@@ -68,11 +68,11 @@ def finalize_evolution(
             "Evolution validation FAILED: %d/%d files have errors",
             report["errors"], report["total"],
         )
-        return {
-                "evolved": False,
-                "validation": report,
-                "hint": read_template("evolve/evolution_failed_hint.txt"),
-            }
+        return tool_result(
+            evolved=False,
+            validation=report,
+            _note=read_template("evolve/evolution_failed_hint.txt"),
+        )
 
     # ---- 2. 验证通过 — 触发交换 ----
     logger.info(
@@ -85,12 +85,8 @@ def finalize_evolution(
 
     request_evolution()
 
-    return {
-            "evolved": True,
-            "validation": report,
-            "message": read_template("evolve/evolution_success_message.txt").replace("{{n}}", str(report["total"])),
-    }
-
-
-def _json_error(message: str) -> dict[str, Any]:
-    return {"evolved": False, "error": str(message)}
+    return tool_result(
+        evolved=True,
+        validation=report,
+        message=read_template("evolve/evolution_success_message.txt").replace("{{n}}", str(report["total"])),
+    )

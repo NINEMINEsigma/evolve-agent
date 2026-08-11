@@ -88,7 +88,7 @@ def _handle_validate_frontend(args: dict[str, Any]) -> dict:
                 exit_code=install_proc.returncode,
                 stdout=_truncate(install_proc.stdout),
                 stderr=_truncate(install_proc.stderr),
-                hint=(
+                _note=(
                     "pnpm install failed. Check dependency conflicts, "
                     "lock file corruption, or missing peer dependencies."
                 ),
@@ -122,7 +122,7 @@ def _handle_validate_frontend(args: dict[str, Any]) -> dict:
                 exit_code=build_proc.returncode,
                 stdout=_truncate(build_proc.stdout),
                 stderr=_truncate(build_proc.stderr),
-                hint=(
+                _note=(
                     "Frontend build failed. Check TypeScript errors, "
                     "missing imports, or build configuration issues."
                 ),
@@ -179,7 +179,7 @@ registry.register(
         # path 默认 'fork:frontend'（进化目标目录）。可指定其他逻辑路径。
         # 调用效果：在目标目录中执行 pnpm install 和 pnpm run build（CI=true 非交互模式），捕获 TypeScript 和构建错误。
         # 成功返回：{ valid: true, stage: "build", exit_code: 0, build_output, message }
-        # 失败返回：{ valid: false, stage: "install"|"build", exit_code, stdout?, stderr?, hint? } 或 { valid: false, stage: ..., error }
+        # 失败返回：{ valid: false, stage: "install"|"build", exit_code, stdout?, stderr?, _note? } 或 { valid: false, stage: ..., error }
         # 典型场景：修改前端文件后、evolve_code 前调用，捕获 validate_code 无法检测的 TypeScript/构建错误。
         # 注意：运行时间较长（超时时间 SUBPROCESS_TIMEOUT_DEFAULT），非前端修改无需调用。
         "description": """Validate frontend code by running `pnpm install && pnpm run build` in the target frontend directory.
@@ -201,11 +201,11 @@ Runs `pnpm install` followed by `pnpm run build` in the target directory (non-in
 ```
 **Install failure**:
 ```json
-{ "valid": false, "stage": "install", "exit_code": N, "stdout": "...", "stderr": "...", "hint": "pnpm install failed. Check dependency conflicts..." }
+{ "valid": false, "stage": "install", "exit_code": N, "stdout": "...", "stderr": "...", "_note": "pnpm install failed. Check dependency conflicts..." }
 ```
 **Build failure**:
 ```json
-{ "valid": false, "stage": "build", "exit_code": N, "stdout": "...", "stderr": "...", "hint": "Frontend build failed. Check TypeScript errors..." }
+{ "valid": false, "stage": "build", "exit_code": N, "stdout": "...", "stderr": "...", "_note": "Frontend build failed. Check TypeScript errors..." }
 ```
 **Timeout**:
 ```json

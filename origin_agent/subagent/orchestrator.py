@@ -361,7 +361,7 @@ class _OrchestratorContext:
                 "success": False,
                 "session_id": session_id,
                 "feedback": outbox,
-                "note": "Sub-agent has already produced feedback that you have not yet received. Please review the feedback first, then decide whether and how to reply via chat_subagent.",
+                "_note": "Sub-agent has already produced feedback that you have not yet received. Please review the feedback first, then decide whether and how to reply via chat_subagent.",
             }
         # 没有未送达反馈，正常发送
         character_name = self._agent_loop.current_character_agent
@@ -413,7 +413,7 @@ class _OrchestratorContext:
                     "session_id": session_id,
                     "session_path": None,
                     "promoted": [],
-                    "note": "Sub-agent was queued (not yet active). No history to save.",
+                    "_note": "Sub-agent was queued (not yet active). No history to save.",
                 }
 
         sub = self._active.get(session_id)
