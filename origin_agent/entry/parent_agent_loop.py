@@ -646,6 +646,9 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
     def load_history(self, history: History) -> None:
         """从外部加载历史到当前 loop。"""
         self._history = history
+        # 对已有消息补充 embedding 向量（fire-and-forget，已有向量的会被跳过）
+        for index, message in enumerate(history.iter_messages()):
+            self._trigger_embedding_update(message, index)
 
     def _store_assistant_with_tools(
         self, session_id: str, resp: LLMResponse,
