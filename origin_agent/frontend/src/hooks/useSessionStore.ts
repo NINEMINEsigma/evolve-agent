@@ -65,6 +65,8 @@ export interface SessionStore {
   setSearchQuery: React.Dispatch<React.SetStateAction<string>>;
   handsfreeMode: boolean;
   setHandsfreeMode: React.Dispatch<React.SetStateAction<boolean>>;
+  yoloMode: boolean;
+  setYoloMode: React.Dispatch<React.SetStateAction<boolean>>;
   taskProgress: Record<string, TaskProgress>;
   setTaskProgress: React.Dispatch<React.SetStateAction<Record<string, TaskProgress>>>;
   clipboardDisplays: Record<string, ClipboardDisplay>;
@@ -188,6 +190,7 @@ export function useSessionStore(callbacks: SessionStoreCallbacks = {}): SessionS
   const [sessions, setSessions] = useState<SessionInfo[]>([]);
   const [searchQuery, setSearchQuery] = useState("");
   const [handsfreeMode, setHandsfreeMode] = useState(false);
+  const [yoloMode, setYoloMode] = useState(false);
   const [taskProgress, setTaskProgress] = useState<Record<string, TaskProgress>>({});
   const [clipboardDisplays, setClipboardDisplays] = useState<Record<string, ClipboardDisplay>>({});
   const [secretBanner, setSecretBanner] = useState<ClipboardDisplay | null>(null);
@@ -399,6 +402,7 @@ export function useSessionStore(callbacks: SessionStoreCallbacks = {}): SessionS
           setApprovalModelName(info.approval_model_name || "");
           setApprovalModelAvailable(info.approval_model_available || false);
           setApprovalModelType(info.approval_model_type || "");
+          setYoloMode(info.yolo || false);
           setEmbeddingModelName(info.embedding_model || "");
           setEmbeddingModelAvailable(info.embedding_model_available || false);
           return;
@@ -1272,6 +1276,8 @@ export function useSessionStore(callbacks: SessionStoreCallbacks = {}): SessionS
     setSearchQuery,
     handsfreeMode,
     setHandsfreeMode,
+    yoloMode,
+    setYoloMode,
     taskProgress,
     setTaskProgress,
     clipboardDisplays,

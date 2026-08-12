@@ -68,6 +68,11 @@ argparse_parser.add_argument("--embedding_model_cuda", action="store_true", defa
 argparse_parser.add_argument("--embedding_model_port", type=int, default=argparse.SUPPRESS)
 
 #----------
+# yolo
+#----------
+argparse_parser.add_argument("--yolo", action="store_true", default=argparse.SUPPRESS)
+
+#----------
 # workspace
 #----------
 argparse_parser.add_argument("--workspace_path", type=str, default=argparse.SUPPRESS)
@@ -113,6 +118,7 @@ class Config(BaseModel):
     logs_path_name: str = "logs"
     mcp_config_path_name: str = "mcp_config.json"
     frontend_force_build: bool = False
+    yolo: bool = False
 
 
 # ── 旧拼写 fouce_init → force_init 兼容迁移 ──────────────────
@@ -217,6 +223,7 @@ slow_agent_space_path:  str     = current_config.slow_agent_space_path
 # runtime
 force_init:             bool    = current_config.force_init
 frontend_force_build:   bool    = current_config.frontend_force_build
+yolo:                   bool    = current_config.yolo
 # gateway
 gateway_host:           str     = current_config.gateway_host
 gateway_port:           int     = current_config.gateway_port

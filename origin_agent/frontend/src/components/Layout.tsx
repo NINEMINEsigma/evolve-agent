@@ -245,6 +245,7 @@ export default function Layout({ ws, onContextMenu }: LayoutProps) {
           contextTokens={ws.contextTokens}
           llmMaxContextTokens={ws.llmMaxContextTokens}
           handsfreeMode={ws.handsfreeMode}
+          yoloMode={ws.yoloMode}
           approvalModelAvailable={ws.approvalModelAvailable}
           approvalModelName={ws.approvalModelName}
           approvalModelType={ws.approvalModelType}

@@ -265,6 +265,9 @@ class SubAgentLoop(BasePrivateChatAgentLoop):
         基于 SUB_SESSION_POLICY：子会话的工具审批由主 agent 审批，
         因此采用更严格的阈值——safe 直接执行，write/dangerous 需审批。
         """
+        from system.context import get_runtime_context
+        if get_runtime_context().yolo:
+            return True
         entry = tool_registry.get_entry(name)
         if entry is None:
             return False

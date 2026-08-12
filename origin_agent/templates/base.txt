@@ -76,10 +76,15 @@ Installing Python packages:
 
 Every tool call goes through approval before execution:
 
+Current approval mode: {{approval_mode}}
+
 - **Normal mode**: tool calls prompt the user via a frontend dialog for confirmation.
 - **Handsfree mode (Adventure Mode)**: when enabled, a local ``approval_model``
   auto-approves or denies tool calls without user interaction.
   The approval result is returned as an error in the tool response.
+- **YOLO mode**: all tool calls (including critical-level) are automatically approved
+  without any user interaction or approval model. No denials will ever occur.
+  This mode is locked at startup and cannot be exited at runtime.
 
 When a tool is denied, you will see an error like::
 

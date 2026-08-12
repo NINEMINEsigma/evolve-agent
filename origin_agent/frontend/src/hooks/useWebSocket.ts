@@ -278,6 +278,7 @@ export function useWebSocket() {
     const s = sessionRef.current;
     const c = connRef.current;
     if (!s) return;
+    if (s.yoloMode) return;
     s.setHandsfreeMode(enabled);
     if (c.wsRef.current?.readyState === WebSocket.OPEN) {
       c.send({
@@ -407,6 +408,8 @@ export function useWebSocket() {
     uploading: upload.uploading,
     handsfreeMode: session.handsfreeMode,
     setHandsfreeMode: session.setHandsfreeMode,
+    yoloMode: session.yoloMode,
+    setYoloMode: session.setYoloMode,
     taskProgress: session.taskProgress,
     setTaskProgress: session.setTaskProgress,
     clipboardDisplays: session.clipboardDisplays,

@@ -12,6 +12,7 @@ interface HeaderProps {
   contextTokens: number;
   llmMaxContextTokens: number;
   handsfreeMode: boolean;
+  yoloMode: boolean;
   approvalModelAvailable: boolean;
   approvalModelName: string;
   approvalModelType: string;
@@ -34,6 +35,7 @@ export default function Header({
   contextTokens,
   llmMaxContextTokens,
   handsfreeMode,
+  yoloMode,
   approvalModelAvailable,
   approvalModelName,
   approvalModelType,
@@ -110,7 +112,7 @@ export default function Header({
     }
   };
 
-  const showHandsfreeToggle = approvalModelAvailable;
+  const showHandsfreeToggle = yoloMode || approvalModelAvailable;
   const showUnloadMenu = approvalModelAvailable && !modelClosed && approvalModelType === "local";
 
   // 移动端折叠态：只显示精简条
@@ -221,12 +223,12 @@ export default function Header({
                 <span
                   className={[
                     "approval-model-badge",
-                    handsfreeMode ? "handsfree-on" : "handsfree-off",
+                    (yoloMode || handsfreeMode) ? "handsfree-on" : "handsfree-off",
                   ].filter(Boolean).join(" ")}
-                  data-tooltip={handsfreeMode ? "脱手模式已开启 — 工具调用由 AI 自动审批" : "脱手模式已关闭 — 工具调用需用户审批"}
-                  onClick={() => onToggleHandsfree(!handsfreeMode)}
+                  data-tooltip={yoloMode ? "YOLO 模式已开启 — 所有工具调用自动批准，不可关闭" : handsfreeMode ? "脱手模式已开启 — 工具调用由 AI 自动审批" : "脱手模式已关闭 — 工具调用需用户审批"}
+                  onClick={yoloMode ? undefined : () => onToggleHandsfree(!handsfreeMode)}
                 >
-                  {handsfreeMode ? approvalModelName || "自动审批" : "脱手"}
+                  {yoloMode ? "AUTO" : handsfreeMode ? approvalModelName || "自动审批" : "脱手"}
                 </span>
               )}
               <span className="token-badge" data-tooltip={`累计消耗: ${tokenUsage.toLocaleString()}  |  已用上下文: ${contextTokens.toLocaleString()}  |  最大上下文: ${llmMaxContextTokens > 0 ? llmMaxContextTokens.toLocaleString() : "?"}`}>
@@ -318,12 +320,12 @@ export default function Header({
             <span
               className={[
                 "approval-model-badge",
-                handsfreeMode ? "handsfree-on" : "handsfree-off",
+                (yoloMode || handsfreeMode) ? "handsfree-on" : "handsfree-off",
               ].filter(Boolean).join(" ")}
-              data-tooltip={handsfreeMode ? "脱手模式已开启 — 工具调用由 AI 自动审批" : "脱手模式已关闭 — 工具调用需用户审批"}
-              onClick={() => onToggleHandsfree(!handsfreeMode)}
+              data-tooltip={yoloMode ? "YOLO 模式已开启 — 所有工具调用自动批准，不可关闭" : handsfreeMode ? "脱手模式已开启 — 工具调用由 AI 自动审批" : "脱手模式已关闭 — 工具调用需用户审批"}
+              onClick={yoloMode ? undefined : () => onToggleHandsfree(!handsfreeMode)}
             >
-              {handsfreeMode ? approvalModelName || "自动审批" : "脱手"}
+              {yoloMode ? "AUTO" : handsfreeMode ? approvalModelName || "自动审批" : "脱手"}
             </span>
           )}
           <span className="token-badge" data-tooltip={`累计消耗: ${tokenUsage.toLocaleString()}  |  已用上下文: ${contextTokens.toLocaleString()}  |  最大上下文: ${llmMaxContextTokens > 0 ? llmMaxContextTokens.toLocaleString() : "?"}`}>

@@ -1613,6 +1613,7 @@ async def ws_chat(ws: WebSocket) -> None:
                                 "approval_model_type": model_type,
                                 "embedding_model": ctx.embedding_model,
                                 "embedding_model_available": bool(ctx.embedding_model.strip()),
+                                "yolo": ctx.yolo,
                             },
                         }),
                     ).model_dump(exclude_none=True),

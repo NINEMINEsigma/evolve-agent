@@ -123,6 +123,9 @@ class RuntimeContext(BaseModel):
     merge_concat_threshold: int = MERGE_CONCAT_THRESHOLD
     """会话合并时直接拼接摘要的字符阈值，超过则截断。"""
 
+    yolo: bool = False
+    """YOLO 模式：所有工具调用直接自动批准，包括 critical 级别。启动后不可退出。"""
+
 
 # ---------------------------------------------------------------------------
 # 全局 RuntimeContext 单例

@@ -87,6 +87,13 @@ async def execute_with_approval(
             - denied=True 时，deny_result 包含错误信息，调用方应跳过工具分发。
             - denied=False 时，args 已被原地修改（_pre_approved / _approval_action），调用方继续分发。
     """
+    # YOLO 模式：所有工具直接自动批准，无例外
+    from system.context import get_runtime_context
+    if get_runtime_context().yolo:
+        args["_pre_approved"] = True
+        args["_approval_action"] = "allow_once"
+        return ApprovalOutcome(denied=False, approved_args=args)
+
     # 不需要审批的工具：直接放行
     if not _needs_approval(tool_name, session_id):
         return ApprovalOutcome(denied=False, approved_args=args)

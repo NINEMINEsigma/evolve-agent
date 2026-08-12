@@ -422,6 +422,10 @@ class MessageRouter:
 
     async def handle_handsfree_mode(self, msg: Message) -> None:
         """处理脱手模式切换。"""
+        from system.context import get_runtime_context
+        if get_runtime_context().yolo:
+            logger.info("Handsfree toggle ignored — YOLO mode active | session=%s", self.sid)
+            return
         from component.approval import set_handsfree_mode
         enabled = msg.content is not None and (str(msg.content).lower() in ("true", "1", "on"))
         logger.info("Handsfree mode toggle | session=%s enabled=%s", self.sid, enabled)
