@@ -1083,7 +1083,7 @@ Returns metadata for all cron jobs in the current session, including schedule in
     handler=_handle_list_cron_jobs,
     is_async=True,
     emoji="📋",
-    danger_level=ToolDangerLevel.readonly,
+    danger_level=ToolDangerLevel.safe,
 )
 
 registry.register(
@@ -1146,7 +1146,7 @@ Stops future scheduling for the task, removes its record, and suppresses notific
     handler=_handle_cancel_cron_job,
     is_async=True,
     emoji="🗑",
-    danger_level=ToolDangerLevel.readonly,
+    danger_level=ToolDangerLevel.safe,
 )
 
 registry.register(
@@ -1344,5 +1344,5 @@ Waits non-blockingly for the specified number of seconds, then sends a [cron-res
     handler=_handle_wait_cron,
     is_async=True,
     emoji="⏳",
-    danger_level=ToolDangerLevel.readonly,
+    danger_level=ToolDangerLevel.safe,
 )

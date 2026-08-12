@@ -32,13 +32,13 @@ class Role(str, Enum):
 class ToolDangerLevel(str, Enum):
     """工具的危险等级。
 
-    readonly    : 永远安全且可逆
+    safe    : 永远安全且可逆
     write       : 可能产生被用于不可逆影响的产物
     dangerous   : 可能导致不可逆的危险影响, 必须经审批后执行
     critical    : 操作本身可能安全，但用户必须亲自许可，不可由模型代审批
     """
 
-    readonly = "readonly"
+    safe = "safe"
     write = "write"
     dangerous = "dangerous"
     critical = "critical"
@@ -193,7 +193,7 @@ class ToolCallMeta(BaseModel):
     application_time_ms: int
     """申请时间的绝对毫秒时间戳，供机器计算使用。"""
     approval_duration_ms: int
-    """审批耗时（毫秒），readonly 工具为 0。"""
+    """审批耗时（毫秒），safe 工具为 0。"""
     invocation_start_offset_ms: int
     """从申请到开始调用 handler 的毫秒偏移。"""
     invocation_duration_ms: int

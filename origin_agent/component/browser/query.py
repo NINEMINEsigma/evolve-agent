@@ -1,4 +1,4 @@
-"""browser_query — 在页面中定位元素，产出可复用的元素引用（readonly）。
+"""browser_query — 在页面中定位元素，产出可复用的元素引用（safe）。
 
 按 CSS/XPath 选择器或子树文本定位，返回元素引用列表（含 path），
 供 browser_click / browser_type / browser_press / browser_scroll 等交互工具使用。
@@ -163,5 +163,5 @@ The path can be passed directly as the path argument of browser_click / browser_
     check_fn=_connection.playwright_available,
     is_async=True,
     emoji="🔎",
-    danger_level=ToolDangerLevel.readonly,
+    danger_level=ToolDangerLevel.safe,
 )

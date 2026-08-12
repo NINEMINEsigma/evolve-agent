@@ -171,7 +171,7 @@ sequenceDiagram
 4. `_build_history_messages()` 组装 system prompt + hooks + 历史。
 5. `StreamConsumer.consume()` 调用 `BaseLLMClient.chat_stream()` 流式生成。
 6. 解析流中的文本 / tool_call，通过 `FrontendSink` 实时推送。
-7. 对 tool_call 执行 `ToolExecutor.execute()`：readonly / allowlist 直接执行，否则等待审批。
+7. 对 tool_call 执行 `ToolExecutor.execute()`：safe / allowlist 直接执行，否则等待审批。
 8. 工具结果加入历史，循环直到 `finish_reason=stop` 或达到 `MAX_TOOL_TURNS`。
 
 ---

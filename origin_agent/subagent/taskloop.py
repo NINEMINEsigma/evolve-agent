@@ -126,7 +126,7 @@ class TaskAgentLoop(SubAgentLoop):
                 )
                 self._history.add_message(assistant_msg)
 
-                # 处理工具调用 — readonly 直接执行；理论上非 readonly 不在工具集中
+                # 处理工具调用 — safe 直接执行；理论上非 safe 不在工具集中
                 try:
                     for i, tc in enumerate(resp.tool_calls):
                         if self._cancel_event.is_set():

@@ -312,6 +312,6 @@ MCP servers without restarting the agent.""",
     },
     handler=_handle_mcp_refresh,
     is_async=False,
-    danger_level=ToolDangerLevel.readonly,
+    danger_level=ToolDangerLevel.safe,
     availability=ToolAvailability.MAIN,
 )

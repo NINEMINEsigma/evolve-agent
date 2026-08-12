@@ -297,7 +297,7 @@ Compresses the source (file or directory) into an archive at the output path. If
     },
     handler=_handle_compress,
     emoji="📦",
-    danger_level=ToolDangerLevel.readonly,
+    danger_level=ToolDangerLevel.safe,
 )
 
 registry.register(
@@ -374,5 +374,5 @@ Decompresses the archive into the target directory. The target directory is auto
     },
     handler=_handle_decompress,
     emoji="📂",
-    danger_level=ToolDangerLevel.readonly,
+    danger_level=ToolDangerLevel.safe,
 )

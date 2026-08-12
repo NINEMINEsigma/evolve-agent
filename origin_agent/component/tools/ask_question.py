@@ -152,7 +152,7 @@ The agent thread blocks until the user responds. Do not call this inside backgro
     handler=_handle_ask_question,
     is_async=True,
     emoji="❓",
-    danger_level=ToolDangerLevel.readonly,
+    danger_level=ToolDangerLevel.safe,
     no_timeout=True,
     availability=ToolAvailability.MAIN | ToolAvailability.MULTI_AGENT,
 )

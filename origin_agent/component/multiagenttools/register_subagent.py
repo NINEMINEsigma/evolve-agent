@@ -154,6 +154,6 @@ The profile is persisted to the workspace and used globally by tools such as run
     },
     handler=_handle_register_subagent_from_parent,
     emoji="🤖",
-    danger_level=ToolDangerLevel.readonly,
+    danger_level=ToolDangerLevel.safe,
     availability=ToolAvailability.MAIN,
 )

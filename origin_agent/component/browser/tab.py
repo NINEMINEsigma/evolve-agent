@@ -149,7 +149,7 @@ The new tab's index can be queried afterwards with browser_list_tabs.""",
     check_fn=_connection.playwright_available,
     is_async=True,
     emoji="➕",
-    danger_level=ToolDangerLevel.readonly,
+    danger_level=ToolDangerLevel.safe,
 )
 
 registry.register(
@@ -174,7 +174,7 @@ registry.register(
     check_fn=_connection.playwright_available,
     is_async=True,
     emoji="🪟",
-    danger_level=ToolDangerLevel.readonly,
+    danger_level=ToolDangerLevel.safe,
 )
 
 registry.register(
@@ -205,5 +205,5 @@ registry.register(
     check_fn=_connection.playwright_available,
     is_async=True,
     emoji="🗑️",
-    danger_level=ToolDangerLevel.readonly,
+    danger_level=ToolDangerLevel.safe,
 )

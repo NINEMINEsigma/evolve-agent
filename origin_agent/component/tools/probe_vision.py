@@ -228,7 +228,7 @@ On non-vision error:
     handler=_handle_probe_vision,
     is_async=True,
     emoji="👁️",
-    danger_level=ToolDangerLevel.readonly,
+    danger_level=ToolDangerLevel.safe,
     no_timeout=True,
     availability=ToolAvailability.EVERY,
 )

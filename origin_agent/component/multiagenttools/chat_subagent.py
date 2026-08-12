@@ -149,6 +149,6 @@ If the sub-agent is still generating its current response, the call fails with:
     handler=_handle_chat_subagent,
     is_async=True,
     emoji="💬",
-    danger_level=ToolDangerLevel.readonly,
+    danger_level=ToolDangerLevel.safe,
     availability=ToolAvailability.MAIN,
 )

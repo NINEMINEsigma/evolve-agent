@@ -1,7 +1,7 @@
 """子 Agent 的 LLM 调用 + 工具执行循环。
 
 参考 ``AgentLoop._process_message_locked`` 的结构，但适配子 Agent 的特化需求：
-- 工具调用分类处理（readonly 立即执行，其他工具阻塞等审批）
+- 工具调用分类处理（safe 立即执行，其他工具阻塞等审批）
 - 独立 LLM 客户端（SubRuntimeContext）
 - 收件箱/发件箱机制
 """
@@ -263,7 +263,7 @@ class SubAgentLoop(BasePrivateChatAgentLoop):
         """判断工具是否可直接执行（无需审批）。
 
         基于 SUB_SESSION_POLICY：子会话的工具审批由主 agent 审批，
-        因此采用更严格的阈值——readonly 直接执行，write/dangerous 需审批。
+        因此采用更严格的阈值——safe 直接执行，write/dangerous 需审批。
         """
         entry = tool_registry.get_entry(name)
         if entry is None:
@@ -369,7 +369,7 @@ class SubAgentLoop(BasePrivateChatAgentLoop):
                 )
                 self._history.add_message(assistant_msg)
 
-                # 处理工具调用 — readonly 直接执行；其它工具入审批队列阻塞等待
+                # 处理工具调用 — safe 直接执行；其它工具入审批队列阻塞等待
                 try:
                     for i, tc in enumerate(resp.tool_calls):
                         # 中断：为当前及剩余未执行 tool_calls 补中断结果后停止响应

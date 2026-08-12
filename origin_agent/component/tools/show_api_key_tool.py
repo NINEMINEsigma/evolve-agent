@@ -117,6 +117,6 @@ Frontend UI only. Does not write to the system clipboard and does not persist an
     handler=_handle_show_llm_api_key,
     is_async=True,
     emoji="🔑",
-    danger_level=ToolDangerLevel.readonly,
+    danger_level=ToolDangerLevel.safe,
     availability=ToolAvailability.MAIN,
 )

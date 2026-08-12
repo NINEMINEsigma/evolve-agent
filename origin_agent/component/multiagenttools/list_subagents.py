@@ -120,6 +120,6 @@ Read-only query with no side effects. Returns a dictionary keyed by sub-agent na
     handler=_handle_list_subagents,
     is_async=True,
     emoji="📋",
-    danger_level=ToolDangerLevel.readonly,
+    danger_level=ToolDangerLevel.safe,
     availability=ToolAvailability.MAIN,
 )

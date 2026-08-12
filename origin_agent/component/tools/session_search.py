@@ -317,7 +317,7 @@ Full-text mode may take several seconds when many sessions exist.
     handler=_handle_search_sessions,
     is_async=False,
     emoji="🔍",
-    danger_level=ToolDangerLevel.readonly,
+    danger_level=ToolDangerLevel.safe,
     availability=ToolAvailability.MAIN | ToolAvailability.MULTI_AGENT,
 )
 
@@ -395,6 +395,6 @@ Loading a session's history may cause a brief delay. Out-of-range indices are si
     handler=_handle_get_session_messages,
     is_async=False,
     emoji="📜",
-    danger_level=ToolDangerLevel.readonly,
+    danger_level=ToolDangerLevel.safe,
     availability=ToolAvailability.MAIN | ToolAvailability.MULTI_AGENT,
 )

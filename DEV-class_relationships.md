@@ -53,7 +53,7 @@ classDiagram
         #_get_tool_definitions()*
         #_on_context_over_limit()*
         #_build_system_prompt()*
-        #_is_readonly_tool()
+        #_is_auto_executable()
         #_is_auto_approved_tool()
         #_execute_tool()
         #_get_history()

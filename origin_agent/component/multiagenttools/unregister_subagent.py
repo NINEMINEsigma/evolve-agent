@@ -104,6 +104,6 @@ After deletion, the name cannot be used with run_subagent until it is re-registe
     },
     handler=_handle_unregister_subagent,
     emoji="🗑️",
-    danger_level=ToolDangerLevel.readonly,
+    danger_level=ToolDangerLevel.safe,
     availability=ToolAvailability.MAIN,
 )

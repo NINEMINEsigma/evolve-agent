@@ -56,7 +56,7 @@ registry.register(
     toolset="multiagent",
     schema={
         # 启动一个一次性任务 Agent (taskagent)。
-        # taskagent 异步执行，只携带一次任务消息，只能使用 readonly 等级工具。
+        # taskagent 异步执行，只携带一次任务消息，只能使用 safe 等级工具。
         # 结果通过 [subagent-result] 消息异步推送，不要轮询或尝试与 taskagent 交互。
         # 如需提前终止，使用 stop_taskagent 并传入返回的 session_id。
         #
@@ -77,16 +77,16 @@ registry.register(
         #
         # ## 何时使用
         # - 需要执行流水线任务或临时任务。
-        # - 需要在隔离上下文中以 readonly 工具执行子任务。
+        # - 需要在隔离上下文中以 safe 工具执行子任务。
         # - 不需要与子 Agent 进行多轮交互。
         #
         # ## 副作用/注意
-        # - taskagent 只能使用 readonly 等级工具，不会产生不可逆影响。
+        # - taskagent 只能使用 safe 等级工具，不会产生不可逆影响。
         # - 结果异步推送，有最多 20 秒延迟（取决于周期收集器触发时机）。
         # - 不保存会话历史，无法恢复。
         "description": """Launch a one-shot task agent with a single prompt.
 
-The task agent runs asynchronously with readonly tools only. The result is delivered as a [subagent-result] message when the task completes. Do not poll or interact with task agents — they are fire-and-forget.
+The task agent runs asynchronously with safe tools only. The result is delivered as a [subagent-result] message when the task completes. Do not poll or interact with task agents — they are fire-and-forget.
 
 To terminate a task agent early, use stop_taskagent with the returned session_id.
 
@@ -106,11 +106,11 @@ On failure:
 
 ## When to Use
 - Execute a pipeline task or a temporary task.
-- Run a sub-task in an isolated context with readonly tools.
+- Run a sub-task in an isolated context with safe tools.
 - When multi-round interaction with a sub-agent is not needed.
 
 ## Side Effects / Notes
-- The task agent can only use readonly-level tools; it cannot cause irreversible effects.
+- The task agent can only use safe-level tools; it cannot cause irreversible effects.
 - Results are delivered asynchronously with up to ~20 seconds delay (depending on the cycle collector trigger).
 - No session history is saved; the task agent cannot be resumed.""",
         "parameters": {
@@ -134,6 +134,6 @@ On failure:
     handler=_handle_run_taskagent,
     is_async=True,
     emoji="📋",
-    danger_level=ToolDangerLevel.readonly,
+    danger_level=ToolDangerLevel.safe,
     availability=ToolAvailability.MAIN,
 )

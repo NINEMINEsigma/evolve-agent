@@ -746,10 +746,10 @@ class _OrchestratorContext:
         return tool_registry.get_definitions_for_availability(ToolAvailability.SUBAGENT)
 
     def _build_task_tool_set(self) -> list[dict[str, Any]]:
-        """构建 taskagent 工具集 — 仅 TASKAGENT 作用域 + readonly 等级。
+        """构建 taskagent 工具集 — 仅 TASKAGENT 作用域 + safe 等级。
 
         复用 get_definitions_for_availability 获取 OpenAI 包装格式的 schema，
-        然后按 danger_level 过滤为 readonly。
+        然后按 danger_level 过滤为 safe。
         """
         all_defs: list[dict] = tool_registry.get_definitions_for_availability(
             ToolAvailability.TASKAGENT,
@@ -759,7 +759,7 @@ class _OrchestratorContext:
             func: dict = schema.get("function") or {}
             name: str = func.get("name", "")
             entry = tool_registry.get_entry(name)
-            if entry is not None and entry.danger_level == ToolDangerLevel.readonly:
+            if entry is not None and entry.danger_level == ToolDangerLevel.safe:
                 result.append(schema)
         return result
 

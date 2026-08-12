@@ -428,7 +428,7 @@ Creates an endpoint registration with path format /dynamic/{session_id}/{agent_n
     handler=_handle_register_dynamic_endpoint,
     is_async=True,
     emoji="🔌",
-    danger_level=ToolDangerLevel.readonly,
+    danger_level=ToolDangerLevel.safe,
     availability=ToolAvailability.MAIN | ToolAvailability.MULTI_AGENT,
 )
 
@@ -492,7 +492,7 @@ Removes the endpoint from the registry and its persisted record. Subsequent POST
     handler=_handle_unregister_dynamic_endpoint,
     is_async=True,
     emoji="✂",
-    danger_level=ToolDangerLevel.readonly,
+    danger_level=ToolDangerLevel.safe,
     availability=ToolAvailability.MAIN | ToolAvailability.MULTI_AGENT,
 )
 
@@ -546,6 +546,6 @@ Returns metadata for all dynamic endpoints in the current session, including end
     handler=_handle_list_dynamic_endpoints,
     is_async=True,
     emoji="📋",
-    danger_level=ToolDangerLevel.readonly,
+    danger_level=ToolDangerLevel.safe,
     availability=ToolAvailability.MAIN | ToolAvailability.MULTI_AGENT,
 )

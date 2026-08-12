@@ -173,7 +173,7 @@ registry.register(
     name="enter_multi_agent",
     toolset="multiagent",
     availability=ToolAvailability.MAIN,
-    danger_level=ToolDangerLevel.readonly,
+    danger_level=ToolDangerLevel.safe,
     schema={
         # 将当前主会话切换到多 Agent 协作模式。
         #

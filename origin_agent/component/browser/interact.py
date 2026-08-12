@@ -341,5 +341,5 @@ registry.register(
     check_fn=_connection.playwright_available,
     is_async=True,
     emoji="📜",
-    danger_level=ToolDangerLevel.readonly,
+    danger_level=ToolDangerLevel.safe,
 )

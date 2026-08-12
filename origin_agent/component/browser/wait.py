@@ -1,4 +1,4 @@
-"""browser_wait — 等待页面/元素达到指定状态（readonly）。
+"""browser_wait — 等待页面/元素达到指定状态（safe）。
 
 供 goto/click 等操作后同步状态：等网络空闲或等元素可见/隐藏。
 无任何副作用。模块导入时通过 ``registry.register()`` 注册。
@@ -129,5 +129,5 @@ registry.register(
     check_fn=_connection.playwright_available,
     is_async=True,
     emoji="⏳",
-    danger_level=ToolDangerLevel.readonly,
+    danger_level=ToolDangerLevel.safe,
 )

@@ -20,7 +20,7 @@ def _handle_list_tools(args: dict[str, Any]) -> dict:
     danger_level_raw: str = str(args.get("danger_level", "")).strip()
 
     # TODO: 需要使用非硬编码的方案
-    valid_levels = {"readonly", "write", "dangerous", "critical"}
+    valid_levels = {"safe", "write", "dangerous", "critical"}
     if not danger_level_raw:
         return tool_error("'danger_level' is required")
     if danger_level_raw not in valid_levels:
@@ -73,7 +73,7 @@ None.
 
 | Level | Impact |
 |-------|--------|
-| `readonly` | Operations fully confined within the sandbox, no external system impact. |
+| `safe` | Operations fully confined within the sandbox, no external system impact. |
 | `write` | May have indirect impact (e.g. writing scripts that won't auto-execute but could contain high-risk code). |
 | `dangerous` | Misuse can directly cause catastrophic damage to the entire machine or critical assets. |
 | `critical` | Operation may be safe, but user must explicitly approve every call. Cannot be auto-approved or added to allowlist. |
@@ -98,10 +98,10 @@ When called from a sub-agent, only tools authorized for that sub-agent are retur
                 "danger_level": {
                     "type": "string",
                     # 要筛选的危险等级。
-                    # 'readonly'=沙箱内操作无外部影响，'write'=可能间接影响，'dangerous'=可直接毁灭性打击。
+                    # 'safe'=沙箱内操作无外部影响，'write'=可能间接影响，'dangerous'=可直接毁灭性打击。
                     "description": """Danger level to filter by.
 
-- `readonly` — sandbox-confined, no external impact.
+- `safe` — sandbox-confined, no external impact.
 - `write` — may have indirect impact.
 - `dangerous` — capable of catastrophic direct damage.
 - `critical` — user must explicitly approve every call, cannot be auto-approved.""",
@@ -112,5 +112,5 @@ When called from a sub-agent, only tools authorized for that sub-agent are retur
     },
     handler=_handle_list_tools,
     emoji="🧰",
-    danger_level=ToolDangerLevel.readonly,
+    danger_level=ToolDangerLevel.safe,
 )

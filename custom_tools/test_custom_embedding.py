@@ -158,5 +158,5 @@ Messages without a stored embedding vector are skipped.""",
     },
     handler=_handle_test_custom_embedding,
     is_async=True,
-    danger_level=ToolDangerLevel.readonly,
+    danger_level=ToolDangerLevel.safe,
 )

@@ -46,7 +46,7 @@ disable-model-invocation: true
    - `handler` — 处理函数签名与逻辑
    - `is_async` — 是否异步
    - `emoji` — 图标
-   - `danger_level` — 危险级别（readonly / write / destructive）
+   - `danger_level` — 危险级别（safe / write / dangerous / critical）
    - `no_timeout` — 是否禁用超时
 3. 说明本次质询的范围和预计深度。
 
@@ -107,7 +107,7 @@ disable-model-invocation: true
 
 - `is_async` — 默认 `False`，阻塞型工具设为 `True`
 - `emoji` — 与工具语义相关的单字符 emoji
-- `danger_level` — `readonly` / `write` / `destructive`
+- `danger_level` — `safe` / `write` / `dangerous` / `critical`
 - `no_timeout` — 长阻塞工具设为 `True`
 
 ### [PHASE: Verify] 6. 事前校验
@@ -207,7 +207,7 @@ registry.register(
     handler=_handle_<tool_name>,
     is_async=<True|False>,
     emoji="<emoji>",
-    danger_level="<readonly|write|destructive>",
+    danger_level="<safe|write|dangerous|critical>",
     no_timeout=<True|False>,
 )
 ```

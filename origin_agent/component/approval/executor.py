@@ -52,7 +52,7 @@ def _needs_approval(tool_name: str, session_id: str) -> bool:
     委托到 needs_approval，使用 MAIN_SESSION_POLICY：
     - dangerous 级别始终需要
     - write 级别仅在脱手模式下需要
-    - readonly 直接执行
+    - safe 直接执行
     """
     danger_level: ToolDangerLevel = tool_registry.get_danger_level(tool_name)
     handsfree = is_handsfree_mode(session_id)

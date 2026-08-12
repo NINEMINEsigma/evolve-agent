@@ -65,7 +65,7 @@ class ToolEntry:
         emoji: str = "",
         max_result_size_chars: int | None = None,
         dynamic_schema_overrides: Callable | None = None,
-        danger_level: ToolDangerLevel = ToolDangerLevel.readonly,
+        danger_level: ToolDangerLevel = ToolDangerLevel.safe,
         no_timeout: bool = False,
         availability: ToolAvailability = ToolAvailability.EVERY,
     ):
@@ -296,9 +296,9 @@ class ToolRegistry:
         return entry.emoji if entry and entry.emoji else default
 
     def get_danger_level(self, name: str) -> ToolDangerLevel:
-        """返回工具的危险等级，未注册时返回 ``ToolDangerLevel.readonly``。"""
+        """返回工具的危险等级，未注册时返回 ``ToolDangerLevel.safe``。"""
         entry: ToolEntry | None = self.get_entry(name)
-        return entry.danger_level if entry else ToolDangerLevel.readonly
+        return entry.danger_level if entry else ToolDangerLevel.safe
 
     def get_tool_to_toolset_map(self) -> dict[str, str]:
         """返回 ``{tool_name: toolset_name}`` 映射。"""
@@ -355,7 +355,7 @@ class ToolRegistry:
         max_result_size_chars: int | None = None,
         dynamic_schema_overrides: Callable | None = None,
         override: bool = False,
-        danger_level: ToolDangerLevel = ToolDangerLevel.readonly,
+        danger_level: ToolDangerLevel = ToolDangerLevel.safe,
         no_timeout: bool = False,
         availability: ToolAvailability = ToolAvailability.EVERY,
     ) -> None:

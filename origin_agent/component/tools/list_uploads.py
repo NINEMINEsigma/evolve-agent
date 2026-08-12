@@ -149,5 +149,5 @@ Read-only query. No side effects.
     },
     handler=_handle_list_uploads,
     emoji="📂",
-    danger_level=ToolDangerLevel.readonly,
+    danger_level=ToolDangerLevel.safe,
 )

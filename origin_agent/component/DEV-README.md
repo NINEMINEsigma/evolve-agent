@@ -144,7 +144,7 @@ component/
 
 1. `ToolExecutor.execute()` 调用 `execute_with_approval()`。
 2. `execute_with_approval` 判断工具危险等级与白名单。
-3. 若工具在 allowlist 中或危险等级为 `readonly`，直接执行。
+3. 若工具在 allowlist 中或危险等级为 `safe`，直接执行。
 4. 否则进入审批流程：
    - **正常模式**：通过 `AgentSink.request_approval()` 弹出前端确认请求，等待用户决策。
    - **脱手模式**：通过 `ApprovalBackend.chat()` 调用本地/远程模型自动评估。

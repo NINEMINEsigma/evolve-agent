@@ -90,7 +90,7 @@ registry.register(
     name="exit_multi_agent",
     toolset="multiagent",
     availability=ToolAvailability.MULTI_AGENT,
-    danger_level=ToolDangerLevel.readonly,
+    danger_level=ToolDangerLevel.safe,
     schema={
         # 退出多 Agent 协作模式，回到普通模式。
         #
