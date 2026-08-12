@@ -1006,6 +1006,7 @@ class BasePrivateChatAgentLoop(BaseAgentLoop):
         if not text.strip():
             return
 
+        logger.debug("Triggering embedding update | index=%d text=%s", index, text[:50])
         task = asyncio.create_task(self._compute_embedding(message, index, text))
         self._pending_embedding_tasks.add(task)
         task.add_done_callback(self._pending_embedding_tasks.discard)
