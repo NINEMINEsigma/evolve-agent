@@ -130,3 +130,39 @@ Determine the output format based on user requirements using the following rules
 - 本系统（Evolve Agent）**无需额外构建流程**：前端任务（网站、Web 应用、网页复刻）直接创建**自包含 HTML 文件**（内嵌 CSS/JS），保存到 `ws:output/`，通过 `/uploads/` 路由嵌入聊天即可发布给用户。
 - 需要设计指导时参考本系统 `frontend-design` 技能（高品质前端设计规范）；需要可复用组件时参考 `ui/status-panel`（可折叠状态面板模板）。
 - 不要在报告中嵌入 `<script>` 交互块；如产出的是静态报告（.md 等），图表需导出为静态图片嵌入。
+
+### 可视化交互式网页（Interactive Webapp）产出路径
+
+当深度研究结果适合做成**可交互、渐进式阅读**的网页版本时（参数调节、实时计算、随机实验、图表联动、教学式章节编排），采用此路径。标准参考实现见 **`examples/information-entropy-webapp/`**（信息熵交互式讲义，由 deep-research 最早的本体 agent 产出）。
+
+**何时选此路径**（区别于上面的自包含 HTML）：
+
+- 内容有**核心概念需要通过交互才能理解**（调滑块看曲线变化、跑实验看统计规律、调参数看模型行为）
+- 内容是**渐进式知识结构**（从直觉到定义到推导到应用），适合章节化叙事
+- 需要**统一主题 + 组件化架构**（章节壳、公式渲染、滚动入场等复用组件），而不是一坨大 HTML
+
+**标准结构**（对齐案例）：
+
+```
+app/
+├── src/
+│   ├── pages/Home.tsx          ← 单页入口：导航 + 滚动进度条 + 章节编排
+│   ├── sections/               ← 每章一个交互组件（Hero + S1~S8 式命名）
+│   ├── components/             ← 复用组件：Section（章节壳）/ Reveal（滚动入场）/ Math（公式）
+│   │   └── ui/                 ← shadcn/ui 组件
+│   ├── lib/                    ← 领域数学/逻辑工具（如 entropy.ts）
+│   └── hooks/
+├── index.html
+├── package.json
+├── vite.config.ts              ← base: './'，@ 别名指向 src
+├── tailwind.config.js
+└── components.json             ← shadcn 配置
+```
+
+**技术栈**：Vite + React + TypeScript + Tailwind CSS + shadcn/ui（图表可用 recharts 或 echarts）。
+
+**产物路径**：
+1. 参考 `examples/information-entropy-webapp/` 的章节编排方式与组件拆分
+2. 复制案例为模板，替换 `src/sections/` 内容与 `src/lib/` 领域逻辑，调整主题色
+3. `npm install && npm run build` → 产出 `dist/`（base: './'，可直接静态部署）
+4. 交付 `dist/` 或整个项目目录
