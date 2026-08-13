@@ -649,6 +649,9 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
         # 对已有消息补充 embedding 向量（fire-and-forget，已有向量的会被跳过）
         for index, message in enumerate(history.iter_messages()):
             self._trigger_embedding_update(message, index)
+        # 所有 embedding 任务触发后，安排 flush：等待全部完成后统一保存一次
+        if self._pending_embedding_tasks:
+            asyncio.create_task(self._flush_embeddings_and_save())
 
     def _store_assistant_with_tools(
         self, session_id: str, resp: LLMResponse,

@@ -1053,7 +1053,18 @@ class BasePrivateChatAgentLoop(BaseAgentLoop):
                 return
 
             message.set_embedding(backend.model_name, resp[0])
-            # 不在此处调用 save_history — 多个后台 Task 并发写入同一文件会导致 JSON 损坏。
-            # embedding 已写入内存中的消息对象，下次主流程的 save_history 会自然持久化。
+            # 不在此处调用 save_history — 多个后台 Task 并发写入同一文件会导致 JSON 捁坏。
+            # embedding 已写入内存中的消息对象，下次主流程的 save_history 会自然持久化，
+            # 或由 _flush_embeddings_and_save 在批量任务完成后统一持久化。
         except Exception:
             logger.exception("Embedding update failed for index=%d", index)
+
+    async def _flush_embeddings_and_save(self) -> None:
+        """等待所有待处理的 embedding 任务完成后，执行一次 save_history。
+
+        解决 load_history 触发的批量 embedding 计算结果不被持久化的问题。
+        并发写入风险已消除：仅在全部 embedding Task 完成后执行单次写入。
+        """
+        if self._pending_embedding_tasks:
+            await asyncio.gather(*self._pending_embedding_tasks, return_exceptions=True)
+        self.save_history(self.session_id)

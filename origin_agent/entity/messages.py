@@ -384,10 +384,6 @@ class History(BaseModel):
                         message.tool_call_id,
                     )
                     return -1
-            if isinstance(message, CharacterConversationMessage):
-                # 上下文编排, 通过RAG等手段获取关于这条消息的正面与负面相关记忆
-                # 形成类似奖惩机制的关联性长期记忆
-                pass
             self.messages.append(message)
             self.update_last_user_message()
             return len(self.messages) - 1

@@ -314,6 +314,29 @@ CRON_MAX_JOBS_PER_SESSION: int = 20
 
 
 # ============================================================================
+# 会话搜索 (session_search.py)
+# ============================================================================
+
+# RecallSession 默认返回结果上限
+SESSION_SEARCH_MAX_RESULTS_DEFAULT: int = 30
+
+# RecallSession 返回结果硬上限
+SESSION_SEARCH_MAX_RESULTS_LIMIT: int = 100
+
+# ReadSession 默认读取消息条数
+SESSION_SEARCH_READ_LENGTH_DEFAULT: int = 10
+
+# ReadSession 读取消息条数硬上限
+SESSION_SEARCH_READ_LENGTH_LIMIT: int = 100
+
+# RecallSession 结果预览/摘要截断长度（字符数）
+SESSION_SEARCH_PREVIEW_LENGTH: int = 200
+
+# 语义匹配余弦相似度阈值 — 低于此值不视为匹配
+SESSION_SEARCH_SEMANTIC_THRESHOLD: float = 0.5
+
+
+# ============================================================================
 # Watching Service (background_service.py)
 # ============================================================================
 
