@@ -25,6 +25,76 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 _ENGINE_FAILED = object()
 
+# 分块目标 token 数：n_ctx=2048 留 500 余量
+_CHUNK_TARGET_TOKENS = 1500
+
+
+# ---------------------------------------------------------------------------
+# 分块 + 聚合辅助函数
+# ---------------------------------------------------------------------------
+
+def _chunk_text(text: str, engine: InferenceEngine, target_tokens: int = _CHUNK_TARGET_TOKENS) -> list[str]:
+    """将超长文本按自然边界分块，每块 token 数不超过 target_tokens。
+
+    分块优先级：段落(\\n\\n) > 行(\\n) > 句子(. ; 。；) > 硬切分。
+    使用 engine.tokenize() 精确验证每块 token 数，超限的块递归细分。
+    """
+    token_count = len(engine.tokenize(text))
+    if token_count <= target_tokens:
+        return [text]
+
+    # 按优先级依次尝试自然边界分隔符
+    separators = ["\n\n", "\n", ". ", "。", "; ", "；"]
+    chosen_sep: str | None = None
+    for sep in separators:
+        if sep in text:
+            chosen_sep = sep
+            break
+
+    if chosen_sep is None:
+        # 无自然边界可切，按字符数硬切分（用 token/char 比率估算）
+        ratio = len(text) / max(token_count, 1)
+        chunk_chars = int(target_tokens * ratio)
+        return [text[i:i + chunk_chars] for i in range(0, len(text), chunk_chars)]
+
+    # 贪心累积：逐个 part 尝试合并到当前 chunk
+    parts = text.split(chosen_sep)
+    chunks: list[str] = []
+    current = ""
+
+    for part in parts:
+        candidate = current + chosen_sep + part if current else part
+        if len(engine.tokenize(candidate)) <= target_tokens:
+            current = candidate
+        else:
+            if current:
+                chunks.append(current)
+            # 检查 part 自身是否超限
+            if len(engine.tokenize(part)) <= target_tokens:
+                current = part
+            else:
+                # part 自身超限，递归细分
+                sub_chunks = _chunk_text(part, engine, target_tokens)
+                chunks.extend(sub_chunks[:-1])
+                current = sub_chunks[-1] if sub_chunks else ""
+
+    if current:
+        chunks.append(current)
+
+    # 兜底：全分隔符文本可能导致 chunks 为空
+    if not chunks:
+        chunks = [text]
+
+    return chunks
+
+
+def _mean_pool(vectors: list[list[float]]) -> list[float]:
+    """对多个向量做逐元素平均，聚合为单向量。"""
+    if len(vectors) == 1:
+        return vectors[0]
+    dim = len(vectors[0])
+    return [sum(v[i] for v in vectors) / len(vectors) for i in range(dim)]
+
 
 # ---------------------------------------------------------------------------
 # EmbeddingBackend 抽象
@@ -120,8 +190,19 @@ class LocalEmbeddingBackend(EmbeddingBackend):
         if engine is None:
             return None
         try:
-            resp = await asyncio.to_thread(engine.embedding, texts)
-            return [d.embedding for d in resp.data]
+            results: list[list[float]] = []
+            for text in texts:
+                chunks = await asyncio.to_thread(_chunk_text, text, engine)
+                resp = await asyncio.to_thread(engine.embedding, chunks)
+                if not resp.data:
+                    results.append([])
+                    continue
+                if len(resp.data) == 1:
+                    results.append(resp.data[0].embedding)
+                else:
+                    chunk_vectors = [d.embedding for d in resp.data]
+                    results.append(_mean_pool(chunk_vectors))
+            return results
         except Exception as exc:
             logger.exception("Local embedding failed: %s", exc)
             return None
