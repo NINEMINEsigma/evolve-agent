@@ -319,6 +319,19 @@
   color: var(--text-primary);
 }
 
+.session-rename-input {
+  flex: 1;
+  font-size: 13px;
+  color: var(--text-primary);
+  background: rgba(var(--white-rgb), 0.05);
+  border: 1px solid var(--accent);
+  border-radius: 3px;
+  padding: 1px 4px;
+  outline: none;
+  line-height: 1.4;
+  box-sizing: border-box;
+}
+
 .session-item.archived {
   opacity: 0.55;
   cursor: default;

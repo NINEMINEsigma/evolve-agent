@@ -151,6 +151,9 @@ export interface SessionStore {
   regenerateSummary: (sid: string) => void;
   terminateSession: (sid: string) => void;
   togglePinSession: (sid: string) => void;
+  renamingSessionId: string | null;
+  setRenamingSessionId: React.Dispatch<React.SetStateAction<string | null>>;
+  renameSession: (sid: string, title: string) => void;
   mergeSessions: (sources: string[]) => Promise<string | undefined>;
   branchSession: (sid: string) => void;
   toggleMergeSelect: (sid: string) => void;
@@ -218,6 +221,7 @@ export function useSessionStore(callbacks: SessionStoreCallbacks = {}): SessionS
   const [terminatingSessions, setTerminatingSessions] = useState<Set<string>>(new Set());
   const [generatingTitleSessions, setGeneratingTitleSessions] = useState<Set<string>>(new Set());
   const [generatingTagSessions, setGeneratingTagSessions] = useState<Set<string>>(new Set());
+  const [renamingSessionId, setRenamingSessionId] = useState<string | null>(null);
   const [streamingMessage, setStreamingMessage] = useState<ChatMessage | null>(null);
   const [allTags, setAllTags] = useState<string[]>([]);
   const [expandedClusters, setExpandedClusters] = usePersistentState<Set<string>>(
@@ -995,6 +999,30 @@ export function useSessionStore(callbacks: SessionStoreCallbacks = {}): SessionS
       });
   }, [fetchSessions]);
 
+  const renameSession = useCallback((sid: string, title: string) => {
+    const trimmed = title.trim().slice(0, 50);
+    if (trimmed === "") {
+      setRenamingSessionId(null);
+      return;
+    }
+    fetch(`/api/sessions/${sid}/title`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ title: trimmed }),
+    })
+      .then((r) => r.json())
+      .then((data) => {
+        if (data.updated) {
+          setSessions((prev) => prev.map((s) => (s.id === sid ? { ...s, title: data.title } : s)));
+          fetchSessions();
+        }
+      })
+      .catch(() => {})
+      .finally(() => {
+        setRenamingSessionId(null);
+      });
+  }, [fetchSessions]);
+
   const autoTagSession = useCallback((sid: string) => {
     setGeneratingTagSessions((prev) => new Set(prev).add(sid));
     fetch(`/api/sessions/${sid}/auto-tags`, { method: "POST" })
@@ -1349,6 +1377,9 @@ export function useSessionStore(callbacks: SessionStoreCallbacks = {}): SessionS
     regenerateSummary,
     terminateSession,
     togglePinSession,
+    renamingSessionId,
+    setRenamingSessionId,
+    renameSession,
     mergeSessions,
     branchSession,
     toggleMergeSelect,

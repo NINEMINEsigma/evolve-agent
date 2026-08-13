@@ -9,6 +9,7 @@ interface ChatContextMenuProps {
   generatingTagSessions: Set<string>;
   terminatingSessions: Set<string>;
   onAutoTitle: (sid: string) => void;
+  onRename: (sid: string) => void;
   onAutoTag: (sid: string) => void;
   onTogglePin: (sid: string) => void;
   onEditTags: (sid: string) => void;
@@ -26,6 +27,7 @@ export default function ChatContextMenu({
   generatingTagSessions,
   terminatingSessions,
   onAutoTitle,
+  onRename,
   onAutoTag,
   onTogglePin,
   onEditTags,
@@ -48,6 +50,10 @@ export default function ChatContextMenu({
         disabled={generatingTitleSessions.has(contextMenu.sid)}
         onClick={() => { onClose(); onAutoTitle(contextMenu.sid); }}
         label={generatingTitleSessions.has(contextMenu.sid) ? "⏳ 命名中..." : "自动命名"}
+      />
+      <ContextMenuItem
+        onClick={() => { onClose(); onRename(contextMenu.sid); }}
+        label="重命名"
       />
       <ContextMenuItem
         disabled={generatingTagSessions.has(contextMenu.sid)}

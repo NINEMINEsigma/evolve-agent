@@ -21,9 +21,10 @@ import { usePersistentSessionState } from "../hooks/usePersistentSessionState";
 interface LayoutProps {
   ws: WebSocketState;
   onContextMenu: (e: React.MouseEvent, sid: string) => void;
+  contextMenuOpen: boolean;
 }
 
-export default function Layout({ ws, onContextMenu }: LayoutProps) {
+export default function Layout({ ws, onContextMenu, contextMenuOpen }: LayoutProps) {
   const [lightboxSrc, setLightboxSrc] = useState<string | null>(null);
   const [sidebarCollapsed, setSidebarCollapsed] = usePersistentState(STORAGE_KEYS.SIDEBAR_COLLAPSED, false);
   const [drawerOpen, setDrawerOpen] = usePersistentState(STORAGE_KEYS.DRAWER_OPEN, false);
@@ -195,6 +196,10 @@ export default function Layout({ ws, onContextMenu }: LayoutProps) {
         onEnterColloquy={ws.enterColloquy}
         onSwitchSession={ws.switchSession}
         onContextMenu={onContextMenu}
+        contextMenuOpen={contextMenuOpen}
+        renamingSessionId={ws.renamingSessionId}
+        setRenamingSessionId={ws.setRenamingSessionId}
+        renameSession={ws.renameSession}
         onMergeSessions={(sources) => {
           ws.mergeSessions(sources);
           ws.setMergeMode(false);
