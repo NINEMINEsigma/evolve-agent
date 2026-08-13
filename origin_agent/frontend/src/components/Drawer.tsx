@@ -1,6 +1,7 @@
-import { useState } from "react";
 import { ChatMessage, CronTask, DynamicEndpoint } from "../types";
 import { extractMessageResources } from "../utils";
+import { usePersistentState } from "../hooks/usePersistentState";
+import { STORAGE_KEYS } from "../constants/storage";
 
 interface DrawerProps {
   open: boolean;
@@ -23,10 +24,10 @@ export default function Drawer({
   open, onClose, sessionId, messages, onImageClick,
   bgTasks, setBgTasks, cronTasks, setCronTasks, dynamicEndpoints,
 }: DrawerProps) {
-  const [resourcesExpanded, setResourcesExpanded] = useState(true);
-  const [backgroundExpanded, setBackgroundExpanded] = useState(true);
-  const [cronExpanded, setCronExpanded] = useState(true);
-  const [dynamicEndpointsExpanded, setDynamicEndpointsExpanded] = useState(true);
+  const [resourcesExpanded, setResourcesExpanded] = usePersistentState(STORAGE_KEYS.DRAWER_RESOURCES_EXPANDED, true);
+  const [backgroundExpanded, setBackgroundExpanded] = usePersistentState(STORAGE_KEYS.DRAWER_BACKGROUND_EXPANDED, true);
+  const [cronExpanded, setCronExpanded] = usePersistentState(STORAGE_KEYS.DRAWER_CRON_EXPANDED, true);
+  const [dynamicEndpointsExpanded, setDynamicEndpointsExpanded] = usePersistentState(STORAGE_KEYS.DRAWER_DYNENDPOINTS_EXPANDED, true);
 
   const { images, audios, downloads } = extractMessageResources(messages);
 
