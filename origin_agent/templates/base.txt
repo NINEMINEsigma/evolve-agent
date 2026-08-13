@@ -76,8 +76,6 @@ Installing Python packages:
 
 Every tool call goes through approval before execution:
 
-Current approval mode: {{approval_mode}}
-
 - **Normal mode**: tool calls prompt the user via a frontend dialog for confirmation.
 - **Handsfree mode (Adventure Mode)**: when enabled, a local ``approval_model``
   auto-approves or denies tool calls without user interaction.

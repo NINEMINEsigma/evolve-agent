@@ -192,11 +192,29 @@ def _format_navigation(session_id: str, workspace: str) -> str:
 
 
 def _format_approval_mode(session_id: str) -> str:
-    """返回当前审批模式状态文本。"""
+    """返回当前审批模式状态文本。
+
+    三级判断（与原 prompt.py::_compute_approval_mode 逻辑对齐）：
+    1. YOLO（全局 RuntimeContext.yolo）→ "yolo"
+    2. handsfree（per-session is_handsfree_mode）→ "handsfree"
+    3. normal，若审批后端已配置则标注 "(handsfree available)"
+    """
     try:
+        from system.context import get_runtime_context
         from component.approval import is_handsfree_mode
-        mode = "handsfree" if is_handsfree_mode(session_id) else "normal"
-        return f"Approval: {mode}"
+        from component.approval.backend import is_local_approval_enabled
+
+        ctx = get_runtime_context()
+        if ctx.yolo:
+            return "Approval: yolo"
+        if is_handsfree_mode(session_id):
+            return "Approval: handsfree"
+        handsfree_available = is_local_approval_enabled(ctx) or (
+            ctx.approval_remote_base_url and ctx.approval_remote_model
+        )
+        if handsfree_available:
+            return "Approval: normal (handsfree available)"
+        return "Approval: normal"
     except Exception:
         logger.debug("Failed to get approval mode", exc_info=True)
         return ""

@@ -80,16 +80,6 @@ def _mcp_ws_path(ctx: RuntimeContext) -> str:
         return fallback
 
 
-def _compute_approval_mode(ctx: RuntimeContext) -> str:
-    """根据 RuntimeContext 计算当前审批模式标识，注入 base.txt 的 {{approval_mode}} 占位符。"""
-    if ctx.yolo:
-        return "YOLO"
-    from component.approval.backend import is_local_approval_enabled
-    if is_local_approval_enabled(ctx) or (ctx.approval_remote_base_url and ctx.approval_remote_model):
-        return "normal (handsfree available)"
-    return "normal"
-
-
 def _system_info() -> SystemInfo:
     """收集宿主系统信息，单项失败时回退为空串。"""
     import getpass
@@ -194,7 +184,6 @@ def build_system_prompt(
                 "{{mcp_config_path}}": _mcp_ws_path(runtime_ctx),
                 "{{gateway_host}}": runtime_ctx.gateway_host,
                 "{{gateway_port}}": str(runtime_ctx.gateway_port),
-                "{{approval_mode}}": _compute_approval_mode(runtime_ctx),
             }
             for k, v in runtime_values.items():
                 base = base.replace(k, (v or "未配置").strip())
