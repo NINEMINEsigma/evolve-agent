@@ -186,10 +186,13 @@ def _safe_media_ref(kind: str, url: str) -> str:
     if not url:
         return f"[{kind}: (empty)]"
     if url.startswith("data:"):
-        if len(url) > 100:
-            prefix = url[:80].rstrip(",").rstrip(";")
-            return f"[{kind}: {prefix};... (base64 stripped)]"
-        return f"[{kind}: data:... (base64 stripped)]"
+        # 提取 media subtype（如 image/png → png），去除所有 base64 片段
+        mediatype = url[5:].split(";")[0].split(",")[0]
+        if "/" in mediatype:
+            subtype = mediatype.split("/", 1)[1]
+        else:
+            subtype = "(unknown)"
+        return f"[{kind}: {subtype}]"
     short = url[:80]
     if len(url) > 80:
         short += "..."

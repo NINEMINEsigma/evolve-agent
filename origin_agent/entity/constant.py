@@ -332,9 +332,6 @@ SESSION_SEARCH_READ_LENGTH_LIMIT: int = 100
 # RecallSession 结果预览/摘要截断长度（字符数）
 SESSION_SEARCH_PREVIEW_LENGTH: int = 200
 
-# 语义匹配余弦相似度阈值 — 低于此值不视为匹配
-SESSION_SEARCH_SEMANTIC_THRESHOLD: float = 0.5
-
 
 # ============================================================================
 # Watching Service (background_service.py)

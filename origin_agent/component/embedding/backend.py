@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING
 
@@ -96,6 +97,17 @@ def _mean_pool(vectors: list[list[float]]) -> list[float]:
     return [sum(v[i] for v in vectors) / len(vectors) for i in range(dim)]
 
 
+def _extract_response_body(exc: Exception) -> str:
+    """从 httpx.HTTPStatusError 等异常中提取 HTTP 响应体文本。"""
+    resp = getattr(exc, "response", None)
+    if resp is not None:
+        try:
+            return resp.text
+        except Exception:
+            return "(unreadable response body)"
+    return ""
+
+
 # ---------------------------------------------------------------------------
 # EmbeddingBackend 抽象
 # ---------------------------------------------------------------------------
@@ -119,6 +131,24 @@ class EmbeddingBackend(ABC):
         """当前 embedding 模型标识（用于回写到消息的 embedding_model 字段）。"""
         ...
 
+    # Qwen3-Embedding 系列的官方非对称检索用法：
+    # query 侧加指令前缀，document 侧保持裸文本（现状已正确，无需改）
+    _QUERY_INSTRUCTION: str = (
+        "Instruct: 给定一个查询，检索与该查询语义相关的历史会话消息\nQuery: "
+    )
+
+    async def embed_query(self, query: str) -> list[float] | None:
+        """检索查询专用编码：对 Qwen3 等指令调优模型附加非对称指令前缀。
+
+        文档侧编码保持原样（embed()）。缺失前缀会把余弦分布压缩到窄区间，
+        导致相关/不相关结果的相似度几乎无法区分。
+        默认实现直接调用 embed()；子类可覆写以注入模型特定前缀。
+        """
+        resp = await self.embed([query])
+        if resp and resp[0]:
+            return resp[0]
+        return None
+
 
 # ---------------------------------------------------------------------------
 # 本地 GGUF 后端
@@ -130,6 +160,8 @@ class LocalEmbeddingBackend(EmbeddingBackend):
     def __init__(self, ctx: RuntimeContext) -> None:
         self._ctx = ctx
         self._engine: InferenceEngine | None | object = None  # object sentinel for failed
+        self._last_restart_at: float = 0.0
+        self._RESTART_COOLDOWN: float = 30.0
 
     def _get_engine(self) -> InferenceEngine | None:
         """懒加载本地 embedding 引擎。失败标记 _ENGINE_FAILED。"""
@@ -185,27 +217,75 @@ class LocalEmbeddingBackend(EmbeddingBackend):
             return False
         return True
 
+    async def _embed_with_engine(
+        self, engine: InferenceEngine, texts: list[str]
+    ) -> list[list[float]]:
+        """单次执行 embedding（无自愈），抛出异常由调用方决定是否重试。"""
+        results: list[list[float]] = []
+        for text in texts:
+            chunks = await asyncio.to_thread(_chunk_text, text, engine)
+            # 过滤空白块，避免 llama-server 返回 400
+            chunks = [c for c in chunks if c.strip()]
+            if not chunks:
+                results.append([])
+                continue
+            resp = await asyncio.to_thread(engine.embedding, chunks)
+            if not resp.data:
+                results.append([])
+                continue
+            if len(resp.data) == 1:
+                results.append(resp.data[0].embedding)
+            else:
+                chunk_vectors = [d.embedding for d in resp.data]
+                results.append(_mean_pool(chunk_vectors))
+        return results
+
     async def embed(self, texts: list[str]) -> list[list[float]] | None:
         engine = self._get_engine()
         if engine is None:
             return None
         try:
-            results: list[list[float]] = []
-            for text in texts:
-                chunks = await asyncio.to_thread(_chunk_text, text, engine)
-                resp = await asyncio.to_thread(engine.embedding, chunks)
-                if not resp.data:
-                    results.append([])
-                    continue
-                if len(resp.data) == 1:
-                    results.append(resp.data[0].embedding)
-                else:
-                    chunk_vectors = [d.embedding for d in resp.data]
-                    results.append(_mean_pool(chunk_vectors))
-            return results
+            return await self._embed_with_engine(engine, texts)
         except Exception as exc:
-            logger.exception("Local embedding failed: %s", exc)
-            return None
+            resp_body = _extract_response_body(exc)
+            logger.warning(
+                "Embedding failed, attempting server restart: %s | response: %s",
+                exc, resp_body,
+            )
+            now = time.monotonic()
+            if now - self._last_restart_at < self._RESTART_COOLDOWN:
+                logger.warning(
+                    "Restart cooldown active (%.0fs), skipping restart",
+                    self._RESTART_COOLDOWN,
+                )
+                return None
+            self._last_restart_at = now
+            try:
+                # unload 强杀进程 → ensure_alive 发现进程已死 → _restart 启动新实例
+                await asyncio.to_thread(engine.unload)
+                restarted = await asyncio.to_thread(engine.ensure_alive)
+                if not restarted:
+                    logger.error("Server restart failed, embedding unavailable")
+                    return None
+                logger.info("Embedding server restarted, retrying")
+                return await self._embed_with_engine(engine, texts)
+            except Exception as retry_exc:
+                retry_body = _extract_response_body(retry_exc)
+                logger.exception(
+                    "Embedding retry after restart also failed: %s | response: %s",
+                    retry_exc, retry_body,
+                )
+                return None
+
+    async def embed_query(self, query: str) -> list[float] | None:
+        """检索查询专用编码：对 Qwen3 等非对称模型附加 Instruct 指令前缀。"""
+        text = query
+        if "qwen3" in self.model_name.lower():
+            text = self._QUERY_INSTRUCTION + query
+        resp = await self.embed([text])
+        if resp and resp[0]:
+            return resp[0]
+        return None
 
 
 # ---------------------------------------------------------------------------

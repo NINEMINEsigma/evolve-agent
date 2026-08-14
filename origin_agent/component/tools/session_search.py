@@ -2,14 +2,23 @@
 
 模块导入时通过 ``registry.register()`` 注册两个工具：
   - ReadSession: 精准读取指定会话的区间消息（session_id + index + length）
-  - RecallSession: 多路径检索全体会话（exact / substring / semantic），去重合并
+  - RecallSession: 混合检索全体会话（exact / substring / bm25 / semantic），RRF 融合排序
+
+混合检索设计：
+  - exact / substring: 布尔高置信通道
+  - bm25: 词汇排序通道，query 分词（拉丁词元 + CJK 单字/二元），覆盖缩写与多词查询
+  - semantic: 稠密向量通道，按名次取 top-k（不再用绝对阈值判生死）
+  - RRF (Reciprocal Rank Fusion, k=60): 按名次融合各通道，规避分数尺度不可比问题
 """
 
 from __future__ import annotations
 
 import logging
 import math
+import re
 from typing import Any
+
+from rank_bm25 import BM25Okapi
 
 from abstract.tools.registry import registry, tool_error, tool_result
 from entity.puretype import ToolAvailability, ToolDangerLevel, Role, SessionStatus
@@ -19,13 +28,67 @@ from entity.constant import (
     SESSION_SEARCH_READ_LENGTH_DEFAULT,
     SESSION_SEARCH_READ_LENGTH_LIMIT,
     SESSION_SEARCH_PREVIEW_LENGTH,
-    SESSION_SEARCH_SEMANTIC_THRESHOLD,
 )
 
 logger = logging.getLogger(__name__)
 
 
+# ── 混合检索常量 ─────────────────────────────────────────
+
+# RRF 融合参数（Cormack et al. 2009 的常用默认值，跨数据集稳定）
+_RRF_K: int = 60
+
+# 各通道在 RRF 中的权重：布尔高置信通道 > 排序通道
+_CHANNEL_WEIGHTS: dict[str, float] = {
+    "exact": 1.5,
+    "substring": 1.2,
+    "bm25": 1.0,
+    "semantic": 1.0,
+}
+
+# 排序通道送入融合的候选深度（粗召回宁多勿少，靠融合精修）
+_BM25_TOP_K: int = 50
+_SEMANTIC_TOP_K: int = 50
+
+# 语义通道硬下限：仅用于滤除纯噪声，不参与排序（排序由名次决定）
+_SEMANTIC_HARD_FLOOR: float = 0.3
+
+_VALID_METHODS: set[str] = {"exact", "substring", "bm25", "semantic"}
+
+# 分词：拉丁词元（含数字/路径片段）+ CJK 连续段
+_LATIN_TOKEN_RE = re.compile(r"[a-z0-9][a-z0-9._\-/#]*")
+_CJK_RUN_RE = re.compile(r"[㐀-䶿一-鿿]+")
+
+
+def _tokenize(text: str) -> list[str]:
+    """混合分词：拉丁词元原样保留；CJK 连续段切单字 + 二元组。
+
+    - 拉丁词元保住 "yolo" "qwen3-embedding-0.6b" "session_search.py" 这类精确标识符；
+    - CJK 单字保证召回，二元组保证短语精度（"审批模式" -> 审批/批模/模式）。
+    """
+    text = text.lower()
+    tokens: list[str] = _LATIN_TOKEN_RE.findall(text)
+    for run in _CJK_RUN_RE.findall(text):
+        tokens.extend(run)
+        tokens.extend(run[i:i + 2] for i in range(len(run) - 1))
+    return tokens
+
+
 # ── 辅助函数 ─────────────────────────────────────────────
+
+
+def _rrf_fuse(channel_ranks: dict[str, dict[Any, int]]) -> dict[Any, float]:
+    """Reciprocal Rank Fusion: score(d) = Σ_channel weight / (k + rank + 1)。
+
+    channel_ranks: 通道名 -> {条目 key: 名次(0-based)}。
+    只看名次不看原始分数，规避 cosine / BM25 / 布尔匹配的尺度不可比问题。
+    """
+    fused: dict[Any, float] = {}
+    for channel, ranks in channel_ranks.items():
+        w = _CHANNEL_WEIGHTS.get(channel, 1.0)
+        for key, rank in ranks.items():
+            fused[key] = fused.get(key, 0.0) + w / (_RRF_K + rank + 1)
+    return fused
 
 
 def _filter_conversation_messages(history) -> list[tuple[int, Any]]:
@@ -156,9 +219,9 @@ def _handle_read_session(args: dict[str, Any]) -> dict:
 
 
 async def _handle_recall_session(args: dict[str, Any]) -> dict:
-    """多路径检索全体会话。"""
+    """混合检索全体会话：四通道召回 + RRF 融合排序。"""
     query: str = str(args.get("query", "")).strip()
-    raw_methods = args.get("match_methods", ["exact", "substring", "semantic"])
+    raw_methods = args.get("match_methods", ["exact", "substring", "bm25", "semantic"])
     max_results: int = int(args.get("max_results", SESSION_SEARCH_MAX_RESULTS_DEFAULT))
     include_history: bool = bool(args.get("include_history", True))
 
@@ -170,13 +233,12 @@ async def _handle_recall_session(args: dict[str, Any]) -> dict:
     if max_results > SESSION_SEARCH_MAX_RESULTS_LIMIT:
         max_results = SESSION_SEARCH_MAX_RESULTS_LIMIT
 
-    valid_methods = {"exact", "substring", "semantic"}
     if isinstance(raw_methods, list):
-        methods = [m for m in raw_methods if m in valid_methods]
+        methods = [m for m in raw_methods if m in _VALID_METHODS]
     else:
         methods = []
     if not methods:
-        methods = ["exact", "substring", "semantic"]
+        methods = ["exact", "substring", "bm25", "semantic"]
 
     from system.application import Application
 
@@ -187,9 +249,9 @@ async def _handle_recall_session(args: dict[str, Any]) -> dict:
     session_store = _get_session_store()
     all_sessions = sm.get_all()
 
-    query_lower = query.lower()
-
     # ── 语义路径准备 ──
+    # 优先使用 embed_query（Qwen3 等非对称模型会自动附加 Instruct 前缀），
+    # 后端未实现时退回普通 embed。
     semantic_available = False
     query_vec: list[float] | None = None
     backend = None
@@ -201,71 +263,42 @@ async def _handle_recall_session(args: dict[str, Any]) -> dict:
             backend = None
         if backend is not None:
             try:
-                resp = await backend.embed([query])
-                if resp and resp[0]:
-                    query_vec = resp[0]
-                    semantic_available = True
+                query_vec = await backend.embed_query(query)
+                semantic_available = query_vec is not None
             except Exception:
                 logger.debug("Failed to compute embedding for query", exc_info=True)
 
-    # ── 遍历会话，三路径并行匹配 ──
-    # message 去重: key=(session_id, conv_index) -> dict
-    msg_hits: dict[tuple[str, int], dict] = {}
-    # history 去重: key=session_id -> dict
-    hist_hits: dict[str, dict] = {}
+    # ── 第一遍：收集检索单元 ──
+    # message 级单元
+    msg_units: list[dict[str, Any]] = []
+    # history 级单元（title + tags + summary 拼接为一个文档）
+    hist_units: list[dict[str, Any]] = []
 
     for info in all_sessions:
         sid = info.id
 
-        # ── history 级匹配 ──
+        summary_text: str | None = None
+        if include_history and session_store is not None:
+            try:
+                summary_text = session_store.read_summary(sid)
+            except Exception:
+                pass
+
         if include_history:
-            hist_matched_methods: list[str] = []
+            hist_text = " ".join(
+                x for x in [
+                    info.title or "",
+                    " ".join(info.tags) if info.tags else "",
+                    summary_text or "",
+                ] if x
+            )
+            hist_units.append({
+                "sid": sid,
+                "info": info,
+                "summary": summary_text,
+                "text": hist_text,
+            })
 
-            # exact: query == title 或 query in tags
-            if "exact" in methods:
-                if info.title and query_lower == info.title.lower():
-                    hist_matched_methods.append("exact")
-                if info.tags:
-                    for tag in info.tags:
-                        if query_lower == tag.lower():
-                            if "exact" not in hist_matched_methods:
-                                hist_matched_methods.append("exact")
-                            break
-
-            # substring: query in title 或 query in summary
-            summary_text: str | None = None
-            if "substring" in methods:
-                if info.title and query_lower in info.title.lower():
-                    if "substring" not in hist_matched_methods:
-                        hist_matched_methods.append("substring")
-                if session_store is not None:
-                    try:
-                        summary_text = session_store.read_summary(sid)
-                    except Exception:
-                        pass
-                if summary_text and query_lower in summary_text.lower():
-                    if "substring" not in hist_matched_methods:
-                        hist_matched_methods.append("substring")
-
-            if hist_matched_methods:
-                hist_entry: dict = {
-                    "session_id": sid,
-                    "title": info.title,
-                    "tags": info.tags if info.tags else [],
-                    "status": info.status.value if hasattr(info.status, "value") else str(info.status),
-                    "matched_methods": hist_matched_methods,
-                }
-                # 读取 summary 用于返回（若尚未读取）
-                if summary_text is None and session_store is not None:
-                    try:
-                        summary_text = session_store.read_summary(sid)
-                    except Exception:
-                        pass
-                if summary_text and info.status == SessionStatus.archived:
-                    hist_entry["summary"] = _extract_preview(summary_text)
-                hist_hits[sid] = hist_entry
-
-        # ── message 级匹配 ──
         if session_store is None:
             continue
         try:
@@ -276,65 +309,134 @@ async def _handle_recall_session(args: dict[str, Any]) -> dict:
         if history is None:
             continue
 
-        conv_msgs = _filter_conversation_messages(history)
-        for conv_idx, msg in conv_msgs:
-            content_text = _extract_content_with_suffix(msg)
-            content_lower = content_text.lower()
-            matched_methods: list[str] = []
-            similarity: float | None = None
+        for conv_idx, msg in _filter_conversation_messages(history):
+            text = _extract_content_with_suffix(msg)
+            if not text:
+                continue
+            msg_units.append({
+                "sid": sid,
+                "conv_idx": conv_idx,
+                "msg": msg,
+                "title": info.title,
+                "text": text,
+            })
 
-            # exact
-            if "exact" in methods and query_lower == content_lower:
-                matched_methods.append("exact")
+    # ── 第二遍：各通道独立产出名次表 ──
+    query_lower = query.lower()
 
-            # substring
-            if "substring" in methods and query_lower in content_lower:
-                matched_methods.append("substring")
+    def _boolean_ranks(units: list[dict], key_fn, pred) -> dict[Any, int]:
+        """布尔通道：命中即名次 0（共享头部）。"""
+        return {key_fn(u): 0 for u in units if pred(u)}
 
-            # semantic
-            if "semantic" in methods and semantic_available and query_vec is not None:
-                stored_vec = msg.get_embedding(backend.model_name)
-                if stored_vec is not None:
-                    sim = _cosine_similarity(query_vec, stored_vec)
-                    if sim >= SESSION_SEARCH_SEMANTIC_THRESHOLD:
-                        matched_methods.append("semantic")
-                        similarity = round(sim, 6)
+    def _bm25_ranks(units: list[dict], key_fn) -> dict[Any, int]:
+        if not units:
+            return {}
+        corpus = [_tokenize(u["text"]) for u in units]
+        bm = BM25Okapi(corpus)
+        scores = bm.get_scores(_tokenize(query))
+        order = sorted(range(len(units)), key=lambda i: scores[i], reverse=True)
+        ranks: dict[Any, int] = {}
+        for rank, i in enumerate(order):
+            if scores[i] <= 0.0 or rank >= _BM25_TOP_K:
+                break
+            ranks[key_fn(units[i])] = rank
+        return ranks
 
-            if matched_methods:
-                key = (sid, conv_idx)
-                if key in msg_hits:
-                    for m in matched_methods:
-                        if m not in msg_hits[key]["matched_methods"]:
-                            msg_hits[key]["matched_methods"].append(m)
-                    if similarity is not None:
-                        existing = msg_hits[key].get("similarity")
-                        if existing is None or similarity > existing:
-                            msg_hits[key]["similarity"] = similarity
-                else:
-                    msg_hits[key] = {
-                        "session_id": sid,
-                        "session_title": info.title,
-                        "message_index": conv_idx,
-                        "role": msg.role.value,
-                        "character_name": getattr(msg, "character_name", ""),
-                        "preview": _extract_preview(content_text),
-                        "matched_methods": matched_methods,
-                        "similarity": similarity,
-                    }
+    def _semantic_ranks(units: list[dict], key_fn) -> tuple[dict[Any, int], dict[Any, float]]:
+        if not (semantic_available and query_vec is not None and backend is not None):
+            return {}, {}
+        scored: list[tuple[Any, float]] = []
+        for u in units:
+            vec = u["msg"].get_embedding(backend.model_name)
+            if vec is None:
+                continue
+            sim = _cosine_similarity(query_vec, vec)
+            if sim >= _SEMANTIC_HARD_FLOOR:
+                scored.append((key_fn(u), sim))
+        scored.sort(key=lambda t: t[1], reverse=True)
+        scored = scored[:_SEMANTIC_TOP_K]
+        return {k: r for r, (k, _) in enumerate(scored)}, dict(scored)
 
-    # ── 排序与截断 ──
-    msg_list = list(msg_hits.values())
-    msg_list.sort(
-        key=lambda x: (x.get("similarity") or 0.0, len(x["matched_methods"])),
-        reverse=True,
-    )
+    # message 级通道
+    msg_key = lambda u: (u["sid"], u["conv_idx"])  # noqa: E731
+    msg_channel_ranks: dict[str, dict[Any, int]] = {}
+    msg_sims: dict[Any, float] = {}
+    if "exact" in methods:
+        msg_channel_ranks["exact"] = _boolean_ranks(
+            msg_units, msg_key, lambda u: query_lower == u["text"].lower())
+    if "substring" in methods:
+        msg_channel_ranks["substring"] = _boolean_ranks(
+            msg_units, msg_key, lambda u: query_lower in u["text"].lower())
+    if "bm25" in methods:
+        msg_channel_ranks["bm25"] = _bm25_ranks(msg_units, msg_key)
+    if "semantic" in methods:
+        ranks, sims = _semantic_ranks(msg_units, msg_key)
+        if ranks:
+            msg_channel_ranks["semantic"] = ranks
+        msg_sims = sims
 
-    hist_list = list(hist_hits.values())
-    hist_list.sort(key=lambda x: len(x["matched_methods"]), reverse=True)
+    # history 级通道
+    hist_key = lambda u: u["sid"]  # noqa: E731
+    hist_channel_ranks: dict[str, dict[Any, int]] = {}
+    if include_history:
+        if "exact" in methods:
+            def _hist_exact(u: dict) -> bool:
+                info = u["info"]
+                if info.title and query_lower == info.title.lower():
+                    return True
+                return bool(info.tags) and any(query_lower == t.lower() for t in info.tags)
+            hist_channel_ranks["exact"] = _boolean_ranks(hist_units, hist_key, _hist_exact)
+        if "substring" in methods:
+            def _hist_sub(u: dict) -> bool:
+                info = u["info"]
+                if info.title and query_lower in info.title.lower():
+                    return True
+                return bool(u["summary"]) and query_lower in u["summary"].lower()
+            hist_channel_ranks["substring"] = _boolean_ranks(hist_units, hist_key, _hist_sub)
+        if "bm25" in methods:
+            hist_channel_ranks["bm25"] = _bm25_ranks(hist_units, hist_key)
 
-    total_matched = len(msg_list) + len(hist_list)
+    # ── RRF 融合与结果装配 ──
+    msg_fused = _rrf_fuse(msg_channel_ranks)
+    unit_by_key = {msg_key(u): u for u in msg_units}
+
+    msg_list: list[dict] = []
+    for key, score in sorted(msg_fused.items(), key=lambda kv: kv[1], reverse=True):
+        u = unit_by_key[key]
+        msg = u["msg"]
+        matched = [c for c, ranks in msg_channel_ranks.items() if key in ranks]
+        msg_list.append({
+            "session_id": u["sid"],
+            "session_title": u["title"],
+            "message_index": u["conv_idx"],
+            "role": msg.role.value,
+            "character_name": getattr(msg, "character_name", ""),
+            "preview": _extract_preview(u["text"]),
+            "matched_methods": matched,
+            "similarity": round(msg_sims[key], 6) if key in msg_sims else None,
+            "fusion_score": round(score, 6),
+        })
     if len(msg_list) > max_results:
         msg_list = msg_list[:max_results]
+
+    hist_fused = _rrf_fuse(hist_channel_ranks)
+    hist_unit_by_key = {hist_key(u): u for u in hist_units}
+
+    hist_list: list[dict] = []
+    for sid, score in sorted(hist_fused.items(), key=lambda kv: kv[1], reverse=True):
+        u = hist_unit_by_key[sid]
+        info = u["info"]
+        entry: dict = {
+            "session_id": sid,
+            "title": info.title,
+            "tags": info.tags if info.tags else [],
+            "status": info.status.value if hasattr(info.status, "value") else str(info.status),
+            "matched_methods": [c for c, ranks in hist_channel_ranks.items() if sid in ranks],
+            "fusion_score": round(score, 6),
+        }
+        if u["summary"] and info.status == SessionStatus.archived:
+            entry["summary"] = _extract_preview(u["summary"])
+        hist_list.append(entry)
     remaining = max_results - len(msg_list)
     if remaining > 0 and len(hist_list) > remaining:
         hist_list = hist_list[:remaining]
@@ -345,7 +447,7 @@ async def _handle_recall_session(args: dict[str, Any]) -> dict:
         total_sessions_scanned=len(all_sessions),
         message_matches=msg_list,
         history_matches=hist_list,
-        total_matched=total_matched,
+        total_matched=len(msg_fused) + len(hist_fused),
     )
 
 
@@ -429,34 +531,35 @@ Loading a session's history may cause a brief delay.
     availability=ToolAvailability.MAIN | ToolAvailability.MULTI_AGENT,
 )
 
-# 多路径检索全体会话历史，支持精准匹配、字串匹配和语义匹配。
-# 前置条件：会话管理子系统已初始化。语义匹配需要 embedding 模型已配置且可用。
-# 调用效果：对全体会话执行指定的匹配方式，message 级和 history 级结果去重合并后返回。
+# 混合检索全体会话历史：exact / substring / bm25 / semantic 四通道召回，RRF 按名次融合排序。
+# 前置条件：会话管理子系统已初始化。语义通道需要 embedding 模型已配置且可用。
+# 调用效果：对全体会话执行指定的匹配通道，message 级和 history 级结果按融合分数降序返回。
 # 返回格式：{ success, semantic_available, total_sessions_scanned, message_matches: [...], history_matches: [...], total_matched }
 # exact: query 完全匹配消息内容、会话标题或标签；substring: query 是消息内容、标题或摘要的子串；
-# semantic: 消息嵌入向量与查询向量的余弦相似度 >= 0.5。
-# message_matches 每条含 session_id, session_title, message_index, role, character_name, preview(200字截断), matched_methods, similarity(仅语义)。
-# history_matches 每条含 session_id, title, tags, status, matched_methods, summary(归档会话, 200字截断)。
-# 典型场景：按关键词或语义概念检索历史讨论，定位相关会话。
-# 副作用：语义匹配在会话数量多时可能有秒级延迟。嵌入后端不可用时自动跳过语义路径。
+# bm25: 词汇排序（query 分词：拉丁词元 + CJK 单字/二元），覆盖缩写与多词查询；
+# semantic: 消息嵌入向量与查询向量余弦相似度按名次取 top-k（不再使用绝对阈值过滤）。
+# 所有通道经 RRF (k=60) 按名次融合，规避分数尺度不可比问题；结果含 fusion_score 与 matched_methods。
+# message_matches 每条含 session_id, session_title, message_index, role, character_name, preview(200字截断), matched_methods, similarity(仅语义), fusion_score。
+# history_matches 每条含 session_id, title, tags, status, matched_methods, fusion_score, summary(归档会话, 200字截断)。
+# 典型场景：按关键词、缩写或语义概念检索历史讨论，定位相关会话。
+# 副作用：语义匹配在会话数量多时可能有秒级延迟。嵌入后端不可用时自动跳过语义通道。
 # 提醒：结果总量截断到 max_results（默认 30）；使用 ReadSession 拉取完整消息内容。
 registry.register(
     name="RecallSession",
     toolset="core",
     schema={
-        "description": """Search across all session histories using multiple matching strategies.
+        "description": """Hybrid search across all session histories: four recall channels fused by Reciprocal Rank Fusion (RRF).
 
 ## Prerequisites
 The session management system must be initialized.
-For semantic matching, an embedding model must be configured and available.
+For the semantic channel, an embedding model must be configured and available.
 
 ## Effect
-Runs the specified matching methods (exact, substring, semantic) across all sessions.
-- `exact`: Matches when the query equals a message's content, a session's title, or a session's tag.
-- `substring`: Matches when the query is a substring of a message's content, a session's title, or a session's summary.
-- `semantic`: Matches messages whose embedding vectors are semantically similar to the query (cosine similarity >= 0.5).
-
-Results from all methods are deduplicated and merged.
+Runs the specified matching channels (exact, substring, bm25, semantic) across all sessions, then fuses their rankings with RRF (k=60) so results are ordered by rank consensus rather than incomparable raw scores.
+- `exact`: The query equals a message's content, a session's title, or a session's tag.
+- `substring`: The query is a substring of a message's content, a session's title, or a session's summary.
+- `bm25`: Lexical ranking over tokenized text (Latin tokens kept verbatim; CJK text split into unigrams + bigrams). Best for abbreviations, identifiers, error codes, and multi-word keyword queries.
+- `semantic`: Embedding cosine similarity, contributed by rank (top-k), not by an absolute threshold.
 
 ## Returns
 ```json
@@ -472,8 +575,9 @@ Results from all methods are deduplicated and merged.
       "role": "user",
       "character_name": "User",
       "preview": "...",
-      "matched_methods": ["exact", "semantic"],
-      "similarity": 0.87
+      "matched_methods": ["bm25", "semantic"],
+      "similarity": 0.87,
+      "fusion_score": 0.032
     }
   ],
   "history_matches": [
@@ -483,24 +587,26 @@ Results from all methods are deduplicated and merged.
       "tags": ["bug"],
       "status": "archived",
       "matched_methods": ["substring"],
+      "fusion_score": 0.019,
       "summary": "..."
     }
   ],
   "total_matched": 12
 }
 ```
-`similarity` is only present for messages matched by the semantic method.
+`similarity` is only present for messages in the semantic channel.
+`fusion_score` is the RRF score used for ordering (higher is better).
 `summary` is only included for archived sessions.
 Message `preview` and history `summary` are truncated to 200 characters.
 
 ## When to Use
-- Finding past discussions on a topic, even when exact keywords differ.
-- Recalling conversations that relate to a concept or idea.
-- Locating sessions by title, tag, or content.
+- Finding past discussions on a topic, even when exact keywords differ (semantic channel).
+- Locating sessions by abbreviations, identifiers, or multi-word keywords (bm25 channel).
+- Precise lookups by title, tag, or exact phrase (exact/substring channels).
 
 ## Side Effects
 Semantic matching may take several seconds when many sessions exist.
-If the embedding backend is unavailable, semantic matching is skipped and `semantic_available` is set to false.
+If the embedding backend is unavailable, the semantic channel is skipped and `semantic_available` is set to false.
 
 ## Notes
 - Only user and assistant messages are searched; tool calls and system prompts are excluded.
@@ -511,14 +617,14 @@ If the embedding backend is unavailable, semantic matching is skipped and `seman
             "properties": {
                 "query": {
                     "type": "string",
-                    # 查询文本，可以是关键词或描述性句子。必需。
-                    "description": """The query text to search for. Can be a keyword or a descriptive sentence. Required.""",
+                    # 查询文本，可以是关键词、缩写或描述性句子。必需。
+                    "description": """The query text to search for. Can be a keyword, an abbreviation/identifier, or a descriptive sentence. Required.""",
                 },
                 "match_methods": {
                     "type": "array",
-                    "items": {"type": "string", "enum": ["exact", "substring", "semantic"]},
-                    # 使用的匹配方式列表。默认全部三种。
-                    "description": """Matching methods to use. Default: all three (exact, substring, semantic).""",
+                    "items": {"type": "string", "enum": ["exact", "substring", "bm25", "semantic"]},
+                    # 使用的匹配通道列表。默认全部四种，经 RRF 融合排序。
+                    "description": """Matching channels to use. Default: all four (exact, substring, bm25, semantic), fused by RRF.""",
                 },
                 "max_results": {
                     "type": "integer",
