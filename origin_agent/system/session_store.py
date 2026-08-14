@@ -83,7 +83,7 @@ class SessionStore:
         if not path.exists():
             return None
         try:
-            data = load(__SessionStore_Version__, str(path), History)
+            data = load(__SessionStore_Version__, str(path), History, ignore_missing_fields=True)
             if isinstance(data, History):
                 data.remove_unpaired_tool_calls()
                 return data

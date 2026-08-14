@@ -646,7 +646,7 @@ class _OrchestratorContext:
             # TODO: 不存在应该失败, 实际上不应该静默吞没错误并成功开始
             if path.exists():
                 try:
-                    loaded_history = load(__History_Version__, str(path), History)
+                    loaded_history = load(__History_Version__, str(path), History, ignore_missing_fields=True)
                     if isinstance(loaded_history, History):
                         loaded_history.remove_unpaired_tool_calls()
                         loop.load_history(loaded_history)
