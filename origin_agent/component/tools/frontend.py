@@ -2,7 +2,7 @@
 
 模块导入时通过 ``registry.register()`` 注册。
 在目标前端目录（默认 fast 模式下为 ``fork:frontend``）中
-运行 ``pnpm install`` 和 ``pnpm run build``，
+运行 ``<pkg_mgr> install`` 和 ``<pkg_mgr> run build``，
 以在进化交换前捕获 TypeScript 或构建错误。
 """
 
@@ -10,12 +10,12 @@ from __future__ import annotations
 
 import logging
 import subprocess  # nosec
-import sys
 from typing import Any, Dict
 
 from abstract.tools.registry import registry, tool_error, tool_result
 from entity.constant import SUBPROCESS_TIMEOUT_DEFAULT
 from entity.puretype import ToolAvailability
+from system.pkgmgr import detect_package_manager
 from system.sandbox import Access, SandboxError
 
 logger = logging.getLogger(__name__)
@@ -34,7 +34,9 @@ def _s():
 
 
 def _handle_validate_frontend(args: dict[str, Any]) -> dict:
-    """通过运行 pnpm install && pnpm run build 验证前端代码。
+    """通过运行 ``<pkg_mgr> install && <pkg_mgr> run build`` 验证前端代码。
+
+    包管理器优先 pnpm，pnpm 不存在时回退 npm。
 
     预期参数：
         path: str — 前端目录的逻辑路径
@@ -63,23 +65,23 @@ def _handle_validate_frontend(args: dict[str, Any]) -> dict:
     if not pkg_json.exists():
         return tool_error("No package.json found in frontend directory", path=path)
 
-    pnpm: str = "pnpm.cmd" if sys.platform == "win32" else "pnpm"
-    # 强制非交互模式：避免 pnpm 在子进程中弹出 ConfirmPrompt 导致 readline 崩溃
+    pkg_mgr: str = detect_package_manager()
+    # 强制非交互模式：避免包管理器在子进程中弹出 ConfirmPrompt 导致 readline 崩溃
     import os
-    pnpm_env: dict[str, str] = {**os.environ, "CI": "true"}
+    build_env: dict[str, str] = {**os.environ, "CI": "true"}
 
-    # ---- pnpm install ----
-    logger.info("validate_frontend | install | cwd=%s", frontend_dir)
+    # ---- install ----
+    logger.info("validate_frontend | install | cwd=%s | pkg_mgr=%s", frontend_dir, pkg_mgr)
     try:
         install_proc: subprocess.CompletedProcess = subprocess.run(
-            [pnpm, "install"],
+            [pkg_mgr, "install"],
             cwd=str(frontend_dir),
             capture_output=True,
             text=True,
             encoding="utf-8",
             errors="replace",
             timeout=SUBPROCESS_TIMEOUT_DEFAULT,
-            env=pnpm_env,
+            env=build_env,
         )
         if install_proc.returncode != 0:
             return tool_result(
@@ -89,7 +91,7 @@ def _handle_validate_frontend(args: dict[str, Any]) -> dict:
                 stdout=_truncate(install_proc.stdout),
                 stderr=_truncate(install_proc.stderr),
                 _note=(
-                    "pnpm install failed. Check dependency conflicts, "
+                    "install failed. Check dependency conflicts, "
                     "lock file corruption, or missing peer dependencies."
                 ),
             )
@@ -102,18 +104,18 @@ def _handle_validate_frontend(args: dict[str, Any]) -> dict:
             valid=False, stage="install", error=str(exc),
         )
 
-    # ---- pnpm run build ----
-    logger.info("validate_frontend | build | cwd=%s", frontend_dir)
+    # ---- run build ----
+    logger.info("validate_frontend | build | cwd=%s | pkg_mgr=%s", frontend_dir, pkg_mgr)
     try:
         build_proc: subprocess.CompletedProcess = subprocess.run(
-            [pnpm, "run", "build"],
+            [pkg_mgr, "run", "build"],
             cwd=str(frontend_dir),
             capture_output=True,
             text=True,
             encoding="utf-8",
             errors="replace",
             timeout=SUBPROCESS_TIMEOUT_DEFAULT,
-            env=pnpm_env,
+            env=build_env,
         )
         if build_proc.returncode != 0:
             return tool_result(
@@ -174,22 +176,22 @@ registry.register(
     name="validate_frontend",
     toolset="frontend",
     schema={
-        # 验证前端代码能否构建。在 fork:frontend 目录下运行 pnpm install && pnpm run build。
+        # 验证前端代码能否构建。在 fork:frontend 目录下运行 <pkg_mgr> install && <pkg_mgr> run build（包管理器优先 pnpm，回退 npm）。
         # 前置条件：已通过 Write/PatchEdit 修改了 frontend/ 下的 .tsx/.ts/.css 文件。仅 fast 模式下可用。
         # path 默认 'fork:frontend'（进化目标目录）。可指定其他逻辑路径。
-        # 调用效果：在目标目录中执行 pnpm install 和 pnpm run build（CI=true 非交互模式），捕获 TypeScript 和构建错误。
+        # 调用效果：在目标目录中执行 install 和 run build（CI=true 非交互模式），捕获 TypeScript 和构建错误。
         # 成功返回：{ valid: true, stage: "build", exit_code: 0, build_output, message }
         # 失败返回：{ valid: false, stage: "install"|"build", exit_code, stdout?, stderr?, _note? } 或 { valid: false, stage: ..., error }
         # 典型场景：修改前端文件后、evolve_code 前调用，捕获 validate_code 无法检测的 TypeScript/构建错误。
         # 注意：运行时间较长（超时时间 SUBPROCESS_TIMEOUT_DEFAULT），非前端修改无需调用。
-        "description": """Validate frontend code by running `pnpm install && pnpm run build` in the target frontend directory.
+        "description": """Validate frontend code by running `<pkg_mgr> install && <pkg_mgr> run build` (pnpm preferred, npm fallback) in the target frontend directory.
 
 ## Prerequisites
 - Frontend files (`.tsx`, `.ts`, `.css`) have been modified via `Write` or `PatchEdit` with `fork:` prefix.
 - Only available in fast mode.
 
 ## Effect
-Runs `pnpm install` followed by `pnpm run build` in the target directory (non-interactive, `CI=true`). Catches TypeScript and build errors that `validate_code` cannot detect. Does not modify any files beyond what pnpm itself generates (`node_modules/`, `dist/`).
+Runs `<pkg_mgr> install` followed by `<pkg_mgr> run build` in the target directory (non-interactive, `CI=true`). Catches TypeScript and build errors that `validate_code` cannot detect. Does not modify any files beyond what the package manager itself generates (`node_modules/`, `dist/`).
 
 ## Parameters
 - `path` (string, default `"fork:frontend"`): Logical path of the frontend directory. Can be a bare name or a namespaced path like `"fork:frontend"`.
@@ -201,7 +203,7 @@ Runs `pnpm install` followed by `pnpm run build` in the target directory (non-in
 ```
 **Install failure**:
 ```json
-{ "valid": false, "stage": "install", "exit_code": N, "stdout": "...", "stderr": "...", "_note": "pnpm install failed. Check dependency conflicts..." }
+{ "valid": false, "stage": "install", "exit_code": N, "stdout": "...", "stderr": "...", "_note": "install failed. Check dependency conflicts..." }
 ```
 **Build failure**:
 ```json

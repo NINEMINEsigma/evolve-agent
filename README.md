@@ -5,8 +5,8 @@
 ## 环境要求
 
 - Python 3.10+
-- pnpm（前端构建依赖）
-- Windows 上需确保 `pnpm.cmd` 在 PATH 中
+- pnpm 或 npm（前端构建依赖，优先 pnpm，不存在时回退 npm）
+- Windows 上需确保 `pnpm.cmd` 或 `npm.cmd` 在 PATH 中
 - 可选：CUDA 环境与本地 GGUF 审批模型
 
 ## 安装
@@ -172,7 +172,8 @@ origin_agent/
 │   ├── error_utils.py     ← 异常降级与日志辅助
 │   ├── pathutils.py       ← 路径工具
 │   ├── atomic_io.py       ← 原子 IO
-│   └── subprocess_utils.py ← 子进程工具
+│   ├── subprocess_utils.py ← 子进程工具
+│   └── pkgmgr.py          ← 包管理器检测（pnpm/npm）
 ├── evolve/                ← 进化系统
 │   ├── code.py            ← 进化编排与触发
 │   └── validator.py       ← 语法 + 编译检查

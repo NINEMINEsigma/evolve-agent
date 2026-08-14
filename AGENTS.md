@@ -37,7 +37,7 @@ custom_*、skills/    ← 根目录扩展点；skills/ 运行时生成
   - 退出码 `-1` / `4294967295` → 进化成功：fast→.fallback 备份、slow→fast 交换、重启
   - 其他 → 进入 fallback：运行 `.fallback/__main__.py --mode fallback --fix_fork <fast>` 修复
 - 入口链：`__main__.py`（CLI 解析 + 前端构建 + 日志）→ `main.py::App`（uvicorn gateway）→ `system/application.py::Application`（单例，初始化各子系统）。
-- 前端在 agent 目录内由 `_build_frontend()` 用 `pnpm install && pnpm run build`（`CI=true`，`pnpm.cmd` on Windows）构建；构建失败返回退出码 1 触发 fallback。构建结果按 `.frontend_build_signature.json` 签名缓存跳过。
+- 前端在 agent 目录内由 `_build_frontend()` 用 `<pkg_mgr> install && <pkg_mgr> run build`（`CI=true`，包管理器优先 pnpm 回退 npm，由 `system/pkgmgr.py` 检测）构建；构建失败返回退出码 1 触发 fallback。构建结果按 `.frontend_build_signature.json` 签名缓存跳过。
 
 ## 沙盒命名空间（system/sandbox.py）
 
@@ -76,4 +76,4 @@ custom_*、skills/    ← 根目录扩展点；skills/ 运行时生成
 
 ## Windows 细节
 
-- Python 命令是 `python`（非 python3）；原生可执行文件调用 `pnpm.cmd`；进程树终止用 `taskkill /T /F`；沙盒子进程用 `CREATE_NEW_PROCESS_GROUP`；`add_signal_handler` 不可用，回退 `signal.signal`。
+- Python 命令是 `python`（非 python3）；原生可执行文件调用 `pnpm.cmd` 或 `npm.cmd`（由 `system/pkgmgr.py` 检测，优先 pnpm）；进程树终止用 `taskkill /T /F`；沙盒子进程用 `CREATE_NEW_PROCESS_GROUP`；`add_signal_handler` 不可用，回退 `signal.signal`。

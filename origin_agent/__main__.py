@@ -38,6 +38,7 @@ for _p in (_THIRD_DIR, _THIRD_DIR / "easysave"):
 from main import App  # noqa: E402
 from system.context import RuntimeContext  # noqa: E402
 from system.convert import as_bool
+from system.pkgmgr import detect_package_manager
 from entity.constant import APPROVAL_MODEL_N_CTX_DEFAULT
 
 
@@ -250,7 +251,10 @@ def _write_build_signature(frontend_dir: Path, signature: str) -> None:
 
 
 def _build_frontend(force: bool = False) -> bool:
-    """在前端目录中运行 ``pnpm install && pnpm run build``。
+    """在前端目录中运行 ``<pkg_mgr> install && <pkg_mgr> run build``。
+
+    包管理器优先 pnpm，pnpm 不存在时回退 npm（由
+    ``system.pkgmgr.detect_package_manager`` 检测）。
 
     前端位于 *AGENT_DIR* 下（例如 ``origin_agent/frontend/`` 或
     ``workspace/fast_agent_space/frontend/``）。构建输出写入
@@ -290,12 +294,13 @@ def _build_frontend(force: bool = False) -> bool:
                     logger.debug("[%s] %s: %s", label, stream_name, line)
 
     try:
-        pnpm: str = "pnpm.cmd" if sys.platform == "win32" else "pnpm"
-        # 强制非交互模式：避免 pnpm 在子进程中弹出 ConfirmPrompt 导致 readline 崩溃
+        pkg_mgr: str = detect_package_manager()
+        logger.info("Using package manager: %s", pkg_mgr)
+        # 强制非交互模式：避免包管理器在子进程中弹出 ConfirmPrompt 导致 readline 崩溃
         env: dict[str, str] = {**os.environ, "CI": "true", "NODE_OPTIONS": "--max-old-space-size=4096"}
-        # pnpm install
+        # install
         install_proc = subprocess.run(
-            [pnpm, "install"],
+            [pkg_mgr, "install"],
             cwd=str(frontend_dir),
             capture_output=True,
             text=True,
@@ -305,9 +310,9 @@ def _build_frontend(force: bool = False) -> bool:
         )
         _log_output(install_proc, "install")
         install_proc.check_returncode()
-        # pnpm run build
+        # run build
         build_proc = subprocess.run(
-            [pnpm, "run", "build"],
+            [pkg_mgr, "run", "build"],
             cwd=str(frontend_dir),
             capture_output=True,
             text=True,
@@ -337,7 +342,7 @@ def _build_frontend(force: bool = False) -> bool:
         logger.error("Frontend build FAILED: %s", detail)
         return False
     except FileNotFoundError:
-        logger.error("pnpm not found — frontend build is required")
+        logger.error("Neither pnpm nor npm found — frontend build is required")
         return False
 
 

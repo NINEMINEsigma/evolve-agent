@@ -80,10 +80,6 @@ class Config(BaseModel):
     fast_agent_space_path: str = "fast_agent_space"
     slow_agent_space_path: str = "slow_agent_space"
     force_init: bool = False
-    # 兼容字段：历史拼写错误 fouce_init 的迁移载体，仅用于接收旧 config.json 中的旧键
-    # （easysave 反序列化直接 setattr，未声明字段会触发 pydantic 错误）。
-    # 迁移由 _migrate_legacy_force_init 完成；移除时机由用户决定。
-    fouce_init: bool | None = None
     gateway_host: str = "127.0.0.1"
     gateway_port: int = 8765
     llm_base_url: str = "https://api.deepseek.com"
@@ -111,61 +107,6 @@ class Config(BaseModel):
     yolo: bool = False
 
 
-# ── 旧拼写 fouce_init → force_init 兼容迁移 ──────────────────
-# fouce_init 为历史拼写错误，已在代码中全面改为 force_init。config.json
-# （easysave 格式）可能仍残留 fouce_init 键：加载时检测到旧键且未显式设置
-# force_init 则隐式迁移，并一次性回写清理（避免错误被保留）。
-# 兼容代码：移除时机由用户决定（确认存量 config.json 已无 fouce_init 键后）。
-_LEGACY_CONFIG_FIELD: str = "fouce_init"
-
-
-def _migrate_legacy_force_init(cfg: Config, profile_key: str | None) -> bool:
-    """旧拼写 fouce_init → force_init 兼容迁移（以 config.json 原始键为判定依据）。
-
-    旧键存在且 force_init 键不存在 → 迁移并回写，返回 True；
-    旧键存在且 force_init 键已存在（新值优先）→ 仅清理旧键，返回 False；
-    无旧键 / 文件缺失或结构不符 → 返回 False。回写失败仅告警不阻断。
-    """
-    if not profile_key:
-        return False
-    try:
-        with open("config.json", "r", encoding="utf-8") as f:
-            data = json.load(f)
-    except (OSError, json.JSONDecodeError):
-        return False
-    root = data.get(profile_key, {}).get("__root", {})
-    value = root.get("__value")
-    if not isinstance(value, dict) or _LEGACY_CONFIG_FIELD not in value:
-        return False
-    migrated = False
-    if "force_init" not in value:
-        legacy_val = value[_LEGACY_CONFIG_FIELD]
-        if legacy_val is not None:
-            cfg.force_init = bool(legacy_val)
-            value["force_init"] = cfg.force_init
-            logger.warning(
-                "config profile '%s': legacy field 'fouce_init' migrated to 'force_init'",
-                profile_key,
-            )
-            migrated = True
-        else:
-            logger.info(
-                "config profile '%s': removed empty legacy field 'fouce_init'", profile_key
-            )
-    else:
-        logger.info(
-            "config profile '%s': legacy field 'fouce_init' ignored, 'force_init' takes precedence",
-            profile_key,
-        )
-    value.pop(_LEGACY_CONFIG_FIELD, None)
-    try:
-        with open("config.json", "w", encoding="utf-8") as f:
-            json.dump(data, f, ensure_ascii=False, indent=4)
-    except OSError as exc:
-        logger.warning("failed to persist force_init migration: %s", exc)
-    return migrated
-
-
 base_config: Config|None = None
 # 运行时类型转换器：将用户输入字符串转为对应类型
 _type_converters: dict[type, Callable[[str], Any]] = {
@@ -180,9 +121,8 @@ current_config = Config.model_validate(cli_overrides)
 
 
 if args.load:
-    base_config = load(args.load or "default", "config.json")
+    base_config = load(args.load or "default", "config.json", ignore_missing_fields=True)
     current_config = base_config.model_copy()
-    _migrate_legacy_force_init(current_config, args.load)
     for k, v in cli_overrides.items():
         setattr(current_config, k, v)
 elif args.save:
@@ -193,13 +133,11 @@ elif args.interactive:
 else:
     config_field_key = input("config key：") or "default"
     if contains(config_field_key, "config.json"):
-        base_config = load(config_field_key, "config.json")
+        base_config = load(config_field_key, "config.json", ignore_missing_fields=True)
         current_config = base_config.model_copy()
-        _migrate_legacy_force_init(current_config, config_field_key)
         for k, v in cli_overrides.items():
             setattr(current_config, k, v)
     else:
-        #current_config = Config.model_validate(cli_overrides)
         save(config_field_key, "config.json", current_config)
 
 print(current_config)

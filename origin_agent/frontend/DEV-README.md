@@ -60,7 +60,7 @@ frontend/
 - **框架**：React 18
 - **构建工具**：Vite 6
 - **语言**：TypeScript 5.6
-- **包管理器**：pnpm
+- **包管理器**：pnpm（优先），npm（回退）
 - **主要依赖**：
   - `react-markdown`：Markdown 渲染
   - `react-syntax-highlighter`：代码高亮
@@ -193,7 +193,7 @@ frontend/
 
 ## 构建与开发注意事项
 
-- 前端构建由 `origin_agent/__main__.py` 在启动时自动执行：`pnpm install && pnpm run build`，运行在 `workspace/fast_agent_space/frontend/` 副本中。
-- **绝对禁止**在 `origin_agent/frontend/` 目录下直接运行 `pnpm install`、`pnpm build`、`pnpm dev` 等命令，以免污染源码目录。
+- 前端构建由 `origin_agent/__main__.py` 在启动时自动执行：`<pkg_mgr> install && <pkg_mgr> run build`（包管理器优先 pnpm，回退 npm），运行在 `workspace/fast_agent_space/frontend/` 副本中。
+- **绝对禁止**在 `origin_agent/frontend/` 目录下直接运行 `pnpm install`、`pnpm build`、`pnpm dev`、`npm install`、`npm run build` 等命令，以免污染源码目录。
 - `origin_agent/frontend/` 不在仓库根目录，静态类型/IDE 感知可能不准确；不要依赖于此处的 TypeScript 类型检查结论。
 - 由于前端构建是自动的，修改源码后由用户自行重启 `run.py` 触发重新构建。
