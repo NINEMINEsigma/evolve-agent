@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useRef } from "react";
 import { SessionInfo, SessionCluster, SidebarItem } from "../types";
 import { formatTime } from "../utils";
 import { useEdgeDrawer } from "../hooks/useEdgeDrawer";
@@ -21,11 +21,18 @@ interface SidebarProps {
   onEnterColloquy: () => void;
   onSwitchSession: (sid: string) => void;
   onContextMenu: (e: React.MouseEvent, sid: string) => void;
+  renamingSessionId: string | null;
+  setRenamingSessionId: (sid: string | null) => void;
+  renameSession: (sid: string, title: string) => void;
   onMergeSessions: (sources: string[]) => void;
+  contextMenuOpen: boolean;
   sidebarItems: SidebarItem[];
   expandedClusters: Set<string>;
   toggleCluster: (id: string) => void;
   isReady: boolean;
+  width?: number;
+  isResizing?: boolean;
+  onResizePointerDown?: (e: React.PointerEvent<HTMLElement>) => void;
 }
 
 function sessionLabel(s: SessionInfo) {
@@ -85,6 +92,9 @@ function SessionListItem({
   onToggleMergeSelect,
   onSwitchSession,
   onContextMenu,
+  renamingSessionId,
+  setRenamingSessionId,
+  renameSession,
   indent = 0,
 }: {
   session: SessionInfo;
@@ -95,9 +105,13 @@ function SessionListItem({
   onToggleMergeSelect: (sid: string) => void;
   onSwitchSession: (sid: string) => void;
   onContextMenu: (e: React.MouseEvent, sid: string) => void;
+  renamingSessionId: string | null;
+  setRenamingSessionId: (sid: string | null) => void;
+  renameSession: (sid: string, title: string) => void;
   indent?: number;
 }) {
   const isArchived = s.status === "archived";
+  const submittedRef = useRef(false);
   const canSelectForMerge = mergeMode && isArchived;
   const current = sessions.find((cs) => cs.id === sessionId);
   const isParentOfCurrent = current?.parents?.includes(s.id) ?? false;
@@ -152,10 +166,40 @@ function SessionListItem({
           <span className="merge-checkbox-custom disabled" data-tooltip="未归档会话不可合并" />
         )
       )}
-      <span className="session-item-title">
-        {s.pinned && <span className="pinned-mark" data-tooltip="已收藏">★</span>}
-        {sessionLabel(s)}
-      </span>
+      {renamingSessionId === s.id ? (
+        <input
+          className="session-rename-input"
+          defaultValue={s.title || ""}
+          autoFocus
+          onFocus={(e) => e.target.select()}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              submittedRef.current = true;
+              renameSession(s.id, (e.target as HTMLInputElement).value);
+            } else if (e.key === "Escape") {
+              e.preventDefault();
+              submittedRef.current = true;
+              setRenamingSessionId(null);
+            }
+          }}
+          onBlur={(e) => {
+            if (submittedRef.current) return;
+            const val = e.target.value.trim();
+            if (val !== (s.title || "")) {
+              renameSession(s.id, val);
+            } else {
+              setRenamingSessionId(null);
+            }
+          }}
+          onClick={(e) => e.stopPropagation()}
+        />
+      ) : (
+        <span className="session-item-title">
+          {s.pinned && <span className="pinned-mark" data-tooltip="已收藏">★</span>}
+          {sessionLabel(s)}
+        </span>
+      )}
       {!mergeMode && (
         <button
           className="session-item-more"
@@ -183,6 +227,9 @@ function ClusterItem({
   onToggleMergeSelect,
   onSwitchSession,
   onContextMenu,
+  renamingSessionId,
+  setRenamingSessionId,
+  renameSession,
 }: {
   cluster: SessionCluster;
   expanded: boolean;
@@ -194,6 +241,9 @@ function ClusterItem({
   onToggleMergeSelect: (sid: string) => void;
   onSwitchSession: (sid: string) => void;
   onContextMenu: (e: React.MouseEvent, sid: string) => void;
+  renamingSessionId: string | null;
+  setRenamingSessionId: (sid: string | null) => void;
+  renameSession: (sid: string, title: string) => void;
 }) {
   const hasActive = cluster.members.some((m) => m.id === sessionId);
   const currentSession = sessions.find((s) => s.id === sessionId);
@@ -229,6 +279,9 @@ function ClusterItem({
                 onToggleMergeSelect={onToggleMergeSelect}
                 onSwitchSession={onSwitchSession}
                 onContextMenu={onContextMenu}
+                renamingSessionId={renamingSessionId}
+                setRenamingSessionId={setRenamingSessionId}
+                renameSession={renameSession}
                 indent={4}
               />
               {s.id === sessionId && (parentSessions.length > 0 || continuationSession) && (
@@ -273,15 +326,22 @@ export default function Sidebar({
   onEnterColloquy,
   onSwitchSession,
   onContextMenu,
+  renamingSessionId,
+  setRenamingSessionId,
+  renameSession,
   onMergeSessions,
+  contextMenuOpen,
   sidebarItems,
   expandedClusters,
   toggleCluster,
   isMobile,
   isReady,
+  width,
+  isResizing,
+  onResizePointerDown,
 }: SidebarProps) {
   const [searchFocused, setSearchFocused] = useState(false);
-  const drawer = useEdgeDrawer({ active: !isMobile });
+  const drawer = useEdgeDrawer({ active: !isMobile, pinned: contextMenuOpen });
   const currentSession = sessions.find((s) => s.id === sessionId);
   const parentSessions = currentSession?.parents
     ?.map((pid) => sessions.find((s) => s.id === pid))
@@ -292,11 +352,15 @@ export default function Sidebar({
   const asideClassName = isMobile
     ? `sidebar ${collapsed ? "collapsed" : ""}`
     : `sidebar drawer-${drawer.phase}`;
+  const showResizeHandle = !isMobile && !collapsed && onResizePointerDown;
   return (
     <>
       {!isMobile && <div className="sidebar-hotzone" {...drawer.hotzoneProps} />}
-      <aside className={asideClassName} {...(isMobile ? {} : drawer.drawerProps)}>
-      <div className="sidebar-header">
+      <aside
+        className={asideClassName}
+        style={width != null && !collapsed ? { width } : undefined}
+        {...(isMobile ? {} : drawer.drawerProps)}
+      >      <div className="sidebar-header">
         <div className="sidebar-toolbar">
           <div className="sidebar-search">
             <textarea
@@ -389,6 +453,9 @@ export default function Sidebar({
                 onToggleMergeSelect={onToggleMergeSelect}
                 onSwitchSession={onSwitchSession}
                 onContextMenu={onContextMenu}
+                renamingSessionId={renamingSessionId}
+                setRenamingSessionId={setRenamingSessionId}
+                renameSession={renameSession}
               />
             ) : (
               <div key={item.session.id}>
@@ -401,6 +468,9 @@ export default function Sidebar({
                   onToggleMergeSelect={onToggleMergeSelect}
                   onSwitchSession={onSwitchSession}
                   onContextMenu={onContextMenu}
+                  renamingSessionId={renamingSessionId}
+                  setRenamingSessionId={setRenamingSessionId}
+                  renameSession={renameSession}
                 />
                 {item.session.id === sessionId && (parentSessions.length > 0 || continuationSession) && (
                   <div className="relation-shortcuts">
@@ -439,6 +509,13 @@ export default function Sidebar({
           </button>
           <span className="merge-hint">仅已归档会话可合并</span>
         </div>
+      )}
+      {showResizeHandle && (
+        <div
+          className={`sidebar-resize-handle ${isResizing ? "dragging" : ""}`}
+          onPointerDown={onResizePointerDown}
+          data-tooltip="拖拽调整侧边栏宽度"
+        />
       )}
     </aside>
     </>

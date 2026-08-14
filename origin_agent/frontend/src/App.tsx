@@ -44,7 +44,7 @@ function ChatApp() {
             recvTick: ws.recvTick,
           }}
         >
-          <Layout ws={ws} onContextMenu={handleContextMenu} />
+          <Layout ws={ws} onContextMenu={handleContextMenu} contextMenuOpen={contextMenu !== null} />
         </ConnectionDiagnosticsProvider>
         <ChatContextMenu
           contextMenu={contextMenu}
@@ -54,6 +54,7 @@ function ChatApp() {
           generatingTagSessions={ws.generatingTagSessions}
           terminatingSessions={ws.terminatingSessions}
           onAutoTitle={ws.autoTitleSession}
+          onRename={ws.setRenamingSessionId}
           onAutoTag={ws.autoTagSession}
           onTogglePin={ws.togglePinSession}
           onEditTags={(sid) => setTagEditorSession(ws.sessions.find((s) => s.id === sid) || null)}

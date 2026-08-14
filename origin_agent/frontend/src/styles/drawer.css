@@ -73,7 +73,7 @@
   position: fixed;
   top: 0;
   right: 0;
-  width: 420px;
+  width: 520px;
   max-width: 90vw;
   height: 100%;
   background: var(--bg-secondary);
@@ -84,7 +84,7 @@
 }
 
 .drawer-panel.subagent-drawer {
-  width: 560px;
+  width: 660px;
 }
 
 .drawer-panel.subagent-drawer .drawer-body {
@@ -626,4 +626,23 @@
 
 .subagent-panel-body .subagent-chat-scroll {
   overflow-y: auto;
+}
+
+/* ── Drawer resize handle ── */
+.drawer-resize-handle {
+  position: absolute;
+  top: 0;
+  left: 0;
+  bottom: 0;
+  width: 6px;
+  cursor: col-resize;
+  background: transparent;
+  z-index: var(--z-content);
+  transition: background var(--duration-fast);
+  flex-shrink: 0;
+}
+
+.drawer-resize-handle:hover,
+.drawer-resize-handle.dragging {
+  background: var(--accent);
 }

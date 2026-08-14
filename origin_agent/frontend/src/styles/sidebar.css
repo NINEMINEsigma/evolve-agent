@@ -319,6 +319,19 @@
   color: var(--text-primary);
 }
 
+.session-rename-input {
+  flex: 1;
+  font-size: 13px;
+  color: var(--text-primary);
+  background: rgba(var(--white-rgb), 0.05);
+  border: 1px solid var(--accent);
+  border-radius: 3px;
+  padding: 1px 4px;
+  outline: none;
+  line-height: 1.4;
+  box-sizing: border-box;
+}
+
 .session-item.archived {
   opacity: 0.55;
   cursor: default;
@@ -696,5 +709,32 @@
 
   .sidebar.drawer-open {
     transform: translateX(0);
+  }
+}
+
+/* ── Sidebar resize handle ── */
+.sidebar-resize-handle {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 6px;
+  cursor: col-resize;
+  background: transparent;
+  z-index: var(--z-content);
+  transition: background var(--duration-fast);
+  flex-shrink: 0;
+}
+
+.sidebar-resize-handle:hover,
+.sidebar-resize-handle.dragging {
+  background: var(--accent);
+}
+
+/* 桌面端 edge drawer 模式下隐藏 resize handle（fixed 定位，宽度由 CSS 变量控制） */
+@media (min-width: 769px) {
+  .sidebar.drawer-hidden .sidebar-resize-handle,
+  .sidebar.drawer-peek .sidebar-resize-handle {
+    display: none;
   }
 }

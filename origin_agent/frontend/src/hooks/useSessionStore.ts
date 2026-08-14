@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { usePersistentState } from "./usePersistentState";
 import {
   ChatMessage,
   ConfirmRequest,
@@ -146,6 +147,9 @@ export interface SessionStore {
   regenerateSummary: (sid: string) => void;
   terminateSession: (sid: string) => void;
   togglePinSession: (sid: string) => void;
+  renamingSessionId: string | null;
+  setRenamingSessionId: React.Dispatch<React.SetStateAction<string | null>>;
+  renameSession: (sid: string, title: string) => void;
   mergeSessions: (sources: string[]) => Promise<string | undefined>;
   branchSession: (sid: string) => void;
   toggleMergeSelect: (sid: string) => void;
@@ -185,7 +189,7 @@ export function useSessionStore(callbacks: SessionStoreCallbacks = {}): SessionS
   const [contextTokens, setContextTokens] = useState(0);
   const [sessions, setSessions] = useState<SessionInfo[]>([]);
   const [searchQuery, setSearchQuery] = useState("");
-  const [handsfreeMode, setHandsfreeMode] = useState(false);
+  const [handsfreeMode, setHandsfreeMode] = usePersistentState(STORAGE_KEYS.HANDSFREE_MODE, false);
   const [yoloMode, setYoloMode] = useState(false);
   const [taskProgress, setTaskProgress] = useState<Record<string, TaskProgress>>({});
   const [clipboardDisplays, setClipboardDisplays] = useState<Record<string, ClipboardDisplay>>({});
@@ -211,9 +215,13 @@ export function useSessionStore(callbacks: SessionStoreCallbacks = {}): SessionS
   const [terminatingSessions, setTerminatingSessions] = useState<Set<string>>(new Set());
   const [generatingTitleSessions, setGeneratingTitleSessions] = useState<Set<string>>(new Set());
   const [generatingTagSessions, setGeneratingTagSessions] = useState<Set<string>>(new Set());
+  const [renamingSessionId, setRenamingSessionId] = useState<string | null>(null);
   const [streamingMessage, setStreamingMessage] = useState<ChatMessage | null>(null);
   const [allTags, setAllTags] = useState<string[]>([]);
-  const [expandedClusters, setExpandedClusters] = useState<Set<string>>(new Set());
+  const [expandedClusters, setExpandedClusters] = usePersistentState<Set<string>>(
+    STORAGE_KEYS.EXPANDED_CLUSTERS, new Set(),
+    { serialize: (s) => JSON.stringify(Array.from(s)),
+      deserialize: (s) => new Set(JSON.parse(s)) });
 
   const messagesRef = useRef<ChatMessage[]>([]);
   useEffect(() => {
@@ -492,6 +500,7 @@ export function useSessionStore(callbacks: SessionStoreCallbacks = {}): SessionS
           if (data.token_usage !== undefined) setTokenUsage(data.token_usage);
           if (data.context_tokens !== undefined) setContextTokens(data.context_tokens);
           if (data.processing) setWaiting(true);
+          if (data.handsfree_mode !== undefined) setHandsfreeMode(data.handsfree_mode);
           if (msg.session_id) {
             setSessionId(msg.session_id);
             localStorage.setItem(STORAGE_KEYS.SESSION_ID, msg.session_id);
@@ -982,6 +991,30 @@ export function useSessionStore(callbacks: SessionStoreCallbacks = {}): SessionS
       });
   }, [fetchSessions]);
 
+  const renameSession = useCallback((sid: string, title: string) => {
+    const trimmed = title.trim().slice(0, 50);
+    if (trimmed === "") {
+      setRenamingSessionId(null);
+      return;
+    }
+    fetch(`/api/sessions/${sid}/title`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ title: trimmed }),
+    })
+      .then((r) => r.json())
+      .then((data) => {
+        if (data.updated) {
+          setSessions((prev) => prev.map((s) => (s.id === sid ? { ...s, title: data.title } : s)));
+          fetchSessions();
+        }
+      })
+      .catch(() => {})
+      .finally(() => {
+        setRenamingSessionId(null);
+      });
+  }, [fetchSessions]);
+
   const autoTagSession = useCallback((sid: string) => {
     setGeneratingTagSessions((prev) => new Set(prev).add(sid));
     fetch(`/api/sessions/${sid}/auto-tags`, { method: "POST" })
@@ -1332,6 +1365,9 @@ export function useSessionStore(callbacks: SessionStoreCallbacks = {}): SessionS
     regenerateSummary,
     terminateSession,
     togglePinSession,
+    renamingSessionId,
+    setRenamingSessionId,
+    renameSession,
     mergeSessions,
     branchSession,
     toggleMergeSelect,

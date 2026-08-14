@@ -1625,6 +1625,7 @@ async def ws_chat(ws: WebSocket) -> None:
         if resume and _get_sm().exists(resume):
             loop = _get_loop(resume)
             if loop is not None:
+                from component.approval import is_handsfree_mode
                 history: list[dict] = [
                     e.model_dump(exclude_none=True)
                     for e in loop.loop.get_session_messages()
@@ -1648,6 +1649,7 @@ async def ws_chat(ws: WebSocket) -> None:
                             "context_tokens": context,
                             "processing": processing,
                             "agents": agents_info,
+                            "handsfree_mode": is_handsfree_mode(sid),
                         }, ensure_ascii=False),
                     ).model_dump(exclude_none=True),
                     ensure_ascii=False,

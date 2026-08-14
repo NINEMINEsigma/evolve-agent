@@ -1,6 +1,7 @@
-import { useState } from "react";
 import { ChatMessage, CronTask, DynamicEndpoint } from "../types";
 import { extractMessageResources } from "../utils";
+import { usePersistentState } from "../hooks/usePersistentState";
+import { STORAGE_KEYS } from "../constants/storage";
 
 interface DrawerProps {
   open: boolean;
@@ -17,16 +18,20 @@ interface DrawerProps {
   cronTasks: CronTask[];
   setCronTasks: React.Dispatch<React.SetStateAction<CronTask[]>>;
   dynamicEndpoints: DynamicEndpoint[];
+  width?: number;
+  isResizing?: boolean;
+  onResizePointerDown?: (e: React.PointerEvent<HTMLElement>) => void;
 }
 
 export default function Drawer({
   open, onClose, sessionId, messages, onImageClick,
   bgTasks, setBgTasks, cronTasks, setCronTasks, dynamicEndpoints,
+  width, isResizing, onResizePointerDown,
 }: DrawerProps) {
-  const [resourcesExpanded, setResourcesExpanded] = useState(true);
-  const [backgroundExpanded, setBackgroundExpanded] = useState(true);
-  const [cronExpanded, setCronExpanded] = useState(true);
-  const [dynamicEndpointsExpanded, setDynamicEndpointsExpanded] = useState(true);
+  const [resourcesExpanded, setResourcesExpanded] = usePersistentState(STORAGE_KEYS.DRAWER_RESOURCES_EXPANDED, true);
+  const [backgroundExpanded, setBackgroundExpanded] = usePersistentState(STORAGE_KEYS.DRAWER_BACKGROUND_EXPANDED, true);
+  const [cronExpanded, setCronExpanded] = usePersistentState(STORAGE_KEYS.DRAWER_CRON_EXPANDED, true);
+  const [dynamicEndpointsExpanded, setDynamicEndpointsExpanded] = usePersistentState(STORAGE_KEYS.DRAWER_DYNENDPOINTS_EXPANDED, true);
 
   const { images, audios, downloads } = extractMessageResources(messages);
 
@@ -34,7 +39,7 @@ export default function Drawer({
 
   return (
     <div className="drawer-overlay" onClick={onClose}>
-      <div className="drawer-panel" onClick={(e) => e.stopPropagation()}>
+      <div className="drawer-panel" style={width != null ? { width } : undefined} onClick={(e) => e.stopPropagation()}>
         <div className="drawer-header">
           <span className="drawer-title">会话资源 / 任务</span>
           <button className="drawer-close" onClick={onClose}>✕</button>
@@ -175,6 +180,13 @@ export default function Drawer({
             )}
           </div>
         </div>
+        {onResizePointerDown && (
+          <div
+            className={`drawer-resize-handle ${isResizing ? "dragging" : ""}`}
+            onPointerDown={onResizePointerDown}
+            data-tooltip="拖拽调整抽屉宽度"
+          />
+        )}
       </div>
     </div>
   );

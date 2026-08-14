@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Sidebar from "./Sidebar";
 import Header from "./Header";
 import ChatArea from "./ChatArea";
@@ -15,88 +15,87 @@ import SecretBanner from "./SecretBanner";
 import type { WebSocketState } from "../hooks/useWebSocket";
 import { STORAGE_KEYS } from "../constants/storage";
 import { DIMENSIONS } from "../constants/dimensions";
+import { usePersistentState } from "../hooks/usePersistentState";
+import { usePersistentSessionState } from "../hooks/usePersistentSessionState";
+import { useResizable } from "../hooks/useResizable";
 
 interface LayoutProps {
   ws: WebSocketState;
   onContextMenu: (e: React.MouseEvent, sid: string) => void;
+  contextMenuOpen: boolean;
 }
 
-export default function Layout({ ws, onContextMenu }: LayoutProps) {
+export default function Layout({ ws, onContextMenu, contextMenuOpen }: LayoutProps) {
   const [lightboxSrc, setLightboxSrc] = useState<string | null>(null);
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
-  const [drawerOpen, setDrawerOpen] = useState(false);
-  const [subagentPanelOpenMap, setSubagentPanelOpenMap] = useState<Record<string, boolean>>({});
-  const [activeSubagentIdMap, setActiveSubagentIdMap] = useState<Record<string, string | null>>({});
-  const [targetSessionsMap, setTargetSessionsMap] = useState<Record<string, string[]>>({});
-  const [visibleCharactersMap, setVisibleCharactersMap] = useState<Record<string, string[]>>({});
-  const [responseCharactersMap, setResponseCharactersMap] = useState<Record<string, string[]>>({});
+  const [sidebarCollapsed, setSidebarCollapsed] = usePersistentState(STORAGE_KEYS.SIDEBAR_COLLAPSED, false);
+  const [drawerOpen, setDrawerOpen] = usePersistentState(STORAGE_KEYS.DRAWER_OPEN, false);
+  const [subagentPanelOpen, setSubagentPanelOpen] = usePersistentSessionState<boolean>(
+    STORAGE_KEYS.SUBAGENT_PANEL_OPEN, ws.sessionId, false);
+  const [activeSubagentId, setActiveSubagentId] = usePersistentSessionState<string | null>(
+    STORAGE_KEYS.ACTIVE_SUBAGENT_ID, ws.sessionId, null);
+  const [targetSessions, setTargetSessions] = usePersistentSessionState<string[]>(
+    STORAGE_KEYS.TARGET_SESSIONS, ws.sessionId, ["main"]);
+  const [visibleCharacters, setVisibleCharacters] = usePersistentSessionState<string[]>(
+    STORAGE_KEYS.VISIBLE_CHARACTERS, ws.sessionId, ["all-agents"]);
+  const [responseCharacters, setResponseCharacters] = usePersistentSessionState<string[]>(
+    STORAGE_KEYS.RESPONSE_CHARACTERS, ws.sessionId, ["main-agent"]);
 
-  const subagentPanelOpen = subagentPanelOpenMap[ws.sessionId] || false;
-  const activeSubagentId = activeSubagentIdMap[ws.sessionId] || null;
-  const targetSessions = targetSessionsMap[ws.sessionId] || ["main"];
-  const visibleCharacters = visibleCharactersMap[ws.sessionId] || ["all-agents"];
-  const responseCharacters = responseCharactersMap[ws.sessionId] || ["main-agent"];
-
-  const [subagentPanelWidth, setSubagentPanelWidth] = useState(() => {
-    const saved = localStorage.getItem(STORAGE_KEYS.SUBAGENT_PANEL_WIDTH);
-    const parsed = saved ? parseInt(saved, 10) : DIMENSIONS.SUBAGENT_PANEL_DEFAULT;
-    return isNaN(parsed) ? DIMENSIONS.SUBAGENT_PANEL_DEFAULT : parsed;
+  const [subagentPanelWidth, setSubagentPanelWidth] = usePersistentState<number>(
+    STORAGE_KEYS.SUBAGENT_PANEL_WIDTH, DIMENSIONS.SUBAGENT_PANEL_DEFAULT);
+  const subagentResize = useResizable({
+    width: subagentPanelWidth,
+    setWidth: setSubagentPanelWidth,
+    min: DIMENSIONS.SUBAGENT_PANEL_MIN,
+    max: DIMENSIONS.SUBAGENT_PANEL_MAX,
+    direction: "right",
   });
-  const [resizingPanel, setResizingPanel] = useState(false);
-  const subagentPanelWidthRef = useRef(subagentPanelWidth);
-  useEffect(() => {
-    subagentPanelWidthRef.current = subagentPanelWidth;
-  }, [subagentPanelWidth]);
+
+  const [sidebarWidth, setSidebarWidth] = usePersistentState<number>(
+    STORAGE_KEYS.SIDEBAR_WIDTH, DIMENSIONS.SIDEBAR_DEFAULT);
+  const sidebarResize = useResizable({
+    width: sidebarWidth,
+    setWidth: setSidebarWidth,
+    min: DIMENSIONS.SIDEBAR_MIN,
+    max: DIMENSIONS.SIDEBAR_MAX,
+    direction: "left",
+  });
+
+  const [drawerWidth, setDrawerWidth] = usePersistentState<number>(
+    STORAGE_KEYS.DRAWER_WIDTH, DIMENSIONS.DRAWER_DEFAULT);
+  const drawerResize = useResizable({
+    width: drawerWidth,
+    setWidth: setDrawerWidth,
+    min: DIMENSIONS.DRAWER_MIN,
+    max: DIMENSIONS.DRAWER_MAX,
+    direction: "right",
+  });
 
   const prevSubagentIdsRef = useRef<Record<string, Set<string>>>({});
   const [isMobile, setIsMobile] = useState(false);
-  const [taskProgressCollapsed, setTaskProgressCollapsed] = useState(false);
-  const [clipboardCollapsed, setClipboardCollapsed] = useState(false);
-  const [headerCollapsed, setHeaderCollapsed] = useState(false);
-
-  const setSubagentPanelOpen = (value: boolean | ((prev: boolean) => boolean)) => {
-    setSubagentPanelOpenMap((prev) => ({
-      ...prev,
-      [ws.sessionId]: typeof value === "function" ? value(prev[ws.sessionId] || false) : value,
-    }));
-  };
-  const setActiveSubagentId = (value: string | null | ((prev: string | null) => string | null)) => {
-    setActiveSubagentIdMap((prev) => ({
-      ...prev,
-      [ws.sessionId]: typeof value === "function" ? value(prev[ws.sessionId] || null) : value,
-    }));
-  };
-  const setTargetSessions = (value: string[] | ((prev: string[]) => string[])) => {
-    setTargetSessionsMap((prev) => ({
-      ...prev,
-      [ws.sessionId]: typeof value === "function" ? value(prev[ws.sessionId] || ["main"]) : value,
-    }));
-  };
+  const [taskProgressCollapsed, setTaskProgressCollapsed] = usePersistentState(STORAGE_KEYS.TASK_PROGRESS_COLLAPSED, false);
+  const [clipboardCollapsed, setClipboardCollapsed] = usePersistentState(STORAGE_KEYS.CLIPBOARD_COLLAPSED, false);
+  const [headerCollapsed, setHeaderCollapsed] = usePersistentState(STORAGE_KEYS.HEADER_COLLAPSED, false);
 
   // 移动端默认折叠侧边栏
   useEffect(() => {
     const mq = window.matchMedia(`(max-width: ${DIMENSIONS.MOBILE_BREAKPOINT}px)`);
+    setIsMobile(mq.matches);
+    if (mq.matches) {
+      setSidebarCollapsed(true);
+      setTaskProgressCollapsed(true);
+    }
     const onChange = (e: MediaQueryListEvent) => {
       setIsMobile(e.matches);
-      setSidebarCollapsed(e.matches);
-      setTaskProgressCollapsed(e.matches);
+      if (e.matches) {
+        setSidebarCollapsed(true);
+        setTaskProgressCollapsed(true);
+      }
     };
-    setIsMobile(mq.matches);
-    setSidebarCollapsed(mq.matches);
-    setTaskProgressCollapsed(mq.matches);
     mq.addEventListener("change", onChange);
     return () => mq.removeEventListener("change", onChange);
   }, []);
 
-  // 切换主会话时重置目标选择为默认值
-  useEffect(() => {
-    setTargetSessionsMap((prev) => {
-      if (prev[ws.sessionId]) return prev;
-      return { ...prev, [ws.sessionId]: ["main"] };
-    });
-  }, [ws.sessionId]);
-
-  // 子 Agent 停止或完成后，清理 targetSessionsMap 中已失效的 session id
+  // 子 Agent 停止或完成后，清理 targetSessions 中已失效的 session id
   useEffect(() => {
     const currentIds = new Set(Object.keys(ws.subagentSessions));
     const prevIds = prevSubagentIdsRef.current[ws.sessionId] || new Set();
@@ -105,14 +104,13 @@ export default function Layout({ ws, onContextMenu }: LayoutProps) {
     const hasRemoval = Array.from(prevIds).some((id) => !currentIds.has(id));
     if (!hasRemoval) return;
 
-    setTargetSessionsMap((prev) => {
-      const current = prev[ws.sessionId] || ["main"];
+    setTargetSessions((prev) => {
       const activeIds = new Set(["main", ...Object.keys(ws.subagentSessions)]);
-      const cleaned = current.filter((id) => activeIds.has(id));
+      const cleaned = prev.filter((id) => activeIds.has(id));
       if (cleaned.length === 0 || !cleaned.includes("main")) {
-        return { ...prev, [ws.sessionId]: ["main"] };
+        return ["main"];
       }
-      return { ...prev, [ws.sessionId]: cleaned };
+      return cleaned;
     });
   }, [ws.sessionId, ws.subagentSessions]);
 
@@ -141,8 +139,8 @@ export default function Layout({ ws, onContextMenu }: LayoutProps) {
     }
     const allVisible = ws.agents.length > 0 && ws.agents.every((a) => curVisible.includes(a));
     const newVisible = allVisible ? ["all-agents"] : curVisible;
-    setVisibleCharactersMap((prev) => ({ ...prev, [ws.sessionId]: newVisible }));
-    setResponseCharactersMap((prev) => ({ ...prev, [ws.sessionId]: curResponse }));
+    setVisibleCharacters(newVisible);
+    setResponseCharacters(curResponse);
   };
 
   const onToggleMessageVisibility = (messageId: string, agentName: string) => {
@@ -172,29 +170,6 @@ export default function Layout({ ws, onContextMenu }: LayoutProps) {
     ));
   };
 
-  const handleResizePointerDown = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
-    e.preventDefault();
-    setResizingPanel(true);
-    const startX = e.clientX;
-    const startWidth = subagentPanelWidthRef.current;
-
-    const handleMove = (ev: PointerEvent) => {
-      const delta = startX - ev.clientX;
-      const newWidth = Math.max(DIMENSIONS.SUBAGENT_PANEL_MIN, Math.min(DIMENSIONS.SUBAGENT_PANEL_MAX, startWidth + delta));
-      setSubagentPanelWidth(newWidth);
-    };
-
-    const handleUp = () => {
-      setResizingPanel(false);
-      window.removeEventListener("pointermove", handleMove);
-      window.removeEventListener("pointerup", handleUp);
-      localStorage.setItem(STORAGE_KEYS.SUBAGENT_PANEL_WIDTH, String(subagentPanelWidthRef.current));
-    };
-
-    window.addEventListener("pointermove", handleMove);
-    window.addEventListener("pointerup", handleUp);
-  }, []);
-
   const currentSessionArchived = ws.sessions.find((s) => s.id === ws.sessionId)?.status === "archived";
   // 空态判定与 ChatArea.isEmpty 一致：无 user/assistant 消息且无流式且无等待
   // （chatEmpty 时进度条不渲染，见 InputBar）
@@ -222,6 +197,10 @@ export default function Layout({ ws, onContextMenu }: LayoutProps) {
         onEnterColloquy={ws.enterColloquy}
         onSwitchSession={ws.switchSession}
         onContextMenu={onContextMenu}
+        contextMenuOpen={contextMenuOpen}
+        renamingSessionId={ws.renamingSessionId}
+        setRenamingSessionId={ws.setRenamingSessionId}
+        renameSession={ws.renameSession}
         onMergeSessions={(sources) => {
           ws.mergeSessions(sources);
           ws.setMergeMode(false);
@@ -231,6 +210,9 @@ export default function Layout({ ws, onContextMenu }: LayoutProps) {
         expandedClusters={ws.expandedClusters}
         toggleCluster={ws.toggleCluster}
         isReady={ws.isReady}
+        width={sidebarWidth}
+        isResizing={sidebarResize.isResizing}
+        onResizePointerDown={sidebarResize.onPointerDown}
       />
 
       {isMobile && !sidebarCollapsed && (
@@ -377,12 +359,15 @@ export default function Layout({ ws, onContextMenu }: LayoutProps) {
         cronTasks={ws.cronTasks}
         setCronTasks={ws.setCronTasks}
         dynamicEndpoints={ws.dynamicEndpoints}
+        width={drawerWidth}
+        isResizing={drawerResize.isResizing}
+        onResizePointerDown={drawerResize.onPointerDown}
       />
 
       {subagentPanelOpen && (
         <div
-          className={`subagent-panel-resize-handle ${resizingPanel ? "dragging" : ""}`}
-          onPointerDown={handleResizePointerDown}
+          className={`subagent-panel-resize-handle ${subagentResize.isResizing ? "dragging" : ""}`}
+          onPointerDown={subagentResize.onPointerDown}
           data-tooltip="拖拽调整子会话面板宽度"
         />
       )}
