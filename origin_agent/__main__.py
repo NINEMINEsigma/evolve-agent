@@ -144,10 +144,6 @@ def _build_context(cli: dict) -> RuntimeContext:
         approval_remote_api_key = str(cli.get("approval_remote_api_key", "")),
         approval_remote_model   = str(cli.get("approval_remote_model", "")),
         approval_remote_client_name = str(cli.get("approval_remote_client_name", "openai_client")),
-        # embedding 模型配置
-        embedding_model         = str(cli.get("embedding_model", "")),
-        embedding_model_cuda    = as_bool(cli.get("embedding_model_cuda", True)),
-        embedding_model_port    = int(cli.get("embedding_model_port", 8082)),
         mcp_config_path         = cli["mcp_config_path"],
         # 会话合并配置
         merge_concat_threshold  = int(cli.get("merge_concat_threshold", 50000)),

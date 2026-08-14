@@ -191,12 +191,6 @@ class CharacterConversationMessage(CharacterMessage):
     '''
 
     # ----------------------------------------
-    # v2 字段区域
-    # ----------------------------------------
-    embedding_model: str|None = Field(default=None, description="The embedding model of the message")
-    embedding_vector: list[float]|None = Field(default=None, description="The embedding vector of the message")
-
-    # ----------------------------------------
     # v1 方法区域
     # ----------------------------------------
     def with_suffix(
@@ -281,23 +275,6 @@ class CharacterConversationMessage(CharacterMessage):
         else:
             return f"{prefix}\n---\n{raw_message}\n---\n{self.message_suffix}{non_persistent_injection_suffix}"
 
-    # ----------------------------------------
-    # v2 方法区域
-    # ----------------------------------------
-    def get_embedding(self, embedding_model: str) -> list[float]|None:
-        """
-        仅在embedding_model与当前消息的embedding_model相同时, 返回embedding_vector, 
-        否则都等同于不存在可用的向量
-        """
-        if self.embedding_model == embedding_model:
-            return self.embedding_vector
-        return None
-
-    def set_embedding(self, embedding_model: str, embedding_vector: list[float]) -> None:
-        """更新此消息的嵌入模型和向量。"""
-        self.embedding_model = embedding_model
-        self.embedding_vector = embedding_vector
-
 
 class ToolResultMessage(CharacterMessage):
     '''
@@ -329,12 +306,6 @@ class History(BaseModel):
     messages: list[BaseMessage] = Field(default_factory=list, description="The messages of the history")
     last_user_message: CharacterConversationMessage|None = Field(default=None, description="The last user message of the history")
     _io_locker: Lock = PrivateAttr(default_factory=Lock)
-
-    # ----------------------------------------
-    # v2 字段区域
-    # ----------------------------------------
-    embedding_model: str|None = Field(default=None, description="The embedding model of the history")
-    embedding_vector: list[float]|None = Field(default=None, description="The embedding vector of the history")
 
     # ----------------------------------------
     # v1 方法区域
@@ -502,20 +473,3 @@ class History(BaseModel):
                 if predicate(msg):
                     return (i, msg)
             return (-1, None)
-
-    # ----------------------------------------
-    # v2 方法区域
-    # ----------------------------------------
-    def get_embedding(self, embedding_model: str) -> list[float]|None:
-        """
-        仅在embedding_model与当前历史记录的embedding_model相同时, 返回embedding_vector, 
-        否则都等同于不存在可用的向量
-        """
-        if self.embedding_model == embedding_model:
-            return self.embedding_vector
-        return None
-
-    def set_embedding(self, embedding_model: str, embedding_vector: list[float]) -> None:
-        """更新此历史记录的嵌入模型和向量。"""
-        self.embedding_model = embedding_model
-        self.embedding_vector = embedding_vector

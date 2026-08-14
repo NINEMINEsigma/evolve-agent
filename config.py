@@ -61,13 +61,6 @@ argparse_parser.add_argument("--approval_remote_model", type=str, default=argpar
 argparse_parser.add_argument("--approval_remote_client_name", type=str, default=argparse.SUPPRESS)
 
 #----------
-# embedding 模型
-#----------
-argparse_parser.add_argument("--embedding_model", type=str, default=argparse.SUPPRESS)
-argparse_parser.add_argument("--embedding_model_cuda", action="store_true", default=argparse.SUPPRESS)
-argparse_parser.add_argument("--embedding_model_port", type=int, default=argparse.SUPPRESS)
-
-#----------
 # yolo
 #----------
 argparse_parser.add_argument("--yolo", action="store_true", default=argparse.SUPPRESS)
@@ -110,9 +103,6 @@ class Config(BaseModel):
     approval_remote_api_key: str = ""
     approval_remote_model: str = ""
     approval_remote_client_name: str = "openai_client"
-    embedding_model: str = ""
-    embedding_model_cuda: bool = True
-    embedding_model_port: int = 8082
     workspace_path: str = "workspace"
     agentspace_path_name: str = "agentspace"
     logs_path_name: str = "logs"
@@ -247,10 +237,6 @@ approval_remote_base_url:    str  = current_config.approval_remote_base_url
 approval_remote_api_key:     str  = current_config.approval_remote_api_key
 approval_remote_model:       str  = current_config.approval_remote_model
 approval_remote_client_name: str  = current_config.approval_remote_client_name
-# embedding model
-embedding_model:             str  = current_config.embedding_model
-embedding_model_cuda:         bool = current_config.embedding_model_cuda
-embedding_model_port:         int  = current_config.embedding_model_port
 
 # ----------
 # 审批模型本地/远程二选一，配置阶段完成判定与存在性检查

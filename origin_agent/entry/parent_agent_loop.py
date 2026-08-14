@@ -451,7 +451,6 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
             )
             index = self._history.add_message(message)
             self.save_history(self.session_id)
-            self._trigger_embedding_update(message, index)
             if target_messages is not None:
                 target_messages.append(message)
         return True
@@ -580,7 +579,6 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
             )
         index = self._history.add_message(message)
         self.save_history(session_id)
-        self._trigger_embedding_update(message, index)
         return index
 
     def _get_full_history(self, session_id: str) -> list[BaseMessage]:
@@ -646,12 +644,6 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
     def load_history(self, history: History) -> None:
         """从外部加载历史到当前 loop。"""
         self._history = history
-        # 对已有消息补充 embedding 向量（fire-and-forget，已有向量的会被跳过）
-        for index, message in enumerate(history.iter_messages()):
-            self._trigger_embedding_update(message, index)
-        # 所有 embedding 任务触发后，安排 flush：等待全部完成后统一保存一次
-        if self._pending_embedding_tasks:
-            asyncio.create_task(self._flush_embeddings_and_save())
 
     def _store_assistant_with_tools(
         self, session_id: str, resp: LLMResponse,
@@ -677,7 +669,6 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
         )
         index = self._history.add_message(message)
         self.save_history(session_id)
-        self._trigger_embedding_update(message, index)
 
     @staticmethod
     def _extract_text(content: Any) -> str:

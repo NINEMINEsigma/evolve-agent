@@ -87,10 +87,6 @@ export interface SessionStore {
   setApprovalModelAvailable: React.Dispatch<React.SetStateAction<boolean>>;
   approvalModelType: string;
   setApprovalModelType: React.Dispatch<React.SetStateAction<string>>;
-  embeddingModelName: string;
-  setEmbeddingModelName: React.Dispatch<React.SetStateAction<string>>;
-  embeddingModelAvailable: boolean;
-  setEmbeddingModelAvailable: React.Dispatch<React.SetStateAction<boolean>>;
   mergeMode: boolean;
   setMergeMode: React.Dispatch<React.SetStateAction<boolean>>;
   selectedForMerge: Set<string>;
@@ -201,8 +197,6 @@ export function useSessionStore(callbacks: SessionStoreCallbacks = {}): SessionS
   const [approvalModelName, setApprovalModelName] = useState("");
   const [approvalModelAvailable, setApprovalModelAvailable] = useState(false);
   const [approvalModelType, setApprovalModelType] = useState("");
-  const [embeddingModelName, setEmbeddingModelName] = useState("");
-  const [embeddingModelAvailable, setEmbeddingModelAvailable] = useState(false);
   const [mergeMode, setMergeMode] = useState(false);
   const [selectedForMerge, setSelectedForMerge] = useState<Set<string>>(new Set());
   const [bgTasks, setBgTasks] = useState<Array<{
@@ -403,8 +397,6 @@ export function useSessionStore(callbacks: SessionStoreCallbacks = {}): SessionS
           setApprovalModelAvailable(info.approval_model_available || false);
           setApprovalModelType(info.approval_model_type || "");
           setYoloMode(info.yolo || false);
-          setEmbeddingModelName(info.embedding_model || "");
-          setEmbeddingModelAvailable(info.embedding_model_available || false);
           return;
         }
         if (data.session_history) {
@@ -1298,10 +1290,6 @@ export function useSessionStore(callbacks: SessionStoreCallbacks = {}): SessionS
     setApprovalModelAvailable,
     approvalModelType,
     setApprovalModelType,
-    embeddingModelName,
-    setEmbeddingModelName,
-    embeddingModelAvailable,
-    setEmbeddingModelAvailable,
     mergeMode,
     setMergeMode,
     selectedForMerge,

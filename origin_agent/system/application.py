@@ -14,7 +14,6 @@ if TYPE_CHECKING:
     from system.sandbox import Sandbox
     from gateway.session_manager import SessionManager
     from component.approval.backend import ApprovalBackend
-    from component.embedding.backend import EmbeddingBackendManager
     from component.cron_router import CronRouter
     from abstract.tools.registry import ToolRegistry
     from entry.agent_sink import FrontendSink
@@ -46,7 +45,6 @@ class Application:
         self._session_manager:           SessionManager | None = None
         self._frontend_sink:             FrontendSink | None = None
         self._approval_backend_manager:  ApprovalBackendManager | None = None
-        self._embedding_backend_manager: EmbeddingBackendManager | None = None
 
         # -- 外部注入的复杂对象（private field + setter property）--
         # TODO: subagent_orchestrator 改为 init() 中初始化或懒加载
@@ -94,10 +92,6 @@ class Application:
         # 5. ApprovalBackendManager — 构造同步，异步 is_available() 在运行时才调用
         self._approval_backend_manager = ApprovalBackendManager(self.runtime_context)
 
-        # 6. EmbeddingBackendManager — 构造同步，异步 get_backend() 在运行时才调用
-        from component.embedding.backend import EmbeddingBackendManager
-        self._embedding_backend_manager = EmbeddingBackendManager(self.runtime_context)
-
         logger.info("Application initialized | subsystems ready")
 
     # ── 只读 property（init() 创建，外部不可赋值）──────────────
@@ -121,10 +115,6 @@ class Application:
     @property
     def approval_backend_manager(self) -> ApprovalBackendManager:
         return self._approval_backend_manager  # type: ignore[return-value]
-
-    @property
-    def embedding_backend_manager(self) -> EmbeddingBackendManager:
-        return self._embedding_backend_manager  # type: ignore[return-value]
 
     @property
     def tool_registry(self) -> ToolRegistry:
@@ -174,13 +164,6 @@ class Application:
             except Exception as exc:
                 logger.exception("ApprovalBackendManager shutdown failed: %s", exc)
                 failures.append(f"ApprovalBackendManager: {exc}")
-        # 2.5 停止 embedding 后端
-        if self._embedding_backend_manager is not None:
-            try:
-                await self._embedding_backend_manager.shutdown()
-            except Exception as exc:
-                logger.exception("EmbeddingBackendManager shutdown failed: %s", exc)
-                failures.append(f"EmbeddingBackendManager: {exc}")
         # 3. 停止子 Agent 编排器
         if self._subagent_orchestrator is not None:
             try:

@@ -102,17 +102,6 @@ class RuntimeContext(BaseModel):
     approval_remote_client_name: str = "openai_client"
     """远程审批模型的 LLM 客户端插件名（custom_llm_client 目录下对应 .py 文件名）。"""
 
-    # -- Embedding 模型配置 ------------------------------------------
-
-    embedding_model: str = ""
-    """embedding GGUF 模型文件名（位于 custom_models/ 下）。空字符串表示未配置。"""
-
-    embedding_model_cuda: bool = True
-    """embedding 模型是否启用 CUDA。"""
-
-    embedding_model_port: int = 8082
-    """embedding 模型 llama-server 的监听端口。"""
-
     # -- MCP 配置 -------------------------------------------------
 
     mcp_config_path: str | None = None

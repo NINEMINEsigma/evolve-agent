@@ -2,19 +2,17 @@
 
 模块导入时通过 ``registry.register()`` 注册两个工具：
   - ReadSession: 精准读取指定会话的区间消息（session_id + index + length）
-  - RecallSession: 混合检索全体会话（exact / substring / bm25 / semantic），RRF 融合排序
+  - RecallSession: 混合检索全体会话（exact / substring / bm25），RRF 融合排序
 
 混合检索设计：
   - exact / substring: 布尔高置信通道
   - bm25: 词汇排序通道，query 分词（拉丁词元 + CJK 单字/二元），覆盖缩写与多词查询
-  - semantic: 稠密向量通道，按名次取 top-k（不再用绝对阈值判生死）
   - RRF (Reciprocal Rank Fusion, k=60): 按名次融合各通道，规避分数尺度不可比问题
 """
 
 from __future__ import annotations
 
 import logging
-import math
 import re
 from typing import Any
 
@@ -43,17 +41,12 @@ _CHANNEL_WEIGHTS: dict[str, float] = {
     "exact": 1.5,
     "substring": 1.2,
     "bm25": 1.0,
-    "semantic": 1.0,
 }
 
 # 排序通道送入融合的候选深度（粗召回宁多勿少，靠融合精修）
 _BM25_TOP_K: int = 50
-_SEMANTIC_TOP_K: int = 50
 
-# 语义通道硬下限：仅用于滤除纯噪声，不参与排序（排序由名次决定）
-_SEMANTIC_HARD_FLOOR: float = 0.3
-
-_VALID_METHODS: set[str] = {"exact", "substring", "bm25", "semantic"}
+_VALID_METHODS: set[str] = {"exact", "substring", "bm25"}
 
 # 分词：拉丁词元（含数字/路径片段）+ CJK 连续段
 _LATIN_TOKEN_RE = re.compile(r"[a-z0-9][a-z0-9._\-/#]*")
@@ -63,7 +56,7 @@ _CJK_RUN_RE = re.compile(r"[㐀-䶿一-鿿]+")
 def _tokenize(text: str) -> list[str]:
     """混合分词：拉丁词元原样保留；CJK 连续段切单字 + 二元组。
 
-    - 拉丁词元保住 "yolo" "qwen3-embedding-0.6b" "session_search.py" 这类精确标识符；
+    - 拉丁词元保住 "yolo" "deepseek-v4-flash" "session_search.py" 这类精确标识符；
     - CJK 单字保证召回，二元组保证短语精度（"审批模式" -> 审批/批模/模式）。
     """
     text = text.lower()
@@ -81,7 +74,7 @@ def _rrf_fuse(channel_ranks: dict[str, dict[Any, int]]) -> dict[Any, float]:
     """Reciprocal Rank Fusion: score(d) = Σ_channel weight / (k + rank + 1)。
 
     channel_ranks: 通道名 -> {条目 key: 名次(0-based)}。
-    只看名次不看原始分数，规避 cosine / BM25 / 布尔匹配的尺度不可比问题。
+    只看名次不看原始分数，规避 BM25 / 布尔匹配的尺度不可比问题。
     """
     fused: dict[Any, float] = {}
     for channel, ranks in channel_ranks.items():
@@ -144,16 +137,6 @@ def _get_session_store():
     if not store_path:
         return None
     return SessionStore(store_path)
-
-
-def _cosine_similarity(a: list[float], b: list[float]) -> float:
-    """计算两个向量的余弦相似度。"""
-    dot = sum(x * y for x, y in zip(a, b))
-    norm_a = math.sqrt(sum(x * x for x in a))
-    norm_b = math.sqrt(sum(y * y for y in b))
-    if norm_a == 0 or norm_b == 0:
-        return 0.0
-    return dot / (norm_a * norm_b)
 
 
 def _extract_preview(text: str, max_len: int = SESSION_SEARCH_PREVIEW_LENGTH) -> str:
@@ -219,9 +202,9 @@ def _handle_read_session(args: dict[str, Any]) -> dict:
 
 
 async def _handle_recall_session(args: dict[str, Any]) -> dict:
-    """混合检索全体会话：四通道召回 + RRF 融合排序。"""
+    """混合检索全体会话：三通道召回 + RRF 融合排序。"""
     query: str = str(args.get("query", "")).strip()
-    raw_methods = args.get("match_methods", ["exact", "substring", "bm25", "semantic"])
+    raw_methods = args.get("match_methods", ["exact", "substring", "bm25"])
     max_results: int = int(args.get("max_results", SESSION_SEARCH_MAX_RESULTS_DEFAULT))
     include_history: bool = bool(args.get("include_history", True))
 
@@ -238,7 +221,7 @@ async def _handle_recall_session(args: dict[str, Any]) -> dict:
     else:
         methods = []
     if not methods:
-        methods = ["exact", "substring", "bm25", "semantic"]
+        methods = ["exact", "substring", "bm25"]
 
     from system.application import Application
 
@@ -248,25 +231,6 @@ async def _handle_recall_session(args: dict[str, Any]) -> dict:
 
     session_store = _get_session_store()
     all_sessions = sm.get_all()
-
-    # ── 语义路径准备 ──
-    # 优先使用 embed_query（Qwen3 等非对称模型会自动附加 Instruct 前缀），
-    # 后端未实现时退回普通 embed。
-    semantic_available = False
-    query_vec: list[float] | None = None
-    backend = None
-    if "semantic" in methods:
-        try:
-            backend = await Application.current().embedding_backend_manager.get_backend()
-        except Exception:
-            logger.debug("Failed to get embedding backend", exc_info=True)
-            backend = None
-        if backend is not None:
-            try:
-                query_vec = await backend.embed_query(query)
-                semantic_available = query_vec is not None
-            except Exception:
-                logger.debug("Failed to compute embedding for query", exc_info=True)
 
     # ── 第一遍：收集检索单元 ──
     # message 级单元
@@ -342,25 +306,9 @@ async def _handle_recall_session(args: dict[str, Any]) -> dict:
             ranks[key_fn(units[i])] = rank
         return ranks
 
-    def _semantic_ranks(units: list[dict], key_fn) -> tuple[dict[Any, int], dict[Any, float]]:
-        if not (semantic_available and query_vec is not None and backend is not None):
-            return {}, {}
-        scored: list[tuple[Any, float]] = []
-        for u in units:
-            vec = u["msg"].get_embedding(backend.model_name)
-            if vec is None:
-                continue
-            sim = _cosine_similarity(query_vec, vec)
-            if sim >= _SEMANTIC_HARD_FLOOR:
-                scored.append((key_fn(u), sim))
-        scored.sort(key=lambda t: t[1], reverse=True)
-        scored = scored[:_SEMANTIC_TOP_K]
-        return {k: r for r, (k, _) in enumerate(scored)}, dict(scored)
-
     # message 级通道
     msg_key = lambda u: (u["sid"], u["conv_idx"])  # noqa: E731
     msg_channel_ranks: dict[str, dict[Any, int]] = {}
-    msg_sims: dict[Any, float] = {}
     if "exact" in methods:
         msg_channel_ranks["exact"] = _boolean_ranks(
             msg_units, msg_key, lambda u: query_lower == u["text"].lower())
@@ -369,11 +317,6 @@ async def _handle_recall_session(args: dict[str, Any]) -> dict:
             msg_units, msg_key, lambda u: query_lower in u["text"].lower())
     if "bm25" in methods:
         msg_channel_ranks["bm25"] = _bm25_ranks(msg_units, msg_key)
-    if "semantic" in methods:
-        ranks, sims = _semantic_ranks(msg_units, msg_key)
-        if ranks:
-            msg_channel_ranks["semantic"] = ranks
-        msg_sims = sims
 
     # history 级通道
     hist_key = lambda u: u["sid"]  # noqa: E731
@@ -413,7 +356,6 @@ async def _handle_recall_session(args: dict[str, Any]) -> dict:
             "character_name": getattr(msg, "character_name", ""),
             "preview": _extract_preview(u["text"]),
             "matched_methods": matched,
-            "similarity": round(msg_sims[key], 6) if key in msg_sims else None,
             "fusion_score": round(score, 6),
         })
     if len(msg_list) > max_results:
@@ -443,7 +385,6 @@ async def _handle_recall_session(args: dict[str, Any]) -> dict:
 
     return tool_result(
         success=True,
-        semantic_available=semantic_available,
         total_sessions_scanned=len(all_sessions),
         message_matches=msg_list,
         history_matches=hist_list,
@@ -531,41 +472,37 @@ Loading a session's history may cause a brief delay.
     availability=ToolAvailability.MAIN | ToolAvailability.MULTI_AGENT,
 )
 
-# 混合检索全体会话历史：exact / substring / bm25 / semantic 四通道召回，RRF 按名次融合排序。
-# 前置条件：会话管理子系统已初始化。语义通道需要 embedding 模型已配置且可用。
+# 混合检索全体会话历史：exact / substring / bm25 三通道召回，RRF 按名次融合排序。
+# 前置条件：会话管理子系统已初始化。
 # 调用效果：对全体会话执行指定的匹配通道，message 级和 history 级结果按融合分数降序返回。
-# 返回格式：{ success, semantic_available, total_sessions_scanned, message_matches: [...], history_matches: [...], total_matched }
+# 返回格式：{ success, total_sessions_scanned, message_matches: [...], history_matches: [...], total_matched }
 # exact: query 完全匹配消息内容、会话标题或标签；substring: query 是消息内容、标题或摘要的子串；
-# bm25: 词汇排序（query 分词：拉丁词元 + CJK 单字/二元），覆盖缩写与多词查询；
-# semantic: 消息嵌入向量与查询向量余弦相似度按名次取 top-k（不再使用绝对阈值过滤）。
+# bm25: 词汇排序（query 分词：拉丁词元 + CJK 单字/二元），覆盖缩写与多词查询。
 # 所有通道经 RRF (k=60) 按名次融合，规避分数尺度不可比问题；结果含 fusion_score 与 matched_methods。
-# message_matches 每条含 session_id, session_title, message_index, role, character_name, preview(200字截断), matched_methods, similarity(仅语义), fusion_score。
+# message_matches 每条含 session_id, session_title, message_index, role, character_name, preview(200字截断), matched_methods, fusion_score。
 # history_matches 每条含 session_id, title, tags, status, matched_methods, fusion_score, summary(归档会话, 200字截断)。
-# 典型场景：按关键词、缩写或语义概念检索历史讨论，定位相关会话。
-# 副作用：语义匹配在会话数量多时可能有秒级延迟。嵌入后端不可用时自动跳过语义通道。
+# 典型场景：按关键词、缩写检索历史讨论，定位相关会话。
+# 副作用：无。
 # 提醒：结果总量截断到 max_results（默认 30）；使用 ReadSession 拉取完整消息内容。
 registry.register(
     name="RecallSession",
     toolset="core",
     schema={
-        "description": """Hybrid search across all session histories: four recall channels fused by Reciprocal Rank Fusion (RRF).
+        "description": """Hybrid search across all session histories: three recall channels fused by Reciprocal Rank Fusion (RRF).
 
 ## Prerequisites
 The session management system must be initialized.
-For the semantic channel, an embedding model must be configured and available.
 
 ## Effect
-Runs the specified matching channels (exact, substring, bm25, semantic) across all sessions, then fuses their rankings with RRF (k=60) so results are ordered by rank consensus rather than incomparable raw scores.
+Runs the specified matching channels (exact, substring, bm25) across all sessions, then fuses their rankings with RRF (k=60) so results are ordered by rank consensus rather than incomparable raw scores.
 - `exact`: The query equals a message's content, a session's title, or a session's tag.
 - `substring`: The query is a substring of a message's content, a session's title, or a session's summary.
 - `bm25`: Lexical ranking over tokenized text (Latin tokens kept verbatim; CJK text split into unigrams + bigrams). Best for abbreviations, identifiers, error codes, and multi-word keyword queries.
-- `semantic`: Embedding cosine similarity, contributed by rank (top-k), not by an absolute threshold.
 
 ## Returns
 ```json
 {
   "success": true,
-  "semantic_available": true,
   "total_sessions_scanned": 15,
   "message_matches": [
     {
@@ -575,8 +512,7 @@ Runs the specified matching channels (exact, substring, bm25, semantic) across a
       "role": "user",
       "character_name": "User",
       "preview": "...",
-      "matched_methods": ["bm25", "semantic"],
-      "similarity": 0.87,
+      "matched_methods": ["bm25", "exact"],
       "fusion_score": 0.032
     }
   ],
@@ -594,19 +530,16 @@ Runs the specified matching channels (exact, substring, bm25, semantic) across a
   "total_matched": 12
 }
 ```
-`similarity` is only present for messages in the semantic channel.
 `fusion_score` is the RRF score used for ordering (higher is better).
 `summary` is only included for archived sessions.
 Message `preview` and history `summary` are truncated to 200 characters.
 
 ## When to Use
-- Finding past discussions on a topic, even when exact keywords differ (semantic channel).
 - Locating sessions by abbreviations, identifiers, or multi-word keywords (bm25 channel).
 - Precise lookups by title, tag, or exact phrase (exact/substring channels).
 
 ## Side Effects
-Semantic matching may take several seconds when many sessions exist.
-If the embedding backend is unavailable, the semantic channel is skipped and `semantic_available` is set to false.
+None.
 
 ## Notes
 - Only user and assistant messages are searched; tool calls and system prompts are excluded.
@@ -622,9 +555,9 @@ If the embedding backend is unavailable, the semantic channel is skipped and `se
                 },
                 "match_methods": {
                     "type": "array",
-                    "items": {"type": "string", "enum": ["exact", "substring", "bm25", "semantic"]},
-                    # 使用的匹配通道列表。默认全部四种，经 RRF 融合排序。
-                    "description": """Matching channels to use. Default: all four (exact, substring, bm25, semantic), fused by RRF.""",
+                    "items": {"type": "string", "enum": ["exact", "substring", "bm25"]},
+                    # 使用的匹配通道列表。默认全部三种，经 RRF 融合排序。
+                    "description": """Matching channels to use. Default: all three (exact, substring, bm25), fused by RRF.""",
                 },
                 "max_results": {
                     "type": "integer",

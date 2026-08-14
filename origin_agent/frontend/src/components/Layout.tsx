@@ -249,8 +249,6 @@ export default function Layout({ ws, onContextMenu }: LayoutProps) {
           approvalModelAvailable={ws.approvalModelAvailable}
           approvalModelName={ws.approvalModelName}
           approvalModelType={ws.approvalModelType}
-          embeddingModelName={ws.embeddingModelName}
-          embeddingModelAvailable={ws.embeddingModelAvailable}
           llmModelName={ws.llmModelName}
           sidebarCollapsed={sidebarCollapsed}
           onToggleSidebar={() => setSidebarCollapsed((v) => !v)}

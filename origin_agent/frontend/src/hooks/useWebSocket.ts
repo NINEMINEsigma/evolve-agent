@@ -423,8 +423,6 @@ export function useWebSocket() {
     approvalModelName: session.approvalModelName,
     approvalModelAvailable: session.approvalModelAvailable,
     approvalModelType: session.approvalModelType,
-    embeddingModelName: session.embeddingModelName,
-    embeddingModelAvailable: session.embeddingModelAvailable,
     mergeMode: session.mergeMode,
     setMergeMode: session.setMergeMode,
     selectedForMerge: session.selectedForMerge,
