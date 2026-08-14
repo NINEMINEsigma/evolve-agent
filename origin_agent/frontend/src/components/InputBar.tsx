@@ -1,8 +1,9 @@
-import type { ChangeEvent, RefObject } from "react";
+import { useEffect, useRef, useState, type ChangeEvent, type RefObject } from "react";
 import RichInput from "./RichInput";
 import TaskProgressPanel from "./TaskProgressPanel";
+import InputMorph, { MorphItem } from "./InputMorph";
 import type { PendingImage } from "../hooks/useWebSocket";
-import type { SubagentSession, TargetSessionOption, TaskProgress } from "../types";
+import type { AskRequest, ConfirmRequest, SubagentSession, TargetSessionOption, TaskProgress } from "../types";
 import { escapeHtml } from "../utils";
 import { SID_DISPLAY_LEN } from "../constants/session";
 
@@ -12,6 +13,7 @@ interface InputBarProps {
   waiting: boolean;
   uploading: boolean;
   archived: boolean;
+  sessionId: string;
   /** 空态（无对话）时隐藏进度条 */
   chatEmpty: boolean;
   taskProgress: Record<string, TaskProgress>;
@@ -34,6 +36,11 @@ interface InputBarProps {
   visibleCharacters: string[];
   responseCharacters: string[];
   onToggleAgentState: (agentName: string) => void;
+  // 工具交互队列（ask/confirm 变形）
+  pendingAsks: AskRequest[];
+  pendingConfirms: ConfirmRequest[];
+  onRespondAsk: (ask: AskRequest, option?: string, customText?: string) => void;
+  onRespondConfirm: (confirm: ConfirmRequest, action: string, reason?: string) => void;
 }
 
 export default function InputBar({
@@ -42,6 +49,7 @@ export default function InputBar({
   waiting,
   uploading,
   archived,
+  sessionId,
   chatEmpty,
   taskProgress,
   taskProgressCollapsed,
@@ -62,11 +70,50 @@ export default function InputBar({
   visibleCharacters,
   responseCharacters,
   onToggleAgentState,
+  pendingAsks,
+  pendingConfirms,
+  onRespondAsk,
+  onRespondConfirm,
 }: InputBarProps) {
+  // ── 变形计算：confirm 队首优先于 ask ──
+  const morphItem: MorphItem | null = pendingConfirms.length > 0
+    ? { kind: "confirm", confirm: pendingConfirms[0] }
+    : pendingAsks.length > 0
+      ? { kind: "ask", ask: pendingAsks[0] }
+      : null;
+  const morphActive = morphItem !== null;
+  const queueExtra = pendingConfirms.length + pendingAsks.length - (morphItem ? 1 : 0);
+
+  // RichInput 的纯文本镜像（html 进 input state，text 供变形提交判断/取值）
+  const [inputText, setInputText] = useState("");
+
+  // 草稿暂存：进入变形时清空输入框供回答/理由使用，退出变形（队列排空）时还原；
+  // 会话切换时丢弃暂存，防止旧会话草稿还原进新会话
+  const draftRef = useRef<{ html: string; text: string } | null>(null);
+  const prevSessionRef = useRef(sessionId);
+  useEffect(() => {
+    if (prevSessionRef.current !== sessionId) {
+      prevSessionRef.current = sessionId;
+      draftRef.current = null;
+      return;
+    }
+    if (morphActive) {
+      if (draftRef.current === null) {
+        draftRef.current = { html: input, text: inputText };
+        if (input) setInput("");
+        if (inputText) setInputText("");
+      }
+    } else if (draftRef.current !== null) {
+      setInput(draftRef.current.html);
+      setInputText(draftRef.current.text);
+      draftRef.current = null;
+    }
+  }, [morphActive, sessionId, input, inputText, setInput]);
+
   if (archived) return null;
 
   const handlePasteClipboard = async () => {
-    if (waiting) return;
+    if (waiting || morphActive) return;
     if (!navigator?.clipboard?.readText) return;
     try {
       const text = await navigator.clipboard.readText();
@@ -114,6 +161,19 @@ export default function InputBar({
         />
       )}
       <div className="input-bar-inner">
+        {morphItem && (
+          <InputMorph
+            item={morphItem}
+            queueExtra={queueExtra}
+            inputText={inputText}
+            onRespondAsk={onRespondAsk}
+            onRespondConfirm={onRespondConfirm}
+            onClearInput={() => {
+              setInput("");
+              setInputText("");
+            }}
+          />
+        )}
         {hasSubagents && (
           <div className="input-target-row">
             {targetOptions.map((opt: TargetSessionOption) => {
@@ -163,7 +223,7 @@ export default function InputBar({
             data-tooltip="添加附件"
             type="button"
             onClick={onUploadClick}
-            disabled={uploading}
+            disabled={uploading || morphActive}
           >
             <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2">
               <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4" />
@@ -176,7 +236,7 @@ export default function InputBar({
             data-tooltip="粘贴系统剪贴板"
             type="button"
             onClick={handlePasteClipboard}
-            disabled={waiting}
+            disabled={waiting || morphActive}
           >
             <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2">
               <rect x="8" y="3" width="8" height="4" rx="1" />
@@ -186,13 +246,22 @@ export default function InputBar({
           <RichInput
             ref={inputRef}
             value={input}
-            onChange={(html) => setInput(html)}
-            onSend={onSend}
+            onChange={(html, text) => {
+              setInput(html);
+              setInputText(text);
+            }}
+            onSend={morphActive ? () => {} : onSend}
             onPasteImage={onPasteImage}
             onRemoveImage={onRemovePendingImage}
             pendingImages={pendingImages}
-            disabled={waiting}
-            placeholder="Send message to agent..."
+            disabled={waiting && !morphActive}
+            placeholder={
+              morphItem
+                ? morphItem.kind === "ask"
+                  ? "输入回答..."
+                  : "输入拒绝理由（可选）..."
+                : "Send message to agent..."
+            }
           />
           <input
             ref={fileInputRef}
@@ -202,7 +271,7 @@ export default function InputBar({
             multiple
             disabled={uploading}
           />
-          <button className="send-btn" onClick={onSend} disabled={waiting} type="button">
+          <button className="send-btn" onClick={onSend} disabled={waiting || morphActive} type="button">
             <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2">
               <path d="M22 2L11 13" />
               <path d="M22 2L15 22L11 13L2 9L22 2Z" />

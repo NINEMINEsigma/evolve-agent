@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef } from "react";
-import { MessageContent, WSMessage, SubagentSession } from "../types";
+import { MessageContent, WSMessage, SubagentSession, AskRequest, ConfirmRequest } from "../types";
 import { generateUUID } from "../utils";
 import { WS_OUT } from "../constants/ws";
 import { COLLOQUY_SID } from "../constants/session";
@@ -303,19 +303,21 @@ export function useWebSocket() {
       }
       return [...next, { role: "system" as const, content: "⏹ 已中断", id: generateUUID() }];
     });
+    // 中断时清空挂起的 ask/confirm 队列并逐项自动应答，解除后端悬挂 Future
+    s.clearPendingInteractions();
     fetch(`/api/interrupt/${s.sessionId || "unknown"}`, { method: "POST" }).catch(() => {});
   }, []);
 
-  const respondConfirm = useCallback((action: string, denyReasonText?: string, deniedBy?: string) => {
+  const respondConfirm = useCallback((request: ConfirmRequest | null, action: string, denyReasonText?: string, deniedBy?: string) => {
     const s = sessionRef.current;
     if (!s) return;
-    s.respondConfirm(s.pendingConfirm, action, denyReasonText, deniedBy);
+    s.respondConfirm(request, action, denyReasonText, deniedBy);
   }, []);
 
-  const respondAsk = useCallback((option?: string, customText?: string) => {
+  const respondAsk = useCallback((request: AskRequest | null, option?: string, customText?: string) => {
     const s = sessionRef.current;
     if (!s) return;
-    s.respondAsk(s.pendingAsk, option, customText);
+    s.respondAsk(request, option, customText);
   }, []);
 
   // ── drawer polling ──
@@ -388,16 +390,9 @@ export function useWebSocket() {
     status: conn.status,
     waiting: session.waiting,
     setWaiting: session.setWaiting,
-    pendingConfirm: session.pendingConfirm,
-    setPendingConfirm: session.setPendingConfirm,
-    denyReason: session.denyReason,
-    setDenyReason: session.setDenyReason,
-    pendingAsk: session.pendingAsk,
-    setPendingAsk: session.setPendingAsk,
-    askCustomText: session.askCustomText,
-    setAskCustomText: session.setAskCustomText,
-    askSelectedOption: session.askSelectedOption,
-    setAskSelectedOption: session.setAskSelectedOption,
+    pendingConfirms: session.pendingConfirms,
+    pendingAsks: session.pendingAsks,
+    clearPendingInteractions: session.clearPendingInteractions,
     sessionId: session.sessionId,
     tokenUsage: session.tokenUsage,
     contextTokens: session.contextTokens,

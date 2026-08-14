@@ -17,6 +17,7 @@ import "./styles/dialogs.css";
 import "./styles/panels.css";
 import "./styles/drawer.css";
 import "./styles/input.css";
+import "./styles/morph.css";
 import "./styles/tooltip.css";
 import "./styles/popup.css";
 import "./styles/context-menu.css";

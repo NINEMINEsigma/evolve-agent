@@ -36,7 +36,7 @@ function ChatApp() {
         <ConnectionDiagnosticsProvider
           value={{
             waiting: ws.waiting,
-            pendingConfirm: ws.pendingConfirm,
+            pendingConfirm: ws.pendingConfirms[0] ?? null,
             streamingMessage: ws.streamingMessage,
             ignoreStaleRef: ws.ignoreStaleRef,
             lastRecvAtRef: ws.lastRecvAtRef,

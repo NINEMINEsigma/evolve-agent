@@ -9,8 +9,6 @@ import SubagentPanel from "./SubagentPanel";
 import CronCountdown from "./CronCountdown";
 import SubagentCountdown from "./SubagentCountdown";
 import Lightbox from "./Lightbox";
-import ConfirmDialog from "./ConfirmDialog";
-import AskDialog from "./AskDialog";
 import SecretBanner from "./SecretBanner";
 import type { WebSocketState } from "../hooks/useWebSocket";
 import { STORAGE_KEYS } from "../constants/storage";
@@ -285,6 +283,7 @@ export default function Layout({ ws, onContextMenu, contextMenuOpen }: LayoutPro
             waiting={ws.waiting}
             uploading={ws.uploading}
             archived={currentSessionArchived}
+            sessionId={ws.sessionId}
             chatEmpty={chatEmpty}
             taskProgress={ws.taskProgress}
             taskProgressCollapsed={taskProgressCollapsed}
@@ -307,24 +306,13 @@ export default function Layout({ ws, onContextMenu, contextMenuOpen }: LayoutPro
             visibleCharacters={visibleCharacters}
             responseCharacters={responseCharacters}
             onToggleAgentState={onToggleAgentState}
+            pendingAsks={ws.pendingAsks}
+            pendingConfirms={ws.pendingConfirms}
+            onRespondAsk={ws.respondAsk}
+            onRespondConfirm={ws.respondConfirm}
           />
         </ChatArea>
 
-        <ConfirmDialog
-          pendingConfirm={ws.pendingConfirm}
-          denyReason={ws.denyReason}
-          setDenyReason={ws.setDenyReason}
-          onRespond={ws.respondConfirm}
-        />
-
-        <AskDialog
-          pendingAsk={ws.pendingAsk}
-          askCustomText={ws.askCustomText}
-          setAskCustomText={ws.setAskCustomText}
-          askSelectedOption={ws.askSelectedOption}
-          setAskSelectedOption={ws.setAskSelectedOption}
-          onRespond={ws.respondAsk}
-        />
       </div>
 
       {!(drawerOpen || subagentPanelOpen) && (

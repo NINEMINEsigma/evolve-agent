@@ -44,16 +44,9 @@ export interface SessionStore {
   setInput: React.Dispatch<React.SetStateAction<string>>;
   waiting: boolean;
   setWaiting: React.Dispatch<React.SetStateAction<boolean>>;
-  pendingConfirm: ConfirmRequest | null;
-  setPendingConfirm: React.Dispatch<React.SetStateAction<ConfirmRequest | null>>;
-  denyReason: string;
-  setDenyReason: React.Dispatch<React.SetStateAction<string>>;
-  pendingAsk: AskRequest | null;
-  setPendingAsk: React.Dispatch<React.SetStateAction<AskRequest | null>>;
-  askCustomText: string;
-  setAskCustomText: React.Dispatch<React.SetStateAction<string>>;
-  askSelectedOption: string | null;
-  setAskSelectedOption: React.Dispatch<React.SetStateAction<string | null>>;
+  pendingConfirms: ConfirmRequest[];
+  pendingAsks: AskRequest[];
+  clearPendingInteractions: () => void;
   sessionId: string;
   setSessionId: React.Dispatch<React.SetStateAction<string>>;
   tokenUsage: number;
@@ -179,11 +172,8 @@ export function useSessionStore(callbacks: SessionStoreCallbacks = {}): SessionS
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
   const [waiting, setWaiting] = useState(false);
-  const [pendingConfirm, setPendingConfirm] = useState<ConfirmRequest | null>(null);
-  const [denyReason, setDenyReason] = useState("用户不同意工具调用");
-  const [pendingAsk, setPendingAsk] = useState<AskRequest | null>(null);
-  const [askCustomText, setAskCustomText] = useState("");
-  const [askSelectedOption, setAskSelectedOption] = useState<string | null>(null);
+  const [pendingConfirms, setPendingConfirms] = useState<ConfirmRequest[]>([]);
+  const [pendingAsks, setPendingAsks] = useState<AskRequest[]>([]);
   const [sessionId, setSessionId] = useState("");
   const [tokenUsage, setTokenUsage] = useState(0);
   const [contextTokens, setContextTokens] = useState(0);
@@ -232,6 +222,37 @@ export function useSessionStore(callbacks: SessionStoreCallbacks = {}): SessionS
   useEffect(() => {
     streamingMessageRef.current = streamingMessage;
   }, [streamingMessage]);
+
+  // 队列最新值镜像，供 clearPendingInteractions 在任意回调时机读取
+  const pendingAsksRef = useRef<AskRequest[]>([]);
+  useEffect(() => {
+    pendingAsksRef.current = pendingAsks;
+  }, [pendingAsks]);
+  const pendingConfirmsRef = useRef<ConfirmRequest[]>([]);
+  useEffect(() => {
+    pendingConfirmsRef.current = pendingConfirms;
+  }, [pendingConfirms]);
+
+  // 中断/切换会话时清理挂起交互：逐项自动应答（ask→跳过，confirm→拒绝），
+  // 同步解除后端悬挂的 Future，再清空前端队列
+  const clearPendingInteractions = useCallback(() => {
+    for (const ask of pendingAsksRef.current) {
+      fetch(`/api/ask/${ask.request_id}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ option: null, custom_text: null }),
+      }).catch(() => {});
+    }
+    for (const confirmReq of pendingConfirmsRef.current) {
+      fetch(`/api/confirm/${confirmReq.request_id}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "deny", deny_reason: "会话中断或切换", denied_by: "user" }),
+      }).catch(() => {});
+    }
+    setPendingAsks([]);
+    setPendingConfirms([]);
+  }, []);
 
   const ignoreStaleRef = useRef(false);
   const streamDoneRef = useRef(false);
@@ -528,6 +549,7 @@ export function useSessionStore(callbacks: SessionStoreCallbacks = {}): SessionS
           setSecretBanner(null);
           setTaskProgress({});
           setDynamicEndpoints([]);
+          clearPendingInteractions();
           callbacksRef.current.onSessionRotated?.(data.new_sid, oldSid);
           callbacksRef.current.onSessionHistory?.(data.new_sid);
           fetchSessions();
@@ -793,8 +815,7 @@ export function useSessionStore(callbacks: SessionStoreCallbacks = {}): SessionS
 
     if (msg.type === WS_IN.CONFIRM_REQUEST) {
       if (msg.request_id) {
-        setDenyReason("用户不同意工具调用");
-        setPendingConfirm({
+        const entry: ConfirmRequest = {
           request_id: msg.request_id,
           content: typeof msg.content === "string" ? msg.content : "运行命令?",
           command: (msg.args as Record<string, unknown>)?.command as string[] | undefined,
@@ -802,24 +823,29 @@ export function useSessionStore(callbacks: SessionStoreCallbacks = {}): SessionS
           tool: msg.tool ?? undefined,
           emoji: msg.emoji,
           danger_level: msg.danger_level,
-        });
+        };
+        // 入队去重：同一 request_id 重复推送时不重复添加
+        setPendingConfirms((prev) =>
+          prev.some((c) => c.request_id === entry.request_id) ? prev : [...prev, entry]
+        );
       }
       return;
     }
 
     if (msg.type === WS_IN.ASK_REQUEST) {
       if (msg.request_id && msg.question) {
-        setAskCustomText("");
-        setAskSelectedOption(null);
-        setPendingAsk({
+        const entry: AskRequest = {
           request_id: msg.request_id,
           question: msg.question ?? "",
           detail: msg.detail,
           options: msg.options,
-        });
+        };
+        setPendingAsks((prev) =>
+          prev.some((a) => a.request_id === entry.request_id) ? prev : [...prev, entry]
+        );
       }
     }
-  }, [addMessage, appendStreamingDelta, fetchSessions, flushAndAppend, flushStreamingMessage, nextMessageIndex, sessionId]);
+  }, [addMessage, appendStreamingDelta, clearPendingInteractions, fetchSessions, flushAndAppend, flushStreamingMessage, nextMessageIndex, sessionId]);
 
   const toggleMessageCollapse = useCallback((id: string) => {
     setMessages((prev) => prev.map((m) => (
@@ -903,7 +929,7 @@ export function useSessionStore(callbacks: SessionStoreCallbacks = {}): SessionS
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
     }).catch((err) => console.error("[confirm] fetch failed", err));
-    setPendingConfirm(null);
+    setPendingConfirms((prev) => prev.filter((c) => c.request_id !== currentPending.request_id));
   }, []);
 
   const respondAsk = useCallback((currentPending: AskRequest | null, option?: string, customText?: string) => {
@@ -917,9 +943,7 @@ export function useSessionStore(callbacks: SessionStoreCallbacks = {}): SessionS
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
     }).catch((err) => console.error("[ask] fetch failed", err));
-    setPendingAsk(null);
-    setAskCustomText("");
-    setAskSelectedOption(null);
+    setPendingAsks((prev) => prev.filter((a) => a.request_id !== currentPending.request_id));
   }, []);
 
   const newChat = useCallback(() => {
@@ -929,7 +953,7 @@ export function useSessionStore(callbacks: SessionStoreCallbacks = {}): SessionS
     setInput("");
     setSessionId("");
     setWaiting(false);
-    setPendingConfirm(null);
+    clearPendingInteractions();
     setHandsfreeMode(false);
     setClipboardDisplays({});
     setSecretBanner(null);
@@ -938,7 +962,7 @@ export function useSessionStore(callbacks: SessionStoreCallbacks = {}): SessionS
     setTokenUsage(0);
     setContextTokens(0);
     ignoreStaleRef.current = false;
-  }, []);
+  }, [clearPendingInteractions]);
 
   const switchSession = useCallback((sid: string) => {
     if (sid === sessionId) return;
@@ -947,7 +971,7 @@ export function useSessionStore(callbacks: SessionStoreCallbacks = {}): SessionS
     setInput("");
     setSessionId(sid);
     setWaiting(false);
-    setPendingConfirm(null);
+    clearPendingInteractions();
     setClipboardDisplays({});
     setSecretBanner(null);
     setTaskProgress({});
@@ -955,7 +979,7 @@ export function useSessionStore(callbacks: SessionStoreCallbacks = {}): SessionS
     setTokenUsage(0);
     setContextTokens(0);
     ignoreStaleRef.current = false;
-  }, [sessionId]);
+  }, [sessionId, clearPendingInteractions]);
 
   const enterColloquy = useCallback(() => {
     switchSession(COLLOQUY_SID);
@@ -1279,16 +1303,9 @@ export function useSessionStore(callbacks: SessionStoreCallbacks = {}): SessionS
     setInput,
     waiting,
     setWaiting,
-    pendingConfirm,
-    setPendingConfirm,
-    denyReason,
-    setDenyReason,
-    pendingAsk,
-    setPendingAsk,
-    askCustomText,
-    setAskCustomText,
-    askSelectedOption,
-    setAskSelectedOption,
+    pendingConfirms,
+    pendingAsks,
+    clearPendingInteractions,
     sessionId,
     setSessionId,
     tokenUsage,

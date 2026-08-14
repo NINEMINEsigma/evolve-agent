@@ -1,0 +1,173 @@
+/* ── Input morph（工具交互变形：Ask / Confirm 融入输入框，配套 components/InputMorph.tsx） ── */
+.input-morph {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 4px 6px 8px;
+  border-bottom: 1px solid var(--border);
+}
+
+.input-morph-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 24px;
+}
+
+.input-morph-title {
+  flex: 1;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.input-morph-queue-badge {
+  flex-shrink: 0;
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  border: 1px solid var(--accent);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.input-morph-collapse-btn {
+  flex-shrink: 0;
+  width: 22px;
+  height: 22px;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 10px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background var(--duration-fast), color var(--duration-fast);
+}
+
+.input-morph-collapse-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text-secondary);
+}
+
+/* 内容区限高：约聊天区高度 40%，超出内部滚动，输入框与按钮始终可见 */
+.input-morph-body {
+  max-height: min(40vh, 320px);
+  overflow-y: auto;
+  scrollbar-width: thin;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.input-morph-body:empty {
+  display: none;
+}
+
+.input-morph-detail {
+  font-size: 13px;
+  color: var(--text-secondary);
+  padding: 0 2px;
+}
+
+.input-morph-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.morph-option-chip {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--bg-hover);
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.4;
+  padding: 4px 10px;
+  cursor: pointer;
+  transition: background var(--duration-fast), color var(--duration-fast), border-color var(--duration-fast);
+}
+
+.morph-option-chip:hover {
+  background: var(--bg-elevated);
+  color: var(--text-secondary);
+  border-color: var(--border-strong);
+}
+
+.morph-option-chip.selected {
+  background: var(--accent-soft);
+  color: var(--accent);
+  border-color: var(--accent);
+  font-weight: 600;
+}
+
+.input-morph-confirm-cmd {
+  margin: 0;
+  background: var(--bg-tertiary);
+  padding: 8px 12px;
+  border-radius: var(--radius-sm);
+  font-family: "SF Mono", "Fira Code", monospace;
+  font-size: 13px;
+  white-space: pre-wrap;
+  word-break: break-all;
+  color: var(--code-amber);
+}
+
+.input-morph-confirm-reason {
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+/* 动作按钮行（配色移植自 modal.css 的 modal-btn 三变体） */
+.input-morph-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.morph-btn {
+  padding: 6px 14px;
+  border: none;
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+  cursor: pointer;
+  transition: background var(--duration-fast), opacity var(--duration-fast);
+}
+
+.morph-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.morph-btn--secondary {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.morph-btn--neutral {
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+  border: 1px solid var(--border);
+}
+
+.morph-btn--primary {
+  background: var(--accent);
+  color: var(--text-white);
+}
+
+.morph-btn--primary:hover:not(:disabled) {
+  background: var(--accent-hover);
+}
+
+@media (max-width: 768px) {
+  .input-morph-body { max-height: min(40vh, 240px); }
+  .morph-btn { padding: 6px 10px; font-size: 12px; }
+}
