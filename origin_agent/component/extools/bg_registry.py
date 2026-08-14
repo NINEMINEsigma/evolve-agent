@@ -32,25 +32,49 @@ _background_tasks: dict[str, dict[str, Any]] = {}
 
 
 def list_background_tasks(session_id: str) -> list[dict[str, Any]]:
-    """返回指定会话关联的所有后台任务。"""
+    """返回指定会话关联的所有后台任务。
+
+    遍历时自动清理已退出的任务：进程已退出且非 watching 类型的条目
+    直接移除；watching 类型在 reader 线程结束后移除并关闭日志句柄。
+    """
     result: list[dict[str, Any]] = []
-    for task_id, task in _background_tasks.items():
-        if task.get("session_id") == session_id:
-            proc: subprocess.Popen = task["proc"]
-            status = "running" if proc.poll() is None else "stopped"
-            watch: _WatchState | None = task.get("watch")
-            entry: dict[str, Any] = {
-                "task_id": task_id,
-                "pid": task["pid"],
-                "command": task["command"],
-                "start_time": task["start_time"],
-                "log_path": task["log_path"],
-                "status": status,
-                "type": "watching" if watch is not None else "background",
-            }
-            if watch is not None:
-                entry["marker_hit"] = watch.marker_hit
-            result.append(entry)
+    for task_id, task in list(_background_tasks.items()):
+        if task.get("session_id") != session_id:
+            continue
+        proc: subprocess.Popen = task["proc"]
+        watch: _WatchState | None = task.get("watch")
+
+        if proc.poll() is not None:
+            # 进程已退出 — 判断是否可安全清理
+            if watch is None:
+                # 普通后台类型：直接移除
+                _background_tasks.pop(task_id, None)
+                continue
+            # watching 类型：等待 reader 线程完成 _final_flush
+            if watch.reader_thread is None or not watch.reader_thread.is_alive():
+                try:
+                    watch.log_file.close()
+                except Exception:
+                    logger.warning("Failed to close log file for task %s", task_id, exc_info=True)
+                _background_tasks.pop(task_id, None)
+                continue
+            # reader 线程仍在执行 _final_flush，保留条目
+            status = "stopped"
+        else:
+            status = "running"
+
+        entry: dict[str, Any] = {
+            "task_id": task_id,
+            "pid": task["pid"],
+            "command": task["command"],
+            "start_time": task["start_time"],
+            "log_path": task["log_path"],
+            "status": status,
+            "type": "watching" if watch is not None else "background",
+        }
+        if watch is not None:
+            entry["marker_hit"] = watch.marker_hit
+        result.append(entry)
     return result
 
 
