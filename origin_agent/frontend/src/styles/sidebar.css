@@ -711,3 +711,30 @@
     transform: translateX(0);
   }
 }
+
+/* ── Sidebar resize handle ── */
+.sidebar-resize-handle {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 6px;
+  cursor: col-resize;
+  background: transparent;
+  z-index: var(--z-content);
+  transition: background var(--duration-fast);
+  flex-shrink: 0;
+}
+
+.sidebar-resize-handle:hover,
+.sidebar-resize-handle.dragging {
+  background: var(--accent);
+}
+
+/* 桌面端 edge drawer 模式下隐藏 resize handle（fixed 定位，宽度由 CSS 变量控制） */
+@media (min-width: 769px) {
+  .sidebar.drawer-hidden .sidebar-resize-handle,
+  .sidebar.drawer-peek .sidebar-resize-handle {
+    display: none;
+  }
+}

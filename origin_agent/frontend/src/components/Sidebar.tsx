@@ -30,6 +30,9 @@ interface SidebarProps {
   expandedClusters: Set<string>;
   toggleCluster: (id: string) => void;
   isReady: boolean;
+  width?: number;
+  isResizing?: boolean;
+  onResizePointerDown?: (e: React.PointerEvent<HTMLElement>) => void;
 }
 
 function sessionLabel(s: SessionInfo) {
@@ -333,6 +336,9 @@ export default function Sidebar({
   toggleCluster,
   isMobile,
   isReady,
+  width,
+  isResizing,
+  onResizePointerDown,
 }: SidebarProps) {
   const [searchFocused, setSearchFocused] = useState(false);
   const drawer = useEdgeDrawer({ active: !isMobile, pinned: contextMenuOpen });
@@ -346,11 +352,15 @@ export default function Sidebar({
   const asideClassName = isMobile
     ? `sidebar ${collapsed ? "collapsed" : ""}`
     : `sidebar drawer-${drawer.phase}`;
+  const showResizeHandle = !isMobile && !collapsed && onResizePointerDown;
   return (
     <>
       {!isMobile && <div className="sidebar-hotzone" {...drawer.hotzoneProps} />}
-      <aside className={asideClassName} {...(isMobile ? {} : drawer.drawerProps)}>
-      <div className="sidebar-header">
+      <aside
+        className={asideClassName}
+        style={width != null && !collapsed ? { width } : undefined}
+        {...(isMobile ? {} : drawer.drawerProps)}
+      >      <div className="sidebar-header">
         <div className="sidebar-toolbar">
           <div className="sidebar-search">
             <textarea
@@ -499,6 +509,13 @@ export default function Sidebar({
           </button>
           <span className="merge-hint">仅已归档会话可合并</span>
         </div>
+      )}
+      {showResizeHandle && (
+        <div
+          className={`sidebar-resize-handle ${isResizing ? "dragging" : ""}`}
+          onPointerDown={onResizePointerDown}
+          data-tooltip="拖拽调整侧边栏宽度"
+        />
       )}
     </aside>
     </>

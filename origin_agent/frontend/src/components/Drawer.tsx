@@ -18,11 +18,15 @@ interface DrawerProps {
   cronTasks: CronTask[];
   setCronTasks: React.Dispatch<React.SetStateAction<CronTask[]>>;
   dynamicEndpoints: DynamicEndpoint[];
+  width?: number;
+  isResizing?: boolean;
+  onResizePointerDown?: (e: React.PointerEvent<HTMLElement>) => void;
 }
 
 export default function Drawer({
   open, onClose, sessionId, messages, onImageClick,
   bgTasks, setBgTasks, cronTasks, setCronTasks, dynamicEndpoints,
+  width, isResizing, onResizePointerDown,
 }: DrawerProps) {
   const [resourcesExpanded, setResourcesExpanded] = usePersistentState(STORAGE_KEYS.DRAWER_RESOURCES_EXPANDED, true);
   const [backgroundExpanded, setBackgroundExpanded] = usePersistentState(STORAGE_KEYS.DRAWER_BACKGROUND_EXPANDED, true);
@@ -35,7 +39,7 @@ export default function Drawer({
 
   return (
     <div className="drawer-overlay" onClick={onClose}>
-      <div className="drawer-panel" onClick={(e) => e.stopPropagation()}>
+      <div className="drawer-panel" style={width != null ? { width } : undefined} onClick={(e) => e.stopPropagation()}>
         <div className="drawer-header">
           <span className="drawer-title">会话资源 / 任务</span>
           <button className="drawer-close" onClick={onClose}>✕</button>
@@ -176,6 +180,13 @@ export default function Drawer({
             )}
           </div>
         </div>
+        {onResizePointerDown && (
+          <div
+            className={`drawer-resize-handle ${isResizing ? "dragging" : ""}`}
+            onPointerDown={onResizePointerDown}
+            data-tooltip="拖拽调整抽屉宽度"
+          />
+        )}
       </div>
     </div>
   );

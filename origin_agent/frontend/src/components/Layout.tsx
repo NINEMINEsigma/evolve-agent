@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Sidebar from "./Sidebar";
 import Header from "./Header";
 import ChatArea from "./ChatArea";
@@ -17,6 +17,7 @@ import { STORAGE_KEYS } from "../constants/storage";
 import { DIMENSIONS } from "../constants/dimensions";
 import { usePersistentState } from "../hooks/usePersistentState";
 import { usePersistentSessionState } from "../hooks/usePersistentSessionState";
+import { useResizable } from "../hooks/useResizable";
 
 interface LayoutProps {
   ws: WebSocketState;
@@ -41,11 +42,33 @@ export default function Layout({ ws, onContextMenu, contextMenuOpen }: LayoutPro
 
   const [subagentPanelWidth, setSubagentPanelWidth] = usePersistentState<number>(
     STORAGE_KEYS.SUBAGENT_PANEL_WIDTH, DIMENSIONS.SUBAGENT_PANEL_DEFAULT);
-  const [resizingPanel, setResizingPanel] = useState(false);
-  const subagentPanelWidthRef = useRef(subagentPanelWidth);
-  useEffect(() => {
-    subagentPanelWidthRef.current = subagentPanelWidth;
-  }, [subagentPanelWidth]);
+  const subagentResize = useResizable({
+    width: subagentPanelWidth,
+    setWidth: setSubagentPanelWidth,
+    min: DIMENSIONS.SUBAGENT_PANEL_MIN,
+    max: DIMENSIONS.SUBAGENT_PANEL_MAX,
+    direction: "right",
+  });
+
+  const [sidebarWidth, setSidebarWidth] = usePersistentState<number>(
+    STORAGE_KEYS.SIDEBAR_WIDTH, DIMENSIONS.SIDEBAR_DEFAULT);
+  const sidebarResize = useResizable({
+    width: sidebarWidth,
+    setWidth: setSidebarWidth,
+    min: DIMENSIONS.SIDEBAR_MIN,
+    max: DIMENSIONS.SIDEBAR_MAX,
+    direction: "left",
+  });
+
+  const [drawerWidth, setDrawerWidth] = usePersistentState<number>(
+    STORAGE_KEYS.DRAWER_WIDTH, DIMENSIONS.DRAWER_DEFAULT);
+  const drawerResize = useResizable({
+    width: drawerWidth,
+    setWidth: setDrawerWidth,
+    min: DIMENSIONS.DRAWER_MIN,
+    max: DIMENSIONS.DRAWER_MAX,
+    direction: "right",
+  });
 
   const prevSubagentIdsRef = useRef<Record<string, Set<string>>>({});
   const [isMobile, setIsMobile] = useState(false);
@@ -147,28 +170,6 @@ export default function Layout({ ws, onContextMenu, contextMenuOpen }: LayoutPro
     ));
   };
 
-  const handleResizePointerDown = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
-    e.preventDefault();
-    setResizingPanel(true);
-    const startX = e.clientX;
-    const startWidth = subagentPanelWidthRef.current;
-
-    const handleMove = (ev: PointerEvent) => {
-      const delta = startX - ev.clientX;
-      const newWidth = Math.max(DIMENSIONS.SUBAGENT_PANEL_MIN, Math.min(DIMENSIONS.SUBAGENT_PANEL_MAX, startWidth + delta));
-      setSubagentPanelWidth(newWidth);
-    };
-
-    const handleUp = () => {
-      setResizingPanel(false);
-      window.removeEventListener("pointermove", handleMove);
-      window.removeEventListener("pointerup", handleUp);
-    };
-
-    window.addEventListener("pointermove", handleMove);
-    window.addEventListener("pointerup", handleUp);
-  }, []);
-
   const currentSessionArchived = ws.sessions.find((s) => s.id === ws.sessionId)?.status === "archived";
   // 空态判定与 ChatArea.isEmpty 一致：无 user/assistant 消息且无流式且无等待
   // （chatEmpty 时进度条不渲染，见 InputBar）
@@ -209,6 +210,9 @@ export default function Layout({ ws, onContextMenu, contextMenuOpen }: LayoutPro
         expandedClusters={ws.expandedClusters}
         toggleCluster={ws.toggleCluster}
         isReady={ws.isReady}
+        width={sidebarWidth}
+        isResizing={sidebarResize.isResizing}
+        onResizePointerDown={sidebarResize.onPointerDown}
       />
 
       {isMobile && !sidebarCollapsed && (
@@ -357,12 +361,15 @@ export default function Layout({ ws, onContextMenu, contextMenuOpen }: LayoutPro
         cronTasks={ws.cronTasks}
         setCronTasks={ws.setCronTasks}
         dynamicEndpoints={ws.dynamicEndpoints}
+        width={drawerWidth}
+        isResizing={drawerResize.isResizing}
+        onResizePointerDown={drawerResize.onPointerDown}
       />
 
       {subagentPanelOpen && (
         <div
-          className={`subagent-panel-resize-handle ${resizingPanel ? "dragging" : ""}`}
-          onPointerDown={handleResizePointerDown}
+          className={`subagent-panel-resize-handle ${subagentResize.isResizing ? "dragging" : ""}`}
+          onPointerDown={subagentResize.onPointerDown}
           data-tooltip="拖拽调整子会话面板宽度"
         />
       )}

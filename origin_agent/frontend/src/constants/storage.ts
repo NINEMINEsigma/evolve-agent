@@ -3,6 +3,8 @@ export const STORAGE_KEYS = {
   SESSION_ID:          "evolve_session_id",
   BUILD_HASH:          "evolve_build_hash",
   SUBAGENT_PANEL_WIDTH: "evolve_subagent_panel_width",
+  SIDEBAR_WIDTH:              "evolve_sidebar_width",
+  DRAWER_WIDTH:               "evolve_drawer_width",
 
   // 全局 UI 偏好
   SIDEBAR_COLLAPSED:           "evolve_sidebar_collapsed",
