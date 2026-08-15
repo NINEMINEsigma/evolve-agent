@@ -1,4 +1,4 @@
-import type { ChatMessage, ContentBlock, DownloadInfo, PendingImage, PlaylistEntry, SubagentSession } from "./types";
+import type { ChatMessage, ContentBlock, DownloadInfo, PendingImage, PendingAudio, SubagentSession } from "./types";
 import { WS_IN } from "./constants/ws";
 
 export function formatTimeSec(sec: number): string {
@@ -21,20 +21,15 @@ export interface ParsedToolResult {
   content?: string;
   imageMarkdown?: string;
   downloadInfo?: DownloadInfo;
-  audioUrl?: string;
-  audioAutoplay?: boolean;
-  playlist?: PlaylistEntry[];
-  playlistAutoplay?: boolean;
   isError?: boolean;
 }
 
 export interface MessageResources {
   images: Array<{ id: string; src: string; alt: string }>;
-  audios: Array<{ id: string; url: string; autoplay?: boolean }>;
   downloads: Array<{ id: string; url: string; filename: string; size?: number }>;
 }
 
-export function parseToolResult(raw: string, toolName?: string): ParsedToolResult {
+export function parseToolResult(raw: string, _toolName?: string): ParsedToolResult {
   try {
     const parsed = JSON.parse(raw);
     const isError = !!parsed.error;
@@ -49,14 +44,6 @@ export function parseToolResult(raw: string, toolName?: string): ParsedToolResul
         description: parsed.description,
         size: parsed.size,
       };
-    }
-    if (parsed.audio_url) {
-      result.audioUrl = parsed.audio_url;
-      result.audioAutoplay = toolName ? parsed.autoplay === true : false;
-    }
-    if (parsed.playlist) {
-      result.playlist = parsed.playlist;
-      result.playlistAutoplay = toolName ? parsed.autoplay === true : false;
     }
 
     // 移除所有下划线开头的字段（_meta, _image, _note, _parse_failed 等）
@@ -78,14 +65,11 @@ export interface MessageResourceSource {
   role: string;
   content: string | unknown;
   imageMarkdown?: string;
-  audioUrl?: string;
-  audioAutoplay?: boolean;
   downloadInfo?: DownloadInfo;
 }
 
 export function extractMessageResources(messages: MessageResourceSource[]): MessageResources {
   const images: MessageResources["images"] = [];
-  const audios: MessageResources["audios"] = [];
   const downloads: MessageResources["downloads"] = [];
   const seen = new Set<string>();
 
@@ -99,11 +83,6 @@ export function extractMessageResources(messages: MessageResourceSource[]): Mess
           images.push({ id: `${m.id}-img`, src, alt: match[1] || "" });
         }
       }
-    }
-
-    if (m.audioUrl && !seen.has(m.audioUrl)) {
-      seen.add(m.audioUrl);
-      audios.push({ id: `${m.id}-audio`, url: m.audioUrl, autoplay: m.audioAutoplay });
     }
 
     if (m.downloadInfo && !seen.has(m.downloadInfo.url)) {
@@ -128,7 +107,7 @@ export function extractMessageResources(messages: MessageResourceSource[]): Mess
     }
   });
 
-  return { images, audios, downloads };
+  return { images, downloads };
 }
 
 export function subagentFeedbackToChatMessages(session: SubagentSession): ChatMessage[] {
@@ -252,9 +231,10 @@ export function escapeHtml(text: string): string {
 
 // ── 多模态内容转换工具 ──────────────────────────────────────
 
-/** 将 ContentBlock[] 转换为 RichInput 可用的 HTML，含内联图片 span。 */
-export function contentBlocksToHtml(blocks: ContentBlock[], images: PendingImage[]): string {
+/** 将 ContentBlock[] 转换为 RichInput 可用的 HTML，含内联图片/音频 span。 */
+export function contentBlocksToHtml(blocks: ContentBlock[], images: PendingImage[], audios: PendingAudio[]): string {
   const imageMap = new Map(images.map((img) => [img.id, img]));
+  const audioMap = new Map(audios.map((au) => [au.id, au]));
   let html = "";
   for (const block of blocks) {
     if (block.type === "text") {
@@ -264,29 +244,58 @@ export function contentBlocksToHtml(blocks: ContentBlock[], images: PendingImage
       const entry = Array.from(imageMap.entries()).find(([, img]) => img.dataUrl === block.image_url.url);
       const id = entry ? entry[0] : generateUUID();
       html += `<span class="input-inline-image" contenteditable="false" data-image-id="${id}"><img src="${block.image_url.url}" alt="" /><button type="button" class="input-inline-remove">x</button></span>`;
+    } else if (block.type === "input_audio") {
+      // 兼容两种 data：裸 base64（前端提取）或 data URL（后端 as_object 输出）
+      const dataUrl = block.input_audio.data.startsWith("data:")
+        ? block.input_audio.data
+        : `data:audio/${block.input_audio.format};base64,${block.input_audio.data}`;
+      const entry = Array.from(audioMap.entries()).find(([, au]) => au.dataUrl === dataUrl);
+      const id = entry ? entry[0] : generateUUID();
+      html += `<span class="input-inline-audio" contenteditable="false" data-audio-id="${id}" data-audio-src="${dataUrl}"><audio src="${dataUrl}" controls></audio><button type="button" class="input-inline-remove">x</button></span>`;
     }
   }
   return html;
 }
 
 /** 从 RichInput 的 DOM 中按遍历顺序提取 ContentBlock[]。 */
-export function extractContentBlocks(el: HTMLDivElement | null, images: PendingImage[]): ContentBlock[] {
+export function extractContentBlocks(el: HTMLDivElement | null, images: PendingImage[], audios: PendingAudio[]): ContentBlock[] {
   if (!el) return [];
   const blocks: ContentBlock[] = [];
   const imageMap = new Map(images.map((img) => [img.id, img]));
+  const audioMap = new Map(audios.map((au) => [au.id, au]));
 
   const imageNodes = el.querySelectorAll<HTMLSpanElement>(".input-inline-image");
-  if (imageNodes.length === 0) {
+  const audioNodes = el.querySelectorAll<HTMLSpanElement>(".input-inline-audio");
+  if (imageNodes.length === 0 && audioNodes.length === 0) {
     const text = (el.innerText || "").replace(/\u200B/g, "").replace(/\n{3,}/g, "\n\n").trim();
     if (text) blocks.push({ type: "text", text });
     return blocks;
   }
 
-  const imagePositions = new Map<Node, PendingImage>();
+  const mediaPositions = new Map<Node, { type: "image" | "audio"; data: PendingImage | PendingAudio }>();
   imageNodes.forEach((node) => {
     const id = node.dataset.imageId;
     const img = id ? imageMap.get(id) : undefined;
-    if (img) imagePositions.set(node, img);
+    if (img) mediaPositions.set(node, { type: "image", data: img });
+  });
+  audioNodes.forEach((node) => {
+    const id = node.dataset.audioId;
+    const au = id ? audioMap.get(id) : undefined;
+    if (au) {
+      mediaPositions.set(node, { type: "audio", data: au });
+    } else {
+      // Fallback: 从 DOM 中的 <audio> src 属性直接提取，不依赖 pendingAudios state
+      const audioEl = node.querySelector("audio");
+      const dataUrl = audioEl?.src || "";
+      if (dataUrl.startsWith("data:audio/")) {
+        const formatMatch = dataUrl.match(/^data:audio\/([^;]+);base64,/);
+        const format = formatMatch ? (formatMatch[1] === "mpeg" ? "mp3" : formatMatch[1]) : "wav";
+        mediaPositions.set(node, {
+          type: "audio",
+          data: { id: id || generateUUID(), file: new File([], ""), dataUrl, format } as PendingAudio,
+        });
+      }
+    }
   });
 
   let currentText = "";
@@ -307,9 +316,25 @@ export function extractContentBlocks(el: HTMLDivElement | null, images: PendingI
         currentText += el.textContent || "";
         return;
       }
-      if (imagePositions.has(el)) {
+      // 直接从 DOM 提取音频，不依赖 mediaPositions map 或 data 属性
+      if (el.classList?.contains("input-inline-audio")) {
         flushText();
-        blocks.push({ type: "image_url", image_url: { url: imagePositions.get(el)!.dataUrl } });
+        const audioEl = el.querySelector("audio");
+        const src = audioEl?.getAttribute("src") || "";
+        const match = src.match(/^data:audio\/([^;]+);base64,(.+)$/);
+        if (match) {
+          const mimeFmt = match[1];
+          const format = mimeFmt === "mpeg" ? "mp3" : mimeFmt;
+          blocks.push({ type: "input_audio", input_audio: { data: match[2], format } });
+        }
+        return;
+      }
+      if (mediaPositions.has(el)) {
+        flushText();
+        const media = mediaPositions.get(el)!;
+        if (media.type === "image") {
+          blocks.push({ type: "image_url", image_url: { url: (media.data as PendingImage).dataUrl } });
+        }
         return;
       }
       for (const child of Array.from(el.childNodes)) {

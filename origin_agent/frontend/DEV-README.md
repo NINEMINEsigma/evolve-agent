@@ -180,7 +180,6 @@ frontend/
 | `sidebar.css` | 侧边栏 |
 | `header.css` | 顶部栏 |
 | `lightbox.css` | 图片灯箱 |
-| `playlist.css` | 播放列表 |
 | `context-menu.css` | 右键菜单 |
 | `tooltip.css` | 工具提示 |
 | `agentspace.css` | Agentspace 文件浏览器 |

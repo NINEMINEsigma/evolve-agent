@@ -18,4 +18,5 @@ export const DIMENSIONS = {
   LONG_MESSAGE_CHARS:     1200,  // 长消息字符阈值
   LONG_MESSAGE_LINES:     18,    // 长消息行数阈值
   MAX_PASTE_IMAGE_SIZE:   20 * 1024 * 1024, // 20MB
+  MAX_PASTE_AUDIO_SIZE:   25 * 1024 * 1024, // 25MB
 } as const;

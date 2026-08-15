@@ -174,7 +174,7 @@ def _content_to_text(content: str | list | None) -> str:
             elif isinstance(block, VideoBlock):
                 parts.append(_safe_media_ref("video", block.video_url))
             elif isinstance(block, AudioBlock):
-                parts.append(_safe_media_ref("audio", block.audio_url))
+                parts.append(f"[audio: {block.format}]")
             else:
                 parts.append(str(block))
         return "\n".join(parts)

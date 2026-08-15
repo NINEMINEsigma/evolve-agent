@@ -2,7 +2,7 @@ from typing import * # type: ignore
 import logging
 from pydantic import BaseModel, Field, PrivateAttr
 from entity.puretype import Role, MessageContent
-from entity.constant import USER_CHARACTER_NAME, ALL_AGENTS_CHARACTER_REF_NAME
+from entity.constant import USER_CHARACTER_NAME, ALL_AGENTS_CHARACTER_REF_NAME, AUDIO_FORMAT_MIME_SUBTYPE
 from system.templates import read_template
 from threading import Lock
 
@@ -46,12 +46,18 @@ class VideoBlock(MessageBlock):
 
 
 class AudioBlock(MessageBlock):
-    audio_url: str = Field(..., description="The url of the audio")
+    data: str = Field(..., description="Base64-encoded audio data (no data URL prefix)")
+    format: str = Field(..., description="Audio format suffix: wav, mp3")
+
     def as_object(self) -> dict:
+        # NOTE: dashscope/qwen-omni 与小米 mimo 兼容接口要求 data 为完整 data URL；
+        # MIME 子类型必须用标准类型（audio/mpeg），非标准的 audio/mp3 会被部分 provider 静默拒绝
+        subtype = AUDIO_FORMAT_MIME_SUBTYPE.get(self.format, self.format)
         return {
-            "type": "audio_url",
-            "audio_url": {
-                "url": self.audio_url
+            "type": "input_audio",
+            "input_audio": {
+                "data": f"data:audio/{subtype};base64,{self.data}",
+                "format": self.format,
             }
         }
 

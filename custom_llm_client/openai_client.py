@@ -135,6 +135,7 @@ class OpenAILLMClient(BaseLLMClient):
             messages, current_character_agent=character,
             last_user_message=last_user_message,
         )
+        # _log_multimodal_content(messages_dict)
         kwargs = self._build_kwargs(
             messages_dict, tools, stream=False,
             response_format=response_format,
@@ -200,6 +201,7 @@ class OpenAILLMClient(BaseLLMClient):
             messages, current_character_agent=character,
             last_user_message=last_user_message,
         )
+        # _log_multimodal_content(messages_dict)
         original_messages: list[dict[str, Any]] = list(messages_dict)
         state: dict[str, Any] = {
             "content": "",
@@ -486,6 +488,37 @@ def _build_resume_messages(
 # ---------------------------------------------------------------------------
 # 内部辅助函数
 # ---------------------------------------------------------------------------
+
+
+def _log_multimodal_content(messages: list[dict[str, Any]]) -> None:
+    """诊断日志：打印每条消息 content 的 block 类型，确认 multimodal block 是否被正确传递。"""
+    for i, m in enumerate(messages):
+        c = m.get("content")
+        if isinstance(c, str):
+            continue
+        if isinstance(c, list):
+            types: list[str] = []
+            audio_info: list[str] = []
+            for b in c:
+                if isinstance(b, dict):
+                    bt = b.get("type", "?")
+                    types.append(bt)
+                    if bt == "input_audio":
+                        ia = b.get("input_audio", {})
+                        if isinstance(ia, dict):
+                            audio_info.append(
+                                f"format={ia.get('format', '?')} data_len={len(str(ia.get('data', '')))}"
+                            )
+            if types:
+                logger.info(
+                    "LLM request msg[%d] role=%s content_types=%s audio=%s",
+                    i, m.get("role", "?"), types, audio_info,
+                )
+        else:
+            logger.info(
+                "LLM request msg[%d] role=%s content_type=%s",
+                i, m.get("role", "?"), type(c).__name__,
+            )
 
 
 def _extract_content(obj: Any) -> str:

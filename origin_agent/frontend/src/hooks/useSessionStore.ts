@@ -5,7 +5,6 @@ import {
   ConfirmRequest,
   AskRequest,
   DownloadInfo,
-  PlaylistEntry,
   TaskProgress,
   ClipboardDisplay,
   DynamicEndpoint,
@@ -30,10 +29,6 @@ export type AddMessageFn = (
   content: MessageContent,
   imageMarkdown?: string,
   downloadInfo?: DownloadInfo,
-  audioUrl?: string,
-  audioAutoplay?: boolean,
-  playlist?: PlaylistEntry[],
-  playlistAutoplay?: boolean,
   messageIndex?: number
 ) => void;
 
@@ -375,15 +370,11 @@ export function useSessionStore(callbacks: SessionStoreCallbacks = {}): SessionS
     content: MessageContent,
     imageMarkdown?: string,
     downloadInfo?: DownloadInfo,
-    audioUrl?: string,
-    audioAutoplay?: boolean,
-    playlist?: PlaylistEntry[],
-    playlistAutoplay?: boolean,
     messageIndex?: number
   ) => {
     const id = generateUUID();
     setMessages((prev) => [...prev, {
-      role, content, id, imageMarkdown, downloadInfo, audioUrl, audioAutoplay, playlist, playlistAutoplay, messageIndex
+      role, content, id, imageMarkdown, downloadInfo, messageIndex
     }]);
   }, []);
 
@@ -494,14 +485,6 @@ export function useSessionStore(callbacks: SessionStoreCallbacks = {}): SessionS
               const parsed = parseToolResult(m.content);
               if (parsed.imageMarkdown) entry.imageMarkdown = parsed.imageMarkdown;
               if (parsed.downloadInfo) entry.downloadInfo = parsed.downloadInfo;
-              if (parsed.audioUrl) {
-                entry.audioUrl = parsed.audioUrl;
-                entry.audioAutoplay = parsed.audioAutoplay;
-              }
-              if (parsed.playlist) {
-                entry.playlist = parsed.playlist;
-                entry.playlistAutoplay = parsed.playlistAutoplay;
-              }
               if (parsed.content !== undefined) entry.content = parsed.content;
               if (parsed.isError) entry.isError = parsed.isError;
             }
@@ -727,10 +710,6 @@ export function useSessionStore(callbacks: SessionStoreCallbacks = {}): SessionS
         toolName: msg.tool,
         imageMarkdown: parsed.imageMarkdown,
         downloadInfo: parsed.downloadInfo,
-        audioUrl: parsed.audioUrl,
-        audioAutoplay: parsed.audioAutoplay ?? false,
-        playlist: parsed.playlist,
-        playlistAutoplay: parsed.playlistAutoplay ?? false,
         messageIndex: nextMessageIndex(prev),
         toolCallMeta: msg.tool_call_meta as import("../types").ToolCallMeta | undefined,
         isError: parsed.isError,

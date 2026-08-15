@@ -56,7 +56,7 @@ component/
 | `clipboard_display_tools.py` | `update_clipboard_display`, `clear_clipboard_display` | 剪贴板展示 |
 | `list_tools.py` | `list_tools` | 列出工具 |
 | `list_uploads.py` | `list_uploads` | 列出上传文件 |
-| `probe_vision.py` | `probe_vision` | 探测模型视觉能力 |
+| `modality_capability.py` | `probe_modality_capability` | 探测模型多模态能力（vision/audio） |
 | `compress_history.py` | `compress_history` | 会话历史压缩 |
 | `session_search.py` | `session_search` | 会话内容搜索 |
 | `show_api_key_tool.py` | `show_api_key` | 显示当前 API 密钥 |

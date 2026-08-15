@@ -1,5 +1,4 @@
 import { ChatMessage } from "../types";
-import PlaylistPlayer from "./PlaylistPlayer";
 
 interface MessageAttachmentsProps {
   message: ChatMessage;
@@ -21,16 +20,6 @@ export default function MessageAttachments({ message, onImageClick }: MessageAtt
           </a>
         ) : null;
       })()}
-      {m.audioUrl && (
-        <div className="tool-audio">
-          <audio controls={true} autoPlay={m.audioAutoplay} src={m.audioUrl} className="tool-audio-player">
-            您的浏览器不支持音频播放
-          </audio>
-        </div>
-      )}
-      {m.playlist && m.playlist.length > 0 && (
-        <PlaylistPlayer playlist={m.playlist} autoplay={m.playlistAutoplay ?? true} />
-      )}
       {m.downloadInfo && (
         <div className="tool-download">
           <a href={m.downloadInfo.url} className="download-btn" download={m.downloadInfo.filename}>

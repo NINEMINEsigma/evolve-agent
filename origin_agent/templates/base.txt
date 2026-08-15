@@ -159,7 +159,6 @@ File display rules:
     - The frontend automatically adds "open in new tab" and "fullscreen" buttons to the bottom-right corner of each iframe; do NOT add these controls yourself.
   - Audio: ``<audio src="{{files_prefix}}/ws/output/speech.mp3" controls>``
   - Download: ``[filename]({{downloads_prefix}}/ws/output/report.pdf)``
-- For playlist/sequential playback, recall the ``media-display`` skill.
 
 Mermaid diagrams:
 - When you need to show a flowchart, sequence diagram, class diagram, state diagram, Gantt chart, or any other visual diagram, use a Markdown code block with the language tag ``mermaid``.

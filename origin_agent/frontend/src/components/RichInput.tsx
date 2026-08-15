@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useImperativeHandle, useRef, useState, type ClipboardEvent, type KeyboardEvent } from "react";
-import type { PendingImage } from "../hooks/useWebSocket";
+import type { PendingImage, PendingAudio } from "../hooks/useWebSocket";
 import MentionMenu, { type MentionItem } from "./MentionMenu";
 import { DIMENSIONS } from "../constants/dimensions";
 import { TIMING } from "../constants/timing";
@@ -11,6 +11,9 @@ interface RichInputProps {
   onPasteImage: (file: File) => Promise<{ id: string; dataUrl: string } | null>;
   onRemoveImage: (id: string) => void;
   pendingImages: PendingImage[];
+  onPasteAudio: (file: File) => Promise<{ id: string; dataUrl: string } | null>;
+  onRemoveAudio: (id: string) => void;
+  pendingAudios: PendingAudio[];
   disabled?: boolean;
   placeholder?: string;
 }
@@ -107,6 +110,9 @@ const RichInput = React.forwardRef<HTMLDivElement, RichInputProps>(function Rich
   onPasteImage,
   onRemoveImage,
   pendingImages,
+  onPasteAudio,
+  onRemoveAudio,
+  pendingAudios,
   disabled,
   placeholder,
 }, ref) {
@@ -147,6 +153,18 @@ const RichInput = React.forwardRef<HTMLDivElement, RichInputProps>(function Rich
     });
     setIsEmpty(!el.innerText?.trim() && !el.querySelector(".input-inline-image"));
   }, [pendingImages]);
+
+  useEffect(() => {
+    const el = divRef.current;
+    if (!el) return;
+    const audioIds = new Set(pendingAudios.map((au) => au.id));
+    el.querySelectorAll<HTMLSpanElement>(".input-inline-audio").forEach((node) => {
+      if (!audioIds.has(node.dataset.audioId || "")) {
+        node.remove();
+      }
+    });
+    setIsEmpty(!el.innerText?.trim() && !el.querySelector(".input-inline-image") && !el.querySelector(".input-inline-audio"));
+  }, [pendingAudios]);
 
   const notifyChange = () => {
     const el = divRef.current;
@@ -375,18 +393,27 @@ const RichInput = React.forwardRef<HTMLDivElement, RichInputProps>(function Rich
     const target = e.target as HTMLElement;
     const removeBtn = target.closest(".input-inline-remove") as HTMLButtonElement | null;
     if (removeBtn) {
-      const wrapper = removeBtn.closest(".input-inline-image") as HTMLSpanElement | null;
-      if (wrapper) {
-        const id = wrapper.dataset.imageId;
+      const imgWrapper = removeBtn.closest(".input-inline-image") as HTMLSpanElement | null;
+      if (imgWrapper) {
+        const id = imgWrapper.dataset.imageId;
         if (id) onRemoveImage(id);
-        wrapper.remove();
+        imgWrapper.remove();
         e.preventDefault();
         notifyChange();
         autoResize();
+        return;
       }
-      return;
+      const audioWrapper = removeBtn.closest(".input-inline-audio") as HTMLSpanElement | null;
+      if (audioWrapper) {
+        const id = audioWrapper.dataset.audioId;
+        if (id) onRemoveAudio(id);
+        audioWrapper.remove();
+        e.preventDefault();
+        notifyChange();
+        autoResize();
+        return;
+      }
     }
-    // 点击 chip 外部关闭菜单
     if (!target.closest(".mention-menu")) {
       // onBlur 会处理
     }
@@ -429,8 +456,9 @@ const RichInput = React.forwardRef<HTMLDivElement, RichInputProps>(function Rich
   const handlePaste = async (e: ClipboardEvent<HTMLDivElement>) => {
     const items = e.clipboardData?.files;
     const imageFiles = items ? Array.from(items).filter((f) => f.type.startsWith("image/")) : [];
+    const audioFiles = items ? Array.from(items).filter((f) => f.type.startsWith("audio/")) : [];
 
-    if (imageFiles.length > 0) {
+    if (imageFiles.length > 0 || audioFiles.length > 0) {
       e.preventDefault();
       for (const file of imageFiles) {
         const result = await onPasteImage(file);
@@ -443,6 +471,24 @@ const RichInput = React.forwardRef<HTMLDivElement, RichInputProps>(function Rich
         wrapper.innerHTML = `<img src="${dataUrl}" alt="" /><button type="button" class="input-inline-remove">×</button>`;
         wrapper.querySelector(".input-inline-remove")?.addEventListener("click", () => {
           onRemoveImage(id);
+          wrapper.remove();
+          notifyChange();
+          autoResize();
+        });
+        insertNodeAtCursor(wrapper);
+      }
+      for (const file of audioFiles) {
+        const result = await onPasteAudio(file);
+        if (!result) continue;
+        const { id, dataUrl } = result;
+        const wrapper = document.createElement("span");
+        wrapper.className = "input-inline-audio";
+        wrapper.contentEditable = "false";
+        wrapper.dataset.audioId = id;
+        wrapper.dataset.audioSrc = dataUrl;
+        wrapper.innerHTML = `<audio src="${dataUrl}" controls></audio><button type="button" class="input-inline-remove">x</button>`;
+        wrapper.querySelector(".input-inline-remove")?.addEventListener("click", () => {
+          onRemoveAudio(id);
           wrapper.remove();
           notifyChange();
           autoResize();

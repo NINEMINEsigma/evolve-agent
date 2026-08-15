@@ -10,7 +10,6 @@ import "./styles/sidebar.css";
 import "./styles/header.css";
 import "./styles/chat.css";
 import "./styles/messages.css";
-import "./styles/playlist.css";
 import "./styles/lightbox.css";
 import "./styles/modal.css";
 import "./styles/dialogs.css";

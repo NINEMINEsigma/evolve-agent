@@ -23,7 +23,12 @@ export interface ImageContentBlock {
   image_url: { url: string };
 }
 
-export type ContentBlock = TextContentBlock | ImageContentBlock;
+export interface AudioContentBlock {
+  type: "input_audio";
+  input_audio: { data: string; format: string };
+}
+
+export type ContentBlock = TextContentBlock | ImageContentBlock | AudioContentBlock;
 export type MessageContent = string | ContentBlock[];
 
 export type MessageType =
@@ -108,15 +113,6 @@ export interface DownloadInfo {
   size?: number;
 }
 
-export interface PlaylistEntry {
-  audio_url: string;
-  mime: string;
-  size: number;
-  title: string;
-  path?: string | null;
-  url?: string | null;
-}
-
 export interface TaskProgress {
   task_id: string;
   label: string;
@@ -165,10 +161,6 @@ export interface ChatMessage {
   toolArgs?: Record<string, unknown>;
   imageMarkdown?: string;
   downloadInfo?: DownloadInfo;
-  audioUrl?: string;
-  audioAutoplay?: boolean;
-  playlist?: PlaylistEntry[];
-  playlistAutoplay?: boolean;
   reasoningContent?: string;
   reasoningDuration?: number;
   characterName?: string;
@@ -245,4 +237,11 @@ export interface PendingImage {
   id: string;
   file: File;
   dataUrl: string;
+}
+
+export interface PendingAudio {
+  id: string;
+  file: File;
+  dataUrl: string;
+  format: string;
 }

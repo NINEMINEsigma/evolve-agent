@@ -36,6 +36,7 @@ from entity.messages import (
     BaseMessage,
     CharacterConversationMessage,
     FunctionCall,
+    AudioBlock,
     ImageBlock,
     TextBlock,
     MessageBlock,
@@ -52,7 +53,9 @@ from entry.agent_support.multimodal import (
     blocks_from_dicts,
     content_to_text,
     is_content_block_error,
+    is_audio_block_error,
     strip_image_blocks,
+    strip_audio_blocks,
     summarize_message_for_log,
 )
 from entry.session_manager import LoopSessionManager
@@ -306,12 +309,13 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
                         last_user_message=self._history.last_user_message,
                     )
                 except Exception as llm_exc:
-                    if is_content_block_error(llm_exc):
+                    if is_content_block_error(llm_exc) or is_audio_block_error(llm_exc):
                         stripped: int = strip_image_blocks(messages, sid)
+                        stripped += strip_audio_blocks(messages, sid)
                         if stripped > 0:
                             logger.warning(
-                                "LLM rejected image content blocks — retrying with text-only "
-                                "(stripped %d image(s) from session=%s)",
+                                "LLM rejected multimodal content blocks — retrying with text-only "
+                                "(stripped %d block(s) from session=%s)",
                                 stripped, sid,
                             )
                             continue
@@ -681,6 +685,8 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
                     parts.append(block.text)
                 elif isinstance(block, ImageBlock):
                     parts.append("[image_url]")
+                elif isinstance(block, AudioBlock):
+                    parts.append("[input_audio]")
                 elif isinstance(block, dict) and block.get("type") == "text":
                     parts.append(str(block.get("text", "")))
             return "\n".join(parts)

@@ -1,7 +1,7 @@
 """多模态消息工具 — 供 AgentLoop 使用。
 
-包含 content block 拒绝检测、图片剥离、vision 缓存查询、
-_image payload 构造与脱敏，以及 tool result 到 content 的统一转换。
+包含 content block 拒绝检测、图片/音频剥离、vision/audio 缓存查询、
+_image/_audio payload 构造，以及 tool result 到 content 的统一转换。
 """
 
 from __future__ import annotations
@@ -10,7 +10,7 @@ import json
 import logging
 from typing import Any
 
-from entity.messages import BaseMessage, ImageBlock, MessageBlock, TextBlock
+from entity.messages import AudioBlock, BaseMessage, ImageBlock, MessageBlock, TextBlock
 from entity.puretype import MessageContent
 
 logger = logging.getLogger(__name__)
@@ -23,19 +23,43 @@ def is_content_block_error(exc: Exception) -> bool:
     if isinstance(exc, _openai.BadRequestError):
         keywords: list[str] = [
             "image_url",
+            "input_audio",
             "content type",
             "content block",
             "unsupported",
             "invalid content",
             "multimodal",
             "vision",
+            "audio",
         ]
         return any(k in msg for k in keywords)
     if isinstance(exc, _openai.APIStatusError):
         if exc.status_code != 400:
             return False
-        keywords400: list[str] = ["image", "content", "unsupported"]
+        keywords400: list[str] = ["image", "audio", "content", "unsupported"]
         return any(k in msg for k in keywords400)
+    return False
+
+
+def is_audio_block_error(exc: Exception) -> bool:
+    """检测异常是否由 unsupported audio content blocks 引起。"""
+    import openai as _openai
+    msg: str = str(exc).lower()
+    if isinstance(exc, _openai.BadRequestError):
+        keywords: list[str] = [
+            "input_audio",
+            "audio",
+            "content type",
+            "content block",
+            "unsupported",
+            "invalid content",
+            "multimodal",
+        ]
+        return any(k in msg for k in keywords)
+    if isinstance(exc, _openai.APIStatusError):
+        if exc.status_code != 400:
+            return False
+        return any(k in msg for k in ["audio", "content", "unsupported"])
     return False
 
 
@@ -56,7 +80,7 @@ def strip_image_blocks(messages: list[BaseMessage], session_id: str) -> int:
                 has_image = True
                 stripped += 1
                 new_blocks.append(TextBlock(
-                    text="[Image content stripped — current model does not support vision]",
+                    text="[Image content removed — the provider rejected this image content block]",
                 ))
             else:
                 new_blocks.append(block)
@@ -70,13 +94,56 @@ def strip_image_blocks(messages: list[BaseMessage], session_id: str) -> int:
     return stripped
 
 
-def supports_vision(model: str) -> bool:
-    """根据缓存判断模型是否支持 vision。
+def strip_audio_blocks(messages: list[BaseMessage], session_id: str) -> int:
+    """移除 BaseMessage 列表中所有含 audio 的 content blocks，转为纯文本。
 
-    缓存未命中时乐观默认返回 True，避免新模型被漏掉。
+    返回被剥离的音频数量。
     """
-    from component.tools.probe_vision import get_cached_vision_support
+    stripped: int = 0
+    for msg in messages:
+        content = msg.content
+        if not isinstance(content, list):
+            continue
+        new_blocks: list[MessageBlock] = []
+        has_audio: bool = False
+        for block in content:
+            if isinstance(block, AudioBlock):
+                has_audio = True
+                stripped += 1
+                new_blocks.append(TextBlock(
+                    text="[Audio content removed — the provider rejected this audio content block]",
+                ))
+            else:
+                new_blocks.append(block)
+        if has_audio:
+            msg.content = new_blocks
+    if stripped:
+        logger.info(
+            "Stripped %d audio block(s) from messages (session=%s)",
+            stripped, session_id,
+        )
+    return stripped
+
+
+def supports_vision(model: str) -> bool:
+    """根据缓存判断 Read 工具（tool 消息）读取图片是否被当前 provider 接受。
+
+    缓存未命中时乐观默认返回 True，避免新 provider 被漏掉。
+    """
+    from component.tools.modality_capability import get_cached_vision_support
     cached = get_cached_vision_support(model)
+    if cached is not None:
+        return cached
+    return True
+
+
+def supports_audio(model: str) -> bool:
+    """根据缓存判断 Read 工具（tool 消息）读取音频是否被当前 provider 接受。
+
+    缓存未命中时乐观默认返回 True，避免新 provider 被漏掉。
+    """
+    from component.tools.modality_capability import get_cached_audio_support
+    cached = get_cached_audio_support(model)
     if cached is not None:
         return cached
     return True
@@ -94,11 +161,27 @@ def build_image_content_blocks(image: dict, text_payload: str) -> list[MessageBl
     ]
 
 
+def build_audio_content_blocks(audio: dict, text_payload: str) -> list[MessageBlock]:
+    """构造 OpenAI 格式的 input_audio + text content blocks。"""
+    b64: str = str(audio.get("base64", ""))
+    fmt: str = str(audio.get("format", audio.get("mime_type", "wav")))
+    # 如果 format 是 MIME 类型，提取后缀
+    if "/" in fmt:
+        fmt = fmt.rsplit("/", 1)[-1]
+    if not b64:
+        return [TextBlock(text=text_payload)]
+    return [
+        AudioBlock(data=b64, format=fmt),
+        TextBlock(text=text_payload),
+    ]
+
+
 def tool_result_to_content(result: Any) -> str | list[MessageBlock]:
     """把工具返回结果转换为 ToolResultMessage 可用的 content。
 
     - 字符串：原样返回。
     - 含 _image 字段的 dict：pop _image 后生成 [ImageBlock, TextBlock（元数据，不含 base64）]。
+    - 含 _audio 字段的 dict：pop _audio 后生成 [AudioBlock, TextBlock（元数据，不含 base64）]。
     - 其他 dict：json.dumps 成字符串。
     - 其他：str(result)。
     """
@@ -108,6 +191,9 @@ def tool_result_to_content(result: Any) -> str | list[MessageBlock]:
         image = result.pop("_image", None)
         if isinstance(image, dict) and image.get("base64"):
             return build_image_content_blocks(image, json.dumps(result, ensure_ascii=False))
+        audio = result.pop("_audio", None)
+        if isinstance(audio, dict) and audio.get("base64"):
+            return build_audio_content_blocks(audio, json.dumps(result, ensure_ascii=False))
         return json.dumps(result, ensure_ascii=False)
     if isinstance(result, list):
         # 如果工具已经返回 MessageBlock 列表，直接透传
@@ -150,7 +236,7 @@ def content_to_text(content: str|list[MessageBlock]|None) -> str:
     else:
         parts: list[str] = []
         for block in content:
-            # 跳过多模态块，避免输出非JSON的占位符
+            # 跳过多模态块（ImageBlock、AudioBlock 等），避免输出非JSON的占位符
             if isinstance(block, TextBlock):
                 parts.append(_strip_internal_fields(block.text))
             elif isinstance(block, dict):
@@ -199,6 +285,17 @@ def blocks_from_dicts(blocks: list[dict[str, Any]]) -> list[MessageBlock]:
                 )
             else:
                 result.append(ImageBlock(image_url=str(image_url_block or "")))
+        elif btype == "input_audio":
+            input_audio_block = block.get("input_audio")
+            if isinstance(input_audio_block, dict):
+                raw_data = str(input_audio_block.get("data", ""))
+                # 兼容 data URL 格式：剥离 `data:audio/{format};base64,` 前缀，内部统一存裸 base64
+                if raw_data.startswith("data:audio/") and ";base64," in raw_data:
+                    raw_data = raw_data.split(";base64,", 1)[1]
+                result.append(AudioBlock(
+                    data=raw_data,
+                    format=str(input_audio_block.get("format", "wav")),
+                ))
     return result
 
 

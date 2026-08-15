@@ -237,6 +237,14 @@ def _content_to_anthropic_blocks(content: Any) -> list[dict[str, Any]]:
                 image_block = _image_url_to_anthropic_image(url)
                 if image_block is not None:
                     blocks.append(image_block)
+            elif block_type == "input_audio":
+                # Anthropic 不支持音频输入，替换为文本占位符
+                input_audio = block.get("input_audio", {})
+                fmt = input_audio.get("format", "unknown") if isinstance(input_audio, dict) else "unknown"
+                blocks.append({
+                    "type": "text",
+                    "text": f"[Audio content ({fmt}) — not supported by Anthropic models]",
+                })
         return blocks
 
     return []

@@ -9,7 +9,7 @@ import DiffBlock from "./DiffBlock";
 export function contentToText(content: MessageContent): string {
   if (typeof content === "string") return content;
   return content
-    .map((block) => (block.type === "text" ? block.text : "[image_url]"))
+    .map((block) => (block.type === "text" ? block.text : block.type === "image_url" ? "[image_url]" : block.type === "input_audio" ? "[input_audio]" : ""))
     .join("\n");
 }
 
@@ -55,6 +55,16 @@ function renderBlocksContent(
               >
                 <img src={src} alt={`图片 ${idx + 1}`} className="message-img-thumb" />
               </a>
+            );
+          }
+          if (block.type === "input_audio") {
+            const dataUrl = block.input_audio.data.startsWith("data:")
+              ? block.input_audio.data
+              : `data:audio/${block.input_audio.format};base64,${block.input_audio.data}`;
+            return (
+              <div key={`${messageId}-audio-${idx}`} className="message-audio">
+                <audio controls src={dataUrl} className="message-audio-player" />
+              </div>
             );
           }
           return null;

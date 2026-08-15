@@ -1,5 +1,5 @@
 import { useState, useCallback, useRef } from "react";
-import { ChatMessage, ContentBlock, MessageContent, PendingImage } from "../types";
+import { ChatMessage, ContentBlock, MessageContent, PendingImage, PendingAudio } from "../types";
 import { generateUUID, escapeHtml, contentBlocksToHtml, extractContentBlocks } from "../utils";
 import RichInput from "./RichInput";
 import { DIMENSIONS } from "../constants/dimensions";
@@ -10,29 +10,41 @@ interface MessageEditorProps {
   onCancel: () => void;
 }
 
-// 从 ContentBlock[] 构建初始 pendingImages 和 HTML
-function initFromContent(content: MessageContent): { html: string; images: PendingImage[] } {
+const _AUDIO_MIME_TO_FORMAT: Record<string, string> = {
+  "audio/wav": "wav",
+  "audio/mpeg": "mp3",
+  "audio/mp3": "mp3",
+};
+
+// 从 ContentBlock[] 构建初始 pendingImages/pendingAudios 和 HTML
+function initFromContent(content: MessageContent): { html: string; images: PendingImage[]; audios: PendingAudio[] } {
   if (typeof content === "string") {
-    return { html: escapeHtml(content).replace(/\n/g, "<br/>"), images: [] };
+    return { html: escapeHtml(content).replace(/\n/g, "<br/>"), images: [], audios: [] };
   }
   const blocks = content as ContentBlock[];
   const images: PendingImage[] = [];
-  // 先创建 PendingImage 条目，再生成 HTML（保证 data-image-id 一致）
+  const audios: PendingAudio[] = [];
   for (const block of blocks) {
     if (block.type === "image_url") {
       const id = generateUUID();
       images.push({ id, file: new File([], ""), dataUrl: block.image_url.url });
+    } else if (block.type === "input_audio") {
+      const id = generateUUID();
+      const dataUrl = block.input_audio.data.startsWith("data:")
+        ? block.input_audio.data
+        : `data:audio/${block.input_audio.format};base64,${block.input_audio.data}`;
+      audios.push({ id, file: new File([], ""), dataUrl, format: block.input_audio.format });
     }
   }
-  const html = contentBlocksToHtml(blocks, images);
-  return { html, images };
+  const html = contentBlocksToHtml(blocks, images, audios);
+  return { html, images, audios };
 }
 
 export default function MessageEditor({ message, onSave, onCancel }: MessageEditorProps) {
-  // 懒初始化 — MessageEditor 每次编辑时都是新挂载
   const [initial] = useState(() => initFromContent(message.content));
   const [input, setInput] = useState(initial.html);
   const [pendingImages, setPendingImages] = useState<PendingImage[]>(initial.images);
+  const [pendingAudios, setPendingAudios] = useState<PendingAudio[]>(initial.audios);
   const inputRef = useRef<HTMLDivElement>(null);
 
   const addPendingImage = useCallback(async (file: File) => {
@@ -52,16 +64,33 @@ export default function MessageEditor({ message, onSave, onCancel }: MessageEdit
     setPendingImages((prev) => prev.filter((img) => img.id !== id));
   }, []);
 
+  const addPendingAudio = useCallback(async (file: File) => {
+    if (!file.type.startsWith("audio/")) return null;
+    const format = _AUDIO_MIME_TO_FORMAT[file.type];
+    if (!format) return null;
+    if (file.size > DIMENSIONS.MAX_PASTE_AUDIO_SIZE) return null;
+    const id = generateUUID();
+    const dataUrl = await new Promise<string>((resolve) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result as string);
+      reader.readAsDataURL(file);
+    });
+    setPendingAudios((prev) => [...prev, { id, file, dataUrl, format }]);
+    return { id, dataUrl };
+  }, []);
+
+  const removePendingAudio = useCallback((id: string) => {
+    setPendingAudios((prev) => prev.filter((au) => au.id !== id));
+  }, []);
+
   const handleSave = async () => {
-    const blocks = extractContentBlocks(inputRef.current, pendingImages);
-    // 降级：只有 1 个 text block 时转为 string
+    const blocks = extractContentBlocks(inputRef.current, pendingImages, pendingAudios);
     const content: MessageContent =
       blocks.length === 1 && blocks[0].type === "text"
         ? blocks[0].text
         : blocks.length === 0
           ? ""
           : blocks;
-    // 无变化检测
     const initialBlocks = extractContentBlocks(
       (() => {
         const div = document.createElement("div");
@@ -69,6 +98,7 @@ export default function MessageEditor({ message, onSave, onCancel }: MessageEdit
         return div;
       })(),
       initial.images,
+      initial.audios,
     );
     const unchanged =
       JSON.stringify(content) === JSON.stringify(
@@ -93,6 +123,9 @@ export default function MessageEditor({ message, onSave, onCancel }: MessageEdit
         onPasteImage={addPendingImage}
         onRemoveImage={removePendingImage}
         pendingImages={pendingImages}
+        onPasteAudio={addPendingAudio}
+        onRemoveAudio={removePendingAudio}
+        pendingAudios={pendingAudios}
         placeholder="编辑消息..."
       />
       <div className="message-edit-actions">

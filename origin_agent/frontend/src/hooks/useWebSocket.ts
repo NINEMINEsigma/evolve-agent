@@ -12,7 +12,7 @@ import { useSubagentManager } from "./useSubagentManager";
 import type { SessionStore } from "./useSessionStore";
 import type { UploadManager } from "./useUploadManager";
 
-export type { PendingImage } from "./useUploadManager";
+export type { PendingImage, PendingAudio } from "./useUploadManager";
 export type WebSocketState = ReturnType<typeof useWebSocket>;
 
 export function useWebSocket() {
@@ -173,7 +173,7 @@ export function useWebSocket() {
     const isArchived = s.sessions.find((sess) => sess.id === s.sessionId)?.status === "archived";
     if (!c.wsRef.current || s.waiting || c.wsRef.current.readyState !== WebSocket.OPEN || isArchived) return;
 
-    const blocks = u.extractContentBlocks(u.inputRef.current, u.pendingImages);
+    const blocks = u.extractContentBlocks(u.inputRef.current, u.pendingImages, u.pendingAudios);
     const hasContent = blocks.length > 0;
     if (!hasContent) return;
 
@@ -200,6 +200,7 @@ export function useWebSocket() {
     });
     s.setInput("");
     u.setPendingImages([]);
+    u.setPendingAudios([]);
     s.setWaiting(true);
     s.ignoreStaleRef.current = false;
     s.streamDoneRef.current = false;
@@ -431,6 +432,7 @@ export function useWebSocket() {
     generatingTitleSessions: session.generatingTitleSessions,
     generatingTagSessions: session.generatingTagSessions,
     pendingImages: upload.pendingImages,
+    pendingAudios: upload.pendingAudios,
     streamingMessage: session.streamingMessage,
     allTags: session.allTags,
     agents: session.agents,
@@ -446,6 +448,9 @@ export function useWebSocket() {
     addPendingImage: upload.addPendingImage,
     removePendingImage: upload.removePendingImage,
     handlePasteImages: upload.handlePasteImages,
+    addPendingAudio: upload.addPendingAudio,
+    removePendingAudio: upload.removePendingAudio,
+    handlePasteAudios: upload.handlePasteAudios,
     inputRef: upload.inputRef,
     newChat,
     enterColloquy,

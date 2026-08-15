@@ -33,7 +33,7 @@ export default function Drawer({
   const [cronExpanded, setCronExpanded] = usePersistentState(STORAGE_KEYS.DRAWER_CRON_EXPANDED, true);
   const [dynamicEndpointsExpanded, setDynamicEndpointsExpanded] = usePersistentState(STORAGE_KEYS.DRAWER_DYNENDPOINTS_EXPANDED, true);
 
-  const { images, audios, downloads } = extractMessageResources(messages);
+  const { images, downloads } = extractMessageResources(messages);
 
   if (!open) return null;
 
@@ -49,11 +49,11 @@ export default function Drawer({
           <div className="drawer-section">
             <div className="drawer-section-header" onClick={() => setResourcesExpanded((v) => !v)}>
               <span className={`drawer-arrow ${resourcesExpanded ? "expanded" : ""}`}>▶</span>
-              <span className="drawer-section-title">资源 ({images.length + audios.length + downloads.length})</span>
+              <span className="drawer-section-title">资源 ({images.length + downloads.length})</span>
             </div>
             {resourcesExpanded && (
               <div className="drawer-section-body">
-                {images.length === 0 && audios.length === 0 && downloads.length === 0 && (
+                {images.length === 0 && downloads.length === 0 && (
                   <div className="drawer-empty">暂无资源</div>
                 )}
                 {images.length > 0 && (
@@ -67,17 +67,6 @@ export default function Drawer({
                         </div>
                       ))}
                     </div>
-                  </div>
-                )}
-                {audios.length > 0 && (
-                  <div className="resource-group">
-                    <div className="resource-group-title">音频 ({audios.length})</div>
-                    {audios.map((a) => (
-                      <div key={a.id} className="resource-audio-card">
-                        <audio controls src={a.url} className="resource-audio-player" />
-                        <a href={a.url} download className="resource-download-link">下载</a>
-                      </div>
-                    ))}
                   </div>
                 )}
                 {downloads.length > 0 && (

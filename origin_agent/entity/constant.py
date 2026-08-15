@@ -227,8 +227,12 @@ APPROVAL_MODEL_N_CTX_DEFAULT: int = 4096
 # 远程审批 json_schema 能力缓存文件名（存放于 workspace/ 下）
 APPROVAL_JSON_SCHEMA_CACHE_FILENAME: str = "approval_json_schema_cache.json"
 
-# Vision 能力缓存文件名（存放于 workspace/ 下）
-VISION_CAPABILITY_CACHE_FILENAME: str = "vision_capability_cache.json"
+# 多模态能力缓存文件名（存放于 workspace/ 下）
+MODALITY_CAPABILITY_CACHE_FILENAME: str = "modality_capability_cache.json"
+
+# 音频格式后缀 → data URL 中的标准 MIME 子类型
+# NOTE: mp3 必须归一化为 mpeg（audio/mpeg）：部分 provider（如小米 MiMo）会静默拒绝非标准的 audio/mp3
+AUDIO_FORMAT_MIME_SUBTYPE: dict[str, str] = {"mp3": "mpeg", "wav": "wav"}
 
 # 远程审批 response_format 中 json_schema 的名称
 APPROVAL_RESPONSE_FORMAT_NAME: str = "approval_decision"
