@@ -10,6 +10,7 @@ import CronCountdown from "./CronCountdown";
 import SubagentCountdown from "./SubagentCountdown";
 import Lightbox from "./Lightbox";
 import SecretBanner from "./SecretBanner";
+import LlmProfileSettings from "./LlmProfileSettings";
 import type { WebSocketState } from "../hooks/useWebSocket";
 import { STORAGE_KEYS } from "../constants/storage";
 import { DIMENSIONS } from "../constants/dimensions";
@@ -25,6 +26,7 @@ interface LayoutProps {
 
 export default function Layout({ ws, onContextMenu, contextMenuOpen }: LayoutProps) {
   const [lightboxSrc, setLightboxSrc] = useState<string | null>(null);
+  const [llmSettingsOpen, setLlmSettingsOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = usePersistentState(STORAGE_KEYS.SIDEBAR_COLLAPSED, false);
   const [drawerOpen, setDrawerOpen] = usePersistentState(STORAGE_KEYS.DRAWER_OPEN, false);
   const [subagentPanelOpen, setSubagentPanelOpen] = usePersistentSessionState<boolean>(
@@ -237,6 +239,8 @@ export default function Layout({ ws, onContextMenu, contextMenuOpen }: LayoutPro
           collapsed={headerCollapsed}
           onToggleCollapse={() => setHeaderCollapsed((v) => !v)}
           isMobile={isMobile}
+          llmProfiles={ws.llmProfiles}
+          onOpenLlmSettings={() => setLlmSettingsOpen(true)}
         />
 
         <ClipboardPanel
@@ -374,6 +378,13 @@ export default function Layout({ ws, onContextMenu, contextMenuOpen }: LayoutPro
 
       {lightboxSrc && (
         <Lightbox src={lightboxSrc} onClose={() => setLightboxSrc(null)} />
+      )}
+
+      {llmSettingsOpen && ws.llmProfiles && (
+        <LlmProfileSettings
+          llmProfiles={ws.llmProfiles}
+          onClose={() => setLlmSettingsOpen(false)}
+        />
       )}
     </>
   );

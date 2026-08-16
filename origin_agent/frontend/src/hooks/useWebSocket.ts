@@ -9,6 +9,7 @@ import { useWebSocketConnection } from "./useWebSocketConnection";
 import { useSessionStore } from "./useSessionStore";
 import { useUploadManager } from "./useUploadManager";
 import { useSubagentManager } from "./useSubagentManager";
+import { useLlmProfiles } from "./useLlmProfiles";
 import type { SessionStore } from "./useSessionStore";
 import type { UploadManager } from "./useUploadManager";
 
@@ -61,11 +62,23 @@ export function useWebSocket() {
     sessionId: session.sessionId,
     addMessage: session.addMessage,
   });
+  const llmProfiles = useLlmProfiles({
+    llm_model: session.llmModelName,
+    llm_base_url: (session.serverInfo?.llm_base_url as string) || "",
+    llm_temperature: (session.serverInfo?.llm_temperature as number) ?? 0.7,
+    llm_max_output_tokens: (session.serverInfo?.llm_max_output_tokens as number) ?? 4096,
+    llm_reasoning_effort: (session.serverInfo?.llm_reasoning_effort as string) || "",
+    llm_client_name: (session.serverInfo?.llm_client_name as string) || "openai_client",
+    llm_max_context_tokens: session.llmMaxContextTokens,
+  });
 
   useEffect(() => { connRef.current = conn; }, [conn]);
   useEffect(() => { sessionRef.current = session; }, [session]);
   useEffect(() => { uploadRef.current = upload; }, [upload]);
   useEffect(() => { subagentRef.current = subagent; }, [subagent]);
+
+  const llmProfilesRef = useRef(llmProfiles);
+  useEffect(() => { llmProfilesRef.current = llmProfiles; }, [llmProfiles]);
 
   // ── scroll anchors ──
   const bottomRef = useRef<HTMLDivElement | null>(null);
@@ -195,6 +208,7 @@ export function useWebSocket() {
       target_sessions: targetSessions,
       client_message_id: clientMessageId,
       client_info: collectClientInfo(),
+      ...(llmProfilesRef.current.toProfilePayload() ? { llm_profile: llmProfilesRef.current.toProfilePayload() } : {}),
       ...(visible_characters ? { visible_characters } : {}),
       ...(response_characters ? { response_characters } : {}),
     });
@@ -414,8 +428,13 @@ export function useWebSocket() {
     setSecretBanner: session.setSecretBanner,
     dynamicEndpoints: session.dynamicEndpoints,
     subagentSessions,
-    llmMaxContextTokens: session.llmMaxContextTokens,
-    llmModelName: session.llmModelName,
+    llmMaxContextTokens: llmProfiles.activeProfileName === "default"
+      ? session.llmMaxContextTokens
+      : llmProfiles.activeProfile.max_context_tokens,
+    llmModelName: llmProfiles.activeProfileName === "default"
+      ? session.llmModelName
+      : llmProfiles.activeProfile.model,
+    llmProfiles,
     approvalModelName: session.approvalModelName,
     approvalModelAvailable: session.approvalModelAvailable,
     approvalModelType: session.approvalModelType,

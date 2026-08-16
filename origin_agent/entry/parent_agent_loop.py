@@ -141,6 +141,9 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
         # -- 子 Agent 编排器（由 server 层注入） --
         self.subagent_orchestrator: Any = None
 
+        # -- 活跃 LLM 配置覆盖（网页端切换） --
+        self._active_llm_profile: dict[str, Any] | None = None
+
     def get_last_idle_time(self, session_id: str) -> float | None:
         """返回指定 session 上次进入空闲的时间戳，不存在时返回 None。"""
         return self._last_idle_time.get(session_id)
@@ -193,8 +196,18 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
                 self._session_manager.rotate_session(old_sid, new_sid)
 
     def _build_system_prompt(self) -> list[str]:
+        ctx = self.app.runtime_context
+        if self._active_llm_profile:
+            ctx = ctx.model_copy(update={
+                "llm_model": self._active_llm_profile.get("model", ctx.llm_model),
+                "llm_base_url": self._active_llm_profile.get("base_url", ctx.llm_base_url),
+                "llm_max_context_tokens": self._active_llm_profile.get("max_context_tokens", ctx.llm_max_context_tokens),
+                "llm_max_output_tokens": self._active_llm_profile.get("max_output_tokens", ctx.llm_max_output_tokens),
+                "llm_reasoning_effort": self._active_llm_profile.get("reasoning_effort", ctx.llm_reasoning_effort),
+                "llm_client_name": self._active_llm_profile.get("llm_client_name", ctx.llm_client_name),
+            })
         return build_agent_system_prompt(
-            self.app.runtime_context,
+            ctx,
             self._collect_skill_prompts(),
         )
 
@@ -258,6 +271,11 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
         self._cancel_event.clear()
         self._processing = True
         self._event_loop = asyncio.get_running_loop()
+
+        # 网页端 LLM 配置切换（在加锁前完成，确保后续工具循环用新客户端）
+        llm_profile: dict | None = kwargs.pop("llm_profile", None)
+        if llm_profile:
+            self.switch_llm_profile(llm_profile)
 
         logger.info(
             "Received user message | session=%s content=%s",
@@ -602,6 +620,38 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
     def llm(self) -> BaseLLMClient:
         """返回当前 loop 的 LLM 客户端。"""
         return self._llm
+
+    @property
+    def active_max_context_tokens(self) -> int:
+        """返回活跃配置的上下文窗口大小，未切换时使用启动配置。"""
+        if self._active_llm_profile:
+            return self._active_llm_profile.get(
+                "max_context_tokens", self.app.runtime_context.llm_max_context_tokens,
+            )
+        return self.app.runtime_context.llm_max_context_tokens
+
+    @property
+    def active_max_output_tokens(self) -> int:
+        """返回活跃配置的最大输出 token 数，未切换时使用启动配置。"""
+        if self._active_llm_profile:
+            return self._active_llm_profile.get(
+                "max_output_tokens", self.app.runtime_context.llm_max_output_tokens,
+            )
+        return self.app.runtime_context.llm_max_output_tokens
+
+    def switch_llm_profile(self, profile: dict[str, Any]) -> None:
+        """切换 LLM 客户端到指定配置，同步更新所有引用方。"""
+        client_name = profile.get(
+            "llm_client_name", self.app.runtime_context.llm_client_name,
+        )
+        self._llm = create_llm_client(client_name, self.app.runtime_context, profile)
+        self._tool_executor.llm = self._llm
+        self._stream_consumer.llm = self._llm
+        self._active_llm_profile = profile
+        logger.info(
+            "LLM profile switched | session=%s client=%s model=%s",
+            self.session_id, client_name, profile.get("model", "?"),
+        )
 
     @property
     def last_prompt_tokens(self) -> int:

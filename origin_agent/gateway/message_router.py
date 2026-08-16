@@ -565,6 +565,7 @@ class MessageRouter:
                 skip_append=True,
                 visible_characters=msg.visible_characters,
                 response_characters=msg.response_characters,
+                llm_profile=msg.llm_profile,
             )
         except Exception as exc:
             logger.exception("Agent loop error for session=%s", self.sid)

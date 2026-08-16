@@ -1462,6 +1462,13 @@ async def skills_list():
         return {"skills": [], "total": 0, "error": str(exc)}
 
 
+@app.get("/api/llm/clients")
+async def list_llm_clients_endpoint():
+    """返回可用的 LLM 客户端实现列表。"""
+    from abstract.llm.loader import list_llm_clients
+    return {"clients": list_llm_clients()}
+
+
 @app.get("/{full_path:path}")
 async def spa_fallback(full_path: str):
     """SPA 客户端路由的兜底处理。
@@ -1608,6 +1615,11 @@ async def ws_chat(ws: WebSocket) -> None:
                             "server_info": {
                                 "llm_max_context_tokens": ctx.llm_max_context_tokens,
                                 "llm_model": ctx.llm_model,
+                                "llm_base_url": ctx.llm_base_url,
+                                "llm_temperature": ctx.llm_temperature,
+                                "llm_max_output_tokens": ctx.llm_max_output_tokens,
+                                "llm_reasoning_effort": ctx.llm_reasoning_effort,
+                                "llm_client_name": ctx.llm_client_name,
                                 "approval_model_name": model_name,
                                 "approval_model_available": model_available,
                                 "approval_model_type": model_type,

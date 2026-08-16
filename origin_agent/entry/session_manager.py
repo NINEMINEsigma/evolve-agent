@@ -80,14 +80,19 @@ class LoopSessionManager:
     # ------------------------------------------------------------------
 
     def is_context_over_limit(self, safety_margin: int = 5000) -> bool:
-        """判断当前 token 数加上 safety_margin 是否超过配置上限。"""
+        """判断当前 token 数加上 safety_margin 是否超过配置上限。
+
+        优先使用活跃 LLM profile 的 token 限制（网页端切换时），
+        未切换时回退到 RuntimeContext 启动配置。
+        """
         current_tokens: int = self._loop.last_prompt_tokens
         if current_tokens == 0:
             return False
-        ctx = self._loop.app.runtime_context
+        max_context = self._loop.active_max_context_tokens
+        max_output = self._loop.active_max_output_tokens
         return (
-            current_tokens + ctx.llm_max_output_tokens + safety_margin
-        ) > ctx.llm_max_context_tokens
+            current_tokens + max_output + safety_margin
+        ) > max_context
 
     # ------------------------------------------------------------------
     # Session 旋转

@@ -4,6 +4,7 @@ import { useEdgeDrawer } from "../hooks/useEdgeDrawer";
 import { exportSession } from "../utils/exportSession";
 import { COLLOQUY_SID } from "../constants/session";
 import { TIMING } from "../constants/timing";
+import type { LlmProfileManager } from "../hooks/useLlmProfiles";
 
 interface HeaderProps {
   status: string;
@@ -24,6 +25,8 @@ interface HeaderProps {
   collapsed?: boolean;
   onToggleCollapse?: () => void;
   isMobile?: boolean;
+  llmProfiles?: LlmProfileManager;
+  onOpenLlmSettings?: () => void;
 }
 
 export default function Header({
@@ -45,6 +48,8 @@ export default function Header({
   collapsed,
   onToggleCollapse,
   isMobile,
+  llmProfiles,
+  onOpenLlmSettings,
 }: HeaderProps) {
   const [cmdMenuOpen, setCmdMenuOpen] = useState(false);
   const [menuPos, setMenuPos] = useState<{ top: number; left: number } | null>(null);
@@ -160,7 +165,7 @@ export default function Header({
       <div className="header-layer">
         <div className="header-hotzone" {...drawer.hotzoneProps} />
         <div className="header-pill-dock">
-          <HeaderPill status={status} agents={agents} llmModelName={llmModelName} />
+          <HeaderPill status={status} agents={agents} llmModelName={llmModelName} llmProfiles={llmProfiles} />
         </div>
         <header
           className={`app-header header-drawer header-drawer-${drawer.phase}`}
@@ -197,6 +202,17 @@ export default function Header({
                   data-tooltip="导出当前会话为可分享的静态 HTML 文件"
                 >
                   导出会话
+                </div>
+                <div
+                  className="context-menu-item"
+                  onClick={() => {
+                    setCmdMenuOpen(false);
+                    setMenuPos(null);
+                    onOpenLlmSettings?.();
+                  }}
+                  data-tooltip="管理 LLM 模型配置"
+                >
+                  模型配置
                 </div>
                 {showUnloadMenu && (
                 <div
@@ -294,6 +310,17 @@ export default function Header({
             >
               导出会话
             </div>
+            <div
+              className="context-menu-item"
+              onClick={() => {
+                setCmdMenuOpen(false);
+                setMenuPos(null);
+                onOpenLlmSettings?.();
+              }}
+              data-tooltip="管理 LLM 模型配置"
+            >
+              模型配置
+            </div>
             {showUnloadMenu && (
             <div
               className="context-menu-item context-menu-item-danger"
@@ -307,7 +334,7 @@ export default function Header({
       </div>
 
       <div className="header-center">
-        <HeaderPill status={status} agents={agents} llmModelName={llmModelName} />
+        <HeaderPill status={status} agents={agents} llmModelName={llmModelName} llmProfiles={llmProfiles} />
       </div>
 
       {sessionId && (
@@ -353,13 +380,30 @@ function HeaderPill({
   status,
   agents,
   llmModelName,
+  llmProfiles,
 }: {
   status: string;
   agents?: string[];
   llmModelName: string;
+  llmProfiles?: LlmProfileManager;
 }) {
+  const [dropdownOpen, setDropdownOpen] = useState(false);
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!dropdownOpen) return;
+    const onClick = (e: MouseEvent) => {
+      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+        setDropdownOpen(false);
+      }
+    };
+    document.addEventListener("click", onClick);
+    return () => document.removeEventListener("click", onClick);
+  }, [dropdownOpen]);
+
   return (
     <div
+      ref={containerRef}
       className={[
         "header-pill",
         status === "已连接" ? "connected" : "",
@@ -372,9 +416,37 @@ function HeaderPill({
       <span className="pill-label">{agents && agents.length > 0 ? "Evolve Agent · Multi" : "Evolve Agent"}</span>
       <span className="pill-detail">
         <span className="pill-status">{status}</span>
-        {llmModelName && <span className="pill-model">{llmModelName}</span>}
+        {llmModelName && (
+          <span
+            className={`pill-model${llmProfiles ? " pill-model-clickable" : ""}`}
+            onClick={llmProfiles ? () => setDropdownOpen((v) => !v) : undefined}
+            data-tooltip={llmProfiles ? "点击切换模型配置" : undefined}
+          >
+            {llmModelName}
+          </span>
+        )}
         {agents && agents.length > 0 && <span className="pill-agent-count">{agents.length} agents</span>}
       </span>
+      {dropdownOpen && llmProfiles && (
+        <div className="pill-model-dropdown">
+          {llmProfiles.profiles.map((p) => (
+            <div
+              key={p.name}
+              className={`pill-model-option${p.name === llmProfiles.activeProfileName ? " active" : ""}`}
+              onClick={(e) => {
+                e.stopPropagation();
+                llmProfiles.setActiveProfile(p.name);
+                setDropdownOpen(false);
+              }}
+            >
+              <span className="pill-model-option-name">
+                {p.name === "default" ? "默认配置" : p.name}
+              </span>
+              <span className="pill-model-option-model">{p.model}</span>
+            </div>
+          ))}
+        </div>
+      )}
       <span className="pill-ripple" aria-hidden />
       <span className="pill-ripple" aria-hidden />
     </div>

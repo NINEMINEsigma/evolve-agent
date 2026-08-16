@@ -19,6 +19,10 @@ export const STORAGE_KEYS = {
   EXPANDED_CLUSTERS:           "evolve_expanded_clusters",
   HANDSFREE_MODE:              "evolve_handsfree_mode",
 
+  // LLM 模型配置
+  LLM_PROFILES:        "evolve_llm_profiles",
+  ACTIVE_LLM_PROFILE:  "evolve_active_llm_profile",
+
   // 按会话隔离
   SUBAGENT_PANEL_OPEN:    "evolve_subagent_panel_open",
   ACTIVE_SUBAGENT_ID:     "evolve_active_subagent_id",

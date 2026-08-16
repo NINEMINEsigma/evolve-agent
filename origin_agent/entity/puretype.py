@@ -447,6 +447,7 @@ class Message(BaseModel):
     emoji: str | None = None  # 工具调用/审批请求的图标
     danger_level: str | None = None  # CONFIRM_REQUEST：工具危险等级
     client_info: dict[str, Any] | None = None  # USER_MESSAGE：前端携带的客户端信息
+    llm_profile: dict[str, Any] | None = None  # USER_MESSAGE：前端携带的 LLM 配置覆盖
 
 
 # ---------------------------------------------------------------------------
@@ -611,3 +612,21 @@ class TokenUsageRecord(BaseModel):
 
     prompt_tokens: int = 0
     """最近一次 LLM 调用的 prompt token 数（已消耗上下文）。"""
+
+
+# ---------------------------------------------------------------------------
+# LLM Profile Types
+# ---------------------------------------------------------------------------
+
+class LlmProfile(BaseModel):
+    """LLM 主模型配置项（前端可切换）。"""
+
+    name: str = ""
+    llm_client_name: str = ""
+    base_url: str = ""
+    model: str = ""
+    api_key: str = ""
+    temperature: float = 0.7
+    max_output_tokens: int = 4096
+    reasoning_effort: str = ""
+    max_context_tokens: int = 128000

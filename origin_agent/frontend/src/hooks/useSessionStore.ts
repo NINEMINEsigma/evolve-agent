@@ -70,6 +70,8 @@ export interface SessionStore {
   setLlmMaxContextTokens: React.Dispatch<React.SetStateAction<number>>;
   llmModelName: string;
   setLlmModelName: React.Dispatch<React.SetStateAction<string>>;
+  serverInfo: Record<string, unknown>;
+  setServerInfo: React.Dispatch<React.SetStateAction<Record<string, unknown>>>;
   approvalModelName: string;
   setApprovalModelName: React.Dispatch<React.SetStateAction<string>>;
   approvalModelAvailable: boolean;
@@ -183,6 +185,7 @@ export function useSessionStore(callbacks: SessionStoreCallbacks = {}): SessionS
   const [agents, setAgents] = useState<string[]>([]);
   const [llmMaxContextTokens, setLlmMaxContextTokens] = useState(0);
   const [llmModelName, setLlmModelName] = useState("");
+  const [serverInfo, setServerInfo] = useState<Record<string, unknown>>({});
   const [approvalModelName, setApprovalModelName] = useState("");
   const [approvalModelAvailable, setApprovalModelAvailable] = useState(false);
   const [approvalModelType, setApprovalModelType] = useState("");
@@ -413,6 +416,7 @@ export function useSessionStore(callbacks: SessionStoreCallbacks = {}): SessionS
           const info = data.server_info;
           if (info.llm_max_context_tokens) setLlmMaxContextTokens(info.llm_max_context_tokens);
           setLlmModelName(info.llm_model || "");
+          setServerInfo(info);
           setApprovalModelName(info.approval_model_name || "");
           setApprovalModelAvailable(info.approval_model_available || false);
           setApprovalModelType(info.approval_model_type || "");
@@ -1313,6 +1317,8 @@ export function useSessionStore(callbacks: SessionStoreCallbacks = {}): SessionS
     setLlmMaxContextTokens,
     llmModelName,
     setLlmModelName,
+    serverInfo,
+    setServerInfo,
     approvalModelName,
     setApprovalModelName,
     approvalModelAvailable,

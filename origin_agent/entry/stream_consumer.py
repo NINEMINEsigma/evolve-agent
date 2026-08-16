@@ -47,6 +47,14 @@ class StreamConsumer:
         self._character_name = character_name
         self._cancel_event = cancel_event
 
+    @property
+    def llm(self) -> BaseLLMClient:
+        return self._llm
+
+    @llm.setter
+    def llm(self, value: BaseLLMClient) -> None:
+        self._llm = value
+
     async def consume(
         self,
         session_id: str,

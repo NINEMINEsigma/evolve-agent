@@ -245,3 +245,15 @@ export interface PendingAudio {
   dataUrl: string;
   format: string;
 }
+
+export interface LlmProfile {
+  name: string;
+  llm_client_name: string;
+  base_url: string;
+  model: string;
+  api_key: string;
+  temperature: number;
+  max_output_tokens: number;
+  reasoning_effort: string;
+  max_context_tokens: number;
+}

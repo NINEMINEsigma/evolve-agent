@@ -71,3 +71,140 @@
 .modal-btn--primary:hover {
   background: var(--accent-hover);
 }
+
+.modal-btn--danger {
+  background: var(--danger, #e53e3e);
+  color: var(--text-white);
+}
+
+/* ── LLM Profile Settings ── */
+.modal-window.llm-profile-settings {
+  max-width: 780px;
+  max-height: min(85vh, 640px);
+}
+
+.llm-profile-layout {
+  display: flex;
+  gap: 16px;
+  min-height: 320px;
+}
+
+.llm-profile-list {
+  width: 180px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  overflow-y: auto;
+  border-right: 1px solid var(--border);
+  padding-right: 12px;
+}
+
+.llm-profile-item {
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  transition: background 0.15s;
+}
+
+.llm-profile-item:hover {
+  background: var(--bg-hover);
+}
+
+.llm-profile-item.active {
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border);
+}
+
+.llm-profile-item.current .llm-profile-item-name::after {
+  content: " ●";
+  color: var(--accent);
+}
+
+.llm-profile-item-name {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-primary);
+}
+
+.llm-profile-item-model {
+  font-size: 11px;
+  color: var(--text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.llm-profile-add-btn {
+  margin-top: 8px;
+  width: 100%;
+  text-align: center;
+}
+
+.llm-profile-form {
+  flex: 1;
+  overflow-y: auto;
+  min-width: 0;
+}
+
+.llm-profile-section {
+  margin-bottom: 20px;
+}
+
+.llm-profile-section-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 10px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--border);
+}
+
+.llm-profile-label {
+  display: block;
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin-bottom: 4px;
+  margin-top: 10px;
+}
+
+.llm-profile-input {
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  font-size: 13px;
+  box-sizing: border-box;
+}
+
+.llm-profile-input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.llm-profile-input:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.llm-profile-error {
+  font-size: 12px;
+  color: var(--danger, #e53e3e);
+  margin-top: 4px;
+}
+
+.llm-profile-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  color: var(--text-secondary);
+  font-size: 14px;
+}

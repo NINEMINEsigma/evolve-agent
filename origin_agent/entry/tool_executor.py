@@ -68,6 +68,14 @@ class ToolExecutor:
         self._llm = llm
         self._tool_stats: dict[str, dict[str, int]] = {}
 
+    @property
+    def llm(self) -> BaseLLMClient:
+        return self._llm
+
+    @llm.setter
+    def llm(self, value: BaseLLMClient) -> None:
+        self._llm = value
+
     # -- 公开 API ----------------------------------------------------------
 
     def get_tool_stats(self) -> dict[str, dict[str, int]]:

@@ -603,3 +603,54 @@
 .app-header.header-drawer-open {
   transform: none;
 }
+
+/* ── pill-model 可点击下拉 ── */
+.pill-model-clickable {
+  cursor: pointer;
+}
+
+.pill-model-clickable:hover {
+  opacity: 0.85;
+}
+
+.pill-model-dropdown {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 50%;
+  transform: translateX(-50%);
+  min-width: 180px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  box-shadow: 0 4px 16px rgba(var(--black-rgb), 0.35);
+  z-index: var(--z-overlay);
+  overflow: hidden;
+}
+
+.pill-model-option {
+  padding: 8px 12px;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  transition: background 0.12s;
+}
+
+.pill-model-option:hover {
+  background: var(--bg-hover);
+}
+
+.pill-model-option.active {
+  background: var(--bg-tertiary);
+}
+
+.pill-model-option-name {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-primary);
+}
+
+.pill-model-option-model {
+  font-size: 11px;
+  color: var(--text-secondary);
+}
