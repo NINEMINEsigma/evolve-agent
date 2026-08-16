@@ -166,6 +166,38 @@ const RichInput = React.forwardRef<HTMLDivElement, RichInputProps>(function Rich
     setIsEmpty(!el.innerText?.trim() && !el.querySelector(".input-inline-image") && !el.querySelector(".input-inline-audio"));
   }, [pendingAudios]);
 
+  // 自动插入新的音频块到输入框
+  useEffect(() => {
+    const el = divRef.current;
+    if (!el) return;
+    
+    for (const audio of pendingAudios) {
+      // 检查是否已经存在
+      const existing = el.querySelector(`[data-audio-id="${audio.id}"]`);
+      if (existing) continue;
+      
+      // 创建音频元素
+      const wrapper = document.createElement("span");
+      wrapper.className = "input-inline-audio";
+      wrapper.contentEditable = "false";
+      wrapper.dataset.audioId = audio.id;
+      wrapper.dataset.audioSrc = audio.dataUrl;
+      wrapper.innerHTML = `<audio src="${audio.dataUrl}" controls></audio><button type="button" class="input-inline-remove">x</button>`;
+      wrapper.querySelector(".input-inline-remove")?.addEventListener("click", () => {
+        onRemoveAudio(audio.id);
+        wrapper.remove();
+        notifyChange();
+        autoResize();
+      });
+      
+      // 插入到输入框末尾
+      el.appendChild(wrapper);
+    }
+    
+    notifyChange();
+    autoResize();
+  }, [pendingAudios, onRemoveAudio]);
+
   const notifyChange = () => {
     const el = divRef.current;
     if (!el) return;

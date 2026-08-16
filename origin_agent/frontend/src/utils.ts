@@ -288,7 +288,8 @@ export function extractContentBlocks(el: HTMLDivElement | null, images: PendingI
       const audioEl = node.querySelector("audio");
       const dataUrl = audioEl?.src || "";
       if (dataUrl.startsWith("data:audio/")) {
-        const formatMatch = dataUrl.match(/^data:audio\/([^;]+);base64,/);
+        // 支持带 codec 的格式，如 data:audio/webm;codecs=opus;base64,...
+        const formatMatch = dataUrl.match(/^data:audio\/([^;]+)(?:;[^;]*)*;base64,/);
         const format = formatMatch ? (formatMatch[1] === "mpeg" ? "mp3" : formatMatch[1]) : "wav";
         mediaPositions.set(node, {
           type: "audio",
@@ -321,7 +322,8 @@ export function extractContentBlocks(el: HTMLDivElement | null, images: PendingI
         flushText();
         const audioEl = el.querySelector("audio");
         const src = audioEl?.getAttribute("src") || "";
-        const match = src.match(/^data:audio\/([^;]+);base64,(.+)$/);
+        // 支持带 codec 的格式，如 data:audio/webm;codecs=opus;base64,...
+        const match = src.match(/^data:audio\/([^;]+)(?:;[^;]*)*;base64,(.+)$/);
         if (match) {
           const mimeFmt = match[1];
           const format = mimeFmt === "mpeg" ? "mp3" : mimeFmt;

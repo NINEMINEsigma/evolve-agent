@@ -12,6 +12,7 @@
     "onlyBuiltDependencies": ["esbuild"]
   },
   "dependencies": {
+    "@breezystack/lamejs": "^1.2.7",
     "@monaco-editor/react": "^4.7.0",
     "framer-motion": "^11.0.0",
     "mermaid": "^11.6.0",

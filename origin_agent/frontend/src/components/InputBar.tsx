@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type ChangeEvent, type RefObject } from "r
 import RichInput from "./RichInput";
 import TaskProgressPanel from "./TaskProgressPanel";
 import InputMorph, { MorphItem } from "./InputMorph";
+import RecorderButton from "./RecorderButton";
 import type { PendingImage, PendingAudio } from "../hooks/useWebSocket";
 import type { AskRequest, ConfirmRequest, SubagentSession, TargetSessionOption, TaskProgress } from "../types";
 import { escapeHtml } from "../utils";
@@ -279,6 +280,10 @@ export default function InputBar({
             onChange={onUpload}
             multiple
             disabled={uploading}
+          />
+          <RecorderButton
+            onRecordingComplete={(file) => onPasteAudio(file)}
+            disabled={waiting || morphActive || uploading}
           />
           <button className="send-btn" onClick={onSend} disabled={waiting || morphActive} type="button">
             <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2">

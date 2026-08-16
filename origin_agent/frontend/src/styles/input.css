@@ -551,3 +551,85 @@
   overflow: hidden;
   text-overflow: ellipsis;
 }
+
+/* ── Recorder button ── */
+.recorder-wrapper {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.recorder-btn {
+  width: var(--icon-btn-md);
+  height: var(--icon-btn-md);
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  transition: background var(--duration-fast), color var(--duration-fast), transform var(--duration-fast);
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+}
+
+.recorder-btn:hover:not(:disabled) {
+  background: var(--bg-hover);
+  color: var(--text-secondary);
+}
+
+.recorder-btn:active:not(:disabled) {
+  transform: scale(0.95);
+}
+
+.recorder-btn.recording {
+  background: var(--status-error, #ef4444);
+  color: var(--text-white);
+  animation: recorder-pulse 1.5s infinite;
+}
+
+.recorder-btn.recording:hover {
+  background: var(--status-error, #ef4444);
+}
+
+.recorder-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+@keyframes recorder-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.7; }
+}
+
+.recorder-visualizer {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 0;
+}
+
+.recorder-canvas {
+  width: 120px;
+  height: 32px;
+  border-radius: var(--radius-sm);
+}
+
+.recorder-timer {
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-muted);
+  min-width: 40px;
+  text-align: right;
+}
+
+.recorder-error {
+  font-size: 12px;
+  color: var(--status-error, #ef4444);
+  max-width: 200px;
+  line-height: 1.3;
+}
