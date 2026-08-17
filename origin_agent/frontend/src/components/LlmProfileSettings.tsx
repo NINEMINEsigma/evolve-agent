@@ -20,6 +20,16 @@ const EMPTY_PROFILE: LlmProfile = {
   max_context_tokens: 128000,
 };
 
+function generateDuplicateName(sourceName: string, existingNames: string[]): string {
+  let n = 1;
+  let candidate = `${sourceName}${n}`;
+  while (existingNames.includes(candidate)) {
+    n++;
+    candidate = `${sourceName}${n}`;
+  }
+  return candidate;
+}
+
 export default function LlmProfileSettings({
   llmProfiles,
   onClose,
@@ -86,6 +96,16 @@ export default function LlmProfileSettings({
     setIsNew(false);
   }, [isDefault, selectedName, deleteProfile]);
 
+  const handleDuplicate = useCallback(() => {
+    if (!selectedProfile) return;
+    const existingNames = profiles.map((p) => p.name);
+    const newName = generateDuplicateName(selectedProfile.name, existingNames);
+    setIsNew(true);
+    setIsEditing(true);
+    setDraft({ ...selectedProfile, name: newName });
+    setSelectedName("");
+  }, [selectedProfile, profiles]);
+
   const handleCancel = useCallback(() => {
     if (isNew) {
       setSelectedName(activeProfileName);
@@ -140,6 +160,9 @@ export default function LlmProfileSettings({
                   </button>
                 </>
               )}
+              <button className="modal-btn modal-btn--secondary" onClick={handleDuplicate}>
+                复制
+              </button>
               <button className="modal-btn modal-btn--secondary" onClick={onClose}>
                 关闭
               </button>
