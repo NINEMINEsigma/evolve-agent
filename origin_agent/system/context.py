@@ -115,6 +115,9 @@ class RuntimeContext(BaseModel):
     yolo: bool = False
     """YOLO 模式：所有工具调用直接自动批准，包括 critical 级别。启动后不可退出。"""
 
+    soul_file: str = "SOUL.md"
+    """SOUL 文件名，默认 ``"SOUL.md"``。可通过启动参数 ``--soul_file`` 切换。"""
+
 
 # ---------------------------------------------------------------------------
 # 全局 RuntimeContext 单例

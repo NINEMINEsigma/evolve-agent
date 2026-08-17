@@ -1,4 +1,4 @@
-import { useCallback } from "react";
+import { useCallback, useRef } from "react";
 import Editor, { loader } from "@monaco-editor/react";
 import * as monaco from "monaco-editor";
 import type { OpenTab } from "../../types";
@@ -27,13 +27,19 @@ export default function EditorArea({
 }: EditorAreaProps) {
   const activeTab = tabs.find((t) => t.id === activeTabId);
 
+  // Refs 避免 addCommand 闭包捕获过期值
+  const activeTabIdRef = useRef(activeTabId);
+  const onSaveRef = useRef(onSave);
+  activeTabIdRef.current = activeTabId;
+  onSaveRef.current = onSave;
+
   const handleEditorDidMount = useCallback(
     (_editor: any, _monaco: any) => {
       _editor.addCommand(_monaco.KeyMod.CtrlCmd | _monaco.KeyCode.KeyS, () => {
-        if (activeTabId) onSave(activeTabId);
+        if (activeTabIdRef.current) onSaveRef.current(activeTabIdRef.current);
       });
     },
-    [activeTabId, onSave]
+    []
   );
 
   if (tabs.length === 0) {

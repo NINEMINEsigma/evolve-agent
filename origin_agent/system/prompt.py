@@ -34,9 +34,9 @@ def _read_gene() -> str:
     return _read_if_exists(find_repo_root() / "GENE.md")
 
 
-def _read_soul(agentspace: Path) -> str:
-    """从 agentspace 目录读取可编辑的 SOUL.md。"""
-    return _read_if_exists(agentspace / "SOUL.md")
+def _read_soul(agentspace: Path, soul_file: str = "SOUL.md") -> str:
+    """从 agentspace 目录读取可编辑的 SOUL 文件。"""
+    return _read_if_exists(agentspace / soul_file)
 
 
 def _platform_info() -> str:
@@ -132,7 +132,7 @@ def build_system_prompt(
     extra_blocks:
         追加在模式段之后的额外节（例如 skill prompt、memory provider 块）。
     workspace:
-        workspace 目录路径，用于读取 SOUL.md。
+        workspace 目录路径，用于读取 SOUL 文件。
     fork_path / fix_fork_path / fix_log_path:
         模板文件中 ``{fork_path}`` / ``{fix_fork_path}`` / ``{fix_log_path}``
         占位符的真实路径（通过 .format() 将 ``{{var}}`` 转换后再替换）。
@@ -152,9 +152,10 @@ def build_system_prompt(
     if gene:
         blocks.append(gene)
 
-    # 0a. SOUL — 人+AI 共同编辑的个性/风格（agentspace/SOUL.md）
+    # 0a. SOUL — 人+AI 共同编辑的个性/风格（agentspace/{soul_file}）
+    soul_file_name: str = runtime_ctx.soul_file if runtime_ctx else "SOUL.md"
     workspace_path: Path = Path(workspace) if workspace else Path()
-    soul: str = _read_soul(Path(agentspace) if agentspace else Path())
+    soul: str = _read_soul(Path(agentspace) if agentspace else Path(), soul_file_name)
     if soul:
         blocks.append(soul)
 
@@ -164,6 +165,7 @@ def build_system_prompt(
         base = base.replace(r"{{platform}}", _platform_info())
         base = base.replace(r"{{agentspace}}", agentspace)
         base = base.replace(r"{{fork_path}}", fork_path)
+        base = base.replace(r"{{soul_file}}", soul_file_name)
         base = base.replace(r"{{files_prefix}}", STATIC_FILE_HTTP_PREFIX)
         base = base.replace(r"{{downloads_prefix}}", DOWNLOADS_HTTP_PREFIX)
         # 1b. 运行时配置占位符（缺省兜底 "未配置"）

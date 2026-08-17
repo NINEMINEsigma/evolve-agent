@@ -72,6 +72,7 @@ argparse_parser.add_argument("--workspace_path", type=str, default=argparse.SUPP
 argparse_parser.add_argument("--logs_path_name", type=str, default=argparse.SUPPRESS)
 argparse_parser.add_argument("--agentspace_path_name", type=str, default=argparse.SUPPRESS)
 argparse_parser.add_argument("--mcp_config_path_name", type=str, default=argparse.SUPPRESS)
+argparse_parser.add_argument("--soul_file", type=str, default=argparse.SUPPRESS)
 
 args = argparse_parser.parse_args()
 
@@ -103,6 +104,7 @@ class Config(BaseModel):
     agentspace_path_name: str = "agentspace"
     logs_path_name: str = "logs"
     mcp_config_path_name: str = "mcp_config.json"
+    soul_file: str = "SOUL.md"
     frontend_force_build: bool = False
     yolo: bool = False
 
@@ -212,3 +214,4 @@ workspace_path:         Path = Path(current_config.workspace_path)
 agentspace_path_name:   Path = workspace_path / current_config.agentspace_path_name
 logs_path_name:         Path = workspace_path / current_config.logs_path_name
 mcp_config_path:        Path = agentspace_path_name / current_config.mcp_config_path_name
+soul_file:              str  = current_config.soul_file
