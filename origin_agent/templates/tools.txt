@@ -18,3 +18,18 @@ Cron tool conventions:
 - Scheduled tasks are background one-shot tasks, not a batch queue or an automatic loop mechanism.
 - Periodic work, polling, or long-running observation must be expressed as recursive scheduling: wait for the task result, then schedule the next one-shot task.
 - Raw scheduled-task output is internal Agent input and log content, not a user message; if the user needs the result, actively summarize it.
+
+Progress bar conventions:
+- When a task can be decomposed into 3 or more discrete steps, proactively call set_task_progress to create a progress bar before starting work.
+- Use a stable task_id for the entire task lifecycle; reuse it on every update to overwrite the same bar rather than creating duplicates.
+- Update the progress bar in real time after each step completes (increment current by 1), and set status to reflect the current phase.
+- Set total to the number of planned steps and current to the number of completed steps.
+- After all steps finish, set current equal to total and keep the progress bar visible — do NOT call clear_task_progress yet.
+- The progress bar must remain visible until the user has reviewed and accepted the work. Only call clear_task_progress after user confirmation or explicit request to clean up.
+- If the task is cancelled or aborted, call clear_task_progress to remove the stale bar.
+
+Task agent dispatch conventions:
+- When a task is stateless, does not require extensive context or memory, only needs read access, and returns a text result (e.g. investigation findings, codebase survey, summary report), prefer dispatching it to a task agent via run_taskagent rather than executing it in the main agent loop.
+- Delegating such tasks frees the main agent's context window and avoids polluting conversation history with intermediate tool outputs.
+- Put all necessary context into the prompt parameter — the task agent receives only that single message and has no access to the main agent's conversation history.
+- Do not delegate tasks that require write access, multi-round interaction, or persistent memory — handle those in the main agent loop directly.
