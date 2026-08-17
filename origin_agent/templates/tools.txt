@@ -33,3 +33,12 @@ Task agent dispatch conventions:
 - Delegating such tasks frees the main agent's context window and avoids polluting conversation history with intermediate tool outputs.
 - Put all necessary context into the prompt parameter — the task agent receives only that single message and has no access to the main agent's conversation history.
 - Do not delegate tasks that require write access, multi-round interaction, or persistent memory — handle those in the main agent loop directly.
+
+Workspace hygiene conventions:
+- Do NOT create files directly in the ws: root directory (e.g. ws:some_file.txt). The root contains system-critical files such as SOUL.md and mcp_config.json; scattering loose files there risks collision and pollution.
+- Always place generated outputs under a subdirectory within ws: (e.g. ws:output/report.txt, ws:tmp/data.json). Create the subdirectory first if it does not exist.
+- This applies to all file-creation tools (Write, Copy, Move, run_python file output, etc.).
+
+Port conflict conventions:
+- The Gateway is already listening on {{gateway_port}} (see Runtime configuration). NEVER start any additional server or service on this port — it will fail with "address already in use" and may disrupt the running system.
+- When you need to start a temporary server (e.g. for testing or serving a file), always pick a different port. Use a high port number (e.g. 48000–50000) and verify it is free before binding.
