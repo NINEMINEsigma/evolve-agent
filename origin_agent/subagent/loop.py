@@ -374,6 +374,7 @@ class SubAgentLoop(BasePrivateChatAgentLoop):
 
                 # 处理工具调用 — safe 直接执行；其它工具入审批队列阻塞等待
                 try:
+                    _executed_tool_msgs: list[ToolResultMessage] = []
                     for i, tc in enumerate(resp.tool_calls):
                         # 中断：为当前及剩余未执行 tool_calls 补中断结果后停止响应
                         if self._cancel_event.is_set():
@@ -404,6 +405,13 @@ class SubAgentLoop(BasePrivateChatAgentLoop):
 
                         messages.append(tool_msg)
                         self._history.add_message(tool_msg)
+                        _executed_tool_msgs.append(tool_msg)
+
+                    # 延迟注入 follow_up 消息
+                    for tm in _executed_tool_msgs:
+                        if tm._follow_up_messages:
+                            for fu_msg in tm._follow_up_messages:
+                                self._history.add_message(fu_msg)
                 except BaseException:
                     # 异常兜底：为未执行的 tool_calls 补中断结果，保证 History 配对后停止响应
                     logger.exception(

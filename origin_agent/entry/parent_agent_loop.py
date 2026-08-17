@@ -395,12 +395,14 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
 
                 # 委托给 ToolExecutor 执行工具调用
                 try:
+                    _executed_tool_msgs: list[ToolResultMessage] = []
                     for tc in resp.tool_calls:
                         tool_msg = await self._tool_executor.execute(tc, sid)
                         messages.append(tool_msg)
                         self._history.add_message(tool_msg)
                         self.save_history(sid)
                         await self._push_usage_update(sid)
+                        _executed_tool_msgs.append(tool_msg)
 
                         if tc.name == "evolve_code":
                             try:
@@ -414,6 +416,13 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
                                     return "Evolution complete, restarting to apply new code..."
                             except (json.JSONDecodeError, KeyError, TypeError):
                                 pass
+
+                    # 延迟注入 follow_up 消息（当前轮所有工具调用完成后）
+                    for tm in _executed_tool_msgs:
+                        if tm._follow_up_messages:
+                            for fu_msg in tm._follow_up_messages:
+                                self._history.add_message(fu_msg)
+                                self.save_history(sid)
                 except BaseException:
                     # 兜底：execute 内部审批/dispatch/finalize 已保护，但
                     # execute 协程被外部取消（asyncio task cancel）或 get_hooks_context

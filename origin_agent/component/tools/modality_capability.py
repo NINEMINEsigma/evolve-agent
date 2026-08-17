@@ -23,7 +23,7 @@ from abstract.tools.registry import registry, tool_error, tool_result
 from abstract.llm.loader import create_llm_client
 from system.context import get_runtime_context
 from entity.constant import MODALITY_CAPABILITY_CACHE_FILENAME
-from entity.puretype import Role, ToolAvailability, ToolDangerLevel
+from entity.puretype import Role, ToolAvailability, ToolDangerLevel, ModalityCapability
 from entity.messages import (
     BaseMessage,
     ImageBlock,
@@ -89,7 +89,7 @@ def _cache_key(model: str, base_url: str | None = None) -> str:
     return f"{model.lower()}@{_resolve_base_url(base_url)}"
 
 
-def _load_cache() -> dict[str, dict[str, bool]]:
+def _load_cache() -> dict[str, dict[str, Any]]:
     try:
         path = _cache_path()
         if path.exists():
@@ -99,27 +99,22 @@ def _load_cache() -> dict[str, dict[str, bool]]:
     return {}
 
 
-def _normalize_entry(raw: Any) -> dict[str, bool] | None:
-    """将缓存条目归一化为 {"vision": bool, "audio": bool} 格式。
-
-    旧格式值为 bool 时返回 None，触发重新探测。
-    """
-    if isinstance(raw, dict):
-        result: dict[str, bool] = {}
-        if "vision" in raw:
-            result["vision"] = bool(raw["vision"])
-        if "audio" in raw:
-            result["audio"] = bool(raw["audio"])
-        return result if result else None
-    return None
+def _normalize_entry(raw: Any) -> ModalityCapability | None:
+    """将缓存条目反序列化为 ModalityCapability；格式不匹配时返回 None。"""
+    if not isinstance(raw, dict):
+        return None
+    try:
+        return ModalityCapability.model_validate(raw)
+    except Exception:
+        return None
 
 
 def get_cached_vision_support(model: str, base_url: str | None = None) -> bool | None:
     """读取模型在指定服务商下的 vision（tool 消息图片）能力缓存；未命中返回 None。"""
     cache = _load_cache()
     entry = _normalize_entry(cache.get(_cache_key(model, base_url)))
-    if entry is not None and "vision" in entry:
-        return entry["vision"]
+    if entry is not None and entry.vision is not None:
+        return entry.vision
     return None
 
 
@@ -127,12 +122,30 @@ def get_cached_audio_support(model: str, base_url: str | None = None) -> bool | 
     """读取模型在指定服务商下的 audio（tool 消息音频）能力缓存；未命中返回 None。"""
     cache = _load_cache()
     entry = _normalize_entry(cache.get(_cache_key(model, base_url)))
-    if entry is not None and "audio" in entry:
-        return entry["audio"]
+    if entry is not None and entry.audio is not None:
+        return entry.audio
     return None
 
 
-def _save_cache(data: dict[str, dict[str, bool]]) -> None:
+def get_cached_user_vision_support(model: str, base_url: str | None = None) -> bool | None:
+    """读取模型在指定服务商下的 user 消息 vision 能力缓存；未命中返回 None。"""
+    cache = _load_cache()
+    entry = _normalize_entry(cache.get(_cache_key(model, base_url)))
+    if entry is not None and entry.user_vision is not None:
+        return entry.user_vision
+    return None
+
+
+def get_cached_user_audio_support(model: str, base_url: str | None = None) -> bool | None:
+    """读取模型在指定服务商下的 user 消息 audio 能力缓存；未命中返回 None。"""
+    cache = _load_cache()
+    entry = _normalize_entry(cache.get(_cache_key(model, base_url)))
+    if entry is not None and entry.user_audio is not None:
+        return entry.user_audio
+    return None
+
+
+def _save_cache(data: dict[str, dict[str, Any]]) -> None:
     try:
         path = _cache_path()
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -243,6 +256,59 @@ async def _probe_single_modality(
         return True
 
 
+def _build_user_probe_messages(blocks: list[MessageBlock]) -> list[BaseMessage]:
+    """构造普通 user 消息探测序列（不伪装工具调用）。
+
+    与 _build_tool_probe_messages 不同，这里只发送一条 user 消息，
+    消息 content 为多模态 content block 列表，测试 provider 是否接受
+    user 消息中的多模态内容。
+    """
+    return [
+        BaseMessage(role=Role.USER, content=blocks),
+    ]
+
+
+async def _probe_single_user_modality(
+    client: Any,
+    model_name: str,
+    session_id: str,
+    modality: str,
+) -> bool:
+    """发送普通 user 消息单独探测一种模态，返回该模态在 user 消息中是否可用。"""
+    if modality == "vision":
+        blocks: list[MessageBlock] = [
+            ImageBlock(image_url=f"data:image/png;base64,{_DUMMY_PNG_B64}"),
+            TextBlock(text='{"path": "probe://image.png", "width": 1, "height": 1}'),
+        ]
+    else:
+        blocks = [
+            AudioBlock(data=_DUMMY_WAV_B64, format="wav"),
+            TextBlock(text='{"path": "probe://audio.wav"}'),
+        ]
+    probe_messages = _build_user_probe_messages(blocks)
+
+    try:
+        await client.chat(probe_messages)
+        logger.info(
+            "probe_modality | session=%s model=%s %s=True source=single_probe(user)",
+            session_id, model_name, modality,
+        )
+        return True
+    except Exception as exc:
+        import openai as _openai
+        if isinstance(exc, (_openai.BadRequestError, _openai.APIStatusError)):
+            logger.info(
+                "probe_modality | session=%s model=%s %s=False source=single_probe(user) reason=http_400",
+                session_id, model_name, modality,
+            )
+            return False
+        logger.warning(
+            "probe_modality | session=%s model=%s %s error=%s (defaulting to True)",
+            session_id, model_name, modality, exc,
+        )
+        return True
+
+
 async def _handle_probe_modality(args: dict[str, Any], context: ToolContext | None = None) -> dict:
     """探测当前配置的 LLM 模型是否支持在工具消息（Read 工具场景）中读取 vision 和 audio。"""
     ctx = context.runtime_context if context is not None else get_runtime_context()
@@ -251,6 +317,32 @@ async def _handle_probe_modality(args: dict[str, Any], context: ToolContext | No
 
     key = _cache_key(model_name, ctx.llm_base_url)
     cache = _load_cache()
+
+    # 缓存命中检查：如果四项都已探测，直接返回缓存值，跳过 API 请求
+    entry = _normalize_entry(cache.get(key))
+    if (
+        entry is not None
+        and entry.vision is not None
+        and entry.audio is not None
+        and entry.user_vision is not None
+        and entry.user_audio is not None
+    ):
+        logger.info(
+            "probe_modality | session=%s model=%s cache_hit, skipping API probe",
+            session_id, model_name,
+        )
+        return tool_result(
+            vision_capable=entry.vision,
+            audio_capable=entry.audio,
+            user_vision_capable=entry.user_vision,
+            user_audio_capable=entry.user_audio,
+            model=model_name,
+            source="cache",
+            _note=(
+                f"Model {model_name} (cached): vision={entry.vision}, audio={entry.audio}, "
+                f"user_vision={entry.user_vision}, user_audio={entry.user_audio}."
+            ),
+        )
 
     client = create_llm_client(ctx.llm_client_name, ctx)
 
@@ -265,18 +357,20 @@ async def _handle_probe_modality(args: dict[str, Any], context: ToolContext | No
     try:
         await client.chat(combined_messages)
         # API 接受了两者
-        cache[key] = {"vision": True, "audio": True}
+        cache[key] = ModalityCapability(vision=True, audio=True, user_vision=True, user_audio=True).model_dump()
         _save_cache(cache)
         logger.info(
-            "probe_modality | session=%s model=%s vision=True audio=True source=combined_probe",
+            "probe_modality | session=%s model=%s vision=True audio=True user_vision=True user_audio=True source=combined_probe",
             session_id, model_name,
         )
         return tool_result(
             vision_capable=True,
             audio_capable=True,
+            user_vision_capable=True,
+            user_audio_capable=True,
             model=model_name,
             source="probe",
-            message=f"Model {model_name} supports reading both image and audio content blocks in tool messages.",
+            _note=f"Model {model_name} supports reading both image and audio content blocks in tool messages.",
         )
     except Exception as exc:
         if not _is_modality_rejection(exc):
@@ -301,16 +395,28 @@ async def _handle_probe_modality(args: dict[str, Any], context: ToolContext | No
         vision_capable = await _probe_single_modality(client, model_name, session_id, "vision")
         audio_capable = await _probe_single_modality(client, model_name, session_id, "audio")
 
-        cache[key] = {"vision": vision_capable, "audio": audio_capable}
+        # 仅在 tool 消息不支持该模态时才探测 user 消息，避免不必要的 API 调用
+        user_vision_capable = True if vision_capable else await _probe_single_user_modality(client, model_name, session_id, "vision")
+        user_audio_capable = True if audio_capable else await _probe_single_user_modality(client, model_name, session_id, "audio")
+
+        cache[key] = ModalityCapability(
+            vision=vision_capable,
+            audio=audio_capable,
+            user_vision=user_vision_capable,
+            user_audio=user_audio_capable,
+        ).model_dump()
         _save_cache(cache)
 
         return tool_result(
             vision_capable=vision_capable,
             audio_capable=audio_capable,
+            user_vision_capable=user_vision_capable,
+            user_audio_capable=user_audio_capable,
             model=model_name,
             source="probe",
-            message=(
-                f"Model {model_name}: vision={vision_capable}, audio={audio_capable}. "
+            _note=(
+                f"Model {model_name}: vision={vision_capable}, audio={audio_capable}, "
+                f"user_vision={user_vision_capable}, user_audio={user_audio_capable}. "
                 f"Combined request was rejected, probed individually."
             ),
         )
@@ -329,22 +435,23 @@ registry.register(
             "name": "probe_modality_capability",
             # 伪装成 Read 工具调用（assistant tool_calls → tool 消息携带多模态 content block），
             # 测试当前 LLM 模型是否支持在**工具消息**中读取 image_url 和 input_audio。
-            # 每次调用都会重新探测并覆盖缓存结果，结果全局生效，无需重复调用。
+            # 同时探测 **user 消息**中的多模态能力（仅当 tool 消息被拒绝时才探测 user 消息）。
+            # 每次调用都会重新探测并覆盖缓存结果（除非缓存已完整命中则直接返回），结果全局生效，无需重复调用。
             #
             # ## 调用效果
             # 先发送伪装成 Read 工具的图片+音频组合请求：
-            # - API 接受请求 → 两者在工具消息中都可用 → 缓存 vision=true, audio=true。
-            # - API 拒绝 → 分别发送仅含图片和仅含音频的工具调用探测。
+            # - API 接受请求 → 两者在工具消息中都可用 → 缓存 vision=true, audio=true, user_vision=true, user_audio=true（乐观假设）。
+            # - API 拒绝 → 分别发送仅含图片和仅含音频的工具调用探测；对 tool 消息不支持的模态，额外探测 user 消息。
             # - API 因非模态错误失败 → 不写缓存，工具返回错误。
             #
             # ## 语义说明
-            # 探测结果只反映"工具消息（Read 工具场景）中读多模态"的能力，不代表"用户消息粘贴多模态"
-            # 的能力——部分 provider（如 token-plan / opencode.ai）拒绝 tool 消息 content 数组
-            # 但接受 user 消息数组。
+            # 探测结果同时反映"工具消息中读多模态"和"用户消息中读多模态"的能力。
+            # Read 工具据此选择路径：tool 消息可用 → 直接返回多模态；仅 user 消息可用 →
+            # 通过 follow_up 用户消息延迟注入多模态内容；都不可用 → 返回错误。
             #
             # ## 返回
             # ```json
-            # {"vision_capable": true, "audio_capable": true, "model": "gpt-4o", "source": "probe", "message": "..."}
+            # {"vision_capable": true, "audio_capable": true, "user_vision_capable": true, "user_audio_capable": true, "model": "gpt-4o", "source": "probe", "message": "..."}
             # ```
             # 非模态错误时：
             # ```json
@@ -359,22 +466,22 @@ registry.register(
             # - 每次调用消耗 1-3 次 API 请求（组合探测 + 可能的单独探测）。
             # - 缓存持久化到本地 JSON 文件（modality_capability_cache.json）。
             # - 非模态错误不写入缓存，agent 可重试。
-            "description": """Test whether the current LLM model supports reading image/vision and audio **inside tool messages** (the Read-tool scenario), by disguising the probe as a Read tool call: assistant message with tool_calls followed by a tool message whose content carries the dummy image (1x1 transparent PNG) and dummy audio (valid 1s WAV).
-Each call re-probes and overwrites the cached result. The result is globally cached, so calling once is sufficient — no need to repeat.
+            "description": """Test whether the current LLM model supports reading image/vision and audio **inside tool messages** (the Read-tool scenario) AND **inside user messages**, by first disguising the probe as a Read tool call (assistant message with tool_calls followed by a tool message whose content carries dummy image and dummy audio), then — only if the tool-message probe is rejected — sending plain user messages with multimodal content blocks to test the user-message path.
+Each call re-probes and overwrites the cached result — UNLESS the cache already contains a complete entry (all four fields present), in which case the cached values are returned immediately without any API requests. The result is globally cached, so calling once is sufficient — no need to repeat.
 
 ## Effect
 Sends a combined tool-call request (image + audio in the tool message):
-- API accepts the request → both modalities work in tool messages → cache `vision=true, audio=true`.
-- API rejects → sends separate tool-call probes for each modality.
+- API accepts the request → both modalities work in tool messages → cache `vision=true, audio=true, user_vision=true, user_audio=true` (optimistic: tool support implies user support).
+- API rejects → sends separate tool-call probes for each modality, then for any modality that failed in tool messages, sends a plain user-message probe → cache all four values.
 - API fails with a non-modality error → no cache written, tool returns error.
 
 ## Semantics
-The result ONLY reflects "reading multimodal content in tool messages" (Read tool). It does NOT reflect "pasting multimodal content in user messages" — some providers (e.g. token-plan / opencode.ai) reject tool-message content arrays but accept user-message arrays.
+The result reflects BOTH "reading multimodal content in tool messages" AND "reading multimodal content in user messages". The Read tool uses this to choose its delivery path: tool-message → direct multimodal return; user-message only → delayed injection via follow-up user message; neither → error.
 
 ## Returns
 On success:
 ```json
-{"vision_capable": true, "audio_capable": true, "model": "gpt-4o", "source": "probe", "message": "..."}
+{"vision_capable": true, "audio_capable": true, "user_vision_capable": true, "user_audio_capable": true, "model": "gpt-4o", "source": "probe", "message": "..."}
 ```
 On non-modality error:
 ```json
@@ -382,11 +489,11 @@ On non-modality error:
 ```
 
 ## When to Use
-- **Do NOT call this probe proactively.** Call it only when the Read tool returns an error saying that tool-message multimodal support has not been probed yet — one call is enough, and the result is globally cached per model+provider.
-- **Important**: if you have ALREADY received image/audio content in a user message, you can understand it — do NOT call this probe to verify your own multimodal capability. The probe only checks whether the Read tool can deliver media to you via tool messages; it says nothing about your ability to understand media you already have.
+- **Do NOT call this probe proactively.** Call it only when the Read tool returns an error saying that multimodal support has not been probed yet — one call is enough, and the result is globally cached per model+provider.
+- **Important**: if you have ALREADY received image/audio content in a user message, you can understand it — do NOT call this probe to verify your own multimodal capability.
 
 ## Side Effects / Notes
-- Each call consumes 1-3 API requests (combined probe + possible individual probes).
+- Each call consumes 1-5 API requests (combined tool probe + possible individual tool probes + possible individual user-message probes).
 - Cache is persisted to a local JSON file (modality_capability_cache.json) and survives sessions until the runtime workspace is reset.
 - Non-modality errors (network, auth, timeout) are NOT cached; the agent can retry.""",
             "parameters": {

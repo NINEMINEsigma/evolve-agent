@@ -291,6 +291,7 @@ class MultiAgentWorker:
                 # 3. 执行工具，写入结果到 History
                 #    tool_call/tool_result 前端事件由 ToolExecutor 内部统一发送，此处不再重复
                 try:
+                    _executed_tool_msgs: list[ToolResultMessage] = []
                     for tc in resp.tool_calls:
                         tool_msg = await self._tool_executor.execute(
                             tc, self._loop.loop.session_id,
@@ -303,6 +304,15 @@ class MultiAgentWorker:
 
                         # 追加 tool 结果到本地 LLM 上下文（跟在 assistant tool_calls 之后）
                         full_messages.append(tool_msg)
+                        _executed_tool_msgs.append(tool_msg)
+
+                    # 延迟注入 follow_up 消息
+                    for tm in _executed_tool_msgs:
+                        if tm._follow_up_messages:
+                            for fu_msg in tm._follow_up_messages:
+                                self._loop.loop.history.add_message(fu_msg)
+                                self._loop.loop.save_history(self._loop.loop.session_id)
+                                full_messages.append(fu_msg)
                 except BaseException:
                     # 兜底：execute 内部审批/dispatch/finalize 已保护，但
                     # execute 协程被外部取消（asyncio task cancel）或未保护 await 点

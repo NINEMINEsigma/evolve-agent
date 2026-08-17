@@ -288,6 +288,8 @@ class ToolResultMessage(CharacterMessage):
     '''
     tool_call_id: str = Field(description="The id of the tool call")
 
+    _follow_up_messages: list[BaseMessage] | None = PrivateAttr(default=None)
+
     @classmethod
     def from_result(
         cls,

@@ -10,8 +10,9 @@ import json
 import logging
 from typing import Any
 
-from entity.messages import AudioBlock, BaseMessage, ImageBlock, MessageBlock, TextBlock
-from entity.puretype import MessageContent
+from entity.messages import AudioBlock, BaseMessage, CharacterConversationMessage, ImageBlock, MessageBlock, TextBlock
+from entity.puretype import MessageContent, Role
+from entity.constant import SYSTEM_CHARACTER_NAME
 
 logger = logging.getLogger(__name__)
 
@@ -200,6 +201,49 @@ def tool_result_to_content(result: Any) -> str | list[MessageBlock]:
         if all(isinstance(b, MessageBlock) for b in result):
             return result  # type: ignore[return-value]
     return str(result)
+
+
+def tool_result_to_follow_up(
+    result: dict,
+    character_name: str,
+) -> tuple[list[BaseMessage] | None, str | list[MessageBlock]]:
+    """提取 _user_image/_user_audio，构造 follow_up 用户消息。
+
+    从 result dict 中 pop _user_image/_user_audio，构造
+    CharacterConversationMessage(role=USER, character_name=system, content=[多模态块, 文本块])。
+    剩余 dict 走 tool_result_to_content 生成纯文本 ToolResultMessage content。
+
+    Returns:
+        (follow_up_messages, remaining_content)
+        - follow_up_messages: 延迟注入的 CharacterConversationMessage 列表，或 None
+        - remaining_content: ToolResultMessage 的 content（纯文本 JSON）
+    """
+    user_image = result.pop("_user_image", None)
+    user_audio = result.pop("_user_audio", None)
+
+    if user_image is None and user_audio is None:
+        return None, tool_result_to_content(result)
+
+    metadata_json = json.dumps(result, ensure_ascii=False)
+    blocks: list[MessageBlock] = []
+
+    if isinstance(user_image, dict) and user_image.get("base64"):
+        blocks.extend(build_image_content_blocks(user_image, metadata_json))
+    if isinstance(user_audio, dict) and user_audio.get("base64"):
+        blocks.extend(build_audio_content_blocks(user_audio, metadata_json))
+
+    if not blocks:
+        return None, tool_result_to_content(result)
+
+    follow_up_msg = CharacterConversationMessage(
+        role=Role.USER,
+        character_name=SYSTEM_CHARACTER_NAME,
+        content=blocks,
+        visible_characters=[character_name],
+    )
+
+    remaining_content = tool_result_to_content(result)
+    return [follow_up_msg], remaining_content
 
 
 def _strip_internal_fields(text: str) -> str:

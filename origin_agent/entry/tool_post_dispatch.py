@@ -11,8 +11,8 @@ import logging
 from typing import TYPE_CHECKING
 
 from entity.puretype import Role, ToolCallMeta
-from entity.messages import ToolResultMessage
-from entry.agent_support.multimodal import tool_result_to_content, content_to_text
+from entity.messages import BaseMessage, ToolResultMessage
+from entry.agent_support.multimodal import tool_result_to_content, tool_result_to_follow_up, content_to_text
 from abstract.tools.ui_event_router import ui_event_router
 
 if TYPE_CHECKING:
@@ -75,7 +75,12 @@ async def finalize_tool_result(
         result = {"result": result, "_meta": _meta.model_dump()}
 
     # 转换为可保存到 History 的 content
-    content = tool_result_to_content(result)
+    # 检查是否需要 follow_up（user 消息多模态回退路径）
+    follow_up_messages: list[BaseMessage] | None = None
+    if isinstance(result, dict) and ("_user_image" in result or "_user_audio" in result):
+        follow_up_messages, content = tool_result_to_follow_up(result, character_name)
+    else:
+        content = tool_result_to_content(result)
 
     # 推送前端 tool_result 事件（content_to_text 内部过滤 _ 前缀字段，避免 base64 撑爆前端）
     await sink.emit_tool_result(
@@ -92,9 +97,11 @@ async def finalize_tool_result(
         session_id,
     )
 
-    return ToolResultMessage(
+    tool_result_msg = ToolResultMessage(
         role=Role.TOOL,
         character_name=character_name,
         tool_call_id=tool_call_id,
         content=content,
     )
+    tool_result_msg._follow_up_messages = follow_up_messages
+    return tool_result_msg

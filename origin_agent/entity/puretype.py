@@ -299,6 +299,25 @@ class StreamChunk(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# Modality Capability Types
+# ---------------------------------------------------------------------------
+
+class ModalityCapability(BaseModel):
+    """探针探测的多模态能力缓存条目。
+
+    每个字段对应一种模态在一种消息路径上的支持状态：
+    - vision / audio: tool 消息中读取图片/音频的能力
+    - user_vision / user_audio: user 消息中读取图片/音频的能力
+
+    None 表示尚未探测，bool 表示探测结果。
+    """
+    vision: bool | None = None
+    audio: bool | None = None
+    user_vision: bool | None = None
+    user_audio: bool | None = None
+
+
+# ---------------------------------------------------------------------------
 # Agent Config Types
 # ---------------------------------------------------------------------------
 

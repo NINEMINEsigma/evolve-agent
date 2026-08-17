@@ -40,7 +40,7 @@ except Exception:  # pragma: no cover — PIL is optional
     logger.debug("PIL not available; image size parsing disabled", exc_info=True)
     PILImage = None  # type: ignore
 
-from .modality_capability import get_cached_vision_support, get_cached_audio_support
+from .modality_capability import get_cached_vision_support, get_cached_audio_support, get_cached_user_vision_support, get_cached_user_audio_support
 
 logger = logging.getLogger(__name__)
 
@@ -213,8 +213,8 @@ def _handle_read(args: dict[str, Any]) -> dict:
                     "No LLM model configured; cannot determine vision capability.",
                     path=path,
                 )
-            vision_capable = get_cached_vision_support(model_name)
-            if vision_capable is None:
+            tool_vision = get_cached_vision_support(model_name)
+            if tool_vision is None:
                 return tool_error(
                     f"Read-tool image support for model '{model_name}' has not been probed yet. "
                     "Call `probe_modality_capability` to test whether this provider accepts "
@@ -222,17 +222,70 @@ def _handle_read(args: dict[str, Any]) -> dict:
                     path=path,
                     model=model_name,
                 )
-            if vision_capable is False:
-                return tool_error(
-                    f"This provider does not support images inside tool messages, so the Read tool "
-                    f"cannot deliver image content to the model. Note: the model itself may still "
-                    f"understand images pasted directly in user messages — only the Read-tool path "
-                    f"is unavailable on this provider.",
-                    path=path,
-                    model=model_name,
+            if tool_vision is False:
+                # tool 消息不支持，检查 user 消息是否支持
+                user_vision = get_cached_user_vision_support(model_name)
+                if user_vision is None:
+                    return tool_error(
+                        f"User-message image support for model '{model_name}' has not been probed yet. "
+                        "Call `probe_modality_capability` to test.",
+                        path=path,
+                        model=model_name,
+                    )
+                if user_vision is False:
+                    return tool_error(
+                        f"This provider does not support images inside either tool messages or user messages, "
+                        f"so the Read tool cannot deliver image content to the model.",
+                        path=path,
+                        model=model_name,
+                    )
+                # user 消息支持 → 走 follow_up 路径
+                # 大小检查
+                file_size: int = resolved.real.stat().st_size
+                if file_size > _MAX_IMAGE_SIZE:
+                    return tool_error(
+                        f"Image too large: {file_size} bytes (max {_MAX_IMAGE_SIZE})",
+                        path=path,
+                        size=file_size,
+                    )
+                try:
+                    raw_bytes: bytes = resolved.real.read_bytes()
+                    b64: str = base64.b64encode(raw_bytes).decode("ascii")
+                except Exception as exc:
+                    return tool_error(f"Failed to read image: {exc}", path=path)
+                width, height = _parse_size(raw_bytes, mime_type)
+                logger.info(
+                    "read_image | path=%s mime=%s size=%d w=%s h=%s (user-message fallback)",
+                    path, mime_type, file_size, width, height,
                 )
+                return {
+                    "type": "image",
+                    "path": path,
+                    "absolute_path": str(resolved.real),
+                    "mime_type": mime_type,
+                    "size": file_size,
+                    "width": width,
+                    "height": height,
+                    "_user_image": {
+                        "base64": b64,
+                        "mime_type": mime_type,
+                    },
+                    "_note": (
+                        "Image content will be delivered as a user message after this tool round. "
+                        "Do NOT call any more tools — respond directly to receive the image. "
+                        "width/height are parsed via Pillow (None for SVG or on failure)."
+                    ),
+                    "total_lines": 0,
+                    "content": "",
+                    "remaining": 0,
+                    "offset": 0,
+                    "limit": 0,
+                    "entries": [],
+                    "count": None,
+                }
+            # tool_vision is True → 现有行为
             # 大小检查
-            file_size: int = resolved.real.stat().st_size
+            file_size = resolved.real.stat().st_size
             if file_size > _MAX_IMAGE_SIZE:
                 return tool_error(
                     f"Image too large: {file_size} bytes (max {_MAX_IMAGE_SIZE})",
@@ -241,8 +294,8 @@ def _handle_read(args: dict[str, Any]) -> dict:
                 )
             # 读取 + base64
             try:
-                raw_bytes: bytes = resolved.real.read_bytes()
-                b64: str = base64.b64encode(raw_bytes).decode("ascii")
+                raw_bytes = resolved.real.read_bytes()
+                b64 = base64.b64encode(raw_bytes).decode("ascii")
             except Exception as exc:
                 return tool_error(f"Failed to read image: {exc}", path=path)
             width, height = _parse_size(raw_bytes, mime_type)
@@ -283,8 +336,8 @@ def _handle_read(args: dict[str, Any]) -> dict:
                     "No LLM model configured; cannot determine audio capability.",
                     path=path,
                 )
-            audio_capable = get_cached_audio_support(model_name)
-            if audio_capable is None:
+            tool_audio = get_cached_audio_support(model_name)
+            if tool_audio is None:
                 return tool_error(
                     f"Read-tool audio support for model '{model_name}' has not been probed yet. "
                     "Call `probe_modality_capability` to test whether this provider accepts "
@@ -292,15 +345,64 @@ def _handle_read(args: dict[str, Any]) -> dict:
                     path=path,
                     model=model_name,
                 )
-            if audio_capable is False:
-                return tool_error(
-                    f"This provider does not support audio inside tool messages, so the Read tool "
-                    f"cannot deliver audio content to the model. Note: the model itself may still "
-                    f"understand audio pasted directly in user messages — only the Read-tool path "
-                    f"is unavailable on this provider.",
-                    path=path,
-                    model=model_name,
+            if tool_audio is False:
+                # tool 消息不支持，检查 user 消息是否支持
+                user_audio = get_cached_user_audio_support(model_name)
+                if user_audio is None:
+                    return tool_error(
+                        f"User-message audio support for model '{model_name}' has not been probed yet. "
+                        "Call `probe_modality_capability` to test.",
+                        path=path,
+                        model=model_name,
+                    )
+                if user_audio is False:
+                    return tool_error(
+                        f"This provider does not support audio inside either tool messages or user messages, "
+                        f"so the Read tool cannot deliver audio content to the model.",
+                        path=path,
+                        model=model_name,
+                    )
+                # user 消息支持 → 走 follow_up 路径
+                file_size = resolved.real.stat().st_size
+                if file_size > _MAX_AUDIO_SIZE:
+                    return tool_error(
+                        f"Audio too large: {file_size} bytes (max {_MAX_AUDIO_SIZE})",
+                        path=path,
+                        size=file_size,
+                    )
+                try:
+                    raw_bytes = resolved.real.read_bytes()
+                    b64 = base64.b64encode(raw_bytes).decode("ascii")
+                except Exception as exc:
+                    return tool_error(f"Failed to read audio: {exc}", path=path)
+                audio_format: str = _AUDIO_FORMAT_MAP.get(mime_type, "wav")
+                logger.info(
+                    "read_audio | path=%s mime=%s size=%d format=%s (user-message fallback)",
+                    path, mime_type, file_size, audio_format,
                 )
+                return {
+                    "type": "audio",
+                    "path": path,
+                    "absolute_path": str(resolved.real),
+                    "mime_type": mime_type,
+                    "size": file_size,
+                    "_user_audio": {
+                        "base64": b64,
+                        "format": audio_format,
+                    },
+                    "_note": (
+                        "Audio content will be delivered as a user message after this tool round. "
+                        "Do NOT call any more tools — respond directly to receive the audio."
+                    ),
+                    "total_lines": 0,
+                    "content": "",
+                    "remaining": 0,
+                    "offset": 0,
+                    "limit": 0,
+                    "entries": [],
+                    "count": None,
+                }
+            # tool_audio is True → 现有行为
             file_size = resolved.real.stat().st_size
             if file_size > _MAX_AUDIO_SIZE:
                 return tool_error(
@@ -313,7 +415,7 @@ def _handle_read(args: dict[str, Any]) -> dict:
                 b64 = base64.b64encode(raw_bytes).decode("ascii")
             except Exception as exc:
                 return tool_error(f"Failed to read audio: {exc}", path=path)
-            audio_format: str = _AUDIO_FORMAT_MAP.get(mime_type, "wav")
+            audio_format = _AUDIO_FORMAT_MAP.get(mime_type, "wav")
             logger.info(
                 "read_audio | path=%s mime=%s size=%d format=%s",
                 path, mime_type, file_size, audio_format,
@@ -507,31 +609,39 @@ registry.register(
     name="Read",
     toolset="filesystem",
     schema={
-        # 读取文件内容（带行号前缀、总行数、绝对路径）、列出目录条目、或读取图片文件（按 MIME 自动检测）。
+        # 读取文件内容（带行号前缀、总行数、绝对路径）、列出目录条目、或读取图片/音频文件（按 MIME 自动检测）。
         # 支持命名空间前缀：ws:、fork:、fix:、skills: 及其他只读命名空间。
-        # 目录分支忽略 offset/limit，文件分支使用 offset/limit 分页，图片分支忽略 offset/limit。
+        # 目录分支忽略 offset/limit，文件分支使用 offset/limit 分页，图片/音频分支忽略 offset/limit。
         #
-        # ## 图片分支（MIME 自动检测）
-        # 当文件 MIME 类型命中图片白名单（PNG/JPEG/WebP/GIF/BMP/TIFF/SVG）时自动走图片分支。
-        # 前置条件：probe_modality_capability 必须已探测且 capable=true（仅反映 Read 工具的
-        # tool 消息图片/音频路径是否被 provider 接受），否则返回错误不读文件。
-        # 支持最大 20MB。返回 type:"image"，含 path、mime_type、size、width、height、_image（base64+mime_type）、_note。
-        # _image 载荷由 tool_result_to_content 提取并构造为 ImageBlock + TextBlock（元数据），base64 不进入 TextBlock。
-        # offset/limit 在图片分支中被忽略（固定填充为 0）。
+        # ## 图片/音频分支（MIME 自动检测）
+        # 当文件 MIME 类型命中图片白名单（PNG/JPEG/WebP/GIF/BMP/TIFF/SVG）或音频白名单（WAV/MP3）时自动走对应分支。
+        # 前置条件：probe_modality_capability 必须已探测。探测结果分三态：
+        # - tool 消息支持 → 直接返回 _image/_audio（多模态块在 tool 消息中传递）
+        # - 仅 user 消息支持 → 返回 _user_image/_user_audio，多模态内容在当前轮工具调用完成后
+        #   通过 follow_up 用户消息注入上下文，返回文本提醒模型不要再调用工具
+        # - 都不支持 → 返回错误，不读取文件
+        # 支持最大图片 20MB、音频 25MB。
+        # _image/_audio 载荷由 tool_result_to_content 提取并构造为 ImageBlock/AudioBlock + TextBlock（元数据）。
+        # _user_image/_user_audio 载荷由 tool_result_to_follow_up 提取并构造为 CharacterConversationMessage
+        # （role=USER, character_name=system, visible_characters=[当前角色]）。
+        # offset/limit 在图片/音频分支中被忽略（固定填充为 0）。
         #
         # ## 前置条件
         # - 路径必须存在（文件或目录均可）。
         # - 路径必须使用命名空间前缀。
-        # - 图片分支额外要求：probe_modality_capability 已探测且 capable=true（provider 在
-        #   tool 消息中接受图片，Read 工具才能把图传给模型；模型自身的多模态能力不受此限制）。
+        # - 图片/音频分支额外要求：probe_modality_capability 已探测（至少 tool 或 user 消息之一
+        #   支持该模态），否则返回错误不读文件。
         #
         # ## 调用效果
         # **文件分支**：返回文件内容，每行前缀为 1-indexed 行号。
         # 支持 offset（0-indexed 起始行）和 limit（最大行数）分页。
         # **目录分支**：返回条目名称列表，目录条目以 "/" 后缀标识。
         # offset/limit 在目录分支中被忽略（固定填充为 0）。
-        # **图片分支**：按 MIME 自动检测，返回图片元数据 + _image base64 载荷。
-        # offset/limit 在图片分支中被忽略（固定填充为 0）。
+        # **图片分支**：按 MIME 自动检测。若 tool 消息支持 → 返回 _image（多模态块在 tool 消息中传递）；
+        # 若仅 user 消息支持 → 返回 _user_image，多模态内容在当前轮工具调用完成后通过用户消息注入，
+        # 返回文本提醒模型不要再调用工具；都不支持 → 返回错误。
+        # **音频分支**：与图片分支对称。
+        # offset/limit 在图片/音频分支中被忽略（固定填充为 0）。
         #
         # ## 返回
         # ```json
@@ -544,27 +654,36 @@ registry.register(
         # - 分页浏览大文件。
         # - 通过行号引用具体位置。
         # - 利用 `remaining` 判断是否需要继续分页读取。
-        # - 读取图片文件（需 provider 支持 tool 消息图片；未探测时 Read 会返回错误提示探测一次）。
+        # - 读取图片/音频文件（需先调用 probe_modality_capability 探测；未探测时 Read 返回错误提示探测一次）。
+        # - 即使 provider 不支持 tool 消息多模态，只要支持 user 消息多模态，Read 仍可通过
+        #   follow_up 用户消息回退路径传递图片/音频内容。
         #
         # ## 副作用/注意
         # - 无副作用，纯查询。
         # - offset < 0 或 limit < 1 返回错误。
         # - 文件不存在或沙箱拒绝访问返回描述性错误。
-        # - 图片分支：未探测 tool 消息图片支持或 provider 拒绝 tool 消息图片时返回错误，不读取文件。
-        "description": """Read file content (with line numbers, total lines, absolute path), list directory entries, or read an image file (auto-detected by MIME type). Supports namespace prefixes: ws:, fork:, fix:, skills:, and read-only namespaces.
+        # - 图片/音频分支：未探测或 tool/user 消息都不支持时返回错误，不读取文件。
+        # - 仅 user 消息支持时，返回 _user_image/_user_audio 而非 _image/_audio，
+        #   多模态内容将在当前轮工具调用完成后通过用户消息注入，返回文本提醒不要再调用工具。
+        "description": """Read file content (with line numbers, total lines, absolute path), list directory entries, or read an image/audio file (auto-detected by MIME type). Supports namespace prefixes: ws:, fork:, fix:, skills:, and read-only namespaces.
 
 ## Prerequisites
 - The path must exist (file or directory).
 - The path must use a namespace prefix.
-- Image branch additionally requires the provider to accept images inside tool messages; if this has not been probed yet, Read returns an error prompting a one-time probe.
+- Image/audio branches additionally require `probe_modality_capability` to have been called at least once. If unprobed, Read returns an error prompting a one-time probe.
 
 ## Effect
 **File branch**: Returns file content prefixed with 1-indexed line numbers. Supports pagination via offset (0-indexed start) and limit (max lines).
 **Directory branch**: Returns entry names; directory entries suffixed with '/'. offset and limit are ignored for directories (filled as 0).
-**Image branch**: Auto-detected by MIME type (PNG, JPEG, WebP, GIF, BMP, TIFF, SVG; max 20 MB). Returns metadata plus the `_image` payload (base64 + mime_type). Requires the provider to accept images inside tool messages (`probe_modality_capability` must return `vision_capable=true`); providers that reject tool-message images get an error and the file is not read. This affects only the Read-tool path — pasting images in user messages is unaffected. offset and limit are ignored for images (filled as 0).
+**Image branch**: Auto-detected by MIME type (PNG, JPEG, WebP, GIF, BMP, TIFF, SVG; max 20 MB). Delivery path depends on probe results:
+- `vision_capable=true` → image is delivered directly in the tool message as an `_image` payload (multimodal content block).
+- `vision_capable=false` but `user_vision_capable=true` → image is delivered via a follow-up user message after the current tool round completes. The tool result contains `_user_image` and a text note advising you NOT to call any more tools — respond directly to receive the image.
+- Both false → error, file is not read.
+offset and limit are ignored for images (filled as 0).
 
-**Audio branch**: Auto-detected by MIME type (WAV, MP3; max 25 MB). Returns metadata plus the `_audio` payload (base64 + format). Requires the provider to accept audio inside tool messages (`probe_modality_capability` must return `audio_capable=true`); providers that reject tool-message audio get an error and the file is not read. This affects only the Read-tool path — pasting audio in user messages is unaffected. offset and limit are ignored for audio (filled as 0).
-All branches return absolute_path (resolved absolute path), total_lines (line count; 0 for directories/images), entries (directory entries; empty array for files/images), and a type discriminant ("file", "directory", or "image").
+**Audio branch**: Auto-detected by MIME type (WAV, MP3; max 25 MB). Same three-state delivery as the image branch, using `_audio` / `_user_audio` / error. offset and limit are ignored for audio (filled as 0).
+
+All branches return absolute_path (resolved absolute path), total_lines (line count; 0 for directories/images/audio), entries (directory entries; empty array for files/images/audio), and a type discriminant ("file", "directory", "image", or "audio").
 
 ## Returns
 File branch:
@@ -575,25 +694,29 @@ Directory branch:
 ```json
 {"type": "directory", "path": "ws:src", "absolute_path": "...", "total_lines": 0, "content": "", "remaining": 0, "offset": 0, "limit": 0, "entries": ["a.py", "sub/"], "count": 2}
 ```
-Image branch:
+Image branch (tool-message path):
 ```json
 {"type": "image", "path": "ws:uploads/screenshot.png", "absolute_path": "...", "mime_type": "image/png", "size": 12345, "width": 800, "height": 600, "_image": {"base64": "...", "mime_type": "image/png"}, "_note": "Image metadata returned...", "total_lines": 0, "content": "", "remaining": 0, "offset": 0, "limit": 0, "entries": [], "count": null}
 ```
-`width`/`height` are parsed via Pillow; `null` for SVG or on parse failure. The `_image` payload is extracted by `tool_result_to_content` into an `ImageBlock` (multimodal) and a `TextBlock` (metadata only, no base64).
+Image branch (user-message fallback path):
+```json
+{"type": "image", "path": "ws:uploads/screenshot.png", "absolute_path": "...", "mime_type": "image/png", "size": 12345, "width": 800, "height": 600, "_user_image": {"base64": "...", "mime_type": "image/png"}, "_note": "Image content will be delivered as a user message after this tool round. Do NOT call any more tools...", "total_lines": 0, "content": "", "remaining": 0, "offset": 0, "limit": 0, "entries": [], "count": null}
+```
+`width`/`height` are parsed via Pillow; `null` for SVG or on parse failure.
 
 ## When to Use
-- Targets a file → file branch; targets a directory → directory branch; image files → image branch (auto-detected).
+- Targets a file → file branch; targets a directory → directory branch; image/audio files → image/audio branch (auto-detected).
 - Use skills: prefix to replace the old read_skill_file tool (e.g. Read(path="skills:my-skill/scripts/hello.py")).
 - Use absolute_path to resolve paths when you have a readable target.
-- Read image files via the tool-message path (requires provider support; if unprobed, Read returns an error prompting a one-time probe). Providers that reject images in tool messages get an error and the file is not read.
-- Read audio files via the tool-message path (requires provider support; if unprobed, Read returns an error prompting a one-time probe). Providers that reject audio in tool messages get an error and the file is not read.
+- Read image/audio files: call `probe_modality_capability` first if not yet probed. Even if the provider rejects multimodal in tool messages, Read can still deliver images/audio via a follow-up user message when the provider accepts multimodal in user messages.
 
 ## Side Effects / Notes
 - No file system side effects, read-only query.
 - offset < 0 or limit out of range returns an error.
 - Non-existent or unsupported paths return a descriptive error.
-- For directories and images, offset/limit are ignored and filled as 0.
-- Image branch: returns an error if tool-message image support has not been probed or the provider rejects images in tool messages; the file is not read in this case.""",
+- For directories, images, and audio, offset/limit are ignored and filled as 0.
+- Image/audio branch: returns an error if support has not been probed or both tool and user messages are unsupported; the file is not read in this case.
+- User-message fallback: when only user-message multimodal is supported, the tool result text includes a note advising you to stop calling tools and respond directly — the image/audio will arrive as a user message after the current tool round.""",
         "parameters": {
             "type": "object",
             "properties": {

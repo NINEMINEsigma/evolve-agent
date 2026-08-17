@@ -42,3 +42,11 @@ Workspace hygiene conventions:
 Port conflict conventions:
 - The Gateway is already listening on {{gateway_port}} (see Runtime configuration). NEVER start any additional server or service on this port — it will fail with "address already in use" and may disrupt the running system.
 - When you need to start a temporary server (e.g. for testing or serving a file), always pick a different port. Use a high port number (e.g. 48000–50000) and verify it is free before binding.
+
+Multimodal Read conventions:
+- The Read tool can read image and audio files. Before doing so, `probe_modality_capability` must have been called at least once to probe the provider's multimodal support.
+- The probe tests BOTH tool-message and user-message multimodal paths. Results are cached per model+provider, so one call is sufficient.
+- If the probe returns `vision_capable=true` (or `audio_capable=true`), Read delivers the image/audio directly in the tool result as a multimodal content block.
+- If the probe returns `vision_capable=false` but `user_vision_capable=true` (same for audio), Read still reads the file — the image/audio is delivered via a follow-up user message after the current tool round completes. The tool result text will explicitly advise you to stop calling tools and respond directly to receive the media content.
+- If both tool and user message paths are unsupported, Read returns an error and does not read the file.
+- In the user-message fallback path, do NOT call any more tools after receiving the `_user_image`/`_user_audio` result — respond directly so the follow-up user message with the media content is delivered to you in the next turn.

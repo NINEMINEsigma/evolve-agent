@@ -128,6 +128,7 @@ class TaskAgentLoop(SubAgentLoop):
 
                 # 处理工具调用 — safe 直接执行；理论上非 safe 不在工具集中
                 try:
+                    _executed_tool_msgs: list[ToolResultMessage] = []
                     for i, tc in enumerate(resp.tool_calls):
                         if self._cancel_event.is_set():
                             for remaining in resp.tool_calls[i:]:
@@ -156,6 +157,13 @@ class TaskAgentLoop(SubAgentLoop):
 
                         messages.append(tool_msg)
                         self._history.add_message(tool_msg)
+                        _executed_tool_msgs.append(tool_msg)
+
+                    # 延迟注入 follow_up 消息
+                    for tm in _executed_tool_msgs:
+                        if tm._follow_up_messages:
+                            for fu_msg in tm._follow_up_messages:
+                                self._history.add_message(fu_msg)
                 except BaseException:
                     logger.exception(
                         "TaskAgent tool loop failed | session=%s", self.session_id,
