@@ -409,6 +409,7 @@ class MessageType(str, Enum):
     ASK_REQUEST = "ask_request"
     ASK_RESPONSE = "ask_response"
     INTERRUPT = "interrupt"
+    DISGUST = "disgust"          # 厌恶信号，不中断 LLM 生成，拦截工具调用
     ERROR = "error"
     SYSTEM = "system"
     FILE_UPLOAD = "file_upload"

@@ -298,6 +298,7 @@ export default function Layout({ ws, onContextMenu, contextMenuOpen }: LayoutPro
             onUpload={ws.handleFileInputChange}
             onUploadClick={ws.handleUploadClick}
             onInterrupt={ws.interrupt}
+            onDisgust={ws.disgust}
             fileInputRef={ws.fileInputRef}
             pendingImages={ws.pendingImages}
             onRemovePendingImage={ws.removePendingImage}

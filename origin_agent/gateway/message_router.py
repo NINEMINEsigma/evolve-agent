@@ -142,6 +142,9 @@ class MessageRouter:
         elif msg.type == MessageType.INTERRUPT:
             await self.handle_interrupt()
 
+        elif msg.type == MessageType.DISGUST:
+            await self.handle_disgust()
+
         elif msg.type == MessageType.FILE_UPLOAD:
             await self.handle_file_upload(msg)
 
@@ -275,6 +278,13 @@ class MessageRouter:
         loop = _get_loop(self.sid)
         if loop is not None and loop.loop is not None:
             loop.loop.interrupt()
+
+    async def handle_disgust(self) -> None:
+        """处理厌恶请求。"""
+        logger.info("WS disgust | session=%s", self.sid)
+        loop = _get_loop(self.sid)
+        if loop is not None and loop.loop is not None:
+            loop.loop.disgust()
 
     async def handle_file_upload(self, msg: Message) -> None:
         """处理文件上传：优先硬链接，fallback 到复制或 base64 解码。"""

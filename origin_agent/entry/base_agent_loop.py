@@ -286,6 +286,7 @@ class BaseAgentLoop(ABC):
         self.app: Application = app
         self._inbox: Inbox = Inbox()
         self._cancel_event: asyncio.Event = asyncio.Event()
+        self._disgust_event: asyncio.Event = asyncio.Event()
         self._message_hooks_cache: list[dict] | None = None
         self._history: History = History()
         self._session_store: SessionStore | None = None
@@ -406,6 +407,17 @@ class BaseAgentLoop(ABC):
     def is_interrupted(self) -> bool:
         """返回 True 表示存在活跃的中断请求。"""
         return self._cancel_event.is_set()
+
+    # -- 厌恶控制 ---------------------------------------------------------
+
+    def disgust(self) -> None:
+        """请求厌恶模式：不中断 LLM 生成，但后续所有工具调用返回厌恶错误。"""
+        logger.info("Disgust requested | session=%s", self.session_id)
+        self._disgust_event.set()
+
+    def is_disgusted(self) -> bool:
+        """返回 True 表示存在活跃的厌恶请求。"""
+        return self._disgust_event.is_set()
 
     async def _check_cancel(self) -> bool:
         """检查取消事件，已中断则返回 True。"""

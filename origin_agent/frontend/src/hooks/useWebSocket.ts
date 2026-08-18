@@ -323,6 +323,18 @@ export function useWebSocket() {
     fetch(`/api/interrupt/${s.sessionId || "unknown"}`, { method: "POST" }).catch(() => {});
   }, []);
 
+  const disgust = useCallback(() => {
+    const s = sessionRef.current;
+    if (!s) return;
+    // 厌恶：不停止流式消息、不设置 ignoreStaleRef
+    // 仅添加系统消息并通知后端
+    s.setMessages((prev) => [
+      ...prev,
+      { role: "system" as const, content: "👎 用户表达了强烈不满", id: generateUUID() },
+    ]);
+    fetch(`/api/disgust/${s.sessionId || "unknown"}`, { method: "POST" }).catch(() => {});
+  }, []);
+
   const respondConfirm = useCallback((request: ConfirmRequest | null, action: string, denyReasonText?: string, deniedBy?: string) => {
     const s = sessionRef.current;
     if (!s) return;
@@ -490,6 +502,7 @@ export function useWebSocket() {
     respondAsk,
     toggleHandsfree,
     interrupt,
+    disgust,
     toggleMessageCollapse: session.toggleMessageCollapse,
     editMessage: session.editMessage,
     deleteMessages: session.deleteMessages,

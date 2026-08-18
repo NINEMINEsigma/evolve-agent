@@ -149,6 +149,45 @@ class ToolExecutor:
 
         args["_session_id"] = session_id
 
+        # 厌恶检查：不中断 LLM 生成，但拦截所有工具调用
+        if self._loop.loop.is_disgusted():
+            logger.info("Tool call '%s' rejected — user disgust active", tc.name)
+            # 仍推送 tool_call 和 tool_result 事件到前端（厌恶不抑制事件）
+            await self._loop.loop.get_sink().emit_tool_call(
+                session_id, tc.name, tc.id, args,
+                character_name=char_name,
+            )
+            _meta = ToolCallMeta(
+                application_time=application_time,
+                application_time_ms=application_time_ms,
+                approval_duration_ms=0,
+                invocation_start_offset_ms=0,
+                invocation_duration_ms=0,
+                end_time_offset_ms=0,
+            )
+            _disgust_result = json.dumps({
+                "error": "Tool call rejected: the user has expressed strong dissatisfaction (disgust). Stop calling tools and address the user's concerns directly.",
+                "_disgusted": True,
+                "_meta": _meta.model_dump(),
+            }, ensure_ascii=False)
+            await self._loop.loop.get_sink().emit_tool_result(
+                session_id, tc.name, tc.id,
+                _disgust_result,
+                character_name=char_name,
+                tool_call_meta=_meta.model_dump(),
+            )
+            # 统计
+            if tc.name not in self._tool_stats:
+                self._tool_stats[tc.name] = {"calls": 0, "errors": 0}
+            self._tool_stats[tc.name]["calls"] += 1
+            self._tool_stats[tc.name]["errors"] += 1
+            return ToolResultMessage(
+                role=Role.TOOL,
+                character_name=char_name,
+                tool_call_id=tc.id,
+                content=_disgust_result,
+            )
+
         # parse error
         if args.get("_parse_error"):
             logger.warning(

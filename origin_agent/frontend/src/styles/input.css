@@ -217,6 +217,26 @@
   color: var(--text-secondary);
 }
 
+.disgust-btn {
+  width: var(--icon-btn-md);
+  height: var(--icon-btn-md);
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background var(--duration-fast), color var(--duration-fast);
+}
+
+.disgust-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text-secondary);
+}
+
 /* ── Agentspace FAB ── */
 .agentspace-fab {
   width: 34px;

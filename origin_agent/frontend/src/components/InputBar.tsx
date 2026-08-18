@@ -24,6 +24,7 @@ interface InputBarProps {
   onUpload: (e: ChangeEvent<HTMLInputElement>) => void;
   onUploadClick: () => Promise<void>;
   onInterrupt: () => void;
+  onDisgust: () => void;
   fileInputRef: RefObject<HTMLInputElement>;
   pendingImages: PendingImage[];
   onRemovePendingImage: (id: string) => void;
@@ -62,6 +63,7 @@ export default function InputBar({
   onUpload,
   onUploadClick,
   onInterrupt,
+  onDisgust,
   fileInputRef,
   pendingImages,
   onRemovePendingImage,
@@ -300,6 +302,19 @@ export default function InputBar({
             <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2">
               <path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z" />
               <path d="M10 13l4-4M14 9h-4v4" />
+            </svg>
+          </button>
+          <button
+            className="disgust-btn"
+            onClick={onDisgust}
+            data-tooltip="表达强烈不满（工具调用将被拒绝）"
+            type="button"
+          >
+            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="M7 9V5a3 3 0 0 1 6 0v4" />
+              <path d="M3 11h14a4 4 0 0 1-1.5 3.1l-1.5 1.2a4 4 0 0 1-2.5.9H7a4 4 0 0 1-4-4z" />
+              <line x1="7" y1="11" x2="7" y2="20" />
+              <line x1="11" y1="11" x2="11" y2="20" />
             </svg>
           </button>
           <button

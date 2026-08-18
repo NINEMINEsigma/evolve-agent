@@ -631,6 +631,17 @@ async def http_interrupt(session_id: str):
     return {"interrupted": True, "session_id": session_id}
 
 
+@app.post("/api/disgust/{session_id}")
+async def http_disgust(session_id: str):
+    """通过 HTTP 处理厌恶请求，使其在 WS handler 被
+    ``process_message()`` 阻塞时仍能生效。"""
+    logger.info("HTTP disgust | session=%s", session_id)
+    loop = _get_loop(session_id)
+    if loop is not None:
+        loop.loop.disgust()
+    return {"disgusted": True, "session_id": session_id}
+
+
 @app.delete("/api/sessions/{session_id}")
 async def delete_session(session_id: str):
     """删除 session 及其持久化数据。colloquy session 不可删除。"""

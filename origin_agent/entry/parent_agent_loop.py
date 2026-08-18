@@ -269,6 +269,7 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
     ) -> str:
         sid = self.session_id
         self._cancel_event.clear()
+        self._disgust_event.clear()
         self._processing = True
         self._event_loop = asyncio.get_running_loop()
 
@@ -308,6 +309,7 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
     ) -> str:
         """执行 LLM 工具调用循环（含 inbox 消息消费）。"""
         self._cancel_event.clear()
+        self._disgust_event.clear()
 
         turn: int = 0
         try:
@@ -497,6 +499,7 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
 
             sid = self.session_id
             self._cancel_event.clear()
+            self._disgust_event.clear()
             self._processing = True
             self._event_loop = asyncio.get_running_loop()
 
