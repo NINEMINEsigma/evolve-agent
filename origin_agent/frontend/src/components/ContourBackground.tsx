@@ -16,6 +16,9 @@ interface ContourBackgroundProps {
   seedKey?: string;
 }
 
+// 等高线背景总开关：false 时 ChatArea 不再渲染该组件，代码保留以便随时恢复
+export const CONTOUR_BACKGROUND_ENABLED = false;
+
 /* ── 渲染常量 ── */
 // 单个 canvas 块的文档高度（px）
 const TILE_HEIGHT = 2048;

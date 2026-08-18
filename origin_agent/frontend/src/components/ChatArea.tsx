@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { ChatMessage, MessageContent } from "../types";
 import MessageItem from "./MessageItem";
 import Minimap from "./Minimap";
-import ContourBackground from "./ContourBackground";
+import ContourBackground, { CONTOUR_BACKGROUND_ENABLED } from "./ContourBackground";
 import { DIMENSIONS } from "../constants/dimensions";
 
 interface ChatAreaProps {
@@ -111,12 +111,14 @@ export default function ChatArea({ messages, waiting, archived, onImageClick, on
           }
         }}
       >
-        <ContourBackground
-          scrollRef={chatAreaRef}
-          contentRef={contentRef}
-          messages={terrainMessages}
-          seedKey={sessionId}
-        />
+        {CONTOUR_BACKGROUND_ENABLED && (
+          <ContourBackground
+            scrollRef={chatAreaRef}
+            contentRef={contentRef}
+            messages={terrainMessages}
+            seedKey={sessionId}
+          />
+        )}
         <div className="chat-content" ref={contentRef}>
           {showSkeleton ? (
             <>
