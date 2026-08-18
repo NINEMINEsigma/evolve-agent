@@ -116,7 +116,7 @@ component/
 
 #### `approval/core.py` — 统一审批入口
 
-- `request_user_confirm(session_id, tool_name, args, ...) -> ApprovalResult`：统一审批入口，自动分流脱手模式与正常模式。
+- `request_user_confirm(session_id, tool_name, args, ...) -> ApprovalResult`：统一审批入口，自动分流脱手模式与手动模式。
 - `ask_agent_reason(llm, tool_name, args, question, ...) -> str`：脱手模式专用，向 Agent 主模型提问获取上下文。
 
 #### `approval/executor.py` — 工具审批执行器
@@ -136,7 +136,7 @@ component/
 #### `approval/policy.py` — 审批策略
 
 - `needs_approval(policy, danger_level, handsfree) -> bool`：根据策略和脱手模式判断工具是否需要审批。
-- `MAIN_SESSION_POLICY`：主会话策略（正常模式仅 dangerous+critical 需审批，脱手模式 write+dangerous+critical 需审批）。
+- `MAIN_SESSION_POLICY`：主会话策略（手动模式仅 dangerous+critical 需审批，脱手模式 write+dangerous+critical 需审批）。
 - `SUB_SESSION_POLICY`：子会话策略（write+dangerous+critical 在两种模式下均需审批）。
 - `ApprovalPolicy` 数据类定义在 `entity/puretype.py`。
 
@@ -146,7 +146,7 @@ component/
 2. `execute_with_approval` 判断工具危险等级与白名单。
 3. 若工具在 allowlist 中或危险等级为 `safe`，直接执行。
 4. 否则进入审批流程：
-   - **正常模式**：通过 `AgentSink.request_approval()` 弹出前端确认请求，等待用户决策。
+   - **手动模式**：通过 `AgentSink.request_approval()` 弹出前端确认请求，等待用户决策。
    - **脱手模式**：通过 `ApprovalBackend.chat()` 调用本地/远程模型自动评估。
 5. 审批结果回传后，允许执行或返回拒绝结果。
 

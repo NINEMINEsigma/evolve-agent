@@ -290,7 +290,7 @@ class Sandbox:
     ) -> subprocess.CompletedProcess:
         """以沙盒化工作目录运行子进程。
 
-        *args* — 命令 + 参数。命令 basename 必须在允许列表中。
+        *args* — 命令 + 参数。命令 basename 必须在白名单中。
 
         *cwd_ns* — 子进程的逻辑工作目录。
 

@@ -16,12 +16,12 @@
 ## 仓库布局
 
 ```
-origin_agent/        ← 唯一源码真相源（编辑这里）
+origin_agent/        ← origin仓库（源码真相源，编辑这里）
 workspace/
-  fast_agent_space/  ← 当前运行的 agent 副本
-  slow_agent_space/  ← 进化目标（fork:）
-  .fallback/         ← 上一次 fast 的备份 / fallback 修复体（fix:）
-  agentspace/        ← agent 通用 I/O（ws:），含 SOUL.md、uploads/
+  fast_agent_space/  ← fast仓库（当前运行副本）
+  slow_agent_space/  ← slow仓库（进化目标副本，fork:）
+  .fallback/         ← fallback仓库（备份 / 回退修复体，fix:）
+  agentspace/        ← 工作空间（agent 的 workspace，ws:），含 SOUL.md、uploads/
   sessions/          ← 会话历史与索引
   logs/              ← 运行日志、evolution.status
 third/               ← git 子模块（easysave、llamaapis），只读
@@ -61,11 +61,11 @@ custom_*、skills/    ← 根目录扩展点；skills/ 运行时生成
 
 ## 模板系统（system/prompt.py）
 
-组装顺序：根目录 `GENE.md`（不可变身份）→ `agentspace/SOUL.md`（可编辑个性，run.py 首次启动时创建/复制）→ `templates/base.txt` → `templates/modes/{fast,fallback}.txt` → `templates/tools.txt` → `tools_subagent.txt`（仅 MAIN scope）→ 额外块。
+组装顺序：根目录 GENE.md（基因——先天身份）→ agentspace/SOUL.md（灵魂——后天个性，run.py 首次启动时创建/复制）→ `templates/base.txt` → `templates/modes/{fast,fallback}.txt` → `templates/tools.txt` → `tools_subagent.txt`（仅 MAIN scope）→ 额外块。
 
-## 审批（脱手模式）
+## 审批系统
 
-- 正常模式：前端 WebSocket 弹窗确认。
+- 手动模式：前端 WebSocket 弹窗确认。
 - 脱手模式：本地 GGUF 自动审批。启动时自动检测 `custom_models/*.gguf`（跳过 mmproj 文件）；`--approval_model` 只存文件名。无本地模型时 fallback 到远程端点（`--approval_remote_*`），两者皆无时脱手模式不可用。
 - 实现：`component/approval/`（core/backend/executor/allowlist/handsfree）+ `system/application.py` 的 `ApprovalBackendManager`。
 

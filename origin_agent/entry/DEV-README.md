@@ -62,7 +62,7 @@ entry/
 - 工具审批：只读 / 白名单直接执行，其余通过 `ToolExecutor` + `execute_with_approval` 等待确认。
 - 会话旋转：当上下文接近上限时，通过 `LoopSessionManager` 归档旧会话并创建带摘要的延续会话。
 - 自动标题与标签生成。
-- 子代理调度：通过 `SubAgentOrchestrator` 启动/管理子 Agent。
+- 子Agent编排：通过 `SubAgentOrchestrator` 启动/管理子 Agent。
 
 ### `MultiAgentLoop` / `MultiAgentWorker`
 

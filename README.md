@@ -104,7 +104,7 @@ python run.py --load <config_key> --force_init
 
 > `--load` / `--save` / `--interactive` 三者互斥。无参数时交互式提示输入配置键。
 
-## 核心机制：Fast-Slow-Fallback 演化循环
+## 核心机制：Fast-Slow-Fallback 进化循环
 
 ```
 origin_agent/           ← 唯一持久化源码真相源
@@ -190,7 +190,7 @@ origin_agent/
 │   ├── tool_post_dispatch.py ← 工具后处理
 │   └── agent_support/     ← 消息组装、多模态、历史摘要
 ├── subagent/              ← 子代理系统
-│   ├── orchestrator.py    ← 子代理调度器
+│   ├── orchestrator.py    ← 子代理编排器
 │   ├── loop.py            ← 子代理循环
 │   ├── taskloop.py        ← 任务循环
 │   └── context.py        ← 子代理上下文
@@ -237,10 +237,10 @@ origin_agent/
 
 - `approval/`：统一审批模块，已从单文件重构为目录结构：
   - `core.py`：审批流程入口。
-  - `backend.py`：审批后端（前端弹窗 / Adventure 模型）。
+  - `backend.py`：审批后端（前端弹窗 / 审批模型）。
   - `executor.py`：审批执行器。
-  - `handsfree.py`：Adventure 免审批模式（本地 GGUF 模型自动审批）。
-  - `allowlist.py`：只读 / 自动通过工具的允许列表。
+  - `handsfree.py`：脱手模式（本地 GGUF 模型自动审批）。
+  - `allowlist.py`：只读 / 自动通过工具的白名单。
   - `policy.py`：审批策略定义（`needs_approval()` + `MAIN_SESSION_POLICY` / `SUB_SESSION_POLICY` 常量）。
 - `mcp_tools.py`：将 MCP server 的工具桥接到 `ToolRegistry`。
 - `cron_router.py`：Cron 后台任务的路由与生命周期管理。
@@ -344,7 +344,7 @@ def create_llm_client(runtime_context, profile=None):
 
 ### custom_models
 
-放置 `.gguf` 模型文件，可作为 Adventure 审批模型自动加载。配置项 `approval_model` 指向该目录下的模型文件名。
+放置 `.gguf` 模型文件，可作为审批模型自动加载。配置项 `approval_model` 指向该目录下的模型文件名。
 
 ### custom_hooks
 

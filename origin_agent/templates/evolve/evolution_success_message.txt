@@ -1,1 +1,1 @@
-All {{n}} files validated. The orchestrator will now swap slow→fast and restart with the evolved code.
+All {{n}} files validated. The launch entry will now swap slow→fast and restart with the evolved code.

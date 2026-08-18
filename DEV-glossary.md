@@ -1,11 +1,178 @@
-# Evolve Agent — 术语表（DEV Glossary）
+# Evolve Agent — 项目术语表
 
-记录 UI 各区域、组件的中文名称与代码标识符的对照，统一沟通口径。
-用户口径优先：如「导航栏」专指**左侧 Sidebar**，不是顶部 Header。
+> **三位一体**：本表统一开发者/用户、开发助手AI、Evolve Agent 三方沟通口径。新增术语必须先登记后使用。
+
+**防漂移规则**：
+
+1. **新增术语先登记后使用** — 任何在文档、对话、prompt 中频繁出现的概念，必须先在本表登记规范称谓，后方可使用。
+2. **Agent 一律大写 A** — Evolve Agent、Cursor AI、主Agent、子Agent、临时Agent、多Agent模式主会话等，"Agent" 永远大写。代码标识按源码原样（`SubAgentLoop`、`subagent` 工具集名等）。
+3. **中英双锁定** — 每条术语锁定中文规范称谓与英文锚点；面向 Evolve Agent 的 prompt 模板使用规范英文形态。
 
 ---
 
-## 页面布局总览
+## §1 元规则
+
+| 规范称谓 | 定义 |
+|---|---|
+| 角色术语与实例名分层 | 文档默认用角色术语；实例名仅特指当前部署时使用 |
+| Role 不译 | 固定搭配，直指 `puretype.Role` 枚举（user/assistant/system/tool） |
+| 术语双锁定 | 中文规范称谓 + 英文锚点；prompt 模板使用规范英文形态 |
+
+---
+
+## §2 协作角色
+
+| 规范称谓 | 指代 | 英文锚点 |
+|---|---|---|
+| 用户（场景别名：开发者） | 人类 | user / developer |
+| 开发助手AI | 开发侧协助的 AI（角色术语；当前实例为 Cursor AI，未来可替换） | dev assistant AI |
+| Cursor AI | 当前承担「开发助手AI」角色的具体 AI 实例 | Cursor AI |
+| Evolve Agent（通称：项目 Agent） | 本项目的运行时 agent | Evolve Agent |
+| 主Agent | 系统提示词含 SOUL 的 Agent，任意 loop 下保证存在 | `MAIN_AGENT_CHARACTER_NAME = "main-agent"` |
+
+---
+
+## §3 空间与沙盒
+
+| 规范称谓 | 目录 | 沙盒前缀 | 角色 |
+|---|---|---|---|
+| origin仓库 | `origin_agent/` | 无 | 源码真相源：唯一持久化源码 |
+| fast仓库 | `workspace/fast_agent_space/` | 无（无 `self:`） | 当前运行副本 |
+| slow仓库 | `workspace/slow_agent_space/` | `fork:` | 进化目标副本 |
+| fallback仓库 | `workspace/.fallback/` | `fix:` | 上一次 fast 仓库的备份 / 回退修复体 |
+| 工作空间 | `workspace/agentspace/` | `ws:` | agent 的 workspace，通用 I/O |
+
+> **设计注记**：fast/slow 借用快慢指针命名——fast 是当前执行位置，slow 是待提升位置，热交换即 slow 提升为 fast。
+> 「副本」为角色描述词，不作名词术语。fast 模式 / fallback 模式保留英文形态。「回退」为 fallback 中文规范译法。
+
+| 规范称谓 | 定义 |
+|---|---|
+| 沙盒命名空间 | `fork:`/`ws:`/`fix:`/`skills:`/`third:`/`custom_*:` 逻辑前缀体系（`Namespace` 枚举） |
+| 逻辑路径 / 物理路径 | 带命名空间前缀的路径（如 `fork:main.py`）/ 真实文件系统路径 |
+| `.docs/` | 项目示例与引用资料目录 |
+
+---
+
+## §4 会话与 Loop
+
+| 规范称谓 | 指代 | 代码锚点 |
+|---|---|---|
+| 主会话 | 三种 loop 承载的顶层会话统称 | — |
+| 普通模式主会话 | `ParentAgentLoop` 的会话 | `Loop.parent` |
+| 多Agent模式主会话 | `MultiAgentLoop` 的会话 | `Loop.multi` |
+| 随意聊聊会话 | `ColloquyLoop` 的内置会话 | `Loop.colloquy` / `COLLOQUY_SESSION_ID` |
+| 子会话 | `SubAgentLoop` 的会话（与前端 UI「子会话面板/抽屉」对齐） | — |
+| 临时子会话 | `TaskAgentLoop` 的会话 | — |
+| 子Agent / subagent | `SubAgentLoop` 运行体；亦指多Agent模式中从注册表加载的非主参与者（两语境互斥，复用不歧义） | — |
+| 临时Agent / taskagent | `TaskAgentLoop` 运行体（无系统提示词、无持久化、完成即终止） | — |
+| 子Agent注册项 | `SubagentStore` 持久化的 `AgentConfig` 条目 | — |
+| （子Agent的）档案 | 子Agent 创建时可被主Agent 配置的系统提示词 | `AgentConfig.system_prompt_paths` |
+| 运行时Profile | 多Agent参与者的运行时形态 | `AgentProfile` 类 |
+| 参与Agent | 多Agent模式主会话中的参与者（主Agent 必居其一） | — |
+| 工具循环 | LLM→工具调用→结果回写→LLM 轮次循环（上限 90） | `MAX_TOOL_TURNS` |
+| 级联 | 多Agent模式 `response_characters` 驱动的串行响应队列调度 | `_cascade` |
+
+---
+
+## §5 编排与进化
+
+| 规范称谓 | 指代 | 英文锚点 |
+|---|---|---|
+| 启动入口 | `run.py` | launch entry |
+| 子代理编排器 | `SubAgentOrchestrator`（禁用"调度器"叫法） | SubAgentOrchestrator |
+| 进化触发模块 | `evolve/code.py` | — |
+| 进化 | 词根统一（"演化"为待改写遗留） | evolution |
+| 进化工具链 | read/edit（fork:）→ validate_code/validate_frontend → evolve_code | — |
+| 热交换 | slow→fast 交换并重启 | fast-slow swap |
+| 进化循环 | fast-slow-fallback 全流程统称 | evolution cycle |
+| 回退修复 | fallback 模式下由 fallback仓库 修复 fast仓库 | fallback repair |
+| 进化状态 | `workspace/logs/evolution.status` 记录的进化结果状态 | evolution status |
+
+---
+
+## §6 审批系统
+
+| 规范称谓 | 定义 | 英文锚点 |
+|---|---|---|
+| 手动模式 | 工具调用经前端弹窗由用户逐条审批 | manual mode |
+| 脱手模式 | 工具调用由审批模型自动审批 | handsfree mode |
+| YOLO 模式 | "You Only Live Once"：AI 工具的免确认自动执行模式——含 critical 全部自动批准、无审批模型参与、`--yolo` 启动锁定、运行时不可退出 | YOLO mode |
+| 审批模型 | 脱手模式下执行审批的 LLM；本地 GGUF 与远程审批端点为其两种部署形态 | approval model |
+| 远程审批端点 | `approval_remote_*` 配置的无本地模型时 fallback 来源 | remote approval endpoint |
+| 危险等级 | `danger_level` 四级：safe / write / dangerous / critical | danger level |
+| 可用范围 | `availability` 位掩码：MAIN / SUBAGENT / MULTI_AGENT / TASKAGENT / EVERY | availability |
+| 审批动作 | allow_once（允许一次）/ allow_always（始终允许，入白名单）/ deny（拒绝） | approval action |
+| 审批策略 | `ApprovalPolicy`：手动模式与脱手模式各自需审批的危险等级集合 | approval policy |
+| 白名单 / allowlist | 中文规范"白名单"、英文标识 allowlist | allowlist |
+| 工具白名单 | `tool_allowlist.json` 持久化的"始终允许"记录 | tool allowlist |
+
+---
+
+## §7 消息与事件
+
+| 规范称谓 | 指代 |
+|---|---|
+| Role（不译） | `puretype.Role` 协议层枚举（user/assistant/system/tool） |
+| 角色（character）/ 角色名（character_name） | 会话参与者层标识（main-agent/end-user/system/子Agent名） |
+| 事件出口 | sink 体系：`AgentSink` 抽象；`FrontendSink` = 前端事件出口；`ParentAgentSink` = 父会话事件出口 |
+| 入站缓冲 / 出站缓冲 | inbox / outbox（异步消息缓冲；代码标识改名为可选遗留） |
+| 消息体系 | `entity/messages.py` 的 `BaseMessage` 多态模型与 `History` |
+| 流式增量 | `StreamChunk`（content_delta / reasoning_delta） |
+| 思考内容 | reasoning_content / reasoning_delta（DeepSeek thinking-mode 载荷） |
+| 记忆上下文 | memory_hook 注入的长期记忆块（`<|im_memory_context_start|>` 标记包裹，非持久化） |
+| 元数据提取器 | `META_EXTRACTOR_CHARACTER`：生成标题/标签/摘要时的角色名，语义上隔离 agent 发言与元数据生成 |
+
+---
+
+## §8 上下文管理
+
+| 规范称谓 | 定义 |
+|---|---|
+| 压缩 | 将早期消息压缩为摘要以释放上下文（`compress_history` 工具；随意聊聊会话用滑动窗口压缩最早 30%） |
+| 摘要 | 会话级总结文本（`summary.txt`，终结/旋转时生成） |
+| 旋转（rotation） | 上下文超限时自动终结当前会话并产生子会话的机制 |
+| 延续（continuation） | **动作**：继承已终结父会话产生子会话——手动（一个或多个父会话，含合并）或旋转自动触发 |
+| 延续会话 | 延续动作产生的子会话（`SessionInfo.continuation` 指向者） |
+| 父会话 | `SessionInfo.parents` 指向的会话（支持多父） |
+
+> 三机制分工：压缩保会话、旋转换会话、摘要作载体。
+
+---
+
+## §9 扩展点
+
+| 规范称谓 | 定义 |
+|---|---|
+| 钩子 | `custom_hooks/` 下实现 `hook_tag_name` + `hook_message`/`hook_fixator` |
+| 上下文扩展块 | 钩子返回、附加到用户消息末尾的内容块（前端渲染类名 `context-extension-part`） |
+| 固着器（fixator） | 实现 `hook_fixator` 的钩子：产出**持久化**扩展块（`message_suffix`，写盘保留） |
+| 非固着器 | 仅实现 `hook_message` 的钩子：产出**非持久化**扩展块（`dynamic_message_suffix`，当轮注入） |
+| 技能 | `skills/` 下 `SKILL.md`，经 `load_skill`/`list_skills` 加载 |
+| 插件 | `abstract/plugins` 目录扫描 + `plugin.yaml` 元数据 |
+| 自定义工具 | `custom_tools/` 下的 `.py` 工具扩展 |
+| 自定义LLM客户端 | `custom_llm_client/` 下的 `.py` LLM 客户端扩展 |
+| 自定义模型 | `custom_models/` 下的 `.gguf` 模型文件 |
+| MCP 桥接 | `component/mcp_tools.py` 将外部 MCP server 工具注册进工具注册表 |
+
+---
+
+## §10 会话操作
+
+| 规范称谓 | 定义 |
+|---|---|
+| 归档 | 会话只读化（`status = "archived"`），可参与合并 |
+| 终结 | 归档 + 生成摘要 |
+| 合并 | 多父延续：将多个已归档会话合并为一个新会话 |
+| 分支 | 从当前会话创建子会话 |
+| 置顶 | `pinned` 标记，置顶显示 |
+
+---
+
+## §11 前端 UI
+
+> 用户口径优先：如「导航栏」专指**左侧 Sidebar**，不是顶部 Header。
+
+### 页面布局总览
 
 ```
 ┌──────────┬────────────────────────────────────────────┬──────┐
@@ -20,9 +187,7 @@
 
 > 启动屏（`SplashScreen`）和骨架屏（`SkeletonScreen`）作为覆盖层叠加在整体布局之上，分别用于开屏动画和首次连接前的占位。
 
----
-
-## 应用框架与加载层
+### 应用框架与加载层
 
 文件：`origin_agent/frontend/src/App.tsx`
 
@@ -39,9 +204,7 @@
 | 启动屏 | `SplashScreen` / `.splash-screen` | 开屏动画，最少停留 800ms、最多 3000ms，可点击跳过 |
 | 骨架屏 | `SkeletonScreen` / `.skeleton-screen` | 首次 WebSocket 连接前的布局骨架占位（Header + Sidebar + 消息区轮廓） |
 
----
-
-## 左侧导航栏（Sidebar）
+### 左侧导航栏（Sidebar）
 
 > 用户所称「导航栏」「会话按钮和搜索框那一块」即此区域。
 
@@ -66,7 +229,7 @@
 | 抽屉状态 | `.drawer-hidden` / `.drawer-peek` / `.drawer-open` | 桌面端侧栏三态：隐藏 / 微微拉出 / 彻底拉出（磨砂玻璃浮层） |
 | 抽屉状态机 | `useEdgeDrawer` | 边缘抽屉三态状态机（hidden/peek/open），侧栏与顶部栏共用；`pinned` 选项在弹出层展开期间钉住抽屉 |
 
-## 顶部栏（Header）
+### 顶部栏（Header）
 
 > 注意：用户口径中「导航栏」**不指这里**。
 
@@ -89,7 +252,7 @@
 | 令牌环 | `TokenRing` / `.token-ring` | 上下文用量环形图，≤900px 显示 |
 | 顶部栏折叠按钮 | `.header-collapse-btn` | 仅移动端出现的顶部栏折叠开关 |
 
-## 主内容区（Layout 其余区域）
+### 主内容区（Layout 其余区域）
 
 文件：`origin_agent/frontend/src/components/Layout.tsx`
 
@@ -169,12 +332,18 @@
 |---|---|---|
 | 剪贴板面板（旧版） | `ClipboardPanel` / `.clipboard-display-panel` | 与 `UnifiedPanel` 功能重叠的旧版组件，已被 `UnifiedPanel` 替代 |
 
-## 通用术语
+---
 
-| 中文名称 | 代码标识 | 说明 |
+## §12 退役术语
+
+以下术语已过时或被取代，禁止在新内容中使用：
+
+| 退役术语 | 替代术语 | 说明 |
 |---|---|---|
-| 脱手模式 | `handsfreeMode` | 工具调用由本地 GGUF 审批模型自动审批 |
-| 归档会话 | `status === "archived"` | 只读，可参与合并 |
-| 父会话 / 延续会话 | `parents` / `continuation` | 会话继承关系 |
-| 进化目标副本 | `workspace/slow_agent_space/`（`fork:`） | Agent 自我修改的对象 |
-| 源码真相源 | `origin_agent/` | 唯一持久化源码，禁止直接运行 |
+| 冒险模式 / Adventure / Adventure Mode | 脱手模式（handsfree mode） | 非常旧的名称，已全面退役 |
+| 演化 / 演化循环 | 进化 / 进化循环 | 词根统一为"进化" |
+| 子代理调度器 | 子代理编排器 | `SubAgentOrchestrator` 的禁用叫法 |
+| 正常模式 | 手动模式 | 审批模式名称，取代"正常模式" |
+| RIPER Yolo | （已删除） | RIPER-5 协议中已过时的 Yolo 概念，已从 `.agents/skills/riper-core/SKILL.md` 移除 |
+| 允许列表 | 白名单 | 统一为"白名单" |
+| orchestrator（裸称） | 启动入口（launch entry） | prompt 模板中裸称 orchestrator 指代 run.py 的写法已退役；`SubAgentOrchestrator` 合法保留 |
