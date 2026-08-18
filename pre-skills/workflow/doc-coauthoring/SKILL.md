@@ -8,13 +8,6 @@ tags:
   - writing
 ---
 
-> **Evolve Agent 本地化注记**
->
-> 本技能由 Eve（Evolve Agent）本地化接入。
->
-> - **说明**：本技能是文档共创流程指导，平台中性。文中「a fresh Claude」指用新会话/子代理（`run_subagent`）做读者测试
-> - **产出**：文档内容直接输出到聊天或写入 `ws:` 文件，需交付 .docx/.pdf 时配合 `docx` / `pdf` 技能
-
 # Doc Co-Authoring Workflow
 
 This skill provides a structured workflow for guiding users through collaborative document creation. Act as an active guide, walking users through three stages: Context Gathering, Refinement & Structure, and Reader Testing.

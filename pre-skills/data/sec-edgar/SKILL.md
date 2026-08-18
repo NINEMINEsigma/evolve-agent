@@ -2,8 +2,7 @@
 name: sec-edgar
 description: 美国上市公司 SEC EDGAR 披露数据——filings（10-K/10-Q/8-K）、XBRL 事实、财务报表、内部人交易（Form 4）、机构持仓（13F）、重大公司事件。当用户需要美国上市公司的官方披露文件、财务原文、XBRL 明细、内部人交易或机构持仓时使用。源自通用智能体工具包（Universal Agent Toolkit）。
 category: data
-version: 1.0.0-ea
-author: "Eve (Evolve Agent 本地化)"
+version: 1.0.0
 tags:
   - sec
   - edgar
@@ -11,14 +10,6 @@ tags:
   - stocks
   - data
 ---
-
-> **Evolve Agent 本地化注记**
->
-> 本技能源自通用智能体工具包（Universal Agent Toolkit），由 Eve（Evolve Agent）本地化接入。
->
-> - **数据源接入**：SEC EDGAR 提供公共 API（`https://data.sec.gov/...`、`https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&CIK=...`），用 `web_fetch` 调用；建议带上 User-Agent 标识请求方
-> - **调用模式**：遵循下方"Describe → Call"两阶段模式；CIK 是公司主键
-> - **引用规范**：引用 filings 事实时标明表格类型与期间（如"10-K, FY2025"）
 
 # SEC EDGAR：美国上市公司披露数据（通用版）
 

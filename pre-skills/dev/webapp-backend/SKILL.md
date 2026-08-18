@@ -2,8 +2,7 @@
 name: webapp-backend
 description: 为前端 Web 项目嫁接后端——API、数据库、认证（tRPC + Drizzle ORM + Hono + MySQL + OAuth 2.0 端到端类型安全）。当用户需要给 Web 应用加后端、REST/API、数据库、登录认证、用户系统、持久化存储时使用。源自通用智能体工具包（Universal Agent Toolkit）。
 category: dev
-version: 1.0.0-ea
-author: "Eve (Evolve Agent 本地化)"
+version: 1.0.0
 tags:
   - backend
   - api
@@ -11,16 +10,6 @@ tags:
   - auth
   - fullstack
 ---
-
-> **Evolve Agent 本地化注记**
->
-> 本技能源自通用智能体工具包（Universal Agent Toolkit），由 Eve（Evolve Agent）本地化接入，转为本地系统专用。
->
-> - **前置**：通常配合 `ui/frontend-design`（含 `references/toolkit-webapp-frontend.md` 工程实现指南）使用
-> - **技术栈**：tRPC + Drizzle ORM + Hono + MySQL + OAuth 2.0；需要安装依赖时用 `install_package` 或 `run_command`
-> - **平台注意**：文中 `lsof -ti:<port> | xargs kill` 为 Unix 命令，Windows 下用 `netstat -ano | findstr :<port>` + `taskkill /PID <pid> /F`
-> - **数据库**：本系统环境需自备 MySQL；生产迁移用 `db:generate` + `db:migrate`
-> - **诚实边界**：宿主平台内置登录/云数据库时优先用平台能力；自部署副本需要自己的认证和数据库
 
 # Web 后端构建（通用版）
 

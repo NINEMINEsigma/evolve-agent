@@ -1,6 +1,6 @@
-# Evolve Agent Skills 索引
+# Skills 索引
 
-本目录包含用于支持 Evolve Agent 自我进化的 skills。
+本目录包含用于支持自我进化的 skills。
 
 ## 已创建的 Skills
 

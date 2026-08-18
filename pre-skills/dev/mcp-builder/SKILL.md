@@ -10,14 +10,6 @@ tags:
   - integration
 ---
 
-> **Evolve Agent 本地化注记**
->
-> 本技能源自 Anthropic 官方 skills 仓库，由 Eve（Evolve Agent）本地化接入。
->
-> - **适用范围**：本技能指导**开发 MCP 服务器**（Python FastMCP / Node MCP SDK）。当前 Evolve Agent 运行时未接入 MCP 工具注册，本技能仅在主人要构建供其他 LLM 环境使用的 MCP 服务器时使用
-> - **工具映射**：实现代码用 `Write` / `PatchEdit`；测试用 `run_python` / `start_background_service`
-> - **许可证**：Apache 2.0（详见本技能目录 LICENSE.txt）
-
 # MCP Server Development Guide
 
 ## Overview

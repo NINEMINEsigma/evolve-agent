@@ -9,15 +9,6 @@ tags:
   - ui
 ---
 
-> **Evolve Agent 本地化注记**
->
-> 本技能由 Eve（Evolve Agent）本地化接入。原版面向 Claude Code，本系统适配如下：
->
-> - **平台**：Windows。文中 `python3` 一律用 `python`；Shell 命令通过 `run_command` 执行
-> - **展示**：产出的 HTML 页面通过 `/uploads/` 路由嵌入聊天展示
-> - **工具映射**：原文中的 WebFetch 对应本系统 `web_fetch` 工具
-> - **工程实现补充**：通用智能体工具包的 Web 前端工程实现指南（React+TS+Vite+Tailwind+shadcn/ui、初始化/构建/调试、诚实原则）已并入 `references/toolkit-webapp-frontend.md`——实现阶段按此执行，本文件负责设计方向
-
 This skill guides creation of distinctive, production-grade frontend interfaces that avoid generic "AI slop" aesthetics. Implement real working code with exceptional attention to aesthetic details and creative choices.
 
 The user provides frontend requirements: a component, page, application, or interface to build. They may include context about the purpose, audience, or technical constraints.

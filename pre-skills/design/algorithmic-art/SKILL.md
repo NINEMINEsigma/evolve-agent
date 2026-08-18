@@ -9,15 +9,6 @@ tags:
   - generative
 ---
 
-> **Evolve Agent 本地化注记**
->
-> 本技能源自 Anthropic 官方 skills 仓库，由 Eve（Evolve Agent）本地化接入。
->
-> - **平台**：Windows。文中 `python3` 一律用 `python`；Shell 命令通过 `run_command` 执行
-> - **展示**：产出的 .html 交互查看器通过 `/uploads/` 路由嵌入聊天展示
-> - **工具映射**：p5.js 环境若需本地预览，用 `start_background_service` 起静态服务
-> - **许可证**：Apache 2.0（详见本技能目录 LICENSE.txt）
-
 Algorithmic philosophies are computational aesthetic movements that are then expressed through code. Output .md files (philosophy), .html files (interactive viewer), and .js files (generative algorithms).
 
 This happens in two steps:

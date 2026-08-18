@@ -2,7 +2,6 @@
 name: news-summary-extractor
 description: "新闻摘要提取工具。输入新闻 URL 列表，自动读取每篇文章的正文，提取完整标题（从页面 title 标签）和一句话概述（正文第一段），输出结构化数据。适用于从爬虫获取的链接列表生成新闻日报、简报等场景。支持批量处理、字数限制分批、Markdown 格式输出，可直接配合 WPS Webhook 等推送工具使用。"
 version: 1.0.0
-author: Hermes Agent
 category: news
 tags:
   - news

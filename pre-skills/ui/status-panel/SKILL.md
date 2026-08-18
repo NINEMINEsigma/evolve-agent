@@ -2,7 +2,6 @@
 name: status-panel
 description: "可折叠状态面板HTML组件模板系统。支持多主题（粉色甜美/暗黑哥特/简约清爽等）、可折叠details/summary、彩色标签、CSS进度条、角色信息卡、多面板组合。适用于角色扮演、游戏数值、故事设定展示等场景，根据故事氛围自动选择风格"
 version: 1.0.0
-author: Evolve-Agent
 category: ui
 tags:
   - status-panel
@@ -10,7 +9,6 @@ tags:
   - details
   - ui-component
   - multi-theme
-  - eve
 ---
 
 # 状态面板（Status Panel）Skill

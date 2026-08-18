@@ -2,7 +2,6 @@
 name: wps-webhook-sender
 description: "WPS  Webhook 机器人消息推送工具。支持发送 Markdown、纯文本、链接卡片三种消息类型。Webhook URL 作为参数传入，不硬编码在脚本中。适用于将 AI 处理结果推送到 WPS 群聊/机器人场景，如新闻日报推送、告警通知、定时报告等。"
 version: 1.0.0
-author: Hermes Agent
 category: comms
 tags:
   - wps

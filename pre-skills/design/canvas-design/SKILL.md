@@ -9,15 +9,6 @@ tags:
   - poster
 ---
 
-> **Evolve Agent 本地化注记**
->
-> 本技能源自 Anthropic 官方 skills 仓库，由 Eve（Evolve Agent）本地化接入。
->
-> - **平台**：Windows。文中 `python3` 一律用 `python`；Shell 命令通过 `run_command` 执行
-> - **依赖**：生成 .pdf/.png 所需的库（如 `reportlab`、`Pillow`）若缺失，用 `install_package` 安装
-> - **展示**：产出的 .png 用 `/uploads/` 路由内联展示，.pdf 用 `/downloads/` 提供下载
-> - **许可证**：Apache 2.0（详见本技能目录 LICENSE.txt）
-
 These are instructions for creating design philosophies - aesthetic movements that are then EXPRESSED VISUALLY. Output only .md files, .pdf files, and .png files.
 
 Complete this in two steps:

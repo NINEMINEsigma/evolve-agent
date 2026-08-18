@@ -9,15 +9,6 @@ tags:
   - slack
 ---
 
-> **Evolve Agent 本地化注记**
->
-> 本技能源自 Anthropic 官方 skills 仓库，由 Eve（Evolve Agent）本地化接入。
->
-> - **说明**：GIF 参数约束与构建工具通用（不仅限 Slack，也可用于任何聊天场景的 GIF）。文中的 `core.gif_builder` 为技能自带模块
-> - **平台**：Windows。生成 GIF 的 Python 库若缺失，用 `install_package` 安装
-> - **展示**：产出的 .gif 通过 `/uploads/` 路由内联展示
-> - **许可证**：Apache 2.0（详见本技能目录 LICENSE.txt）
-
 # Slack GIF Creator
 
 A toolkit providing utilities and knowledge for creating animated GIFs optimized for Slack.

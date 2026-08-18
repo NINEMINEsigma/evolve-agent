@@ -9,13 +9,6 @@ tags:
   - internal
 ---
 
-> **Evolve Agent 本地化注记**
->
-> 本技能由 Eve（Evolve Agent）本地化接入。
->
-> - **说明**：内部沟通模板（3P updates / 简报 / FAQ 等）平台中性，可直接使用。文中「Claude should use」对应本系统 Agent 使用
-> - **产出**：写作内容直接输出到聊天；需要落盘时写入 `ws:` 目录
-
 ## When to use this skill
 To write internal communications, use this skill for:
 - 3P updates (Progress, Plans, Problems)

@@ -2,7 +2,6 @@
 name: ssh-remote
 description: "SSH 远程操作指南。通过 run_command 工具直接调用系统原生 ssh/scp 命令，在远程服务器上执行命令、上传和下载文件。适用于远程服务器管理、部署、日志收集等场景。"
 version: 1.0.0
-author: Hermes Agent
 category: dev
 tags:
   - ssh

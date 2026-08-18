@@ -545,7 +545,7 @@
     <div class="header">
       <div>
         <h1>Eval Review: <span id="skill-name"></span></h1>
-        <div class="instructions">Review each output and leave feedback below. Navigate with arrow keys or buttons. When done, copy feedback and paste into Evolve Agent chat.</div>
+        <div class="instructions">Review each output and leave feedback below. Navigate with arrow keys or buttons. When done, copy feedback and paste into chat.</div>
       </div>
       <div class="progress" id="progress"></div>
     </div>
@@ -634,7 +634,7 @@
   <div class="done-overlay" id="done-overlay">
     <div class="done-card">
       <h2>Review Complete</h2>
-      <p id="done-message">Your feedback has been saved. Go back to your Evolve Agent session and tell Eve you're done reviewing.</p>
+      <p id="done-message">Your feedback has been saved. You're done reviewing.</p>
       <div class="btn-row">
         <button onclick="closeDoneDialog()">OK</button>
       </div>
@@ -1050,7 +1050,7 @@
     function showDoneOverlay(exported) {
       document.getElementById("done-message").textContent = exported
         ? "反馈已导出为 feedback.json，请将内容粘贴回聊天窗口。"
-        : "Your feedback has been saved. Go back to your Evolve Agent session and tell Eve you're done reviewing.";
+        : "Your feedback has been saved. You're done reviewing.";
       document.getElementById("done-overlay").classList.add("visible");
     }
 

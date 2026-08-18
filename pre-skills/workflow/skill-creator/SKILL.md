@@ -1,13 +1,12 @@
 ---
 name: skill-creator
-description: 创建新技能、修改和改进已有技能、测量技能表现的完整工作流。当用户想从零创建技能、编辑或优化已有技能、运行技能测试评估、用方差分析对比基准性能、或优化技能描述以提升触发准确率时使用。Evolve Agent 系统专用版本（已完成 Windows 平台与工具链本地化）。
+description: 创建新技能、修改和改进已有技能、测量技能表现的完整工作流。当用户想从零创建技能、编辑或优化已有技能、运行技能测试评估、用方差分析对比基准性能、或优化技能描述以提升触发准确率时使用。
 version: 2.0.0
-author: Eve (Evolve Agent)
 category: workflow
 tags: [skill, creator, eval, benchmark, workflow]
 ---
 
-# Skill Creator（Evolve Agent 本地化版）
+# Skill Creator
 
 一个用于创建新技能并迭代改进它们的技能。
 
@@ -28,32 +27,6 @@ tags: [skill, creator, eval, benchmark, workflow]
 当然，始终要灵活——如果用户说「我不需要跑一堆评估，就跟我一起感觉一下」，那就照做。
 
 技能完成后（顺序可以灵活），还可以运行描述优化器（有独立脚本），优化技能的触发准确率。
-
----
-
-## 本系统适配说明（重要，先读）
-
-本技能已针对 **Evolve Agent** 系统本地化。与原版的差异：
-
-| 维度 | 原版（Claude Code） | 本系统（Evolve Agent） |
-|:-----|:-----|:-----|
-| 平台 | Linux/macOS | **Windows** |
-| 技能注册 | Claude 插件市场 / 上传 | `skills/<name>/` 目录含 `SKILL.md` 即被 `RecallSkill` 自动扫描 |
-| 创建/编辑 | Claude Code 文件工具 | `CreateSkill`（新建/覆盖）、`Write`/`PatchEdit`（小编辑）、`Read`（读取） |
-| 测试执行 | `claude -p` 子进程 | `run_subagent`（子代理加载技能）或本会话 `RecallSkill` 后测试 |
-| 展示 | `webbrowser.open()` 本地服务器 | `eval-viewer/generate_review.py --static` 生成 HTML → `/uploads/` + iframe 嵌入聊天 |
-| 反馈 | 浏览器下载 `feedback.json` | 主人在聊天里直接反馈，或用 `register_dynamic_endpoint` 收集 |
-| 后台服务 | `nohup ... &` / `kill $PID` | `start_background_service` / `stop_background_service` |
-| 复制快照 | `cp -r` | `Copy` |
-| 进度跟踪 | TodoList | `set_task_progress` |
-| 外部调研 | MCP | `web_search` / `web_fetch` / 子代理 |
-| 触发机制 | Claude `available_skills` | `RecallSkill` 的 name+description 常驻，描述匹配决定是否 `RecallSkill` |
-| 脚本执行 | `python scripts/x.py` 直接运行 | `run_command` 全路径调用；脚本路径以 `RecallSkill` 返回的 `skill_dir` 为准（见「运行与评估测试用例」开头） |
-| 子代理 | 一次性任务子进程 | 需先 `register_subagent` 注册 profile；`run_subagent` 返回 `session_id`，结果异步注入父会话、无时序字段 |
-
-**脚本可用性：**
-- ✅ 可用：`scripts/aggregate_benchmark.py`（聚合基准）、`scripts/quick_validate.py`（校验，纯 stdlib）、`scripts/package_skill.py`（打包 .skill）、`scripts/utils.py`（解析工具）、`eval-viewer/generate_review.py`（纯 stdlib，支持 `--static`）
-- ⚠️ 已归档：`scripts/_legacy_claude_code/` 下的 `run_eval.py`、`run_loop.py`、`improve_description.py`、`generate_report.py`——它们深度绑定 `claude -p` CLI，在本系统**不可用**，仅保留作参考。本系统的描述触发评估采用人工/子代理方式（见「描述优化」章节）
 
 ---
 
@@ -92,7 +65,7 @@ tags: [skill, creator, eval, benchmark, workflow]
 - **name**：技能标识符（kebab-case）
 - **description**：何时触发、做什么。这是主要的触发机制——既要写它做什么，也要写具体的使用场景。所有「何时使用」的信息放这里，不要放正文。注意：当前模型有「欠触发」倾向——不在该用技能时使用。为对抗这一点，把描述写得「pushy」一点。例如不要写「How to build a simple fast dashboard to display internal metrics.」，而要写「How to build a simple fast dashboard to display internal metrics. Make sure to use this skill whenever the user mentions dashboards, data visualization, internal metrics, or wants to display any kind of company data, even if they don't explicitly ask for a 'dashboard.'」
 - **compatibility**：所需工具、依赖（可选，很少需要）
-- **version / author / category / tags**：本系统支持的扩展字段（可选，推荐填写——`category` 用于分类，`tags` 用于过滤）
+- **version / author / category / tags**：支持的扩展字段（可选，推荐填写——`category` 用于分类，`tags` 用于过滤）
 - **技能正文** :)
 
 ### 技能写作指南
@@ -196,7 +169,7 @@ Output: feat(auth): implement JWT-based authentication
 
 本节是一个连续序列——不要中途停下。
 
-工作区约定：结果放在 **`ws:evals/<skill-name>-workspace/`**（本系统专用，避免污染 skills/ 目录）。在工作区内按迭代组织（`iteration-1/`、`iteration-2/`……），每个测试用例一个目录（`eval-0/`、`eval-1/`……）。不要一次性全建好——边做边建。
+工作区约定：结果放在 **`ws:evals/<skill-name>-workspace/`**（避免污染 skills/ 目录）。在工作区内按迭代组织（`iteration-1/`、`iteration-2/`……），每个测试用例一个目录（`eval-0/`、`eval-1/`……）。不要一次性全建好——边做边建。
 
 目录层级：`eval-<ID>/<配置>/run-<M>/`——配置如 `with_skill`、`without_skill`、`old_skill`；`run-<M>` 是运行编号（单次运行就用 `run-1`，多次重复运行取均值时递增）。每次运行的产物放 `run-<M>/outputs/`，`grading.json` 和 `timing.json` 直接放在 `run-<M>/` 下。聚合脚本与查看器都依赖这个层级，缺了 `run-<M>` 层会一次运行都识别不到。
 
@@ -206,7 +179,7 @@ Output: feat(auth): implement JWT-based authentication
 
 对每个测试用例，在同一回合生成两个子代理——一个带技能，一个不带。这一点很重要：不要先启动带技能的运行，再回头启动基线。一次全部启动，让它们大约同时完成。
 
-> 本系统前置：`run_subagent` 启动的是**已注册**的子代理 profile（系统无默认 profile）。首次评估前先注册一个通用评测子代理——只需注册一次，之后所有评估复用：
+> 前置条件：`run_subagent` 启动的是**已注册**的子代理 profile（系统无默认 profile）。首次评估前先注册一个通用评测子代理——只需注册一次，之后所有评估复用：
 >
 > ```
 > register_subagent(name="eval-worker")
@@ -250,7 +223,7 @@ Execute this task:
 
 ### 第3步：运行完成时捕获时序数据
 
-> 本系统机制：子代理完成通知（注入的系统消息）**不含** `total_tokens`/`duration_ms` 字段——时序数据必须自行计时。
+> 机制说明：子代理完成通知（注入的系统消息）**不含** `total_tokens`/`duration_ms` 字段——时序数据必须自行计时。
 
 启动每个子代理时记录本地开始时间；该子代理的完成通知到达时，计算耗时并立即写入其运行目录（`run-<M>/`）的 `timing.json`：
 
@@ -262,7 +235,7 @@ Execute this task:
 }
 ```
 
-`total_tokens` 本系统不产出，填 `0` 占位即可（聚合脚本按 0 处理，benchmark 中 tokens 列仅作参考）。每条完成通知到达时立即处理，不要批量处理——耗时以通知到达时刻为准，批量处理会失真。
+`total_tokens` 无法获得，填 `0` 占位即可（聚合脚本按 0 处理，benchmark 中 tokens 列仅作参考）。每条完成通知到达时立即处理，不要批量处理——耗时以通知到达时刻为准，批量处理会失真。
 
 ### 第4步：评分、聚合、启动查看器
 
@@ -281,7 +254,7 @@ Execute this task:
 
 3. **分析师检查**——阅读基准数据，找出聚合统计可能掩盖的模式。参考 `agents/analyzer.md`（「Analyzing Benchmark Results」一节）——例如无论技能如何总通过的断言（无区分度）、高方差 eval（可能不稳定）、时间/令牌权衡。
 
-4. **启动查看器**——本系统使用**静态模式**（无显示环境，聊天前端展示）：
+4. **启动查看器**——使用**静态模式**（无显示环境，聊天前端展示）：
    ```
    run_command(
      command=["python", "<SKILL_DIR>/eval-viewer/generate_review.py",
@@ -292,11 +265,11 @@ Execute this task:
      reason="生成静态评估查看器 HTML")
    ```
    迭代 2+ 再加 `--previous-workspace ws:evals/<skill-name>-workspace/iteration-<N-1>`。
-   生成 `review.html` 后，通过 `/uploads/` 路由嵌入聊天展示给主人：
+   生成 `review.html` 后，通过 `/uploads/` 路由嵌入聊天展示给用户：
    ```html
    <iframe src="/uploads/evals/<skill-name>-workspace/iteration-N/review.html" style="width:100%;height:600px;border:none"></iframe>
    ```
-   注意：静态模式下「Submit All Reviews」会把反馈导出为 `feedback.json` 下载（宿主 gateway 无 `/api/feedback` 接口）——请主人下载后把内容粘贴回聊天，或直接在聊天里反馈意见，也可改用 `register_dynamic_endpoint` 收集选项点击。
+   注意：静态模式下「Submit All Reviews」会把反馈导出为 `feedback.json` 下载（宿主 gateway 无 `/api/feedback` 接口）——请用户下载后把内容粘贴回聊天，或直接在聊天里反馈意见，也可改用 `register_dynamic_endpoint` 收集选项点击。
 
 5. **告诉用户**类似：「结果已经打开。有两个标签——'Outputs' 可以逐个测试用例查看并留下反馈，'Benchmark' 显示定量对比。看完告诉我。」
 
@@ -377,7 +350,7 @@ Execute this task:
 
 SKILL.md frontmatter 中的 description 字段是决定 Agent 是否调用技能的主要机制。创建或改进技能后，主动提议优化描述以提升触发准确率。
 
-> 本系统注意：原版的自动触发评估脚本（`run_eval.py` / `run_loop.py` / `improve_description.py`）绑定 `claude -p` CLI，本系统不可用，已归档至 `scripts/_legacy_claude_code/`。以下流程改为**人工 + 子代理评估**方式，效果等同。
+> 注意：原版的自动触发评估脚本（`run_eval.py` / `run_loop.py` / `improve_description.py`）绑定 `claude -p` CLI，不可用，已归档至 `scripts/_legacy_claude_code/`。以下流程改为**人工 + 子代理评估**方式，效果等同。
 
 ### 第1步：生成触发评估查询
 

@@ -2,7 +2,6 @@
 name: "people-daily-crawler"
 description: 人民网新闻爬虫工具技能。爬取人民网（www.people.com.cn）及其子频道（国际、时政、经济、社会等）的新闻链接列表。通过 URL 路径中的日期信息（如 /2026/0609/）自动筛选指定日期的新闻，无需逐篇访问。支持多频道同时爬取、自动分页、结果去重，输出结构化 JSON 文件。适用于新闻聚合、舆情分析、信息收集等场景。
 version: 1.0.0
-author: Hermes Agent
 category: news
 tags:
   - crawler

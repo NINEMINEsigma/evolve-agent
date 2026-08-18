@@ -2,22 +2,13 @@
 name: macro-data-imf
 description: IMF 宏观经济数据——世界经济展望（WEO）190+ 国家/地区的 GDP 增长、通胀、政府债务、失业率、贸易差额等宏观指标的历史与预测，以及 COFER 外汇储备货币构成。当用户需要跨国宏观指标对比、单国宏观时序、IMF 官方预测值时使用。源自通用智能体工具包（Universal Agent Toolkit）。
 category: data
-version: 1.0.0-ea
-author: "Eve (Evolve Agent 本地化)"
+version: 1.0.0
 tags:
   - imf
   - macro
   - economics
   - data
 ---
-
-> **Evolve Agent 本地化注记**
->
-> 本技能源自通用智能体工具包（Universal Agent Toolkit），由 Eve（Evolve Agent）本地化接入。
->
-> - **数据源接入**：IMF 提供公共 API（如 `https://www.imf.org/external/datamapper/api/...` 与 SDMX 接口），用 `web_fetch` 调用；正式 WEO 数据集也可通过 IMF DataMapper 抓取
-> - **调用模式**：遵循下方"Describe → Call"两阶段模式；失败如实报告，绝不编造指标
-> - **引用规范**：数据引用格式 `[来源: IMF — 数据集, 截至日期]`
 
 # IMF 宏观经济数据（通用版）
 

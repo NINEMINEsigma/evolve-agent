@@ -2,22 +2,13 @@
 name: development-data-worldbank
 description: 世界银行公开发展数据——覆盖各国 29,000+ 指标（GDP、人口、贫困、失业、贸易、通胀、教育、卫生、环境），1960 年至今长时序。当用户需要发展指标、长历史序列、跨国对比数据时使用。源自通用智能体工具包（Universal Agent Toolkit）。
 category: data
-version: 1.0.0-ea
-author: "Eve (Evolve Agent 本地化)"
+version: 1.0.0
 tags:
   - worldbank
   - development
   - indicators
   - data
 ---
-
-> **Evolve Agent 本地化注记**
->
-> 本技能源自通用智能体工具包（Universal Agent Toolkit），由 Eve（Evolve Agent）本地化接入。
->
-> - **数据源接入**：世界银行提供公共 API（`https://api.worldbank.org/v2/...`），用 `web_fetch` 调用即可，无需密钥
-> - **实测记录**：2026-08 已验证 `https://api.worldbank.org/v2/country/CHN/indicator/SP.POP.BRTH.MF?format=json&per_page=100` 可正常返回 JSON
-> - **调用模式**：遵循下方"Describe → Call"两阶段模式；指标代码不要凭记忆拼，从文档查证
 
 # 世界银行公开数据（通用版）
 

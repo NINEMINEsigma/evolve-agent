@@ -2,8 +2,7 @@
 name: inline-widgets
 description: 在对话流中渲染紧凑的可视化/交互组件——图表、仪表盘、计算器、滑杆、对比、时间线、状态机、小型模拟（沙盒 iframe 契约）。当答案具有空间、顺序、系统、对比、数值或交互结构，需要"看见结构"时使用。源自通用智能体工具包（Universal Agent Toolkit）。
 category: ui
-version: 1.0.0-ea
-author: "Eve (Evolve Agent 本地化)"
+version: 1.0.0
 tags:
   - widget
   - inline
@@ -11,14 +10,6 @@ tags:
   - interactive
   - ui
 ---
-
-> **Evolve Agent 本地化注记**
->
-> 本技能源自通用智能体工具包（Universal Agent Toolkit），由 Eve（Evolve Agent）本地化接入。
->
-> - **展示机制**：本系统聊天前端支持在消息中直接渲染自包含 HTML（含 script/style），widget 即为完整的 HTML 片段
-> - **配合使用**：可复用组件模板见 `ui/status-panel`；文件展示路由见 `core/media-display`
-> - **设计系统**：本系统无固定设计系统 CSS 变量，widget 使用内联样式自包含呈现；配色建议与消息主题协调
 
 # 内联 Widget：对话内可视化组件（通用版）
 
@@ -41,7 +32,7 @@ Widget 运行在消息渲染环境中：
 - **文字在 widget 外，视觉在 widget 内**：解释性文字、引言、总结都写在回复正文里。
 - **渲染后不复述**：widget 渲染完成后，不要再总结或重复它表达的内容——视觉自己会说话，只说 widget 表达不了的。
 - **回传意图**：交互式 widget 可调用宿主注入的回传接口（如 `window.sendPrompt(text)`）把用户下一步意图推回对话。`text` 要写成真实用户会说的话，而不是机器人式确认（"我选择了选项 A，请继续"）。
-- **绝不硬编码颜色、字体、圆角**——尽量引用设计系统的 CSS 变量（`var(--xxx)`）；本系统无全局设计系统时使用内联样式并保持与消息主题协调。
+- **绝不硬编码颜色、字体、圆角**——尽量引用设计系统的 CSS 变量（`var(--xxx)`）；无全局设计系统时使用内联样式并保持与消息主题协调。
 
 ## 设计规范
 

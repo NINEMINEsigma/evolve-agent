@@ -1,6 +1,6 @@
 ---
 name: aesthetic-style-library
-description: 从 Kimi Agent 多风格审美站项目（ws:kimi-agent-website）源码完整提取的七种美学设计风格库，含模板/脚本/资源/参考组件。当用户要求美学风格、视觉设计、前端风格参考、组件设计时使用。
+description: 七种美学设计风格库，含模板/脚本/资源/参考组件。当用户要求美学风格、视觉设计、前端风格参考、组件设计时使用。
 category: design
 tags:
   - aesthetic
@@ -11,7 +11,6 @@ tags:
 
 # Aesthetic Style Library · 七种美学设计风格
 
-> 从 Kimi Agent 多风格审美站项目（`ws:kimi-agent-website`）源码完整提取。
 > 组件级分解，按模板/脚本/资源/参考分类存放。
 
 ---
