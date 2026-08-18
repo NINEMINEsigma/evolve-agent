@@ -1,7 +1,7 @@
 ---
 name: character-management
 description: "基于文件系统的角色管理工作流程, 用于多agent的虚拟角色扮演或执行任务时任务分发"
-version: 1.1.0
+version: 1.3.0
 author: Evolve-Agent
 category: workflow
 tags:
@@ -9,6 +9,8 @@ tags:
   - subagent
   - profile
   - 角色管理
+  - 模板库
+  - subagent-templates
 ---
 
 # Character Management — 角色管理 Skill
@@ -17,26 +19,112 @@ tags:
 
 在 `ws:characters/` 目录下创建和管理角色档案的完整工作流。每个角色独立文件夹，统一使用标准文件结构。
 
+本 skill 包含一套**内置模板库**（多领域子代理模板），覆盖 16 个领域、44 个专业角色，可直接用作任务执行型子代理的 profile.md。模板位于 `skills:workflow/character-management/templates/subagent-templates/`。
+
 ## 目录结构规范
 
 ```
 characters/
 ├── README.md              本索引（维护角色列表和说明）
-├── Eve/                   Evolve Agent 本体
+├── Eve/                   特殊——Evolve Agent 本体（不归入任何类型目录）
 │   ├── eve.md             角色设定
 │   ├── world.md           所有角色公用的世界设定
 │   └── outfits.md         服装变体（可选）
-├── <角色扮演型>/           角色扮演型——含记忆文件
-│   ├── profile.md         角色档案, 必须存在, 并作为角色系统提示词
-│   ├── history0.jsonl      会话记忆文件（启动/停止时读写）
-│   ├── history1.jsonl      
-│   ├── histor~.jsonl       
-│   ├── historyN.jsonl      在到达上下文上限时不能覆盖旧有会话记忆文件
-│   └── outfits.md         服装变体（可选）
-├── <任务执行型>/           任务执行型——通常不含记忆文件
-│   ├── profile.md         角色档案, 可选, 存在时应当作为角色系统提示词
-└── ...
+├── roleplay/              角色扮演型——像真人一样演绎自己
+│   ├── <角色名>/
+│   │   ├── profile.md     角色档案, 必须存在, 并作为角色系统提示词
+│   │   ├── history.jsonl  会话记忆文件（启动/停止时读写）
+│   │   └── outfits.md     服装变体（可选）
+│   └── ...
+└── task/                  任务执行型——聚焦任务本身，通常不含记忆文件
+    ├── <角色名>/
+    │   ├── profile.md     角色档案, 存在时应当作为角色系统提示词
+    │   └── ...
+    └── ...
+
+### 路径约定
+
+| 类型 | 路径格式 | 示例 |
+|:-----|:---------|:-----|
+| 特殊 | `ws:characters/Eve/` | `ws:characters/Eve/world.md` |
+| 角色扮演型 | `ws:characters/roleplay/<角色名>/` | `ws:characters/roleplay/Noire/history.jsonl` |
+| 任务执行型 | `ws:characters/task/<角色名>/` | `ws:characters/task/王博士/profile.md` |
 ```
+
+## 内置模板库
+
+`skills:workflow/character-management/templates/subagent-templates/` 下包含 16 个领域、44 个专业角色的提示词模板。每个文件可直接作为任务执行型子代理的 profile.md 使用。
+
+### 模板目录
+
+```
+templates/subagent-templates/
+├── AI/          01-AIArchitect  02-PromptEngineer  03-MachineLearningEngineer
+├── Product/     01-ProductManager  02-UserResearcher
+├── Writing/     01-Curator  02-Writer  03-Editor
+├── Frontend/    01-Aesthetic  02-InteractionDesigner  03-FrontendArchitect  04-FrontendDeveloper
+├── Backend/     01-BackendArchitect  02-DatabaseDesigner  03-BackendDeveloper  04-Auditor
+├── Mobile/      01-MobileDesigner  02-MobileDeveloper
+├── DevOps/      01-DevOps  02-SRE
+├── Design/      01-Brander  02-VisualDesigner  03-Presenter
+├── Data/        01-DataEngineer  02-DataAnalyst  03-DataViz
+├── General/     01-ProjectManager  02-CodeReviewer  03-Localizer  04-Documentarian
+├── Marketing/   01-MarketAnalyst  02-Marketer  03-Copywriter
+├── Finance/     01-MacroAnalyst  02-IndustryResearcher  03-RiskManager
+├── Legal/       01-LegalResearcher  02-ContractReviewer
+├── Research/    01-LiteratureReviewer  02-Experimentalist  03-Academic
+├── Games/       01-GameDesigner  02-GameDeveloper
+└── AV/          01-Director  02-Producer
+```
+
+### 两种角色风格
+
+| 风格 | 适用角色 | 特征 |
+|:-----|:---------|:-----|
+| **Grill Me 质询型** | 策划 / 设计 / 架构 / 研究类 | 分阶段推进（Initialize→Interrogate→Domain→Scenario→PreMortem→Conclude），每阶段只问一个问题，附带推荐答案与权衡 |
+| **执行型** | 开发 / 撰稿 / 翻译 / 制作类 | 输入检查 → 标准工作流程 → 产出规范 → 验收清单(DoD) → 职责边界 |
+
+**选型原则：** 上游角色把模糊变清晰（Grill Me），下游角色把清晰变交付物（执行型）。
+
+### 推荐流水线
+
+```
+Software Engineering: ProductManager → InteractionDesigner → Aesthetic → FrontendArchitect / BackendArchitect → DatabaseDesigner → FrontendDeveloper / BackendDeveloper → CodeReviewer → Auditor → DevOps → SRE
+Content Creation: Curator → Writer → Editor
+Data Analysis: DataEngineer → DataAnalyst → DataViz
+AI Application: AIArchitect → PromptEngineer / MachineLearningEngineer
+Investment Decision: MacroAnalyst → IndustryResearcher → RiskManager
+Research Project: LiteratureReviewer → Experimentalist → Academic
+```
+
+### 使用方式
+
+**方式 1：直接复制为角色 profile**
+```python
+# 复制模板到角色目录
+Copy(
+    source="skills:workflow/character-management/templates/subagent-templates/Frontend/01-Aesthetic.md",
+    destination="ws:characters/Aesthetic/profile.md"
+)
+# 注册子代理
+register_subagent_from_parent(
+    name="Aesthetic",
+    system_prompt_paths=["ws:characters/Aesthetic/profile.md"]
+)
+```
+
+**方式 2：作为 system_prompt 直接引用**
+```python
+register_subagent_from_parent(
+    name="FrontendArchitect",
+    system_prompt_paths=[
+        "skills:workflow/character-management/templates/subagent-templates/Frontend/03-FrontendArchitect.md"
+    ]
+)
+```
+
+**方式 3：裁剪后使用**
+模板自包含，可按需删减。建议保留「边界（我不做什么）」章节——它是防止角色越界的关键。
 
 ## 角色分类
 
@@ -125,24 +213,24 @@ characters/
 ### 步骤 1：创建文件夹和文件
 ```python
 # 创建角色文件夹（Write 不带 content 即创建目录）
-Write(path="ws:characters/<角色名>/")
+Write(path="ws:characters/roleplay/<角色名>/")
 
 # 编写 profile.md
-Write(path="ws:characters/<角色名>/profile.md", content="...")
+Write(path="ws:characters/roleplay/<角色名>/profile.md", content="...")
 
 # （可选）编写 outfits.md
-Write(path="ws:characters/<角色名>/outfits.md", content="...")
+Write(path="ws:characters/roleplay/<角色名>/outfits.md", content="...")
 ```
 
 ### 步骤 2：注册 subagent
 ```python
 # 1. 注册 subagent，指向角色档案
-#    角色扮演型建议加上 world_setting.md 作为公共知识
+#    角色扮演型建议加上 world.md 作为公共知识
 register_subagent_from_parent(
     name="<角色名>",
     system_prompt_paths=[
-        "ws:characters/<角色名>/profile.md",
-        "ws:characters/Eve/world_setting.md"
+        "ws:characters/roleplay/<角色名>/profile.md",
+        "ws:characters/Eve/world.md"
     ]
 )
 ```
@@ -176,22 +264,22 @@ register_subagent_from_parent(
 
 | 角色 | 类型 | history.jsonl 路径 |
 |------|------|-------------------|
-| Noire | 角色扮演型 | `ws:characters/Noire/history.jsonl` |
-| 朱羽 | 角色扮演型 | `ws:characters/朱羽/history.jsonl` |
-| 杏 | 角色扮演型 | `ws:characters/杏/history.jsonl` |
+| Noire | 角色扮演型 | `ws:characters/roleplay/Noire/history.jsonl` |
+| 朱羽 | 角色扮演型 | `ws:characters/roleplay/朱羽/history.jsonl` |
+| 杏 | 角色扮演型 | `ws:characters/roleplay/杏/history.jsonl` |
 
-所有角色扮演型角色的设定和历史都存储在 `ws:characters/` 目录下各自的文件夹中，**不是** `ws:subagents/`。
+所有角色扮演型角色的设定和历史都存储在 `ws:characters/roleplay/` 目录下各自的文件夹中，**不是** `ws:subagents/`。
 
 ### 启动流程
 
 ```python
 # 1. 先确认 history.jsonl 存在
-file_exists(path="ws:characters/角色名/history.jsonl")
+file_exists(path="ws:characters/roleplay/角色名/history.jsonl")
 
 # 2. 启动子代理，传入 history_path
 run_subagent(
     name="角色名",
-    history_path="ws:characters/角色名/history.jsonl",
+    history_path="ws:characters/roleplay/角色名/history.jsonl",
     initial_prompt="...",
     user_name="Eve",
     message_type="direct"
@@ -208,12 +296,12 @@ stop_result = stop_subagent(session_id="...")
 # 2. 将 session_path 复制到角色的 history.jsonl（覆盖）
 Copy(
     source="ws:subagents/角色名/xxx.jsonl",
-    destination="ws:characters/角色名/history.jsonl"
+    destination="ws:characters/roleplay/角色名/history.jsonl"
 )
 ```
 
 ### 铁律
-- **每次停止角色扮演型子代理后，必须将历史保存到 ws:characters/角色名/history.jsonl**，不能遗漏
+- **每次停止角色扮演型子代理后，必须将历史保存到 `ws:characters/roleplay/角色名/history.jsonl`**，不能遗漏
 - 任务执行型子代理通常不需要 history.jsonl，除非需要跨会话上下文
 
 ## 文件规范总结

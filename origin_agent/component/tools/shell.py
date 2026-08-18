@@ -103,6 +103,8 @@ registry.register(
         # 首次使用前必须向用户详细说明此工具的用途和风险，并询问用户明确意见（允许/禁止/条件允许）。
         # 禁止使用此工具替代沙箱已有的文件读写和搜索操作（如 Read、Write、grep 等）。
         # 禁止用于执行安装命令（pip install、npm install 等）或需要较长时间运行的测试，此工具默认 30 秒超时。
+        # 对于可能超时的长时间命令，使用 start_background_service 后台执行 + Read 轮询日志，
+        # 或 start_watching_service + 动态端点回调。禁止在超时后手动模拟命令效果（如手写 node_modules/）。
         #
         # ## 调用效果
         # 命令中的沙箱逻辑路径（`ws:`、`fork:` 等前缀）会被自动展开为真实绝对路径后执行。
@@ -117,11 +119,15 @@ registry.register(
         # ## 何时使用
         # - 执行版本控制操作（git 命令）。
         # - 其他无法通过内置工具完成且能在 30 秒内完成的 shell 操作。
+        # - 对于可能超过 30 秒的命令（安装、构建、测试等），改用 start_background_service 后台执行
+        #   并通过 Read 轮询日志，或 start_watching_service 监视输出并自动回调。
         #
         # ## 副作用/注意
         # - 错误调用可对整台机器造成毁灭性打击。
         # - 禁止用于替代沙箱已有的文件读写和搜索操作（Read、Write、grep、glob 等），这些操作有更安全的内置工具。
         # - 禁止用于安装命令或长流程测试，默认 30 秒超时。
+        # - 超时后禁止手动模拟命令效果（如手写 node_modules/、手动创建构建产物）。
+        #   超时意味着应改用后台工具（start_background_service / start_watching_service），而不是绕过命令本身。
         # - 默认工作目录为 `ws:`（agentspace）。
         "description": """Execute shell commands in the sandbox.
 
@@ -129,6 +135,7 @@ registry.register(
 Before the first use, the agent MUST explain this tool's purpose and risks to the user in detail and ask for explicit consent (allow / deny / conditional allow).
 Do NOT use this tool to replace sandbox file I/O and search operations (Read, Write, grep, glob, etc.).
 Do NOT use this tool for install commands (pip install, npm install, etc.) or long-running tests; it has a default 30-second timeout.
+For commands that may exceed the timeout, use start_background_service + Read log polling, or start_watching_service + dynamic endpoint callbacks. NEVER manually simulate command effects (e.g. hand-writing node_modules/) after a timeout.
 
 ## Effect
 Sandbox logical paths in the command (`ws:`, `fork:` prefixes) are automatically resolved to real absolute paths before execution.
@@ -143,11 +150,13 @@ Each invocation requires user approval (allow once / always allow / deny). Alway
 ## When to Use
 - Perform version control operations (git commands).
 - Other shell operations that cannot be accomplished with built-in tools and complete within 30 seconds.
+- For commands that may exceed 30 seconds (installs, builds, tests, etc.), use start_background_service to run in background and poll the log via Read, or start_watching_service to monitor output with automatic callbacks.
 
 ## Side Effects / Notes
 - Misuse can cause catastrophic damage to the entire machine.
 - Do NOT use this tool to replace sandbox file I/O and search operations (Read, Write, grep, glob, etc.); those have safer built-in tools.
 - Do NOT use this tool for install commands or long-running tests; default timeout is 30 seconds.
+- When a command times out, do NOT manually simulate its effects (e.g. hand-writing node_modules/, manually creating build artifacts). A timeout means you should switch to background tools (start_background_service / start_watching_service), not work around the command itself.
 - Default working directory is `ws:` (agentspace).""",
         "parameters": {
             "type": "object",

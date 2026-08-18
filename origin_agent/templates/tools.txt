@@ -33,6 +33,17 @@ Task agent dispatch conventions:
 - Delegating such tasks frees the main agent's context window and avoids polluting conversation history with intermediate tool outputs.
 - Put all necessary context into the prompt parameter — the task agent receives only that single message and has no access to the main agent's conversation history.
 - Do not delegate tasks that require write access, multi-round interaction, or persistent memory — handle those in the main agent loop directly.
+- Delegation is for context hygiene, not for cutting corners: the task agent must still do thorough, complete work within its scope. Do not use delegation as a substitute for proper engineering — if a task needs deep analysis or careful implementation, do it in the main loop.
+
+Long-running task conventions:
+- run_command has a fixed 30-second timeout; run_python has a configurable `timeout` parameter.
+- Decision tree for tasks that may exceed the timeout:
+  1. Definitely under 30s → run_command.
+  2. Might exceed 30s but has a bounded duration → run_python with an increased `timeout` parameter.
+  3. Unbounded or likely to exceed any timeout → start_background_service (non-blocking, returns task_id + log_path), then poll the log via Read at reasonable intervals.
+  4. Need real-time output monitoring with automatic callbacks → start_watching_service + register_dynamic_endpoint.
+- NEVER manually simulate a command's effects when it times out (e.g. hand-writing node_modules/, manually creating build artifacts, fabricating output). A timeout is a signal to switch to background tools, not a reason to bypass the command entirely.
+- After starting a background task, use wait_cron or schedule a cron task to periodically Read the log and check for completion, rather than blocking the conversation.
 
 Workspace hygiene conventions:
 - Do NOT create files directly in the ws: root directory (e.g. ws:some_file.txt). The root contains system-critical files such as SOUL.md and mcp_config.json; scattering loose files there risks collision and pollution.

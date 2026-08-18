@@ -117,6 +117,9 @@ registry.register(
         # 首次使用前必须向用户详细说明此工具的用途和风险，并询问用户明确意见（允许/禁止/条件允许）。
         # 禁止使用此工具替代沙箱已有的文件读写和搜索操作（如 Read、Write、grep 等）。
         # 禁止用于执行下载任务或需要较长时间运行的服务。
+        # 可通过 `timeout` 参数延长超时上限以适应中等耗时任务；但对于可能超过 timeout 的长时间任务，
+        # 使用 start_background_service 后台执行 + Read 轮询日志，或 start_watching_service + 动态端点回调。
+        # 禁止在超时后手动模拟命令效果（如手写 node_modules/、手动创建构建产物）。
         #
         # ## 模式
         # 两种互斥模式，必须提供且仅提供其一。
@@ -138,11 +141,16 @@ registry.register(
         # - 需要执行 Python 代码进行数据处理、复杂逻辑运算。
         # - 需要在沙箱内运行脚本。
         # - 需要精确控制 Python 版本（通过 `python_path` 指定虚拟环境中的解释器）。
+        # - 中等耗时任务可通过 `timeout` 参数延长超时上限。
+        # - 对于可能超过 timeout 的长时间任务，改用 start_background_service 后台执行
+        #   并通过 Read 轮询日志，或 start_watching_service 监视输出并自动回调。
         #
         # ## 副作用/注意
         # - 错误调用可对整台机器造成毁灭性打击。
         # - 禁止用于替代沙箱已有的文件读写和搜索操作（Read、Write、grep、glob 等），这些操作有更安全的内置工具。
         # - 禁止用于执行下载任务或需要较长时间运行的服务。
+        # - 超时后禁止手动模拟命令效果（如手写 node_modules/、手动创建构建产物）。
+        #   超时意味着应改用后台工具（start_background_service / start_watching_service），而不是绕过命令本身。
         # - `code` 和 `script` 互斥，同时提供会报错。
         # - `args` 仅在 script 模式生效。
         # - 默认工作目录为 `ws:`（agentspace）。
@@ -153,6 +161,7 @@ registry.register(
 Before the first use, the agent MUST explain this tool's purpose and risks to the user in detail and ask for explicit consent (allow / deny / conditional allow).
 Do NOT use this tool to replace sandbox file I/O and search operations (Read, Write, grep, glob, etc.).
 Do NOT use this tool for downloads or services that require significant runtime.
+You can increase the `timeout` parameter for moderately long tasks; but for tasks that may exceed even the extended timeout, use start_background_service + Read log polling, or start_watching_service + dynamic endpoint callbacks. NEVER manually simulate command effects (e.g. hand-writing node_modules/) after a timeout.
 
 ## Modes
 Two mutually exclusive modes; exactly one of `code` or `script` must be provided.
@@ -174,11 +183,14 @@ Each invocation requires user approval (allow once / always allow / deny). Alway
 - Execute Python code for data processing or complex logic operations.
 - Run scripts within the sandbox.
 - Precisely control the Python version via `python_path` (e.g. pointing to a virtualenv interpreter).
+- For moderately long tasks, increase the `timeout` parameter.
+- For tasks that may exceed even the extended timeout, use start_background_service to run in background and poll the log via Read, or start_watching_service to monitor output with automatic callbacks.
 
 ## Side Effects / Notes
 - Misuse can cause catastrophic damage to the entire machine.
 - Do NOT use this tool to replace sandbox file I/O and search operations (Read, Write, grep, glob, etc.); those have safer built-in tools.
 - Do NOT use this tool for downloads or services that require significant runtime.
+- When a command times out, do NOT manually simulate its effects (e.g. hand-writing node_modules/, manually creating build artifacts). A timeout means you should switch to background tools (start_background_service / start_watching_service), not work around the command itself.
 - `code` and `script` are mutually exclusive; providing both returns an error.
 - `args` only takes effect in script mode.
 - Default working directory is `ws:` (agentspace).
