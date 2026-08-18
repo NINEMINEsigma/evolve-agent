@@ -146,8 +146,8 @@ export default function MessageBody({ message, streaming, onImageClick }: Messag
   if (m.role === "tool") {
     // tool_call（有 toolArgs）
     if (m.toolArgs) {
-      // Write tool_call：content 存在时显示为全绿行 diff
-      if (m.toolName === "Write" && typeof m.toolArgs.content === "string") {
+      // Write tool_call：content + path 字段同时存在时显示为全绿行 diff
+      if (typeof m.toolArgs.content === "string" && typeof m.toolArgs.path === "string") {
         const isAppend = m.toolArgs.mode === "append";
         return (
           <>

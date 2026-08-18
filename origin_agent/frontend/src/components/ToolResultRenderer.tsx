@@ -62,19 +62,33 @@ const renderPatchEdit: RenderFn = (parsed) => {
   );
 };
 
-// 注册表：toolName → 特化渲染函数
+// 注册表：toolName → 特化渲染函数（精确匹配优先）
 const registry: Record<string, RenderFn> = {
   Read: renderRead,
   PatchEdit: renderPatchEdit,
 };
 
-// 对外接口：命中返回特化元素，未命中返回 null（调用方走默认 JsonView）
+// 所有渲染器列表，用于 toolName 缺失时的结构匹配 fallback
+const allRenderers: RenderFn[] = [renderRead, renderPatchEdit];
+
+// 对外接口：toolName 精确匹配优先，缺失或未命中时按结构特征逐个尝试
 export function renderToolResult(
   toolName: string | undefined,
   parsed: Record<string, unknown>,
   onImageClick: (src: string) => void,
 ): JSX.Element | null {
-  if (!toolName) return null;
-  const renderer = registry[toolName];
-  return renderer ? renderer(parsed, onImageClick) : null;
+  // 优先按 toolName 精确匹配
+  if (toolName) {
+    const renderer = registry[toolName];
+    if (renderer) {
+      const result = renderer(parsed, onImageClick);
+      if (result) return result;
+    }
+  }
+  // toolName 缺失或未命中注册表：按结构特征逐个尝试
+  for (const renderer of allRenderers) {
+    const result = renderer(parsed, onImageClick);
+    if (result) return result;
+  }
+  return null;
 }

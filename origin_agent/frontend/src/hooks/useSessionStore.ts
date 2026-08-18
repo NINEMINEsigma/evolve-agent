@@ -455,6 +455,9 @@ export function useSessionStore(callbacks: SessionStoreCallbacks = {}): SessionS
                       .map(([k, v]) => `${k}=${JSON.stringify(v)}`)
                       .join(", ") + ")"
                   : "";
+                // TODO: emoji 未持久化 — SessionMessageEntry 不含 emoji 字段，
+                // 历史恢复后 tool 消息折叠摘要显示 "⚡" 而非工具注册的 emoji（如 "📄"）。
+                // 修复需在 SessionMessageEntry 增加 emoji 字段，并在 _serialize_message_entry 中透传。
                 const callerPrefix = m.character_name ? `${m.character_name} ` : "";
                 return {
                   role: "tool",
