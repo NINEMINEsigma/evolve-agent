@@ -313,8 +313,9 @@ class FrontendSink(AgentSink):
     async def emit_tool_call(self, session_id: str, tool_name: str,
                              tool_call_id: str, args: dict,
                              character_name: str | None = None) -> None:
+        visible_args = {k: v for k, v in args.items() if not k.startswith("_")}
         await self._send_msg(session_id, "tool_call", tool_name,
-                             json.dumps(args, ensure_ascii=False),
+                             json.dumps(visible_args, ensure_ascii=False),
                              character_name=character_name)
 
     async def emit_tool_result(self, session_id: str, tool_name: str,
