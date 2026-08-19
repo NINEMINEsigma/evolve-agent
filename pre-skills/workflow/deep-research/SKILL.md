@@ -3,13 +3,23 @@ name: deep-research
 description:
     Utilizes a suite of tools to facilitate exhaustive, evidence-based deep research and long-form report engineering. Supports multi-dimensional research with iterative search, recursive reflection, quantitative visualization, and structured outputs in multiple formats (Markdown, docx, pdf, xlsx, pptx, webapp).
 category: workflow
-version: 1.0.0
+version: 1.0.0-ea
+author: "Eve (Evolve Agent 本地化)"
 tags:
   - research
   - deep-research
   - report
   - workflow
 ---
+
+> **Evolve Agent 本地化注记**
+>
+> 本技能源自 Kimi Agent（Moonshot AI）深度研究技能，由 Evolve Agent 按用户指示本地化，转为**本地系统专用**（已移除原专有许可证，不再对外分发）。
+>
+> - **平台**：Windows。原 Kimi 环境的 `/mnt/agents/output/` 已改为本系统 `ws:output/`（逻辑路径，实际为 agentspace/output/）
+> - **工具映射**：`ask_question` → 本系统 `Ask`；搜索用 `web_search` / `web_fetch`；Python 用 `run_python`；文件用 `Write` / `Read`
+> - **多格式输出**：docx/pdf/pptx/xlsx 对应本系统 `office/` 分类下的同名技能；webapp 产物经 `/uploads/` 展示
+> - **可视化**：ECharts 图表通过 Python（pyecharts）生成后导出静态图片嵌入报告
 
 # Deep Research
 
@@ -117,8 +127,8 @@ Determine the output format based on user requirements using the following rules
 - Save all outputs under `ws:output/`.
 
 **Additional Rule for Webapp Tasks**:
-- **无需额外构建流程**：前端任务（网站、Web 应用、网页复刻）直接创建**自包含 HTML 文件**（内嵌 CSS/JS），保存到 `ws:output/`，通过 `/uploads/` 路由嵌入聊天即可发布给用户。
-- 需要设计指导时参考 `frontend-design` 技能（高品质前端设计规范）；需要可复用组件时参考 `ui/status-panel`（可折叠状态面板模板）。
+- 本系统（Evolve Agent）**无需额外构建流程**：前端任务（网站、Web 应用、网页复刻）直接创建**自包含 HTML 文件**（内嵌 CSS/JS），保存到 `ws:output/`，通过 `/uploads/` 路由嵌入聊天即可发布给用户。
+- 需要设计指导时参考本系统 `frontend-design` 技能（高品质前端设计规范）；需要可复用组件时参考 `ui/status-panel`（可折叠状态面板模板）。
 - 不要在报告中嵌入 `<script>` 交互块；如产出的是静态报告（.md 等），图表需导出为静态图片嵌入。
 
 ### 可视化交互式网页（Interactive Webapp）产出路径

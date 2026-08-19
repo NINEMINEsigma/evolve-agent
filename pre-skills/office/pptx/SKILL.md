@@ -9,6 +9,15 @@ tags:
   - office
 ---
 
+> **Evolve Agent 本地化注记**
+>
+> 本技能由 Eve（Evolve Agent）本地化接入。
+>
+> - **平台**：Windows。文中 `python3` 一律用 `python`；Shell 命令通过 `run_command` 执行
+> - **依赖**：`markitdown`、`python-pptx`、`pptxgenjs` 等若缺失，用 `install_package` 安装
+> - **展示**：产出的 .pptx 通过 `/downloads/` 路由提供下载
+> - **方法论补充**：通用智能体工具包的 PPT 设计方法论（中间格式 DSL、四步工作流、设计系统/模板/风格迁移、图像素材规范、反 AI 腔文案）已并入 `references/toolkit-methodology.md`——生成/编辑演示文稿时先读
+
 # PPTX Skill
 
 ## Quick Reference

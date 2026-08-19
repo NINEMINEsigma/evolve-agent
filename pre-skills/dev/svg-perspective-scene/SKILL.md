@@ -15,7 +15,7 @@ tags: ["svg", "perspective", "geometry", "browser-screenshot", "testing", "visua
 
 工作流程：
 
-1. 定灭点与进深参数 → 2. 按公式推出房间五个面 → 3. 按物件与墙面的关系选画法 → 4. 浏览器截图目检 → 5. DOM/回归验证 → 6. 逐项对照失败模式清单。
+1. 定灭点与进深参数 → 2. 按公式推出房间五个面 → 3. 按物件与墙面的关系选画法 → 4. 浏览器截图目检（**无视觉能力时改为展示截图给用户目检**）→ 5. DOM/回归验证 → 6. 逐项对照失败模式清单。
 
 ## 第一步：几何构建（公式速查）
 
@@ -64,13 +64,18 @@ P' = P + s × (VP − P)
 
 ### 层 1：浏览器截图目检
 
+> ⚠️ **前置：视觉能力自检（必须）**。截图目检依赖 `Read` 的图片分支，前提是当前模型具备视觉能力。
+> 开始前先 `probe_modality_capability` 确认：
+> - `vision_capable=true` → 可继续走下方自主目检流程；
+> - `vision_capable=false` → **跳过步骤 6–7 的自主读图**，截图后直接把 `saved_to` 路径展示给用户，请用户亲自判断（重点看：墙线收束、物件落地、遮挡、剪裁），等用户反馈后再继续层 2/层 3。
+
 1. 首次使用：`browser_launch` 启动带调试端口的 Edge → `browser_connect` 接管（后续同一会话复用连接）。
 2. 打开页面：`browser_open_tab(url="file:///<HTML 绝对路径>")`。若 file:// 被拒或相对资源失效，改用本地静态服务器托管：`start_background_service(command=["python","-m","http.server","8765"], cwd="ws:output")`，再 `browser_open_tab(url="http://localhost:8765/index.html")`。
 3. `browser_list_tabs` 取新标签页下标 `idx`。
 4. 等动画/定时器沉淀：`browser_wait(tab=idx, timeout_ms=4000)`（真实等待，非虚拟快进）。
 5. `browser_screenshot(tab=idx, full_page=true)` → 截图存到 `ws:logs/browser_screenshots/{uuid}.png`（返回 `saved_to`）。
-6. `Read` 该 `saved_to` 路径（image 分支）**亲自看图**，重点看：墙线收束、物件落地、遮挡、剪裁。
-7. 局部放大复查：`run_python` 调 [scripts/shot.py](scripts/shot.py) 对 `saved_to` 路径按相对坐标裁剪。
+6. （仅 `vision_capable=true`）`Read` 该 `saved_to` 路径（image 分支）**亲自看图**，重点看：墙线收束、物件落地、遮挡、剪裁。
+7. （仅 `vision_capable=true`）局部放大复查：`run_python` 调 [scripts/shot.py](scripts/shot.py) 对 `saved_to` 路径按相对坐标裁剪。
 
 ### 层 2：DOM 状态诊断（验证动画/状态机的终态）
 
@@ -96,7 +101,7 @@ CSS transition 在真实浏览器里会正常播放，截图能反映真实终�
 
 - [ ] 所有纵深边延长后过同一灭点（抽 3 条心算验证）
 - [ ] 每个物体底部有接触线或阴影，无漂浮
-- [ ] 浏览器截图目检通过（含局部裁剪放大）
+- [ ] 浏览器截图目检通过（含局部裁剪放大）——**无视觉能力（vision_capable=false）时由用户目检，不得自称通过**
 - [ ] DOM 诊断无 JS error，终态样式正确
 - [ ] 自动回归链路全 OK
 - [ ] 深/浅两套主题各截一张图确认

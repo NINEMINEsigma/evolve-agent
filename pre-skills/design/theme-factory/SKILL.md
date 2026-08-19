@@ -10,6 +10,14 @@ tags:
 ---
 
 
+> **Evolve Agent 本地化注记**
+>
+> 本技能源自 Anthropic 官方 skills 仓库，由 Eve（Evolve Agent）本地化接入。
+>
+> - **说明**：10 套预设主题（配色+字体）可直接用于幻灯片/文档/HTML 等任何产物
+> - **展示**：`theme-showcase.pdf` 主题展示文件通过 `/uploads/` 或 `/downloads/` 展示给用户选
+> - **许可证**：Apache 2.0（详见本技能目录 LICENSE.txt）
+
 # Theme Factory Skill
 
 This skill provides a curated collection of professional font and color themes themes, each with carefully selected color palettes and font pairings. Once a theme is chosen, it can be applied to any artifact.

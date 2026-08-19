@@ -1,0 +1,204 @@
+@import url('https://fonts.googleapis.com/css2?family=VT323&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --paper: #fff1be;
+  --paper-soft: #faf0d2;
+  --panel: #fdf6dc;
+  --ink: #141312;
+  --ink-soft: #4a4640;
+  --line: #141312;
+  --green: #b2a574;
+  --green-deep: #6b6a3f;
+  --forge: #d9622b;
+  --ember: #b3341f;
+  --gold: #b8860b;
+}
+
+html, body, #root {
+  height: 100%;
+}
+
+body {
+  background: var(--paper);
+  color: var(--ink);
+  font-family: "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans SC", sans-serif;
+  -webkit-font-smoothing: none;
+  -moz-osx-font-smoothing: none;
+  user-select: none;
+  image-rendering: pixelated;
+}
+
+.font-pixel {
+  font-family: 'VT323', "PingFang SC", "Microsoft YaHei", monospace;
+  letter-spacing: 0.02em;
+}
+
+/* ===== 像素面板：脊线边框 + 硬阴影 ===== */
+.px-panel {
+  background: var(--panel);
+  border: 3px solid var(--line);
+  box-shadow:
+    inset 2px 2px 0 0 #ffffff,
+    inset -2px -2px 0 0 #cbb98a,
+    5px 5px 0 0 rgba(20, 19, 18, 0.28);
+}
+
+.px-panel-inset {
+  background: #f4e9c8;
+  border: 3px solid var(--line);
+  box-shadow:
+    inset 2px 2px 0 0 #cbb98a,
+    inset -2px -2px 0 0 #ffffff;
+}
+
+/* ===== 像素按钮：outset / 按下 inset 反转 ===== */
+.px-btn {
+  background: #f0e3b8;
+  border: 3px solid var(--line);
+  box-shadow:
+    inset 2px 2px 0 0 #ffffff,
+    inset -2px -2px 0 0 #cbb98a;
+  padding: 6px 14px;
+  cursor: pointer;
+  color: var(--ink);
+  font-weight: 600;
+  transition: none;
+}
+.px-btn:hover { background: #f7ecc9; }
+.px-btn:active {
+  box-shadow:
+    inset 2px 2px 0 0 #cbb98a,
+    inset -2px -2px 0 0 #ffffff;
+  transform: translate(1px, 1px);
+}
+.px-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.px-btn-primary {
+  background: var(--forge);
+  color: #fff7e0;
+  box-shadow:
+    inset 2px 2px 0 0 #f2a56d,
+    inset -2px -2px 0 0 #8f3c14;
+}
+.px-btn-primary:hover { background: #e0701f; }
+.px-btn-primary:active {
+  box-shadow:
+    inset 2px 2px 0 0 #8f3c14,
+    inset -2px -2px 0 0 #f2a56d;
+}
+.px-btn-danger {
+  background: var(--ember);
+  color: #fff7e0;
+  box-shadow:
+    inset 2px 2px 0 0 #d9725f,
+    inset -2px -2px 0 0 #6e1f10;
+}
+.px-btn-green {
+  background: var(--green-deep);
+  color: #fff7e0;
+  box-shadow:
+    inset 2px 2px 0 0 #9a986b,
+    inset -2px -2px 0 0 #41401f;
+}
+
+/* 标题条 */
+.px-titlebar {
+  background: var(--ink);
+  color: var(--paper);
+  padding: 4px 10px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+/* 像素进度条 */
+.px-bar {
+  height: 14px;
+  background: #e6d9b0;
+  border: 2px solid var(--line);
+  box-shadow: inset 1px 1px 0 #cbb98a;
+  position: relative;
+  overflow: hidden;
+}
+.px-bar > div {
+  height: 100%;
+  transition: width 0.2s steps(8);
+}
+
+/* 标签页 */
+.px-tab {
+  border: 3px solid var(--line);
+  border-bottom: none;
+  background: #e9dcae;
+  padding: 8px 16px;
+  cursor: pointer;
+  font-weight: 700;
+  box-shadow: inset 2px 2px 0 #ffffff;
+}
+.px-tab.active {
+  background: var(--panel);
+  transform: translateY(3px);
+  padding-bottom: 11px;
+}
+
+/* 闪烁提示 */
+@keyframes blink {
+  0%, 60% { opacity: 1; }
+  61%, 100% { opacity: 0.15; }
+}
+.blink { animation: blink 1s steps(1) infinite; }
+
+/* QTE 滑杆 */
+.qte-track {
+  position: relative;
+  height: 34px;
+  background: #2a2620;
+  border: 3px solid var(--line);
+  overflow: hidden;
+}
+.qte-zone-good { position: absolute; top: 0; bottom: 0; background: #b2a574; }
+.qte-zone-perfect { position: absolute; top: 0; bottom: 0; background: #d9622b; }
+.qte-needle {
+  position: absolute; top: -2px; bottom: -2px; width: 4px;
+  background: #fff7e0;
+  box-shadow: 0 0 6px #fff;
+}
+
+/* 火花 */
+@keyframes sparkfly {
+  0% { transform: translate(0, 0) scale(1); opacity: 1; }
+  100% { transform: translate(var(--dx), var(--dy)) scale(0.2); opacity: 0; }
+}
+.spark {
+  position: absolute;
+  width: 6px; height: 6px;
+  background: #ffb347;
+  animation: sparkfly 0.6s steps(6) forwards;
+  pointer-events: none;
+}
+
+/* 对话框打字机光标 */
+.scene-cursor::after {
+  content: '▼';
+  margin-left: 6px;
+  animation: blink 1s steps(1) infinite;
+  font-size: 10px;
+}
+
+/* 滚动条 */
+::-webkit-scrollbar { width: 14px; }
+::-webkit-scrollbar-track { background: #e6d9b0; border-left: 2px solid var(--line); }
+::-webkit-scrollbar-thumb {
+  background: #f0e3b8;
+  border: 2px solid var(--line);
+  box-shadow: inset 1px 1px 0 #fff, inset -1px -1px 0 #cbb98a;
+}
+
+img { image-rendering: pixelated; }

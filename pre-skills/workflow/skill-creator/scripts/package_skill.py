@@ -15,7 +15,7 @@ import sys
 import zipfile
 from pathlib import Path
 
-# Support direct execution: python scripts/package_skill.py
+# Evolve Agent 本地化：支持直接运行 python scripts/package_skill.py
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from quick_validate import validate_skill
 

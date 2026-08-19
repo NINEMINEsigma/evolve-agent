@@ -2,6 +2,7 @@
 name: "tavern-simulator"
 description: "SillyTavern-style character roleplay engine. Load, parse, and perform in-character roleplay using character cards and world books. Trigger when the user provides a character card or world book to load, asks to start/continue a roleplay session, or requests tavern-style inference with structured state panels, color-coded dialogue, and branching options."
 version: 1.2.0
+author: "Evolve-Agent"
 category: game
 tags:
   - roleplay
@@ -34,6 +35,8 @@ Agent 扮演酒馆系统（叙述者和管理者），负责：
 - `Read("skills:game/tavern-simulator/templates/full-html-skeleton.html")` — 完整HTML输出骨架（含JS）
 - `Read("skills:game/tavern-simulator/templates/phone-chat.html")` — 手机聊天界面组件
 - `Read("skills:game/tavern-simulator/templates/panel-examples.html")` — 各面板的HTML模板示例
+- `Read("skills:game/tavern-simulator/assets/char-tooltip.css")` — 正文角色 tooltip 样式（通用版）
+- `Read("skills:game/tavern-simulator/assets/char-tooltip.js")` — 正文角色 tooltip 交互（通用版）
 
 **输出流程**：读取 `assets/tavern-base.css` 获取样式 → 读取 `templates/full-html-skeleton.html` 获取骨架 → 按规范填充六面板内容 → 添加选项。
 
@@ -155,10 +158,10 @@ Agent 扮演酒馆系统（叙述者和管理者），负责：
 ### 三、选项列表
 
 #### 基础规范
-- 提供 **5-6 个分支选项 + 1 个自定义选项**
+- 提供 **5-6 个分支选项 + 1 个自动推进选项**
 - 格式：`emoji + 简短行动描述`
 - 选项应体现不同的行为倾向：积极行动 / 谨慎观察 / 社交对话 / 思考分析 / 冒险试探等
-- 自定义选项固定标注：`✏️ [自定义行动]`
+- 自动推进选项固定标注：`➡️ [自动推进一段]` —— 点击后由 Agent 自动选择一个合理方向推进剧情（适合玩家想偷懒、或想给故事自由发展空间时使用；Agent 收到后应按当前剧情状态自行决策推进，不再等待玩家选择）
 - 选项之间留适当间距，鼠标悬停有反馈效果
 
 #### 动态端点通知
@@ -187,7 +190,7 @@ Agent 扮演酒馆系统（叙述者和管理者），负责：
 **选项的 onclick 写法：**
 ```html
 <div class="oi" onclick="chooseOpt('选项描述')">😏 选项描述</div>
-<div class="oc" onclick="chooseOpt('✏️ [自定义行动]')">✏️ [自定义行动]</div>
+<div class="oc" onclick="chooseOpt('➡️ [自动推进一段]')">➡️ [自动推进一段]</div>
 ```
 
 **脚注文字：**
@@ -205,7 +208,54 @@ Agent 扮演酒馆系统（叙述者和管理者），负责：
 - 一次注册持续使用，直到剧情线结束或场景切换时调用 `unregister_dynamic_endpoint` 清理
 - 端点方案强制执行，不再支持传统复制到剪贴板
 
-### 四、手机聊天界面组件（📱）
+### 四、正文角色 tooltip（通用版）
+
+> 正文中出现的角色名/人称代词可以点击，弹出该角色的图鉴浮层（含好感度进度条）。**通用版本**，不绑定任何特定字段，Agent 每次渲染时自定义展示内容。
+
+#### 用法
+
+正文中角色名与指代明确的代词包 `.ch` span：
+
+```html
+<p><span class="ch" data-ch="紫月">紫月</span>红着脸说……</p>
+<p><span class="ch" data-ch="紫月">她</span>往你怀里靠了靠……</p>
+```
+
+- `data-ch` = 角色在 tooltip 数据源中的 key
+- 代词只在上下文指代明确时包裹；**同段出现多个角色时，优先用名字/身份词，避免「她」指代不明**（这是玩家的硬性要求）
+
+#### 数据源（JS 内嵌对象）
+
+在页面末尾、tooltip 脚本之前，直接内嵌 JS 对象。**不要用 `<script type="application/json">` 元素**——多条历史消息并存时 id 冲突会导致点击无反应或读到旧数据：
+
+```html
+<script>
+window.__TT_DATA__ = {
+  "紫月": {
+    "name": "紫月",
+    "emoji": "👩",
+    "title": "师尊 · 三百岁 · 金丹期丹修",
+    "fields": [
+      ["📏 外貌", "紫发紫瞳 · 紧身旗袍 · 人妻麻花辫"],
+      ["🧬 性格", "清纯呆萌 · 容易害羞"],
+      ["⏭️ 可能", "会主动贴过来求欢"]
+    ],
+    "affection": 92
+  }
+};
+</script>
+```
+
+- `fields` 为二维数组 `[[标签, 值], ...]`，内容由 Agent 每回合按需定制（外貌/性格/状态/下一步可能等均可）
+- `affection` 可选，传入 0-100 数值则渲染好感度进度条
+
+#### 交互脚本与样式
+
+- 完整 JS 见 `assets/char-tooltip.js`。实现要点：IIFE 包裹；`document.currentScript.parentElement` 定位本条消息容器、只监听容器内 `.ch` 点击（**多消息并存不冲突**）；tooltip 浮层全局唯一（`#tt-tip`）；点击同一名字关闭、点击外部关闭；`position:fixed` + 视口避让，移动端友好
+- 完整 CSS 见 `assets/char-tooltip.css`。类名 `.ch` 与 `#tt-tip` 系列，复制进酒馆 HTML 的 `<style>` 后替换色值为当前主题色
+- **输出流程**：正文角色名/代词包 `.ch` → 页面末尾内嵌 `window.__TT_DATA__` → `<style>` 加 tooltip CSS → `<script>` 加 tooltip JS（顺序：CSS → 正文 → 面板 → 数据 → JS）
+
+### 五、手机聊天界面组件（📱）
 
 > 在酒馆剧情中嵌入手机聊天界面，显示角色之间的微信对话。走微信原生配色，不随酒馆主题色变化。**时间必须严格同步剧情时间**。
 
@@ -536,3 +586,7 @@ Agent 扮演酒馆系统（叙述者和管理者），负责：
 17. **手机消息沉浸渲染**：当剧情涉及收发手机消息时，**必须主动使用手机聊天界面组件**（`templates/phone-chat.html`）来渲染对话内容，而非用纯文字叙述。消息内容在手机界面中展示，收/发消息前后的心理活动、环境描写可用正常叙事，但对话本身要用手机UI呈现
 18. **纯HTML输出不混Markdown**：酒馆剧情卡牌必须是纯HTML，不得混入任何Markdown格式（`**粗体**`、`` `行内代码` ``、`- 列表`、`> 引用`等）。如需额外说明，分两条消息发送：先发纯HTML卡牌，再单独发文字消息
 19. **动态端点生命周期管理**：使用动态端点增强时，渲染前先 `register_dynamic_endpoint`，渲染后将 URL 填入模板 `{endpoint_url}` 占位符，结束后及时 `unregister_dynamic_endpoint` 清理，不留残留
+20. **对话块铁律**：所有人物对话必须放进独立对话块（`.dpc`/`.dnpc`/`.dnc`），绝不混入叙事段落——这是玩家的硬性要求，违反必被纠正
+21. **tooltip 指代清楚**：正文中多个角色同段出现时，用名字/身份词区分，少用模糊代词；代词只在上下文唯一明确时使用
+22. **tooltip 实现防冲突**：数据用 JS 内嵌对象（`window.__TT_DATA__`）而非 JSON 元素；用 `document.currentScript.parentElement` 按消息容器隔离绑定，tooltip 浮层全局唯一（`#tt-tip`）
+23. **自动推进选项**：`➡️ [自动推进一段]` 是「让 Agent 自己选方向」，收到后不要又问玩家，直接按当前剧情状态决策推进

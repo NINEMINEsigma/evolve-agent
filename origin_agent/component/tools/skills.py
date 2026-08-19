@@ -182,6 +182,11 @@ registry.register(
         # - 对已有 skill 的主体内容进行较大程度更改。
         # - 小范围修改或追加内容应使用沙箱内置的 PatchEdit 或 Write，路径使用 `skills:` 前缀（如 `skills:my-skill/SKILL.md`）。
         #
+        # ## 语言规范（重要）
+        # Skills 是共享知识产物，不是个人表达。编写所有 skill 内容——Markdown 正文、描述、
+        # 脚本、参考文档——时使用通用、中立的语言，独立于你的 SOUL 人格。采用技术文档
+        # 写作风格，而非你的个人语气或人格。Skills 必须能被任何 agent 理解和复用。
+        #
         # ## 副作用/注意
         # - 写入 project-root/skills/ 下的文件系统。
         # - 同名 skill 会被覆盖更新，谨慎使用。
@@ -204,6 +209,9 @@ The `files` parameter can write ancillary files (scripts, reference docs, etc.) 
 - Create a brand-new skill.
 - Make significant changes to an existing skill's main content.
 - For small edits or appending content, use the sandbox built-in PatchEdit or Write with the `skills:` prefix (e.g. `skills:my-skill/SKILL.md`).
+
+## Language Convention (important)
+Skills are shared knowledge artifacts, not personal expression. Write all skill content — the Markdown body, description, scripts, references — in **generic, neutral language** independent of your SOUL personality. Use a technical writing voice, not your personal tone or persona. Skills must be understandable and reusable by any agent, regardless of persona.
 
 ## Side Effects / Notes
 - Writes to the file system under project-root/skills/.

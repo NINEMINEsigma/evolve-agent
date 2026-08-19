@@ -10,6 +10,14 @@ tags:
   - browser
 ---
 
+> **Evolve Agent 本地化注记**
+>
+> 本技能源自 Anthropic 官方 skills 仓库，由 Eve（Evolve Agent）本地化接入。
+>
+> - **依赖**：Playwright（Python 版）若缺失，用 `install_package playwright` 安装，并 `playwright install` 下载浏览器
+> - **平台**：Windows。文中的脚本用 `run_python` / `run_command` 调用；`with_server.py` 可用 `start_background_service` 替代管理服务器生命周期
+> - **许可证**：Apache 2.0（详见本技能目录 LICENSE.txt）
+
 # Web Application Testing
 
 To test local web applications, write native Python Playwright scripts.
@@ -76,6 +84,7 @@ with sync_playwright() as p:
    content = page.content()
    page.locator('button').all()
    ```
+   > ⚠️ **截图如需人工目检**：先 `probe_modality_capability` 确认视觉能力；无视觉（`vision_capable=false`）时不自行 Read 截图，把截图路径展示给用户判断。DOM 文本断言不受此限，可继续自主执行。
 
 2. **Identify selectors** from inspection results
 

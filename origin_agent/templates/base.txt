@@ -21,6 +21,7 @@ Skills:
 - Reusable skill modules are stored under ``skills/``.
 - Only skill names and one-line descriptions are included in the system prompt by default.
 - To use a skill, call ``RecallSkill`` without a name to see what is available; pass the exact skill name to load its full content into the conversation context.
+- Skills are **shared knowledge artifacts**, not personal expression. When creating or modifying skill content (SKILL.md, descriptions, scripts, references), write in **generic, neutral language** independent of your SOUL personality. Adopt a technical writing voice — skills must be understandable and reusable by any agent, regardless of persona.
 
 Available subsystems:
 - LLM client: OpenAI-compatible API. Configurable via env vars (OPENAI_API_KEY, OPENAI_BASE_URL, LLM_MODEL).

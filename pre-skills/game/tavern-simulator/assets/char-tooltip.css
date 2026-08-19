@@ -1,0 +1,55 @@
+/* =============================================
+   char-tooltip.css — 正文角色 tooltip 样式（通用版）
+   使用方式：复制到酒馆 HTML 的 <style> 内
+   主题适配：替换下方朱砂色值为你的主题强调色
+   ============================================= */
+
+/* ===== 正文角色名/代词 ===== */
+.ch{
+  color:#b03a2e;                 /* 主题强调色 */
+  font-weight:600;
+  cursor:pointer;
+  border-bottom:1px dashed rgba(176,58,46,0.5);
+  transition:background 0.15s;
+}
+.ch:hover{background:rgba(176,58,46,0.06);}
+
+/* ===== tooltip 浮层（全局唯一） ===== */
+#tt-tip{
+  position:fixed;
+  z-index:99999;
+  width:230px;
+  background:#fffaf2;
+  border:1px solid rgba(176,58,46,0.25);
+  border-radius:10px;
+  padding:10px 12px;
+  box-shadow:0 6px 24px rgba(0,0,0,0.15);
+  font-size:12px;
+  color:#3e2f2a;
+  line-height:1.5;
+  display:none;
+  pointer-events:none;          /* 关键：不拦截点击 */
+}
+
+/* tooltip 内部元素（tt- 前缀，避免与页面其他样式冲突） */
+#tt-tip .tt-cn2{font-weight:bold;font-size:13px;color:#b03a2e;margin-bottom:2px;}
+#tt-tip .tt-ct2{font-size:10px;color:#9a7b6b;margin-bottom:6px;border-bottom:1px dashed rgba(176,58,46,0.15);padding-bottom:4px;}
+#tt-tip .tt-cr2{display:flex;gap:6px;margin:3px 0;}
+#tt-tip .tt-cl2{color:#9a7b6b;font-weight:500;min-width:56px;flex-shrink:0;}
+#tt-tip .tt-cv2{color:#3e2f2a;}
+#tt-tip .tt-cp2{display:flex;align-items:center;gap:6px;margin-top:6px;padding-top:5px;border-top:1px dashed rgba(176,58,46,0.15);}
+#tt-tip .tt-cb2{height:5px;border-radius:3px;background:rgba(0,0,0,0.08);overflow:hidden;flex:1;}
+#tt-tip .tt-cf2{height:100%;border-radius:3px;background:linear-gradient(90deg,#e07a5f,#c9604a);}
+#tt-tip .tt-sn2{font-size:10px;color:#b03a2e;font-weight:600;white-space:nowrap;}
+
+/* ===== 深色主题适配示例（取消注释使用） =====
+.ch{color:#c084fc;border-bottom-color:rgba(192,132,252,0.5);}
+.ch:hover{background:rgba(192,132,252,0.1);}
+#tt-tip{background:#221a2e;border-color:rgba(192,132,252,0.3);color:#e8d4a8;}
+#tt-tip .tt-cn2{color:#c084fc;}
+#tt-tip .tt-ct2{color:#8b7a9a;}
+#tt-tip .tt-cl2{color:#8b7a9a;}
+#tt-tip .tt-cv2{color:#e8d4a8;}
+#tt-tip .tt-sn2{color:#c084fc;}
+#tt-tip .tt-cf2{background:linear-gradient(90deg,#c084fc,#9b59b6);}
+*/
