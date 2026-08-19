@@ -237,6 +237,11 @@
   color: var(--text-secondary);
 }
 
+.disgust-emoji {
+  font-size: 15px;
+  line-height: 1;
+}
+
 /* ── Agentspace FAB ── */
 .agentspace-fab {
   width: 34px;
