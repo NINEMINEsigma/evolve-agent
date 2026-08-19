@@ -1,0 +1,279 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>3D Object Viewer</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { overflow: hidden; background: #1a1a1a; font-family: system-ui, sans-serif; }
+  #canvas-container { width: 100vw; height: 100vh; }
+  #toolbar {
+    position: fixed; top: 16px; left: 50%; transform: translateX(-50%);
+    display: flex; gap: 8px; z-index: 100;
+    background: rgba(30,30,30,0.85); backdrop-filter: blur(10px);
+    padding: 8px 12px; border-radius: 10px;
+    border: 1px solid rgba(255,255,255,0.1);
+  }
+  #toolbar button {
+    background: rgba(255,255,255,0.1); color: #eee; border: none;
+    padding: 8px 16px; border-radius: 6px; cursor: pointer;
+    font-size: 13px; transition: background 0.2s;
+  }
+  #toolbar button:hover { background: rgba(255,255,255,0.2); }
+  #info {
+    position: fixed; bottom: 16px; left: 16px; z-index: 100;
+    color: rgba(255,255,255,0.4); font-size: 12px;
+  }
+</style>
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://unpkg.com/three@0.184.0/build/three.module.js",
+    "three/addons/controls/OrbitControls.js": "https://unpkg.com/three@0.184.0/examples/jsm/controls/OrbitControls.js",
+    "three/addons/exporters/OBJExporter.js": "https://unpkg.com/three@0.184.0/examples/jsm/exporters/OBJExporter.js",
+    "three/addons/exporters/GLTFExporter.js": "https://unpkg.com/three@0.184.0/examples/jsm/exporters/GLTFExporter.js"
+  },
+  "integrity": {
+    "https://unpkg.com/three@0.184.0/build/three.module.js": "sha384-8FCZ1eVO6it4+pbec2aDtnTrwjWXZLJRC+MAGCIPDgsYnUrl/E0A2YlF8ioMKI/J",
+    "https://unpkg.com/three@0.184.0/build/three.core.js": "sha384-dw2ooPewaEIrAgl6oFDBmmBWCE9oW9LxRGcfwZ0hLvEprzo202wXl7vCYHRlSnOT",
+    "https://unpkg.com/three@0.184.0/examples/jsm/controls/OrbitControls.js": "sha384-4rziNxOBZKQ69i+w+f89KJ55TCYquwchVbByQwmaOeIOXdOU2PLDn3kOfXHwIJC9",
+    "https://unpkg.com/three@0.184.0/examples/jsm/exporters/OBJExporter.js": "sha384-nbwtoZENJD3Vq+ACK0CuGQdPMuDWHkamC2KJD70EV5nfg6jQjfppKOea07YJN+N3",
+    "https://unpkg.com/three@0.184.0/examples/jsm/exporters/GLTFExporter.js": "sha384-VofkvpG6HERhFCYbsUOHeNXBCqID2nfqkQqnVzE1jc/oPcz+qJ13ADdXH08hE+cQ"
+  }
+}
+</script>
+</head>
+<body>
+<div id="canvas-container"></div>
+<div id="toolbar">
+  <button onclick="exportOBJ()">Download OBJ+MTL</button>
+  <button onclick="exportGLB()">Download GLB</button>
+</div>
+<div id="info">Drag to rotate · Scroll to zoom · Right-drag to pan</div>
+
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { OBJExporter } from 'three/addons/exporters/OBJExporter.js';
+import { GLTFExporter } from 'three/addons/exporters/GLTFExporter.js';
+
+// ===== Scene Setup =====
+const container = document.getElementById('canvas-container');
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x1a1a1a);
+
+const cw = container.clientWidth || window.innerWidth;
+const ch = container.clientHeight || window.innerHeight;
+const camera = new THREE.PerspectiveCamera(45, cw / ch, 0.1, 1000);
+camera.position.set(5, 4, 7);
+
+const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
+renderer.setSize(cw, ch);
+renderer.setPixelRatio(window.devicePixelRatio);
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.0;
+container.appendChild(renderer.domElement);
+
+// ===== Orbit Controls =====
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true;
+controls.dampingFactor = 0.08;
+controls.target.set(0, 0.5, 0);
+
+// ===== Studio Lighting (3-point) =====
+// Key light (main)
+const keyLight = new THREE.DirectionalLight(0xffffff, 2.5);
+keyLight.position.set(5, 8, 5);
+keyLight.castShadow = true;
+keyLight.shadow.mapSize.set(2048, 2048);
+keyLight.shadow.camera.left = -5;
+keyLight.shadow.camera.right = 5;
+keyLight.shadow.camera.top = 5;
+keyLight.shadow.camera.bottom = -5;
+keyLight.shadow.camera.near = 0.1;
+keyLight.shadow.camera.far = 30;
+keyLight.shadow.bias = -0.0005;
+scene.add(keyLight);
+
+// Fill light (softer, opposite side)
+const fillLight = new THREE.DirectionalLight(0xb0c4de, 0.8);
+fillLight.position.set(-5, 4, 3);
+scene.add(fillLight);
+
+// Rim light (behind, for edge separation)
+const rimLight = new THREE.DirectionalLight(0xffe0b0, 1.0);
+rimLight.position.set(0, 3, -6);
+scene.add(rimLight);
+
+// Ambient
+const ambient = new THREE.AmbientLight(0x404040, 0.4);
+scene.add(ambient);
+
+// ===== Ground Shadow Plane =====
+const groundGeo = new THREE.PlaneGeometry(20, 20);
+const groundMat = new THREE.ShadowMaterial({ opacity: 0.35 });
+const ground = new THREE.Mesh(groundGeo, groundMat);
+ground.rotation.x = -Math.PI / 2;
+ground.position.y = 0;
+ground.receiveShadow = true;
+scene.add(ground);
+
+// ===== Build Model (REPLACE THIS) =====
+function buildModel() {
+  const group = new THREE.Group();
+
+  // Example: a simple pawn
+  // Replace this entire function with your model
+
+  const woodMat = new THREE.MeshStandardMaterial({
+    color: 0x8B4513, roughness: 0.6, metalness: 0.1
+  });
+  const brassMat = new THREE.MeshStandardMaterial({
+    color: 0xb8860b, roughness: 0.3, metalness: 0.8
+  });
+
+  // Base
+  const base = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.6, 0.7, 0.15, 32),
+    woodMat
+  );
+  base.name = 'base';
+  base.position.y = 0.075;
+  base.castShadow = true;
+  group.add(base);
+
+  // Stem
+  const stem = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.15, 0.25, 0.8, 32),
+    woodMat
+  );
+  stem.name = 'stem';
+  stem.position.y = 0.55;
+  stem.castShadow = true;
+  group.add(stem);
+
+  // Collar
+  const collar = new THREE.Mesh(
+    new THREE.TorusGeometry(0.2, 0.05, 16, 32),
+    brassMat
+  );
+  collar.name = 'collar';
+  collar.position.y = 0.95;
+  collar.rotation.x = Math.PI / 2;
+  collar.castShadow = true;
+  group.add(collar);
+
+  // Head
+  const head = new THREE.Mesh(
+    new THREE.SphereGeometry(0.28, 32, 32),
+    woodMat
+  );
+  head.name = 'head';
+  head.position.y = 1.25;
+  head.castShadow = true;
+  group.add(head);
+
+  return group;
+}
+
+// ===== Load and Auto-Frame =====
+const model = buildModel();
+scene.add(model);
+
+function autoFrame(obj) {
+  const box = new THREE.Box3().setFromObject(obj);
+  const size = box.getSize(new THREE.Vector3());
+  const center = box.getCenter(new THREE.Vector3());
+  const maxDim = Math.max(size.x, size.y, size.z);
+  const fov = camera.fov * (Math.PI / 180);
+  const distance = (maxDim / 2) / Math.tan(fov / 2) * 1.8;
+
+  camera.position.set(distance * 0.7, distance * 0.5 + center.y, distance);
+  camera.lookAt(center);
+  controls.target.copy(center);
+  controls.update();
+}
+autoFrame(model);
+
+// ===== Export Functions =====
+window.exportOBJ = function() {
+  const exporter = new OBJExporter();
+  const objStr = exporter.parse(model);
+  const blob = new Blob([objStr], { type: 'text/plain' });
+  downloadBlob(blob, 'model.obj');
+
+  // Also export MTL (material info)
+  const mtlLines = [];
+  const materials = new Map();
+  model.traverse((child) => {
+    if (child.isMesh && child.material) {
+      const matName = child.material.name || child.name || 'material';
+      if (!materials.has(matName)) {
+        materials.set(matName, child.material);
+      }
+    }
+  });
+  mtlLines.push('# Material file');
+  for (const [name, mat] of materials) {
+    mtlLines.push(`newmtl ${name}`);
+    mtlLines.push(`Kd ${mat.color.r} ${mat.color.g} ${mat.color.b}`);
+    mtlLines.push(`Ks ${mat.metalness || 0} ${mat.metalness || 0} ${mat.metalness || 0}`);
+    mtlLines.push(`Ns ${(mat.roughness || 0.5) * 100}`);
+    mtlLines.push('');
+  }
+  const mtlBlob = new Blob([mtlLines.join('\n')], { type: 'text/plain' });
+  downloadBlob(mtlBlob, 'model.mtl');
+};
+
+window.exportGLB = function() {
+  const exporter = new GLTFExporter();
+  exporter.parse(
+    model,
+    (result) => {
+      const blob = new Blob([result], { type: 'application/octet-stream' });
+      downloadBlob(blob, 'model.glb');
+    },
+    (error) => console.error('GLB export error:', error),
+    { binary: true }
+  );
+};
+
+function downloadBlob(blob, filename) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+// ===== Render Loop =====
+function animate() {
+  requestAnimationFrame(animate);
+  controls.update();
+  renderer.render(scene, camera);
+}
+animate();
+
+// ===== Resize =====
+const resizeObserver = new ResizeObserver(() => {
+  const w = container.clientWidth || window.innerWidth;
+  const h = container.clientHeight || window.innerHeight;
+  camera.aspect = w / h;
+  camera.updateProjectionMatrix();
+  renderer.setSize(w, h);
+});
+resizeObserver.observe(container);
+window.addEventListener('resize', () => {
+  const w = container.clientWidth || window.innerWidth;
+  const h = container.clientHeight || window.innerHeight;
+  camera.aspect = w / h;
+  camera.updateProjectionMatrix();
+  renderer.setSize(w, h);
+});
+</script>
+</body>
+</html>

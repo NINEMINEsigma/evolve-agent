@@ -23,7 +23,7 @@ from abstract.tools.registry import registry, tool_error, tool_result
 from abstract.llm.loader import create_llm_client
 from system.context import get_runtime_context
 from entity.constant import MODALITY_CAPABILITY_CACHE_FILENAME
-from entity.puretype import Role, ToolAvailability, ToolDangerLevel, ModalityCapability
+from entity.puretype import Role, ToolAvailability, ToolDangerLevel, ModalityCapability, LlmProfile
 from entity.messages import (
     BaseMessage,
     ImageBlock,
@@ -77,6 +77,30 @@ def _resolve_base_url(base_url: str | None) -> str:
         return get_runtime_context().llm_base_url or ""
     except Exception:
         return ""
+
+
+def resolve_active_model_base_url(
+    context: ToolContext | None = None,
+) -> tuple[str, str, LlmProfile | None]:
+    """解析当前活跃的 model 和 base_url，供探针和 Read 工具共用。
+
+    优先从 context.loop.active_llm_profile 获取（前端切换后的配置），
+    fallback 到 runtime_context（启动配置）。
+
+    Returns:
+        (model_name, base_url, profile_or_None)
+        - profile 非空时包含活跃配置，可传给 create_llm_client（需 .model_dump()）
+        - profile 为 None 表示使用启动配置
+    """
+    profile: LlmProfile | None = None
+    if context is not None:
+        profile = context.loop.active_llm_profile
+
+    if profile:
+        return profile.model or "", profile.base_url or "", profile
+
+    ctx = context.runtime_context if context is not None else get_runtime_context()
+    return ctx.llm_model or "", ctx.llm_base_url or "", None
 
 
 def _cache_key(model: str, base_url: str | None = None) -> str:
@@ -313,9 +337,9 @@ async def _handle_probe_modality(args: dict[str, Any], context: ToolContext | No
     """探测当前配置的 LLM 模型是否支持在工具消息（Read 工具场景）中读取 vision 和 audio。"""
     ctx = context.runtime_context if context is not None else get_runtime_context()
     session_id = context.session_id if context is not None else ""
-    model_name: str = ctx.llm_model or ""
+    model_name, base_url, profile = resolve_active_model_base_url(context)
 
-    key = _cache_key(model_name, ctx.llm_base_url)
+    key = _cache_key(model_name, base_url)
     cache = _load_cache()
 
     # 缓存命中检查：如果四项都已探测，直接返回缓存值，跳过 API 请求
@@ -344,7 +368,8 @@ async def _handle_probe_modality(args: dict[str, Any], context: ToolContext | No
             ),
         )
 
-    client = create_llm_client(ctx.llm_client_name, ctx)
+    client_name = (profile.llm_client_name if profile else None) or ctx.llm_client_name
+    client = create_llm_client(client_name, ctx, profile.model_dump() if profile else None)
 
     # 先发送伪装成 Read 工具的图片+音频组合请求
     combined_blocks: list[MessageBlock] = [

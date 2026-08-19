@@ -1,0 +1,348 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Animated Video</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: #0a0a0a; font-family: system-ui, sans-serif;
+    display: flex; flex-direction: column; align-items: center;
+    height: 100vh; overflow: hidden;
+  }
+  #stage-wrapper {
+    position: relative; flex: 1; width: 100%;
+    display: flex; align-items: center; justify-content: center;
+    background: #000;
+  }
+  #stage {
+    position: relative; background: #111;
+    box-shadow: 0 0 40px rgba(0,0,0,0.5);
+  }
+  #stage canvas { display: block; }
+  #controls {
+    width: 100%; padding: 12px 20px;
+    background: #161616; border-top: 1px solid rgba(255,255,255,0.06);
+    display: flex; align-items: center; gap: 12px;
+  }
+  #play-btn {
+    background: rgba(255,255,255,0.1); color: #eee; border: none;
+    width: 40px; height: 40px; border-radius: 50%; cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 16px; transition: background 0.2s; flex-shrink: 0;
+  }
+  #play-btn:hover { background: rgba(255,255,255,0.2); }
+  #scrubber {
+    flex: 1; height: 6px; background: rgba(255,255,255,0.1);
+    border-radius: 3px; cursor: pointer; position: relative;
+  }
+  #scrubber-fill {
+    height: 100%; background: #4a9eff; border-radius: 3px;
+    width: 0%; transition: width 0.05s linear;
+  }
+  #scrubber-handle {
+    position: absolute; top: 50%; transform: translate(-50%, -50%);
+    width: 14px; height: 14px; background: #4a9eff;
+    border-radius: 50%; pointer-events: none;
+  }
+  #time-display {
+    color: rgba(255,255,255,0.5); font-size: 12px;
+    font-family: ui-monospace, monospace; min-width: 80px; text-align: right;
+    flex-shrink: 0;
+  }
+  #scene-label {
+    position: absolute; top: 12px; left: 12px;
+    color: rgba(255,255,255,0.3); font-size: 12px;
+    font-family: ui-monospace, monospace; pointer-events: none;
+  }
+</style>
+</head>
+<body>
+
+<div id="stage-wrapper">
+  <div id="stage">
+    <canvas id="canvas"></canvas>
+    <div id="scene-label"></div>
+  </div>
+</div>
+
+<div id="controls">
+  <button id="play-btn">▶</button>
+  <div id="scrubber">
+    <div id="scrubber-fill"></div>
+    <div id="scrubber-handle" style="left: 0%"></div>
+  </div>
+  <div id="time-display">0.0s / 0.0s</div>
+</div>
+
+<script>
+// ============================================================
+// Animation Engine — Vanilla JS Timeline
+// ============================================================
+
+// --- Easing Functions ---
+const Easing = {
+  linear: t => t,
+  easeInQuad: t => t * t,
+  easeOutQuad: t => t * (2 - t),
+  easeInOutQuad: t => t < 0.5 ? 2 * t * t : -1 + (4 - 2) * t,
+  easeInCubic: t => t * t * t,
+  easeOutCubic: t => (--t) * t * t + 1,
+  easeInOutCubic: t => t < 0.5 ? 4 * t * t * t : (t - 1) * (2 * t - 2) * (2 * t - 2) + 1,
+  easeInExpo: t => t === 0 ? 0 : Math.pow(2, 10 * (t - 1)),
+  easeOutExpo: t => t === 1 ? 1 : 1 - Math.pow(2, -10 * t),
+  easeInOutExpo: t => {
+    if (t === 0 || t === 1) return t;
+    if (t < 0.5) return 0.5 * Math.pow(2, 20 * t - 10);
+    return 1 - 0.5 * Math.pow(2, -20 * t + 10);
+  },
+  easeOutBounce: t => {
+    const n1 = 7.5625, d1 = 2.75;
+    if (t < 1 / d1) return n1 * t * t;
+    if (t < 2 / d1) { t -= 1.5 / d1; return n1 * t * t + 0.75; }
+    if (t < 2.5 / d1) { t -= 2.25 / d1; return n1 * t * t + 0.9375; }
+    t -= 2.625 / d1; return n1 * t * t + 0.984375;
+  },
+  easeOutBack: t => {
+    const c1 = 1.70158, c3 = c1 + 1;
+    return 1 + c3 * Math.pow(t - 1, 3) + c1 * Math.pow(t - 1, 2);
+  },
+  easeOutElastic: t => {
+    if (t === 0 || t === 1) return t;
+    return Math.pow(2, -10 * t) * Math.sin((t * 10 - 0.75) * (2 * Math.PI) / 3) + 1;
+  },
+};
+
+// --- Interpolation Helpers ---
+function lerp(a, b, t) { return a + (b - a) * t; }
+function clamp(v, min, max) { return Math.max(min, Math.min(max, v)); }
+function interpolate(t, start, end, easing) {
+  if (!easing) easing = Easing.linear;
+  return lerp(start, end, easing(clamp(t, 0, 1)));
+}
+function lerpColor(c1, c2, t) {
+  const r = Math.round(lerp(c1[0], c2[0], t));
+  const g = Math.round(lerp(c1[1], c2[1], t));
+  const b = Math.round(lerp(c1[2], c2[2], t));
+  return `rgb(${r},${g},${b})`;
+}
+
+// ============================================================
+// Scene Definitions — REPLACE THIS
+// ============================================================
+// Each scene: { name, duration, draw(ctx, progress, localTime, width, height) }
+// progress: 0→1 across the scene's duration
+// localTime: seconds since scene start
+
+const SCENES = [
+  {
+    name: "Opening",
+    duration: 3,
+    draw(ctx, p, t, w, h) {
+      // Fade in from black
+      ctx.fillStyle = `rgba(10,10,10,${1 - p})`;
+      ctx.fillRect(0, 0, w, h);
+
+      // Title text scaling in
+      const scale = Easing.easeOutBack(p);
+      ctx.save();
+      ctx.translate(w / 2, h / 2);
+      ctx.scale(scale, scale);
+      ctx.fillStyle = '#4a9eff';
+      ctx.font = 'bold 64px system-ui, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('Hello, World!', 0, 0);
+      ctx.restore();
+    }
+  },
+  {
+    name: "Shapes",
+    duration: 4,
+    draw(ctx, p, t, w, h) {
+      ctx.fillStyle = '#0a0a0a';
+      ctx.fillRect(0, 0, w, h);
+
+      // Three circles bouncing in
+      const colors = ['#ff6b6b', '#4ecdc4', '#45b7d1'];
+      const labels = ['A', 'B', 'C'];
+      for (let i = 0; i < 3; i++) {
+        const delay = i * 0.15;
+        const localP = clamp((p - delay) / (1 - delay), 0, 1);
+        const eased = Easing.easeOutBounce(localP);
+        const x = w * 0.25 + i * w * 0.25;
+        const y = h * 0.3 + eased * h * 0.3;
+        const r = 50;
+
+        ctx.beginPath();
+        ctx.arc(x, y, r, 0, Math.PI * 2);
+        ctx.fillStyle = colors[i];
+        ctx.fill();
+
+        ctx.fillStyle = '#fff';
+        ctx.font = 'bold 24px system-ui, sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(labels[i], x, y);
+      }
+
+      // Subtitle
+      const subOpacity = clamp((p - 0.5) * 2, 0, 1);
+      ctx.fillStyle = `rgba(255,255,255,${subOpacity * 0.6})`;
+      ctx.font = '20px system-ui, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('Bouncing in with easing', w / 2, h * 0.8);
+    }
+  },
+  {
+    name: "Outro",
+    duration: 2.5,
+    draw(ctx, p, t, w, h) {
+      // Fade to dark
+      ctx.fillStyle = '#0a0a0a';
+      ctx.fillRect(0, 0, w, h);
+
+      // Text fade out
+      const opacity = 1 - Easing.easeInExpo(p);
+      ctx.fillStyle = `rgba(74, 158, 255, ${opacity})`;
+      ctx.font = 'bold 48px system-ui, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('Thanks for watching', w / 2, h / 2);
+    }
+  }
+];
+
+// ============================================================
+// Engine Core — DO NOT MODIFY
+// ============================================================
+
+const canvas = document.getElementById('canvas');
+const ctx = canvas.getContext('2d');
+const playBtn = document.getElementById('play-btn');
+const scrubber = document.getElementById('scrubber');
+const scrubberFill = document.getElementById('scrubber-fill');
+const scrubberHandle = document.getElementById('scrubber-handle');
+const timeDisplay = document.getElementById('time-display');
+const sceneLabel = document.getElementById('scene-label');
+const stage = document.getElementById('stage');
+
+// Canvas dimensions (16:9)
+const CANVAS_W = 1280;
+const CANVAS_H = 720;
+canvas.width = CANVAS_W;
+canvas.height = CANVAS_H;
+
+// Fit canvas to container
+function fitCanvas() {
+  const wrapper = document.getElementById('stage-wrapper');
+  const availW = wrapper.clientWidth || window.innerWidth;
+  const availH = wrapper.clientHeight || window.innerHeight;
+  const scale = Math.min(availW / CANVAS_W, availH / CANVAS_H);
+  canvas.style.width = (CANVAS_W * scale) + 'px';
+  canvas.style.height = (CANVAS_H * scale) + 'px';
+  stage.style.width = (CANVAS_W * scale) + 'px';
+  stage.style.height = (CANVAS_H * scale) + 'px';
+}
+window.addEventListener('resize', fitCanvas);
+const resizeObserver = new ResizeObserver(fitCanvas);
+resizeObserver.observe(document.getElementById('stage-wrapper'));
+fitCanvas();
+
+// Timeline state
+const totalDuration = SCENES.reduce((s, sc) => s + sc.duration, 0);
+let currentTime = 0;
+let isPlaying = false;
+let lastFrameTime = 0;
+let wasPlaying = false;
+
+function getActiveScene(time) {
+  let acc = 0;
+  for (let i = 0; i < SCENES.length; i++) {
+    if (time < acc + SCENES[i].duration) {
+      return { index: i, scene: SCENES[i], localTime: time - acc, progress: (time - acc) / SCENES[i].duration };
+    }
+    acc += SCENES[i].duration;
+  }
+  const last = SCENES.length - 1;
+  return { index: last, scene: SCENES[last], localTime: SCENES[last].duration, progress: 1 };
+}
+
+function render(time) {
+  const active = getActiveScene(time);
+  ctx.clearRect(0, 0, CANVAS_W, CANVAS_H);
+  active.scene.draw(ctx, active.progress, active.localTime, CANVAS_W, CANVAS_H);
+  sceneLabel.textContent = `Scene ${active.index + 1}: ${active.scene.name}`;
+}
+
+function updateUI(time) {
+  const pct = (time / totalDuration) * 100;
+  scrubberFill.style.width = pct + '%';
+  scrubberHandle.style.left = pct + '%';
+  timeDisplay.textContent = `${time.toFixed(1)}s / ${totalDuration.toFixed(1)}s`;
+}
+
+function tick(now) {
+  if (!isPlaying) return;
+  const dt = (now - lastFrameTime) / 1000;
+  lastFrameTime = now;
+  currentTime += dt;
+
+  if (currentTime >= totalDuration) {
+    currentTime = totalDuration;
+    isPlaying = false;
+    playBtn.textContent = '▶';
+  }
+
+  render(currentTime);
+  updateUI(currentTime);
+
+  if (isPlaying) requestAnimationFrame(tick);
+}
+
+// Controls
+playBtn.addEventListener('click', () => {
+  if (currentTime >= totalDuration) currentTime = 0;
+  isPlaying = !isPlaying;
+  playBtn.textContent = isPlaying ? '⏸' : '▶';
+  if (isPlaying) {
+    lastFrameTime = performance.now();
+    requestAnimationFrame(tick);
+  }
+});
+
+// Scrubber
+let isDragging = false;
+function seekTo(clientX) {
+  const rect = scrubber.getBoundingClientRect();
+  const pct = clamp((clientX - rect.left) / rect.width, 0, 1);
+  currentTime = pct * totalDuration;
+  render(currentTime);
+  updateUI(currentTime);
+}
+
+scrubber.addEventListener('mousedown', (e) => {
+  isDragging = true;
+  wasPlaying = isPlaying;
+  if (isPlaying) {
+    isPlaying = false;
+    playBtn.textContent = '▶';
+  }
+  seekTo(e.clientX);
+});
+
+window.addEventListener('mousemove', (e) => {
+  if (isDragging) seekTo(e.clientX);
+});
+
+window.addEventListener('mouseup', () => {
+  isDragging = false;
+});
+
+// Initial render
+render(0);
+updateUI(0);
+</script>
+</body>
+</html>

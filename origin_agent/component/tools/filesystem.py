@@ -24,7 +24,7 @@ import logging
 import mimetypes
 import re
 from datetime import datetime, timezone
-from typing import Any, Dict
+from typing import Any, Dict, TYPE_CHECKING
 
 from abstract.tools.registry import registry, tool_error, tool_result
 from entity.puretype import ToolDangerLevel
@@ -33,6 +33,9 @@ from system.sandbox import Access, Sandbox, SandboxError
 from system.context import get_runtime_context
 from pathlib import Path
 
+if TYPE_CHECKING:
+    from entry.base_agent_loop import ToolContext
+
 try:
     from PIL import Image as PILImage
 except Exception:  # pragma: no cover — PIL is optional
@@ -40,7 +43,7 @@ except Exception:  # pragma: no cover — PIL is optional
     logger.debug("PIL not available; image size parsing disabled", exc_info=True)
     PILImage = None  # type: ignore
 
-from .modality_capability import get_cached_vision_support, get_cached_audio_support, get_cached_user_vision_support, get_cached_user_audio_support
+from .modality_capability import get_cached_vision_support, get_cached_audio_support, get_cached_user_vision_support, get_cached_user_audio_support, resolve_active_model_base_url
 
 logger = logging.getLogger(__name__)
 
@@ -156,7 +159,7 @@ def _try_attach_lsp_diagnostics(logical_path: str, content: str) -> list[dict] |
 # 工具 handler
 # ---------------------------------------------------------------------------
 
-def _handle_read(args: dict[str, Any]) -> dict:
+def _handle_read(args: dict[str, Any], context: ToolContext | None = None) -> dict:
     path: str = str(args.get("path", "")).strip()
     if not path:
         return tool_error("path is required", path=path)
@@ -207,13 +210,13 @@ def _handle_read(args: dict[str, Any]) -> dict:
         mime_type = _guess_mime(str(resolved.real))
         if mime_type in _SUPPORTED_MIMES:
             # vision 预检
-            model_name: str = get_runtime_context().llm_model or ""
+            model_name, base_url, _profile = resolve_active_model_base_url(context)
             if not model_name:
                 return tool_error(
                     "No LLM model configured; cannot determine vision capability.",
                     path=path,
                 )
-            tool_vision = get_cached_vision_support(model_name)
+            tool_vision = get_cached_vision_support(model_name, base_url)
             if tool_vision is None:
                 return tool_error(
                     f"Read-tool image support for model '{model_name}' has not been probed yet. "
@@ -224,7 +227,7 @@ def _handle_read(args: dict[str, Any]) -> dict:
                 )
             if tool_vision is False:
                 # tool 消息不支持，检查 user 消息是否支持
-                user_vision = get_cached_user_vision_support(model_name)
+                user_vision = get_cached_user_vision_support(model_name, base_url)
                 if user_vision is None:
                     return tool_error(
                         f"User-message image support for model '{model_name}' has not been probed yet. "
@@ -330,13 +333,13 @@ def _handle_read(args: dict[str, Any]) -> dict:
             }
         # --- 音频分支（MIME 自动检测）---
         if mime_type in _SUPPORTED_AUDIO_MIMES:
-            model_name = get_runtime_context().llm_model or ""
+            model_name, base_url, _profile = resolve_active_model_base_url(context)
             if not model_name:
                 return tool_error(
                     "No LLM model configured; cannot determine audio capability.",
                     path=path,
                 )
-            tool_audio = get_cached_audio_support(model_name)
+            tool_audio = get_cached_audio_support(model_name, base_url)
             if tool_audio is None:
                 return tool_error(
                     f"Read-tool audio support for model '{model_name}' has not been probed yet. "
@@ -347,7 +350,7 @@ def _handle_read(args: dict[str, Any]) -> dict:
                 )
             if tool_audio is False:
                 # tool 消息不支持，检查 user 消息是否支持
-                user_audio = get_cached_user_audio_support(model_name)
+                user_audio = get_cached_user_audio_support(model_name, base_url)
                 if user_audio is None:
                     return tool_error(
                         f"User-message audio support for model '{model_name}' has not been probed yet. "

@@ -18,7 +18,7 @@ from typing import Any, TYPE_CHECKING
 
 from pydantic import BaseModel
 
-from entity.puretype import Role, ToolAvailability, SessionMessageEntry, TokenUsageRecord, MessageContent
+from entity.puretype import Role, ToolAvailability, SessionMessageEntry, TokenUsageRecord, MessageContent, LlmProfile
 from entity.messages import (
     History,
     BaseMessage,
@@ -294,6 +294,8 @@ class BaseAgentLoop(ABC):
         # gateway SessionManager 引用（由 server 层注入，用于旋转/归档）；
         # 仅主会话 loop 使用，子 Agent loop 保持 None
         self._session_manager: SessionManager | None = None
+        # 活跃 LLM 配置覆盖（前端切换后设置，None 表示使用启动配置）
+        self._active_llm_profile: LlmProfile | None = None
 
     @property
     def history_store_dir(self) -> Path | None:
@@ -304,6 +306,11 @@ class BaseAgentLoop(ABC):
     def session_store(self) -> "SessionStore | None":
         """返回当前 loop 的 session 持久化存储（未配置时为 None）。"""
         return self._session_store
+
+    @property
+    def active_llm_profile(self) -> LlmProfile | None:
+        """返回当前活跃的 LLM 配置（前端切换后），未切换时返回 None。"""
+        return self._active_llm_profile
 
     def set_session_manager(self, manager: SessionManager) -> None:
         """注入 gateway SessionManager，用于旋转/归档等操作。"""
