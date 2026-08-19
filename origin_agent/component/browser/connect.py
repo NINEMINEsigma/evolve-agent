@@ -107,5 +107,5 @@ Attaches to the running browser over CDP. All existing tabs become accessible to
     check_fn=_connection.playwright_available,
     is_async=True,
     emoji="🔗",
-    danger_level=ToolDangerLevel.dangerous,
+    danger_level=ToolDangerLevel.safe,
 )

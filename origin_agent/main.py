@@ -126,6 +126,17 @@ class App:
         except Exception as exc:
             logger.warning("LSP cleanup failed: %s", exc)
 
+        # ---- 清理无头浏览器进程 ----
+        # 无头模式下浏览器窗口不可见，用户无法手动关闭，
+        # 必须在应用退出时强制终止，否则成为孤儿进程。
+        try:
+            from component.browser._connection import cleanup_headless_browser
+            killed = await asyncio.to_thread(cleanup_headless_browser)
+            if killed:
+                logger.info("Cleaned up headless browser process")
+        except Exception as exc:
+            logger.warning("Headless browser cleanup failed: %s", exc)
+
         # ---- 关闭 Application 子系统 ----
         try:
             await Application.current().shutdown()

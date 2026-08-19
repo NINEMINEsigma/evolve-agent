@@ -14,6 +14,7 @@ from __future__ import annotations
 import asyncio
 import importlib.util
 import logging
+import subprocess
 import time
 import urllib.error
 import urllib.request
@@ -48,6 +49,7 @@ EDGE_DEBUG_GUIDE: str = (
 _pw: Any = None        # playwright.async_api.Playwright
 _browser: Any = None   # playwright.async_api.Browser
 _endpoint: str = CDP_ENDPOINT_DEFAULT
+_headless_proc: subprocess.Popen | None = None  # 无头浏览器进程（需在应用关闭时终止）
 
 
 def playwright_available() -> bool:
@@ -112,7 +114,11 @@ async def get_browser(endpoint: str = CDP_ENDPOINT_DEFAULT) -> "Browser":
 
 
 async def teardown() -> None:
-    """断开 CDP 连接（不关闭用户浏览器）并释放 playwright。"""
+    """断开 CDP 连接（不关闭用户浏览器）并释放 playwright。
+
+    无头浏览器进程的终止由 ``cleanup_headless_browser`` 在应用关闭时处理，
+    本函数仅断开 CDP 连接。
+    """
     global _pw, _browser
     if _browser is not None:
         try:
@@ -126,6 +132,45 @@ async def teardown() -> None:
         except Exception:
             pass
         _pw = None
+
+
+def register_headless_proc(proc: subprocess.Popen) -> None:
+    """登记无头浏览器进程句柄，供应用关闭时终止。
+
+    由 ``browser_launch`` 在 headless=True 时调用。
+    覆盖之前登记的句柄（幂等：同一进程重复登记无副作用）。
+    """
+    global _headless_proc
+    _headless_proc = proc
+
+
+def cleanup_headless_browser() -> int:
+    """终止无头浏览器进程。供 main.py 在 agent 关闭时调用。返回 killed count。
+
+    无头模式启动的浏览器无法被用户手动关闭，必须在应用退出时强制终止，
+    否则会成为孤儿进程持续占用资源。
+    """
+    global _headless_proc
+    if _headless_proc is None:
+        return 0
+    from system.sandbox import _kill_proc_tree
+
+    proc = _headless_proc
+    _headless_proc = None
+    try:
+        _kill_proc_tree(proc.pid)
+        try:
+            proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            logger.warning(
+                "Headless browser (pid=%d) did not exit within 5s after kill",
+                proc.pid,
+            )
+        logger.info("Headless browser process terminated (pid=%d)", proc.pid)
+        return 1
+    except Exception:
+        logger.warning("Failed to kill headless browser process", exc_info=True)
+        return 1
 
 
 def all_pages(browser: "Browser") -> list["Page"]:
