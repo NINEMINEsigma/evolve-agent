@@ -148,6 +148,8 @@ if __name__ == "__main__":
             shutil.copy(soul_file, agentspace_path_name / soul_file)
         else:
             (agentspace_path_name / soul_file).touch() # 创建空 soul 文件
+    if Path("skills/").exists() == False:
+        shutil.copytree("pre-skills/", "skills/", dirs_exist_ok=True) # 复制预设技能到skills目录
     if force_init:
         fallback_space = workspace_path / ".fallback"
         shutil.rmtree(slow_agent_space, ignore_errors=True) # 删除slow agent空间
