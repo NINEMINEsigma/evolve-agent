@@ -1,7 +1,10 @@
-"""StreamConsumer — LLM 流式响应消费器。
+"""StreamConsumer — LLM 流 → 前端的唯一桥接层。
 
-封装 LLM 流式响应的增量消费、content/reasoning/tool_call 分发、
-usage 统计、取消检查和迭代器安全关闭。
+封装 LLM 流式响应的增量消费、content/reasoning/tool_call/tool_call_delta
+分发、usage 绂计、取消检查和迭代器安全关闭。
+
+主 loop 与 multi-agent worker 均经由此处转发流式增量到前端，
+确保"流式 → 前端"路径统一为一条。
 """
 
 from __future__ import annotations
@@ -105,6 +108,13 @@ class StreamConsumer:
                     await self._sink.emit_stream_delta(
                         session_id, stream_id,
                         reasoning_delta=chunk.reasoning_delta,
+                        character_name=self._character_name,
+                    )
+
+                if chunk.tool_call_delta:
+                    await self._sink.emit_stream_delta(
+                        session_id, stream_id,
+                        tool_call_delta=chunk.tool_call_delta.model_dump(exclude_none=True),
                         character_name=self._character_name,
                     )
 

@@ -79,6 +79,7 @@ class AgentSink(ABC):
     async def emit_stream_delta(self, session_id: str, stream_id: str,
                                 delta: str = "", reasoning_delta: str = "",
                                 tool_call: dict | None = None,
+                                tool_call_delta: dict | None = None,
                                 character_name: str | None = None) -> None:
         """推送流式增量。"""
         ...
@@ -377,6 +378,7 @@ class FrontendSink(AgentSink):
     async def emit_stream_delta(self, session_id: str, stream_id: str,
                                 delta: str = "", reasoning_delta: str = "",
                                 tool_call: dict | None = None,
+                                tool_call_delta: dict | None = None,
                                 character_name: str | None = None) -> None:
         data: dict = {"stream_id": stream_id}
         if delta:
@@ -385,6 +387,8 @@ class FrontendSink(AgentSink):
             data["reasoning_delta"] = reasoning_delta
         if tool_call:
             data["tool_call"] = tool_call
+        if tool_call_delta:
+            data["tool_call_delta"] = tool_call_delta
         if character_name:
             data["character_name"] = character_name
         await self._send_msg(session_id, "stream_delta", "",
@@ -462,12 +466,17 @@ class FrontendSink(AgentSink):
                           tool_call_meta=tool_call_meta)
         elif event_type == "stream_delta":
             data = json.loads(payload)
+            content_payload: dict[str, Any] = {}
+            if data.get("tool_call"):
+                content_payload["tool_call"] = data["tool_call"]
+            if data.get("tool_call_delta"):
+                content_payload["tool_call_delta"] = data["tool_call_delta"]
             msg = Message(
                 type=MessageType.STREAM_DELTA, session_id=session_id,
                 stream_id=data.get("stream_id"),
                 delta=data.get("delta"),
                 reasoning_delta=data.get("reasoning_delta"),
-                content=json.dumps({"tool_call": data["tool_call"]}) if data.get("tool_call") else None,
+                content=json.dumps(content_payload, ensure_ascii=False) if content_payload else None,
                 character_name=data.get("character_name"),
             )
         elif event_type == "stream_done":
@@ -616,10 +625,13 @@ class ParentAgentSink(AgentSink):
     async def emit_stream_delta(self, session_id: str, stream_id: str,
                                 delta: str = "", reasoning_delta: str = "",
                                 tool_call: dict | None = None,
+                                tool_call_delta: dict | None = None,
                                 character_name: str | None = None) -> None:
         if delta:
             self._loop.emit_event("assistant", content=delta, reasoning=reasoning_delta,
                              character_name=character_name)
+        if tool_call_delta:
+            self._loop.emit_event("tool_call_delta", **tool_call_delta)
 
     async def emit_stream_done(self, session_id: str, stream_id: str,
                                finish_reason: str = "stop",

@@ -130,7 +130,7 @@ export default function Drawer({
                         <span className="cron-list-name">{t.name}</span>
                         <span className={`cron-list-status ${t.should_schedule ? "active" : "inactive"}`}>{t.should_schedule ? "运行中" : "已停止"}</span>
                       </div>
-                      <div className="cron-list-schedule">{t.schedule_type === "interval" ? `每 ${t.schedule_value} 秒` : t.schedule_value}</div>
+                      <div className="cron-list-schedule">{t.schedule_type === "interval" ? `${t.schedule_value} 秒` : t.schedule_value}</div>
                       <div className="cron-list-meta">下次执行: {t.next_run ? new Date(t.next_run).toLocaleString() : "-"} | 已执行: {t.run_count} 次</div>
                       <div className="cron-list-actions">
                         <button className="cron-list-action trigger" onClick={() => fetch(`/api/sessions/${sessionId}/cron-tasks/${t.task_id}/trigger`, { method: "POST" }).then(() => setCronTasks((prev) => prev.map((x) => x.task_id === t.task_id ? { ...x, run_count: x.run_count + 1 } : x)))}>立即触发</button>

@@ -5,6 +5,7 @@ import { ChatMessage, ContentBlock, MessageContent } from "../types";
 import MarkdownRenderer from "./primitives/MarkdownRenderer";
 import { renderToolResult } from "./ToolResultRenderer";
 import DiffBlock from "./DiffBlock";
+import { extractPartialStringField } from "../utils/partialJson";
 
 export function contentToText(content: MessageContent): string {
   if (typeof content === "string") return content;
@@ -115,6 +116,8 @@ export default function MessageBody({ message, streaming, onImageClick }: Messag
   }, [m.reasoningDuration, streaming, m.reasoningContent]);
 
   if (m.role === "assistant") {
+    // streaming 且有 tool_call 参数增量缓冲：打字机渲染（多 tool_call 场景下已定型的 toolArgs 不阻止后续增量显示）
+    const hasToolCallDelta = streaming && m.toolName && m.activeToolCallKey && m.toolArgsRawMap?.[m.activeToolCallKey] !== undefined;
     return (
       <>
         {m.reasoningContent && (
@@ -128,6 +131,21 @@ export default function MessageBody({ message, streaming, onImageClick }: Messag
         ) : (
           renderBlocksContent(m.content, m.role, m.id, onImageClick)
         )}
+        {hasToolCallDelta && (() => {
+          const raw = m.toolArgsRawMap![m.activeToolCallKey!];
+          if (m.toolName === "Write") {
+            const partialContent = extractPartialStringField(raw, "content");
+            if (partialContent !== null) {
+              return <DiffBlock oldText="" newText={partialContent} />;
+            }
+          }
+          return (
+            <div className="tool-args-raw-stream">
+              <span className="tool-args-raw-label">{m.emoji || "⚡"} {m.toolName} 正在生成参数…</span>
+              <pre className="tool-args-raw-content">{raw}</pre>
+            </div>
+          );
+        })()}
         <ContextExtension message={m} />
         {streaming && <span className="streaming-cursor" />}
       </>

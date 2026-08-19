@@ -159,6 +159,8 @@ export interface ChatMessage {
   collapsed?: boolean;
   toolName?: string;
   toolArgs?: Record<string, unknown>;
+  toolArgsRawMap?: Record<string, string>;   // 生成期按 tool_call 分缓冲的原始参数 JSON 片段
+  activeToolCallKey?: string;                  // 最近有增量活动的 toolArgsRawMap key
   imageMarkdown?: string;
   downloadInfo?: DownloadInfo;
   reasoningContent?: string;

@@ -29,7 +29,7 @@ import json
 from abstract.llm.client import BaseLLMClient
 from abstract.llm.formats import messages_to_anthropic_list
 from entity.messages import BaseMessage, CharacterConversationMessage
-from entity.puretype import LLMResponse, StreamChunk, ToolCallRequest, Usage
+from entity.puretype import LLMResponse, StreamChunk, ToolCallDelta, ToolCallDeltaPhase, ToolCallRequest, Usage
 from entity.constant import (
     BACKOFF_BASE,
     LLM_RETRY_COUNT,
@@ -336,6 +336,11 @@ class AnthropicLLMClient(BaseLLMClient):
                                 "name": getattr(block, "name", ""),
                             }
                             pending_tool_input = ""
+                            yield StreamChunk(tool_call_delta=ToolCallDelta(
+                                id=current_tool_use["id"],
+                                name=current_tool_use["name"],
+                                phase=ToolCallDeltaPhase.START,
+                            ))
 
                 elif event_type == "content_block_delta":
                     delta = getattr(event, "delta", None)
@@ -359,6 +364,12 @@ class AnthropicLLMClient(BaseLLMClient):
                     elif delta_type in ("tool_use_delta", "input_json_delta"):
                         partial = getattr(delta, "partial_json", "") or ""
                         pending_tool_input += partial
+                        if partial and current_tool_use is not None:
+                            yield StreamChunk(tool_call_delta=ToolCallDelta(
+                                id=current_tool_use["id"],
+                                args_delta=partial,
+                                phase=ToolCallDeltaPhase.APPEND,
+                            ))
 
                 elif event_type == "content_block_stop":
                     if current_thinking:
@@ -372,6 +383,10 @@ class AnthropicLLMClient(BaseLLMClient):
                             arguments = _safe_json_parse(pending_tool_input)
                         else:
                             arguments = {}
+                        yield StreamChunk(tool_call_delta=ToolCallDelta(
+                            id=current_tool_use["id"],
+                            phase=ToolCallDeltaPhase.DONE,
+                        ))
                         tc = ToolCallRequest(
                             id=current_tool_use["id"],
                             name=current_tool_use["name"],

@@ -25,7 +25,7 @@ import openai
 from abstract.llm.client import BaseLLMClient
 from abstract.llm.formats import messages_to_openai_list, to_openai_message
 from entity.messages import BaseMessage, CharacterConversationMessage
-from entity.puretype import LLMResponse, StreamChunk, ToolCallRequest, Usage
+from entity.puretype import LLMResponse, StreamChunk, ToolCallDelta, ToolCallDeltaPhase, ToolCallRequest, Usage
 from entity.constant import TOOL_RESULT_PREVIEW_CHARS, LLM_RETRY_COUNT, BACKOFF_BASE
 from system.context import RuntimeContext
 
@@ -285,6 +285,13 @@ class OpenAILLMClient(BaseLLMClient):
 
         遇到可恢复网络错误时抛出 ``_StreamInterruptedError``，由 ``chat_stream``
         外层决定是否续传；正常结束时 yield finish chunk。
+
+        tool_call 增量语义：
+        ``pending_tool_buffers`` 在每次新流开始时重置为空 dict，
+        ``completed_tool_indices`` 为每流局部集合。未完成的 idx 在续流中
+        重新"首见"从而重发 START——前端按 START 重置对应 key 的打字机缓冲。
+        已完成的 tool_call 不会重发增量：它们已被 ``_build_resume_messages``
+        拼入续传 prompt，LLM 在续流中不再生成。
         """
         content_buffer: str = state["content"]
         reasoning_buffer: str = state["reasoning"]
@@ -331,6 +338,7 @@ class OpenAILLMClient(BaseLLMClient):
                 for idx, tc_id, name_delta, args_delta in _iter_delta_tool_calls(delta):
                     if idx in completed_tool_indices:
                         continue
+                    is_new = idx not in tool_buffers
                     buf = tool_buffers.setdefault(idx, {
                         "id": "",
                         "name": "",
@@ -340,8 +348,17 @@ class OpenAILLMClient(BaseLLMClient):
                         buf["id"] = tc_id
                     if name_delta:
                         buf["name"] += name_delta
+                    if is_new:
+                        yield StreamChunk(tool_call_delta=ToolCallDelta(
+                            id=buf["id"], index=idx, name=buf["name"],
+                            phase=ToolCallDeltaPhase.START,
+                        ))
                     if args_delta:
                         buf["arguments"] += args_delta
+                        yield StreamChunk(tool_call_delta=ToolCallDelta(
+                            id=buf["id"], index=idx, args_delta=args_delta,
+                            phase=ToolCallDeltaPhase.APPEND,
+                        ))
 
                 # 某些 provider 会提前发送 finish_reason，此时 arguments 可能尚未
                 # 累积完成。这里只记录 finish_reason，不提前 yield tool_call，
@@ -371,12 +388,15 @@ class OpenAILLMClient(BaseLLMClient):
                 raise _StreamInterruptedError(state) from exc
             raise
 
-        # 流正常结束：先 yield 所有未完成的 tool_call，再 yield finish_reason
+        # 流正常结束：先 yield DONE 增量，再 yield 所有未完成的 tool_call，再 yield finish_reason
         for idx, buf in tool_buffers.items():
             if idx in completed_tool_indices:
                 continue
             if buf["id"] and buf["name"]:
                 completed_tool_indices.add(idx)
+                yield StreamChunk(tool_call_delta=ToolCallDelta(
+                    id=buf["id"], index=idx, phase=ToolCallDeltaPhase.DONE,
+                ))
                 tc = ToolCallRequest(
                     id=buf["id"],
                     name=buf["name"],

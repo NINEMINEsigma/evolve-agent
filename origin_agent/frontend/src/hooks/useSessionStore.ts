@@ -341,6 +341,7 @@ export function useSessionStore(callbacks: SessionStoreCallbacks = {}): SessionS
     delta: string,
     reasoningDelta?: string,
     toolCall?: unknown,
+    toolCallDelta?: unknown,
     characterName?: string
   ) => {
     ensureStreamingMessage(streamId, characterName);
@@ -355,16 +356,58 @@ export function useSessionStore(callbacks: SessionStoreCallbacks = {}): SessionS
       let nextReasoning: string | undefined = reasoning || undefined;
       let nextToolName: string | undefined = prev.toolName;
       let nextToolArgs: Record<string, unknown> | undefined = prev.toolArgs;
+      let nextToolArgsRawMap: Record<string, string> | undefined = prev.toolArgsRawMap;
+      let nextActiveToolCallKey: string | undefined = prev.activeToolCallKey;
+
       if (delta) nextContent = content + delta;
       if (reasoningDelta) nextReasoning = reasoning + reasoningDelta;
+
+      if (toolCallDelta && typeof toolCallDelta === "object") {
+        const tcd = toolCallDelta as Record<string, unknown>;
+        const key = `${tcd.index ?? 0}:${tcd.id ?? ""}`;
+        const phase = tcd.phase;
+        if (!nextToolArgsRawMap) nextToolArgsRawMap = {};
+
+        if (phase === "start") {
+          nextToolArgsRawMap[key] = "";
+          nextActiveToolCallKey = key;
+          if (typeof tcd.name === "string" && tcd.name) nextToolName = tcd.name;
+        } else if (phase === "append") {
+          nextToolArgsRawMap[key] = (nextToolArgsRawMap[key] ?? "") + (typeof tcd.args_delta === "string" ? tcd.args_delta : "");
+          nextActiveToolCallKey = key;
+        } else if (phase === "done") {
+          // DONE 时不立即清除 map — 等完整 toolCall 到达时再删
+        }
+      }
+
       if (toolCall && typeof toolCall === "object") {
         const tc = toolCall as Record<string, unknown>;
         if (typeof tc.name === "string") nextToolName = tc.name;
         if (typeof tc.arguments === "object" && tc.arguments !== null) {
           nextToolArgs = tc.arguments as Record<string, unknown>;
+          // 完整 toolCall 定型后清除对应 raw buffer
+          if (nextToolArgsRawMap) {
+            // 按 toolName 或已知 key 清除；若 activeToolCallKey 存在则优先用
+            if (nextActiveToolCallKey && nextToolArgsRawMap[nextActiveToolCallKey] !== undefined) {
+              delete nextToolArgsRawMap[nextActiveToolCallKey];
+            }
+            if (Object.keys(nextToolArgsRawMap).length === 0) {
+              nextToolArgsRawMap = undefined;
+              nextActiveToolCallKey = undefined;
+            }
+          }
         }
       }
-      return { ...prev, content: nextContent, reasoningContent: nextReasoning, toolName: nextToolName, toolArgs: nextToolArgs };
+
+      return {
+        ...prev,
+        content: nextContent,
+        reasoningContent: nextReasoning,
+        toolName: nextToolName,
+        toolArgs: nextToolArgs,
+        toolArgsRawMap: nextToolArgsRawMap,
+        activeToolCallKey: nextActiveToolCallKey,
+      };
     });
   }, [ensureStreamingMessage]);
 
@@ -657,13 +700,15 @@ export function useSessionStore(callbacks: SessionStoreCallbacks = {}): SessionS
       const delta = msg.delta || "";
       const reasoningDelta = msg.reasoning_delta;
       let toolCall: unknown = undefined;
+      let toolCallDelta: unknown = undefined;
       if (typeof msg.content === "string") {
         try {
           const parsed = JSON.parse(msg.content);
           toolCall = parsed?.tool_call;
+          toolCallDelta = parsed?.tool_call_delta;
         } catch {}
       }
-      appendStreamingDelta(msg.stream_id || "", delta, reasoningDelta, toolCall, msg.character_name);
+      appendStreamingDelta(msg.stream_id || "", delta, reasoningDelta, toolCall, toolCallDelta, msg.character_name);
       return;
     }
 

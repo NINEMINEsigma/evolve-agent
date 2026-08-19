@@ -436,6 +436,7 @@ class MultiAgentWorker:
     async def _emit_text(self, text: str, stream_id: str = "") -> None:
         """将一段文本以流式方式推送到前端（stream_delta + stream_done）。
 
+        错误兜底推送，独立于桥接层主路径；正常流式路径统一走 StreamConsumer。
         仅在流式消费器未主动推送 content 的前提下使用，用于错误兜底文本展示。
         """
         stream_id = stream_id or f"multi_{self.character_name}_{uuid.uuid4().hex[:8]}"

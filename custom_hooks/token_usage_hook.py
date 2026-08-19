@@ -20,6 +20,6 @@ def hook_message(session_id: str = "", workspace: str = "", **kwargs) -> str:
             return ""
         token_usage = loop_wrap.loop.get_token_usage()
         context_tokens = loop_wrap.loop.get_context_tokens()
-        return f"Token usage: total={token_usage}, context={context_tokens}."
+        return f"Token usage: cumulative_session_total={token_usage} (cumulative tokens consumed across all turns, NOT current context occupancy), current_context_tokens={context_tokens} (tokens currently occupying the context window)."
     except Exception:
         return ""

@@ -282,6 +282,37 @@ class LLMResponse(BaseModel):
     usage: Usage = Usage()
 
 
+class ToolCallDeltaPhase(str, Enum):
+    """tool_call 参数生成期增量阶段。"""
+
+    START = "start"
+    APPEND = "append"
+    DONE = "done"
+
+
+class ToolCallDelta(BaseModel):
+    """tool_call 参数生成期增量（仅展示用途，不参与聚合）。
+
+    在 LLM 流式生成工具参数期间逐片产出，供前端打字机渲染。
+    流末仍会产出完整 ToolCallRequest，聚合逻辑只认完整 tool_call。
+    """
+    model_config = ConfigDict(frozen=True)
+
+    id: str = ""
+    """provider 的 tool_call id；OpenAI 在首个 delta 才给出，start 时可能为空。"""
+
+    index: int = 0
+    """OpenAI 多 tool_call 交织时的 wire index；Anthropic 恒 0。"""
+
+    name: str = ""
+    """工具名（start 时给出）。"""
+
+    args_delta: str = ""
+    """原始 JSON 参数片段（append 时给出）。"""
+
+    phase: ToolCallDeltaPhase
+
+
 class StreamChunk(BaseModel):
     """流式 LLM 响应的一个片段。"""
     model_config = ConfigDict(frozen=True)
@@ -293,6 +324,8 @@ class StreamChunk(BaseModel):
     """当前 reasoning_delta 对应的原始字段名（如 reasoning_content / reasoning）。"""
     tool_call: ToolCallRequest | None = None
     """当前 chunk 中首次完整出现的 tool_call（用于工具调用开始通知）。"""
+    tool_call_delta: ToolCallDelta | None = None
+    """生成期 tool_call 参数增量（仅展示用途，不参与聚合）。"""
     finish_reason: str | None = None
     usage: Usage | None = None
     error: str | None = None
