@@ -9,6 +9,8 @@ export const STORAGE_KEYS = {
   // 全局 UI 偏好
   SIDEBAR_COLLAPSED:           "evolve_sidebar_collapsed",
   DRAWER_OPEN:                 "evolve_drawer_open",
+  LLM_DRAWER_OPEN:             "evolve_llm_drawer_open",
+  LLM_DRAWER_WIDTH:            "evolve_llm_drawer_width",
   HEADER_COLLAPSED:            "evolve_header_collapsed",
   TASK_PROGRESS_COLLAPSED:     "evolve_task_progress_collapsed",
   CLIPBOARD_COLLAPSED:         "evolve_clipboard_collapsed",

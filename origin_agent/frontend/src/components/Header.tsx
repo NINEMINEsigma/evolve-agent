@@ -26,7 +26,6 @@ interface HeaderProps {
   onToggleCollapse?: () => void;
   isMobile?: boolean;
   llmProfiles?: LlmProfileManager;
-  onOpenLlmSettings?: () => void;
 }
 
 export default function Header({
@@ -49,7 +48,6 @@ export default function Header({
   onToggleCollapse,
   isMobile,
   llmProfiles,
-  onOpenLlmSettings,
 }: HeaderProps) {
   const [cmdMenuOpen, setCmdMenuOpen] = useState(false);
   const [menuPos, setMenuPos] = useState<{ top: number; left: number } | null>(null);
@@ -203,17 +201,6 @@ export default function Header({
                 >
                   导出会话
                 </div>
-                <div
-                  className="context-menu-item"
-                  onClick={() => {
-                    setCmdMenuOpen(false);
-                    setMenuPos(null);
-                    onOpenLlmSettings?.();
-                  }}
-                  data-tooltip="管理 LLM 模型配置"
-                >
-                  模型配置
-                </div>
                 {showUnloadMenu && (
                 <div
                   className="context-menu-item context-menu-item-danger"
@@ -309,17 +296,6 @@ export default function Header({
               data-tooltip="导出当前会话为可分享的静态 HTML 文件"
             >
               导出会话
-            </div>
-            <div
-              className="context-menu-item"
-              onClick={() => {
-                setCmdMenuOpen(false);
-                setMenuPos(null);
-                onOpenLlmSettings?.();
-              }}
-              data-tooltip="管理 LLM 模型配置"
-            >
-              模型配置
             </div>
             {showUnloadMenu && (
             <div

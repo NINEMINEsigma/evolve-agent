@@ -10,7 +10,7 @@ import CronCountdown from "./CronCountdown";
 import SubagentCountdown from "./SubagentCountdown";
 import Lightbox from "./Lightbox";
 import SecretBanner from "./SecretBanner";
-import LlmProfileSettings from "./LlmProfileSettings";
+import LlmProfileDrawer from "./LlmProfileDrawer";
 import type { WebSocketState } from "../hooks/useWebSocket";
 import { STORAGE_KEYS } from "../constants/storage";
 import { DIMENSIONS } from "../constants/dimensions";
@@ -26,7 +26,7 @@ interface LayoutProps {
 
 export default function Layout({ ws, onContextMenu, contextMenuOpen }: LayoutProps) {
   const [lightboxSrc, setLightboxSrc] = useState<string | null>(null);
-  const [llmSettingsOpen, setLlmSettingsOpen] = useState(false);
+  const [llmDrawerOpen, setLlmDrawerOpen] = usePersistentState(STORAGE_KEYS.LLM_DRAWER_OPEN, false);
   const [sidebarCollapsed, setSidebarCollapsed] = usePersistentState(STORAGE_KEYS.SIDEBAR_COLLAPSED, false);
   const [drawerOpen, setDrawerOpen] = usePersistentState(STORAGE_KEYS.DRAWER_OPEN, false);
   const [subagentPanelOpen, setSubagentPanelOpen] = usePersistentSessionState<boolean>(
@@ -67,6 +67,16 @@ export default function Layout({ ws, onContextMenu, contextMenuOpen }: LayoutPro
     setWidth: setDrawerWidth,
     min: DIMENSIONS.DRAWER_MIN,
     max: DIMENSIONS.DRAWER_MAX,
+    direction: "right",
+  });
+
+  const [llmDrawerWidth, setLlmDrawerWidth] = usePersistentState<number>(
+    STORAGE_KEYS.LLM_DRAWER_WIDTH, DIMENSIONS.LLM_DRAWER_DEFAULT);
+  const llmDrawerResize = useResizable({
+    width: llmDrawerWidth,
+    setWidth: setLlmDrawerWidth,
+    min: DIMENSIONS.LLM_DRAWER_MIN,
+    max: DIMENSIONS.LLM_DRAWER_MAX,
     direction: "right",
   });
 
@@ -240,7 +250,6 @@ export default function Layout({ ws, onContextMenu, contextMenuOpen }: LayoutPro
           onToggleCollapse={() => setHeaderCollapsed((v) => !v)}
           isMobile={isMobile}
           llmProfiles={ws.llmProfiles}
-          onOpenLlmSettings={() => setLlmSettingsOpen(true)}
         />
 
         <ClipboardPanel
@@ -323,7 +332,7 @@ export default function Layout({ ws, onContextMenu, contextMenuOpen }: LayoutPro
 
       </div>
 
-      {!(drawerOpen || subagentPanelOpen) && (
+      {!(drawerOpen || subagentPanelOpen || llmDrawerOpen) && (
         <div className="right-trigger-strip">
           <div
             className="right-trigger-bar resource-trigger-bar"
@@ -341,6 +350,13 @@ export default function Layout({ ws, onContextMenu, contextMenuOpen }: LayoutPro
               <span className="right-trigger-icon">◀</span>
             </div>
           )}
+          <div
+            className="right-trigger-bar llm-trigger-bar"
+            onClick={() => setLlmDrawerOpen(true)}
+            data-tooltip="打开模型配置抽屉"
+          >
+            <span className="right-trigger-icon">◀</span>
+          </div>
         </div>
       )}
 
@@ -381,10 +397,14 @@ export default function Layout({ ws, onContextMenu, contextMenuOpen }: LayoutPro
         <Lightbox src={lightboxSrc} onClose={() => setLightboxSrc(null)} />
       )}
 
-      {llmSettingsOpen && ws.llmProfiles && (
-        <LlmProfileSettings
+      {llmDrawerOpen && ws.llmProfiles && (
+        <LlmProfileDrawer
+          open={llmDrawerOpen}
+          onClose={() => setLlmDrawerOpen(false)}
           llmProfiles={ws.llmProfiles}
-          onClose={() => setLlmSettingsOpen(false)}
+          width={llmDrawerWidth}
+          isResizing={llmDrawerResize.isResizing}
+          onResizePointerDown={llmDrawerResize.onPointerDown}
         />
       )}
     </>

@@ -646,3 +646,222 @@
 .drawer-resize-handle.dragging {
   background: var(--accent);
 }
+
+/* ── LLM Profile Drawer ── */
+
+/* CSS 760px 仅作为 fallback;实际宽度由 JS usePersistentState 状态控制,
+   通过组件内联 style 传入(内联 style 优先级高于 CSS) */
+.drawer-panel.llm-drawer {
+  width: 760px;
+}
+
+.llm-drawer .drawer-body {
+  padding: 0;
+}
+
+.llm-trigger-bar {
+  background: rgba(var(--accent-rgb, 99, 102, 241), 0.15);
+}
+
+.llm-trigger-bar:hover {
+  background: var(--accent);
+}
+
+/* 抽屉 header 新增按钮 */
+.llm-drawer-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.drawer-header-btn {
+  padding: 4px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-hover);
+  color: var(--text-primary);
+  font-size: 12px;
+  cursor: pointer;
+  transition: background var(--duration-fast);
+}
+
+.drawer-header-btn:hover {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+}
+
+/* 抽屉 body 左右分栏 */
+.llm-drawer-body {
+  flex: 1;
+  display: flex;
+  overflow: hidden;
+}
+
+.llm-tree {
+  width: 280px;
+  flex-shrink: 0;
+  overflow-y: auto;
+  border-right: 1px solid var(--border);
+  padding: 8px 4px;
+}
+
+/* 注意:此 .llm-profile-form 定义替代 modal.css 中被删除的同名规则,是唯一定义 */
+.llm-profile-form {
+  flex: 1;
+  overflow-y: auto;
+  padding: 16px;
+  min-width: 0;
+}
+
+/* 三级树节点 */
+.llm-tree-client {
+  margin-bottom: 4px;
+}
+
+.llm-tree-node-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+  transition: background var(--duration-fast);
+  user-select: none;
+}
+
+.llm-tree-node-header:hover {
+  background: var(--bg-hover);
+}
+
+.llm-tree-node-header-sub {
+  padding-left: 24px;
+}
+
+.llm-tree-arrow {
+  font-size: 10px;
+  color: var(--text-muted);
+  transition: transform var(--duration-fast);
+  display: inline-block;
+  width: 12px;
+  text-align: center;
+}
+
+.llm-tree-arrow.expanded {
+  transform: rotate(90deg);
+}
+
+.llm-tree-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.llm-tree-label-mono {
+  font-family: "SF Mono", "Fira Code", monospace;
+  font-weight: 400;
+  font-size: 12px;
+}
+
+.llm-tree-count {
+  font-size: 11px;
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+
+.llm-tree-baseurl {
+  margin-left: 8px;
+}
+
+.llm-tree-leaf {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px 6px 48px;
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+  transition: background var(--duration-fast);
+}
+
+.llm-tree-leaf:hover {
+  background: var(--bg-hover);
+}
+
+.llm-tree-leaf.active {
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border);
+}
+
+.llm-tree-leaf.current .llm-tree-leaf-name::after {
+  content: " ●";
+  color: var(--accent);
+}
+
+.llm-tree-leaf-name {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-primary);
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.llm-tree-badge {
+  display: inline-block;
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 8px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  margin-left: 4px;
+  font-weight: 400;
+}
+
+.llm-tree-leaf-model {
+  font-size: 11px;
+  color: var(--text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 80px;
+}
+
+.llm-tree-active-toggle {
+  flex-shrink: 0;
+  width: 22px;
+  height: 22px;
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  background: transparent;
+  cursor: pointer;
+  font-size: 10px;
+  color: var(--text-muted);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all var(--duration-fast);
+}
+
+.llm-tree-active-toggle.on {
+  background: var(--accent);
+  color: var(--text-white);
+  border-color: var(--accent);
+}
+
+.llm-tree-active-toggle:disabled {
+  cursor: default;
+  opacity: 0.8;
+}
+
+/* 表单操作按钮区 */
+.llm-profile-form-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 16px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
