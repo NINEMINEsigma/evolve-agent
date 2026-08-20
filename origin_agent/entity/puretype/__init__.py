@@ -1,0 +1,130 @@
+"""
+puretype 包 — 只含有不包含任何方法定义的类型定义。
+
+原始单文件 puretype.py 拆分为以下子模块：
+    _base       : MessageContent, Role, ToolDangerLevel, ToolAvailability
+    approval    : ApprovalPolicy, ApprovalOutcome, ApprovalResult, ToolCallMeta, ToolAllowlistEntry
+    llm         : ToolCallRequest, Usage, MessageMetrics, LLMResponse, ToolCallDeltaPhase,
+                  ToolCallDelta, StreamChunk, LlmProfile, ModalityCapability
+    skills      : SkillPayload, SkillInfo
+    session     : Loop, SessionStatus, LoopMeta, SessionInfo, SessionMessageEntry, TokenUsageRecord
+    agent       : AgentConfig
+    ws          : MessageType, Message
+    lsp         : LSPState, LSPDiagnostic, LSPReference, LSPDefinition, LSPSymbol
+    runtime     : SystemInfo, ClientInfo
+    extools     : CronTaskInfo, DynamicEndpointInfo, ShowApiKeyResult
+
+所有公共名称通过 __init__.py 再导出，保持 ``from entity.puretype import X`` 的向后兼容。
+"""
+
+from ._base import (
+    MessageContent,
+    Role,
+    ToolDangerLevel,
+    ToolAvailability,
+)
+from .approval import (
+    ApprovalPolicy,
+    ApprovalOutcome,
+    ApprovalResult,
+    ToolCallMeta,
+    ToolAllowlistEntry,
+)
+from .llm import (
+    ToolCallRequest,
+    Usage,
+    MessageMetrics,
+    LLMResponse,
+    ToolCallDeltaPhase,
+    ToolCallDelta,
+    StreamChunk,
+    LlmProfile,
+    ModalityCapability,
+)
+from .skills import (
+    SkillPayload,
+    SkillInfo,
+)
+from .session import (
+    Loop,
+    SessionStatus,
+    LoopMeta,
+    SessionInfo,
+    SessionMessageEntry,
+    TokenUsageRecord,
+)
+from .agent import (
+    AgentConfig,
+)
+from .ws import (
+    MessageType,
+    Message,
+)
+from .lsp import (
+    LSPState,
+    LSPDiagnostic,
+    LSPReference,
+    LSPDefinition,
+    LSPSymbol,
+)
+from .runtime import (
+    SystemInfo,
+    ClientInfo,
+)
+from .extools import (
+    CronTaskInfo,
+    DynamicEndpointInfo,
+    ShowApiKeyResult,
+)
+
+__all__ = [
+    # _base
+    "MessageContent",
+    "Role",
+    "ToolDangerLevel",
+    "ToolAvailability",
+    # approval
+    "ApprovalPolicy",
+    "ApprovalOutcome",
+    "ApprovalResult",
+    "ToolCallMeta",
+    "ToolAllowlistEntry",
+    # llm
+    "ToolCallRequest",
+    "Usage",
+    "MessageMetrics",
+    "LLMResponse",
+    "ToolCallDeltaPhase",
+    "ToolCallDelta",
+    "StreamChunk",
+    "LlmProfile",
+    "ModalityCapability",
+    # skills
+    "SkillPayload",
+    "SkillInfo",
+    # session
+    "Loop",
+    "SessionStatus",
+    "LoopMeta",
+    "SessionInfo",
+    "SessionMessageEntry",
+    "TokenUsageRecord",
+    # agent
+    "AgentConfig",
+    # ws
+    "MessageType",
+    "Message",
+    # lsp
+    "LSPState",
+    "LSPDiagnostic",
+    "LSPReference",
+    "LSPDefinition",
+    "LSPSymbol",
+    # runtime
+    "SystemInfo",
+    "ClientInfo",
+    # extools
+    "CronTaskInfo",
+    "DynamicEndpointInfo",
+    "ShowApiKeyResult",
+]

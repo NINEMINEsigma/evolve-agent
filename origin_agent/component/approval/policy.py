@@ -1,7 +1,7 @@
 """审批策略定义。
 
 将审批阈值的判断从分散在各处的硬编码条件分支，集中为显式命名的策略常量。
-数据类 ApprovalPolicy 定义在 entity/puretype.py，本模块负责操作函数和预设策略。
+数据类 ApprovalPolicy 定义在 entity/puretype/ 包（approval 子模块），本模块负责操作函数和预设策略。
 """
 
 from __future__ import annotations

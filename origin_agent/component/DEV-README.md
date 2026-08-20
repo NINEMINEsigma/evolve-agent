@@ -138,7 +138,7 @@ component/
 - `needs_approval(policy, danger_level, handsfree) -> bool`：根据策略和脱手模式判断工具是否需要审批。
 - `MAIN_SESSION_POLICY`：主会话策略（手动模式仅 dangerous+critical 需审批，脱手模式 write+dangerous+critical 需审批）。
 - `SUB_SESSION_POLICY`：子会话策略（write+dangerous+critical 在两种模式下均需审批）。
-- `ApprovalPolicy` 数据类定义在 `entity/puretype.py`。
+- `ApprovalPolicy` 数据类定义在 `entity/puretype/`（`approval` 子模块）。
 
 ### 审批流程
 
