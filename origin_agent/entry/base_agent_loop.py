@@ -18,7 +18,7 @@ from typing import Any, TYPE_CHECKING
 
 from pydantic import BaseModel
 
-from entity.puretype import Role, ToolAvailability, SessionMessageEntry, TokenUsageRecord, MessageContent, LlmProfile
+from entity.puretype import Role, ToolAvailability, SessionMessageEntry, TokenUsageRecord, MessageContent, LlmProfile, MessageMetrics
 from entity.messages import (
     History,
     BaseMessage,
@@ -189,6 +189,7 @@ def _serialize_message_entry(
     msg: BaseMessage,
     index: int,
     fallback_character: str = "assistant",
+    metrics: MessageMetrics | None = None,
 ) -> SessionMessageEntry:
     """将单条 History 消息序列化为前端展示用的 SessionMessageEntry。
 
@@ -264,6 +265,7 @@ def _serialize_message_entry(
         requires_response=requires_response,
         tool_calls=tool_calls,
         tool_call_meta=tool_call_meta,
+        metrics=metrics,
     )
 
 
@@ -512,10 +514,24 @@ class BaseAgentLoop(ABC):
     def get_session_messages(self) -> list[SessionMessageEntry]:
         """返回前端展示所需的消息列表，包含多 agent 元数据。"""
         fallback = self.current_character_agent
-        return [
-            _serialize_message_entry(msg, index, fallback_character=fallback)
-            for index, msg in enumerate(self._history.iter_messages())
-        ]
+        # 从 SessionStore 读取持久化的 metrics
+        metrics_map: dict[str, dict[str, Any]] = {}
+        if self._session_store is not None:
+            try:
+                metrics_map = self._session_store.read_message_metrics(self.session_id)
+            except Exception:
+                logger.warning(
+                    "Failed to read message metrics for session=%s",
+                    self.session_id, exc_info=True,
+                )
+        result: list[SessionMessageEntry] = []
+        for index, msg in enumerate(self._history.iter_messages()):
+            m_data = metrics_map.get(str(index))
+            m = MessageMetrics.model_validate(m_data) if m_data else None
+            result.append(
+                _serialize_message_entry(msg, index, fallback_character=fallback, metrics=m)
+            )
+        return result
 
     def edit_session_message(self, index: int, content: str | list[dict[str, Any]] | None = None,
                              visible_characters: list[str] | None = None) -> dict:

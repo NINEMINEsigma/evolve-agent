@@ -78,6 +78,7 @@ export interface WSMessage {
   emoji?: string;                  // 工具调用/审批请求的图标
   danger_level?: string;           // CONFIRM_REQUEST：工具危险等级
   client_info?: Record<string, string>;   // USER_MESSAGE：前端客户端信息
+  metrics?: MessageMetrics;              // STREAM_DONE：计时元信息
 }
 
 export interface ToolCallMeta {
@@ -87,6 +88,13 @@ export interface ToolCallMeta {
   invocation_start_offset_ms: number; // 从申请到开始调用 handler 的毫秒偏移
   invocation_duration_ms: number;   // handler 实际执行的毫秒数
   end_time_offset_ms: number;       // 从申请到工具调用完成的毫秒偏移
+}
+
+export interface MessageMetrics {
+  reasoning_duration_ms: number;   // 推理阶段耗时（毫秒）
+  content_duration_ms: number;      // 正文阶段耗时（毫秒）
+  total_tokens: number;             // 本轮 LLM 调用的 total_tokens
+  tokens_per_second: number;        // token 输出速度
 }
 
 export interface ConfirmRequest {
@@ -164,7 +172,10 @@ export interface ChatMessage {
   imageMarkdown?: string;
   downloadInfo?: DownloadInfo;
   reasoningContent?: string;
-  reasoningDuration?: number;
+  reasoningDuration?: number;       // 推理耗时（毫秒，后端推送或前端粗算兜底）
+  contentDuration?: number;          // 正文耗时（毫秒）
+  totalTokens?: number;              // 本轮 total_tokens
+  tokensPerSecond?: number;          // token 输出速度
   characterName?: string;
   visibleCharacters?: string[];
   requiresResponse?: boolean;

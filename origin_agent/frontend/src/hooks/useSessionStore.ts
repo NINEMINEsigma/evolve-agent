@@ -291,8 +291,8 @@ export function useSessionStore(callbacks: SessionStoreCallbacks = {}): SessionS
       return;
     }
     let finalPrev = prev;
-    if (reasoningStartRef.current && prev.reasoningContent) {
-      const duration = Math.round((Date.now() - reasoningStartRef.current) / 1000);
+    if (reasoningStartRef.current && prev.reasoningContent && prev.reasoningDuration == null) {
+      const duration = Math.round(Date.now() - reasoningStartRef.current);
       finalPrev = { ...prev, reasoningDuration: duration };
       reasoningStartRef.current = null;
     }
@@ -314,8 +314,8 @@ export function useSessionStore(callbacks: SessionStoreCallbacks = {}): SessionS
     let toFlush: ChatMessage | null = null;
     if (prev) {
       let finalPrev = prev;
-      if (reasoningStartRef.current && prev.reasoningContent) {
-        const duration = Math.round((Date.now() - reasoningStartRef.current) / 1000);
+      if (reasoningStartRef.current && prev.reasoningContent && prev.reasoningDuration == null) {
+        const duration = Math.round(Date.now() - reasoningStartRef.current);
         finalPrev = { ...prev, reasoningDuration: duration };
         reasoningStartRef.current = null;
       }
@@ -723,6 +723,18 @@ export function useSessionStore(callbacks: SessionStoreCallbacks = {}): SessionS
           ...streamingMessageRef.current,
           content: doneContent,
         };
+      }
+      // 后端 metrics 覆盖前端粗算
+      if (msg.metrics && streamingMessageRef.current) {
+        streamingMessageRef.current = {
+          ...streamingMessageRef.current,
+          reasoningDuration: msg.metrics.reasoning_duration_ms !== undefined ? msg.metrics.reasoning_duration_ms : undefined,
+          contentDuration: msg.metrics.content_duration_ms !== undefined ? msg.metrics.content_duration_ms : undefined,
+          totalTokens: msg.metrics.total_tokens !== undefined ? msg.metrics.total_tokens : undefined,
+          tokensPerSecond: msg.metrics.tokens_per_second !== undefined ? msg.metrics.tokens_per_second : undefined,
+        };
+        // 后端已提供精确值，跳过前端 Date.now() 粗算
+        reasoningStartRef.current = null;
       }
       flushStreamingMessage();
       streamDoneRef.current = true;

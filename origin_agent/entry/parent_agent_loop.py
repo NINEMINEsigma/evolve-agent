@@ -23,7 +23,7 @@ from abstract.tools.registry import registry as tool_registry
 from component.approval import ask_agent_reason
 from abstract.llm.client import BaseLLMClient
 from abstract.llm.loader import create_llm_client
-from entity.puretype import LLMResponse, ToolCallRequest, Role, ToolAvailability, TokenUsageRecord, MessageContent, LlmProfile
+from entity.puretype import LLMResponse, ToolCallRequest, Role, ToolAvailability, TokenUsageRecord, MessageContent, LlmProfile, MessageMetrics
 from entity.gentype import RefWrapper
 from system.session_store import SessionStore
 from entity.constant import (
@@ -312,6 +312,10 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
 
         turn: RefWrapper[int] = RefWrapper(value=0)
         self._tool_executor.set_turn_counter(turn)
+
+        # 计时数据累积器（三元组：session_id, msg_index, metrics）
+        collected_metrics: list[tuple[str, int, MessageMetrics]] = []
+
         try:
             while turn.value < _MAX_TOOL_TURNS:
                 if self._cancel_event.is_set():
@@ -347,13 +351,15 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
                     )
 
                 if self._cancel_event.is_set():
-                    await self._emit_stream_done(sid, stream_id, "cancelled", content=resp.content or "")
+                    await self._emit_stream_done(sid, stream_id, "cancelled", content=resp.content or "", metrics=resp.metrics)
                     if resp.content:
-                        self._append(
+                        msg_index = self._append(
                             sid, Role.ASSISTANT, resp.content,
                             reasoning_content=resp.reasoning_content,
                             reasoning_field_name=resp.reasoning_field_name,
                         )
+                        if resp.metrics:
+                            collected_metrics.append((sid, msg_index, resp.metrics))
                         return resp.content
                     return "Cancelled."
 
@@ -381,19 +387,23 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
                         else (resp.content or ""),
                     )
 
-                await self._emit_stream_done(sid, stream_id, resp.finish_reason, content=resp.content or "")
+                await self._emit_stream_done(sid, stream_id, resp.finish_reason, content=resp.content or "", metrics=resp.metrics)
 
                 if not resp.tool_calls:
                     assistant_text = resp.content or ""
-                    self._append(
+                    msg_index = self._append(
                         sid, Role.ASSISTANT, assistant_text,
                         reasoning_content=resp.reasoning_content,
                         reasoning_field_name=resp.reasoning_field_name,
                     )
+                    if resp.metrics:
+                        collected_metrics.append((sid, msg_index, resp.metrics))
                     return assistant_text
 
                 # 存储 assistant 消息（含 tool_calls）
-                self._store_assistant_with_tools(sid, resp)
+                msg_index = self._store_assistant_with_tools(sid, resp)
+                if resp.metrics:
+                    collected_metrics.append((sid, msg_index, resp.metrics))
 
                 # 委托给 ToolExecutor 执行工具调用
                 try:
@@ -453,7 +463,23 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
                 messages = self._get_full_history(sid)
 
         finally:
-            pass
+            # 所有退出路径汇聚于此：一次性持久化计时数据
+            if collected_metrics and self._session_store is not None:
+                try:
+                    # 按 session_id 分组（应对会话旋转：早期轮次可能属于旧 session）
+                    by_session: dict[str, dict[str, dict]] = {}
+                    for sess_id, msg_idx, m in collected_metrics:
+                        by_session.setdefault(sess_id, {})
+                        by_session[sess_id][str(msg_idx)] = m.model_dump()
+                    # 每个 session 合并已有 metrics 后原子写入
+                    for sess_id, new_metrics in by_session.items():
+                        existing = self._session_store.read_message_metrics(sess_id)
+                        existing.update(new_metrics)
+                        self._session_store.write_message_metrics(sess_id, existing)
+                except Exception:
+                    logger.warning(
+                        "Failed to persist message metrics for session=%s", sid, exc_info=True,
+                    )
 
         logger.warning(
             "Tool-call loop exceeded max turns (%d) for session=%s",
@@ -707,7 +733,7 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
 
     def _store_assistant_with_tools(
         self, session_id: str, resp: LLMResponse,
-    ) -> None:
+    ) -> int:
         tool_calls_data: list[HistoryToolCall] = [
             HistoryToolCall(
                 id=tc.id,
@@ -729,6 +755,7 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
         )
         index = self._history.add_message(message)
         self.save_history(session_id)
+        return index
 
     @staticmethod
     def _extract_text(content: Any) -> str:
@@ -763,11 +790,13 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
     async def _emit_stream_done(
         self, session_id: str, stream_id: str, finish_reason: str,
         content: str = "",
+        metrics: MessageMetrics | None = None,
     ) -> None:
         try:
             await self._frontend_sink.emit_stream_done(
                 session_id, stream_id, finish_reason,
                 content=content,
+                metrics=metrics,
             )
         except Exception:
             logger.warning(

@@ -14,9 +14,10 @@ export function contentToText(content: MessageContent): string {
     .join("\n");
 }
 
-function formatReasoningDuration(seconds: number): string {
-  const mins = Math.floor(seconds / 60);
-  const secs = seconds % 60;
+function formatReasoningDuration(ms: number): string {
+  const totalSeconds = Math.round(ms / 1000);
+  const mins = Math.floor(totalSeconds / 60);
+  const secs = totalSeconds % 60;
   if (mins > 0) {
     return `Thought for ${mins} minute${mins > 1 ? "s" : ""} ${secs} second${secs > 1 ? "s" : ""}`;
   }
@@ -130,6 +131,19 @@ export default function MessageBody({ message, streaming, onImageClick }: Messag
           <MarkdownRenderer content={textContent} streaming={streaming} onImageClick={onImageClick} />
         ) : (
           renderBlocksContent(m.content, m.role, m.id, onImageClick)
+        )}
+        {!streaming && (m.contentDuration != null || (m.tokensPerSecond != null && m.tokensPerSecond > 0)) && (
+          <div className="message-metrics" style={{ display: "flex", gap: "0.75rem", fontSize: "0.75rem", color: "var(--text-secondary, #888)", marginTop: "0.25rem" }}>
+            {m.contentDuration != null && m.contentDuration > 0 && (
+              <span>Output: {formatReasoningDuration(m.contentDuration)}</span>
+            )}
+            {m.tokensPerSecond != null && m.tokensPerSecond > 0 && (
+              <span>{m.tokensPerSecond} tokens/s</span>
+            )}
+            {m.totalTokens != null && m.totalTokens > 0 && (
+              <span>{m.totalTokens} tokens</span>
+            )}
+          </div>
         )}
         {hasToolCallDelta && (() => {
           const raw = m.toolArgsRawMap![m.activeToolCallKey!];

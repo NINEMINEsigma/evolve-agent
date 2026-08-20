@@ -13,7 +13,7 @@ import uuid
 from abc import ABC, abstractmethod
 from typing import * # type: ignore
 from entity.constant import SYSTEM_CHARACTER_NAME
-from entity.puretype import ApprovalResult
+from entity.puretype import ApprovalResult, MessageMetrics
 
 if TYPE_CHECKING:
     from fastapi import WebSocket
@@ -87,11 +87,13 @@ class AgentSink(ABC):
     @abstractmethod
     async def emit_stream_done(self, session_id: str, stream_id: str,
                                finish_reason: str = "stop",
-                               content: str = "") -> None:
+                               content: str = "",
+                               metrics: MessageMetrics | None = None) -> None:
         """推送流结束事件。
 
         Args:
             content: 本轮 LLM 响应的完整文本，供前端权威固化，避免 delta 累积竞态。
+            metrics: 本轮 LLM 调用的计时与 token 速度元信息。
         """
         ...
 
@@ -397,10 +399,13 @@ class FrontendSink(AgentSink):
 
     async def emit_stream_done(self, session_id: str, stream_id: str,
                                finish_reason: str = "stop",
-                               content: str = "") -> None:
+                               content: str = "",
+                               metrics: MessageMetrics | None = None) -> None:
         payload: dict = {"stream_id": stream_id, "finish_reason": finish_reason}
         if content:
             payload["content"] = content
+        if metrics:
+            payload["metrics"] = metrics.model_dump()
         await self._send_msg(session_id, "stream_done", "",
                              json.dumps(payload, ensure_ascii=False))
 
@@ -487,6 +492,7 @@ class FrontendSink(AgentSink):
                 stream_id=data.get("stream_id"),
                 finish_reason=data.get("finish_reason"),
                 content=data.get("content"),
+                metrics=MessageMetrics.model_validate(data["metrics"]) if data.get("metrics") else None,
             )
         elif event_type == "usage_update":
             msg = Message(type=MessageType.SYSTEM, session_id=session_id, content=payload)
@@ -636,7 +642,8 @@ class ParentAgentSink(AgentSink):
 
     async def emit_stream_done(self, session_id: str, stream_id: str,
                                finish_reason: str = "stop",
-                               content: str = "") -> None:
+                               content: str = "",
+                               metrics: MessageMetrics | None = None) -> None:
         """转发流结束事件到父 Agent 前端。"""
         try:
             from system.application import Application
@@ -645,6 +652,7 @@ class ParentAgentSink(AgentSink):
                 await sink.emit_stream_done(
                     self._loop.parent_session_id, stream_id, finish_reason,
                     content=content,
+                    metrics=metrics,
                 )
         except Exception:
             logger.warning(

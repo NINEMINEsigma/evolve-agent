@@ -11,10 +11,11 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from typing import Any, TYPE_CHECKING
 
 from abstract.llm.client import BaseLLMClient
-from entity.puretype import LLMResponse, Usage, ToolCallRequest
+from entity.puretype import LLMResponse, Usage, ToolCallRequest, MessageMetrics
 from entity.messages import BaseMessage, CharacterConversationMessage
 
 if TYPE_CHECKING:
@@ -80,6 +81,12 @@ class StreamConsumer:
         }
         stream_error: str | None = None
 
+        # 计时变量 — 基于 time.monotonic() 增量到达时间记录
+        reasoning_start_ts: float | None = None
+        reasoning_end_ts: float | None = None
+        content_start_ts: float | None = None
+        content_end_ts: float | None = None
+
         stream = self._llm.chat_stream(
             messages, tools=tools, character=self._character_name,
             last_user_message=last_user_message,
@@ -94,6 +101,9 @@ class StreamConsumer:
                     break
 
                 if chunk.content_delta:
+                    if content_start_ts is None:
+                        content_start_ts = time.monotonic()
+                    content_end_ts = time.monotonic()
                     content += chunk.content_delta
                     await self._sink.emit_stream_delta(
                         session_id, stream_id,
@@ -102,6 +112,9 @@ class StreamConsumer:
                     )
 
                 if chunk.reasoning_delta:
+                    if reasoning_start_ts is None:
+                        reasoning_start_ts = time.monotonic()
+                    reasoning_end_ts = time.monotonic()
                     reasoning_content += chunk.reasoning_delta
                     if chunk.reasoning_field_name:
                         reasoning_field_name = chunk.reasoning_field_name
@@ -153,6 +166,28 @@ class StreamConsumer:
             # NOTE: 借用404代指无效的total_tokens
             usage_dict["total_tokens"] = 404
 
+        # 计算计时数据
+        reasoning_duration_ms = 0
+        if reasoning_start_ts is not None and reasoning_end_ts is not None:
+            reasoning_duration_ms = int((reasoning_end_ts - reasoning_start_ts) * 1000)
+
+        content_duration_ms = 0
+        if content_start_ts is not None and content_end_ts is not None:
+            content_duration_ms = int((content_end_ts - content_start_ts) * 1000)
+
+        total_duration_ms = reasoning_duration_ms + content_duration_ms
+        total_tokens = usage_dict["total_tokens"]
+        tokens_per_second = 0.0
+        if total_duration_ms > 0 and total_tokens > 0 and total_tokens != 404:
+            tokens_per_second = round(total_tokens / (total_duration_ms / 1000), 2)
+
+        metrics = MessageMetrics(
+            reasoning_duration_ms=reasoning_duration_ms,
+            content_duration_ms=content_duration_ms,
+            total_tokens=total_tokens if total_tokens != 404 else 0,
+            tokens_per_second=tokens_per_second,
+        )
+
         return LLMResponse(
             content=content,
             tool_calls=tool_calls,
@@ -164,4 +199,5 @@ class StreamConsumer:
                 completion_tokens=usage_dict["completion_tokens"],
                 total_tokens=usage_dict["total_tokens"],
             ),
+            metrics=metrics,
         )

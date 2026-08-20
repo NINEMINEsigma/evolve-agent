@@ -268,6 +268,27 @@ class Usage(BaseModel):
     total_tokens: int = 0
 
 
+class MessageMetrics(BaseModel):
+    """单条 LLM 响应的计时与 token 速度元信息。
+
+    在 StreamConsumer.consume() 中基于 time.monotonic() 增量到达时间采集，
+    通过 stream_done 事件实时推送到前端，并在 tool loop 结束后
+    持久化到 session 目录下的 message_metrics.json。
+    """
+
+    reasoning_duration_ms: int = 0
+    """推理阶段耗时（毫秒），基于首个到最后一个 reasoning_delta 的间隔。"""
+
+    content_duration_ms: int = 0
+    """正文阶段耗时（毫秒），基于首个到最后一个 content_delta 的间隔。"""
+
+    total_tokens: int = 0
+    """本轮 LLM 调用的 total_tokens（来自 Usage）。"""
+
+    tokens_per_second: float = 0.0
+    """token 输出速度 = total_tokens / ((reasoning_ms + content_ms) / 1000）。"""
+
+
 class LLMResponse(BaseModel):
     """非流式 LLM 响应的完整内容。"""
     model_config = ConfigDict(frozen=True)
@@ -280,6 +301,8 @@ class LLMResponse(BaseModel):
     reasoning_field_name: str | None = None
     """原始响应中携带 reasoning 的字段名，用于在后续回传时保持字段一致。"""
     usage: Usage = Usage()
+    metrics: MessageMetrics | None = None
+    """本轮 LLM 调用的计时与 token 速度元信息（StreamConsumer 填充）。"""
 
 
 class ToolCallDeltaPhase(str, Enum):
@@ -523,6 +546,7 @@ class Message(BaseModel):
     danger_level: str | None = None  # CONFIRM_REQUEST：工具危险等级
     client_info: dict[str, Any] | None = None  # USER_MESSAGE：前端携带的客户端信息
     llm_profile: LlmProfile | None = None  # USER_MESSAGE：前端携带的 LLM 配置覆盖
+    metrics: MessageMetrics | None = None  # STREAM_DONE：计时元信息
 
 
 # ---------------------------------------------------------------------------
@@ -547,6 +571,7 @@ class SessionMessageEntry(BaseModel):
     requires_response: bool | None = None
     tool_calls: list[dict[str, Any]] | None = None
     tool_call_meta: dict[str, Any] | None = None
+    metrics: MessageMetrics | None = None
 
 
 # ---------------------------------------------------------------------------

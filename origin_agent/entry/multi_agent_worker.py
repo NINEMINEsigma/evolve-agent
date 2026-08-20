@@ -235,6 +235,7 @@ class MultiAgentWorker:
                 stream_id,
                 resp.finish_reason,
                 content=resp.content or "",
+                metrics=resp.metrics,
             )
 
             # 收集 token 消耗

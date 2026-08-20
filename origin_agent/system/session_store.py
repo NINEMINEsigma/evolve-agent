@@ -143,3 +143,23 @@ class SessionStore:
         """单分区整体覆盖写（工具模块调用点），不再读-改-写整文件。"""
         self.write_partition(session_id, partition, values)
 
+    # -- message metrics -------------------------------------------------------
+
+    def message_metrics_path(self, session_id: str) -> Path:
+        """返回消息计时元信息文件的路径。"""
+        return self.session_dir(session_id) / "message_metrics.json"
+
+    def read_message_metrics(self, session_id: str) -> dict[str, dict[str, Any]]:
+        """读取消息计时元信息，键为 message index（字符串形式）。"""
+        path = self.message_metrics_path(session_id)
+        if not path.exists():
+            return {}
+        data = json.loads(path.read_text(encoding="utf-8"))
+        return data if isinstance(data, dict) else {}
+
+    def write_message_metrics(self, session_id: str, metrics: dict[str, dict[str, Any]]) -> None:
+        """原子写入消息计时元信息。"""
+        path = self.message_metrics_path(session_id)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        write_text_atomic(path, json.dumps(metrics, ensure_ascii=False, indent=2))
+
