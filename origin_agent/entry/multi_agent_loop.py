@@ -536,8 +536,19 @@ class MultiAgentLoop(BaseAgentLoop, IMainSessionLoop):
                 message_suffix=None,
             )
 
-            self._history.add_message(msg)
+            msg_index = self._history.add_message(msg)
             self.save_history(self.session_id)
+
+            # 配对最终回复 metrics 并持久化
+            if result.last_metrics is not None:
+                result.collected_metrics.append((self.session_id, msg_index, result.last_metrics))
+            if result.collected_metrics and self._session_store is not None:
+                try:
+                    self._session_store.merge_message_metrics(result.collected_metrics)
+                except Exception:
+                    logger.warning(
+                        "Failed to persist message metrics for session=%s", self.session_id, exc_info=True,
+                    )
 
             # 推送可见性/响应元数据给前端
             # 注意：MultiAgentWorker 已经在每轮 LLM 调用后发送过 stream_done，
@@ -675,6 +686,14 @@ class MultiAgentLoop(BaseAgentLoop, IMainSessionLoop):
             )
             # 即使 worker 异常，也要把已累加的 token 消耗同步回 loop，避免部分消耗丢失
             self._aggregate_worker_usage(worker)
+            # 持久化 worker 已收集的 metrics
+            if worker._collected_metrics and self._session_store is not None:
+                try:
+                    self._session_store.merge_message_metrics(worker._collected_metrics)
+                except Exception:
+                    logger.warning(
+                        "Failed to persist message metrics for session=%s", self.session_id, exc_info=True,
+                    )
             raise
 
         self._aggregate_worker_usage(worker, result)

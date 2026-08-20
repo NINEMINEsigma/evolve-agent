@@ -24,6 +24,16 @@ function formatReasoningDuration(ms: number): string {
   return `Thought for ${secs} second${secs > 1 ? "s" : ""}`;
 }
 
+function formatDuration(ms: number): string {
+  const totalSeconds = Math.round(ms / 1000);
+  const mins = Math.floor(totalSeconds / 60);
+  const secs = totalSeconds % 60;
+  if (mins > 0) {
+    return `${mins}m ${secs}s`;
+  }
+  return `${secs}s`;
+}
+
 function renderBlocksContent(
   content: MessageContent,
   roleClass: string,
@@ -135,13 +145,13 @@ export default function MessageBody({ message, streaming, onImageClick }: Messag
         {!streaming && (m.contentDuration != null || (m.tokensPerSecond != null && m.tokensPerSecond > 0)) && (
           <div className="message-metrics" style={{ display: "flex", gap: "0.75rem", fontSize: "0.75rem", color: "var(--text-secondary, #888)", marginTop: "0.25rem" }}>
             {m.contentDuration != null && m.contentDuration > 0 && (
-              <span>Output: {formatReasoningDuration(m.contentDuration)}</span>
+              <span>Output: {formatDuration(m.contentDuration)}</span>
             )}
             {m.tokensPerSecond != null && m.tokensPerSecond > 0 && (
               <span>{m.tokensPerSecond} tokens/s</span>
             )}
-            {m.totalTokens != null && m.totalTokens > 0 && (
-              <span>{m.totalTokens} tokens</span>
+            {m.completionTokens != null && m.completionTokens > 0 && (
+              <span>{m.completionTokens} tokens</span>
             )}
           </div>
         )}

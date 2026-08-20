@@ -93,7 +93,7 @@ export interface ToolCallMeta {
 export interface MessageMetrics {
   reasoning_duration_ms: number;   // 推理阶段耗时（毫秒）
   content_duration_ms: number;      // 正文阶段耗时（毫秒）
-  total_tokens: number;             // 本轮 LLM 调用的 total_tokens
+  completion_tokens: number;         // 本轮 LLM 调用的 completion_tokens
   tokens_per_second: number;        // token 输出速度
 }
 
@@ -174,7 +174,7 @@ export interface ChatMessage {
   reasoningContent?: string;
   reasoningDuration?: number;       // 推理耗时（毫秒，后端推送或前端粗算兜底）
   contentDuration?: number;          // 正文耗时（毫秒）
-  totalTokens?: number;              // 本轮 total_tokens
+  completionTokens?: number;          // 本轮 completion_tokens
   tokensPerSecond?: number;          // token 输出速度
   characterName?: string;
   visibleCharacters?: string[];

@@ -465,21 +465,7 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
         finally:
             # 所有退出路径汇聚于此：一次性持久化计时数据
             if collected_metrics and self._session_store is not None:
-                try:
-                    # 按 session_id 分组（应对会话旋转：早期轮次可能属于旧 session）
-                    by_session: dict[str, dict[str, dict]] = {}
-                    for sess_id, msg_idx, m in collected_metrics:
-                        by_session.setdefault(sess_id, {})
-                        by_session[sess_id][str(msg_idx)] = m.model_dump()
-                    # 每个 session 合并已有 metrics 后原子写入
-                    for sess_id, new_metrics in by_session.items():
-                        existing = self._session_store.read_message_metrics(sess_id)
-                        existing.update(new_metrics)
-                        self._session_store.write_message_metrics(sess_id, existing)
-                except Exception:
-                    logger.warning(
-                        "Failed to persist message metrics for session=%s", sid, exc_info=True,
-                    )
+                self._session_store.merge_message_metrics(collected_metrics)
 
         logger.warning(
             "Tool-call loop exceeded max turns (%d) for session=%s",

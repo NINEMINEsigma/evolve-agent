@@ -482,6 +482,12 @@ export function useSessionStore(callbacks: SessionStoreCallbacks = {}): SessionS
                 assistantEntry.responseCharacters = m.response_characters;
               }
               if (m.reasoning_content) assistantEntry.reasoningContent = m.reasoning_content;
+              if (m.metrics) {
+                assistantEntry.reasoningDuration = m.metrics.reasoning_duration_ms !== undefined ? m.metrics.reasoning_duration_ms : undefined;
+                assistantEntry.contentDuration = m.metrics.content_duration_ms !== undefined ? m.metrics.content_duration_ms : undefined;
+                assistantEntry.completionTokens = m.metrics.completion_tokens !== undefined ? m.metrics.completion_tokens : undefined;
+                assistantEntry.tokensPerSecond = m.metrics.tokens_per_second !== undefined ? m.metrics.tokens_per_second : undefined;
+              }
 
               const toolEntries = m.tool_calls.map((tc: any) => {
                 const toolName = tc.function?.name || "tool";
@@ -540,6 +546,12 @@ export function useSessionStore(callbacks: SessionStoreCallbacks = {}): SessionS
             }
             if (m.tool_call_meta) {
               entry.toolCallMeta = m.tool_call_meta;
+            }
+            if (m.metrics) {
+              entry.reasoningDuration = m.metrics.reasoning_duration_ms !== undefined ? m.metrics.reasoning_duration_ms : undefined;
+              entry.contentDuration = m.metrics.content_duration_ms !== undefined ? m.metrics.content_duration_ms : undefined;
+              entry.completionTokens = m.metrics.completion_tokens !== undefined ? m.metrics.completion_tokens : undefined;
+              entry.tokensPerSecond = m.metrics.tokens_per_second !== undefined ? m.metrics.tokens_per_second : undefined;
             }
             return entry;
           });
@@ -730,7 +742,7 @@ export function useSessionStore(callbacks: SessionStoreCallbacks = {}): SessionS
           ...streamingMessageRef.current,
           reasoningDuration: msg.metrics.reasoning_duration_ms !== undefined ? msg.metrics.reasoning_duration_ms : undefined,
           contentDuration: msg.metrics.content_duration_ms !== undefined ? msg.metrics.content_duration_ms : undefined,
-          totalTokens: msg.metrics.total_tokens !== undefined ? msg.metrics.total_tokens : undefined,
+          completionTokens: msg.metrics.completion_tokens !== undefined ? msg.metrics.completion_tokens : undefined,
           tokensPerSecond: msg.metrics.tokens_per_second !== undefined ? msg.metrics.tokens_per_second : undefined,
         };
         // 后端已提供精确值，跳过前端 Date.now() 粗算

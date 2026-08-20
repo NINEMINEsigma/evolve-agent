@@ -176,15 +176,15 @@ class StreamConsumer:
             content_duration_ms = int((content_end_ts - content_start_ts) * 1000)
 
         total_duration_ms = reasoning_duration_ms + content_duration_ms
-        total_tokens = usage_dict["total_tokens"]
+        completion_tokens = usage_dict["completion_tokens"]
         tokens_per_second = 0.0
-        if total_duration_ms > 0 and total_tokens > 0 and total_tokens != 404:
-            tokens_per_second = round(total_tokens / (total_duration_ms / 1000), 2)
+        if total_duration_ms > 0 and completion_tokens > 0:
+            tokens_per_second = round(completion_tokens / (total_duration_ms / 1000), 2)
 
         metrics = MessageMetrics(
             reasoning_duration_ms=reasoning_duration_ms,
             content_duration_ms=content_duration_ms,
-            total_tokens=total_tokens if total_tokens != 404 else 0,
+            completion_tokens=completion_tokens,
             tokens_per_second=tokens_per_second,
         )
 

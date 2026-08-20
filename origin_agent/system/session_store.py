@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Any
 
 from entity.messages import History
-from entity.puretype import TokenUsageRecord
+from entity.puretype import TokenUsageRecord, MessageMetrics
 from entity.constant import History_Version as __SessionStore_Version__
 from easysave import save, load
 
@@ -162,4 +162,27 @@ class SessionStore:
         path = self.message_metrics_path(session_id)
         path.parent.mkdir(parents=True, exist_ok=True)
         write_text_atomic(path, json.dumps(metrics, ensure_ascii=False, indent=2))
+
+    def merge_message_metrics(
+        self,
+        collected: list[tuple[str, int, MessageMetrics]],
+    ) -> None:
+        """按 session_id 分组合并写入消息计时元信息。
+
+        应对会话旋转：同一批 collected 中可能包含不同 session_id 的条目。
+        每个 session 合并已有 metrics 后原子写入，异常时吞掉不抛出。
+        """
+        try:
+            by_session: dict[str, dict[str, dict]] = {}
+            for sess_id, msg_idx, m in collected:
+                by_session.setdefault(sess_id, {})
+                by_session[sess_id][str(msg_idx)] = m.model_dump()
+            for sess_id, new_metrics in by_session.items():
+                existing = self.read_message_metrics(sess_id)
+                existing.update(new_metrics)
+                self.write_message_metrics(sess_id, existing)
+        except Exception:
+            logger.warning(
+                "Failed to merge message metrics for collected=%d entries", len(collected), exc_info=True,
+            )
 

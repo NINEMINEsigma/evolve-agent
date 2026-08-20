@@ -16,7 +16,7 @@ from typing import Any, TYPE_CHECKING
 
 from pydantic import BaseModel, Field
 
-from entity.puretype import Role
+from entity.puretype import Role, MessageMetrics
 from entity.gentype import RefWrapper
 from entity.messages import ToolResultMessage, CharacterConversationMessage, CharacterSystemMessage, FunctionCall, ToolCall as HistoryToolCall, BaseMessage
 from entity.constant import (
@@ -60,6 +60,14 @@ class WorkerResult(BaseModel):
     last_prompt_tokens: int = Field(0, description="该 worker 最后一次 LLM 调用的 prompt_tokens")
     reasoning: str | None = Field(default=None, description="LLM 推理内容（仅在支持 thinking 的 provider 下存在）")
     context_over_limit: bool = Field(default=False, description="当前 Agent 上下文是否超限")
+    collected_metrics: list[tuple[str, int, MessageMetrics]] = Field(
+        default_factory=list,
+        description="tool_calls 轮次中已配对 (session_id, msg_index, metrics) 的列表",
+    )
+    last_metrics: MessageMetrics | None = Field(
+        default=None,
+        description="最终纯文本回复的 metrics（无 index，由 _cascade 配对）",
+    )
 
 
 class MultiAgentWorker:
@@ -115,6 +123,8 @@ class MultiAgentWorker:
         # per-agent 上下文限制（0 表示未配置，跳过超限检测）
         self._max_context_tokens: int = max_context_tokens
         self._max_output_tokens: int = max_output_tokens
+        # 已配对的 (session_id, msg_index, metrics) 列表，run() 开头重置
+        self._collected_metrics: list[tuple[str, int, MessageMetrics]] = []
 
     @property
     def total_token_usage(self) -> int:
@@ -200,12 +210,13 @@ class MultiAgentWorker:
 
         stream_id = ""  # 兜底初值：若循环体未执行，_error_result 会自动生成
         self._turn_counter.value = 0
+        self._collected_metrics = []
         while self._turn_counter.value < MAX_TOOL_TURNS:
             turn = self._turn_counter.value
             # 每轮 LLM 调用使用独立 stream_id，确保前端把本轮文本固化为独立消息
             stream_id = f"multi_{self.character_name}_{uuid.uuid4().hex[:8]}_{turn}"
             if self._loop.loop.is_interrupted():
-                return await self._error_result("Interrupted", stream_id=stream_id)
+                return await self._error_result("Interrupted", stream_id=stream_id, collected_metrics=self._collected_metrics)
 
             logger.info(
                 "MultiAgentWorker turn start | session=%s character=%s turn=%d messages_len=%d",
@@ -227,6 +238,7 @@ class MultiAgentWorker:
                 return await self._error_result(
                     f"LLM error: {exc}",
                     stream_id=stream_id,
+                    collected_metrics=self._collected_metrics,
                 )
 
             # 发送 stream_done，固化本轮自然语言文本到前端
@@ -266,6 +278,8 @@ class MultiAgentWorker:
                         last_prompt_tokens=self._last_prompt_tokens,
                         reasoning=resp.reasoning_content,
                         context_over_limit=True,
+                        collected_metrics=self._collected_metrics,
+                        last_metrics=resp.metrics,
                     )
 
             # 有 tool_calls → 写入共享 History → 发送标准事件 → 执行工具 → 继续循环
@@ -289,8 +303,10 @@ class MultiAgentWorker:
                     visible_characters=[self.character_name],
                     reasoning=resp.reasoning_content,
                 )
-                self._loop.loop.history.add_message(assistant_msg)
+                msg_index = self._loop.loop.history.add_message(assistant_msg)
                 self._loop.loop.save_history(self._loop.loop.session_id)
+                if resp.metrics:
+                    self._collected_metrics.append((self._loop.loop.session_id, msg_index, resp.metrics))
 
                 full_messages.append(assistant_msg)
 
@@ -351,9 +367,9 @@ class MultiAgentWorker:
                         total_token_usage=self._total_token_usage,
                         last_prompt_tokens=self._last_prompt_tokens,
                         reasoning=resp.reasoning_content,
+                        collected_metrics=self._collected_metrics,
+                        last_metrics=resp.metrics,
                     )
-
-                # 工具执行后检查中断：如 exit_multi_agent 等工具替换了 loop，
                 # 立即停止 worker，不再进入下一轮 LLM 调用
                 if self._loop.loop.is_interrupted():
                     logger.info(
@@ -369,6 +385,8 @@ class MultiAgentWorker:
                         total_token_usage=self._total_token_usage,
                         last_prompt_tokens=self._last_prompt_tokens,
                         reasoning=resp.reasoning_content,
+                        collected_metrics=self._collected_metrics,
+                        last_metrics=resp.metrics,
                     )
 
                 self._turn_counter.value += 1
@@ -386,6 +404,7 @@ class MultiAgentWorker:
                     "Empty response",
                     raw_text=text,
                     reasoning=resp.reasoning_content,
+                    collected_metrics=self._collected_metrics,
                 )
 
             parsed = self._parse_routing_tags(text)
@@ -404,12 +423,15 @@ class MultiAgentWorker:
                 total_token_usage=self._total_token_usage,
                 last_prompt_tokens=self._last_prompt_tokens,
                 reasoning=resp.reasoning_content,
+                collected_metrics=self._collected_metrics,
+                last_metrics=resp.metrics,
             )
 
         # tool loop 超过最大轮数
         return await self._error_result(
             f"Max tool turns ({MAX_TOOL_TURNS}) exceeded",
             stream_id=stream_id,
+            collected_metrics=self._collected_metrics,
         )
 
     # -- 辅助方法 ---------------------------------------------------------
@@ -420,6 +442,7 @@ class MultiAgentWorker:
         raw_text: str = "",
         reasoning: str | None = None,
         stream_id: str = "",
+        collected_metrics: list[tuple[str, int, MessageMetrics]] | None = None,
     ) -> WorkerResult:
         """构造错误占位结果，同时推送错误文本到前端。"""
         text = f"[{self.character_name} 响应失败: {error}]"
@@ -438,6 +461,7 @@ class MultiAgentWorker:
             total_token_usage=self._total_token_usage,
             last_prompt_tokens=self._last_prompt_tokens,
             reasoning=reasoning,
+            collected_metrics=collected_metrics or self._collected_metrics,
         )
 
     async def _emit_text(self, text: str, stream_id: str = "") -> None:

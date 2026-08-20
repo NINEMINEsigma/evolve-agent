@@ -38,11 +38,11 @@ class MessageMetrics(BaseModel):
     content_duration_ms: int = 0
     """正文阶段耗时（毫秒），基于首个到最后一个 content_delta 的间隔。"""
 
-    total_tokens: int = 0
-    """本轮 LLM 调用的 total_tokens（来自 Usage）。"""
+    completion_tokens: int = 0
+    """本轮 LLM 调用的 completion_tokens（来自 Usage）。"""
 
     tokens_per_second: float = 0.0
-    """token 输出速度 = total_tokens / ((reasoning_ms + content_ms) / 1000）。"""
+    """token 输出速度 = completion_tokens / ((reasoning_ms + content_ms) / 1000）。"""
 
 
 class LLMResponse(BaseModel):
