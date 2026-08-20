@@ -155,4 +155,5 @@ The agent thread blocks until the user responds. Do not call this inside backgro
     danger_level=ToolDangerLevel.safe,
     no_timeout=True,
     availability=ToolAvailability.MAIN | ToolAvailability.MULTI_AGENT,
+    resets_turn_counter=True,
 )

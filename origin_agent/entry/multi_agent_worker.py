@@ -17,6 +17,7 @@ from typing import Any, TYPE_CHECKING
 from pydantic import BaseModel, Field
 
 from entity.puretype import Role
+from entity.gentype import RefWrapper
 from entity.messages import ToolResultMessage, CharacterConversationMessage, CharacterSystemMessage, FunctionCall, ToolCall as HistoryToolCall, BaseMessage
 from entity.constant import (
     MAX_TOOL_TURNS,
@@ -106,6 +107,8 @@ class MultiAgentWorker:
         )
         # 工具执行器：复用 ParentAgentLoop 的统一执行逻辑
         self._tool_executor = ToolExecutor(loop=self._loop, llm=self._llm)
+        self._turn_counter: RefWrapper[int] = RefWrapper(value=0)
+        self._tool_executor.set_turn_counter(self._turn_counter)
         # 累计 token 消耗与最近一次上下文 token 数
         self._total_token_usage: int = 0
         self._last_prompt_tokens: int = 0
@@ -196,7 +199,9 @@ class MultiAgentWorker:
         ] + self._messages
 
         stream_id = ""  # 兜底初值：若循环体未执行，_error_result 会自动生成
-        for turn in range(MAX_TOOL_TURNS):
+        self._turn_counter.value = 0
+        while self._turn_counter.value < MAX_TOOL_TURNS:
+            turn = self._turn_counter.value
             # 每轮 LLM 调用使用独立 stream_id，确保前端把本轮文本固化为独立消息
             stream_id = f"multi_{self.character_name}_{uuid.uuid4().hex[:8]}_{turn}"
             if self._loop.loop.is_interrupted():
@@ -365,6 +370,7 @@ class MultiAgentWorker:
                         reasoning=resp.reasoning_content,
                     )
 
+                self._turn_counter.value += 1
                 continue
 
             # 纯文本响应 → 解析 DSL 标签

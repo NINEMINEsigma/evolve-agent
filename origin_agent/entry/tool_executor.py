@@ -16,6 +16,7 @@ from datetime import datetime
 from typing import Any, Awaitable, Callable, TYPE_CHECKING
 
 from entity.puretype import Role, ToolCallMeta, ToolCallRequest
+from entity.gentype import RefWrapper
 from entity.messages import ToolResultMessage
 from entry.base_agent_loop import BaseAgentLoop, ToolContext, IMainSessionLoop
 from entry.tool_post_dispatch import finalize_tool_result
@@ -67,6 +68,7 @@ class ToolExecutor:
         self._loop = loop
         self._llm = llm
         self._tool_stats: dict[str, dict[str, int]] = {}
+        self._turn_counter: RefWrapper[int] | None = None
 
     @property
     def llm(self) -> BaseLLMClient:
@@ -80,6 +82,14 @@ class ToolExecutor:
 
     def get_tool_stats(self) -> dict[str, dict[str, int]]:
         return {name: dict(stats) for name, stats in self._tool_stats.items()}
+
+    def set_turn_counter(self, counter: RefWrapper[int] | None) -> None:
+        """注入或清除工具循环计数器引用。
+
+        当计数器非 None 且执行的工具标记了 resets_turn_counter=True 时，
+        execute() 会在工具成功执行后将计数器归零。
+        """
+        self._turn_counter = counter
 
     async def _await_or_cancel(self, coro: Awaitable[Any], phase: str) -> Any:
         """等待 coro 完成或中断触发。
@@ -342,7 +352,7 @@ class ToolExecutor:
             end_time_offset_ms = approval_duration_ms
 
         try:
-            return await finalize_tool_result(
+            result_msg = await finalize_tool_result(
                 result,
                 tool_name=tc.name,
                 application_time=application_time,
@@ -362,3 +372,12 @@ class ToolExecutor:
                 "finalize_tool_result failed | session=%s tool=%s", session_id, tc.name,
             )
             return _interrupted_result(tc, char_name, "unexpected")
+
+        # 工具成功执行后，检查是否需要重置循环计数器
+        # 仅在实际分发（非审批拒绝）时触发，denied 路径不重置
+        if self._turn_counter is not None and not _skip_dispatch:
+            _entry = tool_registry.get_entry(tc.name)
+            if _entry is not None and _entry.resets_turn_counter:
+                self._turn_counter.value = 0
+
+        return result_msg

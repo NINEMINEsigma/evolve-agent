@@ -27,7 +27,7 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 
-# 已确认不重构为BaseModel
+# NOTE: 已确认不重构为BaseModel
 class ToolEntry:
     """单个已注册工具的元数据。
 
@@ -50,6 +50,7 @@ class ToolEntry:
         "danger_level",
         "no_timeout",
         "availability",
+        "resets_turn_counter",
     )
 
     def __init__(
@@ -68,6 +69,7 @@ class ToolEntry:
         danger_level: ToolDangerLevel = ToolDangerLevel.safe,
         no_timeout: bool = False,
         availability: ToolAvailability = ToolAvailability.EVERY,
+        resets_turn_counter: bool = False,
     ):
         self.name: str = name
         self.toolset: str = toolset
@@ -85,6 +87,7 @@ class ToolEntry:
         self.danger_level: ToolDangerLevel = danger_level
         self.no_timeout: bool = no_timeout
         self.availability: ToolAvailability = availability
+        self.resets_turn_counter: bool = resets_turn_counter
 
 
 # ---------------------------------------------------------------------------
@@ -358,6 +361,7 @@ class ToolRegistry:
         danger_level: ToolDangerLevel = ToolDangerLevel.safe,
         no_timeout: bool = False,
         availability: ToolAvailability = ToolAvailability.EVERY,
+        resets_turn_counter: bool = False,
     ) -> None:
         """注册工具。由每个工具文件在模块导入时调用。
 
@@ -412,6 +416,7 @@ class ToolRegistry:
                 danger_level=danger_level,
                 no_timeout=no_timeout,
                 availability=availability,
+                resets_turn_counter=resets_turn_counter,
             )
             if check_fn and toolset not in self._toolset_checks:
                 self._toolset_checks[toolset] = check_fn

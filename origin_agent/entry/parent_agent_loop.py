@@ -24,6 +24,7 @@ from component.approval import ask_agent_reason
 from abstract.llm.client import BaseLLMClient
 from abstract.llm.loader import create_llm_client
 from entity.puretype import LLMResponse, ToolCallRequest, Role, ToolAvailability, TokenUsageRecord, MessageContent, LlmProfile
+from entity.gentype import RefWrapper
 from system.session_store import SessionStore
 from entity.constant import (
     LOG_PREVIEW_CHARS,
@@ -309,12 +310,13 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
         self._cancel_event.clear()
         self._disgust_event.clear()
 
-        turn: int = 0
+        turn: RefWrapper[int] = RefWrapper(value=0)
+        self._tool_executor.set_turn_counter(turn)
         try:
-            while turn < _MAX_TOOL_TURNS:
+            while turn.value < _MAX_TOOL_TURNS:
                 if self._cancel_event.is_set():
                     return "Cancelled."
-                turn += 1
+                turn.value += 1
 
                 self._maybe_inject_inbox(messages)
 
