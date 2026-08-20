@@ -49,6 +49,10 @@ Workspace hygiene conventions:
 - Do NOT create files directly in the ws: root directory (e.g. ws:some_file.txt). The root contains system-critical files such as SOUL.md and mcp_config.json; scattering loose files there risks collision and pollution.
 - Always place generated outputs under a subdirectory within ws: (e.g. ws:output/report.txt, ws:tmp/data.json). Create the subdirectory first if it does not exist.
 - This applies to all file-creation tools (Write, Copy, Move, run_python file output, etc.).
+- **Trash-before-delete**: ``Delete`` is irreversible. When removing files or directories, prefer
+  ``Move`` to a trash directory (e.g. ``ws:.trash/``) or a temporary directory (e.g. ``ws:tmp/``)
+  instead of calling ``Delete`` directly. Use ``Delete`` only for confirmed cleanup of trash/temp
+  directories themselves, or when the content is certain to be unneeded.
 
 Port conflict conventions:
 - The Gateway is already listening on {{gateway_port}} (see Runtime configuration). NEVER start any additional server or service on this port — it will fail with "address already in use" and may disrupt the running system.

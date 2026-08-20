@@ -928,7 +928,10 @@ Deletes each specified path. File branch deletes a single file; directory branch
 
 ## Side Effects / Notes
 - DANGEROUS: Deletion is irreversible (no trash/recycle bin in the sandbox); directory branch is recursive.
-- Read-only namespaces return an access error.""",
+- Read-only namespaces return an access error.
+- **Prefer ``Move`` over ``Delete``**: move the file/directory to a trash directory (e.g. ``ws:.trash/``)
+  or a temporary directory (e.g. ``ws:tmp/``) first, so the content remains recoverable. Only use
+  ``Delete`` for confirmed cleanup of trash/temp directories or when the content is certain to be unneeded.""",
         "parameters": _param_paths("files or directories to delete"),
     },
     handler=_handle_delete,
