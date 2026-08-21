@@ -15,7 +15,6 @@ from rich.table import Table
 from rich.prompt import Prompt, Confirm
 
 from third.easysave import save, load, contains
-from config import _migrate_legacy_force_init
 
 
 # ── 字段分组 ──────────────────────────────────────────────
@@ -228,7 +227,6 @@ def run_interactive(
     # Step 2: 加载 + CLI 覆盖
     if contains(profile_key, config_path):
         working = load(profile_key, config_path)
-        _migrate_legacy_force_init(working, profile_key)
         console.print(f"[green]已加载 profile '{profile_key}'[/green]")
     else:
         working = Config()

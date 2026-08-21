@@ -140,7 +140,7 @@ def hook_message(session_id: str = "", workspace: str = "", **kwargs) -> str:
 - `agentspace` —— 当前 agent 的命名空间路径（`Path`）。
 - `fork_path` —— 当前 fork 路径。
 - `mode` —— 当前运行模式。
-- `llm_model` —— 当前使用的 LLM 模型名。
+- 其他完整字段以源码 `system/context.py` 中 `RuntimeContext` 的定义为准。
 
 例如：
 
