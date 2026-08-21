@@ -41,6 +41,8 @@ def load_profiles(agentspace_dir: Path) -> list[LLMProfile]:
     """从 agentspace 读取全部 LLM profiles。
 
     文件缺失或 key 不存在时返回空列表（不报错）。
+    easysave 已对 list[LLMProfile] 保留类型，故新格式条目直接复用类型实例；
+    旧格式（平铺 dict）条目则经 model_validate 还原，保证向后兼容。
     """
     path = _es_path(agentspace_dir)
     try:
@@ -54,6 +56,9 @@ def load_profiles(agentspace_dir: Path) -> list[LLMProfile]:
         return []
     profiles: list[LLMProfile] = []
     for item in raw:
+        if isinstance(item, LLMProfile):
+            profiles.append(item)
+            continue
         try:
             profiles.append(LLMProfile.model_validate(item))
         except Exception:
@@ -64,7 +69,9 @@ def load_profiles(agentspace_dir: Path) -> list[LLMProfile]:
 def save_profiles(agentspace_dir: Path, profiles: list[LLMProfile]) -> None:
     """将全部 LLM profiles 原子写入 agentspace。
 
-    先校验列表内 name 唯一（重名 → ValueError），再经 easysave 存平铺 dict 列表。
+    先校验列表内 name 唯一（重名 → ValueError），再经 easysave 直接存 list[LLMProfile]，
+    由 easysave 保留类型信息（type_token 记录 entity.puretype.llm.LLMProfile），
+    不再额外 model_dump() 降级为 dict。
     """
     names: set[str] = set()
     for p in profiles:
@@ -73,8 +80,7 @@ def save_profiles(agentspace_dir: Path, profiles: list[LLMProfile]) -> None:
         names.add(p.name)
     path = _es_path(agentspace_dir)
     path.parent.mkdir(parents=True, exist_ok=True)
-    payload = [p.model_dump() for p in profiles]
-    save(LLM_PROFILES_ES_KEY, str(path), payload)
+    save(LLM_PROFILES_ES_KEY, str(path), profiles)
 
 
 # ---------------------------------------------------------------------------

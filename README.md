@@ -183,7 +183,7 @@ def create_llm_client(runtime_context, profile=None):
 
 ### custom_models
 
-放置 `.gguf` 模型文件, 可作为审批模型自动加载.配置项 `approval_model` 指向该目录下的模型文件名.
+放置 `.gguf` 模型文件, 可作为审批模型加载.配置项 `approval_model` 指向该目录下的模型文件名.
 
 ### custom_hooks
 

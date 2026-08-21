@@ -8,7 +8,7 @@
 
 每次调用覆盖缓存结果，一次探测全局生效，无需重复调用。
 """
-
+# TODO: 没有使用easysave进行缓存, 依然在使用裸字典
 from __future__ import annotations
 
 import base64

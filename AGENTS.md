@@ -12,6 +12,7 @@
 - **Git 只读。** 只允许 `git diff` 和 `git log`。所有写操作（`add`、`commit`、`push`、`checkout`、`branch` 等）必须由用户本人执行。
 - **严禁批量编辑脚本。** 只做有针对性的、可逐条审查的修改。
 - **未经明确批准不得切换 RIPER-5 模式。** 尤其严禁未经用户许可从 RESEARCH/PLAN 跳到 EXECUTE。
+- **严禁在传给 `easysave.save()` 前先 `.model_dump()` 降级 BaseModel。** easysave 会保留类型并重建实例（见下文「easysave 序列化」小节）；先转 dict 会丢失类型，违背设计。
 
 ## 仓库布局
 
@@ -25,13 +26,13 @@ workspace/
   sessions/          ← 会话历史与索引
   logs/              ← 运行日志、evolution.status
 third/               ← git 子模块（easysave、llamaapis），只读
-custom_*、skills/    ← 根目录扩展点；skills/ 运行时生成
+custom_*、skills/    ← 根目录扩展点；skills/ 由 run.py 从 pre-skills/ 拷贝生成
 ```
 
 ## 启动与生命周期
 
 - `python run.py --load <config_key>`（config.py 中 `--load`/`--save`/`--interactive` 互斥；无参数时交互式提示）。`config.json` 存密钥且被 gitignore。
-- **`--force_init`**：`true` 时 run.py 删除三个 workspace 空间并重拷 `origin_agent/`，同时**删除 `origin_agent/frontend/pnpm-lock.yaml`**（run.py:131-133）。持久化开发用 `force_init: false`。历史注记：旧拼写 `fouce_init` 为拼写错误，已修复；config.py 含兼容迁移块（自动迁移旧 config.json 键），移除时机由用户决定。
+- **`--force_init`**：`true` 时 run.py 重置三个 workspace 空间（删除 `slow_agent_space/` 与 `.fallback/`，将 `origin_agent/` 重拷到 fast/slow/.fallback），同时**删除 `origin_agent/frontend/pnpm-lock.yaml`**（run.py:154-156）。持久化开发用 `force_init: false`。
 - run.py 永不执行 `origin_agent/`，而是循环运行 `workspace/fast_agent_space/__main__.py`：
   - 退出码 `0` → 正常停止
   - 退出码 `-1` / `4294967295` → 进化成功：fast→.fallback 备份、slow→fast 交换、重启
@@ -55,8 +56,8 @@ custom_*、skills/    ← 根目录扩展点；skills/ 运行时生成
 
 ## 工具注册
 
-- 模块级 `registry.register()` 调用由 AST 扫描自动发现（`abstract/tools/discover.py`，main.py:187-194）。
-- 内置来源：`component/tools/`（核心）、`component/extools/`（web/ssh/cron/…）、`component/multiagenttools/`（多代理 / 子代理工具）、`component/automation/`（桌面自动化）、`component/browser/`（浏览器控制）+ 根目录 `custom_tools/`（存在即加载）+ MCP 桥接（`component/mcp_tools.py`，配置在 `workspace/mcp_config.json`）。
+- 模块级 `registry.register()` 调用由 AST 扫描自动发现（`abstract/tools/discover.py`，main.py:188-205）。
+- 内置来源：`component/tools/`（核心）、`component/extools/`（web/ssh/cron/…）、`component/multiagenttools/`（多代理 / 子代理工具）、`component/automation/`（桌面自动化）、`component/browser/`（浏览器控制）+ 根目录 `custom_tools/`（存在即加载）+ MCP 桥接（`component/mcp_tools.py`，配置在 `ws:mcp_config.json`，即 `workspace/agentspace/mcp_config.json`）。
 - 工具 schema 的 `description` 用英文，紧邻其上注释为中文。
 
 ## 模板系统（system/prompt.py）
@@ -67,12 +68,20 @@ custom_*、skills/    ← 根目录扩展点；skills/ 运行时生成
 
 - 手动模式：前端 WebSocket 弹窗确认。
 - 脱手模式：本地 GGUF 自动审批。启动时自动检测 `custom_models/*.gguf`（跳过 mmproj 文件）；`--approval_model` 只存文件名。无本地模型时 fallback 到远程端点（`--approval_remote_*`），两者皆无时脱手模式不可用。
-- 实现：`component/approval/`（core/backend/executor/allowlist/handsfree）+ `system/application.py` 的 `ApprovalBackendManager`。
+- 实现：`component/approval/`（core/backend/executor/allowlist/handsfree/policy）+ `system/application.py` 的 `ApprovalBackendManager`。
 
 ## 会话与记忆
 
 - 会话持久化在 `workspace/sessions/`（不是 logs/）：每会话 `history.es`（easysave 序列化）+ `summary.txt`/`token_usage.json`/`tool_resources.json`；元数据索引 + `tags.json` 由 `gateway/chat.py::SessionManager` 管理。
-- 记忆系统在 `custom_tools/memory_tools/`（remember/forget 工具），`custom_hooks/memory_hook.py` 在每轮注入上下文；`custom_hooks/` 还含 time、session_track、recent_uploads、agentspace_changes 钩子。
+- 记忆系统在 `custom_tools/memory_tools/`（remember/forget 工具），`custom_hooks/memory_hook.py` 在每轮注入上下文；`custom_hooks/` 还含 time、session_meta、recent_uploads、agentspace_changes、client_info、token_usage 钩子。
+
+## easysave 序列化（`third/easysave/`，只读子模块）
+
+easysave 是**类型保留**序列化库，原生支持 pydantic BaseModel。
+
+- **机制**：`save(key, path, data)` 用 BFS 遍历对象图，为每个对象记录 `type_token = "module, ClassName"`；`load(key, path)` 会 import 该类并用 `model_construct()` 重建真正的实例（BaseModel / list / dict / Enum 等），而非裸 dict。
+- **直接存 BaseModel 实例**：不要在 `save()` 前先 `.model_dump()` 把 BaseModel 降级为 dict —— 这会丢失类型信息，使存储层退化为普通 dict。直接传 `list[LLMProfile]`、`list[Message]` 等给 `save()` 即可，类型由 easysave 保留。参考 `system/session_store.py`、`system/llm_profile_store.py::save_profiles`。
+- **load() 返回即类型实例**：对新格式文件直接复用，无需再 `model_validate`；为兼容旧版误存的 dict 文件，加载侧可用 `isinstance` 短路 + `model_validate` 兜底（见 `load_profiles`）。
 
 ## Windows 细节
 
