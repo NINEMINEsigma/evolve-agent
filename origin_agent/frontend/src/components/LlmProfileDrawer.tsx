@@ -21,6 +21,9 @@ const EMPTY_PROFILE: LlmProfile = {
   max_output_tokens: 4096,
   reasoning_effort: "",
   max_context_tokens: 128000,
+  uid: "",
+  vision_image_profile: "",
+  audio_profile: "",
 };
 
 function generateDuplicateName(sourceName: string, existingNames: string[]): string {
@@ -181,7 +184,7 @@ export default function LlmProfileDrawer({
     const newName = generateDuplicateName(selectedProfile.name, existingNames);
     setIsNew(true);
     setIsEditing(true);
-    setDraft({ ...selectedProfile, name: newName });
+    setDraft({ ...selectedProfile, name: newName, uid: "" });
     setSelectedName("");
   }, [selectedProfile, profiles]);
 
@@ -389,6 +392,40 @@ export default function LlmProfileDrawer({
                     onChange={(e) => updateField("max_context_tokens", parseInt(e.target.value) || 0)}
                     disabled={!isEditing}
                   />
+                </div>
+
+                <div className="llm-profile-section">
+                  <div className="llm-profile-section-title">多模态分工</div>
+
+                  <label className="llm-profile-label">视觉（读图）配置</label>
+                  <select
+                    className="llm-profile-input"
+                    value={draft.vision_image_profile}
+                    onChange={(e) => updateField("vision_image_profile", e.target.value)}
+                    disabled={!isEditing}
+                  >
+                    <option value="">不引用</option>
+                    {profiles
+                      .filter((p) => p.uid !== draft.uid)
+                      .map((p) => (
+                        <option key={p.uid} value={p.uid}>{p.name}</option>
+                      ))}
+                  </select>
+
+                  <label className="llm-profile-label">听觉配置</label>
+                  <select
+                    className="llm-profile-input"
+                    value={draft.audio_profile}
+                    onChange={(e) => updateField("audio_profile", e.target.value)}
+                    disabled={!isEditing}
+                  >
+                    <option value="">不引用</option>
+                    {profiles
+                      .filter((p) => p.uid !== draft.uid)
+                      .map((p) => (
+                        <option key={p.uid} value={p.uid}>{p.name}</option>
+                      ))}
+                  </select>
                 </div>
 
                 {/* 操作按钮区 */}

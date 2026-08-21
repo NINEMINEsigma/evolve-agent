@@ -135,7 +135,7 @@ class ModalityCapability(BaseModel):
 
 class LLMProfile(BaseModel):
     """LLM 主模型配置项（前端可切换）。"""
-
+    uid: str = ""
     name: str = ""
     llm_client_name: str = ""
     base_url: str = ""
@@ -145,3 +145,9 @@ class LLMProfile(BaseModel):
     max_output_tokens: int = 4096
     reasoning_effort: str = ""
     max_context_tokens: int = 128000
+    # ── 多模态分工（地基字段，运行时借用逻辑延后）──
+    # 配置项唯一标识，由后端 uuid4().hex 生成，不可更改；前端不展示
+    vision_image_profile: str = ""
+    # 视觉(读图)配置引用：值为被引用 profile 的 uid，空=""=不引用
+    audio_profile: str = ""
+    # 听觉配置引用：值为被引用 profile 的 uid，空=""=不引用

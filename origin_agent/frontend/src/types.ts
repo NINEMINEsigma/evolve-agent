@@ -269,4 +269,7 @@ export interface LlmProfile {
   max_output_tokens: number;
   reasoning_effort: string;
   max_context_tokens: number;
+  uid: string;
+  vision_image_profile: string;
+  audio_profile: string;
 }

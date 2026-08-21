@@ -21,7 +21,8 @@ export function useLlmProfiles() {
   }, []);
 
   // ── PUT profiles to server (atomic replace) ──
-  const putProfiles = useCallback(async (next: LlmProfile[]): Promise<boolean> => {
+  // 成功时返回后端保存后的完整 profiles（带新生成的 uid），失败时返回 null
+  const putProfiles = useCallback(async (next: LlmProfile[]): Promise<LlmProfile[] | null> => {
     try {
       const r = await fetch("/api/llm/profiles", {
         method: "PUT",
@@ -31,13 +32,15 @@ export function useLlmProfiles() {
       if (!r.ok) {
         const data = await r.json().catch(() => ({}));
         setError(data.detail || `保存失败 (${r.status})`);
-        return false;
+        return null;
       }
+      const data = await r.json();
       setError(null);
-      return true;
+      // 后端返回保存后的 profiles（含新生成的 uid），供调用方更新本地 state
+      return (data.profiles || []) as LlmProfile[];
     } catch (e) {
       setError(`网络错误: ${e}`);
-      return false;
+      return null;
     }
   }, []);
 
@@ -72,9 +75,9 @@ export function useLlmProfiles() {
         for (const p of legacy) {
           if (!serverNames.has(p.name)) merged.push(p);
         }
-        const ok = await putProfiles(merged);
-        if (ok) {
-          setProfiles(merged);
+        const saved = await putProfiles(merged);
+        if (saved) {
+          setProfiles(saved);
           localStorage.removeItem(STORAGE_KEYS.LLM_PROFILES);
         } else {
           // PUT failed — keep server profiles, leave legacy in localStorage
@@ -96,16 +99,14 @@ export function useLlmProfiles() {
     [setActiveProfileName],
   );
 
-  // ── mutations: local merge → PUT → rollback on failure ──
+  // ── mutations: optimistic update → PUT → replace with server response (含 uid) ──
   const addProfile = useCallback(
     (profile: LlmProfile) => {
       const next = [...profiles, profile];
       setProfiles(next);
-      putProfiles(next).then((ok) => {
-        if (!ok) {
-          // Rollback
-          setProfiles(profiles);
-        }
+      putProfiles(next).then((saved) => {
+        if (saved) setProfiles(saved);
+        else setProfiles(profiles); // rollback
       });
     },
     [profiles, putProfiles],
@@ -115,8 +116,9 @@ export function useLlmProfiles() {
     (name: string, profile: LlmProfile) => {
       const next = profiles.map((p) => (p.name === name ? profile : p));
       setProfiles(next);
-      putProfiles(next).then((ok) => {
-        if (!ok) setProfiles(profiles);
+      putProfiles(next).then((saved) => {
+        if (saved) setProfiles(saved);
+        else setProfiles(profiles); // rollback
       });
     },
     [profiles, putProfiles],
@@ -129,8 +131,9 @@ export function useLlmProfiles() {
       if (activeProfileName === name) {
         setActiveProfileName(next[0]?.name ?? "");
       }
-      putProfiles(next).then((ok) => {
-        if (!ok) setProfiles(profiles);
+      putProfiles(next).then((saved) => {
+        if (saved) setProfiles(saved);
+        else setProfiles(profiles); // rollback
       });
     },
     [profiles, activeProfileName, setActiveProfileName, putProfiles],

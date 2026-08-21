@@ -32,7 +32,7 @@ custom_*、skills/    ← 根目录扩展点；skills/ 由 run.py 从 pre-skills
 ## 启动与生命周期
 
 - `python run.py --load <config_key>`（config.py 中 `--load`/`--save`/`--interactive` 互斥；无参数时交互式提示）。`config.json` 存密钥且被 gitignore。
-- **`--force_init`**：`true` 时 run.py 重置三个 workspace 空间（删除 `slow_agent_space/` 与 `.fallback/`，将 `origin_agent/` 重拷到 fast/slow/.fallback），同时**删除 `origin_agent/frontend/pnpm-lock.yaml`**（run.py:154-156）。持久化开发用 `force_init: false`。
+- **`--force_init`**：`true` 时 run.py 重置 workspace 空间，但**三个空间处理方式不同**：`slow_agent_space/` 与 `.fallback/` 先 `rmtree` 删除再 `copytree`（干净重置，旧残留清除）；`fast_agent_space/` **从不删除**，仅 `copytree(..., dirs_exist_ok=True)` 合并覆盖——origin 中同名文件覆盖 fast，但 fast 中独有的、origin 里不存在的文件**原样保留**。同时**删除 `origin_agent/frontend/pnpm-lock.yaml`**（run.py:117-142）。另外 `enable_fallback = force_init == False`，force_init 为 true 时 fallback 修复流程被禁用（因 fallback 已被重置成与 fast 同源，拿它修无意义），fast 崩溃时直接退出。持久化开发用 `force_init: false`。
 - run.py 永不执行 `origin_agent/`，而是循环运行 `workspace/fast_agent_space/__main__.py`：
   - 退出码 `0` → 正常停止
   - 退出码 `-1` / `4294967295` → 进化成功：fast→.fallback 备份、slow→fast 交换、重启
