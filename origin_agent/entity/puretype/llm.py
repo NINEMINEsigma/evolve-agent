@@ -133,7 +133,7 @@ class ModalityCapability(BaseModel):
 # LLM Profile Types
 # ---------------------------------------------------------------------------
 
-class LlmProfile(BaseModel):
+class LLMProfile(BaseModel):
     """LLM 主模型配置项（前端可切换）。"""
 
     name: str = ""

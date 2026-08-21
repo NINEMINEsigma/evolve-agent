@@ -26,7 +26,7 @@ from system.pathutils import find_repo_root
 from system.templates import read_template
 from system.context import RuntimeContext
 from entity.constant import STATIC_FILE_HTTP_PREFIX, DOWNLOADS_HTTP_PREFIX
-from entity.puretype import SystemInfo, ToolAvailability, LlmProfile
+from entity.puretype import SystemInfo, ToolAvailability, LLMProfile
 
 
 def _read_gene() -> str:
@@ -122,7 +122,7 @@ def build_system_prompt(
     fix_log_path: str = "",
     tool_availability_scope: ToolAvailability = ToolAvailability.MAIN,
     runtime_ctx: RuntimeContext | None = None,   # 运行时配置：注入 base.txt 占位符
-    profile: LlmProfile | None = None,             # 活跃 LLM 配置（优先于 runtime_ctx 的已删除字段）
+    profile: LLMProfile | None = None,             # 活跃 LLM 配置（优先于 runtime_ctx 的已删除字段）
 ) -> list[str]:
     """从分层模板组装完整的 system prompt 列表。
 

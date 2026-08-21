@@ -23,7 +23,7 @@ from entity.constant import (
     APPROVAL_RESPONSE_FORMAT_NAME,
 )
 from entity.messages import BaseMessage
-from entity.puretype import Role
+from entity.puretype import LLMProfile, Role
 
 if TYPE_CHECKING:
     from abstract.llm.client import BaseLLMClient
@@ -219,12 +219,13 @@ class RemoteApprovalBackend(ApprovalBackend):
     def _get_client(self) -> BaseLLMClient:
         if self._client is None:
             from abstract.llm.loader import create_llm_client
-            profile = {
-                "api_key": self._ctx.approval_remote_api_key,
-                "base_url": self._ctx.approval_remote_base_url,
-                "model": self._ctx.approval_remote_model,
-                "temperature": 0.3,
-            }
+            profile = LLMProfile(
+                api_key=self._ctx.approval_remote_api_key,
+                base_url=self._ctx.approval_remote_base_url,
+                model=self._ctx.approval_remote_model,
+                temperature=0.3,
+                llm_client_name=self._ctx.approval_remote_client_name,
+            )
             self._client = create_llm_client(
                 self._ctx.approval_remote_client_name, self._ctx, profile
             )

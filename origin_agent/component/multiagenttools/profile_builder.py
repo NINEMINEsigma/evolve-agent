@@ -14,7 +14,7 @@ from system.sandbox import Sandbox
 from system.templates import render_multi_agent_prompt
 from component.multiagenttools._store import SubagentStore
 from abstract.llm.client import BaseLLMClient
-from entity.puretype import AgentConfig, LlmProfile
+from entity.puretype import AgentConfig, LLMProfile
 from entry.agent_support.messages import (
     build_agent_system_prompt,
     collect_skill_prompts,
@@ -55,7 +55,7 @@ def _resolve_main_agent_prompts(
     _config: AgentConfig,
     parent_ctx: RuntimeContext,
     _sandbox: Sandbox,
-    profile: LlmProfile | None = None,
+    profile: LLMProfile | None = None,
 ) -> list[str]:
     """主 Agent 的系统提示词解析：从模板系统生成。"""
     from entity.puretype import ToolAvailability
@@ -87,6 +87,27 @@ def _resolve_subagent_prompts(
     return persona_prompts
 
 
+# TODO: 或许有优化空间
+def agent_config_to_llm_profile(config: AgentConfig|None) -> LLMProfile|None:
+    """将 :class:`AgentConfig` 转换为 :class:`LLMProfile`。
+
+    ``AgentConfig`` 缺少 ``temperature`` / ``reasoning_effort`` 字段，
+    且 ``max_output_tokens`` / ``max_context_tokens`` 以 ``0`` 表示未设置；
+    这些缺失字段一律回退到 ``LLMProfile`` 的默认值。
+    """
+    if config is None:
+        return None
+    _defaults = LLMProfile()
+    return LLMProfile(
+        base_url=config.base_url,
+        model=config.model,
+        api_key=config.api_key or "",
+        max_output_tokens=config.max_output_tokens or _defaults.max_output_tokens,
+        max_context_tokens=config.max_context_tokens or _defaults.max_context_tokens,
+        llm_client_name=config.client_type,
+    )
+
+
 def build_agent_profiles(
     agents: list[str],
     main_agent_name: str,
@@ -98,7 +119,7 @@ def build_agent_profiles(
     *,
     session_id: str = "",
     skip_missing_subagent: bool = False,
-    main_profile: LlmProfile | None = None,
+    main_profile: LLMProfile | None = None,
 ) -> dict[str, AgentProfile]:
     """为多 Agent 模式构造每个参与者的 AgentProfile。
 

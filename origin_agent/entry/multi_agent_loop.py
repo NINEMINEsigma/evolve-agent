@@ -19,7 +19,7 @@ from entity.messages import (
     History,
     CharacterConversationMessage,
 )
-from entity.puretype import Role, ToolAvailability, AgentConfig, LoopMeta, Loop, TokenUsageRecord, MessageContent, LlmProfile
+from entity.puretype import Role, ToolAvailability, AgentConfig, LoopMeta, Loop, TokenUsageRecord, MessageContent, LLMProfile
 from entity.constant import (
     MAIN_AGENT_CHARACTER_NAME,
     USER_CHARACTER_NAME,
@@ -176,8 +176,8 @@ class MultiAgentLoop(BaseAgentLoop, IMainSessionLoop):
             main_agent = next(iter(self._agents.values()))
         if main_agent is None:
             return False
-        max_output = main_agent.config.max_output_tokens or LlmProfile().max_output_tokens
-        max_context = main_agent.config.max_context_tokens or LlmProfile().max_context_tokens
+        max_output = main_agent.config.max_output_tokens or LLMProfile().max_output_tokens
+        max_context = main_agent.config.max_context_tokens or LLMProfile().max_context_tokens
         return (
             self._token_record.prompt_tokens + max_output + safety_margin
         ) > max_context

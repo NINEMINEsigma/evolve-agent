@@ -20,7 +20,7 @@ from typing import * # type: ignore
 from abstract.tools.registry import ToolEntry, registry as tool_registry
 from abstract.llm.client import BaseLLMClient
 from abstract.llm.loader import create_llm_client
-from entity.puretype import LLMResponse, ToolCallRequest
+from entity.puretype import LLMProfile, LLMResponse, ToolCallRequest
 from entity.constant import MAIN_AGENT_CHARACTER_NAME, USER_CHARACTER_NAME, History_Version as __History_Version__
 from entity.messages import (
     History,
@@ -150,10 +150,19 @@ class SubAgentLoop(BasePrivateChatAgentLoop):
         from system.context import get_runtime_context
 
         parent_ctx = get_runtime_context()
+        _defaults = LLMProfile()
         return create_llm_client(
             ctx.client_type,
             parent_ctx,
-            profile=ctx.model_dump(),
+            profile=LLMProfile(
+                base_url=ctx.base_url,
+                model=ctx.model,
+                api_key=ctx.api_key or "",
+                temperature=ctx.temperature,
+                max_output_tokens=ctx.max_output_tokens or _defaults.max_output_tokens,
+                max_context_tokens=ctx.max_context_tokens or _defaults.max_context_tokens,
+                llm_client_name=ctx.client_type,
+            ),
         )
 
     # ── 基类抽象方法实现 ─────────────────────────────────────────────

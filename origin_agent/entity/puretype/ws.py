@@ -2,7 +2,7 @@ from enum import Enum
 from pydantic import BaseModel
 from typing import Any
 
-from .llm import MessageMetrics, LlmProfile
+from .llm import MessageMetrics, LLMProfile
 
 # ---------------------------------------------------------------------------
 # WebSocket Message Types
@@ -78,5 +78,5 @@ class Message(BaseModel):
     emoji: str | None = None  # 工具调用/审批请求的图标
     danger_level: str | None = None  # CONFIRM_REQUEST：工具危险等级
     client_info: dict[str, Any] | None = None  # USER_MESSAGE：前端携带的客户端信息
-    llm_profile: LlmProfile | None = None  # USER_MESSAGE：前端携带的 LLM 配置覆盖
+    llm_profile: LLMProfile | None = None  # USER_MESSAGE：前端携带的 LLM 配置覆盖
     metrics: MessageMetrics | None = None  # STREAM_DONE：计时元信息

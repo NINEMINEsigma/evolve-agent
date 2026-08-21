@@ -29,7 +29,7 @@ import json
 from abstract.llm.client import BaseLLMClient
 from abstract.llm.formats import messages_to_anthropic_list
 from entity.messages import BaseMessage, CharacterConversationMessage
-from entity.puretype import LLMResponse, StreamChunk, ToolCallDelta, ToolCallDeltaPhase, ToolCallRequest, Usage
+from entity.puretype import LLMProfile, LLMResponse, StreamChunk, ToolCallDelta, ToolCallDeltaPhase, ToolCallRequest, Usage
 from entity.constant import (
     BACKOFF_BASE,
     LLM_RETRY_COUNT,
@@ -76,19 +76,6 @@ class AnthropicLLMClient(BaseLLMClient):
         self._model: str = model
         self._temperature: float = temperature
         self._max_tokens: int = max_output_tokens
-
-    @classmethod
-    def from_context(cls, ctx: RuntimeContext) -> AnthropicLLMClient:
-        """从 RuntimeContext 构造 — 已废弃（ctx.llm_* 字段已删除）。
-
-        保留签名仅为接口兼容，实际调用会抛 ValueError。
-        主模型路径应通过 create_llm_client(ctx, profile) 传入 profile。
-        """
-        raise ValueError(
-            "AnthropicLLMClient.from_context is deprecated — "
-            "RuntimeContext.llm_* fields have been removed. "
-            "Use create_llm_client(ctx, profile) with a non-None profile."
-        )
 
     # -- 内部构造请求参数 --------------------------------------------------
 
@@ -713,27 +700,18 @@ def _safe_json_parse(raw: str) -> dict[str, Any]:
 
 def create_llm_client(
     runtime_context: RuntimeContext,
-    profile: dict[str, Any] | None = None,
+    profile: LLMProfile | None = None,
 ) -> AnthropicLLMClient:
     """按 profile 构造 Anthropic LLM 客户端。
-
-    主模型路径必须提供 profile（profile=None 已不再回退到 runtime_context，
-    因 RuntimeContext 的 llm_* 字段已删除）。
-    远程审批不受此限制（自带完整 profile dict）。
     """
     if profile is None:
-        raise ValueError(
-            "create_llm_client requires a non-None profile for the main model path "
-            "(RuntimeContext.llm_* fields have been removed)."
-        )
+        raise ValueError("create_llm_client requires a non-None profile for the main model path ")
 
     return AnthropicLLMClient(
-        api_key=profile.get("api_key")
+        api_key=profile.api_key
         or os.environ.get("ANTHROPIC_API_KEY", ""),
-        base_url=profile.get("base_url", ""),
-        model=profile.get("model", ""),
-        temperature=profile.get("temperature", 0.7),
-        max_output_tokens=profile.get(
-            "max_output_tokens", 4096
-        ),
+        base_url=profile.base_url,
+        model=profile.model,
+        temperature=profile.temperature,
+        max_output_tokens=profile.max_output_tokens,
     )

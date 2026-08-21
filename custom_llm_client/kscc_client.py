@@ -15,7 +15,7 @@ from typing import Any, Optional
 
 import anthropic
 
-from entity.puretype import LLMResponse, StreamChunk
+from entity.puretype import LLMProfile, LLMResponse, StreamChunk
 from system.context import RuntimeContext
 
 from custom_llm_client.anthropic_client import AnthropicLLMClient
@@ -74,19 +74,6 @@ class KSCCAnthropicLLMClient(AnthropicLLMClient):
         self._temperature: float = temperature
         self._max_tokens: int = max_output_tokens
 
-    @classmethod
-    def from_context(cls, ctx: RuntimeContext) -> KSCCAnthropicLLMClient:
-        """从 RuntimeContext 构造 — 已废弃（ctx.llm_* 字段已删除）。
-
-        保留签名仅为接口兼容，实际调用会抛 ValueError。
-        主模型路径应通过 create_llm_client(ctx, profile) 传入 profile。
-        """
-        raise ValueError(
-            "KSCCAnthropicLLMClient.from_context is deprecated — "
-            "RuntimeContext.llm_* fields have been removed. "
-            "Use create_llm_client(ctx, profile) with a non-None profile."
-        )
-
     # -- 内部构造请求参数 --------------------------------------------------
 
     def _build_kwargs(
@@ -112,27 +99,17 @@ class KSCCAnthropicLLMClient(AnthropicLLMClient):
 
 def create_llm_client(
     runtime_context: RuntimeContext,
-    profile: dict[str, Any] | None = None,
+    profile: LLMProfile | None = None,
 ) -> KSCCAnthropicLLMClient:
     """按 profile 构造 KSCC Anthropic LLM 客户端。
-
-    主模型路径必须提供 profile（profile=None 已不再回退到 runtime_context，
-    因 RuntimeContext 的 llm_* 字段已删除）。
-    远程审批不受此限制（自带完整 profile dict）。
     """
     if profile is None:
-        raise ValueError(
-            "create_llm_client requires a non-None profile for the main model path "
-            "(RuntimeContext.llm_* fields have been removed)."
-        )
+        raise ValueError("create_llm_client requires a non-None profile for the main model path ")
 
     return KSCCAnthropicLLMClient(
-        api_key=profile.get("api_key")
-        or os.environ.get("KSCC_AUTH_TOKEN", ""),
-        base_url=profile.get("base_url", ""),
-        model=profile.get("model", ""),
-        temperature=profile.get("temperature", 0.7),
-        max_output_tokens=profile.get(
-            "max_output_tokens", 4096
-        ),
+        api_key=profile.api_key or os.environ.get("KSCC_AUTH_TOKEN", ""),
+        base_url=profile.base_url,
+        model=profile.model,
+        temperature=profile.temperature,
+        max_output_tokens=profile.max_output_tokens,
     )

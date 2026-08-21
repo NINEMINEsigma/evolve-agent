@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Any
 
 from entity.messages import History
-from entity.puretype import TokenUsageRecord, MessageMetrics, LlmProfile
+from entity.puretype import TokenUsageRecord, MessageMetrics, LLMProfile
 from entity.constant import (
     History_Version as __SessionStore_Version__,
     SESSION_LLM_PROFILE_FILENAME,
@@ -193,7 +193,7 @@ class SessionStore:
 
     # -- LLM profile 持久化 ----------------------------------------------------
 
-    def write_active_llm_profile(self, session_id: str, profile: LlmProfile) -> None:
+    def write_active_llm_profile(self, session_id: str, profile: LLMProfile) -> None:
         """原子写入会话级 profile 快照与全局 last-used 指针。
 
         会话快照存于 ``session_dir / SESSION_LLM_PROFILE_FILENAME``，
@@ -203,7 +203,7 @@ class SessionStore:
         write_profile_snapshot(self.session_dir(session_id) / SESSION_LLM_PROFILE_FILENAME, profile)
         write_profile_snapshot(self.base_dir / GLOBAL_LLM_PROFILE_FILENAME, profile)
 
-    def read_active_llm_profile(self, session_id: str) -> LlmProfile | None:
+    def read_active_llm_profile(self, session_id: str) -> LLMProfile | None:
         """读取最近使用 profile，内置三级回落：
 
         1. 会话目录 snapshot（``session_dir / SESSION_LLM_PROFILE_FILENAME``）

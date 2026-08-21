@@ -1505,7 +1505,7 @@ async def put_llm_profiles(request: Request):
     """整列表原子替换 LLM profiles（前端编辑后调用）。"""
     from system.llm_profile_store import save_profiles
     from system.context import get_runtime_context
-    from entity.puretype import LlmProfile
+    from entity.puretype import LLMProfile
     try:
         body = await request.json()
     except Exception:
@@ -1514,11 +1514,11 @@ async def put_llm_profiles(request: Request):
     if not isinstance(raw_profiles, list):
         raise HTTPException(status_code=400, detail="'profiles' must be a list")
     # 校验 + 去重
-    profiles: list[LlmProfile] = []
+    profiles: list[LLMProfile] = []
     names: set[str] = set()
     for i, item in enumerate(raw_profiles):
         try:
-            p = LlmProfile.model_validate(item)
+            p = LLMProfile.model_validate(item)
         except Exception as exc:
             raise HTTPException(status_code=400, detail=f"Invalid profile at index {i}: {exc}")
         if p.name in names:

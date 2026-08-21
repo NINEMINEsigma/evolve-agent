@@ -18,7 +18,7 @@ from typing import Any, TYPE_CHECKING
 
 from pydantic import BaseModel
 
-from entity.puretype import Role, ToolAvailability, SessionMessageEntry, TokenUsageRecord, MessageContent, LlmProfile, MessageMetrics
+from entity.puretype import Role, ToolAvailability, SessionMessageEntry, TokenUsageRecord, MessageContent, LLMProfile, MessageMetrics
 from entity.messages import (
     History,
     BaseMessage,
@@ -297,7 +297,7 @@ class BaseAgentLoop(ABC):
         # 仅主会话 loop 使用，子 Agent loop 保持 None
         self._session_manager: SessionManager | None = None
         # 活跃 LLM 配置覆盖（前端切换后设置，None 表示使用启动配置）
-        self._active_llm_profile: LlmProfile | None = None
+        self._active_llm_profile: LLMProfile | None = None
 
     @property
     def history_store_dir(self) -> Path | None:
@@ -310,7 +310,7 @@ class BaseAgentLoop(ABC):
         return self._session_store
 
     @property
-    def active_llm_profile(self) -> LlmProfile | None:
+    def active_llm_profile(self) -> LLMProfile | None:
         """返回当前活跃的 LLM 配置（前端切换后），未切换时返回 None。"""
         return self._active_llm_profile
 

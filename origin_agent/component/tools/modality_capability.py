@@ -23,7 +23,7 @@ from abstract.tools.registry import registry, tool_error, tool_result
 from abstract.llm.loader import create_llm_client
 from system.context import get_runtime_context
 from entity.constant import MODALITY_CAPABILITY_CACHE_FILENAME
-from entity.puretype import Role, ToolAvailability, ToolDangerLevel, ModalityCapability, LlmProfile
+from entity.puretype import Role, ToolAvailability, ToolDangerLevel, ModalityCapability, LLMProfile
 from entity.messages import (
     BaseMessage,
     ImageBlock,
@@ -79,7 +79,7 @@ def _resolve_base_url(base_url: str | None) -> str:
 
 def resolve_active_model_base_url(
     context: ToolContext | None = None,
-) -> tuple[str, str, LlmProfile | None]:
+) -> tuple[str, str, LLMProfile | None]:
     """解析当前活跃的 model 和 base_url，供探针和 Read 工具共用。
 
     优先从 context.loop.active_llm_profile 获取（前端切换后的配置），
@@ -87,10 +87,10 @@ def resolve_active_model_base_url(
 
     Returns:
         (model_name, base_url, profile_or_None)
-        - profile 非空时包含活跃配置，可传给 create_llm_client（需 .model_dump()）
+        - profile 非空时包含活跃配置，可直接传给 create_llm_client
         - profile 为 None 表示使用启动配置
     """
-    profile: LlmProfile | None = None
+    profile: LLMProfile | None = None
     if context is not None:
         profile = context.loop.active_llm_profile
 
@@ -373,7 +373,7 @@ async def _handle_probe_modality(args: dict[str, Any], context: ToolContext | No
             "No active LLM profile — cannot probe modality capability.",
             model=model_name,
         )
-    client = create_llm_client(client_name, ctx, profile.model_dump() if profile else None)
+    client = create_llm_client(client_name, ctx, profile)
 
     # 先发送伪装成 Read 工具的图片+音频组合请求
     combined_blocks: list[MessageBlock] = [

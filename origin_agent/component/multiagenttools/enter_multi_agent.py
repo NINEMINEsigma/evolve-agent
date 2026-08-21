@@ -98,6 +98,7 @@ async def _handle_enter_multi_agent(args: dict[str, Any]) -> dict:
     from component.multiagenttools.profile_builder import (
         build_multi_agent_tools,
         build_agent_profiles,
+        agent_config_to_llm_profile,
     )
     from system.sandbox import Sandbox
 
@@ -105,7 +106,7 @@ async def _handle_enter_multi_agent(args: dict[str, Any]) -> dict:
     parent_ctx = get_runtime_context()
     sandbox = Sandbox(parent_ctx)
 
-    from entity.puretype import LlmProfile as _LlmProfile
+    from entity.puretype import LLMProfile as _LlmProfile
     # 从 loop active profile 获取主 agent 的 LlmProfile
     _main_profile: _LlmProfile | None = parent_loop.active_llm_profile
 
@@ -118,7 +119,7 @@ async def _handle_enter_multi_agent(args: dict[str, Any]) -> dict:
             # 主 Agent 用 active profile 的客户端类型。
             profile.client_type if profile is not None else (_main_profile.llm_client_name if _main_profile else ""),
             parent_ctx,
-            profile=profile.model_dump() if profile is not None else None,
+            profile=agent_config_to_llm_profile(profile) if profile is not None else None,
         ),
         system_prompt_template=system_prompt_template,
         sandbox=sandbox,
@@ -126,11 +127,6 @@ async def _handle_enter_multi_agent(args: dict[str, Any]) -> dict:
         session_id=session_id,
         skip_missing_subagent=False,
         main_profile=_main_profile,
-    )
-        sandbox=sandbox,
-        store=store,
-        session_id=session_id,
-        skip_missing_subagent=False,
     )
 
     # 回填统一 tools（build_agent_profiles 返回时 tools 为空列表）

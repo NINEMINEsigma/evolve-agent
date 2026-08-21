@@ -168,6 +168,7 @@ class SessionManager:
         from component.multiagenttools.profile_builder import (
             build_multi_agent_tools,
             build_agent_profiles,
+            agent_config_to_llm_profile,
         )
 
         info = self._chat_sm.get(session_id)
@@ -205,7 +206,7 @@ class SessionManager:
                 # 主 Agent 用 main_profile 的客户端类型。
                 profile.client_type if profile is not None else (main_profile.llm_client_name if main_profile else ""),
                 parent_ctx,
-                profile=profile.model_dump() if profile is not None else None,
+                profile=agent_config_to_llm_profile(profile)
             ),
             system_prompt_template=system_prompt_template,
             sandbox=sandbox,

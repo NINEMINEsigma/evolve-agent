@@ -25,7 +25,7 @@ import openai
 from abstract.llm.client import BaseLLMClient
 from abstract.llm.formats import messages_to_openai_list, to_openai_message
 from entity.messages import BaseMessage, CharacterConversationMessage
-from entity.puretype import LLMResponse, StreamChunk, ToolCallDelta, ToolCallDeltaPhase, ToolCallRequest, Usage
+from entity.puretype import LLMProfile, LLMResponse, StreamChunk, ToolCallDelta, ToolCallDeltaPhase, ToolCallRequest, Usage
 from entity.constant import TOOL_RESULT_PREVIEW_CHARS, LLM_RETRY_COUNT, BACKOFF_BASE
 from system.context import RuntimeContext
 
@@ -70,19 +70,6 @@ class OpenAILLMClient(BaseLLMClient):
         self._temperature: float = temperature
         self._max_tokens: int = max_output_tokens
         self._reasoning_effort: str = reasoning_effort
-
-    @classmethod
-    def from_context(cls, ctx: RuntimeContext) -> OpenAILLMClient:
-        """从 RuntimeContext 构造 — 已废弃（ctx.llm_* 字段已删除）。
-
-        保留签名仅为接口兼容，实际调用会抛 ValueError。
-        主模型路径应通过 create_llm_client(ctx, profile) 传入 profile。
-        """
-        raise ValueError(
-            "OpenAILLMClient.from_context is deprecated — "
-            "RuntimeContext.llm_* fields have been removed. "
-            "Use create_llm_client(ctx, profile) with a non-None profile."
-        )
 
     # -- 内部消息转换 --------------------------------------------------
 
@@ -712,25 +699,19 @@ def _iter_delta_tool_calls(
 
 def create_llm_client(
     runtime_context: RuntimeContext,
-    profile: dict[str, Any] | None = None,
+    profile: LLMProfile | None = None,
 ) -> OpenAILLMClient:
-    """按 profile 构造 OpenAI 兼容 LLM 客户端。
-
-    主模型路径必须提供 profile（profile=None 已不再回退到 runtime_context，
-    因 RuntimeContext 的 llm_* 字段已删除）。
-    远程审批不受此限制（自带完整 profile dict）。
+    """
+    按 profile 构造 OpenAI 兼容 LLM 客户端。
     """
     if profile is None:
-        raise ValueError(
-            "create_llm_client requires a non-None profile for the main model path "
-            "(RuntimeContext.llm_* fields have been removed)."
-        )
+        raise ValueError("create_llm_client requires a non-None profile for the main model path ")
 
     return OpenAILLMClient(
-        api_key=profile.get("api_key") or os.environ.get("OPENAI_API_KEY", ""),
-        base_url=profile.get("base_url", ""),
-        model=profile.get("model", ""),
-        temperature=profile.get("temperature", 0.7),
-        max_output_tokens=profile.get("max_output_tokens", 4096),
-        reasoning_effort=profile.get("reasoning_effort", ""),
+        api_key=profile.api_key or os.environ.get("OPENAI_API_KEY", ""),
+        base_url=profile.base_url,
+        model=profile.model,
+        temperature=profile.temperature,
+        max_output_tokens=profile.max_output_tokens,
+        reasoning_effort=profile.reasoning_effort,
     )

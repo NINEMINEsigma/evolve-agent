@@ -10,10 +10,9 @@ import importlib
 import logging
 import sys
 import types
-from pathlib import Path
-from typing import Any
 
 from abstract.llm.client import BaseLLMClient
+from entity.puretype import LLMProfile
 from system.context import RuntimeContext
 
 logger = logging.getLogger(__name__)
@@ -38,14 +37,15 @@ def _ensure_namespace_package() -> None:
 def create_llm_client(
     name: str,
     runtime_context: RuntimeContext,
-    profile: dict[str, Any] | None = None,
+    profile: LLMProfile | None = None,
 ) -> BaseLLMClient:
     """加载并构造名为 *name* 的 LLM 客户端。
 
     Args:
         name: 插件模块名，对应 ``custom_llm_client/<name>.py``。
         runtime_context: 父 Agent 运行时上下文，用于兜底配置。
-        profile: 可选覆盖配置（如子 Agent / 多 Agent 角色配置）。
+        profile: 可选的 :class:`LLMProfile` 覆盖配置（如子 Agent / 多 Agent
+            角色配置）。为 ``None`` 时仅用于远程审批等自带完整配置的场景。
 
     Returns:
         BaseLLMClient 实例。

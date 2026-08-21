@@ -23,7 +23,7 @@ from abstract.tools.registry import registry as tool_registry
 from component.approval import ask_agent_reason
 from abstract.llm.client import BaseLLMClient
 from abstract.llm.loader import create_llm_client
-from entity.puretype import LLMResponse, ToolCallRequest, Role, ToolAvailability, TokenUsageRecord, MessageContent, LlmProfile, MessageMetrics
+from entity.puretype import LLMResponse, ToolCallRequest, Role, ToolAvailability, TokenUsageRecord, MessageContent, LLMProfile, MessageMetrics
 from entity.gentype import RefWrapper
 from system.session_store import SessionStore
 from entity.constant import (
@@ -116,7 +116,7 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
                     self._llm = create_llm_client(
                         _restored.llm_client_name,
                         app.runtime_context,
-                        _restored.model_dump(),
+                        _restored,
                     )
                     self._active_llm_profile = _restored
                 except Exception:
@@ -277,7 +277,7 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
         self._event_loop = asyncio.get_running_loop()
 
         # 网页端 LLM 配置切换（在加锁前完成，确保后续工具循环用新客户端）
-        llm_profile: LlmProfile | None = kwargs.pop("llm_profile", None)
+        llm_profile: LLMProfile | None = kwargs.pop("llm_profile", None)
         if llm_profile:
             self.switch_llm_profile(llm_profile)
 
@@ -661,20 +661,20 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
     def active_max_context_tokens(self) -> int:
         """返回活跃配置的上下文窗口大小。无 active profile 时用 LlmProfile 字段默认值。"""
         if self._active_llm_profile:
-            return self._active_llm_profile.max_context_tokens or LlmProfile().max_context_tokens
-        return LlmProfile().max_context_tokens
+            return self._active_llm_profile.max_context_tokens or LLMProfile().max_context_tokens
+        return LLMProfile().max_context_tokens
 
     @property
     def active_max_output_tokens(self) -> int:
         """返回活跃配置的最大输出 token 数。无 active profile 时用 LlmProfile 字段默认值。"""
         if self._active_llm_profile:
-            return self._active_llm_profile.max_output_tokens or LlmProfile().max_output_tokens
-        return LlmProfile().max_output_tokens
+            return self._active_llm_profile.max_output_tokens or LLMProfile().max_output_tokens
+        return LLMProfile().max_output_tokens
 
-    def switch_llm_profile(self, profile: LlmProfile) -> None:
+    def switch_llm_profile(self, profile: LLMProfile) -> None:
         """切换 LLM 客户端到指定配置，同步更新所有引用方并持久化。"""
         client_name = profile.llm_client_name
-        self._llm = create_llm_client(client_name, self.app.runtime_context, profile.model_dump())
+        self._llm = create_llm_client(client_name, self.app.runtime_context, profile)
         self._tool_executor.llm = self._llm
         self._stream_consumer.llm = self._llm
         self._active_llm_profile = profile

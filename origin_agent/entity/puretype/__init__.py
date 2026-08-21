@@ -38,7 +38,7 @@ from .llm import (
     ToolCallDeltaPhase,
     ToolCallDelta,
     StreamChunk,
-    LlmProfile,
+    LLMProfile,
     ModalityCapability,
 )
 from .skills import (
@@ -97,7 +97,7 @@ __all__ = [
     "ToolCallDeltaPhase",
     "ToolCallDelta",
     "StreamChunk",
-    "LlmProfile",
+    "LLMProfile",
     "ModalityCapability",
     # skills
     "SkillPayload",

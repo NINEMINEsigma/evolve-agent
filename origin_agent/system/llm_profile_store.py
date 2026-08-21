@@ -18,7 +18,7 @@ from pathlib import Path
 
 from easysave import save, load, contains
 
-from entity.puretype.llm import LlmProfile
+from entity.puretype.llm import LLMProfile
 from entity.constant import (
     LLM_PROFILES_ES_FILENAME,
     LLM_PROFILES_ES_KEY,
@@ -37,7 +37,7 @@ def _es_path(agentspace_dir: Path) -> Path:
     return Path(agentspace_dir) / LLM_PROFILES_ES_FILENAME
 
 
-def load_profiles(agentspace_dir: Path) -> list[LlmProfile]:
+def load_profiles(agentspace_dir: Path) -> list[LLMProfile]:
     """从 agentspace 读取全部 LLM profiles。
 
     文件缺失或 key 不存在时返回空列表（不报错）。
@@ -52,16 +52,16 @@ def load_profiles(agentspace_dir: Path) -> list[LlmProfile]:
     if not isinstance(raw, list):
         logger.warning("LLM profiles in %s is not a list: %s", path, type(raw))
         return []
-    profiles: list[LlmProfile] = []
+    profiles: list[LLMProfile] = []
     for item in raw:
         try:
-            profiles.append(LlmProfile.model_validate(item))
+            profiles.append(LLMProfile.model_validate(item))
         except Exception:
             logger.warning("Skipping invalid LLM profile entry in %s: %s", path, item, exc_info=True)
     return profiles
 
 
-def save_profiles(agentspace_dir: Path, profiles: list[LlmProfile]) -> None:
+def save_profiles(agentspace_dir: Path, profiles: list[LLMProfile]) -> None:
     """将全部 LLM profiles 原子写入 agentspace。
 
     先校验列表内 name 唯一（重名 → ValueError），再经 easysave 存平铺 dict 列表。
@@ -81,7 +81,7 @@ def save_profiles(agentspace_dir: Path, profiles: list[LlmProfile]) -> None:
 # profile 快照（JSON，原子写）— 会话级 / 全局指针
 # ---------------------------------------------------------------------------
 
-def read_profile_snapshot(path: Path) -> LlmProfile | None:
+def read_profile_snapshot(path: Path) -> LLMProfile | None:
     """读取单个 profile 快照 JSON 文件。
 
     文件缺失或解析失败时返回 None。
@@ -91,13 +91,13 @@ def read_profile_snapshot(path: Path) -> LlmProfile | None:
         return None
     try:
         data = json.loads(p.read_text(encoding="utf-8"))
-        return LlmProfile.model_validate(data)
+        return LLMProfile.model_validate(data)
     except Exception:
         logger.warning("Failed to read profile snapshot %s", p, exc_info=True)
         return None
 
 
-def write_profile_snapshot(path: Path, profile: LlmProfile) -> None:
+def write_profile_snapshot(path: Path, profile: LLMProfile) -> None:
     """原子写入单个 profile 快照 JSON 文件。"""
     payload = profile.model_dump_json(indent=2)
     write_text_atomic(Path(path), payload)
