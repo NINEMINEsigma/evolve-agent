@@ -14,7 +14,7 @@ from system.sandbox import Sandbox
 from system.templates import render_multi_agent_prompt
 from component.multiagenttools._store import SubagentStore
 from abstract.llm.client import BaseLLMClient
-from entity.puretype import AgentConfig
+from entity.puretype import AgentConfig, LlmProfile
 from entry.agent_support.messages import (
     build_agent_system_prompt,
     collect_skill_prompts,
@@ -55,6 +55,7 @@ def _resolve_main_agent_prompts(
     _config: AgentConfig,
     parent_ctx: RuntimeContext,
     _sandbox: Sandbox,
+    profile: LlmProfile | None = None,
 ) -> list[str]:
     """主 Agent 的系统提示词解析：从模板系统生成。"""
     from entity.puretype import ToolAvailability
@@ -63,6 +64,7 @@ def _resolve_main_agent_prompts(
     return build_agent_system_prompt(
         parent_ctx, skill_blocks,
         tool_availability_scope=ToolAvailability.MULTI_AGENT,
+        profile=profile,
     )
 
 
@@ -96,11 +98,12 @@ def build_agent_profiles(
     *,
     session_id: str = "",
     skip_missing_subagent: bool = False,
+    main_profile: LlmProfile | None = None,
 ) -> dict[str, AgentProfile]:
     """为多 Agent 模式构造每个参与者的 AgentProfile。
 
     主/子 Agent 统一流程：
-    1. 获取 AgentConfig：主 Agent 从 RuntimeContext 构造；子 Agent 从 SubagentStore 获取
+    1. 获取 AgentConfig：主 Agent 从 main_profile 构造；子 Agent 从 SubagentStore 获取
     2. 解析 system_prompts：主 Agent 从模板系统生成；子 Agent 从沙箱路径读取
     3. 构造 llm_client：通过 llm_client_factory 回调统一
     4. 构造 AgentProfile（含 config 字段）
@@ -129,15 +132,20 @@ def build_agent_profiles(
 
         # ── 1. 获取 AgentConfig ──
         if name == main_agent_name:
-            # 主 Agent 从 RuntimeContext 构造 AgentConfig（不持久化）
+            # 主 Agent 从 main_profile 构造 AgentConfig（不持久化）
+            if main_profile is None:
+                raise ValueError(
+                    "main_profile is required to build main agent config "
+                    f"(session={session_id})."
+                )
             config = AgentConfig(
-                base_url=parent_ctx.llm_base_url,
-                model=parent_ctx.llm_model,
-                api_key=parent_ctx.llm_api_key or None,
+                base_url=main_profile.base_url,
+                model=main_profile.model,
+                api_key=main_profile.api_key or None,
                 system_prompt_paths=[],
-                max_output_tokens=parent_ctx.llm_max_output_tokens,
-                max_context_tokens=parent_ctx.llm_max_context_tokens,
-                client_type=parent_ctx.llm_client_name,
+                max_output_tokens=main_profile.max_output_tokens,
+                max_context_tokens=main_profile.max_context_tokens,
+                client_type=main_profile.llm_client_name,
             )
             llm_client = llm_client_factory(name, None)
         else:
@@ -158,7 +166,7 @@ def build_agent_profiles(
 
         # ── 2. 解析 system_prompts（统一通过回调） ──
         if name == main_agent_name:
-            persona_prompts = _resolve_main_agent_prompts(name, config, parent_ctx, sandbox)
+            persona_prompts = _resolve_main_agent_prompts(name, config, parent_ctx, sandbox, profile=main_profile)
         else:
             persona_prompts = _resolve_subagent_prompts(name, config, parent_ctx, sandbox)
 

@@ -105,25 +105,26 @@ async def build_taskagent_context(
     parent_ctx: RuntimeContext,
     temperature: float,
 ) -> SubRuntimeContext:
-    """从父 Agent RuntimeContext 构建 taskagent 上下文。
+    """从父 Agent 构建 taskagent 上下文。
 
-    继承父 Agent 的全部 LLM 配置，无系统提示词。
+    LLM 配置不再从 RuntimeContext.llm_* 字段复制（已删除）。
+    调用方应通过 active_llm_profile 构造 AgentConfig 传入子 Agent。
 
     Args:
-        parent_ctx: 父 Agent 的 RuntimeContext。
+        parent_ctx: 父 Agent 的 RuntimeContext（仅用于 tool_timeout 等非 LLM 字段）。
         temperature: 采样温度。
 
     Returns:
-        SubRuntimeContext 实例，system_prompts 为空列表。
+        SubRuntimeContext 实例，system_prompts 为空列表，LLM 字段为默认值。
     """
     return SubRuntimeContext(
-        base_url=parent_ctx.llm_base_url,
-        model=parent_ctx.llm_model,
-        api_key=parent_ctx.llm_api_key or None,
+        base_url="",
+        model="",
+        api_key=None,
         temperature=temperature,
-        max_output_tokens=parent_ctx.llm_max_output_tokens,
-        max_context_tokens=parent_ctx.llm_max_context_tokens,
-        client_type=parent_ctx.llm_client_name,
+        max_output_tokens=0,
+        max_context_tokens=0,
+        client_type="",
         system_prompts=[],
         tool_timeout=parent_ctx.tool_timeout,
     )

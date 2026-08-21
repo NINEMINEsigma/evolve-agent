@@ -66,10 +66,6 @@ export interface SessionStore {
   setDynamicEndpoints: React.Dispatch<React.SetStateAction<DynamicEndpoint[]>>;
   agents: string[];
   setAgents: React.Dispatch<React.SetStateAction<string[]>>;
-  llmMaxContextTokens: number;
-  setLlmMaxContextTokens: React.Dispatch<React.SetStateAction<number>>;
-  llmModelName: string;
-  setLlmModelName: React.Dispatch<React.SetStateAction<string>>;
   serverInfo: Record<string, unknown>;
   setServerInfo: React.Dispatch<React.SetStateAction<Record<string, unknown>>>;
   approvalModelName: string;
@@ -183,8 +179,6 @@ export function useSessionStore(callbacks: SessionStoreCallbacks = {}): SessionS
   const [secretBanner, setSecretBanner] = useState<ClipboardDisplay | null>(null);
   const [dynamicEndpoints, setDynamicEndpoints] = useState<DynamicEndpoint[]>([]);
   const [agents, setAgents] = useState<string[]>([]);
-  const [llmMaxContextTokens, setLlmMaxContextTokens] = useState(0);
-  const [llmModelName, setLlmModelName] = useState("");
   const [serverInfo, setServerInfo] = useState<Record<string, unknown>>({});
   const [approvalModelName, setApprovalModelName] = useState("");
   const [approvalModelAvailable, setApprovalModelAvailable] = useState(false);
@@ -457,8 +451,6 @@ export function useSessionStore(callbacks: SessionStoreCallbacks = {}): SessionS
         }
         if (data.server_info) {
           const info = data.server_info;
-          if (info.llm_max_context_tokens) setLlmMaxContextTokens(info.llm_max_context_tokens);
-          setLlmModelName(info.llm_model || "");
           setServerInfo(info);
           setApprovalModelName(info.approval_model_name || "");
           setApprovalModelAvailable(info.approval_model_available || false);
@@ -1385,10 +1377,6 @@ export function useSessionStore(callbacks: SessionStoreCallbacks = {}): SessionS
     setDynamicEndpoints,
     agents,
     setAgents,
-    llmMaxContextTokens,
-    setLlmMaxContextTokens,
-    llmModelName,
-    setLlmModelName,
     serverInfo,
     setServerInfo,
     approvalModelName,

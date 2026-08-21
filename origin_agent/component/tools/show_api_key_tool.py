@@ -46,7 +46,10 @@ async def _handle_show_llm_api_key(args: dict[str, Any], context: ToolContext | 
     返回：{ configured, masked, message } —— 不含明文 key。
     """
     session_id: str = str(args.get("_session_id", ""))
-    key: str = context.runtime_context.llm_api_key if context else ""
+    # LLM API key 从 loop active profile 获取（不再从已删除的 ctx.llm_api_key）
+    key: str = ""
+    if context is not None and context.loop.active_llm_profile is not None:
+        key = context.loop.active_llm_profile.api_key
 
     if not key:
         return tool_result(**ShowApiKeyResult(

@@ -392,13 +392,21 @@ function HeaderPill({
       <span className="pill-label">{agents && agents.length > 0 ? "Evolve Agent · Multi" : "Evolve Agent"}</span>
       <span className="pill-detail">
         <span className="pill-status">{status}</span>
-        {llmModelName && (
+        {llmModelName ? (
           <span
             className={`pill-model${llmProfiles ? " pill-model-clickable" : ""}`}
             onClick={llmProfiles ? () => setDropdownOpen((v) => !v) : undefined}
             data-tooltip={llmProfiles ? "点击切换模型配置" : undefined}
           >
             {llmModelName}
+          </span>
+        ) : (
+          <span
+            className={`pill-model${llmProfiles ? " pill-model-clickable" : ""}`}
+            onClick={llmProfiles ? () => setDropdownOpen((v) => !v) : undefined}
+            data-tooltip={llmProfiles ? "点击配置模型" : undefined}
+          >
+            未配置模型
           </span>
         )}
         {agents && agents.length > 0 && <span className="pill-agent-count">{agents.length} agents</span>}
@@ -416,7 +424,7 @@ function HeaderPill({
               }}
             >
               <span className="pill-model-option-name">
-                {p.name === "default" ? "默认配置" : p.name}
+                {p.name}
               </span>
               <span className="pill-model-option-model">{p.model}</span>
             </div>
@@ -496,6 +504,8 @@ function TokenRing({
   const R = 12;
   const C = 2 * Math.PI * R;
   const offset = C * (1 - percent / 100);
+
+  if (llmMaxContextTokens <= 0) return null;
 
   return (
     <span

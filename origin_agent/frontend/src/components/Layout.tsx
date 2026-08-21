@@ -296,6 +296,7 @@ export default function Layout({ ws, onContextMenu, contextMenuOpen }: LayoutPro
             waiting={ws.waiting}
             uploading={ws.uploading}
             archived={currentSessionArchived}
+            hasActiveProfile={!!ws.llmProfiles?.activeProfile}
             sessionId={ws.sessionId}
             chatEmpty={chatEmpty}
             taskProgress={ws.taskProgress}

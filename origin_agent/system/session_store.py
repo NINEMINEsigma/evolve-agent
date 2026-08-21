@@ -12,11 +12,16 @@ from pathlib import Path
 from typing import Any
 
 from entity.messages import History
-from entity.puretype import TokenUsageRecord, MessageMetrics
-from entity.constant import History_Version as __SessionStore_Version__
+from entity.puretype import TokenUsageRecord, MessageMetrics, LlmProfile
+from entity.constant import (
+    History_Version as __SessionStore_Version__,
+    SESSION_LLM_PROFILE_FILENAME,
+    GLOBAL_LLM_PROFILE_FILENAME,
+)
 from easysave import save, load
 
 from system.atomic_io import write_text_atomic
+from system.llm_profile_store import read_profile_snapshot, write_profile_snapshot
 
 logger = logging.getLogger(__name__)
 
@@ -185,4 +190,28 @@ class SessionStore:
             logger.warning(
                 "Failed to merge message metrics for collected=%d entries", len(collected), exc_info=True,
             )
+
+    # -- LLM profile 持久化 ----------------------------------------------------
+
+    def write_active_llm_profile(self, session_id: str, profile: LlmProfile) -> None:
+        """原子写入会话级 profile 快照与全局 last-used 指针。
+
+        会话快照存于 ``session_dir / SESSION_LLM_PROFILE_FILENAME``，
+        全局指针存于 ``base_dir / GLOBAL_LLM_PROFILE_FILENAME``（fallback 引导用）。
+        两者均存完整 ``LlmProfile``，抗 profile 改名/删除。
+        """
+        write_profile_snapshot(self.session_dir(session_id) / SESSION_LLM_PROFILE_FILENAME, profile)
+        write_profile_snapshot(self.base_dir / GLOBAL_LLM_PROFILE_FILENAME, profile)
+
+    def read_active_llm_profile(self, session_id: str) -> LlmProfile | None:
+        """读取最近使用 profile，内置三级回落：
+
+        1. 会话目录 snapshot（``session_dir / SESSION_LLM_PROFILE_FILENAME``）
+        2. 全局 last-used 指针（``base_dir / GLOBAL_LLM_PROFILE_FILENAME``）
+        3. 均无 → None（由调用方决定报错或降级）
+        """
+        snap = read_profile_snapshot(self.session_dir(session_id) / SESSION_LLM_PROFILE_FILENAME)
+        if snap is not None:
+            return snap
+        return read_profile_snapshot(self.base_dir / GLOBAL_LLM_PROFILE_FILENAME)
 

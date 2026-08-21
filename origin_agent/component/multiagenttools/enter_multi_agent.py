@@ -105,18 +105,28 @@ async def _handle_enter_multi_agent(args: dict[str, Any]) -> dict:
     parent_ctx = get_runtime_context()
     sandbox = Sandbox(parent_ctx)
 
+    from entity.puretype import LlmProfile as _LlmProfile
+    # 从 loop active profile 获取主 agent 的 LlmProfile
+    _main_profile: _LlmProfile | None = parent_loop.active_llm_profile
+
     agent_profiles = build_agent_profiles(
         agents=agents,
         main_agent_name=main_agent_name,
         parent_ctx=parent_loop._get_context(),
         llm_client_factory=lambda name, profile: create_llm_client(
             # 子 Agent 优先使用注册时冻结的 client_type，保证协议与 base_url 一致；
-            # 主 Agent 用当前运行配置的客户端类型。
-            profile.client_type if profile is not None else parent_ctx.llm_client_name,
+            # 主 Agent 用 active profile 的客户端类型。
+            profile.client_type if profile is not None else (_main_profile.llm_client_name if _main_profile else ""),
             parent_ctx,
             profile=profile.model_dump() if profile is not None else None,
         ),
         system_prompt_template=system_prompt_template,
+        sandbox=sandbox,
+        store=store,
+        session_id=session_id,
+        skip_missing_subagent=False,
+        main_profile=_main_profile,
+    )
         sandbox=sandbox,
         store=store,
         session_id=session_id,

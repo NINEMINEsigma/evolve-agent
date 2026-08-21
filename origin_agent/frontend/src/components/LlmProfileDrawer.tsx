@@ -58,6 +58,7 @@ export default function LlmProfileDrawer({
     deleteProfile,
     availableClients,
     setActiveProfile,
+    error: profileError,
   } = llmProfiles;
 
   const [selectedName, setSelectedName] = useState<string>(activeProfileName);
@@ -69,7 +70,6 @@ export default function LlmProfileDrawer({
   const [expandedNodes, setExpandedNodes] = useState<Set<string>>(new Set());
 
   const selectedProfile = profiles.find((p) => p.name === selectedName) || null;
-  const isDefault = selectedName === "default";
   const nameExists = isNew && profiles.some((p) => p.name === draft.name.trim());
 
   // 三级树: 按 llm_client_name → base_url 分组
@@ -152,9 +152,8 @@ export default function LlmProfileDrawer({
   }, [selectedProfile]);
 
   const handleEdit = useCallback(() => {
-    if (isDefault) return;
     setIsEditing(true);
-  }, [isDefault]);
+  }, []);
 
   const handleSave = useCallback(() => {
     if (!draft.name.trim()) return;
@@ -171,12 +170,10 @@ export default function LlmProfileDrawer({
   }, [draft, isNew, selectedName, addProfile, updateProfile, expandPath]);
 
   const handleDelete = useCallback(() => {
-    if (isDefault) return;
     deleteProfile(selectedName);
-    setSelectedName("default");
     setIsEditing(false);
     setIsNew(false);
-  }, [isDefault, selectedName, deleteProfile]);
+  }, [selectedName, deleteProfile]);
 
   const handleDuplicate = useCallback(() => {
     if (!selectedProfile) return;
@@ -226,6 +223,9 @@ export default function LlmProfileDrawer({
             <button className="drawer-close" onClick={onClose}>✕</button>
           </div>
         </div>
+        {profileError && (
+          <div className="llm-profile-error-banner">{profileError}</div>
+        )}
 
         {/* Body: 左右分栏 */}
         <div className="llm-drawer-body">
@@ -261,8 +261,7 @@ export default function LlmProfileDrawer({
                         onClick={() => handleSelect(p.name)}
                       >
                         <span className="llm-tree-leaf-name">
-                          {p.name === "default" ? "默认配置" : p.name}
-                          {p.name === "default" && <span className="llm-tree-badge">默认</span>}
+                          {p.name}
                         </span>
                         <span className="llm-tree-leaf-model">{p.model}</span>
                         {/* "设为当前" 开关 */}
@@ -296,7 +295,7 @@ export default function LlmProfileDrawer({
                     value={draft.name}
                     onChange={(e) => updateField("name", e.target.value)}
                     disabled={!isEditing}
-                    placeholder={isDefault ? "默认配置" : "输入配置名称"}
+                    placeholder="输入配置名称"
                   />
                   {nameExists && (
                     <div className="llm-profile-error">配置名称已存在</div>
@@ -341,7 +340,7 @@ export default function LlmProfileDrawer({
                     value={draft.api_key}
                     onChange={(e) => updateField("api_key", e.target.value)}
                     disabled={!isEditing}
-                    placeholder={isDefault ? "（启动时配置）" : "sk-..."}
+                    placeholder="sk-..."
                   />
                 </div>
 
@@ -409,16 +408,12 @@ export default function LlmProfileDrawer({
                     </>
                   ) : (
                     <>
-                      {!isDefault && (
-                        <>
-                          <button className="modal-btn modal-btn--danger" onClick={handleDelete}>
-                            删除
-                          </button>
-                          <button className="modal-btn modal-btn--secondary" onClick={handleEdit}>
-                            编辑
-                          </button>
-                        </>
-                      )}
+                      <button className="modal-btn modal-btn--danger" onClick={handleDelete}>
+                        删除
+                      </button>
+                      <button className="modal-btn modal-btn--secondary" onClick={handleEdit}>
+                        编辑
+                      </button>
                       <button className="modal-btn modal-btn--secondary" onClick={handleDuplicate}>
                         复制
                       </button>
@@ -427,7 +422,11 @@ export default function LlmProfileDrawer({
                 </div>
               </>
             ) : (
-              <div className="llm-profile-empty">选择一个配置项或点击"新增"</div>
+              <div className="llm-profile-empty">
+                {profiles.length === 0
+                  ? "尚无模型配置，请点击「新增」创建第一个配置"
+                  : "选择一个配置项或点击\"新增\""}
+              </div>
             )}
           </div>
         </div>

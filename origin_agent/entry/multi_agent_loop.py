@@ -19,7 +19,7 @@ from entity.messages import (
     History,
     CharacterConversationMessage,
 )
-from entity.puretype import Role, ToolAvailability, AgentConfig, LoopMeta, Loop, TokenUsageRecord, MessageContent
+from entity.puretype import Role, ToolAvailability, AgentConfig, LoopMeta, Loop, TokenUsageRecord, MessageContent, LlmProfile
 from entity.constant import (
     MAIN_AGENT_CHARACTER_NAME,
     USER_CHARACTER_NAME,
@@ -166,14 +166,21 @@ class MultiAgentLoop(BaseAgentLoop, IMainSessionLoop):
 
         per-agent 的超限检测已在 Worker tool loop 内通过 max_context_tokens 完成，
         此方法作为兜底：当 Worker 使用全局 RuntimeContext 配置时（max_context_tokens=0），
-        回退到全局上限检测。
+        回退到主 agent 配置的上限检测。
         """
         if self._token_record.prompt_tokens == 0:
             return False
-        ctx = self.app.runtime_context
+        # 从主 agent 的 AgentConfig 获取上下文上限（不再依赖已删除的 ctx.llm_* 字段）
+        main_agent = self._agents.get(MAIN_AGENT_CHARACTER_NAME)
+        if main_agent is None and self._agents:
+            main_agent = next(iter(self._agents.values()))
+        if main_agent is None:
+            return False
+        max_output = main_agent.config.max_output_tokens or LlmProfile().max_output_tokens
+        max_context = main_agent.config.max_context_tokens or LlmProfile().max_context_tokens
         return (
-            self._token_record.prompt_tokens + ctx.llm_max_output_tokens + safety_margin
-        ) > ctx.llm_max_context_tokens
+            self._token_record.prompt_tokens + max_output + safety_margin
+        ) > max_context
 
     async def _rotate_session_for_context_limit(self) -> str | None:
         """上下文超限时终结当前会话并创建继承会话（多 Agent 模式）。

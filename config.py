@@ -24,27 +24,6 @@ argparse_parser.add_argument("--frontend_force_build", action="store_true", defa
 argparse_parser.add_argument("--gateway_host", type=str, default=argparse.SUPPRESS)
 argparse_parser.add_argument("--gateway_port", type=int, default=argparse.SUPPRESS)
 
-#----------
-# llm
-#----------
-default_llm_base_url = "https://api.deepseek.com"
-default_llm_model = "deepseek-v4-flash"
-default_llm_api_key = os.getenv("OPENAI_API_KEY", "")
-default_llm_max_context_tokens = 1000000
-default_llm_max_output_tokens = 384000
-default_llm_temperature = 0.95
-default_llm_reasoning_effort = "medium"
-
-argparse_parser.add_argument("--llm_base_url", type=str, default=argparse.SUPPRESS)
-argparse_parser.add_argument("--llm_model", type=str, default=argparse.SUPPRESS)
-argparse_parser.add_argument("--llm_api_key", type=str, default=argparse.SUPPRESS)
-argparse_parser.add_argument("--llm_max_context_tokens", type=int, default=argparse.SUPPRESS)
-argparse_parser.add_argument("--llm_max_output_tokens", type=int, default=argparse.SUPPRESS)
-argparse_parser.add_argument("--llm_temperature", type=float, default=argparse.SUPPRESS)
-# 可选值：e.g. "low" / "medium" / "high"，空字符串表示不启用
-argparse_parser.add_argument("--llm_reasoning_effort", type=str, default=argparse.SUPPRESS)
-# 选择 LLM 客户端实现模块（custom_llm_client 目录下对应名称的 .py 文件）
-argparse_parser.add_argument("--llm_client_name", type=str, default=argparse.SUPPRESS)
 # 会话合并时直接拼接摘要的字符阈值，超过则截断
 argparse_parser.add_argument("--merge_concat_threshold", type=int, default=argparse.SUPPRESS)
 
@@ -83,14 +62,6 @@ class Config(BaseModel):
     force_init: bool = False
     gateway_host: str = "127.0.0.1"
     gateway_port: int = 8765
-    llm_base_url: str = "https://api.deepseek.com"
-    llm_model: str = "deepseek-v4-flash"
-    llm_api_key: str = os.getenv("OPENAI_API_KEY") or ""
-    llm_max_context_tokens: int = 1000000
-    llm_max_output_tokens: int = 384000
-    llm_temperature: float = 0.95
-    llm_reasoning_effort: str = "medium"
-    llm_client_name: str = "openai_client"
     merge_concat_threshold: int = 50000
     approval_model: str = ""
     approval_model_n_ctx: int = 65536
@@ -157,15 +128,6 @@ yolo:                   bool    = current_config.yolo
 # gateway
 gateway_host:           str     = current_config.gateway_host
 gateway_port:           int     = current_config.gateway_port
-# llm
-llm_base_url:           str     = current_config.llm_base_url
-llm_model:              str     = current_config.llm_model
-llm_api_key:            str     = current_config.llm_api_key
-llm_max_context_tokens: int     = current_config.llm_max_context_tokens
-llm_max_output_tokens:  int     = current_config.llm_max_output_tokens
-llm_temperature:        float   = current_config.llm_temperature
-llm_reasoning_effort:   str     = current_config.llm_reasoning_effort 
-llm_client_name:        str     = current_config.llm_client_name
 # merge
 merge_concat_threshold: int     = current_config.merge_concat_threshold
 # approval model

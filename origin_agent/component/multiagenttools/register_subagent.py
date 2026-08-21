@@ -11,6 +11,7 @@ from typing import Any
 from abstract.tools.registry import registry, tool_error, tool_result
 from entity.constant import SUBAGENT_NAME_PATTERN
 from entity.puretype import ToolAvailability, ToolDangerLevel, AgentConfig
+from entry.base_agent_loop import ToolContext
 
 from ._store import SubagentStore
 from system.context import get_runtime_context
@@ -18,7 +19,7 @@ from system.context import get_runtime_context
 logger = logging.getLogger(__name__)
 
 
-def _handle_register_subagent_from_parent(args: dict[str, Any]) -> dict:
+def _handle_register_subagent_from_parent(args: dict[str, Any], context: ToolContext | None = None) -> dict:
     """以主 Agent 当前 LLM 配置为模板注册子 Agent，只需提供 name。"""
     name: str = str(args.get("name", "")).strip()
     system_prompt_paths: list[str] = args.get("system_prompt_paths") or []
@@ -45,16 +46,21 @@ def _handle_register_subagent_from_parent(args: dict[str, Any]) -> dict:
             registered=True,
         )
 
-    ctx = get_runtime_context()
+    # 从 loop active_llm_profile 获取主 Agent 当前 LLM 配置
+    active_profile = context.loop.active_llm_profile if context is not None else None
+    if active_profile is None:
+        return tool_error(
+            "No active LLM profile — 请先在前端选择或新建一个模型配置后再注册子 Agent。"
+        )
 
     profile = AgentConfig(
-        base_url=ctx.llm_base_url,
-        model=ctx.llm_model,
-        api_key=ctx.llm_api_key or None,
+        base_url=active_profile.base_url,
+        model=active_profile.model,
+        api_key=active_profile.api_key or None,
         system_prompt_paths=system_prompt_paths,
-        max_output_tokens=ctx.llm_max_output_tokens,
-        max_context_tokens=ctx.llm_max_context_tokens,
-        client_type=ctx.llm_client_name,
+        max_output_tokens=active_profile.max_output_tokens,
+        max_context_tokens=active_profile.max_context_tokens,
+        client_type=active_profile.llm_client_name,
     )
     try:
         store.add(name, profile)
@@ -66,16 +72,16 @@ def _handle_register_subagent_from_parent(args: dict[str, Any]) -> dict:
         )
     logger.info(
         "Registered subagent '%s' from parent config: %s @ %s",
-        name, ctx.llm_model, ctx.llm_base_url,
+        name, active_profile.model, active_profile.base_url,
     )
     return tool_result(
         success=True,
         name=name,
-        base_url=ctx.llm_base_url,
-        model=ctx.llm_model,
-        max_output_tokens=ctx.llm_max_output_tokens,
-        max_context_tokens=ctx.llm_max_context_tokens,
-        client_type=ctx.llm_client_name,
+        base_url=active_profile.base_url,
+        model=active_profile.model,
+        max_output_tokens=active_profile.max_output_tokens,
+        max_context_tokens=active_profile.max_context_tokens,
+        client_type=active_profile.llm_client_name,
         message=f"Subagent '{name}' registered using parent agent's LLM config.",
     )
 

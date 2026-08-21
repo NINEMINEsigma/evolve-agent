@@ -101,15 +101,29 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
     ) -> None:
         super().__init__(app, session_id)
         self._frontend_sink: FrontendSink = frontend_sink
-        self._llm: BaseLLMClient = create_llm_client(
-            app.runtime_context.llm_client_name,
-            app.runtime_context,
-        )
 
         self._session_store = (
             SessionStore(history_store_dir)
             if history_store_dir else None
         )
+
+        # -- 从会话级/全局 last-used 指针恢复 LLM client（无则 None 降级） --
+        self._llm: BaseLLMClient | None = None
+        if self._session_store is not None:
+            _restored = self._session_store.read_active_llm_profile(session_id)
+            if _restored is not None:
+                try:
+                    self._llm = create_llm_client(
+                        _restored.llm_client_name,
+                        app.runtime_context,
+                        _restored.model_dump(),
+                    )
+                    self._active_llm_profile = _restored
+                except Exception:
+                    logger.warning(
+                        "Failed to restore LLM client from last-used profile | session=%s",
+                        session_id, exc_info=True,
+                    )
 
         # -- 生命周期管理（委托给 LoopSessionManager） --
         self._lifecycle: LoopSessionManager = LoopSessionManager(
@@ -194,20 +208,10 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
                 self._session_manager.rotate_session(old_sid, new_sid)
 
     def _build_system_prompt(self) -> list[str]:
-        ctx = self.app.runtime_context
-        if self._active_llm_profile:
-            p = self._active_llm_profile
-            ctx = ctx.model_copy(update={
-                "llm_model": p.model or ctx.llm_model,
-                "llm_base_url": p.base_url or ctx.llm_base_url,
-                "llm_max_context_tokens": p.max_context_tokens or ctx.llm_max_context_tokens,
-                "llm_max_output_tokens": p.max_output_tokens or ctx.llm_max_output_tokens,
-                "llm_reasoning_effort": p.reasoning_effort or ctx.llm_reasoning_effort,
-                "llm_client_name": p.llm_client_name or ctx.llm_client_name,
-            })
         return build_agent_system_prompt(
-            ctx,
+            self.app.runtime_context,
             self._collect_skill_prompts(),
+            profile=self._active_llm_profile,
         )
 
     def get_tool_availability_scope(self) -> ToolAvailability:
@@ -276,6 +280,13 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
         llm_profile: LlmProfile | None = kwargs.pop("llm_profile", None)
         if llm_profile:
             self.switch_llm_profile(llm_profile)
+
+        # 无 LLM client 且消息未携带 profile 时，返回错误（不进工具循环）
+        if self._llm is None and llm_profile is None:
+            logger.warning("No LLM client available | session=%s", sid)
+            return (
+                "尚未配置 LLM 模型。请在前端「模型配置」中新建或选择一个配置后重试。"
+            )
 
         logger.info(
             "Received user message | session=%s content=%s",
@@ -631,6 +642,7 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
         system_prompts: list[str] = build_agent_system_prompt(
             self.app.runtime_context,
             self._collect_skill_prompts(),
+            profile=self._active_llm_profile,
         )
         return build_full_history_messages(
             system_prompts, self._history, self.current_character_agent,
@@ -647,25 +659,34 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
 
     @property
     def active_max_context_tokens(self) -> int:
-        """返回活跃配置的上下文窗口大小，未切换时使用启动配置。"""
+        """返回活跃配置的上下文窗口大小。无 active profile 时用 LlmProfile 字段默认值。"""
         if self._active_llm_profile:
-            return self._active_llm_profile.max_context_tokens or self.app.runtime_context.llm_max_context_tokens
-        return self.app.runtime_context.llm_max_context_tokens
+            return self._active_llm_profile.max_context_tokens or LlmProfile().max_context_tokens
+        return LlmProfile().max_context_tokens
 
     @property
     def active_max_output_tokens(self) -> int:
-        """返回活跃配置的最大输出 token 数，未切换时使用启动配置。"""
+        """返回活跃配置的最大输出 token 数。无 active profile 时用 LlmProfile 字段默认值。"""
         if self._active_llm_profile:
-            return self._active_llm_profile.max_output_tokens or self.app.runtime_context.llm_max_output_tokens
-        return self.app.runtime_context.llm_max_output_tokens
+            return self._active_llm_profile.max_output_tokens or LlmProfile().max_output_tokens
+        return LlmProfile().max_output_tokens
 
     def switch_llm_profile(self, profile: LlmProfile) -> None:
-        """切换 LLM 客户端到指定配置，同步更新所有引用方。"""
-        client_name = profile.llm_client_name or self.app.runtime_context.llm_client_name
+        """切换 LLM 客户端到指定配置，同步更新所有引用方并持久化。"""
+        client_name = profile.llm_client_name
         self._llm = create_llm_client(client_name, self.app.runtime_context, profile.model_dump())
         self._tool_executor.llm = self._llm
         self._stream_consumer.llm = self._llm
         self._active_llm_profile = profile
+        # 持久化到会话级快照 + 全局 last-used 指针
+        if self._session_store is not None:
+            try:
+                self._session_store.write_active_llm_profile(self.session_id, profile)
+            except Exception:
+                logger.warning(
+                    "Failed to persist active LLM profile | session=%s",
+                    self.session_id, exc_info=True,
+                )
         logger.info(
             "LLM profile switched | session=%s client=%s model=%s",
             self.session_id, client_name, profile.model or "?",

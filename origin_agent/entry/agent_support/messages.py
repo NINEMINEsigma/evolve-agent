@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import * # type: ignore
 
 from system.prompt import build_system_prompt
-from entity.puretype import Role, ToolAvailability
+from entity.puretype import Role, ToolAvailability, LlmProfile
 from entity.messages import History, BaseMessage, CharacterSystemMessage
 
 if TYPE_CHECKING:
@@ -135,6 +135,7 @@ def build_agent_system_prompt(
     ctx: RuntimeContext,
     skill_blocks: list[str],
     tool_availability_scope: ToolAvailability = ToolAvailability.MAIN,
+    profile: LlmProfile | None = None,
 ) -> list[str]:
     """构建 Agent 使用的 system prompt 段落列表。"""
     return build_system_prompt(
@@ -147,6 +148,7 @@ def build_agent_system_prompt(
         fix_log_path=str(ctx.fix_log_path or ""),
         tool_availability_scope=tool_availability_scope,
         runtime_ctx=ctx,
+        profile=profile,
     )
 
 

@@ -22,6 +22,7 @@ export const STORAGE_KEYS = {
   HANDSFREE_MODE:              "evolve_handsfree_mode",
 
   // LLM 模型配置
+  // LEGACY：仅供 localStorage→agentspace 迁移读取，下轮清理删除
   LLM_PROFILES:        "evolve_llm_profiles",
   ACTIVE_LLM_PROFILE:  "evolve_active_llm_profile",
 

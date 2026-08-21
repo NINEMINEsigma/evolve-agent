@@ -62,15 +62,7 @@ export function useWebSocket() {
     sessionId: session.sessionId,
     addMessage: session.addMessage,
   });
-  const llmProfiles = useLlmProfiles({
-    llm_model: session.llmModelName,
-    llm_base_url: (session.serverInfo?.llm_base_url as string) || "",
-    llm_temperature: (session.serverInfo?.llm_temperature as number) ?? 0.7,
-    llm_max_output_tokens: (session.serverInfo?.llm_max_output_tokens as number) ?? 4096,
-    llm_reasoning_effort: (session.serverInfo?.llm_reasoning_effort as string) || "",
-    llm_client_name: (session.serverInfo?.llm_client_name as string) || "openai_client",
-    llm_max_context_tokens: session.llmMaxContextTokens,
-  });
+  const llmProfiles = useLlmProfiles();
 
   useEffect(() => { connRef.current = conn; }, [conn]);
   useEffect(() => { sessionRef.current = session; }, [session]);
@@ -440,12 +432,8 @@ export function useWebSocket() {
     setSecretBanner: session.setSecretBanner,
     dynamicEndpoints: session.dynamicEndpoints,
     subagentSessions,
-    llmMaxContextTokens: llmProfiles.activeProfileName === "default"
-      ? session.llmMaxContextTokens
-      : llmProfiles.activeProfile.max_context_tokens,
-    llmModelName: llmProfiles.activeProfileName === "default"
-      ? session.llmModelName
-      : llmProfiles.activeProfile.model,
+    llmMaxContextTokens: llmProfiles.activeProfile?.max_context_tokens ?? 0,
+    llmModelName: llmProfiles.activeProfile?.model ?? "",
     llmProfiles,
     approvalModelName: session.approvalModelName,
     approvalModelAvailable: session.approvalModelAvailable,

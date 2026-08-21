@@ -552,6 +552,11 @@ class MessageRouter:
         if "main" not in target_sessions:
             return "Message forwarded to sub-agent(s)."
 
+        # 前置闸门：无 LLM profile 且 loop 无 active profile 时拦截
+        if msg.llm_profile is None and loop.loop.active_llm_profile is None:
+            logger.warning("No LLM profile in message and no active profile | session=%s", self.sid)
+            return "尚未配置 LLM 模型。请在前端「模型配置」中新建或选择一个配置后重试。"
+
         main_content: MessageContent = content
         sub_names: list[str] = []
         for s in sub_ids:

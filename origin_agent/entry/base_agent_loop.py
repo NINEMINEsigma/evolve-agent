@@ -346,6 +346,20 @@ class BaseAgentLoop(ABC):
         """返回用于生成标题/标签/摘要等会话信息的 LLM 客户端，无可用时返回 None。"""
         ...
 
+    def _require_llm(self) -> BaseLLMClient:
+        """返回当前可用的 LLM 客户端，无 client 则抛运行时错误。
+
+        用于隐式触发源（auto-title/summary/tags）在无 LLM 时向上抛错，
+        由 REST 端点捕获后返回 4xx。
+        """
+        llm = self._get_session_info_llm_client()
+        if llm is None:
+            raise RuntimeError(
+                "No LLM client available — 请在会话中先发送一条消息以绑定模型配置，"
+                "或在前端「模型配置」中新建/选择一个配置。"
+            )
+        return llm
+
     @property
     @abstractmethod
     def user_character_name(self) -> str:
@@ -742,9 +756,7 @@ class BaseAgentLoop(ABC):
         messages = [m for m in self._history.iter_messages() if isinstance(m, CharacterConversationMessage)]
         if not messages:
             return ""
-        llm = self._get_session_info_llm_client()
-        if llm is None:
-            return ""
+        llm = self._require_llm()
         system_prompt = read_template("auto_title.txt")
         messages_json = [
             d for m in messages
@@ -773,10 +785,7 @@ class BaseAgentLoop(ABC):
         if not messages:
             logger.warning("No messages to regenerate session tags")
             return []
-        llm = self._get_session_info_llm_client()
-        if llm is None:
-            logger.warning("No LLM client to regenerate session tags")
-            return []
+        llm = self._require_llm()
         try:
             system_prompt = read_template("session_tags.txt")
             # 获取已有标签池供 LLM 参考，优先复用已有标签
@@ -822,9 +831,7 @@ class BaseAgentLoop(ABC):
         history = self._session_store.read_history(session_id)
         if history is None or history.count == 0:
             return ""
-        llm = self._get_session_info_llm_client()
-        if llm is None:
-            return ""
+        llm = self._require_llm()
         from entry.agent_support.history_summary import summarize_history
         summary = await summarize_history(history, llm)
         if summary:

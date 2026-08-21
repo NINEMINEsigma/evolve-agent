@@ -811,7 +811,10 @@ async def auto_title_session(session_id: str):
     title: str = ""
     loop = _get_loop(session_id)
     if loop is not None:
-        title = await loop.auto_generate_title()
+        try:
+            title = await loop.auto_generate_title()
+        except RuntimeError as exc:
+            raise HTTPException(status_code=409, detail=str(exc))
     else:
         logger.warning("Failed to auto-generate title for session=%s", session_id)
     if title:
@@ -852,7 +855,10 @@ async def regenerate_summary_endpoint(session_id: str):
     logger.info("Regenerate summary | session=%s", session_id)
     loop = _get_loop(session_id)
     if loop is not None:
-        summary = await loop.regenerate_summary_for_session(session_id)
+        try:
+            summary = await loop.regenerate_summary_for_session(session_id)
+        except RuntimeError as exc:
+            raise HTTPException(status_code=409, detail=str(exc))
         return {"success": bool(summary), "summary": summary}
     return {"success": False, "error": "agent loop not ready", "session_id": session_id}
 
@@ -1480,6 +1486,56 @@ async def list_llm_clients_endpoint():
     return {"clients": list_llm_clients()}
 
 
+@app.get("/api/llm/profiles")
+async def get_llm_profiles():
+    """返回 agentspace 中持久化的全部 LLM profiles。"""
+    from system.llm_profile_store import load_profiles
+    from system.context import get_runtime_context
+    try:
+        ctx = get_runtime_context()
+        profiles = load_profiles(ctx.agentspace)
+        return {"profiles": [p.model_dump() for p in profiles]}
+    except Exception:
+        logger.exception("Failed to load LLM profiles")
+        return {"profiles": []}
+
+
+@app.put("/api/llm/profiles")
+async def put_llm_profiles(request: Request):
+    """整列表原子替换 LLM profiles（前端编辑后调用）。"""
+    from system.llm_profile_store import save_profiles
+    from system.context import get_runtime_context
+    from entity.puretype import LlmProfile
+    try:
+        body = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid JSON body")
+    raw_profiles = body.get("profiles")
+    if not isinstance(raw_profiles, list):
+        raise HTTPException(status_code=400, detail="'profiles' must be a list")
+    # 校验 + 去重
+    profiles: list[LlmProfile] = []
+    names: set[str] = set()
+    for i, item in enumerate(raw_profiles):
+        try:
+            p = LlmProfile.model_validate(item)
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=f"Invalid profile at index {i}: {exc}")
+        if p.name in names:
+            raise HTTPException(status_code=400, detail=f"Duplicate profile name: {p.name!r}")
+        names.add(p.name)
+        profiles.append(p)
+    try:
+        ctx = get_runtime_context()
+        save_profiles(ctx.agentspace, profiles)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except Exception:
+        logger.exception("Failed to save LLM profiles")
+        raise HTTPException(status_code=500, detail="Failed to persist profiles")
+    return {"saved": len(profiles)}
+
+
 @app.get("/{full_path:path}")
 async def spa_fallback(full_path: str):
     """SPA 客户端路由的兜底处理。
@@ -1624,13 +1680,6 @@ async def ws_chat(ws: WebSocket) -> None:
                         session_id=sid,
                         content=json.dumps({
                             "server_info": {
-                                "llm_max_context_tokens": ctx.llm_max_context_tokens,
-                                "llm_model": ctx.llm_model,
-                                "llm_base_url": ctx.llm_base_url,
-                                "llm_temperature": ctx.llm_temperature,
-                                "llm_max_output_tokens": ctx.llm_max_output_tokens,
-                                "llm_reasoning_effort": ctx.llm_reasoning_effort,
-                                "llm_client_name": ctx.llm_client_name,
                                 "approval_model_name": model_name,
                                 "approval_model_available": model_available,
                                 "approval_model_type": model_type,

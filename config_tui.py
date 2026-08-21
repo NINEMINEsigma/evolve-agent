@@ -20,11 +20,6 @@ from config import _migrate_legacy_force_init
 
 # ── 字段分组 ──────────────────────────────────────────────
 FIELD_GROUPS: dict[str, list[str]] = {
-    "LLM 核心": [
-        "llm_base_url", "llm_model", "llm_api_key",
-        "llm_max_context_tokens", "llm_max_output_tokens",
-        "llm_temperature", "llm_reasoning_effort", "llm_client_name",
-    ],
     "审批模型": [
         "approval_model", "approval_model_n_ctx",
         "approval_model_cuda", "approval_model_port",
@@ -103,13 +98,8 @@ def _validate_bool(raw: str, _: Any) -> tuple[bool, str]:
 FIELD_VALIDATORS: dict[str, Callable[[str, Any], tuple[bool, str]]] = {
     "gateway_port":              _validate_port,
     "approval_model_port":       _validate_port,
-    "llm_temperature":            _validate_temperature,
-    "llm_max_context_tokens":     _validate_positive_int,
-    "llm_max_output_tokens":      _validate_positive_int,
     "approval_model_n_ctx":       _validate_positive_int,
     "merge_concat_threshold":    _validate_positive_int,
-    "llm_reasoning_effort":      _validate_reasoning_effort,
-    "llm_base_url":               _validate_url,
     "approval_remote_base_url":  _validate_url,
     "console_log":                _validate_bool,
     "force_init":                 _validate_bool,

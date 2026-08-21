@@ -126,15 +126,6 @@ def _build_context(cli: dict) -> RuntimeContext:
         fix_log_path=(
             Path(cli["fix"]).resolve() if "fix" in cli else None
         ),
-        # LLM 配置 — 直接从 CLI 参数读取（config.py/run.py 已处理默认值）
-        llm_api_key             = str(cli.get("llm_api_key", "")),
-        llm_base_url            = str(cli.get("llm_base_url", "")),
-        llm_model               = str(cli.get("llm_model", "")),
-        llm_max_context_tokens  = int(cli["llm_max_context_tokens"]),
-        llm_max_output_tokens   = int(cli["llm_max_output_tokens"]),
-        llm_temperature        = float(cli.get("llm_temperature", 1)),
-        llm_reasoning_effort    = str(cli["llm_reasoning_effort"]),
-        llm_client_name         = str(cli.get("client", "openai_client")),
         git_remotes             = str(cli.get("git_remotes", "")),
         # 脱手模式审批模型配置
         approval_model_path     = str(cli.get("approval_model_path", "")),

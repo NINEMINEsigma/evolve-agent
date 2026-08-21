@@ -70,13 +70,11 @@ def _cache_path() -> Path:
 
 
 def _resolve_base_url(base_url: str | None) -> str:
-    """解析 base_url：显式传入优先，否则从 runtime context 取（探测/读取共用同一 key 必须一致）。"""
+    """解析 base_url：显式传入优先，否则从 active profile 取。"""
     if base_url:
         return base_url
-    try:
-        return get_runtime_context().llm_base_url or ""
-    except Exception:
-        return ""
+    # ctx.llm_base_url 已删除；调用方应通过 resolve_active_model_base_url 传入 profile
+    return ""
 
 
 def resolve_active_model_base_url(
@@ -99,8 +97,8 @@ def resolve_active_model_base_url(
     if profile:
         return profile.model or "", profile.base_url or "", profile
 
-    ctx = context.runtime_context if context is not None else get_runtime_context()
-    return ctx.llm_model or "", ctx.llm_base_url or "", None
+    # 无 active profile — 探针返回不可用而非尝试建 client
+    return "", "", None
 
 
 def _cache_key(model: str, base_url: str | None = None) -> str:
@@ -368,7 +366,13 @@ async def _handle_probe_modality(args: dict[str, Any], context: ToolContext | No
             ),
         )
 
-    client_name = (profile.llm_client_name if profile else None) or ctx.llm_client_name
+    client_name = profile.llm_client_name if profile else ""
+    if not client_name:
+        # 无 active profile — 探针返回不可用而非尝试建 client
+        return tool_error(
+            "No active LLM profile — cannot probe modality capability.",
+            model=model_name,
+        )
     client = create_llm_client(client_name, ctx, profile.model_dump() if profile else None)
 
     # 先发送伪装成 Read 工具的图片+音频组合请求

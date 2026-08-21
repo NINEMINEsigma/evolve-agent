@@ -26,7 +26,7 @@ from system.pathutils import find_repo_root
 from system.templates import read_template
 from system.context import RuntimeContext
 from entity.constant import STATIC_FILE_HTTP_PREFIX, DOWNLOADS_HTTP_PREFIX
-from entity.puretype import SystemInfo, ToolAvailability
+from entity.puretype import SystemInfo, ToolAvailability, LlmProfile
 
 
 def _read_gene() -> str:
@@ -122,6 +122,7 @@ def build_system_prompt(
     fix_log_path: str = "",
     tool_availability_scope: ToolAvailability = ToolAvailability.MAIN,
     runtime_ctx: RuntimeContext | None = None,   # 运行时配置：注入 base.txt 占位符
+    profile: LlmProfile | None = None,             # 活跃 LLM 配置（优先于 runtime_ctx 的已删除字段）
 ) -> list[str]:
     """从分层模板组装完整的 system prompt 列表。
 
@@ -171,14 +172,16 @@ def build_system_prompt(
         # 1b. 运行时配置占位符（缺省兜底 "未配置"）
         if runtime_ctx is not None:
             sys_info = _system_info()
+            # LLM 配置占位符从 profile 获取（ctx.llm_* 字段已删除）
+            _p = profile
             runtime_values = {
                 "{{mode}}": runtime_ctx.mode,
-                "{{llm_model}}": runtime_ctx.llm_model,
-                "{{llm_base_url}}": runtime_ctx.llm_base_url,
-                "{{llm_max_context_tokens}}": str(runtime_ctx.llm_max_context_tokens),
-                "{{llm_max_output_tokens}}": str(runtime_ctx.llm_max_output_tokens),
-                "{{llm_reasoning_effort}}": runtime_ctx.llm_reasoning_effort,
-                "{{llm_client_name}}": runtime_ctx.llm_client_name,
+                "{{llm_model}}": _p.model if _p else "",
+                "{{llm_base_url}}": _p.base_url if _p else "",
+                "{{llm_max_context_tokens}}": str(_p.max_context_tokens) if _p else "",
+                "{{llm_max_output_tokens}}": str(_p.max_output_tokens) if _p else "",
+                "{{llm_reasoning_effort}}": _p.reasoning_effort if _p else "",
+                "{{llm_client_name}}": _p.llm_client_name if _p else "",
                 "{{git_remotes}}": runtime_ctx.git_remotes,
                 "{{user_name}}": sys_info.user_name,
                 "{{host_name}}": sys_info.host_name,

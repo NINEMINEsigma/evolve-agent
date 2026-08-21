@@ -56,18 +56,6 @@ class RuntimeContext(BaseModel):
     gateway_host: str = "127.0.0.1"
     gateway_port: int = 8765
 
-    # -- LLM 配置（后续从 env / 配置文件填充） ----------------
-
-    llm_api_key: str = ""
-    llm_base_url: str = "https://api.openai.com/v1"
-    llm_model: str = "gpt-4o"
-    llm_max_context_tokens: int = 128_000  # 总上下文窗口
-    llm_temperature: float = 0.7
-    llm_max_output_tokens: int = 4096
-    llm_reasoning_effort: str = ""
-    llm_client_name: str = "openai_client"
-    """模型 reasoning_effort 参数值（如 "low" / "medium" / "high"），空字符串表示不启用。"""
-
     git_remotes: str = ""
     """宿主仓库 remote 列表（``name=url`` 每行一个），由 run.py 启动时读取注入。"""
 

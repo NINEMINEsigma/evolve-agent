@@ -243,6 +243,16 @@ APPROVAL_LOCAL_DISABLED_VALUES: frozenset[str] = frozenset({"", "false", "0", "n
 # 所有LLM解析的重试次数
 LLM_RETRY_COUNT: int = 3
 
+# LLM profiles 持久化（存放于 agentspace 下，easysave 序列化）
+LLM_PROFILES_ES_FILENAME: str = "llm_profiles.es"
+LLM_PROFILES_ES_KEY: str = "v1"
+
+# 会话级最近使用 profile 快照文件名（存于会话目录下，抗 profile 改名/删除）
+SESSION_LLM_PROFILE_FILENAME: str = "llm_profile.json"
+
+# 全局 last-used profile 指针文件名（存于 sessions 根目录，fallback 引导用）
+GLOBAL_LLM_PROFILE_FILENAME: str = "active_llm_profile.json"
+
 
 # ============================================================================
 # Agent

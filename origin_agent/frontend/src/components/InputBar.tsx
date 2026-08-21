@@ -14,6 +14,7 @@ interface InputBarProps {
   waiting: boolean;
   uploading: boolean;
   archived: boolean;
+  hasActiveProfile: boolean;
   sessionId: string;
   /** 空态（无对话）时隐藏进度条 */
   chatEmpty: boolean;
@@ -54,6 +55,7 @@ export default function InputBar({
   waiting,
   uploading,
   archived,
+  hasActiveProfile,
   sessionId,
   chatEmpty,
   taskProgress,
@@ -266,13 +268,15 @@ export default function InputBar({
             onPasteAudio={onPasteAudio}
             onRemoveAudio={onRemovePendingAudio}
             pendingAudios={pendingAudios}
-            disabled={waiting && !morphActive}
+            disabled={(waiting && !morphActive) || !hasActiveProfile}
             placeholder={
               morphItem
                 ? morphItem.kind === "ask"
                   ? "输入回答..."
                   : "输入拒绝理由（可选）..."
-                : "Send message to agent..."
+                : hasActiveProfile
+                  ? "Send message to agent..."
+                  : "请先在模型配置中新建/选择一个配置"
             }
           />
           <input
@@ -287,7 +291,7 @@ export default function InputBar({
             onRecordingComplete={(file) => onPasteAudio(file)}
             disabled={waiting || morphActive || uploading}
           />
-          <button className="send-btn" onClick={onSend} disabled={waiting || morphActive} type="button">
+          <button className="send-btn" onClick={onSend} disabled={waiting || morphActive || !hasActiveProfile} type="button">
             <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2">
               <path d="M22 2L11 13" />
               <path d="M22 2L15 22L11 13L2 9L22 2Z" />

@@ -79,13 +79,15 @@ class AnthropicLLMClient(BaseLLMClient):
 
     @classmethod
     def from_context(cls, ctx: RuntimeContext) -> AnthropicLLMClient:
-        """从 RuntimeContext 构造 Anthropic LLM 客户端。"""
-        return cls(
-            api_key=ctx.llm_api_key or os.environ.get("ANTHROPIC_API_KEY", ""),
-            base_url=ctx.llm_base_url,
-            model=ctx.llm_model,
-            temperature=ctx.llm_temperature,
-            max_output_tokens=ctx.llm_max_output_tokens,
+        """从 RuntimeContext 构造 — 已废弃（ctx.llm_* 字段已删除）。
+
+        保留签名仅为接口兼容，实际调用会抛 ValueError。
+        主模型路径应通过 create_llm_client(ctx, profile) 传入 profile。
+        """
+        raise ValueError(
+            "AnthropicLLMClient.from_context is deprecated — "
+            "RuntimeContext.llm_* fields have been removed. "
+            "Use create_llm_client(ctx, profile) with a non-None profile."
         )
 
     # -- 内部构造请求参数 --------------------------------------------------
@@ -713,22 +715,25 @@ def create_llm_client(
     runtime_context: RuntimeContext,
     profile: dict[str, Any] | None = None,
 ) -> AnthropicLLMClient:
-    """按 RuntimeContext 或 profile 构造 Anthropic LLM 客户端。
+    """按 profile 构造 Anthropic LLM 客户端。
 
-    *profile* 为 None 时直接使用 *runtime_context*；否则从 *profile* 读取配置，
-    缺失字段回退到 *runtime_context*。
+    主模型路径必须提供 profile（profile=None 已不再回退到 runtime_context，
+    因 RuntimeContext 的 llm_* 字段已删除）。
+    远程审批不受此限制（自带完整 profile dict）。
     """
     if profile is None:
-        return AnthropicLLMClient.from_context(runtime_context)
+        raise ValueError(
+            "create_llm_client requires a non-None profile for the main model path "
+            "(RuntimeContext.llm_* fields have been removed)."
+        )
 
     return AnthropicLLMClient(
         api_key=profile.get("api_key")
-        or runtime_context.llm_api_key
         or os.environ.get("ANTHROPIC_API_KEY", ""),
-        base_url=profile.get("base_url", runtime_context.llm_base_url),
-        model=profile.get("model", runtime_context.llm_model),
-        temperature=profile.get("temperature", runtime_context.llm_temperature),
+        base_url=profile.get("base_url", ""),
+        model=profile.get("model", ""),
+        temperature=profile.get("temperature", 0.7),
         max_output_tokens=profile.get(
-            "max_output_tokens", runtime_context.llm_max_output_tokens
+            "max_output_tokens", 4096
         ),
     )

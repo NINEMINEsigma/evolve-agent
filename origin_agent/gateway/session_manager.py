@@ -164,6 +164,7 @@ class SessionManager:
         from abstract.tools.registry import registry as tool_registry
         from entity.constant import MAIN_AGENT_CHARACTER_NAME
         from system.sandbox import Sandbox
+        from system.session_store import SessionStore
         from component.multiagenttools.profile_builder import (
             build_multi_agent_tools,
             build_agent_profiles,
@@ -175,6 +176,17 @@ class SessionManager:
         parent_ctx = get_runtime_context()
         sandbox = Sandbox(parent_ctx)
         store = SubagentStore(parent_ctx.agentspace)
+
+        # 从会话级/全局 last-used 指针恢复主 agent 的 LlmProfile
+        main_profile = None
+        if history_store_dir is not None:
+            ss = SessionStore(history_store_dir)
+            main_profile = ss.read_active_llm_profile(session_id)
+            if main_profile is None:
+                logger.warning(
+                    "No active LLM profile for multi-agent rebuild | session=%s",
+                    session_id,
+                )
 
         # 加载多 Agent 系统提示词模板
         template_path = get_templates_dir() / "multiagent" / "multi_agent_system_prompt.txt"
@@ -190,8 +202,8 @@ class SessionManager:
             parent_ctx=parent_ctx,
             llm_client_factory=lambda name, profile: create_llm_client(
                 # 子 Agent 优先使用注册时冻结的 client_type，保证协议与 base_url 一致；
-                # 主 Agent 用当前运行配置的客户端类型。
-                profile.client_type if profile is not None else parent_ctx.llm_client_name,
+                # 主 Agent 用 main_profile 的客户端类型。
+                profile.client_type if profile is not None else (main_profile.llm_client_name if main_profile else ""),
                 parent_ctx,
                 profile=profile.model_dump() if profile is not None else None,
             ),
@@ -200,6 +212,7 @@ class SessionManager:
             store=store,
             session_id=session_id,
             skip_missing_subagent=True,
+            main_profile=main_profile,
         )
 
         # 回填统一 tools

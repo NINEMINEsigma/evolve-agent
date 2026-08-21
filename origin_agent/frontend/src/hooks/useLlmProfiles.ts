@@ -1,107 +1,150 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { usePersistentState } from "./usePersistentState";
 import { STORAGE_KEYS } from "../constants/storage";
 import type { LlmProfile } from "../types";
 
-export interface LlmServerDefaults {
-  llm_model: string;
-  llm_base_url: string;
-  llm_temperature: number;
-  llm_max_output_tokens: number;
-  llm_reasoning_effort: string;
-  llm_client_name: string;
-  llm_max_context_tokens: number;
-}
-
-const DEFAULT_PROFILE_NAME = "default";
-
-function buildDefaultProfile(defaults: LlmServerDefaults): LlmProfile {
-  return {
-    name: DEFAULT_PROFILE_NAME,
-    llm_client_name: defaults.llm_client_name || "openai_client",
-    base_url: defaults.llm_base_url || "",
-    model: defaults.llm_model || "",
-    api_key: "",
-    temperature: defaults.llm_temperature ?? 0.7,
-    max_output_tokens: defaults.llm_max_output_tokens ?? 4096,
-    reasoning_effort: defaults.llm_reasoning_effort || "",
-    max_context_tokens: defaults.llm_max_context_tokens ?? 128000,
-  };
-}
-
-export function useLlmProfiles(serverDefaults: LlmServerDefaults) {
-  const [customProfiles, setCustomProfiles] = usePersistentState<LlmProfile[]>(
-    STORAGE_KEYS.LLM_PROFILES,
-    [],
-  );
+export function useLlmProfiles() {
+  const [profiles, setProfiles] = useState<LlmProfile[]>([]);
+  const [error, setError] = useState<string | null>(null);
   const [activeProfileName, setActiveProfileName] = usePersistentState<string>(
     STORAGE_KEYS.ACTIVE_LLM_PROFILE,
-    DEFAULT_PROFILE_NAME,
+    "",
   );
   const [availableClients, setAvailableClients] = useState<string[]>([]);
+  const initializedRef = useRef(false);
 
-  useEffect(() => {
-    fetch("/api/llm/clients")
-      .then((r) => r.json())
-      .then((data) => setAvailableClients(data.clients || []))
-      .catch(() => setAvailableClients([]));
+  // ── fetch profiles from server ──
+  const fetchProfiles = useCallback(async (): Promise<LlmProfile[]> => {
+    const r = await fetch("/api/llm/profiles");
+    const data = await r.json();
+    return (data.profiles || []) as LlmProfile[];
   }, []);
 
-  const defaultProfile = useMemo(
-    () => buildDefaultProfile(serverDefaults),
-    [serverDefaults],
-  );
+  // ── PUT profiles to server (atomic replace) ──
+  const putProfiles = useCallback(async (next: LlmProfile[]): Promise<boolean> => {
+    try {
+      const r = await fetch("/api/llm/profiles", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ profiles: next }),
+      });
+      if (!r.ok) {
+        const data = await r.json().catch(() => ({}));
+        setError(data.detail || `保存失败 (${r.status})`);
+        return false;
+      }
+      setError(null);
+      return true;
+    } catch (e) {
+      setError(`网络错误: ${e}`);
+      return false;
+    }
+  }, []);
 
-  const profiles = useMemo(
-    () => [defaultProfile, ...customProfiles],
-    [defaultProfile, customProfiles],
-  );
+  // ── mount: fetch + one-time legacy localStorage migration ──
+  useEffect(() => {
+    if (initializedRef.current) return;
+    initializedRef.current = true;
+
+    (async () => {
+      // Fetch available clients
+      fetch("/api/llm/clients")
+        .then((r) => r.json())
+        .then((data) => setAvailableClients(data.clients || []))
+        .catch(() => setAvailableClients([]));
+
+      const serverProfiles = await fetchProfiles();
+
+      // One-time migration: read legacy localStorage profiles
+      let legacy: LlmProfile[] = [];
+      try {
+        const raw = localStorage.getItem(STORAGE_KEYS.LLM_PROFILES);
+        if (raw) {
+          legacy = JSON.parse(raw) as LlmProfile[];
+          if (!Array.isArray(legacy)) legacy = [];
+        }
+      } catch { legacy = []; }
+
+      if (legacy.length > 0) {
+        // Merge: server-first, add legacy entries whose name doesn't exist on server
+        const serverNames = new Set(serverProfiles.map((p) => p.name));
+        const merged = [...serverProfiles];
+        for (const p of legacy) {
+          if (!serverNames.has(p.name)) merged.push(p);
+        }
+        const ok = await putProfiles(merged);
+        if (ok) {
+          setProfiles(merged);
+          localStorage.removeItem(STORAGE_KEYS.LLM_PROFILES);
+        } else {
+          // PUT failed — keep server profiles, leave legacy in localStorage
+          setProfiles(serverProfiles);
+        }
+      } else {
+        setProfiles(serverProfiles);
+      }
+    })();
+  }, [fetchProfiles, putProfiles]);
 
   const activeProfile = useMemo(() => {
     const found = profiles.find((p) => p.name === activeProfileName);
-    return found || defaultProfile;
-  }, [profiles, activeProfileName, defaultProfile]);
+    return found || profiles[0] || null;
+  }, [profiles, activeProfileName]);
 
   const setActiveProfile = useCallback(
     (name: string) => setActiveProfileName(name),
     [setActiveProfileName],
   );
 
+  // ── mutations: local merge → PUT → rollback on failure ──
   const addProfile = useCallback(
     (profile: LlmProfile) => {
-      setCustomProfiles((prev) => [...prev, profile]);
+      const next = [...profiles, profile];
+      setProfiles(next);
+      putProfiles(next).then((ok) => {
+        if (!ok) {
+          // Rollback
+          setProfiles(profiles);
+        }
+      });
     },
-    [setCustomProfiles],
+    [profiles, putProfiles],
   );
 
   const updateProfile = useCallback(
     (name: string, profile: LlmProfile) => {
-      setCustomProfiles((prev) =>
-        prev.map((p) => (p.name === name ? profile : p)),
-      );
+      const next = profiles.map((p) => (p.name === name ? profile : p));
+      setProfiles(next);
+      putProfiles(next).then((ok) => {
+        if (!ok) setProfiles(profiles);
+      });
     },
-    [setCustomProfiles],
+    [profiles, putProfiles],
   );
 
   const deleteProfile = useCallback(
     (name: string) => {
-      setCustomProfiles((prev) => prev.filter((p) => p.name !== name));
+      const next = profiles.filter((p) => p.name !== name);
+      setProfiles(next);
       if (activeProfileName === name) {
-        setActiveProfileName(DEFAULT_PROFILE_NAME);
+        setActiveProfileName(next[0]?.name ?? "");
       }
+      putProfiles(next).then((ok) => {
+        if (!ok) setProfiles(profiles);
+      });
     },
-    [setCustomProfiles, activeProfileName, setActiveProfileName],
+    [profiles, activeProfileName, setActiveProfileName, putProfiles],
   );
 
   const toProfilePayload = useCallback((): Record<string, unknown> | null => {
-    if (activeProfileName === DEFAULT_PROFILE_NAME) return null;
+    if (!activeProfile) return null;
     const { name: _, ...payload } = activeProfile;
     return payload;
-  }, [activeProfileName, activeProfile]);
+  }, [activeProfile]);
 
   return {
     profiles,
-    activeProfileName,
+    activeProfileName: activeProfile?.name ?? "",
     activeProfile,
     setActiveProfile,
     addProfile,
@@ -109,6 +152,7 @@ export function useLlmProfiles(serverDefaults: LlmServerDefaults) {
     deleteProfile,
     toProfilePayload,
     availableClients,
+    error,
   };
 }
 
