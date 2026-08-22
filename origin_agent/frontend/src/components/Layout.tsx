@@ -11,6 +11,7 @@ import SubagentCountdown from "./SubagentCountdown";
 import Lightbox from "./Lightbox";
 import SecretBanner from "./SecretBanner";
 import LlmProfileDrawer from "./LlmProfileDrawer";
+import SessionLockOverlay from "./SessionLockOverlay";
 import type { WebSocketState } from "../hooks/useWebSocket";
 import { STORAGE_KEYS } from "../constants/storage";
 import { DIMENSIONS } from "../constants/dimensions";
@@ -252,87 +253,93 @@ export default function Layout({ ws, onContextMenu, contextMenuOpen }: LayoutPro
           llmProfiles={ws.llmProfiles}
         />
 
-        <ClipboardPanel
-          clipboardDisplays={ws.clipboardDisplays}
-          collapsed={clipboardCollapsed}
-          onToggleCollapse={() => setClipboardCollapsed((v) => !v)}
-        />
+        {ws.sessionLocked ? (
+          <SessionLockOverlay onRetry={ws.retryConnect} />
+        ) : (
+          <>
+            <ClipboardPanel
+              clipboardDisplays={ws.clipboardDisplays}
+              collapsed={clipboardCollapsed}
+              onToggleCollapse={() => setClipboardCollapsed((v) => !v)}
+            />
 
-        <SecretBanner
-          banner={ws.secretBanner}
-          onDismiss={() => ws.setSecretBanner(null)}
-        />
+            <SecretBanner
+              banner={ws.secretBanner}
+              onDismiss={() => ws.setSecretBanner(null)}
+            />
 
-        <ChatArea
-          messages={ws.messages}
-          waiting={ws.waiting}
-          archived={currentSessionArchived}
-          sessionId={ws.sessionId}
-          onImageClick={setLightboxSrc}
-          onToggleCollapse={ws.toggleMessageCollapse}
-          onEditMessage={ws.editMessage}
-          onDeleteMessages={ws.deleteMessages}
-          onRegenerateResponse={ws.regenerateResponse}
-          bottomRef={ws.bottomRef}
-          chatAreaRef={ws.chatAreaRef}
-          contentRef={ws.contentRef}
-          onDropFiles={ws.handleFileUpload}
-          streamingMessage={ws.streamingMessage}
-          agents={ws.agents}
-          onToggleMessageVisibility={onToggleMessageVisibility}
-          onScrollToBottom={() => ws.scrollToBottomIfAtBottom(true)}
-          isReady={ws.isReady}
-        >
-          <CronCountdown cronTasks={ws.cronTasks} />
+            <ChatArea
+              messages={ws.messages}
+              waiting={ws.waiting}
+              archived={currentSessionArchived}
+              sessionId={ws.sessionId}
+              onImageClick={setLightboxSrc}
+              onToggleCollapse={ws.toggleMessageCollapse}
+              onEditMessage={ws.editMessage}
+              onDeleteMessages={ws.deleteMessages}
+              onRegenerateResponse={ws.regenerateResponse}
+              bottomRef={ws.bottomRef}
+              chatAreaRef={ws.chatAreaRef}
+              contentRef={ws.contentRef}
+              onDropFiles={ws.handleFileUpload}
+              streamingMessage={ws.streamingMessage}
+              agents={ws.agents}
+              onToggleMessageVisibility={onToggleMessageVisibility}
+              onScrollToBottom={() => ws.scrollToBottomIfAtBottom(true)}
+              isReady={ws.isReady}
+            >
+              <CronCountdown cronTasks={ws.cronTasks} />
 
-          <SubagentCountdown
-            subagentSessions={ws.subagentSessions}
-            idleCountdown={ws.subagentIdleCountdown}
-          />
+              <SubagentCountdown
+                subagentSessions={ws.subagentSessions}
+                idleCountdown={ws.subagentIdleCountdown}
+              />
 
-          <InputBar
-            input={ws.input}
-            setInput={ws.setInput}
-            waiting={ws.waiting}
-            uploading={ws.uploading}
-            archived={currentSessionArchived}
-            hasActiveProfile={!!ws.llmProfiles?.activeProfile}
-            sessionId={ws.sessionId}
-            chatEmpty={chatEmpty}
-            taskProgress={ws.taskProgress}
-            taskProgressCollapsed={taskProgressCollapsed}
-            onToggleTaskProgressCollapse={() => setTaskProgressCollapsed((v) => !v)}
-            onSend={() => {
-              ws.send(targetSessions, visibleCharacters, responseCharacters);
-            }}
-            onUpload={ws.handleFileInputChange}
-            onUploadClick={ws.handleUploadClick}
-            onInterrupt={ws.interrupt}
-            onDisgust={ws.disgust}
-            fileInputRef={ws.fileInputRef}
-            pendingImages={ws.pendingImages}
-            onRemovePendingImage={ws.removePendingImage}
-            onPasteImage={ws.handlePasteImages}
-            pendingAudios={ws.pendingAudios}
-            onRemovePendingAudio={ws.removePendingAudio}
-            onPasteAudio={ws.handlePasteAudios}
-            pendingVideos={ws.pendingVideos}
-            onRemovePendingVideo={ws.removePendingVideo}
-            onPasteVideo={ws.handlePasteVideos}
-            inputRef={ws.inputRef}
-            subagentSessions={ws.subagentSessions}
-            targetSessions={targetSessions}
-            setTargetSessions={setTargetSessions}
-            agents={ws.agents}
-            visibleCharacters={visibleCharacters}
-            responseCharacters={responseCharacters}
-            onToggleAgentState={onToggleAgentState}
-            pendingAsks={ws.pendingAsks}
-            pendingConfirms={ws.pendingConfirms}
-            onRespondAsk={ws.respondAsk}
-            onRespondConfirm={ws.respondConfirm}
-          />
-        </ChatArea>
+              <InputBar
+                input={ws.input}
+                setInput={ws.setInput}
+                waiting={ws.waiting}
+                uploading={ws.uploading}
+                archived={currentSessionArchived}
+                hasActiveProfile={!!ws.llmProfiles?.activeProfile}
+                sessionId={ws.sessionId}
+                chatEmpty={chatEmpty}
+                taskProgress={ws.taskProgress}
+                taskProgressCollapsed={taskProgressCollapsed}
+                onToggleTaskProgressCollapse={() => setTaskProgressCollapsed((v) => !v)}
+                onSend={() => {
+                  ws.send(targetSessions, visibleCharacters, responseCharacters);
+                }}
+                onUpload={ws.handleFileInputChange}
+                onUploadClick={ws.handleUploadClick}
+                onInterrupt={ws.interrupt}
+                onDisgust={ws.disgust}
+                fileInputRef={ws.fileInputRef}
+                pendingImages={ws.pendingImages}
+                onRemovePendingImage={ws.removePendingImage}
+                onPasteImage={ws.handlePasteImages}
+                pendingAudios={ws.pendingAudios}
+                onRemovePendingAudio={ws.removePendingAudio}
+                onPasteAudio={ws.handlePasteAudios}
+                pendingVideos={ws.pendingVideos}
+                onRemovePendingVideo={ws.removePendingVideo}
+                onPasteVideo={ws.handlePasteVideos}
+                inputRef={ws.inputRef}
+                subagentSessions={ws.subagentSessions}
+                targetSessions={targetSessions}
+                setTargetSessions={setTargetSessions}
+                agents={ws.agents}
+                visibleCharacters={visibleCharacters}
+                responseCharacters={responseCharacters}
+                onToggleAgentState={onToggleAgentState}
+                pendingAsks={ws.pendingAsks}
+                pendingConfirms={ws.pendingConfirms}
+                onRespondAsk={ws.respondAsk}
+                onRespondConfirm={ws.respondConfirm}
+              />
+            </ChatArea>
+          </>
+        )}
 
       </div>
 

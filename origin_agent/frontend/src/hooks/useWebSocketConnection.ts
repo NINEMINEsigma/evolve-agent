@@ -1,5 +1,6 @@
 import { useCallback, useRef, useState } from "react";
 import { WSMessage } from "../types";
+import { generateUUID } from "../utils";
 import { STORAGE_KEYS } from "../constants/storage";
 import { WS_IN, WS_OUT } from "../constants/ws";
 import { TIMING } from "../constants/timing";
@@ -14,7 +15,7 @@ export interface WebSocketConnection {
   wsRef: React.RefObject<WebSocket | null>;
   status: string;
   setStatus: React.Dispatch<React.SetStateAction<string>>;
-  connect: (resumeSid?: string) => void;
+  connect: (resumeSid?: string) => Promise<void>;
   send: (payload: unknown) => void;
   disconnect: () => void;
   setHandlers: (handlers: WebSocketConnectionHandlers) => void;
@@ -25,11 +26,14 @@ export interface WebSocketConnection {
   lastRecvAtRef: React.RefObject<number>;
   lastPongAtRef: React.RefObject<number>;
   recvTick: number;
+  sessionLocked: boolean;
+  retryConnect: () => void;
 }
 
 export function useWebSocketConnection(): WebSocketConnection {
   const [status, setStatus] = useState("connecting...");
   const [recvTick, setRecvTick] = useState(0);
+  const [sessionLocked, setSessionLocked] = useState(false);
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectRef = useRef(0);
   const timerRef = useRef<ReturnType<typeof setTimeout>>();
@@ -38,6 +42,9 @@ export function useWebSocketConnection(): WebSocketConnection {
   const lastRecvAtRef = useRef<number>(Date.now());
   const lastPongAtRef = useRef<number>(Date.now());
   const handlersRef = useRef<WebSocketConnectionHandlers>({});
+  const wasOpenRef = useRef(false);
+  const lastSidRef = useRef<string | undefined>(undefined);
+  const connectIdRef = useRef(0);
 
   const setHandlers = useCallback((handlers: WebSocketConnectionHandlers) => {
     handlersRef.current = handlers;
@@ -49,8 +56,18 @@ export function useWebSocketConnection(): WebSocketConnection {
     }
   }, []);
 
+  const getOrCreateConnToken = useCallback((): string => {
+    let token = sessionStorage.getItem(STORAGE_KEYS.CONN_TOKEN);
+    if (!token) {
+      token = generateUUID();
+      sessionStorage.setItem(STORAGE_KEYS.CONN_TOKEN, token);
+    }
+    return token;
+  }, []);
+
   const disconnect = useCallback(() => {
     manualRef.current = true;
+    connectIdRef.current += 1; // Invalidate in-flight async connect pre-check
     if (keepaliveRef.current) clearInterval(keepaliveRef.current);
     if (wsRef.current) {
       wsRef.current.onclose = null;
@@ -60,14 +77,47 @@ export function useWebSocketConnection(): WebSocketConnection {
     clearTimeout(timerRef.current);
   }, []);
 
-  const connect = useCallback((resumeSid?: string) => {
+  const connect = useCallback(async (resumeSid?: string) => {
+    const myId = ++connectIdRef.current;
     const urlSid = new URLSearchParams(window.location.search).get("session") ?? undefined;
+    // lastSid 是最终用于连接的 sid，按优先级：显式传入 > URL 参数 > localStorage 残留
     const lastSid = (resumeSid || undefined) ?? urlSid ?? localStorage.getItem(STORAGE_KEYS.SESSION_ID) ?? "";
-    const qs = lastSid ? `?resume=${lastSid}` : "";
+    // preCheckSid 是需要预检的 sid：仅当用户明确指定了目标会话时才预检。
+    // localStorage fallback 不预检——那是新建会话场景，后端会分配新 sid，不存在占用问题。
+    const preCheckSid = (resumeSid || undefined) ?? urlSid;
+    const token = getOrCreateConnToken();
+
+    // Pre-check: only when user explicitly targets an existing session
+    if (preCheckSid) {
+      try {
+        const resp = await fetch(
+          `/api/sessions/${preCheckSid}/status?conn_token=${encodeURIComponent(token)}`
+        ).then((r) => r.json());
+        if (myId !== connectIdRef.current) return; // Stale request
+        if (resp.occupied) {
+          setSessionLocked(true);
+          setStatus("会话已被占用");
+          lastSidRef.current = preCheckSid;
+          return;
+        }
+      } catch {
+        // Pre-check failed (network error/server down) → continue to connect
+      }
+    }
+
+    if (myId !== connectIdRef.current) return; // Stale request
+    setSessionLocked(false);
+    wasOpenRef.current = false;
+    lastSidRef.current = lastSid || undefined;  // Full sid (incl. localStorage fallback) for handshake rejection detection
+
+    const qs = lastSid
+      ? `?resume=${lastSid}&conn_token=${encodeURIComponent(token)}`
+      : `?conn_token=${encodeURIComponent(token)}`;
     const ws = new WebSocket(`ws://${location.host}/ws/chat${qs}`);
     wsRef.current = ws;
 
     ws.onopen = () => {
+      wasOpenRef.current = true;
       reconnectRef.current = 0;
       manualRef.current = false;
       setStatus("已连接");
@@ -82,6 +132,29 @@ export function useWebSocketConnection(): WebSocketConnection {
 
     ws.onclose = () => {
       if (keepaliveRef.current) clearInterval(keepaliveRef.current);
+
+      // Handshake rejection detection: onopen never fired
+      if (!wasOpenRef.current && lastSidRef.current) {
+        const sid = lastSidRef.current;
+        // One-time HTTP re-check to confirm if rejected due to occupancy
+        fetch(`/api/sessions/${sid}/status?conn_token=${encodeURIComponent(token)}`)
+          .then((r) => r.json())
+          .then((data) => {
+            if (myId !== connectIdRef.current) return;
+            if (data.occupied) {
+              setSessionLocked(true);
+              setStatus("会话已被占用");
+            } else {
+              setStatus("连接失败");
+            }
+          })
+          .catch(() => {
+            if (myId !== connectIdRef.current) return;
+            setStatus("连接失败");
+          });
+        return; // Don't trigger onClose handler or auto-reconnect
+      }
+
       setStatus("已断开");
       handlersRef.current.onClose?.();
       if (manualRef.current) return;
@@ -107,7 +180,12 @@ export function useWebSocketConnection(): WebSocketConnection {
       }
       handlersRef.current.onMessage?.(msg);
     };
-  }, []);
+  }, [getOrCreateConnToken]);
+
+  const retryConnect = useCallback(() => {
+    setSessionLocked(false);
+    connect(lastSidRef.current);
+  }, [connect]);
 
   return {
     wsRef,
@@ -124,5 +202,7 @@ export function useWebSocketConnection(): WebSocketConnection {
     lastRecvAtRef,
     lastPongAtRef,
     recvTick,
+    sessionLocked,
+    retryConnect,
   };
 }

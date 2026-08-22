@@ -111,6 +111,13 @@ export function useWebSocket() {
     return () => conn.disconnect();
   }, [conn.connect, conn.disconnect]);
 
+  // ── fetch sessions when locked, so sidebar shows available sessions ──
+  useEffect(() => {
+    if (conn.sessionLocked) {
+      session.fetchSessions();
+    }
+  }, [conn.sessionLocked]);
+
   // ── fetch tool resources when session changes ──
   useEffect(() => {
     if (!session.sessionId) return;
@@ -518,6 +525,8 @@ export function useWebSocket() {
     fileInputRef: upload.fileInputRef,
     // computed
     isReady,
+    sessionLocked: conn.sessionLocked,
+    retryConnect: conn.retryConnect,
     sidebarItems: session.sidebarItems,
     expandedClusters: session.expandedClusters,
     toggleCluster: session.toggleCluster,

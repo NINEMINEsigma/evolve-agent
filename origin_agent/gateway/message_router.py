@@ -100,10 +100,12 @@ class MessageRouter:
     实例持有 WebSocket 引用和当前 session_id（session 旋转时会更新）。
     """
 
-    def __init__(self, ws: WebSocket, sid: str, agentspace_path: Path | None = None):
+    def __init__(self, ws: WebSocket, sid: str, agentspace_path: Path | None = None,
+                 conn_token: str = ""):
         self.ws = ws
         self.sid = sid
         self.agentspace_path = agentspace_path
+        self.conn_token = conn_token
 
     # -- 主分发入口 --------------------------------------------------------
 
@@ -599,7 +601,7 @@ class MessageRouter:
         sink = Application.current().frontend_sink
         if sink:
             sink.unregister_ws(_old)
-            sink.register_ws(_rotated, self.ws)
+            sink.register_ws(_rotated, self.ws, self.conn_token)
         self.sid = _rotated
 
         await self.ws.send_text(

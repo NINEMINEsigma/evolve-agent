@@ -566,6 +566,19 @@ async def get_session_tool_resources(session_id: str):
     }
 
 
+@app.get("/api/sessions/{session_id}/status")
+async def get_session_status(session_id: str, conn_token: str | None = None):
+    """Return session status including WebSocket occupancy info.
+
+    用于前端在连接 WebSocket 前进行预检。
+    conn_token 匹配时视为同标签页刷新，返回 occupied=False。
+    """
+    from system.application import Application
+    sink = Application.current().frontend_sink
+    occupied: bool = sink.is_session_occupied(session_id, conn_token) if sink else False
+    return {"session_id": session_id, "occupied": occupied}
+
+
 @app.get("/api/sessions/{session_id}/subagents")
 async def get_session_subagents(session_id: str):
     """返回当前活跃子会话的快照。"""
@@ -1581,10 +1594,10 @@ async def spa_fallback(full_path: str):
 @app.websocket("/ws/chat")
 async def ws_chat(ws: WebSocket) -> None:
     """WebSocket 聊天端点：接收用户消息，转发给 AgentLoop，返回回复。"""
-    await ws.accept()
-    # 如果客户端请求恢复之前的 session
+    # 在 accept 之前解析 query string
     qs: dict[str, list[str]] = parse_qs(ws.scope.get("query_string", b"").decode())
     resume: str | None = qs.get("resume", [None])[0]
+    conn_token: str | None = qs.get("conn_token", [None])[0]
     sid: str
     if resume and _get_sm().exists(resume):
         sid = resume
@@ -1599,8 +1612,20 @@ async def ws_chat(ws: WebSocket) -> None:
         else:
             sid = _get_sm().create()
 
-    from system.application import Application as _AppInnerNew
-    _AppInnerNew.current().frontend_sink.register_ws(sid, ws)  # 注册用于工具事件流推送
+    # 会话占用检查 — 握手前拒绝。
+    # 使用 WebSocketException 而非 ws.close()，因为 close()-before-accept()
+    # 的行为在不同 Starlette 版本中不一致，WebSocketException 是官方推荐的
+    # 握手拒绝方式，版本无关。
+    from system.application import Application as _AppLock
+    from fastapi import WebSocketException
+    _sink = _AppLock.current().frontend_sink
+    if _sink and _sink.is_session_occupied(sid, conn_token):
+        logger.info("WebSocket rejected (session locked) | session=%s", sid)
+        raise WebSocketException(code=4001, reason="session_locked")
+
+    # 通过检查 → accept 并注册
+    await ws.accept()
+    _sink.register_ws(sid, ws, conn_token or "")
     logger.info("WebSocket connected | session=%s", sid)
 
     # 提取客户端 IP 并存入 SessionManager
@@ -1748,7 +1773,7 @@ async def ws_chat(ws: WebSocket) -> None:
             )
 
         # 创建消息路由器 — 所有消息处理委托给 MessageRouter
-        router = MessageRouter(ws, sid, agentspace_path=_agentspace_path)
+        router = MessageRouter(ws, sid, agentspace_path=_agentspace_path, conn_token=conn_token or "")
 
         while True:
             # Note: 进化关闭（exit -1）期间，uvicorn 会取消所有待处理

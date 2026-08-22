@@ -1,4 +1,4 @@
-/** localStorage 键名 */
+/** 存储键名（介质由调用方决定：localStorage 或 sessionStorage） */
 export const STORAGE_KEYS = {
   SESSION_ID:          "evolve_session_id",
   BUILD_HASH:          "evolve_build_hash",
@@ -32,4 +32,7 @@ export const STORAGE_KEYS = {
   TARGET_SESSIONS:        "evolve_target_sessions",
   VISIBLE_CHARACTERS:    "evolve_visible_characters",
   RESPONSE_CHARACTERS:   "evolve_response_characters",
+
+  // 会话锁定（sessionStorage，标签页级别）
+  CONN_TOKEN:            "evolve_conn_token",
 } as const;

@@ -11,6 +11,7 @@ import json
 import logging
 import uuid
 from abc import ABC, abstractmethod
+from dataclasses import dataclass
 from typing import * # type: ignore
 from entity.constant import SYSTEM_CHARACTER_NAME
 from entity.puretype import ApprovalResult, MessageMetrics
@@ -20,6 +21,17 @@ if TYPE_CHECKING:
     from subagent.loop import SubAgentLoop
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class WsConnectionEntry:
+    """WebSocket 连接条目，附带 connection token 用于会话锁定。
+
+    token 标识发起连接的标签页，用于区分刷新（同 token）与新标签页（不同 token）。
+    """
+    ws: "WebSocket"
+    token: str
+    connected_at: float
 
 
 class AgentSink(ABC):
@@ -139,8 +151,8 @@ class FrontendSink(AgentSink):
     """
 
     def __init__(self) -> None:
-        # session_id → WebSocket
-        self._ws_sinks: dict[str, WebSocket] = {}
+        # session_id → WsConnectionEntry
+        self._ws_sinks: dict[str, WsConnectionEntry] = {}
         # {request_id: Future[ApprovalResult]}
         self._pending_confirms: dict[str, asyncio.Future] = {}
         # {request_id: session_id}
@@ -152,8 +164,11 @@ class FrontendSink(AgentSink):
 
     # -- WebSocket 管理 --
 
-    def register_ws(self, session_id: str, ws: WebSocket) -> None:
-        self._ws_sinks[session_id] = ws
+    def register_ws(self, session_id: str, ws: WebSocket, token: str) -> None:
+        import time
+        self._ws_sinks[session_id] = WsConnectionEntry(
+            ws=ws, token=token, connected_at=time.time()
+        )
 
     def unregister_ws(self, session_id: str) -> None:
         self._ws_sinks.pop(session_id, None)
@@ -162,11 +177,31 @@ class FrontendSink(AgentSink):
         self._deny_session_asks(session_id)
 
     def get_ws(self, session_id: str) -> WebSocket | None:
-        return self._ws_sinks.get(session_id)
+        entry = self._ws_sinks.get(session_id)
+        return entry.ws if entry else None
 
     def get_all_ws(self) -> dict[str, WebSocket]:
         """返回所有已注册 WebSocket 的快照副本。"""
-        return dict(self._ws_sinks)
+        return {sid: entry.ws for sid, entry in self._ws_sinks.items()}
+
+    def is_session_occupied(self, session_id: str, token: str | None) -> bool:
+        """判断会话是否已被其他标签页占用。
+
+        - 无条目 → 未占用
+        - 条目存在但 WebSocket 已断开 → 清理并返回未占用
+        - 条目存在且 token 匹配 → 未占用（同标签页刷新，可接管）
+        - 条目存在且 token 不匹配且连接存活 → 已占用
+        """
+        entry = self._ws_sinks.get(session_id)
+        if entry is None:
+            return False
+        from starlette.websockets import WebSocketState
+        if entry.ws.client_state == WebSocketState.DISCONNECTED:
+            self._ws_sinks.pop(session_id, None)
+            return False
+        if token and entry.token == token:
+            return False
+        return True
 
     # -- 审批请求 --
 
