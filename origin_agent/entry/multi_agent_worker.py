@@ -27,9 +27,10 @@ from entity.constant import (
     MULTI_AGENT_ROUTING_RESPONSE_NONE,
     MULTI_AGENT_ROUTING_RESPONSE_NULL,
 )
-from entry.base_agent_loop import BaseAgentLoop, IMainSessionLoop
+from entry.base_agent_loop import BaseAgentLoop, IMainSessionLoop, ToolContext
 from entry.stream_consumer import StreamConsumer
 from entry.tool_executor import ToolExecutor, _interrupted_result
+from entry.agent_support.multimodal import preprocess_multimodal_blocks
 
 if TYPE_CHECKING:
     from entry.agent_sink import AgentSink
@@ -221,6 +222,13 @@ class MultiAgentWorker:
             logger.info(
                 "MultiAgentWorker turn start | session=%s character=%s turn=%d messages_len=%d",
                 self._loop.loop.session_id, self.character_name, turn, len(full_messages),
+            )
+
+            # 多模态块预检：检测 messages 中的 ImageBlock/AudioBlock，
+            # 自动探查能力，不支持时转发借用并替换为描述文本
+            _ctx = ToolContext(loop=self._loop.loop, session_id=self._loop.loop.session_id)
+            full_messages = await preprocess_multimodal_blocks(
+                full_messages, _ctx, self._loop.loop.save_history,
             )
 
             try:

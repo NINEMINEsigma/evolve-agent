@@ -8,11 +8,14 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import Any
+from typing import Any, TYPE_CHECKING, Callable
 
 from entity.messages import AudioBlock, BaseMessage, CharacterConversationMessage, ImageBlock, MessageBlock, TextBlock
-from entity.puretype import MessageContent, Role
+from entity.puretype import MessageContent, Role, LLMProfile
 from entity.constant import SYSTEM_CHARACTER_NAME
+
+if TYPE_CHECKING:
+    from entry.base_agent_loop import ToolContext
 
 logger = logging.getLogger(__name__)
 
@@ -134,6 +137,187 @@ FORWARDED_AUDIO_TAG = "forwarded_audio"
 def wrap_forwarded_description(description: str, tag: str) -> str:
     """用特殊标签包裹转发描述文本，供活跃模型识别转发来源。"""
     return f"<{tag}>\n{description}\n</{tag}>"
+
+
+async def _forward_unsupported_block(
+    context: "ToolContext",
+    profile: LLMProfile,
+    block: ImageBlock | AudioBlock,
+    ref_field: str,
+    media_type: str,
+    save_callback: "Callable[[str], None] | None" = None,
+) -> str:
+    """处理不支持的多模态块：优先用 forward_result_content，无则转发借用。
+
+    转发成功后写入 block.forward_result_content（持久化），并调用 save_callback 立即固化。
+    返回描述文本。
+    """
+    # 优先用已有的 forward_result_content
+    if block.forward_result_content:
+        logger.info(
+            "preprocess_multimodal | reusing existing forward_result_content for %s",
+            media_type,
+        )
+        return block.forward_result_content
+
+    # 无已有描述 → 转发借用
+    from component.tools.modality_capability import forward_modality_to_ref_profile
+
+    ref_uid: str = getattr(profile, ref_field, "")
+    if not ref_uid:
+        # 未配引用字段 → 报错
+        raise ValueError(
+            f"Active model does not support {media_type} in either tool or user messages, "
+            f"and no {ref_field} is configured. Please configure a reference profile "
+            f"or switch to a model that supports {media_type}."
+        )
+
+    # 构造 media_data
+    if isinstance(block, ImageBlock):
+        # 解析 data URL 提取 base64 和 mime_type
+        image_url = block.image_url
+        if image_url.startswith("data:"):
+            # data:image/png;base64,xxxx
+            header, b64 = image_url.split(",", 1)
+            mime_type = header.split(";")[0].split(":")[1]
+            media_data = {"base64": b64, "mime_type": mime_type}
+        else:
+            # 非 data URL（HTTP URL），跳过转发，保留原块
+            logger.warning(
+                "preprocess_multimodal | skipping forward for non-data-URL image: %s",
+                image_url[:50],
+            )
+            return ""
+    else:
+        # AudioBlock
+        media_data = {"base64": block.data, "format": block.format}
+
+    # 转发借用
+    description = await forward_modality_to_ref_profile(
+        context, profile, ref_field, media_data, media_type,
+    )
+
+    # 写入 forward_result_content（持久化）
+    block.forward_result_content = description
+    if save_callback is not None:
+        save_callback(context.session_id)
+
+    return description
+
+
+async def preprocess_multimodal_blocks(
+    messages: list[BaseMessage],
+    context: "ToolContext",
+    save_callback: "Callable[[str], None] | None" = None,
+) -> list[BaseMessage]:
+    """预检多模态块：自动探查能力，不支持时转发借用替换。
+
+    遍历 messages 中的 ImageBlock/AudioBlock：
+    - 查缓存 → 有缓存直接判断
+    - 无缓存 → 自动探查（ensure_modality_capability）
+    - tool 或 user 支持 → 原样发送
+    - 都不支持 → 优先用 forward_result_content；无则转发借用并写入 forward_result_content
+      用特殊标签包裹描述后替换该块为 TextBlock（临时 messages 列表，不改持久化历史）
+
+    遇到探查非模态错误时向上抛出异常，由调用方的 except 分支处理。
+
+    Args:
+        messages: 发给 LLM 的消息列表（临时列表，不修改持久化历史中的多模态块）
+        context: 工具执行上下文
+        save_callback: 接收 session_id 的回调，用于转发后持久化 forward_result_content。
+                       传入 None 时不持久化。
+    """
+    from component.tools.modality_capability import (
+        ensure_modality_capability,
+        resolve_active_model_base_url,
+    )
+
+    model_name, base_url, profile = resolve_active_model_base_url(context)
+
+    # 无 profile 或 model_name → 无需预检
+    if not profile or not model_name:
+        return messages
+
+    # 快速检查 messages 中是否有 ImageBlock 或 AudioBlock
+    has_multimodal = False
+    for msg in messages:
+        if isinstance(msg.content, list):
+            for block in msg.content:
+                if isinstance(block, (ImageBlock, AudioBlock)):
+                    has_multimodal = True
+                    break
+        if has_multimodal:
+            break
+    if not has_multimodal:
+        return messages
+
+    # 自动探查能力
+    capability = await ensure_modality_capability(context)
+
+    # 遍历处理每条消息
+    result_messages: list[BaseMessage] = []
+    any_replaced = False
+    for msg in messages:
+        content = msg.content
+        if not isinstance(content, list):
+            result_messages.append(msg)
+            continue
+
+        new_blocks: list[MessageBlock] = []
+        blocks_replaced = False
+        for block in content:
+            if isinstance(block, ImageBlock):
+                if capability.vision or capability.user_vision:
+                    # 支持 → 原样保留
+                    new_blocks.append(block)
+                else:
+                    # 都不支持
+                    description = await _forward_unsupported_block(
+                        context, profile, block,
+                        "vision_image_profile", "image",
+                        save_callback,
+                    )
+                    if description:
+                        new_blocks.append(TextBlock(text=wrap_forwarded_description(description, FORWARDED_VISION_TAG)))
+                        blocks_replaced = True
+                        any_replaced = True
+                    else:
+                        # 非 data URL 跳过转发，保留原块
+                        new_blocks.append(block)
+            elif isinstance(block, AudioBlock):
+                if capability.audio or capability.user_audio:
+                    # 支持 → 原样保留
+                    new_blocks.append(block)
+                else:
+                    # 都不支持
+                    description = await _forward_unsupported_block(
+                        context, profile, block,
+                        "audio_profile", "audio",
+                        save_callback,
+                    )
+                    if description:
+                        new_blocks.append(TextBlock(text=wrap_forwarded_description(description, FORWARDED_AUDIO_TAG)))
+                        blocks_replaced = True
+                        any_replaced = True
+                    else:
+                        # 非 data URL 跳过转发，保留原块
+                        new_blocks.append(block)
+            else:
+                new_blocks.append(block)
+
+        if blocks_replaced:
+            # 创建消息副本，避免修改持久化历史
+            result_messages.append(msg.model_copy(update={"content": new_blocks}))
+        else:
+            result_messages.append(msg)
+
+    if any_replaced:
+        logger.info(
+            "preprocess_multimodal | session=%s model=%s replaced unsupported blocks with forwarded descriptions",
+            context.session_id, model_name,
+        )
+
+    return result_messages
 
 
 def build_image_content_blocks(image: dict, text_payload: str) -> list[MessageBlock]:
