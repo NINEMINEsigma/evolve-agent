@@ -50,15 +50,15 @@ def _ensure_uid(profile: LLMProfile) -> LLMProfile:
 
 
 def _validate_references(profiles: list[LLMProfile]) -> None:
-    """校验两个引用字段：悬空、自引用、循环引用。违规 raise ValueError。
+    """校验三个引用字段：悬空、自引用、循环引用。违规 raise ValueError。
 
     - 悬空：引用的 uid 不在列表中
-    - 自引用：vision_image_profile/audio_profile == self.uid
+    - 自引用：vision_image_profile/audio_profile/vision_video_profile == self.uid
     - 循环：沿单一引用字段链检测（A.vision→B.vision→A），跨字段不视为循环
     """
     uid_set = {p.uid for p in profiles}
     for p in profiles:
-        for field in ("vision_image_profile", "audio_profile"):
+        for field in ("vision_image_profile", "audio_profile", "vision_video_profile"):
             ref = getattr(p, field)
             if not ref:
                 continue
@@ -75,7 +75,7 @@ def _validate_references(profiles: list[LLMProfile]) -> None:
     for start in profiles:
         if not start.uid:
             continue
-        for field in ("vision_image_profile", "audio_profile"):
+        for field in ("vision_image_profile", "audio_profile", "vision_video_profile"):
             visited: set[str] = set()
             current = start
             while True:

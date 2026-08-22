@@ -1836,5 +1836,6 @@ def create_server(host: str | None = None, port: int | None = None) -> uvicorn.S
         host=host,
         port=port,
         log_level="warning",  # 抑制 uvicorn 自身的访问日志
+        ws_max_size=100 * 1024 * 1024,  # 100MB — 容纳 50MB 视频的 base64 编码（约 66MB）
     )
     return uvicorn.Server(config)

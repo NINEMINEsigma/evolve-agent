@@ -1,10 +1,10 @@
 import { useCallback, useRef, useState } from "react";
-import type { ChatMessage, ContentBlock, DownloadInfo, MessageContent, PendingImage, PendingAudio, SessionInfo } from "../types";
+import type { ChatMessage, ContentBlock, DownloadInfo, MessageContent, PendingImage, PendingAudio, PendingVideo, SessionInfo } from "../types";
 import { generateUUID, extractContentBlocks as _extractContentBlocks } from "../utils";
 import { WS_OUT } from "../constants/ws";
 import { DIMENSIONS } from "../constants/dimensions";
 
-export type { PendingImage, PendingAudio } from "../types";
+export type { PendingImage, PendingAudio, PendingVideo } from "../types";
 
 export type AddMessageFn = (
   role: ChatMessage["role"],
@@ -28,6 +28,8 @@ export interface UploadManager {
   setPendingImages: React.Dispatch<React.SetStateAction<PendingImage[]>>;
   pendingAudios: PendingAudio[];
   setPendingAudios: React.Dispatch<React.SetStateAction<PendingAudio[]>>;
+  pendingVideos: PendingVideo[];
+  setPendingVideos: React.Dispatch<React.SetStateAction<PendingVideo[]>>;
   inputRef: React.RefObject<HTMLDivElement>;
   fileInputRef: React.RefObject<HTMLInputElement>;
   handleFileUpload: (files: FileList | File[] | null) => void;
@@ -39,7 +41,10 @@ export interface UploadManager {
   addPendingAudio: (file: File) => Promise<{ id: string; dataUrl: string } | null>;
   removePendingAudio: (id: string) => void;
   handlePasteAudios: (file: File) => Promise<{ id: string; dataUrl: string } | null>;
-  extractContentBlocks: (el: HTMLDivElement | null, images: PendingImage[], audios: PendingAudio[]) => ContentBlock[];
+  addPendingVideo: (file: File) => Promise<{ id: string; dataUrl: string } | null>;
+  removePendingVideo: (id: string) => void;
+  handlePasteVideos: (file: File) => Promise<{ id: string; dataUrl: string } | null>;
+  extractContentBlocks: (el: HTMLDivElement | null, images: PendingImage[], audios: PendingAudio[], videos: PendingVideo[]) => ContentBlock[];
 }
 
 export function useUploadManager({
@@ -51,6 +56,7 @@ export function useUploadManager({
   const [uploading, setUploading] = useState(false);
   const [pendingImages, setPendingImages] = useState<PendingImage[]>([]);
   const [pendingAudios, setPendingAudios] = useState<PendingAudio[]>([]);
+  const [pendingVideos, setPendingVideos] = useState<PendingVideo[]>([]);
   const inputRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -196,6 +202,46 @@ export function useUploadManager({
     return addPendingAudio(file);
   }, [addPendingAudio]);
 
+  const addPendingVideo = useCallback((file: File) => {
+    return new Promise<{ id: string; dataUrl: string } | null>((resolve) => {
+      if (!file.type.startsWith("video/")) {
+        addMessage("error", "仅支持粘贴视频文件");
+        resolve(null);
+        return;
+      }
+      if (file.type !== "video/mp4") {
+        addMessage("error", `不支持的视频格式：${file.type}（仅支持 MP4）`);
+        resolve(null);
+        return;
+      }
+      if (file.size > DIMENSIONS.MAX_PASTE_VIDEO_SIZE) {
+        addMessage("error", `视频超过 50MB 限制：${file.name}`);
+        resolve(null);
+        return;
+      }
+      const id = generateUUID();
+      const reader = new FileReader();
+      reader.onload = () => {
+        const dataUrl = reader.result as string;
+        setPendingVideos((prev) => [...prev, { id, file, dataUrl }]);
+        resolve({ id, dataUrl });
+      };
+      reader.onerror = () => {
+        addMessage("error", `读取视频失败：${file.name}`);
+        resolve(null);
+      };
+      reader.readAsDataURL(file);
+    });
+  }, [addMessage]);
+
+  const removePendingVideo = useCallback((id: string) => {
+    setPendingVideos((prev) => prev.filter((vd) => vd.id !== id));
+  }, []);
+
+  const handlePasteVideos = useCallback((file: File) => {
+    return addPendingVideo(file);
+  }, [addPendingVideo]);
+
   const handleUploadClick = useCallback(async () => {
     if (isLocal) {
       try {
@@ -224,8 +270,8 @@ export function useUploadManager({
   }, [handleFileUpload]);
 
   const extractContentBlocks = useCallback(
-    (el: HTMLDivElement | null, images: PendingImage[], audios: PendingAudio[]): ContentBlock[] =>
-      _extractContentBlocks(el, images, audios),
+    (el: HTMLDivElement | null, images: PendingImage[], audios: PendingAudio[], videos: PendingVideo[]): ContentBlock[] =>
+      _extractContentBlocks(el, images, audios, videos),
     [],
   );
 
@@ -236,6 +282,8 @@ export function useUploadManager({
     setPendingImages,
     pendingAudios,
     setPendingAudios,
+    pendingVideos,
+    setPendingVideos,
     inputRef,
     fileInputRef,
     handleFileUpload,
@@ -247,6 +295,9 @@ export function useUploadManager({
     addPendingAudio,
     removePendingAudio,
     handlePasteAudios,
+    addPendingVideo,
+    removePendingVideo,
+    handlePasteVideos,
     extractContentBlocks,
   };
 }

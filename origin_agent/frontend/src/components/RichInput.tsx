@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useImperativeHandle, useRef, useState, type ClipboardEvent, type KeyboardEvent } from "react";
-import type { PendingImage, PendingAudio } from "../hooks/useWebSocket";
+import type { PendingImage, PendingAudio, PendingVideo } from "../hooks/useWebSocket";
 import MentionMenu, { type MentionItem } from "./MentionMenu";
 import { DIMENSIONS } from "../constants/dimensions";
 import { TIMING } from "../constants/timing";
@@ -14,6 +14,9 @@ interface RichInputProps {
   onPasteAudio: (file: File) => Promise<{ id: string; dataUrl: string } | null>;
   onRemoveAudio: (id: string) => void;
   pendingAudios: PendingAudio[];
+  onPasteVideo: (file: File) => Promise<{ id: string; dataUrl: string } | null>;
+  onRemoveVideo: (id: string) => void;
+  pendingVideos: PendingVideo[];
   disabled?: boolean;
   placeholder?: string;
 }
@@ -113,6 +116,9 @@ const RichInput = React.forwardRef<HTMLDivElement, RichInputProps>(function Rich
   onPasteAudio,
   onRemoveAudio,
   pendingAudios,
+  onPasteVideo,
+  onRemoveVideo,
+  pendingVideos,
   disabled,
   placeholder,
 }, ref) {
@@ -166,6 +172,18 @@ const RichInput = React.forwardRef<HTMLDivElement, RichInputProps>(function Rich
     setIsEmpty(!el.innerText?.trim() && !el.querySelector(".input-inline-image") && !el.querySelector(".input-inline-audio"));
   }, [pendingAudios]);
 
+  useEffect(() => {
+    const el = divRef.current;
+    if (!el) return;
+    const videoIds = new Set(pendingVideos.map((vd) => vd.id));
+    el.querySelectorAll<HTMLSpanElement>(".input-inline-video").forEach((node) => {
+      if (!videoIds.has(node.dataset.videoId || "")) {
+        node.remove();
+      }
+    });
+    setIsEmpty(!el.innerText?.trim() && !el.querySelector(".input-inline-image") && !el.querySelector(".input-inline-audio") && !el.querySelector(".input-inline-video"));
+  }, [pendingVideos]);
+
   // 自动插入新的音频块到输入框
   useEffect(() => {
     const el = divRef.current;
@@ -197,6 +215,35 @@ const RichInput = React.forwardRef<HTMLDivElement, RichInputProps>(function Rich
     notifyChange();
     autoResize();
   }, [pendingAudios, onRemoveAudio]);
+
+  // 自动插入新的视频块到输入框
+  useEffect(() => {
+    const el = divRef.current;
+    if (!el) return;
+
+    for (const video of pendingVideos) {
+      const existing = el.querySelector(`[data-video-id="${video.id}"]`);
+      if (existing) continue;
+
+      const wrapper = document.createElement("span");
+      wrapper.className = "input-inline-video";
+      wrapper.contentEditable = "false";
+      wrapper.dataset.videoId = video.id;
+      wrapper.dataset.videoSrc = video.dataUrl;
+      wrapper.innerHTML = `<video src="${video.dataUrl}" controls></video><button type="button" class="input-inline-remove">×</button>`;
+      wrapper.querySelector(".input-inline-remove")?.addEventListener("click", () => {
+        onRemoveVideo(video.id);
+        wrapper.remove();
+        notifyChange();
+        autoResize();
+      });
+
+      el.appendChild(wrapper);
+    }
+
+    notifyChange();
+    autoResize();
+  }, [pendingVideos, onRemoveVideo]);
 
   const notifyChange = () => {
     const el = divRef.current;
@@ -489,8 +536,9 @@ const RichInput = React.forwardRef<HTMLDivElement, RichInputProps>(function Rich
     const items = e.clipboardData?.files;
     const imageFiles = items ? Array.from(items).filter((f) => f.type.startsWith("image/")) : [];
     const audioFiles = items ? Array.from(items).filter((f) => f.type.startsWith("audio/")) : [];
+    const videoFiles = items ? Array.from(items).filter((f) => f.type.startsWith("video/")) : [];
 
-    if (imageFiles.length > 0 || audioFiles.length > 0) {
+    if (imageFiles.length > 0 || audioFiles.length > 0 || videoFiles.length > 0) {
       e.preventDefault();
       for (const file of imageFiles) {
         const result = await onPasteImage(file);
@@ -521,6 +569,24 @@ const RichInput = React.forwardRef<HTMLDivElement, RichInputProps>(function Rich
         wrapper.innerHTML = `<audio src="${dataUrl}" controls></audio><button type="button" class="input-inline-remove">x</button>`;
         wrapper.querySelector(".input-inline-remove")?.addEventListener("click", () => {
           onRemoveAudio(id);
+          wrapper.remove();
+          notifyChange();
+          autoResize();
+        });
+        insertNodeAtCursor(wrapper);
+      }
+      for (const file of videoFiles) {
+        const result = await onPasteVideo(file);
+        if (!result) continue;
+        const { id, dataUrl } = result;
+        const wrapper = document.createElement("span");
+        wrapper.className = "input-inline-video";
+        wrapper.contentEditable = "false";
+        wrapper.dataset.videoId = id;
+        wrapper.dataset.videoSrc = dataUrl;
+        wrapper.innerHTML = `<video src="${dataUrl}" controls></video><button type="button" class="input-inline-remove">×</button>`;
+        wrapper.querySelector(".input-inline-remove")?.addEventListener("click", () => {
+          onRemoveVideo(id);
           wrapper.remove();
           notifyChange();
           autoResize();

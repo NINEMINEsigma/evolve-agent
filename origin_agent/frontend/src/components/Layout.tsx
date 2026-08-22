@@ -316,6 +316,9 @@ export default function Layout({ ws, onContextMenu, contextMenuOpen }: LayoutPro
             pendingAudios={ws.pendingAudios}
             onRemovePendingAudio={ws.removePendingAudio}
             onPasteAudio={ws.handlePasteAudios}
+            pendingVideos={ws.pendingVideos}
+            onRemovePendingVideo={ws.removePendingVideo}
+            onPasteVideo={ws.handlePasteVideos}
             inputRef={ws.inputRef}
             subagentSessions={ws.subagentSessions}
             targetSessions={targetSessions}

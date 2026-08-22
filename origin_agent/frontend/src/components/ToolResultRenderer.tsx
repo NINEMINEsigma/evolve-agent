@@ -37,6 +37,16 @@ const renderRead: RenderFn = (parsed, onImageClick) => {
       );
     }
   }
+  if (parsed.type === "video" && typeof parsed.path === "string") {
+    const url = toFileUrl(parsed.path);
+    if (url) {
+      return (
+        <div className="message-video">
+          <video src={url} controls className="message-video-player" />
+        </div>
+      );
+    }
+  }
   // directory → 默认 JsonView 足够清晰
   return null;
 };

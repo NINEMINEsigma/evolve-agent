@@ -1,7 +1,7 @@
 """多模态能力探测（系统内部自动调用）。
 
 伪装成 Read 工具调用（assistant tool_calls → tool 消息携带多模态 content block），
-检测 provider 是否支持在**工具消息**和**用户消息**中读取图片/音频。
+检测 provider 是否支持在**工具消息**和**用户消息**中读取图片/音频/视频。
 
 探针已从工具内化为系统自动行为：当需要给当前模型传递多模态块时，
 系统自动查找探针缓存（modality_capability_cache.json），没有缓存时自动探查。
@@ -32,6 +32,7 @@ from entity.messages import (
     BaseMessage,
     ImageBlock,
     AudioBlock,
+    VideoBlock,
     TextBlock,
     MessageBlock,
     CharacterConversationMessage,
@@ -41,7 +42,7 @@ from entity.messages import (
 )
 from abstract.llm.client import BaseLLMClient
 from system.llm_profile_store import load_profiles
-from entry.agent_support.multimodal import build_image_content_blocks, build_audio_content_blocks
+from entry.agent_support.multimodal import build_image_content_blocks, build_audio_content_blocks, build_video_content_blocks
 
 if TYPE_CHECKING:
     from entry.base_agent_loop import ToolContext
@@ -71,6 +72,23 @@ def _generate_dummy_wav_b64() -> str:
 
 _DUMMY_WAV_B64: str = _generate_dummy_wav_b64()
 
+
+def _load_dummy_mp4_b64() -> str:
+    """从模板文件加载 dummy MP4 的 base64。
+
+    使用 ffmpeg 生成的 2 秒 320x240 黑屏 MP4（2024 字节），
+    经 API 验证可被接受。不能用更小的 MP4——部分 provider 对极短视频
+    返回 400 "Invalid request parameters"。
+    """
+    from system.templates import read_template
+    b64 = read_template("probe/dummy_video_mp4.txt")
+    if not b64:
+        logger.warning("Failed to load dummy_video_mp4.txt template — video probe will not work")
+    return b64
+
+
+_DUMMY_MP4_B64: str = _load_dummy_mp4_b64()
+
 # 按 cache_key 串行化探查请求，防止多 session 同时探查同一 model+base_url
 _probe_locks: dict[str, asyncio.Lock] = {}
 
@@ -85,7 +103,6 @@ def _resolve_base_url(base_url: str | None) -> str:
         return base_url
     # ctx.llm_base_url 已删除；调用方应通过 resolve_active_model_base_url 传入 profile
     return ""
-
 
 
 def resolve_active_model_base_url(
@@ -115,7 +132,6 @@ def resolve_active_model_base_url(
 async def forward_modality_to_ref_profile(
     context: ToolContext | None,
     active_profile: LLMProfile,
-    ref_field: str,
     media_data: dict,
     media_type: str,
 ) -> str:
@@ -126,12 +142,12 @@ async def forward_modality_to_ref_profile(
 
     Args:
         context: 工具执行上下文，用于获取 runtime_context.agentspace
-        active_profile: 当前活跃的 LLMProfile（含 vision_image_profile/audio_profile 引用字段）
-        ref_field: 引用字段名，"vision_image_profile" 或 "audio_profile"
+        active_profile: 当前活跃的 LLMProfile（含 vision_image_profile/audio_profile/vision_video_profile 引用字段）
         media_data: 多模态数据 dict：
             - 图片: {"base64": str, "mime_type": str}
             - 音频: {"base64": str, "format": str}
-        media_type: "image" 或 "audio"
+            - 视频: {"base64": str, "mime_type": str}
+        media_type: "image" 或 "audio" 或 "video"
 
     Returns:
         描述文本字符串（成功=模型描述，失败=错误信息+提示词模板）
@@ -147,9 +163,15 @@ async def forward_modality_to_ref_profile(
             .replace("{{error_message}}", error_message)
         )
 
-    ref_uid: str = getattr(active_profile, ref_field, "")
+    # 按 media_type 显式获取引用 uid，不使用反射
+    if media_type == "image":
+        ref_uid: str = active_profile.vision_image_profile
+    elif media_type == "audio":
+        ref_uid = active_profile.audio_profile
+    else:  # video
+        ref_uid = active_profile.vision_video_profile
     if not ref_uid:
-        return _error_text("(empty)", f"Active profile has no {ref_field} configured")
+        return _error_text("(empty)", f"Active profile has no {media_type} reference profile configured")
 
     # 加载全部 profiles 按 uid 查找被引用 profile
     ctx = context.runtime_context if context is not None else get_runtime_context()
@@ -164,16 +186,20 @@ async def forward_modality_to_ref_profile(
         return _error_text(ref_uid, f"Referenced profile '{ref_profile.name}' has no llm_client_name")
 
     # 构造提示词（从模板加载）
-    prompt: str = read_template(
-        "forwarded/forwarded_image_prompt.txt" if media_type == "image"
-        else "forwarded/forwarded_audio_prompt.txt"
-    )
+    if media_type == "image":
+        prompt: str = read_template("forwarded/forwarded_image_prompt.txt")
+    elif media_type == "audio":
+        prompt = read_template("forwarded/forwarded_audio_prompt.txt")
+    else:
+        prompt = read_template("forwarded/forwarded_video_prompt.txt")
 
     # 构造多模态块
     if media_type == "image":
         blocks = build_image_content_blocks(media_data, prompt)
-    else:
+    elif media_type == "audio":
         blocks = build_audio_content_blocks(media_data, prompt)
+    else:
+        blocks = build_video_content_blocks(media_data, prompt)
 
     # 构造单条 user 消息
     messages = [BaseMessage(role=Role.USER, content=blocks)]
@@ -186,14 +212,14 @@ async def forward_modality_to_ref_profile(
         if not description.strip():
             return _error_text(ref_uid, f"Referenced profile '{ref_profile.name}' returned an empty description")
         logger.info(
-            "forward_modality | session=%s ref_profile=%s media_type=%s ref_field=%s success",
-            context.session_id if context else "", ref_profile.name, media_type, ref_field,
+            "forward_modality | session=%s ref_profile=%s media_type=%s success",
+            context.session_id if context else "", ref_profile.name, media_type,
         )
         return description
     except Exception as exc:
         logger.warning(
-            "forward_modality | session=%s ref_profile=%s media_type=%s ref_field=%s error=%s",
-            context.session_id if context else "", ref_profile.name, media_type, ref_field, exc,
+            "forward_modality | session=%s ref_profile=%s media_type=%s error=%s",
+            context.session_id if context else "", ref_profile.name, media_type, exc,
         )
         return _error_text(ref_uid, f"{type(exc).__name__}: {exc}")
 
@@ -264,6 +290,23 @@ def get_cached_user_audio_support(model: str, base_url: str | None = None) -> bo
     return None
 
 
+def get_cached_video_support(model: str, base_url: str | None = None) -> bool | None:
+    """读取模型在指定服务商下的 video（tool 消息视频）能力缓存；未命中返回 None。"""
+    cache = _load_cache()
+    entry = _normalize_entry(cache.get(_cache_key(model, base_url)))
+    if entry is not None and entry.video is not None:
+        return entry.video
+    return None
+
+def get_cached_user_video_support(model: str, base_url: str | None = None) -> bool | None:
+    """读取模型在指定服务商下的 user 消息 video 能力缓存；未命中返回 None。"""
+    cache = _load_cache()
+    entry = _normalize_entry(cache.get(_cache_key(model, base_url)))
+    if entry is not None and entry.user_video is not None:
+        return entry.user_video
+    return None
+
+
 def _save_cache(data: dict[str, dict[str, Any]]) -> None:
     try:
         path = _cache_path()
@@ -285,6 +328,7 @@ def _is_modality_rejection(exc: Exception) -> bool:
         keywords: list[str] = [
             "image_url",
             "input_audio",
+            "video_url",
             "content type",
             "content block",
             "unsupported",
@@ -292,11 +336,12 @@ def _is_modality_rejection(exc: Exception) -> bool:
             "multimodal",
             "vision",
             "audio",
+            "video",
         ]
         return any(k in msg for k in keywords)
     if isinstance(exc, _openai.APIStatusError):
         if exc.status_code == 400:
-            return any(k in msg for k in ["image", "audio", "content", "unsupported"])
+            return any(k in msg for k in ["image", "audio", "video", "content", "unsupported"])
     return False
 
 
@@ -342,10 +387,15 @@ async def _probe_single_modality(
             ImageBlock(image_url=f"data:image/png;base64,{_DUMMY_PNG_B64}"),
             TextBlock(text='{"path": "probe://image.png", "width": 1, "height": 1}'),
         ] # type: ignore
-    else:
+    elif modality == "audio":
         blocks = [
             AudioBlock(data=_DUMMY_WAV_B64, format="wav"),
             TextBlock(text='{"path": "probe://audio.wav"}'),
+        ] # type: ignore
+    else:  # video
+        blocks = [
+            VideoBlock(video_url=f"data:video/mp4;base64,{_DUMMY_MP4_B64}"),
+            TextBlock(text='{"path": "probe://video.mp4"}'),
         ] # type: ignore
     probe_messages = _build_tool_probe_messages(blocks)
 
@@ -395,10 +445,15 @@ async def _probe_single_user_modality(
             ImageBlock(image_url=f"data:image/png;base64,{_DUMMY_PNG_B64}"),
             TextBlock(text='{"path": "probe://image.png", "width": 1, "height": 1}'),
         ]
-    else:
+    elif modality == "audio":
         blocks = [
             AudioBlock(data=_DUMMY_WAV_B64, format="wav"),
             TextBlock(text='{"path": "probe://audio.wav"}'),
+        ]
+    else:  # video
+        blocks = [
+            VideoBlock(video_url=f"data:video/mp4;base64,{_DUMMY_MP4_B64}"),
+            TextBlock(text='{"path": "probe://video.mp4"}'),
         ]
     probe_messages = _build_user_probe_messages(blocks)
 
@@ -424,9 +479,9 @@ async def _probe_single_user_modality(
 async def run_modality_probe(
     context: ToolContext | None,
 ) -> ModalityCapability:
-    """执行一次完整的多模态能力探测，返回 ModalityCapability（四项全非 None）。
+    """执行一次完整的多模态能力探测，返回 ModalityCapability（六项全非 None）。
 
-    缓存命中（四项完整）时直接返回；否则创建 client 发送探测请求。
+    缓存命中（六项完整）时直接返回；否则创建 client 发送探测请求。
     非 400 错误（网络/认证/超时）向上抛出异常，不写缓存。
     按 cache_key 串行化（asyncio.Lock），防止多 session 重复探测。
 
@@ -440,7 +495,7 @@ async def run_modality_probe(
 
     key = _cache_key(model_name, base_url)
 
-    # 缓存命中检查：如果四项都已探测，直接返回缓存值，跳过 API 请求
+    # 缓存命中检查：如果六项都已探测，直接返回缓存值，跳过 API 请求
     cache = _load_cache()
     entry = _normalize_entry(cache.get(key))
     if (
@@ -449,6 +504,8 @@ async def run_modality_probe(
         and entry.audio is not None
         and entry.user_vision is not None
         and entry.user_audio is not None
+        and entry.video is not None
+        and entry.user_video is not None
     ):
         logger.info(
             "probe_modality | session=%s model=%s cache_hit, skipping API probe",
@@ -471,6 +528,8 @@ async def run_modality_probe(
             and entry.audio is not None
             and entry.user_vision is not None
             and entry.user_audio is not None
+            and entry.video is not None
+            and entry.user_video is not None
         ):
             logger.info(
                 "probe_modality | session=%s model=%s cache_hit (after lock), skipping API probe",
@@ -486,22 +545,23 @@ async def run_modality_probe(
             )
         client = create_llm_client(client_name, ctx, profile)
 
-        # 先发送伪装成 Read 工具的图片+音频组合请求
+        # 先发送伪装成 Read 工具的图片+音频+视频组合请求
         combined_blocks: list[MessageBlock] = [
             ImageBlock(image_url=f"data:image/png;base64,{_DUMMY_PNG_B64}"),
             AudioBlock(data=_DUMMY_WAV_B64, format="wav"),
+            VideoBlock(video_url=f"data:video/mp4;base64,{_DUMMY_MP4_B64}"),
             TextBlock(text='{"path": "probe://media"}'),
         ]
         combined_messages = _build_tool_probe_messages(combined_blocks)
 
         try:
             await client.chat(combined_messages)
-            # API 接受了两者
-            result = ModalityCapability(vision=True, audio=True, user_vision=True, user_audio=True)
+            # API 接受了全部三模态
+            result = ModalityCapability(vision=True, audio=True, user_vision=True, user_audio=True, video=True, user_video=True)
             cache[key] = result.model_dump()
             _save_cache(cache)
             logger.info(
-                "probe_modality | session=%s model=%s vision=True audio=True user_vision=True user_audio=True source=combined_probe",
+                "probe_modality | session=%s model=%s vision=True audio=True user_vision=True user_audio=True video=True user_video=True source=combined_probe",
                 session_id, model_name,
             )
             return result
@@ -516,6 +576,8 @@ async def run_modality_probe(
                     )
                     raise
 
+            # TODO: 本就应该直接分别探测, 就不应该组合探测
+            # 否则一个失败又得重新推断
             # 模态被拒绝，需分别探测
             logger.info(
                 "probe_modality | session=%s model=%s combined_rejected, probing individually",
@@ -524,16 +586,20 @@ async def run_modality_probe(
 
             vision_capable = await _probe_single_modality(client, model_name, session_id, "vision")
             audio_capable = await _probe_single_modality(client, model_name, session_id, "audio")
+            video_capable = await _probe_single_modality(client, model_name, session_id, "video")
 
             # 仅在 tool 消息不支持该模态时才探测 user 消息，避免不必要的 API 调用
             user_vision_capable = True if vision_capable else await _probe_single_user_modality(client, model_name, session_id, "vision")
             user_audio_capable = True if audio_capable else await _probe_single_user_modality(client, model_name, session_id, "audio")
+            user_video_capable = True if video_capable else await _probe_single_user_modality(client, model_name, session_id, "video")
 
             result = ModalityCapability(
                 vision=vision_capable,
                 audio=audio_capable,
                 user_vision=user_vision_capable,
                 user_audio=user_audio_capable,
+                video=video_capable,
+                user_video=user_video_capable,
             )
             cache[key] = result.model_dump()
             _save_cache(cache)
@@ -546,7 +612,7 @@ async def ensure_modality_capability(
     """确保当前活跃模型的多模态能力已探测。有缓存读缓存，无缓存自动探查。
 
     Returns:
-        ModalityCapability（四项全非 None）
+        ModalityCapability（六项全非 None）
 
     Raises:
         Exception: 探测过程中的非模态错误（网络/认证/超时），向上抛出。

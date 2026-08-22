@@ -118,8 +118,8 @@ class ModalityCapability(BaseModel):
     """探针探测的多模态能力缓存条目。
 
     每个字段对应一种模态在一种消息路径上的支持状态：
-    - vision / audio: tool 消息中读取图片/音频的能力
-    - user_vision / user_audio: user 消息中读取图片/音频的能力
+    - vision / audio / video: tool 消息中读取图片/音频/视频的能力
+    - user_vision / user_audio / user_video: user 消息中读取图片/音频/视频的能力
 
     None 表示尚未探测，bool 表示探测结果。
     """
@@ -127,6 +127,10 @@ class ModalityCapability(BaseModel):
     audio: bool | None = None
     user_vision: bool | None = None
     user_audio: bool | None = None
+    video: bool | None = None
+    """视频(读视频)在 tool 消息中的支持状态。"""
+    user_video: bool | None = None
+    """视频(读视频)在 user 消息中的支持状态。"""
 
 
 # ---------------------------------------------------------------------------
@@ -151,3 +155,5 @@ class LLMProfile(BaseModel):
     # 视觉(读图)配置引用：值为被引用 profile 的 uid，空=""=不引用
     audio_profile: str = ""
     # 听觉配置引用：值为被引用 profile 的 uid，空=""=不引用
+    vision_video_profile: str = ""
+    # 视频(读视频)配置引用：值为被引用 profile 的 uid，空=""=不引用

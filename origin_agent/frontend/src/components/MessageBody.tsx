@@ -10,7 +10,7 @@ import { extractPartialStringField } from "../utils/partialJson";
 export function contentToText(content: MessageContent): string {
   if (typeof content === "string") return content;
   return content
-    .map((block) => (block.type === "text" ? block.text : block.type === "image_url" ? "[image_url]" : block.type === "input_audio" ? "[input_audio]" : ""))
+    .map((block) => (block.type === "text" ? block.text : block.type === "image_url" ? "[image_url]" : block.type === "input_audio" ? "[input_audio]" : block.type === "video_url" ? "[video_url]" : ""))
     .join("\n");
 }
 
@@ -76,6 +76,13 @@ function renderBlocksContent(
             return (
               <div key={`${messageId}-audio-${idx}`} className="message-audio">
                 <audio controls src={dataUrl} className="message-audio-player" />
+              </div>
+            );
+          }
+          if (block.type === "video_url") {
+            return (
+              <div key={`${messageId}-video-${idx}`} className="message-video">
+                <video controls src={block.video_url.url} className="message-video-player" />
               </div>
             );
           }

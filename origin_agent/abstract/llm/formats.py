@@ -245,6 +245,12 @@ def _content_to_anthropic_blocks(content: Any) -> list[dict[str, Any]]:
                     "type": "text",
                     "text": f"[Audio content ({fmt}) — not supported by Anthropic models]",
                 })
+            elif block_type == "video_url":
+                # Anthropic 不支持视频输入，替换为文本占位符
+                blocks.append({
+                    "type": "text",
+                    "text": "[Video content (mp4) — not supported by Anthropic models]",
+                })
         return blocks
 
     return []

@@ -10,7 +10,7 @@ import json
 import logging
 from typing import Any, TYPE_CHECKING, Callable
 
-from entity.messages import AudioBlock, BaseMessage, CharacterConversationMessage, ImageBlock, MessageBlock, TextBlock
+from entity.messages import AudioBlock, BaseMessage, CharacterConversationMessage, ImageBlock, MessageBlock, TextBlock, VideoBlock
 from entity.puretype import MessageContent, Role, LLMProfile
 from entity.constant import SYSTEM_CHARACTER_NAME
 
@@ -21,13 +21,14 @@ logger = logging.getLogger(__name__)
 
 
 def is_content_block_error(exc: Exception) -> bool:
-    """检测异常是否由 unsupported content blocks（如图片）引起。"""
+    """检测异常是否由 unsupported content blocks（如图片/音频/视频）引起。"""
     import openai as _openai
     msg: str = str(exc).lower()
     if isinstance(exc, _openai.BadRequestError):
         keywords: list[str] = [
             "image_url",
             "input_audio",
+            "video_url",
             "content type",
             "content block",
             "unsupported",
@@ -35,12 +36,13 @@ def is_content_block_error(exc: Exception) -> bool:
             "multimodal",
             "vision",
             "audio",
+            "video",
         ]
         return any(k in msg for k in keywords)
     if isinstance(exc, _openai.APIStatusError):
         if exc.status_code != 400:
             return False
-        keywords400: list[str] = ["image", "audio", "content", "unsupported"]
+        keywords400: list[str] = ["image", "audio", "video", "content", "unsupported"]
         return any(k in msg for k in keywords400)
     return False
 
@@ -132,6 +134,7 @@ def strip_audio_blocks(messages: list[BaseMessage], session_id: str) -> int:
 # ── 转发描述特殊标签 ──
 FORWARDED_VISION_TAG = "forwarded_vision"
 FORWARDED_AUDIO_TAG = "forwarded_audio"
+FORWARDED_VIDEO_TAG = "forwarded_video"
 
 
 def wrap_forwarded_description(description: str, tag: str) -> str:
@@ -142,8 +145,7 @@ def wrap_forwarded_description(description: str, tag: str) -> str:
 async def _forward_unsupported_block(
     context: "ToolContext",
     profile: LLMProfile,
-    block: ImageBlock | AudioBlock,
-    ref_field: str,
+    block: ImageBlock | AudioBlock | VideoBlock,
     media_type: str,
     save_callback: "Callable[[str], None] | None" = None,
 ) -> str:
@@ -163,12 +165,18 @@ async def _forward_unsupported_block(
     # 无已有描述 → 转发借用
     from component.tools.modality_capability import forward_modality_to_ref_profile
 
-    ref_uid: str = getattr(profile, ref_field, "")
+    # 按 media_type 显式获取引用 uid，不使用反射
+    if media_type == "image":
+        ref_uid: str = profile.vision_image_profile
+    elif media_type == "audio":
+        ref_uid = profile.audio_profile
+    else:  # video
+        ref_uid = profile.vision_video_profile
     if not ref_uid:
         # 未配引用字段 → 报错
         raise ValueError(
             f"Active model does not support {media_type} in either tool or user messages, "
-            f"and no {ref_field} is configured. Please configure a reference profile "
+            f"and no {media_type} reference profile is configured. Please configure a reference profile "
             f"or switch to a model that supports {media_type}."
         )
 
@@ -188,13 +196,27 @@ async def _forward_unsupported_block(
                 image_url[:50],
             )
             return ""
+    elif isinstance(block, VideoBlock):
+        # 解析 data URL 提取 base64 和 mime_type
+        video_url = block.video_url
+        if video_url.startswith("data:"):
+            header, b64 = video_url.split(",", 1)
+            mime_type = header.split(";")[0].split(":")[1]
+            media_data = {"base64": b64, "mime_type": mime_type}
+        else:
+            # 非 data URL（HTTP URL），跳过转发，保留原块
+            logger.warning(
+                "preprocess_multimodal | skipping forward for non-data-URL video: %s",
+                video_url[:50],
+            )
+            return ""
     else:
         # AudioBlock
         media_data = {"base64": block.data, "format": block.format}
 
     # 转发借用
     description = await forward_modality_to_ref_profile(
-        context, profile, ref_field, media_data, media_type,
+        context, profile, media_data, media_type,
     )
 
     # 写入 forward_result_content（持久化）
@@ -212,7 +234,7 @@ async def preprocess_multimodal_blocks(
 ) -> list[BaseMessage]:
     """预检多模态块：自动探查能力，不支持时转发借用替换。
 
-    遍历 messages 中的 ImageBlock/AudioBlock：
+    遍历 messages 中的 ImageBlock/AudioBlock/VideoBlock：
     - 查缓存 → 有缓存直接判断
     - 无缓存 → 自动探查（ensure_modality_capability）
     - tool 或 user 支持 → 原样发送
@@ -238,12 +260,12 @@ async def preprocess_multimodal_blocks(
     if not profile or not model_name:
         return messages
 
-    # 快速检查 messages 中是否有 ImageBlock 或 AudioBlock
+    # 快速检查 messages 中是否有 ImageBlock 或 AudioBlock 或 VideoBlock
     has_multimodal = False
     for msg in messages:
         if isinstance(msg.content, list):
             for block in msg.content:
-                if isinstance(block, (ImageBlock, AudioBlock)):
+                if isinstance(block, (ImageBlock, AudioBlock, VideoBlock)):
                     has_multimodal = True
                     break
         if has_multimodal:
@@ -274,7 +296,7 @@ async def preprocess_multimodal_blocks(
                     # 都不支持
                     description = await _forward_unsupported_block(
                         context, profile, block,
-                        "vision_image_profile", "image",
+                        "image",
                         save_callback,
                     )
                     if description:
@@ -292,11 +314,29 @@ async def preprocess_multimodal_blocks(
                     # 都不支持
                     description = await _forward_unsupported_block(
                         context, profile, block,
-                        "audio_profile", "audio",
+                        "audio",
                         save_callback,
                     )
                     if description:
                         new_blocks.append(TextBlock(text=wrap_forwarded_description(description, FORWARDED_AUDIO_TAG)))
+                        blocks_replaced = True
+                        any_replaced = True
+                    else:
+                        # 非 data URL 跳过转发，保留原块
+                        new_blocks.append(block)
+            elif isinstance(block, VideoBlock):
+                if capability.video or capability.user_video:
+                    # 支持 → 原样保留
+                    new_blocks.append(block)
+                else:
+                    # 都不支持
+                    description = await _forward_unsupported_block(
+                        context, profile, block,
+                        "video",
+                        save_callback,
+                    )
+                    if description:
+                        new_blocks.append(TextBlock(text=wrap_forwarded_description(description, FORWARDED_VIDEO_TAG)))
                         blocks_replaced = True
                         any_replaced = True
                     else:
@@ -347,12 +387,25 @@ def build_audio_content_blocks(audio: dict, text_payload: str) -> list[MessageBl
     ]
 
 
+def build_video_content_blocks(video: dict, text_payload: str) -> list[MessageBlock]:
+    """构造 OpenAI 格式的 video_url + text content blocks。"""
+    b64: str = str(video.get("base64", ""))
+    mime: str = str(video.get("mime_type", "video/mp4"))
+    if not b64:
+        return [TextBlock(text=text_payload)]
+    return [
+        VideoBlock(video_url=f"data:{mime};base64,{b64}"),
+        TextBlock(text=text_payload),
+    ]
+
+
 def tool_result_to_content(result: Any) -> str | list[MessageBlock]:
     """把工具返回结果转换为 ToolResultMessage 可用的 content。
 
     - 字符串：原样返回。
     - 含 _image 字段的 dict：pop _image 后生成 [ImageBlock, TextBlock（元数据，不含 base64）]。
     - 含 _audio 字段的 dict：pop _audio 后生成 [AudioBlock, TextBlock（元数据，不含 base64）]。
+    - 含 _video 字段的 dict：pop _video 后生成 [VideoBlock, TextBlock（元数据，不含 base64）]。
     - 其他 dict：json.dumps 成字符串。
     - 其他：str(result)。
     """
@@ -365,6 +418,9 @@ def tool_result_to_content(result: Any) -> str | list[MessageBlock]:
         audio = result.pop("_audio", None)
         if isinstance(audio, dict) and audio.get("base64"):
             return build_audio_content_blocks(audio, json.dumps(result, ensure_ascii=False))
+        video = result.pop("_video", None)
+        if isinstance(video, dict) and video.get("base64"):
+            return build_video_content_blocks(video, json.dumps(result, ensure_ascii=False))
         return json.dumps(result, ensure_ascii=False)
     if isinstance(result, list):
         # 如果工具已经返回 MessageBlock 列表，直接透传
@@ -377,9 +433,9 @@ def tool_result_to_follow_up(
     result: dict,
     character_name: str,
 ) -> tuple[list[BaseMessage] | None, str | list[MessageBlock]]:
-    """提取 _user_image/_user_audio，构造 follow_up 用户消息。
+    """提取 _user_image/_user_audio/_user_video，构造 follow_up 用户消息。
 
-    从 result dict 中 pop _user_image/_user_audio，构造
+    从 result dict 中 pop _user_image/_user_audio/_user_video，构造
     CharacterConversationMessage(role=USER, character_name=system, content=[多模态块, 文本块])。
     剩余 dict 走 tool_result_to_content 生成纯文本 ToolResultMessage content。
 
@@ -390,8 +446,9 @@ def tool_result_to_follow_up(
     """
     user_image = result.pop("_user_image", None)
     user_audio = result.pop("_user_audio", None)
+    user_video = result.pop("_user_video", None)
 
-    if user_image is None and user_audio is None:
+    if user_image is None and user_audio is None and user_video is None:
         return None, tool_result_to_content(result)
 
     metadata_json = json.dumps(result, ensure_ascii=False)
@@ -401,6 +458,8 @@ def tool_result_to_follow_up(
         blocks.extend(build_image_content_blocks(user_image, metadata_json))
     if isinstance(user_audio, dict) and user_audio.get("base64"):
         blocks.extend(build_audio_content_blocks(user_audio, metadata_json))
+    if isinstance(user_video, dict) and user_video.get("base64"):
+        blocks.extend(build_video_content_blocks(user_video, metadata_json))
 
     if not blocks:
         return None, tool_result_to_content(result)
@@ -510,6 +569,14 @@ def blocks_from_dicts(blocks: list[dict[str, Any]]) -> list[MessageBlock]:
                     data=raw_data,
                     format=str(input_audio_block.get("format", "wav")),
                 ))
+        elif btype == "video_url":
+            video_url_block = block.get("video_url")
+            if isinstance(video_url_block, dict):
+                result.append(
+                    VideoBlock(video_url=str(video_url_block.get("url", ""))),
+                )
+            else:
+                result.append(VideoBlock(video_url=str(video_url_block or "")))
     return result
 
 

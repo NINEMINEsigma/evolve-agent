@@ -43,7 +43,7 @@ except Exception:  # pragma: no cover — PIL is optional
     logger.debug("PIL not available; image size parsing disabled", exc_info=True)
     PILImage = None  # type: ignore
 
-from .modality_capability import get_cached_vision_support, get_cached_audio_support, get_cached_user_vision_support, get_cached_user_audio_support, resolve_active_model_base_url, forward_modality_to_ref_profile, ensure_modality_capability
+from .modality_capability import get_cached_vision_support, get_cached_audio_support, get_cached_user_vision_support, get_cached_user_audio_support, get_cached_video_support, get_cached_user_video_support, resolve_active_model_base_url, forward_modality_to_ref_profile, ensure_modality_capability
 
 logger = logging.getLogger(__name__)
 
@@ -84,6 +84,13 @@ _AUDIO_FORMAT_MAP: dict[str, str] = {
     "audio/mpeg": "mp3",
     "audio/mp3": "mp3",
 }
+
+# 视频读取支持（OpenAI 兼容协议 video_url 扩展，Qwen-VL/vLLM 已验证）
+_SUPPORTED_VIDEO_MIMES: set[str] = {
+    "video/mp4",
+}
+
+_MAX_VIDEO_SIZE: int = 50 * 1024 * 1024
 
 
 def _guess_mime(path: str) -> str:
@@ -250,7 +257,7 @@ async def _handle_read(args: dict[str, Any], context: ToolContext | None = None)
                             path, mime_type, file_size, width, height,
                         )
                         description = await forward_modality_to_ref_profile(
-                            context, active_profile, "vision_image_profile",
+                            context, active_profile,
                             {"base64": b64, "mime_type": mime_type}, "image",
                         )
                         return {
@@ -410,7 +417,7 @@ async def _handle_read(args: dict[str, Any], context: ToolContext | None = None)
                             path, mime_type, file_size, audio_format,
                         )
                         description = await forward_modality_to_ref_profile(
-                            context, active_profile, "audio_profile",
+                            context, active_profile,
                             {"base64": b64, "format": audio_format}, "audio",
                         )
                         return {
@@ -509,6 +516,143 @@ async def _handle_read(args: dict[str, Any], context: ToolContext | None = None)
                 "_note": (
                     "Audio content attached as a multimodal block for direct analysis."
                 ),
+                "total_lines": 0,
+                "content": "",
+                "remaining": 0,
+                "offset": 0,
+                "limit": 0,
+                "entries": [],
+                "count": None,
+            }
+        # --- 视频分支（MIME 自动检测）---
+        if mime_type in _SUPPORTED_VIDEO_MIMES:
+            model_name, base_url, _profile = resolve_active_model_base_url(context)
+            if not model_name:
+                return tool_error(
+                    "No LLM model configured; cannot determine video capability.",
+                    path=path,
+                )
+            tool_video = get_cached_video_support(model_name, base_url)
+            if tool_video is None:
+                # 缓存未命中 → 自动探查
+                capability = await ensure_modality_capability(context)
+                tool_video = capability.video
+            if tool_video is False:
+                # tool 消息不支持，检查 user 消息是否支持
+                user_video = get_cached_user_video_support(model_name, base_url)
+                if user_video is None:
+                    capability = await ensure_modality_capability(context)
+                    user_video = capability.user_video
+                if user_video is False:
+                    # tool 和 user 都不支持 → 检查是否配置了引用字段
+                    active_profile = _profile
+                    if active_profile and active_profile.vision_video_profile:
+                        file_size = resolved.real.stat().st_size
+                        if file_size > _MAX_VIDEO_SIZE:
+                            return tool_error(
+                                f"Video too large: {file_size} bytes (max {_MAX_VIDEO_SIZE})",
+                                path=path, size=file_size,
+                            )
+                        try:
+                            raw_bytes = resolved.real.read_bytes()
+                            b64 = base64.b64encode(raw_bytes).decode("ascii")
+                        except Exception as exc:
+                            return tool_error(f"Failed to read video: {exc}", path=path)
+                        logger.info(
+                            "read_video | path=%s mime=%s size=%d (forwarding to ref profile)",
+                            path, mime_type, file_size,
+                        )
+                        description = await forward_modality_to_ref_profile(
+                            context, active_profile,
+                            {"base64": b64, "mime_type": mime_type}, "video",
+                        )
+                        return {
+                            "type": "video",
+                            "path": path,
+                            "absolute_path": str(resolved.real),
+                            "mime_type": mime_type,
+                            "size": file_size,
+                            "description": description,
+                            "_note": "Video content forwarded to the referenced profile for analysis.",
+                            "total_lines": 0,
+                            "content": "",
+                            "remaining": 0,
+                            "offset": 0,
+                            "limit": 0,
+                            "entries": [],
+                            "count": None,
+                        }
+                    return tool_error(
+                        f"Video not supported by model '{model_name}' in either tool or user messages, "
+                        f"and no vision_video_profile is configured.",
+                        path=path, model=model_name,
+                    )
+                if user_video is True:
+                    # 仅 user 消息支持 → _user_video 载荷
+                    file_size = resolved.real.stat().st_size
+                    if file_size > _MAX_VIDEO_SIZE:
+                        return tool_error(
+                            f"Video too large: {file_size} bytes (max {_MAX_VIDEO_SIZE})",
+                            path=path, size=file_size,
+                        )
+                    try:
+                        raw_bytes = resolved.real.read_bytes()
+                        b64 = base64.b64encode(raw_bytes).decode("ascii")
+                    except Exception as exc:
+                        return tool_error(f"Failed to read video: {exc}", path=path)
+                    logger.info(
+                        "read_video | path=%s mime=%s size=%d (user-message fallback)",
+                        path, mime_type, file_size,
+                    )
+                    return {
+                        "type": "video",
+                        "path": path,
+                        "absolute_path": str(resolved.real),
+                        "mime_type": mime_type,
+                        "size": file_size,
+                        "_user_video": {
+                            "base64": b64,
+                            "mime_type": mime_type,
+                        },
+                        "_note": (
+                            "Video content will be delivered as a user message after this tool round. "
+                            "Do NOT call any more tools — respond directly to receive the video."
+                        ),
+                        "total_lines": 0,
+                        "content": "",
+                        "remaining": 0,
+                        "offset": 0,
+                        "limit": 0,
+                        "entries": [],
+                        "count": None,
+                    }
+            # tool_video is True → 直接返回 _video 载荷
+            file_size = resolved.real.stat().st_size
+            if file_size > _MAX_VIDEO_SIZE:
+                return tool_error(
+                    f"Video too large: {file_size} bytes (max {_MAX_VIDEO_SIZE})",
+                    path=path, size=file_size,
+                )
+            try:
+                raw_bytes = resolved.real.read_bytes()
+                b64 = base64.b64encode(raw_bytes).decode("ascii")
+            except Exception as exc:
+                return tool_error(f"Failed to read video: {exc}", path=path)
+            logger.info(
+                "read_video | path=%s mime=%s size=%d",
+                path, mime_type, file_size,
+            )
+            return {
+                "type": "video",
+                "path": path,
+                "absolute_path": str(resolved.real),
+                "mime_type": mime_type,
+                "size": file_size,
+                "_video": {
+                    "base64": b64,
+                    "mime_type": mime_type,
+                },
+                "_note": "Video content attached as a multimodal block for direct analysis.",
                 "total_lines": 0,
                 "content": "",
                 "remaining": 0,
@@ -685,28 +829,28 @@ registry.register(
     name="Read",
     toolset="filesystem",
     schema={
-        # 读取文件内容（带行号前缀、总行数、绝对路径）、列出目录条目、或读取图片/音频文件（按 MIME 自动检测）。
+        # 读取文件内容（带行号前缀、总行数、绝对路径）、列出目录条目、或读取图片/音频/视频文件（按 MIME 自动检测）。
         # 支持命名空间前缀：ws:、fork:、fix:、skills: 及其他只读命名空间。
-        # 目录分支忽略 offset/limit，文件分支使用 offset/limit 分页，图片/音频分支忽略 offset/limit。
+        # 目录分支忽略 offset/limit，文件分支使用 offset/limit 分页，图片/音频/视频分支忽略 offset/limit。
         #
-        # ## 图片/音频分支（MIME 自动检测）
-        # 当文件 MIME 类型命中图片白名单（PNG/JPEG/WebP/GIF/BMP/TIFF/SVG）或音频白名单（WAV/MP3）时自动走对应分支。
-        # 多模态能力自动探测：首次读图/音频时自动探测并缓存，无需手动探查。探测结果分三态：
-        # - tool 消息支持 → 直接返回 _image/_audio（多模态块在 tool 消息中传递）
-        # - 仅 user 消息支持 → 返回 _user_image/_user_audio，多模态内容在当前轮工具调用完成后
+        # ## 图片/音频/视频分支（MIME 自动检测）
+        # 当文件 MIME 类型命中图片白名单（PNG/JPEG/WebP/GIF/BMP/TIFF/SVG）、音频白名单（WAV/MP3）或视频白名单（MP4）时自动走对应分支。
+        # 多模态能力自动探测：首次读图/音频/视频时自动探测并缓存，无需手动探查。探测结果分三态：
+        # - tool 消息支持 → 直接返回 _image/_audio/_video（多模态块在 tool 消息中传递）
+        # - 仅 user 消息支持 → 返回 _user_image/_user_audio/_user_video，多模态内容在当前轮工具调用完成后
         #   通过 follow_up 用户消息注入上下文，返回文本提醒模型不要再调用工具
         # - 都不支持但配了引用字段 → 返回 description（转发给被引用模型取描述文本）
         # - 都不支持且未配引用字段 → 返回错误，不读取文件
-        # 支持最大图片 20MB、音频 25MB。
-        # _image/_audio 载荷由 tool_result_to_content 提取并构造为 ImageBlock/AudioBlock + TextBlock（元数据）。
-        # _user_image/_user_audio 载荷由 tool_result_to_follow_up 提取并构造为 CharacterConversationMessage
+        # 支持最大图片 20MB、音频 25MB、视频 50MB。
+        # _image/_audio/_video 载荷由 tool_result_to_content 提取并构造为 ImageBlock/AudioBlock/VideoBlock + TextBlock（元数据）。
+        # _user_image/_user_audio/_user_video 载荷由 tool_result_to_follow_up 提取并构造为 CharacterConversationMessage
         # （role=USER, character_name=system, visible_characters=[当前角色]）。
-        # offset/limit 在图片/音频分支中被忽略（固定填充为 0）。
+        # offset/limit 在图片/音频/视频分支中被忽略（固定填充为 0）。
         #
         # ## 前置条件
         # - 路径必须存在（文件或目录均可）。
         # - 路径必须使用命名空间前缀。
-        # - 图片/音频分支：多模态能力自动探测（首次访问时自动探查并缓存），
+        # - 图片/音频/视频分支：多模态能力自动探测（首次访问时自动探查并缓存），
         #   至少 tool 或 user 消息之一支持该模态时才读取文件。
         #
         # ## 调用效果
@@ -718,7 +862,8 @@ registry.register(
         # 若仅 user 消息支持 → 返回 _user_image，多模态内容在当前轮工具调用完成后通过用户消息注入，
         # 返回文本提醒模型不要再调用工具；都不支持但配了引用字段 → 转发取描述文本；都不支持且未配 → 返回错误。
         # **音频分支**：与图片分支对称。
-        # offset/limit 在图片/音频分支中被忽略（固定填充为 0）。
+        # **视频分支**：与图片分支对称，使用 _video/_user_video/vision_video_profile。
+        # offset/limit 在图片/音频/视频分支中被忽略（固定填充为 0）。
         #
         # ## 返回
         # ```json
@@ -731,17 +876,17 @@ registry.register(
         # - 分页浏览大文件。
         # - 通过行号引用具体位置。
         # - 利用 `remaining` 判断是否需要继续分页读取。
-        # - 读取图片/音频文件（多模态能力自动探测，无需手动探查）。
+        # - 读取图片/音频/视频文件（多模态能力自动探测，无需手动探查）。
         # - 即使 provider 不支持 tool 消息多模态，只要支持 user 消息多模态，Read 仍可通过
-        #   follow_up 用户消息回退路径传递图片/音频内容。
+        #   follow_up 用户消息回退路径传递图片/音频/视频内容。
         #
         # ## 副作用/注意
         # - 无副作用，纯查询。
         # - offset < 0 或 limit < 1 返回错误。
         # - 文件不存在或沙箱拒绝访问返回描述性错误。
-        # - 图片/音频分支：未探测或 tool/user 消息都不支持且未配引用字段时返回错误，不读取文件。
+        # - 图片/音频/视频分支：未探测或 tool/user 消息都不支持且未配引用字段时返回错误，不读取文件。
         # - tool/user 消息都不支持但配了引用字段时，转发给被引用模型取描述文本，返回 description 字段。
-        # - 仅 user 消息支持时，返回 _user_image/_user_audio 而非 _image/_audio，
+        # - 仅 user 消息支持时，返回 _user_image/_user_audio/_user_video 而非 _image/_audio/_video，
         #   多模态内容将在当前轮工具调用完成后通过用户消息注入，返回文本提醒不要再调用工具。
         "description": """Read file content (with line numbers, total lines, absolute path), list directory entries, or read an image/audio file (auto-detected by MIME type). Supports namespace prefixes: ws:, fork:, fix:, skills:, and read-only namespaces.
 
@@ -762,7 +907,9 @@ offset and limit are ignored for images (filled as 0).
 
 **Audio branch**: Auto-detected by MIME type (WAV, MP3; max 25 MB). Same four-state delivery as the image branch, using `_audio` / `_user_audio` / `description` (forwarded) / error. offset and limit are ignored for audio (filled as 0).
 
-All branches return absolute_path (resolved absolute path), total_lines (line count; 0 for directories/images/audio), entries (directory entries; empty array for files/images/audio), and a type discriminant ("file", "directory", "image", or "audio").
+**Video branch**: Auto-detected by MIME type (MP4; max 50 MB). Same four-state delivery as the image branch, using `_video` / `_user_video` / `description` (forwarded, via `vision_video_profile`) / error. offset and limit are ignored for video (filled as 0).
+
+All branches return absolute_path (resolved absolute path), total_lines (line count; 0 for directories/images/audio/video), entries (directory entries; empty array for files/images/audio/video), and a type discriminant ("file", "directory", "image", "audio", or "video").
 
 ## Returns
 File branch:
@@ -783,11 +930,20 @@ Image branch (user-message fallback path):
 ```
 `width`/`height` are parsed via Pillow; `null` for SVG or on parse failure.
 
+Video branch (tool-message path):
+```json
+{"type": "video", "path": "ws:uploads/demo.mp4", "absolute_path": "...", "mime_type": "video/mp4", "size": 123456, "_video": {"base64": "...", "mime_type": "video/mp4"}, "_note": "Video content attached as a multimodal block for direct analysis.", "total_lines": 0, "content": "", "remaining": 0, "offset": 0, "limit": 0, "entries": [], "count": null}
+```
+Video branch (user-message fallback path):
+```json
+{"type": "video", "path": "ws:uploads/demo.mp4", "absolute_path": "...", "mime_type": "video/mp4", "size": 123456, "_user_video": {"base64": "...", "mime_type": "video/mp4"}, "_note": "Video content will be delivered as a user message after this tool round. Do NOT call any more tools...", "total_lines": 0, "content": "", "remaining": 0, "offset": 0, "limit": 0, "entries": [], "count": null}
+```
+
 ## When to Use
-- Targets a file → file branch; targets a directory → directory branch; image/audio files → image/audio branch (auto-detected).
+- Targets a file → file branch; targets a directory → directory branch; image/audio/video files → image/audio/video branch (auto-detected).
 - Use skills: prefix to replace the old read_skill_file tool (e.g. Read(path="skills:my-skill/scripts/hello.py")).
 - Use absolute_path to resolve paths when you have a readable target.
-- Read image/audio files: multimodal capability is automatically probed on first access. Even if the provider rejects multimodal in tool messages, Read can still deliver images/audio via a follow-up user message when the provider accepts multimodal in user messages.
+- Read image/audio/video files: multimodal capability is automatically probed on first access. Even if the provider rejects multimodal in tool messages, Read can still deliver images/audio/video via a follow-up user message when the provider accepts multimodal in user messages.
 
 ## Side Effects / Notes
 - No file system side effects, read-only query.

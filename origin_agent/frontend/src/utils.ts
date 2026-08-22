@@ -1,4 +1,4 @@
-import type { ChatMessage, ContentBlock, DownloadInfo, PendingImage, PendingAudio, SubagentSession } from "./types";
+import type { ChatMessage, ContentBlock, DownloadInfo, PendingImage, PendingAudio, PendingVideo, SubagentSession } from "./types";
 import { WS_IN } from "./constants/ws";
 
 export function formatTimeSec(sec: number): string {
@@ -231,10 +231,11 @@ export function escapeHtml(text: string): string {
 
 // ── 多模态内容转换工具 ──────────────────────────────────────
 
-/** 将 ContentBlock[] 转换为 RichInput 可用的 HTML，含内联图片/音频 span。 */
-export function contentBlocksToHtml(blocks: ContentBlock[], images: PendingImage[], audios: PendingAudio[]): string {
+/** 将 ContentBlock[] 转换为 RichInput 可用的 HTML，含内联图片/音频/视频 span。 */
+export function contentBlocksToHtml(blocks: ContentBlock[], images: PendingImage[], audios: PendingAudio[], videos: PendingVideo[]): string {
   const imageMap = new Map(images.map((img) => [img.id, img]));
   const audioMap = new Map(audios.map((au) => [au.id, au]));
+  const videoMap = new Map(videos.map((vd) => [vd.id, vd]));
   let html = "";
   for (const block of blocks) {
     if (block.type === "text") {
@@ -252,27 +253,34 @@ export function contentBlocksToHtml(blocks: ContentBlock[], images: PendingImage
       const entry = Array.from(audioMap.entries()).find(([, au]) => au.dataUrl === dataUrl);
       const id = entry ? entry[0] : generateUUID();
       html += `<span class="input-inline-audio" contenteditable="false" data-audio-id="${id}" data-audio-src="${dataUrl}"><audio src="${dataUrl}" controls></audio><button type="button" class="input-inline-remove">x</button></span>`;
+    } else if (block.type === "video_url") {
+      const videoUrl = block.video_url.url;
+      const entry = Array.from(videoMap.entries()).find(([, vd]) => vd.dataUrl === videoUrl);
+      const id = entry ? entry[0] : generateUUID();
+      html += `<span class="input-inline-video" contenteditable="false" data-video-id="${id}" data-video-src="${videoUrl}"><video src="${videoUrl}" controls></video><button type="button" class="input-inline-remove">x</button></span>`;
     }
   }
   return html;
 }
 
 /** 从 RichInput 的 DOM 中按遍历顺序提取 ContentBlock[]。 */
-export function extractContentBlocks(el: HTMLDivElement | null, images: PendingImage[], audios: PendingAudio[]): ContentBlock[] {
+export function extractContentBlocks(el: HTMLDivElement | null, images: PendingImage[], audios: PendingAudio[], videos: PendingVideo[]): ContentBlock[] {
   if (!el) return [];
   const blocks: ContentBlock[] = [];
   const imageMap = new Map(images.map((img) => [img.id, img]));
   const audioMap = new Map(audios.map((au) => [au.id, au]));
+  const videoMap = new Map(videos.map((vd) => [vd.id, vd]));
 
   const imageNodes = el.querySelectorAll<HTMLSpanElement>(".input-inline-image");
   const audioNodes = el.querySelectorAll<HTMLSpanElement>(".input-inline-audio");
-  if (imageNodes.length === 0 && audioNodes.length === 0) {
+  const videoNodes = el.querySelectorAll<HTMLSpanElement>(".input-inline-video");
+  if (imageNodes.length === 0 && audioNodes.length === 0 && videoNodes.length === 0) {
     const text = (el.innerText || "").replace(/\u200B/g, "").replace(/\n{3,}/g, "\n\n").trim();
     if (text) blocks.push({ type: "text", text });
     return blocks;
   }
 
-  const mediaPositions = new Map<Node, { type: "image" | "audio"; data: PendingImage | PendingAudio }>();
+  const mediaPositions = new Map<Node, { type: "image" | "audio" | "video"; data: PendingImage | PendingAudio | PendingVideo }>();
   imageNodes.forEach((node) => {
     const id = node.dataset.imageId;
     const img = id ? imageMap.get(id) : undefined;
@@ -294,6 +302,23 @@ export function extractContentBlocks(el: HTMLDivElement | null, images: PendingI
         mediaPositions.set(node, {
           type: "audio",
           data: { id: id || generateUUID(), file: new File([], ""), dataUrl, format } as PendingAudio,
+        });
+      }
+    }
+  });
+  videoNodes.forEach((node) => {
+    const id = node.dataset.videoId;
+    const vd = id ? videoMap.get(id) : undefined;
+    if (vd) {
+      mediaPositions.set(node, { type: "video", data: vd });
+    } else {
+      // Fallback: 从 DOM 中的 <video> src 属性直接提取
+      const videoEl = node.querySelector("video");
+      const dataUrl = videoEl?.src || "";
+      if (dataUrl.startsWith("data:video/")) {
+        mediaPositions.set(node, {
+          type: "video",
+          data: { id: id || generateUUID(), file: new File([], ""), dataUrl } as PendingVideo,
         });
       }
     }
@@ -331,11 +356,24 @@ export function extractContentBlocks(el: HTMLDivElement | null, images: PendingI
         }
         return;
       }
+      // 直接从 DOM 提取视频，不依赖 mediaPositions map 或 data 属性
+      if (el.classList?.contains("input-inline-video")) {
+        flushText();
+        const videoEl = el.querySelector("video");
+        const src = videoEl?.getAttribute("src") || "";
+        const match = src.match(/^data:video\/([^;]+)(?:;[^;]*)*;base64,(.+)$/);
+        if (match) {
+          blocks.push({ type: "video_url", video_url: { url: src } });
+        }
+        return;
+      }
       if (mediaPositions.has(el)) {
         flushText();
         const media = mediaPositions.get(el)!;
         if (media.type === "image") {
           blocks.push({ type: "image_url", image_url: { url: (media.data as PendingImage).dataUrl } });
+        } else if (media.type === "video") {
+          blocks.push({ type: "video_url", video_url: { url: (media.data as PendingVideo).dataUrl } });
         }
         return;
       }

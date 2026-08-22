@@ -24,6 +24,7 @@ const EMPTY_PROFILE: LlmProfile = {
   uid: "",
   vision_image_profile: "",
   audio_profile: "",
+  vision_video_profile: "",
 };
 
 function generateDuplicateName(sourceName: string, existingNames: string[]): string {
@@ -417,6 +418,21 @@ export default function LlmProfileDrawer({
                     className="llm-profile-input"
                     value={draft.audio_profile}
                     onChange={(e) => updateField("audio_profile", e.target.value)}
+                    disabled={!isEditing}
+                  >
+                    <option value="">不引用</option>
+                    {profiles
+                      .filter((p) => p.uid !== draft.uid)
+                      .map((p) => (
+                        <option key={p.uid} value={p.uid}>{p.name}</option>
+                      ))}
+                  </select>
+
+                  <label className="llm-profile-label">视觉（读视频）配置</label>
+                  <select
+                    className="llm-profile-input"
+                    value={draft.vision_video_profile}
+                    onChange={(e) => updateField("vision_video_profile", e.target.value)}
                     disabled={!isEditing}
                   >
                     <option value="">不引用</option>

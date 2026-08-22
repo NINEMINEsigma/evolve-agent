@@ -364,6 +364,27 @@
   border-radius: var(--radius-xs);
 }
 
+.input-inline-video {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  vertical-align: middle;
+  margin: 0 3px;
+  padding: 2px 4px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-hover);
+  border: 1px solid var(--border);
+  user-select: none;
+  cursor: default;
+}
+
+.input-inline-video video {
+  width: 80px;
+  height: 45px;
+  object-fit: cover;
+  border-radius: var(--radius-xs);
+}
+
 .input-inline-remove {
   width: 16px;
   height: 16px;

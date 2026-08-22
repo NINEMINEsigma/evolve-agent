@@ -77,7 +77,7 @@ async def finalize_tool_result(
     # 转换为可保存到 History 的 content
     # 检查是否需要 follow_up（user 消息多模态回退路径）
     follow_up_messages: list[BaseMessage] | None = None
-    if isinstance(result, dict) and ("_user_image" in result or "_user_audio" in result):
+    if isinstance(result, dict) and ("_user_image" in result or "_user_audio" in result or "_user_video" in result):
         follow_up_messages, content = tool_result_to_follow_up(result, character_name)
     else:
         content = tool_result_to_content(result)

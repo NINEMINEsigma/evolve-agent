@@ -224,7 +224,7 @@ class MultiAgentWorker:
                 self._loop.loop.session_id, self.character_name, turn, len(full_messages),
             )
 
-            # 多模态块预检：检测 messages 中的 ImageBlock/AudioBlock，
+            # 多模态块预检：检测 messages 中的 ImageBlock/AudioBlock/VideoBlock，
             # 自动探查能力，不支持时转发借用并替换为描述文本
             _ctx = ToolContext(loop=self._loop.loop, session_id=self._loop.loop.session_id)
             full_messages = await preprocess_multimodal_blocks(

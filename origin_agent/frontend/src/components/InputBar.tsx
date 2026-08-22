@@ -3,7 +3,7 @@ import RichInput from "./RichInput";
 import TaskProgressPanel from "./TaskProgressPanel";
 import InputMorph, { MorphItem } from "./InputMorph";
 import RecorderButton from "./RecorderButton";
-import type { PendingImage, PendingAudio } from "../hooks/useWebSocket";
+import type { PendingImage, PendingAudio, PendingVideo } from "../hooks/useWebSocket";
 import type { AskRequest, ConfirmRequest, SubagentSession, TargetSessionOption, TaskProgress } from "../types";
 import { escapeHtml } from "../utils";
 import { SID_DISPLAY_LEN } from "../constants/session";
@@ -33,6 +33,9 @@ interface InputBarProps {
   pendingAudios: PendingAudio[];
   onRemovePendingAudio: (id: string) => void;
   onPasteAudio: (file: File) => Promise<{ id: string; dataUrl: string } | null>;
+  pendingVideos: PendingVideo[];
+  onRemovePendingVideo: (id: string) => void;
+  onPasteVideo: (file: File) => Promise<{ id: string; dataUrl: string } | null>;
   inputRef: RefObject<HTMLDivElement>;
   subagentSessions: Record<string, SubagentSession>;
   targetSessions: string[];
@@ -73,6 +76,9 @@ export default function InputBar({
   pendingAudios,
   onRemovePendingAudio,
   onPasteAudio,
+  pendingVideos,
+  onRemovePendingVideo,
+  onPasteVideo,
   inputRef,
   subagentSessions,
   targetSessions,
@@ -268,6 +274,9 @@ export default function InputBar({
             onPasteAudio={onPasteAudio}
             onRemoveAudio={onRemovePendingAudio}
             pendingAudios={pendingAudios}
+            onPasteVideo={onPasteVideo}
+            onRemoveVideo={onRemovePendingVideo}
+            pendingVideos={pendingVideos}
             disabled={(waiting && !morphActive) || !hasActiveProfile}
             placeholder={
               morphItem

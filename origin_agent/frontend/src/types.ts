@@ -28,7 +28,12 @@ export interface AudioContentBlock {
   input_audio: { data: string; format: string };
 }
 
-export type ContentBlock = TextContentBlock | ImageContentBlock | AudioContentBlock;
+export interface VideoContentBlock {
+  type: "video_url";
+  video_url: { url: string };
+}
+
+export type ContentBlock = TextContentBlock | ImageContentBlock | AudioContentBlock | VideoContentBlock;
 export type MessageContent = string | ContentBlock[];
 
 export type MessageType =
@@ -259,6 +264,12 @@ export interface PendingAudio {
   format: string;
 }
 
+export interface PendingVideo {
+  id: string;
+  file: File;
+  dataUrl: string;
+}
+
 export interface LlmProfile {
   name: string;
   llm_client_name: string;
@@ -272,4 +283,5 @@ export interface LlmProfile {
   uid: string;
   vision_image_profile: string;
   audio_profile: string;
+  vision_video_profile: string;
 }

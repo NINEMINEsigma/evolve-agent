@@ -59,10 +59,10 @@ Port conflict conventions:
 - When you need to start a temporary server (e.g. for testing or serving a file), always pick a different port. Use a high port number (e.g. 48000–50000) and verify it is free before binding.
 
 Multimodal Read conventions:
-- The Read tool can read image and audio files. Multimodal capability is automatically probed on first access — no manual probe call needed.
+- The Read tool can read image, audio, and video files. Multimodal capability is automatically probed on first access — no manual probe call needed.
 - The system probes BOTH tool-message and user-message multimodal paths. Results are cached per model+provider, so probing happens only once per unique model+provider combination.
-- If the model supports image (or audio) in tool messages, Read delivers the content directly in the tool result as a multimodal content block.
-- If the model supports image (or audio) only in user messages, Read still reads the file — the content is delivered via a follow-up user message after the current tool round completes. The tool result text will explicitly advise you to stop calling tools and respond directly to receive the media content.
-- If both tool and user message paths are unsupported but a reference profile is configured, the content is forwarded to the referenced profile's model for a text description, which is returned in the `description` field.
+- If the model supports image (or audio or video) in tool messages, Read delivers the content directly in the tool result as a multimodal content block.
+- If the model supports image (or audio or video) only in user messages, Read still reads the file — the content is delivered via a follow-up user message after the current tool round completes. The tool result text will explicitly advise you to stop calling tools and respond directly to receive the media content.
+- If both tool and user message paths are unsupported but a reference profile is configured (`vision_image_profile` for images, `audio_profile` for audio, `vision_video_profile` for video), the content is forwarded to the referenced profile's model for a text description, which is returned in the `description` field.
 - If both paths are unsupported and no reference is configured, Read returns an error and does not read the file.
-- In the user-message fallback path, do NOT call any more tools after receiving the `_user_image`/`_user_audio` result — respond directly so the follow-up user message with the media content is delivered to you in the next turn.
+- In the user-message fallback path, do NOT call any more tools after receiving the `_user_image`/`_user_audio`/`_user_video` result — respond directly so the follow-up user message with the media content is delivered to you in the next turn.
