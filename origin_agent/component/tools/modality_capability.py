@@ -36,6 +36,9 @@ from entity.messages import (
     FunctionCall,
 )
 
+from system.llm_profile_store import load_profiles
+from entry.agent_support.multimodal import build_image_content_blocks, build_audio_content_blocks
+
 if TYPE_CHECKING:
     from entry.base_agent_loop import ToolContext
 
@@ -77,6 +80,7 @@ def _resolve_base_url(base_url: str | None) -> str:
     return ""
 
 
+
 def resolve_active_model_base_url(
     context: ToolContext | None = None,
 ) -> tuple[str, str, LLMProfile | None]:
@@ -99,6 +103,92 @@ def resolve_active_model_base_url(
 
     # 无 active profile — 探针返回不可用而非尝试建 client
     return "", "", None
+
+
+async def forward_modality_to_ref_profile(
+    context: ToolContext | None,
+    active_profile: LLMProfile,
+    ref_field: str,
+    media_data: dict,
+    media_type: str,
+) -> str:
+    """转发多模态内容到被引用 profile 对应的模型，返回描述文本。
+
+    成功返回被引用模型的描述文本；失败返回错误信息+提示词模板包装。
+    供 Read 工具在活跃模型 tool+user 都不支持该模态时调用。
+
+    Args:
+        context: 工具执行上下文，用于获取 runtime_context.agentspace
+        active_profile: 当前活跃的 LLMProfile（含 vision_image_profile/audio_profile 引用字段）
+        ref_field: 引用字段名，"vision_image_profile" 或 "audio_profile"
+        media_data: 多模态数据 dict：
+            - 图片: {"base64": str, "mime_type": str}
+            - 音频: {"base64": str, "format": str}
+        media_type: "image" 或 "audio"
+
+    Returns:
+        描述文本字符串（成功=模型描述，失败=错误信息+提示词模板）
+    """
+    from system.templates import read_template
+
+    def _error_text(ref_uid: str, error_message: str) -> str:
+        """构造转发错误文本（从模板加载并填充占位符）。"""
+        return (
+            read_template("forwarded/forwarded_error_template.txt")
+            .replace("{{media_type}}", media_type)
+            .replace("{{ref_uid}}", ref_uid)
+            .replace("{{error_message}}", error_message)
+        )
+
+    ref_uid: str = getattr(active_profile, ref_field, "")
+    if not ref_uid:
+        return _error_text("(empty)", f"Active profile has no {ref_field} configured")
+
+    # 加载全部 profiles 按 uid 查找被引用 profile
+    ctx = context.runtime_context if context is not None else get_runtime_context()
+    profiles = load_profiles(ctx.agentspace)
+    ref_profile: LLMProfile | None = next(
+        (p for p in profiles if p.uid == ref_uid), None
+    )
+    if ref_profile is None:
+        return _error_text(ref_uid, "Referenced profile not found in profile list (dangling reference)")
+
+    if not ref_profile.llm_client_name:
+        return _error_text(ref_uid, f"Referenced profile '{ref_profile.name}' has no llm_client_name")
+
+    # 构造提示词（从模板加载）
+    prompt: str = read_template(
+        "forwarded/forwarded_image_prompt.txt" if media_type == "image"
+        else "forwarded/forwarded_audio_prompt.txt"
+    )
+
+    # 构造多模态块
+    if media_type == "image":
+        blocks = build_image_content_blocks(media_data, prompt)
+    else:
+        blocks = build_audio_content_blocks(media_data, prompt)
+
+    # 构造单条 user 消息
+    messages = [BaseMessage(role=Role.USER, content=blocks)]
+
+    # 建客户端并发送
+    try:
+        client = create_llm_client(ref_profile.llm_client_name, ctx, ref_profile)
+        response = await client.chat(messages)
+        description: str = response.content or ""
+        if not description.strip():
+            return _error_text(ref_uid, f"Referenced profile '{ref_profile.name}' returned an empty description")
+        logger.info(
+            "forward_modality | session=%s ref_profile=%s media_type=%s ref_field=%s success",
+            context.session_id if context else "", ref_profile.name, media_type, ref_field,
+        )
+        return description
+    except Exception as exc:
+        logger.warning(
+            "forward_modality | session=%s ref_profile=%s media_type=%s ref_field=%s error=%s",
+            context.session_id if context else "", ref_profile.name, media_type, ref_field, exc,
+        )
+        return _error_text(ref_uid, f"{type(exc).__name__}: {exc}")
 
 
 def _cache_key(model: str, base_url: str | None = None) -> str:

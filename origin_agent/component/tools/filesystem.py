@@ -43,7 +43,7 @@ except Exception:  # pragma: no cover — PIL is optional
     logger.debug("PIL not available; image size parsing disabled", exc_info=True)
     PILImage = None  # type: ignore
 
-from .modality_capability import get_cached_vision_support, get_cached_audio_support, get_cached_user_vision_support, get_cached_user_audio_support, resolve_active_model_base_url
+from .modality_capability import get_cached_vision_support, get_cached_audio_support, get_cached_user_vision_support, get_cached_user_audio_support, resolve_active_model_base_url, forward_modality_to_ref_profile
 
 logger = logging.getLogger(__name__)
 
@@ -159,7 +159,7 @@ def _try_attach_lsp_diagnostics(logical_path: str, content: str) -> list[dict] |
 # 工具 handler
 # ---------------------------------------------------------------------------
 
-def _handle_read(args: dict[str, Any], context: ToolContext | None = None) -> dict:
+async def _handle_read(args: dict[str, Any], context: ToolContext | None = None) -> dict:
     path: str = str(args.get("path", "")).strip()
     if not path:
         return tool_error("path is required", path=path)
@@ -236,6 +236,51 @@ def _handle_read(args: dict[str, Any], context: ToolContext | None = None) -> di
                         model=model_name,
                     )
                 if user_vision is False:
+                    # tool 和 user 都不支持 → 检查是否配置了引用字段
+                    active_profile = _profile
+                    if active_profile and active_profile.vision_image_profile:
+                        # 读取文件 + base64
+                        file_size = resolved.real.stat().st_size
+                        if file_size > _MAX_IMAGE_SIZE:
+                            return tool_error(
+                                f"Image too large: {file_size} bytes (max {_MAX_IMAGE_SIZE})",
+                                path=path, size=file_size,
+                            )
+                        try:
+                            raw_bytes = resolved.real.read_bytes()
+                            b64 = base64.b64encode(raw_bytes).decode("ascii")
+                        except Exception as exc:
+                            return tool_error(f"Failed to read image: {exc}", path=path)
+                        width, height = _parse_size(raw_bytes, mime_type)
+                        logger.info(
+                            "read_image | path=%s mime=%s size=%d w=%s h=%s (forwarding to ref profile)",
+                            path, mime_type, file_size, width, height,
+                        )
+                        description = await forward_modality_to_ref_profile(
+                            context, active_profile, "vision_image_profile",
+                            {"base64": b64, "mime_type": mime_type}, "image",
+                        )
+                        return {
+                            "type": "image",
+                            "path": path,
+                            "absolute_path": str(resolved.real),
+                            "mime_type": mime_type,
+                            "size": file_size,
+                            "width": width,
+                            "height": height,
+                            "description": description,
+                            "_note": (
+                                "Image content was forwarded to the referenced vision profile for description. "
+                                "The description field contains the model's analysis of the image."
+                            ),
+                            "total_lines": 0,
+                            "content": "",
+                            "remaining": 0,
+                            "offset": 0,
+                            "limit": 0,
+                            "entries": [],
+                            "count": None,
+                        }
                     return tool_error(
                         f"This provider does not support images inside either tool messages or user messages, "
                         f"so the Read tool cannot deliver image content to the model.",
@@ -359,6 +404,48 @@ def _handle_read(args: dict[str, Any], context: ToolContext | None = None) -> di
                         model=model_name,
                     )
                 if user_audio is False:
+                    # tool 和 user 都不支持 → 检查是否配置了引用字段
+                    active_profile = _profile
+                    if active_profile and active_profile.audio_profile:
+                        file_size = resolved.real.stat().st_size
+                        if file_size > _MAX_AUDIO_SIZE:
+                            return tool_error(
+                                f"Audio too large: {file_size} bytes (max {_MAX_AUDIO_SIZE})",
+                                path=path, size=file_size,
+                            )
+                        try:
+                            raw_bytes = resolved.real.read_bytes()
+                            b64 = base64.b64encode(raw_bytes).decode("ascii")
+                        except Exception as exc:
+                            return tool_error(f"Failed to read audio: {exc}", path=path)
+                        audio_format = _AUDIO_FORMAT_MAP.get(mime_type, "wav")
+                        logger.info(
+                            "read_audio | path=%s mime=%s size=%d format=%s (forwarding to ref profile)",
+                            path, mime_type, file_size, audio_format,
+                        )
+                        description = await forward_modality_to_ref_profile(
+                            context, active_profile, "audio_profile",
+                            {"base64": b64, "format": audio_format}, "audio",
+                        )
+                        return {
+                            "type": "audio",
+                            "path": path,
+                            "absolute_path": str(resolved.real),
+                            "mime_type": mime_type,
+                            "size": file_size,
+                            "description": description,
+                            "_note": (
+                                "Audio content was forwarded to the referenced audio profile for description. "
+                                "The description field contains the model's analysis of the audio."
+                            ),
+                            "total_lines": 0,
+                            "content": "",
+                            "remaining": 0,
+                            "offset": 0,
+                            "limit": 0,
+                            "entries": [],
+                            "count": None,
+                        }
                     return tool_error(
                         f"This provider does not support audio inside either tool messages or user messages, "
                         f"so the Read tool cannot deliver audio content to the model.",
@@ -622,7 +709,8 @@ registry.register(
         # - tool 消息支持 → 直接返回 _image/_audio（多模态块在 tool 消息中传递）
         # - 仅 user 消息支持 → 返回 _user_image/_user_audio，多模态内容在当前轮工具调用完成后
         #   通过 follow_up 用户消息注入上下文，返回文本提醒模型不要再调用工具
-        # - 都不支持 → 返回错误，不读取文件
+        # - 都不支持但配了引用字段 → 返回 description（转发给被引用模型取描述文本）
+        # - 都不支持且未配引用字段 → 返回错误，不读取文件
         # 支持最大图片 20MB、音频 25MB。
         # _image/_audio 载荷由 tool_result_to_content 提取并构造为 ImageBlock/AudioBlock + TextBlock（元数据）。
         # _user_image/_user_audio 载荷由 tool_result_to_follow_up 提取并构造为 CharacterConversationMessage
@@ -642,7 +730,7 @@ registry.register(
         # offset/limit 在目录分支中被忽略（固定填充为 0）。
         # **图片分支**：按 MIME 自动检测。若 tool 消息支持 → 返回 _image（多模态块在 tool 消息中传递）；
         # 若仅 user 消息支持 → 返回 _user_image，多模态内容在当前轮工具调用完成后通过用户消息注入，
-        # 返回文本提醒模型不要再调用工具；都不支持 → 返回错误。
+        # 返回文本提醒模型不要再调用工具；都不支持但配了引用字段 → 转发取描述文本；都不支持且未配 → 返回错误。
         # **音频分支**：与图片分支对称。
         # offset/limit 在图片/音频分支中被忽略（固定填充为 0）。
         #
@@ -665,7 +753,8 @@ registry.register(
         # - 无副作用，纯查询。
         # - offset < 0 或 limit < 1 返回错误。
         # - 文件不存在或沙箱拒绝访问返回描述性错误。
-        # - 图片/音频分支：未探测或 tool/user 消息都不支持时返回错误，不读取文件。
+        # - 图片/音频分支：未探测或 tool/user 消息都不支持且未配引用字段时返回错误，不读取文件。
+        # - tool/user 消息都不支持但配了引用字段时，转发给被引用模型取描述文本，返回 description 字段。
         # - 仅 user 消息支持时，返回 _user_image/_user_audio 而非 _image/_audio，
         #   多模态内容将在当前轮工具调用完成后通过用户消息注入，返回文本提醒不要再调用工具。
         "description": """Read file content (with line numbers, total lines, absolute path), list directory entries, or read an image/audio file (auto-detected by MIME type). Supports namespace prefixes: ws:, fork:, fix:, skills:, and read-only namespaces.
@@ -681,10 +770,11 @@ registry.register(
 **Image branch**: Auto-detected by MIME type (PNG, JPEG, WebP, GIF, BMP, TIFF, SVG; max 20 MB). Delivery path depends on probe results:
 - `vision_capable=true` → image is delivered directly in the tool message as an `_image` payload (multimodal content block).
 - `vision_capable=false` but `user_vision_capable=true` → image is delivered via a follow-up user message after the current tool round completes. The tool result contains `_user_image` and a text note advising you NOT to call any more tools — respond directly to receive the image.
-- Both false → error, file is not read.
+- Both false but `vision_image_profile` is set → image is forwarded to the referenced profile's model, which returns a detailed text description. The tool result contains a `description` field (no multimodal blocks) with the forwarded analysis.
+- Both false and no reference configured → error, file is not read.
 offset and limit are ignored for images (filled as 0).
 
-**Audio branch**: Auto-detected by MIME type (WAV, MP3; max 25 MB). Same three-state delivery as the image branch, using `_audio` / `_user_audio` / error. offset and limit are ignored for audio (filled as 0).
+**Audio branch**: Auto-detected by MIME type (WAV, MP3; max 25 MB). Same four-state delivery as the image branch, using `_audio` / `_user_audio` / `description` (forwarded) / error. offset and limit are ignored for audio (filled as 0).
 
 All branches return absolute_path (resolved absolute path), total_lines (line count; 0 for directories/images/audio), entries (directory entries; empty array for files/images/audio), and a type discriminant ("file", "directory", "image", or "audio").
 
@@ -752,6 +842,7 @@ Image branch (user-message fallback path):
     handler=_handle_read,
     emoji="📖",
     no_timeout=True,
+    is_async=True,
 )
 
 

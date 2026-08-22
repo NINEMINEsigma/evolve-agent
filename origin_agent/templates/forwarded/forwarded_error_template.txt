@@ -1,0 +1,9 @@
+[Forwarding Error]
+Failed to forward {{media_type}} content to the referenced profile (uid: {{ref_uid}}).
+Reason: {{error_message}}
+
+The active model does not support {{media_type}} in either tool messages or user messages, and forwarding to the referenced profile also failed. Please guide the user to:
+1. Check that the referenced profile still exists in the LLM profile settings
+2. Verify the referenced profile's model supports {{media_type}} content
+3. Ensure the referenced profile's API connection is working
+4. Or call probe_modality_capability to re-probe the active model's capabilities
