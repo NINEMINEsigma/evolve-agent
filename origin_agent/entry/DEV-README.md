@@ -207,8 +207,7 @@ sequenceDiagram
 
 ### `multimodal.py`
 
-- `supports_vision()`：检测模型是否支持图像输入。
-- `strip_image_blocks()`：当模型不支持图像时，剥离图片 content blocks 并降级为文本提示。
+- `wrap_forwarded_description()`：用特殊标签包裹转发描述文本。
 - `tool_result_to_content()`：将工具结果转换为 LLM content blocks。
 - `content_to_text()`：将 content blocks 提取为纯文本摘要（用于日志或前端展示）。
 - `summarize_message_for_log()`：安全截断消息内容用于日志预览。

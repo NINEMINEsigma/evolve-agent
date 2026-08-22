@@ -218,3 +218,11 @@ User mention tags (important):
 - When you see an ``@ws:...`` tag, use ``Read`` with the ``ws:`` path to read the referenced file, or use ``Read`` / ``search_files`` if it is a directory.
 - When you see a ``/skill:...`` tag, call ``RecallSkill`` with the skill name to load its full content into context.
 - Always honor these references proactively — they indicate the user wants you to use that file or skill in your response.
+
+Multimodal content forwarding (important):
+- When you receive a user message containing images or audio, the system checks whether the active model can process that modality. If the model does NOT support it in either tool or user messages, but a reference profile is configured, the system automatically forwards the original media to the referenced profile's model and replaces the multimodal block with a text description wrapped in special tags:
+  - ``<forwarded_vision>...</forwarded_vision>`` — a system-generated description of an image, produced by forwarding it to another model.
+  - ``<forwarded_audio>...</forwarded_audio>`` — a system-generated description of an audio clip, produced by forwarding it to another model.
+- These tags indicate system-processed content — they are NOT text typed by the user. Treat the description between the tags as an AI-generated analysis of the original media, not as the user's own words.
+- The original media block is preserved in history. If you later switch to a model that supports the modality, the original image/audio will be sent directly instead of the forwarded description.
+- This forwarding happens automatically and transparently — you do not need to call any tool to trigger it.

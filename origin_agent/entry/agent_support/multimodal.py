@@ -126,28 +126,14 @@ def strip_audio_blocks(messages: list[BaseMessage], session_id: str) -> int:
     return stripped
 
 
-def supports_vision(model: str) -> bool:
-    """根据缓存判断 Read 工具（tool 消息）读取图片是否被当前 provider 接受。
-
-    缓存未命中时乐观默认返回 True，避免新 provider 被漏掉。
-    """
-    from component.tools.modality_capability import get_cached_vision_support
-    cached = get_cached_vision_support(model)
-    if cached is not None:
-        return cached
-    return True
+# ── 转发描述特殊标签 ──
+FORWARDED_VISION_TAG = "forwarded_vision"
+FORWARDED_AUDIO_TAG = "forwarded_audio"
 
 
-def supports_audio(model: str) -> bool:
-    """根据缓存判断 Read 工具（tool 消息）读取音频是否被当前 provider 接受。
-
-    缓存未命中时乐观默认返回 True，避免新 provider 被漏掉。
-    """
-    from component.tools.modality_capability import get_cached_audio_support
-    cached = get_cached_audio_support(model)
-    if cached is not None:
-        return cached
-    return True
+def wrap_forwarded_description(description: str, tag: str) -> str:
+    """用特殊标签包裹转发描述文本，供活跃模型识别转发来源。"""
+    return f"<{tag}>\n{description}\n</{tag}>"
 
 
 def build_image_content_blocks(image: dict, text_payload: str) -> list[MessageBlock]:

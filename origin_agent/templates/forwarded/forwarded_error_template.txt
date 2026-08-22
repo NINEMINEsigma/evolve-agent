@@ -6,4 +6,4 @@ The active model does not support {{media_type}} in either tool messages or user
 1. Check that the referenced profile still exists in the LLM profile settings
 2. Verify the referenced profile's model supports {{media_type}} content
 3. Ensure the referenced profile's API connection is working
-4. Or call probe_modality_capability to re-probe the active model's capabilities
+4. Or retry — the system will automatically re-probe on next access

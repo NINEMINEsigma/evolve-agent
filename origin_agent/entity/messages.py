@@ -10,12 +10,15 @@ logger = logging.getLogger(__name__)
 
 
 class MessageBlock(BaseModel):
+    # NOTE: v1.5 field
+    forward_result_content: str|None = Field(default=None, description="forward result content")
+
     def as_object(self) -> dict:
         raise NotImplementedError("Subclass must implement this method")
 
 
 class TextBlock(MessageBlock):
-    text: str = Field(..., description="The text of the block")
+    text: str = Field(description="The text of the block")
     def as_object(self) -> dict[str, str]:
         return {
             "type": "text",
@@ -24,7 +27,7 @@ class TextBlock(MessageBlock):
 
 
 class ImageBlock(MessageBlock):
-    image_url: str = Field(..., description="The url of the image")
+    image_url: str = Field(description="The url of the image")
     def as_object(self) -> dict:
         return {
             "type": "image_url",
@@ -35,7 +38,7 @@ class ImageBlock(MessageBlock):
 
 
 class VideoBlock(MessageBlock):
-    video_url: str = Field(..., description="The url of the video")
+    video_url: str = Field(description="The url of the video")
     def as_object(self) -> dict:
         return {
             "type": "video_url",
@@ -46,8 +49,8 @@ class VideoBlock(MessageBlock):
 
 
 class AudioBlock(MessageBlock):
-    data: str = Field(..., description="Base64-encoded audio data (no data URL prefix)")
-    format: str = Field(..., description="Audio format suffix: wav, mp3")
+    data: str = Field(description="Base64-encoded audio data (no data URL prefix)")
+    format: str = Field(description="Audio format suffix: wav, mp3")
 
     def as_object(self) -> dict:
         # NOTE: dashscope/qwen-omni 与小米 mimo 兼容接口要求 data 为完整 data URL；
@@ -109,7 +112,7 @@ class BaseMessage(BaseModel):
 
 
 class CharacterMessage(BaseMessage):
-    character_name: str = Field(..., description="The character name of the message")
+    character_name: str = Field(description="The character name of the message")
 
     def is_visible_to(self, current_character_agent: str) -> bool:
         # 角色作用域消息默认仅对自身可见
@@ -136,8 +139,8 @@ _Identity_Prefix_Template: str|None = None
 
 
 class FunctionCall(BaseModel):
-    name: str = Field(..., description="The name of the function call")
-    arguments: str = Field(..., description="The arguments of the function call")
+    name: str = Field(description="The name of the function call")
+    arguments: str = Field(description="The arguments of the function call")
 
     def as_object(self) -> dict:
         return {
@@ -147,9 +150,9 @@ class FunctionCall(BaseModel):
 
 
 class ToolCall(BaseModel):
-    id: str = Field(..., description="The id of the tool call")
+    id: str = Field(description="The id of the tool call")
     type: str = Field("function", description="The type of the tool call")
-    function: FunctionCall = Field(..., description="The function of the tool call")
+    function: FunctionCall = Field(description="The function of the tool call")
 
     def as_object(self) -> dict:
         return {

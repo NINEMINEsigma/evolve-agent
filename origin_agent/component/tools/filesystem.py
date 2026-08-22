@@ -43,7 +43,7 @@ except Exception:  # pragma: no cover — PIL is optional
     logger.debug("PIL not available; image size parsing disabled", exc_info=True)
     PILImage = None  # type: ignore
 
-from .modality_capability import get_cached_vision_support, get_cached_audio_support, get_cached_user_vision_support, get_cached_user_audio_support, resolve_active_model_base_url, forward_modality_to_ref_profile
+from .modality_capability import get_cached_vision_support, get_cached_audio_support, get_cached_user_vision_support, get_cached_user_audio_support, resolve_active_model_base_url, forward_modality_to_ref_profile, ensure_modality_capability
 
 logger = logging.getLogger(__name__)
 
@@ -218,23 +218,16 @@ async def _handle_read(args: dict[str, Any], context: ToolContext | None = None)
                 )
             tool_vision = get_cached_vision_support(model_name, base_url)
             if tool_vision is None:
-                return tool_error(
-                    f"Read-tool image support for model '{model_name}' has not been probed yet. "
-                    "Call `probe_modality_capability` to test whether this provider accepts "
-                    "images inside tool messages.",
-                    path=path,
-                    model=model_name,
-                )
+                # 缓存未命中 → 自动探查
+                capability = await ensure_modality_capability(context)
+                tool_vision = capability.vision
             if tool_vision is False:
                 # tool 消息不支持，检查 user 消息是否支持
                 user_vision = get_cached_user_vision_support(model_name, base_url)
                 if user_vision is None:
-                    return tool_error(
-                        f"User-message image support for model '{model_name}' has not been probed yet. "
-                        "Call `probe_modality_capability` to test.",
-                        path=path,
-                        model=model_name,
-                    )
+                    # 缓存未命中（ensure_modality_capability 已探查，但可能只写了部分）
+                    capability = await ensure_modality_capability(context)
+                    user_vision = capability.user_vision
                 if user_vision is False:
                     # tool 和 user 都不支持 → 检查是否配置了引用字段
                     active_profile = _profile
@@ -386,23 +379,16 @@ async def _handle_read(args: dict[str, Any], context: ToolContext | None = None)
                 )
             tool_audio = get_cached_audio_support(model_name, base_url)
             if tool_audio is None:
-                return tool_error(
-                    f"Read-tool audio support for model '{model_name}' has not been probed yet. "
-                    "Call `probe_modality_capability` to test whether this provider accepts "
-                    "audio inside tool messages.",
-                    path=path,
-                    model=model_name,
-                )
+                # 缓存未命中 → 自动探查
+                capability = await ensure_modality_capability(context)
+                tool_audio = capability.audio
             if tool_audio is False:
                 # tool 消息不支持，检查 user 消息是否支持
                 user_audio = get_cached_user_audio_support(model_name, base_url)
                 if user_audio is None:
-                    return tool_error(
-                        f"User-message audio support for model '{model_name}' has not been probed yet. "
-                        "Call `probe_modality_capability` to test.",
-                        path=path,
-                        model=model_name,
-                    )
+                    # 缓存未命中（ensure_modality_capability 已探查，但可能只写了部分）
+                    capability = await ensure_modality_capability(context)
+                    user_audio = capability.user_audio
                 if user_audio is False:
                     # tool 和 user 都不支持 → 检查是否配置了引用字段
                     active_profile = _profile
@@ -705,7 +691,7 @@ registry.register(
         #
         # ## 图片/音频分支（MIME 自动检测）
         # 当文件 MIME 类型命中图片白名单（PNG/JPEG/WebP/GIF/BMP/TIFF/SVG）或音频白名单（WAV/MP3）时自动走对应分支。
-        # 前置条件：probe_modality_capability 必须已探测。探测结果分三态：
+        # 多模态能力自动探测：首次读图/音频时自动探测并缓存，无需手动探查。探测结果分三态：
         # - tool 消息支持 → 直接返回 _image/_audio（多模态块在 tool 消息中传递）
         # - 仅 user 消息支持 → 返回 _user_image/_user_audio，多模态内容在当前轮工具调用完成后
         #   通过 follow_up 用户消息注入上下文，返回文本提醒模型不要再调用工具
@@ -720,8 +706,8 @@ registry.register(
         # ## 前置条件
         # - 路径必须存在（文件或目录均可）。
         # - 路径必须使用命名空间前缀。
-        # - 图片/音频分支额外要求：probe_modality_capability 已探测（至少 tool 或 user 消息之一
-        #   支持该模态），否则返回错误不读文件。
+        # - 图片/音频分支：多模态能力自动探测（首次访问时自动探查并缓存），
+        #   至少 tool 或 user 消息之一支持该模态时才读取文件。
         #
         # ## 调用效果
         # **文件分支**：返回文件内容，每行前缀为 1-indexed 行号。
@@ -745,7 +731,7 @@ registry.register(
         # - 分页浏览大文件。
         # - 通过行号引用具体位置。
         # - 利用 `remaining` 判断是否需要继续分页读取。
-        # - 读取图片/音频文件（需先调用 probe_modality_capability 探测；未探测时 Read 返回错误提示探测一次）。
+        # - 读取图片/音频文件（多模态能力自动探测，无需手动探查）。
         # - 即使 provider 不支持 tool 消息多模态，只要支持 user 消息多模态，Read 仍可通过
         #   follow_up 用户消息回退路径传递图片/音频内容。
         #
@@ -762,7 +748,7 @@ registry.register(
 ## Prerequisites
 - The path must exist (file or directory).
 - The path must use a namespace prefix.
-- Image/audio branches additionally require `probe_modality_capability` to have been called at least once. If unprobed, Read returns an error prompting a one-time probe.
+- Image/audio branches automatically probe multimodal capability on first access and cache the result. No manual probe needed.
 
 ## Effect
 **File branch**: Returns file content prefixed with 1-indexed line numbers. Supports pagination via offset (0-indexed start) and limit (max lines).
@@ -801,7 +787,7 @@ Image branch (user-message fallback path):
 - Targets a file → file branch; targets a directory → directory branch; image/audio files → image/audio branch (auto-detected).
 - Use skills: prefix to replace the old read_skill_file tool (e.g. Read(path="skills:my-skill/scripts/hello.py")).
 - Use absolute_path to resolve paths when you have a readable target.
-- Read image/audio files: call `probe_modality_capability` first if not yet probed. Even if the provider rejects multimodal in tool messages, Read can still deliver images/audio via a follow-up user message when the provider accepts multimodal in user messages.
+- Read image/audio files: multimodal capability is automatically probed on first access. Even if the provider rejects multimodal in tool messages, Read can still deliver images/audio via a follow-up user message when the provider accepts multimodal in user messages.
 
 ## Side Effects / Notes
 - No file system side effects, read-only query.
