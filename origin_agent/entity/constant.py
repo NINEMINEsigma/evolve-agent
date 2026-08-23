@@ -231,6 +231,12 @@ APPROVAL_JSON_SCHEMA_CACHE_FILENAME: str = "approval_json_schema_cache.json"
 MODALITY_CAPABILITY_ES_FILENAME: str = "modality_capability_cache.es"
 MODALITY_CAPABILITY_ES_KEY: str = "v1"
 
+# 多模态转发描述标签名 — 模型不支持某模态时，转发给引用模型取回描述并以这些标签包裹，
+# 供活跃模型识别转发来源。两条转发路径（preprocess 与 Read 工具）共用，保证一致。
+FORWARDED_VISION_TAG: str = "forwarded_vision"
+FORWARDED_AUDIO_TAG: str = "forwarded_audio"
+FORWARDED_VIDEO_TAG: str = "forwarded_video"
+
 # 音频格式后缀 → data URL 中的标准 MIME 子类型
 # NOTE: mp3 必须归一化为 mpeg（audio/mpeg）：部分 provider（如小米 MiMo）会静默拒绝非标准的 audio/mp3
 AUDIO_FORMAT_MIME_SUBTYPE: dict[str, str] = {"mp3": "mpeg", "wav": "wav"}

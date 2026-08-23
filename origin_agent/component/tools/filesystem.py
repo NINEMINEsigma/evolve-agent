@@ -43,7 +43,7 @@ except Exception:  # pragma: no cover — PIL is optional
     logger.debug("PIL not available; image size parsing disabled", exc_info=True)
     PILImage = None  # type: ignore
 
-from system.modality_capability import get_cached_vision_support, get_cached_audio_support, get_cached_user_vision_support, get_cached_user_audio_support, get_cached_video_support, get_cached_user_video_support, resolve_active_model_base_url, forward_modality_to_ref_profile, ensure_modality_capability
+from system.modality_capability import get_cached_vision_support, get_cached_audio_support, get_cached_user_vision_support, get_cached_user_audio_support, get_cached_video_support, get_cached_user_video_support, resolve_active_model_base_url, forward_modality_to_ref_profile, ensure_modality_capability, wrap_forwarded_description, forwarded_tag_for_media
 
 logger = logging.getLogger(__name__)
 
@@ -260,6 +260,7 @@ async def _handle_read(args: dict[str, Any], context: ToolContext | None = None)
                             context, active_profile,
                             {"base64": b64, "mime_type": mime_type}, "image",
                         )
+                        description = wrap_forwarded_description(description, forwarded_tag_for_media("image"))
                         return {
                             "type": "image",
                             "path": path,
@@ -420,6 +421,7 @@ async def _handle_read(args: dict[str, Any], context: ToolContext | None = None)
                             context, active_profile,
                             {"base64": b64, "format": audio_format}, "audio",
                         )
+                        description = wrap_forwarded_description(description, forwarded_tag_for_media("audio"))
                         return {
                             "type": "audio",
                             "path": path,
@@ -566,6 +568,7 @@ async def _handle_read(args: dict[str, Any], context: ToolContext | None = None)
                             context, active_profile,
                             {"base64": b64, "mime_type": mime_type}, "video",
                         )
+                        description = wrap_forwarded_description(description, forwarded_tag_for_media("video"))
                         return {
                             "type": "video",
                             "path": path,

@@ -25,6 +25,7 @@ logger = logging.getLogger(__name__)
 from system.pathutils import find_repo_root
 from system.templates import read_template
 from system.context import RuntimeContext
+from system.modality_capability import build_modality_prompt_block
 from entity.constant import STATIC_FILE_HTTP_PREFIX, DOWNLOADS_HTTP_PREFIX
 from entity.puretype import SystemInfo, ToolAvailability, LLMProfile
 
@@ -211,6 +212,14 @@ def build_system_prompt(
         subagent_tools: str = read_template("tools_subagent.txt")
         if subagent_tools:
             blocks.append(subagent_tools)
+
+    # 3b. 多模态能力与转发配置 — 有活跃 profile 时注入（只读探测缓存，不触发探测）
+    if profile is not None:
+        modality_block: str = build_modality_prompt_block(
+            profile, Path(agentspace) if agentspace else None,
+        )
+        if modality_block:
+            blocks.append(modality_block)
 
     # 4. 额外块（skills、memory provider 等）
     if extra_blocks:

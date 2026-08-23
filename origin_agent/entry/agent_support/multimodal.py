@@ -12,7 +12,12 @@ from typing import Any, TYPE_CHECKING, Callable
 
 from entity.messages import AudioBlock, BaseMessage, CharacterConversationMessage, ImageBlock, MessageBlock, TextBlock, VideoBlock
 from entity.puretype import MessageContent, Role, LLMProfile
-from entity.constant import SYSTEM_CHARACTER_NAME
+from entity.constant import (
+    FORWARDED_AUDIO_TAG,
+    FORWARDED_VISION_TAG,
+    FORWARDED_VIDEO_TAG,
+    SYSTEM_CHARACTER_NAME,
+)
 from system.modality_capability import (
     build_audio_content_blocks,
     build_image_content_blocks,
@@ -20,6 +25,7 @@ from system.modality_capability import (
     ensure_modality_capability,
     forward_modality_to_ref_profile,
     resolve_active_model_base_url,
+    wrap_forwarded_description,
 )
 
 if TYPE_CHECKING:
@@ -139,17 +145,6 @@ def strip_audio_blocks(messages: list[BaseMessage], session_id: str) -> int:
     return stripped
 
 
-# ── 转发描述特殊标签 ──
-FORWARDED_VISION_TAG = "forwarded_vision"
-FORWARDED_AUDIO_TAG = "forwarded_audio"
-FORWARDED_VIDEO_TAG = "forwarded_video"
-
-
-def wrap_forwarded_description(description: str, tag: str) -> str:
-    """用特殊标签包裹转发描述文本，供活跃模型识别转发来源。"""
-    return f"<{tag}>\n{description}\n</{tag}>"
-
-
 async def _forward_unsupported_block(
     context: "ToolContext",
     profile: LLMProfile,
@@ -164,7 +159,7 @@ async def _forward_unsupported_block(
     """
     # 优先用已有的 forward_result_content
     if block.forward_result_content:
-        logger.info(
+        logger.debug(
             "preprocess_multimodal | reusing existing forward_result_content for %s",
             media_type,
         )
@@ -353,7 +348,7 @@ async def preprocess_multimodal_blocks(
             result_messages.append(msg)
 
     if any_replaced:
-        logger.info(
+        logger.debug(
             "preprocess_multimodal | session=%s model=%s replaced unsupported blocks with forwarded descriptions",
             context.session_id, model_name,
         )

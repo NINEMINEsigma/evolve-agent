@@ -29,6 +29,9 @@ from easysave import load as es_load, save as es_save
 from abstract.llm.loader import create_llm_client
 from system.context import get_runtime_context
 from entity.constant import (
+    FORWARDED_AUDIO_TAG,
+    FORWARDED_VISION_TAG,
+    FORWARDED_VIDEO_TAG,
     MODALITY_CAPABILITY_ES_FILENAME,
     MODALITY_CAPABILITY_ES_KEY,
 )
@@ -143,6 +146,32 @@ def build_video_content_blocks(video: dict, text_payload: str) -> list[MessageBl
 # ---------------------------------------------------------------------------
 # 活跃模型解析 / 转发借用
 # ---------------------------------------------------------------------------
+
+# ── 转发描述特殊标签 ──
+# 标签常量定义于 entity/constant.py，此处提供按 media_type 查找标签的映射与包裹函数，
+# 供 preprocess（entry 层）与 Read 工具（component 层）共用，保证两条转发路径产出的
+# 描述都以同一种标签包裹。
+_FORWARDED_TAG_BY_MEDIA: dict[str, str] = {
+    "image": FORWARDED_VISION_TAG,
+    "audio": FORWARDED_AUDIO_TAG,
+    "video": FORWARDED_VIDEO_TAG,
+}
+
+
+def forwarded_tag_for_media(media_type: str) -> str | None:
+    """按 media_type 返回对应的转发描述标签名；未知模态返回 None。"""
+    return _FORWARDED_TAG_BY_MEDIA.get(media_type)
+
+
+def wrap_forwarded_description(description: str, tag: str | None) -> str:
+    """用特殊标签包裹转发描述文本，供活跃模型识别转发来源。
+
+    tag 为 None 或空串时原样返回（未知模态不包裹）。
+    """
+    if not tag:
+        return description
+    return f"<{tag}>\n{description}\n</{tag}>"
+
 
 def _resolve_base_url(base_url: str | None) -> str:
     """解析 base_url：显式传入优先，否则从 active profile 取。"""
@@ -610,3 +639,83 @@ async def ensure_modality_capability(
         Exception: 探测过程中的非模态错误（网络/认证/超时），向上抛出。
     """
     return await run_modality_probe(context)
+
+
+# ---------------------------------------------------------------------------
+# 系统提示词注入块
+# ---------------------------------------------------------------------------
+
+def _fmt_support(value: bool | None) -> str:
+    """格式化单条能力探测结果，供系统提示词展示。"""
+    if value is None:
+        return "unknown (auto-probed on first use)"
+    return "supported" if value else "NOT supported"
+
+
+def build_modality_prompt_block(
+    profile: LLMProfile,
+    agentspace: Path | None = None,
+) -> str:
+    """构建系统提示词的多模态能力与转发配置块（每轮实时生成）。
+
+    文案来自模板 ``templates/modality_capability.txt``，本函数只负责填值：
+    - 能力部分只读探测缓存（不触发探测），未探测项显示 unknown。
+      单次读取整个条目，避免 get_cached_* 逐字段重读缓存文件。
+    - 转发部分把 profile 的三个引用 uid 解析为被引用 profile 的
+      名称+模型展示；agentspace 为 None 时跳过名称解析。
+
+    profile 无 model 或模板缺失时返回空串（不注入）。
+    """
+    if not profile.model:
+        return ""
+
+    from system.templates import read_template
+    template = read_template("modality_capability.txt")
+    if not template:
+        return ""
+
+    # 能力值：单次读取整个条目，避免 get_cached_* 逐字段重读缓存文件
+    entry = _load_cache().get(_cache_key(profile.model, profile.base_url))
+    if entry is None:
+        image_tool = image_user = _fmt_support(None)
+        audio_tool = audio_user = _fmt_support(None)
+        video_tool = video_user = _fmt_support(None)
+    else:
+        image_tool, image_user = _fmt_support(entry.vision), _fmt_support(entry.user_vision)
+        audio_tool, audio_user = _fmt_support(entry.audio), _fmt_support(entry.user_audio)
+        video_tool, video_user = _fmt_support(entry.video), _fmt_support(entry.user_video)
+
+    # 转发引用 uid → 被引用 profile 名称（悬空引用显式标注）
+    ref_names: dict[str, str] = {}
+    if agentspace is not None:
+        try:
+            ref_names = {
+                p.uid: f'"{p.name}" (model ``{p.model}``)'
+                for p in load_profiles(agentspace)
+                if p.uid
+            }
+        except Exception:
+            logger.warning(
+                "Failed to resolve forwarding profile names for prompt block", exc_info=True,
+            )
+
+    def _ref(uid: str) -> str:
+        if not uid:
+            return "not configured"
+        return ref_names.get(uid, f"dangling reference (uid ``{uid}`` not found)")
+
+    replacements = {
+        "{{model}}": profile.model,
+        "{{image_tool}}": image_tool,
+        "{{image_user}}": image_user,
+        "{{audio_tool}}": audio_tool,
+        "{{audio_user}}": audio_user,
+        "{{video_tool}}": video_tool,
+        "{{video_user}}": video_user,
+        "{{image_ref}}": _ref(profile.vision_image_profile),
+        "{{audio_ref}}": _ref(profile.audio_profile),
+        "{{video_ref}}": _ref(profile.vision_video_profile),
+    }
+    for placeholder, value in replacements.items():
+        template = template.replace(placeholder, value)
+    return template

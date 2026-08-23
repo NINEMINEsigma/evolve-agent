@@ -1,0 +1,11 @@
+Multimodal capability of the active model ``{{model}}`` (live probe results, cached per model+provider):
+- Image: tool messages: {{image_tool}}, user messages: {{image_user}}
+- Audio: tool messages: {{audio_tool}}, user messages: {{audio_user}}
+- Video: tool messages: {{video_tool}}, user messages: {{video_user}}
+Entries marked "unknown" are probed automatically and transparently on first multimodal use — no action needed from you.
+
+Forwarding configuration (used when the active model supports a modality in NEITHER tool nor user messages — the media is forwarded to the referenced profile's model, and you receive a text description wrapped in ``<forwarded_vision>`` / ``<forwarded_audio>`` / ``<forwarded_video>`` tags):
+- Image forwarding → {{image_ref}}
+- Audio forwarding → {{audio_ref}}
+- Video forwarding → {{video_ref}}
+If a modality is unsupported on both paths AND its forwarding is not configured, reading that media will fail — inform the user and suggest configuring a reference profile or switching to a capable model.
