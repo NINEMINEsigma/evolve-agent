@@ -146,7 +146,7 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
         self._tool_event_callback: Callable[[str, str, str, str], Awaitable[None]] | None = None
 
         # -- 处理状态 --
-        self._processing: bool = False
+        # NOTE: _processing 已上移至 BaseAgentLoop.__init__，is_processing() 由基类提供
         self._process_lock: asyncio.Lock = asyncio.Lock()
         self._event_loop: asyncio.AbstractEventLoop | None = None
 
@@ -273,7 +273,6 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
         sid = self.session_id
         self._cancel_event.clear()
         self._disgust_event.clear()
-        self._processing = True
         self._event_loop = asyncio.get_running_loop()
 
         # 网页端 LLM 配置切换（在加锁前完成，确保后续工具循环用新客户端）
@@ -284,26 +283,29 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
         # 无 LLM client 且消息未携带 profile 时，返回错误（不进工具循环）
         if self._llm is None and llm_profile is None:
             logger.warning("No LLM client available | session=%s", sid)
-            return (
-                "尚未配置 LLM 模型。请在前端「模型配置」中新建或选择一个配置后重试。"
-            )
+            err_text = "尚未配置 LLM 模型。请在前端「模型配置」中新建或选择一个配置后重试。"
+            # NOTE: 错误文本以 assistant 气泡显示，按 D6 不变量持久化进历史。
+            # 此处在锁外返回，_processing 未置位，不影响并发防护。
+            self.append_assistant_text(err_text, session_id=sid)
+            return err_text
 
         logger.info(
             "Received user message | session=%s content=%s",
             sid, summarize_message_for_log(user_message),
         )
         async with self._process_lock:
-            self._maybe_inject_inbox()
-            if not skip_append:
-                await self.append_user_message(user_message, character_name=character_name)
-
-            # 历史过长时自动终结会话
-            sid = await self._check_over_limit_before_process(sid, user_message)
-            self.session_id = sid
-
-            messages = self._build_history_messages(user_message)
-
+            self._processing = True
             try:
+                self._maybe_inject_inbox()
+                if not skip_append:
+                    await self.append_user_message(user_message, character_name=character_name)
+
+                # 历史过长时自动终结会话
+                sid = await self._check_over_limit_before_process(sid, user_message)
+                self.session_id = sid
+
+                messages = self._build_history_messages(user_message)
+
                 reply = await self._run_tool_loop(sid, messages, user_message)
                 logger.info("Reply sent | session=%s reply=%s", sid, summarize_message_for_log(reply))
                 return reply
@@ -330,6 +332,7 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
         try:
             while turn.value < _MAX_TOOL_TURNS:
                 if self._cancel_event.is_set():
+                    self.append_assistant_text("Cancelled.", session_id=sid)
                     return "Cancelled."
                 turn.value += 1
 
@@ -349,11 +352,14 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
                     )
                 except Exception as llm_exc:
                     logger.exception("LLM call failed for session=%s", sid)
-                    self._remove_last_user_message(sid)
-                    return (
+                    # NOTE: D1——失败时保留 user 消息（不再移除），错误回复持久化为
+                    # assistant 消息。前后端状态一致，重新生成自然命中刚失败的消息。
+                    err_text = (
                         f"The service provider returned an error, please try again later. "
                         f"Details: {llm_exc}"
                     )
+                    self.append_assistant_text(err_text, session_id=sid)
+                    return err_text
 
                 if self._cancel_event.is_set():
                     await self._emit_stream_done(sid, stream_id, "cancelled", content=resp.content or "", metrics=resp.metrics)
@@ -366,6 +372,7 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
                         if resp.metrics:
                             collected_metrics.append((sid, msg_index, resp.metrics))
                         return resp.content
+                    self.append_assistant_text("Cancelled.", session_id=sid)
                     return "Cancelled."
 
                 if resp.usage.prompt_tokens:
@@ -461,6 +468,7 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
                         messages.append(tool_msg)
                         self._history.add_message(tool_msg)
                         self.save_history(sid)
+                    self.append_assistant_text("Interrupted.", session_id=sid)
                     return "Interrupted."
 
                 sid = await self._check_over_limit_in_tool_loop(sid)
@@ -480,7 +488,9 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
             sid,
             f"工具调用已达 {_MAX_TOOL_TURNS} 轮上限，已自动终止。",
         )
-        return "I ran into an issue processing your request. Please try again."
+        over_limit_text = "I ran into an issue processing your request. Please try again."
+        self.append_assistant_text(over_limit_text, session_id=sid)
+        return over_limit_text
 
     # ========================================================================
     # 多模态块预检（委托给 multimodal.preprocess_multimodal_blocks）
@@ -837,6 +847,3 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
                 "Failed to load history for session %s: %s", session_id, exc,
             )
             return History()
-
-    def is_processing(self) -> bool:
-        return self._processing

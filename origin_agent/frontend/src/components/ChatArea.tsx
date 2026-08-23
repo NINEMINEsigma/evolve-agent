@@ -13,7 +13,7 @@ interface ChatAreaProps {
   onToggleCollapse: (id: string) => void;
   onEditMessage: (id: string, content: MessageContent) => void | Promise<void>;
   onDeleteMessages: (count: number) => void;
-  onRegenerateResponse: () => void;
+  onRegenerateResponse: (messageIndex: number) => void;
   bottomRef: React.RefObject<HTMLDivElement>;
   contentRef?: React.RefObject<HTMLDivElement>;
   onDropFiles: (files: FileList) => void;
@@ -80,11 +80,12 @@ export default function ChatArea({ messages, waiting, archived, onImageClick, on
         onDeleteMessages={onDeleteMessages}
         onRegenerateResponse={onRegenerateResponse}
         isLastUserMessage={m.id === lastUserMsgId}
+        waiting={waiting}
         agents={agents}
         onToggleMessageVisibility={onToggleMessageVisibility}
       />
     )),
-    [messages, archived, onImageClick, onToggleCollapse, onEditMessage, onDeleteMessages, onRegenerateResponse, lastUserMsgId]
+    [messages, archived, onImageClick, onToggleCollapse, onEditMessage, onDeleteMessages, onRegenerateResponse, lastUserMsgId, waiting]
   );
 
   // 判断是否为空态：仅当无 user/assistant 消息时才算空态（系统消息不计入）
@@ -152,6 +153,7 @@ export default function ChatArea({ messages, waiting, archived, onImageClick, on
                   onEditMessage={onEditMessage}
                   onDeleteMessages={onDeleteMessages}
                   onRegenerateResponse={onRegenerateResponse}
+                  waiting={waiting}
                   streaming
                 />
               )}

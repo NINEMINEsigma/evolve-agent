@@ -48,6 +48,7 @@ const MessageItem = memo(function MessageItem({
   onRegenerateResponse,
   isLastUserMessage,
   streaming,
+  waiting,
   agents,
   onToggleMessageVisibility,
 }: {
@@ -57,9 +58,10 @@ const MessageItem = memo(function MessageItem({
   onToggleCollapse: (id: string) => void;
   onEditMessage: (id: string, content: MessageContent) => void | Promise<void>;
   onDeleteMessages?: (count: number) => void;
-  onRegenerateResponse?: () => void;
+  onRegenerateResponse?: (messageIndex: number) => void;
   isLastUserMessage?: boolean;
   streaming?: boolean;
+  waiting?: boolean;
   agents?: string[];
   onToggleMessageVisibility?: (messageId: string, agentName: string) => void;
 }) {
@@ -197,7 +199,7 @@ const MessageItem = memo(function MessageItem({
               </button>
             )}
             {canRegenerate && (
-              <button type="button" onClick={() => onRegenerateResponse!()}>
+              <button type="button" disabled={waiting} onClick={() => onRegenerateResponse!(m.messageIndex!)}>
                 重新生成
               </button>
             )}

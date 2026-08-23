@@ -558,6 +558,11 @@
   color: var(--text-primary);
 }
 
+.message-actions button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
 .message-content {
   position: relative;
 }

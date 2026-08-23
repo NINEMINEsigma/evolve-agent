@@ -120,7 +120,7 @@ export interface SessionStore {
   toggleMessageCollapse: (id: string) => void;
   editMessage: (id: string, content: MessageContent) => Promise<void>;
   deleteMessages: (count?: number) => Promise<void>;
-  regenerateResponse: () => Promise<void>;
+  regenerateResponse: (messageIndex: number, llmProfile?: Record<string, unknown> | null) => Promise<void>;
   updateMessageVisibility: (messageIndex: number, visibleCharacters: string[]) => Promise<void>;
   respondConfirm: (pendingConfirm: ConfirmRequest | null, action: string, denyReasonText?: string, deniedBy?: string) => void;
   respondAsk: (pendingAsk: AskRequest | null, option?: string, customText?: string) => void;
@@ -571,9 +571,27 @@ export function useSessionStore(callbacks: SessionStoreCallbacks = {}): SessionS
         if (data.token_usage !== undefined || data.context_tokens !== undefined) return;
         if (data.regenerate_trim) {
           const keepCount = data.keep_count as number;
-          setMessages((prev) => prev.filter((m) =>
-            typeof m.messageIndex === "number" && m.messageIndex < keepCount
-          ));
+          const trimMessageIndex = data.message_index as number | undefined;
+          const trimMessageSuffix = data.message_suffix as string | null | undefined;
+          const trimDynamicSuffix = data.dynamic_message_suffix as string | null | undefined;
+          setMessages((prev) => {
+            const filtered = prev.filter((m) =>
+              typeof m.messageIndex === "number" && m.messageIndex < keepCount
+            );
+            // 同步刷新后的上下文扩展块到目标消息
+            if (trimMessageIndex !== undefined) {
+              return filtered.map((m) =>
+                m.messageIndex === trimMessageIndex
+                  ? {
+                      ...m,
+                      messageSuffix: trimMessageSuffix ?? undefined,
+                      dynamicMessageSuffix: trimDynamicSuffix ?? undefined,
+                    }
+                  : m
+              );
+            }
+            return filtered;
+          });
           return;
         }
         if (data.action === "session_rotated") {
@@ -936,10 +954,15 @@ export function useSessionStore(callbacks: SessionStoreCallbacks = {}): SessionS
     ));
   }, [sessionId, addMessage]);
 
-  const regenerateResponse = useCallback(async () => {
+  const regenerateResponse = useCallback(async (messageIndex: number, llmProfile?: Record<string, unknown> | null) => {
     setWaiting(true);
     const resp = await fetch(`/api/sessions/${sessionId}/regenerate`, {
       method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        message_index: messageIndex,
+        ...(llmProfile ? { llm_profile: llmProfile } : {}),
+      }),
     });
     const data = await resp.json().catch(() => ({}));
     if (!resp.ok || !data.regenerate) {

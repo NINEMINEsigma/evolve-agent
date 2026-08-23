@@ -327,60 +327,64 @@ class MultiAgentLoop(BaseAgentLoop, IMainSessionLoop):
             logger.warning("process_message skipped: loop interrupted | session=%s", self.session_id)
             return ""
 
-        # 用户消息的可见角色 — "all-agents" 简写展开
-        _visible = visible_characters if visible_characters else self._agent_names
-        from entity.constant import ALL_AGENTS_CHARACTER_REF_NAME
-        if _visible == [ALL_AGENTS_CHARACTER_REF_NAME]:
-            _visible = self._agent_names
-        # 初始响应角色
-        _response = response_characters if response_characters else self._agent_names
-        if _response == [ALL_AGENTS_CHARACTER_REF_NAME]:
-            _response = self._agent_names
+        self._processing = True
+        try:
+            # 用户消息的可见角色 — "all-agents" 简写展开
+            _visible = visible_characters if visible_characters else self._agent_names
+            from entity.constant import ALL_AGENTS_CHARACTER_REF_NAME
+            if _visible == [ALL_AGENTS_CHARACTER_REF_NAME]:
+                _visible = self._agent_names
+            # 初始响应角色
+            _response = response_characters if response_characters else self._agent_names
+            if _response == [ALL_AGENTS_CHARACTER_REF_NAME]:
+                _response = self._agent_names
 
-        logger.info(
-            "Received user message | session=%s content=%s visible=%s response=%s",
-            self.session_id, summarize_message_for_log(user_message), _visible, _response,
-        )
-
-        # 追加用户消息
-        if not skip_append:
-            await self.append_user_message(
-                user_message,
-                visible_characters=_visible,
-                response_characters=_response,
-            )
             logger.info(
-                "Appended user message to history | session=%s visible=%s",
-                self.session_id, _visible,
+                "Received user message | session=%s content=%s visible=%s response=%s",
+                self.session_id, summarize_message_for_log(user_message), _visible, _response,
             )
 
-        # 以用户指定的角色（或全体）作为初始响应者
-        await self._cascade(_response)
+            # 追加用户消息
+            if not skip_append:
+                await self.append_user_message(
+                    user_message,
+                    visible_characters=_visible,
+                    response_characters=_response,
+                )
+                logger.info(
+                    "Appended user message to history | session=%s visible=%s",
+                    self.session_id, _visible,
+                )
 
-        # 超限检测触发后旋转会话
-        if self._token_record.prompt_tokens > 0 and self._is_context_over_limit():
-            logger.warning(
-                "Context limit reached after cascade, rotating | session=%s",
-                self.session_id,
+            # 以用户指定的角色（或全体）作为初始响应者
+            await self._cascade(_response)
+
+            # 超限检测触发后旋转会话
+            if self._token_record.prompt_tokens > 0 and self._is_context_over_limit():
+                logger.warning(
+                    "Context limit reached after cascade, rotating | session=%s",
+                    self.session_id,
+                )
+                await self._rotate_session_for_context_limit()
+
+            # 收集本轮所有 Agent 的回复（用户消息之后的消息）
+            responses: list[str] = []
+            for msg in self._history.iter_messages():
+                if isinstance(msg, CharacterConversationMessage) and msg.role == Role.ASSISTANT:
+                    if msg.character_name in self._agents:
+                        text = msg.content if isinstance(msg.content, str) else str(msg.content)
+                        responses.append(f"[{msg.character_name}]: {text}")
+
+            logger.info(
+                "Cascade completed | session=%s responses=%d",
+                self.session_id, len(responses),
             )
-            await self._rotate_session_for_context_limit()
 
-        # 收集本轮所有 Agent 的回复（用户消息之后的消息）
-        responses: list[str] = []
-        for msg in self._history.iter_messages():
-            if isinstance(msg, CharacterConversationMessage) and msg.role == Role.ASSISTANT:
-                if msg.character_name in self._agents:
-                    text = msg.content if isinstance(msg.content, str) else str(msg.content)
-                    responses.append(f"[{msg.character_name}]: {text}")
-
-        logger.info(
-            "Cascade completed | session=%s responses=%d",
-            self.session_id, len(responses),
-        )
-
-        # 每个 agent 已通过 emit_stream_delta + emit_stream_done 独立推送到前端，
-        # 不再需要在此返回拼接文本给 gateway 用于 assistant_message。
-        return ""
+            # 每个 agent 已通过 emit_stream_delta + emit_stream_done 独立推送到前端，
+            # 不再需要在此返回拼接文本给 gateway 用于 assistant_message。
+            return ""
+        finally:
+            self._processing = False
 
     # -- 级联调度 ----------------------------------------------------------
 

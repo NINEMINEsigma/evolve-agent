@@ -298,6 +298,9 @@ class BaseAgentLoop(ABC):
         self._session_manager: SessionManager | None = None
         # 活跃 LLM 配置覆盖（前端切换后设置，None 表示使用启动配置）
         self._active_llm_profile: LLMProfile | None = None
+        # 处理中标志：子类在 process_message 主体内置位/复位；
+        # 供 /regenerate 端点做并发防护（is_processing）查询
+        self._processing: bool = False
 
     @property
     def history_store_dir(self) -> Path | None:
@@ -515,6 +518,22 @@ class BaseAgentLoop(ABC):
                 self._history.remove_last_message()
         self.save_history(session_id)
 
+    def append_assistant_text(self, text: str, *, session_id: str | None = None) -> int:
+        """将一段 assistant 文本作为 CharacterConversationMessage 追加到历史并持久化。
+
+        供 gateway 层与 loop 内错误/取消/超限等路径统一使用，确保「凡以 assistant
+        气泡显示的内容必进历史」（D6 不变量）。返回新消息的索引。
+        """
+        sid = session_id or self.session_id
+        message = CharacterConversationMessage(
+            role=Role.ASSISTANT,
+            character_name=self.current_character_agent,
+            content=text,
+        )
+        index = self._history.add_message(message)
+        self.save_history(sid)
+        return index
+
     def clear_session(self) -> None:
         """清理当前 session 的持久化数据。"""
         logger.info("Clearing session | session=%s", self.session_id)
@@ -598,27 +617,69 @@ class BaseAgentLoop(ABC):
         logger.info("Delete messages ok | session=%s removed_from=%d remaining=%d", self.session_id, remove_from, self._history.count)
         return {"deleted": True, "session_id": self.session_id, "remaining_count": self._history.count}
 
-    def regenerate_response(self) -> dict:
-        """截断到最后一条 user 消息，返回其内容供重新生成。"""
-        logger.info("Regenerate response | session=%s", self.session_id)
-        last_user_idx = self._history.find_last_user_message_index(count=1)
-        if last_user_idx is None:
-            logger.warning("Regenerate response fail | session=%s error=no user message found", self.session_id)
-            return {"regenerate": False, "error": "no user message found"}
+    def regenerate_response(self, message_index: int | None = None) -> dict:
+        """截断到目标 user 消息，刷新其上下文扩展块，返回内容供重新生成。
+
+        NOTE: 双路径解析目标消息——
+          - 显式路径（message_index 非 None）：由前端按钮携带所点消息的索引，
+            校验 0 <= idx < count 且该处 role == Role.USER。命中精确、不会
+            误取 cron/动态端点等非人类 user 消息。失败返回 400 类错误。
+          - 兜底路径（message_index 为 None）：旧式无参调用，取
+            find_last_user_message_index(count=1)，可能命中非人类 user 消息，
+            仅为兼容保留。后续前端全面携带 message_index 后可移除。
+        """
+        logger.info("Regenerate response | session=%s message_index=%s", self.session_id, message_index)
+
+        # ── 解析目标 user 消息索引 ──
+        if message_index is not None:
+            # 显式路径
+            if not isinstance(message_index, int) or message_index < 0 or message_index >= self._history.count:
+                logger.warning("Regenerate fail | session=%s index=%s out of range", self.session_id, message_index)
+                return {"regenerate": False, "error": "message index out of range"}
+            target_msg = self._history.get_message(message_index)
+            if target_msg.role != Role.USER:
+                logger.warning("Regenerate fail | session=%s index=%s not a user message", self.session_id, message_index)
+                return {"regenerate": False, "error": "target message is not a user message"}
+            last_user_idx = message_index
+        else:
+            # 兜底路径
+            last_user_idx = self._history.find_last_user_message_index(count=1)
+            if last_user_idx is None:
+                logger.warning("Regenerate fail | session=%s error=no user message found", self.session_id)
+                return {"regenerate": False, "error": "no user message found"}
+
         last_user_msg = self._history.get_message(last_user_idx)
         last_user_content = content_to_text(last_user_msg.content)
+
+        # ── 截断到目标 user 消息（含）之后 ──
         self._history.truncate_to(last_user_idx + 1)
         self.save_history(self.session_id)
+
+        # ── 刷新上下文扩展块（重新生成 ≡ 重新发送）──
+        # 重新收集 hooks，同时覆写动态块与固定块并持久化
+        hooks_context, fixator_context = self._collect_hooks_context()
+        if isinstance(last_user_msg, CharacterConversationMessage):
+            updated = last_user_msg.model_copy(update={
+                "message_suffix": fixator_context or None,
+                "dynamic_message_suffix": hooks_context or None,
+            })
+            self._history.set_message(last_user_idx, updated)
+            self.save_history(self.session_id)
+            last_user_msg = updated
+
         result: dict = {
             "regenerate": True,
             "session_id": self.session_id,
             "last_user_content": last_user_content,
             "remaining_count": self._history.count,
+            "message_index": last_user_idx,
+            "message_suffix": fixator_context or None,
+            "dynamic_message_suffix": hooks_context or None,
         }
         if isinstance(last_user_msg, CharacterConversationMessage):
             result["visible_characters"] = last_user_msg.visible_characters
             result["response_characters"] = last_user_msg.response_characters
-        logger.info("Regenerate response ok | session=%s remaining=%d", self.session_id, self._history.count)
+        logger.info("Regenerate ok | session=%s index=%d remaining=%d", self.session_id, last_user_idx, self._history.count)
         return result
 
     def get_tool_resources(self) -> dict:
@@ -634,8 +695,12 @@ class BaseAgentLoop(ABC):
         return None
 
     def is_processing(self) -> bool:
-        """返回当前是否正在处理消息。默认返回 False。"""
-        return False
+        """返回当前是否正在处理消息。
+
+        基类维护 ``self._processing`` 标志，子类应在 ``process_message``
+        主体内置位（True）与复位（False）。基类默认实现返回该标志。
+        """
+        return self._processing
 
     async def terminate_session(self) -> dict:
         """终结当前会话。默认返回简单确认。子类可覆盖。"""

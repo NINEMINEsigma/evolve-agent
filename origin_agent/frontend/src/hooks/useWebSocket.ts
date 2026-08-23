@@ -506,7 +506,7 @@ export function useWebSocket() {
     toggleMessageCollapse: session.toggleMessageCollapse,
     editMessage: session.editMessage,
     deleteMessages: session.deleteMessages,
-    regenerateResponse: session.regenerateResponse,
+    regenerateResponse: (messageIndex: number) => session.regenerateResponse(messageIndex, llmProfilesRef.current.toProfilePayload()),
     updateMessageVisibility: session.updateMessageVisibility,
     addMessage: session.addMessage,
     fetchSessions: session.fetchSessions,

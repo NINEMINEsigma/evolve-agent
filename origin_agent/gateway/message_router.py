@@ -557,7 +557,10 @@ class MessageRouter:
         # 前置闸门：无 LLM profile 且 loop 无 active profile 时拦截
         if msg.llm_profile is None and loop.loop.active_llm_profile is None:
             logger.warning("No LLM profile in message and no active profile | session=%s", self.sid)
-            return "尚未配置 LLM 模型。请在前端「模型配置」中新建或选择一个配置后重试。"
+            err_text = "尚未配置 LLM 模型。请在前端「模型配置」中新建或选择一个配置后重试。"
+            # NOTE: D6——错误文本以 assistant 气泡显示，持久化进历史
+            loop.loop.append_assistant_text(err_text, session_id=self.sid)
+            return err_text
 
         main_content: MessageContent = content
         sub_names: list[str] = []
@@ -587,6 +590,8 @@ class MessageRouter:
         except Exception as exc:
             logger.exception("Agent loop error for session=%s", self.sid)
             reply = f"Internal error: {exc}"
+            # NOTE: D6——错误文本以 assistant 气泡显示，持久化进历史
+            loop.loop.append_assistant_text(reply, session_id=self.sid)
 
         return reply
 

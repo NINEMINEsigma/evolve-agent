@@ -30,7 +30,7 @@ from .message_router import MessageRouter
 from abstract.tools.registry import registry
 from datetime import datetime, timezone
 from entity.constant import CRON_STDOUT_PREVIEW_MAX_LENGTH, SUBPROCESS_TIMEOUT_DEFAULT, UPLOAD_FILENAME_TIME_FORMAT, USER_CHARACTER_NAME, UPLOADS_DIR_NAME, UPLOADS_WS_PREFIX, STATIC_FILE_HTTP_PREFIX, DOWNLOADS_HTTP_PREFIX, SYSTEM_CHARACTER_NAME
-from entity.puretype import SessionStatus, ClientInfo
+from entity.puretype import SessionStatus, ClientInfo, LLMProfile
 from system.context import get_runtime_context
 from entry.parent_agent_loop import IncompatibleHistoryError
 from entry.base_agent_loop import IMainSessionLoop
@@ -741,8 +741,8 @@ async def delete_session_messages(session_id: str, count: int = 1):
 
 
 @app.post("/api/sessions/{session_id}/regenerate")
-async def regenerate_response(session_id: str):
-    """重新生成最后一条 user 消息的响应：截断历史，重新调用 process_message。"""
+async def regenerate_response(session_id: str, req: Request):
+    """重新生成指定 user 消息的响应：截断历史，刷新扩展块，重新调用 process_message。"""
     logger.info("Regenerate request | session=%s", session_id)
     info = _get_sm().get(session_id)
     if info and info.status == SessionStatus.archived:
@@ -755,8 +755,51 @@ async def regenerate_response(session_id: str):
     loop = _get_loop(session_id)
     if loop is None:
         return {"regenerate": False, "error": "agent loop not ready"}
-    # 先截断历史
-    result = loop.loop.regenerate_response()
+
+    # 并发防护：处理中拒绝重新生成
+    # NOTE: 存在窄 TOCTOU 窗口（is_processing 检查为 False 到 process_message
+    # 取锁之间），属尽力防护而非强互斥；强互斥需非阻塞 TryLock，超出本任务范围。
+    if loop.loop.is_processing():
+        result = {"regenerate": False, "error": "session is processing"}
+        return HTMLResponse(
+            json.dumps(result, ensure_ascii=False),
+            media_type="application/json",
+            status_code=409,
+        )
+
+    # 解析请求 body（容错：空 body → {}）
+    body: dict = {}
+    try:
+        body = await req.json()
+    except Exception:
+        pass
+
+    # 解析 message_index（可选，前端携带所点消息的索引）
+    message_index = body.get("message_index")
+    if message_index is not None and not isinstance(message_index, int):
+        return HTMLResponse(
+            json.dumps({"regenerate": False, "error": "invalid message_index"}, ensure_ascii=False),
+            media_type="application/json",
+            status_code=400,
+        )
+
+    # 解析 llm_profile（可选，前端携带当前选择器配置）
+    # NOTE: 对 MultiAgentLoop 为 no-op——其 process_message 的 **kwargs 吞掉
+    # llm_profile，per-agent profile 由 SubagentStore 管理。
+    llm_profile: LLMProfile | None = None
+    raw_profile = body.get("llm_profile")
+    if raw_profile is not None:
+        try:
+            llm_profile = LLMProfile.model_validate(raw_profile)
+        except Exception:
+            return HTMLResponse(
+                json.dumps({"regenerate": False, "error": "invalid llm_profile"}, ensure_ascii=False),
+                media_type="application/json",
+                status_code=400,
+            )
+
+    # 先截断历史并刷新扩展块
+    result = loop.loop.regenerate_response(message_index)
     if not result.get("regenerate"):
         return HTMLResponse(
             json.dumps(result, ensure_ascii=False),
@@ -764,7 +807,7 @@ async def regenerate_response(session_id: str):
             status_code=400,
         )
     content: str = result.get("last_user_content", "")
-    # 通知前端裁剪本地消息
+    # 通知前端裁剪本地消息并同步刷新后的扩展块
     ws = _get_ws(session_id)
     if ws:
         try:
@@ -776,6 +819,9 @@ async def regenerate_response(session_id: str):
                         content=json.dumps({
                             "regenerate_trim": True,
                             "keep_count": result.get("remaining_count", 0),
+                            "message_index": result.get("message_index"),
+                            "message_suffix": result.get("message_suffix"),
+                            "dynamic_message_suffix": result.get("dynamic_message_suffix"),
                         }),
                     ).model_dump(exclude_none=True),
                     ensure_ascii=False,
@@ -791,6 +837,7 @@ async def regenerate_response(session_id: str):
         skip_append=True,
         visible_characters=result.get("visible_characters"),
         response_characters=result.get("response_characters"),
+        llm_profile=llm_profile,
     )
     from system.application import Application
     sink = Application.current().frontend_sink
