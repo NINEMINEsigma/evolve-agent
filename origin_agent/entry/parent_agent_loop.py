@@ -56,7 +56,7 @@ from entry.agent_support.multimodal import (
     summarize_message_for_log,
     preprocess_multimodal_blocks,
 )
-from component.tools.modality_capability import (
+from system.modality_capability import (
     ensure_modality_capability,
 )
 from entry.session_manager import LoopSessionManager

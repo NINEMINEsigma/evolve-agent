@@ -43,7 +43,7 @@ except Exception:  # pragma: no cover — PIL is optional
     logger.debug("PIL not available; image size parsing disabled", exc_info=True)
     PILImage = None  # type: ignore
 
-from .modality_capability import get_cached_vision_support, get_cached_audio_support, get_cached_user_vision_support, get_cached_user_audio_support, get_cached_video_support, get_cached_user_video_support, resolve_active_model_base_url, forward_modality_to_ref_profile, ensure_modality_capability
+from system.modality_capability import get_cached_vision_support, get_cached_audio_support, get_cached_user_vision_support, get_cached_user_audio_support, get_cached_video_support, get_cached_user_video_support, resolve_active_model_base_url, forward_modality_to_ref_profile, ensure_modality_capability
 
 logger = logging.getLogger(__name__)
 

@@ -13,6 +13,14 @@ from typing import Any, TYPE_CHECKING, Callable
 from entity.messages import AudioBlock, BaseMessage, CharacterConversationMessage, ImageBlock, MessageBlock, TextBlock, VideoBlock
 from entity.puretype import MessageContent, Role, LLMProfile
 from entity.constant import SYSTEM_CHARACTER_NAME
+from system.modality_capability import (
+    build_audio_content_blocks,
+    build_image_content_blocks,
+    build_video_content_blocks,
+    ensure_modality_capability,
+    forward_modality_to_ref_profile,
+    resolve_active_model_base_url,
+)
 
 if TYPE_CHECKING:
     from entry.base_agent_loop import ToolContext
@@ -163,8 +171,6 @@ async def _forward_unsupported_block(
         return block.forward_result_content
 
     # 无已有描述 → 转发借用
-    from component.tools.modality_capability import forward_modality_to_ref_profile
-
     # 按 media_type 显式获取引用 uid，不使用反射
     if media_type == "image":
         ref_uid: str = profile.vision_image_profile
@@ -249,11 +255,6 @@ async def preprocess_multimodal_blocks(
         save_callback: 接收 session_id 的回调，用于转发后持久化 forward_result_content。
                        传入 None 时不持久化。
     """
-    from component.tools.modality_capability import (
-        ensure_modality_capability,
-        resolve_active_model_base_url,
-    )
-
     model_name, base_url, profile = resolve_active_model_base_url(context)
 
     # 无 profile 或 model_name → 无需预检
@@ -360,45 +361,6 @@ async def preprocess_multimodal_blocks(
     return result_messages
 
 
-def build_image_content_blocks(image: dict, text_payload: str) -> list[MessageBlock]:
-    """构造 OpenAI 格式的 image_url + text content blocks。"""
-    b64: str = str(image.get("base64", ""))
-    mime: str = str(image.get("mime_type", "image/png"))
-    if not b64:
-        return [TextBlock(text=text_payload)]
-    return [
-        ImageBlock(image_url=f"data:{mime};base64,{b64}"),
-        TextBlock(text=text_payload),
-    ]
-
-
-def build_audio_content_blocks(audio: dict, text_payload: str) -> list[MessageBlock]:
-    """构造 OpenAI 格式的 input_audio + text content blocks。"""
-    b64: str = str(audio.get("base64", ""))
-    fmt: str = str(audio.get("format", audio.get("mime_type", "wav")))
-    # 如果 format 是 MIME 类型，提取后缀
-    if "/" in fmt:
-        fmt = fmt.rsplit("/", 1)[-1]
-    if not b64:
-        return [TextBlock(text=text_payload)]
-    return [
-        AudioBlock(data=b64, format=fmt),
-        TextBlock(text=text_payload),
-    ]
-
-
-def build_video_content_blocks(video: dict, text_payload: str) -> list[MessageBlock]:
-    """构造 OpenAI 格式的 video_url + text content blocks。"""
-    b64: str = str(video.get("base64", ""))
-    mime: str = str(video.get("mime_type", "video/mp4"))
-    if not b64:
-        return [TextBlock(text=text_payload)]
-    return [
-        VideoBlock(video_url=f"data:{mime};base64,{b64}"),
-        TextBlock(text=text_payload),
-    ]
-
-
 def tool_result_to_content(result: Any) -> str | list[MessageBlock]:
     """把工具返回结果转换为 ToolResultMessage 可用的 content。
 
@@ -496,8 +458,11 @@ def _strip_internal_fields(text: str) -> str:
     return json.dumps(filtered, ensure_ascii=False)
 
 
-def content_to_text(content: str|list[MessageBlock]|None) -> str:
+def content_to_text(content: MessageContent|list[MessageBlock]|None) -> str:
     """把 content（字符串或 block 列表）转成适合日志/前端展示/事件推送的纯文本。
+
+    同时接受内存态（list[MessageBlock]）与序列化态（MessageContent 的 list[dict]）内容，
+    两种形态的 text 块都会被提取。
 
     自动过滤 JSON 文本中所有下划线前缀的内部字段（_image、_meta 等），
     避免 base64 等大体积载荷撑爆前端事件和日志。
@@ -530,9 +495,10 @@ def sanitize_image_payload(result: dict, keep_metadata: bool = True) -> dict:
     return pr_copy
 
 
-def summarize_message_for_log(content: str|list[MessageBlock]|None, max_text_len: int = 300) -> str:
+def summarize_message_for_log(content: MessageContent|list[MessageBlock]|None, max_text_len: int = 300) -> str:
     """将消息（纯文本或多模态 blocks）转为适合日志的短字符串。
 
+    同时接受内存态（list[MessageBlock]）与序列化态（MessageContent 的 list[dict]）内容。
     图片 block 会被替换为 [image_url] 占位符，避免 base64 撑爆日志。
     """
     summary = content_to_text(content)
