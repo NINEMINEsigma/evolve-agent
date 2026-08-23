@@ -30,7 +30,7 @@ from .message_router import MessageRouter
 from abstract.tools.registry import registry
 from datetime import datetime, timezone
 from entity.constant import CRON_STDOUT_PREVIEW_MAX_LENGTH, SUBPROCESS_TIMEOUT_DEFAULT, UPLOAD_FILENAME_TIME_FORMAT, USER_CHARACTER_NAME, UPLOADS_DIR_NAME, UPLOADS_WS_PREFIX, STATIC_FILE_HTTP_PREFIX, DOWNLOADS_HTTP_PREFIX, SYSTEM_CHARACTER_NAME
-from entity.puretype import SessionStatus, ClientInfo, LLMProfile
+from entity.puretype import SessionStatus, ClientInfo, LLMProfile, MessageContent
 from system.context import get_runtime_context
 from entry.parent_agent_loop import IncompatibleHistoryError
 from entry.base_agent_loop import IMainSessionLoop
@@ -1054,9 +1054,22 @@ async def dynamic_endpoint_handler(
 
     agent 通过 ``register_dynamic_endpoint`` 工具注册端点后，在消息气泡中
     渲染按钮（走 SafeHtml iframe 路径），用户点击按钮时通过 fetch POST 触发
-    此端点。POST body 的 ``message`` 字段成为投递给 agent 的消息内容。
+    此端点。POST body 支持两种内容载体：
 
-    消息格式: ``[dynamic-endpoint] {endpoint_name} ({endpoint_name})\\n{message}``
+    - ``message`` (str)：纯文本消息（向后兼容，watching service 等既有调用方使用）。
+    - ``content`` (str | list[dict])：多模态有序混合内容，格式与聊天输入框一致——
+      block 数组中的每项为 ``{type:"text", text:"..."}``、
+      ``{type:"image_url", image_url:{url:"data:image/...;base64,..."}}``、
+      ``{type:"input_audio", input_audio:{data:"<base64>", format:"mp3"}}``、
+      ``{type:"video_url", video_url:{url:"data:video/...;base64,..."}}``。
+      ``content`` 也可以是纯字符串（等价于 ``message``）。
+
+    ``content`` 优先于 ``message``：两者同时提供时 ``message`` 被忽略，
+    ``content`` 为空数组或空白字符串时回退到 ``message``。
+    block 数组严格校验，任一 block 不合法返回 400 并指明 block 索引。
+
+    投递消息格式: ``[dynamic-endpoint] {endpoint_name}\\n{message}``；
+    使用 ``content`` block 数组时，前缀作为独立的首个 text block 注入。
     """
     from component.extools.dynamic_endpoint_tools import lookup_endpoint
 
@@ -1097,6 +1110,53 @@ async def dynamic_endpoint_handler(
 
     message: str = str(body.get("message", ""))
 
+    # 解析 content 字段：支持多模态有序混合内容（与聊天输入框格式一致）
+    raw_content = body.get("content")
+    payload: MessageContent
+    used: str
+
+    if isinstance(raw_content, list):
+        if not raw_content:
+            # 空数组 → 回退 message 路径
+            payload = f"[dynamic-endpoint] {endpoint_name}\n{message}"
+            used = "message"
+        else:
+            # 严格校验 block 数组
+            from entry.agent_support.multimodal import validate_content_blocks
+            err = validate_content_blocks(raw_content)
+            if err is not None:
+                return HTMLResponse(
+                    json.dumps({"error": err, "endpoint_name": endpoint_name}),
+                    media_type="application/json",
+                    status_code=400,
+                )
+            # 前缀作为独立首个 text block，后接原始 blocks（保序）
+            payload = [{"type": "text", "text": f"[dynamic-endpoint] {endpoint_name}\n"}] + list(raw_content)
+            used = "content"
+            block_types = [b.get("type", "?") if isinstance(b, dict) else "?" for b in raw_content]
+            logger.info(
+                "Dynamic endpoint content blocks | endpoint=%s types=%s",
+                endpoint_name, block_types,
+            )
+    elif isinstance(raw_content, str):
+        if raw_content.strip():
+            payload = f"[dynamic-endpoint] {endpoint_name}\n{raw_content}"
+            used = "content"
+        else:
+            # 空白字符串 → 回退 message 路径
+            payload = f"[dynamic-endpoint] {endpoint_name}\n{message}"
+            used = "message"
+    elif raw_content is None:
+        # 未提供 content → message 路径（watching service 等既有调用方）
+        payload = f"[dynamic-endpoint] {endpoint_name}\n{message}"
+        used = "message"
+    else:
+        return HTMLResponse(
+            json.dumps({"error": "'content' must be a string or an array of content blocks", "endpoint_name": endpoint_name}),
+            media_type="application/json",
+            status_code=400,
+        )
+
     loop = _get_loop(session_id)
     if loop is None:
         return HTMLResponse(
@@ -1105,15 +1165,12 @@ async def dynamic_endpoint_handler(
             status_code=503,
         )
 
-    # 构造消息文本，格式参考 CronResultMessage.to_text()
-    text: str = f"[dynamic-endpoint] {endpoint_name}\n{message}"
-
     # 统一通过 IMainSessionLoop.loop 获取 BaseAgentLoop 后调用 process_message
     # — ParentAgentLoop 的 **kwargs 会吞掉 visible_characters/response_characters，
     #   MultiAgentLoop 显式接受
     try:
         reply = await loop.loop.process_message(
-            text,
+            payload,
             character_name=SYSTEM_CHARACTER_NAME,
             visible_characters=[agent_name],
             response_characters=[agent_name],
@@ -1130,8 +1187,8 @@ async def dynamic_endpoint_handler(
         )
 
     logger.info(
-        "Dynamic endpoint triggered | endpoint=%s session=%s agent=%s",
-        endpoint_name, session_id, agent_name,
+        "Dynamic endpoint triggered | endpoint=%s session=%s agent=%s used=%s",
+        endpoint_name, session_id, agent_name, used,
     )
 
     # 推送 assistant 回复到前端（process_message 只返回文本，由调用方推送）
@@ -1148,7 +1205,7 @@ async def dynamic_endpoint_handler(
                 session_id, exc_info=True,
             )
 
-    return {"delivered": True, "endpoint_name": endpoint_name, "session_id": session_id}
+    return {"delivered": True, "endpoint_name": endpoint_name, "session_id": session_id, "used": used}
 
 
 @app.post("/api/file-picker")

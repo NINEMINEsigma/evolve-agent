@@ -502,6 +502,43 @@ def summarize_message_for_log(content: MessageContent|list[MessageBlock]|None, m
     return summary[:max_text_len] + "..."
 
 
+_ALLOWED_BLOCK_TYPES: tuple[str, ...] = ("text", "image_url", "input_audio", "video_url")
+
+
+def validate_content_blocks(blocks: list[Any]) -> str | None:
+    """严格校验 content block 数组，供动态端点 HTTP 入口层使用。
+
+    遍历 blocks，任一不合法立即返回英文错误描述字符串（含 block 索引），
+    全部合法返回 None。与 ``blocks_from_dicts`` 共享 block 格式约定，
+    但校验比解析更严格——解析器对缺字段做兜底，校验器要求必填字段齐全。
+
+    对额外未知字段宽容（前向兼容），不做校验。
+    """
+    for i, block in enumerate(blocks):
+        if not isinstance(block, dict):
+            return f"block[{i}]: must be an object"
+        btype = block.get("type")
+        if btype not in _ALLOWED_BLOCK_TYPES:
+            allowed = ", ".join(_ALLOWED_BLOCK_TYPES)
+            return f"block[{i}]: unsupported type {btype!r}, allowed: {allowed}"
+        if btype == "text":
+            if "text" not in block or not isinstance(block["text"], str):
+                return f"block[{i}]: 'text' field must be a string"
+        elif btype == "image_url":
+            url_block = block.get("image_url")
+            if not isinstance(url_block, dict) or not str(url_block.get("url", "")):
+                return f"block[{i}]: 'image_url.url' must be a non-empty string"
+        elif btype == "input_audio":
+            audio_block = block.get("input_audio")
+            if not isinstance(audio_block, dict) or not str(audio_block.get("data", "")):
+                return f"block[{i}]: 'input_audio.data' must be a non-empty string"
+        elif btype == "video_url":
+            url_block = block.get("video_url")
+            if not isinstance(url_block, dict) or not str(url_block.get("url", "")):
+                return f"block[{i}]: 'video_url.url' must be a non-empty string"
+    return None
+
+
 def blocks_from_dicts(blocks: list[dict[str, Any]]) -> list[MessageBlock]:
     """将 list[dict] 转换为 list[MessageBlock]，供 edit_session_message 和 _append 共用。"""
     result: list[MessageBlock] = []

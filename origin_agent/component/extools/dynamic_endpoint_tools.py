@@ -11,8 +11,20 @@
 
 agent 获得 URL 后，在消息中输出包含 ``<script>`` 标签的 HTML
 （触发 SafeHtml iframe 渲染路径），按钮点击时通过 fetch POST
-触发端点，端点向该 agent 投递一条仅自身可见的系统消息，
-消息内容由 POST body 的 ``message`` 字段动态携带。
+触发端点，端点向该 agent 投递一条仅自身可见的系统消息。
+
+POST body 支持两种内容载体：
+
+  - ``message`` (str)：纯文本消息（向后兼容，watching service 等既有调用方使用）。
+  - ``content`` (str | list[dict])：多模态有序混合内容，格式与聊天输入框一致——
+    block 数组中每项为 ``{type:"text", text:"..."}``、
+    ``{type:"image_url", image_url:{url:"data:image/...;base64,..."}}``、
+    ``{type:"input_audio", input_audio:{data:"<base64>", format:"mp3"}}``、
+    ``{type:"video_url", video_url:{url:"data:video/...;base64,..."}}``。
+    也可以是纯字符串（等价于 ``message``）。
+
+``content`` 优先于 ``message``；``content`` 为空数组或空白字符串时回退到 ``message``。
+block 数组严格校验，任一 block 不合法返回 400 并指明 block 索引。
 """
 
 from __future__ import annotations
@@ -225,9 +237,20 @@ async def _handle_register_dynamic_endpoint(
 
     端点路径格式为 ``/dynamic/{session_id}/{agent_name}/{name}``。
     agent 获得 URL 后，在消息中输出包含 ``<script>`` 标签的 HTML
-    （触发 SafeHtml iframe 渲染），按钮点击时 ``fetch(url, {method:'POST', body: JSON.stringify({message: '...'})})``
-    触发端点，端点向该 agent 投递一条格式为
-    ``[dynamic-endpoint] {name}\\n{message}`` 的系统消息。
+    （触发 SafeHtml iframe 渲染），按钮点击时通过 fetch POST 触发端点。
+
+    POST body 支持两种内容载体：
+
+    - ``message`` (str)：纯文本，投递格式为 ``[dynamic-endpoint] {name}\\n{message}``。
+    - ``content`` (str | list[dict])：多模态有序混合内容，格式与聊天输入框一致——
+      block 数组中每项为 ``{type:"text", text:"..."}``、
+      ``{type:"image_url", image_url:{url:"data:image/...;base64,..."}}``、
+      ``{type:"input_audio", input_audio:{data:"<base64>", format:"mp3"}}``、
+      ``{type:"video_url", video_url:{url:"data:video/...;base64,..."}}``。
+      也可以是纯字符串（等价于 ``message``）。
+
+    ``content`` 优先于 ``message``；为空数组或空白字符串时回退到 ``message``。
+    block 数组严格校验，任一 block 不合法返回 400 并指明 block 索引。
     """
     session_id: str = str(args.get("_session_id", ""))
     name: str = str(args.get("name", "")).strip()
@@ -288,7 +311,12 @@ async def _handle_register_dynamic_endpoint(
         url=url,
         absolute_url=absolute_url,
         agent_name=agent_name,
-        _note=f"Dynamic endpoint '{safe_name}' registered. POST to {absolute_url} with body {{\"message\": \"...\"}} to deliver a system message to yourself.",
+        _note=(
+            f"Dynamic endpoint '{safe_name}' registered. POST to {absolute_url} to deliver a system message to yourself. "
+            "Body accepts either {\"message\": \"text\"} (plain text) or "
+            "{\"content\": [{\"type\": \"text\", \"text\": \"...\"}, {\"type\": \"image_url\", \"image_url\": {\"url\": \"data:image/...;base64,...\"}}, ...]} "
+            "(multimodal blocks, same format as the chat input). 'content' takes priority over 'message'."
+        ),
     )
 
 
@@ -381,8 +409,18 @@ registry.register(
         # - 注册写入持久化文件（workspace 下），重启后可恢复。
         # - agent 输出按钮时必须包含 <script> 标签才能触发 SafeHtml iframe 渲染路径，
         #   纯 <button onclick="..."> 不含 <script> 时走 ReactMarkdown 路径，onclick 不生效。
-        # - POST body 的 message 字段会成为投递给 agent 的消息内容。
-        # - 投递的消息格式为 [dynamic-endpoint] {endpoint_id}\n{message}。
+        # - POST body 支持两种内容载体：
+        #   message (str)：纯文本消息（向后兼容，watching service 等既有调用方使用）。
+        #   content (str | list[dict])：多模态有序混合内容，格式与聊天输入框一致——
+        #     block 数组中每项为 {type:"text", text:"..."}、
+        #     {type:"image_url", image_url:{url:"data:image/...;base64,..."}}、
+        #     {type:"input_audio", input_audio:{data:"<base64>", format:"mp3"}}、
+        #     {type:"video_url", video_url:{url:"data:video/...;base64,..."}}。
+        #     也可以是纯字符串（等价于 message）。
+        # - content 优先于 message；content 为空数组或空白字符串时回退到 message。
+        # - block 数组严格校验，任一 block 不合法返回 400 并指明 block 索引。
+        # - 投递的消息格式为 [dynamic-endpoint] {endpoint_id}\n{message}；
+        #   使用 content block 数组时，前缀作为独立的首个 text block 注入。
         # - 端点无鉴权，与现有 API 一致（localhost 信任模型）。
         "description": """Register a dynamic HTTP POST endpoint that delivers a self-visible system message when triggered.
 
@@ -404,8 +442,13 @@ Creates an endpoint registration with path format /dynamic/{session_id}/{agent_n
 ## Side Effects / Notes
 - Registration is persisted to disk (workspace/dynamic_endpoints.json) and restored after restart.
 - When outputting a button, you MUST include a <script> tag in the HTML to trigger the SafeHtml iframe rendering path. A bare <button onclick="..."> without <script> goes through ReactMarkdown where onclick does not work.
-- The POST body's `message` field becomes the message content delivered to the agent.
-- The delivered message format is: [dynamic-endpoint] {name}\\n{message}.
+- POST body accepts two content carriers:
+  - `message` (str): plain text message (backward compatible, used by watching service and other existing callers).
+  - `content` (str | list[dict]): multimodal ordered mixed content, same format as the chat input — each block is {"type": "text", "text": "..."}, {"type": "image_url", "image_url": {"url": "data:image/...;base64,..."}}, {"type": "input_audio", "input_audio": {"data": "<base64>", "format": "mp3"}}, or {"type": "video_url", "video_url": {"url": "data:video/...;base64,..."}}. Can also be a plain string (equivalent to `message`).
+  In an iframe button page, use FileReader.readAsDataURL to construct data URLs from user-selected files.
+- `content` takes priority over `message`; when both are provided, `message` is ignored. An empty array or blank string falls back to `message`.
+- Block arrays are strictly validated; any invalid block returns 400 with the block index in the error.
+- The delivered message format is: [dynamic-endpoint] {name}\\n{message}; when using `content` blocks, the prefix is injected as a separate leading text block.
 - Endpoints have no authentication, consistent with existing APIs (localhost trust model).
 - Use unregister_dynamic_endpoint to remove the endpoint when no longer needed.""",
         "parameters": {
