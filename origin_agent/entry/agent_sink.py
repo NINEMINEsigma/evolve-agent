@@ -217,7 +217,7 @@ class FrontendSink(AgentSink):
         self._pending_confirms[request_id] = fut
         self._confirm_session_map[request_id] = session_id
 
-        ws = self._ws_sinks.get(session_id)
+        ws = self.get_ws(session_id)
         if ws is None:
             self._pending_confirms.pop(request_id, None)
             self._confirm_session_map.pop(request_id, None)
@@ -286,7 +286,7 @@ class FrontendSink(AgentSink):
         self._pending_asks[request_id] = fut
         self._ask_session_map[request_id] = session_id
 
-        ws = self._ws_sinks.get(session_id)
+        ws = self.get_ws(session_id)
         if ws is None:
             self._pending_asks.pop(request_id, None)
             self._ask_session_map.pop(request_id, None)
@@ -372,7 +372,7 @@ class FrontendSink(AgentSink):
                                 message_suffix: str | None = None,
                                 dynamic_message_suffix: str | None = None) -> None:
         from gateway.chat import Message, MessageType
-        ws = self._ws_sinks.get(session_id)
+        ws = self.get_ws(session_id)
         if ws is None:
             return
         msg = Message(
@@ -397,7 +397,7 @@ class FrontendSink(AgentSink):
                                      visible_characters: list[str] | None = None,
                                      response_characters: list[str] | None = None) -> None:
         from gateway.chat import Message, MessageType
-        ws = self._ws_sinks.get(session_id)
+        ws = self.get_ws(session_id)
         if ws is None:
             return
         msg = Message(
@@ -467,7 +467,7 @@ class FrontendSink(AgentSink):
     async def emit_system_message(self, session_id: str, content: str) -> None:
         """推送系统消息到前端。"""
         try:
-            ws = self._ws_sinks.get(session_id)
+            ws = self.get_ws(session_id)
             if ws is None:
                 return
             from gateway.chat import Message, MessageType
@@ -488,7 +488,7 @@ class FrontendSink(AgentSink):
                         character_name: str | None = None,
                         tool_call_meta: dict | None = None) -> None:
         """通过 WebSocket 推送一条事件消息。"""
-        ws = self._ws_sinks.get(session_id)
+        ws = self.get_ws(session_id)
         if ws is None:
             return
         from gateway.chat import Message, MessageType
