@@ -609,19 +609,25 @@ class MessageRouter:
             sink.register_ws(_rotated, self.ws, self.conn_token)
         self.sid = _rotated
 
-        await self.ws.send_text(
-            json.dumps(
-                Message(
-                    type=MessageType.SYSTEM,
-                    content=json.dumps({
-                        "action": "session_rotated",
-                        "new_sid": self.sid,
-                        "old_sid": _old,
-                    }),
-                ).model_dump(exclude_none=True),
-                ensure_ascii=False,
+        try:
+            await self.ws.send_text(
+                json.dumps(
+                    Message(
+                        type=MessageType.SYSTEM,
+                        content=json.dumps({
+                            "action": "session_rotated",
+                            "new_sid": self.sid,
+                            "old_sid": _old,
+                        }),
+                    ).model_dump(exclude_none=True),
+                    ensure_ascii=False,
+                )
             )
-        )
+        except Exception:
+            logger.debug(
+                "Failed to send session_rotated notification for old=%s new=%s",
+                _old, self.sid, exc_info=True,
+            )
 
     async def _emit_assistant_reply(self, loop: IMainSessionLoop, reply: str) -> None:
         """发送 assistant 回复到前端。MultiAgentLoop 空回复跳过。"""
@@ -635,20 +641,16 @@ class MessageRouter:
             )
 
     async def _send_token_update(self, loop: IMainSessionLoop) -> None:
-        """向前端发送实时 token 消耗更新。"""
-        try:
-            await self.ws.send_text(
-                json.dumps(
-                    Message(
-                        type=MessageType.SYSTEM,
-                        session_id=self.sid,
-                        content=json.dumps({
-                            "token_usage": loop.get_token_usage(),
-                            "context_tokens": loop.get_context_tokens(),
-                        }),
-                    ).model_dump(exclude_none=True),
-                    ensure_ascii=False,
-                )
-            )
-        except Exception:
-            logger.exception("Failed to send token usage update for session=%s", self.sid)
+        """向前端发送实时 token 消耗更新。
+
+        复用 FrontendSink.emit_usage_update()，统一走 sink 的连接检查
+        （get_ws None 短路）与 warning 级别错误降级，避免 WebSocket 已关闭后
+        send_text 触发 RuntimeError 并产生 ERROR 级 traceback 噪声。
+        """
+        from system.application import Application
+        sink = Application.current().frontend_sink
+        if sink is None:
+            return
+        await sink.emit_usage_update(
+            self.sid, loop.get_token_usage(), loop.get_context_tokens(),
+        )
