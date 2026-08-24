@@ -226,6 +226,69 @@ def migrate_session_endpoints(old_sid: str, new_sid: str) -> int:
     return count
 
 
+def cleanup_session_endpoints(session_id: str) -> int:
+    """删除指定会话的所有动态端点（内存 + 磁盘），返回移除数量。
+
+    与 ``migrate_session_endpoints`` 对称，语义为彻底删除而非迁移。
+    内存：移除 ``_dynamic_endpoints`` 中 ``info.session_id == session_id``
+    的条目。磁盘：读 ``dynamic_endpoints.json``，按 ``session_id`` 过滤剔除
+    （含幽灵条目——重启时被 ``_load_all_endpoints`` 跳过但保留在磁盘的部分），
+    原子写回。
+
+    关键差异 vs ``_save_all_endpoints``：本函数采用"读-过滤-写"删除语义，
+    不走合并保留——否则被删会话的幽灵端点会被合并式写盘保留回来。
+
+    单次持 ``_endpoint_lock`` 完成内存 + 磁盘操作，与 ``_save_all_endpoints``
+    持锁做磁盘 IO 的风格一致。整段 try/except 容错，失败 ``logger.warning``，
+    返回已统计数。
+
+    由 ``cleanup_session_resources`` 在会话永久删除时调用，须在
+    ``stop_session_background_tasks`` 停止 watching 进程之后执行（端点是被
+    watching flusher 引用的资源，先停引用方再清被引用方）。
+    """
+    in_memory = 0
+    on_disk = 0
+    try:
+        store_path = _get_dynamic_endpoints_store_path()
+        with _endpoint_lock:
+            # 内存：pop 该会话的端点
+            ghost_eids = [
+                eid for eid, info in _dynamic_endpoints.items()
+                if info.session_id == session_id
+            ]
+            for eid in ghost_eids:
+                _dynamic_endpoints.pop(eid, None)
+                in_memory += 1
+            # 磁盘：读-过滤-写，剔除该会话全部条目（含幽灵）
+            if store_path.exists():
+                try:
+                    raw: dict = json.loads(store_path.read_text(encoding="utf-8"))
+                except Exception:
+                    raw = {}
+                kept: dict[str, Any] = {
+                    eid: data for eid, data in raw.items()
+                    if not (isinstance(data, dict) and data.get("session_id") == session_id)
+                }
+                on_disk = len(raw) - len(kept)
+                if on_disk:
+                    write_text_atomic(
+                        store_path,
+                        json.dumps(kept, ensure_ascii=False, indent=2),
+                        tmp_suffix=".tmp",
+                    )
+        if in_memory or on_disk:
+            logger.info(
+                "Cleaned up session endpoints | session=%s in_memory=%d on_disk=%d",
+                session_id, in_memory, on_disk,
+            )
+    except Exception as exc:
+        logger.warning(
+            "Failed to cleanup session endpoints for session=%s: %s",
+            session_id, exc, exc_info=True,
+        )
+    return max(in_memory, on_disk)
+
+
 # ── handler ─────────────────────────────────────────────────
 
 

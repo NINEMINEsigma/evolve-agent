@@ -678,6 +678,13 @@ async def delete_session(session_id: str):
         await orch.shutdown_parent(session_id)
     except Exception:
         logger.warning("Failed to shutdown subagents for session=%s", session_id, exc_info=True)
+    # 清理会话级附带资源（后台任务、cron、动态端点）— 置于 shutdown_parent
+    # 之后作为会话级收尾，此时索引/目录已删、子 Agent 已关。
+    try:
+        from gateway.session_cleanup import cleanup_session_resources
+        cleanup_session_resources(session_id)
+    except Exception:
+        logger.warning("Failed to cleanup session resources for session=%s", session_id, exc_info=True)
     logger.info("Delete session ok | session=%s", session_id)
     return {"deleted": True, "session_id": session_id}
 
@@ -1090,6 +1097,17 @@ async def dynamic_endpoint_handler(
         )
         return HTMLResponse(
             json.dumps({"error": "endpoint mismatch", "endpoint_name": endpoint_name}),
+            media_type="application/json",
+            status_code=404,
+        )
+
+    # NOTE: 防御性校验 — 会话已被删除时拒绝投递，作为 cleanup_session_resources
+    # 清理失败的兜底，堵住孤儿端点被触发投递到已死会话。sm 为 None 时不阻断
+    #（SessionManager 尚未初始化，保持原行为）。
+    sm = _get_sm()
+    if sm is not None and not sm.exists(session_id):
+        return HTMLResponse(
+            json.dumps({"error": "session not found", "session_id": session_id}),
             media_type="application/json",
             status_code=404,
         )

@@ -55,6 +55,10 @@ class SessionManager:
         """返回 session 元数据。"""
         return self._chat_sm.get(session_id)
 
+    def exists(self, session_id: str) -> bool:
+        """返回 session 是否存在。"""
+        return self._chat_sm.exists(session_id)
+
     def get_all(self) -> list[SessionInfo]:
         return self._chat_sm.get_all()
 

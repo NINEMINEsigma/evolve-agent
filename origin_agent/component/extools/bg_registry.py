@@ -194,3 +194,29 @@ def stop_watching_by_endpoint(endpoint_name: str) -> int:
                 task_id, endpoint_name,
             )
     return stopped
+
+
+def stop_session_background_tasks(session_id: str) -> int:
+    """停止指定会话的所有后台任务（watching + 普通 background），返回停止数量。
+
+    用 ``list()`` 副本遍历 ``_background_tasks``（``stop_background_task``
+    内会 pop 字典），匹配 ``task.get("session_id") == session_id``，逐个
+    调用现成 ``stop_background_task``（已处理 kill 进程、停 flusher 线程、
+    关日志句柄）。
+
+    由 ``cleanup_session_resources`` 在会话永久删除时调用，与会话相关的
+    watching service（通过动态端点回调投递）应在动态端点被清除之前停止，
+    避免 flusher 在端点消失后 POST 的竞态窗口。
+    """
+    stopped = 0
+    for task_id, task in list(_background_tasks.items()):
+        if task.get("session_id") != session_id:
+            continue
+        result = stop_background_task(task_id)
+        if result.get("stopped"):
+            stopped += 1
+    if stopped:
+        logger.info(
+            "Stopped %d background task(s) for session=%s", stopped, session_id,
+        )
+    return stopped
