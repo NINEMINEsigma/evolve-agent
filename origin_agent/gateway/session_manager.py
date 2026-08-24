@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import Any, TYPE_CHECKING
+from typing import TYPE_CHECKING
 
 from gateway.chat import SessionManager as ChatSessionManager
 from entity.puretype import Loop, LoopMeta, Role, SessionInfo, ClientInfo
@@ -97,10 +97,47 @@ class SessionManager:
     def get_all_tags(self) -> list[str]:
         return self._chat_sm.get_all_tags()
 
-    # TODO: 不健壮的方法
-    def __getattr__(self, name: str) -> Any:
-        """未显式定义的方法委托给底层的 ChatSessionManager。"""
-        return getattr(self._chat_sm, name)
+    def create(
+        self,
+        parent_sid: str | None = None,
+        parents: list[str] | None = None,
+        session_id: str | None = None,
+    ) -> str:
+        """创建新 session，返回 session_id。"""
+        return self._chat_sm.create(parent_sid=parent_sid, parents=parents, session_id=session_id)
+
+    def remove(self, session_id: str) -> None:
+        """从内存和磁盘移除 session（含目录）。"""
+        self._chat_sm.remove(session_id)
+
+    def remove_from_index(self, session_id: str) -> None:
+        """仅从索引移除 session，不删除磁盘目录。"""
+        self._chat_sm.remove_from_index(session_id)
+
+    def update_title(self, session_id: str, title: str) -> None:
+        """更新内存和磁盘中 session 的标题。"""
+        self._chat_sm.update_title(session_id, title)
+
+    def update_last_activity(self, session_id: str) -> None:
+        """更新 session 的最后活动时间。"""
+        self._chat_sm.update_last_activity(session_id)
+
+    def toggle_pin(self, session_id: str) -> bool:
+        """切换 session 的置顶状态，返回新的 pinned 值。"""
+        return self._chat_sm.toggle_pin(session_id)
+
+    def validate_merge_sources(self, source_ids: list[str]) -> str | None:
+        """校验源会话是否已归档，返回错误信息或 None。"""
+        return self._chat_sm.validate_merge_sources(source_ids)
+
+    def load_from_disk(self) -> None:
+        """从磁盘加载持久化的 session 到内存。"""
+        self._chat_sm.load_from_disk()
+
+    @property
+    def count(self) -> int:
+        """返回当前 session 总数。"""
+        return self._chat_sm.count
 
     def get_all_loops(self) -> dict[str, IMainSessionLoop]:
         """返回所有活跃 loop 的 (session_id → IMainSessionLoop) 快照。"""
