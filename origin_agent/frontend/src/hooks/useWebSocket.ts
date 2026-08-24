@@ -279,15 +279,11 @@ export function useWebSocket() {
         const remaining = s.sessions.filter((sess) => sess.id !== sid);
         s.setSessions(remaining);
         if (wasActive) {
-          if (remaining.length > 0) {
-            switchSession(remaining[0].id);
-          } else {
-            newChat();
-          }
+          switchSession(COLLOQUY_SID);
         }
       })
       .catch(() => {});
-  }, [newChat, switchSession]);
+  }, [switchSession]);
 
   const toggleHandsfree = useCallback((enabled: boolean) => {
     const s = sessionRef.current;
