@@ -1,3 +1,4 @@
+import json
 from typing import * # type: ignore
 import logging
 from pydantic import BaseModel, Field, PrivateAttr
@@ -66,7 +67,7 @@ class AudioBlock(MessageBlock):
 
 
 class BaseMessage(BaseModel):
-    content: str|list[MessageBlock] = Field(description="The content of the message")
+    content: str|dict[str, Any]|list[MessageBlock] = Field(description="The content of the message")
     role: Role = Field(description="The role of the message")
 
     def as_content(self, 
@@ -84,13 +85,18 @@ class BaseMessage(BaseModel):
         Returns:
             str|list: 转换后的字符串或列表
         '''
-        content: str|list[MessageBlock]|list[Any] = self.content
+        content: str|dict[str, Any]|list[MessageBlock] = self.content
         result: MessageContent|None = None
         # 当消息为纯文本时
         if isinstance(content, str):
             result = str(content)
             for key, value in kwargs.items():
                 result = result.replace("{{" + key + "}}", str(value))
+        # 当消息为字典时
+        elif isinstance(content, dict):
+            temp_dict = content.copy()
+            temp_dict.update(kwargs)
+            result = json.dumps(temp_dict, ensure_ascii=False)
         # 当消息含有多模态块时
         else:
             e = len(content)
