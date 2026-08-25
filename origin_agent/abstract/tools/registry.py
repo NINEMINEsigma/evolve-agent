@@ -499,7 +499,7 @@ class ToolRegistry:
 
     # -- 分发 ----------------------------------------------------------
 
-    def dispatch(self, name: str, args: dict, context: Any = None) -> Any:
+    def dispatch(self, name: str, args: dict, context: Any = None) -> dict:
         """同步分发 — 供非 async 上下文调用。
 
         通过 ``inspect.signature`` 检查 handler 是否声明 ``context`` 参数。
@@ -509,7 +509,7 @@ class ToolRegistry:
         * 异步 handler 通过 ``asyncio.run()`` 桥接。
         * 所有异常被捕获并返回 ``{"error": "..."}``，保证一致的错误格式。
 
-        返回 dict 或 str。
+        返回 dict。违反 dict 契约的 handler 返回值会被转为 error dict 并 logger.error 记录。
         """
         entry: ToolEntry | None = self.get_entry(name)
         if not entry:
@@ -520,14 +520,23 @@ class ToolRegistry:
             kwargs: dict[str, Any] = {"context": context} if _pass_context else {}
 
             if entry.is_async:
-                return asyncio.run(handler(args, **kwargs))
-            return handler(args, **kwargs)
+                result = asyncio.run(handler(args, **kwargs))
+            else:
+                result = handler(args, **kwargs)
+            if isinstance(result, dict):
+                return result
+            logger.error(
+                "Tool '%s' returned non-dict result (type: %s). "
+                "Tool handlers must return dict.",
+                name, type(result).__name__,
+            )
+            return {"error": f"Tool '{name}' returned non-dict result (type: {type(result).__name__}). Tool handlers must return dict."}
         except Exception as e:
             logger.exception("Tool %s dispatch error: %s", name, e)
             sanitized: str = f"Tool execution failed: {type(e).__name__}: {e}"
             return {"error": sanitized}
 
-    async def async_dispatch(self, name: str, args: dict, context: Any = None) -> Any:
+    async def async_dispatch(self, name: str, args: dict, context: Any = None) -> dict:
         """异步分发 — 供 async 上下文调用。
 
         与 ``dispatch()`` 语义相同，但：
@@ -535,7 +544,7 @@ class ToolRegistry:
         * 异步 handler 直接 ``await``。
         * **不** 处理超时 — 调用方自行 ``asyncio.wait_for``。
 
-        返回 dict 或 str。
+        返回 dict。违反 dict 契约的 handler 返回值会被转为 error dict 并 logger.error 记录。
         """
         entry: ToolEntry | None = self.get_entry(name)
         if not entry:
@@ -546,8 +555,17 @@ class ToolRegistry:
             kwargs: dict[str, Any] = {"context": context} if _pass_context else {}
 
             if entry.is_async:
-                return await handler(args, **kwargs)
-            return await asyncio.to_thread(handler, args, **kwargs)
+                result = await handler(args, **kwargs)
+            else:
+                result = await asyncio.to_thread(handler, args, **kwargs)
+            if isinstance(result, dict):
+                return result
+            logger.error(
+                "Tool '%s' returned non-dict result (type: %s). "
+                "Tool handlers must return dict.",
+                name, type(result).__name__,
+            )
+            return {"error": f"Tool '{name}' returned non-dict result (type: {type(result).__name__}). Tool handlers must return dict."}
         except Exception as e:
             logger.exception("Tool %s async_dispatch error: %s", name, e)
             sanitized: str = f"Tool execution failed: {type(e).__name__}: {e}"
