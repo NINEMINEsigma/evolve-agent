@@ -49,6 +49,7 @@ if TYPE_CHECKING:
     from system.application import Application
     from entry.agent_sink import AgentSink
     from gateway.session_manager import SessionManager
+    from entry.tool_post_dispatch import ResultFieldInjector
 
 logger = logging.getLogger(__name__)
 
@@ -1029,6 +1030,16 @@ class IMainSessionLoop(ABC):
 
         dispatch 层用 (entry.availability & scope) == 0 拦截不在当前 scope 内的工具。
         """
+
+    def get_result_field_injector(self) -> "ResultFieldInjector | None":
+        """返回工具结果字段注入器。默认返回 None（无注入）。
+
+        ToolExecutor.execute 在每次工具调用时查询此方法，
+        将返回的注入器传给 finalize_tool_result 的 field_injector 参数。
+        SP-4 的 SessionMessageQueue 将通过重写此方法返回队列的 drain 回调，
+        使队列在工具链中消费时能向工具结果 dict 注入 queued_messages 字段。
+        """
+        return None
 
 
 # ---------------------------------------------------------------------------

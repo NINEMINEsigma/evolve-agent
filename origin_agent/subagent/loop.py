@@ -778,6 +778,7 @@ class SubAgentLoop(BasePrivateChatAgentLoop):
                 session_id=self.session_id,
                 tool_call_id=tc.id,
                 character_name=self.current_character_agent,
+                field_injector=None,
             )
         except asyncio.TimeoutError:
             invocation_duration_ms = int((_time_module.monotonic() - invocation_start) * 1000)
@@ -795,6 +796,7 @@ class SubAgentLoop(BasePrivateChatAgentLoop):
                 session_id=self.session_id,
                 tool_call_id=tc.id,
                 character_name=self.current_character_agent,
+                field_injector=None,
             )
         except Exception as exc:
             invocation_duration_ms = int((_time_module.monotonic() - invocation_start) * 1000)
@@ -812,6 +814,7 @@ class SubAgentLoop(BasePrivateChatAgentLoop):
                 session_id=self.session_id,
                 tool_call_id=tc.id,
                 character_name=self.current_character_agent,
+                field_injector=None,
             )
         finally:
             current_subagent_loop.set(None)
