@@ -14,7 +14,7 @@
   - ``custom_models:``     只读（本地模型文件）
   - ``custom_tools:``      只读（自定义工具）
 """
-
+# TODO: _blocks构建应该具有一个公用的工厂
 from __future__ import annotations
 
 import base64
@@ -315,10 +315,7 @@ async def _handle_read(args: dict[str, Any], context: ToolContext | None = None)
                     "size": file_size,
                     "width": width,
                     "height": height,
-                    "_user_image": {
-                        "base64": b64,
-                        "mime_type": mime_type,
-                    },
+                    "_user_blocks": [{"type": "image_url", "image_url": {"url": f"data:{mime_type};base64,{b64}"}}],
                     "_note": (
                         "Image content will be delivered as a user message after this tool round. "
                         "Do NOT call any more tools — respond directly to receive the image. "
@@ -360,10 +357,7 @@ async def _handle_read(args: dict[str, Any], context: ToolContext | None = None)
                 "size": file_size,
                 "width": width,
                 "height": height,
-                "_image": {
-                    "base64": b64,
-                    "mime_type": mime_type,
-                },
+                "_blocks": [{"type": "image_url", "image_url": {"url": f"data:{mime_type};base64,{b64}"}}],
                 "_note": (
                     "Image metadata returned. width/height are parsed via Pillow "
                     "(None for SVG or on failure). The image content is attached "
@@ -471,10 +465,7 @@ async def _handle_read(args: dict[str, Any], context: ToolContext | None = None)
                     "absolute_path": str(resolved.real),
                     "mime_type": mime_type,
                     "size": file_size,
-                    "_user_audio": {
-                        "base64": b64,
-                        "format": audio_format,
-                    },
+                    "_user_blocks": [{"type": "input_audio", "input_audio": {"data": b64, "format": audio_format}}],
                     "_note": (
                         "Audio content will be delivered as a user message after this tool round. "
                         "Do NOT call any more tools — respond directly to receive the audio."
@@ -511,10 +502,7 @@ async def _handle_read(args: dict[str, Any], context: ToolContext | None = None)
                 "absolute_path": str(resolved.real),
                 "mime_type": mime_type,
                 "size": file_size,
-                "_audio": {
-                    "base64": b64,
-                    "format": audio_format,
-                },
+                "_blocks": [{"type": "input_audio", "input_audio": {"data": b64, "format": audio_format}}],
                 "_note": (
                     "Audio content attached as a multimodal block for direct analysis."
                 ),
@@ -613,10 +601,7 @@ async def _handle_read(args: dict[str, Any], context: ToolContext | None = None)
                         "absolute_path": str(resolved.real),
                         "mime_type": mime_type,
                         "size": file_size,
-                        "_user_video": {
-                            "base64": b64,
-                            "mime_type": mime_type,
-                        },
+                        "_user_blocks": [{"type": "video_url", "video_url": {"url": f"data:{mime_type};base64,{b64}"}}],
                         "_note": (
                             "Video content will be delivered as a user message after this tool round. "
                             "Do NOT call any more tools — respond directly to receive the video."
@@ -651,10 +636,7 @@ async def _handle_read(args: dict[str, Any], context: ToolContext | None = None)
                 "absolute_path": str(resolved.real),
                 "mime_type": mime_type,
                 "size": file_size,
-                "_video": {
-                    "base64": b64,
-                    "mime_type": mime_type,
-                },
+                "_blocks": [{"type": "video_url", "video_url": {"url": f"data:{mime_type};base64,{b64}"}}],
                 "_note": "Video content attached as a multimodal block for direct analysis.",
                 "total_lines": 0,
                 "content": "",
@@ -925,21 +907,21 @@ Directory branch:
 ```
 Image branch (tool-message path):
 ```json
-{"type": "image", "path": "ws:uploads/screenshot.png", "absolute_path": "...", "mime_type": "image/png", "size": 12345, "width": 800, "height": 600, "_image": {"base64": "...", "mime_type": "image/png"}, "_note": "Image metadata returned...", "total_lines": 0, "content": "", "remaining": 0, "offset": 0, "limit": 0, "entries": [], "count": null}
+{"type": "image", "path": "ws:uploads/screenshot.png", "absolute_path": "...", "mime_type": "image/png", "size": 12345, "width": 800, "height": 600, "_blocks": [{"type": "image_url", "image_url": {"url": "data:image/png;base64,..."}}], "_note": "Image metadata returned...", "total_lines": 0, "content": "", "remaining": 0, "offset": 0, "limit": 0, "entries": [], "count": null}
 ```
 Image branch (user-message fallback path):
 ```json
-{"type": "image", "path": "ws:uploads/screenshot.png", "absolute_path": "...", "mime_type": "image/png", "size": 12345, "width": 800, "height": 600, "_user_image": {"base64": "...", "mime_type": "image/png"}, "_note": "Image content will be delivered as a user message after this tool round. Do NOT call any more tools...", "total_lines": 0, "content": "", "remaining": 0, "offset": 0, "limit": 0, "entries": [], "count": null}
+{"type": "image", "path": "ws:uploads/screenshot.png", "absolute_path": "...", "mime_type": "image/png", "size": 12345, "width": 800, "height": 600, "_user_blocks": [{"type": "image_url", "image_url": {"url": "data:image/png;base64,..."}}], "_note": "Image content will be delivered as a user message after this tool round. Do NOT call any more tools...", "total_lines": 0, "content": "", "remaining": 0, "offset": 0, "limit": 0, "entries": [], "count": null}
 ```
 `width`/`height` are parsed via Pillow; `null` for SVG or on parse failure.
 
 Video branch (tool-message path):
 ```json
-{"type": "video", "path": "ws:uploads/demo.mp4", "absolute_path": "...", "mime_type": "video/mp4", "size": 123456, "_video": {"base64": "...", "mime_type": "video/mp4"}, "_note": "Video content attached as a multimodal block for direct analysis.", "total_lines": 0, "content": "", "remaining": 0, "offset": 0, "limit": 0, "entries": [], "count": null}
+{"type": "video", "path": "ws:uploads/demo.mp4", "absolute_path": "...", "mime_type": "video/mp4", "size": 123456, "_blocks": [{"type": "video_url", "video_url": {"url": "data:video/mp4;base64,..."}}], "_note": "Video content attached as a multimodal block for direct analysis.", "total_lines": 0, "content": "", "remaining": 0, "offset": 0, "limit": 0, "entries": [], "count": null}
 ```
 Video branch (user-message fallback path):
 ```json
-{"type": "video", "path": "ws:uploads/demo.mp4", "absolute_path": "...", "mime_type": "video/mp4", "size": 123456, "_user_video": {"base64": "...", "mime_type": "video/mp4"}, "_note": "Video content will be delivered as a user message after this tool round. Do NOT call any more tools...", "total_lines": 0, "content": "", "remaining": 0, "offset": 0, "limit": 0, "entries": [], "count": null}
+{"type": "video", "path": "ws:uploads/demo.mp4", "absolute_path": "...", "mime_type": "video/mp4", "size": 123456, "_user_blocks": [{"type": "video_url", "video_url": {"url": "data:video/mp4;base64,..."}}], "_note": "Video content will be delivered as a user message after this tool round. Do NOT call any more tools...", "total_lines": 0, "content": "", "remaining": 0, "offset": 0, "limit": 0, "entries": [], "count": null}
 ```
 
 ## When to Use

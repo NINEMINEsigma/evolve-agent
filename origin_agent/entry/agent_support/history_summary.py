@@ -10,7 +10,8 @@
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING
+import json
+from typing import Any, TYPE_CHECKING
 
 from entity.puretype import Role
 from entity.messages import BaseMessage
@@ -146,8 +147,8 @@ def _character_display(msg: BaseMessage) -> str | None:
 
 
 # TODO: 多模块块并不应该直接转换为base64文本然后以文本传回
-def _content_to_text(content: str | list | None) -> str:
-    """把 content（str / list[MessageBlock] / None）转为纯文本。
+def _content_to_text(content: str | dict[str, Any] | list | None) -> str:
+    """把 content（str / dict / list[MessageBlock] / None）转为纯文本。
 
     核心目标：剥离 base64，保留可读媒体引用。
     """
@@ -161,7 +162,11 @@ def _content_to_text(content: str | list | None) -> str:
     if content is None:
         return ""
     if isinstance(content, str):
+        # NOTE: str 为旧形式工具结果（JSON 序列化字典），兼容存量 history.es。
         return content
+    if isinstance(content, dict):
+        # SP-3: 原生 dict 工具结果——json.dumps 提取文本
+        return json.dumps(content, ensure_ascii=False)
     if isinstance(content, list):
         parts: list[str] = []
         for block in content:

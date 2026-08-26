@@ -356,19 +356,31 @@ async def preprocess_multimodal_blocks(
     return result_messages
 
 
-def tool_result_to_content(result: Any) -> str | list[MessageBlock]:
+def tool_result_to_content(result: Any) -> str | dict[str, Any] | list[MessageBlock]:
     """把工具返回结果转换为 ToolResultMessage 可用的 content。
 
-    - 字符串：原样返回。
-    - 含 _image 字段的 dict：pop _image 后生成 [ImageBlock, TextBlock（元数据，不含 base64）]。
-    - 含 _audio 字段的 dict：pop _audio 后生成 [AudioBlock, TextBlock（元数据，不含 base64）]。
-    - 含 _video 字段的 dict：pop _video 后生成 [VideoBlock, TextBlock（元数据，不含 base64）]。
-    - 其他 dict：json.dumps 成字符串。
+    - 字符串：原样返回（旧形式兼容）。
+    - 含 _blocks 字段的 dict：pop _blocks 后经 blocks_from_dicts 转为有序 MessageBlock 列表；
+      剩余 dict 非空时追加为末尾 TextBlock(json.dumps(remaining))。
+    - 含 _image/_audio/_video 字段的 dict：旧键兜底，pop 后生成 [MediaBlock, TextBlock]。
+    - 其他 dict：返回原生 dict（不再 json.dumps）。
+    - list（全 MessageBlock）：直接透传（旧形式兼容）。
     - 其他：str(result)。
     """
     if isinstance(result, str):
+        # NOTE: str 输入为旧形式工具结果（JSON 序列化字典），
+        # SP-3 后工具结果 content 转为原生 dict 存储，str 路径仅为兼容存量 history.es。
         return result
     if isinstance(result, dict):
+        # _blocks 优先：有序混合块列表，复用 blocks_from_dicts 格式
+        blocks_data = result.pop("_blocks", None)
+        if isinstance(blocks_data, list) and blocks_data:
+            blocks = blocks_from_dicts(blocks_data)
+            # 剩余 dict（去掉 _blocks）非空时追加为末尾 TextBlock
+            if result:
+                blocks.append(TextBlock(text=json.dumps(result, ensure_ascii=False)))
+            return blocks
+        # 旧 _image/_audio/_video 键兜底（兼容未迁移的产出方）
         image = result.pop("_image", None)
         if isinstance(image, dict) and image.get("base64"):
             return build_image_content_blocks(image, json.dumps(result, ensure_ascii=False))
@@ -378,9 +390,11 @@ def tool_result_to_content(result: Any) -> str | list[MessageBlock]:
         video = result.pop("_video", None)
         if isinstance(video, dict) and video.get("base64"):
             return build_video_content_blocks(video, json.dumps(result, ensure_ascii=False))
-        return json.dumps(result, ensure_ascii=False)
+        # 无媒体键：返回原生 dict（不再 json.dumps）
+        return result
     if isinstance(result, list):
-        # 如果工具已经返回 MessageBlock 列表，直接透传
+        # NOTE: list 输入为旧形式工具结果（全 MessageBlock 透传），
+        # SP-1 后 handler 返回 dict，此分支仅为兼容。
         if all(isinstance(b, MessageBlock) for b in result):
             return result  # type: ignore[return-value]
     return str(result)
@@ -389,34 +403,48 @@ def tool_result_to_content(result: Any) -> str | list[MessageBlock]:
 def tool_result_to_follow_up(
     result: dict,
     character_name: str,
-) -> tuple[list[BaseMessage] | None, str | list[MessageBlock]]:
-    """提取 _user_image/_user_audio/_user_video，构造 follow_up 用户消息。
+) -> tuple[list[BaseMessage] | None, str | dict[str, Any] | list[MessageBlock]]:
+    """提取 _user_blocks（或旧 _user_image/_user_audio/_user_video），构造 follow_up 用户消息。
 
-    从 result dict 中 pop _user_image/_user_audio/_user_video，构造
-    CharacterConversationMessage(role=USER, character_name=system, content=[多模态块, 文本块])。
-    剩余 dict 走 tool_result_to_content 生成纯文本 ToolResultMessage content。
+    从 result dict 中 pop _user_blocks（优先）或 _user_image/_user_audio/_user_video（兜底），
+    构造 CharacterConversationMessage(role=USER, character_name=system, content=[多模态块, 文本块])。
+    剩余 dict 走 tool_result_to_content 生成 ToolResultMessage content。
 
     Returns:
         (follow_up_messages, remaining_content)
         - follow_up_messages: 延迟注入的 CharacterConversationMessage 列表，或 None
-        - remaining_content: ToolResultMessage 的 content（纯文本 JSON）
+        - remaining_content: ToolResultMessage 的 content
     """
+    # _user_blocks 优先：有序混合块列表
+    user_blocks_data = result.pop("_user_blocks", None)
+    # 旧 _user_image/_user_audio/_user_video 键兜底
     user_image = result.pop("_user_image", None)
     user_audio = result.pop("_user_audio", None)
     user_video = result.pop("_user_video", None)
 
-    if user_image is None and user_audio is None and user_video is None:
+    has_user_blocks = isinstance(user_blocks_data, list) and user_blocks_data
+    has_old_user_media = (
+        (isinstance(user_image, dict) and user_image.get("base64"))
+        or (isinstance(user_audio, dict) and user_audio.get("base64"))
+        or (isinstance(user_video, dict) and user_video.get("base64"))
+    )
+
+    if not has_user_blocks and not has_old_user_media:
         return None, tool_result_to_content(result)
 
     metadata_json = json.dumps(result, ensure_ascii=False)
     blocks: list[MessageBlock] = []
 
-    if isinstance(user_image, dict) and user_image.get("base64"):
-        blocks.extend(build_image_content_blocks(user_image, metadata_json))
-    if isinstance(user_audio, dict) and user_audio.get("base64"):
-        blocks.extend(build_audio_content_blocks(user_audio, metadata_json))
-    if isinstance(user_video, dict) and user_video.get("base64"):
-        blocks.extend(build_video_content_blocks(user_video, metadata_json))
+    if has_user_blocks:
+        blocks.extend(blocks_from_dicts(user_blocks_data))
+    else:
+        # 旧键兜底
+        if isinstance(user_image, dict) and user_image.get("base64"):
+            blocks.extend(build_image_content_blocks(user_image, metadata_json))
+        if isinstance(user_audio, dict) and user_audio.get("base64"):
+            blocks.extend(build_audio_content_blocks(user_audio, metadata_json))
+        if isinstance(user_video, dict) and user_video.get("base64"):
+            blocks.extend(build_video_content_blocks(user_video, metadata_json))
 
     if not blocks:
         return None, tool_result_to_content(result)
@@ -453,11 +481,11 @@ def _strip_internal_fields(text: str) -> str:
     return json.dumps(filtered, ensure_ascii=False)
 
 
-def content_to_text(content: MessageContent|list[MessageBlock]|None) -> str:
-    """把 content（字符串或 block 列表）转成适合日志/前端展示/事件推送的纯文本。
+def content_to_text(content: MessageContent|dict[str, Any]|list[MessageBlock]|None) -> str:
+    """把 content（字符串、dict 或 block 列表）转成适合日志/前端展示/事件推送的纯文本。
 
     同时接受内存态（list[MessageBlock]）与序列化态（MessageContent 的 list[dict]）内容，
-    两种形态的 text 块都会被提取。
+    两种形态的 text 块都会被提取。SP-3 起也接受原生 dict 工具结果。
 
     自动过滤 JSON 文本中所有下划线前缀的内部字段（_image、_meta 等），
     避免 base64 等大体积载荷撑爆前端事件和日志。
@@ -465,17 +493,33 @@ def content_to_text(content: MessageContent|list[MessageBlock]|None) -> str:
     if content is None:
         return ""
     if isinstance(content, str):
+        # NOTE: str 为旧形式工具结果（JSON 序列化字典），
+        # 兼容存量 history.es 中的 ToolResultMessage.content。
         return _strip_internal_fields(content)
+    if isinstance(content, dict):
+        # SP-3: 原生 dict 工具结果——json.dumps 后过滤 _ 前缀字段
+        return _strip_internal_fields(json.dumps(content, ensure_ascii=False))
     else:
         parts: list[str] = []
         for block in content:
-            # 跳过多模态块（ImageBlock、AudioBlock 等），避免输出非JSON的占位符
             if isinstance(block, TextBlock):
                 parts.append(_strip_internal_fields(block.text))
+            elif isinstance(block, ImageBlock):
+                parts.append("[image]")
+            elif isinstance(block, AudioBlock):
+                parts.append("[audio]")
+            elif isinstance(block, VideoBlock):
+                parts.append("[video]")
             elif isinstance(block, dict):
                 btype = block.get("type")
                 if btype == "text":
                     parts.append(_strip_internal_fields(str(block.get("text", ""))))
+                elif btype == "image_url":
+                    parts.append("[image]")
+                elif btype == "input_audio":
+                    parts.append("[audio]")
+                elif btype == "video_url":
+                    parts.append("[video]")
         return "\n".join(parts)
 
 
@@ -578,8 +622,11 @@ def blocks_from_dicts(blocks: list[dict[str, Any]]) -> list[MessageBlock]:
     return result
 
 
-def content_to_serializable(content: str | list[MessageBlock]) -> str | list[dict[str, Any]]:
-    """将 content 序列化为前端可用的 str | list[dict]，供编辑响应使用。"""
+def content_to_serializable(content: str | dict[str, Any] | list[MessageBlock]) -> str | dict[str, Any] | list[dict[str, Any]]:
+    """将 content 序列化为前端可用的 str | dict | list[dict]，供编辑响应使用。"""
+    # NOTE: str 为旧形式工具结果（JSON 序列化字典），兼容存量 history.es。
     if isinstance(content, str):
+        return content
+    if isinstance(content, dict):
         return content
     return [b.as_object() if isinstance(b, MessageBlock) else b for b in content]

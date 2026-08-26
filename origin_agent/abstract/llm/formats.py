@@ -12,6 +12,7 @@ Anthropic 转换器 ``messages_to_anthropic_list()`` 直接从 ``list[BaseMessag
 from __future__ import annotations
 
 import re
+import json
 from typing import Any
 
 from entity.messages import (
@@ -118,7 +119,11 @@ def to_summary_dict(
     # Extract raw text directly from .content field, skipping non-text blocks
     raw = message.content
     if isinstance(raw, str):
+        # NOTE: str 为旧形式工具结果（JSON 序列化字典），兼容存量 history.es。
         text = raw
+    elif isinstance(raw, dict):
+        # SP-3: 原生 dict 工具结果
+        text = json.dumps(raw, ensure_ascii=False)
     elif isinstance(raw, list):
         parts: list[str] = []
         for block in raw:
