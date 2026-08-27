@@ -12,59 +12,197 @@ tags:
   - export
 ---
 
-# 3D Object
+# 3D Object & Scene
 
-Build a 3D object the user can inspect from every angle and download, as a self-contained HTML file using three.js.
+Build 3D objects and immersive scenes the user can inspect from every angle, as self-contained projects using three.js.
 
-## Quick Start
+**Architecture discipline**: Even without a build step, maintain a modular `src/` directory with ES Modules. The single-HTML shortcut is acceptable only for quick previews under 200 lines. Production work must use the modular structure documented below.
 
-1. Copy the stage template: `templates/three_d_stage.html` → your output file (e.g. `ws:output/my-model.html`)
-2. Open the copied file, find the `buildModel()` function (clearly marked with `// ===== Build Model (REPLACE THIS) =====`)
-3. Replace the example model with your own `THREE.Group` of named meshes
-4. Save the file
-5. **Display via inline iframe** in the chat bubble — do NOT open a browser. Use this exact format:
-   ```html
-   <iframe src="/files/ws/output/my-model.html" style="width:640px;height:480px;border:none;border-radius:8px;overflow:hidden;display:block;margin:0 auto"></iframe>
-   ```
+---
 
-### Display Convention
+## Two Work Modes
 
-- **Always** present the result as an inline `<iframe>` in the assistant message, never via `browser_open_tab` or asking the user to open a URL.
-- **Fixed resolution**: `width:640px;height:480px` for 3D content (interactive viewport).
-- The iframe gives the user full interactivity (drag to rotate, scroll to zoom, export buttons) without leaving the chat.
+### Mode A: Quick Preview (single HTML, ≤200 lines)
 
-The template provides everything else: pinned three.js import map (v0.184.0) with SRI integrity hashes, OrbitControls, studio 3-point lighting, ground shadow, auto-framed camera, and an export toolbar (OBJ+MTL / GLB download buttons).
+For rapid iteration or very simple objects. Copy `templates/three_d_stage.html`, replace `buildModel()`, and display via inline iframe.
 
-## three.js Import Map
+**Limitations**: No custom shaders, no post-processing, no procedural textures, no particle systems.
 
-The template loads three.js ONLY through a pinned import map with SRI integrity hashes in `<head>`. Do NOT change versions, URLs, or hashes. Do NOT add other copies of three.js, and do NOT import addons beyond the four listed (three, OrbitControls, OBJExporter, GLTFExporter) — the map is deliberately a closed set, so anything else fails to resolve rather than loading unverified.
+### Mode B: Production Scene (modular, no build)
 
-## Building the Model
+For polished scenes with custom materials, post-processing, procedural geometry, and interactive elements. This is the default for any scene that needs atmosphere beyond a plain studio backdrop.
 
-Build the model programmatically as a `THREE.Group` composed of named parts. The `buildModel()` function must return a `THREE.Group`.
+```
+project/
+├── index.html              # canvas, UI skeleton, importmap only
+├── package.json            # { "scripts": { "dev": "npx serve . -l 5173" } }
+├── vendor/
+│   ├── three.module.min.js
+│   └── addons/             # OrbitControls, EffectComposer, etc.
+└── src/
+    ├── main.js             # entry: imports, init, render loop
+    ├── scene/
+    │   ├── stage.js        # renderer, camera, controls, resize
+    │   ├── lighting.js     # sun, fill, spots, hemispheres
+    │   └── post.js         # EffectComposer → Bloom → GradeShader
+    ├── core/
+    │   ├── audio.js        # optional Web Audio wrapper
+    │   └── config.js       # quality presets, settings load/save
+    ├── world/              # environment: sky, ground, particles, props
+    └── materials/          # shared GLSL, material factories
+```
 
-- **Compose primitives** (BoxGeometry, CylinderGeometry, SphereGeometry, TorusGeometry, LatheGeometry, ExtrudeGeometry with Shape) before reaching for raw BufferGeometry — real objects decompose into far more primitives than you'd guess.
-- **NAME every mesh and every material** ("hull", "walnut", "brass") — the names become the `o` / `usemtl` entries in the exported OBJ and the node names in the GLB, which is what makes the download usable in Blender.
-- **Use MeshStandardMaterial** with a small curated palette (3-5 materials, shared across parts). Set `roughness` / `metalness` deliberately. Textures don't survive the OBJ export — prefer geometry and material color over texture detail.
-- **Model in real-world meters**, y-up, centered on the origin, base resting at the lowest y. Offset deliberately coplanar faces by ~0.001 so nothing z-fights.
-- **Curved surfaces** need enough segments to read as smooth at full screen (32+ radial segments on feature surfaces), but don't tessellate what no one will see.
-- Set `castShadow = true` on each mesh so it casts a shadow on the ground plane.
+`index.html` loads everything through `type="module"` and a local `importmap`. No bundler, no transpilation, no `npm install` of dependencies.
 
-## Export Formats
+**Display**: Inline iframe (`/files/...`) for interactive viewport; `browser_goto` only when the user explicitly asks to open a separate tab.
 
-The template's toolbar gives the user:
-- **OBJ + MTL** — universal format, geometry + per-material colors
-- **GLB** — modern interchange format, keeps part hierarchy and PBR materials; imports cleanly into Blender, Maya, Cinema 4D, Unity, Unreal
+---
 
-When the user asks for something else (FBX, USDZ, STEP), say plainly that the viewer exports OBJ+MTL and GLB.
+## Core Techniques (from production scenes)
 
-## Iterating
+### 1. Shader Injection via `onBeforeCompile`
 
-After editing the `buildModel()` function, reload the page in the browser to see changes. Look at the object from the default framing and refine silhouette, proportion, and material separation — the silhouette carries the object.
+The recommended way to extend Three.js PBR materials without losing built-in lighting. Inject GLSL snippets into `MeshPhysicalMaterial` or `MeshStandardMaterial` at compile time.
 
-## File Paths
+```js
+const material = new THREE.MeshPhysicalMaterial({
+  color: 0xffffff, roughness: 0.26, clearcoat: 0.42
+});
 
-- Template: `skills:design/3d-object/templates/three_d_stage.html`
-- Read the template via: `Read(path="skills:design/3d-object/templates/three_d_stage.html")`
-- Write output to: `ws:output/<name>.html`
-- Display: inline iframe, `width:640px;height:480px` — see Display Convention above
+material.onBeforeCompile = shader => {
+  shader.uniforms.uTime = { value: 0 };
+
+  shader.vertexShader = shader.vertexShader
+    .replace('#include <common>', `#include <common>
+      varying vec3 vWorld;`)
+    .replace('#include <begin_vertex>', `#include <begin_vertex>
+      vWorld = (modelMatrix * vec4(transformed, 1.0)).xyz;`);
+
+  shader.fragmentShader = shader.fragmentShader
+    .replace('#include <common>', `#include <common>
+      uniform float uTime;
+      varying vec3 vWorld;
+      ${NOISE_GLSL}`)
+    .replace('#include <color_fragment>', `#include <color_fragment>
+      float n = fbm(vWorld.xz * 2.0);
+      diffuseColor.rgb *= 0.9 + 0.1 * n;`);
+};
+```
+
+**Key injection points**:
+- `color_fragment` — modify `diffuseColor` before lighting
+- `roughnessmap_fragment` — modify `roughnessFactor`
+- `metalnessmap_fragment` — modify `metalnessFactor`
+- `opaque_fragment` — add emissive glow after lighting
+
+See `references/shader-injection.md` for full patterns.
+
+### 2. Procedural Modeling
+
+Build geometry without external model files. Preferred techniques in order:
+
+| Technique | Use for | API |
+|-----------|---------|-----|
+| **LatheGeometry** | Rotational symmetry (chess pieces, vases, pillars) | `THREE.LatheGeometry(profilePoints, segments)` |
+| **ExtrudeGeometry + Shape** | Profiles with thickness (knight head, emblems) | `THREE.ExtrudeGeometry(shape, { depth, bevelEnabled })` |
+| **Box/Cylinder/Sphere primitives** | Simple parts, merged into compound objects | `mergeGeometries(parts)` |
+| **BufferGeometry** | Custom meshes when primitives are insufficient | Build position/normal/uv buffers directly |
+
+**Lathe profile DSL**: A tiny chainable API for rotational profiles makes code readable:
+
+```js
+const profile = lathe().at(0, 0).line(0.5, 0, 2).quad(0.5, 0.05, 0.4, 0.08, 5).arc(0, 0.3, 0.15, -60, 90, 12).build();
+```
+
+See `references/procedural-modeling.md` for the full DSL and examples for every chess piece type.
+
+### 3. Shared GLSL Noise Library
+
+Reuse a single GLSL string across all injected shaders. Provides `hash11/21/22/31`, `vnoise`, `vnoise3`, `fbm`, `fbm3`, `ridged`.
+
+```js
+// src/scene/glsl.js
+export const NOISE = `float hash21(vec2 p){ ... } float fbm(vec2 p){ ... } ...`;
+```
+
+Import and interpolate into every `onBeforeCompile` fragment shader. See `references/glsl-noise.md` for the complete source.
+
+### 4. Post-Processing Pipeline
+
+```
+RenderPass → UnrealBloomPass → OutputPass → ShaderPass(GradeShader)
+```
+
+`GradeShader` (custom) applies: chromatic aberration at edges, cool shadows / warm highlights, vignette, film grain.
+
+See `references/post-processing.md` for the complete shader and composer setup.
+
+### 5. Environment Maps from Scene Geometry
+
+Generate a PMREM environment map from scene elements (e.g. a sky dome) so that PBR materials receive accurate reflections without external HDR files:
+
+```js
+const pmrem = new THREE.PMREMGenerator(renderer);
+scene.environment = pmrem.fromScene(envScene, 0, 0.5, 60).texture;
+scene.environmentIntensity = 0.9;
+pmrem.dispose();
+```
+
+### 6. Three.js Import Map (local vendor)
+
+```html
+<script type="importmap">
+{
+  "imports": {
+    "three": "./vendor/three.module.min.js",
+    "three/addons/": "./vendor/addons/"
+  }
+}
+</script>
+```
+
+Download three.js release to `vendor/` rather than using a CDN. This makes the project work offline and avoids SRI hash maintenance.
+
+---
+
+## Quality Presets
+
+Define three quality tiers up front. Everything — renderer, shadows, particles, post-processing, instanced mesh counts — reads from the same config object.
+
+```js
+const QUALITY = {
+  ultra: { pixel: 2, shadow: 2560, bloom: true, grade: true },
+  high:  { pixel: 1.75, shadow: 1792, bloom: true, grade: true },
+  low:   { pixel: 1.15, shadow: 0, bloom: false, grade: true }
+};
+```
+
+Auto-downgrade: measure frame times; if sustained < 30fps, switch to the next lower tier and notify the user.
+
+---
+
+## Export
+
+The original `templates/three_d_stage.html` still provides OBJ+MTL and GLB export via `OBJExporter` / `GLTFExporter`. In modular mode, add an export module:
+
+```js
+// src/core/export.js
+import { OBJExporter } from 'three/addons/exporters/OBJExporter.js';
+import { GLTFExporter } from 'three/addons/exporters/GLTFExporter.js';
+
+export function exportOBJ(scene) { /* ... */ }
+export function exportGLB(scene) { /* ... */ }
+```
+
+---
+
+## File Reference
+
+| File | Purpose |
+|------|---------|
+| `SKILL.md` | This file — overview and quick reference |
+| `templates/three_d_stage.html` | Quick preview template (single HTML) |
+| `references/shader-injection.md` | Complete `onBeforeCompile` patterns |
+| `references/procedural-modeling.md` | Lathe DSL, Shape extrusion, merging |
+| `references/glsl-noise.md` | Reusable GLSL noise functions |
+| `references/post-processing.md` | EffectComposer setup + GradeShader |
