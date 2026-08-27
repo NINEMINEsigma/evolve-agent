@@ -368,8 +368,8 @@ def tool_result_to_content(result: Any) -> str | dict[str, Any] | list[MessageBl
     - 其他：str(result)。
     """
     if isinstance(result, str):
-        # NOTE: str 输入为旧形式工具结果（JSON 序列化字典），
-        # SP-3 后工具结果 content 转为原生 dict 存储，str 路径仅为兼容存量 history.es。
+        # TODO(SP-5-cleanup): str 输入为旧形式工具结果（JSON 序列化字典），
+        # SP-3 后工具结果 content 转为原生 dict 存储，str 路径仅为兼容存量 history.es，后续删除。
         return result
     if isinstance(result, dict):
         # _blocks 优先：有序混合块列表，复用 blocks_from_dicts 格式
@@ -380,7 +380,7 @@ def tool_result_to_content(result: Any) -> str | dict[str, Any] | list[MessageBl
             if result:
                 blocks.append(TextBlock(text=json.dumps(result, ensure_ascii=False)))
             return blocks
-        # 旧 _image/_audio/_video 键兜底（兼容未迁移的产出方）
+        # TODO(SP-5-cleanup): 旧 _image/_audio/_video 键兜底——SP-3 后已迁移到 _blocks，后续删除
         image = result.pop("_image", None)
         if isinstance(image, dict) and image.get("base64"):
             return build_image_content_blocks(image, json.dumps(result, ensure_ascii=False))
@@ -393,10 +393,11 @@ def tool_result_to_content(result: Any) -> str | dict[str, Any] | list[MessageBl
         # 无媒体键：返回原生 dict（不再 json.dumps）
         return result
     if isinstance(result, list):
-        # NOTE: list 输入为旧形式工具结果（全 MessageBlock 透传），
-        # SP-1 后 handler 返回 dict，此分支仅为兼容。
+        # TODO(SP-5-cleanup): list 输入为旧形式工具结果（全 MessageBlock 透传），
+        # SP-1 后 handler 返回 dict，此分支仅为兼容，后续删除。
         if all(isinstance(b, MessageBlock) for b in result):
             return result  # type: ignore[return-value]
+    # TODO(SP-5-cleanup): str(result) 兜底——SP-1 后 handler 必须返回 dict，此分支理论不可达，后续删除
     return str(result)
 
 
@@ -417,7 +418,7 @@ def tool_result_to_follow_up(
     """
     # _user_blocks 优先：有序混合块列表
     user_blocks_data = result.pop("_user_blocks", None)
-    # 旧 _user_image/_user_audio/_user_video 键兜底
+    # TODO(SP-5-cleanup): 旧 _user_image/_user_audio/_user_video 键兜底——SP-3 后已迁移到 _user_blocks，后续删除
     user_image = result.pop("_user_image", None)
     user_audio = result.pop("_user_audio", None)
     user_video = result.pop("_user_video", None)
@@ -493,8 +494,8 @@ def content_to_text(content: MessageContent|dict[str, Any]|list[MessageBlock]|No
     if content is None:
         return ""
     if isinstance(content, str):
-        # NOTE: str 为旧形式工具结果（JSON 序列化字典），
-        # 兼容存量 history.es 中的 ToolResultMessage.content。
+        # TODO(SP-5-cleanup): str 为旧形式工具结果（JSON 序列化字典），
+        # 兼容存量 history.es 中的 ToolResultMessage.content，后续删除。
         return _strip_internal_fields(content)
     if isinstance(content, dict):
         # SP-3: 原生 dict 工具结果——json.dumps 后过滤 _ 前缀字段
@@ -624,7 +625,7 @@ def blocks_from_dicts(blocks: list[dict[str, Any]]) -> list[MessageBlock]:
 
 def content_to_serializable(content: str | dict[str, Any] | list[MessageBlock]) -> str | dict[str, Any] | list[dict[str, Any]]:
     """将 content 序列化为前端可用的 str | dict | list[dict]，供编辑响应使用。"""
-    # NOTE: str 为旧形式工具结果（JSON 序列化字典），兼容存量 history.es。
+    # TODO(SP-5-cleanup): str 为旧形式工具结果（JSON 序列化字典），兼容存量 history.es，后续删除。
     if isinstance(content, str):
         return content
     if isinstance(content, dict):

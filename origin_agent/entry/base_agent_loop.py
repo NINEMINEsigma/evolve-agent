@@ -14,7 +14,7 @@ import logging
 import shutil
 from abc import ABC, abstractmethod
 from pathlib import Path
-from typing import Any, TYPE_CHECKING
+from typing import Any, Awaitable, Callable, TYPE_CHECKING
 
 from pydantic import BaseModel
 
@@ -74,46 +74,10 @@ class UserMessage(InboxMessage):
     character_name: str = USER_CHARACTER_NAME
 
 
-# TODO: 目前似乎没有被使用到
-class ApprovalDecisionMessage(InboxMessage):
-    """父Agent对工具审批的决定。"""
-    decision: dict[str, Any]
-
-    def to_text(self) -> str:
-        return json.dumps(self.decision, ensure_ascii=False)
-
-
-class CronResultMessage(InboxMessage):
-    """Cron 定时任务执行结果。"""
-    task_id: str
-    name: str
-    exit_code: int
-    stdout_preview: str
-
-    def to_text(self) -> str:
-        status = "completed" if self.exit_code == 0 else f"failed (exit={self.exit_code})"
-        return f"[cron-result] {self.name} ({self.task_id}) — {status}\n{self.stdout_preview}"
-
-
-class ContextLimitMessage(InboxMessage):
-    """上下文超限通知。"""
-    saved_path: str | None = None
-
-    def to_text(self) -> str:
-        return f"[system] Context limit reached. Session saved to: {self.saved_path or 'unknown'}"
-
-
-class InterruptMessage(InboxMessage):
-    """中断请求。"""
-
-    def to_text(self) -> str:
-        return "[system] Interrupt requested"
-
-
 class Inbox:
     """线程安全的收件箱，支持等待新消息。
 
-    BaseAgentLoop._flush_inbox() 在每个 LLM 回合前检查并合并待处理消息。
+    SubAgentLoop 父→子通道使用（SP-5 D8：主会话已切队列，inbox 仅子 Agent 保留）。
     """
 
     def __init__(self) -> None:
@@ -250,7 +214,7 @@ def _serialize_message_entry(
             # SP-3: 直接从 dict 取 _meta
             tool_call_meta = raw_content.get("_meta")
         else:
-            # NOTE: str 路径为旧形式（JSON 序列化字典），兼容存量 history.es。
+            # TODO(SP-5-cleanup): str 路径为旧形式（JSON 序列化字典），兼容存量 history.es，后续删除。
             content_str = content_to_text(raw_content)
             try:
                 parsed = json.loads(content_str)
@@ -311,6 +275,16 @@ class BaseAgentLoop(ABC):
         # SP-4: 轮次互斥锁统一上移（原 ParentAgentLoop 私有）；会话消息队列设施（子类构造赋值）
         self._process_lock: asyncio.Lock = asyncio.Lock()
         self._message_queue: SessionMessageQueue | None = None
+        # SP-5 D2：轮次后编排放 loop——由 MessageRouter 在 handle_user_message 注册，
+        # run_pending_round 锁外末尾调用，完成 WS 重映射/token 推送/进化触发。
+        self._on_round_done: Callable[[Any], Awaitable[None]] | None = None
+
+    def set_on_round_done(self, cb: Callable[[Any], Awaitable[None]] | None) -> None:
+        """注册轮次后回调（幂等覆盖；None 清除）。
+
+        由 MessageRouter.handle_user_message 在每次 WS 消息入队前调用。
+        """
+        self._on_round_done = cb
 
     @property
     def history_store_dir(self) -> Path | None:
@@ -424,7 +398,7 @@ class BaseAgentLoop(ABC):
     def _flush_inbox(self) -> list[InboxMessage]:
         """取出并返回所有待处理的收件箱消息。
 
-        子类可重写以处理特定类型的消息（如 ApprovalDecisionMessage）。
+        子类可重写以处理特定类型的消息。
         """
         return self._inbox.get_pending()
 
@@ -1052,6 +1026,14 @@ class IMainSessionLoop(ABC):
         使队列在工具链中消费时能向工具结果 dict 注入 queued_messages 字段。
         """
         return None
+
+    def set_on_round_done(self, cb: Callable[[Any], Awaitable[None]] | None) -> None:
+        """注册轮次后回调（SP-5 D2）。默认空实现；BaseAgentLoop 提供真实存储。
+
+        MessageRouter.handle_user_message 在 WS 消息入队前调用，run_pending_round
+        锁外末尾调用该回调以完成 WS 重映射/token 推送/进化触发。
+        """
+        pass
 
     @abstractmethod
     async def run_pending_round(self, items: list[QueuedMessage]) -> str | None:

@@ -3,7 +3,7 @@ from pydantic import BaseModel, Field
 from typing import Any
 
 from ._base import MessageContent
-from .llm import MessageMetrics
+from .llm import MessageMetrics, LLMProfile
 
 # ---------------------------------------------------------------------------
 # Loop Types
@@ -132,3 +132,9 @@ class QueuedMessage(BaseModel):
     character_name: str = ""
     source: str = ""
     timestamp: str = ""
+    # SP-5 D1：可选元数据，仅 ws / dynamic-endpoint 来源使用；None 时消费侧回退缺省。
+    visible_characters: list[str] | None = None
+    response_characters: list[str] | None = None
+    llm_profile: LLMProfile | None = None
+    # SP-5 bugfix：回显移到消费侧，client_message_id 随消息携带供 _append_queued_messages 回显
+    client_message_id: str | None = None

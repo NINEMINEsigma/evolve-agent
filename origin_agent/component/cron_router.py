@@ -10,6 +10,8 @@ import logging
 import threading
 from typing import Any, TYPE_CHECKING
 
+from entity.constant import SYSTEM_CHARACTER_NAME
+
 if TYPE_CHECKING:
     from entry.base_agent_loop import BaseAgentLoop
 
@@ -52,7 +54,10 @@ class CronRouter:
         exit_code: int,
         stdout_preview: str,
     ) -> bool:
-        """投递 cron 结果到对应 loop 的 inbox。
+        """投递 cron 结果到对应 loop。
+
+        SP-5 D7：主会话 loop（有 _message_queue）走队列 push；
+        子 agent loop（无 _message_queue）保留 inbox 投递 + TODO 注释。
 
         Returns:
             True 表示成功投递，False 表示无对应 loop。
@@ -62,24 +67,27 @@ class CronRouter:
             logger.debug("CronRouter: no loop for session=%s, discarding result", session_id)
             return False
 
-        from entry.base_agent_loop import CronResultMessage
-        msg = CronResultMessage(
-            task_id=task_id,
-            name=name,
-            exit_code=exit_code,
-            stdout_preview=stdout_preview,
-        )
-        loop.inbox.put(msg)
-        loop.inbox.wake()
-        logger.debug("CronRouter: dispatched %s to session=%s", task_id, session_id)
-        # 触发 loop 消费 inbox；基类默认空实现，ParentAgentLoop 等需要即时处理的 loop 会覆盖。
-        try:
-            loop.schedule_inbox_processing()
-        except Exception:
-            # cron 结果已安全存入 inbox，调度失败不丢失数据；记录异常供排查
-            logger.exception(
-                "Failed to schedule inbox processing for session=%s", session_id,
-            )
+        status = "completed" if exit_code == 0 else f"failed (exit={exit_code})"
+        text = f"[cron-result] {name} ({task_id}) — {status}\n{stdout_preview}"
+
+        queue = getattr(loop, "_message_queue", None)
+        if queue is not None:
+            # 主会话：走会话消息队列
+            queue.push(text, character_name=SYSTEM_CHARACTER_NAME, source="cron")
+            logger.debug("CronRouter: dispatched %s to session=%s via queue", task_id, session_id)
+        else:
+            # TODO(SP-5): SubAgentLoop 暂无会话消息队列，cron 结果暂保留 inbox 投递；
+            #             后续统一队列时收编。
+            from entry.base_agent_loop import UserMessage
+            loop.inbox.put(UserMessage(content=text, character_name=SYSTEM_CHARACTER_NAME))
+            loop.inbox.wake()
+            logger.debug("CronRouter: dispatched %s to session=%s via inbox", task_id, session_id)
+            try:
+                loop.schedule_inbox_processing()
+            except Exception:
+                logger.exception(
+                    "Failed to schedule inbox processing for session=%s", session_id,
+                )
         return True
 
     # -- 任务注册表管理 ----------------------------------------------------------

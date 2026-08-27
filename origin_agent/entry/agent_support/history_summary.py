@@ -162,7 +162,7 @@ def _content_to_text(content: str | dict[str, Any] | list | None) -> str:
     if content is None:
         return ""
     if isinstance(content, str):
-        # NOTE: str 为旧形式工具结果（JSON 序列化字典），兼容存量 history.es。
+        # TODO(SP-5-cleanup): str 为旧形式工具结果（JSON 序列化字典），兼容存量 history.es，后续删除。
         return content
     if isinstance(content, dict):
         # SP-3: 原生 dict 工具结果——json.dumps 提取文本

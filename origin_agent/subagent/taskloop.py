@@ -93,6 +93,7 @@ class TaskAgentLoop(SubAgentLoop):
                     )
                     self._history.add_message(assistant_msg)
                     self._outbox.append(text)
+                    self._outbox_event.set()
                     self._emit("assistant", content=text, reasoning=reasoning_text,
                                character_name=self.current_character_agent)
                     self._completed = True
@@ -187,6 +188,7 @@ class TaskAgentLoop(SubAgentLoop):
 
             # 达到 MAX_TOOL_TURNS 上限
             self._outbox.append("[taskagent] Max tool turns reached.")
+            self._outbox_event.set()
             self._completed = True
             self._round_active = False
             logger.warning(
@@ -200,3 +202,5 @@ class TaskAgentLoop(SubAgentLoop):
             if _cron is not None:
                 _cron.unregister(self.session_id)
             self._terminated = True
+            # SP-5 D4 R1：唤醒 waiter 做终结检查并 break（防永久悬挂）
+            self._outbox_event.set()

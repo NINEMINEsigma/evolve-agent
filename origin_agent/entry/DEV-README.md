@@ -36,7 +36,7 @@ entry/
 `base_agent_loop.py` 提供三层抽象：
 
 - **`BaseAgentLoop`**：最基础的循环抽象，包含：
-  - `Inbox` 带类型消息队列（`UserMessage`、`ApprovalDecisionMessage`、`CronResultMessage` 等）。
+  - `Inbox` 带类型消息队列（`UserMessage`；SubAgentLoop 父→子通道使用，主会话已切 SessionMessageQueue）。
   - 取消控制（`interrupt()`、`is_interrupted()`）。
   - `ToolContext` 注入到工具 handler，替代旧的全局 `get_runtime_context()`。
   - 通用持久化方法：`save_history()`、`load_history()`。
@@ -165,7 +165,7 @@ sequenceDiagram
 
 主要步骤：
 
-1. `process_message()` 获取锁，消费 inbox 遗留消息。
+1. `process_message()` 获取锁（主会话消息经 SessionMessageQueue 入队，由 `run_pending_round` 消费驱动轮次）。
 2. `append_user_message()` 将用户消息追加到 `History` 并回显前端。
 3. 检查上下文是否超限，超限则 `LoopSessionManager.rotate_session_for_continuation()`。
 4. `_build_history_messages()` 组装 system prompt + hooks + 历史。

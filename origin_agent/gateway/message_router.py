@@ -32,7 +32,7 @@ from typing import *
 from fastapi import WebSocket
 
 from .chat import Message, MessageType
-from entity.constant import UPLOAD_FILENAME_TIME_FORMAT, UPLOADS_DIR_NAME, UPLOADS_WS_PREFIX
+from entity.constant import UPLOAD_FILENAME_TIME_FORMAT, UPLOADS_DIR_NAME, UPLOADS_WS_PREFIX, USER_CHARACTER_NAME
 from entity.puretype import SessionInfo, SessionStatus, ClientInfo, MessageContent
 
 if TYPE_CHECKING:
@@ -212,26 +212,24 @@ class MessageRouter:
             target_sessions: list[str] = msg.target_sessions or ["main"]
             content = msg.content or ""
 
-            # 把原始用户消息追加到历史
-            try:
-                await loop.loop.append_user_message(
-                    content,
-                    visible_characters=msg.visible_characters,
-                    response_characters=msg.response_characters,
-                    client_message_id=msg.client_message_id,
-                )
-            except Exception as exc:
-                logger.warning("Failed to append user message for session=%s: %s", self.sid, exc)
-
-            # 分派子 Agent 消息
+            # 分派子 Agent 消息（父→子方向，不动）
             subagent_tasks, sub_ids, name_map = await self._dispatch_subagent_messages(
                 content, target_sessions,
             )
 
-            # 主会话处理
-            reply = await self._process_main_session(
-                loop, content, msg, target_sessions, sub_ids, name_map,
-            )
+            # 主会话：注册轮次后回调 + 入队（SP-5 D2/D3）
+            if "main" in target_sessions:
+                loop.set_on_round_done(self._make_on_round_done())
+                loop.loop._message_queue.push(
+                    content,
+                    character_name=USER_CHARACTER_NAME,
+                    source="ws",
+                    display_content=content,
+                    client_message_id=msg.client_message_id,
+                    visible_characters=msg.visible_characters,
+                    response_characters=msg.response_characters,
+                    llm_profile=msg.llm_profile,
+                )
 
             # 等待子会话转发完成
             if subagent_tasks:
@@ -239,19 +237,6 @@ class MessageRouter:
                 for idx, res in enumerate(results):
                     if isinstance(res, Exception):
                         logger.warning("Subagent forward failed: %s", res)
-
-            # 检查 session 旋转
-            await self._handle_session_rotation(loop)
-
-            # 发送 assistant 回复
-            await self._emit_assistant_reply(loop, reply)
-
-            # 发送 token 更新
-            await self._send_token_update(loop)
-
-            # 检查进化触发
-            from main import trigger_evolution_shutdown
-            trigger_evolution_shutdown()
 
         except Exception as exc:
             logger.exception("User message handler error for session=%s: %s", self.sid, exc)
@@ -541,59 +526,28 @@ class MessageRouter:
 
         return subagent_tasks, sub_ids, name_map
 
-    async def _process_main_session(
-        self,
-        loop: IMainSessionLoop,
-        content: MessageContent,
-        msg: Message,
-        target_sessions: list[str],
-        sub_ids: list[str],
-        name_map: dict[str, str],
-    ) -> str:
-        """处理主会话的消息。返回 agent 回复文本。"""
-        if "main" not in target_sessions:
-            return "Message forwarded to sub-agent(s)."
+    # -- SP-5 D2：轮次后编排回调 ------------------------------------------
 
-        # 前置闸门：无 LLM profile 且 loop 无 active profile 时拦截
-        if msg.llm_profile is None and loop.loop.active_llm_profile is None:
-            logger.warning("No LLM profile in message and no active profile | session=%s", self.sid)
-            err_text = "尚未配置 LLM 模型。请在前端「模型配置」中新建或选择一个配置后重试。"
-            # NOTE: D6——错误文本以 assistant 气泡显示，持久化进历史
-            loop.loop.append_assistant_text(err_text, session_id=self.sid)
-            return err_text
+    async def _on_round_done_cb(self, loop: IMainSessionLoop) -> None:
+        """轮次后编排：WS 重映射 + token 推送 + 进化触发。
 
-        main_content: MessageContent = content
-        sub_names: list[str] = []
-        for s in sub_ids:
-            name = name_map.get(s)
-            if name:
-                sub_names.append(name)
-            else:
-                logger.warning(
-                    "Skipping unnamed sub-agent target for main session | parent=%s target=%s",
-                    self.sid, s,
-                )
-        if sub_names:
-            prefix = f"[This message is also shared with sub-agents: {', '.join(sub_names)}]\n\n"
-            if isinstance(content, list):
-                main_content = [{"type": "text", "text": prefix}] + content
-            else:
-                main_content = prefix + str(content)
-        try:
-            reply = await loop.loop.process_message(
-                main_content,
-                skip_append=True,
-                visible_characters=msg.visible_characters,
-                response_characters=msg.response_characters,
-                llm_profile=msg.llm_profile,
-            )
-        except Exception as exc:
-            logger.exception("Agent loop error for session=%s", self.sid)
-            reply = f"Internal error: {exc}"
-            # NOTE: D6——错误文本以 assistant 气泡显示，持久化进历史
-            loop.loop.append_assistant_text(reply, session_id=self.sid)
+        由 run_pending_round 锁外末尾调用；回复推送已由 run_pending_round 内部
+        emit_assistant_message 覆盖（parent 版），multi 版各 agent 独立流式推送。
+        """
+        await self._handle_session_rotation(loop)
+        await self._send_token_update(loop)
+        from main import trigger_evolution_shutdown
+        trigger_evolution_shutdown()
 
-        return reply
+    def _make_on_round_done(self):
+        """返回捕获 self 的 async callable（幂等覆盖；WS 重连时新 router 覆盖注册）。
+
+        R3 缓解：lambda 捕获 MessageRouter 实例而非持有 router 引用，
+        新 router 覆盖注册后旧实例随 lambda 替换可 GC。
+        """
+        async def _cb(loop):
+            await self._on_round_done_cb(loop)
+        return _cb
 
     async def _handle_session_rotation(self, loop: IMainSessionLoop) -> None:
         """检查并处理会话旋转（归档+新会话），更新 self.sid 和 WebSocket 映射。"""

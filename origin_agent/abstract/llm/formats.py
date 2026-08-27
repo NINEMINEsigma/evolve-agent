@@ -119,7 +119,7 @@ def to_summary_dict(
     # Extract raw text directly from .content field, skipping non-text blocks
     raw = message.content
     if isinstance(raw, str):
-        # NOTE: str 为旧形式工具结果（JSON 序列化字典），兼容存量 history.es。
+        # TODO(SP-5-cleanup): str 为旧形式工具结果（JSON 序列化字典），兼容存量 history.es，后续删除。
         text = raw
     elif isinstance(raw, dict):
         # SP-3: 原生 dict 工具结果
