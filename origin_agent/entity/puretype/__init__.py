@@ -7,7 +7,7 @@ puretype 包 — 只含有不包含任何方法定义的类型定义。
     llm         : ToolCallRequest, Usage, MessageMetrics, LLMResponse, ToolCallDeltaPhase,
                   ToolCallDelta, StreamChunk, LlmProfile, ModalityCapability
     skills      : SkillPayload, SkillInfo
-    session     : Loop, SessionStatus, LoopMeta, SessionInfo, SessionMessageEntry, TokenUsageRecord
+    session     : Loop, SessionStatus, LoopMeta, SessionInfo, SessionMessageEntry, TokenUsageRecord, QueuedMessage
     agent       : AgentConfig
     ws          : MessageType, Message
     lsp         : LSPState, LSPDiagnostic, LSPReference, LSPDefinition, LSPSymbol
@@ -52,6 +52,7 @@ from .session import (
     SessionInfo,
     SessionMessageEntry,
     TokenUsageRecord,
+    QueuedMessage,
 )
 from .agent import (
     AgentConfig,
@@ -109,6 +110,7 @@ __all__ = [
     "SessionInfo",
     "SessionMessageEntry",
     "TokenUsageRecord",
+    "QueuedMessage",
     # agent
     "AgentConfig",
     # ws

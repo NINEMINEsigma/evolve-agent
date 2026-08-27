@@ -2,6 +2,7 @@ from enum import Enum
 from pydantic import BaseModel, Field
 from typing import Any
 
+from ._base import MessageContent
 from .llm import MessageMetrics
 
 # ---------------------------------------------------------------------------
@@ -119,3 +120,15 @@ class TokenUsageRecord(BaseModel):
 
     prompt_tokens: int = 0
     """最近一次 LLM 调用的 prompt token 数（已消耗上下文）。"""
+
+
+# ---------------------------------------------------------------------------
+# Queued Message — 会话消息队列元素（SP-4）
+# ---------------------------------------------------------------------------
+
+class QueuedMessage(BaseModel):
+    """会话消息队列元素。content 保留原始 MessageContent，严禁扁平化。"""
+    content: MessageContent
+    character_name: str = ""
+    source: str = ""
+    timestamp: str = ""

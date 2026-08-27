@@ -18,7 +18,7 @@ from typing import Any, TYPE_CHECKING
 
 from pydantic import BaseModel
 
-from entity.puretype import Role, ToolAvailability, SessionMessageEntry, TokenUsageRecord, MessageContent, LLMProfile, MessageMetrics
+from entity.puretype import Role, ToolAvailability, SessionMessageEntry, TokenUsageRecord, MessageContent, LLMProfile, MessageMetrics, QueuedMessage
 from entity.messages import (
     History,
     BaseMessage,
@@ -50,6 +50,7 @@ if TYPE_CHECKING:
     from entry.agent_sink import AgentSink
     from gateway.session_manager import SessionManager
     from entry.tool_post_dispatch import ResultFieldInjector
+    from entry.session_message_queue import SessionMessageQueue
 
 logger = logging.getLogger(__name__)
 
@@ -307,6 +308,9 @@ class BaseAgentLoop(ABC):
         # 处理中标志：子类在 process_message 主体内置位/复位；
         # 供 /regenerate 端点做并发防护（is_processing）查询
         self._processing: bool = False
+        # SP-4: 轮次互斥锁统一上移（原 ParentAgentLoop 私有）；会话消息队列设施（子类构造赋值）
+        self._process_lock: asyncio.Lock = asyncio.Lock()
+        self._message_queue: SessionMessageQueue | None = None
 
     @property
     def history_store_dir(self) -> Path | None:
@@ -549,6 +553,14 @@ class BaseAgentLoop(ABC):
         if session_path.exists():
             shutil.rmtree(str(session_path), ignore_errors=True)
             logger.info("Cleared persisted data for session %s", self.session_id)
+
+    def stop_message_queue(self) -> None:
+        """停止本会话的消息队列消费者（gateway 在 loop 消亡时调用）。
+
+        SP-4 D8：旋转复用 loop 不调用（队列随 loop 存活）；仅 terminate/replace 调用。
+        """
+        if self._message_queue is not None:
+            self._message_queue.stop()
 
     def get_session_messages(self) -> list[SessionMessageEntry]:
         """返回前端展示所需的消息列表，包含多 agent 元数据。"""
@@ -1040,6 +1052,15 @@ class IMainSessionLoop(ABC):
         使队列在工具链中消费时能向工具结果 dict 注入 queued_messages 字段。
         """
         return None
+
+    @abstractmethod
+    async def run_pending_round(self, items: list[QueuedMessage]) -> str | None:
+        """以队列 drained 消息列表为输入驱动一轮会话（SP-4 D3）。
+
+        实现必须：持 _process_lock → 置 _processing → （parent 系）超限检查（旋转随动）
+        → sid 变更检测 → cancel 检测 → 注入落历史（无回显、保序、原生块）
+        → （非旋转非中断时）跑轮 → finally 复位。
+        """
 
 
 # ---------------------------------------------------------------------------

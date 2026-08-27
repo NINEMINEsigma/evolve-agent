@@ -23,7 +23,7 @@ from abstract.tools.registry import registry as tool_registry
 from component.approval import ask_agent_reason
 from abstract.llm.client import BaseLLMClient
 from abstract.llm.loader import create_llm_client
-from entity.puretype import LLMResponse, ToolCallRequest, Role, ToolAvailability, TokenUsageRecord, MessageContent, LLMProfile, MessageMetrics
+from entity.puretype import LLMResponse, ToolCallRequest, Role, ToolAvailability, TokenUsageRecord, MessageContent, LLMProfile, MessageMetrics, QueuedMessage
 from entity.gentype import RefWrapper
 from system.session_store import SessionStore
 from entity.constant import (
@@ -62,11 +62,13 @@ from system.modality_capability import (
 from entry.session_manager import LoopSessionManager
 from entry.tool_executor import ToolExecutor, _interrupted_result
 from entry.stream_consumer import StreamConsumer
+from entry.session_message_queue import SessionMessageQueue
 
 if TYPE_CHECKING:
     from gateway.session_manager import SessionManager
     from system.application import Application
     from system.context import RuntimeContext
+    from entry.tool_post_dispatch import ResultFieldInjector
 
 logger = logging.getLogger(__name__)
 
@@ -145,9 +147,11 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
         # -- 工具调用事件回调 --
         self._tool_event_callback: Callable[[str, str, str, str], Awaitable[None]] | None = None
 
+        # SP-4: 会话级消息队列（_process_lock 已上移至 BaseAgentLoop.__init__）
+        self._message_queue = SessionMessageQueue(self)
+
         # -- 处理状态 --
         # NOTE: _processing 已上移至 BaseAgentLoop.__init__，is_processing() 由基类提供
-        self._process_lock: asyncio.Lock = asyncio.Lock()
         self._event_loop: asyncio.AbstractEventLoop | None = None
 
         # -- 子 Agent 周期收集器用的空闲时间戳 --
@@ -220,9 +224,12 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
     # -- 超限检查步骤（可被子类覆写）-------------------------------------------
 
     async def _check_over_limit_before_process(
-        self, sid: str, user_message: MessageContent,
+        self, sid: str, user_message: MessageContent | None,
     ) -> str:
-        """process_message 入口处的超限检查：超限时旋转会话，返回可能更新后的 sid。"""
+        """process_message 入口处的超限检查：超限时旋转会话，返回可能更新后的 sid。
+
+        user_message 为 None 表示队列路径（SP-4），无 pending 搬运。
+        """
         if self._lifecycle.is_context_over_limit():
             new_sid: str | None = await self._lifecycle.rotate_session_for_continuation(
                 sid, pending_user_message=user_message,
@@ -601,6 +608,59 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
             dynamic_message_suffix=dynamic_suffix,
         )
         return index
+
+    # -- SP-4 会话消息队列接入 ------------------------------------------------
+
+    def get_result_field_injector(self) -> "ResultFieldInjector | None":
+        """SP-4：返回队列的链中注入回调。"""
+        return self._message_queue.drain_injected
+
+    def _append_queued_messages(self, items: list[QueuedMessage]) -> None:
+        """队列消息落历史：无回显、保序、原生块（D5 回显单点在 push）。"""
+        for item in items:
+            content = blocks_from_dicts(item.content) if isinstance(item.content, list) else item.content
+            message = CharacterConversationMessage(
+                role=Role.USER,
+                character_name=item.character_name,
+                content=content,
+                visible_characters=[self.current_character_agent],
+            )
+            self._history.add_message(message)
+            self.save_history(self.session_id)
+
+    async def run_pending_round(self, items: list[QueuedMessage]) -> str | None:
+        """SP-4：队列空闲消费驱动的轮次（S1 分支序）。
+
+        持锁 → 置 _processing → 超限检查（旋转随动）→ sid 变更检测 →
+        cancel 检测 → 注入落历史 → 非旋转非中断时跑轮 → finally 复位。
+        """
+        if not items:
+            return None
+        async with self._process_lock:
+            self._processing = True
+            self._event_loop = asyncio.get_running_loop()
+            reply: str | None = None
+            try:
+                sid = await self._check_over_limit_before_process(self.session_id, None)
+                self.session_id = sid
+                queue = self._message_queue
+                rotated: bool = queue.last_known_sid != sid
+                interrupted: bool = self._cancel_event.is_set()
+                self._cancel_event.clear()
+                self._disgust_event.clear()
+                self._append_queued_messages(items)
+                if not rotated and not interrupted:
+                    messages = self._get_full_history(sid)
+                    reply = await self._run_tool_loop(sid, messages, "[queued-messages]")
+                if reply:
+                    await self._frontend_sink.emit_assistant_message(
+                        sid, reply, self.current_character_agent,
+                    )
+                queue.last_known_sid = sid
+            finally:
+                self._processing = False
+                self._last_idle_time[self.session_id] = time.monotonic()
+            return reply
 
     def _append(
         self, session_id: str, role: Role,
