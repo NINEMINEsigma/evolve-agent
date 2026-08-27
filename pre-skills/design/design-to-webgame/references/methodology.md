@@ -40,8 +40,13 @@ Node.js 可用？
 │        ├── 是 → 路线A：React + TypeScript + Vite + pnpm
 │        └── 否 → npm 可用？
 │                 ├── 是 → 路线B：React + TypeScript + Vite + npm
-│                 └── 否 → 路线C：纯 HTML + JavaScript
-└── 否 → 路线C：纯 HTML + JavaScript
+│                 └── 否 → 路线C：Three.js + ES Modules（无构建）
+│                          （如果游戏需要 3D 且 WebGL 可用）
+└── 否 → WebGL 可用？
+         ├── 是 → 路线C：Three.js + ES Modules（无构建）
+         │         适用于 3D 策略/棋牌/环境探索类游戏
+         └── 否 → 路线D：纯 HTML + JavaScript + CSS
+                   适用于 2D 游戏，零依赖
 ```
 
 ### 路线说明
@@ -50,7 +55,8 @@ Node.js 可用？
 |:-----|:-------|:---------|:-----------|
 | **A** | React + TS + Vite + pnpm | 完整开发环境 | 完整分层架构 |
 | **B** | React + TS + Vite + npm | 无 pnpm 但有 npm | 完整分层架构 |
-| **C** | 纯 HTML + JS + CSS | 无 Node.js 或依赖安装失败 | 简化但保持设计原则 |
+| **C** | Three.js + ES Modules | 无 Node.js，有 WebGL | 3D 模块化架构，无构建 |
+| **D** | 纯 HTML + JS + CSS | 无 Node.js，无 WebGL | 简化但保持设计原则 |
 
 ### 关键原则
 
@@ -71,6 +77,17 @@ Node.js 可用？
 决定使用路线A：React + TypeScript + Vite + pnpm
 美术资源方案：SVG 代码生成
 ```
+
+### 路线C：Three.js + ES Modules（无构建）补充说明
+
+当 Node.js 不可用但浏览器支持 WebGL 时，使用 Three.js 的 ES Module 模式：
+- 下载 three.js 发行版到 `vendor/` 目录
+- `index.html` 通过 `<script type="importmap">` 映射本地 three.js
+- 所有业务逻辑分散在 `src/` 下的 ES Module 文件中
+- `package.json` 只包含开发服务器脚本（`npx serve`），无依赖安装
+- 关键技术：程序化建模、`onBeforeCompile` 材质注入、顶点着色器粒子、后处理管线
+
+详见 SKILL.md 中「路线C」章节及 `references/threejs-game-architecture.md`。
 
 ---
 

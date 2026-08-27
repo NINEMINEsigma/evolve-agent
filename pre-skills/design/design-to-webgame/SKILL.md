@@ -28,17 +28,53 @@ pnpm --version
 
 # 3. 如果 pnpm 不可用，检查 npm（回退）
 npm --version
+
+# 4. 检查浏览器 WebGL 支持（仅当游戏需要 3D 渲染时）
+# 通过代码检测：创建 WebGL context，检查是否非 null
 ```
 
 ### 决策树
 
 | 检查结果 | 技术路线 | 说明 |
 |:---------|:---------|:-----|
-| Node.js ✓ + pnpm ✓ | **React + TypeScript + Vite + pnpm** | 完整分层架构 |
-| Node.js ✓ + pnpm ✗ + npm ✓ | **React + TypeScript + Vite + npm** | 完整分层架构 |
-| Node.js ✗ | **纯 HTML + JavaScript + CSS** | 零依赖，双击即可运行 |
+| Node.js ✓ + pnpm ✓ | **路线A：React + TypeScript + Vite + pnpm** | 完整分层架构，首选 |
+| Node.js ✓ + pnpm ✗ + npm ✓ | **路线B：React + TypeScript + Vite + npm** | 完整分层架构 |
+| Node.js ✗ + WebGL ✓ | **路线C：Three.js + ES Modules（无构建）** | 3D 游戏，无构建步骤，importmap + `src/` 模块 |
+| Node.js ✗ + WebGL ✗ | **路线D：纯 HTML + JavaScript + CSS** | 2D 游戏，零依赖，双击即可运行 |
 
 **重要**：一旦确定技术路线，在整个项目中保持一致，不要中途切换。如果预检发现环境不符合预期，应提前告知用户，而不是写完代码才发现编译不了。
+
+### 路线C：Three.js + ES Modules（无构建）
+
+适用于 3D 策略/棋牌/环境探索类游戏。不依赖 Node.js，仅需浏览器支持 WebGL。
+
+```
+project/
+├── index.html              # canvas, UI skeleton, importmap
+├── package.json            # { "scripts": { "dev": "npx serve . -l 5173" } }
+├── vendor/
+│   ├── three.module.min.js
+│   └── addons/
+└── src/
+    ├── main.js             # 入口：初始化、事件循环
+    ├── core/               # 音频、配置、输入
+    ├── scene/              # 渲染器、相机、后处理
+    ├── game/               # 棋盘/场景、棋子、特效、对局逻辑
+    ├── chess/              # （棋类）规则引擎、AI、Worker
+    ├── world/              # 环境：天空、地面、粒子、道具
+    └── ui/                 # HUD、菜单、CSS
+```
+
+架构纪律与路线A/B相同：types → data → engine → scenes → state → ui。所有逻辑通过 ES Modules 分散在 `src/` 中，`index.html` 只包含骨架和 `importmap`。
+
+关键技术点：
+- `onBeforeCompile` 材质注入 — 在标准 PBR 材质上叠加自定义效果
+- 程序化建模 — `LatheGeometry`、`ExtrudeGeometry`、`mergeGeometries`
+- 后处理管线 — `EffectComposer` → `Bloom` → `OutputPass` → 自定义 `ShaderPass`
+- 顶点着色器粒子系统 — 降雪、爆发效果全部在 GPU 完成
+- 共享 GLSL 噪声库 — `fbm`、`ridged`、`vnoise` 注入到所有材质
+
+详见 `references/threejs-game-architecture.md`。
 
 ### 检查 ComfyUI（可选，美术资源用）
 
@@ -77,3 +113,6 @@ curl -s http://localhost:8188/system_stats || echo "ComfyUI not available"
 
 - [references/methodology.md](references/methodology.md) —— 六阶段方法论全文 + 常见陷阱清单
 - [references/architecture.md](references/architecture.md) —— 分层架构模式详解（GameState 设计、场景系统、触发检查器、reducer 模式、存档、界面约定）
+- [references/threejs-game-architecture.md](references/threejs-game-architecture.md) —— Three.js 无构建路线：目录结构、渲染管线、材质注入、程序化建模、后处理、粒子系统
+- [references/ai-engine.md](references/ai-engine.md) —— 棋类/策略游戏 AI 设计：0x88 棋盘、Negamax + Alpha-Beta + PVS + LMR、评估函数、难度控制、Web Worker 异步
+- [references/tween-animation.md](references/tween-animation.md) —— 游戏动画时序系统：Tween 队列、缓动函数库、Three.js 对象动画、粒子爆发
