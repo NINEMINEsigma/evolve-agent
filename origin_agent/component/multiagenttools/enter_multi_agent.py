@@ -119,7 +119,7 @@ async def _handle_enter_multi_agent(args: dict[str, Any]) -> dict:
             # 主 Agent 用 active profile 的客户端类型。
             profile.client_type if profile is not None else (_main_profile.llm_client_name if _main_profile else ""),
             parent_ctx,
-            profile=agent_config_to_llm_profile(profile) if profile is not None else None,
+            profile=agent_config_to_llm_profile(profile) if profile is not None else _main_profile,
         ),
         system_prompt_template=system_prompt_template,
         sandbox=sandbox,
