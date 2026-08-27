@@ -33,6 +33,7 @@ from abstract.tools.registry import registry as tool_registry
 from system.context import get_runtime_context
 from system.templates import read_template
 from entry.parent_agent_loop import ParentAgentLoop
+from entry.base_agent_loop import IMainSessionLoop
 
 from .context import SubRuntimeContext, build_subagent_context, build_taskagent_context
 from .loop import SUB_MESSAGE_SEPARATOR, SubAgentLoop, format_user_message
@@ -68,23 +69,16 @@ class WaitingEntry:
 class _OrchestratorContext:
     """单个主会话的子 Agent 上下文。"""
 
-    def __init__(self, parent_session_id: str, agent_loop: ParentAgentLoop) -> None:
+    def __init__(self, parent_session_id: str, agent_loop: IMainSessionLoop) -> None:
         self._parent_session_id: str = parent_session_id
-        self._agent_loop: ParentAgentLoop = agent_loop
+        self._agent_loop: IMainSessionLoop = agent_loop
         self._active: dict[str, SubAgentLoop] = {}
         self._active_task: dict[str, asyncio.Task] = {}
         self._waiting_queue: deque[WaitingEntry] = deque()
         self._subagent_names: dict[str, str] = {}  # session_id -> registry_name
-        self._background_task: asyncio.Task | None = None
+        self._waiter_tasks: dict[str, asyncio.Task] = {}  # SP-5 D4：per-subagent event waiter
         self._interrupted: bool = False
         self._shutting_down: bool = False
-
-    def start_background_cycle(self) -> None:
-        """启动该上下文的周期循环后台任务。"""
-        self._background_task = asyncio.create_task(
-            self._cycle_loop(),
-            name=f"subagent-cycle-{self._parent_session_id[:16]}",
-        )
 
     # ── 启动 ────────────────────────────────────────────────────────
 
@@ -238,6 +232,11 @@ class _OrchestratorContext:
             name=f"taskagent-{session_id[:16]}",
         )
         self._active_task[session_id] = task
+        # SP-5 D4：启动 per-subagent 事件驱动 waiter
+        self._waiter_tasks[session_id] = asyncio.create_task(
+            self._subagent_waiter(session_id, loop),
+            name=f"subagent-waiter-{session_id[:16]}",
+        )
 
         logger.info(
             "Taskagent started | parent=%s session=%s model=%s tools=%d",
@@ -270,6 +269,10 @@ class _OrchestratorContext:
         if task and not task.done():
             task.cancel()
         self._subagent_names.pop(session_id, None)
+        # SP-5 D4：清理 waiter task
+        waiter = self._waiter_tasks.pop(session_id, None)
+        if waiter and not waiter.done():
+            waiter.cancel()
 
         logger.info("Taskagent stopped | session=%s", session_id)
 
@@ -452,6 +455,10 @@ class _OrchestratorContext:
         task = self._active_task.pop(session_id, None)
         if task and not task.done():
             task.cancel()
+        # SP-5 D4：清理 waiter task
+        waiter = self._waiter_tasks.pop(session_id, None)
+        if waiter and not waiter.done():
+            waiter.cancel()
 
         logger.info("Subagent stopped | session=%s path=%s", session_id, session_path)
 
@@ -553,8 +560,11 @@ class _OrchestratorContext:
     async def shutdown(self) -> None:
         """关闭本上下文的所有活跃子 Agent。"""
         self._shutting_down = True
-        if self._background_task and not self._background_task.done():
-            self._background_task.cancel()
+        # SP-5 D4：取消所有 waiter task
+        for waiter in self._waiter_tasks.values():
+            if not waiter.done():
+                waiter.cancel()
+        self._waiter_tasks.clear()
         logger.info("Subagent context shutdown | parent=%s active=%d", self._parent_session_id, len(self._active))
         for session_id in list(self._active.keys()):
             await self.stop(session_id)
@@ -717,6 +727,11 @@ class _OrchestratorContext:
 
         task = asyncio.create_task(loop.run(initial_prompt, user_name, message_type), name=f"subagent-{session_id[:16]}")
         self._active_task[session_id] = task
+        # SP-5 D4：启动 per-subagent 事件驱动 waiter
+        self._waiter_tasks[session_id] = asyncio.create_task(
+            self._subagent_waiter(session_id, loop),
+            name=f"subagent-waiter-{session_id[:16]}",
+        )
 
         logger.info(
             "Subagent started | parent=%s session=%s model=%s tools=%d",
@@ -763,11 +778,12 @@ class _OrchestratorContext:
                 result.append(schema)
         return result
 
-    def _get_agent_loop(self) -> ParentAgentLoop | None:
-        """解析当前父 session 对应的真实 ParentAgentLoop。
+    def _get_agent_loop(self) -> IMainSessionLoop | None:
+        """解析当前父 session 对应的真实主会话 loop（SP-5 D6：移除 isinstance 门）。
 
         Orchestrator 在启动时拿到的是 __bootstrap__ loop，而每个真实 session
         都由 SessionManager 维护独立的 loop，因此需要动态解析。
+        ParentAgentLoop 与 MultiAgentLoop 均持有 _message_queue，均可接收子 agent 反馈。
         """
         try:
             from system.application import Application
@@ -776,128 +792,81 @@ class _OrchestratorContext:
                 loop = sm.get_loop(self._parent_session_id)
                 if loop is None:
                     return None
-                real_loop = loop.loop
-                if real_loop is None or isinstance(real_loop, ParentAgentLoop):
-                    return real_loop
-                # raise ValueError(f"ParentAgentLoop not found for parent session {self._parent_session_id}")
-                return None
+                return loop
         except Exception:
             logger.warning(
-                "Failed to resolve real ParentAgentLoop for parent=%s; falling back to bootstrap loop",
+                "Failed to resolve real loop for parent=%s; falling back to bootstrap loop",
                 self._parent_session_id,
                 exc_info=True,
             )
         return self._agent_loop
 
-    async def _cycle_loop(self) -> None:
-        """后台周期定时器 — 收集子 Agent 结果并注入父 Agent。"""
-        while not self._shutting_down:
-            try:
-                await asyncio.sleep(1)
-            except asyncio.CancelledError:
-                return
+    # ── SP-5 D4：事件驱动子→主投递 ──────────────────────────────────
 
-            if self._interrupted or self._shutting_down:
-                continue
+    async def _subagent_waiter(self, session_id: str, sub: SubAgentLoop) -> None:
+        """per-subagent 事件驱动 waiter：outbox/pending 变化时即时投递父队列。
 
-            loop = self._get_agent_loop()
-            if loop is None:
-                continue
-
-            last_idle = loop.get_last_idle_time(self._parent_session_id)
-            if last_idle is None:
-                continue
-
-            idle_sec = _time_module.monotonic() - last_idle
-
-            # 每轮推送倒计时到前端
-            if self._active:
-                remaining = max(0, int(SUBAGENT_IDLE_TRIGGER_SECONDS - idle_sec))
-                for session_id in self._active:
-                    name = self._subagent_names.get(session_id, "")
-                    await self._push_subagent_ws(
-                        session_id,
-                        name,
-                        {"role": "countdown", "content": str(remaining)},
-                    )
-
-            if idle_sec < SUBAGENT_IDLE_TRIGGER_SECONDS:
-                continue
-
-            # 检查是否有父 Agent 正在处理本会话消息
-            if loop.is_processing():
-                continue
-
-            # 收集
-            await self._collect_and_inject(loop)
-
-    async def _collect_and_inject(self, loop: ParentAgentLoop) -> None:
-        """收集所有活跃子 Agent 的 outbox 和待审批队列，注入父 Agent。"""
-        messages: list[str] = []
-        source_session_ids: list[str] = []
-
-        for session_id, sub in list(self._active.items()):
-            parts: list[str] = []
-            parts.append(f"session_id: {session_id}")
-
-            outbox = sub.get_outbox()
-            if outbox:
-                merged = SUB_MESSAGE_SEPARATOR.join(outbox)
-                parts.append(f"feedback:\n  {merged}")
-
-            pending = sub.pending_approvals_info
-            if pending:
-                parts.append("pending_approvals:")
-                for p in pending:
-                    parts.append(f"  - tool_call_id: {p['tool_call_id']}")
-                    parts.append(f"    tool_name: {p['tool_name']}")
-                    parts.append(f"    arguments: {json.dumps(p['arguments'], ensure_ascii=False)}")
-
-            if len(parts) > 1:
-                messages.append("\n".join(parts))
-                source_session_ids.append(session_id)
-
-            status = "completed" if sub.completed else ("terminated" if sub.terminated else "running")
-            is_task = isinstance(sub, TaskAgentLoop)
-            try:
-                from gateway.server import push_subagent_update
-                await push_subagent_update(
-                    parent_session_id=self._parent_session_id,
-                    subagent_session_id=session_id,
-                    subagent_name=self._subagent_names.get(session_id, ""),
-                    status=status,
-                    feedback=[],
-                    pending_approvals=pending,
-                    interactive=not is_task,
-                )
-            except Exception as exc:
-                logger.debug("WS push failed for subagent %s: %s", session_id, exc)
-
-        if not messages:
-            return
-
-        prefix = read_template("subagent/result_message.txt")
-        full_message = prefix + "\n\n" + "\n\n".join(messages)
-
+        R1 修复：循环头 while True，body 内 flush 先于 break-check——
+        taskagent 正常完成时 outbox.append→completed 之间无 await，waiter 唤醒
+        时 completed=True，若 break-check 在 flush 之前则最终 outbox 永久丢失。
+        """
         try:
-            await loop.process_message(full_message, character_name=SYSTEM_CHARACTER_NAME)
-            logger.debug("Subagent result injected to parent | parent=%s entries=%d", self._parent_session_id, len(messages))
+            while True:
+                await sub._outbox_event.wait()
+                sub._outbox_event.clear()
+                # 先 flush（drain outbox + pending → push 父队列）
+                await self._flush_subagent_message(session_id, sub)
+                # 后 break-check（独占出口判定）
+                if self._shutting_down or sub.completed or sub.terminated:
+                    # taskagent cleanup（原 _collect_and_inject 末尾逻辑）
+                    if isinstance(sub, TaskAgentLoop) and sub.completed:
+                        self._cleanup_taskagent(session_id)
+                    self._waiter_tasks.pop(session_id, None)
+                    break
+        except asyncio.CancelledError:
+            raise
+
+    async def _flush_subagent_message(self, session_id: str, sub: SubAgentLoop) -> None:
+        """收集单个子 Agent 的 outbox + pending 快照，格式化为 [subagent-result] 并 push 父队列。"""
+        outbox = sub.get_outbox()
+        pending = sub.pending_approvals_info
+        if not outbox and not pending:
+            return
+        parts: list[str] = []
+        parts.append(f"session_id: {session_id}")
+        if outbox:
+            merged = SUB_MESSAGE_SEPARATOR.join(outbox)
+            parts.append(f"feedback:\n  {merged}")
+        if pending:
+            parts.append("pending_approvals:")
+            for p in pending:
+                parts.append(f"  - tool_call_id: {p['tool_call_id']}")
+                parts.append(f"    tool_name: {p['tool_name']}")
+                parts.append(f"    arguments: {json.dumps(p['arguments'], ensure_ascii=False)}")
+        full_message = read_template("subagent/result_message.txt") + "\n\n" + "\n".join(parts)
+        loop = self._get_agent_loop()
+        if loop is None or loop.loop is None or loop.loop._message_queue is None:
+            logger.warning("Cannot flush subagent message: parent queue unavailable | session=%s", session_id)
+            return
+        try:
+            loop.loop._message_queue.push(
+                full_message, character_name=SYSTEM_CHARACTER_NAME, source="subagent",
+            )
+            logger.debug("Subagent result pushed to parent queue | parent=%s session=%s", self._parent_session_id, session_id)
         except Exception as exc:
             logger.exception(
-                "Failed to inject subagent result for parent=%s: %s",
-                self._parent_session_id, exc,
+                "Failed to push subagent result for parent=%s session=%s: %s",
+                self._parent_session_id, session_id, exc,
             )
 
-        # 清理已完成的 taskagent（一次性，不保存历史）
-        for session_id in list(self._active.keys()):
-            sub = self._active[session_id]
-            if isinstance(sub, TaskAgentLoop) and sub.completed:
-                self._active.pop(session_id, None)
-                task = self._active_task.pop(session_id, None)
-                if task and not task.done():
-                    task.cancel()
-                self._subagent_names.pop(session_id, None)
-                logger.info("Taskagent cleaned up | session=%s", session_id)
+    def _cleanup_taskagent(self, session_id: str) -> None:
+        """清理已完成的 taskagent（原 _collect_and_inject 末尾逻辑）。"""
+        self._active.pop(session_id, None)
+        task = self._active_task.pop(session_id, None)
+        if task and not task.done():
+            task.cancel()
+        self._subagent_names.pop(session_id, None)
+        logger.info("Taskagent cleaned up | session=%s", session_id)
 
     @staticmethod
     def _history_path(session_id: str, name: str = "") -> Path:
@@ -914,10 +883,10 @@ class SubAgentOrchestrator:
     """按主会话管理多个子 Agent 上下文。"""
 
     def __init__(self) -> None:
-        self._agent_loop: ParentAgentLoop | None = None
+        self._agent_loop: IMainSessionLoop | None = None
         self._contexts: dict[str, _OrchestratorContext] = {}
 
-    def set_agent_loop(self, agent_loop: ParentAgentLoop) -> None:
+    def set_agent_loop(self, agent_loop: IMainSessionLoop) -> None:
         """注入父 AgentLoop 引用。"""
         self._agent_loop = agent_loop
 
@@ -927,8 +896,7 @@ class SubAgentOrchestrator:
             assert self._agent_loop is not None, "set_agent_loop() must be called before any context operation"
             ctx = _OrchestratorContext(parent_session_id, self._agent_loop)
             self._contexts[parent_session_id] = ctx
-            # 启动后台周期任务
-            ctx.start_background_cycle()
+            # SP-5 D4：事件驱动 waiter 由 _start_subagent/_start_taskagent 启动，无需后台周期任务
         return self._contexts[parent_session_id]
 
     # ── 公共代理方法 ─────────────────────────────────────────────────

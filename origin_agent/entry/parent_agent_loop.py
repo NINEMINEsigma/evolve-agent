@@ -23,7 +23,7 @@ from abstract.tools.registry import registry as tool_registry
 from component.approval import ask_agent_reason
 from abstract.llm.client import BaseLLMClient
 from abstract.llm.loader import create_llm_client
-from entity.puretype import LLMResponse, ToolCallRequest, Role, ToolAvailability, TokenUsageRecord, MessageContent, LLMProfile, MessageMetrics
+from entity.puretype import LLMResponse, ToolCallRequest, Role, ToolAvailability, TokenUsageRecord, MessageContent, LLMProfile, MessageMetrics, QueuedMessage
 from entity.gentype import RefWrapper
 from system.session_store import SessionStore
 from entity.constant import (
@@ -62,11 +62,13 @@ from system.modality_capability import (
 from entry.session_manager import LoopSessionManager
 from entry.tool_executor import ToolExecutor, _interrupted_result
 from entry.stream_consumer import StreamConsumer
+from entry.session_message_queue import SessionMessageQueue
 
 if TYPE_CHECKING:
     from gateway.session_manager import SessionManager
     from system.application import Application
     from system.context import RuntimeContext
+    from entry.tool_post_dispatch import ResultFieldInjector
 
 logger = logging.getLogger(__name__)
 
@@ -145,9 +147,11 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
         # -- 工具调用事件回调 --
         self._tool_event_callback: Callable[[str, str, str, str], Awaitable[None]] | None = None
 
+        # SP-4: 会话级消息队列（_process_lock 已上移至 BaseAgentLoop.__init__）
+        self._message_queue = SessionMessageQueue(self)
+
         # -- 处理状态 --
         # NOTE: _processing 已上移至 BaseAgentLoop.__init__，is_processing() 由基类提供
-        self._process_lock: asyncio.Lock = asyncio.Lock()
         self._event_loop: asyncio.AbstractEventLoop | None = None
 
         # -- 子 Agent 周期收集器用的空闲时间戳 --
@@ -220,9 +224,12 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
     # -- 超限检查步骤（可被子类覆写）-------------------------------------------
 
     async def _check_over_limit_before_process(
-        self, sid: str, user_message: MessageContent,
+        self, sid: str, user_message: MessageContent | None,
     ) -> str:
-        """process_message 入口处的超限检查：超限时旋转会话，返回可能更新后的 sid。"""
+        """process_message 入口处的超限检查：超限时旋转会话，返回可能更新后的 sid。
+
+        user_message 为 None 表示队列路径（SP-4），无 pending 搬运。
+        """
         if self._lifecycle.is_context_over_limit():
             new_sid: str | None = await self._lifecycle.rotate_session_for_continuation(
                 sid, pending_user_message=user_message,
@@ -296,7 +303,6 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
         async with self._process_lock:
             self._processing = True
             try:
-                self._maybe_inject_inbox()
                 if not skip_append:
                     await self.append_user_message(user_message, character_name=character_name)
 
@@ -319,7 +325,7 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
         messages: list[BaseMessage],
         user_message: MessageContent,
     ) -> str:
-        """执行 LLM 工具调用循环（含 inbox 消息消费）。"""
+        """执行 LLM 工具调用循环。"""
         self._cancel_event.clear()
         self._disgust_event.clear()
 
@@ -335,8 +341,6 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
                     self.append_assistant_text("Cancelled.", session_id=sid)
                     return "Cancelled."
                 turn.value += 1
-
-                self._maybe_inject_inbox(messages)
 
                 # 多模态块预检：检测 messages 中的 ImageBlock/AudioBlock，
                 # 自动探查能力，不支持时转发借用并替换为描述文本
@@ -504,71 +508,6 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
         return await preprocess_multimodal_blocks(messages, context, self.save_history)
 
     # ========================================================================
-    # Inbox 消息消费
-    # ========================================================================
-
-    def _maybe_inject_inbox(
-        self, target_messages: list[BaseMessage] | None = None,
-    ) -> bool:
-        pending = self._inbox.get_pending()
-        if not pending:
-            return False
-        for pending_message in pending:
-            message = CharacterConversationMessage(
-                role=Role.USER,
-                character_name=pending_message.character_name,
-                content=pending_message.to_text(),
-                visible_characters=[self.current_character_agent],
-            )
-            index = self._history.add_message(message)
-            self.save_history(self.session_id)
-            if target_messages is not None:
-                target_messages.append(message)
-        return True
-
-    async def process_inbox(self) -> str | None:
-        async with self._process_lock:
-            if self._cancel_event.is_set():
-                return None
-
-            messages = self._get_full_history(self.session_id)
-            if not self._maybe_inject_inbox(messages):
-                return None
-
-            sid = self.session_id
-            self._cancel_event.clear()
-            self._disgust_event.clear()
-            self._processing = True
-            self._event_loop = asyncio.get_running_loop()
-
-            try:
-                reply = await self._run_tool_loop(sid, messages, "[cron-result]")
-            finally:
-                self._processing = False
-                self._last_idle_time[self.session_id] = time.monotonic()
-
-            if reply:
-                try:
-                    await self._frontend_sink.emit_assistant_message(
-                        sid, reply, self.current_character_agent,
-                    )
-                except Exception as exc:
-                    logger.exception(
-                        "Failed to send ASSISTANT_MESSAGE for inbox processing: %s", exc,
-                    )
-
-            return reply
-
-    def schedule_inbox_processing(self) -> None:
-        loop = self._event_loop
-        if loop is None or loop.is_closed():
-            return
-        try:
-            asyncio.run_coroutine_threadsafe(self.process_inbox(), loop)
-        except Exception as exc:
-            logger.exception("Failed to schedule inbox processing: %s", exc)
-
-    # ========================================================================
     # 历史 / 消息构建
     # ========================================================================
 
@@ -601,6 +540,102 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
             dynamic_message_suffix=dynamic_suffix,
         )
         return index
+
+    # -- SP-4 会话消息队列接入 ------------------------------------------------
+
+    def get_result_field_injector(self) -> "ResultFieldInjector | None":
+        """SP-4：返回队列的链中注入回调。"""
+        return self._message_queue.drain_injected
+
+    async def _append_queued_messages(self, items: list[QueuedMessage]) -> None:
+        """队列消息落历史 + 回显：保序、原生块。
+
+        SP-5 bugfix：回显从 push 移到此处（空闲消费时回显，链中注入不回显）。
+        SP-5 D1/R7：仅 source == "ws" 时收集 hooks 上下文（message_suffix /
+        dynamic_message_suffix），与 append_user_message 同源；其余来源
+        （cron/dynamic-endpoint/subagent）不设 suffix——属切队列后的有意行为变更。
+        """
+        for item in items:
+            content = blocks_from_dicts(item.content) if isinstance(item.content, list) else item.content
+            message_suffix: str | None = None
+            dynamic_message_suffix: str | None = None
+            if item.source == "ws":
+                hooks_context, fixator_context = self._collect_hooks_context()
+                dynamic_parts: list[str] = []
+                if hooks_context:
+                    dynamic_parts.append(hooks_context)
+                dynamic_message_suffix = "\n".join(dynamic_parts) if dynamic_parts else None
+                message_suffix = fixator_context or None
+            message = CharacterConversationMessage(
+                role=Role.USER,
+                character_name=item.character_name,
+                content=content,
+                visible_characters=[self.current_character_agent],
+                message_suffix=message_suffix,
+                dynamic_message_suffix=dynamic_message_suffix,
+            )
+            index = self._history.add_message(message)
+            self.save_history(self.session_id)
+            # SP-5 bugfix：空闲消费时回显（push 不再回显）
+            await self._frontend_sink.emit_user_message(
+                self.session_id,
+                item.content,
+                item.character_name,
+                index,
+                client_message_id=item.client_message_id,
+                message_suffix=message_suffix,
+                dynamic_message_suffix=dynamic_message_suffix,
+            )
+
+    async def run_pending_round(self, items: list[QueuedMessage]) -> str | None:
+        """SP-4：队列空闲消费驱动的轮次（S1 分支序）。
+
+        持锁 → 置 _processing → 超限检查（旋转随动）→ sid 变更检测 →
+        cancel 检测 → 注入落历史 → 无 LLM 闸（SP-5 R2）→ llm_profile 应用（SP-5 D1）→
+        非旋转非中断时跑轮 → finally 复位 → 锁外 on_round_done 回调（SP-5 D2）。
+        """
+        if not items:
+            return None
+        async with self._process_lock:
+            self._processing = True
+            self._event_loop = asyncio.get_running_loop()
+            reply: str | None = None
+            try:
+                sid = await self._check_over_limit_before_process(self.session_id, None)
+                self.session_id = sid
+                queue = self._message_queue
+                rotated: bool = queue.last_known_sid != sid
+                interrupted: bool = self._cancel_event.is_set()
+                self._cancel_event.clear()
+                self._disgust_event.clear()
+                await self._append_queued_messages(items)
+                # SP-5 R2：无 LLM 前置闸——消息已落历史并回显（_append_queued_messages 内回显），
+                # 无配置时以 assistant 气泡报错并跳过跑轮（与 process_message 现闸一致）。
+                should_run: bool = not rotated and not interrupted
+                selected_profile = next(
+                    (m.llm_profile for m in reversed(items) if m.llm_profile is not None), None,
+                )
+                if should_run and self._llm is None and selected_profile is None:
+                    err_text = "尚未配置 LLM 模型。请在前端「模型配置」中新建或选择一个配置后重试。"
+                    self.append_assistant_text(err_text, session_id=sid)
+                    should_run = False
+                if should_run and selected_profile is not None:
+                    self.switch_llm_profile(selected_profile)
+                if should_run:
+                    messages = self._get_full_history(sid)
+                    reply = await self._run_tool_loop(sid, messages, "[queued-messages]")
+                if reply:
+                    await self._frontend_sink.emit_assistant_message(
+                        sid, reply, self.current_character_agent,
+                    )
+                queue.last_known_sid = sid
+            finally:
+                self._processing = False
+                self._last_idle_time[self.session_id] = time.monotonic()
+        # SP-5 D2：锁外轮次后回调（WS 重映射/token 推送/进化触发）
+        if self._on_round_done is not None:
+            await self._on_round_done(self)
+        return reply
 
     def _append(
         self, session_id: str, role: Role,

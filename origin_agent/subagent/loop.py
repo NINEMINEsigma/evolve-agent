@@ -32,7 +32,7 @@ from entity.messages import (
 from entity.puretype import Role
 from subagent.context import SubRuntimeContext
 from entry.agent_sink import AgentSink, ParentAgentSink
-from entry.base_agent_loop import BasePrivateChatAgentLoop, UserMessage, ContextLimitMessage, ToolContext
+from entry.base_agent_loop import BasePrivateChatAgentLoop, UserMessage, ToolContext
 from entry.agent_support.multimodal import content_to_text, tool_result_to_content
 from entry.tool_post_dispatch import finalize_tool_result
 from entry.tool_executor import _interrupted_result
@@ -126,6 +126,8 @@ class SubAgentLoop(BasePrivateChatAgentLoop):
         self._outbox: list[str] = []                         # 发件箱：子 Agent 文本回复，父 Agent 通过 get_outbox() 收集
         self._pending_approvals: list[PendingToolCall] = []   # 等待父 Agent 审批的工具调用队列
         self._max_turns: int = max_turns                     # 最大工具调用轮次上限
+        # SP-5 D4：事件驱动信号——outbox append / pending 变化时 set，orchestrator waiter 消费
+        self._outbox_event: asyncio.Event = asyncio.Event()
 
         self._last_message_from_parent: bool = True          # 上一条消息是否来自父 Agent（用于决定是否入 outbox）
 
@@ -197,6 +199,7 @@ class SubAgentLoop(BasePrivateChatAgentLoop):
         """子 Agent 上下文超限时通知父 Agent，不自动旋转。"""
         logger.warning("SubAgent context limit reached | session=%s", self.session_id)
         self._outbox.append("[system] Context limit reached. Sub-agent may lose context.")
+        self._outbox_event.set()
 
     async def append_user_message(self, content: Any, *, display_content: Any | None = None, **kwargs: Any) -> int:
         """把用户消息加入子 Agent 历史并返回索引。"""
@@ -245,6 +248,7 @@ class SubAgentLoop(BasePrivateChatAgentLoop):
     def add_pending_approval(self, pending: PendingToolCall) -> None:
         """将挂起的工具调用加入审批队列并暂停循环。"""
         self._pending_approvals.append(pending)
+        self._outbox_event.set()
         self.set_paused()
 
     def emit_event(self, role: str, **fields: Any) -> None:
@@ -345,6 +349,7 @@ class SubAgentLoop(BasePrivateChatAgentLoop):
                     self._history.add_message(assistant_msg)
                     if self._last_message_from_parent:
                         self._outbox.append(text)
+                        self._outbox_event.set()
                     self._emit("assistant", content=text, reasoning=reasoning_text,
                                character_name=self.current_character_agent)
                     # LLM 给出纯文本即视作本轮对话结束，等待父 Agent 消息或取消
@@ -450,6 +455,8 @@ class SubAgentLoop(BasePrivateChatAgentLoop):
             if _cron is not None:
                 _cron.unregister(self.session_id)
             self._terminated = True
+            # SP-5 D4 R1：唤醒 waiter 做终结检查并 break（防永久悬挂）
+            self._outbox_event.set()
 
     def inject_parent_message(
         self,
@@ -503,6 +510,7 @@ class SubAgentLoop(BasePrivateChatAgentLoop):
 
         # 清空待审批队列
         self._pending_approvals.clear()
+        self._outbox_event.set()
 
         # 解除阻塞
         self._paused_event.set()
@@ -623,6 +631,7 @@ class SubAgentLoop(BasePrivateChatAgentLoop):
 
         pending = PendingToolCall(tc)
         self._pending_approvals.append(pending)
+        self._outbox_event.set()
 
         # 暂停
         self._paused_event.clear()
@@ -778,6 +787,7 @@ class SubAgentLoop(BasePrivateChatAgentLoop):
                 session_id=self.session_id,
                 tool_call_id=tc.id,
                 character_name=self.current_character_agent,
+                field_injector=None,
             )
         except asyncio.TimeoutError:
             invocation_duration_ms = int((_time_module.monotonic() - invocation_start) * 1000)
@@ -795,6 +805,7 @@ class SubAgentLoop(BasePrivateChatAgentLoop):
                 session_id=self.session_id,
                 tool_call_id=tc.id,
                 character_name=self.current_character_agent,
+                field_injector=None,
             )
         except Exception as exc:
             invocation_duration_ms = int((_time_module.monotonic() - invocation_start) * 1000)
@@ -812,6 +823,7 @@ class SubAgentLoop(BasePrivateChatAgentLoop):
                 session_id=self.session_id,
                 tool_call_id=tc.id,
                 character_name=self.current_character_agent,
+                field_injector=None,
             )
         finally:
             current_subagent_loop.set(None)
@@ -862,6 +874,7 @@ class SubAgentLoop(BasePrivateChatAgentLoop):
         self._outbox.append(
             f"[tool-failure] {tool_name}: {summary}"
         )
+        self._outbox_event.set()
 
     def _make_tool_msg(self, tool_call_id: str, content: Any) -> ToolResultMessage:
         return ToolResultMessage.from_result(

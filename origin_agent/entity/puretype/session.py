@@ -2,7 +2,8 @@ from enum import Enum
 from pydantic import BaseModel, Field
 from typing import Any
 
-from .llm import MessageMetrics
+from ._base import MessageContent
+from .llm import MessageMetrics, LLMProfile
 
 # ---------------------------------------------------------------------------
 # Loop Types
@@ -119,3 +120,21 @@ class TokenUsageRecord(BaseModel):
 
     prompt_tokens: int = 0
     """最近一次 LLM 调用的 prompt token 数（已消耗上下文）。"""
+
+
+# ---------------------------------------------------------------------------
+# Queued Message — 会话消息队列元素（SP-4）
+# ---------------------------------------------------------------------------
+
+class QueuedMessage(BaseModel):
+    """会话消息队列元素。content 保留原始 MessageContent，严禁扁平化。"""
+    content: MessageContent
+    character_name: str = ""
+    source: str = ""
+    timestamp: str = ""
+    # SP-5 D1：可选元数据，仅 ws / dynamic-endpoint 来源使用；None 时消费侧回退缺省。
+    visible_characters: list[str] | None = None
+    response_characters: list[str] | None = None
+    llm_profile: LLMProfile | None = None
+    # SP-5 bugfix：回显移到消费侧，client_message_id 随消息携带供 _append_queued_messages 回显
+    client_message_id: str | None = None

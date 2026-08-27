@@ -51,7 +51,7 @@ graph TD
 - **一条子代理 = 一个 `SubAgentLoop` 任务**：启动时创建独立 `asyncio.Task`，在 `loop.run()` 内完成 LLM 调用 → 工具执行 → 结果回写。
 - **工具权限隔离**：子代理只能看到 `availability` 包含 `SUBAGENT` 或 `EVERY` 的工具；递归创建子代理的 `multiagent` 工具集仅对主代理可见（`MAIN`）。
 - **审批流**：只读 / 白名单中的工具直接执行；其余工具调用挂起，等待父代理通过 `approval_subagent` 审批，或走脱手模式的自动审批。
-- **结果收集**：后台每 1 秒检查父代理空闲时间，超过 `SUBAGENT_IDLE_TRIGGER_SECONDS`（默认 20s）后把子代理 `outbox` 和待审批列表以 `[subagent-result]` 形式注入父代理消息循环。
+- **结果收集**：事件驱动——子代理 `outbox` 追加或 `pending_approvals` 变化时经 `_outbox_event` 即时触发 waiter，格式化为 `[subagent-result]` 消息 push 到父代理的 `SessionMessageQueue`。
 - **历史持久化**：停止时通过 `save_history()` 写入 `agentspace/subagents/<name>/<session_id>.es`，使用 `easysave` 多态序列化。
 
 ### 2. 多 Agent 协作模式（MultiAgent）
@@ -157,7 +157,7 @@ graph TD
 
 1. 子代理执行非只读工具时，调用进入 `_pending_approvals`。
 2. `approval_subagent` 工具由父 Agent 调用，批量通过/拒绝。
-3. 父 Agent 空闲超过阈值后，`SubAgentOrchestrator` 将子代理 outbox + 待审批列表格式化为 `[subagent-result]` 消息，通过 inbox 注入 `ParentAgentLoop`。
+3. 子代理 `outbox` 追加或 `pending_approvals` 变化时，`SubAgentOrchestrator` 的 waiter 即时将 outbox + 待审批列表格式化为 `[subagent-result]` 消息，push 到父代理的 `SessionMessageQueue`。
 4. 父 Agent 的下一轮 LLM 调用即可看到子代理的产出。
 
 脱手模式下，子代理的工具审批直接走 `request_user_confirm` 到父 session（由 approval 模型审批），不经过 `_pending_approvals` 队列。

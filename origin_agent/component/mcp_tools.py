@@ -37,7 +37,7 @@ _mcp_initialized: bool = False
 def _bridge_on_register(
     name: str,
     schema: dict,
-    handler: Callable[..., str],
+    handler: Callable[..., dict],
     **kwargs: object,
 ) -> None:
     """MCP 工具注册回调 → 项目 ToolRegistry.register()。
@@ -222,7 +222,7 @@ def shutdown_mcp() -> None:
     _mcp_initialized = False
 
 
-def _handle_mcp_refresh(args: dict, **_kwargs) -> str:
+def _handle_mcp_refresh(args: dict, **_kwargs) -> dict:
     """mcp_refresh 工具 handler — 热重载 MCP server 配置。
 
     重新读取 mcp_config.json，对比当前连接做 diff：
@@ -233,23 +233,14 @@ def _handle_mcp_refresh(args: dict, **_kwargs) -> str:
     try:
         ctx = get_runtime_context()
     except RuntimeError as exc:
-        return json.dumps(
-            {"refreshed": False, "error": str(exc)},
-            ensure_ascii=False,
-        )
+        return {"refreshed": False, "error": str(exc)}
 
     if not ctx.mcp_config_path:
-        return json.dumps(
-            {"refreshed": False, "error": "No mcp_config_path configured"},
-            ensure_ascii=False,
-        )
+        return {"refreshed": False, "error": "No mcp_config_path configured"}
 
     config_path = Path(ctx.mcp_config_path)
     if not config_path.exists():
-        return json.dumps(
-            {"refreshed": True, "removed": [], "added": [], "failed": [], "status": []},
-            ensure_ascii=False,
-        )
+        return {"refreshed": True, "removed": [], "added": [], "failed": [], "status": []}
 
     servers = _load_mcp_config(config_path)
 
@@ -259,7 +250,7 @@ def _handle_mcp_refresh(args: dict, **_kwargs) -> str:
     except Exception as exc:
         result = {"refreshed": False, "error": str(exc)}
 
-    return json.dumps(result, ensure_ascii=False)
+    return result
 
 
 def _get_registered_mcp_tools() -> list[str]:

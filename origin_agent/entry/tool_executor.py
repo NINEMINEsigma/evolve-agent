@@ -365,6 +365,7 @@ class ToolExecutor:
                 session_id=session_id,
                 tool_call_id=tc.id,
                 character_name=char_name,
+                field_injector=self._loop.get_result_field_injector(),
             )
         except BaseException:
             # finalize（content 转换/事件推送）异常时以中断结果兜底，保证 execute 不向调用方抛异常

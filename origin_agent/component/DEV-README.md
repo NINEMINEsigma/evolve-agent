@@ -177,6 +177,6 @@ MCP 配置示例（`workspace/mcp_config.json`）：
 
 - `CronRouter` 接收 Cron 工具创建的后台任务。
 - 维护任务注册表（`_CronTask`）与触发调度。
-- 通过 inbox 将 Cron 结果注入对应 `ParentAgentLoop`。
+- 通过 SessionMessageQueue（主会话）或 inbox（子 Agent）将 Cron 结果投递到对应 loop。
 - 提供 REST API：`/api/sessions/{id}/cron-tasks/...`。
 - 生命周期由 `Application.shutdown()` 管理。

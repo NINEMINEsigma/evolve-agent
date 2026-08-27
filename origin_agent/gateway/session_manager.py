@@ -336,6 +336,7 @@ class SessionManager:
         self._client_infos.pop(session_id, None)
         if loop is not None:
             loop.loop.interrupt()
+            loop.loop.stop_message_queue()
             if self._app.cron_router is not None:
                 self._app.cron_router.unregister(session_id)
             logger.info("Session terminated: %s", session_id)
@@ -358,6 +359,7 @@ class SessionManager:
         old_loop = self._loops.pop(session_id, None)
         if old_loop is not None:
             old_loop.loop.interrupt()
+            old_loop.loop.stop_message_queue()
             if self._app.cron_router is not None:
                 self._app.cron_router.unregister(session_id)
             logger.info(

@@ -1183,47 +1183,28 @@ async def dynamic_endpoint_handler(
             status_code=503,
         )
 
-    # 统一通过 IMainSessionLoop.loop 获取 BaseAgentLoop 后调用 process_message
-    # — ParentAgentLoop 的 **kwargs 会吞掉 visible_characters/response_characters，
-    #   MultiAgentLoop 显式接受
-    try:
-        reply = await loop.loop.process_message(
-            payload,
-            character_name=SYSTEM_CHARACTER_NAME,
-            visible_characters=[agent_name],
-            response_characters=[agent_name],
-        )
-    except Exception as exc:
-        logger.exception(
-            "Dynamic endpoint dispatch failed | endpoint=%s session=%s agent=%s",
-            endpoint_name, session_id, agent_name,
-        )
-        return HTMLResponse(
-            json.dumps({"error": f"dispatch failed: {exc}", "endpoint_name": endpoint_name}),
-            media_type="application/json",
-            status_code=500,
-        )
+    # SP-5 D3：切队列——push 后立即返回 202，回复由轮次驱动推送
+    loop.loop._message_queue.push(
+        payload,
+        character_name=SYSTEM_CHARACTER_NAME,
+        source="dynamic-endpoint",
+        visible_characters=[agent_name],
+        response_characters=[agent_name],
+    )
 
     logger.info(
         "Dynamic endpoint triggered | endpoint=%s session=%s agent=%s used=%s",
         endpoint_name, session_id, agent_name, used,
     )
 
-    # 推送 assistant 回复到前端（process_message 只返回文本，由调用方推送）
-    from system.application import Application
-    sink = Application.current().frontend_sink
-    if sink is not None and reply:
-        try:
-            await sink.emit_assistant_message(
-                session_id, reply, loop.current_character_agent,
-            )
-        except Exception:
-            logger.warning(
-                "Failed to emit assistant message for dynamic endpoint | session=%s",
-                session_id, exc_info=True,
-            )
-
-    return {"delivered": True, "endpoint_name": endpoint_name, "session_id": session_id, "used": used}
+    return HTMLResponse(
+        json.dumps({
+            "delivered": True, "queued": True,
+            "endpoint_name": endpoint_name, "session_id": session_id, "used": used,
+        }, ensure_ascii=False),
+        media_type="application/json",
+        status_code=202,
+    )
 
 
 @app.post("/api/file-picker")

@@ -14,11 +14,11 @@ import logging
 import shutil
 from abc import ABC, abstractmethod
 from pathlib import Path
-from typing import Any, TYPE_CHECKING
+from typing import Any, Awaitable, Callable, TYPE_CHECKING
 
 from pydantic import BaseModel
 
-from entity.puretype import Role, ToolAvailability, SessionMessageEntry, TokenUsageRecord, MessageContent, LLMProfile, MessageMetrics
+from entity.puretype import Role, ToolAvailability, SessionMessageEntry, TokenUsageRecord, MessageContent, LLMProfile, MessageMetrics, QueuedMessage
 from entity.messages import (
     History,
     BaseMessage,
@@ -49,6 +49,8 @@ if TYPE_CHECKING:
     from system.application import Application
     from entry.agent_sink import AgentSink
     from gateway.session_manager import SessionManager
+    from entry.tool_post_dispatch import ResultFieldInjector
+    from entry.session_message_queue import SessionMessageQueue
 
 logger = logging.getLogger(__name__)
 
@@ -72,46 +74,10 @@ class UserMessage(InboxMessage):
     character_name: str = USER_CHARACTER_NAME
 
 
-# TODO: 目前似乎没有被使用到
-class ApprovalDecisionMessage(InboxMessage):
-    """父Agent对工具审批的决定。"""
-    decision: dict[str, Any]
-
-    def to_text(self) -> str:
-        return json.dumps(self.decision, ensure_ascii=False)
-
-
-class CronResultMessage(InboxMessage):
-    """Cron 定时任务执行结果。"""
-    task_id: str
-    name: str
-    exit_code: int
-    stdout_preview: str
-
-    def to_text(self) -> str:
-        status = "completed" if self.exit_code == 0 else f"failed (exit={self.exit_code})"
-        return f"[cron-result] {self.name} ({self.task_id}) — {status}\n{self.stdout_preview}"
-
-
-class ContextLimitMessage(InboxMessage):
-    """上下文超限通知。"""
-    saved_path: str | None = None
-
-    def to_text(self) -> str:
-        return f"[system] Context limit reached. Session saved to: {self.saved_path or 'unknown'}"
-
-
-class InterruptMessage(InboxMessage):
-    """中断请求。"""
-
-    def to_text(self) -> str:
-        return "[system] Interrupt requested"
-
-
 class Inbox:
     """线程安全的收件箱，支持等待新消息。
 
-    BaseAgentLoop._flush_inbox() 在每个 LLM 回合前检查并合并待处理消息。
+    SubAgentLoop 父→子通道使用（SP-5 D8：主会话已切队列，inbox 仅子 Agent 保留）。
     """
 
     def __init__(self) -> None:
@@ -244,13 +210,18 @@ def _serialize_message_entry(
     # ToolResultMessage._meta 提取
     tool_call_meta: dict[str, Any] | None = None
     if isinstance(msg, ToolResultMessage):
-        content_str = content_to_text(raw_content)
-        try:
-            parsed = json.loads(content_str)
-            if isinstance(parsed, dict) and "_meta" in parsed:
-                tool_call_meta = parsed["_meta"]
-        except (json.JSONDecodeError, TypeError):
-            pass
+        if isinstance(raw_content, dict):
+            # SP-3: 直接从 dict 取 _meta
+            tool_call_meta = raw_content.get("_meta")
+        else:
+            # TODO(SP-5-cleanup): str 路径为旧形式（JSON 序列化字典），兼容存量 history.es，后续删除。
+            content_str = content_to_text(raw_content)
+            try:
+                parsed = json.loads(content_str)
+                if isinstance(parsed, dict) and "_meta" in parsed:
+                    tool_call_meta = parsed["_meta"]
+            except (json.JSONDecodeError, TypeError):
+                pass
 
     return SessionMessageEntry(
         role=msg.role.value,
@@ -301,6 +272,19 @@ class BaseAgentLoop(ABC):
         # 处理中标志：子类在 process_message 主体内置位/复位；
         # 供 /regenerate 端点做并发防护（is_processing）查询
         self._processing: bool = False
+        # SP-4: 轮次互斥锁统一上移（原 ParentAgentLoop 私有）；会话消息队列设施（子类构造赋值）
+        self._process_lock: asyncio.Lock = asyncio.Lock()
+        self._message_queue: SessionMessageQueue | None = None
+        # SP-5 D2：轮次后编排放 loop——由 MessageRouter 在 handle_user_message 注册，
+        # run_pending_round 锁外末尾调用，完成 WS 重映射/token 推送/进化触发。
+        self._on_round_done: Callable[[Any], Awaitable[None]] | None = None
+
+    def set_on_round_done(self, cb: Callable[[Any], Awaitable[None]] | None) -> None:
+        """注册轮次后回调（幂等覆盖；None 清除）。
+
+        由 MessageRouter.handle_user_message 在每次 WS 消息入队前调用。
+        """
+        self._on_round_done = cb
 
     @property
     def history_store_dir(self) -> Path | None:
@@ -414,7 +398,7 @@ class BaseAgentLoop(ABC):
     def _flush_inbox(self) -> list[InboxMessage]:
         """取出并返回所有待处理的收件箱消息。
 
-        子类可重写以处理特定类型的消息（如 ApprovalDecisionMessage）。
+        子类可重写以处理特定类型的消息。
         """
         return self._inbox.get_pending()
 
@@ -543,6 +527,14 @@ class BaseAgentLoop(ABC):
         if session_path.exists():
             shutil.rmtree(str(session_path), ignore_errors=True)
             logger.info("Cleared persisted data for session %s", self.session_id)
+
+    def stop_message_queue(self) -> None:
+        """停止本会话的消息队列消费者（gateway 在 loop 消亡时调用）。
+
+        SP-4 D8：旋转复用 loop 不调用（队列随 loop 存活）；仅 terminate/replace 调用。
+        """
+        if self._message_queue is not None:
+            self._message_queue.stop()
 
     def get_session_messages(self) -> list[SessionMessageEntry]:
         """返回前端展示所需的消息列表，包含多 agent 元数据。"""
@@ -1023,6 +1015,33 @@ class IMainSessionLoop(ABC):
         """返回当前 loop 的工具可用性 scope。
 
         dispatch 层用 (entry.availability & scope) == 0 拦截不在当前 scope 内的工具。
+        """
+
+    def get_result_field_injector(self) -> "ResultFieldInjector | None":
+        """返回工具结果字段注入器。默认返回 None（无注入）。
+
+        ToolExecutor.execute 在每次工具调用时查询此方法，
+        将返回的注入器传给 finalize_tool_result 的 field_injector 参数。
+        SP-4 的 SessionMessageQueue 将通过重写此方法返回队列的 drain 回调，
+        使队列在工具链中消费时能向工具结果 dict 注入 queued_messages 字段。
+        """
+        return None
+
+    def set_on_round_done(self, cb: Callable[[Any], Awaitable[None]] | None) -> None:
+        """注册轮次后回调（SP-5 D2）。默认空实现；BaseAgentLoop 提供真实存储。
+
+        MessageRouter.handle_user_message 在 WS 消息入队前调用，run_pending_round
+        锁外末尾调用该回调以完成 WS 重映射/token 推送/进化触发。
+        """
+        pass
+
+    @abstractmethod
+    async def run_pending_round(self, items: list[QueuedMessage]) -> str | None:
+        """以队列 drained 消息列表为输入驱动一轮会话（SP-4 D3）。
+
+        实现必须：持 _process_lock → 置 _processing → （parent 系）超限检查（旋转随动）
+        → sid 变更检测 → cancel 检测 → 注入落历史（无回显、保序、原生块）
+        → （非旋转非中断时）跑轮 → finally 复位。
         """
 
 

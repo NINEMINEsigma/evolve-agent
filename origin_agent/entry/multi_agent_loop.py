@@ -19,23 +19,26 @@ from entity.messages import (
     History,
     CharacterConversationMessage,
 )
-from entity.puretype import Role, ToolAvailability, AgentConfig, LoopMeta, Loop, TokenUsageRecord, MessageContent, LLMProfile
+from entity.puretype import Role, ToolAvailability, AgentConfig, LoopMeta, Loop, TokenUsageRecord, MessageContent, LLMProfile, QueuedMessage
 from entity.constant import (
     MAIN_AGENT_CHARACTER_NAME,
     USER_CHARACTER_NAME,
     MULTI_AGENT_MAX_CASCADE_DEPTH,
     LOG_PREVIEW_CHARS,
+    ALL_AGENTS_CHARACTER_REF_NAME,
 )
 from system.templates import get_templates_dir, render_multi_agent_prompt
 from system.session_store import SessionStore
 from entry.base_agent_loop import BaseAgentLoop, IMainSessionLoop
 from entry.multi_agent_worker import WorkerResult, MultiAgentWorker
-from entry.agent_support.multimodal import content_to_text, summarize_message_for_log
+from entry.session_message_queue import SessionMessageQueue
+from entry.agent_support.multimodal import content_to_text, summarize_message_for_log, blocks_from_dicts
 
 if TYPE_CHECKING:
     from system.application import Application
     from entry.agent_sink import AgentSink
     from entity.messages import ToolResultMessage
+    from entry.tool_post_dispatch import ResultFieldInjector
 
 logger = logging.getLogger(__name__)
 
@@ -104,6 +107,9 @@ class MultiAgentLoop(BaseAgentLoop, IMainSessionLoop):
             "MultiAgentLoop initialized | session=%s agents=%d history_store=%s token_usage=%d",
             session_id, len(self._agent_names), bool(history_store_dir), self._token_record.token_usage,
         )
+
+        # SP-4: 会话级消息队列（_process_lock 由 BaseAgentLoop.__init__ 提供）
+        self._message_queue = SessionMessageQueue(self)
 
     # -- BaseAgentLoop 抽象方法实现 ----------------------------------------
 
@@ -319,72 +325,173 @@ class MultiAgentLoop(BaseAgentLoop, IMainSessionLoop):
         # 新消息到达时重置中断状态，允许用户从停止状态恢复
         self._cancel_event.clear()
         self._disgust_event.clear()
-        # 发送前强制配对：清理上次中断/异常残留的无配对 tool_calls
-        # （multi_agent 不走 build_full_history_messages，此处为唯一清理点）
-        self._history.remove_unpaired_tool_calls()
-        self.save_history(self.session_id)
-        if self.is_interrupted():
-            logger.warning("process_message skipped: loop interrupted | session=%s", self.session_id)
-            return ""
+        async with self._process_lock:
+            # 发送前强制配对：清理上次中断/异常残留的无配对 tool_calls
+            # （multi_agent 不走 build_full_history_messages，此处为唯一清理点）
+            self._history.remove_unpaired_tool_calls()
+            self.save_history(self.session_id)
+            if self.is_interrupted():
+                logger.warning("process_message skipped: loop interrupted | session=%s", self.session_id)
+                return ""
 
-        self._processing = True
-        try:
-            # 用户消息的可见角色 — "all-agents" 简写展开
-            _visible = visible_characters if visible_characters else self._agent_names
-            from entity.constant import ALL_AGENTS_CHARACTER_REF_NAME
-            if _visible == [ALL_AGENTS_CHARACTER_REF_NAME]:
-                _visible = self._agent_names
-            # 初始响应角色
-            _response = response_characters if response_characters else self._agent_names
-            if _response == [ALL_AGENTS_CHARACTER_REF_NAME]:
-                _response = self._agent_names
+            self._processing = True
+            try:
+                # 用户消息的可见角色 — "all-agents" 简写展开
+                _visible = visible_characters if visible_characters else self._agent_names
+                from entity.constant import ALL_AGENTS_CHARACTER_REF_NAME
+                if _visible == [ALL_AGENTS_CHARACTER_REF_NAME]:
+                    _visible = self._agent_names
+                # 初始响应角色
+                _response = response_characters if response_characters else self._agent_names
+                if _response == [ALL_AGENTS_CHARACTER_REF_NAME]:
+                    _response = self._agent_names
 
-            logger.info(
-                "Received user message | session=%s content=%s visible=%s response=%s",
-                self.session_id, summarize_message_for_log(user_message), _visible, _response,
-            )
-
-            # 追加用户消息
-            if not skip_append:
-                await self.append_user_message(
-                    user_message,
-                    visible_characters=_visible,
-                    response_characters=_response,
-                )
                 logger.info(
-                    "Appended user message to history | session=%s visible=%s",
-                    self.session_id, _visible,
+                    "Received user message | session=%s content=%s visible=%s response=%s",
+                    self.session_id, summarize_message_for_log(user_message), _visible, _response,
                 )
 
-            # 以用户指定的角色（或全体）作为初始响应者
-            await self._cascade(_response)
+                # 追加用户消息
+                if not skip_append:
+                    await self.append_user_message(
+                        user_message,
+                        visible_characters=_visible,
+                        response_characters=_response,
+                    )
+                    logger.info(
+                        "Appended user message to history | session=%s visible=%s",
+                        self.session_id, _visible,
+                    )
 
-            # 超限检测触发后旋转会话
-            if self._token_record.prompt_tokens > 0 and self._is_context_over_limit():
-                logger.warning(
-                    "Context limit reached after cascade, rotating | session=%s",
-                    self.session_id,
+                # 以用户指定的角色（或全体）作为初始响应者
+                await self._cascade(_response)
+
+                # 超限检测触发后旋转会话
+                if self._token_record.prompt_tokens > 0 and self._is_context_over_limit():
+                    logger.warning(
+                        "Context limit reached after cascade, rotating | session=%s",
+                        self.session_id,
+                    )
+                    await self._rotate_session_for_context_limit()
+
+                # 收集本轮所有 Agent 的回复（用户消息之后的消息）
+                responses: list[str] = []
+                for msg in self._history.iter_messages():
+                    if isinstance(msg, CharacterConversationMessage) and msg.role == Role.ASSISTANT:
+                        if msg.character_name in self._agents:
+                            text = msg.content if isinstance(msg.content, str) else str(msg.content)
+                            responses.append(f"[{msg.character_name}]: {text}")
+
+                logger.info(
+                    "Cascade completed | session=%s responses=%d",
+                    self.session_id, len(responses),
                 )
-                await self._rotate_session_for_context_limit()
 
-            # 收集本轮所有 Agent 的回复（用户消息之后的消息）
-            responses: list[str] = []
-            for msg in self._history.iter_messages():
-                if isinstance(msg, CharacterConversationMessage) and msg.role == Role.ASSISTANT:
-                    if msg.character_name in self._agents:
-                        text = msg.content if isinstance(msg.content, str) else str(msg.content)
-                        responses.append(f"[{msg.character_name}]: {text}")
+                # 每个 agent 已通过 emit_stream_delta + emit_stream_done 独立推送到前端，
+                # 不再需要在此返回拼接文本给 gateway 用于 assistant_message。
+                return ""
+            finally:
+                self._processing = False
 
-            logger.info(
-                "Cascade completed | session=%s responses=%d",
-                self.session_id, len(responses),
+    # -- SP-4 会话消息队列接入 ------------------------------------------------
+
+    def get_result_field_injector(self) -> "ResultFieldInjector | None":
+        """SP-4：返回队列的链中注入回调。"""
+        return self._message_queue.drain_injected
+
+    async def _append_queued_messages(self, items: list[QueuedMessage]) -> None:
+        """队列消息落历史 + 回显：保序、原生块。
+
+        SP-5 bugfix：回显从 push 移到此处（空闲消费时回显，链中注入不回显）。
+        SP-5 D1/R3：visible/response 由 QueuedMessage 携带（None → 全体），
+        [ALL_AGENTS_CHARACTER_REF_NAME] 简写展开为全体；source=="ws" 时收集 hooks。
+        """
+        for item in items:
+            content = blocks_from_dicts(item.content) if isinstance(item.content, list) else item.content
+            visible = item.visible_characters if item.visible_characters else list(self._agent_names)
+            if visible == [ALL_AGENTS_CHARACTER_REF_NAME]:
+                visible = list(self._agent_names)
+            response = item.response_characters
+            if response == [ALL_AGENTS_CHARACTER_REF_NAME]:
+                response = list(self._agent_names)
+            message_suffix: str | None = None
+            dynamic_message_suffix: str | None = None
+            if item.source == "ws":
+                hooks_context, fixator_context = self._collect_hooks_context()
+                dynamic_parts: list[str] = []
+                if hooks_context:
+                    dynamic_parts.append(hooks_context)
+                dynamic_message_suffix = "\n".join(dynamic_parts) if dynamic_parts else None
+                message_suffix = fixator_context or None
+            message = CharacterConversationMessage(
+                role=Role.USER,
+                character_name=item.character_name,
+                content=content,
+                visible_characters=visible,
+                response_characters=response,
+                message_suffix=message_suffix,
+                dynamic_message_suffix=dynamic_message_suffix,
+            )
+            index = self._history.add_message(message)
+            self.save_history(self.session_id)
+            # SP-5 bugfix：空闲消费时回显（push 不再回显）
+            await self._sink.emit_user_message(
+                self.session_id,
+                item.content,
+                item.character_name,
+                index,
+                visible_characters=visible,
+                response_characters=response,
+                client_message_id=item.client_message_id,
+                message_suffix=message_suffix,
+                dynamic_message_suffix=dynamic_message_suffix,
             )
 
-            # 每个 agent 已通过 emit_stream_delta + emit_stream_done 独立推送到前端，
-            # 不再需要在此返回拼接文本给 gateway 用于 assistant_message。
-            return ""
-        finally:
-            self._processing = False
+    async def run_pending_round(self, items: list[QueuedMessage]) -> str | None:
+        """SP-4：队列空闲消费驱动的轮次。
+
+        multi 无入口级超限检查（既有为 cascade 内 per-agent 检查 + process_message
+        尾部兜底），保持现状语义镜像。R3 修订：注入前镜像 process_message 入口的
+        remove_unpaired_tool_calls 清理点。
+
+        SP-5 D1/R3：_cascade 参数取最后一个非 None response_characters
+        （[ALL_AGENTS_CHARACTER_REF_NAME] 展开为全体）；全 None → 全体。
+        SP-5 D2：锁外末尾调 on_round_done 回调。
+        """
+        if not items:
+            return None
+        async with self._process_lock:
+            self._processing = True
+            try:
+                sid = self.session_id
+                queue = self._message_queue
+                rotated: bool = queue.last_known_sid != sid
+                interrupted: bool = self._cancel_event.is_set()
+                self._cancel_event.clear()
+                self._disgust_event.clear()
+                # R3：镜像 process_message 入口的清理点（multi 唯一清理点）
+                self._history.remove_unpaired_tool_calls()
+                self.save_history(self.session_id)
+                await self._append_queued_messages(items)
+                if not rotated and not interrupted:
+                    # SP-5 D1/R3：取最后一个非 None response_characters
+                    selected_response = next(
+                        (m.response_characters for m in reversed(items)
+                         if m.response_characters is not None), None,
+                    )
+                    cascade_chars = selected_response if selected_response else list(self._agent_names)
+                    if cascade_chars == [ALL_AGENTS_CHARACTER_REF_NAME]:
+                        cascade_chars = list(self._agent_names)
+                    await self._cascade(cascade_chars)
+                    if self._token_record.prompt_tokens > 0 and self._is_context_over_limit():
+                        await self._rotate_session_for_context_limit()
+                queue.last_known_sid = self.session_id
+            finally:
+                self._processing = False
+        # SP-5 D2：锁外轮次后回调
+        if self._on_round_done is not None:
+            await self._on_round_done(self)
+        return None
 
     # -- 级联调度 ----------------------------------------------------------
 

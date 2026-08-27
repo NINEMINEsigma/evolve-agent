@@ -8,7 +8,7 @@
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING
+from typing import Callable, TYPE_CHECKING
 
 from entity.puretype import Role, ToolCallMeta
 from entity.messages import BaseMessage, ToolResultMessage
@@ -19,6 +19,11 @@ if TYPE_CHECKING:
     from entry.agent_sink import AgentSink
 
 logger = logging.getLogger(__name__)
+
+# 工具结果字段注入器：接收已注入 _meta 的 result dict，
+# 返回要合并到 result 的字段 dict（或 None 表示无注入）。
+# SP-4 的 SessionMessageQueue.drain() 将实现此接口。
+ResultFieldInjector = Callable[[dict], dict | None]
 
 
 async def finalize_tool_result(
@@ -35,6 +40,7 @@ async def finalize_tool_result(
     session_id: str,
     tool_call_id: str,
     character_name: str,
+    field_injector: ResultFieldInjector | None = None,
 ) -> ToolResultMessage:
     """构建 _meta、注入到结果、推送前端事件和 UI 事件，返回 ToolResultMessage。
 
@@ -72,12 +78,29 @@ async def finalize_tool_result(
     if isinstance(result, dict):
         result["_meta"] = _meta.model_dump()
     else:
+        # TODO(SP-5-cleanup): 防御性兜底——SP-1 后 handler 必须返回 dict，此分支理论不可达，后续删除
         result = {"result": result, "_meta": _meta.model_dump()}
+
+    # SP-2: 结果字段注入——由 ToolExecutor 从所属 loop 的队列对象获取注入器，
+    # 队列对象本身不进 finalize（R1）。注入器返回要合并的字段 dict（或 None）。
+    # 注入字段在 _meta 之后、tool_result_to_content 之前写入，
+    # 随 JSON 自然进入历史持久化、wire 输出与前端展示。
+    if field_injector is not None:
+        try:
+            injected = field_injector(result)
+            if isinstance(injected, dict) and injected:
+                result.update(injected)
+        except Exception:
+            logger.warning(
+                "field_injector failed for tool=%s session=%s",
+                tool_name, session_id, exc_info=True,
+            )
 
     # 转换为可保存到 History 的 content
     # 检查是否需要 follow_up（user 消息多模态回退路径）
     follow_up_messages: list[BaseMessage] | None = None
-    if isinstance(result, dict) and ("_user_image" in result or "_user_audio" in result or "_user_video" in result):
+    # TODO(SP-5-cleanup): _user_image/_user_audio/_user_video 旧键兜底——SP-3 后已迁移到 _user_blocks，后续删除
+    if isinstance(result, dict) and ("_user_blocks" in result or "_user_image" in result or "_user_audio" in result or "_user_video" in result):
         follow_up_messages, content = tool_result_to_follow_up(result, character_name)
     else:
         content = tool_result_to_content(result)

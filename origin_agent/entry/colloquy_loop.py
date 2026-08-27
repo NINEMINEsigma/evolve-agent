@@ -12,7 +12,7 @@ import logging
 from typing import Any
 
 from abstract.tools.registry import registry as tool_registry
-from entity.puretype import Role, ToolAvailability
+from entity.puretype import Role, ToolAvailability, MessageContent
 from entity.constant import (
     COLLOQUY_COMPRESS_RATIO,
     COLLOQUY_TOOLSET_WHITELIST,
@@ -58,9 +58,12 @@ class ColloquyLoop(ParentAgentLoop):
     # ========================================================================
 
     async def _check_over_limit_before_process(
-        self, sid: str, user_message: str,
+        self, sid: str, user_message: MessageContent | None,
     ) -> str:
-        """process_message 入口处的超限检查：超限时滑动窗口压缩，返回原 sid。"""
+        """process_message 入口处的超限检查：超限时滑动窗口压缩，返回原 sid。
+
+        user_message 为 None 表示队列路径（SP-4），滑窗路径忽略该参数。
+        """
         if self._lifecycle.is_context_over_limit():
             await self._compress_sliding_window(sid)
         return sid
