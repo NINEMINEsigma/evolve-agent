@@ -73,9 +73,11 @@ export function useGlobalTooltip() {
     const onMouseEnter = (e: MouseEvent) => {
       const target = e.target as HTMLElement;
       if (!target) return;
-      const tooltipText = target.getAttribute("data-tooltip");
+      const host = target.closest("[data-tooltip]") as HTMLElement | null;
+      if (!host) return;
+      const tooltipText = host.getAttribute("data-tooltip");
       if (!tooltipText) return;
-      showTooltip(target, tooltipText);
+      showTooltip(host, tooltipText);
     };
 
     const onMouseLeave = (e: MouseEvent) => {
