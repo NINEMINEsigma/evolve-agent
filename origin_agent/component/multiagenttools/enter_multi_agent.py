@@ -86,7 +86,7 @@ async def _handle_enter_multi_agent(args: dict[str, Any]) -> dict:
 
     # 停止所有子 Agent
     if app.subagent_orchestrator is not None:
-        await app.subagent_orchestrator.shutdown_parent(session_id)
+        await app.subagent_orchestrator.shutdown(session_id)
 
     # 加载多 Agent 系统提示词模板
     template_path = get_templates_dir() / "multiagent" / "multi_agent_system_prompt.txt"

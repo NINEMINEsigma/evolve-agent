@@ -675,10 +675,10 @@ async def delete_session(session_id: str):
     # 停止该主会话下的所有子 Agent 并清理上下文
     try:
         orch = get_subagent_orchestrator()
-        await orch.shutdown_parent(session_id)
+        await orch.shutdown(session_id)
     except Exception:
         logger.warning("Failed to shutdown subagents for session=%s", session_id, exc_info=True)
-    # 清理会话级附带资源（后台任务、cron、动态端点）— 置于 shutdown_parent
+    # 清理会话级附带资源（后台任务、cron、动态端点）— 置于 shutdown
     # 之后作为会话级收尾，此时索引/目录已删、子 Agent 已关。
     try:
         from gateway.session_cleanup import cleanup_session_resources
@@ -946,7 +946,7 @@ async def terminate_session_endpoint(session_id: str):
     # 先停止该父会话的所有子 Agent 会话
     try:
         orch = get_subagent_orchestrator()
-        await orch.terminate_parent(parent_session_id=session_id)
+        await orch.shutdown(session_id)
     except Exception:
         logger.warning("Failed to terminate subagents for session=%s", session_id, exc_info=True)
     loop = _get_loop(session_id)

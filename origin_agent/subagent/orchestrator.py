@@ -488,13 +488,6 @@ class _OrchestratorContext:
     def resume(self) -> None:
         self._interrupted = False
 
-    async def terminate_parent(self) -> None:
-        """父 Agent 会话终结时停止所有子 Agent。"""
-        logger.info("Parent terminated: stopping all subagents | parent=%s", self._parent_session_id)
-        for session_id in list(self._active.keys()):
-            await self.stop(session_id)
-        self._waiting_queue.clear()
-
     def get_snapshot(self) -> dict[str, dict[str, Any]]:
         # TODO: msg.content没有多模态
         """返回所有活跃子会话的快照（供前端刷新时拉取）。"""
@@ -740,6 +733,8 @@ class _OrchestratorContext:
 
     async def _activate_next(self) -> list[dict[str, str]]:
         """从等待队列取出一个启动。"""
+        if self._shutting_down:
+            return []
         if not self._waiting_queue:
             return []
         entry = self._waiting_queue.popleft()
@@ -928,11 +923,6 @@ class SubAgentOrchestrator:
     def resume(self, parent_session_id: str) -> None:
         self._get_context(parent_session_id).resume()
 
-    async def terminate_parent(self, parent_session_id: str) -> None:
-        ctx = self._contexts.get(parent_session_id)
-        if ctx is not None:
-            await ctx.terminate_parent()
-
     def get_snapshot(self, parent_session_id: str) -> dict[str, dict[str, Any]]:
         ctx = self._contexts.get(parent_session_id)
         if ctx is None:
@@ -945,7 +935,7 @@ class SubAgentOrchestrator:
             await ctx.shutdown()
         self._contexts.clear()
 
-    async def shutdown_parent(self, parent_session_id: str) -> None:
+    async def shutdown(self, parent_session_id: str) -> None:
         """关闭指定父会话的所有子 Agent 并清理上下文。"""
         ctx = self._contexts.pop(parent_session_id, None)
         if ctx is not None:
