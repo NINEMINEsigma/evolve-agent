@@ -536,6 +536,15 @@ class BaseAgentLoop(ABC):
         if self._message_queue is not None:
             self._message_queue.stop()
 
+    def mark_queue_stopped(self) -> None:
+        """标记队列停止但不取消 consumer task（用于 replace_loop 延迟拆卸）。
+
+        与 stop_message_queue() 的区别：不调用 consumer_task.cancel()，
+        让当前 run_pending_round 自然完成后再退出 _consume_loop。
+        """
+        if self._message_queue is not None:
+            self._message_queue.mark_stopped()
+
     def get_session_messages(self) -> list[SessionMessageEntry]:
         """返回前端展示所需的消息列表，包含多 agent 元数据。"""
         fallback = self.current_character_agent

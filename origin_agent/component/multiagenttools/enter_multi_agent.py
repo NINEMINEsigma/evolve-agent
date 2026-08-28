@@ -147,25 +147,10 @@ async def _handle_enter_multi_agent(args: dict[str, Any]) -> dict:
         history_store_dir=parent_loop.history_store_dir,
     )
 
+    # [R3 修订]：不在此追加系统消息——T2（handler）先于 T1（consumer）完成，
+    # 系统消息会插入到 assistant tool_calls 和 ToolResultMessage 之间，
+    # 违反 Anthropic API 约束。tool_result 的 JSON 内容已包含切换成功信息。
     await app.session_manager.replace_loop(session_id, multi_loop)
-
-    # 切换前清理父 loop 最后一条未完成的 assistant tool_calls
-    idx, msg = history.find_last_message(
-        lambda m: (
-            isinstance(m, CharacterConversationMessage)
-            and m.role == Role.ASSISTANT
-            and bool(m.tool_calls)
-        )
-    )
-    if idx >= 0:
-        history.set_message(idx, msg.model_copy(update={"tool_calls": None}))
-        history.truncate_to(idx + 1)
-        history.add_message(CharacterConversationMessage(
-            role=Role.USER,
-            character_name=SYSTEM_CHARACTER_NAME,
-            content="[System Result] Enter multi-agent mode successfully",
-            visible_characters=[main_agent_name],
-        ))
 
     return tool_result(
         success=True,
@@ -219,6 +204,14 @@ registry.register(
         # - multiagent 工具集被禁用。
         # - 主 Agent 会被无条件加入参与者列表。
         # - 可通过 exit_multi_agent 退出回普通模式。
+        # - 工具返回成功后，模式切换将在你本轮回复完成后生效。请直接给用户一个简短确认，不要再调用任何工具。
+        #
+        # ## 用户侧控制
+        # - 用户每次发送消息时可从前端指定 visible_characters（消息对哪些 Agent 可见）
+        #   和 response_characters（哪些 Agent 需要响应此消息）。
+        # - 未指定时默认对所有 Agent 可见、所有 Agent 参与响应。
+        # - 指定 @response(none) 或空列表时该消息不触发任何 Agent 响应。
+        # - 因此并非每条消息都会触发全体级联——级联的参与者由用户指定的 response_characters 决定。
         "description": """Switch the current main session to multi-agent collaboration mode.
 
 ## Prerequisites
@@ -248,7 +241,14 @@ registry.register(
 - All active sub-agents are stopped and cleaned up.
 - The multiagent toolset is disabled.
 - The main agent is always forcibly included in the participant list.
-- Use `exit_multi_agent` to exit back to normal mode.""",
+- Use `exit_multi_agent` to exit back to normal mode.
+- After this tool returns success, the mode switch takes effect after your current reply completes. Simply give the user a brief confirmation and do NOT call any other tools in your response. The new multi-agent loop will handle all subsequent user messages.
+
+## User-Side Controls
+- When sending each message, the user can specify `visible_characters` (which agents can see the message) and `response_characters` (which agents should respond) from the frontend.
+- If not specified, the message is visible to all agents and all agents participate in the cascade.
+- Specifying `@response(none)` or an empty list means no agent responds to that message.
+- Therefore, not every message triggers a full cascade — the participants are determined by the user-specified `response_characters`.""",
         "parameters": {
             "type": "object",
             "properties": {

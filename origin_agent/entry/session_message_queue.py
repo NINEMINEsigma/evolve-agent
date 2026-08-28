@@ -198,3 +198,22 @@ class SessionMessageQueue:
                 self._event_loop.call_soon_threadsafe(self._wakeup.set)
             if self._consumer_task is not None:
                 self._event_loop.call_soon_threadsafe(self._consumer_task.cancel)
+
+    def mark_stopped(self) -> None:
+        """标记队列停止但不取消正在运行的 consumer task。
+
+        用于 replace_loop 场景：旧 loop 的 consumer task 正在执行工具调用
+        （如 enter_multi_agent / exit_multi_agent），立即 cancel 会导致
+        CancelledError 穿透。标记 _stopped 后，consumer 在当前 run_pending_round
+        自然完成后退出 _consume_loop 循环。
+        """
+        self._stopped = True
+        if self._pending:
+            logger.warning(
+                "Discarding %d queued messages on mark_stopped | session=%s",
+                len(self._pending),
+                self._loop.loop.session_id,
+            )
+        if not self._event_loop.is_closed():
+            if self._wakeup is not None:
+                self._event_loop.call_soon_threadsafe(self._wakeup.set)

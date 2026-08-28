@@ -358,14 +358,9 @@ class SessionManager:
 
         old_loop = self._loops.pop(session_id, None)
         if old_loop is not None:
-            old_loop.loop.interrupt()
-            # TODO: replace_loop 在工具执行期间被调用时（如 enter_multi_agent），
-            # stop_message_queue 会取消正在运行该工具的 consumer task，导致
-            # CancelledError 穿透到 _run_tool_loop，enter_multi_agent 后续的
-            # history 清理和 tool_result 返回无法完成。需要在下一个任务中
-            # 解决这个自取消时序问题（例如延迟 stop_message_queue 到工具返回后，
-            # 或让 enter_multi_agent 在调用 replace_loop 前自行完成清理）。
-            old_loop.loop.stop_message_queue()
+            # 标记旧队列停止但不取消 consumer task——让当前 run_pending_round
+            # 自然完成（含 tool_result 追加和 LLM 过渡回复）后再退出。
+            old_loop.loop.mark_queue_stopped()
             if self._app.cron_router is not None:
                 self._app.cron_router.unregister(session_id)
             logger.info(

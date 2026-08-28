@@ -45,9 +45,6 @@ async def _handle_exit_multi_agent(args: dict[str, Any]) -> dict:
     else:
         return tool_error(f"Current loop is not {MultiAgentLoop.__name__}; already in normal mode")
 
-    # 中断当前级联（如有）
-    multi_loop.interrupt()
-
     # 提取共享资源：history 和 sink
     # MultiAgentLoop._sink 实际存储的是 FrontendSink 实例（由 enter_multi_agent 传入），
     # 但 get_sink() 返回类型标注为 AgentSink 父类，需 cast 收窄。
@@ -67,17 +64,10 @@ async def _handle_exit_multi_agent(args: dict[str, Any]) -> dict:
     # 用多 Agent 模式的共享历史覆盖 ParentAgentLoop 初始化时从磁盘加载的历史
     parent_loop.load_history(history)
 
-    # 替换 loop
+    # [R3 修订]：不在此追加系统消息——T2（handler）先于 T1（consumer）完成，
+    # 系统消息会插入到 assistant tool_calls 和 ToolResultMessage 之间，
+    # 违反 Anthropic API 约束。tool_result 的 JSON 内容已包含切换成功信息。
     await app.session_manager.replace_loop(session_id, parent_loop)
-
-    # 追加系统消息标记退出成功
-    history.add_message(CharacterConversationMessage(
-        role=Role.USER,
-        character_name=SYSTEM_CHARACTER_NAME,
-        content="[System Result] Exited multi-agent mode, back to normal mode",
-        visible_characters=[MAIN_AGENT_CHARACTER_NAME],
-    ))
-    parent_loop.save_history(session_id)
 
     return tool_result(
         success=True,
@@ -120,6 +110,7 @@ registry.register(
         # - 当前会话的 loop 从 MultiAgentLoop 替换为 ParentAgentLoop。
         # - 正在进行的级联响应会被中断。
         # - 共享历史保留，但多 Agent 特有的 visible_characters / response_characters 元数据在普通模式下被忽略。
+        # - 工具返回成功后，模式切换将在你本轮回复完成后生效。请直接给用户一个简短确认，不要再调用任何工具。
         "description": """Exit multi-agent collaboration mode and return to normal mode.
 
 ## Prerequisites
@@ -142,7 +133,8 @@ registry.register(
 ## Side Effects / Notes
 - The session loop is replaced from MultiAgentLoop to ParentAgentLoop.
 - Any in-progress cascade response is interrupted.
-- Shared history is preserved, but multi-agent specific metadata (visible_characters / response_characters) is ignored in normal mode.""",
+- Shared history is preserved, but multi-agent specific metadata (visible_characters / response_characters) is ignored in normal mode.
+- After this tool returns success, the mode switch takes effect after your current reply completes. Simply give the user a brief confirmation and do NOT call any other tools in your response. The normal single-agent loop will handle all subsequent user messages.""",
         "parameters": {
             "type": "object",
             "properties": {},
