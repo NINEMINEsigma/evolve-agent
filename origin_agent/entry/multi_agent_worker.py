@@ -21,6 +21,7 @@ from entity.gentype import RefWrapper
 from entity.messages import ToolResultMessage, CharacterConversationMessage, CharacterSystemMessage, FunctionCall, ToolCall as HistoryToolCall, BaseMessage
 from entity.constant import (
     MAX_TOOL_TURNS,
+    LOG_PREVIEW_CHARS,
     ALL_AGENTS_CHARACTER_REF_NAME,
     MULTI_AGENT_ROUTING_TAG_VISIBLE,
     MULTI_AGENT_ROUTING_TAG_RESPONSE,
@@ -405,9 +406,10 @@ class MultiAgentWorker:
 
             # 纯文本响应 → 解析 DSL 标签
             text = resp.content or ""
+            preview = text[:LOG_PREVIEW_CHARS] + "..." if len(text) > LOG_PREVIEW_CHARS else text
             logger.info(
                 "MultiAgentWorker raw text | session=%s character=%s turn=%d text_len=%d text=%r",
-                self._loop.loop.session_id, self.character_name, turn, len(text), text,
+                self._loop.loop.session_id, self.character_name, turn, len(text), preview,
             )
 
             if not text or not text.strip():

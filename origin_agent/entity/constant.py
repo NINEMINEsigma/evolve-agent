@@ -116,10 +116,6 @@ FFMPEG_DEFAULT_TIMEOUT: int = 300
 # 指数退避基数（秒）
 BACKOFF_BASE: float = 1.0
 
-# 子 Agent 周期收集空闲触发时间（秒）— 父 Agent 消息队列空闲超过此时间后触发收集
-# 推荐该值不要超过origin_agent\frontend\src\components\SubagentCountdown.tsx中设定的值
-SUBAGENT_IDLE_TRIGGER_SECONDS: int = 20
-
 
 # ============================================================================
 # 文件系统 I/O 限制

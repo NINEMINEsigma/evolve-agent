@@ -631,7 +631,7 @@ class SubAgentLoop(BasePrivateChatAgentLoop):
                 tool_name=tc.name,
                 content=f"rejected: {result.deny_reason}",
             )
-            return self._make_tool_msg(tc.id, f"Tool call denied: {result.deny_reason}")
+            return self._make_tool_msg(tc.id, {"error": f"Tool call denied: {result.deny_reason}"})
 
         pending = PendingToolCall(tc)
         self._pending_approvals.append(pending)
@@ -683,7 +683,7 @@ class SubAgentLoop(BasePrivateChatAgentLoop):
                 tool_name=tc.name,
                 content=f"rejected: {exc}",
             )
-            return self._make_tool_msg(tc.id, f"Tool call rejected: {exc}")
+            return self._make_tool_msg(tc.id, {"error": f"Tool call rejected: {exc}"})
 
     async def _execute_approved_tool(self, tc: ToolCallRequest) -> ToolResultMessage:
         """执行已获批准的工具调用，补齐 _meta 注入和 UI 事件推送。"""
@@ -712,7 +712,7 @@ class SubAgentLoop(BasePrivateChatAgentLoop):
         invocation_start_offset_ms: int = 0
         try:
             if tool_registry.get_entry(tc.name) is None:
-                return self._make_tool_msg(tc.id, f"Tool '{tc.name}' not found in registry")
+                return self._make_tool_msg(tc.id, {"error": f"Tool '{tc.name}' not found in registry"})
 
             args: dict[str, Any] = dict(tc.arguments) if tc.arguments else {}
             args["_session_id"] = self.session_id

@@ -54,7 +54,6 @@ class SessionMessageQueue:
         character_name: str = "",
         source: str = "",
         timestamp: str = "",
-        display_content: Any | None = None,  # TODO(SP-5-cleanup): deprecated——回显已移到消费侧，保留签名兼容，后续删除
         client_message_id: str | None = None,
         visible_characters: list[str] | None = None,
         response_characters: list[str] | None = None,

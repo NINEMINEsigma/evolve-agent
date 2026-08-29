@@ -27,7 +27,7 @@ ResultFieldInjector = Callable[[dict], dict | None]
 
 
 async def finalize_tool_result(
-    result: dict | str,
+    result: dict,
     *,
     tool_name: str,
     application_time: str,
@@ -48,7 +48,7 @@ async def finalize_tool_result(
     所有时间戳参数由调用方在 dispatch 前后记录并传入。
 
     Args:
-        result: 工具 handler 返回的原始结果（dict 或 str）。
+        result: 工具 handler 返回的原始结果。
         tool_name: 工具名称。
         application_time: 人类可读的申请时间字符串。
         application_time_ms: 申请时间的绝对毫秒时间戳。
@@ -75,11 +75,7 @@ async def finalize_tool_result(
     )
 
     # 注入 _meta 到结果
-    if isinstance(result, dict):
-        result["_meta"] = _meta.model_dump()
-    else:
-        # TODO(SP-5-cleanup): 防御性兜底——SP-1 后 handler 必须返回 dict，此分支理论不可达，后续删除
-        result = {"result": result, "_meta": _meta.model_dump()}
+    result["_meta"] = _meta.model_dump()
 
     # SP-2: 结果字段注入——由 ToolExecutor 从所属 loop 的队列对象获取注入器，
     # 队列对象本身不进 finalize（R1）。注入器返回要合并的字段 dict（或 None）。
@@ -99,8 +95,7 @@ async def finalize_tool_result(
     # 转换为可保存到 History 的 content
     # 检查是否需要 follow_up（user 消息多模态回退路径）
     follow_up_messages: list[BaseMessage] | None = None
-    # TODO(SP-5-cleanup): _user_image/_user_audio/_user_video 旧键兜底——SP-3 后已迁移到 _user_blocks，后续删除
-    if isinstance(result, dict) and ("_user_blocks" in result or "_user_image" in result or "_user_audio" in result or "_user_video" in result):
+    if isinstance(result, dict) and "_user_blocks" in result:
         follow_up_messages, content = tool_result_to_follow_up(result, character_name)
     else:
         content = tool_result_to_content(result)

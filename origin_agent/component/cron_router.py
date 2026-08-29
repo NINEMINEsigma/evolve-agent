@@ -70,7 +70,7 @@ class CronRouter:
         status = "completed" if exit_code == 0 else f"failed (exit={exit_code})"
         text = f"[cron-result] {name} ({task_id}) — {status}\n{stdout_preview}"
 
-        queue = getattr(loop, "_message_queue", None)
+        queue = loop._message_queue
         if queue is not None:
             # 主会话：走会话消息队列
             queue.push(text, character_name=SYSTEM_CHARACTER_NAME, source="cron")

@@ -412,6 +412,23 @@ class History(BaseModel):
                     ]
                     msg.tool_calls = kept if kept else None
 
+    # NOTE: 兼容性代码
+    def normalize_legacy_tool_results(self) -> None:
+        """归一化存量 str 形态的 ToolResultMessage.content 为原生 dict。
+
+        SP-3 之前持久化的 history.es 中，ToolResultMessage.content 以 str（JSON 序列化字典）存储。
+        本方法在加载缝（SessionStore.read_history / orchestrator 直读路径）调用，
+        将 str 形态的工具结果经 legacy_tool_result_str_to_dict 还原为原生 dict，
+        使后续消费点（_meta 提取、content_to_text 等）只见 dict 不见 str。
+
+        普通文本消息（user/assistant）的 str content 本为合法形态，不在归一化范围。
+        """
+        from entry.agent_support.multimodal import legacy_tool_result_str_to_dict
+        with self._io_locker:
+            for msg in self.messages:
+                if isinstance(msg, ToolResultMessage) and isinstance(msg.content, str):
+                    msg.content = legacy_tool_result_str_to_dict(msg.content)
+
     def at_message(self, message: BaseMessage) -> int:
         with self._io_locker:
             return self.messages.index(message)

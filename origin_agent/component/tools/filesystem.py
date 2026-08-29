@@ -579,7 +579,7 @@ async def _handle_read(args: dict[str, Any], context: ToolContext | None = None)
                         path=path, model=model_name,
                     )
                 if user_video is True:
-                    # 仅 user 消息支持 → _user_video 载荷
+                    # 仅 user 消息支持 → _user_blocks 载荷
                     file_size = resolved.real.stat().st_size
                     if file_size > _MAX_VIDEO_SIZE:
                         return tool_error(
@@ -614,7 +614,7 @@ async def _handle_read(args: dict[str, Any], context: ToolContext | None = None)
                         "entries": [],
                         "count": None,
                     }
-            # tool_video is True → 直接返回 _video 载荷
+            # tool_video is True → 直接返回 _blocks 载荷
             file_size = resolved.real.stat().st_size
             if file_size > _MAX_VIDEO_SIZE:
                 return tool_error(
@@ -821,14 +821,14 @@ registry.register(
         # ## 图片/音频/视频分支（MIME 自动检测）
         # 当文件 MIME 类型命中图片白名单（PNG/JPEG/WebP/GIF/BMP/TIFF/SVG）、音频白名单（WAV/MP3）或视频白名单（MP4）时自动走对应分支。
         # 多模态能力自动探测：首次读图/音频/视频时自动探测并缓存，无需手动探查。探测结果分三态：
-        # - tool 消息支持 → 直接返回 _image/_audio/_video（多模态块在 tool 消息中传递）
-        # - 仅 user 消息支持 → 返回 _user_image/_user_audio/_user_video，多模态内容在当前轮工具调用完成后
+        # - tool 消息支持 → 直接返回 _blocks（多模态块在 tool 消息中传递）
+        # - 仅 user 消息支持 → 返回 _user_blocks，多模态内容在当前轮工具调用完成后
         #   通过 follow_up 用户消息注入上下文，返回文本提醒模型不要再调用工具
         # - 都不支持但配了引用字段 → 返回 description（转发给被引用模型取描述文本）
         # - 都不支持且未配引用字段 → 返回错误，不读取文件
         # 支持最大图片 20MB、音频 25MB、视频 50MB。
-        # _image/_audio/_video 载荷由 tool_result_to_content 提取并构造为 ImageBlock/AudioBlock/VideoBlock + TextBlock（元数据）。
-        # _user_image/_user_audio/_user_video 载荷由 tool_result_to_follow_up 提取并构造为 CharacterConversationMessage
+        # _blocks 载荷由 tool_result_to_content 提取并构造为 ImageBlock/AudioBlock/VideoBlock + TextBlock（元数据）。
+        # _user_blocks 载荷由 tool_result_to_follow_up 提取并构造为 CharacterConversationMessage
         # （role=USER, character_name=system, visible_characters=[当前角色]）。
         # offset/limit 在图片/音频/视频分支中被忽略（固定填充为 0）。
         #
@@ -843,11 +843,11 @@ registry.register(
         # 支持 offset（0-indexed 起始行）和 limit（最大行数）分页。
         # **目录分支**：返回条目名称列表，目录条目以 "/" 后缀标识。
         # offset/limit 在目录分支中被忽略（固定填充为 0）。
-        # **图片分支**：按 MIME 自动检测。若 tool 消息支持 → 返回 _image（多模态块在 tool 消息中传递）；
-        # 若仅 user 消息支持 → 返回 _user_image，多模态内容在当前轮工具调用完成后通过用户消息注入，
+        # **图片分支**：按 MIME 自动检测。若 tool 消息支持 → 返回 _blocks（多模态块在 tool 消息中传递）；
+        # 若仅 user 消息支持 → 返回 _user_blocks，多模态内容在当前轮工具调用完成后通过用户消息注入，
         # 返回文本提醒模型不要再调用工具；都不支持但配了引用字段 → 转发取描述文本；都不支持且未配 → 返回错误。
         # **音频分支**：与图片分支对称。
-        # **视频分支**：与图片分支对称，使用 _video/_user_video/vision_video_profile。
+        # **视频分支**：与图片分支对称，使用 _blocks/_user_blocks/vision_video_profile。
         # offset/limit 在图片/音频/视频分支中被忽略（固定填充为 0）。
         #
         # ## 返回
@@ -871,7 +871,7 @@ registry.register(
         # - 文件不存在或沙箱拒绝访问返回描述性错误。
         # - 图片/音频/视频分支：未探测或 tool/user 消息都不支持且未配引用字段时返回错误，不读取文件。
         # - tool/user 消息都不支持但配了引用字段时，转发给被引用模型取描述文本，返回 description 字段。
-        # - 仅 user 消息支持时，返回 _user_image/_user_audio/_user_video 而非 _image/_audio/_video，
+        # - 仅 user 消息支持时，返回 _user_blocks 而非 _blocks，
         #   多模态内容将在当前轮工具调用完成后通过用户消息注入，返回文本提醒不要再调用工具。
         "description": """Read file content (with line numbers, total lines, absolute path), list directory entries, or read an image/audio file (auto-detected by MIME type). Supports namespace prefixes: ws:, fork:, fix:, skills:, and read-only namespaces.
 
@@ -884,15 +884,15 @@ registry.register(
 **File branch**: Returns file content prefixed with 1-indexed line numbers. Supports pagination via offset (0-indexed start) and limit (max lines).
 **Directory branch**: Returns entry names; directory entries suffixed with '/'. offset and limit are ignored for directories (filled as 0).
 **Image branch**: Auto-detected by MIME type (PNG, JPEG, WebP, GIF, BMP, TIFF, SVG; max 20 MB). Delivery path depends on probe results:
-- `vision_capable=true` → image is delivered directly in the tool message as an `_image` payload (multimodal content block).
-- `vision_capable=false` but `user_vision_capable=true` → image is delivered via a follow-up user message after the current tool round completes. The tool result contains `_user_image` and a text note advising you NOT to call any more tools — respond directly to receive the image.
+- `vision_capable=true` → image is delivered directly in the tool message as a `_blocks` payload (multimodal content block).
+- `vision_capable=false` but `user_vision_capable=true` → image is delivered via a follow-up user message after the current tool round completes. The tool result contains `_user_blocks` and a text note advising you NOT to call any more tools — respond directly to receive the image.
 - Both false but `vision_image_profile` is set → image is forwarded to the referenced profile's model, which returns a detailed text description. The tool result contains a `description` field (no multimodal blocks) with the forwarded analysis.
 - Both false and no reference configured → error, file is not read.
 offset and limit are ignored for images (filled as 0).
 
-**Audio branch**: Auto-detected by MIME type (WAV, MP3; max 25 MB). Same four-state delivery as the image branch, using `_audio` / `_user_audio` / `description` (forwarded) / error. offset and limit are ignored for audio (filled as 0).
+**Audio branch**: Auto-detected by MIME type (WAV, MP3; max 25 MB). Same four-state delivery as the image branch, using `_blocks` / `_user_blocks` / `description` (forwarded) / error. offset and limit are ignored for audio (filled as 0).
 
-**Video branch**: Auto-detected by MIME type (MP4; max 50 MB). Same four-state delivery as the image branch, using `_video` / `_user_video` / `description` (forwarded, via `vision_video_profile`) / error. offset and limit are ignored for video (filled as 0).
+**Video branch**: Auto-detected by MIME type (MP4; max 50 MB). Same four-state delivery as the image branch, using `_blocks` / `_user_blocks` / `description` (forwarded, via `vision_video_profile`) / error. offset and limit are ignored for video (filled as 0).
 
 All branches return absolute_path (resolved absolute path), total_lines (line count; 0 for directories/images/audio/video), entries (directory entries; empty array for files/images/audio/video), and a type discriminant ("file", "directory", "image", "audio", or "video").
 

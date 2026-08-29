@@ -217,17 +217,7 @@ def _serialize_message_entry(
     tool_call_meta: dict[str, Any] | None = None
     if isinstance(msg, ToolResultMessage):
         if isinstance(raw_content, dict):
-            # SP-3: 直接从 dict 取 _meta
             tool_call_meta = raw_content.get("_meta")
-        else:
-            # TODO(SP-5-cleanup): str 路径为旧形式（JSON 序列化字典），兼容存量 history.es，后续删除。
-            content_str = content_to_text(raw_content)
-            try:
-                parsed = json.loads(content_str)
-                if isinstance(parsed, dict) and "_meta" in parsed:
-                    tool_call_meta = parsed["_meta"]
-            except (json.JSONDecodeError, TypeError):
-                pass
 
     return SessionMessageEntry(
         role=msg.role.value,

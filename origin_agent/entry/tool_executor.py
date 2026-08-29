@@ -50,11 +50,11 @@ def _interrupted_result(tc: ToolCallRequest, char_name: str, phase: str) -> Tool
         role=Role.TOOL,
         character_name=char_name,
         tool_call_id=tc.id,
-        content=json.dumps({
+        content={
             "error": "Tool call interrupted by user",
             "_interrupted": True,
             "_interrupted_phase": phase,
-        }, ensure_ascii=False),
+        },
     )
 
 
@@ -178,14 +178,14 @@ class ToolExecutor:
                 invocation_duration_ms=0,
                 end_time_offset_ms=0,
             )
-            _disgust_result = json.dumps({
+            _disgust_result = {
                 "error": "Tool call rejected: the user has expressed strong dissatisfaction (disgust). Stop calling tools and address the user's concerns directly.",
                 "_disgusted": True,
                 "_meta": _meta.model_dump(),
-            }, ensure_ascii=False)
+            }
             await self._loop.loop.get_sink().emit_tool_result(
                 session_id, tc.name, tc.id,
-                _disgust_result,
+                json.dumps(_disgust_result, ensure_ascii=False),
                 character_name=char_name,
                 tool_call_meta=_meta.model_dump(),
             )
@@ -236,7 +236,7 @@ class ToolExecutor:
                 role=Role.TOOL,
                 character_name=char_name,
                 tool_call_id=tc.id,
-                content=json.dumps(_result, ensure_ascii=False),
+                content=_result,
             )
 
         logtc_arguments_strs = []

@@ -91,6 +91,7 @@ class SessionStore:
             data = load(__SessionStore_Version__, str(path), History, ignore_missing_fields=True)
             if isinstance(data, History):
                 data.remove_unpaired_tool_calls()
+                data.normalize_legacy_tool_results()
                 return data
             logger.error("Loaded history for session=%s is not History instance: %s", session_id, type(data))
             return None

@@ -19,9 +19,6 @@ from entity.constant import (
     SYSTEM_CHARACTER_NAME,
 )
 from system.modality_capability import (
-    build_audio_content_blocks,
-    build_image_content_blocks,
-    build_video_content_blocks,
     ensure_modality_capability,
     forward_modality_to_ref_profile,
     resolve_active_model_base_url,
@@ -32,6 +29,32 @@ if TYPE_CHECKING:
     from entry.base_agent_loop import ToolContext
 
 logger = logging.getLogger(__name__)
+
+# 存量 history.es 中 SP-3 之前持久化的 ToolResultMessage.content 为 str（JSON 序列化字典）。
+# 加载时经 normalize_legacy_tool_results 调用本 helper 尝试解析回原生 dict；解析失败则
+# 构造一条「历史解析失败的工具调用失败字典」（与 SP-1 {"error": ...} 同族），字段无 _ 前缀，前端可见。
+LEGACY_CONTENT_PREVIEW_CHARS: int = 200
+
+
+# NOTE: 兼容性代码
+def legacy_tool_result_str_to_dict(content: str) -> dict[str, Any]:
+    """将存量 str 形态的工具结果 content 归一化为原生 dict。
+
+    - json.loads 成功且结果为 dict → 原样返回（解析成功的旧会话恢复为原生 dict，_meta 恢复可提取）。
+    - 其他情况（非 JSON、解析结果非 dict）→ 返回失败字典，含截断原文预览保留可读性。
+
+    本函数永不抛出异常。
+    """
+    try:
+        parsed = json.loads(content)
+        if isinstance(parsed, dict):
+            return parsed
+    except (json.JSONDecodeError, TypeError):
+        pass
+    return {
+        "error": "Failed to parse legacy tool result content (stored before native-dict migration).",
+        "legacy_content_preview": content[:LEGACY_CONTENT_PREVIEW_CHARS],
+    }
 
 
 def is_content_block_error(exc: Exception) -> bool:
@@ -359,18 +382,16 @@ async def preprocess_multimodal_blocks(
 def tool_result_to_content(result: Any) -> str | dict[str, Any] | list[MessageBlock]:
     """把工具返回结果转换为 ToolResultMessage 可用的 content。
 
-    - 字符串：原样返回（旧形式兼容）。
+    - str（防御性，实际不可达——SP-1 后 handler 返回 dict）：经 legacy_tool_result_str_to_dict 解析为 dict 后落入 dict 处理。
     - 含 _blocks 字段的 dict：pop _blocks 后经 blocks_from_dicts 转为有序 MessageBlock 列表；
       剩余 dict 非空时追加为末尾 TextBlock(json.dumps(remaining))。
-    - 含 _image/_audio/_video 字段的 dict：旧键兜底，pop 后生成 [MediaBlock, TextBlock]。
     - 其他 dict：返回原生 dict（不再 json.dumps）。
-    - list（全 MessageBlock）：直接透传（旧形式兼容）。
-    - 其他：str(result)。
+    - 非以上类型：raise TypeError（SP-1 后 handler 必须返回 dict，响亮失败优先于静默兜底）。
     """
     if isinstance(result, str):
-        # TODO(SP-5-cleanup): str 输入为旧形式工具结果（JSON 序列化字典），
-        # SP-3 后工具结果 content 转为原生 dict 存储，str 路径仅为兼容存量 history.es，后续删除。
-        return result
+        # 防御性：SP-1 后 dispatch 层保证 handler 返回 dict，str 理论不可达。
+        # 存量 str（旧 history.es）已在加载缝经 normalize_legacy_tool_results 归一化。
+        result = legacy_tool_result_str_to_dict(result)
     if isinstance(result, dict):
         # _blocks 优先：有序混合块列表，复用 blocks_from_dicts 格式
         blocks_data = result.pop("_blocks", None)
@@ -380,34 +401,18 @@ def tool_result_to_content(result: Any) -> str | dict[str, Any] | list[MessageBl
             if result:
                 blocks.append(TextBlock(text=json.dumps(result, ensure_ascii=False)))
             return blocks
-        # TODO(SP-5-cleanup): 旧 _image/_audio/_video 键兜底——SP-3 后已迁移到 _blocks，后续删除
-        image = result.pop("_image", None)
-        if isinstance(image, dict) and image.get("base64"):
-            return build_image_content_blocks(image, json.dumps(result, ensure_ascii=False))
-        audio = result.pop("_audio", None)
-        if isinstance(audio, dict) and audio.get("base64"):
-            return build_audio_content_blocks(audio, json.dumps(result, ensure_ascii=False))
-        video = result.pop("_video", None)
-        if isinstance(video, dict) and video.get("base64"):
-            return build_video_content_blocks(video, json.dumps(result, ensure_ascii=False))
         # 无媒体键：返回原生 dict（不再 json.dumps）
         return result
-    if isinstance(result, list):
-        # TODO(SP-5-cleanup): list 输入为旧形式工具结果（全 MessageBlock 透传），
-        # SP-1 后 handler 返回 dict，此分支仅为兼容，后续删除。
-        if all(isinstance(b, MessageBlock) for b in result):
-            return result  # type: ignore[return-value]
-    # TODO(SP-5-cleanup): str(result) 兜底——SP-1 后 handler 必须返回 dict，此分支理论不可达，后续删除
-    return str(result)
+    raise TypeError(f"tool_result_to_content expects dict, got {type(result).__name__}")
 
 
 def tool_result_to_follow_up(
     result: dict,
     character_name: str,
 ) -> tuple[list[BaseMessage] | None, str | dict[str, Any] | list[MessageBlock]]:
-    """提取 _user_blocks（或旧 _user_image/_user_audio/_user_video），构造 follow_up 用户消息。
+    """提取 _user_blocks，构造 follow_up 用户消息。
 
-    从 result dict 中 pop _user_blocks（优先）或 _user_image/_user_audio/_user_video（兜底），
+    从 result dict 中 pop _user_blocks（有序混合块列表），
     构造 CharacterConversationMessage(role=USER, character_name=system, content=[多模态块, 文本块])。
     剩余 dict 走 tool_result_to_content 生成 ToolResultMessage content。
 
@@ -416,36 +421,13 @@ def tool_result_to_follow_up(
         - follow_up_messages: 延迟注入的 CharacterConversationMessage 列表，或 None
         - remaining_content: ToolResultMessage 的 content
     """
-    # _user_blocks 优先：有序混合块列表
     user_blocks_data = result.pop("_user_blocks", None)
-    # TODO(SP-5-cleanup): 旧 _user_image/_user_audio/_user_video 键兜底——SP-3 后已迁移到 _user_blocks，后续删除
-    user_image = result.pop("_user_image", None)
-    user_audio = result.pop("_user_audio", None)
-    user_video = result.pop("_user_video", None)
 
-    has_user_blocks = isinstance(user_blocks_data, list) and user_blocks_data
-    has_old_user_media = (
-        (isinstance(user_image, dict) and user_image.get("base64"))
-        or (isinstance(user_audio, dict) and user_audio.get("base64"))
-        or (isinstance(user_video, dict) and user_video.get("base64"))
-    )
-
-    if not has_user_blocks and not has_old_user_media:
+    if not (isinstance(user_blocks_data, list) and user_blocks_data):
         return None, tool_result_to_content(result)
 
     metadata_json = json.dumps(result, ensure_ascii=False)
-    blocks: list[MessageBlock] = []
-
-    if has_user_blocks:
-        blocks.extend(blocks_from_dicts(user_blocks_data))
-    else:
-        # 旧键兜底
-        if isinstance(user_image, dict) and user_image.get("base64"):
-            blocks.extend(build_image_content_blocks(user_image, metadata_json))
-        if isinstance(user_audio, dict) and user_audio.get("base64"):
-            blocks.extend(build_audio_content_blocks(user_audio, metadata_json))
-        if isinstance(user_video, dict) and user_video.get("base64"):
-            blocks.extend(build_video_content_blocks(user_video, metadata_json))
+    blocks: list[MessageBlock] = blocks_from_dicts(user_blocks_data)
 
     if not blocks:
         return None, tool_result_to_content(result)
@@ -494,8 +476,6 @@ def content_to_text(content: MessageContent|dict[str, Any]|list[MessageBlock]|No
     if content is None:
         return ""
     if isinstance(content, str):
-        # TODO(SP-5-cleanup): str 为旧形式工具结果（JSON 序列化字典），
-        # 兼容存量 history.es 中的 ToolResultMessage.content，后续删除。
         return _strip_internal_fields(content)
     if isinstance(content, dict):
         # SP-3: 原生 dict 工具结果——json.dumps 后过滤 _ 前缀字段
@@ -522,17 +502,6 @@ def content_to_text(content: MessageContent|dict[str, Any]|list[MessageBlock]|No
                 elif btype == "video_url":
                     parts.append("[video]")
         return "\n".join(parts)
-
-
-def sanitize_image_payload(result: dict, keep_metadata: bool = True) -> dict:
-    """移除 tool result 中的 base64 数据，用于前端推送。"""
-    pr_copy: dict = dict(result)
-    raw_img_info = pr_copy.pop("_image", {})
-    img_info: dict = dict(raw_img_info) if isinstance(raw_img_info, dict) else {}
-    img_info.pop("base64", None)
-    if keep_metadata and img_info:
-        pr_copy["_image"] = img_info
-    return pr_copy
 
 
 def summarize_message_for_log(content: MessageContent|list[MessageBlock]|None, max_text_len: int = 300) -> str:
@@ -625,7 +594,6 @@ def blocks_from_dicts(blocks: list[dict[str, Any]]) -> list[MessageBlock]:
 
 def content_to_serializable(content: str | dict[str, Any] | list[MessageBlock]) -> str | dict[str, Any] | list[dict[str, Any]]:
     """将 content 序列化为前端可用的 str | dict | list[dict]，供编辑响应使用。"""
-    # TODO(SP-5-cleanup): str 为旧形式工具结果（JSON 序列化字典），兼容存量 history.es，后续删除。
     if isinstance(content, str):
         return content
     if isinstance(content, dict):

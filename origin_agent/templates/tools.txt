@@ -10,7 +10,7 @@ How tools work:
 Built-in tool conventions:
 - Tool names use snake_case.
 - Each tool belongs to a toolset (e.g. "filesystem", "code").
-- Handlers accept a single dict argument and return a JSON string.
+- Handlers accept a single dict argument and return a dict.
 - Errors are returned as {"error": "message"} via tool_error() helper.
 - Success results use tool_result() helper.
 
@@ -65,4 +65,4 @@ Multimodal Read conventions:
 - If the model supports image (or audio or video) only in user messages, Read still reads the file — the content is delivered via a follow-up user message after the current tool round completes. The tool result text will explicitly advise you to stop calling tools and respond directly to receive the media content.
 - If both tool and user message paths are unsupported but a reference profile is configured (`vision_image_profile` for images, `audio_profile` for audio, `vision_video_profile` for video), the content is forwarded to the referenced profile's model for a text description, which is returned in the `description` field.
 - If both paths are unsupported and no reference is configured, Read returns an error and does not read the file.
-- In the user-message fallback path, do NOT call any more tools after receiving the `_user_image`/`_user_audio`/`_user_video` result — respond directly so the follow-up user message with the media content is delivered to you in the next turn.
+- In the user-message fallback path, do NOT call any more tools after receiving the result containing `_user_blocks` — respond directly so the follow-up user message with the media content is delivered to you in the next turn.

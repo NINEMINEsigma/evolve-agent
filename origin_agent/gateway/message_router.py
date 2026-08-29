@@ -224,7 +224,6 @@ class MessageRouter:
                     content,
                     character_name=USER_CHARACTER_NAME,
                     source="ws",
-                    display_content=content,
                     client_message_id=msg.client_message_id,
                     visible_characters=msg.visible_characters,
                     response_characters=msg.response_characters,
