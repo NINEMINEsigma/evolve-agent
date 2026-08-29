@@ -119,6 +119,7 @@ class SubAgentLoop(BasePrivateChatAgentLoop):
         }
         self._allowed_tool_names.discard("")
 
+        self._llm_profile: LLMProfile | None = None  # 由 _build_llm_client 填充
         self._llm: BaseLLMClient = self._build_llm_client(ctx)   # 子 Agent 独立的 LLM 客户端
         self._on_message: Callable[[dict], None] | None = on_message  # 每轮 LLM 响应/工具调用即时推送回调
 
@@ -148,23 +149,26 @@ class SubAgentLoop(BasePrivateChatAgentLoop):
         """用 SubRuntimeContext 构建独立的 LLM 客户端。
 
         优先使用子 Agent profile 中的 LLM 配置，缺失时兜底到父 Agent。
+        同时将构造的 LLMProfile 存储到 self._llm_profile 供 ToolContext 使用。
         """
         from system.context import get_runtime_context
 
         parent_ctx = get_runtime_context()
         _defaults = LLMProfile()
+        profile = LLMProfile(
+            base_url=ctx.base_url,
+            model=ctx.model,
+            api_key=ctx.api_key or "",
+            temperature=ctx.temperature,
+            max_output_tokens=ctx.max_output_tokens or _defaults.max_output_tokens,
+            max_context_tokens=ctx.max_context_tokens or _defaults.max_context_tokens,
+            llm_client_name=ctx.client_type,
+        )
+        self._llm_profile = profile
         return create_llm_client(
             ctx.client_type,
             parent_ctx,
-            profile=LLMProfile(
-                base_url=ctx.base_url,
-                model=ctx.model,
-                api_key=ctx.api_key or "",
-                temperature=ctx.temperature,
-                max_output_tokens=ctx.max_output_tokens or _defaults.max_output_tokens,
-                max_context_tokens=ctx.max_context_tokens or _defaults.max_context_tokens,
-                llm_client_name=ctx.client_type,
-            ),
+            profile=profile,
         )
 
     # ── 基类抽象方法实现 ─────────────────────────────────────────────
@@ -719,7 +723,7 @@ class SubAgentLoop(BasePrivateChatAgentLoop):
                 timeout = 0
 
             # 通过 registry.async_dispatch 执行，正确传递 ToolContext
-            tool_ctx = ToolContext(loop=self, session_id=self.session_id)
+            tool_ctx = ToolContext(loop=self, session_id=self.session_id, character_name=self._name, llm_profile=self._llm_profile)
             coro = tool_registry.async_dispatch(tc.name, args, context=tool_ctx)
 
             invocation_start = _time_module.monotonic()

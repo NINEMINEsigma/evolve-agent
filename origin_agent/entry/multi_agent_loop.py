@@ -56,12 +56,15 @@ class AgentProfile:
         tools: list[dict],
         llm_client: BaseLLMClient,
         config: AgentConfig,
+        llm_profile: LLMProfile | None = None,
     ) -> None:
         self.character_name: str = character_name
         self.system_prompts: list[str] = system_prompts
         self.tools: list[dict] = tools
         self.llm_client: BaseLLMClient = llm_client
         self.config: AgentConfig = config
+        # 当前 agent 的 LLM 配置，供 MultiAgentWorker 传递给 ToolContext
+        self.llm_profile: LLMProfile | None = llm_profile
 
 
 class MultiAgentLoop(BaseAgentLoop, IMainSessionLoop):
@@ -793,6 +796,7 @@ class MultiAgentLoop(BaseAgentLoop, IMainSessionLoop):
             loop=self,
             max_context_tokens=profile.config.max_context_tokens,
             max_output_tokens=profile.config.max_output_tokens,
+            llm_profile=profile.llm_profile,
         )
 
         try:

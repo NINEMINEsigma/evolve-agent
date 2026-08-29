@@ -128,6 +128,12 @@ class ToolContext(BaseModel):
 
     loop: BaseAgentLoop
     session_id: str = ""
+    # 当前执行 agent 的角色名 — 多 agent 模式下由 ToolExecutor/Worker 注入，
+    # 空 = 未指定（handler 回退到 loop.current_character_agent）
+    character_name: str = ""
+    # 当前 agent 的 LLM 配置 — 多 agent 模式下各 agent 配置不同，
+    # None = 未指定（modality_capability 等回退到 loop.active_llm_profile）
+    llm_profile: LLMProfile | None = None
 
     @property
     def app(self) -> Application:

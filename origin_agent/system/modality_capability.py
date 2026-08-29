@@ -186,8 +186,8 @@ def resolve_active_model_base_url(
 ) -> tuple[str, str, LLMProfile | None]:
     """解析当前活跃的 model 和 base_url，供探针和 Read 工具共用。
 
-    优先从 context.loop.active_llm_profile 获取（前端切换后的配置），
-    fallback 到 runtime_context（启动配置）。
+    从 context.llm_profile 获取当前 agent 的 LLM 配置（由 ToolExecutor 注入）。
+    若为 None 则表示使用启动配置。
 
     Returns:
         (model_name, base_url, profile_or_None)
@@ -196,7 +196,7 @@ def resolve_active_model_base_url(
     """
     profile: LLMProfile | None = None
     if context is not None:
-        profile = context.loop.active_llm_profile
+        profile = context.llm_profile
 
     if profile:
         return profile.model or "", profile.base_url or "", profile

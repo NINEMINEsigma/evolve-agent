@@ -425,7 +425,11 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
                 try:
                     _executed_tool_msgs: list[ToolResultMessage] = []
                     for tc in resp.tool_calls:
-                        tool_msg = await self._tool_executor.execute(tc, sid)
+                        tool_msg = await self._tool_executor.execute(
+                            tc, sid,
+                            character_name=self.current_character_agent,
+                            llm_profile=self.active_llm_profile,
+                        )
                         messages.append(tool_msg)
                         self._history.add_message(tool_msg)
                         self.save_history(sid)
@@ -504,7 +508,7 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
         self, sid: str, messages: list[BaseMessage],
     ) -> list[BaseMessage]:
         """预检多模态块：委托给 multimodal.preprocess_multimodal_blocks 公共函数。"""
-        context = ToolContext(loop=self, session_id=sid)
+        context = ToolContext(loop=self, session_id=sid, character_name=self.current_character_agent, llm_profile=self.active_llm_profile)
         return await preprocess_multimodal_blocks(messages, context, self.save_history)
 
     # ========================================================================

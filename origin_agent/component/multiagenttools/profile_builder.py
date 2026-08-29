@@ -193,12 +193,15 @@ def build_agent_profiles(
 
         # ── 3. 构造 AgentProfile ──
         system_prompts = persona_prompts + [multi_agent_common_prompt]
+        # 主 agent 用 main_profile；子 agent 从 AgentConfig 转换
+        agent_llm_profile = main_profile if name == main_agent_name else agent_config_to_llm_profile(config)
         agent_profiles[name] = AgentProfile(
             character_name=name,
             system_prompts=system_prompts,
             tools=[],  # 由调用方在创建 MultiAgentLoop 前统一设置
             llm_client=llm_client,
             config=config,
+            llm_profile=agent_llm_profile,
         )
 
     return agent_profiles

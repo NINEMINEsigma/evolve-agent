@@ -15,7 +15,7 @@ import time
 from datetime import datetime
 from typing import Any, Awaitable, Callable, TYPE_CHECKING
 
-from entity.puretype import Role, ToolCallMeta, ToolCallRequest
+from entity.puretype import Role, ToolCallMeta, ToolCallRequest, LLMProfile
 from entity.gentype import RefWrapper
 from entity.messages import ToolResultMessage
 from entry.base_agent_loop import BaseAgentLoop, ToolContext, IMainSessionLoop
@@ -128,6 +128,7 @@ class ToolExecutor:
         session_id: str,
         *,
         character_name: str | None = None,
+        llm_profile: LLMProfile | None = None,
     ) -> ToolResultMessage:
         """执行单个工具调用，返回 ToolResultMessage。
 
@@ -137,6 +138,8 @@ class ToolExecutor:
             character_name: 发起此工具调用的角色名；
                 MultiAgent 模式下由 worker 传入对应 Agent 名称，
                 默认回退到 loop.current_character_agent。
+            llm_profile: 当前 agent 的 LLM 配置；多 agent 模式下由 worker 传入，
+                None 时回退到 loop.active_llm_profile。
         """
         from entity.constant import LOG_PREVIEW_CHARS, TOOL_RESULT_LOG_ARGUMENT_CHARS
         from component.approval import execute_with_approval, ask_agent_reason as _ask_agent_reason
@@ -319,7 +322,12 @@ class ToolExecutor:
                     end_time_offset_ms = int((time.monotonic() - start_mono) * 1000)
                 else:
                     try:
-                        ctx = ToolContext(loop=self._loop.loop, session_id=session_id)
+                        ctx = ToolContext(
+                            loop=self._loop.loop,
+                            session_id=session_id,
+                            character_name=char_name,
+                            llm_profile=llm_profile,
+                        )
                         try:
                             result = await self._await_or_cancel(
                                 tool_registry.async_dispatch(

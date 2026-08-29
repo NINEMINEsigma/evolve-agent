@@ -184,10 +184,11 @@ def _load_all_endpoints() -> None:
 # ── 会话级查询与迁移 ────────────────────────────────────────
 
 
-def list_session_endpoints(session_id: str) -> list[dict[str, Any]]:
+def list_session_endpoints(session_id: str, agent_name: str | None = None) -> list[dict[str, Any]]:
     """返回指定会话的所有动态端点（序列化列表，供 API 层消费）。
 
     返回 ``[{name, url, absolute_url, agent_name, created_at}]``，url 由会话与角色派生。
+    ``agent_name`` 非空时仅返回该 agent 的端点；为 None 时返回全部（向后兼容）。
     线程安全，持锁读取后立即释放。
     """
     from system.context import get_runtime_context
@@ -203,6 +204,7 @@ def list_session_endpoints(session_id: str) -> list[dict[str, Any]]:
             }
             for info in _dynamic_endpoints.values()
             if info.session_id == session_id
+            and (agent_name is None or info.agent_name == agent_name)
         ]
 
 
@@ -319,12 +321,13 @@ async def _handle_register_dynamic_endpoint(
     name: str = str(args.get("name", "")).strip()
 
     # 从 ToolContext 获取当前 agent 角色名
+    # 从 ToolContext 获取当前 agent 角色名（由 ToolExecutor 注入）
     agent_name: str = ""
     if context is not None:
         try:
-            agent_name = context.loop.current_character_agent
+            agent_name = context.character_name
         except Exception:
-            logger.warning("Failed to get current_character_agent from context", exc_info=True)
+            logger.warning("Failed to get agent name from context", exc_info=True)
 
     if not session_id:
         return tool_error("'_session_id' is required (injected by tool executor)")
@@ -428,15 +431,23 @@ async def _handle_unregister_dynamic_endpoint(
 
 async def _handle_list_dynamic_endpoints(
     args: dict[str, Any],
-    context: ToolContext | None = None,  # noqa: ARG001 — 签名与 registry dispatch 一致
+    context: ToolContext | None = None,
 ) -> dict:
-    """列出当前会话的所有动态端点。"""
+    """列出当前会话中属于当前 agent 的动态端点。"""
     session_id: str = str(args.get("_session_id", ""))
 
     if not session_id:
         return tool_error("'_session_id' is required (injected by tool executor)")
 
-    endpoints = list_session_endpoints(session_id)
+    # 从 ToolContext 获取当前 agent 角色名（由 ToolExecutor 注入）
+    character_name: str = ""
+    if context is not None:
+        try:
+            character_name = context.character_name
+        except Exception:
+            logger.warning("Failed to get agent name from context", exc_info=True)
+
+    endpoints = list_session_endpoints(session_id, agent_name=character_name or None)
 
     return tool_result(success=True, count=len(endpoints), endpoints=endpoints)
 
@@ -606,13 +617,14 @@ registry.register(
     name="list_dynamic_endpoints",
     toolset="dynamic",
     schema={
-        # 列出当前会话的所有动态端点。
+        # 列出当前 agent 自己注册的动态端点（按 agent 过滤，看不到其他 agent 的端点）。
         #
         # ## 前置条件
         # 无。
         #
         # ## 调用效果
-        # 返回当前会话中所有已注册的动态端点，包括 endpoint_id、name、url 等信息。
+        # 返回当前 agent 自己注册的所有动态端点，包括 name、url 等信息。
+        # 在多 agent 模式下，只能看到自己注册的端点，看不到其他 agent 的端点。
         #
         # ## 返回
         # ```json
@@ -620,18 +632,19 @@ registry.register(
         # ```
         #
         # ## 何时使用
-        # - 查看当前有哪些动态端点。
+        # - 查看自己当前有哪些动态端点。
         # - 获取 endpoint_id 以便取消注册。
         #
         # ## 副作用/注意
         # - 纯查询，不会修改端点状态。
-        "description": """List all registered dynamic endpoints for the current session.
+        # - 只返回当前 agent 自己注册的端点，不含其他 agent 的端点。
+        "description": """List dynamic endpoints registered by the current agent (not all agents' endpoints).
 
 ## Prerequisites
 None.
 
 ## Effect
-Returns metadata for all dynamic endpoints in the current session, including endpoint_id, name, url, agent_name, and created_at.
+Returns metadata for all dynamic endpoints registered by the current agent, including endpoint_id, name, url, agent_name, and created_at. In multi-agent mode, only the current agent's own endpoints are returned; other agents' endpoints are not visible.
 
 ## Returns
 ```json
@@ -639,11 +652,12 @@ Returns metadata for all dynamic endpoints in the current session, including end
 ```
 
 ## When to Use
-- Check what dynamic endpoints are currently registered.
+- Check what dynamic endpoints you have registered.
 - Obtain endpoint_id values for unregister_dynamic_endpoint.
 
 ## Side Effects / Notes
-- Read-only query; does not modify endpoint state.""",
+- Read-only query; does not modify endpoint state.
+- Only returns the current agent's own endpoints, not those of other agents.""",
         "parameters": {
             "type": "object",
             "properties": {},
