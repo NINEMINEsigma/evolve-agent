@@ -303,6 +303,19 @@ class ToolRegistry:
         entry: ToolEntry | None = self.get_entry(name)
         return entry.danger_level if entry else ToolDangerLevel.safe
 
+    def is_tool_available(self, name: str) -> bool:
+        """返回单个工具的即时可用性。
+
+        复用 ``_check_fn_cached`` 的 30 秒 TTL 缓存。
+        未注册返回 ``False``；无 ``check_fn`` 返回 ``True``。
+        """
+        entry: ToolEntry | None = self.get_entry(name)
+        if entry is None:
+            return False
+        if entry.check_fn is None:
+            return True
+        return _check_fn_cached(entry.check_fn)
+
     def get_tool_to_toolset_map(self) -> dict[str, str]:
         """返回 ``{tool_name: toolset_name}`` 映射。"""
         return {entry.name: entry.toolset for entry in self._snapshot_entries()}

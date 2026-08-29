@@ -39,7 +39,7 @@ from entry.tool_executor import _interrupted_result
 
 logger = logging.getLogger(__name__)
 
-# 由 SubAgentLoop 在每次工具执行前设置，供沙箱隔离（list_tools）及工具 handler 使用。
+# 由 SubAgentLoop 在每次工具执行前设置，供沙箱隔离（ShowTool）及工具 handler 使用。
 # 类型标注为 Any 以避免循环导入；实际类型为 subagent.loop.SubAgentLoop。
 current_subagent_loop: ContextVar[Any] = ContextVar("current_subagent_loop")
 

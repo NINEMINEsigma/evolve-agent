@@ -54,7 +54,7 @@ component/
 | `ask_question.py` | `Ask` | 向前端提问 |
 | `progress_tools.py` | `update_task_progress`, `clear_task_progress` | 任务进度 |
 | `clipboard_display_tools.py` | `update_clipboard_display`, `clear_clipboard_display` | 剪贴板展示 |
-| `list_tools.py` | `list_tools` | 列出工具 |
+| `show_tool.py` | `ShowTool` | 查看工具/工具集元数据 |
 | `list_uploads.py` | `list_uploads` | 列出上传文件 |
 | `compress_history.py` | `compress_history` | 会话历史压缩 |
 | `session_search.py` | `session_search` | 会话内容搜索 |
