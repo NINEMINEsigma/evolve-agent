@@ -110,6 +110,7 @@ export interface ConfirmRequest {
   tool?: string;
   emoji?: string;
   danger_level?: string;
+  args?: Record<string, unknown>;   // CONFIRM_REQUEST：完整工具参数 dict（JsonView 渲染用）
 }
 
 export interface AskRequest {

@@ -1,4 +1,6 @@
 import { useEffect, useState } from "react";
+import JsonView from "react18-json-view";
+import "react18-json-view/src/style.css";
 import { AskRequest, ConfirmRequest } from "../types";
 import { getToolTitle } from "../utils/toolLabels";
 import MarkdownRenderer from "./primitives/MarkdownRenderer";
@@ -49,6 +51,12 @@ export default function InputMorph({
       ? `❓ ${item.ask.question}`
       : `${item.confirm.emoji ?? "⚡"} ${getToolTitle(item.confirm.tool)}`;
 
+  // confirm 参数：剔除 reason 后供 JsonView 渲染（reason 已在独立行展示，避免重复）
+  const confirmArgs = item.kind === "confirm"
+    ? Object.fromEntries(Object.entries(item.confirm.args ?? {}).filter(([k]) => k !== "reason"))
+    : {};
+  const hasConfirmArgs = Object.keys(confirmArgs).length > 0;
+
   return (
     <div className="input-morph">
       <div className="input-morph-header">
@@ -97,11 +105,16 @@ export default function InputMorph({
           </>
         ) : (
           <>
-            <pre className="input-morph-confirm-cmd">
-              {Array.isArray(item.confirm.command)
-                ? item.confirm.command.join(" ")
-                : (item.confirm.command ?? item.confirm.content)}
-            </pre>
+            {hasConfirmArgs && (
+              <div className="tool-json-view">
+                <JsonView
+                  src={confirmArgs}
+                  collapsed={false}
+                  displaySize
+                  collapseStringsAfterLength={99999}
+                />
+              </div>
+            )}
             {item.confirm.reason && (
               <div className="input-morph-confirm-reason">原因: {item.confirm.reason}</div>
             )}

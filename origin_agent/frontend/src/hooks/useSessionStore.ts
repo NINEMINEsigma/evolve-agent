@@ -877,6 +877,7 @@ export function useSessionStore(callbacks: SessionStoreCallbacks = {}): SessionS
           tool: msg.tool ?? undefined,
           emoji: msg.emoji,
           danger_level: msg.danger_level,
+          args: (msg.args as Record<string, unknown>) ?? {},
         };
         // 入队去重：同一 request_id 重复推送时不重复添加
         setPendingConfirms((prev) =>

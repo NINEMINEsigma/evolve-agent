@@ -109,18 +109,6 @@
   font-weight: 600;
 }
 
-.input-morph-confirm-cmd {
-  margin: 0;
-  background: var(--bg-tertiary);
-  padding: 8px 12px;
-  border-radius: var(--radius-sm);
-  font-family: "SF Mono", "Fira Code", monospace;
-  font-size: 13px;
-  white-space: pre-wrap;
-  word-break: break-all;
-  color: var(--code-amber);
-}
-
 .input-morph-confirm-reason {
   font-size: 13px;
   color: var(--text-secondary);
