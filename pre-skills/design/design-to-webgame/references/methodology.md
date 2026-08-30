@@ -194,7 +194,7 @@ Node.js 可用？
 ## 阶段六：交付与迭代
 
 **版本管理**（手动管理，不依赖外部服务）：
-- 在 `ws:output/` 下按版本号组织目录（如 `ws:output/game-v1.0/`、`ws:output/game-v1.1/`）
+- 在 `output/` 下按版本号组织目录（如 `output/game-v1.0/`、`output/game-v1.1/`）
 - 每个版本保留完整构建产物
 - 需要备份时用 `Compress` 工具打包压缩
 - 交付说明中注明版本号和变更内容

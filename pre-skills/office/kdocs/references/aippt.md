@@ -61,7 +61,6 @@ AI PPT 仅包含一个通用接口 `aippt.execute`，通过 `task_type` 参数�
 - 最后的 `*.done` 事件携带最终生成结果：从 `upload_cloud.done` 取 `link_url`
 
 
-
 #### 操作约束
 
 - **前置检查**：首次调用必须明确选择 task_type，并按该 skill 的交互事件继续恢复调用

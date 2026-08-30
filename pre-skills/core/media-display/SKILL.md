@@ -20,16 +20,16 @@ All files under `ws:` are accessible via HTTP routes:
 |---|---|---|
 | `/files/ws/{path}` | Inline display (browser renders content) | Images, audio, HTML pages |
 
-**Mapping rule**: `ws:output/img.png` → `/files/ws/output/img.png`
+**Mapping rule**: `output/img.png` → `/files/ws/output/img.png`
 
 The URL format is `/files/{namespace}/{file_path}` where:
 - `namespace` is the logical namespace **without** the colon (e.g., `ws` not `ws:`)
 - `file_path` is the path within that namespace
 
 **Example conversions**:
-- `ws:living-organism/index.html` → `/files/ws/living-organism/index.html`
-- `ws:output/diagram.png` → `/files/ws/output/diagram.png`
-- `ws:uploads/speech.mp3` → `/files/ws/uploads/speech.mp3`
+- `living-organism/index.html` → `/files/ws/living-organism/index.html`
+- `output/diagram.png` → `/files/ws/output/diagram.png`
+- `uploads/speech.mp3` → `/files/ws/uploads/speech.mp3`
 
 ## Images
 

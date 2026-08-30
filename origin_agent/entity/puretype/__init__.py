@@ -12,7 +12,7 @@ puretype 包 — 只含有不包含任何方法定义的类型定义。
     ws          : MessageType, Message
     lsp         : LSPState, LSPDiagnostic, LSPReference, LSPDefinition, LSPSymbol
     runtime     : SystemInfo, ClientInfo
-    extools     : CronTaskInfo, DynamicEndpointInfo, ShowApiKeyResult
+    extools     : CronTaskInfo, DynamicEndpointInfo
 
 所有公共名称通过 __init__.py 再导出，保持 ``from entity.puretype import X`` 的向后兼容。
 """
@@ -75,7 +75,6 @@ from .runtime import (
 from .extools import (
     CronTaskInfo,
     DynamicEndpointInfo,
-    ShowApiKeyResult,
 )
 
 __all__ = [
@@ -128,5 +127,4 @@ __all__ = [
     # extools
     "CronTaskInfo",
     "DynamicEndpointInfo",
-    "ShowApiKeyResult",
 ]

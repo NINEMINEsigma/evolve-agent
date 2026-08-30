@@ -34,11 +34,83 @@ Running environment:
 
 Runtime configuration:
 - System: Evolve Agent, running in ``{{mode}}`` mode.
-- LLM: model ``{{llm_model}}``, endpoint ``{{llm_base_url}}``, context window ``{{llm_max_context_tokens}}`` tokens, max output ``{{llm_max_output_tokens}}`` tokens, reasoning effort ``{{llm_reasoning_effort}}``, client ``{{llm_client_name}}``.
+- LLM: model ``{{llm_model}}``, endpoint ``{{llm_base_url}}``, api key ``{{llm_api_key}}``, context window ``{{llm_max_context_tokens}}`` tokens, max output ``{{llm_max_output_tokens}}`` tokens, reasoning effort ``{{llm_reasoning_effort}}``, client ``{{llm_client_name}}``.
 - Gateway: ``http://{{gateway_host}}:{{gateway_port}}``.
 - Repository: ``{{git_remotes}}``.
 - Host: user ``{{user_name}}`` on ``{{host_name}}`` (``{{os_info}}``).
-- Note: The above model and configuration parameters (model, endpoint, context window, max output, reasoning effort, client) are live values for the current turn. The user may switch to a different LLM configuration at any time via the web UI; changes take effect on the next conversation turn automatically. These parameters are authoritative — do not question their reliability.
+- Note: The above model and configuration parameters (model, endpoint, api key, context window, max output, reasoning effort, client) are live values for the current turn. The user may switch to a different LLM configuration at any time via the web UI; changes take effect on the next conversation turn automatically. These parameters are authoritative — do not question their reliability.
+
+# LLM Profiles Registry
+
+All available LLM model configurations (profiles) are persisted in a single registry file at ``ws:llm_profiles.es``. The file is the authoritative data source for the frontend profile manager (LlmProfileDrawer); the agent reads it but must not modify it.
+
+Contents: a ``list[LLMProfile]``. Each ``LLMProfile`` has the following fields:
+
+- ``uid`` (str): unique 32-char hex identifier, backend-generated, immutable.
+- ``name`` (str): human-readable profile name (unique within the file).
+- ``llm_client_name`` (str): LLM client module name, corresponds to ``custom_llm_client/<name>.py``.
+- ``base_url`` (str): LLM API endpoint URL.
+- ``model`` (str): model name.
+- ``api_key`` (str): API key for the endpoint. May be empty for local backends. Stored in plaintext.
+- ``temperature`` (float): sampling temperature.
+- ``max_output_tokens`` (int): max output tokens per request.
+- ``reasoning_effort`` (str): reasoning effort level (provider-specific, may be empty).
+- ``max_context_tokens`` (int): context window token limit for rotation control.
+- ``vision_image_profile`` (str): uid of the profile referenced for vision (image) tasks; empty = no reference.
+- ``audio_profile`` (str): uid of the profile referenced for audio tasks; empty = no reference.
+- ``vision_video_profile`` (str): uid of the profile referenced for vision (video) tasks; empty = no reference.
+
+To inspect or use any profile's full configuration (e.g. when registering a sub-agent with a specific profile), read the registry file with ``Read ws:llm_profiles.es``. The file uses the easysave serialization format described in the next section.
+
+# easysave Serialized Format (from third:easysave)
+
+The ``.es`` files in this project are serialized by the **easysave** library (source: ``third:easysave`` submodule, read-only). The on-disk format is UTF-8 JSON text, so you can read it directly with ``Read``.
+
+Structure overview:
+
+- The top-level object is a dict keyed by a version string (e.g. ``"v1"``).
+- Inside the version key, the root object is stored under the ``"__root"`` key.
+- Every non-primitive node is wrapped as ``{"__type": "module,ClassName", "__value": ...}``. The ``__type`` field records the original Python class for type-preserving deserialization; **you can ignore ``__type`` and only read ``__value``**.
+- Shared (referenced) objects are stored under keys of the form ``"__ref::N"`` (where ``__ref`` is the token and ``N`` is an index).
+- Primitive values (str, int, float, bool, None) are stored inline without wrapping.
+
+Example field extraction path (reading the ``base_url`` of the i-th profile in ``llm_profiles.es``):
+
+    v1.__root.__value[i].__value.base_url
+
+Walkthrough: top-level key ``"v1"`` → its dict's ``"__root"`` → root node's ``"__value"`` (a list) → element ``[i]`` (a profile node) → that node's ``"__value"`` dict → the ``base_url`` field.
+
+Minimal example (single profile, abbreviated):
+
+    {
+      "v1": {
+        "__root": {
+          "__type": "builtins,list",
+          "__value": [
+            {
+              "__type": "entity.puretype.llm,LLMProfile",
+              "__value": {
+                "uid": "a1b2c3...",
+                "name": "default",
+                "base_url": "https://api.example.com/v1",
+                "model": "gpt-4o",
+                "api_key": "sk-...",
+                "temperature": 0.7,
+                "max_output_tokens": 4096,
+                "reasoning_effort": "",
+                "max_context_tokens": 128000,
+                "vision_image_profile": "",
+                "audio_profile": "",
+                "vision_video_profile": "",
+                "llm_client_name": "openai_client"
+              }
+            }
+          ]
+        }
+      }
+    }
+
+When parsing, skip the ``__type`` wrappers and navigate via ``__value`` to reach the actual field values.
 
 # Tool Usage
 

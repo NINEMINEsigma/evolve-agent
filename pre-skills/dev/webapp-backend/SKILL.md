@@ -2,7 +2,6 @@
 name: webapp-backend
 description: 为前端 Web 项目嫁接后端——API、数据库、认证（tRPC + Drizzle ORM + Hono + MySQL + OAuth 2.0 端到端类型安全）。当用户需要给 Web 应用加后端、REST/API、数据库、登录认证、用户系统、持久化存储时使用。源自通用智能体工具包（Universal Agent Toolkit）。
 category: dev
-version: 1.0.0
 tags:
   - backend
   - api

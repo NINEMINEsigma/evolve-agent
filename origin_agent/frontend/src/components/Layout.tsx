@@ -9,7 +9,6 @@ import SubagentPanel from "./SubagentPanel";
 import CronCountdown from "./CronCountdown";
 import SubagentCountdown from "./SubagentCountdown";
 import Lightbox from "./Lightbox";
-import SecretBanner from "./SecretBanner";
 import LlmProfileDrawer from "./LlmProfileDrawer";
 import SessionLockOverlay from "./SessionLockOverlay";
 import type { WebSocketState } from "../hooks/useWebSocket";
@@ -261,11 +260,6 @@ export default function Layout({ ws, onContextMenu, contextMenuOpen }: LayoutPro
               clipboardDisplays={ws.clipboardDisplays}
               collapsed={clipboardCollapsed}
               onToggleCollapse={() => setClipboardCollapsed((v) => !v)}
-            />
-
-            <SecretBanner
-              banner={ws.secretBanner}
-              onDismiss={() => ws.setSecretBanner(null)}
             />
 
             <ChatArea

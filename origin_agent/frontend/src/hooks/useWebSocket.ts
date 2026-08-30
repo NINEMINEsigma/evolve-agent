@@ -432,8 +432,6 @@ export function useWebSocket() {
     setTaskProgress: session.setTaskProgress,
     clipboardDisplays: session.clipboardDisplays,
     setClipboardDisplays: session.setClipboardDisplays,
-    secretBanner: session.secretBanner,
-    setSecretBanner: session.setSecretBanner,
     dynamicEndpoints: session.dynamicEndpoints,
     subagentSessions,
     llmMaxContextTokens: llmProfiles.activeProfile?.max_context_tokens ?? 0,

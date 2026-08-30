@@ -2,7 +2,6 @@
 name: development-data-worldbank
 description: 世界银行公开发展数据——覆盖各国 29,000+ 指标（GDP、人口、贫困、失业、贸易、通胀、教育、卫生、环境），1960 年至今长时序。当用户需要发展指标、长历史序列、跨国对比数据时使用。源自通用智能体工具包（Universal Agent Toolkit）。
 category: data
-version: 1.0.0
 tags:
   - worldbank
   - development

@@ -1,13 +1,9 @@
 ---
 name: skill-creator
 description: 创建新技能、修改和改进已有技能、测量技能表现的完整工作流。当用户想从零创建技能、编辑或优化已有技能、运行技能测试评估、用方差分析对比基准性能、或优化技能描述以提升触发准确率时使用。Evolve Agent 系统专用版本（已完成 Windows 平台与工具链本地化）。
-version: 2.0.0
-author: Eve (Evolve Agent)
 category: workflow
 tags: [skill, creator, eval, benchmark, workflow]
 ---
-
-# Skill Creator（Evolve Agent 本地化版）
 
 一个用于创建新技能并迭代改进它们的技能。
 
@@ -43,12 +39,12 @@ tags: [skill, creator, eval, benchmark, workflow]
 | 测试执行 | `claude -p` 子进程 | `run_subagent`（子代理加载技能）或本会话 `RecallSkill` 后测试 |
 | 展示 | `webbrowser.open()` 本地服务器 | `eval-viewer/generate_review.py --static` 生成 HTML → `/uploads/` + iframe 嵌入聊天 |
 | 反馈 | 浏览器下载 `feedback.json` | 用户在聊天里直接反馈，或用 `register_dynamic_endpoint` 收集 |
-| 后台服务 | `nohup ... &` / `kill $PID` | `start_background_service` / `stop_background_service` |
+| 后台服务 | `nohup ... &` / `kill $PID` | `StartBackgroundService` / `StopBackgroundService` |
 | 复制快照 | `cp -r` | `Copy` |
-| 进度跟踪 | TodoList | `set_task_progress` |
-| 外部调研 | MCP | `web_search` / `web_fetch` / 子代理 |
+| 进度跟踪 | TodoList | `SetTaskProgress` |
+| 外部调研 | MCP | `WebSearch` / `WebFetch` / 子代理 |
 | 触发机制 | Claude `available_skills` | `RecallSkill` 的 name+description 常驻，描述匹配决定是否 `RecallSkill` |
-| 脚本执行 | `python scripts/x.py` 直接运行 | `run_command` 全路径调用；脚本路径以 `RecallSkill` 返回的 `skill_dir` 为准（见「运行与评估测试用例」开头） |
+| 脚本执行 | `python scripts/x.py` 直接运行 | `RunCommand` 全路径调用；脚本路径以 `RecallSkill` 返回的 `skill_dir` 为准（见「运行与评估测试用例」开头） |
 | 子代理 | 一次性任务子进程 | 需先 `register_subagent` 注册 profile；`run_subagent` 返回 `session_id`，结果异步注入父会话、无时序字段 |
 
 **脚本可用性：**
@@ -83,7 +79,7 @@ tags: [skill, creator, eval, benchmark, workflow]
 
 主动询问边界情况、输入/输出格式、示例文件、成功标准、依赖关系。等这部分敲定后再写测试提示词。
 
-调研可用 `web_search` / `web_fetch` 查找文档、相似技能、最佳实践；若有子代理可用，可并行调研（`run_subagent`），否则内联进行。带着充分背景来，减少用户负担。
+调研可用 `WebSearch` / `WebFetch` 查找文档、相似技能、最佳实践；若有子代理可用，可并行调研（`run_subagent`），否则内联进行。带着充分背景来，减少用户负担。
 
 ### 撰写 SKILL.md
 
@@ -196,11 +192,11 @@ Output: feat(auth): implement JWT-based authentication
 
 本节是一个连续序列——不要中途停下。
 
-工作区约定：结果放在 **`ws:evals/<skill-name>-workspace/`**（本系统专用，避免污染 skills/ 目录）。在工作区内按迭代组织（`iteration-1/`、`iteration-2/`……），每个测试用例一个目录（`eval-0/`、`eval-1/`……）。不要一次性全建好——边做边建。
+工作区约定：结果放在 **`evals/<skill-name>-workspace/`**（本系统专用，避免污染 skills/ 目录）。在工作区内按迭代组织（`iteration-1/`、`iteration-2/`……），每个测试用例一个目录（`eval-0/`、`eval-1/`……）。不要一次性全建好——边做边建。
 
 目录层级：`eval-<ID>/<配置>/run-<M>/`——配置如 `with_skill`、`without_skill`、`old_skill`；`run-<M>` 是运行编号（单次运行就用 `run-1`，多次重复运行取均值时递增）。每次运行的产物放 `run-<M>/outputs/`，`grading.json` 和 `timing.json` 直接放在 `run-<M>/` 下。聚合脚本与查看器都依赖这个层级，缺了 `run-<M>` 层会一次运行都识别不到。
 
-本技能自身的安装位置（`<SKILL_DIR>`）：本技能可能被改名、移动或放入 category 子目录，其他用户的安装位置也可能不同——**不要假设目录名是 `skill-creator`**。以 `RecallSkill` 返回的 `skill_dir` 为准：取其位于 `skills/` 下的相对部分拼成 `skills:<相对目录>` 逻辑路径（`run_command` 会自动展开 `skills:` 前缀），或直接使用返回的绝对路径。下文所有 `<SKILL_DIR>` 均指此；`agents/`、`references/`、`scripts/` 等技能内部相对路径也按 `skill_dir` 解析。
+本技能自身的安装位置（`<SKILL_DIR>`）：本技能可能被改名、移动或放入 category 子目录，其他用户的安装位置也可能不同——**不要假设目录名是 `skill-creator`**。以 `RecallSkill` 返回的 `skill_dir` 为准：取其位于 `skills/` 下的相对部分拼成 `skills:<相对目录>` 逻辑路径（`RunCommand` 会自动展开 `skills:` 前缀），或直接使用返回的绝对路径。下文所有 `<SKILL_DIR>` 均指此；`agents/`、`references/`、`scripts/` 等技能内部相对路径也按 `skill_dir` 解析。
 
 ### 第1步：在同一回合生成所有运行（带技能 AND 基线）
 
@@ -270,11 +266,11 @@ Execute this task:
 
 1. **为每次运行评分**——启动评分子代理（或内联评分），读取 `agents/grader.md`，对照输出评估每个断言。结果保存到每个运行目录（`run-<M>/`）的 `grading.json`。grading.json 的 expectations 数组必须使用 `text`、`passed`、`evidence` 字段（不是 `name`/`met`/`details` 等变体）——查看器依赖这些精确字段名。能用脚本程序化检查的断言就写脚本跑，别用肉眼——脚本更快、更可靠、可跨迭代复用。
 
-2. **聚合成基准**——用 `run_command` 调用本技能自带的聚合脚本（`<SKILL_DIR>` 见本节开头说明，`cwd` 保持默认 `ws:` 即可）：
+2. **聚合成基准**——用 `RunCommand` 调用本技能自带的聚合脚本（`<SKILL_DIR>` 见本节开头说明，`cwd` 保持默认 `ws:` 即可）：
    ```
-   run_command(
+   RunCommand(
      command=["python", "<SKILL_DIR>/scripts/aggregate_benchmark.py",
-              "ws:evals/<skill-name>-workspace/iteration-N", "--skill-name", "<name>"],
+              "evals/<skill-name>-workspace/iteration-N", "--skill-name", "<name>"],
      reason="聚合评估结果为 benchmark.json/md")
    ```
    生成 `benchmark.json` 和 `benchmark.md`，包含每个配置的 pass_rate、time、tokens，均值 ± 标准差和差值。每个 with_skill 版本放在其基线对应版本之前。若手动生成 benchmark.json，参考 `references/schemas.md` 中查看器期望的精确 schema。
@@ -283,15 +279,15 @@ Execute this task:
 
 4. **启动查看器**——本系统使用**静态模式**（无显示环境，聊天前端展示）：
    ```
-   run_command(
+   RunCommand(
      command=["python", "<SKILL_DIR>/eval-viewer/generate_review.py",
-              "ws:evals/<skill-name>-workspace/iteration-N",
+              "evals/<skill-name>-workspace/iteration-N",
               "--skill-name", "my-skill",
-              "--benchmark", "ws:evals/<skill-name>-workspace/iteration-N/benchmark.json",
-              "--static", "ws:evals/<skill-name>-workspace/iteration-N/review.html"],
+              "--benchmark", "evals/<skill-name>-workspace/iteration-N/benchmark.json",
+              "--static", "evals/<skill-name>-workspace/iteration-N/review.html"],
      reason="生成静态评估查看器 HTML")
    ```
-   迭代 2+ 再加 `--previous-workspace ws:evals/<skill-name>-workspace/iteration-<N-1>`。
+   迭代 2+ 再加 `--previous-workspace evals/<skill-name>-workspace/iteration-<N-1>`。
    生成 `review.html` 后，通过 `/uploads/` 路由嵌入聊天展示给用户：
    ```html
    <iframe src="/uploads/evals/<skill-name>-workspace/iteration-N/review.html" style="width:100%;height:600px;border:none"></iframe>
@@ -411,11 +407,11 @@ SKILL.md frontmatter 中的 description 字段是决定 Agent 是否调用技能
    - `__EVAL_DATA_PLACEHOLDER__` → eval 条目 JSON 数组（不带引号——它是 JS 变量赋值）
    - `__SKILL_NAME_PLACEHOLDER__` → 技能名
    - `__SKILL_DESCRIPTION_PLACEHOLDER__` → 技能当前描述
-3. 写入临时文件（如 `ws:output/eval_review_<skill-name>.html`），通过 `/uploads/` 嵌入聊天展示：
+3. 写入临时文件（如 `output/eval_review_<skill-name>.html`），通过 `/uploads/` 嵌入聊天展示：
    ```html
    <iframe src="/uploads/output/eval_review_<skill-name>.html" style="width:100%;height:600px;border:none"></iframe>
    ```
-4. 用户编辑查询、切换 should-trigger、增删条目，然后点击「Export Eval Set」——在聊天前端中让用户把导出的 JSON 粘贴回来，或用 `set_clipboard_display` 收集
+4. 用户编辑查询、切换 should-trigger、增删条目，然后点击「Export Eval Set」——在聊天前端中让用户把导出的 JSON 粘贴回来，或用 `SetClipboardDisplay` 收集
 
 这一步很重要——坏的评估查询导致坏的描述。
 
@@ -458,6 +454,6 @@ references/ 目录有额外文档：
   - 尽可能定量评估
 - 重复直到你和用户都满意
 
-请使用 `set_task_progress` 跟踪进度，确保不遗忘。创建 evals JSON 并运行 `eval-viewer/generate_review.py` 让人工审查测试用例。
+请使用 `SetTaskProgress` 跟踪进度，确保不遗忘。创建 evals JSON 并运行 `eval-viewer/generate_review.py` 让人工审查测试用例。
 
 祝好运！

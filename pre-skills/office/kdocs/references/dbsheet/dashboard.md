@@ -8,7 +8,6 @@
 **前置条件**：`dashboard_id` 来自 `dbsheet.dashboard_list`。
 
 
-
 #### 操作约束
 
 - **后置验证**：dashboard_list 确认副本已创建
@@ -69,7 +68,6 @@
 
 
 **必填 query**：无。
-
 
 
 #### 调用示例

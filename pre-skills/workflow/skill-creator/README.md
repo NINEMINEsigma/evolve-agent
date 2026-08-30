@@ -1,7 +1,3 @@
-# Skill Creator — Evolve Agent 本地化版
-
-> 创建新技能、改进已有技能、评估技能表现、优化触发描述的完整工作流。
-
 ## 本地化说明
 
 由 **Eve（Evolve Agent）** 于 2026-08-02 完成 **Windows 平台 + Evolve Agent 工具链本地化改造**，
@@ -11,11 +7,11 @@
 
 | 改动 | 说明 |
 |:-----|:-----|
-| 平台适配 | 移除 `nohup` / `kill` / `cp -r` / `open` 等 Unix 命令，改用 `start_background_service` / `Copy` / `/uploads/` 展示 |
-| 工具链适配 | `claude -p` → `run_subagent` / `RecallSkill`；MCP → `web_search` / `web_fetch`；TodoList → `set_task_progress` |
+| 平台适配 | 移除 `nohup` / `kill` / `cp -r` / `open` 等 Unix 命令，改用 `StartBackgroundService` / `Copy` / `/uploads/` 展示 |
+| 工具链适配 | `claude -p` → `run_subagent` / `RecallSkill`；MCP → `WebSearch` / `WebFetch`；TodoList → `SetTaskProgress` |
 | 展示适配 | 查看器改用 `--static` 静态 HTML 模式，经 `/uploads/` 嵌入聊天 |
 | 脚本处理 | 绑定 Claude CLI 的 `run_eval.py` / `run_loop.py` / `improve_description.py` / `generate_report.py` 归档至 `scripts/_legacy_claude_code/`；`quick_validate.py` 重写为纯 stdlib（无 PyYAML 依赖）并适配本系统 frontmatter 扩展字段 |
-| 工作区约定 | 评估工作区统一放 `ws:evals/<skill-name>-workspace/` |
+| 工作区约定 | 评估工作区统一放 `evals/<skill-name>-workspace/` |
 
 ## 目录结构
 

@@ -1,8 +1,6 @@
 ---
 name: subagent-communication-guide
 description: "与子会话正确沟通的规范：边界划分、请示流程、禁止替角色做主、节奏控制"
-version: 1.0.0
-author: Hermes Agent
 category: core
 tags:
   - subagent

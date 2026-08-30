@@ -13,7 +13,6 @@
 - 页码参数为 1-based（第一页为 1）
 
 
-
 **幂等性**：否 — 若返回会员不足错误（VipLevelNotEnough），可将 is_free_convert 设为 true 重试一次
 
 > 默认 `is_free_convert=false`（付费额度），若返回 `code=400100` 或错误含 `VipLevelNotEnough` 等会员不足提示，使用相同 `file_id`、`to_format`、页码范围等参数，仅将 `is_free_convert` 设为 `true` 重试一次（免费额度最多处理前 5 页）
@@ -118,7 +117,6 @@
 
 - 常见轮询间隔建议 1-2 秒
 - 当 `progress=100` 时可读取结果文件信息
-
 
 
 > `progress < 100` 时继续轮询

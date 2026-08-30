@@ -13,11 +13,11 @@ description: 将游戏设计文档（GDD）开发成可玩网页游戏的完整�
 3. **搭建架构**：根据环境预检结果选择技术栈，按 types → data → engine → scenes → state → sections 的顺序写代码。详见 [references/architecture.md](references/architecture.md)。
 4. **数值审校**：构建前做量级自洽性检查（用文档自己的经济节奏反推核心数值交叉验证）。发现矛盾时引入单一缩放系数、保留其余数值原样，并主动告知用户。详见 [references/methodology.md](references/methodology.md) 阶段四。
 5. **全流程回归**：构建通过后用浏览器按真实玩家路径逐步验证（标题→开场剧情→主玩法一轮→每个标签页→一笔完整交易→存档读档），DOM 文本与截图双重核对（**截图核对依赖视觉：先 `probe_modality_capability`；无视觉时跳过自主看截图，把截图展示给用户核对**）。完整检查清单见 [references/methodology.md](references/methodology.md) 阶段五。
-6. **交付**：手动版本管理——在 `ws:output/` 下按版本号组织目录，或用 `Compress` 打包压缩备份。单机存档用 localStorage，必须明确告知用户存档边界。交付说明中列出偏离设计的改动及理由。
+6. **交付**：手动版本管理——在 `output/` 下按版本号组织目录，或用 `Compress` 打包压缩备份。单机存档用 localStorage，必须明确告知用户存档边界。交付说明中列出偏离设计的改动及理由。
 
 ## 环境预检清单（必须在阶段零完成）
 
-在开始任何开发工作之前，用 `run_command` 执行以下检查，根据结果决定技术路线：
+在开始任何开发工作之前，用 `RunCommand` 执行以下检查，根据结果决定技术路线：
 
 ```bash
 # 1. 检查 Node.js 版本

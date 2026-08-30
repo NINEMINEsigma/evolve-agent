@@ -70,18 +70,18 @@ P' = P + s × (VP − P)
 > - `vision_capable=false` → **跳过步骤 6–7 的自主读图**，截图后直接把 `saved_to` 路径展示给用户，请用户亲自判断（重点看：墙线收束、物件落地、遮挡、剪裁），等用户反馈后再继续层 2/层 3。
 
 1. 首次使用：`browser_launch` 启动带调试端口的 Edge → `browser_connect` 接管（后续同一会话复用连接）。
-2. 打开页面：`browser_open_tab(url="file:///<HTML 绝对路径>")`。若 file:// 被拒或相对资源失效，改用本地静态服务器托管：`start_background_service(command=["python","-m","http.server","8765"], cwd="ws:output")`，再 `browser_open_tab(url="http://localhost:8765/index.html")`。
+2. 打开页面：`browser_open_tab(url="file:///<HTML 绝对路径>")`。若 file:// 被拒或相对资源失效，改用本地静态服务器托管：`StartBackgroundService(command=["python","-m","http.server","8765"], cwd="output")`，再 `browser_open_tab(url="http://localhost:8765/index.html")`。
 3. `browser_list_tabs` 取新标签页下标 `idx`。
 4. 等动画/定时器沉淀：`browser_wait(tab=idx, timeout_ms=4000)`（真实等待，非虚拟快进）。
-5. `browser_screenshot(tab=idx, full_page=true)` → 截图存到 `ws:logs/browser_screenshots/{uuid}.png`（返回 `saved_to`）。
+5. `browser_screenshot(tab=idx, full_page=true)` → 截图存到 `logs/browser_screenshots/{uuid}.png`（返回 `saved_to`）。
 6. （仅 `vision_capable=true`）`Read` 该 `saved_to` 路径（image 分支）**亲自看图**，重点看：墙线收束、物件落地、遮挡、剪裁。
-7. （仅 `vision_capable=true`）局部放大复查：`run_python` 调 [scripts/shot.py](scripts/shot.py) 对 `saved_to` 路径按相对坐标裁剪。
+7. （仅 `vision_capable=true`）局部放大复查：`RunPython` 调 [scripts/shot.py](scripts/shot.py) 对 `saved_to` 路径按相对坐标裁剪。
 
 ### 层 2：DOM 状态诊断（验证动画/状态机的终态）
 
 CSS transition 在真实浏览器里会正常播放，截图能反映真实终态。但状态机终态仍建议用注入脚本读 DOM 验证：
 
-- 把诊断 `<script>`（收集全局 error + 末尾把结果写进 `document.title`）注入 HTML 副本，写入 `ws:output`。
+- 把诊断 `<script>`（收集全局 error + 末尾把结果写进 `document.title`）注入 HTML 副本，写入 `output`。
 - `browser_open_tab` 打开 → `browser_wait(tab=idx, timeout_ms=<诊断时刻>)` → `browser_query(tab=idx, selector="title")` 读 title 文本作为回传通道。
 - 或直接 `browser_query` 用选择器定位元素，读其 text/属性验证状态。
 

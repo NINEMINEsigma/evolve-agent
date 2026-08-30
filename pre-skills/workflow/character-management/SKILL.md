@@ -1,8 +1,6 @@
 ---
 name: character-management
 description: "基于文件系统的角色管理工作流程, 用于多agent的虚拟角色扮演或执行任务时任务分发"
-version: 1.3.0
-author: Evolve-Agent
 category: workflow
 tags:
   - character
@@ -17,7 +15,7 @@ tags:
 
 ## 概述
 
-在 `ws:characters/` 目录下创建和管理角色档案的完整工作流。每个角色独立文件夹，统一使用标准文件结构。
+在 `characters/` 目录下创建和管理角色档案的完整工作流。每个角色独立文件夹，统一使用标准文件结构。
 
 本 skill 包含一套**内置模板库**（多领域子代理模板），覆盖 16 个领域、44 个专业角色，可直接用作任务执行型子代理的 profile.md。模板位于 `skills:workflow/character-management/templates/subagent-templates/`。
 
@@ -46,9 +44,9 @@ characters/
 
 | 类型 | 路径格式 | 示例 |
 |:-----|:---------|:-----|
-| 特殊 | `ws:characters/Eve/` | `ws:characters/Eve/world.md` |
-| 角色扮演型 | `ws:characters/roleplay/<角色名>/` | `ws:characters/roleplay/Noire/history.jsonl` |
-| 任务执行型 | `ws:characters/task/<角色名>/` | `ws:characters/task/王博士/profile.md` |
+| 特殊 | `characters/Eve/` | `characters/Eve/world.md` |
+| 角色扮演型 | `characters/roleplay/<角色名>/` | `characters/roleplay/Noire/history.jsonl` |
+| 任务执行型 | `characters/task/<角色名>/` | `characters/task/王博士/profile.md` |
 ```
 
 ## 内置模板库
@@ -104,19 +102,34 @@ Research Project: LiteratureReviewer → Experimentalist → Academic
 # 复制模板到角色目录
 Copy(
     source="skills:workflow/character-management/templates/subagent-templates/Frontend/01-Aesthetic.md",
-    destination="ws:characters/Aesthetic/profile.md"
+    destination="characters/Aesthetic/profile.md"
 )
 # 注册子代理
-register_subagent_from_parent(
+# 必填：name/base_url/model/api_key/max_output_tokens/max_context_tokens/client_type
+# 可选：system_prompt_paths
+# 取值参考：系统提示词 LLM 行的当前活跃配置，或 Read llm_profiles.es 中目标 profile
+RegisterSubAgent(
     name="Aesthetic",
-    system_prompt_paths=["ws:characters/Aesthetic/profile.md"]
+    base_url="<当前活跃 base_url 或 llm_profiles.es 中目标 profile 的 base_url>",
+    model="<目标 model 名称>",
+    api_key="<对应 api_key，本地端点传空字符串>",
+    max_output_tokens=<如 4096>,
+    max_context_tokens=<如 128000>,
+    client_type="<如 openai_client，对应 custom_llm_client/<name>.py>",
+    system_prompt_paths=["characters/Aesthetic/profile.md"]
 )
 ```
 
 **方式 2：作为 system_prompt 直接引用**
 ```python
-register_subagent_from_parent(
+RegisterSubAgent(
     name="FrontendArchitect",
+    base_url="<当前活跃 base_url 或 llm_profiles.es 中目标 profile 的 base_url>",
+    model="<目标 model 名称>",
+    api_key="<对应 api_key，本地端点传空字符串>",
+    max_output_tokens=<如 4096>,
+    max_context_tokens=<如 128000>,
+    client_type="<如 openai_client，对应 custom_llm_client/<name>.py>",
     system_prompt_paths=[
         "skills:workflow/character-management/templates/subagent-templates/Frontend/03-FrontendArchitect.md"
     ]
@@ -213,30 +226,39 @@ register_subagent_from_parent(
 ### 步骤 1：创建文件夹和文件
 ```python
 # 创建角色文件夹（Write 不带 content 即创建目录）
-Write(path="ws:characters/roleplay/<角色名>/")
+Write(path="characters/roleplay/<角色名>/")
 
 # 编写 profile.md
-Write(path="ws:characters/roleplay/<角色名>/profile.md", content="...")
+Write(path="characters/roleplay/<角色名>/profile.md", content="...")
 
 # （可选）编写 outfits.md
-Write(path="ws:characters/roleplay/<角色名>/outfits.md", content="...")
+Write(path="characters/roleplay/<角色名>/outfits.md", content="...")
 ```
 
 ### 步骤 2：注册 subagent
 ```python
 # 1. 注册 subagent，指向角色档案
 #    角色扮演型建议加上 world.md 作为公共知识
-register_subagent_from_parent(
+# 必填：name/base_url/model/api_key/max_output_tokens/max_context_tokens/client_type
+# 可选：system_prompt_paths
+# 取值参考：系统提示词 LLM 行的当前活跃配置，或 Read llm_profiles.es 中目标 profile
+RegisterSubAgent(
     name="<角色名>",
+    base_url="<当前活跃 base_url 或 llm_profiles.es 中目标 profile 的 base_url>",
+    model="<目标 model 名称>",
+    api_key="<对应 api_key，本地端点传空字符串>",
+    max_output_tokens=<如 4096>,
+    max_context_tokens=<如 128000>,
+    client_type="<如 openai_client，对应 custom_llm_client/<name>.py>",
     system_prompt_paths=[
-        "ws:characters/roleplay/<角色名>/profile.md",
-        "ws:characters/Eve/world.md"
+        "characters/roleplay/<角色名>/profile.md",
+        "characters/Eve/world.md"
     ]
 )
 ```
 
 ### 步骤 3：更新 README
-更新 `ws:characters/README.md`：
+更新 `characters/README.md`：
 - 目录结构中添加新角色
 - 角色列表中添加新角色条目
 
@@ -264,22 +286,22 @@ register_subagent_from_parent(
 
 | 角色 | 类型 | history.jsonl 路径 |
 |------|------|-------------------|
-| Noire | 角色扮演型 | `ws:characters/roleplay/Noire/history.jsonl` |
-| 朱羽 | 角色扮演型 | `ws:characters/roleplay/朱羽/history.jsonl` |
-| 杏 | 角色扮演型 | `ws:characters/roleplay/杏/history.jsonl` |
+| Noire | 角色扮演型 | `characters/roleplay/Noire/history.jsonl` |
+| 朱羽 | 角色扮演型 | `characters/roleplay/朱羽/history.jsonl` |
+| 杏 | 角色扮演型 | `characters/roleplay/杏/history.jsonl` |
 
-所有角色扮演型角色的设定和历史都存储在 `ws:characters/roleplay/` 目录下各自的文件夹中，**不是** `ws:subagents/`。
+所有角色扮演型角色的设定和历史都存储在 `characters/roleplay/` 目录下各自的文件夹中，**不是** `subagents/`。
 
 ### 启动流程
 
 ```python
 # 1. 先确认 history.jsonl 存在
-file_exists(path="ws:characters/roleplay/角色名/history.jsonl")
+file_exists(path="characters/roleplay/角色名/history.jsonl")
 
 # 2. 启动子代理，传入 history_path
 run_subagent(
     name="角色名",
-    history_path="ws:characters/roleplay/角色名/history.jsonl",
+    history_path="characters/roleplay/角色名/history.jsonl",
     initial_prompt="...",
     user_name="Eve",
     message_type="direct"
@@ -291,17 +313,17 @@ run_subagent(
 ```python
 # 1. 停止子代理，获取 session_path
 stop_result = stop_subagent(session_id="...")
-# 返回: {"session_path": "ws:subagents/角色名/xxx.jsonl"}
+# 返回: {"session_path": "subagents/角色名/xxx.jsonl"}
 
 # 2. 将 session_path 复制到角色的 history.jsonl（覆盖）
 Copy(
-    source="ws:subagents/角色名/xxx.jsonl",
-    destination="ws:characters/roleplay/角色名/history.jsonl"
+    source="subagents/角色名/xxx.jsonl",
+    destination="characters/roleplay/角色名/history.jsonl"
 )
 ```
 
 ### 铁律
-- **每次停止角色扮演型子代理后，必须将历史保存到 `ws:characters/roleplay/角色名/history.jsonl`**，不能遗漏
+- **每次停止角色扮演型子代理后，必须将历史保存到 `characters/roleplay/角色名/history.jsonl`**，不能遗漏
 - 任务执行型子代理通常不需要 history.jsonl，除非需要跨会话上下文
 
 ## 文件规范总结

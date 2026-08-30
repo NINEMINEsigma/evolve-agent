@@ -75,7 +75,6 @@
 - `ap`：发起 AP 导出流程
 
 
-
 #### 操作约束
 
 - **前置检查**：先通过 `get_file_info` / `search_files` / `list_files` 获取 `link_id`，或从文档 URL 路径末尾提取
@@ -140,7 +139,6 @@
 #### 功能说明
 
 将在线文字导出为 `png` 或 `jpeg` 图片。该接口走图片导出链路，入参必须使用 `link_id`，不能使用 `file_id`。
-
 
 
 #### 操作约束
@@ -209,7 +207,6 @@
 - `format=ap`：查询 AP 导出任务
 
 
-
 #### 调用示例
 
 `format=pdf` 查询 PDF 导出结果：
@@ -267,7 +264,6 @@
 - 高亮色: modifyParagraphHighlight / modifyRangeHighlight
 
 各命令完整参数与枚举表见 wps 经验文档。
-
 
 
 > param 结构随 command 变化，不传则为 {}

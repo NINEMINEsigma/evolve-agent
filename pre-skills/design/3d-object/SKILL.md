@@ -1,8 +1,6 @@
 ---
 name: 3d-object
 description: "Build a 3D object as a self-contained HTML file using three.js. The user can inspect it from every angle and download as OBJ+MTL or GLB."
-version: 1.0.0
-author: Evolve-Agent
 category: design
 tags:
   - 3d

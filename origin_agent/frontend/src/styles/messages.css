@@ -1070,8 +1070,8 @@
   }
 }
 
-/* ── Secret banner（密钥展示，fixed 顶部居中，自动消失）── */
-.secret-banner {
+/* ── Copy banner（一次性可复制横幅基元，fixed 顶部居中，自动消失）── */
+.copy-banner {
   position: fixed;
   top: 64px;
   left: 50%;
@@ -1087,20 +1087,20 @@
   font-size: 13px;
 }
 
-.secret-banner-header {
+.copy-banner-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
   margin-bottom: 6px;
 }
 
-.secret-banner-label {
+.copy-banner-label {
   font-size: 12px;
   font-weight: 600;
   color: var(--text-primary);
 }
 
-.secret-banner-close {
+.copy-banner-close {
   font-size: 16px;
   line-height: 1;
   padding: 2px 6px;
@@ -1111,12 +1111,12 @@
   border-radius: var(--radius-xs);
 }
 
-.secret-banner-close:hover {
+.copy-banner-close:hover {
   color: var(--text-primary);
   background: var(--bg-hover);
 }
 
-.secret-banner-content {
+.copy-banner-content {
   margin: 0 0 8px;
   padding: 8px 10px;
   background: var(--bg-tertiary);
@@ -1131,7 +1131,7 @@
   user-select: all;
 }
 
-.secret-banner-copy {
+.copy-banner-copy {
   font-size: 12px;
   padding: 4px 14px;
   border: 1px solid var(--border);
@@ -1142,13 +1142,13 @@
   transition: background var(--duration-fast), color var(--duration-fast), border-color var(--duration-fast);
 }
 
-.secret-banner-copy:hover {
+.copy-banner-copy:hover {
   background: var(--accent);
   color: var(--text-white);
   border-color: var(--accent);
 }
 
-.secret-banner-progress {
+.copy-banner-progress {
   position: absolute;
   bottom: 0;
   left: 0;

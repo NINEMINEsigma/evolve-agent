@@ -181,7 +181,7 @@ def build_agent_profiles(
             if config is None:
                 raise ValueError(
                     f"Subagent profile '{name}' not found (session={session_id}). "
-                    "Register it first using register_subagent_from_parent."
+                    "Register it first using RegisterSubAgent."
                 )
             llm_client = llm_client_factory(name, config)
 

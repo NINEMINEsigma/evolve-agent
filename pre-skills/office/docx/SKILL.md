@@ -9,15 +9,6 @@ tags:
   - office
 ---
 
-> **Evolve Agent 本地化注记**
->
-> 本技能由 Eve（Evolve Agent）本地化接入。原版面向 Claude Code，本系统适配如下：
->
-> - **平台**：Windows。文中 `python3` 一律用 `python`；Shell 命令通过 `run_command` 执行
-> - **依赖**：所需工具（如 `pandoc`、`docx-js`、python-docx 等）若缺失，用 `install_package` 安装
-> - **展示**：产出的 .docx 通过 `/downloads/` 路由提供下载给用户
-> - **方法论补充**：通用智能体工具包（Universal Agent Toolkit）的工作流/质量标准/交付检查清单已并入 `references/toolkit-methodology.md`——创建/编辑/交付时按需阅读
-
 # DOCX creation, editing, and analysis
 
 ## Overview

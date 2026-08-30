@@ -69,7 +69,7 @@ async def _handle_enter_multi_agent(args: dict[str, Any]) -> dict:
         if not agents:
             return tool_error(
                 "No registered sub-agents found. "
-                "Register at least one sub-agent using RegisterSubAgentFromParent before entering multi-agent mode."
+                "Register at least one sub-agent using RegisterSubAgent before entering multi-agent mode."
             )
 
     # 将主 Agent 自身也加入参与者列表（它调用工具后自己也需要参与对话）
@@ -81,7 +81,7 @@ async def _handle_enter_multi_agent(args: dict[str, Any]) -> dict:
     if missing:
         return tool_error(
             f"Subagent profiles not found: {', '.join(missing)}. "
-            "Register them first using RegisterSubAgentFromParent."
+            "Register them first using RegisterSubAgent."
         )
 
     # 停止所有子 Agent
@@ -179,7 +179,7 @@ registry.register(
         #
         # ## 前置条件
         # - 仅有活跃的主会话可以调用；子 Agent 会话不支持。
-        # - 至少有一个已注册子 Agent（通过 RegisterSubAgentFromParent 注册）。
+        # - 至少有一个已注册子 Agent（通过 RegisterSubAgent 注册）。
         #
         # ## 调用效果
         # - 所有活跃子 Agent 将被停止并清理。
@@ -216,7 +216,7 @@ registry.register(
 
 ## Prerequisites
 - Only an active main session can call this; sub-agent sessions are not supported.
-- At least one sub-agent must be registered (via `RegisterSubAgentFromParent`).
+- At least one sub-agent must be registered (via `RegisterSubAgent`).
 
 ## Effect
 - All active sub-agents will be stopped and cleaned up.

@@ -2,8 +2,6 @@
 
 This document defines the JSON schemas used by skill-creator.
 
-> **本地化注记（Evolve Agent）**：本文示例沿用 Claude Code 的工具名（如 `Read`/`Write`/`Bash`/`Edit`）。本系统对应工具为 `run_command`（替代 `Bash`）、`Read`、`Write`、`PatchEdit`，示例无需逐条改写。
-
 ---
 
 ## evals.json
@@ -201,8 +199,6 @@ Output from the executor agent. Located at `<run-dir>/outputs/metrics.json`.
 Wall clock timing for a run. Located at `<run-dir>/timing.json`.
 
 **How to capture:** When a subagent task completes, the task notification includes `total_tokens` and `duration_ms`. Save these immediately — they are not persisted anywhere else and cannot be recovered after the fact.
-
-> **本地化注记（Evolve Agent）**：上述是 Claude Code 的机制。本系统（Evolve Agent）的子代理完成通知不包含 `total_tokens` 和 `duration_ms` 字段，需在启动/完成时自行计时并写入 timing.json；`total_tokens` 无法获得时填 0 占位。
 
 ```json
 {

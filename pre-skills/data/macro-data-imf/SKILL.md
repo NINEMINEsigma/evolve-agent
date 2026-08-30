@@ -2,7 +2,6 @@
 name: macro-data-imf
 description: IMF 宏观经济数据——世界经济展望（WEO）190+ 国家/地区的 GDP 增长、通胀、政府债务、失业率、贸易差额等宏观指标的历史与预测，以及 COFER 外汇储备货币构成。当用户需要跨国宏观指标对比、单国宏观时序、IMF 官方预测值时使用。源自通用智能体工具包（Universal Agent Toolkit）。
 category: data
-version: 1.0.0
 tags:
   - imf
   - macro

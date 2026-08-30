@@ -189,10 +189,10 @@ const cleanup = createStarCursor();
 
 ## 源码对应关系
 
-本 skill 所有内容提取自 `ws:kimi-agent-website` 项目（React + Vite + Tailwind CSS），如需查看完整 React 组件实现，请到该目录下查看：
+本 skill 所有内容提取自 `kimi-agent-website` 项目（React + Vite + Tailwind CSS），如需查看完整 React 组件实现，请到该目录下查看：
 
 ```
-ws:kimi-agent-website/app/src/
+kimi-agent-website/app/src/
 ├── pages/              ← 页面级组件（7 个风格展厅）
 │   ├── Home.tsx
 │   ├── Industrial.tsx

@@ -8,7 +8,6 @@
 字符串内部为字段名（或字段 ID）到值的映射。
 
 
-
 #### 操作约束
 
 - **前置检查**：阅读 param_detail 中"fields 对象各字段类型填写规范"章节，按规范构造字段值；不可自行捏造字段名，仅传入数据表实际存在的字段（可通过 dbsheet.get_schema 确认）
@@ -227,7 +226,6 @@
 （对象结构，内容为字段名或字段 ID 到新值的映射）。
 
 
-
 #### 操作约束
 
 - **前置检查**：通过 dbsheet.get_schema 获取目标表的字段结构，不得在未获取表格结构的情况下直接调用；同时必须先阅读 param_detail 中"fields 对象各字段类型填写规范"章节，按规范构造字段值；不得自行推断字段类型或捏造字段名，数据表中不存在的字段不可传入
@@ -414,7 +412,6 @@
 #### 功能说明
 
 分页遍历数据表中的记录，支持按视图过滤、指定返回字段，以及通过 `filter` 参数实现复杂查询条件（支持 criteria 单层筛选和 filters 递归嵌套条件组）。
-
 
 
 #### 调用示例
@@ -685,7 +682,6 @@
 批量删除数据表中的指定记录。`records` 为记录 ID 的对象数组，**不是字符串数组**。
 
 
-
 #### 操作约束
 
 - **前置检查**：调用 list_records 或 get_record 核对拟删记录的内容，确认记录 ID 正确
@@ -797,7 +793,6 @@
 | show_record_extra_info | boolean | 否 | 是否返回创建者、创建时间、最后修改者、最后修改时间等 |
 | text_value | string | 否 | 不填默认 original；可选 original、text、compound |
 | view_id | string | 否 | 指定视图则从该视图取用户可见记录；不填从工作表取 |
-
 
 
 > filter.criteria 的结构需符合多维表格接口对筛选条件的约定。
@@ -927,7 +922,6 @@
 | show_fields_info | boolean | 否 | 为 true 时额外返回 fields 结构体展示字段信息；返回范围取决于是否指定 fields 或 view_id |
 | show_record_extra_info | boolean | 否 | 为 true 时额外显示创建者、创建时间、最后修改者、最后修改时间（与是否有对应字段无关） |
 | text_value | string | 否 | 返回值类型，不填默认 original；可选 original、text、compound |
-
 
 
 > records 为必填参数，需传入有效的记录 id 列表。

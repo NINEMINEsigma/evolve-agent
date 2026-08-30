@@ -9,7 +9,6 @@
 **`range` 必须为对象，即使只读取一个单元格也必须包裹在对象中传入，不可传数组。**
 
 
-
 > 行列索引均为 0-based；读取整张表时先用 sheet.get_sheets_info 获取 range.rowTo / range.colTo 上限
 > isCellPic=true 时，单元格为图片；picData（在线文件）和 sha1（本地图片）二选一返回
 > originalCellValue 返回公式栏原始值，cellText 返回显示值；fmlaText 仅在含公式时返回
@@ -110,7 +109,6 @@
 批量更新单元格选区数据，支持写值/公式、设置格式、合并单元格、写入图片。
 每项操作必须包含 `opType` 和四个坐标字段（`rowFrom`/`rowTo`/`colFrom`/`colTo`）。
 **`rangeData` 必须为对象数组（`array[object]`），即使只操作一个单元格也必须包裹在数组中传入，不可传单个对象。**
-
 
 
 #### 操作约束
@@ -385,7 +383,6 @@
 适用于 Excel（.xlsx）和智能表格（.ksheet）。
 
 
-
 #### 操作约束
 
 - **前置检查**：`sheet.get_range_data` 核对拟删行/列范围内现有数据
@@ -447,7 +444,6 @@
 
 在工作表已使用区域末尾追加一行数据，支持写入文本/公式和图片。
 适用于 Excel（.xlsx）和智能表格（.ksheet）。
-
 
 
 **幂等性**：否 — 重复调用会插入多行，先确认是否已成功
@@ -522,7 +518,6 @@
 - `sheet.get_range_data`：用于“直接读取固定矩形范围数据”，不做筛选、搜索、去重或分页。
 
 **适用于**：Excel（.xlsx）和智能表格（.ksheet）
-
 
 
 > 分页说明：通过 `page.page` 递增翻页，`total` 为结果总数。
@@ -670,7 +665,6 @@
 使用 `multipart/form-data` 方式上传。
 
 支持普通上传，以及 `local_cover`（本地官方推荐模板）和 `user_cover`（用户上传封面图）场景。
-
 
 
 > 请求需使用 `multipart/form-data` 提交参数

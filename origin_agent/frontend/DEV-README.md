@@ -40,7 +40,8 @@ frontend/
 │   │   │   └── StatusBar.tsx
 │   │   ├── primitives/             ← 基础 UI 原语
 │   │   │   ├── ModalWindow.tsx
-│   │   │   └── PopupLayer.tsx
+│   │   │   ├── PopupLayer.tsx
+│   │   │   └── CopyBanner.tsx
 │   │   └── ...                      ← 聊天、弹窗、面板等组件
 │   ├── styles/              ← CSS 样式
 │   └── utils/
@@ -103,7 +104,6 @@ frontend/
 | `SafeHtml.tsx` | 安全 HTML 渲染 |
 | `Minimap.tsx` | 小地图导航 |
 | `MentionMenu.tsx` | `@` 提及菜单（文件/skill 列表，Portal 渲染） |
-| `SecretBanner.tsx` | 隐藏的彩蛋横幅 |
 
 ### 弹窗与对话框
 

@@ -28,20 +28,3 @@ class DynamicEndpointInfo(BaseModel):
     agent_name: str
     name: str          # 即 URL 路径段，全局唯一 key
     created_at: float  # Unix 时间戳
-
-
-# ---------------------------------------------------------------------------
-# Tool Result Types
-# ---------------------------------------------------------------------------
-
-class ShowApiKeyResult(BaseModel):
-    """show_llm_api_key 工具的返回摘要（不含明文 key）。"""
-
-    configured: bool
-    """api_key 是否已配置。"""
-
-    masked: str = ""
-    """脱敏后的 key（如 sk-***wxyz），未配置时为空串。"""
-
-    message: str = ""
-    """面向用户的说明文本。"""

@@ -2,7 +2,6 @@
 name: inline-widgets
 description: 在对话流中渲染紧凑的可视化/交互组件——图表、仪表盘、计算器、滑杆、对比、时间线、状态机、小型模拟（沙盒 iframe 契约）。当答案具有空间、顺序、系统、对比、数值或交互结构，需要"看见结构"时使用。源自通用智能体工具包（Universal Agent Toolkit）。
 category: ui
-version: 1.0.0
 tags:
   - widget
   - inline

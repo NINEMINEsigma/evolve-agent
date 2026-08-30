@@ -179,6 +179,7 @@ def build_system_prompt(
                 "{{mode}}": runtime_ctx.mode,
                 "{{llm_model}}": _p.model if _p else "",
                 "{{llm_base_url}}": _p.base_url if _p else "",
+                "{{llm_api_key}}": _p.api_key if _p else "",
                 "{{llm_max_context_tokens}}": str(_p.max_context_tokens) if _p else "",
                 "{{llm_max_output_tokens}}": str(_p.max_output_tokens) if _p else "",
                 "{{llm_reasoning_effort}}": _p.reasoning_effort if _p else "",

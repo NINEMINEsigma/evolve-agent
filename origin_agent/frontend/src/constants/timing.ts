@@ -1,6 +1,6 @@
 /** 超时/间隔常量 (ms) */
 export const TIMING = {
-  BANNER_TTL:            60_000,  // SecretBanner 自动消失
+  BANNER_TTL:            60_000,  // CopyBanner 自动消失
   TOOLTIP_HIDE_DELAY:    80,      // tooltip 延迟隐藏
   WS_KEEPALIVE:          20_000,  // WebSocket keepalive 间隔
   WS_RECONNECT_BASE:     1_000,   // WebSocket 重连延迟基数

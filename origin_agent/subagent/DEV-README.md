@@ -13,7 +13,7 @@ subagent/
 └── context.py               ← SubRuntimeContext（子代理运行时上下文构建）
 
 component/multiagenttools/   ← 多代理 / 子代理工具
-├── register_subagent.py     ← register_subagent / register_subagent_from_parent
+├── register_subagent.py     ← RegisterSubAgent
 ├── unregister_subagent.py   ← unregister_subagent
 ├── list_subagents.py        ← list_subagents
 ├── run_subagent.py          ← run_subagent
@@ -125,8 +125,7 @@ graph TD
 
 | 工具 | 能力 |
 |---|---|
-| `register_subagent` | 手动注册子代理 LLM 配置（name / base_url / model / api_key / token 上限 / system_prompt_paths），不可覆盖已存在项。 |
-| `register_subagent_from_parent` | 继承父代理当前 LLM 配置快速注册。 |
+| `RegisterSubAgent` | 全参数显式注册子代理 LLM 配置（name/base_url/model/api_key/max_output_tokens/max_context_tokens/client_type），不可覆盖已存在项。 |
 | `unregister_subagent` | 从磁盘注册表删除指定 name。 |
 | `list_subagents` | 列出所有注册子代理，并附带当前父会话下的运行状态、待审批、feedback 数量。 |
 | `run_subagent` | 启动一个子代理会话；支持 `history_path` 恢复历史；同一父会话同名子代理只能有一个活跃或排队实例；达到并发上限则 FIFO 排队。 |

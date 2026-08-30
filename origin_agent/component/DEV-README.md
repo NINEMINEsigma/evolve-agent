@@ -58,7 +58,6 @@ component/
 | `list_uploads.py` | `ListUploads` | 列出上传文件 |
 | `compress_history.py` | `CompressHistory` | 会话历史压缩 |
 | `session_search.py` | `SessionSearch` | 会话内容搜索 |
-| `show_api_key_tool.py` | `ShowAPIKey` | 显示当前 API 密钥 |
 | `lsp.py` | LSP 诊断 | LSP 服务器进程管理与代码诊断 |
 
 ### 扩展工具集（`component/extools/`）

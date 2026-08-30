@@ -1,8 +1,6 @@
 ---
 name: animated-video
 description: "Create an animated video or motion design piece as a self-contained HTML file with a vanilla JS timeline engine, scene sequencing, playback controls, and an Easing library."
-version: 1.0.0
-author: Evolve-Agent
 category: design
 tags:
   - animation
@@ -18,7 +16,7 @@ Create an animated video or motion design piece as a self-contained HTML file wi
 
 ## Quick Start
 
-1. Copy the stage template: `templates/animation_stage.html` → your output file (e.g. `ws:output/my-animation.html`)
+1. Copy the stage template: `templates/animation_stage.html` → your output file (e.g. `output/my-animation.html`)
 2. Open the copied file, find the `SCENES` array (clearly marked with `// ===== Scene Definitions — REPLACE THIS =====`)
 3. Replace the example scenes with your own
 4. Save the file
@@ -106,5 +104,5 @@ Fixed at 1280×720 (16:9). The template auto-scales the canvas to fit the browse
 
 - Template: `skills:design/animated-video/templates/animation_stage.html`
 - Read the template via: `Read(path="skills:design/animated-video/templates/animation_stage.html")`
-- Write output to: `ws:output/<name>.html`
+- Write output to: `output/<name>.html`
 - Display: inline iframe, `width:640px;height:420px` — see Display Convention above

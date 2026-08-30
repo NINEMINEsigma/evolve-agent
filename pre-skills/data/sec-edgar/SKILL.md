@@ -2,7 +2,6 @@
 name: sec-edgar
 description: 美国上市公司 SEC EDGAR 披露数据——filings（10-K/10-Q/8-K）、XBRL 事实、财务报表、内部人交易（Form 4）、机构持仓（13F）、重大公司事件。当用户需要美国上市公司的官方披露文件、财务原文、XBRL 明细、内部人交易或机构持仓时使用。源自通用智能体工具包（Universal Agent Toolkit）。
 category: data
-version: 1.0.0
 tags:
   - sec
   - edgar

@@ -60,8 +60,6 @@ export interface SessionStore {
   setTaskProgress: React.Dispatch<React.SetStateAction<Record<string, TaskProgress>>>;
   clipboardDisplays: Record<string, ClipboardDisplay>;
   setClipboardDisplays: React.Dispatch<React.SetStateAction<Record<string, ClipboardDisplay>>>;
-  secretBanner: ClipboardDisplay | null;
-  setSecretBanner: React.Dispatch<React.SetStateAction<ClipboardDisplay | null>>;
   dynamicEndpoints: DynamicEndpoint[];
   setDynamicEndpoints: React.Dispatch<React.SetStateAction<DynamicEndpoint[]>>;
   agents: string[];
@@ -176,7 +174,6 @@ export function useSessionStore(callbacks: SessionStoreCallbacks = {}): SessionS
   const [yoloMode, setYoloMode] = useState(false);
   const [taskProgress, setTaskProgress] = useState<Record<string, TaskProgress>>({});
   const [clipboardDisplays, setClipboardDisplays] = useState<Record<string, ClipboardDisplay>>({});
-  const [secretBanner, setSecretBanner] = useState<ClipboardDisplay | null>(null);
   const [dynamicEndpoints, setDynamicEndpoints] = useState<DynamicEndpoint[]>([]);
   const [agents, setAgents] = useState<string[]>([]);
   const [serverInfo, setServerInfo] = useState<Record<string, unknown>>({});
@@ -601,7 +598,6 @@ export function useSessionStore(callbacks: SessionStoreCallbacks = {}): SessionS
           setMessages([]);
           setTokenUsage(0);
           setClipboardDisplays({});
-          setSecretBanner(null);
           setTaskProgress({});
           setDynamicEndpoints([]);
           clearPendingInteractions();
@@ -842,14 +838,7 @@ export function useSessionStore(callbacks: SessionStoreCallbacks = {}): SessionS
       const raw = msg.result ?? "";
       try {
         const data = JSON.parse(raw);
-        if (msg.tool === "ShowLLMAPIKey") {
-          // 密钥横幅：一次性展示，不进常驻面板
-          setSecretBanner({
-            display_id: data.display_id || "llm_api_key",
-            label: data.label || "LLM API Key",
-            content: data.content ?? "",
-          });
-        } else if (data.cleared) {
+        if (data.cleared) {
           setClipboardDisplays((prev) => {
             const next = { ...prev };
             if (Array.isArray(data.cleared) && data.cleared.length) {
@@ -1026,7 +1015,6 @@ export function useSessionStore(callbacks: SessionStoreCallbacks = {}): SessionS
     clearPendingInteractions();
     setHandsfreeMode(false);
     setClipboardDisplays({});
-    setSecretBanner(null);
     setTaskProgress({});
     setDynamicEndpoints([]);
     setTokenUsage(0);
@@ -1043,7 +1031,6 @@ export function useSessionStore(callbacks: SessionStoreCallbacks = {}): SessionS
     setWaiting(false);
     clearPendingInteractions();
     setClipboardDisplays({});
-    setSecretBanner(null);
     setTaskProgress({});
     setDynamicEndpoints([]);
     setTokenUsage(0);
@@ -1394,8 +1381,6 @@ export function useSessionStore(callbacks: SessionStoreCallbacks = {}): SessionS
     setTaskProgress,
     clipboardDisplays,
     setClipboardDisplays,
-    secretBanner,
-    setSecretBanner,
     dynamicEndpoints,
     setDynamicEndpoints,
     agents,
