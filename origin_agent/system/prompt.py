@@ -195,6 +195,13 @@ def build_system_prompt(
                 base = base.replace(k, (v or "未配置").strip())
         blocks.append(base)
 
+    # 1c. 命名空间定义 — 集中描述所有沙盒命名空间（读写 + 只读）
+    namespaces: str = read_template("namespaces.txt")
+    if namespaces:
+        namespaces = namespaces.replace(r"{{fork_path}}", fork_path)
+        namespaces = namespaces.replace(r"{{agentspace}}", agentspace)
+        blocks.append(namespaces)
+
     # 2. 模式特定
     mode_block: str = read_template(f"modes/{mode}.txt")
     if mode_block:

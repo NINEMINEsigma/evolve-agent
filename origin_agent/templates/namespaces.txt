@@ -1,0 +1,83 @@
+# File Space Namespaces
+
+All tool file operations must use logical path prefixes — bare paths, ``..``, and
+absolute paths are forbidden. Every prefix maps to a real directory under the project root.
+
+## Read-Write Namespaces
+
+These namespaces allow both reading and writing (unless a mode restriction applies).
+
+``fork:`` — Evolution target space (fast mode only; unavailable in fallback)
+- Maps to: ``{{fork_path}}``
+- Contains: A full copy of your runtime codebase — the slow agent space where you write
+  evolved versions of yourself.
+- When to use: When evolving your own code. Write improved code here, then exit with
+  code -1 to trigger the fast-slow swap. This is the ONLY space where self-modification
+  happens — there is no ``self:`` namespace.
+
+``fix:`` — Fallback repair space (fallback mode only; unavailable in fast)
+- Maps to: ``.fallback/`` directory under the workspace root.
+- Contains: A backup copy of the last known-good agent codebase, used to repair a
+  crashed fast agent.
+- When to use: Only when running in fallback mode. Read the error log, then read and
+  fix the broken code here. This space does not exist during normal (fast) operation.
+
+``ws:`` — General workspace
+- Maps to: ``{{agentspace}}``
+- Contains: Your working directory — SOUL.md (your acquired personality), uploads/,
+  output files, MCP config, and any files you create during a session.
+- When to use: For all general-purpose file I/O — saving outputs, reading uploads,
+  storing intermediate data, editing your SOUL. Shell commands run with ``ws:`` as
+  their working directory unless overridden.
+
+``skills:`` — Skill modules
+- Maps to: ``skills/`` directory under the project root.
+- Contains: Reusable skill modules (SKILL.md files with optional scripts and references).
+- When to use: When creating or modifying skills via the ``RecallSkill`` tool, or when
+  you need to inspect skill definitions. Only skill names and one-line descriptions are
+  injected into the system prompt by default; load full content with ``RecallSkill``.
+
+## Read-Only Namespaces
+
+These namespaces are READ-ONLY in both fast and fallback modes. You MAY read their
+full contents via ``Read`` or ``SearchFiles`` (needed to understand the system before
+evolving), but any write operation (Write, PatchEdit, Copy, Move, Delete) will be
+denied by the sandbox.
+
+``third:`` — Third-party submodules
+- Maps to: ``third/`` directory under the project root.
+- Contains: Git submodules — third-party libraries bundled with the project (e.g.
+  easysave, llamaapis).
+- When to use: When you need to understand how a bundled library works before using
+  or evolving around it (e.g. reading easysave's serialization API to correctly
+  persist BaseModel instances).
+
+``custom_hooks:`` — Custom hooks
+- Maps to: ``custom_hooks/`` directory under the project root.
+- Contains: Hook modules that inject context into each conversation turn — memory,
+  time, session metadata, recent uploads, agentspace changes, client info, token usage.
+- When to use: When you need to understand or evolve the per-turn context injection
+  system (e.g. adding a new hook, modifying what context is injected).
+
+``custom_llm_client:`` — Custom LLM client implementations
+- Maps to: ``custom_llm_client/`` directory under the project root.
+- Contains: Custom LLM client classes that integrate alternative providers or endpoints
+  with the OpenAI-compatible interface.
+- When to use: When you need to understand or add support for a non-standard LLM
+  backend (e.g. a local llama-server, a proprietary API).
+
+``custom_models:`` — Custom model files
+- Maps to: ``custom_models/`` directory under the project root.
+- Contains: Local model files (e.g. ``.gguf`` files for handsfree approval) and any
+  model-related configuration.
+- When to use: When configuring handsfree mode (the approval system auto-detects
+  ``.gguf`` files here) or when you need to understand available local models.
+
+``custom_tools:`` — Custom tools
+- Maps to: ``custom_tools/`` directory under the project root.
+- Contains: User-defined tool modules registered at import time via
+  ``registry.register()`` — extends the built-in toolset with project-specific
+  capabilities (e.g. memory_tools/remember.py, memory_tools/forget.py).
+- When to use: When you need to understand existing custom tools before evolving,
+  or when inspecting how a specific custom tool is implemented (its schema, handler,
+  and danger level).
