@@ -1,6 +1,6 @@
 """代码进化编排器 — 验证 fork 然后触发交换。
 
-此模块由 ``evolve_code`` 工具 handler 在 LLM 已将
+此模块由 ``EvolveCode`` 工具 handler 在 LLM 已将
 进化源码写入 fork: 命名空间后调用。
 
 流程：

@@ -1,7 +1,7 @@
-"""browser_query — 在页面中定位元素，产出可复用的元素引用（safe）。
+"""BrowserQuery — 在页面中定位元素，产出可复用的元素引用（safe）。
 
 按 CSS/XPath 选择器或子树文本定位，返回元素引用列表（含 path），
-供 browser_click / browser_type / browser_press / browser_scroll 等交互工具使用。
+供 BrowserClick / BrowserType / BrowserPress / BrowserScroll 等交互工具使用。
 模块导入时通过 ``registry.register()`` 注册。
 """
 
@@ -17,12 +17,12 @@ from entity.puretype import ToolDangerLevel
 logger = logging.getLogger(__name__)
 
 _NOT_CONNECTED: str = (
-    "浏览器未连接或 CDP 端点不可达。请先调用 browser_connect；"
+    "浏览器未连接或 CDP 端点不可达。请先调用 BrowserConnect；"
     "若 connect 曾返回指引，请先按指引让用户完成操作。"
 )
 
 _TAB_NOT_FOUND: str = (
-    "未找到匹配的标签页。请先用 browser_list_tabs 确认现有标签页；"
+    "未找到匹配的标签页。请先用 BrowserListTabs 确认现有标签页；"
     "若目标页面未在其中，请用户在浏览器中手动打开或切换到目标页面后重试。"
 )
 
@@ -45,7 +45,7 @@ async def _handle_browser_query(args: dict[str, Any]) -> dict:
     try:
         browser = await _connection.get_browser()
     except Exception as exc:
-        logger.warning("browser_query: reconnect failed: %s: %s", type(exc).__name__, exc)
+        logger.warning("BrowserQuery: reconnect failed: %s: %s", type(exc).__name__, exc)
         return tool_error(_NOT_CONNECTED)
 
     page = await _connection.find_page(browser, tab)
@@ -78,13 +78,13 @@ async def _handle_browser_query(args: dict[str, Any]) -> dict:
 
 
 registry.register(
-    name="browser_query",
+    name="BrowserQuery",
     toolset="browser",
     schema={
-        # 在页面中定位元素，返回元素引用列表（含 path），供 browser_click / browser_type 等交互工具使用。
+        # 在页面中定位元素，返回元素引用列表（含 path），供 BrowserClick / BrowserType 等交互工具使用。
         #
         # ## 前置条件
-        # - 已成功调用 browser_connect；目标标签页存在。
+        # - 已成功调用 BrowserConnect；目标标签页存在。
         #
         # ## 调用效果
         # - selector：CSS 选择器或 XPath（以 / 开头自动识别）。
@@ -97,20 +97,20 @@ registry.register(
         # ```json
         # {"matches": [{"path": "0.2.1", "tag": "a", "id": "", "class": "", "text": "...", "child_count": 0, "leaf": true}], "total": 1, "truncated": false}
         # ```
-        # path 可直接作为 browser_click / browser_type 等交互工具的 path 参数。
+        # path 可直接作为 BrowserClick / BrowserType 等交互工具的 path 参数。
         #
         # ## 何时使用
         # - 需要精确定位页面元素（按钮、链接、输入框、内容区块）时。
-        # - browser_click / browser_type 等交互操作之前先确认目标元素存在及其 path。
+        # - BrowserClick / BrowserType 等交互操作之前先确认目标元素存在及其 path。
         # - 深嵌套页面优先用语义 selector（main/article/section）直达正文容器，
         #   避免从 body 逐层下钻。
         #
         # ## 副作用/注意
         # - 只读查询，不修改浏览器状态；正常模式下无需审批。
-        "description": """Locates elements in the page and returns reusable element references (including path) for browser_click / browser_type / browser_press / browser_scroll.
+        "description": """Locates elements in the page and returns reusable element references (including path) for BrowserClick / BrowserType / BrowserPress / BrowserScroll.
 
 ## Prerequisites
-- browser_connect must have succeeded; the target tab must exist.
+- BrowserConnect must have succeeded; the target tab must exist.
 
 ## Effect
 - `selector`: CSS selector or XPath (auto-detected when starting with `/`).
@@ -122,11 +122,11 @@ registry.register(
 ```json
 {"matches": [{"path": "0.2.1", "tag": "a", "id": "", "class": "", "text": "...", "child_count": 0, "leaf": true}], "total": 1, "truncated": false}
 ```
-The path can be passed directly as the path argument of browser_click / browser_type / browser_press / browser_scroll.
+The path can be passed directly as the path argument of BrowserClick / BrowserType / BrowserPress / BrowserScroll.
 
 ## When to Use
 - Pinpoint page elements (buttons, links, inputs, content blocks).
-- Confirm a target element exists and get its path before browser_click / browser_type / browser_press / browser_scroll.
+- Confirm a target element exists and get its path before BrowserClick / BrowserType / BrowserPress / BrowserScroll.
 - On deeply nested pages, prefer semantic selectors (main/article/section) to jump straight to the content container instead of drilling from body.
 
 ## Side Effects / Notes
@@ -136,8 +136,8 @@ The path can be passed directly as the path argument of browser_click / browser_
             "properties": {
                 "tab": {
                     "type": "string",
-                    # 目标标签页：browser_list_tabs 的 0 基 index（如 "0"），或 url/title 的子串。
-                    "description": "Target tab: the 0-based index from browser_list_tabs (e.g. \"0\"), or a substring of its URL or title.",
+                    # 目标标签页：BrowserListTabs 的 0 基 index（如 "0"），或 url/title 的子串。
+                    "description": "Target tab: the 0-based index from BrowserListTabs (e.g. \"0\"), or a substring of its URL or title.",
                 },
                 "selector": {
                     "type": "string",

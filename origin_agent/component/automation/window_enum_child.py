@@ -7,8 +7,8 @@
 
 本工具用于获取窗口的子控件列表。某些窗口（如记事本）的顶层 HWND
 不直接处理键盘输入，真正接收输入的是其子控件（如 Edit）。
-使用本工具枚举子窗口后，可将子控件 HWND 传给 ``keyboard_type``、
-``keyboard_press`` 等工具的 ``hwnd`` 参数，实现精准的后台输入。
+使用本工具枚举子窗口后，可将子控件 HWND 传给 ``KeyboardType``、
+``KeyboardPress`` 等工具的 ``hwnd`` 参数，实现精准的后台输入。
 """
 
 from __future__ import annotations
@@ -157,7 +157,7 @@ def _handle_window_enum_child(args: dict[str, Any]) -> dict:
     children = enum_child_windows(hwnd)
 
     if not children:
-        logger.info("window_enum_child | hwnd=%d → no children", hwnd)
+        logger.info("WindowEnumChild | hwnd=%d → no children", hwnd)
         return tool_result(
             success=True,
             hwnd=hwnd,
@@ -166,7 +166,7 @@ def _handle_window_enum_child(args: dict[str, Any]) -> dict:
         )
 
     logger.info(
-        "window_enum_child | hwnd=%d → %d child(ren)",
+        "WindowEnumChild | hwnd=%d → %d child(ren)",
         hwnd, len(children),
     )
 
@@ -183,11 +183,11 @@ def _handle_window_enum_child(args: dict[str, Any]) -> dict:
 # ---------------------------------------------------------------------------
 
 registry.register(
-    name="window_enum_child",
+    name="WindowEnumChild",
     toolset="automation",
     schema={
         # 枚举指定窗口的所有子窗口，返回每个子窗口的 HWND、类名、文本、可见性等。
-        # 前置条件：仅 Windows；hwnd 必须是有效的窗口句柄（来自 window_find）。
+        # 前置条件：仅 Windows；hwnd 必须是有效的窗口句柄（来自 WindowFind）。
         # 调用效果：遍历 hwnd 的所有直接子窗口，返回详细信息列表。
         # 返回值：children 列表（每个含 hwnd、class_name、text、visible、enabled、rect），count 子窗口数。
         # 典型场景：后台输入时，顶层窗口不处理 WM_CHAR，需要找到子控件（如 Edit）的 HWND。
@@ -196,7 +196,7 @@ registry.register(
 
 ## Prerequisites
 - Windows only.
-- `hwnd` must be a valid window handle (obtain from `window_find`).
+- `hwnd` must be a valid window handle (obtain from `WindowFind`).
 
 ## Effect
 Calls `EnumChildWindows` to list all direct child windows of the given `hwnd`. Returns each child's HWND, class name, text, visibility, enabled state, and screen rectangle.
@@ -223,9 +223,9 @@ Calls `EnumChildWindows` to list all direct child windows of the given `hwnd`. R
 ```
 
 ## When to Use
-- **Before `keyboard_type` (background)**: The top-level window may not process `WM_CHAR` — only its child control (e.g. `Edit`) does. Use this tool to find the child's HWND, then pass it directly as the `hwnd` parameter to `keyboard_type`.
-- **Before `keyboard_press` (background)**: Same reason — send key events to the child control, not the top-level window.
-- **Before `mouse_click` (background)**: To inspect the structure of a complex window before clicking specific controls.
+- **Before `KeyboardType` (background)**: The top-level window may not process `WM_CHAR` — only its child control (e.g. `Edit`) does. Use this tool to find the child's HWND, then pass it directly as the `hwnd` parameter to `KeyboardType`.
+- **Before `KeyboardPress` (background)**: Same reason — send key events to the child control, not the top-level window.
+- **Before `MouseClick` (background)**: To inspect the structure of a complex window before clicking specific controls.
 - **General window exploration**: To understand the UI structure of a target window.
 
 ## How to Pick the Right Child
@@ -242,8 +242,8 @@ Calls `EnumChildWindows` to list all direct child windows of the given `hwnd`. R
             "properties": {
                 "hwnd": {
                     "type": "integer",
-                    # 父窗口句柄（HWND），来自 window_find。枚举该窗口的所有直接子窗口。
-                    "description": "Parent window handle (HWND) from `window_find`. All direct child windows of this window will be enumerated.",
+                    # 父窗口句柄（HWND），来自 WindowFind。枚举该窗口的所有直接子窗口。
+                    "description": "Parent window handle (HWND) from `WindowFind`. All direct child windows of this window will be enumerated.",
                 },
             },
             "required": ["hwnd"],

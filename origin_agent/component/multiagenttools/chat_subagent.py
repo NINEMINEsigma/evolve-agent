@@ -1,6 +1,6 @@
 """向子 Agent 发送消息。
 
-模块导入时通过 ``registry.register()`` 注册 ``chat_subagent`` 工具。
+模块导入时通过 ``registry.register()`` 注册 ``ChatSubAgent`` 工具。
 父 Agent 通过此工具向指定子 Agent 发送消息，消息进入收件箱，
 在子 Agent 工具链结束后合并注入上下文。
 """
@@ -50,7 +50,7 @@ async def _handle_chat_subagent(args: dict[str, Any]) -> dict:
 
 
 registry.register(
-    name="chat_subagent",
+    name="ChatSubAgent",
     toolset="multiagent",
     schema={
         # 向正在运行的子 Agent 会话发送一条消息。
@@ -103,7 +103,7 @@ If the sub-agent has already produced feedback that you have not yet received, t
 ```json
 {"success": false, "feedback": ["..."], "_note": "Sub-agent has already produced feedback that you have not yet received. Please review the feedback first, then decide whether and how to reply via chat_subagent."}
 ```
-You MUST review the returned `feedback` first, then decide whether and how to reply via `chat_subagent`.
+You MUST review the returned `feedback` first, then decide whether and how to reply via `ChatSubAgent`.
 If the sub-agent is still generating its current response, the call fails with:
 ```json
 {"success": false, "error": "Sub-agent is still generating its current response. Wait for [subagent-result] before calling chat_subagent."}

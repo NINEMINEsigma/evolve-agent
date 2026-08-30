@@ -1,6 +1,6 @@
 """审批子 Agent 的工具调用。
 
-模块导入时通过 ``registry.register()`` 注册 ``approval_subagent`` 工具。
+模块导入时通过 ``registry.register()`` 注册 ``ApprovalSubAgent`` 工具。
 父 Agent 通过此工具批量审批子 Agent 提交的工具调用申请，
 同意的工具立即在子 Agent 上下文中执行，拒绝的工具需附带原因。
 """
@@ -66,7 +66,7 @@ async def _handle_approval_subagent(args: dict[str, Any]) -> dict:
 
 
 registry.register(
-    name="approval_subagent",
+    name="ApprovalSubAgent",
     toolset="multiagent",
     schema={
         # 批量批准或拒绝子 Agent 的工具调用请求。

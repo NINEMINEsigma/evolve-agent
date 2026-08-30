@@ -7,7 +7,7 @@
   执行拖拽。需要目标窗口在前台且未被遮挡。
 - **后台拖拽模式**（传 hwnd）：使用 ``PostMessage`` 向指定窗口发送
   ``WM_LBUTTONDOWN`` → ``WM_MOUSEMOVE`` × N → ``WM_LBUTTONUP`` 消息序列。
-  x1, y1, x2, y2 解释为窗口客户区坐标，与 ``screen_capture`` / ``template_match`` 衔接。
+  x1, y1, x2, y2 解释为窗口客户区坐标，与 ``ScreenCapture`` / ``TemplateMatch`` 衔接。
   窗口可被遮挡，无需在前台。
 
 复用 ``mouse_click.py`` 中的 ``_BUTTON_MESSAGES`` 按键映射表。
@@ -144,7 +144,7 @@ def _handle_mouse_drag(args: dict[str, Any]) -> dict:
             )
 
         logger.info(
-            "mouse_drag | hwnd=%d (%d,%d)→(%d,%d) button=%s steps=%d hold=%.2f (background)",
+            "MouseDrag | hwnd=%d (%d,%d)→(%d,%d) button=%s steps=%d hold=%.2f (background)",
             hwnd, x1, y1, x2, y2, button, steps, hold,
         )
 
@@ -178,7 +178,7 @@ def _handle_mouse_drag(args: dict[str, Any]) -> dict:
         )
 
     logger.info(
-        "mouse_drag | (%d,%d)→(%d,%d) button=%s duration=%.2f hold=%.2f (screen)",
+        "MouseDrag | (%d,%d)→(%d,%d) button=%s duration=%.2f hold=%.2f (screen)",
         x1, y1, x2, y2, button, duration, hold,
     )
 
@@ -197,11 +197,11 @@ def _handle_mouse_drag(args: dict[str, Any]) -> dict:
 # ---------------------------------------------------------------------------
 
 registry.register(
-    name="mouse_drag",
+    name="MouseDrag",
     toolset="automation",
     schema={
         # 模拟鼠标拖拽，支持屏幕坐标拖拽和窗口后台拖拽两种模式。
-        # 前置条件：屏幕模式需 pyautogui；后台模式需先用 window_find 获取 HWND。
+        # 前置条件：屏幕模式需 pyautogui；后台模式需先用 WindowFind 获取 HWND。
         # 调用效果：从起点 (x1,y1) 按住按键拖拽到终点 (x2,y2)，保持 hold 秒后释放。
         # 返回值：x1、y1、x2、y2、button、hold、mode（screen 或 background）。
         # 典型场景：拖拽文件、调整窗口大小、滑动列表、画布绘制等。
@@ -211,7 +211,7 @@ registry.register(
 ## Prerequisites
 - `pyautogui` must be installed (screen mode only).
 - Windows only.
-- For background mode: use `window_find` first to obtain the HWND.
+- For background mode: use `WindowFind` first to obtain the HWND.
 
 ## Two Modes
 
@@ -219,7 +219,7 @@ registry.register(
 Moves the cursor to (x1, y1), presses the button, drags to (x2, y2) over `duration` seconds, holds at the endpoint for `hold` seconds, then releases. The target window must be in the foreground and not obscured.
 
 ### Background mode (`hwnd` provided)
-Uses `PostMessage` to send a sequence of `WM_LBUTTONDOWN` → `WM_MOUSEMOVE` × N → `WM_LBUTTONUP` directly to the target window. The window can be obscured or in the background. `x1, y1, x2, y2` are **window client-area coordinates** — the same coordinate system as `screen_capture` and `template_match`. `steps` controls the number of intermediate `WM_MOUSEMOVE` messages; `interval` controls the delay between each move message. After reaching the endpoint, waits `hold` seconds before sending the button-up message.
+Uses `PostMessage` to send a sequence of `WM_LBUTTONDOWN` → `WM_MOUSEMOVE` × N → `WM_LBUTTONUP` directly to the target window. The window can be obscured or in the background. `x1, y1, x2, y2` are **window client-area coordinates** — the same coordinate system as `ScreenCapture` and `TemplateMatch`. `steps` controls the number of intermediate `WM_MOUSEMOVE` messages; `interval` controls the delay between each move message. After reaching the endpoint, waits `hold` seconds before sending the button-up message.
 
 ## Returns
 ```json
@@ -229,9 +229,9 @@ Uses `PostMessage` to send a sequence of `WM_LBUTTONDOWN` → `WM_MOUSEMOVE` × 
 ```
 
 ## When to Use
-- **Background mode**: Drag UI elements in an obscured window (e.g. scroll a list, resize a panel). Coordinates from `template_match` can be used directly.
+- **Background mode**: Drag UI elements in an obscured window (e.g. scroll a list, resize a panel). Coordinates from `TemplateMatch` can be used directly.
 - **Screen mode**: Drag files, resize windows, draw on canvas — when the target is in the foreground.
-- Use `template_match` to find the draggable element's position, then drag from its center to the target location.
+- Use `TemplateMatch` to find the draggable element's position, then drag from its center to the target location.
 - Use `hold` to keep the button pressed at the endpoint before releasing — useful for drag-and-drop with delay, or when the target app needs time to register the drop.
 
 ## Side Effects / Notes
@@ -241,7 +241,7 @@ Uses `PostMessage` to send a sequence of `WM_LBUTTONDOWN` → `WM_MOUSEMOVE` × 
 - Screen mode uses `duration` for drag time; background mode uses `steps` and `interval`.
 - `hold` applies to both modes — the button is released after the hold delay.
 - Some applications (DirectX games, certain Electron apps) may not respond to `PostMessage` drag messages. Use screen mode for those.
-- Coordinates in background mode are relative to the window's client area (top-left = 0,0), matching `screen_capture` and `template_match` output.""",
+- Coordinates in background mode are relative to the window's client area (top-left = 0,0), matching `ScreenCapture` and `TemplateMatch` output.""",
         "parameters": {
             "type": "object",
             "properties": {
@@ -268,7 +268,7 @@ Uses `PostMessage` to send a sequence of `WM_LBUTTONDOWN` → `WM_MOUSEMOVE` × 
                 "hwnd": {
                     "type": "integer",
                     # 窗口句柄（HWND）。传入时使用后台拖拽模式（PostMessage），省略时使用屏幕坐标模式（pyautogui）。
-                    "description": "Window handle (HWND) from `window_find`. When provided, uses background drag mode (PostMessage). When omitted, uses screen coordinate mode (pyautogui).",
+                    "description": "Window handle (HWND) from `WindowFind`. When provided, uses background drag mode (PostMessage). When omitted, uses screen coordinate mode (pyautogui).",
                 },
                 "button": {
                     "type": "string",

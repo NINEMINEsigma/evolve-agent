@@ -276,7 +276,7 @@ def _get_registered_mcp_tools() -> list[str]:
 #   - 重置 circuit breaker 状态
 # 返回：{refreshed, removed, added, failed, status}
 registry.register(
-    name="mcp_refresh",
+    name="MCPRefresh",
     toolset="mcp",
     schema={
         "description": """Hot-reload MCP server connections from the config file.

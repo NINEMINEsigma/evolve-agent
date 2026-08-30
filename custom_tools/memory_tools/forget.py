@@ -39,7 +39,7 @@ def _handle_forget(args: dict[str, Any], context: ToolContext | None = None) -> 
 # ── 注册 ─────────────────────────────────────────────────────
 
 registry.register(
-    name="forget",
+    name="Forget",
     toolset="memory_tools",
     schema={
         # 从记忆存储中删除指定 id 的记忆项。

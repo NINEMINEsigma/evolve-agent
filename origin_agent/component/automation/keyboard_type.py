@@ -9,7 +9,7 @@
 - **后台模式**（传 hwnd）：尝试通过 ``GetGUIThreadInfo`` 找到目标窗口中
   当前聚焦的子控件，找到则向其 ``PostMessage`` ``WM_CHAR``；
   找不到则向传入的 hwnd 发送。顶层窗口通常不直接处理键盘字符消息，
-  如需指定具体子控件，先用 ``window_enum_child`` 枚举子窗口获取子控件 HWND，
+  如需指定具体子控件，先用 ``WindowEnumChild`` 枚举子窗口获取子控件 HWND，
   再直接传给本工具的 ``hwnd`` 参数。
 
 不使用剪贴板。
@@ -216,7 +216,7 @@ def _get_focus_hwnd(hwnd: int) -> int:
     其内部的 Edit / RichEdit / WebView 等子控件。
 
     如果 GetGUIThreadInfo 返回了焦点子控件，返回它；
-    否则返回原始 hwnd（调用方应考虑用 window_enum_child 自行查找子窗口）。
+    否则返回原始 hwnd（调用方应考虑用 WindowEnumChild 自行查找子窗口）。
     """
     thread_id = _user32.GetWindowThreadProcessId(hwnd, None)
     if thread_id:
@@ -286,7 +286,7 @@ def _handle_keyboard_type(args: dict[str, Any]) -> dict:
             )
 
         logger.info(
-            "keyboard_type | hwnd=%d used_hwnd=%d length=%d interval=%.2f (background)",
+            "KeyboardType | hwnd=%d used_hwnd=%d length=%d interval=%.2f (background)",
             hwnd, used_hwnd, len(text), interval,
         )
 
@@ -310,7 +310,7 @@ def _handle_keyboard_type(args: dict[str, Any]) -> dict:
             return tool_error(f"Foreground Unicode input failed: {exc}", text=text[:100])
 
         logger.info(
-            "keyboard_type | length=%d interval=%.2f (foreground/unicode)",
+            "KeyboardType | length=%d interval=%.2f (foreground/unicode)",
             len(text), interval,
         )
 
@@ -332,7 +332,7 @@ def _handle_keyboard_type(args: dict[str, Any]) -> dict:
     except Exception as exc:
         return tool_error(f"Keyboard input failed: {exc}", text=text[:100])
 
-    logger.info("keyboard_type | length=%d interval=%.2f (foreground)", len(text), interval)
+    logger.info("KeyboardType | length=%d interval=%.2f (foreground)", len(text), interval)
 
     return tool_result(
         success=True,
@@ -348,11 +348,11 @@ def _handle_keyboard_type(args: dict[str, Any]) -> dict:
 # ---------------------------------------------------------------------------
 
 registry.register(
-    name="keyboard_type",
+    name="KeyboardType",
     toolset="automation",
     schema={
         # 模拟键盘输入文本，支持前台和后台两种模式。
-        # 前置条件：前台模式需 pyautogui 且输入框已聚焦；后台模式需先用 window_find 获取 HWND。
+        # 前置条件：前台模式需 pyautogui 且输入框已聚焦；后台模式需先用 WindowFind 获取 HWND。
         # 调用效果：前台 ASCII 用 pyautogui.write；前台非 ASCII 用 SendInput+KEYEVENTF_UNICODE；
         #   后台尝试 GetGUIThreadInfo 找焦点子控件，找不到则用传入的 hwnd，再 PostMessage WM_CHAR。
         # 返回值：text、length、interval、mode（foreground 或 background）；后台额外返回 used_hwnd。
@@ -362,8 +362,8 @@ registry.register(
 
 ## Prerequisites
 - `pyautogui` must be installed (foreground ASCII only).
-- The target input field must be focused (use `mouse_click` to click into it first).
-- For background mode: use `window_find` first to obtain the HWND.
+- The target input field must be focused (use `MouseClick` to click into it first).
+- For background mode: use `WindowFind` first to obtain the HWND.
 
 ## Two Modes
 
@@ -374,7 +374,7 @@ registry.register(
 ### Background mode (`hwnd` provided)
 Attempts to find the focused child control via `GetGUIThreadInfo` — if the target window's thread has a focused child (e.g. an `Edit` control), `WM_CHAR` messages are sent to that child. If no focused child is found, messages are sent to the provided `hwnd` directly.
 
-**Important**: The top-level window usually does not process `WM_CHAR` — only its child controls do. If background typing fails, use `window_enum_child` to enumerate the window's children, identify the correct input control (e.g. class_name `Edit`), and pass that child's HWND directly as the `hwnd` parameter.
+**Important**: The top-level window usually does not process `WM_CHAR` — only its child controls do. If background typing fails, use `WindowEnumChild` to enumerate the window's children, identify the correct input control (e.g. class_name `Edit`), and pass that child's HWND directly as the `hwnd` parameter.
 
 The window can be obscured or in the background — no foreground focus needed.
 
@@ -386,8 +386,8 @@ The window can be obscured or in the background — no foreground focus needed.
 ```
 
 ## When to Use
-- **Background mode**: After `window_find` → `mouse_click` (background) to focus an input field, then type text without stealing foreground focus. If typing fails, use `window_enum_child` to find the correct child control HWND and pass it directly.
-- **Foreground mode**: After clicking into an input field with `mouse_click`. To fill in forms, search boxes, or text areas. To enter commands in a terminal or console.
+- **Background mode**: After `WindowFind` → `MouseClick` (background) to focus an input field, then type text without stealing foreground focus. If typing fails, use `WindowEnumChild` to find the correct child control HWND and pass it directly.
+- **Foreground mode**: After clicking into an input field with `MouseClick`. To fill in forms, search boxes, or text areas. To enter commands in a terminal or console.
 
 ## Side Effects / Notes
 - Foreground mode directly controls the keyboard — will type into whatever field currently has focus. `pyautogui.FAILSAFE` is disabled.
@@ -395,7 +395,7 @@ The window can be obscured or in the background — no foreground focus needed.
 - **No clipboard involvement** — no mode touches the system clipboard.
 - Foreground non-ASCII text uses `SendInput` + `KEYEVENTF_UNICODE`. Only BMP characters (U+0000 ~ U+FFFF) are supported; characters outside BMP (some emoji) are skipped with a warning.
 - `interval` controls the delay between each keystroke (seconds). 0 = instant.
-- **If background typing fails**: the top-level window likely doesn't process `WM_CHAR`. Use `window_enum_child` to find the child control (e.g. `Edit`) and pass its HWND as `hwnd`.
+- **If background typing fails**: the top-level window likely doesn't process `WM_CHAR`. Use `WindowEnumChild` to find the child control (e.g. `Edit`) and pass its HWND as `hwnd`.
 - Some applications (DirectX games, certain Electron apps) may not respond to `PostMessage` at all. Use foreground mode for those.""",
         "parameters": {
             "type": "object",
@@ -413,8 +413,8 @@ The window can be obscured or in the background — no foreground focus needed.
                 },
                 "hwnd": {
                     "type": "integer",
-                    # 窗口句柄（HWND）。传入时使用后台文本输入模式，省略时使用前台模式。后台模式下如找不到焦点子控件，可用 window_enum_child 获取子控件 HWND 后直接传入。
-                    "description": "Window handle (HWND). Can be a top-level window (from `window_find`) or a child control (from `window_enum_child`). When provided, uses background typing mode (PostMessage WM_CHAR). When omitted, uses foreground mode (pyautogui for ASCII, SendInput for non-ASCII).",
+                    # 窗口句柄（HWND）。传入时使用后台文本输入模式，省略时使用前台模式。后台模式下如找不到焦点子控件，可用 WindowEnumChild 获取子控件 HWND 后直接传入。
+                    "description": "Window handle (HWND). Can be a top-level window (from `WindowFind`) or a child control (from `WindowEnumChild`). When provided, uses background typing mode (PostMessage WM_CHAR). When omitted, uses foreground mode (pyautogui for ASCII, SendInput for non-ASCII).",
                 },
             },
             "required": ["text"],

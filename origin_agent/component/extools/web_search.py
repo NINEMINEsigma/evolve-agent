@@ -246,7 +246,7 @@ def _handle_web_search(args: dict[str, Any]) -> dict:
 # ---------------------------------------------------------------------------
 
 registry.register(
-    name="web_search",
+    name="WebSearch",
     toolset="extools",
     schema={
         # 使用 DuckDuckGo（主）或 Bing（降级）搜索网页，返回标题、URL 和摘要列表。

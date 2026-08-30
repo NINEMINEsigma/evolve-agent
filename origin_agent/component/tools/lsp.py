@@ -1,12 +1,12 @@
 """LSP 代码识别工具 — 类型推断、引用追踪、定义跳转、语义诊断。
 
 通过 pyright (Language Server Protocol) 提供:
-  - ``lsp_start``      : 启动/替换 LSP server（指定根目录）
-  - ``lsp_references`` : 查找符号的所有引用
-  - ``lsp_definition`` : 跳转到符号定义
-  - ``lsp_diagnostics``: 获取文件的语义诊断
-  - ``lsp_symbols``    : 获取文件的符号列表
-  - ``lsp_refresh``    : 主动刷新 LSP 索引
+  - ``LSPStart``      : 启动/替换 LSP server（指定根目录）
+  - ``LSPReferences`` : 查找符号的所有引用
+  - ``LSPDefinition`` : 跳转到符号定义
+  - ``LSPDiagnostics``: 获取文件的语义诊断
+  - ``LSPSymbols``    : 获取文件的符号列表
+  - ``LSPRefresh``    : 主动刷新 LSP 索引
 
 模块导入时通过 ``registry.register()`` 自动注册。
 """
@@ -57,7 +57,7 @@ async def _handle_lsp_references(args: dict[str, Any]) -> dict:
     from system.lsp import get_lsp_manager
 
     if not get_lsp_manager().is_ready():
-        return tool_error("LSP not started. Call lsp_start first.")
+        return tool_error("LSP not started. Call LSPStart first.")
 
     path: str = str(args.get("file", "")).strip()
     line: int = int(args.get("line", 0))
@@ -77,7 +77,7 @@ async def _handle_lsp_definition(args: dict[str, Any]) -> dict:
     from system.lsp import get_lsp_manager
 
     if not get_lsp_manager().is_ready():
-        return tool_error("LSP not started. Call lsp_start first.")
+        return tool_error("LSP not started. Call LSPStart first.")
 
     path: str = str(args.get("file", "")).strip()
     line: int = int(args.get("line", 0))
@@ -96,7 +96,7 @@ async def _handle_lsp_diagnostics(args: dict[str, Any]) -> dict:
     from system.lsp import get_lsp_manager
 
     if not get_lsp_manager().is_ready():
-        return tool_error("LSP not started. Call lsp_start first.")
+        return tool_error("LSP not started. Call LSPStart first.")
 
     path: str = str(args.get("file", "")).strip()
     if not path:
@@ -114,7 +114,7 @@ async def _handle_lsp_symbols(args: dict[str, Any]) -> dict:
     from system.lsp import get_lsp_manager
 
     if not get_lsp_manager().is_ready():
-        return tool_error("LSP not started. Call lsp_start first.")
+        return tool_error("LSP not started. Call LSPStart first.")
 
     path: str = str(args.get("file", "")).strip()
     if not path:
@@ -132,7 +132,7 @@ async def _handle_lsp_refresh(args: dict[str, Any]) -> dict:
     from system.lsp import get_lsp_manager
 
     if not get_lsp_manager().is_ready():
-        return tool_error("LSP not started. Call lsp_start first.")
+        return tool_error("LSP not started. Call LSPStart first.")
 
     file: str | None = args.get("file")
     if file is not None:
@@ -151,7 +151,7 @@ async def _handle_lsp_refresh(args: dict[str, Any]) -> dict:
 # ---------------------------------------------------------------------------
 
 registry.register(
-    name="lsp_start",
+    name="LSPStart",
     toolset="lsp",
     schema={
         # 启动或替换 pyright LSP server。指定一个逻辑路径作为根目录，
@@ -188,7 +188,7 @@ Error:
 ```
 
 ## When to Use
-- Before using lsp_references, lsp_definition, lsp_diagnostics, or lsp_symbols.
+- Before using LSPReferences, LSPDefinition, LSPDiagnostics, or LSPSymbols.
 - When switching to a different namespace or directory for code analysis.
 
 ## Side Effects
@@ -213,11 +213,11 @@ Error:
 )
 
 registry.register(
-    name="lsp_references",
+    name="LSPReferences",
     toolset="lsp",
     schema={
         # 查找指定位置符号的所有引用（语义级别，非文本匹配）。
-        # 前置条件：LSP 已通过 lsp_start 启动。
+        # 前置条件：LSP 已通过 LSPStart 启动。
         # 调用效果：只读查询，向 pyright 发送 textDocument/references 请求。
         # 返回：{references: [{file, line, column, end_line, end_column, preview}], count}
         # 典型场景：评估修改某个函数/类前的影响范围。
@@ -225,7 +225,7 @@ registry.register(
         "description": """Find all references of the symbol at the given position. Semantic-level lookup (not text matching).
 
 ## Prerequisites
-- LSP must be started via `lsp_start`.
+- LSP must be started via `LSPStart`.
 - `file`, `line`, and `column` must be provided.
 
 ## Effect
@@ -276,11 +276,11 @@ Read-only query. Sends `textDocument/references` to pyright. Returns all locatio
 )
 
 registry.register(
-    name="lsp_definition",
+    name="LSPDefinition",
     toolset="lsp",
     schema={
         # 跳转到指定位置符号的定义位置。
-        # 前置条件：LSP 已通过 lsp_start 启动。
+        # 前置条件：LSP 已通过 LSPStart 启动。
         # 调用效果：只读查询，向 pyright 发送 textDocument/definition 请求。
         # 返回：{definition: {file, line, column, end_line, end_column, preview}} 或 {definition: null}
         # 典型场景：理解函数/类/变量的来源定义。
@@ -288,7 +288,7 @@ registry.register(
         "description": """Go to the definition of the symbol at the given position.
 
 ## Prerequisites
-- LSP must be started via `lsp_start`.
+- LSP must be started via `LSPStart`.
 - `file`, `line`, and `column` must be provided.
 
 ## Effect
@@ -339,11 +339,11 @@ Not found:
 )
 
 registry.register(
-    name="lsp_diagnostics",
+    name="LSPDiagnostics",
     toolset="lsp",
     schema={
         # 获取文件的语义诊断信息（错误、警告、提示）。
-        # 前置条件：LSP 已通过 lsp_start 启动。
+        # 前置条件：LSP 已通过 LSPStart 启动。
         # 调用效果：只读查询，返回 pyright 缓存中该文件的最新 diagnostics。
         # 返回：{diagnostics: [{severity, line, column, end_line, end_column, message, source, code}], count}
         # 典型场景：Write/PatchEdit 后检查代码错误；主动验证文件语义正确性。
@@ -351,7 +351,7 @@ registry.register(
         "description": """Get semantic diagnostics (errors, warnings, hints) for a file.
 
 ## Prerequisites
-- LSP must be started via `lsp_start`.
+- LSP must be started via `LSPStart`.
 - `file` must be provided.
 
 ## Effect
@@ -369,7 +369,7 @@ Read-only query. Returns the latest cached diagnostics from pyright for the spec
 
 ## When to Use
 - After writing or editing code, to check for semantic errors.
-- Proactively verify file correctness before `evolve_code`.
+- Proactively verify file correctness before `EvolveCode`.
 
 ## Side Effects
 - None (read-only query).""",
@@ -392,11 +392,11 @@ Read-only query. Returns the latest cached diagnostics from pyright for the spec
 )
 
 registry.register(
-    name="lsp_symbols",
+    name="LSPSymbols",
     toolset="lsp",
     schema={
         # 获取文件中的符号列表（函数、类、变量等）。
-        # 前置条件：LSP 已通过 lsp_start 启动。
+        # 前置条件：LSP 已通过 LSPStart 启动。
         # 调用效果：只读查询，向 pyright 发送 textDocument/documentSymbol 请求。
         # 返回：{symbols: [{name, kind, line, column, end_line, end_column, detail, children}], count}
         # 典型场景：浏览模块结构；了解文件中定义了哪些函数/类。
@@ -404,7 +404,7 @@ registry.register(
         "description": """Get the list of symbols (functions, classes, variables, etc.) in a file.
 
 ## Prerequisites
-- LSP must be started via `lsp_start`.
+- LSP must be started via `LSPStart`.
 - `file` must be provided.
 
 ## Effect
@@ -447,11 +447,11 @@ Read-only query. Sends `textDocument/documentSymbol` to pyright. Returns the sym
 )
 
 registry.register(
-    name="lsp_refresh",
+    name="LSPRefresh",
     toolset="lsp",
     schema={
         # 主动刷新 LSP 索引。可选指定单个文件，不指定则刷新整个工作区。
-        # 前置条件：LSP 已通过 lsp_start 启动。
+        # 前置条件：LSP 已通过 LSPStart 启动。
         # 调用效果：指定文件时发送 didChange 全量替换通知；不指定时触发工作区重分析。
         # 返回：{refreshed: true, file?: "...", scope?: "workspace"}
         # 典型场景：文件被外部手段修改后（绕过 Write/PatchEdit），或索引过时时。
@@ -459,7 +459,7 @@ registry.register(
         "description": """Manually refresh the LSP index for a specific file or the entire workspace.
 
 ## Prerequisites
-- LSP must be started via `lsp_start`.
+- LSP must be started via `LSPStart`.
 
 ## Effect
 When `file` is specified: reads the file from disk and sends a full `textDocument/didChange` notification to pyright, then clears the cached diagnostics for that file.

@@ -1,6 +1,6 @@
 """停止子 Agent 会话。
 
-模块导入时通过 ``registry.register()`` 注册 ``stop_subagent`` 工具。
+模块导入时通过 ``registry.register()`` 注册 ``StopSubAgent`` 工具。
 父 Agent 通过此工具强制终止指定子 Agent 会话，
 落盘完整会话历史，并可能激活等待队列中的下一个子 Agent。
 """
@@ -38,7 +38,7 @@ async def _handle_stop_subagent(args: dict[str, Any]) -> dict:
 
 
 registry.register(
-    name="stop_subagent",
+    name="StopSubAgent",
     toolset="multiagent",
     schema={
         # 强制终止一个子 Agent 会话。

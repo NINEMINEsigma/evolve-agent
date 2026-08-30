@@ -40,7 +40,7 @@ EDGE_CANDIDATE_PATHS: tuple[str, ...] = (
 # Chromium 136+ 起，默认用户数据目录下 --remote-debugging-port 被静默忽略，
 # 必须配合非默认 --user-data-dir 使用。
 EDGE_DEBUG_GUIDE: str = (
-    "无法接管浏览器：CDP 端点不可达。优先请 agent 调用 browser_launch 自动启动调试 Edge；"
+    "无法接管浏览器：CDP 端点不可达。优先请 agent 调用 BrowserLaunch 自动启动调试 Edge；"
     "若需手动启动，请执行：\n"
     '   "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe" --remote-debugging-port=9222 --user-data-dir=C:\\edge-cdp-profile\n'
     "注意：Chromium 136+ 在默认用户数据目录下会静默忽略调试端口参数，必须指定非默认 --user-data-dir。"
@@ -137,7 +137,7 @@ async def teardown() -> None:
 def register_headless_proc(proc: subprocess.Popen) -> None:
     """登记无头浏览器进程句柄，供应用关闭时终止。
 
-    由 ``browser_launch`` 在 headless=True 时调用。
+    由 ``BrowserLaunch`` 在 headless=True 时调用。
     覆盖之前登记的句柄（幂等：同一进程重复登记无副作用）。
     """
     global _headless_proc

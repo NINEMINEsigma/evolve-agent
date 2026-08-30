@@ -1,4 +1,4 @@
-"""browser_screenshot — 对已接管浏览器中的指定标签页截图（write）。
+"""BrowserScreenshot — 对已接管浏览器中的指定标签页截图（write）。
 
 截图经 sandbox resolve_write 直接写入 ws:logs/browser_screenshots/，
 返回 ws: 逻辑路径，可配合 Read 查看页面画面。
@@ -19,12 +19,12 @@ from entity.puretype import ToolDangerLevel
 logger = logging.getLogger(__name__)
 
 _NOT_CONNECTED: str = (
-    "浏览器未连接或 CDP 端点不可达。请先调用 browser_connect；"
+    "浏览器未连接或 CDP 端点不可达。请先调用 BrowserConnect；"
     "若 connect 曾返回指引，请先按指引让用户完成操作。"
 )
 
 _TAB_NOT_FOUND: str = (
-    "未找到匹配的标签页。请先用 browser_list_tabs 确认现有标签页；"
+    "未找到匹配的标签页。请先用 BrowserListTabs 确认现有标签页；"
     "若目标页面未在其中，请用户在浏览器中手动打开或切换到目标页面后重试。"
     "本工具不会自动打开任何页面。"
 )
@@ -39,7 +39,7 @@ async def _handle_browser_screenshot(args: dict[str, Any]) -> dict:
     try:
         browser = await _connection.get_browser()
     except Exception as exc:
-        logger.warning("browser_screenshot: reconnect failed: %s: %s", type(exc).__name__, exc)
+        logger.warning("BrowserScreenshot: reconnect failed: %s: %s", type(exc).__name__, exc)
         return tool_error(_NOT_CONNECTED)
 
     page = await _connection.find_page(browser, tab)
@@ -65,17 +65,17 @@ async def _handle_browser_screenshot(args: dict[str, Any]) -> dict:
 
 
 registry.register(
-    name="browser_screenshot",
+    name="BrowserScreenshot",
     toolset="browser",
     schema={
         # 对已接管浏览器中的指定标签页截图，返回用户视野一致的页面画面。
         #
         # ## 前置条件
-        # - 已成功调用 browser_connect。
-        # - 目标标签页已存在（可用 browser_list_tabs 确认）。
+        # - 已成功调用 BrowserConnect。
+        # - 目标标签页已存在（可用 BrowserListTabs 确认）。
         #
         # ## 调用效果
-        # tab 定位规则与 browser_screenshot 相同（index 或 url/title 子串）；
+        # tab 定位规则与 BrowserScreenshot 相同（index 或 url/title 子串）；
         # 未命中返回错误并请求用户手动操作——本工具不会自动打开任何页面。
         # 截图写入 ws:logs/browser_screenshots/{{uuid}}.png，full_page=true 时截取整页。
         #
@@ -85,7 +85,7 @@ registry.register(
         # ```
         #
         # ## 何时使用
-        # - browser_screenshot 是了解页面视觉状态的主要手段（布局、图片、验证码、弹窗等）。
+        # - BrowserScreenshot 是了解页面视觉状态的主要手段（布局、图片、验证码、弹窗等）。
         # - 用 Read 读取 saved_to 路径即可看到与用户视野一致的画面。
         #
         # ## 副作用/注意
@@ -93,11 +93,11 @@ registry.register(
         "description": """Takes a screenshot of a tab in the connected browser, capturing exactly what the user sees.
 
 ## Prerequisites
-- browser_connect must have succeeded.
-- The target tab must already exist (confirm with browser_list_tabs).
+- BrowserConnect must have succeeded.
+- The target tab must already exist (confirm with BrowserListTabs).
 
 ## Effect
-Tab location follows the same rules as browser_screenshot (0-based index, or URL/title substring). If no tab matches, an error is returned asking the user to act manually — this tool never opens pages on its own. The screenshot is written to ws:logs/browser_screenshots/{uuid}.png; pass full_page=true to capture the entire scrollable page.
+Tab location follows the same rules as BrowserScreenshot (0-based index, or URL/title substring). If no tab matches, an error is returned asking the user to act manually — this tool never opens pages on its own. The screenshot is written to ws:logs/browser_screenshots/{uuid}.png; pass full_page=true to capture the entire scrollable page.
 
 ## Returns
 ```json
@@ -116,7 +116,7 @@ Tab location follows the same rules as browser_screenshot (0-based index, or URL
                 "tab": {
                     "type": "string",
                     # 目标标签页：list_tabs 的 0 基 index（如 "0"），或 url/title 的子串。
-                    "description": "Target tab: the 0-based index from browser_list_tabs (e.g. \"0\"), or a substring of its URL or title.",
+                    "description": "Target tab: the 0-based index from BrowserListTabs (e.g. \"0\"), or a substring of its URL or title.",
                 },
                 "full_page": {
                     "type": "boolean",

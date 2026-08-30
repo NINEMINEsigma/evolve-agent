@@ -45,20 +45,20 @@ component/
 
 | 工具文件 | 主要工具 | 用途 |
 |----------|----------|------|
-| `filesystem.py` | `Read`, `Write`, `PatchEdit`, `Delete`, `Copy`, `Move`, `search_files`, `grep`, `file_exists` | 沙盒内文件操作 |
-| `code.py` | `validate_code`, `evolve_code` | 自我进化 |
-| `shell.py` | `run_command` 等 | 子进程执行 |
-| `frontend.py` | `validate_frontend` | 前端构建验证 |
-| `skills.py` | `load_skill`, `list_skills` | 技能管理 |
-| `run_python.py` | `run_python` | Python 代码执行 |
+| `filesystem.py` | `Read`, `Write`, `PatchEdit`, `Delete`, `Copy`, `Move`, `SearchFiles`, `Grep`, `file_exists` | 沙盒内文件操作 |
+| `code.py` | `ValidateCode`, `EvolveCode` | 自我进化 |
+| `shell.py` | `RunCommand` 等 | 子进程执行 |
+| `frontend.py` | `ValidateFrontend` | 前端构建验证 |
+| `skills.py` | `LoadSkill`, `ListSkills` | 技能管理 |
+| `run_python.py` | `RunPython` | Python 代码执行 |
 | `ask_question.py` | `Ask` | 向前端提问 |
-| `progress_tools.py` | `update_task_progress`, `clear_task_progress` | 任务进度 |
-| `clipboard_display_tools.py` | `update_clipboard_display`, `clear_clipboard_display` | 剪贴板展示 |
+| `progress_tools.py` | `UpdateTaskProgress`, `ClearTaskProgress` | 任务进度 |
+| `clipboard_display_tools.py` | `UpdateClipboardDisplay`, `ClearClipboardDisplay` | 剪贴板展示 |
 | `show_tool.py` | `ShowTool` | 查看工具/工具集元数据 |
-| `list_uploads.py` | `list_uploads` | 列出上传文件 |
-| `compress_history.py` | `compress_history` | 会话历史压缩 |
-| `session_search.py` | `session_search` | 会话内容搜索 |
-| `show_api_key_tool.py` | `show_api_key` | 显示当前 API 密钥 |
+| `list_uploads.py` | `ListUploads` | 列出上传文件 |
+| `compress_history.py` | `CompressHistory` | 会话历史压缩 |
+| `session_search.py` | `SessionSearch` | 会话内容搜索 |
+| `show_api_key_tool.py` | `ShowAPIKey` | 显示当前 API 密钥 |
 | `lsp.py` | LSP 诊断 | LSP 服务器进程管理与代码诊断 |
 
 ### 扩展工具集（`component/extools/`）
@@ -81,16 +81,16 @@ component/
 
 | 工具文件 | 主要工具 | 用途 |
 |----------|----------|------|
-| `register_subagent.py` | `register_subagent` | 注册子 Agent |
-| `unregister_subagent.py` | `unregister_subagent` | 注销子 Agent |
-| `list_subagents.py` | `list_subagents` | 列出子 Agent |
-| `run_subagent.py` | `run_subagent` | 启动子 Agent |
-| `chat_subagent.py` | `chat_subagent` | 向子 Agent 发消息 |
-| `stop_subagent.py` | `stop_subagent` | 停止子 Agent |
-| `approval_subagent.py` | `approval_subagent` | 审批子 Agent 的工具调用 |
-| `enter_multi_agent.py` | `enter_multi_agent` | 切换到多 Agent 协作模式 |
-| `exit_multi_agent.py` | `exit_multi_agent` | 退出多 Agent 协作模式 |
-| `agents_group.py` | `agents_group` | Agent 分组管理（当前未实现） |
+| `register_subagent.py` | `RegisterSubAgent` | 注册子 Agent |
+| `unregister_subagent.py` | `UnregisterSubAgent` | 注销子 Agent |
+| `list_subagents.py` | `ListSubAgents` | 列出子 Agent |
+| `run_subagent.py` | `RunSubAgent` | 启动子 Agent |
+| `chat_subagent.py` | `ChatSubAgent` | 向子 Agent 发消息 |
+| `stop_subagent.py` | `StopSubAgent` | 停止子 Agent |
+| `approval_subagent.py` | `ApprovalSubAgent` | 审批子 Agent 的工具调用 |
+| `enter_multi_agent.py` | `EnterMultiAgent` | 切换到多 Agent 协作模式 |
+| `exit_multi_agent.py` | `ExitMultiAgent` | 退出多 Agent 协作模式 |
+| `agents_group.py` | `AgentsGroup` | Agent 分组管理（当前未实现） |
 | `_store.py` | — | `SubagentStore`：子 Agent 注册表磁盘存储 |
 | `profile_builder.py` | — | `build_multi_agent_tools()`：多 Agent 模式工具过滤 |
 

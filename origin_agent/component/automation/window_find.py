@@ -6,7 +6,7 @@
 无第三方依赖。
 
 本工具是 automation 工具链的入口：先通过标题获取 HWND，
-后续的 ``window_focus`` / ``screen_capture`` / ``mouse_click`` 均以
+后续的 ``WindowFocus`` / ``ScreenCapture`` / ``MouseClick`` 均以
 HWND 为参数，不再各自按标题查找窗口。
 """
 
@@ -152,7 +152,7 @@ def _handle_window_find(args: dict[str, Any]) -> dict:
     first: dict[str, Any] = matches[0]
 
     logger.info(
-        "window_find | title='%s' → %d match(es), first hwnd=%d '%s' %dx%d (client %dx%d)",
+        "WindowFind | title='%s' → %d match(es), first hwnd=%d '%s' %dx%d (client %dx%d)",
         window_title, len(matches), first["hwnd"], first["title"],
         first["width"], first["height"], first["client_width"], first["client_height"],
     )
@@ -170,7 +170,7 @@ def _handle_window_find(args: dict[str, Any]) -> dict:
 # ---------------------------------------------------------------------------
 
 registry.register(
-    name="window_find",
+    name="WindowFind",
     toolset="automation",
     schema={
         # 通过窗口标题查找窗口，返回所有匹配窗口的 HWND 及尺寸信息。
@@ -201,13 +201,13 @@ Searches all visible top-level windows for ones whose title contains the given `
 }
 ```
 
-Inspect the `matches` array to pick the correct window by its full title, then pass that `hwnd` to `window_focus`, `screen_capture`, or `mouse_click`.
+Inspect the `matches` array to pick the correct window by its full title, then pass that `hwnd` to `WindowFocus`, `ScreenCapture`, or `MouseClick`.
 
 ## When to Use
 - As the first step in any automation flow to obtain the HWND.
-- Before `screen_capture` to capture a specific window.
-- Before `mouse_click` with background mode to click into an obscured window.
-- Before `window_focus` to bring a specific window to the foreground.
+- Before `ScreenCapture` to capture a specific window.
+- Before `MouseClick` with background mode to click into an obscured window.
+- Before `WindowFocus` to bring a specific window to the foreground.
 
 ## Side Effects / Notes
 - Read-only operation — does not modify window state.

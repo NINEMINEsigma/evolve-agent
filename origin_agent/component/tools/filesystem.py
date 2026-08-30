@@ -1746,9 +1746,9 @@ def _handle_search_files(args: dict[str, Any]) -> dict:
 # - 无副作用，只读查询。
 # - 使用 glob 模式（如 *.py），不是正则表达式。
 # - 结果超过 limit（默认 100）时写入日志文件，不直接返回完整列表。
-# - 不搜索文件内容（使用 grep）。
+# - 不搜索文件内容（使用 Grep）。
 registry.register(
-    name="search_files",
+    name="SearchFiles",
     toolset="filesystem",
     schema={
         "description": """Recursively search for files matching a filename glob pattern in a directory. Uses glob patterns (e.g. *.py, **/test_*.py), NOT regex. Returns a list of matching logical file paths. If results exceed the limit, the full list is written to a log file under ws:logs/ and only the count and log path are returned.
@@ -1778,7 +1778,7 @@ When results exceed the limit:
 - No side effects, read-only query.
 - Uses glob patterns (e.g. *.py), NOT regex.
 - Results exceeding the limit (default 100) are written to a log file instead of returned inline.
-- For searching file contents, use grep.""",
+- For searching file contents, use Grep.""",
         "parameters": {
             "type": "object",
             "properties": {
@@ -1961,9 +1961,9 @@ def _handle_grep(args: dict[str, Any]) -> dict:
 # - pattern 是 Python 正则表达式，不是 glob 模式。
 # - 自动跳过二进制文件和超大文件。
 # - 结果超过 limit（默认 100）时写入日志文件。
-# - 按文件名搜索使用 search_files。
+# - 按文件名搜索使用 SearchFiles。
 registry.register(
-    name="grep",
+    name="Grep",
     toolset="filesystem",
     schema={
         "description": f"""Recursively search text file contents using a regex pattern in a directory or a single file. Automatically skips binary files (by extension + null-byte sniffing) and oversized files. Returns matches with file path, line number, matched text, and surrounding context lines. If results exceed the limit, the full list is written to a log file under ws:logs/.
@@ -1995,7 +1995,7 @@ When results exceed the limit:
 - Pattern is a Python regex, NOT a glob pattern.
 - Automatically skips binary files and oversized files.
 - Results exceeding the limit (default 100) are written to a log file.
-- For searching by filename, use search_files.""",
+- For searching by filename, use SearchFiles.""",
         "parameters": {
             "type": "object",
             "properties": {

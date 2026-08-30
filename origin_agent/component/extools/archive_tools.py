@@ -220,7 +220,7 @@ def _handle_decompress(args: dict[str, Any]) -> dict:
 # ---------------------------------------------------------------------------
 
 registry.register(
-    name="compress",
+    name="Compress",
     toolset="archive",
     schema={
         # 将文件或目录压缩为指定格式的压缩包。
@@ -301,7 +301,7 @@ Compresses the source (file or directory) into an archive at the output path. If
 )
 
 registry.register(
-    name="decompress",
+    name="Decompress",
     toolset="archive",
     schema={
         # 将压缩包解压到指定目录。支持格式自动推断（根据文件名后缀）。

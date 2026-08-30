@@ -41,7 +41,7 @@ def _handle_remember(args: dict[str, Any], context: ToolContext | None = None) -
 # ── 注册 ─────────────────────────────────────────────────────
 
 registry.register(
-    name="remember",
+    name="Remember",
     toolset="memory_tools",
     schema={
         # 将一条信息持久化到记忆存储，供后续会话通过 remember_memory hook 读取。

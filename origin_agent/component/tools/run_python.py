@@ -1,7 +1,7 @@
 """Python 执行工具 — 始终使用与 agent 进程相同的解释器运行 Python 代码。
 
 模块导入时通过 ``registry.register()`` 注册。
-与 ``run_command`` 不同，此工具固定使用 ``sys.executable``
+与 ``RunCommand`` 不同，此工具固定使用 ``sys.executable``
 （即启动 agent 的那个 Python），不受 PATH 影响。
 
 支持两种模式：
@@ -108,7 +108,7 @@ def _execute(cmd_parts: list[str], cwd: str, timeout: int = SUBPROCESS_TIMEOUT_D
 # ── 注册 ─────────────────────────────────────────────────────
 
 registry.register(
-    name="run_python",
+    name="RunPython",
     toolset="python",
     schema={
         # 使用与 agent 进程相同的 Python 解释器执行代码。始终使用当前解释器的完整路径，不受 PATH 指向影响。

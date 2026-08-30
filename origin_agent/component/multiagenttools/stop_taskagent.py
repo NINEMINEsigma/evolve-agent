@@ -1,6 +1,6 @@
 """强制停止运行中的 taskagent。
 
-模块导入时通过 ``registry.register()`` 注册 ``stop_taskagent`` 工具。
+模块导入时通过 ``registry.register()`` 注册 ``StopTaskAgent`` 工具。
 父 Agent 通过此工具强制终止指定 taskagent 会话，不保存历史。
 """
 
@@ -39,7 +39,7 @@ async def _handle_stop_taskagent(args: dict[str, Any]) -> dict:
 
 
 registry.register(
-    name="stop_taskagent",
+    name="StopTaskAgent",
     toolset="multiagent",
     schema={
         # 强制终止一个运行中的 taskagent 会话。

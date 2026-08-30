@@ -7,7 +7,7 @@
 每条用户消息触发一轮串行级联响应：初始响应者组成队列逐个执行，
 每个 Agent 完成后可通过 response_characters 动态指定后续响应者，
 级联持续直到队列清空或达到最大深度。
-可通过 exit_multi_agent 退出回普通模式。
+可通过 ExitMultiAgent 退出回普通模式。
 """
 
 from __future__ import annotations
@@ -69,7 +69,7 @@ async def _handle_enter_multi_agent(args: dict[str, Any]) -> dict:
         if not agents:
             return tool_error(
                 "No registered sub-agents found. "
-                "Register at least one sub-agent using register_subagent_from_parent before entering multi-agent mode."
+                "Register at least one sub-agent using RegisterSubAgentFromParent before entering multi-agent mode."
             )
 
     # 将主 Agent 自身也加入参与者列表（它调用工具后自己也需要参与对话）
@@ -81,7 +81,7 @@ async def _handle_enter_multi_agent(args: dict[str, Any]) -> dict:
     if missing:
         return tool_error(
             f"Subagent profiles not found: {', '.join(missing)}. "
-            "Register them first using register_subagent_from_parent."
+            "Register them first using RegisterSubAgentFromParent."
         )
 
     # 停止所有子 Agent
@@ -161,7 +161,7 @@ async def _handle_enter_multi_agent(args: dict[str, Any]) -> dict:
 
 
 registry.register(
-    name="enter_multi_agent",
+    name="EnterMultiAgent",
     toolset="multiagent",
     availability=ToolAvailability.MAIN,
     danger_level=ToolDangerLevel.safe,
@@ -175,11 +175,11 @@ registry.register(
         # 初始 response_characters 组成队列，Agent 逐个执行，每个完成后可通过
         # response_characters 动态指定后续响应者（已在队列中则移到队首，不在则加到队尾），
         # 级联持续直到队列清空或达到最大深度。
-        # 可通过 exit_multi_agent 退出回普通模式。
+        # 可通过 ExitMultiAgent 退出回普通模式。
         #
         # ## 前置条件
         # - 仅有活跃的主会话可以调用；子 Agent 会话不支持。
-        # - 至少有一个已注册子 Agent（通过 register_subagent_from_parent 注册）。
+        # - 至少有一个已注册子 Agent（通过 RegisterSubAgentFromParent 注册）。
         #
         # ## 调用效果
         # - 所有活跃子 Agent 将被停止并清理。
@@ -203,7 +203,7 @@ registry.register(
         # - 所有活跃子 Agent 被停止并清理。
         # - multiagent 工具集被禁用。
         # - 主 Agent 会被无条件加入参与者列表。
-        # - 可通过 exit_multi_agent 退出回普通模式。
+        # - 可通过 ExitMultiAgent 退出回普通模式。
         # - 工具返回成功后，模式切换将在你本轮回复完成后生效。请直接给用户一个简短确认，不要再调用任何工具。
         #
         # ## 用户侧控制
@@ -216,7 +216,7 @@ registry.register(
 
 ## Prerequisites
 - Only an active main session can call this; sub-agent sessions are not supported.
-- At least one sub-agent must be registered (via `register_subagent_from_parent`).
+- At least one sub-agent must be registered (via `RegisterSubAgentFromParent`).
 
 ## Effect
 - All active sub-agents will be stopped and cleaned up.
@@ -225,7 +225,7 @@ registry.register(
 - Each user message triggers one round of serial cascading responses: the initial `response_characters` form a queue, agents execute one at a time, each waiting for the previous to fully complete before starting.
 - Every agent reply may use `response_characters` to dynamically adjust the queue — agents already queued are moved to the front, new agents are appended to the back, self-nomination is ignored.
 - The cascade continues until the queue is empty or the maximum depth (len(agents) * cascade_depth) is reached.
-- Use `exit_multi_agent` to switch back to normal mode.
+- Use `ExitMultiAgent` to switch back to normal mode.
 
 ## Returns
 ```json
@@ -241,7 +241,7 @@ registry.register(
 - All active sub-agents are stopped and cleaned up.
 - The multiagent toolset is disabled.
 - The main agent is always forcibly included in the participant list.
-- Use `exit_multi_agent` to exit back to normal mode.
+- Use `ExitMultiAgent` to exit back to normal mode.
 - After this tool returns success, the mode switch takes effect after your current reply completes. Simply give the user a brief confirmation and do NOT call any other tools in your response. The new multi-agent loop will handle all subsequent user messages.
 
 ## User-Side Controls

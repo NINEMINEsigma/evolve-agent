@@ -1,6 +1,6 @@
 """运行子 Agent。
 
-模块导入时通过 ``registry.register()`` 注册 ``run_subagent`` 工具。
+模块导入时通过 ``registry.register()`` 注册 ``RunSubAgent`` 工具。
 通过已注册的子 Agent 配置启动一次子 Agent 会话。
 """
 
@@ -103,7 +103,7 @@ async def _handle_run_subagent(args: dict[str, Any]) -> dict:
 
 
 registry.register(
-    name="run_subagent",
+    name="RunSubAgent",
     toolset="multiagent",
     schema={
         # 启动一个已注册子 Agent 的会话。
@@ -149,7 +149,7 @@ You MUST explicitly decide whether to pass history_path:
 - Without history_path, the sub-agent has no memory of previous conversations; only its persona/system prompt remains.
 - Role-play sub-agents usually need memory, so pass the JSONL history file saved by stop_subagent.
 - Functional sub-agents may or may not need memory depending on the task: pass history_path only if the task requires continuing from a previous session's context; omit it for independent execution.
-The 'initial_prompt' parameter IS the first message sent to the sub-agent — do NOT call chat_subagent separately just to send the initial prompt.
+The 'initial_prompt' parameter IS the first message sent to the sub-agent — do NOT call ChatSubAgent separately just to send the initial prompt.
 
 ## Effect
 Each call creates a brand-new session. If history_path is omitted, the sub-agent has NO memory of prior conversations, so you MUST include all necessary context in initial_prompt.
@@ -199,7 +199,7 @@ When queued:
                 "initial_prompt": {
                     "type": "string",
                     # 发送给子 Agent 的首条消息（任务描述与完整上下文）。不要仅为了发送这条消息而再次调用 chat_subagent。
-                    "description": """The first message (task description and full context) sent to the sub-agent. Do NOT call chat_subagent afterward just to send this prompt.""",
+                    "description": """The first message (task description and full context) sent to the sub-agent. Do NOT call ChatSubAgent afterward just to send this prompt.""",
                 },
                 "user_name": {
                     "type": "string",

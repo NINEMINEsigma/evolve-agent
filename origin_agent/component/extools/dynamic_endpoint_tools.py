@@ -2,9 +2,9 @@
 
 属于 extools，模块导入时通过 ``registry.register()`` 注册三个工具：
 
-  - ``register_dynamic_endpoint``   — 注册端点，返回 URL
-  - ``unregister_dynamic_endpoint`` — 解除注册
-  - ``list_dynamic_endpoints``      — 列出当前会话的端点
+  - ``RegisterDynamicEndpoint``   — 注册端点，返回 URL
+  - ``UnregisterDynamicEndpoint`` — 解除注册
+  - ``ListDynamicEndpoints``      — 列出当前会话的端点
 
 注册表持久化至 ``workspace/dynamic_endpoints.json``，进程重启后
 按会话存在性恢复（已删除/无效会话的端点保留在磁盘但不加载）。
@@ -455,7 +455,7 @@ async def _handle_list_dynamic_endpoints(
 # ── 注册 ─────────────────────────────────────────────────────
 
 registry.register(
-    name="register_dynamic_endpoint",
+    name="RegisterDynamicEndpoint",
     toolset="dynamic",
     schema={
         # 注册一个动态 HTTP POST 端点，返回 URL 供 agent 在消息中渲染可点击按钮。
@@ -550,7 +550,7 @@ Creates an endpoint registration with path format /dynamic/{session_id}/{agent_n
 )
 
 registry.register(
-    name="unregister_dynamic_endpoint",
+    name="UnregisterDynamicEndpoint",
     toolset="dynamic",
     schema={
         # 解除注册指定端点，后续 POST 请求将返回 404。
@@ -614,7 +614,7 @@ Removes the endpoint from the registry and its persisted record. Subsequent POST
 )
 
 registry.register(
-    name="list_dynamic_endpoints",
+    name="ListDynamicEndpoints",
     toolset="dynamic",
     schema={
         # 列出当前 agent 自己注册的动态端点（按 agent 过滤，看不到其他 agent 的端点）。

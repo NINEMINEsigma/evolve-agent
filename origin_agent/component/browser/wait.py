@@ -1,4 +1,4 @@
-"""browser_wait — 等待页面/元素达到指定状态（safe）。
+"""BrowserWait — 等待页面/元素达到指定状态（safe）。
 
 供 goto/click 等操作后同步状态：等网络空闲或等元素可见/隐藏。
 无任何副作用。模块导入时通过 ``registry.register()`` 注册。
@@ -16,12 +16,12 @@ from entity.puretype import ToolDangerLevel
 logger = logging.getLogger(__name__)
 
 _NOT_CONNECTED: str = (
-    "浏览器未连接或 CDP 端点不可达。请先调用 browser_connect；"
+    "浏览器未连接或 CDP 端点不可达。请先调用 BrowserConnect；"
     "若 connect 曾返回指引，请先按指引让用户完成操作。"
 )
 
 _TAB_NOT_FOUND: str = (
-    "未找到匹配的标签页。请先用 browser_list_tabs 确认现有标签页。"
+    "未找到匹配的标签页。请先用 BrowserListTabs 确认现有标签页。"
 )
 
 _VALID_STATES: tuple[str, ...] = ("attached", "detached", "visible", "hidden")
@@ -44,7 +44,7 @@ async def _handle_browser_wait(args: dict[str, Any]) -> dict:
     try:
         browser = await _connection.get_browser()
     except Exception as exc:
-        logger.warning("browser_wait: reconnect failed: %s: %s", type(exc).__name__, exc)
+        logger.warning("BrowserWait: reconnect failed: %s: %s", type(exc).__name__, exc)
         return tool_error(_NOT_CONNECTED)
     page = await _connection.find_page(browser, tab)
     if page is None:
@@ -66,7 +66,7 @@ async def _handle_browser_wait(args: dict[str, Any]) -> dict:
 
 
 registry.register(
-    name="browser_wait",
+    name="BrowserWait",
     toolset="browser",
     schema={
         # 等待页面或元素达到指定状态。
@@ -77,7 +77,7 @@ registry.register(
         # - 超时（默认 2000ms）未满足则返回错误。
         #
         # ## 何时使用
-        # - browser_goto / browser_click 等操作后同步页面状态。
+        # - BrowserGoto / BrowserClick 等操作后同步页面状态。
         # - 等待动态加载的元素出现后再读取。
         #
         # ## 副作用/注意
@@ -90,7 +90,7 @@ registry.register(
 - Errors when the condition is not met within `timeout_ms` (default 2000).
 
 ## When to Use
-- Sync page state after browser_goto / browser_click.
+- Sync page state after BrowserGoto / BrowserClick.
 - Wait for dynamically loaded elements before reading them.
 
 ## Side Effects / Notes
@@ -100,8 +100,8 @@ registry.register(
             "properties": {
                 "tab": {
                     "type": "string",
-                    # 目标标签页：browser_list_tabs 的 0 基 index（如 "0"），或 url/title 的子串。
-                    "description": "Target tab: the 0-based index from browser_list_tabs, or a substring of its URL or title.",
+                    # 目标标签页：BrowserListTabs 的 0 基 index（如 "0"），或 url/title 的子串。
+                    "description": "Target tab: the 0-based index from BrowserListTabs, or a substring of its URL or title.",
                 },
                 "selector": {
                     "type": "string",

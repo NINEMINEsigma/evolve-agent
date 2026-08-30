@@ -37,7 +37,7 @@ async def request_user_confirm(
 
     参数：
         session_id: WebSocket session ID
-        tool_name:  工具名（如 "run_command"、"install_package"）
+        tool_name:  工具名（如 "RunCommand"、"InstallPackage"）
         args:       工具调用参数字典
         reason:     agent 给出的执行原因
         content:    展示给审批者的描述文本

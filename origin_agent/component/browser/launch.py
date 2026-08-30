@@ -1,4 +1,4 @@
-"""browser_launch — 以调试参数启动 Edge（dangerous，幂等）。
+"""BrowserLaunch — 以调试参数启动 Edge（dangerous，幂等）。
 
 profile（user-data-dir）持久化在 agentspace（ws:browser_profile），
 登录态跨会话保留；启动的是调试专用实例，与日常 Edge 并存；
@@ -66,7 +66,7 @@ async def _handle_browser_launch(args: dict[str, Any]) -> dict:
     proc = _launch_edge_process(str(resolved.real), endpoint, headless=headless)
     if headless:
         _connection.register_headless_proc(proc)
-    logger.info("browser_launch: started Edge, user-data-dir=%s, endpoint=%s, headless=%s", resolved.real, endpoint, headless)
+    logger.info("BrowserLaunch: started Edge, user-data-dir=%s, endpoint=%s, headless=%s", resolved.real, endpoint, headless)
 
     if not await _connection.wait_for_endpoint(endpoint, timeout_s=float(timeout)):
         return tool_error(
@@ -85,7 +85,7 @@ async def _handle_browser_launch(args: dict[str, Any]) -> dict:
 
 
 registry.register(
-    name="browser_launch",
+    name="BrowserLaunch",
     toolset="browser",
     schema={
         # 以调试参数启动 Edge（幂等：端口已就绪时直接返回）。
@@ -105,7 +105,7 @@ registry.register(
         # 否则启动 Edge（--remote-debugging-port + --user-data-dir=ws:browser_profile
         # 解析出的 agentspace 路径），轮询等待端口就绪（默认 20s）后返回。
         # headless=true 时额外追加 --headless=new 启动为无头模式。
-        # 后续可调用 browser_connect 建立连接。
+        # 后续可调用 BrowserConnect 建立连接。
         # 无头模式下启动的浏览器进程会被登记，应用退出时自动终止（用户无法手动关闭）。
         #
         # ## 返回
@@ -114,7 +114,7 @@ registry.register(
         # ```
         #
         # ## 何时使用
-        # - 首次使用 browser 工具组、或检测到端口不可达时，先于 browser_connect 调用。
+        # - 首次使用 browser 工具组、或检测到端口不可达时，先于 BrowserConnect 调用。
         # - 无需用户参与操作和观察页面时，设置 headless=true 以无头模式启动。
         #
         # ## 副作用/注意
@@ -129,7 +129,7 @@ registry.register(
 - Port 9222 must not be occupied by another process.
 
 ## Effect
-If the CDP endpoint is already reachable, returns `already_running: true` without launching a duplicate. Otherwise starts Edge with --remote-debugging-port plus --user-data-dir pointing at the agentspace path resolved from ws:browser_profile (Chromium 136+ silently ignores the debug port on the default user data directory — this tool handles that automatically). Polls until the port is ready (default 20s) and returns. When `headless` is true, also appends `--headless=new` so the browser runs without a visible window — use this when no user interaction or page observation is needed. Call browser_connect afterwards to attach.
+If the CDP endpoint is already reachable, returns `already_running: true` without launching a duplicate. Otherwise starts Edge with --remote-debugging-port plus --user-data-dir pointing at the agentspace path resolved from ws:browser_profile (Chromium 136+ silently ignores the debug port on the default user data directory — this tool handles that automatically). Polls until the port is ready (default 20s) and returns. When `headless` is true, also appends `--headless=new` so the browser runs without a visible window — use this when no user interaction or page observation is needed. Call BrowserConnect afterwards to attach.
 
 ## Returns
 ```json
@@ -137,7 +137,7 @@ If the CDP endpoint is already reachable, returns `already_running: true` withou
 ```
 
 ## When to Use
-- First-time use of the browser toolset, or when the endpoint is unreachable — before browser_connect.
+- First-time use of the browser toolset, or when the endpoint is unreachable — before BrowserConnect.
 - Set `headless: true` when the task requires no user interaction or page observation.
 
 ## Side Effects / Notes

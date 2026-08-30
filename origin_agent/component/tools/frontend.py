@@ -173,7 +173,7 @@ def _tail(text: str | None, n: int = 8) -> str:
 # ---------------------------------------------------------------------------
 
 registry.register(
-    name="validate_frontend",
+    name="ValidateFrontend",
     toolset="frontend",
     schema={
         # 验证前端代码能否构建。在 fork:frontend 目录下运行 <pkg_mgr> install && <pkg_mgr> run build（包管理器优先 pnpm，回退 npm）。
@@ -191,7 +191,7 @@ registry.register(
 - Only available in fast mode.
 
 ## Effect
-Runs `<pkg_mgr> install` followed by `<pkg_mgr> run build` in the target directory (non-interactive, `CI=true`). Catches TypeScript and build errors that `validate_code` cannot detect. Does not modify any files beyond what the package manager itself generates (`node_modules/`, `dist/`).
+Runs `<pkg_mgr> install` followed by `<pkg_mgr> run build` in the target directory (non-interactive, `CI=true`). Catches TypeScript and build errors that `ValidateCode` cannot detect. Does not modify any files beyond what the package manager itself generates (`node_modules/`, `dist/`).
 
 ## Parameters
 - `path` (string, default `"fork:frontend"`): Logical path of the frontend directory. Can be a bare name or a namespaced path like `"fork:frontend"`.
@@ -215,7 +215,7 @@ Runs `<pkg_mgr> install` followed by `<pkg_mgr> run build` in the target directo
 ```
 
 ## When to Use
-Evolution workflow — call after modifying frontend files and before `evolve_code`. Skip if no frontend files were changed.
+Evolution workflow — call after modifying frontend files and before `EvolveCode`. Skip if no frontend files were changed.
 
 ## Side Effects
 Creates `node_modules/` and `dist/` in the target directory. Long-running (up to timeout); only call when frontend changes were actually made.""",

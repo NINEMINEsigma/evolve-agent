@@ -1059,7 +1059,7 @@ async def dynamic_endpoint_handler(
 ):
     """动态端点回调 — 向指定会话中的指定 agent 投递仅自身可见的系统消息。
 
-    agent 通过 ``register_dynamic_endpoint`` 工具注册端点后，在消息气泡中
+    agent 通过 ``RegisterDynamicEndpoint`` 工具注册端点后，在消息气泡中
     渲染按钮（走 SafeHtml iframe 路径），用户点击按钮时通过 fetch POST 触发
     此端点。POST body 支持两种内容载体：
 

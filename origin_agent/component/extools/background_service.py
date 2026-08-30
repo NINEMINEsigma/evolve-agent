@@ -2,12 +2,12 @@
 
 属于 extools，模块导入时通过 ``registry.register()`` 注册三个工具：
 
-  - ``start_background_service``  — 启动后台进程，返回 task_id + 日志路径
-  - ``stop_background_service``   — 通过 task_id 停止后台进程
-  - ``start_watching_service``    — 启动后台进程并监视输出，按自适应间隔
+  - ``StartBackgroundService``  — 启动后台进程，返回 task_id + 日志路径
+  - ``StopBackgroundService``   — 通过 task_id 停止后台进程
+  - ``StartWatchingService``    — 启动后台进程并监视输出，按自适应间隔
     将增量输出 POST 到指定动态端点
 
-与 ``run_command`` 不同，这些工具不等待进程完成，而是立即返回。
+与 ``RunCommand`` 不同，这些工具不等待进程完成，而是立即返回。
 启动的进程以 daemon 方式运行，stdout/stderr 重定向到日志文件
 （watching 类型由 reader 线程读取后双写到缓冲区和日志文件）。
 """
@@ -373,7 +373,7 @@ async def _handle_stop_background_service(args: dict[str, Any]) -> dict:
 # ── 注册 ─────────────────────────────────────────────────────
 
 registry.register(
-    name="start_background_service",
+    name="StartBackgroundService",
     toolset="background",
     schema={
         # 在后台启动一个长时间运行的服务进程，立即返回而不等待进程完成。
@@ -462,7 +462,7 @@ Resolves sandbox logical paths in the command, then launches the subprocess in t
 )
 
 registry.register(
-    name="stop_background_service",
+    name="StopBackgroundService",
     toolset="background",
     schema={
         # 停止一个由 start_background_service 或 start_watching_service 启动的后台服务进程。
@@ -707,7 +707,7 @@ async def _handle_start_watching_service(args: dict[str, Any]) -> dict:
 
 
 registry.register(
-    name="start_watching_service",
+    name="StartWatchingService",
     toolset="background",
     schema={
         # 启动后台进程并监视其 stdout/stderr，按自适应间隔将增量输出

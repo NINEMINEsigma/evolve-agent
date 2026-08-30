@@ -102,7 +102,7 @@ def _handle_list_uploads(args: dict[str, Any]) -> dict:
 # ---------------------------------------------------------------------------
 
 registry.register(
-    name="list_uploads",
+    name="ListUploads",
     toolset="filesystem",
     schema={
         # 列出最近上传的文件，按上传时间降序排列。

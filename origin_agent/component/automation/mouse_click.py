@@ -6,7 +6,7 @@
 - **屏幕坐标模式**（不传 hwnd）：使用 ``pyautogui.click(x, y)`` 在屏幕绝对坐标点击。
   需要目标窗口在前台且未被遮挡。
 - **后台点击模式**（传 hwnd）：使用 ``PostMessage`` 向指定窗口发送鼠标消息。
-  x, y 解释为窗口客户区坐标，与 ``screen_capture`` / ``template_match`` 衔接。
+  x, y 解释为窗口客户区坐标，与 ``ScreenCapture`` / ``TemplateMatch`` 衔接。
   窗口可被遮挡，无需在前台。
 
 依赖 ``pyautogui``（仅屏幕坐标模式需要）。通过 ``check_fn`` 检测可用性。
@@ -120,7 +120,7 @@ def _handle_mouse_click(args: dict[str, Any]) -> dict:
             )
 
         logger.info(
-            "mouse_click | hwnd=%d x=%d y=%d button=%s clicks=%d (background)",
+            "MouseClick | hwnd=%d x=%d y=%d button=%s clicks=%d (background)",
             hwnd, x, y, button, clicks,
         )
 
@@ -144,7 +144,7 @@ def _handle_mouse_click(args: dict[str, Any]) -> dict:
     except Exception as exc:
         return tool_error(f"Mouse click failed: {exc}", x=x, y=y, button=button)
 
-    logger.info("mouse_click | x=%d y=%d button=%s clicks=%d (screen)", x, y, button, clicks)
+    logger.info("MouseClick | x=%d y=%d button=%s clicks=%d (screen)", x, y, button, clicks)
 
     return tool_result(
         success=True,
@@ -162,11 +162,11 @@ def _handle_mouse_click(args: dict[str, Any]) -> dict:
 # ---------------------------------------------------------------------------
 
 registry.register(
-    name="mouse_click",
+    name="MouseClick",
     toolset="automation",
     schema={
         # 模拟鼠标点击，支持屏幕坐标点击和窗口后台点击两种模式。
-        # 前置条件：屏幕模式需 pyautogui；后台模式需先用 window_find 获取 HWND。
+        # 前置条件：屏幕模式需 pyautogui；后台模式需先用 WindowFind 获取 HWND。
         # 调用效果：屏幕模式移动光标到坐标并点击；后台模式通过 PostMessage 发送点击消息。
         # 返回值：x、y、button、clicks、mode（screen 或 background）。
         # 典型场景：后台模式用于被遮挡窗口的点击；屏幕模式用于前台窗口。
@@ -176,7 +176,7 @@ registry.register(
 ## Prerequisites
 - `pyautogui` must be installed (screen mode only).
 - Windows only.
-- For background mode: use `window_find` first to obtain the HWND.
+- For background mode: use `WindowFind` first to obtain the HWND.
 
 ## Two Modes
 
@@ -184,7 +184,7 @@ registry.register(
 Moves the mouse cursor to (x, y) and performs the specified number of clicks with the specified button. The target window must be in the foreground and not obscured. `duration` controls mouse movement animation.
 
 ### Background mode (`hwnd` provided)
-Uses `PostMessage` to send mouse click messages directly to the target window. The window can be obscured or in the background. `x` and `y` are interpreted as **window client-area coordinates** — the same coordinate system as `screen_capture` and `template_match`. `duration` is not used in this mode.
+Uses `PostMessage` to send mouse click messages directly to the target window. The window can be obscured or in the background. `x` and `y` are interpreted as **window client-area coordinates** — the same coordinate system as `ScreenCapture` and `TemplateMatch`. `duration` is not used in this mode.
 
 ## Returns
 ```json
@@ -194,7 +194,7 @@ Uses `PostMessage` to send mouse click messages directly to the target window. T
 ```
 
 ## When to Use
-- **Background mode**: After `window_find` → `screen_capture` → `template_match`, click the center of the matched region: `x + w/2`, `y + h/2`. The coordinates from `template_match` are already in window client-area coordinates, so no conversion is needed.
+- **Background mode**: After `WindowFind` → `ScreenCapture` → `TemplateMatch`, click the center of the matched region: `x + w/2`, `y + h/2`. The coordinates from `TemplateMatch` are already in window client-area coordinates, so no conversion is needed.
 - **Screen mode**: To interact with UI elements at known screen positions when the target is guaranteed to be in the foreground.
 
 ## Side Effects / Notes
@@ -203,7 +203,7 @@ Uses `PostMessage` to send mouse click messages directly to the target window. T
 - `pyautogui.FAILSAFE` is disabled in screen mode.
 - Background mode `duration` is ignored (no mouse movement animation).
 - Some applications (DirectX games, certain Electron apps) may not respond to `PostMessage` mouse messages. Use screen mode for those.
-- Coordinates in background mode are relative to the window's client area (top-left = 0,0), matching `screen_capture` and `template_match` output.""",
+- Coordinates in background mode are relative to the window's client area (top-left = 0,0), matching `ScreenCapture` and `TemplateMatch` output.""",
         "parameters": {
             "type": "object",
             "properties": {
@@ -220,7 +220,7 @@ Uses `PostMessage` to send mouse click messages directly to the target window. T
                 "hwnd": {
                     "type": "integer",
                     # 窗口句柄（HWND）。传入时使用后台点击模式（PostMessage），省略时使用屏幕坐标模式（pyautogui）。
-                    "description": "Window handle (HWND) from `window_find`. When provided, uses background click mode (PostMessage). When omitted, uses screen coordinate mode (pyautogui).",
+                    "description": "Window handle (HWND) from `WindowFind`. When provided, uses background click mode (PostMessage). When omitted, uses screen coordinate mode (pyautogui).",
                 },
                 "button": {
                     "type": "string",

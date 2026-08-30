@@ -1,6 +1,6 @@
 """删除已注册的子 Agent。
 
-模块导入时通过 ``registry.register()`` 注册 ``unregister_subagent`` 工具。
+模块导入时通过 ``registry.register()`` 注册 ``UnregisterSubAgent`` 工具。
 """
 
 from __future__ import annotations
@@ -41,7 +41,7 @@ def _handle_unregister_subagent(args: dict[str, Any]) -> dict:
 
 
 registry.register(
-    name="unregister_subagent",
+    name="UnregisterSubAgent",
     toolset="multiagent",
     schema={
         # 通过唯一名称移除已注册的子 Agent 配置。

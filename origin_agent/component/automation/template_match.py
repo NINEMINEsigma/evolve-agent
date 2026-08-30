@@ -203,7 +203,7 @@ def _handle_template_match(args: dict[str, Any]) -> dict:
                 matched_count += 1
 
         logger.info(
-            "template_match | image=%s template=%s → %d matches, best_score=%.4f",
+            "TemplateMatch | image=%s template=%s → %d matches, best_score=%.4f",
             image_path, tp, single_result.get("match_count", 0),
             single_result["best"]["score"] if single_result.get("best") else 0,
         )
@@ -256,14 +256,14 @@ def _nms(matches: list[dict], tw: int, th: int, overlap_thresh: float = 0.5) -> 
 # ---------------------------------------------------------------------------
 
 registry.register(
-    name="template_match",
+    name="TemplateMatch",
     toolset="automation",
     schema={
         # 在图片中用 OpenCV 模板匹配定位目标，返回匹配坐标框选。
         # 前置条件：需安装 opencv-python；图片和模板须在沙箱（ws:）中。
         # 调用效果：对每张模板执行 cv2.matchTemplate，返回阈值以上的所有匹配并按分数降序排列。
         # 返回值：results 以模板路径为键，每项含 matched、match_count、matches 列表、best 最佳匹配。
-        # 典型场景：screen_capture 截图后定位 UI 元素，为 mouse_click 提供坐标。
+        # 典型场景：ScreenCapture 截图后定位 UI 元素，为 MouseClick 提供坐标。
         # 副作用：只读操作，不修改文件；NMS 去重重叠率 >50% 的匹配。
         "description": """Find template images within an image using OpenCV template matching.
 
@@ -308,8 +308,8 @@ Uses `cv2.matchTemplate` to locate each template image within the source image. 
 When a template's `matched` is false, its `matches` is empty and `best` is null. If a template file could not be read, an `error` field is included instead.
 
 ## When to Use
-- After `screen_capture` to locate UI elements (buttons, icons, text regions) on screen.
-- To find coordinates for `mouse_click` — use the `best` match's center: `x + w/2`, `y + h/2`.
+- After `ScreenCapture` to locate UI elements (buttons, icons, text regions) on screen.
+- To find coordinates for `MouseClick` — use the `best` match's center: `x + w/2`, `y + h/2`.
 - To match multiple UI elements in a single call — pass multiple template paths.
 - To verify whether a specific UI state is present.
 

@@ -436,7 +436,7 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
                         await self._push_usage_update(sid)
                         _executed_tool_msgs.append(tool_msg)
 
-                        if tc.name == "evolve_code":
+                        if tc.name == "EvolveCode":
                             try:
                                 content_text = content_to_text(tool_msg.content)
                                 parsed: Any = json.loads(content_text)

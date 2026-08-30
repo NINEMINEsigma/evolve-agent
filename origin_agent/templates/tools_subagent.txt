@@ -1,11 +1,11 @@
 Sub-agent conventions:
-- After launching a sub-agent with run_subagent, you MUST wait for the [subagent-result] message before interacting with it again.
-- Do NOT call chat_subagent to check whether the sub-agent is alive, to ask "are you there", or to urge it to respond faster. The system will reject such calls while the sub-agent is still generating its current response.
-- Use chat_subagent only to reply to the sub-agent's questions, add missing context, or correct its direction AFTER you have received its latest response.
-- Do NOT call chat_subagent just to send the initial prompt; put all initial context into the initial_prompt parameter of run_subagent.
-- Within the same parent session, only one instance of a given sub-agent name can be active or queued at a time. If you need to restart a sub-agent, stop it first with stop_subagent.
+- After launching a sub-agent with RunSubAgent, you MUST wait for the [subagent-result] message before interacting with it again.
+- Do NOT call ChatSubAgent to check whether the sub-agent is alive, to ask "are you there", or to urge it to respond faster. The system will reject such calls while the sub-agent is still generating its current response.
+- Use ChatSubAgent only to reply to the sub-agent's questions, add missing context, or correct its direction AFTER you have received its latest response.
+- Do NOT call ChatSubAgent just to send the initial prompt; put all initial context into the initial_prompt parameter of RunSubAgent.
+- Within the same parent session, only one instance of a given sub-agent name can be active or queued at a time. If you need to restart a sub-agent, stop it first with StopSubAgent.
 Task-agent conventions:
-- Use run_taskagent to launch a one-shot task agent with a single prompt. The task agent runs asynchronously with safe tools only.
+- Use RunTaskAgent to launch a one-shot task agent with a single prompt. The task agent runs asynchronously with safe tools only.
 - The result will be delivered as a [subagent-result] message when the task completes. Do not poll or chat with task agents.
-- Use stop_taskagent with the session_id if a task agent must be terminated early.
+- Use StopTaskAgent with the session_id if a task agent must be terminated early.
 - Task agents are fire-and-forget: no history is saved, no persistent session.

@@ -1,6 +1,6 @@
 """获取已注册子 Agent 列表及其当前运行会话。
 
-模块导入时通过 ``registry.register()`` 注册 ``list_subagents`` 工具。
+模块导入时通过 ``registry.register()`` 注册 ``ListSubAgents`` 工具。
 返回所有已注册子 Agent 的配置，并附带当前主会话下该子 Agent 的运行会话信息。
 由于同一主会话下每个子 Agent 只能有一个活跃或排队实例，session 字段为空即表示未运行。
 """
@@ -61,7 +61,7 @@ async def _handle_list_subagents(args: dict[str, Any]) -> dict:
 
 
 registry.register(
-    name="list_subagents",
+    name="ListSubAgents",
     toolset="multiagent",
     schema={
         # 返回所有当前已注册子 Agent 的完整配置，以及每个子 Agent 在当前主会话下的运行会话信息。

@@ -842,7 +842,7 @@ export function useSessionStore(callbacks: SessionStoreCallbacks = {}): SessionS
       const raw = msg.result ?? "";
       try {
         const data = JSON.parse(raw);
-        if (msg.tool === "show_llm_api_key") {
+        if (msg.tool === "ShowLLMAPIKey") {
           // 密钥横幅：一次性展示，不进常驻面板
           setSecretBanner({
             display_id: data.display_id || "llm_api_key",

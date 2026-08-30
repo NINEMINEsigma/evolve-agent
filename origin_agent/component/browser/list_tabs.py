@@ -1,4 +1,4 @@
-"""browser_list_tabs — 枚举已接管浏览器中的全部标签页（write）。
+"""BrowserListTabs — 枚举已接管浏览器中的全部标签页（write）。
 
 模块导入时通过 ``registry.register()`` 注册。
 """
@@ -15,7 +15,7 @@ from entity.puretype import ToolDangerLevel
 logger = logging.getLogger(__name__)
 
 _NOT_CONNECTED: str = (
-    "浏览器未连接或 CDP 端点不可达。请先调用 browser_connect；"
+    "浏览器未连接或 CDP 端点不可达。请先调用 BrowserConnect；"
     "若 connect 曾返回指引，请先按指引让用户完成操作。"
 )
 
@@ -24,7 +24,7 @@ async def _handle_browser_list_tabs(args: dict[str, Any]) -> dict:
     try:
         browser = await _connection.get_browser()
     except Exception as exc:
-        logger.warning("browser_list_tabs: reconnect failed: %s: %s", type(exc).__name__, exc)
+        logger.warning("BrowserListTabs: reconnect failed: %s: %s", type(exc).__name__, exc)
         return tool_error(_NOT_CONNECTED)
 
     tabs: list[dict[str, Any]] = []
@@ -43,14 +43,14 @@ async def _handle_browser_list_tabs(args: dict[str, Any]) -> dict:
 
 
 registry.register(
-    name="browser_list_tabs",
+    name="BrowserListTabs",
     toolset="browser",
     schema={
         # 枚举已接管浏览器中的全部标签页，返回 index/title/url 列表。
-        # index 可直接作为 browser_screenshot / browser_query / browser_click 等工具的 tab 参数。
+        # index 可直接作为 BrowserScreenshot / BrowserQuery / BrowserClick 等工具的 tab 参数。
         #
         # ## 前置条件
-        # - 已成功调用 browser_connect（或连接仍可自动重建）。
+        # - 已成功调用 BrowserConnect（或连接仍可自动重建）。
         #
         # ## 调用效果
         # 展平所有浏览器窗口的标签页，按枚举顺序编号（0 基）。
@@ -66,10 +66,10 @@ registry.register(
         #
         # ## 副作用/注意
         # - 只读操作，不修改浏览器状态。
-        "description": """Lists all tabs in the connected browser with index, title, and URL. The index can be passed directly as the `tab` argument of browser_screenshot / browser_query / browser_click / browser_type.
+        "description": """Lists all tabs in the connected browser with index, title, and URL. The index can be passed directly as the `tab` argument of BrowserScreenshot / BrowserQuery / BrowserClick / BrowserType.
 
 ## Prerequisites
-- browser_connect must have succeeded (or the connection can still be re-established automatically).
+- BrowserConnect must have succeeded (or the connection can still be re-established automatically).
 
 ## Effect
 Flattens tabs across all browser windows, numbered 0-based in enumeration order.

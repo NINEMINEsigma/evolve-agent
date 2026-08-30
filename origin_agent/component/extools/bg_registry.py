@@ -175,7 +175,7 @@ def stop_watching_by_endpoint(endpoint_name: str) -> int:
     ``/{endpoint_name}`` 结尾的 watching 任务，逐个调用
     ``stop_background_task`` 停止并返回数量。
 
-    由 ``unregister_dynamic_endpoint`` 在端点注销时调用，
+    由 ``UnregisterDynamicEndpoint`` 在端点注销时调用，
     确保端点消失后不再有任何 flusher 线程持续 POST。
     """
     suffix = f"/{endpoint_name}"

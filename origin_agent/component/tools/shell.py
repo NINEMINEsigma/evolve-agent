@@ -94,7 +94,7 @@ def _execute(cmd_parts: list[str], cwd: str, session_id: str = "") -> dict:
 # ── 注册 ─────────────────────────────────────────────────────
 
 registry.register(
-    name="run_command",
+    name="RunCommand",
     toolset="shell",
     schema={
         # 在沙箱中执行 shell 命令。

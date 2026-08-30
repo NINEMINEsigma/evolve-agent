@@ -77,7 +77,7 @@ async def _handle_exit_multi_agent(args: dict[str, Any]) -> dict:
 
 
 registry.register(
-    name="exit_multi_agent",
+    name="ExitMultiAgent",
     toolset="multiagent",
     availability=ToolAvailability.MULTI_AGENT,
     danger_level=ToolDangerLevel.safe,

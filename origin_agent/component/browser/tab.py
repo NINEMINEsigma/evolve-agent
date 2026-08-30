@@ -1,6 +1,6 @@
 """tab 工具组 — 标签页生命周期管理（write）。
 
-browser_open_tab / browser_activate_tab / browser_close_tab。
+BrowserOpenTab / BrowserActivateTab / BrowserCloseTab。
 模块导入时通过 ``registry.register()`` 注册。
 """
 
@@ -16,12 +16,12 @@ from entity.puretype import ToolDangerLevel
 logger = logging.getLogger(__name__)
 
 _NOT_CONNECTED: str = (
-    "浏览器未连接或 CDP 端点不可达。请先调用 browser_connect；"
+    "浏览器未连接或 CDP 端点不可达。请先调用 BrowserConnect；"
     "若 connect 曾返回指引，请先按指引让用户完成操作。"
 )
 
 _TAB_NOT_FOUND: str = (
-    "未找到匹配的标签页。请先用 browser_list_tabs 确认现有标签页。"
+    "未找到匹配的标签页。请先用 BrowserListTabs 确认现有标签页。"
 )
 
 
@@ -33,7 +33,7 @@ async def _handle_browser_open_tab(args: dict[str, Any]) -> dict:
     try:
         browser = await _connection.get_browser()
     except Exception as exc:
-        logger.warning("browser_open_tab: reconnect failed: %s: %s", type(exc).__name__, exc)
+        logger.warning("BrowserOpenTab: reconnect failed: %s: %s", type(exc).__name__, exc)
         return tool_error(_NOT_CONNECTED)
 
     try:
@@ -45,7 +45,7 @@ async def _handle_browser_open_tab(args: dict[str, Any]) -> dict:
         page = await context.new_page()
         await page.goto(url, wait_until="networkidle", timeout=30000)
     except Exception as exc:
-        logger.warning("browser_open_tab failed: %s", exc)
+        logger.warning("BrowserOpenTab failed: %s", exc)
         return tool_error(f"open tab failed: {type(exc).__name__}: {exc}", url=url)
 
     try:
@@ -63,7 +63,7 @@ async def _handle_browser_activate_tab(args: dict[str, Any]) -> dict:
     try:
         browser = await _connection.get_browser()
     except Exception as exc:
-        logger.warning("browser_activate_tab: reconnect failed: %s: %s", type(exc).__name__, exc)
+        logger.warning("BrowserActivateTab: reconnect failed: %s: %s", type(exc).__name__, exc)
         return tool_error(_NOT_CONNECTED)
     page = await _connection.find_page(browser, tab)
     if page is None:
@@ -89,7 +89,7 @@ async def _handle_browser_close_tab(args: dict[str, Any]) -> dict:
     try:
         browser = await _connection.get_browser()
     except Exception as exc:
-        logger.warning("browser_close_tab: reconnect failed: %s: %s", type(exc).__name__, exc)
+        logger.warning("BrowserCloseTab: reconnect failed: %s: %s", type(exc).__name__, exc)
         return tool_error(_NOT_CONNECTED)
     page = await _connection.find_page(browser, tab)
     if page is None:
@@ -108,7 +108,7 @@ async def _handle_browser_close_tab(args: dict[str, Any]) -> dict:
 # ---------------------------------------------------------------------------
 
 registry.register(
-    name="browser_open_tab",
+    name="BrowserOpenTab",
     toolset="browser",
     schema={
         # 在浏览器中新开标签页并导航到指定 URL。
@@ -121,7 +121,7 @@ registry.register(
         # ```json
         # {"opened": true, "url": "https://...", "tab_title": "..."}
         # ```
-        # 新标签的 index 可随后用 browser_list_tabs 查询。
+        # 新标签的 index 可随后用 BrowserListTabs 查询。
         "description": """Opens a new tab in the browser and navigates to the given URL.
 
 ## Behavior (user-confirmation norms)
@@ -132,7 +132,7 @@ registry.register(
 ```json
 {"opened": true, "url": "https://...", "tab_title": "..."}
 ```
-The new tab's index can be queried afterwards with browser_list_tabs.""",
+The new tab's index can be queried afterwards with BrowserListTabs.""",
         "parameters": {
             "type": "object",
             "properties": {
@@ -153,7 +153,7 @@ The new tab's index can be queried afterwards with browser_list_tabs.""",
 )
 
 registry.register(
-    name="browser_activate_tab",
+    name="BrowserActivateTab",
     toolset="browser",
     schema={
         # 激活/切换到指定标签页（bring to front），不改变导航状态。
@@ -163,8 +163,8 @@ registry.register(
             "properties": {
                 "tab": {
                     "type": "string",
-                    # 目标标签页：browser_list_tabs 的 0 基 index（如 "0"），或 url/title 的子串。
-                    "description": "Target tab: the 0-based index from browser_list_tabs, or a substring of its URL or title.",
+                    # 目标标签页：BrowserListTabs 的 0 基 index（如 "0"），或 url/title 的子串。
+                    "description": "Target tab: the 0-based index from BrowserListTabs, or a substring of its URL or title.",
                 },
             },
             "required": ["tab"],
@@ -178,7 +178,7 @@ registry.register(
 )
 
 registry.register(
-    name="browser_close_tab",
+    name="BrowserCloseTab",
     toolset="browser",
     schema={
         # 关闭指定标签页。
@@ -194,8 +194,8 @@ registry.register(
             "properties": {
                 "tab": {
                     "type": "string",
-                    # 目标标签页：browser_list_tabs 的 0 基 index（如 "0"），或 url/title 的子串。
-                    "description": "Target tab: the 0-based index from browser_list_tabs, or a substring of its URL or title.",
+                    # 目标标签页：BrowserListTabs 的 0 基 index（如 "0"），或 url/title 的子串。
+                    "description": "Target tab: the 0-based index from BrowserListTabs, or a substring of its URL or title.",
                 },
             },
             "required": ["tab"],

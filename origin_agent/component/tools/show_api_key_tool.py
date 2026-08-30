@@ -1,7 +1,7 @@
 """LLM API Key 展示工具 — 在前端显示可一键复制的浮动横幅（自动消失）。
 
 模块导入时通过 ``registry.register()`` 注册 1 个工具：
-  - ``show_llm_api_key`` — 读取当前 LLM API key 并推送到前端横幅
+  - ``ShowLLMAPIKey`` — 读取当前 LLM API key 并推送到前端横幅
 
 安全设计：
 - 明文 key 只经 ``emit_clipboard_display`` 通过 WebSocket 直达前端（用户复制）；
@@ -64,7 +64,7 @@ async def _handle_show_llm_api_key(args: dict[str, Any], context: ToolContext | 
             "label": "LLM API Key",
             "content": key,
         }, ensure_ascii=False)
-        await context.sink.emit_clipboard_display(session_id, "show_llm_api_key", payload)
+        await context.sink.emit_clipboard_display(session_id, "ShowLLMAPIKey", payload)
 
     logger.info("LLM API key displayed | session=%s masked=%s", session_id, _mask_key(key))
 
@@ -78,7 +78,7 @@ async def _handle_show_llm_api_key(args: dict[str, Any], context: ToolContext | 
 # ── 注册 ────────────────────────────────────────────────────────────
 
 registry.register(
-    name="show_llm_api_key",
+    name="ShowLLMAPIKey",
     toolset="core",
     schema={
         # 在前端顶部显示可一键复制的 LLM API Key 浮动横幅，60 秒后自动消失。

@@ -127,7 +127,7 @@ def _handle_evolve_code(args: dict[str, Any]) -> dict:
 
 
 registry.register(
-    name="validate_code",
+    name="ValidateCode",
     toolset="code",
     schema={
         # 用 ast.parse() 检查 fork: 命名空间中 Python 文件的语法错误。
@@ -135,7 +135,7 @@ registry.register(
         # file: 可选。指定时只验证该文件（裸名或 'fork:xxx.py'）；省略时验证 fork: 下所有 .py 文件。
         # 调用效果：只读分析，不修改任何文件。
         # 返回：{ valid: bool, results: [{ file, status: "ok"|"syntax_error"|"error", line?, offset?, message? }] }
-        # 典型场景：进化工作流第二步 — 写入进化代码之后、evolve_code 之前调用，确保语法无误。
+        # 典型场景：进化工作流第二步 — 写入进化代码之后、EvolveCode 之前调用，确保语法无误。
         "description": """Check Python source files in the fork: namespace for syntax errors using ast.parse().
 
 ## Prerequisites
@@ -156,7 +156,7 @@ Read-only analysis. Does not modify any files.
 `valid` is `true` only when all files have status `"ok"`.
 
 ## When to Use
-Evolution workflow step 2 — call after writing evolved code via `Write`/`PatchEdit` and before `evolve_code` to ensure syntax correctness.""",
+Evolution workflow step 2 — call after writing evolved code via `Write`/`PatchEdit` and before `EvolveCode` to ensure syntax correctness.""",
         "parameters": {
             "type": "object",
             "properties": {
@@ -174,27 +174,27 @@ Evolution workflow step 2 — call after writing evolved code via `Write`/`Patch
 
 
 registry.register(
-    name="evolve_code",
+    name="EvolveCode",
     toolset="code",
     schema={
         # 完成代码进化周期 — 进化工作流最后一步。
-        # 前置条件：已通过 Write/PatchEdit 写入进化代码 + validate_code 语法检查通过（修改前端时还需 validate_frontend）。
+        # 前置条件：已通过 Write/PatchEdit 写入进化代码 + ValidateCode 语法检查通过（修改前端时还需 ValidateFrontend）。
         # 调用效果：对 fork: 下所有 .py 文件运行彻底验证（语法 + 可选编译检查），全部通过后进程以退出码 -1 退出，编排器执行 slow→fast 交换并重启。
         # deep=true（默认）：语法 + py_compile 子进程编译检查（更彻底但更慢）。
         # deep=false：仅语法检查（更快）。
         # 成功返回：{ evolved: true, validation: { valid, total, ok, errors, details }, message } — 进程随即退出，agent 不会收到此响应。
         # 失败返回：{ evolved: false, validation: {...}, _note } — agent 可修复问题后重试。
-        # 注意：不会验证 TypeScript/前端构建，触碰前端代码需先调 validate_frontend。
+        # 注意：不会验证 TypeScript/前端构建，触碰前端代码需先调 ValidateFrontend。
         "description": """Complete the code evolution cycle — final step of the evolution workflow.
 
 ## Prerequisites
 - Evolved source code has been written to fork: via `Write` or `PatchEdit` with `fork:` prefix.
-- Syntax check via `validate_code` has passed.
-- If frontend files were modified, `validate_frontend` must also have passed.
+- Syntax check via `ValidateCode` has passed.
+- If frontend files were modified, `ValidateFrontend` must also have passed.
 - Only available in fast mode.
 
 ## Effect
-Runs thorough validation (syntax + optional compile check) on all `.py` files in fork:. If all checks pass, the process exits with code -1, the orchestrator performs the slow→fast swap, and the agent restarts with the evolved code. Does **not** validate TypeScript or frontend builds — call `validate_frontend` separately if frontend code was touched.
+Runs thorough validation (syntax + optional compile check) on all `.py` files in fork:. If all checks pass, the process exits with code -1, the orchestrator performs the slow→fast swap, and the agent restarts with the evolved code. Does **not** validate TypeScript or frontend builds — call `ValidateFrontend` separately if frontend code was touched.
 
 ## Parameters
 - `deep` (boolean, default true): When true, runs both `ast.parse()` syntax check and `py_compile` subprocess compile check on each file. When false, syntax check only (faster but less thorough).
@@ -207,11 +207,11 @@ Runs thorough validation (syntax + optional compile check) on all `.py` files in
 ```
 **Failure** — agent can fix errors and retry:
 ```json
-{ "evolved": false, "validation": { "valid": false, "total": N, "ok": N, "errors": N, "details": [...] }, "_note": "Fix the errors above using Write or PatchEdit with fork: prefix, then call validate_code..." }
+{ "evolved": false, "validation": { "valid": false, "total": N, "ok": N, "errors": N, "details": [...] }, "_note": "Fix the errors above using Write or PatchEdit with fork: prefix, then call ValidateCode..." }
 ```
 
 ## When to Use
-Evolution workflow step 3 — call after writing evolved code via `Write`/`PatchEdit` + `validate_code` (and optionally `validate_frontend`). This is the commit point; once called successfully, the current agent session ends.
+Evolution workflow step 3 — call after writing evolved code via `Write`/`PatchEdit` + `ValidateCode` (and optionally `ValidateFrontend`). This is the commit point; once called successfully, the current agent session ends.
 
 ## Side Effects
 On success, the current agent process exits. The success response is never seen by the calling agent. On failure, the agent continues and can fix issues then retry.""",

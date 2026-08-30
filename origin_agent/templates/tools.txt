@@ -8,7 +8,7 @@ How tools work:
 - check_fn determines availability — results are TTL-cached for 30 seconds.
 
 Built-in tool conventions:
-- Tool names use snake_case.
+- Tool names use PascalCase.
 - Each tool belongs to a toolset (e.g. "filesystem", "code").
 - Handlers accept a single dict argument and return a dict.
 - Errors are returned as {"error": "message"} via tool_error() helper.
@@ -20,35 +20,35 @@ Cron tool conventions:
 - Raw scheduled-task output is internal Agent input and log content, not a user message; if the user needs the result, actively summarize it.
 
 Progress bar conventions:
-- When a task can be decomposed into 3 or more discrete steps, proactively call set_task_progress to create a progress bar before starting work.
+- When a task can be decomposed into 3 or more discrete steps, proactively call SetTaskProgress to create a progress bar before starting work.
 - Use a stable task_id for the entire task lifecycle; reuse it on every update to overwrite the same bar rather than creating duplicates.
 - Update the progress bar in real time after each step completes (increment current by 1), and set status to reflect the current phase.
 - Set total to the number of planned steps and current to the number of completed steps.
-- After all steps finish, set current equal to total and keep the progress bar visible — do NOT call clear_task_progress yet.
-- The progress bar must remain visible until the user has reviewed and accepted the work. Only call clear_task_progress after user confirmation or explicit request to clean up.
-- If the task is cancelled or aborted, call clear_task_progress to remove the stale bar.
+- After all steps finish, set current equal to total and keep the progress bar visible — do NOT call ClearTaskProgress yet.
+- The progress bar must remain visible until the user has reviewed and accepted the work. Only call ClearTaskProgress after user confirmation or explicit request to clean up.
+- If the task is cancelled or aborted, call ClearTaskProgress to remove the stale bar.
 
 Task agent dispatch conventions:
-- When a task is stateless, does not require extensive context or memory, only needs read access, and returns a text result (e.g. investigation findings, codebase survey, summary report), prefer dispatching it to a task agent via run_taskagent rather than executing it in the main agent loop.
+- When a task is stateless, does not require extensive context or memory, only needs read access, and returns a text result (e.g. investigation findings, codebase survey, summary report), prefer dispatching it to a task agent via RunTaskAgent rather than executing it in the main agent loop.
 - Delegating such tasks frees the main agent's context window and avoids polluting conversation history with intermediate tool outputs.
 - Put all necessary context into the prompt parameter — the task agent receives only that single message and has no access to the main agent's conversation history.
 - Do not delegate tasks that require write access, multi-round interaction, or persistent memory — handle those in the main agent loop directly.
 - Delegation is for context hygiene, not for cutting corners: the task agent must still do thorough, complete work within its scope. Do not use delegation as a substitute for proper engineering — if a task needs deep analysis or careful implementation, do it in the main loop.
 
 Long-running task conventions:
-- run_command has a fixed 30-second timeout; run_python has a configurable `timeout` parameter.
+- RunCommand has a fixed 30-second timeout; RunPython has a configurable `timeout` parameter.
 - Decision tree for tasks that may exceed the timeout:
-  1. Definitely under 30s → run_command.
-  2. Might exceed 30s but has a bounded duration → run_python with an increased `timeout` parameter.
-  3. Unbounded or likely to exceed any timeout → start_background_service (non-blocking, returns task_id + log_path), then poll the log via Read at reasonable intervals.
-  4. Need real-time output monitoring with automatic callbacks → start_watching_service + register_dynamic_endpoint.
+  1. Definitely under 30s → RunCommand.
+  2. Might exceed 30s but has a bounded duration → RunPython with an increased `timeout` parameter.
+  3. Unbounded or likely to exceed any timeout → StartBackgroundService (non-blocking, returns task_id + log_path), then poll the log via Read at reasonable intervals.
+  4. Need real-time output monitoring with automatic callbacks → StartWatchingService + RegisterDynamicEndpoint.
 - NEVER manually simulate a command's effects when it times out (e.g. hand-writing node_modules/, manually creating build artifacts, fabricating output). A timeout is a signal to switch to background tools, not a reason to bypass the command entirely.
-- After starting a background task, use wait_cron or schedule a cron task to periodically Read the log and check for completion, rather than blocking the conversation.
+- After starting a background task, use WaitCron or ScheduleCron to periodically Read the log and check for completion, rather than blocking the conversation.
 
 Workspace hygiene conventions:
 - Do NOT create files directly in the ws: root directory (e.g. ws:some_file.txt). The root contains system-critical files such as SOUL.md and mcp_config.json; scattering loose files there risks collision and pollution.
 - Always place generated outputs under a subdirectory within ws: (e.g. ws:output/report.txt, ws:tmp/data.json). Create the subdirectory first if it does not exist.
-- This applies to all file-creation tools (Write, Copy, Move, run_python file output, etc.).
+- This applies to all file-creation tools (Write, Copy, Move, RunPython file output, etc.).
 - **Trash-before-delete**: ``Delete`` is irreversible. When removing files or directories, prefer
   ``Move`` to a trash directory (e.g. ``ws:.trash/``) or a temporary directory (e.g. ``ws:tmp/``)
   instead of calling ``Delete`` directly. Use ``Delete`` only for confirmed cleanup of trash/temp

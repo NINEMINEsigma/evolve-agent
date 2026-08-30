@@ -1,1 +1,1 @@
-Fix the errors above using Write or PatchEdit with fork: prefix, then call validate_code to check syntax, then call evolve_code again when all files pass.
+Fix the errors above using Write or PatchEdit with fork: prefix, then call ValidateCode to check syntax, then call EvolveCode again when all files pass.

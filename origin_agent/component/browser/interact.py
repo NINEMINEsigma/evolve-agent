@@ -1,6 +1,6 @@
 """interact 工具组 — 元素交互（write）。
 
-browser_click / browser_type / browser_press / browser_scroll。
+BrowserClick / BrowserType / BrowserPress / BrowserScroll。
 元素定位复用 query 的 path|selector 双通道（path → XPath locator）。
 行为规范：不可逆动作（删除/提交/发送）执行前必须征求用户同意；
 type 可先行填写、提交前确认。模块导入时通过 ``registry.register()`` 注册。
@@ -18,15 +18,15 @@ from entity.puretype import ToolDangerLevel
 logger = logging.getLogger(__name__)
 
 _NOT_CONNECTED: str = (
-    "浏览器未连接或 CDP 端点不可达。请先调用 browser_connect；"
+    "浏览器未连接或 CDP 端点不可达。请先调用 BrowserConnect；"
     "若 connect 曾返回指引，请先按指引让用户完成操作。"
 )
 
 _TAB_NOT_FOUND: str = (
-    "未找到匹配的标签页。请先用 browser_list_tabs 确认现有标签页。"
+    "未找到匹配的标签页。请先用 BrowserListTabs 确认现有标签页。"
 )
 
-_ELEMENT_NOT_FOUND: str = "未找到目标元素，请先用 browser_query 确认其 path 或 selector。"
+_ELEMENT_NOT_FOUND: str = "未找到目标元素，请先用 BrowserQuery 确认其 path 或 selector。"
 
 _DEFAULT_TIMEOUT_MS: int = 30000
 
@@ -139,7 +139,7 @@ async def _handle_browser_scroll(args: dict[str, Any]) -> dict:
 # ---------------------------------------------------------------------------
 
 registry.register(
-    name="browser_click",
+    name="BrowserClick",
     toolset="browser",
     schema={
         # 点击指定元素（path 或 selector 定位，真实输入事件）。
@@ -150,7 +150,7 @@ registry.register(
         # - 提交/发送类按钮的点击尤其需要先与用户确认内容与后果。
         #
         # ## 参数
-        # - path：browser_query 产出的索引路径（XPath 定位）。
+        # - path：BrowserQuery 产出的索引路径（XPath 定位）。
         # - selector：CSS 选择器（或 / 开头的 XPath）。
         # - 二者二选一，不可同时提供。
         "description": """Clicks an element (located by path or selector) with real input events.
@@ -160,7 +160,7 @@ registry.register(
 - For submit/send buttons in particular, confirm the content and consequences with the user first.
 
 ## Parameters
-- `path`: index path from browser_query (resolved as XPath).
+- `path`: index path from BrowserQuery (resolved as XPath).
 - `selector`: CSS selector (or XPath when starting with `/`).
 - Exactly one of path/selector is required.""",
         "parameters": {
@@ -168,8 +168,8 @@ registry.register(
             "properties": {
                 "tab": {
                     "type": "string",
-                    # 目标标签页：browser_list_tabs 的 0 基 index（如 "0"），或 url/title 的子串。
-                    "description": "Target tab: the 0-based index from browser_list_tabs, or a substring of its URL or title.",
+                    # 目标标签页：BrowserListTabs 的 0 基 index（如 "0"），或 url/title 的子串。
+                    "description": "Target tab: the 0-based index from BrowserListTabs, or a substring of its URL or title.",
                 },
                 "path": {
                     "type": "string",
@@ -201,7 +201,7 @@ registry.register(
 )
 
 registry.register(
-    name="browser_type",
+    name="BrowserType",
     toolset="browser",
     schema={
         # 向指定元素输入文本（fill，真实输入事件）。
@@ -219,7 +219,7 @@ registry.register(
             "properties": {
                 "tab": {
                     "type": "string",
-                    "description": "Target tab: the 0-based index from browser_list_tabs, or a substring of its URL or title.",
+                    "description": "Target tab: the 0-based index from BrowserListTabs, or a substring of its URL or title.",
                 },
                 "path": {
                     "type": "string",
@@ -255,7 +255,7 @@ registry.register(
 )
 
 registry.register(
-    name="browser_press",
+    name="BrowserPress",
     toolset="browser",
     schema={
         # 按下键盘按键。有元素定位时在该元素上按键，否则全局按键
@@ -272,7 +272,7 @@ registry.register(
             "properties": {
                 "tab": {
                     "type": "string",
-                    "description": "Target tab: the 0-based index from browser_list_tabs, or a substring of its URL or title.",
+                    "description": "Target tab: the 0-based index from BrowserListTabs, or a substring of its URL or title.",
                 },
                 "key": {
                     "type": "string",
@@ -303,7 +303,7 @@ registry.register(
 )
 
 registry.register(
-    name="browser_scroll",
+    name="BrowserScroll",
     toolset="browser",
     schema={
         # 滚动页面。有元素定位时滚动到该元素可见；否则按 delta_y 像素滚动。
@@ -313,7 +313,7 @@ registry.register(
             "properties": {
                 "tab": {
                     "type": "string",
-                    "description": "Target tab: the 0-based index from browser_list_tabs, or a substring of its URL or title.",
+                    "description": "Target tab: the 0-based index from BrowserListTabs, or a substring of its URL or title.",
                 },
                 "path": {
                     "type": "string",

@@ -12,7 +12,7 @@
     ``keybd_event`` 是全局事件，前台窗口也会收到完整的 down→up 序列，
     但整个操作在微秒级完成且修饰键在同一序列中释放，不会残留按键状态。
   顶层窗口通常不直接处理键盘消息，如需指定子控件，
-  先用 ``window_enum_child`` 枚举子窗口获取子控件 HWND。
+  先用 ``WindowEnumChild`` 枚举子窗口获取子控件 HWND。
 
 依赖 ``pyautogui``（仅前台模式需要）。通过 ``check_fn`` 检测可用性。
 当 key 包含 "+" 时自动拆分为组合键。
@@ -214,7 +214,7 @@ def _handle_keyboard_press(args: dict[str, Any]) -> dict:
                 )
             vk_codes.append(vk)
 
-        used_hwnd = hwnd  # 直接使用传入的 hwnd（agent 应通过 window_enum_child 获取子控件 HWND）
+        used_hwnd = hwnd  # 直接使用传入的 hwnd（agent 应通过 WindowEnumChild 获取子控件 HWND）
         is_combo = len(vk_codes) > 1
 
         try:
@@ -230,7 +230,7 @@ def _handle_keyboard_press(args: dict[str, Any]) -> dict:
             )
 
         logger.info(
-            "keyboard_press | hwnd=%d used_hwnd=%d key='%s' presses=%d combo=%s (background)",
+            "KeyboardPress | hwnd=%d used_hwnd=%d key='%s' presses=%d combo=%s (background)",
             hwnd, used_hwnd, key, presses, is_combo,
         )
 
@@ -262,7 +262,7 @@ def _handle_keyboard_press(args: dict[str, Any]) -> dict:
     except Exception as exc:
         return tool_error(f"Key press failed: {exc}", key=key)
 
-    logger.info("keyboard_press | key='%s' presses=%d (foreground)", key, presses)
+    logger.info("KeyboardPress | key='%s' presses=%d (foreground)", key, presses)
 
     return tool_result(
         success=True,
@@ -277,11 +277,11 @@ def _handle_keyboard_press(args: dict[str, Any]) -> dict:
 # ---------------------------------------------------------------------------
 
 registry.register(
-    name="keyboard_press",
+    name="KeyboardPress",
     toolset="automation",
     schema={
         # 模拟按键或组合键，支持前台 pyautogui 和后台两种模式。
-        # 前置条件：前台模式需 pyautogui；后台模式需先用 window_find 获取 HWND。
+        # 前置条件：前台模式需 pyautogui；后台模式需先用 WindowFind 获取 HWND。
         # 调用效果：前台模式用 pyautogui 按键；
         #   后台单键用 PostMessage WM_KEYDOWN/UP 到子控件；
         #   后台组合键全部用 keybd_event（PostMessage 无法更新 GetKeyState 导致组合键无效）。
@@ -293,7 +293,7 @@ registry.register(
 ## Prerequisites
 - `pyautogui` must be installed (foreground mode only).
 - Windows only.
-- For background mode: use `window_find` first to obtain the HWND.
+- For background mode: use `WindowFind` first to obtain the HWND.
 
 ## Two Modes
 
@@ -304,7 +304,7 @@ Uses `pyautogui` to simulate keystrokes. If `key` contains `+`, it is treated as
 - **Single key** (no `+` in key): Uses `PostMessage` to send `WM_KEYDOWN` / `WM_KEYUP` to the focused child control (found via `GetGUIThreadInfo`). The window can be in the background — no foreground focus needed.
 - **Key combination** (contains `+`): Uses `keybd_event` for ALL keys. `PostMessage` cannot update the target window's `GetKeyState`, so modifier keys (Ctrl/Shift/Alt) would not be detected — e.g. `ctrl+a` would just type `a`. `keybd_event` injects hardware-level events that update the global keyboard state. The entire sequence (all keys down → all keys up) executes in microseconds as an atomic operation. The foreground window may also receive these events, but since modifier keys are pressed and released in the same sequence, no residual key state remains.
 
-**Important**: For single-key background mode, the top-level window may not process keyboard messages — only its child controls do. If background key pressing fails, use `window_enum_child` to find the correct child control (e.g. `Edit`) and pass its HWND directly as the `hwnd` parameter.
+**Important**: For single-key background mode, the top-level window may not process keyboard messages — only its child controls do. If background key pressing fails, use `WindowEnumChild` to find the correct child control (e.g. `Edit`) and pass its HWND directly as the `hwnd` parameter.
 
 ## Returns
 ```json
@@ -316,17 +316,17 @@ Uses `pyautogui` to simulate keystrokes. If `key` contains `+`, it is treated as
 ```
 
 ## When to Use
-- **Background mode**: Send keystrokes to a window without stealing focus. Use after `window_find` to obtain the HWND. Ideal for batch automation where disrupting the user's focus is undesirable.
+- **Background mode**: Send keystrokes to a window without stealing focus. Use after `WindowFind` to obtain the HWND. Ideal for batch automation where disrupting the user's focus is undesirable.
 - **Foreground mode**: Press Enter to confirm a dialog, Escape to close a popup, "ctrl+c" to copy, "alt+tab" to switch windows, "ctrl+s" to save.
 
 ## Side Effects / Notes
 - Foreground mode directly controls the keyboard — `pyautogui.FAILSAFE` is disabled.
 - **Background single key**: Uses `PostMessage` — no effect on other windows, no global keyboard state change.
 - **Background combination key**: Uses `keybd_event` — this is a global hardware-level event. The entire key sequence (all down → all up) completes in microseconds as an atomic operation. The foreground window may receive these events but sees a complete combination (e.g. Ctrl down → A down → A up → Ctrl up), so no residual modifier state remains. The risk of interfering with user input is minimal — the window is only a few microseconds.
-- **If background single key fails**: the top-level window may not process keyboard messages. Use `window_enum_child` to find the child control (e.g. `Edit`) and pass its HWND as `hwnd`.
+- **If background single key fails**: the top-level window may not process keyboard messages. Use `WindowEnumChild` to find the child control (e.g. `Edit`) and pass its HWND as `hwnd`.
 - Key names follow pyautogui conventions (e.g. "enter", "escape", "tab", "ctrl", "alt", "shift", "win", "space", "backspace", "delete").
 - In background mode, not all applications respond to `PostMessage` keyboard messages (e.g. DirectX games, some Electron apps). Use foreground mode for those.
-- In background mode, only keys resolvable to VK codes are supported. Plain letter keys (a-z), digit keys (0-9), and all entries in the internal VK map are supported. Symbol keys (!, @, #, etc.) are NOT supported in background mode — use `keyboard_type` with `hwnd` instead.""",
+- In background mode, only keys resolvable to VK codes are supported. Plain letter keys (a-z), digit keys (0-9), and all entries in the internal VK map are supported. Symbol keys (!, @, #, etc.) are NOT supported in background mode — use `KeyboardType` with `hwnd` instead.""",
         "parameters": {
             "type": "object",
             "properties": {
@@ -343,8 +343,8 @@ Uses `pyautogui` to simulate keystrokes. If `key` contains `+`, it is treated as
                 },
                 "hwnd": {
                     "type": "integer",
-                    # 窗口句柄（HWND）。可以是顶层窗口（来自 window_find）或子控件（来自 window_enum_child）。传入时使用后台按键模式，省略时使用前台模式。
-                    "description": "Window handle (HWND). Can be a top-level window (from `window_find`) or a child control (from `window_enum_child`). When provided, uses background mode (PostMessage for single keys, keybd_event for combinations). When omitted, uses foreground mode (pyautogui).",
+                    # 窗口句柄（HWND）。可以是顶层窗口（来自 WindowFind）或子控件（来自 WindowEnumChild）。传入时使用后台按键模式，省略时使用前台模式。
+                    "description": "Window handle (HWND). Can be a top-level window (from `WindowFind`) or a child control (from `WindowEnumChild`). When provided, uses background mode (PostMessage for single keys, keybd_event for combinations). When omitted, uses foreground mode (pyautogui).",
                 },
             },
             "required": ["key"],

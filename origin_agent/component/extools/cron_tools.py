@@ -14,12 +14,12 @@ Weekday 遵循标准 cron 语义：0=Sunday, 1=Monday, ..., 6=Saturday。
 可通过 reschedule_cron_job 在 [cron-result] 返回后基于已有任务配置再次创建相同的新任务。
 
 模块导入时通过 ``registry.register()`` 注册 6 个工具：
-  - ``schedule_cron``       — 创建定时任务（仅执行一次）
-  - ``list_cron_jobs``      — 列出当前会话的任务
-  - ``cancel_cron_job``     — 取消指定任务
-  - ``run_cron_job_now``    — 立即触发执行一次
-  - ``reschedule_cron_job`` — 基于已有任务配置重新创建任务（参数不可修改）
-  - ``wait_cron``           — 创建一个只等待、不执行脚本的精简定时提醒任务
+  - ``ScheduleCron``       — 创建定时任务（仅执行一次）
+  - ``ListCronJobs``      — 列出当前会话的任务
+  - ``CancelCronJob``     — 取消指定任务
+  - ``RunCronJobNow``    — 立即触发执行一次
+  - ``RescheduleCronJob`` — 基于已有任务配置重新创建任务（参数不可修改）
+  - ``WaitCron``           — 创建一个只等待、不执行脚本的精简定时提醒任务
 """
 
 from __future__ import annotations
@@ -939,7 +939,7 @@ def cancel_cron_task(session_id: str, task_id: str) -> dict[str, Any]:
 # ── 注册 ─────────────────────────────────────────────────────
 
 registry.register(
-    name="schedule_cron",
+    name="ScheduleCron",
     toolset="cron",
     schema={
         # 创建一个一次性后台定时任务。
@@ -1034,7 +1034,7 @@ Schedules the task to run once at a future time. After execution, a [cron-result
 )
 
 registry.register(
-    name="list_cron_jobs",
+    name="ListCronJobs",
     toolset="cron",
     schema={
         # 列出当前会话的所有定时任务。
@@ -1087,7 +1087,7 @@ Returns metadata for all cron jobs in the current session, including schedule in
 )
 
 registry.register(
-    name="cancel_cron_job",
+    name="CancelCronJob",
     toolset="cron",
     schema={
         # 取消指定 task_id 的定时任务。
@@ -1150,7 +1150,7 @@ Stops future scheduling for the task, removes its record, and suppresses notific
 )
 
 registry.register(
-    name="run_cron_job_now",
+    name="RunCronJobNow",
     toolset="cron",
     schema={
         # 立即触发指定定时任务执行一次。
@@ -1213,7 +1213,7 @@ Runs the task once immediately in a new thread. The regular schedule is not affe
 )
 
 registry.register(
-    name="reschedule_cron_job",
+    name="RescheduleCronJob",
     toolset="cron",
     schema={
         # 基于已有任务配置复制创建一个新的定时任务。
@@ -1277,7 +1277,7 @@ Copies schedule, command, cwd, and other parameters from the source task, create
 )
 
 registry.register(
-    name="wait_cron",
+    name="WaitCron",
     toolset="cron",
     schema={
         # 创建一个只等待、不执行任何脚本的精简定时提醒任务。

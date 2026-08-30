@@ -1,8 +1,8 @@
 """任务进度条工具 — 在前端显示当前工作的进度。
 
 模块导入时通过 ``registry.register()`` 注册 2 个工具：
-  - ``set_task_progress``  — 创建或更新进度条
-  - ``clear_task_progress`` — 清除进度条
+  - ``SetTaskProgress``  — 创建或更新进度条
+  - ``ClearTaskProgress`` — 清除进度条
 
 进度条状态由前端维护，后端工具仅负责生成携带进度元数据的结果，
 由 ``finalize_tool_result`` 检测后通过 ``task_progress`` 事件推送到前端。
@@ -129,7 +129,7 @@ async def _handle_clear_task_progress(args: dict[str, Any], context: ToolContext
 # ── 注册 ────────────────────────────────────────────────────────────
 
 registry.register(
-    name="set_task_progress",
+    name="SetTaskProgress",
     toolset="progress",
     schema={
         # 创建或更新前端进度条以可视化当前任务状态。
@@ -148,7 +148,7 @@ registry.register(
         # - 增量反馈能降低用户不确定性的长时间操作。
         #
         # ## 副作用/注意
-        # - 任务确定结束后应调用 `clear_task_progress` 清理进度条。
+        # - 任务确定结束后应调用 `ClearTaskProgress` 清理进度条。
         # - 进度条限定在会话范围内，会话结束时自动清除。
         # - `current` 被 clamp 到 >= 0；`total` 必须 > 0。
         # - 若 `label` 为空，`task_id` 被用作显示标签。
@@ -169,7 +169,7 @@ Creates or updates a progress bar identified by `task_id`. Reusing the same `tas
 - Long-running operations where incremental feedback reduces user uncertainty.
 
 ## Side Effects / Notes
-- After the task is confirmed complete, call `clear_task_progress` to clean up the progress bar.
+- After the task is confirmed complete, call `ClearTaskProgress` to clean up the progress bar.
 - Progress bars are session-scoped and auto-cleared when the session ends.
 - `current` is clamped to >= 0; `total` must be > 0.
 - If `label` is empty, `task_id` is used as the display label.
@@ -212,10 +212,10 @@ Creates or updates a progress bar identified by `task_id`. Reusing the same `tas
     danger_level=ToolDangerLevel.safe,
     availability=ToolAvailability.MAIN | ToolAvailability.MULTI_AGENT,
 )
-ui_event_router.register("set_task_progress", _emit_task_progress)
+ui_event_router.register("SetTaskProgress", _emit_task_progress)
 
 registry.register(
-    name="clear_task_progress",
+    name="ClearTaskProgress",
     toolset="progress",
     schema={
         # 从当前会话移除一个或全部进度条。
@@ -280,4 +280,4 @@ If `task_id` is provided and non-empty, removes only that specific bar. If omitt
     danger_level=ToolDangerLevel.safe,
     availability=ToolAvailability.MAIN | ToolAvailability.MULTI_AGENT,
 )
-ui_event_router.register("clear_task_progress", _emit_task_progress)
+ui_event_router.register("ClearTaskProgress", _emit_task_progress)

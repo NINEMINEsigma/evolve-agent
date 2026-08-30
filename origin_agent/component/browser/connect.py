@@ -1,4 +1,4 @@
-"""browser_connect — 通过 CDP 探测并接管用户的真实浏览器（dangerous）。
+"""BrowserConnect — 通过 CDP 探测并接管用户的真实浏览器（dangerous）。
 
 只建立 CDP 连接：不关闭、不修改用户浏览器，也不会自动打开任何页面。
 模块导入时通过 ``registry.register()`` 注册。
@@ -22,7 +22,7 @@ async def _handle_browser_connect(args: dict[str, Any]) -> dict:
     try:
         browser = await _connection.get_browser(endpoint)
     except Exception as exc:
-        logger.warning("browser_connect failed: %s: %s", type(exc).__name__, exc)
+        logger.warning("BrowserConnect failed: %s: %s", type(exc).__name__, exc)
         return tool_error(
             _connection.EDGE_DEBUG_GUIDE,
             endpoint=endpoint,
@@ -37,7 +37,7 @@ async def _handle_browser_connect(args: dict[str, Any]) -> dict:
 
 
 registry.register(
-    name="browser_connect",
+    name="BrowserConnect",
     toolset="browser",
     schema={
         # 通过 CDP 接管用户真实浏览器，获得其全部标签页的访问权（含登录态、Cookie、本地存储）。
@@ -46,13 +46,13 @@ registry.register(
         # ## 前置条件
         # - 已存在以调试参数启动的浏览器实例：--remote-debugging-port=9222
         #   + --user-data-dir=<非默认目录>（Chromium 136+ 在默认用户数据目录下会
-        #   静默忽略调试端口参数）。若未启动，可先调用 browser_launch 自动拉起。
+        #   静默忽略调试端口参数）。若未启动，可先调用 BrowserLaunch 自动拉起。
         # - 若端点不可达，返回的 error 中包含给用户的中文步骤指引，请原样转述给用户。
         # - 已安装 playwright 包（未安装时本工具不可见）。
         #
         # ## 调用效果
         # 经 CDP 附加到正在运行的浏览器。所有现有标签页随后可被
-        # browser_list_tabs / browser_screenshot / browser_query / browser_click 访问。
+        # BrowserListTabs / BrowserScreenshot / BrowserQuery / BrowserClick 访问。
         # 连接跨调用复用；浏览器以调试端口重启后自动重连。
         #
         # ## 返回
@@ -68,12 +68,12 @@ registry.register(
         "description": """Connects to the user's real browser via CDP (Chrome DevTools Protocol), gaining access to all its existing tabs including login sessions, cookies, and local storage. Establishes the connection only — never closes or modifies the browser, and never opens pages on its own.
 
 ## Prerequisites
-- A browser instance must already be running with debug flags: --remote-debugging-port=9222 plus a non-default --user-data-dir (Chromium 136+ silently ignores the debug port on the default user data directory). If not started yet, call browser_launch first to bring it up automatically.
+- A browser instance must already be running with debug flags: --remote-debugging-port=9222 plus a non-default --user-data-dir (Chromium 136+ silently ignores the debug port on the default user data directory). If not started yet, call BrowserLaunch first to bring it up automatically.
 - If the endpoint is unreachable, the returned error contains step-by-step instructions in Chinese for the user — relay them to the user verbatim.
 - The playwright package must be installed (this tool is hidden otherwise).
 
 ## Effect
-Attaches to the running browser over CDP. All existing tabs become accessible to browser_list_tabs / browser_screenshot / browser_query / browser_click. The connection is reused across calls and re-established automatically if lost.
+Attaches to the running browser over CDP. All existing tabs become accessible to BrowserListTabs / BrowserScreenshot / BrowserQuery / BrowserClick. The connection is reused across calls and re-established automatically if lost.
 
 ## Returns
 ```json

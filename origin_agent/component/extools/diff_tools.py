@@ -332,7 +332,7 @@ _COMMON_SCHEMA = {
 # ---------------------------------------------------------------------------
 
 registry.register(
-    name="diff_origin_fast",
+    name="DiffOriginFast",
     toolset="extools",
     schema={
         # 比较原始源码仓库 origin_agent/ 与当前运行副本 fast_agent_space/ 之间的代码差异。
@@ -384,7 +384,7 @@ Generates a unified diff with origin_agent as the baseline and fast_agent_space 
 )
 
 registry.register(
-    name="diff_fast_fork",
+    name="DiffFastFork",
     toolset="extools",
     schema={
         # 比较当前运行副本 fast_agent_space/ 与 fork 目录 slow_agent_space/ 之间的代码差异。
@@ -416,7 +416,7 @@ registry.register(
 The fork (slow_agent_space) directory must be available.
 
 ## Effect
-Generates a unified diff between fast_agent_space and fork. After writing evolved code to fork, use this tool to review changes that are about to be swapped. If they are identical, there is no need to call evolve_code. Supports path substring filtering, glob pattern filtering, context_lines, and max_files.
+Generates a unified diff between fast_agent_space and fork. After writing evolved code to fork, use this tool to review changes that are about to be swapped. If they are identical, there is no need to call EvolveCode. Supports path substring filtering, glob pattern filtering, context_lines, and max_files.
 
 ## Returns
 ```json

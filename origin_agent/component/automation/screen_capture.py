@@ -5,7 +5,7 @@
 仅兼容 Windows。使用 ``ctypes`` 调用 Win32 API 实现后台截屏
 （窗口被遮挡时仍可截取），通过 PIL 保存图片到 agentspace。
 
-使用前应先调用 ``window_find`` 获取目标窗口的 HWND。
+使用前应先调用 ``WindowFind`` 获取目标窗口的 HWND。
 """
 
 from __future__ import annotations
@@ -204,7 +204,7 @@ def _handle_screen_capture(args: dict[str, Any]) -> dict:
     except Exception as exc:
         return tool_error(f"Failed to save screenshot: {exc}", hwnd=hwnd)
 
-    logger.info("screen_capture | hwnd=%d → %s (%dx%d)",
+    logger.info("ScreenCapture | hwnd=%d → %s (%dx%d)",
                 hwnd, save_path, width, height)
 
     return tool_result(
@@ -221,11 +221,11 @@ def _handle_screen_capture(args: dict[str, Any]) -> dict:
 # ---------------------------------------------------------------------------
 
 registry.register(
-    name="screen_capture",
+    name="ScreenCapture",
     toolset="automation",
     schema={
         # 通过 HWND 后台截取窗口内容并保存到 agentspace（窗口被遮挡时仍可截取）。
-        # 前置条件：仅 Windows；需安装 Pillow；需先用 window_find 获取 HWND。
+        # 前置条件：仅 Windows；需安装 Pillow；需先用 WindowFind 获取 HWND。
         # 调用效果：使用 PrintWindow 后台渲染窗口内容，保存为 PNG 到沙箱。
         # 返回值：hwnd、path（沙箱路径）、width、height。
         # 典型场景：自动化流程中截图 → 模板匹配 → 点击的第一步。
@@ -235,21 +235,21 @@ registry.register(
 ## Prerequisites
 - Windows only.
 - Pillow (PIL) must be installed.
-- Use `window_find` first to obtain the HWND of the target window.
+- Use `WindowFind` first to obtain the HWND of the target window.
 
 ## Effect
-Uses `PrintWindow` with `PW_RENDERFULLCONTENT` to capture the window content — even when the window is behind other windows. The screenshot is saved as a PNG file to agentspace. Coordinates in the screenshot are relative to the window's client area (top-left = 0,0), matching the coordinate system used by `mouse_click` in background mode.
+Uses `PrintWindow` with `PW_RENDERFULLCONTENT` to capture the window content — even when the window is behind other windows. The screenshot is saved as a PNG file to agentspace. Coordinates in the screenshot are relative to the window's client area (top-left = 0,0), matching the coordinate system used by `MouseClick` in background mode.
 
 ## Returns
 ```json
 {"success": true, "hwnd": 12345, "path": "ws:uploads/screenshot_20260101_120000.png", "width": 1920, "height": 1080}
 ```
-The `path` is a sandbox logical path (ws: namespace). Use it with `template_match` or `Read` to process the screenshot.
+The `path` is a sandbox logical path (ws: namespace). Use it with `TemplateMatch` or `Read` to process the screenshot.
 
 ## When to Use
-- After `window_find` to capture the current state of a window.
-- As the first step in an automation flow: `window_find` → `screen_capture` → `template_match` → `mouse_click`.
-- The screenshot coordinates align with `mouse_click` background mode (both use window client-area coordinates).
+- After `WindowFind` to capture the current state of a window.
+- As the first step in an automation flow: `WindowFind` → `ScreenCapture` → `TemplateMatch` → `MouseClick`.
+- The screenshot coordinates align with `MouseClick` background mode (both use window client-area coordinates).
 
 ## Side Effects / Notes
 - Creates a PNG file in agentspace (default: `ws:uploads/screenshot_{timestamp}.png`).
@@ -262,8 +262,8 @@ The `path` is a sandbox logical path (ws: namespace). Use it with `template_matc
             "properties": {
                 "hwnd": {
                     "type": "integer",
-                    # 窗口句柄（HWND），由 window_find 工具返回。
-                    "description": "Window handle (HWND) obtained from `window_find`.",
+                    # 窗口句柄（HWND），由 WindowFind 工具返回。
+                    "description": "Window handle (HWND) obtained from `WindowFind`.",
                 },
                 "save_path": {
                     "type": "string",

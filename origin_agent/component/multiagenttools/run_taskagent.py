@@ -1,6 +1,6 @@
 """启动一次性任务 Agent。
 
-模块导入时通过 ``registry.register()`` 注册 ``run_taskagent`` 工具。
+模块导入时通过 ``registry.register()`` 注册 ``RunTaskAgent`` 工具。
 父 Agent 通过此工具以单个 prompt 启动一个异步执行的 taskagent，
 结果通过周期收集器以 [subagent-result] 消息推送。
 """
@@ -52,7 +52,7 @@ async def _handle_run_taskagent(args: dict[str, Any]) -> dict:
 
 
 registry.register(
-    name="run_taskagent",
+    name="RunTaskAgent",
     toolset="multiagent",
     schema={
         # 启动一个一次性任务 Agent (taskagent)。

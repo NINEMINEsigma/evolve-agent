@@ -76,7 +76,7 @@ async def _handle_install_package(args: dict[str, Any]) -> dict:
 # ---------------------------------------------------------------------------
 
 registry.register(
-    name="install_package",
+    name="InstallPackage",
     toolset="python",
     schema={
         # 安装 Python 包到当前运行环境中。

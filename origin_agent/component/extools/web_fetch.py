@@ -132,7 +132,7 @@ def _handle_web_fetch(args: dict[str, Any]) -> dict:
 # ---------------------------------------------------------------------------
 
 registry.register(
-    name="web_fetch",
+    name="WebFetch",
     toolset="extools",
     schema={
         # 获取指定 URL 的内容并以纯文本形式返回。

@@ -87,7 +87,7 @@ def _handle_register_subagent_from_parent(args: dict[str, Any], context: ToolCon
 
 
 registry.register(
-    name="register_subagent_from_parent",
+    name="RegisterSubAgentFromParent",
     toolset="multiagent",
     schema={
         # 使用主 Agent 当前的 LLM 配置作为模板注册一个子 Agent。

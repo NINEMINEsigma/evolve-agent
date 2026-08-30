@@ -1,6 +1,6 @@
 """navigate 工具组 — 页面导航（write）。
 
-browser_goto / browser_refresh / browser_back / browser_forward。
+BrowserGoto / BrowserRefresh / BrowserBack / BrowserForward。
 所有导航都是改变浏览器状态的显式动作：schema 行为规范要求
 跳转前与用户确认目标；可能重定向到登录页的目标先向用户说明。
 模块导入时通过 ``registry.register()`` 注册。
@@ -18,12 +18,12 @@ from entity.puretype import ToolDangerLevel
 logger = logging.getLogger(__name__)
 
 _NOT_CONNECTED: str = (
-    "浏览器未连接或 CDP 端点不可达。请先调用 browser_connect；"
+    "浏览器未连接或 CDP 端点不可达。请先调用 BrowserConnect；"
     "若 connect 曾返回指引，请先按指引让用户完成操作。"
 )
 
 _TAB_NOT_FOUND: str = (
-    "未找到匹配的标签页。请先用 browser_list_tabs 确认现有标签页；"
+    "未找到匹配的标签页。请先用 BrowserListTabs 确认现有标签页；"
     "若目标页面未在其中，请用户在浏览器中手动打开或切换到目标页面后重试。"
 )
 
@@ -73,7 +73,7 @@ async def _handle_browser_goto(args: dict[str, Any]) -> dict:
     try:
         await page.goto(url, wait_until=wait, timeout=timeout)
     except Exception as exc:
-        logger.warning("browser_goto failed: %s", exc)
+        logger.warning("BrowserGoto failed: %s", exc)
         return tool_error(f"goto failed: {type(exc).__name__}: {exc}", url=url)
 
     return tool_result(goto=url, **await _page_summary(page))
@@ -123,7 +123,7 @@ async def _handle_browser_forward(args: dict[str, Any]) -> dict:
 _GOTO_DESCRIPTION = """Navigates the current tab to a URL and waits for the page to load.
 
 ## Prerequisites
-- browser_connect must have succeeded; the target tab exists.
+- BrowserConnect must have succeeded; the target tab exists.
 
 ## Behavior (user-confirmation norms)
 - Navigation is an explicit state change: before navigating, confirm the target URL with the user.
@@ -143,7 +143,7 @@ Navigates to `url`, waiting for the given load state (default networkidle). Retu
 
 
 registry.register(
-    name="browser_goto",
+    name="BrowserGoto",
     toolset="browser",
     schema={
         # 导航当前标签页到指定 URL 并等待加载完成。
@@ -157,8 +157,8 @@ registry.register(
             "properties": {
                 "tab": {
                     "type": "string",
-                    # 目标标签页：browser_list_tabs 的 0 基 index（如 "0"），或 url/title 的子串。
-                    "description": "Target tab: the 0-based index from browser_list_tabs (e.g. \"0\"), or a substring of its URL or title.",
+                    # 目标标签页：BrowserListTabs 的 0 基 index（如 "0"），或 url/title 的子串。
+                    "description": "Target tab: the 0-based index from BrowserListTabs (e.g. \"0\"), or a substring of its URL or title.",
                 },
                 "url": {
                     "type": "string",
@@ -189,7 +189,7 @@ registry.register(
 )
 
 registry.register(
-    name="browser_refresh",
+    name="BrowserRefresh",
     toolset="browser",
     schema={
         # 刷新当前页面并等待网络空闲。可逆状态变更。
@@ -199,7 +199,7 @@ registry.register(
             "properties": {
                 "tab": {
                     "type": "string",
-                    "description": "Target tab: the 0-based index from browser_list_tabs, or a substring of its URL or title.",
+                    "description": "Target tab: the 0-based index from BrowserListTabs, or a substring of its URL or title.",
                 },
             },
             "required": ["tab"],
@@ -213,7 +213,7 @@ registry.register(
 )
 
 registry.register(
-    name="browser_back",
+    name="BrowserBack",
     toolset="browser",
     schema={
         # 历史后退。返回跳转后 URL 与标题；无历史时报错。
@@ -223,7 +223,7 @@ registry.register(
             "properties": {
                 "tab": {
                     "type": "string",
-                    "description": "Target tab: the 0-based index from browser_list_tabs, or a substring of its URL or title.",
+                    "description": "Target tab: the 0-based index from BrowserListTabs, or a substring of its URL or title.",
                 },
             },
             "required": ["tab"],
@@ -237,7 +237,7 @@ registry.register(
 )
 
 registry.register(
-    name="browser_forward",
+    name="BrowserForward",
     toolset="browser",
     schema={
         # 历史前进。返回跳转后 URL 与标题；无前向历史时报错。
@@ -247,7 +247,7 @@ registry.register(
             "properties": {
                 "tab": {
                     "type": "string",
-                    "description": "Target tab: the 0-based index from browser_list_tabs, or a substring of its URL or title.",
+                    "description": "Target tab: the 0-based index from BrowserListTabs, or a substring of its URL or title.",
                 },
             },
             "required": ["tab"],

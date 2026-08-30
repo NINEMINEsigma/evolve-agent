@@ -1,7 +1,7 @@
 """子 Agent 运行时上下文 — 从注册表和调用参数构建。
 
 与父 Agent 的 ``RuntimeContext`` 不同，``SubRuntimeContext`` 的 LLM 配置
-全部来自子 Agent 注册表（``_store.py``）和 ``run_subagent`` 调用参数。
+全部来自子 Agent 注册表（``_store.py``）和 ``RunSubAgent`` 调用参数。
 """
 
 from __future__ import annotations

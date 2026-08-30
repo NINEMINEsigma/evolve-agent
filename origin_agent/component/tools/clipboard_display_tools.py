@@ -1,8 +1,8 @@
 """剪贴板展示工具 — 在前端顶部显示可一键复制的文本区域。
 
 模块导入时通过 ``registry.register()`` 注册 2 个工具：
-  - ``set_clipboard_display``  — 创建或更新可复制展示区域
-  - ``clear_clipboard_display`` — 清除展示区域
+  - ``SetClipboardDisplay``  — 创建或更新可复制展示区域
+  - ``ClearClipboardDisplay`` — 清除展示区域
 
 由 ``finalize_tool_result`` 检测后通过 ``clipboard_display`` 事件推送到前端。
 """
@@ -113,7 +113,7 @@ async def _handle_clear_clipboard_display(args: dict[str, Any], context: ToolCon
 # ── 注册 ────────────────────────────────────────────────────────────
 
 registry.register(
-    name="set_clipboard_display",
+    name="SetClipboardDisplay",
     toolset="clipboard",
     schema={
         # 在前端顶部创建或更新可一键复制的展示区域。
@@ -122,7 +122,7 @@ registry.register(
         # 返回：{ display_id, label, content }
         # 使用限制：最多同时保留 2 个展示区域，除非用户明确要求更多。
         #   内容发生变化时应主动调用本工具更新对应 display_id 的卡片。
-        #   感觉用户已不再需要某卡片时应主动调用 clear_clipboard_display 关闭。
+        #   感觉用户已不再需要某卡片时应主动调用 ClearClipboardDisplay 关闭。
         # 典型场景：用户要求复制内容、生成长文本（代码、配置、标签列表）时。
         # 副作用：仅影响前端 UI，不涉及文件系统。不会将内容写入剪贴板。
         "description": """Create or update a one-click copy area in the frontend top panel.
@@ -141,7 +141,7 @@ A copyable text card appears at the top of the frontend. The user can copy with 
 ## Usage Rules
 - **Limit**: keep at most 2 display areas simultaneously, unless the user explicitly requests more.
 - **Update**: when content changes, proactively call this tool with the same `display_id` to update the card.
-- **Cleanup**: when you sense the user no longer needs a card, proactively call `clear_clipboard_display` to remove it.
+- **Cleanup**: when you sense the user no longer needs a card, proactively call `ClearClipboardDisplay` to remove it.
 
 ## When to Use
 - The user asks to copy something (e.g. "copy this", "给我复制").
@@ -178,10 +178,10 @@ Frontend UI only. Does not write to the system clipboard. Reusing the same `disp
     danger_level=ToolDangerLevel.safe,
     availability=ToolAvailability.MAIN | ToolAvailability.MULTI_AGENT,
 )
-ui_event_router.register("set_clipboard_display", _emit_clipboard_display)
+ui_event_router.register("SetClipboardDisplay", _emit_clipboard_display)
 
 registry.register(
-    name="clear_clipboard_display",
+    name="ClearClipboardDisplay",
     toolset="clipboard",
     schema={
         # 移除前端展示区域。
@@ -222,4 +222,4 @@ Proactively call this tool when you sense the user no longer needs a card, to ke
     danger_level=ToolDangerLevel.safe,
     availability=ToolAvailability.MAIN | ToolAvailability.MULTI_AGENT,
 )
-ui_event_router.register("clear_clipboard_display", _emit_clipboard_display)
+ui_event_router.register("ClearClipboardDisplay", _emit_clipboard_display)

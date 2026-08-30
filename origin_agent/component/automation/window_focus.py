@@ -5,7 +5,7 @@
 仅兼容 Windows。使用 ``ctypes`` 调用 ``user32.dll`` Win32 API，
 无第三方依赖。
 
-使用前应先调用 ``window_find`` 获取目标窗口的 HWND。
+使用前应先调用 ``WindowFind`` 获取目标窗口的 HWND。
 """
 
 from __future__ import annotations
@@ -115,7 +115,7 @@ def _handle_window_focus(args: dict[str, Any]) -> dict:
 
     focused: bool = _bring_to_foreground(hwnd)
 
-    logger.info("window_focus | hwnd=%d focused=%s", hwnd, focused)
+    logger.info("WindowFocus | hwnd=%d focused=%s", hwnd, focused)
 
     return tool_result(
         success=True,
@@ -129,11 +129,11 @@ def _handle_window_focus(args: dict[str, Any]) -> dict:
 # ---------------------------------------------------------------------------
 
 registry.register(
-    name="window_focus",
+    name="WindowFocus",
     toolset="automation",
     schema={
         # 通过 HWND 将窗口设为前台焦点。
-        # 前置条件：仅 Windows；需先用 window_find 获取 HWND。
+        # 前置条件：仅 Windows；需先用 WindowFind 获取 HWND。
         # 调用效果：恢复最小化/最大化窗口并强制置顶到前台，采用多级降级策略。
         # 返回值：hwnd、foreground（是否成功置顶）。
         # 典型场景：在执行需要窗口在前台的鼠标/键盘自动化之前调用。
@@ -142,7 +142,7 @@ registry.register(
 
 ## Prerequisites
 - Windows only.
-- Use `window_find` first to obtain the HWND of the target window.
+- Use `WindowFind` first to obtain the HWND of the target window.
 
 ## Effect
 Restores the window (if minimized/maximized) and brings it to the foreground using `SetForegroundWindow`. Uses a multi-level fallback strategy: ShowWindow → BringWindowToTop → Alt key trick → SetForegroundWindow → AttachThreadInput → SetWindowPos.
@@ -153,7 +153,7 @@ Restores the window (if minimized/maximized) and brings it to the foreground usi
 ```
 
 ## When to Use
-- After `window_find` to bring the target window to the front.
+- After `WindowFind` to bring the target window to the front.
 - Before performing mouse/keyboard automation that requires the window to be in the foreground.
 - To ensure the target window is active and visible.
 
@@ -166,8 +166,8 @@ Restores the window (if minimized/maximized) and brings it to the foreground usi
             "properties": {
                 "hwnd": {
                     "type": "integer",
-                    # 窗口句柄（HWND），由 window_find 工具返回。
-                    "description": "Window handle (HWND) obtained from `window_find`.",
+                    # 窗口句柄（HWND），由 WindowFind 工具返回。
+                    "description": "Window handle (HWND) obtained from `WindowFind`.",
                 },
             },
             "required": ["hwnd"],

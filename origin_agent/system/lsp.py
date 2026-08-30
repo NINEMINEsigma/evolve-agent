@@ -1,10 +1,10 @@
 """LSP (Language Server Protocol) 客户端 — pyright 子进程管理 + JSON-RPC over stdio。
 
-全局共享单例，懒启动。agent 通过 ``lsp_start`` 工具指定根目录并启动 pyright 后，
-才能使用 ``lsp_references``、``lsp_definition``、``lsp_diagnostics``、
-``lsp_symbols``、``lsp_refresh`` 等查询能力。
+全局共享单例，懒启动。agent 通过 ``LSPStart`` 工具指定根目录并启动 pyright 后，
+才能使用 ``LSPReferences``、``LSPDefinition``、``LSPDiagnostics``、
+``LSPSymbols``、``LSPRefresh`` 等查询能力。
 
-无 ``lsp_stop``；重复 ``lsp_start`` 直接替换根目录并重启 pyright 进程。
+无 ``lsp_stop``；重复 ``LSPStart`` 直接替换根目录并重启 pyright 进程。
 agent 进程退出时由 ``main.py`` 调用 ``cleanup_lsp()`` 强制清理。
 
 通信模型：JSON-RPC 2.0 over stdio，帧格式 ``Content-Length: N\\r\\n\\r\\n{json}``。

@@ -1,6 +1,6 @@
 """历史压缩工具 — agent 主动调用，用 agent 撰写的摘要替换旧消息。
 
-模块导入时通过 ``registry.register()`` 注册 ``compress_history`` 工具。
+模块导入时通过 ``registry.register()`` 注册 ``CompressHistory`` 工具。
 danger_level 为 critical：操作本身可能安全，但用户必须亲自许可，不可由模型代审批。
 """
 
@@ -113,7 +113,7 @@ async def _handle_compress_history(args: dict[str, Any], context: "ToolContext")
 
 
 registry.register(
-    name="compress_history",
+    name="CompressHistory",
     toolset="core",
     schema={
         # 用 agent 撰写的摘要替换旧消息，保留最近 N 轮对话。
