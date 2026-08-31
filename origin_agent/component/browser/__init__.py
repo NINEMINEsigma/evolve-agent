@@ -1,5 +1,5 @@
 """browser 工具组 — 通过 CDP 接管用户真实浏览器，读取 JS 渲染后的页面。
 
-工具（connect / launch / list_tabs / query / interact / screenshot / navigate / wait / tab）共享
+工具（connect / launch / close / list_tabs / query / interact / screenshot / navigate / wait / tab）共享
 ``_connection`` 模块中的连接单例与标签页定位逻辑。
 """
