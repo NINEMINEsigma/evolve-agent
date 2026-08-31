@@ -66,7 +66,11 @@ async def _handle_compress_history(args: dict[str, Any], context: "ToolContext")
         # 不足 keep_recent_rounds 轮时全部保留
         keep_start_idx = 0
 
-    if keep_start_idx >= last_user_idx:
+    # keep_start_idx == 0 表示保留区从历史最开头开始，前面没有任何消息可压缩。
+    # 注意：不能用 keep_start_idx >= last_user_idx 判断——
+    # 当 keep_recent_rounds=1 时 keep_start_idx 恰好等于 last_user_idx，
+    # 但此时 last_user_idx 之前仍有更早的消息可以压缩，属于合法场景。
+    if keep_start_idx == 0:
         return tool_error(
             "Cannot compress: keep_recent_rounds covers the entire history. "
             "Try reducing keep_recent_rounds."
