@@ -747,6 +747,52 @@ async def delete_session_messages(session_id: str, count: int = 1):
     )
 
 
+@app.delete("/api/sessions/{session_id}/messages/single")
+async def delete_single_message(session_id: str, index: int):
+    """删除最后一轮范围内的单条消息（含配对联动清理）。"""
+    logger.info("Delete single message request | session=%s index=%d", session_id, index)
+    info = _get_sm().get(session_id)
+    if info and info.status == SessionStatus.archived:
+        result = {"deleted": False, "error": "archived session"}
+        return HTMLResponse(
+            json.dumps(result, ensure_ascii=False),
+            media_type="application/json",
+            status_code=403,
+        )
+    loop = _get_loop(session_id)
+    if loop is None:
+        return {"deleted": False, "error": "agent loop not ready"}
+
+    # 并发防护：处理中拒绝删除
+    if loop.loop.is_processing():
+        result = {"deleted": False, "error": "session is processing"}
+        return HTMLResponse(
+            json.dumps(result, ensure_ascii=False),
+            media_type="application/json",
+            status_code=409,
+        )
+
+    result = loop.loop.delete_single_message(index)
+    if not result.get("deleted"):
+        return HTMLResponse(
+            json.dumps(result, ensure_ascii=False),
+            media_type="application/json",
+            status_code=400,
+        )
+
+    # 返回 token_usage 和 context_tokens 供前端更新（不通过 WS 全量推送，避免滚动位置重置）
+    result["token_usage"] = loop.get_token_usage()
+    result["context_tokens"] = loop.get_context_tokens()
+
+    logger.info("Delete single message result | session=%s index=%d deleted=%s remaining=%s",
+                session_id, index, result.get("deleted"), result.get("remaining_count"))
+    return HTMLResponse(
+        json.dumps(result, ensure_ascii=False),
+        media_type="application/json",
+        status_code=200,
+    )
+
+
 @app.post("/api/sessions/{session_id}/regenerate")
 async def regenerate_response(session_id: str, req: Request):
     """重新生成指定 user 消息的响应：截断历史，刷新扩展块，重新调用 process_message。"""

@@ -45,8 +45,10 @@ const MessageItem = memo(function MessageItem({
   onToggleCollapse,
   onEditMessage,
   onDeleteMessages,
+  onDeleteSingleMessage,
   onRegenerateResponse,
   isLastUserMessage,
+  isAfterLastUser,
   streaming,
   waiting,
   agents,
@@ -58,8 +60,10 @@ const MessageItem = memo(function MessageItem({
   onToggleCollapse: (id: string) => void;
   onEditMessage: (id: string, content: MessageContent) => void | Promise<void>;
   onDeleteMessages?: (count: number) => void;
+  onDeleteSingleMessage?: (index: number) => void;
   onRegenerateResponse?: (messageIndex: number) => void;
   isLastUserMessage?: boolean;
+  isAfterLastUser?: boolean;
   streaming?: boolean;
   waiting?: boolean;
   agents?: string[];
@@ -76,6 +80,8 @@ const MessageItem = memo(function MessageItem({
   const collapsed = !isTool && !streaming && isLong && m.collapsed !== false;
   const canEdit = !archived && !streaming && typeof m.messageIndex === "number";
   const canDelete = !archived && !streaming && isLastUserMessage && typeof m.messageIndex === "number";
+  const canDeleteSingle = !archived && !streaming && isAfterLastUser && typeof m.messageIndex === "number"
+    && !m.isSystemStatus && m.role !== "user";
   const canRegenerate = !archived && !streaming && m.role === "user" && isLastUserMessage && typeof m.messageIndex === "number";
 
   const handoffWheelAtBoundary = (event: WheelEvent<HTMLDivElement>) => {
@@ -205,6 +211,12 @@ const MessageItem = memo(function MessageItem({
               }}
               >
                 删除
+              </button>
+            )}
+            {canDeleteSingle && (
+              <button type="button" onClick={() => onDeleteSingleMessage!(m.messageIndex!)}
+              >
+                删除此条
               </button>
             )}
             {canRegenerate && (

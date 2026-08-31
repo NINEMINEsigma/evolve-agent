@@ -271,6 +271,7 @@ export default function Layout({ ws, onContextMenu, contextMenuOpen }: LayoutPro
               onToggleCollapse={ws.toggleMessageCollapse}
               onEditMessage={ws.editMessage}
               onDeleteMessages={ws.deleteMessages}
+              onDeleteSingleMessage={ws.deleteSingleMessage}
               onRegenerateResponse={ws.regenerateResponse}
               bottomRef={ws.bottomRef}
               chatAreaRef={ws.chatAreaRef}

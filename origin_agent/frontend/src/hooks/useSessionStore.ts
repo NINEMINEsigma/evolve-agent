@@ -118,6 +118,7 @@ export interface SessionStore {
   toggleMessageCollapse: (id: string) => void;
   editMessage: (id: string, content: MessageContent) => Promise<void>;
   deleteMessages: (count?: number) => Promise<void>;
+  deleteSingleMessage: (index: number) => Promise<void>;
   regenerateResponse: (messageIndex: number, llmProfile?: Record<string, unknown> | null) => Promise<void>;
   resumeSession: () => Promise<void>;
   updateMessageVisibility: (messageIndex: number, visibleCharacters: string[]) => Promise<void>;
@@ -946,6 +947,26 @@ export function useSessionStore(callbacks: SessionStoreCallbacks = {}): SessionS
     ));
   }, [sessionId, addMessage]);
 
+  const deleteSingleMessage = useCallback(async (index: number) => {
+    const resp = await fetch(`/api/sessions/${sessionId}/messages/single?index=${index}`, {
+      method: "DELETE",
+    });
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok || !data.deleted) {
+      addMessage("error", `删除失败：${data.error || "unknown error"}`);
+      return;
+    }
+    // 本地删除对应消息（避免 WS 全量刷新导致滚动位置重置）
+    const removedIndices: number[] = data.removed_indices || [];
+    if (removedIndices.length > 0) {
+      setMessages((prev) => prev.filter((m) =>
+        typeof m.messageIndex !== "number" || !removedIndices.includes(m.messageIndex)
+      ));
+    }
+    if (data.token_usage !== undefined) setTokenUsage(data.token_usage);
+    if (data.context_tokens !== undefined) setContextTokens(data.context_tokens);
+  }, [sessionId, addMessage, setMessages, setTokenUsage, setContextTokens]);
+
   const regenerateResponse = useCallback(async (messageIndex: number, llmProfile?: Record<string, unknown> | null) => {
     setWaiting(true);
     const resp = await fetch(`/api/sessions/${sessionId}/regenerate`, {
@@ -1435,6 +1456,7 @@ export function useSessionStore(callbacks: SessionStoreCallbacks = {}): SessionS
     toggleMessageCollapse,
     editMessage,
     deleteMessages,
+    deleteSingleMessage,
     regenerateResponse,
     resumeSession,
     updateMessageVisibility,

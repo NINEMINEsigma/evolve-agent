@@ -638,6 +638,36 @@ class BaseAgentLoop(ABC):
         logger.info("Delete messages ok | session=%s removed_from=%d remaining=%d", self.session_id, remove_from, self._history.count)
         return {"deleted": True, "session_id": self.session_id, "remaining_count": self._history.count}
 
+    def delete_single_message(self, index: int) -> dict:
+        """删除最后一轮范围内的单条消息（含配对联动清理）。
+
+        校验 index 在最后一条 user 消息之后。
+        调用 History.remove_message_with_pairing。
+        持久化 save_history。
+        """
+        logger.info("Delete single message | session=%s index=%d", self.session_id, index)
+
+        # 校验 index 在最后一条 user 消息之后
+        last_user_idx = self._history.find_last_user_message_index(count=1)
+        if last_user_idx is None:
+            logger.warning("Delete single message fail | session=%s error=no user message found", self.session_id)
+            return {"deleted": False, "error": "no user message found"}
+        if index <= last_user_idx:
+            logger.warning("Delete single message fail | session=%s index=%d must be after last user (idx=%d)", self.session_id, index, last_user_idx)
+            return {"deleted": False, "error": "can only delete messages after the last user message"}
+
+        # 调用 History 的配对删除
+        result = self._history.remove_message_with_pairing(index)
+        if not result.get("deleted"):
+            return result
+
+        # 持久化
+        self.save_history(self.session_id)
+
+        logger.info("Delete single message ok | session=%s removed=%s remaining=%d",
+                     self.session_id, result.get("removed_indices"), result.get("remaining_count"))
+        return result
+
     def regenerate_response(self, message_index: int | None = None) -> dict:
         """截断到目标 user 消息，刷新其上下文扩展块，返回内容供重新生成。
 

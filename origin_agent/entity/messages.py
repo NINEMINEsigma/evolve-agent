@@ -399,6 +399,74 @@ class History(BaseModel):
             self.update_last_user_message()
             return True
 
+    def remove_message_with_pairing(self, index: int) -> dict:
+        """删除指定索引的消息，处理 tool_calls/tool_results 配对联动。
+
+        - CharacterConversationMessage (assistant)：整条删除 + 从后向前删除其所有
+          tool_calls 对应的 ToolResultMessage
+        - ToolResultMessage：删除该消息 + 找到对应 assistant 消息，从中移除匹配
+          tool_call_id 的 ToolCall 条目（全移除后置 None）
+        - 不允许删除 user 消息和 SystemStatusMessage
+
+        返回:
+            {"deleted": True, "removed_indices": list[int], "remaining_count": int}
+            {"deleted": False, "error": str}
+        """
+        removed_indices: list[int] = []
+        with self._io_locker:
+            if index < 0 or index >= len(self.messages):
+                return {"deleted": False, "error": "index out of range"}
+
+            target = self.messages[index]
+
+            # 类型校验：拒绝 user 和 SystemStatusMessage
+            if target.role == Role.USER:
+                return {"deleted": False, "error": "cannot delete user message"}
+            if isinstance(target, SystemStatusMessage):
+                return {"deleted": False, "error": "cannot delete system status message"}
+
+            if isinstance(target, CharacterConversationMessage) and target.role == Role.ASSISTANT:
+                # assistant 消息：整条删除 + 级联删除对应 tool results
+                if target.tool_calls:
+                    # 收集所有 tool_call_id
+                    tool_call_ids: set[str] = {tc.id for tc in target.tool_calls}
+                    # 从后向前找到并删除对应的 ToolResultMessage
+                    for i in range(len(self.messages) - 1, index, -1):
+                        msg = self.messages[i]
+                        if isinstance(msg, ToolResultMessage) and msg.tool_call_id in tool_call_ids:
+                            self.messages.pop(i)
+                            removed_indices.append(i)
+                # 删除 assistant 消息本身
+                self.messages.pop(index)
+                removed_indices.append(index)
+
+            elif isinstance(target, ToolResultMessage):
+                # tool result 消息：删除 + 从对应 assistant 移除匹配 tool_call
+                target_tool_call_id = target.tool_call_id
+                # 从后向前找到对应的 assistant 消息（含此 tool_call_id 的最近一条）
+                for i in range(index - 1, -1, -1):
+                    msg = self.messages[i]
+                    if isinstance(msg, CharacterConversationMessage) and msg.tool_calls:
+                        if any(tc.id == target_tool_call_id for tc in msg.tool_calls):
+                            # 移除匹配的 tool_call 条目
+                            kept = [tc for tc in msg.tool_calls if tc.id != target_tool_call_id]
+                            msg.tool_calls = kept if kept else None
+                            break
+                # 删除 tool result 消息
+                self.messages.pop(index)
+                removed_indices.append(index)
+
+            else:
+                # 其他非 user/assistant/tool 类型消息：整条删除
+                self.messages.pop(index)
+                removed_indices.append(index)
+
+        # 锁外执行配对清理和缓存更新（避免非重入锁死锁）
+        self.remove_unpaired_tool_calls()
+        self.update_last_user_message()
+
+        return {"deleted": True, "removed_indices": sorted(removed_indices), "remaining_count": len(self.messages)}
+
     def remove_unpaired_tool_calls(self) -> None:
         """移除所有没有对应 ToolResultMessage 的 tool_calls. 
 

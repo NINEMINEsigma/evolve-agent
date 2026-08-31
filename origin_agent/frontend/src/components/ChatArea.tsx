@@ -13,6 +13,7 @@ interface ChatAreaProps {
   onToggleCollapse: (id: string) => void;
   onEditMessage: (id: string, content: MessageContent) => void | Promise<void>;
   onDeleteMessages: (count: number) => void;
+  onDeleteSingleMessage?: (index: number) => void;
   onRegenerateResponse: (messageIndex: number) => void;
   bottomRef: React.RefObject<HTMLDivElement>;
   contentRef?: React.RefObject<HTMLDivElement>;
@@ -27,7 +28,7 @@ interface ChatAreaProps {
   isReady?: boolean;
 }
 
-export default function ChatArea({ messages, waiting, archived, onImageClick, onToggleCollapse, onEditMessage, onDeleteMessages, onRegenerateResponse, bottomRef, contentRef: externalContentRef, onDropFiles, streamingMessage, chatAreaRef: externalChatAreaRef, agents, onToggleMessageVisibility, onScrollToBottom, sessionId, children, isReady }: ChatAreaProps) {
+export default function ChatArea({ messages, waiting, archived, onImageClick, onToggleCollapse, onEditMessage, onDeleteMessages, onDeleteSingleMessage, onRegenerateResponse, bottomRef, contentRef: externalContentRef, onDropFiles, streamingMessage, chatAreaRef: externalChatAreaRef, agents, onToggleMessageVisibility, onScrollToBottom, sessionId, children, isReady }: ChatAreaProps) {
   const [dragOver, setDragOver] = useState(false);
   const [showScrollButton, setShowScrollButton] = useState(false);
   const [minimapCollapsed, setMinimapCollapsed] = useState(false);
@@ -63,6 +64,17 @@ export default function ChatArea({ messages, waiting, archived, onImageClick, on
     }
     return null;
   }, [messages]);
+
+  // 最后一条 user 消息的 messageIndex（用于判断后续消息是否在"最后一轮"范围内）
+  const lastUserMessageIndex = useMemo(() => {
+    for (let i = messages.length - 1; i >= 0; i--) {
+      if (messages[i].role === "user" && typeof messages[i].messageIndex === "number") {
+        return messages[i].messageIndex;
+      }
+    }
+    return null;
+  }, [messages]);
+
   // 背景地形联动使用的消息列表（含流式消息）
   const terrainMessages = useMemo(
     () => (streamingMessage ? [...messages, streamingMessage] : messages),
@@ -78,14 +90,16 @@ export default function ChatArea({ messages, waiting, archived, onImageClick, on
         onToggleCollapse={onToggleCollapse}
         onEditMessage={onEditMessage}
         onDeleteMessages={onDeleteMessages}
+        onDeleteSingleMessage={onDeleteSingleMessage}
         onRegenerateResponse={onRegenerateResponse}
         isLastUserMessage={m.id === lastUserMsgId}
+        isAfterLastUser={typeof m.messageIndex === "number" && lastUserMessageIndex != null && m.messageIndex > lastUserMessageIndex}
         waiting={waiting}
         agents={agents}
         onToggleMessageVisibility={onToggleMessageVisibility}
       />
     )),
-    [messages, archived, onImageClick, onToggleCollapse, onEditMessage, onDeleteMessages, onRegenerateResponse, lastUserMsgId, waiting]
+    [messages, archived, onImageClick, onToggleCollapse, onEditMessage, onDeleteMessages, onDeleteSingleMessage, onRegenerateResponse, lastUserMsgId, lastUserMessageIndex, waiting]
   );
 
   // 判断是否为空态：仅当无 user/assistant 消息时才算空态（系统消息不计入）
