@@ -4,6 +4,7 @@ import { generateUUID } from "../utils";
 import { WS_OUT } from "../constants/ws";
 import { COLLOQUY_SID } from "../constants/session";
 import { TIMING } from "../constants/timing";
+import { DIMENSIONS } from "../constants/dimensions";
 import { collectClientInfo } from "../constants/clientInfo";
 import { useWebSocketConnection } from "./useWebSocketConnection";
 import { useSessionStore } from "./useSessionStore";
@@ -77,7 +78,6 @@ export function useWebSocket() {
   const chatAreaRef = useRef<HTMLDivElement | null>(null);
   const contentRef = useRef<HTMLDivElement | null>(null);
   const isAtBottomRef = useRef(true);
-  const instantScrollRef = useRef(false);
   const programmaticScrollingRef = useRef(false);
   const lastScrollTopRef = useRef(0);
   const lastMessageCountRef = useRef(0);
@@ -92,7 +92,6 @@ export function useWebSocket() {
     if (!sessionRef.current) return;
     sessionRef.current.ignoreStaleRef.current = false;
     isAtBottomRef.current = true;
-    instantScrollRef.current = true;
     sessionRef.current.addMessage("system", "已连接到 Evolve Agent");
     sessionRef.current.fetchSessions();
   }, []);
@@ -139,7 +138,7 @@ export function useWebSocket() {
     }
     const currentScrollTop = chat.scrollTop;
     const previousScrollTop = lastScrollTopRef.current;
-    const isAtBottom = chat.scrollHeight - currentScrollTop - chat.clientHeight <= 1;
+    const isAtBottom = chat.scrollHeight - currentScrollTop - chat.clientHeight <= DIMENSIONS.SCROLL_BOTTOM_THRESHOLD;
     if (currentScrollTop < previousScrollTop) {
       isAtBottomRef.current = false;
     } else if (currentScrollTop > previousScrollTop && isAtBottom) {
@@ -161,15 +160,29 @@ export function useWebSocket() {
     const chat = chatAreaRef.current;
     if (!chat) return;
     if (force || isAtBottomRef.current) {
-      const behavior = instantScrollRef.current ? "auto" : "smooth";
-      instantScrollRef.current = false;
       programmaticScrollingRef.current = true;
-      chat.scrollTo({ top: chat.scrollHeight, behavior });
+      chat.scrollTo({ top: chat.scrollHeight, behavior: "auto" });
       lastScrollTopRef.current = chat.scrollTop;
       programmaticScrollingRef.current = false;
-    } else {
-      instantScrollRef.current = false;
     }
+  }, []);
+
+  const scrollToBottomSmooth = useCallback(() => {
+    const chat = chatAreaRef.current;
+    if (!chat) return;
+    isAtBottomRef.current = true;
+    programmaticScrollingRef.current = true;
+    chat.scrollTo({ top: chat.scrollHeight, behavior: "smooth" });
+    let done = false;
+    const reset = () => {
+      if (done) return;
+      done = true;
+      programmaticScrollingRef.current = false;
+      lastScrollTopRef.current = chat.scrollTop;
+      chat.removeEventListener("scrollend", reset);
+    };
+    chat.addEventListener("scrollend", reset);
+    setTimeout(reset, 800);
   }, []);
 
   // ── message sending ──
@@ -219,7 +232,6 @@ export function useWebSocket() {
     s.ignoreStaleRef.current = false;
     s.streamDoneRef.current = false;
     isAtBottomRef.current = true;
-    instantScrollRef.current = true;
     scrollToBottomIfAtBottom(true);
   }, []);
 
@@ -390,7 +402,6 @@ export function useWebSocket() {
     if (!content) return;
     const observer = new ResizeObserver(() => {
       if (isAtBottomRef.current) {
-        instantScrollRef.current = true;
         scrollToBottomIfAtBottom(true);
       }
     });
@@ -517,13 +528,13 @@ export function useWebSocket() {
     updateSessionTags: session.updateSessionTags,
     attachScrollListener,
     scrollToBottomIfAtBottom,
+    scrollToBottomSmooth,
     // refs
     wsRef: conn.wsRef,
     bottomRef,
     chatAreaRef,
     contentRef,
     isAtBottomRef,
-    instantScrollRef,
     fileInputRef: upload.fileInputRef,
     // computed
     isReady,

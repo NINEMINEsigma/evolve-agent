@@ -292,7 +292,7 @@ export default function Layout({ ws, onContextMenu, contextMenuOpen }: LayoutPro
               streamingMessage={ws.streamingMessage}
               agents={ws.agents}
               onToggleMessageVisibility={onToggleMessageVisibility}
-              onScrollToBottom={() => ws.scrollToBottomIfAtBottom(true)}
+              onScrollToBottom={() => ws.scrollToBottomSmooth()}
               isReady={ws.isReady}
             >
               <CronCountdown cronTasks={ws.cronTasks} />
