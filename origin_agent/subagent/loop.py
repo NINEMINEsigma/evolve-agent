@@ -36,6 +36,7 @@ from entry.base_agent_loop import BasePrivateChatAgentLoop, UserMessage, ToolCon
 from entry.agent_support.multimodal import content_to_text, tool_result_to_content
 from entry.tool_post_dispatch import finalize_tool_result
 from entry.tool_executor import _interrupted_result
+from system.prompt import build_session_site_block
 
 logger = logging.getLogger(__name__)
 
@@ -197,7 +198,13 @@ class SubAgentLoop(BasePrivateChatAgentLoop):
         return self._tools
 
     def _build_system_prompt(self) -> list[str]:
-        return list(self._ctx.system_prompts)
+        prompts = list(self._ctx.system_prompts)
+        # 子代理注入父会话的 site 约定块（owner="parent"），告知子代理
+        # 网站部署区属于父会话而非自身
+        site_block = build_session_site_block(self._parent_session_id, owner="parent")
+        if site_block:
+            prompts.append(site_block)
+        return prompts
 
     async def _on_context_over_limit(self) -> None:
         """子 Agent 上下文超限时通知父 Agent，不自动旋转。"""

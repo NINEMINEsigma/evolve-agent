@@ -18,6 +18,8 @@ export const STORAGE_KEYS = {
   DRAWER_BACKGROUND_EXPANDED:  "evolve_drawer_background_expanded",
   DRAWER_CRON_EXPANDED:        "evolve_drawer_cron_expanded",
   DRAWER_DYNENDPOINTS_EXPANDED:"evolve_drawer_dynendpoints_expanded",
+  SITE_DRAWER_OPEN:             "evolve_site_drawer_open",
+  SITE_DRAWER_WIDTH:            "evolve_site_drawer_width",
   EXPANDED_CLUSTERS:           "evolve_expanded_clusters",
   HANDSFREE_MODE:              "evolve_handsfree_mode",
 

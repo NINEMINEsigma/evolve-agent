@@ -187,6 +187,12 @@ STATIC_FILE_HTTP_PREFIX: str = "/files"
 # 下载路由 HTTP 前缀 — 触发浏览器 attachment 下载
 DOWNLOADS_HTTP_PREFIX: str = "/downloads"
 
+# 目录打包 zip 下载路由前缀 — 将整个目录打包为 zip 后下载
+DIR_ZIP_HTTP_PREFIX: str = "/zip"
+
+# 目录打包 zip 源文件合计大小上限（200MB）— 防止大目录拖垮网关事件循环
+DIR_ZIP_MAX_TOTAL_BYTES: int = 200 * 1024 * 1024
+
 # 文件名示例：20250617_123045_utc_a1b2c3d4_filename.ext
 UPLOAD_TIME_RE_PATTERN = r"^(\d{8}_\d{6}_utc)_[a-f0-9]{8}_(.+)$"
 

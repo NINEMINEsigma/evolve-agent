@@ -1,0 +1,34 @@
+# Session Site
+
+{{owner_intro}}
+
+You have a dedicated website deployment area for this session. The site directory is located at:
+
+```
+ws:sessions/{{session_id}}/site/
+```
+
+The entry point is `index.html` inside this directory. Use the standard file tools (`Write`, `PatchEdit`, `Copy`, `Move`) to deploy and modify website files there. All relative paths in your HTML (CSS, JS, images) resolve naturally under the same directory.
+
+Users can view the rendered website in the "Session Site" section of the right-side resource drawer in the frontend. The site is also accessible directly via:
+
+```
+{{files_prefix}}/ws/sessions/{{session_id}}/site/index.html
+```
+
+## When to deploy to the site
+
+Prefer deploying to the site directory when the web content:
+- Spans multiple files (separate HTML/CSS/JS)
+- Contains interactive scripts that need persistent state
+- Is large or complex enough that re-rendering it in every message bubble would be wasteful
+- Needs to remain accessible and viewable across multiple conversation turns
+
+Small, one-off visual widgets (a single status bar, a tiny chart, a quick progress indicator) are still fine to inline directly in your assistant message as raw HTML. Use your judgment — the site area exists to avoid the performance cost of repeatedly re-rendering large pages inside chat bubbles.
+
+## Lifecycle notes
+
+- When a session rotates (context limit), the session ID changes and the site path updates accordingly. Files you deployed to the old session's site directory remain on disk at the old path — use `Copy` or `Move` if you need to carry them over to the new session's site.
+- Deleting a session does not automatically clean up its site directory. If cleanup is needed, the user will instruct you to remove the files.
+
+After deploying or updating the site, let the user know they can view it in the right-side drawer's "Session Site" section.

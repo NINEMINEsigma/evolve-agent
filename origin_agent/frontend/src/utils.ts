@@ -396,3 +396,21 @@ export function extractContentBlocks(el: HTMLDivElement | null, images: PendingI
   flushText();
   return blocks;
 }
+
+// ── Session Site URL 构建 ──────────────────────────────────────
+
+/**
+ * 构建会话站点的前端访问 URL。
+ *
+ * indexUrl 用于抽屉内 iframe 直连展示；
+ * zipUrl 用于"下载整站 zip"按钮，后端 /zip 路由会将 site/ 目录打包。
+ * sessionId 为空时返回 null（调用方应跳过渲染）。
+ */
+export function buildSiteUrls(sessionId: string): { indexUrl: string; zipUrl: string } | null {
+  if (!sessionId) return null;
+  const encoded = encodeURIComponent(sessionId);
+  return {
+    indexUrl: `/files/ws/sessions/${encoded}/site/index.html`,
+    zipUrl: `/zip/ws/sessions/${encoded}/site`,
+  };
+}

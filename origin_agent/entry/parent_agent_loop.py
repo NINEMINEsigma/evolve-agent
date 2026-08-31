@@ -50,6 +50,7 @@ from entry.agent_support.messages import (
     build_agent_system_prompt,
     build_full_history_messages,
 )
+from system.prompt import build_session_site_block
 from entry.agent_support.multimodal import (
     blocks_from_dicts,
     content_to_text,
@@ -212,11 +213,16 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
                 self._session_manager.rotate_session(old_sid, new_sid)
 
     def _build_system_prompt(self) -> list[str]:
-        return build_agent_system_prompt(
+        prompts = build_agent_system_prompt(
             self.app.runtime_context,
             self._collect_skill_prompts(),
             profile=self._active_llm_profile,
+            session_id=self.session_id,
         )
+        site_block = build_session_site_block(self.session_id, owner="self")
+        if site_block:
+            prompts.append(site_block)
+        return prompts
 
     def get_tool_availability_scope(self) -> ToolAvailability:
         return ToolAvailability.MAIN
@@ -728,11 +734,7 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
         return index
 
     def _get_full_history(self, session_id: str) -> list[BaseMessage]:
-        system_prompts: list[str] = build_agent_system_prompt(
-            self.app.runtime_context,
-            self._collect_skill_prompts(),
-            profile=self._active_llm_profile,
-        )
+        system_prompts = self._build_system_prompt()
         return build_full_history_messages(
             system_prompts, self._history, self.current_character_agent,
         )

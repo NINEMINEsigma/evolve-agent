@@ -22,14 +22,14 @@ from urllib.parse import parse_qs, quote
 
 import uvicorn
 from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
-from fastapi.responses import FileResponse, HTMLResponse
+from fastapi.responses import FileResponse, HTMLResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 from .chat import Message, MessageType
 from .message_router import MessageRouter
 from abstract.tools.registry import registry
 from datetime import datetime, timezone
-from entity.constant import CRON_STDOUT_PREVIEW_MAX_LENGTH, SUBPROCESS_TIMEOUT_DEFAULT, UPLOAD_FILENAME_TIME_FORMAT, USER_CHARACTER_NAME, UPLOADS_DIR_NAME, UPLOADS_WS_PREFIX, STATIC_FILE_HTTP_PREFIX, DOWNLOADS_HTTP_PREFIX, SYSTEM_CHARACTER_NAME
+from entity.constant import CRON_STDOUT_PREVIEW_MAX_LENGTH, SUBPROCESS_TIMEOUT_DEFAULT, UPLOAD_FILENAME_TIME_FORMAT, USER_CHARACTER_NAME, UPLOADS_DIR_NAME, UPLOADS_WS_PREFIX, STATIC_FILE_HTTP_PREFIX, DOWNLOADS_HTTP_PREFIX, DIR_ZIP_HTTP_PREFIX, DIR_ZIP_MAX_TOTAL_BYTES, SYSTEM_CHARACTER_NAME
 from entity.puretype import SessionStatus, ClientInfo, LLMProfile, MessageContent
 from system.context import get_runtime_context
 from entry.parent_agent_loop import IncompatibleHistoryError
@@ -1417,6 +1417,71 @@ async def download_workspace_file(namespace: str, file_path: str):
             "Content-Disposition": (
                 f'attachment; filename="{safe_ascii}"; '
                 f"filename*=UTF-8''{quote(filename, safe='')}"
+            ),
+        },
+    )
+
+
+@app.get(DIR_ZIP_HTTP_PREFIX + "/{namespace}/{file_path:path}")
+def download_dir_zip(namespace: str, file_path: str):
+    """将沙盒命名空间下的整个目录打包为 zip 后下载。
+
+    URL 格式: /zip/{namespace}/{file_path}
+    例如: /zip/ws/sessions/{sid}/site → agentspace/sessions/{sid}/site 打包为 site.zip
+
+    同步 def（非 async）使 Starlette 自动走 threadpool，避免 zip 构建阻塞事件循环。
+    """
+    import io
+    import os
+    import zipfile
+
+    from system.sandbox import Sandbox, SandboxError
+
+    logical = f"{namespace}:{file_path}"
+    try:
+        sandbox = Sandbox(get_runtime_context())
+        resolved = sandbox.resolve_read(logical)
+    except SandboxError as exc:
+        return HTMLResponse(str(exc), status_code=403)
+    if not resolved.real.exists() or not resolved.real.is_dir():
+        return HTMLResponse("Directory not found", status_code=404)
+
+    # 收集文件并检查总大小
+    files: list[tuple[Path, str]] = []
+    total_size: int = 0
+    root: Path = resolved.real
+    for dirpath, _dirnames, filenames in os.walk(str(root)):
+        for fname in filenames:
+            fpath = Path(dirpath) / fname
+            if not fpath.is_file():
+                continue
+            # arcname 以所打包目录名称为根
+            arcname = str(fpath.relative_to(root.parent))
+            files.append((fpath, arcname))
+            total_size += fpath.stat().st_size
+
+    if not files:
+        return HTMLResponse("Directory is empty", status_code=404)
+    if total_size > DIR_ZIP_MAX_TOTAL_BYTES:
+        return HTMLResponse(
+            f"Directory too large: {total_size} bytes exceeds limit {DIR_ZIP_MAX_TOTAL_BYTES}",
+            status_code=413,
+        )
+
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        for fpath, arcname in files:
+            zf.write(str(fpath), arcname)
+
+    zip_filename = f"{root.name}.zip"
+    safe_ascii = re.sub(r'[^\x20-\x7e]', '_', zip_filename)
+    return Response(
+        buf.getvalue(),
+        media_type="application/zip",
+        headers={
+            "Content-Disposition": (
+                f'attachment; filename="{safe_ascii}"; '
+                f"filename*=UTF-8''{quote(zip_filename, safe='')}"
             ),
         },
     )

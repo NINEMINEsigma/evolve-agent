@@ -10,6 +10,7 @@ import CronCountdown from "./CronCountdown";
 import SubagentCountdown from "./SubagentCountdown";
 import Lightbox from "./Lightbox";
 import LlmProfileDrawer from "./LlmProfileDrawer";
+import SessionSiteDrawer from "./SessionSiteSection";
 import SessionLockOverlay from "./SessionLockOverlay";
 import type { WebSocketState } from "../hooks/useWebSocket";
 import { STORAGE_KEYS } from "../constants/storage";
@@ -27,6 +28,7 @@ interface LayoutProps {
 export default function Layout({ ws, onContextMenu, contextMenuOpen }: LayoutProps) {
   const [lightboxSrc, setLightboxSrc] = useState<string | null>(null);
   const [llmDrawerOpen, setLlmDrawerOpen] = usePersistentState(STORAGE_KEYS.LLM_DRAWER_OPEN, false);
+  const [siteDrawerOpen, setSiteDrawerOpen] = usePersistentState(STORAGE_KEYS.SITE_DRAWER_OPEN, false);
   const [sidebarCollapsed, setSidebarCollapsed] = usePersistentState(STORAGE_KEYS.SIDEBAR_COLLAPSED, false);
   const [drawerOpen, setDrawerOpen] = usePersistentState(STORAGE_KEYS.DRAWER_OPEN, false);
   const [subagentPanelOpen, setSubagentPanelOpen] = usePersistentSessionState<boolean>(
@@ -77,6 +79,16 @@ export default function Layout({ ws, onContextMenu, contextMenuOpen }: LayoutPro
     setWidth: setLlmDrawerWidth,
     min: DIMENSIONS.LLM_DRAWER_MIN,
     max: DIMENSIONS.LLM_DRAWER_MAX,
+    direction: "right",
+  });
+
+  const [siteDrawerWidth, setSiteDrawerWidth] = usePersistentState<number>(
+    STORAGE_KEYS.SITE_DRAWER_WIDTH, DIMENSIONS.SITE_DRAWER_DEFAULT);
+  const siteDrawerResize = useResizable({
+    width: siteDrawerWidth,
+    setWidth: setSiteDrawerWidth,
+    min: DIMENSIONS.SITE_DRAWER_MIN,
+    max: DIMENSIONS.SITE_DRAWER_MAX,
     direction: "right",
   });
 
@@ -339,7 +351,7 @@ export default function Layout({ ws, onContextMenu, contextMenuOpen }: LayoutPro
 
       </div>
 
-      {!(drawerOpen || subagentPanelOpen || llmDrawerOpen) && (
+      {!(drawerOpen || subagentPanelOpen || llmDrawerOpen || siteDrawerOpen) && (
         <div className="right-trigger-strip">
           <div
             className="right-trigger-bar resource-trigger-bar"
@@ -357,6 +369,13 @@ export default function Layout({ ws, onContextMenu, contextMenuOpen }: LayoutPro
               <span className="right-trigger-icon">◀</span>
             </div>
           )}
+          <div
+            className="right-trigger-bar site-trigger-bar"
+            onClick={() => setSiteDrawerOpen(true)}
+            data-tooltip="打开会话网页抽屉"
+          >
+            <span className="right-trigger-icon">◀</span>
+          </div>
           <div
             className="right-trigger-bar llm-trigger-bar"
             onClick={() => setLlmDrawerOpen(true)}
@@ -414,6 +433,15 @@ export default function Layout({ ws, onContextMenu, contextMenuOpen }: LayoutPro
           onResizePointerDown={llmDrawerResize.onPointerDown}
         />
       )}
+
+      <SessionSiteDrawer
+        open={siteDrawerOpen}
+        onClose={() => setSiteDrawerOpen(false)}
+        sessionId={ws.sessionId}
+        width={siteDrawerWidth}
+        isResizing={siteDrawerResize.isResizing}
+        onResizePointerDown={siteDrawerResize.onPointerDown}
+      />
     </>
   );
 }

@@ -136,6 +136,7 @@ def build_agent_system_prompt(
     skill_blocks: list[str],
     tool_availability_scope: ToolAvailability = ToolAvailability.MAIN,
     profile: LLMProfile | None = None,
+    session_id: str = "",
 ) -> list[str]:
     """构建 Agent 使用的 system prompt 段落列表。"""
     return build_system_prompt(
@@ -149,6 +150,7 @@ def build_agent_system_prompt(
         tool_availability_scope=tool_availability_scope,
         runtime_ctx=ctx,
         profile=profile,
+        session_id=session_id,
     )
 
 

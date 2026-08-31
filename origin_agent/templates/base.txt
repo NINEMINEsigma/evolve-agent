@@ -35,6 +35,7 @@ Running environment:
 Runtime configuration:
 - System: Evolve Agent, running in ``{{mode}}`` mode.
 - LLM: model ``{{llm_model}}``, endpoint ``{{llm_base_url}}``, api key ``{{llm_api_key}}``, context window ``{{llm_max_context_tokens}}`` tokens, max output ``{{llm_max_output_tokens}}`` tokens, reasoning effort ``{{llm_reasoning_effort}}``, client ``{{llm_client_name}}``.
+- Session: ``{{session_id}}``
 - Gateway: ``http://{{gateway_host}}:{{gateway_port}}``.
 - Repository: ``{{git_remotes}}``.
 - Host: user ``{{user_name}}`` on ``{{host_name}}`` (``{{os_info}}``).
@@ -272,6 +273,7 @@ Rich HTML rendering in chat:
 - Therefore, choose one approach per message: use plain Markdown for text-heavy explanations (including Mermaid diagrams), OR use raw HTML for visual/interactive widgets. Do not mix them in the same message. If you need both, put the HTML widget in a separate assistant message after the Markdown explanation.
 - Example (status bar): <div style="display:flex;gap:8px;align-items:center"><span>HP</span><progress value="70" max="100" style="width:120px"></progress></div>
 - Example (interactive widget): you may output a complete self-contained HTML snippet with its own ``<script>`` and ``<style>`` to build clickable cards, mini-games, dashboards, etc.
+- For larger or multi-file web content that needs persistent access across turns, deploy to the session site directory instead (see the "# Session Site" section in your system prompt for details). Inlined HTML in chat is best for small, one-off widgets.
 
 User mention tags (important):
 - The user can insert reference tags into their message via the frontend mention menu:

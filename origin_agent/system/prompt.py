@@ -19,6 +19,7 @@ from __future__ import annotations
 import logging
 import sys
 from pathlib import Path
+from typing import Literal
 
 logger = logging.getLogger(__name__)
 
@@ -124,6 +125,7 @@ def build_system_prompt(
     tool_availability_scope: ToolAvailability = ToolAvailability.MAIN,
     runtime_ctx: RuntimeContext | None = None,   # 运行时配置：注入 base.txt 占位符
     profile: LLMProfile | None = None,             # 活跃 LLM 配置（优先于 runtime_ctx 的已删除字段）
+    session_id: str = "",                           # 当前会话 ID，注入 base.txt 的 {{session_id}} 占位符
 ) -> list[str]:
     """从分层模板组装完整的 system prompt 列表。
 
@@ -191,6 +193,7 @@ def build_system_prompt(
                 "{{mcp_config_path}}": _mcp_ws_path(runtime_ctx),
                 "{{gateway_host}}": runtime_ctx.gateway_host,
                 "{{gateway_port}}": str(runtime_ctx.gateway_port),
+                "{{session_id}}": session_id,
             }
             for k, v in runtime_values.items():
                 base = base.replace(k, (v or "未配置").strip())
@@ -236,3 +239,43 @@ def build_system_prompt(
                 blocks.append(block.strip())
 
     return blocks
+
+
+def build_session_site_block(
+    session_id: str,
+    *,
+    owner: Literal["self", "parent"] = "self",
+) -> str:
+    """构建 Session Site Deployment 约定提示词块。
+
+    从 ``templates/session_site.txt`` 读取模板并替换占位符。
+    session_id 为空串或模板缺失时返回空串（调用方跳过 append）。
+
+    Args:
+        session_id: 当前会话 ID（owner="parent" 时为父会话 ID）。
+        owner: "self" 表示本会话自身的部署区；"parent" 表示子代理
+            为主会话的部署区产出内容（归属主会话）。
+    """
+    if not session_id:
+        return ""
+    template: str = read_template("session_site.txt")
+    if not template:
+        return ""
+    if owner == "parent":
+        owner_intro = (
+            "You are a sub-agent working within a parent session. "
+            "The parent session has a dedicated website deployment area. "
+            "The session ID below is the PARENT session's ID, not your own. "
+            "Deploy website content to the parent session's site directory."
+        )
+    else:
+        owner_intro = (
+            "You have a dedicated website deployment area for THIS session. "
+            "The session ID below is your current session's ID."
+        )
+    return (
+        template
+        .replace("{{owner_intro}}", owner_intro)
+        .replace("{{session_id}}", session_id)
+        .replace("{{files_prefix}}", STATIC_FILE_HTTP_PREFIX)
+    )

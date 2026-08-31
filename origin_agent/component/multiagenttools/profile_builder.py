@@ -56,6 +56,7 @@ def _resolve_main_agent_prompts(
     parent_ctx: RuntimeContext,
     _sandbox: Sandbox,
     profile: LLMProfile | None = None,
+    session_id: str = "",
 ) -> list[str]:
     """主 Agent 的系统提示词解析：从模板系统生成。"""
     from entity.puretype import ToolAvailability
@@ -65,6 +66,7 @@ def _resolve_main_agent_prompts(
         parent_ctx, skill_blocks,
         tool_availability_scope=ToolAvailability.MULTI_AGENT,
         profile=profile,
+        session_id=session_id,
     )
 
 
@@ -187,7 +189,7 @@ def build_agent_profiles(
 
         # ── 2. 解析 system_prompts（统一通过回调） ──
         if name == main_agent_name:
-            persona_prompts = _resolve_main_agent_prompts(name, config, parent_ctx, sandbox, profile=main_profile)
+            persona_prompts = _resolve_main_agent_prompts(name, config, parent_ctx, sandbox, profile=main_profile, session_id=session_id)
         else:
             persona_prompts = _resolve_subagent_prompts(name, config, parent_ctx, sandbox)
 

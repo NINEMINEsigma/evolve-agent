@@ -61,6 +61,14 @@
   background: var(--multi-bright);
 }
 
+.site-trigger-bar {
+  background: rgba(var(--accent-rgb, 99, 102, 241), 0.10);
+}
+
+.site-trigger-bar:hover {
+  background: var(--accent);
+}
+
 .drawer-overlay {
   position: fixed;
   inset: 0;
@@ -864,4 +872,62 @@
   margin-top: 16px;
   padding-top: 12px;
   border-top: 1px solid var(--border);
+}
+
+/* ── Session Site ── */
+
+/* site 抽屉 body：去 padding、禁滚动、撑满剩余高度（toolbar + iframe 直接填充） */
+.drawer-body.site-drawer-body {
+  padding: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+/* toolbar：顶部一行按钮 */
+.site-toolbar {
+  display: flex;
+  flex-direction: row;
+  gap: 8px;
+  align-items: center;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-elevated);
+  flex-shrink: 0;
+}
+
+.site-btn {
+  padding: 4px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-hover);
+  color: var(--text-primary);
+  font-size: 12px;
+  cursor: pointer;
+  transition: background var(--duration-fast);
+}
+
+.site-btn:hover {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+}
+
+/* 视口：撑满 toolbar 之下全部剩余空间，自适应宽高 */
+.site-viewport {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.site-viewport iframe {
+  width: 100%;
+  height: 100%;
+  border: 0;
+  background: #fff;
+  display: block;
+}
+
+/* 全屏模式 */
+.site-viewport:fullscreen {
+  background: var(--bg-primary);
 }
