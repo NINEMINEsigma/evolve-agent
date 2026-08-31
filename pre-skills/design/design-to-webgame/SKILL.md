@@ -76,6 +76,38 @@ project/
 
 详见 `references/threejs-game-architecture.md`。
 
+#### 路线C进阶：高性能实时 3D 游戏
+
+当目标是**规模化 + 性能化**（大量程序化发光体、开放场景、需要 60fps 的对抗/空战/竞速），
+不要只用基础的 `EffectComposer→Bloom`，参考本 skill 自带的完整高性能模板：
+
+- **完整可运行范例**：`assets/cyber-jet-game/`（赛博战机 — 霓虹峡谷之雨，一场浏览器实时 3D 空战，
+  自研 HDR 后处理链 + 程序化霓虹城市 + 玩家/AI 共用物理）。说明与技术点清单见
+  `assets/cyber-jet-game/BUILD_NOTES.md`。
+- **架构方法论**：`references/cyber-jet-game-architecture.md`（自研 HDR 合成、InstancedMesh 程序化城市、
+  周期种子无缝循环、受击方权威判定、共享雾与全局 uniform、GPU 粒子 + 辉光池、状态机 + 调试钩子、
+  画质预设与自动降档）。
+
+**如何选**：
+- 场景规模小、氛围简单 → 用 `threejs-game-architecture.md` 的 EffectComposer 路线。
+- 场景有数百+程序化发光体、需要无缝大世界、玩家/AI 要用同一套物理 → 读
+  `references/cyber-jet-game-architecture.md`，并对照 `assets/cyber-jet-game/` 源码。
+
+#### 路线C进阶2：程序化世界渲染（滚动 / 状态驱动）
+
+当游戏世界目标是**纯程序化、零素材、形态随进度 / 状态连续变形**（开放地形、程序化生态、
+滚动式环境叙事），参考 `assets/field-world-render/`（「场」程序化落地页，说明见
+`assets/field-world-render/BUILD_NOTES.md`）。它覆盖地图级程序化渲染的一套干净契约：
+
+- **状态驱动**：页面只产 `travel`(0..1 进度)+`phase`(0..n 阶段)，场景据此推导一切
+- **计算通道多态**：每帧派发 N 线程重写存储缓冲，描述每个实例「此刻是什么」，状态切换零加载
+- **高度场脊柱**：一张共享高度场同时位移地形、定位生态，永不穿模
+- **CPU 混色 + uniform 驱动**：整组艺术方向按权重混合，推给 GPU
+- **自适应降档 + 降级页**：低端自动减实例 / DPR，不支持 GPU 显说明页
+
+具体源码在 `assets/field-world-render/src/` 下读（`scroll.js` / `field.js` / `tsl-common.js` /
+`palette.js` / `stage.js`）。若目标是**可玩对抗**而非滚动叙事，回到上一条 cyber-jet-game 路线。
+
 ### 检查 ComfyUI（可选，美术资源用）
 
 ```bash

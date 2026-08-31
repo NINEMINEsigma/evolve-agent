@@ -1,0 +1,566 @@
+/* ============================================================== fonts === */
+
+@font-face {
+	font-family: 'Geist';
+	src: url('../assets/fonts/Geist-Variable.woff2') format('woff2');
+	font-weight: 100 700;
+	font-style: normal;
+	font-display: swap;
+}
+
+@font-face {
+	font-family: 'Geist Mono';
+	src: url('../assets/fonts/GeistMono-Variable.woff2') format('woff2');
+	font-weight: 100 700;
+	font-style: normal;
+	font-display: swap;
+}
+
+@font-face {
+	font-family: 'Instrument Serif';
+	src: url('../assets/fonts/InstrumentSerif-Regular.woff2') format('woff2');
+	font-weight: 400;
+	font-style: normal;
+	font-display: swap;
+}
+
+@font-face {
+	font-family: 'Instrument Serif';
+	src: url('../assets/fonts/InstrumentSerif-Italic.woff2') format('woff2');
+	font-weight: 400;
+	font-style: italic;
+	font-display: swap;
+}
+
+/* ============================================================== tokens === */
+
+:root {
+	--ink: #f6f3ec;
+	--ink-soft: rgba(246, 243, 236, 0.66);
+	--ink-faint: rgba(246, 243, 236, 0.38);
+	--accent: #e8c37a;
+	--line: rgba(246, 243, 236, 0.14);
+
+	--gutter: clamp(1.4rem, 4.6vw, 6.5rem);
+	--chapter-height: 185vh;
+
+	--sans: 'Geist', -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Noto Sans SC', 'Segoe UI', sans-serif;
+	--mono: 'Geist Mono', ui-monospace, 'SF Mono', Menlo, 'PingFang SC', 'Noto Sans SC', monospace;
+	--display: 'Instrument Serif', 'Songti SC', 'Noto Serif SC', 'Times New Roman', serif;
+
+	--ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* ============================================================== base ==== */
+
+*,
+*::before,
+*::after { box-sizing: border-box; }
+
+html { -webkit-text-size-adjust: 100%; }
+
+body {
+	margin: 0;
+	background: #05070a;
+	color: var(--ink);
+	font-family: var(--sans);
+	font-weight: 300;
+	font-size: 16px;
+	line-height: 1.6;
+	letter-spacing: -0.004em;
+	overflow-x: hidden;
+	-webkit-font-smoothing: antialiased;
+	-moz-osx-font-smoothing: grayscale;
+	text-rendering: optimizeLegibility;
+}
+
+::selection { background: var(--accent); color: #0a0906; }
+
+a { color: inherit; text-decoration: none; }
+h1, h2, p, dl, dd, figure { margin: 0; }
+code { font-family: var(--mono); font-size: 0.92em; letter-spacing: 0; }
+em { font-style: italic; }
+
+/* ============================================================== canvas == */
+
+#stage {
+	position: fixed;
+	inset: 0;
+	width: 100%;
+	height: 100%;
+	display: block;
+	z-index: 0;
+	opacity: 0;
+	transition: opacity 1.6s var(--ease-out);
+}
+
+body.is-live #stage { opacity: 1; }
+
+/* a whisper of extra depth on top of the render */
+.atmosphere {
+	position: fixed;
+	inset: 0;
+	z-index: 1;
+	pointer-events: none;
+	background:
+		radial-gradient(120% 78% at 50% 8%, rgba(0, 0, 0, 0) 42%, rgba(0, 0, 0, 0.36) 100%),
+		linear-gradient(to bottom, rgba(0, 0, 0, 0.42), rgba(0, 0, 0, 0) 22%, rgba(0, 0, 0, 0) 70%, rgba(0, 0, 0, 0.5));
+	opacity: 0;
+	transition: opacity 2s var(--ease-out);
+}
+
+body.is-live .atmosphere { opacity: 1; }
+
+/* ============================================================== chrome == */
+
+.chrome {
+	position: fixed;
+	z-index: 20;
+	opacity: 0;
+	pointer-events: none;
+}
+
+body.is-live .chrome { opacity: 1; transition: opacity 1.2s var(--ease-out) 0.5s; }
+
+.nav {
+	top: 0;
+	left: 0;
+	right: 0;
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	padding: clamp(1.1rem, 2.4vw, 2.1rem) var(--gutter);
+	mix-blend-mode: normal;
+}
+
+.nav__brand {
+	pointer-events: auto;
+	display: inline-flex;
+	align-items: center;
+	gap: 0.65rem;
+	font-family: var(--mono);
+	font-weight: 400;
+	font-size: 0.78rem;
+	letter-spacing: 0.34em;
+	text-transform: uppercase;
+}
+
+.nav__mark {
+	width: 7px;
+	height: 7px;
+	border-radius: 50%;
+	background: var(--accent);
+	box-shadow: 0 0 14px 2px color-mix(in srgb, var(--accent) 70%, transparent);
+	transition: background 0.8s linear, box-shadow 0.8s linear;
+}
+
+.nav__meta {
+	display: flex;
+	gap: 0.5rem;
+	font-family: var(--mono);
+	font-size: 0.66rem;
+	letter-spacing: 0.24em;
+	text-transform: uppercase;
+	color: var(--ink-faint);
+}
+
+.dot { opacity: 0.42; }
+
+/* thin progress line at the very top */
+.scrollbar {
+	top: 0;
+	left: 0;
+	right: 0;
+	height: 2px;
+	background: rgba(255, 255, 255, 0.07);
+}
+
+.scrollbar i {
+	display: block;
+	height: 100%;
+	width: 0%;
+	background: var(--accent);
+	box-shadow: 0 0 12px color-mix(in srgb, var(--accent) 80%, transparent);
+	transition: background 0.8s linear;
+}
+
+/* chapter rail — sits opposite the readout so it never fights the copy */
+.rail {
+	right: var(--gutter);
+	bottom: clamp(1rem, 2.2vw, 1.9rem);
+}
+
+.rail ol {
+	margin: 0;
+	padding: 0;
+	list-style: none;
+	display: flex;
+	gap: 1.5rem;
+}
+
+.rail li {
+	display: flex;
+	align-items: baseline;
+	gap: 0.5rem;
+	font-family: var(--mono);
+	font-size: 0.62rem;
+	letter-spacing: 0.18em;
+	text-transform: uppercase;
+	color: var(--ink-faint);
+	transition: color 0.6s var(--ease-out), opacity 0.6s var(--ease-out);
+	opacity: 0.45;
+}
+
+.rail li b {
+	font-weight: 400;
+	font-size: 0.58rem;
+	color: inherit;
+}
+
+.rail li span {
+	max-width: 0;
+	overflow: hidden;
+	white-space: nowrap;
+	transition: max-width 0.7s var(--ease-out);
+}
+
+.rail li.is-active {
+	opacity: 1;
+	color: var(--accent);
+}
+
+.rail li.is-active span { max-width: 8rem; }
+
+/* live readout */
+.hud {
+	left: var(--gutter);
+	bottom: clamp(1rem, 2.2vw, 1.9rem);
+	display: flex;
+	gap: 0.55rem;
+	font-family: var(--mono);
+	font-size: 0.62rem;
+	letter-spacing: 0.18em;
+	text-transform: uppercase;
+	color: var(--ink-faint);
+}
+
+/* ============================================================== layout == */
+
+main { position: relative; z-index: 10; }
+
+.panel {
+	position: relative;
+	min-height: var(--chapter-height);
+}
+
+.panel__inner {
+	position: sticky;
+	top: 0;
+	min-height: 100svh;
+	display: flex;
+	flex-direction: column;
+	justify-content: center;
+	padding: clamp(6rem, 12vh, 10rem) var(--gutter) clamp(5rem, 10vh, 8rem);
+}
+
+.hero {
+	min-height: 100svh;
+}
+
+.hero .panel__inner {
+	min-height: 100svh;
+	justify-content: flex-end;
+	padding-bottom: clamp(6rem, 16vh, 11rem);
+	max-width: 62rem;
+}
+
+.chapter--right .panel__inner { align-items: flex-end; text-align: right; }
+
+.card {
+	position: relative;
+	max-width: 33rem;
+}
+
+/* soft local scrim so type always reads over the render — sized to the sticky
+   frame itself, so nothing ever overhangs the viewport */
+.panel__inner::before {
+	content: '';
+	position: absolute;
+	inset: 0;
+	z-index: -1;
+	pointer-events: none;
+	background: radial-gradient(66% 58% at 24% 52%, rgba(4, 6, 9, 0.74), rgba(4, 6, 9, 0) 72%);
+}
+
+.chapter--right .panel__inner::before {
+	background: radial-gradient(66% 58% at 76% 52%, rgba(4, 6, 9, 0.74), rgba(4, 6, 9, 0) 72%);
+}
+
+/* the hero carries no scrim of its own — its inner is width-capped, so any
+   fill here shows its own edge. The full-viewport .atmosphere gradient is
+   what keeps the headline legible. */
+.hero .panel__inner::before { content: none; }
+
+.outro .panel__inner::before {
+	background: radial-gradient(72% 62% at 26% 50%, rgba(4, 6, 9, 0.8), rgba(4, 6, 9, 0) 74%);
+}
+
+/* ============================================================== type ==== */
+
+.eyebrow {
+	font-family: var(--mono);
+	font-size: 0.68rem;
+	font-weight: 400;
+	letter-spacing: 0.3em;
+	text-transform: uppercase;
+	color: var(--ink-soft);
+	margin-bottom: clamp(1.1rem, 2.4vh, 2rem);
+}
+
+.eyebrow b {
+	font-weight: 400;
+	color: var(--accent);
+	transition: color 0.8s linear;
+}
+
+.display {
+	font-family: var(--display);
+	/* 与首屏标题同一路数：更小更细。行高 > 1，中文多行标题才不会相碰 */
+	font-weight: 300;
+	line-height: 1.12;
+	letter-spacing: -0.012em;
+	font-size: clamp(2rem, 4.4vw, 4.4rem);
+	text-wrap: balance;
+}
+
+.display--hero {
+	/* 四个汉字整体成行，字号随视口收敛，窄屏下也不会折行叠字 */
+	font-size: clamp(2.6rem, 6vw, 6rem);
+	line-height: 1;
+	white-space: nowrap;
+	font-weight: 300;
+	max-width: none;
+}
+
+.display--outro {
+	font-size: clamp(1.9rem, 4vw, 4rem);
+	max-width: 20ch;
+}
+
+.chapter .display { margin-bottom: clamp(1.4rem, 3vh, 2.4rem); }
+
+.lede {
+	margin-top: clamp(1.6rem, 3.4vh, 2.6rem);
+	max-width: 38ch;
+	font-size: clamp(1rem, 1.05vw, 1.14rem);
+	line-height: 1.62;
+	color: var(--ink-soft);
+}
+
+.lede b {
+	font-weight: 400;
+	color: var(--ink);
+	font-variant-numeric: tabular-nums;
+}
+
+.body {
+	max-width: 40ch;
+	font-size: clamp(0.95rem, 0.98vw, 1.06rem);
+	line-height: 1.68;
+	color: var(--ink-soft);
+}
+
+.chapter--right .body,
+.chapter--right .spec { margin-left: auto; }
+
+/* ============================================================== specs === */
+
+.spec,
+.colophon {
+	margin-top: clamp(1.8rem, 3.6vh, 2.8rem);
+	display: grid;
+	gap: 0;
+	border-top: 1px solid var(--line);
+	max-width: 34rem;
+}
+
+.spec > div,
+.colophon > div {
+	display: grid;
+	grid-template-columns: 9rem 1fr;
+	gap: 1rem;
+	padding: 0.62rem 0;
+	border-bottom: 1px solid var(--line);
+	font-family: var(--mono);
+	font-size: 0.7rem;
+	letter-spacing: 0.06em;
+}
+
+.chapter--right .spec > div { grid-template-columns: 1fr 9rem; }
+.chapter--right .spec dt { order: 2; text-align: right; }
+.chapter--right .spec dd { order: 1; text-align: right; }
+
+.spec dt,
+.colophon dt {
+	color: var(--ink-faint);
+	text-transform: uppercase;
+	letter-spacing: 0.18em;
+	font-size: 0.62rem;
+	align-self: center;
+}
+
+.spec dd,
+.colophon dd {
+	margin: 0;
+	color: var(--ink);
+	font-variant-numeric: tabular-nums;
+}
+
+.outro .panel__inner { max-width: 64rem; }
+
+.colophon { margin-top: clamp(2.4rem, 5vh, 4rem); max-width: 44rem; }
+.colophon > div { grid-template-columns: 10rem 1fr; }
+
+.foot {
+	margin-top: clamp(2.4rem, 5vh, 4rem);
+	display: flex;
+	gap: 0.6rem;
+	font-family: var(--mono);
+	font-size: 0.62rem;
+	letter-spacing: 0.2em;
+	text-transform: uppercase;
+	color: var(--ink-faint);
+}
+
+/* ============================================================== hero cue */
+
+.hero__cue {
+	position: absolute;
+	left: var(--gutter);
+	bottom: clamp(2.2rem, 5vh, 3.4rem);
+	display: flex;
+	align-items: center;
+	gap: 0.9rem;
+	font-family: var(--mono);
+	font-size: 0.62rem;
+	letter-spacing: 0.28em;
+	text-transform: uppercase;
+	color: var(--ink-faint);
+}
+
+.hero__cue i {
+	display: block;
+	width: 3.4rem;
+	height: 1px;
+	background: linear-gradient(to right, var(--accent), transparent);
+	transform-origin: left center;
+	animation: cue 2.8s var(--ease-out) infinite;
+}
+
+@keyframes cue {
+	0%, 100% { transform: scaleX(0.35); opacity: 0.45; }
+	45% { transform: scaleX(1); opacity: 1; }
+}
+
+/* ============================================================== reveal == */
+
+[data-reveal],
+.split-line {
+	will-change: transform, opacity;
+}
+
+.split-mask { overflow: hidden; display: block; }
+
+/* ============================================================== boot ==== */
+
+.boot {
+	position: fixed;
+	inset: 0;
+	z-index: 100;
+	display: grid;
+	place-items: center;
+	background: #05070a;
+	transition: opacity 1.1s var(--ease-out), visibility 1.1s;
+}
+
+.boot.is-done { opacity: 0; visibility: hidden; }
+
+.boot__inner { display: grid; justify-items: center; gap: 1.5rem; }
+
+.boot__mark {
+	font-family: var(--mono);
+	font-size: 0.8rem;
+	letter-spacing: 0.5em;
+	text-indent: 0.5em;
+	color: var(--ink);
+}
+
+.boot__bar {
+	width: min(46vw, 14rem);
+	height: 1px;
+	background: rgba(255, 255, 255, 0.12);
+	overflow: hidden;
+}
+
+.boot__bar i {
+	display: block;
+	height: 100%;
+	width: 30%;
+	background: var(--accent);
+	animation: boot 1.5s ease-in-out infinite;
+}
+
+@keyframes boot {
+	0% { transform: translateX(-110%); }
+	100% { transform: translateX(360%); }
+}
+
+.boot__note {
+	font-family: var(--mono);
+	font-size: 0.6rem;
+	letter-spacing: 0.26em;
+	text-transform: uppercase;
+	color: var(--ink-faint);
+}
+
+/* ============================================================== fallback  */
+
+.fallback {
+	position: fixed;
+	inset: 0;
+	z-index: 120;
+	display: grid;
+	place-items: center;
+	padding: var(--gutter);
+	background:
+		radial-gradient(120% 90% at 30% 10%, #16202c, #05070a 70%);
+}
+
+.fallback[hidden] { display: none; }
+.fallback__inner { max-width: 40rem; display: grid; gap: 1.4rem; }
+.fallback .display { font-size: clamp(2.4rem, 6vw, 4.2rem); }
+.fallback__reason { font-family: var(--mono); font-size: 0.7rem; color: var(--ink-faint); }
+
+/* ============================================================== small === */
+
+@media (max-width: 900px) {
+	:root { --chapter-height: 165vh; }
+
+	.rail { display: none; }
+	.card { max-width: 100%; }
+	.chapter--right .panel__inner { align-items: flex-start; text-align: left; }
+	.chapter--right .body, .chapter--right .spec { margin-left: 0; }
+	.chapter--right .spec > div { grid-template-columns: 8rem 1fr; }
+	.chapter--right .spec dt { order: 0; text-align: left; }
+	.chapter--right .spec dd { order: 0; text-align: left; }
+	.chapter--right .panel__inner::before { background: radial-gradient(80% 58% at 30% 52%, rgba(4, 6, 9, 0.76), rgba(4, 6, 9, 0) 74%); }
+	.spec > div, .colophon > div { grid-template-columns: 7.5rem 1fr; font-size: 0.66rem; }
+	.hud { font-size: 0.55rem; letter-spacing: 0.12em; }
+	.nav__meta { display: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.hero__cue i { animation: none; }
+	.boot__bar i { animation: none; width: 100%; }
+	#stage, .atmosphere, .chrome { transition-duration: 0.01ms; }
+}

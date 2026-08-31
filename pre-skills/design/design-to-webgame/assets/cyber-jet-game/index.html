@@ -1,0 +1,347 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' fill='%23060b14'/%3E%3Ccircle cx='8' cy='8' r='4' fill='%23ff5cc8'/%3E%3C/svg%3E"/>
+<title>赛博战机</title>
+<style>
+  @font-face { font-family: 'Geist Mono'; src: url('fonts/geist-mono-400.woff2') format('woff2'); font-weight: 400; font-display: swap; }
+  @font-face { font-family: 'Geist Mono'; src: url('fonts/geist-mono-500.woff2') format('woff2'); font-weight: 500; font-display: swap; }
+  @font-face { font-family: 'Geist Mono'; src: url('fonts/geist-mono-200.woff2') format('woff2'); font-weight: 200; font-display: swap; }
+  :root {
+    --mono: 'Geist Mono', ui-monospace, Menlo, monospace;
+    --snow: #e8f2fb;
+    --faint: rgba(232, 242, 251, 0.42);
+    --acc: #ff5cc8;
+    --acc-title: #4de2ff;   /* the title reads in canyon cyan; the rest of the UI keeps the magenta accent */
+    --acc-dim: rgba(255, 92, 200, 0.32);
+  }
+  html, body { margin:0; padding:0; height:100%; background:#05070e; overflow:hidden; }
+  body.playing { cursor: crosshair; }
+  #app { position:fixed; inset:0; }
+  #gl { display:block; width:100%; height:100%; }
+
+  /* ---- readability gradients + scanlines (menu only) -------------------- */
+  #vig {
+    position:fixed; inset:0; z-index:5; pointer-events:none;
+    opacity:0; transition:opacity .45s ease;
+    background:linear-gradient(103deg, rgba(4,6,12,0) 34%, rgba(4,6,12,.58) 68%, rgba(3,5,10,.9) 100%);
+  }
+  #vig::before {
+    content:''; position:absolute; inset:0;
+    background:linear-gradient(0deg, rgba(3,5,10,.66) 0%, rgba(3,5,10,0) 30%);
+  }
+  #vig::after {
+    content:''; position:absolute; inset:0;
+    background:repeating-linear-gradient(0deg, rgba(232,242,251,.022) 0 1px, transparent 1px 3px);
+  }
+  body.menu-open #vig { opacity:1; }
+
+  /* ---- terminal corner brackets ----------------------------------------- */
+  #frame { position:fixed; inset:16px; z-index:6; pointer-events:none; opacity:0; transition:opacity .5s ease; }
+  body.menu-open #frame { opacity:1; }
+  #frame i { position:absolute; width:22px; height:22px; border:0 solid var(--acc-dim); }
+  #frame .tl { left:0; top:0; border-top-width:1px; border-left-width:1px; }
+  #frame .tr { right:0; top:0; border-top-width:1px; border-right-width:1px; }
+  #frame .bl { left:0; bottom:0; border-bottom-width:1px; border-left-width:1px; }
+  #frame .br { right:0; bottom:0; border-bottom-width:1px; border-right-width:1px; }
+
+  /* ---- right-rail menu --------------------------------------------------- */
+  #menu {
+    position:fixed; right:6.5vw; top:50%; transform:translateY(-50%); z-index:12;
+    text-align:right; font-family:var(--mono); color:var(--snow);
+    text-shadow:0 1px 6px rgba(3,6,12,.9);
+    user-select:none; pointer-events:none;
+  }
+  .screen { display:none; }
+  .screen.active { display:block; }
+  .screen.active .anim {
+    animation:enter .55s cubic-bezier(.22,.8,.36,1) both;
+    animation-delay:calc(var(--i, 0) * 66ms);
+  }
+  @keyframes enter { from { opacity:0; transform:translateX(28px); } to { opacity:1; transform:none; } }
+
+  .ov { font-size:10.5px; font-weight:500; letter-spacing:.34em; text-transform:uppercase; color:rgba(255,92,200,.78); }
+  .ttl { margin:14px 0 0; font-size:clamp(40px, 6vw, 84px); font-weight:200; letter-spacing:-.02em; line-height:1.02; }
+  .ttl b { font-weight:500; color:var(--acc-title); }
+  .ttl.small { font-size:clamp(30px, 4.2vw, 56px); }
+  .sub { margin-top:14px; font-size:12px; letter-spacing:.1em; color:var(--faint); }
+
+  .items { margin-top:36px; }
+  .item {
+    padding:10px 0; font-size:13px; font-weight:500; letter-spacing:.28em; text-transform:uppercase;
+    color:rgba(232,242,251,.52); cursor:pointer; pointer-events:auto;
+    transition:color .18s ease;
+  }
+  .item .num { color:rgba(232,242,251,.26); margin-right:14px; transition:color .18s ease; }
+  .item.sel { color:#fff; }
+  .item.sel .num { color:var(--acc); }
+  .item.nudge { animation:nudge .18s ease-out 1; }
+  @keyframes nudge { 0% { transform:translateX(0); } 35% { transform:translateX(-5px); } 70% { transform:translateX(2px); } 100% { transform:translateX(0); } }
+  .item .val { margin-left:18px; color:#fff; }
+  .item .chev { color:var(--faint); }
+
+  .rows { margin-top:26px; }
+  .row {
+    display:flex; justify-content:flex-end; align-items:baseline; gap:20px;
+    padding:6px 0; font-size:11.5px; letter-spacing:.14em; text-transform:uppercase;
+  }
+  .row .k { color:#fff; font-weight:500; letter-spacing:.22em; }
+  .row .v { color:var(--faint); }
+  .row.me .k, .row.me .v { color:var(--acc); }
+
+  #foot {
+    position:fixed; left:24px; bottom:20px; z-index:6; pointer-events:none;
+    font-family:var(--mono); font-size:10px; font-weight:500; letter-spacing:.3em; text-transform:uppercase;
+    color:var(--faint); opacity:0; transition:opacity .5s ease;
+  }
+  body.menu-open #foot { opacity:.6; }
+
+  /* ---- HUD --------------------------------------------------------------- */
+  #hud {
+    position:fixed; inset:0; z-index:10; pointer-events:none; opacity:0; transition:opacity 1s ease;
+    font-family:var(--mono); color:var(--snow);
+    text-shadow:0 1px 4px rgba(3,6,12,.9), 0 0 16px rgba(83,213,253,.22);
+    user-select:none;
+  }
+  #topbar {
+    position:absolute; left:28px; top:22px; display:flex; gap:22px; align-items:baseline;
+    font-size:13px; font-weight:500; letter-spacing:.26em; text-transform:uppercase;
+  }
+  #topbar b { color:#53d5fd; font-weight:500; }
+  #timer {
+    position:absolute; left:50%; top:20px; transform:translateX(-50%);
+    font-size:26px; font-weight:200; letter-spacing:.14em;
+  }
+  #center-msg {
+    position:absolute; left:50%; top:26%; transform:translateX(-50%);
+    font-size:clamp(20px, 3.4vw, 46px); font-weight:200; letter-spacing:.24em; color:#fff; opacity:0; transition:opacity .3s ease;
+    text-shadow:0 2px 12px rgba(3,6,12,.95), 0 0 34px rgba(83,213,253,.55);
+    white-space:nowrap; max-width:94vw;
+  }
+  #crosshair {
+    position:absolute; left:50%; top:50%; width:26px; height:26px; transform:translate(-50%,-50%);
+    opacity:.75;
+  }
+  #crosshair::before, #crosshair::after {
+    content:''; position:absolute; background:#53d5fd;
+    box-shadow:0 0 6px rgba(83,213,253,.8);
+  }
+  #crosshair::before { left:50%; top:0; width:1.5px; height:100%; transform:translateX(-50%); }
+  #crosshair::after { top:50%; left:0; height:1.5px; width:100%; transform:translateY(-50%); }
+  #feed {
+    position:absolute; right:28px; top:22px; text-align:right;
+    font-size:11.5px; font-weight:500; letter-spacing:.18em; text-transform:uppercase; color:var(--faint);
+  }
+  #feed div { transition:opacity .6s ease; margin-bottom:5px; }
+  #bars {
+    position:absolute; left:50%; bottom:44px; transform:translateX(-50%);
+    width:280px; display:flex; flex-direction:column; gap:7px;
+  }
+  .hbar { height:3px; background:rgba(232,242,251,.14); border-radius:2px; overflow:hidden; }
+  .hbar i { display:block; height:100%; width:100%; border-radius:2px; transition:width .18s ease, background .3s ease; }
+  #hp-fill { background:#53d5fd; }
+  #heat-fill { width:0%; background:#53d5fd; }
+  #speed {
+    position:absolute; right:28px; bottom:36px;
+    font-size:22px; font-weight:200; letter-spacing:.1em;
+  }
+  #hint {
+    position:absolute; left:50%; bottom:16px; transform:translateX(-50%);
+    font-size:10px; font-weight:500; letter-spacing:.3em; opacity:.5; text-transform:uppercase;
+  }
+
+  /* ---- item slot (created by js/arena/items.js) -------------------------- */
+  #item-slot {
+    position:fixed; left:50%; top:64px; transform:translateX(-50%); z-index:40; display:none;
+    width:64px; height:64px; border-radius:12px; align-items:center; justify-content:center;
+    background:rgba(5,9,16,.66); border:1.5px solid rgba(114,173,247,.5);
+    box-shadow:0 0 18px rgba(114,173,247,.22); pointer-events:none;
+  }
+  #item-slot.pop { animation:itempop .34s cubic-bezier(.2,1.5,.4,1) 1; }
+  @keyframes itempop {
+    0% { transform:translateX(-50%) scale(.35); opacity:.2; }
+    100% { transform:translateX(-50%) scale(1); opacity:1; }
+  }
+  #item-slot .ibadge {
+    position:absolute; right:-7px; bottom:-7px; width:20px; height:20px; border-radius:5px;
+    display:flex; align-items:center; justify-content:center; font:700 11px var(--mono);
+    color:#0a1526; background:linear-gradient(180deg,#cfe4ff,#72adf7);
+  }
+  #item-label {
+    position:absolute; top:72px; left:50%; transform:translateX(-50%); white-space:nowrap;
+    font:500 11px var(--mono); letter-spacing:.26em;
+    text-shadow:0 1px 6px rgba(3,6,12,.95);
+  }
+
+  /* ---- rival markers ------------------------------------------------------ */
+  #markers { position:absolute; inset:0; overflow:hidden; }
+  .marker {
+    position:absolute; left:0; top:0; transform:translate(-50%,-50%);
+    display:flex; flex-direction:column; align-items:center; gap:6px;
+    will-change:left,top;
+  }
+  .marker .dot {
+    width:15px; height:15px; border:1.5px solid var(--mc,#fff); transform:rotate(45deg);
+    box-shadow:0 0 10px var(--mc,#fff), inset 0 0 5px var(--mc,#fff);
+  }
+  .marker.edge .dot {
+    border:none; border-radius:2px; background:var(--mc,#fff);
+    clip-path:polygon(50% 0, 100% 100%, 50% 76%, 0 100%);
+    box-shadow:0 0 12px var(--mc,#fff);
+    transform:rotate(var(--ang,0rad));
+  }
+  .marker .mlab {
+    font-size:10px; font-weight:500; letter-spacing:.16em; white-space:nowrap;
+    color:var(--mc,#fff); text-shadow:0 1px 5px rgba(3,6,12,.95);
+  }
+
+  /* ---- items codex screen ------------------------------------------------- */
+  .screen[data-screen="items"] .row { align-items:flex-start; }
+  .screen[data-screen="items"] .row .k { min-width:4.5em; text-align:right; }
+  .screen[data-screen="items"] .row .v { max-width:360px; line-height:1.7; text-align:right; }
+
+  #fade {
+    position:fixed; inset:0; background:#05070e; z-index:20; pointer-events:none;
+    transition:opacity 2.6s ease; display:flex; align-items:center; justify-content:center;
+    font-family:var(--mono); color:var(--acc); font-size:13px; letter-spacing:.55em; text-transform:uppercase;
+  }
+  #err {
+    position:fixed; inset:0; z-index:30; display:none; align-items:center; justify-content:center;
+    color:#ffb0a0; background:#100d0d; font-family:monospace; padding:2em; text-align:center;
+  }
+</style>
+<script type="importmap">
+{
+  "imports": {
+    "three": "./vendor/three/three.module.js",
+    "three/addons/": "./vendor/three/addons/"
+  }
+}
+</script>
+</head>
+<body>
+<div id="app"></div>
+
+<div id="vig"></div>
+<div id="frame"><i class="tl"></i><i class="tr"></i><i class="bl"></i><i class="br"></i></div>
+
+<!-- ================= right rail: every menu screen lives here ============ -->
+<div id="menu">
+
+  <section class="screen" data-screen="main">
+    <div class="ov anim">霓虹峡谷 // 空战协议</div>
+    <h1 class="ttl anim">赛博 <b>战机</b></h1>
+    <div class="sub anim">雨落峡谷。三名王牌同场竞技，命中最多者胜。</div>
+    <div class="items">
+      <div class="item anim" data-act="start"><span class="num">[01]</span><span class="lab">出击</span></div>
+      <div class="item anim" data-act="controls"><span class="num">[02]</span><span class="lab">操作</span></div>
+      <div class="item anim" data-act="items"><span class="num">[03]</span><span class="lab">道具</span></div>
+      <div class="item anim" data-act="settings"><span class="num">[04]</span><span class="lab">设置</span></div>
+    </div>
+  </section>
+
+  <section class="screen" data-screen="controls">
+    <div class="ov anim">飞行手册</div>
+    <h1 class="ttl small anim">操<b>作</b></h1>
+    <div class="rows">
+      <div class="row anim"><span class="k">鼠标</span><span class="v">转向 —— 偏离中心即压坡度</span></div>
+      <div class="row anim"><span class="k">左键 / J</span><span class="v">发射等离子弹 —— 按住连发</span></div>
+      <div class="row anim"><span class="k">E</span><span class="v">使用手中道具 —— 效果见「道具」页</span></div>
+      <div class="row anim"><span class="k">W / S</span><span class="v">加速 / 减速</span></div>
+      <div class="row anim"><span class="k">Shift</span><span class="v">推进加速 —— 会过热，需冷却</span></div>
+      <div class="row anim"><span class="k">空格</span><span class="v">垂直点火 —— 瞬间拉升</span></div>
+      <div class="row anim"><span class="k">Esc</span><span class="v">暂停 / 返回</span></div>
+      <div class="row anim"><span class="k">被命中</span><span class="v">系统离线 2 秒 —— 只有撞上格栅才会坠毁</span></div>
+    </div>
+    <div class="items">
+      <div class="item anim" data-act="back"><span class="num">[01]</span><span class="lab">返回</span></div>
+    </div>
+  </section>
+
+  <section class="screen" data-screen="items">
+    <div class="ov anim">装备库 // 撞进补给箱拾取 · 按 E 使用</div>
+    <h1 class="ttl small anim">道<b>具</b></h1>
+    <div class="rows">
+      <div class="row anim"><span class="k" style="color:#72adf7">冲击波</span><span class="v">以自身为中心爆发 28 米球形冲击 —— 范围内所有战机系统离线 2 秒，持有时会显示范围指示球</span></div>
+      <div class="row anim"><span class="k" style="color:#c27bff">电磁脉冲</span><span class="v">自动锁定当前命中数最多的对手 —— 无视距离直击，目标处于保护状态时会落空</span></div>
+      <div class="row anim"><span class="k" style="color:#7dffc7">护盾</span><span class="v">8 秒内抵挡下一次命中 —— 弹丸与道具均可格挡，生效时机体被光罩包裹</span></div>
+      <div class="row anim"><span class="k" style="color:#35e0ff">疾冲</span><span class="v">2.5 秒极速推进 —— 不积累热量，甩开追击或抢夺航线的最佳选择</span></div>
+      <div class="row anim"><span class="k">拾取</span><span class="v">撞进峡谷中的霓虹补给箱 —— 同时只能持有一个道具，按 E 立即生效</span></div>
+    </div>
+    <div class="items">
+      <div class="item anim" data-act="back"><span class="num">[01]</span><span class="lab">返回</span></div>
+    </div>
+  </section>
+
+  <section class="screen" data-screen="settings">
+    <div class="ov anim">系统</div>
+    <h1 class="ttl small anim">设<b>置</b></h1>
+    <div class="items">
+      <div class="item anim" data-act="quality" data-val="quality">
+        <span class="num">[01]</span><span class="lab">画质</span>
+        <span class="val"><span class="chev">‹ </span><span class="vtext">均衡</span><span class="chev"> ›</span></span>
+      </div>
+      <div class="item anim" data-act="sound" data-val="sound">
+        <span class="num">[02]</span><span class="lab">声音</span>
+        <span class="val"><span class="chev">‹ </span><span class="vtext">开</span><span class="chev"> ›</span></span>
+      </div>
+      <div class="item anim" data-act="back"><span class="num">[03]</span><span class="lab">返回</span></div>
+    </div>
+  </section>
+
+  <section class="screen" data-screen="pause">
+    <div class="ov anim">信号保持</div>
+    <h1 class="ttl small anim">已<b>暂停</b></h1>
+    <div class="items">
+      <div class="item anim" data-act="resume"><span class="num">[01]</span><span class="lab">继续</span></div>
+      <div class="item anim" data-act="restart"><span class="num">[02]</span><span class="lab">重新开始</span></div>
+      <div class="item anim" data-act="settings"><span class="num">[03]</span><span class="lab">设置</span></div>
+      <div class="item anim" data-act="quit"><span class="num">[04]</span><span class="lab">返回主菜单</span></div>
+    </div>
+  </section>
+
+  <section class="screen" data-screen="results">
+    <div class="ov anim">对局结束</div>
+    <h1 class="ttl small anim" id="r-title">你 <b>获胜</b></h1>
+    <div class="rows" id="r-rows"></div>
+    <div class="items">
+      <div class="item anim" data-act="rematch"><span class="num">[01]</span><span class="lab">再来一局</span></div>
+      <div class="item anim" data-act="quit"><span class="num">[02]</span><span class="lab">主菜单</span></div>
+    </div>
+  </section>
+
+</div>
+
+<div id="foot">↑↓ 选择&nbsp;&nbsp;&nbsp;ENTER 确认&nbsp;&nbsp;&nbsp;ESC 返回</div>
+
+<!-- ================================= HUD ================================= -->
+<div id="hud">
+  <div id="topbar"><b id="who">你</b><span id="kills">命中 0</span></div>
+  <div id="timer">3:00</div>
+  <div id="center-msg"></div>
+  <div id="crosshair"></div>
+  <div id="markers"></div>
+  <div id="feed"></div>
+  <div id="bars">
+    <div class="hbar"><i id="hp-fill"></i></div>
+    <div class="hbar"><i id="heat-fill"></i></div>
+  </div>
+  <div id="speed">0 公里/时</div>
+  <div id="hint">鼠标 转向 · 左键 开火 · E 道具 · 被命中 = 离线 2 秒 · W S 油门 · SHIFT 加速 · ESC 暂停</div>
+</div>
+
+<div id="fade">C&nbsp;Y&nbsp;B&nbsp;E&nbsp;R&nbsp;&nbsp;S&nbsp;P&nbsp;A&nbsp;C&nbsp;E&nbsp;S&nbsp;H&nbsp;I&nbsp;P</div>
+<div id="err"></div>
+<script type="module">
+  import { boot } from './js/arena/main.js';
+  boot(document.getElementById('app')).catch((e) => {
+    console.error(e);
+    const el = document.getElementById('err');
+    el.style.display = 'flex';
+    el.textContent = '渲染器启动失败：' + (e && e.message ? e.message : e);
+  });
+</script>
+</body>
+</html>

@@ -161,6 +161,42 @@ pmrem.dispose();
 
 Download three.js release to `vendor/` rather than using a CDN. This makes the project work offline and avoids SRI hash maintenance.
 
+### 7. 规模化程序化场景（进阶，Mode B 之上）
+
+当场景需要**数百到数千个同类对象**、无缝大世界、或大量程序化发光体时，不要用独立 Mesh +
+`EffectComposer`。直接参考本 skill 自带的完整场景模板 `assets/cyber-jet-scene/`（赛博战机渲染层，
+说明见 `assets/cyber-jet-scene/SCENE_NOTES.md`）。它覆盖 Mode B 未涵盖的进阶技巧：
+
+- **InstancedMesh 实例化**：用顶点属性（`aSeed/aKind/aTile`）携带每实例随机差异，一次 draw call
+  渲染整片城市
+- **全手写 ShaderMaterial**：窗户/霓虹/湿滑街面是纯 `ShaderMaterial`，片元里用 `h21(seed)`
+  派生窗户密度/发光色，按 `vSize` 做米制 UV
+- **平面反射**（mirror camera）：渲染关于 `y=0` 镜像的几何到 RT，街面按镜像视图矩阵采样；
+  背景层刻意排除使反射只体现光源而非地平线
+- **canvas 程序化图集**：用 `document.createElement('canvas')` 生成霓虹招牌/字符 `CanvasTexture`
+- **GPU 粒子 + 共享辉光池**：`InstancedBufferGeometry`（≤7000 雨丝）+ 预分配 `GlowPool` 批量提交
+- **周期种子无缝大世界**：`seed = f(idx % loopChunks)` 让地图数学意义上重复，无限循环无需 reload
+
+这些的具体实现直接在 `assets/cyber-jet-scene/js/` 下读源码：`engine.js`（后处理）、`city.js`（程序化城市）、
+`life.js`（粒子）、`utils.js`（共享雾/全局 uniform）。
+
+### 8. WebGPU / TSL 程序化场景（计算通道多态，Mode B 之上）
+
+当场景目标是**纯程序化、零素材、形态随滚动/时间连续变形**时，参考本 skill 自带的完整渲染层
+范例 `assets/field-wgpu/`（「场」程序化落地页渲染层，说明见 `assets/field-wgpu/SKILL_NOTES.md`）。
+它在第 7 条 InstancedMesh 之上覆盖 WebGPU 计算通道 + three.js TSL 节点图：
+
+- **滚动只给两个数**：`travel`(0..1)+`phase`(0..3) 驱动一切，相机/光色/泛光/色差全由渲染器推导
+- **一次计算通道，多状态**：每帧派发 N 线程重写多段 `vec4` 存储缓冲，顶点着色只弯一条带子
+- **状态=缓冲值不同**：同一批数字写成别的值即切换形态（草/潮汐/余烬/晶格），零加载零二次 draw
+- **高度场脊柱**：地面位移+实例定位共用同一 `surfaceHeight()`，永不穿模/浮空
+- **TSL 节点图**：不写 WGSL 字符串，改材质不碰着色器源码
+- **沃格尔螺旋盘 + 镜头加权 + 中心空场**：密度随屏幕尺寸收敛，防怼脸
+- **自适应降档 + 降级页**：低端自动减实例/DPR；不支持 GPU 显说明页而非白屏
+
+具体源码在 `assets/field-wgpu/src/` 下读：`scroll.js`（双数驱动）、`field.js`（计算通道）、
+`tsl-common.js`（TSL 积木）、`palette.js`（CPU 混色）、`stage.js`（降档+后期链）。
+
 ---
 
 ## Quality Presets

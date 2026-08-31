@@ -1,0 +1,184 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>场 · 一段缓冲区的四种状态</title>
+<meta name="description" content="262,144 根程序化草叶，每一帧都由 WebGPU 计算通道重写一次。往下滚，同一段缓冲区依次变成水、火，和一张网格。">
+<meta name="color-scheme" content="dark">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' fill='%2305070a'/%3E%3Ccircle cx='16' cy='16' r='6' fill='%23e8c37a'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="./styles/main.css">
+
+<script type="importmap">
+{
+	"imports": {
+		"three": "./vendor/three/three.webgpu.js",
+		"three/webgpu": "./vendor/three/three.webgpu.js",
+		"three/tsl": "./vendor/three/three.tsl.js",
+		"three/addons/": "./vendor/three/addons/"
+	}
+}
+</script>
+
+<script src="./vendor/gsap/gsap.min.js" defer></script>
+<script src="./vendor/gsap/ScrollTrigger.min.js" defer></script>
+<script src="./vendor/gsap/SplitText.min.js" defer></script>
+<script type="module" src="./src/main.js"></script>
+</head>
+
+<body>
+
+<canvas id="stage" aria-hidden="true"></canvas>
+<div class="atmosphere" aria-hidden="true"></div>
+
+<header class="chrome nav">
+	<a class="nav__brand" href="#top">
+		<span class="nav__mark" aria-hidden="true"></span>
+		FIELD
+	</a>
+	<nav class="nav__meta" aria-label="Built with">
+		<span>WEBGPU</span><span class="dot" aria-hidden="true">·</span>
+		<span>TSL</span><span class="dot" aria-hidden="true">·</span>
+		<span>GSAP</span>
+	</nav>
+</header>
+
+<div class="chrome scrollbar" aria-hidden="true"><i data-progress></i></div>
+
+<aside class="chrome rail" aria-hidden="true">
+	<ol>
+		<li data-rail="0"><b>I</b><span>草场</span></li>
+		<li data-rail="1"><b>II</b><span>潮汐</span></li>
+		<li data-rail="2"><b>III</b><span>余烬</span></li>
+		<li data-rail="3"><b>IV</b><span>晶格</span></li>
+	</ol>
+</aside>
+
+<div class="chrome hud" aria-hidden="true">
+	<span data-hud="fps">— fps</span>
+	<span class="dot">·</span>
+	<span data-hud="count">— 草叶</span>
+	<span class="dot">·</span>
+	<span data-hud="state">草场</span>
+</div>
+
+<main id="top">
+
+	<section class="panel hero">
+		<div class="panel__inner">
+			<p class="eyebrow" data-reveal>实时渲染 · 零素材</p>
+			<h1 class="display display--hero" data-reveal-lines>一场四态</h1>
+			<p class="lede" data-reveal><b data-count-text>262,144</b> 根草叶，每一帧都被计算通道重写一次。没有任何东西是加载进来的 —— 没有贴图，也没有模型。往下滚，同一段缓冲区先变成水，再变成火，最后变成一张网格。</p>
+		</div>
+		<div class="hero__cue" data-reveal>
+			<span>下滚</span>
+			<i aria-hidden="true"></i>
+		</div>
+	</section>
+
+	<section class="panel chapter chapter--left" data-chapter="0">
+		<div class="panel__inner">
+			<div class="card">
+				<p class="eyebrow"><b>I</b> — 生长</p>
+				<h2 class="display" data-reveal-lines>草场</h2>
+				<p class="body" data-reveal>每一根草都由计算通道排布在一张沃格尔螺旋盘上，并向镜头一侧加权，于是草变稀的速度，正好等于它在屏幕上变小的速度。一整片世界空间里的风场同时吹弯所有草叶 ——
+					而光是<em>穿过</em>叶片的，不是从叶片上反射的 —— 草之所以看起来像草，全靠这一点。</p>
+				<dl class="spec" data-reveal>
+					<div><dt>草叶</dt><dd data-count-text>262,144</dd></div>
+					<div><dt>几何体</dt><dd>12 顶点 / 10 三角</dd></div>
+					<div><dt>贴图</dt><dd>无</dd></div>
+				</dl>
+			</div>
+		</div>
+	</section>
+
+	<section class="panel chapter chapter--right" data-chapter="1">
+		<div class="panel__inner">
+			<div class="card">
+				<p class="eyebrow"><b>II</b> — 流动</p>
+				<h2 class="display" data-reveal-lines>潮汐</h2>
+				<p class="body" data-reveal>走到这一步没有销毁任何东西。草叶躺下、转向波场的梯度方向，在浪尖上变成泡沫。同一段缓冲区，同一次绘制调用 —— 变的只是描述一根草叶的那几个数。</p>
+				<dl class="spec" data-reveal>
+					<div><dt>水面</dt><dd>3 组方向波 + 3 层倍频</dd></div>
+					<div><dt>朝向</dt><dd>∇h 旋转 90°</dd></div>
+					<div><dt>泡沫</dt><dd>只在浪尖</dd></div>
+				</dl>
+			</div>
+		</div>
+	</section>
+
+	<section class="panel chapter chapter--left" data-chapter="2">
+		<div class="panel__inner">
+			<div class="card">
+				<p class="eyebrow"><b>III</b> — 灼烧</p>
+				<h2 class="display" data-reveal-lines>余烬</h2>
+				<p class="body" data-reveal>把一根草从地面上松开，它就往上飘。高度坍缩成一粒火星，亮度随之攀升，整片原野变成一种天气 —— 四万粒余烬从烧焦的山脊上飘走，每一粒仍然是同样的十二个顶点，每一粒都按屏幕空间定尺寸，所以凑得再近，它也始终只是一个光点。</p>
+				<dl class="spec" data-reveal>
+					<div><dt>点燃</dt><dd>全场的 15%</dd></div>
+					<div><dt>寿命</dt><dd>12 – 33 秒</dd></div>
+					<div><dt>飘移</dt><dd>与风场耦合</dd></div>
+				</dl>
+			</div>
+		</div>
+	</section>
+
+	<section class="panel chapter chapter--right" data-chapter="3">
+		<div class="panel__inner">
+			<div class="card">
+				<p class="eyebrow"><b>IV</b> — 秩序</p>
+				<h2 class="display" data-reveal-lines>晶格</h2>
+				<p class="body" data-reveal>最后，这片原野承认了自己是什么。位置吸附到 <code>1.9 m</code> 的网格上，高度量化成五档，一个格子亮不亮，变成格子自己的属性而不是草叶的属性 ——
+					于是草场显出了它底下一直存在的那套结构。</p>
+				<dl class="spec" data-reveal>
+					<div><dt>格子</dt><dd>1.9 m，轴向对齐</dd></div>
+					<div><dt>量化</dt><dd>5 档高度</dd></div>
+					<div><dt>点亮格子</dt><dd>45%</dd></div>
+				</dl>
+			</div>
+		</div>
+	</section>
+
+	<section class="panel outro">
+		<div class="panel__inner">
+			<h2 class="display display--outro" data-reveal-lines>四种状态 · 一次绘制</h2>
+			<p class="lede" data-reveal>整个场景就是一张高度场、一张风场，加上一段「此刻一根草叶是什么」的描述。你刚才滚过的一切，都出自同样的四段存储缓冲区 —— 每帧写一次，每次换一种读法。</p>
+
+			<dl class="colophon" data-reveal>
+				<div><dt>渲染器</dt><dd>three.js WebGPURenderer</dd></div>
+				<div><dt>着色</dt><dd>TSL 节点图 —— 不写着色器字符串</dd></div>
+				<div><dt>计算</dt><dd>每帧 1 次派发 · <span data-count-text>262,144</span> 线程</dd></div>
+				<div><dt>几何体</dt><dd>1 根草叶 · 12 顶点 · 实例化</dd></div>
+				<div><dt>素材</dt><dd>0 贴图 · 0 模型 · 0 高度图</dd></div>
+				<div><dt>存储</dt><dd>每根草叶 4 × vec4 · 16 MB</dd></div>
+				<div><dt>动效</dt><dd>GSAP ScrollTrigger + Lenis</dd></div>
+			</dl>
+
+			<footer class="foot" data-reveal>
+				<span>FIELD —— 一次程序化渲染实验</span>
+				<span class="dot" aria-hidden="true">·</span>
+				<span>2026</span>
+			</footer>
+		</div>
+	</section>
+
+</main>
+
+<div class="boot" id="boot">
+	<div class="boot__inner">
+		<p class="boot__mark">FIELD</p>
+		<div class="boot__bar"><i></i></div>
+		<p class="boot__note" data-boot-note>正在初始化 webgpu</p>
+	</div>
+</div>
+
+<div class="fallback" id="fallback" hidden>
+	<div class="fallback__inner">
+		<p class="eyebrow">需要 WebGPU</p>
+		<h1 class="display">需要更新一些的引擎</h1>
+		<p class="body">这片原野由 WebGPU 计算通道绘制，而当前浏览器还没有开放这项能力。桌面端的 Chrome、Edge 或 Safari 26+ 可以运行它。</p>
+		<p class="body fallback__reason" data-fallback-reason></p>
+	</div>
+</div>
+
+</body>
+</html>

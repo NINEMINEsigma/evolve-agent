@@ -1,0 +1,6 @@
+{
+  "name": "cyber-spaceship",
+  "private": true,
+  "type": "module",
+  "description": "暴雨中赛博朋克城市峡谷里的单机实时 3D 空战。纯静态站点，无构建步骤，无服务端。"
+}
