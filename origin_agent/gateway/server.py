@@ -856,6 +856,35 @@ async def regenerate_response(session_id: str, req: Request):
     return {"regenerate": True, "session_id": session_id}
 
 
+@app.post("/api/sessions/{session_id}/resume")
+async def resume_session_endpoint(session_id: str):
+    """从当前历史状态恢复工具链执行。
+
+    清除中断标志、重置工具调用计数器，从当前历史直接重新进入工具循环。
+    不追加任何 user 消息，不截断历史。
+    """
+    info = _get_sm().get(session_id)
+    if info and info.status == SessionStatus.archived:
+        result = {"resumed": False, "error": "archived session"}
+        return HTMLResponse(
+            json.dumps(result, ensure_ascii=False),
+            media_type="application/json",
+            status_code=403,
+        )
+    loop = _get_loop(session_id)
+    if loop is None:
+        return {"resumed": False, "error": "agent loop not ready"}
+    if loop.loop.is_processing():
+        result = {"resumed": False, "error": "session is processing"}
+        return HTMLResponse(
+            json.dumps(result, ensure_ascii=False),
+            media_type="application/json",
+            status_code=409,
+        )
+    reply = await loop.resume()
+    logger.info("Resume ok | session=%s reply_len=%d", session_id, len(reply))
+    return {"resumed": True, "session_id": session_id}
+
 
 @app.put("/api/sessions/{session_id}/title")
 async def update_session_title(session_id: str, req: Request):

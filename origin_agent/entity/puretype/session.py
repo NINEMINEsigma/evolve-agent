@@ -106,6 +106,8 @@ class SessionMessageEntry(BaseModel):
     tool_calls: list[dict[str, Any]] | None = None
     tool_call_meta: dict[str, Any] | None = None
     metrics: MessageMetrics | None = None
+    is_system_status: bool = False
+    """标记该消息为系统状态消息（对 LLM 不可见，仅前端展示用）。"""
 
 
 # ---------------------------------------------------------------------------

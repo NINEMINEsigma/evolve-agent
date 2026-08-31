@@ -119,6 +119,7 @@ export interface SessionStore {
   editMessage: (id: string, content: MessageContent) => Promise<void>;
   deleteMessages: (count?: number) => Promise<void>;
   regenerateResponse: (messageIndex: number, llmProfile?: Record<string, unknown> | null) => Promise<void>;
+  resumeSession: () => Promise<void>;
   updateMessageVisibility: (messageIndex: number, visibleCharacters: string[]) => Promise<void>;
   respondConfirm: (pendingConfirm: ConfirmRequest | null, action: string, denyReasonText?: string, deniedBy?: string) => void;
   respondAsk: (pendingAsk: AskRequest | null, option?: string, customText?: string) => void;
@@ -517,6 +518,7 @@ export function useSessionStore(callbacks: SessionStoreCallbacks = {}): SessionS
               id: generateUUID(),
               messageIndex: typeof m.index === "number" ? m.index : undefined,
             };
+            if (m.is_system_status) entry.isSystemStatus = m.is_system_status;
             if (m.character_name) entry.characterName = m.character_name;
             if (m.visible_characters) entry.visibleCharacters = m.visible_characters;
             if (m.response_characters && m.response_characters.length > 0) {
@@ -958,6 +960,16 @@ export function useSessionStore(callbacks: SessionStoreCallbacks = {}): SessionS
     if (!resp.ok || !data.regenerate) {
       setWaiting(false);
       addMessage("error", `重新生成失败：${data.error || "unknown error"}`);
+    }
+  }, [sessionId, addMessage]);
+
+  const resumeSession = useCallback(async () => {
+    setWaiting(true);
+    const resp = await fetch(`/api/sessions/${sessionId}/resume`, { method: "POST" });
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok || !data.resumed) {
+      setWaiting(false);
+      addMessage("error", `恢复失败：${data.error || "unknown error"}`);
     }
   }, [sessionId, addMessage]);
 
@@ -1424,6 +1436,7 @@ export function useSessionStore(callbacks: SessionStoreCallbacks = {}): SessionS
     editMessage,
     deleteMessages,
     regenerateResponse,
+    resumeSession,
     updateMessageVisibility,
     respondConfirm,
     respondAsk,

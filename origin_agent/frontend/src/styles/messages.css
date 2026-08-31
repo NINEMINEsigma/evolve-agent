@@ -424,6 +424,22 @@
   white-space: normal;
 }
 
+.message-system-status {
+  justify-content: center;
+}
+
+.message-system-status-content {
+  color: var(--text-muted);
+  font-size: 13px;
+  text-align: center;
+  font-family: inherit;
+  white-space: normal;
+  background: var(--bg-secondary);
+  border-radius: 8px;
+  padding: 6px 14px;
+  max-width: 80%;
+}
+
 .message-text {
   white-space: pre-wrap;
   word-break: break-word;

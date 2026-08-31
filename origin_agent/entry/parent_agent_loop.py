@@ -291,9 +291,9 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
         if self._llm is None and llm_profile is None:
             logger.warning("No LLM client available | session=%s", sid)
             err_text = "尚未配置 LLM 模型。请在前端「模型配置」中新建或选择一个配置后重试。"
-            # NOTE: 错误文本以 assistant 气泡显示，按 D6 不变量持久化进历史。
+            # NOTE: 错误文本以系统状态消息显示（对 LLM 不可见），持久化进历史。
             # 此处在锁外返回，_processing 未置位，不影响并发防护。
-            self.append_assistant_text(err_text, session_id=sid)
+            self.append_system_status(err_text, session_id=sid)
             return err_text
 
         logger.info(
@@ -319,6 +319,41 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
                 self._processing = False
                 self._last_idle_time[self.session_id] = time.monotonic()
 
+    async def resume(self) -> str:
+        """从当前历史状态恢复工具链执行。
+
+        清除中断/厌恶标志，重置工具调用计数器（_run_tool_loop 内部自动重置），
+        从当前历史构建 messages 并重新进入工具循环。
+        不追加任何 user 消息。SystemStatusMessage 对 LLM 不可见，自动被过滤。
+        返回助手回复文本（空串表示无回复）。
+        """
+        sid = self.session_id
+        self._cancel_event.clear()
+        self._disgust_event.clear()
+        self._event_loop = asyncio.get_running_loop()
+
+        if self._llm is None:
+            err_text = "尚未配置 LLM 模型。请在前端「模型配置」中新建或选择一个配置后重试。"
+            self.append_system_status(err_text, session_id=sid)
+            return err_text
+
+        async with self._process_lock:
+            self._processing = True
+            try:
+                sid = await self._check_over_limit_before_process(sid, None)
+                self.session_id = sid
+
+                messages = self._get_full_history(sid)
+                reply = await self._run_tool_loop(sid, messages, "[resume]")
+                if reply:
+                    await self._frontend_sink.emit_assistant_message(
+                        sid, reply, self.current_character_agent,
+                    )
+                return reply
+            finally:
+                self._processing = False
+                self._last_idle_time[self.session_id] = time.monotonic()
+
     async def _run_tool_loop(
         self,
         sid: str,
@@ -338,8 +373,8 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
         try:
             while turn.value < _MAX_TOOL_TURNS:
                 if self._cancel_event.is_set():
-                    self.append_assistant_text("Cancelled.", session_id=sid)
-                    return "Cancelled."
+                    self.append_system_status("已中断", session_id=sid)
+                    return ""
                 turn.value += 1
 
                 # 多模态块预检：检测 messages 中的 ImageBlock/AudioBlock，
@@ -362,8 +397,8 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
                         f"The service provider returned an error, please try again later. "
                         f"Details: {llm_exc}"
                     )
-                    self.append_assistant_text(err_text, session_id=sid)
-                    return err_text
+                    self.append_system_status(err_text, session_id=sid)
+                    return ""
 
                 if self._cancel_event.is_set():
                     await self._emit_stream_done(sid, stream_id, "cancelled", content=resp.content or "", metrics=resp.metrics)
@@ -376,8 +411,8 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
                         if resp.metrics:
                             collected_metrics.append((sid, msg_index, resp.metrics))
                         return resp.content
-                    self.append_assistant_text("Cancelled.", session_id=sid)
-                    return "Cancelled."
+                    self.append_system_status("已中断", session_id=sid)
+                    return ""
 
                 if resp.usage.prompt_tokens:
                     self._token_record.prompt_tokens = resp.usage.prompt_tokens
@@ -476,8 +511,8 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
                         messages.append(tool_msg)
                         self._history.add_message(tool_msg)
                         self.save_history(sid)
-                    self.append_assistant_text("Interrupted.", session_id=sid)
-                    return "Interrupted."
+                    self.append_system_status("工具链异常中断", session_id=sid)
+                    return ""
 
                 sid = await self._check_over_limit_in_tool_loop(sid)
 
@@ -497,8 +532,8 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
             f"工具调用已达 {_MAX_TOOL_TURNS} 轮上限，已自动终止。",
         )
         over_limit_text = "I ran into an issue processing your request. Please try again."
-        self.append_assistant_text(over_limit_text, session_id=sid)
-        return over_limit_text
+        self.append_system_status(f"工具调用已达 {_MAX_TOOL_TURNS} 轮上限", session_id=sid)
+        return ""
 
     # ========================================================================
     # 多模态块预检（委托给 multimodal.preprocess_multimodal_blocks）
@@ -621,7 +656,7 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
                 )
                 if should_run and self._llm is None and selected_profile is None:
                     err_text = "尚未配置 LLM 模型。请在前端「模型配置」中新建或选择一个配置后重试。"
-                    self.append_assistant_text(err_text, session_id=sid)
+                    self.append_system_status(err_text, session_id=sid)
                     should_run = False
                 if should_run and selected_profile is not None:
                     self.switch_llm_profile(selected_profile)

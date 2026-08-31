@@ -331,6 +331,12 @@ export function useWebSocket() {
     fetch(`/api/disgust/${s.sessionId || "unknown"}`, { method: "POST" }).catch(() => {});
   }, []);
 
+  const resume = useCallback(() => {
+    const s = sessionRef.current;
+    if (!s) return;
+    s.resumeSession();
+  }, []);
+
   const respondConfirm = useCallback((request: ConfirmRequest | null, action: string, denyReasonText?: string, deniedBy?: string) => {
     const s = sessionRef.current;
     if (!s) return;
@@ -497,6 +503,7 @@ export function useWebSocket() {
     toggleHandsfree,
     interrupt,
     disgust,
+    resume,
     toggleMessageCollapse: session.toggleMessageCollapse,
     editMessage: session.editMessage,
     deleteMessages: session.deleteMessages,

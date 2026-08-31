@@ -496,6 +496,29 @@ class MultiAgentLoop(BaseAgentLoop, IMainSessionLoop):
             await self._on_round_done(self)
         return None
 
+    async def resume(self) -> str:
+        """从当前历史状态恢复工具链执行。
+
+        清除中断/厌恶标志，清理无配对 tool_calls，
+        以全体 agent 为初始响应者重新启动级联。
+        不追加任何 user 消息。
+        返回空串（多 Agent 回复已通过 sink 独立推送前端）。
+        """
+        self._cancel_event.clear()
+        self._disgust_event.clear()
+        async with self._process_lock:
+            self._processing = True
+            try:
+                self._history.remove_unpaired_tool_calls()
+                self.save_history(self.session_id)
+                # 以全体 agent 为初始响应者重新启动级联
+                await self._cascade(list(self._agent_names))
+                if self._token_record.prompt_tokens > 0 and self._is_context_over_limit():
+                    await self._rotate_session_for_context_limit()
+                return ""
+            finally:
+                self._processing = False
+
     # -- 级联调度 ----------------------------------------------------------
 
     def _get_available_subagents(self, characters: list[str]) -> list[str]:

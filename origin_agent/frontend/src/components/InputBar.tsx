@@ -26,6 +26,7 @@ interface InputBarProps {
   onUploadClick: () => Promise<void>;
   onInterrupt: () => void;
   onDisgust: () => void;
+  onResume: () => void;
   fileInputRef: RefObject<HTMLInputElement>;
   pendingImages: PendingImage[];
   onRemovePendingImage: (id: string) => void;
@@ -69,6 +70,7 @@ export default function InputBar({
   onUploadClick,
   onInterrupt,
   onDisgust,
+  onResume,
   fileInputRef,
   pendingImages,
   onRemovePendingImage,
@@ -333,6 +335,17 @@ export default function InputBar({
           >
             <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor">
               <rect x="6" y="6" width="12" height="12" rx="2" />
+            </svg>
+          </button>
+          <button
+            className="resume-btn"
+            onClick={onResume}
+            data-tooltip="恢复工具链执行"
+            type="button"
+            disabled={waiting || morphActive}
+          >
+            <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor">
+              <path d="M8 5v14l11-7z" />
             </svg>
           </button>
         </div>

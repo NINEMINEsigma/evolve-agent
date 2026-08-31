@@ -101,6 +101,15 @@ const MessageItem = memo(function MessageItem({
   const displayName = m.characterName || (m.role === "user" ? "User" : m.role === "assistant" ? "Assistant" : undefined);
   const showMeta = m.visibleCharacters != null || m.requiresResponse != null;
 
+  // 系统状态消息：居中灰色气泡，无头像、无编辑/删除/重新生成按钮
+  if (m.isSystemStatus) {
+    return (
+      <div className="message message-system-status" data-message-id={m.id}>
+        <div className="message-system-status-content">{textContent}</div>
+      </div>
+    );
+  }
+
   return (
     <div
       className={`message message-${m.role}${streaming ? " message-streaming" : ""}`}

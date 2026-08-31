@@ -213,6 +213,10 @@ def _serialize_message_entry(
 
     requires_response = True if msg.role == Role.USER else None
 
+    # SystemStatusMessage 标记（对 LLM 不可见，仅前端展示用）
+    from entity.messages import SystemStatusMessage
+    is_system_status = isinstance(msg, SystemStatusMessage)
+
     # ToolResultMessage._meta 提取
     tool_call_meta: dict[str, Any] | None = None
     if isinstance(msg, ToolResultMessage):
@@ -233,6 +237,7 @@ def _serialize_message_entry(
         tool_calls=tool_calls,
         tool_call_meta=tool_call_meta,
         metrics=metrics,
+        is_system_status=is_system_status,
     )
 
 
@@ -508,6 +513,25 @@ class BaseAgentLoop(ABC):
         message = CharacterConversationMessage(
             role=Role.ASSISTANT,
             character_name=self.current_character_agent,
+            content=text,
+        )
+        index = self._history.add_message(message)
+        self.save_history(sid)
+        return index
+
+    def append_system_status(self, text: str, *, session_id: str | None = None) -> int:
+        """将系统状态消息作为 SystemStatusMessage 追加到历史并持久化。
+
+        SystemStatusMessage 对 LLM 不可见（is_visible_to 返回 False），
+        但存储在 History 中，前端可通过 get_session_messages 看到。
+        用于替代中断/错误场景下的 append_assistant_text，避免污染 LLM 上下文。
+
+        返回新消息的索引。
+        """
+        from entity.messages import SystemStatusMessage
+        sid = session_id or self.session_id
+        message = SystemStatusMessage(
+            role=Role.SYSTEM,
             content=text,
         )
         index = self._history.add_message(message)
@@ -1047,6 +1071,16 @@ class IMainSessionLoop(ABC):
         实现必须：持 _process_lock → 置 _processing → （parent 系）超限检查（旋转随动）
         → sid 变更检测 → cancel 检测 → 注入落历史（无回显、保序、原生块）
         → （非旋转非中断时）跑轮 → finally 复位。
+        """
+
+    @abstractmethod
+    async def resume(self) -> str:
+        """从当前历史状态恢复工具链执行。
+
+        清除中断/厌恶标志，重置工具调用计数器，
+        从当前历史构建 messages 并重新进入工具循环。
+        不追加任何 user 消息。
+        返回助手回复文本（空串表示无回复）。
         """
 
 

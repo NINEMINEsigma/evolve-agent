@@ -191,6 +191,7 @@ export interface ChatMessage {
   toolCallMeta?: ToolCallMeta;   // 工具调用时间元信息
   emoji?: string;                  // 工具调用/审批请求的图标
   isError?: boolean;               // 工具结果是否为错误
+  isSystemStatus?: boolean;        // 系统状态消息（对 LLM 不可见，仅前端展示）
 }
 
 export interface SessionInfo {

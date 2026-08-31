@@ -117,6 +117,13 @@ class BaseMessage(BaseModel):
         return True
 
 
+class SystemStatusMessage(BaseMessage):
+    @override
+    def is_visible_to(self, current_character_agent: str) -> bool:
+        """系统状态消息对所有角色都不可见. """
+        return False
+
+
 class CharacterMessage(BaseMessage):
     character_name: str = Field(description="The character name of the message")
 
