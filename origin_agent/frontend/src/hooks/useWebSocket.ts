@@ -136,15 +136,9 @@ export function useWebSocket() {
       lastScrollTopRef.current = chat.scrollTop;
       return;
     }
-    const currentScrollTop = chat.scrollTop;
-    const previousScrollTop = lastScrollTopRef.current;
-    const isAtBottom = chat.scrollHeight - currentScrollTop - chat.clientHeight <= DIMENSIONS.SCROLL_BOTTOM_THRESHOLD;
-    if (currentScrollTop < previousScrollTop) {
-      isAtBottomRef.current = false;
-    } else if (currentScrollTop > previousScrollTop && isAtBottom) {
-      isAtBottomRef.current = true;
-    }
-    lastScrollTopRef.current = currentScrollTop;
+    const isAtBottom = chat.scrollHeight - chat.scrollTop - chat.clientHeight <= DIMENSIONS.SCROLL_BOTTOM_THRESHOLD;
+    isAtBottomRef.current = isAtBottom;
+    lastScrollTopRef.current = chat.scrollTop;
   }, []);
 
   const attachScrollListener = useCallback(() => {
