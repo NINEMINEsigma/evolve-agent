@@ -44,6 +44,7 @@
 
 > **设计注记**：fast/slow 借用快慢指针命名——fast 是当前执行位置，slow 是待提升位置，热交换即 slow 提升为 fast。
 > 「副本」为角色描述词，不作名词术语。fast 模式 / fallback 模式保留英文形态。「回退」为 fallback 中文规范译法。
+> **目录列均为默认配置名**——workspace 根与 fast/slow 空间、工作空间、logs 的实际目录名由 config.py 参数（`workspace_path`、`fast_agent_space_path`、`slow_agent_space_path`、`agentspace_path_name`、`logs_path_name`）覆盖；本表锁定的是角色称谓而非物理目录名。仅 `.fallback/` 为 run.py 硬编码固定名。
 
 | 规范称谓 | 定义 |
 |---|---|

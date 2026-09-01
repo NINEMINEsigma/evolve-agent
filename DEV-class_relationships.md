@@ -167,6 +167,20 @@ classDiagram
         +execute()
     }
 
+    class SessionMessageQueue {
+        #_loop
+        #_pending
+        #_wakeup
+        #_event_loop
+        #_consumer_task
+        #_stopped
+        +last_known_sid
+        +push()
+        +drain_injected()
+        +stop()
+        +mark_stopped()
+    }
+
     class StreamConsumer {
         #_llm
         #_sink
@@ -264,6 +278,11 @@ classDiagram
         #_execute_approved_tool()
         #_make_tool_msg()
         #_emit()
+    }
+
+    class TaskAgentLoop {
+        #_build_system_prompt()
+        +run()
     }
 
     class LoopSessionManager {
@@ -430,6 +449,7 @@ classDiagram
     BaseAgentLoop <|-- MultiAgentLoop
     BasePrivateChatAgentLoop <|-- ParentAgentLoop
     BasePrivateChatAgentLoop <|-- SubAgentLoop
+    SubAgentLoop <|-- TaskAgentLoop
     IMainSessionLoop <|.. ParentAgentLoop
     IMainSessionLoop <|.. MultiAgentLoop
     AgentSink <|-- FrontendSink
@@ -445,6 +465,8 @@ classDiagram
     ParentAgentLoop --> StreamConsumer : creates
     ParentAgentLoop --> FrontendSink : holds
     ParentAgentLoop --> LoopSessionManager : creates
+    ParentAgentLoop --> SessionMessageQueue : holds
+    MultiAgentLoop --> SessionMessageQueue : holds
     ParentAgentLoop --> _OrchestratorContext : has via SubAgentOrchestrator
     ParentAgentLoop --> SessionManager : registered by
     SubAgentLoop --> ParentAgentSink : creates
@@ -509,6 +531,14 @@ classDiagram
 | `_loop` | `ToolExecutor` | `IMainSessionLoop` | 持有 loop 引用，访问其内部字段 |
 | `_llm` | `ToolExecutor` | `BaseLLMClient` | LLM 客户端（用于 ask_agent_reason） |
 | `_tool_stats` | `ToolExecutor` | `dict[str, dict[str, int]]` | 工具调用统计 |
+| `_loop` | `SessionMessageQueue` | `IMainSessionLoop` | 所属主会话 loop |
+| `_pending` | `SessionMessageQueue` | `deque[QueuedMessage]` | 待消费队列；一切变更只在事件循环线程发生（push 经 `call_soon_threadsafe` 落回），无需锁 |
+| `_wakeup` | `SessionMessageQueue` | `asyncio.Event \| None` | 空闲消费循环的唤醒事件 |
+| `_event_loop` | `SessionMessageQueue` | `asyncio.AbstractEventLoop` | 构造时捕获运行中的事件循环，供跨线程入队 |
+| `_consumer_task` | `SessionMessageQueue` | `asyncio.Task \| None` | 懒启动的空闲消费任务 |
+| `_stopped` | `SessionMessageQueue` | `bool` | `stop()` / `mark_stopped()` 置位 |
+| `last_known_sid` | `SessionMessageQueue` | `str` | 旋转检测：与当前 session_id 比对 |
+| （无新增字段） | `TaskAgentLoop` | — | 全部继承 `SubAgentLoop`；仅覆写 `_build_system_prompt()`（返回空）与 `run()`（纯文本回复或达 `MAX_TOOL_TURNS` 即终止） |
 | `_ws_sinks` | `FrontendSink` | `dict[str, WebSocket]` | session_id → WebSocket 映射 |
 | `_pending_confirms` | `FrontendSink` | `dict[str, Future]` | 外部解析确认结果 |
 | `_confirm_session_map` | `FrontendSink` | `dict[str, str]` | 外部映射确认到 session |
@@ -570,6 +600,7 @@ classDiagram
 | `LoopSessionManager.is_context_over_limit` | `_last_prompt_tokens`, `app.runtime_context` | `ParentAgentLoop` | `entry/session_manager.py` | 读取 loop 内部 token 和配置 |
 | `LoopSessionManager.rotate_session_for_continuation` | `_remove_last_user_message`, `_append`, `_history`, `_last_prompt_tokens`, `_session_store`, `_session_manager`, `_llm`, `load_history`, `persist_history` | `ParentAgentLoop` | `entry/session_manager.py` | 旋转时大量调用 loop 内部 |
 | `LoopSessionManager._terminate_session` | `_session_manager`, `_session_store`, `_history`, `_llm`, `get_full_history` | `ParentAgentLoop` | `entry/session_manager.py` | 终结会话时大量调用 loop 内部 |
+| `TaskAgentLoop`（模块级 import） | `_interrupted_result()` | `entry/tool_executor.py`（模块级函数） | `subagent/taskloop.py` | 跨模块导入 protected 函数，构造中断/异常时的工具结果占位 |
 | `_OrchestratorContext._drain_outbox` | `_outbox` | `SubAgentLoop` | `subagent/orchestrator.py` | 直接读取并清空 outbox |
 | `_OrchestratorContext.get_snapshot` | `_history.messages`, `pending_approvals_info` | `SubAgentLoop` | `subagent/orchestrator.py` | 读取子 agent 历史 |
 | `_OrchestratorContext._start_subagent` | `_history` | `SubAgentLoop` | `subagent/orchestrator.py` | 加载历史时覆盖 `_history` |
@@ -607,6 +638,7 @@ classDiagram
 | `InterruptMessage` | `entry/base_agent_loop.py` | `InboxMessage` | 中断消息 |
 | `AgentResponse` | `entry/multi_agent_worker.py` | `BaseModel` | 多 Agent 模式下单 Agent 的解析后响应 |
 | `WorkerResult` | `entry/multi_agent_worker.py` | `BaseModel` | Worker 执行结果，含 DSL 路由元数据 |
+| `RefWrapper[T]` | `entity/gentype.py` | `BaseModel, Generic[T]` | 可变引用容器，供 loop 与 `ToolExecutor` 等组件共享可变值 |
 
 ---
 
@@ -628,7 +660,7 @@ classDiagram
 
 ### Approval 目录化
 
-`component/approval/` 从单文件重构为目录，包含：`__init__.py`（公共接口）、`backend.py`（`ApprovalBackend` / `LocalApprovalBackend`）、`executor.py`（`execute_with_approval`）、`allowlist.py`（白名单逻辑）、`handsfree.py`（脱手模式）。`ApprovalBackendManager` 由 `Application` 持有，管理审批后端的懒加载和生命周期。
+`component/approval/` 从单文件重构为目录，包含：`__init__.py`（公共接口）、`core.py`（`request_user_confirm` 统一审批入口；`ask_agent_reason` 脱手模式向 Agent 主模型提问取上下文）、`policy.py`（预设策略 `MAIN_SESSION_POLICY` / `SUB_SESSION_POLICY` 与 `needs_approval()`；数据类 `ApprovalPolicy` 定义在 `entity/puretype/approval`）、`backend.py`（`ApprovalBackend` / `LocalApprovalBackend`）、`executor.py`（`execute_with_approval`）、`allowlist.py`（白名单逻辑）、`handsfree.py`（脱手模式）。`ApprovalBackendManager` 由 `Application` 持有，管理审批后端的懒加载和生命周期。
 
 ### MessageRouter 拆分
 
@@ -637,3 +669,15 @@ classDiagram
 ### MultiAgentWorker 独立工具执行
 
 `MultiAgentWorker` 内部创建独立的 `StreamConsumer` 和 `ToolExecutor` 实例，复用 `ParentAgentLoop` 的统一工具执行逻辑，但拥有独立的 stream_id 生成和 token 统计。
+
+### 工具结果后处理统一
+
+`entry/tool_post_dispatch.py::finalize_tool_result` 提取 `ToolExecutor.execute` 与 `SubAgentLoop._execute_approved_tool` 中重复的后处理：构建 `ToolCallMeta` 并注入 `_meta`、经 `ResultFieldInjector` 注入附加字段（如消息队列的 `queued_messages`）、推送前端 `tool_result` 事件并经 `ui_event_router` 路由 UI 事件，返回可持久化的 `ToolResultMessage`。
+
+### 会话级消息队列（SP-4/SP-5）
+
+`entry/session_message_queue.py::SessionMessageQueue` 由 `ParentAgentLoop` / `MultiAgentLoop`（及继承的 `ColloquyLoop`）持有：生产侧任意线程非阻塞（经 `call_soon_threadsafe` 落回事件循环入队，因此 `_pending` 无需锁）；消费双模态——空闲时由懒启动的 consumer task 驱动 `run_pending_round`，工具结果 finalize 时经 `drain_injected` 注入 `queued_messages` 结构化字段（先只读快照构造产物，成功后才出队）。gateway 在 loop 消亡时调 `stop()`；`replace_loop` 场景用 `mark_stopped()` 标记停止而不 cancel，避免 CancelledError 穿透正在执行的工具调用。
+
+### 多模态能力探测内化
+
+原探针工具已内化为 `system/modality_capability.py` 的系统自动行为：需要给活跃模型传递多模态块时先查 easysave 缓存（`modality_capability_cache.es`，按 model+base_url 联合索引、六项能力齐全才命中），未探测则伪装 Read 工具调用按 模态 × 消息路径（tool/user）六路并发探测；400 类错误判为不支持，网络/认证/超时等非模态错误上抛不写缓存。`build_modality_prompt_block()` 每轮生成 system prompt 注入块；活跃模型不支持某模态时经 `forward_modality_to_ref_profile()` 转发到 profile 引用的其他模型。

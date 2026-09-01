@@ -17,15 +17,17 @@ Evolve Agent 是一个以**运行时自我代码进化**为核心目标的 Agent
 
 ## 源码与运行时布局
 
+> workspace 及其内部目录（fast/slow 空间、agentspace、logs）均为**默认配置名**，可由 config.py 参数（`workspace_path`、`fast_agent_space_path`、`slow_agent_space_path`、`agentspace_path_name`、`logs_path_name`）覆盖；只有 `.fallback/` 为 run.py 硬编码固定名。下列以默认名描述。
+
 ```
-origin_agent/              <- 唯一持久化源码真相源（修改这里）
-workspace/
-  fast_agent_space/        <- 当前运行的 agent 副本
-  slow_agent_space/        <- 进化目标副本（fork: 命名空间）
-  .fallback/               <- 上一次 fast 的备份
-  agentspace/              <- agent 工作目录（ws: 命名空间）
+origin_agent/              <- origin仓库：唯一持久化源码真相源（修改这里）
+workspace/                 <- 运行时根（默认名；整体被 gitignore）
+  fast_agent_space/        <- fast仓库：当前运行的 agent 副本（默认名）
+  slow_agent_space/        <- slow仓库：进化目标副本（fork: 命名空间）（默认名）
+  .fallback/               <- fallback仓库：上一次 fast 的备份 / 回退修复体（固定名）
+  agentspace/              <- 工作空间：agent 工作目录（ws: 命名空间）（默认名）
   sessions/                <- 会话持久化
-  logs/                    <- 运行时日志、进化状态
+  logs/                    <- 运行时日志、进化状态（默认名）
 ```
 
 ---
@@ -53,8 +55,8 @@ workspace/
 
 | 模块 | 职责 | 详细文档 |
 |---|---|---|
-| `entry/` | Agent 主循环与抽象：`BaseAgentLoop`、`ParentAgentLoop`、`ColloquyLoop`、`MultiAgentLoop`、`AgentSink`、`ToolExecutor`、`StreamConsumer` | [entry/DEV-README.md](origin_agent/entry/DEV-README.md) |
-| `subagent/` | 子代理编排与生命周期：`SubAgentOrchestrator`、`SubAgentLoop` | [subagent/DEV-README.md](origin_agent/subagent/DEV-README.md) |
+| `entry/` | Agent 主循环与抽象：`BaseAgentLoop`、`ParentAgentLoop`、`ColloquyLoop`、`MultiAgentLoop`、`LoopSessionManager`、`AgentSink`、`ToolExecutor`、`StreamConsumer`、`SessionMessageQueue`（会话级消息队列）、`tool_post_dispatch.finalize_tool_result`（工具结果统一后处理） | [entry/DEV-README.md](origin_agent/entry/DEV-README.md) |
+| `subagent/` | 子代理编排与生命周期：`SubAgentOrchestrator`、`SubAgentLoop`、`TaskAgentLoop`（临时Agent：无系统提示词、无持久化、纯文本回复即终止） | [subagent/DEV-README.md](origin_agent/subagent/DEV-README.md) |
 | `gateway/` | WebSocket / HTTP 网关、消息路由、会话管理 | [gateway/DEV-README.md](origin_agent/gateway/DEV-README.md) |
 | `component/` | 工具实现、审批系统（目录化）、MCP 桥接、Cron 路由、桌面自动化（`automation/`）、浏览器控制（`browser/`） | [component/DEV-README.md](origin_agent/component/DEV-README.md) |
 | `abstract/` | 抽象层：LLM 客户端、工具注册表、AST 发现、技能、插件、MCP 客户端 | [abstract/DEV-README.md](origin_agent/abstract/DEV-README.md) |
@@ -139,6 +141,8 @@ Evolve Agent 内置两套多代理运行时：
 
 所有文件操作必须使用逻辑路径前缀，禁止裸路径、`..` 遍历和绝对路径。
 
+> 下表映射目录所涉 workspace 内部名为**默认配置名**，实际由 config.py 参数决定（`slow_agent_space_path`、`agentspace_path_name` 等）；`.fallback/` 为硬编码固定名。权威映射见 `system/sandbox.py::namespace_bases()`。
+
 | 前缀 | 映射目录 | 模式 | 用途 |
 |------|----------|------|------|
 | `fork:` | `workspace/slow_agent_space/` | fast | 读写进化代码 |
@@ -162,7 +166,7 @@ Evolve Agent 内置两套多代理运行时：
 系统提供多个热扩展点，无需修改核心源码：
 
 - **自定义工具**：在 `custom_tools/` 目录下编写 `.py` 文件，使用 `registry.register()` 注册，启动时由 AST 扫描自动发现。
-- **自定义 LLM 客户端**：在 `custom_llm_client/` 目录下编写 `.py` 文件，暴露 `create_llm_client(runtime_context, profile)` 工厂函数，返回 `BaseLLMClient` 子类实例。内置 `openai_client.py`、`anthropic_client.py` 和 `kscc_client.py`。
+- **自定义 LLM 客户端**：在 `custom_llm_client/` 目录下编写 `.py` 文件，暴露 `create_llm_client(runtime_context, profile)` 工厂函数，返回 `BaseLLMClient` 子类实例。内置 `openai_client.py`、`anthropic_client.py`、`kscc_client.py` 和 `lmstudio_client.py`。
 - **自定义钩子**：在 `custom_hooks/` 下实现 `hook_tag_name()` 与 `hook_message()`，返回的上下文块会追加到用户消息末尾。
 - **本地模型**：在 `custom_models/` 下放置 `.gguf` 文件，可作为审批模型自动加载。
 - **技能文件**：运行时 `skills/` 目录存放 `SKILL.md`，通过 `load_skill` / `list_skills` 工具加载。`pre-skills/` 提供参考模板。
@@ -184,6 +188,7 @@ Evolve Agent 内置两套多代理运行时：
 - `system/error_utils.py`：异常降级与日志辅助，用于可恢复副作用失败时记录日志但不中断主流程。
 - `system/pathutils.py` / `system/atomic_io.py` / `system/subprocess_utils.py`：路径、IO、子进程工具。
 - `system/lsp.py`：LSP 服务器进程管理与诊断（`component/tools/lsp.py` 工具调用；App 关闭时清理 LSP 进程）。
+- `system/modality_capability.py`：多模态能力探测与缓存（探针已内化为系统自动行为：伪装 Read 工具调用，按 模态 × 消息路径六路并发探测 tool/user 消息的图片/音频/视频支持；easysave 缓存按 model+base_url 联合索引；`build_modality_prompt_block()` 每轮生成 system prompt 注入块；`forward_modality_to_ref_profile()` 把活跃模型不支持的模态转发到 profile 引用的其他模型）。
 
 ### `evolve/`
 
@@ -194,6 +199,7 @@ Evolve Agent 内置两套多代理运行时：
 
 - `entity/messages.py`：`BaseMessage` 消息体系，包括 `BaseMessage`、`CharacterConversationMessage`、`CharacterSystemMessage`、`ToolResultMessage`、`History` 等。所有 LLM 调用统一使用 `list[BaseMessage]` 而非 `list[dict]`。
 - `entity/puretype/`：纯数据类型包，按职责拆分为 `_base`、`approval`、`llm`、`skills`、`session`、`agent`、`ws`、`lsp`、`runtime`、`extools` 子模块。包括 `LLMResponse`、`StreamChunk`、`Role`、`ToolAvailability`、`ToolDangerLevel` 等。
+- `entity/gentype.py`：泛型工具类型（`RefWrapper[T]` 可变引用容器，供 loop 与 `ToolExecutor` 等组件共享可变值，如工具循环计数器）。
 - `entity/constant.py`：全局常量。
 
 ---
