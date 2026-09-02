@@ -19,8 +19,6 @@ interface InputBarProps {
   /** 空态（无对话）时隐藏进度条 */
   chatEmpty: boolean;
   taskProgress: Record<string, TaskProgress>;
-  taskProgressCollapsed: boolean;
-  onToggleTaskProgressCollapse: () => void;
   onSend: () => void;
   onUpload: (e: ChangeEvent<HTMLInputElement>) => void;
   onUploadClick: () => Promise<void>;
@@ -63,8 +61,6 @@ export default function InputBar({
   sessionId,
   chatEmpty,
   taskProgress,
-  taskProgressCollapsed,
-  onToggleTaskProgressCollapse,
   onSend,
   onUpload,
   onUploadClick,
@@ -175,8 +171,6 @@ export default function InputBar({
       {!chatEmpty && (
         <TaskProgressPanel
           taskProgress={taskProgress}
-          collapsed={taskProgressCollapsed}
-          onToggleCollapse={onToggleTaskProgressCollapse}
         />
       )}
       <div className="input-bar-inner">

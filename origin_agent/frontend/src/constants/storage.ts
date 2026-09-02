@@ -12,7 +12,6 @@ export const STORAGE_KEYS = {
   LLM_DRAWER_OPEN:             "evolve_llm_drawer_open",
   LLM_DRAWER_WIDTH:            "evolve_llm_drawer_width",
   HEADER_COLLAPSED:            "evolve_header_collapsed",
-  TASK_PROGRESS_COLLAPSED:     "evolve_task_progress_collapsed",
   CLIPBOARD_COLLAPSED:         "evolve_clipboard_collapsed",
   DRAWER_RESOURCES_EXPANDED:   "evolve_drawer_resources_expanded",
   DRAWER_BACKGROUND_EXPANDED:  "evolve_drawer_background_expanded",

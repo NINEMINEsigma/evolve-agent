@@ -94,7 +94,6 @@ export default function Layout({ ws, onContextMenu, contextMenuOpen }: LayoutPro
 
   const prevSubagentIdsRef = useRef<Record<string, Set<string>>>({});
   const [isMobile, setIsMobile] = useState(false);
-  const [taskProgressCollapsed, setTaskProgressCollapsed] = usePersistentState(STORAGE_KEYS.TASK_PROGRESS_COLLAPSED, false);
   const [clipboardCollapsed, setClipboardCollapsed] = usePersistentState(STORAGE_KEYS.CLIPBOARD_COLLAPSED, false);
   const [headerCollapsed, setHeaderCollapsed] = usePersistentState(STORAGE_KEYS.HEADER_COLLAPSED, false);
 
@@ -104,13 +103,11 @@ export default function Layout({ ws, onContextMenu, contextMenuOpen }: LayoutPro
     setIsMobile(mq.matches);
     if (mq.matches) {
       setSidebarCollapsed(true);
-      setTaskProgressCollapsed(true);
     }
     const onChange = (e: MediaQueryListEvent) => {
       setIsMobile(e.matches);
       if (e.matches) {
         setSidebarCollapsed(true);
-        setTaskProgressCollapsed(true);
       }
     };
     mq.addEventListener("change", onChange);
@@ -338,8 +335,6 @@ export default function Layout({ ws, onContextMenu, contextMenuOpen }: LayoutPro
                 sessionId={ws.sessionId}
                 chatEmpty={chatEmpty}
                 taskProgress={ws.taskProgress}
-                taskProgressCollapsed={taskProgressCollapsed}
-                onToggleTaskProgressCollapse={() => setTaskProgressCollapsed((v) => !v)}
                 onSend={() => {
                   ws.send(targetSessions, visibleCharacters, responseCharacters);
                 }}

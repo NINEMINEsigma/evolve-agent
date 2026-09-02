@@ -69,22 +69,6 @@
   white-space: nowrap;
 }
 
-/* ── Task progress collapsed ── */
-.task-progress-collapsed {
-  padding: 0;
-  height: 1px;
-  overflow: hidden;
-}
-
-.task-progress-strip-fill-static {
-  position: absolute;
-  top: 0;
-  left: 0;
-  height: 1px;
-  border-radius: 0;
-  box-shadow: none;
-}
-
 /* ── Clipboard display items (shared) ── */
 .clipboard-display-item {
   margin-bottom: 8px;
@@ -175,10 +159,6 @@
   font-size: 12px;
   cursor: pointer;
   padding: 2px 6px;
-}
-
-.task-progress-panel.collapsed .task-progress-item {
-  display: none;
 }
 
 /* ── Cron countdown strip ── */
