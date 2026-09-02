@@ -171,7 +171,7 @@ Evolve Agent 内置两套多代理运行时：
 - **本地模型**：在 `custom_models/` 下放置 `.gguf` 文件，可作为审批模型自动加载。
 - **技能文件**：运行时 `skills/` 目录存放 `SKILL.md`，通过 `load_skill` / `list_skills` 工具加载。`pre-skills/` 提供参考模板。
 - **插件**：`abstract/plugins/discover.py` 基于目录扫描插件，解析 `plugin.yaml`，启发式检测 provider 类型。
-- **MCP**：`component/mcp_tools.py` 读取 `workspace/mcp_config.json`（默认），通过 `abstract/mcp/client.py` 连接 MCP server 并桥接工具。
+- **MCP**：`component/mcp_tools.py` 读取 `workspace/mcp_config.json`（默认），通过 `abstract/mcp/client.py` 连接并桥接工具；`abstract/mcp/schema.py` 在注册和 sampling 的 provider 边界规范化工具参数 schema。该层按 JSON Schema 结构位置处理嵌套内容，保护名为 `properties` 的业务参数，并将异常 `additionalProperties` 转为合法形式；它不改变实际 MCP `tools/call` 参数。
 
 ---
 

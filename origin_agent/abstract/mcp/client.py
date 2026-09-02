@@ -97,6 +97,7 @@ from urllib.parse import urlparse
 
 from system.convert import as_bool
 from entity.puretype import Role
+from .schema import normalize_mcp_input_schema as _normalize_schema
 
 if TYPE_CHECKING:
     from mcp import ClientSession
@@ -2664,151 +2665,18 @@ def _make_check_fn(server_name: str):
 # ---------------------------------------------------------------------------
 
 def _normalize_mcp_input_schema(schema: dict | None) -> dict:
-    """Normalize MCP input schemas for LLM tool-calling compatibility.
+    """Compatibility wrapper for the shared MCP schema normalizer.
 
-    MCP servers can emit plain JSON Schema with ``definitions`` /
-    ``#/definitions/...`` references.  Kimi / Moonshot rejects that form and
-    requires local refs to point into ``#/$defs/...`` instead.  Normalize the
-    common draft-07 shape here so MCP tool schemas remain portable across
-    OpenAI-compatible providers.
-
-    Additional MCP-server robustness repairs applied recursively:
-
-    * Missing or ``null`` ``type`` on an object-shaped node is coerced to
-      ``"object"`` (some servers omit it).  See PR #4897.
-    * When an ``object`` node lacks ``properties``, an empty ``properties``
-      dict is added so ``required`` entries don't dangle.
-    * ``required`` arrays are pruned to only names that exist in
-      ``properties``; otherwise Google AI Studio / Gemini 400s with
-      ``property is not defined``.  See PR #4651.
-    * MCP/Pydantic optional fields commonly arrive as
-      ``anyOf: [{...}, {"type": "null"}], default: null``.  Anthropic rejects
-      nullable branches in tool input schemas, so nullable unions are collapsed
-      to the non-null branch and optionality remains represented solely by the
-      parent object's ``required`` list.
-
-    All repairs are provider-agnostic and ideally produce a schema valid on
-    OpenAI, Anthropic, Gemini, and Moonshot in one pass.
+    The historical private entry point remains available for callers and
+    tests that import it from this module. The implementation lives in
+    ``abstract.mcp.schema`` so discovery and sampling share one walker.
     """
-    if not schema:
-        return {"type": "object", "properties": {}}
-
-    def _rewrite_local_refs(node):
-        if isinstance(node, dict):
-            normalized = {}
-            for key, value in node.items():
-                out_key = "$defs" if key == "definitions" else key
-                normalized[out_key] = _rewrite_local_refs(value)
-            ref = normalized.get("$ref")
-            if isinstance(ref, str) and ref.startswith("#/definitions/"):
-                normalized["$ref"] = "#/$defs/" + ref[len("#/definitions/"):]
-            return normalized
-        if isinstance(node, list):
-            return [_rewrite_local_refs(item) for item in node]
-        return node
-
-    def _strip_nullable_union(node):
-        """Collapse JSON Schema nullable unions to provider-safe non-null schemas.
-
-        Delegates to ``tools.schema_sanitizer.strip_nullable_unions`` so MCP
-        ingestion, the Anthropic guard, and the global sanitizer all share one
-        implementation. Keeps the ``nullable: true`` hint so runtime argument
-        coercion can still map a model-emitted ``"null"`` string to Python
-        ``None`` for this optional field.
-        """
-        return _strip_nullable_unions(node, keep_nullable_hint=True)
-
-    def _strip_nullable_unions(node, keep_nullable_hint=True):
-        """Inline version of strip_nullable_unions.
-
-        Strips ``null`` from ``anyOf``/``oneOf`` lists in JSON Schema nodes.
-        When *keep_nullable_hint* is True, adds ``nullable: true`` to the
-        result so downstream coercion can still map ``null`` -> None.
-        """
-        import copy
-        node = copy.deepcopy(node)
-
-        def _walk(n):
-            if not isinstance(n, dict):
-                return n
-            for key in ("anyOf", "oneOf"):
-                variants = n.get(key)
-                if isinstance(variants, list):
-                    filtered = [v for v in variants if isinstance(v, dict) and v.get("type") != "null"]
-                    if len(filtered) == 1:
-                        n[key] = [_walk(filtered[0])]
-                    elif len(filtered) > 1:
-                        n[key] = [_walk(v) for v in filtered]
-                    else:
-                        n[key] = variants
-                    if keep_nullable_hint and len(filtered) < len(variants):
-                        n["nullable"] = True
-            for k, v in n.items():
-                if isinstance(v, (dict, list)):
-                    n[k] = _walk(v)
-            return n
-
-        result = _walk(node)
-        for key in ("anyOf", "oneOf"):
-            variants = result.get(key)
-            if isinstance(variants, list) and len(variants) == 1:
-                merged = dict(result)
-                merged.update(variants[0])
-                merged.pop(key, None)
-                if "nullable" in variants[0]:
-                    merged["nullable"] = True
-                return merged
-        return result
-
-    def _repair_object_shape(node):
-        """Recursively repair object-shaped nodes: fill type, prune required."""
-        if isinstance(node, list):
-            return [_repair_object_shape(item) for item in node]
-        if not isinstance(node, dict):
-            return node
-
-        repaired = {k: _repair_object_shape(v) for k, v in node.items()}
-
-        # Coerce missing / null type when the shape is clearly an object
-        # (has properties or required but no type).
-        if not repaired.get("type") and (
-            "properties" in repaired or "required" in repaired
-        ):
-            repaired["type"] = "object"
-
-        if repaired.get("type") == "object":
-            # Ensure properties exists so required can reference it safely
-            if "properties" not in repaired or not isinstance(
-                repaired.get("properties"), dict
-            ):
-                repaired["properties"] = {} if "properties" not in repaired else repaired["properties"]
-                if not isinstance(repaired.get("properties"), dict):
-                    repaired["properties"] = {}
-
-            # Prune required to only include names that exist in properties
-            required = repaired.get("required")
-            if isinstance(required, list):
-                props = repaired.get("properties") or {}
-                valid = [r for r in required if isinstance(r, str) and r in props]
-                if len(valid) != len(required):
-                    if valid:
-                        repaired["required"] = valid
-                    else:
-                        repaired.pop("required", None)
-
-        return repaired
-
-    normalized = _rewrite_local_refs(schema)
-    normalized = _strip_nullable_union(normalized)
-    normalized = _repair_object_shape(normalized)
-
-    # Ensure top-level is a well-formed object schema
-    if not isinstance(normalized, dict):
-        return {"type": "object", "properties": {}}
-    if normalized.get("type") == "object" and "properties" not in normalized:
-        normalized = {**normalized, "properties": {}}
-
-    return normalized
+    return _normalize_schema(
+        schema,
+        diagnostic=lambda path, code: logger.debug(
+            "MCP schema normalized at %s (%s)", path, code
+        ),
+    )
 
 
 def sanitize_mcp_name_component(value: str) -> str:

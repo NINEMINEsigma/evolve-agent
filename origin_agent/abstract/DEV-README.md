@@ -24,6 +24,7 @@ abstract/
 │   └── discover.py             ← 插件发现
 └── mcp/
     ├── client.py               ← MCP 客户端
+    ├── schema.py               ← MCP 输入 schema 结构位置规范化
     ├── oauth.py                ← OAuth 认证
     └── oauth_manager.py        ← OAuth 管理
 ```
@@ -154,6 +155,14 @@ create_llm_client(name, runtime_context, profile) -> BaseLLMClient
 - 凭据脱敏、提示注入扫描、重连退避。
 
 配置通过 `component/mcp_tools.py` 调用 `register_mcp_servers(servers)` 时传入，默认读取 `workspace/mcp_config.json`。
+
+### `abstract/mcp/schema.py`
+
+`normalize_mcp_input_schema(schema, diagnostic=None)` 是 MCP 工具输入 schema 的 provider 兼容层。它不依赖 MCP SDK、ToolRegistry 或 LLM 客户端，使用深拷贝按 JSON Schema 的结构位置递归处理：`properties`/`patternProperties`/`$defs`/`definitions` 是映射边界，`items`、组合关键字和 `additionalProperties` 才进入子 schema。这样业务参数名为 `properties`、`type` 或 `required` 时不会被误认为结构关键字。
+
+该模块保留本地定义引用重写、nullable union 折叠和 `required` 清理；对 `additionalProperties` 保留布尔值和 schema 对象，标准类型字符串转换为 schema，未知字符串或无效值降级为 `true` 并通过仅含路径与类别的诊断回调记录。`null` 裸字符串不直接生成 `type: "null"`。规范化只改变发送给 LLM 的 schema，不改变随后传给 MCP `tools/call` 的参数字典。
+
+`abstract/mcp/client.py` 的 `_normalize_mcp_input_schema()` 仍是兼容包装入口，MCP 工具发现和 server-initiated sampling 均通过同一实现，避免不同路径产生不一致的 schema。
 
 ---
 

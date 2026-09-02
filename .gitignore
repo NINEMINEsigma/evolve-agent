@@ -185,7 +185,8 @@ cython_debug/
 
 # tests
 .test*.*
-test/*
+test/
+tests/
 
 # workspace
 workspace/

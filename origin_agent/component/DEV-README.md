@@ -158,6 +158,8 @@ component/
 - 调用 `abstract/mcp/client.py` 的 `register_mcp_servers()` 连接 server。
 - 将 MCP server 提供的工具动态注册到 `ToolRegistry`，对主 Agent 可见。
 - 应用关闭时调用 `shutdown_mcp_servers()` 清理连接。
+- MCP 工具注册前由 `abstract/mcp/schema.py::normalize_mcp_input_schema()` 做 provider 兼容规范化：按 schema 结构位置递归处理 `properties`、`items`、组合分支、`$defs`/`definitions` 和 `additionalProperties`，不会把业务参数 `properties` 误当作 JSON Schema 映射表。
+- 规范化只作用于发送给 LLM 的 `function.parameters`；MCP handler 仍将模型生成的原始参数字典传递给 `session.call_tool()`，不使用规范化 schema 反向改写调用参数。
 
 MCP 配置示例（`workspace/mcp_config.json`）：
 

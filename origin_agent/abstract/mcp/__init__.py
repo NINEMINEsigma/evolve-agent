@@ -39,6 +39,7 @@ from .client import (
     _ENV_VAR_PATTERN,
     _CREDENTIAL_PATTERN,
 )
+from .schema import normalize_mcp_input_schema
 
 __all__ = [
     # OAuth
@@ -63,4 +64,5 @@ __all__ = [
     "sanitize_mcp_name_component",
     "_ENV_VAR_PATTERN",
     "_CREDENTIAL_PATTERN",
+    "normalize_mcp_input_schema",
 ]
