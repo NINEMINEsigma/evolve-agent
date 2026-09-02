@@ -1,103 +1,143 @@
 ---
 name: webapp-testing
-description: Toolkit for interacting with and testing local web applications using Playwright. Supports verifying frontend functionality, debugging UI behavior, capturing browser screenshots, and viewing browser logs.
+description: "Use this skill whenever a web page, local web app, static HTML, React/Vite app, Three.js scene, WebGL/WebGPU demo, Session Site, or interactive frontend needs verification, debugging, screenshots, console inspection, or regression testing. Choose the current Browser* tools first; use Playwright scripts only when they provide a capability the browser tools cannot."
 license: Complete terms in LICENSE.txt
 category: dev
 tags:
   - testing
-  - playwright
-  - webapp
   - browser
+  - webapp
+  - three.js
+  - webgl
+  - webgpu
+  - session-site
+  - mime
 ---
 
 # Web Application Testing
 
-To test local web applications, write native Python Playwright scripts.
+Use a reconnaissance-first workflow. Do not declare success from source inspection or `node --check` alone: a web app is successful only when its intended delivery URL loads in a real browser and its important interactions produce observable state changes.
 
-**Helper Scripts Available**:
-- `scripts/with_server.py` - Manages server lifecycle (supports multiple servers)
+## Tool selection
 
-**Always run scripts with `--help` first** to see usage. DO NOT read the source until you try running the script first and find that a customized solution is abslutely necessary. These scripts can be very large and thus pollute your context window. They exist to be called directly as black-box scripts rather than ingested into your context window.
+Use the current browser tools as the default:
 
-## Decision Tree: Choosing Your Approach
+1. `BrowserLaunch` only when a debug browser is not already available. Use `headless: true` for ordinary DOM checks; use `headless: false` for WebGL/WebGPU, GPU acceleration, visual composition, or cases where the user needs to see the browser.
+2. `BrowserConnect` to attach to an existing browser when appropriate.
+3. `BrowserListTabs` to identify the target tab.
+4. `BrowserGoto` to navigate to the confirmed URL.
+5. `BrowserWait`, `BrowserQuery`, and `BrowserScreenshot` to inspect the rendered result.
+6. `BrowserClick`, `BrowserType`, `BrowserPress`, and `BrowserScroll` to exercise discovered controls. Confirm before submit/send/destructive actions.
 
+Use a native Playwright script only for capabilities that the Browser* tools do not expose, such as large repeated test matrices, detailed request interception, or persistent console/network collection. Do not make Playwright the default merely because an old example does so.
+
+## Reconnaissance → assertion → interaction → regression
+
+### 1. Reconnaissance
+
+- Read the entry HTML and relevant source to learn the intended selectors and boot sequence.
+- Navigate to the actual delivery URL, not an invented `file://` approximation.
+- Wait for DOM/content readiness. For dynamic apps, allow the application to finish its own loader or ready transition.
+- Query `body`, loader, fallback/error panels, primary canvas, headings, buttons, inputs, and status indicators.
+- Capture a screenshot when visual composition matters.
+
+### 2. Assertions
+
+Record objective checks before interacting:
+
+- The expected title and main content exist.
+- The loader is hidden or gone after boot.
+- The fallback/error panel is absent unless the tested condition requires it.
+- The canvas or primary app root has non-zero dimensions.
+- Expected controls exist and have the intended initial state.
+- Runtime counters such as FPS, triangle count, part count, or a ready marker update when the app exposes them.
+- No fatal console error, failed module request, or unexpected HTML response appears during startup.
+
+### 3. Interaction assertions
+
+For every important control, test both the action and its effect:
+
+- Click a view/route and verify active state, URL, heading, or camera/status change.
+- Toggle a panel, layer, roof, furniture, landscape, or fallback and verify `class`, `hidden`, `aria-*`, visibility, or text changes.
+- Move a range input and verify its value/label or rendered state changes.
+- Scroll a narrative or scene and verify the intended section/state changes.
+- For 3D scenes, test at least one camera/orbit action and one scene-specific interaction, then capture a screenshot after the change.
+
+### 4. Regression
+
+Repeat the boot assertions after interaction, resize, refresh, and (when relevant) a second route or camera. Check that no state change leaves a blank canvas, stuck loader, duplicated UI, or stale status.
+
+## Static delivery and MIME diagnosis
+
+When testing a Session Site, use the real route:
+
+```text
+/files/ws/sessions/<session_id>/site/index.html
 ```
-User task → Is it static HTML?
-    ├─ Yes → Read HTML file directly to identify selectors
-    │         ├─ Success → Write Playwright script using selectors
-    │         └─ Fails/Incomplete → Treat as dynamic (below)
-    │
-    └─ No (dynamic webapp) → Is the server already running?
-        ├─ No → Run: python scripts/with_server.py --help
-        │        Then use the helper + write simplified Playwright script
-        │
-        └─ Yes → Reconnaissance-then-action:
-            1. Navigate and wait for networkidle
-            2. Take screenshot or inspect DOM
-            3. Identify selectors from rendered state
-            4. Execute actions with discovered selectors
-```
 
-## Example: Using with_server.py
+Keep resource paths relative to `index.html` unless the host explicitly guarantees a site root. A request for `/src/main.js` can accidentally target the gateway root rather than the Session Site. Prefer `src/main.js`, `./assets/...`, and other same-site relative paths.
 
-To start a server, run `--help` first, then use the helper:
+Interpret module errors by the response:
 
-**Single server:**
-```bash
-python scripts/with_server.py --server "npm run dev" --port 5173 -- python your_automation.py
-```
+- `Expected a JavaScript-or-Wasm module ... text/html`: the module URL is wrong, a SPA fallback returned `index.html`, or the file was not served at that path.
+- `... text/plain`: the server is serving the module with an unsuitable MIME type; test a `.js` path, correct the host, or use a built asset.
+- Bare imports such as `react` or `react-dom/client` require a bundler, an import map, or a browser-resolvable URL. They do not work in an arbitrary static source directory.
+- JSX/TSX is not browser-native JavaScript. Use a built bundle, a configured transform server, or a plain `.js` bootstrap for direct static delivery.
+- After fixing a path, refresh the actual `/files/ws/...` URL and verify the browser, not only the filesystem.
 
-**Multiple servers (e.g., backend + frontend):**
-```bash
-python scripts/with_server.py \
-  --server "cd backend && python server.py" --port 3000 \
-  --server "cd frontend && npm run dev" --port 5173 \
-  -- python your_automation.py
-```
+See `references/session-site-validation.md` for the full checklist.
 
-To create an automation script, include only Playwright logic (servers are managed automatically):
-```python
-from playwright.sync_api import sync_playwright
+## WebGL/WebGPU and visual validation
 
-with sync_playwright() as p:
-    browser = p.chromium.launch(headless=True) # Always launch chromium in headless mode
-    page = browser.new_page()
-    page.goto('http://localhost:5173') # Server already running and ready
-    page.wait_for_load_state('networkidle') # CRITICAL: Wait for JS to execute
-    # ... your automation logic
-    browser.close()
-```
+Headless DOM success is not GPU success. Use a headed browser for WebGL/WebGPU, shader compilation, GPU adapter behavior, animation smoothness, and visual composition. Do not enter a retry loop in a headless environment that lacks the required GPU feature.
 
-## Reconnaissance-Then-Action Pattern
+For a GPU scene, check in this order:
 
-1. **Inspect rendered DOM**:
-   ```python
-   page.screenshot(path='/tmp/inspect.png', full_page=True)
-   content = page.content()
-   page.locator('button').all()
-   ```
-   > ⚠️ **截图如需人工目检**：先 `probe_modality_capability` 确认视觉能力；无视觉（`vision_capable=false`）时不自行 Read 截图，把截图路径展示给用户判断。DOM 文本断言不受此限，可继续自主执行。
+1. Page title and boot text.
+2. Loader/fallback state and any explicit error attribute.
+3. Canvas dimensions and visible rendering state.
+4. FPS or runtime counters after a short settling period.
+5. Console/module errors.
+6. One representative screenshot per major visual state.
+7. At least one real interaction: orbit/drag, slider, camera button, scroll phase, or toggle.
 
-2. **Identify selectors** from inspection results
+A screenshot is evidence, not a substitute for the user's visual judgment. Report what was observed and show the image when needed; do not claim that structural visual quality is objectively perfect.
 
-3. **Execute actions** using discovered selectors
+See `references/gpu-rendering-validation.md`.
 
-## Common Pitfall
+## UI regression traps
 
-❌ **Don't** inspect the DOM before waiting for `networkidle` on dynamic apps
-✅ **Do** wait for `page.wait_for_load_state('networkidle')` before inspection
+Always check these common failure modes:
 
-## Best Practices
+- `[hidden]` overridden by `.fallback { display: grid/flex }`; add an explicit `[hidden] { display: none !important; }` rule when needed.
+- A loader remains above the app because opacity changed but pointer-events or z-index was not cleared.
+- A route or asset uses an absolute path that escapes the deployed site.
+- A React/Vite source entry is served directly without its runtime or transform.
+- A control visually changes but does not update the underlying state.
+- A 3D toggle hides the model but leaves furniture, lights, or overlays visible.
+- Resize changes CSS dimensions but not the renderer/camera aspect.
+- A screenshot is taken before asynchronous geometry, shader, or font loading settles.
 
-- **Use bundled scripts as black boxes** - To accomplish a task, consider whether one of the scripts available in `scripts/` can help. These scripts handle common, complex workflows reliably without cluttering the context window. Use `--help` to see usage, then invoke directly. 
-- Use `sync_playwright()` for synchronous scripts
-- Always close the browser when done
-- Use descriptive selectors: `text=`, `role=`, CSS selectors, or IDs
-- Add appropriate waits: `page.wait_for_selector()` or `page.wait_for_timeout()`
+See `references/ui-regression-checklist.md`.
 
-## Reference Files
+## Local servers and helper script
 
-- **examples/** - Examples showing common patterns:
-  - `element_discovery.py` - Discovering buttons, links, and inputs on a page
-  - `static_html_automation.py` - Using file:// URLs for local HTML
-  - `console_logging.py` - Capturing console logs during automation
+Prefer an already-running server or the actual Session Site route. Do not start another process on the gateway port `8765`. Use `scripts/with_server.py` only when a project genuinely needs a temporary development server; run its `--help` first, use a free high port, and let it clean up its child process. It is a fallback helper, not the default test path.
+
+When a background service must be stopped, use the dedicated `StopBackgroundService` tool rather than killing it through Python or shell commands.
+
+## Screenshot and artifact handling
+
+Use `BrowserScreenshot` for browser captures; it writes to the workspace logs. Use the `media-display` conventions when showing a result. Large sites already deployed to Session Site should be linked, not re-embedded repeatedly in chat.
+
+## Playwright fallback
+
+If a script is required, use Windows-compatible paths or workspace-relative output paths, wait for readiness before querying dynamic DOM, and close the browser. Prefer `page.on('console')` and request listeners for diagnostics. Keep visual GPU tests headed unless the user explicitly accepts a non-GPU smoke test.
+
+The bundled examples are fallback references:
+
+- `examples/element_discovery.py` — Playwright DOM reconnaissance.
+- `examples/console_logging.py` — console capture.
+- `examples/static_html_automation.py` — HTTP-delivered static page smoke test.
+
+The helper implementation is in `scripts/with_server.py`.

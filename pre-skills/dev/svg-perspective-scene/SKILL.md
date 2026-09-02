@@ -60,42 +60,31 @@ P' = P + s × (VP − P)
 
 ## 第四步：验证循环（三层，逐层收紧）
 
-> 截图与诊断改用**内置浏览器工具集**（`browser_*`）替代无头 chromium 命令行。浏览器按**真实时间**运行（无 `--virtual-time-budget` 快进），CSS transition 会真实播放——这对终态验证是利好，但长动画需留足等待时间。
+截图与诊断优先使用当前内置浏览器工具集。普通 DOM 页面可使用无头浏览器；需要真实 GPU、动画、WebGL/WebGPU 或视觉构图时使用有头 Edge。不要在缺少 GPU 能力的环境中反复重试同一场景。
 
 ### 层 1：浏览器截图目检
 
-> ⚠️ **前置：视觉能力自检（必须）**。截图目检依赖 `Read` 的图片分支，前提是当前模型具备视觉能力。
-> 开始前先 `probe_modality_capability` 确认：
-> - `vision_capable=true` → 可继续走下方自主目检流程；
-> - `vision_capable=false` → **跳过步骤 6–7 的自主读图**，截图后直接把 `saved_to` 路径展示给用户，请用户亲自判断（重点看：墙线收束、物件落地、遮挡、剪裁），等用户反馈后再继续层 2/层 3。
+1. 首次使用时，用 `BrowserLaunch` 启动调试 Edge（普通 DOM 可 `headless: true`；GPU/视觉验证用 `headless: false`），再用 `BrowserConnect` 接管；已有连接时复用。
+2. 打开实际交付 URL。优先使用 `/files/ws/...` 或已运行的 HTTP 服务；不要用 `file://` 代替 Session Site，也不要占用网关 `8765` 启动临时服务器。
+3. 用 `BrowserListTabs` 确认目标标签页。
+4. 用 `BrowserWait` 等待动态页面、字体、动画和渲染器稳定。
+5. 用 `BrowserScreenshot` 截图；需要人工判断结构质量时，把截图交由用户，不要把截图当成客观完美证明。
+6. 对 SVG 场景重点检查：墙线是否共享灭点、门窗是否贴墙、家具是否落地、遮挡顺序和 clipPath 是否正确。
 
-1. 首次使用：`browser_launch` 启动带调试端口的 Edge → `browser_connect` 接管（后续同一会话复用连接）。
-2. 打开页面：`browser_open_tab(url="file:///<HTML 绝对路径>")`。若 file:// 被拒或相对资源失效，改用本地静态服务器托管：`StartBackgroundService(command=["python","-m","http.server","8765"], cwd="output")`，再 `browser_open_tab(url="http://localhost:8765/index.html")`。
-3. `browser_list_tabs` 取新标签页下标 `idx`。
-4. 等动画/定时器沉淀：`browser_wait(tab=idx, timeout_ms=4000)`（真实等待，非虚拟快进）。
-5. `browser_screenshot(tab=idx, full_page=true)` → 截图存到 `logs/browser_screenshots/{uuid}.png`（返回 `saved_to`）。
-6. （仅 `vision_capable=true`）`Read` 该 `saved_to` 路径（image 分支）**亲自看图**，重点看：墙线收束、物件落地、遮挡、剪裁。
-7. （仅 `vision_capable=true`）局部放大复查：`RunPython` 调 [scripts/shot.py](scripts/shot.py) 对 `saved_to` 路径按相对坐标裁剪。
+### 层 2：DOM 与运行状态诊断
 
-### 层 2：DOM 状态诊断（验证动画/状态机的终态）
+- 用 `BrowserQuery` 检查标题、主要容器、loader、fallback、按钮和状态文本。
+- 检查 `hidden` 元素是否真的不可见；若 CSS 覆盖了默认 display，使用 `[hidden] { display: none !important; }`。
+- 对动画或状态机，查询最终 class、属性、文本或标题；不要只依赖截图。
+- 收集全局错误时，优先用页面现有错误面板或 Playwright 后备脚本；必要时让诊断脚本把摘要写入 `document.title`，再用 `BrowserQuery` 读取。
 
-CSS transition 在真实浏览器里会正常播放，截图能反映真实终态。但状态机终态仍建议用注入脚本读 DOM 验证：
+### 层 3：自动点击回归
 
-- 把诊断 `<script>`（收集全局 error + 末尾把结果写进 `document.title`）注入 HTML 副本，写入 `output`。
-- `browser_open_tab` 打开 → `browser_wait(tab=idx, timeout_ms=<诊断时刻>)` → `browser_query(tab=idx, selector="title")` 读 title 文本作为回传通道。
-- 或直接 `browser_query` 用选择器定位元素，读其 text/属性验证状态。
+**A. 简单链路**：用 `BrowserQuery` 定位元素 → `BrowserClick` 按真实路径点击 → `BrowserWait` 等待 → `BrowserQuery` 读取终态。点击提交、发送或破坏性按钮前必须获得确认。
 
-把诊断结果写进 `document.title` 是最省事的回传通道（注入示例见原脚本注释）。
+**B. 复杂时序链路**：仅当内置工具不足时，使用 `scripts/playthrough_test.py` 生成测试副本或使用 Playwright。为每个步骤设置足够延迟，在最后一步之后再读取报告；不要把脚本的旧命令名直接当作当前工具名。
 
-### 层 3：自动点击回归（交互链路全通）
-
-按复杂度两条路径：
-
-**A. 简单链路**：直接用浏览器工具——`browser_query` 定位元素 → `browser_click` 按真实用户路径依次点击（含模态框按钮）→ `browser_wait` 留余量 → `browser_query` 读终态/查 error。
-
-**B. 复杂时序链路**：保留 click-driver 注入——用 [scripts/playthrough_test.py](scripts/playthrough_test.py)（已改为注入器）生成带 driver 的 HTML 副本（`dispatchEvent(new MouseEvent('click',{bubbles:true}))` 按时刻表触发），`browser_open_tab` 打开 → `browser_wait` 等到 report 时刻 → `browser_query(selector="title")` 读结果。链路里任何一步断了（选择器失效、状态前提不满足），报告里立即可见。无 error 且链路全 OK 即通过。
-
-注意时序：被测页面若用 setTimeout 串联剧情，driver 的点击时刻表要留出余量；末尾诊断时刻要晚于最后一个状态变更。
+每轮回归至少覆盖：初始加载、一次交互、交互后的状态、刷新后的状态。若页面包含多个主题或响应式布局，再各取一个代表状态。
 
 ## 交付前检查单
 

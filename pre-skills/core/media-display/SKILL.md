@@ -43,13 +43,39 @@ Supported formats: PNG, JPG, JPEG, GIF, WebP.
 
 ## HTML Pages
 
-Use an `<iframe>` tag to embed a complete HTML page inline:
+Use an `<iframe>` tag for a small, self-contained HTML widget that benefits from inline rendering:
 
 ```html
 <iframe src="/files/ws/output/report.html" style="width:100%;height:500px;border:none"></iframe>
 ```
 
 The frontend renders iframes in a sandbox with `allow-scripts allow-same-origin allow-popups allow-forms`.
+
+### Session Site deployment
+
+For a multi-file or persistent website, deploy files under the current session's site directory:
+
+```text
+ws:sessions/<session_id>/site/
+```
+
+Use `index.html` as the entry and provide this link to the user:
+
+```text
+/files/ws/sessions/<session_id>/site/index.html
+```
+
+Do not repeatedly embed a large deployed website inside the chat bubble. Tell the user to open it from the Session Site section of the resource drawer, and provide the link when useful.
+
+Before delivery, ensure the chosen deployment is coherent:
+
+- A built deployment must serve the complete build output and generated assets.
+- A direct static-source deployment must use same-site relative paths such as `src/main.js` and `./assets/file.png`.
+- Do not leave Vite/React JSX or bundler-only bare imports in a page intended to run without a transform server; use a built bundle, an import map, or a browser-native `.js` entry.
+- Test the actual `/files/ws/sessions/<session_id>/site/index.html` route in a browser. Files existing on disk are not proof that the gateway serves them with correct paths and MIME types.
+- If the site is changed after a session rotation, copy the final files into the new session's site directory and update the link.
+
+For a small one-off widget, inline embedding remains appropriate; for a large interactive site, use Session Site instead.
 
 ## Audio
 

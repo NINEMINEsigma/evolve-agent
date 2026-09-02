@@ -1,33 +1,24 @@
+"""Smoke-test an HTTP-delivered static page with Playwright.
+
+Use the real deployment URL when possible; do not replace it with file:// when
+checking Session Site routing or module MIME behavior.
+"""
 from playwright.sync_api import sync_playwright
-import os
 
-# Example: Automating interaction with static HTML files using file:// URLs
-
-html_file_path = os.path.abspath('path/to/your/file.html')
-file_url = f'file://{html_file_path}'
+URL = "http://127.0.0.1:8765/files/ws/sessions/<session_id>/site/index.html"
 
 with sync_playwright() as p:
     browser = p.chromium.launch(headless=True)
-    page = browser.new_page(viewport={'width': 1920, 'height': 1080})
-
-    # Navigate to local HTML file
-    page.goto(file_url)
-
-    # Take screenshot
-    page.screenshot(path='/mnt/user-data/outputs/static_page.png', full_page=True)
-
-    # Interact with elements
-    page.click('text=Click Me')
-    page.fill('#name', 'John Doe')
-    page.fill('#email', 'john@example.com')
-
-    # Submit form
-    page.click('button[type="submit"]')
+    page = browser.new_page(viewport={"width": 1440, "height": 900})
+    errors = []
+    page.on("pageerror", lambda exc: errors.append(str(exc)))
+    page.goto(URL, wait_until="domcontentloaded")
+    page.wait_for_load_state("networkidle")
     page.wait_for_timeout(500)
-
-    # Take final screenshot
-    page.screenshot(path='/mnt/user-data/outputs/after_submit.png', full_page=True)
-
+    page.screenshot(path="session-site-smoke.png")
+    assert page.title(), "Expected a document title"
+    assert page.locator("body").count() == 1
+    assert not errors, f"Page errors: {errors}"
     browser.close()
 
-print("Static HTML automation completed!")
+print("HTTP static-page smoke test passed")

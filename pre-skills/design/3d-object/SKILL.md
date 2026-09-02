@@ -215,6 +215,44 @@ Auto-downgrade: measure frame times; if sustained < 30fps, switch to the next lo
 
 ---
 
+## Architectural visualization extension
+
+Use this extension whenever the scene is a house, villa, resort, hotel, pavilion, museum, or another building that must be inspected as a spatial model rather than a decorative facade. Read `references/procedural-architecture.md` before implementing.
+
+### Model from a dimensional source
+
+- Establish one central dimensional object (`D`) for grade, finished-floor levels, slab ranges, floor-to-floor heights, wall thicknesses, and each envelope's min/max coordinates.
+- Derive wall, slab, roof, stair, terrace, furniture, landscape, and camera coordinates from that scheme. Avoid independently edited coordinate piles.
+- If a floor plan is supplied, measure or estimate openings and dimensions explicitly. A displayed plan image is presentation content only; it does not update the 3D model.
+
+### Build real openings
+
+Give exterior and partition walls physical thickness. Represent doors and windows as opening data and generate the wall around those openings; do not place dark rectangles on an intact wall. Split around every opening boundary to form piers, sills, lintels, and reveals. Set glazing back from the exterior face so the reveal produces depth and shadow.
+
+### Keep scene modules under contract
+
+For a production building scene, separate:
+
+```text
+lib.js          metric primitives, wall-with-openings, glazing, stairs, railings
+textures.js     procedural canvas height fields, normal and roughness maps
+materials.js    shared PBR material instances
+house.js        dimensional scheme and architectural geometry
+furniture.js    room-scale furnishings and fixtures
+site.js         terrain, pool, paths, planting and outdoor structures
+main.js         renderer, environment, lighting, cameras, animation and UI
+```
+
+Define and verify cross-module state explicitly: tagged doors/sliders, visibility groups, lights, emissive meshes, animated objects, upper/roof cutaway groups, and outdoor water or landscape handles.
+
+### Coordinate-dependent QA
+
+When the footprint changes, update all dependent systems together: wall openings, furniture, pool and deck bounds, pavilion, planting, landscape stones, viewpoints and camera targets. Check for overlapping openings, furniture through walls, floating props, props inside water, cameras inside geometry, and toggles that hide architecture but leave coupled furniture or lights behind.
+
+### Useful building interactions
+
+A strong architectural showcase usually benefits from scripted viewpoints with eased transitions, a day/night keyframe rig, roof or upper-level cutaway toggles, furniture and landscape isolation, animated sliding doors, animated water normals, and a modest automatic orbit. Treat these as testable state changes, not merely visual promises.
+
 ## Export
 
 The original `templates/three_d_stage.html` still provides OBJ+MTL and GLB export via `OBJExporter` / `GLTFExporter`. In modular mode, add an export module:
@@ -228,8 +266,6 @@ export function exportOBJ(scene) { /* ... */ }
 export function exportGLB(scene) { /* ... */ }
 ```
 
----
-
 ## File Reference
 
 | File | Purpose |
@@ -238,5 +274,6 @@ export function exportGLB(scene) { /* ... */ }
 | `templates/three_d_stage.html` | Quick preview template (single HTML) |
 | `references/shader-injection.md` | Complete `onBeforeCompile` patterns |
 | `references/procedural-modeling.md` | Lathe DSL, Shape extrusion, merging |
+| `references/procedural-architecture.md` | Dimensional building model, true openings, procedural materials, site/furniture/camera contracts |
 | `references/glsl-noise.md` | Reusable GLSL noise functions |
 | `references/post-processing.md` | EffectComposer setup + GradeShader |

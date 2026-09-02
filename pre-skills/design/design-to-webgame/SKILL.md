@@ -9,10 +9,10 @@ description: 将游戏设计文档（GDD）开发成可玩网页游戏的完整�
 
 0. **环境预检**：在动手写任何代码之前，先检查环境，确定技术栈路线。详见下方「环境预检清单」。
 1. **拆解文档**：通读设计文档，产出系统清单（核心循环、数值表、触发条件、UI 布局）。原则：文档每张数值表对应一个常量表，每个"当 X 触发 Y"对应一条触发逻辑。
-2. **视觉定向**：用浏览器搜索设计参考（如搜索"pixel game UI"、"retro game interface"、"经营游戏界面"等关键词）确定配色/字体/面板质感。可配合 `aesthetic-style-library` skill 获取风格模板。再生成关键美术（标题横幅、角色头像）。**生成后如需读图目检，先 `probe_modality_capability` 确认视觉能力；无视觉（`vision_capable=false`）时不自行 Read 读图，直接把图片展示给用户判断。** 中文游戏必须配置中文字体回退栈，像素字体只管拉丁与数字。
+2. **视觉定向**：用浏览器搜索设计参考（如搜索“pixel game UI”“retro game interface”“经营游戏界面”等关键词）确定配色、字体和面板质感。可配合 `aesthetic-style-library` skill 获取风格模板。生成关键美术后，如需视觉判断，使用 `BrowserScreenshot` 获取证据并交由用户做最终判断，不要把截图当作绝对质量证明。中文游戏必须配置中文字体回退栈，像素字体只管拉丁与数字。
 3. **搭建架构**：根据环境预检结果选择技术栈，按 types → data → engine → scenes → state → sections 的顺序写代码。详见 [references/architecture.md](references/architecture.md)。
 4. **数值审校**：构建前做量级自洽性检查（用文档自己的经济节奏反推核心数值交叉验证）。发现矛盾时引入单一缩放系数、保留其余数值原样，并主动告知用户。详见 [references/methodology.md](references/methodology.md) 阶段四。
-5. **全流程回归**：构建通过后用浏览器按真实玩家路径逐步验证（标题→开场剧情→主玩法一轮→每个标签页→一笔完整交易→存档读档），DOM 文本与截图双重核对（**截图核对依赖视觉：先 `probe_modality_capability`；无视觉时跳过自主看截图，把截图展示给用户核对**）。完整检查清单见 [references/methodology.md](references/methodology.md) 阶段五。
+5. **全流程回归**：构建通过后，用当前 Browser 工具按真实玩家路径逐步验证（标题→开场剧情→主玩法一轮→每个标签页→一笔完整交易→存档读档）。DOM 文本断言用于客观状态，截图通过 `BrowserScreenshot` 获取并交由用户做最终视觉判断，不把截图当作绝对质量证明。完整检查清单见 [references/methodology.md](references/methodology.md) 阶段五。
 6. **交付**：手动版本管理——在 `output/` 下按版本号组织目录，或用 `Compress` 打包压缩备份。单机存档用 localStorage，必须明确告知用户存档边界。交付说明中列出偏离设计的改动及理由。
 
 ## 环境预检清单（必须在阶段零完成）

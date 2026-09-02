@@ -138,9 +138,35 @@ export default function Layout({ ws, onContextMenu, contextMenuOpen }: LayoutPro
 
   // 挂载时注册滚动监听
   useEffect(() => {
-    const cleanup = ws.attachScrollListener();
-    return cleanup;
-  }, [ws.attachScrollListener]);
+    let active = true;
+    let cleanup: (() => void) | null = null;
+    let retryFrame: number | null = null;
+    let retryUsed = false;
+
+    const attach = () => {
+      if (!active || ws.sessionLocked) return;
+      const nextCleanup = ws.attachScrollListener();
+      if (nextCleanup) {
+        cleanup = nextCleanup;
+        return;
+      }
+      if (retryUsed) return;
+      retryUsed = true;
+      retryFrame = requestAnimationFrame(() => {
+        retryFrame = null;
+        if (!active || ws.sessionLocked) return;
+        const retriedCleanup = ws.attachScrollListener();
+        if (retriedCleanup) cleanup = retriedCleanup;
+      });
+    };
+
+    attach();
+    return () => {
+      active = false;
+      if (retryFrame !== null) cancelAnimationFrame(retryFrame);
+      cleanup?.();
+    };
+  }, [ws.attachScrollListener, ws.sessionLocked]);
 
   const onToggleAgentState = (agentName: string) => {
     let curVisible = visibleCharacters.includes("all-agents")

@@ -17,6 +17,61 @@ import type { UploadManager } from "./useUploadManager";
 export type { PendingImage, PendingAudio, PendingVideo } from "./useUploadManager";
 export type WebSocketState = ReturnType<typeof useWebSocket>;
 
+const NESTED_SCROLL_SELECTOR = [
+  ".tool-call-detail",
+  ".message-content-collapsed",
+  ".reasoning-content",
+  ".context-extension-content",
+].join(", ");
+const HANDOFF_SCROLL_SELECTOR = ".tool-call-detail, .message-content-collapsed";
+
+function eventTargetElement(target: EventTarget | null): Element | null {
+  return target instanceof Element ? target : null;
+}
+
+function findScrollableElement(target: EventTarget | null, selector: string): HTMLElement | null {
+  let current = eventTargetElement(target);
+  while (current) {
+    if (current instanceof HTMLElement && current.matches(selector) && current.scrollHeight > current.clientHeight) {
+      return current;
+    }
+    current = current.parentElement;
+  }
+  return null;
+}
+
+function findNestedScrollContainer(target: EventTarget | null): HTMLElement | null {
+  return findScrollableElement(target, NESTED_SCROLL_SELECTOR);
+}
+
+function isInsideNestedScrollContainer(target: EventTarget | null): boolean {
+  return findNestedScrollContainer(target) !== null;
+}
+
+function isNestedHandoffTargetAtBoundary(target: EventTarget | null, deltaY: number): boolean {
+  const container = findNestedScrollContainer(target);
+  if (!container || !container.matches(HANDOFF_SCROLL_SELECTOR) || deltaY === 0) return false;
+  const atTop = container.scrollTop <= 0;
+  const atBottom = container.scrollTop + container.clientHeight >= container.scrollHeight - 1;
+  return (deltaY < 0 && atTop) || (deltaY > 0 && atBottom);
+}
+
+const KEYBOARD_SCROLL_KEYS = new Set([
+  "ArrowDown",
+  "ArrowUp",
+  "End",
+  "Home",
+  "PageDown",
+  "PageUp",
+  " ",
+]);
+
+function isKeyboardScrollTarget(target: EventTarget | null, chat: HTMLElement): boolean {
+  const element = eventTargetElement(target);
+  if (!element || !chat.contains(element)) return false;
+  return element.closest("input, textarea, button, [contenteditable=\"true\"]") === null;
+}
+
 export function useWebSocket() {
   const conn = useWebSocketConnection();
   const subagent = useSubagentManager();
@@ -79,8 +134,17 @@ export function useWebSocket() {
   const contentRef = useRef<HTMLDivElement | null>(null);
   const isAtBottomRef = useRef(true);
   const programmaticScrollingRef = useRef(false);
-  const lastScrollTopRef = useRef(0);
-  const lastMessageCountRef = useRef(0);
+  const scrollGenerationRef = useRef(0);
+  const pendingScrollFrameRef = useRef<number | null>(null);
+  const pendingScrollForceRef = useRef(false);
+  const programmaticResetFrameRef = useRef<number | null>(null);
+  const observerRetryFrameRef = useRef<number | null>(null);
+  const userScrollIntentUntilRef = useRef(0);
+  const userScrollIntentTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const nestedHandoffUntilRef = useRef(0);
+  const smoothScrollCleanupRef = useRef<(() => void) | null>(null);
+  const scrollListenerCleanupRef = useRef<(() => void) | null>(null);
+  const scrollSessionIdRef = useRef(session.sessionId);
 
   // ── websocket handlers ──
   const handleMessage = useCallback((msg: WSMessage) => {
@@ -129,55 +193,240 @@ export function useWebSocket() {
   );
 
   // ── scroll helpers ──
+  const resetProgrammaticScrollGuard = useCallback(() => {
+    if (programmaticResetFrameRef.current !== null) {
+      cancelAnimationFrame(programmaticResetFrameRef.current);
+      programmaticResetFrameRef.current = null;
+    }
+    programmaticScrollingRef.current = false;
+  }, []);
+
+  const cancelScheduledScroll = useCallback(() => {
+    if (pendingScrollFrameRef.current !== null) {
+      cancelAnimationFrame(pendingScrollFrameRef.current);
+      pendingScrollFrameRef.current = null;
+    }
+    pendingScrollForceRef.current = false;
+    resetProgrammaticScrollGuard();
+  }, [resetProgrammaticScrollGuard]);
+
+  const cleanupScrollResources = useCallback(() => {
+    cancelScheduledScroll();
+    if (observerRetryFrameRef.current !== null) {
+      cancelAnimationFrame(observerRetryFrameRef.current);
+      observerRetryFrameRef.current = null;
+    }
+    const activeSmoothCleanup = smoothScrollCleanupRef.current;
+    if (activeSmoothCleanup) {
+      activeSmoothCleanup();
+      smoothScrollCleanupRef.current = null;
+    }
+    if (userScrollIntentTimerRef.current !== undefined) {
+      clearTimeout(userScrollIntentTimerRef.current);
+      userScrollIntentTimerRef.current = undefined;
+    }
+    userScrollIntentUntilRef.current = 0;
+    nestedHandoffUntilRef.current = 0;
+  }, [cancelScheduledScroll]);
+
+  const disposeScrollResources = useCallback(() => {
+    cleanupScrollResources();
+    const listenerCleanup = scrollListenerCleanupRef.current;
+    if (listenerCleanup) {
+      listenerCleanup();
+      scrollListenerCleanupRef.current = null;
+    }
+  }, [cleanupScrollResources]);
+
+  const markUserScrollIntent = useCallback(() => {
+    const activeSmoothCleanup = smoothScrollCleanupRef.current;
+    if (activeSmoothCleanup) {
+      activeSmoothCleanup();
+      smoothScrollCleanupRef.current = null;
+    }
+    cancelScheduledScroll();
+    const generation = scrollGenerationRef.current;
+    const expiresAt = performance.now() + TIMING.USER_SCROLL_INTENT_WINDOW;
+    userScrollIntentUntilRef.current = expiresAt;
+    if (userScrollIntentTimerRef.current !== undefined) {
+      clearTimeout(userScrollIntentTimerRef.current);
+    }
+    userScrollIntentTimerRef.current = setTimeout(() => {
+      if (scrollGenerationRef.current !== generation) return;
+      if (userScrollIntentUntilRef.current !== expiresAt) return;
+      if (performance.now() >= expiresAt) {
+        userScrollIntentUntilRef.current = 0;
+        userScrollIntentTimerRef.current = undefined;
+      }
+    }, TIMING.USER_SCROLL_INTENT_WINDOW);
+  }, [cancelScheduledScroll]);
+
+  const invalidateScrollGeneration = useCallback(() => {
+    cleanupScrollResources();
+    programmaticScrollingRef.current = false;
+    isAtBottomRef.current = true;
+    scrollGenerationRef.current += 1;
+  }, [cleanupScrollResources]);
+
+  useEffect(() => {
+    if (scrollSessionIdRef.current === session.sessionId) return;
+    invalidateScrollGeneration();
+    scrollSessionIdRef.current = session.sessionId;
+  }, [session.sessionId, invalidateScrollGeneration]);
+
   const handleUserScroll = useCallback(() => {
     const chat = chatAreaRef.current;
     if (!chat) return;
-    if (programmaticScrollingRef.current) {
-      lastScrollTopRef.current = chat.scrollTop;
-      return;
-    }
+    const now = performance.now();
+    const hasUserIntent = userScrollIntentUntilRef.current > now;
+    const hasNestedHandoff = nestedHandoffUntilRef.current > now;
+    if (programmaticScrollingRef.current && !hasUserIntent && !hasNestedHandoff) return;
+    if (!hasUserIntent && !hasNestedHandoff) return;
+    if (!hasNestedHandoff) nestedHandoffUntilRef.current = 0;
     const isAtBottom = chat.scrollHeight - chat.scrollTop - chat.clientHeight <= DIMENSIONS.SCROLL_BOTTOM_THRESHOLD;
     isAtBottomRef.current = isAtBottom;
-    lastScrollTopRef.current = chat.scrollTop;
   }, []);
 
-  const attachScrollListener = useCallback(() => {
+  const attachScrollListener = useCallback((): (() => void) | null => {
     const chat = chatAreaRef.current;
-    if (!chat) return () => {};
-    lastScrollTopRef.current = chat.scrollTop;
-    const onScroll = () => handleUserScroll();
-    chat.addEventListener("scroll", onScroll, { passive: true });
-    return () => chat.removeEventListener("scroll", onScroll);
-  }, [handleUserScroll]);
+    if (!chat) return null;
 
-  const scrollToBottomIfAtBottom = useCallback((force = false) => {
+    const onScroll = () => handleUserScroll();
+    const onWheel = (event: WheelEvent) => {
+      if (event.deltaY === 0) return;
+      if (isInsideNestedScrollContainer(event.target)) {
+        if (isNestedHandoffTargetAtBoundary(event.target, event.deltaY)) {
+          nestedHandoffUntilRef.current = performance.now() + TIMING.USER_SCROLL_INTENT_WINDOW;
+          markUserScrollIntent();
+        }
+        return;
+      }
+      markUserScrollIntent();
+    };
+    const onTouchStart = (event: TouchEvent) => {
+      if (!isInsideNestedScrollContainer(event.target)) markUserScrollIntent();
+    };
+    const onTouchMove = (event: TouchEvent) => {
+      if (!isInsideNestedScrollContainer(event.target)) markUserScrollIntent();
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (KEYBOARD_SCROLL_KEYS.has(event.key) && isKeyboardScrollTarget(event.target, chat)) {
+        markUserScrollIntent();
+      }
+    };
+
+    chat.addEventListener("scroll", onScroll, { passive: true });
+    chat.addEventListener("wheel", onWheel, { passive: true });
+    chat.addEventListener("touchstart", onTouchStart, { passive: true });
+    chat.addEventListener("touchmove", onTouchMove, { passive: true });
+    chat.addEventListener("keydown", onKeyDown);
+
+    const cleanup = () => {
+      chat.removeEventListener("scroll", onScroll);
+      chat.removeEventListener("wheel", onWheel);
+      chat.removeEventListener("touchstart", onTouchStart);
+      chat.removeEventListener("touchmove", onTouchMove);
+      chat.removeEventListener("keydown", onKeyDown);
+      if (scrollListenerCleanupRef.current === cleanup) {
+        scrollListenerCleanupRef.current = null;
+      }
+    };
+    const previousCleanup = scrollListenerCleanupRef.current;
+    if (previousCleanup) previousCleanup();
+    scrollListenerCleanupRef.current = cleanup;
+    return cleanup;
+  }, [handleUserScroll, markUserScrollIntent]);
+
+  const scheduleScrollToBottom = useCallback((force = false) => {
     const chat = chatAreaRef.current;
     if (!chat) return;
-    if (force || isAtBottomRef.current) {
-      programmaticScrollingRef.current = true;
-      chat.scrollTo({ top: chat.scrollHeight, behavior: "auto" });
-      lastScrollTopRef.current = chat.scrollTop;
-      programmaticScrollingRef.current = false;
+    if (!force && !isAtBottomRef.current) return;
+    if (!force && userScrollIntentUntilRef.current > performance.now()) return;
+
+    const activeSmoothCleanup = smoothScrollCleanupRef.current;
+    if (activeSmoothCleanup) {
+      activeSmoothCleanup();
+      smoothScrollCleanupRef.current = null;
     }
+    if (force) pendingScrollForceRef.current = true;
+    if (pendingScrollFrameRef.current !== null) return;
+
+    const generation = scrollGenerationRef.current;
+    let frameId = 0;
+    frameId = requestAnimationFrame(() => {
+      if (pendingScrollFrameRef.current !== frameId) return;
+      pendingScrollFrameRef.current = null;
+      if (scrollGenerationRef.current !== generation) return;
+
+      const shouldForce = pendingScrollForceRef.current;
+      pendingScrollForceRef.current = false;
+      const currentChat = chatAreaRef.current;
+      if (!currentChat || (!shouldForce && !isAtBottomRef.current)) return;
+
+      const maxScrollTop = Math.max(0, currentChat.scrollHeight - currentChat.clientHeight);
+      programmaticScrollingRef.current = true;
+      currentChat.scrollTo({ top: maxScrollTop, behavior: "auto" });
+
+      if (programmaticResetFrameRef.current !== null) {
+        cancelAnimationFrame(programmaticResetFrameRef.current);
+      }
+      const resetGeneration = generation;
+      let resetFrameId = 0;
+      resetFrameId = requestAnimationFrame(() => {
+        if (programmaticResetFrameRef.current !== resetFrameId) return;
+        programmaticResetFrameRef.current = null;
+        if (scrollGenerationRef.current !== resetGeneration) return;
+        programmaticScrollingRef.current = false;
+      });
+      programmaticResetFrameRef.current = resetFrameId;
+    });
+    pendingScrollFrameRef.current = frameId;
   }, []);
+
+  const scrollToBottomIfAtBottom = useCallback((force = false) => {
+    scheduleScrollToBottom(force);
+  }, [scheduleScrollToBottom]);
 
   const scrollToBottomSmooth = useCallback(() => {
     const chat = chatAreaRef.current;
     if (!chat) return;
+
+    cancelScheduledScroll();
+    const previousCleanup = smoothScrollCleanupRef.current;
+    if (previousCleanup) previousCleanup();
+
+    const generation = scrollGenerationRef.current;
     isAtBottomRef.current = true;
     programmaticScrollingRef.current = true;
-    chat.scrollTo({ top: chat.scrollHeight, behavior: "smooth" });
+
     let done = false;
-    const reset = () => {
+    let fallbackTimer: ReturnType<typeof setTimeout> | undefined;
+    const onScrollEnd = () => finish();
+    const cleanup = () => {
       if (done) return;
       done = true;
-      programmaticScrollingRef.current = false;
-      lastScrollTopRef.current = chat.scrollTop;
-      chat.removeEventListener("scrollend", reset);
+      if (fallbackTimer !== undefined) clearTimeout(fallbackTimer);
+      chat.removeEventListener("scrollend", onScrollEnd);
+      if (smoothScrollCleanupRef.current === cleanup) {
+        smoothScrollCleanupRef.current = null;
+      }
+      if (scrollGenerationRef.current === generation) {
+        resetProgrammaticScrollGuard();
+      }
     };
-    chat.addEventListener("scrollend", reset);
-    setTimeout(reset, 800);
-  }, []);
+    const finish = () => {
+      if (scrollGenerationRef.current !== generation) {
+        cleanup();
+        return;
+      }
+      cleanup();
+    };
+
+    smoothScrollCleanupRef.current = cleanup;
+    fallbackTimer = setTimeout(finish, TIMING.SMOOTH_SCROLL_FALLBACK);
+    chat.addEventListener("scrollend", onScrollEnd);
+    chat.scrollTo({ top: chat.scrollHeight, behavior: "smooth" });
+  }, [cancelScheduledScroll, resetProgrammaticScrollGuard]);
 
   // ── message sending ──
   const send = useCallback((
@@ -227,53 +476,58 @@ export function useWebSocket() {
     s.streamDoneRef.current = false;
     isAtBottomRef.current = true;
     scrollToBottomIfAtBottom(true);
-  }, []);
+  }, [scrollToBottomIfAtBottom]);
 
   // ── actions ──
   const newChat = useCallback(() => {
     if (!sessionRef.current) return;
+    invalidateScrollGeneration();
     window.history.replaceState({}, "", "/");
     conn.disconnect();
     sessionRef.current.newChat();
     conn.connect();
-  }, [conn.connect, conn.disconnect]);
+  }, [conn.connect, conn.disconnect, invalidateScrollGeneration]);
 
   const switchSession = useCallback((sid: string) => {
     if (!sessionRef.current) return;
+    invalidateScrollGeneration();
     window.history.replaceState({}, "", `/?session=${sid}`);
     conn.disconnect();
     sessionRef.current.switchSession(sid);
     conn.connect(sid);
-  }, [conn.connect, conn.disconnect]);
+  }, [conn.connect, conn.disconnect, invalidateScrollGeneration]);
 
   const enterColloquy = useCallback(() => {
     if (!sessionRef.current) return;
+    invalidateScrollGeneration();
     connRef.current.disconnect();
     sessionRef.current.switchSession(COLLOQUY_SID);
     connRef.current.connect(COLLOQUY_SID);
-  }, []);
+  }, [invalidateScrollGeneration]);
 
   const mergeSessions = useCallback(async (sources: string[]) => {
     if (!sessionRef.current) return;
     const newSid = await session.mergeSessions(sources);
     if (newSid) {
+      invalidateScrollGeneration();
       window.history.replaceState({}, "", `/?session=${newSid}`);
       conn.disconnect();
       sessionRef.current.switchSession(newSid);
       conn.connect(newSid);
     }
-  }, [conn.connect, conn.disconnect, session.mergeSessions]);
+  }, [conn.connect, conn.disconnect, invalidateScrollGeneration, session.mergeSessions]);
 
   const branchSession = useCallback(async (sid: string) => {
     if (!sessionRef.current) return;
     const newSid = await sessionRef.current.mergeSessions([sid]);
     if (newSid) {
+      invalidateScrollGeneration();
       window.history.replaceState({}, "", `/?session=${newSid}`);
       conn.disconnect();
       sessionRef.current.switchSession(newSid);
       conn.connect(newSid);
     }
-  }, [conn.connect, conn.disconnect]);
+  }, [conn.connect, conn.disconnect, invalidateScrollGeneration]);
 
   const deleteSession = useCallback((sid: string) => {
     if (!sessionRef.current) return;
@@ -378,30 +632,79 @@ export function useWebSocket() {
 
   // ── auto scroll ──
   useEffect(() => {
-    const previousCount = lastMessageCountRef.current;
-    lastMessageCountRef.current = session.messages.length;
-    if (session.messages.length === 0 || session.messages.length <= previousCount) return;
+    if (session.messages.length === 0) return;
     scrollToBottomIfAtBottom();
   }, [session.messages.length, scrollToBottomIfAtBottom]);
 
   useEffect(() => {
-    if (session.streamingMessage?.content || session.streamingMessage?.reasoningContent) {
+    if (session.streamingMessage || session.waiting) {
       scrollToBottomIfAtBottom();
     }
-  }, [session.streamingMessage?.content, session.streamingMessage?.reasoningContent, scrollToBottomIfAtBottom]);
+  }, [
+    session.streamingMessage?.content,
+    session.streamingMessage?.reasoningContent,
+    session.streamingMessage?.toolName,
+    session.streamingMessage?.toolArgs,
+    session.streamingMessage?.activeToolCallKey,
+    session.waiting,
+    scrollToBottomIfAtBottom,
+  ]);
 
   // ── ResizeObserver 追底: 异步渲染导致内容高度增长时自动追底 ──
   useEffect(() => {
-    const content = contentRef.current;
-    if (!content) return;
-    const observer = new ResizeObserver(() => {
-      if (isAtBottomRef.current) {
-        scrollToBottomIfAtBottom(true);
+    let active = true;
+    let observer: ResizeObserver | null = null;
+    let retryUsed = false;
+    const generation = scrollGenerationRef.current;
+
+    const observeContent = () => {
+      if (!active || conn.sessionLocked || scrollGenerationRef.current !== generation) return;
+      const content = contentRef.current;
+      if (!content) {
+        if (retryUsed) return;
+        retryUsed = true;
+        let retryFrameId = 0;
+        retryFrameId = requestAnimationFrame(() => {
+          if (observerRetryFrameRef.current !== retryFrameId) return;
+          observerRetryFrameRef.current = null;
+          observeContent();
+        });
+        observerRetryFrameRef.current = retryFrameId;
+        return;
       }
-    });
-    observer.observe(content);
-    return () => observer.disconnect();
-  }, [scrollToBottomIfAtBottom]);
+      if (typeof ResizeObserver === "undefined") {
+        scheduleScrollToBottom();
+        return;
+      }
+
+      observer = new ResizeObserver(() => {
+        if (active && !conn.sessionLocked) {
+          scheduleScrollToBottom();
+        }
+      });
+      observer.observe(content);
+      scheduleScrollToBottom();
+    };
+
+    if (!conn.sessionLocked) observeContent();
+
+    return () => {
+      active = false;
+      if (observer) observer.disconnect();
+      if (observerRetryFrameRef.current !== null) {
+        cancelAnimationFrame(observerRetryFrameRef.current);
+        observerRetryFrameRef.current = null;
+      }
+      cleanupScrollResources();
+    };
+  }, [conn.sessionLocked, scheduleScrollToBottom, cleanupScrollResources]);
+
+  useEffect(() => {
+    return () => {
+      invalidateScrollGeneration();
+      disposeScrollResources();
+    };
+  }, [invalidateScrollGeneration, disposeScrollResources]);
 
   // ── sync URL with session id ──
   useEffect(() => {
