@@ -30,7 +30,16 @@ from .message_router import MessageRouter
 from abstract.tools.registry import registry
 from datetime import datetime, timezone
 from entity.constant import CRON_STDOUT_PREVIEW_MAX_LENGTH, SUBPROCESS_TIMEOUT_DEFAULT, UPLOAD_FILENAME_TIME_FORMAT, USER_CHARACTER_NAME, UPLOADS_DIR_NAME, UPLOADS_WS_PREFIX, STATIC_FILE_HTTP_PREFIX, DOWNLOADS_HTTP_PREFIX, DIR_ZIP_HTTP_PREFIX, DIR_ZIP_MAX_TOTAL_BYTES, SYSTEM_CHARACTER_NAME
-from entity.puretype import SessionStatus, ClientInfo, LLMProfile, MessageContent
+from entity.puretype import (
+    SessionStatus,
+    ClientInfo,
+    MessageContent,
+    LLMProfilePayload,
+    LLMProfileUpdateRequest,
+    LLMProfileDeleteRequest,
+    LLMProfileMutationResponse,
+    LLMProfileDeleteResult,
+)
 from system.context import get_runtime_context
 from entry.parent_agent_loop import IncompatibleHistoryError
 from entry.base_agent_loop import IMainSessionLoop
@@ -820,12 +829,15 @@ async def regenerate_response(session_id: str, req: Request):
             status_code=409,
         )
 
-    # 解析请求 body（容错：空 body → {}）
-    body: dict = {}
+    # 解析请求 body。
     try:
-        body = await req.json()
+        body: dict = await req.json()
     except Exception:
-        pass
+        return HTMLResponse(
+            json.dumps({"regenerate": False, "error": "invalid JSON body"}, ensure_ascii=False),
+            media_type="application/json",
+            status_code=400,
+        )
 
     # 解析 message_index（可选，前端携带所点消息的索引）
     message_index = body.get("message_index")
@@ -836,22 +848,32 @@ async def regenerate_response(session_id: str, req: Request):
             status_code=400,
         )
 
-    # 解析 llm_profile（可选，前端携带当前选择器配置）
-    # NOTE: 对 MultiAgentLoop 为 no-op——其 process_message 的 **kwargs 吞掉
-    # llm_profile，per-agent profile 由 SubagentStore 管理。
-    llm_profile: LLMProfile | None = None
-    raw_profile = body.get("llm_profile")
-    if raw_profile is not None:
-        try:
-            llm_profile = LLMProfile.model_validate(raw_profile)
-        except Exception:
-            return HTMLResponse(
-                json.dumps({"regenerate": False, "error": "invalid llm_profile"}, ensure_ascii=False),
-                media_type="application/json",
-                status_code=400,
-            )
+    profile_name = body.get("llm_profile_name")
+    if not isinstance(profile_name, str):
+        return HTMLResponse(
+            json.dumps({"regenerate": False, "error": "invalid llm_profile_name"}, ensure_ascii=False),
+            media_type="application/json",
+            status_code=400,
+        )
+    try:
+        from system.application import Application
+        application = Application.current()
+        with application.profile_lock:
+            profile = application.llm_profile_store.resolve_profile_name(profile_name)
+            loop.set_profile(profile)
+    except Exception as exc:
+        logger.exception(
+            "Failed to select LLM Profile for regenerate | session=%s name=%r",
+            session_id,
+            profile_name,
+        )
+        return HTMLResponse(
+            json.dumps({"regenerate": False, "error": str(exc)}, ensure_ascii=False),
+            media_type="application/json",
+            status_code=400,
+        )
 
-    # 先截断历史并刷新扩展块
+    # Profile 切换成功后才截断历史并刷新扩展块。
     result = loop.loop.regenerate_response(message_index)
     if not result.get("regenerate"):
         return HTMLResponse(
@@ -890,7 +912,6 @@ async def regenerate_response(session_id: str, req: Request):
         skip_append=True,
         visible_characters=result.get("visible_characters"),
         response_characters=result.get("response_characters"),
-        llm_profile=llm_profile,
     )
     from system.application import Application
     sink = Application.current().frontend_sink
@@ -1744,71 +1765,132 @@ async def list_llm_clients_endpoint():
 
 @app.get("/api/llm/profiles")
 async def get_llm_profiles():
-    """返回 agentspace 中持久化的全部 LLM profiles。"""
-    from system.llm_profile_store import load_profiles
-    from system.context import get_runtime_context
+    """返回共享 v2 根对象的扁平 Profile 列表。"""
+    from system.application import Application
+
     try:
-        ctx = get_runtime_context()
-        profiles = load_profiles(ctx.agentspace)
-        return {"profiles": [p.model_dump() for p in profiles]}
+        store = Application.current().llm_profile_store
+        return {
+            "profiles": [
+                store.to_payload(profile).model_dump()
+                for profile in store.list_profiles()
+            ]
+        }
     except Exception:
         logger.exception("Failed to load LLM profiles")
-        return {"profiles": []}
+        raise HTTPException(status_code=500, detail="Failed to load LLM profiles")
 
 
-@app.put("/api/llm/profiles")
-async def put_llm_profiles(request: Request):
-    """整列表原子替换 LLM profiles（前端编辑后调用）。
+@app.post("/api/llm/profiles", response_model=LLMProfileMutationResponse)
+async def create_llm_profile(payload: LLMProfilePayload):
+    """创建单个 LLM Profile。"""
+    from system.application import Application
 
-    成功返回 {"saved": N, "profiles": [...]}，profiles 带新生成的 uid，
-    供前端更新本地 state（新建 profile 需后端生成的 uid 才能被引用）。
-    """
-    from system.llm_profile_store import save_profiles, load_profiles
-    from system.context import get_runtime_context
-    from entity.puretype import LLMProfile
-    import uuid
+    application = Application.current()
     try:
-        body = await request.json()
-    except Exception:
-        raise HTTPException(status_code=400, detail="Invalid JSON body")
-    raw_profiles = body.get("profiles")
-    if not isinstance(raw_profiles, list):
-        raise HTTPException(status_code=400, detail="'profiles' must be a list")
-    ctx = get_runtime_context()
-    # 加载现有 profiles 建 uid 集合（uid 不可更改校验）
-    try:
-        existing_uids = {p.uid for p in load_profiles(ctx.agentspace) if p.uid}
-    except Exception:
-        existing_uids = set()
-    # 校验 + 去重 + uid 处理
-    profiles: list[LLMProfile] = []
-    names: set[str] = set()
-    for i, item in enumerate(raw_profiles):
-        try:
-            p = LLMProfile.model_validate(item)
-        except Exception as exc:
-            raise HTTPException(status_code=400, detail=f"Invalid profile at index {i}: {exc}")
-        if p.name in names:
-            raise HTTPException(status_code=400, detail=f"Duplicate profile name: {p.name!r}")
-        names.add(p.name)
-        # uid 处理：空→生成；已有→透传；非空不在 existing→伪造拒绝
-        if not p.uid:
-            p = p.model_copy(update={"uid": uuid.uuid4().hex})
-        elif p.uid not in existing_uids:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Profile {p.name!r} has unknown uid {p.uid!r}; uid is generated by backend and immutable",
-            )
-        profiles.append(p)
-    try:
-        save_profiles(ctx.agentspace, profiles)
+        with application.profile_lock:
+            profile = application.llm_profile_store.create_profile(payload)
+            response_payload = application.llm_profile_store.to_payload(profile)
+        return LLMProfileMutationResponse(profile=response_payload)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
+        raise HTTPException(status_code=409, detail=str(exc))
     except Exception:
-        logger.exception("Failed to save LLM profiles")
-        raise HTTPException(status_code=500, detail="Failed to persist profiles")
-    logger.info("LLM profiles saved | count=%d", len(profiles))
-    return {"saved": len(profiles), "profiles": [p.model_dump() for p in profiles]}
+        logger.exception("Failed to create LLM profile")
+        raise HTTPException(status_code=500, detail="Failed to persist LLM profile")
+
+
+@app.put("/api/llm/profiles", response_model=LLMProfileMutationResponse)
+async def update_llm_profile(request: LLMProfileUpdateRequest):
+    """原地更新单个 LLM Profile，并在重命名后广播名称变更。"""
+    from entity.constant import SESSIONS_DIR_NAME
+    from system.application import Application
+    from system.session_store import SessionStore
+
+    application = Application.current()
+    old_name = request.profile_name
+    try:
+        with application.profile_lock:
+            profile = application.llm_profile_store.update_profile(
+                old_name,
+                request.profile,
+            )
+            new_name = profile.name
+            if new_name != old_name:
+                SessionStore(
+                    application.runtime_context.workspace / SESSIONS_DIR_NAME
+                ).replace_profile_name_pointers(old_name, new_name)
+            response_payload = application.llm_profile_store.to_payload(profile)
+        failures: list[str] = []
+        if new_name != old_name:
+            failures = await application.frontend_sink.broadcast_profile_change(
+                "renamed", old_name, new_name,
+            )
+        return LLMProfileMutationResponse(
+            profile=response_payload,
+            notification_failures=failures,
+        )
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+    except Exception:
+        logger.exception("Failed to update LLM profile")
+        raise HTTPException(status_code=500, detail="Failed to persist LLM profile")
+
+
+@app.delete("/api/llm/profiles", response_model=LLMProfileDeleteResult)
+async def delete_llm_profile(request: LLMProfileDeleteRequest):
+    """删除 Profile，并只切换当前空闲的受影响主会话。"""
+    from entity.constant import SESSIONS_DIR_NAME
+    from system.application import Application
+    from system.session_store import SessionStore
+
+    application = Application.current()
+    try:
+        with application.profile_lock:
+            store = application.llm_profile_store
+            source = store.get_profile(request.profile_name)
+            replacement = (
+                store.get_profile(request.replacement_profile_name)
+                if request.replacement_profile_name is not None else None
+            )
+            if replacement is source:
+                raise ValueError("replacement Profile must differ from deleted Profile")
+            store.assert_removable(source)
+            switched, busy = application.session_manager.replace_idle_loops_using_profile(
+                source,
+                replacement,
+            )
+            SessionStore(
+                application.runtime_context.workspace / SESSIONS_DIR_NAME
+            ).replace_profile_name_pointers(
+                request.profile_name,
+                request.replacement_profile_name,
+            )
+            store.remove_profile(request.profile_name)
+
+        failures = await application.frontend_sink.broadcast_profile_change(
+            "deleted",
+            request.profile_name,
+            request.replacement_profile_name,
+        )
+        return LLMProfileDeleteResult(
+            deleted=True,
+            profile_name=request.profile_name,
+            replacement_profile_name=request.replacement_profile_name,
+            switched_sessions=switched,
+            pending_sessions=busy,
+            notification_failures=failures,
+        )
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+    except Exception:
+        logger.exception("Failed to delete LLM profile")
+        raise HTTPException(status_code=500, detail="Failed to delete LLM profile")
 
 
 @app.get("/{full_path:path}")

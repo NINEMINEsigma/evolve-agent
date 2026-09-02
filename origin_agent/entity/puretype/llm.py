@@ -1,5 +1,7 @@
+from __future__ import annotations
+
 from enum import Enum
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 from typing import Any
 
 # ---------------------------------------------------------------------------
@@ -139,7 +141,6 @@ class ModalityCapability(BaseModel):
 
 class LLMProfile(BaseModel):
     """LLM 主模型配置项（前端可切换）。"""
-    uid: str = ""
     name: str = ""
     llm_client_name: str = ""
     base_url: str = ""
@@ -149,11 +150,75 @@ class LLMProfile(BaseModel):
     max_output_tokens: int = 4096
     reasoning_effort: str = ""
     max_context_tokens: int = 128000
-    # ── 多模态分工（地基字段，运行时借用逻辑延后）──
-    # 配置项唯一标识，由后端 uuid4().hex 生成，不可更改；前端不展示
-    vision_image_profile: str = ""
-    # 视觉(读图)配置引用：值为被引用 profile 的 uid，空=""=不引用
-    audio_profile: str = ""
-    # 听觉配置引用：值为被引用 profile 的 uid，空=""=不引用
-    vision_video_profile: str = ""
-    # 视频(读视频)配置引用：值为被引用 profile 的 uid，空=""=不引用
+    # 多模态分工直接引用根对象中的 LLMProfile 实例。
+    vision_image_profile: LLMProfile | None = None
+    audio_profile: LLMProfile | None = None
+    vision_video_profile: LLMProfile | None = None
+
+
+LLMProfile.model_rebuild()
+
+
+class LLMProfileData(BaseModel):
+    """LLMProfile 持久化根对象。"""
+
+    profiles: list[LLMProfile] = Field(default_factory=list, description="LLMProfile列表")
+
+
+class LLMProfilePayload(BaseModel):
+    """HTTP 传输用的扁平 Profile，不包含 UID 或嵌套对象。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: str
+    llm_client_name: str
+    base_url: str
+    model: str
+    api_key: str
+    temperature: float
+    max_output_tokens: int
+    reasoning_effort: str
+    max_context_tokens: int
+    vision_image_profile: str | None
+    audio_profile: str | None
+    vision_video_profile: str | None
+
+
+class LLMProfileUpdateRequest(BaseModel):
+    """HTTP 单 Profile 更新请求。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    profile_name: str
+    profile: LLMProfilePayload
+
+
+class LLMProfileDeleteRequest(BaseModel):
+    """HTTP Profile 删除请求；替换名称为 None 表示清空配置。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    profile_name: str
+    replacement_profile_name: str | None
+
+
+class LLMProfileMutationResponse(BaseModel):
+    """HTTP Profile 创建/更新响应。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    profile: LLMProfilePayload
+    notification_failures: list[str] = Field(default_factory=list)
+
+
+class LLMProfileDeleteResult(BaseModel):
+    """HTTP Profile 删除及会话替换结果。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    deleted: bool
+    profile_name: str
+    replacement_profile_name: str | None
+    switched_sessions: list[str] = Field(default_factory=list)
+    pending_sessions: list[str] = Field(default_factory=list)
+    notification_failures: list[str] = Field(default_factory=list)

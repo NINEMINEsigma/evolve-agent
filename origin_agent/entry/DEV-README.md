@@ -14,6 +14,7 @@ entry/
 ├── multi_agent_loop.py           ← 多 Agent 广播协作循环
 ├── multi_agent_worker.py         ← 单 Agent tool loop 执行器
 ├── agent_sink.py                 ← AgentSink / FrontendSink / ParentAgentSink
+├── session_message_queue.py      ← 主会话逐条 FIFO 消息队列（每条保留 Profile 名称）
 ├── session_manager.py            ← LoopSessionManager（session 生命周期）
 ├── stream_consumer.py            ← StreamConsumer（LLM 流式响应消费器）
 ├── tool_executor.py              ← ToolExecutor（统一工具调用执行器）
@@ -51,7 +52,7 @@ entry/
 
 `ParentAgentLoop` 与 `SubAgentLoop` 均继承 `BasePrivateChatAgentLoop`。
 
-- **`IMainSessionLoop`**：主会话 loop 接口（C#-style interface），不继承 `BaseAgentLoop` 以避免菱形继承。声明主会话特有的能力：`current_character_agent`、`pop_session_rotated()`、`get_token_usage()`、`auto_generate_title()`、`regenerate_session_tags()`、`regenerate_summary_for_session()`。`ParentAgentLoop` 和 `MultiAgentLoop` 实现此接口。
+- **`IMainSessionLoop`**：主会话 loop 接口（C#-style interface），不继承 `BaseAgentLoop` 以避免菱形继承。声明主会话特有的能力：`current_character_agent`、`set_profile()`、`pop_session_rotated()`、`get_token_usage()`、`auto_generate_title()`、`regenerate_session_tags()`、`regenerate_summary_for_session()`。`ParentAgentLoop` 和 `MultiAgentLoop` 实现此接口。
 
 ### `ParentAgentLoop`
 
@@ -63,6 +64,7 @@ entry/
 - 会话旋转：当上下文接近上限时，通过 `LoopSessionManager` 归档旧会话并创建带摘要的延续会话。
 - 自动标题与标签生成。
 - 子Agent编排：通过 `SubAgentOrchestrator` 启动/管理子 Agent。
+- LLM Profile：活动配置始终是 `Application.llm_profile_store` 根对象中的实例；`set_profile(None)` 表示明确无配置。主会话队列逐条 FIFO 消费，每条前端消息保留自己的 `llm_profile_name`，执行前重新解析并构造客户端。
 
 ### `MultiAgentLoop` / `MultiAgentWorker`
 

@@ -173,24 +173,7 @@ class MessageRouter:
         session 旋转时会更新 ``self.sid``。
         """
         try:
-            self._auto_generate_title(msg.content)
-            _get_sm().update_last_activity(self.sid)
-
-            # 提取前端携带的客户端信息并合并 IP
-            if msg.client_info:
-                sm = _get_sm()
-                if sm is not None:
-                    existing = sm.get_client_info(self.sid)
-                    current_ip = existing.client_ip if existing else ""
-                    sm.set_client_info(self.sid, ClientInfo(
-                        device_type=str(msg.client_info.get("device_type", "")),
-                        browser=str(msg.client_info.get("browser", "")),
-                        client_ip=current_ip,
-                        frontend_version=str(msg.client_info.get("frontend_version", "")),
-                        screen_orientation=str(msg.client_info.get("screen_orientation", "")),
-                    ))
-
-            # 拦截 archived 会话的新消息
+            # 拦截 archived 会话的新消息。
             session_info = _get_sm().get(self.sid)
             if session_info and session_info.status == SessionStatus.archived:
                 await self.ws.send_text(
@@ -208,9 +191,70 @@ class MessageRouter:
             loop = _get_loop(self.sid)
             if loop is None:
                 return
+            if (
+                "llm_profile_name" not in msg.model_fields_set
+                or not isinstance(msg.llm_profile_name, str)
+            ):
+                await self.ws.send_text(
+                    json.dumps(
+                        Message(
+                            type=MessageType.ERROR,
+                            session_id=self.sid,
+                            message="llm_profile_name must be provided as a string",
+                        ).model_dump(exclude_none=True),
+                        ensure_ascii=False,
+                    )
+                )
+                return
 
             target_sessions: list[str] = msg.target_sessions or ["main"]
             content = msg.content or ""
+
+            # 空闲主会话尽早切换；忙碌会话仅把名称保留到 FIFO 消息中。
+            if "main" in target_sessions and not loop.loop.is_processing():
+                try:
+                    from system.application import Application
+                    application = Application.current()
+                    with application.profile_lock:
+                        selected = application.llm_profile_store.resolve_profile_name(
+                            msg.llm_profile_name,
+                        )
+                        loop.set_profile(selected)
+                except Exception as exc:
+                    logger.exception(
+                        "Failed to select LLM Profile before enqueue | session=%s name=%r",
+                        self.sid,
+                        msg.llm_profile_name,
+                    )
+                    await self.ws.send_text(
+                        json.dumps(
+                            Message(
+                                type=MessageType.ERROR,
+                                session_id=self.sid,
+                                message=f"LLM Profile 切换失败：{exc}",
+                            ).model_dump(exclude_none=True),
+                            ensure_ascii=False,
+                        )
+                    )
+                    return
+
+            self._auto_generate_title(msg.content)
+            _get_sm().update_last_activity(self.sid)
+
+            # 提取前端携带的客户端信息并合并 IP
+            if msg.client_info:
+                sm = _get_sm()
+                if sm is not None:
+                    existing = sm.get_client_info(self.sid)
+                    current_ip = existing.client_ip if existing else ""
+                    sm.set_client_info(self.sid, ClientInfo(
+                        device_type=str(msg.client_info.get("device_type", "")),
+                        browser=str(msg.client_info.get("browser", "")),
+                        client_ip=current_ip,
+                        frontend_version=str(msg.client_info.get("frontend_version", "")),
+                        screen_orientation=str(msg.client_info.get("screen_orientation", "")),
+                    ))
+
 
             # 分派子 Agent 消息（父→子方向，不动）
             subagent_tasks, sub_ids, name_map = await self._dispatch_subagent_messages(
@@ -227,7 +271,7 @@ class MessageRouter:
                     client_message_id=msg.client_message_id,
                     visible_characters=msg.visible_characters,
                     response_characters=msg.response_characters,
-                    llm_profile=msg.llm_profile,
+                    llm_profile_name=msg.llm_profile_name,
                 )
 
             # 等待子会话转发完成

@@ -7,10 +7,12 @@
 from __future__ import annotations
 
 import logging
+import threading
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from system.context import RuntimeContext
+    from system.llm_profile_store import LLMProfileStore
     from system.sandbox import Sandbox
     from gateway.session_manager import SessionManager
     from component.approval.backend import ApprovalBackend
@@ -40,6 +42,8 @@ class Application:
         self.runtime_context: RuntimeContext = runtime_context
 
         # -- 子系统 private fields（由 init() 创建，@property 只读暴露）--
+        self._profile_lock:              threading.RLock = threading.RLock()
+        self._llm_profile_store:         LLMProfileStore | None = None
         self._sandbox:                   Sandbox | None = None
         self._cron_router:               CronRouter | None = None
         self._session_manager:           SessionManager | None = None
@@ -66,7 +70,14 @@ class Application:
         from system.sandbox import Sandbox
         self._sandbox = Sandbox(self.runtime_context)
 
-        # 2. CronRouter — 构造后从磁盘恢复持久化任务
+        # 2. LLMProfileStore — 必须先于 SessionManager 和任何 Loop 恢复。
+        from system.llm_profile_store import LLMProfileStore
+        self._llm_profile_store = LLMProfileStore(
+            self.runtime_context.agentspace,
+            self._profile_lock,
+        )
+
+        # 3. CronRouter — 构造后从磁盘恢复持久化任务
         #    _load_all_tasks 内部调用 _get_cr() → Application.current().cron_router，
         #    此时 self._cron_router 已设好，不会重入问题。
         from component.cron_router import CronRouter
@@ -74,27 +85,37 @@ class Application:
         from component.extools.cron_tools import _load_all_tasks
         _load_all_tasks()
 
-        # 3. SessionManager — 纯构造，只需 sessions 目录路径
+        # 4. SessionManager — 纯构造，只需 sessions 目录路径
         from gateway.session_manager import SessionManager
         from entity.constant import SESSIONS_DIR_NAME
         self._session_manager = SessionManager(
             str(self.runtime_context.workspace / SESSIONS_DIR_NAME)
         )
 
-        # 3.5 动态端点恢复 — 依赖 SessionManager.exists 会话存在性检查，故放在其后
+        # 4.5 动态端点恢复 — 依赖 SessionManager.exists 会话存在性检查，故放在其后
         from component.extools.dynamic_endpoint_tools import _load_all_endpoints
         _load_all_endpoints()
 
-        # 4. FrontendSink — 纯构造，无依赖
+        # 5. FrontendSink — 纯构造，无依赖
         from entry.agent_sink import FrontendSink
         self._frontend_sink = FrontendSink()
 
-        # 5. ApprovalBackendManager — 构造同步，异步 is_available() 在运行时才调用
+        # 6. ApprovalBackendManager — 构造同步，异步 is_available() 在运行时才调用
         self._approval_backend_manager = ApprovalBackendManager(self.runtime_context)
 
         logger.info("Application initialized | subsystems ready")
 
     # ── 只读 property（init() 创建，外部不可赋值）──────────────
+
+    @property
+    def profile_lock(self) -> threading.RLock:
+        """返回 Profile 根对象与会话选择共用的进程锁。"""
+        return self._profile_lock
+
+    @property
+    def llm_profile_store(self) -> LLMProfileStore:
+        """返回进程内唯一的 LLM Profile 根对象存储。"""
+        return self._llm_profile_store  # type: ignore[return-value]
 
     @property
     def sandbox(self) -> Sandbox:

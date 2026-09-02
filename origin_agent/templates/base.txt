@@ -43,75 +43,27 @@ Runtime configuration:
 
 # LLM Profiles Registry
 
-All available LLM model configurations (profiles) are persisted in a single registry file at ``ws:llm_profiles.es``. The file is the authoritative data source for the frontend profile manager (LlmProfileDrawer); the agent reads it but must not modify it.
+All available LLM model configurations are persisted in ``ws:llm_profiles.es``. The file is the authoritative registry for the frontend profile manager; the Agent may read it but must not modify it.
 
-Contents: a ``list[LLMProfile]``. Each ``LLMProfile`` has the following fields:
+The only supported easysave key is ``v2``. Its root value is an ``LLMProfileData`` instance with one field:
 
-- ``uid`` (str): unique 32-char hex identifier, backend-generated, immutable.
-- ``name`` (str): human-readable profile name (unique within the file).
-- ``llm_client_name`` (str): LLM client module name, corresponds to ``custom_llm_client/<name>.py``.
-- ``base_url`` (str): LLM API endpoint URL.
-- ``model`` (str): model name.
-- ``api_key`` (str): API key for the endpoint. May be empty for local backends. Stored in plaintext.
-- ``temperature`` (float): sampling temperature.
-- ``max_output_tokens`` (int): max output tokens per request.
-- ``reasoning_effort`` (str): reasoning effort level (provider-specific, may be empty).
-- ``max_context_tokens`` (int): context window token limit for rotation control.
-- ``vision_image_profile`` (str): uid of the profile referenced for vision (image) tasks; empty = no reference.
-- ``audio_profile`` (str): uid of the profile referenced for audio tasks; empty = no reference.
-- ``vision_video_profile`` (str): uid of the profile referenced for vision (video) tasks; empty = no reference.
+- ``profiles``: the root ``list[LLMProfile]``.
 
-To inspect or use any profile's full configuration (e.g. when registering a sub-agent with a specific profile), read the registry file with ``Read ws:llm_profiles.es``. The file uses the easysave serialization format described in the next section.
+Each ``LLMProfile`` contains:
 
-# easysave Serialized Format (from third:easysave)
+- ``name`` (str): unique, non-empty Profile name and API identity.
+- ``llm_client_name`` (str): module name under ``custom_llm_client/``.
+- ``base_url`` (str), ``model`` (str), ``api_key`` (str).
+- ``temperature`` (float), ``max_output_tokens`` (int), ``reasoning_effort`` (str), ``max_context_tokens`` (int).
+- ``vision_image_profile`` (``LLMProfile | None``): referenced Profile instance for image tasks.
+- ``audio_profile`` (``LLMProfile | None``): referenced Profile instance for audio tasks.
+- ``vision_video_profile`` (``LLMProfile | None``): referenced Profile instance for video tasks.
 
-The ``.es`` files in this project are serialized by the **easysave** library (source: ``third:easysave`` submodule, read-only). The on-disk format is UTF-8 JSON text, so you can read it directly with ``Read``.
+The three reference fields point to the same Profile instances held by ``LLMProfileData.profiles``; they are not names or IDs in the persisted object graph. ``None`` means no reference. The registry has no UID field.
 
-Structure overview:
+The frontend manages Profiles through the Gateway's single-Profile CRUD endpoints. HTTP payloads flatten each reference to the referenced Profile's name or JSON ``null``; this wire representation is not the persisted domain model.
 
-- The top-level object is a dict keyed by a version string (e.g. ``"v1"``).
-- Inside the version key, the root object is stored under the ``"__root"`` key.
-- Every non-primitive node is wrapped as ``{"__type": "module,ClassName", "__value": ...}``. The ``__type`` field records the original Python class for type-preserving deserialization; **you can ignore ``__type`` and only read ``__value``**.
-- Shared (referenced) objects are stored under keys of the form ``"__ref::N"`` (where ``__ref`` is the token and ``N`` is an index).
-- Primitive values (str, int, float, bool, None) are stored inline without wrapping.
-
-Example field extraction path (reading the ``base_url`` of the i-th profile in ``llm_profiles.es``):
-
-    v1.__root.__value[i].__value.base_url
-
-Walkthrough: top-level key ``"v1"`` → its dict's ``"__root"`` → root node's ``"__value"`` (a list) → element ``[i]`` (a profile node) → that node's ``"__value"`` dict → the ``base_url`` field.
-
-Minimal example (single profile, abbreviated):
-
-    {
-      "v1": {
-        "__root": {
-          "__type": "builtins,list",
-          "__value": [
-            {
-              "__type": "entity.puretype.llm,LLMProfile",
-              "__value": {
-                "uid": "a1b2c3...",
-                "name": "default",
-                "base_url": "https://api.example.com/v1",
-                "model": "gpt-4o",
-                "api_key": "sk-...",
-                "temperature": 0.7,
-                "max_output_tokens": 4096,
-                "reasoning_effort": "",
-                "max_context_tokens": 128000,
-                "vision_image_profile": "",
-                "audio_profile": "",
-                "vision_video_profile": "",
-                "llm_client_name": "openai_client"
-              }
-            }
-          ]
-        }
-      }
-    }
-
-When parsing, skip the ``__type`` wrappers and navigate via ``__value`` to reach the actual field values.
+The registry is saved with easysave. The serialization implementation is in ``third:easysave``; Profile persistence is implemented in ``system/llm_profile_store.py`` and the data models are defined in ``entity/puretype/llm.py``.
 
 # Tool Usage
 

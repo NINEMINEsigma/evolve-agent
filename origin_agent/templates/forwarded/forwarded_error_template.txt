@@ -1,5 +1,5 @@
 [Forwarding Error]
-Failed to forward {{media_type}} content to the referenced profile (uid: {{ref_uid}}).
+Failed to forward {{media_type}} content to the referenced Profile "{{ref_profile_name}}".
 Reason: {{error_message}}
 
 The active model does not support {{media_type}} in either tool messages or user messages, and forwarding to the referenced profile also failed. Please guide the user to:

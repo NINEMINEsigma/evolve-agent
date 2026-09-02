@@ -114,7 +114,7 @@ def build_agent_profiles(
     agents: list[str],
     main_agent_name: str,
     parent_ctx: RuntimeContext,
-    llm_client_factory: Callable[[str, AgentConfig | None], BaseLLMClient],
+    llm_client_factory: Callable[[str, AgentConfig | None], BaseLLMClient | None],
     system_prompt_template: str,
     sandbox: Sandbox,
     store: SubagentStore,
@@ -155,22 +155,30 @@ def build_agent_profiles(
 
         # ── 1. 获取 AgentConfig ──
         if name == main_agent_name:
-            # 主 Agent 从 main_profile 构造 AgentConfig（不持久化）
+            # 主 Agent 允许在 CLEAR 状态下以空客户端创建运行时档案。
             if main_profile is None:
-                raise ValueError(
-                    "main_profile is required to build main agent config "
-                    f"(session={session_id})."
+                defaults = LLMProfile()
+                config = AgentConfig(
+                    base_url="",
+                    model="",
+                    api_key=None,
+                    system_prompt_paths=[],
+                    max_output_tokens=defaults.max_output_tokens,
+                    max_context_tokens=defaults.max_context_tokens,
+                    client_type="",
                 )
-            config = AgentConfig(
-                base_url=main_profile.base_url,
-                model=main_profile.model,
-                api_key=main_profile.api_key or None,
-                system_prompt_paths=[],
-                max_output_tokens=main_profile.max_output_tokens,
-                max_context_tokens=main_profile.max_context_tokens,
-                client_type=main_profile.llm_client_name,
-            )
-            llm_client = llm_client_factory(name, None)
+                llm_client = None
+            else:
+                config = AgentConfig(
+                    base_url=main_profile.base_url,
+                    model=main_profile.model,
+                    api_key=main_profile.api_key or None,
+                    system_prompt_paths=[],
+                    max_output_tokens=main_profile.max_output_tokens,
+                    max_context_tokens=main_profile.max_context_tokens,
+                    client_type=main_profile.llm_client_name,
+                )
+                llm_client = llm_client_factory(name, None)
         else:
             # 子 Agent 从 SubagentStore 获取
             config = store.get(name)

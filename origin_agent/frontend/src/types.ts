@@ -50,6 +50,7 @@ export type MessageType =
   | "stream_done"
   | "error"
   | "subagent_update"
+  | "llm_profile_changed"
   | "ping"
   | "pong";
 
@@ -83,6 +84,10 @@ export interface WSMessage {
   emoji?: string;                  // 工具调用/审批请求的图标
   danger_level?: string;           // CONFIRM_REQUEST：工具危险等级
   client_info?: Record<string, string>;   // USER_MESSAGE：前端客户端信息
+  llm_profile_name?: string;                   // USER_MESSAGE：当前 Profile 名称，空字符串=无配置
+  operation?: "renamed" | "deleted";          // LLM_PROFILE_CHANGED
+  old_name?: string;
+  new_name?: string | null;
   metrics?: MessageMetrics;              // STREAM_DONE：计时元信息
 }
 
@@ -282,8 +287,7 @@ export interface LlmProfile {
   max_output_tokens: number;
   reasoning_effort: string;
   max_context_tokens: number;
-  uid: string;
-  vision_image_profile: string;
-  audio_profile: string;
-  vision_video_profile: string;
+  vision_image_profile: string | null;
+  audio_profile: string | null;
+  vision_video_profile: string | null;
 }

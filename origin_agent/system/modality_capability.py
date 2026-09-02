@@ -49,7 +49,6 @@ from entity.messages import (
     FunctionCall,
 )
 from abstract.llm.client import BaseLLMClient
-from system.llm_profile_store import load_profiles
 
 if TYPE_CHECKING:
     from entry.base_agent_loop import ToolContext
@@ -230,36 +229,34 @@ async def forward_modality_to_ref_profile(
     """
     from system.templates import read_template
 
-    def _error_text(ref_uid: str, error_message: str) -> str:
+    def _error_text(ref_profile_name: str, error_message: str) -> str:
         """构造转发错误文本（从模板加载并填充占位符）。"""
         return (
             read_template("forwarded/forwarded_error_template.txt")
             .replace("{{media_type}}", media_type)
-            .replace("{{ref_uid}}", ref_uid)
+            .replace("{{ref_profile_name}}", ref_profile_name)
             .replace("{{error_message}}", error_message)
         )
 
-    # 按 media_type 显式获取引用 uid，不使用反射
+    # 按 media_type 显式取得根对象中的引用实例，不使用反射。
     if media_type == "image":
-        ref_uid: str = active_profile.vision_image_profile
+        ref_profile = active_profile.vision_image_profile
     elif media_type == "audio":
-        ref_uid = active_profile.audio_profile
+        ref_profile = active_profile.audio_profile
     else:  # video
-        ref_uid = active_profile.vision_video_profile
-    if not ref_uid:
-        return _error_text("(empty)", f"Active profile has no {media_type} reference profile configured")
-
-    # 加载全部 profiles 按 uid 查找被引用 profile
-    ctx = context.runtime_context if context is not None else get_runtime_context()
-    profiles = load_profiles(ctx.agentspace)
-    ref_profile: LLMProfile | None = next(
-        (p for p in profiles if p.uid == ref_uid), None
-    )
+        ref_profile = active_profile.vision_video_profile
     if ref_profile is None:
-        return _error_text(ref_uid, "Referenced profile not found in profile list (dangling reference)")
+        return _error_text(
+            "(not configured)",
+            f"Active profile has no {media_type} reference profile configured",
+        )
 
+    ctx = context.runtime_context if context is not None else get_runtime_context()
     if not ref_profile.llm_client_name:
-        return _error_text(ref_uid, f"Referenced profile '{ref_profile.name}' has no llm_client_name")
+        return _error_text(
+            ref_profile.name,
+            f"Referenced profile '{ref_profile.name}' has no llm_client_name",
+        )
 
     # 构造提示词（从模板加载）
     if media_type == "image":
@@ -286,7 +283,10 @@ async def forward_modality_to_ref_profile(
         response = await client.chat(messages)
         description: str = response.content or ""
         if not description.strip():
-            return _error_text(ref_uid, f"Referenced profile '{ref_profile.name}' returned an empty description")
+            return _error_text(
+                ref_profile.name,
+                f"Referenced profile '{ref_profile.name}' returned an empty description",
+            )
         logger.info(
             "forward_modality | session=%s ref_profile=%s media_type=%s success",
             context.session_id if context else "", ref_profile.name, media_type,
@@ -297,7 +297,7 @@ async def forward_modality_to_ref_profile(
             "forward_modality | session=%s ref_profile=%s media_type=%s error=%s",
             context.session_id if context else "", ref_profile.name, media_type, exc,
         )
-        return _error_text(ref_uid, f"{type(exc).__name__}: {exc}")
+        return _error_text(ref_profile.name, f"{type(exc).__name__}: {exc}")
 
 
 # ---------------------------------------------------------------------------
@@ -661,8 +661,7 @@ def build_modality_prompt_block(
     文案来自模板 ``templates/modality_capability.txt``，本函数只负责填值：
     - 能力部分只读探测缓存（不触发探测），未探测项显示 unknown。
       单次读取整个条目，避免 get_cached_* 逐字段重读缓存文件。
-    - 转发部分把 profile 的三个引用 uid 解析为被引用 profile 的
-      名称+模型展示；agentspace 为 None 时跳过名称解析。
+    - 转发部分直接读取三个引用实例的名称与模型。
 
     profile 无 model 或模板缺失时返回空串（不注入）。
     """
@@ -685,24 +684,10 @@ def build_modality_prompt_block(
         audio_tool, audio_user = _fmt_support(entry.audio), _fmt_support(entry.user_audio)
         video_tool, video_user = _fmt_support(entry.video), _fmt_support(entry.user_video)
 
-    # 转发引用 uid → 被引用 profile 名称（悬空引用显式标注）
-    ref_names: dict[str, str] = {}
-    if agentspace is not None:
-        try:
-            ref_names = {
-                p.uid: f'"{p.name}" (model ``{p.model}``)'
-                for p in load_profiles(agentspace)
-                if p.uid
-            }
-        except Exception:
-            logger.warning(
-                "Failed to resolve forwarding profile names for prompt block", exc_info=True,
-            )
-
-    def _ref(uid: str) -> str:
-        if not uid:
+    def _ref(reference: LLMProfile | None) -> str:
+        if reference is None:
             return "not configured"
-        return ref_names.get(uid, f"dangling reference (uid ``{uid}`` not found)")
+        return f'"{reference.name}" (model ``{reference.model}``)'
 
     replacements = {
         "{{model}}": profile.model,

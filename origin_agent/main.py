@@ -217,8 +217,7 @@ class App:
         agent_loop: AgentLoop | None = None
         try:
             from entry.parent_agent_loop import ParentAgentLoop as AgentLoop
-            from entity.constant import SESSIONS_DIR_NAME, GLOBAL_LLM_PROFILE_FILENAME
-            from system.llm_profile_store import read_profile_snapshot
+            from entity.constant import SESSIONS_DIR_NAME
             history_path: str = str(self.ctx.workspace / SESSIONS_DIR_NAME)
             agent_loop = AgentLoop(
                 Application.current(),
@@ -227,11 +226,7 @@ class App:
                 history_store_dir=Path(history_path) if history_path else None,
             )
 
-            # ---- 从全局 last-used 指针恢复 LLM client ----
-            _global_profile_path = Path(history_path) / GLOBAL_LLM_PROFILE_FILENAME
-            _bootstrap_profile = read_profile_snapshot(_global_profile_path)
-            if _bootstrap_profile is not None:
-                agent_loop.switch_llm_profile(_bootstrap_profile)
+            # ParentAgentLoop 构造时已通过全局名称指针恢复 Profile。
 
             # 将工具事件流连接到前端
             from gateway.server import _send_tool_event

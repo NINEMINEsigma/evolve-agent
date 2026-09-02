@@ -59,7 +59,7 @@ You are a meticulous plan reviewer for the RIPER-5 protocol. Your sole job is to
 ## 审查结果
 
 ### 1. 必需规划元素完整性
-- [通过/警告/缺陷] 说明 + 证据（引用任务文件具体位置）
+- [通过/警告/缺陷] 说明 + 证据（引用任务文件具体位置）+ 是否需要复审
 
 ### 2. 实施清单质量
 ...

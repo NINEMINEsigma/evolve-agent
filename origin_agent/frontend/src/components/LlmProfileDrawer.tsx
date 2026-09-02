@@ -21,10 +21,9 @@ const EMPTY_PROFILE: LlmProfile = {
   max_output_tokens: 4096,
   reasoning_effort: "",
   max_context_tokens: 128000,
-  uid: "",
-  vision_image_profile: "",
-  audio_profile: "",
-  vision_video_profile: "",
+  vision_image_profile: null,
+  audio_profile: null,
+  vision_video_profile: null,
 };
 
 function generateDuplicateName(sourceName: string, existingNames: string[]): string {
@@ -57,7 +56,7 @@ export default function LlmProfileDrawer({
   const {
     profiles,
     activeProfileName,
-    addProfile,
+    createProfile,
     updateProfile,
     deleteProfile,
     availableClients,
@@ -159,25 +158,40 @@ export default function LlmProfileDrawer({
     setIsEditing(true);
   }, []);
 
-  const handleSave = useCallback(() => {
+  const handleSave = useCallback(async () => {
     if (!draft.name.trim()) return;
-    if (isNew) {
-      addProfile({ ...draft, name: draft.name.trim() });
-    } else {
-      updateProfile(selectedName, { ...draft, name: draft.name.trim() });
+    const nextDraft = { ...draft, name: draft.name.trim() };
+    try {
+      if (isNew) {
+        await createProfile(nextDraft);
+      } else {
+        await updateProfile(selectedName, nextDraft);
+      }
+    } catch {
+      return;
     }
     setIsEditing(false);
     setIsNew(false);
-    setSelectedName(draft.name.trim());
-    // 保存后自动展开新路径以保持可见
-    expandPath(draft);
-  }, [draft, isNew, selectedName, addProfile, updateProfile, expandPath]);
+    setSelectedName(nextDraft.name);
+    expandPath(nextDraft);
+  }, [draft, isNew, selectedName, createProfile, updateProfile, expandPath]);
 
-  const handleDelete = useCallback(() => {
-    deleteProfile(selectedName);
+  const handleDelete = useCallback(async () => {
+    const remaining = profiles.filter((profile) => profile.name !== selectedName);
+    const replacementName = (
+      activeProfileName && activeProfileName !== selectedName
+        ? activeProfileName
+        : remaining[0]?.name ?? null
+    );
+    try {
+      await deleteProfile(selectedName, replacementName);
+    } catch {
+      return;
+    }
+    setSelectedName(replacementName ?? "");
     setIsEditing(false);
     setIsNew(false);
-  }, [selectedName, deleteProfile]);
+  }, [selectedName, profiles, activeProfileName, deleteProfile]);
 
   const handleDuplicate = useCallback(() => {
     if (!selectedProfile) return;
@@ -185,7 +199,7 @@ export default function LlmProfileDrawer({
     const newName = generateDuplicateName(selectedProfile.name, existingNames);
     setIsNew(true);
     setIsEditing(true);
-    setDraft({ ...selectedProfile, name: newName, uid: "" });
+    setDraft({ ...selectedProfile, name: newName });
     setSelectedName("");
   }, [selectedProfile, profiles]);
 
@@ -401,45 +415,45 @@ export default function LlmProfileDrawer({
                   <label className="llm-profile-label">视觉（读图）配置</label>
                   <select
                     className="llm-profile-input"
-                    value={draft.vision_image_profile}
-                    onChange={(e) => updateField("vision_image_profile", e.target.value)}
+                    value={draft.vision_image_profile ?? ""}
+                    onChange={(e) => updateField("vision_image_profile", e.target.value || null)}
                     disabled={!isEditing}
                   >
                     <option value="">不引用</option>
                     {profiles
-                      .filter((p) => p.uid !== draft.uid)
+                      .filter((p) => isNew || p.name !== selectedName)
                       .map((p) => (
-                        <option key={p.uid} value={p.uid}>{p.name}</option>
+                        <option key={p.name} value={p.name}>{p.name}</option>
                       ))}
                   </select>
 
                   <label className="llm-profile-label">听觉配置</label>
                   <select
                     className="llm-profile-input"
-                    value={draft.audio_profile}
-                    onChange={(e) => updateField("audio_profile", e.target.value)}
+                    value={draft.audio_profile ?? ""}
+                    onChange={(e) => updateField("audio_profile", e.target.value || null)}
                     disabled={!isEditing}
                   >
                     <option value="">不引用</option>
                     {profiles
-                      .filter((p) => p.uid !== draft.uid)
+                      .filter((p) => isNew || p.name !== selectedName)
                       .map((p) => (
-                        <option key={p.uid} value={p.uid}>{p.name}</option>
+                        <option key={p.name} value={p.name}>{p.name}</option>
                       ))}
                   </select>
 
                   <label className="llm-profile-label">视觉（读视频）配置</label>
                   <select
                     className="llm-profile-input"
-                    value={draft.vision_video_profile}
-                    onChange={(e) => updateField("vision_video_profile", e.target.value)}
+                    value={draft.vision_video_profile ?? ""}
+                    onChange={(e) => updateField("vision_video_profile", e.target.value || null)}
                     disabled={!isEditing}
                   >
                     <option value="">不引用</option>
                     {profiles
-                      .filter((p) => p.uid !== draft.uid)
+                      .filter((p) => isNew || p.name !== selectedName)
                       .map((p) => (
-                        <option key={p.uid} value={p.uid}>{p.name}</option>
+                        <option key={p.name} value={p.name}>{p.name}</option>
                       ))}
                   </select>
                 </div>

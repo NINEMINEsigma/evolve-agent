@@ -820,6 +820,7 @@ class BaseAgentLoop(ABC):
             parents=sources,
             role=Role.USER,
         )
+        self._session_store.copy_active_profile_name(sources[0], new_sid)
 
         # 追加各源会话尾部轮次文本
         tail_blocks: list[str] = []
@@ -1068,6 +1069,10 @@ class IMainSessionLoop(ABC):
     @abstractmethod
     async def regenerate_summary_for_session(self, session_id: str) -> str:
         """重新生成指定会话的摘要（可为任意 session_id，不要求当前活跃）。"""
+
+    @abstractmethod
+    def set_profile(self, profile: LLMProfile | None) -> None:
+        """切换主会话的活动 Profile；None 表示明确无配置。"""
 
     @abstractmethod
     def get_tool_availability_scope(self) -> ToolAvailability:

@@ -5,7 +5,9 @@ puretype 包 — 只含有不包含任何方法定义的类型定义。
     _base       : MessageContent, Role, ToolDangerLevel, ToolAvailability
     approval    : ApprovalPolicy, ApprovalOutcome, ApprovalResult, ToolCallMeta, ToolAllowlistEntry
     llm         : ToolCallRequest, Usage, MessageMetrics, LLMResponse, ToolCallDeltaPhase,
-                  ToolCallDelta, StreamChunk, LlmProfile, ModalityCapability
+                  ToolCallDelta, StreamChunk, LLMProfile, LLMProfileData, LLMProfilePayload,
+                  LLMProfileUpdateRequest, LLMProfileDeleteRequest, LLMProfileMutationResponse,
+                  LLMProfileDeleteResult, ModalityCapability
     skills      : SkillPayload, SkillInfo
     session     : Loop, SessionStatus, LoopMeta, SessionInfo, SessionMessageEntry, TokenUsageRecord, QueuedMessage
     agent       : AgentConfig
@@ -39,6 +41,12 @@ from .llm import (
     ToolCallDelta,
     StreamChunk,
     LLMProfile,
+    LLMProfileData,
+    LLMProfilePayload,
+    LLMProfileUpdateRequest,
+    LLMProfileDeleteRequest,
+    LLMProfileMutationResponse,
+    LLMProfileDeleteResult,
     ModalityCapability,
 )
 from .skills import (
@@ -98,6 +106,12 @@ __all__ = [
     "ToolCallDelta",
     "StreamChunk",
     "LLMProfile",
+    "LLMProfileData",
+    "LLMProfilePayload",
+    "LLMProfileUpdateRequest",
+    "LLMProfileDeleteRequest",
+    "LLMProfileMutationResponse",
+    "LLMProfileDeleteResult",
     "ModalityCapability",
     # skills
     "SkillPayload",

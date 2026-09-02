@@ -110,23 +110,19 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
             if history_store_dir else None
         )
 
-        # -- 从会话级/全局 last-used 指针恢复 LLM client（无则 None 降级） --
+        # -- 从会话级/全局名称指针恢复根对象中的 LLM Profile --
         self._llm: BaseLLMClient | None = None
         if self._session_store is not None:
-            _restored = self._session_store.read_active_llm_profile(session_id)
-            if _restored is not None:
-                try:
+            restored_name = self._session_store.read_active_profile_name(session_id)
+            if restored_name is not None:
+                restored_profile = app.llm_profile_store.resolve_profile_name(restored_name)
+                if restored_profile is not None:
                     self._llm = create_llm_client(
-                        _restored.llm_client_name,
+                        restored_profile.llm_client_name,
                         app.runtime_context,
-                        _restored,
+                        restored_profile,
                     )
-                    self._active_llm_profile = _restored
-                except Exception:
-                    logger.warning(
-                        "Failed to restore LLM client from last-used profile | session=%s",
-                        session_id, exc_info=True,
-                    )
+                    self._active_llm_profile = restored_profile
 
         # -- 生命周期管理（委托给 LoopSessionManager） --
         self._lifecycle: LoopSessionManager = LoopSessionManager(
@@ -182,7 +178,7 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
     def user_character_name(self) -> str:
         return USER_CHARACTER_NAME
 
-    def _get_llm_client(self) -> BaseLLMClient:
+    def _get_llm_client(self) -> BaseLLMClient | None:
         return self._llm
 
     def _get_session_info_llm_client(self) -> BaseLLMClient | None:
@@ -288,13 +284,8 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
         self._disgust_event.clear()
         self._event_loop = asyncio.get_running_loop()
 
-        # 网页端 LLM 配置切换（在加锁前完成，确保后续工具循环用新客户端）
-        llm_profile: LLMProfile | None = kwargs.pop("llm_profile", None)
-        if llm_profile:
-            self.switch_llm_profile(llm_profile)
-
-        # 无 LLM client 且消息未携带 profile 时，返回错误（不进工具循环）
-        if self._llm is None and llm_profile is None:
+        # 无 LLM client 时返回错误（不进工具循环）
+        if self._llm is None:
             logger.warning("No LLM client available | session=%s", sid)
             err_text = "尚未配置 LLM 模型。请在前端「模型配置」中新建或选择一个配置后重试。"
             # NOTE: 错误文本以系统状态消息显示（对 LLM 不可见），持久化进历史。
@@ -633,42 +624,57 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
             )
 
     async def run_pending_round(self, items: list[QueuedMessage]) -> str | None:
-        """SP-4：队列空闲消费驱动的轮次（S1 分支序）。
-
-        持锁 → 置 _processing → 超限检查（旋转随动）→ sid 变更检测 →
-        cancel 检测 → 注入落历史 → 无 LLM 闸（SP-5 R2）→ llm_profile 应用（SP-5 D1）→
-        非旋转非中断时跑轮 → finally 复位 → 锁外 on_round_done 回调（SP-5 D2）。
-        """
+        """按队列中单条消息的 Profile 名称驱动一轮。"""
         if not items:
             return None
+        if len(items) != 1:
+            raise ValueError("run_pending_round accepts exactly one queued message")
+
+        item = items[0]
         async with self._process_lock:
-            self._processing = True
             self._event_loop = asyncio.get_running_loop()
             reply: str | None = None
+
+            # 每条显式消息执行前重新从共享根对象解析并构造客户端。
+            if item.llm_profile_name is not None:
+                try:
+                    profile = self.app.llm_profile_store.resolve_profile_name(
+                        item.llm_profile_name,
+                    )
+                    self.set_profile(profile)
+                except (LookupError, ValueError, RuntimeError) as exc:
+                    error_text = f"LLM Profile 切换失败：{exc}"
+                    logger.warning(
+                        "Queued message Profile selection failed | session=%s name=%r error=%s",
+                        self.session_id, item.llm_profile_name, exc,
+                    )
+                    self.append_system_status(error_text, session_id=self.session_id)
+                    await self._frontend_sink.emit_system_message(
+                        self.session_id, error_text,
+                    )
+                    return None
+
+            if self._llm is None:
+                error_text = "尚未配置 LLM 模型。请在前端「模型配置」中新建或选择一个配置后重试。"
+                self.append_system_status(error_text, session_id=self.session_id)
+                await self._frontend_sink.emit_system_message(
+                    self.session_id, error_text,
+                )
+                return None
+
+            self._processing = True
             try:
                 sid = await self._check_over_limit_before_process(self.session_id, None)
                 self.session_id = sid
                 queue = self._message_queue
-                rotated: bool = queue.last_known_sid != sid
-                interrupted: bool = self._cancel_event.is_set()
+                rotated = queue.last_known_sid != sid
+                interrupted = self._cancel_event.is_set()
                 self._cancel_event.clear()
                 self._disgust_event.clear()
-                await self._append_queued_messages(items)
-                # SP-5 R2：无 LLM 前置闸——消息已落历史并回显（_append_queued_messages 内回显），
-                # 无配置时以 assistant 气泡报错并跳过跑轮（与 process_message 现闸一致）。
-                should_run: bool = not rotated and not interrupted
-                selected_profile = next(
-                    (m.llm_profile for m in reversed(items) if m.llm_profile is not None), None,
-                )
-                if should_run and self._llm is None and selected_profile is None:
-                    err_text = "尚未配置 LLM 模型。请在前端「模型配置」中新建或选择一个配置后重试。"
-                    self.append_system_status(err_text, session_id=sid)
-                    should_run = False
-                if should_run and selected_profile is not None:
-                    self.switch_llm_profile(selected_profile)
-                if should_run:
+                if not rotated and not interrupted:
+                    await self._append_queued_messages(items)
                     messages = self._get_full_history(sid)
-                    reply = await self._run_tool_loop(sid, messages, "[queued-messages]")
+                    reply = await self._run_tool_loop(sid, messages, "[queued-message]")
                 if reply:
                     await self._frontend_sink.emit_assistant_message(
                         sid, reply, self.current_character_agent,
@@ -677,7 +683,7 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
             finally:
                 self._processing = False
                 self._last_idle_time[self.session_id] = time.monotonic()
-        # SP-5 D2：锁外轮次后回调（WS 重映射/token 推送/进化触发）
+
         if self._on_round_done is not None:
             await self._on_round_done(self)
         return reply
@@ -744,7 +750,7 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
     # ------------------------------------------------------------------
 
     @property
-    def llm(self) -> BaseLLMClient:
+    def llm(self) -> BaseLLMClient | None:
         """返回当前 loop 的 LLM 客户端。"""
         return self._llm
 
@@ -762,26 +768,36 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
             return self._active_llm_profile.max_output_tokens or LLMProfile().max_output_tokens
         return LLMProfile().max_output_tokens
 
-    def switch_llm_profile(self, profile: LLMProfile) -> None:
-        """切换 LLM 客户端到指定配置，同步更新所有引用方并持久化。"""
-        client_name = profile.llm_client_name
-        self._llm = create_llm_client(client_name, self.app.runtime_context, profile)
-        self._tool_executor.llm = self._llm
-        self._stream_consumer.llm = self._llm
+    def set_profile(self, profile: LLMProfile | None) -> None:
+        """同步安装根对象中的 Profile；None 表示明确清空配置。"""
+        if profile is None:
+            client = None
+        else:
+            client = create_llm_client(
+                profile.llm_client_name,
+                self.app.runtime_context,
+                profile,
+            )
+        self._llm = client
+        # TODO: 疑惑的linter报错
+        self._tool_executor.llm = client
+        self._stream_consumer.llm = client
         self._active_llm_profile = profile
-        # 持久化到会话级快照 + 全局 last-used 指针
         if self._session_store is not None:
-            try:
-                self._session_store.write_active_llm_profile(self.session_id, profile)
-            except Exception:
-                logger.warning(
-                    "Failed to persist active LLM profile | session=%s",
-                    self.session_id, exc_info=True,
-                )
+            self._session_store.write_active_profile_name(
+                self.session_id,
+                profile.name if profile is not None else "",
+            )
         logger.info(
-            "LLM profile switched | session=%s client=%s model=%s",
-            self.session_id, client_name, profile.model or "?",
+            "LLM Profile selected | session=%s name=%s model=%s",
+            self.session_id,
+            profile.name if profile is not None else "(none)",
+            profile.model if profile is not None else "(none)",
         )
+
+    def switch_llm_profile(self, profile: LLMProfile) -> None:
+        """兼容内部旧调用名称；委托给 ``set_profile``。"""
+        self.set_profile(profile)
 
     @property
     def last_prompt_tokens(self) -> int:

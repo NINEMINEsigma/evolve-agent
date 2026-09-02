@@ -107,7 +107,10 @@ class ColloquyLoop(ParentAgentLoop):
         temp_history = History(messages=messages_to_compress)
 
         # 5. LLM 生成摘要
-        summary: str = await summarize_history(temp_history, self._llm)
+        llm = self._llm
+        if llm is None:
+            raise RuntimeError("No LLM client available for colloquy history summary")
+        summary: str = await summarize_history(temp_history, llm)
         if not summary:
             logger.warning("Colloquy compress: summary generation failed | session=%s", sid)
             await self._frontend_sink.emit_system_message(sid, "压缩完成（摘要生成失败）")

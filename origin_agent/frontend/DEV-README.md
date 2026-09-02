@@ -30,6 +30,7 @@ frontend/
 │   │   ├── useSessionStore.ts       ← 会话列表与元数据管理
 │   │   ├── useSubagentManager.ts    ← 子代理状态管理
 │   │   ├── useUploadManager.ts      ← 文件上传管理
+│   │   ├── useLlmProfiles.ts         ← Profile 列表、单对象 CRUD 与活动名称
 │   │   ├── useAgentspace.ts         ← Agentspace 文件浏览
 │   │   ├── useEdgeDrawer.ts         ← 边缘抽屉三态状态机
 │   │   └── useGlobalTooltip.ts      ← 全局 tooltip
@@ -144,7 +145,8 @@ frontend/
 
 | Hook | 职责 |
 |---|---|
-| `useWebSocket.ts` | WebSocket 与状态管理核心：解析下行消息、管理消息列表、流式渲染、发送上行消息、调用 REST API |
+| `useWebSocket.ts` | WebSocket 与状态管理核心：解析下行消息、管理消息列表、流式渲染、发送上行消息、调用 REST API；每条用户消息携带活动 Profile 名称并处理 `llm_profile_changed` |
+| `useLlmProfiles.ts` | 从服务端读取 Profile；提供单对象创建/编辑/删除；浏览器仅持久化活动 Profile 名称，不保存 Profile 列表 |
 | `useWebSocketConnection.ts` | WebSocket 连接生命周期管理：建立/断开/重连/心跳 |
 | `useSessionStore.ts` | 会话列表与元数据管理：获取/创建/归档/删除/标签/标题 |
 | `useSubagentManager.ts` | 子代理状态管理：注册/启动/停止/审批/列表 |

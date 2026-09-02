@@ -119,7 +119,7 @@ export interface SessionStore {
   editMessage: (id: string, content: MessageContent) => Promise<void>;
   deleteMessages: (count?: number) => Promise<void>;
   deleteSingleMessage: (index: number) => Promise<void>;
-  regenerateResponse: (messageIndex: number, llmProfile?: Record<string, unknown> | null) => Promise<void>;
+  regenerateResponse: (messageIndex: number, llmProfileName: string) => Promise<void>;
   resumeSession: () => Promise<void>;
   updateMessageVisibility: (messageIndex: number, visibleCharacters: string[]) => Promise<void>;
   respondConfirm: (pendingConfirm: ConfirmRequest | null, action: string, denyReasonText?: string, deniedBy?: string) => void;
@@ -967,14 +967,14 @@ export function useSessionStore(callbacks: SessionStoreCallbacks = {}): SessionS
     if (data.context_tokens !== undefined) setContextTokens(data.context_tokens);
   }, [sessionId, addMessage, setMessages, setTokenUsage, setContextTokens]);
 
-  const regenerateResponse = useCallback(async (messageIndex: number, llmProfile?: Record<string, unknown> | null) => {
+  const regenerateResponse = useCallback(async (messageIndex: number, llmProfileName: string) => {
     setWaiting(true);
     const resp = await fetch(`/api/sessions/${sessionId}/regenerate`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         message_index: messageIndex,
-        ...(llmProfile ? { llm_profile: llmProfile } : {}),
+        llm_profile_name: llmProfileName,
       }),
     });
     const data = await resp.json().catch(() => ({}));

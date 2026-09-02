@@ -1,7 +1,12 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { usePersistentState } from "./usePersistentState";
 import { STORAGE_KEYS } from "../constants/storage";
 import type { LlmProfile } from "../types";
+
+async function responseError(response: Response): Promise<Error> {
+  const data = await response.json().catch(() => ({}));
+  return new Error(data.detail || `请求失败 (${response.status})`);
+}
 
 export function useLlmProfiles() {
   const [profiles, setProfiles] = useState<LlmProfile[]>([]);
@@ -11,149 +16,149 @@ export function useLlmProfiles() {
     "",
   );
   const [availableClients, setAvailableClients] = useState<string[]>([]);
-  const initializedRef = useRef(false);
 
-  // ── fetch profiles from server ──
   const fetchProfiles = useCallback(async (): Promise<LlmProfile[]> => {
-    const r = await fetch("/api/llm/profiles");
-    const data = await r.json();
-    return (data.profiles || []) as LlmProfile[];
-  }, []);
-
-  // ── PUT profiles to server (atomic replace) ──
-  // 成功时返回后端保存后的完整 profiles（带新生成的 uid），失败时返回 null
-  const putProfiles = useCallback(async (next: LlmProfile[]): Promise<LlmProfile[] | null> => {
-    try {
-      const r = await fetch("/api/llm/profiles", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ profiles: next }),
-      });
-      if (!r.ok) {
-        const data = await r.json().catch(() => ({}));
-        setError(data.detail || `保存失败 (${r.status})`);
-        return null;
-      }
-      const data = await r.json();
-      setError(null);
-      // 后端返回保存后的 profiles（含新生成的 uid），供调用方更新本地 state
-      return (data.profiles || []) as LlmProfile[];
-    } catch (e) {
-      setError(`网络错误: ${e}`);
-      return null;
+    const response = await fetch("/api/llm/profiles");
+    if (!response.ok) throw await responseError(response);
+    const data = await response.json();
+    if (!Array.isArray(data.profiles)) {
+      throw new Error("服务端返回的 Profile 列表格式无效");
     }
+    return data.profiles as LlmProfile[];
   }, []);
 
-  // ── mount: fetch + one-time legacy localStorage migration ──
+  const refreshProfiles = useCallback(async (): Promise<LlmProfile[]> => {
+    try {
+      const next = await fetchProfiles();
+      setProfiles(next);
+      setError(null);
+      return next;
+    } catch (cause) {
+      const message = cause instanceof Error ? cause.message : String(cause);
+      setError(message);
+      throw cause;
+    }
+  }, [fetchProfiles]);
+
   useEffect(() => {
-    if (initializedRef.current) return;
-    initializedRef.current = true;
+    fetch("/api/llm/clients")
+      .then(async (response) => {
+        if (!response.ok) throw await responseError(response);
+        return response.json();
+      })
+      .then((data) => setAvailableClients(data.clients || []))
+      .catch((cause) => setError(cause instanceof Error ? cause.message : String(cause)));
 
-    (async () => {
-      // Fetch available clients
-      fetch("/api/llm/clients")
-        .then((r) => r.json())
-        .then((data) => setAvailableClients(data.clients || []))
-        .catch(() => setAvailableClients([]));
+    void refreshProfiles().catch(() => {});
+  }, [refreshProfiles]);
 
-      const serverProfiles = await fetchProfiles();
-
-      // One-time migration: read legacy localStorage profiles
-      let legacy: LlmProfile[] = [];
-      try {
-        const raw = localStorage.getItem(STORAGE_KEYS.LLM_PROFILES);
-        if (raw) {
-          legacy = JSON.parse(raw) as LlmProfile[];
-          if (!Array.isArray(legacy)) legacy = [];
-        }
-      } catch { legacy = []; }
-
-      if (legacy.length > 0) {
-        // Merge: server-first, add legacy entries whose name doesn't exist on server
-        const serverNames = new Set(serverProfiles.map((p) => p.name));
-        const merged = [...serverProfiles];
-        for (const p of legacy) {
-          if (!serverNames.has(p.name)) merged.push(p);
-        }
-        const saved = await putProfiles(merged);
-        if (saved) {
-          setProfiles(saved);
-          localStorage.removeItem(STORAGE_KEYS.LLM_PROFILES);
-        } else {
-          // PUT failed — keep server profiles, leave legacy in localStorage
-          setProfiles(serverProfiles);
-        }
-      } else {
-        setProfiles(serverProfiles);
-      }
-    })();
-  }, [fetchProfiles, putProfiles]);
-
-  const activeProfile = useMemo(() => {
-    const found = profiles.find((p) => p.name === activeProfileName);
-    return found || profiles[0] || null;
-  }, [profiles, activeProfileName]);
+  const activeProfile = useMemo(
+    () => profiles.find((profile) => profile.name === activeProfileName) || null,
+    [profiles, activeProfileName],
+  );
 
   const setActiveProfile = useCallback(
     (name: string) => setActiveProfileName(name),
     [setActiveProfileName],
   );
 
-  // ── mutations: optimistic update → PUT → replace with server response (含 uid) ──
-  const addProfile = useCallback(
-    (profile: LlmProfile) => {
-      const next = [...profiles, profile];
-      setProfiles(next);
-      putProfiles(next).then((saved) => {
-        if (saved) setProfiles(saved);
-        else setProfiles(profiles); // rollback
+  const createProfile = useCallback(async (profile: LlmProfile): Promise<LlmProfile> => {
+    try {
+      const response = await fetch("/api/llm/profiles", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(profile),
       });
-    },
-    [profiles, putProfiles],
-  );
+      if (!response.ok) throw await responseError(response);
+      const data = await response.json();
+      await refreshProfiles();
+      setError(null);
+      return data.profile as LlmProfile;
+    } catch (cause) {
+      const message = cause instanceof Error ? cause.message : String(cause);
+      setError(message);
+      throw cause;
+    }
+  }, [refreshProfiles]);
 
-  const updateProfile = useCallback(
-    (name: string, profile: LlmProfile) => {
-      const next = profiles.map((p) => (p.name === name ? profile : p));
-      setProfiles(next);
-      putProfiles(next).then((saved) => {
-        if (saved) setProfiles(saved);
-        else setProfiles(profiles); // rollback
+  const updateProfile = useCallback(async (
+    originalName: string,
+    profile: LlmProfile,
+  ): Promise<LlmProfile> => {
+    try {
+      const response = await fetch("/api/llm/profiles", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ profile_name: originalName, profile }),
       });
-    },
-    [profiles, putProfiles],
-  );
-
-  const deleteProfile = useCallback(
-    (name: string) => {
-      const next = profiles.filter((p) => p.name !== name);
-      setProfiles(next);
-      if (activeProfileName === name) {
-        setActiveProfileName(next[0]?.name ?? "");
+      if (!response.ok) throw await responseError(response);
+      const data = await response.json();
+      if (activeProfileName === originalName && profile.name !== originalName) {
+        setActiveProfileName(profile.name);
       }
-      putProfiles(next).then((saved) => {
-        if (saved) setProfiles(saved);
-        else setProfiles(profiles); // rollback
-      });
-    },
-    [profiles, activeProfileName, setActiveProfileName, putProfiles],
-  );
+      await refreshProfiles();
+      setError(null);
+      return data.profile as LlmProfile;
+    } catch (cause) {
+      const message = cause instanceof Error ? cause.message : String(cause);
+      setError(message);
+      throw cause;
+    }
+  }, [activeProfileName, refreshProfiles, setActiveProfileName]);
 
-  const toProfilePayload = useCallback((): Record<string, unknown> | null => {
-    if (!activeProfile) return null;
-    const { name: _, ...payload } = activeProfile;
-    return payload;
-  }, [activeProfile]);
+  const deleteProfile = useCallback(async (
+    profileName: string,
+    replacementProfileName: string | null,
+  ): Promise<void> => {
+    const previousActiveName = activeProfileName;
+    if (previousActiveName === profileName) {
+      setActiveProfileName(replacementProfileName ?? "");
+    }
+    try {
+      const response = await fetch("/api/llm/profiles", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          profile_name: profileName,
+          replacement_profile_name: replacementProfileName,
+        }),
+      });
+      if (!response.ok) throw await responseError(response);
+      await refreshProfiles();
+      setError(null);
+    } catch (cause) {
+      if (previousActiveName === profileName) {
+        setActiveProfileName(previousActiveName);
+      }
+      const message = cause instanceof Error ? cause.message : String(cause);
+      setError(message);
+      throw cause;
+    }
+  }, [activeProfileName, refreshProfiles, setActiveProfileName]);
+
+  const handleProfileChanged = useCallback((event: {
+    old_name?: string | null;
+    new_name?: string | null;
+  }) => {
+    if (event.old_name && activeProfileName === event.old_name) {
+      setActiveProfileName(event.new_name ?? "");
+    }
+    void refreshProfiles().catch(() => {});
+  }, [activeProfileName, refreshProfiles, setActiveProfileName]);
+
+  const toProfileName = useCallback((): string => activeProfileName, [activeProfileName]);
 
   return {
     profiles,
-    activeProfileName: activeProfile?.name ?? "",
+    activeProfileName,
     activeProfile,
     setActiveProfile,
-    addProfile,
+    createProfile,
     updateProfile,
     deleteProfile,
-    toProfilePayload,
+    refreshProfiles,
+    handleProfileChanged,
+    toProfileName,
     availableClients,
     error,
   };

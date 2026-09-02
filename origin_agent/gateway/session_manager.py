@@ -143,6 +143,31 @@ class SessionManager:
         """返回所有活跃 loop 的 (session_id → IMainSessionLoop) 快照。"""
         return dict(self._loops)
 
+    def replace_idle_loops_using_profile(
+        self,
+        source_profile,
+        replacement_profile,
+    ) -> tuple[list[str], list[str]]:
+        """只切换当前空闲且正在使用源 Profile 的主会话。"""
+        switched: list[str] = []
+        busy: list[str] = []
+        with self._app.profile_lock:
+            for session_id, managed_loop in self._loops.items():
+                loop = managed_loop.loop
+                if loop.active_llm_profile is not source_profile:
+                    continue
+                if loop.is_processing():
+                    busy.append(session_id)
+                    continue
+                set_profile = getattr(loop, "set_profile", None)
+                if not callable(set_profile):
+                    raise RuntimeError(
+                        f"Loop {type(loop).__name__} cannot switch LLM Profile"
+                    )
+                set_profile(replacement_profile)
+                switched.append(session_id)
+        return switched, busy
+
     # -- ParentAgentLoop 管理 --
 
     def create_session(
@@ -219,15 +244,14 @@ class SessionManager:
         sandbox = Sandbox(parent_ctx)
         store = SubagentStore(parent_ctx.agentspace)
 
-        # 从会话级/全局 last-used 指针恢复主 agent 的 LlmProfile
+        # 从会话级/全局名称指针恢复主 Agent 的根 Profile 实例。
         main_profile = None
         if history_store_dir is not None:
             ss = SessionStore(history_store_dir)
-            main_profile = ss.read_active_llm_profile(session_id)
-            if main_profile is None:
-                logger.warning(
-                    "No active LLM profile for multi-agent rebuild | session=%s",
-                    session_id,
+            profile_name = ss.read_active_profile_name(session_id)
+            if profile_name is not None:
+                main_profile = self._app.llm_profile_store.resolve_profile_name(
+                    profile_name,
                 )
 
         # 加载多 Agent 系统提示词模板

@@ -64,18 +64,18 @@ class ToolExecutor:
     由 IMainSessionLoop 持有，每个 tool_call 调用一次 ``execute()``。
     """
 
-    def __init__(self, loop: IMainSessionLoop, llm: BaseLLMClient) -> None:
+    def __init__(self, loop: IMainSessionLoop, llm: BaseLLMClient | None) -> None:
         self._loop = loop
         self._llm = llm
         self._tool_stats: dict[str, dict[str, int]] = {}
         self._turn_counter: RefWrapper[int] | None = None
 
     @property
-    def llm(self) -> BaseLLMClient:
+    def llm(self) -> BaseLLMClient | None:
         return self._llm
 
     @llm.setter
-    def llm(self, value: BaseLLMClient) -> None:
+    def llm(self, value: BaseLLMClient | None) -> None:
         self._llm = value
 
     # -- 公开 API ----------------------------------------------------------
@@ -146,6 +146,9 @@ class ToolExecutor:
         from abstract.tools.registry import registry as tool_registry
 
         char_name = character_name or self._loop.current_character_agent
+        llm = self._llm
+        if llm is None:
+            raise RuntimeError("No LLM client available for tool execution")
 
         # -- 记录申请时间（审批流程之前） --
         start_mono: float = time.monotonic()
@@ -260,13 +263,14 @@ class ToolExecutor:
         _hooks_ctx = self._loop.loop.get_hooks_context(session_id)
 
         ask_agent_callback: Callable[[str], Awaitable[str]] | None = None
-        if self._llm is not None:
-            async def _ask_agent_callback_impl(q: str) -> str:
-                return await _ask_agent_reason(
-                    self._llm, tc.name, _approval_args, q,
-                    extra_context=_hooks_ctx,
-                )
-            ask_agent_callback = _ask_agent_callback_impl
+
+        async def _ask_agent_callback_impl(q: str) -> str:
+            return await _ask_agent_reason(
+                llm, tc.name, _approval_args, q,
+                extra_context=_hooks_ctx,
+            )
+
+        ask_agent_callback = _ask_agent_callback_impl
 
         approval_start: float = time.monotonic()
         try:

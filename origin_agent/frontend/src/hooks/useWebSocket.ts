@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef } from "react";
 import { MessageContent, WSMessage, SubagentSession, AskRequest, ConfirmRequest } from "../types";
 import { generateUUID } from "../utils";
-import { WS_OUT } from "../constants/ws";
+import { WS_IN, WS_OUT } from "../constants/ws";
 import { COLLOQUY_SID } from "../constants/session";
 import { TIMING } from "../constants/timing";
 import { DIMENSIONS } from "../constants/dimensions";
@@ -148,6 +148,10 @@ export function useWebSocket() {
 
   // ── websocket handlers ──
   const handleMessage = useCallback((msg: WSMessage) => {
+    if (msg.type === WS_IN.LLM_PROFILE_CHANGED) {
+      llmProfilesRef.current.handleProfileChanged(msg);
+      return;
+    }
     sessionRef.current?.handleMessage(msg);
     subagentRef.current.handleMessage(msg, sessionRef.current?.sessionId ?? "");
   }, []);
@@ -463,7 +467,7 @@ export function useWebSocket() {
       target_sessions: targetSessions,
       client_message_id: clientMessageId,
       client_info: collectClientInfo(),
-      ...(llmProfilesRef.current.toProfilePayload() ? { llm_profile: llmProfilesRef.current.toProfilePayload() } : {}),
+      llm_profile_name: llmProfilesRef.current.toProfileName(),
       ...(visible_characters ? { visible_characters } : {}),
       ...(response_characters ? { response_characters } : {}),
     });
@@ -816,7 +820,7 @@ export function useWebSocket() {
     editMessage: session.editMessage,
     deleteMessages: session.deleteMessages,
     deleteSingleMessage: session.deleteSingleMessage,
-    regenerateResponse: (messageIndex: number) => session.regenerateResponse(messageIndex, llmProfilesRef.current.toProfilePayload()),
+    regenerateResponse: (messageIndex: number) => session.regenerateResponse(messageIndex, llmProfilesRef.current.toProfileName()),
     updateMessageVisibility: session.updateMessageVisibility,
     addMessage: session.addMessage,
     fetchSessions: session.fetchSessions,

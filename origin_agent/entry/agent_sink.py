@@ -184,6 +184,38 @@ class FrontendSink(AgentSink):
         """返回所有已注册 WebSocket 的快照副本。"""
         return {sid: entry.ws for sid, entry in self._ws_sinks.items()}
 
+    async def broadcast_profile_change(
+        self,
+        operation: str,
+        old_name: str,
+        new_name: str | None,
+    ) -> list[str]:
+        """向所有已连接前端广播独立的 Profile 变更事件。"""
+        from gateway.chat import Message, MessageType
+
+        failures: list[str] = []
+        for session_id, ws in self.get_all_ws().items():
+            message = Message(
+                type=MessageType.LLM_PROFILE_CHANGED,
+                session_id=session_id,
+                operation=operation,
+                old_name=old_name,
+                new_name=new_name,
+            )
+            try:
+                payload = message.model_dump(exclude_none=True)
+                # 删除最后一个 Profile 时协议要求显式携带 JSON null。
+                payload["new_name"] = new_name
+                await ws.send_text(json.dumps(payload, ensure_ascii=False))
+            except Exception:
+                failures.append(session_id)
+                logger.warning(
+                    "Failed to broadcast LLM Profile change | session=%s",
+                    session_id,
+                    exc_info=True,
+                )
+        return failures
+
     def is_session_occupied(self, session_id: str, token: str | None) -> bool:
         """判断会话是否已被其他标签页占用。
 

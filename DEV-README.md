@@ -179,10 +179,11 @@ Evolve Agent 内置两套多代理运行时：
 
 ### `system/`
 
-- `system/application.py`：`Application` 进程级唯一单例，持有所有子系统引用（`RuntimeContext`、`SessionManager`、`ToolRegistry`、`ApprovalBackend`、`CronRouter`、`SubAgentOrchestrator` 等）。通过 `Application.current()` 访问，避免模块级全局变量。
+- `system/application.py`：`Application` 进程级唯一单例，持有所有子系统引用（`RuntimeContext`、`LLMProfileStore`、共享 Profile 锁、`SessionManager`、`ToolRegistry`、`ApprovalBackend`、`CronRouter`、`SubAgentOrchestrator` 等）。通过 `Application.current()` 访问，避免模块级全局变量。
+- `system/llm_profile_store.py`：进程内唯一的 LLM Profile 注册表。仅支持 `llm_profiles.es` 的 `v2` key，直接持有并保存 `LLMProfileData` 根对象；Profile 间多模态分工使用根列表中的实例引用，Gateway 通过单 Profile CRUD 修改。
 - `system/context.py`：`RuntimeContext`，贯穿整个应用的生命周期上下文。
 - `system/sandbox.py`：路径沙盒与命名空间解析。
-- `system/session_store.py`：单个会话的文件读写（`history.es`、`summary.txt`、`token_usage.json`、`tool_resources.json` 等；旧版 `messages.jsonl` 已由 `scripts/migrate_v0_to_v1.py` 迁移到 v1 格式）。
+- `system/session_store.py`：单个会话的文件读写（`history.es`、`summary.txt`、`token_usage.json`、`tool_resources.json` 等）；活动 LLM Profile 仅以 `{"profile_name": ...}` 名称指针保存。旧版 `messages.jsonl` 已由 `scripts/migrate_v0_to_v1.py` 迁移到会话 v1 格式。
 - `system/prompt.py` / `system/templates.py`：System Prompt 组装与模板渲染。
 - `system/convert.py`：类型转换工具（`as_enum()`、`as_bool()`）。
 - `system/error_utils.py`：异常降级与日志辅助，用于可恢复副作用失败时记录日志但不中断主流程。

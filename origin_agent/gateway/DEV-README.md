@@ -101,7 +101,8 @@ WS /ws/chat?resume=<sid>
 | `tool_result` | 工具执行结果 |
 | `task_progress` | 任务进度更新 |
 | `clipboard_display` | 剪贴板展示更新 |
-| `subagent_update` | 子代理状态更新 |
+| `subagent_update` | 子会话状态更新 |
+| `llm_profile_changed` | Profile 重命名/删除通知；顶层携带 `operation`、`old_name`、`new_name` |
 | `confirm_request` | 请求用户审批 |
 | `ask_request` | 请求用户回答 |
 | `error` | 错误通知 |
@@ -154,6 +155,18 @@ WS /ws/chat?resume=<sid>
 |------|------|------|
 | GET/POST | `/api/sessions/{id}/background-tasks` | 后台任务列表/停止 |
 | GET/POST | `/api/sessions/{id}/cron-tasks/...` | Cron 任务列表/触发/取消 |
+
+### LLM Profile
+
+| 方法 | 端点 | 说明 |
+|------|------|------|
+| GET | `/api/llm/profiles` | 返回 v2 `LLMProfileData` 的扁平 Profile 列表 |
+| POST | `/api/llm/profiles` | 创建单个 Profile |
+| PUT | `/api/llm/profiles` | 按原名称原地更新或重命名单个 Profile |
+| DELETE | `/api/llm/profiles` | 删除 Profile，并为当前空闲会话指定替换名称或无配置 |
+| GET | `/api/llm/clients` | 返回可用 LLM 客户端实现 |
+
+前端 USER_MESSAGE 与重新生成请求只传 `llm_profile_name`，不传完整 Profile。空字符串表示明确无配置。Profile 重命名和删除通过 `llm_profile_changed` 广播；忙碌会话不在删除请求中切换。
 
 ### 静态文件
 

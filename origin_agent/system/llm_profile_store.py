@@ -1,193 +1,386 @@
-"""LLM profiles 持久化存储。
-
-封装两类存储：
-
-1. **agentspace 全局 profiles 列表**（`llm_profiles.es`，easysave 序列化）：
-   前端 GET/PUT 的唯一权威数据源，平铺 ``list[LlmProfile]``。
-2. **会话级 / 全局 profile 快照**（JSON，经 ``atomic_io`` 原子写）：
-   用于隐式触发源（cron/auto-title/summary/fallback）的最近使用 profile 回落。
-
-快照文件存完整 ``LlmProfile``（而非仅 name），抗 profile 改名/删除。
-"""
+"""LLM Profile v2 根对象存储。"""
 
 from __future__ import annotations
 
 import json
 import logging
-import uuid
+import os
+import tempfile
+import threading
 from pathlib import Path
+from typing import Any
 
-from easysave import save, load, contains
+from easysave import contains, load, save
 
-from entity.puretype.llm import LLMProfile
 from entity.constant import (
     LLM_PROFILES_ES_FILENAME,
     LLM_PROFILES_ES_KEY,
 )
-from system.atomic_io import write_text_atomic
+from entity.puretype.llm import (
+    LLMProfile,
+    LLMProfileData,
+    LLMProfilePayload,
+)
+from system.atomic_io import replace_atomic
 
 logger = logging.getLogger(__name__)
 
-
-# ---------------------------------------------------------------------------
-# agentspace 全局 profiles 列表（easysave）
-# ---------------------------------------------------------------------------
-
-def _es_path(agentspace_dir: Path) -> Path:
-    """返回 agentspace 下的 profiles easysave 文件路径。"""
-    return Path(agentspace_dir) / LLM_PROFILES_ES_FILENAME
-
-
-def _ensure_uid(profile: LLMProfile) -> LLMProfile:
-    """若 profile 无 uid 则生成并返回新实例（函数式无副作用）。
-
-    返回带 uid 的 LLMProfile；若原已有 uid 则原样返回。
-    uid 由后端 uuid4().hex 生成，32 字符无连字符，不可更改。
-    """
-    if profile.uid:
-        return profile
-    return profile.model_copy(update={"uid": uuid.uuid4().hex})
+_REFERENCE_FIELDS: tuple[str, ...] = (
+    "vision_image_profile",
+    "audio_profile",
+    "vision_video_profile",
+)
+_PROFILE_FIELDS: tuple[str, ...] = (
+    "name",
+    "llm_client_name",
+    "base_url",
+    "model",
+    "api_key",
+    "temperature",
+    "max_output_tokens",
+    "reasoning_effort",
+    "max_context_tokens",
+    *_REFERENCE_FIELDS,
+)
 
 
-def _validate_references(profiles: list[LLMProfile]) -> None:
-    """校验三个引用字段：悬空、自引用、循环引用。违规 raise ValueError。
+class LLMProfileStore:
+    """进程内唯一的 ``LLMProfileData`` 根对象存储。"""
 
-    - 悬空：引用的 uid 不在列表中
-    - 自引用：vision_image_profile/audio_profile/vision_video_profile == self.uid
-    - 循环：沿单一引用字段链检测（A.vision→B.vision→A），跨字段不视为循环
-    """
-    uid_set = {p.uid for p in profiles}
-    for p in profiles:
-        for field in ("vision_image_profile", "audio_profile", "vision_video_profile"):
-            ref = getattr(p, field)
-            if not ref:
-                continue
-            if ref not in uid_set:
-                raise ValueError(
-                    f"Profile {p.name!r} {field} references non-existent uid {ref!r}"
-                )
-            if ref == p.uid:
-                raise ValueError(
-                    f"Profile {p.name!r} {field} cannot reference itself"
-                )
-    # 循环检测：沿单一字段链遍历，遇回到起点则循环
-    by_uid = {p.uid: p for p in profiles if p.uid}
-    for start in profiles:
-        if not start.uid:
-            continue
-        for field in ("vision_image_profile", "audio_profile", "vision_video_profile"):
-            visited: set[str] = set()
-            current = start
-            while True:
-                ref = getattr(current, field)
-                if not ref or ref not in by_uid:
-                    break
-                if ref == start.uid and visited:
-                    raise ValueError(
-                        f"Circular reference detected: profile {start.name!r} .{field} → ... → self"
-                    )
-                if ref in visited:
-                    break  # 其他环，非从 start 开始，不报错
-                visited.add(ref)
-                current = by_uid[ref]
+    def __init__(
+        self,
+        agentspace_dir: Path,
+        lock: threading.RLock | None = None,
+    ) -> None:
+        self._agentspace_dir = Path(agentspace_dir)
+        self._path = self._agentspace_dir / LLM_PROFILES_ES_FILENAME
+        self._lock = lock or threading.RLock()
+        with self._lock:
+            self._data = self._load_unlocked()
 
+    @property
+    def path(self) -> Path:
+        """返回 Profile 注册表路径。"""
+        return self._path
 
-def load_profiles(agentspace_dir: Path) -> list[LLMProfile]:
-    """从 agentspace 读取全部 LLM profiles。
+    def get_data(self) -> LLMProfileData:
+        """返回共享根对象；修改必须通过本类的写接口完成。"""
+        with self._lock:
+            return self._data
 
-    文件缺失或 key 不存在时返回空列表（不报错）。
-    easysave 已对 list[LLMProfile] 保留类型，故新格式条目直接复用类型实例；
-    旧格式（平铺 dict）条目则经 model_validate 还原，保证向后兼容。
+    def list_profiles(self) -> list[LLMProfile]:
+        """返回根列表的浅拷贝，列表元素仍是根对象中的实例。"""
+        with self._lock:
+            return list(self._data.profiles)
 
-    旧 profile 无 uid 时自动补 uuid4().hex 并立即固化（迁移副作用仅一次）。
-    """
-    path = _es_path(agentspace_dir)
-    try:
-        raw = load(LLM_PROFILES_ES_KEY, str(path))
-    except FileNotFoundError:
-        return []
-    except KeyError:
-        return []
-    if not isinstance(raw, list):
-        logger.warning("LLM profiles in %s is not a list: %s", path, type(raw))
-        return []
-    profiles: list[LLMProfile] = []
-    migrated = False
-    for item in raw:
-        if isinstance(item, LLMProfile):
-            if not item.uid:
-                item = _ensure_uid(item)
-                migrated = True
-            profiles.append(item)
-            continue
-        try:
-            p = LLMProfile.model_validate(item)
-            if not p.uid:
-                p = _ensure_uid(p)
-                migrated = True
-            profiles.append(p)
-        except Exception:
-            logger.warning("Skipping invalid LLM profile entry in %s: %s", path, item, exc_info=True)
-    if migrated and profiles:
-        try:
-            save_profiles(agentspace_dir, profiles)
-            logger.info(
-                "Migrated LLM profiles with new uid in %s (%d profiles)",
-                path, sum(1 for p in profiles if p.uid),
+    def get_profile(self, name: str) -> LLMProfile:
+        """按名称返回根对象中的 Profile；未命中直接抛出 ``LookupError``。"""
+        with self._lock:
+            for profile in self._data.profiles:
+                if profile.name == name:
+                    return profile
+        raise LookupError(f"LLM profile not found: {name!r}")
+
+    def resolve_profile_name(self, name: str) -> LLMProfile | None:
+        """空名称表示无配置；非空名称必须命中现有 Profile。"""
+        if name == "":
+            return None
+        return self.get_profile(name)
+
+    def to_payload(self, profile: LLMProfile) -> LLMProfilePayload:
+        """将根对象中的 Profile 显式转换为扁平 HTTP DTO。"""
+        with self._lock:
+            return LLMProfilePayload(
+                name=profile.name,
+                llm_client_name=profile.llm_client_name,
+                base_url=profile.base_url,
+                model=profile.model,
+                api_key=profile.api_key,
+                temperature=profile.temperature,
+                max_output_tokens=profile.max_output_tokens,
+                reasoning_effort=profile.reasoning_effort,
+                max_context_tokens=profile.max_context_tokens,
+                vision_image_profile=(
+                    profile.vision_image_profile.name
+                    if profile.vision_image_profile is not None else None
+                ),
+                audio_profile=(
+                    profile.audio_profile.name
+                    if profile.audio_profile is not None else None
+                ),
+                vision_video_profile=(
+                    profile.vision_video_profile.name
+                    if profile.vision_video_profile is not None else None
+                ),
             )
-        except Exception:
-            logger.warning("Failed to persist uid migration in %s", path, exc_info=True)
-    logger.info("Loaded %d LLM profiles from %s", len(profiles), path)
-    return profiles
 
+    def create_profile(self, payload: LLMProfilePayload) -> LLMProfile:
+        """新增一个 Profile，并在成功后返回根列表中的新实例。"""
+        if not isinstance(payload, LLMProfilePayload):
+            raise TypeError("payload must be LLMProfilePayload")
+        with self._lock:
+            if not payload.name:
+                raise ValueError("LLM profile name must not be empty")
+            if any(p.name == payload.name for p in self._data.profiles):
+                raise ValueError(f"Duplicate LLM profile name: {payload.name!r}")
+            refs = self._resolve_payload_references(payload)
+            profile = LLMProfile(
+                name=payload.name,
+                llm_client_name=payload.llm_client_name,
+                base_url=payload.base_url,
+                model=payload.model,
+                api_key=payload.api_key,
+                temperature=payload.temperature,
+                max_output_tokens=payload.max_output_tokens,
+                reasoning_effort=payload.reasoning_effort,
+                max_context_tokens=payload.max_context_tokens,
+                **refs,
+            )
+            self._data.profiles.append(profile)
+            try:
+                self._validate_root(self._data)
+                self._save_unlocked()
+            except Exception:
+                self._data.profiles.pop()
+                raise
+            logger.info("Created LLM profile | name=%s", profile.name)
+            return profile
 
-def save_profiles(agentspace_dir: Path, profiles: list[LLMProfile]) -> None:
-    """将全部 LLM profiles 原子写入 agentspace。
+    def update_profile(
+        self,
+        original_name: str,
+        payload: LLMProfilePayload,
+    ) -> LLMProfile:
+        """原地更新 Profile；重命名不会替换实例身份。"""
+        if not isinstance(payload, LLMProfilePayload):
+            raise TypeError("payload must be LLMProfilePayload")
+        with self._lock:
+            profile = self.get_profile(original_name)
+            if not payload.name:
+                raise ValueError("LLM profile name must not be empty")
+            if any(
+                other is not profile and other.name == payload.name
+                for other in self._data.profiles
+            ):
+                raise ValueError(f"Duplicate LLM profile name: {payload.name!r}")
+            refs = self._resolve_payload_references(payload)
+            old_values = self._snapshot_profile(profile)
+            self._assign_payload(profile, payload, refs)
+            try:
+                self._validate_root(self._data)
+                self._save_unlocked()
+            except Exception:
+                self._restore_profile(profile, old_values)
+                raise
+            logger.info(
+                "Updated LLM profile | old_name=%s new_name=%s",
+                original_name,
+                profile.name,
+            )
+            return profile
 
-    先校验列表内 name 唯一（重名 → ValueError），再经 easysave 直接存 list[LLMProfile]，
-    由 easysave 保留类型信息（type_token 记录 entity.puretype.llm.LLMProfile），
-    不再额外 model_dump() 降级为 dict。
+    def assert_removable(self, profile: LLMProfile) -> None:
+        """确认没有其他根 Profile 直接引用目标实例。"""
+        with self._lock:
+            for owner in self._data.profiles:
+                if owner is profile:
+                    continue
+                for field in _REFERENCE_FIELDS:
+                    if getattr(owner, field) is profile:
+                        raise ValueError(
+                            f"LLM profile {profile.name!r} is referenced by "
+                            f"{owner.name!r}.{field}"
+                        )
 
-    校验 name 唯一、uid 唯一、引用字段（悬空/自引用/循环）。
-    """
-    names: set[str] = set()
-    uids: set[str] = set()
-    for p in profiles:
-        if p.name in names:
-            raise ValueError(f"Duplicate LLM profile name: {p.name!r}")
-        names.add(p.name)
-        if p.uid:
-            if p.uid in uids:
-                raise ValueError(f"Duplicate LLM profile uid: {p.uid!r}")
-            uids.add(p.uid)
-    _validate_references(profiles)
-    path = _es_path(agentspace_dir)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    save(LLM_PROFILES_ES_KEY, str(path), profiles)
-    logger.info("Saved %d LLM profiles to %s", len(profiles), path)
+    def remove_profile(self, name: str) -> LLMProfile:
+        """移除未被其他根 Profile 引用的实例。"""
+        with self._lock:
+            profile = self.get_profile(name)
+            self.assert_removable(profile)
+            index = self._data.profiles.index(profile)
+            self._data.profiles.pop(index)
+            try:
+                self._validate_root(self._data)
+                self._save_unlocked()
+            except Exception:
+                self._data.profiles.insert(index, profile)
+                raise
+            logger.info("Removed LLM profile | name=%s", name)
+            return profile
 
+    # ------------------------------------------------------------------
+    # 加载、迁移与校验
+    # ------------------------------------------------------------------
 
-# ---------------------------------------------------------------------------
-# profile 快照（JSON，原子写）— 会话级 / 全局指针
-# ---------------------------------------------------------------------------
+    def _load_unlocked(self) -> LLMProfileData:
+        if not contains(LLM_PROFILES_ES_KEY, str(self._path)):
+            return LLMProfileData()
 
-def read_profile_snapshot(path: Path) -> LLMProfile | None:
-    """读取单个 profile 快照 JSON 文件。
+        data = load(LLM_PROFILES_ES_KEY, str(self._path))
+        if not isinstance(data, LLMProfileData):
+            raise TypeError(
+                f"Expected LLMProfileData in v2, got {type(data).__name__}"
+            )
+        self._validate_root(data)
+        return data
 
-    文件缺失或解析失败时返回 None。
-    """
-    p = Path(path)
-    if not p.is_file():
-        return None
-    try:
-        data = json.loads(p.read_text(encoding="utf-8"))
-        return LLMProfile.model_validate(data)
-    except Exception:
-        logger.warning("Failed to read profile snapshot %s", p, exc_info=True)
-        return None
+    def _validate_root(self, data: LLMProfileData) -> None:
+        if not isinstance(data, LLMProfileData):
+            raise TypeError("Profile root must be LLMProfileData")
+        if set(data.__dict__) - {"profiles"}:
+            raise TypeError("LLMProfileData contains unknown fields")
+        if not isinstance(data.profiles, list):
+            raise TypeError("LLMProfileData.profiles must be a list")
 
+        names: set[str] = set()
+        profile_ids: set[int] = set()
+        for profile in data.profiles:
+            if not isinstance(profile, LLMProfile):
+                raise TypeError("LLMProfileData.profiles must contain LLMProfile instances")
+            self._validate_profile_scalars(profile)
+            if not profile.name:
+                raise ValueError("LLM profile name must not be empty")
+            if profile.name in names:
+                raise ValueError(f"Duplicate LLM profile name: {profile.name!r}")
+            names.add(profile.name)
+            profile_ids.add(id(profile))
 
-def write_profile_snapshot(path: Path, profile: LLMProfile) -> None:
-    """原子写入单个 profile 快照 JSON 文件。"""
-    payload = profile.model_dump_json(indent=2)
-    write_text_atomic(Path(path), payload)
+        for profile in data.profiles:
+            for field in _REFERENCE_FIELDS:
+                reference = getattr(profile, field)
+                if reference is None:
+                    continue
+                if not isinstance(reference, LLMProfile):
+                    raise TypeError(f"{field} must be an LLMProfile or None")
+                if id(reference) not in profile_ids:
+                    raise ValueError(
+                        f"Profile {profile.name!r} references an object outside the root"
+                    )
+                if reference is profile:
+                    raise ValueError(
+                        f"Profile {profile.name!r} cannot reference itself"
+                    )
+
+        visiting: set[int] = set()
+        visited: set[int] = set()
+
+        def visit(profile: LLMProfile) -> None:
+            profile_id = id(profile)
+            if profile_id in visiting:
+                raise ValueError("Circular LLM profile reference detected")
+            if profile_id in visited:
+                return
+            visiting.add(profile_id)
+            for field in _REFERENCE_FIELDS:
+                reference = getattr(profile, field)
+                if reference is not None:
+                    visit(reference)
+            visiting.remove(profile_id)
+            visited.add(profile_id)
+
+        for profile in data.profiles:
+            visit(profile)
+
+    @staticmethod
+    def _validate_profile_scalars(profile: LLMProfile) -> None:
+        fields = set(profile.__dict__)
+        if fields - set(_PROFILE_FIELDS):
+            raise TypeError("LLMProfile contains unknown fields")
+        string_fields = (
+            "name",
+            "llm_client_name",
+            "base_url",
+            "model",
+            "api_key",
+            "reasoning_effort",
+        )
+        for field in string_fields:
+            if type(getattr(profile, field)) is not str:
+                raise TypeError(f"LLMProfile.{field} must be a string")
+        for field in ("max_output_tokens", "max_context_tokens"):
+            if type(getattr(profile, field)) is not int:
+                raise TypeError(f"LLMProfile.{field} must be an integer")
+        temperature = getattr(profile, "temperature")
+        if type(temperature) not in (int, float):
+            raise TypeError("LLMProfile.temperature must be numeric")
+
+    def _resolve_payload_references(
+        self,
+        payload: LLMProfilePayload,
+    ) -> dict[str, LLMProfile | None]:
+        resolved: dict[str, LLMProfile | None] = {}
+        for field in _REFERENCE_FIELDS:
+            name = getattr(payload, field)
+            if name is None:
+                resolved[field] = None
+                continue
+            if not isinstance(name, str) or not name:
+                raise ValueError(f"{field} must be a Profile name or null")
+            resolved[field] = self.get_profile(name)
+        return resolved
+
+    @staticmethod
+    def _snapshot_profile(profile: LLMProfile) -> tuple[Any, ...]:
+        return tuple(getattr(profile, field) for field in _PROFILE_FIELDS)
+
+    @staticmethod
+    def _restore_profile(profile: LLMProfile, values: tuple[Any, ...]) -> None:
+        for field, value in zip(_PROFILE_FIELDS, values):
+            setattr(profile, field, value)
+
+    @staticmethod
+    def _assign_payload(
+        profile: LLMProfile,
+        payload: LLMProfilePayload,
+        refs: dict[str, LLMProfile | None],
+    ) -> None:
+        for field in (
+            "name",
+            "llm_client_name",
+            "base_url",
+            "model",
+            "api_key",
+            "temperature",
+            "max_output_tokens",
+            "reasoning_effort",
+            "max_context_tokens",
+        ):
+            setattr(profile, field, getattr(payload, field))
+        for field, value in refs.items():
+            setattr(profile, field, value)
+
+    # ------------------------------------------------------------------
+    # v2 写入
+    # ------------------------------------------------------------------
+
+    def _save_unlocked(self, data: LLMProfileData | None = None) -> None:
+        target = data if data is not None else self._data
+        self._validate_root(target)
+        self._agentspace_dir.mkdir(parents=True, exist_ok=True)
+
+        if self._path.exists():
+            original = json.loads(self._path.read_text(encoding="utf-8"))
+            if not isinstance(original, dict):
+                raise TypeError("LLM profile storage file must contain a JSON object")
+        else:
+            original = {}
+
+        fd, temp_name = tempfile.mkstemp(
+            prefix=f"{self._path.name}.",
+            suffix=".tmp",
+            dir=str(self._agentspace_dir),
+            text=True,
+        )
+        os.close(fd)
+        temp_path = Path(temp_name)
+        try:
+            temp_path.write_text(
+                json.dumps(original, ensure_ascii=False, indent=4),
+                encoding="utf-8",
+            )
+            # 必须直接传递 LLMProfileData，保留 easysave 的对象引用图。
+            save(LLM_PROFILES_ES_KEY, str(temp_path), target)
+            replace_atomic(temp_path, self._path)
+        finally:
+            if temp_path.exists():
+                temp_path.unlink()

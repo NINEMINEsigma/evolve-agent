@@ -24,6 +24,8 @@ from system.session_store import SessionStore
 if TYPE_CHECKING:
     from abstract.llm.client import BaseLLMClient
     from entry.parent_agent_loop import ParentAgentLoop
+    from gateway.session_manager import SessionManager
+    from entity.puretype import LoopMeta
 
 logger = logging.getLogger(__name__)
 
@@ -275,7 +277,12 @@ class LoopSessionManager:
         if history is None or history.count == 0:
             return ""
         from entry.agent_support.history_summary import summarize_history
-        return await summarize_history(history, self._loop.llm)
+        llm = self._loop.llm
+        if llm is None:
+            raise RuntimeError(
+                "No LLM client available for session history summary"
+            )
+        return await summarize_history(history, llm)
 
     async def _generate_session_tags(self, session_id: str) -> list[str]:
         """委托 loop.regenerate_session_tags() 生成会话分类标签。"""
@@ -299,9 +306,9 @@ async def terminate_and_rotate_session(
     *,
     session_id: str,
     session_store: SessionStore | None,
-    session_manager: Any,
+    session_manager: SessionManager,
     llm: BaseLLMClient | None,
-    loop_meta: Any | None = None,
+    loop_meta: LoopMeta | None = None,
     current_character_agent: str = "",
     history_store_dir: Path | None = None,
 ) -> str | None:
@@ -399,6 +406,8 @@ async def terminate_and_rotate_session(
         context, parent_sid=old_sid, role=Role.USER,
         loop_meta=loop_meta,
     )
+    if session_store is not None:
+        session_store.copy_active_profile_name(old_sid, new_sid)
     session_manager.archive(old_sid, continuation_sid=new_sid)
 
     # 8. 写入仅含 summary 消息的历史到新会话

@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Any
 
 from entity.messages import History
-from entity.puretype import TokenUsageRecord, MessageMetrics, LLMProfile
+from entity.puretype import TokenUsageRecord, MessageMetrics
 from entity.constant import (
     History_Version as __SessionStore_Version__,
     SESSION_LLM_PROFILE_FILENAME,
@@ -21,7 +21,6 @@ from entity.constant import (
 from easysave import save, load
 
 from system.atomic_io import write_text_atomic
-from system.llm_profile_store import read_profile_snapshot, write_profile_snapshot
 
 logger = logging.getLogger(__name__)
 
@@ -192,27 +191,105 @@ class SessionStore:
                 "Failed to merge message metrics for collected=%d entries", len(collected), exc_info=True,
             )
 
-    # -- LLM profile 持久化 ----------------------------------------------------
+    # -- LLM Profile 名称指针 -----------------------------------------------
 
-    def write_active_llm_profile(self, session_id: str, profile: LLMProfile) -> None:
-        """原子写入会话级 profile 快照与全局 last-used 指针。
+    def active_profile_name_path(self, session_id: str) -> Path:
+        """返回会话级活动 Profile 名称指针路径。"""
+        return self.session_dir(session_id) / SESSION_LLM_PROFILE_FILENAME
 
-        会话快照存于 ``session_dir / SESSION_LLM_PROFILE_FILENAME``，
-        全局指针存于 ``base_dir / GLOBAL_LLM_PROFILE_FILENAME``（fallback 引导用）。
-        两者均存完整 ``LlmProfile``，抗 profile 改名/删除。
-        """
-        write_profile_snapshot(self.session_dir(session_id) / SESSION_LLM_PROFILE_FILENAME, profile)
-        write_profile_snapshot(self.base_dir / GLOBAL_LLM_PROFILE_FILENAME, profile)
+    def global_profile_name_path(self) -> Path:
+        """返回全局最近使用 Profile 名称指针路径。"""
+        return self.base_dir / GLOBAL_LLM_PROFILE_FILENAME
 
-    def read_active_llm_profile(self, session_id: str) -> LLMProfile | None:
-        """读取最近使用 profile，内置三级回落：
+    @staticmethod
+    def _read_profile_name_pointer(path: Path) -> str | None:
+        """读取新格式名称指针；旧完整快照视为没有新指针。"""
+        if not path.is_file():
+            return None
+        data = json.loads(path.read_text(encoding="utf-8"))
+        if isinstance(data, dict) and set(data) == {"profile_name"}:
+            name = data["profile_name"]
+            if not isinstance(name, str):
+                raise TypeError(f"Profile name pointer in {path} must be a string")
+            return name
+        if isinstance(data, dict) and {
+            "name", "llm_client_name", "base_url", "model",
+        }.issubset(data):
+            return None
+        raise ValueError(f"Invalid Profile name pointer format: {path}")
 
-        1. 会话目录 snapshot（``session_dir / SESSION_LLM_PROFILE_FILENAME``）
-        2. 全局 last-used 指针（``base_dir / GLOBAL_LLM_PROFILE_FILENAME``）
-        3. 均无 → None（由调用方决定报错或降级）
-        """
-        snap = read_profile_snapshot(self.session_dir(session_id) / SESSION_LLM_PROFILE_FILENAME)
-        if snap is not None:
-            return snap
-        return read_profile_snapshot(self.base_dir / GLOBAL_LLM_PROFILE_FILENAME)
+    @staticmethod
+    def _write_profile_name_pointer(path: Path, profile_name: str) -> None:
+        """原子写入精确的 Profile 名称指针对象。"""
+        if not isinstance(profile_name, str):
+            raise TypeError("profile_name must be a string")
+        write_text_atomic(
+            path,
+            json.dumps({"profile_name": profile_name}, ensure_ascii=False, indent=2),
+        )
 
+    def write_active_profile_name(self, session_id: str, profile_name: str) -> None:
+        """写入会话级名称，并同步更新全局最近使用名称。"""
+        self._write_profile_name_pointer(
+            self.active_profile_name_path(session_id), profile_name,
+        )
+        self.write_global_profile_name(profile_name)
+
+    def read_active_profile_name(self, session_id: str) -> str | None:
+        """先读会话名称指针，缺失时回退全局名称指针。"""
+        name = self._read_profile_name_pointer(
+            self.active_profile_name_path(session_id),
+        )
+        if name is not None:
+            return name
+        return self.read_global_profile_name()
+
+    def write_global_profile_name(self, profile_name: str) -> None:
+        """写入全局最近使用 Profile 名称。"""
+        self._write_profile_name_pointer(
+            self.global_profile_name_path(), profile_name,
+        )
+
+    def read_global_profile_name(self) -> str | None:
+        """读取全局最近使用 Profile 名称。"""
+        return self._read_profile_name_pointer(self.global_profile_name_path())
+
+    def iter_profile_pointer_files(self) -> list[Path]:
+        """列出当前存在的全局及会话级 Profile 指针文件。"""
+        paths: list[Path] = []
+        global_path = self.global_profile_name_path()
+        if global_path.is_file():
+            paths.append(global_path)
+        if not self.base_dir.is_dir():
+            return paths
+        for child in self.base_dir.iterdir():
+            if not child.is_dir():
+                continue
+            candidate = child / SESSION_LLM_PROFILE_FILENAME
+            if candidate.is_file():
+                paths.append(candidate)
+        return paths
+
+    def replace_profile_name_pointers(
+        self,
+        old_name: str,
+        new_name: str | None,
+    ) -> list[Path]:
+        """把所有新格式指针中的旧名称替换为目标名称。"""
+        replacement = new_name or ""
+        changed: list[Path] = []
+        for path in self.iter_profile_pointer_files():
+            current = self._read_profile_name_pointer(path)
+            if current == old_name:
+                self._write_profile_name_pointer(path, replacement)
+                changed.append(path)
+        return changed
+
+    def copy_active_profile_name(self, old_session_id: str, new_session_id: str) -> None:
+        """将来源会话的名称指针复制给延续会话。"""
+        profile_name = self.read_active_profile_name(old_session_id)
+        if profile_name is None:
+            return
+        self._write_profile_name_pointer(
+            self.active_profile_name_path(new_session_id), profile_name,
+        )

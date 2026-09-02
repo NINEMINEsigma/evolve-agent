@@ -355,6 +355,21 @@ classDiagram
         #_send_token_update()
     }
 
+    class LLMProfileStore {
+        #_data
+        #_lock
+        +list_profiles()
+        +get_profile()
+        +create_profile()
+        +update_profile()
+        +remove_profile()
+        +to_payload()
+    }
+
+    class LLMProfileData {
+        +profiles
+    }
+
     class Application {
         +runtime_context
         +session_manager
@@ -474,6 +489,8 @@ classDiagram
     SessionManager --> IMainSessionLoop : manages
     MessageRouter --> SessionManager : uses
     MessageRouter --> IMainSessionLoop : routes to
+    Application --> LLMProfileStore : holds
+    LLMProfileStore --> LLMProfileData : owns root
     Application --> SessionManager : holds
     Application --> ApprovalBackendManager : holds
     Application --> FrontendSink : holds
@@ -532,7 +549,7 @@ classDiagram
 | `_llm` | `ToolExecutor` | `BaseLLMClient` | LLM 客户端（用于 ask_agent_reason） |
 | `_tool_stats` | `ToolExecutor` | `dict[str, dict[str, int]]` | 工具调用统计 |
 | `_loop` | `SessionMessageQueue` | `IMainSessionLoop` | 所属主会话 loop |
-| `_pending` | `SessionMessageQueue` | `deque[QueuedMessage]` | 待消费队列；一切变更只在事件循环线程发生（push 经 `call_soon_threadsafe` 落回），无需锁 |
+| `_pending` | `SessionMessageQueue` | `deque[QueuedMessage]` | 待消费 FIFO；每次只取一条消息，每条保留自己的 `llm_profile_name`；当前工具轮不再 drain 用户消息 |
 | `_wakeup` | `SessionMessageQueue` | `asyncio.Event \| None` | 空闲消费循环的唤醒事件 |
 | `_event_loop` | `SessionMessageQueue` | `asyncio.AbstractEventLoop` | 构造时捕获运行中的事件循环，供跨线程入队 |
 | `_consumer_task` | `SessionMessageQueue` | `asyncio.Task \| None` | 懒启动的空闲消费任务 |
@@ -560,6 +577,8 @@ classDiagram
 | `sid` | `MessageRouter` | `str` | 当前 session_id（旋转时更新） |
 | `agentspace_path` | `MessageRouter` | `Path \| None` | 文件上传目标目录 |
 | `runtime_context` | `Application` | `RuntimeContext` | 运行时上下文 |
+| `_profile_lock` | `Application` | `threading.RLock` | Profile 根对象、名称指针与会话选择共用的进程锁 |
+| `_llm_profile_store` | `Application` | `LLMProfileStore \| None` | 进程内唯一的 `LLMProfileData` 根对象存储 |
 | `session_manager` | `Application` | `SessionManager \| None` | session 管理器 |
 | `approval_backend_manager` | `Application` | `ApprovalBackendManager \| None` | 审批后端管理器 |
 | `cron_router` | `Application` | `CronRouter \| None` | Cron 路由器 |
@@ -639,6 +658,9 @@ classDiagram
 | `AgentResponse` | `entry/multi_agent_worker.py` | `BaseModel` | 多 Agent 模式下单 Agent 的解析后响应 |
 | `WorkerResult` | `entry/multi_agent_worker.py` | `BaseModel` | Worker 执行结果，含 DSL 路由元数据 |
 | `RefWrapper[T]` | `entity/gentype.py` | `BaseModel, Generic[T]` | 可变引用容器，供 loop 与 `ToolExecutor` 等组件共享可变值 |
+| `LLMProfile` | `entity/puretype/llm.py` | `BaseModel` | LLM 配置；三个多模态字段为根对象内实例引用 |
+| `LLMProfileData` | `entity/puretype/llm.py` | `BaseModel` | `llm_profiles.es` v2 的持久化根对象 |
+| `LLMProfilePayload` | `entity/puretype/llm.py` | `BaseModel` | HTTP 扁平 Profile DTO，以名称/null 表达引用 |
 
 ---
 
@@ -656,7 +678,7 @@ classDiagram
 
 ### Application 单例
 
-`system/application.py::Application` 作为进程级唯一单例，替代了原有的模块级全局变量。所有子系统（`SessionManager`、`FrontendSink`、`SubAgentOrchestrator`、`ApprovalBackendManager`、`CronRouter`、`ToolRegistry`）通过 `Application.current()` 访问。
+`system/application.py::Application` 作为进程级唯一单例，替代了原有的模块级全局变量。所有子系统（`LLMProfileStore`、共享 Profile 锁、`SessionManager`、`FrontendSink`、`SubAgentOrchestrator`、`ApprovalBackendManager`、`CronRouter`、`ToolRegistry`）通过 `Application.current()` 访问。
 
 ### Approval 目录化
 
@@ -676,7 +698,11 @@ classDiagram
 
 ### 会话级消息队列（SP-4/SP-5）
 
-`entry/session_message_queue.py::SessionMessageQueue` 由 `ParentAgentLoop` / `MultiAgentLoop`（及继承的 `ColloquyLoop`）持有：生产侧任意线程非阻塞（经 `call_soon_threadsafe` 落回事件循环入队，因此 `_pending` 无需锁）；消费双模态——空闲时由懒启动的 consumer task 驱动 `run_pending_round`，工具结果 finalize 时经 `drain_injected` 注入 `queued_messages` 结构化字段（先只读快照构造产物，成功后才出队）。gateway 在 loop 消亡时调 `stop()`；`replace_loop` 场景用 `mark_stopped()` 标记停止而不 cancel，避免 CancelledError 穿透正在执行的工具调用。
+`entry/session_message_queue.py::SessionMessageQueue` 由 `ParentAgentLoop` / `MultiAgentLoop`（及继承的 `ColloquyLoop`）持有。生产侧仍经 `call_soon_threadsafe` 落回事件循环；消费侧改为严格逐条 FIFO，每条前端消息保存自己的 `llm_profile_name` 并在执行前重新解析。当前工具轮期间到达的用户消息不再由 `drain_injected` 移出，而是在当前轮结束后依次执行。gateway 在 loop 消亡时调 `stop()`；`replace_loop` 场景用 `mark_stopped()` 标记停止而不 cancel。
+
+### LLM Profile 根对象与名称边界
+
+`Application` 持有唯一 `LLMProfileStore` 和共享进程锁。`llm_profiles.es` 仅支持 v2 `LLMProfileData` 根对象，三个多模态分工字段直接保存根列表中的 `LLMProfile` 实例引用；不存在 UID 或 v1 迁移。Gateway 只接收扁平名称 DTO 和单 Profile CRUD。主会话活动配置以名称指针持久化，每条前端消息只传 `llm_profile_name`；`IMainSessionLoop.set_profile()` 由 Parent/Multi 实现。
 
 ### 多模态能力探测内化
 

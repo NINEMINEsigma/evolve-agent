@@ -55,14 +55,14 @@ class AgentProfile:
         character_name: str,
         system_prompts: list[str],
         tools: list[dict],
-        llm_client: BaseLLMClient,
+        llm_client: BaseLLMClient | None,
         config: AgentConfig,
         llm_profile: LLMProfile | None = None,
     ) -> None:
         self.character_name: str = character_name
         self.system_prompts: list[str] = system_prompts
         self.tools: list[dict] = tools
-        self.llm_client: BaseLLMClient = llm_client
+        self.llm_client: BaseLLMClient | None = llm_client
         self.config: AgentConfig = config
         # 当前 agent 的 LLM 配置，供 MultiAgentWorker 传递给 ToolContext
         self.llm_profile: LLMProfile | None = llm_profile
@@ -91,6 +91,10 @@ class MultiAgentLoop(BaseAgentLoop, IMainSessionLoop):
         self._agents: dict[str, AgentProfile] = agents
         self._sink: AgentSink = sink
         self._agent_names: list[str] = list(agents.keys())
+        main_agent = agents.get(MAIN_AGENT_CHARACTER_NAME)
+        self._active_llm_profile = (
+            main_agent.llm_profile if main_agent is not None else None
+        )
         self._session_store: SessionStore | None = (
             SessionStore(history_store_dir) if history_store_dir else None
         )
@@ -268,11 +272,52 @@ class MultiAgentLoop(BaseAgentLoop, IMainSessionLoop):
     # -- LLM 客户端 -------------------------------------------------------
 
     def _get_session_info_llm_client(self) -> BaseLLMClient | None:
-        """返回用于生成标题/标签/摘要等会话信息的 LLM 客户端，首选主 Agent 配置。"""
+        """返回用于生成标题/标签/摘要等会话信息的主 Agent 客户端。"""
         agent = self._agents.get(MAIN_AGENT_CHARACTER_NAME)
-        if agent is None and self._agents:
-            agent = next(iter(self._agents.values()))
         return agent.llm_client if agent else None
+
+    def set_profile(self, profile: LLMProfile | None) -> None:
+        """同步切换 MultiAgentLoop 的主 Agent Profile；子 Agent 不变。"""
+        main_agent = self._agents.get(MAIN_AGENT_CHARACTER_NAME)
+        if main_agent is None:
+            raise RuntimeError("MultiAgentLoop has no main Agent profile")
+
+        client = None
+        if profile is not None:
+            from abstract.llm.loader import create_llm_client
+            client = create_llm_client(
+                profile.llm_client_name,
+                self.app.runtime_context,
+                profile,
+            )
+            main_agent.config.base_url = profile.base_url
+            main_agent.config.model = profile.model
+            main_agent.config.api_key = profile.api_key or None
+            main_agent.config.max_output_tokens = profile.max_output_tokens
+            main_agent.config.max_context_tokens = profile.max_context_tokens
+            main_agent.config.client_type = profile.llm_client_name
+
+        main_agent.llm_client = client
+        main_agent.llm_profile = profile
+        self._active_llm_profile = profile
+
+        from component.multiagenttools.profile_builder import _resolve_main_agent_prompts
+        from system.sandbox import Sandbox
+        common_prompt = main_agent.system_prompts[-1:] if main_agent.system_prompts else []
+        main_agent.system_prompts = _resolve_main_agent_prompts(
+            MAIN_AGENT_CHARACTER_NAME,
+            main_agent.config,
+            self.app.runtime_context,
+            Sandbox(self.app.runtime_context),
+            profile=profile,
+            session_id=self.session_id,
+        ) + common_prompt
+
+        if self._session_store is not None:
+            self._session_store.write_active_profile_name(
+                self.session_id,
+                profile.name if profile is not None else "",
+            )
 
     def clear_session(self) -> None:
         """清空 History。"""
@@ -464,7 +509,25 @@ class MultiAgentLoop(BaseAgentLoop, IMainSessionLoop):
         """
         if not items:
             return None
+        if len(items) != 1:
+            raise ValueError("run_pending_round accepts exactly one queued message")
+        item = items[0]
         async with self._process_lock:
+            if item.llm_profile_name is not None:
+                try:
+                    selected = self.app.llm_profile_store.resolve_profile_name(
+                        item.llm_profile_name,
+                    )
+                    self.set_profile(selected)
+                except (LookupError, ValueError, RuntimeError) as exc:
+                    logger.warning(
+                        "Queued multi-agent Profile selection failed | session=%s name=%r error=%s",
+                        self.session_id, item.llm_profile_name, exc,
+                    )
+                    await self._sink.emit_system_message(
+                        self.session_id, f"LLM Profile 切换失败：{exc}",
+                    )
+                    return None
             self._processing = True
             try:
                 sid = self.session_id
@@ -780,6 +843,11 @@ class MultiAgentLoop(BaseAgentLoop, IMainSessionLoop):
         委托给 MultiAgentWorker 执行完整的 LLM → tool_calls → tool_result → 循环。
         """
         profile = self._agents[character_name]
+        llm_client = profile.llm_client
+        if llm_client is None:
+            raise RuntimeError(
+                f"No LLM client available for Agent {character_name!r}"
+            )
 
         # 构建该 Agent 视角的 History 视图；
         # dynamic_message_suffix 已在 append_user_message 中设置，由 History 自动附加。
@@ -821,7 +889,7 @@ class MultiAgentLoop(BaseAgentLoop, IMainSessionLoop):
             system_prompts=system_prompts,
             history=history_view,
             tools=profile.tools,
-            llm_client=profile.llm_client,
+            llm_client=llm_client,
             sink=self._sink,
             loop=self,
             max_context_tokens=profile.config.max_context_tokens,

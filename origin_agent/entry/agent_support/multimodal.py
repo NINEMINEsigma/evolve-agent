@@ -188,15 +188,14 @@ async def _forward_unsupported_block(
         )
         return block.forward_result_content
 
-    # 无已有描述 → 转发借用
-    # 按 media_type 显式获取引用 uid，不使用反射
+    # 无已有描述 → 转发借用。按模态显式检查引用实例。
     if media_type == "image":
-        ref_uid: str = profile.vision_image_profile
+        ref_profile = profile.vision_image_profile
     elif media_type == "audio":
-        ref_uid = profile.audio_profile
+        ref_profile = profile.audio_profile
     else:  # video
-        ref_uid = profile.vision_video_profile
-    if not ref_uid:
+        ref_profile = profile.vision_video_profile
+    if ref_profile is None:
         # 未配引用字段 → 报错
         raise ValueError(
             f"Active model does not support {media_type} in either tool or user messages, "

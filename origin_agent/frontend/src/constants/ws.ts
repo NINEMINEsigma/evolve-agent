@@ -13,6 +13,7 @@ export const WS_IN = {
   STREAM_DONE:       "stream_done",
   ERROR:             "error",
   SUBAGENT_UPDATE:   "subagent_update",
+  LLM_PROFILE_CHANGED: "llm_profile_changed",
   PONG:              "pong",
 } as const;
 

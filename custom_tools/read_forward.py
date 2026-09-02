@@ -35,8 +35,7 @@ from system.modality_capability import (
     build_video_content_blocks,
 )
 
-# ── LLM Profile 加载与客户端创建 ──
-from system.llm_profile_store import load_profiles
+# ── LLM 客户端创建 ──
 from abstract.llm.loader import create_llm_client
 
 # ── 消息类型 ──
@@ -137,17 +136,13 @@ async def _handle_read_forward(
         path, mime_type, file_size, profile_name,
     )
 
-    # ── 步骤 e：按 profile_name 查找 LLMProfile ──
+    # ── 步骤 e：按 profile_name 从共享根对象取得 LLMProfile ──
     ctx = context.runtime_context if context is not None else get_runtime_context()
-    profiles = load_profiles(ctx.agentspace)
-    ref_profile = next((p for p in profiles if p.name == profile_name), None)
-
-    if ref_profile is None:
-        available: str = ", ".join(p.name for p in profiles) or "(none)"
-        return tool_error(
-            f"LLM profile '{profile_name}' not found. Available profiles: {available}",
-            profile_name=profile_name,
-        )
+    from system.application import Application
+    try:
+        ref_profile = Application.current().llm_profile_store.get_profile(profile_name)
+    except LookupError as exc:
+        return tool_error(str(exc), profile_name=profile_name)
 
     if not ref_profile.llm_client_name:
         return tool_error(
@@ -211,7 +206,7 @@ registry.register(
         # 读取图片/音频/视频文件，将内容连同自定义 prompt 转发给指定名称的 LLM 配置，
         # 返回该 AI 的响应文本。
         # 与 Read 工具的多模态分支类似，但区别在于：
-        # - 按 profile_name（而非 uid）查找转发目标
+        # - 按 profile_name 查找转发目标
         # - agent 传入自定义 prompt（而非固定模板 prompt）
         # - 直接返回 AI 响应文本（不包装转发标签、不做能力探测）
         # 仅支持图片/音频/视频文件，不支持文本文件和目录。

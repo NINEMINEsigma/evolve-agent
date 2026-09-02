@@ -41,7 +41,7 @@ class StreamConsumer:
 
     def __init__(
         self,
-        llm: BaseLLMClient,
+        llm: BaseLLMClient | None,
         sink: AgentSink,
         character_name: str,
         cancel_event: asyncio.Event,
@@ -52,11 +52,11 @@ class StreamConsumer:
         self._cancel_event = cancel_event
 
     @property
-    def llm(self) -> BaseLLMClient:
+    def llm(self) -> BaseLLMClient | None:
         return self._llm
 
     @llm.setter
-    def llm(self, value: BaseLLMClient) -> None:
+    def llm(self, value: BaseLLMClient | None) -> None:
         self._llm = value
 
     async def consume(
@@ -69,6 +69,9 @@ class StreamConsumer:
         last_user_message: CharacterConversationMessage | None = None,
     ) -> LLMResponse:
         """消费流式响应，返回聚合后的 LLMResponse。"""
+        llm = self._llm
+        if llm is None:
+            raise RuntimeError("No LLM client available for stream consumption")
         ev = self._cancel_event
 
         content: str = ""
@@ -87,7 +90,7 @@ class StreamConsumer:
         content_start_ts: float | None = None
         content_end_ts: float | None = None
 
-        stream = self._llm.chat_stream(
+        stream = llm.chat_stream(
             messages, tools=tools, character=self._character_name,
             last_user_message=last_user_message,
         )

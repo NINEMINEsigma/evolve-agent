@@ -2,7 +2,7 @@ from enum import Enum
 from pydantic import BaseModel
 from typing import Any
 
-from .llm import MessageMetrics, LLMProfile
+from .llm import MessageMetrics
 
 # ---------------------------------------------------------------------------
 # WebSocket Message Types
@@ -33,6 +33,7 @@ class MessageType(str, Enum):
     PONG = "pong"
     SUBAGENT_UPDATE = "subagent_update"
     AGENTSPACE_LOCK = "agentspace_lock"
+    LLM_PROFILE_CHANGED = "llm_profile_changed"
 
 
 class Message(BaseModel):
@@ -78,5 +79,10 @@ class Message(BaseModel):
     emoji: str | None = None  # 工具调用/审批请求的图标
     danger_level: str | None = None  # CONFIRM_REQUEST：工具危险等级
     client_info: dict[str, Any] | None = None  # USER_MESSAGE：前端携带的客户端信息
-    llm_profile: LLMProfile | None = None  # USER_MESSAGE：前端携带的 LLM 配置覆盖
+    # USER_MESSAGE/重新生成：前端当前选择的 Profile 名称；空字符串表示无配置。
+    llm_profile_name: str | None = None
+    # LLM_PROFILE_CHANGED：Profile 名称变更或删除的全局通知。
+    operation: str | None = None
+    old_name: str | None = None
+    new_name: str | None = None
     metrics: MessageMetrics | None = None  # STREAM_DONE：计时元信息
