@@ -21,8 +21,10 @@ from rank_bm25 import BM25Okapi
 from abstract.tools.registry import registry, tool_error, tool_result
 from entity.puretype import ToolAvailability, ToolDangerLevel, Role, SessionStatus
 from entity.constant import (
-    SESSION_SEARCH_MAX_RESULTS_DEFAULT,
-    SESSION_SEARCH_MAX_RESULTS_LIMIT,
+    SESSION_SEARCH_MAX_MESSAGE_RESULTS_DEFAULT,
+    SESSION_SEARCH_MAX_MESSAGE_RESULTS_LIMIT,
+    SESSION_SEARCH_MAX_HISTORY_RESULTS_DEFAULT,
+    SESSION_SEARCH_MAX_HISTORY_RESULTS_LIMIT,
     SESSION_SEARCH_READ_LENGTH_DEFAULT,
     SESSION_SEARCH_READ_LENGTH_LIMIT,
     SESSION_SEARCH_PREVIEW_LENGTH,
@@ -205,16 +207,22 @@ async def _handle_recall_session(args: dict[str, Any]) -> dict:
     """混合检索全体会话：三通道召回 + RRF 融合排序。"""
     query: str = str(args.get("query", "")).strip()
     raw_methods = args.get("match_methods", ["exact", "substring", "bm25"])
-    max_results: int = int(args.get("max_results", SESSION_SEARCH_MAX_RESULTS_DEFAULT))
+    max_message_results: int = int(args.get("max_message_results", SESSION_SEARCH_MAX_MESSAGE_RESULTS_DEFAULT))
+    max_history_results: int = int(args.get("max_history_results", SESSION_SEARCH_MAX_HISTORY_RESULTS_DEFAULT))
     include_history: bool = bool(args.get("include_history", True))
 
     if not query:
         return tool_error("'query' is required")
 
-    if max_results <= 0:
-        max_results = SESSION_SEARCH_MAX_RESULTS_DEFAULT
-    if max_results > SESSION_SEARCH_MAX_RESULTS_LIMIT:
-        max_results = SESSION_SEARCH_MAX_RESULTS_LIMIT
+    if max_message_results <= 0:
+        max_message_results = SESSION_SEARCH_MAX_MESSAGE_RESULTS_DEFAULT
+    if max_message_results > SESSION_SEARCH_MAX_MESSAGE_RESULTS_LIMIT:
+        max_message_results = SESSION_SEARCH_MAX_MESSAGE_RESULTS_LIMIT
+
+    if max_history_results <= 0:
+        max_history_results = SESSION_SEARCH_MAX_HISTORY_RESULTS_DEFAULT
+    if max_history_results > SESSION_SEARCH_MAX_HISTORY_RESULTS_LIMIT:
+        max_history_results = SESSION_SEARCH_MAX_HISTORY_RESULTS_LIMIT
 
     if isinstance(raw_methods, list):
         methods = [m for m in raw_methods if m in _VALID_METHODS]
@@ -358,8 +366,8 @@ async def _handle_recall_session(args: dict[str, Any]) -> dict:
             "matched_methods": matched,
             "fusion_score": round(score, 6),
         })
-    if len(msg_list) > max_results:
-        msg_list = msg_list[:max_results]
+    if len(msg_list) > max_message_results:
+        msg_list = msg_list[:max_message_results]
 
     hist_fused = _rrf_fuse(hist_channel_ranks)
     hist_unit_by_key = {hist_key(u): u for u in hist_units}
@@ -379,9 +387,8 @@ async def _handle_recall_session(args: dict[str, Any]) -> dict:
         if u["summary"] and info.status == SessionStatus.archived:
             entry["summary"] = _extract_preview(u["summary"])
         hist_list.append(entry)
-    remaining = max_results - len(msg_list)
-    if remaining > 0 and len(hist_list) > remaining:
-        hist_list = hist_list[:remaining]
+    if len(hist_list) > max_history_results:
+        hist_list = hist_list[:max_history_results]
 
     return tool_result(
         success=True,
@@ -402,12 +409,13 @@ async def _handle_recall_session(args: dict[str, Any]) -> dict:
 # 消息内容为纯文本形式，包含消息附带的固定后缀和动态后缀。
 # 典型场景：配合 RecallSession 定位后拉取完整消息内容，或按窗口顺序浏览会话历史。
 # 副作用：加载会话历史时可能有短暂延迟。
-# 提醒：index 是过滤后的对话消息序号（0-based），不是原始消息序列位置；length 上限 100。
+# 提醒：index 是过滤后的对话消息序号（0-based），不是原始消息序列位置；length 上限受 SESSION_SEARCH_READ_LENGTH_LIMIT 约束。
 registry.register(
     name="ReadSession",
     toolset="core",
     schema={
-        "description": """Read a range of messages from a specific session by index.
+        "description": (
+            """Read a range of messages from a specific session by index.
 
 ## Prerequisites
 The session management system must be initialized. The target session must exist.
@@ -440,8 +448,10 @@ Loading a session's history may cause a brief delay.
 
 ## Notes
 - Index is 0-based, referring to the position in the filtered conversation message sequence (user + assistant only).
-- `length` is capped at 100 to limit response size.
-- Out-of-range indices are silently clipped.""",
+"""
+            f"- `length` is capped at {SESSION_SEARCH_READ_LENGTH_LIMIT} to limit response size.\n"
+            """- Out-of-range indices are silently clipped."""
+        ),
         "parameters": {
             "type": "object",
             "properties": {
@@ -457,9 +467,9 @@ Loading a session's history may cause a brief delay.
                 },
                 "length": {
                     "type": "integer",
-                    # 从 index 开始读取的消息条数。默认 10，上限 100。
-                    "description": """Number of messages to read starting from index. Default 10, max 100.""",
-                    "default": 10,
+                    # 从 index 开始读取的消息条数。
+                    "description": f"""Number of messages to read starting from index. Default {SESSION_SEARCH_READ_LENGTH_DEFAULT}, max {SESSION_SEARCH_READ_LENGTH_LIMIT}.""",
+                    "default": SESSION_SEARCH_READ_LENGTH_DEFAULT,
                 },
             },
             "required": ["session_id", "index"],
@@ -479,16 +489,17 @@ Loading a session's history may cause a brief delay.
 # exact: query 完全匹配消息内容、会话标题或标签；substring: query 是消息内容、标题或摘要的子串；
 # bm25: 词汇排序（query 分词：拉丁词元 + CJK 单字/二元），覆盖缩写与多词查询。
 # 所有通道经 RRF (k=60) 按名次融合，规避分数尺度不可比问题；结果含 fusion_score 与 matched_methods。
-# message_matches 每条含 session_id, session_title, message_index, role, character_name, preview(200字截断), matched_methods, fusion_score。
-# history_matches 每条含 session_id, title, tags, status, matched_methods, fusion_score, summary(归档会话, 200字截断)。
+# message_matches 每条含 session_id, session_title, message_index, role, character_name, preview(受 SESSION_SEARCH_PREVIEW_LENGTH 截断), matched_methods, fusion_score。
+# history_matches 每条含 session_id, title, tags, status, matched_methods, fusion_score, summary(归档会话, 受 SESSION_SEARCH_PREVIEW_LENGTH 截断)。
 # 典型场景：按关键词、缩写检索历史讨论，定位相关会话。
 # 副作用：无。
-# 提醒：结果总量截断到 max_results（默认 30）；使用 ReadSession 拉取完整消息内容。
+# 提醒：message 级结果截断到 max_message_results（受 SESSION_SEARCH_MAX_MESSAGE_RESULTS_DEFAULT/LIMIT 约束），history 级结果截断到 max_history_results（受 SESSION_SEARCH_MAX_HISTORY_RESULTS_DEFAULT/LIMIT 约束），两个上限独立；使用 ReadSession 拉取完整消息内容。
 registry.register(
     name="RecallSession",
     toolset="core",
     schema={
-        "description": """Hybrid search across all session histories: three recall channels fused by Reciprocal Rank Fusion (RRF).
+        "description": (
+            """Hybrid search across all session histories: three recall channels fused by Reciprocal Rank Fusion (RRF).
 
 ## Prerequisites
 The session management system must be initialized.
@@ -532,9 +543,9 @@ Runs the specified matching channels (exact, substring, bm25) across all session
 ```
 `fusion_score` is the RRF score used for ordering (higher is better).
 `summary` is only included for archived sessions.
-Message `preview` and history `summary` are truncated to 200 characters.
-
-## When to Use
+"""
+            f"Message `preview` and history `summary` are truncated to {SESSION_SEARCH_PREVIEW_LENGTH} characters.\n\n"
+            """## When to Use
 - Locating sessions by abbreviations, identifiers, or multi-word keywords (bm25 channel).
 - Precise lookups by title, tag, or exact phrase (exact/substring channels).
 
@@ -543,8 +554,12 @@ None.
 
 ## Notes
 - Only user and assistant messages are searched; tool calls and system prompts are excluded.
-- Results are capped at `max_results` (default 30) total across messages and histories.
-- Use `ReadSession` to fetch full message content for any matched index.""",
+"""
+            f"- Message matches are capped at `max_message_results` (default {SESSION_SEARCH_MAX_MESSAGE_RESULTS_DEFAULT}, max {SESSION_SEARCH_MAX_MESSAGE_RESULTS_LIMIT}); "
+            f"history matches are capped at `max_history_results` (default {SESSION_SEARCH_MAX_HISTORY_RESULTS_DEFAULT}, max {SESSION_SEARCH_MAX_HISTORY_RESULTS_LIMIT}). "
+            """The two limits are independent.
+- Use `ReadSession` to fetch full message content for any matched index."""
+        ),
         "parameters": {
             "type": "object",
             "properties": {
@@ -559,11 +574,17 @@ None.
                     # 使用的匹配通道列表。默认全部三种，经 RRF 融合排序。
                     "description": """Matching channels to use. Default: all three (exact, substring, bm25), fused by RRF.""",
                 },
-                "max_results": {
+                "max_message_results": {
                     "type": "integer",
-                    # 最终返回结果上限（message + history 合计）。默认 30。
-                    "description": """Maximum total results (messages + histories). Default 30.""",
-                    "default": 30,
+                    # message 级匹配结果上限。
+                    "description": f"""Maximum number of message-level matches to return. Default {SESSION_SEARCH_MAX_MESSAGE_RESULTS_DEFAULT}, max {SESSION_SEARCH_MAX_MESSAGE_RESULTS_LIMIT}.""",
+                    "default": SESSION_SEARCH_MAX_MESSAGE_RESULTS_DEFAULT,
+                },
+                "max_history_results": {
+                    "type": "integer",
+                    # history 级匹配结果上限。
+                    "description": f"""Maximum number of history-level matches to return. Default {SESSION_SEARCH_MAX_HISTORY_RESULTS_DEFAULT}, max {SESSION_SEARCH_MAX_HISTORY_RESULTS_LIMIT}.""",
+                    "default": SESSION_SEARCH_MAX_HISTORY_RESULTS_DEFAULT,
                 },
                 "include_history": {
                     "type": "boolean",

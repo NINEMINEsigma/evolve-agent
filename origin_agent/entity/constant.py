@@ -341,11 +341,17 @@ CRON_MAX_JOBS_PER_SESSION: int = 20
 # 会话搜索 (session_search.py)
 # ============================================================================
 
-# RecallSession 默认返回结果上限
-SESSION_SEARCH_MAX_RESULTS_DEFAULT: int = 30
+# RecallSession message 级结果默认上限
+SESSION_SEARCH_MAX_MESSAGE_RESULTS_DEFAULT: int = 20
 
-# RecallSession 返回结果硬上限
-SESSION_SEARCH_MAX_RESULTS_LIMIT: int = 100
+# RecallSession message 级结果硬上限
+SESSION_SEARCH_MAX_MESSAGE_RESULTS_LIMIT: int = 50
+
+# RecallSession history 级结果默认上限
+SESSION_SEARCH_MAX_HISTORY_RESULTS_DEFAULT: int = 10
+
+# RecallSession history 级结果硬上限
+SESSION_SEARCH_MAX_HISTORY_RESULTS_LIMIT: int = 50
 
 # ReadSession 默认读取消息条数
 SESSION_SEARCH_READ_LENGTH_DEFAULT: int = 10
