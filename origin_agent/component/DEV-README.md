@@ -95,6 +95,19 @@ component/
 
 ---
 
+## Agentspace 文件接触登记
+
+内置工具通过 `ToolContext.agentspace_access()` 把明确的 `ws:` 路径登记到当前 Agent 回复轮次：
+
+- `Read` 与单文件 `Grep` 登记精确文件；目录读取/搜索不锁整树。
+- `Write`、`PatchEdit` 登记目标；`Copy`、`Move` 同时登记源和目标；目录 `Move/Delete` 使用递归锁。
+- `RunCommand`、`RunPython` 在 `cwd` 为 `ws:` 时登记递归 cwd；`RunPython` 的明确 `ws:` script 另登记精确文件。
+- 登记失败时工具 fail-closed；非 `ws:` 命名空间保持原行为。
+- `Delete` 的 schema、危险等级、审批和永久删除行为完全不变。Agentspace 垃圾桶只属于网页编辑器的用户删除 API。
+- custom tools、MCP 和绕过应用的外部进程无法可靠事前识别路径，由 watcher 与版本冲突机制处理，不宣称预锁。
+
+---
+
 ## 审批系统
 
 ### `component/approval/`（目录化重构）

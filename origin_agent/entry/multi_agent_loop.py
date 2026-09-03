@@ -884,45 +884,50 @@ class MultiAgentLoop(BaseAgentLoop, IMainSessionLoop):
                 self.session_id, character_name, len(system_prompts),
             )
 
-        worker = MultiAgentWorker(
-            character_name=character_name,
-            system_prompts=system_prompts,
-            history=history_view,
-            tools=profile.tools,
-            llm_client=llm_client,
-            sink=self._sink,
-            loop=self,
-            max_context_tokens=profile.config.max_context_tokens,
-            max_output_tokens=profile.config.max_output_tokens,
-            llm_profile=profile.llm_profile,
-        )
-
+        round_id = self.begin_agentspace_round(character_name)
         try:
-            result = await worker.run()
-        except Exception:
-            logger.exception(
-                "Agent worker run failed | session=%s character=%s final=%s",
-                self.session_id, character_name, is_final_round,
+            worker = MultiAgentWorker(
+                character_name=character_name,
+                system_prompts=system_prompts,
+                history=history_view,
+                tools=profile.tools,
+                llm_client=llm_client,
+                sink=self._sink,
+                loop=self,
+                round_id=round_id,
+                max_context_tokens=profile.config.max_context_tokens,
+                max_output_tokens=profile.config.max_output_tokens,
+                llm_profile=profile.llm_profile,
             )
-            # 即使 worker 异常，也要把已累加的 token 消耗同步回 loop，避免部分消耗丢失
-            self._aggregate_worker_usage(worker)
-            # 持久化 worker 已收集的 metrics
-            if worker._collected_metrics and self._session_store is not None:
-                try:
-                    self._session_store.merge_message_metrics(worker._collected_metrics)
-                except Exception:
-                    logger.warning(
-                        "Failed to persist message metrics for session=%s", self.session_id, exc_info=True,
-                    )
-            raise
 
-        self._aggregate_worker_usage(worker, result)
+            try:
+                result = await worker.run()
+            except Exception:
+                logger.exception(
+                    "Agent worker run failed | session=%s character=%s final=%s",
+                    self.session_id, character_name, is_final_round,
+                )
+                # 即使 worker 异常，也要把已累加的 token 消耗同步回 loop，避免部分消耗丢失
+                self._aggregate_worker_usage(worker)
+                # 持久化 worker 已收集的 metrics
+                if worker._collected_metrics and self._session_store is not None:
+                    try:
+                        self._session_store.merge_message_metrics(worker._collected_metrics)
+                    except Exception:
+                        logger.warning(
+                            "Failed to persist message metrics for session=%s", self.session_id, exc_info=True,
+                        )
+                raise
 
-        logger.info(
-            "Agent worker done | session=%s character=%s token_usage=%d",
-            self.session_id, character_name, self._token_record.token_usage,
-        )
-        return result
+            self._aggregate_worker_usage(worker, result)
+
+            logger.info(
+                "Agent worker done | session=%s character=%s token_usage=%d",
+                self.session_id, character_name, self._token_record.token_usage,
+            )
+            return result
+        finally:
+            self.end_agentspace_round(character_name, round_id)
 
     def _aggregate_worker_usage(
         self,

@@ -1,7 +1,27 @@
-import { useReducer, useCallback } from "react";
-import type { FileEntry, OpenTab } from "../types";
-
-// ── 语言检测 ──────────────────────────────────────────────
+import { useCallback, useEffect, useMemo, useReducer, useRef } from "react";
+import type {
+  AgentspaceErrorState,
+  AgentspaceEvent,
+  DirectoryStateMap,
+  EntrySelection,
+  ExternalConflict,
+  FileEntry,
+  FileLock,
+  FileSnapshot,
+  OpenTab,
+  SyncState,
+  TrashEntry,
+} from "../types";
+import * as api from "../services/agentspaceApi";
+import { AgentspaceApiError } from "../services/agentspaceApi";
+import {
+  baseName,
+  isPathWithin,
+  joinPath,
+  parentPath,
+  rewritePathPrefix,
+  sortEntries,
+} from "../utils/agentspacePath";
 
 function getLanguageFromPath(path: string): string {
   const ext = path.split(".").pop()?.toLowerCase() || "";
@@ -16,285 +36,889 @@ function getLanguageFromPath(path: string): string {
   return map[ext] || "plaintext";
 }
 
-// ── State ──────────────────────────────────────────────────
+function genId(): string {
+  return typeof crypto !== "undefined" && "randomUUID" in crypto
+    ? crypto.randomUUID()
+    : Math.random().toString(36).slice(2);
+}
+
+function lockForPath(locks: FileLock[], path: string): FileLock[] {
+  return locks.filter((lock) =>
+    lock.path === path || (lock.recursive && isPathWithin(path, lock.path)),
+  );
+}
 
 interface AgentspaceState {
-  dirContents: Record<string, FileEntry[]>;
+  directories: DirectoryStateMap;
+  expandedPaths: Set<string>;
+  selection: EntrySelection;
   openTabs: OpenTab[];
   activeTabId: string | null;
-  loading: boolean;
-  error: string | null;
-  locked: boolean;
-  currentDir: string;
+  locks: FileLock[];
+  trashEntries: TrashEntry[];
+  trashExpanded: boolean;
+  syncState: SyncState;
+  error: AgentspaceErrorState;
 }
 
 type Action =
-  | { type: "LOAD_DIR"; payload: { path: string; entries: FileEntry[] } }
-  | { type: "UNLOAD_DIR"; payload: string }
-  | { type: "OPEN_TAB"; payload: OpenTab }
-  | { type: "CLOSE_TAB"; payload: string }
-  | { type: "SET_ACTIVE_TAB"; payload: string }
-  | { type: "UPDATE_CONTENT"; payload: { id: string; content: string } }
-  | { type: "SAVE_TAB"; payload: string }
-  | { type: "RENAME_TAB"; payload: { oldPath: string; newPath: string; newName: string } }
-  | { type: "SET_LOADING"; payload: boolean }
-  | { type: "SET_ERROR"; payload: string | null }
-  | { type: "SET_LOCKED"; payload: boolean }
-  | { type: "SET_CURRENT_DIR"; payload: string };
+  | { type: "DIR_LOADING"; path: string }
+  | { type: "DIR_LOADED"; path: string; entries: FileEntry[] }
+  | { type: "DIR_ERROR"; path: string; message: string }
+  | { type: "SET_EXPANDED"; path: string; expanded: boolean }
+  | { type: "SELECT"; selection: EntrySelection }
+  | { type: "OPEN_TAB"; tab: OpenTab }
+  | { type: "SET_ACTIVE"; id: string }
+  | { type: "CLOSE_TAB"; id: string }
+  | { type: "UPDATE_CONTENT"; id: string; content: string }
+  | { type: "APPLY_SNAPSHOT"; id: string; snapshot: FileSnapshot }
+  | { type: "SET_CONFLICT"; id: string; conflict: ExternalConflict }
+  | { type: "REWRITE_PATH"; oldPath: string; newPath: string }
+  | { type: "REMOVE_PATH"; path: string }
+  | { type: "SET_LOCKS"; locks: FileLock[] }
+  | { type: "SET_TRASH"; entries: TrashEntry[] }
+  | { type: "SET_TRASH_EXPANDED"; expanded: boolean }
+  | { type: "SET_SYNC"; state: SyncState }
+  | { type: "SET_ERROR"; error: AgentspaceErrorState }
+  | { type: "USE_DISK"; id: string }
+  | { type: "DISCARD_DELETED"; id: string };
+
+const initialState: AgentspaceState = {
+  directories: {},
+  expandedPaths: new Set(),
+  selection: null,
+  openTabs: [],
+  activeTabId: null,
+  locks: [],
+  trashEntries: [],
+  trashExpanded: false,
+  syncState: "connecting",
+  error: null,
+};
 
 function reducer(state: AgentspaceState, action: Action): AgentspaceState {
   switch (action.type) {
-    case "LOAD_DIR": {
-      const next = { ...state.dirContents, [action.payload.path]: action.payload.entries };
-      return { ...state, dirContents: next, loading: false, error: null };
+    case "DIR_LOADING":
+      return {
+        ...state,
+        directories: {
+          ...state.directories,
+          [action.path]: {
+            entries: state.directories[action.path]?.entries || [],
+            loading: true,
+            error: null,
+          },
+        },
+      };
+    case "DIR_LOADED":
+      return {
+        ...state,
+        directories: {
+          ...state.directories,
+          [action.path]: {
+            entries: sortEntries(action.entries),
+            loading: false,
+            error: null,
+          },
+        },
+      };
+    case "DIR_ERROR":
+      return {
+        ...state,
+        directories: {
+          ...state.directories,
+          [action.path]: {
+            entries: state.directories[action.path]?.entries || [],
+            loading: false,
+            error: action.message,
+          },
+        },
+      };
+    case "SET_EXPANDED": {
+      const expanded = new Set(state.expandedPaths);
+      if (action.expanded) expanded.add(action.path);
+      else expanded.delete(action.path);
+      return { ...state, expandedPaths: expanded };
     }
-    case "UNLOAD_DIR": {
-      const next = { ...state.dirContents };
-      delete next[action.payload];
-      return { ...state, dirContents: next };
-    }
+    case "SELECT":
+      return { ...state, selection: action.selection };
     case "OPEN_TAB": {
-      const existing = state.openTabs.find((t) => t.path === action.payload.path);
+      const existing = state.openTabs.find((tab) => tab.path === action.tab.path);
       if (existing) return { ...state, activeTabId: existing.id };
       return {
         ...state,
-        openTabs: [...state.openTabs, action.payload],
-        activeTabId: action.payload.id,
+        openTabs: [...state.openTabs, action.tab],
+        activeTabId: action.tab.id,
       };
     }
+    case "SET_ACTIVE":
+      return { ...state, activeTabId: action.id };
     case "CLOSE_TAB": {
-      const tabs = state.openTabs.filter((t) => t.id !== action.payload);
-      let activeId = state.activeTabId;
-      if (state.activeTabId === action.payload) {
-        activeId = tabs.length > 0 ? tabs[tabs.length - 1].id : null;
+      const index = state.openTabs.findIndex((tab) => tab.id === action.id);
+      if (index < 0) return state;
+      const tabs = state.openTabs.filter((tab) => tab.id !== action.id);
+      let activeTabId = state.activeTabId;
+      if (activeTabId === action.id) {
+        activeTabId = tabs[index]?.id || tabs[index - 1]?.id || null;
       }
-      return { ...state, openTabs: tabs, activeTabId: activeId };
+      return { ...state, openTabs: tabs, activeTabId };
     }
-    case "SET_ACTIVE_TAB":
-      return { ...state, activeTabId: action.payload };
-    case "UPDATE_CONTENT": {
-      const tabs = state.openTabs.map((t) =>
-        t.id === action.payload.id ? { ...t, content: action.payload.content, isDirty: action.payload.content !== t.originalContent } : t
+    case "UPDATE_CONTENT":
+      return {
+        ...state,
+        openTabs: state.openTabs.map((tab) =>
+          tab.id === action.id
+            ? {
+                ...tab,
+                content: action.content,
+                isDirty: action.content !== tab.originalContent,
+              }
+            : tab,
+        ),
+      };
+    case "APPLY_SNAPSHOT":
+      return {
+        ...state,
+        openTabs: state.openTabs.map((tab) =>
+          tab.id === action.id
+            ? {
+                ...tab,
+                path: action.snapshot.path,
+                name: baseName(action.snapshot.path),
+                content: action.snapshot.content,
+                originalContent: action.snapshot.content,
+                version: action.snapshot.version,
+                modifiedNs: action.snapshot.modified_ns,
+                isDirty: false,
+                conflict: null,
+              }
+            : tab,
+        ),
+      };
+    case "SET_CONFLICT":
+      return {
+        ...state,
+        openTabs: state.openTabs.map((tab) =>
+          tab.id === action.id ? { ...tab, conflict: action.conflict } : tab,
+        ),
+      };
+    case "REWRITE_PATH": {
+      const directories: DirectoryStateMap = {};
+      for (const [path, directory] of Object.entries(state.directories)) {
+        const nextKey = isPathWithin(path, action.oldPath)
+          ? rewritePathPrefix(path, action.oldPath, action.newPath)
+          : path;
+        directories[nextKey] = {
+          ...directory,
+          entries: sortEntries(directory.entries.map((entry) => {
+            if (!isPathWithin(entry.path, action.oldPath)) return entry;
+            const nextPath = rewritePathPrefix(entry.path, action.oldPath, action.newPath);
+            return { ...entry, path: nextPath, name: baseName(nextPath) };
+          })),
+        };
+      }
+      const expandedPaths = new Set(
+        [...state.expandedPaths].map((path) =>
+          isPathWithin(path, action.oldPath)
+            ? rewritePathPrefix(path, action.oldPath, action.newPath)
+            : path,
+        ),
       );
-      return { ...state, openTabs: tabs };
+      const selection = state.selection && isPathWithin(state.selection.path, action.oldPath)
+        ? { ...state.selection, path: rewritePathPrefix(state.selection.path, action.oldPath, action.newPath) }
+        : state.selection;
+      const openTabs = state.openTabs.map((tab) => {
+        if (!isPathWithin(tab.path, action.oldPath)) return tab;
+        const path = rewritePathPrefix(tab.path, action.oldPath, action.newPath);
+        return { ...tab, path, name: baseName(path) };
+      });
+      return { ...state, directories, expandedPaths, selection, openTabs };
     }
-    case "SAVE_TAB": {
-      const tabs = state.openTabs.map((t) =>
-        t.id === action.payload ? { ...t, originalContent: t.content, isDirty: false } : t
+    case "REMOVE_PATH": {
+      const removedIds = new Set(
+        state.openTabs.filter((tab) => isPathWithin(tab.path, action.path)).map((tab) => tab.id),
       );
-      return { ...state, openTabs: tabs };
-    }
-    case "RENAME_TAB": {
-      const tabs = state.openTabs.map((t) =>
-        t.path === action.payload.oldPath ? { ...t, path: action.payload.newPath, name: action.payload.newName } : t
+      const openTabs = state.openTabs.filter((tab) => !removedIds.has(tab.id));
+      const activeTabId = state.activeTabId && removedIds.has(state.activeTabId)
+        ? openTabs[0]?.id || null
+        : state.activeTabId;
+      const directories = Object.fromEntries(
+        Object.entries(state.directories).filter(([path]) => !isPathWithin(path, action.path)),
       );
-      return { ...state, openTabs: tabs };
+      const expandedPaths = new Set(
+        [...state.expandedPaths].filter((path) => !isPathWithin(path, action.path)),
+      );
+      const selection = state.selection && isPathWithin(state.selection.path, action.path)
+        ? null
+        : state.selection;
+      return { ...state, openTabs, activeTabId, directories, expandedPaths, selection };
     }
-    case "SET_LOADING":
-      return { ...state, loading: action.payload };
+    case "SET_LOCKS": {
+      const openTabs = state.openTabs.map((tab) => {
+        const matches = lockForPath(action.locks, tab.path);
+        return {
+          ...tab,
+          isLocked: matches.length > 0,
+          lockOwners: matches.flatMap((lock) => lock.owners),
+        };
+      });
+      return { ...state, locks: action.locks, openTabs };
+    }
+    case "SET_TRASH":
+      return { ...state, trashEntries: action.entries };
+    case "SET_TRASH_EXPANDED":
+      return { ...state, trashExpanded: action.expanded };
+    case "SET_SYNC":
+      return { ...state, syncState: action.state };
     case "SET_ERROR":
-      return { ...state, error: action.payload, loading: false };
-    case "SET_LOCKED":
-      return { ...state, locked: action.payload };
-    case "SET_CURRENT_DIR":
-      return { ...state, currentDir: action.payload };
+      return { ...state, error: action.error };
+    case "USE_DISK": {
+      const tab = state.openTabs.find((item) => item.id === action.id);
+      if (!tab?.conflict || tab.conflict.kind !== "modified") return state;
+      return {
+        ...state,
+        openTabs: state.openTabs.map((item) =>
+          item.id === action.id
+            ? {
+                ...item,
+                content: tab.conflict!.diskContent || "",
+                originalContent: tab.conflict!.diskContent || "",
+                version: tab.conflict!.diskVersion || "",
+                isDirty: false,
+                conflict: null,
+              }
+            : item,
+        ),
+      };
+    }
+    case "DISCARD_DELETED":
+      return reducer(state, { type: "CLOSE_TAB", id: action.id });
     default:
       return state;
   }
 }
 
-const initialState: AgentspaceState = {
-  dirContents: {},
-  openTabs: [],
-  activeTabId: null,
-  loading: false,
-  error: null,
-  locked: false,
-  currentDir: "",
-};
-
-function genId(): string {
-  return Math.random().toString(36).substring(2, 10);
+export interface UseAgentspaceResult {
+  directories: DirectoryStateMap;
+  expandedPaths: Set<string>;
+  selection: EntrySelection;
+  openTabs: OpenTab[];
+  activeTabId: string | null;
+  locks: FileLock[];
+  trashEntries: TrashEntry[];
+  trashExpanded: boolean;
+  syncState: SyncState;
+  error: AgentspaceErrorState;
+  hasDirtyTabs: boolean;
+  loadDirectory(path: string, force?: boolean): Promise<void>;
+  refreshExpandedDirectories(): Promise<void>;
+  toggleDirectory(path: string): Promise<void>;
+  selectEntry(entry: FileEntry): void;
+  openFile(path: string): Promise<void>;
+  setActiveTab(id: string): void;
+  updateContent(id: string, content: string): void;
+  saveFile(id: string, expectedVersionOverride?: string | null): Promise<boolean>;
+  closeCleanTab(id: string): void;
+  discardAndCloseTab(id: string): void;
+  createFile(parent: string, name: string): Promise<void>;
+  createFolder(parent: string, name: string): Promise<void>;
+  renamePath(path: string, newName: string): Promise<void>;
+  movePathToTrash(path: string): Promise<void>;
+  setTrashExpanded(expanded: boolean): void;
+  restoreTrashEntry(entryId: string): Promise<void>;
+  purgeTrashEntry(entryId: string): Promise<void>;
+  emptyTrash(): Promise<void>;
+  resolveConflictWithDisk(tabId: string): void;
+  resolveConflictWithLocal(tabId: string): Promise<boolean>;
+  recreateDeletedConflict(tabId: string): Promise<boolean>;
+  discardDeletedConflict(tabId: string): void;
+  clearError(): void;
 }
 
-// ── API helpers ────────────────────────────────────────────
+export function useAgentspace(): UseAgentspaceResult {
+  const [state, rawDispatch] = useReducer(reducer, initialState);
+  const stateRef = useRef(state);
+  const dispatch = useCallback((action: Action) => {
+    stateRef.current = reducer(stateRef.current, action);
+    rawDispatch(action);
+  }, []);
+  const requestEpochRef = useRef<Record<string, number>>({});
+  const generationRef = useRef<Record<string, number>>({});
+  const globalGenerationRef = useRef(0);
+  const lastSequenceRef = useRef(0);
+  const operationVersionsRef = useRef(new Map<string, { path: string; version: string | null; sequence: number }>());
+  const pathVersionsRef = useRef(new Map<string, string | null>());
+  const pendingOperationsRef = useRef(new Set<string>());
+  const pendingWriteVersionsRef = useRef(new Map<string, string>());
 
-async function apiGet(path: string): Promise<any> {
-  const res = await fetch(path);
-  if (!res.ok) {
-    const detail = await res.text();
-    throw new Error(detail || `HTTP ${res.status}`);
-  }
-  return res.json();
-}
+  useEffect(() => {
+    stateRef.current = state;
+  }, [state]);
 
-async function apiPost(path: string, body: Record<string, string>): Promise<any> {
-  const res = await fetch(path, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
-  if (!res.ok) {
-    const detail = await res.text();
-    throw new Error(detail || `HTTP ${res.status}`);
-  }
-  return res.json();
-}
-
-// ── Hook ───────────────────────────────────────────────────
-
-export function useAgentspace() {
-  const [state, dispatch] = useReducer(reducer, initialState);
-
-  /** 加载指定路径的目录内容 */
-  const loadDirectory = useCallback(async (path: string) => {
-    dispatch({ type: "SET_LOADING", payload: true });
-    try {
-      const data = await apiGet(`/api/agentspace/list?path=${encodeURIComponent(path)}`);
-      dispatch({ type: "LOAD_DIR", payload: { path, entries: data.entries || [] } });
-      dispatch({ type: "SET_CURRENT_DIR", payload: path });
-    } catch (e: any) {
-      dispatch({ type: "SET_ERROR", payload: e.message });
-    }
+  const nextEpoch = useCallback((key: string) => {
+    const next = (requestEpochRef.current[key] || 0) + 1;
+    requestEpochRef.current[key] = next;
+    return next;
   }, []);
 
-  /** 展开文件夹：如果未缓存则加载，已缓存则直接展开；折叠时移除缓存 */
-  const toggleDir = useCallback(async (path: string) => {
-    if (state.dirContents[path]) {
-      // 已缓存 → 折叠
-      dispatch({ type: "UNLOAD_DIR", payload: path });
-    } else {
-      // 未缓存 → 加载并展开
-      await loadDirectory(path);
+  const generation = useCallback((path: string) =>
+    (generationRef.current[path] || 0) + globalGenerationRef.current, []);
+
+  const bumpGeneration = useCallback((path: string | null) => {
+    if (path === null) return;
+    generationRef.current[path] = (generationRef.current[path] || 0) + 1;
+    const parent = parentPath(path);
+    generationRef.current[parent] = (generationRef.current[parent] || 0) + 1;
+  }, []);
+
+  const setError = useCallback((message: string, retry: (() => Promise<void>) | null = null) => {
+    dispatch({ type: "SET_ERROR", error: { message, retry } });
+  }, []);
+
+  const loadDirectory: UseAgentspaceResult["loadDirectory"] = useCallback(async (path: string, force = false) => {
+    const key = `dir:${path}`;
+    if (!force && stateRef.current.directories[path]?.loading) return;
+    const epoch = nextEpoch(key);
+    const generationAtStart = generation(path);
+    const sequenceAtStart = lastSequenceRef.current;
+    dispatch({ type: "DIR_LOADING", path });
+    try {
+      const entries = await api.listDirectory(path);
+      if (
+        requestEpochRef.current[key] !== epoch
+        || generation(path) !== generationAtStart
+        || lastSequenceRef.current > sequenceAtStart
+      ) return;
+      dispatch({ type: "DIR_LOADED", path, entries: sortEntries(entries) });
+    } catch (error) {
+      if (requestEpochRef.current[key] !== epoch) return;
+      const message = error instanceof Error ? error.message : "目录加载失败";
+      dispatch({ type: "DIR_ERROR", path, message });
+      setError(message, () => loadDirectory(path, true));
     }
-  }, [state.dirContents, loadDirectory]);
+  }, [generation, nextEpoch, setError]);
 
-  /** 刷新当前目录 */
-  const refresh = useCallback(async () => {
-    await loadDirectory(state.currentDir);
-  }, [state.currentDir, loadDirectory]);
+  const loadTrashEntries: () => Promise<void> = useCallback(async () => {
+    const key = "trash";
+    const epoch = nextEpoch(key);
+    try {
+      const entries = await api.listTrash();
+      if (requestEpochRef.current[key] === epoch) {
+        dispatch({ type: "SET_TRASH", entries });
+      }
+    } catch (error) {
+      setError(error instanceof Error ? error.message : "垃圾桶加载失败", loadTrashEntries);
+    }
+  }, [nextEpoch, setError]);
 
-  const openFile = useCallback(async (path: string) => {
-    const existing = state.openTabs.find((t) => t.path === path);
+  const loadLocks: () => Promise<void> = useCallback(async () => {
+    try {
+      dispatch({ type: "SET_LOCKS", locks: await api.getLocks() });
+    } catch (error) {
+      setError(error instanceof Error ? error.message : "文件锁状态加载失败", loadLocks);
+    }
+  }, [setError]);
+
+  const refreshExpandedDirectories = useCallback(async () => {
+    const paths = ["", ...stateRef.current.expandedPaths];
+    await Promise.all([...new Set(paths)].map((path) => loadDirectory(path, true)));
+  }, [loadDirectory]);
+
+  const toggleDirectory = useCallback(async (path: string) => {
+    const expanded = stateRef.current.expandedPaths.has(path);
+    dispatch({ type: "SET_EXPANDED", path, expanded: !expanded });
+    if (!expanded) await loadDirectory(path, true);
+  }, [loadDirectory]);
+
+  const selectEntry = useCallback((entry: FileEntry) => {
+    dispatch({ type: "SELECT", selection: { path: entry.path, kind: entry.kind } });
+  }, []);
+
+  const openFile: UseAgentspaceResult["openFile"] = useCallback(async (path: string) => {
+    const existing = stateRef.current.openTabs.find((tab) => tab.path === path);
     if (existing) {
-      dispatch({ type: "SET_ACTIVE_TAB", payload: existing.id });
+      dispatch({ type: "SET_ACTIVE", id: existing.id });
       return;
     }
-    dispatch({ type: "SET_LOADING", payload: true });
+    const key = `file:${path}`;
+    const epoch = nextEpoch(key);
+    const generationAtStart = generation(path);
+    const sequenceAtStart = lastSequenceRef.current;
     try {
-      const data = await apiGet(`/api/agentspace/read?path=${encodeURIComponent(path)}`);
-      const name = path.split("/").pop() || path;
-      const tab: OpenTab = {
-        id: genId(),
-        path,
-        name,
-        content: data.content,
-        originalContent: data.content,
-        isDirty: false,
-        language: getLanguageFromPath(path),
-      };
-      dispatch({ type: "OPEN_TAB", payload: tab });
-    } catch (e: any) {
-      dispatch({ type: "SET_ERROR", payload: e.message });
+      const snapshot = await api.readFile(path);
+      if (
+        requestEpochRef.current[key] !== epoch
+        || generation(path) !== generationAtStart
+        || lastSequenceRef.current > sequenceAtStart
+      ) return;
+      const matchingLocks = lockForPath(stateRef.current.locks, path);
+      dispatch({
+        type: "OPEN_TAB",
+        tab: {
+          id: genId(),
+          path,
+          name: baseName(path),
+          content: snapshot.content,
+          originalContent: snapshot.content,
+          isDirty: false,
+          language: getLanguageFromPath(path),
+          version: snapshot.version,
+          modifiedNs: snapshot.modified_ns,
+          isLocked: matchingLocks.length > 0,
+          lockOwners: matchingLocks.flatMap((lock) => lock.owners),
+          conflict: null,
+        },
+      });
+    } catch (error) {
+      setError(error instanceof Error ? error.message : "文件打开失败", () => openFile(path));
     }
-  }, [state.openTabs]);
+  }, [generation, nextEpoch, setError]);
 
-  const saveFile = useCallback(async (tabId: string) => {
-    const tab = state.openTabs.find((t) => t.id === tabId);
-    if (!tab || !tab.isDirty) return;
+  const saveFile: UseAgentspaceResult["saveFile"] = useCallback(async (
+    id: string,
+    expectedVersionOverride?: string | null,
+  ): Promise<boolean> => {
+    const tab = stateRef.current.openTabs.find((item) => item.id === id);
+    if (!tab || (!tab.isDirty && expectedVersionOverride === undefined)) return true;
+    if (tab.isLocked) {
+      setError(
+        "该文件正在被 Agent 使用，请等待当前回复结束。",
+        async () => { await saveFile(id, expectedVersionOverride); },
+      );
+      return false;
+    }
+    if (tab.conflict && expectedVersionOverride === undefined) {
+      setError("请先在冲突比较窗口中选择要保留的版本。", null);
+      return false;
+    }
+    const key = `save:${tab.path}`;
+    const epoch = nextEpoch(key);
+    const generationAtStart = generation(tab.path);
+    const sequenceAtStart = lastSequenceRef.current;
+    const mutationId = api.createOperationId();
+    const normalizedWriteVersion = await api.getTextVersion(tab.content);
+    pendingOperationsRef.current.add(mutationId);
+    pendingWriteVersionsRef.current.set(tab.path, normalizedWriteVersion);
     try {
-      await apiPost("/api/agentspace/write", { path: tab.path, content: tab.content });
-      dispatch({ type: "SAVE_TAB", payload: tabId });
-    } catch (e: any) {
-      dispatch({ type: "SET_ERROR", payload: e.message });
+      const snapshot = await api.writeFile(
+        tab.path,
+        tab.content,
+        expectedVersionOverride === undefined ? tab.version : expectedVersionOverride,
+        mutationId,
+      );
+      if (requestEpochRef.current[key] !== epoch) return false;
+      if (
+        generation(tab.path) !== generationAtStart
+        && pathVersionsRef.current.get(tab.path) !== snapshot.version
+      ) return false;
+      const conflict = stateRef.current.openTabs.find((item) => item.id === id)?.conflict;
+      if (
+        conflict
+        && conflict.detectedSequence > sequenceAtStart
+        && pathVersionsRef.current.get(tab.path) !== snapshot.version
+        && pathVersionsRef.current.get(tab.path) !== normalizedWriteVersion
+      ) return false;
+      const operation = snapshot.operation_id
+        ? operationVersionsRef.current.get(snapshot.operation_id)
+        : null;
+      if (operation && (operation.path !== snapshot.path || operation.version !== snapshot.version)) {
+        return false;
+      }
+      dispatch({ type: "APPLY_SNAPSHOT", id, snapshot });
+      return true;
+    } catch (error) {
+      if (error instanceof AgentspaceApiError && error.status === 409) {
+        try {
+          const disk = await api.readFile(tab.path);
+          const localVersion = await api.getTextVersion(tab.content);
+          if (disk.version === localVersion) {
+            dispatch({ type: "APPLY_SNAPSHOT", id, snapshot: disk });
+            return true;
+          }
+          dispatch({
+            type: "SET_CONFLICT",
+            id,
+            conflict: {
+              kind: "modified",
+              diskContent: disk.content,
+              diskVersion: disk.version,
+              detectedSequence: lastSequenceRef.current,
+            },
+          });
+        } catch (readError) {
+          if (readError instanceof AgentspaceApiError && readError.status === 404) {
+            dispatch({
+              type: "SET_CONFLICT",
+              id,
+              conflict: {
+                kind: "deleted",
+                diskContent: null,
+                diskVersion: null,
+                detectedSequence: lastSequenceRef.current,
+              },
+            });
+          } else {
+            setError(readError instanceof Error ? readError.message : "冲突内容读取失败", null);
+          }
+        }
+        return false;
+      }
+      if (error instanceof AgentspaceApiError && error.status === 423 && error.detail.locks) {
+        dispatch({ type: "SET_LOCKS", locks: error.detail.locks });
+      }
+      setError(
+        error instanceof Error ? error.message : "文件保存失败",
+        async () => { await saveFile(id, expectedVersionOverride); },
+      );
+      return false;
+    } finally {
+      pendingOperationsRef.current.delete(mutationId);
+      if (pendingWriteVersionsRef.current.get(tab.path) === normalizedWriteVersion) {
+        pendingWriteVersionsRef.current.delete(tab.path);
+      }
     }
-  }, [state.openTabs]);
+  }, [nextEpoch, setError]);
 
-  const closeTab = useCallback((tabId: string) => {
-    dispatch({ type: "CLOSE_TAB", payload: tabId });
+  const closeCleanTab = useCallback((id: string) => {
+    const tab = stateRef.current.openTabs.find((item) => item.id === id);
+    if (tab && !tab.isDirty) dispatch({ type: "CLOSE_TAB", id });
   }, []);
 
-  const setActiveTab = useCallback((tabId: string) => {
-    dispatch({ type: "SET_ACTIVE_TAB", payload: tabId });
+  const discardAndCloseTab = useCallback((id: string) => {
+    dispatch({ type: "CLOSE_TAB", id });
   }, []);
 
-  const updateContent = useCallback((tabId: string, content: string) => {
-    dispatch({ type: "UPDATE_CONTENT", payload: { id: tabId, content } });
+  const setActiveTab = useCallback((id: string) => dispatch({ type: "SET_ACTIVE", id }), []);
+  const updateContent = useCallback((id: string, content: string) => {
+    dispatch({ type: "UPDATE_CONTENT", id, content });
   }, []);
 
-  const createFile = useCallback(async (parentDir: string, name: string) => {
-    const path = parentDir ? `${parentDir}/${name}` : name;
+  const createFile: UseAgentspaceResult["createFile"] = useCallback(async (parent: string, name: string) => {
+    const path = joinPath(parent, name);
     try {
-      await apiPost("/api/agentspace/write", { path, content: "" });
-      await loadDirectory(parentDir);
-    } catch (e: any) {
-      dispatch({ type: "SET_ERROR", payload: e.message });
+      await api.writeFile(path, "", null);
+      await loadDirectory(parent, true);
+      await openFile(path);
+    } catch (error) {
+      setError(error instanceof Error ? error.message : "文件创建失败", () => createFile(parent, name));
     }
-  }, [loadDirectory]);
+  }, [loadDirectory, openFile, setError]);
 
-  const createFolder = useCallback(async (parentDir: string, name: string) => {
-    const path = parentDir ? `${parentDir}/${name}` : name;
+  const createFolder: UseAgentspaceResult["createFolder"] = useCallback(async (parent: string, name: string) => {
+    const path = joinPath(parent, name);
     try {
-      await apiPost("/api/agentspace/mkdir", { path });
-      await loadDirectory(parentDir);
-    } catch (e: any) {
-      dispatch({ type: "SET_ERROR", payload: e.message });
+      await api.createDirectory(path);
+      await loadDirectory(parent, true);
+    } catch (error) {
+      setError(error instanceof Error ? error.message : "文件夹创建失败", () => createFolder(parent, name));
     }
-  }, [loadDirectory]);
+  }, [loadDirectory, setError]);
 
-  const deletePath = useCallback(async (path: string) => {
+  const renamePath: UseAgentspaceResult["renamePath"] = useCallback(async (path: string, newName: string) => {
     try {
-      await apiPost("/api/agentspace/delete", { path });
-      const relatedTab = state.openTabs.find((t) => t.path === path || t.path.startsWith(path + "/"));
-      if (relatedTab) dispatch({ type: "CLOSE_TAB", payload: relatedTab.id });
-      const parentDir = path.substring(0, path.lastIndexOf("/"));
-      await loadDirectory(parentDir);
-    } catch (e: any) {
-      dispatch({ type: "SET_ERROR", payload: e.message });
+      const result = await api.renamePath(path, newName);
+      dispatch({ type: "REWRITE_PATH", oldPath: result.old_path, newPath: result.new_path });
+      await loadDirectory(parentPath(result.new_path), true);
+    } catch (error) {
+      setError(error instanceof Error ? error.message : "重命名失败", () => renamePath(path, newName));
     }
-  }, [state.openTabs, loadDirectory]);
+  }, [loadDirectory, setError]);
 
-  const renamePath = useCallback(async (oldPath: string, newName: string) => {
-    const parentDir = oldPath.substring(0, oldPath.lastIndexOf("/"));
-    const newPath = parentDir ? `${parentDir}/${newName}` : newName;
-    try {
-      await apiPost("/api/agentspace/rename", { oldPath, newPath });
-      dispatch({ type: "RENAME_TAB", payload: { oldPath, newPath, newName } });
-      await loadDirectory(parentDir);
-    } catch (e: any) {
-      dispatch({ type: "SET_ERROR", payload: e.message });
+  const movePathToTrash: UseAgentspaceResult["movePathToTrash"] = useCallback(async (path: string) => {
+    const dirty = stateRef.current.openTabs.some((tab) => isPathWithin(tab.path, path) && tab.isDirty);
+    if (dirty) {
+      setError("该路径仍有未保存标签，请先处理后再移入垃圾桶。", null);
+      return;
     }
-  }, [loadDirectory]);
+    try {
+      await api.moveToTrash(path);
+      dispatch({ type: "REMOVE_PATH", path });
+      await Promise.all([loadDirectory(parentPath(path), true), loadTrashEntries()]);
+    } catch (error) {
+      setError(error instanceof Error ? error.message : "移入垃圾桶失败", () => movePathToTrash(path));
+    }
+  }, [loadDirectory, loadTrashEntries, setError]);
 
-  const loadLockStatus = useCallback(async () => {
+  const restoreTrashEntry: UseAgentspaceResult["restoreTrashEntry"] = useCallback(async (entryId: string) => {
     try {
-      const data = await apiGet("/api/agentspace/lock");
-      dispatch({ type: "SET_LOCKED", payload: data.locked });
-    } catch {
-      // 静默失败
+      const result = await api.restoreTrash(entryId);
+      await Promise.all([
+        loadDirectory(parentPath(result.restored_path), true),
+        loadTrashEntries(),
+      ]);
+    } catch (error) {
+      setError(error instanceof Error ? error.message : "恢复失败", () => restoreTrashEntry(entryId));
     }
+  }, [loadDirectory, loadTrashEntries, setError]);
+
+  const purgeTrashEntry: UseAgentspaceResult["purgeTrashEntry"] = useCallback(async (entryId: string) => {
+    try {
+      await api.purgeTrash(entryId);
+      await loadTrashEntries();
+    } catch (error) {
+      setError(error instanceof Error ? error.message : "永久删除失败", () => purgeTrashEntry(entryId));
+    }
+  }, [loadTrashEntries, setError]);
+
+  const emptyTrash: UseAgentspaceResult["emptyTrash"] = useCallback(async () => {
+    try {
+      const result = await api.emptyTrash();
+      await loadTrashEntries();
+      if (result.failures.length) {
+        setError(`有 ${result.failures.length} 个垃圾桶条目清理失败。`, emptyTrash);
+      }
+    } catch (error) {
+      setError(error instanceof Error ? error.message : "清空垃圾桶失败", emptyTrash);
+    }
+  }, [loadTrashEntries, setError]);
+
+  const resolveConflictWithDisk = useCallback((tabId: string) => {
+    dispatch({ type: "USE_DISK", id: tabId });
   }, []);
+
+  const resolveConflictWithLocal = useCallback(async (tabId: string): Promise<boolean> => {
+    const tab = stateRef.current.openTabs.find((item) => item.id === tabId);
+    if (!tab?.conflict || tab.conflict.kind !== "modified") return false;
+    return saveFile(tabId, tab.conflict.diskVersion);
+  }, [saveFile]);
+
+  const recreateDeletedConflict = useCallback(async (tabId: string): Promise<boolean> => {
+    const tab = stateRef.current.openTabs.find((item) => item.id === tabId);
+    if (!tab?.conflict || tab.conflict.kind !== "deleted") return false;
+    return saveFile(tabId, null);
+  }, [saveFile]);
+
+  const discardDeletedConflict = useCallback((tabId: string) => {
+    dispatch({ type: "DISCARD_DELETED", id: tabId });
+  }, []);
+
+  useEffect(() => {
+    const handleEvent = (event: AgentspaceEvent) => {
+      if (event.sequence > 0) {
+        if (event.sequence <= lastSequenceRef.current) return;
+        lastSequenceRef.current = event.sequence;
+      }
+      if (event.operation_id) {
+        operationVersionsRef.current.set(event.operation_id, {
+          path: event.new_path || event.path || "",
+          version: event.version,
+          sequence: event.sequence,
+        });
+      }
+      if (event.path && event.kind !== "locks" && event.kind !== "resync") {
+        pathVersionsRef.current.set(
+          event.new_path || event.path,
+          event.kind === "deleted" ? null : event.version,
+        );
+      }
+      if (
+        event.source === "watcher"
+        && event.path
+        && event.version
+        && pendingWriteVersionsRef.current.get(event.path) === event.version
+      ) {
+        return;
+      }
+      if (
+        event.source === "service"
+        && event.operation_id
+        && pendingOperationsRef.current.has(event.operation_id)
+      ) {
+        return;
+      }
+      if (event.kind === "watcher_error") {
+        dispatch({ type: "SET_SYNC", state: "degraded" });
+        setError(event.message || "外部文件实时同步不可用。", refreshExpandedDirectories);
+        return;
+      }
+      if (event.kind === "locks") {
+        dispatch({ type: "SET_LOCKS", locks: event.locks || [] });
+        return;
+      }
+      if (event.kind === "trash_changed") {
+        void loadTrashEntries();
+        return;
+      }
+      if (event.kind === "resync") {
+        globalGenerationRef.current += 1;
+        for (const key of Object.keys(requestEpochRef.current)) nextEpoch(key);
+        void refreshExpandedDirectories();
+        void loadLocks();
+        void loadTrashEntries();
+        for (const tab of stateRef.current.openTabs) {
+          const key = `file:${tab.path}`;
+          const epoch = nextEpoch(key);
+          const generationAtStart = generation(tab.path);
+          const sequenceAtStart = lastSequenceRef.current;
+          void api.readFile(tab.path).then((snapshot) => {
+            if (
+              requestEpochRef.current[key] !== epoch
+              || generation(tab.path) !== generationAtStart
+              || lastSequenceRef.current > sequenceAtStart
+            ) return;
+            const current = stateRef.current.openTabs.find((item) => item.id === tab.id);
+            if (!current || snapshot.version === current.version) return;
+            if (current.isDirty) {
+              dispatch({
+                type: "SET_CONFLICT",
+                id: current.id,
+                conflict: {
+                  kind: "modified",
+                  diskContent: snapshot.content,
+                  diskVersion: snapshot.version,
+                  detectedSequence: lastSequenceRef.current,
+                },
+              });
+            } else {
+              dispatch({ type: "APPLY_SNAPSHOT", id: current.id, snapshot });
+            }
+          }).catch((error) => {
+            if (
+              requestEpochRef.current[key] !== epoch
+              || generation(tab.path) !== generationAtStart
+              || lastSequenceRef.current > sequenceAtStart
+            ) return;
+            if (error instanceof AgentspaceApiError && error.status === 404) {
+              if (tab.isDirty) {
+                dispatch({
+                  type: "SET_CONFLICT",
+                  id: tab.id,
+                  conflict: {
+                    kind: "deleted",
+                    diskContent: null,
+                    diskVersion: null,
+                    detectedSequence: lastSequenceRef.current,
+                  },
+                });
+              } else {
+                dispatch({ type: "CLOSE_TAB", id: tab.id });
+              }
+            }
+          });
+        }
+        return;
+      }
+
+      bumpGeneration(event.path);
+      bumpGeneration(event.new_path);
+      if (event.kind === "moved" && event.path && event.new_path) {
+        dispatch({ type: "REWRITE_PATH", oldPath: event.path, newPath: event.new_path });
+        void loadDirectory(parentPath(event.path), true);
+        void loadDirectory(parentPath(event.new_path), true);
+        return;
+      }
+      if (!event.path) return;
+      void loadDirectory(parentPath(event.path), true);
+      const affected = stateRef.current.openTabs.filter((tab) =>
+        event.is_directory ? isPathWithin(tab.path, event.path!) : tab.path === event.path,
+      );
+      if (event.kind === "deleted") {
+        let closedCleanTab = false;
+        for (const tab of affected) {
+          if (tab.isDirty) {
+            dispatch({
+              type: "SET_CONFLICT",
+              id: tab.id,
+              conflict: {
+                kind: "deleted",
+                diskContent: null,
+                diskVersion: null,
+                detectedSequence: event.sequence,
+              },
+            });
+          } else {
+            dispatch({ type: "CLOSE_TAB", id: tab.id });
+            closedCleanTab = true;
+          }
+        }
+        if (closedCleanTab) {
+          setError(`文件已被外部删除：${event.path}`, null);
+        }
+        return;
+      }
+      if (event.is_directory) return;
+      for (const tab of affected) {
+        const key = `file:${tab.path}`;
+        const epoch = nextEpoch(key);
+        const generationAtStart = generation(tab.path);
+        const sequenceAtStart = lastSequenceRef.current;
+        void api.readFile(tab.path).then((snapshot) => {
+          if (
+            requestEpochRef.current[key] !== epoch
+            || generation(tab.path) !== generationAtStart
+            || lastSequenceRef.current > sequenceAtStart
+          ) return;
+          const current = stateRef.current.openTabs.find((item) => item.id === tab.id);
+          if (!current || snapshot.version === current.version) return;
+          if (current.isDirty) {
+            dispatch({
+              type: "SET_CONFLICT",
+              id: current.id,
+              conflict: {
+                kind: "modified",
+                diskContent: snapshot.content,
+                diskVersion: snapshot.version,
+                detectedSequence: event.sequence,
+              },
+            });
+          } else {
+            dispatch({ type: "APPLY_SNAPSHOT", id: current.id, snapshot });
+          }
+        }).catch(() => undefined);
+      }
+    };
+
+    return api.connectAgentspaceEvents(
+      handleEvent,
+      (syncState) => dispatch({ type: "SET_SYNC", state: syncState }),
+    );
+  }, [bumpGeneration, generation, loadDirectory, loadLocks, loadTrashEntries, nextEpoch, refreshExpandedDirectories, setError]);
+
+  useEffect(() => {
+    return () => {
+      for (const key of Object.keys(requestEpochRef.current)) nextEpoch(key);
+    };
+  }, [nextEpoch]);
+
+  const hasDirtyTabs = useMemo(
+    () => state.openTabs.some((tab) => tab.isDirty),
+    [state.openTabs],
+  );
 
   return {
-    dirContents: state.dirContents,
+    directories: state.directories,
+    expandedPaths: state.expandedPaths,
+    selection: state.selection,
     openTabs: state.openTabs,
     activeTabId: state.activeTabId,
-    loading: state.loading,
+    locks: state.locks,
+    trashEntries: state.trashEntries,
+    trashExpanded: state.trashExpanded,
+    syncState: state.syncState,
     error: state.error,
-    locked: state.locked,
-    currentDir: state.currentDir,
+    hasDirtyTabs,
     loadDirectory,
+    refreshExpandedDirectories,
+    toggleDirectory,
+    selectEntry,
     openFile,
-    saveFile,
-    closeTab,
     setActiveTab,
     updateContent,
+    saveFile,
+    closeCleanTab,
+    discardAndCloseTab,
     createFile,
     createFolder,
-    deletePath,
     renamePath,
-    toggleDir,
-    refresh,
-    loadLockStatus,
+    movePathToTrash,
+    setTrashExpanded: (expanded: boolean) => dispatch({ type: "SET_TRASH_EXPANDED", expanded }),
+    restoreTrashEntry,
+    purgeTrashEntry,
+    emptyTrash,
+    resolveConflictWithDisk,
+    resolveConflictWithLocal,
+    recreateDeletedConflict,
+    discardDeletedConflict,
+    clearError: () => dispatch({ type: "SET_ERROR", error: null }),
   };
 }

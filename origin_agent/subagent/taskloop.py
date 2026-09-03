@@ -48,6 +48,7 @@ class TaskAgentLoop(SubAgentLoop):
         _cron = Application.current().cron_router
         if _cron is not None:
             _cron.register(self.session_id, self)
+        active_round_id = self.begin_agentspace_round(self.current_character_agent)
         try:
             # 注入初始用户消息
             initial_character_name = (
@@ -199,6 +200,10 @@ class TaskAgentLoop(SubAgentLoop):
         except Exception as exc:
             logger.exception("TaskAgentLoop error for session=%s: %s", self.session_id, exc)
         finally:
+            self.end_agentspace_round(
+                self.current_character_agent,
+                active_round_id,
+            )
             if _cron is not None:
                 _cron.unregister(self.session_id)
             self._terminated = True

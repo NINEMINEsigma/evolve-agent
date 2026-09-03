@@ -20,6 +20,9 @@ export const DIMENSIONS = {
   MOBILE_BREAKPOINT:      768,   // 移动端断点 (px)
   MINIMAP_MIN_HEIGHT:     24,    // 小地图最小元素高度
   TREE_INDENT:            16,    // 文件树缩进步长
+  AGENTSPACE_SIDEBAR_DEFAULT: 280, // Agentspace 文件树默认宽度
+  AGENTSPACE_SIDEBAR_MIN: 190,     // Agentspace 文件树最小宽度
+  AGENTSPACE_SIDEBAR_MAX: 640,     // Agentspace 文件树最大宽度
   SCROLL_BOTTOM_THRESHOLD: 20,   // 滚动到底部阈值
   LONG_MESSAGE_CHARS:     1200,  // 长消息字符阈值
   LONG_MESSAGE_LINES:     18,    // 长消息行数阈值

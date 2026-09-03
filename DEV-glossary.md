@@ -191,6 +191,17 @@
 
 > 启动屏（`SplashScreen`）和骨架屏（`SkeletonScreen`）作为覆盖层叠加在整体布局之上，分别用于开屏动画和首次连接前的占位。
 
+### Agentspace 编辑器
+
+| 规范称谓 | 代码锚点 | 定义 | 英文锚点 |
+|---|---|---|---|
+| Agentspace 编辑器 | `pages/Agentspace.tsx` | 独立的工作空间文件浏览与文本编辑页面 | Agentspace editor |
+| Agentspace 文件树 | `components/agentspace/FileTree.tsx` | Agentspace 编辑器左侧的目录与文件树；不称作「导航栏」 | Agentspace file tree |
+| Agentspace 垃圾桶 | `ws:.trash/` | 仅承接用户从 Agentspace 编辑器发起的可恢复删除；不改变 Evolve Agent `Delete` 工具 | Agentspace trash |
+| 文件锁 | `AgentspaceLockRegistry` | Agent 在单次回复轮次中明确接触 `ws:` 路径后持有的路径锁；轮次收尾时释放 | file lock |
+
+> 「导航栏」仍然只指聊天页面左侧 Sidebar。Agentspace 文件树与导航栏是两个不同区域。
+
 ### 应用框架与加载层
 
 文件：`origin_agent/frontend/src/App.tsx`

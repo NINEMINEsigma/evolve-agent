@@ -17,7 +17,10 @@ import locale
 import logging
 import subprocess  # nosec
 import sys
-from typing import Any, Dict, List
+from typing import Any, Dict, List, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from entry.base_agent_loop import ToolContext
 
 from abstract.tools.registry import registry, tool_error, tool_result
 from entity.puretype import ToolDangerLevel
@@ -38,7 +41,10 @@ def _s():
 # ── 工具 handler ─────────────────────────────────────────────────────
 
 
-async def _handle_run_python(args: dict[str, Any]) -> dict:
+async def _handle_run_python(
+    args: dict[str, Any],
+    context: ToolContext | None = None,
+) -> dict:
     """执行 Python 代码，始终使用与 agent 进程相同的解释器。"""
     code: str = str(args.get("code", "")).strip()
     script: str = str(args.get("script", "")).strip()
@@ -53,6 +59,18 @@ async def _handle_run_python(args: dict[str, Any]) -> dict:
         return tool_error("Either 'code' or 'script' is required")
     if code and script:
         return tool_error("Provide either 'code' or 'script', not both")
+
+    access_paths: list[tuple[str, bool]] = []
+    if cwd.startswith("ws:"):
+        access_paths.append((cwd, True))
+    if script.startswith("ws:"):
+        access_paths.append((script, False))
+    if context is not None and access_paths:
+        try:
+            with context.agentspace_access(access_paths):
+                pass
+        except Exception as exc:
+            return tool_error(f"Agentspace access lock failed: {exc}", cwd=cwd)
 
     # ── 确定解释器路径 ──
     if python_path:

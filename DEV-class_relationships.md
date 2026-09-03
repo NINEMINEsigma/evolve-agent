@@ -372,6 +372,7 @@ classDiagram
 
     class Application {
         +runtime_context
+        +agentspace_service
         +session_manager
         +approval_backend_manager
         +cron_router
@@ -420,6 +421,38 @@ classDiagram
         +total_token_usage
         +last_prompt_tokens
         +reasoning
+    }
+
+    class AgentspaceService {
+        #_event_hub
+        #_lock_registry
+        #_operation_gate
+        #_trash_store
+        #_watcher
+        +start()
+        +shutdown()
+        +list_directory()
+        +read_file()
+        +write_file()
+        +rename_path()
+        +move_to_trash()
+        +restore_trash()
+        +agent_access()
+        +release_agent_access()
+    }
+
+    class AgentspaceLockRegistry {
+        +acquire()
+        +release_round()
+        +matching()
+        +snapshot()
+    }
+
+    class AgentspaceEventHub {
+        +bind_loop()
+        +subscribe()
+        +publish_threadsafe()
+        +close()
     }
 
     class Sandbox {
@@ -495,6 +528,10 @@ classDiagram
     Application --> ApprovalBackendManager : holds
     Application --> FrontendSink : holds
     Application --> SubAgentOrchestrator : holds
+    Application --> AgentspaceService : holds
+    AgentspaceService --> Sandbox : uses
+    AgentspaceService --> AgentspaceLockRegistry : owns
+    AgentspaceService --> AgentspaceEventHub : owns
     ApprovalBackendManager --> ApprovalBackend : manages
     Sandbox --> RuntimeContext : holds
     CronRouter --> _CronTask : manages
@@ -513,6 +550,8 @@ classDiagram
 | `_session_store` | `BaseAgentLoop` / `MultiAgentLoop` | `SessionStore \| None` | BaseAgentLoop 定义；MultiAgentLoop 覆盖 |
 | `_token_usage` | `BaseAgentLoop` / `MultiAgentLoop` | `int` | 累计 token；MultiAgentLoop 独立维护 |
 | `_last_prompt_tokens` | `BaseAgentLoop` | `int` | 最近一次 prompt tokens |
+| `_agentspace_round_ids` | `BaseAgentLoop` | `dict[str, str]` | 角色名到当前 Agentspace 回复轮次 ID；完整收尾后释放路径锁 |
+| `round_id` | `ToolContext` | `str` | 当前 Agent 回复轮次唯一 ID，明确 `ws:` 文件接触登记的 owner |
 | `_get_sink()` | `BaseAgentLoop` | abstract method | `ToolContext.sink` 调用 `loop._get_sink()` |
 | `_overwrite_history_file()` | `BaseAgentLoop` | method | 类内部使用 |
 | `_remove_last_user_message()` | `BaseAgentLoop` | method | 类内部使用 |
@@ -579,6 +618,7 @@ classDiagram
 | `runtime_context` | `Application` | `RuntimeContext` | 运行时上下文 |
 | `_profile_lock` | `Application` | `threading.RLock` | Profile 根对象、名称指针与会话选择共用的进程锁 |
 | `_llm_profile_store` | `Application` | `LLMProfileStore \| None` | 进程内唯一的 `LLMProfileData` 根对象存储 |
+| `_agentspace_service` | `Application` | `AgentspaceService \| None` | Agentspace 版本化 CRUD、文件锁、垃圾桶、watcher 与 SSE 事件的唯一业务服务 |
 | `session_manager` | `Application` | `SessionManager \| None` | session 管理器 |
 | `approval_backend_manager` | `Application` | `ApprovalBackendManager \| None` | 审批后端管理器 |
 | `cron_router` | `Application` | `CronRouter \| None` | Cron 路由器 |
@@ -604,6 +644,8 @@ classDiagram
 |---|---|---|---|---|
 | `ToolContext.sink` | `_get_sink()` | `BaseAgentLoop` | `entry/base_agent_loop.py` | 工具通过 `ctx.sink` 访问 loop 的 sink |
 | `ToolContext.is_interrupted` | `_cancel_event` | `BaseAgentLoop` | `entry/base_agent_loop.py` | 工具通过 `ctx.is_interrupted` 读取取消状态 |
+| `ToolContext.agentspace_access` | `agentspace_service` | `Application` | `entry/base_agent_loop.py` | 以 `round_id` 向 `AgentspaceService` fail-closed 登记明确 `ws:` 路径 |
+| 各 Agent Loop 回复收尾 | `release_agent_access()` | `AgentspaceService` | `entry/parent_agent_loop.py`、`entry/multi_agent_loop.py`、`subagent/loop.py`、`subagent/taskloop.py` | 主Agent、参与Agent、子Agent与临时Agent在匹配 round `finally` 释放 |
 | `BaseAgentLoop._remove_last_user_message` | `_update_last_user_message()` | `History` | `entry/base_agent_loop.py` | 跨类调用 History 的 protected 方法 |
 | `MultiAgentLoop._aggregate_worker_usage` | `_total_token_usage` | `MultiAgentWorker` | `entry/multi_agent_loop.py` | 读取 worker 内部 token 统计 |
 | `MultiAgentLoop._aggregate_worker_usage` | `_last_prompt_tokens` | `MultiAgentWorker` | `entry/multi_agent_loop.py` | 读取 worker 内部 token 统计 |
@@ -707,6 +749,12 @@ classDiagram
 ### 多模态能力探测内化
 
 原探针工具已内化为 `system/modality_capability.py` 的系统自动行为：需要给活跃模型传递多模态块时先查 easysave 缓存（`modality_capability_cache.es`，按 model+base_url 联合索引、六项能力齐全才命中），未探测则伪装 Read 工具调用按 模态 × 消息路径（tool/user）六路并发探测；400 类错误判为不支持，网络/认证/超时等非模态错误上抛不写缓存。`build_modality_prompt_block()` 每轮生成 system prompt 注入块；活跃模型不支持某模态时经 `forward_modality_to_ref_profile()` 转发到 profile 引用的其他模型。
+
+### Agentspace 编辑器业务服务与回复轮次文件锁
+
+`Application` 新增唯一 `AgentspaceService`。该服务把原先位于 Gateway 的全局布尔锁和直接文件操作替换为版本化 CRUD、`AgentspaceLockRegistry`、`AgentspaceOperationGate`、事务垃圾桶、`watchdog` watcher 与 SSE `AgentspaceEventHub`。Gateway 只负责 typed HTTP/SSE 转换。
+
+`ToolContext` 携带必填 `round_id`。主Agent、参与Agent、子Agent与临时Agent在各自完整回复开始时创建 round，并在 History/事件/metrics 收尾后的 `finally` 幂等释放。内置文件、Shell 与 Python 工具只登记明确 `ws:` 路径；`Delete` 的永久删除和审批语义不变。用户从 Agentspace 编辑器删除时独立进入 `ws:.trash/`。
 
 ### MCP schema 规范化
 

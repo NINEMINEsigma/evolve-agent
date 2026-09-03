@@ -39,7 +39,8 @@ entry/
 - **`BaseAgentLoop`**：最基础的循环抽象，包含：
   - `Inbox` 带类型消息队列（`UserMessage`；SubAgentLoop 父→子通道使用，主会话已切 SessionMessageQueue）。
   - 取消控制（`interrupt()`、`is_interrupted()`）。
-  - `ToolContext` 注入到工具 handler，替代旧的全局 `get_runtime_context()`。
+  - `ToolContext` 注入到工具 handler，替代旧的全局 `get_runtime_context()`；上下文携带必填 `round_id`，明确 `ws:` 文件接触通过 `agentspace_access()` fail-closed 登记。
+  - 回复轮次文件锁：`begin_agentspace_round()` / `current_agentspace_round()` / `end_agentspace_round()` 按角色管理唯一 round ID，并在完整回复收尾后幂等释放。
   - 通用持久化方法：`save_history()`、`load_history()`。
   - Token 统计：`_token_usage`、`_last_prompt_tokens`。
   - Hooks 加载与上下文收集：`_load_message_hooks()`、`_collect_hooks_context()`。
@@ -119,11 +120,20 @@ entry/
 `tool_executor.py` 中的 `ToolExecutor` 是统一工具调用执行器：
 
 - 封装单个工具调用的完整流程：取消检查、parse error 处理、审批（复用 `execute_with_approval`）、registry 分发、异常转换、前端事件推送和 UI 事件路由。
-- `execute(tc, session_id) -> ToolResultMessage`：执行单个工具调用。
+- `execute(tc, session_id, *, round_id, ...) -> ToolResultMessage`：执行单个工具调用；`round_id` 传入每个 `ToolContext`。
 - `get_tool_stats()`：返回工具调用统计。
 - 通过 `IMainSessionLoop.loop` 访问 loop 内部字段（`cancel_event`、`get_sink()`、`get_hooks_context()` 等）。
 
 > 由 `ParentAgentLoop` 和 `MultiAgentWorker` 分别持有独立实例。
+
+---
+
+## Agentspace 回复轮次文件锁
+
+- `ParentAgentLoop._run_tool_loop()` 为主Agent的一次完整 LLM→工具→最终回复创建 round ID，metrics 与事件收尾后释放。
+- `MultiAgentLoop._run_single_agent()` 为每个参与Agent worker 独立创建 round ID，worker 结果和 token/metrics 聚合后释放。
+- `ToolExecutor.execute()` 必须接收当前 round ID；任何明确 `ws:` 路径登记失败都会阻止对应工具执行。
+- 锁只限制命中的工作空间路径，不把整个 Agentspace 设为只读；`custom_tools`、MCP 与绕过应用的外部进程属于不可预锁通道，由 watcher 和内容版本冲突处理。
 
 ---
 

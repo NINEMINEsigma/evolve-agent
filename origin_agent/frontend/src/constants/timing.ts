@@ -7,7 +7,8 @@ export const TIMING = {
   WS_MAX_RECONNECT_DELAY: 30_000, // WebSocket 最大重连延迟
   WS_MAX_RECONNECT_TRIES: 10,     // WebSocket 最大重连次数
   TASK_POLL_INTERVAL:    3_000,   // 后台任务轮询
-  LOCK_POLL_INTERVAL:    3_000,   // agentspace 锁状态轮询
+  LOCK_POLL_INTERVAL:    3_000,   // agentspace 旧锁轮询（兼容常量，编辑器已改用 SSE）
+  AGENTSPACE_EVENT_RECONNECT_NOTICE: 3_000, // SSE 中断状态提示延迟
   CRON_TICK:             1_000,   // 定时任务倒计时 tick
   CRON_WINDOW:           60_000,  // 定时任务倒计时显示窗口
   COPY_RESET_DELAY:      2_000,   // 复制成功状态复位

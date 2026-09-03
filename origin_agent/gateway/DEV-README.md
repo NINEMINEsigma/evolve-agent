@@ -179,13 +179,20 @@ WS /ws/chat?resume=<sid>
 
 | 方法 | 端点 | 说明 |
 |------|------|------|
-| GET | `/api/agentspace/list` | Agentspace 文件列表 |
-| GET | `/api/agentspace/read` | Agentspace 文件读取 |
-| POST | `/api/agentspace/write` | Agentspace 文件写入 |
-| POST | `/api/agentspace/mkdir` | Agentspace 创建目录 |
-| POST | `/api/agentspace/delete` | Agentspace 删除文件 |
-| POST | `/api/agentspace/rename` | Agentspace 重命名 |
-| GET | `/api/agentspace/lock` | Agentspace 文件锁状态 |
+| GET | `/api/agentspace/list` | 目录优先自然排序的文件列表（兼容返回 `type`，权威字段为 `kind`） |
+| GET | `/api/agentspace/read` | UTF-8 文本快照、SHA-256 version 与修改时间 |
+| POST | `/api/agentspace/write` | 独占创建或携带 `expected_version` 的版本化保存 |
+| POST | `/api/agentspace/mkdir` | 无覆盖创建目录 |
+| POST | `/api/agentspace/delete` | 用户操作：移动到 Agentspace 垃圾桶 |
+| POST | `/api/agentspace/rename` | basename-only、无覆盖重命名 |
+| GET | `/api/agentspace/trash` | 垃圾桶条目列表 |
+| POST | `/api/agentspace/trash/{entry_id}/restore` | 无覆盖恢复，冲突自动改名 |
+| DELETE | `/api/agentspace/trash/{entry_id}` | 永久删除单条垃圾桶条目 |
+| DELETE | `/api/agentspace/trash` | 清空垃圾桶，返回 partial failure |
+| GET | `/api/agentspace/locks` | 当前回复轮次路径锁完整快照 |
+| GET | `/api/agentspace/events` | Agentspace `text/event-stream` 实时事件 |
+
+Agentspace mutation body 均携带 `operation_id`；`write` 另携带 `expected_version`，`rename` 只接收 `path + new_name`。错误 `detail` 为机器可读对象：无效路径 400、不存在 404、目标或版本冲突 409、非 UTF-8 文本 415、命中 Agent 回复轮次文件锁 423、内部错误 500。SSE 使用 `event: agentspace`，`id` 为进程内递增 sequence，连接后先发送 `resync` 与完整 `locks`，心跳为注释帧；断线重连后前端重新取得 REST 权威快照。
 
 ### 技能与动态端点
 

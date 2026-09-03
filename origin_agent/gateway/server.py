@@ -16,20 +16,21 @@ import json
 import logging
 import re
 import sys
+import uuid
 from pathlib import Path
 from typing import * # type: ignore
 from urllib.parse import parse_qs, quote
 
 import uvicorn
 from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
-from fastapi.responses import FileResponse, HTMLResponse, Response
+from fastapi.responses import FileResponse, HTMLResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
 from .chat import Message, MessageType
 from .message_router import MessageRouter
 from abstract.tools.registry import registry
 from datetime import datetime, timezone
-from entity.constant import CRON_STDOUT_PREVIEW_MAX_LENGTH, SUBPROCESS_TIMEOUT_DEFAULT, UPLOAD_FILENAME_TIME_FORMAT, USER_CHARACTER_NAME, UPLOADS_DIR_NAME, UPLOADS_WS_PREFIX, STATIC_FILE_HTTP_PREFIX, DOWNLOADS_HTTP_PREFIX, DIR_ZIP_HTTP_PREFIX, DIR_ZIP_MAX_TOTAL_BYTES, SYSTEM_CHARACTER_NAME
+from entity.constant import CRON_STDOUT_PREVIEW_MAX_LENGTH, SUBPROCESS_TIMEOUT_DEFAULT, UPLOAD_FILENAME_TIME_FORMAT, USER_CHARACTER_NAME, UPLOADS_DIR_NAME, UPLOADS_WS_PREFIX, STATIC_FILE_HTTP_PREFIX, DOWNLOADS_HTTP_PREFIX, DIR_ZIP_HTTP_PREFIX, DIR_ZIP_MAX_TOTAL_BYTES, SYSTEM_CHARACTER_NAME, AGENTSPACE_SSE_HEARTBEAT_SECONDS
 from entity.puretype import (
     SessionStatus,
     ClientInfo,
@@ -39,6 +40,12 @@ from entity.puretype import (
     LLMProfileDeleteRequest,
     LLMProfileMutationResponse,
     LLMProfileDeleteResult,
+    AgentspaceWriteRequest,
+    AgentspacePathRequest,
+    AgentspaceRenameRequest,
+    AgentspaceEvent,
+    AgentspaceEventKind,
+    AgentspaceEventSource,
 )
 from system.context import get_runtime_context
 from entry.parent_agent_loop import IncompatibleHistoryError
@@ -349,132 +356,19 @@ if _FRONTEND_DIST.is_dir():
     logger.info("Frontend dist found at %s (build=%s)", _FRONTEND_DIST, _BUILD_HASH or "unknown")
 
 # ---------------------------------------------------------------------------
-# Agentspace lock & operation log
+# Agentspace 用户变更摘要兼容入口
 # ---------------------------------------------------------------------------
-
-import time as _time
-
-_agentspace_lock: dict = {"locked": False, "locked_by": None, "locked_at": None}
-"""agentspace 互斥锁状态。agent 工具调用链通过 acquire/release 管理。"""
-
-_agentspace_pending_changes: dict[str, str] = {}
-"""用户操作日志（内存中维护最终状态）: path -> operation (edit/create/delete/rename)"""
-
-
-def _to_logical_path(relative: str) -> str:
-    """将 API 传入的相对路径转换为 Sandbox 逻辑路径。
-
-    去除首尾 /，拒绝包含 .. 或绝对路径的输入，返回 ws:{relative}。
-    """
-    if not relative:
-        return "ws:"
-    cleaned = relative.strip("/")
-    if ".." in cleaned.split("/") or cleaned.startswith("/"):
-        raise ValueError(f"Invalid path: {relative!r}")
-    return f"ws:{cleaned}"
-
-
-def _record_agentspace_change(operation: str, path: str, old_path: str | None = None) -> None:
-    """记录用户对 agentspace 的操作。按路径合并最终状态。
-
-    规则：
-    - 同路径后操作覆盖前操作
-    - 创建后被删除可抵消
-    - 重命名清除旧路径
-    """
-    # TODO: 需要检查当前逻辑是否正确
-    global _agentspace_pending_changes
-    if _agentspace_lock["locked"]:
-        return
-    op = operation
-    if op == "rename" and old_path:
-        _agentspace_pending_changes.pop(old_path, None)
-        _agentspace_pending_changes[path] = "edit"
-    elif op == "delete":
-        existing = _agentspace_pending_changes.get(path)
-        if existing == "create":
-            _agentspace_pending_changes.pop(path, None)
-        else:
-            _agentspace_pending_changes[path] = "delete"
-    elif op == "create":
-        _agentspace_pending_changes[path] = "create"
-    elif op == "edit":
-        existing = _agentspace_pending_changes.get(path)
-        if existing != "create":
-            _agentspace_pending_changes[path] = "edit"
 
 
 def _flush_pending_changes() -> str | None:
-    """将操作日志写入 ws:.agentspace/operations.jsonl，返回变更摘要，清空内存。"""
-    global _agentspace_pending_changes
-    if not _agentspace_pending_changes:
-        return None
-    lines: list[str] = ["User changes in agentspace:"]
-    label_map = {"edit": "modified", "create": "created", "delete": "deleted", "rename": "renamed"}
-    for path, op in _agentspace_pending_changes.items():
-        label = label_map.get(op, op)
-        lines.append(f"- {label}: {path}")
-    summary = "\n".join(lines)
-    try:
-        from system.context import get_runtime_context
-        from system.sandbox import Sandbox
-        ctx = get_runtime_context()
-        sandbox = Sandbox(ctx)
-        sandbox.write("ws:.agentspace/operations.jsonl", summary)
-    except Exception as exc:
-        logger.warning("Failed to flush agentspace changes to disk: %s", exc)
-    _agentspace_pending_changes = {}
-    return summary
-
-
-def acquire_agentspace_lock(locked_by: str) -> None:
-    """获取 agentspace 锁。由 agent 工具调用链入口调用。"""
-    global _agentspace_lock
-    _agentspace_lock["locked"] = True
-    _agentspace_lock["locked_by"] = locked_by
-    _agentspace_lock["locked_at"] = _time.time()
-    _push_agentspace_lock_state()
-
-
-def release_agentspace_lock() -> None:
-    """释放 agentspace 锁。由 agent 工具调用链结束时调用。"""
-    global _agentspace_lock
-    _agentspace_lock["locked"] = False
-    _agentspace_lock["locked_by"] = None
-    _agentspace_lock["locked_at"] = None
-    _push_agentspace_lock_state()
-
-
-def _push_agentspace_lock_state() -> None:
-    """向所有连接的 WebSocket 推送当前锁状态。"""
+    """供现有 agentspace_changes_hook 调用，委托给唯一业务服务。"""
     try:
         from system.application import Application
-        from gateway.chat import Message, MessageType
-        import asyncio as _asyncio
-        sink = Application.current().frontend_sink
-        if sink is None:
-            return
-        payload = json.dumps({"locked": _agentspace_lock["locked"], "locked_by": _agentspace_lock["locked_by"]})
-        for sid, ws in sink.get_all_ws().items():
-            if ws is None:
-                continue
-            try:
-                # NOTE: fire-and-forget 通知，仅用于前端 UI 实时刷新锁状态。
-                #   锁正确性由全局 _agentspace_lock dict 保证，不依赖此推送；
-                #   前端另有 GET /api/agentspace/lock/status 可轮询兜底。
-                #   已知局限（不影响锁正确性）：
-                #     1. ensure_future 要求当前线程有 running loop，否则抛 RuntimeError
-                #        被外层 except 吞掉 → 推送静默失败，前端不更新。
-                #     2. 返回的 Task 未持有引用，可能被 GC 回收导致协程取消。
-                #     3. 内层 except 静默吞错，单连接持续失败时无日志可排查。
-                #   彻底修复需用 run_coroutine_threadsafe(coro, loop) 并持有 Task 引用。
-                _asyncio.ensure_future(ws.send_text(
-                    json.dumps(Message(type=MessageType.AGENTSPACE_LOCK, session_id=sid, content=payload).model_dump(exclude_none=True), ensure_ascii=False)
-                ))
-            except Exception:
-                pass
-    except Exception as exc:
-        logger.warning("Failed to push agentspace lock state: %s", exc)
+        return Application.current().agentspace_service.flush_pending_changes()
+    except Exception:
+        logger.warning("Failed to flush Agentspace change summary", exc_info=True)
+        return None
+
 
 # ---------------------------------------------------------------------------
 # 路由
@@ -1524,206 +1418,276 @@ async def shutdown_approval_model_endpoint():
 
 
 # ---------------------------------------------------------------------------
-# Agentspace file API
+# Agentspace editor API
 # ---------------------------------------------------------------------------
+
+
+def _agentspace_service():
+    from system.application import Application
+    return Application.current().agentspace_service
+
+
+def _raise_agentspace_http(exc: Exception) -> NoReturn:
+    from system.agentspace import (
+        AgentspaceAlreadyExistsError,
+        AgentspaceError,
+        AgentspaceInvalidPathError,
+        AgentspaceLockedError,
+        AgentspaceNotFoundError,
+        AgentspaceNotTextError,
+        AgentspaceVersionConflictError,
+    )
+
+    if isinstance(exc, AgentspaceInvalidPathError):
+        status = 400
+    elif isinstance(exc, AgentspaceNotFoundError):
+        status = 404
+    elif isinstance(exc, (AgentspaceAlreadyExistsError, AgentspaceVersionConflictError)):
+        status = 409
+    elif isinstance(exc, AgentspaceNotTextError):
+        status = 415
+    elif isinstance(exc, AgentspaceLockedError):
+        status = 423
+    elif isinstance(exc, AgentspaceError):
+        status = 400
+    else:
+        logger.exception("Unexpected Agentspace API failure")
+        raise HTTPException(
+            status_code=500,
+            detail={"code": "internal_error", "message": "Agentspace 内部错误。"},
+        )
+    raise HTTPException(status_code=status, detail=exc.as_detail())
+
+
+async def _request_operation_id(req: Request) -> str:
+    try:
+        body = await req.json()
+    except Exception:
+        return uuid.uuid4().hex
+    value = body.get("operation_id", "") if isinstance(body, dict) else ""
+    return str(value).strip() or uuid.uuid4().hex
 
 
 @app.get("/api/agentspace/list")
 async def agentspace_list(path: str = ""):
-    """列出 agentspace 目录内容。
-
-    返回 { entries: [{ name: string, type: "file"|"dir" }] }。
-    目录不存在时返回空列表。
-    """
     try:
-        logical = _to_logical_path(path)
-        from system.context import get_runtime_context
-        from system.sandbox import Sandbox
-        sandbox = Sandbox(get_runtime_context())
-        names = sandbox.list_dir(logical)
-        entries: list[dict[str, str]] = []
-        for name in names:
-            entry_path = f"{logical}/{name}" if logical != "ws:" else f"ws:{name}"
-            entry_type = "dir" if sandbox.is_dir(entry_path) else "file"
-            entries.append({"name": name, "type": entry_type})
-        return {"entries": entries}
-    except (ValueError, PermissionError) as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
+        entries = await asyncio.to_thread(_agentspace_service().list_directory, path)
+        return {
+            "entries": [
+                {**entry.model_dump(mode="json"), "type": entry.kind.value}
+                for entry in entries
+            ]
+        }
     except Exception as exc:
-        logger.warning("agentspace list failed for path=%r: %s", path, exc)
-        raise HTTPException(status_code=500, detail="Internal error")
+        _raise_agentspace_http(exc)
 
 
 @app.get("/api/agentspace/read")
 async def agentspace_read(path: str = ""):
-    """读取 agentspace 文件内容。
-
-    返回 { content: string }。文件不存在时返回 404。
-    """
-    if not path:
-        raise HTTPException(status_code=400, detail="path required")
     try:
-        logical = _to_logical_path(path)
-        from system.context import get_runtime_context
-        from system.sandbox import Sandbox
-        sandbox = Sandbox(get_runtime_context())
-        content = sandbox.read(logical, limit=0)
-        return {"content": content}
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
-    except PermissionError as exc:
-        if "not found" in str(exc).lower():
-            raise HTTPException(status_code=404, detail=str(exc))
-        raise HTTPException(status_code=403, detail=str(exc))
+        snapshot = await asyncio.to_thread(_agentspace_service().read_file, path)
+        return snapshot.model_dump(mode="json")
     except Exception as exc:
-        logger.warning("agentspace read failed for path=%r: %s", path, exc)
-        raise HTTPException(status_code=500, detail="Internal error")
+        _raise_agentspace_http(exc)
 
 
 @app.post("/api/agentspace/write")
-async def agentspace_write(req: Request):
-    """写入/覆盖 agentspace 文件。
-
-    body: { path: string, content: string } → { success: true }
-    锁定时禁止写入。
-    """
-    body = await req.json()
-    path = body.get("path", "")
-    content = body.get("content", "")
-    if not path:
-        raise HTTPException(status_code=400, detail="path required")
-    if _agentspace_lock["locked"]:
-        raise HTTPException(status_code=423, detail="Agentspace is locked by agent")
-    logger.info("Agentspace write | path=%s", path)
+async def agentspace_write(request: AgentspaceWriteRequest):
+    operation_id = request.operation_id or uuid.uuid4().hex
     try:
-        logical = _to_logical_path(path)
-        from system.context import get_runtime_context
-        from system.sandbox import Sandbox
-        sandbox = Sandbox(get_runtime_context())
-        sandbox.write(logical, content)
-        _record_agentspace_change("edit", path)
-        logger.info("Agentspace write ok | path=%s", path)
-        return {"success": True}
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
-    except PermissionError as exc:
-        raise HTTPException(status_code=403, detail=str(exc))
+        snapshot = await asyncio.to_thread(
+            _agentspace_service().write_file,
+            request.path,
+            request.content,
+            request.expected_version,
+            operation_id,
+        )
+        return {**snapshot.model_dump(mode="json"), "operation_id": operation_id}
     except Exception as exc:
-        logger.warning("agentspace write failed for path=%r: %s", path, exc)
-        raise HTTPException(status_code=500, detail="Internal error")
+        _raise_agentspace_http(exc)
 
 
 @app.post("/api/agentspace/mkdir")
-async def agentspace_mkdir(req: Request):
-    """创建 agentspace 目录（含父目录）。
-
-    body: { path: string } → { success: true }
-    锁定时禁止创建。
-    """
-    body = await req.json()
-    path = body.get("path", "")
-    if not path:
-        raise HTTPException(status_code=400, detail="path required")
-    if _agentspace_lock["locked"]:
-        raise HTTPException(status_code=423, detail="Agentspace is locked by agent")
-    logger.info("Agentspace mkdir | path=%s", path)
+async def agentspace_mkdir(request: AgentspacePathRequest):
+    operation_id = request.operation_id or uuid.uuid4().hex
     try:
-        logical = _to_logical_path(path)
-        from system.context import get_runtime_context
-        from system.sandbox import Sandbox
-        sandbox = Sandbox(get_runtime_context())
-        sandbox.create_folder(logical, parents=True)
-        _record_agentspace_change("create", path)
-        logger.info("Agentspace mkdir ok | path=%s", path)
-        return {"success": True}
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
-    except PermissionError as exc:
-        raise HTTPException(status_code=403, detail=str(exc))
+        entry = await asyncio.to_thread(
+            _agentspace_service().create_directory,
+            request.path,
+            operation_id,
+        )
+        return {"entry": entry.model_dump(mode="json"), "operation_id": operation_id}
     except Exception as exc:
-        logger.warning("agentspace mkdir failed for path=%r: %s", path, exc)
-        raise HTTPException(status_code=500, detail="Internal error")
-
-
-@app.post("/api/agentspace/delete")
-async def agentspace_delete(req: Request):
-    """删除 agentspace 文件或空目录。
-
-    body: { path: string } → { success: true }
-    锁定时禁止删除。
-    """
-    body = await req.json()
-    path = body.get("path", "")
-    if not path:
-        raise HTTPException(status_code=400, detail="path required")
-    if _agentspace_lock["locked"]:
-        raise HTTPException(status_code=423, detail="Agentspace is locked by agent")
-    logger.info("Agentspace delete | path=%s", path)
-    try:
-        logical = _to_logical_path(path)
-        from system.context import get_runtime_context
-        from system.sandbox import Sandbox
-        sandbox = Sandbox(get_runtime_context())
-        if sandbox.is_dir(logical):
-            sandbox.delete_folder(logical)
-        else:
-            sandbox.delete(logical)
-        _record_agentspace_change("delete", path)
-        logger.info("Agentspace delete ok | path=%s", path)
-        return {"success": True}
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
-    except PermissionError as exc:
-        raise HTTPException(status_code=403, detail=str(exc))
-    except Exception as exc:
-        logger.warning("agentspace delete failed for path=%r: %s", path, exc)
-        raise HTTPException(status_code=500, detail="Internal error")
+        _raise_agentspace_http(exc)
 
 
 @app.post("/api/agentspace/rename")
-async def agentspace_rename(req: Request):
-    """重命名/移动 agentspace 文件或目录。
-
-    body: { oldPath: string, newPath: string } → { success: true }
-    锁定时禁止重命名。
-    """
-    body = await req.json()
-    old_path = body.get("oldPath", "")
-    new_path = body.get("newPath", "")
-    if not old_path or not new_path:
-        raise HTTPException(status_code=400, detail="oldPath and newPath required")
-    if _agentspace_lock["locked"]:
-        raise HTTPException(status_code=423, detail="Agentspace is locked by agent")
-    logger.info("Agentspace rename | old=%s new=%s", old_path, new_path)
+async def agentspace_rename(request: AgentspaceRenameRequest):
+    operation_id = request.operation_id or uuid.uuid4().hex
     try:
-        old_logical = _to_logical_path(old_path)
-        new_logical = _to_logical_path(new_path)
-        from system.context import get_runtime_context
-        from system.sandbox import Sandbox
-        sandbox = Sandbox(get_runtime_context())
-        sandbox.move(old_logical, new_logical)
-        _record_agentspace_change("rename", new_path, old_path=old_path)
-        logger.info("Agentspace rename ok | old=%s new=%s", old_path, new_path)
-        return {"success": True}
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
-    except PermissionError as exc:
-        raise HTTPException(status_code=403, detail=str(exc))
+        old_path, new_path = await asyncio.to_thread(
+            _agentspace_service().rename_path,
+            request.path,
+            request.new_name,
+            operation_id,
+        )
+        return {
+            "old_path": old_path,
+            "new_path": new_path,
+            "operation_id": operation_id,
+        }
     except Exception as exc:
-        logger.warning("agentspace rename failed old=%r new=%r: %s", old_path, new_path, exc)
-        raise HTTPException(status_code=500, detail="Internal error")
+        _raise_agentspace_http(exc)
 
 
-@app.get("/api/agentspace/lock")
-async def agentspace_lock_status():
-    """查询 agentspace 锁状态。
+@app.post("/api/agentspace/delete")
+async def agentspace_delete(request: AgentspacePathRequest):
+    """用户删除语义：移动到 Agentspace 垃圾桶。"""
+    operation_id = request.operation_id or uuid.uuid4().hex
+    try:
+        entry = await asyncio.to_thread(
+            _agentspace_service().move_to_trash,
+            request.path,
+            operation_id,
+        )
+        return {"entry": entry.model_dump(mode="json"), "operation_id": operation_id}
+    except Exception as exc:
+        _raise_agentspace_http(exc)
 
-    返回 { locked: bool, locked_by: string|null }
-    """
+
+@app.get("/api/agentspace/trash")
+async def agentspace_trash_list():
+    try:
+        entries = await asyncio.to_thread(_agentspace_service().list_trash)
+        return {"entries": [entry.model_dump(mode="json") for entry in entries]}
+    except Exception as exc:
+        _raise_agentspace_http(exc)
+
+
+@app.post("/api/agentspace/trash/{entry_id}/restore")
+async def agentspace_trash_restore(entry_id: str, req: Request):
+    operation_id = await _request_operation_id(req)
+    try:
+        entry, restored_path = await asyncio.to_thread(
+            _agentspace_service().restore_trash,
+            entry_id,
+            operation_id,
+        )
+        return {
+            "entry": entry.model_dump(mode="json"),
+            "restored_path": restored_path,
+            "operation_id": operation_id,
+        }
+    except Exception as exc:
+        _raise_agentspace_http(exc)
+
+
+@app.delete("/api/agentspace/trash/{entry_id}")
+async def agentspace_trash_purge(entry_id: str, req: Request):
+    operation_id = await _request_operation_id(req)
+    try:
+        await asyncio.to_thread(
+            _agentspace_service().purge_trash,
+            entry_id,
+            operation_id,
+        )
+        return {"success": True, "operation_id": operation_id}
+    except Exception as exc:
+        _raise_agentspace_http(exc)
+
+
+@app.delete("/api/agentspace/trash")
+async def agentspace_trash_empty(req: Request):
+    operation_id = await _request_operation_id(req)
+    try:
+        deleted, failures = await asyncio.to_thread(
+            _agentspace_service().empty_trash,
+            operation_id,
+        )
+        return {
+            "deleted": deleted,
+            "failures": failures,
+            "operation_id": operation_id,
+        }
+    except Exception as exc:
+        _raise_agentspace_http(exc)
+
+
+@app.get("/api/agentspace/locks")
+async def agentspace_locks():
     return {
-        "locked": _agentspace_lock["locked"],
-        "locked_by": _agentspace_lock["locked_by"],
+        "locks": [
+            lock.model_dump(mode="json")
+            for lock in _agentspace_service().locks_snapshot()
+        ]
     }
+
+
+def _agentspace_sse(event: AgentspaceEvent) -> str:
+    return (
+        f"id: {event.sequence}\n"
+        "event: agentspace\n"
+        f"data: {event.model_dump_json()}\n\n"
+    )
+
+
+@app.get("/api/agentspace/events")
+async def agentspace_events(req: Request):
+    service = _agentspace_service()
+    subscription_id, queue = service.subscribe_events()
+
+    async def stream():
+        try:
+            now = datetime.now(timezone.utc).isoformat()
+            yield _agentspace_sse(
+                AgentspaceEvent(
+                    sequence=0,
+                    kind=AgentspaceEventKind.RESYNC,
+                    source=AgentspaceEventSource.SYSTEM,
+                    timestamp=now,
+                )
+            )
+            yield _agentspace_sse(
+                AgentspaceEvent(
+                    sequence=0,
+                    kind=AgentspaceEventKind.LOCKS,
+                    source=AgentspaceEventSource.LOCKS,
+                    locks=service.locks_snapshot(),
+                    timestamp=now,
+                )
+            )
+            if not service.watcher_available:
+                yield _agentspace_sse(
+                    AgentspaceEvent(
+                        sequence=0,
+                        kind=AgentspaceEventKind.WATCHER_ERROR,
+                        source=AgentspaceEventSource.SYSTEM,
+                        timestamp=now,
+                        message="外部文件实时同步不可用，请使用手动刷新。",
+                    )
+                )
+            while not await req.is_disconnected():
+                try:
+                    event = await asyncio.wait_for(
+                        queue.get(),
+                        timeout=AGENTSPACE_SSE_HEARTBEAT_SECONDS,
+                    )
+                except asyncio.TimeoutError:
+                    yield ": keepalive\n\n"
+                    continue
+                yield _agentspace_sse(event)
+        finally:
+            service.unsubscribe_events(subscription_id)
+
+    return StreamingResponse(
+        stream(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 @app.get("/api/skills/list")

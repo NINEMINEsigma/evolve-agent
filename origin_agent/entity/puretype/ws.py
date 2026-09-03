@@ -32,7 +32,6 @@ class MessageType(str, Enum):
     PING = "ping"
     PONG = "pong"
     SUBAGENT_UPDATE = "subagent_update"
-    AGENTSPACE_LOCK = "agentspace_lock"
     LLM_PROFILE_CHANGED = "llm_profile_changed"
 
 

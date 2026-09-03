@@ -127,6 +127,7 @@ class ToolExecutor:
         tc: ToolCallRequest,
         session_id: str,
         *,
+        round_id: str,
         character_name: str | None = None,
         llm_profile: LLMProfile | None = None,
     ) -> ToolResultMessage:
@@ -135,6 +136,7 @@ class ToolExecutor:
         Args:
             tc: 工具调用描述。
             session_id: 当前会话 ID。
+            round_id: 当前 Agent 回复轮次的唯一 ID。
             character_name: 发起此工具调用的角色名；
                 MultiAgent 模式下由 worker 传入对应 Agent 名称，
                 默认回退到 loop.current_character_agent。
@@ -329,6 +331,7 @@ class ToolExecutor:
                         ctx = ToolContext(
                             loop=self._loop.loop,
                             session_id=session_id,
+                            round_id=round_id,
                             character_name=char_name,
                             llm_profile=llm_profile,
                         )

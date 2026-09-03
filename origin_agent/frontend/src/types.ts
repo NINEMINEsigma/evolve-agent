@@ -1,6 +1,81 @@
+export type AgentspaceEntryKind = "file" | "dir";
+
 export interface FileEntry {
   name: string;
-  type: "file" | "dir";
+  path: string;
+  kind: AgentspaceEntryKind;
+}
+
+export interface DirectoryState {
+  entries: FileEntry[];
+  loading: boolean;
+  error: string | null;
+}
+
+export type DirectoryStateMap = Record<string, DirectoryState>;
+
+export interface FileSnapshot {
+  path: string;
+  content: string;
+  version: string;
+  size: number;
+  modified_ns: number;
+  operation_id?: string;
+}
+
+export interface FileLockOwner {
+  owner_id: string;
+  session_id: string;
+  character_name: string;
+  round_id: string;
+}
+
+export interface FileLock {
+  path: string;
+  recursive: boolean;
+  owners: FileLockOwner[];
+}
+
+export type AgentspaceEventKind =
+  | "created"
+  | "modified"
+  | "deleted"
+  | "moved"
+  | "locks"
+  | "trash_changed"
+  | "resync"
+  | "watcher_error";
+
+export interface AgentspaceEvent {
+  sequence: number;
+  kind: AgentspaceEventKind;
+  source: "service" | "watcher" | "locks" | "system";
+  path: string | null;
+  new_path: string | null;
+  is_directory: boolean | null;
+  locks: FileLock[] | null;
+  timestamp: string;
+  operation_id: string | null;
+  version: string | null;
+  message: string | null;
+}
+
+export interface TrashEntry {
+  entry_id: string;
+  state: "ready" | "recoverable" | "corrupt";
+  original_path: string | null;
+  name: string | null;
+  kind: AgentspaceEntryKind | null;
+  deleted_at: string | null;
+  size: number;
+  error: string | null;
+}
+
+export interface ExternalConflict {
+  kind: "modified" | "deleted";
+  diskContent: string | null;
+  diskVersion: string | null;
+  detectedSequence: number;
 }
 
 export interface OpenTab {
@@ -11,7 +86,32 @@ export interface OpenTab {
   originalContent: string;
   isDirty: boolean;
   language: string;
+  version: string;
+  modifiedNs: number;
+  isLocked: boolean;
+  lockOwners: FileLockOwner[];
+  conflict: ExternalConflict | null;
 }
+
+export type EntrySelection = { path: string; kind: AgentspaceEntryKind } | null;
+export type CursorPosition = { line: number; column: number };
+export type DirtyCloseDecision = "save" | "discard" | "cancel";
+export type TrashDirtyDecision = "save-all" | "discard-all" | "cancel";
+export type DangerousDecision = "confirm" | "cancel";
+export type SyncState = "connecting" | "live" | "degraded";
+export type AgentspaceErrorState = {
+  message: string;
+  retry: (() => Promise<void>) | null;
+} | null;
+
+export type AgentspaceDialogState =
+  | { kind: "create-file"; parentPath: string }
+  | { kind: "create-folder"; parentPath: string }
+  | { kind: "rename"; entry: FileEntry }
+  | { kind: "close-dirty"; tabId: string }
+  | { kind: "trash-dirty"; path: string; tabIds: string[] }
+  | { kind: "purge-trash"; entryId: string; displayName: string }
+  | { kind: "empty-trash"; count: number };
 
 export interface TextContentBlock {
   type: "text";

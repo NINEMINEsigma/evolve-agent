@@ -37,9 +37,10 @@ workspace/                 <- 运行时根（默认名；整体被 gitignore）
 1. `run.py` 将 `origin_agent/` 复制到 `fast_agent_space/` 和 `slow_agent_space/`。
 2. 启动 `fast_agent_space/__main__.py`。
 3. `__main__.py` 解析 CLI、构造 `RuntimeContext`、构建前端。
-4. `main.py` 中的 `Application` 单例初始化 gateway、沙盒、工具发现、审批后端、SessionManager、ParentAgentLoop、SubAgentOrchestrator。
-5. 启动 uvicorn，监听 `WS /ws/chat` 与 REST API。
-6. 用户连接后，`SessionManager` 创建新的 `ParentAgentLoop` 实例并绑定 `FrontendSink`。
+4. `main.py` 中的 `Application` 单例初始化 gateway、沙盒、`AgentspaceService`、工具发现、审批后端、SessionManager、ParentAgentLoop、SubAgentOrchestrator。
+5. `AgentspaceService` 在 Gateway 接受请求前启动垃圾桶恢复与文件变化 watcher；watcher 不可用时降级但不影响 REST、版本校验和文件锁。
+6. 启动 uvicorn，监听 `WS /ws/chat`、REST API 与 Agentspace SSE。
+7. 用户连接后，`SessionManager` 创建新的 `ParentAgentLoop` 实例并绑定 `FrontendSink`。
 
 进化流程：
 
@@ -161,6 +162,16 @@ Evolve Agent 内置两套多代理运行时：
 
 ---
 
+## Agentspace 编辑器数据流
+
+- 用户文件操作由前端 `agentspaceApi.ts` 调用 Gateway typed REST，再委托 `Application.agentspace_service`；Service 负责路径校验、按目录优先自然排序、内容 SHA-256 版本与原子写。
+- 用户删除进入 `ws:.trash/` 的事务垃圾桶；Evolve Agent `Delete` 的永久删除与审批语义保持不变。
+- 内置 Agent 文件工具在明确接触 `ws:` 路径时登记回复轮次文件锁，主Agent、参与Agent、子Agent与临时Agent在各自回复收尾后释放。
+- `watchdog` 把外部变化送入事件总线，Gateway 通过 `GET /api/agentspace/events` SSE 推送；前端以事件作为缓存失效信号，并通过 REST 重新取得权威快照。依赖不可用时界面显示同步降级。
+- 编辑器保存携带预期版本；冲突返回 HTTP 409，前端保留本地草稿并显示 Monaco 差异比较，禁止静默覆盖。
+
+---
+
 ## 扩展点
 
 系统提供多个热扩展点，无需修改核心源码：
@@ -179,7 +190,8 @@ Evolve Agent 内置两套多代理运行时：
 
 ### `system/`
 
-- `system/application.py`：`Application` 进程级唯一单例，持有所有子系统引用（`RuntimeContext`、`LLMProfileStore`、共享 Profile 锁、`SessionManager`、`ToolRegistry`、`ApprovalBackend`、`CronRouter`、`SubAgentOrchestrator` 等）。通过 `Application.current()` 访问，避免模块级全局变量。
+- `system/application.py`：`Application` 进程级唯一单例，持有所有子系统引用（`RuntimeContext`、`LLMProfileStore`、共享 Profile 锁、`AgentspaceService`、`SessionManager`、`ToolRegistry`、`ApprovalBackend`、`CronRouter`、`SubAgentOrchestrator` 等）。通过 `Application.current()` 访问，避免模块级全局变量。
+- `system/agentspace/`：Agentspace 编辑器后端业务包。`AgentspaceService` 统一版本化 CRUD、用户垃圾桶、按 Agent 回复轮次持有的文件锁、文件变化 watcher、SSE 事件总线和用户变更摘要；Gateway 与内置工具均通过该服务协作。
 - `system/llm_profile_store.py`：进程内唯一的 LLM Profile 注册表。仅支持 `llm_profiles.es` 的 `v2` key，直接持有并保存 `LLMProfileData` 根对象；Profile 间多模态分工使用根列表中的实例引用，Gateway 通过单 Profile CRUD 修改。
 - `system/context.py`：`RuntimeContext`，贯穿整个应用的生命周期上下文。
 - `system/sandbox.py`：路径沙盒与命名空间解析。

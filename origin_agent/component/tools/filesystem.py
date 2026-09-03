@@ -54,6 +54,17 @@ def _s() -> Sandbox:
     return Application.current().sandbox
 
 
+def _track_agentspace_access(
+    context: ToolContext | None,
+    paths: list[tuple[str, bool]],
+) -> None:
+    """登记明确的 ws: 路径；登记失败时让调用方返回工具错误。"""
+    if context is None:
+        return
+    with context.agentspace_access(paths):
+        pass
+
+
 # ---------------------------------------------------------------------------
 # 图片读取支持（从 read_image.py 合并）
 # ---------------------------------------------------------------------------
@@ -213,6 +224,10 @@ async def _handle_read(args: dict[str, Any], context: ToolContext | None = None)
 
     # 文件分支
     if resolved.real.is_file():
+        try:
+            _track_agentspace_access(context, [(path, False)])
+        except Exception as exc:
+            return tool_error(f"Agentspace access lock failed: {exc}", path=path)
         # --- 图片分支（MIME 自动检测，从 read_image.py 合并）---
         mime_type = _guess_mime(str(resolved.real))
         if mime_type in _SUPPORTED_MIMES:
@@ -677,13 +692,20 @@ async def _handle_read(args: dict[str, Any], context: ToolContext | None = None)
     return tool_error("Unsupported path type — must be a file or directory", path=path)
 
 
-def _handle_write(args: dict[str, Any]) -> dict:
+def _handle_write(
+    args: dict[str, Any],
+    context: ToolContext | None = None,
+) -> dict:
     path: str = str(args.get("path", "")).strip()
     has_content = "content" in args and args["content"] is not None
     content: str = str(args["content"]) if has_content else ""
     mode: str = str(args.get("mode", "overwrite")).strip()
     if not path:
         return tool_error("path is required", path=path)
+    try:
+        _track_agentspace_access(context, [(path, False)])
+    except Exception as exc:
+        return tool_error(f"Agentspace access lock failed: {exc}", path=path)
 
     # -- 目录创建分支：content 缺失或为 None --
     if not has_content:
@@ -745,7 +767,10 @@ def _handle_write(args: dict[str, Any]) -> dict:
         return tool_error(str(exc), path=path)
 
 
-def _handle_delete(args: dict[str, Any]) -> dict:
+def _handle_delete(
+    args: dict[str, Any],
+    context: ToolContext | None = None,
+) -> dict:
     paths_raw = args.get("paths", [])
     if not isinstance(paths_raw, list) or not paths_raw:
         return tool_error("paths is required as a non-empty array of strings")
@@ -759,13 +784,15 @@ def _handle_delete(args: dict[str, Any]) -> dict:
             failed += 1
             continue
         try:
-            if _s().is_dir(path):
+            is_directory = _s().is_dir(path)
+            _track_agentspace_access(context, [(path, is_directory)])
+            if is_directory:
                 _s().delete_folder(path)
             else:
                 _s().delete(path)
             results.append({"path": path, "success": True, "deleted": True})
             succeeded += 1
-        except SandboxError as exc:
+        except Exception as exc:
             results.append({"path": path, "success": False, "error": str(exc)})
             failed += 1
     return tool_result(results=results, summary={"total": len(results), "succeeded": succeeded, "failed": failed})
@@ -1183,7 +1210,10 @@ def _find_ranges(
     return ranges
 
 
-def _handle_edit(args: dict[str, Any]) -> dict:
+def _handle_edit(
+    args: dict[str, Any],
+    context: ToolContext | None = None,
+) -> dict:
     """文本替换 — 支持 exact / regex / range 三种匹配模式。"""
     path: str = str(args.get("path", "")).strip()
     old_string: str = str(args.get("old_string", ""))
@@ -1235,8 +1265,9 @@ def _handle_edit(args: dict[str, Any]) -> dict:
         return tool_error("File not found — use Write to create it first", path=path)
 
     try:
+        _track_agentspace_access(context, [(path, False)])
         content: str = _s().read(path, limit=0)
-    except SandboxError as exc:
+    except Exception as exc:
         return tool_error(str(exc), path=path)
 
     # --- exact 模式（默认，向后兼容） ---
@@ -1468,7 +1499,10 @@ Errors:
 
 
 # -- Copy
-def _handle_copy(args: dict[str, Any]) -> dict:
+def _handle_copy(
+    args: dict[str, Any],
+    context: ToolContext | None = None,
+) -> dict:
     source: str = str(args.get("source", "")).strip()
     destination: str = str(args.get("destination", "")).strip()
     if not source:
@@ -1479,6 +1513,11 @@ def _handle_copy(args: dict[str, Any]) -> dict:
         resolved = _s().resolve_read(source)
         if not resolved.real.exists():
             return tool_error("Source not found", source=source)
+        is_directory = resolved.real.is_dir()
+        _track_agentspace_access(
+            context,
+            [(source, is_directory), (destination, is_directory)],
+        )
         if resolved.real.is_file():
             _s().copy(source, destination)
         elif resolved.real.is_dir():
@@ -1486,7 +1525,7 @@ def _handle_copy(args: dict[str, Any]) -> dict:
         else:
             return tool_error("Source must be a file or directory", source=source)
         return tool_result(success=True, source=source, destination=destination)
-    except SandboxError as exc:
+    except Exception as exc:
         return tool_error(str(exc), source=source, destination=destination)
 
 
@@ -1574,7 +1613,10 @@ Copies the source file/directory to the destination path. File branch overwrites
 
 
 # -- move_file
-def _handle_move(args: dict[str, Any]) -> dict:
+def _handle_move(
+    args: dict[str, Any],
+    context: ToolContext | None = None,
+) -> dict:
     source: str = str(args.get("source", "")).strip()
     destination: str = str(args.get("destination", "")).strip()
     if not source:
@@ -1582,9 +1624,17 @@ def _handle_move(args: dict[str, Any]) -> dict:
     if not destination:
         return tool_error("destination is required")
     try:
+        resolved = _s().resolve_read(source)
+        if not resolved.real.exists():
+            return tool_error("Source not found", source=source)
+        is_directory = resolved.real.is_dir()
+        _track_agentspace_access(
+            context,
+            [(source, is_directory), (destination, is_directory)],
+        )
         _s().move(source, destination)
         return tool_result(success=True, source=source, destination=destination)
-    except SandboxError as exc:
+    except Exception as exc:
         return tool_error(str(exc), source=source, destination=destination)
 
 
@@ -1831,7 +1881,10 @@ def _is_text_file(path: Any) -> bool:
         return False
 
 
-def _handle_grep(args: dict[str, Any]) -> dict:
+def _handle_grep(
+    args: dict[str, Any],
+    context: ToolContext | None = None,
+) -> dict:
     path: str = str(args.get("path", "")).strip()
     pattern: str = str(args.get("pattern", "")).strip()
     limit: int = int(args.get("limit", 100))
@@ -1851,6 +1904,10 @@ def _handle_grep(args: dict[str, Any]) -> dict:
     # 收集待搜索文件列表：文件直接搜索，目录递归搜索
     files: list[Path] = []
     if resolved.real.is_file():
+        try:
+            _track_agentspace_access(context, [(path, False)])
+        except Exception as exc:
+            return tool_error(f"Agentspace access lock failed: {exc}", path=path)
         files = [resolved.real]
     elif resolved.real.is_dir():
         files = [p for p in resolved.real.rglob("*") if p.is_file()]

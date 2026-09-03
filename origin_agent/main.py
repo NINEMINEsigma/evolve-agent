@@ -180,6 +180,7 @@ class App:
         app = Application(self.ctx)
         app.link_shutdown_event(self._shutdown_event)
         app.init()
+        await app.agentspace_service.start()
 
         # ---- 确保 colloquy session 存在 ----
         if app.session_manager is not None:

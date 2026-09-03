@@ -12,9 +12,10 @@ import asyncio
 import json
 import logging
 import shutil
+import uuid
 from abc import ABC, abstractmethod
 from pathlib import Path
-from typing import Any, Awaitable, Callable, TYPE_CHECKING
+from typing import Any, Awaitable, Callable, ContextManager, TYPE_CHECKING
 
 from pydantic import BaseModel
 
@@ -128,6 +129,8 @@ class ToolContext(BaseModel):
 
     loop: BaseAgentLoop
     session_id: str = ""
+    # 当前回复轮次的唯一 ID；所有明确 ws: 文件接触共用该 ID。
+    round_id: str
     # 当前执行 agent 的角色名 — 多 agent 模式下由 ToolExecutor/Worker 注入，
     # 空 = 未指定（handler 回退到 loop.current_character_agent）
     character_name: str = ""
@@ -151,6 +154,21 @@ class ToolContext(BaseModel):
     @property
     def is_interrupted(self) -> bool:
         return self.loop.is_interrupted()
+
+    def agentspace_access(
+        self,
+        paths: list[tuple[str, bool]],
+    ) -> ContextManager[None]:
+        """登记本轮明确接触的 ws: 路径；失败时由工具 fail-closed。"""
+        from entity.puretype import AgentspaceLockOwner
+
+        owner = AgentspaceLockOwner(
+            owner_id=self.round_id,
+            session_id=self.session_id,
+            character_name=self.character_name,
+            round_id=self.round_id,
+        )
+        return self.app.agentspace_service.agent_access(owner, paths)
 
 
 # ---------------------------------------------------------------------------
@@ -279,6 +297,46 @@ class BaseAgentLoop(ABC):
         # SP-5 D2：轮次后编排放 loop——由 MessageRouter 在 handle_user_message 注册，
         # run_pending_round 锁外末尾调用，完成 WS 重映射/token 推送/进化触发。
         self._on_round_done: Callable[[Any], Awaitable[None]] | None = None
+        # 角色名 → 当前回复轮次 ID；只在 loop 的事件循环中变更。
+        self._agentspace_round_ids: dict[str, str] = {}
+
+    def begin_agentspace_round(self, character_name: str) -> str:
+        """开始一个 Agent 回复轮次并返回唯一 round_id。"""
+        if character_name in self._agentspace_round_ids:
+            raise RuntimeError(
+                f"Agentspace round already active for {character_name!r}"
+            )
+        round_id = uuid.uuid4().hex
+        self._agentspace_round_ids[character_name] = round_id
+        return round_id
+
+    def current_agentspace_round(self, character_name: str) -> str:
+        """返回角色当前回复轮次；无活动轮次时拒绝无锁工具访问。"""
+        try:
+            return self._agentspace_round_ids[character_name]
+        except KeyError as exc:
+            raise RuntimeError(
+                f"No active Agentspace round for {character_name!r}"
+            ) from exc
+
+    def end_agentspace_round(self, character_name: str, round_id: str) -> None:
+        """仅释放匹配轮次持有的路径锁；重复调用幂等。"""
+        current = self._agentspace_round_ids.get(character_name)
+        if current is None:
+            return
+        if current != round_id:
+            logger.warning(
+                "Ignored mismatched Agentspace round release | character=%s current=%s requested=%s",
+                character_name,
+                current,
+                round_id,
+            )
+            return
+        try:
+            self.app.agentspace_service.release_agent_access(round_id)
+        finally:
+            if self._agentspace_round_ids.get(character_name) == round_id:
+                self._agentspace_round_ids.pop(character_name, None)
 
     def set_on_round_done(self, cb: Callable[[Any], Awaitable[None]] | None) -> None:
         """注册轮次后回调（幂等覆盖；None 清除）。

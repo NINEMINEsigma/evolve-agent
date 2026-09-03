@@ -98,6 +98,7 @@ class MultiAgentWorker:
         llm_client: BaseLLMClient,
         sink: AgentSink,
         loop: IMainSessionLoop,
+        round_id: str,
         max_context_tokens: int = 0,
         max_output_tokens: int = 0,
         llm_profile: LLMProfile | None = None,
@@ -110,6 +111,7 @@ class MultiAgentWorker:
         self._llm_profile: LLMProfile | None = llm_profile
         self._sink: AgentSink = sink
         self._loop: IMainSessionLoop = loop
+        self._round_id: str = round_id
         # 流式消费器：每轮 LLM 调用会生成独立 stream_id，避免多轮文本互相覆盖
         self._stream_consumer = StreamConsumer(
             llm=self._llm,
@@ -229,7 +231,13 @@ class MultiAgentWorker:
 
             # 多模态块预检：检测 messages 中的 ImageBlock/AudioBlock/VideoBlock，
             # 自动探查能力，不支持时转发借用并替换为描述文本
-            _ctx = ToolContext(loop=self._loop.loop, session_id=self._loop.loop.session_id, character_name=self.character_name, llm_profile=self._llm_profile)
+            _ctx = ToolContext(
+                loop=self._loop.loop,
+                session_id=self._loop.loop.session_id,
+                round_id=self._round_id,
+                character_name=self.character_name,
+                llm_profile=self._llm_profile,
+            )
             full_messages = await preprocess_multimodal_blocks(
                 full_messages, _ctx, self._loop.loop.save_history,
             )
@@ -328,6 +336,7 @@ class MultiAgentWorker:
                     for tc in resp.tool_calls:
                         tool_msg = await self._tool_executor.execute(
                             tc, self._loop.loop.session_id,
+                            round_id=self._round_id,
                             character_name=self.character_name,
                             llm_profile=self._llm_profile,
                         )

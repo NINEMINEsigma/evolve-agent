@@ -36,16 +36,22 @@ frontend/
 │   │   └── useGlobalTooltip.ts      ← 全局 tooltip
 │   ├── components/
 │   │   ├── agentspace/             ← Agentspace 文件浏览器组件
+│   │   │   ├── AgentspaceDialogs.tsx
+│   │   │   ├── ConflictDialog.tsx
 │   │   │   ├── EditorArea.tsx
 │   │   │   ├── FileTree.tsx
-│   │   │   └── StatusBar.tsx
+│   │   │   ├── StatusBar.tsx
+│   │   │   └── TreeIcons.tsx
 │   │   ├── primitives/             ← 基础 UI 原语
 │   │   │   ├── ModalWindow.tsx
 │   │   │   ├── PopupLayer.tsx
 │   │   │   └── CopyBanner.tsx
 │   │   └── ...                      ← 聊天、弹窗、面板等组件
+│   ├── services/
+│   │   └── agentspaceApi.ts ← Agentspace REST/SSE 唯一适配层
 │   ├── styles/              ← CSS 样式
 │   └── utils/
+│       ├── agentspacePath.ts ← Agentspace 路径与排序纯函数
 │       ├── toolLabels.ts    ← 工具标签映射
 │       ├── exportSession.ts ← 会话导出
 │       └── terrain.ts       ← 等高线背景生成
@@ -110,7 +116,6 @@ frontend/
 
 | 组件 | 职责 |
 |---|---|
-| `ConfirmDialog.tsx` | 工具审批弹窗（兼容 command 为字符串或数组） |
 | `AskDialog.tsx` | `Ask` 弹窗 |
 | `TagEditor.tsx` | 会话标签编辑 |
 | `primitives/ModalWindow.tsx` | 模态窗口基础原语 |
@@ -131,11 +136,16 @@ frontend/
 
 | 组件 | 职责 |
 |---|---|
-| `pages/Agentspace.tsx` | Agentspace 页面入口 |
-| `components/agentspace/FileTree.tsx` | 文件树导航 |
-| `components/agentspace/EditorArea.tsx` | 文件编辑/预览区域 |
-| `components/agentspace/StatusBar.tsx` | 底部状态栏 |
-| `hooks/useAgentspace.ts` | Agentspace 文件列表与内容管理 |
+| `pages/Agentspace.tsx` | Agentspace 页面编排、侧栏尺寸、离开确认和对话框宿主 |
+| `components/agentspace/FileTree.tsx` | 目录优先文件树、独立类型图标、单选键盘导航和垃圾桶节点 |
+| `components/agentspace/EditorArea.tsx` | Monaco 编辑、可滚动标签、同名消歧和逐文件锁/冲突状态 |
+| `components/agentspace/StatusBar.tsx` | 路径、语言、光标、保存/冲突/锁与同步状态 |
+| `components/agentspace/AgentspaceDialogs.tsx` | 创建、重命名、脏标签与永久清理确认 |
+| `components/agentspace/ConflictDialog.tsx` | Monaco DiffEditor 冲突处理 |
+| `components/agentspace/TreeIcons.tsx` | 无新增依赖的内联 SVG 文件树图标 |
+| `services/agentspaceApi.ts` | Agentspace REST、结构化错误与 EventSource 适配 |
+| `utils/agentspacePath.ts` | 路径规范化、前缀重写、选择上下文和自然排序 |
+| `hooks/useAgentspace.ts` | 目录/标签/锁/垃圾桶状态机及 HTTP/SSE 代际控制 |
 
 ---
 
@@ -151,7 +161,7 @@ frontend/
 | `useSessionStore.ts` | 会话列表与元数据管理：获取/创建/归档/删除/标签/标题 |
 | `useSubagentManager.ts` | 子代理状态管理：注册/启动/停止/审批/列表 |
 | `useUploadManager.ts` | 文件上传管理：拖拽上传、进度跟踪、文件选择器 |
-| `useAgentspace.ts` | Agentspace 文件浏览：文件树加载、文件读写、路径导航 |
+| `useAgentspace.ts` | Agentspace 编辑器状态机：目录展开/选择、版本化标签、SSE 代际、逐文件锁、冲突和垃圾桶 |
 | `useEdgeDrawer.ts` | 边缘抽屉三态状态机（hidden/peek/open），侧栏与顶部栏共用 |
 | `useGlobalTooltip.ts` | 全局 tooltip 管理 |
 
@@ -162,6 +172,18 @@ frontend/
 | Context | 职责 |
 |---|---|
 | `ConnectionDiagnosticsContext.tsx` | 连接诊断上下文：检测 WebSocket 连接状态、延迟、错误信息，为 UI 提供连接健康度反馈 |
+
+---
+
+## Agentspace 编辑器行为
+
+- 文件树固定使用“文件夹优先、文件在后、组内自然名称排序”，展开箭头与类型图标分离；单击文件直接打开永久标签。
+- 侧栏可拖动、折叠并保存宽度；标签栏可横向滚动，不同目录的同名文件显示最短可区分父路径。
+- 用户删除进入独立 `ws:.trash/` 垃圾桶节点；恢复冲突自动添加 `.restored-N`，永久删除与清空需要明确确认。Evolve Agent 的 `Delete` 不受此 UI 语义影响。
+- 保存携带打开时的 SHA-256 版本。外部修改干净标签时自动重载；脏标签保留本地内容并进入 DiffEditor 冲突处理。
+- 内置 Agent 操作按回复轮次持有具体路径锁，只有命中路径变为只读；无关文件仍可编辑。
+- 文件变化通过 SSE 实时同步。watcher 或连接不可用时状态栏显示降级，并保留手动刷新。
+- 关闭脏标签提供保存/不保存/取消；页面离开使用浏览器原生确认，不跨刷新恢复草稿和标签。
 
 ---
 

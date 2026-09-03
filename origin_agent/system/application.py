@@ -14,6 +14,7 @@ if TYPE_CHECKING:
     from system.context import RuntimeContext
     from system.llm_profile_store import LLMProfileStore
     from system.sandbox import Sandbox
+    from system.agentspace import AgentspaceService
     from gateway.session_manager import SessionManager
     from component.approval.backend import ApprovalBackend
     from component.cron_router import CronRouter
@@ -45,6 +46,7 @@ class Application:
         self._profile_lock:              threading.RLock = threading.RLock()
         self._llm_profile_store:         LLMProfileStore | None = None
         self._sandbox:                   Sandbox | None = None
+        self._agentspace_service:        AgentspaceService | None = None
         self._cron_router:               CronRouter | None = None
         self._session_manager:           SessionManager | None = None
         self._frontend_sink:             FrontendSink | None = None
@@ -70,7 +72,14 @@ class Application:
         from system.sandbox import Sandbox
         self._sandbox = Sandbox(self.runtime_context)
 
-        # 2. LLMProfileStore — 必须先于 SessionManager 和任何 Loop 恢复。
+        # 2. AgentspaceService — 依赖共享 Sandbox；异步 watcher 在 main.py 启动。
+        from system.agentspace import AgentspaceService
+        self._agentspace_service = AgentspaceService(
+            self._sandbox,
+            self.runtime_context.agentspace,
+        )
+
+        # 3. LLMProfileStore — 必须先于 SessionManager 和任何 Loop 恢复。
         from system.llm_profile_store import LLMProfileStore
         self._llm_profile_store = LLMProfileStore(
             self.runtime_context.agentspace,
@@ -122,6 +131,11 @@ class Application:
         return self._sandbox  # type: ignore[return-value]
 
     @property
+    def agentspace_service(self) -> AgentspaceService:
+        """返回 Agentspace 编辑器唯一业务服务。"""
+        return self._agentspace_service  # type: ignore[return-value]
+
+    @property
     def cron_router(self) -> CronRouter:
         return self._cron_router  # type: ignore[return-value]
 
@@ -171,7 +185,14 @@ class Application:
         """按依赖顺序停止子系统。"""
         logger.info("Application shutdown initiated")
         failures: list[str] = []
-        # 1. 停止 cron 后台任务
+        # 1. 停止 Agentspace watcher 与 SSE 订阅。
+        if self._agentspace_service is not None:
+            try:
+                await self._agentspace_service.shutdown()
+            except Exception as exc:
+                logger.exception("AgentspaceService shutdown failed: %s", exc)
+                failures.append(f"AgentspaceService: {exc}")
+        # 2. 停止 cron 后台任务
         if self._cron_router is not None:
             try:
                 await self._cron_router.shutdown()

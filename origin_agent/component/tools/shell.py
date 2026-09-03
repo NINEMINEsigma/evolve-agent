@@ -8,7 +8,10 @@ from __future__ import annotations
 
 import logging
 import subprocess  # nosec
-from typing import Any, Dict, List
+from typing import Any, Dict, List, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from entry.base_agent_loop import ToolContext
 
 from abstract.tools.registry import registry, tool_error, tool_result
 from entity.puretype import ToolDangerLevel
@@ -28,7 +31,10 @@ def _s():
 
 # ── 工具 handler ─────────────────────────────────────────────────────
 
-async def _handle_run_command(args: dict[str, Any]) -> dict:
+async def _handle_run_command(
+    args: dict[str, Any],
+    context: ToolContext | None = None,
+) -> dict:
     """执行已由 AgentLoop 统一审批的 shell 命令。
 
     预期参数：
@@ -46,6 +52,13 @@ async def _handle_run_command(args: dict[str, Any]) -> dict:
     cmd_parts: list[str] = [str(p) for p in raw_cmd]
     if not cmd_parts:
         return tool_error("'command' must be a non-empty list")
+
+    if context is not None and cwd.startswith("ws:"):
+        try:
+            with context.agentspace_access([(cwd, True)]):
+                pass
+        except Exception as exc:
+            return tool_error(f"Agentspace access lock failed: {exc}", cwd=cwd)
 
     # 审批由 AgentLoop 统一入口处理（handler 内不再重复确认）
     return _execute(cmd_parts, cwd, session_id)

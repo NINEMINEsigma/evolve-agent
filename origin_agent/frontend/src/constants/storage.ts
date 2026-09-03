@@ -21,6 +21,8 @@ export const STORAGE_KEYS = {
   SITE_DRAWER_WIDTH:            "evolve_site_drawer_width",
   EXPANDED_CLUSTERS:           "evolve_expanded_clusters",
   HANDSFREE_MODE:              "evolve_handsfree_mode",
+  AGENTSPACE_SIDEBAR_WIDTH:    "evolve_agentspace_sidebar_width",
+  AGENTSPACE_SIDEBAR_COLLAPSED:"evolve_agentspace_sidebar_collapsed",
 
   // LLM 模型配置
   ACTIVE_LLM_PROFILE:  "evolve_active_llm_profile",

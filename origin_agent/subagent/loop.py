@@ -316,6 +316,7 @@ class SubAgentLoop(BasePrivateChatAgentLoop):
         _cron = Application.current().cron_router
         if _cron is not None:
             _cron.register(self.session_id, self)
+        active_round_id: str | None = None
         try:
             # 注入初始用户消息（system prompt 由 _build_history_messages 通过 _build_system_prompt 处理）
             initial_character_name = USER_CHARACTER_NAME if message_type == "user_direct" else (self._parent_character_agent or MAIN_AGENT_CHARACTER_NAME)
@@ -332,6 +333,10 @@ class SubAgentLoop(BasePrivateChatAgentLoop):
             while turn < self._max_turns:
                 if self._cancel_event.is_set():
                     return
+                if active_round_id is None:
+                    active_round_id = self.begin_agentspace_round(
+                        self.current_character_agent
+                    )
                 turn += 1
                 self._round_active = True  # 新一轮响应开始
 
@@ -363,8 +368,13 @@ class SubAgentLoop(BasePrivateChatAgentLoop):
                         self._outbox_event.set()
                     self._emit("assistant", content=text, reasoning=reasoning_text,
                                character_name=self.current_character_agent)
-                    # LLM 给出纯文本即视作本轮对话结束，等待父 Agent 消息或取消
+                    # LLM 给出纯文本即视作本轮对话结束，释放文件锁后等待新消息。
                     self._round_active = False
+                    self.end_agentspace_round(
+                        self.current_character_agent,
+                        active_round_id,
+                    )
+                    active_round_id = None
                     self._wake_event.clear()
                     await self._wake_event.wait()
                     self._maybe_inject_inbox()
@@ -463,6 +473,11 @@ class SubAgentLoop(BasePrivateChatAgentLoop):
         except Exception as exc:
             logger.exception("SubAgentLoop error for session=%s: %s", self.session_id, exc)
         finally:
+            if active_round_id is not None:
+                self.end_agentspace_round(
+                    self.current_character_agent,
+                    active_round_id,
+                )
             if _cron is not None:
                 _cron.unregister(self.session_id)
             self._terminated = True
@@ -730,7 +745,13 @@ class SubAgentLoop(BasePrivateChatAgentLoop):
                 timeout = 0
 
             # 通过 registry.async_dispatch 执行，正确传递 ToolContext
-            tool_ctx = ToolContext(loop=self, session_id=self.session_id, character_name=self._name, llm_profile=self._llm_profile)
+            tool_ctx = ToolContext(
+                loop=self,
+                session_id=self.session_id,
+                round_id=self.current_agentspace_round(self.current_character_agent),
+                character_name=self._name,
+                llm_profile=self._llm_profile,
+            )
             coro = tool_registry.async_dispatch(tc.name, args, context=tool_ctx)
 
             invocation_start = _time_module.monotonic()

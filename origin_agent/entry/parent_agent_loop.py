@@ -360,6 +360,7 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
         """执行 LLM 工具调用循环。"""
         self._cancel_event.clear()
         self._disgust_event.clear()
+        round_id = self.begin_agentspace_round(self.current_character_agent)
 
         turn: RefWrapper[int] = RefWrapper(value=0)
         self._tool_executor.set_turn_counter(turn)
@@ -376,7 +377,9 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
 
                 # 多模态块预检：检测 messages 中的 ImageBlock/AudioBlock，
                 # 自动探查能力，不支持时转发借用并替换为描述文本
-                messages = await self._preprocess_multimodal_blocks(sid, messages)
+                messages = await self._preprocess_multimodal_blocks(
+                    sid, messages, round_id,
+                )
 
                 stream_id: str = uuid.uuid4().hex[:12]
                 try:
@@ -459,6 +462,7 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
                     for tc in resp.tool_calls:
                         tool_msg = await self._tool_executor.execute(
                             tc, sid,
+                            round_id=round_id,
                             character_name=self.current_character_agent,
                             llm_profile=self.active_llm_profile,
                         )
@@ -516,9 +520,12 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
                 messages = self._get_full_history(sid)
 
         finally:
-            # 所有退出路径汇聚于此：一次性持久化计时数据
-            if collected_metrics and self._session_store is not None:
-                self._session_store.merge_message_metrics(collected_metrics)
+            # 所有退出路径汇聚于此：一次性持久化计时数据，再释放回复轮次文件锁。
+            try:
+                if collected_metrics and self._session_store is not None:
+                    self._session_store.merge_message_metrics(collected_metrics)
+            finally:
+                self.end_agentspace_round(self.current_character_agent, round_id)
 
         logger.warning(
             "Tool-call loop exceeded max turns (%d) for session=%s",
@@ -537,10 +544,19 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
     # ========================================================================
 
     async def _preprocess_multimodal_blocks(
-        self, sid: str, messages: list[BaseMessage],
+        self,
+        sid: str,
+        messages: list[BaseMessage],
+        round_id: str,
     ) -> list[BaseMessage]:
         """预检多模态块：委托给 multimodal.preprocess_multimodal_blocks 公共函数。"""
-        context = ToolContext(loop=self, session_id=sid, character_name=self.current_character_agent, llm_profile=self.active_llm_profile)
+        context = ToolContext(
+            loop=self,
+            session_id=sid,
+            round_id=round_id,
+            character_name=self.current_character_agent,
+            llm_profile=self.active_llm_profile,
+        )
         return await preprocess_multimodal_blocks(messages, context, self.save_history)
 
     # ========================================================================

@@ -163,6 +163,14 @@ graph TD
 
 ---
 
+## Agentspace 回复轮次文件锁
+
+- `SubAgentLoop` 在初始消息或被 `_wake_event` 唤醒开始回复时创建唯一 round ID；连续工具回环沿用该 ID，纯文本回复完成并进入等待前释放，异常/停止路径在 `finally` 幂等释放。
+- `TaskAgentLoop` 的一次性完整回复使用一个 round ID，并在终止 `finally` 释放。
+- 子Agent文件工具通过 `ToolContext.round_id` 登记明确 `ws:` 路径；登记失败时 fail-closed。该机制不改变子Agent审批策略或 Evolve Agent `Delete` 的永久删除语义。
+
+---
+
 ## 历史持久化
 
 - 运行中：子代理历史保存在内存中的 `SubAgentLoop._history`。
