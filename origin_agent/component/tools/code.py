@@ -6,14 +6,10 @@
 
 from __future__ import annotations
 
-import ast
-import json
 import logging
-import subprocess  # nosec
-from typing import Any, Dict, List
+from typing import Any
 
 from abstract.tools.registry import registry, tool_error, tool_result
-from entity.puretype import ToolDangerLevel
 from entity.constant import SUBPROCESS_TIMEOUT_DEFAULT
 from system.sandbox import Access, SandboxError
 
@@ -42,59 +38,38 @@ def _handle_validate_code(args: dict[str, Any]) -> dict:
     """验证 Python 代码的语法错误。
 
     *file* — 要验证的裸文件名或逻辑路径。
-    未指定文件时验证 fork: 命名空间中所有 .py 文件。
+    未指定文件时递归验证 fork: 命名空间中所有 .py 文件。
+    *deep* — 是否额外运行 py_compile 编译检查（默认 False）。
     """
+    from evolve.validator import validate_directory, validate_syntax, validate_compile, summary
+
     path: str = str(args.get("file", "")).strip()
-    results: list[dict[str, Any]] = []
+    deep: bool = bool(args.get("deep", False))
+    compile_timeout: int = int(args.get("compile_timeout", SUBPROCESS_TIMEOUT_DEFAULT))
 
     if path:
         # 验证单个文件
-        resolved: Any
         try:
             if ":" in path:
                 resolved = _s().resolve(path, Access.READ)
             else:
                 resolved = _s().resolve(f"fork:{path}", Access.READ)
-            source: str = resolved.real.read_text(encoding="utf-8")
-            ast.parse(source, filename=str(resolved.real))
-            results.append({"file": path, "status": "ok"})
-        except SyntaxError as exc:
-            results.append({
-                "file": path,
-                "status": "syntax_error",
-                "line": exc.lineno,
-                "offset": exc.offset,
-                "message": str(exc),
-            })
-        except (SandboxError, FileNotFoundError) as exc:
-            results.append({"file": path, "status": "error", "message": str(exc)})
+            results: list[dict[str, Any]] = [validate_syntax(resolved.real)]
+            if deep and results[0].get("status") == "ok":
+                compile_result: dict[str, Any] = validate_compile(resolved.real, timeout=compile_timeout)
+                if compile_result["status"] != "ok":
+                    results[0] = compile_result
+        except SandboxError as exc:
+            results = [{"file": path, "status": "error", "message": str(exc)}]
     else:
-        # 验证 fork: 中所有 .py 文件
+        # 验证 fork: 中所有 .py 文件（递归子目录）
         try:
-            entries: list[str] = _s().list_dir("fork:")
-            for entry in entries:
-                if not entry.endswith(".py"):
-                    continue
-                try:
-                    resolved = _s().resolve(f"fork:{entry}", Access.READ)
-                    source = resolved.real.read_text(encoding="utf-8")
-                    ast.parse(source, filename=str(resolved.real))
-                    results.append({"file": entry, "status": "ok"})
-                except SyntaxError as exc:
-                    results.append({
-                        "file": entry,
-                        "status": "syntax_error",
-                        "line": exc.lineno,
-                        "offset": exc.offset,
-                        "message": str(exc),
-                    })
-                except Exception as exc:
-                    results.append({"file": entry, "status": "error", "message": str(exc)})
+            fork_resolved = _s().resolve_read("fork:")
+            results = validate_directory(fork_resolved.real, deep=deep, timeout=compile_timeout)
         except SandboxError as exc:
             return tool_error(str(exc))
 
-    ok: bool = all(r.get("status") == "ok" for r in results)
-    return tool_result(valid=ok, results=results)
+    return tool_result(**summary(results))
 
 
 def _handle_evolve_code(args: dict[str, Any]) -> dict:
@@ -130,26 +105,35 @@ registry.register(
     name="ValidateCode",
     toolset="code",
     schema={
-        # 用 ast.parse() 检查 fork: 命名空间中 Python 文件的语法错误。
+        # 用 ast.parse() 检查 fork: 命名空间中 Python 文件的语法错误，可选 py_compile 编译检查。
         # 前置条件：已通过 Write/PatchEdit 将进化代码写入 fork:。仅 fast 模式下可用。
-        # file: 可选。指定时只验证该文件（裸名或 'fork:xxx.py'）；省略时验证 fork: 下所有 .py 文件。
+        # file: 可选。指定时只验证该文件（裸名或 'fork:xxx.py'）；省略时递归验证 fork: 下所有 .py 文件（含子目录）。
+        # deep: 默认 false（仅语法检查）。设为 true 额外运行 py_compile 子进程编译检查。
         # 调用效果：只读分析，不修改任何文件。
-        # 返回：{ valid: bool, results: [{ file, status: "ok"|"syntax_error"|"error", line?, offset?, message? }] }
+        # 返回：{ valid, total, ok, errors, details: [{ file, status: "ok"|"syntax_error"|"compile_error"|"error", line?, offset?, message? }] }
         # 典型场景：进化工作流第二步 — 写入进化代码之后、EvolveCode 之前调用，确保语法无误。
-        "description": """Check Python source files in the fork: namespace for syntax errors using ast.parse().
+        "description": """Check Python source files in the fork: namespace for syntax errors using ast.parse(), with optional py_compile check.
 
 ## Prerequisites
 Evolved code must have been written to fork: via `Write` or `PatchEdit` with `fork:` prefix. Only available in fast mode.
 
 ## Effect
-Read-only analysis. Does not modify any files.
+Read-only analysis. Does not modify any files. When `file` is omitted, recursively validates all `.py` files in fork: (including subdirectories).
+
+## Parameters
+- `file` (string, optional): Specific file to validate, as bare name ('main.py') or logical path ('fork:main.py'). Omit to validate all `.py` files in fork: recursively.
+- `deep` (boolean, default false): When true, also runs `py_compile` subprocess compile check on each file. When false, syntax check only (faster).
+- `compile_timeout` (integer): Timeout in seconds for each file's `py_compile` subprocess.
 
 ## Returns
 ```json
 {
   "valid": true|false,
-  "results": [
-    { "file": "<path>", "status": "ok"|"syntax_error"|"error", "line": N, "offset": N, "message": "<detail>" }
+  "total": N,
+  "ok": N,
+  "errors": N,
+  "details": [
+    { "file": "<relative_path>", "status": "ok"|"syntax_error"|"compile_error"|"error", "line": N, "offset": N, "message": "<detail>" }
   ]
 }
 ```
@@ -162,8 +146,18 @@ Evolution workflow step 2 — call after writing evolved code via `Write`/`Patch
             "properties": {
                 "file": {
                     "type": "string",
-                    # 可选。要验证的特定文件，裸名（'main.py'）或逻辑路径（'fork:main.py'）。省略则验证 fork: 下所有 .py 文件。
-                    "description": """Optional. Specific file to validate, as bare name ('main.py') or logical path ('fork:main.py'). Omit to validate all .py files in fork:.""",
+                    # 可选。要验证的特定文件，裸名（'main.py'）或逻辑路径（'fork:main.py'）。省略则递归验证 fork: 下所有 .py 文件（含子目录）。
+                    "description": """Optional. Specific file to validate, as bare name ('main.py') or logical path ('fork:main.py'). Omit to validate all .py files in fork: recursively.""",
+                },
+                "deep": {
+                    "type": "boolean",
+                    # 是否运行 py_compile 编译检查。默认 false（仅语法检查）。设为 true 额外运行编译检查（较慢但更彻底）。
+                    "description": """Whether to run py_compile check. Default false (syntax only). Set true to also run compile check (slower but more thorough).""",
+                },
+                "compile_timeout": {
+                    "type": "integer",
+                    # 每个文件 py_compile 子进程的超时秒数。
+                    "description": """Timeout in seconds for each file's py_compile subprocess.""",
                 },
             },
         },

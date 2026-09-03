@@ -94,12 +94,15 @@ def validate_directory(
         # 跳过 __pycache__ 和其他生成目录
         if "__pycache__" in py_file.parts:
             continue
+        rel_path: str = str(py_file.relative_to(dir_path)).replace("\\", "/")
         result: dict[str, Any] = validate_syntax(py_file)
+        result["file"] = rel_path
         results.append(result)
         if deep and result.get("status") == "ok":
             # 仅对通过语法检查的文件进行编译检查
             compile_result: dict[str, Any] = validate_compile(py_file, timeout=timeout)
             if compile_result["status"] != "ok":
+                compile_result["file"] = rel_path
                 results[-1] = compile_result
 
     return results
