@@ -26,13 +26,6 @@ const FIELD_TYPES = {
   llm_reasoning_effort:      'str',
   llm_client_name:           'str',
   merge_concat_threshold:    'int',
-  approval_model:            'str',
-  approval_model_n_ctx:      'int',
-  approval_model_cuda:       'bool',
-  approval_model_port:       'int',
-  approval_remote_base_url:  'str',
-  approval_remote_api_key:   'str',
-  approval_remote_model:     'str',
   workspace_path:            'str',
   agentspace_path_name:      'str',
   logs_path_name:            'str',
@@ -58,13 +51,6 @@ const FIELD_DEFAULTS = {
   llm_reasoning_effort:      'medium',
   llm_client_name:           'openai_client',
   merge_concat_threshold:    50000,
-  approval_model:            '',
-  approval_model_n_ctx:      65536,
-  approval_model_cuda:       true,
-  approval_model_port:       8081,
-  approval_remote_base_url:  '',
-  approval_remote_api_key:   '',
-  approval_remote_model:     '',
   workspace_path:            'workspace',
   agentspace_path_name:      'agentspace',
   logs_path_name:            'logs',
@@ -78,12 +64,6 @@ const FIELD_GROUPS = {
     'llm_base_url', 'llm_model', 'llm_api_key',
     'llm_max_context_tokens', 'llm_max_output_tokens',
     'llm_temperature', 'llm_reasoning_effort', 'llm_client_name',
-  ],
-  '审批模型': [
-    'approval_model', 'approval_model_n_ctx',
-    'approval_model_cuda', 'approval_model_port',
-    'approval_remote_base_url', 'approval_remote_api_key',
-    'approval_remote_model',
   ],
   'Workspace': [
     'workspace_path', 'agentspace_path_name',
@@ -138,15 +118,12 @@ function _validateUrl(raw) {
 
 const FIELD_VALIDATORS = {
   gateway_port:              (raw) => _validatePort(raw),
-  approval_model_port:       (raw) => _validatePort(raw),
   llm_temperature:           (raw) => _validateRange(raw, 0.0, 2.0),
   llm_max_context_tokens:    (raw) => _validatePositiveInt(raw),
   llm_max_output_tokens:     (raw) => _validatePositiveInt(raw),
-  approval_model_n_ctx:      (raw) => _validatePositiveInt(raw),
   merge_concat_threshold:    (raw) => _validatePositiveInt(raw),
   llm_reasoning_effort:      (raw) => _validateEnum(raw, ['low', 'medium', 'high', '']),
   llm_base_url:              (raw) => _validateUrl(raw),
-  approval_remote_base_url:  (raw) => _validateUrl(raw),
 };
 
 // ── CLI 参数映射 ──────────────────────────────────────────
@@ -155,7 +132,6 @@ const FIELD_VALIDATORS = {
 
 const STORE_TRUE_FIELDS = new Set([
   'force_init',
-  'approval_model_cuda',
   'frontend_force_build',
 ]);
 
@@ -176,13 +152,6 @@ const CLI_ARG_MAP = {
   llm_reasoning_effort:     '--llm_reasoning_effort',
   llm_client_name:          '--llm_client_name',
   merge_concat_threshold:   '--merge_concat_threshold',
-  approval_model:           '--approval_model',
-  approval_model_n_ctx:     '--approval_model_n_ctx',
-  approval_model_cuda:      '--approval_model_cuda',
-  approval_model_port:      '--approval_model_port',
-  approval_remote_base_url: '--approval_remote_base_url',
-  approval_remote_api_key:  '--approval_remote_api_key',
-  approval_remote_model:    '--approval_remote_model',
   workspace_path:           '--workspace_path',
   agentspace_path_name:     '--agentspace_path_name',
   logs_path_name:           '--logs_path_name',

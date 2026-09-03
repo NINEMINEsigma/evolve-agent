@@ -20,7 +20,7 @@ from typing import * # type: ignore
 from abstract.tools.registry import ToolEntry, registry as tool_registry
 from abstract.llm.client import BaseLLMClient
 from abstract.llm.loader import create_llm_client
-from entity.puretype import LLMProfile, LLMResponse, ToolCallRequest
+from entity.puretype import ApprovalResult, LLMProfile, LLMResponse, ToolCallRequest
 from entity.constant import MAIN_AGENT_CHARACTER_NAME, USER_CHARACTER_NAME, History_Version as __History_Version__
 from entity.messages import (
     History,
@@ -612,7 +612,11 @@ class SubAgentLoop(BasePrivateChatAgentLoop):
 
         子 Agent 进入暂停状态，直到父 Agent 通过 approve_tools() 审批。
         """
-        from component.approval import is_handsfree_mode, request_user_confirm
+        from component.approval import (
+            build_denied_tool_result,
+            is_handsfree_mode,
+            request_user_confirm,
+        )
 
         if is_handsfree_mode(self._parent_session_id):
             # 脱手模式审批同样可中断：中断时取消审批任务并返回强制中断失败结果
@@ -622,7 +626,6 @@ class SubAgentLoop(BasePrivateChatAgentLoop):
                 args=dict(tc.arguments) if tc.arguments else {},
                 reason="Sub-agent initiated tool call",
                 content=f"Sub-agent {tc.name} tool call",
-                ask_agent_callback=None,
             ))
             cancel_wait = asyncio.ensure_future(self._cancel_event.wait())
             try:
@@ -653,7 +656,10 @@ class SubAgentLoop(BasePrivateChatAgentLoop):
                 tool_name=tc.name,
                 content=f"rejected: {result.deny_reason}",
             )
-            return self._make_tool_msg(tc.id, {"error": f"Tool call denied: {result.deny_reason}"})
+            return self._make_tool_msg(
+                tc.id,
+                build_denied_tool_result(result),
+            )
 
         pending = PendingToolCall(tc)
         self._pending_approvals.append(pending)
@@ -705,7 +711,15 @@ class SubAgentLoop(BasePrivateChatAgentLoop):
                 tool_name=tc.name,
                 content=f"rejected: {exc}",
             )
-            return self._make_tool_msg(tc.id, {"error": f"Tool call rejected: {exc}"})
+            approval = ApprovalResult(
+                action="deny",
+                deny_reason=str(exc),
+                denied_by="parent_agent",
+            )
+            return self._make_tool_msg(
+                tc.id,
+                build_denied_tool_result(approval),
+            )
 
     async def _execute_approved_tool(self, tc: ToolCallRequest) -> ToolResultMessage:
         """执行已获批准的工具调用，补齐 _meta 注入和 UI 事件推送。"""

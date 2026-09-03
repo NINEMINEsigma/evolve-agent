@@ -1402,19 +1402,88 @@ def download_dir_zip(namespace: str, file_path: str):
     )
 
 
-@app.post("/api/shutdown-approval-model")
-async def shutdown_approval_model_endpoint():
-    """关闭本地审批模型 (llama-server) 以释放显存。"""
-    logger.info("Shutdown approval model")
+# ---------------------------------------------------------------------------
+# Approval Profile API
+# ---------------------------------------------------------------------------
+
+
+@app.get("/api/approval/profile")
+async def get_approval_profile():
+    """返回项目级审批 Profile 的权威状态。"""
+    from system.application import Application
     try:
-        from system.application import Application
         mgr = Application.current().approval_backend_manager
-        if mgr is not None:
-            await mgr.shutdown()
-            return {"ok": True}
-        return {"ok": False, "error": "approval_backend_manager not available"}
+        return mgr.get_state().model_dump()
+    except Exception:
+        logger.exception("Failed to get approval profile state")
+        raise HTTPException(status_code=500, detail="Failed to get approval profile state")
+
+
+@app.put("/api/approval/profile")
+async def put_approval_profile(request: Request):
+    """设置或清空项目级审批 Profile 引用。
+
+    请求体为 ApprovalProfileUpdateRequest，profile_name=null 表示清空。
+    """
+    from system.application import Application
+    from entity.puretype import ApprovalProfileUpdateRequest, ApprovalProfileMutationResponse
+    from component.approval import disable_all_handsfree_modes
+
+    try:
+        body = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid JSON body")
+    try:
+        update = ApprovalProfileUpdateRequest.model_validate(body)
     except Exception as exc:
-        return {"ok": False, "error": str(exc)}
+        raise HTTPException(status_code=400, detail=str(exc))
+
+    app = Application.current()
+    store = app.llm_profile_store
+    mgr = app.approval_backend_manager
+
+    with app.profile_lock:
+        if update.profile_name is None:
+            previous = store.get_approval_profile()
+            store.set_approval_profile(None)
+            disabled = disable_all_handsfree_modes()
+            logger.info(
+                "Approval profile cleared | previous=%s disabled_sessions=%s",
+                previous.name if previous else None,
+                disabled,
+            )
+        else:
+            try:
+                profile = store.get_profile(update.profile_name)
+            except LookupError:
+                raise HTTPException(status_code=404, detail=f"Profile not found: {update.profile_name!r}")
+            missing = [
+                f for f in ("llm_client_name", "base_url", "model")
+                if not str(getattr(profile, f, "")).strip()
+            ]
+            if missing:
+                raise HTTPException(
+                    status_code=409,
+                    detail=f"Approval Profile {profile.name!r} is missing required fields: " + ", ".join(missing),
+                )
+            previous = store.get_approval_profile()
+            store.set_approval_profile(profile)
+            disabled = []
+            logger.info(
+                "Approval profile set | name=%s model=%s client=%s",
+                profile.name,
+                profile.model,
+                profile.llm_client_name,
+            )
+        mgr.invalidate()
+
+    state = mgr.get_state()
+    failures = await app.frontend_sink.broadcast_approval_profile_change(state, disabled)
+    return ApprovalProfileMutationResponse(
+        state=state,
+        disabled_sessions=disabled,
+        notification_failures=failures,
+    ).model_dump()
 
 
 # ---------------------------------------------------------------------------
@@ -1786,14 +1855,32 @@ async def update_llm_profile(request: LLMProfileUpdateRequest):
                     application.runtime_context.workspace / SESSIONS_DIR_NAME
                 ).replace_profile_name_pointers(old_name, new_name)
             response_payload = application.llm_profile_store.to_payload(profile)
+            # 审批 Profile 联动：编辑后使客户端缓存失效
+            mgr = application.approval_backend_manager
+            mgr.invalidate()
+            # 若审批 Profile 连接字段不完整，关闭全部脱手模式
+            disabled_sessions: list[str] = []
+            approval = application.llm_profile_store.get_approval_profile()
+            if approval is not None and (
+                not approval.llm_client_name.strip()
+                or not approval.base_url.strip()
+                or not approval.model.strip()
+            ):
+                from component.approval import disable_all_handsfree_modes
+                disabled_sessions = disable_all_handsfree_modes()
         failures: list[str] = []
         if new_name != old_name:
             failures = await application.frontend_sink.broadcast_profile_change(
                 "renamed", old_name, new_name,
             )
+        # 广播审批 Profile 状态变更
+        approval_state = mgr.get_state()
+        approval_failures = await application.frontend_sink.broadcast_approval_profile_change(
+            approval_state, disabled_sessions,
+        )
         return LLMProfileMutationResponse(
             profile=response_payload,
-            notification_failures=failures,
+            notification_failures=failures + approval_failures,
         )
     except LookupError as exc:
         raise HTTPException(status_code=404, detail=str(exc))
@@ -1823,6 +1910,12 @@ async def delete_llm_profile(request: LLMProfileDeleteRequest):
             if replacement is source:
                 raise ValueError("replacement Profile must differ from deleted Profile")
             store.assert_removable(source)
+            # 审批 Profile 联动：若删除目标是当前审批 Profile，先清空引用
+            disabled_sessions: list[str] = []
+            if store.is_approval_profile(source):
+                store.set_approval_profile(None)
+                from component.approval import disable_all_handsfree_modes
+                disabled_sessions = disable_all_handsfree_modes()
             switched, busy = application.session_manager.replace_idle_loops_using_profile(
                 source,
                 replacement,
@@ -1834,11 +1927,17 @@ async def delete_llm_profile(request: LLMProfileDeleteRequest):
                 request.replacement_profile_name,
             )
             store.remove_profile(request.profile_name)
+            application.approval_backend_manager.invalidate()
 
         failures = await application.frontend_sink.broadcast_profile_change(
             "deleted",
             request.profile_name,
             request.replacement_profile_name,
+        )
+        # 广播审批 Profile 状态变更
+        approval_state = application.approval_backend_manager.get_state()
+        approval_failures = await application.frontend_sink.broadcast_approval_profile_change(
+            approval_state, disabled_sessions,
         )
         return LLMProfileDeleteResult(
             deleted=True,
@@ -1992,20 +2091,13 @@ async def ws_chat(ws: WebSocket) -> None:
                 )
             )
 
-        # 发送服务端信息：上下文窗口、审批模型配置
+        # 发送服务端信息：审批模型状态与 YOLO 标志
         try:
             from system.context import get_runtime_context
+            from system.application import Application
             ctx = get_runtime_context()
-            _local_disabled = {"", "false", "0", "no"}
-            _local_raw = (ctx.approval_model_path or "").strip().lower()
-            if _local_raw not in _local_disabled:
-                model_name: str = Path(ctx.approval_model_path).name if ctx.approval_model_path else ""
-                model_available: bool = bool(ctx.approval_model_path)
-                model_type = "local"
-            else:
-                model_name = ctx.approval_remote_model or ""
-                model_available = bool(ctx.approval_remote_base_url and ctx.approval_remote_model)
-                model_type = "remote"
+            mgr = Application.current().approval_backend_manager
+            state = mgr.get_state()
             await ws.send_text(
                 json.dumps(
                     Message(
@@ -2013,9 +2105,8 @@ async def ws_chat(ws: WebSocket) -> None:
                         session_id=sid,
                         content=json.dumps({
                             "server_info": {
-                                "approval_model_name": model_name,
-                                "approval_model_available": model_available,
-                                "approval_model_type": model_type,
+                                "approval_model_name": state.profile_name or "",
+                                "approval_model_available": state.available,
                                 "yolo": ctx.yolo,
                             },
                         }),

@@ -153,7 +153,6 @@ Evolve Agent 内置两套多代理运行时：
 | `third:` | `third/` | fast / fallback | 第三方子模块（只读） |
 | `custom_hooks:` | `custom_hooks/` | fast / fallback | 自定义钩子（只读） |
 | `custom_llm_client:` | `custom_llm_client/` | fast / fallback | 自定义 LLM 客户端（只读） |
-| `custom_models:` | `custom_models/` | fast / fallback | 本地模型文件（只读） |
 | `custom_tools:` | `custom_tools/` | fast / fallback | 自定义工具（只读） |
 
 **没有 `self:` 命名空间** — agent 不能读取或修改自身运行时副本，进化完全通过 `fork:`/`fix:` 实现。

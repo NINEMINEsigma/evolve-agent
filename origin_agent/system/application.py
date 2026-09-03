@@ -11,6 +11,7 @@ import threading
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+    from entity.puretype import ApprovalProfileState
     from system.context import RuntimeContext
     from system.llm_profile_store import LLMProfileStore
     from system.sandbox import Sandbox
@@ -79,7 +80,7 @@ class Application:
             self.runtime_context.agentspace,
         )
 
-        # 3. LLMProfileStore — 必须先于 SessionManager 和任何 Loop 恢复。
+        # 3. LLMProfileStore — 必须先于审批 Profile 和任何 Loop 恢复。
         from system.llm_profile_store import LLMProfileStore
         self._llm_profile_store = LLMProfileStore(
             self.runtime_context.agentspace,
@@ -109,8 +110,11 @@ class Application:
         from entry.agent_sink import FrontendSink
         self._frontend_sink = FrontendSink()
 
-        # 6. ApprovalBackendManager — 构造同步，异步 is_available() 在运行时才调用
-        self._approval_backend_manager = ApprovalBackendManager(self.runtime_context)
+        # 6. ApprovalBackendManager — 通过项目级审批 Profile 连接外部管理模型。
+        self._approval_backend_manager = ApprovalBackendManager(
+            self.runtime_context,
+            self._llm_profile_store,
+        )
 
         logger.info("Application initialized | subsystems ready")
 
@@ -220,49 +224,44 @@ class Application:
 
 
 class ApprovalBackendManager:
-    """管理审批后端的懒加载和生命周期。
+    """管理由项目级审批 Profile 驱动的后端与客户端缓存。"""
 
-    从 component/approval.py 迁移出来，避免该模块持有全局状态。
-    """
+    def __init__(
+        self,
+        ctx: RuntimeContext,
+        llm_profile_store: LLMProfileStore,
+    ) -> None:
+        from component.approval.backend import ProfileApprovalBackend
 
-    def __init__(self, ctx: RuntimeContext) -> None:
-        self._ctx = ctx
-        self._backend: ApprovalBackend | None = None
-        self._failed: bool = False
+        self._llm_profile_store = llm_profile_store
+        self._backend: ApprovalBackend = ProfileApprovalBackend(
+            ctx,
+            llm_profile_store,
+        )
 
-    async def get_backend(self) -> ApprovalBackend | None:
-        """懒加载审批后端。返回 None 表示不可用。"""
-        if self._failed:
-            return None
-        if self._backend is not None:
-            return self._backend
+    def get_backend(self) -> ApprovalBackend | None:
+        """返回可用审批后端；未配置或配置无效时返回 ``None``。"""
+        return self._backend if self._backend.is_available() else None
 
-        from component.approval import create_approval_backend
-        self._backend = create_approval_backend(self._ctx)
-        if self._backend is None:
-            self._failed = True
-            return None
+    def get_state(self) -> ApprovalProfileState:
+        """返回项目级审批 Profile 的权威状态。"""
+        from entity.puretype import ApprovalProfileState
 
-        if not await self._backend.is_available():
-            logger.warning("Approval backend not available — handsfree mode will deny all")
-            self._failed = True
-            self._backend = None
-            return None
+        profile = self._llm_profile_store.get_approval_profile()
+        if profile is None:
+            return ApprovalProfileState()
+        return ApprovalProfileState(
+            profile_name=profile.name,
+            model=profile.model or None,
+            available=self._backend.is_available(),
+        )
 
-        return self._backend
+    def invalidate(self) -> None:
+        """清除审批客户端缓存，使下一次调用按当前 Profile 重建。"""
+        invalidate = getattr(self._backend, "invalidate", None)
+        if callable(invalidate):
+            invalidate()
 
     async def shutdown(self) -> None:
-        """停止审批后端子进程并释放资源。"""
-        if self._backend is None:
-            return
-        try:
-            from component.approval import LocalApprovalBackend
-            if isinstance(self._backend, LocalApprovalBackend):
-                engine = self._backend._get_engine()
-                if engine is not None:
-                    engine.unload()
-                    logger.info("Approval backend unloaded successfully")
-        except Exception as exc:
-            logger.warning("Failed to unload approval backend: %s", exc)
-        self._backend = None
-        self._failed = False
+        """释放审批客户端引用。"""
+        self.invalidate()

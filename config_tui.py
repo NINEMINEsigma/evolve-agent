@@ -19,12 +19,6 @@ from third.easysave import save, load, contains
 
 # ── 字段分组 ──────────────────────────────────────────────
 FIELD_GROUPS: dict[str, list[str]] = {
-    "审批模型": [
-        "approval_model", "approval_model_n_ctx",
-        "approval_model_cuda", "approval_model_port",
-        "approval_remote_base_url", "approval_remote_api_key",
-        "approval_remote_model", "approval_remote_client_name",
-    ],
     "Workspace": [
         "workspace_path", "agentspace_path_name",
         "logs_path_name", "mcp_config_path_name",
@@ -96,13 +90,9 @@ def _validate_bool(raw: str, _: Any) -> tuple[bool, str]:
 
 FIELD_VALIDATORS: dict[str, Callable[[str, Any], tuple[bool, str]]] = {
     "gateway_port":              _validate_port,
-    "approval_model_port":       _validate_port,
-    "approval_model_n_ctx":       _validate_positive_int,
     "merge_concat_threshold":    _validate_positive_int,
-    "approval_remote_base_url":  _validate_url,
     "console_log":                _validate_bool,
     "force_init":                 _validate_bool,
-    "approval_model_cuda":       _validate_bool,
     "frontend_force_build":       _validate_bool,
 }
 

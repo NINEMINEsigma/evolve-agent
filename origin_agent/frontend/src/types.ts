@@ -151,6 +151,8 @@ export type MessageType =
   | "error"
   | "subagent_update"
   | "llm_profile_changed"
+  | "approval_profile_changed"
+  | "handsfree_mode"
   | "ping"
   | "pong";
 
@@ -189,6 +191,10 @@ export interface WSMessage {
   old_name?: string;
   new_name?: string | null;
   metrics?: MessageMetrics;              // STREAM_DONE：计时元信息
+  approval_profile_name?: string | null;    // APPROVAL_PROFILE_CHANGED
+  approval_profile_model?: string | null;   // APPROVAL_PROFILE_CHANGED
+  approval_profile_available?: boolean;     // APPROVAL_PROFILE_CHANGED
+  handsfree_mode?: boolean;                  // HANDSFREE_MODE：服务端权威回执
 }
 
 export interface ToolCallMeta {
@@ -390,4 +396,10 @@ export interface LlmProfile {
   vision_image_profile: string | null;
   audio_profile: string | null;
   vision_video_profile: string | null;
+}
+
+export interface ApprovalProfileState {
+  profile_name: string | null;
+  model: string | null;
+  available: boolean;
 }

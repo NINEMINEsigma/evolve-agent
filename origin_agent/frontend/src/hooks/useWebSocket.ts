@@ -152,6 +152,19 @@ export function useWebSocket() {
       llmProfilesRef.current.handleProfileChanged(msg);
       return;
     }
+    if (msg.type === WS_IN.APPROVAL_PROFILE_CHANGED) {
+      llmProfilesRef.current.handleApprovalProfileChanged(msg);
+      if (msg.handsfree_mode === false) {
+        sessionRef.current?.setHandsfreeMode(false);
+      }
+      return;
+    }
+    if (msg.type === WS_IN.HANDSFREE_MODE) {
+      if (msg.handsfree_mode !== undefined && msg.handsfree_mode !== null) {
+        sessionRef.current?.setHandsfreeMode(msg.handsfree_mode);
+      }
+      return;
+    }
     sessionRef.current?.handleMessage(msg);
     subagentRef.current.handleMessage(msg, sessionRef.current?.sessionId ?? "");
   }, []);
@@ -554,7 +567,7 @@ export function useWebSocket() {
     const c = connRef.current;
     if (!s) return;
     if (s.yoloMode) return;
-    s.setHandsfreeMode(enabled);
+    // 不乐观更新；等待服务端 HANDSFREE_MODE 回执
     if (c.wsRef.current?.readyState === WebSocket.OPEN) {
       c.send({
         type: WS_OUT.HANDSFREE_MODE,
@@ -755,9 +768,8 @@ export function useWebSocket() {
     llmMaxContextTokens: llmProfiles.activeProfile?.max_context_tokens ?? 0,
     llmModelName: llmProfiles.activeProfile?.model ?? "",
     llmProfiles,
-    approvalModelName: session.approvalModelName,
-    approvalModelAvailable: session.approvalModelAvailable,
-    approvalModelType: session.approvalModelType,
+    approvalModelName: llmProfiles.approvalProfileName ?? "",
+    approvalModelAvailable: llmProfiles.approvalProfileState.available,
     mergeMode: session.mergeMode,
     setMergeMode: session.setMergeMode,
     selectedForMerge: session.selectedForMerge,

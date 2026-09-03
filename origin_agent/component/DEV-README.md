@@ -116,29 +116,27 @@ component/
 
 #### `approval/backend.py` — 审批后端
 
-- `ApprovalBackend`（ABC）：脱手模式审批后端抽象，声明 `chat()` 和 `is_available()` 接口。
-- `LocalApprovalBackend`：本地 GGUF 模型审批，通过 `third/llamaapis` 的 `InferenceEngine` 推理。
-- `RemoteApprovalBackend`：远程 OpenAI 兼容 API 审批。
-- `FailedApprovalBackend`：哨兵子类，表示初始化失败。
-- `create_approval_backend(ctx)`：工厂函数，根据 `RuntimeContext` 配置选择本地或远程后端。
-- `is_local_approval_enabled()`：检测本地审批是否可用。
+- `ApprovalBackend`（ABC）：脱手模式审批后端抽象，声明异步 `chat()` 和同步 `is_available()` 接口。
+- `ProfileApprovalBackend`：通过 `LLMProfileStore` 读取 `LLMProfileData.approval_profile` 根对象引用，连接外部管理的 LLM Profile 端点。使用五字段连接指纹缓存客户端，Profile 内容变更时自动重建。
+- 不再有本地/远程双后端、`FailedApprovalBackend`、工厂函数或本地检测函数。
 
-审批后端的生命周期由 `system/application.py::ApprovalBackendManager` 管理（懒加载 + 优雅卸载）。
+审批后端的生命周期由 `system/application.py::ApprovalBackendManager` 管理（同步 get_backend/get_state/invalidate + 异步 shutdown）。
 
 #### `approval/core.py` — 统一审批入口
 
 - `request_user_confirm(session_id, tool_name, args, ...) -> ApprovalResult`：统一审批入口，自动分流脱手模式与手动模式。
-- `ask_agent_reason(llm, tool_name, args, question, ...) -> str`：脱手模式专用，向 Agent 主模型提问获取上下文。
+- `build_denied_tool_result(approval) -> dict`：按拒绝来源（model/user/parent_agent/system）构建统一的工具拒绝结果。
 
 #### `approval/executor.py` — 工具审批执行器
 
-- `execute_with_approval(tool_name, args, session_id, sink, ...) -> ApprovalOutcome`：提取 `ParentAgentLoop` 与 `MultiAgentLoop` 中重复的审批逻辑，封装 dangerous/write 判断、白名单检查、脱手/正常两种审批模式、拒绝结果构建和 `allow_always` 加白名单。
+- `execute_with_approval(tool_name, args, session_id, sink, ...) -> ApprovalOutcome`：封装 dangerous/write 判断、白名单检查、脱手/手动两种审批模式、拒绝结果构建和 `allow_always` 加白名单。
 
 #### `approval/handsfree.py` — 脱手模式
 
-- `set_handsfree_mode(session_id, enabled)` / `is_handsfree_mode(session_id)`：脱手模式 session 级状态管理。
-- `APPROVAL_JSON_SCHEMA`：审批决策的 JSON Schema 定义。
-- `_handsfree_confirm()`：核心流程，通过 `ApprovalBackend.chat()` 调用本地/远程模型评估工具调用风险。
+- `set_handsfree_mode(session_id, enabled) -> bool` / `is_handsfree_mode(session_id)`：脱手模式 session 级状态管理，返回服务端实际状态。
+- `is_handsfree_available() -> bool`：检查审批 Profile 是否已配置。
+- `disable_all_handsfree_modes() -> list[str]`：关闭全部已开启会话并返回受影响列表。
+- `_handsfree_confirm()`：核心流程，通过审批 Profile 模型评估工具调用风险。审批输出使用普通文本决策标记（`[ALLOW]`/`[APPROVE]`/`[DENY]`/`[REJECT]`/`[拒绝]`/`[否决]`），不使用 JSON。
 
 #### `approval/allowlist.py` — 工具白名单
 
@@ -158,7 +156,7 @@ component/
 3. 若工具在 allowlist 中或危险等级为 `safe`，直接执行。
 4. 否则进入审批流程：
    - **手动模式**：通过 `AgentSink.request_approval()` 弹出前端确认请求，等待用户决策。
-   - **脱手模式**：通过 `ApprovalBackend.chat()` 调用本地/远程模型自动评估。
+   - **脱手模式**：通过审批 Profile 模型自动评估，使用普通文本决策标记。
 5. 审批结果回传后，允许执行或返回拒绝结果。
 
 ---

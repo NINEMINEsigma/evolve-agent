@@ -47,7 +47,7 @@ denied by the sandbox.
 ``third:`` — Third-party submodules
 - Maps to: ``third/`` directory under the project root.
 - Contains: Git submodules — third-party libraries bundled with the project (e.g.
-  easysave, llamaapis).
+  easysave, framework).
 - When to use: When you need to understand how a bundled library works before using
   or evolving around it (e.g. reading easysave's serialization API to correctly
   persist BaseModel instances).
@@ -65,13 +65,6 @@ denied by the sandbox.
   with the OpenAI-compatible interface.
 - When to use: When you need to understand or add support for a non-standard LLM
   backend (e.g. a local llama-server, a proprietary API).
-
-``custom_models:`` — Custom model files
-- Maps to: ``custom_models/`` directory under the project root.
-- Contains: Local model files (e.g. ``.gguf`` files for handsfree approval) and any
-  model-related configuration.
-- When to use: When configuring handsfree mode (the approval system auto-detects
-  ``.gguf`` files here) or when you need to understand available local models.
 
 ``custom_tools:`` — Custom tools
 - Maps to: ``custom_tools/`` directory under the project root.

@@ -7,7 +7,6 @@
 - Python 3.10+
 - pnpm 或 npm（前端构建依赖, 优先 pnpm, 不存在时回退 npm）
 - Windows 上需确保 `pnpm.cmd` 或 `npm.cmd` 在 PATH 中
-- 可选：CUDA 环境与本地 GGUF 审批模型
 
 ## 安装
 
@@ -22,12 +21,6 @@ git submodule update --init --recursive
 
 ```bash
 pip install -r requirements.txt
-```
-
-检查环境（可选, 用户按需自行执行）：
-
-```bash
-python check_env.py --cuda
 ```
 
 ## 快速启动
@@ -73,16 +66,10 @@ python run.py --load <config_key> --force_init
 | `logs_path_name` | `logs` | 日志目录名 |
 | `mcp_config_path_name` | `mcp_config.json` | MCP 配置文件名 |
 | `merge_concat_threshold` | `50000` | 会话合并摘要截断阈值 |
-| `approval_model` | 自动检测 `custom_models/` 下首个 `.gguf` 文件 | 审批模型文件名（无则为空） |
-| `approval_model_n_ctx` | `65536` | 审批模型上下文窗口 |
-| `approval_model_cuda` | `True` | 审批模型使用 CUDA |
-| `approval_model_port` | `8081` | 审批模型服务端口 |
-| `approval_remote_base_url` | `""` | 远程审批端点 URL（本地模型不可用时 fallback） |
-| `approval_remote_api_key` | `""` | 远程审批端点 API 密钥 |
-| `approval_remote_model` | `""` | 远程审批模型名称 |
-| `approval_remote_client_name` | `openai_client` | 远程审批 LLM 客户端插件名 |
 
 > `--load` / `--save` / `--interactive` 三者互斥.无参数时交互式提示输入配置键.
+
+> 审批模型（脱手模式）通过前端「模型配置」抽屉选择一个已有 LLM Profile 作为审批 Profile，无需在启动配置中设置。
 
 ## 进化流程
 

@@ -252,7 +252,9 @@ class SessionStore:
 
     def read_global_profile_name(self) -> str | None:
         """读取全局最近使用 Profile 名称。"""
-        return self._read_profile_name_pointer(self.global_profile_name_path())
+        return self._read_profile_name_pointer(
+            self.global_profile_name_path(),
+        )
 
     def iter_profile_pointer_files(self) -> list[Path]:
         """列出当前存在的全局及会话级 Profile 指针文件。"""

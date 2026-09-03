@@ -20,7 +20,6 @@ from pathlib import Path
 from typing import Any, Awaitable, Callable, Dict, List, TYPE_CHECKING
 
 from abstract.tools.registry import registry as tool_registry
-from component.approval import ask_agent_reason
 from abstract.llm.client import BaseLLMClient
 from abstract.llm.loader import create_llm_client
 from entity.puretype import LLMResponse, ToolCallRequest, Role, ToolAvailability, TokenUsageRecord, MessageContent, LLMProfile, MessageMetrics, QueuedMessage
@@ -131,7 +130,7 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
         self._lifecycle.initialize()
 
         # -- 工具执行器 --
-        self._tool_executor: ToolExecutor = ToolExecutor(loop=self, llm=self._llm)
+        self._tool_executor: ToolExecutor = ToolExecutor(loop=self)
 
         # -- LLM 流消费器 --
         self._stream_consumer: StreamConsumer = StreamConsumer(
@@ -795,8 +794,6 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
                 profile,
             )
         self._llm = client
-        # TODO: 疑惑的linter报错
-        self._tool_executor.llm = client
         self._stream_consumer.llm = client
         self._active_llm_profile = profile
         if self._session_store is not None:

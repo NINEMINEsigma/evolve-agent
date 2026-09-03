@@ -6,7 +6,7 @@ from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict
 
-from entity.constant import APPROVAL_MODEL_N_CTX_DEFAULT, MERGE_CONCAT_THRESHOLD
+from entity.constant import MERGE_CONCAT_THRESHOLD
 
 
 class RuntimeContext(BaseModel):
@@ -63,32 +63,6 @@ class RuntimeContext(BaseModel):
 
     tool_timeout: int = 30
     """单个工具调用允许运行的最大秒数，超时后取消（0 = 无超时）。"""
-
-    # -- 脱手模式审批模型配置 ---------------------------------------
-
-    approval_model_path: str = ""
-    """脱手模式审批小模型的 GGUF 路径。空字符串表示未配置。"""
-
-    approval_model_n_ctx: int = APPROVAL_MODEL_N_CTX_DEFAULT
-    """审批小模型的上下文窗口 token 数。"""
-
-    approval_model_cuda: bool = False
-    """脱手模式审批小模型是否启用 CUDA。默认 False，不自动检测。"""
-
-    approval_model_port: int = 8081
-    """脱手模式审批小模型 llama-server 的监听端口。"""
-
-    approval_remote_base_url: str = ""
-    """远程审批模型 OpenAI 兼容端点 URL。空字符串表示未配置。"""
-
-    approval_remote_api_key: str = ""
-    """远程审批模型 API 密钥。"""
-
-    approval_remote_model: str = ""
-    """远程审批模型名称。"""
-
-    approval_remote_client_name: str = "openai_client"
-    """远程审批模型的 LLM 客户端插件名（custom_llm_client 目录下对应 .py 文件名）。"""
 
     # -- MCP 配置 -------------------------------------------------
 

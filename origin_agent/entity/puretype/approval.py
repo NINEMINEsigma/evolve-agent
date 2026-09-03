@@ -1,4 +1,4 @@
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from entity.constant import SYSTEM_CHARACTER_NAME
 from ._base import ToolDangerLevel
@@ -50,8 +50,32 @@ class ApprovalResult(BaseModel):
     """
     denied_by: str = SYSTEM_CHARACTER_NAME
     """
-    拒绝来源："model"（脱手模式LLM）、"user"（人工）、SYSTEM_CHARACTER_NAME（超时/断开等）
+    拒绝来源："model"（脱手模式LLM）、"user"（人工）、"parent_agent"（父Agent）或 SYSTEM_CHARACTER_NAME（系统故障）
     """
+
+
+class ApprovalProfileUpdateRequest(BaseModel):
+    """项目级审批 Profile 名称指针更新请求。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    profile_name: str | None
+
+
+class ApprovalProfileState(BaseModel):
+    """项目级审批 Profile 的服务端权威状态。"""
+
+    profile_name: str | None = None
+    model: str | None = None
+    available: bool = False
+
+
+class ApprovalProfileMutationResponse(BaseModel):
+    """审批 Profile 更新及联动结果。"""
+
+    state: ApprovalProfileState
+    disabled_sessions: list[str] = Field(default_factory=list)
+    notification_failures: list[str] = Field(default_factory=list)
 
 
 class ToolCallMeta(BaseModel):

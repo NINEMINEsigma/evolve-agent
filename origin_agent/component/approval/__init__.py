@@ -1,51 +1,45 @@
-"""审批流程统一入口包。
+"""审批系统公共接口。
 
-子模块：
-- entity:    类型通过 entity.puretype 统一管理（ApprovalResult, ApprovalOutcome）
-- backend:   审批后端抽象与实现（本地 GGUF / 远程 API）
-- handsfree: 脱手模式状态管理与 LLM 审批核心流程
-- core:      统一审批入口与 Agent 主模型提问回调
-- executor:  工具审批执行器（封装 dangerous/write 判断、白名单、审批流程）
-- allowlist: 工具 allowlist 持久化
-- policy:    审批策略定义（ApprovalPolicy 数据类 + needs_approval 函数 + 预设策略常量）
-
-重新导出策略：保持旧路径兼容，from component.approval import Xxx 继续可用。
+审批模型由项目级审批 Profile 名称指针选择，并通过 ``BaseLLMClient``
+连接 Evolve Agent 外部管理的模型服务。脱手审批使用普通文本决策标记，
+不请求或解析 JSON 格式输出。
 """
 
-from entity.puretype import ApprovalResult, ApprovalOutcome, ApprovalPolicy
-from component.approval.backend import (
-    ApprovalBackend,
-    FailedApprovalBackend,
-    LocalApprovalBackend,
-    RemoteApprovalBackend,
-    create_approval_backend,
-    is_local_approval_enabled,
+from entity.puretype import (
+    ApprovalOutcome,
+    ApprovalPolicy,
+    ApprovalProfileMutationResponse,
+    ApprovalProfileState,
+    ApprovalProfileUpdateRequest,
+    ApprovalResult,
 )
+from component.approval.backend import ApprovalBackend, ProfileApprovalBackend
 from component.approval.handsfree import (
-    set_handsfree_mode,
+    disable_all_handsfree_modes,
+    is_handsfree_available,
     is_handsfree_mode,
-    APPROVAL_JSON_SCHEMA,
+    set_handsfree_mode,
 )
-from component.approval.core import request_user_confirm, ask_agent_reason
+from component.approval.core import build_denied_tool_result, request_user_confirm
 from component.approval.executor import execute_with_approval
-from component.approval.allowlist import is_allowed, add_allowed
-from component.approval.policy import needs_approval, MAIN_SESSION_POLICY, SUB_SESSION_POLICY
+from component.approval.allowlist import add_allowed, is_allowed
+from component.approval.policy import MAIN_SESSION_POLICY, SUB_SESSION_POLICY, needs_approval
 
 __all__ = [
     "ApprovalResult",
     "ApprovalOutcome",
     "ApprovalPolicy",
+    "ApprovalProfileUpdateRequest",
+    "ApprovalProfileState",
+    "ApprovalProfileMutationResponse",
     "ApprovalBackend",
-    "FailedApprovalBackend",
-    "LocalApprovalBackend",
-    "RemoteApprovalBackend",
-    "create_approval_backend",
-    "is_local_approval_enabled",
+    "ProfileApprovalBackend",
     "set_handsfree_mode",
     "is_handsfree_mode",
-    "APPROVAL_JSON_SCHEMA",
+    "disable_all_handsfree_modes",
+    "is_handsfree_available",
     "request_user_confirm",
-    "ask_agent_reason",
+    "build_denied_tool_result",
     "execute_with_approval",
     "is_allowed",
     "add_allowed",

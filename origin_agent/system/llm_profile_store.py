@@ -68,6 +68,34 @@ class LLMProfileStore:
         with self._lock:
             return self._data
 
+    def get_approval_profile(self) -> LLMProfile | None:
+        """返回根对象当前指向的审批 Profile 实例。"""
+        with self._lock:
+            return self._data.approval_profile
+
+    def set_approval_profile(self, profile: LLMProfile | None) -> None:
+        """设置根对象审批 Profile 引用并持久化。"""
+        with self._lock:
+            if profile is not None and not any(
+                candidate is profile for candidate in self._data.profiles
+            ):
+                raise ValueError(
+                    "LLMProfileData.approval_profile must reference a profile in profiles"
+                )
+            previous = self._data.approval_profile
+            self._data.approval_profile = profile
+            try:
+                self._validate_root(self._data)
+                self._save_unlocked()
+            except Exception:
+                self._data.approval_profile = previous
+                raise
+
+    def is_approval_profile(self, profile: LLMProfile) -> bool:
+        """返回 Profile 是否是根对象当前的审批 Profile 实例。"""
+        with self._lock:
+            return self._data.approval_profile is profile
+
     def list_profiles(self) -> list[LLMProfile]:
         """返回根列表的浅拷贝，列表元素仍是根对象中的实例。"""
         with self._lock:
@@ -216,7 +244,11 @@ class LLMProfileStore:
         if not contains(LLM_PROFILES_ES_KEY, str(self._path)):
             return LLMProfileData()
 
-        data = load(LLM_PROFILES_ES_KEY, str(self._path))
+        data = load(
+            LLM_PROFILES_ES_KEY,
+            str(self._path),
+            ignore_missing_fields=True,
+        )
         if not isinstance(data, LLMProfileData):
             raise TypeError(
                 f"Expected LLMProfileData in v2, got {type(data).__name__}"
@@ -227,7 +259,7 @@ class LLMProfileStore:
     def _validate_root(self, data: LLMProfileData) -> None:
         if not isinstance(data, LLMProfileData):
             raise TypeError("Profile root must be LLMProfileData")
-        if set(data.__dict__) - {"profiles"}:
+        if set(data.__dict__) - {"profiles", "approval_profile"}:
             raise TypeError("LLMProfileData contains unknown fields")
         if not isinstance(data.profiles, list):
             raise TypeError("LLMProfileData.profiles must be a list")
@@ -244,6 +276,15 @@ class LLMProfileStore:
                 raise ValueError(f"Duplicate LLM profile name: {profile.name!r}")
             names.add(profile.name)
             profile_ids.add(id(profile))
+
+        approval_profile = data.approval_profile
+        if approval_profile is not None:
+            if not isinstance(approval_profile, LLMProfile):
+                raise TypeError("LLMProfileData.approval_profile must be an LLMProfile or None")
+            if id(approval_profile) not in profile_ids:
+                raise ValueError(
+                    "LLMProfileData.approval_profile must reference a profile in profiles"
+                )
 
         for profile in data.profiles:
             for field in _REFERENCE_FIELDS:

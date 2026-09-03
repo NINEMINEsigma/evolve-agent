@@ -66,12 +66,6 @@ export interface SessionStore {
   setAgents: React.Dispatch<React.SetStateAction<string[]>>;
   serverInfo: Record<string, unknown>;
   setServerInfo: React.Dispatch<React.SetStateAction<Record<string, unknown>>>;
-  approvalModelName: string;
-  setApprovalModelName: React.Dispatch<React.SetStateAction<string>>;
-  approvalModelAvailable: boolean;
-  setApprovalModelAvailable: React.Dispatch<React.SetStateAction<boolean>>;
-  approvalModelType: string;
-  setApprovalModelType: React.Dispatch<React.SetStateAction<string>>;
   mergeMode: boolean;
   setMergeMode: React.Dispatch<React.SetStateAction<boolean>>;
   selectedForMerge: Set<string>;
@@ -172,16 +166,13 @@ export function useSessionStore(callbacks: SessionStoreCallbacks = {}): SessionS
   const [contextTokens, setContextTokens] = useState(0);
   const [sessions, setSessions] = useState<SessionInfo[]>([]);
   const [searchQuery, setSearchQuery] = useState("");
-  const [handsfreeMode, setHandsfreeMode] = usePersistentState(STORAGE_KEYS.HANDSFREE_MODE, false);
+  const [handsfreeMode, setHandsfreeMode] = useState(false);
   const [yoloMode, setYoloMode] = useState(false);
   const [taskProgress, setTaskProgress] = useState<Record<string, TaskProgress>>({});
   const [clipboardDisplays, setClipboardDisplays] = useState<Record<string, ClipboardDisplay>>({});
   const [dynamicEndpoints, setDynamicEndpoints] = useState<DynamicEndpoint[]>([]);
   const [agents, setAgents] = useState<string[]>([]);
   const [serverInfo, setServerInfo] = useState<Record<string, unknown>>({});
-  const [approvalModelName, setApprovalModelName] = useState("");
-  const [approvalModelAvailable, setApprovalModelAvailable] = useState(false);
-  const [approvalModelType, setApprovalModelType] = useState("");
   const [mergeMode, setMergeMode] = useState(false);
   const [selectedForMerge, setSelectedForMerge] = useState<Set<string>>(new Set());
   const [bgTasks, setBgTasks] = useState<Array<{
@@ -451,9 +442,6 @@ export function useSessionStore(callbacks: SessionStoreCallbacks = {}): SessionS
         if (data.server_info) {
           const info = data.server_info;
           setServerInfo(info);
-          setApprovalModelName(info.approval_model_name || "");
-          setApprovalModelAvailable(info.approval_model_available || false);
-          setApprovalModelType(info.approval_model_type || "");
           setYoloMode(info.yolo || false);
           return;
         }
@@ -1421,12 +1409,6 @@ export function useSessionStore(callbacks: SessionStoreCallbacks = {}): SessionS
     setAgents,
     serverInfo,
     setServerInfo,
-    approvalModelName,
-    setApprovalModelName,
-    approvalModelAvailable,
-    setApprovalModelAvailable,
-    approvalModelType,
-    setApprovalModelType,
     mergeMode,
     setMergeMode,
     selectedForMerge,

@@ -25,10 +25,6 @@ ALL_AGENTS_CHARACTER_REF_NAME: str = "all-agents"
 # 自定义插件目录
 # ============================================================================
 
-# 本地 GGUF 模型文件存放目录名
-CUSTOM_MODELS_DIR: str = "custom_models"
-
-# 自定义插件目录
 CUSTOM_TOOLS_DIR: str = "custom_tools"
 
 
@@ -100,9 +96,6 @@ SUBPROCESS_SHORT_TIMEOUT_DEFAULT: int = 5
 
 # 子进程软清理等待时间, 到时后强杀进程
 SUBPROCESS_SOFT_CLEANUP_WAIT_TIME: int = 5
-
-# 审批模型加载等待超时（秒）— 等待本地 GGUF 模型从 loading 变为 ready
-APPROVAL_MODEL_LOAD_TIMEOUT: int = 120
 
 # 审批请求等待超时（秒）— 等待用户在前端确认工具调用
 APPROVAL_WAIT_TIMEOUT: int = 120
@@ -179,7 +172,6 @@ class Namespace(str, Enum):
     THIRD = "third"
     CUSTOM_HOOKS = "custom_hooks"
     CUSTOM_LLM_CLIENT = "custom_llm_client"
-    CUSTOM_MODELS = "custom_models"
     CUSTOM_TOOLS = "custom_tools"
 
 
@@ -246,11 +238,13 @@ WEB_FETCH_MAX_CHARS: int = 50000
 # LLM
 # ============================================================================
 
-# 审批模型上下文窗口 token 数默认值
-APPROVAL_MODEL_N_CTX_DEFAULT: int = 4096
+# 审批调用固定采样参数；通过临时 Profile 副本覆盖，不修改根对象
+APPROVAL_TEMPERATURE: float = 0.3
+APPROVAL_MAX_OUTPUT_TOKENS: int = 4096
 
-# 远程审批 json_schema 能力缓存文件名（存放于 workspace/ 下）
-APPROVAL_JSON_SCHEMA_CACHE_FILENAME: str = "approval_json_schema_cache.json"
+# 审批模型普通文本响应中的显式决策标记（解析前统一 casefold）
+APPROVAL_ALLOW_MARKERS: tuple[str, ...] = ("[allow]", "[approve]")
+APPROVAL_DENY_MARKERS: tuple[str, ...] = ("[deny]", "[reject]", "[拒绝]", "[否决]")
 
 # 多模态能力缓存（存放于 workspace/ 下，easysave 序列化，dict[cache_key, ModalityCapability]）
 MODALITY_CAPABILITY_ES_FILENAME: str = "modality_capability_cache.es"
@@ -265,12 +259,6 @@ FORWARDED_VIDEO_TAG: str = "forwarded_video"
 # 音频格式后缀 → data URL 中的标准 MIME 子类型
 # NOTE: mp3 必须归一化为 mpeg（audio/mpeg）：部分 provider（如小米 MiMo）会静默拒绝非标准的 audio/mp3
 AUDIO_FORMAT_MIME_SUBTYPE: dict[str, str] = {"mp3": "mpeg", "wav": "wav"}
-
-# 远程审批 response_format 中 json_schema 的名称
-APPROVAL_RESPONSE_FORMAT_NAME: str = "approval_decision"
-
-# 本地审批模型禁用值 — 配置为这些值时视为未启用本地审批
-APPROVAL_LOCAL_DISABLED_VALUES: frozenset[str] = frozenset({"", "false", "0", "no"})
 
 # 所有LLM解析的重试次数
 LLM_RETRY_COUNT: int = 3

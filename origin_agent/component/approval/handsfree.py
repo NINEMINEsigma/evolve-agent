@@ -1,35 +1,61 @@
-"""脱手模式审批 — 本地/远程 LLM 自动审批工具调用。
-
-包含脱手模式 session 状态管理、审批 JSON Schema 定义和 _handsfree_confirm 核心流程。
-"""
+"""脱手模式状态与普通文本审批决策。"""
 
 from __future__ import annotations
 
-import asyncio
 import json
 import logging
-from typing import Any, Awaitable, Callable, cast
+from typing import Any
 
-import dirtyjson
-
-from entity.constant import LLM_RETRY_COUNT, SYSTEM_CHARACTER_NAME
+from entity.constant import (
+    APPROVAL_ALLOW_MARKERS,
+    APPROVAL_DENY_MARKERS,
+    SYSTEM_CHARACTER_NAME,
+)
+from entity.messages import BaseMessage
 from entity.puretype import ApprovalResult, Role
-from abstract.llm.formats import to_openai_message
-from entity.messages import BaseMessage as ApprovalBaseMessage
 
 logger = logging.getLogger(__name__)
 
 
-# ---------------------------------------------------------------------------
-# 脱手模式 session 注册表
-# ---------------------------------------------------------------------------
-
 _handsfree_sessions: dict[str, bool] = {}
 
-def set_handsfree_mode(session_id: str, enabled: bool) -> None:
-    """开启/关闭脱手模式。"""
-    _handsfree_sessions[session_id] = enabled
-    logger.info("Handsfree mode %s for session=%s", "enabled" if enabled else "disabled", session_id)
+
+def is_handsfree_available() -> bool:
+    """返回项目级审批 Profile 是否已配置且具备必需连接字段。"""
+    try:
+        from system.application import Application
+
+        manager = Application.current().approval_backend_manager
+        return manager is not None and manager.get_backend() is not None
+    except Exception:
+        logger.debug("Failed to resolve handsfree availability", exc_info=True)
+        return False
+
+
+def set_handsfree_mode(session_id: str, enabled: bool) -> bool:
+    """设置会话脱手模式并返回服务端实际状态。"""
+    actual = bool(enabled and is_handsfree_available())
+    _handsfree_sessions[session_id] = actual
+    logger.info(
+        "Handsfree mode %s for session=%s",
+        "enabled" if actual else "disabled",
+        session_id,
+    )
+    return actual
+
+
+def disable_all_handsfree_modes() -> list[str]:
+    """关闭全部已开启会话并返回受影响的 session ID。"""
+    disabled = sorted(
+        session_id
+        for session_id, enabled in _handsfree_sessions.items()
+        if enabled
+    )
+    for session_id in disabled:
+        _handsfree_sessions[session_id] = False
+    if disabled:
+        logger.info("Disabled handsfree mode for sessions=%s", disabled)
+    return disabled
 
 
 def is_handsfree_mode(session_id: str) -> bool:
@@ -37,166 +63,106 @@ def is_handsfree_mode(session_id: str) -> bool:
     return _handsfree_sessions.get(session_id, False)
 
 
-# ---------------------------------------------------------------------------
-# 审批输出 JSON Schema
-# ---------------------------------------------------------------------------
+def _approval_model_failure(reason: str) -> ApprovalResult:
+    """把审批模型失效转换为闭合失败，并指示调用方停止工具链。"""
+    detail = reason.strip() or "unavailable"
+    return ApprovalResult(
+        action="deny",
+        deny_reason=(
+            f"Approval model unavailable ({detail}). Stop the current tool-call chain, "
+            "report that the approval model has failed, and ask the user to turn off "
+            "handsfree mode. Do not call more tools in this turn."
+        ),
+        denied_by=SYSTEM_CHARACTER_NAME,
+    )
 
-APPROVAL_JSON_SCHEMA: dict[str, Any] = {
-    "type": "object",
-    "properties": {
-        "approved": {"type": "boolean"},
-        "reason": {"type": "string"},
-        "ask": {"type": "string"},
-    },
-    "required": ["approved"],
-}
 
+def _interpret_approval_response(content: str) -> ApprovalResult:
+    """按否定优先的显式文本标记解释审批模型响应。"""
+    response = content.strip()
+    if not response:
+        return _approval_model_failure("empty response")
 
-# ---------------------------------------------------------------------------
-# 脱手模式：LLM 审批
-# ---------------------------------------------------------------------------
+    normalized = response.casefold()
+    if any(marker in normalized for marker in APPROVAL_DENY_MARKERS):
+        return ApprovalResult(
+            action="deny",
+            deny_reason=response,
+            denied_by="model",
+        )
+    if any(marker in normalized for marker in APPROVAL_ALLOW_MARKERS):
+        return ApprovalResult(action="allow_once", denied_by="")
+    return _approval_model_failure("missing decision marker")
+
 
 async def _handsfree_confirm(
-    tool_name: str, args: dict, reason: str, content: str,
-    ask_agent_callback: Callable[[str], Awaitable[str]] | None = None,
-    max_dialog_turns: int = 2,
+    tool_name: str,
+    args: dict,
+    reason: str,
     extra_context: str | None = None,
 ) -> ApprovalResult:
-    """脱手模式：将工具调用 JSON 发送给LLM 审批。
-
-    支持 dialog 模式：当审批模型不确定时，可通过 ask_agent_callback
-    向 Agent 主模型提问，获取更多上下文后重新评估。
-
-    返回 ApprovalResult，deny 时携带 LLM 生成的拒绝原因。
-    """
-    backend = None
+    """把工具调用发送给审批 Profile，并解释单次普通文本响应。"""
     try:
         from system.application import Application
-        mgr = Application.current().approval_backend_manager
-        if mgr is not None:
-            backend = await mgr.get_backend()
-    except Exception as exc:
-        logger.warning("Failed to resolve approval backend: %s", exc, exc_info=True)
-        backend = None
+
+        manager = Application.current().approval_backend_manager
+        backend = manager.get_backend() if manager is not None else None
+    except Exception:
+        logger.warning("Failed to resolve approval backend", exc_info=True)
+        return _approval_model_failure("backend resolution failed")
+
     if backend is None:
-        logger.warning("Approver not available — handsfree mode deny")
-        return ApprovalResult(action="deny", deny_reason="Approval backend unavailable, auto-denied", denied_by=SYSTEM_CHARACTER_NAME)
+        logger.warning("Approval backend unavailable — handsfree mode deny")
+        return _approval_model_failure("backend unavailable")
+
+    from system.application import Application as _App
+    _approval_profile = _App.current().llm_profile_store.get_approval_profile()
+    logger.info(
+        "Approval model request | tool=%s profile=%s model=%s",
+        tool_name,
+        _approval_profile.name if _approval_profile else None,
+        _approval_profile.model if _approval_profile else None,
+    )
 
     from system.pathutils import find_repo_root, get_templates_dir
 
-    system_prompt = (get_templates_dir() / "approval" / "system_prompt.md").read_text(encoding="utf-8")
-    cwd = str(find_repo_root().resolve())
-
+    system_prompt = (
+        get_templates_dir() / "approval" / "system_prompt.md"
+    ).read_text(encoding="utf-8")
     user_prompt_data: dict[str, Any] = {
         "tool": tool_name,
         "args": args,
         "reason": reason,
-        "cwd": cwd,
+        "cwd": str(find_repo_root().resolve()),
     }
     if extra_context:
         user_prompt_data["context"] = extra_context
-    user_prompt = json.dumps(user_prompt_data, ensure_ascii=False)
 
-    sys_msg = to_openai_message(ApprovalBaseMessage(role=Role.SYSTEM, content=system_prompt), current_character_agent="")
-    user_msg = to_openai_message(ApprovalBaseMessage(role=Role.USER, content=user_prompt), current_character_agent="")
-    assert sys_msg is not None, "system approval prompt should never be invisible"
-    assert user_msg is not None, "user approval prompt should never be invisible"
-    messages: list[dict[str, Any]] = [sys_msg, user_msg]
+    messages = [
+        BaseMessage(role=Role.SYSTEM, content=system_prompt),
+        BaseMessage(
+            role=Role.USER,
+            content=json.dumps(user_prompt_data, ensure_ascii=False),
+        ),
+    ]
+    try:
+        response = await backend.chat(messages)
+    except Exception:
+        logger.warning(
+            "Approval model request failed | tool=%s",
+            tool_name,
+            exc_info=True,
+        )
+        return _approval_model_failure("request failed")
 
-    dialog_turn = 0
-    last_error: str | None = None
-
-    while dialog_turn <= max_dialog_turns:
-        current_messages = list(messages)
-        last_error = None
-        resp_content: str | None = None
-
-        for attempt in range(1, LLM_RETRY_COUNT + 1):
-            try:
-                resp_content = await backend.chat(current_messages, json_schema=APPROVAL_JSON_SCHEMA)
-                result: dict = cast(dict, dirtyjson.loads(resp_content))
-
-                # ---- 处理「ask」响应：审批模型不确定，向Agent提问 ----
-                ask_question: str | None = result.get("ask")
-                if ask_question and isinstance(ask_question, str) and ask_question.strip():
-                    if ask_agent_callback is None or dialog_turn >= max_dialog_turns:
-                        reason_text: str = cast(str, result.get("reason", ""))
-                        logger.info(
-                            "Handsfree ask but cannot continue | tool=%s question=%s",
-                            tool_name, ask_question,
-                        )
-                        return ApprovalResult(
-                            action="deny",
-                            deny_reason=f"Approval model uncertain: {reason_text}" if reason_text else "Approval model needs more info but cannot continue dialog",
-                            denied_by="model",
-                        )
-
-                    logger.info(
-                        "Handsfree asking agent (turn %d/%d) | tool=%s question=%s",
-                        dialog_turn + 1, max_dialog_turns, tool_name, ask_question,
-                    )
-                    agent_answer = await ask_agent_callback(ask_question)
-                    logger.info(
-                        "Handsfree got agent answer (turn %d/%d) | tool=%s answer: %s",
-                        dialog_turn + 1, max_dialog_turns, tool_name, agent_answer,
-                    )
-
-                    # 将Agent的回答追加到 messages，下一轮循环重新审批
-                    assistant_msg = to_openai_message(
-                        ApprovalBaseMessage(role=Role.ASSISTANT, content=resp_content or ""),
-                        current_character_agent="",
-                    )
-                    if assistant_msg is not None:
-                        current_messages.append(assistant_msg)
-                    from system.templates import read_template
-                    user_re_eval = to_openai_message(
-                        ApprovalBaseMessage(role=Role.USER, content=read_template("approval/dialog_re_evaluate.txt")
-                            .replace("{{dialog_turn}}", str(dialog_turn + 1))
-                            .replace("{{ask_question}}", ask_question)
-                            .replace("{{agent_answer}}", agent_answer)),
-                        current_character_agent="",
-                    )
-                    if user_re_eval is not None:
-                        current_messages.append(user_re_eval)
-                    messages.extend(current_messages[2:])  # 保留 system + 原始 user，追加对话
-                    dialog_turn += 1
-                    break  # 跳出重试循环，进入 while 下一轮
-
-                # Process approve / deny
-                approved: bool = result["approved"]
-                reason_text = cast(str, result.get("reason", ""))
-                if approved:
-                    logger.info("Handsfree approved | tool=%s reason=%s", tool_name, reason_text)
-                    return ApprovalResult(action="allow_once")
-                logger.info("Handsfree denied | tool=%s reason=%s", tool_name, reason_text)
-                return ApprovalResult(action="deny", deny_reason=reason_text or "Security review failed", denied_by="model")
-
-            except Exception as exc:
-                last_error = str(exc)
-                resp_content = locals().get("resp_content", "<not available>")
-                logger.warning(
-                    "Handsfree approval attempt %d/%d failed: %s | resp=%r",
-                    attempt, LLM_RETRY_COUNT, exc, resp_content,
-                )
-                if attempt < LLM_RETRY_COUNT:
-                    _ct = (get_templates_dir() / "approval" / "correction_hint.md").read_text(encoding="utf-8")
-                    correction_msg = to_openai_message(
-                        ApprovalBaseMessage(role=Role.USER, content=_ct.replace("{{error}}", str(exc)).replace("{{raw_output}}", resp_content or "<not available>")),
-                        current_character_agent="",
-                    )
-                    if correction_msg is not None:
-                        current_messages.append(correction_msg)
-
-        # 重试循环全部失败 → 退出 while，最终返回 deny
-        if last_error:
-            break
-
-    logger.warning(
-        "Handsfree approval exhausted — denying tool=%s | last_error=%s",
-        tool_name, last_error,
-    )
-    return ApprovalResult(
-        action="deny",
-        deny_reason=f"approval model continuous parsing failed: {last_error}" if last_error else "approval model cannot make a decision",
-        denied_by="approval model",
-    )
+    result = _interpret_approval_response(response)
+    if result.action == "deny":
+        logger.info(
+            "Handsfree denied | tool=%s denied_by=%s reason=%s",
+            tool_name,
+            result.denied_by,
+            result.deny_reason,
+        )
+    else:
+        logger.info("Handsfree approved | tool=%s", tool_name)
+    return result

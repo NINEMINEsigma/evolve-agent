@@ -16,7 +16,6 @@ interface HeaderProps {
   yoloMode: boolean;
   approvalModelAvailable: boolean;
   approvalModelName: string;
-  approvalModelType: string;
   llmModelName: string;
   sidebarCollapsed: boolean;
   onToggleSidebar: () => void;
@@ -38,7 +37,6 @@ export default function Header({
   yoloMode,
   approvalModelAvailable,
   approvalModelName,
-  approvalModelType,
   llmModelName,
   sidebarCollapsed,
   onToggleSidebar,
@@ -51,8 +49,6 @@ export default function Header({
 }: HeaderProps) {
   const [cmdMenuOpen, setCmdMenuOpen] = useState(false);
   const [menuPos, setMenuPos] = useState<{ top: number; left: number } | null>(null);
-  const [modelClosed, setModelClosed] = useState(false);
-  const [shuttingDown, setShuttingDown] = useState(false);
   const cmdBtnRef = useRef<HTMLButtonElement>(null);
   // 桌面端顶部抽屉状态机；菜单展开期间钉住，断点切到移动端时强制归位
   const drawer = useEdgeDrawer({ active: !isMobile, pinned: cmdMenuOpen });
@@ -89,30 +85,7 @@ export default function Header({
     });
   };
 
-  const handleShutdownApprovalModel = async () => {
-    setCmdMenuOpen(false);
-    setMenuPos(null);
-    if (!window.confirm("确定要卸载审批模型 (llama-server) 吗？关闭后将释放显存，脱手模式开关仍可使用。")) return;
-    setShuttingDown(true);
-    try {
-      const resp = await fetch("/api/shutdown-approval-model", { method: "POST" });
-      const data = await resp.json();
-      if (data.ok) {
-        setModelClosed(true);
-        onToggleHandsfree(false);
-        alert("审批模型已关闭，显存已释放。");
-      } else {
-        alert("卸载审批模型失败。");
-      }
-    } catch {
-      alert("请求失败，请检查网络。");
-    } finally {
-      setShuttingDown(false);
-    }
-  };
-
   const showHandsfreeToggle = yoloMode || approvalModelAvailable;
-  const showUnloadMenu = approvalModelAvailable && !modelClosed && approvalModelType === "local";
 
   // 移动端折叠态：只显示精简条
   if (isMobile && collapsed) {
@@ -181,7 +154,6 @@ export default function Header({
               className="header-action-btn"
               onClick={toggleCmdMenu}
               data-tooltip="命令菜单"
-              disabled={shuttingDown}
             >
               ⋮
             </button>
@@ -201,14 +173,6 @@ export default function Header({
                 >
                   导出会话
                 </div>
-                {showUnloadMenu && (
-                <div
-                  className="context-menu-item context-menu-item-danger"
-                  onClick={handleShutdownApprovalModel}
-                >
-                  卸载审批模型
-                </div>
-                )}
               </div>
             )}
           </div>
@@ -277,7 +241,6 @@ export default function Header({
           className="header-action-btn"
           onClick={toggleCmdMenu}
           data-tooltip="命令菜单"
-          disabled={shuttingDown}
         >
           ⋮
         </button>
@@ -297,14 +260,6 @@ export default function Header({
             >
               导出会话
             </div>
-            {showUnloadMenu && (
-            <div
-              className="context-menu-item context-menu-item-danger"
-              onClick={handleShutdownApprovalModel}
-            >
-              卸载审批模型
-            </div>
-            )}
           </div>
         )}
       </div>

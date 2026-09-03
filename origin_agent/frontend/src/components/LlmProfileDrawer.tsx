@@ -56,6 +56,8 @@ export default function LlmProfileDrawer({
   const {
     profiles,
     activeProfileName,
+    approvalProfileName,
+    setApprovalProfile,
     createProfile,
     updateProfile,
     deleteProfile,
@@ -65,6 +67,7 @@ export default function LlmProfileDrawer({
   } = llmProfiles;
 
   const [selectedName, setSelectedName] = useState<string>(activeProfileName);
+  const [approvalBusy, setApprovalBusy] = useState<string | null>(null);
   const [draft, setDraft] = useState<LlmProfile>(EMPTY_PROFILE);
   const [isEditing, setIsEditing] = useState(false);
   const [isNew, setIsNew] = useState(false);
@@ -193,6 +196,22 @@ export default function LlmProfileDrawer({
     setIsNew(false);
   }, [selectedName, profiles, activeProfileName, deleteProfile]);
 
+  const handleSetApproval = useCallback(async (name: string | null) => {
+    if (approvalBusy) return;
+    if (name !== null && approvalProfileName === name) {
+      if (!window.confirm("将清空审批 Profile 并关闭所有会话的脱手模式，确认？")) return;
+    }
+    setApprovalBusy(name ?? "__clear__");
+    try {
+      const target = name !== null && approvalProfileName === name ? null : name;
+      await setApprovalProfile(target);
+    } catch {
+      // error 已由 useLlmProfiles 设置
+    } finally {
+      setApprovalBusy(null);
+    }
+  }, [approvalBusy, approvalProfileName, setApprovalProfile]);
+
   const handleDuplicate = useCallback(() => {
     if (!selectedProfile) return;
     const existingNames = profiles.map((p) => p.name);
@@ -290,6 +309,15 @@ export default function LlmProfileDrawer({
                           disabled={p.name === activeProfileName}
                         >
                           {p.name === activeProfileName ? "●" : "○"}
+                        </button>
+                        {/* "设为审批" 开关 */}
+                        <button
+                          className={`llm-tree-approval-toggle${p.name === approvalProfileName ? " on" : ""}`}
+                          onClick={(e) => { e.stopPropagation(); handleSetApproval(p.name); }}
+                          data-tooltip={p.name === approvalProfileName ? "审批 Profile（点击清除）" : "设为审批 Profile"}
+                          disabled={approvalBusy === p.name}
+                        >
+                          {p.name === approvalProfileName ? "🔒" : "🔓"}
                         </button>
                       </div>
                     ))}

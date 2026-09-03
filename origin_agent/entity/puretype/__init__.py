@@ -3,7 +3,8 @@ puretype 包 — 只含有不包含任何方法定义的类型定义。
 
 原始单文件 puretype.py 拆分为以下子模块：
     _base       : MessageContent, Role, ToolDangerLevel, ToolAvailability
-    approval    : ApprovalPolicy, ApprovalOutcome, ApprovalResult, ToolCallMeta, ToolAllowlistEntry
+    approval    : ApprovalPolicy, ApprovalOutcome, ApprovalResult, ApprovalProfileUpdateRequest,
+                  ApprovalProfileState, ApprovalProfileMutationResponse, ToolCallMeta, ToolAllowlistEntry
     llm         : ToolCallRequest, Usage, MessageMetrics, LLMResponse, ToolCallDeltaPhase,
                   ToolCallDelta, StreamChunk, LLMProfile, LLMProfileData, LLMProfilePayload,
                   LLMProfileUpdateRequest, LLMProfileDeleteRequest, LLMProfileMutationResponse,
@@ -30,6 +31,9 @@ from .approval import (
     ApprovalPolicy,
     ApprovalOutcome,
     ApprovalResult,
+    ApprovalProfileUpdateRequest,
+    ApprovalProfileState,
+    ApprovalProfileMutationResponse,
     ToolCallMeta,
     ToolAllowlistEntry,
 )
@@ -112,6 +116,9 @@ __all__ = [
     "ApprovalPolicy",
     "ApprovalOutcome",
     "ApprovalResult",
+    "ApprovalProfileUpdateRequest",
+    "ApprovalProfileState",
+    "ApprovalProfileMutationResponse",
     "ToolCallMeta",
     "ToolAllowlistEntry",
     # llm

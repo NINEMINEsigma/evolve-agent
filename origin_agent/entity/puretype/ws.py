@@ -33,6 +33,7 @@ class MessageType(str, Enum):
     PONG = "pong"
     SUBAGENT_UPDATE = "subagent_update"
     LLM_PROFILE_CHANGED = "llm_profile_changed"
+    APPROVAL_PROFILE_CHANGED = "approval_profile_changed"
 
 
 class Message(BaseModel):
@@ -85,3 +86,9 @@ class Message(BaseModel):
     old_name: str | None = None
     new_name: str | None = None
     metrics: MessageMetrics | None = None  # STREAM_DONE：计时元信息
+    # APPROVAL_PROFILE_CHANGED：审批 Profile 状态变更通知
+    approval_profile_name: str | None = None
+    approval_profile_model: str | None = None
+    approval_profile_available: bool | None = None
+    # HANDSFREE_MODE：服务端权威脱手模式回执
+    handsfree_mode: bool | None = None

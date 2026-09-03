@@ -9,13 +9,12 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import Any, Awaitable, Callable, TYPE_CHECKING
+from typing import TYPE_CHECKING
 
 from abstract.tools.registry import registry as tool_registry
-from entity.puretype import ApprovalResult, ApprovalOutcome, ToolDangerLevel
-from entity.constant import SYSTEM_CHARACTER_NAME
+from entity.puretype import ApprovalOutcome, ToolDangerLevel
 from component.approval.handsfree import is_handsfree_mode
-from component.approval.core import request_user_confirm
+from component.approval.core import build_denied_tool_result, request_user_confirm
 from component.approval.allowlist import add_allowed as add_tool_allowlist_entry
 from component.approval.allowlist import is_allowed as is_tool_allowlisted
 from component.approval.policy import needs_approval as _policy_needs_approval, MAIN_SESSION_POLICY
@@ -30,20 +29,6 @@ def _build_approval_content(tool_name: str, approval_args: dict) -> str:
     """构建审批请求的描述文本。"""
     params = json.dumps(approval_args, ensure_ascii=False)
     return f"Tool: {tool_name}\nParameters: {params}"
-
-
-def _build_deny_result(approval: ApprovalResult) -> dict:
-    """根据 ApprovalResult 构建统一的 deny 错误 dict。"""
-    source_label = {
-        "model": "approval model", 
-        "user": "user", 
-        "system": SYSTEM_CHARACTER_NAME
-        }.get(approval.denied_by, SYSTEM_CHARACTER_NAME)
-    return {
-        "error": f"[{source_label} denied] {approval.deny_reason or 'unknown reason'}",
-        "denied": True,
-        "denied_by": approval.denied_by,
-    }
 
 
 def _needs_approval(tool_name: str, session_id: str) -> bool:
@@ -65,7 +50,6 @@ async def execute_with_approval(
     session_id: str,
     *,
     sink: "AgentSink",
-    ask_agent_callback: Callable[[str], Awaitable[str]] | None = None,
     hooks_context: str = "",
 ) -> ApprovalOutcome:
     """统一的工具审批流程。
@@ -77,9 +61,7 @@ async def execute_with_approval(
         tool_name: 工具名称。
         args: 工具参数 dict（审批通过后会原地修改，加入 _pre_approved / _approval_action）。
         session_id: 会话 ID。
-        sink: AgentSink 实例，用于正常模式通过前端请求审批。
-        ask_agent_callback: 脱手模式下审批模型向主模型提问的回调。
-                           仅父 Agent 需要传入（multi loop 中脱手模式不使用）。
+        sink: AgentSink 实例，用于手动模式通过前端请求审批。
         hooks_context: 脱手模式下注入审批请求的 hooks 上下文。
 
     Returns:
@@ -117,17 +99,11 @@ async def execute_with_approval(
     approval: ApprovalResult
 
     if handsfree and danger_level != ToolDangerLevel.critical:
-        # 脱手模式（非 critical）：通过 approval 模型（本地/远程）自动审批
-        # 若未提供回调，使用空回调兜底
-        async def _empty_callback(_q: str) -> str:
-            return ""
-
-        _callback = ask_agent_callback or _empty_callback
+        # 脱手模式（非 critical）：通过项目级审批 Profile 自动审批
         approval = await request_user_confirm(
             session_id, tool_name, approval_args,
             reason=str(args.get("reason", "")),
             content=_build_approval_content(tool_name, approval_args),
-            ask_agent_callback=_callback,
             extra_context=hooks_context if hooks_context else None,
         )
     else:
@@ -144,7 +120,7 @@ async def execute_with_approval(
     if approval.action == "deny":
         return ApprovalOutcome(
             denied=True,
-            deny_result=_build_deny_result(approval),
+            deny_result=build_denied_tool_result(approval),
             approved_args=args,
         )
 

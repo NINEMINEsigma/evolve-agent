@@ -39,7 +39,6 @@ from main import App  # noqa: E402
 from system.context import RuntimeContext  # noqa: E402
 from system.convert import as_bool
 from system.pkgmgr import detect_package_manager
-from entity.constant import APPROVAL_MODEL_N_CTX_DEFAULT
 
 
 # ---------------------------------------------------------------------------
@@ -127,15 +126,6 @@ def _build_context(cli: dict) -> RuntimeContext:
             Path(cli["fix"]).resolve() if "fix" in cli else None
         ),
         git_remotes             = str(cli.get("git_remotes", "")),
-        # 脱手模式审批模型配置
-        approval_model_path     = str(cli.get("approval_model_path", "")),
-        approval_model_n_ctx    = int(cli.get("approval_model_n_ctx", APPROVAL_MODEL_N_CTX_DEFAULT)),
-        approval_model_cuda     = as_bool(cli.get("approval_model_cuda", False)),
-        approval_model_port     = int(cli.get("approval_model_port", 8081)),
-        approval_remote_base_url= str(cli.get("approval_remote_base_url", "")),
-        approval_remote_api_key = str(cli.get("approval_remote_api_key", "")),
-        approval_remote_model   = str(cli.get("approval_remote_model", "")),
-        approval_remote_client_name = str(cli.get("approval_remote_client_name", "openai_client")),
         mcp_config_path         = cli["mcp_config_path"],
         # 会话合并配置
         merge_concat_threshold  = int(cli.get("merge_concat_threshold", 50000)),

@@ -461,15 +461,28 @@ class MessageRouter:
         )
 
     async def handle_handsfree_mode(self, msg: Message) -> None:
-        """处理脱手模式切换。"""
+        """处理脱手模式切换，回送服务端权威状态。"""
         from system.context import get_runtime_context
-        if get_runtime_context().yolo:
-            logger.info("Handsfree toggle ignored — YOLO mode active | session=%s", self.sid)
-            return
         from component.approval import set_handsfree_mode
-        enabled = msg.content is not None and (str(msg.content).lower() in ("true", "1", "on"))
-        logger.info("Handsfree mode toggle | session=%s enabled=%s", self.sid, enabled)
-        set_handsfree_mode(self.sid, enabled)
+
+        ctx = get_runtime_context()
+        if ctx.yolo:
+            logger.info("Handsfree toggle ignored — YOLO mode active | session=%s", self.sid)
+            actual = False
+        else:
+            enabled = msg.content is not None and (str(msg.content).lower() in ("true", "1", "on"))
+            actual = set_handsfree_mode(self.sid, enabled)
+            logger.info("Handsfree mode toggle | session=%s enabled=%s actual=%s", self.sid, enabled, actual)
+        await self.ws.send_text(
+            json.dumps(
+                Message(
+                    type=MessageType.HANDSFREE_MODE,
+                    session_id=self.sid,
+                    handsfree_mode=actual,
+                ).model_dump(exclude_none=True),
+                ensure_ascii=False,
+            )
+        )
 
     async def handle_ping(self) -> None:
         """处理心跳。"""

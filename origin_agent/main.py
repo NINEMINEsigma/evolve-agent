@@ -249,30 +249,6 @@ class App:
             logger.warning("AgentLoop unavailable: %s", exc)
             # Gateway 将回退到 echo 模式
 
-        # ---- 预编译 llama-server（本地脱手模式审批模型需要）----
-        _local_disabled = {"", "false", "0", "no"}
-        _local_path_raw = (self.ctx.approval_model_path or "").strip().lower()
-        if _local_path_raw not in _local_disabled:
-            gguf_path = Application.current().sandbox.get_base(Namespace.CUSTOM_MODELS) / self.ctx.approval_model_path.strip()
-            if gguf_path.is_file():
-                try:
-                    from third.llamaapis.system.builder import LlamaBuilder
-                    _builder = LlamaBuilder(
-                        source_dir="lib/llama.cpp",
-                        cuda=self.ctx.approval_model_cuda,
-                        jobs=4,
-                    )
-                    await asyncio.to_thread(_builder.build_if_needed)
-                except Exception as exc:
-                    logger.warning(
-                        "llama-server pre-build failed (will retry at runtime): %s", exc
-                    )
-            else:
-                logger.warning(
-                    "Local approval model file not found: %s — skipping llama.cpp pre-build",
-                    gguf_path,
-                )
-
         self._gateway_server = create_server(host=host, port=port)
         self._gateway_task = asyncio.create_task(
             self._gateway_server.serve(),  # type: ignore[union-attr]

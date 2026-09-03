@@ -275,7 +275,6 @@ export default function Layout({ ws, onContextMenu, contextMenuOpen }: LayoutPro
           yoloMode={ws.yoloMode}
           approvalModelAvailable={ws.approvalModelAvailable}
           approvalModelName={ws.approvalModelName}
-          approvalModelType={ws.approvalModelType}
           llmModelName={ws.llmModelName}
           sidebarCollapsed={sidebarCollapsed}
           onToggleSidebar={() => setSidebarCollapsed((v) => !v)}

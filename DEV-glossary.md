@@ -98,8 +98,8 @@
 | 手动模式 | 工具调用经前端弹窗由用户逐条审批 | manual mode |
 | 脱手模式 | 工具调用由审批模型自动审批 | handsfree mode |
 | YOLO 模式 | "You Only Live Once"：AI 工具的免确认自动执行模式——含 critical 全部自动批准、无审批模型参与、`--yolo` 启动锁定、运行时不可退出 | YOLO mode |
-| 审批模型 | 脱手模式下执行审批的 LLM；本地 GGUF 与远程审批端点为其两种部署形态 | approval model |
-| 远程审批端点 | `approval_remote_*` 配置的无本地模型时 fallback 来源 | remote approval endpoint |
+| 审批模型 | 脱手模式下执行审批的 LLM；由 `LLMProfileData.approval_profile` 引用根对象中的一个 LLMProfile 实例 | approval model |
+| 审批 Profile 名称指针 | 项目级审批 Profile 在 `LLMProfileData.approval_profile` 中的对象引用（英文锚点：`approval Profile reference`）；通过前端「模型配置」抽屉选择，easysave 保留对象身份 |
 | 危险等级 | `danger_level` 四级：safe / write / dangerous / critical | danger level |
 | 可用范围 | `availability` 位掩码：MAIN / SUBAGENT / MULTI_AGENT / TASKAGENT / EVERY | availability |
 | 审批动作 | allow_once（允许一次）/ allow_always（始终允许，入白名单）/ deny（拒绝） | approval action |
@@ -152,7 +152,7 @@
 | 插件 | `abstract/plugins` 目录扫描 + `plugin.yaml` 元数据 |
 | 自定义工具 | `custom_tools/` 下的 `.py` 工具扩展 |
 | 自定义LLM客户端 | `custom_llm_client/` 下的 `.py` LLM 客户端扩展 |
-| 自定义模型 | `custom_models/` 下的 `.gguf` 模型文件 |
+| 自定义模型 | `custom_models/` 下的 `.gguf` 模型文件（当前无运行时接入，保留目录供未来用途） |
 | MCP 桥接 | `component/mcp_tools.py` 将外部 MCP server 工具注册进工具注册表 |
 | LLM Profile 根对象 | `LLMProfileData`（英文锚点：`LLM Profile root`）；`llm_profiles.es` v2 中唯一的持久化根，持有全部 Profile 及实例引用关系 |
 | Profile 名称指针 | 会话级或全局最近使用的 Profile 名称（英文锚点：`Profile name pointer`）；只保存名称，不复制端点、密钥或 Profile 对象 |
@@ -260,7 +260,7 @@
 | 侧栏开关按钮 | `.sidebar-toggle` | 位于顶部栏左侧，控制左侧导航栏收起/展开 |
 | 会话徽章 | `.session-badge` | 当前会话 ID，≤768px 隐藏 |
 | 调试徽章组 | `DebugBadges` / `.debug-badges` | 连接诊断徽章，≤1100px 隐藏 |
-| 命令菜单 | `.cmd-menu-dropdown`（⋮ 按钮触发） | 导出会话 / 卸载审批模型；展开期间钉住顶部抽屉 |
+| 命令菜单 | `.cmd-menu-dropdown`（⋮ 按钮触发） | 导出会话；展开期间钉住顶部抽屉 |
 | 状态胶囊 | `HeaderPill` / `.header-pill` | 居中渐变胶囊，hover 展开状态/模型名详情；桌面端渲染于 dock，移动端渲染于中栏 |
 | 脱手模式徽章 | `.approval-model-badge` | 点击切换自动审批 |
 | 令牌徽章 | `.token-badge` | token 统计文本，≤900px 隐藏 |

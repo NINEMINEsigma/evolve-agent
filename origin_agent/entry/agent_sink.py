@@ -216,6 +216,46 @@ class FrontendSink(AgentSink):
                 )
         return failures
 
+    async def broadcast_approval_profile_change(
+        self,
+        state,
+        disabled_sessions: list[str] | None = None,
+    ) -> list[str]:
+        """向所有已连接前端广播审批 Profile 状态变更。
+
+        ``state`` 为 ``ApprovalProfileState`` 实例。显式保留 null 值
+        以便前端区分"未选择"与"字段缺失"。``disabled_sessions`` 中的
+        连接同时携带 ``handsfree_mode=false``。
+        """
+        from gateway.chat import Message, MessageType
+
+        failures: list[str] = []
+        disabled_set = set(disabled_sessions or [])
+        for session_id, ws in self.get_all_ws().items():
+            message = Message(
+                type=MessageType.APPROVAL_PROFILE_CHANGED,
+                session_id=session_id,
+                approval_profile_name=state.profile_name,
+                approval_profile_model=state.model,
+                approval_profile_available=state.available,
+                handsfree_mode=False if session_id in disabled_set else None,
+            )
+            try:
+                payload = message.model_dump(exclude_none=True)
+                payload["approval_profile_name"] = state.profile_name
+                payload["approval_profile_model"] = state.model
+                if session_id in disabled_set:
+                    payload["handsfree_mode"] = False
+                await ws.send_text(json.dumps(payload, ensure_ascii=False))
+            except Exception:
+                failures.append(session_id)
+                logger.warning(
+                    "Failed to broadcast approval profile change | session=%s",
+                    session_id,
+                    exc_info=True,
+                )
+        return failures
+
     def is_session_occupied(self, session_id: str, token: str | None) -> bool:
         """判断会话是否已被其他标签页占用。
 
@@ -621,7 +661,6 @@ class ParentAgentSink(AgentSink):
                 args=args,
                 reason=reason or "Sub-agent initiated tool call",
                 content=content or f"Sub-agent {tool_name} tool call",
-                ask_agent_callback=None,
             )
             return result
 

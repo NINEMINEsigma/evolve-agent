@@ -11,7 +11,6 @@
   - ``third:``   只读（第三方子模块）
   - ``custom_hooks:``      只读（自定义钩子）
   - ``custom_llm_client:`` 只读（自定义 LLM 客户端）
-  - ``custom_models:``     只读（本地模型文件）
   - ``custom_tools:``      只读（自定义工具）
 """
 # TODO: _blocks构建应该具有一个公用的工厂

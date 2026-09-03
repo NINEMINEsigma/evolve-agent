@@ -163,6 +163,7 @@ class LLMProfileData(BaseModel):
     """LLMProfile 持久化根对象。"""
 
     profiles: list[LLMProfile] = Field(default_factory=list, description="LLMProfile列表")
+    approval_profile: LLMProfile|None = Field(default=None)
 
 
 class LLMProfilePayload(BaseModel):

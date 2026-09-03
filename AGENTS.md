@@ -45,10 +45,10 @@
 ```
 origin_agent/          ← origin仓库（源码真相源，编辑这里）
 workspace/             ← 整个目录被 gitignore
-third/                 ← git 子模块（easysave、llamaapis），只读
+third/                 ← git 子模块（easysave、framework），只读
 custom_hooks/          ← 上下文钩子扩展点（见「记忆与上下文钩子」）
 custom_llm_client/     ← LLM 客户端插件（工厂函数 create_llm_client）
-custom_models/         ← 本地 .gguf 模型（审批模型等；*.gguf 被 gitignore）
+custom_models/         ← 保留目录（*.gguf 被 gitignore）；当前无运行时接入
 custom_tools/          ← 自定义工具（AST 扫描自动发现；含 memory_tools/）
 pre-skills/ → skills/  ← run.py 首次启动时拷贝生成 skills/（/skills/ 被 gitignore）
 desktop/               ← Electron 桌面壳（独立 package.json；node_modules/dist 被 gitignore）
@@ -56,13 +56,13 @@ desktop/               ← Electron 桌面壳（独立 package.json；node_modul
 其他 gitignore：/docs/、/temp/、/.tasks/、/config.json（含密钥）、custom_models/*.gguf
 ```
 
-根目录另有 `SOUL.md`（agent 人格档案，首次启动复制到 agentspace）、`GENE.md`、`check_env.py`、`config_tui.py`（`--interactive` TUI）、`config.json.example`、`scripts/migrate_v0_to_v1.py`（会话存储 v0→v1 迁移）、`.docs/`（示例与引用资料）。
+根目录另有 `SOUL.md`（agent 人格档案，首次启动复制到 agentspace）、`GENE.md`、`config_tui.py`（`--interactive` TUI）、`config.json.example`、`scripts/migrate_v0_to_v1.py`（会话存储 v0→v1 迁移）、`.docs/`（示例与引用资料）。
 
 ## 启动与生命周期
 
 > 本节涉及的 workspace 内部目录（fast/slow 空间、agentspace、logs）与 `SOUL.md` 均按**默认配置名**描述；实际名称由 config.py 参数（`workspace_path`、`fast_agent_space_path`、`slow_agent_space_path`、`agentspace_path_name`、`logs_path_name`、`mcp_config_path_name`、`soul_file`）决定，只有 `.fallback/` 为 run.py 硬编码固定名。
 
-- `python run.py`（无参数时提示输入 config key）；`--load <key>` / `--save <key>` / `--interactive` 互斥。`config.json` 用 easysave 按 key 存多份 `Config`，存密钥且被 gitignore。关键配置：`gateway_host/port`、`force_init`、`frontend_force_build`、`yolo`、`merge_concat_threshold`、`approval_model*`（本地 GGUF 与 `approval_remote_*` 远程端点二选一：config.py 在配置阶段判定，本地文件名缺失/未配置远程时给出警告并降级）。
+- `python run.py`（无参数时提示输入 config key）；`--load <key>` / `--save <key>` / `--interactive` 互斥。`config.json` 用 easysave 按 key 存多份 `Config`，存密钥且被 gitignore。关键配置：`gateway_host/port`、`force_init`、`frontend_force_build`、`yolo`、`merge_concat_threshold`。审批模型（脱手模式）通过前端「模型配置」抽屉选择一个已有 LLM Profile 作为审批 Profile，不通过启动参数配置。
 - **`--force_init`**：`true` 时 run.py 重置 workspace 空间，但**三个空间处理方式不同**：`slow_agent_space/` 与 `.fallback/` 先 `rmtree` 删除再 `copytree`（干净重置，旧残留清除）；`fast_agent_space/` **从不删除**，仅 `copytree(..., dirs_exist_ok=True)` 合并覆盖—— origin 中同名文件覆盖 fast，fast 中独有文件原样保留。同时**删除 origin 与 fast 的 `frontend/pnpm-lock.yaml`**（force_init 分支与首次初始化分支都做，run.py 154-173）。`enable_fallback = force_init == False`：force_init 为 true 时 fallback 修复流程被禁用（fallback 已被重置成与 fast 同源，拿它修无意义），fast 崩溃时直接退出。非 force_init 且 fast 尚未初始化（缺 `__main__.py`）时，也会执行同样的首次复制。持久化开发用 `force_init: false`。
 - 每次启动 run.py 还会：把根目录 `SOUL.md` 复制到 agentspace（两者都不存在则创建空文件）；`skills/` 不存在时从 `pre-skills/` 复制；只读收集宿主 `git remote -v` 结果，经 `--git_remotes` 注入 system prompt。
 - run.py 永不执行 `origin_agent/`，而是循环运行 `workspace/fast_agent_space/__main__.py`（`--mode fast --evolve <slow>`）：
@@ -87,7 +87,6 @@ desktop/               ← Electron 桌面壳（独立 package.json；node_modul
 | `third:` | 仓库根 `third/` | ro | ro | 第三方子模块 |
 | `custom_hooks:` | 仓库根 `custom_hooks/` | ro | ro | 自定义钩子 |
 | `custom_llm_client:` | 仓库根 `custom_llm_client/` | ro | ro | 自定义 LLM 客户端 |
-| `custom_models:` | 仓库根 `custom_models/` | ro | ro | 本地模型文件 |
 | `custom_tools:` | 仓库根 `custom_tools/` | ro | ro | 自定义工具 |
 
 **没有 `self:` 命名空间** — agent 不能读取或修改自身运行时副本，进化完全通过 `fork:`/`fix:` 实现。权限模型为 `_PERMISSIONS`（mode × namespace → Access 列表），`namespace_bases()` 是 ns→物理根的唯一映射来源（`resolve()` 与 LSP 反向映射复用）；`Namespace` 枚举定义在 `entity/constant.py`。

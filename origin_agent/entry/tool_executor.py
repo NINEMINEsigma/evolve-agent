@@ -13,16 +13,13 @@ import json
 import logging
 import time
 from datetime import datetime
-from typing import Any, Awaitable, Callable, TYPE_CHECKING
+from typing import Any, Awaitable
 
 from entity.puretype import Role, ToolCallMeta, ToolCallRequest, LLMProfile
 from entity.gentype import RefWrapper
 from entity.messages import ToolResultMessage
 from entry.base_agent_loop import BaseAgentLoop, ToolContext, IMainSessionLoop
 from entry.tool_post_dispatch import finalize_tool_result
-
-if TYPE_CHECKING:
-    from abstract.llm.client import BaseLLMClient
 
 logger = logging.getLogger(__name__)
 
@@ -64,19 +61,10 @@ class ToolExecutor:
     由 IMainSessionLoop 持有，每个 tool_call 调用一次 ``execute()``。
     """
 
-    def __init__(self, loop: IMainSessionLoop, llm: BaseLLMClient | None) -> None:
+    def __init__(self, loop: IMainSessionLoop) -> None:
         self._loop = loop
-        self._llm = llm
         self._tool_stats: dict[str, dict[str, int]] = {}
         self._turn_counter: RefWrapper[int] | None = None
-
-    @property
-    def llm(self) -> BaseLLMClient | None:
-        return self._llm
-
-    @llm.setter
-    def llm(self, value: BaseLLMClient | None) -> None:
-        self._llm = value
 
     # -- 公开 API ----------------------------------------------------------
 
@@ -144,13 +132,10 @@ class ToolExecutor:
                 None 时回退到 loop.active_llm_profile。
         """
         from entity.constant import LOG_PREVIEW_CHARS, TOOL_RESULT_LOG_ARGUMENT_CHARS
-        from component.approval import execute_with_approval, ask_agent_reason as _ask_agent_reason
+        from component.approval import execute_with_approval
         from abstract.tools.registry import registry as tool_registry
 
         char_name = character_name or self._loop.current_character_agent
-        llm = self._llm
-        if llm is None:
-            raise RuntimeError("No LLM client available for tool execution")
 
         # -- 记录申请时间（审批流程之前） --
         start_mono: float = time.monotonic()
@@ -261,18 +246,7 @@ class ToolExecutor:
         )
 
         # 审批流程
-        _approval_args = {k: v for k, v in args.items() if k != "_session_id"}
         _hooks_ctx = self._loop.loop.get_hooks_context(session_id)
-
-        ask_agent_callback: Callable[[str], Awaitable[str]] | None = None
-
-        async def _ask_agent_callback_impl(q: str) -> str:
-            return await _ask_agent_reason(
-                llm, tc.name, _approval_args, q,
-                extra_context=_hooks_ctx,
-            )
-
-        ask_agent_callback = _ask_agent_callback_impl
 
         approval_start: float = time.monotonic()
         try:
@@ -282,7 +256,6 @@ class ToolExecutor:
                     args=args,
                     session_id=session_id,
                     sink=self._loop.loop.get_sink(),
-                    ask_agent_callback=ask_agent_callback,
                     hooks_context=_hooks_ctx,
                 ),
                 "approval",

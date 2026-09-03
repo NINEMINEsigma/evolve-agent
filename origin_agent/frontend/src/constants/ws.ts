@@ -14,6 +14,8 @@ export const WS_IN = {
   ERROR:             "error",
   SUBAGENT_UPDATE:   "subagent_update",
   LLM_PROFILE_CHANGED: "llm_profile_changed",
+  APPROVAL_PROFILE_CHANGED: "approval_profile_changed",
+  HANDSFREE_MODE:    "handsfree_mode",
   PONG:              "pong",
 } as const;
 

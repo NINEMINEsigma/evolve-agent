@@ -120,7 +120,7 @@ class MultiAgentWorker:
             cancel_event=self._loop.loop.cancel_event,
         )
         # 工具执行器：复用 ParentAgentLoop 的统一执行逻辑
-        self._tool_executor = ToolExecutor(loop=self._loop, llm=self._llm)
+        self._tool_executor = ToolExecutor(loop=self._loop)
         self._turn_counter: RefWrapper[int] = RefWrapper(value=0)
         self._tool_executor.set_turn_counter(self._turn_counter)
         # 累计 token 消耗与最近一次上下文 token 数

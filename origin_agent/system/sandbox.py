@@ -16,7 +16,6 @@ LLM 可见的路径是**逻辑路径**（``ws:logs/error.log``），
     ``third:``       find_repo_root()/third    ro      第三方子模块（只读）
     ``custom_hooks:``       find_repo_root()/custom_hooks       ro  自定义钩子（只读）
     ``custom_llm_client:``  find_repo_root()/custom_llm_client  ro  自定义 LLM 客户端（只读）
-    ``custom_models:``      find_repo_root()/custom_models      ro  本地模型文件（只读）
     ``custom_tools:``       find_repo_root()/custom_tools       ro  自定义工具（只读）
     ==============  ===================  ======  ==========================
 
@@ -78,7 +77,6 @@ _PERMISSIONS: dict[str, dict[str, list[Access]]] = {
         Namespace.THIRD.value:              [Access.READ],
         Namespace.CUSTOM_HOOKS.value:      [Access.READ],
         Namespace.CUSTOM_LLM_CLIENT.value: [Access.READ],
-        Namespace.CUSTOM_MODELS.value:     [Access.READ],
         Namespace.CUSTOM_TOOLS.value:      [Access.READ],
     },
     "fallback": {
@@ -89,7 +87,6 @@ _PERMISSIONS: dict[str, dict[str, list[Access]]] = {
         Namespace.THIRD.value:              [Access.READ],
         Namespace.CUSTOM_HOOKS.value:      [Access.READ],
         Namespace.CUSTOM_LLM_CLIENT.value: [Access.READ],
-        Namespace.CUSTOM_MODELS.value:     [Access.READ],
         Namespace.CUSTOM_TOOLS.value:      [Access.READ],
     },
 }
@@ -256,7 +253,6 @@ class Sandbox:
                 Namespace.THIRD.value:              _repo_root / Namespace.THIRD.value,
                 Namespace.CUSTOM_HOOKS.value:       _repo_root / Namespace.CUSTOM_HOOKS.value,
                 Namespace.CUSTOM_LLM_CLIENT.value:  _repo_root / Namespace.CUSTOM_LLM_CLIENT.value,
-                Namespace.CUSTOM_MODELS.value:      _repo_root / Namespace.CUSTOM_MODELS.value,
                 Namespace.CUSTOM_TOOLS.value:       _repo_root / Namespace.CUSTOM_TOOLS.value,
             }.items() if base is not None
         }

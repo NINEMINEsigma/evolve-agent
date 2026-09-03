@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { usePersistentState } from "./usePersistentState";
 import { STORAGE_KEYS } from "../constants/storage";
-import type { LlmProfile } from "../types";
+import type { LlmProfile, ApprovalProfileState } from "../types";
 
 async function responseError(response: Response): Promise<Error> {
   const data = await response.json().catch(() => ({}));
@@ -16,6 +16,7 @@ export function useLlmProfiles() {
     "",
   );
   const [availableClients, setAvailableClients] = useState<string[]>([]);
+  const [approvalProfileState, setApprovalProfileState] = useState<ApprovalProfileState>({ profile_name: null, model: null, available: false });
 
   const fetchProfiles = useCallback(async (): Promise<LlmProfile[]> => {
     const response = await fetch("/api/llm/profiles");
@@ -50,6 +51,7 @@ export function useLlmProfiles() {
       .catch((cause) => setError(cause instanceof Error ? cause.message : String(cause)));
 
     void refreshProfiles().catch(() => {});
+    void fetchApprovalProfile().catch(() => {});
   }, [refreshProfiles]);
 
   const activeProfile = useMemo(
@@ -136,6 +138,59 @@ export function useLlmProfiles() {
     }
   }, [activeProfileName, refreshProfiles, setActiveProfileName]);
 
+  const fetchApprovalProfile = useCallback(async (): Promise<ApprovalProfileState> => {
+    try {
+      const response = await fetch("/api/approval/profile");
+      if (!response.ok) throw await responseError(response);
+      const data = await response.json() as ApprovalProfileState;
+      setApprovalProfileState(data);
+      return data;
+    } catch (cause) {
+      const message = cause instanceof Error ? cause.message : String(cause);
+      setError(message);
+      return { profile_name: null, model: null, available: false };
+    }
+  }, []);
+
+  const setApprovalProfile = useCallback(async (profileName: string | null): Promise<ApprovalProfileState> => {
+    try {
+      const response = await fetch("/api/approval/profile", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ profile_name: profileName }),
+      });
+      if (!response.ok) throw await responseError(response);
+      const data = await response.json();
+      const state = data.state as ApprovalProfileState;
+      setApprovalProfileState(state);
+      setError(null);
+      return state;
+    } catch (cause) {
+      const message = cause instanceof Error ? cause.message : String(cause);
+      setError(message);
+      throw cause;
+    }
+  }, []);
+
+  const handleApprovalProfileChanged = useCallback((msg: {
+    approval_profile_name?: string | null;
+    approval_profile_model?: string | null;
+    approval_profile_available?: boolean;
+    handsfree_mode?: boolean | null;
+  }) => {
+    setApprovalProfileState({
+      profile_name: msg.approval_profile_name ?? null,
+      model: msg.approval_profile_model ?? null,
+      available: msg.approval_profile_available ?? false,
+    });
+  }, []);
+
+  const approvalProfileName = approvalProfileState.profile_name;
+  const approvalProfile = useMemo(
+    () => profiles.find((p) => p.name === approvalProfileName) || null,
+    [profiles, approvalProfileName],
+  );
+
   const handleProfileChanged = useCallback((event: {
     old_name?: string | null;
     new_name?: string | null;
@@ -161,6 +216,12 @@ export function useLlmProfiles() {
     toProfileName,
     availableClients,
     error,
+    approvalProfileState,
+    approvalProfileName,
+    approvalProfile,
+    fetchApprovalProfile,
+    setApprovalProfile,
+    handleApprovalProfileChanged,
   };
 }
 
