@@ -126,11 +126,17 @@ async def _handsfree_confirm(
 
     from system.pathutils import find_repo_root, get_templates_dir
 
+    # 获取工具的参数 schema，使审批模型能理解每个参数的类型、描述、
+    # 默认值和是否必填，从而区分"必需信息缺失"与"可选参数省略"。
+    from abstract.tools.registry import registry as tool_registry
+    tool_schema = tool_registry.get_schema(tool_name)
+
     system_prompt = (
         get_templates_dir() / "approval" / "system_prompt.md"
     ).read_text(encoding="utf-8")
     user_prompt_data: dict[str, Any] = {
         "tool": tool_name,
+        "schema": tool_schema,
         "args": args,
         "reason": reason,
         "cwd": str(find_repo_root().resolve()),
@@ -155,6 +161,7 @@ async def _handsfree_confirm(
         )
         return _approval_model_failure("request failed")
 
+    logger.debug("Approval model response | tool=%s response=%s", tool_name, response)
     result = _interpret_approval_response(response)
     if result.action == "deny":
         logger.info(
@@ -164,5 +171,5 @@ async def _handsfree_confirm(
             result.deny_reason,
         )
     else:
-        logger.info("Handsfree approved | tool=%s", tool_name)
+        logger.info("Handsfree approved | tool=%s response=%s", tool_name, response)
     return result

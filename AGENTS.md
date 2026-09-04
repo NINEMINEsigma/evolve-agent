@@ -9,6 +9,7 @@
    - `DEV-glossary.md` — 项目术语表（三位一体口径：开发者/用户、开发助手AI、Evolve Agent）。沟通、文档与 prompt 一律使用登记术语：Agent 一律大写、五仓库规范称谓（origin/fast/slow/fallback 仓库、工作空间）、审批三模式（手动/脱手/YOLO）、前端「导航栏」专指左侧 Sidebar 等；新增术语先登记后使用，退役词禁用。
    - `DEV-class_relationships.md` — Agent Loop 类关系图、protected 字段归属表、跨类/跨模块外部访问清单、关键设计变更记录。
 2. **子包文档再代码**：`origin_agent/` 各子包目录下带有该包的开发文档（`abstract/`、`component/`、`entry/`、`frontend/`、`gateway/`、`subagent/` 均有 `DEV-README.md`）。深入某个目录的代码前先读其 `DEV-*` 文档；修改该目录代码后若行为或约定发生变化，应同步更新对应文档（包括根目录三件套中受影响的部分）。
+3. **不要误认为riper协议的模式转换要求是agent或者system提示器的模式转换**
 
 ## 硬性警告（违反会破坏构建或丢失工作）
 

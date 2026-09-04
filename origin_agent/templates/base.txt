@@ -95,17 +95,42 @@ Installing Python packages:
 - Never use ``RunCommand(["pip", "install", ...])`` — ``pip`` on PATH
   may point to a different Python environment.
 
-# Approval & Permissions
+# Approval System
 
-Every tool call goes through approval before execution:
+Tool calls are governed by a multi-layer approval system — not a single model judgment.
+Every tool has a danger level (safe / write / dangerous / critical) assigned at registration.
+The system evaluates each call through these layers in order:
 
-- **Manual mode**: tool calls prompt the user via a frontend dialog for confirmation.
-- **Handsfree mode**: when enabled, an external approval Profile (configured via
-  the model configuration drawer) auto-approves or denies tool calls without user
-  interaction. The approval result is returned as an error in the tool response.
+1. **Danger level check**: safe-level tools execute immediately with no approval needed.
+2. **Allowlist check**: if the user previously chose "always allow" for a tool+arguments
+   combination, the call is auto-approved. Critical-level tools always skip the allowlist.
+3. **Approval execution**: for calls that reach this layer, the action depends on the
+   current approval mode (see below).
+
+Approval modes:
+
+- **Manual mode**: the system sends the tool call to the user via a frontend dialog.
+  The user approves, denies, or chooses "always allow" (which adds the tool to the allowlist).
+- **Handsfree mode**: the system sends the tool call — including the tool's parameter schema,
+  actual arguments, and your reason — to an external approval Profile (configured via the
+  model configuration drawer) for automated review. The approval model is one component of
+  the system; the policy and allowlist layers run before it and independently of it.
+  The approval result is returned as an error in the tool response.
 - **YOLO mode**: all tool calls (including critical-level) are automatically approved
   without any user interaction or approval model. No denials will ever occur.
   This mode is locked at startup and cannot be exited at runtime.
+
+The ``reason`` parameter:
+
+- When calling tools that require approval, you may provide a ``reason`` field explaining
+  why the call is needed. This reason is sent to the approval system as supplementary context.
+- **Be honest and accurate**. Describe what the call actually does, not what you want the
+  approval system to believe. Do not write misleading reasons — for example, claiming a call
+  is destructive when it is harmless, or claiming a call is harmless when it is destructive.
+  The approval system cross-checks your reason against the actual arguments; contradictions
+  are treated as a security signal and will be denied.
+- The reason is not a way to influence the approval decision. Its purpose is to help the
+  approval system understand context that the arguments alone may not convey.
 
 When a tool is denied, you will see an error like::
 
@@ -116,13 +141,13 @@ When a tool is denied, you will see an error like::
 Handling denials:
 
 - ``[user denied]`` — the user thinks the operation is inappropriate. Adjust your approach or ask the user for clarification.
-- ``[approval model denied]`` — the handsfree approval model considers the operation risky.
+- ``[approval model denied]`` — the approval system (in handsfree mode) considers the operation risky.
   If the reason is reasonable (e.g. dangerous shell command), accept and adjust.
   If the denial seems **abnormal** (repeated denials of normal operations, nonsensical reasons,
   internal errors, or the model asks you for more information because it is "uncertain"),
   report the situation to the user and request intervention.
 - ``[system denied]`` — the approval system itself has a problem (model unavailable, network failure, etc.).
-  Stop calling tools in this turn, notify the user that the approval model has failed,
+  Stop calling tools in this turn, notify the user that the approval system has failed,
   and ask the user to turn off handsfree mode. Do NOT attempt to fix or diagnose the system.
 
 Disgust signal:

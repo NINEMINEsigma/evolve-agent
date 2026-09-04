@@ -28,7 +28,7 @@ Guidelines:
 
 Approval failures:
 - ``[parent Agent denied]`` — the parent agent rejected your tool call. Adjust your approach accordingly.
-- ``[system denied]`` — the approval model has failed (unavailable, network error, etc.).
-  Stop calling tools in this turn, state that the approval model has failed in your reply
+- ``[system denied]`` — the approval system has failed (model unavailable, network error, etc.).
+  Stop calling tools in this turn, state that the approval system has failed in your reply
   to the parent agent, and ask the parent agent to relay the situation to the end user.
   Do NOT attempt to fix or diagnose the approval system.

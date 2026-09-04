@@ -136,7 +136,7 @@ component/
 - `set_handsfree_mode(session_id, enabled) -> bool` / `is_handsfree_mode(session_id)`：脱手模式 session 级状态管理，返回服务端实际状态。
 - `is_handsfree_available() -> bool`：检查审批 Profile 是否已配置。
 - `disable_all_handsfree_modes() -> list[str]`：关闭全部已开启会话并返回受影响列表。
-- `_handsfree_confirm()`：核心流程，通过审批 Profile 模型评估工具调用风险。审批输出使用普通文本决策标记（`[ALLOW]`/`[APPROVE]`/`[DENY]`/`[REJECT]`/`[拒绝]`/`[否决]`），不使用 JSON。
+- `_handsfree_confirm()`：核心流程，通过审批 Profile 模型评估工具调用风险。审批请求包含工具的参数 schema（使模型能区分必填与可选参数）、实际参数值和 reason（补充说明）。审批输出使用普通文本决策标记（`[ALLOW]`/`[APPROVE]`/`[DENY]`/`[REJECT]`/`[拒绝]`/`[否决]`），不使用 JSON。
 
 #### `approval/allowlist.py` — 工具白名单
 
