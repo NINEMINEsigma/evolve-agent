@@ -19,6 +19,7 @@ from entity.constant import (
     GLOBAL_LLM_PROFILE_FILENAME,
 )
 from easysave import save, load
+from entity.typeref import make_config
 
 from system.atomic_io import write_text_atomic
 
@@ -87,7 +88,7 @@ class SessionStore:
         if not path.exists():
             return None
         try:
-            data = load(__SessionStore_Version__, str(path), History, ignore_missing_fields=True)
+            data = load(__SessionStore_Version__, make_config(path), History, ignore_missing_fields=True)
             if isinstance(data, History):
                 data.remove_unpaired_tool_calls()
                 data.normalize_legacy_tool_results()
@@ -106,7 +107,7 @@ class SessionStore:
         path = self.history_path(session_id)
         path.parent.mkdir(parents=True, exist_ok=True)
         try:
-            save(__SessionStore_Version__, str(path), history)
+            save(__SessionStore_Version__, make_config(path), history)
         except Exception as exc:
             logger.exception("Failed to save history for session %s: %s", session_id, exc)
             raise

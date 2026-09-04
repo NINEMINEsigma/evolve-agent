@@ -642,13 +642,14 @@ class _OrchestratorContext:
 
         if history_path:
             from easysave import load
+            from entity.typeref import make_config
             from entity.messages import History, CharacterConversationMessage, ToolResultMessage
 
             path = Path(history_path)
             # TODO: 不存在应该失败, 实际上不应该静默吞没错误并成功开始
             if path.exists():
                 try:
-                    loaded_history = load(__History_Version__, str(path), History, ignore_missing_fields=True)
+                    loaded_history = load(__History_Version__, make_config(path), History, ignore_missing_fields=True)
                     if isinstance(loaded_history, History):
                         loaded_history.remove_unpaired_tool_calls()
                         loaded_history.normalize_legacy_tool_results()

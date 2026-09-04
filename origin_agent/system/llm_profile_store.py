@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any
 
 from easysave import contains, load, save
+from entity.typeref import make_config
 
 from entity.constant import (
     LLM_PROFILES_ES_FILENAME,
@@ -241,12 +242,12 @@ class LLMProfileStore:
     # ------------------------------------------------------------------
 
     def _load_unlocked(self) -> LLMProfileData:
-        if not contains(LLM_PROFILES_ES_KEY, str(self._path)):
+        if not contains(LLM_PROFILES_ES_KEY, make_config(self._path)):
             return LLMProfileData()
 
         data = load(
             LLM_PROFILES_ES_KEY,
-            str(self._path),
+            make_config(self._path),
             ignore_missing_fields=True,
         )
         if not isinstance(data, LLMProfileData):
@@ -420,7 +421,7 @@ class LLMProfileStore:
                 encoding="utf-8",
             )
             # 必须直接传递 LLMProfileData，保留 easysave 的对象引用图。
-            save(LLM_PROFILES_ES_KEY, str(temp_path), target)
+            save(LLM_PROFILES_ES_KEY, make_config(temp_path), target)
             replace_atomic(temp_path, self._path)
         finally:
             if temp_path.exists():

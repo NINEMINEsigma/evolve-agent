@@ -554,10 +554,11 @@ class SubAgentLoop(BasePrivateChatAgentLoop):
     def save_history(self, session_id: str | Path) -> None:
         """将 History 实例以 easysave 多态序列化写入磁盘。"""
         from easysave import save
+        from entity.typeref import make_config
         path = Path(session_id)
         path.parent.mkdir(parents=True, exist_ok=True)
         try:
-            save(__History_Version__, str(path), self._history)
+            save(__History_Version__, make_config(path), self._history)
         except Exception as exc:
             logger.exception("Failed to save subagent history to %s: %s", path, exc)
             raise

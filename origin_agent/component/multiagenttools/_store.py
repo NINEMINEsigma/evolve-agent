@@ -13,6 +13,7 @@ import logging
 from pathlib import Path
 
 from easysave import save, load
+from entity.typeref import make_config
 
 from entity.constant import (
     SUBAGENT_DIR_NAME,
@@ -63,7 +64,7 @@ class SubagentStore:
         if not path.exists():
             return None
         try:
-            return load(__VERSION__, str(path), AgentConfig)
+            return load(__VERSION__, make_config(path), AgentConfig)
         except (FileNotFoundError, KeyError):
             # 文件不存在或版本 key 不匹配（旧格式）
             return None
@@ -112,7 +113,7 @@ class SubagentStore:
             raise FileExistsError(f"Subagent '{name}' already exists.")
 
         self._subagents_dir().mkdir(parents=True, exist_ok=True)
-        save(__VERSION__, str(path), profile)
+        save(__VERSION__, make_config(path), profile)
         logger.info("Persisted setting for subagent: %s", name)
 
         names = self._read_index()
