@@ -639,57 +639,55 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
             )
 
     async def run_pending_round(self, items: list[QueuedMessage]) -> str | None:
-        """按队列中单条消息的 Profile 名称驱动一轮。"""
+        """SP-4：队列空闲消费驱动的轮次（S1 分支序）。
+
+        持锁 → 置 _processing → 超限检查（旋转随动）→ sid 变更检测 →
+        cancel 检测 → 注入落历史 → 无 LLM 闸 → llm_profile_name 应用 →
+        非旋转非中断时跑轮 → finally 复位 → 锁外 on_round_done 回调。
+        """
         if not items:
             return None
-        if len(items) != 1:
-            raise ValueError("run_pending_round accepts exactly one queued message")
-
-        item = items[0]
         async with self._process_lock:
+            self._processing = True
             self._event_loop = asyncio.get_running_loop()
             reply: str | None = None
-
-            # 每条显式消息执行前重新从共享根对象解析并构造客户端。
-            if item.llm_profile_name is not None:
-                try:
-                    profile = self.app.llm_profile_store.resolve_profile_name(
-                        item.llm_profile_name,
-                    )
-                    self.set_profile(profile)
-                except (LookupError, ValueError, RuntimeError) as exc:
-                    error_text = f"LLM Profile 切换失败：{exc}"
-                    logger.warning(
-                        "Queued message Profile selection failed | session=%s name=%r error=%s",
-                        self.session_id, item.llm_profile_name, exc,
-                    )
-                    self.append_system_status(error_text, session_id=self.session_id)
-                    await self._frontend_sink.emit_system_message(
-                        self.session_id, error_text,
-                    )
-                    return None
-
-            if self._llm is None:
-                error_text = "尚未配置 LLM 模型。请在前端「模型配置」中新建或选择一个配置后重试。"
-                self.append_system_status(error_text, session_id=self.session_id)
-                await self._frontend_sink.emit_system_message(
-                    self.session_id, error_text,
-                )
-                return None
-
-            self._processing = True
             try:
                 sid = await self._check_over_limit_before_process(self.session_id, None)
                 self.session_id = sid
                 queue = self._message_queue
-                rotated = queue.last_known_sid != sid
-                interrupted = self._cancel_event.is_set()
+                rotated: bool = queue.last_known_sid != sid
+                interrupted: bool = self._cancel_event.is_set()
                 self._cancel_event.clear()
                 self._disgust_event.clear()
-                if not rotated and not interrupted:
-                    await self._append_queued_messages(items)
+                await self._append_queued_messages(items)
+                should_run: bool = not rotated and not interrupted
+                # 取最后一条非 None 的 llm_profile_name；None 表示沿用当前配置（内部消息）。
+                selected_name = next(
+                    (m.llm_profile_name for m in reversed(items) if m.llm_profile_name is not None), None,
+                )
+                if should_run and self._llm is None and selected_name is None:
+                    err_text = "尚未配置 LLM 模型。请在前端「模型配置」中新建或选择一个配置后重试。"
+                    self.append_system_status(err_text, session_id=sid)
+                    await self._frontend_sink.emit_system_message(sid, err_text)
+                    should_run = False
+                if should_run and selected_name is not None:
+                    try:
+                        profile = self.app.llm_profile_store.resolve_profile_name(
+                            selected_name,
+                        )
+                        self.set_profile(profile)
+                    except (LookupError, ValueError, RuntimeError) as exc:
+                        err_text = f"LLM Profile 切换失败：{exc}"
+                        logger.warning(
+                            "Queued message Profile selection failed | session=%s name=%r error=%s",
+                            sid, selected_name, exc,
+                        )
+                        self.append_system_status(err_text, session_id=sid)
+                        await self._frontend_sink.emit_system_message(sid, err_text)
+                        should_run = False
+                if should_run:
                     messages = self._get_full_history(sid)
-                    reply = await self._run_tool_loop(sid, messages, "[queued-message]")
+                    reply = await self._run_tool_loop(sid, messages, "[queued-messages]")
                 if reply:
                     await self._frontend_sink.emit_assistant_message(
                         sid, reply, self.current_character_agent,

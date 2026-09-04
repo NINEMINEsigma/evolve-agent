@@ -509,25 +509,7 @@ class MultiAgentLoop(BaseAgentLoop, IMainSessionLoop):
         """
         if not items:
             return None
-        if len(items) != 1:
-            raise ValueError("run_pending_round accepts exactly one queued message")
-        item = items[0]
         async with self._process_lock:
-            if item.llm_profile_name is not None:
-                try:
-                    selected = self.app.llm_profile_store.resolve_profile_name(
-                        item.llm_profile_name,
-                    )
-                    self.set_profile(selected)
-                except (LookupError, ValueError, RuntimeError) as exc:
-                    logger.warning(
-                        "Queued multi-agent Profile selection failed | session=%s name=%r error=%s",
-                        self.session_id, item.llm_profile_name, exc,
-                    )
-                    await self._sink.emit_system_message(
-                        self.session_id, f"LLM Profile 切换失败：{exc}",
-                    )
-                    return None
             self._processing = True
             try:
                 sid = self.session_id
@@ -540,6 +522,25 @@ class MultiAgentLoop(BaseAgentLoop, IMainSessionLoop):
                 self._history.remove_unpaired_tool_calls()
                 self.save_history(self.session_id)
                 await self._append_queued_messages(items)
+                # 取最后一条非 None 的 llm_profile_name；None 表示沿用当前配置（内部消息）。
+                selected_name = next(
+                    (m.llm_profile_name for m in reversed(items) if m.llm_profile_name is not None), None,
+                )
+                if selected_name is not None:
+                    try:
+                        selected = self.app.llm_profile_store.resolve_profile_name(
+                            selected_name,
+                        )
+                        self.set_profile(selected)
+                    except (LookupError, ValueError, RuntimeError) as exc:
+                        logger.warning(
+                            "Queued multi-agent Profile selection failed | session=%s name=%r error=%s",
+                            sid, selected_name, exc,
+                        )
+                        await self._sink.emit_system_message(
+                            sid, f"LLM Profile 切换失败：{exc}",
+                        )
+                        return None
                 if not rotated and not interrupted:
                     # SP-5 D1/R3：取最后一个非 None response_characters
                     selected_response = next(

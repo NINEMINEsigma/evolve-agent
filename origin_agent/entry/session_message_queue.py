@@ -1,7 +1,10 @@
 """会话级消息队列（SP-4）。
 
-每个主会话 Loop 持有一个实例；消息逐条 FIFO 消费，当前工具轮期间到达的消息
-保留到后续轮次，不再通过 ``drain_injected`` 提前移出队列。
+每主会话 loop 持有一个实例：生产永不阻塞、消费双模态、事件驱动无周期计时器。
+
+线程模型：``_pending`` 的一切变更只发生在事件循环线程——``push`` 从任意线程进来，
+经 ``call_soon_threadsafe`` 落到事件循环后才入队；``drain_injected`` 由 finalize 触发，
+天然运行在该 loop 的轮次协程（即事件循环线程）。无需任何锁。
 """
 
 from __future__ import annotations
@@ -11,7 +14,7 @@ import logging
 import time
 from collections import deque
 from datetime import datetime
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from entity.constant import SYSTEM_CHARACTER_NAME
 from entity.puretype import MessageContent, QueuedMessage
@@ -82,9 +85,8 @@ class SessionMessageQueue:
         self,
         item: QueuedMessage,
     ) -> None:
-        """事件循环线程内的入队 + 唤醒。"""
-        with self._loop.loop.app.profile_lock:
-            self._pending.append(item)
+        """事件循环线程内的入队 + 唤醒（无回显——回显移到消费侧）。"""
+        self._pending.append(item)
 
         self._ensure_consumer()
         if self._wakeup is not None:
@@ -104,15 +106,17 @@ class SessionMessageQueue:
     # -- 消费循环（模态 B：空闲消费）----------------------------------------
 
     async def _consume_loop(self) -> None:
-        """按 FIFO 每次只处理一条消息。"""
+        """空闲消费循环：单唤醒源（仅 push）+ run_pending_round 内部锁排队（D4）。
+
+        PM2：无兜底 try/except，异常经 done_callback 观测后上抛终止 task。
+        """
         while not self._stopped:
             self._wakeup.clear()
-            while not self._stopped:
-                with self._loop.loop.app.profile_lock:
-                    if not self._pending:
-                        break
-                    item = self._pending.popleft()
-                await self._loop.run_pending_round([item])
+            while not self._stopped and self._pending:
+                items: list[QueuedMessage] = []
+                while self._pending:
+                    items.append(self._pending.popleft())
+                await self._loop.run_pending_round(items)
             await self._wakeup.wait()
 
     def _on_consumer_done(self, task: asyncio.Task) -> None:
@@ -132,8 +136,44 @@ class SessionMessageQueue:
     # -- 模态 A：链中注入（由 finalize_tool_result 的 field_injector 调用）----
 
     def drain_injected(self, result: dict) -> dict | None:
-        """保留当前工具轮期间到达的消息，等待后续 FIFO 轮次处理。"""
-        return None
+        """排空队列并注入 ``queued_messages`` 结构化字段（SP-5 bugfix 修订）。
+
+        PM5 结构性不丢消息：先只读快照 + 构造产物（可抛——P1 上抛给 finalize
+        既有 try/except willing catcher），构造成功后才从 deque 移除；构造异常时
+        deque 未动，消息滞留队列等下轮消费。
+
+        SP-5 bugfix：从 _blocks 就地展开改为 queued_messages 结构化字段——
+        工具结果 content 保持为合法 JSON dict，content_to_text 展平后前端可 json.loads。
+        """
+        if not self._pending:
+            return None
+        items = list(self._pending)                  # 只读快照
+        messages = self._build_queued_messages(items)  # 构造可抛——deque 未动
+        for _ in range(len(items)):
+            self._pending.popleft()                  # 构造成功后移除（事件循环单线程，快照即队首）
+        existing = result.get("queued_messages")
+        merged: list = list(existing) if isinstance(existing, list) else []
+        merged.extend(messages)
+        return {"queued_messages": merged}
+
+    def _build_queued_messages(self, items: list[QueuedMessage]) -> list[dict]:
+        """构造 queued_messages 字段值：每条消息为嵌套结构化 dict。"""
+        messages: list[dict] = []
+        for m in items:
+            content: Any = m.content
+            # content 为块列表时保持原始 dict 形式（不扁平化）
+            if isinstance(m.content, list):
+                content = [b for b in m.content if isinstance(b, dict)]
+            messages.append({
+                "queued_message": {
+                    "role": "user",
+                    "character_name": m.character_name,
+                    "source": m.source,
+                    "timestamp": m.timestamp,
+                    "content": content,
+                }
+            })
+        return messages
 
     # -- 生命周期 ---------------------------------------------------------
 

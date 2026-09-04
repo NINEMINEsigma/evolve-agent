@@ -260,9 +260,14 @@ async def preprocess_multimodal_blocks(
     遍历 messages 中的 ImageBlock/AudioBlock/VideoBlock：
     - 查缓存 → 有缓存直接判断
     - 无缓存 → 自动探查（ensure_modality_capability）
-    - tool 或 user 支持 → 原样发送
-    - 都不支持 → 优先用 forward_result_content；无则转发借用并写入 forward_result_content
+    - tool 消息（role=tool）只看 tool 路径能力（vision/audio/video）
+    - user/其他消息只看 user 路径能力（user_vision/user_audio/user_video）
+    - 对应路径不支持 → 优先用 forward_result_content；无则转发借用并写入 forward_result_content
       用特殊标签包裹描述后替换该块为 TextBlock（临时 messages 列表，不改持久化历史）
+
+    注意：不能对 tool 和 user 能力做 OR 合并——某模型可能 user_vision=True
+    但 vision=False（tool 消息不支持图片），此时 tool 消息中的 ImageBlock
+    必须被转发替换，否则 provider 会返回 400 错误。
 
     遇到探查非模态错误时向上抛出异常，由调用方的 except 分支处理。
 
@@ -303,15 +308,22 @@ async def preprocess_multimodal_blocks(
             result_messages.append(msg)
             continue
 
+        # tool 消息和 user 消息使用不同的能力字段：
+        # tool 消息只看 vision/audio/video，user 消息只看 user_vision/user_audio/user_video。
+        is_tool_msg = msg.role == Role.TOOL
+        image_supported = capability.vision if is_tool_msg else capability.user_vision
+        audio_supported = capability.audio if is_tool_msg else capability.user_audio
+        video_supported = capability.video if is_tool_msg else capability.user_video
+
         new_blocks: list[MessageBlock] = []
         blocks_replaced = False
         for block in content:
             if isinstance(block, ImageBlock):
-                if capability.vision or capability.user_vision:
+                if image_supported:
                     # 支持 → 原样保留
                     new_blocks.append(block)
                 else:
-                    # 都不支持
+                    # 不支持
                     description = await _forward_unsupported_block(
                         context, profile, block,
                         "image",
@@ -325,11 +337,11 @@ async def preprocess_multimodal_blocks(
                         # 非 data URL 跳过转发，保留原块
                         new_blocks.append(block)
             elif isinstance(block, AudioBlock):
-                if capability.audio or capability.user_audio:
+                if audio_supported:
                     # 支持 → 原样保留
                     new_blocks.append(block)
                 else:
-                    # 都不支持
+                    # 不支持
                     description = await _forward_unsupported_block(
                         context, profile, block,
                         "audio",
@@ -343,11 +355,11 @@ async def preprocess_multimodal_blocks(
                         # 非 data URL 跳过转发，保留原块
                         new_blocks.append(block)
             elif isinstance(block, VideoBlock):
-                if capability.video or capability.user_video:
+                if video_supported:
                     # 支持 → 原样保留
                     new_blocks.append(block)
                 else:
-                    # 都不支持
+                    # 不支持
                     description = await _forward_unsupported_block(
                         context, profile, block,
                         "video",
