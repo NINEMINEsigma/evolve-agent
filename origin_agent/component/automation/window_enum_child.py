@@ -250,5 +250,4 @@ Calls `EnumChildWindows` to list all direct child windows of the given `hwnd`. R
         },
     },
     handler=_handle_window_enum_child,
-    emoji="📋",
 )

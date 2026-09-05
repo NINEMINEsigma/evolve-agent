@@ -178,7 +178,6 @@ Replaces all messages before the kept rounds with your summary. This is irrevers
     },
     handler=_handle_compress_history,
     is_async=True,
-    emoji="🗜️",
     danger_level=ToolDangerLevel.critical,
     availability=ToolAvailability.MAIN,
 )

@@ -162,6 +162,5 @@ The path can be passed directly as the path argument of BrowserClick / BrowserTy
     handler=_handle_browser_query,
     check_fn=_connection.playwright_available,
     is_async=True,
-    emoji="🔎",
     danger_level=ToolDangerLevel.safe,
 )

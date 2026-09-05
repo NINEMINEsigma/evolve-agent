@@ -174,7 +174,6 @@ Frontend UI only. Does not write to the system clipboard. Reusing the same `disp
     },
     handler=_handle_set_clipboard_display,
     is_async=True,
-    emoji="📋",
     danger_level=ToolDangerLevel.safe,
     availability=ToolAvailability.MAIN | ToolAvailability.MULTI_AGENT,
 )
@@ -218,7 +217,6 @@ Proactively call this tool when you sense the user no longer needs a card, to ke
     },
     handler=_handle_clear_clipboard_display,
     is_async=True,
-    emoji="🧹",
     danger_level=ToolDangerLevel.safe,
     availability=ToolAvailability.MAIN | ToolAvailability.MULTI_AGENT,
 )

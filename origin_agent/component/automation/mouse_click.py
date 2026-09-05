@@ -247,5 +247,4 @@ Uses `PostMessage` to send mouse click messages directly to the target window. T
     },
     handler=_handle_mouse_click,
     check_fn=_check_pyautogui,
-    emoji="🖱️",
 )

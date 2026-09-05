@@ -360,5 +360,4 @@ Optional `roi` parameter limits the search area to `[x, y, w, h]` within the sou
     },
     handler=_handle_template_match,
     check_fn=_check_cv2,
-    emoji="🎯",
 )

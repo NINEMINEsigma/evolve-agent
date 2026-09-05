@@ -1029,7 +1029,6 @@ Schedules the task to run once at a future time. After execution, a [cron-result
     },
     handler=_handle_schedule_cron,
     is_async=True,
-    emoji="⏰",
     danger_level=ToolDangerLevel.dangerous,
 )
 
@@ -1082,7 +1081,6 @@ Returns metadata for all cron jobs in the current session, including schedule in
     },
     handler=_handle_list_cron_jobs,
     is_async=True,
-    emoji="📋",
     danger_level=ToolDangerLevel.safe,
 )
 
@@ -1145,7 +1143,6 @@ Stops future scheduling for the task, removes its record, and suppresses notific
     },
     handler=_handle_cancel_cron_job,
     is_async=True,
-    emoji="🗑",
     danger_level=ToolDangerLevel.safe,
 )
 
@@ -1208,7 +1205,6 @@ Runs the task once immediately in a new thread. The regular schedule is not affe
     },
     handler=_handle_run_cron_job_now,
     is_async=True,
-    emoji="▶",
     danger_level=ToolDangerLevel.dangerous,
 )
 
@@ -1272,7 +1268,6 @@ Copies schedule, command, cwd, and other parameters from the source task, create
     },
     handler=_handle_reschedule_cron_job,
     is_async=True,
-    emoji="🔁",
     danger_level=ToolDangerLevel.dangerous,
 )
 
@@ -1343,6 +1338,5 @@ Waits non-blockingly for the specified number of seconds, then sends a [cron-res
     },
     handler=_handle_wait_cron,
     is_async=True,
-    emoji="⏳",
     danger_level=ToolDangerLevel.safe,
 )

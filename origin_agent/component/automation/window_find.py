@@ -226,5 +226,4 @@ Inspect the `matches` array to pick the correct window by its full title, then p
         },
     },
     handler=_handle_window_find,
-    emoji="🔍",
 )

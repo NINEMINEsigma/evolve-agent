@@ -455,7 +455,6 @@ Resolves sandbox logical paths in the command, then launches the subprocess in t
     },
     handler=_handle_start_background_service,
     is_async=True,
-    emoji="🔄",
     danger_level=ToolDangerLevel.dangerous,
     availability=ToolAvailability.MAIN | ToolAvailability.MULTI_AGENT,
 )
@@ -538,7 +537,6 @@ For watching-type tasks, an additional remaining_buffer field is included:
     },
     handler=_handle_stop_background_service,
     is_async=True,
-    emoji="⏹",
     availability=ToolAvailability.MAIN | ToolAvailability.MULTI_AGENT,
 )
 
@@ -842,7 +840,6 @@ You will receive output automatically via [dynamic-endpoint] messages — no pol
     },
     handler=_handle_start_watching_service,
     is_async=True,
-    emoji="👀",
     danger_level=ToolDangerLevel.dangerous,
     availability=ToolAvailability.MAIN | ToolAvailability.MULTI_AGENT,
 )

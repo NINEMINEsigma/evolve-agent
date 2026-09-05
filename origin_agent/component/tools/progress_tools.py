@@ -208,7 +208,6 @@ Creates or updates a progress bar identified by `task_id`. Reusing the same `tas
     },
     handler=_handle_set_task_progress,
     is_async=True,
-    emoji="📊",
     danger_level=ToolDangerLevel.safe,
     availability=ToolAvailability.MAIN | ToolAvailability.MULTI_AGENT,
 )
@@ -276,7 +275,6 @@ If `task_id` is provided and non-empty, removes only that specific bar. If omitt
     },
     handler=_handle_clear_task_progress,
     is_async=True,
-    emoji="🧹",
     danger_level=ToolDangerLevel.safe,
     availability=ToolAvailability.MAIN | ToolAvailability.MULTI_AGENT,
 )

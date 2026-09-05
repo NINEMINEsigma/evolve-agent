@@ -380,7 +380,6 @@ Generates a unified diff with origin_agent as the baseline and fast_agent_space 
         **_COMMON_SCHEMA,
     },
     handler=_handle_diff_origin_fast,
-    emoji="🔍",
 )
 
 registry.register(
@@ -433,5 +432,4 @@ Generates a unified diff between fast_agent_space and fork. After writing evolve
         **_COMMON_SCHEMA,
     },
     handler=_handle_diff_fast_fork,
-    emoji="🔁",
 )

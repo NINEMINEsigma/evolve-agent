@@ -172,7 +172,7 @@ export default function MessageBody({ message, streaming, onImageClick }: Messag
           }
           return (
             <div className="tool-args-raw-stream">
-              <span className="tool-args-raw-label">{m.emoji || "⚡"} {m.toolName} 正在生成参数…</span>
+              <span className="tool-args-raw-label">⚡ {m.toolName} 正在生成参数…</span>
               <pre className="tool-args-raw-content">{raw}</pre>
             </div>
           );

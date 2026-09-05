@@ -128,6 +128,5 @@ registry.register(
     handler=_handle_browser_wait,
     check_fn=_connection.playwright_available,
     is_async=True,
-    emoji="⏳",
     danger_level=ToolDangerLevel.safe,
 )

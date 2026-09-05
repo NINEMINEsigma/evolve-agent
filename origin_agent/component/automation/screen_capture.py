@@ -275,5 +275,4 @@ The `path` is a sandbox logical path (ws: namespace). Use it with `TemplateMatch
         },
     },
     handler=_handle_screen_capture,
-    emoji="📸",
 )

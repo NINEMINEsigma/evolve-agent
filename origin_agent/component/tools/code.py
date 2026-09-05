@@ -163,7 +163,6 @@ Evolution workflow step 2 — call after writing evolved code via `Write`/`Patch
         },
     },
     handler=_handle_validate_code,
-    emoji="✅",
 )
 
 
@@ -226,5 +225,4 @@ On success, the current agent process exits. The success response is never seen 
         },
     },
     handler=_handle_evolve_code,
-    emoji="🚀",
 )

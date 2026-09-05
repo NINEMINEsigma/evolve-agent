@@ -422,5 +422,4 @@ The window can be obscured or in the background — no foreground focus needed.
     },
     handler=_handle_keyboard_type,
     check_fn=_check_pyautogui,
-    emoji="⌨️",
 )

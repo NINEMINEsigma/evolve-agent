@@ -307,5 +307,4 @@ Uses `PostMessage` to send a sequence of `WM_LBUTTONDOWN` → `WM_MOUSEMOVE` × 
     },
     handler=_handle_mouse_drag,
     check_fn=_check_pyautogui,
-    emoji="🖱️",
 )

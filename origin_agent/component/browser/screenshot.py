@@ -131,6 +131,5 @@ Tab location follows the same rules as BrowserScreenshot (0-based index, or URL/
     handler=_handle_browser_screenshot,
     check_fn=_connection.playwright_available,
     is_async=True,
-    emoji="📸",
     danger_level=ToolDangerLevel.write,
 )

@@ -174,5 +174,4 @@ Restores the window (if minimized/maximized) and brings it to the foreground usi
         },
     },
     handler=_handle_window_focus,
-    emoji="🪟",
 )

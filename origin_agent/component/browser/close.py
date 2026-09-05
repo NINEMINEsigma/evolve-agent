@@ -97,6 +97,5 @@ registry.register(
     handler=_handle_browser_close,
     check_fn=_connection.playwright_available,
     is_async=True,
-    emoji="🔒",
     danger_level=ToolDangerLevel.safe,
 )

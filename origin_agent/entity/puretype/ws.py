@@ -76,7 +76,6 @@ class Message(BaseModel):
     message_suffix: str | None = None  # 用户消息固定后缀（如 fixator 上下文）
     dynamic_message_suffix: str | None = None  # 用户消息动态后缀（如 memory/hooks 上下文）
     tool_call_meta: dict[str, Any] | None = None  # TOOL_RESULT：工具调用时间元信息
-    emoji: str | None = None  # 工具调用/审批请求的图标
     danger_level: str | None = None  # CONFIRM_REQUEST：工具危险等级
     client_info: dict[str, Any] | None = None  # USER_MESSAGE：前端携带的客户端信息
     # USER_MESSAGE/重新生成：前端当前选择的 Profile 名称；空字符串表示无配置。

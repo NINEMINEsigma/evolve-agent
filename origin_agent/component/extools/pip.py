@@ -155,6 +155,5 @@ Runs pip install to install the specified packages. Set upgrade=true to upgrade 
     },
     handler=_handle_install_package,
     is_async=True,
-    emoji="f4e6",
     danger_level=ToolDangerLevel.dangerous,
 )

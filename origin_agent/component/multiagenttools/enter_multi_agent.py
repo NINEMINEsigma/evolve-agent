@@ -262,5 +262,4 @@ registry.register(
     },
     handler=_handle_enter_multi_agent,
     is_async=True,
-    emoji="👥",
 )

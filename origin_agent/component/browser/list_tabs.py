@@ -94,6 +94,5 @@ Flattens tabs across all browser windows, numbered 0-based in enumeration order.
     handler=_handle_browser_list_tabs,
     check_fn=_connection.playwright_available,
     is_async=True,
-    emoji="📑",
     danger_level=ToolDangerLevel.write,
 )

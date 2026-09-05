@@ -44,7 +44,6 @@ class ToolEntry:
         "requires_env",
         "is_async",
         "description",
-        "emoji",
         "max_result_size_chars",
         "dynamic_schema_overrides",
         "danger_level",
@@ -63,7 +62,6 @@ class ToolEntry:
         requires_env: list[str] | None = None,
         is_async: bool = False,
         description: str = "",
-        emoji: str = "",
         max_result_size_chars: int | None = None,
         dynamic_schema_overrides: Callable | None = None,
         danger_level: ToolDangerLevel = ToolDangerLevel.safe,
@@ -79,7 +77,6 @@ class ToolEntry:
         self.requires_env: list[str] = requires_env or []
         self.is_async: bool = is_async
         self.description: str = description
-        self.emoji: str = emoji
         self.max_result_size_chars: int | None = max_result_size_chars
         # 可选的零参数可调用对象，返回 schema 覆盖字典，
         # 在 get_definitions() 时应用。用于依赖运行时配置的字段。
@@ -293,11 +290,6 @@ class ToolRegistry:
             result.append({"type": "function", "function": schema_with_name})
         return result
 
-    def get_emoji(self, name: str, default: str = "⚡") -> str:
-        """返回工具的 emoji，未设置时返回 *default*。"""
-        entry: ToolEntry | None = self.get_entry(name)
-        return entry.emoji if entry and entry.emoji else default
-
     def get_danger_level(self, name: str) -> ToolDangerLevel:
         """返回工具的危险等级，未注册时返回 ``ToolDangerLevel.safe``。"""
         entry: ToolEntry | None = self.get_entry(name)
@@ -367,7 +359,6 @@ class ToolRegistry:
         requires_env: list[str] | None = None,
         is_async: bool = False,
         description: str = "",
-        emoji: str = "",
         max_result_size_chars: int | None = None,
         dynamic_schema_overrides: Callable | None = None,
         override: bool = False,
@@ -423,7 +414,6 @@ class ToolRegistry:
                 requires_env=requires_env or [],
                 is_async=is_async,
                 description=description or schema.get("description", ""),
-                emoji=emoji,
                 max_result_size_chars=max_result_size_chars,
                 dynamic_schema_overrides=dynamic_schema_overrides,
                 danger_level=danger_level,

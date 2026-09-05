@@ -272,7 +272,6 @@ Skills are shared knowledge artifacts, not personal expression. Write all skill 
         },
     },
     handler=_handle_learn_skill,
-    emoji="🧠",
 )
 
 
@@ -347,7 +346,6 @@ Load branch:
         },
     },
     handler=_handle_recall_skill,
-    emoji="🔍",
 )
 
 

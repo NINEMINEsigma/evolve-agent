@@ -174,6 +174,5 @@ The visible set depends on the current loop type (parent / sub-agent / colloquy 
         },
     },
     handler=_handle_show_tool,
-    emoji="🔍",
     danger_level=ToolDangerLevel.safe,
 )

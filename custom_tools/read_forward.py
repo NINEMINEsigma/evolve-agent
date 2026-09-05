@@ -293,7 +293,6 @@ On error: {"error": "..."}.
         },
     },
     handler=_handle_read_forward,
-    emoji="🔄",
     no_timeout=True,
     is_async=True,
     danger_level=ToolDangerLevel.safe,

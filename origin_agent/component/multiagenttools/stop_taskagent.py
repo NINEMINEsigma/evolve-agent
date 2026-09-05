@@ -102,7 +102,6 @@ On failure:
     },
     handler=_handle_stop_taskagent,
     is_async=True,
-    emoji="🛑",
     danger_level=ToolDangerLevel.safe,
     availability=ToolAvailability.MAIN,
 )

@@ -49,7 +49,7 @@ export default function InputMorph({
   const header =
     item.kind === "ask"
       ? `❓ ${item.ask.question}`
-      : `${item.confirm.emoji ?? "⚡"} ${getToolTitle(item.confirm.tool)}`;
+      : `⚡ ${getToolTitle(item.confirm.tool)}`;
 
   // confirm 参数：剔除 reason 后供 JsonView 渲染（reason 已在独立行展示，避免重复）
   const confirmArgs = item.kind === "confirm"

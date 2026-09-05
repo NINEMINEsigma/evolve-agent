@@ -183,7 +183,6 @@ export interface WSMessage {
   index?: number;
   client_message_id?: string;
   tool_call_meta?: ToolCallMeta;   // TOOL_RESULT：工具调用时间元信息
-  emoji?: string;                  // 工具调用/审批请求的图标
   danger_level?: string;           // CONFIRM_REQUEST：工具危险等级
   client_info?: Record<string, string>;   // USER_MESSAGE：前端客户端信息
   llm_profile_name?: string;                   // USER_MESSAGE：当前 Profile 名称，空字符串=无配置
@@ -219,7 +218,6 @@ export interface ConfirmRequest {
   command?: string[];
   reason?: string;
   tool?: string;
-  emoji?: string;
   danger_level?: string;
   args?: Record<string, unknown>;   // CONFIRM_REQUEST：完整工具参数 dict（JsonView 渲染用）
 }
@@ -300,7 +298,6 @@ export interface ChatMessage {
   messageSuffix?: string;
   dynamicMessageSuffix?: string;
   toolCallMeta?: ToolCallMeta;   // 工具调用时间元信息
-  emoji?: string;                  // 工具调用/审批请求的图标
   isError?: boolean;               // 工具结果是否为错误
   isSystemStatus?: boolean;        // 系统状态消息（对 LLM 不可见，仅前端展示）
 }
@@ -346,7 +343,6 @@ export interface SubagentMessage {
   tool_args?: Record<string, unknown>;
   reasoning?: string;
   character_name?: string;
-  emoji?: string;
 }
 
 export interface SubagentSession {

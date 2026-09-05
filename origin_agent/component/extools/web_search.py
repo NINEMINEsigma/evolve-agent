@@ -314,5 +314,4 @@ Tries DuckDuckGo Lite first, then falls back to Bing on failure. max_results is 
         },
     },
     handler=_handle_web_search,
-    emoji="🔍",
 )

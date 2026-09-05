@@ -207,7 +207,6 @@ Error:
         },
     },
     handler=_handle_lsp_start,
-    emoji="🔍",
     danger_level=ToolDangerLevel.write,
     availability=ToolAvailability.EVERY,
 )
@@ -271,7 +270,6 @@ Read-only query. Sends `textDocument/references` to pyright. Returns all locatio
     },
     handler=_handle_lsp_references,
     is_async=True,
-    emoji="📎",
     availability=ToolAvailability.EVERY,
 )
 
@@ -334,7 +332,6 @@ Not found:
     },
     handler=_handle_lsp_definition,
     is_async=True,
-    emoji="🎯",
     availability=ToolAvailability.EVERY,
 )
 
@@ -387,7 +384,6 @@ Read-only query. Returns the latest cached diagnostics from pyright for the spec
     },
     handler=_handle_lsp_diagnostics,
     is_async=True,
-    emoji="🔬",
     availability=ToolAvailability.EVERY,
 )
 
@@ -442,7 +438,6 @@ Read-only query. Sends `textDocument/documentSymbol` to pyright. Returns the sym
     },
     handler=_handle_lsp_symbols,
     is_async=True,
-    emoji="🧩",
     availability=ToolAvailability.EVERY,
 )
 
@@ -494,6 +489,5 @@ Workspace refresh:
     },
     handler=_handle_lsp_refresh,
     is_async=True,
-    emoji="🔄",
     availability=ToolAvailability.EVERY,
 )

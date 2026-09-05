@@ -145,11 +145,10 @@ export function subagentFeedbackToChatMessages(session: SubagentSession): ChatMe
         const argsStr = msg.tool_args ? `(${JSON.stringify(msg.tool_args)})` : "()";
         messages.push({
           role: "tool",
-          content: `${msg.emoji || "⚡"} ${toolName}${argsStr}`,
+          content: `⚡ ${toolName}${argsStr}`,
           id,
           toolName,
           toolArgs: msg.tool_args,
-          emoji: msg.emoji,
         });
         break;
       }

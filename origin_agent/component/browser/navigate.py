@@ -184,7 +184,6 @@ registry.register(
     handler=_handle_browser_goto,
     check_fn=_connection.playwright_available,
     is_async=True,
-    emoji="🧭",
     danger_level=ToolDangerLevel.safe,
 )
 
@@ -208,7 +207,6 @@ registry.register(
     handler=_handle_browser_refresh,
     check_fn=_connection.playwright_available,
     is_async=True,
-    emoji="🔄",
     danger_level=ToolDangerLevel.safe,
 )
 
@@ -232,7 +230,6 @@ registry.register(
     handler=_handle_browser_back,
     check_fn=_connection.playwright_available,
     is_async=True,
-    emoji="⬅️",
     danger_level=ToolDangerLevel.safe,
 )
 
@@ -256,6 +253,5 @@ registry.register(
     handler=_handle_browser_forward,
     check_fn=_connection.playwright_available,
     is_async=True,
-    emoji="➡️",
     danger_level=ToolDangerLevel.safe,
 )

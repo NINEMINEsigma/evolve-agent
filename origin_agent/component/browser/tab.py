@@ -148,7 +148,6 @@ The new tab's index can be queried afterwards with BrowserListTabs.""",
     handler=_handle_browser_open_tab,
     check_fn=_connection.playwright_available,
     is_async=True,
-    emoji="➕",
     danger_level=ToolDangerLevel.safe,
 )
 
@@ -173,7 +172,6 @@ registry.register(
     handler=_handle_browser_activate_tab,
     check_fn=_connection.playwright_available,
     is_async=True,
-    emoji="🪟",
     danger_level=ToolDangerLevel.safe,
 )
 
@@ -204,6 +202,5 @@ registry.register(
     handler=_handle_browser_close_tab,
     check_fn=_connection.playwright_available,
     is_async=True,
-    emoji="🗑️",
     danger_level=ToolDangerLevel.safe,
 )

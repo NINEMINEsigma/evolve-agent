@@ -115,7 +115,6 @@ After receiving history_path, you MUST proactively ask the user whether to persi
     },
     handler=_handle_stop_subagent,
     is_async=True,
-    emoji="🛑",
     danger_level=ToolDangerLevel.safe,
     availability=ToolAvailability.MAIN,
 )

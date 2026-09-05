@@ -477,7 +477,6 @@ Loading a session's history may cause a brief delay.
     },
     handler=_handle_read_session,
     is_async=False,
-    emoji="📖",
     danger_level=ToolDangerLevel.safe,
     availability=ToolAvailability.MAIN | ToolAvailability.MULTI_AGENT,
 )
@@ -598,7 +597,6 @@ None.
     },
     handler=_handle_recall_session,
     is_async=True,
-    emoji="🔎",
     danger_level=ToolDangerLevel.safe,
     availability=ToolAvailability.MAIN | ToolAvailability.MULTI_AGENT,
 )

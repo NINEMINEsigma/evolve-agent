@@ -142,5 +142,4 @@ registry.register(
     },
     handler=_handle_exit_multi_agent,
     is_async=True,
-    emoji="🚪",
 )

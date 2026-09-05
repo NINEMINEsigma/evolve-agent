@@ -993,7 +993,6 @@ Video branch (user-message fallback path):
         },
     },
     handler=_handle_read,
-    emoji="📖",
     no_timeout=True,
     is_async=True,
 )
@@ -1119,7 +1118,6 @@ Directory creation (content omitted):
         },
     },
     handler=_handle_write,
-    emoji="✏️",
     danger_level=ToolDangerLevel.write,
 )
 
@@ -1179,7 +1177,6 @@ Deletes each specified path. File branch deletes a single file; directory branch
         "parameters": _param_paths("files or directories to delete"),
     },
     handler=_handle_delete,
-    emoji="🗑️",
     danger_level=ToolDangerLevel.write,
 )
 
@@ -1491,7 +1488,6 @@ Errors:
         },
     },
     handler=_handle_edit,
-    emoji="✂️",
     danger_level=ToolDangerLevel.write,
 )
 
@@ -1604,7 +1600,6 @@ Copies the source file/directory to the destination path. File branch overwrites
         },
     },
     handler=_handle_copy,
-    emoji="📋",
     danger_level=ToolDangerLevel.write,
 )
 
@@ -1709,7 +1704,6 @@ Moves a file or directory to the destination path. If the destination includes a
         },
     },
     handler=_handle_move,
-    emoji="🚚",
     danger_level=ToolDangerLevel.write,
 )
 
@@ -1852,7 +1846,6 @@ When results exceed the limit:
         },
     },
     handler=_handle_search_files,
-    emoji="🔍",
 )
 
 
@@ -2088,6 +2081,5 @@ When results exceed the limit:
         },
     },
     handler=_handle_grep,
-    emoji="🔎",
 )
 

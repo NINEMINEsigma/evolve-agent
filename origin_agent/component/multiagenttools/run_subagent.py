@@ -222,7 +222,6 @@ When queued:
     },
     handler=_handle_run_subagent,
     is_async=True,
-    emoji="🚀",
     danger_level=ToolDangerLevel.safe,
     availability=ToolAvailability.MAIN,
 )

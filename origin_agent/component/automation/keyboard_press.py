@@ -352,5 +352,4 @@ Uses `pyautogui` to simulate keystrokes. If `key` contains `+`, it is treated as
     },
     handler=_handle_keyboard_press,
     check_fn=_check_pyautogui,
-    emoji="🔑",
 )

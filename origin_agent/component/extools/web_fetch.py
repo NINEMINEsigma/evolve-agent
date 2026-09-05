@@ -209,5 +209,4 @@ Oversized:
         },
     },
     handler=_handle_web_fetch,
-    emoji="🌐",
 )

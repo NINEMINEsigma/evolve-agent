@@ -309,7 +309,6 @@ class FrontendSink(AgentSink):
                 tool=tool_name,
                 args=display_args,
                 content=content,
-                emoji=registry.get_emoji(tool_name),
                 danger_level=str(registry.get_danger_level(tool_name).value),
             )
             await ws.send_text(json.dumps(msg.model_dump(exclude_none=True), ensure_ascii=False))
@@ -564,13 +563,12 @@ class FrontendSink(AgentSink):
         if ws is None:
             return
         from gateway.chat import Message, MessageType
-        from abstract.tools.registry import registry
 
         if event_type == "tool_call":
             msg_type = MessageType.TOOL_CALL
             data = json.loads(payload) if payload else None
             msg = Message(type=msg_type, session_id=session_id, tool=tool_name, args=data,
-                          character_name=character_name, emoji=registry.get_emoji(tool_name))
+                          character_name=character_name)
         elif event_type == "tool_result":
             msg_type = MessageType.TOOL_RESULT
             msg = Message(type=msg_type, session_id=session_id, tool=tool_name,

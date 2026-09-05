@@ -483,19 +483,15 @@ export function useSessionStore(callbacks: SessionStoreCallbacks = {}): SessionS
                       .map(([k, v]) => `${k}=${JSON.stringify(v)}`)
                       .join(", ") + ")"
                   : "";
-                // TODO: emoji 未持久化 — SessionMessageEntry 不含 emoji 字段，
-                // 历史恢复后 tool 消息折叠摘要显示 "⚡" 而非工具注册的 emoji（如 "📄"）。
-                // 修复需在 SessionMessageEntry 增加 emoji 字段，并在 _serialize_message_entry 中透传。
                 const callerPrefix = m.character_name ? `${m.character_name} ` : "";
                 return {
                   role: "tool",
-                  content: `${callerPrefix}${m.emoji || "⚡"} ${toolName} ${argsStr}`,
+                  content: `${callerPrefix}⚡ ${toolName} ${argsStr}`,
                   id: generateUUID(),
                   toolName,
                   toolArgs,
                   characterName: m.character_name,
                   messageIndex: typeof m.index === "number" ? m.index : undefined,
-                  emoji: m.emoji,
                 };
               });
 
@@ -760,13 +756,12 @@ export function useSessionStore(callbacks: SessionStoreCallbacks = {}): SessionS
       const callerPrefix = msg.character_name ? `${msg.character_name} ` : "";
       flushAndAppend({
         role: "tool",
-        content: `${callerPrefix}${msg.emoji || "⚡"} ${msg.tool} ${argsStr}`,
+        content: `${callerPrefix}⚡ ${msg.tool} ${argsStr}`,
         id: generateUUID(),
         toolName: msg.tool,
         toolArgs: msg.args,
         characterName: msg.character_name,
         messageIndex: nextMessageIndex(messagesRef.current),
-        emoji: msg.emoji,
       });
       return;
     }
@@ -866,7 +861,6 @@ export function useSessionStore(callbacks: SessionStoreCallbacks = {}): SessionS
           command: (msg.args as Record<string, unknown>)?.command as string[] | undefined,
           reason: (msg.args as Record<string, unknown>)?.reason as string | undefined,
           tool: msg.tool ?? undefined,
-          emoji: msg.emoji,
           danger_level: msg.danger_level,
           args: (msg.args as Record<string, unknown>) ?? {},
         };

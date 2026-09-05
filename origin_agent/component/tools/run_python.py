@@ -259,6 +259,5 @@ Each invocation requires user approval (allow once / always allow / deny). Alway
     },
     handler=_handle_run_python,
     is_async=True,
-    emoji="🐍",
     danger_level=ToolDangerLevel.dangerous,
 )

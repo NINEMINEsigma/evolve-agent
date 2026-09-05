@@ -133,7 +133,6 @@ On failure:
     },
     handler=_handle_run_taskagent,
     is_async=True,
-    emoji="📋",
     danger_level=ToolDangerLevel.safe,
     availability=ToolAvailability.MAIN,
 )

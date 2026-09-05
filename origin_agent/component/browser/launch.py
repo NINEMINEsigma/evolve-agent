@@ -180,6 +180,5 @@ If the CDP endpoint is already reachable, returns `already_running: true` withou
     handler=_handle_browser_launch,
     check_fn=_connection.playwright_available,
     is_async=True,
-    emoji="🚀",
     danger_level=ToolDangerLevel.dangerous,
 )
