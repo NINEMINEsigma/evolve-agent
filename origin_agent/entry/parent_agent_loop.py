@@ -367,6 +367,10 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
         # 计时数据累积器（三元组：session_id, msg_index, metrics）
         collected_metrics: list[tuple[str, int, MessageMetrics]] = []
 
+        # 预初始化：while 循环内每轮重新赋值，但循环退出后的超限路径仍需引用，
+        # 静态检查无法证明循环至少执行一次（_MAX_TOOL_TURNS=90 保证之）。
+        stream_id: str = ""
+
         try:
             while turn.value < _MAX_TOOL_TURNS:
                 if self._cancel_event.is_set():
@@ -380,7 +384,7 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
                     sid, messages, round_id,
                 )
 
-                stream_id: str = uuid.uuid4().hex[:12]
+                stream_id = uuid.uuid4().hex[:12]
                 try:
                     resp = await self._stream_consumer.consume(
                         sid, messages,
@@ -397,6 +401,8 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
                         f"Details: {llm_exc}"
                     )
                     self.append_system_status(err_text, session_id=sid)
+                    await self._emit_stream_done(sid, stream_id, "error", content="", metrics=None)
+                    await self._frontend_sink.emit_system_message(sid, err_text)
                     return ""
 
                 if self._cancel_event.is_set():
@@ -512,6 +518,8 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
                         self._history.add_message(tool_msg)
                         self.save_history(sid)
                     self.append_system_status("工具链异常中断", session_id=sid)
+                    await self._emit_stream_done(sid, stream_id, "error", content="", metrics=None)
+                    await self._frontend_sink.emit_system_message(sid, "工具链异常中断")
                     return ""
 
                 sid = await self._check_over_limit_in_tool_loop(sid)
@@ -530,6 +538,7 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
             "Tool-call loop exceeded max turns (%d) for session=%s",
             _MAX_TOOL_TURNS, sid,
         )
+        await self._emit_stream_done(sid, stream_id, "error", content="", metrics=None)
         await self._frontend_sink.emit_system_message(
             sid,
             f"工具调用已达 {_MAX_TOOL_TURNS} 轮上限，已自动终止。",
