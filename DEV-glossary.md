@@ -313,6 +313,9 @@
 | 待上传图片预览 | `pendingImages` / `.pending-image` | 输入栏上方显示待发送的图片缩略图，可移除 |
 | 目标会话选择器 | `targetSessions` | 选择消息发送目标（main / 子会话），位于输入栏工具区 |
 | 角色可见性控制 | `visibleCharacters` / `responseCharacters` | 多 Agent 模式下控制消息可见范围与响应角色 |
+| 上下文徽章 | `TokenRing`（独立组件） | 输入栏右下角环形上下文用量徽章（contextTokens/llmMaxContextTokens 百分比），悬浮/点击展示累计·已用·上限 | context badge |
+| 输入栏功能组 | `.input-bar-actions-left` | 输入栏下行左侧功能按钮组（中断/厌恶/上传/剪贴板/录音/Agentspace/恢复），超宽收起为菜单 | input actions group |
+| 功能组菜单 | `.input-actions-menu` | 功能组收起后的纵向菜单（图标+文字），PopupLayer 承载 | input actions menu |
 
 ### 会话操作弹层
 

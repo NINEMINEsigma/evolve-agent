@@ -106,7 +106,8 @@ frontend/
 | `MermaidRenderer.tsx` | Mermaid 图表渲染 |
 | `ChatContextMenu.tsx` | 聊天区右键菜单 |
 | `RichInput.tsx` | 富文本输入（支持多行、快捷键） |
-| `InputBar.tsx` | 输入框、文件上传、发送按钮 |
+| `InputBar.tsx` | 输入框、文件上传、发送按钮、功能按钮组（超宽收起菜单）、上下文徽章 |
+| `TokenRing.tsx` | 上下文用量环形徽章（Header 与输入栏共用） |
 | `Lightbox.tsx` | 图片灯箱 |
 | `SafeHtml.tsx` | 安全 HTML 渲染 |
 | `Minimap.tsx` | 小地图导航 |

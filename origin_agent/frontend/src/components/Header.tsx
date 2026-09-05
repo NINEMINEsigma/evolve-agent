@@ -5,6 +5,7 @@ import { exportSession } from "../utils/exportSession";
 import { COLLOQUY_SID } from "../constants/session";
 import { TIMING } from "../constants/timing";
 import type { LlmProfileManager } from "../hooks/useLlmProfiles";
+import TokenRing from "./TokenRing";
 
 interface HeaderProps {
   status: string;
@@ -439,50 +440,6 @@ function DebugBadges() {
           心跳异常
         </span>
       )}
-    </span>
-  );
-}
-
-function TokenRing({
-  contextTokens,
-  llmMaxContextTokens,
-  tokenUsage,
-}: {
-  contextTokens: number;
-  llmMaxContextTokens: number;
-  tokenUsage: number;
-}) {
-  const percent =
-    llmMaxContextTokens > 0
-      ? Math.round((contextTokens / llmMaxContextTokens) * 100)
-      : 0;
-  const R = 12;
-  const C = 2 * Math.PI * R;
-  const offset = C * (1 - percent / 100);
-
-  if (llmMaxContextTokens <= 0) return null;
-
-  return (
-    <span
-      className="token-ring"
-      data-tooltip={`累计消耗: ${tokenUsage.toLocaleString()}  |  已用上下文: ${contextTokens.toLocaleString()}  |  最大上下文: ${llmMaxContextTokens > 0 ? llmMaxContextTokens.toLocaleString() : "?"}`}
-    >
-      <svg viewBox="0 0 32 32" width="28" height="28">
-        <circle
-          className="token-ring-track"
-          cx="16"
-          cy="16"
-          r={R}
-        />
-        <circle
-          className="token-ring-progress"
-          cx="16"
-          cy="16"
-          r={R}
-          style={{ strokeDashoffset: offset }}
-        />
-      </svg>
-      <span className="token-ring-label">{percent}</span>
     </span>
   );
 }

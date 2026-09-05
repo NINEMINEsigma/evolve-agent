@@ -364,6 +364,9 @@ export default function Layout({ ws, onContextMenu, contextMenuOpen }: LayoutPro
                 pendingConfirms={ws.pendingConfirms}
                 onRespondAsk={ws.respondAsk}
                 onRespondConfirm={ws.respondConfirm}
+                tokenUsage={ws.tokenUsage}
+                contextTokens={ws.contextTokens}
+                llmMaxContextTokens={ws.llmMaxContextTokens}
               />
             </ChatArea>
           </>

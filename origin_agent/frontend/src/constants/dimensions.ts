@@ -29,4 +29,6 @@ export const DIMENSIONS = {
   MAX_PASTE_IMAGE_SIZE:   20 * 1024 * 1024, // 20MB
   MAX_PASTE_AUDIO_SIZE:   25 * 1024 * 1024, // 25MB
   MAX_PASTE_VIDEO_SIZE:   50 * 1024 * 1024, // 50MB
+  INPUT_ACTIONS_COLLAPSE_RATIO: 0.4, // 输入栏左下功能组宽度超过视口宽度该比例时收起为菜单按钮
+  INPUT_ACTION_BTN_WIDTH: 36,       // 输入栏功能按钮展开态固有宽度 (px)，等于 --icon-btn-md，用于静态宽度估算
 } as const;
