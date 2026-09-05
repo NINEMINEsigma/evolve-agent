@@ -449,7 +449,6 @@ export default function LlmProfileDrawer({
                   >
                     <option value="">不引用</option>
                     {profiles
-                      .filter((p) => isNew || p.name !== selectedName)
                       .map((p) => (
                         <option key={p.name} value={p.name}>{p.name}</option>
                       ))}
@@ -464,7 +463,6 @@ export default function LlmProfileDrawer({
                   >
                     <option value="">不引用</option>
                     {profiles
-                      .filter((p) => isNew || p.name !== selectedName)
                       .map((p) => (
                         <option key={p.name} value={p.name}>{p.name}</option>
                       ))}
@@ -479,7 +477,6 @@ export default function LlmProfileDrawer({
                   >
                     <option value="">不引用</option>
                     {profiles
-                      .filter((p) => isNew || p.name !== selectedName)
                       .map((p) => (
                         <option key={p.name} value={p.name}>{p.name}</option>
                       ))}

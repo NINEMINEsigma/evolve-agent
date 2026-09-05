@@ -298,30 +298,6 @@ class LLMProfileStore:
                     raise ValueError(
                         f"Profile {profile.name!r} references an object outside the root"
                     )
-                if reference is profile:
-                    raise ValueError(
-                        f"Profile {profile.name!r} cannot reference itself"
-                    )
-
-        visiting: set[int] = set()
-        visited: set[int] = set()
-
-        def visit(profile: LLMProfile) -> None:
-            profile_id = id(profile)
-            if profile_id in visiting:
-                raise ValueError("Circular LLM profile reference detected")
-            if profile_id in visited:
-                return
-            visiting.add(profile_id)
-            for field in _REFERENCE_FIELDS:
-                reference = getattr(profile, field)
-                if reference is not None:
-                    visit(reference)
-            visiting.remove(profile_id)
-            visited.add(profile_id)
-
-        for profile in data.profiles:
-            visit(profile)
 
     @staticmethod
     def _validate_profile_scalars(profile: LLMProfile) -> None:
