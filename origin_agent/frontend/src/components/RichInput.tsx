@@ -257,8 +257,21 @@ const RichInput = React.forwardRef<HTMLDivElement, RichInputProps>(function Rich
   const autoResize = () => {
     const el = divRef.current;
     if (!el) return;
+    // 读取当前 CSS min-height（空态 80px / 非空态 36px），作为是否需要 inline height 的阈值
+    const cssMinHeight = parseFloat(getComputedStyle(el).minHeight) || 0;
     el.style.height = "auto";
-    el.style.height = Math.min(el.scrollHeight, DIMENSIONS.INPUT_MAX_SCROLL) + "px";
+    // 临时移除 min-height 以读取纯内容驱动高度，避免空态 min-height:80px 撑高 scrollHeight
+    el.style.minHeight = "0px";
+    const contentHeight = el.scrollHeight;
+    el.style.minHeight = ""; // 恢复 CSS min-height 兜底
+    if (contentHeight <= cssMinHeight) {
+      // 内容不超过 min-height：清空 inline height，让 CSS min-height 接管。
+      // 这样在空态不会把被 min-height 撑起的 80px 固化为 inline height，
+      // 脱离空态后自然回落到非空态 min-height，避免残留额外高度。
+      el.style.height = "";
+    } else {
+      el.style.height = Math.min(contentHeight, DIMENSIONS.INPUT_MAX_SCROLL) + "px";
+    }
   };
 
   // ── mention 核心逻辑 ─────────────────────────────────────────
