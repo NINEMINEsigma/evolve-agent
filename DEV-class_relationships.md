@@ -379,6 +379,7 @@ classDiagram
         +tool_registry
         +frontend_sink
         +subagent_orchestrator
+        +subprocess_runner
         #_shutdown_event
         +current()$
         +link_shutdown_event()
@@ -457,10 +458,21 @@ classDiagram
 
     class Sandbox {
         #_ctx
+        #_runner
         +resolve()
         +resolve_read()
         +resolve_write()
         +run()
+        +run_async()
+        +kill_active()
+    }
+
+    class SubprocessRunner {
+        #_active_procs
+        #_procs_lock
+        +run()
+        +run_async()
+        +kill_active()
     }
 
     class _CronTask {
@@ -528,12 +540,14 @@ classDiagram
     Application --> ApprovalBackendManager : holds
     Application --> FrontendSink : holds
     Application --> SubAgentOrchestrator : holds
+    Application --> SubprocessRunner : holds
     Application --> AgentspaceService : holds
     AgentspaceService --> Sandbox : uses
     AgentspaceService --> AgentspaceLockRegistry : owns
     AgentspaceService --> AgentspaceEventHub : owns
     ApprovalBackendManager --> ApprovalBackend : manages
     Sandbox --> RuntimeContext : holds
+    Sandbox --> SubprocessRunner : delegates
     CronRouter --> _CronTask : manages
 ```
 
@@ -618,6 +632,7 @@ classDiagram
 | `runtime_context` | `Application` | `RuntimeContext` | 运行时上下文 |
 | `_profile_lock` | `Application` | `threading.RLock` | Profile 根对象、名称指针与会话选择共用的进程锁 |
 | `_llm_profile_store` | `Application` | `LLMProfileStore \| None` | 进程内唯一的 `LLMProfileData` 根对象存储 |
+| `_subprocess_runner` | `Application` | `SubprocessRunner \| None` | 进程内唯一的子进程执行器（同步+真异步），注入 Sandbox 委托 |
 | `_agentspace_service` | `Application` | `AgentspaceService \| None` | Agentspace 版本化 CRUD、文件锁、垃圾桶、watcher 与 SSE 事件的唯一业务服务 |
 | `session_manager` | `Application` | `SessionManager \| None` | session 管理器 |
 | `approval_backend_manager` | `Application` | `ApprovalBackendManager \| None` | 审批后端管理器 |
@@ -632,6 +647,9 @@ classDiagram
 | `tools` | `AgentProfile` | `list[dict]` | 工具定义列表 |
 | `llm_client` | `AgentProfile` | `BaseLLMClient` | LLM 客户端实例 |
 | `_ctx` | `Sandbox` | `RuntimeContext` | 被多个 extools 直接访问 `sb._ctx.agentspace` |
+| `_runner` | `Sandbox` | `SubprocessRunner \| None` | 子进程执行委托目标；`None` 时惰性获取 `Application.current().subprocess_runner` |
+| `_active_procs` | `SubprocessRunner` | `dict[str, list[Popen \| Process]]` | session_id → 活动子进程登记（同步 `Popen` 与异步 `Process` 混合） |
+| `_procs_lock` | `SubprocessRunner` | `threading.Lock` | 活动进程登记表锁 |
 | `_tasks` | `CronRouter` | `dict[str, dict[str, _CronTask]]` | 被 cron_tools 模块级函数直接访问 |
 | `_lock` | `CronRouter` | `threading.Lock` | 被 cron_tools 模块级函数直接访问 |
 | `_timer` | `_CronTask` | `threading.Timer` | 被 cron_tools 模块级函数直接访问 |
@@ -763,3 +781,9 @@ classDiagram
 ### LLM Profile 转发引用限制移除
 
 `LLMProfileStore._validate_root()` 移除了自引用检查（`reference is profile`）与循环引用 DFS 检测（`visiting`/`visited` 集合）。Profile 间多模态分工字段（`vision_image_profile`/`audio_profile`/`vision_video_profile`）现允许自引用和循环引用。转发运行时 `forward_modality_to_ref_profile()` 为单跳机制，不递归触发转发，循环/自引用不会产生无限递归。保留的校验：引用必须为 `LLMProfile` 类型且在根列表内。前端 `LlmProfileDrawer.tsx` 同步移除三个多模态分工下拉框对当前编辑项的过滤。
+
+### 子进程执行层抽取为 SubprocessRunner
+
+`Sandbox` 原有的子进程执行逻辑（`run()`、`kill_active()`、`_kill_proc_tree()`、`_active_procs`/`_procs_lock` 登记表）迁移至 `system/subprocess_utils.py::SubprocessRunner`。`Application` 持有其全局单例（`_subprocess_runner`），在 `init()` 中创建并注入 `Sandbox(ctx, runner)`。`Sandbox` 保留命名空间校验与 cwd 解析层，`run()`/`kill_active()` 变为薄委托，新增 `async run_async()` 委托。`SubprocessRunner` 提供同步 `run()`（任意线程）与真异步 `run_async()`（`asyncio.create_subprocess_exec` + `wait_for(communicate())`）双入口，取消语义为自清理（杀树+限量 wait+re-raise）+ `kill_active` 兜底双保险。`run_async` 超时抛 `subprocess.TimeoutExpired`（与同步版对齐），取消 re-raise `CancelledError`（保 `ToolInterrupted("dispatch")` 语义）。`Sandbox.__init__` 的 `runner` 参数为可选（默认 `None`），仅做路径解析的既有 `Sandbox(ctx)` 构造零改动，委托方法惰性获取 `Application.current().subprocess_runner`。
+
+根因：`RunCommand`/`RunPython`/`InstallPackage` 三工具注册 `is_async=True` 但内部调用同步阻塞子进程 API（`proc.communicate()`），被直接 await 在事件循环上冻结整个 loop——agent 用 run 系列工具执行 curl 打自己的动态端点时形成自死锁（uvicorn 无法处理请求直至 `tool_timeout`）。真异步化后子进程等待为协程挂起，事件循环保持响应。

@@ -121,6 +121,10 @@ easysave 是**类型保留**序列化库，原生支持 pydantic BaseModel。
 
 新增纯数据类时先判断是否有方法；没有则优先放入 `entity/puretype/` 中合适的子模块，并在 `__init__.py` 中再导出。
 
+### Application全局单例
+
+所有需要维持全局生命周期的对象或者单例由Application实例直接或者间接持有
+
 ### 常量集中在 `entity/constant.py`
 
 项目级常量统一放在 `origin_agent/entity/constant.py`，业务模块内禁止散落魔法数字和硬编码字符串。该文件按职责用分区注释划分（版本、角色名、超时、I/O 上限、沙盒命名空间、上传、LLM、子 Agent、Cron、会话搜索等），新增常量放入对应分区（无合适分区时新建），并附中文注释说明用途与单位/取值含义。仅被单一函数私有使用、无复用价值的字面量除外。

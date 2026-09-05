@@ -746,7 +746,7 @@ class LSPManager:
         """终止当前 pyright 进程。返回是否确实杀死了进程。"""
         if self._process is None:
             return False
-        from system.sandbox import _kill_proc_tree
+        from system.subprocess_utils import _kill_proc_tree
         try:
             _kill_proc_tree(self._process.pid)
             try:

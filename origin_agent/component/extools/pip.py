@@ -11,6 +11,7 @@ Module-import-time registration via ``registry.register()``.
 from __future__ import annotations
 
 import logging
+import os
 import subprocess
 import sys
 from typing import Any, Dict, List
@@ -29,6 +30,7 @@ async def _handle_install_package(args: dict[str, Any]) -> dict:
     """Install one or more Python packages via pip."""
     packages: str = str(args.get("packages", "")).strip()
     upgrade: bool = args.get("upgrade", False)
+    session_id: str = str(args.get("_session_id", ""))
 
     if not packages:
         return tool_error("packages is required — package names to install, space-separated")
@@ -44,30 +46,33 @@ async def _handle_install_package(args: dict[str, Any]) -> dict:
 
     logger.info("install_package | %s", " ".join(cmd))
 
+    from system.application import Application
     try:
-        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=SUBPROCESS_TIMEOUT_DEFAULT)
+        result = await Application.current().subprocess_runner.run_async(
+            cmd, cwd=os.getcwd(), timeout=SUBPROCESS_TIMEOUT_DEFAULT, session_id=session_id,
+        )
     except subprocess.TimeoutExpired:
         return tool_error(f"pip install timed out ({SUBPROCESS_TIMEOUT_DEFAULT}s): {packages}")
     except Exception as exc:
         return tool_error(f"pip install failed: {exc}")
 
-    success = proc.returncode == 0
+    success = result.returncode == 0
 
     if success:
         # Extract installed package names from output
         installed = []
-        for line in (proc.stdout or "").splitlines():
+        for line in (result.stdout or "").splitlines():
             if "Successfully installed" in line:
                 installed = line.replace("Successfully installed", "").strip().split()
                 break
         return tool_result(
             packages=installed or pkg_list,
             exit_code=0,
-            message=f"Installation successful: {' '.join(installed or pkg_list)}\n{proc.stdout or ''}",
+            message=f"Installation successful: {' '.join(installed or pkg_list)}\n{result.stdout or ''}",
         )
     # Failure
-    error_lines = [l for l in (proc.stderr or "").splitlines() if "ERROR:" in l]
-    err_msg = error_lines[0] if error_lines else (proc.stderr or "Unknown error").strip()
+    error_lines = [l for l in (result.stderr or "").splitlines() if "ERROR:" in l]
+    err_msg = error_lines[0] if error_lines else (result.stderr or "Unknown error").strip()
     return tool_error(f"Installation failed: {err_msg}")
 
 

@@ -13,7 +13,6 @@
 
 from __future__ import annotations
 
-import locale
 import logging
 import subprocess  # nosec
 import sys
@@ -98,16 +97,15 @@ async def _handle_run_python(
             cmd_parts.extend(extra_args)
 
     # 审批由 AgentLoop 统一入口处理（handler 内不再重复确认）
-    return _execute(cmd_parts, cwd, timeout, session_id)
+    return await _execute(cmd_parts, cwd, timeout, session_id)
 
 
-def _execute(cmd_parts: list[str], cwd: str, timeout: int = SUBPROCESS_TIMEOUT_DEFAULT, session_id: str = "") -> dict:
+async def _execute(cmd_parts: list[str], cwd: str, timeout: int = SUBPROCESS_TIMEOUT_DEFAULT, session_id: str = "") -> dict:
     """执行已批准的命令并返回结果。"""
     logger.info("run_python | cwd=%s cmd=%s", cwd, cmd_parts)
     result: subprocess.CompletedProcess
     try:
-        _enc = locale.getpreferredencoding(False) or sys.getfilesystemencoding() or "utf-8"
-        result = _s().run(cmd_parts, cwd_ns=cwd, timeout=timeout, encoding=_enc, errors="replace", session_id=session_id)
+        result = await _s().run_async(cmd_parts, cwd_ns=cwd, timeout=timeout, session_id=session_id)
     except SandboxError as exc:
         return tool_error(str(exc))
     except subprocess.TimeoutExpired:

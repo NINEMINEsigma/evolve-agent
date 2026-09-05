@@ -61,10 +61,10 @@ async def _handle_run_command(
             return tool_error(f"Agentspace access lock failed: {exc}", cwd=cwd)
 
     # 审批由 AgentLoop 统一入口处理（handler 内不再重复确认）
-    return _execute(cmd_parts, cwd, session_id)
+    return await _execute(cmd_parts, cwd, session_id)
 
 
-def _execute(cmd_parts: list[str], cwd: str, session_id: str = "") -> dict:
+async def _execute(cmd_parts: list[str], cwd: str, session_id: str = "") -> dict:
     """执行已受信任 / 已批准的命令并返回结果。"""
     # if cmd_parts and cmd_parts[0] not in _s().allowed_commands:
     #     return tool_error(f"Command '{cmd_parts[0]}' not in the allowed list")
@@ -85,7 +85,7 @@ def _execute(cmd_parts: list[str], cwd: str, session_id: str = "") -> dict:
     logger.info("run_command | cwd=%s cmd=%s", cwd, cmd_parts)
     result: subprocess.CompletedProcess
     try:
-        result = _s().run(resolved_parts, cwd_ns=cwd, session_id=session_id)
+        result = await _s().run_async(resolved_parts, cwd_ns=cwd, session_id=session_id)
     except SandboxError as exc:
         return tool_error(str(exc))
     except subprocess.TimeoutExpired:

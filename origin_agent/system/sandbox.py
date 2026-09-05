@@ -35,21 +35,19 @@ from __future__ import annotations
 
 import logging
 import subprocess  # nosec
-import sys
-import threading
 from enum import Enum
 from pathlib import Path
-from typing import TYPE_CHECKING, Dict, List
+from typing import TYPE_CHECKING
 
 from entity.constant import Namespace, is_namespaced_path
 from system.context import get_runtime_context
 from system.pathutils import find_repo_root
-from system.subprocess_utils import build_subprocess_env, completed_process_from_bytes, windows_process_group_flags
 
 from pydantic import BaseModel, ConfigDict
 
 if TYPE_CHECKING:
     from system.context import RuntimeContext
+    from system.subprocess_utils import SubprocessRunner
 
 logger = logging.getLogger(__name__)
 
@@ -97,31 +95,6 @@ class SandboxError(PermissionError):
 
 
 # ---------------------------------------------------------------------------
-# 进程树终止辅助函数
-# ---------------------------------------------------------------------------
-
-
-def _kill_proc_tree(pid: int) -> None:
-    """强制终止进程及其所有子孙进程。
-
-    Windows 使用 ``taskkill /T /F``。
-    Unix 向进程组发送 SIGTERM。
-    """
-    if sys.platform == "win32":
-        subprocess.run(
-            ["taskkill", "/T", "/F", "/PID", str(pid)],
-            capture_output=True,
-        )
-    else:
-        try:
-            import os
-            import signal
-            os.killpg(os.getpgid(pid), signal.SIGTERM)
-        except ProcessLookupError:
-            pass
-
-
-# ---------------------------------------------------------------------------
 # Sandbox
 # ---------------------------------------------------------------------------
 
@@ -151,12 +124,23 @@ class Sandbox:
         sandbox.run(["python", "-m", "pytest"], cwd_ns="fork:")
     """
 
-    def __init__(self, ctx: RuntimeContext) -> None:
+    def __init__(
+        self,
+        ctx: RuntimeContext,
+        runner: SubprocessRunner | None = None,
+    ) -> None:
         self._ctx: RuntimeContext = ctx
-        # 活动子进程登记（session_id -> [Popen]），供中断路径 kill_active 终止。
-        # Sandbox 为全局单例，多个会话/线程并发调用 run()，需锁保护。
-        self._active_procs: dict[str, list[subprocess.Popen]] = {}
-        self._procs_lock: threading.Lock = threading.Lock()
+        # 子进程执行委托给 SubprocessRunner（由 Application 持有全局单例并注入）。
+        # runner 为 None 时（既有仅做路径解析的 Sandbox 构造），run()/run_async()/
+        # kill_active() 惰性从 Application.current().subprocess_runner 获取全局单例。
+        self._runner: SubprocessRunner | None = runner
+
+    def _get_runner(self) -> SubprocessRunner:
+        """返回注入的 runner，或惰性获取 Application 全局单例。"""
+        if self._runner is not None:
+            return self._runner
+        from system.application import Application
+        return Application.current().subprocess_runner
 
     # -- 路径解析 ----------------------------------------------------
 
@@ -280,38 +264,21 @@ class Sandbox:
         cwd_ns: str = "ws:",
         timeout: int | None = None,
         extra_env: dict[str, str] | None = None,
-        encoding: str = "utf-8",
-        errors: str | None = None,
         session_id: str = "",
     ) -> subprocess.CompletedProcess:
-        """以沙盒化工作目录运行子进程。
+        """以沙盒化工作目录运行子进程（同步，委托 SubprocessRunner）。
 
-        *args* — 命令 + 参数。命令 basename 必须在白名单中。
+        保留命名空间校验与 cwd 解析层；子进程执行委托给 runner。
 
         *cwd_ns* — 子进程的逻辑工作目录。
-
         *timeout* — 超时秒数；``None`` 时从 ``RuntimeContext.tool_timeout`` 获取。
-
-        *encoding* — 子进程输出的文本编码（默认 ``"utf-8"``）。
-        *errors* — 解码错误的处理方案（例如 ``"replace"``）。
         *session_id* — 发起会话 ID，用于中断路径按会话终止活动进程。
-
-        如果命令不允许或路径逃逸沙盒，抛出 ``SandboxError``。
         """
         if timeout is None:
             timeout = get_runtime_context().tool_timeout
 
         if not args:
             raise SandboxError("subprocess args must not be empty")
-
-        # -- 验证命令 --
-        cmd: str = args[0]
-        cmd_name: str = Path(cmd).name
-        # if cmd_name not in self._ALLOWED_COMMANDS:
-        #     raise SandboxError(
-        #         f"Command '{cmd_name}' is not in the allowed list: "
-        #         f"{sorted(self._ALLOWED_COMMANDS)}"
-        #     )
 
         # -- 验证 cwd --
         cwd_r: ResolvedPath = self.resolve(cwd_ns, Access.READ)
@@ -327,78 +294,53 @@ class Sandbox:
                     f"Got: {arg!r}"
                 )
 
-        # -- 构建 env --
-        env = build_subprocess_env(extra_env)
+        return self._get_runner().run(
+            args, cwd=str(cwd_r.real), timeout=timeout,
+            extra_env=extra_env, session_id=session_id,
+        )
 
-        logger.debug("sandbox.run | cwd=%s cmd=%s", cwd_r.real, args)
+    async def run_async(
+        self,
+        args: list[str],
+        *,
+        cwd_ns: str = "ws:",
+        timeout: int | None = None,
+        extra_env: dict[str, str] | None = None,
+        session_id: str = "",
+    ) -> subprocess.CompletedProcess:
+        """以沙盒化工作目录运行子进程（真异步，事件循环不阻塞）。
 
-        # 使用 Popen 以支持超时时强制终止整个进程树。
-        # subprocess.run(timeout=...) 在 Windows 上不能可靠地
-        # 终止子进程（例如 pnpm 生成的 node 进程）。
-        popen_kwargs: dict = {
-            "cwd": str(cwd_r.real),
-            "stdout": subprocess.PIPE,
-            "stderr": subprocess.PIPE,
-            "text": False,
-            "env": env,
-        }
-        if sys.platform == "win32":
-            # CREATE_NEW_PROCESS_GROUP 允许发送 CTRL_BREAK_EVENT，
-            # 但我们将使用 taskkill 进行更可靠的进程树终止。
-            popen_kwargs["creationflags"] = windows_process_group_flags()
-        proc: subprocess.Popen = subprocess.Popen(args, **popen_kwargs)
-        with self._procs_lock:
-            self._active_procs.setdefault(session_id, []).append(proc)
-        stdout: bytes
-        stderr: bytes
-        try:
-            stdout, stderr = proc.communicate(timeout=timeout)
-        except subprocess.TimeoutExpired:
-            _kill_proc_tree(proc.pid)
-            stdout, stderr = b"", b""
-            try:
-                proc.wait(timeout=5)
-            except subprocess.TimeoutExpired:
-                pass
-            raise subprocess.TimeoutExpired(
-                cmd=args[0], timeout=timeout, output="", stderr="",
-            )
-        finally:
-            # 移除登记。kill_active 可能已清空整个 key（列表为空或 key 已删），须判空。
-            with self._procs_lock:
-                proc_list = self._active_procs.get(session_id)
-                if proc_list and proc in proc_list:
-                    proc_list.remove(proc)
-                    if not proc_list:
-                        self._active_procs.pop(session_id, None)
+        与 ``run()`` 同样的命名空间校验与 cwd 解析，但子进程执行为
+        ``asyncio.create_subprocess_exec`` 协程挂起，事件循环保持响应。
+        """
+        if timeout is None:
+            timeout = get_runtime_context().tool_timeout
 
-        return completed_process_from_bytes(
-            args=args,
-            returncode=proc.returncode,
-            stdout=stdout,
-            stderr=stderr,
+        if not args:
+            raise SandboxError("subprocess args must not be empty")
+
+        # -- 验证 cwd --
+        cwd_r: ResolvedPath = self.resolve(cwd_ns, Access.READ)
+        if not cwd_r.real.is_dir():
+            raise SandboxError(f"cwd does not exist or is not a directory: {cwd_ns}")
+
+        # -- 验证任何看起来像逻辑路径的参数 --
+        for arg in args:
+            if ":" in arg and is_namespaced_path(arg):
+                raise SandboxError(
+                    f"Path arguments to subprocess commands must be resolved "
+                    f"by the tool handler before calling sandbox.run(). "
+                    f"Got: {arg!r}"
+                )
+
+        return await self._get_runner().run_async(
+            args, cwd=str(cwd_r.real), timeout=timeout,
+            extra_env=extra_env, session_id=session_id,
         )
 
     def kill_active(self, session_id: str) -> None:
-        """终止指定 session 登记的所有活动子进程树；session_id 为空串时终止全部。
-
-        在事件循环线程调用（ToolExecutor 中断路径）。_kill_proc_tree 为同步
-        taskkill 子进程调用（毫秒级）；proc.wait 限制单进程等待上限 1 秒，
-        避免事件循环长阻塞。幂等：仅终止 poll() 仍为 None 的进程。
-        """
-        with self._procs_lock:
-            if session_id:
-                procs = self._active_procs.pop(session_id, [])
-            else:
-                procs = [p for v in self._active_procs.values() for p in v]
-                self._active_procs.clear()
-        for proc in procs:
-            if proc.poll() is None:
-                _kill_proc_tree(proc.pid)
-                try:
-                    proc.wait(timeout=1)
-                except Exception:
-                    pass
+        """终止指定 session 登记的所有活动子进程树（委托 SubprocessRunner）。"""
+        self._get_runner().kill_active(session_id)
 
     # -- 工具辅助方法 --------------------------------------------------
 

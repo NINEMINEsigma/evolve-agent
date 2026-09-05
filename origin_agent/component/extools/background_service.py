@@ -43,8 +43,7 @@ logger = logging.getLogger(__name__)
 from component.extools.bg_registry import _background_tasks
 
 # ── sandbox 引用 ──────────────────────────────────────────────
-from system.sandbox import _kill_proc_tree
-from system.subprocess_utils import windows_process_group_flags
+from system.subprocess_utils import _kill_proc_tree, windows_process_group_flags
 
 
 def _resolve_logical_path(logical: str) -> str | None:

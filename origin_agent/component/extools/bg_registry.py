@@ -15,7 +15,7 @@ import subprocess  # nosec
 from typing import TYPE_CHECKING, Any
 
 from entity.constant import SUBPROCESS_SOFT_CLEANUP_WAIT_TIME
-from system.sandbox import _kill_proc_tree
+from system.subprocess_utils import _kill_proc_tree
 
 if TYPE_CHECKING:
     from component.extools.background_service import _WatchState

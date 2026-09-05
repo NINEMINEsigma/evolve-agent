@@ -153,7 +153,7 @@ def cleanup_headless_browser() -> int:
     global _headless_proc
     if _headless_proc is None:
         return 0
-    from system.sandbox import _kill_proc_tree
+    from system.subprocess_utils import _kill_proc_tree
 
     proc = _headless_proc
     _headless_proc = None

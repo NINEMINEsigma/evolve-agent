@@ -15,6 +15,7 @@ if TYPE_CHECKING:
     from system.context import RuntimeContext
     from system.llm_profile_store import LLMProfileStore
     from system.sandbox import Sandbox
+    from system.subprocess_utils import SubprocessRunner
     from system.agentspace import AgentspaceService
     from gateway.session_manager import SessionManager
     from component.approval.backend import ApprovalBackend
@@ -46,6 +47,7 @@ class Application:
         # -- 子系统 private fields（由 init() 创建，@property 只读暴露）--
         self._profile_lock:              threading.RLock = threading.RLock()
         self._llm_profile_store:         LLMProfileStore | None = None
+        self._subprocess_runner:         SubprocessRunner | None = None
         self._sandbox:                   Sandbox | None = None
         self._agentspace_service:        AgentspaceService | None = None
         self._cron_router:               CronRouter | None = None
@@ -69,9 +71,14 @@ class Application:
         依赖：RuntimeContext 已 set（由 __main__.py 保证）。
         本方法在 _app = self 之后调用，因此 Application.current() 可用。
         """
-        # 1. Sandbox — 纯构造，只依赖 RuntimeContext
+        # 1. SubprocessRunner — 子进程执行层（无依赖，纯构造）
+        from system.subprocess_utils import SubprocessRunner
+        self._subprocess_runner = SubprocessRunner()
+
+        # 2. Sandbox — 依赖 RuntimeContext；注入 SubprocessRunner 全局单例
         from system.sandbox import Sandbox
-        self._sandbox = Sandbox(self.runtime_context)
+        # TODO: subprocess_runner本就可以通过Application获取, 不需要在构造中被引用
+        self._sandbox = Sandbox(self.runtime_context, self._subprocess_runner)
 
         # 2. AgentspaceService — 依赖共享 Sandbox；异步 watcher 在 main.py 启动。
         from system.agentspace import AgentspaceService
@@ -129,6 +136,11 @@ class Application:
     def llm_profile_store(self) -> LLMProfileStore:
         """返回进程内唯一的 LLM Profile 根对象存储。"""
         return self._llm_profile_store  # type: ignore[return-value]
+
+    @property
+    def subprocess_runner(self) -> SubprocessRunner:
+        """返回进程内唯一的子进程执行器（同步 + 真异步）。"""
+        return self._subprocess_runner  # type: ignore[return-value]
 
     @property
     def sandbox(self) -> Sandbox:

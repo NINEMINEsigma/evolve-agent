@@ -198,7 +198,8 @@ Evolve Agent 内置两套多代理运行时：
 - `system/prompt.py` / `system/templates.py`：System Prompt 组装与模板渲染。
 - `system/convert.py`：类型转换工具（`as_enum()`、`as_bool()`）。
 - `system/error_utils.py`：异常降级与日志辅助，用于可恢复副作用失败时记录日志但不中断主流程。
-- `system/pathutils.py` / `system/atomic_io.py` / `system/subprocess_utils.py`：路径、IO、子进程工具。
+- `system/pathutils.py` / `system/atomic_io.py`：路径与原子 IO 工具。
+- `system/subprocess_utils.py`：子进程 I/O 编码工具与 `SubprocessRunner`（子进程同步 `run()` 与真异步 `run_async()` 执行、活动进程登记与按会话中断终止进程树；由 `Application` 持有全局单例并注入 `Sandbox` 委托）。
 - `system/lsp.py`：LSP 服务器进程管理与诊断（`component/tools/lsp.py` 工具调用；App 关闭时清理 LSP 进程）。
 - `system/modality_capability.py`：多模态能力探测与缓存（探针已内化为系统自动行为：伪装 Read 工具调用，按 模态 × 消息路径六路并发探测 tool/user 消息的图片/音频/视频支持；easysave 缓存按 model+base_url 联合索引；`build_modality_prompt_block()` 每轮生成 system prompt 注入块；`forward_modality_to_ref_profile()` 把活跃模型不支持的模态转发到 profile 引用的其他模型）。
 
