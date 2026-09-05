@@ -14,7 +14,6 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import time
 import uuid
 from pathlib import Path
 from typing import Any, Awaitable, Callable, Dict, List, TYPE_CHECKING
@@ -150,20 +149,8 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
         # NOTE: _processing 已上移至 BaseAgentLoop.__init__，is_processing() 由基类提供
         self._event_loop: asyncio.AbstractEventLoop | None = None
 
-        # -- 子 Agent 周期收集器用的空闲时间戳 --
-        self._last_idle_time: dict[str, float] = {session_id: time.monotonic()}
-
         # -- 子 Agent 编排器（由 server 层注入） --
         self.subagent_orchestrator: Any = None
-
-    def get_last_idle_time(self, session_id: str) -> float | None:
-        """返回指定 session 上次进入空闲的时间戳，不存在时返回 None。"""
-        return self._last_idle_time.get(session_id)
-
-    # TODO: 未被使用
-    def update_last_idle_time(self, session_id: str) -> None:
-        """更新指定 session 的空闲时间戳。"""
-        self._last_idle_time[session_id] = time.monotonic()
 
     # ========================================================================
     # 抽象方法实现
@@ -313,7 +300,6 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
                 return reply
             finally:
                 self._processing = False
-                self._last_idle_time[self.session_id] = time.monotonic()
 
     async def resume(self) -> str:
         """从当前历史状态恢复工具链执行。
@@ -348,7 +334,6 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
                 return reply
             finally:
                 self._processing = False
-                self._last_idle_time[self.session_id] = time.monotonic()
 
     async def _run_tool_loop(
         self,
@@ -704,7 +689,6 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
                 queue.last_known_sid = sid
             finally:
                 self._processing = False
-                self._last_idle_time[self.session_id] = time.monotonic()
 
         if self._on_round_done is not None:
             await self._on_round_done(self)

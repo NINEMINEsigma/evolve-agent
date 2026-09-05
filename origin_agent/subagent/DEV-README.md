@@ -87,7 +87,7 @@ graph TD
 - `_active`：当前活跃的子代理映射（`session_id → SubAgentLoop`）。
 - `_active_task`：活跃子代理的 asyncio.Task 映射。
 - `_waiting_queue`：达到并发上限后 FIFO 排队的子代理请求。
-- 后台周期任务：检查空闲并推送结果。
+- 事件驱动 waiter：子 Agent 完成后自动收集并推送结果。
 
 ### `SubAgentLoop`
 

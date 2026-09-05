@@ -3,7 +3,7 @@
 职责：
 - 每个主会话拥有独立的子 Agent 上下文
 - 并发控制（活跃上限 + FIFO 等待队列）
-- 周期定时器（空闲检测 + 结果收集 + 消息注入）
+- 事件驱动 waiter（结果收集 + 消息注入，由 _start_subagent/_start_taskagent 启动）
 - 工具操作代理（chat / approve / stop）
 - 优雅关闭
 """

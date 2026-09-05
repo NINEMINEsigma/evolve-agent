@@ -97,8 +97,7 @@ class SubAgentLoop(BasePrivateChatAgentLoop):
         session_id: str,
         tools: list[dict[str, Any]],
         max_turns: int,
-        # TODO: 真的可能为空吗
-        on_message: Callable[[dict], None]|None = None, 
+        on_message: Callable[[dict[str, Any]], None],
         parent_session_id: str = "",
         parent_character_agent: str = "",
         name: str = "",
@@ -122,7 +121,7 @@ class SubAgentLoop(BasePrivateChatAgentLoop):
 
         self._llm_profile: LLMProfile | None = None  # 由 _build_llm_client 填充
         self._llm: BaseLLMClient = self._build_llm_client(ctx)   # 子 Agent 独立的 LLM 客户端
-        self._on_message: Callable[[dict], None] | None = on_message  # 每轮 LLM 响应/工具调用即时推送回调
+        self._on_message: Callable[[dict[str, Any]], None] = on_message  # 每轮 LLM 响应/工具调用即时推送回调
 
         # 内部状态（_inbox / _cancel_event 由 BaseAgentLoop 提供；_history 由 BasePrivateChatAgentLoop 提供）
         self._outbox: list[str] = []                         # 发件箱：子 Agent 文本回复，父 Agent 通过 get_outbox() 收集
@@ -274,8 +273,6 @@ class SubAgentLoop(BasePrivateChatAgentLoop):
         其余字段（``content``/``tool_name``/``tool_call_id``/``tool_args``/``reasoning``）
         按需透传。
         """
-        if not self._on_message:
-            return
         try:
             payload: dict[str, Any] = {"role": role}
             payload.update({k: v for k, v in fields.items() if v is not None})

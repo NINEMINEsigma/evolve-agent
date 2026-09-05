@@ -82,7 +82,6 @@ classDiagram
         #_processing
         #_process_lock
         #_event_loop
-        #_last_idle_time
         +subagent_orchestrator
         #_session_manager
         +set_tool_event_callback()
@@ -579,7 +578,6 @@ classDiagram
 | `_processing` | `ParentAgentLoop` | `bool` | 是否正在处理 |
 | `_process_lock` | `ParentAgentLoop` | `asyncio.Lock` | 处理锁 |
 | `_event_loop` | `ParentAgentLoop` | `asyncio.AbstractEventLoop \| None` | 事件循环引用 |
-| `_last_idle_time` | `ParentAgentLoop` | `dict[str, float]` | 空闲时间戳 |
 | `_session_manager` | `ParentAgentLoop` | `SessionManager \| None` | gateway session manager |
 | `_agents` | `MultiAgentLoop` | `dict[str, AgentProfile]` | Agent 配置档案 |
 | `_sink` | `MultiAgentLoop` | `AgentSink` | sink |
@@ -683,7 +681,6 @@ classDiagram
 | `_OrchestratorContext._drain_outbox` | `_outbox` | `SubAgentLoop` | `subagent/orchestrator.py` | 直接读取并清空 outbox |
 | `_OrchestratorContext.get_snapshot` | `_history.messages`, `pending_approvals_info` | `SubAgentLoop` | `subagent/orchestrator.py` | 读取子 agent 历史 |
 | `_OrchestratorContext._start_subagent` | `_history` | `SubAgentLoop` | `subagent/orchestrator.py` | 加载历史时覆盖 `_history` |
-| `_OrchestratorContext._cycle_loop` | `_last_idle_time` | `ParentAgentLoop` | `subagent/orchestrator.py` | 读取父 loop 空闲时间 |
 | `_OrchestratorContext._collect_and_inject` | `outbox` / `_outbox` | `SubAgentLoop` | `subagent/orchestrator.py` | 收集并清空 outbox |
 | `_OrchestratorContext._collect_and_inject` | `process_message()` | `ParentAgentLoop` | `subagent/orchestrator.py` | 调用父 loop 公共方法 |
 | `MessageRouter.route` | `get_loop()` | `SessionManager` | `gateway/message_router.py` | 通过 `_get_sm().get_loop()` 获取 loop |
