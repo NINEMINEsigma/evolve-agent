@@ -92,3 +92,5 @@ class Message(BaseModel):
     approval_profile_available: bool | None = None
     # HANDSFREE_MODE：服务端权威脱手模式回执
     handsfree_mode: bool | None = None
+    # HANDSFREE_MODE：服务端权威审批模式（manual/handsfree/yolo）
+    approval_mode: str | None = None

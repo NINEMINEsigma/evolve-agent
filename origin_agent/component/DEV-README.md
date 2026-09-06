@@ -13,7 +13,7 @@ component/
 │   ├── backend.py            ← ApprovalBackend 抽象 + Local/Remote 实现
 │   ├── core.py               ← request_user_confirm / ask_agent_reason
 │   ├── executor.py           ← execute_with_approval 统一执行器
-│   ├── handsfree.py          ← 脱手模式状态管理 + LLM 审批流程
+│   ├── handsfree.py          ← 审批模式状态管理 + LLM 审批流程
 │   ├── allowlist.py           ← 工具 allowlist 持久化
 │   └── policy.py             ← 审批策略（needs_approval + 预设策略常量）
 ├── tools/                    ← 核心工具
@@ -131,12 +131,14 @@ component/
 
 - `execute_with_approval(tool_name, args, session_id, sink, ...) -> ApprovalOutcome`：封装 dangerous/write 判断、白名单检查、脱手/手动两种审批模式、拒绝结果构建和 `allow_always` 加白名单。
 
-#### `approval/handsfree.py` — 脱手模式
+#### `approval/handsfree.py` — 审批模式状态管理
 
-- `set_handsfree_mode(session_id, enabled) -> bool` / `is_handsfree_mode(session_id)`：脱手模式 session 级状态管理，返回服务端实际状态。
+- `set_approval_mode(session_id, mode: ApprovalMode) -> ApprovalMode`：设置会话审批模式（MANUAL/HANDSFREE/YOLO），HANDSFREE 不可用时回退 MANUAL。
+- `get_approval_mode(session_id) -> ApprovalMode`：返回会话当前审批模式（默认 MANUAL）。
+- `disable_all_non_manual_modes() -> list[str]`：将全部非 MANUAL 的会话重置为 MANUAL。
 - `is_handsfree_available() -> bool`：检查审批 Profile 是否已配置。
-- `disable_all_handsfree_modes() -> list[str]`：关闭全部已开启会话并返回受影响列表。
 - `_handsfree_confirm()`：核心流程，通过审批 Profile 模型评估工具调用风险。审批请求包含工具的参数 schema（使模型能区分必填与可选参数）、实际参数值和 reason（补充说明）。审批输出使用普通文本决策标记（`[ALLOW]`/`[APPROVE]`/`[DENY]`/`[REJECT]`/`[拒绝]`/`[否决]`），不使用 JSON。
+- 兼容包装：`set_handsfree_mode()`/`is_handsfree_mode()`/`disable_all_handsfree_modes()` 保留，分别委托到新接口。
 
 #### `approval/allowlist.py` — 工具白名单
 
@@ -144,7 +146,7 @@ component/
 
 #### `approval/policy.py` — 审批策略
 
-- `needs_approval(policy, danger_level, handsfree) -> bool`：根据策略和脱手模式判断工具是否需要审批。
+- `needs_approval(policy, danger_level, approval_mode: ApprovalMode) -> bool`：根据策略和审批模式判断工具是否需要审批。
 - `MAIN_SESSION_POLICY`：主会话策略（手动模式仅 dangerous+critical 需审批，脱手模式 write+dangerous+critical 需审批）。
 - `SUB_SESSION_POLICY`：子会话策略（write+dangerous+critical 在两种模式下均需审批）。
 - `ApprovalPolicy` 数据类定义在 `entity/puretype/`（`approval` 子模块）。

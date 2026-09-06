@@ -2105,7 +2105,6 @@ async def ws_chat(ws: WebSocket) -> None:
                             "server_info": {
                                 "approval_model_name": state.profile_name or "",
                                 "approval_model_available": state.available,
-                                "yolo": ctx.yolo,
                             },
                         }),
                     ).model_dump(exclude_none=True),
@@ -2119,7 +2118,7 @@ async def ws_chat(ws: WebSocket) -> None:
         if resume and _get_sm().exists(resume):
             loop = _get_loop(resume)
             if loop is not None:
-                from component.approval import is_handsfree_mode
+                from component.approval import is_handsfree_mode, get_approval_mode
                 history: list[dict] = [
                     e.model_dump(exclude_none=True)
                     for e in loop.loop.get_session_messages()
@@ -2144,6 +2143,7 @@ async def ws_chat(ws: WebSocket) -> None:
                             "processing": processing,
                             "agents": agents_info,
                             "handsfree_mode": is_handsfree_mode(sid),
+                            "approval_mode": get_approval_mode(sid).value,
                         }, ensure_ascii=False),
                     ).model_dump(exclude_none=True),
                     ensure_ascii=False,

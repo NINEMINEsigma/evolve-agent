@@ -22,18 +22,12 @@ argparse_parser.add_argument("--gateway_port", type=int, default=argparse.SUPPRE
 argparse_parser.add_argument("--merge_concat_threshold", type=int, default=argparse.SUPPRESS)
 
 #----------
-# yolo
-#----------
-argparse_parser.add_argument("--yolo", action="store_true", default=argparse.SUPPRESS)
-
-#----------
 # workspace
 #----------
 argparse_parser.add_argument("--workspace_path", type=str, default=argparse.SUPPRESS)
 argparse_parser.add_argument("--logs_path_name", type=str, default=argparse.SUPPRESS)
 argparse_parser.add_argument("--agentspace_path_name", type=str, default=argparse.SUPPRESS)
 argparse_parser.add_argument("--mcp_config_path_name", type=str, default=argparse.SUPPRESS)
-argparse_parser.add_argument("--soul_file", type=str, default=argparse.SUPPRESS)
 
 args = argparse_parser.parse_args()
 
@@ -49,9 +43,7 @@ class Config(BaseModel):
     agentspace_path_name: str = "agentspace"
     logs_path_name: str = "logs"
     mcp_config_path_name: str = "mcp_config.json"
-    soul_file: str = "SOUL.md"
     frontend_force_build: bool = False
-    yolo: bool = False
 
 
 base_config: Config|None = None
@@ -98,7 +90,6 @@ slow_agent_space_path:  str     = current_config.slow_agent_space_path
 # runtime
 force_init:             bool    = current_config.force_init
 frontend_force_build:   bool    = current_config.frontend_force_build
-yolo:                   bool    = current_config.yolo
 # gateway
 gateway_host:           str     = current_config.gateway_host
 gateway_port:           int     = current_config.gateway_port
@@ -113,4 +104,3 @@ workspace_path:         Path = Path(current_config.workspace_path)
 agentspace_path_name:   Path = workspace_path / current_config.agentspace_path_name
 logs_path_name:         Path = workspace_path / current_config.logs_path_name
 mcp_config_path:        Path = agentspace_path_name / current_config.mcp_config_path_name
-soul_file:              str  = current_config.soul_file

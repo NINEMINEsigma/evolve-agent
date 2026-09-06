@@ -163,6 +163,10 @@ export function useWebSocket() {
       if (msg.handsfree_mode !== undefined && msg.handsfree_mode !== null) {
         sessionRef.current?.setHandsfreeMode(msg.handsfree_mode);
       }
+      if (msg.approval_mode !== undefined && msg.approval_mode !== null) {
+        sessionRef.current?.setApprovalMode(msg.approval_mode);
+        sessionRef.current?.setYoloMode(msg.approval_mode === "yolo");
+      }
       return;
     }
     sessionRef.current?.handleMessage(msg);
@@ -555,19 +559,22 @@ export function useWebSocket() {
       .catch(() => {});
   }, [switchSession]);
 
-  const toggleHandsfree = useCallback((enabled: boolean) => {
+  const setApprovalMode = useCallback((mode: string) => {
     const s = sessionRef.current;
     const c = connRef.current;
     if (!s) return;
-    if (s.yoloMode) return;
     // 不乐观更新；等待服务端 HANDSFREE_MODE 回执
     if (c.wsRef.current?.readyState === WebSocket.OPEN) {
       c.send({
         type: WS_OUT.HANDSFREE_MODE,
-        content: enabled ? "true" : "false",
+        content: mode,
       });
     }
   }, []);
+
+  const toggleHandsfree = useCallback((enabled: boolean) => {
+    setApprovalMode(enabled ? "handsfree" : "manual");
+  }, [setApprovalMode]);
 
   const interrupt = useCallback(() => {
     const s = sessionRef.current;
@@ -751,6 +758,7 @@ export function useWebSocket() {
     uploading: upload.uploading,
     handsfreeMode: session.handsfreeMode,
     setHandsfreeMode: session.setHandsfreeMode,
+    approvalMode: session.approvalMode,
     yoloMode: session.yoloMode,
     setYoloMode: session.setYoloMode,
     taskProgress: session.taskProgress,
@@ -819,6 +827,7 @@ export function useWebSocket() {
     respondConfirm,
     respondAsk,
     toggleHandsfree,
+    setApprovalMode,
     interrupt,
     disgust,
     resume,

@@ -246,6 +246,11 @@ APPROVAL_MAX_OUTPUT_TOKENS: int = 4096
 APPROVAL_ALLOW_MARKERS: tuple[str, ...] = ("[allow]", "[approve]")
 APPROVAL_DENY_MARKERS: tuple[str, ...] = ("[deny]", "[reject]", "[拒绝]", "[否决]")
 
+# 会话级审批模式枚举值（手动/脱手/YOLO 三态互斥）
+APPROVAL_MODE_MANUAL: str = "manual"
+APPROVAL_MODE_HANDSFREE: str = "handsfree"
+APPROVAL_MODE_YOLO: str = "yolo"
+
 # 多模态能力缓存（存放于 workspace/ 下，easysave 序列化，dict[cache_key, ModalityCapability]）
 MODALITY_CAPABILITY_ES_FILENAME: str = "modality_capability_cache.es"
 MODALITY_CAPABILITY_ES_KEY: str = "v1"

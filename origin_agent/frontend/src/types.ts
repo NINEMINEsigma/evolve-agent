@@ -194,7 +194,8 @@ export interface WSMessage {
   approval_profile_name?: string | null;    // APPROVAL_PROFILE_CHANGED
   approval_profile_model?: string | null;   // APPROVAL_PROFILE_CHANGED
   approval_profile_available?: boolean;     // APPROVAL_PROFILE_CHANGED
-  handsfree_mode?: boolean;                  // HANDSFREE_MODE：服务端权威回执
+  handsfree_mode?: boolean;                  // HANDSFREE_MODE：服务端权威回执（向后兼容）
+  approval_mode?: string;                   // HANDSFREE_MODE：服务端权威审批模式（manual/handsfree/yolo）
 }
 
 export interface ToolCallMeta {
@@ -393,6 +394,7 @@ export interface LlmProfile {
   vision_image_profile: string | null;
   audio_profile: string | null;
   vision_video_profile: string | null;
+  soul_file: string;
 }
 
 export interface ApprovalProfileState {

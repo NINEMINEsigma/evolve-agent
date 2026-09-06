@@ -129,8 +129,6 @@ def _build_context(cli: dict) -> RuntimeContext:
         mcp_config_path         = cli["mcp_config_path"],
         # 会话合并配置
         merge_concat_threshold  = int(cli.get("merge_concat_threshold", 50000)),
-        yolo                    = as_bool(cli.get("yolo", False)),
-        soul_file              = str(cli.get("soul_file", "SOUL.md")),
     )
 
 

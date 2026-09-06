@@ -28,6 +28,7 @@ from ._base import (
     ToolAvailability,
 )
 from .approval import (
+    ApprovalMode,
     ApprovalPolicy,
     ApprovalOutcome,
     ApprovalResult,
@@ -113,6 +114,7 @@ __all__ = [
     "ToolDangerLevel",
     "ToolAvailability",
     # approval
+    "ApprovalMode",
     "ApprovalPolicy",
     "ApprovalOutcome",
     "ApprovalResult",

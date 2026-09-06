@@ -12,8 +12,8 @@ import logging
 from typing import TYPE_CHECKING
 
 from abstract.tools.registry import registry as tool_registry
-from entity.puretype import ApprovalOutcome, ToolDangerLevel
-from component.approval.handsfree import is_handsfree_mode
+from entity.puretype import ApprovalOutcome, ApprovalMode, ToolDangerLevel
+from component.approval.handsfree import get_approval_mode, is_handsfree_mode
 from component.approval.core import build_denied_tool_result, request_user_confirm
 from component.approval.allowlist import add_allowed as add_tool_allowlist_entry
 from component.approval.allowlist import is_allowed as is_tool_allowlisted
@@ -40,8 +40,8 @@ def _needs_approval(tool_name: str, session_id: str) -> bool:
     - safe 直接执行
     """
     danger_level: ToolDangerLevel = tool_registry.get_danger_level(tool_name)
-    handsfree = is_handsfree_mode(session_id)
-    return _policy_needs_approval(MAIN_SESSION_POLICY, danger_level, handsfree)
+    approval_mode = get_approval_mode(session_id)
+    return _policy_needs_approval(MAIN_SESSION_POLICY, danger_level, approval_mode)
 
 
 async def execute_with_approval(
@@ -70,8 +70,7 @@ async def execute_with_approval(
             - denied=False 时，args 已被原地修改（_pre_approved / _approval_action），调用方继续分发。
     """
     # YOLO 模式：所有工具直接自动批准，无例外
-    from system.context import get_runtime_context
-    if get_runtime_context().yolo:
+    if get_approval_mode(session_id) == ApprovalMode.YOLO:
         args["_pre_approved"] = True
         args["_approval_action"] = "allow_once"
         return ApprovalOutcome(denied=False, approved_args=args)

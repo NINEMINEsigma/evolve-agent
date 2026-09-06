@@ -461,24 +461,24 @@ class MessageRouter:
         )
 
     async def handle_handsfree_mode(self, msg: Message) -> None:
-        """处理脱手模式切换，回送服务端权威状态。"""
-        from system.context import get_runtime_context
-        from component.approval import set_handsfree_mode
+        """处理审批模式切换，回送服务端权威状态。"""
+        from component.approval import set_approval_mode
+        from entity.puretype import ApprovalMode
 
-        ctx = get_runtime_context()
-        if ctx.yolo:
-            logger.info("Handsfree toggle ignored — YOLO mode active | session=%s", self.sid)
-            actual = False
-        else:
-            enabled = msg.content is not None and (str(msg.content).lower() in ("true", "1", "on"))
-            actual = set_handsfree_mode(self.sid, enabled)
-            logger.info("Handsfree mode toggle | session=%s enabled=%s actual=%s", self.sid, enabled, actual)
+        mode_str = str(msg.content or "").strip().lower()
+        try:
+            mode = ApprovalMode(mode_str)
+        except ValueError:
+            mode = ApprovalMode.MANUAL
+        actual = set_approval_mode(self.sid, mode)
+        logger.info("Approval mode toggle | session=%s requested=%s actual=%s", self.sid, mode_str, actual.value)
         await self.ws.send_text(
             json.dumps(
                 Message(
                     type=MessageType.HANDSFREE_MODE,
                     session_id=self.sid,
-                    handsfree_mode=actual,
+                    handsfree_mode=actual == ApprovalMode.HANDSFREE,
+                    approval_mode=actual.value,
                 ).model_dump(exclude_none=True),
                 ensure_ascii=False,
             )

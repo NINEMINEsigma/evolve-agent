@@ -24,6 +24,7 @@ const EMPTY_PROFILE: LlmProfile = {
   vision_image_profile: null,
   audio_profile: null,
   vision_video_profile: null,
+  soul_file: "SOUL.md",
 };
 
 function generateDuplicateName(sourceName: string, existingNames: string[]): string {
@@ -481,6 +482,20 @@ export default function LlmProfileDrawer({
                         <option key={p.name} value={p.name}>{p.name}</option>
                       ))}
                   </select>
+                </div>
+
+                <div className="llm-profile-section">
+                  <div className="llm-profile-section-title">人格</div>
+
+                  <label className="llm-profile-label">灵魂文件名</label>
+                  <input
+                    className="llm-profile-input"
+                    type="text"
+                    value={draft.soul_file}
+                    onChange={(e) => updateField("soul_file", e.target.value)}
+                    disabled={!isEditing}
+                    placeholder="SOUL.md"
+                  />
                 </div>
 
                 {/* 操作按钮区 */}

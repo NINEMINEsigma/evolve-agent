@@ -154,6 +154,7 @@ class LLMProfile(BaseModel):
     vision_image_profile: LLMProfile | None = None
     audio_profile: LLMProfile | None = None
     vision_video_profile: LLMProfile | None = None
+    soul_file: str = "SOUL.md"
 
 
 LLMProfile.model_rebuild()
@@ -183,6 +184,7 @@ class LLMProfilePayload(BaseModel):
     vision_image_profile: str | None
     audio_profile: str | None
     vision_video_profile: str | None
+    soul_file: str = "SOUL.md"
 
 
 class LLMProfileUpdateRequest(BaseModel):

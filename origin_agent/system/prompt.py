@@ -157,7 +157,7 @@ def build_system_prompt(
         blocks.append(gene)
 
     # 0a. SOUL — 人+AI 共同编辑的个性/风格（agentspace/{soul_file}）
-    soul_file_name: str = runtime_ctx.soul_file if runtime_ctx else "SOUL.md"
+    soul_file_name: str = (profile.soul_file if profile and profile.soul_file else "SOUL.md")
     workspace_path: Path = Path(workspace) if workspace else Path()
     soul: str = _read_soul(Path(agentspace) if agentspace else Path(), soul_file_name)
     if soul:

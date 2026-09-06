@@ -286,16 +286,15 @@ class SubAgentLoop(BasePrivateChatAgentLoop):
         基于 SUB_SESSION_POLICY：子会话的工具审批由主 agent 审批，
         因此采用更严格的阈值——safe 直接执行，write/dangerous 需审批。
         """
-        from system.context import get_runtime_context
-        if get_runtime_context().yolo:
+        from component.approval.handsfree import get_approval_mode, ApprovalMode
+        if get_approval_mode(self._parent_session_id) == ApprovalMode.YOLO:
             return True
         entry = tool_registry.get_entry(name)
         if entry is None:
             return False
         from component.approval.policy import needs_approval as _policy_needs_approval, SUB_SESSION_POLICY
-        from component.approval.handsfree import is_handsfree_mode
-        handsfree = is_handsfree_mode(self._parent_session_id)
-        return not _policy_needs_approval(SUB_SESSION_POLICY, entry.danger_level, handsfree)
+        approval_mode = get_approval_mode(self._parent_session_id)
+        return not _policy_needs_approval(SUB_SESSION_POLICY, entry.danger_level, approval_mode)
 
     def _is_auto_approved_tool(self, name: str, args: dict) -> bool:
         """检查工具调用是否在 allowlist 中（始终自动批准）。"""

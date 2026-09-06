@@ -117,9 +117,7 @@ def _build_base_args():
         "--mcp_config_path",                quote(mcp_config_path),
         "--merge_concat_threshold",         quote(merge_concat_threshold),
         "--frontend_force_build",           quote(frontend_force_build),
-        "--yolo",                           quote(yolo),
         "--git_remotes",                    quote(git_remotes),
-        "--soul_file",                      quote(soul_file),
     ]
 
 
@@ -127,11 +125,11 @@ if __name__ == "__main__":
     fast_agent_space = (workspace_path/fast_agent_space_path)
     slow_agent_space = (workspace_path/slow_agent_space_path)
     source = Path(origin_agent_codes_path)
-    if (agentspace_path_name / soul_file).exists() == False:
-        if Path(soul_file).exists():
-            shutil.copy(soul_file, agentspace_path_name / soul_file)
+    if (agentspace_path_name / "SOUL.md").exists() == False:
+        if Path("SOUL.md").exists():
+            shutil.copy("SOUL.md", agentspace_path_name / "SOUL.md")
         else:
-            (agentspace_path_name / soul_file).touch() # 创建空 soul 文件
+            (agentspace_path_name / "SOUL.md").touch() # 创建空 soul 文件
     if Path("skills/").exists() == False:
         shutil.copytree("pre-skills/", "skills/", dirs_exist_ok=True) # 复制预设技能到skills目录
     if force_init:

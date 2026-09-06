@@ -273,12 +273,13 @@ export default function Layout({ ws, onContextMenu, contextMenuOpen }: LayoutPro
           llmMaxContextTokens={ws.llmMaxContextTokens}
           handsfreeMode={ws.handsfreeMode}
           yoloMode={ws.yoloMode}
+          approvalMode={ws.approvalMode}
           approvalModelAvailable={ws.approvalModelAvailable}
           approvalModelName={ws.approvalModelName}
           llmModelName={ws.llmModelName}
           sidebarCollapsed={sidebarCollapsed}
           onToggleSidebar={() => setSidebarCollapsed((v) => !v)}
-          onToggleHandsfree={ws.toggleHandsfree}
+          onSetApprovalMode={ws.setApprovalMode}
           agents={ws.agents}
           collapsed={headerCollapsed}
           onToggleCollapse={() => setHeaderCollapsed((v) => !v)}

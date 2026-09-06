@@ -6,6 +6,7 @@
 """
 
 from entity.puretype import (
+    ApprovalMode,
     ApprovalOutcome,
     ApprovalPolicy,
     ApprovalProfileMutationResponse,
@@ -16,8 +17,11 @@ from entity.puretype import (
 from component.approval.backend import ApprovalBackend, ProfileApprovalBackend
 from component.approval.handsfree import (
     disable_all_handsfree_modes,
+    disable_all_non_manual_modes,
+    get_approval_mode,
     is_handsfree_available,
     is_handsfree_mode,
+    set_approval_mode,
     set_handsfree_mode,
 )
 from component.approval.core import build_denied_tool_result, request_user_confirm
@@ -28,14 +32,18 @@ from component.approval.policy import MAIN_SESSION_POLICY, SUB_SESSION_POLICY, n
 __all__ = [
     "ApprovalResult",
     "ApprovalOutcome",
+    "ApprovalMode",
     "ApprovalPolicy",
     "ApprovalProfileUpdateRequest",
     "ApprovalProfileState",
     "ApprovalProfileMutationResponse",
     "ApprovalBackend",
     "ProfileApprovalBackend",
+    "set_approval_mode",
+    "get_approval_mode",
     "set_handsfree_mode",
     "is_handsfree_mode",
+    "disable_all_non_manual_modes",
     "disable_all_handsfree_modes",
     "is_handsfree_available",
     "request_user_confirm",

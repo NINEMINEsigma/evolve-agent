@@ -54,6 +54,8 @@ export interface SessionStore {
   setSearchQuery: React.Dispatch<React.SetStateAction<string>>;
   handsfreeMode: boolean;
   setHandsfreeMode: React.Dispatch<React.SetStateAction<boolean>>;
+  approvalMode: string;
+  setApprovalMode: React.Dispatch<React.SetStateAction<string>>;
   yoloMode: boolean;
   setYoloMode: React.Dispatch<React.SetStateAction<boolean>>;
   taskProgress: Record<string, TaskProgress>;
@@ -171,6 +173,7 @@ export function useSessionStore(callbacks: SessionStoreCallbacks = {}): SessionS
   const [sessions, setSessions] = useState<SessionInfo[]>([]);
   const [searchQuery, setSearchQuery] = useState("");
   const [handsfreeMode, setHandsfreeMode] = useState(false);
+  const [approvalMode, setApprovalMode] = useState("manual");
   const [yoloMode, setYoloMode] = useState(false);
   const [taskProgress, setTaskProgress] = useState<Record<string, TaskProgress>>({});
   const [clipboardDisplays, setClipboardDisplays] = useState<Record<string, ClipboardDisplay>>({});
@@ -462,7 +465,6 @@ export function useSessionStore(callbacks: SessionStoreCallbacks = {}): SessionS
         if (data.server_info) {
           const info = data.server_info;
           setServerInfo(info);
-          setYoloMode(info.yolo || false);
           return;
         }
         if (data.session_history) {
@@ -564,6 +566,10 @@ export function useSessionStore(callbacks: SessionStoreCallbacks = {}): SessionS
           if (data.context_tokens !== undefined) setContextTokens(data.context_tokens);
           if (data.processing) setWaiting(true);
           if (data.handsfree_mode !== undefined) setHandsfreeMode(data.handsfree_mode);
+          if (data.approval_mode !== undefined) {
+            setApprovalMode(data.approval_mode);
+            setYoloMode(data.approval_mode === "yolo");
+          }
           if (msg.session_id) {
             setSessionId(msg.session_id);
             localStorage.setItem(STORAGE_KEYS.SESSION_ID, msg.session_id);
@@ -1421,6 +1427,8 @@ export function useSessionStore(callbacks: SessionStoreCallbacks = {}): SessionS
     setSearchQuery,
     handsfreeMode,
     setHandsfreeMode,
+    approvalMode,
+    setApprovalMode,
     yoloMode,
     setYoloMode,
     taskProgress,

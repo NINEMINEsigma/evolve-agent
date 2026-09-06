@@ -1,4 +1,5 @@
 from pydantic import BaseModel, ConfigDict, Field
+from enum import Enum
 
 from entity.constant import SYSTEM_CHARACTER_NAME
 from ._base import ToolDangerLevel
@@ -6,6 +7,20 @@ from ._base import ToolDangerLevel
 # ---------------------------------------------------------------------------
 # Approval Types
 # ---------------------------------------------------------------------------
+
+class ApprovalMode(str, Enum):
+    """会话级审批模式三态枚举。
+
+    每会话同一时间只能处于一种模式：
+    - MANUAL：手动模式，工具调用由用户在前端逐条审批
+    - HANDSFREE：脱手模式，工具调用由审批模型自动审批（critical 除外）
+    - YOLO：YOLO 模式，所有工具调用直接自动批准（含 critical）
+    """
+
+    MANUAL = "manual"
+    HANDSFREE = "handsfree"
+    YOLO = "yolo"
+
 
 class ApprovalPolicy(BaseModel):
     """审批策略：定义在特定会话角色下，哪些 danger_level 需要审批。

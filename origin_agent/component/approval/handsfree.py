@@ -12,12 +12,12 @@ from entity.constant import (
     SYSTEM_CHARACTER_NAME,
 )
 from entity.messages import BaseMessage
-from entity.puretype import ApprovalResult, Role
+from entity.puretype import ApprovalResult, ApprovalMode, Role
 
 logger = logging.getLogger(__name__)
 
 
-_handsfree_sessions: dict[str, bool] = {}
+_approval_modes: dict[str, ApprovalMode] = {}
 
 
 def is_handsfree_available() -> bool:
@@ -32,35 +32,58 @@ def is_handsfree_available() -> bool:
         return False
 
 
-def set_handsfree_mode(session_id: str, enabled: bool) -> bool:
-    """设置会话脱手模式并返回服务端实际状态。"""
-    actual = bool(enabled and is_handsfree_available())
-    _handsfree_sessions[session_id] = actual
+def set_approval_mode(session_id: str, mode: ApprovalMode) -> ApprovalMode:
+    """设置会话审批模式并返回服务端实际状态。
+
+    HANDSFREE 模式在审批模型不可用时回退为 MANUAL。
+    """
+    if mode == ApprovalMode.HANDSFREE and not is_handsfree_available():
+        actual = ApprovalMode.MANUAL
+    else:
+        actual = mode
+    _approval_modes[session_id] = actual
     logger.info(
-        "Handsfree mode %s for session=%s",
-        "enabled" if actual else "disabled",
-        session_id,
+        "Approval mode set | session=%s mode=%s actual=%s",
+        session_id, mode.value, actual.value,
     )
     return actual
 
 
-def disable_all_handsfree_modes() -> list[str]:
-    """关闭全部已开启会话并返回受影响的 session ID。"""
+def get_approval_mode(session_id: str) -> ApprovalMode:
+    """返回该会话当前的审批模式（默认 MANUAL）。"""
+    return _approval_modes.get(session_id, ApprovalMode.MANUAL)
+
+
+def disable_all_non_manual_modes() -> list[str]:
+    """将全部非 MANUAL 的会话重置为 MANUAL，返回受影响的 session ID。"""
     disabled = sorted(
         session_id
-        for session_id, enabled in _handsfree_sessions.items()
-        if enabled
+        for session_id, mode in _approval_modes.items()
+        if mode != ApprovalMode.MANUAL
     )
     for session_id in disabled:
-        _handsfree_sessions[session_id] = False
+        _approval_modes[session_id] = ApprovalMode.MANUAL
     if disabled:
-        logger.info("Disabled handsfree mode for sessions=%s", disabled)
+        logger.info("Reset non-manual approval modes for sessions=%s", disabled)
     return disabled
 
 
+# ---- 向后兼容包装 ----
+
+def set_handsfree_mode(session_id: str, enabled: bool) -> bool:
+    """兼容包装：设置脱手模式。等价于 set_approval_mode(sid, HANDSFREE/MANUAL)。"""
+    mode = ApprovalMode.HANDSFREE if enabled else ApprovalMode.MANUAL
+    return set_approval_mode(session_id, mode) == ApprovalMode.HANDSFREE
+
+
 def is_handsfree_mode(session_id: str) -> bool:
-    """返回该 session 是否处于脱手模式。"""
-    return _handsfree_sessions.get(session_id, False)
+    """兼容包装：返回该会话是否处于脱手模式。"""
+    return get_approval_mode(session_id) == ApprovalMode.HANDSFREE
+
+
+def disable_all_handsfree_modes() -> list[str]:
+    """兼容包装：关闭全部脱手模式会话。等价于 disable_all_non_manual_modes()。"""
+    return disable_all_non_manual_modes()
 
 
 def _approval_model_failure(reason: str) -> ApprovalResult:
@@ -124,7 +147,7 @@ async def _handsfree_confirm(
         _approval_profile.model if _approval_profile else None,
     )
 
-    from system.pathutils import find_repo_root, get_templates_dir
+    from system.pathutils import get_templates_dir
 
     # 获取工具的参数 schema，使审批模型能理解每个参数的类型、描述、
     # 默认值和是否必填，从而区分"必需信息缺失"与"可选参数省略"。
@@ -139,7 +162,6 @@ async def _handsfree_confirm(
         "schema": tool_schema,
         "args": args,
         "reason": reason,
-        "cwd": str(find_repo_root().resolve()),
     }
     if extra_context:
         user_prompt_data["context"] = extra_context

@@ -6,19 +6,20 @@
 
 from __future__ import annotations
 
-from entity.puretype import ApprovalPolicy, ToolDangerLevel
+from entity.puretype import ApprovalMode, ApprovalPolicy, ToolDangerLevel
 
 
 def needs_approval(
     policy: ApprovalPolicy,
     danger_level: ToolDangerLevel,
-    handsfree: bool,
+    approval_mode: ApprovalMode,
 ) -> bool:
     """判断工具是否需要审批。
 
-    根据是否为脱手模式选择对应的 requires 集合，返回 danger_level 是否在该集合中。
+    根据审批模式选择对应的 requires 集合，返回 danger_level 是否在该集合中。
+    HANDSFREE 模式使用 handsfree_requires，其余使用 normal_requires。
     """
-    requires = policy.handsfree_requires if handsfree else policy.normal_requires
+    requires = policy.handsfree_requires if approval_mode == ApprovalMode.HANDSFREE else policy.normal_requires
     return danger_level in requires
 
 

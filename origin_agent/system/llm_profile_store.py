@@ -41,6 +41,7 @@ _PROFILE_FIELDS: tuple[str, ...] = (
     "max_output_tokens",
     "reasoning_effort",
     "max_context_tokens",
+    "soul_file",
     *_REFERENCE_FIELDS,
 )
 
@@ -141,6 +142,7 @@ class LLMProfileStore:
                     profile.vision_video_profile.name
                     if profile.vision_video_profile is not None else None
                 ),
+                soul_file=profile.soul_file,
             )
 
     def create_profile(self, payload: LLMProfilePayload) -> LLMProfile:
@@ -163,6 +165,7 @@ class LLMProfileStore:
                 max_output_tokens=payload.max_output_tokens,
                 reasoning_effort=payload.reasoning_effort,
                 max_context_tokens=payload.max_context_tokens,
+                soul_file=payload.soul_file,
                 **refs,
             )
             self._data.profiles.append(profile)
@@ -311,6 +314,7 @@ class LLMProfileStore:
             "model",
             "api_key",
             "reasoning_effort",
+            "soul_file",
         )
         for field in string_fields:
             if type(getattr(profile, field)) is not str:
@@ -362,6 +366,7 @@ class LLMProfileStore:
             "max_output_tokens",
             "reasoning_effort",
             "max_context_tokens",
+            "soul_file",
         ):
             setattr(profile, field, getattr(payload, field))
         for field, value in refs.items():
