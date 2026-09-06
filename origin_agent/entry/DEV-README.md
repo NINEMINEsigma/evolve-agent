@@ -14,7 +14,7 @@ entry/
 ├── multi_agent_loop.py           ← 多 Agent 广播协作循环
 ├── multi_agent_worker.py         ← 单 Agent tool loop 执行器
 ├── agent_sink.py                 ← AgentSink / FrontendSink / ParentAgentSink
-├── session_message_queue.py      ← 主会话逐条 FIFO 消息队列（每条保留 Profile 名称）
+├── session_message_queue.py      ← 主会话逐条 FIFO 消息队列（每条保留 Profile 名称；drain_injected 额外返回 consumed_client_message_ids 供前端移除已排队徽章）
 ├── session_manager.py            ← LoopSessionManager（session 生命周期）
 ├── stream_consumer.py            ← StreamConsumer（LLM 流式响应消费器）
 ├── tool_executor.py              ← ToolExecutor（统一工具调用执行器）
@@ -185,6 +185,8 @@ sequenceDiagram
 6. 解析流中的文本 / tool_call，通过 `FrontendSink` 实时推送。
 7. 对 tool_call 执行 `ToolExecutor.execute()`：safe / allowlist 直接执行，否则等待审批。
 8. 工具结果加入历史，循环直到 `finish_reason=stop` 或达到 `MAX_TOOL_TURNS`。
+
+> **延迟渲染与消费确认**：前端发送消息后不乐观渲染气泡，改为在输入栏显示"已排队"徽章。后端通过两条路径确认消费方式：空闲消费时 `emit_user_message` 回显 → 前端渲染正式气泡并移除徽章；工具链注入时 `drain_injected` 在 `queued_messages` 旁返回 `consumed_client_message_ids`，经 `finalize_tool_result` pop 隔离后透传到 `tool_result` 事件 → 前端移除匹配徽章（消息仅留在工具结果内，不显示独立气泡）。中断、切会话、历史重载时清空徽章。
 
 ---
 

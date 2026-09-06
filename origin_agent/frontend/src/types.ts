@@ -183,6 +183,7 @@ export interface WSMessage {
   index?: number;
   client_message_id?: string;
   tool_call_meta?: ToolCallMeta;   // TOOL_RESULT：工具调用时间元信息
+  consumed_client_message_ids?: string[];   // TOOL_RESULT：被工具链消费的用户消息 client_message_id 列表（用于移除已排队徽章）
   danger_level?: string;           // CONFIRM_REQUEST：工具危险等级
   client_info?: Record<string, string>;   // USER_MESSAGE：前端客户端信息
   llm_profile_name?: string;                   // USER_MESSAGE：当前 Profile 名称，空字符串=无配置

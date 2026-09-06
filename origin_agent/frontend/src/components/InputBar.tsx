@@ -111,6 +111,8 @@ interface InputBarProps {
   tokenUsage: number;
   contextTokens: number;
   llmMaxContextTokens: number;
+  // 已排队待确认的消息数（延迟渲染期间显示徽章）
+  pendingMessageCount: number;
 }
 
 // ── 零测量静态判定 hook：按展开态固有宽度（常量）与视口比较，防收起后振荡 ──
@@ -169,6 +171,7 @@ export default function InputBar({
   tokenUsage,
   contextTokens,
   llmMaxContextTokens,
+  pendingMessageCount,
 }: InputBarProps) {
   // ── 变形计算：confirm 队首优先于 ask ──
   const morphItem: MorphItem | null = pendingConfirms.length > 0
@@ -294,6 +297,11 @@ export default function InputBar({
               setInputText("");
             }}
           />
+        )}
+        {pendingMessageCount > 0 && (
+          <div className="input-pending-badge" title={`${pendingMessageCount} 条消息已排队，等待后端确认消费方式`}>
+            ⏳ {pendingMessageCount}
+          </div>
         )}
         {hasSubagents && (
           <div className="input-target-row">

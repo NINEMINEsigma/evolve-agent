@@ -367,6 +367,7 @@ export default function Layout({ ws, onContextMenu, contextMenuOpen }: LayoutPro
                 tokenUsage={ws.tokenUsage}
                 contextTokens={ws.contextTokens}
                 llmMaxContextTokens={ws.llmMaxContextTokens}
+                pendingMessageCount={Object.keys(ws.pendingMessages).length}
               />
             </ChatArea>
           </>

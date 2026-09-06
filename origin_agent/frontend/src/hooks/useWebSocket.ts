@@ -465,14 +465,7 @@ export function useWebSocket() {
     const content: MessageContent = blocks.length === 1 && blocks[0].type === "text" ? blocks[0].text : blocks;
     const clientMessageId = generateUUID();
 
-    s.setMessages((prev) => [...prev, {
-      role: "user",
-      content,
-      id: clientMessageId,
-      clientMessageId,
-      visibleCharacters: visible_characters,
-      responseCharacters: response_characters,
-    }]);
+    s.addPendingMessage(clientMessageId, content);
 
     c.send({
       type: WS_OUT.USER_MESSAGE,
@@ -581,6 +574,7 @@ export function useWebSocket() {
     if (!s) return;
     s.ignoreStaleRef.current = true;
     s.setWaiting(false);
+    s.setPendingMessages({});
     const streamed = s.streamingMessageRef.current;
     s.setStreamingMessage(null);
     s.setMessages((prev) => {
@@ -835,6 +829,7 @@ export function useWebSocket() {
     regenerateResponse: (messageIndex: number) => session.regenerateResponse(messageIndex, llmProfilesRef.current.toProfileName()),
     updateMessageVisibility: session.updateMessageVisibility,
     addMessage: session.addMessage,
+    pendingMessages: session.pendingMessages,
     fetchSessions: session.fetchSessions,
     fetchAllTags: session.fetchAllTags,
     connect: conn.connect,

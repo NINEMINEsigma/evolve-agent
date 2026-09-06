@@ -93,6 +93,9 @@ async def finalize_tool_result(
             )
 
     # 转换为可保存到 History 的 content
+    # 提取被工具链消费的用户消息 client_message_id 列表（由 drain_injected 通过
+    # field_injector 注入），pop 出 result 以确保不进入 content（不进历史/不进 LLM）。
+    consumed_ids: list[str] | None = result.pop("consumed_client_message_ids", None)
     # 检查是否需要 follow_up（user 消息多模态回退路径）
     follow_up_messages: list[BaseMessage] | None = None
     if isinstance(result, dict) and "_user_blocks" in result:
@@ -105,6 +108,7 @@ async def finalize_tool_result(
         session_id, tool_name, tool_call_id, content_to_text(content),
         character_name=character_name,
         tool_call_meta=_meta.model_dump(),
+        consumed_client_message_ids=consumed_ids,
     )
 
     # 对前端 UI 类工具推送实时状态更新（工具模块自行注册事件类型）

@@ -154,7 +154,9 @@ class SessionMessageQueue:
         existing = result.get("queued_messages")
         merged: list = list(existing) if isinstance(existing, list) else []
         merged.extend(messages)
-        return {"queued_messages": merged}
+        # 提取被消费消息的 client_message_id 列表（供 tool_result 事件透传给前端移除已排队徽章）
+        consumed_ids = [m.client_message_id for m in items if m.client_message_id]
+        return {"queued_messages": merged, "consumed_client_message_ids": consumed_ids}
 
     def _build_queued_messages(self, items: list[QueuedMessage]) -> list[dict]:
         """构造 queued_messages 字段值：每条消息为嵌套结构化 dict。"""

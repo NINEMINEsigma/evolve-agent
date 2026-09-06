@@ -106,6 +106,10 @@ export interface SessionStore {
   ignoreStaleRef: React.MutableRefObject<boolean>;
   streamDoneRef: React.MutableRefObject<boolean>;
   addMessage: AddMessageFn;
+  pendingMessages: Record<string, { content: MessageContent; timestamp: number }>;
+  addPendingMessage: (clientMessageId: string, content: MessageContent) => void;
+  removePendingMessages: (clientMessageIds: string[]) => void;
+  setPendingMessages: React.Dispatch<React.SetStateAction<Record<string, { content: MessageContent; timestamp: number }>>>;
   fetchSessions: () => void;
   fetchAllTags: () => void;
   handleMessage: (msg: WSMessage) => void;
@@ -190,6 +194,8 @@ export function useSessionStore(callbacks: SessionStoreCallbacks = {}): SessionS
   const [renamingSessionId, setRenamingSessionId] = useState<string | null>(null);
   const [streamingMessage, setStreamingMessage] = useState<ChatMessage | null>(null);
   const [allTags, setAllTags] = useState<string[]>([]);
+  // 已排队待确认的用户消息：client_message_id → { content, timestamp }
+  const [pendingMessages, setPendingMessages] = useState<Record<string, { content: MessageContent; timestamp: number }>>({});
   const [expandedClusters, setExpandedClusters] = usePersistentState<Set<string>>(
     STORAGE_KEYS.EXPANDED_CLUSTERS, new Set(),
     { serialize: (s) => JSON.stringify(Array.from(s)),
@@ -408,6 +414,20 @@ export function useSessionStore(callbacks: SessionStoreCallbacks = {}): SessionS
     }]);
   }, []);
 
+  // 已排队消息管理：发送时记录 pending，回显/消费确认时移除
+  const addPendingMessage = useCallback((clientMessageId: string, content: MessageContent) => {
+    setPendingMessages((prev) => ({ ...prev, [clientMessageId]: { content, timestamp: Date.now() } }));
+  }, []);
+
+  const removePendingMessages = useCallback((clientMessageIds: string[]) => {
+    if (!clientMessageIds.length) return;
+    setPendingMessages((prev) => {
+      const next = { ...prev };
+      for (const id of clientMessageIds) delete next[id];
+      return next;
+    });
+  }, []);
+
   const fetchSessions = useCallback(() => {
     fetch("/api/sessions")
       .then((r) => r.json())
@@ -534,6 +554,7 @@ export function useSessionStore(callbacks: SessionStoreCallbacks = {}): SessionS
           if (history.length) {
             setMessages(history);
           }
+          setPendingMessages({});
           if (data.agents && Array.isArray(data.agents)) {
             setAgents(data.agents);
           } else if ("agents" in data) {
@@ -583,6 +604,7 @@ export function useSessionStore(callbacks: SessionStoreCallbacks = {}): SessionS
           setSessionId(data.new_sid);
           localStorage.setItem(STORAGE_KEYS.SESSION_ID, data.new_sid);
           setMessages([]);
+          setPendingMessages({});
           setTokenUsage(0);
           setClipboardDisplays({});
           setTaskProgress({});
@@ -670,6 +692,9 @@ export function useSessionStore(callbacks: SessionStoreCallbacks = {}): SessionS
           dynamicMessageSuffix: (msg as any).dynamic_message_suffix ?? undefined,
         }];
       });
+      if (incomingClientId) {
+        removePendingMessages([incomingClientId]);
+      }
       return;
     }
 
@@ -782,6 +807,9 @@ export function useSessionStore(callbacks: SessionStoreCallbacks = {}): SessionS
         toolCallMeta: msg.tool_call_meta as import("../types").ToolCallMeta | undefined,
         isError: parsed.isError,
       }]);
+      if (msg.consumed_client_message_ids && msg.consumed_client_message_ids.length > 0) {
+        removePendingMessages(msg.consumed_client_message_ids);
+      }
       return;
     }
 
@@ -1024,6 +1052,7 @@ export function useSessionStore(callbacks: SessionStoreCallbacks = {}): SessionS
   const newChat = useCallback(() => {
     localStorage.removeItem(STORAGE_KEYS.SESSION_ID);
     setMessages([]);
+    setPendingMessages({});
     setAgents([]);
     setInput("");
     setSessionId("");
@@ -1041,6 +1070,7 @@ export function useSessionStore(callbacks: SessionStoreCallbacks = {}): SessionS
   const switchSession = useCallback((sid: string) => {
     if (sid === sessionId) return;
     setMessages([]);
+    setPendingMessages({});
     setAgents([]);
     setInput("");
     setSessionId(sid);
@@ -1426,6 +1456,10 @@ export function useSessionStore(callbacks: SessionStoreCallbacks = {}): SessionS
     ignoreStaleRef,
     streamDoneRef,
     addMessage,
+    pendingMessages,
+    addPendingMessage,
+    removePendingMessages,
+    setPendingMessages,
     fetchSessions,
     fetchAllTags,
     handleMessage,
