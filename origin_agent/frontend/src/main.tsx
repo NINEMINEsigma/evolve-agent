@@ -20,6 +20,7 @@ import "./styles/morph.css";
 import "./styles/tooltip.css";
 import "./styles/popup.css";
 import "./styles/context-menu.css";
+import "./styles/onboarding.css";
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>

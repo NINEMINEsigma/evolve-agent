@@ -39,7 +39,7 @@ export default function Drawer({
 
   return (
     <div className="drawer-overlay" onClick={onClose}>
-      <div className="drawer-panel" style={width != null ? { width } : undefined} onClick={(e) => e.stopPropagation()}>
+      <div className="drawer-panel" data-tour="resource-drawer" style={width != null ? { width } : undefined} onClick={(e) => e.stopPropagation()}>
         <div className="drawer-header">
           <span className="drawer-title">会话资源 / 任务</span>
           <button className="drawer-close" onClick={onClose}>✕</button>

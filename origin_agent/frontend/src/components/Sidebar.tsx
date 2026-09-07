@@ -33,6 +33,7 @@ interface SidebarProps {
   width?: number;
   isResizing?: boolean;
   onResizePointerDown?: (e: React.PointerEvent<HTMLElement>) => void;
+  forcePin?: boolean;
 }
 
 function sessionLabel(s: SessionInfo) {
@@ -339,9 +340,10 @@ export default function Sidebar({
   width,
   isResizing,
   onResizePointerDown,
+  forcePin,
 }: SidebarProps) {
   const [searchFocused, setSearchFocused] = useState(false);
-  const drawer = useEdgeDrawer({ active: !isMobile, pinned: contextMenuOpen });
+  const drawer = useEdgeDrawer({ active: !isMobile, pinned: contextMenuOpen || !!forcePin });
   const currentSession = sessions.find((s) => s.id === sessionId);
   const parentSessions = currentSession?.parents
     ?.map((pid) => sessions.find((s) => s.id === pid))
@@ -357,6 +359,7 @@ export default function Sidebar({
     <>
       {!isMobile && <div className="sidebar-hotzone" {...drawer.hotzoneProps} />}
       <aside
+        data-tour="sidebar"
         className={asideClassName}
         style={width != null && !collapsed ? { width } : undefined}
         {...(isMobile ? {} : drawer.drawerProps)}

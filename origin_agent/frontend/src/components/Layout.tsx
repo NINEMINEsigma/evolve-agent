@@ -12,6 +12,7 @@ import Lightbox from "./Lightbox";
 import LlmProfileDrawer from "./LlmProfileDrawer";
 import SessionSiteDrawer from "./SessionSiteSection";
 import SessionLockOverlay from "./SessionLockOverlay";
+import OnboardingTour from "./OnboardingTour";
 import type { WebSocketState } from "../hooks/useWebSocket";
 import { STORAGE_KEYS } from "../constants/storage";
 import { DIMENSIONS } from "../constants/dimensions";
@@ -23,10 +24,14 @@ interface LayoutProps {
   ws: WebSocketState;
   onContextMenu: (e: React.MouseEvent, sid: string) => void;
   contextMenuOpen: boolean;
+  onboardingRun: boolean;
+  onOnboardingClose: () => void;
 }
 
-export default function Layout({ ws, onContextMenu, contextMenuOpen }: LayoutProps) {
+export default function Layout({ ws, onContextMenu, contextMenuOpen, onboardingRun, onOnboardingClose }: LayoutProps) {
   const [lightboxSrc, setLightboxSrc] = useState<string | null>(null);
+  const [pinSidebar, setPinSidebar] = useState(false);
+  const [pinHeader, setPinHeader] = useState(false);
   const [llmDrawerOpen, setLlmDrawerOpen] = usePersistentState(STORAGE_KEYS.LLM_DRAWER_OPEN, false);
   const [siteDrawerOpen, setSiteDrawerOpen] = usePersistentState(STORAGE_KEYS.SITE_DRAWER_OPEN, false);
   const [sidebarCollapsed, setSidebarCollapsed] = usePersistentState(STORAGE_KEYS.SIDEBAR_COLLAPSED, false);
@@ -258,6 +263,7 @@ export default function Layout({ ws, onContextMenu, contextMenuOpen }: LayoutPro
         width={sidebarWidth}
         isResizing={sidebarResize.isResizing}
         onResizePointerDown={sidebarResize.onPointerDown}
+        forcePin={pinSidebar}
       />
 
       {isMobile && !sidebarCollapsed && (
@@ -285,6 +291,7 @@ export default function Layout({ ws, onContextMenu, contextMenuOpen }: LayoutPro
           onToggleCollapse={() => setHeaderCollapsed((v) => !v)}
           isMobile={isMobile}
           llmProfiles={ws.llmProfiles}
+          forcePin={pinHeader}
         />
 
         {ws.sessionLocked ? (
@@ -377,9 +384,10 @@ export default function Layout({ ws, onContextMenu, contextMenuOpen }: LayoutPro
       </div>
 
       {!(drawerOpen || subagentPanelOpen || llmDrawerOpen || siteDrawerOpen) && (
-        <div className="right-trigger-strip">
+        <div className="right-trigger-strip" data-tour="right-trigger-strip">
           <div
             className="right-trigger-bar resource-trigger-bar"
+            data-tour="resource-trigger"
             onClick={() => setDrawerOpen(true)}
             data-tooltip="打开资源/任务抽屉"
           >
@@ -403,6 +411,7 @@ export default function Layout({ ws, onContextMenu, contextMenuOpen }: LayoutPro
           </div>
           <div
             className="right-trigger-bar llm-trigger-bar"
+            data-tour="llm-trigger"
             onClick={() => setLlmDrawerOpen(true)}
             data-tooltip="打开模型配置抽屉"
           >
@@ -466,6 +475,17 @@ export default function Layout({ ws, onContextMenu, contextMenuOpen }: LayoutPro
         width={siteDrawerWidth}
         isResizing={siteDrawerResize.isResizing}
         onResizePointerDown={siteDrawerResize.onPointerDown}
+      />
+
+      <OnboardingTour
+        run={onboardingRun}
+        onClose={onOnboardingClose}
+        isMobile={isMobile}
+        setSidebarCollapsed={setSidebarCollapsed}
+        setDrawerOpen={setDrawerOpen}
+        setLlmDrawerOpen={setLlmDrawerOpen}
+        onPinSidebarChange={setPinSidebar}
+        onPinHeaderChange={setPinHeader}
       />
     </>
   );

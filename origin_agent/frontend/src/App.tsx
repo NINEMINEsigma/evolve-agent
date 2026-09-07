@@ -11,11 +11,13 @@ import { ConnectionDiagnosticsProvider } from "./context/ConnectionDiagnosticsCo
 import ErrorBoundary from "./components/ErrorBoundary";
 import Agentspace from "./pages/Agentspace";
 import { SessionInfo } from "./types";
+import { STORAGE_KEYS } from "./constants/storage";
 
 function ChatApp() {
   useGlobalTooltip();
   const ws = useWebSocket();
   const [showSplash, setShowSplash] = useState(true);
+  const [showOnboarding, setShowOnboarding] = useState(false);
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; sid: string } | null>(null);
   const [tagEditorSession, setTagEditorSession] = useState<SessionInfo | null>(null);
 
@@ -44,7 +46,20 @@ function ChatApp() {
             recvTick: ws.recvTick,
           }}
         >
-          <Layout ws={ws} onContextMenu={handleContextMenu} contextMenuOpen={contextMenu !== null} />
+          <Layout
+            ws={ws}
+            onContextMenu={handleContextMenu}
+            contextMenuOpen={contextMenu !== null}
+            onboardingRun={showOnboarding}
+            onOnboardingClose={() => {
+              try {
+                localStorage.setItem(STORAGE_KEYS.ONBOARDING_COMPLETED, "true");
+              } catch {
+                // localStorage 不可用时静默失败
+              }
+              setShowOnboarding(false);
+            }}
+          />
         </ConnectionDiagnosticsProvider>
         <ChatContextMenu
           contextMenu={contextMenu}
@@ -79,7 +94,19 @@ function ChatApp() {
       {/* 开屏动画覆盖层 */}
       <AnimatePresence mode="wait">
         {showSplash && (
-          <SplashScreen key="splash" onFinish={() => setShowSplash(false)} />
+          <SplashScreen
+            key="splash"
+            onFinish={() => {
+              setShowSplash(false);
+              try {
+                if (localStorage.getItem(STORAGE_KEYS.ONBOARDING_COMPLETED) !== "true") {
+                  setShowOnboarding(true);
+                }
+              } catch {
+                // localStorage 不可用时静默失败
+              }
+            }}
+          />
         )}
       </AnimatePresence>
     </ErrorBoundary>

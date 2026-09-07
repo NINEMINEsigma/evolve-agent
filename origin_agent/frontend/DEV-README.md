@@ -89,6 +89,7 @@ frontend/
 | `Sidebar.tsx` | 会话列表、搜索、新建会话 |
 | `Header.tsx` | 顶部工具栏、模型信息、设置入口 |
 | `Drawer.tsx` | 侧边抽屉容器 |
+| `OnboardingTour.tsx` | 首次访问引导向导（react-joyride），spotlight 高亮 + 步骤动画驱动 |
 | `ErrorBoundary.tsx` | 错误边界，防止模态组件异常卸载整个 App |
 | `SplashScreen.tsx` | 开屏动画，最少停留 800ms、最多 3000ms，可点击跳过 |
 | `ContourBackground.tsx` | 聊天区 canvas 等高线动态背景 |
@@ -212,6 +213,7 @@ frontend/
 | `popup.css` | 弹出层 |
 | `splash.css` | 启动屏 |
 | `skeleton.css` | 组件级骨架占位样式（shimmer 动画） |
+| `onboarding.css` | 引导向导样式覆盖（react-joyride 主题微调） |
 
 ---
 

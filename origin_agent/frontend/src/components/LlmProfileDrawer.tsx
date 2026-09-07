@@ -250,6 +250,7 @@ export default function LlmProfileDrawer({
     <div className="drawer-overlay" onClick={onClose}>
       <div
         className="drawer-panel llm-drawer"
+        data-tour="llm-drawer-panel"
         style={width != null ? { width } : undefined}
         onClick={(e) => e.stopPropagation()}
       >

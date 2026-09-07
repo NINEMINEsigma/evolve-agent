@@ -1,0 +1,25 @@
+/* ── Onboarding Tour (react-joyride 样式覆盖) ── */
+/* 主要主题适配通过 Joyride options/styles props 完成，
+   此文件仅用于 CSS 层面的微调，如字体继承、圆角等。
+   react-joyride v3 的 CSS 类名前缀在运行时确认，
+   如类名不匹配则此文件内容无效（由 styles prop 承担）。 */
+
+.joyride-tooltip {
+  font-family: inherit;
+}
+
+.joyride-tooltip__title {
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.joyride-tooltip__content {
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+.joyride-tooltip__button--primary,
+.joyride-tooltip__button--back,
+.joyride-tooltip__button--skip {
+  border-radius: var(--radius-sm);
+}

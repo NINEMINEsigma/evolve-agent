@@ -26,6 +26,9 @@ export const STORAGE_KEYS = {
   // LLM 模型配置
   ACTIVE_LLM_PROFILE:  "evolve_active_llm_profile",
 
+  // 首次引导向导完成标志
+  ONBOARDING_COMPLETED: "evolve_onboarding_completed",
+
   // 按会话隔离
   SUBAGENT_PANEL_OPEN:    "evolve_subagent_panel_open",
   ACTIVE_SUBAGENT_ID:     "evolve_active_subagent_id",

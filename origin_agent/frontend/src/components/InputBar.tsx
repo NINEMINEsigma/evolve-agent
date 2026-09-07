@@ -277,7 +277,7 @@ export default function InputBar({
   ];
 
   return (
-    <footer className="input-bar">
+    <footer className="input-bar" data-tour="input-bar">
       {!chatEmpty && (
         <TaskProgressPanel
           taskProgress={taskProgress}

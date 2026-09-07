@@ -27,6 +27,7 @@ interface HeaderProps {
   onToggleCollapse?: () => void;
   isMobile?: boolean;
   llmProfiles?: LlmProfileManager;
+  forcePin?: boolean;
 }
 
 export default function Header({
@@ -48,12 +49,13 @@ export default function Header({
   onToggleCollapse,
   isMobile,
   llmProfiles,
+  forcePin,
 }: HeaderProps) {
   const [cmdMenuOpen, setCmdMenuOpen] = useState(false);
   const [menuPos, setMenuPos] = useState<{ top: number; left: number } | null>(null);
   const cmdBtnRef = useRef<HTMLButtonElement>(null);
   // 桌面端顶部抽屉状态机；菜单展开期间钉住，断点切到移动端时强制归位
-  const drawer = useEdgeDrawer({ active: !isMobile, pinned: cmdMenuOpen });
+  const drawer = useEdgeDrawer({ active: !isMobile, pinned: cmdMenuOpen || !!forcePin });
 
   useEffect(() => {
     if (!cmdMenuOpen) return;
@@ -92,7 +94,7 @@ export default function Header({
   // 移动端折叠态：只显示精简条
   if (isMobile && collapsed) {
     return (
-      <header className="app-header app-header-collapsed">
+      <header className="app-header app-header-collapsed" data-tour="header">
         <div className="header-left">
           <button
             className="sidebar-toggle"
@@ -141,6 +143,7 @@ export default function Header({
           <HeaderPill status={status} agents={agents} llmModelName={llmModelName} llmProfiles={llmProfiles} />
         </div>
         <header
+          data-tour="header"
           className={`app-header header-drawer header-drawer-${drawer.phase}`}
           {...drawer.drawerProps}
         >
@@ -221,7 +224,7 @@ export default function Header({
 
   // 移动端全量（未折叠）：流内 header
   return (
-    <header className={`app-header ${isMobile && collapsed ? "app-header-collapsed" : ""}`}>
+    <header className={`app-header ${isMobile && collapsed ? "app-header-collapsed" : ""}`} data-tour="header">
       <div className="header-left">
         {isMobile && (
           <button
