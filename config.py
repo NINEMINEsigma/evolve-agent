@@ -69,7 +69,8 @@ elif args.save:
 elif args.interactive:
     from config_tui import run_interactive
     current_config = run_interactive(current_config, cli_overrides)
-else:
+#else:
+elif False:
     config_field_key = input("config key：") or "default"
     if contains(config_field_key, "config.json"):
         base_config = load(config_field_key, "config.json", ignore_missing_fields=True)
