@@ -39,19 +39,20 @@ class ColloquyLoop(ParentAgentLoop):
     # ========================================================================
 
     def _get_tool_definitions(self) -> list[dict]:
-        """返回 component/tools 和 component/extools 范围内的工具 schema。
+        """返回白名单范围内且已加载的工具 schema。
 
-        通过 toolset 白名单仅保留 component/tools 和 component/extools 范围内的工具。
+        在 `_get_effective_tool_definitions()`（已加载工具集 × MAIN scope）基础上，
+        叠加 ColloquyLoop 工具集白名单过滤。
         """
-        tool_to_toolset = tool_registry.get_tool_to_toolset_map()
-        filtered_names: set[str] = set()
-        for name, toolset in tool_to_toolset.items():
-            if toolset in COLLOQUY_TOOLSET_WHITELIST:
-                filtered_names.add(name)
-        return tool_registry.get_definitions_for_availability(
-            scope=ToolAvailability.MAIN,
-            tool_names=filtered_names,
-        )
+        definitions: list[dict] = self._get_effective_tool_definitions()
+        filtered: list[dict] = []
+        for d in definitions:
+            func = d.get("function") or {}
+            name = func.get("name", "")
+            entry = tool_registry.get_entry(name)
+            if entry and entry.toolset in COLLOQUY_TOOLSET_WHITELIST:
+                filtered.append(d)
+        return filtered
 
     # ========================================================================
     # 超限处理 — 滑动窗口压缩

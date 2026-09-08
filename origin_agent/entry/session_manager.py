@@ -153,6 +153,15 @@ class LoopSessionManager:
                     "Failed to transfer tool resources from %s to %s: %s",
                     old_sid, new_sid, exc,
                 )
+        # 迁移加载工具集状态
+        if self._loop.session_store is not None:
+            try:
+                self._loop.session_store.copy_loaded_toolsets(old_sid, new_sid)
+            except Exception as exc:
+                logger.warning(
+                    "Failed to transfer loaded_toolsets from %s to %s: %s",
+                    old_sid, new_sid, exc,
+                )
         result["tool_resources_error"] = tool_resources_error
 
         return result
@@ -408,6 +417,7 @@ async def terminate_and_rotate_session(
     )
     if session_store is not None:
         session_store.copy_active_profile_name(old_sid, new_sid)
+        session_store.copy_loaded_toolsets(old_sid, new_sid)
     session_manager.archive(old_sid, continuation_sid=new_sid)
 
     # 8. 写入仅含 summary 消息的历史到新会话

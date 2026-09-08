@@ -299,6 +299,8 @@ class BaseAgentLoop(ABC):
         self._on_round_done: Callable[[Any], Awaitable[None]] | None = None
         # 角色名 → 当前回复轮次 ID；只在 loop 的事件循环中变更。
         self._agentspace_round_ids: dict[str, str] = {}
+        # 会话级已加载工具集名称集合
+        self._loaded_toolsets: set[str] = set()
 
     def begin_agentspace_round(self, character_name: str) -> str:
         """开始一个 Agent 回复轮次并返回唯一 round_id。"""
@@ -491,6 +493,66 @@ class BaseAgentLoop(ABC):
     async def _check_cancel(self) -> bool:
         """检查取消事件，已中断则返回 True。"""
         return self._cancel_event.is_set()
+
+    # -- 工具集加载状态（所有 loop 共享）-----------------------------------
+
+    def get_tool_availability_scope(self) -> ToolAvailability:
+        """返回当前 loop 的工具可用性 scope。
+
+        子类覆写此方法返回具体的 ToolAvailability（MAIN / SUBAGENT /
+        MULTI_AGENT / TASKAGENT）。默认返回 EVERY。
+        """
+        return ToolAvailability.EVERY
+
+    def get_loaded_toolsets(self) -> set[str]:
+        """返回当前会话已加载的工具集名称集合。"""
+        return set(self._loaded_toolsets)
+
+    def is_toolset_loaded(self, toolset_name: str) -> bool:
+        """检查工具集是否已加载。"""
+        return toolset_name in self._loaded_toolsets
+
+    def load_toolsets(self, toolset_names: list[str]) -> list[str]:
+        """加载工具集，持久化并返回新加载的工具集名称列表。
+
+        幂等：已加载的工具集不重复加载。core 始终在集合中。
+        """
+        newly_loaded: list[str] = []
+        for name in toolset_names:
+            if name not in self._loaded_toolsets:
+                self._loaded_toolsets.add(name)
+                newly_loaded.append(name)
+        if newly_loaded:
+            self._persist_loaded_toolsets()
+        return newly_loaded
+
+    def _persist_loaded_toolsets(self) -> None:
+        """持久化当前已加载工具集到 SessionStore。"""
+        if self._session_store is not None:
+            self._session_store.write_loaded_toolsets(
+                self.session_id, sorted(self._loaded_toolsets),
+            )
+
+    def _restore_loaded_toolsets(self) -> None:
+        """从 SessionStore 恢复已加载工具集；无 SessionStore 时仅加载 core。"""
+        from abstract.tools.registry import DEFAULT_LOADED_TOOLSET
+        if self._session_store is not None:
+            names = self._session_store.read_loaded_toolsets(self.session_id)
+            self._loaded_toolsets = set(names)
+        else:
+            self._loaded_toolsets = {DEFAULT_LOADED_TOOLSET}
+
+    def _get_effective_tool_definitions(self) -> list[dict]:
+        """根据当前 Loop 的 scope 和会话已加载工具集，计算有效工具 schema 列表。
+
+        子类通过 get_tool_availability_scope() 返回当前 Loop 的 ToolAvailability。
+        """
+        from abstract.tools.registry import registry as tool_registry
+        scope = self.get_tool_availability_scope()
+        return tool_registry.get_definitions_for_loaded_toolsets(
+            scope=scope,
+            loaded_toolsets=self._loaded_toolsets,
+        )
 
     # -- token 追踪（所有 loop 共享，可被子类覆盖）-------------------------
 

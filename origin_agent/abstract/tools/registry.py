@@ -88,6 +88,43 @@ class ToolEntry:
 
 
 # ---------------------------------------------------------------------------
+# ToolsetEntry
+# ---------------------------------------------------------------------------
+
+
+# NOTE: 不继承 BaseModel — 与 ToolEntry 保持一致，使用 __slots__
+class ToolsetEntry:
+    """单个工具集的元数据。
+
+    由 ``register_toolset()`` 显式注册，或由工具首次注册时自动创建
+    无描述回退项。使用 ``__slots__`` 以节省内存。
+
+    ``description`` 是简短描述，未加载时在工具集目录中显示。
+    ``usage_guide`` 是详细使用说明，加载后在工具集目录中显示，
+    替代简短描述。
+    """
+
+    __slots__ = (
+        "name",
+        "description",
+        "usage_guide",
+        "loaded_by_default",
+    )
+
+    def __init__(
+        self,
+        name: str,
+        description: str = "",
+        usage_guide: str = "",
+        loaded_by_default: bool = False,
+    ):
+        self.name: str = name
+        self.description: str = description
+        self.usage_guide: str = usage_guide
+        self.loaded_by_default: bool = loaded_by_default
+
+
+# ---------------------------------------------------------------------------
 # check_fn TTL 缓存
 #
 # check_fn 可调用对象探测外部状态（Docker 守护进程、二进制可用性、
@@ -101,6 +138,9 @@ _check_fn_cache: dict[Callable, tuple[float, bool]] = {}
 _check_fn_cache_lock: threading.Lock = threading.Lock()
 
 DEFAULT_RESULT_SIZE_CHARS: int = 100000
+
+# 默认加载的工具集名称
+DEFAULT_LOADED_TOOLSET: str = "core"
 
 
 def _check_fn_cached(fn: Callable) -> bool:
@@ -167,6 +207,7 @@ class ToolRegistry:
         self._tools: dict[str, ToolEntry] = {}
         self._toolset_checks: dict[str, Callable] = {}
         self._toolset_aliases: dict[str, str] = {}
+        self._toolsets: dict[str, ToolsetEntry] = {}
         # 序列化变更并为读取者提供稳定快照。
         self._lock: threading.RLock = threading.RLock()
         # 单调递增的 generation 计数器。每次变更时递增
@@ -347,6 +388,48 @@ class ToolRegistry:
         with self._lock:
             return self._toolset_aliases.get(alias)
 
+    # -- 工具集元数据 --------------------------------------------------
+
+    def register_toolset(
+        self,
+        name: str,
+        description: str = "",
+        usage_guide: str = "",
+        loaded_by_default: bool = False,
+    ) -> None:
+        """显式注册工具集元数据。
+
+        若工具集已存在（包括自动创建的回退项），仅更新 description、
+        usage_guide 和 loaded_by_default；若已有值且新值为空，保留原值。
+        """
+        with self._lock:
+            existing: ToolsetEntry | None = self._toolsets.get(name)
+            if existing is not None:
+                if description:
+                    existing.description = description
+                if usage_guide:
+                    existing.usage_guide = usage_guide
+                existing.loaded_by_default = loaded_by_default
+            else:
+                self._toolsets[name] = ToolsetEntry(
+                    name=name,
+                    description=description,
+                    usage_guide=usage_guide,
+                    loaded_by_default=loaded_by_default,
+                )
+            self._generation += 1
+
+    def deregister_toolset(self, name: str) -> None:
+        """显式注销工具集元数据。"""
+        with self._lock:
+            self._toolsets.pop(name, None)
+            self._generation += 1
+
+    def get_toolset_entry(self, name: str) -> ToolsetEntry | None:
+        """返回工具集元数据条目，不存在返回 None。"""
+        with self._lock:
+            return self._toolsets.get(name)
+
     # -- 注册 ------------------------------------------------------
 
     def register(
@@ -423,6 +506,9 @@ class ToolRegistry:
             )
             if check_fn and toolset not in self._toolset_checks:
                 self._toolset_checks[toolset] = check_fn
+            # 自动为工具集创建无描述回退 ToolsetEntry（若尚不存在）
+            if toolset not in self._toolsets:
+                self._toolsets[toolset] = ToolsetEntry(name=toolset)
             self._generation += 1
 
     def deregister(self, name: str) -> None:
@@ -500,6 +586,113 @@ class ToolRegistry:
             result.append({"type": "function", "function": schema_with_name})
         return result
 
+    # -- 已加载工具集 schema 检索 ---------------------------------------------
+
+    def get_definitions_for_loaded_toolsets(
+        self,
+        scope: ToolAvailability,
+        loaded_toolsets: set[str],
+        quiet: bool = False,
+    ) -> list[dict]:
+        """返回已加载工具集中符合 scope 和 check_fn 的工具 schema。
+
+        安全降级：持久化的工具集名称可能指向已注销的 MCP 工具集，
+        此时该名称下的成员为空，自然被跳过，不抛异常。
+
+        返回 ``{"type": "function", "function": schema}`` 字典列表。
+        """
+        result: list[dict] = []
+        check_results: dict[Callable, bool] = {}
+        entries_by_name: dict[str, ToolEntry] = {
+            entry.name: entry for entry in self._snapshot_entries()
+        }
+        for name, entry in sorted(entries_by_name.items()):
+            if entry.toolset not in loaded_toolsets:
+                continue
+            if (entry.availability & scope) == 0:
+                if not quiet:
+                    logger.debug(
+                        "Tool %s filtered out (availability=%s, scope=%s)",
+                        name, entry.availability, scope,
+                    )
+                continue
+            if entry.check_fn:
+                if entry.check_fn not in check_results:
+                    check_results[entry.check_fn] = _check_fn_cached(entry.check_fn)
+                if not check_results[entry.check_fn]:
+                    if not quiet:
+                        logger.debug("Tool %s unavailable (check failed)", name)
+                    continue
+            schema_with_name: dict = {**entry.schema, "name": entry.name}
+            if entry.dynamic_schema_overrides is not None:
+                try:
+                    overrides: dict = entry.dynamic_schema_overrides()
+                    if isinstance(overrides, dict):
+                        schema_with_name.update(overrides)
+                except Exception as exc:
+                    logger.warning(
+                        "dynamic_schema_overrides for tool %s raised %s; "
+                        "using static schema",
+                        name, exc,
+                    )
+            result.append({"type": "function", "function": schema_with_name})
+        return result
+
+    # -- 工具集目录 --------------------------------------------------------
+
+    def get_toolset_catalog(
+        self,
+        scope: ToolAvailability,
+        loaded_toolsets: set[str],
+    ) -> list[dict]:
+        """返回按当前 Loop scope 和 check_fn 过滤后的工具集目录。
+
+        每个工具集至少有一个可见且可用的成员工具时才包含在目录中。
+
+        返回格式::
+
+            [
+                {
+                    "name": "filesystem",
+                    "description": "...",
+                    "loaded": True,
+                    "tools": ["Read", "Write", ...],
+                },
+                ...
+            ]
+        """
+        entries: list[ToolEntry] = self._snapshot_entries()
+        check_results: dict[Callable, bool] = {}
+        toolsets: dict[str, dict] = {}
+
+        for entry in entries:
+            if (entry.availability & scope) == 0:
+                continue
+            if entry.check_fn:
+                if entry.check_fn not in check_results:
+                    check_results[entry.check_fn] = _check_fn_cached(entry.check_fn)
+                if not check_results[entry.check_fn]:
+                    continue
+
+            ts: str = entry.toolset
+            if ts not in toolsets:
+                ts_entry: ToolsetEntry | None = self._toolsets.get(ts)
+                is_loaded = ts in loaded_toolsets
+                # 已加载时优先使用 usage_guide（详细说明），未加载时使用 description（简述）
+                if is_loaded and ts_entry and ts_entry.usage_guide:
+                    display_desc = ts_entry.usage_guide
+                else:
+                    display_desc = ts_entry.description if ts_entry else ""
+                toolsets[ts] = {
+                    "name": ts,
+                    "description": display_desc,
+                    "loaded": is_loaded,
+                    "tools": [],
+                }
+            toolsets[ts]["tools"].append(entry.name)
+
+        return sorted(toolsets.values(), key=lambda t: t["name"])
+
     # -- 分发 ----------------------------------------------------------
 
     def dispatch(self, name: str, args: dict, context: Any = None) -> dict:
@@ -517,6 +710,14 @@ class ToolRegistry:
         entry: ToolEntry | None = self.get_entry(name)
         if not entry:
             return {"error": f"Unknown tool: {name}"}
+        # 工具集加载检查：若 context 携带 loop 且工具集未加载，拦截
+        if context is not None and hasattr(context, "loop") and hasattr(context.loop, "is_toolset_loaded"):
+            if not context.loop.is_toolset_loaded(entry.toolset):
+                return {
+                    "error": f"Tool '{name}' belongs to toolset '{entry.toolset}' which is not loaded. Call LoadToolset with the toolset name first.",
+                    "_toolset_not_loaded": True,
+                    "_toolset": entry.toolset,
+                }
         try:
             handler = entry.handler
             _pass_context = _handler_accepts_context(handler, context)
@@ -552,6 +753,14 @@ class ToolRegistry:
         entry: ToolEntry | None = self.get_entry(name)
         if not entry:
             return {"error": f"Unknown tool: {name}"}
+        # 工具集加载检查：若 context 携带 loop 且工具集未加载，拦截
+        if context is not None and hasattr(context, "loop") and hasattr(context.loop, "is_toolset_loaded"):
+            if not context.loop.is_toolset_loaded(entry.toolset):
+                return {
+                    "error": f"Tool '{name}' belongs to toolset '{entry.toolset}' which is not loaded. Call LoadToolset with the toolset name first.",
+                    "_toolset_not_loaded": True,
+                    "_toolset": entry.toolset,
+                }
         try:
             handler = entry.handler
             _pass_context = _handler_accepts_context(handler, context)

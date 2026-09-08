@@ -147,6 +147,10 @@ async def _handle_enter_multi_agent(args: dict[str, Any]) -> dict:
         history_store_dir=parent_loop.history_store_dir,
     )
 
+    # 继承加载状态
+    multi_loop._loaded_toolsets = parent_loop.get_loaded_toolsets()
+    multi_loop._persist_loaded_toolsets()
+
     # [R3 修订]：不在此追加系统消息——T2（handler）先于 T1（consumer）完成，
     # 系统消息会插入到 assistant tool_calls 和 ToolResultMessage 之间，
     # 违反 Anthropic API 约束。tool_result 的 JSON 内容已包含切换成功信息。

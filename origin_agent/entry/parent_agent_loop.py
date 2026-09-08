@@ -128,6 +128,9 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
         )
         self._lifecycle.initialize()
 
+        # -- 恢复会话级已加载工具集 --
+        self._restore_loaded_toolsets()
+
         # -- 工具执行器 --
         self._tool_executor: ToolExecutor = ToolExecutor(loop=self)
 
@@ -177,10 +180,8 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
         return self._frontend_sink
 
     def _get_tool_definitions(self) -> list[dict]:
-        """返回主 Agent 可用的工具 schema（availability 包含 MAIN 或 EVERY）。"""
-        definitions: list[dict] = tool_registry.get_definitions_for_availability(
-            scope=ToolAvailability.MAIN,
-        )
+        """返回主 Agent 可用的工具 schema（已加载工具集 × MAIN scope）。"""
+        definitions: list[dict] = self._get_effective_tool_definitions()
         return definitions if definitions else []
 
     async def _on_context_over_limit(self) -> None:
@@ -200,6 +201,7 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
             self._collect_skill_prompts(),
             profile=self._active_llm_profile,
             session_id=self.session_id,
+            loaded_toolsets=self._loaded_toolsets,
         )
         site_block = build_session_site_block(self.session_id, owner="self")
         if site_block:

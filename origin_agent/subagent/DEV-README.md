@@ -140,7 +140,7 @@ graph TD
 
 ## 工具可见性
 
-子代理的工具集不是"除了 multiagent 之外的所有工具"，而是由 `ToolRegistry.get_definitions_for_availability(ToolAvailability.SUBAGENT)` 决定。每个工具注册时可声明 `availability` 位掩码：
+子代理的工具集不是"除了 multiagent 之外的所有工具"，而是由 `ToolRegistry.get_definitions_for_loaded_toolsets(ToolAvailability.SUBAGENT, loaded_toolsets)` 决定。每个工具注册时可声明 `availability` 位掩码：
 
 - `MAIN`：仅主 Agent 可见。
 - `SUBAGENT`：子 Agent 可见。
@@ -148,7 +148,9 @@ graph TD
 
 例如，创建子代理的 `run_subagent` 等工具标记为 `MAIN`，避免无限递归。
 
-多 Agent 模式下，`profile_builder.build_multi_agent_tools()` 从 MAIN 工具集中排除 `multiagent` toolset 的工具。
+子代理拥有独立的会话级工具集加载状态（`_loaded_toolsets`），默认从 `core` 开始。`SubAgentLoop` 和 `TaskAgentLoop` 通过 `get_tool_availability_scope()` 返回各自的 scope（`SUBAGENT` / `TASKAGENT`），工具定义按已加载工具集动态计算。
+
+多 Agent 模式下，`MultiAgentLoop._run_single_agent()` 使用 `self._get_effective_tool_definitions()` 动态获取工具定义，参与Agent共享主会话的加载状态。
 
 ---
 

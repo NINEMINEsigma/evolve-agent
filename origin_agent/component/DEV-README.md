@@ -49,7 +49,8 @@ component/
 | `code.py` | `ValidateCode`, `EvolveCode` | 自我进化 |
 | `shell.py` | `RunCommand` 等 | 子进程执行 |
 | `frontend.py` | `ValidateFrontend` | 前端构建验证 |
-| `skills.py` | `LoadSkill`, `ListSkills` | 技能管理 |
+| `skills.py` | `RecallSkill`, `CreateSkill` | 技能管理（已并入 core 工具集） |
+| `load_toolset.py` | `LoadToolset` | 按需加载工具集到当前会话（core 工具集，EVERY 可见性） |
 | `run_python.py` | `RunPython` | Python 代码执行 |
 | `ask_question.py` | `Ask` | 向前端提问 |
 | `progress_tools.py` | `UpdateTaskProgress`, `ClearTaskProgress` | 任务进度 |

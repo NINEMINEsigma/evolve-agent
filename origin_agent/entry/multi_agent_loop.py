@@ -119,6 +119,9 @@ class MultiAgentLoop(BaseAgentLoop, IMainSessionLoop):
         # SP-4: 会话级消息队列（_process_lock 由 BaseAgentLoop.__init__ 提供）
         self._message_queue = SessionMessageQueue(self)
 
+        # 恢复会话级已加载工具集
+        self._restore_loaded_toolsets()
+
     # -- BaseAgentLoop 抽象方法实现 ----------------------------------------
 
     def get_sink(self) -> AgentSink:
@@ -891,7 +894,7 @@ class MultiAgentLoop(BaseAgentLoop, IMainSessionLoop):
                 character_name=character_name,
                 system_prompts=system_prompts,
                 history=history_view,
-                tools=profile.tools,
+                tools=self._get_effective_tool_definitions(),
                 llm_client=llm_client,
                 sink=self._sink,
                 loop=self,

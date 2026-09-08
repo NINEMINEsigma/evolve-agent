@@ -64,6 +64,10 @@ async def _handle_exit_multi_agent(args: dict[str, Any]) -> dict:
     # 用多 Agent 模式的共享历史覆盖 ParentAgentLoop 初始化时从磁盘加载的历史
     parent_loop.load_history(history)
 
+    # 继承加载状态
+    parent_loop._loaded_toolsets = multi_loop.get_loaded_toolsets()
+    parent_loop._persist_loaded_toolsets()
+
     # [R3 修订]：不在此追加系统消息——T2（handler）先于 T1（consumer）完成，
     # 系统消息会插入到 assistant tool_calls 和 ToolResultMessage 之间，
     # 违反 Anthropic API 约束。tool_result 的 JSON 内容已包含切换成功信息。

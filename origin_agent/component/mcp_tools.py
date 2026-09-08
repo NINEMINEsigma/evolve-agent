@@ -16,7 +16,7 @@ from __future__ import annotations
 import json
 import logging
 from pathlib import Path
-from typing import TYPE_CHECKING, Callable
+from typing import * #type: ignore
 
 from entity.puretype import ToolAvailability, ToolDangerLevel
 from abstract.tools.registry import registry
@@ -48,7 +48,7 @@ def _bridge_on_register(
     # 延迟导入避免循环依赖
     from abstract.tools.registry import registry as tool_registry
 
-    toolset = kwargs.pop("toolset", f"mcp-{name.split('_')[1] if '_' in name else name}")
+    toolset = cast(str, kwargs.pop("toolset", f"mcp-{name.split('_')[1] if '_' in name else name}"))
     check_fn = kwargs.pop("check_fn", None)
     is_async = kwargs.pop("is_async", False)
     description = kwargs.pop("description", schema.get("description", ""))
@@ -63,6 +63,11 @@ def _bridge_on_register(
         description=description,
         # MCP 工具 refresh 时允许同类别覆盖
         override=False,
+    )
+    # 为 MCP 工具集注册简短描述（若尚不存在）
+    tool_registry.register_toolset(
+        name=toolset,
+        description=f"MCP server: {toolset}",
     )
 
 

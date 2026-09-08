@@ -13,7 +13,7 @@ import json
 import logging
 from typing import * # type: ignore
 
-from entity.puretype import LLMResponse
+from entity.puretype import LLMResponse, ToolAvailability
 from entity.constant import MAIN_AGENT_CHARACTER_NAME, USER_CHARACTER_NAME
 from entity.messages import (
     CharacterConversationMessage,
@@ -41,6 +41,9 @@ class TaskAgentLoop(SubAgentLoop):
     def _build_system_prompt(self) -> list[str]:
         """taskagent 无系统提示词。"""
         return []
+
+    def get_tool_availability_scope(self) -> ToolAvailability:
+        return ToolAvailability.TASKAGENT
 
     async def run(self, initial_prompt: str, user_name: str, message_type: str) -> None:
         """taskagent 主循环 — 纯文本回复即终止。"""
@@ -72,8 +75,9 @@ class TaskAgentLoop(SubAgentLoop):
                 self._round_active = True
 
                 messages = self._build_history_messages()
+                tools = self._get_effective_tool_definitions()
                 resp: LLMResponse = await self._llm.chat(
-                    messages, self._tools, character=self.current_character_agent,
+                    messages, tools, character=self.current_character_agent,
                     last_user_message=self._history.last_user_message,
                 )
 

@@ -57,6 +57,7 @@ def _resolve_main_agent_prompts(
     _sandbox: Sandbox,
     profile: LLMProfile | None = None,
     session_id: str = "",
+    loaded_toolsets: set[str] | None = None,
 ) -> list[str]:
     """主 Agent 的系统提示词解析：从模板系统生成。"""
     from entity.puretype import ToolAvailability
@@ -67,6 +68,7 @@ def _resolve_main_agent_prompts(
         tool_availability_scope=ToolAvailability.MULTI_AGENT,
         profile=profile,
         session_id=session_id,
+        loaded_toolsets=loaded_toolsets,
     )
 
 

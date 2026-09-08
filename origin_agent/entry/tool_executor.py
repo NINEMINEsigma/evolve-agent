@@ -245,6 +245,43 @@ class ToolExecutor:
             character_name=char_name,
         )
 
+        # 工具集加载检查：未加载工具在审批前拦截
+        _entry = tool_registry.get_entry(tc.name)
+        if _entry is not None:
+            _toolset = _entry.toolset
+            if not self._loop.loop.is_toolset_loaded(_toolset):
+                logger.info(
+                    "Tool %s blocked (toolset '%s' not loaded)",
+                    tc.name, _toolset,
+                )
+                _meta = ToolCallMeta(
+                    application_time=application_time,
+                    application_time_ms=application_time_ms,
+                    approval_duration_ms=0,
+                    invocation_start_offset_ms=0,
+                    invocation_duration_ms=0,
+                    end_time_offset_ms=0,
+                )
+                _not_loaded_result: dict = {
+                    "error": f"Tool '{tc.name}' belongs to toolset '{_toolset}' which is not loaded. Call LoadToolset with the toolset name first.",
+                    "_toolset_not_loaded": True,
+                    "_toolset": _toolset,
+                    "_meta": _meta.model_dump(),
+                }
+                await self._loop.loop.get_sink().emit_tool_result(
+                    session_id, tc.name, tc.id,
+                    json.dumps(_not_loaded_result, ensure_ascii=False),
+                    character_name=char_name,
+                    tool_call_meta=_meta.model_dump(),
+                )
+                self._tool_stats[tc.name]["errors"] += 1
+                return ToolResultMessage(
+                    role=Role.TOOL,
+                    character_name=char_name,
+                    tool_call_id=tc.id,
+                    content=_not_loaded_result,
+                )
+
         # 审批流程
         _hooks_ctx = self._loop.loop.get_hooks_context(session_id)
 

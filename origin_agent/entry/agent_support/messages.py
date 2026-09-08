@@ -137,6 +137,7 @@ def build_agent_system_prompt(
     tool_availability_scope: ToolAvailability = ToolAvailability.MAIN,
     profile: LLMProfile | None = None,
     session_id: str = "",
+    loaded_toolsets: set[str] | None = None,
 ) -> list[str]:
     """构建 Agent 使用的 system prompt 段落列表。"""
     return build_system_prompt(
@@ -151,6 +152,7 @@ def build_agent_system_prompt(
         runtime_ctx=ctx,
         profile=profile,
         session_id=session_id,
+        loaded_toolsets=loaded_toolsets,
     )
 
 
@@ -204,3 +206,31 @@ def build_full_history_messages(
     history.remove_unpaired_tool_calls()
     messages.extend(history.get_messages(current_character_agent=current_character_agent))
     return messages
+
+
+def build_toolset_catalog_block(
+    loaded_toolsets: set[str],
+    scope: ToolAvailability,
+) -> str:
+    """构建工具集目录提示词块。
+
+    只包含当前 Loop 至少有一个可见且可用成员的工具集。
+    每个工具集一行：名称 [loaded/not loaded]、工具名列表、简短描述。
+    """
+    from abstract.tools.registry import registry as tool_registry
+    catalog = tool_registry.get_toolset_catalog(scope, loaded_toolsets)
+    if not catalog:
+        return ""
+    lines: list[str] = [
+        "Toolsets (use LoadToolset to load a toolset before calling its tools):",
+        "",
+    ]
+    for ts in catalog:
+        status = "[loaded]" if ts["loaded"] else "[not loaded]"
+        tools_str = ", ".join(ts["tools"])
+        desc = ts["description"]
+        line = f"- {ts['name']} {status}: {tools_str}"
+        if desc:
+            line += f"\n  {desc}"
+        lines.append(line)
+    return "\n".join(lines)

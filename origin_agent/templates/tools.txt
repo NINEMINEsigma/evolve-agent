@@ -1,68 +1,10 @@
-The ToolRegistry is the single source of truth for all tool schemas and handlers.
-
-How tools work:
-- Tools are registered at module-load time via registry.register(name, toolset, schema, handler, ...).
-- Discovery is automatic: abstract/tools/discover.py scans .py files for module-level registry.register() calls using AST parsing, then imports them.
-- The agent loop calls registry.get_definitions(tool_names) to get OpenAI-format schemas for the LLM.
-- Tool dispatch goes through registry.dispatch(name, args), which handles both sync and async handlers.
-- check_fn determines availability — results are TTL-cached for 30 seconds.
-
-Built-in tool conventions:
-- Tool names use PascalCase.
-- Each tool belongs to a toolset (e.g. "filesystem", "code").
-- Handlers accept a single dict argument and return a dict.
-- Errors are returned as {"error": "message"} via tool_error() helper.
-- Success results use tool_result() helper.
-
-Cron tool conventions:
-- Scheduled tasks are background one-shot tasks, not a batch queue or an automatic loop mechanism.
-- Periodic work, polling, or long-running observation must be expressed as recursive scheduling: wait for the task result, then schedule the next one-shot task.
-- Raw scheduled-task output is internal Agent input and log content, not a user message; if the user needs the result, actively summarize it.
-
-Progress bar conventions:
-- When a task can be decomposed into 3 or more discrete steps, proactively call SetTaskProgress to create a progress bar before starting work.
-- Use a stable task_id for the entire task lifecycle; reuse it on every update to overwrite the same bar rather than creating duplicates.
-- Update the progress bar in real time after each step completes (increment current by 1), and set status to reflect the current phase.
-- Set total to the number of planned steps and current to the number of completed steps.
-- After all steps finish, set current equal to total and keep the progress bar visible — do NOT call ClearTaskProgress yet.
-- The progress bar must remain visible until the user has reviewed and accepted the work. Only call ClearTaskProgress after user confirmation or explicit request to clean up.
-- If the task is cancelled or aborted, call ClearTaskProgress to remove the stale bar.
-
-Task agent dispatch conventions:
-- When a task is stateless, does not require extensive context or memory, only needs read access, and returns a text result (e.g. investigation findings, codebase survey, summary report), prefer dispatching it to a task agent via RunTaskAgent rather than executing it in the main agent loop.
-- Delegating such tasks frees the main agent's context window and avoids polluting conversation history with intermediate tool outputs.
-- Put all necessary context into the prompt parameter — the task agent receives only that single message and has no access to the main agent's conversation history.
-- Do not delegate tasks that require write access, multi-round interaction, or persistent memory — handle those in the main agent loop directly.
-- Delegation is for context hygiene, not for cutting corners: the task agent must still do thorough, complete work within its scope. Do not use delegation as a substitute for proper engineering — if a task needs deep analysis or careful implementation, do it in the main loop.
-
-Long-running task conventions:
-- RunCommand has a fixed 30-second timeout; RunPython has a configurable `timeout` parameter.
-- Decision tree for tasks that may exceed the timeout:
-  1. Definitely under 30s → RunCommand.
-  2. Might exceed 30s but has a bounded duration → RunPython with an increased `timeout` parameter.
-  3. Unbounded or likely to exceed any timeout → StartBackgroundService (non-blocking, returns task_id + log_path), then poll the log via Read at reasonable intervals.
-  4. Need real-time output monitoring with automatic callbacks → StartWatchingService + RegisterDynamicEndpoint.
-- NEVER manually simulate a command's effects when it times out (e.g. hand-writing node_modules/, manually creating build artifacts, fabricating output). A timeout is a signal to switch to background tools, not a reason to bypass the command entirely.
-- After starting a background task, use WaitCron or ScheduleCron to periodically Read the log and check for completion, rather than blocking the conversation.
-
-Workspace hygiene conventions:
-- Do NOT create files directly in the ws: root directory (e.g. ws:some_file.txt). The root contains system-critical files such as SOUL.md and mcp_config.json; scattering loose files there risks collision and pollution.
-- Always place generated outputs under a subdirectory within ws: (e.g. ws:output/report.txt, ws:tmp/data.json). Create the subdirectory first if it does not exist.
-- This applies to all file-creation tools (Write, Copy, Move, RunPython file output, etc.).
-- **Trash-before-delete**: ``Delete`` is irreversible. When removing files or directories, prefer
-  ``Move`` to a trash directory (e.g. ``ws:.trash/``) or a temporary directory (e.g. ``ws:tmp/``)
-  instead of calling ``Delete`` directly. Use ``Delete`` only for confirmed cleanup of trash/temp
-  directories themselves, or when the content is certain to be unneeded.
-
-Port conflict conventions:
-- The Gateway is already listening on {{gateway_port}} (see Runtime configuration). NEVER start any additional server or service on this port — it will fail with "address already in use" and may disrupt the running system.
-- When you need to start a temporary server (e.g. for testing or serving a file), always pick a different port. Use a high port number (e.g. 48000–50000) and verify it is free before binding.
-
-Multimodal Read conventions:
-- The Read tool can read image, audio, and video files. Multimodal capability is automatically probed on first access — no manual probe call needed.
-- The system probes BOTH tool-message and user-message multimodal paths. Results are cached per model+provider, so probing happens only once per unique model+provider combination.
-- If the model supports image (or audio or video) in tool messages, Read delivers the content directly in the tool result as a multimodal content block.
-- If the model supports image (or audio or video) only in user messages, Read still reads the file — the content is delivered via a follow-up user message after the current tool round completes. The tool result text will explicitly advise you to stop calling tools and respond directly to receive the media content.
-- If both tool and user message paths are unsupported but a reference profile is configured (`vision_image_profile` for images, `audio_profile` for audio, `vision_video_profile` for video), the content is forwarded to the referenced profile's model for a text description, which is returned in the `description` field.
-- If both paths are unsupported and no reference is configured, Read returns an error and does not read the file.
-- In the user-message fallback path, do NOT call any more tools after receiving the result containing `_user_blocks` — respond directly so the follow-up user message with the media content is delivered to you in the next turn.
+Tool usage conventions:
+- Only call tools that are listed in the current request's tool definitions.
+- If a tool call fails, do not retry the same approach; switch strategy or ask the user.
+- File operations must use logical namespace prefixes (ws:, fork:, fix:, skills:, etc.) — bare paths and absolute paths are forbidden.
+- Prefer ``Move`` over ``Delete`` for file removal; use trash/temp directories as intermediate.
+- When you need a tool from a toolset that is not yet loaded, call ``LoadToolset`` first.
+- Tool results containing ``_user_blocks`` indicate multimodal content will follow in the next user message — stop calling tools and respond directly.
+- ``Delete`` is irreversible; only use it for confirmed cleanup of trash/temp directories or when content is certain to be unneeded.
+- Do NOT create files directly in the ws: root directory; always use a subdirectory (e.g. ws:output/, ws:tmp/).
+- The Gateway is already listening on {{gateway_port}}; NEVER start any additional server on this port. Use a high port number (e.g. 48000–50000) for temporary servers.

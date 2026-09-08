@@ -106,6 +106,7 @@ def _handle_show_tool(args: dict[str, Any], context: ToolContext | None = None) 
                 results[name] = {
                     "toolset": name,
                     "tools": tools,
+                    "loaded": context.loop.is_toolset_loaded(name) if context and context.loop else False,
                 }
                 continue
 

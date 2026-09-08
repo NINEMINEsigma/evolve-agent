@@ -279,6 +279,9 @@ SESSION_LLM_PROFILE_FILENAME: str = "llm_profile.json"
 # 全局最近使用 Profile 名称指针文件名（存于 sessions 根目录）
 GLOBAL_LLM_PROFILE_FILENAME: str = "active_llm_profile.json"
 
+# 会话工具集加载状态文件名（存于会话目录下，记录已加载的工具集名称列表）
+LOADED_TOOLSETS_FILENAME: str = "loaded_toolsets.json"
+
 
 # ============================================================================
 # Agent
@@ -424,7 +427,7 @@ COLLOQUY_COMPRESS_RATIO: float = 0.3
 # 包含 component/tools 和 component/extools 下所有 toolset 的并集
 COLLOQUY_TOOLSET_WHITELIST: frozenset[str] = frozenset({
     "filesystem", "core", "progress", "lsp", "frontend", "code",
-    "clipboard", "skills", "shell", "python",
+    "clipboard", "shell", "python",
     "extools", "cron", "background", "dynamic", "archive",
 })
 

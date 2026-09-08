@@ -204,6 +204,9 @@ class App:
             _custom_tools: Path = Application.current().sandbox.get_base(Namespace.CUSTOM_TOOLS)
             if _custom_tools.exists():
                 discover_builtin_tools(str(_custom_tools), Namespace.CUSTOM_TOOLS.value)
+            # 注册内置工具集描述
+            from abstract.tools.toolsets_meta import register_builtin_toolset_descriptions
+            register_builtin_toolset_descriptions()
             # 注册 MCP 工具（桥接 + 连接 server）
             import component.mcp_tools  # noqa: F401 — 安装 MCP 回调
             component.mcp_tools.init_mcp(self.ctx)

@@ -154,6 +154,9 @@
 | 自定义LLM客户端 | `custom_llm_client/` 下的 `.py` LLM 客户端扩展 |
 | 自定义模型 | `custom_models/` 下的 `.gguf` 模型文件（当前无运行时接入，保留目录供未来用途） |
 | MCP 桥接 | `component/mcp_tools.py` 将外部 MCP server 工具注册进工具注册表 |
+| 工具集条目 | `ToolsetEntry`：工具集的独立元数据实体（名称、描述、是否默认加载） | ToolsetEntry |
+| 工具集加载意图 | 会话曾经调用 `LoadToolset` 加载过的工具集名称集合，持久化在 SessionStore（`loaded_toolsets.json`） | loaded toolsets |
+| 有效工具集合 | 按"已加载工具集 + 当前 Loop 可见性（`ToolAvailability`）+ `check_fn` 可用性"动态计算的实际工具列表 | effective tools |
 | LLM Profile 根对象 | `LLMProfileData`（英文锚点：`LLM Profile root`）；`llm_profiles.es` v2 中唯一的持久化根，持有全部 Profile 及实例引用关系 |
 | Profile 名称指针 | 会话级或全局最近使用的 Profile 名称（英文锚点：`Profile name pointer`）；只保存名称，不复制端点、密钥或 Profile 对象 |
 | Profile 实例引用 | `LLMProfile` 多模态分工字段直接指向根列表中的另一个 `LLMProfile` 实例（英文锚点：`Profile object reference`） |

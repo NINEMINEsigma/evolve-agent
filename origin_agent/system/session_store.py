@@ -17,6 +17,7 @@ from entity.constant import (
     History_Version as __SessionStore_Version__,
     SESSION_LLM_PROFILE_FILENAME,
     GLOBAL_LLM_PROFILE_FILENAME,
+    LOADED_TOOLSETS_FILENAME,
 )
 from easysave import save, load
 from entity.typeref import make_config
@@ -296,3 +297,44 @@ class SessionStore:
         self._write_profile_name_pointer(
             self.active_profile_name_path(new_session_id), profile_name,
         )
+
+    # -- 工具集加载状态 ---------------------------------------------------
+
+    def loaded_toolsets_path(self, session_id: str) -> Path:
+        """返回会话工具集加载状态文件路径。"""
+        return self.session_dir(session_id) / LOADED_TOOLSETS_FILENAME
+
+    def read_loaded_toolsets(self, session_id: str) -> list[str]:
+        """读取会话已加载的工具集名称列表；文件不存在时返回 [DEFAULT_LOADED_TOOLSET]。
+
+        旧会话缺失该文件时安全回退到默认只加载 core。
+        """
+        from abstract.tools.registry import DEFAULT_LOADED_TOOLSET
+        path = self.loaded_toolsets_path(session_id)
+        if not path.exists():
+            return [DEFAULT_LOADED_TOOLSET]
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+            if isinstance(data, list):
+                return [str(name) for name in data]
+            return [DEFAULT_LOADED_TOOLSET]
+        except Exception:
+            logger.warning(
+                "Failed to read loaded_toolsets for session=%s",
+                session_id, exc_info=True,
+            )
+            return [DEFAULT_LOADED_TOOLSET]
+
+    def write_loaded_toolsets(self, session_id: str, toolsets: list[str]) -> None:
+        """原子写入会话已加载的工具集名称列表。"""
+        path = self.loaded_toolsets_path(session_id)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        write_text_atomic(
+            path,
+            json.dumps(sorted(set(toolsets)), ensure_ascii=False, indent=2),
+        )
+
+    def copy_loaded_toolsets(self, old_session_id: str, new_session_id: str) -> None:
+        """将来源会话的加载工具集列表复制给延续会话。"""
+        toolsets = self.read_loaded_toolsets(old_session_id)
+        self.write_loaded_toolsets(new_session_id, toolsets)

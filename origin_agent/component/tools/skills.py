@@ -158,7 +158,7 @@ def _handle_recall_skill(args: dict[str, Any]) -> dict:
 
 registry.register(
     name="CreateSkill",
-    toolset="skills",
+    toolset="core",
     schema={
         # 创建新 skill 或对已有 skill 进行较大程度的更改。Skill 是以目录形式存储在
         # project-root/skills/ 下的可复用知识模块，包含 SKILL.md 主文档及可选的
@@ -277,7 +277,7 @@ Skills are shared knowledge artifacts, not personal expression. Write all skill 
 
 registry.register(
     name="RecallSkill",
-    toolset="skills",
+    toolset="core",
     schema={
         # 加载 skill 的完整内容，或在无参数时列举全部可用 skill。
         #

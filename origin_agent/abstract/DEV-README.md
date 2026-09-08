@@ -89,7 +89,10 @@ create_llm_client(name, runtime_context, profile) -> BaseLLMClient
 `ToolRegistry` 是线程安全的中央注册表单例，提供：
 
 - `registry.register()`：模块级注册，声明 schema、handler、toolset、危险等级、`availability` 位掩码等。
-- `registry.dispatch(name, args, context)`：按名分发工具调用。
+- `registry.register_toolset()`：显式注册工具集元数据（`ToolsetEntry`：名称、描述、是否默认加载）。
+- `registry.dispatch(name, args, context)`：按名分发工具调用；内含工具集加载检查（`is_toolset_loaded`）。
+- `registry.get_definitions_for_loaded_toolsets(scope, loaded_toolsets)`：按已加载工具集和 scope 返回工具 schema（渐进式加载核心方法）。
+- `registry.get_toolset_catalog(scope, loaded_toolsets)`：返回按当前 Loop 过滤后的工具集目录（用于系统提示词）。
 - toolset 别名、schema 覆盖、动态 schema（`check_fn` + 30s TTL 缓存）。
 - 按 `availability` 过滤：`MAIN`（主 Agent）、`SUBAGENT`（子 Agent）、`EVERY`（两者）。
 
@@ -100,6 +103,8 @@ create_llm_client(name, runtime_context, profile) -> BaseLLMClient
 - `is_async`, `danger_level`
 - `availability`：位掩码
 - `emit_for`：需要向前端推送的事件类型列表
+
+工具集元数据由 `ToolsetEntry` 承载，可显式注册或由工具首次注册时自动创建无描述回退项。`abstract/tools/toolsets_meta.py` 在启动时为所有内置工具集注册简短描述。`skills` 工具集已并入 `core`。
 
 ### `abstract/tools/discover.py`
 

@@ -44,6 +44,8 @@ entry/
   - 通用持久化方法：`save_history()`、`load_history()`。
   - Token 统计：`_token_usage`、`_last_prompt_tokens`。
   - Hooks 加载与上下文收集：`_load_message_hooks()`、`_collect_hooks_context()`。
+  - 工具集加载状态：`_loaded_toolsets`（会话级已加载工具集名称集合）、`get_loaded_toolsets()`、`is_toolset_loaded()`、`load_toolsets()`、`_restore_loaded_toolsets()`、`_get_effective_tool_definitions()`（按已加载工具集 × scope 动态计算工具 schema）。
+  - `get_tool_availability_scope()`：返回当前 Loop 的 `ToolAvailability`（默认 `EVERY`，子类覆写）。
 
 - **`BasePrivateChatAgentLoop`**：在基类之上增加 1-on-1 私聊循环模板，包含：
   - 历史管理（`History` 实例）。

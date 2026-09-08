@@ -126,6 +126,7 @@ def build_system_prompt(
     runtime_ctx: RuntimeContext | None = None,   # 运行时配置：注入 base.txt 占位符
     profile: LLMProfile | None = None,             # 活跃 LLM 配置（优先于 runtime_ctx 的已删除字段）
     session_id: str = "",                           # 当前会话 ID，注入 base.txt 的 {{session_id}} 占位符
+    loaded_toolsets: set[str] | None = None,        # 会话已加载工具集名称集合
 ) -> list[str]:
     """从分层模板组装完整的 system prompt 列表。
 
@@ -218,7 +219,14 @@ def build_system_prompt(
     if tools:
         blocks.append(tools)
 
-    # 3a. Sub-agent 工具说明 — 仅在 MAIN scope 下注入
+    # 3a. 工具集目录 — 有已加载工具集时注入
+    if loaded_toolsets is not None:
+        from entry.agent_support.messages import build_toolset_catalog_block
+        catalog_block = build_toolset_catalog_block(loaded_toolsets, tool_availability_scope)
+        if catalog_block:
+            blocks.append(catalog_block)
+
+    # 3b. Sub-agent 工具说明 — 仅在 MAIN scope 下注入
     if tool_availability_scope & ToolAvailability.MAIN:
         subagent_tools: str = read_template("tools_subagent.txt")
         if subagent_tools:

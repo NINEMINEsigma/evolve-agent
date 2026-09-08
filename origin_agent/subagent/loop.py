@@ -20,7 +20,7 @@ from typing import * # type: ignore
 from abstract.tools.registry import ToolEntry, registry as tool_registry
 from abstract.llm.client import BaseLLMClient
 from abstract.llm.loader import create_llm_client
-from entity.puretype import ApprovalResult, LLMProfile, LLMResponse, ToolCallRequest
+from entity.puretype import ApprovalResult, LLMProfile, LLMResponse, ToolCallRequest, ToolAvailability
 from entity.constant import MAIN_AGENT_CHARACTER_NAME, USER_CHARACTER_NAME, History_Version as __History_Version__
 from entity.messages import (
     History,
@@ -123,6 +123,9 @@ class SubAgentLoop(BasePrivateChatAgentLoop):
         self._llm: BaseLLMClient = self._build_llm_client(ctx)   # 子 Agent 独立的 LLM 客户端
         self._on_message: Callable[[dict[str, Any]], None] = on_message  # 每轮 LLM 响应/工具调用即时推送回调
 
+        # 恢复会话级已加载工具集（子会话无 SessionStore 时默认 core）
+        self._restore_loaded_toolsets()
+
         # 内部状态（_inbox / _cancel_event 由 BaseAgentLoop 提供；_history 由 BasePrivateChatAgentLoop 提供）
         self._outbox: list[str] = []                         # 发件箱：子 Agent 文本回复，父 Agent 通过 get_outbox() 收集
         self._pending_approvals: list[PendingToolCall] = []   # 等待父 Agent 审批的工具调用队列
@@ -193,8 +196,11 @@ class SubAgentLoop(BasePrivateChatAgentLoop):
     def get_sink(self) -> AgentSink:
         return ParentAgentSink(self)
 
+    def get_tool_availability_scope(self) -> ToolAvailability:
+        return ToolAvailability.SUBAGENT
+
     def _get_tool_definitions(self) -> list[dict[str, Any]]:
-        return self._tools
+        return self._get_effective_tool_definitions()
 
     def _build_system_prompt(self) -> list[str]:
         prompts = list(self._ctx.system_prompts)
@@ -203,6 +209,11 @@ class SubAgentLoop(BasePrivateChatAgentLoop):
         site_block = build_session_site_block(self._parent_session_id, owner="parent")
         if site_block:
             prompts.append(site_block)
+        # 注入工具集目录
+        from entry.agent_support.messages import build_toolset_catalog_block
+        catalog = build_toolset_catalog_block(self._loaded_toolsets, self.get_tool_availability_scope())
+        if catalog:
+            prompts.append(catalog)
         return prompts
 
     async def _on_context_over_limit(self) -> None:
