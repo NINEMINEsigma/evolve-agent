@@ -287,3 +287,45 @@ def build_session_site_block(
         .replace("{{session_id}}", session_id)
         .replace("{{files_prefix}}", STATIC_FILE_HTTP_PREFIX)
     )
+
+
+def build_session_stage_block(
+    session_id: str,
+    *,
+    owner: Literal["self", "parent"] = "self",
+) -> str:
+    """构建 Session Stage 舞台层约定提示词块。
+
+    从 ``templates/session_stage.txt`` 读取模板并替换占位符。
+    session_id 为空串或模板缺失时返回空串（调用方跳过 append）。
+
+    Args:
+        session_id: 当前会话 ID（owner="parent" 时为父会话 ID）。
+        owner: "self" 表示本会话自身的舞台层；"parent" 表示子代理
+            为主会话的舞台层产出内容（归属主会话）。
+    """
+    if not session_id:
+        return ""
+    template: str = read_template("session_stage.txt")
+    if not template:
+        return ""
+    if owner == "parent":
+        owner_intro = (
+            "You are a sub-agent working within a parent session. "
+            "The parent session has a dedicated stage layer — a transparent background "
+            "rendering area in the chat background. "
+            "The session ID below is the PARENT session's ID, not your own. "
+            "Deploy stage content to the parent session's stage directory."
+        )
+    else:
+        owner_intro = (
+            "You have a dedicated stage layer for THIS session — a transparent background "
+            "rendering area in the chat background. "
+            "The session ID below is your current session's ID."
+        )
+    return (
+        template
+        .replace("{{owner_intro}}", owner_intro)
+        .replace("{{session_id}}", session_id)
+        .replace("{{files_prefix}}", STATIC_FILE_HTTP_PREFIX)
+    )

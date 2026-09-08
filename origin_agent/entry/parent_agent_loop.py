@@ -48,7 +48,7 @@ from entry.agent_support.messages import (
     build_agent_system_prompt,
     build_full_history_messages,
 )
-from system.prompt import build_session_site_block
+from system.prompt import build_session_site_block, build_session_stage_block
 from entry.agent_support.multimodal import (
     blocks_from_dicts,
     content_to_text,
@@ -206,6 +206,9 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
         site_block = build_session_site_block(self.session_id, owner="self")
         if site_block:
             prompts.append(site_block)
+        stage_block = build_session_stage_block(self.session_id, owner="self")
+        if stage_block:
+            prompts.append(stage_block)
         return prompts
 
     def get_tool_availability_scope(self) -> ToolAvailability:

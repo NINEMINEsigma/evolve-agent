@@ -3,6 +3,7 @@ import { ChatMessage, MessageContent } from "../types";
 import MessageItem from "./MessageItem";
 import Minimap from "./Minimap";
 import ContourBackground, { CONTOUR_BACKGROUND_ENABLED } from "./ContourBackground";
+import AgentStageLayer from "./AgentStageLayer";
 import { DIMENSIONS } from "../constants/dimensions";
 
 interface ChatAreaProps {
@@ -110,6 +111,7 @@ export default function ChatArea({ messages, waiting, archived, onImageClick, on
   return (
     <div className="chat-area-wrapper">
       <div className={`chat-area-container${isEmpty ? " chat-area-container-empty" : ""}`}>
+      <AgentStageLayer sessionId={sessionId} />
       <main
         ref={chatAreaRef}
         className={`chat-area ${dragOver ? "chat-area-drag-over" : ""}`}

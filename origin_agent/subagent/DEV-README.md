@@ -119,6 +119,16 @@ graph TD
 - `build_agent_profile()`：为多 Agent 模式中的单个 Agent 构造 `AgentProfile`（系统提示词、工具列表、LLM 客户端）。
 - 通过 `llm_client_factory` 回调保留不同调用方对 LLM 客户端获取方式的差异。
 
+### 子代理系统提示词注入
+
+`SubAgentLoop._build_system_prompt()` 在 `SubRuntimeContext.system_prompts` 基础上动态注入父会话级约定块（`owner="parent"`）：
+
+- `build_session_site_block(parent_session_id, owner="parent")`：父会话网页 `site/` 约定。
+- `build_session_stage_block(parent_session_id, owner="parent")`：父会话 Agent 舞台层 `stage/` 约定。
+- `build_toolset_catalog_block()`：已加载工具集目录。
+
+这些约定块告知子 Agent 网站部署区和舞台层属于父会话而非自身，写入路径为 `ws:sessions/<parent_session_id>/site/` 和 `ws:sessions/<parent_session_id>/stage/`。
+
 ---
 
 ## 子代理工具

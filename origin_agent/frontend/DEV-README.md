@@ -93,6 +93,7 @@ frontend/
 | `ErrorBoundary.tsx` | 错误边界，防止模态组件异常卸载整个 App |
 | `SplashScreen.tsx` | 开屏动画，最少停留 800ms、最多 3000ms，可点击跳过 |
 | `ContourBackground.tsx` | 聊天区 canvas 等高线动态背景 |
+| `AgentStageLayer.tsx` | 聊天区背景层 Agent 舞台层 iframe（会话级 `stage/` 目录，透明、鼠标穿透） |
 
 ### 聊天区域
 
@@ -166,6 +167,7 @@ frontend/
 | `useAgentspace.ts` | Agentspace 编辑器状态机：目录展开/选择、版本化标签、SSE 代际、逐文件锁、冲突和垃圾桶 |
 | `useEdgeDrawer.ts` | 边缘抽屉三态状态机（hidden/peek/open），侧栏与顶部栏共用 |
 | `useGlobalTooltip.ts` | 全局 tooltip 管理 |
+| `useSessionStage.ts` | 会话舞台层状态：探测 `stage/index.html`，订阅 Agentspace SSE 自动刷新 |
 
 ---
 
@@ -209,6 +211,7 @@ frontend/
 | `context-menu.css` | 右键菜单 |
 | `tooltip.css` | 工具提示 |
 | `agentspace.css` | Agentspace 文件浏览器 |
+| `agent-stage.css` | Agent 舞台层（聊天区背景层 iframe） |
 | `modal.css` | 模态窗口 |
 | `popup.css` | 弹出层 |
 | `splash.css` | 启动屏 |

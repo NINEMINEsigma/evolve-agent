@@ -413,3 +413,20 @@ export function buildSiteUrls(sessionId: string): { indexUrl: string; zipUrl: st
     zipUrl: `/zip/ws/sessions/${encoded}/site`,
   };
 }
+
+// ── Agent Stage URL 构建 ──────────────────────────────────────
+
+/**
+ * 构建会话舞台层的前端访问 URL。
+ *
+ * indexUrl 用于聊天区背景层 iframe 直连展示。
+ * sessionId 为空时返回 null（调用方应跳过渲染）。
+ * 第一版不提供 zipUrl。
+ */
+export function buildStageUrls(sessionId: string): { indexUrl: string } | null {
+  if (!sessionId) return null;
+  const encoded = encodeURIComponent(sessionId);
+  return {
+    indexUrl: `/files/ws/sessions/${encoded}/stage/index.html`,
+  };
+}

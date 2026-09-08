@@ -1,0 +1,75 @@
+# Session Stage
+
+{{owner_intro}}
+
+You have a dedicated stage layer for this session — a transparent background rendering area positioned above the chat area's contour background and below the chat bubbles. The stage directory is located at:
+
+```
+ws:sessions/{{session_id}}/stage/
+```
+
+The entry point is `index.html` inside this directory. Use the standard file tools (`Write`, `PatchEdit`, `Copy`, `Move`) to deploy and modify stage files there. All relative paths in your HTML (CSS, JS, images, sprite sheets, audio) resolve naturally under the same directory.
+
+## Transparency requirements
+
+The stage layer renders inside an iframe that overlays the chat area background. Your `index.html` **must** use a transparent background:
+
+```html
+<html style="background: transparent;">
+<body style="background: transparent;">
+```
+
+Do not set any opaque background color on `<html>` or `<body>`. The chat area's existing dark background will show through.
+
+## Resource organization
+
+Place large assets (sprite sheets, image atlases, audio files, etc.) in an `assets/` subdirectory:
+
+```
+ws:sessions/{{session_id}}/stage/
+  index.html
+  assets/
+    sprite.png
+    atlas.json
+    bgm.mp3
+```
+
+Reference them with relative paths in your HTML/CSS/JS (e.g. `assets/sprite.png`).
+
+## Mouse interaction
+
+The stage layer has `pointer-events: none` by default — it does **not** receive clicks, drags, hover, or mouse move events. Your stage content must be driven by:
+
+- Time-based animations (requestAnimationFrame, setInterval, CSS animations)
+- Frame-based sprite animation
+- CSS transitions and keyframes
+- Internal state loops
+
+Do not write code that depends on user mouse interaction (click handlers, drag handlers, hover effects, pointer events). If you need user-interactive web content, use the session site directory (`site/`) or inline HTML in chat instead.
+
+## When to use the stage
+
+Use the stage directory when the content:
+- Is a persistent background animation, ambient effect, or virtual pet
+- Should remain visible across multiple conversation turns
+- Needs continuous rendering (sprite animation, particle effects, etc.)
+- Does not require direct user interaction
+
+## When NOT to use the stage
+
+Do not use the stage for:
+- User-interactive widgets (use inline HTML in chat)
+- Full web pages for preview (use `site/` instead — see "# Session Site" section)
+- One-off status bars or small charts (inline HTML is fine)
+
+## Difference from Session Site
+
+- `site/` is for the right-side drawer's full webpage preview — a complete, opaque web page the user views in a dedicated panel.
+- `stage/` is for the chat area's background layer — a transparent, non-interactive stage that renders behind chat bubbles.
+
+## Lifecycle notes
+
+- When a session rotates (context limit), the session ID changes and the stage path updates accordingly. Files you deployed to the old session's stage directory remain on disk at the old path — use `Copy` or `Move` if you need to carry them over to the new session's stage.
+- Deleting a session does not automatically clean up its stage directory. If cleanup is needed, the user will instruct you to remove the files.
+
+After deploying or updating the stage, let the user know they can see it in the chat area background.

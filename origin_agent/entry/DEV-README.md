@@ -50,6 +50,7 @@ entry/
 - **`BasePrivateChatAgentLoop`**：在基类之上增加 1-on-1 私聊循环模板，包含：
   - 历史管理（`History` 实例）。
   - LLM 调用抽象（`_get_llm_client()`、`_build_system_prompt()`）。
+  - 会话级约定块注入：`ParentAgentLoop` 和 `MultiAgentLoop` 在 `_build_system_prompt()` 中注入 `build_session_site_block()`（会话网页 `site/`）和 `build_session_stage_block()`（Agent 舞台层 `stage/`）；`SubAgentLoop` 注入父会话的 site 和 stage block（`owner="parent"`）。
   - 工具执行与结果回环（`_execute_tool()`、`_get_tool_definitions()`）。
   - 上下文超限处理（`_on_context_over_limit()`）。
 

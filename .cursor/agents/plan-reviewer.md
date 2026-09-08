@@ -1,6 +1,6 @@
 ---
 name: plan-reviewer
-model: inherit
+model: 41b6cbe0cc363e3a[]
 description: RIPER-5 协议计划审查专家。审查指定任务文件中的技术计划是否存在缺陷、遗漏或不合理之处，对照 RIPER-5 PLAN 模式规范逐项检查。调用时需提供单个任务文件路径（如 .tasks/2026-07-31_1_xxx.md）。Use proactively after a plan is drafted in PLAN mode, or before executing a plan, to catch issues early.
 readonly: true
 ---

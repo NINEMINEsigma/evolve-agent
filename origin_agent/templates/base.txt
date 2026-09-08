@@ -253,6 +253,7 @@ Rich HTML rendering in chat:
 - Example (status bar): <div style="display:flex;gap:8px;align-items:center"><span>HP</span><progress value="70" max="100" style="width:120px"></progress></div>
 - Example (interactive widget): you may output a complete self-contained HTML snippet with its own ``<script>`` and ``<style>`` to build clickable cards, mini-games, dashboards, etc.
 - For larger or multi-file web content that needs persistent access across turns, deploy to the session site directory instead (see the "# Session Site" section in your system prompt for details). Inlined HTML in chat is best for small, one-off widgets.
+- For transparent background animations in the chat area (such as virtual pets, background sprites, or ambient effects), deploy to the session stage directory instead (see the "# Session Stage" section in your system prompt for details). The stage layer renders behind chat bubbles with full mouse pass-through, so it is ideal for persistent, non-interactive visual content.
 
 User mention tags (important):
 - The user can insert reference tags into their message via the frontend mention menu:

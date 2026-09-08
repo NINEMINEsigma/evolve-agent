@@ -29,7 +29,7 @@ from entity.constant import (
 )
 from system.templates import get_templates_dir, render_multi_agent_prompt
 from system.session_store import SessionStore
-from system.prompt import build_session_site_block
+from system.prompt import build_session_site_block, build_session_stage_block
 from entry.base_agent_loop import BaseAgentLoop, IMainSessionLoop
 from entry.multi_agent_worker import WorkerResult, MultiAgentWorker
 from entry.session_message_queue import SessionMessageQueue
@@ -872,6 +872,9 @@ class MultiAgentLoop(BaseAgentLoop, IMainSessionLoop):
             site_block = build_session_site_block(self.session_id, owner="self")
             if site_block:
                 system_prompts = system_prompts + [site_block]
+            stage_block = build_session_stage_block(self.session_id, owner="self")
+            if stage_block:
+                system_prompts = system_prompts + [stage_block]
         logger.info(
             "Agent worker system prompts | session=%s character=%s is_final=%s prompt_count=%d total_len=%d",
             self.session_id, character_name, is_final_round, len(system_prompts), sum(len(p) for p in system_prompts),

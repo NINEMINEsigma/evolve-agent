@@ -57,6 +57,7 @@
 
   /* Z-index layers (低→高) */
   --z-base:       0;      /* 背景装饰/内容基础 */
+  --z-agent-stage: 1;     /* Agent 舞台层：背景之上，内容控件之下 */
   --z-content:    10;     /* 结构/导航/内容控件 */
   --z-sidebar:    20;     /* 侧边栏/抽屉叠层 */
   --z-header:     90;     /* header 叠层 */

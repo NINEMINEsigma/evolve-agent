@@ -32,3 +32,7 @@ Small, one-off visual widgets (a single status bar, a tiny chart, a quick progre
 - Deleting a session does not automatically clean up its site directory. If cleanup is needed, the user will instruct you to remove the files.
 
 After deploying or updating the site, let the user know they can view it in the right-side drawer's "Session Site" section.
+
+## Stage vs Site
+
+`site/` is for the right-side drawer's full webpage preview. If your content is meant to be a transparent background animation in the chat area (such as a virtual pet, background sprite, or ambient effect), use the `stage/` directory instead (see "# Session Stage" section in your system prompt for details).

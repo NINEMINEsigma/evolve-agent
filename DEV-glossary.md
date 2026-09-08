@@ -302,6 +302,8 @@
 | Mermaid 渲染器 | `MermaidRenderer` | Mermaid 图表渲染；点击放大为灯箱（缩放/平移，react-zoom-pan-pinch） |
 | 安全 HTML | `SafeHtml` | iframe 沙箱渲染 agent 输出的原始 HTML，postMessage 同步高度，避免流式闪烁 |
 | 等高线背景 | `ContourBackground` | 聊天区 canvas 等高线动态背景，受消息内容长度与 seed 影响 |
+| Agent 舞台层 | `AgentStageLayer` / `.agent-stage-layer` | 位于聊天区背景之上、聊天气泡和输入栏之下的会话级渲染层；Agent 通过 `ws:sessions/<session_id>/stage/` 目录写入内容（入口 `index.html`），前端以透明 iframe 渲染；默认 `pointer-events: none` 鼠标穿透；独立于会话网页 `site/` |
+| 会话网页 | `SessionSiteDrawer` / `.site-drawer-panel` | 右侧独立抽屉，iframe 加载 `ws:sessions/<session_id>/site/index.html`，用于完整网页预览；与 Agent 舞台层 `stage/` 分离 |
 | 小地图 | `Minimap` | 聊天区右侧消息流缩略导航，可拖拽跳转；移动端默认折叠 |
 | 回到底部按钮 | `.scroll-to-bottom-btn` | 滚动离开底部时出现的快捷回底按钮 |
 
