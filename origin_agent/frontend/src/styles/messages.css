@@ -212,7 +212,7 @@
   text-align: left;
 }
 
-/* ── 悬停毛玻璃：模糊气泡背后的等高线，显隐随基态 transition 渐变 ── */
+/* ── 悬停毛玻璃：模糊气泡背景，显隐随基态 transition 渐变 ── */
 .message:hover .message-bubble {
   backdrop-filter: blur(10px) saturate(150%);
   -webkit-backdrop-filter: blur(10px) saturate(150%);

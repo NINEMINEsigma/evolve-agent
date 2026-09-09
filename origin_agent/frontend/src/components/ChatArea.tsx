@@ -2,7 +2,6 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { ChatMessage, MessageContent } from "../types";
 import MessageItem from "./MessageItem";
 import Minimap from "./Minimap";
-import ContourBackground, { CONTOUR_BACKGROUND_ENABLED } from "./ContourBackground";
 import AgentStageLayer from "./AgentStageLayer";
 import { DIMENSIONS } from "../constants/dimensions";
 
@@ -76,11 +75,6 @@ export default function ChatArea({ messages, waiting, archived, onImageClick, on
     return null;
   }, [messages]);
 
-  // 背景地形联动使用的消息列表（含流式消息）
-  const terrainMessages = useMemo(
-    () => (streamingMessage ? [...messages, streamingMessage] : messages),
-    [messages, streamingMessage]
-  );
   const messageList = useMemo(() =>
     messages.map((m) => (
       <MessageItem
@@ -128,14 +122,6 @@ export default function ChatArea({ messages, waiting, archived, onImageClick, on
           }
         }}
       >
-        {CONTOUR_BACKGROUND_ENABLED && (
-          <ContourBackground
-            scrollRef={chatAreaRef}
-            contentRef={contentRef}
-            messages={terrainMessages}
-            seedKey={sessionId}
-          />
-        )}
         <div className="chat-content" ref={contentRef}>
           {showSkeleton ? (
             <>

@@ -45,34 +45,6 @@
   z-index: var(--z-content);
 }
 
-/* ── Contour background (消息联动等高线背景) ── */
-.contour-bg {
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-  z-index: var(--z-base);
-  opacity: 0;
-  filter: blur(0);
-  transition: opacity 0.9s ease, filter 0.5s ease;
-}
-
-.contour-bg.ready {
-  opacity: 1;
-}
-
-.contour-bg.buffering {
-  filter: blur(6px);
-  opacity: 0.45;
-  transition: filter 0.3s ease, opacity 0.3s ease;
-}
-
-.contour-bg-tile {
-  position: absolute;
-  left: 0;
-  width: 100%;
-  display: block;
-}
-
 .chat-area-drag-over {
   outline: 2px dashed var(--accent);
   outline-offset: -4px;

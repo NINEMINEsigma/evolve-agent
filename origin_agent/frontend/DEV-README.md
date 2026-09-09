@@ -53,8 +53,7 @@ frontend/
 │   └── utils/
 │       ├── agentspacePath.ts ← Agentspace 路径与排序纯函数
 │       ├── toolLabels.ts    ← 工具标签映射
-│       ├── exportSession.ts ← 会话导出
-│       └── terrain.ts       ← 等高线背景生成
+│       └── exportSession.ts ← 会话导出
 ├── package.json
 ├── vite.config.ts
 ├── tsconfig*.json
@@ -92,7 +91,6 @@ frontend/
 | `OnboardingTour.tsx` | 首次访问引导向导（react-joyride），spotlight 高亮 + 步骤动画驱动 |
 | `ErrorBoundary.tsx` | 错误边界，防止模态组件异常卸载整个 App |
 | `SplashScreen.tsx` | 开屏动画，最少停留 800ms、最多 3000ms，可点击跳过 |
-| `ContourBackground.tsx` | 聊天区 canvas 等高线动态背景 |
 | `AgentStageLayer.tsx` | 聊天区背景层 Agent 舞台层 iframe（会话级 `stage/` 目录，透明、鼠标穿透） |
 
 ### 聊天区域
