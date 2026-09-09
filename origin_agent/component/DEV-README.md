@@ -138,7 +138,7 @@ component/
 - `get_approval_mode(session_id) -> ApprovalMode`：返回会话当前审批模式（默认 MANUAL）。
 - `disable_all_non_manual_modes() -> list[str]`：将全部非 MANUAL 的会话重置为 MANUAL。
 - `is_handsfree_available() -> bool`：检查审批 Profile 是否已配置。
-- `_handsfree_confirm()`：核心流程，通过审批 Profile 模型评估工具调用风险。审批请求包含工具的参数 schema（使模型能区分必填与可选参数）、实际参数值和 reason（补充说明）。审批输出使用普通文本决策标记（`[ALLOW]`/`[APPROVE]`/`[DENY]`/`[REJECT]`/`[拒绝]`/`[否决]`），不使用 JSON。
+- `_handsfree_confirm()`：核心流程，通过审批 Profile 模型评估工具调用风险。审批请求包含工具的参数 schema（使模型能区分必填与可选参数）、实际参数值和 reason（补充说明）。审批输出使用普通文本决策标记（`[ALLOW]`/`[APPROVE]`/`[DENY]`/`[REJECT]`/`[拒绝]`/`[否决]`），不使用 JSON。审批 system prompt（`templates/approval/system_prompt.md`）明确审批模型只见单次调用、不读用户消息；schema description 是写给调用方 Agent 的指令而非审批判据；审批模型只判断该次调用本身是否安全，不检查前置条件/用户同意/流程合规，本质只读的操作（含 `ssh <host> <只读命令>`）必须放行。
 - 兼容包装：`set_handsfree_mode()`/`is_handsfree_mode()`/`disable_all_handsfree_modes()` 保留，分别委托到新接口。
 
 #### `approval/allowlist.py` — 工具白名单
