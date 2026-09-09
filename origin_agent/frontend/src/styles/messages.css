@@ -202,7 +202,7 @@
 
 .message-user .message-bubble {
   order: 1;
-  background: var(--user-bubble);
+  background: transparent;
   border: 1px solid var(--border);
   border-radius: 16px;
   padding: 10px 16px;
