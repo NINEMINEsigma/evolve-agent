@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ChatMessage, MessageContent } from "../types";
 import MessageItem from "./MessageItem";
 import Minimap from "./Minimap";
@@ -32,10 +32,16 @@ export default function ChatArea({ messages, waiting, archived, onImageClick, on
   const [dragOver, setDragOver] = useState(false);
   const [showScrollButton, setShowScrollButton] = useState(false);
   const [minimapCollapsed, setMinimapCollapsed] = useState(false);
+  const [hoveredCharacterName, setHoveredCharacterName] = useState<string | null>(null);
   const internalChatAreaRef = useRef<HTMLDivElement>(null);
   const internalContentRef = useRef<HTMLDivElement>(null);
   const chatAreaRef = externalChatAreaRef || internalChatAreaRef;
   const contentRef = externalContentRef || internalContentRef;
+
+  // 同角色气泡悬停联动回调：setHoveredCharacterName 来自 useState，本身保证稳定引用
+  const handleCharacterHoverChange = useCallback((characterName: string | null) => {
+    setHoveredCharacterName(characterName);
+  }, []);
 
   // 移动端默认折叠 minimap
   useEffect(() => {
@@ -92,9 +98,11 @@ export default function ChatArea({ messages, waiting, archived, onImageClick, on
         waiting={waiting}
         agents={agents}
         onToggleMessageVisibility={onToggleMessageVisibility}
+        hoveredCharacterName={hoveredCharacterName}
+        onCharacterHoverChange={handleCharacterHoverChange}
       />
     )),
-    [messages, archived, onImageClick, onToggleCollapse, onEditMessage, onDeleteMessages, onDeleteSingleMessage, onRegenerateResponse, lastUserMsgId, lastUserMessageIndex, waiting]
+    [messages, archived, onImageClick, onToggleCollapse, onEditMessage, onDeleteMessages, onDeleteSingleMessage, onRegenerateResponse, lastUserMsgId, lastUserMessageIndex, waiting, agents, onToggleMessageVisibility, hoveredCharacterName, handleCharacterHoverChange]
   );
 
   // 判断是否为空态：仅当无 user/assistant 消息时才算空态（系统消息不计入）
@@ -157,6 +165,8 @@ export default function ChatArea({ messages, waiting, archived, onImageClick, on
                   onRegenerateResponse={onRegenerateResponse}
                   waiting={waiting}
                   streaming
+                  hoveredCharacterName={hoveredCharacterName}
+                  onCharacterHoverChange={handleCharacterHoverChange}
                 />
               )}
 

@@ -26,17 +26,32 @@
   flex-direction: column;
   gap: 8px;
   width: 100%;
-  background: var(--bg-tertiary);
-  border: 1px solid var(--border);
+  background:
+    linear-gradient(135deg, rgba(var(--white-rgb), 0.1), rgba(var(--white-rgb), 0.025) 45%, rgba(var(--accent-rgb), 0.045)),
+    rgba(var(--bg-secondary-rgb), 0.5);
+  backdrop-filter: blur(24px) saturate(165%);
+  -webkit-backdrop-filter: blur(24px) saturate(165%);
+  border: 1px solid rgba(var(--white-rgb), 0.14);
   border-radius: 24px;
   padding: 6px 10px;
-  box-shadow: 0 4px 24px rgba(var(--black-rgb), 0.35), 0 0 1px rgba(var(--white-rgb), 0.06);
-  transition: border-color var(--duration-normal) var(--ease-out), box-shadow var(--duration-normal) var(--ease-out), transform var(--duration-fast) var(--ease-out);
+  box-shadow:
+    0 12px 40px rgba(var(--black-rgb), 0.3),
+    inset 0 1px 0 rgba(var(--white-rgb), 0.12),
+    inset 0 -1px 0 rgba(var(--white-rgb), 0.035);
+  transition: border-color var(--duration-normal) var(--ease-out), box-shadow var(--duration-normal) var(--ease-out), background var(--duration-normal) var(--ease-out), transform var(--duration-fast) var(--ease-out);
 }
 
 .input-bar-inner:focus-within {
-  border-color: var(--border-strong);
-  box-shadow: 0 4px 28px rgba(var(--black-rgb), 0.45), 0 0 0 1px var(--border-strong), 0 0 24px rgba(var(--accent-rgb), 0.08);
+  background:
+    linear-gradient(135deg, rgba(var(--white-rgb), 0.12), rgba(var(--white-rgb), 0.03) 45%, rgba(var(--accent-rgb), 0.075)),
+    rgba(var(--bg-secondary-rgb), 0.56);
+  border-color: rgba(var(--accent-rgb), 0.42);
+  box-shadow:
+    0 14px 44px rgba(var(--black-rgb), 0.36),
+    0 0 0 1px rgba(var(--accent-rgb), 0.12),
+    0 0 28px rgba(var(--accent-rgb), 0.12),
+    inset 0 1px 0 rgba(var(--white-rgb), 0.16),
+    inset 0 -1px 0 rgba(var(--white-rgb), 0.04);
 }
 
 .input-target-row {

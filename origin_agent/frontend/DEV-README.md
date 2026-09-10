@@ -97,8 +97,8 @@ frontend/
 
 | 组件 | 职责 |
 |---|---|
-| `ChatArea.tsx` | 聊天消息滚动区域 |
-| `MessageItem.tsx` | 单条消息渲染（文本、代码块、图片、工具调用） |
+| `ChatArea.tsx` | 聊天消息滚动区域；持有主聊天区同角色悬停联动状态（`hoveredCharacterName`），悬停某气泡时同角色名的全部气泡同时变为模糊玻璃 |
+| `MessageItem.tsx` | 单条消息渲染（文本、代码块、图片、工具调用）；上报鼠标进入/离开的角色显示名称，并按名称匹配附加 `.message-character-hovered`；子会话抽屉不传联动 props，不参与跨消息联动 |
 | `MessageBody.tsx` | 消息正文 Markdown 渲染 |
 | `MessageEditor.tsx` | 消息编辑器（编辑历史消息） |
 | `MessageAttachments.tsx` | 消息附件展示 |
@@ -199,7 +199,7 @@ frontend/
 | `variables.css` | CSS 变量 |
 | `chat.css` | 聊天布局 |
 | `messages.css` | 消息气泡与渲染 |
-| `input.css` | 输入框 |
+| `input.css` | 输入框（半透明背景模糊、玻璃高光边框与聚焦光晕） |
 | `dialogs.css` | 弹窗 |
 | `drawer.css` | 抽屉面板 |
 | `panels.css` | 任务进度/子代理面板 |

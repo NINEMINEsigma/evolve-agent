@@ -1,4 +1,4 @@
-import { memo, useState, type WheelEvent } from "react";
+import { memo, useEffect, useRef, useState, type WheelEvent } from "react";
 import { ChatMessage, MessageContent } from "../types";
 import MessageBody, { contentToText } from "./MessageBody";
 import MessageEditor from "./MessageEditor";
@@ -53,6 +53,8 @@ const MessageItem = memo(function MessageItem({
   waiting,
   agents,
   onToggleMessageVisibility,
+  hoveredCharacterName,
+  onCharacterHoverChange,
 }: {
   message: ChatMessage;
   archived: boolean;
@@ -68,9 +70,14 @@ const MessageItem = memo(function MessageItem({
   waiting?: boolean;
   agents?: string[];
   onToggleMessageVisibility?: (messageId: string, agentName: string) => void;
+  hoveredCharacterName?: string | null;
+  onCharacterHoverChange?: (characterName: string | null) => void;
 }) {
   const m = message;
   const [editing, setEditing] = useState(false);
+
+  // 指针是否当前悬停在本文消息上，用于卸载清理时只清理真实悬停项
+  const pointerHoveringRef = useRef(false);
 
   const textContent = contentToText(m.content);
   const lineCount = textContent.split("\n").length;
@@ -107,6 +114,15 @@ const MessageItem = memo(function MessageItem({
   const displayName = m.characterName || (m.role === "user" ? "User" : m.role === "assistant" ? "Assistant" : undefined);
   const showMeta = m.visibleCharacters != null || m.requiresResponse != null;
 
+  // 卸载或显示名称/回调变更时，仅清理真实悬停项的状态，防止流式消息替换留下残留高亮
+  useEffect(() => {
+    return () => {
+      if (pointerHoveringRef.current && onCharacterHoverChange) {
+        onCharacterHoverChange(null);
+      }
+    };
+  }, [displayName, onCharacterHoverChange]);
+
   // 系统状态消息：居中灰色气泡，无头像、无编辑/删除/重新生成按钮
   if (m.isSystemStatus) {
     return (
@@ -116,11 +132,23 @@ const MessageItem = memo(function MessageItem({
     );
   }
 
+  // 同角色悬停联动：仅当消息有有效显示名称且提供了回调时参与联动
+  const canCharacterHover = !!displayName && !!onCharacterHoverChange;
+  const isCharacterHovered = canCharacterHover && displayName === hoveredCharacterName;
+
   return (
     <div
-      className={`message message-${m.role}${streaming ? " message-streaming" : ""}`}
+      className={`message message-${m.role}${streaming ? " message-streaming" : ""}${isCharacterHovered ? " message-character-hovered" : ""}`}
       data-message-id={m.id}
       style={{ "--msg-hue": hueFromString(displayName || "") } as React.CSSProperties}
+      onMouseEnter={canCharacterHover ? () => {
+        pointerHoveringRef.current = true;
+        onCharacterHoverChange!(displayName!);
+      } : undefined}
+      onMouseLeave={canCharacterHover ? () => {
+        pointerHoveringRef.current = false;
+        onCharacterHoverChange!(null);
+      } : undefined}
     >
       {(m.role === "user" || m.role === "assistant" || m.role === "error") && (
         <div className="message-avatar-wrapper" data-tooltip={displayName || m.role}>
