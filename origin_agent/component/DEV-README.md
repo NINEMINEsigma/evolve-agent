@@ -45,7 +45,7 @@ component/
 
 | 工具文件 | 主要工具 | 用途 |
 |----------|----------|------|
-| `filesystem.py` | `Read`, `Write`, `PatchEdit`, `Delete`, `Copy`, `Move`, `SearchFiles`, `Grep`, `file_exists` | 沙盒内文件操作 |
+| `filesystem.py` | `Read`, `Write`, `PatchEdit`, `Delete`, `Copy`, `Move`, `SearchFiles`, `Grep`, `file_exists` | 沙盒内文件操作；`SearchFiles`/`Grep` 在 Windows x64 优先使用内置 `ripgrep`，不可用或单次不兼容时回退 Python；默认遵循 ignore 文件和隐藏路径过滤，返回 `engine`、`truncated`，`full_scan` 可完整包含隐藏/忽略路径，`exhaustive` 可完整扫描并写超限日志 |
 | `code.py` | `ValidateCode`, `EvolveCode` | 自我进化 |
 | `shell.py` | `RunCommand` 等 | 子进程执行 |
 | `frontend.py` | `ValidateFrontend` | 前端构建验证 |

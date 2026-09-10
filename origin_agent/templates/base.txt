@@ -70,7 +70,7 @@ The registry is saved with easysave. The serialization implementation is in ``th
 
 Tool selection priority:
 - Read or inspect files: use ``Read`` (or ``PatchEdit`` for small edits).  Do NOT use ``RunCommand`` to call cat, type, head, tail, etc.
-- Search code: use ``SearchFiles`` or ``Grep``.
+- Search code: use ``SearchFiles`` for filename glob search and ``Grep`` for content search. Both tools default to ignore-file and hidden-path filtering, return ``engine`` and ``truncated``, stop at ``limit`` unless ``exhaustive=true``, use ``full_scan=true`` only when you intentionally need ignored or hidden paths.
 - File operations: use ``Write``, ``PatchEdit``, ``Copy``, ``Move``.
 - Only use ``RunCommand`` for tasks that truly require a shell (e.g. package installation, running tests).
 - Never use ``RunPython`` to write files; always use ``Write`` or ``PatchEdit`` instead.

@@ -17,6 +17,22 @@ class SystemInfo(BaseModel):
     """操作系统平台描述（如 Windows-11-10.0.22631-SP0）。"""
 
 
+class ProcessLineStreamResult(BaseModel):
+    """逐行消费子进程输出后的结果摘要。"""
+
+    returncode: int | None = None
+    """子进程退出码；调用方主动截断时可能为空。"""
+
+    stderr: str = ""
+    """限制长度后的标准错误文本。"""
+
+    truncated: bool = False
+    """是否因调用方要求停止而提前终止。"""
+
+    stdout_line_count: int = 0
+    """已消费的 stdout 行数。"""
+
+
 # ---------------------------------------------------------------------------
 # Client Info Types
 # ---------------------------------------------------------------------------

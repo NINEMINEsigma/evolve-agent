@@ -14,7 +14,7 @@ puretype 包 — 只含有不包含任何方法定义的类型定义。
     agent       : AgentConfig
     ws          : MessageType, Message
     lsp         : LSPState, LSPDiagnostic, LSPReference, LSPDefinition, LSPSymbol
-    runtime     : SystemInfo, ClientInfo
+    runtime     : SystemInfo, ClientInfo, ProcessLineStreamResult
     extools     : CronTaskInfo, DynamicEndpointInfo
     agentspace  : AgentspaceEntry/Event/FileSnapshot/Lock/Trash 与 REST 请求模型
 
@@ -85,6 +85,7 @@ from .lsp import (
 from .runtime import (
     SystemInfo,
     ClientInfo,
+    ProcessLineStreamResult,
 )
 from .extools import (
     CronTaskInfo,
@@ -164,6 +165,7 @@ __all__ = [
     # runtime
     "SystemInfo",
     "ClientInfo",
+    "ProcessLineStreamResult",
     # extools
     "CronTaskInfo",
     "DynamicEndpointInfo",

@@ -16,3 +16,4 @@ rich
 # playwright
 rank-bm25
 watchdog>=6.0,<7
+pathspec>=0.12,<1

@@ -37,9 +37,10 @@ import logging
 import subprocess  # nosec
 from enum import Enum
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import Callable, TYPE_CHECKING
 
-from entity.constant import Namespace, is_namespaced_path
+from entity.constant import Namespace, SEARCH_PROCESS_STDERR_MAX_BYTES, is_namespaced_path
+from entity.puretype import ProcessLineStreamResult
 from system.context import get_runtime_context
 from system.pathutils import find_repo_root
 
@@ -336,6 +337,50 @@ class Sandbox:
         return await self._get_runner().run_async(
             args, cwd=str(cwd_r.real), timeout=timeout,
             extra_env=extra_env, session_id=session_id,
+        )
+
+    async def run_async_line_processor(
+        self,
+        args: list[str],
+        *,
+        cwd_ns: str = "ws:",
+        on_stdout_line: Callable[[bytes], bool],
+        timeout: int | None = None,
+        extra_env: dict[str, str] | None = None,
+        session_id: str = "",
+        stderr_byte_limit: int = SEARCH_PROCESS_STDERR_MAX_BYTES,
+    ) -> ProcessLineStreamResult:
+        """以沙盒化工作目录逐行消费子进程 stdout。
+
+        保留与 ``run_async()`` 一致的 cwd 解析和逻辑路径参数拒绝逻辑，
+        实际逐行执行委托给 ``SubprocessRunner``。
+        """
+        if timeout is None:
+            timeout = get_runtime_context().tool_timeout
+
+        if not args:
+            raise SandboxError("subprocess args must not be empty")
+
+        cwd_r: ResolvedPath = self.resolve(cwd_ns, Access.READ)
+        if not cwd_r.real.is_dir():
+            raise SandboxError(f"cwd does not exist or is not a directory: {cwd_ns}")
+
+        for arg in args:
+            if ":" in arg and is_namespaced_path(arg):
+                raise SandboxError(
+                    f"Path arguments to subprocess commands must be resolved "
+                    f"by the tool handler before calling sandbox.run_async_line_processor(). "
+                    f"Got: {arg!r}"
+                )
+
+        return await self._get_runner().run_async_line_processor(
+            args,
+            cwd=str(cwd_r.real),
+            on_stdout_line=on_stdout_line,
+            timeout=timeout,
+            extra_env=extra_env,
+            session_id=session_id,
+            stderr_byte_limit=stderr_byte_limit,
         )
 
     def kill_active(self, session_id: str) -> None:

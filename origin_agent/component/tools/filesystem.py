@@ -22,12 +22,11 @@ import json
 import logging
 import mimetypes
 import re
-from datetime import datetime, timezone
 from typing import Any, Dict, TYPE_CHECKING
 
 from abstract.tools.registry import registry, tool_error, tool_result
 from entity.puretype import ToolDangerLevel
-from entity.constant import EDIT_FILE_MAX_CHARS, FILE_SNIFF_BYTES, READ_FILE_DEFAULT_LIMIT, READ_FILE_MAX_LINES, WRITE_FILE_MAX_CHARS, WRITE_FILE_TRUNCATION_TAIL
+from entity.constant import EDIT_FILE_MAX_CHARS, READ_FILE_DEFAULT_LIMIT, READ_FILE_MAX_LINES, WRITE_FILE_MAX_CHARS, WRITE_FILE_TRUNCATION_TAIL
 from system.sandbox import Access, Sandbox, SandboxError
 from system.context import get_runtime_context
 from pathlib import Path
@@ -1711,116 +1710,44 @@ Moves a file or directory to the destination path. If the destination includes a
 
 
 # -- search_files
-def _handle_search_files(args: dict[str, Any]) -> dict:
-    path: str = str(args.get("path", "")).strip()
-    pattern: str = str(args.get("pattern", "")).strip()
-    limit: int = int(args.get("limit", 100))
+async def _handle_search_files(
+    args: dict[str, Any],
+    context: ToolContext | None = None,
+) -> dict:
+    from system.search_engine import search_files
 
-    if not path:
-        return tool_error("path is required")
-    if not pattern:
-        return tool_error("pattern is required")
-
-    try:
-        resolved = _s().resolve_read(path)
-    except SandboxError as exc:
-        return tool_error(str(exc), path=path)
-
-    if not resolved.real.is_dir():
-        return tool_error(f"Not a directory: {path}")
-
-    matches: list[str] = []
-    for p in resolved.real.rglob(pattern):
-        if p.is_file():
-            rel = p.relative_to(resolved.real).as_posix()
-            matches.append(f"{resolved.namespace}:{rel}")
-
-    count = len(matches)
-    if count > limit:
-        timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
-        log_name = f"ws:logs/search_files_{timestamp}.log"
-        log_content = (
-            f"# search_files results for {path} pattern={pattern}\n"
-            f"Total: {count} matches\n\n"
-            + "\n".join(matches)
-        )
-        try:
-            _s().write(log_name, log_content)
-        except SandboxError as exc:
-            return tool_error(str(exc))
-        return tool_result(
-            count=count,
-            log_path=log_name,
-            _note=f"Results exceeded {limit} matches. Full list written to log file.",
-        )
-
-    return tool_result(matches=matches, count=count)
+    return await search_files(args, context)
 
 
 # -- search_files
-# 按文件名 glob 模式递归搜索目录中的文件。返回匹配文件的逻辑路径列表。
-# 使用 glob 模式（如 *.py、**/test_*.py），不是正则表达式。
-# 结果超过 limit 时自动写入 ws:logs/ 下的日志文件，仅返回数量和日志路径。
-#
-# ## 前置条件
-# - 搜索路径必须是一个存在的目录。
-# - 路径必须使用命名空间前缀。
-#
-# ## 调用效果
-# 递归遍历目录，查找文件名匹配 glob pattern 的文件。
-# 返回匹配文件的逻辑路径列表（如 ws:src/main.py）。
-# 结果超过 limit 条时，完整列表写入 ws:logs/search_files_<timestamp>.log。
-#
-# ## 返回
-# 结果未超限时：
-# ```json
-# {"matches": ["ws:src/a.py", "ws:src/b.py"], "count": 2}
-# ```
-# 结果超限时：
-# ```json
-# {"count": 150, "log_path": "ws:logs/search_files_20250314_120000.log", "_note": "..."}
-# ```
-#
-# ## 何时使用
-# - 查找特定文件名的文件。
-# - 确定目录结构中有哪些文件。
-#
-# ## 副作用/注意
-# - 无副作用，只读查询。
-# - 使用 glob 模式（如 *.py），不是正则表达式。
-# - 结果超过 limit（默认 100）时写入日志文件，不直接返回完整列表。
-# - 不搜索文件内容（使用 Grep）。
+# 通过统一搜索引擎按文件名 glob 递归搜索。默认遵循 ignore 文件并跳过隐藏路径；
+# full_scan 可包含被过滤路径，exhaustive 可完整扫描并在超限时写入日志。
 registry.register(
     name="SearchFiles",
     toolset="filesystem",
     schema={
-        "description": """Recursively search for files matching a filename glob pattern in a directory. Uses glob patterns (e.g. *.py, **/test_*.py), NOT regex. Returns a list of matching logical file paths. If results exceed the limit, the full list is written to a log file under ws:logs/ and only the count and log path are returned.
+        "description": """Recursively search for files matching a filename glob pattern in a directory. Uses bundled ripgrep on supported Windows x64 builds and falls back to Python when ripgrep is unavailable. By default, respects .gitignore/.ignore/.rgignore and skips hidden paths. Set full_scan=true to include ignored and hidden paths. The limit is a real result cap unless exhaustive=true.
 
 ## Prerequisites
 - The search path must be an existing directory.
 - The path must use a namespace prefix.
 
 ## Effect
-Recursively traverses the directory looking for files whose names match the glob pattern. Returns logical paths of matching files (e.g. ws:src/main.py). When results exceed the limit, the full list is written to ws:logs/search_files_<timestamp>.log.
+Returns logical paths of matching files (e.g. ws:src/main.py). In the default non-exhaustive mode, stops soon after limit matches are found and returns truncated=true when more results exist. In exhaustive mode, scans the full tree; if total results exceed limit, writes the full list to ws:logs/search_files_<timestamp>.log and returns log_path.
 
 ## Returns
-When results fit within the limit:
 ```json
-{"matches": ["ws:src/a.py", "ws:src/b.py"], "count": 2}
+{"matches": ["ws:src/a.py"], "count": 1, "truncated": false, "engine": "ripgrep", "limit": 100, "full_scan": false, "exhaustive": false}
 ```
-When results exceed the limit:
-```json
-{"count": 150, "log_path": "ws:logs/search_files_20250314_120000.log", "_note": "..."}
-```
+Fallback results include warning and engine="python".
 
 ## When to Use
 - Find files by name pattern.
 - Discover what files exist in a directory tree.
 
 ## Side Effects / Notes
-- No side effects, read-only query.
+- No side effects unless exhaustive=true and results exceed limit, in which case a log file is written under ws:logs/.
 - Uses glob patterns (e.g. *.py), NOT regex.
-- Results exceeding the limit (default 100) are written to a log file instead of returned inline.
 - For searching file contents, use Grep.""",
         "parameters": {
             "type": "object",
@@ -1837,213 +1764,83 @@ When results exceed the limit:
                 },
                 "limit": {
                     "type": "integer",
-                    # 内联返回的最大结果数（默认 100）。超出时写入日志文件。
-                    "description": "Maximum number of results to return inline (default 100). Excess results are written to a log file.",
+                    # 返回结果上限（默认 100）。非 exhaustive 模式达到上限后提前停止。
+                    "description": "Maximum number of results to return (default 100). In non-exhaustive mode, search stops after enough matches are found.",
                     "default": 100,
+                },
+                "full_scan": {
+                    "type": "boolean",
+                    # 是否搜索隐藏路径和 ignore 规则命中的路径。
+                    "description": "If true, include hidden paths and paths ignored by .gitignore/.ignore/.rgignore.",
+                    "default": False,
+                },
+                "exhaustive": {
+                    "type": "boolean",
+                    # 是否完整扫描并统计全部结果。
+                    "description": "If true, scan the full tree and count all matches; when results exceed limit, the full list is written to ws:logs/.",
+                    "default": False,
                 },
             },
             "required": ["path", "pattern"],
         },
     },
     handler=_handle_search_files,
+    is_async=True,
 )
 
 
 # -- grep
-_TEXT_EXTENSIONS: frozenset[str] = frozenset(
-    {
-        ".py", ".txt", ".md", ".json", ".yaml", ".yml", ".toml", ".csv",
-        ".ini", ".cfg", ".conf", ".js", ".ts", ".jsx", ".tsx", ".css",
-        ".html", ".htm", ".xml", ".sh", ".bat", ".ps1", ".rs", ".go",
-        ".java", ".c", ".cpp", ".h", ".hpp", ".rb", ".php", ".swift",
-        ".kt", ".scala", ".sql", ".rst", ".log",
-    }
-)
-
-
-def _is_text_file(path: Any) -> bool:
-    """通过扩展名和空字节探测判断是否为文本文件。"""
-    if path.suffix.lower() in _TEXT_EXTENSIONS:
-        return True
-    try:
-        sample: bytes = path.read_bytes()[:FILE_SNIFF_BYTES]
-        return b"\x00" not in sample
-    except Exception:
-        logger.warning("Failed to sniff file type: %s", path, exc_info=True)
-        return False
-
-
-def _handle_grep(
+async def _handle_grep(
     args: dict[str, Any],
     context: ToolContext | None = None,
 ) -> dict:
     path: str = str(args.get("path", "")).strip()
-    pattern: str = str(args.get("pattern", "")).strip()
-    limit: int = int(args.get("limit", 100))
-    max_file_size: int = int(args.get("max_file_size", 524_288_000))
-    context_lines: int = int(args.get("context_lines", 2))
-
-    if not path:
-        return tool_error("path is required")
-    if not pattern:
-        return tool_error("pattern is required")
-
-    try:
-        resolved = _s().resolve_read(path)
-    except SandboxError as exc:
-        return tool_error(str(exc), path=path)
-
-    # 收集待搜索文件列表：文件直接搜索，目录递归搜索
-    files: list[Path] = []
-    if resolved.real.is_file():
+    if path:
         try:
-            _track_agentspace_access(context, [(path, False)])
+            resolved = _s().resolve_read(path)
+            if resolved.real.is_file():
+                _track_agentspace_access(context, [(path, False)])
+        except SandboxError as exc:
+            return tool_error(str(exc), path=path)
         except Exception as exc:
             return tool_error(f"Agentspace access lock failed: {exc}", path=path)
-        files = [resolved.real]
-    elif resolved.real.is_dir():
-        files = [p for p in resolved.real.rglob("*") if p.is_file()]
-    else:
-        return tool_error(f"Not a file or directory: {path}")
 
-    try:
-        regex = re.compile(pattern)
-    except re.error as exc:
-        return tool_error(f"Invalid regex pattern: {exc}")
+    from system.search_engine import grep
 
-    matches: list[dict[str, Any]] = []
-    for p in files:
-        if p.stat().st_size > max_file_size:
-            continue
-        if not _is_text_file(p):
-            continue
-
-        try:
-            content = p.read_text(encoding="utf-8", errors="replace")
-        except Exception:
-            logger.warning("Failed to read file for search: %s", p, exc_info=True)
-            continue
-
-        lines = content.splitlines()
-        for i, line in enumerate(lines):
-            if regex.search(line):
-                if resolved.real.is_file():
-                    file_path = path
-                else:
-                    rel = p.relative_to(resolved.real).as_posix()
-                    file_path = f"{resolved.namespace}:{rel}"
-                matches.append(
-                    {
-                        "file": file_path,
-                        "line": i + 1,
-                        "match": line,
-                        "context_before": lines[max(0, i - context_lines) : i],
-                        "context_after": lines[i + 1 : i + 1 + context_lines],
-                    }
-                )
-
-    count = len(matches)
-    if count > limit:
-        timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
-        log_name = f"ws:logs/grep_{timestamp}.log"
-        out_lines = [
-            f"# grep results for {path} pattern={pattern}",
-            f"Total: {count} matches",
-            "",
-        ]
-        for m in matches:
-            out_lines.append(f"{m['file']}:{m['line']}:{m['match']}")
-            if m["context_before"]:
-                for cb in m["context_before"]:
-                    out_lines.append(f"  - {cb}")
-            if m["context_after"]:
-                for ca in m["context_after"]:
-                    out_lines.append(f"  + {ca}")
-            out_lines.append("")
-        try:
-            _s().write(log_name, "\n".join(out_lines))
-        except SandboxError as exc:
-            return tool_error(str(exc))
-        return tool_result(
-            count=count,
-            log_path=log_name,
-            _note=f"Results exceeded {limit} matches. Full list written to log file.",
-        )
-
-    return tool_result(matches=matches, count=count)
+    return await grep(args, context)
 
 
 # -- grep
-# 在目录或单个文件中按正则表达式递归搜索文本文件的内容。
-# 自动跳过二进制文件（通过扩展名 + 空字节探测）和超大文件。
-# 返回匹配项的文件路径、行号、匹配文本及周围上下文行。
-# 结果超过 limit 时自动写入 ws:logs/ 下的日志文件。
-#
-# ## 前置条件
-# - 搜索路径必须是一个存在的目录或文件。
-# - 路径必须使用命名空间前缀。
-# - pattern 必须是有效的 Python 正则表达式。
-#
-# ## 调用效果
-# 当路径为目录时递归遍历其中的文本文件，当路径为文件时只搜索该文件。
-# 用正则表达式搜索内容。自动跳过二进制文件（通过白名单扩展名 + 前 {FILE_SNIFF_BYTES} 字节的空字节探测）、
-# 超过 max_file_size 字节的文件、以及无法以 UTF-8 解码的文件。
-# 每条匹配返回文件路径、行号、匹配行文本、前后上下文行。
-# 结果超过 limit 条时，完整列表写入 ws:logs/grep_<timestamp>.log。
-#
-# ## 返回
-# 结果未超限时：
-# ```json
-# {"matches": [{"file": "ws:src/main.py", "line": 42, "match": "def foo():", "context_before": [...], "context_after": [...]}], "count": 2}
-# ```
-# 结果超限时：
-# ```json
-# {"count": 150, "log_path": "ws:logs/grep_20250314_120000.log", "_note": "..."}
-# ```
-#
-# ## 何时使用
-# - 在代码库中搜索特定函数、变量、错误信息等。
-# - 配合 Read 使用，根据 grep 结果的行号读取文件。
-#
-# ## 副作用/注意
-# - 无副作用，只读查询。
-# - pattern 是 Python 正则表达式，不是 glob 模式。
-# - 自动跳过二进制文件和超大文件。
-# - 结果超过 limit（默认 100）时写入日志文件。
-# - 按文件名搜索使用 SearchFiles。
+# 通过统一搜索引擎递归搜索文本内容。默认遵循 ignore 文件并跳过隐藏路径；
+# 支持固定字符串、真实 limit 截断和 exhaustive 完整扫描。
 registry.register(
     name="Grep",
     toolset="filesystem",
     schema={
-        "description": f"""Recursively search text file contents using a regex pattern in a directory or a single file. Automatically skips binary files (by extension + null-byte sniffing) and oversized files. Returns matches with file path, line number, matched text, and surrounding context lines. If results exceed the limit, the full list is written to a log file under ws:logs/.
+        "description": f"""Recursively search text file contents in a directory or a single file. Uses bundled ripgrep on supported Windows x64 builds and falls back to Python when ripgrep is unavailable or a single query is incompatible. By default, respects .gitignore/.ignore/.rgignore, skips hidden paths, skips binary files, and skips files larger than max_file_size. The limit is a real result cap unless exhaustive=true.
 
 ## Prerequisites
 - The search path must be an existing directory or file.
 - The path must use a namespace prefix.
-- The pattern must be a valid Python regex.
+- In regex mode, pattern must be a valid regex for the active engine or the tool will fall back to Python / return a Python regex error.
 
 ## Effect
-When the path is a directory, recursively traverses text files in it; when it is a single file, searches only that file. Searches contents with a regex pattern. Automatically skips binary files (via allowlist extension + null-byte probe on first {FILE_SNIFF_BYTES} bytes), files larger than max_file_size, and files that cannot be decoded as UTF-8. Each match returns file path, line number, matched line text, and surrounding context lines. When results exceed the limit, the full list is written to ws:logs/grep_<timestamp>.log.
+Returns matches with file path, line number, matched line text, and surrounding context lines. In the default non-exhaustive mode, stops soon after limit matches are found and returns truncated=true when more results exist. In exhaustive mode, scans the full tree; if total results exceed limit, writes the full list to ws:logs/grep_<timestamp>.log and returns log_path.
 
 ## Returns
-When results fit within the limit:
 ```json
-{{"matches": [{{"file": "ws:src/main.py", "line": 42, "match": "def foo():", "context_before": [...], "context_after": [...]}}], "count": 2}}
+{{"matches": [{{"file": "ws:src/main.py", "line": 42, "match": "def foo():", "context_before": [], "context_after": []}}], "count": 1, "truncated": false, "engine": "ripgrep", "limit": 100, "full_scan": false, "exhaustive": false, "literal": false}}
 ```
-When results exceed the limit:
-```json
-{{"count": 150, "log_path": "ws:logs/grep_20250314_120000.log", "_note": "..."}}
-```
+Fallback results include warning and engine="python".
 
 ## When to Use
 - Search for specific functions, variables, error messages, etc. in a codebase.
 - Use with Read by line number from grep results.
 
 ## Side Effects / Notes
-- No side effects, read-only query.
-- Pattern is a Python regex, NOT a glob pattern.
-- Automatically skips binary files and oversized files.
-- Results exceeding the limit (default 100) are written to a log file.
+- No side effects unless exhaustive=true and results exceed limit, in which case a log file is written under ws:logs/.
+- Pattern is a regex by default; set literal=true for fixed-string search.
+- full_scan=true includes hidden and ignored paths.
 - For searching by filename, use SearchFiles.""",
         "parameters": {
             "type": "object",
@@ -2055,13 +1852,13 @@ When results exceed the limit:
                 },
                 "pattern": {
                     "type": "string",
-                    # 用于匹配文件内容的正则表达式。
-                    "description": "Regex pattern to search for in file contents.",
+                    # 用于匹配文件内容的正则表达式或固定字符串。
+                    "description": "Regex pattern to search for in file contents, or a fixed string when literal=true.",
                 },
                 "limit": {
                     "type": "integer",
-                    # 内联返回的最大结果数（默认 100）。超出时写入日志文件。
-                    "description": "Maximum number of results to return inline (default 100). Excess results are written to a log file.",
+                    # 返回结果上限（默认 100）。非 exhaustive 模式达到上限后提前停止。
+                    "description": "Maximum number of results to return (default 100). In non-exhaustive mode, search stops after enough matches are found.",
                     "default": 100,
                 },
                 "max_file_size": {
@@ -2076,10 +1873,29 @@ When results exceed the limit:
                     "description": "Number of context lines to include before and after each match (default 2).",
                     "default": 2,
                 },
+                "full_scan": {
+                    "type": "boolean",
+                    # 是否搜索隐藏路径和 ignore 规则命中的路径。
+                    "description": "If true, include hidden paths and paths ignored by .gitignore/.ignore/.rgignore.",
+                    "default": False,
+                },
+                "exhaustive": {
+                    "type": "boolean",
+                    # 是否完整扫描并统计全部结果。
+                    "description": "If true, scan the full tree and count all matches; when results exceed limit, the full list is written to ws:logs/.",
+                    "default": False,
+                },
+                "literal": {
+                    "type": "boolean",
+                    # 是否按固定字符串搜索。
+                    "description": "If true, search pattern as a fixed string instead of a regex.",
+                    "default": False,
+                },
             },
             "required": ["path", "pattern"],
         },
     },
     handler=_handle_grep,
+    is_async=True,
 )
 

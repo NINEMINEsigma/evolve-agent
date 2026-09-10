@@ -13,7 +13,10 @@ import os
 import subprocess  # nosec
 import sys
 import threading
-from typing import Any, Mapping, Sequence
+from typing import Any, Callable, Mapping, Sequence
+
+from entity.constant import SEARCH_PROCESS_STDERR_MAX_BYTES
+from entity.puretype import ProcessLineStreamResult
 
 logger = logging.getLogger(__name__)
 
@@ -338,6 +341,141 @@ class SubprocessRunner:
             returncode=proc.returncode,
             stdout=stdout,
             stderr=stderr,
+        )
+
+    async def run_async_line_processor(
+        self,
+        args: list[str],
+        *,
+        cwd: str,
+        on_stdout_line: Callable[[bytes], bool],
+        timeout: float | None = None,
+        extra_env: dict[str, str] | None = None,
+        session_id: str = "",
+        stderr_byte_limit: int = SEARCH_PROCESS_STDERR_MAX_BYTES,
+    ) -> ProcessLineStreamResult:
+        """以逐行 stdout 回调方式运行子进程，并允许调用方提前终止。
+
+        ``on_stdout_line`` 返回 ``False`` 时表示调用方已取得足够输出，
+        本方法终止整棵进程树并返回 ``truncated=True``。stderr 独立并发
+        读取，并按字节上限保留，避免子进程阻塞或错误输出无限增长。
+        """
+        if not args:
+            raise ValueError("subprocess args must not be empty")
+
+        env = build_subprocess_env(extra_env)
+        logger.debug("SubprocessRunner.run_async_line_processor | cwd=%s cmd=%s", cwd, args)
+
+        popen_kwargs: dict = {
+            "cwd": cwd,
+            "stdout": subprocess.PIPE,
+            "stderr": subprocess.PIPE,
+            "env": env,
+        }
+        if sys.platform == "win32":
+            popen_kwargs["creationflags"] = windows_process_group_flags()
+
+        proc: asyncio.subprocess.Process = await asyncio.create_subprocess_exec(
+            *args, **popen_kwargs,
+        )  # nosec
+        with self._procs_lock:
+            self._active_procs.setdefault(session_id, []).append(proc)
+
+        stderr_chunks: list[bytes] = []
+        stderr_seen: int = 0
+        stderr_truncated: bool = False
+        stdout_line_count: int = 0
+        truncated: bool = False
+
+        async def _read_stderr() -> None:
+            nonlocal stderr_seen, stderr_truncated
+            if proc.stderr is None:
+                return
+            while True:
+                chunk = await proc.stderr.read(4096)
+                if not chunk:
+                    return
+                if stderr_seen < stderr_byte_limit:
+                    remaining = stderr_byte_limit - stderr_seen
+                    stderr_chunks.append(chunk[:remaining])
+                stderr_seen += len(chunk)
+                if stderr_seen > stderr_byte_limit:
+                    stderr_truncated = True
+
+        async def _read_stdout() -> None:
+            nonlocal stdout_line_count, truncated
+            if proc.stdout is None:
+                return
+            while True:
+                line = await proc.stdout.readline()
+                if not line:
+                    return
+                stdout_line_count += 1
+                keep_going = on_stdout_line(line)
+                if not keep_going:
+                    truncated = True
+                    _kill_proc_tree(proc.pid)
+                    return
+
+        stderr_task = asyncio.create_task(_read_stderr())
+        stdout_task = asyncio.create_task(_read_stdout())
+        try:
+            await asyncio.wait_for(stdout_task, timeout=timeout)
+            if truncated and proc.returncode is None:
+                try:
+                    await asyncio.wait_for(proc.wait(), 5)
+                except asyncio.TimeoutError:
+                    pass
+            else:
+                await asyncio.wait_for(proc.wait(), timeout=timeout)
+            await asyncio.wait_for(stderr_task, timeout=5)
+        except asyncio.TimeoutError:
+            _kill_proc_tree(proc.pid)
+            try:
+                await asyncio.wait_for(proc.wait(), 5)
+            except asyncio.TimeoutError:
+                pass
+            raise subprocess.TimeoutExpired(
+                cmd=args[0], timeout=timeout if timeout is not None else 0, output="", stderr="",
+            )
+        except asyncio.CancelledError:
+            _kill_proc_tree(proc.pid)
+            try:
+                await asyncio.wait_for(proc.wait(), 5)
+            except (asyncio.TimeoutError, Exception):
+                pass
+            raise
+        except Exception:
+            if proc.returncode is None:
+                _kill_proc_tree(proc.pid)
+                try:
+                    await asyncio.wait_for(proc.wait(), 5)
+                except (asyncio.TimeoutError, Exception):
+                    pass
+            raise
+        finally:
+            if not stdout_task.done():
+                stdout_task.cancel()
+            if not stderr_task.done():
+                stderr_task.cancel()
+            await asyncio.gather(stdout_task, stderr_task, return_exceptions=True)
+            with self._procs_lock:
+                proc_list = self._active_procs.get(session_id)
+                if proc_list and proc in proc_list:
+                    proc_list.remove(proc)
+                    if not proc_list:
+                        self._active_procs.pop(session_id, None)
+
+        stderr_bytes = b"".join(stderr_chunks)
+        stderr_text = safe_decode(stderr_bytes)
+        if stderr_truncated:
+            stderr_text += "\n[stderr truncated]"
+
+        return ProcessLineStreamResult(
+            returncode=proc.returncode,
+            stderr=stderr_text,
+            truncated=truncated,
+            stdout_line_count=stdout_line_count,
         )
 
     # -- 中断终止 ---------------------------------------------------------- #

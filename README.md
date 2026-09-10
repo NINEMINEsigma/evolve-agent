@@ -7,6 +7,7 @@
 - Python 3.10+
 - pnpm 或 npm（前端构建依赖, 优先 pnpm, 不存在时回退 npm）
 - Windows 上需确保 `pnpm.cmd` 或 `npm.cmd` 在 PATH 中
+- Windows x64 的 `SearchFiles` / `Grep` 高性能路径已随项目内置 `ripgrep`, 无需额外安装 `rg`; 其他平台不作为内置 `ripgrep` 保障范围
 
 ## 安装
 

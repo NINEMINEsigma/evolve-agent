@@ -463,6 +463,7 @@ classDiagram
         +resolve_write()
         +run()
         +run_async()
+        +run_async_line_processor()
         +kill_active()
     }
 
@@ -471,6 +472,7 @@ classDiagram
         #_procs_lock
         +run()
         +run_async()
+        +run_async_line_processor()
         +kill_active()
     }
 
@@ -632,7 +634,7 @@ classDiagram
 | `runtime_context` | `Application` | `RuntimeContext` | 运行时上下文 |
 | `_profile_lock` | `Application` | `threading.RLock` | Profile 根对象、名称指针与会话选择共用的进程锁 |
 | `_llm_profile_store` | `Application` | `LLMProfileStore \| None` | 进程内唯一的 `LLMProfileData` 根对象存储 |
-| `_subprocess_runner` | `Application` | `SubprocessRunner \| None` | 进程内唯一的子进程执行器（同步+真异步），注入 Sandbox 委托 |
+| `_subprocess_runner` | `Application` | `SubprocessRunner \| None` | 进程内唯一的子进程执行器（同步、真异步与逐行消费），注入 Sandbox 委托 |
 | `_agentspace_service` | `Application` | `AgentspaceService \| None` | Agentspace 版本化 CRUD、文件锁、垃圾桶、watcher 与 SSE 事件的唯一业务服务 |
 | `session_manager` | `Application` | `SessionManager \| None` | session 管理器 |
 | `approval_backend_manager` | `Application` | `ApprovalBackendManager \| None` | 审批后端管理器 |
@@ -720,6 +722,7 @@ classDiagram
 | `InterruptMessage` | `entry/base_agent_loop.py` | `InboxMessage` | 中断消息 |
 | `AgentResponse` | `entry/multi_agent_worker.py` | `BaseModel` | 多 Agent 模式下单 Agent 的解析后响应 |
 | `WorkerResult` | `entry/multi_agent_worker.py` | `BaseModel` | Worker 执行结果，含 DSL 路由元数据 |
+| `ProcessLineStreamResult` | `entity/puretype/runtime.py` | `BaseModel` | 逐行消费子进程输出后的退出码、stderr、截断与行数摘要 |
 | `RefWrapper[T]` | `entity/gentype.py` | `BaseModel, Generic[T]` | 可变引用容器，供 loop 与 `ToolExecutor` 等组件共享可变值 |
 | `LLMProfile` | `entity/puretype/llm.py` | `BaseModel` | LLM 配置；三个多模态字段为根对象内实例引用 |
 | `LLMProfileData` | `entity/puretype/llm.py` | `BaseModel` | `llm_profiles.es` v2 的持久化根对象 |
@@ -787,7 +790,7 @@ classDiagram
 
 ### 子进程执行层抽取为 SubprocessRunner
 
-`Sandbox` 原有的子进程执行逻辑（`run()`、`kill_active()`、`_kill_proc_tree()`、`_active_procs`/`_procs_lock` 登记表）迁移至 `system/subprocess_utils.py::SubprocessRunner`。`Application` 持有其全局单例（`_subprocess_runner`），在 `init()` 中创建并注入 `Sandbox(ctx, runner)`。`Sandbox` 保留命名空间校验与 cwd 解析层，`run()`/`kill_active()` 变为薄委托，新增 `async run_async()` 委托。`SubprocessRunner` 提供同步 `run()`（任意线程）与真异步 `run_async()`（`asyncio.create_subprocess_exec` + `wait_for(communicate())`）双入口，取消语义为自清理（杀树+限量 wait+re-raise）+ `kill_active` 兜底双保险。`run_async` 超时抛 `subprocess.TimeoutExpired`（与同步版对齐），取消 re-raise `CancelledError`（保 `ToolInterrupted("dispatch")` 语义）。`Sandbox.__init__` 的 `runner` 参数为可选（默认 `None`），仅做路径解析的既有 `Sandbox(ctx)` 构造零改动，委托方法惰性获取 `Application.current().subprocess_runner`。
+`Sandbox` 原有的子进程执行逻辑（`run()`、`kill_active()`、`_kill_proc_tree()`、`_active_procs`/`_procs_lock` 登记表）迁移至 `system/subprocess_utils.py::SubprocessRunner`。`Application` 持有其全局单例（`_subprocess_runner`），在 `init()` 中创建并注入 `Sandbox(ctx, runner)`。`Sandbox` 保留命名空间校验与 cwd 解析层，`run()`/`kill_active()` 变为薄委托，并提供 `async run_async()` 与 `async run_async_line_processor()` 委托。`SubprocessRunner` 提供同步 `run()`、真异步 `run_async()`（`asyncio.create_subprocess_exec` + `wait_for(communicate())`）及逐行消费 `run_async_line_processor()`；后者供 `SearchFiles`/`Grep` 在达到结果上限时终止进程树并限制 stderr 缓冲。取消语义为自清理（杀树+限量 wait+re-raise）+ `kill_active` 兜底双保险。异步入口超时抛 `subprocess.TimeoutExpired`，取消 re-raise `CancelledError`（保 `ToolInterrupted("dispatch")` 语义）。`Sandbox.__init__` 的 `runner` 参数为可选（默认 `None`），仅做路径解析的既有 `Sandbox(ctx)` 构造零改动，委托方法惰性获取 `Application.current().subprocess_runner`。
 
 根因：`RunCommand`/`RunPython`/`InstallPackage` 三工具注册 `is_async=True` 但内部调用同步阻塞子进程 API（`proc.communicate()`），被直接 await 在事件循环上冻结整个 loop——agent 用 run 系列工具执行 curl 打自己的动态端点时形成自死锁（uvicorn 无法处理请求直至 `tool_timeout`）。真异步化后子进程等待为协程挂起，事件循环保持响应。
 
