@@ -48,7 +48,8 @@
 
 | 规范称谓 | 定义 |
 |---|---|
-| 沙盒命名空间 | `fork:`/`ws:`/`fix:`/`skills:`/`third:`/`custom_*:` 逻辑前缀体系（`Namespace` 枚举） |
+| 沙盒命名空间 | `fork:`/`ws:`/`fix:`/`skills:`/`third:`/`custom_*:` 逻辑前缀体系；内置前缀由 `Namespace` 枚举定义 |
+| 动态沙盒空间 | 用户授权的全局逻辑路径映射（英文锚点：`global dynamic sandbox space`）；独立持久化、仅 fast 模式启用，由 Sandbox 单例管理并供所有 Agent 共享。`is_readonly` 仅表示标准 Sandbox 文件 API 层只读，不是操作系统 ACL |
 | 逻辑路径 / 物理路径 | 带命名空间前缀的路径（如 `fork:main.py`）/ 真实文件系统路径 |
 | `.docs/` | 项目示例与引用资料目录 |
 

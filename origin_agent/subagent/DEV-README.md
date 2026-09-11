@@ -129,6 +129,8 @@ graph TD
 
 这些约定块告知子 Agent 网站部署区和舞台层属于父会话而非自身，写入路径为 `ws:sessions/<parent_session_id>/site/` 和 `ws:sessions/<parent_session_id>/stage/`。
 
+此外，`SubAgentLoop._build_system_prompt()` 每次调用都会注入 fast 模式全局动态沙盒空间块。动态映射由 Application 的唯一 Sandbox 持有，与父会话、子会话和 LLM Profile 无关，所有子Agent共享；子Agent不能加载仅 MAIN|MULTI_AGENT 可见的管理工具。`TaskAgentLoop` 继续保持无系统提示词，但若任务中已给出动态逻辑路径，文件工具仍通过共享 Sandbox 解析。
+
 ---
 
 ## 子代理工具

@@ -1,0 +1,265 @@
+<!doctype html>
+<html lang="zh-CN" style="background: transparent;">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>__STAGE_TITLE__</title>
+  <style>
+    :root { color-scheme: dark; }
+    * { box-sizing: border-box; }
+    html, body {
+      width: 100%;
+      height: 100%;
+      margin: 0;
+      overflow: hidden;
+      background: transparent !important;
+      pointer-events: none !important;
+    }
+    #stage-bg {
+      position: fixed;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      display: none;
+      object-fit: cover;
+      opacity: 0;
+      transition: opacity .45s ease;
+      pointer-events: none;
+      user-select: none;
+    }
+    #stage-bg[src] { display: block; }
+    #stage-bg[data-loaded="true"] { opacity: 1; }
+    #live2d-stage {
+      position: fixed;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      display: block;
+      background: transparent;
+      opacity: 0;
+      transition: opacity .5s ease;
+      pointer-events: none;
+    }
+    #live2d-stage[data-ready="true"] { opacity: 1; }
+    #license-notice {
+      position: fixed;
+      left: 8px;
+      bottom: 6px;
+      max-width: min(470px, calc(100vw - 16px));
+      padding: 3px 7px;
+      border: 1px solid rgba(255, 255, 255, .08);
+      border-radius: 999px;
+      color: rgba(255, 255, 255, .36);
+      background: rgba(10, 14, 24, .16);
+      font: 9px/1.25 system-ui, sans-serif;
+      letter-spacing: .01em;
+      backdrop-filter: blur(3px);
+      pointer-events: none;
+      user-select: none;
+    }
+    #stage-error {
+      position: fixed;
+      top: 12px;
+      right: 12px;
+      display: none;
+      max-width: min(420px, calc(100vw - 24px));
+      padding: 7px 10px;
+      border: 1px solid rgba(255, 120, 140, .28);
+      border-radius: 10px;
+      color: rgba(255, 225, 230, .9);
+      background: rgba(70, 8, 20, .68);
+      font: 12px/1.4 system-ui, sans-serif;
+      white-space: pre-wrap;
+      pointer-events: none;
+    }
+  </style>
+</head>
+<body style="background: transparent;">
+  <img id="stage-bg" alt="" />
+  <canvas id="live2d-stage" aria-label="__STAGE_ARIA__"></canvas>
+  <div id="license-notice">__LICENSE_TEXT__</div>
+  <div id="stage-error" role="status"></div>
+
+  <script src="assets/libs/live2dcubismcore.min.js"></script>
+  <script src="assets/libs/pixi.min.js"></script>
+  <script src="assets/libs/cubism4.min.js"></script>
+  <script>
+    (() => {
+      'use strict';
+
+      /*__STAGE_CONFIG__*/
+
+      const state = {
+        app: null,
+        model: null,
+        baseWidth: 0,
+        baseHeight: 0,
+        motionTimer: 0,
+        expressionTimer: 0,
+        destroyed: false,
+        lastMotion: -1,
+        lastExpression: -1
+      };
+
+      if (CONFIG.background) {
+        const bgElement = document.getElementById('stage-bg');
+        if (bgElement) {
+          bgElement.src = CONFIG.background;
+          const revealBackground = () => {
+            bgElement.dataset.loaded = 'true';
+          };
+          if (bgElement.complete) revealBackground();
+          else bgElement.addEventListener('load', revealBackground, { once: true });
+        }
+      }
+
+      const randomInt = (min, max) => Math.floor(Math.random() * (max - min + 1)) + min;
+      const randomDelay = (range) => randomInt(range[0], range[1]);
+
+      function chooseDifferent(maxExclusive, previous) {
+        if (maxExclusive <= 1) return 0;
+        let value;
+        do value = randomInt(0, maxExclusive - 1); while (value === previous);
+        return value;
+      }
+
+      function reportError(error) {
+        const message = error instanceof Error ? error.message : String(error);
+        console.error('[Live2D Stage]', error);
+        document.documentElement.dataset.stageStatus = 'error';
+        const badge = document.getElementById('stage-error');
+        badge.textContent = `${CONFIG.label} 加载失败：${message}`;
+        badge.style.display = 'block';
+      }
+
+      function layoutModel() {
+        const { app, model, baseWidth, baseHeight } = state;
+        if (!app || !model || !baseWidth || !baseHeight) return;
+
+        const width = app.renderer.width / app.renderer.resolution;
+        const height = app.renderer.height / app.renderer.resolution;
+        const layout = CONFIG.layout;
+        const isNarrow = width < layout.narrowBreakpoint;
+        const widthRatio = isNarrow ? layout.mobileWidthRatio : layout.desktopWidthRatio;
+        const heightRatio = isNarrow ? layout.mobileHeightRatio : layout.desktopHeightRatio;
+        const scale = Math.min((width * widthRatio) / baseWidth, (height * heightRatio) / baseHeight);
+
+        model.scale.set(scale);
+        model.position.set(width * (isNarrow ? layout.mobileX : layout.desktopX), height * layout.bottomY);
+      }
+
+      function scheduleMotion(delay) {
+        if (!CONFIG.actions.length) return;
+        clearTimeout(state.motionTimer);
+        state.motionTimer = window.setTimeout(
+          playRandomMotion,
+          typeof delay === 'number' ? delay : randomDelay(CONFIG.motionPause)
+        );
+      }
+
+      function playRandomMotion() {
+        if (state.destroyed) return;
+        if (document.hidden || !state.model) {
+          scheduleMotion(CONFIG.hiddenRetry);
+          return;
+        }
+
+        const index = chooseDifferent(CONFIG.actions.length, state.lastMotion);
+        state.lastMotion = index;
+        const action = CONFIG.actions[index];
+
+        try {
+          const result = state.model.motion(action.group, action.index, CONFIG.motionPriority);
+          if (result && typeof result.catch === 'function') {
+            result.catch((error) => console.warn('[Live2D Stage] 动作未播放', error));
+          }
+        } catch (error) {
+          console.warn('[Live2D Stage] 动作触发失败', error);
+        }
+
+        scheduleMotion(action.duration + randomDelay(CONFIG.motionPause));
+      }
+
+      function scheduleExpression(delay) {
+        if (!CONFIG.expressionCount) return;
+        clearTimeout(state.expressionTimer);
+        state.expressionTimer = window.setTimeout(
+          playRandomExpression,
+          typeof delay === 'number' ? delay : randomDelay(CONFIG.expressionPause)
+        );
+      }
+
+      function playRandomExpression() {
+        if (state.destroyed) return;
+        if (document.hidden || !state.model) {
+          scheduleExpression(CONFIG.hiddenRetry);
+          return;
+        }
+
+        const index = chooseDifferent(CONFIG.expressionCount, state.lastExpression);
+        state.lastExpression = index;
+        try {
+          state.model.expression(index);
+        } catch (error) {
+          console.warn('[Live2D Stage] 表情触发失败', error);
+        }
+        scheduleExpression();
+      }
+
+      async function boot() {
+        if (!window.PIXI || !PIXI.live2d || !PIXI.live2d.Live2DModel) {
+          throw new Error('Live2D 渲染库未正确加载');
+        }
+
+        const canvas = document.getElementById('live2d-stage');        const app = new PIXI.Application({
+          view: canvas,
+          resizeTo: window,
+          transparent: true,
+          backgroundAlpha: 0,
+          antialias: true,
+          autoDensity: true,
+          resolution: Math.min(window.devicePixelRatio || 1, 2)
+        });
+        state.app = app;
+
+        const model = await PIXI.live2d.Live2DModel.from(CONFIG.modelUrl, {
+          autoInteract: false
+        });
+        state.model = model;
+        state.baseWidth = model.width;
+        state.baseHeight = model.height;
+
+        model.anchor.set(0.5, 1);
+        model.interactive = false;
+        model.eventMode = 'none';
+        app.stage.addChild(model);
+        layoutModel();
+
+        window.addEventListener('resize', layoutModel, { passive: true });
+        document.addEventListener('visibilitychange', () => {
+          if (document.hidden) {
+            app.stop();
+          } else {
+            app.start();
+            scheduleMotion(CONFIG.hiddenRetry);
+            scheduleExpression(CONFIG.hiddenRetry);
+          }
+        });
+
+        canvas.dataset.ready = 'true';
+        document.documentElement.dataset.stageStatus = 'ready';
+        scheduleMotion(randomDelay(CONFIG.firstMotionDelay));
+        scheduleExpression(randomDelay(CONFIG.firstExpressionDelay));
+      }
+
+      window.addEventListener('beforeunload', () => {
+        state.destroyed = true;
+        clearTimeout(state.motionTimer);
+        clearTimeout(state.expressionTimer);
+      });
+
+      boot().catch(reportError);
+    })();
+  </script>
+</body>
+</html>

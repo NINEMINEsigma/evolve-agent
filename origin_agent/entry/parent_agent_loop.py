@@ -48,7 +48,12 @@ from entry.agent_support.messages import (
     build_agent_system_prompt,
     build_full_history_messages,
 )
-from system.prompt import build_session_site_block, build_session_stage_block, build_session_chat_style_block
+from system.prompt import (
+    build_dynamic_sandbox_spaces_block,
+    build_session_chat_style_block,
+    build_session_site_block,
+    build_session_stage_block,
+)
 from entry.agent_support.multimodal import (
     blocks_from_dicts,
     content_to_text,
@@ -206,6 +211,9 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
             session_id=self.session_id,
             loaded_toolsets=self._loaded_toolsets,
         )
+        dynamic_spaces_block = build_dynamic_sandbox_spaces_block(self.app.sandbox)
+        if dynamic_spaces_block:
+            prompts.append(dynamic_spaces_block)
         site_block = build_session_site_block(self.session_id, owner="self")
         if site_block:
             prompts.append(site_block)

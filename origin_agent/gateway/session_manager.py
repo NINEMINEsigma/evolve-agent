@@ -229,7 +229,6 @@ class SessionManager:
         from system.templates import get_templates_dir
         from abstract.tools.registry import registry as tool_registry
         from entity.constant import MAIN_AGENT_CHARACTER_NAME
-        from system.sandbox import Sandbox
         from system.session_store import SessionStore
         from component.multiagenttools.profile_builder import (
             build_multi_agent_tools,
@@ -241,7 +240,7 @@ class SessionManager:
         agents_names: list[str] = (info.agents or []) if info else []
 
         parent_ctx = get_runtime_context()
-        sandbox = Sandbox(parent_ctx)
+        sandbox = self._app.sandbox
         store = SubagentStore(parent_ctx.agentspace)
 
         # 从会话级/全局名称指针恢复主 Agent 的根 Profile 实例。

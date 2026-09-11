@@ -31,7 +31,6 @@ import httpx
 from abstract.tools.registry import registry, tool_error, tool_result
 from entity.puretype import ToolAvailability, ToolDangerLevel
 from entity.constant import (
-    is_namespaced_path,
     SUBPROCESS_SOFT_CLEANUP_WAIT_TIME,
     WATCHING_MIN_INTERVAL,
     WATCHING_DEFAULT_LONG_INTERVAL,
@@ -234,12 +233,15 @@ async def _handle_start_background_service(args: dict[str, Any]) -> dict:
     from component.tools.filesystem import _s as _get_sandbox
     resolved_parts: list[str] = []
     for part in cmd_parts:
-        if is_namespaced_path(part):
+        if _get_sandbox().is_namespaced_path(part):
             try:
                 r = _get_sandbox().resolve_read(part)
                 resolved_parts.append(str(r.real))
-            except SandboxError:
-                resolved_parts.append(part)
+            except SandboxError as exc:
+                return tool_error(
+                    f"Command path resolution failed: {exc}",
+                    path=part,
+                )
         else:
             resolved_parts.append(part)
 
@@ -617,12 +619,15 @@ async def _handle_start_watching_service(args: dict[str, Any]) -> dict:
     # ── 解析命令参数中的沙箱路径 ──
     resolved_parts: list[str] = []
     for part in cmd_parts:
-        if is_namespaced_path(part):
+        if _get_sandbox().is_namespaced_path(part):
             try:
                 r = _get_sandbox().resolve_read(part)
                 resolved_parts.append(str(r.real))
-            except SandboxError:
-                resolved_parts.append(part)
+            except SandboxError as exc:
+                return tool_error(
+                    f"Command path resolution failed: {exc}",
+                    path=part,
+                )
         else:
             resolved_parts.append(part)
 

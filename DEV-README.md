@@ -26,6 +26,7 @@ workspace/                 <- 运行时根（默认名；整体被 gitignore）
   slow_agent_space/        <- slow仓库：进化目标副本（fork: 命名空间）（默认名）
   .fallback/               <- fallback仓库：上一次 fast 的备份 / 回退修复体（固定名）
   agentspace/              <- 工作空间：agent 工作目录（ws: 命名空间）（默认名）
+  dynamic_sandbox_spaces.es <- fast 模式全局动态沙盒空间配置（独立 easysave 根对象）
   sessions/                <- 会话持久化
   logs/                    <- 运行时日志、进化状态（默认名）
 ```
@@ -154,6 +155,15 @@ Evolve Agent 内置两套多代理运行时：
 | `custom_hooks:` | `custom_hooks/` | fast / fallback | 自定义钩子（只读） |
 | `custom_llm_client:` | `custom_llm_client/` | fast / fallback | 自定义 LLM 客户端（只读） |
 | `custom_tools:` | `custom_tools/` | fast / fallback | 自定义工具（只读） |
+| 用户定义的动态前缀 | 用户授权的规范化绝对目录 | fast | 全局共享；每项为工具层只读或读写 |
+
+fast 模式的动态沙盒空间由 Application 持有的 Sandbox 单例统一管理，配置直接以
+`DynamicSandboxSpaceData` 根对象保存到 `RuntimeContext.workspace/dynamic_sandbox_spaces.es`，
+不属于 `ws:`、会话或 LLM Profile。目录可暂时不存在；不存在时配置保留但该空间
+不可读写，目录恢复后自动恢复。所有 Agent 共享动态映射；只有普通模式和多Agent模式
+主Agent可在加载 `sandbox` 工具集后，通过 critical 的 `AddSandboxSpace` /
+`RemoveSandboxSpace` 修改。随意聊聊会话只能使用已有空间，临时Agent无动态空间提示词。
+动态只读权限与现有只读空间相同，仅约束标准 Sandbox 文件 API，并非 OS 级 ACL。
 
 **没有 `self:` 命名空间** — agent 不能读取或修改自身运行时副本，进化完全通过 `fork:`/`fix:` 实现。
 
@@ -197,7 +207,7 @@ Evolve Agent 内置两套多代理运行时：
 - `system/agentspace/`：Agentspace 编辑器后端业务包。`AgentspaceService` 统一版本化 CRUD、用户垃圾桶、按 Agent 回复轮次持有的文件锁、文件变化 watcher、SSE 事件总线和用户变更摘要；Gateway 与内置工具均通过该服务协作。
 - `system/llm_profile_store.py`：进程内唯一的 LLM Profile 注册表。仅支持 `llm_profiles.es` 的 `v2` key，直接持有并保存 `LLMProfileData` 根对象；Profile 间多模态分工使用根列表中的实例引用，Gateway 通过单 Profile CRUD 修改。
 - `system/context.py`：`RuntimeContext`，贯穿整个应用的生命周期上下文。
-- `system/sandbox.py`：路径沙盒与命名空间解析。
+- `system/sandbox.py`：路径沙盒、固定命名空间解析，以及 fast 模式全局动态沙盒空间的严格加载、原子持久化、增删、目录可用性和权限管理；动态配置位于 workspace 根且由 Application 的唯一 Sandbox 实例持有。
 - `system/session_store.py`：单个会话的文件读写（`history.es`、`summary.txt`、`token_usage.json`、`tool_resources.json` 等）；活动 LLM Profile 仅以 `{"profile_name": ...}` 名称指针保存。旧版 `messages.jsonl` 已由 `scripts/migrate_v0_to_v1.py` 迁移到会话 v1 格式。
 - `system/prompt.py` / `system/templates.py`：System Prompt 组装与模板渲染。
 - `system/convert.py`：类型转换工具（`as_enum()`、`as_bool()`）。

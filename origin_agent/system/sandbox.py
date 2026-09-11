@@ -1,46 +1,51 @@
-"""路径沙盒 — 所有工具操作的唯一安全边界。
+"""路径沙盒 — 固定命名空间安全边界与全局动态空间注册表。
 
-所有文件系统工具和子进程调用**必须**通过此模块路由。
-LLM 可见的路径是**逻辑路径**（``ws:logs/error.log``），
-仅在此模块内部解析为真实绝对路径。任何工具 handler
-或子进程都不会看到或接受裸文件系统路径。
+所有文件系统工具和子进程调用必须通过此模块路由。LLM 可见路径使用
+``namespace:relative/path`` 逻辑形式；真实绝对路径只在 Sandbox 内解析。
 
-逻辑命名空间
-    ==============  ===================  ======  ==========================
-    前缀            映射到              权限    用途
-    ==============  ===================  ======  ==========================
-    ``fork:``        ctx.fork_path        rw      读写进化代码
-    ``ws:``          ctx.agentspace       rw      通用 agent I/O
-    ``fix:``         ctx.fix_path         rw      修复目标（fallback）
-    ``skills:``      find_repo_root()/skills   rw      skill 文件读写
-    ``third:``       find_repo_root()/third    ro      第三方子模块（只读）
-    ``custom_hooks:``       find_repo_root()/custom_hooks       ro  自定义钩子（只读）
-    ``custom_llm_client:``  find_repo_root()/custom_llm_client  ro  自定义 LLM 客户端（只读）
-    ``custom_tools:``       find_repo_root()/custom_tools       ro  自定义工具（只读）
-    ==============  ===================  ======  ==========================
+固定命名空间由 ``Namespace``、``_PERMISSIONS`` 与
+``_static_namespace_bases()`` 定义。fast 模式还会从工作空间根目录的独立
+easysave 文件加载全局动态沙盒空间；这些空间由 Application 持有的唯一
+Sandbox 实例管理，并由 fast 模式下所有 Agent 共享。fallback 模式既不加载
+也不启用动态空间。
 
-    在 **fast** 模式下 ``fork:`` 和 ``skills:`` 可读写。
-    在 **fallback** 模式下 ``fix:`` 和 ``skills:`` 可读写。
-    ``third:`` 与 ``custom_*:`` 为第一批只读命名空间，两种模式下均可读，
-    映射项目根目录，agent 可完整读取内容但禁止写入。
+动态空间的 ``is_readonly`` 与现有 ``third:``/``custom_*:`` 一样，只是
+Sandbox 文件 API 层的逻辑只读，不是操作系统 ACL；外部 Shell、Python 和
+后台进程不具备强制只读隔离。
 
-**没有** ``self:`` 命名空间 — agent 不能读取或修改自身的运行时副本。
-进化完全通过 fork:/fix: 实现。
-
-所有路径必须携带显式命名空间前缀。裸路径、``..`` 遍历
-和绝对路径无条件拒绝。
+不存在 ``self:`` 命名空间。所有路径必须携带显式前缀；裸路径、``..``
+遍历和绝对路径均拒绝。
 """
 
 from __future__ import annotations
 
 import logging
+import os
+import re
 import subprocess  # nosec
+import tempfile
+import threading
 from enum import Enum
 from pathlib import Path
 from typing import Callable, TYPE_CHECKING
 
-from entity.constant import Namespace, SEARCH_PROCESS_STDERR_MAX_BYTES, is_namespaced_path
-from entity.puretype import ProcessLineStreamResult
+from easysave import contains, load, save
+from entity.typeref import make_config
+from entity.constant import (
+    DYNAMIC_SANDBOX_SPACE_DESCRIPTION_MAX_CHARS,
+    DYNAMIC_SANDBOX_SPACE_NAME_PATTERN,
+    DYNAMIC_SANDBOX_SPACES_ES_FILENAME,
+    DYNAMIC_SANDBOX_SPACES_ES_KEY,
+    NAMESPACE_PREFIXES,
+    Namespace,
+    SEARCH_PROCESS_STDERR_MAX_BYTES,
+)
+from entity.puretype import (
+    DynamicSandboxSpace,
+    DynamicSandboxSpaceData,
+    ProcessLineStreamResult,
+)
+from system.atomic_io import replace_atomic
 from system.context import get_runtime_context
 from system.pathutils import find_repo_root
 
@@ -107,23 +112,11 @@ class ResolvedPath(BaseModel):
 
     logical: str   # 例如 "ws:data/config.json"
     real: Path      # 磁盘上的绝对路径
-    namespace: str  # "fork" | "ws" | "fix"
+    namespace: str  # 不带冒号的内置或动态命名空间名
 
 
 class Sandbox:
-    """无状态安全边界。每个 RuntimeContext 创建一次。
-
-    用法::
-
-        sandbox = Sandbox(ctx)
-        r = sandbox.resolve("ws:logs/error.log", Access.READ)
-        content = r.real.read_text()
-
-        r = sandbox.resolve("fork:main.py", Access.WRITE)
-        r.real.write_text(new_code)
-
-        sandbox.run(["python", "-m", "pytest"], cwd_ns="fork:")
-    """
+    """Application 持有的路径安全边界与动态空间管理单例。"""
 
     def __init__(
         self,
@@ -131,10 +124,27 @@ class Sandbox:
         runner: SubprocessRunner | None = None,
     ) -> None:
         self._ctx: RuntimeContext = ctx
-        # 子进程执行委托给 SubprocessRunner（由 Application 持有全局单例并注入）。
-        # runner 为 None 时（既有仅做路径解析的 Sandbox 构造），run()/run_async()/
-        # kill_active() 惰性从 Application.current().subprocess_runner 获取全局单例。
         self._runner: SubprocessRunner | None = runner
+        self._dynamic_spaces_path: Path = (
+            self._ctx.workspace / DYNAMIC_SANDBOX_SPACES_ES_FILENAME
+        )
+        self._dynamic_spaces_lock: threading.RLock = threading.RLock()
+        self._dynamic_space_availability: dict[str, bool] = {}
+        if self._ctx.mode == "fast":
+            with self._dynamic_spaces_lock:
+                self._dynamic_spaces_data = self._load_dynamic_spaces_unlocked()
+                for space in self._dynamic_spaces_data.spaces:
+                    available = self._is_dynamic_space_available_unlocked(space)
+                    logger.info(
+                        "Dynamic sandbox space loaded | name=%s path=%s readonly=%s available=%s",
+                        space.name,
+                        space.path,
+                        space.is_readonly,
+                        available,
+                    )
+        else:
+            # fallback 模式不读取、不校验也不启用 fast 的动态空间配置。
+            self._dynamic_spaces_data = DynamicSandboxSpaceData()
 
     def _get_runner(self) -> SubprocessRunner:
         """返回注入的 runner，或惰性获取 Application 全局单例。"""
@@ -143,56 +153,384 @@ class Sandbox:
         from system.application import Application
         return Application.current().subprocess_runner
 
+    # -- 动态空间持久化与校验 --------------------------------------
+
+    def _static_namespace_bases(self) -> dict[str, Path]:
+        """返回当前模式全部内置命名空间的 base 映射。"""
+        repo_root = find_repo_root()
+        return {
+            ns: base for ns, base in {
+                Namespace.FORK.value: self._ctx.fork_path,
+                Namespace.WS.value: self._ctx.agentspace,
+                Namespace.FIX.value: self._ctx.fix_path,
+                Namespace.SKILLS.value: repo_root / Namespace.SKILLS.value,
+                Namespace.THIRD.value: repo_root / Namespace.THIRD.value,
+                Namespace.CUSTOM_HOOKS.value: repo_root / Namespace.CUSTOM_HOOKS.value,
+                Namespace.CUSTOM_LLM_CLIENT.value: repo_root / Namespace.CUSTOM_LLM_CLIENT.value,
+                Namespace.CUSTOM_TOOLS.value: repo_root / Namespace.CUSTOM_TOOLS.value,
+            }.items()
+            if base is not None and ns in _PERMISSIONS.get(self._ctx.mode, {})
+        }
+
+    def _normalize_dynamic_path(self, raw_path: str) -> Path:
+        """词法规范化绝对路径，不主动解析符号链接或目录联接点。"""
+        if type(raw_path) is not str or not raw_path.strip():
+            raise ValueError("Dynamic sandbox space path must be a non-empty string")
+        candidate = Path(raw_path.strip())
+        if not candidate.is_absolute():
+            raise ValueError("Dynamic sandbox space path must be absolute")
+        return Path(os.path.abspath(os.path.normpath(str(candidate))))
+
+    @staticmethod
+    def _path_compare_key(path: Path) -> str:
+        """返回适合当前平台比较的规范路径键。"""
+        return os.path.normcase(os.path.normpath(str(path)))
+
+    def _paths_overlap(self, left: Path, right: Path) -> bool:
+        """判断两个路径是否相同或存在父子包含关系。"""
+        left_key = self._path_compare_key(left)
+        right_key = self._path_compare_key(right)
+        try:
+            common = os.path.commonpath([left_key, right_key])
+        except ValueError:
+            return False
+        return common == left_key or common == right_key
+
+    def _validate_dynamic_space(
+        self,
+        space: DynamicSandboxSpace,
+        *,
+        existing: list[DynamicSandboxSpace],
+        require_normalized: bool,
+    ) -> DynamicSandboxSpace:
+        """校验并返回规范化动态空间，不修改传入对象。"""
+        if not isinstance(space, DynamicSandboxSpace):
+            raise TypeError("Dynamic sandbox spaces must contain DynamicSandboxSpace instances")
+        if set(space.__dict__) - {"name", "path", "description", "is_readonly"}:
+            raise TypeError("DynamicSandboxSpace contains unknown fields")
+        if type(space.name) is not str:
+            raise TypeError("DynamicSandboxSpace.name must be a string")
+        if type(space.path) is not str:
+            raise TypeError("DynamicSandboxSpace.path must be a string")
+        if type(space.description) is not str:
+            raise TypeError("DynamicSandboxSpace.description must be a string")
+        if type(space.is_readonly) is not bool:
+            raise TypeError("DynamicSandboxSpace.is_readonly must be a boolean")
+
+        name = space.name.strip()
+        if not re.fullmatch(DYNAMIC_SANDBOX_SPACE_NAME_PATTERN, name):
+            raise ValueError(
+                "Dynamic sandbox space name must start with an ASCII letter or underscore "
+                "and contain only ASCII letters, digits, and underscores"
+            )
+        if name in NAMESPACE_PREFIXES:
+            raise ValueError(f"Dynamic sandbox space name conflicts with built-in namespace: {name!r}")
+
+        description = space.description.strip()
+        if not description:
+            raise ValueError("Dynamic sandbox space description must not be empty")
+        if len(description) > DYNAMIC_SANDBOX_SPACE_DESCRIPTION_MAX_CHARS:
+            raise ValueError(
+                "Dynamic sandbox space description exceeds "
+                f"{DYNAMIC_SANDBOX_SPACE_DESCRIPTION_MAX_CHARS} characters"
+            )
+        if any((ord(char) < 32 and char not in "\n\r\t") or ord(char) == 127 for char in description):
+            raise ValueError("Dynamic sandbox space description contains unsafe control characters")
+
+        normalized_path = self._normalize_dynamic_path(space.path)
+        normalized = DynamicSandboxSpace(
+            name=name,
+            path=str(normalized_path),
+            description=description,
+            is_readonly=space.is_readonly,
+        )
+        if require_normalized and (
+            space.name != normalized.name
+            or space.path != normalized.path
+            or space.description != normalized.description
+        ):
+            raise ValueError(f"Dynamic sandbox space {space.name!r} is not normalized")
+
+        for other in existing:
+            if other.name == normalized.name:
+                raise ValueError(f"Duplicate dynamic sandbox space name: {normalized.name!r}")
+            if self._paths_overlap(normalized_path, Path(other.path)):
+                raise ValueError(
+                    f"Dynamic sandbox space path overlaps {other.name!r}: {other.path}"
+                )
+        for namespace, base in self._static_namespace_bases().items():
+            if self._paths_overlap(normalized_path, base):
+                raise ValueError(
+                    f"Dynamic sandbox space path overlaps built-in namespace "
+                    f"'{namespace}:': {base}"
+                )
+        return normalized
+
+    def _load_dynamic_spaces_unlocked(self) -> DynamicSandboxSpaceData:
+        """严格加载并校验 fast 模式动态空间根对象。"""
+        config = make_config(self._dynamic_spaces_path)
+        if not self._dynamic_spaces_path.exists():
+            return DynamicSandboxSpaceData()
+        if not contains(DYNAMIC_SANDBOX_SPACES_ES_KEY, config):
+            raise TypeError(
+                f"Dynamic sandbox space storage is missing key "
+                f"{DYNAMIC_SANDBOX_SPACES_ES_KEY!r}"
+            )
+        data = load(
+            DYNAMIC_SANDBOX_SPACES_ES_KEY,
+            config,
+            ignore_missing_fields=False,
+        )
+        if not isinstance(data, DynamicSandboxSpaceData):
+            raise TypeError(
+                "Dynamic sandbox space storage root must be DynamicSandboxSpaceData"
+            )
+        if set(data.__dict__) - {"spaces"}:
+            raise TypeError("DynamicSandboxSpaceData contains unknown fields")
+        if not isinstance(data.spaces, list):
+            raise TypeError("DynamicSandboxSpaceData.spaces must be a list")
+        validated: list[DynamicSandboxSpace] = []
+        for space in data.spaces:
+            validated.append(self._validate_dynamic_space(
+                space,
+                existing=validated,
+                require_normalized=True,
+            ))
+        return DynamicSandboxSpaceData(spaces=validated)
+
+    def _save_dynamic_spaces_unlocked(self) -> None:
+        """将动态空间根对象写入同目录临时文件后原子替换。"""
+        self._ctx.workspace.mkdir(parents=True, exist_ok=True)
+        fd, temp_name = tempfile.mkstemp(
+            prefix=f"{self._dynamic_spaces_path.name}.",
+            suffix=".tmp",
+            dir=str(self._ctx.workspace),
+            text=True,
+        )
+        os.close(fd)
+        temp_path = Path(temp_name)
+        try:
+            temp_path.write_text("{}", encoding="utf-8")
+            save(
+                DYNAMIC_SANDBOX_SPACES_ES_KEY,
+                make_config(temp_path),
+                self._dynamic_spaces_data,
+            )
+            replace_atomic(temp_path, self._dynamic_spaces_path)
+        finally:
+            if temp_path.exists():
+                temp_path.unlink()
+
+    def _dynamic_space_by_name_unlocked(self, name: str) -> DynamicSandboxSpace | None:
+        for space in self._dynamic_spaces_data.spaces:
+            if space.name == name:
+                return space
+        return None
+
+    @staticmethod
+    def _dynamic_accesses(space: DynamicSandboxSpace) -> list[Access]:
+        return [Access.READ] if space.is_readonly else [Access.READ, Access.WRITE]
+
+    def _is_dynamic_space_available_unlocked(self, space: DynamicSandboxSpace) -> bool:
+        available = Path(space.path).is_dir()
+        previous = self._dynamic_space_availability.get(space.name)
+        self._dynamic_space_availability[space.name] = available
+        if previous is not None and previous != available:
+            logger.warning(
+                "Dynamic sandbox space availability changed | name=%s path=%s available=%s",
+                space.name,
+                space.path,
+                available,
+            )
+        return available
+
+    # -- 动态空间公共管理接口 --------------------------------------
+
+    def list_dynamic_spaces(self) -> list[DynamicSandboxSpace]:
+        """返回动态空间配置的深拷贝；fallback 模式返回空列表。"""
+        if self._ctx.mode != "fast":
+            return []
+        with self._dynamic_spaces_lock:
+            return [space.model_copy(deep=True) for space in self._dynamic_spaces_data.spaces]
+
+    def list_dynamic_spaces_with_availability(
+        self,
+    ) -> list[tuple[DynamicSandboxSpace, bool]]:
+        """返回动态空间配置拷贝及实时目录可用性。"""
+        if self._ctx.mode != "fast":
+            return []
+        with self._dynamic_spaces_lock:
+            return [
+                (space.model_copy(deep=True), self._is_dynamic_space_available_unlocked(space))
+                for space in self._dynamic_spaces_data.spaces
+            ]
+
+    def normalize_dynamic_space_path(self, raw_path: str) -> str:
+        """返回动态空间路径的规范绝对字符串。"""
+        return str(self._normalize_dynamic_path(raw_path))
+
+    def add_dynamic_space(
+        self,
+        *,
+        name: str,
+        path: str,
+        description: str,
+        is_readonly: bool,
+        session_id: str = "",
+    ) -> tuple[DynamicSandboxSpace, bool]:
+        """新增全局动态空间；完全相同的同名配置幂等成功。"""
+        if self._ctx.mode != "fast":
+            raise SandboxError("Dynamic sandbox spaces can only be modified in fast mode")
+        if type(name) is not str:
+            raise TypeError("Dynamic sandbox space name must be a string")
+        if type(path) is not str:
+            raise TypeError("Dynamic sandbox space path must be a string")
+        if type(description) is not str:
+            raise TypeError("Dynamic sandbox space description must be a string")
+        if type(is_readonly) is not bool:
+            raise TypeError("Dynamic sandbox space is_readonly must be a boolean")
+        candidate = DynamicSandboxSpace(
+            name=name,
+            path=path,
+            description=description,
+            is_readonly=is_readonly,
+        )
+        with self._dynamic_spaces_lock:
+            current = self._dynamic_space_by_name_unlocked(name.strip())
+            others = [space for space in self._dynamic_spaces_data.spaces if space is not current]
+            normalized = self._validate_dynamic_space(
+                candidate,
+                existing=others,
+                require_normalized=False,
+            )
+            if current is not None:
+                if current == normalized:
+                    logger.info(
+                        "Dynamic sandbox space add idempotent | session=%s name=%s path=%s",
+                        session_id,
+                        current.name,
+                        current.path,
+                    )
+                    return current.model_copy(deep=True), False
+                raise ValueError(
+                    f"Dynamic sandbox space {normalized.name!r} already exists with different configuration"
+                )
+            self._dynamic_spaces_data.spaces.append(normalized)
+            try:
+                self._save_dynamic_spaces_unlocked()
+            except BaseException:
+                self._dynamic_spaces_data.spaces.pop()
+                raise
+            available = self._is_dynamic_space_available_unlocked(normalized)
+            logger.info(
+                "Dynamic sandbox space added | session=%s name=%s path=%s readonly=%s available=%s",
+                session_id,
+                normalized.name,
+                normalized.path,
+                normalized.is_readonly,
+                available,
+            )
+            return normalized.model_copy(deep=True), True
+
+    def remove_dynamic_space(self, name: str, *, session_id: str = "") -> bool:
+        """按名称删除全局动态空间；名称不存在时幂等成功。"""
+        if self._ctx.mode != "fast":
+            raise SandboxError("Dynamic sandbox spaces can only be modified in fast mode")
+        if type(name) is not str:
+            raise TypeError("Dynamic sandbox space name must be a string")
+        normalized_name = name.strip()
+        if not re.fullmatch(DYNAMIC_SANDBOX_SPACE_NAME_PATTERN, normalized_name):
+            raise ValueError("Invalid dynamic sandbox space name")
+        if normalized_name in NAMESPACE_PREFIXES:
+            raise ValueError("Built-in namespaces cannot be removed")
+        with self._dynamic_spaces_lock:
+            current = self._dynamic_space_by_name_unlocked(normalized_name)
+            if current is None:
+                logger.info(
+                    "Dynamic sandbox space remove idempotent | session=%s name=%s",
+                    session_id,
+                    normalized_name,
+                )
+                return False
+            index = self._dynamic_spaces_data.spaces.index(current)
+            self._dynamic_spaces_data.spaces.pop(index)
+            try:
+                self._save_dynamic_spaces_unlocked()
+            except BaseException:
+                self._dynamic_spaces_data.spaces.insert(index, current)
+                raise
+            self._dynamic_space_availability.pop(current.name, None)
+            logger.info(
+                "Dynamic sandbox space removed | session=%s name=%s path=%s readonly=%s",
+                session_id,
+                current.name,
+                current.path,
+                current.is_readonly,
+            )
+            return True
+
+    def is_namespaced_path(self, path: str) -> bool:
+        """识别内置前缀及 fast 模式全部已配置动态前缀。"""
+        if not isinstance(path, str) or ":" not in path:
+            return False
+        namespace = path.split(":", 1)[0]
+        if namespace in _PERMISSIONS.get(self._ctx.mode, {}):
+            return True
+        if self._ctx.mode != "fast":
+            return False
+        with self._dynamic_spaces_lock:
+            return self._dynamic_space_by_name_unlocked(namespace) is not None
+
     # -- 路径解析 ----------------------------------------------------
 
     def resolve(self, logical: str, access: Access) -> ResolvedPath:
-        """解析逻辑路径，检查权限，返回绝对真实路径。
-
-        任何违规均抛出 ``SandboxError``。
-        """
+        """解析固定或 fast 动态逻辑路径，检查权限并返回真实路径。"""
         if not logical or not isinstance(logical, str):
             raise SandboxError("logical path must be a non-empty string")
 
-        # ---- 提取命名空间前缀 ----
-        ns: str
-        rest: str
-        if ":" in logical:
-            ns, rest = logical.split(":", 1)
-        else:
+        if ":" not in logical:
             raise SandboxError(
-                f"Path must carry a namespace prefix "
-                f"(fork:, ws:, fix:, skills:). Got: {logical!r}"
+                f"Path must carry a namespace prefix. Got: {logical!r}"
             )
-
+        ns, rest = logical.split(":", 1)
         ns = ns.strip()
-        if ns not in _PERMISSIONS.get(self._ctx.mode, {}):
-            raise SandboxError(
-                f"Unknown namespace '{ns}:' in mode '{self._ctx.mode}'. "
-                f"Allowed: {list(_PERMISSIONS.get(self._ctx.mode, {}).keys())}"
-            )
+
+        static_bases = self._static_namespace_bases()
+        base = static_bases.get(ns)
+        allowed = _PERMISSIONS.get(self._ctx.mode, {}).get(ns)
+        if base is None or allowed is None:
+            dynamic_space: DynamicSandboxSpace | None = None
+            if self._ctx.mode == "fast":
+                with self._dynamic_spaces_lock:
+                    dynamic_space = self._dynamic_space_by_name_unlocked(ns)
+                    if dynamic_space is not None:
+                        if not self._is_dynamic_space_available_unlocked(dynamic_space):
+                            raise SandboxError(
+                                f"Dynamic namespace '{ns}:' is currently unavailable; "
+                                f"directory does not exist: {dynamic_space.path}"
+                            )
+                        dynamic_space = dynamic_space.model_copy(deep=True)
+            if dynamic_space is None:
+                available_names = list(static_bases)
+                if self._ctx.mode == "fast":
+                    with self._dynamic_spaces_lock:
+                        available_names.extend(
+                            space.name for space in self._dynamic_spaces_data.spaces
+                        )
+                raise SandboxError(
+                    f"Unknown namespace '{ns}:' in mode '{self._ctx.mode}'. "
+                    f"Allowed: {available_names}"
+                )
+            base = Path(dynamic_space.path)
+            allowed = self._dynamic_accesses(dynamic_space)
 
         rest = rest.lstrip("/")
+        if ".." in rest.split("/") or rest.startswith("/") or (len(rest) > 1 and rest[1] == ":"):
+            raise SandboxError(f"Path traversal rejected: {logical!r}")
+        if ".." in rest.split("\\") or rest.startswith("\\") or (len(rest) > 1 and rest[1] == ":"):
+            raise SandboxError(f"Path traversal rejected: {logical!r}")
 
-        # ---- 路径遍历检查 ----
-        if ".." in rest.split("/") or rest.startswith("/") or (len(rest)>1 and rest[1]==":"):
-            raise SandboxError(
-                f"Path traversal rejected: {logical!r}"
-            )
-        if ".." in rest.split("\\") or rest.startswith("\\") or (len(rest)>1 and rest[1]==":"):
-            raise SandboxError(
-                f"Path traversal rejected: {logical!r}"
-            )
-
-        # ---- 解析到真实目录（base 映射单一来源：namespace_bases()）----
-        base: Path | None = self.namespace_bases().get(ns)
-        if base is None:
-            raise SandboxError(
-                f"Namespace '{ns}:' is not available in mode '{self._ctx.mode}'"
-            )
-
-        real: Path = (base / rest).resolve()
-
-        # ---- 强制解析后路径仍在 base 之下 ----
+        real = (base / rest).resolve()
         try:
             real.relative_to(base)
         except ValueError:
@@ -200,15 +538,12 @@ class Sandbox:
                 f"Resolved path {real} escapes namespace base {base}"
             )
 
-        # ---- 权限检查 ----
-        allowed: list[Access] = _PERMISSIONS[self._ctx.mode][ns]
         if access not in allowed:
             raise SandboxError(
                 f"Access {access.value} denied for namespace '{ns}:' "
                 f"in mode '{self._ctx.mode}'. Allowed: "
-                f"{[a.value for a in allowed]}"
+                f"{[item.value for item in allowed]}"
             )
-
         return ResolvedPath(logical=logical, real=real, namespace=ns)
 
     @property
@@ -223,24 +558,15 @@ class Sandbox:
         return self.resolve(logical, Access.WRITE)
 
     def namespace_bases(self) -> dict[str, Path]:
-        """返回全部已注册命名空间的 base 映射（跳过 None）。
-
-        ns → base 映射的单一来源，供 ``resolve()`` 与 LSP 反向映射复用，
-        避免两处手写字典漂移。键为不带冒号的命名空间名（如 ``"third"``）。
-        """
-        _repo_root = find_repo_root()
-        return {
-            ns: base for ns, base in {
-                Namespace.FORK.value:               self._ctx.fork_path,
-                Namespace.WS.value:                 self._ctx.agentspace,
-                Namespace.FIX.value:                self._ctx.fix_path,
-                Namespace.SKILLS.value:             _repo_root / Namespace.SKILLS.value,
-                Namespace.THIRD.value:              _repo_root / Namespace.THIRD.value,
-                Namespace.CUSTOM_HOOKS.value:       _repo_root / Namespace.CUSTOM_HOOKS.value,
-                Namespace.CUSTOM_LLM_CLIENT.value:  _repo_root / Namespace.CUSTOM_LLM_CLIENT.value,
-                Namespace.CUSTOM_TOOLS.value:       _repo_root / Namespace.CUSTOM_TOOLS.value,
-            }.items() if base is not None
-        }
+        """返回当前可用命名空间 base；不存在的动态目录有意排除。"""
+        bases = self._static_namespace_bases()
+        if self._ctx.mode != "fast":
+            return bases
+        with self._dynamic_spaces_lock:
+            for space in self._dynamic_spaces_data.spaces:
+                if self._is_dynamic_space_available_unlocked(space):
+                    bases[space.name] = Path(space.path)
+        return bases
 
     def get_base(self, ns: Namespace) -> Path:
         """返回指定命名空间的物理根目录。
@@ -288,7 +614,7 @@ class Sandbox:
 
         # -- 验证任何看起来像逻辑路径的参数 --
         for arg in args:
-            if ":" in arg and is_namespaced_path(arg):
+            if ":" in arg and self.is_namespaced_path(arg):
                 raise SandboxError(
                     f"Path arguments to subprocess commands must be resolved "
                     f"by the tool handler before calling sandbox.run(). "
@@ -327,7 +653,7 @@ class Sandbox:
 
         # -- 验证任何看起来像逻辑路径的参数 --
         for arg in args:
-            if ":" in arg and is_namespaced_path(arg):
+            if ":" in arg and self.is_namespaced_path(arg):
                 raise SandboxError(
                     f"Path arguments to subprocess commands must be resolved "
                     f"by the tool handler before calling sandbox.run(). "
@@ -366,7 +692,7 @@ class Sandbox:
             raise SandboxError(f"cwd does not exist or is not a directory: {cwd_ns}")
 
         for arg in args:
-            if ":" in arg and is_namespaced_path(arg):
+            if ":" in arg and self.is_namespaced_path(arg):
                 raise SandboxError(
                     f"Path arguments to subprocess commands must be resolved "
                     f"by the tool handler before calling sandbox.run_async_line_processor(). "

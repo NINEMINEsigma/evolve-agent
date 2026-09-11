@@ -100,11 +100,9 @@ async def _handle_enter_multi_agent(args: dict[str, Any]) -> dict:
         build_agent_profiles,
         agent_config_to_llm_profile,
     )
-    from system.sandbox import Sandbox
-
     tools = build_multi_agent_tools(tool_registry)
     parent_ctx = get_runtime_context()
-    sandbox = Sandbox(parent_ctx)
+    sandbox = app.sandbox
 
     from entity.puretype import LLMProfile as _LlmProfile
     # 从 loop active profile 获取主 agent 的 LlmProfile

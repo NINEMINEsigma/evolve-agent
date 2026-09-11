@@ -225,9 +225,26 @@ def is_namespaced_path(path: str) -> bool:
     return any(path.startswith(ns.value + ":") for ns in Namespace)
 
 
-# 支持的命名空间前缀元组 — 从 Namespace 枚举派生
-# 只读命名空间（third/custom_*）映射项目根目录，仅允许 Read 访问。
+# 支持的内置命名空间前缀元组 — 从 Namespace 枚举派生。
+# 动态命名空间由 Sandbox 单例的运行时注册表识别，不属于此静态元组。
+# 只读内置命名空间（third/custom_*）映射项目根目录，仅允许 Read 访问。
 NAMESPACE_PREFIXES: tuple[str, ...] = tuple(ns.value for ns in Namespace)
+
+# fast 模式全局动态沙盒空间持久化（存放于 RuntimeContext.workspace 根目录）
+DYNAMIC_SANDBOX_SPACES_ES_FILENAME: str = "dynamic_sandbox_spaces.es"
+DYNAMIC_SANDBOX_SPACES_ES_KEY: str = "v1"
+
+# 动态沙盒空间名称：不带冒号，以 ASCII 字母/下划线开头，仅含字母、数字、下划线
+DYNAMIC_SANDBOX_SPACE_NAME_PATTERN: str = r"^[A-Za-z_][A-Za-z0-9_]*$"
+
+# 动态沙盒空间用途描述最大字符数
+DYNAMIC_SANDBOX_SPACE_DESCRIPTION_MAX_CHARS: int = 1000
+
+# 仅普通模式/多Agent模式主Agent可调用的动态空间管理工具名
+DYNAMIC_SANDBOX_MANAGEMENT_TOOL_NAMES: frozenset[str] = frozenset({
+    "AddSandboxSpace",
+    "RemoveSandboxSpace",
+})
 
 
 # ============================================================================
@@ -506,8 +523,8 @@ COLLOQUY_SESSION_ID: str = "____buildin_colloquy__"
 # 滑动窗口压缩比例：将最早 N% 的消息压缩为一条摘要
 COLLOQUY_COMPRESS_RATIO: float = 0.3
 
-# 工具集白名单 — colloquy loop 仅允许这些 toolset 的工具
-# 包含 component/tools 和 component/extools 下所有 toolset 的并集
+# 工具集白名单 — colloquy loop 仅允许这些 toolset 的工具。
+# sandbox 管理工具集有意排除：随意聊聊会话可使用已有动态空间，但不可修改全局配置。
 COLLOQUY_TOOLSET_WHITELIST: frozenset[str] = frozenset({
     "filesystem", "core", "progress", "lsp", "frontend", "code",
     "clipboard", "shell", "python",

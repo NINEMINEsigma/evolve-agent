@@ -12,6 +12,8 @@
   - ``custom_hooks:``      只读（自定义钩子）
   - ``custom_llm_client:`` 只读（自定义 LLM 客户端）
   - ``custom_tools:``      只读（自定义工具）
+  - fast 模式还可使用 Sandbox 单例全局注册的动态命名空间；动态列表不是固定闭集，
+    每个空间按自身配置提供工具层只读或读写权限。
 """
 # TODO: _blocks构建应该具有一个公用的工厂
 from __future__ import annotations

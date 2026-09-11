@@ -1,0 +1,17 @@
+[
+  { "id": "none", "label": "无背景", "file": null },
+  { "id": "room-interior", "label": "房间室内", "file": "room-interior-illustration.jpeg" },
+  { "id": "classroom-center", "label": "教室中央", "file": "lernado-diff-classroom-center.jpeg" },
+  { "id": "classroom-door", "label": "教室门口", "file": "sdxl-classroom-door-view.jpeg" },
+  { "id": "cityscape", "label": "城市景观", "file": "cityscape.jpeg" },
+  { "id": "computer-room", "label": "电脑房", "file": "computer-room-illustration.jpeg" },
+  { "id": "night-window-room", "label": "夜窗室内", "file": "ceiling-window-room-night.jpeg" },
+  { "id": "moon-mountain", "label": "山间月色", "file": "moon-over-mountain.jpeg" },
+  { "id": "mountain-range", "label": "山脉插画", "file": "mountain-range-illustration.jpeg" },
+  { "id": "field-night", "label": "田野夜景", "file": "field-night-painting-moon.jpeg" },
+  { "id": "grass-night", "label": "草地夜景", "file": "night-landscape-grass-moon.jpeg" },
+  { "id": "cartoon-night", "label": "卡通夜景", "file": "night-scene-cartoon-moon.jpeg" },
+  { "id": "night-landscape-moon", "label": "夜景月色", "file": "cartoon-night-landscape-moon.jpeg" },
+  { "id": "valley-night", "label": "山谷夜空", "file": "painting-valley-night-sky. 2.jpeg" },
+  { "id": "congress", "label": "建筑", "file": "congress.jpg" }
+]

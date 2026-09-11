@@ -1,0 +1,26 @@
+{
+  "label": "Shizuku",
+  "modelUrl": "assets/models/shizuku/runtime/shizuku.model3.json",
+  "actions": [
+    { "group": "FlickUp", "index": 0, "duration": 1270 },
+    { "group": "Tap", "index": 0, "duration": 1270 },
+    { "group": "Flick3", "index": 0, "duration": 1500 }
+  ],
+  "expressionCount": 0,
+  "motionPriority": 3,
+  "motionPause": [3000, 7500],
+  "expressionPause": [7000, 15000],
+  "hiddenRetry": 2000,
+  "firstMotionDelay": [2200, 4800],
+  "firstExpressionDelay": [3500, 7000],
+  "layout": {
+    "narrowBreakpoint": 760,
+    "desktopWidthRatio": 0.42,
+    "desktopHeightRatio": 0.92,
+    "desktopX": 0.79,
+    "mobileWidthRatio": 0.72,
+    "mobileHeightRatio": 0.8,
+    "mobileX": 0.5,
+    "bottomY": 1.015
+  }
+}

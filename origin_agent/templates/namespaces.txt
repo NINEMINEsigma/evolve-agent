@@ -74,3 +74,7 @@ denied by the sandbox.
 - When to use: When you need to understand existing custom tools before evolving,
   or when inspecting how a specific custom tool is implemented (its schema, handler,
   and danger level).
+
+In fast mode, user-authorized global dynamic sandbox spaces may be provided in a
+separate **Global Dynamic Sandbox Spaces** system block. That runtime block is the
+authoritative source for dynamic prefixes; the fixed list above is not a closed set.

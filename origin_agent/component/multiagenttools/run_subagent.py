@@ -10,8 +10,8 @@ from typing import Any
 
 from abstract.tools.registry import registry, tool_error, tool_result
 from entity.puretype import ToolAvailability, ToolDangerLevel
+from system.application import Application
 from system.context import get_runtime_context
-from system.sandbox import Sandbox
 
 from ._store import SubagentStore
 
@@ -67,7 +67,7 @@ async def _handle_run_subagent(args: dict[str, Any]) -> dict:
             return tool_error("'system_prompt_paths' must be a list of strings")
     if len(system_prompt_paths) != len(set(system_prompt_paths)):
         return tool_error("Duplicate paths found in 'system_prompt_paths'")
-    sandbox = Sandbox(get_runtime_context())
+    sandbox = Application.current().sandbox
     for p in system_prompt_paths:
         if not sandbox.exists(p):
             return tool_error(f"System prompt file not found: {p}")
@@ -85,7 +85,6 @@ async def _handle_run_subagent(args: dict[str, Any]) -> dict:
 
     # 通过编排器启动子 Agent
     try:
-        from system.application import Application
         orch = Application.current().subagent_orchestrator
         result = await orch.launch(
             parent_session_id=parent_session_id,

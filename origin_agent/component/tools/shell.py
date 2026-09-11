@@ -15,7 +15,6 @@ if TYPE_CHECKING:
 
 from abstract.tools.registry import registry, tool_error, tool_result
 from entity.puretype import ToolDangerLevel
-from entity.constant import is_namespaced_path
 from system.context import get_runtime_context
 from system.sandbox import SandboxError
 
@@ -73,12 +72,15 @@ async def _execute(cmd_parts: list[str], cwd: str, session_id: str = "") -> dict
     # sandbox.run() 要求 tool handler 预先展开，不接收未解析的逻辑路径。
     resolved_parts: list[str] = []
     for part in cmd_parts:
-        if is_namespaced_path(part):
+        if _s().is_namespaced_path(part):
             try:
                 r = _s().resolve_read(part)
                 resolved_parts.append(str(r.real))
-            except SandboxError:
-                resolved_parts.append(part)
+            except SandboxError as exc:
+                return tool_error(
+                    f"Command path resolution failed: {exc}",
+                    path=part,
+                )
         else:
             resolved_parts.append(part)
 

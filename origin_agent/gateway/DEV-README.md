@@ -170,6 +170,8 @@ WS /ws/chat?resume=<sid>
 
 ### 静态文件
 
+`/files`、`/downloads` 与 `/zip` 均复用 `Application.sandbox`，不再临时构造 Sandbox。因此 fast 模式下可读且当前目录存在的全局动态沙盒空间也遵循同一逻辑前缀解析、遍历防护和权限检查；fallback 不启用动态空间。
+
 | 方法 | 端点 | 说明 |
 |------|------|------|
 | GET | `/uploads/{path}` | 静态文件访问 |

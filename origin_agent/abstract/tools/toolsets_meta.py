@@ -15,6 +15,17 @@ def register_builtin_toolset_descriptions() -> None:
         loaded_by_default=True,
     )
     registry.register_toolset(
+        name="sandbox",
+        description="Manage fast-mode global dynamic sandbox spaces through critical user-approved add/remove tools.",
+        usage_guide="""Global dynamic sandbox spaces are shared by all Agents in fast mode.
+
+- AddSandboxSpace and RemoveSandboxSpace are critical operations.
+- Load this toolset only when the user needs to grant or revoke a global logical namespace.
+- AddSandboxSpace never overwrites an existing name; remove the old space before adding changed configuration.
+- is_readonly must be supplied explicitly. Read-only is enforced by Sandbox file APIs, not by OS-level process isolation.
+- The Colloquy session intentionally cannot load this management toolset.""",
+    )
+    registry.register_toolset(
         name="filesystem",
         description="Read, write, edit, delete, copy, move, and search files in logical namespaces.",
         usage_guide="""Filesystem tools operate on logical namespace prefixes (ws:, fork:, fix:, skills:, etc.).

@@ -7,8 +7,8 @@
 from __future__ import annotations
 
 from pydantic import BaseModel
+from system.application import Application
 from system.context import RuntimeContext
-from system.sandbox import Sandbox
 
 from entity.puretype import AgentConfig
 
@@ -78,7 +78,7 @@ async def build_subagent_context(
 
     # 3. 用户自定义角色提示词
     system_prompt_paths: list[str] = profile.system_prompt_paths
-    sandbox = Sandbox(parent_ctx)
+    sandbox = Application.current().sandbox
     for prompt_path in system_prompt_paths:
         resolved = sandbox.resolve_read(prompt_path)
         if not resolved.real.exists():

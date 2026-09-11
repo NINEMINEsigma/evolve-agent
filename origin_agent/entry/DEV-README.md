@@ -140,6 +140,12 @@ entry/
 
 ---
 
+## 全局动态沙盒空间
+
+- `ParentAgentLoop._build_system_prompt()` 每次构建上下文时从 Application 的唯一 Sandbox 取得 fast 模式动态空间块；`ColloquyLoop` 继承该提示词和空间使用能力。
+- `MultiAgentLoop._run_single_agent()` 在每个参与Agent Worker 启动前刷新同一动态空间块。`sandbox` 管理工具在多Agent模式只向主Agent提供，非主参与Agent的有效工具定义会被过滤。
+- 动态空间解析能力由 Sandbox 全局共享，不属于会话或 LLM Profile。临时Agent保持无系统提示词，但已知动态逻辑路径仍可通过 Sandbox 解析。
+
 ## Agentspace 回复轮次文件锁
 
 - `ParentAgentLoop._run_tool_loop()` 为主Agent的一次完整 LLM→工具→最终回复创建 round ID，metrics 与事件收尾后释放。

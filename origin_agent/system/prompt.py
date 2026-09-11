@@ -16,6 +16,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import sys
 from pathlib import Path
@@ -26,6 +27,7 @@ logger = logging.getLogger(__name__)
 from system.pathutils import find_repo_root
 from system.templates import read_template
 from system.context import RuntimeContext
+from system.sandbox import Sandbox
 from system.modality_capability import build_modality_prompt_block
 from entity.constant import STATIC_FILE_HTTP_PREFIX, DOWNLOADS_HTTP_PREFIX, LOCAL_FONT_HTTP_PREFIX
 from entity.puretype import SystemInfo, ToolAvailability, LLMProfile
@@ -112,6 +114,34 @@ def _read_if_exists(path: Path) -> str:
     except OSError as exc:
         logger.warning("Failed to read template %s: %s", path, exc)
         return ""
+
+
+def build_dynamic_sandbox_spaces_block(sandbox: Sandbox) -> str:
+    """构建 fast 模式全局动态沙盒空间的结构化提示词块。"""
+    entries = sandbox.list_dynamic_spaces_with_availability()
+    if not entries:
+        return ""
+    template = read_template("dynamic_namespaces.txt")
+    if not template:
+        return ""
+    payload = [
+        {
+            "namespace": f"{space.name}:",
+            "path": space.path,
+            "access": "read-only" if space.is_readonly else "read-write",
+            "available": available,
+            "description": space.description,
+        }
+        for space, available in entries
+    ]
+    serialized = json.dumps(payload, ensure_ascii=False, indent=2)
+    serialized = (
+        serialized
+        .replace("&", "\\u0026")
+        .replace("<", "\\u003c")
+        .replace(">", "\\u003e")
+    )
+    return template.replace("{{dynamic_spaces_json}}", serialized)
 
 
 def build_system_prompt(

@@ -1,0 +1,29 @@
+{
+  "label": "Mao",
+  "modelUrl": "assets/models/mao_pro/runtime/mao_pro.model3.json",
+  "actions": [
+    { "group": "", "index": 0, "duration": 3470 },
+    { "group": "", "index": 1, "duration": 4400 },
+    { "group": "", "index": 2, "duration": 4200 },
+    { "group": "", "index": 3, "duration": 7800 },
+    { "group": "", "index": 4, "duration": 9370 },
+    { "group": "", "index": 5, "duration": 9230 }
+  ],
+  "expressionCount": 8,
+  "motionPriority": 3,
+  "motionPause": [4500, 10500],
+  "expressionPause": [7000, 15000],
+  "hiddenRetry": 2000,
+  "firstMotionDelay": [2500, 5500],
+  "firstExpressionDelay": [3500, 7000],
+  "layout": {
+    "narrowBreakpoint": 760,
+    "desktopWidthRatio": 0.46,
+    "desktopHeightRatio": 0.94,
+    "desktopX": 0.79,
+    "mobileWidthRatio": 0.76,
+    "mobileHeightRatio": 0.82,
+    "mobileX": 0.5,
+    "bottomY": 1.015
+  }
+}

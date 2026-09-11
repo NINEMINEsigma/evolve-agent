@@ -26,10 +26,16 @@ from entity.constant import (
     MULTI_AGENT_MAX_CASCADE_DEPTH,
     LOG_PREVIEW_CHARS,
     ALL_AGENTS_CHARACTER_REF_NAME,
+    DYNAMIC_SANDBOX_MANAGEMENT_TOOL_NAMES,
 )
 from system.templates import get_templates_dir, render_multi_agent_prompt
 from system.session_store import SessionStore
-from system.prompt import build_session_site_block, build_session_stage_block, build_session_chat_style_block
+from system.prompt import (
+    build_dynamic_sandbox_spaces_block,
+    build_session_chat_style_block,
+    build_session_site_block,
+    build_session_stage_block,
+)
 from entry.base_agent_loop import BaseAgentLoop, IMainSessionLoop
 from entry.multi_agent_worker import WorkerResult, MultiAgentWorker
 from entry.session_message_queue import SessionMessageQueue
@@ -308,13 +314,12 @@ class MultiAgentLoop(BaseAgentLoop, IMainSessionLoop):
         self._active_llm_profile = profile
 
         from component.multiagenttools.profile_builder import _resolve_main_agent_prompts
-        from system.sandbox import Sandbox
         common_prompt = main_agent.system_prompts[-1:] if main_agent.system_prompts else []
         main_agent.system_prompts = _resolve_main_agent_prompts(
             MAIN_AGENT_CHARACTER_NAME,
             main_agent.config,
             self.app.runtime_context,
-            Sandbox(self.app.runtime_context),
+            self.app.sandbox,
             profile=profile,
             session_id=self.session_id,
         ) + common_prompt
@@ -888,6 +893,9 @@ class MultiAgentLoop(BaseAgentLoop, IMainSessionLoop):
             chat_style_block = build_session_chat_style_block(self.session_id, owner="self")
             if chat_style_block:
                 system_prompts = system_prompts + [chat_style_block]
+        dynamic_spaces_block = build_dynamic_sandbox_spaces_block(self.app.sandbox)
+        if dynamic_spaces_block:
+            system_prompts = system_prompts + [dynamic_spaces_block]
         logger.info(
             "Agent worker system prompts | session=%s character=%s is_final=%s prompt_count=%d total_len=%d",
             self.session_id, character_name, is_final_round, len(system_prompts), sum(len(p) for p in system_prompts),
@@ -904,13 +912,22 @@ class MultiAgentLoop(BaseAgentLoop, IMainSessionLoop):
                 self.session_id, character_name, len(system_prompts),
             )
 
+        effective_tools = self._get_effective_tool_definitions()
+        if character_name != MAIN_AGENT_CHARACTER_NAME:
+            effective_tools = [
+                definition
+                for definition in effective_tools
+                if (definition.get("function") or {}).get("name")
+                not in DYNAMIC_SANDBOX_MANAGEMENT_TOOL_NAMES
+            ]
+
         round_id = self.begin_agentspace_round(character_name)
         try:
             worker = MultiAgentWorker(
                 character_name=character_name,
                 system_prompts=system_prompts,
                 history=history_view,
-                tools=self._get_effective_tool_definitions(),
+                tools=effective_tools,
                 llm_client=llm_client,
                 sink=self._sink,
                 loop=self,

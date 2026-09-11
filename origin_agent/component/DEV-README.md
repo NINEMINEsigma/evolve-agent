@@ -51,6 +51,7 @@ component/
 | `frontend.py` | `ValidateFrontend` | 前端构建验证 |
 | `skills.py` | `RecallSkill`, `CreateSkill` | 技能管理（已并入 core 工具集） |
 | `load_toolset.py` | `LoadToolset` | 按需加载工具集到当前会话（core 工具集，EVERY 可见性） |
+| `sandbox_spaces.py` | `AddSandboxSpace`、`RemoveSandboxSpace` | fast 模式全局动态沙盒空间增删；位于按需加载的 `sandbox` 工具集，critical，仅普通/多Agent模式主Agent可修改 |
 | `run_python.py` | `RunPython` | Python 代码执行 |
 | `ask_question.py` | `Ask` | 向前端提问 |
 | `progress_tools.py` | `UpdateTaskProgress`, `ClearTaskProgress` | 任务进度 |
@@ -95,6 +96,15 @@ component/
 | `profile_builder.py` | — | `build_multi_agent_tools()`：多 Agent 模式工具过滤 |
 
 ---
+
+## 全局动态沙盒空间工具集
+
+- `sandbox` 是 fast-only 的按需加载工具集，不属于默认 `core`；主Agent先通过 `LoadToolset` 加载。
+- `AddSandboxSpace` 要求显式提供名称、规范化绝对路径、用途描述、`is_readonly` 和审批原因；同名同配置幂等，同名不同配置拒绝覆盖。
+- `RemoveSandboxSpace` 按名称撤销后续逻辑路径解析；缺失名称幂等。
+- 两个工具均为 critical：手动/脱手模式由用户亲自审批，YOLO 按全局语义自动批准。
+- 普通模式与多Agent模式主Agent可修改；非主参与Agent不接收工具定义且 handler 二次拒绝。随意聊聊会话的工具集白名单有意不包含 `sandbox`。
+- 已配置空间由 fast 模式所有 Agent 共享。动态只读与内置只读空间一致，只限制标准 Sandbox 文件 API，不是 Shell/Python/后台进程的 OS 级 ACL。
 
 ## Agentspace 文件接触登记
 

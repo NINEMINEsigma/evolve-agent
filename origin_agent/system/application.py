@@ -75,7 +75,8 @@ class Application:
         from system.subprocess_utils import SubprocessRunner
         self._subprocess_runner = SubprocessRunner()
 
-        # 2. Sandbox — 依赖 RuntimeContext；注入 SubprocessRunner 全局单例
+        # 2. Sandbox — Application 持有的唯一安全边界与全局动态空间管理实例；
+        # 依赖 RuntimeContext，并注入 SubprocessRunner 全局单例。
         from system.sandbox import Sandbox
         # TODO: subprocess_runner本就可以通过Application获取, 不需要在构造中被引用
         self._sandbox = Sandbox(self.runtime_context, self._subprocess_runner)

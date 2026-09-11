@@ -1324,11 +1324,12 @@ async def serve_workspace_file(namespace: str, file_path: str):
     命名空间不带冒号，由 f-string 拼接逻辑路径传给 Sandbox.resolve_read()。
     通过沙盒复用路径解析、权限校验和路径遍历防护。
     """
-    from system.sandbox import Sandbox, SandboxError
+    from system.application import Application
+    from system.sandbox import SandboxError
 
     logical = f"{namespace}:{file_path}"
     try:
-        sandbox = Sandbox(get_runtime_context())
+        sandbox = Application.current().sandbox
         resolved = sandbox.resolve_read(logical)
     except SandboxError as exc:
         return HTMLResponse(str(exc), status_code=403)
@@ -1397,11 +1398,12 @@ async def serve_local_font(font_path: str):
 @app.get(DOWNLOADS_HTTP_PREFIX + "/{namespace}/{file_path:path}")
 async def download_workspace_file(namespace: str, file_path: str):
     """提供沙盒命名空间下文件的 HTTP 下载（强制 Content-Disposition: attachment）。"""
-    from system.sandbox import Sandbox, SandboxError
+    from system.application import Application
+    from system.sandbox import SandboxError
 
     logical = f"{namespace}:{file_path}"
     try:
-        sandbox = Sandbox(get_runtime_context())
+        sandbox = Application.current().sandbox
         resolved = sandbox.resolve_read(logical)
     except SandboxError as exc:
         return HTMLResponse(str(exc), status_code=403)
@@ -1435,11 +1437,12 @@ def download_dir_zip(namespace: str, file_path: str):
     import os
     import zipfile
 
-    from system.sandbox import Sandbox, SandboxError
+    from system.application import Application
+    from system.sandbox import SandboxError
 
     logical = f"{namespace}:{file_path}"
     try:
-        sandbox = Sandbox(get_runtime_context())
+        sandbox = Application.current().sandbox
         resolved = sandbox.resolve_read(logical)
     except SandboxError as exc:
         return HTMLResponse(str(exc), status_code=403)
