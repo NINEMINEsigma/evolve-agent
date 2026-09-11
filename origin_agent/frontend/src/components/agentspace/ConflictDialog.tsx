@@ -1,9 +1,6 @@
-import { DiffEditor, loader } from "@monaco-editor/react";
-import * as monaco from "monaco-editor";
+import { DiffEditor } from "@monaco-editor/react";
 import type { OpenTab } from "../../types";
 import ModalWindow from "../primitives/ModalWindow";
-
-loader.config({ monaco });
 
 export interface ConflictDialogProps {
   tab: OpenTab;

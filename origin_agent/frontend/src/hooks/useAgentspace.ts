@@ -496,10 +496,11 @@ export function useAgentspace(): UseAgentspaceResult {
     const generationAtStart = generation(tab.path);
     const sequenceAtStart = lastSequenceRef.current;
     const mutationId = api.createOperationId();
-    const normalizedWriteVersion = await api.getTextVersion(tab.content);
-    pendingOperationsRef.current.add(mutationId);
-    pendingWriteVersionsRef.current.set(tab.path, normalizedWriteVersion);
+    let normalizedWriteVersion: string | undefined;
     try {
+      normalizedWriteVersion = await api.getTextVersion(tab.content);
+      pendingOperationsRef.current.add(mutationId);
+      pendingWriteVersionsRef.current.set(tab.path, normalizedWriteVersion);
       const snapshot = await api.writeFile(
         tab.path,
         tab.content,
@@ -573,7 +574,10 @@ export function useAgentspace(): UseAgentspaceResult {
       return false;
     } finally {
       pendingOperationsRef.current.delete(mutationId);
-      if (pendingWriteVersionsRef.current.get(tab.path) === normalizedWriteVersion) {
+      if (
+        normalizedWriteVersion !== undefined
+        && pendingWriteVersionsRef.current.get(tab.path) === normalizedWriteVersion
+      ) {
         pendingWriteVersionsRef.current.delete(tab.path);
       }
     }

@@ -146,7 +146,9 @@ frontend/
 | `components/agentspace/ConflictDialog.tsx` | Monaco DiffEditor 冲突处理 |
 | `components/agentspace/TreeIcons.tsx` | 无新增依赖的内联 SVG 文件树图标 |
 | `services/agentspaceApi.ts` | Agentspace REST、结构化错误与 EventSource 适配 |
+| `services/monacoEnvironment.ts` | Monaco 统一环境配置：`MonacoEnvironment.getWorker` language label 路由 + Vite `?worker` 同源 Worker 构造器 + `loader.config({ monaco })` |
 | `utils/agentspacePath.ts` | 路径规范化、前缀重写、选择上下文和自然排序 |
+| `utils/sha256.ts` | SHA-256 统一摘要：安全上下文优先 Web Crypto，远程普通 HTTP 回退纯 TypeScript 实现 |
 | `hooks/useAgentspace.ts` | 目录/标签/锁/垃圾桶状态机及 HTTP/SSE 代际控制 |
 
 ---
@@ -184,10 +186,17 @@ frontend/
 - 文件树固定使用“文件夹优先、文件在后、组内自然名称排序”，展开箭头与类型图标分离；单击文件直接打开永久标签。
 - 侧栏可拖动、折叠并保存宽度；标签栏可横向滚动，不同目录的同名文件显示最短可区分父路径。
 - 用户删除进入独立 `ws:.trash/` 垃圾桶节点；恢复冲突自动添加 `.restored-N`，永久删除与清空需要明确确认。Evolve Agent 的 `Delete` 不受此 UI 语义影响。
-- 保存携带打开时的 SHA-256 版本。外部修改干净标签时自动重载；脏标签保留本地内容并进入 DiffEditor 冲突处理。
+- 保存携带打开时的 SHA-256 版本。安全上下文（HTTPS 或 localhost）下前端通过 Web Crypto 计算版本；远程普通 HTTP 部署下 `crypto.subtle` 不可用时自动回退到纯 TypeScript SHA-256 实现，结果与服务端 Python `hashlib.sha256` 完全一致。外部修改干净标签时自动重载；脏标签保留本地内容并进入 DiffEditor 冲突处理。
 - 内置 Agent 操作按回复轮次持有具体路径锁，只有命中路径变为只读；无关文件仍可编辑。
 - 文件变化通过 SSE 实时同步。watcher 或连接不可用时状态栏显示降级，并保留手动刷新。
 - 关闭脏标签提供保存/不保存/取消；页面离开使用浏览器原生确认，不跨刷新恢复草稿和标签。
+
+### Monaco Worker 统一配置
+
+- Monaco Editor 和 DiffEditor 的 Web Worker 加载入口由 `services/monacoEnvironment.ts` 集中配置，应用入口 `main.tsx` 在 React 渲染前调用一次。
+- Worker 通过 Vite `?worker` 机制打包为带构建哈希的同源资源，远程普通 HTTP 部署下浏览器从当前应用地址加载，不依赖 CDN 或 HTTPS。
+- `EditorArea.tsx` 和 `ConflictDialog.tsx` 不再各自执行 `loader.config({ monaco })`，只消费应用入口已配置的 Monaco 实例。
+- 浏览器或 CSP 拒绝 Worker 时允许 Monaco 自身降级到主线程；项目不实现伪 Worker 或全局错误抑制。
 
 ---
 

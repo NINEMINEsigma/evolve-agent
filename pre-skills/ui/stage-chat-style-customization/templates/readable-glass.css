@@ -1,0 +1,120 @@
+/*
+ * Evolve Agent Session Chat Style：轻量双态玻璃气泡模板
+ * 复制到 ws:sessions/<session_id>/chat-style/index.css 后按背景调参。
+ */
+
+[data-message-role="assistant"] [data-chat-scope="bubble"],
+[data-message-role="tool"] [data-chat-scope="bubble"] {
+  color: #f2f3f8;
+  background: rgba(19, 19, 25, 0.20);
+  border: 1px solid rgba(255, 255, 255, 0.055);
+  border-radius: 12px;
+  box-shadow: 0 3px 12px rgba(0, 0, 0, 0.08);
+  backdrop-filter: blur(4px) saturate(110%);
+  -webkit-backdrop-filter: blur(4px) saturate(110%);
+  transition:
+    background-color 220ms ease,
+    backdrop-filter 220ms ease,
+    -webkit-backdrop-filter 220ms ease;
+}
+
+[data-message-role="assistant"]:hover [data-chat-scope="bubble"],
+[data-message-role="assistant"][data-character-hovered="true"] [data-chat-scope="bubble"],
+[data-message-role="assistant"]:focus-within [data-chat-scope="bubble"],
+[data-message-role="tool"]:hover [data-chat-scope="bubble"],
+[data-message-role="tool"][data-character-hovered="true"] [data-chat-scope="bubble"],
+[data-message-role="tool"]:focus-within [data-chat-scope="bubble"] {
+  background: rgba(19, 19, 25, 0.34);
+  border-color: rgba(255, 255, 255, 0.055);
+  border-radius: 12px;
+  box-shadow: 0 3px 12px rgba(0, 0, 0, 0.08);
+  backdrop-filter: blur(10px) saturate(135%);
+  -webkit-backdrop-filter: blur(10px) saturate(135%);
+}
+
+[data-message-role="user"] [data-chat-scope="bubble"] {
+  color: #f7f7fb;
+  background: rgba(31, 31, 41, 0.28);
+  border: 1px solid rgba(255, 255, 255, 0.055);
+  border-radius: 16px;
+  box-shadow: 0 3px 12px rgba(0, 0, 0, 0.08);
+  backdrop-filter: blur(4px) saturate(110%);
+  -webkit-backdrop-filter: blur(4px) saturate(110%);
+  transition:
+    background-color 220ms ease,
+    backdrop-filter 220ms ease,
+    -webkit-backdrop-filter 220ms ease;
+}
+
+[data-message-role="user"]:hover [data-chat-scope="bubble"],
+[data-message-role="user"][data-character-hovered="true"] [data-chat-scope="bubble"],
+[data-message-role="user"]:focus-within [data-chat-scope="bubble"] {
+  background: rgba(31, 31, 41, 0.40);
+  border-color: rgba(255, 255, 255, 0.055);
+  border-radius: 16px;
+  box-shadow: 0 3px 12px rgba(0, 0, 0, 0.08);
+  backdrop-filter: blur(10px) saturate(135%);
+  -webkit-backdrop-filter: blur(10px) saturate(135%);
+}
+
+[data-chat-scope="reasoning"],
+[data-chat-scope="toolbar"],
+[data-chat-scope="tool-call"],
+[data-chat-scope="tool-detail"] {
+  background: transparent;
+  border-radius: 0;
+  box-shadow: none;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+
+[data-chat-scope="content"] {
+  color: inherit;
+  text-shadow:
+    0 1px 2px rgba(0, 0, 0, 0.90),
+    0 0 3px rgba(0, 0, 0, 0.58);
+}
+
+[data-chat-scope="content"] h1,
+[data-chat-scope="content"] h2,
+[data-chat-scope="content"] h3,
+[data-chat-scope="content"] strong {
+  color: #fff;
+  text-shadow:
+    0 1px 2px rgba(0, 0, 0, 0.96),
+    0 0 4px rgba(0, 0, 0, 0.64);
+}
+
+[data-chat-scope="code"] {
+  text-shadow: none;
+}
+
+[data-chat-scope="reasoning"],
+[data-chat-scope="toolbar"],
+[data-chat-scope="meta"] {
+  text-shadow:
+    0 1px 2px rgba(0, 0, 0, 0.92),
+    0 0 3px rgba(0, 0, 0, 0.56);
+}
+
+@media (max-width: 760px) {
+  [data-message-role="assistant"] [data-chat-scope="bubble"],
+  [data-message-role="tool"] [data-chat-scope="bubble"],
+  [data-message-role="user"] [data-chat-scope="bubble"] {
+    backdrop-filter: blur(3px) saturate(108%);
+    -webkit-backdrop-filter: blur(3px) saturate(108%);
+  }
+
+  [data-message-role="assistant"]:hover [data-chat-scope="bubble"],
+  [data-message-role="assistant"][data-character-hovered="true"] [data-chat-scope="bubble"],
+  [data-message-role="assistant"]:focus-within [data-chat-scope="bubble"],
+  [data-message-role="tool"]:hover [data-chat-scope="bubble"],
+  [data-message-role="tool"][data-character-hovered="true"] [data-chat-scope="bubble"],
+  [data-message-role="tool"]:focus-within [data-chat-scope="bubble"],
+  [data-message-role="user"]:hover [data-chat-scope="bubble"],
+  [data-message-role="user"][data-character-hovered="true"] [data-chat-scope="bubble"],
+  [data-message-role="user"]:focus-within [data-chat-scope="bubble"] {
+    backdrop-filter: blur(7px) saturate(125%);
+    -webkit-backdrop-filter: blur(7px) saturate(125%);
+  }
+}

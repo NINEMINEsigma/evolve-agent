@@ -1,11 +1,9 @@
 import { useCallback, useMemo, useRef } from "react";
-import Editor, { loader } from "@monaco-editor/react";
+import Editor from "@monaco-editor/react";
 import * as monaco from "monaco-editor";
 import type { CursorPosition, OpenTab } from "../../types";
 import { parentPath } from "../../utils/agentspacePath";
 import { ConflictIcon, LockIcon } from "./TreeIcons";
-
-loader.config({ monaco });
 
 export interface EditorAreaProps {
   tabs: OpenTab[];

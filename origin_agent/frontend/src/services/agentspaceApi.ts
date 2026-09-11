@@ -6,6 +6,7 @@ import type {
   SyncState,
   TrashEntry,
 } from "../types";
+import { sha256Hex } from "../utils/sha256";
 
 interface ErrorDetail {
   code?: string;
@@ -74,8 +75,7 @@ export function normalizeEditorText(content: string): string {
 
 export async function getTextVersion(content: string): Promise<string> {
   const bytes = new TextEncoder().encode(normalizeEditorText(content));
-  const digest = await crypto.subtle.digest("SHA-256", bytes);
-  return Array.from(new Uint8Array(digest), (value) => value.toString(16).padStart(2, "0")).join("");
+  return sha256Hex(bytes);
 }
 
 function normalizeSnapshot(snapshot: FileSnapshot): FileSnapshot {

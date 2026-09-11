@@ -2,6 +2,7 @@ import React from "react";
 import ReactDOM from "react-dom/client";
 import { BrowserRouter } from "react-router-dom";
 import App from "./App";
+import { configureMonacoEnvironment } from "./services/monacoEnvironment";
 import "./styles/variables.css";
 import "./styles/base.css";
 import "./styles/splash.css";
@@ -23,6 +24,8 @@ import "./styles/tooltip.css";
 import "./styles/popup.css";
 import "./styles/context-menu.css";
 import "./styles/onboarding.css";
+
+configureMonacoEnvironment();
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>

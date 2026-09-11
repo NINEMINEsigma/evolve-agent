@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="zh-CN" style="background: transparent;">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>Session Stage</title>
+  <style>
+    * { box-sizing: border-box; }
+    html, body {
+      width: 100%;
+      height: 100%;
+      margin: 0;
+      overflow: hidden;
+      background: transparent;
+      pointer-events: none;
+    }
+    #stage {
+      position: fixed;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      background: transparent;
+      pointer-events: none;
+    }
+    .orb {
+      position: absolute;
+      left: 78%;
+      top: 70%;
+      width: 110px;
+      aspect-ratio: 1;
+      border-radius: 50%;
+      background: radial-gradient(circle at 35% 30%, rgba(255,255,255,.8), rgba(120,180,255,.34) 26%, rgba(95,80,210,.08) 66%, transparent 72%);
+      filter: blur(1px);
+      animation: float 6s ease-in-out infinite;
+    }
+    @keyframes float {
+      0%, 100% { transform: translate(-50%, -50%) translateY(0) scale(1); opacity: .55; }
+      50% { transform: translate(-50%, -50%) translateY(-22px) scale(1.06); opacity: .78; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      .orb { animation: none; }
+    }
+  </style>
+</head>
+<body style="background: transparent;">
+  <div id="stage" aria-hidden="true">
+    <div class="orb"></div>
+  </div>
+  <script>
+    (() => {
+      "use strict";
+      document.documentElement.dataset.stageStatus = "ready";
+      document.addEventListener("visibilitychange", () => {
+        document.getAnimations().forEach((animation) => {
+          if (document.hidden) animation.pause();
+          else animation.play();
+        });
+      });
+    })();
+  </script>
+</body>
+</html>

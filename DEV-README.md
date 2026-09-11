@@ -164,10 +164,12 @@ Evolve Agent 内置两套多代理运行时：
 ## Agentspace 编辑器数据流
 
 - 用户文件操作由前端 `agentspaceApi.ts` 调用 Gateway typed REST，再委托 `Application.agentspace_service`；Service 负责路径校验、按目录优先自然排序、内容 SHA-256 版本与原子写。
+- 前端本地版本计算优先使用浏览器原生 Web Crypto；远程普通 HTTP 部署下 `crypto.subtle` 不可用时自动回退到纯 TypeScript SHA-256 实现（`utils/sha256.ts`），结果与服务端 Python `hashlib.sha256` 完全一致，不改变版本/冲突流程。
 - 用户删除进入 `ws:.trash/` 的事务垃圾桶；Evolve Agent `Delete` 的永久删除与审批语义保持不变。
 - 内置 Agent 文件工具在明确接触 `ws:` 路径时登记回复轮次文件锁，主Agent、参与Agent、子Agent与临时Agent在各自回复收尾后释放。
 - `watchdog` 把外部变化送入事件总线，Gateway 通过 `GET /api/agentspace/events` SSE 推送；前端以事件作为缓存失效信号，并通过 REST 重新取得权威快照。依赖不可用时界面显示同步降级。
 - 编辑器保存携带预期版本；冲突返回 HTTP 409，前端保留本地草稿并显示 Monaco 差异比较，禁止静默覆盖。
+- Monaco Editor 和 DiffEditor 的 Web Worker 由 `services/monacoEnvironment.ts` 集中配置，应用入口在 React 渲染前初始化；Worker 通过 Vite `?worker` 打包为同源构建资源，远程普通 HTTP 部署下从当前应用地址加载。
 
 ---
 
