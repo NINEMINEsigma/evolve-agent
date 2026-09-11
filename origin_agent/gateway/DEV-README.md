@@ -41,7 +41,7 @@ gateway/
 | `USER_MESSAGE` | `handle_user_message` | 后台 task 执行：自动标题、归档检查、子 Agent 转发、主会话处理、session 旋转检查 |
 | `CONFIRM_RESPONSE` | `handle_confirm_response` | 审批确认/拒绝，解析到 `FrontendSink` |
 | `ASK_RESPONSE` | `handle_ask_response` | 提问回答，解析到 `FrontendSink` |
-| `INTERRUPT` | `handle_interrupt` | 中断当前 loop 处理 |
+| `INTERRUPT` | `handle_interrupt` | 强制中断主会话当前轮次；与 HTTP 中断统一走 `request_interrupt()`，不乐观声明结果 |
 | `FILE_UPLOAD` | `handle_file_upload` | 文件上传：硬链接优先 → 复制 fallback → base64 解码 |
 | `HANDSFREE_MODE` | `handle_handsfree_mode` | 切换脱手/免审批模式 |
 | `PING` | `handle_ping` | 心跳响应 |
@@ -145,7 +145,7 @@ WS /ws/chat?resume=<sid>
 | GET | `/api/sessions/{id}/subagents` | 当前会话的子代理状态 |
 | POST | `/api/confirm/{request_id}` | 审批响应 |
 | POST | `/api/ask/{request_id}` | 提问响应 |
-| POST | `/api/interrupt/{session_id}` | 中断会话 |
+| POST | `/api/interrupt/{session_id}` | 强制中断主会话当前轮次；按活动任务判定 idle，返回权威结果（cancelled / timeout / failed / not_found） |
 | POST | `/api/file-picker` | 系统文件选择器 |
 | POST | `/api/shutdown-approval-model` | 卸载审批模型服务 |
 

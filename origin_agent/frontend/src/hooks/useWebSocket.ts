@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef } from "react";
-import { MessageContent, WSMessage, SubagentSession, AskRequest, ConfirmRequest } from "../types";
+import { MessageContent, WSMessage, SubagentSession, AskRequest, ConfirmRequest, InterruptResponse } from "../types";
 import { generateUUID } from "../utils";
 import { WS_IN, WS_OUT } from "../constants/ws";
 import { COLLOQUY_SID } from "../constants/session";
@@ -576,25 +576,63 @@ export function useWebSocket() {
     setApprovalMode(enabled ? "handsfree" : "manual");
   }, [setApprovalMode]);
 
-  const interrupt = useCallback(() => {
+  const interrupt = useCallback(async () => {
     const s = sessionRef.current;
-    if (!s) return;
-    s.ignoreStaleRef.current = true;
-    s.setWaiting(false);
-    s.setPendingMessages({});
-    const streamed = s.streamingMessageRef.current;
-    s.setStreamingMessage(null);
-    s.setMessages((prev) => {
-      let next = prev;
-      if (streamed) {
-        const exists = prev.some((x) => x.id === streamed.id);
-        next = exists ? prev.map((x) => (x.id === streamed.id ? streamed : x)) : [...prev, streamed];
-      }
-      return [...next, { role: "system" as const, content: "⏹ 已中断", id: generateUUID() }];
-    });
-    // 中断时清空挂起的 ask/confirm 队列并逐项自动应答，解除后端悬挂 Future
+    if (!s || !s.sessionId) return;
+    if (s.interruptStatus === "interrupting") return;
+    s.setInterruptStatus("interrupting");
+    // 清理本地待审批 UI 队列（后端 pending Future 由 request_interrupt 释放）
     s.clearPendingInteractions();
-    fetch(`/api/interrupt/${s.sessionId || "unknown"}`, { method: "POST" }).catch(() => {});
+    try {
+      const resp = await fetch(`/api/interrupt/${s.sessionId}`, { method: "POST" });
+      const data: InterruptResponse = await resp.json().catch(() => ({}));
+      const status = data.status;
+      if (status === "cancelled") {
+        // 等待后端 STREAM_DONE(cancelled) 固化部分内容；若无流，直接结束
+        if (!s.streamingMessageRef.current) {
+          s.setInterruptStatus("cancelled");
+          s.setWaiting(false);
+          s.setMessages((prev) => [...prev, { role: "system" as const, content: "⏹ 已中断", id: generateUUID() }]);
+        }
+      } else if (status === "idle") {
+        s.setInterruptStatus("idle");
+        s.setWaiting(false);
+      } else {
+        // timeout / failed / not_found / 网络错误：查询一次服务端真实状态再定
+        s.setInterruptStatus("failed");
+        try {
+          const statusResp = await fetch(`/api/sessions/${s.sessionId}/status`);
+          const statusData = await statusResp.json().catch(() => ({}));
+          if (!statusData.occupied && !s.streamingMessageRef.current) {
+            s.setWaiting(false);
+            s.setMessages((prev) => [...prev, {
+              role: "error" as const,
+              content: `中断失败：${data.error || "清理超时或异常"}（会话当前实际已空闲，可重试）`,
+              id: generateUUID(),
+            }]);
+          } else {
+            s.setMessages((prev) => [...prev, {
+              role: "error" as const,
+              content: `中断失败：${data.error || "清理超时或异常"}`,
+              id: generateUUID(),
+            }]);
+          }
+        } catch {
+          s.setMessages((prev) => [...prev, {
+            role: "error" as const,
+            content: `中断失败：${data.error || "网络错误"}`,
+            id: generateUUID(),
+          }]);
+        }
+      }
+    } catch (err) {
+      s.setInterruptStatus("failed");
+      s.setMessages((prev) => [...prev, {
+        role: "error" as const,
+        content: `中断请求失败：${err instanceof Error ? err.message : "网络错误"}`,
+        id: generateUUID(),
+      }]);
+    }
   }, []);
 
   const disgust = useCallback(() => {
@@ -839,6 +877,7 @@ export function useWebSocket() {
     updateMessageVisibility: session.updateMessageVisibility,
     addMessage: session.addMessage,
     pendingMessages: session.pendingMessages,
+    interruptStatus: session.interruptStatus,
     fetchSessions: session.fetchSessions,
     fetchAllTags: session.fetchAllTags,
     connect: conn.connect,

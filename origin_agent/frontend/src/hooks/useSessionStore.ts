@@ -13,6 +13,7 @@ import {
   SidebarItem,
   WSMessage,
   MessageContent,
+  InterruptStatus,
 } from "../types";
 import { parseToolResult, generateUUID, extractMessageResources } from "../utils";
 import { STORAGE_KEYS } from "../constants/storage";
@@ -102,6 +103,8 @@ export interface SessionStore {
   setGeneratingTagSessions: React.Dispatch<React.SetStateAction<Set<string>>>;
   streamingMessage: ChatMessage | null;
   setStreamingMessage: React.Dispatch<React.SetStateAction<ChatMessage | null>>;
+  interruptStatus: InterruptStatus;
+  setInterruptStatus: React.Dispatch<React.SetStateAction<InterruptStatus>>;
   allTags: string[];
   setAllTags: React.Dispatch<React.SetStateAction<string[]>>;
   streamingMessageRef: React.MutableRefObject<ChatMessage | null>;
@@ -196,6 +199,7 @@ export function useSessionStore(callbacks: SessionStoreCallbacks = {}): SessionS
   const [generatingTagSessions, setGeneratingTagSessions] = useState<Set<string>>(new Set());
   const [renamingSessionId, setRenamingSessionId] = useState<string | null>(null);
   const [streamingMessage, setStreamingMessage] = useState<ChatMessage | null>(null);
+  const [interruptStatus, setInterruptStatus] = useState<InterruptStatus>("idle");
   const [allTags, setAllTags] = useState<string[]>([]);
   // 已排队待确认的用户消息：client_message_id → { content, timestamp }
   const [pendingMessages, setPendingMessages] = useState<Record<string, { content: MessageContent; timestamp: number }>>({});
@@ -751,6 +755,9 @@ export function useSessionStore(callbacks: SessionStoreCallbacks = {}): SessionS
     if (msg.type === WS_IN.STREAM_DONE) {
       setWaiting(false);
       ignoreStaleRef.current = false;
+      if (msg.finish_reason === "cancelled") {
+        setInterruptStatus("cancelled");
+      }
       // 后端在 stream_done 中附带完整 content，作为权威源同步覆盖 ref，
       // 消除 delta 累积与 useEffect 异步同步之间的竞态
       const doneContent = typeof msg.content === "string" ? msg.content : "";
@@ -1070,6 +1077,7 @@ export function useSessionStore(callbacks: SessionStoreCallbacks = {}): SessionS
     setDynamicEndpoints([]);
     setTokenUsage(0);
     setContextTokens(0);
+    setInterruptStatus("idle");
     ignoreStaleRef.current = false;
   }, [clearPendingInteractions]);
 
@@ -1087,6 +1095,7 @@ export function useSessionStore(callbacks: SessionStoreCallbacks = {}): SessionS
     setDynamicEndpoints([]);
     setTokenUsage(0);
     setContextTokens(0);
+    setInterruptStatus("idle");
     ignoreStaleRef.current = false;
   }, [sessionId, clearPendingInteractions]);
 
@@ -1457,6 +1466,8 @@ export function useSessionStore(callbacks: SessionStoreCallbacks = {}): SessionS
     setGeneratingTagSessions,
     streamingMessage,
     setStreamingMessage,
+    interruptStatus,
+    setInterruptStatus,
     streamingMessageRef,
     allTags,
     setAllTags,

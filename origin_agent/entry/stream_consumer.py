@@ -17,6 +17,7 @@ from typing import Any, TYPE_CHECKING
 from abstract.llm.client import BaseLLMClient
 from entity.puretype import LLMResponse, Usage, ToolCallRequest, MessageMetrics
 from entity.messages import BaseMessage, CharacterConversationMessage
+from entity.constant import LLM_STREAM_IDLE_TIMEOUT
 
 if TYPE_CHECKING:
     from entry.agent_sink import AgentSink
@@ -25,9 +26,12 @@ logger = logging.getLogger(__name__)
 
 
 async def _close_async_iterator(ait: Any) -> None:
-    """安全关闭异步迭代器，避免未读取完成的流留下资源泄漏。"""
+    """安全关闭异步迭代器，避免未读取完成的流留下资源泄漏。
+
+    对已断开/无响应的连接限时 2 秒，防止关闭本身挂起阻塞中断收尾。
+    """
     try:
-        await ait.aclose()
+        await asyncio.wait_for(ait.aclose(), timeout=2.0)
     except Exception:
         logger.debug("Failed to close async iterator", exc_info=True)
 
@@ -50,6 +54,10 @@ class StreamConsumer:
         self._sink = sink
         self._character_name = character_name
         self._cancel_event = cancel_event
+        # 当前活动流的底层异步迭代器与最后一次部分结果快照；由主会话层
+        # 在取消时调用 cancel_stream() 解除网络阻塞，partial_result() 取回已显示内容。
+        self._active_iterator: Any | None = None
+        self._last_partial: LLMResponse | None = None
 
     @property
     def llm(self) -> BaseLLMClient | None:
@@ -94,9 +102,54 @@ class StreamConsumer:
             messages, tools=tools, character=self._character_name,
             last_user_message=last_user_message,
         )
+        self._active_iterator = stream
+        idle_timeout = LLM_STREAM_IDLE_TIMEOUT
+        next_task: asyncio.Task | None = None
+        cancel_waiter: asyncio.Task | None = None
         try:
-            async for chunk in stream:
-                if ev.is_set():
+            while True:
+                # 三路竞速：下一块流数据 / 用户取消事件 / 空闲超时。
+                # 取消事件一旦置位立即退出，不依赖 task.cancel() 打断阻塞的网络读取；
+                # 超时与用户取消不共享 CancelledError 边界。
+                next_task = asyncio.ensure_future(stream.__anext__())
+                cancel_waiter = asyncio.ensure_future(ev.wait())
+                done, _pending = await asyncio.wait(
+                    {next_task, cancel_waiter},
+                    timeout=idle_timeout,
+                    return_when=asyncio.FIRST_COMPLETED,
+                )
+                if not done:
+                    # 连续 idle_timeout 秒无任何流式数据：自动停止本轮
+                    next_task.cancel()
+                    cancel_waiter.cancel()
+                    for t in (next_task, cancel_waiter):
+                        try:
+                            await t
+                        except (asyncio.CancelledError, Exception):
+                            pass
+                    stream_error = (
+                        f"LLM stream idle timeout: no data received for "
+                        f"{idle_timeout}s"
+                    )
+                    break
+
+                if cancel_waiter in done:
+                    # 用户取消：丢弃未完成的读取，直接结束（finish_reason=cancelled）
+                    next_task.cancel()
+                    try:
+                        await next_task
+                    except (asyncio.CancelledError, Exception):
+                        pass
+                    break
+                cancel_waiter.cancel()
+                try:
+                    await cancel_waiter
+                except (asyncio.CancelledError, Exception):
+                    pass
+
+                try:
+                    chunk = next_task.result()
+                except StopAsyncIteration:
                     break
 
                 if chunk.error:
@@ -155,6 +208,7 @@ class StreamConsumer:
                     finish_reason = chunk.finish_reason
         finally:
             await _close_async_iterator(stream)
+            self._active_iterator = None
 
         if ev.is_set():
             finish_reason = "cancelled"
@@ -191,7 +245,7 @@ class StreamConsumer:
             tokens_per_second=tokens_per_second,
         )
 
-        return LLMResponse(
+        response = LLMResponse(
             content=content,
             tool_calls=tool_calls,
             finish_reason=finish_reason,
@@ -204,3 +258,27 @@ class StreamConsumer:
             ),
             metrics=metrics,
         )
+        # 保存本轮快照供取消路径取回（不含未完成的 tool_call 参数）
+        self._last_partial = response
+        return response
+
+    def partial_result(self, *, finish_reason: str = "cancelled") -> LLMResponse | None:
+        """返回当前已显示内容的快照（完整 tool_calls 之前的部分）。
+
+        用于强制中断时保留用户已看到的部分文字；不伪造未完成的工具调用。
+        无已收到内容时返回 None。
+        """
+        snapshot = self._last_partial
+        if snapshot is None:
+            return None
+        return snapshot.model_copy(update={"finish_reason": finish_reason})
+
+    async def cancel_stream(self) -> None:
+        """主动关闭当前活动流，解除 chat_stream 的网络阻塞。
+
+        由主会话层在强制中断时调用；关闭后当前 ``consume()`` 的下一轮
+        ``__anext__`` 会抛错或结束，由 Loop 取消边界负责收尾。
+        """
+        it = self._active_iterator
+        if it is not None:
+            await _close_async_iterator(it)

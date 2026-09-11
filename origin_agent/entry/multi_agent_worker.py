@@ -32,6 +32,7 @@ from entry.base_agent_loop import BaseAgentLoop, IMainSessionLoop, ToolContext
 from entry.stream_consumer import StreamConsumer
 from entry.tool_executor import ToolExecutor, _interrupted_result
 from entry.agent_support.multimodal import preprocess_multimodal_blocks
+import asyncio
 
 if TYPE_CHECKING:
     from entry.agent_sink import AgentSink
@@ -249,6 +250,20 @@ class MultiAgentWorker:
                     self._tools,
                     stream_id,
                 )
+            except asyncio.CancelledError:
+                # 强制中断：固化当前参与Agent已显示的部分内容，然后上抛，
+                # 由 MultiAgentLoop._cascade 停止级联
+                partial = self._stream_consumer.partial_result(finish_reason="cancelled")
+                partial_content = partial.content if partial else ""
+                partial_metrics = partial.metrics if partial else None
+                await self._sink.emit_stream_done(
+                    self._loop.loop.session_id,
+                    stream_id,
+                    "cancelled",
+                    content=partial_content,
+                    metrics=partial_metrics,
+                )
+                raise
             except Exception as exc:
                 logger.exception(
                     "LLM error for agent=%s: %s",

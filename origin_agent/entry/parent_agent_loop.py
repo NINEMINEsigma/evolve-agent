@@ -142,6 +142,9 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
             cancel_event=self._cancel_event,
         )
 
+        # -- 主会话活动任务注册表（强制中断基础，IMainSessionLoop 公共实现）--
+        self._init_round_registry()
+
         # -- 工具调用事件回调 --
         self._tool_event_callback: Callable[[str, str, str, str], Awaitable[None]] | None = None
 
@@ -364,6 +367,8 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
         try:
             while turn.value < _MAX_TOOL_TURNS:
                 if self._cancel_event.is_set():
+                    # 取消事件检查点：统一收尾由 CancelledError 边界或此处执行，
+                    # 只写一次系统状态（下方 cancelled 分支去重）
                     self.append_system_status("已中断", session_id=sid)
                     return ""
                 turn.value += 1
@@ -376,12 +381,34 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
 
                 stream_id = uuid.uuid4().hex[:12]
                 try:
+                    self.register_active_stream(self._stream_consumer)
                     resp = await self._stream_consumer.consume(
                         sid, messages,
                         self._get_tool_definitions(),
                         stream_id,
                         last_user_message=self._history.last_user_message,
                     )
+                except asyncio.CancelledError:
+                    # 强制中断收尾：保留已显示文字、补发 cancelled、补齐工具配对，
+                    # 系统状态只在此处写一次（与上方检查点互斥——检查点在
+                    # cancel_event 已置位时先行返回，不会到达本边界）
+                    partial = self._stream_consumer.partial_result(finish_reason="cancelled")
+                    partial_content = partial.content if partial else ""
+                    partial_metrics = partial.metrics if partial else None
+                    if partial_content:
+                        msg_index = self._append(
+                            sid, Role.ASSISTANT, partial_content,
+                            reasoning_content=partial.reasoning_content if partial else None,
+                            reasoning_field_name=partial.reasoning_field_name if partial else None,
+                        )
+                        if partial_metrics:
+                            collected_metrics.append((sid, msg_index, partial_metrics))
+                    self.append_system_status("已中断", session_id=sid)
+                    await self._emit_stream_done(
+                        sid, stream_id, "cancelled",
+                        content=partial_content, metrics=partial_metrics,
+                    )
+                    return partial_content or ""
                 except Exception as llm_exc:
                     logger.exception("LLM call failed for session=%s", sid)
                     # NOTE: D1——失败时保留 user 消息（不再移除），错误回复持久化为
@@ -394,6 +421,8 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
                     await self._emit_stream_done(sid, stream_id, "error", content="", metrics=None)
                     await self._frontend_sink.emit_system_message(sid, err_text)
                     return ""
+                finally:
+                    self.register_active_stream(None)
 
                 if self._cancel_event.is_set():
                     await self._emit_stream_done(sid, stream_id, "cancelled", content=resp.content or "", metrics=resp.metrics)

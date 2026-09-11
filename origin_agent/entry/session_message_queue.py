@@ -116,7 +116,12 @@ class SessionMessageQueue:
                 items: list[QueuedMessage] = []
                 while self._pending:
                     items.append(self._pending.popleft())
-                await self._loop.run_pending_round(items)
+                current = asyncio.current_task()
+                self._loop.register_round_task(current)
+                try:
+                    await self._loop.run_pending_round(items)
+                finally:
+                    self._loop.unregister_round_task(current)
             await self._wakeup.wait()
 
     def _on_consumer_done(self, task: asyncio.Task) -> None:

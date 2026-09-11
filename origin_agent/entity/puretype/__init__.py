@@ -67,6 +67,7 @@ from .session import (
     SessionMessageEntry,
     TokenUsageRecord,
     QueuedMessage,
+    MainSessionInterruptResult,
 )
 from .agent import (
     AgentConfig,
@@ -151,6 +152,7 @@ __all__ = [
     "SessionMessageEntry",
     "TokenUsageRecord",
     "QueuedMessage",
+    "MainSessionInterruptResult",
     # agent
     "AgentConfig",
     # ws

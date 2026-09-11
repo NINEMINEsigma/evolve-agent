@@ -103,6 +103,13 @@ APPROVAL_WAIT_TIMEOUT: int = 120
 # cron 任务执行超时（秒）— 单次定时任务的最大运行时间
 CRON_TASK_TIMEOUT: int = 300
 
+# LLM 流连续空闲超时（秒）— 连续该时长未收到任何流式数据（content/reasoning/
+# tool_call/usage）时自动停止本轮并恢复会话为空闲；任一有效数据到达即重置计时
+LLM_STREAM_IDLE_TIMEOUT: int = 300
+
+# 主会话中断清理等待上限（秒）— HTTP 中断接口等待当前轮次完成收尾的最长时间
+MAIN_SESSION_INTERRUPT_TIMEOUT: float = 2.0
+
 # ffmpeg 命令执行默认超时（秒）
 FFMPEG_DEFAULT_TIMEOUT: int = 300
 

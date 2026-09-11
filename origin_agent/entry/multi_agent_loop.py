@@ -122,6 +122,9 @@ class MultiAgentLoop(BaseAgentLoop, IMainSessionLoop):
         # 恢复会话级已加载工具集
         self._restore_loaded_toolsets()
 
+        # 主会话活动任务注册表（强制中断基础，IMainSessionLoop 公共实现）
+        self._init_round_registry()
+
     # -- BaseAgentLoop 抽象方法实现 ----------------------------------------
 
     def get_sink(self) -> AgentSink:
@@ -687,6 +690,13 @@ class MultiAgentLoop(BaseAgentLoop, IMainSessionLoop):
             # ── 执行单个 Agent ──
             try:
                 result = await self._run_single_agent(char, is_final_round=is_final)
+            except asyncio.CancelledError:
+                # 强制中断：不启动后续参与Agent，不追加路由结果，直接退出级联
+                logger.info(
+                    "Cascade cancelled | session=%s character=%s step=%d",
+                    self.session_id, char, step,
+                )
+                raise
             except Exception as exc:
                 logger.exception(
                     "Agent worker failed, cascade interrupted | session=%s character=%s step=%d",
@@ -908,7 +918,13 @@ class MultiAgentLoop(BaseAgentLoop, IMainSessionLoop):
             )
 
             try:
+                self.register_active_stream(worker._stream_consumer)
                 result = await worker.run()
+            except asyncio.CancelledError:
+                # 强制中断：worker 内部已固化部分输出；此处聚合 token 后上抛，
+                # _cascade 捕获 CancelledError 后停止级联，不启动后续参与Agent。
+                self._aggregate_worker_usage(worker)
+                raise
             except Exception:
                 logger.exception(
                     "Agent worker run failed | session=%s character=%s final=%s",
@@ -934,6 +950,7 @@ class MultiAgentLoop(BaseAgentLoop, IMainSessionLoop):
             )
             return result
         finally:
+            self.register_active_stream(None)
             self.end_agentspace_round(character_name, round_id)
 
     def _aggregate_worker_usage(

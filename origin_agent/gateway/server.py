@@ -536,13 +536,32 @@ async def http_ask(request_id: str, req: Request):
 
 @app.post("/api/interrupt/{session_id}")
 async def http_interrupt(session_id: str):
-    """通过 HTTP 处理中断请求，使其在 WS handler 被
-    ``process_message()`` 阻塞时仍能生效。"""
+    """通过 HTTP 强制中断主会话当前轮次，返回权威结果。
+
+    按「是否存在登记的活动任务」判定 idle；有活动任务时调用统一的
+    ``request_interrupt()``，等待收尾确认（上限 MAIN_SESSION_INTERRUPT_TIMEOUT），
+    返回 cancelled / timeout / failed / not_found。
+    """
     logger.info("HTTP interrupt | session=%s", session_id)
     loop = _get_loop(session_id)
-    if loop is not None:
-        loop.loop.interrupt()
-    return {"interrupted": True, "session_id": session_id}
+    if loop is None:
+        return {"interrupted": False, "status": "not_found", "session_id": session_id}
+    result = await loop.request_interrupt(reason="user")
+    payload = result.model_dump()
+    payload["interrupted"] = result.status in ("idle", "cancelled")
+    if result.status == "timeout":
+        return HTMLResponse(
+            json.dumps(payload, ensure_ascii=False),
+            media_type="application/json",
+            status_code=409,
+        )
+    if result.status == "failed":
+        return HTMLResponse(
+            json.dumps(payload, ensure_ascii=False),
+            media_type="application/json",
+            status_code=500,
+        )
+    return payload
 
 
 @app.post("/api/disgust/{session_id}")
@@ -799,12 +818,18 @@ async def regenerate_response(session_id: str, req: Request):
     # 没有前端连接时只重新生成并尽力而为推送
     # 复用 process_message 流程（流式事件自动推送到 ws）
     # 历史已包含最后一条 user 消息，避免重复追加
-    reply: str = await loop.loop.process_message(
-        content,
-        skip_append=True,
-        visible_characters=result.get("visible_characters"),
-        response_characters=result.get("response_characters"),
-    )
+    # 登记当前 HTTP handler task 为主会话活动任务，保证强制中断可取消本路径
+    current_task = asyncio.current_task()
+    loop.register_round_task(current_task)
+    try:
+        reply: str = await loop.loop.process_message(
+            content,
+            skip_append=True,
+            visible_characters=result.get("visible_characters"),
+            response_characters=result.get("response_characters"),
+        )
+    finally:
+        loop.unregister_round_task(current_task)
     from system.application import Application
     sink = Application.current().frontend_sink
     if sink is not None and reply:
@@ -840,7 +865,13 @@ async def resume_session_endpoint(session_id: str):
             media_type="application/json",
             status_code=409,
         )
-    reply = await loop.resume()
+    # 登记当前 HTTP handler task 为主会话活动任务，保证强制中断可取消本路径
+    current_task = asyncio.current_task()
+    loop.register_round_task(current_task)
+    try:
+        reply = await loop.resume()
+    finally:
+        loop.unregister_round_task(current_task)
     logger.info("Resume ok | session=%s reply_len=%d", session_id, len(reply))
     return {"resumed": True, "session_id": session_id}
 

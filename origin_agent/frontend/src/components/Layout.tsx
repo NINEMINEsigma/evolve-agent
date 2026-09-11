@@ -348,6 +348,7 @@ export default function Layout({ ws, onContextMenu, contextMenuOpen, onboardingR
                 onUpload={ws.handleFileInputChange}
                 onUploadClick={ws.handleUploadClick}
                 onInterrupt={ws.interrupt}
+                interruptStatus={ws.interruptStatus}
                 onDisgust={ws.disgust}
                 onResume={ws.resume}
                 fileInputRef={ws.fileInputRef}

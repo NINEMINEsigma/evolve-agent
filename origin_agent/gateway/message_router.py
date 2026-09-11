@@ -303,11 +303,14 @@ class MessageRouter:
                 sink.resolve_ask(msg.request_id, option=msg.option, custom_text=msg.custom_text)
 
     async def handle_interrupt(self) -> None:
-        """处理中断请求。"""
+        """处理中断请求：与 HTTP 中断统一走 request_interrupt()，不乐观声明结果。"""
         logger.info("WS interrupt | session=%s", self.sid)
         loop = _get_loop(self.sid)
         if loop is not None and loop.loop is not None:
-            loop.loop.interrupt()
+            asyncio.create_task(
+                loop.request_interrupt(reason="user"),
+                name=f"ws-interrupt-{self.sid[:8]}",
+            )
 
     async def handle_disgust(self) -> None:
         """处理厌恶请求。"""

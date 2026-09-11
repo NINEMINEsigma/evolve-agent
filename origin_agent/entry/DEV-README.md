@@ -47,6 +47,13 @@ entry/
   - 工具集加载状态：`_loaded_toolsets`（会话级已加载工具集名称集合）、`get_loaded_toolsets()`、`is_toolset_loaded()`、`load_toolsets()`、`_restore_loaded_toolsets()`、`_get_effective_tool_definitions()`（按已加载工具集 × scope 动态计算工具 schema）。
   - `get_tool_availability_scope()`：返回当前 Loop 的 `ToolAvailability`（默认 `EVERY`，子类覆写）。
 
+- **`IMainSessionLoop`**：主会话专属接口，除历史/Profile/轮次能力外，还提供**强制中断**所需的公共实现：
+  - `_init_round_registry()`：由主会话实现类在构造时调用，初始化 `_interrupt_lock`、`_active_round_task`、`_active_stream_consumer`。
+  - `register_round_task(task)` / `unregister_round_task(task)`：登记/注销当前活动回复任务（队列 consumer 或 HTTP handler task）。
+  - `register_active_stream(consumer)`：登记当前活动 `StreamConsumer`，供强制中断时主动关闭底层流。
+  - `has_active_round()`：以「是否存在登记的活动任务」判定主会话是否忙碌，不以 `_processing` 为准。
+  - `request_interrupt(reason, timeout)`：强制中断权威入口——设置取消事件、关闭活动流、终止本会话登记的活动子进程、取消活动任务，并等待收尾确认；返回 `MainSessionInterruptResult`（idle / cancelled / timeout / failed / not_found）。
+
 - **`BasePrivateChatAgentLoop`**：在基类之上增加 1-on-1 私聊循环模板，包含：
   - 历史管理（`History` 实例）。
   - LLM 调用抽象（`_get_llm_client()`、`_build_system_prompt()`）。
@@ -113,7 +120,9 @@ entry/
 
 - 接收独立依赖（`llm`、`sink`、`character_name`、`cancel_event`），不绑定任何 loop 类型。
 - `consume(session_id, messages, tools, stream_id) -> LLMResponse`：消费完整流式响应，聚合 content/reasoning/tool_calls，推送增量到前端，返回结构化结果。
-- 安全关闭异步迭代器，避免资源泄漏。
+- **流式空闲超时**：使用独立 next 任务 + `asyncio.wait` 实现，连续 `LLM_STREAM_IDLE_TIMEOUT`（300 秒）未收到任何流式数据（content/reasoning/tool_call/usage）时自动停止本轮，产生明确的 idle-timeout 错误；任一有效数据到达即重置计时。超时与用户取消不共享 `CancelledError` 边界。
+- **部分结果快照**：`partial_result(finish_reason="cancelled")` 返回当前已显示内容的快照（完整 tool_calls 之前的部分），供强制中断时保留用户已看到的部分文字；不伪造未完成的工具调用。
+- **主动关闭**：`cancel_stream()` 关闭当前活动流的底层异步迭代器，解除 `chat_stream` 的网络阻塞，由主会话层在强制中断时调用。
 - 检测 LLM provider 是否返回了 token usage（若未返回则抛异常）。
 
 > 由 `ParentAgentLoop` 持有；`MultiAgentWorker` 内部也创建独立实例使用。

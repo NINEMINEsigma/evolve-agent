@@ -1,6 +1,6 @@
 from enum import Enum
 from pydantic import BaseModel, Field
-from typing import Any
+from typing import Any, Literal
 
 from ._base import MessageContent
 from .llm import MessageMetrics
@@ -141,3 +141,26 @@ class QueuedMessage(BaseModel):
     llm_profile_name: str | None = None
     # SP-5 bugfix：回显移到消费侧，client_message_id 随消息携带供 _append_queued_messages 回显
     client_message_id: str | None = None
+
+
+# ---------------------------------------------------------------------------
+# Main Session Interrupt — 主会话中断结果（权威响应）
+# ---------------------------------------------------------------------------
+
+class MainSessionInterruptResult(BaseModel):
+    """主会话强制中断的权威结果，由 HTTP /api/interrupt/{sid} 返回。"""
+
+    accepted: bool
+    """中断请求是否被接受执行。"""
+
+    status: Literal["idle", "cancelled", "timeout", "failed", "not_found"]
+    """中断后状态：idle=无活动任务；cancelled=已取消并收尾；timeout=清理超时；failed=清理异常；not_found=会话不存在。"""
+
+    session_id: str
+    """目标主会话 ID。"""
+
+    reason: str = ""
+    """中断原因标记（user / idle-timeout 等）。"""
+
+    error: str | None = None
+    """失败或超时时的错误说明。"""

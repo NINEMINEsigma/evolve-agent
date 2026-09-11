@@ -6,7 +6,7 @@ import RecorderButton from "./RecorderButton";
 import TokenRing from "./TokenRing";
 import PopupLayer from "./primitives/PopupLayer";
 import type { PendingImage, PendingAudio, PendingVideo } from "../hooks/useWebSocket";
-import type { AskRequest, ConfirmRequest, SubagentSession, TargetSessionOption, TaskProgress } from "../types";
+import type { AskRequest, ConfirmRequest, InterruptStatus, SubagentSession, TargetSessionOption, TaskProgress } from "../types";
 import { escapeHtml } from "../utils";
 import { SID_DISPLAY_LEN } from "../constants/session";
 import { DIMENSIONS } from "../constants/dimensions";
@@ -81,6 +81,7 @@ interface InputBarProps {
   onUpload: (e: ChangeEvent<HTMLInputElement>) => void;
   onUploadClick: () => Promise<void>;
   onInterrupt: () => void;
+  interruptStatus: InterruptStatus;
   onDisgust: () => void;
   onResume: () => void;
   fileInputRef: RefObject<HTMLInputElement>;
@@ -144,6 +145,7 @@ export default function InputBar({
   onUpload,
   onUploadClick,
   onInterrupt,
+  interruptStatus,
   onDisgust,
   onResume,
   fileInputRef,
@@ -267,7 +269,7 @@ export default function InputBar({
 
   // ── 菜单项数据 ──
   const actionItems = [
-    { key: "interrupt", label: "中断当前 Agent 工作", icon: ICONS.interrupt, disabled: false, action: onInterrupt },
+    { key: "interrupt", label: interruptStatus === "interrupting" ? "正在中断..." : "中断当前 Agent 工作", icon: ICONS.interrupt, disabled: interruptStatus === "interrupting", action: onInterrupt },
     { key: "disgust", label: "表达强烈不满", icon: ICONS.disgust, disabled: false, action: onDisgust },
     { key: "upload", label: "添加附件", icon: ICONS.upload, disabled: uploading || morphActive, action: onUploadClick },
     { key: "clipboard", label: "粘贴系统剪贴板", icon: ICONS.clipboard, disabled: morphActive, action: handlePasteClipboard },
@@ -404,10 +406,15 @@ export default function InputBar({
                 <button
                   className="interrupt-btn"
                   onClick={onInterrupt}
-                  data-tooltip="中断当前 Agent 工作"
+                  data-tooltip={interruptStatus === "interrupting" ? "正在中断..." : "中断当前 Agent 工作"}
                   type="button"
+                  disabled={interruptStatus === "interrupting"}
                 >
-                  {ICONS.interrupt}
+                  {interruptStatus === "interrupting" ? (
+                    <span className="interrupt-spinner" aria-label="interrupting">⏳</span>
+                  ) : (
+                    ICONS.interrupt
+                  )}
                 </button>
                 <button
                   className="disgust-btn"

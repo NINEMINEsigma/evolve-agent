@@ -106,7 +106,7 @@ frontend/
 | `MermaidRenderer.tsx` | Mermaid 图表渲染 |
 | `ChatContextMenu.tsx` | 聊天区右键菜单 |
 | `RichInput.tsx` | 富文本输入（支持多行、快捷键） |
-| `InputBar.tsx` | 输入框、文件上传、发送按钮、功能按钮组（超宽收起菜单）、上下文徽章 |
+| `InputBar.tsx` | 输入框、文件上传、发送按钮、功能按钮组（超宽收起菜单）、上下文徽章；中断按钮支持「正在中断」状态、禁止重复点击、失败后允许重试 |
 | `TokenRing.tsx` | 上下文用量环形徽章（Header 与输入栏共用） |
 | `Lightbox.tsx` | 图片灯箱 |
 | `SafeHtml.tsx` | 安全 HTML 渲染 |
@@ -156,7 +156,7 @@ frontend/
 
 | Hook | 职责 |
 |---|---|
-| `useWebSocket.ts` | WebSocket 与状态管理核心：解析下行消息、管理消息列表、流式渲染、发送上行消息、调用 REST API；每条用户消息携带活动 Profile 名称并处理 `llm_profile_changed`；发送时不乐观渲染气泡，改为记录 pending message 供输入栏显示"已排队"徽章 |
+| `useWebSocket.ts` | WebSocket 与状态管理核心：解析下行消息、管理消息列表、流式渲染、发送上行消息、调用 REST API；每条用户消息携带活动 Profile 名称并处理 `llm_profile_changed`；发送时不乐观渲染气泡，改为记录 pending message 供输入栏显示"已排队"徽章；中断为后端权威流程，不再提前显示"已中断"，timeout/failed 后查询服务端真实状态一次 |
 | `useLlmProfiles.ts` | 从服务端读取 Profile；提供单对象创建/编辑/删除；浏览器仅持久化活动 Profile 名称，不保存 Profile 列表 |
 | `useWebSocketConnection.ts` | WebSocket 连接生命周期管理：建立/断开/重连/心跳 |
 | `useSessionStore.ts` | 会话列表与元数据管理：获取/创建/归档/删除/标签/标题；维护 pending messages 状态（`pendingMessages`），在 `USER_MESSAGE` 回显时渲染正式气泡并移除 pending，在 `TOOL_RESULT` 携带 `consumed_client_message_ids` 时移除匹配 pending，中断/切会话/历史重载时清空 |

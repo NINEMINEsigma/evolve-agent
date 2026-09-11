@@ -70,6 +70,15 @@ classDiagram
         +auto_generate_title()*
         +regenerate_session_tags()*
         +regenerate_summary_for_session()*
+        #_interrupt_lock
+        #_active_round_task
+        #_active_stream_consumer
+        #_init_round_registry()
+        +register_round_task()
+        +unregister_round_task()
+        +register_active_stream()
+        +has_active_round()
+        +request_interrupt()
     }
 
     class ParentAgentLoop {
@@ -583,6 +592,9 @@ classDiagram
 | `_process_lock` | `ParentAgentLoop` | `asyncio.Lock` | 处理锁 |
 | `_event_loop` | `ParentAgentLoop` | `asyncio.AbstractEventLoop \| None` | 事件循环引用 |
 | `_session_manager` | `ParentAgentLoop` | `SessionManager \| None` | gateway session manager |
+| `_interrupt_lock` | `IMainSessionLoop`（公共实现） | `asyncio.Lock` | 同会话中断请求互斥锁 |
+| `_active_round_task` | `IMainSessionLoop`（公共实现） | `asyncio.Task \| None` | 当前活动回复任务（队列 consumer 或 HTTP handler task） |
+| `_active_stream_consumer` | `IMainSessionLoop`（公共实现） | `StreamConsumer \| None` | 当前活动流消费器，供强制中断时主动关闭底层流 |
 | `_agents` | `MultiAgentLoop` | `dict[str, AgentProfile]` | Agent 配置档案 |
 | `_sink` | `MultiAgentLoop` | `AgentSink` | sink |
 | `_agent_names` | `MultiAgentLoop` | `list[str]` | agent 名列表 |

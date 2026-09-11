@@ -202,6 +202,7 @@ Evolve Agent 内置两套多代理运行时：
 - `system/pathutils.py` / `system/atomic_io.py`：路径与原子 IO 工具。
 - `system/subprocess_utils.py`：子进程 I/O 编码工具与 `SubprocessRunner`（子进程同步 `run()`、真异步 `run_async()` 和逐行消费 `run_async_line_processor()` 执行、活动进程登记与按会话中断终止进程树；由 `Application` 持有全局单例并注入 `Sandbox` 委托）。
 - `system/search_engine.py`：`SearchFiles` / `Grep` 的搜索引擎封装。Windows x64 优先使用随 Agent 分发的固定版本 `ripgrep`（`origin_agent/vendor/ripgrep/win32-x64/rg.exe`），不可用、校验失败或单次兼容错误时回退 Python；统一处理 ignore/hidden 过滤、`limit` 截断、`full_scan`、`exhaustive`、`engine` 与 `warning` 返回字段。
+- 主会话强制中断：`IMainSessionLoop` 提供活动任务登记与 `request_interrupt()` 权威入口（普通模式/多Agent模式共用）；`StreamConsumer` 提供 5 分钟流式空闲超时、部分结果快照与主动关闭；前端中断按钮为后端权威流程，不再乐观显示"已中断"。
 - `system/lsp.py`：LSP 服务器进程管理与诊断（`component/tools/lsp.py` 工具调用；App 关闭时清理 LSP 进程）。
 - `system/modality_capability.py`：多模态能力探测与缓存（探针已内化为系统自动行为：伪装 Read 工具调用，按 模态 × 消息路径六路并发探测 tool/user 消息的图片/音频/视频支持；easysave 缓存按 model+base_url 联合索引；`build_modality_prompt_block()` 每轮生成 system prompt 注入块；`forward_modality_to_ref_profile()` 把活跃模型不支持的模态转发到 profile 引用的其他模型）。
 

@@ -207,6 +207,17 @@ export interface ToolCallMeta {
   end_time_offset_ms: number;       // 从申请到工具调用完成的毫秒偏移
 }
 
+// ── 主会话中断状态机（后端权威）──
+export type InterruptStatus = "idle" | "interrupting" | "cancelled" | "failed";
+
+export interface InterruptResponse {
+  interrupted?: boolean;
+  status?: "idle" | "cancelled" | "timeout" | "failed" | "not_found";
+  session_id?: string;
+  reason?: string;
+  error?: string;
+}
+
 export interface MessageMetrics {
   reasoning_duration_ms: number;   // 推理阶段耗时（毫秒）
   content_duration_ms: number;      // 正文阶段耗时（毫秒）
