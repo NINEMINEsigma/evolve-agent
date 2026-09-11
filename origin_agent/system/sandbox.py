@@ -432,6 +432,70 @@ class Sandbox:
             )
             return normalized.model_copy(deep=True), True
 
+    def update_dynamic_space(
+        self,
+        name: str,
+        *,
+        path: str,
+        description: str,
+        is_readonly: bool,
+        session_id: str = "",
+    ) -> DynamicSandboxSpace:
+        """原子更新全局动态空间；名称固定不变。"""
+        if self._ctx.mode != "fast":
+            raise SandboxError("Dynamic sandbox spaces can only be modified in fast mode")
+        if type(name) is not str:
+            raise TypeError("Dynamic sandbox space name must be a string")
+        if type(path) is not str:
+            raise TypeError("Dynamic sandbox space path must be a string")
+        if type(description) is not str:
+            raise TypeError("Dynamic sandbox space description must be a string")
+        if type(is_readonly) is not bool:
+            raise TypeError("Dynamic sandbox space is_readonly must be a boolean")
+        normalized_name = name.strip()
+        if not re.fullmatch(DYNAMIC_SANDBOX_SPACE_NAME_PATTERN, normalized_name):
+            raise ValueError("Invalid dynamic sandbox space name")
+        if normalized_name in NAMESPACE_PREFIXES:
+            raise ValueError("Built-in namespaces cannot be updated")
+        candidate = DynamicSandboxSpace(
+            name=normalized_name,
+            path=path,
+            description=description,
+            is_readonly=is_readonly,
+        )
+        with self._dynamic_spaces_lock:
+            current = self._dynamic_space_by_name_unlocked(normalized_name)
+            if current is None:
+                raise KeyError(f"Dynamic sandbox space not found: {normalized_name!r}")
+            index = self._dynamic_spaces_data.spaces.index(current)
+            others = [space for space in self._dynamic_spaces_data.spaces if space is not current]
+            normalized = self._validate_dynamic_space(
+                candidate,
+                existing=others,
+                require_normalized=False,
+            )
+            previous_availability = self._dynamic_space_availability.get(normalized_name)
+            self._dynamic_spaces_data.spaces[index] = normalized
+            try:
+                self._save_dynamic_spaces_unlocked()
+            except BaseException:
+                self._dynamic_spaces_data.spaces[index] = current
+                if previous_availability is None:
+                    self._dynamic_space_availability.pop(normalized_name, None)
+                else:
+                    self._dynamic_space_availability[normalized_name] = previous_availability
+                raise
+            available = self._is_dynamic_space_available_unlocked(normalized)
+            logger.info(
+                "Dynamic sandbox space updated | session=%s name=%s path=%s readonly=%s available=%s",
+                session_id,
+                normalized.name,
+                normalized.path,
+                normalized.is_readonly,
+                available,
+            )
+            return normalized.model_copy(deep=True)
+
     def remove_dynamic_space(self, name: str, *, session_id: str = "") -> bool:
         """按名称删除全局动态空间；名称不存在时幂等成功。"""
         if self._ctx.mode != "fast":

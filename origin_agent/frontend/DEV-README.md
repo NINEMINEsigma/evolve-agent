@@ -222,6 +222,12 @@ frontend/
 | `agentspace.css` | Agentspace 文件浏览器 |
 | `agent-stage.css` | Agent 舞台层（聊天区背景层 iframe） |
 | `chat-style-scope.css` | 聊天区自定义样式作用域基础变量（`.chat-area` 可覆盖 CSS 变量锚点） |
+
+## 动态沙盒空间管理弹窗
+
+顶部栏命令菜单中的“动态沙盒空间”在所有会话中显示，打开用户直接管理全局动态沙盒空间的弹窗。弹窗通过 REST 接口完成列表查询、创建、完整更新和删除，不经过 Agent 工具审批；Sandbox 的名称、路径、描述、只读标志校验仍是唯一权威。空间名称不可修改，目录选择按钮只选择已有目录，手动输入允许暂不存在的绝对目录；删除仅删除配置，不删除目标目录和文件。
+
+
 | `modal.css` | 模态窗口 |
 | `popup.css` | 弹出层 |
 | `splash.css` | 启动屏 |

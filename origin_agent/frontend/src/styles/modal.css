@@ -138,3 +138,104 @@
   color: var(--text-secondary);
   font-size: 14px;
 }
+
+.dynamic-sandbox-spaces-dialog {
+  width: min(760px, 92vw);
+  max-width: 760px;
+  max-height: min(86vh, 680px);
+}
+
+.dynamic-sandbox-layout {
+  display: grid;
+  grid-template-columns: minmax(180px, 0.8fr) minmax(280px, 1.2fr);
+  gap: 18px;
+}
+
+.dynamic-sandbox-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.dynamic-sandbox-list-item {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 9px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  text-align: left;
+  cursor: pointer;
+}
+
+.dynamic-sandbox-list-item.active {
+  border-color: var(--accent);
+  background: var(--bg-hover);
+}
+
+.dynamic-sandbox-list-item span {
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.dynamic-sandbox-form {
+  min-width: 0;
+}
+
+.dynamic-sandbox-path-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.dynamic-sandbox-path-row .llm-profile-input {
+  min-width: 0;
+  flex: 1;
+}
+
+.dynamic-sandbox-description {
+  min-height: 76px;
+  resize: vertical;
+}
+
+.dynamic-sandbox-readonly {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-top: 14px;
+  color: var(--text-secondary);
+  font-size: 13px;
+}
+
+.dynamic-sandbox-form > .modal-btn {
+  margin-top: 14px;
+}
+
+.dynamic-sandbox-error {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 12px;
+  padding: 8px 10px;
+  border: 1px solid var(--danger, #e53e3e);
+  border-radius: var(--radius-sm);
+  color: var(--danger, #e53e3e);
+  font-size: 13px;
+}
+
+.dynamic-sandbox-empty {
+  padding: 24px 8px;
+  color: var(--text-secondary);
+  text-align: center;
+}
+
+@media (max-width: 640px) {
+  .dynamic-sandbox-layout {
+    grid-template-columns: 1fr;
+  }
+}
+}

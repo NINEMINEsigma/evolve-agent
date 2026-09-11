@@ -51,7 +51,7 @@ component/
 | `frontend.py` | `ValidateFrontend` | 前端构建验证 |
 | `skills.py` | `RecallSkill`, `CreateSkill` | 技能管理（已并入 core 工具集） |
 | `load_toolset.py` | `LoadToolset` | 按需加载工具集到当前会话（core 工具集，EVERY 可见性） |
-| `sandbox_spaces.py` | `AddSandboxSpace`、`RemoveSandboxSpace` | fast 模式全局动态沙盒空间增删；位于按需加载的 `sandbox` 工具集，critical，仅普通/多Agent模式主Agent可修改 |
+| `sandbox_spaces.py` | `AddSandboxSpace`、`RemoveSandboxSpace` | fast 模式全局动态沙盒空间增删；位于按需加载的 `sandbox` 工具集，critical，仅普通/多Agent模式主Agent可修改；用户也可通过命令菜单中的动态沙盒空间管理弹窗直接执行 REST CRUD |
 | `run_python.py` | `RunPython` | Python 代码执行 |
 | `ask_question.py` | `Ask` | 向前端提问 |
 | `progress_tools.py` | `UpdateTaskProgress`, `ClearTaskProgress` | 任务进度 |

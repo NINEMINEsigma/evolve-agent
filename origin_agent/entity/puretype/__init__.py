@@ -93,6 +93,10 @@ from .sandbox import (
     DynamicSandboxSpace,
     DynamicSandboxSpaceData,
 )
+from .sandbox_spaces import (
+    DynamicSandboxSpaceCreateRequest,
+    DynamicSandboxSpaceUpdateRequest,
+)
 from .extools import (
     CronTaskInfo,
     DynamicEndpointInfo,
@@ -176,6 +180,8 @@ __all__ = [
     # sandbox
     "DynamicSandboxSpace",
     "DynamicSandboxSpaceData",
+    "DynamicSandboxSpaceCreateRequest",
+    "DynamicSandboxSpaceUpdateRequest",
     # extools
     "CronTaskInfo",
     "DynamicEndpointInfo",

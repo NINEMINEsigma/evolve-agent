@@ -10,6 +10,7 @@ import CronCountdown from "./CronCountdown";
 import SubagentCountdown from "./SubagentCountdown";
 import Lightbox from "./Lightbox";
 import LlmProfileDrawer from "./LlmProfileDrawer";
+import DynamicSandboxSpacesDialog from "./DynamicSandboxSpacesDialog";
 import SessionSiteDrawer from "./SessionSiteSection";
 import SessionLockOverlay from "./SessionLockOverlay";
 import OnboardingTour from "./OnboardingTour";
@@ -35,6 +36,7 @@ export default function Layout({ ws, onContextMenu, contextMenuOpen, onboardingR
   const [pinSidebar, setPinSidebar] = useState(false);
   const [pinHeader, setPinHeader] = useState(false);
   const [llmDrawerOpen, setLlmDrawerOpen] = usePersistentState(STORAGE_KEYS.LLM_DRAWER_OPEN, false);
+  const [sandboxSpacesOpen, setSandboxSpacesOpen] = useState(false);
   const [siteDrawerOpen, setSiteDrawerOpen] = usePersistentState(STORAGE_KEYS.SITE_DRAWER_OPEN, false);
   const [sidebarCollapsed, setSidebarCollapsed] = usePersistentState(STORAGE_KEYS.SIDEBAR_COLLAPSED, false);
   const [drawerOpen, setDrawerOpen] = usePersistentState(STORAGE_KEYS.DRAWER_OPEN, false);
@@ -314,6 +316,7 @@ export default function Layout({ ws, onContextMenu, contextMenuOpen, onboardingR
           chatStylePaused={chatStylePaused}
           onToggleChatStylePaused={() => setChatStylePaused((v) => !v)}
           chatStyleStatusText={chatStyleStatusText}
+          onOpenSandboxSpaces={() => setSandboxSpacesOpen(true)}
         />
 
         {ws.sessionLocked ? (
@@ -482,6 +485,13 @@ export default function Layout({ ws, onContextMenu, contextMenuOpen, onboardingR
 
       {lightboxSrc && (
         <Lightbox src={lightboxSrc} onClose={() => setLightboxSrc(null)} />
+      )}
+
+      {sandboxSpacesOpen && (
+        <DynamicSandboxSpacesDialog
+          open={sandboxSpacesOpen}
+          onClose={() => setSandboxSpacesOpen(false)}
+        />
       )}
 
       {llmDrawerOpen && ws.llmProfiles && (

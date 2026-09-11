@@ -475,6 +475,7 @@ classDiagram
         +list_dynamic_spaces_with_availability()
         +normalize_dynamic_space_path()
         +add_dynamic_space()
+        +update_dynamic_space()
         +remove_dynamic_space()
         +is_namespaced_path()
         +namespace_bases()
@@ -730,7 +731,7 @@ classDiagram
 | `cron_tools` 模块函数 | `_timer` | `_CronTask` | `component/extools/cron_tools.py` | 直接访问任务内部 timer |
 | `diagram.py` / `mermaid_tools.py` / `docgen_tools.py` / `web_browser.py` | `_ctx` | `Sandbox` | `component/extools/*.py` | 直接访问 Sandbox 的 `_ctx` 获取 agentspace |
 | 全局 `Application.current()` | `session_manager`, `frontend_sink`, `subagent_orchestrator`, `approval_backend_manager` | `Application` | 多处 | 各模块通过单例访问子系统 |
-| 动态空间管理工具 | `add_dynamic_space()` / `remove_dynamic_space()` / `normalize_dynamic_space_path()` | `Sandbox` | `component/tools/sandbox_spaces.py` | fast 模式主Agent经 critical 审批修改全局动态空间 |
+| 动态空间管理工具与管理弹窗 | `add_dynamic_space()` / `update_dynamic_space()` / `remove_dynamic_space()` / `normalize_dynamic_space_path()` | `Sandbox` | `component/tools/sandbox_spaces.py`、`gateway/server.py` | Agent 工具经 critical 审批；用户命令菜单管理弹窗经 REST 直接修改，均复用 Sandbox 校验 |
 | 动态空间 Prompt 构建器 | `list_dynamic_spaces_with_availability()` | `Sandbox` | `system/prompt.py` | 生成结构化动态命名空间系统提示词块 |
 | Gateway / 搜索 / LSP | `resolve_read()` / `namespace_bases()` | `Sandbox` | `gateway/server.py`、`system/search_engine.py`、`system/lsp.py` | 复用唯一 Sandbox 的动态映射与有效 base |
 

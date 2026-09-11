@@ -1,5 +1,25 @@
 export type AgentspaceEntryKind = "file" | "dir";
 
+export interface DynamicSandboxSpace {
+  name: string;
+  path: string;
+  description: string;
+  is_readonly: boolean;
+}
+
+export type DynamicSandboxSpaceWithAvailability = DynamicSandboxSpace & {
+  available: boolean;
+};
+
+export interface DynamicSandboxSpacesResponse {
+  spaces: DynamicSandboxSpaceWithAvailability[];
+}
+
+export interface DynamicSandboxDirectoryPickResponse {
+  selected: boolean;
+  path: string | null;
+}
+
 export interface FileEntry {
   name: string;
   path: string;

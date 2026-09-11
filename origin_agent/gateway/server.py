@@ -45,6 +45,9 @@ from entity.puretype import (
     AgentspaceEvent,
     AgentspaceEventKind,
     AgentspaceEventSource,
+    DynamicSandboxSpace,
+    DynamicSandboxSpaceCreateRequest,
+    DynamicSandboxSpaceUpdateRequest,
 )
 from system.context import get_runtime_context
 from entry.parent_agent_loop import IncompatibleHistoryError
@@ -1488,6 +1491,130 @@ def download_dir_zip(namespace: str, file_path: str):
             ),
         },
     )
+
+
+# ---------------------------------------------------------------------------
+# Dynamic sandbox spaces API
+# ---------------------------------------------------------------------------
+
+
+def _sandbox_space_payload(space: DynamicSandboxSpace, available: bool | None = None) -> dict[str, object]:
+    payload = space.model_dump()
+    if available is not None:
+        payload["available"] = available
+    return payload
+
+
+def _raise_sandbox_space_http(exc: Exception) -> NoReturn:
+    from system.sandbox import SandboxError
+
+    if isinstance(exc, KeyError):
+        raise HTTPException(status_code=404, detail=str(exc))
+    if isinstance(exc, (ValueError, TypeError, SandboxError)):
+        message = str(exc)
+        status = 409 if "overlap" in message.lower() or "already exists" in message.lower() or "duplicate" in message.lower() else 400
+        raise HTTPException(status_code=status, detail=message)
+    logger.exception("Dynamic sandbox space API failure")
+    raise HTTPException(status_code=500, detail="动态沙盒空间操作失败")
+
+
+@app.get("/api/sandbox-spaces")
+async def list_sandbox_spaces():
+    from system.application import Application
+
+    try:
+        entries = Application.current().sandbox.list_dynamic_spaces_with_availability()
+        return {"spaces": [_sandbox_space_payload(space, available) for space, available in entries]}
+    except Exception as exc:
+        _raise_sandbox_space_http(exc)
+
+
+@app.post("/api/sandbox-spaces")
+async def create_sandbox_space(request: DynamicSandboxSpaceCreateRequest):
+    from system.application import Application
+
+    try:
+        space, created = Application.current().sandbox.add_dynamic_space(
+            name=request.name,
+            path=request.path,
+            description=request.description,
+            is_readonly=request.is_readonly,
+        )
+        return {"space": _sandbox_space_payload(space), "created": created}
+    except Exception as exc:
+        _raise_sandbox_space_http(exc)
+
+
+@app.put("/api/sandbox-spaces/{name}")
+async def update_sandbox_space(name: str, request: DynamicSandboxSpaceUpdateRequest):
+    from system.application import Application
+
+    if name != request.name:
+        raise HTTPException(status_code=400, detail="动态沙盒空间名称不可修改，且必须与路径参数一致")
+    try:
+        space = Application.current().sandbox.update_dynamic_space(
+            name,
+            path=request.path,
+            description=request.description,
+            is_readonly=request.is_readonly,
+        )
+        return {"space": _sandbox_space_payload(space)}
+    except Exception as exc:
+        _raise_sandbox_space_http(exc)
+
+
+@app.delete("/api/sandbox-spaces/{name}")
+async def delete_sandbox_space(name: str):
+    from system.application import Application
+
+    try:
+        removed = Application.current().sandbox.remove_dynamic_space(name)
+        return {"removed": removed, "name": name}
+    except Exception as exc:
+        _raise_sandbox_space_http(exc)
+
+
+@app.post("/api/sandbox-spaces/pick-directory")
+async def pick_sandbox_directory():
+    import subprocess
+    import sys
+
+    script = "\n".join([
+        "import json, tkinter as tk",
+        "from tkinter import filedialog",
+        "root = tk.Tk()",
+        "root.withdraw()",
+        "root.attributes('-topmost', True)",
+        "selected = filedialog.askdirectory(title='选择动态沙盒空间目录')",
+        "root.destroy()",
+        "print(json.dumps(selected))",
+    ])
+    loop = asyncio.get_running_loop()
+    try:
+        result = await loop.run_in_executor(
+            None,
+            lambda: subprocess.run(
+                [sys.executable, "-c", script],
+                capture_output=True,
+                text=True,
+                timeout=SUBPROCESS_TIMEOUT_DEFAULT,
+            ),
+        )
+    except subprocess.TimeoutExpired:
+        raise HTTPException(status_code=500, detail="目录选择对话框超时")
+    except Exception as exc:
+        logger.warning("Dynamic sandbox directory picker failed: %s", exc)
+        raise HTTPException(status_code=500, detail="无法打开目录选择对话框")
+    if result.returncode != 0:
+        logger.warning("Dynamic sandbox directory picker subprocess failed: %s", result.stderr.strip())
+        raise HTTPException(status_code=500, detail="目录选择对话框启动失败")
+    try:
+        selected = json.loads(result.stdout.strip() or '""')
+    except Exception:
+        raise HTTPException(status_code=500, detail="目录选择对话框返回结果无效")
+    if not selected:
+        return {"selected": False, "path": None}
+    return {"selected": True, "path": selected}
 
 
 # ---------------------------------------------------------------------------

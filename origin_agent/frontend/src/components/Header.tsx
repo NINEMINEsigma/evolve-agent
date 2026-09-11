@@ -35,6 +35,7 @@ interface HeaderProps {
   chatStylePaused: boolean;
   onToggleChatStylePaused: () => void;
   chatStyleStatusText: string;
+  onOpenSandboxSpaces: () => void;
 }
 
 export default function Header({
@@ -63,6 +64,7 @@ export default function Header({
   chatStylePaused,
   onToggleChatStylePaused,
   chatStyleStatusText,
+  onOpenSandboxSpaces,
 }: HeaderProps) {
   const [cmdMenuOpen, setCmdMenuOpen] = useState(false);
   const [menuPos, setMenuPos] = useState<{ top: number; left: number } | null>(null);
@@ -193,6 +195,17 @@ export default function Header({
                 </div>
                 <div
                   className="context-menu-item"
+                  onClick={() => {
+                    setCmdMenuOpen(false);
+                    setMenuPos(null);
+                    onOpenSandboxSpaces();
+                  }}
+                  data-tooltip="管理全局动态沙盒空间"
+                >
+                  动态沙盒空间
+                </div>
+                <div
+                  className="context-menu-item"
                   onClick={() => { onToggleStagePaused(); }}
                   data-tooltip={stageStatusText === "未配置" ? "Agent 舞台层未配置" : stagePaused ? "恢复 Agent 舞台层" : "暂停 Agent 舞台层"}
                 >
@@ -299,6 +312,17 @@ export default function Header({
               data-tooltip="导出当前会话为可分享的静态 HTML 文件"
             >
               导出会话
+            </div>
+            <div
+              className="context-menu-item"
+              onClick={() => {
+                setCmdMenuOpen(false);
+                setMenuPos(null);
+                onOpenSandboxSpaces();
+              }}
+              data-tooltip="管理全局动态沙盒空间"
+            >
+              动态沙盒空间
             </div>
             <div
               className="context-menu-item"
