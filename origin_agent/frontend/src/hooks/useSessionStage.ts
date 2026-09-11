@@ -20,12 +20,12 @@ export interface SessionStageState {
 
 const DEBOUNCE_MS = 300;
 
-export function useSessionStage(sessionId: string | undefined): SessionStageState {
+export function useSessionStage(sessionId: string | undefined, paused: boolean = false): SessionStageState {
   const [status, setStatus] = useState<StageStatus>("idle");
   const [reloadKey, setReloadKey] = useState(0);
   const [stageUrl, setStageUrl] = useState<string | null>(null);
 
-  const urls = sessionId ? buildStageUrls(sessionId) : null;
+  const urls = sessionId && !paused ? buildStageUrls(sessionId) : null;
   const probeSeqRef = useRef(0);
   const debounceTimerRef = useRef<number | null>(null);
   const stagePathPrefixRef = useRef<string>("");
@@ -54,8 +54,13 @@ export function useSessionStage(sessionId: string | undefined): SessionStageStat
     }
   }, [urls]);
 
-  // 会话切换：重置状态并重新探测
+  // 会话切换或暂停状态变化：重置状态并重新探测
   useEffect(() => {
+    if (paused) {
+      setStatus("missing");
+      setStageUrl(null);
+      return;
+    }
     setStatus("idle");
     setReloadKey(0);
     setStageUrl(null);
@@ -69,11 +74,11 @@ export function useSessionStage(sessionId: string | undefined): SessionStageStat
     } else {
       setStatus("missing");
     }
-  }, [sessionId]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [sessionId, paused]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // SSE 监听 stage/ 目录变化
   useEffect(() => {
-    if (!sessionId) return;
+    if (!sessionId || paused) return;
 
     const prefix = stagePathPrefixRef.current;
     if (!prefix) return;
@@ -132,7 +137,7 @@ export function useSessionStage(sessionId: string | undefined): SessionStageStat
         debounceTimerRef.current = null;
       }
     };
-  }, [sessionId]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [sessionId, paused]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return { status, reloadKey, stageUrl };
 }

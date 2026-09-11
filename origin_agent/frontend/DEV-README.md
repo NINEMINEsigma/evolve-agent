@@ -92,6 +92,7 @@ frontend/
 | `ErrorBoundary.tsx` | 错误边界，防止模态组件异常卸载整个 App |
 | `SplashScreen.tsx` | 开屏动画，最少停留 800ms、最多 3000ms，可点击跳过 |
 | `AgentStageLayer.tsx` | 聊天区背景层 Agent 舞台层 iframe（会话级 `stage/` 目录，透明、鼠标穿透） |
+| `ChatStyleLayer.tsx` | 聊天区自定义样式注入层，以 `<style data-chat-style-scope>` 注入经 PostCSS 作用域处理的 CSS（会话级 `chat-style/index.css`） |
 
 ### 聊天区域
 
@@ -166,6 +167,7 @@ frontend/
 | `useEdgeDrawer.ts` | 边缘抽屉三态状态机（hidden/peek/open），侧栏与顶部栏共用 |
 | `useGlobalTooltip.ts` | 全局 tooltip 管理 |
 | `useSessionStage.ts` | 会话舞台层状态：探测 `stage/index.html`，订阅 Agentspace SSE 自动刷新 |
+| `useSessionChatStyle.ts` | 会话聊天区自定义样式状态：探测 `chat-style/index.css`，经 PostCSS 作用域处理（`@import` 拒绝、`.chat-area` 前缀、`@font-face` 校验 `ChatStyle-` 前缀），SSE 热重载 |
 
 ---
 
@@ -210,6 +212,7 @@ frontend/
 | `tooltip.css` | 工具提示 |
 | `agentspace.css` | Agentspace 文件浏览器 |
 | `agent-stage.css` | Agent 舞台层（聊天区背景层 iframe） |
+| `chat-style-scope.css` | 聊天区自定义样式作用域基础变量（`.chat-area` 可覆盖 CSS 变量锚点） |
 | `modal.css` | 模态窗口 |
 | `popup.css` | 弹出层 |
 | `splash.css` | 启动屏 |
@@ -217,6 +220,27 @@ frontend/
 | `onboarding.css` | 引导向导样式覆盖（react-joyride 主题微调） |
 
 ---
+
+## 公开样式选择器契约
+
+聊天区自定义样式（`chat-style/index.css`）面向 Evolve Agent 暴露的稳定选择器契约。内部类名不保证跨版本兼容，Evolve Agent 应优先使用以下 `data-*` 属性选择器：
+
+| 用途 | 选择器 |
+|---|---|
+| 聊天区根 | `.chat-area` |
+| 消息根 | `[data-chat-scope="message"]` |
+| 消息角色 | `[data-message-role="user"]`、`[data-message-role="assistant"]`、`[data-message-role="tool"]` |
+| 同角色联动悬停 | `[data-character-hovered="true"]` |
+| 气泡 | `[data-chat-scope="bubble"]` |
+| 正文 | `[data-chat-scope="content"]` |
+| 思考内容 | `[data-chat-scope="reasoning"]` |
+| 工具调用 | `[data-chat-scope="tool-call"]` |
+| 工具详情 | `[data-chat-scope="tool-detail"]` |
+| 代码块 | `[data-chat-scope="code"]` |
+| 附件 | `[data-chat-scope="attachments"]` |
+| 工具栏 | `[data-chat-scope="toolbar"]` |
+| 元数据 | `[data-chat-scope="meta"]` |
+| 等待状态 | `[data-chat-scope="waiting"]` |
 
 ## 构建与开发注意事项
 

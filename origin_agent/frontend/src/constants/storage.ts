@@ -36,6 +36,10 @@ export const STORAGE_KEYS = {
   VISIBLE_CHARACTERS:    "evolve_visible_characters",
   RESPONSE_CHARACTERS:   "evolve_response_characters",
 
+  // 会话视觉暂停开关（按会话隔离）
+  STAGE_PAUSED:           "evolve_stage_paused",
+  CHAT_STYLE_PAUSED:      "evolve_chat_style_paused",
+
   // 会话锁定（sessionStorage，标签页级别）
   CONN_TOKEN:            "evolve_conn_token",
 } as const;

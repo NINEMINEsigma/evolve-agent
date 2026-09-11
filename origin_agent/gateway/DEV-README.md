@@ -174,6 +174,7 @@ WS /ws/chat?resume=<sid>
 |------|------|------|
 | GET | `/uploads/{path}` | 静态文件访问 |
 | GET | `/downloads/{path}` | 文件下载 |
+| GET | `/local-font/{font_path}` | 本地字体文件访问（CSS `@font-face` `src` 用途）；扩展名白名单 `woff2`/`woff`/`ttf`/`otf`，单文件 ≤ 20 MiB，响应 `Access-Control-Allow-Origin: *` |
 
 ### Agentspace
 

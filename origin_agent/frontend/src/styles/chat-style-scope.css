@@ -1,0 +1,24 @@
+/**
+ * 聊天区自定义样式作用域基础样式。
+ *
+ * 定义 .chat-area 作用域的基础 CSS 变量与默认值，
+ * 供会话级 chat-style/index.css 覆盖。
+ * 此文件不定义具体视觉样式，仅声明可覆盖的变量锚点。
+ */
+
+.chat-area {
+  /* 会话级自定义样式可覆盖的 CSS 变量 */
+  --chat-style-bubble-bg: transparent;
+  --chat-style-bubble-border: none;
+  --chat-style-bubble-radius: var(--radius-md);
+  --chat-style-bubble-shadow: none;
+  --chat-style-bubble-padding: 10px 16px;
+  --chat-style-bubble-max-width: 72%;
+  --chat-style-text-color: inherit;
+  --chat-style-font-family: inherit;
+  --chat-style-font-size: inherit;
+  --chat-style-font-weight: inherit;
+  --chat-style-line-height: inherit;
+  --chat-style-letter-spacing: inherit;
+  --chat-style-text-shadow: none;
+}

@@ -14,10 +14,11 @@ import { useSessionStage } from "../hooks/useSessionStage";
 
 interface AgentStageLayerProps {
   sessionId: string | undefined;
+  paused?: boolean;
 }
 
-export default function AgentStageLayer({ sessionId }: AgentStageLayerProps) {
-  const { status, reloadKey, stageUrl } = useSessionStage(sessionId);
+export default function AgentStageLayer({ sessionId, paused }: AgentStageLayerProps) {
+  const { status, reloadKey, stageUrl } = useSessionStage(sessionId, paused);
 
   if (status !== "ready" || !stageUrl) return null;
 

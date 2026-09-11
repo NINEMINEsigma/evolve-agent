@@ -36,7 +36,7 @@ from entry.base_agent_loop import BasePrivateChatAgentLoop, UserMessage, ToolCon
 from entry.agent_support.multimodal import content_to_text, tool_result_to_content
 from entry.tool_post_dispatch import finalize_tool_result
 from entry.tool_executor import _interrupted_result
-from system.prompt import build_session_site_block, build_session_stage_block
+from system.prompt import build_session_site_block, build_session_stage_block, build_session_chat_style_block
 
 logger = logging.getLogger(__name__)
 
@@ -214,6 +214,9 @@ class SubAgentLoop(BasePrivateChatAgentLoop):
         stage_block = build_session_stage_block(self._parent_session_id, owner="parent")
         if stage_block:
             prompts.append(stage_block)
+        chat_style_block = build_session_chat_style_block(self._parent_session_id, owner="parent")
+        if chat_style_block:
+            prompts.append(chat_style_block)
         # 注入工具集目录
         from entry.agent_support.messages import build_toolset_catalog_block
         catalog = build_toolset_catalog_block(self._loaded_toolsets, self.get_tool_availability_scope())

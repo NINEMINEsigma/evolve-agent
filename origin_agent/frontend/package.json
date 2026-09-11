@@ -27,7 +27,8 @@
     "react-zoom-pan-pinch": "^3.7.0",
     "rehype-raw": "^7.0.0",
     "remark-breaks": "^4.0.0",
-    "remark-gfm": "^4.0.1"
+    "remark-gfm": "^4.0.1",
+    "postcss": "^8.4.47"
   },
   "devDependencies": {
     "@types/react": "^18.3.12",

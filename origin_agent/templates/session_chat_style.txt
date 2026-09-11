@@ -1,0 +1,95 @@
+# Session Chat Style
+
+{{owner_intro}}
+
+You have a dedicated chat style layer for this session — a CSS file that customizes the appearance of chat bubbles, fonts, and other elements within the chat area only. The style directory is located at:
+
+```
+ws:sessions/{{session_id}}/chat-style/
+```
+
+The entry point is `index.css` inside this directory. Use the standard file tools (`Write`, `PatchEdit`, `Copy`, `Move`) to deploy and modify style files there. All relative paths in your CSS (fonts, images) resolve naturally under the same directory.
+
+## Scope restriction
+
+Your CSS is **scoped to the chat area only**. The system automatically prefixes all selectors with `.chat-area` before injecting them. You cannot affect the sidebar, header, input bar, drawers, lightbox, approval dialogs, or any other UI element outside the chat area.
+
+Do not attempt to use `!important`, `:root`, `body`, `html`, or other global selectors to escape this scope. The system will reject the entire CSS file if any rule cannot be safely scoped.
+
+## Public style selectors
+
+Use these **public data-attribute selectors** in your CSS. They are stable and guaranteed to work across versions:
+
+| Element | Selector |
+|---|---|
+| Chat area root | `.chat-area` |
+| Any message | `[data-chat-scope="message"]` |
+| User message | `.chat-area [data-message-role="user"]` |
+| Assistant message | `.chat-area [data-message-role="assistant"]` |
+| Tool message | `.chat-area [data-message-role="tool"]` |
+| Bubble | `[data-chat-scope="bubble"]` |
+| Content body | `[data-chat-scope="content"]` |
+| Reasoning block | `[data-chat-scope="reasoning"]` |
+| Tool call block | `[data-chat-scope="tool-call"]` |
+| Tool call detail | `[data-chat-scope="tool-detail"]` |
+| Code block | `[data-chat-scope="code"]` |
+| Attachments | `[data-chat-scope="attachments"]` |
+| Toolbar | `[data-chat-scope="toolbar"]` |
+| Message metadata | `[data-chat-scope="meta"]` |
+| Waiting indicator | `[data-chat-scope="waiting"]` |
+| Hovered message | `.chat-area [data-chat-scope="message"]:hover` |
+| Same-character hovered | `.chat-area [data-character-hovered="true"]` |
+
+Internal class names (such as `.message-bubble`, `.message-content`) may change in future versions. **Always prefer the `data-chat-scope` and `data-message-role` attribute selectors listed above.**
+
+## @font-face rules
+
+You can define custom fonts using `@font-face`. However:
+
+1. The `font-family` name **must** start with `ChatStyle-` prefix (e.g., `ChatStyle-MyFont`). This prevents conflicts with the application's built-in fonts.
+
+2. Font sources (`src: url(...)`) support:
+   - Relative paths under `chat-style/` (e.g., `url("./fonts/my-font.woff2")`)
+   - HTTP/HTTPS URLs (e.g., `url("https://example.com/font.woff2")`)
+   - `file://` paths (e.g., `url("file:///C:/Windows/Fonts/arial.ttf")`)
+   - Absolute file paths (e.g., `url("/local-font/C:/Users/me/font.woff2")`)
+
+3. For absolute paths and `file://` paths, the system provides a local font proxy at `{{local_font_prefix}}`. Prefix the absolute path with `{{local_font_prefix}}` to make it accessible via HTTP. Only `woff2`, `woff`, `ttf`, and `otf` files are allowed, up to 20 MiB each.
+
+4. Always declare a fallback font stack:
+   ```css
+   font-family: "ChatStyle-MyFont", "Segoe UI", sans-serif;
+   ```
+
+5. `data:` URIs are not supported.
+
+## Prohibited rules
+
+The following will cause the **entire CSS file to be rejected**:
+
+- `@import` — do not import external stylesheets
+- `@font-face` without the `ChatStyle-` prefix in `font-family`
+- Any at-rule the system cannot safely scope (e.g., `@namespace`, `@page`, `@document`)
+
+## Size limit
+
+The `index.css` file must not exceed 256 KiB. Larger files will be rejected entirely.
+
+## Allowed rules
+
+The following are preserved as-is without scoping:
+
+- `@font-face` (with `ChatStyle-` prefixed family name)
+- `@keyframes` and `@-webkit-keyframes`
+- `@media`, `@supports`, `@container` (inner rules are scoped)
+
+## User pause
+
+The user can independently pause your chat style or the Agent Stage layer via the command menu in the header. When paused, your CSS will not be applied, but the `index.css` file is not deleted. Updating the file does not automatically re-enable a paused style — the user must manually resume it.
+
+## Lifecycle notes
+
+- When a session rotates (context limit), the session ID changes and the chat style path updates accordingly. Files you deployed to the old session's `chat-style/` directory remain on disk at the old path — use `Copy` or `Move` if you need to carry them over.
+- Deleting a session does not automatically clean up its `chat-style/` directory. If cleanup is needed, the user will instruct you to remove the files.
+
+After deploying or updating the chat style, let the user know they can see it applied in the chat area.

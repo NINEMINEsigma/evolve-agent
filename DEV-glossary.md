@@ -357,7 +357,18 @@
 
 ---
 
-## §12 退役术语
+## §12 前端会话视觉
+
+| 规范称谓 | 定义 | 英文锚点 |
+|---|---|---|
+| 会话聊天区自定义样式 | 会话级 CSS 覆盖层，Agent 通过 `ws:sessions/<session_id>/chat-style/index.css` 写入，仅作用于 `.chat-area` 聊天区 | Session Chat Style |
+| 聊天区样式暂停开关 | 用户在顶部栏命令菜单中独立暂停聊天区自定义样式的开关，按会话持久化 | chat style pause toggle |
+| 舞台层暂停开关 | 用户在顶部栏命令菜单中独立暂停 Agent 舞台层的开关，按会话持久化 | stage pause toggle |
+| 公开样式选择器契约 | 以 `data-chat-scope` 和 `data-message-role` 属性构成的稳定选择器集合，向 Evolve Agent 承诺跨版本兼容 | public style selector contract |
+
+---
+
+## §13 退役术语
 
 以下术语已过时或被取代，禁止在新内容中使用：
 

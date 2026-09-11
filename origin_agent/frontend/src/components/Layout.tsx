@@ -19,6 +19,8 @@ import { DIMENSIONS } from "../constants/dimensions";
 import { usePersistentState } from "../hooks/usePersistentState";
 import { usePersistentSessionState } from "../hooks/usePersistentSessionState";
 import { useResizable } from "../hooks/useResizable";
+import { useSessionStage } from "../hooks/useSessionStage";
+import { useSessionChatStyle } from "../hooks/useSessionChatStyle";
 
 interface LayoutProps {
   ws: WebSocketState;
@@ -46,6 +48,20 @@ export default function Layout({ ws, onContextMenu, contextMenuOpen, onboardingR
     STORAGE_KEYS.VISIBLE_CHARACTERS, ws.sessionId, ["all-agents"]);
   const [responseCharacters, setResponseCharacters] = usePersistentSessionState<string[]>(
     STORAGE_KEYS.RESPONSE_CHARACTERS, ws.sessionId, ["main-agent"]);
+
+  // 会话视觉暂停开关（按会话持久化）
+  const [stagePaused, setStagePaused] = usePersistentSessionState<boolean>(
+    STORAGE_KEYS.STAGE_PAUSED, ws.sessionId, false);
+  const [chatStylePaused, setChatStylePaused] = usePersistentSessionState<boolean>(
+    STORAGE_KEYS.CHAT_STYLE_PAUSED, ws.sessionId, false);
+
+  // Layout 层直接调用 hook，避免 Header 和 ChatArea 重复探测
+  const stageState = useSessionStage(ws.sessionId, stagePaused);
+  const chatStyleState = useSessionChatStyle(ws.sessionId, chatStylePaused);
+
+  // 派生显示状态文本（供 Header 开关展示）
+  const stageStatusText = stagePaused ? "已暂停" : stageState.status === "ready" ? "已启用" : stageState.status === "idle" ? "未配置" : "未配置";
+  const chatStyleStatusText = chatStylePaused ? "已暂停" : chatStyleState.status === "ready" ? "已启用" : chatStyleState.status === "error" ? "加载失败" : "未配置";
 
   const [subagentPanelWidth, setSubagentPanelWidth] = usePersistentState<number>(
     STORAGE_KEYS.SUBAGENT_PANEL_WIDTH, DIMENSIONS.SUBAGENT_PANEL_DEFAULT);
@@ -292,6 +308,12 @@ export default function Layout({ ws, onContextMenu, contextMenuOpen, onboardingR
           isMobile={isMobile}
           llmProfiles={ws.llmProfiles}
           forcePin={pinHeader}
+          stagePaused={stagePaused}
+          onToggleStagePaused={() => setStagePaused((v) => !v)}
+          stageStatusText={stageStatusText}
+          chatStylePaused={chatStylePaused}
+          onToggleChatStylePaused={() => setChatStylePaused((v) => !v)}
+          chatStyleStatusText={chatStyleStatusText}
         />
 
         {ws.sessionLocked ? (
@@ -324,6 +346,10 @@ export default function Layout({ ws, onContextMenu, contextMenuOpen, onboardingR
               onToggleMessageVisibility={onToggleMessageVisibility}
               onScrollToBottom={() => ws.scrollToBottomSmooth()}
               isReady={ws.isReady}
+              stagePaused={stagePaused}
+              chatStyleCssText={chatStyleState.cssText}
+              chatStyleStatus={chatStyleState.status}
+              chatStyleReloadKey={chatStyleState.reloadKey}
             >
               <CronCountdown cronTasks={ws.cronTasks} />
 

@@ -28,6 +28,13 @@ interface HeaderProps {
   isMobile?: boolean;
   llmProfiles?: LlmProfileManager;
   forcePin?: boolean;
+  // 会话视觉暂停开关
+  stagePaused: boolean;
+  onToggleStagePaused: () => void;
+  stageStatusText: string;
+  chatStylePaused: boolean;
+  onToggleChatStylePaused: () => void;
+  chatStyleStatusText: string;
 }
 
 export default function Header({
@@ -50,6 +57,12 @@ export default function Header({
   isMobile,
   llmProfiles,
   forcePin,
+  stagePaused,
+  onToggleStagePaused,
+  stageStatusText,
+  chatStylePaused,
+  onToggleChatStylePaused,
+  chatStyleStatusText,
 }: HeaderProps) {
   const [cmdMenuOpen, setCmdMenuOpen] = useState(false);
   const [menuPos, setMenuPos] = useState<{ top: number; left: number } | null>(null);
@@ -178,6 +191,20 @@ export default function Header({
                 >
                   导出会话
                 </div>
+                <div
+                  className="context-menu-item"
+                  onClick={() => { onToggleStagePaused(); }}
+                  data-tooltip={stageStatusText === "未配置" ? "Agent 舞台层未配置" : stagePaused ? "恢复 Agent 舞台层" : "暂停 Agent 舞台层"}
+                >
+                  Agent 舞台层：{stageStatusText}
+                </div>
+                <div
+                  className="context-menu-item"
+                  onClick={() => { onToggleChatStylePaused(); }}
+                  data-tooltip={chatStyleStatusText === "未配置" ? "聊天区自定义样式未配置" : chatStylePaused ? "恢复聊天区自定义样式" : "暂停聊天区自定义样式"}
+                >
+                  聊天区样式：{chatStyleStatusText}
+                </div>
               </div>
             )}
           </div>
@@ -272,6 +299,20 @@ export default function Header({
               data-tooltip="导出当前会话为可分享的静态 HTML 文件"
             >
               导出会话
+            </div>
+            <div
+              className="context-menu-item"
+              onClick={() => { onToggleStagePaused(); }}
+              data-tooltip={stageStatusText === "未配置" ? "Agent 舞台层未配置" : stagePaused ? "恢复 Agent 舞台层" : "暂停 Agent 舞台层"}
+            >
+              Agent 舞台层：{stageStatusText}
+            </div>
+            <div
+              className="context-menu-item"
+              onClick={() => { onToggleChatStylePaused(); }}
+              data-tooltip={chatStyleStatusText === "未配置" ? "聊天区自定义样式未配置" : chatStylePaused ? "恢复聊天区自定义样式" : "暂停聊天区自定义样式"}
+            >
+              聊天区样式：{chatStyleStatusText}
             </div>
           </div>
         )}

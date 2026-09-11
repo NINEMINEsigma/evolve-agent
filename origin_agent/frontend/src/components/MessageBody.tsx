@@ -139,7 +139,7 @@ export default function MessageBody({ message, streaming, onImageClick }: Messag
     return (
       <>
         {m.reasoningContent && (
-          <details className="reasoning-block">
+          <details className="reasoning-block" data-chat-scope="reasoning">
             <summary className="reasoning-summary">{reasoningLabel}</summary>
             <div className="reasoning-content">{m.reasoningContent}</div>
           </details>

@@ -430,3 +430,19 @@ export function buildStageUrls(sessionId: string): { indexUrl: string } | null {
     indexUrl: `/files/ws/sessions/${encoded}/stage/index.html`,
   };
 }
+
+// ── Chat Style URL 构建 ───────────────────────────────────────
+
+/**
+ * 构建会话级聊天区自定义样式的前端访问 URL。
+ *
+ * cssUrl 用于聊天区 CSS 探测与加载。
+ * sessionId 为空时返回 null（调用方应跳过加载）。
+ */
+export function buildChatStyleUrls(sessionId: string): { cssUrl: string } | null {
+  if (!sessionId) return null;
+  const encoded = encodeURIComponent(sessionId);
+  return {
+    cssUrl: `/files/ws/sessions/${encoded}/chat-style/index.css`,
+  };
+}

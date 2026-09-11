@@ -3,7 +3,9 @@ import { ChatMessage, MessageContent } from "../types";
 import MessageItem from "./MessageItem";
 import Minimap from "./Minimap";
 import AgentStageLayer from "./AgentStageLayer";
+import ChatStyleLayer from "./ChatStyleLayer";
 import { DIMENSIONS } from "../constants/dimensions";
+import type { ChatStyleStatus } from "../hooks/useSessionChatStyle";
 
 interface ChatAreaProps {
   messages: ChatMessage[];
@@ -26,9 +28,14 @@ interface ChatAreaProps {
   sessionId?: string;
   children?: React.ReactNode;
   isReady?: boolean;
+  // 会话视觉暂停与状态
+  stagePaused?: boolean;
+  chatStyleCssText?: string | null;
+  chatStyleStatus?: ChatStyleStatus;
+  chatStyleReloadKey?: number;
 }
 
-export default function ChatArea({ messages, waiting, archived, onImageClick, onToggleCollapse, onEditMessage, onDeleteMessages, onDeleteSingleMessage, onRegenerateResponse, bottomRef, contentRef: externalContentRef, onDropFiles, streamingMessage, chatAreaRef: externalChatAreaRef, agents, onToggleMessageVisibility, onScrollToBottom, sessionId, children, isReady }: ChatAreaProps) {
+export default function ChatArea({ messages, waiting, archived, onImageClick, onToggleCollapse, onEditMessage, onDeleteMessages, onDeleteSingleMessage, onRegenerateResponse, bottomRef, contentRef: externalContentRef, onDropFiles, streamingMessage, chatAreaRef: externalChatAreaRef, agents, onToggleMessageVisibility, onScrollToBottom, sessionId, children, isReady, stagePaused, chatStyleCssText, chatStyleStatus, chatStyleReloadKey }: ChatAreaProps) {
   const [dragOver, setDragOver] = useState(false);
   const [showScrollButton, setShowScrollButton] = useState(false);
   const [minimapCollapsed, setMinimapCollapsed] = useState(false);
@@ -113,7 +120,8 @@ export default function ChatArea({ messages, waiting, archived, onImageClick, on
   return (
     <div className="chat-area-wrapper">
       <div className={`chat-area-container${isEmpty ? " chat-area-container-empty" : ""}`}>
-      <AgentStageLayer sessionId={sessionId} />
+      <AgentStageLayer sessionId={sessionId} paused={stagePaused} />
+      <ChatStyleLayer cssText={chatStyleCssText ?? null} status={chatStyleStatus ?? "idle"} reloadKey={chatStyleReloadKey ?? 0} />
       <main
         ref={chatAreaRef}
         className={`chat-area ${dragOver ? "chat-area-drag-over" : ""}`}
@@ -171,9 +179,9 @@ export default function ChatArea({ messages, waiting, archived, onImageClick, on
               )}
 
               {waiting && !streamingMessage && (
-                <div className="message message-assistant" data-message-id="__waiting__">
+                <div className="message message-assistant" data-message-id="__waiting__" data-chat-scope="waiting" data-message-role="assistant">
                   <div className="message-avatar waiting-avatar">⚡</div>
-                  <div className="message-bubble">
+                  <div className="message-bubble" data-chat-scope="bubble">
                     <div className="typing-indicator">
                       <span /><span /><span />
                     </div>

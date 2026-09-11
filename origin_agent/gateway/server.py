@@ -29,7 +29,7 @@ from fastapi.staticfiles import StaticFiles
 from .chat import Message, MessageType
 from .message_router import MessageRouter
 from datetime import datetime, timezone
-from entity.constant import CRON_STDOUT_PREVIEW_MAX_LENGTH, SUBPROCESS_TIMEOUT_DEFAULT, UPLOAD_FILENAME_TIME_FORMAT, USER_CHARACTER_NAME, UPLOADS_DIR_NAME, UPLOADS_WS_PREFIX, STATIC_FILE_HTTP_PREFIX, DOWNLOADS_HTTP_PREFIX, DIR_ZIP_HTTP_PREFIX, DIR_ZIP_MAX_TOTAL_BYTES, SYSTEM_CHARACTER_NAME, AGENTSPACE_SSE_HEARTBEAT_SECONDS
+from entity.constant import CRON_STDOUT_PREVIEW_MAX_LENGTH, SUBPROCESS_TIMEOUT_DEFAULT, UPLOAD_FILENAME_TIME_FORMAT, USER_CHARACTER_NAME, UPLOADS_DIR_NAME, UPLOADS_WS_PREFIX, STATIC_FILE_HTTP_PREFIX, DOWNLOADS_HTTP_PREFIX, DIR_ZIP_HTTP_PREFIX, DIR_ZIP_MAX_TOTAL_BYTES, SYSTEM_CHARACTER_NAME, AGENTSPACE_SSE_HEARTBEAT_SECONDS, LOCAL_FONT_HTTP_PREFIX, LOCAL_FONT_MAX_BYTES, LOCAL_FONT_ALLOWED_EXTENSIONS, LOCAL_FONT_MIME_TYPES
 from entity.puretype import (
     SessionStatus,
     ClientInfo,
@@ -1336,6 +1336,62 @@ async def serve_workspace_file(namespace: str, file_path: str):
         return HTMLResponse("File not found", status_code=404)
     media_type = _guess_media_type_with_charset(resolved.real)
     return FileResponse(str(resolved.real), media_type=media_type, headers=_NO_CACHE)
+
+
+@app.get(LOCAL_FONT_HTTP_PREFIX + "/{font_path:path}")
+async def serve_local_font(font_path: str):
+    """提供本地字体文件的 HTTP 访问，供 CSS @font-face src 使用。
+
+    URL 格式: /local-font/{绝对路径}
+    例如: /local-font/C:/Windows/Fonts/arial.ttf
+
+    安全约束：
+    - 仅接受 woff2/woff/ttf/otf 扩展名
+    - 文件大小 ≤ LOCAL_FONT_MAX_BYTES (20 MiB)
+    - 拒绝 .. 路径遍历
+    - 响应头：Cache-Control: no-cache + Access-Control-Allow-Origin: *
+    """
+    from pathlib import Path
+
+    # 路径遍历防护
+    raw_path = font_path
+    if ".." in raw_path:
+        return HTMLResponse("Path traversal not allowed", status_code=403)
+
+    try:
+        font_file = Path(raw_path).resolve()
+    except Exception:
+        return HTMLResponse("Invalid path", status_code=400)
+
+    # 扩展名白名单检查
+    ext = font_file.suffix.lower()
+    if ext not in LOCAL_FONT_ALLOWED_EXTENSIONS:
+        return HTMLResponse(
+            f"Font type '{ext}' not allowed. Allowed: {', '.join(LOCAL_FONT_ALLOWED_EXTENSIONS)}",
+            status_code=404,
+        )
+
+    # 存在性与普通文件检查
+    if not font_file.exists() or not font_file.is_file():
+        return HTMLResponse("Font file not found", status_code=404)
+
+    # 大小限制
+    try:
+        file_size = font_file.stat().st_size
+    except OSError:
+        return HTMLResponse("Cannot read font file", status_code=500)
+    if file_size > LOCAL_FONT_MAX_BYTES:
+        return HTMLResponse(
+            f"Font file exceeds {LOCAL_FONT_MAX_BYTES} byte limit",
+            status_code=403,
+        )
+
+    media_type = LOCAL_FONT_MIME_TYPES.get(ext, "application/octet-stream")
+    font_headers = {
+        **_NO_CACHE,
+        "Access-Control-Allow-Origin": "*",
+    }
+    return FileResponse(str(font_file), media_type=media_type, headers=font_headers)
 
 
 @app.get(DOWNLOADS_HTTP_PREFIX + "/{namespace}/{file_path:path}")

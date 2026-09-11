@@ -27,7 +27,7 @@ from system.pathutils import find_repo_root
 from system.templates import read_template
 from system.context import RuntimeContext
 from system.modality_capability import build_modality_prompt_block
-from entity.constant import STATIC_FILE_HTTP_PREFIX, DOWNLOADS_HTTP_PREFIX
+from entity.constant import STATIC_FILE_HTTP_PREFIX, DOWNLOADS_HTTP_PREFIX, LOCAL_FONT_HTTP_PREFIX
 from entity.puretype import SystemInfo, ToolAvailability, LLMProfile
 
 
@@ -328,4 +328,47 @@ def build_session_stage_block(
         .replace("{{owner_intro}}", owner_intro)
         .replace("{{session_id}}", session_id)
         .replace("{{files_prefix}}", STATIC_FILE_HTTP_PREFIX)
+    )
+
+
+def build_session_chat_style_block(
+    session_id: str,
+    *,
+    owner: Literal["self", "parent"] = "self",
+) -> str:
+    """构建会话级聊天区自定义样式约定提示词块。
+
+    从 ``templates/session_chat_style.txt`` 读取模板并替换占位符。
+    session_id 为空串或模板缺失时返回空串（调用方跳过 append）。
+
+    Args:
+        session_id: 当前会话 ID（owner="parent" 时为父会话 ID）。
+        owner: "self" 表示本会话自身的聊天样式；"parent" 表示子代理
+            为主会话的聊天样式产出内容（归属主会话）。
+    """
+    if not session_id:
+        return ""
+    template: str = read_template("session_chat_style.txt")
+    if not template:
+        return ""
+    if owner == "parent":
+        owner_intro = (
+            "You are a sub-agent working within a parent session. "
+            "The parent session has a dedicated chat style layer — a CSS file "
+            "that customizes the appearance of chat bubbles and fonts in the chat area. "
+            "The session ID below is the PARENT session's ID, not your own. "
+            "Deploy chat style content to the parent session's chat-style directory."
+        )
+    else:
+        owner_intro = (
+            "You have a dedicated chat style layer for THIS session — a CSS file "
+            "that customizes the appearance of chat bubbles and fonts in the chat area. "
+            "The session ID below is your current session's ID."
+        )
+    return (
+        template
+        .replace("{{owner_intro}}", owner_intro)
+        .replace("{{session_id}}", session_id)
+        .replace("{{files_prefix}}", STATIC_FILE_HTTP_PREFIX)
+        .replace("{{local_font_prefix}}", LOCAL_FONT_HTTP_PREFIX)
     )

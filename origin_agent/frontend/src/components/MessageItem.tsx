@@ -126,7 +126,7 @@ const MessageItem = memo(function MessageItem({
   // 系统状态消息：居中灰色气泡，无头像、无编辑/删除/重新生成按钮
   if (m.isSystemStatus) {
     return (
-      <div className="message message-system-status" data-message-id={m.id}>
+      <div className="message message-system-status" data-message-id={m.id} data-chat-scope="message" data-message-role="system">
         <div className="message-system-status-content">{textContent}</div>
       </div>
     );
@@ -140,6 +140,9 @@ const MessageItem = memo(function MessageItem({
     <div
       className={`message message-${m.role}${streaming ? " message-streaming" : ""}${isCharacterHovered ? " message-character-hovered" : ""}`}
       data-message-id={m.id}
+      data-chat-scope="message"
+      data-message-role={m.role}
+      data-character-hovered={isCharacterHovered ? "true" : undefined}
       style={{ "--msg-hue": hueFromString(displayName || "") } as React.CSSProperties}
       onMouseEnter={canCharacterHover ? () => {
         pointerHoveringRef.current = true;
@@ -157,9 +160,9 @@ const MessageItem = memo(function MessageItem({
           </div>
         </div>
       )}
-      <div className="message-bubble">
+      <div className="message-bubble" data-chat-scope="bubble">
         {isTool && !editing ? (
-          <div className="tool-call-block">
+          <div className="tool-call-block" data-chat-scope="tool-call">
             <button
               type="button"
               className={`tool-call-summary ${toolCollapsed ? "" : "tool-call-summary-open"}`}
@@ -168,7 +171,7 @@ const MessageItem = memo(function MessageItem({
               {textContent.length > CONTENT_PREVIEW_LEN ? textContent.slice(0, CONTENT_PREVIEW_LEN) + '...' : textContent}
             </button>
             {!toolCollapsed && (
-              <div className={`tool-call-detail message-content-collapsed${m.isError ? " tool-call-detail-error" : ""}`} onWheel={handoffWheelAtBoundary}>
+              <div className={`tool-call-detail message-content-collapsed${m.isError ? " tool-call-detail-error" : ""}`} data-chat-scope="tool-detail" onWheel={handoffWheelAtBoundary}>
                 <MessageBody message={m} onImageClick={onImageClick} />
                 <MessageAttachments message={m} onImageClick={onImageClick} />
                 {m.toolCallMeta && (
@@ -184,6 +187,7 @@ const MessageItem = memo(function MessageItem({
         ) : (
           <div
             className={`message-content ${collapsed && !editing ? "message-content-collapsed" : ""}`}
+            data-chat-scope="content"
             onWheel={collapsed && !editing ? handoffWheelAtBoundary : undefined}
           >
             {editing ? (
@@ -202,7 +206,7 @@ const MessageItem = memo(function MessageItem({
           </div>
         )}
 
-        <div className="message-toolbar">
+        <div className="message-toolbar" data-chat-scope="toolbar">
           <span className="message-meta">
             {m.edited ? "已编辑" : canEdit ? `#${m.messageIndex}` : ""}
             {showMeta && (

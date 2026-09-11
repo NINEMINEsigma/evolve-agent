@@ -10,6 +10,7 @@ import "./styles/sidebar.css";
 import "./styles/header.css";
 import "./styles/chat.css";
 import "./styles/agent-stage.css";
+import "./styles/chat-style-scope.css";
 import "./styles/messages.css";
 import "./styles/lightbox.css";
 import "./styles/modal.css";
