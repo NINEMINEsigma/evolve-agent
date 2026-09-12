@@ -18,7 +18,8 @@ export interface SessionStageState {
   stageUrl: string | null;
 }
 
-const DEBOUNCE_MS = 300;
+// Live2D 等舞台资源通常会连续写入多个文件；等待一段安静时间后只刷新一次 iframe。
+const DEBOUNCE_MS = 1000;
 
 export function useSessionStage(sessionId: string | undefined, paused: boolean = false): SessionStageState {
   const [status, setStatus] = useState<StageStatus>("idle");

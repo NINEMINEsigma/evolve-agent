@@ -6,6 +6,7 @@ import AgentStageLayer from "./AgentStageLayer";
 import ChatStyleLayer from "./ChatStyleLayer";
 import { DIMENSIONS } from "../constants/dimensions";
 import type { ChatStyleStatus } from "../hooks/useSessionChatStyle";
+import type { SessionStageState } from "../hooks/useSessionStage";
 
 interface ChatAreaProps {
   messages: ChatMessage[];
@@ -25,17 +26,16 @@ interface ChatAreaProps {
   agents?: string[];
   onToggleMessageVisibility?: (messageId: string, agentName: string) => void;
   onScrollToBottom?: () => void;
-  sessionId?: string;
   children?: React.ReactNode;
   isReady?: boolean;
-  // 会话视觉暂停与状态
-  stagePaused?: boolean;
+  // 会话舞台层状态由 Layout 统一管理，避免重复探测和订阅
+  stageState: SessionStageState;
   chatStyleCssText?: string | null;
   chatStyleStatus?: ChatStyleStatus;
   chatStyleReloadKey?: number;
 }
 
-export default function ChatArea({ messages, waiting, archived, onImageClick, onToggleCollapse, onEditMessage, onDeleteMessages, onDeleteSingleMessage, onRegenerateResponse, bottomRef, contentRef: externalContentRef, onDropFiles, streamingMessage, chatAreaRef: externalChatAreaRef, agents, onToggleMessageVisibility, onScrollToBottom, sessionId, children, isReady, stagePaused, chatStyleCssText, chatStyleStatus, chatStyleReloadKey }: ChatAreaProps) {
+export default function ChatArea({ messages, waiting, archived, onImageClick, onToggleCollapse, onEditMessage, onDeleteMessages, onDeleteSingleMessage, onRegenerateResponse, bottomRef, contentRef: externalContentRef, onDropFiles, streamingMessage, chatAreaRef: externalChatAreaRef, agents, onToggleMessageVisibility, onScrollToBottom, children, isReady, stageState, chatStyleCssText, chatStyleStatus, chatStyleReloadKey }: ChatAreaProps) {
   const [dragOver, setDragOver] = useState(false);
   const [showScrollButton, setShowScrollButton] = useState(false);
   const [minimapCollapsed, setMinimapCollapsed] = useState(false);
@@ -120,7 +120,7 @@ export default function ChatArea({ messages, waiting, archived, onImageClick, on
   return (
     <div className="chat-area-wrapper">
       <div className={`chat-area-container${isEmpty ? " chat-area-container-empty" : ""}`}>
-      <AgentStageLayer sessionId={sessionId} paused={stagePaused} />
+      <AgentStageLayer stageState={stageState} />
       <ChatStyleLayer cssText={chatStyleCssText ?? null} status={chatStyleStatus ?? "idle"} reloadKey={chatStyleReloadKey ?? 0} />
       <main
         ref={chatAreaRef}

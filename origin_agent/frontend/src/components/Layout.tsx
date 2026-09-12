@@ -334,7 +334,6 @@ export default function Layout({ ws, onContextMenu, contextMenuOpen, onboardingR
               messages={ws.messages}
               waiting={ws.waiting}
               archived={currentSessionArchived}
-              sessionId={ws.sessionId}
               onImageClick={setLightboxSrc}
               onToggleCollapse={ws.toggleMessageCollapse}
               onEditMessage={ws.editMessage}
@@ -350,7 +349,7 @@ export default function Layout({ ws, onContextMenu, contextMenuOpen, onboardingR
               onToggleMessageVisibility={onToggleMessageVisibility}
               onScrollToBottom={() => ws.scrollToBottomSmooth()}
               isReady={ws.isReady}
-              stagePaused={stagePaused}
+              stageState={stageState}
               chatStyleCssText={chatStyleState.cssText}
               chatStyleStatus={chatStyleState.status}
               chatStyleReloadKey={chatStyleState.reloadKey}
