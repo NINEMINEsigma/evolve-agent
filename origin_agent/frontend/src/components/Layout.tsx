@@ -296,9 +296,8 @@ export default function Layout({ ws, onContextMenu, contextMenuOpen, onboardingR
           tokenUsage={ws.tokenUsage}
           contextTokens={ws.contextTokens}
           llmMaxContextTokens={ws.llmMaxContextTokens}
-          handsfreeMode={ws.handsfreeMode}
-          yoloMode={ws.yoloMode}
           approvalMode={ws.approvalMode}
+          approvalModeSyncStatus={ws.approvalModeSyncStatus}
           approvalModelAvailable={ws.approvalModelAvailable}
           approvalModelName={ws.approvalModelName}
           llmModelName={ws.llmModelName}

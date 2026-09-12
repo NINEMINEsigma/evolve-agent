@@ -2194,6 +2194,31 @@ async def spa_fallback(full_path: str):
     raise HTTPException(status_code=404, detail=f"Not found: {full_path}")
 
 
+async def _send_approval_mode_state(ws: WebSocket, session_id: str) -> None:
+    """向当前连接发送该会话的权威审批模式。"""
+    from component.approval import ApprovalMode, get_approval_mode
+
+    mode = get_approval_mode(session_id)
+    try:
+        await ws.send_text(
+            json.dumps(
+                Message(
+                    type=MessageType.HANDSFREE_MODE,
+                    session_id=session_id,
+                    handsfree_mode=mode == ApprovalMode.HANDSFREE,
+                    approval_mode=mode.value,
+                ).model_dump(exclude_none=True),
+                ensure_ascii=False,
+            )
+        )
+    except Exception:
+        logger.warning(
+            "Failed to send approval mode state | session=%s",
+            session_id,
+            exc_info=True,
+        )
+
+
 @app.websocket("/ws/chat")
 async def ws_chat(ws: WebSocket) -> None:
     """WebSocket 聊天端点：接收用户消息，转发给 AgentLoop，返回回复。"""
@@ -2330,6 +2355,9 @@ async def ws_chat(ws: WebSocket) -> None:
             )
         except Exception:
             logger.warning("RuntimeContext not initialized, skipping server_info push", exc_info=True)  # fallback 模式可能无 LLM
+
+        # 新会话与恢复会话均主动同步会话级权威审批模式。
+        await _send_approval_mode_state(ws, sid)
 
         # 恢复 session 时回放会话历史，使前端不为空白
         if resume and _get_sm().exists(resume):

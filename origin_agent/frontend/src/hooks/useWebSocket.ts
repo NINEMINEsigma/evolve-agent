@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef } from "react";
-import { MessageContent, WSMessage, SubagentSession, AskRequest, ConfirmRequest, InterruptResponse } from "../types";
+import { MessageContent, WSMessage, SubagentSession, AskRequest, ConfirmRequest, InterruptResponse, ApprovalMode } from "../types";
 import { generateUUID } from "../utils";
 import { WS_IN, WS_OUT } from "../constants/ws";
 import { COLLOQUY_SID } from "../constants/session";
@@ -70,6 +70,10 @@ function isKeyboardScrollTarget(target: EventTarget | null, chat: HTMLElement): 
   const element = eventTargetElement(target);
   if (!element || !chat.contains(element)) return false;
   return element.closest("input, textarea, button, [contenteditable=\"true\"]") === null;
+}
+
+function isApprovalMode(value: unknown): value is ApprovalMode {
+  return value === "manual" || value === "handsfree" || value === "yolo";
 }
 
 export function useWebSocket() {
@@ -155,17 +159,20 @@ export function useWebSocket() {
     if (msg.type === WS_IN.APPROVAL_PROFILE_CHANGED) {
       llmProfilesRef.current.handleApprovalProfileChanged(msg);
       if (msg.handsfree_mode === false) {
-        sessionRef.current?.setHandsfreeMode(false);
+        sessionRef.current?.setApprovalMode("manual");
+        sessionRef.current?.setApprovalModeSyncStatus("ready");
       }
       return;
     }
     if (msg.type === WS_IN.HANDSFREE_MODE) {
-      if (msg.handsfree_mode !== undefined && msg.handsfree_mode !== null) {
-        sessionRef.current?.setHandsfreeMode(msg.handsfree_mode);
-      }
-      if (msg.approval_mode !== undefined && msg.approval_mode !== null) {
-        sessionRef.current?.setApprovalMode(msg.approval_mode);
-        sessionRef.current?.setYoloMode(msg.approval_mode === "yolo");
+      const mode = isApprovalMode(msg.approval_mode)
+        ? msg.approval_mode
+        : typeof msg.handsfree_mode === "boolean"
+          ? (msg.handsfree_mode ? "handsfree" : "manual")
+          : null;
+      if (mode) {
+        sessionRef.current?.setApprovalMode(mode);
+        sessionRef.current?.setApprovalModeSyncStatus("ready");
       }
       return;
     }
@@ -175,6 +182,7 @@ export function useWebSocket() {
 
   const onOpen = useCallback(() => {
     if (!sessionRef.current) return;
+    sessionRef.current.setApprovalModeSyncStatus("loading");
     sessionRef.current.ignoreStaleRef.current = false;
     isAtBottomRef.current = true;
     sessionRef.current.addMessage("system", "已连接到 Evolve Agent");
@@ -183,6 +191,7 @@ export function useWebSocket() {
 
   const onClose = useCallback(() => {
     sessionRef.current?.setWaiting(false);
+    sessionRef.current?.setApprovalModeSyncStatus("unavailable");
   }, []);
 
   useEffect(() => {
@@ -559,22 +568,19 @@ export function useWebSocket() {
       .catch(() => {});
   }, [switchSession]);
 
-  const setApprovalMode = useCallback((mode: string) => {
+  const setApprovalMode = useCallback((mode: ApprovalMode) => {
     const s = sessionRef.current;
     const c = connRef.current;
-    if (!s) return;
-    // 不乐观更新；等待服务端 HANDSFREE_MODE 回执
+    if (!s || s.approvalModeSyncStatus !== "ready") return;
+    // 不乐观更新模式；发送后进入加载态，等待服务端权威回执。
     if (c.wsRef.current?.readyState === WebSocket.OPEN) {
       c.send({
         type: WS_OUT.HANDSFREE_MODE,
         content: mode,
       });
+      s.setApprovalModeSyncStatus("loading");
     }
   }, []);
-
-  const toggleHandsfree = useCallback((enabled: boolean) => {
-    setApprovalMode(enabled ? "handsfree" : "manual");
-  }, [setApprovalMode]);
 
   const interrupt = useCallback(async () => {
     const s = sessionRef.current;
@@ -794,11 +800,8 @@ export function useWebSocket() {
     searchQuery: session.searchQuery,
     setSearchQuery: session.setSearchQuery,
     uploading: upload.uploading,
-    handsfreeMode: session.handsfreeMode,
-    setHandsfreeMode: session.setHandsfreeMode,
     approvalMode: session.approvalMode,
-    yoloMode: session.yoloMode,
-    setYoloMode: session.setYoloMode,
+    approvalModeSyncStatus: session.approvalModeSyncStatus,
     taskProgress: session.taskProgress,
     setTaskProgress: session.setTaskProgress,
     clipboardDisplays: session.clipboardDisplays,
@@ -864,7 +867,6 @@ export function useWebSocket() {
     toggleMergeSelect: session.toggleMergeSelect,
     respondConfirm,
     respondAsk,
-    toggleHandsfree,
     setApprovalMode,
     interrupt,
     disgust,

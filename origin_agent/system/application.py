@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import logging
 import threading
+from framework import Architecture
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -30,7 +31,7 @@ logger = logging.getLogger(__name__)
 _app: Application | None = None
 
 
-class Application:
+class Application(Architecture):
     """进程级唯一单例，持有所有子系统引用。
 
     用法::

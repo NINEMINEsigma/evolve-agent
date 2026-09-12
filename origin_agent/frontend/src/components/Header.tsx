@@ -5,6 +5,7 @@ import { exportSession } from "../utils/exportSession";
 import { COLLOQUY_SID } from "../constants/session";
 import { TIMING } from "../constants/timing";
 import type { LlmProfileManager } from "../hooks/useLlmProfiles";
+import type { ApprovalMode, ApprovalModeSyncStatus } from "../types";
 import TokenRing from "./TokenRing";
 
 interface HeaderProps {
@@ -13,15 +14,14 @@ interface HeaderProps {
   tokenUsage: number;
   contextTokens: number;
   llmMaxContextTokens: number;
-  handsfreeMode: boolean;
-  yoloMode: boolean;
-  approvalMode: string;
+  approvalMode: ApprovalMode;
+  approvalModeSyncStatus: ApprovalModeSyncStatus;
   approvalModelAvailable: boolean;
   approvalModelName: string;
   llmModelName: string;
   sidebarCollapsed: boolean;
   onToggleSidebar: () => void;
-  onSetApprovalMode: (mode: string) => void;
+  onSetApprovalMode: (mode: ApprovalMode) => void;
   agents?: string[];
   collapsed?: boolean;
   onToggleCollapse?: () => void;
@@ -44,8 +44,8 @@ export default function Header({
   tokenUsage,
   contextTokens,
   llmMaxContextTokens,
-  yoloMode,
   approvalMode,
+  approvalModeSyncStatus,
   approvalModelAvailable,
   approvalModelName,
   llmModelName,
@@ -103,8 +103,6 @@ export default function Header({
       return true;
     });
   };
-
-  const showApprovalBadge = approvalMode !== "manual" || approvalModelAvailable || yoloMode;
 
   // 移动端折叠态：只显示精简条
   if (isMobile && collapsed) {
@@ -227,26 +225,13 @@ export default function Header({
 
           {sessionId && (
             <div className="header-right">
-              {showApprovalBadge && (
-                <span
-                  className={[
-                    "approval-model-badge",
-                    approvalMode !== "manual" ? "handsfree-on" : "handsfree-off",
-                  ].filter(Boolean).join(" ")}
-                  data-tooltip={
-                    approvalMode === "yolo" ? "YOLO 模式 — 所有工具调用自动批准（含 critical）" :
-                    approvalMode === "handsfree" ? "脱手模式 — 工具调用由 AI 自动审批" :
-                    "手动模式 — 工具调用需用户审批"
-                  }
-                  onClick={() => {
-                    if (approvalMode === "manual") onSetApprovalMode(approvalModelAvailable ? "handsfree" : "yolo");
-                    else if (approvalMode === "handsfree") onSetApprovalMode("yolo");
-                    else onSetApprovalMode("manual");
-                  }}
-                >
-                  {approvalMode === "yolo" ? "YOLO" : approvalMode === "handsfree" ? approvalModelName || "自动审批" : "手动"}
-                </span>
-              )}
+              <ApprovalModeBadge
+                mode={approvalMode}
+                syncStatus={approvalModeSyncStatus}
+                approvalModelAvailable={approvalModelAvailable}
+                approvalModelName={approvalModelName}
+                onSetApprovalMode={onSetApprovalMode}
+              />
               <span className="token-badge" data-tooltip={`累计消耗: ${tokenUsage.toLocaleString()}  |  已用上下文: ${contextTokens.toLocaleString()}  |  最大上下文: ${llmMaxContextTokens > 0 ? llmMaxContextTokens.toLocaleString() : "?"}`}>
                 累计 {tokenUsage.toLocaleString()} / 上下文 {contextTokens.toLocaleString()} / 上限 {llmMaxContextTokens > 0 ? llmMaxContextTokens.toLocaleString() : "?"}
               </span>
@@ -348,26 +333,13 @@ export default function Header({
 
       {sessionId && (
         <div className="header-right">
-          {showApprovalBadge && (
-            <span
-              className={[
-                "approval-model-badge",
-                approvalMode !== "manual" ? "handsfree-on" : "handsfree-off",
-              ].filter(Boolean).join(" ")}
-              data-tooltip={
-                approvalMode === "yolo" ? "YOLO 模式 — 所有工具调用自动批准（含 critical）" :
-                approvalMode === "handsfree" ? "脱手模式 — 工具调用由 AI 自动审批" :
-                "手动模式 — 工具调用需用户审批"
-              }
-              onClick={() => {
-                if (approvalMode === "manual") onSetApprovalMode(approvalModelAvailable ? "handsfree" : "yolo");
-                else if (approvalMode === "handsfree") onSetApprovalMode("yolo");
-                else onSetApprovalMode("manual");
-              }}
-            >
-              {approvalMode === "yolo" ? "YOLO" : approvalMode === "handsfree" ? approvalModelName || "自动审批" : "手动"}
-            </span>
-          )}
+          <ApprovalModeBadge
+            mode={approvalMode}
+            syncStatus={approvalModeSyncStatus}
+            approvalModelAvailable={approvalModelAvailable}
+            approvalModelName={approvalModelName}
+            onSetApprovalMode={onSetApprovalMode}
+          />
           <span className="token-badge" data-tooltip={`累计消耗: ${tokenUsage.toLocaleString()}  |  已用上下文: ${contextTokens.toLocaleString()}  |  最大上下文: ${llmMaxContextTokens > 0 ? llmMaxContextTokens.toLocaleString() : "?"}`}>
             累计 {tokenUsage.toLocaleString()} / 上下文 {contextTokens.toLocaleString()} / 上限 {llmMaxContextTokens > 0 ? llmMaxContextTokens.toLocaleString() : "?"}
           </span>
@@ -390,6 +362,65 @@ export default function Header({
         </button>
       )}
     </header>
+  );
+}
+
+function ApprovalModeBadge({
+  mode,
+  syncStatus,
+  approvalModelAvailable,
+  approvalModelName,
+  onSetApprovalMode,
+}: {
+  mode: ApprovalMode;
+  syncStatus: ApprovalModeSyncStatus;
+  approvalModelAvailable: boolean;
+  approvalModelName: string;
+  onSetApprovalMode: (mode: ApprovalMode) => void;
+}) {
+  if (syncStatus === "ready" && mode === "manual" && !approvalModelAvailable) {
+    return null;
+  }
+
+  const disabled = syncStatus !== "ready";
+  const label = syncStatus === "loading"
+    ? "加载中"
+    : syncStatus === "unavailable"
+      ? "不可用"
+      : mode === "yolo"
+        ? "YOLO"
+        : mode === "handsfree"
+          ? approvalModelName || "自动审批"
+          : "手动";
+  const tooltip = syncStatus === "loading"
+    ? "正在同步当前会话的审批模式"
+    : syncStatus === "unavailable"
+      ? "连接不可用，无法确认当前会话的审批模式"
+      : mode === "yolo"
+        ? "YOLO 模式 — 所有工具调用自动批准（含 critical）"
+        : mode === "handsfree"
+          ? "脱手模式 — 工具调用由 AI 自动审批"
+          : "手动模式 — 工具调用需用户审批";
+  const stateClass = syncStatus === "ready"
+    ? mode !== "manual" ? "handsfree-on" : "handsfree-off"
+    : syncStatus === "loading" ? "sync-loading" : "sync-unavailable";
+
+  const cycleMode = () => {
+    if (mode === "manual") onSetApprovalMode(approvalModelAvailable ? "handsfree" : "yolo");
+    else if (mode === "handsfree") onSetApprovalMode("yolo");
+    else onSetApprovalMode("manual");
+  };
+
+  return (
+    <button
+      type="button"
+      className={`approval-model-badge ${stateClass}`}
+      data-tooltip={tooltip}
+      onClick={cycleMode}
+      disabled={disabled}
+    >
+      {label}
+    </button>
   );
 }
 

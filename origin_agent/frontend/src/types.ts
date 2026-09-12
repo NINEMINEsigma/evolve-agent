@@ -156,6 +156,9 @@ export interface VideoContentBlock {
 export type ContentBlock = TextContentBlock | ImageContentBlock | AudioContentBlock | VideoContentBlock;
 export type MessageContent = string | ContentBlock[];
 
+export type ApprovalMode = "manual" | "handsfree" | "yolo";
+export type ApprovalModeSyncStatus = "loading" | "ready" | "unavailable";
+
 export type MessageType =
   | "system"
   | "user_message"
@@ -215,7 +218,7 @@ export interface WSMessage {
   approval_profile_model?: string | null;   // APPROVAL_PROFILE_CHANGED
   approval_profile_available?: boolean;     // APPROVAL_PROFILE_CHANGED
   handsfree_mode?: boolean;                  // HANDSFREE_MODE：服务端权威回执（向后兼容）
-  approval_mode?: string;                   // HANDSFREE_MODE：服务端权威审批模式（manual/handsfree/yolo）
+  approval_mode?: ApprovalMode;             // HANDSFREE_MODE：服务端权威审批模式（manual/handsfree/yolo）
 }
 
 export interface ToolCallMeta {

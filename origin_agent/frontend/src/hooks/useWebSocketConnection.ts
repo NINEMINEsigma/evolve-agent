@@ -169,6 +169,7 @@ export function useWebSocketConnection(): WebSocketConnection {
     };
 
     ws.onmessage = (e) => {
+      if (myId !== connectIdRef.current || wsRef.current !== ws) return;
       const msg: WSMessage = JSON.parse(e.data);
       const now = Date.now();
       lastRecvAtRef.current = now;

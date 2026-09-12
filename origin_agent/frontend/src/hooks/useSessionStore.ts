@@ -14,6 +14,8 @@ import {
   WSMessage,
   MessageContent,
   InterruptStatus,
+  ApprovalMode,
+  ApprovalModeSyncStatus,
 } from "../types";
 import { parseToolResult, generateUUID, extractMessageResources } from "../utils";
 import { STORAGE_KEYS } from "../constants/storage";
@@ -53,12 +55,10 @@ export interface SessionStore {
   setSessions: React.Dispatch<React.SetStateAction<SessionInfo[]>>;
   searchQuery: string;
   setSearchQuery: React.Dispatch<React.SetStateAction<string>>;
-  handsfreeMode: boolean;
-  setHandsfreeMode: React.Dispatch<React.SetStateAction<boolean>>;
-  approvalMode: string;
-  setApprovalMode: React.Dispatch<React.SetStateAction<string>>;
-  yoloMode: boolean;
-  setYoloMode: React.Dispatch<React.SetStateAction<boolean>>;
+  approvalMode: ApprovalMode;
+  setApprovalMode: React.Dispatch<React.SetStateAction<ApprovalMode>>;
+  approvalModeSyncStatus: ApprovalModeSyncStatus;
+  setApprovalModeSyncStatus: React.Dispatch<React.SetStateAction<ApprovalModeSyncStatus>>;
   taskProgress: Record<string, TaskProgress>;
   setTaskProgress: React.Dispatch<React.SetStateAction<Record<string, TaskProgress>>>;
   clipboardDisplays: Record<string, ClipboardDisplay>;
@@ -175,9 +175,8 @@ export function useSessionStore(callbacks: SessionStoreCallbacks = {}): SessionS
   const [contextTokens, setContextTokens] = useState(0);
   const [sessions, setSessions] = useState<SessionInfo[]>([]);
   const [searchQuery, setSearchQuery] = useState("");
-  const [handsfreeMode, setHandsfreeMode] = useState(false);
-  const [approvalMode, setApprovalMode] = useState("manual");
-  const [yoloMode, setYoloMode] = useState(false);
+  const [approvalMode, setApprovalMode] = useState<ApprovalMode>("manual");
+  const [approvalModeSyncStatus, setApprovalModeSyncStatus] = useState<ApprovalModeSyncStatus>("loading");
   const [taskProgress, setTaskProgress] = useState<Record<string, TaskProgress>>({});
   const [clipboardDisplays, setClipboardDisplays] = useState<Record<string, ClipboardDisplay>>({});
   const [dynamicEndpoints, setDynamicEndpoints] = useState<DynamicEndpoint[]>([]);
@@ -569,10 +568,13 @@ export function useSessionStore(callbacks: SessionStoreCallbacks = {}): SessionS
           if (data.token_usage !== undefined) setTokenUsage(data.token_usage);
           if (data.context_tokens !== undefined) setContextTokens(data.context_tokens);
           if (data.processing) setWaiting(true);
-          if (data.handsfree_mode !== undefined) setHandsfreeMode(data.handsfree_mode);
-          if (data.approval_mode !== undefined) {
+          if (
+            data.approval_mode === "manual" ||
+            data.approval_mode === "handsfree" ||
+            data.approval_mode === "yolo"
+          ) {
             setApprovalMode(data.approval_mode);
-            setYoloMode(data.approval_mode === "yolo");
+            setApprovalModeSyncStatus("ready");
           }
           if (msg.session_id) {
             setSessionId(msg.session_id);
@@ -1071,7 +1073,7 @@ export function useSessionStore(callbacks: SessionStoreCallbacks = {}): SessionS
     setSessionId("");
     setWaiting(false);
     clearPendingInteractions();
-    setHandsfreeMode(false);
+    setApprovalModeSyncStatus("loading");
     setClipboardDisplays({});
     setTaskProgress({});
     setDynamicEndpoints([]);
@@ -1090,6 +1092,7 @@ export function useSessionStore(callbacks: SessionStoreCallbacks = {}): SessionS
     setSessionId(sid);
     setWaiting(false);
     clearPendingInteractions();
+    setApprovalModeSyncStatus("loading");
     setClipboardDisplays({});
     setTaskProgress({});
     setDynamicEndpoints([]);
@@ -1434,12 +1437,10 @@ export function useSessionStore(callbacks: SessionStoreCallbacks = {}): SessionS
     setSessions,
     searchQuery,
     setSearchQuery,
-    handsfreeMode,
-    setHandsfreeMode,
     approvalMode,
     setApprovalMode,
-    yoloMode,
-    setYoloMode,
+    approvalModeSyncStatus,
+    setApprovalModeSyncStatus,
     taskProgress,
     setTaskProgress,
     clipboardDisplays,

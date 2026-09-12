@@ -274,6 +274,9 @@
 }
 
 .approval-model-badge {
+  appearance: none;
+  border: 0;
+  line-height: inherit;
   font-size: 11px;
   font-family: "SF Mono", "Fira Code", monospace;
   padding: 4px 12px;
@@ -298,6 +301,28 @@
   color: var(--text-white);
   opacity: 1;
   box-shadow: 0 4px 12px -4px var(--accent-glow);
+}
+
+.approval-model-badge.sync-loading {
+  background: var(--surface-hover);
+  color: var(--text-muted);
+  opacity: 0.75;
+}
+
+.approval-model-badge.sync-unavailable {
+  background: var(--surface-hover);
+  color: var(--text-muted);
+  opacity: 0.5;
+}
+
+.approval-model-badge:disabled {
+  cursor: not-allowed;
+  box-shadow: none;
+}
+
+.approval-model-badge:disabled:hover {
+  filter: none;
+  transform: none;
 }
 
 .model-icon {

@@ -74,7 +74,8 @@ WS /ws/chat?resume=<sid>
 
 - `build_hash`：当前前端构建哈希，变化时前端提示刷新。
 - `server_info`：服务端信息。
-- `session_history`：恢复会话时回放历史消息。
+- `handsfree_mode`：每次连接都会主动发送的当前会话权威审批模式，包含兼容布尔字段 `handsfree_mode` 与三态字段 `approval_mode`；新会话和恢复会话行为一致。
+- `session_history`：恢复会话时回放历史消息；其中的审批模式字段仅保留作兼容回放，完整连接同步以独立 `handsfree_mode` 消息为准。
 
 ### 上行消息类型
 
