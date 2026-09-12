@@ -209,7 +209,7 @@ fast 模式的动态沙盒空间由 Application 持有的 Sandbox 单例统一�
 - `system/agentspace/`：Agentspace 编辑器后端业务包。`AgentspaceService` 统一版本化 CRUD、用户垃圾桶、按 Agent 回复轮次持有的文件锁、文件变化 watcher、SSE 事件总线和用户变更摘要；Gateway 与内置工具均通过该服务协作。
 - `system/llm_profile_store.py`：进程内唯一的 LLM Profile 注册表。仅支持 `llm_profiles.es` 的 `v2` key，直接持有并保存 `LLMProfileData` 根对象；Profile 间多模态分工使用根列表中的实例引用，Gateway 通过单 Profile CRUD 修改。
 - `system/context.py`：`RuntimeContext`，贯穿整个应用的生命周期上下文。
-- `system/sandbox.py`：路径沙盒、固定命名空间解析，以及 fast 模式全局动态沙盒空间的严格加载、原子持久化、增删改、目录可用性和权限管理；动态配置位于 workspace 根且由 Application 的唯一 Sandbox 实例持有。用户管理弹窗通过 Gateway REST 复用该单例。
+- `system/sandbox.py`：路径沙盒、固定命名空间解析，以及 fast 模式全局动态沙盒空间的严格加载、原子持久化、增删改、目录可用性和权限管理；文本 `Read` 会按 UTF-8、系统编码和 Windows 常见编码自动探测，编辑路径仍严格要求 UTF-8。动态配置位于 workspace 根且由 Application 的唯一 Sandbox 实例持有。用户管理弹窗通过 Gateway REST 复用该单例。
 - `system/session_store.py`：单个会话的文件读写（`history.es`、`summary.txt`、`token_usage.json`、`tool_resources.json` 等）；活动 LLM Profile 仅以 `{"profile_name": ...}` 名称指针保存。旧版 `messages.jsonl` 已由 `scripts/migrate_v0_to_v1.py` 迁移到会话 v1 格式。
 - `system/prompt.py` / `system/templates.py`：System Prompt 组装与模板渲染。
 - `system/convert.py`：类型转换工具（`as_enum()`、`as_bool()`）。

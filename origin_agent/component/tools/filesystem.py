@@ -1263,7 +1263,7 @@ def _handle_edit(
 
     try:
         _track_agentspace_access(context, [(path, False)])
-        content: str = _s().read(path, limit=0)
+        content: str = _s().read(path, limit=0, strict_utf8=True)
     except Exception as exc:
         return tool_error(str(exc), path=path)
 

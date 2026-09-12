@@ -48,6 +48,7 @@ from entity.puretype import (
 from system.atomic_io import replace_atomic
 from system.context import get_runtime_context
 from system.pathutils import find_repo_root
+from system.text_codec import decode_text
 
 from pydantic import BaseModel, ConfigDict
 
@@ -779,15 +780,32 @@ class Sandbox:
 
     # -- 工具辅助方法 --------------------------------------------------
 
-    def read(self, logical: str, offset: int = 0, limit: int = 100) -> str:
-        """通过沙盒读取文件内容，支持按行分页。
+    def read(
+        self,
+        logical: str,
+        offset: int = 0,
+        limit: int = 100,
+        *,
+        strict_utf8: bool = False,
+    ) -> str:
+        """通过沙盒读取文件内容，支持按行分页和常见编码自动探测。
 
-        offset: 起始行号（0-indexed，默认 0）。
-        limit:  最大返回行数（默认 100）。传 0 读取完整文件不截断。
+        普通查看路径会按候选编码严格尝试，避免日志中的单个非法 UTF-8
+        字节导致整个 Read 失败。编辑路径应传入 ``strict_utf8=True``，
+        防止非 UTF-8 文件被读取后又以 UTF-8 写回。
         """
         r: ResolvedPath = self.resolve_read(logical)
         try:
-            content: str = r.real.read_text(encoding="utf-8")
+            raw = r.real.read_bytes()
+            content, encoding, fallback_used = decode_text(
+                raw, strict_utf8=strict_utf8,
+            )
+            if fallback_used:
+                logger.warning(
+                    "Sandbox.read decoded non-UTF-8 text | path=%s | encoding=%s",
+                    logical,
+                    encoding,
+                )
             if limit > 0 and (offset > 0 or limit < len(content.splitlines())):
                 lines: list[str] = content.splitlines()
                 chunk: list[str] = lines[offset:offset + limit]
@@ -795,6 +813,10 @@ class Sandbox:
             return content
         except FileNotFoundError:
             raise SandboxError(f"File not found: {logical}")
+        except UnicodeDecodeError as exc:
+            raise SandboxError(
+                f"File is not valid UTF-8 and cannot be edited: {logical}"
+            ) from exc
 
     def write(self, logical: str, content: str) -> None:
         """通过沙盒写入文件内容。"""
@@ -906,7 +928,17 @@ class Sandbox:
             raise SandboxError(f"File not found: {logical}")
         if not r.real.is_file():
             raise SandboxError(f"Not a file: {logical}")
-        content = r.real.read_text(encoding="utf-8")
+        try:
+            raw = r.real.read_bytes()
+            content, encoding, fallback_used = decode_text(raw)
+            if fallback_used:
+                logger.warning(
+                    "Sandbox.count_lines decoded non-UTF-8 text | path=%s | encoding=%s",
+                    logical,
+                    encoding,
+                )
+        except FileNotFoundError:
+            raise SandboxError(f"File not found: {logical}")
         if content:
             return content.count("\n") + (1 if not content.endswith("\n") else 0)
         return 0
