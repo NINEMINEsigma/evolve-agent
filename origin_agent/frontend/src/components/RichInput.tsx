@@ -291,9 +291,16 @@ const RichInput = React.forwardRef<HTMLDivElement, RichInputProps>(function Rich
     }
     const textBefore = (node.textContent || "").substring(0, range.startOffset);
 
-    // 查找最后一个未被空格截断的 @ 或 /
+    // 查找最后一个 @，以及仅位于输入开头或空白之后的 /。
+    // @ 后的 / 是路径分隔符（例如 @project/src/），不能被当作 /skill 触发符。
     const atIdx = textBefore.lastIndexOf("@");
-    const slashIdx = textBefore.lastIndexOf("/");
+    let slashIdx = -1;
+    for (let index = textBefore.lastIndexOf("/"); index >= 0; index = textBefore.lastIndexOf("/", index - 1)) {
+      if (index === 0 || /\s/.test(textBefore[index - 1])) {
+        slashIdx = index;
+        break;
+      }
+    }
     const triggerIdx = Math.max(atIdx, slashIdx);
     if (triggerIdx === -1) {
       setMention(MENTION_NONE);
@@ -381,6 +388,21 @@ const RichInput = React.forwardRef<HTMLDivElement, RichInputProps>(function Rich
     delRange.setEnd(m.range.startContainer, m.range.startOffset);
     delRange.deleteContents();
 
+    // 目录选择用于继续导航：保留 @ 路径文本并追加 /，让菜单立即查询子目录。
+    // 目录不生成不可编辑 chip，鼠标点击、Tab 和 Enter 都不会结束输入。
+    if (m.trigger === "@" && item.icon === "dir") {
+      const directoryText = document.createTextNode(`@${item.id}/`);
+      delRange.insertNode(directoryText);
+      delRange.setStartAfter(directoryText);
+      delRange.collapse(true);
+      sel.removeAllRanges();
+      sel.addRange(delRange);
+      notifyChange();
+      autoResize();
+      detectMention();
+      return;
+    }
+
     // 构建标签文本
     const tagText = m.trigger === "@"
       ? `@ws:${item.id}`
@@ -421,7 +443,18 @@ const RichInput = React.forwardRef<HTMLDivElement, RichInputProps>(function Rich
 
   const handleKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
     const m = mentionRef.current;
-    const menuOpen = m !== MENTION_NONE && m.items.length > 0;
+    const mentionActive = m !== MENTION_NONE;
+    const menuOpen = mentionActive && m.items.length > 0;
+
+    // 目录选择后重新加载子目录期间，候选项会暂时为空。
+    // 仍需拦截 Enter/Tab，避免落入普通 Enter 发送逻辑或切走输入焦点。
+    if (mentionActive && (e.key === "Enter" || e.key === "Tab")) {
+      e.preventDefault();
+      if (menuOpen && m.items[m.selectedIndex]) {
+        insertMention(m.items[m.selectedIndex]);
+      }
+      return;
+    }
 
     if (menuOpen) {
       if (e.key === "ArrowDown") {
@@ -440,13 +473,6 @@ const RichInput = React.forwardRef<HTMLDivElement, RichInputProps>(function Rich
             ? prev
             : { ...prev, selectedIndex: (prev.selectedIndex - 1 + prev.items.length) % prev.items.length },
         );
-        return;
-      }
-      if (e.key === "Enter" || e.key === "Tab") {
-        e.preventDefault();
-        if (m.items[m.selectedIndex]) {
-          insertMention(m.items[m.selectedIndex]);
-        }
         return;
       }
       if (e.key === "Escape") {

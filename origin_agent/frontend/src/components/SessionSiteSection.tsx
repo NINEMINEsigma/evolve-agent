@@ -1,9 +1,9 @@
 /**
  * 会话网页抽屉 — 与"会话资源/任务"抽屉和"模型配置"抽屉并列的独立右侧抽屉。
  *
- * 拉模式探测：打开或 sessionId 变化时 fetch 一次 index.html，
- * 404/网络异常 → 空态"尚未部署网页"；
- * 200 → toolbar 一行 + iframe 撑满剩余空间（自适应宽高、无冗余边框）。
+ * 拉模式探测：组件挂载、打开或 sessionId 变化时 fetch 一次 index.html，
+ * 404/网络异常 → 空态"尚未部署网页"，并隐藏右侧触发按钮；
+ * 200 → 显示右侧触发按钮，抽屉内 toolbar 一行 + iframe 撑满剩余空间（自适应宽高、无冗余边框）。
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -13,6 +13,7 @@ interface SessionSiteDrawerProps {
   open: boolean;
   onClose: () => void;
   sessionId: string;
+  onAvailabilityChange?: (available: boolean) => void;
   width?: number;
   isResizing?: boolean;
   onResizePointerDown?: (e: React.PointerEvent<HTMLElement>) => void;
@@ -21,7 +22,7 @@ interface SessionSiteDrawerProps {
 type ProbeStatus = "idle" | "missing" | "ready";
 
 export default function SessionSiteDrawer({
-  open, onClose, sessionId, width, isResizing, onResizePointerDown,
+  open, onClose, sessionId, onAvailabilityChange, width, isResizing, onResizePointerDown,
 }: SessionSiteDrawerProps) {
   const [status, setStatus] = useState<ProbeStatus>("idle");
   const [reloadKey, setReloadKey] = useState(0);
@@ -34,6 +35,7 @@ export default function SessionSiteDrawer({
   const probe = useCallback(async () => {
     if (!urls) {
       setStatus("missing");
+      onAvailabilityChange?.(false);
       return;
     }
     const seq = ++probeSeqRef.current;
@@ -41,19 +43,20 @@ export default function SessionSiteDrawer({
       const resp = await fetch(urls.indexUrl, { cache: "no-store" });
       if (seq !== probeSeqRef.current) return;
       setStatus(resp.ok ? "ready" : "missing");
+      onAvailabilityChange?.(resp.ok);
     } catch {
       if (seq !== probeSeqRef.current) return;
       setStatus("missing");
+      onAvailabilityChange?.(false);
     }
-  }, [urls]);
+  }, [urls, onAvailabilityChange]);
 
   // sessionId 变化：重置状态并重新探测
   useEffect(() => {
     setStatus("idle");
+    onAvailabilityChange?.(false);
     setReloadKey(0);
-    if (open) {
-      probe();
-    }
+    probe();
   }, [sessionId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // open 由 false→true 时探测

@@ -38,6 +38,7 @@ export default function Layout({ ws, onContextMenu, contextMenuOpen, onboardingR
   const [llmDrawerOpen, setLlmDrawerOpen] = usePersistentState(STORAGE_KEYS.LLM_DRAWER_OPEN, false);
   const [sandboxSpacesOpen, setSandboxSpacesOpen] = useState(false);
   const [siteDrawerOpen, setSiteDrawerOpen] = usePersistentState(STORAGE_KEYS.SITE_DRAWER_OPEN, false);
+  const [siteAvailable, setSiteAvailable] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = usePersistentState(STORAGE_KEYS.SIDEBAR_COLLAPSED, false);
   const [drawerOpen, setDrawerOpen] = usePersistentState(STORAGE_KEYS.DRAWER_OPEN, false);
   const [subagentPanelOpen, setSubagentPanelOpen] = usePersistentSessionState<boolean>(
@@ -432,13 +433,15 @@ export default function Layout({ ws, onContextMenu, contextMenuOpen, onboardingR
               <span className="right-trigger-icon">◀</span>
             </div>
           )}
-          <div
-            className="right-trigger-bar site-trigger-bar"
-            onClick={() => setSiteDrawerOpen(true)}
-            data-tooltip="打开会话网页抽屉"
-          >
-            <span className="right-trigger-icon">◀</span>
-          </div>
+          {siteAvailable && (
+            <div
+              className="right-trigger-bar site-trigger-bar"
+              onClick={() => setSiteDrawerOpen(true)}
+              data-tooltip="打开会话网页抽屉"
+            >
+              <span className="right-trigger-icon">◀</span>
+            </div>
+          )}
           <div
             className="right-trigger-bar llm-trigger-bar"
             data-tour="llm-trigger"
@@ -509,6 +512,7 @@ export default function Layout({ ws, onContextMenu, contextMenuOpen, onboardingR
         open={siteDrawerOpen}
         onClose={() => setSiteDrawerOpen(false)}
         sessionId={ws.sessionId}
+        onAvailabilityChange={setSiteAvailable}
         width={siteDrawerWidth}
         isResizing={siteDrawerResize.isResizing}
         onResizePointerDown={siteDrawerResize.onPointerDown}
