@@ -108,15 +108,6 @@ class App:
         # ---- 排空后台任务 ----
         await self._drain_background_tasks()
 
-        # ---- 清理后台服务进程 ----
-        try:
-            from component.extools.bg_registry import cleanup_background_services
-            killed = await asyncio.to_thread(cleanup_background_services)
-            if killed:
-                logger.info("Cleaned up %d background service(s)", killed)
-        except Exception as exc:
-            logger.warning("Background service cleanup failed: %s", exc)
-
         # ---- 清理 LSP 进程 ----
         try:
             from system.lsp import cleanup_lsp

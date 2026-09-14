@@ -87,7 +87,7 @@ frontend/
 | `Layout.tsx` | 布局容器，管理主聊天区与侧面板的排列 |
 | `Sidebar.tsx` | 会话列表、搜索、新建会话 |
 | `Header.tsx` | 顶部工具栏、模型信息、设置入口；审批徽章按当前会话显示手动/脱手/YOLO，并在连接同步期间显示不可点击的“加载中”或“不可用” |
-| `Drawer.tsx` | 侧边抽屉容器 |
+| `Drawer.tsx` | 侧边抽屉容器；资源区包含 Shell会话元数据列表与用户停止按钮，不提供终端输出或人工输入 |
 | `OnboardingTour.tsx` | 首次访问引导向导（react-joyride），spotlight 高亮 + 步骤动画驱动 |
 | `ErrorBoundary.tsx` | 错误边界，防止模态组件异常卸载整个 App |
 | `SplashScreen.tsx` | 开屏动画，最少停留 800ms、最多 3000ms，可点击跳过 |
@@ -161,7 +161,7 @@ frontend/
 
 | Hook | 职责 |
 |---|---|
-| `useWebSocket.ts` | WebSocket 与状态管理核心：解析下行消息、管理消息列表、流式渲染、发送上行消息、调用 REST API；每条用户消息携带活动 Profile 名称并处理 `llm_profile_changed`；会话审批模式仅接受服务端权威值，使用 `loading/ready/unavailable` 同步状态约束徽章和非乐观模式切换；发送时不乐观渲染气泡，改为记录 pending message 供输入栏显示"已排队"徽章；中断为后端权威流程，不再提前显示"已中断"，timeout/failed 后查询服务端真实状态一次 |
+| `useWebSocket.ts` | WebSocket 与状态管理核心：解析下行消息、管理消息列表、流式渲染、发送上行消息、调用 REST API；每条用户消息携带活动 Profile 名称并处理 `llm_profile_changed`；重新生成请求携带当前 Profile 名称，resume 请求仅恢复当前工具链，不携带也不更新 Profile；会话审批模式仅接受服务端权威值，使用 `loading/ready/unavailable` 同步状态约束徽章和非乐观模式切换；发送时不乐观渲染气泡，改为记录 pending message 供输入栏显示“已排队”徽章；中断为后端权威流程，不再提前显示“已中断”，timeout/failed 后查询服务端真实状态一次 |
 | `useLlmProfiles.ts` | 从服务端读取 Profile；提供单对象创建/编辑/删除；浏览器仅持久化活动 Profile 名称，不保存 Profile 列表 |
 | `useWebSocketConnection.ts` | WebSocket 连接生命周期管理：建立/断开/重连/心跳；消息入口按连接代际和当前 WebSocket 实例丢弃旧连接迟到消息，避免快速切换会话时污染当前状态 |
 | `useSessionStore.ts` | 会话列表与元数据管理：获取/创建/归档/删除/标签/标题；以 `approvalMode` 作为当前会话审批模式的唯一真相源，并维护 `loading/ready/unavailable` 同步状态，切换或新建会话时立即清除旧徽章语义；维护 pending messages 状态（`pendingMessages`），在 `USER_MESSAGE` 回显时渲染正式气泡并移除 pending，在 `TOOL_RESULT` 携带 `consumed_client_message_ids` 时移除匹配 pending，中断/切会话/历史重载时清空 |

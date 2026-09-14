@@ -4,16 +4,17 @@ uvicorn
 websockets
 openai
 anthropic==0.71.0
+pywinpty>=3.0.5,<4; sys_platform == "win32"
 pydantic
-# pyautogui>=0.9.54
-# pygetwindow>=0.0.9; sys_platform == 'darwin' or sys_platform == 'win32'
+pyautogui>=0.9.54; sys_platform == 'darwin' or sys_platform == 'win32'
+pygetwindow>=0.0.9; sys_platform == 'darwin' or sys_platform == 'win32'
 Pillow
 dirtyjson
 # pyright
 py7zr
 rich
 # 可选：component/browser 工具组的 CDP 浏览器接管（未安装时工具自动隐藏，check_fn 控制）
-# playwright
+playwright; sys_platform == 'darwin' or sys_platform == 'win32'
 rank-bm25
 watchdog>=6.0,<7
 pathspec>=0.12,<1

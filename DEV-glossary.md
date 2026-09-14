@@ -89,6 +89,12 @@
 | 热交换 | slow→fast 交换并重启 | fast-slow swap |
 | 进化循环 | fast-slow-fallback 全流程统称 | evolution cycle |
 | 回退修复 | fallback 模式下由 fallback仓库 修复 fast仓库 | fallback repair |
+| Shell会话 | 由 Agent 通过 ConPTY 持有、可跨多次工具调用持续读写的长期交互式命令解释器实例 | Shell session |
+| 启动Shell | 创建独立 Shell会话并写入首条命令的工具 | `StartShell` |
+| 读取Shell | 按绝对字符位置读取 Shell会话规范化输出的工具 | `ReadShell` |
+| 写入Shell | 向已有 Shell会话发送一行文本的工具 | `WriteShell` |
+| 中断Shell | 向已有 Shell会话发送 Ctrl-C、但不终结 Shell 的工具 | `InterruptShell` |
+| 停止Shell | 强制终结 Shell会话及其进程树的工具 | `StopShell` |
 | 进化状态 | `workspace/logs/evolution.status` 记录的进化结果状态 | evolution status |
 
 ---

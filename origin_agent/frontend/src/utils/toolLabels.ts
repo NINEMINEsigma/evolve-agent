@@ -5,6 +5,11 @@ export function getToolTitle(tool?: string): string {
 }
 
 const TOOL_LABELS: Array<[string, string]> = [
+  ["StartShell", "确认启动 Shell"],
+  ["ReadShell", "读取 Shell 输出"],
+  ["WriteShell", "确认写入 Shell"],
+  ["InterruptShell", "确认中断 Shell"],
+  ["StopShell", "确认停止 Shell"],
   ["Command", "确认执行命令"],
   ["Python", "确认运行 Python"],
   ["File", "确认文件操作"],

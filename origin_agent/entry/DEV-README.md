@@ -40,6 +40,7 @@ entry/
   - `Inbox` 带类型消息队列（`UserMessage`；SubAgentLoop 父→子通道使用，主会话已切 SessionMessageQueue）。
   - 取消控制（`interrupt()`、`is_interrupted()`）。
   - `ToolContext` 注入到工具 handler，替代旧的全局 `get_runtime_context()`；上下文携带必填 `round_id`，明确 `ws:` 文件接触通过 `agentspace_access()` fail-closed 登记。
+  - `ToolContext.resource_session_id`：长期资源归属的主会话 ID；主Agent/参与Agent使用当前主会话，子Agent/临时Agent使用公开 `parent_session_id`。
   - 回复轮次文件锁：`begin_agentspace_round()` / `current_agentspace_round()` / `end_agentspace_round()` 按角色管理唯一 round ID，并在完整回复收尾后幂等释放。
   - 通用持久化方法：`save_history()`、`load_history()`。
   - Token 统计：`_token_usage`、`_last_prompt_tokens`。
@@ -75,7 +76,7 @@ entry/
 - 会话旋转：当上下文接近上限时，通过 `LoopSessionManager` 归档旧会话并创建带摘要的延续会话。
 - 自动标题与标签生成。
 - 子Agent编排：通过 `SubAgentOrchestrator` 启动/管理子 Agent。
-- LLM Profile：活动配置始终是 `Application.llm_profile_store` 根对象中的实例；`set_profile(None)` 表示明确无配置。主会话队列逐条 FIFO 消费，每条前端消息保留自己的 `llm_profile_name`，执行前重新解析并构造客户端。
+- LLM Profile：活动配置始终是 `Application.llm_profile_store` 根对象中的实例；`set_profile(None)` 表示明确无配置。主会话队列逐条 FIFO 消费，每条前端消息保留自己的 `llm_profile_name`，执行前重新解析并构造客户端。`resume()` 是从现有历史继续执行工具链的恢复操作，不追加用户消息、不截断历史，也不接收或更新 `llm_profile_name`；它使用当前 `ParentAgentLoop` 已持有的活动 Profile。需要切换 Profile 后重新生成时，应使用 `/regenerate`。
 
 ### `MultiAgentLoop` / `MultiAgentWorker`
 
@@ -108,8 +109,8 @@ entry/
 
 - `initialize()`：从磁盘加载已有历史。
 - `is_context_over_limit()`：判断 token 数是否接近配置上限。
-- `rotate_session_for_continuation()`：终结旧会话 + 创建继承会话 + 迁移运行态资源。
-- `terminate_session()`：归档 + 摘要，不旋转。
+- `rotate_session_for_continuation()`：终结旧会话 + 创建继承会话 + 迁移运行态资源（含 Shell会话所有权）。
+- `terminate_session()`：归档 + 摘要，不旋转；归档完成后停止该主会话全部 Shell。
 - `pop_session_rotated()`：取出旋转通知（old_sid → new_sid）。
 
 > 注意：`MultiAgentLoop` 明确声明不支持 session 旋转和合并（存在 TODO 标记），因此未使用 `LoopSessionManager`。

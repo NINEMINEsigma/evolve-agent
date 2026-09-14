@@ -150,6 +150,14 @@ class ToolContext(BaseModel):
         return self.app.runtime_context
 
     @property
+    def resource_session_id(self) -> str:
+        """返回长期资源归属的主会话 ID。"""
+        parent_session_id = getattr(self.loop, "parent_session_id", "")
+        if isinstance(parent_session_id, str) and parent_session_id:
+            return parent_session_id
+        return self.session_id
+
+    @property
     def sink(self) -> AgentSink:
         return self.loop.get_sink()
 

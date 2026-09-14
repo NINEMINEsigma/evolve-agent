@@ -16,6 +16,7 @@ if TYPE_CHECKING:
     from system.context import RuntimeContext
     from system.llm_profile_store import LLMProfileStore
     from system.sandbox import Sandbox
+    from system.shell_manager import ShellManager
     from system.subprocess_utils import SubprocessRunner
     from system.agentspace import AgentspaceService
     from gateway.session_manager import SessionManager
@@ -50,6 +51,7 @@ class Application(Architecture):
         self._llm_profile_store:         LLMProfileStore | None = None
         self._subprocess_runner:         SubprocessRunner | None = None
         self._sandbox:                   Sandbox | None = None
+        self._shell_manager:             ShellManager | None = None
         self._agentspace_service:        AgentspaceService | None = None
         self._cron_router:               CronRouter | None = None
         self._session_manager:           SessionManager | None = None
@@ -82,7 +84,11 @@ class Application(Architecture):
         # TODO: subprocess_runner本就可以通过Application获取, 不需要在构造中被引用
         self._sandbox = Sandbox(self.runtime_context, self._subprocess_runner)
 
-        # 2. AgentspaceService — 依赖共享 Sandbox；异步 watcher 在 main.py 启动。
+        # 2.5 ShellManager — 长期 Windows ConPTY Shell会话的唯一生命周期管理器。
+        from system.shell_manager import ShellManager
+        self._shell_manager = ShellManager(self._sandbox)
+
+        # 3. AgentspaceService — 依赖共享 Sandbox；异步 watcher 在 main.py 启动。
         from system.agentspace import AgentspaceService
         self._agentspace_service = AgentspaceService(
             self._sandbox,
@@ -149,6 +155,11 @@ class Application(Architecture):
         return self._sandbox  # type: ignore[return-value]
 
     @property
+    def shell_manager(self) -> ShellManager:
+        """返回进程内唯一的 Shell会话管理器。"""
+        return self._shell_manager  # type: ignore[return-value]
+
+    @property
     def agentspace_service(self) -> AgentspaceService:
         """返回 Agentspace 编辑器唯一业务服务。"""
         return self._agentspace_service  # type: ignore[return-value]
@@ -203,7 +214,16 @@ class Application(Architecture):
         """按依赖顺序停止子系统。"""
         logger.info("Application shutdown initiated")
         failures: list[str] = []
-        # 1. 停止 Agentspace watcher 与 SSE 订阅。
+        # 1. 先停止仍可能继续写文件的 Shell会话。
+        if self._shell_manager is not None:
+            try:
+                stopped = await self._shell_manager.shutdown()
+                if stopped:
+                    logger.info("Stopped %d Shell session(s)", stopped)
+            except Exception as exc:
+                logger.exception("ShellManager shutdown failed: %s", exc)
+                failures.append(f"ShellManager: {exc}")
+        # 2. 停止 Agentspace watcher 与 SSE 订阅。
         if self._agentspace_service is not None:
             try:
                 await self._agentspace_service.shutdown()

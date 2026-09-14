@@ -7,7 +7,7 @@
 
 | 改动 | 说明 |
 |:-----|:-----|
-| 平台适配 | 移除 `nohup` / `kill` / `cp -r` / `open` 等 Unix 命令，改用 `StartBackgroundService` / `Copy` / `/uploads/` 展示 |
+| 平台适配 | 移除 `nohup` / `kill` / `cp -r` / `open` 等 Unix 命令，改用 `StartShell` / `StopShell` / `Copy` / `/uploads/` 展示 |
 | 工具链适配 | `claude -p` → `run_subagent` / `RecallSkill`；MCP → `WebSearch` / `WebFetch`；TodoList → `SetTaskProgress` |
 | 展示适配 | 查看器改用 `--static` 静态 HTML 模式，经 `/uploads/` 嵌入聊天 |
 | 脚本处理 | 绑定 Claude CLI 的 `run_eval.py` / `run_loop.py` / `improve_description.py` / `generate_report.py` 归档至 `scripts/_legacy_claude_code/`；`quick_validate.py` 重写为纯 stdlib（无 PyYAML 依赖）并适配本系统 frontmatter 扩展字段 |

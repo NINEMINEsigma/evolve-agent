@@ -15,6 +15,7 @@ puretype 包 — 只含有不包含任何方法定义的类型定义。
     ws          : MessageType, Message
     lsp         : LSPState, LSPDiagnostic, LSPReference, LSPDefinition, LSPSymbol
     runtime     : SystemInfo, ClientInfo, ProcessLineStreamResult
+    shell       : ShellInfo, ShellOutputSlice
     sandbox     : DynamicSandboxSpace, DynamicSandboxSpaceData
     extools     : CronTaskInfo, DynamicEndpointInfo
     agentspace  : AgentspaceEntry/Event/FileSnapshot/Lock/Trash 与 REST 请求模型
@@ -88,6 +89,10 @@ from .runtime import (
     SystemInfo,
     ClientInfo,
     ProcessLineStreamResult,
+)
+from .shell import (
+    ShellInfo,
+    ShellOutputSlice,
 )
 from .sandbox import (
     DynamicSandboxSpace,
@@ -177,6 +182,9 @@ __all__ = [
     "SystemInfo",
     "ClientInfo",
     "ProcessLineStreamResult",
+    # shell
+    "ShellInfo",
+    "ShellOutputSlice",
     # sandbox
     "DynamicSandboxSpace",
     "DynamicSandboxSpaceData",

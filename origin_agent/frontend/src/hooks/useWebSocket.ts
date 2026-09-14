@@ -676,9 +676,9 @@ export function useWebSocket() {
     if (!session.sessionId) return;
     const sid = session.sessionId;
     const fetchTasks = () => {
-      fetch(`/api/sessions/${sid}/background-tasks`)
+      fetch(`/api/sessions/${sid}/shells`)
         .then((r) => r.json())
-        .then((d) => sessionRef.current?.setBgTasks(d.tasks || []))
+        .then((d) => sessionRef.current?.setShells(d.shells || []))
         .catch(() => {});
       fetch(`/api/sessions/${sid}/cron-tasks`)
         .then((r) => r.json())
@@ -817,8 +817,8 @@ export function useWebSocket() {
     setMergeMode: session.setMergeMode,
     selectedForMerge: session.selectedForMerge,
     setSelectedForMerge: session.setSelectedForMerge,
-    bgTasks: session.bgTasks,
-    setBgTasks: session.setBgTasks,
+    shells: session.shells,
+    setShells: session.setShells,
     cronTasks: session.cronTasks,
     setCronTasks: session.setCronTasks,
     subagentIdleCountdown: subagent.subagentIdleCountdown,

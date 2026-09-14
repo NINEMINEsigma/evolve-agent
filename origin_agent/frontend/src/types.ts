@@ -294,6 +294,20 @@ export interface DynamicEndpoint {
   created_at: number;
 }
 
+export interface ShellInfo {
+  shell_id: string;
+  pid: number | null;
+  session_id: string;
+  character_name: string;
+  shell_type: string;
+  cwd: string;
+  started_at: number;
+  last_activity_at: number;
+  running: boolean;
+  termination: "natural" | "forced" | "error" | null;
+  exit_code: number | null;
+}
+
 export interface CronTask {
   task_id: string;
   session_id?: string;

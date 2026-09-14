@@ -177,6 +177,10 @@ graph TD
 
 ---
 
+## Shell会话所有权
+
+子Agent与临时Agent可使用 `shell` 工具集创建 Shell会话。资源所有权使用父主会话 ID 与自身角色名，而不是子会话 ID；因此不同 Agent 不能互相读取、写入、中断或停止 Shell。主会话自动旋转时，ShellManager 迁移 Shell并保留旧父会话 ID 的临时解析别名，使尚未结束的子Agent仍能继续操作；手动终结、永久删除和应用关闭会停止关联 Shell。
+
 ## Agentspace 回复轮次文件锁
 
 - `SubAgentLoop` 在初始消息或被 `_wake_event` 唤醒开始回复时创建唯一 round ID；连续工具回环沿用该 ID，纯文本回复完成并进入等待前释放，异常/停止路径在 `finally` 幂等释放。

@@ -269,6 +269,15 @@ class LoopSessionManager:
             logger.info("Auto-classified tags for session %s: %s", old_sid, tags)
         sm.archive(old_sid, continuation_sid=None)
 
+        try:
+            from system.application import Application
+            await Application.current().shell_manager.stop_session(old_sid)
+        except Exception:
+            logger.exception(
+                "Failed to stop Shell sessions during termination | session=%s",
+                old_sid,
+            )
+
         logger.info(
             "Session terminated | old=%s summary=%d chars", old_sid, len(summary),
         )
@@ -447,6 +456,24 @@ async def terminate_and_rotate_session(
     except Exception:
         logger.exception(
             "Failed to migrate dynamic endpoints from %s to %s", old_sid, new_sid,
+        )
+
+    # 10. 迁移 Shell会话（手动终结不经过本路径）
+    try:
+        from system.application import Application
+        migrated_shells = Application.current().shell_manager.migrate_session(
+            old_sid, new_sid,
+        )
+        if migrated_shells:
+            logger.info(
+                "Migrated %d Shell session(s) | old=%s new=%s",
+                migrated_shells, old_sid, new_sid,
+            )
+    except Exception:
+        logger.exception(
+            "Failed to migrate Shell sessions from %s to %s; "
+            "they may remain owned by the archived session",
+            old_sid, new_sid,
         )
 
     logger.info(

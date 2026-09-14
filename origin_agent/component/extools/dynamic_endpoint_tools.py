@@ -244,9 +244,8 @@ def cleanup_session_endpoints(session_id: str) -> int:
     持锁做磁盘 IO 的风格一致。整段 try/except 容错，失败 ``logger.warning``，
     返回已统计数。
 
-    由 ``cleanup_session_resources`` 在会话永久删除时调用，须在
-    ``stop_session_background_tasks`` 停止 watching 进程之后执行（端点是被
-    watching flusher 引用的资源，先停引用方再清被引用方）。
+    由 ``cleanup_session_resources`` 在会话永久删除时调用。动态端点与
+    Shell会话互不引用，可在 Cron 清理后独立删除。
     """
     in_memory = 0
     on_disk = 0
@@ -403,18 +402,6 @@ async def _handle_unregister_dynamic_endpoint(
         return tool_error(f"Endpoint not found: {name}")
 
     _delete_endpoint_on_disk(name)
-
-    # 级联停止引用此端点的 watching service
-    try:
-        from component.extools.bg_registry import stop_watching_by_endpoint
-        stopped_count = stop_watching_by_endpoint(name)
-        if stopped_count:
-            logger.info(
-                "Cascade stopped %d watching service(s) for endpoint %s",
-                stopped_count, name,
-            )
-    except Exception:
-        logger.warning("Failed to cascade stop watching services for %s", name, exc_info=True)
 
     logger.info(
         "Dynamic endpoint unregistered | name=%s session=%s agent=%s",

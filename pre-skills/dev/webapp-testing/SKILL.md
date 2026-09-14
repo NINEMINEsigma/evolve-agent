@@ -124,7 +124,7 @@ See `references/ui-regression-checklist.md`.
 
 Prefer an already-running server or the actual Session Site route. Do not start another process on the gateway port `8765`. Use `scripts/with_server.py` only when a project genuinely needs a temporary development server; run its `--help` first, use a free high port, and let it clean up its child process. It is a fallback helper, not the default test path.
 
-When a background service must be stopped, use the dedicated `StopBackgroundService` tool rather than killing it through Python or shell commands.
+When a persistent Shell must be stopped, use the dedicated `StopShell` tool rather than killing it through another Shell or Python command.
 
 ## Screenshot and artifact handling
 

@@ -39,12 +39,12 @@ tags: [skill, creator, eval, benchmark, workflow]
 | 测试执行 | `claude -p` 子进程 | `run_subagent`（子代理加载技能）或本会话 `RecallSkill` 后测试 |
 | 展示 | `webbrowser.open()` 本地服务器 | `eval-viewer/generate_review.py --static` 生成 HTML → `/uploads/` + iframe 嵌入聊天 |
 | 反馈 | 浏览器下载 `feedback.json` | 用户在聊天里直接反馈，或用 `register_dynamic_endpoint` 收集 |
-| 后台服务 | `nohup ... &` / `kill $PID` | `StartBackgroundService` / `StopBackgroundService` |
+| 后台服务 | `nohup ... &` / `kill $PID` | `StartShell` / `ReadShell` / `StopShell` |
 | 复制快照 | `cp -r` | `Copy` |
 | 进度跟踪 | TodoList | `SetTaskProgress` |
 | 外部调研 | MCP | `WebSearch` / `WebFetch` / 子代理 |
 | 触发机制 | Claude `available_skills` | `RecallSkill` 的 name+description 常驻，描述匹配决定是否 `RecallSkill` |
-| 脚本执行 | `python scripts/x.py` 直接运行 | `RunCommand` 全路径调用；脚本路径以 `RecallSkill` 返回的 `skill_dir` 为准（见「运行与评估测试用例」开头） |
+| 脚本执行 | `python scripts/x.py` 直接运行 | `StartShell` 调用 `namespace_env` 返回的 `EVOLVE_PYTHON` 引用；脚本路径以 `RecallSkill` 返回的 `skill_dir` 为准（见「运行与评估测试用例」开头） |
 | 子代理 | 一次性任务子进程 | 需先 `register_subagent` 注册 profile；`run_subagent` 返回 `session_id`，结果异步注入父会话、无时序字段 |
 
 **脚本可用性：**
@@ -196,7 +196,7 @@ Output: feat(auth): implement JWT-based authentication
 
 目录层级：`eval-<ID>/<配置>/run-<M>/`——配置如 `with_skill`、`without_skill`、`old_skill`；`run-<M>` 是运行编号（单次运行就用 `run-1`，多次重复运行取均值时递增）。每次运行的产物放 `run-<M>/outputs/`，`grading.json` 和 `timing.json` 直接放在 `run-<M>/` 下。聚合脚本与查看器都依赖这个层级，缺了 `run-<M>` 层会一次运行都识别不到。
 
-本技能自身的安装位置（`<SKILL_DIR>`）：本技能可能被改名、移动或放入 category 子目录，其他用户的安装位置也可能不同——**不要假设目录名是 `skill-creator`**。以 `RecallSkill` 返回的 `skill_dir` 为准：取其位于 `skills/` 下的相对部分拼成 `skills:<相对目录>` 逻辑路径（`RunCommand` 会自动展开 `skills:` 前缀），或直接使用返回的绝对路径。下文所有 `<SKILL_DIR>` 均指此；`agents/`、`references/`、`scripts/` 等技能内部相对路径也按 `skill_dir` 解析。
+本技能自身的安装位置（`<SKILL_DIR>`）：本技能可能被改名、移动或放入 category 子目录，其他用户的安装位置也可能不同——**不要假设目录名是 `skill-creator`**。以 `RecallSkill` 返回的 `skill_dir` 绝对路径为准；若从 `skills:` 逻辑路径构造，则必须使用 `StartShell` 返回的 `namespace_env` 中 `skills:` 环境变量引用，命令文本不会自动展开逻辑前缀。下文所有 `<SKILL_DIR>` 均指此；`agents/`、`references/`、`scripts/` 等技能内部相对路径也按 `skill_dir` 解析。
 
 ### 第1步：在同一回合生成所有运行（带技能 AND 基线）
 
@@ -266,25 +266,22 @@ Execute this task:
 
 1. **为每次运行评分**——启动评分子代理（或内联评分），读取 `agents/grader.md`，对照输出评估每个断言。结果保存到每个运行目录（`run-<M>/`）的 `grading.json`。grading.json 的 expectations 数组必须使用 `text`、`passed`、`evidence` 字段（不是 `name`/`met`/`details` 等变体）——查看器依赖这些精确字段名。能用脚本程序化检查的断言就写脚本跑，别用肉眼——脚本更快、更可靠、可跨迭代复用。
 
-2. **聚合成基准**——用 `RunCommand` 调用本技能自带的聚合脚本（`<SKILL_DIR>` 见本节开头说明，`cwd` 保持默认 `ws:` 即可）：
+2. **聚合成基准**——用 `StartShell` 调用本技能自带的聚合脚本（`<SKILL_DIR>` 见本节开头说明，`cwd` 保持默认 `ws:` 即可）：
    ```
-   RunCommand(
-     command=["python", "<SKILL_DIR>/scripts/aggregate_benchmark.py",
-              "evals/<skill-name>-workspace/iteration-N", "--skill-name", "<name>"],
+   StartShell(
+     shell="powershell",
+     command="& $env:EVOLVE_PYTHON \"<SKILL_DIR>/scripts/aggregate_benchmark.py\" \"evals/<skill-name>-workspace/iteration-N\" --skill-name \"<name>\"",
      reason="聚合评估结果为 benchmark.json/md")
    ```
    生成 `benchmark.json` 和 `benchmark.md`，包含每个配置的 pass_rate、time、tokens，均值 ± 标准差和差值。每个 with_skill 版本放在其基线对应版本之前。若手动生成 benchmark.json，参考 `references/schemas.md` 中查看器期望的精确 schema。
 
 3. **分析师检查**——阅读基准数据，找出聚合统计可能掩盖的模式。参考 `agents/analyzer.md`（「Analyzing Benchmark Results」一节）——例如无论技能如何总通过的断言（无区分度）、高方差 eval（可能不稳定）、时间/令牌权衡。
 
-4. **启动查看器**——本系统使用**静态模式**（无显示环境，聊天前端展示）：
+4. **启动查看器**——本系统使用**静态模式**（无显示环境，聊天前端展示）。复用上一步返回的 `shell_id`，用 `WriteShell` 输入：
    ```
-   RunCommand(
-     command=["python", "<SKILL_DIR>/eval-viewer/generate_review.py",
-              "evals/<skill-name>-workspace/iteration-N",
-              "--skill-name", "my-skill",
-              "--benchmark", "evals/<skill-name>-workspace/iteration-N/benchmark.json",
-              "--static", "evals/<skill-name>-workspace/iteration-N/review.html"],
+   WriteShell(
+     shell_id="<shell_id>",
+     text="& $env:EVOLVE_PYTHON \"<SKILL_DIR>/eval-viewer/generate_review.py\" \"evals/<skill-name>-workspace/iteration-N\" --skill-name \"my-skill\" --benchmark \"evals/<skill-name>-workspace/iteration-N/benchmark.json\" --static \"evals/<skill-name>-workspace/iteration-N/review.html\"",
      reason="生成静态评估查看器 HTML")
    ```
    迭代 2+ 再加 `--previous-workspace evals/<skill-name>-workspace/iteration-<N-1>`。

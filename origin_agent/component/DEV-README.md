@@ -47,12 +47,11 @@ component/
 |----------|----------|------|
 | `filesystem.py` | `Read`, `Write`, `PatchEdit`, `Delete`, `Copy`, `Move`, `SearchFiles`, `Grep`, `file_exists` | 沙盒内文件操作；`Read` 文本分支自动尝试 UTF-8、系统编码和 Windows 常见编码，`SearchFiles`/`Grep` 在 Windows x64 优先使用内置 `ripgrep`，不可用或单次不兼容时回退 Python；默认遵循 ignore/hidden 过滤，返回 `engine`、`truncated`，`full_scan` 可完整包含隐藏/忽略路径，`exhaustive` 可完整扫描并写超限日志 |
 | `code.py` | `ValidateCode`, `EvolveCode` | 自我进化 |
-| `shell.py` | `RunCommand` 等 | 子进程执行 |
+| `shell.py` | `StartShell`、`ReadShell`、`WriteShell`、`InterruptShell`、`StopShell` | Windows ConPTY 长期 Shell会话：启动并输入、字符位置读取、复用输入、Ctrl-C 与强制停止 |
 | `frontend.py` | `ValidateFrontend` | 前端构建验证 |
 | `skills.py` | `RecallSkill`, `CreateSkill` | 技能管理（已并入 core 工具集） |
 | `load_toolset.py` | `LoadToolset` | 按需加载工具集到当前会话（core 工具集，EVERY 可见性） |
 | `sandbox_spaces.py` | `AddSandboxSpace`、`RemoveSandboxSpace` | fast 模式全局动态沙盒空间增删；位于按需加载的 `sandbox` 工具集，critical，仅普通/多Agent模式主Agent可修改；用户也可通过命令菜单中的动态沙盒空间管理弹窗直接执行 REST CRUD |
-| `run_python.py` | `RunPython` | Python 代码执行 |
 | `ask_question.py` | `Ask` | 向前端提问 |
 | `progress_tools.py` | `UpdateTaskProgress`, `ClearTaskProgress` | 任务进度 |
 | `clipboard_display_tools.py` | `UpdateClipboardDisplay`, `ClearClipboardDisplay` | 剪贴板展示 |
@@ -68,9 +67,7 @@ component/
 |----------|------|
 | `web_search.py` / `web_fetch.py` | 网络搜索与抓取 |
 | `cron_tools.py` | 一次性/周期性后台定时任务 |
-| `background_service.py` / `bg_registry.py` | 后台服务管理与注册 |
 | `dynamic_endpoint_tools.py` | 动态端点工具 |
-| `pip.py` | Python 包管理 |
 | `archive_tools.py` | 归档工具 |
 | `diff_tools.py` | diff 工具 |
 
@@ -97,6 +94,16 @@ component/
 
 ---
 
+## Shell会话工具集
+
+`ShellInfo.termination` 使用 `natural`、`forced`、`error` 区分 Shell 终止方式；`exit_code` 仍仅表示被托管进程的退出码，`StopShell` 返回 `stopped=true` 时不因非零退出码失败。输出规范化器折叠 PowerShell/PSReadLine 的 CR、退格和 CSI 重绘，启动阶段先等待当前 PTY 的初始输出稳定再写首条命令。
+
+powershell/pwsh 使用 `-NoProfile`，并在启动阶段通过内部 `-Command` 优先尝试移除 PSReadLine；移除失败时回退为关闭预测。第一阶段不提供 PowerShell 历史、预测、方向键等行编辑能力。Shell 单行输入使用单独 CR（`\r`）提交。Agent 使用显式 `EVOLVE_PYTHON` 和 namespace 环境变量，不依赖用户 Profile 中的别名、函数或自动激活环境。
+
+ShellManager 使用 pywinpty 高层 `PtyProcess` 的 socket reader；通过受保护的 `PYWINPTY_BACKEND=0` 环境切换强制 ConPTY，停止使用 `close(force=True)`，不直接依赖低层 PTY 读取/关闭 API。每个原始输出块都会刷新活动时间；无换行提示符在静默窗口后提交并立即以 `quiet` 返回，不等待 30 秒硬截止。
+
+旧 `RunCommand`、`RunPython`、`InstallPackage`、`StartBackgroundService`、`StopBackgroundService`、`StartWatchingService` 及 `python`/`background` 工具集已移除；内部 `SubprocessRunner` 继续供验证、搜索等基础设施使用。
+
 ## 全局动态沙盒空间工具集
 
 - `sandbox` 是 fast-only 的按需加载工具集，不属于默认 `core`；主Agent先通过 `LoadToolset` 加载。
@@ -112,7 +119,7 @@ component/
 
 - `Read` 与单文件 `Grep` 登记精确文件；目录读取/搜索不锁整树。
 - `Write`、`PatchEdit` 登记目标；`Copy`、`Move` 同时登记源和目标；目录 `Move/Delete` 使用递归锁。
-- `RunCommand`、`RunPython` 在 `cwd` 为 `ws:` 时登记递归 cwd；`RunPython` 的明确 `ws:` script 另登记精确文件。
+- `StartShell` 在 `cwd` 为 `ws:` 时登记当前回复轮次的递归 cwd；Shell会话返回后继续运行，因此该登记不宣称覆盖后台阶段。
 - 登记失败时工具 fail-closed；非 `ws:` 命名空间保持原行为。
 - `Delete` 的 schema、危险等级、审批和永久删除行为完全不变。Agentspace 垃圾桶只属于网页编辑器的用户删除 API。
 - custom tools、MCP 和绕过应用的外部进程无法可靠事前识别路径，由 watcher 与版本冲突机制处理，不宣称预锁。

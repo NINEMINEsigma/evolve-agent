@@ -43,6 +43,8 @@ workspace/                 <- 运行时根（默认名；整体被 gitignore）
 6. 启动 uvicorn，监听 `WS /ws/chat`、REST API 与 Agentspace SSE。
 7. 用户连接后，`SessionManager` 创建新的 `ParentAgentLoop` 实例并绑定 `FrontendSink`。
 
+Shell会话由 `Application.shell_manager` 统一持有。Agent 通过五个 Shell 工具跨工具调用操作 Windows ConPTY；WebSocket 断线不停止，自动旋转迁移到延续会话，手动终结、永久删除、进化热交换与应用关闭时停止。Shell 输出仅由 Agent 拉取，前端资源抽屉只显示元数据与停止按钮。
+
 进化流程：
 
 1. Agent 通过工具链读取 `fork:` 命名空间中的源码，修改后写入 `slow_agent_space/`。
@@ -215,7 +217,9 @@ fast 模式的动态沙盒空间由 Application 持有的 Sandbox 单例统一�
 - `system/convert.py`：类型转换工具（`as_enum()`、`as_bool()`）。
 - `system/error_utils.py`：异常降级与日志辅助，用于可恢复副作用失败时记录日志但不中断主流程。
 - `system/pathutils.py` / `system/atomic_io.py`：路径与原子 IO 工具。
-- `system/subprocess_utils.py`：子进程 I/O 编码工具与 `SubprocessRunner`（子进程同步 `run()`、真异步 `run_async()` 和逐行消费 `run_async_line_processor()` 执行、活动进程登记与按会话中断终止进程树；由 `Application` 持有全局单例并注入 `Sandbox` 委托）。
+- `system/subprocess_utils.py`：内部子进程同步/异步执行、活动进程登记与中断终止；代码验证、搜索、LSP 等基础设施继续复用。
+- `StartShell` 在 Windows 上启动 powershell/pwsh 时使用 `-NoProfile`，并通过启动阶段内部 `-Command` 优先尝试移除 PSReadLine，失败时回退为关闭预测；第一阶段不提供历史、预测和方向键等行编辑能力。Agent 依赖显式的 `EVOLVE_PYTHON` 与 namespace 环境变量。
+- Shell 单行输入通过 ConPTY 发送单独的 CR（`\r`）作为 Enter，不发送 CRLF；未换行提示符作为待提交逻辑行，在最后原始输出静默 0.4 秒后提交并立即返回，因此 InterruptShell 和 ReadShell 不必等待 30 秒硬截止。
 - `system/search_engine.py`：`SearchFiles` / `Grep` 的搜索引擎封装。Windows x64 优先使用随 Agent 分发的固定版本 `ripgrep`（`origin_agent/vendor/ripgrep/win32-x64/rg.exe`），不可用、校验失败或单次兼容错误时回退 Python；统一处理 ignore/hidden 过滤、`limit` 截断、`full_scan`、`exhaustive`、`engine` 与 `warning` 返回字段。
 - 主会话强制中断：`IMainSessionLoop` 提供活动任务登记与 `request_interrupt()` 权威入口（普通模式/多Agent模式共用）；`StreamConsumer` 提供 5 分钟流式空闲超时、部分结果快照与主动关闭；前端中断按钮为后端权威流程，不再乐观显示"已中断"。
 - `system/lsp.py`：LSP 服务器进程管理与诊断（`component/tools/lsp.py` 工具调用；App 关闭时清理 LSP 进程）。

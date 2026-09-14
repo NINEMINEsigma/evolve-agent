@@ -73,7 +73,7 @@ Adds the named toolsets to the session's loaded set. Tools from loaded toolsets 
   "loaded": ["filesystem", "shell"],
   "results": {
     "filesystem": {"loaded": true, "tools": ["Read", "Write", "PatchEdit", "Delete", "Copy", "Move", "SearchFiles", "Grep", "ListUploads"], "already_loaded": false},
-    "shell": {"loaded": true, "tools": ["RunCommand"], "already_loaded": false},
+    "shell": {"loaded": true, "tools": ["StartShell", "ReadShell", "WriteShell", "InterruptShell", "StopShell"], "already_loaded": false},
     "missing": {"loaded": false, "code": "unknown_toolset", "error": "Unknown toolset: missing"}
   }
 }

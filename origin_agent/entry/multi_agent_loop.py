@@ -359,6 +359,13 @@ class MultiAgentLoop(BaseAgentLoop, IMainSessionLoop):
                 logger.exception(
                     "Failed to archive session=%s", self.session_id,
                 )
+        try:
+            await self.app.shell_manager.stop_session(self.session_id)
+        except Exception:
+            logger.exception(
+                "Failed to stop Shell sessions during multi-agent termination | session=%s",
+                self.session_id,
+            )
         return {"terminated": True, "session_id": self.session_id}
 
     async def process_message(

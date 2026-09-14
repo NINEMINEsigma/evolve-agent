@@ -488,6 +488,41 @@ classDiagram
         +kill_active()
     }
 
+    class ShellManager {
+        #_sandbox
+        #_shells
+        #_session_aliases
+        #_registry_lock
+        +start_shell()
+        +read_shell()
+        +write_shell()
+        +interrupt_shell()
+        +stop_shell()
+        +list_shells()
+        +stop_shell_for_user()
+        +migrate_session()
+        +stop_session()
+        +shutdown()
+    }
+
+    class _ShellSession {
+        +shell_id
+        +session_id
+        +character_name
+        +shell_type
+        +cwd
+        +pid
+        #pty
+        #reader_thread
+        #operation_lock
+        #output_event
+        #normalizer
+        #raw_text
+        #text
+        #base_offset
+        #total_chars
+    }
+
     class SubprocessRunner {
         #_active_procs
         #_procs_lock
@@ -563,6 +598,9 @@ classDiagram
     Application --> FrontendSink : holds
     Application --> SubAgentOrchestrator : holds
     Application --> SubprocessRunner : holds
+    Application --> ShellManager : holds
+    ShellManager --> _ShellSession : owns
+    ShellManager --> Sandbox : resolves cwd and namespaces
     Application --> AgentspaceService : holds
     AgentspaceService --> Sandbox : uses
     AgentspaceService --> AgentspaceLockRegistry : owns
@@ -658,7 +696,14 @@ classDiagram
 | `runtime_context` | `Application` | `RuntimeContext` | 运行时上下文 |
 | `_profile_lock` | `Application` | `threading.RLock` | Profile 根对象、名称指针与会话选择共用的进程锁 |
 | `_llm_profile_store` | `Application` | `LLMProfileStore \| None` | 进程内唯一的 `LLMProfileData` 根对象存储 |
-| `_subprocess_runner` | `Application` | `SubprocessRunner \| None` | 进程内唯一的子进程执行器（同步、真异步与逐行消费），注入 Sandbox 委托 |
+| `_subprocess_runner` | `Application` | `SubprocessRunner \| None` | 进程内唯一的内部子进程执行器（同步、真异步与逐行消费），注入 Sandbox 委托 |
+| `_shell_manager` | `Application` | `ShellManager \| None` | 进程内唯一的 Windows ConPTY Shell会话管理器；持有长期交互式 Shell |
+| `_shells` | `ShellManager` | `dict[str, _ShellSession]` | Shell ID 到运行时会话状态的唯一注册表 |
+| `_session_aliases` | `ShellManager` | `dict[str, str]` | 自动旋转后的旧主会话 ID 到新 ID 别名，仅供活动旧上下文解析 |
+| `_registry_lock` | `ShellManager` | `threading.RLock` | Shell 注册表、所有权迁移和别名链的同步边界 |
+| `pty` / `reader_thread` | `_ShellSession` | `PTY` / `threading.Thread \| None` | ConPTY 对象与唯一输出读取线程 |
+| `operation_lock` / `output_event` | `_ShellSession` | `asyncio.Lock` / `asyncio.Event` | Agent 操作串行化与输出/退出唤醒 |
+| `raw_text` / `text` / `base_offset` / `total_chars` | `_ShellSession` | `str` / `str` / `int` / `int` | 有界原始与规范化输出及绝对字符位置边界 |
 | `_agentspace_service` | `Application` | `AgentspaceService \| None` | Agentspace 版本化 CRUD、文件锁、垃圾桶、watcher 与 SSE 事件的唯一业务服务 |
 | `session_manager` | `Application` | `SessionManager \| None` | session 管理器 |
 | `approval_backend_manager` | `Application` | `ApprovalBackendManager \| None` | 审批后端管理器 |
@@ -690,6 +735,10 @@ classDiagram
 
 | 访问方 | 被访问字段 | 被访问类 | 位置 | 说明 |
 |---|---|---|---|---|
+| `ToolContext.resource_session_id` | `parent_session_id`（若公开且非空） | `SubAgentLoop` / `TaskAgentLoop` | `entry/base_agent_loop.py` | 为长期资源选择父主会话 ID；其他 Loop 回退当前 session_id |
+| Shell 工具 handlers | `shell_manager` | `Application` | `component/tools/shell.py` | 按资源主会话 ID 与角色名创建或操作 Shell会话 |
+| 会话终结/旋转 | `stop_session()` / `migrate_session()` | `ShellManager` | `entry/session_manager.py`、`entry/multi_agent_loop.py` | 手动终结停止；自动旋转迁移 Shell 所有权 |
+| Gateway Shell REST | `list_shells()` / `stop_shell_for_user()` | `ShellManager` | `gateway/server.py` | 用户查看同会话元数据并直接停止 Shell |
 | `ToolContext.sink` | `_get_sink()` | `BaseAgentLoop` | `entry/base_agent_loop.py` | 工具通过 `ctx.sink` 访问 loop 的 sink |
 | `ToolContext.is_interrupted` | `_cancel_event` | `BaseAgentLoop` | `entry/base_agent_loop.py` | 工具通过 `ctx.is_interrupted` 读取取消状态 |
 | `ToolContext.agentspace_access` | `agentspace_service` | `Application` | `entry/base_agent_loop.py` | 以 `round_id` 向 `AgentspaceService` fail-closed 登记明确 `ws:` 路径 |
@@ -753,6 +802,8 @@ classDiagram
 | `InterruptMessage` | `entry/base_agent_loop.py` | `InboxMessage` | 中断消息 |
 | `AgentResponse` | `entry/multi_agent_worker.py` | `BaseModel` | 多 Agent 模式下单 Agent 的解析后响应 |
 | `WorkerResult` | `entry/multi_agent_worker.py` | `BaseModel` | Worker 执行结果，含 DSL 路由元数据 |
+| `ShellInfo` | `entity/puretype/shell.py` | `BaseModel` | Shell会话元数据快照，`termination` 区分 natural/forced/error，`exit_code` 仅为进程退出码 |
+| `ShellOutputSlice` | `entity/puretype/shell.py` | `BaseModel` | 规范化输出的绝对字符位置切片 |
 | `ProcessLineStreamResult` | `entity/puretype/runtime.py` | `BaseModel` | 逐行消费子进程输出后的退出码、stderr、截断与行数摘要 |
 | `DynamicSandboxSpace` | `entity/puretype/sandbox.py` | `BaseModel` | 单个全局动态沙盒空间的名称、绝对路径、用途描述和工具层只读标志 |
 | `DynamicSandboxSpaceData` | `entity/puretype/sandbox.py` | `BaseModel` | `dynamic_sandbox_spaces.es` v1 的持久化根对象 |
@@ -801,7 +852,7 @@ classDiagram
 
 ### LLM Profile 根对象与名称边界
 
-`Application` 持有唯一 `LLMProfileStore` 和共享进程锁。`llm_profiles.es` 仅支持 v2 `LLMProfileData` 根对象，三个多模态分工字段直接保存根列表中的 `LLMProfile` 实例引用；不存在 UID 或 v1 迁移。Gateway 只接收扁平名称 DTO 和单 Profile CRUD。主会话活动配置以名称指针持久化，每条前端消息只传 `llm_profile_name`；`IMainSessionLoop.set_profile()` 由 Parent/Multi 实现。
+`Application` 持有唯一 `LLMProfileStore` 和共享进程锁。`llm_profiles.es` 仅支持 v2 `LLMProfileData` 根对象，三个多模态分工字段直接保存根列表中的 `LLMProfile` 实例引用；不存在 UID 或 v1 迁移。Gateway 只接收扁平名称 DTO 和单 Profile CRUD。主会话活动配置以名称指针持久化，每条前端消息只传 `llm_profile_name`；`IMainSessionLoop.set_profile()` 由 Parent/Multi 实现。`/regenerate` 请求明确接收 `llm_profile_name` 并在生成前更新活动 Profile；`/resume` 仅从当前历史恢复工具链，不接收、不更新 Profile，使用 `ParentAgentLoop` 当前已持有的活动 Profile。
 
 ### 多模态能力探测内化
 
@@ -834,6 +885,11 @@ classDiagram
 1. **`soul_file`** 从 `RuntimeContext.soul_file` 迁移到 `LLMProfile.soul_file` 字段（每 Profile 独立，通过 `llm_profiles.es` 持久化）。`LLMProfile` 中已有字段定义但未接线，本次完成 DTO（`LLMProfilePayload.soul_file`）、Store（`_PROFILE_FIELDS`、`to_payload`、`create_profile`、`_assign_payload`、验证）和 Prompt 构建（`system/prompt.py::build_system_prompt()` 从 `profile.soul_file` 读取）的完整接线。`run.py` 初始 SOUL 文件复制改用硬编码 `"SOUL.md"`。
 
 2. **`yolo`** 从 `RuntimeContext.yolo` 全局配置升级为会话级三态审批模式之一。新增 `ApprovalMode(str, Enum)` 枚举（MANUAL/HANDSFREE/YOLO）定义在 `entity/puretype/approval.py`。`component/approval/handsfree.py` 的 `_handsfree_sessions: dict[str, bool]` 升级为 `_approval_modes: dict[str, ApprovalMode]`，新增 `set_approval_mode()`/`get_approval_mode()`/`disable_all_non_manual_modes()`，保留旧函数（`set_handsfree_mode`/`is_handsfree_mode`/`disable_all_handsfree_modes`）作为兼容包装。`component/approval/policy.py::needs_approval()` 参数从 `handsfree: bool` 改为 `approval_mode: ApprovalMode`。`executor.py`、`subagent/loop.py` 的 YOLO 检查从 `get_runtime_context().yolo` 改为 `get_approval_mode(sid) == ApprovalMode.YOLO`。WS 协议中 `Message` 新增 `approval_mode` 字段（`handsfree_mode` 保留向后兼容）。前端 `useSessionStore` 新增 `approvalMode` 状态，`Header.tsx` 升级为三态审批模式选择器。
+
+### Agent 运行工具被 Shell会话取代
+
+- `ShellManager` 使用 pywinpty 高层 `PtyProcess` 的 socket reader；通过受保护的 `PYWINPTY_BACKEND=0` 环境切换强制 ConPTY，停止时使用 `close(force=True)`，不直接依赖低层 PTY 读取/关闭 API。
+- powershell/pwsh 使用 `-NoProfile`，并在启动阶段优先移除 PSReadLine、失败时回退为关闭预测；第一阶段不提供 PowerShell 行编辑能力。单行输入使用单独 CR；未换行提示符通过原始输出活动版本触发静默提交，规范化字符 offset 只在实际提交时增长。
 
 ### 全局动态沙盒空间
 

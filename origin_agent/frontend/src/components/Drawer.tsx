@@ -1,4 +1,4 @@
-import { ChatMessage, CronTask, DynamicEndpoint } from "../types";
+import { ChatMessage, CronTask, DynamicEndpoint, ShellInfo } from "../types";
 import { extractMessageResources } from "../utils";
 import { usePersistentState } from "../hooks/usePersistentState";
 import { STORAGE_KEYS } from "../constants/storage";
@@ -9,12 +9,8 @@ interface DrawerProps {
   sessionId: string;
   messages: ChatMessage[];
   onImageClick: (src: string) => void;
-  bgTasks: Array<{
-    task_id: string; pid: number; command: string[]; start_time: number; log_path: string; status: string
-  }>;
-  setBgTasks: React.Dispatch<React.SetStateAction<Array<{
-    task_id: string; pid: number; command: string[]; start_time: number; log_path: string; status: string
-  }>>>;
+  shells: ShellInfo[];
+  setShells: React.Dispatch<React.SetStateAction<ShellInfo[]>>;
   cronTasks: CronTask[];
   setCronTasks: React.Dispatch<React.SetStateAction<CronTask[]>>;
   dynamicEndpoints: DynamicEndpoint[];
@@ -25,7 +21,7 @@ interface DrawerProps {
 
 export default function Drawer({
   open, onClose, sessionId, messages, onImageClick,
-  bgTasks, setBgTasks, cronTasks, setCronTasks, dynamicEndpoints,
+  shells, setShells, cronTasks, setCronTasks, dynamicEndpoints,
   width, isResizing, onResizePointerDown,
 }: DrawerProps) {
   const [resourcesExpanded, setResourcesExpanded] = usePersistentState(STORAGE_KEYS.DRAWER_RESOURCES_EXPANDED, true);
@@ -85,26 +81,39 @@ export default function Drawer({
             )}
           </div>
 
-          {/* 后台任务区块 */}
+          {/* Shell会话区块 */}
           <div className="drawer-section">
             <div className="drawer-section-header" onClick={() => setBackgroundExpanded((v) => !v)}>
               <span className={`drawer-arrow ${backgroundExpanded ? "expanded" : ""}`}>▶</span>
-              <span className="drawer-section-title">后台任务 ({bgTasks.length})</span>
+              <span className="drawer-section-title">Shell 会话 ({shells.length})</span>
             </div>
             {backgroundExpanded && (
               <div className="drawer-section-body">
-                {bgTasks.length === 0 ? (
-                  <div className="drawer-empty">暂无后台任务</div>
+                {shells.length === 0 ? (
+                  <div className="drawer-empty">暂无 Shell 会话</div>
                 ) : (
-                  bgTasks.map((t) => (
-                    <div key={t.task_id} className={`task-list-item ${t.status === "running" ? "running" : "stopped"}`}>
+                  shells.map((shell) => (
+                    <div key={shell.shell_id} className={`task-list-item ${shell.running ? "running" : "stopped"}`}>
                       <div className="task-list-header">
-                        <span className="task-list-name">{t.command.join(" ")}</span>
-                        <span className={`task-list-status status-${t.status}`}>{t.status}</span>
+                        <span className="task-list-name">{shell.shell_type} · {shell.shell_id}</span>
+                        <span className={`task-list-status status-${shell.running ? "running" : "stopped"}`}>
+                          {shell.running ? "running" : `exited${shell.termination ? ` · ${shell.termination}` : ""}${shell.exit_code == null ? "" : ` (${shell.exit_code})`}`}
+                        </span>
                       </div>
-                      <div className="task-list-meta">PID: {t.pid} | 启动: {new Date(t.start_time * 1000).toLocaleString()}</div>
+                      <div className="task-list-meta">创建者: {shell.character_name} | PID: {shell.pid ?? "-"}</div>
+                      <div className="task-list-meta">目录: {shell.cwd}</div>
+                      <div className="task-list-meta">启动: {new Date(shell.started_at * 1000).toLocaleString()}</div>
+                      <div className="task-list-meta">最近活动: {new Date(shell.last_activity_at * 1000).toLocaleString()}</div>
                       <div className="task-list-actions">
-                        <button className="task-list-action stop" onClick={() => fetch(`/api/sessions/${sessionId}/background-tasks/${t.task_id}/stop`, { method: "POST" }).then(() => setBgTasks((prev) => prev.map((x) => x.task_id === t.task_id ? { ...x, status: "stopping" } : x)))}>停止</button>
+                        <button
+                          className="task-list-action stop"
+                          onClick={() => fetch(`/api/sessions/${sessionId}/shells/${shell.shell_id}/stop`, { method: "POST" })
+                            .then((response) => {
+                              if (!response.ok) throw new Error(`Stop Shell failed: ${response.status}`);
+                              setShells((previous) => previous.filter((item) => item.shell_id !== shell.shell_id));
+                            })
+                            .catch(() => {})}
+                        >停止</button>
                       </div>
                     </div>
                   ))

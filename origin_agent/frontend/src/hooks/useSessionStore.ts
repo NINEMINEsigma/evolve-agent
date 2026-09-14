@@ -8,6 +8,7 @@ import {
   TaskProgress,
   ClipboardDisplay,
   DynamicEndpoint,
+  ShellInfo,
   CronTask,
   SessionInfo,
   SidebarItem,
@@ -73,26 +74,8 @@ export interface SessionStore {
   setMergeMode: React.Dispatch<React.SetStateAction<boolean>>;
   selectedForMerge: Set<string>;
   setSelectedForMerge: React.Dispatch<React.SetStateAction<Set<string>>>;
-  bgTasks: Array<{
-    task_id: string;
-    pid: number;
-    command: string[];
-    start_time: number;
-    log_path: string;
-    status: string;
-  }>;
-  setBgTasks: React.Dispatch<
-    React.SetStateAction<
-      Array<{
-        task_id: string;
-        pid: number;
-        command: string[];
-        start_time: number;
-        log_path: string;
-        status: string;
-      }>
-    >
-  >;
+  shells: ShellInfo[];
+  setShells: React.Dispatch<React.SetStateAction<ShellInfo[]>>;
   cronTasks: CronTask[];
   setCronTasks: React.Dispatch<React.SetStateAction<CronTask[]>>;
   terminatingSessions: Set<string>;
@@ -184,14 +167,7 @@ export function useSessionStore(callbacks: SessionStoreCallbacks = {}): SessionS
   const [serverInfo, setServerInfo] = useState<Record<string, unknown>>({});
   const [mergeMode, setMergeMode] = useState(false);
   const [selectedForMerge, setSelectedForMerge] = useState<Set<string>>(new Set());
-  const [bgTasks, setBgTasks] = useState<Array<{
-    task_id: string;
-    pid: number;
-    command: string[];
-    start_time: number;
-    log_path: string;
-    status: string;
-  }>>([]);
+  const [shells, setShells] = useState<ShellInfo[]>([]);
   const [cronTasks, setCronTasks] = useState<CronTask[]>([]);
   const [terminatingSessions, setTerminatingSessions] = useState<Set<string>>(new Set());
   const [generatingTitleSessions, setGeneratingTitleSessions] = useState<Set<string>>(new Set());
@@ -1455,8 +1431,8 @@ export function useSessionStore(callbacks: SessionStoreCallbacks = {}): SessionS
     setMergeMode,
     selectedForMerge,
     setSelectedForMerge,
-    bgTasks,
-    setBgTasks,
+    shells,
+    setShells,
     cronTasks,
     setCronTasks,
     terminatingSessions,

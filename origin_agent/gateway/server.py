@@ -605,7 +605,7 @@ async def delete_session(session_id: str):
     # 之后作为会话级收尾，此时索引/目录已删、子 Agent 已关。
     try:
         from gateway.session_cleanup import cleanup_session_resources
-        cleanup_session_resources(session_id)
+        await cleanup_session_resources(session_id)
     except Exception:
         logger.warning("Failed to cleanup session resources for session=%s", session_id, exc_info=True)
     logger.info("Delete session ok | session=%s", session_id)
@@ -1028,22 +1028,39 @@ async def branch_session_endpoint(session_id: str):
     return {"error": "agent loop not ready", "session_id": session_id}
 
 
-@app.get("/api/sessions/{session_id}/background-tasks")
-async def list_background_tasks_endpoint(session_id: str):
-    """列出指定会话的所有后台任务。"""
-    from component.extools.bg_registry import list_background_tasks
-    tasks = list_background_tasks(session_id)
-    return {"tasks": tasks}
+@app.get("/api/sessions/{session_id}/shells")
+async def list_shells_endpoint(session_id: str):
+    """列出指定主会话的全部 Shell会话元数据。"""
+    from system.application import Application
+
+    shells = Application.current().shell_manager.list_shells(session_id)
+    return {"shells": [item.model_dump() for item in shells]}
 
 
-@app.post("/api/sessions/{session_id}/background-tasks/{task_id}/stop")
-async def stop_background_task_endpoint(session_id: str, task_id: str):
-    """停止指定的后台任务。"""
-    logger.info("Stop background task | session=%s task_id=%s", session_id, task_id)
-    from component.extools.bg_registry import stop_background_task
-    result = stop_background_task(task_id)
-    logger.info("Stop background task ok | session=%s task_id=%s result=%s", session_id, task_id, result)
-    return result
+@app.post("/api/sessions/{session_id}/shells/{shell_id}/stop")
+async def stop_shell_endpoint(session_id: str, shell_id: str):
+    """由前端用户停止指定主会话中的 Shell会话。"""
+    from system.application import Application
+    from system.shell_manager import ShellAccessError
+
+    logger.info("Stop Shell from frontend | session=%s shell=%s", session_id, shell_id)
+    try:
+        info = await Application.current().shell_manager.stop_shell_for_user(
+            session_id, shell_id,
+        )
+    except ShellAccessError as exc:
+        raise HTTPException(status_code=404, detail={"code": "shell_not_found", "message": str(exc)}) from exc
+    except Exception as exc:
+        logger.exception(
+            "Failed to stop Shell from frontend | session=%s shell=%s",
+            session_id,
+            shell_id,
+        )
+        raise HTTPException(
+            status_code=500,
+            detail={"code": "shell_stop_failed", "message": str(exc)},
+        ) from exc
+    return {"stopped": True, "shell": info.model_dump()}
 
 
 @app.get("/api/sessions/{session_id}/cron-tasks")

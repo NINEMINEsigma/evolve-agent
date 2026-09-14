@@ -17,7 +17,7 @@ description: 将游戏设计文档（GDD）开发成可玩网页游戏的完整�
 
 ## 环境预检清单（必须在阶段零完成）
 
-在开始任何开发工作之前，用 `RunCommand` 执行以下检查，根据结果决定技术路线：
+在开始任何开发工作之前，用 `StartShell` 启动一个 Shell会话并依次执行以下检查；后续检查使用 `WriteShell` 复用同一 `shell_id`，用 `ReadShell` 继续读取超时后的输出，完成后调用 `StopShell`。根据结果决定技术路线：
 
 ```bash
 # 1. 检查 Node.js 版本

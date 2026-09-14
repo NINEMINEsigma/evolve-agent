@@ -117,7 +117,7 @@ python <skill_dir>/scripts/validate_session_visuals.py \
   --chat-style ws:sessions/<session_id>/chat-style/index.css
 ```
 
-`RunCommand` 会解析命令参数中的逻辑路径。`--stage-dir` 既接受 Stage 目录（会自动查找 `index.html`），也接受单个 Stage HTML 文件；`--chat-style` 接受 CSS 文件。脚本只使用 Python 标准库，无外部依赖。
+`StartShell` 不会改写命令文本中的逻辑路径。先读取其 `namespace_env`，把 `--stage-dir` 与 `--chat-style` 参数改用对应的 Shell 环境变量引用；`--stage-dir` 既接受 Stage 目录（会自动查找 `index.html`），也接受单个 Stage HTML 文件；`--chat-style` 接受 CSS 文件。脚本只使用 Python 标准库，无外部依赖。
 
 两个参数都可单独使用，例如只校验 CSS：`--chat-style ws:sessions/<session_id>/chat-style/index.css`。
 

@@ -41,27 +41,17 @@ Multimodal Read conventions:
     )
     registry.register_toolset(
         name="shell",
-        description="Execute shell commands in the sandbox with a 30-second timeout.",
-        usage_guide="""Shell tools execute commands in the sandbox with a 30-second timeout.
+        description="Create and control persistent interactive Windows ConPTY Shell sessions.",
+        usage_guide="""Shell sessions preserve working directory, environment, and interactive process state across tool calls.
 
-Long-running task conventions:
-- RunCommand has a fixed 30-second timeout.
-- Decision tree for tasks that may exceed the timeout:
-  1. Definitely under 30s → RunCommand.
-  2. Might exceed 30s but has a bounded duration → RunPython with an increased `timeout` parameter.
-  3. Unbounded or likely to exceed any timeout → StartBackgroundService (non-blocking, returns task_id + log_path), then poll the log via Read at reasonable intervals.
-  4. Need real-time output monitoring with automatic callbacks → StartWatchingService + RegisterDynamicEndpoint.
-- NEVER manually simulate a command's effects when it times out. A timeout is a signal to switch to background tools, not a reason to bypass the command entirely.
-- After starting a background task, use WaitCron or ScheduleCron to periodically Read the log and check for completion, rather than blocking the conversation.""",
-    )
-    registry.register_toolset(
-        name="python",
-        description="Execute Python code using the agent's own interpreter.",
-        usage_guide="""Python tools use the same Python interpreter as the agent process.
-
-- RunPython has a configurable `timeout` parameter for tasks that may exceed 30 seconds.
-- Never use RunPython to write files; always use Write or PatchEdit instead.
-- In RunPython, `sys.executable` is the current Python path. Do NOT use bare "ws:" paths directly in matplotlib/Pillow/etc. — query the agentspace path via RunPython, use an absolute path, then write the file.""",
+- Start every command workflow with StartShell, including short commands. It creates a new powershell, pwsh, or cmd session and submits the first line.
+- A 30-second timeout ends only the current wait. The Shell keeps running in the background.
+- Preserve shell_id and output.next_offset. Use ReadShell with that offset for subsequent normalized output.
+- Use WriteShell to answer a CLI prompt or submit another command to the same Shell.
+- InterruptShell sends Ctrl-C without destroying the Shell. StopShell force-stops the Shell and its process tree.
+- Command text does not expand ws:/fork: paths. Use namespace_env returned by StartShell.
+- Use the returned EVOLVE_PYTHON environment reference for the Agent's Python interpreter and pip.
+- Never use Shell tools in place of dedicated Read, Write, PatchEdit, SearchFiles, or Grep tools.""",
     )
     registry.register_toolset(
         name="code",
@@ -124,14 +114,6 @@ Task agent dispatch conventions:
 - Scheduled tasks are background one-shot tasks, not a batch queue or an automatic loop mechanism.
 - Periodic work, polling, or long-running observation must be expressed as recursive scheduling: wait for the task result, then schedule the next one-shot task.
 - Raw scheduled-task output is internal Agent input and log content, not a user message; if the user needs the result, actively summarize it.""",
-    )
-    registry.register_toolset(
-        name="background",
-        description="Start, stop, and watch long-running background service processes.",
-        usage_guide="""Background service conventions:
-- StartBackgroundService starts a long-running service process in the background and returns immediately without waiting for completion.
-- After starting a background task, use WaitCron or ScheduleCron to periodically Read the log and check for completion, rather than blocking the conversation.
-- StartWatchingService starts a background process and watches its stdout/stderr, posting incremental output to a dynamic endpoint at adaptive intervals.""",
     )
     registry.register_toolset(
         name="dynamic",

@@ -457,8 +457,8 @@ export default function Layout({ ws, onContextMenu, contextMenuOpen, onboardingR
         sessionId={ws.sessionId}
         messages={ws.messages}
         onImageClick={setLightboxSrc}
-        bgTasks={ws.bgTasks}
-        setBgTasks={ws.setBgTasks}
+        shells={ws.shells}
+        setShells={ws.setShells}
         cronTasks={ws.cronTasks}
         setCronTasks={ws.setCronTasks}
         dynamicEndpoints={ws.dynamicEndpoints}

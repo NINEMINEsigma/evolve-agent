@@ -68,7 +68,7 @@ WS /ws/chat?resume=<sid>
 ```
 
 - 不带 `resume`：创建新会话。
-- 带 `resume`：恢复已有会话，重放历史。
+- 带 `resume`：恢复已有会话，重放历史。这里的 `resume` 是 WebSocket 连接恢复参数，不等同于下方 REST `/api/sessions/{id}/resume` 的“恢复工具链执行”操作；两者都不会因为前端当前选择了新的 Profile 而自动更新会话配置。
 
 连接建立后，服务端发送：
 
@@ -135,7 +135,8 @@ WS /ws/chat?resume=<sid>
 |------|------|------|
 | PUT | `/api/sessions/{id}/messages/{index}` | 编辑历史消息 |
 | DELETE | `/api/sessions/{id}/messages` | 清空历史消息 |
-| POST | `/api/sessions/{id}/regenerate` | 重新生成最后一条回复 |
+| POST | `/api/sessions/{id}/regenerate` | 重新生成最后一条回复；请求体必须携带 `llm_profile_name`，可同时更新本次生成使用的 Profile |
+| POST | `/api/sessions/{id}/resume` | 从当前历史状态恢复工具链执行；不追加用户消息、不截断历史，也不更新 LLM Profile |
 | POST | `/api/sessions/{id}/regenerate-summary` | 重新生成会话摘要 |
 
 ### 工具资源与子代理
@@ -150,12 +151,15 @@ WS /ws/chat?resume=<sid>
 | POST | `/api/file-picker` | 系统文件选择器 |
 | POST | `/api/shutdown-approval-model` | 卸载审批模型服务 |
 
-### 后台任务
+### Shell会话与 Cron
 
 | 方法 | 端点 | 说明 |
 |------|------|------|
-| GET/POST | `/api/sessions/{id}/background-tasks` | 后台任务列表/停止 |
+| GET | `/api/sessions/{id}/shells` | 返回当前主会话全部 Shell会话元数据，不返回终端输出 |
+| POST | `/api/sessions/{id}/shells/{shell_id}/stop` | 前端用户直接停止 Shell会话及其进程树 |
 | GET/POST | `/api/sessions/{id}/cron-tasks/...` | Cron 任务列表/触发/取消 |
+
+Shell 输出由 Agent 使用 `ReadShell` 拉取，不通过聊天 WebSocket 主动推送。WebSocket 断线不停止 Shell；自动旋转迁移所有权；手动终结、永久删除和应用关闭负责停止。
 
 ### LLM Profile
 
@@ -167,7 +171,7 @@ WS /ws/chat?resume=<sid>
 | DELETE | `/api/llm/profiles` | 删除 Profile，并为当前空闲会话指定替换名称或无配置 |
 | GET | `/api/llm/clients` | 返回可用 LLM 客户端实现 |
 
-前端 USER_MESSAGE 与重新生成请求只传 `llm_profile_name`，不传完整 Profile。空字符串表示明确无配置。Profile 重命名和删除通过 `llm_profile_changed` 广播；忙碌会话不在删除请求中切换。
+前端 USER_MESSAGE 与重新生成请求只传 `llm_profile_name`，不传完整 Profile。空字符串表示明确无配置。`/resume` 请求不接收 `llm_profile_name`，始终使用当前 `ParentAgentLoop` 已持有的活动 Profile；前端刚切换但尚未通过 USER_MESSAGE 或重新生成提交的 Profile，不会被 resume 应用。Profile 重命名和删除通过 `llm_profile_changed` 广播；忙碌会话不在删除请求中切换。
 
 ### 静态文件
 
