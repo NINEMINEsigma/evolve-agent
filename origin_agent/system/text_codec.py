@@ -34,6 +34,25 @@ def preferred_text_encodings() -> list[str]:
     return result
 
 
+def split_lf_lines(text: str) -> list[str]:
+    """只按 LF 分行，保留每行内原有的 CR；末尾 LF 不额外计行。"""
+    if not text:
+        return []
+    lines = text.split("\n")
+    if text.endswith("\n"):
+        lines.pop()
+    return lines
+
+
+def strip_lf_line_ending(text: str) -> str:
+    """仅移除行尾 LF 及其配对的 CR，保留其余 CR。"""
+    if text.endswith("\n"):
+        text = text[:-1]
+        if text.endswith("\r"):
+            text = text[:-1]
+    return text
+
+
 def decode_text(raw: bytes, *, strict_utf8: bool = False) -> tuple[str, str, bool]:
     """解码文本并返回 ``(content, encoding, fallback_used)``。
 

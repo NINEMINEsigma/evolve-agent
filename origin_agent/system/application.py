@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import threading
 from framework import Architecture
@@ -64,7 +65,7 @@ class Application(Architecture):
         self._subagent_orchestrator:      SubAgentOrchestrator | None = None
 
         # -- 关闭信号（与 main.py 的 App 共享） --
-        self._shutdown_event:             object | None = None  # asyncio.Event
+        self._shutdown_event:             asyncio.Event | None = None
 
         _app = self
 
@@ -206,9 +207,16 @@ class Application(Architecture):
             raise RuntimeError("Application not initialized — call Application(ctx) first")
         return _app
 
-    def link_shutdown_event(self, event: object) -> None:
+    def link_shutdown_event(self, event: asyncio.Event) -> None:
         """绑定 main.py App 的关闭事件，供子系统优雅退出使用。"""
         self._shutdown_event = event
+
+    @property
+    def shutdown_event(self) -> asyncio.Event:
+        """进程关闭信号，供 Gateway 长连接在优雅关闭时退出。"""
+        if self._shutdown_event is None:
+            raise RuntimeError("Application shutdown event is not linked")
+        return self._shutdown_event
 
     async def shutdown(self) -> None:
         """按依赖顺序停止子系统。"""

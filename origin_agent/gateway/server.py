@@ -318,12 +318,7 @@ from contextlib import asynccontextmanager
 
 @asynccontextmanager
 async def _app_lifespan(app: FastAPI):
-    """FastAPI 生命周期管理：启动 session 清理任务，关闭时取消。
-
-    Note: 进化关闭（exit -1）期间，uvicorn 会取消所有待处理
-    handler task。日志中出现的 asyncio.CancelledError 噪声
-    是无害且预期的 — 仅表示 gateway 正在拆除其事件循环。
-    """
+    """FastAPI 生命周期；关闭由 main.py 等待 uvicorn 正常完成。"""
     yield
 
 
@@ -1967,16 +1962,30 @@ async def agentspace_events(req: Request):
                         message="外部文件实时同步不可用，请使用手动刷新。",
                     )
                 )
-            while not await req.is_disconnected():
-                try:
-                    event = await asyncio.wait_for(
-                        queue.get(),
-                        timeout=AGENTSPACE_SSE_HEARTBEAT_SECONDS,
-                    )
-                except asyncio.TimeoutError:
-                    yield ": keepalive\n\n"
-                    continue
-                yield _agentspace_sse(event)
+            from system.application import Application
+            shutdown_wait = asyncio.create_task(Application.current().shutdown_event.wait())
+            try:
+                while not await req.is_disconnected():
+                    event_wait = asyncio.create_task(queue.get())
+                    try:
+                        done, _ = await asyncio.wait(
+                            (event_wait, shutdown_wait),
+                            timeout=AGENTSPACE_SSE_HEARTBEAT_SECONDS,
+                            return_when=asyncio.FIRST_COMPLETED,
+                        )
+                    finally:
+                        if not event_wait.done():
+                            event_wait.cancel()
+                            await asyncio.gather(event_wait, return_exceptions=True)
+                    if shutdown_wait in done:
+                        return
+                    if event_wait in done:
+                        yield _agentspace_sse(event_wait.result())
+                    else:
+                        yield ": keepalive\n\n"
+            finally:
+                shutdown_wait.cancel()
+                await asyncio.gather(shutdown_wait, return_exceptions=True)
         finally:
             service.unsubscribe_events(subscription_id)
 
@@ -2416,9 +2425,8 @@ async def ws_chat(ws: WebSocket) -> None:
         router = MessageRouter(ws, sid, agentspace_path=_agentspace_path, conn_token=conn_token or "")
 
         while True:
-            # Note: 进化关闭（exit -1）期间，uvicorn 会取消所有待处理
-            # handler task。从 receive_text() 传播的 asyncio.CancelledError
-            # 是无害且预期的 — 仅表示 gateway 正在拆除其事件循环。
+            # 优雅关闭时 uvicorn 会关闭 WebSocket；超时强制取消时
+            # CancelledError 由下方处理，避免干扰正常关闭日志。
             raw: str = await ws.receive_text()
 
             # 解析接收到的消息

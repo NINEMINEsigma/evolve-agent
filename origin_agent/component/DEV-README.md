@@ -45,7 +45,7 @@ component/
 
 | 工具文件 | 主要工具 | 用途 |
 |----------|----------|------|
-| `filesystem.py` | `Read`, `Write`, `PatchEdit`, `Delete`, `Copy`, `Move`, `SearchFiles`, `Grep`, `file_exists` | 沙盒内文件操作；`Read` 文本分支自动尝试 UTF-8、系统编码和 Windows 常见编码，`SearchFiles`/`Grep` 在 Windows x64 优先使用内置 `ripgrep`，不可用或单次不兼容时回退 Python；默认遵循 ignore/hidden 过滤，返回 `engine`、`truncated`，`full_scan` 可完整包含隐藏/忽略路径，`exhaustive` 可完整扫描并写超限日志 |
+| `filesystem.py` | `Read`, `Write`, `PatchEdit`, `Delete`, `Copy`, `Move`, `SearchFiles`, `Grep`, `file_exists` | 沙盒内文件操作；`Read` 文本分支自动尝试 UTF-8、系统编码和 Windows 常见编码，`content` 返回原文行片段，不添加行号或规范化换行，分页保留 CRLF、孤立 CR 与末尾 LF，行位置由 `offset`/`total_lines` 给出；`PatchEdit` 的 exact/range 均按原始 UTF-8 文本逐字符匹配并原样写入 `new_string`，regex 仅按 Python `re.sub` 语法展开显式引用；三种模式都不自动补换行。`Sandbox.write()`/`append()` 禁用操作系统换行转换；`SearchFiles`/`Grep` 在 Windows x64 优先使用内置 `ripgrep`，不可用或单次不兼容时回退 Python；`Grep` 上下文与回退行号都按 LF 分行；默认遵循 ignore/hidden 过滤，返回 `engine`、`truncated`，`full_scan` 可完整包含隐藏/忽略路径，`exhaustive` 可完整扫描并写超限日志 |
 | `code.py` | `ValidateCode`, `EvolveCode` | 自我进化 |
 | `shell.py` | `StartShell`、`ReadShell`、`WriteShell`、`InterruptShell`、`StopShell` | Windows ConPTY 长期 Shell会话：启动并输入、字符位置读取、复用输入、Ctrl-C 与强制停止 |
 | `frontend.py` | `ValidateFrontend` | 前端构建验证 |
@@ -100,7 +100,7 @@ component/
 
 powershell/pwsh 使用 `-NoProfile`，并在启动阶段通过内部 `-Command` 优先尝试移除 PSReadLine；移除失败时回退为关闭预测。第一阶段不提供 PowerShell 历史、预测、方向键等行编辑能力。Shell 单行输入使用单独 CR（`\r`）提交。Agent 使用显式 `EVOLVE_PYTHON` 和 namespace 环境变量，不依赖用户 Profile 中的别名、函数或自动激活环境。
 
-ShellManager 使用 pywinpty 高层 `PtyProcess` 的 socket reader；通过受保护的 `PYWINPTY_BACKEND=0` 环境切换强制 ConPTY，停止使用 `close(force=True)`，不直接依赖低层 PTY 读取/关闭 API。每个原始输出块都会刷新活动时间；无换行提示符在静默窗口后提交并立即以 `quiet` 返回，不等待 30 秒硬截止。
+ShellManager 使用 pywinpty 高层 `PtyProcess` 的 socket reader；通过受保护的 `PYWINPTY_BACKEND=0` 环境切换强制 ConPTY，停止使用 `close(force=True)`，不直接依赖低层 PTY 读取/关闭 API。每个原始输出块都会刷新活动时间；无换行提示符在静默窗口后提交并立即以 `quiet` 返回，不等待 30 秒硬截止。Shell会话跨命令和回复轮次复用；单条命令完成、读等待超时或当前回复结束均不要求 `StopShell`，只有明确需要终结整个 Shell 时才调用。
 
 旧 `RunCommand`、`RunPython`、`InstallPackage`、`StartBackgroundService`、`StopBackgroundService`、`StartWatchingService` 及 `python`/`background` 工具集已移除；内部 `SubprocessRunner` 继续供验证、搜索等基础设施使用。
 

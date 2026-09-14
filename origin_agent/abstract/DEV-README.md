@@ -104,7 +104,7 @@ create_llm_client(name, runtime_context, profile) -> BaseLLMClient
 - `availability`：位掩码
 - `emit_for`：需要向前端推送的事件类型列表
 
-工具集元数据由 `ToolsetEntry` 承载，可显式注册或由工具首次注册时自动创建无描述回退项。`abstract/tools/toolsets_meta.py` 在启动时为所有内置工具集注册简短描述。`skills` 工具集已并入 `core`。
+工具集元数据由 `ToolsetEntry` 承载，可显式注册或由工具首次注册时自动创建无描述回退项。`abstract/tools/toolsets_meta.py` 在启动时为所有内置工具集注册简短描述及加载后的使用说明；其中 shell 工具集说明要求跨命令和回复轮次复用 Shell会话，不因单次命令或回复完成而例行调用 `StopShell`。`skills` 工具集已并入 `core`。
 
 ### `abstract/tools/discover.py`
 

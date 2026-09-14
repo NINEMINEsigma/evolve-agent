@@ -44,11 +44,11 @@ Multimodal Read conventions:
         description="Create and control persistent interactive Windows ConPTY Shell sessions.",
         usage_guide="""Shell sessions preserve working directory, environment, and interactive process state across tool calls.
 
-- Start every command workflow with StartShell, including short commands. It creates a new powershell, pwsh, or cmd session and submits the first line.
+- Reuse an existing Shell when possible, including across response turns. If none is available, use StartShell to create a powershell, pwsh, or cmd session and submit the first command.
 - A 30-second timeout ends only the current wait. The Shell keeps running in the background.
 - Preserve shell_id and output.next_offset. Use ReadShell with that offset for subsequent normalized output.
 - Use WriteShell to answer a CLI prompt or submit another command to the same Shell.
-- InterruptShell sends Ctrl-C without destroying the Shell. StopShell force-stops the Shell and its process tree.
+- InterruptShell sends Ctrl-C without destroying the Shell. StopShell force-stops the Shell and its process tree; use it only when the entire Shell must be destroyed. A completed command, an unfinished task, or the end of a response turn does not require stopping a reusable Shell.
 - Command text does not expand ws:/fork: paths. Use namespace_env returned by StartShell.
 - Use the returned EVOLVE_PYTHON environment reference for the Agent's Python interpreter and pip.
 - Never use Shell tools in place of dedicated Read, Write, PatchEdit, SearchFiles, or Grep tools.""",

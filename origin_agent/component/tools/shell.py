@@ -182,7 +182,8 @@ Output rules:
 - Calls wait at most 30 seconds. Timeout only ends the current wait; it never stops the Shell.
 - After output starts, the call returns after a short quiet window, or at the 30-second hard deadline.
 - Output is normalized text addressed by absolute character offsets. Preserve `next_offset` for later ReadShell calls.
-- A Shell remains alive until StopShell, session termination/deletion, or application shutdown.
+- A Shell remains alive across commands and response turns until StopShell, session termination/deletion, or application shutdown. Reuse it while the task is unfinished or the Shell remains useful.
+- Completing a command or reply is not a reason to call StopShell. StopShell is for intentionally destroying the entire Shell; it also terminates running child processes.
 
 Path rules:
 - `cwd` is a sandbox logical directory such as `ws:`.
@@ -294,7 +295,7 @@ registry.register(
 
 {_COMMON_USAGE}
 
-This never escalates to process-tree termination. Use StopShell explicitly when the entire Shell must be destroyed.""",
+This never escalates to process-tree termination. Use StopShell explicitly only when the entire Shell must be destroyed; do not stop a Shell just because the foreground command was interrupted.""",
         "parameters": {
             "type": "object",
             "properties": {
@@ -319,7 +320,7 @@ registry.register(
 
 {_COMMON_USAGE}
 
-This destroys the persistent Shell environment and can corrupt work performed by a running foreground process. A successful tool result has `stopped=true`; `termination="forced"` describes the Shell termination mode, while `exit_code` is only the process exit code and may be non-zero after forced termination. The process exit code does not make the StopShell operation fail.""",
+This destroys the persistent Shell environment and can corrupt work performed by a running foreground process. Use only when intentionally shutting down the entire Shell, not as routine cleanup after a command or response turn; keep a reusable Shell alive while the task is unfinished. A successful tool result has `stopped=true`; `termination="forced"` describes the Shell termination mode, while `exit_code` is only the process exit code and may be non-zero after forced termination. The process exit code does not make the StopShell operation fail.""",
         "parameters": {
             "type": "object",
             "properties": {

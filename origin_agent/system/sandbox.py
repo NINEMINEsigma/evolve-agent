@@ -48,7 +48,7 @@ from entity.puretype import (
 from system.atomic_io import replace_atomic
 from system.context import get_runtime_context
 from system.pathutils import find_repo_root
-from system.text_codec import decode_text
+from system.text_codec import decode_text, split_lf_lines
 
 from pydantic import BaseModel, ConfigDict
 
@@ -806,11 +806,15 @@ class Sandbox:
                     logical,
                     encoding,
                 )
-            if limit > 0 and (offset > 0 or limit < len(content.splitlines())):
-                lines: list[str] = content.splitlines()
-                chunk: list[str] = lines[offset:offset + limit]
-                return "\n".join(chunk)
-            return content
+            # 只按 LF 定位分页边界；返回原文切片，不改动 CRLF、孤立 CR 或末尾 LF。
+            if limit <= 0:
+                return content
+            lines = split_lf_lines(content)
+            if offset <= 0 and limit >= len(lines):
+                return content
+            start = sum(len(line) + 1 for line in lines[:offset])
+            end = start + sum(len(line) + 1 for line in lines[offset:offset + limit])
+            return content[start:end]
         except FileNotFoundError:
             raise SandboxError(f"File not found: {logical}")
         except UnicodeDecodeError as exc:
@@ -819,19 +823,20 @@ class Sandbox:
             ) from exc
 
     def write(self, logical: str, content: str) -> None:
-        """通过沙盒写入文件内容。"""
+        """通过沙盒写入文件内容，保留传入文本的原始换行序列。"""
         r: ResolvedPath = self.resolve_write(logical)
         r.real.parent.mkdir(parents=True, exist_ok=True)
-        r.real.write_text(content, encoding="utf-8")
+        with r.real.open("w", encoding="utf-8", newline="") as f:
+            f.write(content)
 
     def append(self, logical: str, content: str) -> None:
-        """通过沙盒追加文件内容。文件不存在时报错。"""
+        """通过沙盒追加文件内容，保留传入文本的原始换行序列。"""
         r: ResolvedPath = self.resolve_write(logical)
         if not r.real.exists():
             raise SandboxError(f"File not found: {logical}")
         if not r.real.is_file():
             raise SandboxError(f"Not a file: {logical}")
-        with r.real.open("a", encoding="utf-8") as f:
+        with r.real.open("a", encoding="utf-8", newline="") as f:
             f.write(content)
 
     def exists(self, logical: str) -> bool:

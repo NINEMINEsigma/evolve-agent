@@ -31,6 +31,7 @@ from entity.puretype import ToolDangerLevel
 from entity.constant import EDIT_FILE_MAX_CHARS, READ_FILE_DEFAULT_LIMIT, READ_FILE_MAX_LINES, WRITE_FILE_MAX_CHARS, WRITE_FILE_TRUNCATION_TAIL
 from system.sandbox import Access, Sandbox, SandboxError
 from system.context import get_runtime_context
+from system.text_codec import split_lf_lines
 from pathlib import Path
 
 if TYPE_CHECKING:
@@ -661,27 +662,24 @@ async def _handle_read(args: dict[str, Any], context: ToolContext | None = None)
                 "entries": [],
                 "count": None,
             }
-        # --- 文本分支（原有逻辑，无修改）---
+        # --- 文本分支：直接返回原文片段，行位置另由元数据表示 ---
         try:
             content: str = _s().read(path, offset=offset, limit=limit)
         except SandboxError as exc:
             return tool_error(str(exc), path=path)
-        lines: list[str] = content.splitlines()
-        numbered: str = "\n".join(
-            f"{offset + i + 1}: {line}" for i, line in enumerate(lines)
-        )
+        line_count = len(split_lf_lines(content))
         try:
             total: int = _s().count_lines(path)
         except SandboxError as exc:
             return tool_error(str(exc), path=path)
-        last_line: int = offset + len(lines)
+        last_line: int = offset + line_count
         remaining: int = max(0, total - last_line)
         return {
             "type": "file",
             "path": path,
             "absolute_path": str(resolved.real),
             "total_lines": total,
-            "content": numbered,
+            "content": content,
             "remaining": remaining,
             "offset": offset,
             "limit": limit,
@@ -841,7 +839,7 @@ registry.register(
     name="Read",
     toolset="filesystem",
     schema={
-        # 读取文件内容（带行号前缀、总行数、绝对路径）、列出目录条目、或读取图片/音频/视频文件（按 MIME 自动检测）。
+        # 读取文件原始文本（保留 CRLF/LF/孤立 CR 和末尾换行，另返回总行数、绝对路径）、列出目录条目、或读取图片/音频/视频文件（按 MIME 自动检测）。
         # 支持命名空间前缀：ws:、fork:、fix:、skills: 及其他只读命名空间。
         # 目录分支忽略 offset/limit，文件分支使用 offset/limit 分页，图片/音频/视频分支忽略 offset/limit。
         #
@@ -866,8 +864,8 @@ registry.register(
         #   至少 tool 或 user 消息之一支持该模态时才读取文件。
         #
         # ## 调用效果
-        # **文件分支**：返回文件内容，每行前缀为 1-indexed 行号。
-        # 支持 offset（0-indexed 起始行）和 limit（最大行数）分页。
+        # **文件分支**：content 为原始文本片段，不添加行号，也不转换或删除换行字符。
+        # offset（0-indexed 起始行）和 limit（最大行数）只用于选择完整的原文行片段。
         # **目录分支**：返回条目名称列表，目录条目以 "/" 后缀标识。
         # offset/limit 在目录分支中被忽略（固定填充为 0）。
         # **图片分支**：按 MIME 自动检测。若 tool 消息支持 → 返回 _blocks（多模态块在 tool 消息中传递）；
@@ -879,14 +877,14 @@ registry.register(
         #
         # ## 返回
         # ```json
-        # {{"path": "ws:example.txt", "content": "1|first line\n2|second line", "total_lines": 100, "remaining": 98, "offset": 0, "limit": 100}}
+        # {{"path": "ws:example.txt", "content": "first line\r\nsecond line\r\n", "total_lines": 100, "remaining": 98, "offset": 0, "limit": 2}}
         # ```
         # `total_lines` 为文件总行数。`remaining` 为当前读取的最后一行到文件末尾还剩多少行（0 表示已读至文件末尾）。
         #
         # ## 何时使用
         # - 编辑前查看文件内容。
         # - 分页浏览大文件。
-        # - 通过行号引用具体位置。
+        # - 通过 offset 和 total_lines 定位具体行；content 本身不插入行号。
         # - 利用 `remaining` 判断是否需要继续分页读取。
         # - 读取图片/音频/视频文件（多模态能力自动探测，无需手动探查）。
         # - 即使 provider 不支持 tool 消息多模态，只要支持 user 消息多模态，Read 仍可通过
@@ -900,7 +898,7 @@ registry.register(
         # - tool/user 消息都不支持但配了引用字段时，转发给被引用模型取描述文本，返回 description 字段。
         # - 仅 user 消息支持时，返回 _user_blocks 而非 _blocks，
         #   多模态内容将在当前轮工具调用完成后通过用户消息注入，返回文本提醒不要再调用工具。
-        "description": """Read file content (with line numbers, total lines, absolute path), list directory entries, or read an image/audio file (auto-detected by MIME type). Supports namespace prefixes: ws:, fork:, fix:, skills:, and read-only namespaces.
+        "description": """Read original file text (preserving CRLF, LF, lone CR, and trailing newlines), list directory entries, or read an image/audio file (auto-detected by MIME type). Returns total lines and absolute path separately. Supports namespace prefixes: ws:, fork:, fix:, skills:, and read-only namespaces.
 
 ## Prerequisites
 - The path must exist (file or directory).
@@ -908,7 +906,7 @@ registry.register(
 - Image/audio branches automatically probe multimodal capability on first access and cache the result. No manual probe needed.
 
 ## Effect
-**File branch**: Returns file content prefixed with 1-indexed line numbers. Supports pagination via offset (0-indexed start) and limit (max lines).
+**File branch**: `content` is the original text of the selected whole-line slice: no line-number prefixes, newline normalization, or removed trailing newline. Supports pagination via offset (0-indexed start) and limit (max lines); use offset and total_lines for line positions.
 **Directory branch**: Returns entry names; directory entries suffixed with '/'. offset and limit are ignored for directories (filled as 0).
 **Image branch**: Auto-detected by MIME type (PNG, JPEG, WebP, GIF, BMP, TIFF, SVG; max 20 MB). Delivery path depends on probe results:
 - `vision_capable=true` → image is delivered directly in the tool message as a `_blocks` payload (multimodal content block).
@@ -926,7 +924,7 @@ All branches return absolute_path (resolved absolute path), total_lines (line co
 ## Returns
 File branch:
 ```json
-{"type": "file", "path": "ws:a.py", "absolute_path": "...", "total_lines": 100, "content": "1|...", "remaining": 98, "offset": 0, "limit": 100, "entries": [], "count": null}
+{"type": "file", "path": "ws:a.py", "absolute_path": "...", "total_lines": 100, "content": "first line\r\nsecond line\r\n", "remaining": 98, "offset": 0, "limit": 2, "entries": [], "count": null}
 ```
 Directory branch:
 ```json
@@ -975,9 +973,9 @@ Video branch (user-message fallback path):
                 },
                 "offset": {
                     "type": "integer",
-                    # 起始行号（0-indexed，默认 0）。输出使用 1-indexed 行号前缀。
+                    # 起始行号（0-indexed，默认 0）。content 返回对应原文片段，不插入行号。
                     "description": "Starting line number, 0-indexed (default 0). "
-                    "Output uses 1-indexed line number prefixes for display.",
+                    "Content is the corresponding original text slice, without line-number prefixes.",
                     "default": 0,
                     "minimum": 0,
                 },
@@ -1267,7 +1265,7 @@ def _handle_edit(
     except Exception as exc:
         return tool_error(str(exc), path=path)
 
-    # --- exact 模式（默认，向后兼容） ---
+    # --- exact 模式：仅按原始文本匹配，替换文本原样写入 ---
     if match_mode == "exact":
         if old_string == new_string:
             return tool_error("old_string and new_string are identical — nothing to change", path=path)
@@ -1322,7 +1320,7 @@ def _handle_edit(
             m = iter_matches[0]
             diffs = [[m.group(0), m.expand(new_string), content[:m.start()].count("\n") + 1]]
 
-    # --- range 模式 ---
+    # --- range 模式：按原始文本匹配标记并原样写入替换文本 ---
     elif match_mode == "range":
         ranges = _find_ranges(content, start_marker, end_marker)
         if not ranges:
@@ -1337,10 +1335,9 @@ def _handle_edit(
             )
         target_ranges = ranges if replace_all else ranges[:1]
         diffs = [[content[s:e], new_string, content[:s].count("\n") + 1] for s, e in target_ranges]
-        # 逆序替换以避免偏移
         new_content = content
-        for s_idx, e_end in reversed(target_ranges):
-            new_content = new_content[:s_idx] + new_string + new_content[e_end:]
+        for start, end in reversed(target_ranges):
+            new_content = new_content[:start] + new_string + new_content[end:]
 
     else:
         return tool_error(
@@ -1365,11 +1362,12 @@ registry.register(
     toolset="filesystem",
     schema={
         # 通过替换匹配文本为 new_string 来编辑文件。支持三种匹配模式：
-        #   - exact（默认）：old_string 精确匹配，必须唯一出现或设置 replace_all=true。
-        #   - regex：old_string 作为正则 pattern，new_string 支持 Python re.sub 替换语法：
+        #   - exact（默认）：old_string 按原文逐字符匹配，必须唯一出现或设置 replace_all=true。
+        #     new_string 原样写入，绝不自动转换换行；CRLF 文件的跨行片段需显式使用 \r\n。
+        #   - regex：在原始文本上匹配，显式使用 \r 匹配原始 CR；new_string 遵循 Python re.sub 替换语法。
         #     \1~\99（编号组）、\g<1>（显式编号组，推荐）、\g<name>（命名组）、\g<0>（整个匹配）、\\（字面反斜杠）。
         #     注意：$1、$& 等 JS/Perl 语法不被支持，会被当作字面文本。
-        #   - range：通过 start_marker 和 end_marker 定位整个区间（含标记），替换为 new_string。
+        #   - range：start_marker/end_marker 按原文逐字符定位区间（含标记），new_string 原样写入。
         #
         # exact / regex 模式下 old_string 必填，range 模式下 start_marker + end_marker 必填。
         # old_string / start_marker / end_marker / new_string 各自不能超过 {EDIT_FILE_MAX_CHARS} 字符。
@@ -1377,8 +1375,8 @@ registry.register(
         # 如需更大更改，请多次顺序调用 PatchEdit。
         #
         # 使用方式：
-        # - 必须先使用 Read 查看当前内容及行号。
-        # - exact 模式：从 Read 输出中选取 old_string，保留行号前缀之后的精确缩进。
+        # - 必须先使用 Read 查看当前原始文本及分页 offset/total_lines。
+        # - exact 模式：Read 返回原文；跨行 old_string 必须保留原文件实际换行（包括 CRLF），保留缩进。
         # - exact 模式：包含 2-3 行周围上下文以确保唯一匹配。
         # - regex 模式：old_string 为 Python 正则表达式，new_string 用 \1 或 \g<1> 引用捕获组（不支持 $1）。
         # - range 模式：start_marker 到其后最近 end_marker（含两端）的整个区间被替换。
@@ -1407,17 +1405,17 @@ registry.register(
         #   - 字符串相同（exact/regex）→ 无变更，报错
         "description": f"""Edit a file by replacing matched text with new_string. Supports three matching modes via `match_mode`:
 
-- **exact** (default): `old_string` must match exactly once (or set `replace_all=true`). Classic find-and-replace.
-- **regex**: `old_string` is a Python regex pattern. In `new_string`, use Python `re.sub` replacement syntax: `\\1`-`\\99` (numbered group), `\\g<1>` (explicit numbered, recommended), `\\g<name>` (named group via `(?P<name>...)`), `\\g<0>` (full match), `\\\\` (literal backslash). Do NOT use `$1` or `$&` — these are JS/Perl syntax and will be inserted as literal text.
-- **range**: Replace the entire region from `start_marker` to the nearest `end_marker` (both markers included) with `new_string`.
+- **exact** (default): `old_string` must match the original file text exactly once (or set `replace_all=true`). `new_string` is written verbatim, including its newline characters. For CRLF files, supply CRLF explicitly in multiline strings.
+- **regex**: `old_string` matches the original text, so use `\\r` explicitly to match CR in CRLF. Replacement newlines are used verbatim; Python `re.sub` replacement syntax still expands backreferences: `\\1`-`\\99` (numbered group), `\\g<1>` (explicit numbered, recommended), `\\g<name>` (named group via `(?P<name>...)`), `\\g<0>` (full match), `\\\\` (literal backslash). Do NOT use `$1` or `$&` — these are JS/Perl syntax and will be inserted as literal text.
+- **range**: Locate `start_marker` through the nearest `end_marker` (inclusive) in the original file text; write `new_string` verbatim.
 
 All modes share `replace_all` (default false): when false, multiple matches return an error; when true, all matches are replaced.
 
 Both `old_string` and `new_string` are limited to {EDIT_FILE_MAX_CHARS} characters each. Use this instead of Write when only a few lines need changing — avoids resending the entire file content. For larger changes, make multiple sequential PatchEdit calls.
 
 Usage:
-- You must use Read first to inspect current content with line numbers.
-- exact: pick old_string from Read output, preserve exact indentation after the line number prefix. Include 2-3 lines of surrounding context for uniqueness.
+- You must use Read first to inspect the original text (offset and total_lines give line positions).
+- exact: `old_string` must match Read's original UTF-8 file text, including its actual newline characters. Preserve indentation and include 2-3 surrounding lines for uniqueness.
 - regex: old_string is a Python regex. new_string uses Python replacement syntax: \\1, \\g<1>, \\g<name>, \\g<0>. Do NOT use $1 (JS/Perl) — it will be literal text.
 - range: provide start_marker and end_marker. The entire span from start_marker to the nearest end_marker (inclusive) is replaced by new_string.
 - Set replace_all=true to replace all matches (skips uniqueness check).

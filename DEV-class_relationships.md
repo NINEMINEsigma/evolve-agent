@@ -391,6 +391,7 @@ classDiagram
         #_shutdown_event
         +current()$
         +link_shutdown_event()
+        +shutdown_event
         +shutdown()
     }
 
@@ -693,6 +694,7 @@ classDiagram
 | `ws` | `MessageRouter` | `WebSocket` | WebSocket 连接引用 |
 | `sid` | `MessageRouter` | `str` | 当前 session_id（旋转时更新） |
 | `agentspace_path` | `MessageRouter` | `Path \| None` | 文件上传目标目录 |
+| `_shutdown_event` | `Application` | `asyncio.Event \| None` | `main.py::App` 绑定的进程关闭信号；Gateway 通过只读 `shutdown_event` 属性让 SSE 长连接正常退出 |
 | `runtime_context` | `Application` | `RuntimeContext` | 运行时上下文 |
 | `_profile_lock` | `Application` | `threading.RLock` | Profile 根对象、名称指针与会话选择共用的进程锁 |
 | `_llm_profile_store` | `Application` | `LLMProfileStore \| None` | 进程内唯一的 `LLMProfileData` 根对象存储 |
@@ -782,6 +784,7 @@ classDiagram
 | 全局 `Application.current()` | `session_manager`, `frontend_sink`, `subagent_orchestrator`, `approval_backend_manager` | `Application` | 多处 | 各模块通过单例访问子系统 |
 | 动态空间管理工具与管理弹窗 | `add_dynamic_space()` / `update_dynamic_space()` / `remove_dynamic_space()` / `normalize_dynamic_space_path()` | `Sandbox` | `component/tools/sandbox_spaces.py`、`gateway/server.py` | Agent 工具经 critical 审批；用户命令菜单管理弹窗经 REST 直接修改，均复用 Sandbox 校验 |
 | 动态空间 Prompt 构建器 | `list_dynamic_spaces_with_availability()` | `Sandbox` | `system/prompt.py` | 生成结构化动态命名空间系统提示词块 |
+| Gateway Agentspace SSE | `shutdown_event` | `Application` | `gateway/server.py::agentspace_events` | 通过共享进程关闭信号主动结束事件流，避免阻塞 uvicorn 优雅关闭 |
 | Gateway / 搜索 / LSP | `resolve_read()` / `namespace_bases()` | `Sandbox` | `gateway/server.py`、`system/search_engine.py`、`system/lsp.py` | 复用唯一 Sandbox 的动态映射与有效 base |
 
 > 注：子类对父类 protected 字段的 `self._x` 访问（如 `ParentAgentLoop` 访问 `self._history`）属于合法继承访问，不列入"外部访问"。

@@ -17,7 +17,7 @@ from system.application import Application
 if TYPE_CHECKING:
     from system.context import RuntimeContext
 
-from entity.constant import Namespace
+from entity.constant import GATEWAY_SHUTDOWN_TIMEOUT_SECONDS, Namespace
 
 logger = logging.getLogger(__name__)
 
@@ -282,11 +282,27 @@ class App:
         except Exception:
             logger.warning("Failed to shutdown MCP tools", exc_info=True)
         self._gateway_server.should_exit = True  # type: ignore[union-attr]
-        self._gateway_task.cancel()
+        # App._shutdown_event 已设置，Agentspace SSE 会通过 Application 的共享事件退出。
         try:
-            await self._gateway_task
+            await asyncio.wait_for(
+                asyncio.shield(self._gateway_task),
+                timeout=GATEWAY_SHUTDOWN_TIMEOUT_SECONDS,
+            )
+        except asyncio.TimeoutError:
+            logger.warning(
+                "Gateway did not stop within %.1f seconds; cancelling it",
+                GATEWAY_SHUTDOWN_TIMEOUT_SECONDS,
+            )
+            self._gateway_task.cancel()
+            try:
+                await self._gateway_task
+            except asyncio.CancelledError:
+                pass
+            except Exception:
+                logger.warning("Gateway task failed while being cancelled", exc_info=True)
         except asyncio.CancelledError:
-            pass
+            if not self._gateway_task.cancelled():
+                raise
         except Exception:
             logger.warning("Failed to await gateway task during shutdown", exc_info=True)
         logger.info("Gateway stopped")

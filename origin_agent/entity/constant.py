@@ -88,6 +88,9 @@ META_EXTRACTOR_CHARACTER: str = "__meta_extractor__"
 # 超时
 # ============================================================================
 
+# Gateway 优雅关闭等待上限（秒）；超时后才强制取消 uvicorn 任务
+GATEWAY_SHUTDOWN_TIMEOUT_SECONDS: float = 10.0
+
 # 子进程默认超时（秒）— 用于 pip install、scp 传输、前端构建等子进程调用
 SUBPROCESS_TIMEOUT_DEFAULT: int = 120
 

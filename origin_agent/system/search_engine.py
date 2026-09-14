@@ -35,6 +35,7 @@ from entity.constant import (
 from system.pathutils import get_agent_dir
 from system.sandbox import SandboxError
 from system.subprocess_utils import safe_decode
+from system.text_codec import strip_lf_line_ending
 
 if TYPE_CHECKING:
     from entry.base_agent_loop import ToolContext
@@ -410,9 +411,9 @@ def _attach_contexts(matches: list[dict[str, Any]], context_lines: int) -> None:
         before_buffer: deque[str] = deque(maxlen=context_lines)
         pending_after: list[tuple[dict[str, Any], int]] = []
         try:
-            with file_path.open("r", encoding="utf-8", errors="replace") as f:
+            with file_path.open("r", encoding="utf-8", errors="replace", newline="\n") as f:
                 for line_number, raw_line in enumerate(f, start=1):
-                    line = raw_line.rstrip("\r\n")
+                    line = strip_lf_line_ending(raw_line)
                     if pending_after:
                         next_pending: list[tuple[dict[str, Any], int]] = []
                         for match, remaining in pending_after:
@@ -494,7 +495,7 @@ async def _run_ripgrep_grep(
         matches.append({
             "file": _logical_result_path(namespace, root, file_path),
             "line": line_number,
-            "match": line_text.rstrip("\r\n"),
+            "match": strip_lf_line_ending(line_text),
             "context_before": [],
             "context_after": [],
             "_real_path": file_path,
@@ -583,9 +584,9 @@ def _python_grep(
         before_buffer: deque[str] = deque(maxlen=context_lines)
         pending_after: list[tuple[dict[str, Any], int]] = []
         try:
-            with file_path.open("r", encoding="utf-8", errors="replace") as f:
+            with file_path.open("r", encoding="utf-8", errors="replace", newline="\n") as f:
                 for line_number, raw_line in enumerate(f, start=1):
-                    line = raw_line.rstrip("\r\n")
+                    line = strip_lf_line_ending(raw_line)
                     if pending_after:
                         next_pending: list[tuple[dict[str, Any], int]] = []
                         for match, remaining in pending_after:
@@ -623,7 +624,7 @@ def _python_grep(
                             ]
                             for _ in range(context_lines):
                                 try:
-                                    following = next(f).rstrip("\r\n")
+                                    following = strip_lf_line_ending(next(f))
                                 except StopIteration:
                                     break
                                 next_pending = []
