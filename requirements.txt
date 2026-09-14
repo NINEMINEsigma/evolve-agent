@@ -2,8 +2,8 @@ fastapi
 httpx
 uvicorn
 websockets
-# openai
-# anthropic
+openai
+anthropic==0.71.0
 pydantic
 # pyautogui>=0.9.54
 # pygetwindow>=0.0.9; sys_platform == 'darwin' or sys_platform == 'win32'
