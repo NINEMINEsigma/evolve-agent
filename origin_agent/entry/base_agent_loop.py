@@ -1064,6 +1064,16 @@ class BaseAgentLoop(ABC):
             ], character=META_EXTRACTOR_CHARACTER, response_format={"type": "json_object"})
             logger.info("Session tags response, tags: %s | reasoning: %s", resp.content, resp.reasoning_content)
             result = json.loads(resp.content)
+            if isinstance(result, dict):
+                if "tags" in result:
+                    result = result["tags"]
+                elif "tag" in result:
+                    result = result["tag"]
+                else:
+                    for v in result.values():
+                        if isinstance(v, list) and all(isinstance(content, str) for content in v):
+                            result = v
+                            break
             if not isinstance(result, list):
                 raise ValueError("session tags response is not a list")
             return result
