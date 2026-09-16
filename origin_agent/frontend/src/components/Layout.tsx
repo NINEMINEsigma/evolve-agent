@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import Sidebar from "./Sidebar";
 import Header from "./Header";
 import ChatArea from "./ChatArea";
@@ -212,8 +212,11 @@ export default function Layout({ ws, onContextMenu, contextMenuOpen, onboardingR
     setResponseCharacters(curResponse);
   };
 
-  const onToggleMessageVisibility = (messageId: string, agentName: string) => {
-    const msg = ws.messages.find((m) => m.id === messageId);
+  const messagesRef = useRef(ws.messages);
+  messagesRef.current = ws.messages;
+
+  const handleToggleMessageVisibility = useCallback((messageId: string, agentName: string) => {
+    const msg = messagesRef.current.find((m) => m.id === messageId);
     if (msg == null || typeof msg.messageIndex !== "number") return;
     let curVisible = [...(msg.visibleCharacters || ["all-agents"])];
     let curResponse = [...(msg.responseCharacters || [])];
@@ -237,7 +240,7 @@ export default function Layout({ ws, onContextMenu, contextMenuOpen, onboardingR
     ws.setMessages((prev) => prev.map((m) =>
       m.id === messageId ? { ...m, visibleCharacters: newVisible, responseCharacters: curResponse } : m
     ));
-  };
+  }, [ws.agents, ws.setMessages, ws.updateMessageVisibility]);
 
   const currentSessionArchived = ws.sessions.find((s) => s.id === ws.sessionId)?.status === "archived";
   // 空态判定与 ChatArea.isEmpty 一致：无 user/assistant 消息且无流式且无等待
@@ -345,7 +348,7 @@ export default function Layout({ ws, onContextMenu, contextMenuOpen, onboardingR
               onDropFiles={ws.handleFileUpload}
               streamingMessage={ws.streamingMessage}
               agents={ws.agents}
-              onToggleMessageVisibility={onToggleMessageVisibility}
+              onToggleMessageVisibility={handleToggleMessageVisibility}
               onScrollToBottom={() => ws.scrollToBottomSmooth()}
               isReady={ws.isReady}
               stageState={stageState}

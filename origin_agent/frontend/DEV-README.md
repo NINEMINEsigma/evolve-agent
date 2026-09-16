@@ -98,8 +98,8 @@ frontend/
 
 | 组件 | 职责 |
 |---|---|
-| `ChatArea.tsx` | 聊天消息滚动区域；持有主聊天区同角色悬停联动状态（`hoveredCharacterName`），悬停某气泡时同角色名的全部气泡同时变为模糊玻璃 |
-| `MessageItem.tsx` | 单条消息渲染（文本、代码块、图片、工具调用）；上报鼠标进入/离开的角色显示名称，并按名称匹配附加 `.message-character-hovered`；子会话抽屉不传联动 props，不参与跨消息联动 |
+| `ChatArea.tsx` | 聊天消息滚动区域；通过 `useMessageCharacterHover` 在 `.chat-content` 根节点委托同角色悬停事件，直接维护公开 `data-character-hovered` 属性，避免悬停状态触发历史消息树重渲染 |
+| `MessageItem.tsx` | 单条消息渲染（文本、代码块、图片、工具调用）；通过 `data-character-name` 暴露角色显示名称，主聊天区的事件委托按名称维护同角色联动；子会话抽屉不接入该委托 |
 | `MessageBody.tsx` | 消息正文 Markdown 渲染 |
 | `MessageEditor.tsx` | 消息编辑器（编辑历史消息） |
 | `MessageAttachments.tsx` | 消息附件展示 |
@@ -111,7 +111,7 @@ frontend/
 | `TokenRing.tsx` | 上下文用量环形徽章（Header 与输入栏共用） |
 | `Lightbox.tsx` | 图片灯箱 |
 | `SafeHtml.tsx` | 安全 HTML 渲染 |
-| `Minimap.tsx` | 小地图导航 |
+| `Minimap.tsx` | 小地图导航；消息结构或尺寸变化时测量精确消息块几何，滚动热路径只按滚动容器数据更新视口指示器 |
 | `MentionMenu.tsx` | `@` 提及菜单（文件/skill 列表，Portal 渲染） |
 
 `@` 提及支持通过 `/` 逐级查询工作空间子目录；选择目录会保留输入状态并自动进入该目录，选择文件才会插入不可编辑的引用标签。子目录查询期间候选项暂时为空时，`Enter` 和 `Tab` 也不会发送消息或切走输入焦点。只有输入开头或空白后的 `/` 才触发 skill 菜单，目录路径中的 `/` 会作为路径分隔符保留。
@@ -170,6 +170,7 @@ frontend/
 | `useAgentspace.ts` | Agentspace 编辑器状态机：目录展开/选择、版本化标签、SSE 代际、逐文件锁、冲突和垃圾桶 |
 | `useEdgeDrawer.ts` | 边缘抽屉三态状态机（hidden/peek/open），侧栏与顶部栏共用 |
 | `useGlobalTooltip.ts` | 全局 tooltip 管理 |
+| `useMessageCharacterHover.ts` | 主聊天区同角色悬停事件委托；直接维护消息公开属性，避免瞬时悬停进入 React 消息状态 |
 | `useSessionStage.ts` | 会话舞台层状态：由 `Layout` 单例探测 `stage/index.html` 并订阅 Agentspace SSE，资源连续变更时等待 1 秒安静窗口后刷新 iframe |
 | `useSessionChatStyle.ts` | 会话聊天区自定义样式状态：探测 `chat-style/index.css`，经 PostCSS 作用域处理（`@import` 拒绝、`.chat-area` 前缀、`@font-face` 校验 `ChatStyle-` 前缀），SSE 热重载 |
 
