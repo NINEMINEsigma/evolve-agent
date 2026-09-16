@@ -32,6 +32,7 @@ frontend/
 │   │   ├── useUploadManager.ts      ← 文件上传管理
 │   │   ├── useLlmProfiles.ts         ← Profile 列表、单对象 CRUD 与活动名称
 │   │   ├── useAgentspace.ts         ← Agentspace 文件浏览
+│   │   ├── useSessionSite.ts        ← 会话网页探测与 SSE 热刷新
 │   │   ├── useEdgeDrawer.ts         ← 边缘抽屉三态状态机
 │   │   └── useGlobalTooltip.ts      ← 全局 tooltip
 │   ├── components/
@@ -92,6 +93,7 @@ frontend/
 | `ErrorBoundary.tsx` | 错误边界，防止模态组件异常卸载整个 App |
 | `SplashScreen.tsx` | 开屏动画，最少停留 800ms、最多 3000ms，可点击跳过 |
 | `AgentStageLayer.tsx` | 聊天区背景层 Agent 舞台层 iframe（会话级 `stage/` 目录，透明、鼠标穿透）；仅负责渲染，由 `Layout` 统一提供舞台层状态 |
+| `SessionSiteSection.tsx` / `SessionSiteDrawer` | 会话网页抽屉展示与交互；消费 `useSessionSite` 的权威状态，保留手动刷新、全屏、新标签页和整站下载 |
 | `ChatStyleLayer.tsx` | 聊天区自定义样式注入层，以 `<style data-chat-style-scope>` 注入经 PostCSS 作用域处理的 CSS（会话级 `chat-style/index.css`） |
 
 ### 聊天区域
@@ -171,6 +173,7 @@ frontend/
 | `useEdgeDrawer.ts` | 边缘抽屉三态状态机（hidden/peek/open），侧栏与顶部栏共用 |
 | `useGlobalTooltip.ts` | 全局 tooltip 管理 |
 | `useMessageCharacterHover.ts` | 主聊天区同角色悬停事件委托；直接维护消息公开属性，避免瞬时悬停进入 React 消息状态 |
+| `useSessionSite.ts` | 会话网页状态：探测当前会话 `site/index.html` 并订阅 `site/` 的 Agentspace SSE；部署完成后自动显示右侧入口，资源连续变化时等待 1 秒安静窗口后热刷新，入口文件或目录删除/移走后自动隐藏 |
 | `useSessionStage.ts` | 会话舞台层状态：由 `Layout` 单例探测 `stage/index.html` 并订阅 Agentspace SSE，资源连续变更时等待 1 秒安静窗口后刷新 iframe |
 | `useSessionChatStyle.ts` | 会话聊天区自定义样式状态：探测 `chat-style/index.css`，经 PostCSS 作用域处理（`@import` 拒绝、`.chat-area` 前缀、`@font-face` 校验 `ChatStyle-` 前缀），SSE 热重载 |
 

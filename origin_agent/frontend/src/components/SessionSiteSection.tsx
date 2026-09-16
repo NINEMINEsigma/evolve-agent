@@ -1,13 +1,13 @@
 /**
  * 会话网页抽屉 — 与"会话资源/任务"抽屉和"模型配置"抽屉并列的独立右侧抽屉。
  *
- * 拉模式探测：组件挂载、打开或 sessionId 变化时 fetch 一次 index.html，
- * 404/网络异常 → 空态"尚未部署网页"，并隐藏右侧触发按钮；
- * 200 → 显示右侧触发按钮，抽屉内 toolbar 一行 + iframe 撑满剩余空间（自适应宽高、无冗余边框）。
+ * 通过初始探测与 Agentspace SSE 实时同步 site/index.html：
+ * 缺失或网络异常时显示空态并隐藏右侧触发按钮；部署成功后自动显示入口，
+ * 站点资源变化时自动刷新 iframe，同时保留用户手动刷新能力。
  */
 
-import { useCallback, useEffect, useRef, useState } from "react";
-import { buildSiteUrls } from "../utils";
+import { useEffect, useRef, useState } from "react";
+import { useSessionSite } from "../hooks/useSessionSite";
 
 interface SessionSiteDrawerProps {
   open: boolean;
@@ -19,52 +19,17 @@ interface SessionSiteDrawerProps {
   onResizePointerDown?: (e: React.PointerEvent<HTMLElement>) => void;
 }
 
-type ProbeStatus = "idle" | "missing" | "ready";
-
 export default function SessionSiteDrawer({
   open, onClose, sessionId, onAvailabilityChange, width, isResizing, onResizePointerDown,
 }: SessionSiteDrawerProps) {
-  const [status, setStatus] = useState<ProbeStatus>("idle");
-  const [reloadKey, setReloadKey] = useState(0);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const frameRef = useRef<HTMLDivElement>(null);
-  const probeSeqRef = useRef(0);
+  const { status, reloadKey, urls, refresh } = useSessionSite(sessionId);
 
-  const urls = buildSiteUrls(sessionId);
-
-  const probe = useCallback(async () => {
-    if (!urls) {
-      setStatus("missing");
-      onAvailabilityChange?.(false);
-      return;
-    }
-    const seq = ++probeSeqRef.current;
-    try {
-      const resp = await fetch(urls.indexUrl, { cache: "no-store" });
-      if (seq !== probeSeqRef.current) return;
-      setStatus(resp.ok ? "ready" : "missing");
-      onAvailabilityChange?.(resp.ok);
-    } catch {
-      if (seq !== probeSeqRef.current) return;
-      setStatus("missing");
-      onAvailabilityChange?.(false);
-    }
-  }, [urls, onAvailabilityChange]);
-
-  // sessionId 变化：重置状态并重新探测
+  // Hook 的权威探测状态决定 Layout 是否显示右侧会话网页入口。
   useEffect(() => {
-    setStatus("idle");
-    onAvailabilityChange?.(false);
-    setReloadKey(0);
-    probe();
-  }, [sessionId]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // open 由 false→true 时探测
-  useEffect(() => {
-    if (open && status === "idle") {
-      probe();
-    }
-  }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
+    onAvailabilityChange?.(status === "ready");
+  }, [status, onAvailabilityChange]);
 
   // 全屏状态同步
   useEffect(() => {
@@ -78,8 +43,7 @@ export default function SessionSiteDrawer({
   if (!open) return null;
 
   const handleRefresh = () => {
-    probe();
-    setReloadKey((k) => k + 1);
+    refresh();
   };
 
   const handleFullscreen = () => {
