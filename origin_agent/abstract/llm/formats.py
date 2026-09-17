@@ -15,6 +15,7 @@ import re
 import json
 from typing import Any
 
+from abstract.llm.client import UnsupportedModalityError
 from entity.messages import (
     BaseMessage,
     CharacterConversationMessage,
@@ -242,19 +243,13 @@ def _content_to_anthropic_blocks(content: Any) -> list[dict[str, Any]]:
                 if image_block is not None:
                     blocks.append(image_block)
             elif block_type == "input_audio":
-                # Anthropic 不支持音频输入，替换为文本占位符
-                input_audio = block.get("input_audio", {})
-                fmt = input_audio.get("format", "unknown") if isinstance(input_audio, dict) else "unknown"
-                blocks.append({
-                    "type": "text",
-                    "text": f"[Audio content ({fmt}) — not supported by Anthropic models]",
-                })
+                raise UnsupportedModalityError(
+                    "Anthropic wire format does not support audio input"
+                )
             elif block_type == "video_url":
-                # Anthropic 不支持视频输入，替换为文本占位符
-                blocks.append({
-                    "type": "text",
-                    "text": "[Video content (mp4) — not supported by Anthropic models]",
-                })
+                raise UnsupportedModalityError(
+                    "Anthropic wire format does not support video input"
+                )
         return blocks
 
     return []

@@ -227,7 +227,7 @@ fast 模式的动态沙盒空间由 Application 持有的 Sandbox 单例统一�
 - `system/search_engine.py`：`SearchFiles` / `Grep` 的搜索引擎封装。Windows x64 优先使用随 Agent 分发的固定版本 `ripgrep`（`origin_agent/vendor/ripgrep/win32-x64/rg.exe`），不可用、校验失败或单次兼容错误时回退 Python；ripgrep 匹配、Python 回退和上下文读取均按 LF 计行，孤立 CR 不会错位；统一处理 ignore/hidden 过滤、`limit` 截断、`full_scan`、`exhaustive`、`engine` 与 `warning` 返回字段。
 - 主会话强制中断：`IMainSessionLoop` 提供活动任务登记与 `request_interrupt()` 权威入口（普通模式/多Agent模式共用）；`StreamConsumer` 提供 5 分钟流式空闲超时、部分结果快照与主动关闭；前端中断按钮为后端权威流程，不再乐观显示"已中断"。
 - `system/lsp.py`：LSP 服务器进程管理与诊断（`component/tools/lsp.py` 工具调用；App 关闭时清理 LSP 进程）。
-- `system/modality_capability.py`：多模态能力探测与缓存（探针已内化为系统自动行为：伪装 Read 工具调用，按 模态 × 消息路径六路并发探测 tool/user 消息的图片/音频/视频支持；easysave 缓存按 model+base_url 联合索引；`build_modality_prompt_block()` 每轮生成 system prompt 注入块；`forward_modality_to_ref_profile()` 把活跃模型不支持的模态转发到 profile 引用的其他模型）。
+- `system/modality_capability.py`：多模态能力探测与缓存（探针已内化为系统自动行为：伪装 Read 工具调用，按 模态 × 消息路径六路并发探测 tool/user 消息的图片/音频/视频支持；easysave 缓存按 model+base_url 联合索引；`build_modality_prompt_block()` 每轮生成 system prompt 注入块；`forward_modality_to_ref_profile()` 把活跃模型不支持的模态转发到 profile 引用的其他模型）。`build_media_content_block()` 提供不附加 prompt 的共享单媒体块构造入口。自定义工具 `ReadForward` 使用该入口按 `paths` 顺序构造“文件标签 + 媒体块”，末尾只附加一次 prompt，并通过单条 user 消息和一次 LLM 调用转发混合模态；工具生成的紧凑 JSON 内容块载荷上限为 45 MiB，任意文件无效时整体失败。
 
 ### `evolve/`
 

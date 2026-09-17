@@ -8,7 +8,9 @@
 （api_key、base_url、model、temperature、max_output_tokens），
 密钥通过环境变量兜底（``ANTHROPIC_API_KEY``）。
 
-支持 thinking（reasoning）内容的解析与续传。
+支持 thinking（reasoning）内容的解析与续传。图片会转换为 Anthropic image block；
+音频和视频无法忠实表达时，wire format 转换阶段抛出 ``UnsupportedModalityError``，
+不会静默替换为文本占位符。
 ``response_format`` 在本实现中忽略。
 """
 

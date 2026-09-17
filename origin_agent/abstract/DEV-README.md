@@ -48,6 +48,7 @@ abstract/
 - 抽象层不依赖 `RuntimeContext`，保持后端无关。
 - `messages` 参数类型为 `list[BaseMessage]`（非 `list[dict]`），子类在发送前自行调用 `to_openai_message()` 或 `messages_to_anthropic_list()` 转换为 wire format。
 - `character` 参数为当前运行中的 agent 角色名，用于消息转换时的可见性过滤和前缀修饰。
+- 多模态内容块必须忠实转换并发送；客户端或 wire format 无法表达某种模态时应抛出 `UnsupportedModalityError`（第三方实现也可抛出自身明确异常），禁止静默删除、替换为普通文本或伪造成功。
 - 子类必须实现 `_convert_messages()` 将 `list[BaseMessage]` 转换为对应 LLM 后端的 wire format。
 
 #### `abstract/llm/loader.py` — `create_llm_client()`
@@ -79,6 +80,7 @@ create_llm_client(name, runtime_context, profile) -> BaseLLMClient
   - 工具调用结果转为 `tool_result` content block，放在 user 消息中。
   - 助手消息的 `tool_calls` 转为 `tool_use` content block。
   - reasoning 内容转为 `thinking` content block。
+  - 图片忠实转换为 Anthropic image block；音频和视频无法表达时抛出 `UnsupportedModalityError`，不再替换为文本占位符。
 
 ---
 

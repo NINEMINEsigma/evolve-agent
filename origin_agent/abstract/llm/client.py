@@ -2,6 +2,9 @@
 
 ``BaseLLMClient`` 声明所有 LLM 后端必须支持的 ``chat`` 和 ``chat_stream`` 接口。
 构造函数由各具体实现自行定义，抽象层不依赖 ``RuntimeContext``，以保持后端无关。
+
+客户端必须忠实转换收到的多模态内容块；无法表达某种模态时必须抛出异常，
+禁止静默删除、用普通文本替换或伪造成功。
 """
 
 from __future__ import annotations
@@ -14,6 +17,10 @@ from entity.messages import BaseMessage, CharacterConversationMessage
 from entity.puretype import LLMResponse, StreamChunk
 
 
+class UnsupportedModalityError(RuntimeError):
+    """LLM 客户端无法忠实表达输入多模态内容块。"""
+
+
 class BaseLLMClient(ABC):
     """LLM 客户端抽象基类。
 
@@ -22,6 +29,8 @@ class BaseLLMClient(ABC):
       - ``chat_stream()``：流式，逐块 yield ``StreamChunk``
 
     具体实现类负责处理认证、重试、流式消费、错误恢复等后端细节。
+    对 ``ImageBlock``、``AudioBlock``、``VideoBlock`` 等多模态内容，
+    实现必须完整转换并发送；无法支持时必须抛出异常，禁止静默降级。
 
     子类必须实现 ``_convert_messages()`` 将 ``list[BaseMessage]``
     转换为对应 LLM 后端的 wire format。
@@ -44,6 +53,9 @@ class BaseLLMClient(ABC):
         *response_format* 用于指定结构化输出格式（如 json_object）。
         *character* 当前运行中的 agent 角色名，用于消息转换时的可见性过滤和前缀修饰（发送前由 LLM 客户端自行调用 ``to_openai_message()``）。
         *last_user_message* 用于标记 ``is_last_user_message``，使 ``dynamic_message_suffix`` 被附加。
+
+        多模态内容块必须完整转换并发送；无法支持时必须抛出异常，禁止静默删除、
+        文本占位或伪造成功。
         """
         raise NotImplementedError
 
@@ -64,6 +76,9 @@ class BaseLLMClient(ABC):
 
         *character* 当前运行中的 agent 角色名，用于消息转换时的可见性过滤和前缀修饰（发送前由 LLM 客户端自行调用 ``to_openai_message()``）。
         *last_user_message* 用于标记 ``is_last_user_message``，使 ``dynamic_message_suffix`` 被附加。
+
+        多模态内容块必须完整转换并发送；无法支持时必须抛出异常，禁止静默删除、
+        文本占位或伪造成功。
         """
         raise NotImplementedError
         yield None  # noqa
