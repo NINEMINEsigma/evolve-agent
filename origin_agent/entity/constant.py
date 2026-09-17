@@ -397,6 +397,10 @@ APPROVAL_MODE_YOLO: str = "yolo"
 MODALITY_CAPABILITY_ES_FILENAME: str = "modality_capability_cache.es"
 MODALITY_CAPABILITY_ES_KEY: str = "v1"
 
+# ReadForward 生成的多模态内容块载荷上限（字节，45 MiB）。
+# 仅约束工具构造的 JSON 内容块，不保证第三方 LLM SDK 最终 HTTP 请求体大小。
+READ_FORWARD_MAX_PAYLOAD_BYTES: int = 45 * 1024 * 1024
+
 # 多模态转发描述标签名 — 模型不支持某模态时，转发给引用模型取回描述并以这些标签包裹，
 # 供活跃模型识别转发来源。两条转发路径（preprocess 与 Read 工具）共用，保证一致。
 FORWARDED_VISION_TAG: str = "forwarded_vision"

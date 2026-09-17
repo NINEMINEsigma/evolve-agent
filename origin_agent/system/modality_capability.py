@@ -103,43 +103,58 @@ _probe_locks: dict[str, asyncio.Lock] = {}
 # 多模态 content block 构造（供探针/转发与 tool result 转换共用）
 # ---------------------------------------------------------------------------
 
+def build_media_content_block(
+    media_data: dict,
+    media_type: str,
+) -> MessageBlock | None:
+    """构造单个多模态内容块，不附加文本提示词。
+
+    调用方掌握音频 MIME 映射时应传入规范 ``format``；仅在缺少
+    ``format`` 时从 ``mime_type`` 提取后缀作为兼容回退。
+    """
+    if media_type not in ("image", "audio", "video"):
+        raise ValueError(f"Unsupported media_type: {media_type}")
+    b64: str = str(media_data.get("base64", ""))
+    if not b64:
+        return None
+
+    if media_type == "image":
+        mime: str = str(media_data.get("mime_type", "image/png"))
+        return ImageBlock(image_url=f"data:{mime};base64,{b64}")
+    if media_type == "audio":
+        fmt: str = str(media_data.get("format", ""))
+        if not fmt:
+            fmt = str(media_data.get("mime_type", "wav"))
+            if "/" in fmt:
+                fmt = fmt.rsplit("/", 1)[-1]
+        return AudioBlock(data=b64, format=fmt)
+    if media_type == "video":
+        mime = str(media_data.get("mime_type", "video/mp4"))
+        return VideoBlock(video_url=f"data:{mime};base64,{b64}")
+
+
 def build_image_content_blocks(image: dict, text_payload: str) -> list[MessageBlock]:
     """构造 OpenAI 格式的 image_url + text content blocks。"""
-    b64: str = str(image.get("base64", ""))
-    mime: str = str(image.get("mime_type", "image/png"))
-    if not b64:
+    media_block = build_media_content_block(image, "image")
+    if media_block is None:
         return [TextBlock(text=text_payload)]
-    return [
-        ImageBlock(image_url=f"data:{mime};base64,{b64}"),
-        TextBlock(text=text_payload),
-    ]
+    return [media_block, TextBlock(text=text_payload)]
 
 
 def build_audio_content_blocks(audio: dict, text_payload: str) -> list[MessageBlock]:
     """构造 OpenAI 格式的 input_audio + text content blocks。"""
-    b64: str = str(audio.get("base64", ""))
-    fmt: str = str(audio.get("format", audio.get("mime_type", "wav")))
-    # 如果 format 是 MIME 类型，提取后缀
-    if "/" in fmt:
-        fmt = fmt.rsplit("/", 1)[-1]
-    if not b64:
+    media_block = build_media_content_block(audio, "audio")
+    if media_block is None:
         return [TextBlock(text=text_payload)]
-    return [
-        AudioBlock(data=b64, format=fmt),
-        TextBlock(text=text_payload),
-    ]
+    return [media_block, TextBlock(text=text_payload)]
 
 
 def build_video_content_blocks(video: dict, text_payload: str) -> list[MessageBlock]:
     """构造 OpenAI 格式的 video_url + text content blocks。"""
-    b64: str = str(video.get("base64", ""))
-    mime: str = str(video.get("mime_type", "video/mp4"))
-    if not b64:
+    media_block = build_media_content_block(video, "video")
+    if media_block is None:
         return [TextBlock(text=text_payload)]
-    return [
-        VideoBlock(video_url=f"data:{mime};base64,{b64}"),
-        TextBlock(text=text_payload),
-    ]
+    return [media_block, TextBlock(text=text_payload)]
 
 
 # ---------------------------------------------------------------------------
