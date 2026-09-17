@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Routes, Route } from "react-router-dom";
 import { AnimatePresence } from "framer-motion";
 import { useWebSocket } from "./hooks/useWebSocket";
@@ -27,6 +27,20 @@ function ChatApp() {
     setContextMenu({ x: e.clientX, y: e.clientY, sid });
   }, []);
 
+  const diagnosticsValue = useMemo(() => ({
+    pendingConfirm: ws.pendingConfirms[0] ?? null,
+    ignoreStaleRef: ws.ignoreStaleRef,
+    lastRecvAtRef: ws.lastRecvAtRef,
+    lastPongAtRef: ws.lastPongAtRef,
+    recvTick: ws.recvTick,
+  }), [
+    ws.pendingConfirms,
+    ws.ignoreStaleRef,
+    ws.lastRecvAtRef,
+    ws.lastPongAtRef,
+    ws.recvTick,
+  ]);
+
   useEffect(() => {
     ws.fetchAllTags();
   }, []);
@@ -35,17 +49,7 @@ function ChatApp() {
     <ErrorBoundary>
       {/* 正常内容始终渲染，开屏/骨架屏作为覆盖层 */}
       <div className="app">
-        <ConnectionDiagnosticsProvider
-          value={{
-            waiting: ws.waiting,
-            pendingConfirm: ws.pendingConfirms[0] ?? null,
-            streamingMessage: ws.streamingMessage,
-            ignoreStaleRef: ws.ignoreStaleRef,
-            lastRecvAtRef: ws.lastRecvAtRef,
-            lastPongAtRef: ws.lastPongAtRef,
-            recvTick: ws.recvTick,
-          }}
-        >
+        <ConnectionDiagnosticsProvider value={diagnosticsValue}>
           <Layout
             ws={ws}
             onContextMenu={handleContextMenu}

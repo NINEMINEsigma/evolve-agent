@@ -14,6 +14,7 @@ import DynamicSandboxSpacesDialog from "./DynamicSandboxSpacesDialog";
 import SessionSiteDrawer from "./SessionSiteSection";
 import SessionLockOverlay from "./SessionLockOverlay";
 import OnboardingTour from "./OnboardingTour";
+import PerformanceTelemetryDialog from "./PerformanceTelemetryDialog";
 import type { WebSocketState } from "../hooks/useWebSocket";
 import { STORAGE_KEYS } from "../constants/storage";
 import { DIMENSIONS } from "../constants/dimensions";
@@ -22,6 +23,7 @@ import { usePersistentSessionState } from "../hooks/usePersistentSessionState";
 import { useResizable } from "../hooks/useResizable";
 import { useSessionStage } from "../hooks/useSessionStage";
 import { useSessionChatStyle } from "../hooks/useSessionChatStyle";
+import { useChatRuntimeStore } from "../features/chat/chatRuntimeStore";
 
 interface LayoutProps {
   ws: WebSocketState;
@@ -37,6 +39,7 @@ export default function Layout({ ws, onContextMenu, contextMenuOpen, onboardingR
   const [pinHeader, setPinHeader] = useState(false);
   const [llmDrawerOpen, setLlmDrawerOpen] = usePersistentState(STORAGE_KEYS.LLM_DRAWER_OPEN, false);
   const [sandboxSpacesOpen, setSandboxSpacesOpen] = useState(false);
+  const [performanceTelemetryOpen, setPerformanceTelemetryOpen] = useState(false);
   const [siteDrawerOpen, setSiteDrawerOpen] = usePersistentState(STORAGE_KEYS.SITE_DRAWER_OPEN, false);
   const [siteAvailable, setSiteAvailable] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = usePersistentState(STORAGE_KEYS.SIDEBAR_COLLAPSED, false);
@@ -157,38 +160,6 @@ export default function Layout({ ws, onContextMenu, contextMenuOpen, onboardingR
     });
   }, [ws.sessionId, ws.subagentSessions]);
 
-  // 挂载时注册滚动监听
-  useEffect(() => {
-    let active = true;
-    let cleanup: (() => void) | null = null;
-    let retryFrame: number | null = null;
-    let retryUsed = false;
-
-    const attach = () => {
-      if (!active || ws.sessionLocked) return;
-      const nextCleanup = ws.attachScrollListener();
-      if (nextCleanup) {
-        cleanup = nextCleanup;
-        return;
-      }
-      if (retryUsed) return;
-      retryUsed = true;
-      retryFrame = requestAnimationFrame(() => {
-        retryFrame = null;
-        if (!active || ws.sessionLocked) return;
-        const retriedCleanup = ws.attachScrollListener();
-        if (retriedCleanup) cleanup = retriedCleanup;
-      });
-    };
-
-    attach();
-    return () => {
-      active = false;
-      if (retryFrame !== null) cancelAnimationFrame(retryFrame);
-      cleanup?.();
-    };
-  }, [ws.attachScrollListener, ws.sessionLocked]);
-
   const onToggleAgentState = (agentName: string) => {
     let curVisible = visibleCharacters.includes("all-agents")
       ? ws.agents
@@ -212,11 +183,8 @@ export default function Layout({ ws, onContextMenu, contextMenuOpen, onboardingR
     setResponseCharacters(curResponse);
   };
 
-  const messagesRef = useRef(ws.messages);
-  messagesRef.current = ws.messages;
-
   const handleToggleMessageVisibility = useCallback((messageId: string, agentName: string) => {
-    const msg = messagesRef.current.find((m) => m.id === messageId);
+    const msg = useChatRuntimeStore.getState().contentByRowId[messageId];
     if (msg == null || typeof msg.messageIndex !== "number") return;
     let curVisible = [...(msg.visibleCharacters || ["all-agents"])];
     let curResponse = [...(msg.responseCharacters || [])];
@@ -236,17 +204,16 @@ export default function Layout({ ws, onContextMenu, contextMenuOpen, onboardingR
     }
     const allVisible = ws.agents.length > 0 && ws.agents.every((a) => curVisible.includes(a));
     const newVisible = allVisible ? ["all-agents"] : curVisible;
-    ws.updateMessageVisibility(msg.messageIndex, newVisible);
-    ws.setMessages((prev) => prev.map((m) =>
-      m.id === messageId ? { ...m, visibleCharacters: newVisible, responseCharacters: curResponse } : m
-    ));
-  }, [ws.agents, ws.setMessages, ws.updateMessageVisibility]);
+    ws.updateMessageVisibility(messageId, newVisible);
+    useChatRuntimeStore.setState((state) => ({
+      contentByRowId: {
+        ...state.contentByRowId,
+        [messageId]: { ...msg, visibleCharacters: newVisible, responseCharacters: curResponse },
+      },
+    }));
+  }, [ws.agents, ws.updateMessageVisibility]);
 
   const currentSessionArchived = ws.sessions.find((s) => s.id === ws.sessionId)?.status === "archived";
-  // 空态判定与 ChatArea.isEmpty 一致：无 user/assistant 消息且无流式且无等待
-  // （chatEmpty 时进度条不渲染，见 InputBar）
-  const chatEmpty = !ws.messages.some((m) => m.role === "user" || m.role === "assistant")
-    && !ws.streamingMessage && !ws.waiting;
 
   return (
     <>
@@ -320,6 +287,7 @@ export default function Layout({ ws, onContextMenu, contextMenuOpen, onboardingR
           onToggleChatStylePaused={() => setChatStylePaused((v) => !v)}
           chatStyleStatusText={chatStyleStatusText}
           onOpenSandboxSpaces={() => setSandboxSpacesOpen(true)}
+          onOpenPerformanceTelemetry={() => setPerformanceTelemetryOpen(true)}
         />
 
         {ws.sessionLocked ? (
@@ -333,24 +301,15 @@ export default function Layout({ ws, onContextMenu, contextMenuOpen, onboardingR
             />
 
             <ChatArea
-              messages={ws.messages}
-              waiting={ws.waiting}
               archived={currentSessionArchived}
               onImageClick={setLightboxSrc}
-              onToggleCollapse={ws.toggleMessageCollapse}
               onEditMessage={ws.editMessage}
               onDeleteMessages={ws.deleteMessages}
               onDeleteSingleMessage={ws.deleteSingleMessage}
               onRegenerateResponse={ws.regenerateResponse}
-              bottomRef={ws.bottomRef}
-              chatAreaRef={ws.chatAreaRef}
-              contentRef={ws.contentRef}
               onDropFiles={ws.handleFileUpload}
-              streamingMessage={ws.streamingMessage}
               agents={ws.agents}
               onToggleMessageVisibility={handleToggleMessageVisibility}
-              onScrollToBottom={() => ws.scrollToBottomSmooth()}
-              isReady={ws.isReady}
               stageState={stageState}
               chatStyleCssText={chatStyleState.cssText}
               chatStyleStatus={chatStyleState.status}
@@ -364,14 +323,10 @@ export default function Layout({ ws, onContextMenu, contextMenuOpen, onboardingR
               />
 
               <InputBar
-                input={ws.input}
-                setInput={ws.setInput}
-                waiting={ws.waiting}
                 uploading={ws.uploading}
                 archived={currentSessionArchived}
                 hasActiveProfile={!!ws.llmProfiles?.activeProfile}
                 sessionId={ws.sessionId}
-                chatEmpty={chatEmpty}
                 taskProgress={ws.taskProgress}
                 onSend={() => {
                   ws.send(targetSessions, visibleCharacters, responseCharacters);
@@ -407,7 +362,6 @@ export default function Layout({ ws, onContextMenu, contextMenuOpen, onboardingR
                 tokenUsage={ws.tokenUsage}
                 contextTokens={ws.contextTokens}
                 llmMaxContextTokens={ws.llmMaxContextTokens}
-                pendingMessageCount={Object.keys(ws.pendingMessages).length}
               />
             </ChatArea>
           </>
@@ -458,7 +412,6 @@ export default function Layout({ ws, onContextMenu, contextMenuOpen, onboardingR
         open={drawerOpen}
         onClose={() => setDrawerOpen(false)}
         sessionId={ws.sessionId}
-        messages={ws.messages}
         onImageClick={setLightboxSrc}
         shells={ws.shells}
         setShells={ws.setShells}
@@ -489,6 +442,10 @@ export default function Layout({ ws, onContextMenu, contextMenuOpen, onboardingR
 
       {lightboxSrc && (
         <Lightbox src={lightboxSrc} onClose={() => setLightboxSrc(null)} />
+      )}
+
+      {performanceTelemetryOpen && (
+        <PerformanceTelemetryDialog onClose={() => setPerformanceTelemetryOpen(false)} />
       )}
 
       {sandboxSpacesOpen && (

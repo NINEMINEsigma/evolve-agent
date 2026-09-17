@@ -13,6 +13,7 @@ export const WS_IN = {
   STREAM_DONE:       "stream_done",
   ERROR:             "error",
   SUBAGENT_UPDATE:   "subagent_update",
+  HISTORY_SYNC:      "history_sync",
   LLM_PROFILE_CHANGED: "llm_profile_changed",
   APPROVAL_PROFILE_CHANGED: "approval_profile_changed",
   HANDSFREE_MODE:    "handsfree_mode",

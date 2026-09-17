@@ -72,6 +72,12 @@ AUTO_TAGS_CONTENT_MAX: int = AUTO_CONTENT_MAX
 # 会话合并时直接拼接摘要的字符阈值，超过则截断
 MERGE_CONCAT_THRESHOLD: int = AUTO_CONTENT_MAX
 
+# 前端聊天历史内容页默认读取的 History 消息条目数（不是投影行数）
+SESSION_HISTORY_PAGE_DEFAULT_LIMIT: int = 80
+
+# 前端聊天历史内容页单次允许读取的 History 消息条目数上限（不是投影行数）
+SESSION_HISTORY_PAGE_MAX_LIMIT: int = 200
+
 # 会话摘要生成时历史输入截断上限（字符数）— 暂时设为极大值，后续再细化
 SUMMARY_INPUT_MAX_CHARS: int = 1_000_000_000
 

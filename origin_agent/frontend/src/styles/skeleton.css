@@ -20,6 +20,50 @@
   transform: translateX(-100%);
 }
 
+/* ── Chat history row skeletons ── */
+.chat-history-message-skeleton {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 16px;
+  box-sizing: border-box;
+}
+
+.chat-history-skeleton-avatar {
+  width: 30px;
+  height: 30px;
+  flex: 0 0 30px;
+  border-radius: 50%;
+  background: var(--bg-hover);
+}
+
+.chat-history-skeleton-bubble {
+  display: block;
+  width: min(72%, 680px);
+  min-height: 32px;
+  border-radius: var(--radius);
+  background: linear-gradient(100deg, var(--bg-secondary) 25%, var(--bg-hover) 45%, var(--bg-secondary) 65%);
+  background-size: 200% 100%;
+  animation: skeletonShimmer 2s var(--ease-in-out) infinite;
+}
+
+.chat-history-message-skeleton.skeleton-user {
+  flex-direction: row-reverse;
+}
+
+.chat-history-message-skeleton.skeleton-user .chat-history-skeleton-bubble {
+  width: min(58%, 560px);
+}
+
+.chat-history-message-skeleton.skeleton-tool .chat-history-skeleton-avatar,
+.chat-history-message-skeleton.skeleton-system .chat-history-skeleton-avatar {
+  display: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .chat-history-skeleton-bubble { animation: none; }
+}
+
 @keyframes skeletonShimmer {
   0% { transform: translateX(-100%); }
   100% { transform: translateX(100%); }

@@ -1,3 +1,19 @@
+/* ── Local performance telemetry ── */
+.telemetry-dialog {
+  width: min(560px, calc(100vw - 32px));
+}
+
+.telemetry-status-grid {
+  display: grid;
+  grid-template-columns: minmax(110px, auto) 1fr;
+  gap: 8px 16px;
+  align-items: baseline;
+}
+
+.telemetry-status-grid span { color: var(--text-muted); }
+.telemetry-status-grid strong { color: var(--text-primary); overflow-wrap: anywhere; }
+.telemetry-note { color: var(--text-secondary); line-height: 1.5; }
+
 /* ── Tag editor ── */
 .tag-editor .modal-body {
   min-height: 160px;

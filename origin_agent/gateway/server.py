@@ -29,7 +29,26 @@ from fastapi.staticfiles import StaticFiles
 from .chat import Message, MessageType
 from .message_router import MessageRouter
 from datetime import datetime, timezone
-from entity.constant import CRON_STDOUT_PREVIEW_MAX_LENGTH, SUBPROCESS_TIMEOUT_DEFAULT, UPLOAD_FILENAME_TIME_FORMAT, USER_CHARACTER_NAME, UPLOADS_DIR_NAME, UPLOADS_WS_PREFIX, STATIC_FILE_HTTP_PREFIX, DOWNLOADS_HTTP_PREFIX, DIR_ZIP_HTTP_PREFIX, DIR_ZIP_MAX_TOTAL_BYTES, SYSTEM_CHARACTER_NAME, AGENTSPACE_SSE_HEARTBEAT_SECONDS, LOCAL_FONT_HTTP_PREFIX, LOCAL_FONT_MAX_BYTES, LOCAL_FONT_ALLOWED_EXTENSIONS, LOCAL_FONT_MIME_TYPES
+from entity.constant import (
+    CRON_STDOUT_PREVIEW_MAX_LENGTH,
+    SUBPROCESS_TIMEOUT_DEFAULT,
+    UPLOAD_FILENAME_TIME_FORMAT,
+    USER_CHARACTER_NAME,
+    UPLOADS_DIR_NAME,
+    UPLOADS_WS_PREFIX,
+    STATIC_FILE_HTTP_PREFIX,
+    DOWNLOADS_HTTP_PREFIX,
+    DIR_ZIP_HTTP_PREFIX,
+    DIR_ZIP_MAX_TOTAL_BYTES,
+    SYSTEM_CHARACTER_NAME,
+    AGENTSPACE_SSE_HEARTBEAT_SECONDS,
+    LOCAL_FONT_HTTP_PREFIX,
+    LOCAL_FONT_MAX_BYTES,
+    LOCAL_FONT_ALLOWED_EXTENSIONS,
+    LOCAL_FONT_MIME_TYPES,
+    SESSION_HISTORY_PAGE_DEFAULT_LIMIT,
+    SESSION_HISTORY_PAGE_MAX_LIMIT,
+)
 from entity.puretype import (
     SessionStatus,
     ClientInfo,
@@ -607,6 +626,60 @@ async def delete_session(session_id: str):
     return {"deleted": True, "session_id": session_id}
 
 
+@app.get("/api/sessions/{session_id}/history/skeleton")
+async def get_session_history_skeleton(session_id: str, start_index: int = 0):
+    """返回前端全历史骨架或从指定 History 索引开始的后缀。"""
+    loop = _get_loop(session_id)
+    if loop is None:
+        raise HTTPException(status_code=404, detail="agent loop not ready")
+    try:
+        return loop.loop.get_session_history_skeleton(start_index)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        logger.exception("History skeleton failed | session=%s", session_id)
+        raise HTTPException(status_code=500, detail="history skeleton failed") from exc
+
+
+@app.get("/api/sessions/{session_id}/history/page")
+async def get_session_history_page(
+    session_id: str,
+    start_index: int = 0,
+    limit: int = SESSION_HISTORY_PAGE_DEFAULT_LIMIT,
+):
+    """按 History 消息索引范围返回完整前端内容行。"""
+    if start_index < 0:
+        raise HTTPException(status_code=400, detail="start_index must be >= 0")
+    if limit < 1 or limit > SESSION_HISTORY_PAGE_MAX_LIMIT:
+        raise HTTPException(
+            status_code=400,
+            detail=f"limit must be between 1 and {SESSION_HISTORY_PAGE_MAX_LIMIT}",
+        )
+    loop = _get_loop(session_id)
+    if loop is None:
+        raise HTTPException(status_code=404, detail="agent loop not ready")
+    try:
+        return loop.loop.get_session_history_page(start_index, limit)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        logger.exception("History page failed | session=%s", session_id)
+        raise HTTPException(status_code=500, detail="history page failed") from exc
+
+
+@app.get("/api/sessions/{session_id}/history/resources")
+async def get_session_history_resources(session_id: str):
+    """返回完整会话 History 的图片与下载资源索引。"""
+    loop = _get_loop(session_id)
+    if loop is None:
+        raise HTTPException(status_code=404, detail="agent loop not ready")
+    try:
+        return loop.loop.get_session_history_resources()
+    except Exception as exc:
+        logger.exception("History resources failed | session=%s", session_id)
+        raise HTTPException(status_code=500, detail="history resources failed") from exc
+
+
 @app.put("/api/sessions/{session_id}/messages/{message_index}")
 async def update_session_message(session_id: str, message_index: int, req: Request):
     """编辑指定 session 中一条历史消息的正文或 visible_characters，不触发重新生成。"""
@@ -630,6 +703,13 @@ async def update_session_message(session_id: str, message_index: int, req: Reque
     loop = _get_loop(session_id)
     if loop is None:
         return {"updated": False, "error": "agent loop not ready", "session_id": session_id}
+    if loop.loop.is_processing():
+        result = {"updated": False, "error": "session is processing", "session_id": session_id}
+        return HTMLResponse(
+            json.dumps(result, ensure_ascii=False),
+            media_type="application/json",
+            status_code=409,
+        )
     result = loop.loop.edit_session_message(message_index, content, visible_characters)
     status_code = 200 if result.get("updated") else 400
     logger.info("Edit message result | session=%s index=%d updated=%s", session_id, message_index, result.get("updated"))
@@ -655,7 +735,16 @@ async def delete_session_messages(session_id: str, count: int = 1):
     loop = _get_loop(session_id)
     if loop is None:
         return {"deleted": False, "error": "agent loop not ready"}
+    if loop.loop.is_processing():
+        result = {"deleted": False, "error": "session is processing"}
+        return HTMLResponse(
+            json.dumps(result, ensure_ascii=False),
+            media_type="application/json",
+            status_code=409,
+        )
     result = loop.loop.delete_session_messages(count)
+    if result.get("deleted"):
+        result["history_count"] = loop.loop.history.count
     status_code = 200 if result.get("deleted") else 400
     logger.info("Delete messages result | session=%s count=%d deleted=%s remaining=%s", session_id, count, result.get("deleted"), result.get("remaining_count"))
     return HTMLResponse(
@@ -701,6 +790,7 @@ async def delete_single_message(session_id: str, index: int):
     # 返回 token_usage 和 context_tokens 供前端更新（不通过 WS 全量推送，避免滚动位置重置）
     result["token_usage"] = loop.get_token_usage()
     result["context_tokens"] = loop.get_context_tokens()
+    result["history_count"] = loop.loop.history.count
 
     logger.info("Delete single message result | session=%s index=%d deleted=%s remaining=%s",
                 session_id, index, result.get("deleted"), result.get("remaining_count"))
@@ -834,8 +924,29 @@ async def regenerate_response(session_id: str, req: Request):
         await sink.emit_assistant_message(
             session_id, reply, loop.current_character_agent,
         )
+    if ws:
+        try:
+            await ws.send_text(
+                json.dumps(
+                    Message(
+                        type=MessageType.HISTORY_SYNC,
+                        session_id=session_id,
+                        history_count=loop.loop.history.count,
+                        processing=loop.loop.is_processing(),
+                        token_usage=loop.get_token_usage(),
+                        context_tokens=loop.get_context_tokens(),
+                    ).model_dump(exclude_none=True),
+                    ensure_ascii=False,
+                )
+            )
+        except Exception:
+            logger.warning("Failed to send regenerate history_sync to session=%s", session_id, exc_info=True)
     logger.info("Regenerate ok | session=%s", session_id)
-    return {"regenerate": True, "session_id": session_id}
+    return {
+        "regenerate": True,
+        "session_id": session_id,
+        "history_count": loop.loop.history.count,
+    }
 
 
 @app.post("/api/sessions/{session_id}/resume")
@@ -871,7 +982,29 @@ async def resume_session_endpoint(session_id: str):
     finally:
         loop.unregister_round_task(current_task)
     logger.info("Resume ok | session=%s reply_len=%d", session_id, len(reply))
-    return {"resumed": True, "session_id": session_id}
+    ws = _get_ws(session_id)
+    if ws:
+        try:
+            await ws.send_text(
+                json.dumps(
+                    Message(
+                        type=MessageType.HISTORY_SYNC,
+                        session_id=session_id,
+                        history_count=loop.loop.history.count,
+                        processing=loop.loop.is_processing(),
+                        token_usage=loop.get_token_usage(),
+                        context_tokens=loop.get_context_tokens(),
+                    ).model_dump(exclude_none=True),
+                    ensure_ascii=False,
+                )
+            )
+        except Exception:
+            logger.warning("Failed to send resume history_sync to session=%s", session_id, exc_info=True)
+    return {
+        "resumed": True,
+        "session_id": session_id,
+        "history_count": loop.loop.history.count,
+    }
 
 
 @app.put("/api/sessions/{session_id}/title")
@@ -2385,37 +2518,23 @@ async def ws_chat(ws: WebSocket) -> None:
         # 新会话与恢复会话均主动同步会话级权威审批模式。
         await _send_approval_mode_state(ws, sid)
 
-        # 恢复 session 时回放会话历史，使前端不为空白
-        if resume and _get_sm().exists(resume):
-            loop = _get_loop(resume)
-            if loop is not None:
-                from component.approval import is_handsfree_mode, get_approval_mode
-                history: list[dict] = [
-                    e.model_dump(exclude_none=True)
-                    for e in loop.loop.get_session_messages()
-                ]
-                usage: int = loop.get_token_usage()
-                context: int = loop.get_context_tokens()
-                processing: bool = loop.loop.is_processing()
-                # 检查是否多 agent 模式，携带 agents 列表
-                agents_info: list[str] | None = None
-                from entry.multi_agent_loop import MultiAgentLoop
-                if isinstance(loop, MultiAgentLoop):
-                    agents_info = list(loop._agent_names)
-                await ws.send_text(
+        # 新会话与恢复会话都只推送正典历史元数据；正文由 REST 按需读取。
+        loop = _get_loop(sid)
+        if loop is not None:
+            agents_info: list[str] | None = None
+            from entry.multi_agent_loop import MultiAgentLoop
+            if isinstance(loop, MultiAgentLoop):
+                agents_info = list(loop._agent_names)
+            await ws.send_text(
                 json.dumps(
                     Message(
-                        type=MessageType.SYSTEM,
+                        type=MessageType.HISTORY_SYNC,
                         session_id=sid,
-                        content=json.dumps({
-                            "session_history": history,
-                            "token_usage": usage,
-                            "context_tokens": context,
-                            "processing": processing,
-                            "agents": agents_info,
-                            "handsfree_mode": is_handsfree_mode(sid),
-                            "approval_mode": get_approval_mode(sid).value,
-                        }, ensure_ascii=False),
+                        history_count=loop.loop.history.count,
+                        processing=loop.loop.is_processing(),
+                        token_usage=loop.get_token_usage(),
+                        context_tokens=loop.get_context_tokens(),
+                        agents=agents_info,
                     ).model_dump(exclude_none=True),
                     ensure_ascii=False,
                 )

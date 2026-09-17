@@ -1,13 +1,14 @@
-import { ChatMessage, CronTask, DynamicEndpoint, ShellInfo } from "../types";
-import { extractMessageResources } from "../utils";
+import { useEffect } from "react";
+import { CronTask, DynamicEndpoint, ShellInfo } from "../types";
 import { usePersistentState } from "../hooks/usePersistentState";
 import { STORAGE_KEYS } from "../constants/storage";
+import { chatRuntimeController } from "../features/chat/chatRuntimeController";
+import { useChatRuntimeStore } from "../features/chat/chatRuntimeStore";
 
 interface DrawerProps {
   open: boolean;
   onClose: () => void;
   sessionId: string;
-  messages: ChatMessage[];
   onImageClick: (src: string) => void;
   shells: ShellInfo[];
   setShells: React.Dispatch<React.SetStateAction<ShellInfo[]>>;
@@ -20,7 +21,7 @@ interface DrawerProps {
 }
 
 export default function Drawer({
-  open, onClose, sessionId, messages, onImageClick,
+  open, onClose, sessionId, onImageClick,
   shells, setShells, cronTasks, setCronTasks, dynamicEndpoints,
   width, isResizing, onResizePointerDown,
 }: DrawerProps) {
@@ -29,7 +30,15 @@ export default function Drawer({
   const [cronExpanded, setCronExpanded] = usePersistentState(STORAGE_KEYS.DRAWER_CRON_EXPANDED, true);
   const [dynamicEndpointsExpanded, setDynamicEndpointsExpanded] = usePersistentState(STORAGE_KEYS.DRAWER_DYNENDPOINTS_EXPANDED, true);
 
-  const { images, downloads } = extractMessageResources(messages);
+  const resources = useChatRuntimeStore((state) => state.resources);
+  const resourcesLoading = useChatRuntimeStore((state) => state.resourcesLoading);
+  const resourcesError = useChatRuntimeStore((state) => state.resourcesError);
+  const images = resources?.images ?? [];
+  const downloads = resources?.downloads ?? [];
+
+  useEffect(() => {
+    if (open && resourcesExpanded) void chatRuntimeController.loadResources();
+  }, [open, resourcesExpanded, sessionId]);
 
   if (!open) return null;
 
@@ -49,7 +58,14 @@ export default function Drawer({
             </div>
             {resourcesExpanded && (
               <div className="drawer-section-body">
-                {images.length === 0 && downloads.length === 0 && (
+                {resourcesLoading && <div className="drawer-empty">正在加载资源…</div>}
+                {resourcesError && (
+                  <div className="drawer-empty">
+                    加载失败：{resourcesError}
+                    <button type="button" onClick={() => void chatRuntimeController.loadResources(true)}>重试</button>
+                  </div>
+                )}
+                {!resourcesLoading && !resourcesError && images.length === 0 && downloads.length === 0 && (
                   <div className="drawer-empty">暂无资源</div>
                 )}
                 {images.length > 0 && (
@@ -57,9 +73,9 @@ export default function Drawer({
                     <div className="resource-group-title">图片 ({images.length})</div>
                     <div className="resource-grid">
                       {images.map((img) => (
-                        <div key={img.id} className="resource-img-card">
-                          <img src={img.src} alt={img.alt} className="resource-img-thumb" onClick={() => onImageClick(img.src)} />
-                          <a href={img.src} download className="resource-download-link">下载</a>
+                        <div key={img.resource_id} className="resource-img-card">
+                          <img src={img.url} alt={img.alt} className="resource-img-thumb" onClick={() => onImageClick(img.url)} />
+                          <a href={img.url} download className="resource-download-link">下载</a>
                         </div>
                       ))}
                     </div>
@@ -69,7 +85,7 @@ export default function Drawer({
                   <div className="resource-group">
                     <div className="resource-group-title">文件 ({downloads.length})</div>
                     {downloads.map((d) => (
-                      <div key={d.id} className="resource-download-card">
+                      <div key={d.resource_id} className="resource-download-card">
                         <span className="resource-filename">{d.filename}</span>
                         {d.size != null && <span className="resource-filesize">（{(d.size / 1024).toFixed(1)} KB）</span>}
                         <a href={d.url} download={d.filename} className="resource-download-link">下载</a>

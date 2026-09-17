@@ -1,219 +1,114 @@
-import { useEffect, useMemo, useRef, useState } from "react";
-import { ChatMessage, MessageContent } from "../types";
-import MessageItem from "./MessageItem";
+import { useEffect, useRef, useState } from "react";
+import type { MessageContent } from "../types";
 import Minimap from "./Minimap";
 import AgentStageLayer from "./AgentStageLayer";
 import ChatStyleLayer from "./ChatStyleLayer";
-import { useMessageCharacterHover } from "../hooks/useMessageCharacterHover";
-import { DIMENSIONS } from "../constants/dimensions";
+import VirtualMessageList, { type ChatVirtualListHandle } from "../features/chat/VirtualMessageList";
+import { useChatRuntimeStore } from "../features/chat/chatRuntimeStore";
 import type { ChatStyleStatus } from "../hooks/useSessionChatStyle";
 import type { SessionStageState } from "../hooks/useSessionStage";
 
 interface ChatAreaProps {
-  messages: ChatMessage[];
-  waiting: boolean;
   archived: boolean;
   onImageClick: (src: string) => void;
-  onToggleCollapse: (id: string) => void;
   onEditMessage: (id: string, content: MessageContent) => void | Promise<void>;
   onDeleteMessages: (count: number) => void;
   onDeleteSingleMessage?: (index: number) => void;
   onRegenerateResponse: (messageIndex: number) => void;
-  bottomRef: React.RefObject<HTMLDivElement>;
-  contentRef?: React.RefObject<HTMLDivElement>;
   onDropFiles: (files: FileList) => void;
-  streamingMessage?: ChatMessage | null;
-  chatAreaRef?: React.RefObject<HTMLDivElement>;
   agents?: string[];
   onToggleMessageVisibility?: (messageId: string, agentName: string) => void;
-  onScrollToBottom?: () => void;
   children?: React.ReactNode;
-  isReady?: boolean;
-  // 会话舞台层状态由 Layout 统一管理，避免重复探测和订阅
   stageState: SessionStageState;
   chatStyleCssText?: string | null;
   chatStyleStatus?: ChatStyleStatus;
   chatStyleReloadKey?: number;
 }
 
-export default function ChatArea({ messages, waiting, archived, onImageClick, onToggleCollapse, onEditMessage, onDeleteMessages, onDeleteSingleMessage, onRegenerateResponse, bottomRef, contentRef: externalContentRef, onDropFiles, streamingMessage, chatAreaRef: externalChatAreaRef, agents, onToggleMessageVisibility, onScrollToBottom, children, isReady, stageState, chatStyleCssText, chatStyleStatus, chatStyleReloadKey }: ChatAreaProps) {
-  const [dragOver, setDragOver] = useState(false);
-  const [showScrollButton, setShowScrollButton] = useState(false);
+export default function ChatArea({
+  archived,
+  onImageClick,
+  onEditMessage,
+  onDeleteMessages,
+  onDeleteSingleMessage,
+  onRegenerateResponse,
+  onDropFiles,
+  agents,
+  onToggleMessageVisibility,
+  children,
+  stageState,
+  chatStyleCssText,
+  chatStyleStatus,
+  chatStyleReloadKey,
+}: ChatAreaProps) {
   const [minimapCollapsed, setMinimapCollapsed] = useState(false);
-  const internalChatAreaRef = useRef<HTMLDivElement>(null);
-  const internalContentRef = useRef<HTMLDivElement>(null);
-  const chatAreaRef = externalChatAreaRef || internalChatAreaRef;
-  const contentRef = externalContentRef || internalContentRef;
-  useMessageCharacterHover(contentRef);
+  const listRef = useRef<ChatVirtualListHandle>(null);
+  const followMode = useChatRuntimeStore((state) => state.followMode);
+  const skeletonLength = useChatRuntimeStore((state) => state.skeleton.length);
+  const liveLength = useChatRuntimeStore((state) => state.liveRows.length);
+  const processing = useChatRuntimeStore((state) => state.processing);
+  const isEmpty = skeletonLength === 0 && liveLength === 0 && !processing;
 
-  // 移动端默认折叠 minimap
   useEffect(() => {
-    const mq = window.matchMedia("(max-width: 768px)");
-    setMinimapCollapsed(mq.matches);
-    const onChange = (e: MediaQueryListEvent) => setMinimapCollapsed(e.matches);
-    mq.addEventListener("change", onChange);
-    return () => mq.removeEventListener("change", onChange);
+    const media = window.matchMedia("(max-width: 768px)");
+    setMinimapCollapsed(media.matches);
+    const onChange = (event: MediaQueryListEvent) => setMinimapCollapsed(event.matches);
+    media.addEventListener("change", onChange);
+    return () => media.removeEventListener("change", onChange);
   }, []);
-
-  useEffect(() => {
-    const chat = chatAreaRef.current;
-    if (!chat) return;
-    const onScroll = () => {
-      const isAtBottom = chat.scrollHeight - chat.scrollTop - chat.clientHeight <= DIMENSIONS.SCROLL_BOTTOM_THRESHOLD;
-      setShowScrollButton(!isAtBottom);
-    };
-    chat.addEventListener("scroll", onScroll, { passive: true });
-    onScroll();
-    return () => chat.removeEventListener("scroll", onScroll);
-  }, [chatAreaRef]);
-
-  const lastUserMsgId = useMemo(() => {
-    for (let i = messages.length - 1; i >= 0; i--) {
-      if (messages[i].role === "user") return messages[i].id;
-    }
-    return null;
-  }, [messages]);
-
-  // 最后一条 user 消息的 messageIndex（用于判断后续消息是否在"最后一轮"范围内）
-  const lastUserMessageIndex = useMemo(() => {
-    for (let i = messages.length - 1; i >= 0; i--) {
-      if (messages[i].role === "user" && typeof messages[i].messageIndex === "number") {
-        return messages[i].messageIndex;
-      }
-    }
-    return null;
-  }, [messages]);
-
-  const messageList = useMemo(() =>
-    messages.map((m) => (
-      <MessageItem
-        key={m.id}
-        message={m}
-        archived={archived}
-        onImageClick={onImageClick}
-        onToggleCollapse={onToggleCollapse}
-        onEditMessage={onEditMessage}
-        onDeleteMessages={onDeleteMessages}
-        onDeleteSingleMessage={onDeleteSingleMessage}
-        onRegenerateResponse={onRegenerateResponse}
-        isLastUserMessage={m.id === lastUserMsgId}
-        isAfterLastUser={typeof m.messageIndex === "number" && lastUserMessageIndex != null && m.messageIndex > lastUserMessageIndex}
-        waiting={m.id === lastUserMsgId ? waiting : false}
-        agents={agents}
-        onToggleMessageVisibility={onToggleMessageVisibility}
-      />
-    )),
-    [messages, archived, onImageClick, onToggleCollapse, onEditMessage, onDeleteMessages, onDeleteSingleMessage, onRegenerateResponse, lastUserMsgId, lastUserMessageIndex, waiting, agents, onToggleMessageVisibility]
-  );
-
-  // 判断是否为空态：仅当无 user/assistant 消息时才算空态（系统消息不计入）
-  const hasConversation = messages.some((m) => m.role === "user" || m.role === "assistant");
-  const isEmpty = !hasConversation && !streamingMessage && !waiting;
-  const showSkeleton = isEmpty && !isReady;
 
   return (
     <div className="chat-area-wrapper">
       <div className={`chat-area-container${isEmpty ? " chat-area-container-empty" : ""}`}>
-      <AgentStageLayer stageState={stageState} />
-      <ChatStyleLayer cssText={chatStyleCssText ?? null} status={chatStyleStatus ?? "idle"} reloadKey={chatStyleReloadKey ?? 0} />
-      <main
-        ref={chatAreaRef}
-        className={`chat-area ${dragOver ? "chat-area-drag-over" : ""}`}
-        onDragOver={(e) => {
-          e.preventDefault();
-          setDragOver(true);
-        }}
-        onDragLeave={() => setDragOver(false)}
-        onDrop={(e) => {
-          e.preventDefault();
-          setDragOver(false);
-          if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
-            onDropFiles(e.dataTransfer.files);
-          }
-        }}
-      >
-        <div className="chat-content" ref={contentRef}>
-          {showSkeleton ? (
-            <>
-              <div className="skeleton-message">
-                <div className="skeleton-item skeleton-avatar" />
-                <div className="skeleton-item skeleton-bubble" />
-              </div>
-              <div className="skeleton-message skeleton-message-user">
-                <div className="skeleton-item skeleton-avatar" />
-                <div className="skeleton-item skeleton-bubble" />
-              </div>
-              <div className="skeleton-message skeleton-message-long">
-                <div className="skeleton-item skeleton-avatar" />
-                <div className="skeleton-item skeleton-bubble" />
-              </div>
-              <div className="skeleton-message">
-                <div className="skeleton-item skeleton-avatar" />
-                <div className="skeleton-item skeleton-bubble" />
-              </div>
-            </>
-          ) : (
-            <>
-              {messageList}
-
-              {streamingMessage && (
-                <MessageItem
-                  message={streamingMessage}
-                  archived={archived}
-                  onImageClick={onImageClick}
-                  onToggleCollapse={onToggleCollapse}
-                  onEditMessage={onEditMessage}
-                  onDeleteMessages={onDeleteMessages}
-                  onRegenerateResponse={onRegenerateResponse}
-                  waiting={waiting}
-                  streaming
-                />
-              )}
-
-              {waiting && !streamingMessage && (
-                <div className="message message-assistant" data-message-id="__waiting__" data-chat-scope="waiting" data-message-role="assistant">
-                  <div className="message-avatar waiting-avatar">⚡</div>
-                  <div className="message-bubble" data-chat-scope="bubble">
-                    <div className="typing-indicator">
-                      <span /><span /><span />
-                    </div>
-                  </div>
-                </div>
-              )}
-            </>
-          )}
-        </div>
-        <div ref={bottomRef} />
-      </main>
-      {onScrollToBottom && showScrollButton && (
-        <button
-          type="button"
-          className="scroll-to-bottom"
-          onClick={onScrollToBottom}
-          aria-label="回到最新位置"
-          title="回到最新位置"
-        >
-          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2">
-            <polyline points="6 9 12 15 18 9" />
-          </svg>
-        </button>
-      )}
-      {children}
+        <AgentStageLayer stageState={stageState} />
+        <ChatStyleLayer
+          cssText={chatStyleCssText ?? null}
+          status={chatStyleStatus ?? "idle"}
+          reloadKey={chatStyleReloadKey ?? 0}
+        />
+        <VirtualMessageList
+          ref={listRef}
+          archived={archived}
+          onImageClick={onImageClick}
+          onEditMessage={onEditMessage}
+          onDeleteMessages={onDeleteMessages}
+          onDeleteSingleMessage={onDeleteSingleMessage}
+          onRegenerateResponse={onRegenerateResponse}
+          onDropFiles={onDropFiles}
+          agents={agents}
+          onToggleMessageVisibility={onToggleMessageVisibility}
+        />
+        {followMode === "detached" && (
+          <button
+            type="button"
+            className="scroll-to-bottom"
+            onClick={() => void listRef.current?.returnToBottom()}
+            aria-label="回到最新位置"
+            title="回到最新位置"
+          >
+            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2">
+              <polyline points="6 9 12 15 18 9" />
+            </svg>
+          </button>
+        )}
+        {children}
       </div>
-      {!minimapCollapsed && <Minimap messages={messages} chatAreaRef={chatAreaRef} />}
+      {!minimapCollapsed && (
+        <Minimap
+          onDragStart={() => listRef.current?.beginMinimapDrag()}
+          onPreviewScrollTop={(scrollTop) => listRef.current?.previewMinimapScrollTop(scrollTop)}
+          onDragEnd={(scrollTop) => listRef.current?.commitMinimapDrag(scrollTop)}
+        />
+      )}
       <button
         type="button"
         className="minimap-toggle"
-        onClick={() => setMinimapCollapsed((v) => !v)}
+        onClick={() => setMinimapCollapsed((value) => !value)}
         aria-label={minimapCollapsed ? "展开预览条" : "收起预览条"}
         title={minimapCollapsed ? "展开预览条" : "收起预览条"}
       >
         <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2">
-          {minimapCollapsed ? (
-            <path d="M15 18l-6-6 6-6" />
-          ) : (
-            <path d="M9 18l6-6-6-6" />
-          )}
+          {minimapCollapsed ? <path d="M15 18l-6-6 6-6" /> : <path d="M9 18l6-6-6-6" />}
         </svg>
       </button>
     </div>

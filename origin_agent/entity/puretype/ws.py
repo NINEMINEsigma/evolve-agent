@@ -32,6 +32,7 @@ class MessageType(str, Enum):
     PING = "ping"
     PONG = "pong"
     SUBAGENT_UPDATE = "subagent_update"
+    HISTORY_SYNC = "history_sync"
     LLM_PROFILE_CHANGED = "llm_profile_changed"
     APPROVAL_PROFILE_CHANGED = "approval_profile_changed"
 
@@ -86,6 +87,12 @@ class Message(BaseModel):
     old_name: str | None = None
     new_name: str | None = None
     metrics: MessageMetrics | None = None  # STREAM_DONE：计时元信息
+    # HISTORY_SYNC：正典历史同步元数据（正文由 REST 按需读取）
+    history_count: int | None = None
+    processing: bool | None = None
+    token_usage: int | None = None
+    context_tokens: int | None = None
+    agents: list[str] | None = None
     # APPROVAL_PROFILE_CHANGED：审批 Profile 状态变更通知
     approval_profile_name: str | None = None
     approval_profile_model: str | None = None

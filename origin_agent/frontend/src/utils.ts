@@ -24,11 +24,6 @@ export interface ParsedToolResult {
   isError?: boolean;
 }
 
-export interface MessageResources {
-  images: Array<{ id: string; src: string; alt: string }>;
-  downloads: Array<{ id: string; url: string; filename: string; size?: number }>;
-}
-
 export function parseToolResult(raw: string, _toolName?: string): ParsedToolResult {
   try {
     const parsed = JSON.parse(raw);
@@ -58,56 +53,6 @@ export function parseToolResult(raw: string, _toolName?: string): ParsedToolResu
   } catch {
     return { content: raw, isError: false };
   }
-}
-
-export interface MessageResourceSource {
-  id: string;
-  role: string;
-  content: string | unknown;
-  imageMarkdown?: string;
-  downloadInfo?: DownloadInfo;
-}
-
-export function extractMessageResources(messages: MessageResourceSource[]): MessageResources {
-  const images: MessageResources["images"] = [];
-  const downloads: MessageResources["downloads"] = [];
-  const seen = new Set<string>();
-
-  messages.forEach((m) => {
-    if (m.imageMarkdown) {
-      const match = m.imageMarkdown.match(/!\[(.*?)\]\(([^)]+)\)/);
-      if (match) {
-        const src = match[2];
-        if (!seen.has(src)) {
-          seen.add(src);
-          images.push({ id: `${m.id}-img`, src, alt: match[1] || "" });
-        }
-      }
-    }
-
-    if (m.downloadInfo && !seen.has(m.downloadInfo.url)) {
-      seen.add(m.downloadInfo.url);
-      downloads.push({
-        id: `${m.id}-dl`,
-        url: m.downloadInfo.url,
-        filename: m.downloadInfo.filename,
-        size: m.downloadInfo.size,
-      });
-    }
-
-    if (m.role === "assistant" && typeof m.content === "string") {
-      const imgMatches = m.content.matchAll(/!\[(.*?)\]\(([^)]+)\)/g);
-      for (const match of imgMatches) {
-        const src = match[2];
-        if (!seen.has(src)) {
-          seen.add(src);
-          images.push({ id: `${m.id}-mdimg-${src.slice(-8)}`, src, alt: match[1] || "" });
-        }
-      }
-    }
-  });
-
-  return { images, downloads };
 }
 
 export function subagentFeedbackToChatMessages(session: SubagentSession): ChatMessage[] {

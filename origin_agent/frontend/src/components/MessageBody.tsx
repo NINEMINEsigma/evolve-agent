@@ -95,11 +95,11 @@ function renderBlocksContent(
   return <pre className={`message-text message-text-${roleClass}`}>{String(content)}</pre>;
 }
 
-function ContextExtension({ message }: { message: ChatMessage }) {
+function ContextExtension({ message, onUserHeightMutation }: { message: ChatMessage; onUserHeightMutation?: () => void }) {
   const hasSuffix = message.messageSuffix || message.dynamicMessageSuffix;
   if (!hasSuffix) return null;
   return (
-    <details className="context-extension-block">
+    <details className="context-extension-block" onToggle={onUserHeightMutation}>
       <summary className="context-extension-summary">上下文扩展</summary>
       <div className="context-extension-content">
         {message.dynamicMessageSuffix && (
@@ -117,9 +117,10 @@ interface MessageBodyProps {
   message: ChatMessage;
   streaming?: boolean;
   onImageClick: (src: string) => void;
+  onUserHeightMutation?: () => void;
 }
 
-export default function MessageBody({ message, streaming, onImageClick }: MessageBodyProps) {
+export default function MessageBody({ message, streaming, onImageClick, onUserHeightMutation }: MessageBodyProps) {
   const m = message;
   const textContent = contentToText(m.content);
 
@@ -139,7 +140,7 @@ export default function MessageBody({ message, streaming, onImageClick }: Messag
     return (
       <>
         {m.reasoningContent && (
-          <details className="reasoning-block" data-chat-scope="reasoning">
+          <details className="reasoning-block" data-chat-scope="reasoning" onToggle={onUserHeightMutation}>
             <summary className="reasoning-summary">{reasoningLabel}</summary>
             <div className="reasoning-content">{m.reasoningContent}</div>
           </details>
@@ -177,7 +178,7 @@ export default function MessageBody({ message, streaming, onImageClick }: Messag
             </div>
           );
         })()}
-        <ContextExtension message={m} />
+        <ContextExtension message={m} onUserHeightMutation={onUserHeightMutation} />
         {streaming && <span className="streaming-cursor" />}
       </>
     );
@@ -187,7 +188,7 @@ export default function MessageBody({ message, streaming, onImageClick }: Messag
     return (
       <>
         {renderBlocksContent(m.content, m.role, m.id, onImageClick)}
-        <ContextExtension message={m} />
+        <ContextExtension message={m} onUserHeightMutation={onUserHeightMutation} />
       </>
     );
   }
@@ -221,7 +222,7 @@ export default function MessageBody({ message, streaming, onImageClick }: Messag
         return (
           <>
             {specialized}
-            <ContextExtension message={m} />
+            <ContextExtension message={m} onUserHeightMutation={onUserHeightMutation} />
           </>
         );
       }
@@ -230,7 +231,7 @@ export default function MessageBody({ message, streaming, onImageClick }: Messag
           <div className="tool-json-view">
             <JsonView src={parsed} collapsed={2} displaySize collapseStringsAfterLength={99999} />
           </div>
-          <ContextExtension message={m} />
+          <ContextExtension message={m} onUserHeightMutation={onUserHeightMutation} />
         </>
       );
     } catch {

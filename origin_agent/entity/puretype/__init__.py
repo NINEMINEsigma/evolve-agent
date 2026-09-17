@@ -10,7 +10,8 @@ puretype 包 — 只含有不包含任何方法定义的类型定义。
                   LLMProfileUpdateRequest, LLMProfileDeleteRequest, LLMProfileMutationResponse,
                   LLMProfileDeleteResult, ModalityCapability
     skills      : SkillPayload, SkillInfo
-    session     : Loop, SessionStatus, LoopMeta, SessionInfo, SessionMessageEntry, TokenUsageRecord, QueuedMessage
+    session     : Loop, SessionStatus, LoopMeta, SessionInfo, History skeleton/page/resource DTO,
+                  SessionMessageEntry, TokenUsageRecord, QueuedMessage
     agent       : AgentConfig
     ws          : MessageType, Message
     lsp         : LSPState, LSPDiagnostic, LSPReference, LSPDefinition, LSPSymbol
@@ -66,6 +67,14 @@ from .session import (
     SessionStatus,
     LoopMeta,
     SessionInfo,
+    SessionHistoryRowKind,
+    SessionHistorySkeletonRow,
+    SessionHistorySkeletonResponse,
+    SessionHistoryContentRow,
+    SessionHistoryPageResponse,
+    SessionHistoryImageResource,
+    SessionHistoryDownloadResource,
+    SessionHistoryResourcesResponse,
     SessionMessageEntry,
     TokenUsageRecord,
     QueuedMessage,
@@ -163,6 +172,14 @@ __all__ = [
     "SessionStatus",
     "LoopMeta",
     "SessionInfo",
+    "SessionHistoryRowKind",
+    "SessionHistorySkeletonRow",
+    "SessionHistorySkeletonResponse",
+    "SessionHistoryContentRow",
+    "SessionHistoryPageResponse",
+    "SessionHistoryImageResource",
+    "SessionHistoryDownloadResource",
+    "SessionHistoryResourcesResponse",
     "SessionMessageEntry",
     "TokenUsageRecord",
     "QueuedMessage",

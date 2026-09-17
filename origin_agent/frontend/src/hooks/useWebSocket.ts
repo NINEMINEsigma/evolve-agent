@@ -1,76 +1,30 @@
 import { useCallback, useEffect, useMemo, useRef } from "react";
-import { MessageContent, WSMessage, SubagentSession, AskRequest, ConfirmRequest, InterruptResponse, ApprovalMode } from "../types";
-import { generateUUID } from "../utils";
-import { WS_IN, WS_OUT } from "../constants/ws";
-import { COLLOQUY_SID } from "../constants/session";
-import { TIMING } from "../constants/timing";
-import { DIMENSIONS } from "../constants/dimensions";
+import type {
+  ApprovalMode,
+  AskRequest,
+  ConfirmRequest,
+  InterruptResponse,
+  MessageContent,
+  SubagentSession,
+  WSMessage,
+} from "../types";
 import { collectClientInfo } from "../constants/clientInfo";
-import { useWebSocketConnection } from "./useWebSocketConnection";
-import { useSessionStore } from "./useSessionStore";
-import { useUploadManager } from "./useUploadManager";
-import { useSubagentManager } from "./useSubagentManager";
+import { COLLOQUY_SID } from "../constants/session";
+import { STORAGE_KEYS } from "../constants/storage";
+import { TIMING } from "../constants/timing";
+import { WS_IN, WS_OUT } from "../constants/ws";
+import { generateUUID, parseToolResult } from "../utils";
+import { chatRuntimeController } from "../features/chat/chatRuntimeController";
+import { useChatRuntimeStore } from "../features/chat/chatRuntimeStore";
+import { createStreamFrameBuffer, type StreamFrameBuffer } from "../features/chat/streamFrameBuffer";
 import { useLlmProfiles } from "./useLlmProfiles";
-import type { SessionStore } from "./useSessionStore";
-import type { UploadManager } from "./useUploadManager";
+import { useSessionStore, type SessionStore } from "./useSessionStore";
+import { useSubagentManager } from "./useSubagentManager";
+import { useUploadManager, type UploadManager } from "./useUploadManager";
+import { useWebSocketConnection } from "./useWebSocketConnection";
 
 export type { PendingImage, PendingAudio, PendingVideo } from "./useUploadManager";
 export type WebSocketState = ReturnType<typeof useWebSocket>;
-
-const NESTED_SCROLL_SELECTOR = [
-  ".tool-call-detail",
-  ".message-content-collapsed",
-  ".reasoning-content",
-  ".context-extension-content",
-].join(", ");
-const HANDOFF_SCROLL_SELECTOR = ".tool-call-detail, .message-content-collapsed";
-
-function eventTargetElement(target: EventTarget | null): Element | null {
-  return target instanceof Element ? target : null;
-}
-
-function findScrollableElement(target: EventTarget | null, selector: string): HTMLElement | null {
-  let current = eventTargetElement(target);
-  while (current) {
-    if (current instanceof HTMLElement && current.matches(selector) && current.scrollHeight > current.clientHeight) {
-      return current;
-    }
-    current = current.parentElement;
-  }
-  return null;
-}
-
-function findNestedScrollContainer(target: EventTarget | null): HTMLElement | null {
-  return findScrollableElement(target, NESTED_SCROLL_SELECTOR);
-}
-
-function isInsideNestedScrollContainer(target: EventTarget | null): boolean {
-  return findNestedScrollContainer(target) !== null;
-}
-
-function isNestedHandoffTargetAtBoundary(target: EventTarget | null, deltaY: number): boolean {
-  const container = findNestedScrollContainer(target);
-  if (!container || !container.matches(HANDOFF_SCROLL_SELECTOR) || deltaY === 0) return false;
-  const atTop = container.scrollTop <= 0;
-  const atBottom = container.scrollTop + container.clientHeight >= container.scrollHeight - 1;
-  return (deltaY < 0 && atTop) || (deltaY > 0 && atBottom);
-}
-
-const KEYBOARD_SCROLL_KEYS = new Set([
-  "ArrowDown",
-  "ArrowUp",
-  "End",
-  "Home",
-  "PageDown",
-  "PageUp",
-  " ",
-]);
-
-function isKeyboardScrollTarget(target: EventTarget | null, chat: HTMLElement): boolean {
-  const element = eventTargetElement(target);
-  if (!element || !chat.contains(element)) return false;
-  return element.closest("input, textarea, button, [contenteditable=\"true\"]") === null;
-}
 
 function isApprovalMode(value: unknown): value is ApprovalMode {
   return value === "manual" || value === "handsfree" || value === "yolo";
@@ -79,96 +33,116 @@ function isApprovalMode(value: unknown): value is ApprovalMode {
 export function useWebSocket() {
   const conn = useWebSocketConnection();
   const subagent = useSubagentManager();
-
-  const connRef = useRef(conn);
+  const processing = useChatRuntimeStore((state) => state.processing);
   const sessionRef = useRef<SessionStore | null>(null);
   const uploadRef = useRef<UploadManager | null>(null);
+  const connRef = useRef(conn);
   const subagentRef = useRef(subagent);
+  const streamDoneSeenRef = useRef(false);
 
-  // ── cross-cutting resource fetcher ──
   const fetchToolResourcesRef = useRef(async (sid: string) => {
     if (!sid) return;
     const [toolRes, subagentRes] = await Promise.allSettled([
-      fetch(`/api/sessions/${sid}/tool-resources`).then((r) => r.json()),
-      fetch(`/api/sessions/${sid}/subagents`).then((r) => r.json()),
+      fetch(`/api/sessions/${sid}/tool-resources`).then((response) => response.json()),
+      fetch(`/api/sessions/${sid}/subagents`).then((response) => response.json()),
     ]);
-    const activeSid = sessionRef.current?.sessionId;
-    // sessionId 为空（newChat 后新 sid 未返回）时拒绝应用任何 in-flight 数据，
-    // 否则旧会话资源会串入新会话（原 `|| sid` 竞态缺陷）
-    if (!activeSid || activeSid !== sid) return;
+    if (sessionRef.current?.sessionId !== sid) return;
     if (toolRes.status === "fulfilled") {
-      const data = toolRes.value;
-      sessionRef.current?.setTaskProgress(data.task_progress || {});
-      sessionRef.current?.setClipboardDisplays(data.clipboard_display || {});
-      sessionRef.current?.setDynamicEndpoints(data.dynamic_endpoints || []);
+      sessionRef.current.setTaskProgress(toolRes.value.task_progress || {});
+      sessionRef.current.setClipboardDisplays(toolRes.value.clipboard_display || {});
+      sessionRef.current.setDynamicEndpoints(toolRes.value.dynamic_endpoints || []);
     }
-    if (subagentRes.status === "fulfilled") {
-      const data = subagentRes.value;
-      if (data.subagents) {
-        subagentRef.current.mergeSnapshot(sid, { subagents: data.subagents as Record<string, SubagentSession> });
-      }
+    if (subagentRes.status === "fulfilled" && subagentRes.value.subagents) {
+      subagentRef.current.mergeSnapshot(sid, {
+        subagents: subagentRes.value.subagents as Record<string, SubagentSession>,
+      });
     }
   });
 
   const session = useSessionStore({
-    onSessionHistory: (sid: string) => fetchToolResourcesRef.current(sid),
-    onSessionRotated: (_newSid: string, oldSid: string) => {
-      subagentRef.current.setSubagentSessionsMap((prev) => ({ ...prev, [oldSid]: {} }));
+    onSessionRotated: (newSid, oldSid) => {
+      subagentRef.current.setSubagentSessionsMap((previous) => ({ ...previous, [oldSid]: {} }));
+      chatRuntimeController.beginSession(newSid);
     },
   });
+
+  const appendLocalMessage = useCallback((
+    role: "user" | "assistant" | "system" | "error" | "tool",
+    content: MessageContent,
+  ) => {
+    useChatRuntimeStore.getState().appendLiveMessage({ role, content, id: generateUUID() });
+  }, []);
+
   const upload = useUploadManager({
     wsRef: conn.wsRef,
     sessions: session.sessions,
     sessionId: session.sessionId,
-    addMessage: session.addMessage,
+    addMessage: (role, content) => appendLocalMessage(role, content),
   });
   const llmProfiles = useLlmProfiles();
+  const llmProfilesRef = useRef(llmProfiles);
+
+  const frameBufferRef = useRef<StreamFrameBuffer | null>(null);
+  if (frameBufferRef.current === null) {
+    frameBufferRef.current = createStreamFrameBuffer((batch) => {
+      useChatRuntimeStore.getState().applyStreamBatch(batch);
+    });
+  }
 
   useEffect(() => { connRef.current = conn; }, [conn]);
   useEffect(() => { sessionRef.current = session; }, [session]);
   useEffect(() => { uploadRef.current = upload; }, [upload]);
   useEffect(() => { subagentRef.current = subagent; }, [subagent]);
-
-  const llmProfilesRef = useRef(llmProfiles);
   useEffect(() => { llmProfilesRef.current = llmProfiles; }, [llmProfiles]);
 
-  // ── scroll anchors ──
-  const bottomRef = useRef<HTMLDivElement | null>(null);
-  const chatAreaRef = useRef<HTMLDivElement | null>(null);
-  const contentRef = useRef<HTMLDivElement | null>(null);
-  const isAtBottomRef = useRef(true);
-  const programmaticScrollingRef = useRef(false);
-  const scrollGenerationRef = useRef(0);
-  const pendingScrollFrameRef = useRef<number | null>(null);
-  const pendingScrollForceRef = useRef(false);
-  const programmaticResetFrameRef = useRef<number | null>(null);
-  const observerRetryFrameRef = useRef<number | null>(null);
-  const userScrollIntentUntilRef = useRef(0);
-  const userScrollIntentTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
-  const nestedHandoffUntilRef = useRef(0);
-  const smoothScrollCleanupRef = useRef<(() => void) | null>(null);
-  const scrollListenerCleanupRef = useRef<(() => void) | null>(null);
-  const scrollSessionIdRef = useRef(session.sessionId);
+  const handleHistorySync = useCallback((message: WSMessage) => {
+    const sid = message.session_id || sessionRef.current?.sessionId || "";
+    if (!sid) return;
+    if (sessionRef.current?.sessionId !== sid) {
+      sessionRef.current?.setSessionId(sid);
+      localStorage.setItem(STORAGE_KEYS.SESSION_ID, sid);
+    }
+    const runtime = useChatRuntimeStore.getState();
+    if (typeof message.token_usage === "number") sessionRef.current?.setTokenUsage(message.token_usage);
+    if (typeof message.context_tokens === "number") sessionRef.current?.setContextTokens(message.context_tokens);
+    if (Array.isArray(message.agents)) sessionRef.current?.setAgents(message.agents);
+    else if (message.agents === null) sessionRef.current?.setAgents([]);
+    const historyCount = message.history_count ?? 0;
+    if (runtime.sessionId !== sid) {
+      chatRuntimeController.beginSession(sid);
+      useChatRuntimeStore.setState({ knownHistoryCount: historyCount });
+      useChatRuntimeStore.getState().setProcessing(Boolean(message.processing));
+      void chatRuntimeController.initialize(sid, historyCount);
+    } else if (runtime.skeleton.length === 0 && !runtime.initialReady) {
+      useChatRuntimeStore.setState({ knownHistoryCount: historyCount });
+      useChatRuntimeStore.getState().setProcessing(Boolean(message.processing));
+      void chatRuntimeController.initialize(sid, historyCount);
+    } else {
+      if (message.processing) useChatRuntimeStore.getState().setProcessing(true);
+      void chatRuntimeController.syncCanonicalHistory(historyCount);
+    }
+    fetchToolResourcesRef.current(sid);
+    sessionRef.current?.fetchSessions();
+  }, []);
 
-  // ── websocket handlers ──
-  const handleMessage = useCallback((msg: WSMessage) => {
-    if (msg.type === WS_IN.LLM_PROFILE_CHANGED) {
-      llmProfilesRef.current.handleProfileChanged(msg);
+  const handleMessage = useCallback((message: WSMessage) => {
+    if (message.type === WS_IN.LLM_PROFILE_CHANGED) {
+      llmProfilesRef.current.handleProfileChanged(message);
       return;
     }
-    if (msg.type === WS_IN.APPROVAL_PROFILE_CHANGED) {
-      llmProfilesRef.current.handleApprovalProfileChanged(msg);
-      if (msg.handsfree_mode === false) {
+    if (message.type === WS_IN.APPROVAL_PROFILE_CHANGED) {
+      llmProfilesRef.current.handleApprovalProfileChanged(message);
+      if (message.handsfree_mode === false) {
         sessionRef.current?.setApprovalMode("manual");
         sessionRef.current?.setApprovalModeSyncStatus("ready");
       }
       return;
     }
-    if (msg.type === WS_IN.HANDSFREE_MODE) {
-      const mode = isApprovalMode(msg.approval_mode)
-        ? msg.approval_mode
-        : typeof msg.handsfree_mode === "boolean"
-          ? (msg.handsfree_mode ? "handsfree" : "manual")
+    if (message.type === WS_IN.HANDSFREE_MODE) {
+      const mode = isApprovalMode(message.approval_mode)
+        ? message.approval_mode
+        : typeof message.handsfree_mode === "boolean"
+          ? message.handsfree_mode ? "handsfree" : "manual"
           : null;
       if (mode) {
         sessionRef.current?.setApprovalMode(mode);
@@ -176,622 +150,400 @@ export function useWebSocket() {
       }
       return;
     }
-    sessionRef.current?.handleMessage(msg);
-    subagentRef.current.handleMessage(msg, sessionRef.current?.sessionId ?? "");
-  }, []);
+    if (message.type === WS_IN.HISTORY_SYNC) {
+      frameBufferRef.current?.flush();
+      handleHistorySync(message);
+      return;
+    }
+    if (message.type === WS_IN.STREAM_DELTA) {
+      streamDoneSeenRef.current = false;
+      frameBufferRef.current?.push(message);
+      return;
+    }
+    if (message.type === WS_IN.STREAM_DONE) {
+      frameBufferRef.current?.flush();
+      const streamId = message.stream_id || useChatRuntimeStore.getState().currentStreamId || "";
+      if (streamId) {
+        useChatRuntimeStore.getState().finishStream(
+          streamId,
+          typeof message.content === "string" ? message.content : undefined,
+          message.metrics,
+        );
+      }
+      streamDoneSeenRef.current = true;
+      return;
+    }
+    if (message.type === WS_IN.USER_MESSAGE) {
+      const clientId = message.client_message_id;
+      useChatRuntimeStore.getState().appendLiveMessage({
+        role: "user",
+        content: message.content ?? "",
+        id: clientId || generateUUID(),
+        clientMessageId: clientId,
+        characterName: message.character_name,
+        messageIndex: message.index,
+        visibleCharacters: message.visible_characters,
+        responseCharacters: message.response_characters,
+        messageSuffix: message.message_suffix,
+        dynamicMessageSuffix: message.dynamic_message_suffix,
+      });
+      if (clientId) useChatRuntimeStore.getState().removePendingMessages([clientId]);
+      return;
+    }
+    if (message.type === WS_IN.TOOL_CALL) {
+      frameBufferRef.current?.flush();
+      useChatRuntimeStore.getState().appendLiveMessage({
+        role: "tool",
+        content: `${message.character_name ? `${message.character_name} ` : ""}⚡ ${message.tool || "tool"}`,
+        id: message.tool_call_id || generateUUID(),
+        toolName: message.tool,
+        toolArgs: message.args,
+        characterName: message.character_name,
+      });
+      return;
+    }
+    if (message.type === WS_IN.TOOL_RESULT) {
+      frameBufferRef.current?.flush();
+      const parsed = parseToolResult(message.result ?? "", message.tool);
+      useChatRuntimeStore.getState().appendLiveMessage({
+        role: "tool",
+        content: parsed.content ?? message.result ?? "",
+        id: generateUUID(),
+        toolName: message.tool,
+        characterName: message.character_name,
+        imageMarkdown: parsed.imageMarkdown,
+        downloadInfo: parsed.downloadInfo,
+        toolCallMeta: message.tool_call_meta,
+        isError: parsed.isError,
+      });
+      if (message.consumed_client_message_ids?.length) {
+        useChatRuntimeStore.getState().removePendingMessages(message.consumed_client_message_ids);
+      }
+      return;
+    }
+    if (message.type === WS_IN.ASSISTANT_MESSAGE) {
+      if (streamDoneSeenRef.current) {
+        streamDoneSeenRef.current = false;
+        return;
+      }
+      useChatRuntimeStore.getState().appendLiveMessage({
+        role: "assistant",
+        content: message.content ?? "",
+        id: generateUUID(),
+        characterName: message.character_name,
+        visibleCharacters: message.visible_characters,
+        responseCharacters: message.response_characters,
+      });
+      return;
+    }
+    if (message.type === WS_IN.ERROR) {
+      appendLocalMessage("error", message.message || "未知错误");
+      return;
+    }
+    if (message.type === WS_IN.SYSTEM && typeof message.content === "string") {
+      try {
+        const parsed = JSON.parse(message.content);
+        if (parsed.uploaded) {
+          appendLocalMessage("system", `上传成功：${parsed.filename || "文件"} → ${parsed.path}`);
+        }
+      } catch {
+        // 普通 system 文本继续交由会话元数据 store 处理。
+      }
+    }
+    sessionRef.current?.handleMessage(message);
+    subagentRef.current.handleMessage(message, sessionRef.current?.sessionId ?? "");
+  }, [appendLocalMessage, handleHistorySync]);
 
   const onOpen = useCallback(() => {
-    if (!sessionRef.current) return;
-    sessionRef.current.setApprovalModeSyncStatus("loading");
-    sessionRef.current.ignoreStaleRef.current = false;
-    isAtBottomRef.current = true;
-    sessionRef.current.addMessage("system", "已连接到 Evolve Agent");
-    sessionRef.current.fetchSessions();
+    sessionRef.current?.setApprovalModeSyncStatus("loading");
+    if (sessionRef.current) sessionRef.current.ignoreStaleRef.current = false;
+    sessionRef.current?.fetchSessions();
   }, []);
 
   const onClose = useCallback(() => {
-    sessionRef.current?.setWaiting(false);
+    useChatRuntimeStore.getState().setProcessing(false);
     sessionRef.current?.setApprovalModeSyncStatus("unavailable");
   }, []);
 
   useEffect(() => {
     conn.setHandlers({ onOpen, onMessage: handleMessage, onClose });
-  }, [conn, onOpen, handleMessage, onClose]);
+  }, [conn, handleMessage, onClose, onOpen]);
 
-  // ── connect on mount ──
   useEffect(() => {
     conn.connect();
-    return () => conn.disconnect();
+    return () => {
+      frameBufferRef.current?.cancel();
+      chatRuntimeController.abortAll();
+      conn.disconnect();
+    };
   }, [conn.connect, conn.disconnect]);
 
-  // ── fetch sessions when locked, so sidebar shows available sessions ──
   useEffect(() => {
-    if (conn.sessionLocked) {
-      session.fetchSessions();
-    }
-  }, [conn.sessionLocked]);
+    if (conn.sessionLocked) session.fetchSessions();
+  }, [conn.sessionLocked, session.fetchSessions]);
 
-  // ── fetch tool resources when session changes ──
   useEffect(() => {
-    if (!session.sessionId) return;
-    fetchToolResourcesRef.current(session.sessionId);
+    if (session.sessionId) fetchToolResourcesRef.current(session.sessionId);
   }, [session.sessionId]);
 
   const subagentSessions = useMemo(
     () => subagent.subagentSessionsMap[session.sessionId] || {},
-    [subagent.subagentSessionsMap, session.sessionId]
+    [session.sessionId, subagent.subagentSessionsMap],
   );
 
-  // ── scroll helpers ──
-  const resetProgrammaticScrollGuard = useCallback(() => {
-    if (programmaticResetFrameRef.current !== null) {
-      cancelAnimationFrame(programmaticResetFrameRef.current);
-      programmaticResetFrameRef.current = null;
-    }
-    programmaticScrollingRef.current = false;
-  }, []);
-
-  const cancelScheduledScroll = useCallback(() => {
-    if (pendingScrollFrameRef.current !== null) {
-      cancelAnimationFrame(pendingScrollFrameRef.current);
-      pendingScrollFrameRef.current = null;
-    }
-    pendingScrollForceRef.current = false;
-    resetProgrammaticScrollGuard();
-  }, [resetProgrammaticScrollGuard]);
-
-  const cleanupScrollResources = useCallback(() => {
-    cancelScheduledScroll();
-    if (observerRetryFrameRef.current !== null) {
-      cancelAnimationFrame(observerRetryFrameRef.current);
-      observerRetryFrameRef.current = null;
-    }
-    const activeSmoothCleanup = smoothScrollCleanupRef.current;
-    if (activeSmoothCleanup) {
-      activeSmoothCleanup();
-      smoothScrollCleanupRef.current = null;
-    }
-    if (userScrollIntentTimerRef.current !== undefined) {
-      clearTimeout(userScrollIntentTimerRef.current);
-      userScrollIntentTimerRef.current = undefined;
-    }
-    userScrollIntentUntilRef.current = 0;
-    nestedHandoffUntilRef.current = 0;
-  }, [cancelScheduledScroll]);
-
-  const disposeScrollResources = useCallback(() => {
-    cleanupScrollResources();
-    const listenerCleanup = scrollListenerCleanupRef.current;
-    if (listenerCleanup) {
-      listenerCleanup();
-      scrollListenerCleanupRef.current = null;
-    }
-  }, [cleanupScrollResources]);
-
-  const markUserScrollIntent = useCallback(() => {
-    const activeSmoothCleanup = smoothScrollCleanupRef.current;
-    if (activeSmoothCleanup) {
-      activeSmoothCleanup();
-      smoothScrollCleanupRef.current = null;
-    }
-    cancelScheduledScroll();
-    const generation = scrollGenerationRef.current;
-    const expiresAt = performance.now() + TIMING.USER_SCROLL_INTENT_WINDOW;
-    userScrollIntentUntilRef.current = expiresAt;
-    if (userScrollIntentTimerRef.current !== undefined) {
-      clearTimeout(userScrollIntentTimerRef.current);
-    }
-    userScrollIntentTimerRef.current = setTimeout(() => {
-      if (scrollGenerationRef.current !== generation) return;
-      if (userScrollIntentUntilRef.current !== expiresAt) return;
-      if (performance.now() >= expiresAt) {
-        userScrollIntentUntilRef.current = 0;
-        userScrollIntentTimerRef.current = undefined;
-      }
-    }, TIMING.USER_SCROLL_INTENT_WINDOW);
-  }, [cancelScheduledScroll]);
-
-  const invalidateScrollGeneration = useCallback(() => {
-    cleanupScrollResources();
-    programmaticScrollingRef.current = false;
-    isAtBottomRef.current = true;
-    scrollGenerationRef.current += 1;
-  }, [cleanupScrollResources]);
-
-  useEffect(() => {
-    if (scrollSessionIdRef.current === session.sessionId) return;
-    invalidateScrollGeneration();
-    scrollSessionIdRef.current = session.sessionId;
-  }, [session.sessionId, invalidateScrollGeneration]);
-
-  const handleUserScroll = useCallback(() => {
-    const chat = chatAreaRef.current;
-    if (!chat) return;
-    const now = performance.now();
-    const hasUserIntent = userScrollIntentUntilRef.current > now;
-    const hasNestedHandoff = nestedHandoffUntilRef.current > now;
-    if (programmaticScrollingRef.current && !hasUserIntent && !hasNestedHandoff) return;
-    if (!hasUserIntent && !hasNestedHandoff) return;
-    if (!hasNestedHandoff) nestedHandoffUntilRef.current = 0;
-    const isAtBottom = chat.scrollHeight - chat.scrollTop - chat.clientHeight <= DIMENSIONS.SCROLL_BOTTOM_THRESHOLD;
-    isAtBottomRef.current = isAtBottom;
-  }, []);
-
-  const attachScrollListener = useCallback((): (() => void) | null => {
-    const chat = chatAreaRef.current;
-    if (!chat) return null;
-
-    const onScroll = () => handleUserScroll();
-    const onWheel = (event: WheelEvent) => {
-      if (event.deltaY === 0) return;
-      if (isInsideNestedScrollContainer(event.target)) {
-        if (isNestedHandoffTargetAtBoundary(event.target, event.deltaY)) {
-          nestedHandoffUntilRef.current = performance.now() + TIMING.USER_SCROLL_INTENT_WINDOW;
-          markUserScrollIntent();
-        }
-        return;
-      }
-      markUserScrollIntent();
-    };
-    const onTouchStart = (event: TouchEvent) => {
-      if (!isInsideNestedScrollContainer(event.target)) markUserScrollIntent();
-    };
-    const onTouchMove = (event: TouchEvent) => {
-      if (!isInsideNestedScrollContainer(event.target)) markUserScrollIntent();
-    };
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (KEYBOARD_SCROLL_KEYS.has(event.key) && isKeyboardScrollTarget(event.target, chat)) {
-        markUserScrollIntent();
-      }
-    };
-
-    chat.addEventListener("scroll", onScroll, { passive: true });
-    chat.addEventListener("wheel", onWheel, { passive: true });
-    chat.addEventListener("touchstart", onTouchStart, { passive: true });
-    chat.addEventListener("touchmove", onTouchMove, { passive: true });
-    chat.addEventListener("keydown", onKeyDown);
-
-    const cleanup = () => {
-      chat.removeEventListener("scroll", onScroll);
-      chat.removeEventListener("wheel", onWheel);
-      chat.removeEventListener("touchstart", onTouchStart);
-      chat.removeEventListener("touchmove", onTouchMove);
-      chat.removeEventListener("keydown", onKeyDown);
-      if (scrollListenerCleanupRef.current === cleanup) {
-        scrollListenerCleanupRef.current = null;
-      }
-    };
-    const previousCleanup = scrollListenerCleanupRef.current;
-    if (previousCleanup) previousCleanup();
-    scrollListenerCleanupRef.current = cleanup;
-    return cleanup;
-  }, [handleUserScroll, markUserScrollIntent]);
-
-  const scheduleScrollToBottom = useCallback((force = false) => {
-    const chat = chatAreaRef.current;
-    if (!chat) return;
-    if (!force && !isAtBottomRef.current) return;
-    if (!force && userScrollIntentUntilRef.current > performance.now()) return;
-
-    const activeSmoothCleanup = smoothScrollCleanupRef.current;
-    if (activeSmoothCleanup) {
-      activeSmoothCleanup();
-      smoothScrollCleanupRef.current = null;
-    }
-    if (force) pendingScrollForceRef.current = true;
-    if (pendingScrollFrameRef.current !== null) return;
-
-    const generation = scrollGenerationRef.current;
-    let frameId = 0;
-    frameId = requestAnimationFrame(() => {
-      if (pendingScrollFrameRef.current !== frameId) return;
-      pendingScrollFrameRef.current = null;
-      if (scrollGenerationRef.current !== generation) return;
-
-      const shouldForce = pendingScrollForceRef.current;
-      pendingScrollForceRef.current = false;
-      const currentChat = chatAreaRef.current;
-      if (!currentChat || (!shouldForce && !isAtBottomRef.current)) return;
-
-      const maxScrollTop = Math.max(0, currentChat.scrollHeight - currentChat.clientHeight);
-      programmaticScrollingRef.current = true;
-      currentChat.scrollTo({ top: maxScrollTop, behavior: "auto" });
-
-      if (programmaticResetFrameRef.current !== null) {
-        cancelAnimationFrame(programmaticResetFrameRef.current);
-      }
-      const resetGeneration = generation;
-      let resetFrameId = 0;
-      resetFrameId = requestAnimationFrame(() => {
-        if (programmaticResetFrameRef.current !== resetFrameId) return;
-        programmaticResetFrameRef.current = null;
-        if (scrollGenerationRef.current !== resetGeneration) return;
-        programmaticScrollingRef.current = false;
-      });
-      programmaticResetFrameRef.current = resetFrameId;
-    });
-    pendingScrollFrameRef.current = frameId;
-  }, []);
-
-  const scrollToBottomIfAtBottom = useCallback((force = false) => {
-    scheduleScrollToBottom(force);
-  }, [scheduleScrollToBottom]);
-
-  const scrollToBottomSmooth = useCallback(() => {
-    const chat = chatAreaRef.current;
-    if (!chat) return;
-
-    cancelScheduledScroll();
-    const previousCleanup = smoothScrollCleanupRef.current;
-    if (previousCleanup) previousCleanup();
-
-    const generation = scrollGenerationRef.current;
-    isAtBottomRef.current = true;
-    programmaticScrollingRef.current = true;
-
-    let done = false;
-    let fallbackTimer: ReturnType<typeof setTimeout> | undefined;
-    const onScrollEnd = () => finish();
-    const cleanup = () => {
-      if (done) return;
-      done = true;
-      if (fallbackTimer !== undefined) clearTimeout(fallbackTimer);
-      chat.removeEventListener("scrollend", onScrollEnd);
-      if (smoothScrollCleanupRef.current === cleanup) {
-        smoothScrollCleanupRef.current = null;
-      }
-      if (scrollGenerationRef.current === generation) {
-        resetProgrammaticScrollGuard();
-      }
-    };
-    const finish = () => {
-      if (scrollGenerationRef.current !== generation) {
-        cleanup();
-        return;
-      }
-      cleanup();
-    };
-
-    smoothScrollCleanupRef.current = cleanup;
-    fallbackTimer = setTimeout(finish, TIMING.SMOOTH_SCROLL_FALLBACK);
-    chat.addEventListener("scrollend", onScrollEnd);
-    chat.scrollTo({ top: chat.scrollHeight, behavior: "smooth" });
-  }, [cancelScheduledScroll, resetProgrammaticScrollGuard]);
-
-  // ── message sending ──
   const send = useCallback((
     targetSessions: string[],
-    visible_characters?: string[],
-    response_characters?: string[],
+    visibleCharacters?: string[],
+    responseCharacters?: string[],
   ) => {
-    const s = sessionRef.current;
-    const u = uploadRef.current;
-    const c = connRef.current;
-    if (!s || !u) return;
-    const isArchived = s.sessions.find((sess) => sess.id === s.sessionId)?.status === "archived";
-    if (!c.wsRef.current || s.waiting || c.wsRef.current.readyState !== WebSocket.OPEN || isArchived) return;
-
-    const blocks = u.extractContentBlocks(u.inputRef.current, u.pendingImages, u.pendingAudios, u.pendingVideos);
-    const hasContent = blocks.length > 0;
-    if (!hasContent) return;
-
-    const content: MessageContent = blocks.length === 1 && blocks[0].type === "text" ? blocks[0].text : blocks;
+    const runtime = useChatRuntimeStore.getState();
+    const currentSession = sessionRef.current;
+    const currentUpload = uploadRef.current;
+    const currentConnection = connRef.current;
+    if (!currentSession || !currentUpload || !currentConnection.wsRef.current) return;
+    const archived = currentSession.sessions.find((item) => item.id === currentSession.sessionId)?.status === "archived";
+    if (archived || currentConnection.wsRef.current.readyState !== WebSocket.OPEN) return;
+    const blocks = currentUpload.extractContentBlocks(
+      currentUpload.inputRef.current,
+      currentUpload.pendingImages,
+      currentUpload.pendingAudios,
+      currentUpload.pendingVideos,
+    );
+    if (!blocks.length) return;
+    const content: MessageContent = blocks.length === 1 && blocks[0].type === "text"
+      ? blocks[0].text
+      : blocks;
     const clientMessageId = generateUUID();
-
-    s.addPendingMessage(clientMessageId, content);
-
-    c.send({
+    runtime.addPendingMessage(clientMessageId, content);
+    currentConnection.send({
       type: WS_OUT.USER_MESSAGE,
       content,
       target_sessions: targetSessions,
       client_message_id: clientMessageId,
       client_info: collectClientInfo(),
       llm_profile_name: llmProfilesRef.current.toProfileName(),
-      ...(visible_characters ? { visible_characters } : {}),
-      ...(response_characters ? { response_characters } : {}),
+      ...(visibleCharacters ? { visible_characters: visibleCharacters } : {}),
+      ...(responseCharacters ? { response_characters: responseCharacters } : {}),
     });
-    s.setInput("");
-    u.setPendingImages([]);
-    u.setPendingAudios([]);
-    u.setPendingVideos([]);
-    s.setWaiting(true);
-    s.ignoreStaleRef.current = false;
-    s.streamDoneRef.current = false;
-    isAtBottomRef.current = true;
-    scrollToBottomIfAtBottom(true);
-  }, [scrollToBottomIfAtBottom]);
+    runtime.setDraft("", "");
+    currentUpload.setPendingImages([]);
+    currentUpload.setPendingAudios([]);
+    currentUpload.setPendingVideos([]);
+    runtime.setProcessing(true);
+  }, []);
 
-  // ── actions ──
   const newChat = useCallback(() => {
-    if (!sessionRef.current) return;
-    invalidateScrollGeneration();
     window.history.replaceState({}, "", "/");
     conn.disconnect();
-    sessionRef.current.newChat();
+    sessionRef.current?.newChat();
+    chatRuntimeController.beginSession("");
     conn.connect();
-  }, [conn.connect, conn.disconnect, invalidateScrollGeneration]);
+  }, [conn.connect, conn.disconnect]);
 
   const switchSession = useCallback((sid: string) => {
-    if (!sessionRef.current) return;
-    invalidateScrollGeneration();
     window.history.replaceState({}, "", `/?session=${sid}`);
     conn.disconnect();
-    sessionRef.current.switchSession(sid);
+    sessionRef.current?.switchSession(sid);
+    chatRuntimeController.beginSession(sid);
     conn.connect(sid);
-  }, [conn.connect, conn.disconnect, invalidateScrollGeneration]);
+  }, [conn.connect, conn.disconnect]);
 
-  const enterColloquy = useCallback(() => {
-    if (!sessionRef.current) return;
-    invalidateScrollGeneration();
-    connRef.current.disconnect();
-    sessionRef.current.switchSession(COLLOQUY_SID);
-    connRef.current.connect(COLLOQUY_SID);
-  }, [invalidateScrollGeneration]);
+  const enterColloquy = useCallback(() => switchSession(COLLOQUY_SID), [switchSession]);
 
   const mergeSessions = useCallback(async (sources: string[]) => {
-    if (!sessionRef.current) return;
     const newSid = await session.mergeSessions(sources);
-    if (newSid) {
-      invalidateScrollGeneration();
-      window.history.replaceState({}, "", `/?session=${newSid}`);
-      conn.disconnect();
-      sessionRef.current.switchSession(newSid);
-      conn.connect(newSid);
-    }
-  }, [conn.connect, conn.disconnect, invalidateScrollGeneration, session.mergeSessions]);
+    if (newSid) switchSession(newSid);
+  }, [session.mergeSessions, switchSession]);
 
   const branchSession = useCallback(async (sid: string) => {
-    if (!sessionRef.current) return;
-    const newSid = await sessionRef.current.mergeSessions([sid]);
-    if (newSid) {
-      invalidateScrollGeneration();
-      window.history.replaceState({}, "", `/?session=${newSid}`);
-      conn.disconnect();
-      sessionRef.current.switchSession(newSid);
-      conn.connect(newSid);
-    }
-  }, [conn.connect, conn.disconnect, invalidateScrollGeneration]);
+    const newSid = await sessionRef.current?.mergeSessions([sid]);
+    if (newSid) switchSession(newSid);
+  }, [switchSession]);
 
   const deleteSession = useCallback((sid: string) => {
-    if (!sessionRef.current) return;
     if (!confirm("确定要删除这个会话吗？此操作不可撤销。")) return;
-    const s = sessionRef.current;
-    const wasActive = sid === s.sessionId;
+    const wasActive = sid === sessionRef.current?.sessionId;
     fetch(`/api/sessions/${sid}`, { method: "DELETE" })
       .then(() => {
-        const remaining = s.sessions.filter((sess) => sess.id !== sid);
-        s.setSessions(remaining);
-        if (wasActive) {
-          switchSession(COLLOQUY_SID);
-        }
+        sessionRef.current?.setSessions((previous) => previous.filter((item) => item.id !== sid));
+        if (wasActive) switchSession(COLLOQUY_SID);
       })
       .catch(() => {});
   }, [switchSession]);
 
   const setApprovalMode = useCallback((mode: ApprovalMode) => {
-    const s = sessionRef.current;
-    const c = connRef.current;
-    if (!s || s.approvalModeSyncStatus !== "ready") return;
-    // 不乐观更新模式；发送后进入加载态，等待服务端权威回执。
-    if (c.wsRef.current?.readyState === WebSocket.OPEN) {
-      c.send({
-        type: WS_OUT.HANDSFREE_MODE,
-        content: mode,
-      });
-      s.setApprovalModeSyncStatus("loading");
+    const currentSession = sessionRef.current;
+    const currentConnection = connRef.current;
+    if (!currentSession || currentSession.approvalModeSyncStatus !== "ready") return;
+    if (currentConnection.wsRef.current?.readyState === WebSocket.OPEN) {
+      currentConnection.send({ type: WS_OUT.HANDSFREE_MODE, content: mode });
+      currentSession.setApprovalModeSyncStatus("loading");
     }
   }, []);
 
   const interrupt = useCallback(async () => {
-    const s = sessionRef.current;
-    if (!s || !s.sessionId) return;
-    if (s.interruptStatus === "interrupting") return;
-    s.setInterruptStatus("interrupting");
-    // 清理本地待审批 UI 队列（后端 pending Future 由 request_interrupt 释放）
-    s.clearPendingInteractions();
+    const currentSession = sessionRef.current;
+    if (!currentSession?.sessionId || currentSession.interruptStatus === "interrupting") return;
+    currentSession.setInterruptStatus("interrupting");
+    currentSession.clearPendingInteractions();
     try {
-      const resp = await fetch(`/api/interrupt/${s.sessionId}`, { method: "POST" });
-      const data: InterruptResponse = await resp.json().catch(() => ({}));
-      const status = data.status;
-      if (status === "cancelled") {
-        // 等待后端 STREAM_DONE(cancelled) 固化部分内容；若无流，直接结束
-        if (!s.streamingMessageRef.current) {
-          s.setInterruptStatus("cancelled");
-          s.setWaiting(false);
-          s.setMessages((prev) => [...prev, { role: "system" as const, content: "⏹ 已中断", id: generateUUID() }]);
-        }
-      } else if (status === "idle") {
-        s.setInterruptStatus("idle");
-        s.setWaiting(false);
-      } else {
-        // timeout / failed / not_found / 网络错误：查询一次服务端真实状态再定
-        s.setInterruptStatus("failed");
-        try {
-          const statusResp = await fetch(`/api/sessions/${s.sessionId}/status`);
-          const statusData = await statusResp.json().catch(() => ({}));
-          if (!statusData.occupied && !s.streamingMessageRef.current) {
-            s.setWaiting(false);
-            s.setMessages((prev) => [...prev, {
-              role: "error" as const,
-              content: `中断失败：${data.error || "清理超时或异常"}（会话当前实际已空闲，可重试）`,
-              id: generateUUID(),
-            }]);
-          } else {
-            s.setMessages((prev) => [...prev, {
-              role: "error" as const,
-              content: `中断失败：${data.error || "清理超时或异常"}`,
-              id: generateUUID(),
-            }]);
-          }
-        } catch {
-          s.setMessages((prev) => [...prev, {
-            role: "error" as const,
-            content: `中断失败：${data.error || "网络错误"}`,
-            id: generateUUID(),
-          }]);
-        }
+      const response = await fetch(`/api/interrupt/${currentSession.sessionId}`, { method: "POST" });
+      const data: InterruptResponse = await response.json().catch(() => ({}));
+      if (data.status === "cancelled") currentSession.setInterruptStatus("cancelled");
+      else if (data.status === "idle") currentSession.setInterruptStatus("idle");
+      else currentSession.setInterruptStatus("failed");
+      if (data.status === "cancelled" || data.status === "idle") {
+        useChatRuntimeStore.getState().setProcessing(false);
       }
-    } catch (err) {
-      s.setInterruptStatus("failed");
-      s.setMessages((prev) => [...prev, {
-        role: "error" as const,
-        content: `中断请求失败：${err instanceof Error ? err.message : "网络错误"}`,
-        id: generateUUID(),
-      }]);
+    } catch {
+      currentSession.setInterruptStatus("failed");
     }
   }, []);
 
   const disgust = useCallback(() => {
-    const s = sessionRef.current;
-    if (!s) return;
-    // 厌恶：不停止流式消息、不设置 ignoreStaleRef
-    // 仅添加系统消息并通知后端
-    s.setMessages((prev) => [
-      ...prev,
-      { role: "system" as const, content: "👎 用户表达了强烈不满", id: generateUUID() },
-    ]);
-    fetch(`/api/disgust/${s.sessionId || "unknown"}`, { method: "POST" }).catch(() => {});
-  }, []);
+    const sid = sessionRef.current?.sessionId || "unknown";
+    appendLocalMessage("system", "用户表达了强烈不满");
+    fetch(`/api/disgust/${sid}`, { method: "POST" }).catch(() => {});
+  }, [appendLocalMessage]);
 
-  const resume = useCallback(() => {
-    const s = sessionRef.current;
-    if (!s) return;
-    s.resumeSession();
+  const resume = useCallback(async () => {
+    const sid = sessionRef.current?.sessionId;
+    if (!sid) return;
+    useChatRuntimeStore.getState().setProcessing(true);
+    try {
+      const response = await fetch(`/api/sessions/${sid}/resume`, { method: "POST" });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok || !data.resumed) {
+        useChatRuntimeStore.getState().setProcessing(false);
+        appendLocalMessage("error", `恢复失败：${data.error || "unknown error"}`);
+      }
+    } catch (error) {
+      useChatRuntimeStore.getState().setProcessing(false);
+      appendLocalMessage("error", `恢复失败：${error instanceof Error ? error.message : "网络错误"}`);
+    }
+  }, [appendLocalMessage]);
+  const respondConfirm = useCallback((request: ConfirmRequest | null, action: string, reason?: string, deniedBy?: string) => {
+    sessionRef.current?.respondConfirm(request, action, reason, deniedBy);
   }, []);
-
-  const respondConfirm = useCallback((request: ConfirmRequest | null, action: string, denyReasonText?: string, deniedBy?: string) => {
-    const s = sessionRef.current;
-    if (!s) return;
-    s.respondConfirm(request, action, denyReasonText, deniedBy);
-  }, []);
-
   const respondAsk = useCallback((request: AskRequest | null, option?: string, customText?: string) => {
-    const s = sessionRef.current;
-    if (!s) return;
-    s.respondAsk(request, option, customText);
+    sessionRef.current?.respondAsk(request, option, customText);
   }, []);
 
-  // ── drawer polling ──
+  const editMessage = useCallback(async (id: string, content: MessageContent) => {
+    const message = useChatRuntimeStore.getState().contentByRowId[id];
+    if (typeof message?.messageIndex !== "number") return;
+    const response = await fetch(`/api/sessions/${sessionRef.current?.sessionId}/messages/${message.messageIndex}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ content }),
+    });
+    if (response.status === 409) {
+      appendLocalMessage("error", "Agent 正在处理，暂时不能修改历史消息。");
+      return;
+    }
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok || !data.updated) {
+      appendLocalMessage("error", `消息编辑失败：${data.error || "unknown error"}`);
+      return;
+    }
+    useChatRuntimeStore.setState((state) => ({
+      contentByRowId: {
+        ...state.contentByRowId,
+        [id]: { ...message, content: data.content ?? content, edited: true },
+      },
+    }));
+  }, [appendLocalMessage]);
+
+  const deleteMessages = useCallback(async (count = 1) => {
+    const response = await fetch(`/api/sessions/${sessionRef.current?.sessionId}/messages?count=${count}`, { method: "DELETE" });
+    const data = await response.json().catch(() => ({}));
+    if (response.status === 409) {
+      appendLocalMessage("error", "Agent 正在处理，暂时不能删除历史消息。");
+    } else if (response.ok && data.deleted) {
+      await chatRuntimeController.invalidateAfterMutation(data.history_count);
+    }
+  }, [appendLocalMessage]);
+
+  const deleteSingleMessage = useCallback(async (index: number) => {
+    const response = await fetch(`/api/sessions/${sessionRef.current?.sessionId}/messages/single?index=${index}`, { method: "DELETE" });
+    const data = await response.json().catch(() => ({}));
+    if (response.status === 409) {
+      appendLocalMessage("error", "Agent 正在处理，暂时不能删除历史消息。");
+    } else if (response.ok && data.deleted) {
+      await chatRuntimeController.invalidateAfterMutation(data.history_count);
+      if (typeof data.token_usage === "number") sessionRef.current?.setTokenUsage(data.token_usage);
+      if (typeof data.context_tokens === "number") sessionRef.current?.setContextTokens(data.context_tokens);
+    }
+  }, [appendLocalMessage]);
+
+  const regenerateResponse = useCallback(async (messageIndex: number) => {
+    useChatRuntimeStore.getState().setProcessing(true);
+    const response = await fetch(`/api/sessions/${sessionRef.current?.sessionId}/regenerate`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        message_index: messageIndex,
+        llm_profile_name: llmProfilesRef.current.toProfileName(),
+      }),
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok || !data.regenerate) {
+      useChatRuntimeStore.getState().setProcessing(false);
+      appendLocalMessage("error", `重新生成失败：${data.error || "unknown error"}`);
+    }
+  }, [appendLocalMessage]);
+
+  const updateMessageVisibility = useCallback(async (messageId: string, visibleCharacters: string[]) => {
+    const message = useChatRuntimeStore.getState().contentByRowId[messageId];
+    if (typeof message?.messageIndex !== "number") return;
+    const response = await fetch(`/api/sessions/${sessionRef.current?.sessionId}/messages/${message.messageIndex}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ visible_characters: visibleCharacters }),
+    });
+    const data = await response.json().catch(() => ({}));
+    if (response.status === 409) {
+      appendLocalMessage("error", "Agent 正在处理，暂时不能修改消息可见性。");
+      return;
+    }
+    if (response.ok && data.updated) {
+      useChatRuntimeStore.setState((state) => ({
+        contentByRowId: {
+          ...state.contentByRowId,
+          [messageId]: { ...message, visibleCharacters: data.visible_characters ?? visibleCharacters },
+        },
+      }));
+    }
+  }, [appendLocalMessage]);
+
   useEffect(() => {
     if (!session.sessionId) return;
     const sid = session.sessionId;
     const fetchTasks = () => {
-      fetch(`/api/sessions/${sid}/shells`)
-        .then((r) => r.json())
-        .then((d) => sessionRef.current?.setShells(d.shells || []))
-        .catch(() => {});
-      fetch(`/api/sessions/${sid}/cron-tasks`)
-        .then((r) => r.json())
-        .then((d) => sessionRef.current?.setCronTasks(d.tasks || []))
-        .catch(() => {});
-      // 动态端点等 tool-resources 随轮询刷新：agent 注册/注销端点后资源面板自动更新
+      fetch(`/api/sessions/${sid}/shells`).then((response) => response.json())
+        .then((data) => sessionRef.current?.setShells(data.shells || [])).catch(() => {});
+      fetch(`/api/sessions/${sid}/cron-tasks`).then((response) => response.json())
+        .then((data) => sessionRef.current?.setCronTasks(data.tasks || [])).catch(() => {});
       fetchToolResourcesRef.current(sid);
     };
     fetchTasks();
-    const iv = setInterval(fetchTasks, TIMING.TASK_POLL_INTERVAL);
-    return () => clearInterval(iv);
+    const interval = setInterval(fetchTasks, TIMING.TASK_POLL_INTERVAL);
+    return () => clearInterval(interval);
   }, [session.sessionId]);
 
-  // ── auto scroll ──
-  useEffect(() => {
-    if (session.messages.length === 0) return;
-    scrollToBottomIfAtBottom();
-  }, [session.messages.length, scrollToBottomIfAtBottom]);
-
-  useEffect(() => {
-    if (session.streamingMessage || session.waiting) {
-      scrollToBottomIfAtBottom();
-    }
-  }, [
-    session.streamingMessage?.content,
-    session.streamingMessage?.reasoningContent,
-    session.streamingMessage?.toolName,
-    session.streamingMessage?.toolArgs,
-    session.streamingMessage?.activeToolCallKey,
-    session.waiting,
-    scrollToBottomIfAtBottom,
-  ]);
-
-  // ── ResizeObserver 追底: 异步渲染导致内容高度增长时自动追底 ──
-  useEffect(() => {
-    let active = true;
-    let observer: ResizeObserver | null = null;
-    let retryUsed = false;
-    const generation = scrollGenerationRef.current;
-
-    const observeContent = () => {
-      if (!active || conn.sessionLocked || scrollGenerationRef.current !== generation) return;
-      const content = contentRef.current;
-      if (!content) {
-        if (retryUsed) return;
-        retryUsed = true;
-        let retryFrameId = 0;
-        retryFrameId = requestAnimationFrame(() => {
-          if (observerRetryFrameRef.current !== retryFrameId) return;
-          observerRetryFrameRef.current = null;
-          observeContent();
-        });
-        observerRetryFrameRef.current = retryFrameId;
-        return;
-      }
-      if (typeof ResizeObserver === "undefined") {
-        scheduleScrollToBottom();
-        return;
-      }
-
-      observer = new ResizeObserver(() => {
-        if (active && !conn.sessionLocked) {
-          scheduleScrollToBottom();
-        }
-      });
-      observer.observe(content);
-      scheduleScrollToBottom();
-    };
-
-    if (!conn.sessionLocked) observeContent();
-
-    return () => {
-      active = false;
-      if (observer) observer.disconnect();
-      if (observerRetryFrameRef.current !== null) {
-        cancelAnimationFrame(observerRetryFrameRef.current);
-        observerRetryFrameRef.current = null;
-      }
-      cleanupScrollResources();
-    };
-  }, [conn.sessionLocked, scheduleScrollToBottom, cleanupScrollResources]);
-
-  useEffect(() => {
-    return () => {
-      invalidateScrollGeneration();
-      disposeScrollResources();
-    };
-  }, [invalidateScrollGeneration, disposeScrollResources]);
-
-  // ── sync URL with session id ──
   useEffect(() => {
     if (!session.sessionId) return;
-    const urlSid = new URLSearchParams(window.location.search).get("session");
-    if (urlSid !== session.sessionId) {
+    const current = new URLSearchParams(window.location.search).get("session");
+    if (current !== session.sessionId) {
       window.history.replaceState({}, "", `/?session=${session.sessionId}`);
     }
   }, [session.sessionId]);
 
-  // ── computed ──
-  const isReady = conn.status === "已连接";
-
   return {
-    // state
-    messages: session.messages,
-    setMessages: session.setMessages,
-    input: session.input,
-    setInput: session.setInput,
     status: conn.status,
-    waiting: session.waiting,
-    setWaiting: session.setWaiting,
+    waiting: processing,
     pendingConfirms: session.pendingConfirms,
     pendingAsks: session.pendingAsks,
-    clearPendingInteractions: session.clearPendingInteractions,
     sessionId: session.sessionId,
     tokenUsage: session.tokenUsage,
     contextTokens: session.contextTokens,
@@ -803,9 +555,7 @@ export function useWebSocket() {
     approvalMode: session.approvalMode,
     approvalModeSyncStatus: session.approvalModeSyncStatus,
     taskProgress: session.taskProgress,
-    setTaskProgress: session.setTaskProgress,
     clipboardDisplays: session.clipboardDisplays,
-    setClipboardDisplays: session.setClipboardDisplays,
     dynamicEndpoints: session.dynamicEndpoints,
     subagentSessions,
     llmMaxContextTokens: llmProfiles.activeProfile?.max_context_tokens ?? 0,
@@ -828,28 +578,24 @@ export function useWebSocket() {
     pendingImages: upload.pendingImages,
     pendingAudios: upload.pendingAudios,
     pendingVideos: upload.pendingVideos,
-    streamingMessage: session.streamingMessage,
     allTags: session.allTags,
     agents: session.agents,
     ignoreStaleRef: session.ignoreStaleRef,
     lastRecvAtRef: conn.lastRecvAtRef,
     lastPongAtRef: conn.lastPongAtRef,
     recvTick: conn.recvTick,
-    // actions
     send,
     handleFileUpload: upload.handleFileUpload,
     handleFileInputChange: upload.handleFileInputChange,
     handleUploadClick: upload.handleUploadClick,
-    addPendingImage: upload.addPendingImage,
     removePendingImage: upload.removePendingImage,
     handlePasteImages: upload.handlePasteImages,
-    addPendingAudio: upload.addPendingAudio,
     removePendingAudio: upload.removePendingAudio,
     handlePasteAudios: upload.handlePasteAudios,
-    addPendingVideo: upload.addPendingVideo,
     removePendingVideo: upload.removePendingVideo,
     handlePasteVideos: upload.handlePasteVideos,
     inputRef: upload.inputRef,
+    fileInputRef: upload.fileInputRef,
     newChat,
     enterColloquy,
     switchSession,
@@ -871,36 +617,20 @@ export function useWebSocket() {
     interrupt,
     disgust,
     resume,
-    toggleMessageCollapse: session.toggleMessageCollapse,
-    editMessage: session.editMessage,
-    deleteMessages: session.deleteMessages,
-    deleteSingleMessage: session.deleteSingleMessage,
-    regenerateResponse: (messageIndex: number) => session.regenerateResponse(messageIndex, llmProfilesRef.current.toProfileName()),
-    updateMessageVisibility: session.updateMessageVisibility,
-    addMessage: session.addMessage,
-    pendingMessages: session.pendingMessages,
+    editMessage,
+    deleteMessages,
+    deleteSingleMessage,
+    regenerateResponse,
+    updateMessageVisibility,
     interruptStatus: session.interruptStatus,
     fetchSessions: session.fetchSessions,
     fetchAllTags: session.fetchAllTags,
-    connect: conn.connect,
     updateSessionTags: session.updateSessionTags,
-    attachScrollListener,
-    scrollToBottomIfAtBottom,
-    scrollToBottomSmooth,
-    // refs
-    wsRef: conn.wsRef,
-    bottomRef,
-    chatAreaRef,
-    contentRef,
-    isAtBottomRef,
-    fileInputRef: upload.fileInputRef,
-    // computed
-    isReady,
+    isReady: conn.status === "已连接",
     sessionLocked: conn.sessionLocked,
     retryConnect: conn.retryConnect,
     sidebarItems: session.sidebarItems,
     expandedClusters: session.expandedClusters,
     toggleCluster: session.toggleCluster,
-    sessionResources: session.sessionResources,
   };
 }

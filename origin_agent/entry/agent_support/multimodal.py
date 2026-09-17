@@ -603,6 +603,16 @@ def blocks_from_dicts(blocks: list[dict[str, Any]]) -> list[MessageBlock]:
     return result
 
 
+def extract_tool_call_meta(
+    content: str | dict[str, Any] | list[MessageBlock],
+) -> dict[str, Any] | None:
+    """读取工具结果内部 ``_meta``，不改变原始 content。"""
+    if not isinstance(content, dict):
+        return None
+    meta = content.get("_meta")
+    return dict(meta) if isinstance(meta, dict) else None
+
+
 def content_to_serializable(content: str | dict[str, Any] | list[MessageBlock]) -> str | dict[str, Any] | list[dict[str, Any]]:
     """将 content 序列化为前端可用的 str | dict | list[dict]，供编辑响应使用。"""
     if isinstance(content, str):

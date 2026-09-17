@@ -173,6 +173,7 @@ export type MessageType =
   | "stream_done"
   | "error"
   | "subagent_update"
+  | "history_sync"
   | "llm_profile_changed"
   | "approval_profile_changed"
   | "handsfree_mode"
@@ -185,6 +186,7 @@ export interface WSMessage {
   content?: MessageContent;
   message?: string;
   tool?: string;
+  tool_call_id?: string;                  // TOOL_CALL / TOOL_RESULT：工具调用 ID
   args?: Record<string, unknown>;
   result?: string;
   request_id?: string;
@@ -205,6 +207,8 @@ export interface WSMessage {
   character_name?: string;
   index?: number;
   client_message_id?: string;
+  message_suffix?: string;                // USER_MESSAGE：持久化上下文扩展块
+  dynamic_message_suffix?: string;        // USER_MESSAGE：当轮动态上下文扩展块
   tool_call_meta?: ToolCallMeta;   // TOOL_RESULT：工具调用时间元信息
   consumed_client_message_ids?: string[];   // TOOL_RESULT：被工具链消费的用户消息 client_message_id 列表（用于移除已排队徽章）
   danger_level?: string;           // CONFIRM_REQUEST：工具危险等级
@@ -219,6 +223,11 @@ export interface WSMessage {
   approval_profile_available?: boolean;     // APPROVAL_PROFILE_CHANGED
   handsfree_mode?: boolean;                  // HANDSFREE_MODE：服务端权威回执（向后兼容）
   approval_mode?: ApprovalMode;             // HANDSFREE_MODE：服务端权威审批模式（manual/handsfree/yolo）
+  history_count?: number;                    // HISTORY_SYNC：当前正典 History 消息数
+  processing?: boolean;                      // HISTORY_SYNC：主会话是否正在处理
+  token_usage?: number;                      // HISTORY_SYNC：累计 token
+  context_tokens?: number;                   // HISTORY_SYNC：当前上下文 token
+  agents?: string[] | null;                  // HISTORY_SYNC：多Agent参与角色
 }
 
 export interface ToolCallMeta {

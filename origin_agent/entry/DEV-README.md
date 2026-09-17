@@ -14,6 +14,7 @@ entry/
 ├── multi_agent_loop.py           ← 多 Agent 广播协作循环
 ├── multi_agent_worker.py         ← 单 Agent tool loop 执行器
 ├── agent_sink.py                 ← AgentSink / FrontendSink / ParentAgentSink
+├── history_projection.py       ← History 到前端骨架/内容页/资源索引的唯一投影层
 ├── session_message_queue.py      ← 主会话逐条 FIFO 消息队列（每条保留 Profile 名称；drain_injected 额外返回 consumed_client_message_ids 供前端移除已排队徽章）
 ├── session_manager.py            ← LoopSessionManager（session 生命周期）
 ├── stream_consumer.py            ← StreamConsumer（LLM 流式响应消费器）
@@ -43,6 +44,7 @@ entry/
   - `ToolContext.resource_session_id`：长期资源归属的主会话 ID；主Agent/参与Agent使用当前主会话，子Agent/临时Agent使用公开 `parent_session_id`。
   - 回复轮次文件锁：`begin_agentspace_round()` / `current_agentspace_round()` / `end_agentspace_round()` 按角色管理唯一 round ID，并在完整回复收尾后幂等释放。
   - 通用持久化方法：`save_history()`、`load_history()`。
+  - 前端 History 只读投影：`get_session_history_skeleton(start_index)`、`get_session_history_page(start_index, limit)`、`get_session_history_resources()`；普通模式、多Agent模式与随意聊聊会话共享实现。子Agent虽继承该能力，但 Gateway 不为子会话暴露对应 REST。
   - Token 统计：`_token_usage`、`_last_prompt_tokens`。
   - Hooks 加载与上下文收集：`_load_message_hooks()`、`_collect_hooks_context()`。
   - 工具集加载状态：`_loaded_toolsets`（会话级已加载工具集名称集合）、`get_loaded_toolsets()`、`is_toolset_loaded()`、`load_toolsets()`、`_restore_loaded_toolsets()`、`_get_effective_tool_definitions()`（按已加载工具集 × scope 动态计算工具 schema）。
@@ -238,11 +240,21 @@ sequenceDiagram
 - `messages_to_text(messages) -> str`：把 `BaseMessage` 列表转换为适合 LLM 阅读的纯文本。
 - `extract_last_rounds(history, rounds) -> list[BaseMessage]`：提取最后 N 轮消息的原始对象。
 
+### `history_projection.py`
+
+- `history_row_id()`：按 History 索引和工具调用子索引生成一个骨架代际内稳定的前端行 ID。
+- `project_history_skeleton()`：生成不含正文和富媒体的全历史骨架或后缀。
+- `project_history_content_rows()`：把一条 History 消息投影为正文行及其工具调用子行。
+- `project_history_resources()`：从完整 History 提取去重后的图片和下载资源索引。
+
+投影是只读视图，不改变 `History` 类型、消息实例或 easysave 存储。工具结果 `_meta` 通过 `agent_support.multimodal.extract_tool_call_meta()` 与旧序列化路径共用口径。
+
 ### `multimodal.py`
 
 - `wrap_forwarded_description()`：用特殊标签包裹转发描述文本。
 - `tool_result_to_content()`：将工具结果转换为 LLM content blocks。
 - `content_to_text()`：将 content blocks 提取为纯文本摘要（用于日志或前端展示）。
+- `extract_tool_call_meta()`：从原生 dict 工具结果只读提取 `_meta` 副本，供旧消息序列化与 History 内容页投影共用。
 - `summarize_message_for_log()`：安全截断消息内容用于日志预览。
 
 ---

@@ -14,6 +14,7 @@ frontend/
 │   ├── types.ts             ← 类型定义
 │   ├── utils.ts             ← 工具函数
 │   ├── declarations.d.ts    ← 全局类型声明
+│   ├── features/chat/          ← 主聊天运行时：骨架、内容页、Virtuoso、Zustand、滚动与遥测
 │   ├── pages/
 │   │   └── Agentspace.tsx   ← Agentspace 页面（文件浏览器）
 │   ├── context/
@@ -53,8 +54,7 @@ frontend/
 │   ├── styles/              ← CSS 样式
 │   └── utils/
 │       ├── agentspacePath.ts ← Agentspace 路径与排序纯函数
-│       ├── toolLabels.ts    ← 工具标签映射
-│       └── exportSession.ts ← 会话导出
+│       └── toolLabels.ts    ← 工具标签映射
 ├── package.json
 ├── vite.config.ts
 ├── tsconfig*.json
@@ -75,6 +75,8 @@ frontend/
   - `remark-gfm`：GitHub 风格 Markdown
   - `react-zoom-pan-pinch`：图片缩放
   - `mermaid`：Mermaid 图表渲染
+  - `react-virtuoso`：主聊天区可变高度虚拟列表
+  - `zustand`：聊天运行时细粒度 selector store
 
 ---
 
@@ -100,8 +102,10 @@ frontend/
 
 | 组件 | 职责 |
 |---|---|
-| `ChatArea.tsx` | 聊天消息滚动区域；通过 `useMessageCharacterHover` 在 `.chat-content` 根节点委托同角色悬停事件，直接维护公开 `data-character-hovered` 属性，避免悬停状态触发历史消息树重渲染 |
-| `MessageItem.tsx` | 单条消息渲染（文本、代码块、图片、工具调用）；通过 `data-character-name` 暴露角色显示名称，主聊天区的事件委托按名称维护同角色联动；子会话抽屉不接入该委托 |
+| `ChatArea.tsx` | 聊天区外层布局宿主；保持 Agent 舞台层、聊天区自定义样式、输入栏和 Minimap 的定位边界，消息序列委托给 `VirtualMessageList` |
+| `features/chat/VirtualMessageList.tsx` | 基于 Virtuoso 渲染完整骨架的可视窗口；正文按页加载，live 尾部独立渲染 |
+| `features/chat/ChatHistoryRow.tsx` | 单行 selector 消费，按 loaded / skeleton / page-error 三态渲染 |
+| `MessageItem.tsx` | 单条消息渲染（文本、代码块、图片、工具调用）；通过 `data-character-name` 暴露角色显示名称，并在用户主动高度操作前通知滚动状态机 |
 | `MessageBody.tsx` | 消息正文 Markdown 渲染 |
 | `MessageEditor.tsx` | 消息编辑器（编辑历史消息） |
 | `MessageAttachments.tsx` | 消息附件展示 |
@@ -113,7 +117,7 @@ frontend/
 | `TokenRing.tsx` | 上下文用量环形徽章（Header 与输入栏共用） |
 | `Lightbox.tsx` | 图片灯箱 |
 | `SafeHtml.tsx` | 安全 HTML 渲染 |
-| `Minimap.tsx` | 小地图导航；消息结构或尺寸变化时测量精确消息块几何，滚动热路径只按滚动容器数据更新视口指示器 |
+| `Minimap.tsx` | 主聊天区使用 Canvas 逻辑 Minimap 映射，将正典骨架与尚未固化的 live 行共同绘制，不测量离屏 DOM；子会话抽屉继续使用局部 DOM 几何模式 |
 | `MentionMenu.tsx` | `@` 提及菜单（文件/skill 列表，Portal 渲染） |
 
 `@` 提及支持通过 `/` 逐级查询工作空间子目录；选择目录会保留输入状态并自动进入该目录，选择文件才会插入不可编辑的引用标签。子目录查询期间候选项暂时为空时，`Enter` 和 `Tab` 也不会发送消息或切走输入焦点。只有输入开头或空白后的 `/` 才触发 skill 菜单，目录路径中的 `/` 会作为路径分隔符保留。
@@ -163,10 +167,13 @@ frontend/
 
 | Hook | 职责 |
 |---|---|
-| `useWebSocket.ts` | WebSocket 与状态管理核心：解析下行消息、管理消息列表、流式渲染、发送上行消息、调用 REST API；每条用户消息携带活动 Profile 名称并处理 `llm_profile_changed`；重新生成请求携带当前 Profile 名称，resume 请求仅恢复当前工具链，不携带也不更新 Profile；会话审批模式仅接受服务端权威值，使用 `loading/ready/unavailable` 同步状态约束徽章和非乐观模式切换；发送时不乐观渲染气泡，改为记录 pending message 供输入栏显示“已排队”徽章；中断为后端权威流程，不再提前显示“已中断”，timeout/failed 后查询服务端真实状态一次 |
+| `useWebSocket.ts` | WebSocket 连接编排与低频会话状态桥接；聊天事件写入 `chatRuntimeStore`，流式增量经 `StreamFrameBuffer` 按动画帧提交；Agent 忙碌时仍允许消息进入后端 FIFO |
+| `features/chat/chatRuntimeStore.ts` | Zustand 聊天运行时唯一高频状态：完整骨架、内容行、live 尾部、输入草稿、pending、滚动与资源 |
+| `features/chat/chatRuntimeController.ts` | History skeleton/page 请求代际、Abort、页去重、正典同步、Minimap 随机目标与资源懒加载 |
+| `features/chat/useChatScrollController.ts` | `initializing/following/detached/minimap_dragging/returning` 五态追底与回底控制 |
 | `useLlmProfiles.ts` | 从服务端读取 Profile；提供单对象创建/编辑/删除；浏览器仅持久化活动 Profile 名称，不保存 Profile 列表 |
 | `useWebSocketConnection.ts` | WebSocket 连接生命周期管理：建立/断开/重连/心跳；消息入口按连接代际和当前 WebSocket 实例丢弃旧连接迟到消息，避免快速切换会话时污染当前状态 |
-| `useSessionStore.ts` | 会话列表与元数据管理：获取/创建/归档/删除/标签/标题；以 `approvalMode` 作为当前会话审批模式的唯一真相源，并维护 `loading/ready/unavailable` 同步状态，切换或新建会话时立即清除旧徽章语义；维护 pending messages 状态（`pendingMessages`），在 `USER_MESSAGE` 回显时渲染正式气泡并移除 pending，在 `TOOL_RESULT` 携带 `consumed_client_message_ids` 时移除匹配 pending，中断/切会话/历史重载时清空 |
+| `useSessionStore.ts` | 会话列表与低频元数据管理：获取/创建/归档/删除/标签/标题；审批模式、任务资源、Shell/Cron 和交互队列；主聊天消息、输入草稿与 pending 已迁移到 chat runtime store |
 | `useSubagentManager.ts` | 子代理状态管理：注册/启动/停止/审批/列表 |
 | `useUploadManager.ts` | 文件上传管理：拖拽上传、进度跟踪、文件选择器 |
 | `useAgentspace.ts` | Agentspace 编辑器状态机：目录展开/选择、版本化标签、SSE 代际、逐文件锁、冲突和垃圾桶 |
@@ -174,7 +181,7 @@ frontend/
 | `useGlobalTooltip.ts` | 全局 tooltip 管理 |
 | `useMessageCharacterHover.ts` | 主聊天区同角色悬停事件委托；直接维护消息公开属性，避免瞬时悬停进入 React 消息状态 |
 | `useSessionSite.ts` | 会话网页状态：探测当前会话 `site/index.html` 并订阅 `site/` 的 Agentspace SSE；部署完成后自动显示右侧入口，资源连续变化时等待 1 秒安静窗口后热刷新，入口文件或目录删除/移走后自动隐藏 |
-| `useSessionStage.ts` | 会话舞台层状态：由 `Layout` 单例探测 `stage/index.html` 并订阅 Agentspace SSE，资源连续变更时等待 1 秒安静窗口后刷新 iframe |
+| `useSessionStage.ts` | 会话舞台层状态：由 `Layout` 单例探测 `stage/index.html` 并订阅 Agentspace SSE；入口文件作为部署提交标记，新内容版本经 1 秒安静窗口后只重建一次 iframe，非入口资源事件和 SSE resync 不重置运行态 |
 | `useSessionChatStyle.ts` | 会话聊天区自定义样式状态：探测 `chat-style/index.css`，经 PostCSS 作用域处理（`@import` 拒绝、`.chat-area` 前缀、`@font-face` 校验 `ChatStyle-` 前缀），SSE 热重载 |
 
 ---
@@ -186,6 +193,30 @@ frontend/
 | `ConnectionDiagnosticsContext.tsx` | 连接诊断上下文：检测 WebSocket 连接状态、延迟、错误信息，为 UI 提供连接健康度反馈 |
 
 ---
+
+## 主聊天历史数据流
+
+- Gateway 通过 `history_sync` 只发送正典 History 元数据；前端 REST 取得全历史骨架和可见范围历史内容页。
+- 全历史骨架始终保留完整逻辑顺序；Virtuoso 只挂载可视区附近行，离屏 iframe、Mermaid 和播放器会卸载并可在滚回时重建。
+- `stream_done` 只冻结 live 行；`history_sync` 后 skeleton 后缀与末尾内容页成功合并，才按 canonical cutoff 清理对应 live 行。
+- 位于底部时被动内容增长继续追底；追底使用 Virtuoso scroller 的物理底部而不是只对齐最后一个正典数据项，因此空骨架的新会话和动态 live Footer 同样有效。用户主动离开底部后不追随。近距离回底平滑，远距离先加载最新页再瞬时定位。
+- 主聊天区逻辑 Minimap 同时绘制正典骨架和当前 live 行；拖动到 live 尾部等价于回到底部。
+- `features/chat/useChatScrollController.ts` 统一从 Virtuoso scroller 采集 `scrollTop`、`scrollHeight`、`clientHeight`，供 Minimap 物理高亮与拖拽使用；拖动期间抑制内容页请求，释放时以最终物理位置反查目标范围。
+- 主聊天区 Minimap 的 Canvas 背景按已测量/骨架估算消息高度加权绘制；高亮和拖拽只使用 scroller 的 `scrollTop` / `scrollHeight` / `clientHeight` 物理指标，估算高度不反向修改 Virtuoso 或追底位置。极薄高亮保持真实比例，另以透明扩展命中区保留可抓取性。子会话 Legacy Minimap 保留原 DOM 几何实现。
+- 资源抽屉使用完整 History 资源索引，不依赖前端已加载正文页。
+- 原“导出会话为 HTML”已移除；虚拟列表不保证浏览器原生查找命中离屏历史。
+
+## 本地性能遥测
+
+顶部栏命令菜单可打开本地性能遥测。默认关闭；开启后只记录批次数、字符数、请求耗时、逻辑范围、追底状态、长任务和 DOM/iframe 数量，最多保留 5000 条事件并导出 JSON，不上传消息正文、附件、工具参数或密钥。关闭时断开全部 observer 和采样 timer。
+
+## 测试入口
+
+- `npm run test:unit`：Vitest 单元测试。
+- `npm run test:chat:e2e`：Playwright 桌面/移动聊天场景。
+- `npm run test:chat`：测试 TypeScript 检查、Vitest 与 Playwright。
+
+以上命令只由用户在运行时 fast仓库前端副本执行，开发助手AI不得在 origin仓库前端目录运行。
 
 ## Agentspace 编辑器行为
 

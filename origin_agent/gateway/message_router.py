@@ -595,6 +595,7 @@ class MessageRouter:
         """
         await self._handle_session_rotation(loop)
         await self._send_token_update(loop)
+        await self._send_history_sync(loop)
         from main import trigger_evolution_shutdown
         trigger_evolution_shutdown()
 
@@ -651,6 +652,34 @@ class MessageRouter:
         if sink is not None:
             await sink.emit_assistant_message(
                 self.sid, reply, loop.current_character_agent,
+            )
+
+    async def _send_history_sync(self, loop: IMainSessionLoop) -> None:
+        """在一轮 History 写入完成后推送正典历史同步元数据。"""
+        agents_info: list[str] | None = None
+        from entry.multi_agent_loop import MultiAgentLoop
+        if isinstance(loop, MultiAgentLoop):
+            agents_info = list(loop._agent_names)
+        try:
+            await self.ws.send_text(
+                json.dumps(
+                    Message(
+                        type=MessageType.HISTORY_SYNC,
+                        session_id=self.sid,
+                        history_count=loop.loop.history.count,
+                        processing=loop.loop.is_processing(),
+                        token_usage=loop.get_token_usage(),
+                        context_tokens=loop.get_context_tokens(),
+                        agents=agents_info,
+                    ).model_dump(exclude_none=True),
+                    ensure_ascii=False,
+                )
+            )
+        except Exception:
+            logger.debug(
+                "Failed to send history_sync for session=%s",
+                self.sid,
+                exc_info=True,
             )
 
     async def _send_token_update(self, loop: IMainSessionLoop) -> None:

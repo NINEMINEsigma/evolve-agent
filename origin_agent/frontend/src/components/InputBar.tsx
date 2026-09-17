@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ChangeEvent, type RefObject } from "react";
+import { useCallback, useEffect, useRef, useState, type ChangeEvent, type RefObject } from "react";
 import RichInput from "./RichInput";
 import TaskProgressPanel from "./TaskProgressPanel";
 import InputMorph, { MorphItem } from "./InputMorph";
@@ -10,6 +10,7 @@ import type { AskRequest, ConfirmRequest, InterruptStatus, SubagentSession, Targ
 import { escapeHtml } from "../utils";
 import { SID_DISPLAY_LEN } from "../constants/session";
 import { DIMENSIONS } from "../constants/dimensions";
+import { useChatRuntimeStore } from "../features/chat/chatRuntimeStore";
 
 // ── 左下功能组按钮间距（CSS .input-bar-actions-left gap 定值） ──
 const ACTIONS_GAP = 6;
@@ -67,15 +68,10 @@ const ICONS = {
 };
 
 interface InputBarProps {
-  input: string;
-  setInput: (v: string) => void;
-  waiting: boolean;
   uploading: boolean;
   archived: boolean;
   hasActiveProfile: boolean;
   sessionId: string;
-  /** 空态（无对话）时隐藏进度条 */
-  chatEmpty: boolean;
   taskProgress: Record<string, TaskProgress>;
   onSend: () => void;
   onUpload: (e: ChangeEvent<HTMLInputElement>) => void;
@@ -112,8 +108,6 @@ interface InputBarProps {
   tokenUsage: number;
   contextTokens: number;
   llmMaxContextTokens: number;
-  // 已排队待确认的消息数（延迟渲染期间显示徽章）
-  pendingMessageCount: number;
 }
 
 // ── 零测量静态判定 hook：按展开态固有宽度（常量）与视口比较，防收起后振荡 ──
@@ -133,13 +127,10 @@ function useActionsCollapsed() {
 }
 
 export default function InputBar({
-  input,
-  setInput,
   uploading,
   archived,
   hasActiveProfile,
   sessionId,
-  chatEmpty,
   taskProgress,
   onSend,
   onUpload,
@@ -173,9 +164,20 @@ export default function InputBar({
   tokenUsage,
   contextTokens,
   llmMaxContextTokens,
-  pendingMessageCount,
 }: InputBarProps) {
-  // ── 变形计算：confirm 队首优先于 ask ──
+  const input = useChatRuntimeStore((state) => state.draftHtml);
+  const inputText = useChatRuntimeStore((state) => state.draftText);
+  const pendingMessageCount = useChatRuntimeStore((state) => Object.keys(state.pendingMessages).length);
+  const chatEmpty = useChatRuntimeStore((state) =>
+    state.skeleton.length === 0 && state.liveRows.length === 0 && !state.processing);
+  const setInput = useCallback((html: string) => {
+    const current = useChatRuntimeStore.getState();
+    current.setDraft(html, current.draftText);
+  }, []);
+  const setInputText = useCallback((text: string) => {
+    const current = useChatRuntimeStore.getState();
+    current.setDraft(current.draftHtml, text);
+  }, []);
   const morphItem: MorphItem | null = pendingConfirms.length > 0
     ? { kind: "confirm", confirm: pendingConfirms[0] }
     : pendingAsks.length > 0
@@ -183,9 +185,6 @@ export default function InputBar({
       : null;
   const morphActive = morphItem !== null;
   const queueExtra = pendingConfirms.length + pendingAsks.length - (morphItem ? 1 : 0);
-
-  // RichInput 的纯文本镜像（html 进 input state，text 供变形提交判断/取值）
-  const [inputText, setInputText] = useState("");
 
   // 草稿暂存：进入变形时清空输入框供回答/理由使用，退出变形（队列排空）时还原；
   // 会话切换时丢弃暂存，防止旧会话草稿还原进新会话
@@ -354,8 +353,7 @@ export default function InputBar({
           ref={inputRef}
           value={input}
           onChange={(html, text) => {
-            setInput(html);
-            setInputText(text);
+            useChatRuntimeStore.getState().setDraft(html, text);
           }}
           onSend={morphActive ? () => {} : onSend}
           onPasteImage={onPasteImage}

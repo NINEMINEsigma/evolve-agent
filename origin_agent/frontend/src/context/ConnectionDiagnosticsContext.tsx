@@ -2,9 +2,7 @@ import React, { createContext, useContext, useEffect, useState } from "react";
 import { TIMING } from "../constants/timing";
 
 export interface ConnectionDiagnostics {
-  waiting?: boolean;
   pendingConfirm?: { request_id: string } | null;
-  streamingMessage?: { id: string } | null;
   ignoreStaleRef?: React.RefObject<boolean>;
   lastRecvAtRef?: React.RefObject<number>;
   lastPongAtRef?: React.RefObject<number>;

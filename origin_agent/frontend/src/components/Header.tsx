@@ -1,12 +1,12 @@
 import { useRef, useState, useEffect } from "react";
 import { useConnectionDiagnostics } from "../context/ConnectionDiagnosticsContext";
 import { useEdgeDrawer } from "../hooks/useEdgeDrawer";
-import { exportSession } from "../utils/exportSession";
 import { COLLOQUY_SID } from "../constants/session";
 import { TIMING } from "../constants/timing";
 import type { LlmProfileManager } from "../hooks/useLlmProfiles";
 import type { ApprovalMode, ApprovalModeSyncStatus } from "../types";
 import TokenRing from "./TokenRing";
+import { useChatRuntimeStore } from "../features/chat/chatRuntimeStore";
 
 interface HeaderProps {
   status: string;
@@ -36,6 +36,7 @@ interface HeaderProps {
   onToggleChatStylePaused: () => void;
   chatStyleStatusText: string;
   onOpenSandboxSpaces: () => void;
+  onOpenPerformanceTelemetry: () => void;
 }
 
 export default function Header({
@@ -65,6 +66,7 @@ export default function Header({
   onToggleChatStylePaused,
   chatStyleStatusText,
   onOpenSandboxSpaces,
+  onOpenPerformanceTelemetry,
 }: HeaderProps) {
   const [cmdMenuOpen, setCmdMenuOpen] = useState(false);
   const [menuPos, setMenuPos] = useState<{ top: number; left: number } | null>(null);
@@ -185,11 +187,11 @@ export default function Header({
                   onClick={() => {
                     setCmdMenuOpen(false);
                     setMenuPos(null);
-                    exportSession(sessionId || "session");
+                    onOpenPerformanceTelemetry();
                   }}
-                  data-tooltip="导出当前会话为可分享的静态 HTML 文件"
+                  data-tooltip="打开本地聊天性能遥测"
                 >
-                  导出会话
+                  性能遥测
                 </div>
                 <div
                   className="context-menu-item"
@@ -292,11 +294,11 @@ export default function Header({
               onClick={() => {
                 setCmdMenuOpen(false);
                 setMenuPos(null);
-                exportSession(sessionId || "session");
+                onOpenPerformanceTelemetry();
               }}
-              data-tooltip="导出当前会话为可分享的静态 HTML 文件"
+              data-tooltip="打开本地聊天性能遥测"
             >
-              导出会话
+              性能遥测
             </div>
             <div
               className="context-menu-item"
@@ -510,14 +512,16 @@ function HeaderPill({
 }
 
 function DebugBadges() {
-  const { waiting, pendingConfirm, streamingMessage, ignoreStaleRef, lastRecvAtRef, lastPongAtRef, recvTick, now } =
+  const { pendingConfirm, ignoreStaleRef, lastRecvAtRef, lastPongAtRef, recvTick, now } =
     useConnectionDiagnostics();
+  const waiting = useChatRuntimeStore((state) => state.processing);
+  const currentStreamId = useChatRuntimeStore((state) => state.currentStreamId);
 
   const lastRecv = lastRecvAtRef?.current ?? now;
   const lastPong = lastPongAtRef?.current ?? now;
   const recvStall = now - lastRecv;
   const pongStall = now - lastPong;
-  const active = waiting || !!streamingMessage;
+  const active = waiting || !!currentStreamId;
   const recvStallThreshold = active ? TIMING.RECV_STALL_ACTIVE : TIMING.RECV_STALL_INACTIVE;
 
   return (
@@ -527,8 +531,8 @@ function DebugBadges() {
           处理中 ⚡
         </span>
       )}
-      {streamingMessage && (
-        <span className="debug-badge ok" title={`stream id=${streamingMessage.id}`}>
+      {currentStreamId && (
+        <span className="debug-badge ok" title={`stream id=${currentStreamId}`}>
           流式 ✍️
         </span>
       )}

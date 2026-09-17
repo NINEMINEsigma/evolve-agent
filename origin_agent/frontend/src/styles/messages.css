@@ -2,6 +2,9 @@
 .message {
   display: flex;
   gap: 10px;
+}
+
+.message-new {
   animation: fadeIn 0.2s ease;
 }
 

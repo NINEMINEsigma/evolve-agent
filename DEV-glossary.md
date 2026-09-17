@@ -221,7 +221,7 @@
 |---|---|---|
 | 应用根组件 | `App` / `ChatApp` | 路由入口；管理 `SplashScreen`、`ChatContextMenu`、`TagEditor` 等顶层覆盖层；外层套 `ErrorBoundary` |
 | 错误边界 | `ErrorBoundary` / `.error-boundary` | 组件渲染异常兜底，显示「界面渲染出错」+ 刷新按钮 |
-| 连接诊断上下文 | `ConnectionDiagnosticsProvider` / `useConnectionDiagnostics` | 全局 Provider，向 `DebugBadges` 等组件提供 WebSocket 连接状态（waiting / pendingConfirm / streamingMessage 等） |
+| 连接诊断上下文 | `ConnectionDiagnosticsProvider` / `useConnectionDiagnostics` | 只提供低频 WebSocket 连接时间戳、接收 tick 与待审批状态；processing/stream ID 由聊天运行时 selector 直接提供 |
 
 文件：`origin_agent/frontend/src/components/SplashScreen.tsx` · `origin_agent/frontend/src/components/SkeletonScreen.tsx`
 
@@ -271,7 +271,7 @@
 | 侧栏开关按钮 | `.sidebar-toggle` | 位于顶部栏左侧，控制左侧导航栏收起/展开 |
 | 会话徽章 | `.session-badge` | 当前会话 ID，≤768px 隐藏 |
 | 调试徽章组 | `DebugBadges` / `.debug-badges` | 连接诊断徽章，≤1100px 隐藏 |
-| 命令菜单 | `.cmd-menu-dropdown`（⋮ 按钮触发） | 导出会话；展开期间钉住顶部抽屉 |
+| 命令菜单 | `.cmd-menu-dropdown`（⋮ 按钮触发） | 本地性能遥测、动态沙盒空间与会话视觉开关；展开期间钉住顶部抽屉 |
 | 状态胶囊 | `HeaderPill` / `.header-pill` | 居中渐变胶囊，hover 展开状态/模型名详情；桌面端渲染于 dock，移动端渲染于中栏 |
 | 脱手模式徽章 | `.approval-model-badge` | 点击切换自动审批 |
 | 令牌徽章 | `.token-badge` | token 统计文本，≤900px 隐藏 |
@@ -310,9 +310,9 @@
 | Mermaid 渲染器 | `MermaidRenderer` | Mermaid 图表渲染；点击放大为灯箱（缩放/平移，react-zoom-pan-pinch） |
 | 安全 HTML | `SafeHtml` | iframe 沙箱渲染 agent 输出的原始 HTML，postMessage 同步高度，避免流式闪烁 |
 | 等高线背景 | `ContourBackground` | 聊天区 canvas 等高线动态背景，受消息内容长度与 seed 影响 |
-| Agent 舞台层 | `AgentStageLayer` / `.agent-stage-layer` | 位于聊天区背景之上、聊天气泡和输入栏之下的会话级渲染层；Agent 通过 `ws:sessions/<session_id>/stage/` 目录写入内容（入口 `index.html`），前端以透明 iframe 渲染；默认 `pointer-events: none` 鼠标穿透；独立于会话网页 `site/` |
+| Agent 舞台层 | `AgentStageLayer` / `.agent-stage-layer` | 位于聊天区背景之上、聊天气泡和输入栏之下的会话级渲染层；Agent 通过 `ws:sessions/<session_id>/stage/` 目录写入内容，`index.html` 作为资源完成后的部署提交标记；前端以透明 iframe 渲染且默认鼠标穿透 |
 | 会话网页 | `SessionSiteDrawer` | 右侧独立抽屉，iframe 加载 `ws:sessions/<session_id>/site/index.html`，用于完整网页预览；仅当前会话已部署 `index.html` 时显示右侧触发按钮；与 Agent 舞台层 `stage/` 分离 |
-| 小地图 | `Minimap` | 聊天区右侧消息流缩略导航，可拖拽跳转；移动端默认折叠 |
+| 小地图 | `Minimap` | 主聊天区按全历史骨架使用逻辑 Minimap 映射并可随机跳转；子会话抽屉保留局部消息 DOM 几何预览；移动端默认折叠 |
 | 回到底部按钮 | `.scroll-to-bottom-btn` | 滚动离开底部时出现的快捷回底按钮 |
 
 ### 输入栏内部组件
@@ -364,6 +364,15 @@
 | 剪贴板面板（旧版） | `ClipboardPanel` / `.clipboard-display-panel` | 与 `UnifiedPanel` 功能重叠的旧版组件，已被 `UnifiedPanel` 替代 |
 
 ---
+
+### 聊天历史与性能
+
+| 规范称谓 | 定义 | 英文锚点 |
+|---|---|---|
+| 全历史骨架 | 会话中全部前端消息行的轻量顺序与角色信息，不含正文或富媒体；不是 `history.es` 的分页存储 | full history skeleton |
+| 历史内容页 | Gateway 按 History 消息索引范围返回的完整前端渲染内容；不改变 `History` 的整体存储 | history content page |
+| 逻辑 Minimap 映射 | 主聊天 Minimap 背景按真实/估算气泡高度显示全历史角色分布，高亮和拖拽以 Virtuoso scroller 的物理滚动指标为权威，不把估算高度用于滚动校正 | logical Minimap mapping |
+| 本地性能遥测 | 用户手动开启、仅在浏览器本地记录并导出技术指标、默认关闭且不上传消息内容的诊断能力 | local performance telemetry |
 
 ## §12 前端会话视觉
 

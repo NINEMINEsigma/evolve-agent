@@ -83,6 +83,74 @@ class SessionInfo(BaseModel):
     """multi loop 时指定的 agents 列表。"""
 
 
+class SessionHistoryRowKind(str, Enum):
+    """前端历史投影行类型。"""
+
+    message = "message"
+    tool_call = "tool_call"
+
+
+class SessionHistorySkeletonRow(BaseModel):
+    row_id: str
+    history_index: int
+    row_kind: SessionHistoryRowKind
+    role: str
+    character_name: str | None = None
+    tool_index: int | None = None
+    is_system_status: bool = False
+
+
+class SessionHistorySkeletonResponse(BaseModel):
+    session_id: str
+    start_index: int
+    history_count: int
+    row_count: int
+    rows: list[SessionHistorySkeletonRow] = Field(default_factory=list)
+
+
+class SessionHistoryContentRow(SessionHistorySkeletonRow):
+    content: str | list[dict[str, Any]]
+    visible_characters: list[str] | None = None
+    response_characters: list[str] | None = None
+    message_suffix: str | None = None
+    dynamic_message_suffix: str | None = None
+    reasoning_content: str | None = None
+    requires_response: bool | None = None
+    tool_name: str | None = None
+    tool_args: dict[str, Any] | None = None
+    tool_args_raw: str | None = None
+    tool_call_meta: dict[str, Any] | None = None
+    metrics: MessageMetrics | None = None
+
+
+class SessionHistoryPageResponse(BaseModel):
+    session_id: str
+    start_index: int
+    end_index: int
+    history_count: int
+    rows: list[SessionHistoryContentRow] = Field(default_factory=list)
+
+
+class SessionHistoryImageResource(BaseModel):
+    resource_id: str
+    url: str
+    alt: str = ""
+
+
+class SessionHistoryDownloadResource(BaseModel):
+    resource_id: str
+    url: str
+    filename: str
+    size: int | None = None
+
+
+class SessionHistoryResourcesResponse(BaseModel):
+    session_id: str
+    history_count: int
+    images: list[SessionHistoryImageResource] = Field(default_factory=list)
+    downloads: list[SessionHistoryDownloadResource] = Field(default_factory=list)
+
+
 # ---------------------------------------------------------------------------
 # Session Message Entry — 前端会话历史展示用的单条消息序列化模型
 # ---------------------------------------------------------------------------

@@ -53,6 +53,8 @@ const MessageItem = memo(function MessageItem({
   waiting,
   agents,
   onToggleMessageVisibility,
+  onUserHeightMutation,
+  animateEntry,
 }: {
   message: ChatMessage;
   archived: boolean;
@@ -68,6 +70,8 @@ const MessageItem = memo(function MessageItem({
   waiting?: boolean;
   agents?: string[];
   onToggleMessageVisibility?: (messageId: string, agentName: string) => void;
+  onUserHeightMutation?: () => void;
+  animateEntry?: boolean;
 }) {
   const m = message;
   const [editing, setEditing] = useState(false);
@@ -118,7 +122,7 @@ const MessageItem = memo(function MessageItem({
 
   return (
     <div
-      className={`message message-${m.role}${streaming ? " message-streaming" : ""}`}
+      className={`message message-${m.role}${streaming ? " message-streaming" : ""}${animateEntry ? " message-new" : ""}`}
       data-message-id={m.id}
       data-chat-scope="message"
       data-message-role={m.role}
@@ -138,13 +142,16 @@ const MessageItem = memo(function MessageItem({
             <button
               type="button"
               className={`tool-call-summary ${toolCollapsed ? "" : "tool-call-summary-open"}`}
-              onClick={() => onToggleCollapse(m.id)}
+              onClick={() => {
+                onUserHeightMutation?.();
+                onToggleCollapse(m.id);
+              }}
             >
               {textContent.length > CONTENT_PREVIEW_LEN ? textContent.slice(0, CONTENT_PREVIEW_LEN) + '...' : textContent}
             </button>
             {!toolCollapsed && (
               <div className={`tool-call-detail message-content-collapsed${m.isError ? " tool-call-detail-error" : ""}`} data-chat-scope="tool-detail" onWheel={handoffWheelAtBoundary}>
-                <MessageBody message={m} onImageClick={onImageClick} />
+                <MessageBody message={m} onImageClick={onImageClick} onUserHeightMutation={onUserHeightMutation} />
                 <MessageAttachments message={m} onImageClick={onImageClick} />
                 {m.toolCallMeta && (
                   <div className="tool-call-meta">
@@ -172,7 +179,7 @@ const MessageItem = memo(function MessageItem({
                 onCancel={() => setEditing(false)}
               />
             ) : (
-              <MessageBody message={m} streaming={streaming} onImageClick={onImageClick} />
+              <MessageBody message={m} streaming={streaming} onImageClick={onImageClick} onUserHeightMutation={onUserHeightMutation} />
             )}
             <MessageAttachments message={m} onImageClick={onImageClick} />
           </div>
@@ -198,7 +205,10 @@ const MessageItem = memo(function MessageItem({
           </span>
           <div className="message-actions">
             {isLong && (
-              <button type="button" onClick={() => onToggleCollapse(m.id)}>
+              <button type="button" onClick={() => {
+                onUserHeightMutation?.();
+                onToggleCollapse(m.id);
+              }}>
                 {collapsed ? "展开" : "收起"}
               </button>
             )}

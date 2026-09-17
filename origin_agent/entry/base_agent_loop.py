@@ -19,7 +19,20 @@ from typing import Any, Awaitable, Callable, ContextManager, TYPE_CHECKING
 
 from pydantic import BaseModel
 
-from entity.puretype import Role, ToolAvailability, SessionMessageEntry, TokenUsageRecord, MessageContent, LLMProfile, MessageMetrics, QueuedMessage, MainSessionInterruptResult
+from entity.puretype import (
+    Role,
+    ToolAvailability,
+    SessionMessageEntry,
+    SessionHistorySkeletonResponse,
+    SessionHistoryPageResponse,
+    SessionHistoryResourcesResponse,
+    TokenUsageRecord,
+    MessageContent,
+    LLMProfile,
+    MessageMetrics,
+    QueuedMessage,
+    MainSessionInterruptResult,
+)
 from entity.messages import (
     History,
     BaseMessage,
@@ -41,7 +54,12 @@ from entry.agent_support.messages import (
     collect_all_hooks_context,
     load_message_hooks,
 )
-from entry.agent_support.multimodal import content_to_text, blocks_from_dicts, content_to_serializable
+from entry.agent_support.multimodal import (
+    content_to_text,
+    blocks_from_dicts,
+    content_to_serializable,
+    extract_tool_call_meta,
+)
 from system.pathutils import find_repo_root
 from system.session_store import SessionStore
 
@@ -248,8 +266,7 @@ def _serialize_message_entry(
     # ToolResultMessage._meta 提取
     tool_call_meta: dict[str, Any] | None = None
     if isinstance(msg, ToolResultMessage):
-        if isinstance(raw_content, dict):
-            tool_call_meta = raw_content.get("_meta")
+        tool_call_meta = extract_tool_call_meta(raw_content)
 
     return SessionMessageEntry(
         role=msg.role.value,
@@ -716,6 +733,89 @@ class BaseAgentLoop(ABC):
                 _serialize_message_entry(msg, index, fallback_character=fallback, metrics=m)
             )
         return result
+
+    def get_session_history_skeleton(
+        self, start_index: int = 0,
+    ) -> SessionHistorySkeletonResponse:
+        """返回从 History 索引开始的全历史骨架后缀。"""
+        from entry.history_projection import project_history_skeleton
+
+        messages = list(self._history.iter_messages())
+        history_count = len(messages)
+        if start_index < 0 or start_index > history_count:
+            raise ValueError("start_index out of range")
+        rows = project_history_skeleton(
+            messages[start_index:],
+            self.current_character_agent,
+            start_index=start_index,
+        )
+        return SessionHistorySkeletonResponse(
+            session_id=self.session_id,
+            start_index=start_index,
+            history_count=history_count,
+            row_count=len(rows),
+            rows=rows,
+        )
+
+    def get_session_history_page(
+        self, start_index: int, limit: int,
+    ) -> SessionHistoryPageResponse:
+        """按 History 索引范围返回完整前端内容行。"""
+        from entry.history_projection import project_history_content_rows
+
+        messages = list(self._history.iter_messages())
+        history_count = len(messages)
+        if start_index < 0:
+            raise ValueError("start_index must be >= 0")
+        if limit < 1:
+            raise ValueError("limit must be >= 1")
+        if start_index >= history_count:
+            return SessionHistoryPageResponse(
+                session_id=self.session_id,
+                start_index=start_index,
+                end_index=start_index,
+                history_count=history_count,
+                rows=[],
+            )
+
+        end_index = min(history_count, start_index + limit)
+        metrics_map: dict[str, dict[str, Any]] = {}
+        if self._session_store is not None:
+            try:
+                metrics_map = self._session_store.read_message_metrics(self.session_id)
+            except Exception:
+                logger.warning(
+                    "Failed to read message metrics for session=%s",
+                    self.session_id,
+                    exc_info=True,
+                )
+        rows = []
+        for history_index in range(start_index, end_index):
+            raw_metrics = metrics_map.get(str(history_index))
+            metrics = MessageMetrics.model_validate(raw_metrics) if raw_metrics else None
+            rows.extend(
+                project_history_content_rows(
+                    messages[history_index],
+                    history_index,
+                    self.current_character_agent,
+                    metrics,
+                )
+            )
+        return SessionHistoryPageResponse(
+            session_id=self.session_id,
+            start_index=start_index,
+            end_index=end_index,
+            history_count=history_count,
+            rows=rows,
+        )
+
+    def get_session_history_resources(self) -> SessionHistoryResourcesResponse:
+        """返回完整 History 的图片与下载资源索引。"""
+        from entry.history_projection import project_history_resources
+
+        return project_history_resources(
+            list(self._history.iter_messages()), self.session_id,
+        )
 
     def edit_session_message(self, index: int, content: str | list[dict[str, Any]] | None = None,
                              visible_characters: list[str] | None = None) -> dict:

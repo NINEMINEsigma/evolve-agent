@@ -75,7 +75,7 @@ WS /ws/chat?resume=<sid>
 - `build_hash`：当前前端构建哈希，变化时前端提示刷新。
 - `server_info`：服务端信息。
 - `handsfree_mode`：每次连接都会主动发送的当前会话权威审批模式，包含兼容布尔字段 `handsfree_mode` 与三态字段 `approval_mode`；新会话和恢复会话行为一致。
-- `session_history`：恢复会话时回放历史消息；其中的审批模式字段仅保留作兼容回放，完整连接同步以独立 `handsfree_mode` 消息为准。
+- `history_sync`：新建/恢复连接以及每轮正典 History 写入完成后发送；顶层携带 `history_count`、`processing`、`token_usage`、`context_tokens` 和可选 `agents`，不携带正文。前端随后通过 History REST 按需加载。
 
 ### 上行消息类型
 
@@ -103,6 +103,7 @@ WS /ws/chat?resume=<sid>
 | `task_progress` | 任务进度更新 |
 | `clipboard_display` | 剪贴板展示更新 |
 | `subagent_update` | 子会话状态更新 |
+| `history_sync` | 正典历史同步元数据；正文通过 REST 加载 |
 | `llm_profile_changed` | Profile 重命名/删除通知；顶层携带 `operation`、`old_name`、`new_name` |
 | `confirm_request` | 请求用户审批 |
 | `ask_request` | 请求用户回答 |
@@ -128,6 +129,16 @@ WS /ws/chat?resume=<sid>
 | POST | `/api/sessions/{id}/branch` | 从会话创建分支 |
 | POST | `/api/sessions/merge` | 合并多个已归档会话 |
 | DELETE | `/api/sessions/{id}` | 删除会话 |
+
+### 聊天 History 按需读取
+
+| 方法 | 端点 | 说明 |
+|------|------|------|
+| GET | `/api/sessions/{id}/history/skeleton?start_index=` | 返回全历史骨架或 append-only 后缀，不含正文 |
+| GET | `/api/sessions/{id}/history/page?start_index=&limit=` | 按 History 消息索引范围返回完整前端投影行 |
+| GET | `/api/sessions/{id}/history/resources` | 返回完整 History 的图片与下载资源索引 |
+
+骨架与历史内容页只是 Gateway 读取视图，不改变 `History` / `history.es` 整体存储。编辑、按轮删除、单条删除和重新生成在 Agent 处理期间统一返回 HTTP 409；结构修改后前端取消旧页请求并重取骨架。
 
 ### 消息编辑
 

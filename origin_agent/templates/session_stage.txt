@@ -36,6 +36,16 @@ ws:sessions/{{session_id}}/stage/
 
 Reference them with relative paths in your HTML/CSS/JS (e.g. `assets/sprite.png`).
 
+## Deployment commit rule
+
+The host treats `stage/index.html` as the deployment commit marker. When creating or updating a stage:
+
+1. Write or replace all files under `assets/` first.
+2. Write, patch, or replace `stage/index.html` **last**, after every referenced resource is complete.
+3. Do not continuously rewrite `index.html` for runtime state, counters, animation frames, or heartbeat data. Keep runtime state inside the already loaded page.
+
+Changes to non-entry resources do not recreate the running iframe by themselves. A new `index.html` content version commits the completed deployment and causes one debounced iframe reload. This prevents multi-file deployments or frequently changing data files from repeatedly resetting long-running animation state.
+
 ## Mouse interaction
 
 The stage layer has `pointer-events: none` by default — it does **not** receive clicks, drags, hover, or mouse move events. Your stage content must be driven by:

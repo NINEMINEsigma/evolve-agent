@@ -1,13 +1,36 @@
-import { useEffect, useRef, useState, useCallback } from "react";
-import { ChatMessage } from "../types";
+import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from "react";
+import type { ChatMessage } from "../types";
 import { DIMENSIONS } from "../constants/dimensions";
+import { useChatRuntimeStore } from "../features/chat/chatRuntimeStore";
+import {
+  MINIMAP_THUMB_MIN_HIT_PX,
+} from "../constants/history";
+import {
+  buildHeightWeightedSegments,
+  minimapDragTarget,
+  minimapHitGeometry,
+  minimapViewportGeometry,
+} from "../features/chat/minimapGeometry";
 
-interface MinimapProps {
-  messages: ChatMessage[];
-  chatAreaRef: React.RefObject<HTMLDivElement | null>;
+interface LogicalMinimapProps {
+  onDragStart: () => void;
+  onPreviewScrollTop: (scrollTop: number) => void;
+  onDragEnd: (scrollTop: number) => void | Promise<void>;
+  messages?: never;
+  chatAreaRef?: never;
 }
 
-interface MinimapBlock {
+interface LegacyMinimapProps {
+  messages: ChatMessage[];
+  chatAreaRef: RefObject<HTMLDivElement | null>;
+  onDragStart?: never;
+  onPreviewScrollTop?: never;
+  onDragEnd?: never;
+}
+
+type MinimapProps = LogicalMinimapProps | LegacyMinimapProps;
+
+interface LegacyBlock {
   id: string;
   top: number;
   height: number;
@@ -22,216 +45,279 @@ const ROLE_COLORS: Record<string, string> = {
   tool: "#b45309",
 };
 
-const GEOMETRY_EPSILON = 0.1;
+export function minimapIndexFromRatio(ratio: number, rowCount: number): number {
+  if (rowCount <= 0) return 0;
+  const normalized = Math.max(0, Math.min(1, ratio));
+  return Math.min(rowCount - 1, Math.floor(normalized * rowCount));
+}
 
-function blocksEqual(previous: MinimapBlock[], next: MinimapBlock[]): boolean {
-  if (previous.length !== next.length) return false;
-  return previous.every((block, index) => {
-    const candidate = next[index];
-    return block.id === candidate.id
-      && block.color === candidate.color
-      && Math.abs(block.top - candidate.top) < GEOMETRY_EPSILON
-      && Math.abs(block.height - candidate.height) < GEOMETRY_EPSILON;
+export function minimapRoleBuckets(roles: string[], bucketCount: number): string[] {
+  if (!roles.length || bucketCount <= 0) return [];
+  return Array.from({ length: bucketCount }, (_, bucket) => {
+    const start = Math.floor((bucket / bucketCount) * roles.length);
+    const end = Math.max(start + 1, Math.floor(((bucket + 1) / bucketCount) * roles.length));
+    const counts: Record<string, number> = {};
+    for (let index = start; index < Math.min(end, roles.length); index += 1) {
+      counts[roles[index]] = (counts[roles[index]] || 0) + 1;
+    }
+    return Object.entries(counts).sort((a, b) => b[1] - a[1])[0]?.[0] || "system";
   });
 }
 
-function viewportEqual(
-  previous: { top: number; height: number },
-  next: { top: number; height: number },
-): boolean {
-  return Math.abs(previous.top - next.top) < GEOMETRY_EPSILON
-    && Math.abs(previous.height - next.height) < GEOMETRY_EPSILON;
-}
-
-export default function Minimap({ messages, chatAreaRef }: MinimapProps) {
-  const [blocks, setBlocks] = useState<MinimapBlock[]>([]);
-  const [viewport, setViewport] = useState({ top: 0, height: 0 });
-  const [minimapHeight, setMinimapHeight] = useState(0);
-  const minimapRef = useRef<HTMLDivElement>(null);
+function LogicalMinimap({ onDragStart, onPreviewScrollTop, onDragEnd }: LogicalMinimapProps) {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const rootRef = useRef<HTMLDivElement>(null);
+  const frameRef = useRef<number | null>(null);
   const draggingRef = useRef(false);
-  const blocksRef = useRef<MinimapBlock[]>([]);
-  const viewportRef = useRef({ top: 0, height: 0 });
-  const minimapHeightRef = useRef(0);
-  const layoutFrameRef = useRef<number | null>(null);
-  const viewportFrameRef = useRef<number | null>(null);
-
-  const refreshViewport = useCallback(() => {
-    const chat = chatAreaRef.current;
-    if (!chat) return;
-
-    const scrollHeight = chat.scrollHeight;
-    const clientHeight = chat.clientHeight;
-    const scale = scrollHeight > 0 ? clientHeight / scrollHeight : 0;
-    const nextViewport = scrollHeight > 0
-      ? {
-          top: (chat.scrollTop / scrollHeight) * clientHeight,
-          height: Math.max(clientHeight * scale, DIMENSIONS.MINIMAP_MIN_HEIGHT),
-        }
-      : { top: 0, height: 0 };
-
-    if (minimapHeightRef.current !== clientHeight) {
-      minimapHeightRef.current = clientHeight;
-      setMinimapHeight(clientHeight);
-    }
-    if (!viewportEqual(viewportRef.current, nextViewport)) {
-      viewportRef.current = nextViewport;
-      setViewport(nextViewport);
-    }
-  }, [chatAreaRef]);
-
-  const measureLayout = useCallback(() => {
-    const chat = chatAreaRef.current;
-    if (!chat) return;
-
-    const msgEls = chat.querySelectorAll<HTMLElement>(".message");
-    const scrollHeight = chat.scrollHeight;
-    const clientHeight = chat.clientHeight;
-    const nextBlocks: MinimapBlock[] = [];
-
-    if (scrollHeight > 0) {
-      msgEls.forEach((el) => {
-        const id = el.getAttribute("data-message-id");
-        if (!id) return;
-        const top = (el.offsetTop / scrollHeight) * clientHeight;
-        const height = Math.max((el.offsetHeight / scrollHeight) * clientHeight, 2);
-        const role = el.classList.contains("message-user")
-          ? "user"
-          : el.classList.contains("message-assistant")
-            ? "assistant"
-            : el.classList.contains("message-error")
-              ? "error"
-              : el.classList.contains("message-tool")
-                ? "tool"
-                : "system";
-        nextBlocks.push({
-          id,
-          top,
-          height,
-          color: ROLE_COLORS[role] || ROLE_COLORS.system,
-        });
-      });
-    }
-
-    if (!blocksEqual(blocksRef.current, nextBlocks)) {
-      blocksRef.current = nextBlocks;
-      setBlocks(nextBlocks);
-    }
-    refreshViewport();
-  }, [chatAreaRef, refreshViewport]);
-
-  const scheduleViewportRefresh = useCallback(() => {
-    if (viewportFrameRef.current !== null) return;
-    viewportFrameRef.current = requestAnimationFrame(() => {
-      viewportFrameRef.current = null;
-      refreshViewport();
-    });
-  }, [refreshViewport]);
-
-  const scheduleLayoutMeasure = useCallback(() => {
-    if (layoutFrameRef.current !== null) return;
-    layoutFrameRef.current = requestAnimationFrame(() => {
-      layoutFrameRef.current = null;
-      measureLayout();
-    });
-  }, [measureLayout]);
+  const pointerIdRef = useRef<number | null>(null);
+  const [dragging, setDragging] = useState(false);
+  const grabOffsetRef = useRef(0);
+  const targetScrollTopRef = useRef(0);
+  const [height, setHeight] = useState(0);
+  const sessionGeneration = useChatRuntimeStore((state) => state.generation);
+  const skeleton = useChatRuntimeStore((state) => state.skeleton);
+  const liveRows = useChatRuntimeStore((state) => state.liveRows);
+  const rowHeights = useChatRuntimeStore((state) => state.rowHeights);
+  const scrollMetrics = useChatRuntimeStore((state) => state.scrollMetrics);
+  // 流式增量只改变正文；未改变行 ID/Role 时无需重算整份历史权重。
+  const liveOutlineKey = liveRows.map((row) => `${row.id}:${row.message.role}`).join("|");
+  const segments = useMemo(
+    () => buildHeightWeightedSegments(skeleton, liveRows, rowHeights),
+    // liveRows 的完整对象只在行身份或角色变化时影响权重，其余由 rowHeights 更新。
+    [skeleton, rowHeights, liveOutlineKey],
+  );
+  const hasLogicalRows = segments.length > 0;
+  const viewport = minimapViewportGeometry(scrollMetrics, height);
+  const hitGeometry = minimapHitGeometry(viewport, height, MINIMAP_THUMB_MIN_HIT_PX);
 
   useEffect(() => {
-    const chat = chatAreaRef.current;
-    if (!chat) return;
-
-    scheduleLayoutMeasure();
-    chat.addEventListener("scroll", scheduleViewportRefresh, { passive: true });
-
-    let resizeObserver: ResizeObserver | null = null;
-    let resizeFallback: (() => void) | null = null;
-    if (typeof ResizeObserver !== "undefined") {
-      resizeObserver = new ResizeObserver(scheduleLayoutMeasure);
-      resizeObserver.observe(chat);
-      const content = chat.querySelector<HTMLElement>(".chat-content");
-      if (content) resizeObserver.observe(content);
-    } else {
-      resizeFallback = scheduleLayoutMeasure;
-      window.addEventListener("resize", resizeFallback);
+    draggingRef.current = false;
+    setDragging(false);
+    if (frameRef.current !== null) {
+      cancelAnimationFrame(frameRef.current);
+      frameRef.current = null;
     }
-
-    return () => {
-      chat.removeEventListener("scroll", scheduleViewportRefresh);
-      resizeObserver?.disconnect();
-      if (resizeFallback) window.removeEventListener("resize", resizeFallback);
-      if (layoutFrameRef.current !== null) {
-        cancelAnimationFrame(layoutFrameRef.current);
-        layoutFrameRef.current = null;
-      }
-      if (viewportFrameRef.current !== null) {
-        cancelAnimationFrame(viewportFrameRef.current);
-        viewportFrameRef.current = null;
-      }
-    };
-  }, [chatAreaRef, scheduleLayoutMeasure, scheduleViewportRefresh]);
+    const root = rootRef.current;
+    const pointerId = pointerIdRef.current;
+    if (root && pointerId !== null && root.hasPointerCapture(pointerId)) {
+      root.releasePointerCapture(pointerId);
+    }
+    pointerIdRef.current = null;
+  }, [sessionGeneration]);
 
   useEffect(() => {
-    scheduleLayoutMeasure();
-  }, [messages, scheduleLayoutMeasure]);
+    const root = rootRef.current;
+    if (!root) return;
+    const update = () => setHeight(root.clientHeight);
+    update();
+    const observer = new ResizeObserver(update);
+    observer.observe(root);
+    return () => observer.disconnect();
+  }, [hasLogicalRows]);
 
-  const handlePointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
-    const chat = chatAreaRef.current;
-    const minimap = minimapRef.current;
-    if (!chat || !minimap || minimapHeight === 0) return;
-    e.preventDefault();
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas || height <= 0 || segments.length === 0) return;
+    const width = canvas.clientWidth;
+    const dpr = window.devicePixelRatio || 1;
+    canvas.width = Math.max(1, Math.round(width * dpr));
+    canvas.height = Math.max(1, Math.round(height * dpr));
+    const context = canvas.getContext("2d");
+    if (!context) return;
+    context.setTransform(dpr, 0, 0, dpr, 0, 0);
+    context.clearRect(0, 0, width, height);
+    context.globalAlpha = 0.55;
+    const buckets = Math.max(1, Math.floor(height));
+    let segmentIndex = 0;
+    for (let bucket = 0; bucket < buckets; bucket += 1) {
+      const ratio = (bucket + 0.5) / buckets;
+      while (
+        segmentIndex < segments.length - 1
+        && segments[segmentIndex].endRatio < ratio
+      ) segmentIndex += 1;
+      const role = segments[segmentIndex]?.role || "system";
+      context.fillStyle = ROLE_COLORS[role] || ROLE_COLORS.system;
+      context.fillRect(6, bucket, Math.max(1, width - 12), 1);
+    }
+  }, [height, segments]);
+
+  const targetFromPointer = useCallback((clientY: number): number => {
+    const root = rootRef.current;
+    if (!root || height <= 0 || scrollMetrics.scrollHeight <= 0) return 0;
+    return minimapDragTarget(
+      clientY,
+      root.getBoundingClientRect().top,
+      height,
+      viewport,
+      grabOffsetRef.current,
+      scrollMetrics,
+    ).scrollTop;
+  }, [height, scrollMetrics, viewport]);
+
+  const handlePointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
+    const root = rootRef.current;
+    if (
+      !root || !hasLogicalRows || height <= 0
+      || !Number.isFinite(scrollMetrics.scrollHeight)
+      || !Number.isFinite(scrollMetrics.viewportHeight)
+      || scrollMetrics.viewportHeight <= 0
+      || scrollMetrics.scrollHeight < scrollMetrics.viewportHeight
+    ) return;
+    event.preventDefault();
+    const pointerY = event.clientY - root.getBoundingClientRect().top;
+    const insideHit = pointerY >= hitGeometry.top
+      && pointerY <= hitGeometry.top + hitGeometry.height;
+    grabOffsetRef.current = insideHit
+      ? viewport.height < hitGeometry.height
+        ? viewport.height / 2
+        : pointerY - viewport.top
+      : viewport.height / 2;
     draggingRef.current = true;
-
-    const rect = minimap.getBoundingClientRect();
-    const clickY = e.clientY - rect.top;
-    const ratio = Math.max(0, Math.min(1, clickY / minimapHeight));
-    chat.scrollTop = ratio * chat.scrollHeight;
-
-    const handleMove = (ev: PointerEvent) => {
-      if (!draggingRef.current) return;
-      const moveRect = minimap.getBoundingClientRect();
-      const moveY = ev.clientY - moveRect.top;
-      const moveRatio = Math.max(0, Math.min(1, moveY / minimapHeight));
-      chat.scrollTop = moveRatio * chat.scrollHeight;
-    };
-
-    const handleUp = () => {
-      draggingRef.current = false;
-      window.removeEventListener("pointermove", handleMove);
-      window.removeEventListener("pointerup", handleUp);
-    };
-
-    window.addEventListener("pointermove", handleMove);
-    window.addEventListener("pointerup", handleUp);
+    setDragging(true);
+    pointerIdRef.current = event.pointerId;
+    event.currentTarget.setPointerCapture(event.pointerId);
+    onDragStart();
+    const target = targetFromPointer(event.clientY);
+    targetScrollTopRef.current = target;
+    onPreviewScrollTop(target);
+  };
+  const handlePointerMove = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (!draggingRef.current || pointerIdRef.current !== event.pointerId) return;
+    const target = targetFromPointer(event.clientY);
+    targetScrollTopRef.current = target;
+    if (frameRef.current !== null) cancelAnimationFrame(frameRef.current);
+    frameRef.current = requestAnimationFrame(() => {
+      frameRef.current = null;
+      onPreviewScrollTop(target);
+    });
+  };
+  const finishDrag = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (!draggingRef.current || pointerIdRef.current !== event.pointerId) return;
+    draggingRef.current = false;
+    pointerIdRef.current = null;
+    setDragging(false);
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+    if (frameRef.current !== null) cancelAnimationFrame(frameRef.current);
+    frameRef.current = null;
+    const target = targetFromPointer(event.clientY);
+    targetScrollTopRef.current = target;
+    void onDragEnd(targetScrollTopRef.current);
   };
 
-  if (messages.length === 0) return null;
-
+  if (!hasLogicalRows) return null;
   return (
-    <div ref={minimapRef} className="minimap" onPointerDown={handlePointerDown}>
+    <div ref={rootRef} className={`minimap${dragging ? " minimap-dragging" : ""}`} onPointerDown={handlePointerDown} onPointerMove={handlePointerMove} onPointerUp={finishDrag} onPointerCancel={finishDrag}>
+      <canvas ref={canvasRef} className="minimap-canvas" />
+      <div className="minimap-dim-top" style={{ height: viewport.top }} />
+      <div className="minimap-dim-bottom" style={{ top: viewport.top + viewport.height }} />
+      <div className="minimap-viewport" style={{ top: viewport.top, height: viewport.height }} />
+    </div>
+  );
+}
+
+function LegacyMinimap({ messages, chatAreaRef }: LegacyMinimapProps) {
+  const [blocks, setBlocks] = useState<LegacyBlock[]>([]);
+  const [viewport, setViewport] = useState({ top: 0, height: 0 });
+  const [height, setHeight] = useState(0);
+  const rootRef = useRef<HTMLDivElement>(null);
+  const frameRef = useRef<number | null>(null);
+  const draggingRef = useRef(false);
+
+  const measure = useCallback(() => {
+    const chat = chatAreaRef.current;
+    if (!chat) return;
+    const scrollHeight = Math.max(1, chat.scrollHeight);
+    const clientHeight = chat.clientHeight;
+    setHeight(clientHeight);
+    setBlocks(Array.from(chat.querySelectorAll<HTMLElement>(".message")).map((element) => {
+      const role = element.classList.contains("message-user") ? "user"
+        : element.classList.contains("message-assistant") ? "assistant"
+          : element.classList.contains("message-tool") ? "tool"
+            : element.classList.contains("message-error") ? "error" : "system";
+      return {
+        id: element.dataset.messageId || String(element.offsetTop),
+        top: element.offsetTop / scrollHeight * clientHeight,
+        height: Math.max(2, element.offsetHeight / scrollHeight * clientHeight),
+        color: ROLE_COLORS[role],
+      };
+    }));
+    setViewport({
+      top: chat.scrollTop / scrollHeight * clientHeight,
+      height: Math.max(clientHeight * clientHeight / scrollHeight, DIMENSIONS.MINIMAP_MIN_HEIGHT),
+    });
+  }, [chatAreaRef]);
+
+  useEffect(() => {
+    const chat = chatAreaRef.current;
+    if (!chat) return;
+    const schedule = () => {
+      if (frameRef.current !== null) return;
+      frameRef.current = requestAnimationFrame(() => { frameRef.current = null; measure(); });
+    };
+    schedule();
+    chat.addEventListener("scroll", schedule, { passive: true });
+    const observer = new ResizeObserver(schedule);
+    observer.observe(chat);
+    const content = chat.querySelector<HTMLElement>(".chat-content");
+    if (content) observer.observe(content);
+    return () => {
+      chat.removeEventListener("scroll", schedule);
+      observer.disconnect();
+      if (frameRef.current !== null) cancelAnimationFrame(frameRef.current);
+    };
+  }, [chatAreaRef, measure, messages]);
+
+  if (!messages.length) return null;
+  const jump = (clientY: number) => {
+    const root = rootRef.current;
+    const chat = chatAreaRef.current;
+    if (!root || !chat || height <= 0) return;
+    const ratio = Math.max(0, Math.min(1, (clientY - root.getBoundingClientRect().top) / height));
+    chat.scrollTop = ratio * chat.scrollHeight;
+  };
+  return (
+    <div
+      ref={rootRef}
+      className="minimap"
+      onPointerDown={(event) => {
+        draggingRef.current = true;
+        event.currentTarget.setPointerCapture(event.pointerId);
+        jump(event.clientY);
+      }}
+      onPointerMove={(event) => { if (draggingRef.current) jump(event.clientY); }}
+      onPointerUp={() => { draggingRef.current = false; }}
+      onPointerCancel={() => { draggingRef.current = false; }}
+    >
       <div className="minimap-track">
-        {blocks.map((b) => (
-          <div
-            key={b.id}
-            className="minimap-block"
-            style={{
-              top: b.top,
-              height: b.height,
-              backgroundColor: b.color,
-            }}
-          />
-        ))}
+        {blocks.map((block) => <div key={block.id} className="minimap-block" style={{ top: block.top, height: block.height, backgroundColor: block.color }} />)}
       </div>
       <div className="minimap-dim-top" style={{ height: viewport.top }} />
-      <div
-        className="minimap-dim-bottom"
-        style={{ top: viewport.top + viewport.height }}
-      />
-      <div
-        className="minimap-viewport"
-        style={{
-          top: viewport.top,
-          height: viewport.height,
-        }}
-      />
+      <div className="minimap-dim-bottom" style={{ top: viewport.top + viewport.height }} />
+      <div className="minimap-viewport" style={{ top: viewport.top, height: viewport.height }} />
     </div>
+  );
+}
+
+function isLegacyMinimapProps(props: MinimapProps): props is LegacyMinimapProps {
+  return Array.isArray(props.messages);
+}
+
+export default function Minimap(props: MinimapProps) {
+  if (isLegacyMinimapProps(props)) {
+    return (
+      <LegacyMinimap
+        messages={props.messages}
+        chatAreaRef={props.chatAreaRef}
+      />
+    );
+  }
+  return (
+    <LogicalMinimap
+      onDragStart={props.onDragStart}
+      onPreviewScrollTop={props.onPreviewScrollTop}
+      onDragEnd={props.onDragEnd}
+    />
   );
 }
