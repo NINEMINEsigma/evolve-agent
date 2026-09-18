@@ -45,7 +45,7 @@ gateway/
 | `FILE_UPLOAD` | `handle_file_upload` | 文件上传：硬链接优先 → 复制 fallback → base64 解码 |
 | `HANDSFREE_MODE` | `handle_handsfree_mode` | 切换脱手/免审批模式 |
 | `PING` | `handle_ping` | 心跳响应 |
-| `SYSTEM` | `handle_system_message` | 系统消息（仅记录日志） |
+| `SYSTEM` | `handle_system_message` | 系统消息（仅记录日志；多模态块使用占位符，不改变既有无截断约定） |
 | 其他 | `handle_unsupported` | 不支持的消息类型 |
 
 **`handle_user_message` 子流程**：

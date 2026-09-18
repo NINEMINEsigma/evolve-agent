@@ -255,7 +255,7 @@ sequenceDiagram
 - `tool_result_to_content()`：将工具结果转换为 LLM content blocks。
 - `content_to_text()`：将 content blocks 提取为纯文本摘要（用于日志或前端展示）。
 - `extract_tool_call_meta()`：从原生 dict 工具结果只读提取 `_meta` 副本，供旧消息序列化与 History 内容页投影共用。
-- `summarize_message_for_log()`：安全截断消息内容用于日志预览。
+- `summarize_message_for_log()`：独立的日志安全视图，支持内存态/序列化态块及单个 dict 块；图片、音频、视频替换为占位符，未知块不输出载荷。默认预览上限为 300 字符；原本不限长的日志入口可传 `max_text_len=None`。不修改 `content_to_text()` 的前端展示行为。
 
 ---
 

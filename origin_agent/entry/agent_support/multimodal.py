@@ -515,14 +515,43 @@ def content_to_text(content: MessageContent|dict[str, Any]|list[MessageBlock]|No
         return "\n".join(parts)
 
 
-def summarize_message_for_log(content: MessageContent|list[MessageBlock]|None, max_text_len: int = 300) -> str:
-    """将消息（纯文本或多模态 blocks）转为适合日志的短字符串。
+def content_to_log_text(content: MessageContent | dict[str, Any] | list[MessageBlock] | None) -> str:
+    """仅供日志使用的多模态文本视图；不改变前端或 LLM 的内容转换。"""
+    if content is None or isinstance(content, str):
+        return content_to_text(content)
 
-    同时接受内存态（list[MessageBlock]）与序列化态（MessageContent 的 list[dict]）内容。
-    图片 block 会被替换为 [image_url] 占位符，避免 base64 撑爆日志。
+    blocks = content if isinstance(content, list) else [content]
+    parts: list[str] = []
+    for block in blocks:
+        if isinstance(block, (TextBlock, ImageBlock, AudioBlock, VideoBlock)):
+            parts.append(content_to_text([block]))
+        elif isinstance(block, dict):
+            btype = block.get("type")
+            if btype == "text":
+                parts.append(_strip_internal_fields(str(block.get("text", ""))))
+            elif btype == "image_url":
+                parts.append("[image]")
+            elif btype == "input_audio":
+                parts.append("[audio]")
+            elif btype == "video_url":
+                parts.append("[video]")
+            else:
+                parts.append("[unknown block]")
+        else:
+            parts.append("[unknown block]")
+    return "\n".join(parts)
+
+
+def summarize_message_for_log(
+    content: MessageContent | dict[str, Any] | list[MessageBlock] | None,
+    max_text_len: int | None = 300,
+) -> str:
+    """以占位符记录多模态块；默认保留原有的 300 字符预览长度。
+
+    max_text_len=None 供原本没有字符限制的日志入口使用。
     """
-    summary = content_to_text(content)
-    if len(summary) <= max_text_len:
+    summary = content_to_log_text(content)
+    if max_text_len is None or len(summary) <= max_text_len:
         return summary
     return summary[:max_text_len] + "..."
 

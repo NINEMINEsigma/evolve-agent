@@ -34,6 +34,7 @@ from fastapi import WebSocket
 from .chat import Message, MessageType
 from entity.constant import UPLOAD_FILENAME_TIME_FORMAT, UPLOADS_DIR_NAME, UPLOADS_WS_PREFIX, USER_CHARACTER_NAME
 from entity.puretype import SessionInfo, SessionStatus, ClientInfo, MessageContent
+from entry.agent_support.multimodal import summarize_message_for_log
 
 if TYPE_CHECKING:
     from entry.parent_agent_loop import ParentAgentLoop
@@ -501,7 +502,10 @@ class MessageRouter:
 
     async def handle_system_message(self, msg: Message) -> None:
         """处理系统消息（仅记录日志）。"""
-        logger.info("System message from session=%s: %s", self.sid, msg.content)
+        logger.info(
+            "System message from session=%s: %s",
+            self.sid, summarize_message_for_log(msg.content, max_text_len=None),
+        )
 
     async def handle_unsupported(self, msg: Message) -> None:
         """处理不支持的消息类型。"""
