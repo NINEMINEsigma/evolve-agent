@@ -30,6 +30,7 @@ from entity.constant import (
 )
 from entry.base_agent_loop import BaseAgentLoop, IMainSessionLoop, ToolContext
 from entry.stream_consumer import StreamConsumer
+from entry.stream_history_link import emit_stream_history_link
 from entry.tool_executor import ToolExecutor, _interrupted_result
 from entry.agent_support.multimodal import preprocess_multimodal_blocks
 import asyncio
@@ -339,6 +340,9 @@ class MultiAgentWorker:
                 )
                 msg_index = self._loop.loop.history.add_message(assistant_msg)
                 self._loop.loop.save_history(self._loop.loop.session_id)
+                await emit_stream_history_link(
+                    self._sink, self._loop.loop.session_id, stream_id, msg_index,
+                )
                 if resp.metrics:
                     self._collected_metrics.append((self._loop.loop.session_id, msg_index, resp.metrics))
 

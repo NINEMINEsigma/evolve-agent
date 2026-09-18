@@ -5,7 +5,7 @@ import { useChatRuntimeStore } from "./chatRuntimeStore";
 
 class ChatRuntimeController {
   private controllers = new Set<AbortController>();
-  private pageRequests = new Map<string, Promise<void>>();
+  private pageRequests = new Map<string, { promise: Promise<void>; canonicalCutoff?: number }>();
 
   beginSession(sessionId: string): void {
     this.abortAll();
@@ -105,6 +105,7 @@ class ChatRuntimeController {
           generation,
           Math.max(0, historyCount - HISTORY_PAGE_SIZE),
           HISTORY_PAGE_SIZE,
+          cutoff,
         );
         const verified = useChatRuntimeStore.getState();
         const tailStart = Math.max(0, historyCount - HISTORY_PAGE_SIZE);
@@ -182,11 +183,20 @@ class ChatRuntimeController {
     generation: number,
     startIndex: number,
     limit: number,
+    canonicalCutoff?: number,
   ): Promise<void> {
     const key = `${sessionId}:${generation}:${startIndex}:${limit}`;
     const existing = this.pageRequests.get(key);
-    if (existing) return existing;
-    const promise = this.withController((signal) =>
+    if (existing) {
+      if (canonicalCutoff !== undefined) {
+        existing.canonicalCutoff = Math.max(existing.canonicalCutoff ?? 0, canonicalCutoff);
+      }
+      return existing.promise;
+    }
+    const request: { promise: Promise<void>; canonicalCutoff?: number } = {
+      promise: Promise.resolve(), canonicalCutoff,
+    };
+    request.promise = this.withController((signal) =>
       fetchHistoryPage(sessionId, startIndex, limit, signal))
       .then((page) => {
         if (!this.isCurrent(sessionId, generation)) return;
@@ -194,6 +204,7 @@ class ChatRuntimeController {
           page.rows.map(historyContentRowToChatMessage),
           page.start_index,
           page.end_index,
+          request.canonicalCutoff,
         );
       })
       .catch((error) => {
@@ -206,9 +217,11 @@ class ChatRuntimeController {
           retryable: true,
         });
       })
-      .finally(() => this.pageRequests.delete(key));
-    this.pageRequests.set(key, promise);
-    return promise;
+      .finally(() => {
+        if (this.pageRequests.get(key) === request) this.pageRequests.delete(key);
+      });
+    this.pageRequests.set(key, request);
+    return request.promise;
   }
 
   private async withController<T>(operation: (signal: AbortSignal) => Promise<T>): Promise<T> {

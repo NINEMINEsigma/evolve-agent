@@ -9,10 +9,12 @@ import type {
   HistorySkeletonRowDto,
   LiveChatRow,
   PendingChatMessage,
+  PendingStreamFinish,
   StreamBatch,
 } from "./types";
 import { generateUUID } from "../../utils";
 import { MINIMAP_MEASUREMENT_EPSILON_PX } from "../../constants/history";
+import { isLongChatMessage } from "./messageCollapse";
 
 interface ChatRuntimeState {
   sessionId: string;
@@ -27,6 +29,8 @@ interface ChatRuntimeState {
   pageErrors: Record<string, ChatHistoryPageError>;
   initialReady: boolean;
   liveRows: LiveChatRow[];
+  pendingStreamFinishes: Record<string, PendingStreamFinish>;
+  streamHistoryLinks: Record<string, string>;
   liveVersion: number;
   currentStreamId: string | null;
   processing: boolean;
@@ -49,14 +53,16 @@ interface ChatRuntimeState {
   setSkeletonError: (error: string | null) => void;
   replaceSkeleton: (rows: HistorySkeletonRowDto[], historyCount: number) => void;
   appendSkeleton: (rows: HistorySkeletonRowDto[], historyCount: number) => void;
-  mergeHistoryPage: (messages: ChatMessage[], startIndex: number, endIndex: number) => void;
+  mergeHistoryPage: (messages: ChatMessage[], startIndex: number, endIndex: number, canonicalCutoff?: number) => void;
   toggleMessageCollapse: (id: string, source: "history" | "live") => void;
+  linkStreamHistory: (streamId: string, historyIndex: number) => void;
   setPageError: (error: ChatHistoryPageError | null) => void;
   clearCanonicalContent: () => void;
   setInitialReady: (ready: boolean) => void;
   appendLiveMessage: (message: ChatMessage, streaming?: boolean) => number;
   applyStreamBatch: (batch: StreamBatch) => void;
-  finishStream: (streamId: string, content?: string, metrics?: import("../../types").MessageMetrics) => void;
+  queueStreamFinish: (streamId: string, content?: string, metrics?: import("../../types").MessageMetrics) => void;
+  finishStream: (streamId: string, content?: string, metrics?: import("../../types").MessageMetrics, visibleAtFinish?: boolean) => void;
   reconcileCanonicalTail: (canonicalCutoff: number) => void;
   clearLive: () => void;
   setProcessing: (processing: boolean) => void;
@@ -90,6 +96,8 @@ const initialState = {
   pageErrors: {} as Record<string, ChatHistoryPageError>,
   initialReady: false,
   liveRows: [] as LiveChatRow[],
+  pendingStreamFinishes: {} as Record<string, PendingStreamFinish>,
+  streamHistoryLinks: {} as Record<string, string>,
   liveVersion: 0,
   currentStreamId: null as string | null,
   processing: false,
@@ -115,6 +123,14 @@ const lastUserIndex = (rows: HistorySkeletonRowDto[], fallback = -1): number => 
   }
   return fallback;
 };
+
+const historyMatchesLive = (history: ChatMessage, live: LiveChatRow, historyId: string): boolean => (
+  history.id === historyId
+  && history.role === "assistant"
+  && live.message.role === "assistant"
+  && (history.characterName == null || live.message.characterName == null
+    || history.characterName === live.message.characterName)
+);
 
 export const useChatRuntimeStore = create<ChatRuntimeState>((set, get) => ({
   ...initialState,
@@ -143,6 +159,8 @@ export const useChatRuntimeStore = create<ChatRuntimeState>((set, get) => ({
     knownHistoryCount,
     lastUserHistoryIndex: lastUserIndex(skeleton),
     contentByRowId: {},
+    streamHistoryLinks: {},
+    pendingStreamFinishes: {},
     loadedHistoryIndices: new Set<number>(),
     pageErrors: {},
   }),
@@ -153,14 +171,36 @@ export const useChatRuntimeStore = create<ChatRuntimeState>((set, get) => ({
     lastUserHistoryIndex: lastUserIndex(rows, state.lastUserHistoryIndex),
   })),
 
-  mergeHistoryPage: (messages, startIndex, endIndex) => set((state) => {
+  mergeHistoryPage: (messages, startIndex, endIndex, canonicalCutoff) => set((state) => {
     const contentByRowId = { ...state.contentByRowId };
+    const transferred = new Set<string>();
+    const streamHistoryLinks = { ...state.streamHistoryLinks };
     for (const message of messages) {
       const previous = contentByRowId[message.id];
-      contentByRowId[message.id] = previous?.collapsed === undefined
-        ? message
-        : { ...message, collapsed: previous.collapsed };
+      const link = Object.entries(streamHistoryLinks).find(([, rowId]) => rowId === message.id);
+      const live = link && state.liveRows.find((row) => row.id === link[0]);
+      const matches = Boolean(live && !live.streaming && historyMatchesLive(message, live, message.id)
+        && message.messageIndex === Number(message.id.split(":")[1]));
+      const transferredCollapse = matches && live?.preserveExpanded ? live.message.collapsed : undefined;
+      contentByRowId[message.id] = previous?.collapsed !== undefined
+        ? { ...message, collapsed: previous.collapsed }
+        : transferredCollapse === undefined ? message : { ...message, collapsed: transferredCollapse };
+      if (link && !live?.streaming) {
+        delete streamHistoryLinks[link[0]];
+        if (matches) transferred.add(link[0]);
+      }
     }
+    const liveRows = state.liveRows.filter((row) => {
+      if (transferred.has(row.id)) return false;
+      if (canonicalCutoff === undefined || row.version > canonicalCutoff) return true;
+      return Boolean(streamHistoryLinks[row.id]);
+    });
+    const remaining = new Set(liveRows.map((row) => row.id));
+    const pendingStreamFinishes = Object.fromEntries(
+      Object.entries(state.pendingStreamFinishes).filter(([id]) => remaining.has(id)),
+    );
+    const rowHeights = { ...state.rowHeights };
+    for (const row of state.liveRows) if (!remaining.has(row.id)) delete rowHeights[row.id];
     const loadedHistoryIndices = new Set(state.loadedHistoryIndices);
     for (let index = startIndex; index < endIndex; index += 1) {
       loadedHistoryIndices.add(index);
@@ -169,7 +209,7 @@ export const useChatRuntimeStore = create<ChatRuntimeState>((set, get) => ({
       Object.entries(state.pageErrors).filter(([, error]) =>
         error.endIndex <= startIndex || error.startIndex >= endIndex),
     );
-    return { contentByRowId, loadedHistoryIndices, pageErrors };
+    return { contentByRowId, loadedHistoryIndices, pageErrors, liveRows, streamHistoryLinks, pendingStreamFinishes, rowHeights };
   }),
 
   toggleMessageCollapse: (id, source) => set((state) => {
@@ -190,8 +230,39 @@ export const useChatRuntimeStore = create<ChatRuntimeState>((set, get) => ({
     liveRows[index] = {
       ...row,
       message: { ...row.message, collapsed: row.message.collapsed === false },
+      collapseManuallyChanged: true,
     };
     return { liveRows };
+  }),
+
+  linkStreamHistory: (streamId, historyIndex) => set((state) => {
+    if (!streamId || !Number.isSafeInteger(historyIndex) || historyIndex < 0) return state;
+    const live = state.liveRows.find((row) => row.id === streamId && row.message.role === "assistant");
+    if (!live) return state;
+    const historyId = `history:${historyIndex}:message`;
+    const existingLink = state.streamHistoryLinks[streamId];
+    if (existingLink && existingLink !== historyId) return state;
+    const skeleton = state.skeleton.find((row) => row.row_id === historyId);
+    if (skeleton && (skeleton.row_kind !== "message" || skeleton.role !== "assistant"
+      || (skeleton.character_name && live.message.characterName
+        && skeleton.character_name !== live.message.characterName))) return state;
+    const history = state.contentByRowId[historyId];
+    if (!history || live.streaming) {
+      return { streamHistoryLinks: { ...state.streamHistoryLinks, [streamId]: historyId } };
+    }
+    if (!historyMatchesLive(history, live, historyId) || history.messageIndex !== historyIndex) return state;
+    const streamHistoryLinks = { ...state.streamHistoryLinks };
+    delete streamHistoryLinks[streamId];
+    const rowHeights = { ...state.rowHeights };
+    delete rowHeights[streamId];
+    return {
+      streamHistoryLinks,
+      rowHeights,
+      liveRows: state.liveRows.filter((row) => row.id !== streamId),
+      contentByRowId: live.preserveExpanded && history.collapsed === undefined
+        ? { ...state.contentByRowId, [historyId]: { ...history, collapsed: live.message.collapsed } }
+        : state.contentByRowId,
+    };
   }),
 
   setPageError: (error) => set((state) => {
@@ -205,6 +276,8 @@ export const useChatRuntimeStore = create<ChatRuntimeState>((set, get) => ({
 
   clearCanonicalContent: () => set({
     contentByRowId: {},
+    streamHistoryLinks: {},
+    pendingStreamFinishes: {},
     loadedHistoryIndices: new Set<number>(),
     pageErrors: {},
     initialReady: false,
@@ -273,44 +346,79 @@ export const useChatRuntimeStore = create<ChatRuntimeState>((set, get) => ({
     };
   }),
 
-  finishStream: (streamId, content, metrics) => set((state) => {
-    const version = state.liveVersion + 1;
+  queueStreamFinish: (streamId, content, metrics) => set((state) => {
+    const live = state.liveRows.find((row) => row.id === streamId && row.streaming);
+    if (!live || state.pendingStreamFinishes[streamId]) return state;
     return {
-      liveVersion: version,
-      currentStreamId: state.currentStreamId === streamId ? null : state.currentStreamId,
+      pendingStreamFinishes: {
+        ...state.pendingStreamFinishes,
+        [streamId]: { streamId, content, metrics },
+      },
       liveRows: state.liveRows.map((row) => row.id === streamId
-        ? {
-            ...row,
-            version,
-            streaming: false,
-            frozen: true,
-            message: {
-              ...row.message,
-              content: content || row.message.content,
-              reasoningDuration: metrics?.reasoning_duration_ms ?? row.message.reasoningDuration,
-              contentDuration: metrics?.content_duration_ms ?? row.message.contentDuration,
-              completionTokens: metrics?.completion_tokens ?? row.message.completionTokens,
-              tokensPerSecond: metrics?.tokens_per_second ?? row.message.tokensPerSecond,
-            },
-          }
+        ? { ...row, message: { ...row.message, content: content || row.message.content } }
         : row),
     };
   }),
 
+  finishStream: (streamId, content, metrics, visibleAtFinish = false) => {
+    set((state) => {
+      const pendingStreamFinishes = { ...state.pendingStreamFinishes };
+      delete pendingStreamFinishes[streamId];
+      const existing = state.liveRows.find((row) => row.id === streamId);
+      if (!existing && !state.pendingStreamFinishes[streamId]) return state;
+      const version = state.pendingStreamFinishes[streamId]
+        ? (existing?.version ?? state.liveVersion) : state.liveVersion + 1;
+      return {
+        pendingStreamFinishes,
+        liveVersion: state.pendingStreamFinishes[streamId] ? state.liveVersion : version,
+        currentStreamId: state.currentStreamId === streamId ? null : state.currentStreamId,
+        liveRows: state.liveRows.map((row) => {
+          if (row.id !== streamId) return row;
+          const message = {
+            ...row.message,
+            content: content || row.message.content,
+            reasoningDuration: metrics?.reasoning_duration_ms ?? row.message.reasoningDuration,
+            contentDuration: metrics?.content_duration_ms ?? row.message.contentDuration,
+            completionTokens: metrics?.completion_tokens ?? row.message.completionTokens,
+            tokensPerSecond: metrics?.tokens_per_second ?? row.message.tokensPerSecond,
+          };
+          const preserveExpanded = row.streaming && visibleAtFinish
+            && message.role === "assistant" && !message.isSystemStatus
+            && isLongChatMessage(message) && !row.collapseManuallyChanged;
+          return {
+            ...row, version, streaming: false, frozen: true,
+            preserveExpanded: row.preserveExpanded || preserveExpanded,
+            message: preserveExpanded ? { ...message, collapsed: false } : message,
+          };
+        }),
+      };
+    });
+    const state = get();
+    const link = state.streamHistoryLinks[streamId];
+    if (link) state.linkStreamHistory(streamId, Number(link.split(":")[1]));
+  },
+
   reconcileCanonicalTail: (canonicalCutoff) => set((state) => {
-    const liveRows = state.liveRows.filter((row) => row.version > canonicalCutoff);
+    const liveRows = state.liveRows.filter((row) =>
+      row.version > canonicalCutoff || Boolean(state.streamHistoryLinks[row.id]));
     const remainingIds = new Set(liveRows.map((row) => row.id));
     const rowHeights = { ...state.rowHeights };
     for (const row of state.liveRows) {
       if (!remainingIds.has(row.id)) delete rowHeights[row.id];
     }
-    return { liveRows, rowHeights };
+    const pendingStreamFinishes = Object.fromEntries(
+      Object.entries(state.pendingStreamFinishes).filter(([id]) => remainingIds.has(id)),
+    );
+    return { liveRows, rowHeights, pendingStreamFinishes };
   }),
 
   clearLive: () => set((state) => {
     const rowHeights = { ...state.rowHeights };
     for (const row of state.liveRows) delete rowHeights[row.id];
-    return { liveRows: [], currentStreamId: null, liveVersion: 0, rowHeights };
+    return {
+      liveRows: [], currentStreamId: null, liveVersion: 0, rowHeights,
+      pendingStreamFinishes: {}, streamHistoryLinks: {},
+    };
   }),
   setProcessing: (processing) => set({ processing }),
   setDraft: (draftHtml, draftText) => set({ draftHtml, draftText }),

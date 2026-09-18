@@ -112,6 +112,106 @@ describe("chat runtime store", () => {
     expect(useChatRuntimeStore.getState().contentByRowId).toEqual({});
     expect(useChatRuntimeStore.getState().liveRows).toEqual([]);
   });
+  it("keeps a visible ordinary long stream expanded until a manual collapse", () => {
+    const store = useChatRuntimeStore.getState();
+    store.appendLiveMessage({ id: "read", role: "assistant", content: "a" }, true);
+    store.queueStreamFinish("read", "x".repeat(1300));
+    expect(useChatRuntimeStore.getState().liveRows[0].streaming).toBe(true);
+    store.finishStream("read", "x".repeat(1300), undefined, true);
+    const current = useChatRuntimeStore.getState();
+    expect(current.liveRows[0].message.collapsed).toBe(false);
+    expect(current.liveRows[0].preserveExpanded).toBe(true);
+    store.toggleMessageCollapse("read", "live");
+    expect(useChatRuntimeStore.getState().liveRows[0].message.collapsed).toBe(true);
+  });
+
+  it("leaves offscreen, short and tool messages at their previous defaults", () => {
+    const store = useChatRuntimeStore.getState();
+    store.appendLiveMessage({ id: "off", role: "assistant", content: "a" }, true);
+    store.appendLiveMessage({ id: "short", role: "assistant", content: "a" }, true);
+    store.appendLiveMessage({ id: "tool", role: "tool", content: "a" }, true);
+    store.finishStream("off", "x".repeat(1300), undefined, false);
+    store.finishStream("short", "short", undefined, true);
+    store.finishStream("tool", "x".repeat(1300), undefined, true);
+    expect(useChatRuntimeStore.getState().liveRows.every((row) => !row.preserveExpanded)).toBe(true);
+    store.appendLiveMessage({ id: "manual", role: "assistant", content: "x".repeat(1300) }, true);
+    store.toggleMessageCollapse("manual", "live");
+    store.finishStream("manual", undefined, undefined, true);
+    expect(useChatRuntimeStore.getState().liveRows.find((row) => row.id === "manual")?.preserveExpanded).toBeFalsy();
+  });
+
+  it("hands a visible stream to its authoritative History row before page merge", () => {
+    const store = useChatRuntimeStore.getState();
+    store.appendLiveMessage({ id: "first", role: "assistant", content: "x".repeat(1300), characterName: "main-agent" }, true);
+    store.finishStream("first", undefined, undefined, true);
+    const cutoff = useChatRuntimeStore.getState().liveVersion;
+    store.linkStreamHistory("first", 4);
+    store.mergeHistoryPage([{
+      id: "history:4:message", role: "assistant", content: "updated",
+      messageIndex: 4, characterName: "main-agent",
+    }], 4, 5, cutoff);
+    expect(useChatRuntimeStore.getState().contentByRowId["history:4:message"].collapsed).toBe(false);
+    expect(useChatRuntimeStore.getState().liveRows).toEqual([]);
+    store.mergeHistoryPage([{
+      id: "history:4:message", role: "assistant", content: "reloaded", messageIndex: 4,
+    }], 4, 5);
+    expect(useChatRuntimeStore.getState().contentByRowId["history:4:message"].collapsed).toBe(false);
+    store.toggleMessageCollapse("history:4:message", "history");
+    expect(useChatRuntimeStore.getState().contentByRowId["history:4:message"].collapsed).toBe(true);
+  });
+
+  it("transfers after a page arrives first, and rejects a mismatched character", () => {
+    const store = useChatRuntimeStore.getState();
+    store.appendLiveMessage({ id: "later", role: "assistant", content: "x".repeat(1300), characterName: "agent-a" }, true);
+    store.finishStream("later", undefined, undefined, true);
+    store.mergeHistoryPage([{
+      id: "history:2:message", role: "assistant", content: "parsed content",
+      messageIndex: 2, characterName: "agent-a",
+    }], 2, 3);
+    store.linkStreamHistory("later", 2);
+    expect(useChatRuntimeStore.getState().contentByRowId["history:2:message"].collapsed).toBe(false);
+    expect(useChatRuntimeStore.getState().liveRows).toEqual([]);
+    store.appendLiveMessage({ id: "wrong", role: "assistant", content: "x".repeat(1300), characterName: "agent-b" }, true);
+    store.finishStream("wrong", undefined, undefined, true);
+    store.linkStreamHistory("wrong", 2);
+    expect(useChatRuntimeStore.getState().streamHistoryLinks.wrong).toBeUndefined();
+  });
+
+  it("drops an unlinked live row atomically with the canonical page and resets pending state", () => {
+    const store = useChatRuntimeStore.getState();
+    store.appendLiveMessage({ id: "orphan", role: "assistant", content: "x".repeat(1300) }, true);
+    store.queueStreamFinish("orphan", "x".repeat(1300));
+    store.finishStream("orphan", undefined, undefined, true);
+    const cutoff = useChatRuntimeStore.getState().liveVersion;
+    store.mergeHistoryPage([{
+      id: "history:0:message", role: "assistant", content: "x".repeat(1300), messageIndex: 0,
+    }], 0, 1, cutoff);
+    expect(useChatRuntimeStore.getState().liveRows).toEqual([]);
+    expect(useChatRuntimeStore.getState().contentByRowId["history:0:message"].collapsed).toBeUndefined();
+    store.beginSession("new");
+    expect(useChatRuntimeStore.getState().pendingStreamFinishes).toEqual({});
+    expect(useChatRuntimeStore.getState().streamHistoryLinks).toEqual({});
+  });
+  it("keeps separate links for equal-content streams until a failed page is retried", () => {
+    const store = useChatRuntimeStore.getState();
+    for (const id of ["one", "two"]) {
+      store.appendLiveMessage({ id, role: "assistant", content: "x".repeat(1300) }, true);
+      store.finishStream(id, undefined, undefined, true);
+    }
+    store.linkStreamHistory("one", 2);
+    store.linkStreamHistory("two", 3);
+    store.setPageError({ key: "2:4", startIndex: 2, endIndex: 4, message: "unavailable", retryable: true });
+    store.reconcileCanonicalTail(useChatRuntimeStore.getState().liveVersion);
+    expect(useChatRuntimeStore.getState().liveRows).toHaveLength(2);
+    store.mergeHistoryPage([
+      { id: "history:2:message", role: "assistant", content: "x".repeat(1300), messageIndex: 2 },
+      { id: "history:3:message", role: "assistant", content: "x".repeat(1300), messageIndex: 3 },
+    ], 2, 4);
+    expect(useChatRuntimeStore.getState().liveRows).toEqual([]);
+    expect(useChatRuntimeStore.getState().contentByRowId["history:2:message"].collapsed).toBe(false);
+    expect(useChatRuntimeStore.getState().contentByRowId["history:3:message"].collapsed).toBe(false);
+    expect(useChatRuntimeStore.getState().pageErrors).toEqual({});
+  });
 });
 
 describe("follow reducer", () => {

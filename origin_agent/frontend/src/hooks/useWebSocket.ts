@@ -16,6 +16,7 @@ import { WS_IN, WS_OUT } from "../constants/ws";
 import { generateUUID, parseToolResult } from "../utils";
 import { chatRuntimeController } from "../features/chat/chatRuntimeController";
 import { useChatRuntimeStore } from "../features/chat/chatRuntimeStore";
+import { hasMountedLiveFooter } from "../features/chat/chatViewport";
 import { createStreamFrameBuffer, type StreamFrameBuffer } from "../features/chat/streamFrameBuffer";
 import { useLlmProfiles } from "./useLlmProfiles";
 import { useSessionStore, type SessionStore } from "./useSessionStore";
@@ -164,11 +165,10 @@ export function useWebSocket() {
       frameBufferRef.current?.flush();
       const streamId = message.stream_id || useChatRuntimeStore.getState().currentStreamId || "";
       if (streamId) {
-        useChatRuntimeStore.getState().finishStream(
-          streamId,
-          typeof message.content === "string" ? message.content : undefined,
-          message.metrics,
-        );
+        const store = useChatRuntimeStore.getState();
+        const content = typeof message.content === "string" ? message.content : undefined;
+        if (hasMountedLiveFooter()) store.queueStreamFinish(streamId, content, message.metrics);
+        else store.finishStream(streamId, content, message.metrics, false);
       }
       streamDoneSeenRef.current = true;
       return;
@@ -243,6 +243,12 @@ export function useWebSocket() {
     if (message.type === WS_IN.SYSTEM && typeof message.content === "string") {
       try {
         const parsed = JSON.parse(message.content);
+        const streamMeta = parsed?.stream_meta;
+        if (streamMeta && typeof streamMeta.stream_id === "string" && streamMeta.stream_id
+          && Number.isSafeInteger(streamMeta.history_index) && streamMeta.history_index >= 0
+          && (!message.session_id || message.session_id === useChatRuntimeStore.getState().sessionId)) {
+          useChatRuntimeStore.getState().linkStreamHistory(streamMeta.stream_id, streamMeta.history_index);
+        }
         if (parsed.uploaded) {
           appendLocalMessage("system", `上传成功：${parsed.filename || "文件"} → ${parsed.path}`);
         }

@@ -1,10 +1,10 @@
 import { memo, useState, type WheelEvent } from "react";
 import { ChatMessage, MessageContent } from "../types";
-import MessageBody, { contentToText } from "./MessageBody";
+import MessageBody from "./MessageBody";
+import { contentToText, isLongChatMessage } from "../features/chat/messageCollapse";
 import MessageEditor from "./MessageEditor";
 import MessageAttachments from "./MessageAttachments";
 import { CONTENT_PREVIEW_LEN } from "../constants/session";
-import { DIMENSIONS } from "../constants/dimensions";
 
 function hashString(str: string): number {
   let hash = 0;
@@ -77,8 +77,7 @@ const MessageItem = memo(function MessageItem({
   const [editing, setEditing] = useState(false);
 
   const textContent = contentToText(m.content);
-  const lineCount = textContent.split("\n").length;
-  const isLong = textContent.length > DIMENSIONS.LONG_MESSAGE_CHARS || lineCount > DIMENSIONS.LONG_MESSAGE_LINES;
+  const isLong = isLongChatMessage(m);
   const isTool = m.role === "tool";
   const toolCollapsed = isTool && m.collapsed !== false;
   const collapsed = !isTool && !streaming && isLong && m.collapsed !== false;

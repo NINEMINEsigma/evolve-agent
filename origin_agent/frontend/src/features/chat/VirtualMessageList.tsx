@@ -27,6 +27,7 @@ import MessageSkeleton from "./MessageSkeleton";
 import { useChatRuntimeStore } from "./chatRuntimeStore";
 import { measuredHistoryRowHeights } from "./minimapGeometry";
 import { chatRuntimeController } from "./chatRuntimeController";
+import { liveBubbleIntersectsViewport } from "./chatViewport";
 import { useChatScrollController } from "./useChatScrollController";
 import type { HistorySkeletonRowDto } from "./types";
 
@@ -89,12 +90,32 @@ function MeasuredLiveRow({ id, children }: { id: string; children: ReactNode }) 
 }
 
 function ChatLiveFooter({ context }: { context: ChatListContext }) {
+  const footerRef = useRef<HTMLDivElement>(null);
   const liveRows = useChatRuntimeStore((state) => state.liveRows);
+  const pendingStreamFinishes = useChatRuntimeStore((state) => state.pendingStreamFinishes);
+  useLayoutEffect(() => {
+    const footer = footerRef.current;
+    if (!footer) return;
+    for (const pending of Object.values(pendingStreamFinishes)) {
+      const runtime = useChatRuntimeStore.getState();
+      if (!runtime.pendingStreamFinishes[pending.streamId]) continue;
+      runtime.finishStream(
+        pending.streamId, pending.content, pending.metrics,
+        liveBubbleIntersectsViewport(footer, pending.streamId),
+      );
+    }
+  }, [pendingStreamFinishes, liveRows]);
+  useLayoutEffect(() => () => {
+    const runtime = useChatRuntimeStore.getState();
+    for (const pending of Object.values(runtime.pendingStreamFinishes)) {
+      runtime.finishStream(pending.streamId, pending.content, pending.metrics, false);
+    }
+  }, []);
   const processing = useChatRuntimeStore((state) => state.processing);
   const tailPageError = useChatRuntimeStore((state) =>
     Object.values(state.pageErrors).find((error) => error.endIndex >= state.knownHistoryCount));
   return (
-    <div className="chat-live-footer">
+    <div ref={footerRef} className="chat-live-footer">
       {liveRows.map((row) => (
         <MeasuredLiveRow key={row.id} id={row.id}>
           <MessageItem

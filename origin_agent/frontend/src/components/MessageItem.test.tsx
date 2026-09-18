@@ -65,4 +65,18 @@ describe("MessageItem folding", () => {
     await user.click(summary);
     expect(container.querySelector('[data-chat-scope="tool-detail"]')).toBeNull();
   });
+
+  it("keeps a long assistant reply expanded after streaming ends when selected", () => {
+    const message: ChatMessage = {
+      id: "reply", role: "assistant", content: "x".repeat(1300), collapsed: false,
+    };
+    const props = {
+      message, archived: false, onImageClick: () => {},
+      onToggleCollapse: () => {}, onEditMessage: () => {},
+    };
+    const { container, rerender } = render(<MessageItem {...props} streaming />);
+    rerender(<MessageItem {...props} streaming={false} />);
+    expect(container.querySelector(".message-content-collapsed")).toBeNull();
+    expect(screen.getByRole("button", { name: "收起" })).not.toBeNull();
+  });
 });

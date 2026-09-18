@@ -2,17 +2,12 @@ import { useMemo } from "react";
 import JsonView from "react18-json-view";
 import "react18-json-view/src/style.css";
 import { ChatMessage, ContentBlock, MessageContent } from "../types";
+import { contentToText } from "../features/chat/messageCollapse";
+export { contentToText } from "../features/chat/messageCollapse";
 import MarkdownRenderer from "./primitives/MarkdownRenderer";
 import { renderToolResult } from "./ToolResultRenderer";
 import DiffBlock from "./DiffBlock";
 import { extractPartialStringField } from "../utils/partialJson";
-
-export function contentToText(content: MessageContent): string {
-  if (typeof content === "string") return content;
-  return content
-    .map((block) => (block.type === "text" ? block.text : block.type === "image_url" ? "[image_url]" : block.type === "input_audio" ? "[input_audio]" : block.type === "video_url" ? "[video_url]" : ""))
-    .join("\n");
-}
 
 function formatReasoningDuration(ms: number): string {
   const totalSeconds = Math.round(ms / 1000);

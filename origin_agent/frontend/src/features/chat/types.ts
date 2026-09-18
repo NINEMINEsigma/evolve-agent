@@ -108,6 +108,14 @@ export interface LiveChatRow {
   message: ChatMessage;
   streaming: boolean;
   frozen: boolean;
+  preserveExpanded?: boolean;
+  collapseManuallyChanged?: boolean;
+}
+
+export interface PendingStreamFinish {
+  streamId: string;
+  content?: string;
+  metrics?: import("../../types").MessageMetrics;
 }
 
 export interface StreamBatch {

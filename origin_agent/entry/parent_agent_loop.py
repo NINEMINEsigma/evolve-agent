@@ -66,6 +66,7 @@ from system.modality_capability import (
 from entry.session_manager import LoopSessionManager
 from entry.tool_executor import ToolExecutor, _interrupted_result
 from entry.stream_consumer import StreamConsumer
+from entry.stream_history_link import emit_stream_history_link
 from entry.session_message_queue import SessionMessageQueue
 
 if TYPE_CHECKING:
@@ -415,6 +416,8 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
                         if partial_metrics:
                             collected_metrics.append((sid, msg_index, partial_metrics))
                     self.append_system_status("已中断", session_id=sid)
+                    if partial_content:
+                        await emit_stream_history_link(self._frontend_sink, sid, stream_id, msg_index)
                     await self._emit_stream_done(
                         sid, stream_id, "cancelled",
                         content=partial_content, metrics=partial_metrics,
@@ -445,6 +448,7 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
                         )
                         if resp.metrics:
                             collected_metrics.append((sid, msg_index, resp.metrics))
+                        await emit_stream_history_link(self._frontend_sink, sid, stream_id, msg_index)
                         return resp.content
                     self.append_system_status("已中断", session_id=sid)
                     return ""
@@ -484,10 +488,12 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
                     )
                     if resp.metrics:
                         collected_metrics.append((sid, msg_index, resp.metrics))
+                    await emit_stream_history_link(self._frontend_sink, sid, stream_id, msg_index)
                     return assistant_text
 
                 # 存储 assistant 消息（含 tool_calls）
                 msg_index = self._store_assistant_with_tools(sid, resp)
+                await emit_stream_history_link(self._frontend_sink, sid, stream_id, msg_index)
                 if resp.metrics:
                     collected_metrics.append((sid, msg_index, resp.metrics))
 

@@ -117,6 +117,10 @@ entry/
 
 > 注意：`MultiAgentLoop` 明确声明不支持 session 旋转和合并（存在 TODO 标记），因此未使用 `LoopSessionManager`。
 
+### 流式消息与 History 行的权威关联
+
+`ParentAgentLoop` 每次将流式 assistant 回复写入 History 后，在对应轮次的 `history_sync` 前通过现有 `system.stream_meta` 发送 `stream_id` 和 History 整数索引；有正文的取消路径和含工具调用的 assistant 消息也遵循此顺序。`MultiAgentWorker` 为含工具调用的中间 assistant 回复发送关联；`MultiAgentLoop._cascade()` 为最终 assistant 回复在既有可见性元数据中加入索引。`entry/stream_history_link.py` 统一构造关联事件，发送失败仅记录日志，不阻断 History 持久化；未存入 History 的流不发送关联。工具调用子行与工具结果不参与。前端凭权威索引把流式结束时位于视口内的普通长回复的展开选择转交给正典行；旧服务缺少关联时恢复历史默认折叠。
+
 ### `StreamConsumer`
 
 `stream_consumer.py` 中的 `StreamConsumer` 封装 LLM 流式响应的增量消费：

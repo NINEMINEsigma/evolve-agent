@@ -39,6 +39,7 @@ from system.prompt import (
 from entry.base_agent_loop import BaseAgentLoop, IMainSessionLoop
 from entry.multi_agent_worker import WorkerResult, MultiAgentWorker
 from entry.session_message_queue import SessionMessageQueue
+from entry.stream_history_link import emit_stream_history_link
 from entry.agent_support.multimodal import content_to_text, summarize_message_for_log, blocks_from_dicts
 
 if TYPE_CHECKING:
@@ -784,23 +785,12 @@ class MultiAgentLoop(BaseAgentLoop, IMainSessionLoop):
                         "Failed to persist message metrics for session=%s", self.session_id, exc_info=True,
                     )
 
-            # 推送可见性/响应元数据给前端
-            # 注意：MultiAgentWorker 已经在每轮 LLM 调用后发送过 stream_done，
-            # 此处只需发送 system_message 关联元数据，避免重复固化。
-            if result.stream_id and (visible or response):
-                try:
-                    await self._sink.emit_system_message(
-                        self.session_id,
-                        json.dumps({
-                            "stream_meta": {
-                                "stream_id": result.stream_id,
-                                "visible_characters": visible,
-                                "response_characters": response,
-                            },
-                        }, ensure_ascii=False),
-                    )
-                except Exception:
-                    logger.debug("Failed to push visibility metadata for stream=%s", result.stream_id, exc_info=True)
+            # 存盘后、history_sync 前，用同一条 stream_meta 传递权威索引及既有可见性信息。
+            if result.stream_id:
+                await emit_stream_history_link(
+                    self._sink, self.session_id, result.stream_id, msg_index,
+                    visible_characters=visible, response_characters=response,
+                )
 
             # ── 动态调整队列 + 发起者 pending 回调 ──
             if not is_final:
