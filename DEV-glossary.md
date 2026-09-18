@@ -96,6 +96,10 @@
 | 中断Shell | 向已有 Shell会话发送 Ctrl-C、但不终结 Shell 的工具 | `InterruptShell` |
 | 停止Shell | 强制终结 Shell会话及其进程树的工具 | `StopShell` |
 | 进化状态 | `workspace/logs/evolution.status` 记录的进化结果状态 | evolution status |
+| 安全写入 | 先写同目录临时文件，再原子替换目标；进程中断时主文件保持完整旧版本或完整新版本 | safe write |
+| 原子写 | 不以截断方式直接覆盖目标，而是在完整临时文件准备好后一次性替换目标 | atomic write |
+| 备份冲突 | 目标路径对应的 `.bak` 已存在时，`save()` 拒绝继续并要求人工检查 | backup conflict |
+| 原生 PTY 访问串行化 | 对同一 ConPTY 原生对象的写入、中断、关闭和状态查询使用统一生命周期同步边界 | native PTY access serialization |
 
 ---
 

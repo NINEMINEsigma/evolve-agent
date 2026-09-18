@@ -74,6 +74,11 @@ class _ShellSession:
         self.error: str | None = None
 
         self.lock = threading.RLock()
+        # PTY control calls are serialized separately from text-state access.
+        # The reader must not hold this lock while blocked in pty.read().
+        self.native_lock = threading.RLock()
+        self.reader_exited = threading.Event()
+        self.native_closed = threading.Event()
         self.operation_lock = asyncio.Lock()
         self.output_event = asyncio.Event()
         self.closing = threading.Event()
@@ -92,6 +97,15 @@ class _ShellSession:
             self.event_loop.call_soon_threadsafe(self.output_event.set)
         except RuntimeError:
             pass
+
+    def exit_status(self) -> int | None:
+        with self.native_lock:
+            if self.native_closed.is_set():
+                return None
+            try:
+                return self.pty.exitstatus
+            except Exception:
+                return None
 
     def append_raw(self, raw: str) -> None:
         if not raw:
@@ -140,15 +154,12 @@ class _ShellSession:
         error: str | None = None,
         termination: str | None = None,
     ) -> None:
+        exit_code = self.exit_status()
         with self.lock:
             self.running = False
             self.error = error
             if self.termination is None and termination is not None:
                 self.termination = termination
-            try:
-                exit_code = self.pty.exitstatus
-            except Exception:
-                exit_code = None
             if exit_code is not None or self.exit_code is None:
                 self.exit_code = exit_code
             self.last_activity_at = time.time()
@@ -392,7 +403,7 @@ class ShellManager:
             self._require_running(state)
             start_offset = self._total_chars(state)
             try:
-                await asyncio.to_thread(state.pty.sendintr)
+                await asyncio.to_thread(self._send_interrupt_blocking, state)
             except EOFError as exc:
                 raise ShellError(f"Shell is closed: {state.shell_id}") from exc
             state.touch()
@@ -513,8 +524,12 @@ class ShellManager:
                     error = None
                     state.append_raw(raw)
         finally:
-            state.finish_output()
-            state.mark_exited(error, "error" if error else "natural")
+            try:
+                state.finish_output()
+                state.mark_exited(error, "error" if error else "natural")
+            finally:
+                state.reader_exited.set()
+                state.signal_output()
 
     async def _wait_for_startup_quiet(self, state: _ShellSession) -> None:
         """等待当前新 PTY 的初始化输出稳定，再允许写入首条命令。"""
@@ -605,10 +620,24 @@ class ShellManager:
     async def _write_line(self, state: _ShellSession, text: str) -> None:
         self._require_running(state)
         try:
-            await asyncio.to_thread(state.pty.write, text + "\r")
+            await asyncio.to_thread(self._write_line_blocking, state, text)
         except EOFError as exc:
             raise ShellError(f"Shell is closed: {state.shell_id}") from exc
         state.touch()
+
+    @staticmethod
+    def _write_line_blocking(state: _ShellSession, text: str) -> None:
+        with state.native_lock:
+            if state.closing.is_set() or state.native_closed.is_set():
+                raise EOFError
+            state.pty.write(text + "\r")
+
+    @staticmethod
+    def _send_interrupt_blocking(state: _ShellSession) -> None:
+        with state.native_lock:
+            if state.closing.is_set() or state.native_closed.is_set():
+                raise EOFError
+            state.pty.sendintr()
 
     async def _remove_and_stop(self, state: _ShellSession) -> None:
         state.closing.set()
@@ -622,16 +651,15 @@ class ShellManager:
     def _stop_state_blocking(state: _ShellSession) -> None:
         with state.lock:
             state.termination = "forced"
-        pty = state.pty
-        try:
-            pty.close(force=True)
-        except Exception:
-            logger.warning(
-                "PtyProcess.close(force=True) failed | shell=%s",
-                state.shell_id,
-                exc_info=True,
-            )
-        if state.pid is not None and ShellManager._pty_is_alive(state):
+        logger.info(
+            "Stopping Shell PTY | shell=%s pid=%s reader_alive=%s",
+            state.shell_id,
+            state.pid,
+            bool(state.reader_thread and state.reader_thread.is_alive()),
+        )
+
+        # First terminate the child process so a blocked reader can leave read().
+        if state.pid is not None:
             try:
                 _kill_proc_tree(state.pid)
             except Exception:
@@ -641,19 +669,72 @@ class ShellManager:
                     state.pid,
                     exc_info=True,
                 )
+
+        if state.reader_thread is None:
+            state.reader_exited.set()
+        reader_stopped = state.reader_exited.wait(SHELL_STOP_WAIT_SECONDS)
+        if not reader_stopped:
+            logger.warning(
+                "Shell reader did not exit before PTY close | shell=%s pid=%s",
+                state.shell_id,
+                state.pid,
+            )
+
+        acquired = state.native_lock.acquire(timeout=SHELL_STOP_WAIT_SECONDS)
+        if acquired:
+            try:
+                if not state.native_closed.is_set():
+                    try:
+                        exit_code = state.pty.exitstatus
+                    except Exception:
+                        exit_code = None
+                    with state.lock:
+                        if exit_code is not None or state.exit_code is None:
+                            state.exit_code = exit_code
+                    try:
+                        state.pty.close(force=True)
+                    except Exception:
+                        logger.warning(
+                            "PtyProcess.close(force=True) failed | shell=%s",
+                            state.shell_id,
+                            exc_info=True,
+                        )
+                    finally:
+                        state.native_closed.set()
+            finally:
+                state.native_lock.release()
+        else:
+            # The reader never owns native_lock while blocked in read(). If a
+            # foreign PTY call nevertheless holds it, do not deadlock cleanup.
+            logger.error(
+                "Timed out waiting for Shell native control lock; using emergency close | shell=%s",
+                state.shell_id,
+            )
+            if not state.native_closed.is_set():
+                try:
+                    state.pty.close(force=True)
+                except Exception:
+                    logger.warning(
+                        "Emergency PtyProcess.close(force=True) failed | shell=%s",
+                        state.shell_id,
+                        exc_info=True,
+                    )
+                finally:
+                    state.native_closed.set()
+
         if state.reader_thread is not None and state.reader_thread.is_alive():
             state.reader_thread.join(timeout=SHELL_STOP_WAIT_SECONDS)
         state.finish_output()
-        try:
-            exit_code = pty.exitstatus
-        except Exception:
-            exit_code = None
         with state.lock:
-            if exit_code is not None or state.exit_code is None:
-                state.exit_code = exit_code
             state.running = False
             state.last_activity_at = time.time()
             state.version += 1
+        logger.info(
+            "Stopped Shell PTY | shell=%s reader_exited=%s native_closed=%s",
+            state.shell_id,
+            state.reader_exited.is_set(),
+            state.native_closed.is_set(),
+        )
         state.signal_output()
 
     def _get_owned(
@@ -782,14 +863,20 @@ class ShellManager:
 
     @staticmethod
     def _pty_is_alive(state: _ShellSession) -> bool:
-        try:
-            return bool(state.pty.isalive())
-        except Exception:
-            return False
+        with state.native_lock:
+            if state.native_closed.is_set():
+                return False
+            try:
+                return bool(state.pty.isalive())
+            except Exception:
+                return False
 
     @staticmethod
     def _pty_is_eof(state: _ShellSession) -> bool:
-        try:
-            return bool(state.pty.eof())
-        except Exception:
-            return False
+        with state.native_lock:
+            if state.native_closed.is_set():
+                return True
+            try:
+                return bool(state.pty.eof())
+            except Exception:
+                return True
