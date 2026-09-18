@@ -50,6 +50,7 @@ interface ChatRuntimeState {
   replaceSkeleton: (rows: HistorySkeletonRowDto[], historyCount: number) => void;
   appendSkeleton: (rows: HistorySkeletonRowDto[], historyCount: number) => void;
   mergeHistoryPage: (messages: ChatMessage[], startIndex: number, endIndex: number) => void;
+  toggleMessageCollapse: (id: string, source: "history" | "live") => void;
   setPageError: (error: ChatHistoryPageError | null) => void;
   clearCanonicalContent: () => void;
   setInitialReady: (ready: boolean) => void;
@@ -154,7 +155,12 @@ export const useChatRuntimeStore = create<ChatRuntimeState>((set, get) => ({
 
   mergeHistoryPage: (messages, startIndex, endIndex) => set((state) => {
     const contentByRowId = { ...state.contentByRowId };
-    for (const message of messages) contentByRowId[message.id] = message;
+    for (const message of messages) {
+      const previous = contentByRowId[message.id];
+      contentByRowId[message.id] = previous?.collapsed === undefined
+        ? message
+        : { ...message, collapsed: previous.collapsed };
+    }
     const loadedHistoryIndices = new Set(state.loadedHistoryIndices);
     for (let index = startIndex; index < endIndex; index += 1) {
       loadedHistoryIndices.add(index);
@@ -164,6 +170,28 @@ export const useChatRuntimeStore = create<ChatRuntimeState>((set, get) => ({
         error.endIndex <= startIndex || error.startIndex >= endIndex),
     );
     return { contentByRowId, loadedHistoryIndices, pageErrors };
+  }),
+
+  toggleMessageCollapse: (id, source) => set((state) => {
+    if (source === "history") {
+      const message = state.contentByRowId[id];
+      if (!message) return state;
+      return {
+        contentByRowId: {
+          ...state.contentByRowId,
+          [id]: { ...message, collapsed: message.collapsed === false },
+        },
+      };
+    }
+    const index = state.liveRows.findIndex((row) => row.id === id);
+    if (index < 0) return state;
+    const liveRows = [...state.liveRows];
+    const row = liveRows[index];
+    liveRows[index] = {
+      ...row,
+      message: { ...row.message, collapsed: row.message.collapsed === false },
+    };
+    return { liveRows };
   }),
 
   setPageError: (error) => set((state) => {

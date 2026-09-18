@@ -105,7 +105,7 @@ frontend/
 | `ChatArea.tsx` | 聊天区外层布局宿主；保持 Agent 舞台层、聊天区自定义样式、输入栏和 Minimap 的定位边界，消息序列委托给 `VirtualMessageList` |
 | `features/chat/VirtualMessageList.tsx` | 基于 Virtuoso 渲染完整骨架的可视窗口；正文按页加载，live 尾部独立渲染 |
 | `features/chat/ChatHistoryRow.tsx` | 单行 selector 消费，按 loaded / skeleton / page-error 三态渲染 |
-| `MessageItem.tsx` | 单条消息渲染（文本、代码块、图片、工具调用）；通过 `data-character-name` 暴露角色显示名称，并在用户主动高度操作前通知滚动状态机 |
+| `MessageItem.tsx` | 单条消息渲染（文本、代码块、图片、工具调用）；通过 `data-character-name` 暴露角色显示名称，并在用户主动高度操作前通知滚动状态机；气泡折叠入口按消息类型互斥：工具消息仅由摘要切换详情，普通长消息仅由底部按钮切换正文 |
 | `MessageBody.tsx` | 消息正文 Markdown 渲染 |
 | `MessageEditor.tsx` | 消息编辑器（编辑历史消息） |
 | `MessageAttachments.tsx` | 消息附件展示 |
@@ -168,7 +168,7 @@ frontend/
 | Hook | 职责 |
 |---|---|
 | `useWebSocket.ts` | WebSocket 连接编排与低频会话状态桥接；聊天事件写入 `chatRuntimeStore`，流式增量经 `StreamFrameBuffer` 按动画帧提交；Agent 忙碌时仍允许消息进入后端 FIFO |
-| `features/chat/chatRuntimeStore.ts` | Zustand 聊天运行时唯一高频状态：完整骨架、内容行、live 尾部、输入草稿、pending、滚动与资源 |
+| `features/chat/chatRuntimeStore.ts` | Zustand 聊天运行时唯一高频状态：完整骨架、内容行、live 尾部、输入草稿、pending、滚动与资源；`toggleMessageCollapse(id, source)` 分别切换历史内容行与 live 行的气泡折叠状态，不改变 live 正典版本号 |
 | `features/chat/chatRuntimeController.ts` | History skeleton/page 请求代际、Abort、页去重、正典同步、Minimap 随机目标与资源懒加载 |
 | `features/chat/useChatScrollController.ts` | `initializing/following/detached/minimap_dragging/returning` 五态追底与回底控制 |
 | `useLlmProfiles.ts` | 从服务端读取 Profile；提供单对象创建/编辑/删除；浏览器仅持久化活动 Profile 名称，不保存 Profile 列表 |
@@ -199,6 +199,7 @@ frontend/
 - Gateway 通过 `history_sync` 只发送正典 History 元数据；前端 REST 取得全历史骨架和可见范围历史内容页。
 - 全历史骨架始终保留完整逻辑顺序；Virtuoso 只挂载可视区附近行，离屏 iframe、Mermaid 和播放器会卸载并可在滚回时重建。
 - `stream_done` 只冻结 live 行；`history_sync` 后 skeleton 后缀与末尾内容页成功合并，才按 canonical cutoff 清理对应 live 行。
+- 工具消息与普通长消息统一使用气泡 `collapsed` 状态，但入口互斥：工具摘要切换工具详情，普通长消息底部按钮切换正文限高；流式工具消息默认折叠且允许摘要展开/收起。历史页重取按相同 History 行 ID 保留用户折叠选择；live 行与正典 History 行的 ID 不稳定对应，交接时正典行恢复默认折叠，不推测映射。UI 折叠不提高 live 正典版本，避免交接后留下重复气泡。
 - 位于底部时被动内容增长继续追底；追底使用 Virtuoso scroller 的物理底部而不是只对齐最后一个正典数据项，因此空骨架的新会话和动态 live Footer 同样有效。用户主动离开底部后不追随。近距离回底平滑，远距离先加载最新页再瞬时定位。
 - 主聊天区逻辑 Minimap 同时绘制正典骨架和当前 live 行；拖动到 live 尾部等价于回到底部。
 - `features/chat/useChatScrollController.ts` 统一从 Virtuoso scroller 采集 `scrollTop`、`scrollHeight`、`clientHeight`，供 Minimap 物理高亮与拖拽使用；拖动期间抑制内容页请求，释放时以最终物理位置反查目标范围。

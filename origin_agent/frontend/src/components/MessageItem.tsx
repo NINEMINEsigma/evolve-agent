@@ -80,7 +80,7 @@ const MessageItem = memo(function MessageItem({
   const lineCount = textContent.split("\n").length;
   const isLong = textContent.length > DIMENSIONS.LONG_MESSAGE_CHARS || lineCount > DIMENSIONS.LONG_MESSAGE_LINES;
   const isTool = m.role === "tool";
-  const toolCollapsed = isTool && !streaming && m.collapsed !== false;
+  const toolCollapsed = isTool && m.collapsed !== false;
   const collapsed = !isTool && !streaming && isLong && m.collapsed !== false;
   const canEdit = !archived && !streaming && typeof m.messageIndex === "number";
   const canDelete = !archived && !streaming && isLastUserMessage && typeof m.messageIndex === "number";
@@ -204,7 +204,7 @@ const MessageItem = memo(function MessageItem({
             )}
           </span>
           <div className="message-actions">
-            {isLong && (
+            {!isTool && isLong && (
               <button type="button" onClick={() => {
                 onUserHeightMutation?.();
                 onToggleCollapse(m.id);

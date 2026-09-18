@@ -101,7 +101,7 @@ function ChatLiveFooter({ context }: { context: ChatListContext }) {
             message={row.message}
             archived={context.archived || processing}
             onImageClick={context.onImageClick}
-            onToggleCollapse={context.beginUserHeightMutation}
+            onToggleCollapse={(id) => useChatRuntimeStore.getState().toggleMessageCollapse(id, "live")}
             onEditMessage={context.onEditMessage}
             onDeleteMessages={context.onDeleteMessages}
             onDeleteSingleMessage={context.onDeleteSingleMessage}

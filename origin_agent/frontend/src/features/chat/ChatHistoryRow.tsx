@@ -61,20 +61,7 @@ export default function ChatHistoryRow({
       message={message}
       archived={archived || processing}
       onImageClick={onImageClick}
-      onToggleCollapse={(id) => {
-        onUserHeightMutation();
-        useChatRuntimeStore.setState((state) => ({
-          contentByRowId: {
-            ...state.contentByRowId,
-            [id]: {
-              ...state.contentByRowId[id],
-              collapsed: state.contentByRowId[id]?.collapsed === undefined
-                ? false
-                : !state.contentByRowId[id]?.collapsed,
-            },
-          },
-        }));
-      }}
+      onToggleCollapse={(id) => useChatRuntimeStore.getState().toggleMessageCollapse(id, "history")}
       onEditMessage={onEditMessage}
       onDeleteMessages={onDeleteMessages}
       onDeleteSingleMessage={onDeleteSingleMessage}
