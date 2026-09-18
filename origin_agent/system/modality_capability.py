@@ -48,7 +48,7 @@ from entity.messages import (
     ToolCall,
     FunctionCall,
 )
-from abstract.llm.client import BaseLLMClient
+from abstract.llm.client import BaseLLMClient, UnsupportedModalityError
 
 if TYPE_CHECKING:
     from entry.base_agent_loop import ToolContext
@@ -493,6 +493,13 @@ async def _probe_single_modality(
         )
         return True
     except Exception as exc:
+        if isinstance(exc, UnsupportedModalityError):
+            logger.info(
+                "probe_modality | session=%s model=%s %s=False source=single_probe(tool) reason=unsupported_modality",
+                session_id, model_name, modality,
+            )
+            return False
+        # TODO: 错误的提前依赖第三方库, 实际上根本就不一定使用openai库来使用openai协议
         import openai as _openai
         # 400 错误（无论是否匹配 modality 关键词）都判定为该模态在工具消息中不可用。
         # 某些 provider 返回通用的 "Invalid request parameters" / "Upstream request failed"
@@ -536,6 +543,12 @@ async def _probe_single_user_modality(
         )
         return True
     except Exception as exc:
+        if isinstance(exc, UnsupportedModalityError):
+            logger.info(
+                "probe_modality | session=%s model=%s %s=False source=single_probe(user) reason=unsupported_modality",
+                session_id, model_name, modality,
+            )
+            return False
         import openai as _openai
         if isinstance(exc, (_openai.BadRequestError, _openai.APIStatusError)):
             logger.info(
@@ -557,8 +570,8 @@ async def run_modality_probe(
     """执行一次完整的多模态能力探测，返回 ModalityCapability（六项全非 None）。
 
     缓存命中（六项完整）时直接返回；否则创建 client，按 模态 × 消息路径
-    （tool/user）六路并发探测。非 400 错误（网络/认证/超时）向上抛出异常，
-    不写缓存。按 cache_key 串行化（asyncio.Lock），防止多 session 重复探测。
+    （tool/user）六路并发探测。客户端明确不支持该模态或 HTTP 模态拒绝返回 False；
+    网络/认证/超时等错误向上抛出且不写缓存。按 cache_key 串行化（asyncio.Lock），防止多 session 重复探测。
 
     Raises:
         RuntimeError: 无 active profile 或无 llm_client_name。
@@ -615,8 +628,8 @@ async def run_modality_probe(
             _probe_single_user_modality(client, model_name, session_id, "video"),
             return_exceptions=True,
         )
-        # 单路探针仅对 400/模态拒绝返回 False；此处出现的异常必为非模态错误
-        # （网络/认证/超时等），不写缓存，向上抛出
+        # 单路探针仅对 HTTP 模态拒绝或客户端明确不支持的模态返回 False；
+        # 网络/认证/超时等真实错误仍向上抛出，不写缓存。
         probed: list[bool] = []
         for item in results:
             if isinstance(item, BaseException):
