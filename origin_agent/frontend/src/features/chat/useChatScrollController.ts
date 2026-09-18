@@ -58,7 +58,6 @@ export function useChatScrollController(
   scrollerElement: HTMLElement | null,
 ) {
   const userIntentUntilRef = useRef(0);
-  const followFrameRef = useRef<number | null>(null);
   const metricsFrameRef = useRef<number | null>(null);
   const minimapGenerationRef = useRef<number | null>(null);
   const followMode = useChatRuntimeStore((state) => state.followMode);
@@ -104,20 +103,26 @@ export function useChatScrollController(
     virtuosoRef.current?.scrollTo({ top: Number.MAX_SAFE_INTEGER, behavior });
   }, [virtuosoRef]);
 
-  const scheduleFollowBottom = useCallback(() => {
-    if (followFrameRef.current !== null) return;
-    followFrameRef.current = requestAnimationFrame(() => {
-      followFrameRef.current = null;
-      const current = useChatRuntimeStore.getState();
-      if (
-        current.followMode === "following"
-        && !current.userHeightMutation
-        && userIntentUntilRef.current <= performance.now()
-      ) {
-        scrollToPhysicalBottom("auto");
-      }
-    });
-  }, [scrollToPhysicalBottom]);
+  const followPhysicalBottomIfEligible = useCallback(() => {
+    const current = useChatRuntimeStore.getState();
+    const scroller = scrollerElement;
+    if (
+      current.followMode !== "following"
+      || current.userHeightMutation
+      || userIntentUntilRef.current > performance.now()
+      || !scroller
+      || !virtuosoRef.current
+    ) return;
+    const { scrollTop, scrollHeight, clientHeight } = scroller;
+    if (![scrollTop, scrollHeight, clientHeight].every(Number.isFinite)) return;
+    const target = Math.max(0, scrollHeight - clientHeight);
+    if (Math.abs(target - scrollTop) <= 1) return;
+    virtuosoRef.current.scrollTo({ top: target, behavior: "auto" });
+  }, [scrollerElement, virtuosoRef]);
+
+  const followAfterLiveCommit = useCallback(() => {
+    followPhysicalBottomIfEligible();
+  }, [followPhysicalBottomIfEligible]);
 
   const handleAtBottomStateChange = useCallback((atBottom: boolean) => {
     scheduleScrollMetrics();
@@ -127,6 +132,7 @@ export function useChatScrollController(
       store.setInitialReady(true);
       transition({ type: "INITIAL_READY" });
       chatTelemetry.record({ time: Date.now(), kind: "initial_bottom" });
+      followPhysicalBottomIfEligible();
       return;
     }
     if (store.userHeightMutation) {
@@ -139,19 +145,17 @@ export function useChatScrollController(
       return;
     }
     if (!atBottom && store.followMode === "following") {
-      scheduleFollowBottom();
+      followPhysicalBottomIfEligible();
     }
     if (atBottom && store.followMode === "returning") {
       transition({ type: "RETURN_DONE" });
     }
-  }, [scheduleFollowBottom, scheduleScrollMetrics, transition]);
+  }, [followPhysicalBottomIfEligible, scheduleScrollMetrics, transition]);
 
   const handleTotalListHeightChanged = useCallback(() => {
     scheduleScrollMetrics();
-    const store = useChatRuntimeStore.getState();
-    if (store.followMode !== "following" || store.userHeightMutation) return;
-    scheduleFollowBottom();
-  }, [scheduleFollowBottom, scheduleScrollMetrics]);
+    followPhysicalBottomIfEligible();
+  }, [followPhysicalBottomIfEligible, scheduleScrollMetrics]);
 
   const beginUserHeightMutation = useCallback(() => {
     useChatRuntimeStore.getState().beginUserHeightMutation();
@@ -181,10 +185,6 @@ export function useChatScrollController(
     const state = useChatRuntimeStore.getState();
     minimapGenerationRef.current = state.generation;
     userIntentUntilRef.current = Number.POSITIVE_INFINITY;
-    if (followFrameRef.current !== null) {
-      cancelAnimationFrame(followFrameRef.current);
-      followFrameRef.current = null;
-    }
     transition({ type: "MINIMAP_START" });
   }, [transition]);
 
@@ -224,10 +224,6 @@ export function useChatScrollController(
     if (!scroller) return;
     const markIntent = () => {
       userIntentUntilRef.current = performance.now() + 700;
-      if (followFrameRef.current !== null) {
-        cancelAnimationFrame(followFrameRef.current);
-        followFrameRef.current = null;
-      }
     };
     const onPointerDown = (event: PointerEvent) => {
       if (event.target === scroller) markIntent();
@@ -269,15 +265,12 @@ export function useChatScrollController(
         cancelAnimationFrame(metricsFrameRef.current);
         metricsFrameRef.current = null;
       }
-      if (followFrameRef.current !== null) {
-        cancelAnimationFrame(followFrameRef.current);
-        followFrameRef.current = null;
-      }
     };
   }, [scheduleScrollMetrics, scrollerElement]);
 
   return {
     followMode,
+    followAfterLiveCommit,
     handleRangeChanged,
     handleAtBottomStateChange,
     handleTotalListHeightChanged,

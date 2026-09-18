@@ -146,7 +146,7 @@ function renderHistoryRow(
   context: ChatListContext,
 ) {
   return (
-    <div className="chat-history-row" data-history-row-id={row.row_id}>
+    <div className="chat-history-row chat-history-row--history" data-history-row-id={row.row_id}>
       <ChatHistoryRow
         row={row}
         archived={context.archived}
@@ -169,7 +169,8 @@ const VirtualMessageList = forwardRef<ChatVirtualListHandle, VirtualMessageListP
     const skeletonLoading = useChatRuntimeStore((state) => state.skeletonLoading);
     const skeletonError = useChatRuntimeStore((state) => state.skeletonError);
     const initialReady = useChatRuntimeStore((state) => state.initialReady);
-    const followMode = useChatRuntimeStore((state) => state.followMode);
+    const liveVersion = useChatRuntimeStore((state) => state.liveVersion);
+    const processing = useChatRuntimeStore((state) => state.processing);
     const virtuosoRef = useRef<VirtuosoHandle>(null);
     const [scrollerElement, setScrollerElement] = useState<HTMLDivElement | null>(null);
     const hoverRootRef = useMemo(
@@ -178,6 +179,10 @@ const VirtualMessageList = forwardRef<ChatVirtualListHandle, VirtualMessageListP
     );
     useMessageCharacterHover(hoverRootRef);
     const scroll = useChatScrollController(virtuosoRef, scrollerElement);
+
+    useLayoutEffect(() => {
+      scroll.followAfterLiveCommit();
+    }, [liveVersion, processing, scroll.followAfterLiveCommit]);
 
     useImperativeHandle(ref, () => ({
       returnToBottom: scroll.returnToBottom,
@@ -256,7 +261,6 @@ const VirtualMessageList = forwardRef<ChatVirtualListHandle, VirtualMessageListP
           rangeChanged={(range: ListRange) => scroll.handleRangeChanged(range)}
           atBottomStateChange={scroll.handleAtBottomStateChange}
           totalListHeightChanged={scroll.handleTotalListHeightChanged}
-          followOutput={() => followMode === "following" ? "auto" : false}
           scrollSeekConfiguration={{
             enter: (velocity) => Math.abs(velocity) > HISTORY_SCROLL_SEEK_ENTER,
             exit: (velocity) => Math.abs(velocity) < HISTORY_SCROLL_SEEK_EXIT,

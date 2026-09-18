@@ -28,6 +28,7 @@
   position: relative;
   scrollbar-width: none;
   -ms-overflow-style: none;
+  --chat-message-inline-inset: 20px;
 }
 
 .chat-area::-webkit-scrollbar {
@@ -48,13 +49,17 @@
 .chat-history-row {
   box-sizing: border-box;
   /* 与 constants/history.ts 的 HISTORY_ROW_GAP_PX 保持同步 */
-  padding: 0 20px 6px;
+  padding: 0 var(--chat-message-inline-inset) 6px;
+}
+
+.chat-history-row--history {
+  padding-inline: calc(2 * var(--chat-message-inline-inset));
 }
 
 .chat-live-footer {
   position: relative;
   box-sizing: border-box;
-  padding: 0 20px;
+  padding: 0 var(--chat-message-inline-inset);
   z-index: var(--z-content);
 }
 
