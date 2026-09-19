@@ -169,6 +169,7 @@ export default function InputBar({
   const input = useChatRuntimeStore((state) => state.draftHtml);
   const inputText = useChatRuntimeStore((state) => state.draftText);
   const pendingMessageCount = useChatRuntimeStore((state) => Object.keys(state.pendingMessages).length);
+  const followMode = useChatRuntimeStore((state) => state.followMode);
   const chatEmpty = useChatRuntimeStore((state) =>
     state.skeleton.length === 0 && state.liveRows.length === 0 && !state.processing);
   const setInput = useCallback((html: string) => {
@@ -227,7 +228,7 @@ export default function InputBar({
   const hasSubagents = activeSubagents.length > 0;
 
   // 非空普通单Agent输入栏固定使用底部停靠位置；没有必须常驻显示的交互时，启用独立热区控制的三态抽屉。
-  // 空会话保留原有的居中完整输入栏，不参与自动隐藏。
+  // 空会话保留原有的居中完整输入栏，不参与自动隐藏；空闲且位于聊天底部时自动展开，离底后恢复收缩。
   const hasPendingAttachments = pendingImages.length > 0 || pendingAudios.length > 0 || pendingVideos.length > 0;
   const inputBarBottomDocked = !archived
     && !chatEmpty
@@ -242,9 +243,10 @@ export default function InputBar({
     && Object.keys(taskProgress).length === 0
     && pendingMessageCount === 0
     && !actionsMenu;
+  const inputBarAtBottom = followMode === "following";
   const inputDrawer = useEdgeDrawer({
     active: inputBarAutoHide,
-    pinned: inputFocused,
+    pinned: inputFocused || (inputBarAutoHide && inputBarAtBottom),
   });
 
   if (archived) return null;

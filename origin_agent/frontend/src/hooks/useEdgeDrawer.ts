@@ -72,8 +72,10 @@ export function useEdgeDrawer({
     }
   }, [active, clearTimer, setPhaseTracked]);
 
-  // 钉住期间强制 open；解除钉住时按当前悬停实况决定去留
+  // 钉住期间强制 open；解除钉住时按当前悬停实况决定去留。
+  // active 重新启用时也重新应用 pinned，避免 active 暂时关闭期间丢失强制展开状态。
   useEffect(() => {
+    if (!active) return;
     if (pinned) {
       clearTimer();
       setPhaseTracked("open");
@@ -86,7 +88,7 @@ export function useEdgeDrawer({
     ) {
       scheduleHide(closeDelay);
     }
-  }, [pinned, closeDelay, clearTimer, setPhaseTracked, scheduleHide]);
+  }, [active, pinned, closeDelay, clearTimer, setPhaseTracked, scheduleHide]);
 
   useEffect(() => clearTimer, [clearTimer]);
 
