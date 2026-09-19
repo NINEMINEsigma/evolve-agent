@@ -304,6 +304,8 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
             sid, summarize_message_for_log(user_message),
         )
         async with self._process_lock:
+            current_task = asyncio.current_task()
+            self.register_round_task(current_task)
             self._processing = True
             try:
                 if not skip_append:
@@ -320,6 +322,8 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
                 return reply
             finally:
                 self._processing = False
+                self._cancel_event.clear()
+                self.unregister_round_task(current_task)
 
     async def resume(self) -> str:
         """从当前历史状态恢复工具链执行。
@@ -340,6 +344,8 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
             return err_text
 
         async with self._process_lock:
+            current_task = asyncio.current_task()
+            self.register_round_task(current_task)
             self._processing = True
             try:
                 sid = await self._check_over_limit_before_process(sid, None)
@@ -354,6 +360,8 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
                 return reply
             finally:
                 self._processing = False
+                self._cancel_event.clear()
+                self.unregister_round_task(current_task)
 
     async def _run_tool_loop(
         self,
@@ -362,8 +370,6 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
         user_message: MessageContent,
     ) -> str:
         """执行 LLM 工具调用循环。"""
-        self._cancel_event.clear()
-        self._disgust_event.clear()
         round_id = self.begin_agentspace_round(self.current_character_agent)
 
         turn: RefWrapper[int] = RefWrapper(value=0)
@@ -379,8 +385,7 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
         try:
             while turn.value < _MAX_TOOL_TURNS:
                 if self._cancel_event.is_set():
-                    # 取消事件检查点：统一收尾由 CancelledError 边界或此处执行，
-                    # 只写一次系统状态（下方 cancelled 分支去重）
+                    # 取消事件检查点：只写一次系统状态并结束当前工具循环。
                     self.append_system_status("已中断", session_id=sid)
                     return ""
                 turn.value += 1
@@ -393,7 +398,6 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
 
                 stream_id = uuid.uuid4().hex[:12]
                 try:
-                    self.register_active_stream(self._stream_consumer)
                     resp = await self._stream_consumer.consume(
                         sid, messages,
                         self._get_tool_definitions(),
@@ -401,9 +405,7 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
                         last_user_message=self._history.last_user_message,
                     )
                 except asyncio.CancelledError:
-                    # 强制中断收尾：保留已显示文字、补发 cancelled、补齐工具配对，
-                    # 系统状态只在此处写一次（与上方检查点互斥——检查点在
-                    # cancel_event 已置位时先行返回，不会到达本边界）
+                    # 强制中断收尾：保留已显示文字并补发 cancelled。
                     partial = self._stream_consumer.partial_result(finish_reason="cancelled")
                     partial_content = partial.content if partial else ""
                     partial_metrics = partial.metrics if partial else None
@@ -435,9 +437,6 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
                     await self._emit_stream_done(sid, stream_id, "error", content="", metrics=None)
                     await self._frontend_sink.emit_system_message(sid, err_text)
                     return ""
-                finally:
-                    self.register_active_stream(None)
-
                 if self._cancel_event.is_set():
                     await self._emit_stream_done(sid, stream_id, "cancelled", content=resp.content or "", metrics=resp.metrics)
                     if resp.content:
@@ -532,11 +531,27 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
                             for fu_msg in tm._follow_up_messages:
                                 self._history.add_message(fu_msg)
                                 self.save_history(sid)
-                except BaseException:
-                    # 兜底：execute 内部审批/dispatch/finalize 已保护，但
-                    # execute 协程被外部取消（asyncio task cancel）或 get_hooks_context
-                    # 等未保护 await 点抛异常时仍会穿透。此处为未执行的 tool_calls
-                    # 补中断结果，保证 History 配对后停止响应
+                except asyncio.CancelledError:
+                    # 强制取消仍需补齐未执行 tool_calls，保持 History 消息配对。
+                    _assistant_ids = {t.id for t in resp.tool_calls}
+                    _executed_ids = {
+                        m.tool_call_id
+                        for m in self._history.iter_messages()
+                        if isinstance(m, ToolResultMessage) and m.tool_call_id in _assistant_ids
+                    }
+                    for tc in resp.tool_calls:
+                        if tc.id in _executed_ids:
+                            continue
+                        tool_msg = _interrupted_result(
+                            tc, self.current_character_agent, "forced",
+                        )
+                        messages.append(tool_msg)
+                        self._history.add_message(tool_msg)
+                        self.save_history(sid)
+                    self.append_system_status("已中断", session_id=sid)
+                    raise
+                except Exception:
+                    # 非取消异常同样补齐 tool_calls，再按既有错误路径降级。
                     logger.exception("Tool loop failed for session=%s", sid)
                     _assistant_ids = {t.id for t in resp.tool_calls}
                     _executed_ids = {
@@ -684,66 +699,79 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
             )
 
     async def run_pending_round(self, items: list[QueuedMessage]) -> str | None:
-        """SP-4：队列空闲消费驱动的轮次（S1 分支序）。
-
-        持锁 → 置 _processing → 超限检查（旋转随动）→ sid 变更检测 →
-        cancel 检测 → 注入落历史 → 无 LLM 闸 → llm_profile_name 应用 →
-        非旋转非中断时跑轮 → finally 复位 → 锁外 on_round_done 回调。
-        """
+        """由会话消息队列驱动一轮回复，并覆盖完整轮次后收尾。"""
         if not items:
             return None
-        async with self._process_lock:
-            self._processing = True
-            self._event_loop = asyncio.get_running_loop()
-            reply: str | None = None
-            try:
-                sid = await self._check_over_limit_before_process(self.session_id, None)
-                self.session_id = sid
-                queue = self._message_queue
-                rotated: bool = queue.last_known_sid != sid
-                interrupted: bool = self._cancel_event.is_set()
-                self._cancel_event.clear()
-                self._disgust_event.clear()
-                await self._append_queued_messages(items)
-                should_run: bool = not rotated and not interrupted
-                # 取最后一条非 None 的 llm_profile_name；None 表示沿用当前配置（内部消息）。
-                selected_name = next(
-                    (m.llm_profile_name for m in reversed(items) if m.llm_profile_name is not None), None,
-                )
-                if should_run and self._llm is None and selected_name is None:
-                    err_text = "尚未配置 LLM 模型。请在前端「模型配置」中新建或选择一个配置后重试。"
-                    self.append_system_status(err_text, session_id=sid)
-                    await self._frontend_sink.emit_system_message(sid, err_text)
-                    should_run = False
-                if should_run and selected_name is not None:
-                    try:
-                        profile = self.app.llm_profile_store.resolve_profile_name(
-                            selected_name,
-                        )
-                        self.set_profile(profile)
-                    except (LookupError, ValueError, RuntimeError) as exc:
-                        err_text = f"LLM Profile 切换失败：{exc}"
-                        logger.warning(
-                            "Queued message Profile selection failed | session=%s name=%r error=%s",
-                            sid, selected_name, exc,
-                        )
+
+        current_task = asyncio.current_task()
+        registered = False
+        reply: str | None = None
+        try:
+            async with self._process_lock:
+                self.register_round_task(current_task)
+                registered = True
+                self._processing = True
+                self._event_loop = asyncio.get_running_loop()
+                try:
+                    sid = await self._check_over_limit_before_process(self.session_id, None)
+                    self.session_id = sid
+                    queue = self._message_queue
+                    rotated: bool = queue.last_known_sid != sid
+                    interrupted: bool = self._cancel_event.is_set()
+                    self._cancel_event.clear()
+                    self._disgust_event.clear()
+                    await self._append_queued_messages(items)
+                    should_run: bool = not rotated and not interrupted
+
+                    # 取最后一条非 None 的 llm_profile_name；None 表示沿用当前配置。
+                    selected_name = next(
+                        (m.llm_profile_name for m in reversed(items)
+                         if m.llm_profile_name is not None),
+                        None,
+                    )
+                    if should_run and self._llm is None and selected_name is None:
+                        err_text = "尚未配置 LLM 模型。请在前端「模型配置」中新建或选择一个配置后重试。"
                         self.append_system_status(err_text, session_id=sid)
                         await self._frontend_sink.emit_system_message(sid, err_text)
                         should_run = False
-                if should_run:
-                    messages = self._get_full_history(sid)
-                    reply = await self._run_tool_loop(sid, messages, "[queued-messages]")
-                if reply:
-                    await self._frontend_sink.emit_assistant_message(
-                        sid, reply, self.current_character_agent,
-                    )
-                queue.last_known_sid = sid
-            finally:
-                self._processing = False
+                    if should_run and selected_name is not None:
+                        try:
+                            profile = self.app.llm_profile_store.resolve_profile_name(
+                                selected_name,
+                            )
+                            self.set_profile(profile)
+                        except (LookupError, ValueError, RuntimeError) as exc:
+                            err_text = f"LLM Profile 切换失败：{exc}"
+                            logger.warning(
+                                "Queued message Profile selection failed | "
+                                "session=%s name=%r error=%s",
+                                sid,
+                                selected_name,
+                                exc,
+                            )
+                            self.append_system_status(err_text, session_id=sid)
+                            await self._frontend_sink.emit_system_message(sid, err_text)
+                            should_run = False
+                    if should_run:
+                        messages = self._get_full_history(sid)
+                        reply = await self._run_tool_loop(
+                            sid, messages, "[queued-messages]",
+                        )
+                    if reply:
+                        await self._frontend_sink.emit_assistant_message(
+                            sid, reply, self.current_character_agent,
+                        )
+                    queue.last_known_sid = sid
+                finally:
+                    self._processing = False
+                    self._cancel_event.clear()
 
-        if self._on_round_done is not None:
-            await self._on_round_done(self)
-        return reply
+            if self._on_round_done is not None:
+                await self._on_round_done(self)
+            return reply
+        finally:
+            if registered:
+                self.unregister_round_task(current_task)
 
     def _append(
         self, session_id: str, role: Role,

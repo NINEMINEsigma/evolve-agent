@@ -116,8 +116,17 @@ CRON_TASK_TIMEOUT: int = 300
 # tool_call/usage）时自动停止本轮并恢复会话为空闲；任一有效数据到达即重置计时
 LLM_STREAM_IDLE_TIMEOUT: int = 300
 
-# 主会话中断清理等待上限（秒）— HTTP 中断接口等待当前轮次完成收尾的最长时间
+# 主会话中断清理等待上限（秒）— HTTP 中断接口等待当前轮次协作式收尾的最长时间
 MAIN_SESSION_INTERRUPT_TIMEOUT: float = 2.0
+
+# 主会话强制取消后的收尾等待上限（秒）— 超时后返回 timeout，不继续阻塞中断接口
+MAIN_SESSION_INTERRUPT_FORCE_CANCEL_TIMEOUT: float = 1.0
+
+# LLM 流读取 task 响应取消的等待上限（秒）— 超时后延迟到读取结束再关闭异步迭代器
+STREAM_READ_CANCEL_CLEANUP_TIMEOUT: float = 2.0
+
+# 工具 handler task 响应取消的等待上限（秒）— 超时后转入后台强引用观察
+TOOL_TASK_CANCEL_CLEANUP_TIMEOUT: float = 1.0
 
 # ffmpeg 命令执行默认超时（秒）
 FFMPEG_DEFAULT_TIMEOUT: int = 300

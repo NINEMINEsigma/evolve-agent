@@ -564,6 +564,11 @@ async def http_interrupt(session_id: str):
     if loop is None:
         return {"interrupted": False, "status": "not_found", "session_id": session_id}
     result = await loop.request_interrupt(reason="user")
+    logger.info(
+        "HTTP interrupt result | session=%s status=%s",
+        session_id,
+        result.status,
+    )
     payload = result.model_dump()
     payload["interrupted"] = result.status in ("idle", "cancelled")
     if result.status == "timeout":
@@ -906,18 +911,13 @@ async def regenerate_response(session_id: str, req: Request):
     # 没有前端连接时只重新生成并尽力而为推送
     # 复用 process_message 流程（流式事件自动推送到 ws）
     # 历史已包含最后一条 user 消息，避免重复追加
-    # 登记当前 HTTP handler task 为主会话活动任务，保证强制中断可取消本路径
-    current_task = asyncio.current_task()
-    loop.register_round_task(current_task)
-    try:
-        reply: str = await loop.loop.process_message(
-            content,
-            skip_append=True,
-            visible_characters=result.get("visible_characters"),
-            response_characters=result.get("response_characters"),
-        )
-    finally:
-        loop.unregister_round_task(current_task)
+    # Loop 在取得处理锁后自行登记当前回复 task，避免 Gateway 双重所有权。
+    reply: str = await loop.loop.process_message(
+        content,
+        skip_append=True,
+        visible_characters=result.get("visible_characters"),
+        response_characters=result.get("response_characters"),
+    )
     from system.application import Application
     sink = Application.current().frontend_sink
     if sink is not None and reply:
@@ -974,13 +974,8 @@ async def resume_session_endpoint(session_id: str):
             media_type="application/json",
             status_code=409,
         )
-    # 登记当前 HTTP handler task 为主会话活动任务，保证强制中断可取消本路径
-    current_task = asyncio.current_task()
-    loop.register_round_task(current_task)
-    try:
-        reply = await loop.resume()
-    finally:
-        loop.unregister_round_task(current_task)
+    # Loop 在取得处理锁后自行登记当前回复 task。
+    reply = await loop.resume()
     logger.info("Resume ok | session=%s reply_len=%d", session_id, len(reply))
     ws = _get_ws(session_id)
     if ws:

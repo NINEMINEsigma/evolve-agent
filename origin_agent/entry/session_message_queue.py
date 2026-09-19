@@ -87,7 +87,6 @@ class SessionMessageQueue:
     ) -> None:
         """事件循环线程内的入队 + 唤醒（无回显——回显移到消费侧）。"""
         self._pending.append(item)
-
         self._ensure_consumer()
         if self._wakeup is not None:
             self._wakeup.set()
@@ -105,38 +104,64 @@ class SessionMessageQueue:
 
     # -- 消费循环（模态 B：空闲消费）----------------------------------------
 
-    async def _consume_loop(self) -> None:
-        """空闲消费循环：单唤醒源（仅 push）+ run_pending_round 内部锁排队（D4）。
+    async def _run_round_task(self, items: list[QueuedMessage]) -> None:
+        """在独立 task 中执行单次回复，取消该轮时保留长期 consumer。"""
+        consumer = asyncio.current_task()
+        round_task = asyncio.create_task(
+            self._loop.run_pending_round(items),
+            name=f"session-message-round-{self._loop.loop.session_id[:8]}",
+        )
+        try:
+            await round_task
+        except asyncio.CancelledError:
+            # consumer 自身被 stop()/应用关闭取消时，取消必须继续向上传播。
+            if consumer is not None and consumer.cancelling():
+                if not round_task.done():
+                    round_task.cancel()
+                try:
+                    await round_task
+                except (asyncio.CancelledError, Exception):
+                    pass
+                raise
+            # 只有 child 自身被主会话中断取消时，consumer 才继续 FIFO。
+            if not round_task.cancelled():
+                raise
+            logger.info(
+                "Session round cancelled; message consumer remains active | session=%s",
+                self._loop.loop.session_id,
+            )
 
-        PM2：无兜底 try/except，异常经 done_callback 观测后上抛终止 task。
-        """
+    async def _consume_loop(self) -> None:
+        """空闲消费循环：单唤醒源（仅 push）+ 独立单次回复 task。"""
         while not self._stopped:
             self._wakeup.clear()
             while not self._stopped and self._pending:
                 items: list[QueuedMessage] = []
                 while self._pending:
                     items.append(self._pending.popleft())
-                current = asyncio.current_task()
-                self._loop.register_round_task(current)
-                try:
-                    await self._loop.run_pending_round(items)
-                finally:
-                    self._loop.unregister_round_task(current)
+                await self._run_round_task(items)
             await self._wakeup.wait()
 
     def _on_consumer_done(self, task: asyncio.Task) -> None:
-        """consumer task 结束回调：观测异常 + 复位引用支持重启（R2）。"""
-        if task.cancelled():
+        """观测 consumer 结束，并在竞态残留消息存在时重建 consumer。"""
+        exc: BaseException | None = None
+        if not task.cancelled():
+            exc = task.exception()
+            if exc is not None:
+                logger.error(
+                    "SessionMessageQueue consumer died | session=%s",
+                    self._loop.loop.session_id,
+                    exc_info=(type(exc), exc, exc.__traceback__),
+                )
+
+        if self._consumer_task is task:
             self._consumer_task = None
-            return
-        exc = task.exception()
-        if exc is not None:
-            logger.error(
-                "SessionMessageQueue consumer died | session=%s",
-                self._loop.loop.session_id,
-                exc_info=exc,
-            )
-        self._consumer_task = None
+
+        # 只处理失败批次 drain 后新入队的消息，不回填或重放已 drain 批次。
+        if not self._stopped and self._pending and self._consumer_task is None:
+            self._ensure_consumer()
+            if self._wakeup is not None:
+                self._wakeup.set()
 
     # -- 模态 A：链中注入（由 finalize_tool_result 的 field_injector 调用）----
 

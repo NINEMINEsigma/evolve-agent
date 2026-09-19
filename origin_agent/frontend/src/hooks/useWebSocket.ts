@@ -109,17 +109,15 @@ export function useWebSocket() {
     if (Array.isArray(message.agents)) sessionRef.current?.setAgents(message.agents);
     else if (message.agents === null) sessionRef.current?.setAgents([]);
     const historyCount = message.history_count ?? 0;
+    useChatRuntimeStore.getState().setProcessing(Boolean(message.processing));
     if (runtime.sessionId !== sid) {
       chatRuntimeController.beginSession(sid);
       useChatRuntimeStore.setState({ knownHistoryCount: historyCount });
-      useChatRuntimeStore.getState().setProcessing(Boolean(message.processing));
       void chatRuntimeController.initialize(sid, historyCount);
     } else if (runtime.skeleton.length === 0 && !runtime.initialReady) {
       useChatRuntimeStore.setState({ knownHistoryCount: historyCount });
-      useChatRuntimeStore.getState().setProcessing(Boolean(message.processing));
       void chatRuntimeController.initialize(sid, historyCount);
     } else {
-      if (message.processing) useChatRuntimeStore.getState().setProcessing(true);
       void chatRuntimeController.syncCanonicalHistory(historyCount);
     }
     fetchToolResourcesRef.current(sid);

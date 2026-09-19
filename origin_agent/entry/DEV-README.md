@@ -51,11 +51,10 @@ entry/
   - `get_tool_availability_scope()`：返回当前 Loop 的 `ToolAvailability`（默认 `EVERY`，子类覆写）。
 
 - **`IMainSessionLoop`**：主会话专属接口，除历史/Profile/轮次能力外，还提供**强制中断**所需的公共实现：
-  - `_init_round_registry()`：由主会话实现类在构造时调用，初始化 `_interrupt_lock`、`_active_round_task`、`_active_stream_consumer`。
-  - `register_round_task(task)` / `unregister_round_task(task)`：登记/注销当前活动回复任务（队列 consumer 或 HTTP handler task）。
-  - `register_active_stream(consumer)`：登记当前活动 `StreamConsumer`，供强制中断时主动关闭底层流。
-  - `has_active_round()`：以「是否存在登记的活动任务」判定主会话是否忙碌，不以 `_processing` 为准。
-  - `request_interrupt(reason, timeout)`：强制中断权威入口——设置取消事件、关闭活动流、终止本会话登记的活动子进程、取消活动任务，并等待收尾确认；返回 `MainSessionInterruptResult`（idle / cancelled / timeout / failed / not_found）。
+  - `_init_round_registry()`：由主会话实现类在构造时调用，初始化 `_interrupt_lock`、`_active_round_task`。
+  - `register_round_task(task)` / `unregister_round_task(task)`：登记/注销已经取得 `_process_lock` 的单次回复 task；长期队列 consumer 和等待锁的 child 不登记，重叠 task 被视为生命周期错误。
+  - `has_active_round()`：以是否存在登记的单次回复 task 判定主会话是否忙碌，不以 `_processing` 为准。
+  - `request_interrupt(reason, timeout)`：强制中断权威入口——设置当前轮次取消事件、终止本会话活动子进程、等待协作式收尾，超时后只强制取消该轮 task；返回 `MainSessionInterruptResult`（idle / cancelled / timeout / failed / not_found）。轮次 finally 在 task 完成前清除取消事件，后续消息不继承旧中断状态。
 
 - **`BasePrivateChatAgentLoop`**：在基类之上增加 1-on-1 私聊循环模板，包含：
   - 历史管理（`History` 实例）。
@@ -128,8 +127,8 @@ entry/
 - 接收独立依赖（`llm`、`sink`、`character_name`、`cancel_event`），不绑定任何 loop 类型。
 - `consume(session_id, messages, tools, stream_id) -> LLMResponse`：消费完整流式响应，聚合 content/reasoning/tool_calls，推送增量到前端，返回结构化结果。
 - **流式空闲超时**：使用独立 next 任务 + `asyncio.wait` 实现，连续 `LLM_STREAM_IDLE_TIMEOUT`（300 秒）未收到任何流式数据（content/reasoning/tool_call/usage）时自动停止本轮，产生明确的 idle-timeout 错误；任一有效数据到达即重置计时。超时与用户取消不共享 `CancelledError` 边界。
-- **部分结果快照**：`partial_result(finish_reason="cancelled")` 返回当前已显示内容的快照（完整 tool_calls 之前的部分），供强制中断时保留用户已看到的部分文字；不伪造未完成的工具调用。
-- **主动关闭**：`cancel_stream()` 关闭当前活动流的底层异步迭代器，解除 `chat_stream` 的网络阻塞，由主会话层在强制中断时调用。
+- **部分结果快照**：`partial_result(finish_reason="cancelled")` 只返回当前 stream 正常结束或强制取消前保存的本轮快照；每次 `consume()` 开始时重置，不会复用上一轮内容，也不伪造未完成的工具调用。
+- **单一关闭者**：`consume()` 将共享取消事件与当前 `__anext__()` task 竞速；读取取消后由消费侧 finally 统一关闭异步迭代器。读取未在清理窗口内结束时延迟到读取真正结束再关闭，外部不并发调用 `aclose()`。
 - 检测 LLM provider 是否返回了 token usage（若未返回则抛异常）。
 
 > 由 `ParentAgentLoop` 持有；`MultiAgentWorker` 内部也创建独立实例使用。
@@ -141,6 +140,7 @@ entry/
 - 封装单个工具调用的完整流程：取消检查、parse error 处理、审批（复用 `execute_with_approval`）、registry 分发、异常转换、前端事件推送和 UI 事件路由。
 - `execute(tc, session_id, *, round_id, ...) -> ToolResultMessage`：执行单个工具调用；`round_id` 传入每个 `ToolContext`。
 - `get_tool_stats()`：返回工具调用统计。
+- 审批或 dispatch 等待与主会话取消事件竞速；handler task 取消只等待正式清理窗口，超时 task 由 `_cancel_cleanup_tasks` 强引用并在最终结束时观察异常，禁止无限阻塞主轮次。
 - 通过 `IMainSessionLoop.loop` 访问 loop 内部字段（`cancel_event`、`get_sink()`、`get_hooks_context()` 等）。
 
 > 由 `ParentAgentLoop` 和 `MultiAgentWorker` 分别持有独立实例。
@@ -211,7 +211,7 @@ sequenceDiagram
 7. 对 tool_call 执行 `ToolExecutor.execute()`：safe / allowlist 直接执行，否则等待审批。
 8. 工具结果加入历史，循环直到 `finish_reason=stop` 或达到 `MAX_TOOL_TURNS`。
 
-> **延迟渲染与消费确认**：前端发送消息后不乐观渲染气泡，改为在输入栏显示"已排队"徽章。后端通过两条路径确认消费方式：空闲消费时 `emit_user_message` 回显 → 前端渲染正式气泡并移除徽章；工具链注入时 `drain_injected` 在 `queued_messages` 旁返回 `consumed_client_message_ids`，经 `finalize_tool_result` pop 隔离后透传到 `tool_result` 事件 → 前端移除匹配徽章（消息仅留在工具结果内，不显示独立气泡）。中断、切会话、历史重载时清空徽章。
+> **延迟渲染与消费确认**：前端发送消息后不乐观渲染气泡，改为在输入栏显示"已排队"徽章。后端通过两条路径确认消费方式：空闲消费时 `emit_user_message` 回显 → 前端渲染正式气泡并移除徽章；工具链注入时 `drain_injected` 在 `queued_messages` 旁返回 `consumed_client_message_ids`，经 `finalize_tool_result` pop 隔离后透传到 `tool_result` 事件 → 前端移除匹配徽章（消息仅留在工具结果内，不显示独立气泡）。中断、切会话、历史重载时清空徽章。`SessionMessageQueue` 的长期 consumer 为每批消息创建独立单次回复 task；中断该 task 后 consumer 继续处理后续 FIFO。consumer 意外结束时只恢复 deque 中尚未 drain 的新消息，不回放失败批次。
 
 ---
 

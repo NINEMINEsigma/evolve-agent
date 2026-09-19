@@ -394,16 +394,21 @@ class MultiAgentLoop(BaseAgentLoop, IMainSessionLoop):
         self._cancel_event.clear()
         self._disgust_event.clear()
         async with self._process_lock:
-            # 发送前强制配对：清理上次中断/异常残留的无配对 tool_calls
-            # （multi_agent 不走 build_full_history_messages，此处为唯一清理点）
-            self._history.remove_unpaired_tool_calls()
-            self.save_history(self.session_id)
-            if self.is_interrupted():
-                logger.warning("process_message skipped: loop interrupted | session=%s", self.session_id)
-                return ""
-
+            current_task = asyncio.current_task()
+            self.register_round_task(current_task)
             self._processing = True
             try:
+                # 发送前强制配对：清理上次中断/异常残留的无配对 tool_calls
+                # （multi_agent 不走 build_full_history_messages，此处为唯一清理点）
+                self._history.remove_unpaired_tool_calls()
+                self.save_history(self.session_id)
+                if self.is_interrupted():
+                    logger.warning(
+                        "process_message skipped: loop interrupted | session=%s",
+                        self.session_id,
+                    )
+                    return ""
+
                 # 用户消息的可见角色 — "all-agents" 简写展开
                 _visible = visible_characters if visible_characters else self._agent_names
                 from entity.constant import ALL_AGENTS_CHARACTER_REF_NAME
@@ -460,6 +465,8 @@ class MultiAgentLoop(BaseAgentLoop, IMainSessionLoop):
                 return ""
             finally:
                 self._processing = False
+                self._cancel_event.clear()
+                self.unregister_round_task(current_task)
 
     # -- SP-4 会话消息队列接入 ------------------------------------------------
 
@@ -516,69 +523,83 @@ class MultiAgentLoop(BaseAgentLoop, IMainSessionLoop):
             )
 
     async def run_pending_round(self, items: list[QueuedMessage]) -> str | None:
-        """SP-4：队列空闲消费驱动的轮次。
-
-        multi 无入口级超限检查（既有为 cascade 内 per-agent 检查 + process_message
-        尾部兜底），保持现状语义镜像。R3 修订：注入前镜像 process_message 入口的
-        remove_unpaired_tool_calls 清理点。
-
-        SP-5 D1/R3：_cascade 参数取最后一个非 None response_characters
-        （[ALL_AGENTS_CHARACTER_REF_NAME] 展开为全体）；全 None → 全体。
-        SP-5 D2：锁外末尾调 on_round_done 回调。
-        """
+        """由会话消息队列驱动一轮多Agent回复，并覆盖完整轮次后收尾。"""
         if not items:
             return None
-        async with self._process_lock:
-            self._processing = True
-            try:
-                sid = self.session_id
-                queue = self._message_queue
-                rotated: bool = queue.last_known_sid != sid
-                interrupted: bool = self._cancel_event.is_set()
-                self._cancel_event.clear()
-                self._disgust_event.clear()
-                # R3：镜像 process_message 入口的清理点（multi 唯一清理点）
-                self._history.remove_unpaired_tool_calls()
-                self.save_history(self.session_id)
-                await self._append_queued_messages(items)
-                # 取最后一条非 None 的 llm_profile_name；None 表示沿用当前配置（内部消息）。
-                selected_name = next(
-                    (m.llm_profile_name for m in reversed(items) if m.llm_profile_name is not None), None,
-                )
-                if selected_name is not None:
-                    try:
-                        selected = self.app.llm_profile_store.resolve_profile_name(
-                            selected_name,
-                        )
-                        self.set_profile(selected)
-                    except (LookupError, ValueError, RuntimeError) as exc:
-                        logger.warning(
-                            "Queued multi-agent Profile selection failed | session=%s name=%r error=%s",
-                            sid, selected_name, exc,
-                        )
-                        await self._sink.emit_system_message(
-                            sid, f"LLM Profile 切换失败：{exc}",
-                        )
-                        return None
-                if not rotated and not interrupted:
-                    # SP-5 D1/R3：取最后一个非 None response_characters
-                    selected_response = next(
-                        (m.response_characters for m in reversed(items)
-                         if m.response_characters is not None), None,
+
+        current_task = asyncio.current_task()
+        registered = False
+        try:
+            async with self._process_lock:
+                self.register_round_task(current_task)
+                registered = True
+                self._processing = True
+                try:
+                    sid = self.session_id
+                    queue = self._message_queue
+                    rotated: bool = queue.last_known_sid != sid
+                    interrupted: bool = self._cancel_event.is_set()
+                    self._cancel_event.clear()
+                    self._disgust_event.clear()
+                    self._history.remove_unpaired_tool_calls()
+                    self.save_history(self.session_id)
+                    await self._append_queued_messages(items)
+                    should_run = not rotated and not interrupted
+
+                    selected_name = next(
+                        (m.llm_profile_name for m in reversed(items)
+                         if m.llm_profile_name is not None),
+                        None,
                     )
-                    cascade_chars = selected_response if selected_response else list(self._agent_names)
-                    if cascade_chars == [ALL_AGENTS_CHARACTER_REF_NAME]:
-                        cascade_chars = list(self._agent_names)
-                    await self._cascade(cascade_chars)
-                    if self._token_record.prompt_tokens > 0 and self._is_context_over_limit():
-                        await self._rotate_session_for_context_limit()
-                queue.last_known_sid = self.session_id
-            finally:
-                self._processing = False
-        # SP-5 D2：锁外轮次后回调
-        if self._on_round_done is not None:
-            await self._on_round_done(self)
-        return None
+                    if selected_name is not None:
+                        try:
+                            selected = self.app.llm_profile_store.resolve_profile_name(
+                                selected_name,
+                            )
+                            self.set_profile(selected)
+                        except (LookupError, ValueError, RuntimeError) as exc:
+                            logger.warning(
+                                "Queued multi-agent Profile selection failed | "
+                                "session=%s name=%r error=%s",
+                                sid,
+                                selected_name,
+                                exc,
+                            )
+                            await self._sink.emit_system_message(
+                                sid, f"LLM Profile 切换失败：{exc}",
+                            )
+                            should_run = False
+
+                    if should_run:
+                        selected_response = next(
+                            (m.response_characters for m in reversed(items)
+                             if m.response_characters is not None),
+                            None,
+                        )
+                        cascade_chars = (
+                            selected_response
+                            if selected_response
+                            else list(self._agent_names)
+                        )
+                        if cascade_chars == [ALL_AGENTS_CHARACTER_REF_NAME]:
+                            cascade_chars = list(self._agent_names)
+                        await self._cascade(cascade_chars)
+                        if (
+                            self._token_record.prompt_tokens > 0
+                            and self._is_context_over_limit()
+                        ):
+                            await self._rotate_session_for_context_limit()
+                    queue.last_known_sid = self.session_id
+                finally:
+                    self._processing = False
+                    self._cancel_event.clear()
+
+            if self._on_round_done is not None:
+                await self._on_round_done(self)
+            return None
+        finally:
+            if registered:
+                self.unregister_round_task(current_task)
 
     async def resume(self) -> str:
         """从当前历史状态恢复工具链执行。
@@ -591,6 +612,8 @@ class MultiAgentLoop(BaseAgentLoop, IMainSessionLoop):
         self._cancel_event.clear()
         self._disgust_event.clear()
         async with self._process_lock:
+            current_task = asyncio.current_task()
+            self.register_round_task(current_task)
             self._processing = True
             try:
                 self._history.remove_unpaired_tool_calls()
@@ -602,6 +625,8 @@ class MultiAgentLoop(BaseAgentLoop, IMainSessionLoop):
                 return ""
             finally:
                 self._processing = False
+                self._cancel_event.clear()
+                self.unregister_round_task(current_task)
 
     # -- 级联调度 ----------------------------------------------------------
 
@@ -935,7 +960,6 @@ class MultiAgentLoop(BaseAgentLoop, IMainSessionLoop):
             )
 
             try:
-                self.register_active_stream(worker._stream_consumer)
                 result = await worker.run()
             except asyncio.CancelledError:
                 # 强制中断：worker 内部已固化部分输出；此处聚合 token 后上抛，
@@ -967,7 +991,6 @@ class MultiAgentLoop(BaseAgentLoop, IMainSessionLoop):
             )
             return result
         finally:
-            self.register_active_stream(None)
             self.end_agentspace_round(character_name, round_id)
 
     def _aggregate_worker_usage(

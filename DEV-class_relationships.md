@@ -75,11 +75,9 @@ classDiagram
         +regenerate_summary_for_session()*
         #_interrupt_lock
         #_active_round_task
-        #_active_stream_consumer
         #_init_round_registry()
         +register_round_task()
         +unregister_round_task()
-        +register_active_stream()
         +has_active_round()
         +request_interrupt()
     }
@@ -647,8 +645,7 @@ classDiagram
 | `_event_loop` | `ParentAgentLoop` | `asyncio.AbstractEventLoop \| None` | 事件循环引用 |
 | `_session_manager` | `ParentAgentLoop` | `SessionManager \| None` | gateway session manager |
 | `_interrupt_lock` | `IMainSessionLoop`（公共实现） | `asyncio.Lock` | 同会话中断请求互斥锁 |
-| `_active_round_task` | `IMainSessionLoop`（公共实现） | `asyncio.Task \| None` | 当前活动回复任务（队列 consumer 或 HTTP handler task） |
-| `_active_stream_consumer` | `IMainSessionLoop`（公共实现） | `StreamConsumer \| None` | 当前活动流消费器，供强制中断时主动关闭底层流 |
+| `_active_round_task` | `IMainSessionLoop`（公共实现） | `asyncio.Task \| None` | 已取得 `_process_lock` 的当前单次主会话回复 task；长期队列 consumer 与等待处理锁的 child 不登记 |
 | `_agents` | `MultiAgentLoop` | `dict[str, AgentProfile]` | Agent 配置档案 |
 | `_sink` | `MultiAgentLoop` | `AgentSink` | sink |
 | `_agent_names` | `MultiAgentLoop` | `list[str]` | agent 名列表 |
@@ -665,10 +662,12 @@ classDiagram
 | `_llm` | `StreamConsumer` | `BaseLLMClient` | LLM 客户端 |
 | `_sink` | `StreamConsumer` | `AgentSink` | 前端 sink |
 | `_character_name` | `StreamConsumer` | `str` | 当前角色名 |
-| `_cancel_event` | `StreamConsumer` | `asyncio.Event` | 取消信号 |
+| `_cancel_event` | `StreamConsumer` | `asyncio.Event` | 共享的当前回复轮次取消信号；消费器将其与流读取竞速 |
+| `_last_partial` | `StreamConsumer` | `LLMResponse \| None` | 当前 stream 正常结束或强制取消前保存的部分结果；每次 `consume()` 开始时重置 |
 | `_loop` | `ToolExecutor` | `IMainSessionLoop` | 持有 loop 引用，访问其内部字段 |
 | `_llm` | `ToolExecutor` | `BaseLLMClient` | LLM 客户端（用于 ask_agent_reason） |
 | `_tool_stats` | `ToolExecutor` | `dict[str, dict[str, int]]` | 工具调用统计 |
+| `_cancel_cleanup_tasks` | `ToolExecutor` | `set[asyncio.Task[Any]]` | 超过同步清理窗口的已取消 handler task 强引用集合；done callback 负责观察异常并移除 |
 | `_loop` | `SessionMessageQueue` | `IMainSessionLoop` | 所属主会话 loop |
 | `_pending` | `SessionMessageQueue` | `deque[QueuedMessage]` | 待消费 FIFO；每次只取一条消息，每条保留自己的 `llm_profile_name`；当前工具轮不再 drain 用户消息 |
 | `_wakeup` | `SessionMessageQueue` | `asyncio.Event \| None` | 空闲消费循环的唤醒事件 |
@@ -908,3 +907,9 @@ classDiagram
 ### 全局动态沙盒空间
 
 动态沙盒空间从会话和 LLM Profile 生命周期中独立，使用 workspace 根下的 `dynamic_sandbox_spaces.es` v1 根对象持久化，由 Application 持有的唯一 Sandbox 加载和修改。仅 fast 模式启用，但所有 Agent 共享解析能力；普通模式和多Agent模式主Agent通过按需加载的 `sandbox` 工具集执行 critical 增删，随意聊聊会话有意不能管理。Sandbox 统一提供动态前缀识别、目录可用性、工具层读写权限和 Prompt 快照；运行时临时 Sandbox 构造已收敛到 Application 单例。
+
+### 主会话中断生命周期收敛
+
+主会话的活动任务从长期 `SessionMessageQueue` consumer 收敛为已经取得 `_process_lock` 的单次回复 task。队列 consumer 为每批消息创建 child 并持续承载 FIFO；用户中断只设置该轮取消事件并等待/取消活动回复，不销毁 consumer。普通模式、多Agent模式及恢复/重新生成入口均在外层轮次开始时初始化控制事件，并在同轮 finally 清除后再注销 task。
+
+`StreamConsumer` 通过共享取消事件自行终止当前 `__anext__()`，并作为异步迭代器唯一关闭者；外部不再并发 `aclose()`。工具 handler task 的取消使用有限清理窗口，超时 task 由 `ToolExecutor._cancel_cleanup_tasks` 强引用并观察。前端对 `history_sync.processing` 的 true/false 都按服务端权威值覆盖本地状态。

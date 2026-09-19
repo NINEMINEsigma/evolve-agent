@@ -17,7 +17,10 @@ from typing import Any, TYPE_CHECKING
 from abstract.llm.client import BaseLLMClient
 from entity.puretype import LLMResponse, Usage, ToolCallRequest, MessageMetrics
 from entity.messages import BaseMessage, CharacterConversationMessage
-from entity.constant import LLM_STREAM_IDLE_TIMEOUT
+from entity.constant import (
+    LLM_STREAM_IDLE_TIMEOUT,
+    STREAM_READ_CANCEL_CLEANUP_TIMEOUT,
+)
 
 if TYPE_CHECKING:
     from entry.agent_sink import AgentSink
@@ -26,14 +29,64 @@ logger = logging.getLogger(__name__)
 
 
 async def _close_async_iterator(ait: Any) -> None:
-    """安全关闭异步迭代器，避免未读取完成的流留下资源泄漏。
-
-    对已断开/无响应的连接限时 2 秒，防止关闭本身挂起阻塞中断收尾。
-    """
+    """限时关闭已经停止读取的异步迭代器。"""
     try:
-        await asyncio.wait_for(ait.aclose(), timeout=2.0)
+        await asyncio.wait_for(
+            ait.aclose(),
+            timeout=STREAM_READ_CANCEL_CLEANUP_TIMEOUT,
+        )
+    except asyncio.TimeoutError:
+        logger.warning("Timed out while closing LLM async iterator")
     except Exception:
-        logger.debug("Failed to close async iterator", exc_info=True)
+        logger.warning("Failed to close LLM async iterator", exc_info=True)
+
+
+async def _settle_stream_read(
+    next_task: asyncio.Task | None,
+    stream: Any,
+) -> bool:
+    """取消并限时收割活动读取；返回是否可以立即安全关闭 stream。"""
+    if next_task is None:
+        return True
+    if not next_task.done():
+        next_task.cancel()
+        done, _ = await asyncio.wait(
+            {next_task},
+            timeout=STREAM_READ_CANCEL_CLEANUP_TIMEOUT,
+        )
+        if not done:
+            logger.warning(
+                "LLM stream read did not settle after cancellation; deferring iterator close"
+            )
+            return False
+    if not next_task.cancelled():
+        try:
+            next_task.exception()
+        except Exception:
+            logger.debug("Failed to observe settled LLM stream read", exc_info=True)
+    return True
+
+
+def _defer_iterator_close(next_task: asyncio.Task, stream: Any) -> None:
+    """等未及时结束的读取真正结束后，再调度迭代器关闭。"""
+    def _on_read_done(task: asyncio.Task) -> None:
+        if not task.cancelled():
+            try:
+                task.exception()
+            except Exception:
+                logger.debug("Deferred LLM stream read failed", exc_info=True)
+        try:
+            close_task = asyncio.get_running_loop().create_task(
+                _close_async_iterator(stream),
+                name="deferred-llm-stream-close",
+            )
+            close_task.add_done_callback(
+                lambda done: None if done.cancelled() else done.exception()
+            )
+        except RuntimeError:
+            logger.warning("Event loop closed before deferred LLM stream cleanup")
+
+    next_task.add_done_callback(_on_read_done)
 
 
 class StreamConsumer:
@@ -54,9 +107,7 @@ class StreamConsumer:
         self._sink = sink
         self._character_name = character_name
         self._cancel_event = cancel_event
-        # 当前活动流的底层异步迭代器与最后一次部分结果快照；由主会话层
-        # 在取消时调用 cancel_stream() 解除网络阻塞，partial_result() 取回已显示内容。
-        self._active_iterator: Any | None = None
+        # 最近一次当前流部分结果；强制取消时由 consume() 在传播前写入。
         self._last_partial: LLMResponse | None = None
 
     @property
@@ -98,11 +149,11 @@ class StreamConsumer:
         content_start_ts: float | None = None
         content_end_ts: float | None = None
 
+        self._last_partial = None
         stream = llm.chat_stream(
             messages, tools=tools, character=self._character_name,
             last_user_message=last_user_message,
         )
-        self._active_iterator = stream
         idle_timeout = LLM_STREAM_IDLE_TIMEOUT
         next_task: asyncio.Task | None = None
         cancel_waiter: asyncio.Task | None = None
@@ -119,14 +170,13 @@ class StreamConsumer:
                     return_when=asyncio.FIRST_COMPLETED,
                 )
                 if not done:
-                    # 连续 idle_timeout 秒无任何流式数据：自动停止本轮
+                    # 连续 idle_timeout 秒无任何流式数据：自动停止本轮。
                     next_task.cancel()
                     cancel_waiter.cancel()
-                    for t in (next_task, cancel_waiter):
-                        try:
-                            await t
-                        except (asyncio.CancelledError, Exception):
-                            pass
+                    try:
+                        await cancel_waiter
+                    except (asyncio.CancelledError, Exception):
+                        pass
                     stream_error = (
                         f"LLM stream idle timeout: no data received for "
                         f"{idle_timeout}s"
@@ -134,12 +184,8 @@ class StreamConsumer:
                     break
 
                 if cancel_waiter in done:
-                    # 用户取消：丢弃未完成的读取，直接结束（finish_reason=cancelled）
+                    # 用户取消：停止当前读取，最终化统一由 finally 负责。
                     next_task.cancel()
-                    try:
-                        await next_task
-                    except (asyncio.CancelledError, Exception):
-                        pass
                     break
                 cancel_waiter.cancel()
                 try:
@@ -206,9 +252,33 @@ class StreamConsumer:
 
                 if chunk.finish_reason:
                     finish_reason = chunk.finish_reason
+        except asyncio.CancelledError:
+            self._last_partial = LLMResponse(
+                content=content,
+                tool_calls=list(tool_calls),
+                finish_reason="cancelled",
+                reasoning_content=reasoning_content or None,
+                reasoning_field_name=reasoning_field_name,
+                usage=Usage(
+                    prompt_tokens=usage_dict["prompt_tokens"],
+                    completion_tokens=usage_dict["completion_tokens"],
+                    total_tokens=usage_dict["total_tokens"],
+                ),
+                metrics=None,
+            )
+            raise
         finally:
-            await _close_async_iterator(stream)
-            self._active_iterator = None
+            if cancel_waiter is not None and not cancel_waiter.done():
+                cancel_waiter.cancel()
+                try:
+                    await cancel_waiter
+                except (asyncio.CancelledError, Exception):
+                    pass
+            read_settled = await _settle_stream_read(next_task, stream)
+            if read_settled:
+                await _close_async_iterator(stream)
+            elif next_task is not None:
+                _defer_iterator_close(next_task, stream)
 
         if ev.is_set():
             finish_reason = "cancelled"
@@ -258,7 +328,7 @@ class StreamConsumer:
             ),
             metrics=metrics,
         )
-        # 保存本轮快照供取消路径取回（不含未完成的 tool_call 参数）
+        # 保存本轮快照供取消路径取回（只包含完整 tool_call）。
         self._last_partial = response
         return response
 
@@ -272,13 +342,3 @@ class StreamConsumer:
         if snapshot is None:
             return None
         return snapshot.model_copy(update={"finish_reason": finish_reason})
-
-    async def cancel_stream(self) -> None:
-        """主动关闭当前活动流，解除 chat_stream 的网络阻塞。
-
-        由主会话层在强制中断时调用；关闭后当前 ``consume()`` 的下一轮
-        ``__anext__`` 会抛错或结束，由 Loop 取消边界负责收尾。
-        """
-        it = self._active_iterator
-        if it is not None:
-            await _close_async_iterator(it)

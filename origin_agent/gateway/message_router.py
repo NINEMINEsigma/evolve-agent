@@ -32,7 +32,12 @@ from typing import *
 from fastapi import WebSocket
 
 from .chat import Message, MessageType
-from entity.constant import UPLOAD_FILENAME_TIME_FORMAT, UPLOADS_DIR_NAME, UPLOADS_WS_PREFIX, USER_CHARACTER_NAME
+from entity.constant import (
+    UPLOAD_FILENAME_TIME_FORMAT,
+    UPLOADS_DIR_NAME,
+    UPLOADS_WS_PREFIX,
+    USER_CHARACTER_NAME,
+)
 from entity.puretype import SessionInfo, SessionStatus, ClientInfo, MessageContent
 from entry.agent_support.multimodal import summarize_message_for_log
 
@@ -44,6 +49,22 @@ if TYPE_CHECKING:
     from subagent.orchestrator import SubAgentOrchestrator
 
 logger = logging.getLogger(__name__)
+
+
+def _observe_background_interrupt(task: asyncio.Task) -> None:
+    """观察 WS 兼容中断 task，避免后台异常无人获取。"""
+    if task.cancelled():
+        return
+    try:
+        exc = task.exception()
+    except asyncio.CancelledError:
+        return
+    if exc is not None:
+        logger.error(
+            "Background WebSocket interrupt failed | task=%s",
+            task.get_name(),
+            exc_info=(type(exc), exc, exc.__traceback__),
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -304,14 +325,14 @@ class MessageRouter:
                 sink.resolve_ask(msg.request_id, option=msg.option, custom_text=msg.custom_text)
 
     async def handle_interrupt(self) -> None:
-        """处理中断请求：与 HTTP 中断统一走 request_interrupt()，不乐观声明结果。"""
-        logger.info("WS interrupt | session=%s", self.sid)
+        """处理中断请求：与 HTTP 中断统一走 request_interrupt()。"""
         loop = _get_loop(self.sid)
         if loop is not None and loop.loop is not None:
-            asyncio.create_task(
+            task = asyncio.create_task(
                 loop.request_interrupt(reason="user"),
                 name=f"ws-interrupt-{self.sid[:8]}",
             )
+            task.add_done_callback(_observe_background_interrupt)
 
     async def handle_disgust(self) -> None:
         """处理厌恶请求。"""

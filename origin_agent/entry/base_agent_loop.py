@@ -48,6 +48,7 @@ from entity.constant import (
     META_EXTRACTOR_CHARACTER,
     INHERIT_LAST_ROUNDS,
     MAIN_SESSION_INTERRUPT_TIMEOUT,
+    MAIN_SESSION_INTERRUPT_FORCE_CANCEL_TIMEOUT,
 )
 from entry.agent_support.messages import (
     build_full_history_messages,
@@ -71,7 +72,6 @@ if TYPE_CHECKING:
     from gateway.session_manager import SessionManager
     from entry.tool_post_dispatch import ResultFieldInjector
     from entry.session_message_queue import SessionMessageQueue
-    from entry.stream_consumer import StreamConsumer
 
 logger = logging.getLogger(__name__)
 
@@ -1281,31 +1281,27 @@ class IMainSessionLoop(ABC):
         """初始化主会话活动任务注册表。由主会话实现类在 ``super().__init__`` 后调用。"""
         self._interrupt_lock: asyncio.Lock = asyncio.Lock()
         self._active_round_task: asyncio.Task | None = None
-        self._active_stream_consumer: StreamConsumer | None = None
 
     def register_round_task(self, task: asyncio.Task | None) -> None:
-        """登记当前主会话活动任务（队列 consumer 或 HTTP handler task）。"""
+        """登记已经取得处理锁的当前主会话回复任务。"""
         if task is None:
             return
         old = self._active_round_task
-        if old is not None and old is not task and not old.done():
-            logger.warning(
-                "Replacing unfinished round task | session=%s",
-                self.loop.session_id,
+        if old is task:
+            return
+        if old is not None and not old.done():
+            message = (
+                f"Overlapping active round tasks for session={self.loop.session_id}: "
+                f"old={old.get_name()} new={task.get_name()}"
             )
-            old.cancel()
+            logger.error(message)
+            raise RuntimeError(message)
         self._active_round_task = task
 
     def unregister_round_task(self, task: asyncio.Task | None) -> None:
-        """注销主会话活动任务；仅匹配当前登记任务时清除。"""
-        if task is None:
-            return
-        if self._active_round_task is task:
+        """注销主会话回复任务；仅匹配当前登记任务时清除。"""
+        if task is not None and self._active_round_task is task:
             self._active_round_task = None
-
-    def register_active_stream(self, consumer: StreamConsumer | None) -> None:
-        """登记/清除当前活动流消费器（由主会话层调用，consumer 不反向持有 loop）。"""
-        self._active_stream_consumer = consumer
 
     def has_active_round(self) -> bool:
         """以「是否存在登记的活动任务」判定主会话是否忙碌，而非 _processing。"""
@@ -1318,52 +1314,98 @@ class IMainSessionLoop(ABC):
     ) -> MainSessionInterruptResult:
         """强制中断当前主会话轮次并等待收尾确认（权威结果）。
 
-        流程：互斥 → 无活动任务直接 idle → 关闭活动流 → 取消活动任务 →
-        终止本会话登记的活动子进程 → 等待任务完成收尾（超时返回 timeout）。
+        流程：互斥 → 无活动任务直接 idle → 设置轮次取消信号 →
+        终止活动子进程 → 协作式等待 → 超时后强制取消轮次 task。
         """
         sid = self.loop.session_id
+        started = asyncio.get_running_loop().time()
         async with self._interrupt_lock:
             task = self._active_round_task
             if task is None or task.done():
                 return MainSessionInterruptResult(
                     accepted=True, status="idle", session_id=sid, reason=reason,
                 )
+
             self.loop._cancel_event.set()
-            # 主动关闭活动流，解除 chat_stream 的网络阻塞
-            consumer = self._active_stream_consumer
-            if consumer is not None:
-                await consumer.cancel_stream()
-            # 终止本会话登记的活动子进程树
+
+            # 终止本会话登记的活动子进程树。
             try:
                 self.loop.app.sandbox.kill_active(sid)
             except Exception:
                 logger.warning(
                     "kill_active failed during interrupt | session=%s", sid, exc_info=True,
                 )
-            # 先给协作式退出完整窗口（cancel_event 竞速会立即解除流/工具/审批等待）；
-            # 超时后才强制取消任务，避免 CancelledError 打断收尾写入。
+
+            # 先给协作式退出完整窗口；超时后才强制取消轮次 task。
             try:
                 await asyncio.wait_for(asyncio.shield(task), timeout=timeout)
-                return MainSessionInterruptResult(
-                    accepted=True, status="cancelled", session_id=sid, reason=reason,
-                )
             except asyncio.TimeoutError:
+                logger.warning(
+                    "Interrupt cooperative cleanup timed out; forcing round cancellation | "
+                    "session=%s task=%s",
+                    sid,
+                    task.get_name(),
+                )
                 task.cancel()
-            try:
-                await asyncio.wait_for(asyncio.shield(task), timeout=1.0)
-            except asyncio.TimeoutError:
-                return MainSessionInterruptResult(
-                    accepted=True, status="timeout", session_id=sid, reason=reason,
-                    error=f"round cleanup exceeded {timeout + 1.0}s",
-                )
             except asyncio.CancelledError:
-                pass
+                if task.cancelled():
+                    logger.info(
+                        "Interrupt completed by target task cancellation | session=%s elapsed_ms=%d",
+                        sid,
+                        int((asyncio.get_running_loop().time() - started) * 1000),
+                    )
+                    return MainSessionInterruptResult(
+                        accepted=True, status="cancelled", session_id=sid, reason=reason,
+                    )
+                raise
             except Exception as exc:
-                logger.exception("Interrupt cleanup failed | session=%s", sid)
+                logger.exception("Interrupt cooperative cleanup failed | session=%s", sid)
                 return MainSessionInterruptResult(
                     accepted=True, status="failed", session_id=sid, reason=reason,
                     error=f"{type(exc).__name__}: {exc}",
                 )
+            else:
+                logger.info(
+                    "Interrupt completed cooperatively | session=%s elapsed_ms=%d",
+                    sid,
+                    int((asyncio.get_running_loop().time() - started) * 1000),
+                )
+                return MainSessionInterruptResult(
+                    accepted=True, status="cancelled", session_id=sid, reason=reason,
+                )
+
+            try:
+                await asyncio.wait_for(
+                    asyncio.shield(task),
+                    timeout=MAIN_SESSION_INTERRUPT_FORCE_CANCEL_TIMEOUT,
+                )
+            except asyncio.TimeoutError:
+                total_timeout = timeout + MAIN_SESSION_INTERRUPT_FORCE_CANCEL_TIMEOUT
+                logger.error(
+                    "Interrupt forced cleanup timed out | session=%s task=%s timeout=%.3f",
+                    sid,
+                    task.get_name(),
+                    total_timeout,
+                )
+                return MainSessionInterruptResult(
+                    accepted=True, status="timeout", session_id=sid, reason=reason,
+                    error=f"round cleanup exceeded {total_timeout}s",
+                )
+            except asyncio.CancelledError:
+                if not task.cancelled():
+                    raise
+            except Exception as exc:
+                logger.exception("Interrupt forced cleanup failed | session=%s", sid)
+                return MainSessionInterruptResult(
+                    accepted=True, status="failed", session_id=sid, reason=reason,
+                    error=f"{type(exc).__name__}: {exc}",
+                )
+
+            logger.info(
+                "Interrupt completed after forced cancellation | session=%s elapsed_ms=%d",
+                sid,
+                int((asyncio.get_running_loop().time() - started) * 1000),
+            )
             return MainSessionInterruptResult(
                 accepted=True, status="cancelled", session_id=sid, reason=reason,
             )

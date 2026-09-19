@@ -375,11 +375,25 @@ class MultiAgentWorker:
                                 self._loop.loop.history.add_message(fu_msg)
                                 self._loop.loop.save_history(self._loop.loop.session_id)
                                 full_messages.append(fu_msg)
-                except BaseException:
-                    # 兜底：execute 内部审批/dispatch/finalize 已保护，但
-                    # execute 协程被外部取消（asyncio task cancel）或未保护 await 点
-                    # 抛异常时仍会穿透。此处为未执行的 tool_calls 补中断结果，
-                    # 保证共享 History 配对后停止响应
+                except asyncio.CancelledError:
+                    # 强制取消仍需补齐共享 History 中未执行的 tool_calls。
+                    _assistant_ids = {t.id for t in resp.tool_calls}
+                    _executed_ids = {
+                        m.tool_call_id
+                        for m in self._loop.loop.history.iter_messages()
+                        if isinstance(m, ToolResultMessage) and m.tool_call_id in _assistant_ids
+                    }
+                    for tc in resp.tool_calls:
+                        if tc.id in _executed_ids:
+                            continue
+                        tool_msg = _interrupted_result(
+                            tc, self.character_name, "forced",
+                        )
+                        self._loop.loop.history.add_message(tool_msg)
+                        self._loop.loop.save_history(self._loop.loop.session_id)
+                    raise
+                except Exception:
+                    # 普通异常补齐未执行的 tool_calls 后返回既有降级结果。
                     logger.exception(
                         "Worker tool loop failed | session=%s character=%s turn=%d",
                         self._loop.loop.session_id, self.character_name, turn,

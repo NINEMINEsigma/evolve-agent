@@ -17,6 +17,7 @@ from typing import Any, Awaitable
 
 from entity.puretype import Role, ToolCallMeta, ToolCallRequest, LLMProfile
 from entity.gentype import RefWrapper
+from entity.constant import TOOL_TASK_CANCEL_CLEANUP_TIMEOUT
 from entity.messages import ToolResultMessage
 from entry.base_agent_loop import BaseAgentLoop, ToolContext, IMainSessionLoop
 from entry.tool_post_dispatch import finalize_tool_result
@@ -65,6 +66,7 @@ class ToolExecutor:
         self._loop = loop
         self._tool_stats: dict[str, dict[str, int]] = {}
         self._turn_counter: RefWrapper[int] | None = None
+        self._cancel_cleanup_tasks: set[asyncio.Task[Any]] = set()
 
     # -- 公开 API ----------------------------------------------------------
 
@@ -79,13 +81,55 @@ class ToolExecutor:
         """
         self._turn_counter = counter
 
-    async def _await_or_cancel(self, coro: Awaitable[Any], phase: str) -> Any:
-        """等待 coro 完成或中断触发。
+    def _track_cancel_cleanup_task(
+        self,
+        task: asyncio.Task[Any],
+        phase: str,
+    ) -> None:
+        """强引用已取消 handler task，并在最终结束时观察异常。"""
+        if task in self._cancel_cleanup_tasks:
+            return
+        self._cancel_cleanup_tasks.add(task)
 
-        - 正常完成：返回 coro 结果（内部异常由 async_dispatch 等已转为错误结果）。
-        - 中断触发（cancel_event 置位）：取消 coro 任务并抛 ToolInterrupted(phase)，
-          由调用方捕获后转统一中断失败结果。
-        """
+        def _observe(done: asyncio.Task[Any]) -> None:
+            self._cancel_cleanup_tasks.discard(done)
+            if done.cancelled():
+                return
+            try:
+                exc = done.exception()
+            except asyncio.CancelledError:
+                return
+            if exc is not None:
+                logger.warning(
+                    "Cancelled tool task finished with error | session=%s phase=%s",
+                    self._loop.loop.session_id,
+                    phase,
+                    exc_info=(type(exc), exc, exc.__traceback__),
+                )
+
+        task.add_done_callback(_observe)
+
+    async def _cancel_child_task(
+        self,
+        task: asyncio.Task[Any],
+        phase: str,
+    ) -> None:
+        """取消工具子 task，并只在正式清理窗口内等待。"""
+        self._track_cancel_cleanup_task(task, phase)
+        task.cancel()
+        done, _ = await asyncio.wait(
+            {task},
+            timeout=TOOL_TASK_CANCEL_CLEANUP_TIMEOUT,
+        )
+        if not done:
+            logger.warning(
+                "Tool task did not settle after cancellation | session=%s phase=%s",
+                self._loop.loop.session_id,
+                phase,
+            )
+
+    async def _await_or_cancel(self, coro: Awaitable[Any], phase: str) -> Any:
+        """等待工具协程完成，或在主会话中断时有界取消它。"""
         task = asyncio.ensure_future(coro)
         interrupt_wait = asyncio.ensure_future(self._loop.loop.cancel_event.wait())
         try:
@@ -93,21 +137,20 @@ class ToolExecutor:
                 {task, interrupt_wait},
                 return_when=asyncio.FIRST_COMPLETED,
             )
+        except asyncio.CancelledError:
+            await self._cancel_child_task(task, phase)
+            raise
         finally:
             interrupt_wait.cancel()
+
         if task in done and not task.cancelled():
             try:
                 return task.result()
             except Exception as exc:
-                # 正常完成路径防御：handler 异常已由 async_dispatch 转为错误结果，
-                # 此处仅兜底非常规异常；SystemExit/KeyboardInterrupt 放行
+                # handler 异常通常已由 async_dispatch 转为错误结果；此处兜底。
                 return {"error": f"{type(exc).__name__}: {exc}"}
-        # 中断分支：取消任务并吞掉 CancelledError
-        task.cancel()
-        try:
-            await task
-        except (asyncio.CancelledError, Exception):
-            pass
+
+        await self._cancel_child_task(task, phase)
         raise ToolInterrupted(phase)
 
     async def execute(
@@ -392,8 +435,10 @@ class ToolExecutor:
                 character_name=char_name,
                 field_injector=self._loop.get_result_field_injector(),
             )
-        except BaseException:
-            # finalize（content 转换/事件推送）异常时以中断结果兜底，保证 execute 不向调用方抛异常
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            # finalize 普通异常时以中断结果兜底，保证 execute 不向调用方抛业务异常。
             logger.exception(
                 "finalize_tool_result failed | session=%s tool=%s", session_id, tc.name,
             )
