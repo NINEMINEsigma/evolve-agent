@@ -187,7 +187,6 @@ function renderHistoryRow(
 const VirtualMessageList = forwardRef<ChatVirtualListHandle, VirtualMessageListProps>(
   function VirtualMessageList(props, ref) {
     const skeleton = useChatRuntimeStore((state) => state.skeleton);
-    const skeletonLoading = useChatRuntimeStore((state) => state.skeletonLoading);
     const skeletonError = useChatRuntimeStore((state) => state.skeletonError);
     const initialReady = useChatRuntimeStore((state) => state.initialReady);
     const liveVersion = useChatRuntimeStore((state) => state.liveVersion);
@@ -244,10 +243,6 @@ const VirtualMessageList = forwardRef<ChatVirtualListHandle, VirtualMessageListP
       if (entries.length) useChatRuntimeStore.getState().mergeRowHeights(entries);
     }, []);
 
-    if (!initialReady && skeleton.length === 0 && !skeletonError) {
-      return <div className="chat-history-initializing" aria-live="polite">正在加载会话骨架…</div>;
-    }
-
     if (skeletonError && skeleton.length === 0) {
       return (
         <div className="chat-history-load-error">
@@ -264,6 +259,8 @@ const VirtualMessageList = forwardRef<ChatVirtualListHandle, VirtualMessageListP
         </div>
       );
     }
+
+    if (!initialReady && skeleton.length === 0) return null;
 
     return (
       <>
@@ -292,9 +289,6 @@ const VirtualMessageList = forwardRef<ChatVirtualListHandle, VirtualMessageListP
             if (event.dataTransfer.files.length) props.onDropFiles(event.dataTransfer.files);
           }}
         />
-        {(skeletonLoading || (!initialReady && skeleton.length > 0)) && (
-          <div className="chat-history-initializing" aria-live="polite">正在定位最新消息…</div>
-        )}
       </>
     );
   },
