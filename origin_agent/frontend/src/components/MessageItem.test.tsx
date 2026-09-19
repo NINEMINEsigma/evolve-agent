@@ -36,6 +36,24 @@ describe("MessageItem folding", () => {
     expect(container.querySelector('[data-chat-scope="tool-detail"]')).not.toBeNull();
   });
 
+  it("keeps the full tool argument summary for CSS width-based truncation", () => {
+    const args = { path: "ws:notes/very-long-file-name.txt", content: "x".repeat(160) };
+    const fullSummary = `main-agent ⚡ Write ${JSON.stringify(args)}`;
+    render(
+      <MessageItem
+        message={{ id: "tool-call-1", role: "tool", content: "main-agent ⚡ Write", toolName: "Write", toolArgs: args }}
+        archived={false}
+        onImageClick={() => {}}
+        onToggleCollapse={() => {}}
+        onEditMessage={() => {}}
+      />,
+    );
+    const summary = screen.getByRole("button");
+    expect(summary.textContent).toBe(fullSummary);
+    expect(summary.getAttribute("title")).toBe(fullSummary);
+    expect(summary.querySelector(".tool-call-summary-text")?.className).toBe("tool-call-summary-text");
+  });
+
   it("keeps the ordinary long-message toolbar control", async () => {
     const user = userEvent.setup();
     const onToggleCollapse = vi.fn();

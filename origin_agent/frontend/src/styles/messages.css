@@ -298,6 +298,14 @@
   color: var(--text-primary);
 }
 
+.tool-call-summary-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .tool-call-summary::before {
   content: '▶';
   font-size: 9px;

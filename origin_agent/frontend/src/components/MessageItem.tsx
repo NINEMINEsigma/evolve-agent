@@ -1,10 +1,9 @@
 import { memo, useState, type WheelEvent } from "react";
 import { ChatMessage, MessageContent } from "../types";
 import MessageBody from "./MessageBody";
-import { contentToText, isLongChatMessage } from "../features/chat/messageCollapse";
+import { contentToText, isLongChatMessage, toolCallSummary } from "../features/chat/messageCollapse";
 import MessageEditor from "./MessageEditor";
 import MessageAttachments from "./MessageAttachments";
-import { CONTENT_PREVIEW_LEN } from "../constants/session";
 
 function hashString(str: string): number {
   let hash = 0;
@@ -77,6 +76,7 @@ const MessageItem = memo(function MessageItem({
   const [editing, setEditing] = useState(false);
 
   const textContent = contentToText(m.content);
+  const toolSummary = toolCallSummary(m);
   const isLong = isLongChatMessage(m);
   const isTool = m.role === "tool";
   const toolCollapsed = isTool && m.collapsed !== false;
@@ -145,8 +145,9 @@ const MessageItem = memo(function MessageItem({
                 onUserHeightMutation?.();
                 onToggleCollapse(m.id);
               }}
+              title={toolSummary}
             >
-              {textContent.length > CONTENT_PREVIEW_LEN ? textContent.slice(0, CONTENT_PREVIEW_LEN) + '...' : textContent}
+              <span className="tool-call-summary-text">{toolSummary}</span>
             </button>
             {!toolCollapsed && (
               <div className={`tool-call-detail message-content-collapsed${m.isError ? " tool-call-detail-error" : ""}`} data-chat-scope="tool-detail" onWheel={handoffWheelAtBoundary}>

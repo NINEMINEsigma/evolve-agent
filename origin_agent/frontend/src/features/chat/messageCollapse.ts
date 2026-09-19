@@ -13,3 +13,14 @@ export function isLongChatMessage(message: ChatMessage): boolean {
   return text.length > DIMENSIONS.LONG_MESSAGE_CHARS
     || text.split("\n").length > DIMENSIONS.LONG_MESSAGE_LINES;
 }
+
+export function toolCallSummary(message: ChatMessage): string {
+  const content = contentToText(message.content);
+  if (!message.toolArgs) return content;
+  try {
+    const args = JSON.stringify(message.toolArgs);
+    return args === undefined ? content : `${content} ${args}`;
+  } catch {
+    return content;
+  }
+}

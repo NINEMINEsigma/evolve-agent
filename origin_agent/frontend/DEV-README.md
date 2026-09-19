@@ -105,7 +105,7 @@ frontend/
 | `ChatArea.tsx` | 聊天区外层布局宿主；保持 Agent 舞台层、聊天区自定义样式、输入栏和 Minimap 的定位边界，消息序列委托给 `VirtualMessageList` |
 | `features/chat/VirtualMessageList.tsx` | 基于 Virtuoso 渲染完整骨架的可视窗口；正文按页加载，live 尾部独立渲染 |
 | `features/chat/ChatHistoryRow.tsx` | 单行 selector 消费，按 loaded / skeleton / page-error 三态渲染 |
-| `MessageItem.tsx` | 单条消息渲染（文本、代码块、图片、工具调用）；通过 `data-character-name` 暴露角色显示名称，并在用户主动高度操作前通知滚动状态机；气泡折叠入口按消息类型互斥：工具消息仅由摘要切换详情，普通长消息仅由底部按钮切换正文 |
+| `MessageItem.tsx` | 单条消息渲染（文本、代码块、图片、工具调用）；通过 `data-character-name` 暴露角色显示名称，并在用户主动高度操作前通知滚动状态机；工具调用折叠摘要显示工具名与参数 JSON，并按气泡实际宽度自适应省略；气泡折叠入口按消息类型互斥：工具消息仅由摘要切换详情，普通长消息仅由底部按钮切换正文 |
 | `MessageBody.tsx` | 消息正文 Markdown 渲染 |
 | `MessageEditor.tsx` | 消息编辑器（编辑历史消息） |
 | `MessageAttachments.tsx` | 消息附件展示 |
