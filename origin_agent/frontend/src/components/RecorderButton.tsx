@@ -1,14 +1,22 @@
-import { useCallback } from "react";
+import { useCallback, useEffect } from "react";
 import { useAudioRecorder } from "../hooks/useAudioRecorder";
 import { formatTimeSec } from "../utils";
 
 interface RecorderButtonProps {
   onRecordingComplete: (file: File) => void;
+  onRecordingStateChange?: (isRecording: boolean) => void;
   disabled?: boolean;
 }
 
-export default function RecorderButton({ onRecordingComplete, disabled }: RecorderButtonProps) {
+export default function RecorderButton({ onRecordingComplete, onRecordingStateChange, disabled }: RecorderButtonProps) {
   const { isRecording, duration, startRecording, stopRecording, error } = useAudioRecorder();
+
+  useEffect(() => {
+    onRecordingStateChange?.(isRecording);
+    return () => {
+      if (isRecording) onRecordingStateChange?.(false);
+    };
+  }, [isRecording, onRecordingStateChange]);
 
   // 点击切换录音状态
   const handleClick = useCallback(async () => {

@@ -11,6 +11,7 @@ import { escapeHtml } from "../utils";
 import { SID_DISPLAY_LEN } from "../constants/session";
 import { DIMENSIONS } from "../constants/dimensions";
 import { useChatRuntimeStore } from "../features/chat/chatRuntimeStore";
+import { useEdgeDrawer } from "../hooks/useEdgeDrawer";
 
 // ── 左下功能组按钮间距（CSS .input-bar-actions-left gap 定值） ──
 const ACTIONS_GAP = 6;
@@ -214,7 +215,37 @@ export default function InputBar({
 
   // ── 菜单状态 ──
   const [actionsMenu, setActionsMenu] = useState<{ x: number; y: number } | null>(null);
+  const [recordingActive, setRecordingActive] = useState(false);
+  const [inputFocused, setInputFocused] = useState(false);
   const menuBtnRef = useRef<HTMLButtonElement>(null);
+  const handleRecordingStateChange = useCallback((isRecording: boolean) => {
+    setRecordingActive(isRecording);
+  }, []);
+  const activeSubagents = Object.values(subagentSessions).filter(
+    (session) => (session.status === "running" || session.status === "waiting") && session.interactive !== false,
+  );
+  const hasSubagents = activeSubagents.length > 0;
+
+  // 非空普通单Agent输入栏固定使用底部停靠位置；没有必须常驻显示的交互时，启用独立热区控制的三态抽屉。
+  // 空会话保留原有的居中完整输入栏，不参与自动隐藏。
+  const hasPendingAttachments = pendingImages.length > 0 || pendingAudios.length > 0 || pendingVideos.length > 0;
+  const inputBarBottomDocked = !archived
+    && !chatEmpty
+    && hasActiveProfile
+    && agents.length === 0
+    && !hasSubagents;
+  const inputBarAutoHide = inputBarBottomDocked
+    && !morphActive
+    && !hasPendingAttachments
+    && !uploading
+    && !recordingActive
+    && Object.keys(taskProgress).length === 0
+    && pendingMessageCount === 0
+    && !actionsMenu;
+  const inputDrawer = useEdgeDrawer({
+    active: inputBarAutoHide,
+    pinned: inputFocused,
+  });
 
   if (archived) return null;
 
@@ -231,11 +262,6 @@ export default function InputBar({
       // 忽略剪贴板权限或读取失败
     }
   };
-
-  const activeSubagents = Object.values(subagentSessions).filter(
-    (s) => (s.status === "running" || s.status === "waiting") && s.interactive !== false
-  );
-  const hasSubagents = activeSubagents.length > 0;
 
   const targetOptions: TargetSessionOption[] = [
     { id: "main", name: "主会话" },
@@ -278,14 +304,55 @@ export default function InputBar({
   ];
 
   return (
-    <footer className="input-bar" data-tour="input-bar">
-      {!chatEmpty && (
-        <TaskProgressPanel
-          taskProgress={taskProgress}
-        />
+    <footer
+      className={[
+        "input-bar",
+        inputBarBottomDocked ? "input-bar-bottom" : "",
+        inputBarAutoHide ? `input-bar-auto-hide input-bar-drawer-${inputDrawer.phase}` : "",
+        inputBarBottomDocked && !inputBarAutoHide ? "input-bar-docked" : "",
+        actionsMenu ? "input-bar-menu-open" : "",
+      ].filter(Boolean).join(" ")}
+      data-tour="input-bar"
+      onFocusCapture={(event) => {
+        const target = event.target;
+        if (target instanceof Element && target.closest(".input-bar-drawer-surface")) {
+          setInputFocused(true);
+        }
+      }}
+      onBlurCapture={(event) => {
+        const nextFocused = event.relatedTarget;
+        const remainsInSurface = nextFocused instanceof Element
+          && event.currentTarget.contains(nextFocused)
+          && Boolean(nextFocused.closest(".input-bar-drawer-surface"));
+        if (!remainsInSurface) setInputFocused(false);
+      }}
+    >
+      {inputBarAutoHide && (
+        <button
+          type="button"
+          className={`input-bar-hotzone input-bar-hotzone-${inputDrawer.phase}`}
+          aria-label="展开输入栏"
+          aria-expanded={inputDrawer.phase === "open"}
+          title="展开输入栏"
+          {...inputDrawer.hotzoneProps}
+          onFocus={inputDrawer.hotzoneProps.onMouseEnter}
+          onClick={() => inputRef.current?.focus()}
+        >
+          <span className="input-bar-hotzone-glint" aria-hidden />
+        </button>
       )}
-      
-      <div className="input-bar-inner">
+
+      <div
+        className="input-bar-drawer-surface"
+        {...(inputBarAutoHide ? inputDrawer.drawerProps : {})}
+      >
+        {!chatEmpty && (
+          <TaskProgressPanel
+            taskProgress={taskProgress}
+          />
+        )}
+        
+        <div className="input-bar-inner">
         {morphItem && (
           <InputMorph
             item={morphItem}
@@ -442,6 +509,7 @@ export default function InputBar({
                 </button>
                 <RecorderButton
                   onRecordingComplete={(file) => onPasteAudio(file)}
+                  onRecordingStateChange={handleRecordingStateChange}
                   disabled={morphActive || uploading}
                 />
                 <button
@@ -479,6 +547,7 @@ export default function InputBar({
             </button>
           </div>
         </div>
+        </div>
       </div>
       
       {/* ── 功能组收起菜单（PopupLayer 承载，向上弹出） ── */}
@@ -500,6 +569,7 @@ export default function InputBar({
                 >
                   <RecorderButton
                     onRecordingComplete={(file) => onPasteAudio(file)}
+                    onRecordingStateChange={handleRecordingStateChange}
                     disabled={item.disabled}
                   />
                   <span>{item.label}</span>

@@ -12,7 +12,9 @@
   border: none;
   background: transparent;
   /* 空态 → 有消息时的过渡动画 */
-  transition: bottom var(--duration-slow) var(--ease-in-out);
+  transition:
+    bottom var(--duration-slow) var(--ease-in-out),
+    transform var(--duration-slow) var(--ease-in-out);
 }
 
 /* 空态：输入框垂直居中显示 */
@@ -26,6 +28,7 @@
   flex-direction: column;
   gap: 8px;
   width: 100%;
+  position: relative;
   background:
     linear-gradient(135deg, rgba(var(--white-rgb), 0.1), rgba(var(--white-rgb), 0.025) 45%, rgba(var(--accent-rgb), 0.045)),
     rgba(var(--bg-secondary-rgb), 0.5);
@@ -38,7 +41,36 @@
     0 12px 40px rgba(var(--black-rgb), 0.3),
     inset 0 1px 0 rgba(var(--white-rgb), 0.12),
     inset 0 -1px 0 rgba(var(--white-rgb), 0.035);
-  transition: border-color var(--duration-normal) var(--ease-out), box-shadow var(--duration-normal) var(--ease-out), background var(--duration-normal) var(--ease-out), transform var(--duration-fast) var(--ease-out);
+  transition:
+    border-color var(--duration-normal) var(--ease-out),
+    box-shadow var(--duration-normal) var(--ease-out),
+    background var(--duration-normal) var(--ease-out),
+    transform var(--duration-fast) var(--ease-out);
+}
+
+.input-bar-inner::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  border-radius: inherit;
+  background: linear-gradient(
+    115deg,
+    transparent 18%,
+    rgba(var(--white-rgb), 0.13) 42%,
+    transparent 62%
+  );
+  background-size: 240% 100%;
+  background-position: 120% 0;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 360ms ease, background-position 760ms var(--ease-out);
+}
+
+.input-bar-inner:hover::before,
+.input-bar-inner:focus-within::before {
+  opacity: 1;
+  background-position: -20% 0;
 }
 
 .input-bar-inner:focus-within {
@@ -778,4 +810,164 @@
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
+}
+
+/* ── 底部自动隐藏输入栏 ── */
+.input-bar-drawer-surface {
+  width: 100%;
+  transform-origin: bottom center;
+}
+
+.input-bar-hotzone {
+  display: none;
+}
+
+@media (hover: hover) and (min-width: 769px) {
+  /* 底部停靠态脱离空会话居中规则，确保抽屉始终从页面底边升起。 */
+  .input-bar.input-bar-bottom,
+  .chat-area-container-empty .input-bar.input-bar-bottom {
+    bottom: 0;
+    transform: translateX(-50%);
+    pointer-events: none;
+  }
+
+  .input-bar-bottom .input-bar-drawer-surface {
+    pointer-events: auto;
+    transition:
+      transform 520ms var(--ease-out),
+      opacity 280ms ease,
+      filter 520ms var(--ease-out);
+  }
+
+  .input-bar-docked .input-bar-drawer-surface,
+  .input-bar-drawer-open .input-bar-drawer-surface {
+    transform: translateY(-8px) scaleX(1);
+    opacity: 1;
+    filter: saturate(165%);
+  }
+
+  .input-bar-drawer-hidden .input-bar-drawer-surface {
+    transform: translateY(calc(100% + 8px)) scaleX(0.24);
+    opacity: 0;
+    filter: saturate(110%);
+    pointer-events: none;
+  }
+
+  .input-bar-drawer-peek .input-bar-drawer-surface {
+    transform: translateY(calc(100% - 30px)) scaleX(0.32);
+    opacity: 0.96;
+    filter: saturate(140%);
+  }
+
+  .input-bar-auto-hide .input-bar-inner > * {
+    transition: opacity 180ms ease;
+  }
+
+  .input-bar-drawer-hidden .input-bar-inner > *,
+  .input-bar-drawer-peek .input-bar-inner > * {
+    opacity: 0;
+    pointer-events: none;
+  }
+
+  .input-bar-drawer-open .input-bar-inner > * {
+    opacity: 1;
+  }
+
+  /* 与输入栏本体分离的稳定触发热区；抽屉移动不会改变它的命中边界。 */
+  .input-bar-hotzone {
+    appearance: none;
+    display: block;
+    position: absolute;
+    left: 50%;
+    bottom: 0;
+    width: 176px;
+    height: 14px;
+    padding: 0;
+    transform: translateX(-50%);
+    border: 1px solid rgba(var(--white-rgb), 0.18);
+    border-bottom: 0;
+    border-radius: 999px 999px 0 0;
+    background:
+      linear-gradient(115deg, rgba(var(--white-rgb), 0.14), rgba(var(--accent-rgb), 0.10) 48%, rgba(var(--white-rgb), 0.04)),
+      rgba(var(--bg-secondary-rgb), 0.64);
+    backdrop-filter: blur(18px) saturate(170%);
+    -webkit-backdrop-filter: blur(18px) saturate(170%);
+    box-shadow:
+      0 -8px 28px rgba(var(--black-rgb), 0.24),
+      0 0 20px rgba(var(--accent-rgb), 0.10),
+      inset 0 1px 0 rgba(var(--white-rgb), 0.24);
+    cursor: pointer;
+    overflow: hidden;
+    opacity: 1;
+    pointer-events: auto;
+    z-index: 3;
+    transition:
+      width 360ms var(--ease-out),
+      height 360ms var(--ease-out),
+      opacity 220ms ease,
+      transform 360ms var(--ease-out),
+      background 360ms var(--ease-out),
+      box-shadow 360ms var(--ease-out);
+  }
+
+  .input-bar-hotzone::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(90deg, transparent, rgba(var(--white-rgb), 0.22), transparent);
+    background-size: 220% 100%;
+    background-position: 120% 0;
+    transition: background-position 620ms var(--ease-out);
+  }
+
+  .input-bar-hotzone-glint {
+    position: absolute;
+    left: 50%;
+    top: 4px;
+    width: 58px;
+    height: 2px;
+    transform: translateX(-50%);
+    border-radius: 999px;
+    background: rgba(var(--white-rgb), 0.62);
+    box-shadow: 0 0 10px rgba(var(--accent-rgb), 0.42);
+    pointer-events: none;
+  }
+
+  .input-bar-hotzone:hover,
+  .input-bar-hotzone:focus-visible,
+  .input-bar-hotzone-peek {
+    width: 224px;
+    height: 18px;
+    background:
+      linear-gradient(115deg, rgba(var(--white-rgb), 0.20), rgba(var(--accent-rgb), 0.15) 48%, rgba(var(--white-rgb), 0.06)),
+      rgba(var(--bg-secondary-rgb), 0.70);
+    box-shadow:
+      0 -10px 32px rgba(var(--black-rgb), 0.28),
+      0 0 26px rgba(var(--accent-rgb), 0.16),
+      inset 0 1px 0 rgba(var(--white-rgb), 0.30);
+    outline: none;
+  }
+
+  .input-bar-hotzone:hover::before,
+  .input-bar-hotzone:focus-visible::before,
+  .input-bar-hotzone-peek::before {
+    background-position: -20% 0;
+  }
+
+  .input-bar-hotzone-open {
+    opacity: 0;
+    transform: translateX(-50%);
+    pointer-events: auto;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .input-bar-drawer-surface,
+  .input-bar-inner,
+  .input-bar-inner::before,
+  .input-bar-hotzone,
+  .input-bar-hotzone::before {
+    transition-duration: 1ms !important;
+    animation-duration: 1ms !important;
+  }
 }

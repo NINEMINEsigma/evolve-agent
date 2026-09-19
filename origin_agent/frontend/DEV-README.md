@@ -113,7 +113,7 @@ frontend/
 | `MermaidRenderer.tsx` | Mermaid 图表渲染 |
 | `ChatContextMenu.tsx` | 聊天区右键菜单 |
 | `RichInput.tsx` | 富文本输入（支持多行、快捷键） |
-| `InputBar.tsx` | 输入框、文件上传、发送按钮、功能按钮组（超宽收起菜单）、上下文徽章；中断按钮支持「正在中断」状态、禁止重复点击、失败后允许重试 |
+| `InputBar.tsx` | 输入框、文件上传、发送按钮、功能按钮组（超宽收起菜单）、上下文徽章；普通单Agent桌面会话在已有消息后使用独立底部玻璃热区控制三态抽屉，空会话保留居中的完整输入栏；非空会话空闲时输入栏本体藏到页面下方，热区悬停后先探出再稳定展开，聚焦及附件、审批、上传、录音、任务进度等交互期间保持展开；中断按钮支持「正在中断」状态、禁止重复点击、失败后允许重试 |
 | `TokenRing.tsx` | 上下文用量环形徽章（Header 与输入栏共用） |
 | `Lightbox.tsx` | 图片灯箱 |
 | `SafeHtml.tsx` | 安全 HTML 渲染 |
@@ -253,7 +253,7 @@ frontend/
 | `variables.css` | CSS 变量 |
 | `chat.css` | 聊天布局 |
 | `messages.css` | 消息气泡与渲染 |
-| `input.css` | 输入框（半透明背景模糊、玻璃高光边框与聚焦光晕） |
+| `input.css` | 输入框（半透明背景模糊、玻璃高光边框与聚焦光晕；非空桌面会话的底部玻璃热区和 hidden/peek/open 三态抽屉动画；空会话及触摸设备保持完整形态） |
 | `dialogs.css` | 弹窗 |
 | `drawer.css` | 抽屉面板 |
 | `panels.css` | 任务进度/子代理面板 |
