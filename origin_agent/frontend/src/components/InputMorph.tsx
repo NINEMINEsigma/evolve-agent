@@ -105,6 +105,9 @@ export default function InputMorph({
           </>
         ) : (
           <>
+            {item.confirm.reason && (
+              <div className="input-morph-confirm-reason">原因: {item.confirm.reason}</div>
+            )}
             {hasConfirmArgs && (
               <div className="tool-json-view">
                 <JsonView
@@ -114,9 +117,6 @@ export default function InputMorph({
                   collapseStringsAfterLength={99999}
                 />
               </div>
-            )}
-            {item.confirm.reason && (
-              <div className="input-morph-confirm-reason">原因: {item.confirm.reason}</div>
             )}
           </>
         )}
