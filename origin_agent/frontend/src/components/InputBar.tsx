@@ -445,7 +445,7 @@ export default function InputBar({
                   disabled={morphActive || uploading}
                 />
                 <button
-                  className="agentspace-fab"
+                  className="input-tool-btn"
                   data-tooltip="打开 Agentspace 编辑器"
                   type="button"
                   onClick={() => window.open("/agentspace", "_blank")}
