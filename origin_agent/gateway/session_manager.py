@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import logging
+import threading
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -44,6 +45,8 @@ class SessionManager:
         self._loops: dict[str, IMainSessionLoop] = {}
         self._store_path: str | None = store_path
         self._client_infos: dict[str, ClientInfo] = {}
+        self._deleting_sessions: set[str] = set()
+        self._deleting_sessions_lock = threading.Lock()
 
     # -- 委托给底层 ChatSessionManager 的方法 --
 
@@ -58,6 +61,24 @@ class SessionManager:
     def exists(self, session_id: str) -> bool:
         """返回 session 是否存在。"""
         return self._chat_sm.exists(session_id)
+
+    def begin_session_delete(self, session_id: str) -> bool:
+        """原子标记会话正在永久删除；已标记时返回 False。"""
+        with self._deleting_sessions_lock:
+            if session_id in self._deleting_sessions:
+                return False
+            self._deleting_sessions.add(session_id)
+            return True
+
+    def is_session_deleting(self, session_id: str) -> bool:
+        """返回会话是否处于永久删除流程。"""
+        with self._deleting_sessions_lock:
+            return session_id in self._deleting_sessions
+
+    def end_session_delete(self, session_id: str) -> None:
+        """清除永久删除标记；重复调用保持幂等。"""
+        with self._deleting_sessions_lock:
+            self._deleting_sessions.discard(session_id)
 
     def get_all(self) -> list[SessionInfo]:
         return self._chat_sm.get_all()
@@ -363,6 +384,32 @@ class SessionManager:
             if self._app.cron_router is not None:
                 self._app.cron_router.unregister(session_id)
             logger.info("Session terminated: %s", session_id)
+
+    async def delete_session_runtime(self, session_id: str) -> None:
+        """回收永久删除会话的运行时 Loop、队列、客户端信息与 Cron 注册。"""
+        loop = self._loops.pop(session_id, None)
+        self._client_infos.pop(session_id, None)
+        try:
+            if loop is not None:
+                try:
+                    result = await loop.request_interrupt(reason="delete")
+                    logger.info(
+                        "Session delete interrupt result | session=%s status=%s",
+                        session_id,
+                        result.status,
+                    )
+                except Exception:
+                    logger.warning(
+                        "Session delete interrupt failed | session=%s",
+                        session_id,
+                        exc_info=True,
+                    )
+        finally:
+            if loop is not None:
+                loop.loop.stop_message_queue()
+            if self._app.cron_router is not None:
+                self._app.cron_router.unregister(session_id)
+        logger.info("Session runtime deleted | session=%s", session_id)
 
     async def replace_loop(self, session_id: str, new_loop: IMainSessionLoop) -> None:
         """将 session 的当前 loop 替换为 new_loop。

@@ -20,6 +20,9 @@ export const WS_IN = {
   PONG:              "pong",
 } as const;
 
+/** 会话永久删除关闭码；必须与后端 WEBSOCKET_CLOSE_SESSION_DELETED 保持一致。 */
+export const WS_CLOSE_SESSION_DELETED = 4004;
+
 /** WebSocket 传出消息类型 */
 export const WS_OUT = {
   USER_MESSAGE:   "user_message",

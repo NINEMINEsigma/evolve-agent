@@ -222,6 +222,7 @@ classDiagram
         #_ask_session_map
         +register_ws()
         +unregister_ws()
+        +close_session()
         +get_ws()
         +get_all_ws()
         +request_approval()
@@ -335,9 +336,15 @@ classDiagram
         #_chat_sm
         #_loops
         #_store_path
+        #_deleting_sessions
+        #_deleting_sessions_lock
         +create_session()
         +get_loop()
         +terminate_session()
+        +delete_session_runtime()
+        +begin_session_delete()
+        +is_session_deleting()
+        +end_session_delete()
         +replace_loop()
         +rotate_session()
     }
@@ -693,6 +700,8 @@ classDiagram
 | `_agent_loop` | `_OrchestratorContext` | `ParentAgentLoop` | 访问父 loop 的 `current_character_agent` 等 |
 | `_active` / `_active_task` | `_OrchestratorContext` | `dict` | 管理 SubAgentLoop 实例 |
 | `_loops` | `SessionManager` | `dict[str, IMainSessionLoop]` | 管理 loop 映射 |
+| `_deleting_sessions` | `SessionManager` | `set[str]` | 正在永久删除的主会话 ID；Gateway 在持久化移除完成前据此拒绝恢复连接 |
+| `_deleting_sessions_lock` | `SessionManager` | `threading.Lock` | 删除中集合的检查并添加、查询和移除同步边界 |
 | `ws` | `MessageRouter` | `WebSocket` | WebSocket 连接引用 |
 | `sid` | `MessageRouter` | `str` | 当前 session_id（旋转时更新） |
 | `agentspace_path` | `MessageRouter` | `Path \| None` | 文件上传目标目录 |
@@ -774,6 +783,8 @@ classDiagram
 | `_OrchestratorContext._collect_and_inject` | `process_message()` | `ParentAgentLoop` | `subagent/orchestrator.py` | 调用父 loop 公共方法 |
 | `MessageRouter.route` | `get_loop()` | `SessionManager` | `gateway/message_router.py` | 通过 `_get_sm().get_loop()` 获取 loop |
 | `MessageRouter._handle_session_rotation` | `unregister_ws()` / `register_ws()` | `FrontendSink` | `gateway/message_router.py` | 旋转时更新 WebSocket 映射 |
+| Gateway 永久删除 | `close_session()` | `FrontendSink` | `gateway/server.py::delete_session` | 先移除连接映射、拒绝待处理交互，再以 4004关闭已建立的被删除会话连接 |
+| Gateway 永久删除与恢复 | `begin_session_delete()` / `is_session_deleting()` / `end_session_delete()` / `delete_session_runtime()` | `SessionManager` | `gateway/server.py` | 封闭删除期间的连接重建竞态，并回收 Loop、活动回复、消息队列、客户端信息和 Cron 注册 |
 | `MessageRouter._dispatch_subagent_messages` | `get_snapshot()` / `chat_user_direct()` | `SubAgentOrchestrator` | `gateway/message_router.py` | 转发消息到子 Agent |
 | `gateway/session_manager.replace_loop` | `_agents` | `MultiAgentLoop` | `gateway/session_manager.py` | 读取 multi loop 的 agents |
 | `gateway/session_manager.replace_loop` / `rotate_session` | `session_id` | `BaseAgentLoop` | `gateway/session_manager.py` | 写入 loop 的 session_id |
@@ -913,3 +924,7 @@ classDiagram
 主会话的活动任务从长期 `SessionMessageQueue` consumer 收敛为已经取得 `_process_lock` 的单次回复 task。队列 consumer 为每批消息创建 child 并持续承载 FIFO；用户中断只设置该轮取消事件并等待/取消活动回复，不销毁 consumer。普通模式、多Agent模式及恢复/重新生成入口均在外层轮次开始时初始化控制事件，并在同轮 finally 清除后再注销 task。
 
 `StreamConsumer` 通过共享取消事件自行终止当前 `__anext__()`，并作为异步迭代器唯一关闭者；外部不再并发 `aclose()`。工具 handler task 的取消使用有限清理窗口，超时 task 由 `ToolExecutor._cancel_cleanup_tasks` 强引用并观察。前端对 `history_sync.processing` 的 true/false 都按服务端权威值覆盖本地状态。
+
+### 主会话永久删除与连接失效收敛
+
+永久删除由 Gateway 分层执行：`SessionManager` 的删除中集合先封闭新连接与 Loop重建竞态，`FrontendSink.close_session()`从连接映射移除会话并以 4004关闭已建立连接，`delete_session_runtime()`再中断活动回复、停止长期消息队列、清除客户端信息并注销 Cron，最后由 `gateway.chat.SessionManager.remove()`统一删除索引与会话目录。握手前无法可靠向浏览器传递私有关闭码，因此前端通过 `/api/sessions/{id}/status` 的删除感知 `exists`字段二次确认；显式恢复已经删除或删除中的 ID不再创建随机新会话。

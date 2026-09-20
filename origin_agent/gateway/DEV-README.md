@@ -68,7 +68,9 @@ WS /ws/chat?resume=<sid>
 ```
 
 - 不带 `resume`：创建新会话。
-- 带 `resume`：恢复已有会话，重放历史。这里的 `resume` 是 WebSocket 连接恢复参数，不等同于下方 REST `/api/sessions/{id}/resume` 的“恢复工具链执行”操作；两者都不会因为前端当前选择了新的 Profile 而自动更新会话配置。
+- 带 `resume`：只恢复已有会话，重放历史。这里的 `resume` 是 WebSocket 连接恢复参数，不等同于下方 REST `/api/sessions/{id}/resume` 的“恢复工具链执行”操作；两者都不会因为前端当前选择了新的 Profile 而自动更新会话配置。显式目标处于删除中或从内存、磁盘均不存在时，Gateway 拒绝握手，不再创建随机替代会话。
+
+永久删除已建立连接时，Gateway 使用关闭码 `WEBSOCKET_CLOSE_SESSION_DELETED`（4004）使连接失效；前端收到后停止按旧会话 ID自动重连并切换到“随意聊聊”。握手前的拒绝可能被浏览器报告为 1006，前端因此通过 `/api/sessions/{id}/status` 的 `exists`再次确认；删除中的会话也按 `exists=false`返回。
 
 连接建立后，服务端发送：
 
@@ -119,6 +121,7 @@ WS /ws/chat?resume=<sid>
 | 方法 | 端点 | 说明 |
 |------|------|------|
 | GET | `/api/sessions` | 会话列表 |
+| GET | `/api/sessions/{id}/status` | 返回内存索引中的存在状态与 WebSocket 占用状态；删除中按 `exists=false`处理 |
 | GET | `/api/tags` | 全局标签列表 |
 | PUT | `/api/sessions/{id}/tags` | 更新会话标签 |
 | PUT | `/api/sessions/{id}/title` | 手动设置标题 |
@@ -128,7 +131,9 @@ WS /ws/chat?resume=<sid>
 | POST | `/api/sessions/{id}/pin` | 置顶切换 |
 | POST | `/api/sessions/{id}/branch` | 从会话创建分支 |
 | POST | `/api/sessions/merge` | 合并多个已归档会话 |
-| DELETE | `/api/sessions/{id}` | 删除会话 |
+| DELETE | `/api/sessions/{id}` | 永久删除会话；拒绝“随意聊聊”、不存在目标和重复删除 |
+
+永久删除先建立进程内删除中标记以阻止新连接重建 Loop，再关闭现有 WebSocket、停止子Agent、回收活动回复/消息队列/客户端信息/Cron 注册，随后删除会话索引与目录并清理 Shell、Cron 和动态端点。删除中并发请求对已移除的 Loop返回未找到或未就绪；附带资源清理失败不回滚已经完成的永久删除。
 
 ### 聊天 History 按需读取
 

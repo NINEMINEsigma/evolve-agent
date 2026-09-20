@@ -258,6 +258,25 @@ export function useWebSocket() {
     subagentRef.current.handleMessage(message, sessionRef.current?.sessionId ?? "");
   }, [appendLocalMessage, handleHistorySync]);
 
+  const newChat = useCallback(() => {
+    window.history.replaceState({}, "", "/");
+    conn.disconnect();
+    sessionRef.current?.newChat();
+    chatRuntimeController.beginSession("");
+    conn.connect();
+  }, [conn.connect, conn.disconnect]);
+
+  const switchSession = useCallback((sid: string) => {
+    if (sessionRef.current?.sessionId === sid) return;
+    window.history.replaceState({}, "", `/?session=${sid}`);
+    conn.disconnect();
+    sessionRef.current?.switchSession(sid);
+    chatRuntimeController.beginSession(sid);
+    conn.connect(sid);
+  }, [conn.connect, conn.disconnect]);
+
+  const enterColloquy = useCallback(() => switchSession(COLLOQUY_SID), [switchSession]);
+
   const onOpen = useCallback(() => {
     sessionRef.current?.setApprovalModeSyncStatus("loading");
     if (sessionRef.current) sessionRef.current.ignoreStaleRef.current = false;
@@ -269,9 +288,14 @@ export function useWebSocket() {
     sessionRef.current?.setApprovalModeSyncStatus("unavailable");
   }, []);
 
+  const onSessionDeleted = useCallback(() => {
+    if (sessionRef.current?.sessionId === COLLOQUY_SID) return;
+    switchSession(COLLOQUY_SID);
+  }, [switchSession]);
+
   useEffect(() => {
-    conn.setHandlers({ onOpen, onMessage: handleMessage, onClose });
-  }, [conn, handleMessage, onClose, onOpen]);
+    conn.setHandlers({ onOpen, onMessage: handleMessage, onClose, onSessionDeleted });
+  }, [conn, handleMessage, onClose, onOpen, onSessionDeleted]);
 
   useEffect(() => {
     conn.connect();
@@ -336,24 +360,6 @@ export function useWebSocket() {
     runtime.setProcessing(true);
   }, []);
 
-  const newChat = useCallback(() => {
-    window.history.replaceState({}, "", "/");
-    conn.disconnect();
-    sessionRef.current?.newChat();
-    chatRuntimeController.beginSession("");
-    conn.connect();
-  }, [conn.connect, conn.disconnect]);
-
-  const switchSession = useCallback((sid: string) => {
-    window.history.replaceState({}, "", `/?session=${sid}`);
-    conn.disconnect();
-    sessionRef.current?.switchSession(sid);
-    chatRuntimeController.beginSession(sid);
-    conn.connect(sid);
-  }, [conn.connect, conn.disconnect]);
-
-  const enterColloquy = useCallback(() => switchSession(COLLOQUY_SID), [switchSession]);
-
   const mergeSessions = useCallback(async (sources: string[]) => {
     const newSid = await session.mergeSessions(sources);
     if (newSid) switchSession(newSid);
@@ -364,16 +370,30 @@ export function useWebSocket() {
     if (newSid) switchSession(newSid);
   }, [switchSession]);
 
-  const deleteSession = useCallback((sid: string) => {
+  const deleteSession = useCallback(async (sid: string) => {
     if (!confirm("确定要删除这个会话吗？此操作不可撤销。")) return;
-    const wasActive = sid === sessionRef.current?.sessionId;
-    fetch(`/api/sessions/${sid}`, { method: "DELETE" })
-      .then(() => {
-        sessionRef.current?.setSessions((previous) => previous.filter((item) => item.id !== sid));
-        if (wasActive) switchSession(COLLOQUY_SID);
-      })
-      .catch(() => {});
-  }, [switchSession]);
+    const activeSessionAtStart = sessionRef.current?.sessionId;
+    try {
+      const response = await fetch(`/api/sessions/${sid}`, { method: "DELETE" });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok || !data.deleted) {
+        const reason = typeof data.error === "string"
+          ? data.error
+          : `HTTP ${response.status}`;
+        appendLocalMessage("error", `删除会话失败：${reason}`);
+        return;
+      }
+      sessionRef.current?.setSessions((previous) => previous.filter((item) => item.id !== sid));
+      if (activeSessionAtStart === sid && sessionRef.current?.sessionId === sid) {
+        switchSession(COLLOQUY_SID);
+      }
+    } catch (error) {
+      appendLocalMessage(
+        "error",
+        `删除会话失败：${error instanceof Error ? error.message : "网络错误"}`,
+      );
+    }
+  }, [appendLocalMessage, switchSession]);
 
   const setApprovalMode = useCallback((mode: ApprovalMode) => {
     const currentSession = sessionRef.current;

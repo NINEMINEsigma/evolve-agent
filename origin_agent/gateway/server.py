@@ -22,7 +22,7 @@ from typing import * # type: ignore
 from urllib.parse import parse_qs, quote
 
 import uvicorn
-from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect, WebSocketException
 from fastapi.responses import FileResponse, HTMLResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -48,6 +48,7 @@ from entity.constant import (
     LOCAL_FONT_MIME_TYPES,
     SESSION_HISTORY_PAGE_DEFAULT_LIMIT,
     SESSION_HISTORY_PAGE_MAX_LIMIT,
+    WEBSOCKET_CLOSE_SESSION_DELETED,
 )
 from entity.puretype import (
     SessionStatus,
@@ -486,15 +487,24 @@ async def get_session_tool_resources(session_id: str):
 
 @app.get("/api/sessions/{session_id}/status")
 async def get_session_status(session_id: str, conn_token: str | None = None):
-    """Return session status including WebSocket occupancy info.
+    """Return session existence and WebSocket occupancy info.
 
-    用于前端在连接 WebSocket 前进行预检。
+    用于前端在连接 WebSocket 前进行预检。删除中的会话按不存在处理，
+    使握手拒绝后的二次查询停止按旧 ID 自动重连。
     conn_token 匹配时视为同标签页刷新，返回 occupied=False。
     """
     from system.application import Application
+    sm = _get_sm()
+    exists = bool(
+        sm
+        and sm.exists(session_id)
+        and not sm.is_session_deleting(session_id)
+    )
     sink = Application.current().frontend_sink
-    occupied: bool = sink.is_session_occupied(session_id, conn_token) if sink else False
-    return {"session_id": session_id, "occupied": occupied}
+    occupied: bool = bool(
+        exists and sink and sink.is_session_occupied(session_id, conn_token)
+    )
+    return {"session_id": session_id, "exists": exists, "occupied": occupied}
 
 
 @app.get("/api/sessions/{session_id}/subagents")
@@ -599,34 +609,63 @@ async def http_disgust(session_id: str):
 
 @app.delete("/api/sessions/{session_id}")
 async def delete_session(session_id: str):
-    """删除 session 及其持久化数据。colloquy session 不可删除。"""
+    """永久删除 session、运行时对象及附带资源。colloquy session 不可删除。"""
     from entity.puretype import Loop
-    info = _get_sm().get(session_id)
-    if info and info.loop_type == Loop.colloquy:
+    from system.application import Application
+
+    sm = _get_sm()
+    info = sm.get(session_id) if sm else None
+    if info is None:
+        logger.warning("Delete session rejected (not found) | session=%s", session_id)
+        return HTMLResponse(
+            json.dumps({"deleted": False, "error": "session not found"}, ensure_ascii=False),
+            media_type="application/json",
+            status_code=404,
+        )
+    if info.loop_type == Loop.colloquy:
         logger.warning("Delete session rejected (colloquy) | session=%s", session_id)
         return HTMLResponse(
             json.dumps({"deleted": False, "error": "colloquy session cannot be deleted"}, ensure_ascii=False),
             media_type="application/json",
             status_code=403,
         )
+    if not sm.begin_session_delete(session_id):
+        logger.warning("Delete session rejected (already deleting) | session=%s", session_id)
+        return HTMLResponse(
+            json.dumps({"deleted": False, "error": "session deletion already in progress"}, ensure_ascii=False),
+            media_type="application/json",
+            status_code=409,
+        )
+
     logger.info("Delete session | session=%s", session_id)
-    _get_sm().remove(session_id)
-    loop = _get_loop(session_id)
-    if loop is not None:
-        loop.loop.clear_session()
-    # 停止该主会话下的所有子 Agent 并清理上下文
     try:
-        orch = get_subagent_orchestrator()
-        await orch.shutdown(session_id)
-    except Exception:
-        logger.warning("Failed to shutdown subagents for session=%s", session_id, exc_info=True)
-    # 清理会话级附带资源（后台任务、cron、动态端点）— 置于 shutdown
-    # 之后作为会话级收尾，此时索引/目录已删、子 Agent 已关。
-    try:
-        from gateway.session_cleanup import cleanup_session_resources
-        await cleanup_session_resources(session_id)
-    except Exception:
-        logger.warning("Failed to cleanup session resources for session=%s", session_id, exc_info=True)
+        sink = Application.current().frontend_sink
+        if sink is not None:
+            await sink.close_session(
+                session_id,
+                code=WEBSOCKET_CLOSE_SESSION_DELETED,
+                reason="session_deleted",
+            )
+
+        # 停止该主会话下的所有子 Agent 并清理上下文。
+        try:
+            orch = get_subagent_orchestrator()
+            await orch.shutdown(session_id)
+        except Exception:
+            logger.warning("Failed to shutdown subagents for session=%s", session_id, exc_info=True)
+
+        await sm.delete_session_runtime(session_id)
+        sm.remove(session_id)
+
+        # 清理会话级附带资源。各资源独立容错，失败不回滚永久删除。
+        try:
+            from gateway.session_cleanup import cleanup_session_resources
+            await cleanup_session_resources(session_id)
+        except Exception:
+            logger.warning("Failed to cleanup session resources for session=%s", session_id, exc_info=True)
+    finally:
+        sm.end_session_delete(session_id)
+
     logger.info("Delete session ok | session=%s", session_id)
     return {"deleted": True, "session_id": session_id}
 
@@ -2381,32 +2420,46 @@ async def ws_chat(ws: WebSocket) -> None:
     resume: str | None = qs.get("resume", [None])[0]
     conn_token: str | None = qs.get("conn_token", [None])[0]
     sid: str
-    if resume and _get_sm().exists(resume):
+    sm = _get_sm()
+    if resume:
+        if sm.is_session_deleting(resume):
+            logger.info("WebSocket rejected (session deleting) | session=%s", resume)
+            raise WebSocketException(
+                code=WEBSOCKET_CLOSE_SESSION_DELETED,
+                reason="session_deleted",
+            )
+        if not sm.exists(resume):
+            # 防御性地从磁盘重新加载一次；仍不存在时禁止把旧 ID 转成随机新会话。
+            sm.load_from_disk()
+        if not sm.exists(resume) or sm.is_session_deleting(resume):
+            logger.info("WebSocket rejected (session missing) | session=%s", resume)
+            raise WebSocketException(
+                code=WEBSOCKET_CLOSE_SESSION_DELETED,
+                reason="session_deleted",
+            )
         sid = resume
     else:
-        # 尝试从磁盘加载（server 重启后恢复）
-        if resume:
-            _get_sm().load_from_disk()
-            if _get_sm().exists(resume):
-                sid = resume
-            else:
-                sid = _get_sm().create()
-        else:
-            sid = _get_sm().create()
+        sid = sm.create()
 
     # 会话占用检查 — 握手前拒绝。
     # 使用 WebSocketException 而非 ws.close()，因为 close()-before-accept()
     # 的行为在不同 Starlette 版本中不一致，WebSocketException 是官方推荐的
     # 握手拒绝方式，版本无关。
     from system.application import Application as _AppLock
-    from fastapi import WebSocketException
     _sink = _AppLock.current().frontend_sink
     if _sink and _sink.is_session_occupied(sid, conn_token):
         logger.info("WebSocket rejected (session locked) | session=%s", sid)
         raise WebSocketException(code=4001, reason="session_locked")
 
-    # 通过检查 → accept 并注册
+    # 通过检查 → accept；accept 会让出事件循环，因此注册前再次确认删除状态。
     await ws.accept()
+    if sm.is_session_deleting(sid) or not sm.exists(sid):
+        logger.info("WebSocket closed after accept (session deleted) | session=%s", sid)
+        await ws.close(
+            code=WEBSOCKET_CLOSE_SESSION_DELETED,
+            reason="session_deleted",
+        )
+        return
     _sink.register_ws(sid, ws, conn_token or "")
     logger.info("WebSocket connected | session=%s", sid)
 

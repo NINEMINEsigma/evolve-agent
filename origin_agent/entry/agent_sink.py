@@ -177,6 +177,27 @@ class FrontendSink(AgentSink):
         self._deny_session_confirms(session_id)
         self._deny_session_asks(session_id)
 
+    async def close_session(
+        self, session_id: str, *, code: int, reason: str,
+    ) -> bool:
+        """使会话连接失效并关闭 WebSocket；无活动连接时保持幂等。"""
+        entry = self._ws_sinks.pop(session_id, None)
+        self._deny_session_confirms(session_id)
+        self._deny_session_asks(session_id)
+        if entry is None:
+            return False
+        try:
+            await entry.ws.close(code=code, reason=reason)
+        except Exception:
+            logger.warning(
+                "Failed to close WebSocket | session=%s code=%s reason=%s",
+                session_id,
+                code,
+                reason,
+                exc_info=True,
+            )
+        return True
+
     def get_ws(self, session_id: str) -> WebSocket | None:
         entry = self._ws_sinks.get(session_id)
         return entry.ws if entry else None
