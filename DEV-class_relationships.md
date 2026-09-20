@@ -70,9 +70,6 @@ classDiagram
         +pop_session_rotated()*
         +get_token_usage()*
         +get_context_tokens()*
-        +auto_generate_title()*
-        +regenerate_session_tags()*
-        +regenerate_summary_for_session()*
         #_interrupt_lock
         #_active_round_task
         #_init_round_registry()
@@ -102,8 +99,6 @@ classDiagram
         +process_inbox()
         +schedule_inbox_processing()
         +append_user_message()
-        +auto_generate_title()
-        +regenerate_session_tags()
         +terminate_session()
         +merge_sessions()
         #_run_tool_loop()
@@ -133,8 +128,6 @@ classDiagram
         +get_token_usage()
         +get_context_tokens()
         #_resolve_llm_client()
-        +auto_generate_title()
-        +regenerate_session_tags()
         +get_session_messages()
         +clear_session()
         +edit_session_message()
@@ -382,12 +375,29 @@ classDiagram
         +to_payload()
     }
 
+    class SessionMetadataService {
+        #_runtime_context
+        #_llm_profile_store
+        #_profile_lock
+        #_session_store
+        +get_state()
+        +select_profile()
+        +generate_title()
+        +generate_tags()
+        +generate_summary()
+        +regenerate_summary()
+        +ensure_summary()
+    }
+
     class LLMProfileData {
         +profiles
+        +approval_profile
+        +metadata_profile
     }
 
     class Application {
         +runtime_context
+        +session_metadata_service
         +agentspace_service
         +session_manager
         +approval_backend_manager
@@ -601,6 +611,9 @@ classDiagram
     MessageRouter --> SessionManager : uses
     MessageRouter --> IMainSessionLoop : routes to
     Application --> LLMProfileStore : holds
+    Application --> SessionMetadataService : holds
+    SessionMetadataService --> LLMProfileStore : resolves Profile
+    SessionMetadataService --> SessionStore : reads target session
     LLMProfileStore --> LLMProfileData : owns root
     Application --> SessionManager : holds
     Application --> ApprovalBackendManager : holds
@@ -709,6 +722,11 @@ classDiagram
 | `runtime_context` | `Application` | `RuntimeContext` | 运行时上下文 |
 | `_profile_lock` | `Application` | `threading.RLock` | Profile 根对象、名称指针与会话选择共用的进程锁 |
 | `_llm_profile_store` | `Application` | `LLMProfileStore \| None` | 进程内唯一的 `LLMProfileData` 根对象存储 |
+| `_session_metadata_service` | `Application` | `SessionMetadataService \| None` | 进程内唯一的标题、标签、摘要生成服务；解析全局元数据 Profile与目标会话回退 |
+| `_runtime_context` | `SessionMetadataService` | `RuntimeContext` | 创建单次元数据 LLM 客户端所需的运行时上下文 |
+| `_llm_profile_store` | `SessionMetadataService` | `LLMProfileStore` | 读取全局元数据 Profile和目标会话回退 Profile |
+| `_profile_lock` | `SessionMetadataService` | `threading.RLock` | 解析根对象并复制单次 Profile快照的同步边界 |
+| `_session_store` | `SessionMetadataService` | `SessionStore` | 读取目标会话 Profile名称指针、History和摘要 |
 | `_subprocess_runner` | `Application` | `SubprocessRunner \| None` | 进程内唯一的内部子进程执行器（同步、真异步与逐行消费），注入 Sandbox 委托 |
 | `_shell_manager` | `Application` | `ShellManager \| None` | 进程内唯一的 Windows ConPTY Shell会话管理器；持有长期交互式 Shell |
 | `_shells` | `ShellManager` | `dict[str, _ShellSession]` | Shell ID 到运行时会话状态的唯一注册表 |
@@ -795,6 +813,7 @@ classDiagram
 | `cron_tools` 模块函数 | `_timer` | `_CronTask` | `component/extools/cron_tools.py` | 直接访问任务内部 timer |
 | `diagram.py` / `mermaid_tools.py` / `docgen_tools.py` / `web_browser.py` | `_ctx` | `Sandbox` | `component/extools/*.py` | 直接访问 Sandbox 的 `_ctx` 获取 agentspace |
 | 全局 `Application.current()` | `session_manager`, `frontend_sink`, `subagent_orchestrator`, `approval_backend_manager` | `Application` | 多处 | 各模块通过单例访问子系统 |
+| Gateway / Agent Loop 会话元数据入口 | `session_metadata_service` | `Application` | `gateway/server.py`、`entry/base_agent_loop.py`、`entry/session_manager.py`、`entry/multi_agent_loop.py`、`entry/colloquy_loop.py` | 标题、标签、摘要及延续摘要保障统一经全局元数据服务，Loop 不再自行选择元数据客户端 |
 | 动态空间管理工具与管理弹窗 | `add_dynamic_space()` / `update_dynamic_space()` / `remove_dynamic_space()` / `normalize_dynamic_space_path()` | `Sandbox` | `component/tools/sandbox_spaces.py`、`gateway/server.py` | Agent 工具经 critical 审批；用户命令菜单管理弹窗经 REST 直接修改，均复用 Sandbox 校验 |
 | 动态空间 Prompt 构建器 | `list_dynamic_spaces_with_availability()` | `Sandbox` | `system/prompt.py` | 生成结构化动态命名空间系统提示词块 |
 | Gateway Agentspace SSE | `shutdown_event` | `Application` | `gateway/server.py::agentspace_events` | 通过共享进程关闭信号主动结束事件流，避免阻塞 uvicorn 优雅关闭 |
@@ -814,6 +833,8 @@ classDiagram
 | `SessionHistorySkeletonRow` / `SessionHistorySkeletonResponse` | `entity/puretype/session.py` | `BaseModel` | 前端全历史骨架及后缀响应，不含正文或富媒体 |
 | `SessionHistoryContentRow` / `SessionHistoryPageResponse` | `entity/puretype/session.py` | `BaseModel` | 按 History 索引范围返回的完整前端投影行 |
 | `SessionHistoryImageResource` / `SessionHistoryDownloadResource` / `SessionHistoryResourcesResponse` | `entity/puretype/session.py` | `BaseModel` | 完整 History 的图片与下载资源索引 |
+| `SessionTerminationResult` | `entity/puretype/session.py` | `BaseModel` | 会话终结结果；元数据失败通过 `metadata_warnings`返回但不改变归档成功 |
+| `MetadataProfileUpdateRequest` / `MetadataProfileState` / `MetadataProfileMutationResponse` | `entity/puretype/metadata.py` | `BaseModel` | 全局元数据 Profile REST 请求、权威状态与变更响应 |
 | `InboxMessage` | `entry/base_agent_loop.py` | `BaseModel` | 收件箱消息基类，含 `to_text()` |
 | `UserMessage` | `entry/base_agent_loop.py` | `InboxMessage` | 用户消息 |
 | `ApprovalDecisionMessage` | `entry/base_agent_loop.py` | `InboxMessage` | 审批决定消息（当前未使用） |
@@ -852,7 +873,7 @@ classDiagram
 
 ### Application 单例
 
-`system/application.py::Application` 作为进程级唯一单例，替代了原有的模块级全局变量。所有子系统（`LLMProfileStore`、共享 Profile 锁、`SessionManager`、`FrontendSink`、`SubAgentOrchestrator`、`ApprovalBackendManager`、`CronRouter`、`ToolRegistry`）通过 `Application.current()` 访问。
+`system/application.py::Application` 作为进程级唯一单例，替代了原有的模块级全局变量。所有子系统（`LLMProfileStore`、共享 Profile 锁、`SessionMetadataService`、`SessionManager`、`FrontendSink`、`SubAgentOrchestrator`、`ApprovalBackendManager`、`CronRouter`、`ToolRegistry`）通过 `Application.current()` 访问。
 
 ### Approval 目录化
 
@@ -876,7 +897,11 @@ classDiagram
 
 ### LLM Profile 根对象与名称边界
 
-`Application` 持有唯一 `LLMProfileStore` 和共享进程锁。`llm_profiles.es` 仅支持 v2 `LLMProfileData` 根对象，三个多模态分工字段直接保存根列表中的 `LLMProfile` 实例引用；不存在 UID 或 v1 迁移。Gateway 只接收扁平名称 DTO 和单 Profile CRUD。主会话活动配置以名称指针持久化，每条前端消息只传 `llm_profile_name`；`IMainSessionLoop.set_profile()` 由 Parent/Multi 实现。`/regenerate` 请求明确接收 `llm_profile_name` 并在生成前更新活动 Profile；`/resume` 仅从当前历史恢复工具链，不接收、不更新 Profile，使用 `ParentAgentLoop` 当前已持有的活动 Profile。
+`Application` 持有唯一 `LLMProfileStore`、共享进程锁和 `SessionMetadataService`。`llm_profiles.es` 仅支持 v2 `LLMProfileData` 根对象，三个多模态分工字段、审批 Profile与全局元数据 Profile直接保存根列表中的 `LLMProfile` 实例引用；不存在 UID 或 v1 迁移。Gateway 只接收扁平名称 DTO 和单 Profile CRUD。主会话活动配置以名称指针持久化，每条前端消息只传 `llm_profile_name`；`IMainSessionLoop.set_profile()` 由 Parent/Multi 实现。`/regenerate` 请求明确接收 `llm_profile_name` 并在生成前更新活动 Profile；`/resume` 仅从当前历史恢复工具链，不接收、不更新 Profile，使用 `ParentAgentLoop` 当前已持有的活动 Profile。
+
+### 全局元数据 Profile 与延续摘要保障
+
+`SessionMetadataService`是标题、标签和摘要生成的唯一业务入口。它优先使用 `LLMProfileData.metadata_profile`；仅在全局引用为空时通过 `SessionStore.read_active_profile_name(session_id)`按目标会话回退，并对选定 Profile执行浅拷贝形成单次调用快照。明确配置但无效或调用失败时禁止静默回退。手动终结中的摘要和标签为 best-effort，失败通过 `SessionTerminationResult.metadata_warnings`返回但仍归档；分支、合并与自动超限旋转必须先取得摘要。自动旋转在摘要或延续初始化失败时保持旧会话 active、保留触发消息并追加对 LLM 不可见的系统状态，成功初始化延续 History后才归档旧会话。
 
 ### 多模态能力探测内化
 

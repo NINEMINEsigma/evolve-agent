@@ -9,6 +9,7 @@ import type {
   CronTask,
   DynamicEndpoint,
   InterruptStatus,
+  OperationNotice,
   SessionInfo,
   ShellInfo,
   SidebarItem,
@@ -60,6 +61,9 @@ export interface SessionStore {
   terminatingSessions: Set<string>;
   generatingTitleSessions: Set<string>;
   generatingTagSessions: Set<string>;
+  generatingSummarySessions: Set<string>;
+  operationNotice: OperationNotice | null;
+  dismissOperationNotice: () => void;
   interruptStatus: InterruptStatus;
   setInterruptStatus: React.Dispatch<React.SetStateAction<InterruptStatus>>;
   allTags: string[];
@@ -87,6 +91,18 @@ export interface SessionStore {
   toggleCluster: (id: string) => void;
 }
 
+function operationError(data: unknown, fallback: string): string {
+  if (!data || typeof data !== "object") return fallback;
+  const payload = data as Record<string, unknown>;
+  if (typeof payload.error === "string") return payload.error;
+  if (typeof payload.detail === "string") return payload.detail;
+  if (payload.detail && typeof payload.detail === "object") {
+    const message = (payload.detail as Record<string, unknown>).message;
+    if (typeof message === "string") return message;
+  }
+  return fallback;
+}
+
 export function useSessionStore(callbacks: SessionStoreCallbacks = {}): SessionStore {
   const [pendingConfirms, setPendingConfirms] = useState<ConfirmRequest[]>([]);
   const [pendingAsks, setPendingAsks] = useState<AskRequest[]>([]);
@@ -108,6 +124,8 @@ export function useSessionStore(callbacks: SessionStoreCallbacks = {}): SessionS
   const [terminatingSessions, setTerminatingSessions] = useState<Set<string>>(new Set());
   const [generatingTitleSessions, setGeneratingTitleSessions] = useState<Set<string>>(new Set());
   const [generatingTagSessions, setGeneratingTagSessions] = useState<Set<string>>(new Set());
+  const [generatingSummarySessions, setGeneratingSummarySessions] = useState<Set<string>>(new Set());
+  const [operationNotice, setOperationNotice] = useState<OperationNotice | null>(null);
   const [renamingSessionId, setRenamingSessionId] = useState<string | null>(null);
   const [interruptStatus, setInterruptStatus] = useState<InterruptStatus>("idle");
   const [allTags, setAllTags] = useState<string[]>([]);
@@ -299,6 +317,8 @@ export function useSessionStore(callbacks: SessionStoreCallbacks = {}): SessionS
     setPendingAsks((previous) => previous.filter((item) => item.request_id !== request.request_id));
   }, []);
 
+  const dismissOperationNotice = useCallback(() => setOperationNotice(null), []);
+
   const resetVolatile = useCallback(() => {
     setAgents([]);
     setTokenUsage(0);
@@ -308,6 +328,7 @@ export function useSessionStore(callbacks: SessionStoreCallbacks = {}): SessionS
     setDynamicEndpoints([]);
     setInterruptStatus("idle");
     setApprovalModeSyncStatus("loading");
+    setOperationNotice(null);
     ignoreStaleRef.current = false;
     clearPendingInteractions();
   }, [clearPendingInteractions]);
@@ -322,40 +343,81 @@ export function useSessionStore(callbacks: SessionStoreCallbacks = {}): SessionS
     resetVolatile();
   }, [resetVolatile, sessionId]);
 
-  const autoTitleSession = useCallback((sid: string) => {
+  const autoTitleSession = useCallback(async (sid: string) => {
     setGeneratingTitleSessions((previous) => new Set(previous).add(sid));
-    fetch(`/api/sessions/${sid}/auto-title`, { method: "POST" }).then((response) => response.json())
-      .then((data) => {
-        if (data.title) {
-          setSessions((previous) => previous.map((item) => item.id === sid ? { ...item, title: data.title } : item));
-          fetchSessions();
-        }
-      })
-      .catch(() => {})
-      .finally(() => setGeneratingTitleSessions((previous) => { const next = new Set(previous); next.delete(sid); return next; }));
+    setOperationNotice(null);
+    try {
+      const response = await fetch(`/api/sessions/${sid}/auto-title`, { method: "POST" });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok || !data.title) {
+        throw new Error(operationError(data, "自动命名失败"));
+      }
+      setSessions((previous) => previous.map((item) => item.id === sid ? { ...item, title: data.title } : item));
+      fetchSessions();
+    } catch (cause) {
+      setOperationNotice({ kind: "error", message: cause instanceof Error ? cause.message : "自动命名失败" });
+    } finally {
+      setGeneratingTitleSessions((previous) => { const next = new Set(previous); next.delete(sid); return next; });
+    }
   }, [fetchSessions]);
-  const autoTagSession = useCallback((sid: string) => {
+
+  const autoTagSession = useCallback(async (sid: string) => {
     setGeneratingTagSessions((previous) => new Set(previous).add(sid));
-    fetch(`/api/sessions/${sid}/auto-tags`, { method: "POST" }).then((response) => response.json())
-      .then((data) => {
-        if (Array.isArray(data.tags)) {
-          setSessions((previous) => previous.map((item) => item.id === sid ? { ...item, tags: data.tags } : item));
-          fetchSessions();
-          fetchAllTags();
-        }
-      })
-      .catch(() => {})
-      .finally(() => setGeneratingTagSessions((previous) => { const next = new Set(previous); next.delete(sid); return next; }));
+    setOperationNotice(null);
+    try {
+      const response = await fetch(`/api/sessions/${sid}/auto-tags`, { method: "POST" });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok || !Array.isArray(data.tags)) {
+        throw new Error(operationError(data, "自动标签生成失败"));
+      }
+      setSessions((previous) => previous.map((item) => item.id === sid ? { ...item, tags: data.tags } : item));
+      fetchSessions();
+      fetchAllTags();
+    } catch (cause) {
+      setOperationNotice({ kind: "error", message: cause instanceof Error ? cause.message : "自动标签生成失败" });
+    } finally {
+      setGeneratingTagSessions((previous) => { const next = new Set(previous); next.delete(sid); return next; });
+    }
   }, [fetchAllTags, fetchSessions]);
-  const regenerateSummary = useCallback((sid: string) => {
-    setGeneratingTitleSessions((previous) => new Set(previous).add(sid));
-    fetch(`/api/sessions/${sid}/regenerate-summary`, { method: "POST" }).then(() => fetchSessions()).catch(() => {})
-      .finally(() => setGeneratingTitleSessions((previous) => { const next = new Set(previous); next.delete(sid); return next; }));
+
+  const regenerateSummary = useCallback(async (sid: string) => {
+    setGeneratingSummarySessions((previous) => new Set(previous).add(sid));
+    setOperationNotice(null);
+    try {
+      const response = await fetch(`/api/sessions/${sid}/regenerate-summary`, { method: "POST" });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok || !data.success) {
+        throw new Error(operationError(data, "摘要重新生成失败"));
+      }
+      fetchSessions();
+    } catch (cause) {
+      setOperationNotice({ kind: "error", message: cause instanceof Error ? cause.message : "摘要重新生成失败" });
+    } finally {
+      setGeneratingSummarySessions((previous) => { const next = new Set(previous); next.delete(sid); return next; });
+    }
   }, [fetchSessions]);
-  const terminateSession = useCallback((sid: string) => {
+
+  const terminateSession = useCallback(async (sid: string) => {
     setTerminatingSessions((previous) => new Set(previous).add(sid));
-    fetch(`/api/sessions/${sid}/terminate`, { method: "POST" }).then(() => fetchSessions()).catch(() => {})
-      .finally(() => setTerminatingSessions((previous) => { const next = new Set(previous); next.delete(sid); return next; }));
+    setOperationNotice(null);
+    try {
+      const response = await fetch(`/api/sessions/${sid}/terminate`, { method: "POST" });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok || !data.terminated) {
+        throw new Error(operationError(data, "会话终结失败"));
+      }
+      const warnings = Array.isArray(data.metadata_warnings)
+        ? data.metadata_warnings.filter((item: unknown): item is string => typeof item === "string" && Boolean(item))
+        : [];
+      if (warnings.length) {
+        setOperationNotice({ kind: "warning", message: `会话已归档，但部分元数据未生成：\n${warnings.join("\n")}` });
+      }
+      fetchSessions();
+    } catch (cause) {
+      setOperationNotice({ kind: "error", message: cause instanceof Error ? cause.message : "会话终结失败" });
+    } finally {
+      setTerminatingSessions((previous) => { const next = new Set(previous); next.delete(sid); return next; });
+    }
   }, [fetchSessions]);
   const togglePinSession = useCallback((sid: string) => {
     fetch(`/api/sessions/${sid}/pin`, { method: "POST" }).then((response) => response.json())
@@ -371,15 +433,26 @@ export function useSessionStore(callbacks: SessionStoreCallbacks = {}): SessionS
       .then((data) => { if (data.updated) setSessions((previous) => previous.map((item) => item.id === sid ? { ...item, title: data.title } : item)); })
       .catch(() => {}).finally(() => setRenamingSessionId(null));
   }, []);
-  const mergeSessions = useCallback((sources: string[]): Promise<string | undefined> => {
+  const mergeSessions = useCallback(async (sources: string[]): Promise<string | undefined> => {
     const validSources = sources.filter((sid) => sessions.find((item) => item.id === sid)?.status === "archived");
-    if (!validSources.length) return Promise.resolve(undefined);
-    return fetch("/api/sessions/merge", {
-      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sources: validSources }),
-    }).then((response) => response.json()).then((data) => {
-      if (data.session_id) fetchSessions();
-      return data.session_id as string | undefined;
-    }).catch(() => undefined);
+    if (!validSources.length) return undefined;
+    setOperationNotice(null);
+    try {
+      const response = await fetch("/api/sessions/merge", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sources: validSources }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok || !data.merged || !data.session_id) {
+        throw new Error(operationError(data, "延续会话创建失败"));
+      }
+      fetchSessions();
+      return data.session_id as string;
+    } catch (cause) {
+      setOperationNotice({ kind: "error", message: cause instanceof Error ? cause.message : "延续会话创建失败" });
+      return undefined;
+    }
   }, [fetchSessions, sessions]);
   const updateSessionTags = useCallback(async (sid: string, tags: string[]) => {
     const valid = tags.map((tag) => tag.trim()).filter((tag) => /^[\u4e00-\u9fa5]{1,5}$/.test(tag) || /^[a-zA-Z]{1,10}$/.test(tag));
@@ -485,7 +558,8 @@ export function useSessionStore(callbacks: SessionStoreCallbacks = {}): SessionS
     dynamicEndpoints, setDynamicEndpoints, agents, setAgents,
     mergeMode, setMergeMode, selectedForMerge, setSelectedForMerge,
     shells, setShells, cronTasks, setCronTasks,
-    terminatingSessions, generatingTitleSessions, generatingTagSessions,
+    terminatingSessions, generatingTitleSessions, generatingTagSessions, generatingSummarySessions,
+    operationNotice, dismissOperationNotice,
     interruptStatus, setInterruptStatus, allTags, ignoreStaleRef,
     fetchSessions, fetchAllTags, handleMessage, respondConfirm, respondAsk,
     newChat, switchSession, autoTitleSession, autoTagSession, regenerateSummary,

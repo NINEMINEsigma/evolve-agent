@@ -65,7 +65,7 @@ entry/
 
 `ParentAgentLoop` 与 `SubAgentLoop` 均继承 `BasePrivateChatAgentLoop`。
 
-- **`IMainSessionLoop`**：主会话 loop 接口（C#-style interface），不继承 `BaseAgentLoop` 以避免菱形继承。声明主会话特有的能力：`current_character_agent`、`set_profile()`、`pop_session_rotated()`、`get_token_usage()`、`auto_generate_title()`、`regenerate_session_tags()`、`regenerate_summary_for_session()`。`ParentAgentLoop` 和 `MultiAgentLoop` 实现此接口。
+- **`IMainSessionLoop`**：主会话 loop 接口（C#-style interface），不继承 `BaseAgentLoop` 以避免菱形继承。声明主会话特有的能力：`current_character_agent`、`set_profile()`、`pop_session_rotated()`、`get_token_usage()`、`get_context_tokens()`和强制中断生命周期。标题、标签、摘要不再属于 Loop 接口，统一由 `SessionMetadataService`承担。`ParentAgentLoop` 和 `MultiAgentLoop` 实现此接口。
 
 ### `ParentAgentLoop`
 
@@ -74,8 +74,8 @@ entry/
 - 处理用户消息：`process_message()`。
 - 流式 LLM 调用与实时前端推送（通过 `StreamConsumer`）。
 - 工具审批：只读 / 白名单直接执行，其余通过 `ToolExecutor` + `execute_with_approval` 等待确认。
-- 会话旋转：当上下文接近上限时，通过 `LoopSessionManager` 归档旧会话并创建带摘要的延续会话。
-- 自动标题与标签生成。
+- 会话旋转：当上下文接近上限时，通过 `LoopSessionManager` 在摘要保障成功后创建延续会话，最后才归档旧会话；摘要失败时保留当前会话与触发消息，追加系统状态并中断本轮。
+- 标题、标签与摘要生成：统一委托 `Application.session_metadata_service`；全局元数据 Profile优先，未配置时按目标会话活动 Profile回退。
 - 子Agent编排：通过 `SubAgentOrchestrator` 启动/管理子 Agent。
 - LLM Profile：活动配置始终是 `Application.llm_profile_store` 根对象中的实例；`set_profile(None)` 表示明确无配置。主会话队列逐条 FIFO 消费，每条前端消息保留自己的 `llm_profile_name`，执行前重新解析并构造客户端。`resume()` 是从现有历史继续执行工具链的恢复操作，不追加用户消息、不截断历史，也不接收或更新 `llm_profile_name`；它使用当前 `ParentAgentLoop` 已持有的活动 Profile。需要切换 Profile 后重新生成时，应使用 `/regenerate`。
 
@@ -110,11 +110,11 @@ entry/
 
 - `initialize()`：从磁盘加载已有历史。
 - `is_context_over_limit()`：判断 token 数是否接近配置上限。
-- `rotate_session_for_continuation()`：终结旧会话 + 创建继承会话 + 迁移运行态资源（含 Shell会话所有权）。
-- `terminate_session()`：归档 + 摘要，不旋转；归档完成后停止该主会话全部 Shell。
+- `rotate_session_for_continuation()`：先保障旧会话摘要，再初始化延续 History并归档旧会话；失败时完整恢复临时分离的用户消息。
+- `terminate_session()`：摘要与标签均为 best-effort；失败以 `metadata_warnings`返回但仍归档，并在归档完成后停止该主会话全部 Shell。
 - `pop_session_rotated()`：取出旋转通知（old_sid → new_sid）。
 
-> 注意：`MultiAgentLoop` 明确声明不支持 session 旋转和合并（存在 TODO 标记），因此未使用 `LoopSessionManager`。
+> `MultiAgentLoop` 不使用 `LoopSessionManager`，但复用 `terminate_and_rotate_session()`与同一个 `SessionMetadataService`完成多Agent自动旋转；元数据失败语义与普通模式一致。
 
 ### 流式消息与 History 行的权威关联
 
@@ -220,12 +220,12 @@ sequenceDiagram
 当单一会话的总 token 接近模型窗口上限时：
 
 1. `LoopSessionManager.is_context_over_limit()` 检测超限。
-2. `rotate_session_for_continuation()` 归档当前会话，生成摘要。
-3. 创建新的延续会话，保留历史摘要与近期完整消息（`INHERIT_LAST_ROUNDS` 轮）。
+2. `rotate_session_for_continuation()`先调用 `SessionMetadataService.ensure_summary()`；摘要失败时不归档、不创建延续会话，保留触发消息并追加对 LLM 不可见的系统状态。
+3. 摘要成功后创建新的延续会话，保留历史摘要与近期完整消息（`INHERIT_LAST_ROUNDS` 轮），完成 History 初始化后才归档旧会话。
 4. 迁移运行态资源（工具副作用、cron 任务）。
 5. 前端通过 `session_rotated` 系统消息刷新。
 
-上下文压缩策略由 `system/prompt.py` 与模板 `compress.txt` / `compress_full.txt` 控制。摘要生成逻辑在 `agent_support/history_summary.py` 中实现。
+上下文压缩模板仍位于 `compress.txt` / `compress_input.txt`，低层文本转换在 `agent_support/history_summary.py`；Profile选择、模型调用、失败分类与摘要持久化由 `system/session_metadata.py`统一管理。
 
 ---
 

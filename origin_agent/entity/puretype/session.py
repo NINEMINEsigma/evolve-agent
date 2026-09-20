@@ -178,6 +178,15 @@ class SessionMessageEntry(BaseModel):
     """标记该消息为系统状态消息（对 LLM 不可见，仅前端展示用）。"""
 
 
+class SessionTerminationResult(BaseModel):
+    """会话终结结果；元数据失败不阻止归档，只通过 warnings 返回。"""
+
+    terminated: bool
+    session_id: str
+    error: str | None = None
+    metadata_warnings: list[str] = Field(default_factory=list)
+
+
 # ---------------------------------------------------------------------------
 # Token Usage Types
 # ---------------------------------------------------------------------------

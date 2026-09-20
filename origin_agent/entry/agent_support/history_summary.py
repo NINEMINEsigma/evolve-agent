@@ -216,18 +216,13 @@ async def summarize_history(
     system_prompt: str = read_template("compress.txt")
     user_prompt: str = read_template("compress_input.txt").replace("{{old_text}}", text)
 
-    try:
-        resp = await llm.chat([
-            BaseMessage(role=Role.SYSTEM, content=system_prompt),
-            BaseMessage(role=Role.USER, content=user_prompt),
-        ], character=character)
-        result = resp.content or ""
-        result = result.strip()
-        # 兼容旧版模板输出的 "Summary:" 前缀
-        prefix = "Summary:"
-        if result.lower().startswith(prefix.lower()):
-            result = result[len(prefix):].strip()
-        return result
-    except Exception as exc:
-        logger.exception("Failed to generate session summary: %s", exc)
-        return ""
+    resp = await llm.chat([
+        BaseMessage(role=Role.SYSTEM, content=system_prompt),
+        BaseMessage(role=Role.USER, content=user_prompt),
+    ], character=character)
+    result = (resp.content or "").strip()
+    # 兼容旧版模板输出的 "Summary:" 前缀
+    prefix = "Summary:"
+    if result.lower().startswith(prefix.lower()):
+        result = result[len(prefix):].strip()
+    return result

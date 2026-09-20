@@ -137,6 +137,10 @@ export function useWebSocket() {
       }
       return;
     }
+    if (message.type === WS_IN.METADATA_PROFILE_CHANGED) {
+      llmProfilesRef.current.handleMetadataProfileChanged(message);
+      return;
+    }
     if (message.type === WS_IN.HANDSFREE_MODE) {
       const mode = isApprovalMode(message.approval_mode)
         ? message.approval_mode
@@ -599,6 +603,9 @@ export function useWebSocket() {
     terminatingSessions: session.terminatingSessions,
     generatingTitleSessions: session.generatingTitleSessions,
     generatingTagSessions: session.generatingTagSessions,
+    generatingSummarySessions: session.generatingSummarySessions,
+    operationNotice: session.operationNotice,
+    dismissOperationNotice: session.dismissOperationNotice,
     pendingImages: upload.pendingImages,
     pendingAudios: upload.pendingAudios,
     pendingVideos: upload.pendingVideos,

@@ -9,6 +9,7 @@ import TagEditor from "./components/TagEditor";
 import SplashScreen from "./components/SplashScreen";
 import { ConnectionDiagnosticsProvider } from "./context/ConnectionDiagnosticsContext";
 import ErrorBoundary from "./components/ErrorBoundary";
+import NoticeBanner from "./components/primitives/NoticeBanner";
 import Agentspace from "./pages/Agentspace";
 import { SessionInfo } from "./types";
 import { STORAGE_KEYS } from "./constants/storage";
@@ -71,6 +72,7 @@ function ChatApp() {
           sessions={ws.sessions}
           generatingTitleSessions={ws.generatingTitleSessions}
           generatingTagSessions={ws.generatingTagSessions}
+          generatingSummarySessions={ws.generatingSummarySessions}
           terminatingSessions={ws.terminatingSessions}
           onAutoTitle={ws.autoTitleSession}
           onRename={ws.setRenamingSessionId}
@@ -81,6 +83,10 @@ function ChatApp() {
           onTerminate={ws.terminateSession}
           onDelete={ws.deleteSession}
           onRegenerateSummary={ws.regenerateSummary}
+        />
+        <NoticeBanner
+          notice={ws.operationNotice}
+          onDismiss={ws.dismissOperationNotice}
         />
         {tagEditorSession && (
           <TagEditor

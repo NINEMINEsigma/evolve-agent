@@ -89,6 +89,13 @@ INHERIT_LAST_ROUNDS: int = 10
 # 对 BaseMessage 无技术效果，但语义上隔离了 agent 角色和元数据生成角色。
 META_EXTRACTOR_CHARACTER: str = "__meta_extractor__"
 
+# 上下文超限但无法生成延续摘要时写入 History 的系统状态消息。
+# 该消息对 LLM 不可见，用于提示用户修复全局元数据 Profile 或目标会话活动 Profile 后恢复。
+CONTEXT_LIMIT_METADATA_FAILURE_STATUS: str = (
+    "上下文已达到上限，但无法生成延续摘要，本轮已中断。"
+    "请检查全局元数据 Profile 或当前会话的活动 Profile 后再恢复。"
+)
+
 
 # ============================================================================
 # 超时

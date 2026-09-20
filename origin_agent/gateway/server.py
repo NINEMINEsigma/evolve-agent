@@ -59,6 +59,8 @@ from entity.puretype import (
     LLMProfileDeleteRequest,
     LLMProfileMutationResponse,
     LLMProfileDeleteResult,
+    MetadataProfileUpdateRequest,
+    MetadataProfileMutationResponse,
     AgentspaceWriteRequest,
     AgentspacePathRequest,
     AgentspaceRenameRequest,
@@ -1056,62 +1058,83 @@ async def update_session_title(session_id: str, req: Request):
     return {"updated": True, "session_id": session_id, "title": title}
 
 
+def _raise_metadata_http(exc: Exception) -> NoReturn:
+    """把元数据服务错误转换为稳定的 HTTP 状态。"""
+    from system.session_metadata import (
+        MetadataGenerationError,
+        MetadataProfileUnavailableError,
+    )
+
+    if isinstance(exc, MetadataProfileUnavailableError):
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    if isinstance(exc, MetadataGenerationError):
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    raise exc
+
+
 @app.post("/api/sessions/{session_id}/auto-title")
 async def auto_title_session(session_id: str):
-    """请求 LLM 根据 session 消息自动生成标题。"""
-    title: str = ""
-    loop = _get_loop(session_id)
-    if loop is not None:
-        try:
-            title = await loop.auto_generate_title()
-        except RuntimeError as exc:
-            raise HTTPException(status_code=409, detail=str(exc))
-    else:
-        logger.warning("Failed to auto-generate title for session=%s", session_id)
-    if title:
-        _get_sm().update_title(session_id, title)
+    """使用全局元数据服务生成并保存会话标题。"""
+    from system.application import Application
+
+    sm = _get_sm()
+    if sm is None or not sm.exists(session_id):
+        raise HTTPException(status_code=404, detail="session not found")
+    try:
+        title = await Application.current().session_metadata_service.generate_title(
+            session_id
+        )
+    except Exception as exc:
+        _raise_metadata_http(exc)
+    sm.update_title(session_id, title)
     logger.info("Auto title | session=%s title=%s", session_id, title)
     return {"title": title, "session_id": session_id}
 
 
 @app.post("/api/sessions/{session_id}/auto-tags")
 async def auto_tags_session(session_id: str):
-    """请求根据 session 摘要重新生成标签并持久化。"""
-    tags: list[str] = []
-    loop = _get_loop(session_id)
-    if loop is not None:
-        tags = await loop.regenerate_session_tags()
-        if tags:
-            sm = _get_sm()
-            if sm is not None:
-                sm.set_session_tags(session_id, tags)
-    else:
-        logger.warning("Failed to auto-generate tags for session=%s", session_id)
+    """使用全局元数据服务生成并保存会话标签。"""
+    from system.application import Application
+
+    sm = _get_sm()
+    if sm is None or not sm.exists(session_id):
+        raise HTTPException(status_code=404, detail="session not found")
+    try:
+        tags = await Application.current().session_metadata_service.generate_tags(
+            session_id,
+            sm.get_all_tags(),
+        )
+    except Exception as exc:
+        _raise_metadata_http(exc)
+    sm.set_session_tags(session_id, tags)
     logger.info("Auto tags | session=%s tags=%s", session_id, tags)
     return {"tags": tags, "session_id": session_id}
 
 
 @app.post("/api/sessions/{session_id}/regenerate-summary")
 async def regenerate_summary_endpoint(session_id: str):
-    """重新生成指定会话的摘要。colloquy session 不可手动压缩。"""
+    """使用全局元数据服务重新生成指定会话摘要。"""
     from entity.puretype import Loop
-    info = _get_sm().get(session_id)
-    if info and info.loop_type == Loop.colloquy:
+    from system.application import Application
+
+    sm = _get_sm()
+    info = sm.get(session_id) if sm is not None else None
+    if info is None:
+        raise HTTPException(status_code=404, detail="session not found")
+    if info.loop_type == Loop.colloquy:
         logger.warning("Regenerate summary rejected (colloquy) | session=%s", session_id)
-        return HTMLResponse(
-            json.dumps({"success": False, "error": "colloquy session cannot be manually compressed"}, ensure_ascii=False),
-            media_type="application/json",
+        raise HTTPException(
             status_code=403,
+            detail="colloquy session cannot be manually compressed",
         )
     logger.info("Regenerate summary | session=%s", session_id)
-    loop = _get_loop(session_id)
-    if loop is not None:
-        try:
-            summary = await loop.regenerate_summary_for_session(session_id)
-        except RuntimeError as exc:
-            raise HTTPException(status_code=409, detail=str(exc))
-        return {"success": bool(summary), "summary": summary}
-    return {"success": False, "error": "agent loop not ready", "session_id": session_id}
+    try:
+        summary = await Application.current().session_metadata_service.regenerate_summary(
+            session_id
+        )
+    except Exception as exc:
+        _raise_metadata_http(exc)
+    return {"success": True, "summary": summary, "session_id": session_id}
 
 
 @app.post("/api/sessions/{session_id}/terminate")
@@ -1136,8 +1159,14 @@ async def terminate_session_endpoint(session_id: str):
     loop = _get_loop(session_id)
     if loop is not None:
         result = await loop.loop.terminate_session()
-        logger.info("Terminate session ok | session=%s terminated=%s", session_id, result.get("terminated"))
-        return result
+        payload = result.model_dump() if hasattr(result, "model_dump") else result
+        logger.info(
+            "Terminate session complete | session=%s terminated=%s warnings=%d",
+            session_id,
+            payload.get("terminated"),
+            len(payload.get("metadata_warnings", [])),
+        )
+        return payload
     logger.warning("Terminate session fail | session=%s error=agent loop not ready", session_id)
     return {"terminated": False, "error": "agent loop not ready", "session_id": session_id}
 
@@ -1881,6 +1910,56 @@ async def put_approval_profile(request: Request):
 
 
 # ---------------------------------------------------------------------------
+# Metadata Profile API
+# ---------------------------------------------------------------------------
+
+
+@app.get("/api/metadata/profile")
+async def get_metadata_profile():
+    """返回项目级全局元数据 Profile 的权威状态。"""
+    from system.application import Application
+
+    return Application.current().session_metadata_service.get_state().model_dump()
+
+
+@app.put(
+    "/api/metadata/profile",
+    response_model=MetadataProfileMutationResponse,
+)
+async def put_metadata_profile(
+    update: MetadataProfileUpdateRequest,
+):
+    """设置或清空项目级全局元数据 Profile 引用。"""
+    from system.application import Application
+    from system.session_metadata import MetadataProfileUnavailableError
+
+    application = Application.current()
+    try:
+        with application.profile_lock:
+            profile = (
+                application.llm_profile_store.get_profile(update.profile_name)
+                if update.profile_name is not None
+                else None
+            )
+            state = application.session_metadata_service.select_profile(profile)
+    except LookupError:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Profile not found: {update.profile_name!r}",
+        )
+    except MetadataProfileUnavailableError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    failures = await application.frontend_sink.broadcast_metadata_profile_change(
+        state
+    )
+    return MetadataProfileMutationResponse(
+        state=state,
+        notification_failures=failures,
+    )
+
+
+# ---------------------------------------------------------------------------
 # Agentspace editor API
 # ---------------------------------------------------------------------------
 
@@ -2276,6 +2355,7 @@ async def update_llm_profile(request: LLMProfileUpdateRequest):
             ):
                 from component.approval import disable_all_handsfree_modes
                 disabled_sessions = disable_all_handsfree_modes()
+            metadata_state = application.session_metadata_service.get_state()
         failures: list[str] = []
         if new_name != old_name:
             failures = await application.frontend_sink.broadcast_profile_change(
@@ -2286,9 +2366,14 @@ async def update_llm_profile(request: LLMProfileUpdateRequest):
         approval_failures = await application.frontend_sink.broadcast_approval_profile_change(
             approval_state, disabled_sessions,
         )
+        metadata_failures = await application.frontend_sink.broadcast_metadata_profile_change(
+            metadata_state,
+        )
         return LLMProfileMutationResponse(
             profile=response_payload,
-            notification_failures=failures + approval_failures,
+            notification_failures=(
+                failures + approval_failures + metadata_failures
+            ),
         )
     except LookupError as exc:
         raise HTTPException(status_code=404, detail=str(exc))
@@ -2324,6 +2409,8 @@ async def delete_llm_profile(request: LLMProfileDeleteRequest):
                 store.set_approval_profile(None)
                 from component.approval import disable_all_handsfree_modes
                 disabled_sessions = disable_all_handsfree_modes()
+            if store.is_metadata_profile(source):
+                store.set_metadata_profile(None)
             switched, busy = application.session_manager.replace_idle_loops_using_profile(
                 source,
                 replacement,
@@ -2336,6 +2423,7 @@ async def delete_llm_profile(request: LLMProfileDeleteRequest):
             )
             store.remove_profile(request.profile_name)
             application.approval_backend_manager.invalidate()
+            metadata_state = application.session_metadata_service.get_state()
 
         failures = await application.frontend_sink.broadcast_profile_change(
             "deleted",
@@ -2347,13 +2435,18 @@ async def delete_llm_profile(request: LLMProfileDeleteRequest):
         approval_failures = await application.frontend_sink.broadcast_approval_profile_change(
             approval_state, disabled_sessions,
         )
+        metadata_failures = await application.frontend_sink.broadcast_metadata_profile_change(
+            metadata_state,
+        )
         return LLMProfileDeleteResult(
             deleted=True,
             profile_name=request.profile_name,
             replacement_profile_name=request.replacement_profile_name,
             switched_sessions=switched,
             pending_sessions=busy,
-            notification_failures=failures,
+            notification_failures=(
+                failures + approval_failures + metadata_failures
+            ),
         )
     except LookupError as exc:
         raise HTTPException(status_code=404, detail=str(exc))

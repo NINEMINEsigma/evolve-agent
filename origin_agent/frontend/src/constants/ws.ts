@@ -16,6 +16,7 @@ export const WS_IN = {
   HISTORY_SYNC:      "history_sync",
   LLM_PROFILE_CHANGED: "llm_profile_changed",
   APPROVAL_PROFILE_CHANGED: "approval_profile_changed",
+  METADATA_PROFILE_CHANGED: "metadata_profile_changed",
   HANDSFREE_MODE:    "handsfree_mode",
   PONG:              "pong",
 } as const;

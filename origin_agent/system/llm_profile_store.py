@@ -98,6 +98,34 @@ class LLMProfileStore:
         with self._lock:
             return self._data.approval_profile is profile
 
+    def get_metadata_profile(self) -> LLMProfile | None:
+        """返回根对象当前指向的全局元数据 Profile 实例。"""
+        with self._lock:
+            return self._data.metadata_profile
+
+    def set_metadata_profile(self, profile: LLMProfile | None) -> None:
+        """设置根对象全局元数据 Profile 引用并持久化。"""
+        with self._lock:
+            if profile is not None and not any(
+                candidate is profile for candidate in self._data.profiles
+            ):
+                raise ValueError(
+                    "LLMProfileData.metadata_profile must reference a profile in profiles"
+                )
+            previous = self._data.metadata_profile
+            self._data.metadata_profile = profile
+            try:
+                self._validate_root(self._data)
+                self._save_unlocked()
+            except Exception:
+                self._data.metadata_profile = previous
+                raise
+
+    def is_metadata_profile(self, profile: LLMProfile) -> bool:
+        """返回 Profile 是否是根对象当前的全局元数据 Profile 实例。"""
+        with self._lock:
+            return self._data.metadata_profile is profile
+
     def list_profiles(self) -> list[LLMProfile]:
         """返回根列表的浅拷贝，列表元素仍是根对象中的实例。"""
         with self._lock:
@@ -263,7 +291,7 @@ class LLMProfileStore:
     def _validate_root(self, data: LLMProfileData) -> None:
         if not isinstance(data, LLMProfileData):
             raise TypeError("Profile root must be LLMProfileData")
-        if set(data.__dict__) - {"profiles", "approval_profile"}:
+        if set(data.__dict__) - {"profiles", "approval_profile", "metadata_profile"}:
             raise TypeError("LLMProfileData contains unknown fields")
         if not isinstance(data.profiles, list):
             raise TypeError("LLMProfileData.profiles must be a list")
@@ -288,6 +316,15 @@ class LLMProfileStore:
             if id(approval_profile) not in profile_ids:
                 raise ValueError(
                     "LLMProfileData.approval_profile must reference a profile in profiles"
+                )
+
+        metadata_profile = data.metadata_profile
+        if metadata_profile is not None:
+            if not isinstance(metadata_profile, LLMProfile):
+                raise TypeError("LLMProfileData.metadata_profile must be an LLMProfile or None")
+            if id(metadata_profile) not in profile_ids:
+                raise ValueError(
+                    "LLMProfileData.metadata_profile must reference a profile in profiles"
                 )
 
         for profile in data.profiles:

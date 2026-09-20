@@ -176,6 +176,7 @@ export type MessageType =
   | "history_sync"
   | "llm_profile_changed"
   | "approval_profile_changed"
+  | "metadata_profile_changed"
   | "handsfree_mode"
   | "ping"
   | "pong";
@@ -221,6 +222,9 @@ export interface WSMessage {
   approval_profile_name?: string | null;    // APPROVAL_PROFILE_CHANGED
   approval_profile_model?: string | null;   // APPROVAL_PROFILE_CHANGED
   approval_profile_available?: boolean;     // APPROVAL_PROFILE_CHANGED
+  metadata_profile_name?: string | null;    // METADATA_PROFILE_CHANGED
+  metadata_profile_model?: string | null;   // METADATA_PROFILE_CHANGED
+  metadata_profile_available?: boolean;     // METADATA_PROFILE_CHANGED
   handsfree_mode?: boolean;                  // HANDSFREE_MODE：服务端权威回执（向后兼容）
   approval_mode?: ApprovalMode;             // HANDSFREE_MODE：服务端权威审批模式（manual/handsfree/yolo）
   history_count?: number;                    // HISTORY_SYNC：当前正典 History 消息数
@@ -458,4 +462,15 @@ export interface ApprovalProfileState {
   profile_name: string | null;
   model: string | null;
   available: boolean;
+}
+
+export interface MetadataProfileState {
+  profile_name: string | null;
+  model: string | null;
+  available: boolean;
+}
+
+export interface OperationNotice {
+  kind: "error" | "warning";
+  message: string;
 }

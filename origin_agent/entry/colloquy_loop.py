@@ -80,8 +80,6 @@ class ColloquyLoop(ParentAgentLoop):
 
         保证不压缩本轮对话（最后一条 user 消息及之后的内容）。
         """
-        from entry.agent_support.history_summary import summarize_history
-
         # 1. 通知前端
         await self._frontend_sink.emit_system_message(sid, "正在压缩历史...")
 
@@ -107,14 +105,22 @@ class ColloquyLoop(ParentAgentLoop):
         messages_to_compress = list(self._history.messages[:compress_count])
         temp_history = History(messages=messages_to_compress)
 
-        # 5. LLM 生成摘要
-        llm = self._llm
-        if llm is None:
-            raise RuntimeError("No LLM client available for colloquy history summary")
-        summary: str = await summarize_history(temp_history, llm)
-        if not summary:
-            logger.warning("Colloquy compress: summary generation failed | session=%s", sid)
-            await self._frontend_sink.emit_system_message(sid, "压缩完成（摘要生成失败）")
+        # 5. 全局元数据服务生成摘要
+        try:
+            summary = await self.app.session_metadata_service.generate_summary(
+                sid,
+                temp_history,
+            )
+        except Exception as exc:
+            logger.warning(
+                "Colloquy compress: summary generation failed | session=%s error=%s",
+                sid,
+                exc,
+            )
+            await self._frontend_sink.emit_system_message(
+                sid,
+                "压缩完成（摘要生成失败）",
+            )
             return
 
         # 6. 替换：truncate → remove_unpaired → insert 摘要

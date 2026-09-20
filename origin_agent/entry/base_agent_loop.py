@@ -9,7 +9,6 @@ LLM 调用、工具执行、memory 和 hooks 能力。
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
 import shutil
 import uuid
@@ -44,8 +43,6 @@ from entity.messages import (
 )
 from entity.constant import (
     USER_CHARACTER_NAME, SYSTEM_CHARACTER_NAME,
-    AUTO_TITLE_CONTENT_MAX, AUTO_TAGS_CONTENT_MAX,
-    META_EXTRACTOR_CHARACTER,
     INHERIT_LAST_ROUNDS,
     MAIN_SESSION_INTERRUPT_TIMEOUT,
     MAIN_SESSION_INTERRUPT_FORCE_CANCEL_TIMEOUT,
@@ -416,25 +413,6 @@ class BaseAgentLoop(ABC):
         """返回当前 loop 对应的 agent 角色名，用于 History 视图过滤。"""
         ...
 
-    @abstractmethod
-    def _get_session_info_llm_client(self) -> BaseLLMClient | None:
-        """返回用于生成标题/标签/摘要等会话信息的 LLM 客户端，无可用时返回 None。"""
-        ...
-
-    def _require_llm(self) -> BaseLLMClient:
-        """返回当前可用的 LLM 客户端，无 client 则抛运行时错误。
-
-        用于隐式触发源（auto-title/summary/tags）在无 LLM 时向上抛错，
-        由 REST 端点捕获后返回 4xx。
-        """
-        llm = self._get_session_info_llm_client()
-        if llm is None:
-            raise RuntimeError(
-                "No LLM client available — 请在会话中先发送一条消息以绑定模型配置，"
-                "或在前端「模型配置」中新建/选择一个配置。"
-            )
-        return llm
-
     @property
     @abstractmethod
     def user_character_name(self) -> str:
@@ -684,6 +662,29 @@ class BaseAgentLoop(ABC):
         index = self._history.add_message(message)
         self.save_history(sid)
         return index
+
+    async def report_context_limit_rotation_blocked(
+        self,
+        session_id: str,
+        error: Exception,
+    ) -> None:
+        """持久化并推送上下文超限旋转失败状态。"""
+        from entity.constant import CONTEXT_LIMIT_METADATA_FAILURE_STATUS
+
+        logger.error(
+            "Context-limit rotation blocked by metadata failure | session=%s error=%s",
+            session_id,
+            error,
+            exc_info=(type(error), error, error.__traceback__),
+        )
+        self.append_system_status(
+            CONTEXT_LIMIT_METADATA_FAILURE_STATUS,
+            session_id=session_id,
+        )
+        await self.get_sink().emit_system_message(
+            session_id,
+            CONTEXT_LIMIT_METADATA_FAILURE_STATUS,
+        )
 
     def clear_session(self) -> None:
         """清理当前 session 的持久化数据。"""
@@ -989,13 +990,7 @@ class BaseAgentLoop(ABC):
         return {"terminated": True, "session_id": self.session_id}
 
     async def merge_sessions(self, sources: list[str]) -> dict:
-        """合并多个已归档会话到一个新会话，基于摘要而非完整历史。
-
-        单源分支：读取源 session 的 summary.txt，使用 session_inherit 模板构建初始消息。
-        多源合并：拼接各源 session 的摘要，按阈值截断。
-        新 session 只包含 summary 消息，源 sessions 归档并标记 continuation_sid。
-        新会话始终降级为普通模式（ParentAgentLoop），不传 loop_meta。
-        """
+        """基于全部父会话摘要创建延续会话；任一摘要失败则整体失败。"""
         sm = self.session_manager
         if sm is None:
             return {"error": "session manager not available", "merged": False}
@@ -1005,45 +1000,77 @@ class BaseAgentLoop(ABC):
             return {"error": "session store not available", "merged": False}
 
         from entry.agent_support.history_summary import (
-            summarize_history, messages_to_text, extract_last_rounds,
+            messages_to_text,
+            extract_last_rounds,
         )
+        from system.session_metadata import SessionMetadataError
         from system.templates import read_template
 
-        llm = self._get_session_info_llm_client()
+        summaries: list[tuple[str, str]] = []
+        for source_id in sources:
+            try:
+                summary = await self.app.session_metadata_service.ensure_summary(
+                    source_id
+                )
+            except SessionMetadataError as exc:
+                logger.warning(
+                    "Session merge blocked by missing summary | source=%s error=%s",
+                    source_id,
+                    exc,
+                )
+                return {
+                    "error": f"无法为父会话 {source_id} 生成摘要：{exc}",
+                    "merged": False,
+                }
+            summaries.append((source_id, summary))
 
-        # 收集各源 session 的摘要，缺失时自动生成
-        summaries: list[str] = []
-        for sid in sources:
-            summary = self._session_store.read_summary(sid)
-            logger.info("merge_sessions: source=%s summary_len=%d", sid, len(summary))
-            if not summary:
-                history = self._session_store.read_history(sid)
-                if history and history.count > 0 and llm is not None:
-                    summary = await summarize_history(history, llm)
-                    if summary:
-                        self._session_store.write_summary(sid, summary)
-            if summary:
-                summaries.append(f"[Session {sid}]: {summary}")
-
-        if not summaries:
-            return {"error": "no summaries found for source sessions", "merged": False}
-
-        # 构建初始上下文
         if len(summaries) == 1:
+            source_id, summary = summaries[0]
             context = (
                 read_template("session_inherit.txt")
-                .replace("{{old_sid}}", sources[0])
-                .replace("{{summary}}", summaries[0])
+                .replace("{{old_sid}}", source_id)
+                .replace("{{summary}}", summary)
             )
         else:
-            joined = "\n\n---\n\n".join(summaries)
+            joined = "\n\n---\n\n".join(
+                f"[Session {source_id}]: {summary}"
+                for source_id, summary in summaries
+            )
+            threshold = self.app.runtime_context.merge_concat_threshold
+            if threshold > 0 and len(joined) > threshold:
+                joined = joined[-threshold:]
             context = (
-                f"This session merges multiple previous sessions. "
-                f"Here are their summaries:\n\n"
+                "This session merges multiple previous sessions. "
+                "Here are their summaries:\n\n"
                 f"{joined}"
             )
 
-        # 创建新 session（降级为普通模式，不传 loop_meta）
+        tail_blocks: list[str] = []
+        for source_id in sources:
+            try:
+                source_history = self._session_store.read_history(source_id)
+                if source_history is None or source_history.count == 0:
+                    continue
+                tail_messages = extract_last_rounds(
+                    source_history,
+                    rounds=INHERIT_LAST_ROUNDS,
+                    include_tool_messages=False,
+                )
+                if tail_messages:
+                    tail_blocks.append(
+                        f"### Source session {source_id}\n"
+                        + messages_to_text(tail_messages)
+                    )
+            except Exception:
+                logger.exception(
+                    "Failed to append tail rounds for source=%s", source_id
+                )
+        if tail_blocks:
+            context += (
+                "\n\n## Recent conversation rounds\n"
+                + "\n\n---\n\n".join(tail_blocks)
+            )
+
         new_sid = sm.create_with_context(
             context=context,
             parent_sid=sources[0],
@@ -1052,28 +1079,6 @@ class BaseAgentLoop(ABC):
         )
         self._session_store.copy_active_profile_name(sources[0], new_sid)
 
-        # 追加各源会话尾部轮次文本
-        tail_blocks: list[str] = []
-        for sid in sources:
-            try:
-                src_history = self._session_store.read_history(sid)
-                if src_history is None or src_history.count == 0:
-                    continue
-                tail_msgs = extract_last_rounds(
-                    src_history,
-                    rounds=INHERIT_LAST_ROUNDS,
-                    include_tool_messages=False,
-                )
-                if tail_msgs:
-                    tail_blocks.append(
-                        f"### Source session {sid}\n" + messages_to_text(tail_msgs)
-                    )
-            except Exception:
-                logger.exception("Failed to append tail rounds for source=%s", sid)
-        if tail_blocks:
-            context += "\n\n## Recent conversation rounds\n" + "\n\n---\n\n".join(tail_blocks)
-
-        # 写入仅含 summary 消息的历史
         summary_history = History()
         summary_history.add_message(CharacterConversationMessage(
             role=Role.USER,
@@ -1083,117 +1088,16 @@ class BaseAgentLoop(ABC):
         ))
         self._session_store.write_history(new_sid, summary_history)
 
-        # 归档源 sessions
-        for sid in sources:
-            sm.archive(sid, continuation_sid=new_sid)
+        for source_id in sources:
+            sm.archive(source_id, continuation_sid=new_sid)
 
         logger.info(
             "Sessions merged | new=%s sources=%s summaries=%d",
-            new_sid, sources, len(summaries),
+            new_sid,
+            sources,
+            len(summaries),
         )
         return {"merged": True, "session_id": new_sid, "sources": sources}
-
-    # -- 标题 / 标签 / 摘要生成（全量消息，不做可见性过滤）------------------
-
-    async def auto_generate_title(self) -> str:
-        """根据会话历史自动生成标题。"""
-        from abstract.llm.formats import to_summary_dict
-        from system.templates import read_template
-
-        messages = [m for m in self._history.iter_messages() if isinstance(m, CharacterConversationMessage)]
-        if not messages:
-            return ""
-        llm = self._require_llm()
-        system_prompt = read_template("auto_title.txt")
-        messages_json = [
-            d for m in messages
-            if (d := to_summary_dict(m)) is not None
-        ]
-        user_prompt = read_template("auto_title_input.txt").replace(
-            "{{context}}",
-            json.dumps(messages_json, ensure_ascii=False)[-AUTO_TITLE_CONTENT_MAX:],
-        )
-        try:
-            resp = await llm.chat([
-                BaseMessage(role=Role.SYSTEM, content=system_prompt),
-                BaseMessage(role=Role.USER, content=user_prompt),
-            ], character=META_EXTRACTOR_CHARACTER)
-            return (resp.content or "").strip().strip("\"'")[:50]
-        except Exception as exc:
-            logger.exception("Failed to auto-generate title: %s", exc)
-            return ""
-
-    async def regenerate_session_tags(self) -> list[str]:
-        """根据会话历史重新生成标签列表。"""
-        from abstract.llm.formats import to_summary_dict
-        from system.templates import read_template
-
-        messages = [m for m in self._history.iter_messages() if isinstance(m, CharacterConversationMessage)]
-        if not messages:
-            logger.warning("No messages to regenerate session tags")
-            return []
-        llm = self._require_llm()
-        try:
-            system_prompt = read_template("session_tags.txt")
-            # 获取已有标签池供 LLM 参考，优先复用已有标签
-            existing_tags_hint = ""
-            try:
-                from system.application import Application
-                sm = Application.current().session_manager
-                if sm is not None:
-                    all_tags = sm.get_all_tags()
-                    if all_tags:
-                        existing_tags_hint = (
-                            "\n\nExisting tags in the system (prefer reusing these when applicable): "
-                            + ", ".join(all_tags)
-                        )
-            except Exception:
-                pass
-            system_prompt = system_prompt.replace("{{existing_tags}}", existing_tags_hint)
-            messages_json = [
-                d for m in messages
-                if (d := to_summary_dict(m)) is not None
-            ]
-            user_prompt = read_template("session_tags_input.txt").replace(
-                "{{old_text}}",
-                json.dumps(messages_json, ensure_ascii=False)[-AUTO_TAGS_CONTENT_MAX:],
-            )
-            resp = await llm.chat([
-                BaseMessage(role=Role.SYSTEM, content=system_prompt),
-                BaseMessage(role=Role.USER, content=user_prompt),
-            ], character=META_EXTRACTOR_CHARACTER, response_format={"type": "json_object"})
-            logger.info("Session tags response, tags: %s | reasoning: %s", resp.content, resp.reasoning_content)
-            result = json.loads(resp.content)
-            if isinstance(result, dict):
-                if "tags" in result:
-                    result = result["tags"]
-                elif "tag" in result:
-                    result = result["tag"]
-                else:
-                    for v in result.values():
-                        if isinstance(v, list) and all(isinstance(content, str) for content in v):
-                            result = v
-                            break
-            if not isinstance(result, list):
-                raise ValueError("session tags response is not a list")
-            return result
-        except Exception as exc:
-            logger.exception("Failed to regenerate session tags: %s", exc)
-        return []
-
-    async def regenerate_summary_for_session(self, session_id: str) -> str:
-        """重新生成指定会话的摘要（可为任意 session_id，不要求当前活跃）。"""
-        if self._session_store is None:
-            return ""
-        history = self._session_store.read_history(session_id)
-        if history is None or history.count == 0:
-            return ""
-        llm = self._require_llm()
-        from entry.agent_support.history_summary import summarize_history
-        summary = await summarize_history(history, llm)
-        if summary:
-            self._session_store.write_summary(session_id, summary)
-        return summary
 
     # -- Hook 支持（所有 loop 共享）----------------------------------------
 
@@ -1433,18 +1337,6 @@ class IMainSessionLoop(ABC):
     @abstractmethod
     def get_context_tokens(self) -> int:
         """返回当前上下文 token 数。"""
-
-    @abstractmethod
-    async def auto_generate_title(self) -> str:
-        """根据会话历史自动生成标题。"""
-
-    @abstractmethod
-    async def regenerate_session_tags(self) -> list[str]:
-        """根据会话历史重新生成标签列表。"""
-
-    @abstractmethod
-    async def regenerate_summary_for_session(self, session_id: str) -> str:
-        """重新生成指定会话的摘要（可为任意 session_id，不要求当前活跃）。"""
 
     @abstractmethod
     def set_profile(self, profile: LLMProfile | None) -> None:

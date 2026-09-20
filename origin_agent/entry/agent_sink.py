@@ -278,6 +278,36 @@ class FrontendSink(AgentSink):
                 )
         return failures
 
+    async def broadcast_metadata_profile_change(
+        self,
+        state,
+    ) -> list[str]:
+        """向所有已连接前端广播全局元数据 Profile 状态变更。"""
+        from gateway.chat import Message, MessageType
+
+        failures: list[str] = []
+        for session_id, ws in self.get_all_ws().items():
+            message = Message(
+                type=MessageType.METADATA_PROFILE_CHANGED,
+                session_id=session_id,
+                metadata_profile_name=state.profile_name,
+                metadata_profile_model=state.model,
+                metadata_profile_available=state.available,
+            )
+            try:
+                payload = message.model_dump(exclude_none=True)
+                payload["metadata_profile_name"] = state.profile_name
+                payload["metadata_profile_model"] = state.model
+                await ws.send_text(json.dumps(payload, ensure_ascii=False))
+            except Exception:
+                failures.append(session_id)
+                logger.warning(
+                    "Failed to broadcast metadata Profile change | session=%s",
+                    session_id,
+                    exc_info=True,
+                )
+        return failures
+
     def is_session_occupied(self, session_id: str, token: str | None) -> bool:
         """判断会话是否已被其他标签页占用。
 

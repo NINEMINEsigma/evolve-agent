@@ -179,9 +179,6 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
     def _get_llm_client(self) -> BaseLLMClient | None:
         return self._llm
 
-    def _get_session_info_llm_client(self) -> BaseLLMClient | None:
-        return self._llm
-
     def _get_context(self) -> RuntimeContext:
         return self.app.runtime_context
 
@@ -194,15 +191,22 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
         return definitions if definitions else []
 
     async def _on_context_over_limit(self) -> None:
-        """上下文超限：触发 session 旋转/归档。"""
+        """上下文超限：摘要成功后旋转；失败时中断并写系统状态。"""
         old_sid = self.session_id
-        new_sid: str | None = await self._lifecycle.rotate_session_for_continuation(
-            self.session_id,
-        )
-        if new_sid:
-            self.session_id = new_sid
-            if self._session_manager is not None:
-                self._session_manager.rotate_session(old_sid, new_sid)
+        try:
+            new_sid = await self._lifecycle.rotate_session_for_continuation(
+                self.session_id,
+            )
+        except Exception as exc:
+            from system.session_metadata import SessionMetadataError
+
+            if isinstance(exc, SessionMetadataError):
+                await self.report_context_limit_rotation_blocked(old_sid, exc)
+                return
+            raise
+        self.session_id = new_sid
+        if self._session_manager is not None:
+            self._session_manager.rotate_session(old_sid, new_sid)
 
     def _build_system_prompt(self) -> list[str]:
         prompts = build_agent_system_prompt(
@@ -232,28 +236,41 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
     # -- 超限检查步骤（可被子类覆写）-------------------------------------------
 
     async def _check_over_limit_before_process(
-        self, sid: str, user_message: MessageContent | None,
-    ) -> str:
-        """process_message 入口处的超限检查：超限时旋转会话，返回可能更新后的 sid。
-
-        user_message 为 None 表示队列路径（SP-4），无 pending 搬运。
-        """
-        if self._lifecycle.is_context_over_limit():
-            new_sid: str | None = await self._lifecycle.rotate_session_for_continuation(
-                sid, pending_user_message=user_message,
+        self,
+        sid: str,
+        move_last_user_message: bool,
+    ) -> str | None:
+        """入口超限检查；元数据失败时报告并返回 None 终止本轮。"""
+        if not self._lifecycle.is_context_over_limit():
+            return sid
+        try:
+            return await self._lifecycle.rotate_session_for_continuation(
+                sid,
+                move_last_user_message=move_last_user_message,
             )
-            if new_sid:
-                return new_sid
-        return sid
+        except Exception as exc:
+            from system.session_metadata import SessionMetadataError
 
-    async def _check_over_limit_in_tool_loop(self, sid: str) -> str:
-        """_run_tool_loop 内每轮工具调用后的超限检查：超限时旋转会话，返回可能更新后的 sid。"""
-        if self._lifecycle.is_context_over_limit():
-            new_sid: str | None = await self._lifecycle.rotate_session_for_continuation(sid)
-            if new_sid:
-                self.session_id = new_sid
-                return new_sid
-        return sid
+            if not isinstance(exc, SessionMetadataError):
+                raise
+            await self.report_context_limit_rotation_blocked(sid, exc)
+            return None
+
+    async def _check_over_limit_in_tool_loop(self, sid: str) -> str | None:
+        """工具循环超限检查；元数据失败时报告并返回 None 终止循环。"""
+        if not self._lifecycle.is_context_over_limit():
+            return sid
+        try:
+            new_sid = await self._lifecycle.rotate_session_for_continuation(sid)
+        except Exception as exc:
+            from system.session_metadata import SessionMetadataError
+
+            if not isinstance(exc, SessionMetadataError):
+                raise
+            await self.report_context_limit_rotation_blocked(sid, exc)
+            return None
+        self.session_id = new_sid
+        return new_sid
 
     # ========================================================================
     # 公共 API
@@ -312,7 +329,13 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
                     await self.append_user_message(user_message, character_name=character_name)
 
                 # 历史过长时自动终结会话
-                sid = await self._check_over_limit_before_process(sid, user_message)
+                rotated_sid = await self._check_over_limit_before_process(
+                    sid,
+                    move_last_user_message=True,
+                )
+                if rotated_sid is None:
+                    return ""
+                sid = rotated_sid
                 self.session_id = sid
 
                 messages = self._build_history_messages(user_message)
@@ -348,7 +371,13 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
             self.register_round_task(current_task)
             self._processing = True
             try:
-                sid = await self._check_over_limit_before_process(sid, None)
+                rotated_sid = await self._check_over_limit_before_process(
+                    sid,
+                    move_last_user_message=False,
+                )
+                if rotated_sid is None:
+                    return ""
+                sid = rotated_sid
                 self.session_id = sid
 
                 messages = self._get_full_history(sid)
@@ -573,7 +602,10 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
                     await self._frontend_sink.emit_system_message(sid, "工具链异常中断")
                     return ""
 
-                sid = await self._check_over_limit_in_tool_loop(sid)
+                rotated_sid = await self._check_over_limit_in_tool_loop(sid)
+                if rotated_sid is None:
+                    return ""
+                sid = rotated_sid
 
                 messages = self._get_full_history(sid)
 
@@ -713,9 +745,27 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
                 self._processing = True
                 self._event_loop = asyncio.get_running_loop()
                 try:
-                    sid = await self._check_over_limit_before_process(self.session_id, None)
-                    self.session_id = sid
+                    sid = self.session_id
                     queue = self._message_queue
+                    if self._lifecycle.is_context_over_limit():
+                        try:
+                            sid = await self._lifecycle.rotate_session_for_continuation(
+                                sid,
+                                move_last_user_message=False,
+                            )
+                            self.session_id = sid
+                        except Exception as exc:
+                            from system.session_metadata import SessionMetadataError
+
+                            if not isinstance(exc, SessionMetadataError):
+                                raise
+                            await self._append_queued_messages(items)
+                            await self.report_context_limit_rotation_blocked(
+                                sid,
+                                exc,
+                            )
+                            queue.last_known_sid = sid
+                            return None
                     rotated: bool = queue.last_known_sid != sid
                     interrupted: bool = self._cancel_event.is_set()
                     self._cancel_event.clear()
@@ -1005,11 +1055,16 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
     # 会话管理（业务级）
     # ========================================================================
 
-    async def terminate_session(self) -> dict:
+    async def terminate_session(self):
         logger.info("Terminating session (parent) | session=%s", self.session_id)
-        await self._lifecycle.terminate_session()
-        logger.info("Terminate session ok (parent) | session=%s", self.session_id)
-        return {"terminated": True, "session_id": self.session_id}
+        result = await self._lifecycle.terminate_session()
+        logger.info(
+            "Terminate session complete (parent) | session=%s terminated=%s warnings=%d",
+            self.session_id,
+            result.terminated,
+            len(result.metadata_warnings),
+        )
+        return result
 
     def _load_history_from_disk(self, session_id: str) -> History:
         if self._session_store is None:

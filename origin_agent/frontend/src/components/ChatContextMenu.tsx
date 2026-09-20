@@ -7,6 +7,7 @@ interface ChatContextMenuProps {
   sessions: SessionInfo[];
   generatingTitleSessions: Set<string>;
   generatingTagSessions: Set<string>;
+  generatingSummarySessions: Set<string>;
   terminatingSessions: Set<string>;
   onAutoTitle: (sid: string) => void;
   onRename: (sid: string) => void;
@@ -25,6 +26,7 @@ export default function ChatContextMenu({
   sessions,
   generatingTitleSessions,
   generatingTagSessions,
+  generatingSummarySessions,
   terminatingSessions,
   onAutoTitle,
   onRename,
@@ -72,7 +74,7 @@ export default function ChatContextMenu({
         session={session}
         sid={contextMenu.sid}
         terminating={terminatingSessions.has(contextMenu.sid)}
-        generatingTitle={generatingTitleSessions.has(contextMenu.sid)}
+        generatingSummary={generatingSummarySessions.has(contextMenu.sid)}
         onClose={onClose}
         onBranch={onBranch}
         onTerminate={onTerminate}
@@ -113,7 +115,7 @@ function SessionLifecycleItem({
   session,
   sid,
   terminating,
-  generatingTitle,
+  generatingSummary,
   onClose,
   onBranch,
   onTerminate,
@@ -122,7 +124,7 @@ function SessionLifecycleItem({
   session?: SessionInfo;
   sid: string;
   terminating: boolean;
-  generatingTitle: boolean;
+  generatingSummary: boolean;
   onClose: () => void;
   onBranch: (sid: string) => void;
   onTerminate: (sid: string) => void;
@@ -137,9 +139,9 @@ function SessionLifecycleItem({
           label="继续此会话"
         />
         <ContextMenuItem
-          disabled={generatingTitle}
-          onClick={() => { if (!generatingTitle) { onClose(); onRegenerateSummary(sid); } }}
-          label={generatingTitle ? "⏳ 生成摘要中..." : "重新生成摘要"}
+          disabled={generatingSummary}
+          onClick={() => { if (!generatingSummary) { onClose(); onRegenerateSummary(sid); } }}
+          label={generatingSummary ? "⏳ 生成摘要中..." : "重新生成摘要"}
         />
       </>
     );

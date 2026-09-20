@@ -170,6 +170,7 @@
 | 工具集加载意图 | 会话曾经调用 `LoadToolset` 加载过的工具集名称集合，持久化在 SessionStore（`loaded_toolsets.json`） | loaded toolsets |
 | 有效工具集合 | 按"已加载工具集 + 当前 Loop 可见性（`ToolAvailability`）+ `check_fn` 可用性"动态计算的实际工具列表 | effective tools |
 | LLM Profile 根对象 | `LLMProfileData`（英文锚点：`LLM Profile root`）；`llm_profiles.es` v2 中唯一的持久化根，持有全部 Profile 及实例引用关系 |
+| 全局元数据 Profile | `LLMProfileData.metadata_profile`（英文锚点：`global metadata Profile`）；项目级元数据生成 Profile，统一服务所有会话的自动标题、自动标签和摘要；未配置时按目标会话活动 Profile 回退 |
 | Profile 名称指针 | 会话级或全局最近使用的 Profile 名称（英文锚点：`Profile name pointer`）；只保存名称，不复制端点、密钥或 Profile 对象 |
 | Profile 实例引用 | `LLMProfile` 多模态分工字段直接指向根列表中的另一个 `LLMProfile` 实例（英文锚点：`Profile object reference`） |
 
@@ -180,7 +181,7 @@
 | 规范称谓 | 定义 |
 |---|---|
 | 归档 | 会话只读化（`status = "archived"`），可参与合并 |
-| 终结 | 归档 + 生成摘要 |
+| 终结 | 归档 + 尝试生成摘要与标签；元数据失败以警告返回但不阻止归档 |
 | 合并 | 多父延续：将多个已归档会话合并为一个新会话 |
 | 分支 | 从当前会话创建子会话 |
 | 置顶 | `pinned` 标记，置顶显示 |

@@ -319,20 +319,6 @@ class SessionManager:
         # 如果提供了 loop_meta，更新新 session 的 loop_type 和 agents
         if loop_meta is not None:
             self.update_loop_type(new_sid, loop_meta.loopType, loop_meta.agents)
-        # 更新所有父会话的 continuation
-        new_info = self._sessions.get(new_sid)
-        effective_parents: list[str] = new_info.parents if new_info else []
-        for parent_id in effective_parents:
-            if parent_id in self._sessions:
-                self._sessions[parent_id].continuation = new_sid
-        # 同步更新父会话索引持久化，确保重启后 continuation 关系可恢复
-        if self._store_dir and effective_parents:
-            with self._index_lock:
-                entries = self._read_index()
-                for e in entries:
-                    if e.get("id") in effective_parents:
-                        e["continuation"] = new_sid
-                self._write_index(entries)
         logger.info("Session created | new=%s parents=%s role=%s", new_sid, parents or [parent_sid], role.value)
         return new_sid
 

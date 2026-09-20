@@ -107,6 +107,7 @@ WS /ws/chat?resume=<sid>
 | `subagent_update` | 子会话状态更新 |
 | `history_sync` | 正典历史同步元数据；正文通过 REST 加载 |
 | `llm_profile_changed` | Profile 重命名/删除通知；顶层携带 `operation`、`old_name`、`new_name` |
+| `metadata_profile_changed` | 全局元数据 Profile 状态通知；显式携带可空名称、模型和可用性 |
 | `confirm_request` | 请求用户审批 |
 | `ask_request` | 请求用户回答 |
 | `error` | 错误通知 |
@@ -127,10 +128,10 @@ WS /ws/chat?resume=<sid>
 | PUT | `/api/sessions/{id}/title` | 手动设置标题 |
 | POST | `/api/sessions/{id}/auto-title` | 自动生成标题 |
 | POST | `/api/sessions/{id}/auto-tags` | 自动生成标签 |
-| POST | `/api/sessions/{id}/terminate` | 终结会话（归档+摘要） |
+| POST | `/api/sessions/{id}/terminate` | 终结会话；元数据生成失败不阻止归档，响应通过 `metadata_warnings`返回警告 |
 | POST | `/api/sessions/{id}/pin` | 置顶切换 |
-| POST | `/api/sessions/{id}/branch` | 从会话创建分支 |
-| POST | `/api/sessions/merge` | 合并多个已归档会话 |
+| POST | `/api/sessions/{id}/branch` | 从会话创建分支；缺摘要时保底生成，失败不创建延续会话 |
+| POST | `/api/sessions/merge` | 合并多个已归档会话；所有父摘要必须齐备，任一失败则整体失败 |
 | DELETE | `/api/sessions/{id}` | 永久删除会话；拒绝“随意聊聊”、不存在目标和重复删除 |
 
 永久删除先建立进程内删除中标记以阻止新连接重建 Loop，再关闭现有 WebSocket、停止子Agent、回收活动回复/消息队列/客户端信息/Cron 注册，随后删除会话索引与目录并清理 Shell、Cron 和动态端点。删除中并发请求对已移除的 Loop返回未找到或未就绪；附带资源清理失败不回滚已经完成的永久删除。
@@ -190,6 +191,15 @@ Shell 输出由 Agent 使用 `ReadShell` 拉取，不通过聊天 WebSocket 主�
 | GET | `/api/llm/clients` | 返回可用 LLM 客户端实现 |
 
 前端 USER_MESSAGE 与重新生成请求只传 `llm_profile_name`，不传完整 Profile。空字符串表示明确无配置。`/resume` 请求不接收 `llm_profile_name`，始终使用当前 `ParentAgentLoop` 已持有的活动 Profile；前端刚切换但尚未通过 USER_MESSAGE 或重新生成提交的 Profile，不会被 resume 应用。Profile 重命名和删除通过 `llm_profile_changed` 广播；忙碌会话不在删除请求中切换。
+
+### 全局元数据 Profile
+
+| 方法 | 端点 | 说明 |
+|------|------|------|
+| GET | `/api/metadata/profile` | 返回全局元数据 Profile 的可空名称、模型与配置可用性 |
+| PUT | `/api/metadata/profile` | 按 Profile 名称设置或以 `null`清空全局元数据 Profile |
+
+自动标题、自动标签和摘要直接调用 Application 持有的 `SessionMetadataService`，不要求目标会话存在运行时 Loop。全局元数据 Profile未配置时按目标会话自己的活动 Profile回退；明确配置但不可用时返回失败，不静默回退。配置变化通过 `metadata_profile_changed`广播。删除当前元数据 Profile只清空全局引用，不自动采用删除请求中的替换 Profile。
 
 ### 静态文件
 

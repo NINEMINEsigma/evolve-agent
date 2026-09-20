@@ -16,6 +16,7 @@ if TYPE_CHECKING:
     from entity.puretype import ApprovalProfileState
     from system.context import RuntimeContext
     from system.llm_profile_store import LLMProfileStore
+    from system.session_metadata import SessionMetadataService
     from system.sandbox import Sandbox
     from system.shell_manager import ShellManager
     from system.subprocess_utils import SubprocessRunner
@@ -50,6 +51,7 @@ class Application(Architecture):
         # -- 子系统 private fields（由 init() 创建，@property 只读暴露）--
         self._profile_lock:              threading.RLock = threading.RLock()
         self._llm_profile_store:         LLMProfileStore | None = None
+        self._session_metadata_service:  SessionMetadataService | None = None
         self._subprocess_runner:         SubprocessRunner | None = None
         self._sandbox:                   Sandbox | None = None
         self._shell_manager:             ShellManager | None = None
@@ -103,6 +105,14 @@ class Application(Architecture):
             self._profile_lock,
         )
 
+        # 3.5 SessionMetadataService — 全局元数据 Profile 与会话回退的唯一业务入口。
+        from system.session_metadata import SessionMetadataService
+        self._session_metadata_service = SessionMetadataService(
+            self.runtime_context,
+            self._llm_profile_store,
+            self._profile_lock,
+        )
+
         # 3. CronRouter — 构造后从磁盘恢复持久化任务
         #    _load_all_tasks 内部调用 _get_cr() → Application.current().cron_router，
         #    此时 self._cron_router 已设好，不会重入问题。
@@ -145,6 +155,11 @@ class Application(Architecture):
     def llm_profile_store(self) -> LLMProfileStore:
         """返回进程内唯一的 LLM Profile 根对象存储。"""
         return self._llm_profile_store  # type: ignore[return-value]
+
+    @property
+    def session_metadata_service(self) -> SessionMetadataService:
+        """返回进程内唯一的会话元数据生成服务。"""
+        return self._session_metadata_service  # type: ignore[return-value]
 
     @property
     def subprocess_runner(self) -> SubprocessRunner:

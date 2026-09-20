@@ -5,13 +5,14 @@ puretype 包 — 只含有不包含任何方法定义的类型定义。
     _base       : MessageContent, Role, ToolDangerLevel, ToolAvailability
     approval    : ApprovalPolicy, ApprovalOutcome, ApprovalResult, ApprovalProfileUpdateRequest,
                   ApprovalProfileState, ApprovalProfileMutationResponse, ToolCallMeta, ToolAllowlistEntry
+    metadata    : MetadataProfileUpdateRequest, MetadataProfileState, MetadataProfileMutationResponse
     llm         : ToolCallRequest, Usage, MessageMetrics, LLMResponse, ToolCallDeltaPhase,
                   ToolCallDelta, StreamChunk, LLMProfile, LLMProfileData, LLMProfilePayload,
                   LLMProfileUpdateRequest, LLMProfileDeleteRequest, LLMProfileMutationResponse,
                   LLMProfileDeleteResult, ModalityCapability
     skills      : SkillPayload, SkillInfo
-    session     : Loop, SessionStatus, LoopMeta, SessionInfo, History skeleton/page/resource DTO,
-                  SessionMessageEntry, TokenUsageRecord, QueuedMessage
+    session     : Loop, SessionStatus, LoopMeta, SessionInfo, SessionTerminationResult,
+                  History skeleton/page/resource DTO, SessionMessageEntry, TokenUsageRecord, QueuedMessage
     agent       : AgentConfig
     ws          : MessageType, Message
     lsp         : LSPState, LSPDiagnostic, LSPReference, LSPDefinition, LSPSymbol
@@ -41,6 +42,11 @@ from .approval import (
     ToolCallMeta,
     ToolAllowlistEntry,
 )
+from .metadata import (
+    MetadataProfileUpdateRequest,
+    MetadataProfileState,
+    MetadataProfileMutationResponse,
+)
 from .llm import (
     ToolCallRequest,
     Usage,
@@ -67,6 +73,7 @@ from .session import (
     SessionStatus,
     LoopMeta,
     SessionInfo,
+    SessionTerminationResult,
     SessionHistoryRowKind,
     SessionHistorySkeletonRow,
     SessionHistorySkeletonResponse,
@@ -146,6 +153,9 @@ __all__ = [
     "ApprovalProfileUpdateRequest",
     "ApprovalProfileState",
     "ApprovalProfileMutationResponse",
+    "MetadataProfileUpdateRequest",
+    "MetadataProfileState",
+    "MetadataProfileMutationResponse",
     "ToolCallMeta",
     "ToolAllowlistEntry",
     # llm
@@ -172,6 +182,7 @@ __all__ = [
     "SessionStatus",
     "LoopMeta",
     "SessionInfo",
+    "SessionTerminationResult",
     "SessionHistoryRowKind",
     "SessionHistorySkeletonRow",
     "SessionHistorySkeletonResponse",

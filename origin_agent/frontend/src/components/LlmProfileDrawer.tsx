@@ -59,6 +59,8 @@ export default function LlmProfileDrawer({
     activeProfileName,
     approvalProfileName,
     setApprovalProfile,
+    metadataProfileName,
+    setMetadataProfile,
     createProfile,
     updateProfile,
     deleteProfile,
@@ -69,6 +71,7 @@ export default function LlmProfileDrawer({
 
   const [selectedName, setSelectedName] = useState<string>(activeProfileName);
   const [approvalBusy, setApprovalBusy] = useState<string | null>(null);
+  const [metadataBusy, setMetadataBusy] = useState<string | null>(null);
   const [draft, setDraft] = useState<LlmProfile>(EMPTY_PROFILE);
   const [isEditing, setIsEditing] = useState(false);
   const [isNew, setIsNew] = useState(false);
@@ -213,6 +216,22 @@ export default function LlmProfileDrawer({
     }
   }, [approvalBusy, approvalProfileName, setApprovalProfile]);
 
+  const handleSetMetadata = useCallback(async (name: string | null) => {
+    if (metadataBusy) return;
+    if (name !== null && metadataProfileName === name) {
+      if (!window.confirm("将清空全局元数据 Profile，确认？")) return;
+    }
+    setMetadataBusy(name ?? "__clear__");
+    try {
+      const target = name !== null && metadataProfileName === name ? null : name;
+      await setMetadataProfile(target);
+    } catch {
+      // error 已由 useLlmProfiles 设置
+    } finally {
+      setMetadataBusy(null);
+    }
+  }, [metadataBusy, metadataProfileName, setMetadataProfile]);
+
   const handleDuplicate = useCallback(() => {
     if (!selectedProfile) return;
     const existingNames = profiles.map((p) => p.name);
@@ -320,6 +339,15 @@ export default function LlmProfileDrawer({
                           disabled={approvalBusy === p.name}
                         >
                           {p.name === approvalProfileName ? "🔒" : "🔓"}
+                        </button>
+                        {/* "设为元数据"开关 */}
+                        <button
+                          className={`llm-tree-metadata-toggle${p.name === metadataProfileName ? " on" : ""}`}
+                          onClick={(e) => { e.stopPropagation(); handleSetMetadata(p.name); }}
+                          data-tooltip={p.name === metadataProfileName ? "全局元数据 Profile（点击清除）" : "设为全局元数据 Profile"}
+                          disabled={metadataBusy === p.name}
+                        >
+                          {p.name === metadataProfileName ? "◆" : "◇"}
                         </button>
                       </div>
                     ))}

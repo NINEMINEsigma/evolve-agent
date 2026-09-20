@@ -19,7 +19,7 @@ from entity.messages import (
     History,
     CharacterConversationMessage,
 )
-from entity.puretype import Role, ToolAvailability, AgentConfig, LoopMeta, Loop, TokenUsageRecord, MessageContent, LLMProfile, QueuedMessage
+from entity.puretype import Role, ToolAvailability, AgentConfig, LoopMeta, Loop, TokenUsageRecord, MessageContent, LLMProfile, QueuedMessage, SessionTerminationResult
 from entity.constant import (
     MAIN_AGENT_CHARACTER_NAME,
     USER_CHARACTER_NAME,
@@ -209,59 +209,65 @@ class MultiAgentLoop(BaseAgentLoop, IMainSessionLoop):
             self._token_record.prompt_tokens + max_output + safety_margin
         ) > max_context
 
-    async def _rotate_session_for_context_limit(self) -> str | None:
-        """上下文超限时终结当前会话并创建继承会话（多 Agent 模式）。
-
-        新会话继承原会话的 agents 列表，以多 Agent 模式重建。
-        """
+    async def _rotate_session_for_context_limit(self) -> str:
+        """摘要成功后创建并切换到多Agent延续会话。"""
         from entry.session_manager import terminate_and_rotate_session
 
         old_sid = self.session_id
-        loop_meta = LoopMeta(loopType=Loop.multi, agents=list(self._agents.keys()))
-
-        # 确定历史存储目录
-        history_store_dir = None
-        if self._session_store is not None:
-            history_store_dir = self._session_store.base_dir
-
-        # 获取用于生成摘要的 LLM 客户端
-        llm = self._get_session_info_llm_client()
-
-        # 获取 gateway 层 SessionManager
         sm = self.session_manager
         if sm is None:
-            logger.warning("Cannot rotate: session_manager is None | session=%s", old_sid)
-            return None
+            raise RuntimeError("session manager not available")
 
-        try:
-            new_sid = await terminate_and_rotate_session(
-                session_id=old_sid,
-                session_store=self._session_store,
-                session_manager=sm,
-                llm=llm,
-                loop_meta=loop_meta,
-                current_character_agent=self.current_character_agent,
-                history_store_dir=history_store_dir,
-            )
-        except Exception:
-            logger.exception(
-                "Failed to rotate session for context limit | session=%s", old_sid,
-            )
-            return None
-
-        if new_sid:
-            self.session_id = new_sid
-            self._token_record = TokenUsageRecord()
-            self._session_rotated_notify[old_sid] = new_sid
-            logger.info(
-                "Multi-agent session rotated for context limit | old=%s new=%s",
-                old_sid, new_sid,
-            )
+        new_sid = await terminate_and_rotate_session(
+            session_id=old_sid,
+            session_store=self._session_store,
+            session_manager=sm,
+            metadata_service=self.app.session_metadata_service,
+            loop_meta=LoopMeta(
+                loopType=Loop.multi,
+                agents=list(self._agents.keys()),
+            ),
+            current_character_agent=self.current_character_agent,
+        )
+        self.session_id = new_sid
+        self._token_record = TokenUsageRecord()
+        new_history = (
+            self._session_store.read_history(new_sid)
+            if self._session_store is not None
+            else None
+        )
+        if new_history is not None:
+            self._history = new_history
+        self._session_rotated_notify[old_sid] = new_sid
+        logger.info(
+            "Multi-agent session rotated for context limit | old=%s new=%s",
+            old_sid,
+            new_sid,
+        )
         return new_sid
+
+    async def _try_rotate_session_for_context_limit(self) -> bool:
+        """尝试超限旋转；元数据失败时报告并终止当前轮次。"""
+        try:
+            await self._rotate_session_for_context_limit()
+            return True
+        except Exception as exc:
+            from system.session_metadata import SessionMetadataError
+
+            if not isinstance(exc, SessionMetadataError):
+                raise
+            await self.report_context_limit_rotation_blocked(
+                self.session_id,
+                exc,
+            )
+            return False
 
     def pop_session_rotated(self) -> str | None:
         """取出并移除旋转通知（old_sid → new_sid），供 gateway 层读取。"""
-        return self._session_rotated_notify.pop(self.session_id, None)
+        if not self._session_rotated_notify:
+            return None
+        old_sid = next(iter(self._session_rotated_notify))
+        return self._session_rotated_notify.pop(old_sid)
 
     @property
     def current_character_agent(self) -> str:
@@ -283,11 +289,6 @@ class MultiAgentLoop(BaseAgentLoop, IMainSessionLoop):
         return self._token_record.prompt_tokens
 
     # -- LLM 客户端 -------------------------------------------------------
-
-    def _get_session_info_llm_client(self) -> BaseLLMClient | None:
-        """返回用于生成标题/标签/摘要等会话信息的主 Agent 客户端。"""
-        agent = self._agents.get(MAIN_AGENT_CHARACTER_NAME)
-        return agent.llm_client if agent else None
 
     def set_profile(self, profile: LLMProfile | None) -> None:
         """同步切换 MultiAgentLoop 的主 Agent Profile；子 Agent 不变。"""
@@ -339,35 +340,59 @@ class MultiAgentLoop(BaseAgentLoop, IMainSessionLoop):
     def get_tool_availability_scope(self) -> ToolAvailability:
         return ToolAvailability.MULTI_AGENT
 
-    async def terminate_session(self) -> dict:
-        """终结当前会话：中断级联 + 生成摘要 + 归档。"""
+    async def terminate_session(self) -> SessionTerminationResult:
+        """终结多Agent会话；元数据失败只作为警告。"""
         logger.info("Terminating multi-agent session | session=%s", self.session_id)
-        # 1. 中断级联，使 _cascade 在下一个 step 退出
         self.interrupt()
-        # 2. 生成并持久化摘要（复用 BaseAgentLoop.regenerate_summary_for_session）
-        if self._session_store is not None:
-            try:
-                await self.regenerate_summary_for_session(self.session_id)
-            except Exception:
-                logger.exception(
-                    "Failed to generate summary for session=%s", self.session_id,
-                )
-        # 3. 归档（通过 gateway SessionManager）
-        if self.session_manager is not None:
-            try:
-                self.session_manager.archive(self.session_id, continuation_sid=None)
-            except Exception:
-                logger.exception(
-                    "Failed to archive session=%s", self.session_id,
-                )
+        warnings: list[str] = []
+        service = self.app.session_metadata_service
+
+        try:
+            await service.ensure_summary(self.session_id)
+        except Exception as exc:
+            logger.warning(
+                "Multi-agent summary unavailable during termination | session=%s error=%s",
+                self.session_id,
+                exc,
+            )
+            warnings.append(f"摘要生成失败：{exc}")
+
+        if self.session_manager is None:
+            return SessionTerminationResult(
+                terminated=False,
+                session_id=self.session_id,
+                error="session manager not available",
+                metadata_warnings=warnings,
+            )
+
+        try:
+            tags = await service.generate_tags(
+                self.session_id,
+                self.session_manager.get_all_tags(),
+            )
+            self.session_manager.set_session_tags(self.session_id, tags)
+        except Exception as exc:
+            logger.warning(
+                "Multi-agent tags unavailable during termination | session=%s error=%s",
+                self.session_id,
+                exc,
+            )
+            warnings.append(f"标签生成失败：{exc}")
+
+        self.session_manager.archive(self.session_id, continuation_sid=None)
         try:
             await self.app.shell_manager.stop_session(self.session_id)
-        except Exception:
+        except Exception as exc:
             logger.exception(
                 "Failed to stop Shell sessions during multi-agent termination | session=%s",
                 self.session_id,
             )
-        return {"terminated": True, "session_id": self.session_id}
+            warnings.append(f"Shell会话停止失败：{exc}")
+        return SessionTerminationResult(
+            terminated=True,
+            session_id=self.session_id,
+            metadata_warnings=warnings,
+        )
 
     async def process_message(
         self,
@@ -445,7 +470,8 @@ class MultiAgentLoop(BaseAgentLoop, IMainSessionLoop):
                         "Context limit reached after cascade, rotating | session=%s",
                         self.session_id,
                     )
-                    await self._rotate_session_for_context_limit()
+                    if not await self._try_rotate_session_for_context_limit():
+                        return ""
 
                 # 收集本轮所有 Agent 的回复（用户消息之后的消息）
                 responses: list[str] = []
@@ -588,7 +614,8 @@ class MultiAgentLoop(BaseAgentLoop, IMainSessionLoop):
                             self._token_record.prompt_tokens > 0
                             and self._is_context_over_limit()
                         ):
-                            await self._rotate_session_for_context_limit()
+                            if not await self._try_rotate_session_for_context_limit():
+                                return ""
                     queue.last_known_sid = self.session_id
                 finally:
                     self._processing = False
@@ -621,7 +648,8 @@ class MultiAgentLoop(BaseAgentLoop, IMainSessionLoop):
                 # 以全体 agent 为初始响应者重新启动级联
                 await self._cascade(list(self._agent_names))
                 if self._token_record.prompt_tokens > 0 and self._is_context_over_limit():
-                    await self._rotate_session_for_context_limit()
+                    if not await self._try_rotate_session_for_context_limit():
+                        return ""
                 return ""
             finally:
                 self._processing = False

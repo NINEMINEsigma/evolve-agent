@@ -31,7 +31,7 @@ frontend/
 │   │   ├── useSessionStore.ts       ← 会话列表与元数据管理
 │   │   ├── useSubagentManager.ts    ← 子代理状态管理
 │   │   ├── useUploadManager.ts      ← 文件上传管理
-│   │   ├── useLlmProfiles.ts         ← Profile 列表、单对象 CRUD 与活动名称
+│   │   ├── useLlmProfiles.ts         ← Profile 列表、单对象 CRUD、活动名称、审批与全局元数据 Profile状态
 │   │   ├── useAgentspace.ts         ← Agentspace 文件浏览
 │   │   ├── useSessionSite.ts        ← 会话网页探测与 SSE 热刷新
 │   │   ├── useEdgeDrawer.ts         ← 边缘抽屉三态状态机
@@ -130,6 +130,7 @@ frontend/
 | `TagEditor.tsx` | 会话标签编辑 |
 | `primitives/ModalWindow.tsx` | 模态窗口基础原语 |
 | `primitives/PopupLayer.tsx` | 弹出层基础原语 |
+| `primitives/NoticeBanner.tsx` | 用户触发操作的持久错误/警告横幅；不会写入聊天 History，需用户关闭 |
 
 ### 面板
 
@@ -171,9 +172,9 @@ frontend/
 | `features/chat/chatRuntimeStore.ts` | Zustand 聊天运行时唯一高频状态：完整骨架、内容行、live 尾部、输入草稿、pending、滚动与资源；`toggleMessageCollapse(id, source)` 分别切换历史内容行与 live 行的气泡折叠状态，不改变 live 正典版本号；待结束流在 Footer 布局采样后固化，`linkStreamHistory` 按权威索引交接展开选择 |
 | `features/chat/chatRuntimeController.ts` | History skeleton/page 请求代际、Abort、页去重、正典同步、Minimap 随机目标与资源懒加载 |
 | `features/chat/useChatScrollController.ts` | `initializing/following/detached/minimap_dragging/returning` 五态追底与回底控制 |
-| `useLlmProfiles.ts` | 从服务端读取 Profile；提供单对象创建/编辑/删除；浏览器仅持久化活动 Profile 名称，不保存 Profile 列表 |
+| `useLlmProfiles.ts` | 从服务端读取 Profile；提供单对象创建/编辑/删除；浏览器仅持久化活动 Profile 名称；审批 Profile与全局元数据 Profile使用服务端权威 REST 状态和 WebSocket广播 |
 | `useWebSocketConnection.ts` | WebSocket 连接生命周期管理：建立/断开/重连/心跳；消息入口按连接代际和当前 WebSocket 实例丢弃旧连接迟到消息，避免快速切换会话时污染当前状态；普通断开保留指数退避重连，永久删除的已建立连接按 4004 停止重连，握手拒绝则通过 `status.exists`二次确认后通知上层切换“随意聊聊” |
-| `useSessionStore.ts` | 会话列表与低频元数据管理：获取/创建/归档/删除/标签/标题；审批模式、任务资源、Shell/Cron 和交互队列；主聊天消息、输入草稿与 pending 已迁移到 chat runtime store |
+| `useSessionStore.ts` | 会话列表与低频元数据管理：获取/创建/归档/删除/标签/标题；审批模式、任务资源、Shell/Cron 和交互队列；自动标题/标签/摘要/终结/合并错误通过全局操作通知展示，终结元数据警告不改变归档成功；主聊天消息、输入草稿与 pending 已迁移到 chat runtime store |
 | `useSubagentManager.ts` | 子代理状态管理：注册/启动/停止/审批/列表 |
 | `useUploadManager.ts` | 文件上传管理：拖拽上传、进度跟踪、文件选择器 |
 | `useAgentspace.ts` | Agentspace 编辑器状态机：目录展开/选择、版本化标签、SSE 代际、逐文件锁、冲突和垃圾桶 |
@@ -183,6 +184,8 @@ frontend/
 | `useSessionSite.ts` | 会话网页状态：探测当前会话 `site/index.html` 并订阅 `site/` 的 Agentspace SSE；部署完成后自动显示右侧入口，资源连续变化时等待 1 秒安静窗口后热刷新，入口文件或目录删除/移走后自动隐藏 |
 | `useSessionStage.ts` | 会话舞台层状态：由 `Layout` 单例探测 `stage/index.html` 并订阅 Agentspace SSE；入口文件作为部署提交标记，新内容版本经 1 秒安静窗口后只重建一次 iframe，非入口资源事件和 SSE resync 不重置运行态 |
 | `useSessionChatStyle.ts` | 会话聊天区自定义样式状态：探测 `chat-style/index.css`，经 PostCSS 作用域处理（`@import` 拒绝、`.chat-area` 前缀、`@font-face` 校验 `ChatStyle-` 前缀），SSE 热重载 |
+
+“模型配置”抽屉的每个 Profile 行包含三个互相独立的角色开关：当前会话活动 Profile、审批 Profile、全局元数据 Profile。全局元数据 Profile可再次点击并确认清空；切换状态由服务端持久化与广播，不写入浏览器活动 Profile名称。
 
 ---
 

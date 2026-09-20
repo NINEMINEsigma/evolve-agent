@@ -165,6 +165,7 @@ class LLMProfileData(BaseModel):
 
     profiles: list[LLMProfile] = Field(default_factory=list, description="LLMProfile列表")
     approval_profile: LLMProfile|None = Field(default=None)
+    metadata_profile: LLMProfile|None = Field(default=None)
 
 
 class LLMProfilePayload(BaseModel):

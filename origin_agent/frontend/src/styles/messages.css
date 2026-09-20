@@ -1205,3 +1205,60 @@
   from { transform: scaleX(1); }
   to { transform: scaleX(0); }
 }
+
+/* ── Operation notice banner（用户触发操作的持久错误/警告）── */
+.notice-banner {
+  position: fixed;
+  top: 64px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: var(--z-banner);
+  width: min(620px, calc(100vw - 32px));
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  box-shadow: 0 8px 24px rgba(var(--black-rgb), 0.35);
+  color: var(--text-primary);
+  background: var(--bg-secondary);
+}
+
+.notice-banner-error {
+  border-color: var(--error, #ef4444);
+}
+
+.notice-banner-warning {
+  border-color: var(--warning, #f59e0b);
+}
+
+.notice-banner-message {
+  flex: 1;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.notice-banner-close {
+  flex-shrink: 0;
+  border: none;
+  border-radius: var(--radius-xs);
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 18px;
+  line-height: 1;
+}
+
+.notice-banner-close:hover {
+  color: var(--text-primary);
+  background: var(--bg-hover);
+}
+
+@media (max-width: 768px) {
+  .notice-banner {
+    top: 52px;
+    width: calc(100vw - 20px);
+  }
+}

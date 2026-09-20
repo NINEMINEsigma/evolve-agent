@@ -892,6 +892,33 @@
   opacity: 0.5;
 }
 
+.llm-tree-metadata-toggle {
+  flex-shrink: 0;
+  width: 22px;
+  height: 22px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xs);
+  background: transparent;
+  cursor: pointer;
+  font-size: 12px;
+  color: var(--text-muted);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all var(--duration-fast);
+}
+
+.llm-tree-metadata-toggle.on {
+  background: var(--accent-blue);
+  color: var(--text-white);
+  border-color: var(--accent-blue);
+}
+
+.llm-tree-metadata-toggle:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+
 /* 表单操作按钮区 */
 .llm-profile-form-actions {
   display: flex;

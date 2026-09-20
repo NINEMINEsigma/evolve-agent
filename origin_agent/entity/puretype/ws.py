@@ -35,6 +35,7 @@ class MessageType(str, Enum):
     HISTORY_SYNC = "history_sync"
     LLM_PROFILE_CHANGED = "llm_profile_changed"
     APPROVAL_PROFILE_CHANGED = "approval_profile_changed"
+    METADATA_PROFILE_CHANGED = "metadata_profile_changed"
 
 
 class Message(BaseModel):
@@ -97,6 +98,10 @@ class Message(BaseModel):
     approval_profile_name: str | None = None
     approval_profile_model: str | None = None
     approval_profile_available: bool | None = None
+    # METADATA_PROFILE_CHANGED：全局元数据 Profile 状态变更通知
+    metadata_profile_name: str | None = None
+    metadata_profile_model: str | None = None
+    metadata_profile_available: bool | None = None
     # HANDSFREE_MODE：服务端权威脱手模式回执
     handsfree_mode: bool | None = None
     # HANDSFREE_MODE：服务端权威审批模式（manual/handsfree/yolo）

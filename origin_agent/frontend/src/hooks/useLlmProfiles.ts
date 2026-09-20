@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { usePersistentState } from "./usePersistentState";
 import { STORAGE_KEYS } from "../constants/storage";
-import type { LlmProfile, ApprovalProfileState } from "../types";
+import type { LlmProfile, ApprovalProfileState, MetadataProfileState } from "../types";
 
 async function responseError(response: Response): Promise<Error> {
   const data = await response.json().catch(() => ({}));
@@ -17,6 +17,7 @@ export function useLlmProfiles() {
   );
   const [availableClients, setAvailableClients] = useState<string[]>([]);
   const [approvalProfileState, setApprovalProfileState] = useState<ApprovalProfileState>({ profile_name: null, model: null, available: false });
+  const [metadataProfileState, setMetadataProfileState] = useState<MetadataProfileState>({ profile_name: null, model: null, available: false });
 
   const fetchProfiles = useCallback(async (): Promise<LlmProfile[]> => {
     const response = await fetch("/api/llm/profiles");
@@ -52,6 +53,7 @@ export function useLlmProfiles() {
 
     void refreshProfiles().catch(() => {});
     void fetchApprovalProfile().catch(() => {});
+    void fetchMetadataProfile().catch(() => {});
   }, [refreshProfiles]);
 
   const activeProfile = useMemo(
@@ -172,6 +174,52 @@ export function useLlmProfiles() {
     }
   }, []);
 
+  const fetchMetadataProfile = useCallback(async (): Promise<MetadataProfileState> => {
+    try {
+      const response = await fetch("/api/metadata/profile");
+      if (!response.ok) throw await responseError(response);
+      const data = await response.json() as MetadataProfileState;
+      setMetadataProfileState(data);
+      return data;
+    } catch (cause) {
+      const message = cause instanceof Error ? cause.message : String(cause);
+      setError(message);
+      return { profile_name: null, model: null, available: false };
+    }
+  }, []);
+
+  const setMetadataProfile = useCallback(async (profileName: string | null): Promise<MetadataProfileState> => {
+    try {
+      const response = await fetch("/api/metadata/profile", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ profile_name: profileName }),
+      });
+      if (!response.ok) throw await responseError(response);
+      const data = await response.json();
+      const state = data.state as MetadataProfileState;
+      setMetadataProfileState(state);
+      setError(null);
+      return state;
+    } catch (cause) {
+      const message = cause instanceof Error ? cause.message : String(cause);
+      setError(message);
+      throw cause;
+    }
+  }, []);
+
+  const handleMetadataProfileChanged = useCallback((msg: {
+    metadata_profile_name?: string | null;
+    metadata_profile_model?: string | null;
+    metadata_profile_available?: boolean;
+  }) => {
+    setMetadataProfileState({
+      profile_name: msg.metadata_profile_name ?? null,
+      model: msg.metadata_profile_model ?? null,
+      available: msg.metadata_profile_available ?? false,
+    });
+  }, []);
+
   const handleApprovalProfileChanged = useCallback((msg: {
     approval_profile_name?: string | null;
     approval_profile_model?: string | null;
@@ -189,6 +237,12 @@ export function useLlmProfiles() {
   const approvalProfile = useMemo(
     () => profiles.find((p) => p.name === approvalProfileName) || null,
     [profiles, approvalProfileName],
+  );
+
+  const metadataProfileName = metadataProfileState.profile_name;
+  const metadataProfile = useMemo(
+    () => profiles.find((p) => p.name === metadataProfileName) || null,
+    [profiles, metadataProfileName],
   );
 
   const handleProfileChanged = useCallback((event: {
@@ -222,6 +276,12 @@ export function useLlmProfiles() {
     fetchApprovalProfile,
     setApprovalProfile,
     handleApprovalProfileChanged,
+    metadataProfileState,
+    metadataProfileName,
+    metadataProfile,
+    fetchMetadataProfile,
+    setMetadataProfile,
+    handleMetadataProfileChanged,
   };
 }
 
