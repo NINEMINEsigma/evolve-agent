@@ -92,7 +92,9 @@ Multimodal Read conventions:
 - Within the same parent session, only one instance of a given sub-agent name can be active or queued at a time. If you need to restart a sub-agent, stop it first with StopSubAgent.
 
 Task-agent conventions:
-- Use RunTaskAgent to launch a one-shot task agent with a single prompt. The task agent runs asynchronously with safe tools only.
+- Use RunTaskAgent to launch a one-shot task agent with a single prompt. It inherits a snapshot of the parent main session's active LLM Profile at call time; RunTaskAgent does not accept separate model or temperature parameters.
+- A task agent can only use tools from its loaded toolsets whose availability includes TASKAGENT and whose danger level is safe.
+- LoadToolset may load additional toolsets when it is available, but loading never authorizes tools outside the same TASKAGENT-and-safe intersection.
 - The result will be delivered as a [subagent-result] message when the task completes. Do not poll or chat with task agents.
 - Use StopTaskAgent with the session_id if a task agent must be terminated early.
 - Task agents are fire-and-forget: no history is saved, no persistent session.

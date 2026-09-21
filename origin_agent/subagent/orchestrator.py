@@ -27,7 +27,13 @@ from entity.constant import (
     History_Version as __History_Version__,
 )
 from entity.messages import CharacterConversationMessage, ToolResultMessage
-from entity.puretype import Role, ToolAvailability, AgentConfig, ToolDangerLevel
+from entity.puretype import (
+    Role,
+    ToolAvailability,
+    AgentConfig,
+    ToolDangerLevel,
+    LLMProfile,
+)
 from abstract.tools.registry import registry as tool_registry
 from system.context import get_runtime_context
 from system.templates import read_template
@@ -157,20 +163,20 @@ class _OrchestratorContext:
         self,
         parent_session_id: str,
         prompt: str,
-        temperature: float,
+        profile: LLMProfile,
     ) -> dict[str, Any]:
-        """启动一次性 taskagent。"""
+        """使用调用时活动 Profile快照启动一次性临时Agent。"""
         session_id = f"{parent_session_id}_{uuid.uuid4().hex[:12]}"
 
         # 检查上限
         if len(self._active) >= SUBAGENT_MAX_ACTIVE:
-            # taskagent 不进等待队列——直接拒绝
+            # 临时Agent不进等待队列——直接拒绝
             return {
                 "success": False,
                 "error": f"Active sub-agent limit reached ({SUBAGENT_MAX_ACTIVE}). Stop some sub-agents first.",
             }
 
-        await self._start_taskagent(session_id, prompt, temperature)
+        await self._start_taskagent(session_id, prompt, profile)
         return {
             "success": True,
             "session_id": session_id,
@@ -181,11 +187,11 @@ class _OrchestratorContext:
         self,
         session_id: str,
         prompt: str,
-        temperature: float,
+        profile: LLMProfile,
     ) -> None:
         """创建 TaskAgentLoop 并以 asyncio.Task 启动。"""
         parent_ctx = get_runtime_context()
-        ctx = await build_taskagent_context(parent_ctx, temperature)
+        ctx = await build_taskagent_context(profile, parent_ctx)
 
         tools = self._build_task_tool_set()
 
@@ -202,6 +208,9 @@ class _OrchestratorContext:
             parent_character_agent=self._agent_loop.current_character_agent,
             name="taskagent",
         )
+        # TODO: 后续可按任务类型或调用方声明为临时Agent预加载工具集，
+        # 减少先调用 LoadToolset 再执行任务所占用的工具循环轮次；
+        # 预加载不得绕过“已加载工具集 ∩ TASKAGENT ∩ safe”权限过滤。
         self._active[session_id] = loop
         self._subagent_names[session_id] = "taskagent"
 
@@ -910,8 +919,15 @@ class SubAgentOrchestrator:
     async def stop(self, parent_session_id: str, session_id: str) -> dict[str, Any]:
         return await self._get_context(parent_session_id).stop(session_id)
 
-    async def launch_taskagent(self, parent_session_id: str, prompt: str, temperature: float) -> dict[str, Any]:
-        return await self._get_context(parent_session_id).launch_taskagent(parent_session_id, prompt, temperature)
+    async def launch_taskagent(
+        self,
+        parent_session_id: str,
+        prompt: str,
+        profile: LLMProfile,
+    ) -> dict[str, Any]:
+        return await self._get_context(parent_session_id).launch_taskagent(
+            parent_session_id, prompt, profile
+        )
 
     async def stop_taskagent(self, parent_session_id: str, session_id: str) -> dict[str, Any]:
         return await self._get_context(parent_session_id).stop_taskagent(session_id)

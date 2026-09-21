@@ -132,6 +132,13 @@ Evolve Agent 内置两套多代理运行时：
 
 详见 [subagent/DEV-README.md](origin_agent/subagent/DEV-README.md)。
 
+### 临时Agent（TaskAgent）
+
+- `RunTaskAgent` 只接收单个 prompt，并在调用发生时取得父主会话活动 LLM Profile的非持久化深快照；后续 Profile切换或编辑不影响已经启动的临时Agent。
+- 临时Agent无系统提示词、无历史持久化，产生纯文本结果后立即终止；并发槽位已满时直接失败，不进入等待队列。
+- 工具范围严格为“已加载工具集 ∩ `TASKAGENT` 可用范围 ∩ `safe` 危险等级”，定义生成和执行期均校验，因此不会进入审批流程。
+- 初始工具集状态默认从 `core` 开始；符合相同权限交集的 `LoadToolset` 可以加载其他工具集，但加载本身不扩大授权范围。
+
 ### 多 Agent 协作模式（MultiAgent）
 
 - 通过 `enter_multi_agent` 工具切换，不可逆。切换后所有用户消息由 `MultiAgentLoop` 处理。

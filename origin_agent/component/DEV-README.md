@@ -50,7 +50,7 @@ component/
 | `shell.py` | `StartShell`、`ReadShell`、`WriteShell`、`InterruptShell`、`StopShell` | Windows ConPTY 长期 Shell会话：启动并输入、字符位置读取、复用输入、Ctrl-C 与强制停止 |
 | `frontend.py` | `ValidateFrontend` | 前端构建验证 |
 | `skills.py` | `RecallSkill`, `CreateSkill` | 技能管理（已并入 core 工具集） |
-| `load_toolset.py` | `LoadToolset` | 按需加载工具集到当前会话（core 工具集，EVERY 可见性） |
+| `load_toolset.py` | `LoadToolset` | 按需加载工具集到当前会话（core 工具集，EVERY 可见性）；加载只改变已加载集合，返回名称仅供发现，工具仍须通过当前 Loop 的 scope、危险等级与运行时权限过滤 |
 | `sandbox_spaces.py` | `AddSandboxSpace`、`RemoveSandboxSpace` | fast 模式全局动态沙盒空间增删；位于按需加载的 `sandbox` 工具集，critical，仅普通/多Agent模式主Agent可修改；用户也可通过命令菜单中的动态沙盒空间管理弹窗直接执行 REST CRUD |
 | `ask_question.py` | `Ask` | 向前端提问 |
 | `progress_tools.py` | `UpdateTaskProgress`, `ClearTaskProgress` | 任务进度 |
@@ -83,6 +83,8 @@ component/
 | `unregister_subagent.py` | `UnregisterSubAgent` | 注销子 Agent |
 | `list_subagents.py` | `ListSubAgents` | 列出子 Agent |
 | `run_subagent.py` | `RunSubAgent` | 启动子 Agent |
+| `run_taskagent.py` | `RunTaskAgent` | 只接收单个 prompt；继承调用时父主会话活动 LLM Profile快照，启动仅可使用“已加载工具集 ∩ TASKAGENT ∩ safe”的临时Agent |
+| `stop_taskagent.py` | `StopTaskAgent` | 提前终止临时Agent，不保存历史 |
 | `chat_subagent.py` | `ChatSubAgent` | 向子 Agent 发消息 |
 | `stop_subagent.py` | `StopSubAgent` | 停止子 Agent |
 | `approval_subagent.py` | `ApprovalSubAgent` | 审批子 Agent 的工具调用 |

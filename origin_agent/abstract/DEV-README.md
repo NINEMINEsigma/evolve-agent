@@ -96,7 +96,8 @@ create_llm_client(name, runtime_context, profile) -> BaseLLMClient
 - `registry.get_definitions_for_loaded_toolsets(scope, loaded_toolsets)`：按已加载工具集和 scope 返回工具 schema（渐进式加载核心方法）。
 - `registry.get_toolset_catalog(scope, loaded_toolsets)`：返回按当前 Loop 过滤后的工具集目录（用于系统提示词）。
 - toolset 别名、schema 覆盖、动态 schema（`check_fn` + 30s TTL 缓存）。
-- 按 `availability` 过滤：`MAIN`（主 Agent）、`SUBAGENT`（子 Agent）、`EVERY`（两者）。
+- 按 `availability` 位掩码过滤：`MAIN`（普通模式主Agent）、`SUBAGENT`（子Agent）、`MULTI_AGENT`（多Agent模式）、`TASKAGENT`（临时Agent）、`EVERY`（全部范围）。
+- 已加载工具集与 `availability` 是注册表的通用过滤层；具体 Loop可在其上继续施加危险等级等策略。临时Agent的额外策略为 `TASKAGENT ∩ safe`，定义生成与执行期均校验。
 
 每个工具注册后生成 `ToolEntry`，包含：
 

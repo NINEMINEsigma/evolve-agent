@@ -285,6 +285,8 @@ classDiagram
 
     class TaskAgentLoop {
         #_build_system_prompt()
+        #_is_task_tool_authorized()
+        #_get_effective_tool_definitions()
         +run()
     }
 
@@ -695,7 +697,9 @@ classDiagram
 | `_consumer_task` | `SessionMessageQueue` | `asyncio.Task \| None` | 懒启动的空闲消费任务 |
 | `_stopped` | `SessionMessageQueue` | `bool` | `stop()` / `mark_stopped()` 置位 |
 | `last_known_sid` | `SessionMessageQueue` | `str` | 旋转检测：与当前 session_id 比对 |
-| （无新增字段） | `TaskAgentLoop` | — | 全部继承 `SubAgentLoop`；仅覆写 `_build_system_prompt()`（返回空）与 `run()`（纯文本回复或达 `MAX_TOOL_TURNS` 即终止） |
+| `_llm_profile` | `SubAgentLoop` | `LLMProfile \| None` | 工具上下文使用的 LLM Profile；注册子Agent由标量配置构造，临时Agent直接使用调用时活动 Profile的非持久化快照 |
+| `llm_profile` | `SubRuntimeContext` | `LLMProfile \| None` | 注册子Agent为 `None`；临时Agent持有调用时活动 Profile的非持久化深快照 |
+| （无新增字段） | `TaskAgentLoop` | — | 全部继承 `SubAgentLoop`；覆写无系统提示词、`TASKAGENT ∩ safe` 定义/执行授权及完成即终止行为 |
 | `_ws_sinks` | `FrontendSink` | `dict[str, WebSocket]` | session_id → WebSocket 映射 |
 | `_pending_confirms` | `FrontendSink` | `dict[str, Future]` | 外部解析确认结果 |
 | `_confirm_session_map` | `FrontendSink` | `dict[str, str]` | 外部映射确认到 session |
@@ -767,6 +771,7 @@ classDiagram
 | 访问方 | 被访问字段 | 被访问类 | 位置 | 说明 |
 |---|---|---|---|---|
 | `ToolContext.resource_session_id` | `parent_session_id`（若公开且非空） | `SubAgentLoop` / `TaskAgentLoop` | `entry/base_agent_loop.py` | 为长期资源选择父主会话 ID；其他 Loop 回退当前 session_id |
+| `RunTaskAgent` handler | `llm_profile` / `snapshot_profile()` | `ToolContext` / `LLMProfileStore` | `component/multiagenttools/run_taskagent.py` | 通过公开工具上下文取得活动 Profile，并在 Store共享锁内创建非持久化深快照；不访问主会话 protected字段 |
 | Shell 工具 handlers | `shell_manager` | `Application` | `component/tools/shell.py` | 按资源主会话 ID 与角色名创建或操作 Shell会话 |
 | 会话终结/旋转 | `stop_session()` / `migrate_session()` | `ShellManager` | `entry/session_manager.py`、`entry/multi_agent_loop.py` | 手动终结停止；自动旋转迁移 Shell 所有权 |
 | Gateway Shell REST | `list_shells()` / `stop_shell_for_user()` | `ShellManager` | `gateway/server.py` | 用户查看同会话元数据并直接停止 Shell |
@@ -955,3 +960,9 @@ classDiagram
 ### 主会话永久删除与连接失效收敛
 
 永久删除由 Gateway 分层执行：`SessionManager` 的删除中集合先封闭新连接与 Loop重建竞态，`FrontendSink.close_session()`从连接映射移除会话并以 4004关闭已建立连接，`delete_session_runtime()`再中断活动回复、停止长期消息队列、清除客户端信息并注销 Cron，最后由 `gateway.chat.SessionManager.remove()`统一删除索引与会话目录。握手前无法可靠向浏览器传递私有关闭码，因此前端通过 `/api/sessions/{id}/status` 的删除感知 `exists`字段二次确认；显式恢复已经删除或删除中的 ID不再创建随机新会话。
+
+### 临时Agent继承活动 LLM Profile与工具权限收敛
+
+`RunTaskAgent` 通过公开 `ToolContext.llm_profile` 取得调用发生时父主会话的活动 Profile，并由 `LLMProfileStore.snapshot_profile()` 在共享锁内验证根对象身份后创建非持久化深快照。快照完整保留客户端、采样、多模态分工等配置；临时Agent不再从 `SubRuntimeContext` 空默认值构造 `custom_llm_client.`，也不再暴露单次 temperature参数。注册子Agent仍使用 `AgentConfig + temperature` 的原有路径。
+
+`TaskAgentLoop` 不新增字段。它复用 `SubAgentLoop._allowed_tool_names` 与会话级已加载工具集，并在模型定义生成和执行期统一要求“已加载工具集 ∩ `TASKAGENT` 可用范围 ∩ `safe` 危险等级”。允许工具直接执行，越权调用直接返回失败工具结果，不进入父Agent或审批模型流程。`LoadToolset` 只扩展已加载集合，不扩大权限交集。

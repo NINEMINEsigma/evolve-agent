@@ -10,13 +10,16 @@
 subagent/
 ├── orchestrator.py          ← SubAgentOrchestrator + _OrchestratorContext
 ├── loop.py                  ← SubAgentLoop（子代理循环实现）
-└── context.py               ← SubRuntimeContext（子代理运行时上下文构建）
+├── taskloop.py              ← TaskAgentLoop（一次性临时Agent循环）
+└── context.py               ← SubRuntimeContext（子代理/临时Agent运行时上下文构建）
 
 component/multiagenttools/   ← 多代理 / 子代理工具
 ├── register_subagent.py     ← RegisterSubAgent
 ├── unregister_subagent.py   ← unregister_subagent
 ├── list_subagents.py        ← list_subagents
 ├── run_subagent.py          ← run_subagent
+├── run_taskagent.py         ← RunTaskAgent
+├── stop_taskagent.py        ← StopTaskAgent
 ├── chat_subagent.py         ← chat_subagent
 ├── approval_subagent.py     ← approval_subagent
 ├── stop_subagent.py         ← stop_subagent
@@ -100,7 +103,13 @@ graph TD
 
 ### `SubRuntimeContext`
 
-`subagent/context.py` 构建子代理运行时上下文，包含独立的 LLM 客户端配置（通过 `create_llm_client()` 加载）和工具集。
+`subagent/context.py` 构建子代理与临时Agent运行时上下文。注册子Agent的独立 LLM 配置来自 `AgentConfig`；临时Agent则保存发起 `RunTaskAgent` 调用时父主会话活动 LLM Profile的非持久化深快照，并据此创建客户端。
+
+### `TaskAgentLoop`
+
+`subagent/taskloop.py` 实现一次性临时Agent：只接收单个 prompt，无系统提示词、无历史持久化，产生纯文本结果或达到工具循环上限后终止。并发槽位已满时直接失败，不进入子Agent等待队列。
+
+临时Agent的工具定义与执行期授权都使用同一交集：当前实例已加载工具集中的工具，且 `availability` 包含 `TASKAGENT`，同时 `danger_level` 为 `safe`。因此临时Agent不会进入父Agent或审批模型流程；陈旧或伪造的越权工具调用直接返回失败工具结果。`LoadToolset` 本身符合该交集时可以调用，但加载只改变已加载集合，不会授权非 `TASKAGENT` 或非 `safe` 工具。当前新实例默认从 `core` 开始；后续可按任务类型预加载工具集以减少工具循环轮次，但不得绕过权限交集。
 
 ### `SubagentStore`
 
@@ -160,7 +169,7 @@ graph TD
 
 例如，创建子代理的 `run_subagent` 等工具标记为 `MAIN`，避免无限递归。
 
-子代理拥有独立的会话级工具集加载状态（`_loaded_toolsets`），默认从 `core` 开始。`SubAgentLoop` 和 `TaskAgentLoop` 通过 `get_tool_availability_scope()` 返回各自的 scope（`SUBAGENT` / `TASKAGENT`），工具定义按已加载工具集动态计算。
+子代理拥有独立的会话级工具集加载状态（`_loaded_toolsets`），默认从 `core` 开始。`SubAgentLoop` 和 `TaskAgentLoop` 通过 `get_tool_availability_scope()` 返回各自的 scope（`SUBAGENT` / `TASKAGENT`），工具定义按已加载工具集动态计算。`TaskAgentLoop` 还在定义侧与执行侧同时施加 `danger_level == safe` 过滤，因此其权威范围是“已加载工具集 ∩ TASKAGENT ∩ safe”，不会产生审批请求。
 
 多 Agent 模式下，`MultiAgentLoop._run_single_agent()` 使用 `self._get_effective_tool_definitions()` 动态获取工具定义，参与Agent共享主会话的加载状态。
 
@@ -179,7 +188,7 @@ graph TD
 
 ## Shell会话所有权
 
-子Agent与临时Agent可使用 `shell` 工具集创建 Shell会话。资源所有权使用父主会话 ID 与自身角色名，而不是子会话 ID；因此不同 Agent 不能互相读取、写入、中断或停止 Shell。主会话自动旋转时，ShellManager 迁移 Shell并保留旧父会话 ID 的临时解析别名，使尚未结束的子Agent仍能继续操作；手动终结、永久删除和应用关闭会停止关联 Shell。
+子Agent可按 `SUBAGENT` 可用范围与审批策略使用 Shell工具。临时Agent不能按工具集整体推断权限；只有具体 Shell工具同时属于已加载工具集、标记为 `TASKAGENT` 且危险等级为 `safe` 时才可见和执行。资源所有权使用父主会话 ID 与自身角色名，而不是子会话 ID；因此不同 Agent 不能互相读取、写入、中断或停止 Shell。主会话自动旋转时，ShellManager 迁移 Shell并保留旧父会话 ID 的临时解析别名，使尚未结束的子Agent仍能继续操作；手动终结、永久删除和应用关闭会停止关联 Shell。
 
 ## Agentspace 回复轮次文件锁
 

@@ -10,7 +10,7 @@ from pydantic import BaseModel
 from system.application import Application
 from system.context import RuntimeContext
 
-from entity.puretype import AgentConfig
+from entity.puretype import AgentConfig, LLMProfile
 
 
 class SubRuntimeContext(BaseModel):
@@ -38,7 +38,10 @@ class SubRuntimeContext(BaseModel):
     """上下文窗口 token 上限，用于旋转控制（来自注册表）。"""
 
     client_type: str = "openai_client"
-    """LLM 客户端模块名，继承自主 Agent（来自注册表或 RuntimeContext 兜底）。"""
+    """LLM 客户端模块名；注册子Agent来自注册表，临时Agent来自活动 Profile快照。"""
+
+    llm_profile: LLMProfile | None = None
+    """临时Agent的非持久化 LLM Profile快照；注册子Agent为 None。"""
 
     system_prompts: list[str]
     """系统提示词列表（每项为独立 system message，来自注册表 system_prompt_paths 或内置默认模板）。"""
@@ -102,29 +105,28 @@ async def build_subagent_context(
 
 
 async def build_taskagent_context(
+    profile: LLMProfile,
     parent_ctx: RuntimeContext,
-    temperature: float,
 ) -> SubRuntimeContext:
-    """从父 Agent 构建 taskagent 上下文。
+    """从调用时活动 LLM Profile快照构建临时Agent上下文。
 
-    LLM 配置不再从 RuntimeContext.llm_* 字段复制（已删除）。
-    调用方应通过 active_llm_profile 构造 AgentConfig 传入子 Agent。
-
-    Args:
-        parent_ctx: 父 Agent 的 RuntimeContext（仅用于 tool_timeout 等非 LLM 字段）。
-        temperature: 采样温度。
-
-    Returns:
-        SubRuntimeContext 实例，system_prompts 为空列表，LLM 字段为默认值。
+    Profile快照只在内存中使用，不属于注册子Agent配置，也不持久化。
+    RuntimeContext仅提供工具超时等非 LLM运行参数。
     """
+    if not profile.llm_client_name:
+        raise ValueError(
+            "The inherited LLM Profile has an empty LLM client module name"
+        )
+
     return SubRuntimeContext(
-        base_url="",
-        model="",
-        api_key=None,
-        temperature=temperature,
-        max_output_tokens=0,
-        max_context_tokens=0,
-        client_type="",
+        base_url=profile.base_url,
+        model=profile.model,
+        api_key=profile.api_key or None,
+        temperature=profile.temperature,
+        max_output_tokens=profile.max_output_tokens,
+        max_context_tokens=profile.max_context_tokens,
+        client_type=profile.llm_client_name,
+        llm_profile=profile,
         system_prompts=[],
         tool_timeout=parent_ctx.tool_timeout,
     )

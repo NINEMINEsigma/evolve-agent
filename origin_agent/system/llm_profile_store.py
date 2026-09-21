@@ -131,6 +131,15 @@ class LLMProfileStore:
         with self._lock:
             return list(self._data.profiles)
 
+    def snapshot_profile(self, profile: LLMProfile) -> LLMProfile:
+        """返回根对象中指定 Profile 的调用时深快照。"""
+        with self._lock:
+            if not any(candidate is profile for candidate in self._data.profiles):
+                raise ValueError(
+                    "Active LLM Profile does not belong to the current LLM Profile root"
+                )
+            return profile.model_copy(deep=True)
+
     def get_profile(self, name: str) -> LLMProfile:
         """按名称返回根对象中的 Profile；未命中直接抛出 ``LookupError``。"""
         with self._lock:

@@ -13,7 +13,8 @@ import json
 import logging
 from typing import * # type: ignore
 
-from entity.puretype import LLMResponse, ToolAvailability
+from abstract.tools.registry import registry as tool_registry
+from entity.puretype import LLMResponse, ToolAvailability, ToolDangerLevel
 from entity.constant import MAIN_AGENT_CHARACTER_NAME, USER_CHARACTER_NAME
 from entity.messages import (
     CharacterConversationMessage,
@@ -44,6 +45,30 @@ class TaskAgentLoop(SubAgentLoop):
 
     def get_tool_availability_scope(self) -> ToolAvailability:
         return ToolAvailability.TASKAGENT
+
+    def _is_task_tool_authorized(self, name: str) -> bool:
+        """检查工具是否满足临时Agent的完整授权交集。"""
+        if name not in self._allowed_tool_names:
+            return False
+        entry = tool_registry.get_entry(name)
+        if entry is None:
+            return False
+        if entry.toolset not in self._loaded_toolsets:
+            return False
+        if (entry.availability & ToolAvailability.TASKAGENT) == 0:
+            return False
+        return entry.danger_level == ToolDangerLevel.safe
+
+    def _get_effective_tool_definitions(self) -> list[dict[str, Any]]:
+        """返回已加载工具集内同时满足 TASKAGENT 与 safe 的定义。"""
+        definitions = super()._get_effective_tool_definitions()
+        return [
+            definition
+            for definition in definitions
+            if self._is_task_tool_authorized(
+                (definition.get("function") or {}).get("name", "")
+            )
+        ]
 
     async def run(self, initial_prompt: str, user_name: str, message_type: str) -> None:
         """taskagent 主循环 — 纯文本回复即终止。"""
@@ -132,7 +157,7 @@ class TaskAgentLoop(SubAgentLoop):
                 )
                 self._history.add_message(assistant_msg)
 
-                # 处理工具调用 — safe 直接执行；理论上非 safe 不在工具集中
+                # 处理工具调用：完整授权交集内直接执行，其余直接拒绝且不进入审批。
                 try:
                     _executed_tool_msgs: list[ToolResultMessage] = []
                     for i, tc in enumerate(resp.tool_calls):
@@ -150,12 +175,21 @@ class TaskAgentLoop(SubAgentLoop):
                             tool_args=dict(tc.arguments) if tc.arguments else {},
                         )
 
-                        if self._is_auto_executable(tc.name) or self._is_auto_approved_tool(
-                            tc.name, dict(tc.arguments) if tc.arguments else {}
-                        ):
+                        if self._is_task_tool_authorized(tc.name):
                             tool_msg = await self._execute_approved_tool(tc)
                         else:
-                            tool_msg = await self._queue_for_approval(tc)
+                            tool_msg = self._make_tool_msg(
+                                tc.id,
+                                {
+                                    "success": False,
+                                    "error": (
+                                        f"Tool '{tc.name}' is not authorized for this "
+                                        "task agent. Allowed tools must belong to a loaded "
+                                        "toolset, include TASKAGENT availability, and have "
+                                        "safe danger level."
+                                    ),
+                                },
+                            )
 
                         from entry.agent_support.multimodal import content_to_text
                         raw_content = content_to_text(tool_msg.content)

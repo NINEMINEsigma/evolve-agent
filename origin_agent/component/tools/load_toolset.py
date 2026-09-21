@@ -65,7 +65,7 @@ def _build_load_toolset_description() -> str:
 None. This tool is always available.
 
 ## Effect
-Adds the named toolsets to the session's loaded set. Tools from loaded toolsets will appear in the next LLM request's tool definitions. Already-loaded toolsets are idempotent (no error).
+Adds the named toolsets to the session's loaded set. Loading a toolset does not grant permission by itself: tools appear in the next LLM request only if they also pass the current Loop's availability, danger-level, runtime-availability, and other authorization filters. Already-loaded toolsets are idempotent (no error).
 
 ## Returns
 ```json
@@ -84,7 +84,7 @@ Adds the named toolsets to the session's loaded set. Tools from loaded toolsets 
 - When you need to discover what tools a toolset provides.
 
 ## Note
-The returned tool names are for discovery only; the full tool schemas will be available in subsequent LLM requests after loading. The ``core`` toolset is always loaded and cannot be unloaded."""
+The returned tool names are discovery information for all registered members of each toolset; they are not a guarantee that every listed tool is visible or callable in the current Loop. Full schemas become available in subsequent LLM requests only for tools that pass all current Loop filters. The ``core`` toolset is always loaded and cannot be unloaded."""
 
     # 动态追加当前已注册的工具集名称
     from abstract.tools.registry import registry

@@ -156,25 +156,33 @@ class SubAgentLoop(BasePrivateChatAgentLoop):
     def _build_llm_client(self, ctx: SubRuntimeContext) -> BaseLLMClient:
         """用 SubRuntimeContext 构建独立的 LLM 客户端。
 
-        优先使用子 Agent profile 中的 LLM 配置，缺失时兜底到父 Agent。
-        同时将构造的 LLMProfile 存储到 self._llm_profile 供 ToolContext 使用。
+        临时Agent直接使用调用时的完整 LLM Profile快照；注册子Agent
+        继续由自身标量配置构造运行时 Profile。最终 Profile存入
+        ``self._llm_profile``，供 ToolContext 和多模态分工使用。
         """
         from system.context import get_runtime_context
 
         parent_ctx = get_runtime_context()
-        _defaults = LLMProfile()
-        profile = LLMProfile(
-            base_url=ctx.base_url,
-            model=ctx.model,
-            api_key=ctx.api_key or "",
-            temperature=ctx.temperature,
-            max_output_tokens=ctx.max_output_tokens or _defaults.max_output_tokens,
-            max_context_tokens=ctx.max_context_tokens or _defaults.max_context_tokens,
-            llm_client_name=ctx.client_type,
-        )
+        if ctx.llm_profile is not None:
+            profile = ctx.llm_profile
+        else:
+            defaults = LLMProfile()
+            profile = LLMProfile(
+                base_url=ctx.base_url,
+                model=ctx.model,
+                api_key=ctx.api_key or "",
+                temperature=ctx.temperature,
+                max_output_tokens=(
+                    ctx.max_output_tokens or defaults.max_output_tokens
+                ),
+                max_context_tokens=(
+                    ctx.max_context_tokens or defaults.max_context_tokens
+                ),
+                llm_client_name=ctx.client_type,
+            )
         self._llm_profile = profile
         return create_llm_client(
-            ctx.client_type,
+            profile.llm_client_name,
             parent_ctx,
             profile=profile,
         )
