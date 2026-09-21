@@ -33,7 +33,7 @@ frontend/
 │   │   ├── useUploadManager.ts      ← 文件上传管理
 │   │   ├── useLlmProfiles.ts         ← Profile 列表、单对象 CRUD、活动名称、审批与全局元数据 Profile状态
 │   │   ├── useAgentspace.ts         ← Agentspace 文件浏览
-│   │   ├── useSessionSite.ts        ← 会话网页探测与 SSE 热刷新
+│   │   ├── useSessionSite.ts        ← 会话网页探测与 WebSocket事件热刷新
 │   │   ├── useEdgeDrawer.ts         ← 边缘抽屉三态状态机
 │   │   └── useGlobalTooltip.ts      ← 全局 tooltip
 │   ├── components/
@@ -50,7 +50,9 @@ frontend/
 │   │   │   └── CopyBanner.tsx
 │   │   └── ...                      ← 聊天、弹窗、面板等组件
 │   ├── services/
-│   │   └── agentspaceApi.ts ← Agentspace REST/SSE 唯一适配层
+│   │   ├── agentspaceApi.ts ← 独立 Agentspace 编辑器 REST/SSE 适配层
+│   │   ├── chatAgentspaceEventBus.ts ← 聊天 WebSocket Agentspace事件页面内扇出
+│   │   └── fetchWithTimeout.ts ← 关键请求可取消15秒硬截止
 │   ├── styles/              ← CSS 样式
 │   └── utils/
 │       ├── agentspacePath.ts ← Agentspace 路径与排序纯函数
@@ -168,12 +170,12 @@ frontend/
 
 | Hook | 职责 |
 |---|---|
-| `useWebSocket.ts` | WebSocket 连接编排与低频会话状态桥接；聊天事件写入 `chatRuntimeStore`，流式增量经 `StreamFrameBuffer` 按动画帧提交；Agent 忙碌时仍允许消息进入后端 FIFO；`history_sync.processing` 的 true/false 均作为服务端权威值覆盖本地处理状态；永久删除只在 HTTP 明确成功后移除会话项，失败保留会话并显示错误，删除当前会话固定切换到“随意聊聊” |
+| `useWebSocket.ts` | WebSocket 连接编排与低频会话状态桥接；聊天事件写入 `chatRuntimeStore`，流式增量经 `StreamFrameBuffer` 按动画帧提交；`agentspace_event`通过页面事件总线扇出给三个会话视觉 hook；关键请求超时显示持久通知并在 WebSocket可用时上报脱敏诊断；Agent 忙碌时仍允许消息进入后端 FIFO；`history_sync.processing` 的 true/false 均作为服务端权威值覆盖本地处理状态；永久删除只在 HTTP 明确成功后移除会话项，失败保留会话并显示错误，删除当前会话固定切换到“随意聊聊” |
 | `features/chat/chatRuntimeStore.ts` | Zustand 聊天运行时唯一高频状态：完整骨架、内容行、live 尾部、输入草稿、pending、滚动与资源；`toggleMessageCollapse(id, source)` 分别切换历史内容行与 live 行的气泡折叠状态，不改变 live 正典版本号；待结束流在 Footer 布局采样后固化，`linkStreamHistory` 按权威索引交接展开选择 |
-| `features/chat/chatRuntimeController.ts` | History skeleton/page 请求代际、Abort、页去重、正典同步、Minimap 随机目标与资源懒加载 |
+| `features/chat/chatRuntimeController.ts` | History skeleton/page 请求代际、Abort、页去重、正典同步、15秒超时局部错误与诊断 reporter、Minimap 随机目标和资源懒加载 |
 | `features/chat/useChatScrollController.ts` | `initializing/following/detached/minimap_dragging/returning` 五态追底与回底控制 |
 | `useLlmProfiles.ts` | 从服务端读取 Profile；提供单对象创建/编辑/删除；浏览器仅持久化活动 Profile 名称；审批 Profile与全局元数据 Profile使用服务端权威 REST 状态和 WebSocket广播 |
-| `useWebSocketConnection.ts` | WebSocket 连接生命周期管理：建立/断开/重连/心跳；消息入口按连接代际和当前 WebSocket 实例丢弃旧连接迟到消息，避免快速切换会话时污染当前状态；普通断开保留指数退避重连，永久删除的已建立连接按 4004 停止重连，握手拒绝则通过 `status.exists`二次确认后通知上层切换“随意聊聊” |
+| `useWebSocketConnection.ts` | WebSocket 连接生命周期管理：建立/断开/重连/心跳；会话状态预检和握手复检使用可取消15秒截止，超时报告后不误判删除；消息入口按连接代际和当前 WebSocket 实例丢弃旧连接迟到消息，避免快速切换会话时污染当前状态；普通断开保留指数退避重连，永久删除的已建立连接按 4004 停止重连，握手拒绝则通过 `status.exists`二次确认后通知上层切换“随意聊聊” |
 | `useSessionStore.ts` | 会话列表与低频元数据管理：获取/创建/归档/删除/标签/标题；审批模式、任务资源、Shell/Cron 和交互队列；自动标题/标签/摘要/终结/合并错误通过全局操作通知展示，终结元数据警告不改变归档成功；主聊天消息、输入草稿与 pending 已迁移到 chat runtime store |
 | `useSubagentManager.ts` | 子代理状态管理：注册/启动/停止/审批/列表 |
 | `useUploadManager.ts` | 文件上传管理：拖拽上传、进度跟踪、文件选择器 |
@@ -181,9 +183,9 @@ frontend/
 | `useEdgeDrawer.ts` | 边缘抽屉三态状态机（hidden/peek/open），侧栏与顶部栏共用 |
 | `useGlobalTooltip.ts` | 全局 tooltip 管理 |
 | `useMessageCharacterHover.ts` | 主聊天区同角色悬停事件委托；直接维护消息公开属性，避免瞬时悬停进入 React 消息状态 |
-| `useSessionSite.ts` | 会话网页状态：探测当前会话 `site/index.html` 并订阅 `site/` 的 Agentspace SSE；部署完成后自动显示右侧入口，资源连续变化时等待 1 秒安静窗口后热刷新，入口文件或目录删除/移走后自动隐藏 |
-| `useSessionStage.ts` | 会话舞台层状态：由 `Layout` 单例探测 `stage/index.html` 并订阅 Agentspace SSE；入口文件作为部署提交标记，新内容版本经 1 秒安静窗口后只重建一次 iframe，非入口资源事件和 SSE resync 不重置运行态 |
-| `useSessionChatStyle.ts` | 会话聊天区自定义样式状态：探测 `chat-style/index.css`，经 PostCSS 作用域处理（`@import` 拒绝、`.chat-area` 前缀、`@font-face` 校验 `ChatStyle-` 前缀），SSE 热重载 |
+| `useSessionSite.ts` | 会话网页状态：探测当前会话 `site/index.html` 并订阅聊天 WebSocket扇出的 `site/` Agentspace事件；部署完成后自动显示右侧入口，资源连续变化时等待 1 秒安静窗口后热刷新，入口文件或目录删除/移走后自动隐藏 |
+| `useSessionStage.ts` | 会话舞台层状态：由 `Layout` 单例探测 `stage/index.html` 并订阅聊天 WebSocket Agentspace事件；入口文件作为部署提交标记，新内容版本经 1 秒安静窗口后只重建一次 iframe，非入口资源事件和 `resync`不重置运行态 |
+| `useSessionChatStyle.ts` | 会话聊天区自定义样式状态：探测 `chat-style/index.css`，经 PostCSS 作用域处理（`@import` 拒绝、`.chat-area` 前缀、`@font-face` 校验 `ChatStyle-` 前缀），通过聊天 WebSocket Agentspace事件热重载 |
 
 “模型配置”抽屉的每个 Profile 行包含三个互相独立的角色开关：当前会话活动 Profile、审批 Profile、全局元数据 Profile。全局元数据 Profile可再次点击并确认清空；切换状态由服务端持久化与广播，不写入浏览器活动 Profile名称。
 
@@ -202,7 +204,7 @@ frontend/
 - 主聊天默认水平间距使用 `.chat-area` 的 `--chat-message-inline-inset`：只有历史行添加 `.chat-history-row--history`，其左右内边距为变量的两倍；实时行则由 Footer 和行各提供一次内边距，使相同 Role 的新旧消息保持同一水平起点。
 - 实时 Footer 末尾的 120px 留白属于完整列表的物理底部；被动追随只由 `useChatScrollController` 管理，实时内容提交后的布局阶段和列表高度变化使用同一个幂等追底入口。用户主动离底或主动改变消息高度时不追随。
 
-- Gateway 通过 `history_sync` 只发送正典 History 元数据；前端 REST 取得全历史骨架和可见范围历史内容页。
+- Gateway 通过 `history_sync` 只发送正典 History 元数据；前端 REST 取得全历史骨架和可见范围历史内容页。会话状态预检、骨架和内容页请求等待超过15秒会被主动中止：History显示局部错误与重试，顶层显示持久通知；WebSocket可用时同时上报不含正文、工具参数、附件或密钥的客户端传输诊断，Gateway只写 warning且不写聊天 History。
 - 全历史骨架始终保留完整逻辑顺序；Virtuoso 只挂载可视区附近行，离屏 iframe、Mermaid 和播放器会卸载并可在滚回时重建。
 - `stream_done` 先登记待结束流，实时 Footer 在布局阶段判断气泡是否与视口相交后再冻结 live 行；`history_sync` 后 skeleton 后缀与末尾内容页成功合并，才按 canonical cutoff 清理对应 live 行。
 - `stream_done` 先使 live 行进入待结束状态；`ChatLiveFooter` 在布局阶段只对结束瞬间与当前聊天区视口有正面积交集的普通 Agent 长回复记录展开选择，之后再固化流。视口外、工具消息与短消息维持既有规则；用户手动收起优先。滚出视口不会自动折叠。

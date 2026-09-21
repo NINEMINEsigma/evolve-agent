@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef } from "react";
 import type {
   ApprovalMode,
   AskRequest,
+  ClientDiagnostic,
   ConfirmRequest,
   InterruptResponse,
   MessageContent,
@@ -20,6 +21,8 @@ import { hasMountedLiveFooter } from "../features/chat/chatViewport";
 import { createStreamFrameBuffer, type StreamFrameBuffer } from "../features/chat/streamFrameBuffer";
 import { useLlmProfiles } from "./useLlmProfiles";
 import { useSessionStore, type SessionStore } from "./useSessionStore";
+import { publishChatAgentspaceEvent } from "../services/chatAgentspaceEventBus";
+import { clientDiagnosticFrame, routeChatTransportMessage } from "./chatTransportRouting";
 import { useSubagentManager } from "./useSubagentManager";
 import { useUploadManager, type UploadManager } from "./useUploadManager";
 import { useWebSocketConnection } from "./useWebSocketConnection";
@@ -96,6 +99,36 @@ export function useWebSocket() {
   useEffect(() => { subagentRef.current = subagent; }, [subagent]);
   useEffect(() => { llmProfilesRef.current = llmProfiles; }, [llmProfiles]);
 
+  const reportTransportDiagnostic = useCallback((diagnostic: ClientDiagnostic) => {
+    const sid = sessionRef.current?.sessionId || "";
+    const now = Date.now();
+    const socket = connRef.current?.wsRef.current;
+    const state = socket?.readyState === WebSocket.OPEN ? "OPEN"
+      : socket?.readyState === WebSocket.CONNECTING ? "CONNECTING"
+        : socket?.readyState === WebSocket.CLOSING ? "CLOSING"
+          : socket ? "CLOSED" : diagnostic.websocket_state;
+    const payload: ClientDiagnostic = {
+      kind: diagnostic.kind,
+      phase: diagnostic.phase,
+      duration_ms: diagnostic.duration_ms,
+      websocket_state: state,
+      last_recv_age_ms: Math.max(0, now - (connRef.current?.lastRecvAtRef.current ?? now)),
+      last_pong_age_ms: Math.max(0, now - (connRef.current?.lastPongAtRef.current ?? now)),
+    };
+    sessionRef.current?.showOperationNotice({
+      kind: "error",
+      message: `会话 ${sid || "未连接"} 的${payload.phase}请求等待 ${(payload.duration_ms / 1000).toFixed(1)} 秒后超时，请重试。`,
+    });
+    if (socket?.readyState === WebSocket.OPEN) {
+      connRef.current.send(clientDiagnosticFrame(sid, payload));
+    }
+  }, []);
+
+  useEffect(() => {
+    chatRuntimeController.setDiagnosticReporter(reportTransportDiagnostic);
+    return () => chatRuntimeController.setDiagnosticReporter(null);
+  }, [reportTransportDiagnostic]);
+
   const handleHistorySync = useCallback((message: WSMessage) => {
     const sid = message.session_id || sessionRef.current?.sessionId || "";
     if (!sid) return;
@@ -125,6 +158,11 @@ export function useWebSocket() {
   }, []);
 
   const handleMessage = useCallback((message: WSMessage) => {
+    if (routeChatTransportMessage(
+      message,
+      sessionRef.current?.sessionId || "",
+      publishChatAgentspaceEvent,
+    )) return;
     if (message.type === WS_IN.LLM_PROFILE_CHANGED) {
       llmProfilesRef.current.handleProfileChanged(message);
       return;
@@ -298,8 +336,14 @@ export function useWebSocket() {
   }, [switchSession]);
 
   useEffect(() => {
-    conn.setHandlers({ onOpen, onMessage: handleMessage, onClose, onSessionDeleted });
-  }, [conn, handleMessage, onClose, onOpen, onSessionDeleted]);
+    conn.setHandlers({
+      onOpen,
+      onMessage: handleMessage,
+      onClose,
+      onSessionDeleted,
+      onTransportDiagnostic: reportTransportDiagnostic,
+    });
+  }, [conn, handleMessage, onClose, onOpen, onSessionDeleted, reportTransportDiagnostic]);
 
   useEffect(() => {
     conn.connect();

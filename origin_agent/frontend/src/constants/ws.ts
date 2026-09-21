@@ -17,6 +17,7 @@ export const WS_IN = {
   LLM_PROFILE_CHANGED: "llm_profile_changed",
   APPROVAL_PROFILE_CHANGED: "approval_profile_changed",
   METADATA_PROFILE_CHANGED: "metadata_profile_changed",
+  AGENTSPACE_EVENT: "agentspace_event",
   HANDSFREE_MODE:    "handsfree_mode",
   PONG:              "pong",
 } as const;
@@ -30,4 +31,5 @@ export const WS_OUT = {
   HANDSFREE_MODE: "handsfree_mode",
   PING:           "ping",
   FILE_UPLOAD:    "file_upload",
+  CLIENT_DIAGNOSTIC: "client_diagnostic",
 } as const;

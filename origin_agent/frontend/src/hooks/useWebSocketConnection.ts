@@ -1,15 +1,17 @@
 import { useCallback, useRef, useState } from "react";
-import { WSMessage } from "../types";
+import type { ClientDiagnostic, WSMessage } from "../types";
 import { generateUUID } from "../utils";
 import { STORAGE_KEYS } from "../constants/storage";
 import { WS_CLOSE_SESSION_DELETED, WS_IN, WS_OUT } from "../constants/ws";
 import { TIMING } from "../constants/timing";
+import { fetchWithTimeout, RequestTimeoutError } from "../services/fetchWithTimeout";
 
 export interface WebSocketConnectionHandlers {
   onOpen?: () => void;
   onMessage?: (msg: WSMessage) => void;
   onClose?: () => void;
   onSessionDeleted?: () => void;
+  onTransportDiagnostic?: (diagnostic: ClientDiagnostic) => void;
 }
 
 export interface WebSocketConnection {
@@ -46,6 +48,7 @@ export function useWebSocketConnection(): WebSocketConnection {
   const wasOpenRef = useRef(false);
   const lastSidRef = useRef<string | undefined>(undefined);
   const connectIdRef = useRef(0);
+  const statusRequestAbortRef = useRef<AbortController | null>(null);
 
   const setHandlers = useCallback((handlers: WebSocketConnectionHandlers) => {
     handlersRef.current = handlers;
@@ -69,6 +72,8 @@ export function useWebSocketConnection(): WebSocketConnection {
   const disconnect = useCallback(() => {
     manualRef.current = true;
     connectIdRef.current += 1; // Invalidate in-flight async connect pre-check
+    statusRequestAbortRef.current?.abort();
+    statusRequestAbortRef.current = null;
     if (keepaliveRef.current) clearInterval(keepaliveRef.current);
     if (wsRef.current) {
       wsRef.current.onclose = null;
@@ -80,6 +85,8 @@ export function useWebSocketConnection(): WebSocketConnection {
 
   const connect = useCallback(async (resumeSid?: string) => {
     const myId = ++connectIdRef.current;
+    statusRequestAbortRef.current?.abort();
+    statusRequestAbortRef.current = null;
     const urlSid = new URLSearchParams(window.location.search).get("session") ?? undefined;
     // lastSid 是最终用于连接的 sid，按优先级：显式传入 > URL 参数 > localStorage 残留
     const lastSid = (resumeSid || undefined) ?? urlSid ?? localStorage.getItem(STORAGE_KEYS.SESSION_ID) ?? "";
@@ -99,10 +106,18 @@ export function useWebSocketConnection(): WebSocketConnection {
 
     // Pre-check: only when user explicitly targets an existing session
     if (preCheckSid) {
+      const statusController = new AbortController();
+      statusRequestAbortRef.current = statusController;
       try {
-        const resp = await fetch(
-          `/api/sessions/${preCheckSid}/status?conn_token=${encodeURIComponent(token)}`
-        ).then((r) => r.json());
+        const response = await fetchWithTimeout(
+          `/api/sessions/${preCheckSid}/status?conn_token=${encodeURIComponent(token)}`,
+          { signal: statusController.signal },
+          {
+            timeoutMs: TIMING.CRITICAL_REQUEST_TIMEOUT,
+            phase: "session_status_precheck",
+          },
+        );
+        const resp = await response.json();
         if (myId !== connectIdRef.current) return; // Stale request
         if (resp.exists === false) {
           notifySessionDeleted();
@@ -114,8 +129,20 @@ export function useWebSocketConnection(): WebSocketConnection {
           lastSidRef.current = preCheckSid;
           return;
         }
-      } catch {
-        // Pre-check failed (network error/server down) → continue to connect
+      } catch (error) {
+        if (error instanceof RequestTimeoutError && myId === connectIdRef.current) {
+          handlersRef.current.onTransportDiagnostic?.({
+            kind: "critical_request_timeout",
+            phase: "session_status_precheck",
+            duration_ms: Math.max(0, Math.round(error.elapsedMs)),
+            websocket_state: "NOT_CREATED",
+          });
+        }
+        // Pre-check failed or timed out → continue to connect.
+      } finally {
+        if (statusRequestAbortRef.current === statusController) {
+          statusRequestAbortRef.current = null;
+        }
       }
     }
 
@@ -156,7 +183,17 @@ export function useWebSocketConnection(): WebSocketConnection {
       // a pre-accept rejection as 1006, so the HTTP status response is authoritative.
       if (!wasOpenRef.current && lastSidRef.current) {
         const sid = lastSidRef.current;
-        fetch(`/api/sessions/${sid}/status?conn_token=${encodeURIComponent(token)}`)
+        const statusController = new AbortController();
+        statusRequestAbortRef.current?.abort();
+        statusRequestAbortRef.current = statusController;
+        fetchWithTimeout(
+          `/api/sessions/${sid}/status?conn_token=${encodeURIComponent(token)}`,
+          { signal: statusController.signal },
+          {
+            timeoutMs: TIMING.CRITICAL_REQUEST_TIMEOUT,
+            phase: "session_status_recheck",
+          },
+        )
           .then((r) => r.json())
           .then((data) => {
             if (myId !== connectIdRef.current) return;
@@ -169,9 +206,24 @@ export function useWebSocketConnection(): WebSocketConnection {
               setStatus("连接失败");
             }
           })
-          .catch(() => {
+          .catch((error) => {
             if (myId !== connectIdRef.current) return;
-            setStatus("连接失败");
+            if (error instanceof RequestTimeoutError) {
+              handlersRef.current.onTransportDiagnostic?.({
+                kind: "critical_request_timeout",
+                phase: "session_status_recheck",
+                duration_ms: Math.max(0, Math.round(error.elapsedMs)),
+                websocket_state: "CLOSED",
+              });
+              setStatus("连接诊断超时");
+            } else {
+              setStatus("连接失败");
+            }
+          })
+          .finally(() => {
+            if (statusRequestAbortRef.current === statusController) {
+              statusRequestAbortRef.current = null;
+            }
           });
         return; // Don't trigger onClose handler or auto-reconnect
       }

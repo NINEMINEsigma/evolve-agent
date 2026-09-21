@@ -1,12 +1,12 @@
 /**
  * 会话网页状态 Hook。
  *
- * 探测当前会话的 site/index.html 是否存在，并通过 Agentspace SSE
+ * 探测当前会话的 site/index.html，并通过聊天 WebSocket Agentspace 事件
  * 监听 site/ 目录的文件变化，自动更新右侧入口并刷新已打开的 iframe。
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { connectAgentspaceEvents } from "../services/agentspaceApi";
+import { subscribeChatAgentspaceEvents } from "../services/chatAgentspaceEventBus";
 import type { AgentspaceEvent } from "../types";
 import { buildSiteUrls } from "../utils";
 
@@ -153,7 +153,7 @@ export function useSessionSite(sessionId: string | undefined): SessionSiteState 
       scheduleRefresh();
     };
 
-    const cleanup = connectAgentspaceEvents(handleEvent, () => {});
+    const cleanup = subscribeChatAgentspaceEvents(handleEvent);
 
     return () => {
       cleanup();

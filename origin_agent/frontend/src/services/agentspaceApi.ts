@@ -181,6 +181,11 @@ export async function getLocks(): Promise<FileLock[]> {
   return result.locks;
 }
 
+/**
+ * 连接独立 Agentspace 编辑器的 SSE。
+ * 聊天页视觉功能必须复用聊天 WebSocket，并订阅 chatAgentspaceEventBus，
+ * 禁止调用此函数为每个功能重复创建 EventSource。
+ */
 export function connectAgentspaceEvents(
   onEvent: (event: AgentspaceEvent) => void,
   onState: (state: SyncState) => void,

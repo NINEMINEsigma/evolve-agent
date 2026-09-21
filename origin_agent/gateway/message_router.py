@@ -12,6 +12,7 @@ ws_chat 仅保留 WebSocket 连接生命周期管理，通过 ``MessageRouter.ro
     FILE_UPLOAD       → handle_file_upload
     HANDSFREE_MODE    → handle_handsfree_mode
     PING              → handle_ping
+    CLIENT_DIAGNOSTIC → handle_client_diagnostic
     SYSTEM            → handle_system_message
     其他              → handle_unsupported
 """
@@ -177,6 +178,9 @@ class MessageRouter:
 
         elif msg.type == MessageType.PING:
             await self.handle_ping()
+
+        elif msg.type == MessageType.CLIENT_DIAGNOSTIC:
+            await self.handle_client_diagnostic(msg)
 
         elif msg.type == MessageType.SYSTEM:
             await self.handle_system_message(msg)
@@ -519,6 +523,27 @@ class MessageRouter:
                 ).model_dump(exclude_none=True),
                 ensure_ascii=False,
             )
+        )
+
+    async def handle_client_diagnostic(self, msg: Message) -> None:
+        """记录脱敏客户端传输诊断，不写入聊天 History。"""
+        diagnostic = msg.client_diagnostic
+        if diagnostic is None:
+            logger.warning(
+                "Client diagnostic missing payload | session=%s",
+                self.sid,
+            )
+            return
+        logger.warning(
+            "Client transport diagnostic | session=%s kind=%s phase=%s duration_ms=%d "
+            "websocket_state=%s last_recv_age_ms=%s last_pong_age_ms=%s",
+            self.sid,
+            diagnostic.kind.value,
+            diagnostic.phase.value,
+            diagnostic.duration_ms,
+            diagnostic.websocket_state,
+            diagnostic.last_recv_age_ms,
+            diagnostic.last_pong_age_ms,
         )
 
     async def handle_system_message(self, msg: Message) -> None:

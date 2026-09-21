@@ -7,8 +7,8 @@ const eventBridge = vi.hoisted(() => ({
   handler: null as ((event: AgentspaceEvent) => void) | null,
 }));
 
-vi.mock("../services/agentspaceApi", () => ({
-  connectAgentspaceEvents: vi.fn((handler: (event: AgentspaceEvent) => void) => {
+vi.mock("../services/chatAgentspaceEventBus", () => ({
+  subscribeChatAgentspaceEvents: vi.fn((handler: (event: AgentspaceEvent) => void) => {
     eventBridge.handler = handler;
     return () => { eventBridge.handler = null; };
   }),
@@ -78,7 +78,7 @@ describe("useSessionStage", () => {
     expect(result.current.reloadKey).toBe(1);
   });
 
-  it("does not reset a ready stage on SSE resync or transient probe failure", async () => {
+  it("does not reset a ready stage on WebSocket resync or transient probe failure", async () => {
     const fetchMock = vi.mocked(fetch);
     const { result } = renderHook(() => useSessionStage("session-a", false));
     await act(async () => { await Promise.resolve(); await Promise.resolve(); });

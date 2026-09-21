@@ -1,8 +1,8 @@
 /**
  * 会话级聊天区自定义样式 hook。
  *
- * 探测当前会话的 chat-style/index.css 是否存在，通过 Agentspace SSE
- * 监听 chat-style/ 目录的文件变化，自动热重载 CSS。
+ * 探测当前会话的 chat-style/index.css 是否存在，通过聊天 WebSocket
+ * Agentspace 事件监听 chat-style/ 目录变化，自动热重载 CSS。
  * 加载时用 PostCSS 解析规则，为普通选择器施加 .chat-area 作用域，
  * 禁止 @import，保留 @font-face 和 @keyframes。
  * 无法安全处理时触发失败关闭，整份 CSS 不生效。
@@ -10,7 +10,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { buildChatStyleUrls } from "../utils";
-import { connectAgentspaceEvents } from "../services/agentspaceApi";
+import { subscribeChatAgentspaceEvents } from "../services/chatAgentspaceEventBus";
 import { CHAT_STYLE } from "../constants/chatStyle";
 import type { AgentspaceEvent } from "../types";
 
@@ -218,7 +218,7 @@ export function useSessionChatStyle(
     }
   }, [sessionId, paused]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // SSE 监听 chat-style/ 目录变化
+  // 监听聊天 WebSocket 转发的 chat-style/ 目录变化
   useEffect(() => {
     if (!sessionId || paused) return;
 
@@ -265,7 +265,7 @@ export function useSessionChatStyle(
       }, DEBOUNCE_MS);
     };
 
-    const cleanup = connectAgentspaceEvents(handleEvent, () => {});
+    const cleanup = subscribeChatAgentspaceEvents(handleEvent);
 
     return () => {
       cleanup();

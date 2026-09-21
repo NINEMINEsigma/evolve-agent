@@ -63,6 +63,7 @@ export interface SessionStore {
   generatingTagSessions: Set<string>;
   generatingSummarySessions: Set<string>;
   operationNotice: OperationNotice | null;
+  showOperationNotice: (notice: OperationNotice) => void;
   dismissOperationNotice: () => void;
   interruptStatus: InterruptStatus;
   setInterruptStatus: React.Dispatch<React.SetStateAction<InterruptStatus>>;
@@ -317,6 +318,9 @@ export function useSessionStore(callbacks: SessionStoreCallbacks = {}): SessionS
     setPendingAsks((previous) => previous.filter((item) => item.request_id !== request.request_id));
   }, []);
 
+  const showOperationNotice = useCallback((notice: OperationNotice) => {
+    setOperationNotice(notice);
+  }, []);
   const dismissOperationNotice = useCallback(() => setOperationNotice(null), []);
 
   const resetVolatile = useCallback(() => {
@@ -559,7 +563,7 @@ export function useSessionStore(callbacks: SessionStoreCallbacks = {}): SessionS
     mergeMode, setMergeMode, selectedForMerge, setSelectedForMerge,
     shells, setShells, cronTasks, setCronTasks,
     terminatingSessions, generatingTitleSessions, generatingTagSessions, generatingSummarySessions,
-    operationNotice, dismissOperationNotice,
+    operationNotice, showOperationNotice, dismissOperationNotice,
     interruptStatus, setInterruptStatus, allTags, ignoreStaleRef,
     fetchSessions, fetchAllTags, handleMessage, respondConfirm, respondAsk,
     newChat, switchSession, autoTitleSession, autoTagSession, regenerateSummary,

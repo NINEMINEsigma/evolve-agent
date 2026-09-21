@@ -177,9 +177,27 @@ export type MessageType =
   | "llm_profile_changed"
   | "approval_profile_changed"
   | "metadata_profile_changed"
+  | "agentspace_event"
+  | "client_diagnostic"
   | "handsfree_mode"
   | "ping"
   | "pong";
+
+export type ClientDiagnosticKind = "critical_request_timeout";
+export type ClientDiagnosticPhase =
+  | "session_status_precheck"
+  | "session_status_recheck"
+  | "history_skeleton"
+  | "history_page";
+
+export interface ClientDiagnostic {
+  kind: ClientDiagnosticKind;
+  phase: ClientDiagnosticPhase;
+  duration_ms: number;
+  websocket_state: string;
+  last_recv_age_ms?: number | null;
+  last_pong_age_ms?: number | null;
+}
 
 export interface WSMessage {
   type: MessageType;
@@ -232,6 +250,8 @@ export interface WSMessage {
   token_usage?: number;                      // HISTORY_SYNC：累计 token
   context_tokens?: number;                   // HISTORY_SYNC：当前上下文 token
   agents?: string[] | null;                  // HISTORY_SYNC：多Agent参与角色
+  agentspace_event?: AgentspaceEvent;        // AGENTSPACE_EVENT：聊天页视觉资源变化
+  client_diagnostic?: ClientDiagnostic;      // CLIENT_DIAGNOSTIC：脱敏传输诊断
 }
 
 export interface ToolCallMeta {

@@ -139,6 +139,7 @@ export type ChatTelemetryEventKind =
   | "history_request"
   | "history_response"
   | "history_cancel"
+  | "history_timeout"
   | "visible_range"
   | "follow_mode"
   | "initial_bottom"
@@ -160,6 +161,7 @@ export interface ChatTelemetryEvent {
   endIndex?: number;
   followMode?: ChatFollowMode;
   status?: number;
+  phase?: import("../../types").ClientDiagnosticPhase;
   domCount?: number;
   iframeCount?: number;
 }

@@ -7,7 +7,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { buildStageUrls } from "../utils";
-import { connectAgentspaceEvents } from "../services/agentspaceApi";
+import { subscribeChatAgentspaceEvents } from "../services/chatAgentspaceEventBus";
 import type { AgentspaceEvent } from "../types";
 import { chatTelemetry } from "../features/chat/chatTelemetry";
 
@@ -179,7 +179,7 @@ export function useSessionStage(
 
     const handleEvent = (event: AgentspaceEvent) => {
       if (event.kind === "resync") {
-        // 重连只校验入口存在性；不得重建正在运行的 iframe。
+        // WebSocket resync 只校验入口存在性；不得重建正在运行的 iframe。
         void probe({ preserveReady: true });
         return;
       }
@@ -222,7 +222,7 @@ export function useSessionStage(
       // 其他 stage/ 资源事件只标记了一次部署的中间步骤，不刷新 iframe。
     };
 
-    const cleanup = connectAgentspaceEvents(handleEvent, () => {});
+    const cleanup = subscribeChatAgentspaceEvents(handleEvent);
     return () => {
       ++commitSeqRef.current;
       cleanup();

@@ -78,6 +78,7 @@ WS /ws/chat?resume=<sid>
 - `server_info`：服务端信息。
 - `handsfree_mode`：每次连接都会主动发送的当前会话权威审批模式，包含兼容布尔字段 `handsfree_mode` 与三态字段 `approval_mode`；新会话和恢复会话行为一致。
 - `history_sync`：新建/恢复连接以及每轮正典 History 写入完成后发送；顶层携带 `history_count`、`processing`、`token_usage`、`context_tokens` 和可选 `agents`，不携带正文。前端随后通过 History REST 按需加载。
+- `agentspace_event` 初始序列：`resync`、`locks`及 watcher不可用时的 `watcher_error`；随后复用同一 EventHub订阅转发文件变化。事件突发时允许折叠为 `resync`，连接断开时取消转发 task并注销订阅；自动旋转复用同一物理连接和订阅。
 
 ### 上行消息类型
 
@@ -90,6 +91,7 @@ WS /ws/chat?resume=<sid>
 | `file_upload` | 文件上传 |
 | `handsfree_mode` | 切换免审批模式 |
 | `ping` | 心跳 |
+| `client_diagnostic` | 前端关键请求等待超过15秒时上报的脱敏客户端传输诊断；Gateway只记录 warning，不调用 Agent Loop、不写 History |
 
 ### 下行消息类型
 
@@ -106,6 +108,7 @@ WS /ws/chat?resume=<sid>
 | `clipboard_display` | 剪贴板展示更新 |
 | `subagent_update` | 子会话状态更新 |
 | `history_sync` | 正典历史同步元数据；正文通过 REST 加载 |
+| `agentspace_event` | 聊天页会话视觉使用的 typed Agentspace事件；载荷沿用既有文件、锁和重同步元数据范围 |
 | `llm_profile_changed` | Profile 重命名/删除通知；顶层携带 `operation`、`old_name`、`new_name` |
 | `metadata_profile_changed` | 全局元数据 Profile 状态通知；显式携带可空名称、模型和可用性 |
 | `confirm_request` | 请求用户审批 |
@@ -144,7 +147,7 @@ WS /ws/chat?resume=<sid>
 | GET | `/api/sessions/{id}/history/page?start_index=&limit=` | 按 History 消息索引范围返回完整前端投影行 |
 | GET | `/api/sessions/{id}/history/resources` | 返回完整 History 的图片与下载资源索引 |
 
-骨架与历史内容页只是 Gateway 读取视图，不改变 `History` / `history.es` 整体存储。编辑、按轮删除、单条删除和重新生成在 Agent 处理期间统一返回 HTTP 409；结构修改后前端取消旧页请求并重取骨架。
+骨架与历史内容页只是 Gateway 读取视图，不改变 `History` / `history.es` 整体存储。编辑、按轮删除、单条删除和重新生成在 Agent 处理期间统一返回 HTTP 409；结构修改后前端取消旧页请求并重取骨架。前端对会话状态预检、History骨架和历史内容页设置15秒硬截止；超时显示持久通知和局部重试，WebSocket可用时发送不含正文、工具参数、附件或密钥的 `client_diagnostic`。
 
 ### 消息编辑
 
@@ -228,7 +231,7 @@ Shell 输出由 Agent 使用 `ReadShell` 拉取，不通过聊天 WebSocket 主�
 | GET | `/api/agentspace/locks` | 当前回复轮次路径锁完整快照 |
 | GET | `/api/agentspace/events` | Agentspace `text/event-stream` 实时事件 |
 
-Agentspace mutation body 均携带 `operation_id`；`write` 另携带 `expected_version`，`rename` 只接收 `path + new_name`。错误 `detail` 为机器可读对象：无效路径 400、不存在 404、目标或版本冲突 409、非 UTF-8 文本 415、命中 Agent 回复轮次文件锁 423、内部错误 500。SSE 使用 `event: agentspace`，`id` 为进程内递增 sequence，连接后先发送 `resync` 与完整 `locks`，心跳为注释帧；断线重连后前端重新取得 REST 权威快照。
+Agentspace mutation body 均携带 `operation_id`；`write` 另携带 `expected_version`，`rename` 只接收 `path + new_name`。错误 `detail` 为机器可读对象：无效路径 400、不存在 404、目标或版本冲突 409、非 UTF-8 文本 415、命中 Agent 回复轮次文件锁 423、内部错误 500。该 SSE 只服务独立 Agentspace 编辑器：使用 `event: agentspace`，`id` 为进程内递增 sequence，连接后先发送 `resync` 与完整 `locks`，心跳为注释帧；断线重连后前端重新取得 REST 权威快照。聊天页视觉不再创建此 EventSource，而从已有会话 WebSocket接收 `agentspace_event`。
 
 Agentspace SSE 长连接在 Gateway 收到关闭信号时主动结束；`main.py::App._stop_gateway()` 会等待 uvicorn 完成正常关闭，仅在超时后强制取消。`AgentspaceService` 的订阅在响应结束时由 `finally` 释放。
 

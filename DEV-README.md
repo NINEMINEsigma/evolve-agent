@@ -40,7 +40,7 @@ workspace/                 <- 运行时根（默认名；整体被 gitignore）
 3. `__main__.py` 解析 CLI、构造 `RuntimeContext`、构建前端。
 4. `main.py` 中的 `Application` 单例初始化 gateway、沙盒、`AgentspaceService`、`LLMProfileStore`、`SessionMetadataService`、工具发现、审批后端、SessionManager、ParentAgentLoop、SubAgentOrchestrator。
 5. `AgentspaceService` 在 Gateway 接受请求前启动垃圾桶恢复与文件变化 watcher；watcher 不可用时降级但不影响 REST、版本校验和文件锁。
-6. 启动 uvicorn，监听 `WS /ws/chat`、REST API 与 Agentspace SSE。关闭时 `main.py::App` 设置由 `Application.shutdown_event` 暴露的进程关闭信号，事件流据此退出；`App._stop_gateway()` 再设置 uvicorn 的退出标志，等待 Gateway 完成连接与 lifespan 清理，超过 `GATEWAY_SHUTDOWN_TIMEOUT_SECONDS` 才强制取消任务，以免正常手动结束或进化热交换时打印 `CancelledError` 堆栈。
+6. 启动 uvicorn，监听 `WS /ws/chat`、REST API 与 Agentspace SSE。聊天页的 Agent 舞台层、会话网页和会话聊天区自定义样式复用各自已有的会话 WebSocket接收 typed `agentspace_event`，不再建立额外 SSE；独立 Agentspace 编辑器继续使用一条 SSE。关闭时 `main.py::App` 设置由 `Application.shutdown_event` 暴露的进程关闭信号，事件流据此退出；`App._stop_gateway()` 再设置 uvicorn 的退出标志，等待 Gateway 完成连接与 lifespan 清理，超过 `GATEWAY_SHUTDOWN_TIMEOUT_SECONDS` 才强制取消任务，以免正常手动结束或进化热交换时打印 `CancelledError` 堆栈。
 7. 用户连接后，`SessionManager` 创建新的 `ParentAgentLoop` 实例并绑定 `FrontendSink`。
 
 Shell会话由 `Application.shell_manager` 统一持有。Agent 通过五个 Shell 工具跨工具调用操作 Windows ConPTY；单条命令完成或当前回复结束不触发停止，未完成任务或后续可复用时保留 Shell会话，只有明确需要销毁整个 Shell 时才调用 `StopShell`。WebSocket 断线不停止，自动旋转迁移到延续会话，手动终结、永久删除、进化热交换与应用关闭时停止。Shell 输出仅由 Agent 拉取，前端资源抽屉只显示元数据与停止按钮。单个 Shell会话的原生 PTY 访问通过生命周期同步边界收敛，停止流程先等待 reader 收尾再关闭原生对象，并保留超时兜底日志；该防御性处理不等同于已确认 `0xC0000005` 根因。
@@ -110,7 +110,7 @@ sequenceDiagram
 - **上下文组装**：`entry/agent_support/messages.py` 加载 `custom_hooks`、memory 上下文、system prompt，组装成 `BaseMessage` 列表。
 - **流式生成**：通过 `abstract/llm/` 抽象层的 `BaseLLMClient.chat_stream()` 调用大模型（具体后端由 `custom_llm_client/` 插件提供），`ParentAgentLoop` 实时解析 `StreamChunk` 中的文本增量与工具调用。
 - **工具执行**：通过 `abstract/tools/registry.py` 按名分发；工具集加载检查在 `dispatch`/`async_dispatch` 中统一拦截未加载工具，`ToolExecutor` 在审批前做前置快速拒绝；只读 / 白名单工具直接执行，其余进入审批流程（`component/approval/`）。工具定义按会话已加载工具集动态生成（渐进式加载），首轮只加载 `core` 工具集，其他工具集通过 `LoadToolset` 按需加载。
-- **前端推送**：实时事件（流式文本、工具调用、工具结果、任务进度、子代理更新）通过 `FrontendSink` 经 WebSocket 推回前端。正典聊天历史不再在连接时整体回放：Gateway 先发送 typed `history_sync` 元数据，前端再通过 REST 取得全历史骨架与可见范围的历史内容页；`History` / `history.es` 仍保持整体存储。
+- **前端推送**：实时事件（流式文本、工具调用、工具结果、任务进度、子代理更新）通过 `FrontendSink` 经 WebSocket 推回前端。正典聊天历史不再在连接时整体回放：Gateway 先发送 typed `history_sync` 元数据，前端再通过 REST 取得全历史骨架与可见范围的历史内容页；`History` / `history.es` 仍保持整体存储。聊天页会话视觉所需的 Agentspace 变化也通过同一会话 WebSocket的 typed `agentspace_event`推送，页面内事件总线扇出到三个视觉 hook；独立 Agentspace 编辑器仍使用 SSE。会话状态预检、History骨架和历史内容页具有15秒硬截止；超时显示持久通知，并在 WebSocket可用时以不进入 History 的脱敏 `client_diagnostic`记录 Gateway warning。
 
 - 前端主聊天区使用全历史骨架 + 历史内容页：Gateway 进程内 `History` 仍是正典对象，连接与轮次结束仅通过 `history_sync` 宣告消息数，正文按 History 索引范围读取。前端以 Virtuoso 只挂载可视行，流式 live 尾部在正典页合并成功后再清理。
 - 流式结束时位于聊天视口内的普通长回复保留展开；后端在存入 History 后、对应 `history_sync` 前通过 `system.stream_meta` 发送 `stream_id` 与 History 索引的可选权威关联，前端在正典页合并时原子传递展开选择。缺失关联的旧服务退回历史默认折叠，不猜测消息对应关系。
@@ -187,7 +187,7 @@ fast 模式的动态沙盒空间由 Application 持有的 Sandbox 单例统一�
 - 前端本地版本计算优先使用浏览器原生 Web Crypto；远程普通 HTTP 部署下 `crypto.subtle` 不可用时自动回退到纯 TypeScript SHA-256 实现（`utils/sha256.ts`），结果与服务端 Python `hashlib.sha256` 完全一致，不改变版本/冲突流程。
 - 用户删除进入 `ws:.trash/` 的事务垃圾桶；Evolve Agent `Delete` 的永久删除与审批语义保持不变。
 - 内置 Agent 文件工具在明确接触 `ws:` 路径时登记回复轮次文件锁，主Agent、参与Agent、子Agent与临时Agent在各自回复收尾后释放。
-- `watchdog` 把外部变化送入事件总线，Gateway 通过 `GET /api/agentspace/events` SSE 推送；前端以事件作为缓存失效信号，并通过 REST 重新取得权威快照。依赖不可用时界面显示同步降级。
+- `watchdog` 把外部变化送入事件总线。独立 Agentspace 编辑器通过 `GET /api/agentspace/events` SSE 接收缓存失效信号；聊天页会话视觉通过已有会话 WebSocket的 `agentspace_event`接收同源事件，避免每个视觉功能建立长连接。两者都通过 REST 重新取得权威快照；依赖不可用时界面显示同步降级。
 - 编辑器保存携带预期版本；冲突返回 HTTP 409，前端保留本地草稿并显示 Monaco 差异比较，禁止静默覆盖。
 - Monaco Editor 和 DiffEditor 的 Web Worker 由 `services/monacoEnvironment.ts` 集中配置，应用入口在 React 渲染前初始化；Worker 通过 Vite `?worker` 打包为同源构建资源，远程普通 HTTP 部署下从当前应用地址加载。
 
@@ -204,8 +204,8 @@ fast 模式的动态沙盒空间由 Application 持有的 Sandbox 单例统一�
 - **技能文件**：运行时 `skills/` 目录存放 `SKILL.md`，通过 `load_skill` / `list_skills` 工具加载。`pre-skills/` 提供参考模板。
 - **插件**：`abstract/plugins/discover.py` 基于目录扫描插件，解析 `plugin.yaml`，启发式检测 provider 类型。
 - **MCP**：`component/mcp_tools.py` 读取 `workspace/mcp_config.json`（默认），通过 `abstract/mcp/client.py` 连接并桥接工具；`abstract/mcp/schema.py` 在注册和 sampling 的 provider 边界规范化工具参数 schema。该层按 JSON Schema 结构位置处理嵌套内容，保护名为 `properties` 的业务参数，并将异常 `additionalProperties` 转为合法形式；它不改变实际 MCP `tools/call` 参数。
-- **Agent 舞台层**：会话级背景渲染层，位于聊天区背景之上、聊天气泡之下。Agent 通过 `ws:sessions/<session_id>/stage/` 目录写入 `index.html` 及图集/动画资源，前端以透明 iframe 渲染，默认鼠标穿透。`Layout` 统一管理舞台层探测与 Agentspace SSE 监听，AgentStageLayer 只负责渲染；`stage/index.html` 是部署提交标记，资源应先写、入口最后写，只有入口文件的新内容版本经 1 秒安静窗口后重建 iframe。SSE 重连和非入口资源变化不会重置正在运行的舞台。独立于会话网页 `site/`。系统提示词通过 `build_session_stage_block()` 注入。
-- **会话网页**：独立于 Agent 舞台层的完整网页预览。Agent 通过 `ws:sessions/<session_id>/site/` 部署 `index.html` 及引用资源；前端探测入口文件并监听该目录的 Agentspace SSE，部署完成后自动显示右侧会话网页入口，资源连续变化时等待 1 秒安静窗口后热刷新 iframe，入口文件或整个目录被删除/移走后自动隐藏入口。
+- **Agent 舞台层**：会话级背景渲染层，位于聊天区背景之上、聊天气泡之下。Agent 通过 `ws:sessions/<session_id>/stage/` 目录写入 `index.html` 及图集/动画资源，前端以透明 iframe 渲染，默认鼠标穿透。`Layout` 统一管理舞台层探测并订阅聊天 WebSocket扇出的 Agentspace事件，AgentStageLayer 只负责渲染；`stage/index.html` 是部署提交标记，资源应先写、入口最后写，只有入口文件的新内容版本经 1 秒安静窗口后重建 iframe。`resync` 和非入口资源变化不会重置正在运行的舞台。独立于会话网页 `site/`。系统提示词通过 `build_session_stage_block()` 注入。
+- **会话网页**：独立于 Agent 舞台层的完整网页预览。Agent 通过 `ws:sessions/<session_id>/site/` 部署 `index.html` 及引用资源；前端探测入口文件并监听聊天 WebSocket中的该目录 Agentspace事件，部署完成后自动显示右侧会话网页入口，资源连续变化时等待 1 秒安静窗口后热刷新 iframe，入口文件或整个目录被删除/移走后自动隐藏入口。
 - **会话聊天区自定义样式**：会话级聊天区 CSS 覆盖层。Agent 通过 `ws:sessions/<session_id>/chat-style/index.css` 写入 CSS，前端探测并经 PostCSS 作用域处理后注入 `<style>` 标签，仅作用于 `.chat-area` 聊天区。禁止 `@import`，允许 `@font-face`（`ChatStyle-` 前缀）和 `@keyframes`。CSS 缺失、超限（256 KiB）或作用域处理失败时恢复默认样式。用户可通过顶部栏命令菜单独立暂停 Agent 舞台层和聊天区自定义样式。系统提示词通过 `build_session_chat_style_block()` 注入。
 
 ---
@@ -215,7 +215,7 @@ fast 模式的动态沙盒空间由 Application 持有的 Sandbox 单例统一�
 ### `system/`
 
 - `system/application.py`：`Application` 进程级唯一单例，持有所有子系统引用（`RuntimeContext`、`LLMProfileStore`、共享 Profile 锁、`SessionMetadataService`、`AgentspaceService`、`SessionManager`、`ToolRegistry`、`ApprovalBackend`、`CronRouter`、`SubAgentOrchestrator` 等）。通过 `Application.current()` 访问，避免模块级全局变量。
-- `system/agentspace/`：Agentspace 编辑器后端业务包。`AgentspaceService` 统一版本化 CRUD、用户垃圾桶、按 Agent 回复轮次持有的文件锁、文件变化 watcher、SSE 事件总线和用户变更摘要；Gateway 与内置工具均通过该服务协作。
+- `system/agentspace/`：Agentspace 编辑器后端业务包。`AgentspaceService` 统一版本化 CRUD、用户垃圾桶、按 Agent 回复轮次持有的文件锁、文件变化 watcher、`AgentspaceEventHub`和用户变更摘要；Gateway 将同一事件总线适配为独立编辑器 SSE与聊天 WebSocket typed事件，内置工具通过该服务协作。
 - `system/llm_profile_store.py`：进程内唯一的 LLM Profile 注册表。仅支持 `llm_profiles.es` 的 `v2` key，直接持有并保存 `LLMProfileData` 根对象；Profile 间多模态分工、审批 Profile和全局元数据 Profile均使用根列表中的实例引用，Gateway 通过单 Profile CRUD 修改。
 - `system/session_metadata.py`：Application 持有的唯一会话元数据服务。全局元数据 Profile优先；未配置时按目标会话持久化的活动 Profile回退。统一生成标题、标签和摘要，并为分支、合并与自动旋转提供摘要保障。明确配置不可用时不静默回退。
 - `system/context.py`：`RuntimeContext`，贯穿整个应用的生命周期上下文。

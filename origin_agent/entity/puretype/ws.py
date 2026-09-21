@@ -1,7 +1,8 @@
 from enum import Enum
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from typing import Any
 
+from .agentspace import AgentspaceEvent
 from .llm import MessageMetrics
 
 # ---------------------------------------------------------------------------
@@ -36,6 +37,34 @@ class MessageType(str, Enum):
     LLM_PROFILE_CHANGED = "llm_profile_changed"
     APPROVAL_PROFILE_CHANGED = "approval_profile_changed"
     METADATA_PROFILE_CHANGED = "metadata_profile_changed"
+    AGENTSPACE_EVENT = "agentspace_event"
+    CLIENT_DIAGNOSTIC = "client_diagnostic"
+
+
+class ClientDiagnosticKind(str, Enum):
+    """客户端传输诊断类型。"""
+
+    CRITICAL_REQUEST_TIMEOUT = "critical_request_timeout"
+
+
+class ClientDiagnosticPhase(str, Enum):
+    """客户端关键请求诊断阶段。"""
+
+    SESSION_STATUS_PRECHECK = "session_status_precheck"
+    SESSION_STATUS_RECHECK = "session_status_recheck"
+    HISTORY_SKELETON = "history_skeleton"
+    HISTORY_PAGE = "history_page"
+
+
+class ClientDiagnostic(BaseModel):
+    """不进入聊天 History 的脱敏客户端传输诊断。"""
+
+    kind: ClientDiagnosticKind
+    phase: ClientDiagnosticPhase
+    duration_ms: int = Field(ge=0)
+    websocket_state: str
+    last_recv_age_ms: int | None = Field(default=None, ge=0)
+    last_pong_age_ms: int | None = Field(default=None, ge=0)
 
 
 class Message(BaseModel):
@@ -106,3 +135,7 @@ class Message(BaseModel):
     handsfree_mode: bool | None = None
     # HANDSFREE_MODE：服务端权威审批模式（manual/handsfree/yolo）
     approval_mode: str | None = None
+    # AGENTSPACE_EVENT：聊天页复用 WebSocket 接收的 Agentspace 事件。
+    agentspace_event: AgentspaceEvent | None = None
+    # CLIENT_DIAGNOSTIC：不进入聊天 History 的脱敏客户端传输诊断。
+    client_diagnostic: ClientDiagnostic | None = None

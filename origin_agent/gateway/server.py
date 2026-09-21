@@ -28,6 +28,11 @@ from fastapi.staticfiles import StaticFiles
 
 from .chat import Message, MessageType
 from .message_router import MessageRouter
+from .agentspace_event_bridge import (
+    attach_agentspace_events,
+    build_initial_agentspace_events,
+    detach_agentspace_events,
+)
 from datetime import datetime, timezone
 from entity.constant import (
     CRON_STDOUT_PREVIEW_MAX_LENGTH,
@@ -2180,34 +2185,8 @@ async def agentspace_events(req: Request):
 
     async def stream():
         try:
-            now = datetime.now(timezone.utc).isoformat()
-            yield _agentspace_sse(
-                AgentspaceEvent(
-                    sequence=0,
-                    kind=AgentspaceEventKind.RESYNC,
-                    source=AgentspaceEventSource.SYSTEM,
-                    timestamp=now,
-                )
-            )
-            yield _agentspace_sse(
-                AgentspaceEvent(
-                    sequence=0,
-                    kind=AgentspaceEventKind.LOCKS,
-                    source=AgentspaceEventSource.LOCKS,
-                    locks=service.locks_snapshot(),
-                    timestamp=now,
-                )
-            )
-            if not service.watcher_available:
-                yield _agentspace_sse(
-                    AgentspaceEvent(
-                        sequence=0,
-                        kind=AgentspaceEventKind.WATCHER_ERROR,
-                        source=AgentspaceEventSource.SYSTEM,
-                        timestamp=now,
-                        message="外部文件实时同步不可用，请使用手动刷新。",
-                    )
-                )
+            for initial_event in build_initial_agentspace_events(service):
+                yield _agentspace_sse(initial_event)
             from system.application import Application
             shutdown_wait = asyncio.create_task(Application.current().shutdown_event.wait())
             try:
@@ -2505,6 +2484,24 @@ async def _send_approval_mode_state(ws: WebSocket, session_id: str) -> None:
         )
 
 
+async def _send_agentspace_ws_event(
+    ws: WebSocket,
+    session_id: str,
+    event: AgentspaceEvent,
+) -> None:
+    """通过聊天 WebSocket 发送 typed Agentspace 事件。"""
+    await ws.send_text(
+        json.dumps(
+            Message(
+                type=MessageType.AGENTSPACE_EVENT,
+                session_id=session_id,
+                agentspace_event=event,
+            ).model_dump(exclude_none=True),
+            ensure_ascii=False,
+        )
+    )
+
+
 @app.websocket("/ws/chat")
 async def ws_chat(ws: WebSocket) -> None:
     """WebSocket 聊天端点：接收用户消息，转发给 AgentLoop，返回回复。"""
@@ -2556,7 +2553,10 @@ async def ws_chat(ws: WebSocket) -> None:
     _sink.register_ws(sid, ws, conn_token or "")
     logger.info("WebSocket connected | session=%s", sid)
 
-    # 提取客户端 IP 并存入 SessionManager
+    agentspace_subscription_id: str | None = None
+    agentspace_event_task: asyncio.Task[None] | None = None
+
+    # 提取客户端 IP并存入 SessionManager
     try:
         client_ip: str = ws.client.host if ws.client else ""
     except Exception:
@@ -2681,6 +2681,72 @@ async def ws_chat(ws: WebSocket) -> None:
                 )
             )
 
+        # 聊天页通过现有 WebSocket 接收 Agentspace 变化；独立编辑器继续使用 SSE。
+        try:
+            agentspace_service = _agentspace_service()
+
+            async def _send_current_agentspace_event(event: AgentspaceEvent) -> None:
+                await _send_agentspace_ws_event(ws, sid, event)
+
+            agentspace_subscription_id, agentspace_event_task = await attach_agentspace_events(
+                agentspace_service,
+                _send_current_agentspace_event,
+                connection_label=conn_token or sid,
+            )
+
+            def _close_on_agentspace_failure(task: asyncio.Task[None]) -> None:
+                if task.cancelled():
+                    return
+                try:
+                    failure = task.exception()
+                except asyncio.CancelledError:
+                    return
+                if failure is None:
+                    return
+                logger.warning(
+                    "Agentspace WebSocket forwarding failed | session=%s error=%s",
+                    sid,
+                    failure,
+                    exc_info=(type(failure), failure, failure.__traceback__),
+                )
+                asyncio.create_task(
+                    ws.close(code=1011, reason="agentspace_event_forward_failed"),
+                    name=f"agentspace-ws-close-{sid[:8]}",
+                )
+
+            agentspace_event_task.add_done_callback(_close_on_agentspace_failure)
+        except Exception:
+            logger.warning(
+                "Failed to attach Agentspace events to WebSocket | session=%s",
+                sid,
+                exc_info=True,
+            )
+            if agentspace_subscription_id is not None:
+                try:
+                    _agentspace_service().unsubscribe_events(agentspace_subscription_id)
+                except Exception:
+                    logger.warning(
+                        "Failed to rollback Agentspace WebSocket subscription | session=%s",
+                        sid,
+                        exc_info=True,
+                    )
+                agentspace_subscription_id = None
+            try:
+                degraded_event = AgentspaceEvent(
+                    sequence=0,
+                    kind=AgentspaceEventKind.WATCHER_ERROR,
+                    source=AgentspaceEventSource.SYSTEM,
+                    timestamp=datetime.now(timezone.utc).isoformat(),
+                    message="Agentspace实时事件连接失败，请手动刷新会话视觉内容。",
+                )
+                await _send_agentspace_ws_event(ws, sid, degraded_event)
+            except Exception:
+                logger.warning(
+                    "Failed to report Agentspace WebSocket degradation | session=%s",
+                    sid,
+                    exc_info=True,
+                )
+
         # 创建消息路由器 — 所有消息处理委托给 MessageRouter
         router = MessageRouter(ws, sid, agentspace_path=_agentspace_path, conn_token=conn_token or "")
 
@@ -2721,6 +2787,18 @@ async def ws_chat(ws: WebSocket) -> None:
         # 收到非 text 消息（如 binary）或连接已关闭时仍尝试读写
         logger.info("WebSocket runtime error for session=%s: %s", sid, exc)
     finally:
+        try:
+            await detach_agentspace_events(
+                _agentspace_service(),
+                agentspace_subscription_id,
+                agentspace_event_task,
+            )
+        except Exception:
+            logger.warning(
+                "Failed to detach Agentspace WebSocket events | session=%s",
+                sid,
+                exc_info=True,
+            )
         from system.application import Application
         _sink = Application.current().frontend_sink
         if _sink:

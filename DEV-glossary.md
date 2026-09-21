@@ -130,6 +130,8 @@
 | 事件出口 | sink 体系：`AgentSink` 抽象；`FrontendSink` = 前端事件出口；`ParentAgentSink` = 父会话事件出口 |
 | 入站缓冲 / 出站缓冲 | inbox / outbox（异步消息缓冲；代码标识改名为可选遗留） |
 | 消息体系 | `entity/messages.py` 的 `BaseMessage` 多态模型与 `History` |
+| 客户端传输诊断 | 前端检测会话预检或 History关键 REST等待超过15秒时产生的脱敏 `client_diagnostic`；显示持久通知，并在会话 WebSocket可用时只写 Gateway warning，不进入聊天 History（英文锚点：`client transport diagnostic`） |
+| Agentspace事件 | `AgentspaceEvent` 文件/锁/重同步元数据；聊天页通过 typed `agentspace_event`复用会话 WebSocket，独立 Agentspace 编辑器通过 SSE接收，载荷沿用既有同源元数据范围 |
 | 流式增量 | `StreamChunk`（content_delta / reasoning_delta） |
 | 思考内容 | reasoning_content / reasoning_delta（DeepSeek thinking-mode 载荷） |
 | 记忆上下文 | memory_hook 注入的长期记忆块（`<|im_memory_context_start|>` 标记包裹，非持久化） |
@@ -315,8 +317,8 @@
 | Mermaid 渲染器 | `MermaidRenderer` | Mermaid 图表渲染；点击放大为灯箱（缩放/平移，react-zoom-pan-pinch） |
 | 安全 HTML | `SafeHtml` | iframe 沙箱渲染 agent 输出的原始 HTML，postMessage 同步高度，避免流式闪烁 |
 | 等高线背景 | `ContourBackground` | 聊天区 canvas 等高线动态背景，受消息内容长度与 seed 影响 |
-| Agent 舞台层 | `AgentStageLayer` / `.agent-stage-layer` | 位于聊天区背景之上、聊天气泡和输入栏之下的会话级渲染层；Agent 通过 `ws:sessions/<session_id>/stage/` 目录写入内容，`index.html` 作为资源完成后的部署提交标记；前端以透明 iframe 渲染且默认鼠标穿透 |
-| 会话网页 | `SessionSiteDrawer` | 右侧独立抽屉，iframe 加载 `ws:sessions/<session_id>/site/index.html`，用于完整网页预览；仅当前会话已部署 `index.html` 时显示右侧触发按钮；与 Agent 舞台层 `stage/` 分离 |
+| Agent 舞台层 | `AgentStageLayer` / `.agent-stage-layer` | 位于聊天区背景之上、聊天气泡和输入栏之下的会话级渲染层；Agent 通过 `ws:sessions/<session_id>/stage/` 目录写入内容，`index.html` 作为资源完成后的部署提交标记；前端以透明 iframe 渲染且默认鼠标穿透，变化事件通过已有会话 WebSocket接收 |
+| 会话网页 | `SessionSiteDrawer` | 右侧独立抽屉，iframe 加载 `ws:sessions/<session_id>/site/index.html`，用于完整网页预览；仅当前会话已部署 `index.html` 时显示右侧触发按钮；与 Agent 舞台层 `stage/` 分离，变化事件通过已有会话 WebSocket接收 |
 | 小地图 | `Minimap` | 主聊天区按全历史骨架使用逻辑 Minimap 映射并可随机跳转；子会话抽屉保留局部消息 DOM 几何预览；移动端默认折叠 |
 | 回到底部按钮 | `.scroll-to-bottom-btn` | 滚动离开底部时出现的快捷回底按钮 |
 
@@ -383,7 +385,7 @@
 
 | 规范称谓 | 定义 | 英文锚点 |
 |---|---|---|
-| 会话聊天区自定义样式 | 会话级 CSS 覆盖层，Agent 通过 `ws:sessions/<session_id>/chat-style/index.css` 写入，仅作用于 `.chat-area` 聊天区 | Session Chat Style |
+| 会话聊天区自定义样式 | 会话级 CSS 覆盖层，Agent 通过 `ws:sessions/<session_id>/chat-style/index.css` 写入，仅作用于 `.chat-area` 聊天区；变化事件通过已有会话 WebSocket接收 | Session Chat Style |
 | 聊天区样式暂停开关 | 用户在顶部栏命令菜单中独立暂停聊天区自定义样式的开关，按会话持久化 | chat style pause toggle |
 | 舞台层暂停开关 | 用户在顶部栏命令菜单中独立暂停 Agent 舞台层的开关，按会话持久化 | stage pause toggle |
 | 公开样式选择器契约 | 以 `data-chat-scope` 和 `data-message-role` 属性构成的稳定选择器集合，向 Evolve Agent 承诺跨版本兼容 | public style selector contract |

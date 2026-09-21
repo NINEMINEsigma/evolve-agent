@@ -2,10 +2,34 @@ import { HISTORY_PAGE_OVERSCAN_ROWS, HISTORY_PAGE_SIZE } from "../../constants/h
 import { historyContentRowToChatMessage, historyIndexRangeForRows } from "./historyProjection";
 import { fetchHistoryPage, fetchHistoryResources, fetchHistorySkeleton } from "./historyApi";
 import { useChatRuntimeStore } from "./chatRuntimeStore";
+import type { ClientDiagnostic } from "../../types";
+import { RequestTimeoutError } from "../../services/fetchWithTimeout";
 
 class ChatRuntimeController {
   private controllers = new Set<AbortController>();
   private pageRequests = new Map<string, { promise: Promise<void>; canonicalCutoff?: number }>();
+  private diagnosticReporter: ((diagnostic: ClientDiagnostic) => void) | null = null;
+
+  setDiagnosticReporter(
+    reporter: ((diagnostic: ClientDiagnostic) => void) | null,
+  ): void {
+    this.diagnosticReporter = reporter;
+  }
+
+  private reportTimeout(
+    error: RequestTimeoutError,
+    sessionId: string,
+    generation: number,
+  ): void {
+    if (!this.isCurrent(sessionId, generation)) return;
+    if (error.phase !== "history_skeleton" && error.phase !== "history_page") return;
+    this.diagnosticReporter?.({
+      kind: "critical_request_timeout",
+      phase: error.phase,
+      duration_ms: Math.max(0, Math.round(error.elapsedMs)),
+      websocket_state: "unknown",
+    });
+  }
 
   beginSession(sessionId: string): void {
     this.abortAll();
@@ -39,6 +63,7 @@ class ChatRuntimeController {
       }
     } catch (error) {
       if (this.isAbort(error) || !this.isCurrent(sessionId, generation)) return;
+      if (error instanceof RequestTimeoutError) this.reportTimeout(error, sessionId, generation);
       useChatRuntimeStore.getState().setSkeletonError(this.errorMessage(error));
     } finally {
       if (this.isCurrent(sessionId, generation)) {
@@ -121,6 +146,7 @@ class ChatRuntimeController {
       if (!current.initialReady) useChatRuntimeStore.getState().setInitialReady(true);
     } catch (error) {
       if (this.isAbort(error) || !this.isCurrent(sessionId, generation)) return;
+      if (error instanceof RequestTimeoutError) this.reportTimeout(error, sessionId, generation);
       useChatRuntimeStore.getState().setSkeletonError(
         `正典历史同步失败：${this.errorMessage(error)}`,
       );
@@ -209,6 +235,7 @@ class ChatRuntimeController {
       })
       .catch((error) => {
         if (this.isAbort(error) || !this.isCurrent(sessionId, generation)) return;
+        if (error instanceof RequestTimeoutError) this.reportTimeout(error, sessionId, generation);
         useChatRuntimeStore.getState().setPageError({
           key: `${startIndex}:${startIndex + limit}`,
           startIndex,

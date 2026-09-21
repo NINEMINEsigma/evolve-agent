@@ -4,6 +4,9 @@ import type {
   HistorySkeletonResponseDto,
 } from "./types";
 import { chatTelemetry } from "./chatTelemetry";
+import type { ClientDiagnosticPhase } from "../../types";
+import { TIMING } from "../../constants/timing";
+import { fetchWithTimeout, RequestTimeoutError } from "../../services/fetchWithTimeout";
 
 export class ChatHistoryRequestError extends Error {
   readonly status: number;
@@ -17,14 +20,24 @@ export class ChatHistoryRequestError extends Error {
   }
 }
 
-async function requestJson<T>(url: string, signal: AbortSignal): Promise<T> {
+async function requestJson<T>(
+  url: string,
+  signal: AbortSignal,
+  phase?: ClientDiagnosticPhase,
+): Promise<T> {
   const started = performance.now();
   chatTelemetry.record({
     time: Date.now(),
     kind: "history_request",
   });
   try {
-    const response = await fetch(url, { signal });
+    const response = phase
+      ? await fetchWithTimeout(
+          url,
+          { signal },
+          { timeoutMs: TIMING.CRITICAL_REQUEST_TIMEOUT, phase },
+        )
+      : await fetch(url, { signal });
     const data = await response.json().catch(() => ({}));
     chatTelemetry.record({
       time: Date.now(),
@@ -46,7 +59,14 @@ async function requestJson<T>(url: string, signal: AbortSignal): Promise<T> {
     }
     return data as T;
   } catch (error) {
-    if (error instanceof DOMException && error.name === "AbortError") {
+    if (error instanceof RequestTimeoutError) {
+      chatTelemetry.record({
+        time: Date.now(),
+        kind: "history_timeout",
+        durationMs: error.elapsedMs,
+        phase,
+      });
+    } else if (error instanceof DOMException && error.name === "AbortError") {
       chatTelemetry.record({ time: Date.now(), kind: "history_cancel" });
     }
     throw error;
@@ -61,6 +81,7 @@ export function fetchHistorySkeleton(
   return requestJson(
     `/api/sessions/${encodeURIComponent(sessionId)}/history/skeleton?start_index=${startIndex}`,
     signal,
+    "history_skeleton",
   );
 }
 
@@ -73,6 +94,7 @@ export function fetchHistoryPage(
   return requestJson(
     `/api/sessions/${encodeURIComponent(sessionId)}/history/page?start_index=${startIndex}&limit=${limit}`,
     signal,
+    "history_page",
   );
 }
 

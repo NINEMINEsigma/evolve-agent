@@ -735,7 +735,7 @@ classDiagram
 | `pty` / `reader_thread` | `_ShellSession` | `PTY` / `threading.Thread \| None` | ConPTY 对象与唯一输出读取线程 |
 | `operation_lock` / `output_event` | `_ShellSession` | `asyncio.Lock` / `asyncio.Event` | Agent 操作串行化与输出/退出唤醒 |
 | `raw_text` / `text` / `base_offset` / `total_chars` | `_ShellSession` | `str` / `str` / `int` / `int` | 有界原始与规范化输出及绝对字符位置边界 |
-| `_agentspace_service` | `Application` | `AgentspaceService \| None` | Agentspace 版本化 CRUD、文件锁、垃圾桶、watcher 与 SSE 事件的唯一业务服务 |
+| `_agentspace_service` | `Application` | `AgentspaceService \| None` | Agentspace 版本化 CRUD、文件锁、垃圾桶、watcher 与 `AgentspaceEventHub` 的唯一业务服务；Gateway适配为独立编辑器 SSE和聊天 WebSocket事件 |
 | `session_manager` | `Application` | `SessionManager \| None` | session 管理器 |
 | `approval_backend_manager` | `Application` | `ApprovalBackendManager \| None` | 审批后端管理器 |
 | `cron_router` | `Application` | `CronRouter \| None` | Cron 路由器 |
@@ -816,7 +816,8 @@ classDiagram
 | Gateway / Agent Loop 会话元数据入口 | `session_metadata_service` | `Application` | `gateway/server.py`、`entry/base_agent_loop.py`、`entry/session_manager.py`、`entry/multi_agent_loop.py`、`entry/colloquy_loop.py` | 标题、标签、摘要及延续摘要保障统一经全局元数据服务，Loop 不再自行选择元数据客户端 |
 | 动态空间管理工具与管理弹窗 | `add_dynamic_space()` / `update_dynamic_space()` / `remove_dynamic_space()` / `normalize_dynamic_space_path()` | `Sandbox` | `component/tools/sandbox_spaces.py`、`gateway/server.py` | Agent 工具经 critical 审批；用户命令菜单管理弹窗经 REST 直接修改，均复用 Sandbox 校验 |
 | 动态空间 Prompt 构建器 | `list_dynamic_spaces_with_availability()` | `Sandbox` | `system/prompt.py` | 生成结构化动态命名空间系统提示词块 |
-| Gateway Agentspace SSE | `shutdown_event` | `Application` | `gateway/server.py::agentspace_events` | 通过共享进程关闭信号主动结束事件流，避免阻塞 uvicorn 优雅关闭 |
+| Gateway Agentspace SSE | `shutdown_event` | `Application` | `gateway/server.py::agentspace_events` | 独立 Agentspace 编辑器通过共享进程关闭信号主动结束 SSE，避免阻塞 uvicorn 优雅关闭 |
+| Gateway聊天 WebSocket Agentspace桥接 | `subscribe_events()` / `unsubscribe_events()` | `AgentspaceService` | `gateway/server.py::ws_chat`、`gateway/agentspace_event_bridge.py` | 每条聊天连接订阅一次 EventHub，发送初始 `resync/locks/watcher_error`，积压折叠为 `resync`，断线时取消 task并注销；自动旋转复用物理连接与订阅 |
 | Gateway History REST | `get_session_history_skeleton()` / `get_session_history_page()` / `get_session_history_resources()` | `BaseAgentLoop` (via `IMainSessionLoop.loop`) | `gateway/server.py` | 主会话只读投影；子Agent虽继承实现但没有对应 Gateway 路由 |
 | Gateway / 搜索 / LSP | `resolve_read()` / `namespace_bases()` | `Sandbox` | `gateway/server.py`、`system/search_engine.py`、`system/lsp.py` | 复用唯一 Sandbox 的动态映射与有效 base |
 
@@ -846,6 +847,7 @@ classDiagram
 | `ShellInfo` | `entity/puretype/shell.py` | `BaseModel` | Shell会话元数据快照，`termination` 区分 natural/forced/error，`exit_code` 仅为进程退出码 |
 | `ShellOutputSlice` | `entity/puretype/shell.py` | `BaseModel` | 规范化输出的绝对字符位置切片 |
 | `ProcessLineStreamResult` | `entity/puretype/runtime.py` | `BaseModel` | 逐行消费子进程输出后的退出码、stderr、截断与行数摘要 |
+| `ClientDiagnostic` / `ClientDiagnosticKind` / `ClientDiagnosticPhase` | `entity/puretype/ws.py` | `BaseModel` / `Enum` | 会话预检与 History关键请求超时的脱敏传输诊断；只写 Gateway日志，不进入 History |
 | `DynamicSandboxSpace` | `entity/puretype/sandbox.py` | `BaseModel` | 单个全局动态沙盒空间的名称、绝对路径、用途描述和工具层只读标志 |
 | `DynamicSandboxSpaceData` | `entity/puretype/sandbox.py` | `BaseModel` | `dynamic_sandbox_spaces.es` v1 的持久化根对象 |
 | `RefWrapper[T]` | `entity/gentype.py` | `BaseModel, Generic[T]` | 可变引用容器，供 loop 与 `ToolExecutor` 等组件共享可变值 |
@@ -909,7 +911,7 @@ classDiagram
 
 ### Agentspace 编辑器业务服务与回复轮次文件锁
 
-`Application` 新增唯一 `AgentspaceService`。该服务把原先位于 Gateway 的全局布尔锁和直接文件操作替换为版本化 CRUD、`AgentspaceLockRegistry`、`AgentspaceOperationGate`、事务垃圾桶、`watchdog` watcher 与 SSE `AgentspaceEventHub`。Gateway 只负责 typed HTTP/SSE 转换。
+`Application` 新增唯一 `AgentspaceService`。该服务把原先位于 Gateway 的全局布尔锁和直接文件操作替换为版本化 CRUD、`AgentspaceLockRegistry`、`AgentspaceOperationGate`、事务垃圾桶、`watchdog` watcher 与 `AgentspaceEventHub`。Gateway负责 typed HTTP及两种传输适配：独立 Agentspace 编辑器使用 SSE；聊天页会话视觉复用各自已有会话 WebSocket的 typed `agentspace_event`，每条连接订阅一次并在断线时注销，事件积压折叠为 `resync`。
 
 `ToolContext` 携带必填 `round_id`。主Agent、参与Agent、子Agent与临时Agent在各自完整回复开始时创建 round，并在 History/事件/metrics 收尾后的 `finally` 幂等释放。内置文件、Shell 与 Python 工具只登记明确 `ws:` 路径；`Delete` 的永久删除和审批语义不变。用户从 Agentspace 编辑器删除时独立进入 `ws:.trash/`。
 
