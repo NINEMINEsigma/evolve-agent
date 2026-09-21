@@ -3,5 +3,6 @@
   "compilerOptions": {
     "types": ["vitest/globals", "@testing-library/jest-dom"]
   },
-  "include": ["src", "vitest.config.ts", "playwright.config.ts", "e2e"]
+  "include": ["src", "vitest.config.ts", "playwright.config.ts", "e2e"],
+  "exclude": []
 }
