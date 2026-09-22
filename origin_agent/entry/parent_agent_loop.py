@@ -21,7 +21,7 @@ from typing import Any, Awaitable, Callable, Dict, List, TYPE_CHECKING
 from abstract.tools.registry import registry as tool_registry
 from abstract.llm.client import BaseLLMClient
 from abstract.llm.loader import create_llm_client
-from entity.puretype import LLMResponse, ToolCallRequest, Role, ToolAvailability, TokenUsageRecord, MessageContent, LLMProfile, MessageMetrics, QueuedMessage
+from entity.puretype import LLMResponse, ToolCallRequest, Role, ToolAvailability, TokenUsageRecord, MessageContent, LLMProfile, MessageMetrics, QueuedMessage, HistoryRowLink, SessionHistoryRowKind
 from entity.gentype import RefWrapper
 from system.session_store import SessionStore
 from entity.constant import (
@@ -66,7 +66,8 @@ from system.modality_capability import (
 from entry.session_manager import LoopSessionManager
 from entry.tool_executor import ToolExecutor, _interrupted_result
 from entry.stream_consumer import StreamConsumer
-from entry.stream_history_link import emit_stream_history_link
+from entry.history_projection import history_row_id
+from entry.stream_history_link import emit_history_links, emit_stream_history_link
 from entry.session_message_queue import SessionMessageQueue
 
 if TYPE_CHECKING:
@@ -462,9 +463,8 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
                         f"The service provider returned an error, please try again later. "
                         f"Details: {llm_exc}"
                     )
-                    self.append_system_status(err_text, session_id=sid)
+                    await self._emit_persisted_system_status(sid, err_text)
                     await self._emit_stream_done(sid, stream_id, "error", content="", metrics=None)
-                    await self._frontend_sink.emit_system_message(sid, err_text)
                     return ""
                 if self._cancel_event.is_set():
                     await self._emit_stream_done(sid, stream_id, "cancelled", content=resp.content or "", metrics=resp.metrics)
@@ -521,7 +521,16 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
 
                 # 存储 assistant 消息（含 tool_calls）
                 msg_index = self._store_assistant_with_tools(sid, resp)
-                await emit_stream_history_link(self._frontend_sink, sid, stream_id, msg_index)
+                tool_links = [
+                    HistoryRowLink(
+                        live_id=f"tool-call:{tc.id}",
+                        history_row_id=history_row_id(msg_index, SessionHistoryRowKind.tool_call, tool_index),
+                    )
+                    for tool_index, tc in enumerate(resp.tool_calls)
+                ]
+                await emit_stream_history_link(
+                    self._frontend_sink, sid, stream_id, msg_index, links=tool_links,
+                )
                 if resp.metrics:
                     collected_metrics.append((sid, msg_index, resp.metrics))
 
@@ -536,8 +545,16 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
                             llm_profile=self.active_llm_profile,
                         )
                         messages.append(tool_msg)
-                        self._history.add_message(tool_msg)
+                        tool_result_index = self._history.add_message(tool_msg)
                         self.save_history(sid)
+                        await emit_history_links(
+                            self._frontend_sink,
+                            sid,
+                            links=[HistoryRowLink(
+                                live_id=f"tool-result:{tool_msg.tool_call_id}",
+                                history_row_id=history_row_id(tool_result_index, SessionHistoryRowKind.message),
+                            )],
+                        )
                         await self._push_usage_update(sid)
                         _executed_tool_msgs.append(tool_msg)
 
@@ -575,8 +592,16 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
                             tc, self.current_character_agent, "forced",
                         )
                         messages.append(tool_msg)
-                        self._history.add_message(tool_msg)
+                        tool_result_index = self._history.add_message(tool_msg)
                         self.save_history(sid)
+                        await emit_history_links(
+                            self._frontend_sink,
+                            sid,
+                            links=[HistoryRowLink(
+                                live_id=f"tool-result:{tool_msg.tool_call_id}",
+                                history_row_id=history_row_id(tool_result_index, SessionHistoryRowKind.message),
+                            )],
+                        )
                     self.append_system_status("已中断", session_id=sid)
                     raise
                 except Exception:
@@ -595,11 +620,18 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
                             tc, self.current_character_agent, "unexpected",
                         )
                         messages.append(tool_msg)
-                        self._history.add_message(tool_msg)
+                        tool_result_index = self._history.add_message(tool_msg)
                         self.save_history(sid)
-                    self.append_system_status("工具链异常中断", session_id=sid)
+                        await emit_history_links(
+                            self._frontend_sink,
+                            sid,
+                            links=[HistoryRowLink(
+                                live_id=f"tool-result:{tool_msg.tool_call_id}",
+                                history_row_id=history_row_id(tool_result_index, SessionHistoryRowKind.message),
+                            )],
+                        )
+                    await self._emit_persisted_system_status(sid, "工具链异常中断")
                     await self._emit_stream_done(sid, stream_id, "error", content="", metrics=None)
-                    await self._frontend_sink.emit_system_message(sid, "工具链异常中断")
                     return ""
 
                 rotated_sid = await self._check_over_limit_in_tool_loop(sid)
@@ -622,12 +654,14 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
             _MAX_TOOL_TURNS, sid,
         )
         await self._emit_stream_done(sid, stream_id, "error", content="", metrics=None)
+        status_text = f"工具调用已达 {_MAX_TOOL_TURNS} 轮上限，已自动终止。"
+        status_index = self.append_system_status(status_text, session_id=sid)
         await self._frontend_sink.emit_system_message(
             sid,
-            f"工具调用已达 {_MAX_TOOL_TURNS} 轮上限，已自动终止。",
+            status_text,
+            history_index=status_index,
+            is_system_status=True,
         )
-        over_limit_text = "I ran into an issue processing your request. Please try again."
-        self.append_system_status(f"工具调用已达 {_MAX_TOOL_TURNS} 轮上限", session_id=sid)
         return ""
 
     # ========================================================================
@@ -1002,6 +1036,17 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
         )
         index = self._history.add_message(message)
         self.save_history(session_id)
+        return index
+
+    async def _emit_persisted_system_status(self, session_id: str, text: str) -> int:
+        """持久化系统状态并按同一索引实时发送。"""
+        index = self.append_system_status(text, session_id=session_id)
+        await self._frontend_sink.emit_system_message(
+            session_id,
+            text,
+            history_index=index,
+            is_system_status=True,
+        )
         return index
 
     @staticmethod

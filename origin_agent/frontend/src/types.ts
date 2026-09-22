@@ -199,6 +199,11 @@ export interface ClientDiagnostic {
   last_pong_age_ms?: number | null;
 }
 
+export interface HistoryRowLink {
+  live_id: string;
+  history_row_id: string;
+}
+
 export interface WSMessage {
   type: MessageType;
   session_id?: string;
@@ -225,6 +230,7 @@ export interface WSMessage {
   response_characters?: string[];  // 多 Agent 模式：需响应角色列表
   character_name?: string;
   index?: number;
+  is_system_status?: boolean;
   client_message_id?: string;
   message_suffix?: string;                // USER_MESSAGE：持久化上下文扩展块
   dynamic_message_suffix?: string;        // USER_MESSAGE：当轮动态上下文扩展块

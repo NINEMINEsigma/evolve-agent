@@ -16,7 +16,7 @@ from typing import Any, TYPE_CHECKING
 
 from pydantic import BaseModel, Field
 
-from entity.puretype import Role, MessageMetrics, LLMProfile
+from entity.puretype import Role, MessageMetrics, LLMProfile, HistoryRowLink, SessionHistoryRowKind
 from entity.gentype import RefWrapper
 from entity.messages import ToolResultMessage, CharacterConversationMessage, CharacterSystemMessage, FunctionCall, ToolCall as HistoryToolCall, BaseMessage
 from entity.constant import (
@@ -30,7 +30,8 @@ from entity.constant import (
 )
 from entry.base_agent_loop import BaseAgentLoop, IMainSessionLoop, ToolContext
 from entry.stream_consumer import StreamConsumer
-from entry.stream_history_link import emit_stream_history_link
+from entry.history_projection import history_row_id
+from entry.stream_history_link import emit_history_links, emit_stream_history_link
 from entry.tool_executor import ToolExecutor, _interrupted_result
 from entry.agent_support.multimodal import preprocess_multimodal_blocks
 import asyncio
@@ -340,8 +341,16 @@ class MultiAgentWorker:
                 )
                 msg_index = self._loop.loop.history.add_message(assistant_msg)
                 self._loop.loop.save_history(self._loop.loop.session_id)
+                tool_links = [
+                    HistoryRowLink(
+                        live_id=f"tool-call:{tc.id}",
+                        history_row_id=history_row_id(msg_index, SessionHistoryRowKind.tool_call, tool_index),
+                    )
+                    for tool_index, tc in enumerate(resp.tool_calls)
+                ]
                 await emit_stream_history_link(
                     self._sink, self._loop.loop.session_id, stream_id, msg_index,
+                    links=tool_links,
                 )
                 if resp.metrics:
                     self._collected_metrics.append((self._loop.loop.session_id, msg_index, resp.metrics))
@@ -361,8 +370,16 @@ class MultiAgentWorker:
                         )
 
                         # 写入共享 History
-                        self._loop.loop.history.add_message(tool_msg)
+                        tool_result_index = self._loop.loop.history.add_message(tool_msg)
                         self._loop.loop.save_history(self._loop.loop.session_id)
+                        await emit_history_links(
+                            self._sink,
+                            self._loop.loop.session_id,
+                            links=[HistoryRowLink(
+                                live_id=f"tool-result:{tool_msg.tool_call_id}",
+                                history_row_id=history_row_id(tool_result_index, SessionHistoryRowKind.message),
+                            )],
+                        )
 
                         # 追加 tool 结果到本地 LLM 上下文（跟在 assistant tool_calls 之后）
                         full_messages.append(tool_msg)
@@ -389,8 +406,16 @@ class MultiAgentWorker:
                         tool_msg = _interrupted_result(
                             tc, self.character_name, "forced",
                         )
-                        self._loop.loop.history.add_message(tool_msg)
+                        tool_result_index = self._loop.loop.history.add_message(tool_msg)
                         self._loop.loop.save_history(self._loop.loop.session_id)
+                        await emit_history_links(
+                            self._sink,
+                            self._loop.loop.session_id,
+                            links=[HistoryRowLink(
+                                live_id=f"tool-result:{tool_msg.tool_call_id}",
+                                history_row_id=history_row_id(tool_result_index, SessionHistoryRowKind.message),
+                            )],
+                        )
                     raise
                 except Exception:
                     # 普通异常补齐未执行的 tool_calls 后返回既有降级结果。
@@ -410,8 +435,16 @@ class MultiAgentWorker:
                         tool_msg = _interrupted_result(
                             tc, self.character_name, "unexpected",
                         )
-                        self._loop.loop.history.add_message(tool_msg)
+                        tool_result_index = self._loop.loop.history.add_message(tool_msg)
                         self._loop.loop.save_history(self._loop.loop.session_id)
+                        await emit_history_links(
+                            self._sink,
+                            self._loop.loop.session_id,
+                            links=[HistoryRowLink(
+                                live_id=f"tool-result:{tool_msg.tool_call_id}",
+                                history_row_id=history_row_id(tool_result_index, SessionHistoryRowKind.message),
+                            )],
+                        )
                     return WorkerResult(
                         character_name=self.character_name,
                         parsed_json=AgentResponse(content=""),

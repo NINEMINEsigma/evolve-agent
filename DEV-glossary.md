@@ -378,6 +378,8 @@
 |---|---|---|
 | 全历史骨架 | 会话中全部前端消息行的轻量顺序与角色信息，不含正文或富媒体；不是 `history.es` 的分页存储 | full history skeleton |
 | 历史内容页 | Gateway 按 History 消息索引范围返回的完整前端渲染内容；不改变 `History` 的整体存储 | history content page |
+| 实时行映射 | WebSocket实时行 ID到正典 History投影行 ID的权威关联；只使用后端实际 History索引，不按正文或顺序猜测 | live History row link |
+| 正典交接 | skeleton目标存在时把实时行提升到正典位置、再由History内容页覆盖临时内容并移除实时副本的过程 | canonical handoff |
 | 逻辑 Minimap 映射 | 主聊天 Minimap 背景按真实/估算气泡高度显示全历史角色分布，高亮和拖拽以 Virtuoso scroller 的物理滚动指标为权威，不把估算高度用于滚动校正 | logical Minimap mapping |
 | 本地性能遥测 | 用户手动开启、仅在浏览器本地记录并导出技术指标、默认关闭且不上传消息内容的诊断能力 | local performance telemetry |
 

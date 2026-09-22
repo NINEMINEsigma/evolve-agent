@@ -134,13 +134,10 @@ class AgentSink(ABC):
         ...
 
     @abstractmethod
-    async def emit_system_message(self, session_id: str, content: str) -> None:
-        """推送系统消息到前端。
-
-        Args:
-            session_id: 目标会话 ID。
-            content: 系统消息文本内容。
-        """
+    async def emit_system_message(self, session_id: str, content: str,
+                                  history_index: int | None = None,
+                                  is_system_status: bool = False) -> None:
+        """推送系统消息到前端；可选携带已持久化 History 索引。"""
         ...
 
 
@@ -476,6 +473,7 @@ class FrontendSink(AgentSink):
         visible_args = {k: v for k, v in args.items() if not k.startswith("_")}
         await self._send_msg(session_id, "tool_call", tool_name,
                              json.dumps(visible_args, ensure_ascii=False),
+                             tool_call_id=tool_call_id,
                              character_name=character_name)
 
     async def emit_tool_result(self, session_id: str, tool_name: str,
@@ -589,7 +587,9 @@ class FrontendSink(AgentSink):
         await self._send_msg(session_id, "subagent_update", "",
                              json.dumps(payload, ensure_ascii=False))
 
-    async def emit_system_message(self, session_id: str, content: str) -> None:
+    async def emit_system_message(self, session_id: str, content: str,
+                                  history_index: int | None = None,
+                                  is_system_status: bool = False) -> None:
         """推送系统消息到前端。"""
         try:
             ws = self.get_ws(session_id)
@@ -600,6 +600,8 @@ class FrontendSink(AgentSink):
                 type=MessageType.SYSTEM,
                 session_id=session_id,
                 content=content,
+                index=history_index,
+                is_system_status=is_system_status or None,
             )
             await ws.send_text(json.dumps(msg.model_dump(exclude_none=True), ensure_ascii=False))
         except Exception:
@@ -623,6 +625,7 @@ class FrontendSink(AgentSink):
             msg_type = MessageType.TOOL_CALL
             data = json.loads(payload) if payload else None
             msg = Message(type=msg_type, session_id=session_id, tool=tool_name, args=data,
+                          tool_call_id=tool_call_id or None,
                           character_name=character_name)
         elif event_type == "tool_result":
             msg_type = MessageType.TOOL_RESULT
@@ -880,14 +883,19 @@ class ParentAgentSink(AgentSink):
                 "Failed to forward subagent_update to parent session=%s", session_id, exc_info=True
             )
 
-    async def emit_system_message(self, session_id: str, content: str) -> None:
+    async def emit_system_message(self, session_id: str, content: str,
+                                  history_index: int | None = None,
+                                  is_system_status: bool = False) -> None:
         """转发系统消息到父 Agent 前端。"""
         try:
             from system.application import Application
             sink = Application.current().frontend_sink
             if sink is not None:
                 await sink.emit_system_message(
-                    self._loop.parent_session_id, content,
+                    self._loop.parent_session_id,
+                    content,
+                    history_index=history_index,
+                    is_system_status=is_system_status,
                 )
         except Exception:
             logger.warning(

@@ -67,6 +67,13 @@ class ClientDiagnostic(BaseModel):
     last_pong_age_ms: int | None = Field(default=None, ge=0)
 
 
+class HistoryRowLink(BaseModel):
+    """实时聊天行到正典 History 投影行的非持久化关联。"""
+
+    live_id: str
+    history_row_id: str
+
+
 class Message(BaseModel):
     """WebSocket 消息模型。"""
 
@@ -103,6 +110,7 @@ class Message(BaseModel):
     tool_call_id: str | None = None  # TOOL_CALL / TOOL_RESULT：工具调用 ID
     character_name: str | None = None  # 消息发送者角色名
     index: int | None = None  # 消息在持久化历史中的索引
+    is_system_status: bool | None = None  # SYSTEM：是否为已持久化的系统状态消息
     client_message_id: str | None = None  # 前端生成的乐观消息 ID，用于回显去重
     message_suffix: str | None = None  # 用户消息固定后缀（如 fixator 上下文）
     dynamic_message_suffix: str | None = None  # 用户消息动态后缀（如 memory/hooks 上下文）

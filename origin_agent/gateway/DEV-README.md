@@ -97,7 +97,7 @@ WS /ws/chat?resume=<sid>
 
 | 类型 | 说明 |
 |---|---|
-| `system` | 系统通知；可选 JSON `stream_meta` 同时携带 `stream_id`、`history_index`（History 整数索引，非工具子行），在对应 assistant 消息存盘后、该轮 `history_sync` 前发送。多Agent模式继续携带可见性/响应角色。旧客户端可忽略，新客户端用以传递当前会话内的消息展开选择；缺失关联恢复历史默认折叠 |
+| `system` | 系统通知；可选 JSON `stream_meta`携带 `stream_id`、`history_index`、`live_history_links`（实时行到正典行的明确关联），或顶层携带 system status 的 `index`/`is_system_status`。关联只在对应 History 写入后发送；前端不得按正文、顺序或实时版本猜测映射。多Agent模式继续携带可见性/响应角色。 |
 | `user_message` | 用户消息回显 |
 | `assistant_message` | 完整助手消息 |
 | `stream_delta` | LLM 流式文本块 |
