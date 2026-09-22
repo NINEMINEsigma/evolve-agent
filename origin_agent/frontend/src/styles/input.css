@@ -32,8 +32,6 @@
   background:
     linear-gradient(135deg, rgba(var(--white-rgb), 0.1), rgba(var(--white-rgb), 0.025) 45%, rgba(var(--accent-rgb), 0.045)),
     rgba(var(--bg-secondary-rgb), 0.5);
-  backdrop-filter: blur(24px) saturate(165%);
-  -webkit-backdrop-filter: blur(24px) saturate(165%);
   border: 1px solid rgba(var(--white-rgb), 0.14);
   border-radius: 24px;
   padding: 6px 10px;
@@ -77,6 +75,8 @@
   background:
     linear-gradient(135deg, rgba(var(--white-rgb), 0.12), rgba(var(--white-rgb), 0.03) 45%, rgba(var(--accent-rgb), 0.075)),
     rgba(var(--bg-secondary-rgb), 0.56);
+  backdrop-filter: blur(24px) saturate(165%);
+  -webkit-backdrop-filter: blur(24px) saturate(165%);
   border-color: rgba(var(--accent-rgb), 0.42);
   box-shadow:
     0 14px 44px rgba(var(--black-rgb), 0.36),

@@ -610,8 +610,6 @@
   inset: 0;
   z-index: -1;
   background: rgba(var(--bg-secondary-rgb), 0.72);
-  backdrop-filter: blur(18px) saturate(1.4);
-  -webkit-backdrop-filter: blur(18px) saturate(1.4);
   border-bottom: 1px solid var(--border-strong);
   border-radius: 0 0 12px 12px;
   box-shadow: 0 8px 32px rgba(var(--black-rgb), 0.45);
@@ -627,6 +625,11 @@
 
 .app-header.header-drawer-open {
   transform: none;
+}
+
+.app-header.header-drawer-open::before {
+  backdrop-filter: blur(18px) saturate(1.4);
+  -webkit-backdrop-filter: blur(18px) saturate(1.4);
 }
 
 /* ── pill-model 可点击下拉 ── */

@@ -70,10 +70,7 @@
   flex: 1;
   min-width: 0;
   max-width: 100%;
-  /* 基态 blur(0) 是 backdrop-filter 可过渡的前提（none 不可插值） */
-  backdrop-filter: blur(0px);
-  -webkit-backdrop-filter: blur(0px);
-  transition: background-color var(--duration-normal) ease, backdrop-filter var(--duration-normal) ease, -webkit-backdrop-filter var(--duration-normal) ease;
+  transition: background-color var(--duration-normal) ease;
 }
 
 .message-assistant .message-bubble {
@@ -215,10 +212,8 @@
   text-align: left;
 }
 
-/* ── 悬停毛玻璃：模糊气泡背景，显隐随基态 transition 渐变 ── */
-.message:hover .message-bubble,
-.message-character-hovered .message-bubble,
-.message[data-character-hovered="true"] .message-bubble {
+/* ── 悬停毛玻璃：仅作用于当前鼠标所在的单条消息 ── */
+.message:hover .message-bubble {
   backdrop-filter: blur(10px) saturate(150%);
   -webkit-backdrop-filter: blur(10px) saturate(150%);
 }
