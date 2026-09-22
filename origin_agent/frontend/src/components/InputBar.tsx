@@ -312,6 +312,7 @@ export default function InputBar({
         inputBarBottomDocked ? "input-bar-bottom" : "",
         inputBarAutoHide ? `input-bar-auto-hide input-bar-drawer-${inputDrawer.phase}` : "",
         inputBarBottomDocked && !inputBarAutoHide ? "input-bar-docked" : "",
+        morphActive ? "input-bar-morph-active" : "",
         actionsMenu ? "input-bar-menu-open" : "",
       ].filter(Boolean).join(" ")}
       data-tour="input-bar"
