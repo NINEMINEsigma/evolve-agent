@@ -4,6 +4,7 @@ import MessageBody from "./MessageBody";
 import { contentToText, isLongChatMessage, toolCallSummary } from "../features/chat/messageCollapse";
 import MessageEditor from "./MessageEditor";
 import MessageAttachments from "./MessageAttachments";
+import ToolCallCard from "./ToolCallCard";
 
 function hashString(str: string): number {
   let hash = 0;
@@ -81,10 +82,12 @@ const MessageItem = memo(function MessageItem({
   const isTool = m.role === "tool";
   const toolCollapsed = isTool && m.collapsed !== false;
   const collapsed = !isTool && !streaming && isLong && m.collapsed !== false;
-  const canEdit = !archived && !streaming && typeof m.messageIndex === "number";
+  const canEdit = !archived && !streaming && (m.role === "user" || m.role === "assistant") && typeof m.messageIndex === "number";
   const canDelete = !archived && !streaming && isLastUserMessage && typeof m.messageIndex === "number";
-  const canDeleteSingle = !archived && !streaming && isAfterLastUser && typeof m.messageIndex === "number"
-    && !m.isSystemStatus && m.role !== "user";
+  const canDeleteSingle = !archived && !streaming && isAfterLastUser
+    && !m.isSystemStatus && m.role !== "user"
+    && (!m.toolCard || typeof m.toolCard.result?.historyIndex === "number");
+  const deleteIndex = m.toolCard?.result?.historyIndex ?? m.messageIndex;
   const canRegenerate = !archived && !streaming && m.role === "user" && isLastUserMessage && typeof m.messageIndex === "number";
 
   const handoffWheelAtBoundary = (event: WheelEvent<HTMLDivElement>) => {
@@ -136,7 +139,14 @@ const MessageItem = memo(function MessageItem({
         </div>
       )}
       <div className="message-bubble" data-chat-scope="bubble">
-        {isTool && !editing ? (
+        {m.toolCard && !editing ? (
+          <ToolCallCard
+            message={m}
+            onImageClick={onImageClick}
+            onToggleCollapse={onToggleCollapse}
+            onUserHeightMutation={onUserHeightMutation}
+          />
+        ) : isTool && !editing ? (
           <div className="tool-call-block" data-chat-scope="tool-call">
             <button
               type="button"
@@ -227,8 +237,8 @@ const MessageItem = memo(function MessageItem({
                 删除
               </button>
             )}
-            {canDeleteSingle && (
-              <button type="button" onClick={() => onDeleteSingleMessage!(m.messageIndex!)}
+            {canDeleteSingle && deleteIndex != null && (
+              <button type="button" onClick={() => onDeleteSingleMessage!(deleteIndex)}
               >
                 删除此条
               </button>

@@ -34,13 +34,42 @@ class HistoryProjectionTests(unittest.TestCase):
             [row.row_id for row in skeleton],
             ["history:0:message", "history:0:tool:0", "history:0:tool:1"],
         )
-        content = project_history_content_rows(message, 0, "main-agent")
+        content = project_history_content_rows([message], 0, 1, "main-agent")
         self.assertEqual([row.row_id for row in content], [row.row_id for row in skeleton])
-        self.assertEqual(content[1].tool_args, {"path": "ws:a"})
-        self.assertEqual(content[2].tool_args, {})
-        self.assertEqual(content[2].tool_args_raw, "not-json")
+        self.assertEqual(content[1].tool_card.request_args, {"path": "ws:a"})
+        self.assertEqual(content[2].tool_card.request_args, {})
+        self.assertEqual(content[2].tool_card.request_args_raw, "not-json")
 
-    def test_skeleton_contains_no_multimodal_payload(self) -> None:
+    def test_tool_results_are_embedded_by_tool_call_id(self) -> None:
+        assistant = CharacterConversationMessage(
+            role=Role.ASSISTANT,
+            character_name="main-agent",
+            content="",
+            tool_calls=[ToolCall(id="a", function=FunctionCall(name="Read", arguments='{"path":"ws:a"}'))],
+        )
+        result = ToolResultMessage(
+            role=Role.TOOL,
+            character_name="main-agent",
+            tool_call_id="a",
+            content={"type": "file", "content": "1: hello"},
+        )
+        rows = project_history_content_rows([assistant, result], 0, 2, "main-agent")
+        self.assertEqual([row.row_id for row in rows], ["history:0:tool:0"])
+        self.assertEqual(rows[0].tool_card.status.value, "succeeded")
+        self.assertEqual(rows[0].tool_card.result_history_index, 1)
+
+    def test_tool_result_without_request_remains_visible(self) -> None:
+        result = ToolResultMessage(
+            role=Role.TOOL,
+            character_name="main-agent",
+            tool_call_id="missing",
+            content={"error": "orphan"},
+        )
+        rows = project_history_content_rows([result], 0, 1, "main-agent")
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0].row_kind, SessionHistoryRowKind.message)
+
+
         message = CharacterConversationMessage(
             role=Role.USER,
             character_name="end-user",
@@ -82,7 +111,7 @@ class HistoryProjectionTests(unittest.TestCase):
 
     def test_tool_row_requires_tool_index(self) -> None:
         with self.assertRaises(ValueError):
-            history_row_id(0, SessionHistoryRowKind.tool_call)
+            history_row_id(0, SessionHistoryRowKind.tool_card)
 
 
 if __name__ == "__main__":

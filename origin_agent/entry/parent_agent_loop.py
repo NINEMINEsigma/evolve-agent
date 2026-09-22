@@ -66,8 +66,8 @@ from system.modality_capability import (
 from entry.session_manager import LoopSessionManager
 from entry.tool_executor import ToolExecutor, _interrupted_result
 from entry.stream_consumer import StreamConsumer
-from entry.history_projection import history_row_id
-from entry.stream_history_link import emit_history_links, emit_stream_history_link
+from entry.history_projection import history_row_id, has_visible_history_message_row
+from entry.stream_history_link import emit_history_links, emit_stream_history_link, tool_card_live_id
 from entry.session_message_queue import SessionMessageQueue
 
 if TYPE_CHECKING:
@@ -521,16 +521,43 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
 
                 # 存储 assistant 消息（含 tool_calls）
                 msg_index = self._store_assistant_with_tools(sid, resp)
+                tool_card_targets = {
+                    tc.id: history_row_id(msg_index, SessionHistoryRowKind.tool_card, tool_index)
+                    for tool_index, tc in enumerate(resp.tool_calls)
+                }
                 tool_links = [
                     HistoryRowLink(
-                        live_id=f"tool-call:{tc.id}",
-                        history_row_id=history_row_id(msg_index, SessionHistoryRowKind.tool_call, tool_index),
+                        live_id=tool_card_live_id(tc.id),
+                        history_row_id=tool_card_targets[tc.id],
                     )
-                    for tool_index, tc in enumerate(resp.tool_calls)
+                    for tc in resp.tool_calls
                 ]
-                await emit_stream_history_link(
-                    self._frontend_sink, sid, stream_id, msg_index, links=tool_links,
-                )
+                if has_visible_history_message_row(
+                    self._history.get_message(msg_index),
+                ):
+                    await emit_stream_history_link(
+                        self._frontend_sink, sid, stream_id, msg_index, links=tool_links,
+                    )
+                else:
+                    await emit_history_links(
+                        self._frontend_sink, sid, links=tool_links,
+                    )
+                async def emit_tool_card_result_link(tool_msg: ToolResultMessage) -> None:
+                    target = tool_card_targets.get(tool_msg.tool_call_id)
+                    if target is None:
+                        logger.warning(
+                            "Missing tool card target | session=%s tool_call_id=%s",
+                            sid, tool_msg.tool_call_id,
+                        )
+                        return
+                    await emit_history_links(
+                        self._frontend_sink,
+                        sid,
+                        links=[HistoryRowLink(
+                            live_id=tool_card_live_id(tool_msg.tool_call_id),
+                            history_row_id=target,
+                        )],
+                    )
                 if resp.metrics:
                     collected_metrics.append((sid, msg_index, resp.metrics))
 
@@ -547,14 +574,7 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
                         messages.append(tool_msg)
                         tool_result_index = self._history.add_message(tool_msg)
                         self.save_history(sid)
-                        await emit_history_links(
-                            self._frontend_sink,
-                            sid,
-                            links=[HistoryRowLink(
-                                live_id=f"tool-result:{tool_msg.tool_call_id}",
-                                history_row_id=history_row_id(tool_result_index, SessionHistoryRowKind.message),
-                            )],
-                        )
+                        await emit_tool_card_result_link(tool_msg)
                         await self._push_usage_update(sid)
                         _executed_tool_msgs.append(tool_msg)
 
@@ -594,14 +614,7 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
                         messages.append(tool_msg)
                         tool_result_index = self._history.add_message(tool_msg)
                         self.save_history(sid)
-                        await emit_history_links(
-                            self._frontend_sink,
-                            sid,
-                            links=[HistoryRowLink(
-                                live_id=f"tool-result:{tool_msg.tool_call_id}",
-                                history_row_id=history_row_id(tool_result_index, SessionHistoryRowKind.message),
-                            )],
-                        )
+                        await emit_tool_card_result_link(tool_msg)
                     self.append_system_status("已中断", session_id=sid)
                     raise
                 except Exception:
@@ -622,14 +635,7 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
                         messages.append(tool_msg)
                         tool_result_index = self._history.add_message(tool_msg)
                         self.save_history(sid)
-                        await emit_history_links(
-                            self._frontend_sink,
-                            sid,
-                            links=[HistoryRowLink(
-                                live_id=f"tool-result:{tool_msg.tool_call_id}",
-                                history_row_id=history_row_id(tool_result_index, SessionHistoryRowKind.message),
-                            )],
-                        )
+                        await emit_tool_card_result_link(tool_msg)
                     await self._emit_persisted_system_status(sid, "工具链异常中断")
                     await self._emit_stream_done(sid, stream_id, "error", content="", metrics=None)
                     return ""

@@ -30,8 +30,8 @@ from entity.constant import (
 )
 from entry.base_agent_loop import BaseAgentLoop, IMainSessionLoop, ToolContext
 from entry.stream_consumer import StreamConsumer
-from entry.history_projection import history_row_id
-from entry.stream_history_link import emit_history_links, emit_stream_history_link
+from entry.history_projection import history_row_id, has_visible_history_message_row
+from entry.stream_history_link import emit_history_links, emit_stream_history_link, tool_card_live_id
 from entry.tool_executor import ToolExecutor, _interrupted_result
 from entry.agent_support.multimodal import preprocess_multimodal_blocks
 import asyncio
@@ -341,17 +341,41 @@ class MultiAgentWorker:
                 )
                 msg_index = self._loop.loop.history.add_message(assistant_msg)
                 self._loop.loop.save_history(self._loop.loop.session_id)
+                tool_card_targets = {
+                    tc.id: history_row_id(msg_index, SessionHistoryRowKind.tool_card, tool_index)
+                    for tool_index, tc in enumerate(resp.tool_calls)
+                }
                 tool_links = [
                     HistoryRowLink(
-                        live_id=f"tool-call:{tc.id}",
-                        history_row_id=history_row_id(msg_index, SessionHistoryRowKind.tool_call, tool_index),
+                        live_id=tool_card_live_id(tc.id),
+                        history_row_id=tool_card_targets[tc.id],
                     )
-                    for tool_index, tc in enumerate(resp.tool_calls)
+                    for tc in resp.tool_calls
                 ]
-                await emit_stream_history_link(
-                    self._sink, self._loop.loop.session_id, stream_id, msg_index,
-                    links=tool_links,
-                )
+                if has_visible_history_message_row(assistant_msg):
+                    await emit_stream_history_link(
+                        self._sink, self._loop.loop.session_id, stream_id, msg_index,
+                        links=tool_links,
+                    )
+                else:
+                    await emit_history_links(self._sink, self._loop.loop.session_id, links=tool_links)
+
+                async def emit_tool_card_result_link(tool_msg: ToolResultMessage) -> None:
+                    target = tool_card_targets.get(tool_msg.tool_call_id)
+                    if target is None:
+                        logger.warning(
+                            "Missing tool card target | session=%s tool_call_id=%s",
+                            self._loop.loop.session_id, tool_msg.tool_call_id,
+                        )
+                        return
+                    await emit_history_links(
+                        self._sink,
+                        self._loop.loop.session_id,
+                        links=[HistoryRowLink(
+                            live_id=tool_card_live_id(tool_msg.tool_call_id),
+                            history_row_id=target,
+                        )],
+                    )
                 if resp.metrics:
                     self._collected_metrics.append((self._loop.loop.session_id, msg_index, resp.metrics))
 
@@ -372,14 +396,7 @@ class MultiAgentWorker:
                         # 写入共享 History
                         tool_result_index = self._loop.loop.history.add_message(tool_msg)
                         self._loop.loop.save_history(self._loop.loop.session_id)
-                        await emit_history_links(
-                            self._sink,
-                            self._loop.loop.session_id,
-                            links=[HistoryRowLink(
-                                live_id=f"tool-result:{tool_msg.tool_call_id}",
-                                history_row_id=history_row_id(tool_result_index, SessionHistoryRowKind.message),
-                            )],
-                        )
+                        await emit_tool_card_result_link(tool_msg)
 
                         # 追加 tool 结果到本地 LLM 上下文（跟在 assistant tool_calls 之后）
                         full_messages.append(tool_msg)
@@ -408,14 +425,7 @@ class MultiAgentWorker:
                         )
                         tool_result_index = self._loop.loop.history.add_message(tool_msg)
                         self._loop.loop.save_history(self._loop.loop.session_id)
-                        await emit_history_links(
-                            self._sink,
-                            self._loop.loop.session_id,
-                            links=[HistoryRowLink(
-                                live_id=f"tool-result:{tool_msg.tool_call_id}",
-                                history_row_id=history_row_id(tool_result_index, SessionHistoryRowKind.message),
-                            )],
-                        )
+                        await emit_tool_card_result_link(tool_msg)
                     raise
                 except Exception:
                     # 普通异常补齐未执行的 tool_calls 后返回既有降级结果。
@@ -437,14 +447,7 @@ class MultiAgentWorker:
                         )
                         tool_result_index = self._loop.loop.history.add_message(tool_msg)
                         self._loop.loop.save_history(self._loop.loop.session_id)
-                        await emit_history_links(
-                            self._sink,
-                            self._loop.loop.session_id,
-                            links=[HistoryRowLink(
-                                live_id=f"tool-result:{tool_msg.tool_call_id}",
-                                history_row_id=history_row_id(tool_result_index, SessionHistoryRowKind.message),
-                            )],
-                        )
+                        await emit_tool_card_result_link(tool_msg)
                     return WorkerResult(
                         character_name=self.character_name,
                         parsed_json=AgentResponse(content=""),

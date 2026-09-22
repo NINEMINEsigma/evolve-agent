@@ -21,7 +21,7 @@ describe("historyProjection", () => {
   it("maps visible rows to the inclusive History range", () => {
     const rows: HistorySkeletonRowDto[] = [
       { row_id: "history:1:message", history_index: 1, row_kind: "message", role: "assistant", is_system_status: false },
-      { row_id: "history:1:tool:0", history_index: 1, row_kind: "tool_call", role: "tool", tool_index: 0, is_system_status: false },
+      { row_id: "history:1:tool:0", history_index: 1, row_kind: "tool_card", role: "tool", tool_index: 0, is_system_status: false },
       { row_id: "history:4:message", history_index: 4, row_kind: "message", role: "user", is_system_status: false },
     ];
     expect(historyIndexRangeForRows(rows, 0, 2)).toEqual({ startIndex: 1, limit: 4 });

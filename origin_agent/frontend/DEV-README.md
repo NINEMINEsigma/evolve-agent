@@ -107,7 +107,8 @@ frontend/
 | `ChatArea.tsx` | 聊天区外层布局宿主；保持 Agent 舞台层、聊天区自定义样式、输入栏和 Minimap 的定位边界，消息序列委托给 `VirtualMessageList` |
 | `features/chat/VirtualMessageList.tsx` | 基于 Virtuoso 渲染完整骨架的可视窗口；正文按页加载，live 尾部独立渲染 |
 | `features/chat/ChatHistoryRow.tsx` | 单行 selector 消费，按 loaded / skeleton / page-error 三态渲染 |
-| `MessageItem.tsx` | 单条消息渲染（文本、代码块、图片、工具调用）；通过 `data-character-name` 暴露角色显示名称，并在用户主动高度操作前通知滚动状态机；工具调用折叠摘要显示工具名与参数 JSON，并按气泡实际宽度自适应省略；气泡折叠入口按消息类型互斥：工具消息仅由摘要切换详情，普通长消息仅由底部按钮切换正文 |
+| `MessageItem.tsx` | 单条消息渲染（文本、代码块、图片、工具调用卡片）；工具调用卡片以 `tool_call_id` 聚合请求、状态和结果，默认折叠并复用请求/结果的既有特殊渲染；通过 `data-character-name` 暴露角色显示名称，并在用户主动高度操作前通知滚动状态机；工具调用卡片和普通长消息的折叠入口互斥 |
+| `ToolCallCard.tsx` | 工具调用卡片的状态摘要、请求参数区、结果区、耗时和附件；不改变 History 持久化顺序 |
 | `MessageBody.tsx` | 消息正文 Markdown 渲染 |
 | `MessageEditor.tsx` | 消息编辑器（编辑历史消息） |
 | `MessageAttachments.tsx` | 消息附件展示 |
@@ -170,8 +171,8 @@ frontend/
 
 | Hook | 职责 |
 |---|---|
-| `useWebSocket.ts` | WebSocket 连接编排与低频会话状态桥接；聊天事件写入 `chatRuntimeStore`，流式增量经 `StreamFrameBuffer` 按动画帧提交；所有 user/assistant/tool/system 实时行使用明确 History 映射或保留为可诊断未映射行；`agentspace_event`通过页面事件总线扇出给三个会话视觉 hook；关键请求超时显示持久通知并在 WebSocket可用时上报脱敏诊断；Agent 忙碌时仍允许消息进入后端 FIFO；`history_sync.processing` 的 true/false 均作为服务端权威值覆盖本地处理状态；永久删除只在 HTTP 明确成功后移除会话项，失败保留会话并显示错误，删除当前会话固定切换到“随意聊聊” |
-| `features/chat/chatRuntimeStore.ts` | Zustand 聊天运行时唯一高频状态：完整骨架、内容行、live 尾部、输入草稿、pending、滚动与资源；通用 `liveId → historyRowId`关联把user/assistant/tool/system实时行提升到skeleton正典位置，REST内容页随后覆盖临时内容；未映射或History失败的行不按版本号清理；`toggleMessageCollapse(id, source)`分别维护历史与实时折叠状态 |
+| `useWebSocket.ts` | WebSocket 连接编排与低频会话状态桥接；聊天事件写入 `chatRuntimeStore`，流式增量经 `StreamFrameBuffer` 按动画帧提交；所有 user/assistant/tool/system 实时行使用明确 History 映射或保留为可诊断未映射行；工具请求和结果按 `tool_call_id` 幂等更新同一工具调用卡片；`agentspace_event`通过页面事件总线扇出给三个会话视觉 hook；关键请求超时显示持久通知并在 WebSocket可用时上报脱敏诊断；Agent 忙碌时仍允许消息进入后端 FIFO；`history_sync.processing` 的 true/false 均作为服务端权威值覆盖本地处理状态；永久删除只在 HTTP 明确成功后移除会话项，失败保留会话并显示错误，删除当前会话固定切换到“随意聊聊” |
+| `features/chat/chatRuntimeStore.ts` | Zustand 聊天运行时唯一高频状态：完整骨架、内容行、live 尾部、输入草稿、pending、滚动与资源；通用 `liveId → historyRowId`关联把user/assistant/tool/system实时行提升到skeleton正典位置，工具请求和结果按 `tool_call_id` 幂等合并为同一工具调用卡片，REST内容页随后覆盖临时内容；未映射或History失败的行不按版本号清理；`toggleMessageCollapse(id, source)`分别维护历史与实时折叠状态 |
 | `features/chat/chatRuntimeController.ts` | History skeleton/page 请求代际、Abort、页去重、正典同步、15秒超时局部错误与诊断 reporter、Minimap 随机目标和资源懒加载 |
 | `features/chat/useChatScrollController.ts` | `initializing/following/detached/minimap_dragging/returning` 五态追底与回底控制 |
 | `useLlmProfiles.ts` | 从服务端读取 Profile；提供单对象创建/编辑/删除；浏览器仅持久化活动 Profile 名称；审批 Profile与全局元数据 Profile使用服务端权威 REST 状态和 WebSocket广播 |

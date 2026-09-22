@@ -58,98 +58,128 @@ export function parseToolResult(raw: string, _toolName?: string): ParsedToolResu
 export function subagentFeedbackToChatMessages(session: SubagentSession): ChatMessage[] {
   const baseId = session.session_id;
   const messages: ChatMessage[] = [];
+  const cards = new Map<string, ChatMessage>();
 
   session.feedback.forEach((msg, idx) => {
     const id = `${baseId}-msg-${idx}`;
     const role = (msg.role || "").toLowerCase();
-
+    if (role === WS_IN.TOOL_CALL) {
+      if (!msg.tool_call_id) {
+        messages.push({ role: "tool", content: msg.content || "", id, toolName: msg.tool_name, toolArgs: msg.tool_args });
+        return;
+      }
+      const existing = cards.get(msg.tool_call_id);
+      if (existing?.toolCard) {
+        existing.toolCard = {
+          ...existing.toolCard,
+          request: { ...existing.toolCard.request, toolCallId: msg.tool_call_id, toolName: msg.tool_name, args: msg.tool_args },
+        };
+        existing.toolName = msg.tool_name;
+        existing.toolArgs = msg.tool_args;
+        existing.content = `⚡ ${msg.tool_name || "tool"}`;
+        return;
+      }
+      const card: ChatMessage = {
+        role: "tool",
+        content: `⚡ ${msg.tool_name || "tool"}`,
+        id: `${baseId}-tool-card-${msg.tool_call_id}`,
+        toolName: msg.tool_name,
+        toolArgs: msg.tool_args,
+        toolCard: {
+          request: { toolCallId: msg.tool_call_id, toolName: msg.tool_name, args: msg.tool_args },
+          status: "running",
+        },
+      };
+      cards.set(msg.tool_call_id, card);
+      messages.push(card);
+      return;
+    }
+    if (role === WS_IN.TOOL_RESULT) {
+      if (!msg.tool_call_id) {
+        messages.push({ role: "tool", content: msg.content || "", id, toolName: msg.tool_name });
+        return;
+      }
+      const parsed = parseToolResult(msg.content || "", msg.tool_name);
+      const card = cards.get(msg.tool_call_id);
+      if (card?.toolCard) {
+        card.content = parsed.content || msg.content || "";
+        card.toolCard = {
+          ...card.toolCard,
+          status: parsed.isError ? "failed" : "succeeded",
+          result: {
+            content: parsed.content || msg.content || "",
+            imageMarkdown: parsed.imageMarkdown,
+            downloadInfo: parsed.downloadInfo,
+            isError: parsed.isError,
+          },
+        };
+      } else {
+        const orphan: ChatMessage = {
+          role: "tool",
+          content: parsed.content || msg.content || "",
+          id: `${baseId}-tool-result-${msg.tool_call_id}`,
+          toolName: msg.tool_name,
+          toolCard: {
+            request: { toolCallId: msg.tool_call_id, toolName: msg.tool_name },
+            status: parsed.isError ? "failed" : "succeeded",
+            result: {
+              content: parsed.content || msg.content || "",
+              imageMarkdown: parsed.imageMarkdown,
+              downloadInfo: parsed.downloadInfo,
+              isError: parsed.isError,
+            },
+          },
+        };
+        cards.set(msg.tool_call_id, orphan);
+        messages.push(orphan);
+      }
+      return;
+    }
     switch (role) {
       case "user":
         messages.push({ role: "user", content: msg.content || "", id, characterName: msg.character_name });
         break;
       case "assistant":
-        messages.push({
-          role: "assistant",
-          content: msg.content || "",
-          id,
-          reasoningContent: msg.reasoning,
-          characterName: msg.character_name,
-        });
+        messages.push({ role: "assistant", content: msg.content || "", id, reasoningContent: msg.reasoning, characterName: msg.character_name });
         break;
       case "reasoning":
-        messages.push({
-          role: "assistant",
-          content: "",
-          id,
-          reasoningContent: msg.reasoning || msg.content,
-          characterName: msg.character_name,
-        });
-        break;
-      case WS_IN.TOOL_CALL: {
-        const toolName = msg.tool_name || "";
-        const argsStr = msg.tool_args ? `(${JSON.stringify(msg.tool_args)})` : "()";
-        messages.push({
-          role: "tool",
-          content: `⚡ ${toolName}${argsStr}`,
-          id,
-          toolName,
-          toolArgs: msg.tool_args,
-        });
-        break;
-      }
-      case WS_IN.TOOL_RESULT:
-        messages.push({
-          role: "tool",
-          content: msg.content || "",
-          id,
-          toolName: msg.tool_name,
-        });
+        messages.push({ role: "assistant", content: "", id, reasoningContent: msg.reasoning || msg.content, characterName: msg.character_name });
         break;
       case "status":
       case "completed":
       case "terminated":
-        messages.push({
-          role: "system",
-          content: msg.content || (role === "completed" ? "子会话已完成" : role === "terminated" ? "子会话已终止" : ""),
-          id,
-        });
+        messages.push({ role: "system", content: msg.content || (role === "completed" ? "子会话已完成" : role === "terminated" ? "子会话已终止" : ""), id });
         break;
-      case "approval_pending": {
-        const toolName = msg.tool_name || "";
-        const argsStr = msg.tool_args ? `\n${JSON.stringify(msg.tool_args, null, 2)}` : "";
-        messages.push({
-          role: "system",
-          content: `⏸ 待审批: ${toolName}${argsStr}`,
-          id,
-          toolName,
-          toolArgs: msg.tool_args,
-        });
+      case "approval_pending":
+        messages.push({ role: "system", content: `⏸ 待审批: ${msg.tool_name || "tool"}\n${msg.tool_args ? JSON.stringify(msg.tool_args, null, 2) : ""}`, id });
         break;
-      }
-      case "approval_decision": {
-        const toolName = msg.tool_name ? `${msg.tool_name}: ` : "";
-        messages.push({
-          role: "system",
-          content: `${toolName}${msg.content}`,
-          id,
-        });
+      case "approval_decision":
+        messages.push({ role: "system", content: `${msg.tool_name ? `${msg.tool_name}: ` : ""}${msg.content}`, id });
         break;
-      }
       default:
         messages.push({ role: "system", content: msg.content || "", id });
     }
   });
 
   session.pending_approvals.forEach((pa, idx) => {
-    messages.push({
+    const card: ChatMessage = {
       role: "tool",
-      content: `⏸ 待审批: ${pa.tool_name}\n${JSON.stringify(pa.arguments, null, 2)}`,
+      content: `⏸ 待审批: ${pa.tool_name}`,
       id: `${baseId}-pending-${idx}`,
       toolName: pa.tool_name,
-      toolArgs: pa.arguments,
-    });
+      toolCard: {
+        request: { toolCallId: pa.tool_call_id, toolName: pa.tool_name, args: pa.arguments },
+        status: "running",
+      },
+    };
+    messages.push(card);
   });
 
+  if (session.status === "completed" || session.status === "terminated") {
+    for (const message of messages) {
+      if (message.toolCard?.status === "running") message.toolCard = { ...message.toolCard, status: "missing_result" };
+    }
+  }
   return messages;
 }
 

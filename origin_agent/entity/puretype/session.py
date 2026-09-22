@@ -87,7 +87,29 @@ class SessionHistoryRowKind(str, Enum):
     """前端历史投影行类型。"""
 
     message = "message"
-    tool_call = "tool_call"
+    tool_card = "tool_card"
+
+
+class SessionHistoryToolCardStatus(str, Enum):
+    """History 中工具调用卡片的终态。"""
+
+    succeeded = "succeeded"
+    failed = "failed"
+    missing_result = "missing_result"
+
+
+class SessionHistoryToolCard(BaseModel):
+    """一个工具调用卡片的只读 History 投影。"""
+
+    tool_call_id: str
+    tool_name: str
+    request_args: dict[str, Any] = Field(default_factory=dict)
+    request_args_raw: str | None = None
+    status: SessionHistoryToolCardStatus
+    result_content: str | list[dict[str, Any]] | None = None
+    result_history_index: int | None = None
+    tool_call_meta: dict[str, Any] | None = None
+    is_error: bool = False
 
 
 class SessionHistorySkeletonRow(BaseModel):
@@ -97,6 +119,7 @@ class SessionHistorySkeletonRow(BaseModel):
     role: str
     character_name: str | None = None
     tool_index: int | None = None
+    tool_call_id: str | None = None
     is_system_status: bool = False
 
 
@@ -116,6 +139,8 @@ class SessionHistoryContentRow(SessionHistorySkeletonRow):
     dynamic_message_suffix: str | None = None
     reasoning_content: str | None = None
     requires_response: bool | None = None
+    tool_card: SessionHistoryToolCard | None = None
+    # 孤立 ToolResultMessage 的兼容/降级字段
     tool_name: str | None = None
     tool_args: dict[str, Any] | None = None
     tool_args_raw: str | None = None

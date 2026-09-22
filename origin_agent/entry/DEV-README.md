@@ -246,9 +246,9 @@ sequenceDiagram
 
 ### `history_projection.py`
 
-- `history_row_id()`：按 History 索引和工具调用子索引生成一个骨架代际内稳定的前端行 ID。
-- `project_history_skeleton()`：生成不含正文和富媒体的全历史骨架或后缀。
-- `project_history_content_rows()`：把一条 History 消息投影为正文行及其工具调用子行。
+- `history_row_id()`：按 History 索引和工具调用子索引生成一个骨架代际内稳定的前端行 ID；工具行是以 `tool_call_id` 聚合请求与结果的工具调用卡片。
+- `project_history_skeleton()`：扫描完整 History 建立请求—结果配对，生成不含正文和富媒体的全历史骨架或后缀；匹配的 ToolResultMessage 不再产生独立视觉行。
+- `project_history_content_rows()`：按完整 History 的请求/结果范围返回普通消息、工具调用卡片和孤立结果降级行，支持结果跨 History 内容页配对。
 - `project_history_resources()`：从完整 History 提取去重后的图片和下载资源索引。
 
 投影是只读视图，不改变 `History` 类型、消息实例或 easysave 存储。工具结果 `_meta` 通过 `agent_support.multimodal.extract_tool_call_meta()` 与旧序列化路径共用口径。

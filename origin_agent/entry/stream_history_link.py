@@ -14,6 +14,13 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+def tool_card_live_id(tool_call_id: str) -> str:
+    """返回工具调用卡片统一实时行 ID。"""
+    if not tool_call_id:
+        raise ValueError("tool_call_id must be non-empty")
+    return f"tool-card:{tool_call_id}"
+
+
 def _validate_links(links: list[HistoryRowLink]) -> None:
     live_ids = [link.live_id for link in links]
     row_ids = [link.history_row_id for link in links]

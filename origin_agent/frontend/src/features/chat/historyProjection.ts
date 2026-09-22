@@ -1,7 +1,11 @@
 import type { ChatMessage } from "../../types";
 import type { HistoryContentRowDto, HistorySkeletonRowDto } from "./types";
+import { historyToolCardToChatMessage } from "./toolCards";
 
 export function historyContentRowToChatMessage(row: HistoryContentRowDto): ChatMessage {
+  if (row.tool_card) {
+    return historyToolCardToChatMessage(row.row_id, row.history_index, row.character_name, row.tool_card);
+  }
   const role = row.role === "user"
     ? "user"
     : row.role === "assistant"
@@ -38,11 +42,9 @@ export function historyContentRowToChatMessage(row: HistoryContentRowDto): ChatM
 
 export type HistorySkeletonVisualKind = "user" | "assistant" | "tool" | "system";
 
-export function skeletonClassFor(
-  row: HistorySkeletonRowDto,
-): HistorySkeletonVisualKind {
+export function skeletonClassFor(row: HistorySkeletonRowDto): HistorySkeletonVisualKind {
   if (row.is_system_status || row.role === "system") return "system";
-  if (row.row_kind === "tool_call" || row.role === "tool") return "tool";
+  if (row.row_kind === "tool_card" || row.role === "tool") return "tool";
   if (row.role === "user") return "user";
   return "assistant";
 }

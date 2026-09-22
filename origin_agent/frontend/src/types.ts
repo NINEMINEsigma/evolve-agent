@@ -159,6 +159,30 @@ export type MessageContent = string | ContentBlock[];
 export type ApprovalMode = "manual" | "handsfree" | "yolo";
 export type ApprovalModeSyncStatus = "loading" | "ready" | "unavailable";
 
+export type ToolCardStatus = "running" | "succeeded" | "failed" | "missing_result";
+
+export interface ToolCardRequest {
+  toolCallId: string;
+  toolName?: string;
+  args?: Record<string, unknown>;
+  argsRaw?: string;
+}
+
+export interface ToolCardResult {
+  content: MessageContent;
+  imageMarkdown?: string;
+  downloadInfo?: DownloadInfo;
+  toolCallMeta?: ToolCallMeta;
+  isError?: boolean;
+  historyIndex?: number;
+}
+
+export interface ToolCardData {
+  request: ToolCardRequest;
+  status: ToolCardStatus;
+  result?: ToolCardResult;
+}
+
 export type MessageType =
   | "system"
   | "user_message"
@@ -387,6 +411,7 @@ export interface ChatMessage {
   messageSuffix?: string;
   dynamicMessageSuffix?: string;
   toolCallMeta?: ToolCallMeta;   // 工具调用时间元信息
+  toolCard?: ToolCardData;
   isError?: boolean;               // 工具结果是否为错误
   isSystemStatus?: boolean;        // 系统状态消息（对 LLM 不可见，仅前端展示）
 }

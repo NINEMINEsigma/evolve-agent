@@ -147,7 +147,7 @@ WS /ws/chat?resume=<sid>
 | GET | `/api/sessions/{id}/history/page?start_index=&limit=` | 按 History 消息索引范围返回完整前端投影行 |
 | GET | `/api/sessions/{id}/history/resources` | 返回完整 History 的图片与下载资源索引 |
 
-骨架与历史内容页只是 Gateway 读取视图，不改变 `History` / `history.es` 整体存储。编辑、按轮删除、单条删除和重新生成在 Agent 处理期间统一返回 HTTP 409；结构修改后前端取消旧页请求并重取骨架。前端对会话状态预检、History骨架和历史内容页设置15秒硬截止；超时显示持久通知和局部重试，WebSocket可用时发送不含正文、工具参数、附件或密钥的 `client_diagnostic`。
+骨架与历史内容页只是 Gateway 读取视图，不改变 `History` / `history.es` 整体存储。工具请求和匹配的 ToolResultMessage 在前端投影为一个 `tool_card` 行，结果按 `tool_call_id` 配对并可跨 History 内容页返回；只有孤立结果保留为独立降级行。编辑、按轮删除、单条删除和重新生成在 Agent 处理期间统一返回 HTTP 409；结构修改后前端取消旧页请求并重取骨架。前端对会话状态预检、History骨架和历史内容页设置15秒硬截止；超时显示持久通知和局部重试，WebSocket可用时发送不含正文、工具参数、附件或密钥的 `client_diagnostic`。
 
 ### 消息编辑
 

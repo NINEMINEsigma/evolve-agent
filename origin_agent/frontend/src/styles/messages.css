@@ -265,6 +265,39 @@
   background: transparent;
 }
 
+.tool-call-block {
+  margin-bottom: 2px;
+  border-radius: var(--radius-sm);
+  background: transparent;
+}
+
+.tool-call-card {
+  margin-bottom: 2px;
+  border-radius: var(--radius-sm);
+  background: transparent;
+}
+
+.tool-call-card-running .tool-call-summary { color: var(--accent); }
+.tool-call-card-failed .tool-call-summary { color: var(--danger); }
+.tool-call-card-missing_result .tool-call-summary { color: var(--text-muted); }
+.tool-card-section + .tool-card-section {
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+}
+.tool-card-section-title {
+  margin-bottom: 5px;
+  color: var(--text-muted);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.tool-card-result-placeholder {
+  color: var(--text-muted);
+  font-size: 12px;
+  padding: 4px 0;
+}
+
 /* ── Tool call collapse ── */
 .tool-call-block {
   margin-bottom: 2px;

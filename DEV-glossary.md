@@ -313,6 +313,7 @@
 | 消息体 | `MessageBody` | Markdown 渲染（GFM + breaks + raw）；reasoning 折叠；检测 `<script>`/`<style>` 等标签时切换到 `SafeHtml` 沙箱 |
 | 消息编辑器 | `MessageEditor` / `.message-edit-box` | 用户消息内联编辑（textarea + 保存/取消） |
 | 消息附件 | `MessageAttachments` | 图片缩略图、音频播放器、下载链接、播放列表 |
+| 工具调用卡片 | `ToolCallCard` / tool call card | 主聊天区和子会话面板中以 `tool_call_id` 一对一聚合工具调用请求、执行状态与工具结果的可折叠视觉单元；不改变 History 中 assistant `tool_calls` 与 `ToolResultMessage` 的存储顺序 |
 | 代码块 | `CodeBlock` / `.code-block-wrapper` | 语法高亮（Prism oneDark）+ 一键复制 |
 | Mermaid 渲染器 | `MermaidRenderer` | Mermaid 图表渲染；点击放大为灯箱（缩放/平移，react-zoom-pan-pinch） |
 | 安全 HTML | `SafeHtml` | iframe 沙箱渲染 agent 输出的原始 HTML，postMessage 同步高度，避免流式闪烁 |

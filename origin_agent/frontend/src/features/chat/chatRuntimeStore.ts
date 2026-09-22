@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import type { ChatMessage, MessageContent } from "../../types";
+import type { ChatMessage, MessageContent, ToolCardResult } from "../../types";
 import type {
   ChatFollowMode,
   ChatHistoryPageError,
@@ -15,6 +15,7 @@ import type {
 import { generateUUID } from "../../utils";
 import { MINIMAP_MEASUREMENT_EPSILON_PX } from "../../constants/history";
 import { isLongChatMessage } from "./messageCollapse";
+import { mergeToolCard, toolCardLiveId } from "./toolCards";
 
 interface ChatRuntimeState {
   sessionId: string;
@@ -62,6 +63,8 @@ interface ChatRuntimeState {
   clearCanonicalContent: () => void;
   setInitialReady: (ready: boolean) => void;
   appendLiveMessage: (message: ChatMessage, streaming?: boolean) => number;
+  upsertLiveToolCall: (toolCallId: string, toolName: string | undefined, args: Record<string, unknown> | undefined, characterName?: string) => void;
+  completeLiveToolCall: (toolCallId: string, toolName: string | undefined, result: ToolCardResult, characterName?: string) => void;
   applyStreamBatch: (batch: StreamBatch) => void;
   queueStreamFinish: (streamId: string, content?: string, metrics?: import("../../types").MessageMetrics) => void;
   finishStream: (streamId: string, content?: string, metrics?: import("../../types").MessageMetrics, visibleAtFinish?: boolean) => void;
@@ -135,6 +138,11 @@ const historyMatchesLive = (history: ChatMessage, live: LiveChatRow, historyId: 
 );
 
 const historyRowMatchesLive = (history: ChatMessage, live: LiveChatRow, historyId: string): boolean => {
+  if (history.toolCard || live.message.toolCard) {
+    return history.role === "tool"
+      && live.message.role === "tool"
+      && history.toolCard?.request.toolCallId === live.message.toolCard?.request.toolCallId;
+  }
   if (history.role !== live.message.role) return false;
   if (historyId.includes(":tool:") && live.message.role !== "tool") return false;
   if (history.characterName && live.message.characterName
@@ -150,12 +158,15 @@ const historyRowMatchesLive = (history: ChatMessage, live: LiveChatRow, historyI
 const skeletonMatchesLive = (skeleton: HistorySkeletonRowDto, live: LiveChatRow): boolean => {
   const expectedRole = skeleton.is_system_status || skeleton.role === "system"
     ? "system"
-    : skeleton.row_kind === "tool_call" || skeleton.role === "tool"
+    : skeleton.row_kind === "tool_card" || skeleton.role === "tool"
       ? "tool"
       : skeleton.role;
+  if (skeleton.row_kind === "tool_card" || skeleton.role === "tool") {
+    return expectedRole === "tool"
+      && live.message.role === "tool"
+      && skeleton.tool_call_id === live.message.toolCard?.request.toolCallId;
+  }
   if (expectedRole !== live.message.role) return false;
-  if (skeleton.character_name && live.message.characterName
-    && skeleton.character_name !== live.message.characterName) return false;
   return true;
 };
 
@@ -354,6 +365,82 @@ export const useChatRuntimeStore = create<ChatRuntimeState>((set, get) => ({
     return version;
   },
 
+  upsertLiveToolCall: (toolCallId, toolName, args, characterName) => set((state) => {
+    if (!toolCallId) return state;
+    const id = toolCardLiveId(toolCallId);
+    const index = state.liveRows.findIndex((row) => row.id === id);
+    const current = index >= 0 ? state.liveRows[index] : undefined;
+    const toolCard = mergeToolCard(current?.message.toolCard, {
+      status: "running",
+      request: { toolCallId, toolName, args },
+    });
+    const message: ChatMessage = {
+      ...(current?.message || { id, role: "tool", content: "" }),
+      id,
+      role: "tool",
+      content: `${characterName ? `${characterName} ` : ""}⚡ ${toolName || "tool"}`,
+      toolName: toolName || current?.message.toolName,
+      toolArgs: args || current?.message.toolArgs,
+      characterName: characterName || current?.message.characterName,
+      toolCard,
+    };
+    const version = state.liveVersion + (current ? 1 : 1);
+    const row: LiveChatRow = {
+      id,
+      version,
+      message,
+      streaming: false,
+      frozen: false,
+    };
+    return {
+      liveVersion: version,
+      liveRows: current
+        ? state.liveRows.map((item, itemIndex) => itemIndex === index ? { ...item, ...row } : item)
+        : [...state.liveRows, row],
+    };
+  }),
+
+  completeLiveToolCall: (toolCallId, toolName, result, characterName) => set((state) => {
+    if (!toolCallId) return state;
+    const id = toolCardLiveId(toolCallId);
+    const status = result.isError ? "failed" : "succeeded";
+    const index = state.liveRows.findIndex((row) => row.id === id);
+    const current = index >= 0 ? state.liveRows[index] : undefined;
+    const existingCard = current?.message.toolCard;
+    const toolCard = mergeToolCard(existingCard, {
+      status,
+      request: { toolCallId, toolName },
+      result,
+    });
+    const message: ChatMessage = {
+      ...(current?.message || { id, role: "tool", content: result.content }),
+      id,
+      role: "tool",
+      content: result.content,
+      toolName: toolName || current?.message.toolName,
+      characterName: characterName || current?.message.characterName,
+      toolCard,
+      toolCallMeta: result.toolCallMeta,
+      imageMarkdown: result.imageMarkdown,
+      downloadInfo: result.downloadInfo,
+      isError: result.isError,
+    };
+    const liveRows = current
+      ? state.liveRows.map((item, itemIndex) => itemIndex === index
+        ? { ...item, message, streaming: false, frozen: true, version: state.liveVersion + 1 }
+        : item)
+      : [...state.liveRows, { id, version: state.liveVersion + 1, message, streaming: false, frozen: true }];
+    const link = state.streamHistoryLinks[id];
+    const contentByRowId = { ...state.contentByRowId };
+    if (link) {
+      const canonical = contentByRowId[link];
+      contentByRowId[link] = canonical
+        ? { ...canonical, ...message, id: link, toolCard }
+        : { ...message, id: link };
+    }
+    return { liveRows, contentByRowId, liveVersion: state.liveVersion + 1 };
+  }),
+
   applyStreamBatch: (batch) => set((state) => {
     const version = state.liveVersion + 1;
     const existing = state.liveRows.find((row) => row.id === batch.streamId);
@@ -421,29 +508,50 @@ export const useChatRuntimeStore = create<ChatRuntimeState>((set, get) => ({
       if (!existing && !state.pendingStreamFinishes[streamId]) return state;
       const version = state.pendingStreamFinishes[streamId]
         ? (existing?.version ?? state.liveVersion) : state.liveVersion + 1;
+      const nextLiveRows: LiveChatRow[] = [];
+      const rowHeights = { ...state.rowHeights };
+      const streamHistoryLinks = { ...state.streamHistoryLinks };
+      for (const row of state.liveRows) {
+        if (row.id !== streamId) {
+          nextLiveRows.push(row);
+          continue;
+        }
+        const message = {
+          ...row.message,
+          content: content || row.message.content,
+          reasoningDuration: metrics?.reasoning_duration_ms ?? row.message.reasoningDuration,
+          contentDuration: metrics?.content_duration_ms ?? row.message.contentDuration,
+          completionTokens: metrics?.completion_tokens ?? row.message.completionTokens,
+          tokensPerSecond: metrics?.tokens_per_second ?? row.message.tokensPerSecond,
+        };
+        const text = typeof message.content === "string" ? message.content.trim() : "";
+        const hasToolParameterStream = Boolean(message.toolName || message.toolArgs || message.toolArgsRawMap);
+        const removeInvisibleToolStream = message.role === "assistant"
+          && !text
+          && !message.reasoningContent?.trim()
+          && !message.isSystemStatus
+          && hasToolParameterStream;
+        if (removeInvisibleToolStream) {
+          delete rowHeights[row.id];
+          delete streamHistoryLinks[row.id];
+          continue;
+        }
+        const preserveExpanded = row.streaming && visibleAtFinish
+          && message.role === "assistant" && !message.isSystemStatus
+          && isLongChatMessage(message) && !row.collapseManuallyChanged;
+        nextLiveRows.push({
+          ...row, version, streaming: false, frozen: true,
+          preserveExpanded: row.preserveExpanded || preserveExpanded,
+          message: preserveExpanded ? { ...message, collapsed: false } : message,
+        });
+      }
       return {
         pendingStreamFinishes,
         liveVersion: state.pendingStreamFinishes[streamId] ? state.liveVersion : version,
         currentStreamId: state.currentStreamId === streamId ? null : state.currentStreamId,
-        liveRows: state.liveRows.map((row) => {
-          if (row.id !== streamId) return row;
-          const message = {
-            ...row.message,
-            content: content || row.message.content,
-            reasoningDuration: metrics?.reasoning_duration_ms ?? row.message.reasoningDuration,
-            contentDuration: metrics?.content_duration_ms ?? row.message.contentDuration,
-            completionTokens: metrics?.completion_tokens ?? row.message.completionTokens,
-            tokensPerSecond: metrics?.tokens_per_second ?? row.message.tokensPerSecond,
-          };
-          const preserveExpanded = row.streaming && visibleAtFinish
-            && message.role === "assistant" && !message.isSystemStatus
-            && isLongChatMessage(message) && !row.collapseManuallyChanged;
-          return {
-            ...row, version, streaming: false, frozen: true,
-            preserveExpanded: row.preserveExpanded || preserveExpanded,
-            message: preserveExpanded ? { ...message, collapsed: false } : message,
-          };
-        }),
+        liveRows: nextLiveRows,
+        rowHeights,
+        streamHistoryLinks,
       };
     });
     const state = get();
