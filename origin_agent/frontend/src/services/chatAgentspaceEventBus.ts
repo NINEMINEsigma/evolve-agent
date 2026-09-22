@@ -27,8 +27,3 @@ export function publishChatAgentspaceEvent(event: AgentspaceEvent): void {
     }
   }
 }
-
-/** 仅供单元测试隔离模块级订阅者。 */
-export function resetChatAgentspaceEventBusForTest(): void {
-  listeners.clear();
-}

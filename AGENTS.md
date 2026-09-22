@@ -13,6 +13,7 @@
 
 ## 硬性警告（违反会破坏构建或丢失工作）
 
+- **严禁在 origin仓库中放置测试代码。** `origin_agent/` 只允许正式运行源码和构建必需文件；禁止新增或保留自动化测试源、测试运行配置、测试夹具和测试专用入口。发现违规内容时必须从 origin仓库定向移除，严禁通过 `.gitignore` 或 `run.py` 的过滤机制掩盖。
 - **严禁在 `origin_agent/frontend/` 运行 pnpm/npm。** 前端构建只发生在运行时 `workspace/fast_agent_space/frontend/` 内。在 `origin_agent/` 运行 pnpm 会生成 `node_modules/`/`dist/`，`--force_init` 会把它们复制进 workspace 并破坏构建。
 - **严禁替用户运行任何校验命令。** 包括 `npx tsc`、`pnpm exec tsc`、`npm run typecheck`、`npm run lint`、`pnpm build`、`python check_env.py` 等。用户报告构建错误时只修改源码，不得通过运行命令复现或验证。
 - **严禁未经用户明确授权运行 `python run.py` / `python check_env.py` 或启动应用。**

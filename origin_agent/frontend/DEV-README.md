@@ -221,14 +221,6 @@ frontend/
 
 顶部栏命令菜单可打开本地性能遥测。默认关闭；开启后只记录批次数、字符数、请求耗时、逻辑范围、追底状态、长任务和 DOM/iframe 数量，最多保留 5000 条事件并导出 JSON，不上传消息正文、附件、工具参数或密钥。关闭时断开全部 observer 和采样 timer。
 
-## 测试入口
-
-- `npm run test:unit`：Vitest 单元测试。
-- `npm run test:chat:e2e`：Playwright 桌面/移动聊天场景。
-- `npm run test:chat`：测试 TypeScript 检查、Vitest 与 Playwright。
-
-以上命令只由用户在运行时 fast仓库前端副本执行，开发助手AI不得在 origin仓库前端目录运行。
-
 ## Agentspace 编辑器行为
 
 - 文件树固定使用“文件夹优先、文件在后、组内自然名称排序”，展开箭头与类型图标分离；单击文件直接打开永久标签。
@@ -310,4 +302,5 @@ frontend/
 - 前端构建由 `origin_agent/__main__.py` 在启动时自动执行：`<pkg_mgr> install && <pkg_mgr> run build`（包管理器优先 pnpm，回退 npm），运行在 `workspace/fast_agent_space/frontend/` 副本中。
 - **绝对禁止**在 `origin_agent/frontend/` 目录下直接运行 `pnpm install`、`pnpm build`、`pnpm dev`、`npm install`、`npm run build` 等命令，以免污染源码目录。
 - `origin_agent/frontend/` 不在仓库根目录，静态类型/IDE 感知可能不准确；不要依赖于此处的 TypeScript 类型检查结论。
+- `tsconfig.app.json` 中针对测试文件名和 `src/test/`、`src/tests/`、嵌套 `__tests__/` 目录的排除模式，是隔离 fast仓库合并复制历史残留的正式构建防御；origin仓库仍严禁测试源、测试配置、测试夹具和测试专用入口，不得通过恢复测试依赖迁就残留文件。
 - 由于前端构建是自动的，修改源码后由用户自行重启 `run.py` 触发重新构建。
