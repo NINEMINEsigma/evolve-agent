@@ -4,6 +4,7 @@ import type {
   AskRequest,
   ClientDiagnostic,
   ConfirmRequest,
+  HistoryRowLink,
   InterruptResponse,
   MessageContent,
   SubagentSession,
@@ -215,10 +216,11 @@ export function useWebSocket() {
     }
     if (message.type === WS_IN.USER_MESSAGE) {
       const clientId = message.client_message_id;
+      const liveId = clientId || generateUUID();
       useChatRuntimeStore.getState().appendLiveMessage({
         role: "user",
         content: message.content ?? "",
-        id: clientId || generateUUID(),
+        id: liveId,
         clientMessageId: clientId,
         characterName: message.character_name,
         messageIndex: message.index,
@@ -227,35 +229,69 @@ export function useWebSocket() {
         messageSuffix: message.message_suffix,
         dynamicMessageSuffix: message.dynamic_message_suffix,
       });
+      if (Number.isSafeInteger(message.index) && (message.index ?? -1) >= 0) {
+        useChatRuntimeStore.getState().linkLiveHistory(liveId, `history:${message.index}:message`);
+        useChatRuntimeStore.getState().promoteMappedLiveRows();
+      } else {
+        console.error("USER_MESSAGE缺少有效History index", { sessionId: useChatRuntimeStore.getState().sessionId, liveId });
+      }
       if (clientId) useChatRuntimeStore.getState().removePendingMessages([clientId]);
       return;
     }
     if (message.type === WS_IN.TOOL_CALL) {
       frameBufferRef.current?.flush();
-      useChatRuntimeStore.getState().appendLiveMessage({
-        role: "tool",
-        content: `${message.character_name ? `${message.character_name} ` : ""}⚡ ${message.tool || "tool"}`,
-        id: message.tool_call_id || generateUUID(),
-        toolName: message.tool,
-        toolArgs: message.args,
-        characterName: message.character_name,
-      });
+      if (!message.tool_call_id) {
+        const liveId = generateUUID();
+        console.error("TOOL_CALL缺少tool_call_id", { liveId });
+        useChatRuntimeStore.getState().appendLiveMessage({
+          role: "tool",
+          content: `${message.character_name ? `${message.character_name} ` : ""}⚡ ${message.tool || "tool"}`,
+          id: liveId,
+          toolName: message.tool,
+          toolArgs: message.args,
+          characterName: message.character_name,
+        });
+        return;
+      }
+      useChatRuntimeStore.getState().upsertLiveToolCall(
+        message.tool_call_id,
+        message.tool,
+        message.args,
+        message.character_name,
+      );
       return;
     }
     if (message.type === WS_IN.TOOL_RESULT) {
       frameBufferRef.current?.flush();
       const parsed = parseToolResult(message.result ?? "", message.tool);
-      useChatRuntimeStore.getState().appendLiveMessage({
-        role: "tool",
-        content: parsed.content ?? message.result ?? "",
-        id: generateUUID(),
-        toolName: message.tool,
-        characterName: message.character_name,
-        imageMarkdown: parsed.imageMarkdown,
-        downloadInfo: parsed.downloadInfo,
-        toolCallMeta: message.tool_call_meta,
-        isError: parsed.isError,
-      });
+      if (!message.tool_call_id) {
+        const liveId = generateUUID();
+        console.error("TOOL_RESULT缺少tool_call_id", { liveId });
+        useChatRuntimeStore.getState().appendLiveMessage({
+          role: "tool",
+          content: parsed.content ?? message.result ?? "",
+          id: liveId,
+          toolName: message.tool,
+          characterName: message.character_name,
+          imageMarkdown: parsed.imageMarkdown,
+          downloadInfo: parsed.downloadInfo,
+          toolCallMeta: message.tool_call_meta,
+          isError: parsed.isError,
+        });
+      } else {
+        useChatRuntimeStore.getState().completeLiveToolCall(
+          message.tool_call_id,
+          message.tool,
+          {
+            content: parsed.content ?? message.result ?? "",
+            imageMarkdown: parsed.imageMarkdown,
+            downloadInfo: parsed.downloadInfo,
+            toolCallMeta: message.tool_call_meta,
+            isError: parsed.isError,
+          },
+          message.character_name,
+        );
+      }
       if (message.consumed_client_message_ids?.length) {
         useChatRuntimeStore.getState().removePendingMessages(message.consumed_client_message_ids);
       }
@@ -281,19 +317,53 @@ export function useWebSocket() {
       return;
     }
     if (message.type === WS_IN.SYSTEM && typeof message.content === "string") {
+      let parsed: Record<string, any> | null = null;
+      let isProtocolMeta = false;
       try {
-        const parsed = JSON.parse(message.content);
+        parsed = JSON.parse(message.content);
         const streamMeta = parsed?.stream_meta;
-        if (streamMeta && typeof streamMeta.stream_id === "string" && streamMeta.stream_id
-          && Number.isSafeInteger(streamMeta.history_index) && streamMeta.history_index >= 0
-          && (!message.session_id || message.session_id === useChatRuntimeStore.getState().sessionId)) {
-          useChatRuntimeStore.getState().linkStreamHistory(streamMeta.stream_id, streamMeta.history_index);
+        if (streamMeta && typeof streamMeta === "object") {
+          isProtocolMeta = true;
+          if (typeof streamMeta.stream_id === "string" && streamMeta.stream_id
+            && Number.isSafeInteger(streamMeta.history_index) && streamMeta.history_index >= 0
+            && (!message.session_id || message.session_id === useChatRuntimeStore.getState().sessionId)) {
+            useChatRuntimeStore.getState().linkStreamHistory(
+              streamMeta.stream_id, streamMeta.history_index,
+            );
+          }
+          if (Array.isArray(streamMeta.live_history_links)) {
+            for (const link of streamMeta.live_history_links as HistoryRowLink[]) {
+              if (typeof link?.live_id !== "string" || typeof link?.history_row_id !== "string") {
+                console.error("无效的live_history_links映射", { link });
+                continue;
+              }
+              useChatRuntimeStore.getState().linkLiveHistory(link.live_id, link.history_row_id);
+            }
+            useChatRuntimeStore.getState().promoteMappedLiveRows();
+          }
         }
-        if (parsed.uploaded) {
+        if (parsed?.uploaded) {
           appendLocalMessage("system", `上传成功：${parsed.filename || "文件"} → ${parsed.path}`);
         }
       } catch {
-        // 普通 system 文本继续交由会话元数据 store 处理。
+        // 普通文本 system 消息继续进入聊天区；协议 JSON 不作为聊天正文渲染。
+      }
+      if (!isProtocolMeta && !parsed?.uploaded && (message.is_system_status || !parsed)) {
+        const liveId = Number.isSafeInteger(message.index) && (message.index ?? -1) >= 0
+          ? `system:${message.index}` : generateUUID();
+        useChatRuntimeStore.getState().appendLiveMessage({
+          role: "system",
+          content: message.content,
+          id: liveId,
+          messageIndex: message.index,
+          isSystemStatus: message.is_system_status,
+        });
+        if (Number.isSafeInteger(message.index) && (message.index ?? -1) >= 0) {
+          useChatRuntimeStore.getState().linkLiveHistory(
+            liveId, `history:${message.index}:message`,
+          );
+          useChatRuntimeStore.getState().promoteMappedLiveRows();
+        }
       }
     }
     sessionRef.current?.handleMessage(message);

@@ -20,6 +20,15 @@ All files under `ws:` are accessible via HTTP routes:
 |---|---|---|
 | `/files/ws/{path}` | Inline display (browser renders content) | Images, audio, HTML pages |
 
+**Never use the logical path itself as a browser URL.** These are invalid and must not be emitted:
+
+```markdown
+![description](ws:output/diagram.png)
+[download](ws:output/report.pdf)
+```
+
+The `ws:` form is only a file-tool path or a location description. For rendering or linking, always use the HTTP route form shown below.
+
 **Mapping rule**: `output/img.png` → `/files/ws/output/img.png`
 
 The URL format is `/files/{namespace}/{file_path}` where:

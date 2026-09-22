@@ -1,6 +1,6 @@
-import type { ChatMessage, MessageContent, MessageMetrics } from "../../types";
+import type { ChatMessage, MessageContent, MessageMetrics, ToolCardStatus } from "../../types";
 
-export type HistoryRowKind = "message" | "tool_call";
+export type HistoryRowKind = "message" | "tool_card";
 
 export interface HistorySkeletonRowDto {
   row_id: string;
@@ -9,7 +9,20 @@ export interface HistorySkeletonRowDto {
   role: string;
   character_name?: string | null;
   tool_index?: number | null;
+  tool_call_id?: string | null;
   is_system_status: boolean;
+}
+
+export interface HistoryToolCardDto {
+  tool_call_id: string;
+  tool_name: string;
+  request_args: Record<string, unknown>;
+  request_args_raw?: string | null;
+  status: ToolCardStatus;
+  result_content?: MessageContent | null;
+  result_history_index?: number | null;
+  tool_call_meta?: import("../../types").ToolCallMeta | null;
+  is_error: boolean;
 }
 
 export interface HistorySkeletonResponseDto {
@@ -28,6 +41,7 @@ export interface HistoryContentRowDto extends HistorySkeletonRowDto {
   dynamic_message_suffix?: string | null;
   reasoning_content?: string | null;
   requires_response?: boolean | null;
+  tool_card?: HistoryToolCardDto | null;
   tool_name?: string | null;
   tool_args?: Record<string, unknown> | null;
   tool_args_raw?: string | null;

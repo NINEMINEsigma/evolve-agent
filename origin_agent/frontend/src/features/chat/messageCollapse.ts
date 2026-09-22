@@ -15,6 +15,7 @@ export function isLongChatMessage(message: ChatMessage): boolean {
 }
 
 export function toolCallSummary(message: ChatMessage): string {
+  if (message.toolCard) return `${message.toolCard.request.toolName || "tool"} · ${message.toolCard.status}`;
   const content = contentToText(message.content);
   if (!message.toolArgs) return content;
   try {

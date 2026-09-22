@@ -118,7 +118,7 @@ entry/
 
 ### 流式消息与 History 行的权威关联
 
-`ParentAgentLoop` 每次将流式 assistant 回复写入 History 后，在对应轮次的 `history_sync` 前通过现有 `system.stream_meta` 发送 `stream_id` 和 History 整数索引；有正文的取消路径和含工具调用的 assistant 消息也遵循此顺序。`MultiAgentWorker` 为含工具调用的中间 assistant 回复发送关联；`MultiAgentLoop._cascade()` 为最终 assistant 回复在既有可见性元数据中加入索引。`entry/stream_history_link.py` 统一构造关联事件，发送失败仅记录日志，不阻断 History 持久化；未存入 History 的流不发送关联。工具调用子行与工具结果不参与。前端凭权威索引把流式结束时位于视口内的普通长回复的展开选择转交给正典行；旧服务缺少关联时恢复历史默认折叠。
+`ParentAgentLoop` 每次将流式 assistant 回复写入 History 后，在对应轮次的 `history_sync` 前通过现有 `system.stream_meta` 发送 `stream_id`、History 整数索引和工具行 `live_history_links`；用户消息复用 `USER_MESSAGE.index`，工具结果复用 `History.add_message()`返回索引。`MultiAgentWorker` 为共享 History 中的 assistant/tool_calls 和工具结果发送关联；`MultiAgentLoop._cascade()` 为最终 assistant 回复在既有可见性元数据中加入索引。`entry/stream_history_link.py` 统一构造关联事件，映射异常可诊断且不清空实时行；子Agent独立 History 不映射到主会话。前端只有在 skeleton 正典目标存在并完成交接后才清理实时行。
 
 ### `StreamConsumer`
 
@@ -246,9 +246,9 @@ sequenceDiagram
 
 ### `history_projection.py`
 
-- `history_row_id()`：按 History 索引和工具调用子索引生成一个骨架代际内稳定的前端行 ID。
-- `project_history_skeleton()`：生成不含正文和富媒体的全历史骨架或后缀。
-- `project_history_content_rows()`：把一条 History 消息投影为正文行及其工具调用子行。
+- `history_row_id()`：按 History 索引和工具调用子索引生成一个骨架代际内稳定的前端行 ID；工具行是以 `tool_call_id` 聚合请求与结果的工具调用卡片。
+- `project_history_skeleton()`：扫描完整 History 建立请求—结果配对，生成不含正文和富媒体的全历史骨架或后缀；匹配的 ToolResultMessage 不再产生独立视觉行。
+- `project_history_content_rows()`：按完整 History 的请求/结果范围返回普通消息、工具调用卡片和孤立结果降级行，支持结果跨 History 内容页配对。
 - `project_history_resources()`：从完整 History 提取去重后的图片和下载资源索引。
 
 投影是只读视图，不改变 `History` 类型、消息实例或 easysave 存储。工具结果 `_meta` 通过 `agent_support.multimodal.extract_tool_call_meta()` 与旧序列化路径共用口径。

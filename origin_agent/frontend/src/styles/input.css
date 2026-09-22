@@ -86,6 +86,13 @@
     inset 0 -1px 0 rgba(var(--white-rgb), 0.04);
 }
 
+/* Ask / 审批变形时，内容区域使用实色背景，避免聊天背景透过文字造成干扰。 */
+.input-bar-morph-active .input-bar-inner {
+  background: var(--bg-secondary);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+
 .input-target-row {
   display: flex;
   gap: 6px;

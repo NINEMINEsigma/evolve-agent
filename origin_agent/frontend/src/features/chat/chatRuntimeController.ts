@@ -7,7 +7,7 @@ import { RequestTimeoutError } from "../../services/fetchWithTimeout";
 
 class ChatRuntimeController {
   private controllers = new Set<AbortController>();
-  private pageRequests = new Map<string, { promise: Promise<void>; canonicalCutoff?: number }>();
+  private pageRequests = new Map<string, { promise: Promise<void> }>();
   private diagnosticReporter: ((diagnostic: ClientDiagnostic) => void) | null = null;
 
   setDiagnosticReporter(
@@ -110,19 +110,20 @@ class ChatRuntimeController {
     if (!state.sessionId) return;
     const sessionId = state.sessionId;
     const generation = state.generation;
-    const cutoff = state.liveVersion;
     try {
       if (historyCount < state.knownHistoryCount) {
         const full = await this.withController((signal) =>
           fetchHistorySkeleton(sessionId, 0, signal));
         if (!this.isCurrent(sessionId, generation)) return;
         useChatRuntimeStore.getState().replaceSkeleton(full.rows, full.history_count);
+        useChatRuntimeStore.getState().clearLive();
       } else if (historyCount > state.knownHistoryCount) {
         const suffix = await this.withController((signal) =>
           fetchHistorySkeleton(sessionId, state.knownHistoryCount, signal));
         if (!this.isCurrent(sessionId, generation)) return;
         useChatRuntimeStore.getState().appendSkeleton(suffix.rows, suffix.history_count);
       }
+      useChatRuntimeStore.getState().promoteMappedLiveRows();
       const current = useChatRuntimeStore.getState();
       if (historyCount > 0) {
         await this.loadPage(
@@ -130,7 +131,6 @@ class ChatRuntimeController {
           generation,
           Math.max(0, historyCount - HISTORY_PAGE_SIZE),
           HISTORY_PAGE_SIZE,
-          cutoff,
         );
         const verified = useChatRuntimeStore.getState();
         const tailStart = Math.max(0, historyCount - HISTORY_PAGE_SIZE);
@@ -141,7 +141,7 @@ class ChatRuntimeController {
         }
       }
       if (!this.isCurrent(sessionId, generation)) return;
-      useChatRuntimeStore.getState().reconcileCanonicalTail(cutoff);
+      useChatRuntimeStore.getState().reconcileCanonicalTail();
       useChatRuntimeStore.getState().setProcessing(false);
       if (!current.initialReady) useChatRuntimeStore.getState().setInitialReady(true);
     } catch (error) {
@@ -209,18 +209,12 @@ class ChatRuntimeController {
     generation: number,
     startIndex: number,
     limit: number,
-    canonicalCutoff?: number,
   ): Promise<void> {
     const key = `${sessionId}:${generation}:${startIndex}:${limit}`;
     const existing = this.pageRequests.get(key);
-    if (existing) {
-      if (canonicalCutoff !== undefined) {
-        existing.canonicalCutoff = Math.max(existing.canonicalCutoff ?? 0, canonicalCutoff);
-      }
-      return existing.promise;
-    }
-    const request: { promise: Promise<void>; canonicalCutoff?: number } = {
-      promise: Promise.resolve(), canonicalCutoff,
+    if (existing) return existing.promise;
+    const request: { promise: Promise<void> } = {
+      promise: Promise.resolve(),
     };
     request.promise = this.withController((signal) =>
       fetchHistoryPage(sessionId, startIndex, limit, signal))
@@ -230,7 +224,6 @@ class ChatRuntimeController {
           page.rows.map(historyContentRowToChatMessage),
           page.start_index,
           page.end_index,
-          request.canonicalCutoff,
         );
       })
       .catch((error) => {

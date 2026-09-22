@@ -85,7 +85,7 @@ Path rules (important):
 - ``StartShell`` returns ``namespace_env`` mappings and an ``EVOLVE_PYTHON`` reference for the selected Shell syntax.
 - Shell command text does NOT resolve ``ws:`` or other logical prefixes automatically.
   Use the matching reference from ``namespace_env`` inside the command.
-- When Python must write a generated binary or media artifact, use the physical path exposed by the returned namespace environment reference, then include the logical ``ws:`` URL in your response.
+- When Python must write a generated binary or media artifact, use the physical path exposed by the returned namespace environment reference. In your response, distinguish the storage path from the display URL: you may mention the logical ``ws:`` path as a file location, but you MUST NOT use ``ws:`` as a Markdown link destination or an HTML ``src`` value.
 
 Installing Python packages:
 - Reuse an existing Shell when available; otherwise start one. Invoke pip through the returned ``EVOLVE_PYTHON`` reference so the package is installed into the Agent's current interpreter.
@@ -220,6 +220,10 @@ File display rules:
 - Files under ``ws:`` are served via two HTTP routes:
   - ``{{files_prefix}}/`` — inline display (images, audio, HTML pages)
   - ``{{downloads_prefix}}/`` — forced download (PDF, ZIP, etc.)
+- Resource display rule (highest priority): ``ws:`` is a logical sandbox path, not a browser URL. Never put ``ws:`` directly inside Markdown link destinations or HTML ``src`` attributes. For a workspace resource, convert ``ws:<path>`` to ``{{files_prefix}}/ws/<path>`` before displaying it.
+- Never output these invalid forms: ``![image](ws:output/image.png)``, ``[file](ws:output/file.zip)``, or ``<img src="ws:output/image.png">``.
+- Use these valid forms instead: ``![image]({{files_prefix}}/ws/output/image.png)`` for inline images, and ``[file]({{downloads_prefix}}/ws/output/file.zip)`` for downloads.
+
 - Mapping: ``ws:output/img.png`` → ``{{files_prefix}}/ws/output/img.png``
 - In your response text, use standard Markdown/HTML to display files:
   - Images: ``![description]({{files_prefix}}/ws/output/img.png)``

@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import type { ChatMessage, MessageContent } from "../../types";
+import type { ChatMessage, MessageContent, ToolCardResult } from "../../types";
 import type {
   ChatFollowMode,
   ChatHistoryPageError,
@@ -15,6 +15,7 @@ import type {
 import { generateUUID } from "../../utils";
 import { MINIMAP_MEASUREMENT_EPSILON_PX } from "../../constants/history";
 import { isLongChatMessage } from "./messageCollapse";
+import { mergeToolCard, toolCardLiveId } from "./toolCards";
 
 interface ChatRuntimeState {
   sessionId: string;
@@ -53,17 +54,21 @@ interface ChatRuntimeState {
   setSkeletonError: (error: string | null) => void;
   replaceSkeleton: (rows: HistorySkeletonRowDto[], historyCount: number) => void;
   appendSkeleton: (rows: HistorySkeletonRowDto[], historyCount: number) => void;
-  mergeHistoryPage: (messages: ChatMessage[], startIndex: number, endIndex: number, canonicalCutoff?: number) => void;
+  mergeHistoryPage: (messages: ChatMessage[], startIndex: number, endIndex: number) => void;
   toggleMessageCollapse: (id: string, source: "history" | "live") => void;
   linkStreamHistory: (streamId: string, historyIndex: number) => void;
+  linkLiveHistory: (liveId: string, historyRowId: string) => void;
+  promoteMappedLiveRows: () => void;
   setPageError: (error: ChatHistoryPageError | null) => void;
   clearCanonicalContent: () => void;
   setInitialReady: (ready: boolean) => void;
   appendLiveMessage: (message: ChatMessage, streaming?: boolean) => number;
+  upsertLiveToolCall: (toolCallId: string, toolName: string | undefined, args: Record<string, unknown> | undefined, characterName?: string) => void;
+  completeLiveToolCall: (toolCallId: string, toolName: string | undefined, result: ToolCardResult, characterName?: string) => void;
   applyStreamBatch: (batch: StreamBatch) => void;
   queueStreamFinish: (streamId: string, content?: string, metrics?: import("../../types").MessageMetrics) => void;
   finishStream: (streamId: string, content?: string, metrics?: import("../../types").MessageMetrics, visibleAtFinish?: boolean) => void;
-  reconcileCanonicalTail: (canonicalCutoff: number) => void;
+  reconcileCanonicalTail: () => void;
   clearLive: () => void;
   setProcessing: (processing: boolean) => void;
   setDraft: (html: string, text: string) => void;
@@ -132,6 +137,39 @@ const historyMatchesLive = (history: ChatMessage, live: LiveChatRow, historyId: 
     || history.characterName === live.message.characterName)
 );
 
+const historyRowMatchesLive = (history: ChatMessage, live: LiveChatRow, historyId: string): boolean => {
+  if (history.toolCard || live.message.toolCard) {
+    return history.role === "tool"
+      && live.message.role === "tool"
+      && history.toolCard?.request.toolCallId === live.message.toolCard?.request.toolCallId;
+  }
+  if (history.role !== live.message.role) return false;
+  if (historyId.includes(":tool:") && live.message.role !== "tool") return false;
+  if (history.characterName && live.message.characterName
+    && history.characterName !== live.message.characterName) return false;
+  if (history.role === "assistant") {
+    return historyMatchesLive(history, live, historyId);
+  }
+  if (history.role === "tool" && history.toolName && live.message.toolName
+    && history.toolName !== live.message.toolName) return false;
+  return true;
+};
+
+const skeletonMatchesLive = (skeleton: HistorySkeletonRowDto, live: LiveChatRow): boolean => {
+  const expectedRole = skeleton.is_system_status || skeleton.role === "system"
+    ? "system"
+    : skeleton.row_kind === "tool_card" || skeleton.role === "tool"
+      ? "tool"
+      : skeleton.role;
+  if (skeleton.row_kind === "tool_card" || skeleton.role === "tool") {
+    return expectedRole === "tool"
+      && live.message.role === "tool"
+      && skeleton.tool_call_id === live.message.toolCard?.request.toolCallId;
+  }
+  if (expectedRole !== live.message.role) return false;
+  return true;
+};
+
 export const useChatRuntimeStore = create<ChatRuntimeState>((set, get) => ({
   ...initialState,
 
@@ -171,7 +209,7 @@ export const useChatRuntimeStore = create<ChatRuntimeState>((set, get) => ({
     lastUserHistoryIndex: lastUserIndex(rows, state.lastUserHistoryIndex),
   })),
 
-  mergeHistoryPage: (messages, startIndex, endIndex, canonicalCutoff) => set((state) => {
+  mergeHistoryPage: (messages, startIndex, endIndex) => set((state) => {
     const contentByRowId = { ...state.contentByRowId };
     const transferred = new Set<string>();
     const streamHistoryLinks = { ...state.streamHistoryLinks };
@@ -179,22 +217,19 @@ export const useChatRuntimeStore = create<ChatRuntimeState>((set, get) => ({
       const previous = contentByRowId[message.id];
       const link = Object.entries(streamHistoryLinks).find(([, rowId]) => rowId === message.id);
       const live = link && state.liveRows.find((row) => row.id === link[0]);
-      const matches = Boolean(live && !live.streaming && historyMatchesLive(message, live, message.id)
-        && message.messageIndex === Number(message.id.split(":")[1]));
+      const matches = Boolean(live && !live.streaming && historyRowMatchesLive(message, live, message.id));
       const transferredCollapse = matches && live?.preserveExpanded ? live.message.collapsed : undefined;
       contentByRowId[message.id] = previous?.collapsed !== undefined
         ? { ...message, collapsed: previous.collapsed }
         : transferredCollapse === undefined ? message : { ...message, collapsed: transferredCollapse };
-      if (link && !live?.streaming) {
+      if (link && !live) {
         delete streamHistoryLinks[link[0]];
-        if (matches) transferred.add(link[0]);
+      } else if (link && matches) {
+        delete streamHistoryLinks[link[0]];
+        transferred.add(link[0]);
       }
     }
-    const liveRows = state.liveRows.filter((row) => {
-      if (transferred.has(row.id)) return false;
-      if (canonicalCutoff === undefined || row.version > canonicalCutoff) return true;
-      return Boolean(streamHistoryLinks[row.id]);
-    });
+    const liveRows = state.liveRows.filter((row) => !transferred.has(row.id));
     const remaining = new Set(liveRows.map((row) => row.id));
     const pendingStreamFinishes = Object.fromEntries(
       Object.entries(state.pendingStreamFinishes).filter(([id]) => remaining.has(id)),
@@ -235,35 +270,64 @@ export const useChatRuntimeStore = create<ChatRuntimeState>((set, get) => ({
     return { liveRows };
   }),
 
-  linkStreamHistory: (streamId, historyIndex) => set((state) => {
-    if (!streamId || !Number.isSafeInteger(historyIndex) || historyIndex < 0) return state;
-    const live = state.liveRows.find((row) => row.id === streamId && row.message.role === "assistant");
-    if (!live) return state;
-    const historyId = `history:${historyIndex}:message`;
-    const existingLink = state.streamHistoryLinks[streamId];
-    if (existingLink && existingLink !== historyId) return state;
-    const skeleton = state.skeleton.find((row) => row.row_id === historyId);
-    if (skeleton && (skeleton.row_kind !== "message" || skeleton.role !== "assistant"
-      || (skeleton.character_name && live.message.characterName
-        && skeleton.character_name !== live.message.characterName))) return state;
-    const history = state.contentByRowId[historyId];
-    if (!history || live.streaming) {
-      return { streamHistoryLinks: { ...state.streamHistoryLinks, [streamId]: historyId } };
+  linkLiveHistory: (liveId, historyRowId) => set((state) => {
+    if (!liveId || !historyRowId) return state;
+    const existingLink = state.streamHistoryLinks[liveId];
+    if (existingLink && existingLink !== historyRowId) {
+      console.error("实时消息正典映射冲突", { liveId, existingLink, historyRowId });
+      return state;
     }
-    if (!historyMatchesLive(history, live, historyId) || history.messageIndex !== historyIndex) return state;
+    return existingLink
+      ? state
+      : { streamHistoryLinks: { ...state.streamHistoryLinks, [liveId]: historyRowId } };
+  }),
+
+  promoteMappedLiveRows: () => set((state) => {
+    const contentByRowId = { ...state.contentByRowId };
     const streamHistoryLinks = { ...state.streamHistoryLinks };
-    delete streamHistoryLinks[streamId];
+    const transferred = new Set<string>();
     const rowHeights = { ...state.rowHeights };
-    delete rowHeights[streamId];
+    for (const [liveId, historyId] of Object.entries(streamHistoryLinks)) {
+      const skeleton = state.skeleton.find((row) => row.row_id === historyId);
+      const live = state.liveRows.find((row) => row.id === liveId);
+      if (!skeleton || !live || live.streaming) continue;
+      if (!skeletonMatchesLive(skeleton, live)) {
+        console.error("实时消息与正典骨架身份不匹配", { liveId, historyId });
+        continue;
+      }
+      const current = contentByRowId[historyId];
+      if (current && !historyRowMatchesLive(current, live, historyId)) {
+        console.error("实时消息正典目标身份不匹配", { liveId, historyId });
+        continue;
+      }
+      contentByRowId[historyId] = current || {
+        ...live.message,
+        id: historyId,
+        messageIndex: skeleton.history_index,
+        isSystemStatus: skeleton.is_system_status || live.message.isSystemStatus,
+      };
+      delete streamHistoryLinks[liveId];
+      transferred.add(liveId);
+      delete rowHeights[liveId];
+    }
+    if (!transferred.size) return state;
+    const pendingStreamFinishes = Object.fromEntries(
+      Object.entries(state.pendingStreamFinishes).filter(([id]) => !transferred.has(id)),
+    );
     return {
+      contentByRowId,
       streamHistoryLinks,
+      liveRows: state.liveRows.filter((row) => !transferred.has(row.id)),
+      pendingStreamFinishes,
       rowHeights,
-      liveRows: state.liveRows.filter((row) => row.id !== streamId),
-      contentByRowId: live.preserveExpanded && history.collapsed === undefined
-        ? { ...state.contentByRowId, [historyId]: { ...history, collapsed: live.message.collapsed } }
-        : state.contentByRowId,
     };
   }),
+
+  linkStreamHistory: (streamId, historyIndex) => {
+    if (!streamId || !Number.isSafeInteger(historyIndex) || historyIndex < 0) return;
+    get().linkLiveHistory(streamId, `history:${historyIndex}:message`);
+    get().promoteMappedLiveRows();
+  },
 
   setPageError: (error) => set((state) => {
     const pageErrors = { ...state.pageErrors };
@@ -300,6 +364,82 @@ export const useChatRuntimeStore = create<ChatRuntimeState>((set, get) => ({
     }));
     return version;
   },
+
+  upsertLiveToolCall: (toolCallId, toolName, args, characterName) => set((state) => {
+    if (!toolCallId) return state;
+    const id = toolCardLiveId(toolCallId);
+    const index = state.liveRows.findIndex((row) => row.id === id);
+    const current = index >= 0 ? state.liveRows[index] : undefined;
+    const toolCard = mergeToolCard(current?.message.toolCard, {
+      status: "running",
+      request: { toolCallId, toolName, args },
+    });
+    const message: ChatMessage = {
+      ...(current?.message || { id, role: "tool", content: "" }),
+      id,
+      role: "tool",
+      content: `${characterName ? `${characterName} ` : ""}⚡ ${toolName || "tool"}`,
+      toolName: toolName || current?.message.toolName,
+      toolArgs: args || current?.message.toolArgs,
+      characterName: characterName || current?.message.characterName,
+      toolCard,
+    };
+    const version = state.liveVersion + (current ? 1 : 1);
+    const row: LiveChatRow = {
+      id,
+      version,
+      message,
+      streaming: false,
+      frozen: false,
+    };
+    return {
+      liveVersion: version,
+      liveRows: current
+        ? state.liveRows.map((item, itemIndex) => itemIndex === index ? { ...item, ...row } : item)
+        : [...state.liveRows, row],
+    };
+  }),
+
+  completeLiveToolCall: (toolCallId, toolName, result, characterName) => set((state) => {
+    if (!toolCallId) return state;
+    const id = toolCardLiveId(toolCallId);
+    const status = result.isError ? "failed" : "succeeded";
+    const index = state.liveRows.findIndex((row) => row.id === id);
+    const current = index >= 0 ? state.liveRows[index] : undefined;
+    const existingCard = current?.message.toolCard;
+    const toolCard = mergeToolCard(existingCard, {
+      status,
+      request: { toolCallId, toolName },
+      result,
+    });
+    const message: ChatMessage = {
+      ...(current?.message || { id, role: "tool", content: result.content }),
+      id,
+      role: "tool",
+      content: result.content,
+      toolName: toolName || current?.message.toolName,
+      characterName: characterName || current?.message.characterName,
+      toolCard,
+      toolCallMeta: result.toolCallMeta,
+      imageMarkdown: result.imageMarkdown,
+      downloadInfo: result.downloadInfo,
+      isError: result.isError,
+    };
+    const liveRows = current
+      ? state.liveRows.map((item, itemIndex) => itemIndex === index
+        ? { ...item, message, streaming: false, frozen: true, version: state.liveVersion + 1 }
+        : item)
+      : [...state.liveRows, { id, version: state.liveVersion + 1, message, streaming: false, frozen: true }];
+    const link = state.streamHistoryLinks[id];
+    const contentByRowId = { ...state.contentByRowId };
+    if (link) {
+      const canonical = contentByRowId[link];
+      contentByRowId[link] = canonical
+        ? { ...canonical, ...message, id: link, toolCard }
+        : { ...message, id: link };
+    }
+    return { liveRows, contentByRowId, liveVersion: state.liveVersion + 1 };
+  }),
 
   applyStreamBatch: (batch) => set((state) => {
     const version = state.liveVersion + 1;
@@ -368,29 +508,50 @@ export const useChatRuntimeStore = create<ChatRuntimeState>((set, get) => ({
       if (!existing && !state.pendingStreamFinishes[streamId]) return state;
       const version = state.pendingStreamFinishes[streamId]
         ? (existing?.version ?? state.liveVersion) : state.liveVersion + 1;
+      const nextLiveRows: LiveChatRow[] = [];
+      const rowHeights = { ...state.rowHeights };
+      const streamHistoryLinks = { ...state.streamHistoryLinks };
+      for (const row of state.liveRows) {
+        if (row.id !== streamId) {
+          nextLiveRows.push(row);
+          continue;
+        }
+        const message = {
+          ...row.message,
+          content: content || row.message.content,
+          reasoningDuration: metrics?.reasoning_duration_ms ?? row.message.reasoningDuration,
+          contentDuration: metrics?.content_duration_ms ?? row.message.contentDuration,
+          completionTokens: metrics?.completion_tokens ?? row.message.completionTokens,
+          tokensPerSecond: metrics?.tokens_per_second ?? row.message.tokensPerSecond,
+        };
+        const text = typeof message.content === "string" ? message.content.trim() : "";
+        const hasToolParameterStream = Boolean(message.toolName || message.toolArgs || message.toolArgsRawMap);
+        const removeInvisibleToolStream = message.role === "assistant"
+          && !text
+          && !message.reasoningContent?.trim()
+          && !message.isSystemStatus
+          && hasToolParameterStream;
+        if (removeInvisibleToolStream) {
+          delete rowHeights[row.id];
+          delete streamHistoryLinks[row.id];
+          continue;
+        }
+        const preserveExpanded = row.streaming && visibleAtFinish
+          && message.role === "assistant" && !message.isSystemStatus
+          && isLongChatMessage(message) && !row.collapseManuallyChanged;
+        nextLiveRows.push({
+          ...row, version, streaming: false, frozen: true,
+          preserveExpanded: row.preserveExpanded || preserveExpanded,
+          message: preserveExpanded ? { ...message, collapsed: false } : message,
+        });
+      }
       return {
         pendingStreamFinishes,
         liveVersion: state.pendingStreamFinishes[streamId] ? state.liveVersion : version,
         currentStreamId: state.currentStreamId === streamId ? null : state.currentStreamId,
-        liveRows: state.liveRows.map((row) => {
-          if (row.id !== streamId) return row;
-          const message = {
-            ...row.message,
-            content: content || row.message.content,
-            reasoningDuration: metrics?.reasoning_duration_ms ?? row.message.reasoningDuration,
-            contentDuration: metrics?.content_duration_ms ?? row.message.contentDuration,
-            completionTokens: metrics?.completion_tokens ?? row.message.completionTokens,
-            tokensPerSecond: metrics?.tokens_per_second ?? row.message.tokensPerSecond,
-          };
-          const preserveExpanded = row.streaming && visibleAtFinish
-            && message.role === "assistant" && !message.isSystemStatus
-            && isLongChatMessage(message) && !row.collapseManuallyChanged;
-          return {
-            ...row, version, streaming: false, frozen: true,
-            preserveExpanded: row.preserveExpanded || preserveExpanded,
-            message: preserveExpanded ? { ...message, collapsed: false } : message,
-          };
-        }),
+        liveRows: nextLiveRows,
+        rowHeights,
+        streamHistoryLinks,
       };
     });
     const state = get();
@@ -398,19 +559,9 @@ export const useChatRuntimeStore = create<ChatRuntimeState>((set, get) => ({
     if (link) state.linkStreamHistory(streamId, Number(link.split(":")[1]));
   },
 
-  reconcileCanonicalTail: (canonicalCutoff) => set((state) => {
-    const liveRows = state.liveRows.filter((row) =>
-      row.version > canonicalCutoff || Boolean(state.streamHistoryLinks[row.id]));
-    const remainingIds = new Set(liveRows.map((row) => row.id));
-    const rowHeights = { ...state.rowHeights };
-    for (const row of state.liveRows) {
-      if (!remainingIds.has(row.id)) delete rowHeights[row.id];
-    }
-    const pendingStreamFinishes = Object.fromEntries(
-      Object.entries(state.pendingStreamFinishes).filter(([id]) => remainingIds.has(id)),
-    );
-    return { liveRows, rowHeights, pendingStreamFinishes };
-  }),
+  reconcileCanonicalTail: () => {
+    get().promoteMappedLiveRows();
+  },
 
   clearLive: () => set((state) => {
     const rowHeights = { ...state.rowHeights };

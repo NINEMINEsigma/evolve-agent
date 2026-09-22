@@ -746,7 +746,7 @@ class BaseAgentLoop(ABC):
         if start_index < 0 or start_index > history_count:
             raise ValueError("start_index out of range")
         rows = project_history_skeleton(
-            messages[start_index:],
+            messages,
             self.current_character_agent,
             start_index=start_index,
         )
@@ -780,28 +780,31 @@ class BaseAgentLoop(ABC):
             )
 
         end_index = min(history_count, start_index + limit)
-        metrics_map: dict[str, dict[str, Any]] = {}
+        metrics_map: dict[int, MessageMetrics] = {}
         if self._session_store is not None:
             try:
-                metrics_map = self._session_store.read_message_metrics(self.session_id)
+                raw_metrics_map = self._session_store.read_message_metrics(self.session_id)
+                for raw_index, raw_metrics in raw_metrics_map.items():
+                    try:
+                        metrics_map[int(raw_index)] = MessageMetrics.model_validate(raw_metrics)
+                    except (TypeError, ValueError):
+                        logger.warning(
+                            "Invalid message metrics index=%s for session=%s",
+                            raw_index, self.session_id,
+                        )
             except Exception:
                 logger.warning(
                     "Failed to read message metrics for session=%s",
                     self.session_id,
                     exc_info=True,
                 )
-        rows = []
-        for history_index in range(start_index, end_index):
-            raw_metrics = metrics_map.get(str(history_index))
-            metrics = MessageMetrics.model_validate(raw_metrics) if raw_metrics else None
-            rows.extend(
-                project_history_content_rows(
-                    messages[history_index],
-                    history_index,
-                    self.current_character_agent,
-                    metrics,
-                )
-            )
+        rows = project_history_content_rows(
+            messages,
+            start_index,
+            end_index,
+            self.current_character_agent,
+            metrics_map,
+        )
         return SessionHistoryPageResponse(
             session_id=self.session_id,
             start_index=start_index,

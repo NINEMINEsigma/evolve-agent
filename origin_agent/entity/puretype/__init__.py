@@ -14,7 +14,8 @@ puretype 包 — 只含有不包含任何方法定义的类型定义。
     session     : Loop, SessionStatus, LoopMeta, SessionInfo, SessionTerminationResult,
                   History skeleton/page/resource DTO, SessionMessageEntry, TokenUsageRecord, QueuedMessage
     agent       : AgentConfig
-    ws          : MessageType, Message, ClientDiagnosticKind, ClientDiagnosticPhase, ClientDiagnostic
+    ws          : MessageType, Message, HistoryRowLink, ClientDiagnosticKind,
+                  ClientDiagnosticPhase, ClientDiagnostic
     lsp         : LSPState, LSPDiagnostic, LSPReference, LSPDefinition, LSPSymbol
     runtime     : SystemInfo, ClientInfo, ProcessLineStreamResult
     shell       : ShellInfo, ShellOutputSlice
@@ -75,6 +76,8 @@ from .session import (
     SessionInfo,
     SessionTerminationResult,
     SessionHistoryRowKind,
+    SessionHistoryToolCardStatus,
+    SessionHistoryToolCard,
     SessionHistorySkeletonRow,
     SessionHistorySkeletonResponse,
     SessionHistoryContentRow,
@@ -93,6 +96,7 @@ from .agent import (
 from .ws import (
     MessageType,
     Message,
+    HistoryRowLink,
     ClientDiagnosticKind,
     ClientDiagnosticPhase,
     ClientDiagnostic,
@@ -187,6 +191,8 @@ __all__ = [
     "SessionInfo",
     "SessionTerminationResult",
     "SessionHistoryRowKind",
+    "SessionHistoryToolCardStatus",
+    "SessionHistoryToolCard",
     "SessionHistorySkeletonRow",
     "SessionHistorySkeletonResponse",
     "SessionHistoryContentRow",
@@ -203,6 +209,7 @@ __all__ = [
     # ws
     "MessageType",
     "Message",
+    "HistoryRowLink",
     # lsp
     "LSPState",
     "LSPDiagnostic",

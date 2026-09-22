@@ -159,6 +159,30 @@ export type MessageContent = string | ContentBlock[];
 export type ApprovalMode = "manual" | "handsfree" | "yolo";
 export type ApprovalModeSyncStatus = "loading" | "ready" | "unavailable";
 
+export type ToolCardStatus = "running" | "succeeded" | "failed" | "missing_result";
+
+export interface ToolCardRequest {
+  toolCallId: string;
+  toolName?: string;
+  args?: Record<string, unknown>;
+  argsRaw?: string;
+}
+
+export interface ToolCardResult {
+  content: MessageContent;
+  imageMarkdown?: string;
+  downloadInfo?: DownloadInfo;
+  toolCallMeta?: ToolCallMeta;
+  isError?: boolean;
+  historyIndex?: number;
+}
+
+export interface ToolCardData {
+  request: ToolCardRequest;
+  status: ToolCardStatus;
+  result?: ToolCardResult;
+}
+
 export type MessageType =
   | "system"
   | "user_message"
@@ -199,6 +223,11 @@ export interface ClientDiagnostic {
   last_pong_age_ms?: number | null;
 }
 
+export interface HistoryRowLink {
+  live_id: string;
+  history_row_id: string;
+}
+
 export interface WSMessage {
   type: MessageType;
   session_id?: string;
@@ -225,6 +254,7 @@ export interface WSMessage {
   response_characters?: string[];  // 多 Agent 模式：需响应角色列表
   character_name?: string;
   index?: number;
+  is_system_status?: boolean;
   client_message_id?: string;
   message_suffix?: string;                // USER_MESSAGE：持久化上下文扩展块
   dynamic_message_suffix?: string;        // USER_MESSAGE：当轮动态上下文扩展块
@@ -381,6 +411,7 @@ export interface ChatMessage {
   messageSuffix?: string;
   dynamicMessageSuffix?: string;
   toolCallMeta?: ToolCallMeta;   // 工具调用时间元信息
+  toolCard?: ToolCardData;
   isError?: boolean;               // 工具结果是否为错误
   isSystemStatus?: boolean;        // 系统状态消息（对 LLM 不可见，仅前端展示）
 }

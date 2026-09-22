@@ -97,7 +97,7 @@ WS /ws/chat?resume=<sid>
 
 | 类型 | 说明 |
 |---|---|
-| `system` | 系统通知；可选 JSON `stream_meta` 同时携带 `stream_id`、`history_index`（History 整数索引，非工具子行），在对应 assistant 消息存盘后、该轮 `history_sync` 前发送。多Agent模式继续携带可见性/响应角色。旧客户端可忽略，新客户端用以传递当前会话内的消息展开选择；缺失关联恢复历史默认折叠 |
+| `system` | 系统通知；可选 JSON `stream_meta`携带 `stream_id`、`history_index`、`live_history_links`（实时行到正典行的明确关联），或顶层携带 system status 的 `index`/`is_system_status`。关联只在对应 History 写入后发送；前端不得按正文、顺序或实时版本猜测映射。多Agent模式继续携带可见性/响应角色。 |
 | `user_message` | 用户消息回显 |
 | `assistant_message` | 完整助手消息 |
 | `stream_delta` | LLM 流式文本块 |
@@ -147,7 +147,7 @@ WS /ws/chat?resume=<sid>
 | GET | `/api/sessions/{id}/history/page?start_index=&limit=` | 按 History 消息索引范围返回完整前端投影行 |
 | GET | `/api/sessions/{id}/history/resources` | 返回完整 History 的图片与下载资源索引 |
 
-骨架与历史内容页只是 Gateway 读取视图，不改变 `History` / `history.es` 整体存储。编辑、按轮删除、单条删除和重新生成在 Agent 处理期间统一返回 HTTP 409；结构修改后前端取消旧页请求并重取骨架。前端对会话状态预检、History骨架和历史内容页设置15秒硬截止；超时显示持久通知和局部重试，WebSocket可用时发送不含正文、工具参数、附件或密钥的 `client_diagnostic`。
+骨架与历史内容页只是 Gateway 读取视图，不改变 `History` / `history.es` 整体存储。工具请求和匹配的 ToolResultMessage 在前端投影为一个 `tool_card` 行，结果按 `tool_call_id` 配对并可跨 History 内容页返回；只有孤立结果保留为独立降级行。编辑、按轮删除、单条删除和重新生成在 Agent 处理期间统一返回 HTTP 409；结构修改后前端取消旧页请求并重取骨架。前端对会话状态预检、History骨架和历史内容页设置15秒硬截止；超时显示持久通知和局部重试，WebSocket可用时发送不含正文、工具参数、附件或密钥的 `client_diagnostic`。
 
 ### 消息编辑
 
