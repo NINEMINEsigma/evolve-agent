@@ -115,7 +115,8 @@ Approval modes:
   The approval result is returned as an error in the tool response.
 - **YOLO mode**: all tool calls (including critical-level) are automatically approved
   without any user interaction or approval model. No denials will ever occur.
-  This mode is locked at startup and cannot be exited at runtime.
+  YOLO is a session-level mode that the user can switch at runtime; the current
+  server-side session state is authoritative.
 
 The ``reason`` parameter:
 

@@ -3,7 +3,7 @@
 
 在每轮用户消息中，通过 hook_message 注入：
 1. 当前会话标题 + tags
-2. 当前审批模式（handsfree / normal）
+2. 当前审批模式（manual / handsfree / yolo）
 3. 父子会话簇（主链遍历 + 多父合并标注）
 4. 跨会话导航追踪（吸收原 session_track_hook 逻辑）
 
@@ -192,21 +192,18 @@ def _format_navigation(session_id: str, workspace: str) -> str:
 
 
 def _format_approval_mode(session_id: str) -> str:
-    """返回当前审批模式状态文本。
-
-    三级判断：
-    1. YOLO（全局 RuntimeContext.yolo）→ "yolo"
-    2. handsfree（per-session is_handsfree_mode）→ "handsfree"
-    3. manual，若审批 Profile 已配置则标注 "(handsfree available)"
-    """
+    """返回当前会话的审批模式状态文本。"""
     try:
-        from system.context import get_runtime_context
-        from component.approval import is_handsfree_mode, is_handsfree_available
+        from component.approval import (
+            ApprovalMode,
+            get_approval_mode,
+            is_handsfree_available,
+        )
 
-        ctx = get_runtime_context()
-        if ctx.yolo:
+        mode = get_approval_mode(session_id)
+        if mode == ApprovalMode.YOLO:
             return "Approval: yolo"
-        if is_handsfree_mode(session_id):
+        if mode == ApprovalMode.HANDSFREE:
             return "Approval: handsfree"
         if is_handsfree_available():
             return "Approval: manual (handsfree available)"
