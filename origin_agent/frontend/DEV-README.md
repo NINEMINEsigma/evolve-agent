@@ -75,6 +75,8 @@ frontend/
   - `react-markdown`：Markdown 渲染
   - `react-syntax-highlighter`：代码高亮
   - `remark-gfm`：GitHub 风格 Markdown
+  - `remark-math`：识别 `$...$` 和 `$$...$$` 数学语法
+  - `rehype-katex` / `katex`：将数学节点渲染为 KaTeX HTML 并提供公式样式
   - `react-zoom-pan-pinch`：图片缩放
   - `mermaid`：Mermaid 图表渲染
   - `react-virtuoso`：主聊天区可变高度虚拟列表
@@ -109,7 +111,8 @@ frontend/
 | `features/chat/ChatHistoryRow.tsx` | 单行 selector 消费，按 loaded / skeleton / page-error 三态渲染 |
 | `MessageItem.tsx` | 单条消息渲染（文本、代码块、图片、工具调用卡片）；工具调用卡片以 `tool_call_id` 聚合请求、状态和结果，默认折叠并复用请求/结果的既有特殊渲染；通过 `data-character-name` 暴露角色显示名称，并在用户主动高度操作前通知滚动状态机；工具调用卡片和普通长消息的折叠入口互斥 |
 | `ToolCallCard.tsx` | 工具调用卡片的状态摘要、请求参数区、结果区、耗时和附件；不改变 History 持久化顺序 |
-| `MessageBody.tsx` | 消息正文 Markdown 渲染 |
+| `MessageBody.tsx` | 消息正文 Markdown 渲染；Assistant 文本和 Ask 详情通过 `MarkdownRenderer` 支持 GFM、换行、原始 HTML 以及 `$...$`、`$$...$$`、`\\(...\\)`、`\\[...\\]` 四种数学公式分隔符 |
+| `primitives/MarkdownRenderer.tsx` | 统一 Markdown、代码块、Mermaid、原始 HTML、图片和 KaTeX 数学公式渲染；规范化只作用于普通文本，行内代码和围栏代码中的公式标记保持原文；流式未闭合公式保持可见文本，未知 LaTeX 命令降级而不使消息树崩溃 |
 | `MessageEditor.tsx` | 消息编辑器（编辑历史消息） |
 | `MessageAttachments.tsx` | 消息附件展示 |
 | `CodeBlock.tsx` | 代码块渲染与高亮 |
@@ -302,6 +305,7 @@ frontend/
 
 - 前端构建由 `origin_agent/__main__.py` 在启动时自动执行：`<pkg_mgr> install && <pkg_mgr> run build`（包管理器优先 pnpm，回退 npm），运行在 `workspace/fast_agent_space/frontend/` 副本中。
 - **绝对禁止**在 `origin_agent/frontend/` 目录下直接运行 `pnpm install`、`pnpm build`、`pnpm dev`、`npm install`、`npm run build` 等命令，以免污染源码目录。
+- 数学公式依赖（`remark-math`、`rehype-katex`、`katex`）随运行时 fast仓库前端副本安装；KaTeX 未知命令采用降级渲染，流式未闭合公式保持原文，块级长公式只在公式区域横向滚动。
 - `origin_agent/frontend/` 不在仓库根目录，静态类型/IDE 感知可能不准确；不要依赖于此处的 TypeScript 类型检查结论。
 - `tsconfig.app.json` 中针对测试文件名和 `src/test/`、`src/tests/`、嵌套 `__tests__/` 目录的排除模式，是隔离 fast仓库合并复制历史残留的正式构建防御；origin仓库仍严禁测试源、测试配置、测试夹具和测试专用入口，不得通过恢复测试依赖迁就残留文件。
 - 由于前端构建是自动的，修改源码后由用户自行重启 `run.py` 触发重新构建。

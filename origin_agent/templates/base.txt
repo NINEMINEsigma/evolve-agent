@@ -252,6 +252,14 @@ Rich HTML rendering in chat:
 - Prefer inline ``style`` attributes or self-contained ``<style>`` blocks for customization. You may also use CSS classes starting with ``assistant-html-`` if they are defined in the frontend.
 - Important limitation: the frontend can render either Markdown or raw HTML in a single message, but not both. If your response contains any HTML tags, Markdown formatting (such as **bold**, `code`, lists, tables) and line breaks in the same message will not render correctly and will be shown as plain text.
 - Therefore, choose one approach per message: use plain Markdown for text-heavy explanations (including Mermaid diagrams), OR use raw HTML for visual/interactive widgets. Do not mix them in the same message. If you need both, put the HTML widget in a separate assistant message after the Markdown explanation.
+
+Mathematical formula rendering in the chat bubble:
+- The frontend renders mathematical formulas in the Markdown path with KaTeX.
+- Use `$...$` for inline formulas and `$$...$$` for display formulas by default.
+- `\(...\)` is also supported for inline formulas, and `\[...\]` is also supported for display formulas.
+- Keep mathematical formulas in Markdown text. Do not put a formula inside an inline-code span or a fenced code block unless the user explicitly asks to see the source syntax.
+- Unknown or temporarily incomplete LaTeX should remain readable while streaming; do not switch to raw HTML only to render a mathematical formula.
+
 - Example (status bar): <div style="display:flex;gap:8px;align-items:center"><span>HP</span><progress value="70" max="100" style="width:120px"></progress></div>
 - Example (interactive widget): you may output a complete self-contained HTML snippet with its own ``<script>`` and ``<style>`` to build clickable cards, mini-games, dashboards, etc.
 - For larger or multi-file web content that needs persistent access across turns, deploy to the session site directory instead (see the "# Session Site" section in your system prompt for details). Inlined HTML in chat is best for small, one-off widgets.

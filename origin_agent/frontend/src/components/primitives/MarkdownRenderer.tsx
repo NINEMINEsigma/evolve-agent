@@ -1,13 +1,17 @@
 import { useMemo } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import remarkMath from "remark-math";
 import remarkBreaks from "remark-breaks";
 import rehypeRaw from "rehype-raw";
+import rehypeKatex from "rehype-katex";
+import "katex/dist/katex.min.css";
 import type { Components } from "react-markdown";
 import CodeBlock from "../CodeBlock";
 import SafeHtml from "../SafeHtml";
 import IframeRenderer from "../IframeRenderer";
 import MermaidRenderer from "../MermaidRenderer";
+import { normalizeMarkdownMathDelimiters } from "../../utils/markdownMath";
 
 // 当文本包含 script、style、link 等标签时，需要完整隔离渲染，避免 CSS/JS 污染外层页面
 // iframe 不在此列——<iframe src="url"> 本身就是浏览器沙盒，走 ReactMarkdown 管线即可
@@ -106,6 +110,11 @@ interface MarkdownRendererProps {
 }
 
 export default function MarkdownRenderer({ content, streaming, onImageClick }: MarkdownRendererProps) {
+  const normalizedContent = useMemo(
+    () => normalizeMarkdownMathDelimiters(content),
+    [content]
+  );
+
   const mdComponents = useMemo(
     () => ({
       ...markdownComponentsBase,
@@ -138,17 +147,17 @@ export default function MarkdownRenderer({ content, streaming, onImageClick }: M
     [onImageClick, streaming]
   );
 
-  if (needsSandbox(content)) {
-    return <SafeHtml html={content} />;
+  if (needsSandbox(normalizedContent)) {
+    return <SafeHtml html={normalizedContent} />;
   }
 
   return (
     <ReactMarkdown
-      remarkPlugins={[remarkGfm, remarkBreaks]}
-      rehypePlugins={[rehypeRaw]}
+      remarkPlugins={[remarkGfm, [remarkMath, { singleDollarTextMath: true }], remarkBreaks]}
+      rehypePlugins={[rehypeRaw, [rehypeKatex, { throwOnError: false }]]}
       components={mdComponents}
     >
-      {content || ""}
+      {normalizedContent || ""}
     </ReactMarkdown>
   );
 }
