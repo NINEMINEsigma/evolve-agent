@@ -869,6 +869,13 @@ classDiagram
 
 `History` 与 `history.es` 保持整体类型保留存储；`BaseAgentLoop` 新增三个只读投影接口，经 `entry/history_projection.py` 输出全历史骨架、按 History 索引范围的历史内容页和完整资源索引。Gateway 只向主会话暴露三个 REST，并以 `history_sync` 通知正典历史数量。前端使用 Zustand 隔离高频状态、Virtuoso 只挂载可视消息行，主聊天区 Minimap 改为逻辑映射；工具调用请求和匹配结果在只读投影层按 `tool_call_id` 聚合为一张工具调用卡片，结果可跨内容页返回，匹配结果不再产生独立视觉行；当前轮 live 行在内容页完成正典合并后再清理。
 
+### 主聊天滚动追底协调
+
+`useChatScrollController` 是主聊天区被动追底的唯一协调入口。实时内容提交与列表总高度变化只申请一个可取消的 `requestAnimationFrame` 任务，任务执行时读取 Virtuoso scroller 的最新 `scrollTop`、`scrollHeight` 和 `clientHeight`，并以 `scrollHeight - clientHeight` 为物理底部目标。`atBottomStateChange(false)` 仅更新观察状态，不因自动滚动再次独立创建追底任务；连续流式增长允许按有效布局帧更新底部，但同一帧内不会重复写入滚动位置。
+
+用户滚动意图、消息高度变更、小地图拖拽、会话重置或状态离开 `following` 时取消待执行任务。显式回到底部和小地图提交继续使用独立的用户动作路径。最新流式消息超过视口时保持物理底部锚点，不切换到消息顶部，也不改变 History、Virtuoso 行顺序或消息协议。
+
+
 ### Memory 系统移除
 
 `ParentAgentLoop` 中原有的 `_memory`（`MemoryManager`）和 `_memory_initialized_ids`（`set[int]`）字段已移除。`add_memory_provider()` 方法也已完全移除（不再保留空实现）。`LoopSessionManager` 中涉及 memory 的迁移逻辑已移除。记忆功能现由运行时扩展实现：`custom_tools/memory_tools/`（remember/forget 工具）+ `custom_hooks/memory_hook.py`（每轮注入上下文）。
@@ -969,6 +976,8 @@ classDiagram
 `TaskAgentLoop` 不新增字段。它复用 `SubAgentLoop._allowed_tool_names` 与会话级已加载工具集，并在模型定义生成和执行期统一要求“已加载工具集 ∩ `TASKAGENT` 可用范围 ∩ `safe` 危险等级”。允许工具直接执行，越权调用直接返回失败工具结果，不进入父Agent或审批模型流程。`LoadToolset` 只扩展已加载集合，不扩大权限交集。
 
 ### 主聊天实时行到正典 History 行交接
+
+实时行到正典 History 行的交接继续以明确 `live_id → history_row_id` 关联为准；滚动位置不参与消息身份或交接判断。工具调用请求和结果通过同一工具卡片关联，滚动控制器只负责视口物理位置，不改变正典交接语义。
 
 `entry/stream_history_link.py` 统一发送 `stream_id/history_index` 与 `live_history_links`。`ParentAgentLoop`（含继承的 `ColloquyLoop`）和 `MultiAgentWorker`只使用实际 `History.add_message()`返回索引构造关联；`MultiAgentLoop._cascade()`继续负责最终 assistant 行。工具请求和匹配结果使用统一 `tool-card:<tool_call_id>` live ID，指向请求锚定的 `history:<index>:tool:<tool_index>` 工具调用卡片行；History 持久化顺序不变。`FrontendSink`必须透传 `tool_call_id`，持久化 system 状态携带 `index/is_system_status`。缺失、重复、孤立或非法倒序的 `tool_call_id` 不猜配：后端记录 warning，前端保留缺失结果卡片或独立降级行。子Agent与临时Agent的独立 History不映射到主会话。
 

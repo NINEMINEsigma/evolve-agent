@@ -59,6 +59,7 @@ export function useChatScrollController(
 ) {
   const userIntentUntilRef = useRef(0);
   const metricsFrameRef = useRef<number | null>(null);
+  const followFrameRef = useRef<number | null>(null);
   const minimapGenerationRef = useRef<number | null>(null);
   const followMode = useChatRuntimeStore((state) => state.followMode);
 
@@ -103,7 +104,7 @@ export function useChatScrollController(
     virtuosoRef.current?.scrollTo({ top: Number.MAX_SAFE_INTEGER, behavior });
   }, [virtuosoRef]);
 
-  const followPhysicalBottomIfEligible = useCallback(() => {
+  const followPhysicalBottomNow = useCallback(() => {
     const current = useChatRuntimeStore.getState();
     const scroller = scrollerElement;
     if (
@@ -120,9 +121,23 @@ export function useChatScrollController(
     virtuosoRef.current.scrollTo({ top: target, behavior: "auto" });
   }, [scrollerElement, virtuosoRef]);
 
+  const cancelScheduledFollow = useCallback(() => {
+    if (followFrameRef.current === null) return;
+    cancelAnimationFrame(followFrameRef.current);
+    followFrameRef.current = null;
+  }, []);
+
+  const schedulePhysicalBottomFollow = useCallback(() => {
+    if (followFrameRef.current !== null) return;
+    followFrameRef.current = requestAnimationFrame(() => {
+      followFrameRef.current = null;
+      followPhysicalBottomNow();
+    });
+  }, [followPhysicalBottomNow]);
+
   const followAfterLiveCommit = useCallback(() => {
-    followPhysicalBottomIfEligible();
-  }, [followPhysicalBottomIfEligible]);
+    schedulePhysicalBottomFollow();
+  }, [schedulePhysicalBottomFollow]);
 
   const handleAtBottomStateChange = useCallback((atBottom: boolean) => {
     scheduleScrollMetrics();
@@ -132,7 +147,6 @@ export function useChatScrollController(
       store.setInitialReady(true);
       transition({ type: "INITIAL_READY" });
       chatTelemetry.record({ time: Date.now(), kind: "initial_bottom" });
-      followPhysicalBottomIfEligible();
       return;
     }
     if (store.userHeightMutation) {
@@ -144,26 +158,25 @@ export function useChatScrollController(
       userIntentUntilRef.current = 0;
       return;
     }
-    if (!atBottom && store.followMode === "following") {
-      followPhysicalBottomIfEligible();
-    }
     if (atBottom && store.followMode === "returning") {
       transition({ type: "RETURN_DONE" });
     }
-  }, [followPhysicalBottomIfEligible, scheduleScrollMetrics, transition]);
+  }, [scheduleScrollMetrics, transition]);
 
   const handleTotalListHeightChanged = useCallback(() => {
     scheduleScrollMetrics();
-    followPhysicalBottomIfEligible();
-  }, [followPhysicalBottomIfEligible, scheduleScrollMetrics]);
+    schedulePhysicalBottomFollow();
+  }, [schedulePhysicalBottomFollow, scheduleScrollMetrics]);
 
   const beginUserHeightMutation = useCallback(() => {
+    cancelScheduledFollow();
     useChatRuntimeStore.getState().beginUserHeightMutation();
-  }, []);
+  }, [cancelScheduledFollow]);
 
   const returnToBottom = useCallback(async () => {
     const state = useChatRuntimeStore.getState();
     if (!state.skeleton.length && !state.liveRows.length) return;
+    cancelScheduledFollow();
     transition({ type: "RETURN_START" });
     const distance = state.skeleton.length
       ? state.skeleton.length - 1 - state.visibleRange.endIndex
@@ -179,14 +192,15 @@ export function useChatScrollController(
       kind: "return_to_bottom",
       count: distance,
     });
-  }, [scrollToPhysicalBottom, transition]);
+  }, [cancelScheduledFollow, scrollToPhysicalBottom, transition]);
 
   const beginMinimapDrag = useCallback(() => {
     const state = useChatRuntimeStore.getState();
+    cancelScheduledFollow();
     minimapGenerationRef.current = state.generation;
     userIntentUntilRef.current = Number.POSITIVE_INFINITY;
     transition({ type: "MINIMAP_START" });
-  }, [transition]);
+  }, [cancelScheduledFollow, transition]);
 
   const previewMinimapScrollTop = useCallback((scrollTop: number) => {
     if (!Number.isFinite(scrollTop) || scrollTop < 0) return;
@@ -220,9 +234,14 @@ export function useChatScrollController(
   }, [previewMinimapScrollTop, scrollToPhysicalBottom, transition]);
 
   useEffect(() => {
+    if (followMode !== "following") cancelScheduledFollow();
+  }, [cancelScheduledFollow, followMode]);
+
+  useEffect(() => {
     const scroller = scrollerElement;
     if (!scroller) return;
     const markIntent = () => {
+      cancelScheduledFollow();
       userIntentUntilRef.current = performance.now() + 700;
     };
     const onPointerDown = (event: PointerEvent) => {
@@ -265,8 +284,9 @@ export function useChatScrollController(
         cancelAnimationFrame(metricsFrameRef.current);
         metricsFrameRef.current = null;
       }
+      cancelScheduledFollow();
     };
-  }, [scheduleScrollMetrics, scrollerElement]);
+  }, [cancelScheduledFollow, scheduleScrollMetrics, scrollerElement]);
 
   return {
     followMode,

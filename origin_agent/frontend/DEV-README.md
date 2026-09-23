@@ -174,7 +174,7 @@ frontend/
 | `useWebSocket.ts` | WebSocket 连接编排与低频会话状态桥接；聊天事件写入 `chatRuntimeStore`，流式增量经 `StreamFrameBuffer` 按动画帧提交；所有 user/assistant/tool/system 实时行使用明确 History 映射或保留为可诊断未映射行；工具请求和结果按 `tool_call_id` 幂等更新同一工具调用卡片；`agentspace_event`通过页面事件总线扇出给三个会话视觉 hook；关键请求超时显示持久通知并在 WebSocket可用时上报脱敏诊断；Agent 忙碌时仍允许消息进入后端 FIFO；`history_sync.processing` 的 true/false 均作为服务端权威值覆盖本地处理状态；永久删除只在 HTTP 明确成功后移除会话项，失败保留会话并显示错误，删除当前会话固定切换到“随意聊聊” |
 | `features/chat/chatRuntimeStore.ts` | Zustand 聊天运行时唯一高频状态：完整骨架、内容行、live 尾部、输入草稿、pending、滚动与资源；通用 `liveId → historyRowId`关联把user/assistant/tool/system实时行提升到skeleton正典位置，工具请求和结果按 `tool_call_id` 幂等合并为同一工具调用卡片，REST内容页随后覆盖临时内容；未映射或History失败的行不按版本号清理；`toggleMessageCollapse(id, source)`分别维护历史与实时折叠状态 |
 | `features/chat/chatRuntimeController.ts` | History skeleton/page 请求代际、Abort、页去重、正典同步、15秒超时局部错误与诊断 reporter、Minimap 随机目标和资源懒加载 |
-| `features/chat/useChatScrollController.ts` | `initializing/following/detached/minimap_dragging/returning` 五态追底与回底控制 |
+| `features/chat/useChatScrollController.ts` | `initializing/following/detached/minimap_dragging/returning` 五态追底与回底控制；实时提交和列表高度变化通过可取消、按浏览器帧合并的被动追底调度读取 Virtuoso scroller 物理底部；用户意图、小地图拖拽、消息高度操作和非 `following` 状态会取消待执行帧 |
 | `useLlmProfiles.ts` | 从服务端读取 Profile；提供单对象创建/编辑/删除；浏览器仅持久化活动 Profile 名称；审批 Profile与全局元数据 Profile使用服务端权威 REST 状态和 WebSocket广播 |
 | `useWebSocketConnection.ts` | WebSocket 连接生命周期管理：建立/断开/重连/心跳；会话状态预检和握手复检使用可取消15秒截止，超时报告后不误判删除；消息入口按连接代际和当前 WebSocket 实例丢弃旧连接迟到消息，避免快速切换会话时污染当前状态；普通断开保留指数退避重连，永久删除的已建立连接按 4004 停止重连，握手拒绝则通过 `status.exists`二次确认后通知上层切换“随意聊聊” |
 | `useSessionStore.ts` | 会话列表与低频元数据管理：获取/创建/归档/删除/标签/标题；审批模式、任务资源、Shell/Cron 和交互队列；自动标题/标签/摘要/终结/合并错误通过全局操作通知展示，终结元数据警告不改变归档成功；主聊天消息、输入草稿与 pending 已迁移到 chat runtime store |
@@ -203,7 +203,7 @@ frontend/
 ## 主聊天历史数据流
 
 - 主聊天默认水平间距使用 `.chat-area` 的 `--chat-message-inline-inset`：只有历史行添加 `.chat-history-row--history`，其左右内边距为变量的两倍；实时行则由 Footer 和行各提供一次内边距，使相同 Role 的新旧消息保持同一水平起点。
-- 实时 Footer 末尾的 120px 留白属于完整列表的物理底部；被动追随只由 `useChatScrollController` 管理，实时内容提交后的布局阶段和列表高度变化使用同一个幂等追底入口。用户主动离底或主动改变消息高度时不追随。
+- 实时 Footer 末尾的 120px 留白属于完整列表的物理底部；被动追随只由 `useChatScrollController` 管理，实时内容提交和列表高度变化只申请一个按浏览器帧合并的追底任务，执行时重新读取 Virtuoso scroller 的最新物理指标。用户主动离底、主动改变消息高度或开始小地图拖拽时会取消待执行任务并停止被动追随；`atBottomStateChange(false)` 只报告布局状态，不独立派生追底任务。
 
 - Gateway 通过 `history_sync` 只发送正典 History 元数据；前端 REST 取得全历史骨架和可见范围历史内容页。会话状态预检、骨架和内容页请求等待超过15秒会被主动中止：History显示局部错误与重试，顶层显示持久通知；WebSocket可用时同时上报不含正文、工具参数、附件或密钥的客户端传输诊断，Gateway只写 warning且不写聊天 History。
 - 全历史骨架始终保留完整逻辑顺序；Virtuoso 只挂载可视区附近行，离屏 iframe、Mermaid 和播放器会卸载并可在滚回时重建。
@@ -211,7 +211,7 @@ frontend/
 - `stream_done` 先使 live 行进入待结束状态；`ChatLiveFooter` 在布局阶段只对结束瞬间与当前聊天区视口有正面积交集的普通 Agent 长回复记录展开选择，之后再固化流。视口外、工具消息与短消息维持既有规则；用户手动收起优先。滚出视口不会自动折叠。
 - 后端在写入 History 后、`history_sync` 前通过 `system.stream_meta`发送 `stream_id`、`history_index`和`live_history_links`权威关联；用户消息使用 `USER_MESSAGE.index`，工具结果使用实际 History 索引。前端在 skeleton 已存在目标行时把实时消息提升到正典位置，REST内容页覆盖临时内容后移除实时行；目标缺失或请求失败时保留原实时行并报告诊断，不按正文或顺序猜配。
 - 工具消息与普通长消息统一使用气泡 `collapsed` 状态，但入口互斥：工具摘要切换工具详情，普通长消息底部按钮切换正文限高；流式工具消息默认折叠且允许摘要展开/收起。历史页重取按相同 History 行 ID 保留用户折叠选择；其他未命中视口保护的 live 行在正典交接时恢复默认折叠。UI 折叠不提高 live 正典版本，避免交接后留下重复气泡。
-- 位于底部时被动内容增长继续追底；追底使用 Virtuoso scroller 的物理底部而不是只对齐最后一个正典数据项，因此空骨架的新会话和动态 live Footer 同样有效。用户主动离开底部后不追随。近距离回底平滑，远距离先加载最新页再瞬时定位。
+- 位于底部时被动内容增长继续追底；追底使用 Virtuoso scroller 的物理底部而不是只对齐最后一个正典数据项，因此空骨架的新会话和动态 live Footer 同样有效。最新流式消息即使超过一个视口，也不切换到消息顶部；实时提交与列表高度变化在同一浏览器帧内最多合并一次物理底部定位，避免长消息高度变化与 Virtuoso 校正互相竞争。用户主动离开底部后不追随。近距离回底平滑，远距离先加载最新页再瞬时定位。
 - 主聊天区逻辑 Minimap 同时绘制正典骨架和当前 live 行；拖动到 live 尾部等价于回到底部。
 - `features/chat/useChatScrollController.ts` 统一从 Virtuoso scroller 采集 `scrollTop`、`scrollHeight`、`clientHeight`，供 Minimap 物理高亮与拖拽使用；拖动期间抑制内容页请求，释放时以最终物理位置反查目标范围。
 - 主聊天区 Minimap 的 Canvas 背景按已测量/骨架估算消息高度加权绘制；高亮和拖拽只使用 scroller 的 `scrollTop` / `scrollHeight` / `clientHeight` 物理指标，估算高度不反向修改 Virtuoso 或追底位置。极薄高亮保持真实比例，另以透明扩展命中区保留可抓取性。子会话 Legacy Minimap 保留原 DOM 几何实现。
