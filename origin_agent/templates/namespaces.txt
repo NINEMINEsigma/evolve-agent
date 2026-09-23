@@ -1,8 +1,5 @@
 # File Space Namespaces
 
-All tool file operations must use logical path prefixes — bare paths, ``..``, and
-absolute paths are forbidden. Every prefix maps to a real directory under the project root.
-
 ## Read-Write Namespaces
 
 These namespaces allow both reading and writing (unless a mode restriction applies).

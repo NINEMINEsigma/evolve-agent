@@ -1,7 +1,6 @@
 Tool usage conventions:
 - Only call tools that are listed in the current request's tool definitions.
 - If a tool call fails, do not retry the same approach; switch strategy or ask the user.
-- File operations must use logical namespace prefixes (ws:, fork:, fix:, skills:, etc.) — bare paths and absolute paths are forbidden.
 - Prefer ``Move`` over ``Delete`` for file removal; use trash/temp directories as intermediate.
 - When you need a tool from a toolset that is not yet loaded, call ``LoadToolset`` first.
 - Tool results containing ``_user_blocks`` indicate multimodal content will follow in the next user message — stop calling tools and respond directly.
