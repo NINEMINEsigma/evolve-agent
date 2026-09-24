@@ -156,6 +156,41 @@ export interface VideoContentBlock {
 export type ContentBlock = TextContentBlock | ImageContentBlock | AudioContentBlock | VideoContentBlock;
 export type MessageContent = string | ContentBlock[];
 
+export type MainSessionActivitySource =
+  | "user_message"
+  | "dynamic_endpoint"
+  | "subagent_feedback"
+  | "cron"
+  | "regenerate"
+  | "resume"
+  | "other"
+  | "mixed";
+
+export type MainSessionActivityPhase =
+  | "queued"
+  | "preparing"
+  | "waiting_first_token"
+  | "streaming"
+  | "waiting_approval"
+  | "waiting_tool";
+
+export interface MainSessionActivitySnapshot {
+  activity_id: string;
+  revision: number;
+  source: MainSessionActivitySource;
+  phase: MainSessionActivityPhase;
+  stream_id?: string | null;
+  character_name?: string | null;
+}
+
+export interface SessionRuntimeStatus {
+  session_id: string;
+  exists: boolean;
+  occupied: boolean;
+  processing: boolean;
+  activity?: MainSessionActivitySnapshot | null;
+}
+
 export type ApprovalMode = "manual" | "handsfree" | "yolo";
 export type ApprovalModeSyncStatus = "loading" | "ready" | "unavailable";
 

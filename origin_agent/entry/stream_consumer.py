@@ -12,7 +12,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
-from typing import Any, TYPE_CHECKING
+from typing import Any, Awaitable, Callable, TYPE_CHECKING
 
 from abstract.llm.client import BaseLLMClient
 from entity.puretype import LLMResponse, Usage, ToolCallRequest, MessageMetrics
@@ -126,6 +126,7 @@ class StreamConsumer:
         stream_id: str,
         *,
         last_user_message: CharacterConversationMessage | None = None,
+        on_first_chunk: Callable[[str], Awaitable[None]] | None = None,
     ) -> LLMResponse:
         """消费流式响应，返回聚合后的 LLMResponse。"""
         llm = self._llm
@@ -142,6 +143,7 @@ class StreamConsumer:
             "prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0,
         }
         stream_error: str | None = None
+        first_chunk_seen: bool = False
 
         # 计时变量 — 基于 time.monotonic() 增量到达时间记录
         reasoning_start_ts: float | None = None
@@ -201,6 +203,19 @@ class StreamConsumer:
                 if chunk.error:
                     stream_error = chunk.error
                     break
+
+                if not first_chunk_seen:
+                    first_chunk_seen = True
+                    if on_first_chunk is not None:
+                        try:
+                            await on_first_chunk(stream_id)
+                        except Exception:
+                            logger.warning(
+                                "Failed to mark first LLM stream chunk | session=%s stream=%s",
+                                session_id,
+                                stream_id,
+                                exc_info=True,
+                            )
 
                 if chunk.content_delta:
                     if content_start_ts is None:

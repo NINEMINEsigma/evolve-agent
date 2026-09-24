@@ -19,7 +19,11 @@ from entity.messages import (
     History,
     CharacterConversationMessage,
 )
-from entity.puretype import Role, ToolAvailability, AgentConfig, LoopMeta, Loop, TokenUsageRecord, MessageContent, LLMProfile, QueuedMessage, SessionTerminationResult
+from entity.puretype import (
+    Role, ToolAvailability, AgentConfig, LoopMeta, Loop, TokenUsageRecord,
+    MessageContent, LLMProfile, QueuedMessage, SessionTerminationResult,
+    MainSessionActivitySource, MainSessionActivityPhase,
+)
 from entity.constant import (
     MAIN_AGENT_CHARACTER_NAME,
     USER_CHARACTER_NAME,
@@ -38,7 +42,7 @@ from system.prompt import (
 )
 from entry.base_agent_loop import BaseAgentLoop, IMainSessionLoop
 from entry.multi_agent_worker import WorkerResult, MultiAgentWorker
-from entry.session_message_queue import SessionMessageQueue
+from entry.session_message_queue import SessionMessageQueue, activity_source_for_items
 from entry.stream_history_link import emit_stream_history_link
 from entry.agent_support.multimodal import content_to_text, summarize_message_for_log, blocks_from_dicts
 
@@ -402,97 +406,86 @@ class MultiAgentLoop(BaseAgentLoop, IMainSessionLoop):
         character_name: str = USER_CHARACTER_NAME,
         visible_characters: list[str] | None = None,
         response_characters: list[str] | None = None,
+        activity_source: MainSessionActivitySource = MainSessionActivitySource.other,
+        activity_id: str | None = None,
         **kwargs,
     ) -> str:
-        """处理用户消息入口。
-
-        每轮用户消息触发一次级联对话：
-        1. 追加用户消息到 History（skip_append 为 True 时跳过）
-        2. 以指定的 response_characters 为初始响应者启动级联
-           - 若为 None，默认所有 Agent 响应
-        3. 各 Agent 回复已通过 sink 独立推送前端，本方法返回空字符串
-
-        visible_characters / response_characters 由用户从前端指定；
-        未指定时默认对全体可见、全体响应。
-        """
-        # 新消息到达时重置中断状态，允许用户从停止状态恢复
+        """处理用户消息入口；整个串行级联共享一次主会话活动。"""
         self._cancel_event.clear()
         self._disgust_event.clear()
-        async with self._process_lock:
-            current_task = asyncio.current_task()
-            self.register_round_task(current_task)
-            self._processing = True
-            try:
-                # 发送前强制配对：清理上次中断/异常残留的无配对 tool_calls
-                # （multi_agent 不走 build_full_history_messages，此处为唯一清理点）
-                self._history.remove_unpaired_tool_calls()
-                self.save_history(self.session_id)
-                if self.is_interrupted():
-                    logger.warning(
-                        "process_message skipped: loop interrupted | session=%s",
-                        self.session_id,
-                    )
-                    return ""
-
-                # 用户消息的可见角色 — "all-agents" 简写展开
-                _visible = visible_characters if visible_characters else self._agent_names
-                from entity.constant import ALL_AGENTS_CHARACTER_REF_NAME
-                if _visible == [ALL_AGENTS_CHARACTER_REF_NAME]:
-                    _visible = self._agent_names
-                # 初始响应角色
-                _response = response_characters if response_characters else self._agent_names
-                if _response == [ALL_AGENTS_CHARACTER_REF_NAME]:
-                    _response = self._agent_names
-
-                logger.info(
-                    "Received user message | session=%s content=%s visible=%s response=%s",
-                    self.session_id, summarize_message_for_log(user_message), _visible, _response,
+        active_id = activity_id or self.ensure_main_session_activity(activity_source)
+        try:
+            async with self._process_lock:
+                current_task = asyncio.current_task()
+                self.register_round_task(current_task)
+                self._processing = True
+                self.set_main_session_activity_phase(
+                    active_id,
+                    MainSessionActivityPhase.preparing,
+                    stream_id=None,
                 )
-
-                # 追加用户消息
-                if not skip_append:
-                    await self.append_user_message(
-                        user_message,
-                        visible_characters=_visible,
-                        response_characters=_response,
-                    )
-                    logger.info(
-                        "Appended user message to history | session=%s visible=%s",
-                        self.session_id, _visible,
-                    )
-
-                # 以用户指定的角色（或全体）作为初始响应者
-                await self._cascade(_response)
-
-                # 超限检测触发后旋转会话
-                if self._token_record.prompt_tokens > 0 and self._is_context_over_limit():
-                    logger.warning(
-                        "Context limit reached after cascade, rotating | session=%s",
-                        self.session_id,
-                    )
-                    if not await self._try_rotate_session_for_context_limit():
+                try:
+                    # 发送前强制配对：清理上次中断/异常残留的无配对 tool_calls
+                    self._history.remove_unpaired_tool_calls()
+                    self.save_history(self.session_id)
+                    if self.is_interrupted():
+                        logger.warning(
+                            "process_message skipped: loop interrupted | session=%s",
+                            self.session_id,
+                        )
                         return ""
 
-                # 收集本轮所有 Agent 的回复（用户消息之后的消息）
-                responses: list[str] = []
-                for msg in self._history.iter_messages():
-                    if isinstance(msg, CharacterConversationMessage) and msg.role == Role.ASSISTANT:
-                        if msg.character_name in self._agents:
-                            text = msg.content if isinstance(msg.content, str) else str(msg.content)
-                            responses.append(f"[{msg.character_name}]: {text}")
+                    _visible = visible_characters if visible_characters else self._agent_names
+                    if _visible == [ALL_AGENTS_CHARACTER_REF_NAME]:
+                        _visible = self._agent_names
+                    _response = response_characters if response_characters else self._agent_names
+                    if _response == [ALL_AGENTS_CHARACTER_REF_NAME]:
+                        _response = self._agent_names
 
-                logger.info(
-                    "Cascade completed | session=%s responses=%d",
-                    self.session_id, len(responses),
-                )
+                    logger.info(
+                        "Received user message | session=%s content=%s visible=%s response=%s",
+                        self.session_id, summarize_message_for_log(user_message), _visible, _response,
+                    )
 
-                # 每个 agent 已通过 emit_stream_delta + emit_stream_done 独立推送到前端，
-                # 不再需要在此返回拼接文本给 gateway 用于 assistant_message。
-                return ""
-            finally:
-                self._processing = False
-                self._cancel_event.clear()
-                self.unregister_round_task(current_task)
+                    if not skip_append:
+                        await self.append_user_message(
+                            user_message,
+                            visible_characters=_visible,
+                            response_characters=_response,
+                        )
+                        logger.info(
+                            "Appended user message to history | session=%s visible=%s",
+                            self.session_id, _visible,
+                        )
+
+                    await self._cascade(_response, activity_id=active_id)
+
+                    if self._token_record.prompt_tokens > 0 and self._is_context_over_limit():
+                        logger.warning(
+                            "Context limit reached after cascade, rotating | session=%s",
+                            self.session_id,
+                        )
+                        if not await self._try_rotate_session_for_context_limit():
+                            return ""
+
+                    responses: list[str] = []
+                    for msg in self._history.iter_messages():
+                        if isinstance(msg, CharacterConversationMessage) and msg.role == Role.ASSISTANT:
+                            if msg.character_name in self._agents:
+                                text = msg.content if isinstance(msg.content, str) else str(msg.content)
+                                responses.append(f"[{msg.character_name}]: {text}")
+
+                    logger.info(
+                        "Cascade completed | session=%s responses=%d",
+                        self.session_id, len(responses),
+                    )
+                    return ""
+                finally:
+                    self._processing = False
+                    self._cancel_event.clear()
+                    self.unregister_round_task(current_task)
+        finally:
+            self.finish_main_session_activity(active_id)
 
     # -- SP-4 会话消息队列接入 ------------------------------------------------
 
@@ -553,6 +546,7 @@ class MultiAgentLoop(BaseAgentLoop, IMainSessionLoop):
         if not items:
             return None
 
+        activity_id = self.ensure_main_session_activity(activity_source_for_items(items))
         current_task = asyncio.current_task()
         registered = False
         try:
@@ -560,6 +554,11 @@ class MultiAgentLoop(BaseAgentLoop, IMainSessionLoop):
                 self.register_round_task(current_task)
                 registered = True
                 self._processing = True
+                self.set_main_session_activity_phase(
+                    activity_id,
+                    MainSessionActivityPhase.preparing,
+                    stream_id=None,
+                )
                 try:
                     sid = self.session_id
                     queue = self._message_queue
@@ -609,7 +608,7 @@ class MultiAgentLoop(BaseAgentLoop, IMainSessionLoop):
                         )
                         if cascade_chars == [ALL_AGENTS_CHARACTER_REF_NAME]:
                             cascade_chars = list(self._agent_names)
-                        await self._cascade(cascade_chars)
+                        await self._cascade(cascade_chars, activity_id=activity_id)
                         if (
                             self._token_record.prompt_tokens > 0
                             and self._is_context_over_limit()
@@ -620,11 +619,13 @@ class MultiAgentLoop(BaseAgentLoop, IMainSessionLoop):
                 finally:
                     self._processing = False
                     self._cancel_event.clear()
+                    self.finish_main_session_activity(activity_id)
 
             if self._on_round_done is not None:
                 await self._on_round_done(self)
             return None
         finally:
+            self.finish_main_session_activity(activity_id)
             if registered:
                 self.unregister_round_task(current_task)
 
@@ -638,23 +639,32 @@ class MultiAgentLoop(BaseAgentLoop, IMainSessionLoop):
         """
         self._cancel_event.clear()
         self._disgust_event.clear()
-        async with self._process_lock:
-            current_task = asyncio.current_task()
-            self.register_round_task(current_task)
-            self._processing = True
-            try:
-                self._history.remove_unpaired_tool_calls()
-                self.save_history(self.session_id)
-                # 以全体 agent 为初始响应者重新启动级联
-                await self._cascade(list(self._agent_names))
-                if self._token_record.prompt_tokens > 0 and self._is_context_over_limit():
-                    if not await self._try_rotate_session_for_context_limit():
-                        return ""
-                return ""
-            finally:
-                self._processing = False
-                self._cancel_event.clear()
-                self.unregister_round_task(current_task)
+        activity_id = self.ensure_main_session_activity(MainSessionActivitySource.resume)
+        try:
+            async with self._process_lock:
+                current_task = asyncio.current_task()
+                self.register_round_task(current_task)
+                self._processing = True
+                self.set_main_session_activity_phase(
+                    activity_id,
+                    MainSessionActivityPhase.preparing,
+                    stream_id=None,
+                )
+                try:
+                    self._history.remove_unpaired_tool_calls()
+                    self.save_history(self.session_id)
+                    # 以全体 agent 为初始响应者重新启动级联
+                    await self._cascade(list(self._agent_names), activity_id=activity_id)
+                    if self._token_record.prompt_tokens > 0 and self._is_context_over_limit():
+                        if not await self._try_rotate_session_for_context_limit():
+                            return ""
+                    return ""
+                finally:
+                    self._processing = False
+                    self._cancel_event.clear()
+                    self.unregister_round_task(current_task)
+        finally:
+            self.finish_main_session_activity(activity_id)
 
     # -- 级联调度 ----------------------------------------------------------
 
@@ -681,6 +691,8 @@ class MultiAgentLoop(BaseAgentLoop, IMainSessionLoop):
     async def _cascade(
         self,
         response_characters: list[str],
+        *,
+        activity_id: str,
     ) -> None:
         """串行动态队列级联调度。
 
@@ -755,7 +767,11 @@ class MultiAgentLoop(BaseAgentLoop, IMainSessionLoop):
 
             # ── 执行单个 Agent ──
             try:
-                result = await self._run_single_agent(char, is_final_round=is_final)
+                result = await self._run_single_agent(
+                    char,
+                    activity_id=activity_id,
+                    is_final_round=is_final,
+                )
             except asyncio.CancelledError:
                 # 强制中断：不启动后续参与Agent，不追加路由结果，直接退出级联
                 logger.info(
@@ -905,7 +921,11 @@ class MultiAgentLoop(BaseAgentLoop, IMainSessionLoop):
     # -- 单 Agent 执行 -----------------------------------------------------
 
     async def _run_single_agent(
-        self, character_name: str, *, is_final_round: bool = False
+        self,
+        character_name: str,
+        *,
+        activity_id: str,
+        is_final_round: bool = False,
     ) -> WorkerResult:
         """启动单个 Agent 的 tool loop + JSON 输出。
 
@@ -982,6 +1002,7 @@ class MultiAgentLoop(BaseAgentLoop, IMainSessionLoop):
                 sink=self._sink,
                 loop=self,
                 round_id=round_id,
+                activity_id=activity_id,
                 max_context_tokens=profile.config.max_context_tokens,
                 max_output_tokens=profile.config.max_output_tokens,
                 llm_profile=profile.llm_profile,

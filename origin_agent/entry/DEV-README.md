@@ -215,6 +215,12 @@ sequenceDiagram
 
 ---
 
+### 主会话活动快照与首字前流式气泡
+
+`BaseAgentLoop` 持有不写入 History 的主会话活动快照，覆盖队列排队、准备、等待首字、流式生成、等待审批和等待工具。`activity_id` 标识一次主会话活动；一次活动可包含多个 `stream_id`，每个 `stream_id` 对应一条前端实时流式气泡。用户消息、动态端点、子会话反馈和 Cron 通过 `SessionMessageQueue` 在实际入队时登记活动；恢复、重新生成和多Agent级联复用同一活动生命周期。
+
+Gateway 的会话状态 REST 返回当前活动快照。前端在用户发送、恢复或重新生成时先创建乐观空 assistant 流式气泡，并在 WebSocket连接期间每秒轮询活动状态；连接恢复或页面重新可见时立即查询。首个 `stream_delta` 与轮询共用同一实时行收敛逻辑，换键到实际 `stream_id` 后继续复用已有气泡。WebSocket断开不等于 Loop空闲，重连后由活动快照恢复状态；空流在终态确定性清理。
+
 ## 会话旋转与上下文压缩
 
 当单一会话的总 token 接近模型窗口上限时：

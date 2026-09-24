@@ -1,4 +1,9 @@
-import type { ChatMessage, MessageContent, MessageMetrics, ToolCardStatus } from "../../types";
+import type {
+  ChatMessage,
+  MessageContent,
+  MessageMetrics,
+  ToolCardStatus,
+} from "../../types";
 
 export type HistoryRowKind = "message" | "tool_card";
 
@@ -122,6 +127,9 @@ export interface LiveChatRow {
   message: ChatMessage;
   streaming: boolean;
   frozen: boolean;
+  activityId?: string;
+  activityPlaceholder?: boolean;
+  provisional?: boolean;
   preserveExpanded?: boolean;
   collapseManuallyChanged?: boolean;
 }
@@ -130,6 +138,7 @@ export interface PendingStreamFinish {
   streamId: string;
   content?: string;
   metrics?: import("../../types").MessageMetrics;
+  finishReason?: string;
 }
 
 export interface StreamBatch {

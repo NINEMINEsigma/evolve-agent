@@ -75,6 +75,8 @@ from entity.puretype import (
     DynamicSandboxSpace,
     DynamicSandboxSpaceCreateRequest,
     DynamicSandboxSpaceUpdateRequest,
+    SessionRuntimeStatus,
+    MainSessionActivitySource,
 )
 from system.context import get_runtime_context
 from entry.parent_agent_loop import IncompatibleHistoryError
@@ -494,12 +496,7 @@ async def get_session_tool_resources(session_id: str):
 
 @app.get("/api/sessions/{session_id}/status")
 async def get_session_status(session_id: str, conn_token: str | None = None):
-    """Return session existence and WebSocket occupancy info.
-
-    用于前端在连接 WebSocket 前进行预检。删除中的会话按不存在处理，
-    使握手拒绝后的二次查询停止按旧 ID 自动重连。
-    conn_token 匹配时视为同标签页刷新，返回 occupied=False。
-    """
+    """返回会话存在性、占用状态和当前主会话活动快照。"""
     from system.application import Application
     sm = _get_sm()
     exists = bool(
@@ -511,7 +508,22 @@ async def get_session_status(session_id: str, conn_token: str | None = None):
     occupied: bool = bool(
         exists and sink and sink.is_session_occupied(session_id, conn_token)
     )
-    return {"session_id": session_id, "exists": exists, "occupied": occupied}
+    managed_loop = _get_loop(session_id) if exists else None
+    activity = (
+        managed_loop.loop.get_main_session_activity()
+        if managed_loop is not None
+        else None
+    )
+    processing = bool(
+        managed_loop is not None and managed_loop.loop.is_active()
+    )
+    return SessionRuntimeStatus(
+        session_id=session_id,
+        exists=exists,
+        occupied=occupied,
+        processing=processing,
+        activity=activity,
+    )
 
 
 @app.get("/api/sessions/{session_id}/subagents")
@@ -923,9 +935,18 @@ async def regenerate_response(session_id: str, req: Request):
             status_code=400,
         )
 
-    # Profile 切换成功后才截断历史并刷新扩展块。
-    result = loop.loop.regenerate_response(message_index)
+    # Profile 切换成功后、截断 History 前登记活动；失败时由 Gateway 收回。
+    activity_id = loop.loop.ensure_main_session_activity(
+        MainSessionActivitySource.regenerate,
+        character_name=loop.current_character_agent,
+    )
+    try:
+        result = loop.loop.regenerate_response(message_index)
+    except Exception:
+        loop.loop.finish_main_session_activity(activity_id)
+        raise
     if not result.get("regenerate"):
+        loop.loop.finish_main_session_activity(activity_id)
         return HTMLResponse(
             json.dumps(result, ensure_ascii=False),
             media_type="application/json",
@@ -963,6 +984,8 @@ async def regenerate_response(session_id: str, req: Request):
         skip_append=True,
         visible_characters=result.get("visible_characters"),
         response_characters=result.get("response_characters"),
+        activity_source=MainSessionActivitySource.regenerate,
+        activity_id=activity_id,
     )
     from system.application import Application
     sink = Application.current().frontend_sink
@@ -978,7 +1001,7 @@ async def regenerate_response(session_id: str, req: Request):
                         type=MessageType.HISTORY_SYNC,
                         session_id=session_id,
                         history_count=loop.loop.history.count,
-                        processing=loop.loop.is_processing(),
+                        processing=loop.loop.is_active(),
                         token_usage=loop.get_token_usage(),
                         context_tokens=loop.get_context_tokens(),
                     ).model_dump(exclude_none=True),
@@ -1032,7 +1055,7 @@ async def resume_session_endpoint(session_id: str):
                         type=MessageType.HISTORY_SYNC,
                         session_id=session_id,
                         history_count=loop.loop.history.count,
-                        processing=loop.loop.is_processing(),
+                        processing=loop.loop.is_active(),
                         token_usage=loop.get_token_usage(),
                         context_tokens=loop.get_context_tokens(),
                     ).model_dump(exclude_none=True),
@@ -2672,7 +2695,7 @@ async def ws_chat(ws: WebSocket) -> None:
                         type=MessageType.HISTORY_SYNC,
                         session_id=sid,
                         history_count=loop.loop.history.count,
-                        processing=loop.loop.is_processing(),
+                        processing=loop.loop.is_active(),
                         token_usage=loop.get_token_usage(),
                         context_tokens=loop.get_context_tokens(),
                         agents=agents_info,

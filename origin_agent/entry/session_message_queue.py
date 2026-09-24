@@ -17,12 +17,38 @@ from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
 from entity.constant import SYSTEM_CHARACTER_NAME
-from entity.puretype import MessageContent, QueuedMessage
+from entity.puretype import (
+    MainSessionActivityPhase,
+    MainSessionActivitySource,
+    MessageContent,
+    QueuedMessage,
+)
 
 if TYPE_CHECKING:
     from entry.base_agent_loop import IMainSessionLoop
 
 logger = logging.getLogger(__name__)
+
+
+_QUEUE_ACTIVITY_SOURCES: dict[str, MainSessionActivitySource] = {
+    "ws": MainSessionActivitySource.user_message,
+    "dynamic-endpoint": MainSessionActivitySource.dynamic_endpoint,
+    "subagent": MainSessionActivitySource.subagent_feedback,
+    "cron": MainSessionActivitySource.cron,
+}
+
+
+def activity_source_for_items(items: list[QueuedMessage]) -> MainSessionActivitySource:
+    """把一个 drained 批次的队列来源归一化为单一活动来源。"""
+    sources = {
+        _QUEUE_ACTIVITY_SOURCES.get(item.source, MainSessionActivitySource.other)
+        for item in items
+    }
+    if not sources:
+        return MainSessionActivitySource.other
+    if len(sources) > 1:
+        return MainSessionActivitySource.mixed
+    return next(iter(sources))
 
 
 class SessionMessageQueue:
@@ -87,6 +113,13 @@ class SessionMessageQueue:
     ) -> None:
         """事件循环线程内的入队 + 唤醒（无回显——回显移到消费侧）。"""
         self._pending.append(item)
+        source = _QUEUE_ACTIVITY_SOURCES.get(
+            item.source,
+            MainSessionActivitySource.other,
+        )
+        current = self._loop.loop.get_main_session_activity()
+        if current is None or current.phase == MainSessionActivityPhase.queued:
+            self._loop.loop.ensure_main_session_activity(source)
         self._ensure_consumer()
         if self._wakeup is not None:
             self._wakeup.set()

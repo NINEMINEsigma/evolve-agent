@@ -72,6 +72,10 @@ from .skills import (
 from .session import (
     Loop,
     SessionStatus,
+    MainSessionActivitySource,
+    MainSessionActivityPhase,
+    MainSessionActivitySnapshot,
+    SessionRuntimeStatus,
     LoopMeta,
     SessionInfo,
     SessionTerminationResult,
@@ -187,6 +191,10 @@ __all__ = [
     # session
     "Loop",
     "SessionStatus",
+    "MainSessionActivitySource",
+    "MainSessionActivityPhase",
+    "MainSessionActivitySnapshot",
+    "SessionRuntimeStatus",
     "LoopMeta",
     "SessionInfo",
     "SessionTerminationResult",
