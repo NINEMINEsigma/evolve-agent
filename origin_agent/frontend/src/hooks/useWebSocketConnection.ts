@@ -17,6 +17,7 @@ export interface WebSocketConnectionHandlers {
 export interface WebSocketConnection {
   wsRef: React.RefObject<WebSocket | null>;
   status: string;
+  connected: boolean;
   setStatus: React.Dispatch<React.SetStateAction<string>>;
   connect: (resumeSid?: string) => Promise<void>;
   send: (payload: unknown) => void;
@@ -35,6 +36,7 @@ export interface WebSocketConnection {
 
 export function useWebSocketConnection(): WebSocketConnection {
   const [status, setStatus] = useState("connecting...");
+  const [connected, setConnected] = useState(false);
   const [recvTick, setRecvTick] = useState(0);
   const [sessionLocked, setSessionLocked] = useState(false);
   const wsRef = useRef<WebSocket | null>(null);
@@ -71,6 +73,7 @@ export function useWebSocketConnection(): WebSocketConnection {
 
   const disconnect = useCallback(() => {
     manualRef.current = true;
+    setConnected(false);
     connectIdRef.current += 1; // Invalidate in-flight async connect pre-check
     statusRequestAbortRef.current?.abort();
     statusRequestAbortRef.current = null;
@@ -100,6 +103,7 @@ export function useWebSocketConnection(): WebSocketConnection {
       reconnectRef.current = 0;
       clearTimeout(timerRef.current);
       setSessionLocked(false);
+      setConnected(false);
       setStatus("会话已删除");
       handlersRef.current.onSessionDeleted?.();
     };
@@ -148,6 +152,7 @@ export function useWebSocketConnection(): WebSocketConnection {
 
     if (myId !== connectIdRef.current) return; // Stale request
     setSessionLocked(false);
+    setConnected(false);
     wasOpenRef.current = false;
     lastSidRef.current = lastSid || undefined;  // Full sid (incl. localStorage fallback) for handshake rejection detection
 
@@ -161,6 +166,7 @@ export function useWebSocketConnection(): WebSocketConnection {
       wasOpenRef.current = true;
       reconnectRef.current = 0;
       manualRef.current = false;
+      setConnected(true);
       setStatus("已连接");
       if (keepaliveRef.current) clearInterval(keepaliveRef.current);
       keepaliveRef.current = setInterval(() => {
@@ -172,6 +178,7 @@ export function useWebSocketConnection(): WebSocketConnection {
     };
 
     ws.onclose = (event) => {
+      setConnected(false);
       if (keepaliveRef.current) clearInterval(keepaliveRef.current);
 
       if (event.code === WS_CLOSE_SESSION_DELETED) {
@@ -264,6 +271,7 @@ export function useWebSocketConnection(): WebSocketConnection {
   return {
     wsRef,
     status,
+    connected,
     setStatus,
     connect,
     send,

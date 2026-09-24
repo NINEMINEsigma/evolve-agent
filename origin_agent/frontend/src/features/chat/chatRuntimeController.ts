@@ -142,7 +142,6 @@ class ChatRuntimeController {
       }
       if (!this.isCurrent(sessionId, generation)) return;
       useChatRuntimeStore.getState().reconcileCanonicalTail();
-      useChatRuntimeStore.getState().setProcessing(false);
       if (!current.initialReady) useChatRuntimeStore.getState().setInitialReady(true);
     } catch (error) {
       if (this.isAbort(error) || !this.isCurrent(sessionId, generation)) return;

@@ -16,7 +16,14 @@ from typing import Any, TYPE_CHECKING
 
 from pydantic import BaseModel, Field
 
-from entity.puretype import Role, MessageMetrics, LLMProfile, HistoryRowLink, SessionHistoryRowKind
+from entity.puretype import (
+    Role,
+    MessageMetrics,
+    LLMProfile,
+    HistoryRowLink,
+    SessionHistoryRowKind,
+    MainSessionActivityPhase,
+)
 from entity.gentype import RefWrapper
 from entity.messages import ToolResultMessage, CharacterConversationMessage, CharacterSystemMessage, FunctionCall, ToolCall as HistoryToolCall, BaseMessage
 from entity.constant import (
@@ -102,6 +109,7 @@ class MultiAgentWorker:
         sink: AgentSink,
         loop: IMainSessionLoop,
         round_id: str,
+        activity_id: str,
         max_context_tokens: int = 0,
         max_output_tokens: int = 0,
         llm_profile: LLMProfile | None = None,
@@ -115,6 +123,7 @@ class MultiAgentWorker:
         self._sink: AgentSink = sink
         self._loop: IMainSessionLoop = loop
         self._round_id: str = round_id
+        self._activity_id: str = activity_id
         # 流式消费器：每轮 LLM 调用会生成独立 stream_id，避免多轮文本互相覆盖
         self._stream_consumer = StreamConsumer(
             llm=self._llm,
@@ -227,6 +236,13 @@ class MultiAgentWorker:
             if self._loop.loop.is_interrupted():
                 return await self._error_result("Interrupted", stream_id=stream_id, collected_metrics=self._collected_metrics)
 
+            self._loop.loop.set_main_session_activity_phase(
+                self._activity_id,
+                MainSessionActivityPhase.waiting_first_token,
+                stream_id=stream_id,
+                character_name=self.character_name,
+            )
+
             logger.info(
                 "MultiAgentWorker turn start | session=%s character=%s turn=%d messages_len=%d",
                 self._loop.loop.session_id, self.character_name, turn, len(full_messages),
@@ -245,12 +261,21 @@ class MultiAgentWorker:
                 full_messages, _ctx, self._loop.loop.save_history,
             )
 
+            async def _mark_streaming(started_stream_id: str) -> None:
+                self._loop.loop.set_main_session_activity_phase(
+                    self._activity_id,
+                    MainSessionActivityPhase.streaming,
+                    stream_id=started_stream_id,
+                    character_name=self.character_name,
+                )
+
             try:
                 resp = await self._stream_consumer.consume(
                     self._loop.loop.session_id,
                     full_messages,
                     self._tools,
                     stream_id,
+                    on_first_chunk=_mark_streaming,
                 )
             except asyncio.CancelledError:
                 # 强制中断：固化当前参与Agent已显示的部分内容，然后上抛，
@@ -320,6 +345,12 @@ class MultiAgentWorker:
 
             # 有 tool_calls → 写入共享 History → 发送标准事件 → 执行工具 → 继续循环
             if resp.tool_calls:
+                self._loop.loop.set_main_session_activity_phase(
+                    self._activity_id,
+                    MainSessionActivityPhase.waiting_tool,
+                    stream_id=None,
+                    character_name=self.character_name,
+                )
                 # 1. 构造 History 格式的 ToolCall 列表
                 history_tool_calls: list[HistoryToolCall] = []
                 for tc in resp.tool_calls:
@@ -391,6 +422,7 @@ class MultiAgentWorker:
                             round_id=self._round_id,
                             character_name=self.character_name,
                             llm_profile=self._llm_profile,
+                            activity_id=self._activity_id,
                         )
 
                         # 写入共享 History
@@ -538,6 +570,12 @@ class MultiAgentWorker:
         """构造错误占位结果，同时推送错误文本到前端。"""
         text = f"[{self.character_name} 响应失败: {error}]"
         stream_id = stream_id or f"multi_{self.character_name}_{uuid.uuid4().hex[:8]}_error"
+        self._loop.loop.set_main_session_activity_phase(
+            self._activity_id,
+            MainSessionActivityPhase.streaming,
+            stream_id=stream_id,
+            character_name=self.character_name,
+        )
         await self._emit_text(text, stream_id=stream_id)
         return WorkerResult(
             character_name=self.character_name,

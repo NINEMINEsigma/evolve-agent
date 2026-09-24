@@ -850,7 +850,11 @@ classDiagram
 
 ---
 
-## Pydantic 数据模型
+### 主会话活动快照
+
+`BaseAgentLoop` 新增 `_main_session_activity` 与 `_main_session_activity_revision`，并提供 `ensure_main_session_activity()`、`set_main_session_activity_phase()`、`get_main_session_activity()`、`finish_main_session_activity()`、`is_active()`。`SessionMessageQueue`、`ParentAgentLoop`、`MultiAgentLoop`、`MultiAgentWorker`、`StreamConsumer` 和 `ToolExecutor` 只通过这些生命周期入口更新活动状态。Gateway 读取快照并返回给前端，前端不依赖新的 WebSocket 活动事件。
+
+### Pydantic 数据模型
 
 以下类继承 `pydantic.BaseModel`，属于纯数据结构或带轻量验证的响应模型：
 

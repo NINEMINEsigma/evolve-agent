@@ -118,6 +118,12 @@ WS /ws/chat?resume=<sid>
 
 ---
 
+### 主会话活动状态接口
+
+`GET /api/sessions/{session_id}/status` 除了返回 `exists` 和 `occupied`，还返回 `processing` 与非持久化 `activity` 快照。快照包含 `activity_id`、`revision`、`source`、`phase`、可空 `stream_id` 和可空 `character_name`。状态查询只读取已经存在的运行时 Loop，不会为了轮询隐式创建 Loop。
+
+`processing` 表示 Loop存在活动快照或已经进入处理状态；它覆盖队列排队窗口。WebSocket 的 `history_sync.processing` 保留兼容用途并使用相同活跃语义，首字前精细状态由前端活动状态轮询取得。
+
 ## REST API
 
 ### 会话管理

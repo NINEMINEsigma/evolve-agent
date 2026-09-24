@@ -30,5 +30,5 @@ If this binary is missing, blocked, corrupted, or fails its SHA-256 check, `Sear
 2. Verify the archive SHA-256 against the upstream `.sha256` file.
 3. Replace `rg.exe` in this directory with the archive's `rg.exe`.
 4. Compute the new `rg.exe` SHA-256.
-5. Update `SEARCH_RIPGREP_VERSION`, `SEARCH_RIPGREP_WINDOWS_X64_ARCHIVE_SHA256`, and `SEARCH_RIPGREP_EXE_SHA256` in `origin_agent/entity/constant.py`.
+5. Update `SEARCH_RIPGREP_VERSION`, `SEARCH_RIPGREP_WINDOWS_X64_ARCHIVE_SHA256`, and `SEARCH_RIPGREP_EXE_SHA256` in `origin_agent/entity/constant/`.
 6. Update this notice file with the new version, archive name, archive SHA-256, and executable SHA-256.

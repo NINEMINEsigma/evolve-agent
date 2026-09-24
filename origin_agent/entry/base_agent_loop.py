@@ -31,6 +31,9 @@ from entity.puretype import (
     MessageMetrics,
     QueuedMessage,
     MainSessionInterruptResult,
+    MainSessionActivitySource,
+    MainSessionActivityPhase,
+    MainSessionActivitySnapshot,
 )
 from entity.messages import (
     History,
@@ -315,6 +318,9 @@ class BaseAgentLoop(ABC):
         # 处理中标志：子类在 process_message 主体内置位/复位；
         # 供 /regenerate 端点做并发防护（is_processing）查询
         self._processing: bool = False
+        # 主会话活动快照只描述当前进程内运行状态，不进入 History 或持久化。
+        self._main_session_activity: MainSessionActivitySnapshot | None = None
+        self._main_session_activity_revision: int = 0
         # SP-4: 轮次互斥锁统一上移（原 ParentAgentLoop 私有）；会话消息队列设施（子类构造赋值）
         self._process_lock: asyncio.Lock = asyncio.Lock()
         self._message_queue: SessionMessageQueue | None = None
@@ -973,6 +979,100 @@ class BaseAgentLoop(ABC):
             return {"task_progress": {}, "clipboard_display": {}}
         return self._session_store.read_tool_resources(self.session_id)
 
+    # -- 主会话活动快照 --------------------------------------------------
+
+    def ensure_main_session_activity(
+        self,
+        source: MainSessionActivitySource,
+        *,
+        character_name: str | None = None,
+    ) -> str:
+        """创建或复用当前主会话活动；只有 queued 阶段允许合并来源。"""
+        current = self._main_session_activity
+        if current is not None:
+            updates: dict[str, Any] = {}
+            if (
+                current.phase == MainSessionActivityPhase.queued
+                and current.source != source
+                and current.source != MainSessionActivitySource.mixed
+            ):
+                updates["source"] = MainSessionActivitySource.mixed
+            if character_name and current.character_name != character_name:
+                updates["character_name"] = character_name
+            if updates:
+                self._main_session_activity_revision += 1
+                updates["revision"] = self._main_session_activity_revision
+                self._main_session_activity = current.model_copy(update=updates)
+            return current.activity_id
+
+        self._main_session_activity_revision = 1
+        activity_id = uuid.uuid4().hex
+        self._main_session_activity = MainSessionActivitySnapshot(
+            activity_id=activity_id,
+            revision=self._main_session_activity_revision,
+            source=source,
+            phase=MainSessionActivityPhase.queued,
+            character_name=character_name,
+        )
+        return activity_id
+
+    def set_main_session_activity_phase(
+        self,
+        activity_id: str,
+        phase: MainSessionActivityPhase,
+        *,
+        stream_id: str | None = None,
+        character_name: str | None = None,
+    ) -> None:
+        """更新匹配活动的阶段；None stream_id 明确解除当前流绑定。"""
+        current = self._main_session_activity
+        if current is None or current.activity_id != activity_id:
+            logger.debug(
+                "Ignored stale main-session activity update | session=%s requested=%s current=%s",
+                self.session_id,
+                activity_id,
+                current.activity_id if current else None,
+            )
+            return
+        next_character = character_name if character_name is not None else current.character_name
+        if (
+            current.phase == phase
+            and current.stream_id == stream_id
+            and current.character_name == next_character
+        ):
+            return
+        self._main_session_activity_revision += 1
+        self._main_session_activity = current.model_copy(update={
+            "revision": self._main_session_activity_revision,
+            "phase": phase,
+            "stream_id": stream_id,
+            "character_name": next_character,
+        })
+
+    def get_main_session_activity(self) -> MainSessionActivitySnapshot | None:
+        """返回当前活动的隔离副本，避免外部修改内部状态。"""
+        current = self._main_session_activity
+        return current.model_copy(deep=True) if current is not None else None
+
+    def finish_main_session_activity(self, activity_id: str) -> None:
+        """仅结束匹配活动；旧轮次收尾不能清除后续活动。"""
+        current = self._main_session_activity
+        if current is None:
+            return
+        if current.activity_id != activity_id:
+            logger.debug(
+                "Ignored stale main-session activity finish | session=%s requested=%s current=%s",
+                self.session_id,
+                activity_id,
+                current.activity_id,
+            )
+            return
+        self._main_session_activity = None
+
+    def is_active(self) -> bool:
+        """返回用户可见的主会话活跃状态，包含尚未取得处理锁的排队窗口。"""
+        return self._main_session_activity is not None or self._processing
+
     # -- IMainSessionLoop 默认实现 ----------------------------------------
 
     def pop_session_rotated(self) -> str | None:
@@ -1323,6 +1423,41 @@ class IMainSessionLoop(ABC):
         if isinstance(self, BaseAgentLoop):
             return self
         raise ValueError("current instance is not a BaseAgentLoop")
+
+    def ensure_main_session_activity(
+        self,
+        source: MainSessionActivitySource,
+        *,
+        character_name: str | None = None,
+    ) -> str:
+        return self.loop.ensure_main_session_activity(
+            source,
+            character_name=character_name,
+        )
+
+    def set_main_session_activity_phase(
+        self,
+        activity_id: str,
+        phase: MainSessionActivityPhase,
+        *,
+        stream_id: str | None = None,
+        character_name: str | None = None,
+    ) -> None:
+        self.loop.set_main_session_activity_phase(
+            activity_id,
+            phase,
+            stream_id=stream_id,
+            character_name=character_name,
+        )
+
+    def get_main_session_activity(self) -> MainSessionActivitySnapshot | None:
+        return self.loop.get_main_session_activity()
+
+    def finish_main_session_activity(self, activity_id: str) -> None:
+        self.loop.finish_main_session_activity(activity_id)
+
+    def is_active(self) -> bool:
+        return self.loop.is_active()
 
     @property
     @abstractmethod

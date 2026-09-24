@@ -15,11 +15,18 @@ import time
 from datetime import datetime
 from typing import Any, Awaitable
 
-from entity.puretype import Role, ToolCallMeta, ToolCallRequest, LLMProfile
+from entity.puretype import (
+    Role,
+    ToolCallMeta,
+    ToolCallRequest,
+    LLMProfile,
+    MainSessionActivityPhase,
+)
 from entity.gentype import RefWrapper
 from entity.constant import TOOL_TASK_CANCEL_CLEANUP_TIMEOUT
 from entity.messages import ToolResultMessage
 from entry.base_agent_loop import BaseAgentLoop, ToolContext, IMainSessionLoop
+from entry.agent_support.multimodal import legacy_tool_result_str_to_dict
 from entry.tool_post_dispatch import finalize_tool_result
 
 logger = logging.getLogger(__name__)
@@ -161,6 +168,7 @@ class ToolExecutor:
         round_id: str,
         character_name: str | None = None,
         llm_profile: LLMProfile | None = None,
+        activity_id: str | None = None,
     ) -> ToolResultMessage:
         """执行单个工具调用，返回 ToolResultMessage。
 
@@ -327,6 +335,13 @@ class ToolExecutor:
 
         # 审批流程
         _hooks_ctx = self._loop.loop.get_hooks_context(session_id)
+        if activity_id is not None:
+            self._loop.loop.set_main_session_activity_phase(
+                activity_id,
+                MainSessionActivityPhase.waiting_approval,
+                stream_id=None,
+                character_name=char_name,
+            )
 
         approval_start: float = time.monotonic()
         try:
@@ -344,9 +359,16 @@ class ToolExecutor:
             # 取消审批 task 触发 request_approval 的 CancelledError 分支，自行清理 pending confirms
             return _interrupted_result(tc, char_name, ti.phase)
         approval_duration_ms: int = int((time.monotonic() - approval_start) * 1000)
+        if activity_id is not None:
+            self._loop.loop.set_main_session_activity_phase(
+                activity_id,
+                MainSessionActivityPhase.waiting_tool,
+                stream_id=None,
+                character_name=char_name,
+            )
 
         _skip_dispatch = False
-        result: dict | str = {}
+        result: dict = {}
         if outcome.denied:
             result = outcome.deny_result or {"error": "Tool denied"}
             _skip_dispatch = True
@@ -389,12 +411,18 @@ class ToolExecutor:
                             llm_profile=llm_profile,
                         )
                         try:
-                            result = await self._await_or_cancel(
+                            dispatch_result = await self._await_or_cancel(
                                 tool_registry.async_dispatch(
                                     tc.name, args, context=ctx,
                                 ),
                                 "dispatch",
                             )
+                            if isinstance(dispatch_result, dict):
+                                result = dispatch_result
+                            elif isinstance(dispatch_result, str):
+                                result = legacy_tool_result_str_to_dict(dispatch_result)
+                            else:
+                                result = {"result": dispatch_result}
                         except ToolInterrupted as ti:
                             # 尽力 kill 子进程（run_command / run_python 登记的 Popen）
                             try:

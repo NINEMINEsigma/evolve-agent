@@ -139,6 +139,14 @@
 
 ---
 
+## §7 会话运行状态
+
+| 规范称谓 | 指代 | 英文锚点 |
+|---|---|---|
+| 主会话活动快照 | 当前主会话 Loop 的非持久化运行状态，包含活动来源、阶段、活动标识和当前 LLM 流标识；由前端通过会话状态 REST 查询 | main session activity snapshot |
+| 活动标识 | 一次主会话回复活动的 `activity_id`；一次活动可先后包含多个 `stream_id` | activity ID |
+| 流标识 | 单次 LLM 流式调用的 `stream_id`，对应一个前端实时 assistant 气泡和其 History 映射 | stream ID |
+
 ## §8 上下文管理
 
 | 规范称谓 | 定义 |

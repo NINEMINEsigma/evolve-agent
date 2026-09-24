@@ -1,5 +1,12 @@
 import { create } from "zustand";
-import type { ChatMessage, MessageContent, ToolCardResult } from "../../types";
+import type {
+  ChatMessage,
+  MainSessionActivitySnapshot,
+  MainSessionActivitySource,
+  MessageContent,
+  SessionRuntimeStatus,
+  ToolCardResult,
+} from "../../types";
 import type {
   ChatFollowMode,
   ChatHistoryPageError,
@@ -35,6 +42,7 @@ interface ChatRuntimeState {
   liveVersion: number;
   currentStreamId: string | null;
   processing: boolean;
+  mainSessionActivity: MainSessionActivitySnapshot | null;
   draftHtml: string;
   draftText: string;
   pendingMessages: Record<string, PendingChatMessage>;
@@ -66,10 +74,14 @@ interface ChatRuntimeState {
   upsertLiveToolCall: (toolCallId: string, toolName: string | undefined, args: Record<string, unknown> | undefined, characterName?: string) => void;
   completeLiveToolCall: (toolCallId: string, toolName: string | undefined, result: ToolCardResult, characterName?: string) => void;
   applyStreamBatch: (batch: StreamBatch) => void;
-  queueStreamFinish: (streamId: string, content?: string, metrics?: import("../../types").MessageMetrics) => void;
-  finishStream: (streamId: string, content?: string, metrics?: import("../../types").MessageMetrics, visibleAtFinish?: boolean) => void;
+  queueStreamFinish: (streamId: string, content?: string, metrics?: import("../../types").MessageMetrics, finishReason?: string) => void;
+  finishStream: (streamId: string, content?: string, metrics?: import("../../types").MessageMetrics, visibleAtFinish?: boolean, finishReason?: string) => void;
   reconcileCanonicalTail: () => void;
   clearLive: () => void;
+  beginOptimisticMainSessionActivity: (localId: string, source: MainSessionActivitySource) => void;
+  placeProvisionalActivityAfterUser: () => void;
+  reconcileMainSessionActivity: (status: SessionRuntimeStatus) => void;
+  clearMainSessionActivityPlaceholders: () => void;
   setProcessing: (processing: boolean) => void;
   setDraft: (html: string, text: string) => void;
   addPendingMessage: (clientMessageId: string, content: MessageContent) => void;
@@ -106,6 +118,7 @@ const initialState = {
   liveVersion: 0,
   currentStreamId: null as string | null,
   processing: false,
+  mainSessionActivity: null as MainSessionActivitySnapshot | null,
   draftHtml: "",
   draftText: "",
   pendingMessages: {} as Record<string, PendingChatMessage>,
@@ -168,6 +181,135 @@ const skeletonMatchesLive = (skeleton: HistorySkeletonRowDto, live: LiveChatRow)
   }
   if (expectedRole !== live.message.role) return false;
   return true;
+};
+
+const activityLiveId = (activityId: string): string => `activity:${activityId}`;
+
+const isSemanticallyEmptyActivityRow = (row: LiveChatRow): boolean => {
+  if (!row.activityPlaceholder) return false;
+  const message = row.message;
+  const contentEmpty = typeof message.content === "string"
+    ? message.content.trim().length === 0
+    : message.content.length === 0;
+  const rawArgsEmpty = !message.toolArgsRawMap
+    || Object.values(message.toolArgsRawMap).every((value) => !value);
+  return contentEmpty
+    && !message.reasoningContent?.trim()
+    && !message.toolName
+    && !message.toolArgs
+    && rawArgsEmpty
+    && !message.toolCard
+    && !message.imageMarkdown
+    && !message.downloadInfo
+    && !message.isSystemStatus;
+};
+
+type ActivityStreamState = Pick<
+  ChatRuntimeState,
+  | "liveRows"
+  | "rowHeights"
+  | "streamHistoryLinks"
+  | "pendingStreamFinishes"
+  | "currentStreamId"
+  | "mainSessionActivity"
+>;
+
+const resolveActivityStreamRow = (
+  state: ActivityStreamState,
+  streamId: string,
+  characterName: string | undefined,
+  version: number,
+): ActivityStreamState => {
+  const exact = state.liveRows.find((row) => row.id === streamId);
+  if (exact) {
+    return {
+      ...state,
+      currentStreamId: streamId,
+      liveRows: state.liveRows.map((row) => row.id === streamId
+        ? {
+            ...row,
+            activityId: state.mainSessionActivity?.activity_id ?? row.activityId,
+            provisional: state.mainSessionActivity ? false : row.provisional,
+            message: {
+              ...row.message,
+              characterName: characterName ?? row.message.characterName,
+            },
+          }
+        : row),
+    };
+  }
+
+  const activity = state.mainSessionActivity;
+  const authoritativeStream = activity?.stream_id || null;
+  const canAdoptPlaceholder = !authoritativeStream || authoritativeStream === streamId;
+  const candidate = canAdoptPlaceholder
+    ? state.liveRows.find((row) => row.activityPlaceholder
+        && row.streaming
+        && (row.provisional || !activity || row.activityId === activity.activity_id))
+    : undefined;
+
+  if (!candidate) {
+    const message: ChatMessage = {
+      role: "assistant",
+      content: "",
+      id: streamId,
+      characterName: characterName ?? activity?.character_name ?? undefined,
+    };
+    return {
+      ...state,
+      currentStreamId: streamId,
+      liveRows: [...state.liveRows, {
+        id: streamId,
+        version,
+        message,
+        streaming: true,
+        frozen: false,
+        activityId: activity?.activity_id,
+        activityPlaceholder: Boolean(activity),
+        provisional: false,
+      }],
+    };
+  }
+
+  const oldId = candidate.id;
+  const rowHeights = { ...state.rowHeights };
+  if (rowHeights[oldId] !== undefined) {
+    rowHeights[streamId] = rowHeights[oldId];
+    delete rowHeights[oldId];
+  }
+  const streamHistoryLinks = { ...state.streamHistoryLinks };
+  if (streamHistoryLinks[oldId] !== undefined) {
+    streamHistoryLinks[streamId] = streamHistoryLinks[oldId];
+    delete streamHistoryLinks[oldId];
+  }
+  const pendingStreamFinishes = { ...state.pendingStreamFinishes };
+  if (pendingStreamFinishes[oldId] !== undefined) {
+    pendingStreamFinishes[streamId] = {
+      ...pendingStreamFinishes[oldId],
+      streamId,
+    };
+    delete pendingStreamFinishes[oldId];
+  }
+  return {
+    ...state,
+    currentStreamId: streamId,
+    rowHeights,
+    streamHistoryLinks,
+    pendingStreamFinishes,
+    liveRows: state.liveRows.map((row) => row.id === oldId
+      ? {
+          ...row,
+          id: streamId,
+          activityId: activity?.activity_id ?? row.activityId,
+          provisional: false,
+          message: {
+            ...row.message,
+            id: streamId,
+            characterName: characterName ?? activity?.character_name ?? row.message.characterName,
+          },
+        }
+      : row),
+  };
 };
 
 export const useChatRuntimeStore = create<ChatRuntimeState>((set, get) => ({
@@ -441,9 +583,249 @@ export const useChatRuntimeStore = create<ChatRuntimeState>((set, get) => ({
     return { liveRows, contentByRowId, liveVersion: state.liveVersion + 1 };
   }),
 
+  beginOptimisticMainSessionActivity: (localId, source) => set((state) => {
+    if (state.mainSessionActivity || state.liveRows.some(
+      (row) => row.streaming && row.message.role === "assistant",
+    )) {
+      return state.processing ? state : { processing: true };
+    }
+    const activityId = `local:${localId}`;
+    const id = activityLiveId(activityId);
+    const version = state.liveVersion + 1;
+    const snapshot: MainSessionActivitySnapshot = {
+      activity_id: activityId,
+      revision: 0,
+      source,
+      phase: "queued",
+      stream_id: null,
+      character_name: null,
+    };
+    return {
+      mainSessionActivity: snapshot,
+      processing: true,
+      liveVersion: version,
+      liveRows: [...state.liveRows, {
+        id,
+        version,
+        message: { role: "assistant", content: "", id },
+        streaming: true,
+        frozen: false,
+        activityId,
+        activityPlaceholder: true,
+        provisional: true,
+      }],
+    };
+  }),
+
+  placeProvisionalActivityAfterUser: () => set((state) => {
+    const provisionalRows = state.liveRows.filter(
+      (row) => row.provisional && row.activityPlaceholder,
+    );
+    if (!provisionalRows.length) return state;
+    const remainingRows = state.liveRows.filter(
+      (row) => !(row.provisional && row.activityPlaceholder),
+    );
+    let lastUserIndex = -1;
+    remainingRows.forEach((row, index) => {
+      if (row.message.role === "user") lastUserIndex = index;
+    });
+    if (lastUserIndex < 0) return state;
+    remainingRows.splice(lastUserIndex + 1, 0, ...provisionalRows);
+    return { liveRows: remainingRows, liveVersion: state.liveVersion + 1 };
+  }),
+
+  reconcileMainSessionActivity: (status) => set((state) => {
+    const incoming = status.activity ?? null;
+    if (!status.processing && incoming === null) {
+      const removedIds = state.liveRows
+        .filter(isSemanticallyEmptyActivityRow)
+        .map((row) => row.id);
+      if (!removedIds.length && !state.mainSessionActivity && !state.processing) return state;
+      const removed = new Set(removedIds);
+      const rowHeights = { ...state.rowHeights };
+      const streamHistoryLinks = { ...state.streamHistoryLinks };
+      const pendingStreamFinishes = { ...state.pendingStreamFinishes };
+      for (const id of removed) {
+        delete rowHeights[id];
+        delete streamHistoryLinks[id];
+        delete pendingStreamFinishes[id];
+      }
+      return {
+        mainSessionActivity: null,
+        processing: false,
+        liveRows: state.liveRows.filter((row) => !removed.has(row.id)),
+        currentStreamId: state.currentStreamId && removed.has(state.currentStreamId)
+          ? null : state.currentStreamId,
+        rowHeights,
+        streamHistoryLinks,
+        pendingStreamFinishes,
+        liveVersion: removed.size ? state.liveVersion + 1 : state.liveVersion,
+      };
+    }
+    if (incoming === null) {
+      return state.processing === status.processing
+        ? state
+        : { processing: status.processing };
+    }
+
+    const current = state.mainSessionActivity;
+    if (
+      current
+      && current.activity_id === incoming.activity_id
+      && current.revision > incoming.revision
+    ) {
+      return state.processing ? state : { processing: true };
+    }
+    if (
+      current
+      && current.activity_id === incoming.activity_id
+      && current.revision === incoming.revision
+      && current.phase === incoming.phase
+      && current.stream_id === incoming.stream_id
+      && current.character_name === incoming.character_name
+    ) {
+      return state.processing ? state : { processing: true };
+    }
+
+    let liveRows = state.liveRows;
+    let rowHeights = state.rowHeights;
+    let streamHistoryLinks = state.streamHistoryLinks;
+    let pendingStreamFinishes = state.pendingStreamFinishes;
+    const replacingActivity = current
+      && !current.activity_id.startsWith("local:")
+      && current.activity_id !== incoming.activity_id;
+    if (replacingActivity) {
+      const removed = new Set(
+        liveRows.filter(isSemanticallyEmptyActivityRow).map((row) => row.id),
+      );
+      liveRows = liveRows.filter((row) => !removed.has(row.id));
+      if (removed.size) {
+        rowHeights = Object.fromEntries(
+          Object.entries(rowHeights).filter(([id]) => !removed.has(id)),
+        );
+        streamHistoryLinks = Object.fromEntries(
+          Object.entries(streamHistoryLinks).filter(([id]) => !removed.has(id)),
+        );
+        pendingStreamFinishes = Object.fromEntries(
+          Object.entries(pendingStreamFinishes).filter(([id]) => !removed.has(id)),
+        );
+      }
+    }
+    const provisional = liveRows.find((row) => row.provisional && row.activityPlaceholder);
+    if (provisional) {
+      liveRows = liveRows.map((row) => row.id === provisional.id
+        ? { ...row, activityId: incoming.activity_id, provisional: false }
+        : row);
+    }
+
+    let next: ActivityStreamState = {
+      liveRows,
+      rowHeights,
+      streamHistoryLinks,
+      pendingStreamFinishes,
+      currentStreamId: state.currentStreamId,
+      mainSessionActivity: incoming,
+    };
+
+    if (incoming.stream_id) {
+      next = resolveActivityStreamRow(
+        next,
+        incoming.stream_id,
+        incoming.character_name ?? undefined,
+        state.liveVersion + 1,
+      );
+    } else if (incoming.phase === "queued" || incoming.phase === "preparing") {
+      const existing = next.liveRows.find((row) => row.activityPlaceholder
+        && row.activityId === incoming.activity_id);
+      if (!existing) {
+        const id = activityLiveId(incoming.activity_id);
+        next = {
+          ...next,
+          liveRows: [...next.liveRows, {
+            id,
+            version: state.liveVersion + 1,
+            message: {
+              role: "assistant",
+              content: "",
+              id,
+              characterName: incoming.character_name ?? undefined,
+            },
+            streaming: true,
+            frozen: false,
+            activityId: incoming.activity_id,
+            activityPlaceholder: true,
+            provisional: false,
+          }],
+        };
+      }
+    } else {
+      const removed = new Set(
+        next.liveRows
+          .filter((row) => row.activityId === incoming.activity_id
+            && isSemanticallyEmptyActivityRow(row))
+          .map((row) => row.id),
+      );
+      if (removed.size) {
+        next = {
+          ...next,
+          liveRows: next.liveRows.filter((row) => !removed.has(row.id)),
+          rowHeights: Object.fromEntries(
+            Object.entries(next.rowHeights).filter(([id]) => !removed.has(id)),
+          ),
+          streamHistoryLinks: Object.fromEntries(
+            Object.entries(next.streamHistoryLinks).filter(([id]) => !removed.has(id)),
+          ),
+          pendingStreamFinishes: Object.fromEntries(
+            Object.entries(next.pendingStreamFinishes).filter(([id]) => !removed.has(id)),
+          ),
+          currentStreamId: next.currentStreamId && removed.has(next.currentStreamId)
+            ? null : next.currentStreamId,
+        };
+      }
+    }
+
+    return {
+      ...next,
+      processing: true,
+      liveVersion: state.liveVersion + 1,
+    };
+  }),
+
+  clearMainSessionActivityPlaceholders: () => set((state) => {
+    const removedIds = state.liveRows
+      .filter(isSemanticallyEmptyActivityRow)
+      .map((row) => row.id);
+    const removed = new Set(removedIds);
+    const rowHeights = { ...state.rowHeights };
+    const streamHistoryLinks = { ...state.streamHistoryLinks };
+    const pendingStreamFinishes = { ...state.pendingStreamFinishes };
+    for (const id of removed) {
+      delete rowHeights[id];
+      delete streamHistoryLinks[id];
+      delete pendingStreamFinishes[id];
+    }
+    return {
+      mainSessionActivity: null,
+      processing: false,
+      liveRows: state.liveRows.filter((row) => !removed.has(row.id)),
+      currentStreamId: state.currentStreamId && removed.has(state.currentStreamId)
+        ? null : state.currentStreamId,
+      rowHeights,
+      streamHistoryLinks,
+      pendingStreamFinishes,
+      liveVersion: removed.size ? state.liveVersion + 1 : state.liveVersion,
+    };
+  }),
+
   applyStreamBatch: (batch) => set((state) => {
     const version = state.liveVersion + 1;
-    const existing = state.liveRows.find((row) => row.id === batch.streamId);
+    const resolved = resolveActivityStreamRow(
+      state,
+      batch.streamId,
+      batch.characterName,
+      version,
+    );
+    const existing = resolved.liveRows.find((row) => row.id === batch.streamId);
     const base: ChatMessage = existing?.message ?? {
       role: "assistant",
       content: "",
@@ -467,32 +849,24 @@ export const useChatRuntimeStore = create<ChatRuntimeState>((set, get) => ({
       toolArgsRawMap: batch.toolArgs ? undefined : mergedToolArgsRawMap,
       activeToolCallKey: batch.toolArgs ? undefined : (batch.activeToolCallKey ?? base.activeToolCallKey),
     };
-    const liveRows = existing
-      ? state.liveRows.map((row) => row.id === batch.streamId
-          ? { ...row, version, message: nextMessage, streaming: true, frozen: false }
-          : row)
-      : [...state.liveRows, {
-          id: batch.streamId,
-          version,
-          message: nextMessage,
-          streaming: true,
-          frozen: false,
-        }];
     return {
-      liveRows,
+      ...resolved,
+      liveRows: resolved.liveRows.map((row) => row.id === batch.streamId
+        ? { ...row, version, message: nextMessage, streaming: true, frozen: false }
+        : row),
       liveVersion: version,
       currentStreamId: batch.streamId,
       processing: true,
     };
   }),
 
-  queueStreamFinish: (streamId, content, metrics) => set((state) => {
+  queueStreamFinish: (streamId, content, metrics, finishReason) => set((state) => {
     const live = state.liveRows.find((row) => row.id === streamId && row.streaming);
     if (!live || state.pendingStreamFinishes[streamId]) return state;
     return {
       pendingStreamFinishes: {
         ...state.pendingStreamFinishes,
-        [streamId]: { streamId, content, metrics },
+        [streamId]: { streamId, content, metrics, finishReason },
       },
       liveRows: state.liveRows.map((row) => row.id === streamId
         ? { ...row, message: { ...row.message, content: content || row.message.content } }
@@ -500,8 +874,10 @@ export const useChatRuntimeStore = create<ChatRuntimeState>((set, get) => ({
     };
   }),
 
-  finishStream: (streamId, content, metrics, visibleAtFinish = false) => {
+  finishStream: (streamId, content, metrics, visibleAtFinish = false, finishReason) => {
     set((state) => {
+      const queuedFinish = state.pendingStreamFinishes[streamId];
+      const effectiveFinishReason = finishReason ?? queuedFinish?.finishReason ?? "stop";
       const pendingStreamFinishes = { ...state.pendingStreamFinishes };
       delete pendingStreamFinishes[streamId];
       const existing = state.liveRows.find((row) => row.id === streamId);
@@ -524,6 +900,14 @@ export const useChatRuntimeStore = create<ChatRuntimeState>((set, get) => ({
           completionTokens: metrics?.completion_tokens ?? row.message.completionTokens,
           tokensPerSecond: metrics?.tokens_per_second ?? row.message.tokensPerSecond,
         };
+        const completedRow: LiveChatRow = { ...row, message };
+        const removeEmptyActivityStream = effectiveFinishReason.length > 0
+          && isSemanticallyEmptyActivityRow(completedRow);
+        if (removeEmptyActivityStream) {
+          delete rowHeights[row.id];
+          delete streamHistoryLinks[row.id];
+          continue;
+        }
         const text = typeof message.content === "string" ? message.content.trim() : "";
         const hasToolParameterStream = Boolean(message.toolName || message.toolArgs || message.toolArgsRawMap);
         const removeInvisibleToolStream = message.role === "assistant"
@@ -541,6 +925,8 @@ export const useChatRuntimeStore = create<ChatRuntimeState>((set, get) => ({
           && isLongChatMessage(message) && !row.collapseManuallyChanged;
         nextLiveRows.push({
           ...row, version, streaming: false, frozen: true,
+          activityPlaceholder: false,
+          provisional: false,
           preserveExpanded: row.preserveExpanded || preserveExpanded,
           message: preserveExpanded ? { ...message, collapsed: false } : message,
         });
@@ -569,6 +955,7 @@ export const useChatRuntimeStore = create<ChatRuntimeState>((set, get) => ({
     return {
       liveRows: [], currentStreamId: null, liveVersion: 0, rowHeights,
       pendingStreamFinishes: {}, streamHistoryLinks: {},
+      mainSessionActivity: null, processing: false,
     };
   }),
   setProcessing: (processing) => set({ processing }),

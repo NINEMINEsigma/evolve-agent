@@ -24,6 +24,7 @@ import { useLlmProfiles } from "./useLlmProfiles";
 import { useSessionStore, type SessionStore } from "./useSessionStore";
 import { publishChatAgentspaceEvent } from "../services/chatAgentspaceEventBus";
 import { clientDiagnosticFrame, routeChatTransportMessage } from "./chatTransportRouting";
+import { useMainSessionActivityPolling } from "../features/chat/useMainSessionActivityPolling";
 import { useSubagentManager } from "./useSubagentManager";
 import { useUploadManager, type UploadManager } from "./useUploadManager";
 import { useWebSocketConnection } from "./useWebSocketConnection";
@@ -86,6 +87,7 @@ export function useWebSocket() {
   });
   const llmProfiles = useLlmProfiles();
   const llmProfilesRef = useRef(llmProfiles);
+  useMainSessionActivityPolling(session.sessionId, conn.connected);
 
   const frameBufferRef = useRef<StreamFrameBuffer | null>(null);
   if (frameBufferRef.current === null) {
@@ -143,7 +145,7 @@ export function useWebSocket() {
     if (Array.isArray(message.agents)) sessionRef.current?.setAgents(message.agents);
     else if (message.agents === null) sessionRef.current?.setAgents([]);
     const historyCount = message.history_count ?? 0;
-    useChatRuntimeStore.getState().setProcessing(Boolean(message.processing));
+    if (message.processing) useChatRuntimeStore.getState().setProcessing(true);
     if (runtime.sessionId !== sid) {
       chatRuntimeController.beginSession(sid);
       useChatRuntimeStore.setState({ knownHistoryCount: historyCount });
@@ -204,8 +206,9 @@ export function useWebSocket() {
       if (streamId) {
         const store = useChatRuntimeStore.getState();
         const content = typeof message.content === "string" ? message.content : undefined;
-        if (hasMountedLiveFooter()) store.queueStreamFinish(streamId, content, message.metrics);
-        else store.finishStream(streamId, content, message.metrics, false);
+        const finishReason = message.finish_reason || "stop";
+        if (hasMountedLiveFooter()) store.queueStreamFinish(streamId, content, message.metrics, finishReason);
+        else store.finishStream(streamId, content, message.metrics, false, finishReason);
       }
       streamDoneSeenRef.current = true;
       return;
@@ -232,6 +235,7 @@ export function useWebSocket() {
         console.error("USER_MESSAGE缺少有效History index", { sessionId: useChatRuntimeStore.getState().sessionId, liveId });
       }
       if (clientId) useChatRuntimeStore.getState().removePendingMessages([clientId]);
+      useChatRuntimeStore.getState().placeProvisionalActivityAfterUser();
       return;
     }
     if (message.type === WS_IN.TOOL_CALL) {
@@ -392,7 +396,7 @@ export function useWebSocket() {
   }, []);
 
   const onClose = useCallback(() => {
-    useChatRuntimeStore.getState().setProcessing(false);
+    // 断线不等同于 Loop 空闲；活动轮询在重连后负责恢复权威状态。
     sessionRef.current?.setApprovalModeSyncStatus("unavailable");
   }, []);
 
@@ -457,6 +461,9 @@ export function useWebSocket() {
       : blocks;
     const clientMessageId = generateUUID();
     runtime.addPendingMessage(clientMessageId, content);
+    if (targetSessions.includes("main")) {
+      runtime.beginOptimisticMainSessionActivity(clientMessageId, "user_message");
+    }
     currentConnection.send({
       type: WS_OUT.USER_MESSAGE,
       content,
@@ -531,7 +538,7 @@ export function useWebSocket() {
       else if (data.status === "idle") currentSession.setInterruptStatus("idle");
       else currentSession.setInterruptStatus("failed");
       if (data.status === "cancelled" || data.status === "idle") {
-        useChatRuntimeStore.getState().setProcessing(false);
+        useChatRuntimeStore.getState().clearMainSessionActivityPlaceholders();
       }
     } catch {
       currentSession.setInterruptStatus("failed");
@@ -547,16 +554,17 @@ export function useWebSocket() {
   const resume = useCallback(async () => {
     const sid = sessionRef.current?.sessionId;
     if (!sid) return;
+    useChatRuntimeStore.getState().beginOptimisticMainSessionActivity(`resume-${Date.now()}`, "resume");
     useChatRuntimeStore.getState().setProcessing(true);
     try {
       const response = await fetch(`/api/sessions/${sid}/resume`, { method: "POST" });
       const data = await response.json().catch(() => ({}));
       if (!response.ok || !data.resumed) {
-        useChatRuntimeStore.getState().setProcessing(false);
+        useChatRuntimeStore.getState().clearMainSessionActivityPlaceholders();
         appendLocalMessage("error", `恢复失败：${data.error || "unknown error"}`);
       }
     } catch (error) {
-      useChatRuntimeStore.getState().setProcessing(false);
+      useChatRuntimeStore.getState().clearMainSessionActivityPlaceholders();
       appendLocalMessage("error", `恢复失败：${error instanceof Error ? error.message : "网络错误"}`);
     }
   }, [appendLocalMessage]);
@@ -615,6 +623,7 @@ export function useWebSocket() {
   }, [appendLocalMessage]);
 
   const regenerateResponse = useCallback(async (messageIndex: number) => {
+    useChatRuntimeStore.getState().beginOptimisticMainSessionActivity(`regenerate-${messageIndex}-${Date.now()}`, "regenerate");
     useChatRuntimeStore.getState().setProcessing(true);
     const response = await fetch(`/api/sessions/${sessionRef.current?.sessionId}/regenerate`, {
       method: "POST",
@@ -626,7 +635,7 @@ export function useWebSocket() {
     });
     const data = await response.json().catch(() => ({}));
     if (!response.ok || !data.regenerate) {
-      useChatRuntimeStore.getState().setProcessing(false);
+      useChatRuntimeStore.getState().clearMainSessionActivityPlaceholders();
       appendLocalMessage("error", `重新生成失败：${data.error || "unknown error"}`);
     }
   }, [appendLocalMessage]);

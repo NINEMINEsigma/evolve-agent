@@ -101,14 +101,14 @@ function ChatLiveFooter({ context }: { context: ChatListContext }) {
       if (!runtime.pendingStreamFinishes[pending.streamId]) continue;
       runtime.finishStream(
         pending.streamId, pending.content, pending.metrics,
-        liveBubbleIntersectsViewport(footer, pending.streamId),
+        liveBubbleIntersectsViewport(footer, pending.streamId), pending.finishReason,
       );
     }
   }, [pendingStreamFinishes, liveRows]);
   useLayoutEffect(() => () => {
     const runtime = useChatRuntimeStore.getState();
     for (const pending of Object.values(runtime.pendingStreamFinishes)) {
-      runtime.finishStream(pending.streamId, pending.content, pending.metrics, false);
+      runtime.finishStream(pending.streamId, pending.content, pending.metrics, false, pending.finishReason);
     }
   }, []);
   const processing = useChatRuntimeStore((state) => state.processing);
@@ -134,7 +134,7 @@ function ChatLiveFooter({ context }: { context: ChatListContext }) {
           />
         </MeasuredLiveRow>
       ))}
-      {processing && liveRows.length === 0 && (
+      {processing && !liveRows.some((row) => row.streaming && row.message.role === "assistant") && (
         <div className="message message-assistant message-new" data-chat-scope="waiting" data-message-role="assistant">
           <div className="message-avatar waiting-avatar">⚡</div>
           <div className="message-bubble" data-chat-scope="bubble">

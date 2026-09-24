@@ -168,6 +168,10 @@ frontend/
 
 ---
 
+### 主会话活动轮询与首字前气泡
+
+聊天运行时通过 `useMainSessionActivityPolling` 每 1 秒查询当前会话状态；WebSocket 建立、恢复和页面重新可见时立即查询，断开、隐藏和卸载时停止并取消请求。`chatRuntimeStore` 先创建乐观空 assistant 流式行，再将权威 `activity_id` 收编；首个 `stream_id` 到达时与流事件共用唯一收敛函数进行原子换键。一个主会话活动可以先后拥有多个流式气泡，工具等待阶段不重复创建空气泡，终态会清理语义为空的占位行。
+
 ## Hooks
 
 前端采用 hooks 拆分状态管理逻辑，从原有的 `useWebSocket.ts` 中提取出独立职责：

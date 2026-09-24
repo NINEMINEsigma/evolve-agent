@@ -21,7 +21,11 @@ from typing import Any, Awaitable, Callable, Dict, List, TYPE_CHECKING
 from abstract.tools.registry import registry as tool_registry
 from abstract.llm.client import BaseLLMClient
 from abstract.llm.loader import create_llm_client
-from entity.puretype import LLMResponse, ToolCallRequest, Role, ToolAvailability, TokenUsageRecord, MessageContent, LLMProfile, MessageMetrics, QueuedMessage, HistoryRowLink, SessionHistoryRowKind
+from entity.puretype import (
+    LLMResponse, ToolCallRequest, Role, ToolAvailability, TokenUsageRecord,
+    MessageContent, LLMProfile, MessageMetrics, QueuedMessage, HistoryRowLink,
+    SessionHistoryRowKind, MainSessionActivitySource, MainSessionActivityPhase,
+)
 from entity.gentype import RefWrapper
 from system.session_store import SessionStore
 from entity.constant import (
@@ -68,7 +72,7 @@ from entry.tool_executor import ToolExecutor, _interrupted_result
 from entry.stream_consumer import StreamConsumer
 from entry.history_projection import history_row_id, has_visible_history_message_row
 from entry.stream_history_link import emit_history_links, emit_stream_history_link, tool_card_live_id
-from entry.session_message_queue import SessionMessageQueue
+from entry.session_message_queue import SessionMessageQueue, activity_source_for_items
 
 if TYPE_CHECKING:
     from gateway.session_manager import SessionManager
@@ -301,53 +305,68 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
         *,
         skip_append: bool = False,
         character_name: str = USER_CHARACTER_NAME,
+        activity_source: MainSessionActivitySource = MainSessionActivitySource.other,
+        activity_id: str | None = None,
         **kwargs,
     ) -> str:
         sid = self.session_id
         self._cancel_event.clear()
         self._disgust_event.clear()
         self._event_loop = asyncio.get_running_loop()
-
-        # 无 LLM client 时返回错误（不进工具循环）
-        if self._llm is None:
-            logger.warning("No LLM client available | session=%s", sid)
-            err_text = "尚未配置 LLM 模型。请在前端「模型配置」中新建或选择一个配置后重试。"
-            # NOTE: 错误文本以系统状态消息显示（对 LLM 不可见），持久化进历史。
-            # 此处在锁外返回，_processing 未置位，不影响并发防护。
-            self.append_system_status(err_text, session_id=sid)
-            return err_text
-
-        logger.info(
-            "Received user message | session=%s content=%s",
-            sid, summarize_message_for_log(user_message),
+        active_id = activity_id or self.ensure_main_session_activity(
+            activity_source,
+            character_name=self.current_character_agent,
         )
-        async with self._process_lock:
-            current_task = asyncio.current_task()
-            self.register_round_task(current_task)
-            self._processing = True
-            try:
-                if not skip_append:
-                    await self.append_user_message(user_message, character_name=character_name)
 
-                # 历史过长时自动终结会话
-                rotated_sid = await self._check_over_limit_before_process(
-                    sid,
-                    move_last_user_message=True,
+        try:
+            # 无 LLM client 时返回错误（不进工具循环）
+            if self._llm is None:
+                logger.warning("No LLM client available | session=%s", sid)
+                err_text = "尚未配置 LLM 模型。请在前端「模型配置」中新建或选择一个配置后重试。"
+                # NOTE: 错误文本以系统状态消息显示（对 LLM 不可见），持久化进历史。
+                self.append_system_status(err_text, session_id=sid)
+                return err_text
+
+            logger.info(
+                "Received user message | session=%s content=%s",
+                sid, summarize_message_for_log(user_message),
+            )
+            async with self._process_lock:
+                current_task = asyncio.current_task()
+                self.register_round_task(current_task)
+                self._processing = True
+                self.set_main_session_activity_phase(
+                    active_id,
+                    MainSessionActivityPhase.preparing,
+                    character_name=self.current_character_agent,
                 )
-                if rotated_sid is None:
-                    return ""
-                sid = rotated_sid
-                self.session_id = sid
+                try:
+                    if not skip_append:
+                        await self.append_user_message(user_message, character_name=character_name)
 
-                messages = self._build_history_messages(user_message)
+                    # 历史过长时自动终结会话
+                    rotated_sid = await self._check_over_limit_before_process(
+                        sid,
+                        move_last_user_message=True,
+                    )
+                    if rotated_sid is None:
+                        return ""
+                    sid = rotated_sid
+                    self.session_id = sid
 
-                reply = await self._run_tool_loop(sid, messages, user_message)
-                logger.info("Reply sent | session=%s reply=%s", sid, summarize_message_for_log(reply))
-                return reply
-            finally:
-                self._processing = False
-                self._cancel_event.clear()
-                self.unregister_round_task(current_task)
+                    messages = self._build_history_messages(user_message)
+
+                    reply = await self._run_tool_loop(
+                        sid, messages, user_message, activity_id=active_id,
+                    )
+                    logger.info("Reply sent | session=%s reply=%s", sid, summarize_message_for_log(reply))
+                    return reply
+                finally:
+                    self._processing = False
+                    self._cancel_event.clear()
+                    self.unregister_round_task(current_task)
+        finally:
+            self.finish_main_session_activity(active_id)
 
     async def resume(self) -> str:
         """从当前历史状态恢复工具链执行。
@@ -361,43 +380,59 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
         self._cancel_event.clear()
         self._disgust_event.clear()
         self._event_loop = asyncio.get_running_loop()
+        activity_id = self.ensure_main_session_activity(
+            MainSessionActivitySource.resume,
+            character_name=self.current_character_agent,
+        )
 
-        if self._llm is None:
-            err_text = "尚未配置 LLM 模型。请在前端「模型配置」中新建或选择一个配置后重试。"
-            self.append_system_status(err_text, session_id=sid)
-            return err_text
+        try:
+            if self._llm is None:
+                err_text = "尚未配置 LLM 模型。请在前端「模型配置」中新建或选择一个配置后重试。"
+                self.append_system_status(err_text, session_id=sid)
+                return err_text
 
-        async with self._process_lock:
-            current_task = asyncio.current_task()
-            self.register_round_task(current_task)
-            self._processing = True
-            try:
-                rotated_sid = await self._check_over_limit_before_process(
-                    sid,
-                    move_last_user_message=False,
+            async with self._process_lock:
+                current_task = asyncio.current_task()
+                self.register_round_task(current_task)
+                self._processing = True
+                self.set_main_session_activity_phase(
+                    activity_id,
+                    MainSessionActivityPhase.preparing,
+                    character_name=self.current_character_agent,
                 )
-                if rotated_sid is None:
-                    return ""
-                sid = rotated_sid
-                self.session_id = sid
-
-                messages = self._get_full_history(sid)
-                reply = await self._run_tool_loop(sid, messages, "[resume]")
-                if reply:
-                    await self._frontend_sink.emit_assistant_message(
-                        sid, reply, self.current_character_agent,
+                try:
+                    rotated_sid = await self._check_over_limit_before_process(
+                        sid,
+                        move_last_user_message=False,
                     )
-                return reply
-            finally:
-                self._processing = False
-                self._cancel_event.clear()
-                self.unregister_round_task(current_task)
+                    if rotated_sid is None:
+                        return ""
+                    sid = rotated_sid
+                    self.session_id = sid
+
+                    messages = self._get_full_history(sid)
+                    reply = await self._run_tool_loop(
+                        sid, messages, "[resume]", activity_id=activity_id,
+                    )
+                    if reply:
+                        await self._frontend_sink.emit_assistant_message(
+                            sid, reply, self.current_character_agent,
+                        )
+                    return reply
+                finally:
+                    self._processing = False
+                    self._cancel_event.clear()
+                    self.unregister_round_task(current_task)
+        finally:
+            self.finish_main_session_activity(activity_id)
 
     async def _run_tool_loop(
         self,
         sid: str,
         messages: list[BaseMessage],
         user_message: MessageContent,
+        *,
+        activity_id: str,
     ) -> str:
         """执行 LLM 工具调用循环。"""
         round_id = self.begin_agentspace_round(self.current_character_agent)
@@ -427,12 +462,28 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
                 )
 
                 stream_id = uuid.uuid4().hex[:12]
+                self.set_main_session_activity_phase(
+                    activity_id,
+                    MainSessionActivityPhase.waiting_first_token,
+                    stream_id=stream_id,
+                    character_name=self.current_character_agent,
+                )
+
+                async def _mark_streaming(started_stream_id: str) -> None:
+                    self.set_main_session_activity_phase(
+                        activity_id,
+                        MainSessionActivityPhase.streaming,
+                        stream_id=started_stream_id,
+                        character_name=self.current_character_agent,
+                    )
+
                 try:
                     resp = await self._stream_consumer.consume(
                         sid, messages,
                         self._get_tool_definitions(),
                         stream_id,
                         last_user_message=self._history.last_user_message,
+                        on_first_chunk=_mark_streaming,
                     )
                 except asyncio.CancelledError:
                     # 强制中断收尾：保留已显示文字并补发 cancelled。
@@ -519,6 +570,13 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
                     await emit_stream_history_link(self._frontend_sink, sid, stream_id, msg_index)
                     return assistant_text
 
+                self.set_main_session_activity_phase(
+                    activity_id,
+                    MainSessionActivityPhase.waiting_tool,
+                    stream_id=None,
+                    character_name=self.current_character_agent,
+                )
+
                 # 存储 assistant 消息（含 tool_calls）
                 msg_index = self._store_assistant_with_tools(sid, resp)
                 tool_card_targets = {
@@ -570,6 +628,7 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
                             round_id=round_id,
                             character_name=self.current_character_agent,
                             llm_profile=self.active_llm_profile,
+                            activity_id=activity_id,
                         )
                         messages.append(tool_msg)
                         tool_result_index = self._history.add_message(tool_msg)
@@ -775,6 +834,10 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
         if not items:
             return None
 
+        activity_id = self.ensure_main_session_activity(
+            activity_source_for_items(items),
+            character_name=self.current_character_agent,
+        )
         current_task = asyncio.current_task()
         registered = False
         reply: str | None = None
@@ -783,6 +846,11 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
                 self.register_round_task(current_task)
                 registered = True
                 self._processing = True
+                self.set_main_session_activity_phase(
+                    activity_id,
+                    MainSessionActivityPhase.preparing,
+                    character_name=self.current_character_agent,
+                )
                 self._event_loop = asyncio.get_running_loop()
                 try:
                     sid = self.session_id
@@ -846,6 +914,7 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
                         messages = self._get_full_history(sid)
                         reply = await self._run_tool_loop(
                             sid, messages, "[queued-messages]",
+                            activity_id=activity_id,
                         )
                     if reply:
                         await self._frontend_sink.emit_assistant_message(
@@ -855,11 +924,13 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
                 finally:
                     self._processing = False
                     self._cancel_event.clear()
+                    self.finish_main_session_activity(activity_id)
 
             if self._on_round_done is not None:
                 await self._on_round_done(self)
             return reply
         finally:
+            self.finish_main_session_activity(activity_id)
             if registered:
                 self.unregister_round_task(current_task)
 

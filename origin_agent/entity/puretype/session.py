@@ -24,6 +24,51 @@ class SessionStatus(str, Enum):
     archived = "archived"
 
 
+class MainSessionActivitySource(str, Enum):
+    """触发一次主会话活动的来源。"""
+
+    user_message = "user_message"
+    dynamic_endpoint = "dynamic_endpoint"
+    subagent_feedback = "subagent_feedback"
+    cron = "cron"
+    regenerate = "regenerate"
+    resume = "resume"
+    other = "other"
+    mixed = "mixed"
+
+
+class MainSessionActivityPhase(str, Enum):
+    """主会话当前活动所处的运行阶段。"""
+
+    queued = "queued"
+    preparing = "preparing"
+    waiting_first_token = "waiting_first_token"
+    streaming = "streaming"
+    waiting_approval = "waiting_approval"
+    waiting_tool = "waiting_tool"
+
+
+class MainSessionActivitySnapshot(BaseModel):
+    """不持久化的主会话活动快照。"""
+
+    activity_id: str
+    revision: int = Field(ge=1)
+    source: MainSessionActivitySource
+    phase: MainSessionActivityPhase
+    stream_id: str | None = None
+    character_name: str | None = None
+
+
+class SessionRuntimeStatus(BaseModel):
+    """会话存在性、连接占用与当前运行活动的统一 REST 响应。"""
+
+    session_id: str
+    exists: bool
+    occupied: bool
+    processing: bool
+    activity: MainSessionActivitySnapshot | None = None
+
+
 class LoopMeta(BaseModel):
     loopType: Loop = Loop.parent
     '''

@@ -717,7 +717,7 @@ class MessageRouter:
                         type=MessageType.HISTORY_SYNC,
                         session_id=self.sid,
                         history_count=loop.loop.history.count,
-                        processing=loop.loop.is_processing(),
+                        processing=loop.loop.is_active(),
                         token_usage=loop.get_token_usage(),
                         context_tokens=loop.get_context_tokens(),
                         agents=agents_info,

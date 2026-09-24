@@ -8,6 +8,7 @@ export const TIMING = {
   WS_MAX_RECONNECT_TRIES: 10,     // WebSocket 最大重连次数
   CRITICAL_REQUEST_TIMEOUT: 15_000, // 会话预检与 History 关键请求硬截止
   TASK_POLL_INTERVAL:    3_000,   // 后台任务轮询
+  MAIN_SESSION_ACTIVITY_POLL_INTERVAL: 1_000, // 主会话活动快照轮询
   LOCK_POLL_INTERVAL:    3_000,   // agentspace 旧锁轮询（兼容常量，编辑器已改用 SSE）
   AGENTSPACE_EVENT_RECONNECT_NOTICE: 3_000, // SSE 中断状态提示延迟
   CRON_TICK:             1_000,   // 定时任务倒计时 tick

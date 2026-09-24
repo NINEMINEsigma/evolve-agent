@@ -91,7 +91,7 @@ desktop/               ← Electron 桌面壳（独立 package.json；node_modul
 | `custom_llm_client:` | 仓库根 `custom_llm_client/` | ro | ro | 自定义 LLM 客户端 |
 | `custom_tools:` | 仓库根 `custom_tools/` | ro | ro | 自定义工具 |
 
-**没有 `self:` 命名空间** — agent 不能读取或修改自身运行时副本，进化完全通过 `fork:`/`fix:` 实现。权限模型为 `_PERMISSIONS`（mode × namespace → Access 列表），`namespace_bases()` 是 ns→物理根的唯一映射来源（`resolve()` 与 LSP 反向映射复用）；`Namespace` 枚举定义在 `entity/constant.py`。
+**没有 `self:` 命名空间** — agent 不能读取或修改自身运行时副本，进化完全通过 `fork:`/`fix:` 实现。权限模型为 `_PERMISSIONS`（mode × namespace → Access 列表），`namespace_bases()` 是 ns→物理根的唯一映射来源（`resolve()` 与 LSP 反向映射复用）；`Namespace` 枚举定义在 `entity/constant/sandbox.py`。
 
 ## 记忆与上下文钩子（custom_hooks/）
 
@@ -118,7 +118,7 @@ easysave 是**类型保留**序列化库，原生支持 pydantic BaseModel。
 | 纯数据类（无方法） | `entity/puretype/` 包内对应子模块 |
 | 带验证/转换/业务方法的模型 | 对应业务模块 |
 | 工具类 / 异常类 / 枚举 | 按职责分散到各模块 |
-| 项目级常量 | `entity/constant.py` 对应分区 |
+| 项目级常量 | `entity/constant/` 包内对应职责子模块 |
 
 新增纯数据类时先判断是否有方法；没有则优先放入 `entity/puretype/` 中合适的子模块，并在 `__init__.py` 中再导出。
 
@@ -126,9 +126,9 @@ easysave 是**类型保留**序列化库，原生支持 pydantic BaseModel。
 
 所有需要维持全局生命周期的对象或者单例由Application实例直接或者间接持有
 
-### 常量集中在 `entity/constant.py`
+### 常量集中在 `entity/constant/` 包
 
-项目级常量统一放在 `origin_agent/entity/constant.py`，业务模块内禁止散落魔法数字和硬编码字符串。该文件按职责用分区注释划分（版本、角色名、超时、I/O 上限、沙盒命名空间、上传、LLM、子 Agent、Cron、会话搜索等），新增常量放入对应分区（无合适分区时新建），并附中文注释说明用途与单位/取值含义。仅被单一函数私有使用、无复用价值的字面量除外。
+项目级常量统一放在 `origin_agent/entity/constant/` 包内，业务模块内禁止散落魔法数字和硬编码字符串。常量按职责分布在子模块中，并由 `constant/__init__.py` 显式重新导出，保持 `from entity.constant import ...` 兼容。各子模块按版本、角色名、超时、I/O 上限、沙盒命名空间、上传、LLM、子 Agent、Cron、会话搜索等职责组织，新增常量放入对应职责子模块，并附中文注释说明用途与单位/取值含义。仅被单一函数私有使用、无复用价值的字面量除外。
 
 ## Windows 细节
 
