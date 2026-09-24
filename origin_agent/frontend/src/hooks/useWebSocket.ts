@@ -170,10 +170,6 @@ export function useWebSocket() {
     }
     if (message.type === WS_IN.APPROVAL_PROFILE_CHANGED) {
       llmProfilesRef.current.handleApprovalProfileChanged(message);
-      if (message.handsfree_mode === false) {
-        sessionRef.current?.setApprovalMode("manual");
-        sessionRef.current?.setApprovalModeSyncStatus("ready");
-      }
       return;
     }
     if (message.type === WS_IN.METADATA_PROFILE_CHANGED) {

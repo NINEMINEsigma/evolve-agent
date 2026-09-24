@@ -89,10 +89,12 @@ class SessionManager:
         role: Role = Role.USER,
         loop_meta: LoopMeta | None = None,
     ) -> str:
-        return self._chat_sm.create_with_context(
+        session_id = self._chat_sm.create_with_context(
             context, parent_sid=parent_sid, parents=parents,
             role=role, loop_meta=loop_meta,
         )
+        self._app.approval_mode_store.initialize_session(session_id)
+        return session_id
 
     def archive(self, session_id: str, continuation_sid: str | None = None) -> None:
         logger.info("Archive session | session=%s continuation=%s", session_id, continuation_sid)
@@ -124,12 +126,20 @@ class SessionManager:
         parents: list[str] | None = None,
         session_id: str | None = None,
     ) -> str:
-        """创建新 session，返回 session_id。"""
-        return self._chat_sm.create(parent_sid=parent_sid, parents=parents, session_id=session_id)
+        """创建新 session，并将审批模式显式初始化为手动模式。"""
+        new_session_id = self._chat_sm.create(
+            parent_sid=parent_sid,
+            parents=parents,
+            session_id=session_id,
+        )
+        self._app.approval_mode_store.initialize_session(new_session_id)
+        return new_session_id
 
     def remove(self, session_id: str) -> None:
-        """从内存和磁盘移除 session（含目录）。"""
+        """从内存和磁盘移除 session（含目录）及审批模式缓存。"""
         self._chat_sm.remove(session_id)
+        if not self._chat_sm.exists(session_id):
+            self._app.approval_mode_store.forget_session(session_id)
 
     def remove_from_index(self, session_id: str) -> None:
         """仅从索引移除 session，不删除磁盘目录。"""
@@ -514,8 +524,8 @@ class SessionManager:
             logger.debug("Colloquy session already exists | id=%s", COLLOQUY_SESSION_ID)
             return
 
-        # 使用固定 ID 创建 session
-        self._chat_sm.create(session_id=COLLOQUY_SESSION_ID)
+        # 使用固定 ID 创建 session，并经统一入口初始化手动审批模式。
+        self.create(session_id=COLLOQUY_SESSION_ID)
 
         # 设置元数据
         info = self._chat_sm.get(COLLOQUY_SESSION_ID)

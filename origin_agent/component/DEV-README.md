@@ -13,7 +13,8 @@ component/
 │   ├── backend.py            ← ApprovalBackend 抽象 + Local/Remote 实现
 │   ├── core.py               ← request_user_confirm / ask_agent_reason
 │   ├── executor.py           ← execute_with_approval 统一执行器
-│   ├── handsfree.py          ← 审批模式状态管理 + LLM 审批流程
+│   ├── handsfree.py          ← 审批模式公共入口 + LLM 审批流程
+│   ├── mode_store.py         ← Application 持有的会话级审批模式缓存与持久化服务
 │   ├── allowlist.py           ← 工具 allowlist 持久化
 │   └── policy.py             ← 审批策略（needs_approval + 预设策略常量）
 ├── tools/                    ← 核心工具
@@ -132,7 +133,7 @@ ShellManager 使用 pywinpty 高层 `PtyProcess` 的 socket reader；通过受�
 
 ### `component/approval/`（目录化重构）
 
-原 `component/approval.py` 单文件已重构为目录，按职责拆分为 7 个子模块。`__init__.py` 重新导出所有公共接口，保持 `from component.approval import Xxx` 旧路径兼容。
+原 `component/approval.py` 单文件已重构为目录，按职责拆分为 8 个子模块。`__init__.py` 重新导出所有公共接口，保持 `from component.approval import Xxx` 旧路径兼容。
 
 #### `approval/backend.py` — 审批后端
 
@@ -151,14 +152,25 @@ ShellManager 使用 pywinpty 高层 `PtyProcess` 的 socket reader；通过受�
 
 - `execute_with_approval(tool_name, args, session_id, sink, ...) -> ApprovalOutcome`：封装 dangerous/write 判断、白名单检查、脱手/手动两种审批模式、拒绝结果构建和 `allow_always` 加白名单。
 
-#### `approval/handsfree.py` — 审批模式状态管理
+#### `approval/handsfree.py` — 审批模式公共入口
 
-- `set_approval_mode(session_id, mode: ApprovalMode) -> ApprovalMode`：设置会话审批模式（MANUAL/HANDSFREE/YOLO），HANDSFREE 不可用时回退 MANUAL。
-- `get_approval_mode(session_id) -> ApprovalMode`：返回会话当前审批模式（默认 MANUAL）。
-- `disable_all_non_manual_modes() -> list[str]`：将全部非 MANUAL 的会话重置为 MANUAL。
+- `set_approval_mode(session_id, mode: ApprovalMode) -> ApprovalMode`：设置会话审批模式（MANUAL/HANDSFREE/YOLO）；用户当前请求新开 HANDSFREE 且审批 Profile不可用时仍回退 MANUAL，实际模式随后交给 `ApprovalModeStore` 缓存并尽力持久化。
+- `get_approval_mode(session_id) -> ApprovalMode`：委托 `ApprovalModeStore` 返回内存值或从会话文件惰性恢复；恢复 HANDSFREE 时不检查审批 Profile可用性。
+- `disable_all_non_manual_modes() -> list[str]`：保留的显式兼容管理入口，委托 Store遍历现存会话并尽力写回 MANUAL；审批 Profile生命周期不调用该函数。
 - `is_handsfree_available() -> bool`：检查审批 Profile 是否已配置。
 - `_handsfree_confirm()`：核心流程，通过审批 Profile 模型评估工具调用风险。审批请求包含工具的参数 schema（使模型能区分必填与可选参数）、实际参数值和 reason（补充说明）。审批输出使用普通文本决策标记（`[ALLOW]`/`[APPROVE]`/`[DENY]`/`[REJECT]`/`[拒绝]`/`[否决]`），不使用 JSON。审批 system prompt（`templates/approval/system_prompt.md`）明确审批模型只见单次调用、不读用户消息；schema description 是写给调用方 Agent 的指令而非审批判据；审批模型只判断该次调用本身是否安全，不检查前置条件/用户同意/流程合规，本质只读的操作（含 `ssh <host> <只读命令>`）必须放行。
-- 兼容包装：`set_handsfree_mode()`/`is_handsfree_mode()`/`disable_all_handsfree_modes()` 保留，分别委托到新接口。
+- 兼容包装：`set_handsfree_mode()`/`is_handsfree_mode()`/`disable_all_handsfree_modes()` 保留，分别委托到统一入口。
+
+#### `approval/mode_store.py` — 会话级审批模式存储
+
+- `ApprovalModeStore` 由 Application唯一持有，物理根为 sessions 目录；每个主会话使用 `approval_mode.es`，文件内逻辑根 key 为 `v1`，根对象为直接保存的 `SessionApprovalModeState`。
+- `get_mode()` 首次访问时通过 `load(v1, make_config(path), SessionApprovalModeState, ignore_missing_fields=True)` 惰性重建真实 BaseModel实例；旧会话缺文件静默使用手动模式，缺 key、损坏、类型 token错误、根类型或 `mode`类型错误记录 warning 后回退手动模式。
+- `set_mode()` 在业务 `RLock` 内先更新内存，再把 `SessionApprovalModeState`实例直接传给 easysave `save()`，禁止 `.model_dump()`降级。easysave负责路径锁、前置 `.bak`、同目录临时文件、`fsync`和原子替换；任何写入异常只记录会话 ID、目标模式、路径和堆栈，不回滚内存、不自动处理备份、不向前端报错。
+- `initialize_session()` 只接受新会话 ID并初始化手动模式，不提供来源会话复制能力。普通新会话、自动延续、单源分支、多父合并及首次创建“随意聊聊”均使用该入口。
+- `forget_session()` 只清理缓存；`approval_mode.es` 随永久删除的会话目录统一清理。归档不删除状态。
+- `reset_all_non_manual_modes()` 仅为兼容显式调用保留，扫描 sessions 直接子目录并复用同一会话 ID校验与尽力写入规则；sessions 根不存在时不调用 `save()`，避免创建孤立目录。
+- `entity/typeref.py` 为持久化根登记 `v1::SessionApprovalModeState` stable type token；ES key版本与类型 token版本分别使用独立常量，职责不得混用。
+- 审批 Profile清空、删除或配置无效只更新 Profile状态和审批后端缓存，不改写任何会话模式。已恢复的脱手模式在实际审批后端不可用时按既有系统拒绝路径报错；YOLO不依赖审批 Profile。
 
 #### `approval/allowlist.py` — 工具白名单
 

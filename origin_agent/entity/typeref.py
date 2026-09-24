@@ -18,16 +18,21 @@ from entity.constant import (
     History_Type_Version,
     LLMProfileData_Type_Version,
     AgentConfig_Type_Version,
+    SessionApprovalModeState_Type_Version,
 )
 from entity.messages import History
 from entity.puretype.llm import LLMProfileData
 from entity.puretype.agent import AgentConfig
+from entity.puretype.approval import SessionApprovalModeState
 
 # Type → 稳定名（保存时使用）
 typespace: dict[Type, str] = {
     History: f"{History_Type_Version}::{History.__name__}",
     LLMProfileData: f"{LLMProfileData_Type_Version}::{LLMProfileData.__name__}",
     AgentConfig: f"{AgentConfig_Type_Version}::{AgentConfig.__name__}",
+    SessionApprovalModeState: (
+        f"{SessionApprovalModeState_Type_Version}::{SessionApprovalModeState.__name__}"
+    ),
 }
 
 # 稳定名 → Type（加载时使用）
@@ -35,6 +40,9 @@ namespace: dict[str, Type] = {
     f"{History_Type_Version}::{History.__name__}": History,
     f"{LLMProfileData_Type_Version}::{LLMProfileData.__name__}": LLMProfileData,
     f"{AgentConfig_Type_Version}::{AgentConfig.__name__}": AgentConfig,
+    f"{SessionApprovalModeState_Type_Version}::{SessionApprovalModeState.__name__}": (
+        SessionApprovalModeState
+    ),
 }
 
 

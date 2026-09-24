@@ -43,7 +43,7 @@ gateway/
 | `ASK_RESPONSE` | `handle_ask_response` | 提问回答，解析到 `FrontendSink` |
 | `INTERRUPT` | `handle_interrupt` | WS 兼容中断入口；后台调用统一 `request_interrupt()` 并通过 done callback 观察异常，前端权威交互使用 HTTP |
 | `FILE_UPLOAD` | `handle_file_upload` | 文件上传：硬链接优先 → 复制 fallback → base64 解码 |
-| `HANDSFREE_MODE` | `handle_handsfree_mode` | 切换脱手/免审批模式 |
+| `HANDSFREE_MODE` | `handle_handsfree_mode` | 切换手动/脱手/YOLO 模式；服务端实际模式先更新内存，再尽力原子写入会话文件并回送权威值 |
 | `PING` | `handle_ping` | 心跳响应 |
 | `SYSTEM` | `handle_system_message` | 系统消息（仅记录日志；多模态块使用占位符，不改变既有无截断约定） |
 | 其他 | `handle_unsupported` | 不支持的消息类型 |
@@ -76,7 +76,7 @@ WS /ws/chat?resume=<sid>
 
 - `build_hash`：当前前端构建哈希，变化时前端提示刷新。
 - `server_info`：服务端信息。
-- `handsfree_mode`：每次连接都会主动发送的当前会话权威审批模式，包含兼容布尔字段 `handsfree_mode` 与三态字段 `approval_mode`；新会话和恢复会话行为一致。
+- `handsfree_mode`：每次连接都会主动发送的当前会话权威审批模式，包含兼容布尔字段 `handsfree_mode` 与三态字段 `approval_mode`。已有会话由 `ApprovalModeStore` 从 `approval_mode.es` 的 easysave `v1` key惰性重建 `SessionApprovalModeState`；新建普通主会话、派生主会话和首次创建的“随意聊聊”默认手动模式。前端不持久化该值。
 - `history_sync`：新建/恢复连接以及每轮正典 History 写入完成后发送；顶层携带 `history_count`、`processing`、`token_usage`、`context_tokens` 和可选 `agents`，不携带正文。前端随后通过 History REST 按需加载。
 - `agentspace_event` 初始序列：`resync`、`locks`及 watcher不可用时的 `watcher_error`；随后复用同一 EventHub订阅转发文件变化。事件突发时允许折叠为 `resync`，连接断开时取消转发 task并注销订阅；自动旋转复用同一物理连接和订阅。
 
@@ -195,6 +195,15 @@ Shell 输出由 Agent 使用 `ReadShell` 拉取，不通过聊天 WebSocket 主�
 
 前端 USER_MESSAGE 与重新生成请求只传 `llm_profile_name`，不传完整 Profile。空字符串表示明确无配置。`/resume` 请求不接收 `llm_profile_name`，始终使用当前 `ParentAgentLoop` 已持有的活动 Profile；前端刚切换但尚未通过 USER_MESSAGE 或重新生成提交的 Profile，不会被 resume 应用。Profile 重命名和删除通过 `llm_profile_changed` 广播；忙碌会话不在删除请求中切换。
 
+### 审批 Profile
+
+| 方法 | 端点 | 说明 |
+|------|------|------|
+| GET | `/api/approval/profile` | 返回项目级审批 Profile 的名称、模型和可用性 |
+| PUT | `/api/approval/profile` | 按 Profile 名称设置或以 `null`清空审批 Profile引用 |
+
+审批 Profile设置、清空、编辑失效或删除只更新 Profile根对象、审批后端缓存和 `approval_profile_changed` 广播；广播不携带审批模式重置字段，也不改写任何会话的手动/脱手/YOLO 模式。已恢复的脱手模式在审批后端不可用时保持不变，实际审批按既有失败路径拒绝；YOLO不依赖审批 Profile。PUT响应中的 `disabled_sessions` 仅为兼容字段，固定为空列表。
+
 ### 全局元数据 Profile
 
 | 方法 | 端点 | 说明 |
@@ -246,7 +255,7 @@ Agentspace SSE 长连接在 Gateway 收到关闭信号时主动结束；`main.py
 
 ## 会话持久化
 
-单个会话的数据由 `system/session_store.py` 持久化到 `workspace/sessions/<session_id>/`：
+单个会话的数据持久化到 `workspace/sessions/<session_id>/`。History等内容由 `system/session_store.py` 管理，审批模式由 Application持有的 `ApprovalModeStore` 管理：
 
 | 文件 | 说明 |
 |---|---|
@@ -254,5 +263,8 @@ Agentspace SSE 长连接在 Gateway 收到关闭信号时主动结束；`main.py
 | `summary.txt` | 会话摘要 |
 | `token_usage.json` | token 消耗 |
 | `tool_resources.json` | 任务进度、剪贴板展示等 |
+| `approval_mode.es` | easysave `v1` key保存的 `SessionApprovalModeState`；BaseModel直接保存并通过 stable type token重建，缺失、缺 key、损坏或类型错误时回退手动模式；模式变更先更新内存再尽力保存，安全写入与 `.bak`由 easysave负责 |
+
+归档保留 `approval_mode.es`；永久删除会话目录时一并删除，随后清理 Store缓存。自动延续、单源分支和多父合并不会复制该文件，新会话统一写入手动模式。
 
 全局会话索引：`workspace/sessions/_index.json`。

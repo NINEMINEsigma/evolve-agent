@@ -402,6 +402,7 @@ classDiagram
         +session_metadata_service
         +agentspace_service
         +session_manager
+        +approval_mode_store
         +approval_backend_manager
         +cron_router
         +tool_registry
@@ -413,6 +414,17 @@ classDiagram
         +link_shutdown_event()
         +shutdown_event
         +shutdown()
+    }
+
+    class ApprovalModeStore {
+        #_sessions_dir
+        #_modes
+        #_lock
+        +get_mode()
+        +initialize_session()
+        +set_mode()
+        +forget_session()
+        +reset_all_non_manual_modes()
     }
 
     class ApprovalBackendManager {
@@ -618,6 +630,7 @@ classDiagram
     SessionMetadataService --> SessionStore : reads target session
     LLMProfileStore --> LLMProfileData : owns root
     Application --> SessionManager : holds
+    Application --> ApprovalModeStore : holds
     Application --> ApprovalBackendManager : holds
     Application --> FrontendSink : holds
     Application --> SubAgentOrchestrator : holds
@@ -727,6 +740,10 @@ classDiagram
 | `_profile_lock` | `Application` | `threading.RLock` | Profile 根对象、名称指针与会话选择共用的进程锁 |
 | `_llm_profile_store` | `Application` | `LLMProfileStore \| None` | 进程内唯一的 `LLMProfileData` 根对象存储 |
 | `_session_metadata_service` | `Application` | `SessionMetadataService \| None` | 进程内唯一的标题、标签、摘要生成服务；解析全局元数据 Profile与目标会话回退 |
+| `_approval_mode_store` | `Application` | `ApprovalModeStore \| None` | 进程内唯一的主会话审批模式缓存与持久化服务 |
+| `_sessions_dir` | `ApprovalModeStore` | `Path` | sessions 根目录；各主会话模式保存到自身目录的 `approval_mode.es` |
+| `_modes` | `ApprovalModeStore` | `dict[str, ApprovalMode]` | 已惰性读取或当前进程已修改的会话审批模式缓存 |
+| `_lock` | `ApprovalModeStore` | `threading.RLock` | 缓存读取、磁盘恢复、模式更新和兼容批量重置的同步边界 |
 | `_runtime_context` | `SessionMetadataService` | `RuntimeContext` | 创建单次元数据 LLM 客户端所需的运行时上下文 |
 | `_llm_profile_store` | `SessionMetadataService` | `LLMProfileStore` | 读取全局元数据 Profile和目标会话回退 Profile |
 | `_profile_lock` | `SessionMetadataService` | `threading.RLock` | 解析根对象并复制单次 Profile快照的同步边界 |
@@ -741,6 +758,7 @@ classDiagram
 | `raw_text` / `text` / `base_offset` / `total_chars` | `_ShellSession` | `str` / `str` / `int` / `int` | 有界原始与规范化输出及绝对字符位置边界 |
 | `_agentspace_service` | `Application` | `AgentspaceService \| None` | Agentspace 版本化 CRUD、文件锁、垃圾桶、watcher 与 `AgentspaceEventHub` 的唯一业务服务；Gateway适配为独立编辑器 SSE和聊天 WebSocket事件 |
 | `session_manager` | `Application` | `SessionManager \| None` | session 管理器 |
+| `approval_mode_store` | `Application` | `ApprovalModeStore \| None` | 主会话审批模式存储，只读属性暴露 Application持有实例 |
 | `approval_backend_manager` | `Application` | `ApprovalBackendManager \| None` | 审批后端管理器 |
 | `cron_router` | `Application` | `CronRouter \| None` | Cron 路由器 |
 | `tool_registry` | `Application` | `ToolRegistry \| None` | 工具注册表 |
@@ -817,7 +835,9 @@ classDiagram
 | `cron_tools` 模块函数 | `_lock`, `_tasks` | `CronRouter` | `component/extools/cron_tools.py` | 直接访问 CronRouter 内部字段 |
 | `cron_tools` 模块函数 | `_timer` | `_CronTask` | `component/extools/cron_tools.py` | 直接访问任务内部 timer |
 | `diagram.py` / `mermaid_tools.py` / `docgen_tools.py` / `web_browser.py` | `_ctx` | `Sandbox` | `component/extools/*.py` | 直接访问 Sandbox 的 `_ctx` 获取 agentspace |
-| 全局 `Application.current()` | `session_manager`, `frontend_sink`, `subagent_orchestrator`, `approval_backend_manager` | `Application` | 多处 | 各模块通过单例访问子系统 |
+| 全局 `Application.current()` | `session_manager`, `frontend_sink`, `subagent_orchestrator`, `approval_mode_store`, `approval_backend_manager` | `Application` | 多处 | 各模块通过单例访问子系统 |
+| 审批模式公共函数 | `get_mode()` / `set_mode()` / `reset_all_non_manual_modes()` | `ApprovalModeStore` | `component/approval/handsfree.py` | 保持公共审批 API稳定，统一委托 Application持有的 Store恢复、更新和显式重置模式 |
+| Gateway主会话生命周期 | `initialize_session()` / `forget_session()` | `ApprovalModeStore` | `gateway/session_manager.py` | 新建普通/派生/随意聊聊主会话时初始化手动模式；永久删除成功后清理缓存，不复制来源模式 |
 | Gateway / Agent Loop 会话元数据入口 | `session_metadata_service` | `Application` | `gateway/server.py`、`entry/base_agent_loop.py`、`entry/session_manager.py`、`entry/multi_agent_loop.py`、`entry/colloquy_loop.py` | 标题、标签、摘要及延续摘要保障统一经全局元数据服务，Loop 不再自行选择元数据客户端 |
 | 动态空间管理工具与管理弹窗 | `add_dynamic_space()` / `update_dynamic_space()` / `remove_dynamic_space()` / `normalize_dynamic_space_path()` | `Sandbox` | `component/tools/sandbox_spaces.py`、`gateway/server.py` | Agent 工具经 critical 审批；用户命令菜单管理弹窗经 REST 直接修改，均复用 Sandbox 校验 |
 | 动态空间 Prompt 构建器 | `list_dynamic_spaces_with_availability()` | `Sandbox` | `system/prompt.py` | 生成结构化动态命名空间系统提示词块 |
@@ -841,6 +861,7 @@ classDiagram
 | `SessionHistoryImageResource` / `SessionHistoryDownloadResource` / `SessionHistoryResourcesResponse` | `entity/puretype/session.py` | `BaseModel` | 完整 History 的图片与下载资源索引 |
 | `SessionTerminationResult` | `entity/puretype/session.py` | `BaseModel` | 会话终结结果；元数据失败通过 `metadata_warnings`返回但不改变归档成功 |
 | `MetadataProfileUpdateRequest` / `MetadataProfileState` / `MetadataProfileMutationResponse` | `entity/puretype/metadata.py` | `BaseModel` | 全局元数据 Profile REST 请求、权威状态与变更响应 |
+| `SessionApprovalModeState` | `entity/puretype/approval.py` | `BaseModel` | easysave类型保留的会话审批模式根对象，只含 `ApprovalMode`；文件版本由 ES key、类型稳定性由 typeref stable type token管理 |
 | `InboxMessage` | `entry/base_agent_loop.py` | `BaseModel` | 收件箱消息基类，含 `to_text()` |
 | `UserMessage` | `entry/base_agent_loop.py` | `InboxMessage` | 用户消息 |
 | `ApprovalDecisionMessage` | `entry/base_agent_loop.py` | `InboxMessage` | 审批决定消息（当前未使用） |
@@ -949,6 +970,12 @@ classDiagram
 1. **`soul_file`** 从 `RuntimeContext.soul_file` 迁移到 `LLMProfile.soul_file` 字段（每 Profile 独立，通过 `llm_profiles.es` 持久化）。`LLMProfile` 中已有字段定义但未接线，本次完成 DTO（`LLMProfilePayload.soul_file`）、Store（`_PROFILE_FIELDS`、`to_payload`、`create_profile`、`_assign_payload`、验证）和 Prompt 构建（`system/prompt.py::build_system_prompt()` 从 `profile.soul_file` 读取）的完整接线。`run.py` 初始 SOUL 文件复制改用硬编码 `"SOUL.md"`。
 
 2. **`yolo`** 从 `RuntimeContext.yolo` 全局配置升级为会话级三态审批模式之一。新增 `ApprovalMode(str, Enum)` 枚举（MANUAL/HANDSFREE/YOLO）定义在 `entity/puretype/approval.py`。`component/approval/handsfree.py` 的 `_handsfree_sessions: dict[str, bool]` 升级为 `_approval_modes: dict[str, ApprovalMode]`，新增 `set_approval_mode()`/`get_approval_mode()`/`disable_all_non_manual_modes()`，保留旧函数（`set_handsfree_mode`/`is_handsfree_mode`/`disable_all_handsfree_modes`）作为兼容包装。`component/approval/policy.py::needs_approval()` 参数从 `handsfree: bool` 改为 `approval_mode: ApprovalMode`。`executor.py`、`subagent/loop.py` 的 YOLO 检查从 `get_runtime_context().yolo` 改为 `get_approval_mode(sid) == ApprovalMode.YOLO`。WS 协议中 `Message` 新增 `approval_mode` 字段（`handsfree_mode` 保留向后兼容）。前端 `useSessionStore` 新增 `approvalMode` 状态，`Header.tsx` 升级为三态审批模式选择器。
+
+### 审批模式按主会话持久化
+
+会话级三态审批模式从 `component/approval/handsfree.py` 的模块级字典迁移到 Application持有的唯一 `ApprovalModeStore`。Store 以业务 `RLock` 保护缓存与“先更新内存、后尽力保存”的顺序，按主会话惰性加载 `approval_mode.es` 的 easysave `v1` key；`SessionApprovalModeState` 直接交给 `save()`，通过 `entity/typeref.py` 中的 `v1::SessionApprovalModeState` stable type token重建，禁止 `.model_dump()` 降级。easysave负责路径锁、前置 `.bak`、同目录临时文件、`fsync`与原子替换；写入失败只记录日志且不回滚内存。旧会话缺文件以及损坏、缺 key或类型错误均回退手动模式。
+
+普通新会话、自动延续、单源分支、多父合并和首次创建的“随意聊聊”都经 Gateway `SessionManager` 统一初始化为手动模式，不复制来源模式；归档保留状态，永久删除会话目录后清理 Store缓存。审批 Profile清空、删除或配置失效不再调用模式批量重置，也不通过 Profile广播携带 `handsfree_mode=false`；已恢复的脱手模式保持不变，实际审批后端不可用时继续按既有失败路径拒绝。
 
 ### Agent 运行工具被 Shell会话取代
 

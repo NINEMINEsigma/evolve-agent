@@ -458,6 +458,10 @@ GLOBAL_LLM_PROFILE_FILENAME: str = "active_llm_profile.json"
 # 会话工具集加载状态文件名（存于会话目录下，记录已加载的工具集名称列表）
 LOADED_TOOLSETS_FILENAME: str = "loaded_toolsets.json"
 
+# 会话级审批模式持久化（存于各会话目录下，easysave 类型保留序列化）
+SESSION_APPROVAL_MODE_ES_FILENAME: str = "approval_mode.es"
+SESSION_APPROVAL_MODE_ES_KEY: str = "v1"
+
 
 # ============================================================================
 # Agent
@@ -631,3 +635,4 @@ COMPRESS_HISTORY_MIN_MESSAGES: int = 10
 History_Type_Version = "v1"
 LLMProfileData_Type_Version = "v2"
 AgentConfig_Type_Version = "v1"
+SessionApprovalModeState_Type_Version = "v1"

@@ -238,18 +238,15 @@ class FrontendSink(AgentSink):
     async def broadcast_approval_profile_change(
         self,
         state,
-        disabled_sessions: list[str] | None = None,
     ) -> list[str]:
         """向所有已连接前端广播审批 Profile 状态变更。
 
         ``state`` 为 ``ApprovalProfileState`` 实例。显式保留 null 值
-        以便前端区分"未选择"与"字段缺失"。``disabled_sessions`` 中的
-        连接同时携带 ``handsfree_mode=false``。
+        以便前端区分"未选择"与"字段缺失"；Profile 变化不携带审批模式。
         """
         from gateway.chat import Message, MessageType
 
         failures: list[str] = []
-        disabled_set = set(disabled_sessions or [])
         for session_id, ws in self.get_all_ws().items():
             message = Message(
                 type=MessageType.APPROVAL_PROFILE_CHANGED,
@@ -257,14 +254,11 @@ class FrontendSink(AgentSink):
                 approval_profile_name=state.profile_name,
                 approval_profile_model=state.model,
                 approval_profile_available=state.available,
-                handsfree_mode=False if session_id in disabled_set else None,
             )
             try:
                 payload = message.model_dump(exclude_none=True)
                 payload["approval_profile_name"] = state.profile_name
                 payload["approval_profile_model"] = state.model
-                if session_id in disabled_set:
-                    payload["handsfree_mode"] = False
                 await ws.send_text(json.dumps(payload, ensure_ascii=False))
             except Exception:
                 failures.append(session_id)

@@ -23,6 +23,7 @@ if TYPE_CHECKING:
     from system.agentspace import AgentspaceService
     from gateway.session_manager import SessionManager
     from component.approval.backend import ApprovalBackend
+    from component.approval.mode_store import ApprovalModeStore
     from component.cron_router import CronRouter
     from abstract.tools.registry import ToolRegistry
     from entry.agent_sink import FrontendSink
@@ -59,6 +60,7 @@ class Application(Architecture):
         self._cron_router:               CronRouter | None = None
         self._session_manager:           SessionManager | None = None
         self._frontend_sink:             FrontendSink | None = None
+        self._approval_mode_store:       ApprovalModeStore | None = None
         self._approval_backend_manager:  ApprovalBackendManager | None = None
 
         # -- 外部注入的复杂对象（private field + setter property）--
@@ -121,22 +123,25 @@ class Application(Architecture):
         from component.extools.cron_tools import _load_all_tasks
         _load_all_tasks()
 
-        # 4. SessionManager — 纯构造，只需 sessions 目录路径
-        from gateway.session_manager import SessionManager
+        # 4. ApprovalModeStore — 会话级审批模式的唯一内存与持久化服务。
+        from component.approval.mode_store import ApprovalModeStore
         from entity.constant import SESSIONS_DIR_NAME
-        self._session_manager = SessionManager(
-            str(self.runtime_context.workspace / SESSIONS_DIR_NAME)
-        )
+        sessions_dir = self.runtime_context.workspace / SESSIONS_DIR_NAME
+        self._approval_mode_store = ApprovalModeStore(sessions_dir)
 
-        # 4.5 动态端点恢复 — 依赖 SessionManager.exists 会话存在性检查，故放在其后
+        # 5. SessionManager — 依赖 ApprovalModeStore 初始化/清理会话模式。
+        from gateway.session_manager import SessionManager
+        self._session_manager = SessionManager(str(sessions_dir))
+
+        # 5.5 动态端点恢复 — 依赖 SessionManager.exists 会话存在性检查，故放在其后
         from component.extools.dynamic_endpoint_tools import _load_all_endpoints
         _load_all_endpoints()
 
-        # 5. FrontendSink — 纯构造，无依赖
+        # 6. FrontendSink — 纯构造，无依赖
         from entry.agent_sink import FrontendSink
         self._frontend_sink = FrontendSink()
 
-        # 6. ApprovalBackendManager — 通过项目级审批 Profile 连接外部管理模型。
+        # 7. ApprovalBackendManager — 通过项目级审批 Profile 连接外部管理模型。
         self._approval_backend_manager = ApprovalBackendManager(
             self.runtime_context,
             self._llm_profile_store,
@@ -191,6 +196,11 @@ class Application(Architecture):
     @property
     def frontend_sink(self) -> FrontendSink:
         return self._frontend_sink  # type: ignore[return-value]
+
+    @property
+    def approval_mode_store(self) -> ApprovalModeStore:
+        """返回进程内唯一的会话级审批模式存储。"""
+        return self._approval_mode_store  # type: ignore[return-value]
 
     @property
     def approval_backend_manager(self) -> ApprovalBackendManager:

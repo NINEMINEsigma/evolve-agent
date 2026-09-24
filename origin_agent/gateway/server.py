@@ -1855,7 +1855,6 @@ async def put_approval_profile(request: Request):
     """
     from system.application import Application
     from entity.puretype import ApprovalProfileUpdateRequest, ApprovalProfileMutationResponse
-    from component.approval import disable_all_handsfree_modes
 
     try:
         body = await request.json()
@@ -1874,11 +1873,9 @@ async def put_approval_profile(request: Request):
         if update.profile_name is None:
             previous = store.get_approval_profile()
             store.set_approval_profile(None)
-            disabled = disable_all_handsfree_modes()
             logger.info(
-                "Approval profile cleared | previous=%s disabled_sessions=%s",
+                "Approval profile cleared | previous=%s",
                 previous.name if previous else None,
-                disabled,
             )
         else:
             try:
@@ -1896,7 +1893,6 @@ async def put_approval_profile(request: Request):
                 )
             previous = store.get_approval_profile()
             store.set_approval_profile(profile)
-            disabled = []
             logger.info(
                 "Approval profile set | name=%s model=%s client=%s",
                 profile.name,
@@ -1906,10 +1902,9 @@ async def put_approval_profile(request: Request):
         mgr.invalidate()
 
     state = mgr.get_state()
-    failures = await app.frontend_sink.broadcast_approval_profile_change(state, disabled)
+    failures = await app.frontend_sink.broadcast_approval_profile_change(state)
     return ApprovalProfileMutationResponse(
         state=state,
-        disabled_sessions=disabled,
         notification_failures=failures,
     ).model_dump()
 
@@ -2321,19 +2316,9 @@ async def update_llm_profile(request: LLMProfileUpdateRequest):
                     application.runtime_context.workspace / SESSIONS_DIR_NAME
                 ).replace_profile_name_pointers(old_name, new_name)
             response_payload = application.llm_profile_store.to_payload(profile)
-            # 审批 Profile 联动：编辑后使客户端缓存失效
+            # 审批 Profile 联动：编辑后使客户端缓存失效；会话审批模式保持不变。
             mgr = application.approval_backend_manager
             mgr.invalidate()
-            # 若审批 Profile 连接字段不完整，关闭全部脱手模式
-            disabled_sessions: list[str] = []
-            approval = application.llm_profile_store.get_approval_profile()
-            if approval is not None and (
-                not approval.llm_client_name.strip()
-                or not approval.base_url.strip()
-                or not approval.model.strip()
-            ):
-                from component.approval import disable_all_handsfree_modes
-                disabled_sessions = disable_all_handsfree_modes()
             metadata_state = application.session_metadata_service.get_state()
         failures: list[str] = []
         if new_name != old_name:
@@ -2343,7 +2328,7 @@ async def update_llm_profile(request: LLMProfileUpdateRequest):
         # 广播审批 Profile 状态变更
         approval_state = mgr.get_state()
         approval_failures = await application.frontend_sink.broadcast_approval_profile_change(
-            approval_state, disabled_sessions,
+            approval_state,
         )
         metadata_failures = await application.frontend_sink.broadcast_metadata_profile_change(
             metadata_state,
@@ -2382,12 +2367,9 @@ async def delete_llm_profile(request: LLMProfileDeleteRequest):
             if replacement is source:
                 raise ValueError("replacement Profile must differ from deleted Profile")
             store.assert_removable(source)
-            # 审批 Profile 联动：若删除目标是当前审批 Profile，先清空引用
-            disabled_sessions: list[str] = []
+            # 审批 Profile 联动：删除当前引用时只清空引用，会话模式保持不变。
             if store.is_approval_profile(source):
                 store.set_approval_profile(None)
-                from component.approval import disable_all_handsfree_modes
-                disabled_sessions = disable_all_handsfree_modes()
             if store.is_metadata_profile(source):
                 store.set_metadata_profile(None)
             switched, busy = application.session_manager.replace_idle_loops_using_profile(
@@ -2412,7 +2394,7 @@ async def delete_llm_profile(request: LLMProfileDeleteRequest):
         # 广播审批 Profile 状态变更
         approval_state = application.approval_backend_manager.get_state()
         approval_failures = await application.frontend_sink.broadcast_approval_profile_change(
-            approval_state, disabled_sessions,
+            approval_state,
         )
         metadata_failures = await application.frontend_sink.broadcast_metadata_profile_change(
             metadata_state,

@@ -174,13 +174,13 @@ frontend/
 
 | Hook | 职责 |
 |---|---|
-| `useWebSocket.ts` | WebSocket 连接编排与低频会话状态桥接；聊天事件写入 `chatRuntimeStore`，流式增量经 `StreamFrameBuffer` 按动画帧提交；所有 user/assistant/tool/system 实时行使用明确 History 映射或保留为可诊断未映射行；工具请求和结果按 `tool_call_id` 幂等更新同一工具调用卡片；`agentspace_event`通过页面事件总线扇出给三个会话视觉 hook；关键请求超时显示持久通知并在 WebSocket可用时上报脱敏诊断；Agent 忙碌时仍允许消息进入后端 FIFO；`history_sync.processing` 的 true/false 均作为服务端权威值覆盖本地处理状态；永久删除只在 HTTP 明确成功后移除会话项，失败保留会话并显示错误，删除当前会话固定切换到“随意聊聊” |
+| `useWebSocket.ts` | WebSocket 连接编排与低频会话状态桥接；聊天事件写入 `chatRuntimeStore`，流式增量经 `StreamFrameBuffer` 按动画帧提交；所有 user/assistant/tool/system 实时行使用明确 History 映射或保留为可诊断未映射行；工具请求和结果按 `tool_call_id` 幂等更新同一工具调用卡片；`agentspace_event`通过页面事件总线扇出给三个会话视觉 hook；关键请求超时显示持久通知并在 WebSocket可用时上报脱敏诊断；Agent 忙碌时仍允许消息进入后端 FIFO；`history_sync.processing` 的 true/false 均作为服务端权威值覆盖本地处理状态；永久删除只在 HTTP 明确成功后移除会话项，失败保留会话并显示错误，删除当前会话固定切换到“随意聊聊”；审批模式不写 localStorage/IndexedDB，只有 `HANDSFREE_MODE` 权威消息可更新三态模式，`APPROVAL_PROFILE_CHANGED` 只更新审批 Profile状态 |
 | `features/chat/chatRuntimeStore.ts` | Zustand 聊天运行时唯一高频状态：完整骨架、内容行、live 尾部、输入草稿、pending、滚动与资源；通用 `liveId → historyRowId`关联把user/assistant/tool/system实时行提升到skeleton正典位置，工具请求和结果按 `tool_call_id` 幂等合并为同一工具调用卡片，REST内容页随后覆盖临时内容；未映射或History失败的行不按版本号清理；`toggleMessageCollapse(id, source)`分别维护历史与实时折叠状态 |
 | `features/chat/chatRuntimeController.ts` | History skeleton/page 请求代际、Abort、页去重、正典同步、15秒超时局部错误与诊断 reporter、Minimap 随机目标和资源懒加载 |
 | `features/chat/useChatScrollController.ts` | `initializing/following/detached/minimap_dragging/returning` 五态追底与回底控制；实时提交和列表高度变化通过可取消、按浏览器帧合并的被动追底调度读取 Virtuoso scroller 物理底部；用户意图、小地图拖拽、消息高度操作和非 `following` 状态会取消待执行帧 |
 | `useLlmProfiles.ts` | 从服务端读取 Profile；提供单对象创建/编辑/删除；浏览器仅持久化活动 Profile 名称；审批 Profile与全局元数据 Profile使用服务端权威 REST 状态和 WebSocket广播 |
 | `useWebSocketConnection.ts` | WebSocket 连接生命周期管理：建立/断开/重连/心跳；会话状态预检和握手复检使用可取消15秒截止，超时报告后不误判删除；消息入口按连接代际和当前 WebSocket 实例丢弃旧连接迟到消息，避免快速切换会话时污染当前状态；普通断开保留指数退避重连，永久删除的已建立连接按 4004 停止重连，握手拒绝则通过 `status.exists`二次确认后通知上层切换“随意聊聊” |
-| `useSessionStore.ts` | 会话列表与低频元数据管理：获取/创建/归档/删除/标签/标题；审批模式、任务资源、Shell/Cron 和交互队列；自动标题/标签/摘要/终结/合并错误通过全局操作通知展示，终结元数据警告不改变归档成功；主聊天消息、输入草稿与 pending 已迁移到 chat runtime store |
+| `useSessionStore.ts` | 会话列表与低频元数据管理：获取/创建/归档/删除/标签/标题；当前连接的审批模式显示与同步状态（服务端为唯一持久化真相）、任务资源、Shell/Cron 和交互队列；自动标题/标签/摘要/终结/合并错误通过全局操作通知展示，终结元数据警告不改变归档成功；主聊天消息、输入草稿与 pending 已迁移到 chat runtime store |
 | `useSubagentManager.ts` | 子代理状态管理：注册/启动/停止/审批/列表 |
 | `useUploadManager.ts` | 文件上传管理：拖拽上传、进度跟踪、文件选择器 |
 | `useAgentspace.ts` | Agentspace 编辑器状态机：目录展开/选择、版本化标签、SSE 代际、逐文件锁、冲突和垃圾桶 |
@@ -192,6 +192,8 @@ frontend/
 | `useSessionChatStyle.ts` | 会话聊天区自定义样式状态：探测 `chat-style/index.css`，经 PostCSS 作用域处理（`@import` 拒绝、`.chat-area` 前缀、`@font-face` 校验 `ChatStyle-` 前缀），通过聊天 WebSocket Agentspace事件热重载 |
 
 “模型配置”抽屉的每个 Profile 行包含三个互相独立的角色开关：当前会话活动 Profile、审批 Profile、全局元数据 Profile。全局元数据 Profile可再次点击并确认清空；切换状态由服务端持久化与广播，不写入浏览器活动 Profile名称。
+
+审批 Profile与会话审批模式是两个独立状态：清空、删除或改坏审批 Profile只改变 Profile名称/模型/可用性，不把当前会话改为手动模式。已有脱手模式继续显示，实际审批后端不可用时由服务端返回审批失败；YOLO不受影响。会话模式切换继续采用非乐观更新，只有专用权威回执到达后才解除“加载中”。
 
 ---
 

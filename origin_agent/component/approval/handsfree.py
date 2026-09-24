@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import Any
+from typing import Any, TYPE_CHECKING
 
 from entity.constant import (
     APPROVAL_ALLOW_MARKERS,
@@ -16,8 +16,15 @@ from entity.puretype import ApprovalResult, ApprovalMode, Role
 
 logger = logging.getLogger(__name__)
 
+if TYPE_CHECKING:
+    from component.approval.mode_store import ApprovalModeStore
 
-_approval_modes: dict[str, ApprovalMode] = {}
+
+def _get_approval_mode_store() -> ApprovalModeStore:
+    """返回 Application 持有的唯一审批模式存储。"""
+    from system.application import Application
+
+    return Application.current().approval_mode_store
 
 
 def is_handsfree_available() -> bool:
@@ -41,7 +48,7 @@ def set_approval_mode(session_id: str, mode: ApprovalMode) -> ApprovalMode:
         actual = ApprovalMode.MANUAL
     else:
         actual = mode
-    _approval_modes[session_id] = actual
+    actual = _get_approval_mode_store().set_mode(session_id, actual)
     logger.info(
         "Approval mode set | session=%s mode=%s actual=%s",
         session_id, mode.value, actual.value,
@@ -50,19 +57,13 @@ def set_approval_mode(session_id: str, mode: ApprovalMode) -> ApprovalMode:
 
 
 def get_approval_mode(session_id: str) -> ApprovalMode:
-    """返回该会话当前的审批模式（默认 MANUAL）。"""
-    return _approval_modes.get(session_id, ApprovalMode.MANUAL)
+    """返回该会话当前或持久化恢复的审批模式。"""
+    return _get_approval_mode_store().get_mode(session_id)
 
 
 def disable_all_non_manual_modes() -> list[str]:
-    """将全部非 MANUAL 的会话重置为 MANUAL，返回受影响的 session ID。"""
-    disabled = sorted(
-        session_id
-        for session_id, mode in _approval_modes.items()
-        if mode != ApprovalMode.MANUAL
-    )
-    for session_id in disabled:
-        _approval_modes[session_id] = ApprovalMode.MANUAL
+    """显式将全部非 MANUAL 会话重置为 MANUAL。"""
+    disabled = _get_approval_mode_store().reset_all_non_manual_modes()
     if disabled:
         logger.info("Reset non-manual approval modes for sessions=%s", disabled)
     return disabled

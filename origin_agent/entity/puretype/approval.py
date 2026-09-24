@@ -22,6 +22,14 @@ class ApprovalMode(str, Enum):
     YOLO = "yolo"
 
 
+class SessionApprovalModeState(BaseModel):
+    """单个主会话的审批模式持久化根对象。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    mode: ApprovalMode = ApprovalMode.MANUAL
+
+
 class ApprovalPolicy(BaseModel):
     """审批策略：定义在特定会话角色下，哪些 danger_level 需要审批。
 
@@ -86,10 +94,11 @@ class ApprovalProfileState(BaseModel):
 
 
 class ApprovalProfileMutationResponse(BaseModel):
-    """审批 Profile 更新及联动结果。"""
+    """审批 Profile 更新结果；Profile 变更不修改会话审批模式。"""
 
     state: ApprovalProfileState
     disabled_sessions: list[str] = Field(default_factory=list)
+    """向后兼容字段；审批 Profile 变更流程固定返回空列表。"""
     notification_failures: list[str] = Field(default_factory=list)
 
 
