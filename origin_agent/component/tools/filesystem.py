@@ -28,7 +28,8 @@ from typing import Any, Dict, TYPE_CHECKING
 
 from abstract.tools.registry import registry, tool_error, tool_result
 from entity.puretype import ToolDangerLevel
-from entity.constant import EDIT_FILE_MAX_CHARS, READ_FILE_DEFAULT_LIMIT, READ_FILE_MAX_LINES, WRITE_FILE_MAX_CHARS, WRITE_FILE_TRUNCATION_TAIL
+from entity.constant import EDIT_FILE_MAX_CHARS, META_FILE_SUFFIX, READ_FILE_DEFAULT_LIMIT, READ_FILE_MAX_LINES, WRITE_FILE_MAX_CHARS, WRITE_FILE_TRUNCATION_TAIL
+from system.file_metadata import MetaFormatError, parse_meta_content
 from system.sandbox import Access, Sandbox, SandboxError
 from system.context import get_runtime_context
 from system.text_codec import split_lf_lines
@@ -53,6 +54,44 @@ def _s() -> Sandbox:
     """委托到 Application.sandbox property。"""
     from system.application import Application
     return Application.current().sandbox
+
+
+def _read_meta_fields(
+    path: str,
+    is_directory: bool,
+    context: ToolContext | None = None,
+) -> dict[str, dict[str, str] | str]:
+    """读取已校验目标的同级元数据；缺失省略字段，失败不影响正文。"""
+    namespace, relative = path.split(":", 1)
+    # 原目标已经过 resolve_read 校验；这里只统一分隔符和当前目录写法，
+    # 保留逻辑别名，而不是从符号链接的物理目标反推同级路径。
+    parts = [part for part in relative.replace("\\", "/").split("/") if part not in ("", ".")]
+    if not parts or parts[-1].lower().endswith(META_FILE_SUFFIX):
+        return {}
+    logical = f"{namespace.strip()}:{'/'.join(parts)}"
+    meta_path = logical + META_FILE_SUFFIX
+    try:
+        sandbox = _s()
+        if is_directory:
+            target = sandbox.resolve_read(path)
+            root = sandbox.resolve_read(f"{namespace.strip()}:")
+            if target.real == root.real:
+                return {}
+        meta_resolved = sandbox.resolve_read(meta_path)
+        # stat 区分真正缺失与权限/I/O 错误，不用 Sandbox.exists 隐藏拒绝。
+        try:
+            meta_resolved.real.stat()
+        except FileNotFoundError:
+            return {}
+        if not meta_resolved.real.is_file():
+            raise SandboxError("metadata path is not a file")
+        _track_agentspace_access(context, [(meta_path, False)])
+        content = sandbox.read(meta_path, limit=0)
+        return {"meta": parse_meta_content(content)}
+    except MetaFormatError as exc:
+        return {"meta": f"元数据存在但解析失败（{meta_path}）：{exc}"}
+    except Exception as exc:
+        return {"meta": f"元数据读取失败（{meta_path}）：{exc}"}
 
 
 def _track_agentspace_access(
@@ -206,9 +245,12 @@ async def _handle_read(args: dict[str, Any], context: ToolContext | None = None)
             raw: list[str] = _s().list_dir(path)
         except SandboxError as exc:
             return tool_error(str(exc), path=path)
+        metadata_fields = _read_meta_fields(path, is_directory=True, context=context)
         entries: list[str] = []
         for name in raw:
             fp = resolved.real / name
+            if name.lower().endswith(META_FILE_SUFFIX) and fp.is_file():
+                continue
             entries.append(f"{name}/" if fp.is_dir() else name)
         return {
             "type": "directory",
@@ -221,6 +263,7 @@ async def _handle_read(args: dict[str, Any], context: ToolContext | None = None)
             "limit": 0,
             "entries": entries,
             "count": len(entries),
+            **metadata_fields,
         }
 
     # 文件分支
@@ -297,6 +340,7 @@ async def _handle_read(args: dict[str, Any], context: ToolContext | None = None)
                             "limit": 0,
                             "entries": [],
                             "count": None,
+                            **_read_meta_fields(path, is_directory=False, context=context),
                         }
                     return tool_error(
                         f"This provider does not support images inside either tool messages or user messages, "
@@ -344,6 +388,7 @@ async def _handle_read(args: dict[str, Any], context: ToolContext | None = None)
                     "limit": 0,
                     "entries": [],
                     "count": None,
+                    **_read_meta_fields(path, is_directory=False, context=context),
                 }
             # tool_vision is True → 现有行为
             # 大小检查
@@ -386,6 +431,7 @@ async def _handle_read(args: dict[str, Any], context: ToolContext | None = None)
                 "limit": 0,
                 "entries": [],
                 "count": None,
+                **_read_meta_fields(path, is_directory=False, context=context),
             }
         # --- 音频分支（MIME 自动检测）---
         if mime_type in _SUPPORTED_AUDIO_MIMES:
@@ -450,6 +496,7 @@ async def _handle_read(args: dict[str, Any], context: ToolContext | None = None)
                             "limit": 0,
                             "entries": [],
                             "count": None,
+                            **_read_meta_fields(path, is_directory=False, context=context),
                         }
                     return tool_error(
                         f"This provider does not support audio inside either tool messages or user messages, "
@@ -493,6 +540,7 @@ async def _handle_read(args: dict[str, Any], context: ToolContext | None = None)
                     "limit": 0,
                     "entries": [],
                     "count": None,
+                    **_read_meta_fields(path, is_directory=False, context=context),
                 }
             # tool_audio is True → 现有行为
             file_size = resolved.real.stat().st_size
@@ -529,6 +577,7 @@ async def _handle_read(args: dict[str, Any], context: ToolContext | None = None)
                 "limit": 0,
                 "entries": [],
                 "count": None,
+                **_read_meta_fields(path, is_directory=False, context=context),
             }
         # --- 视频分支（MIME 自动检测）---
         if mime_type in _SUPPORTED_VIDEO_MIMES:
@@ -588,6 +637,7 @@ async def _handle_read(args: dict[str, Any], context: ToolContext | None = None)
                             "limit": 0,
                             "entries": [],
                             "count": None,
+                            **_read_meta_fields(path, is_directory=False, context=context),
                         }
                     return tool_error(
                         f"Video not supported by model '{model_name}' in either tool or user messages, "
@@ -629,6 +679,7 @@ async def _handle_read(args: dict[str, Any], context: ToolContext | None = None)
                         "limit": 0,
                         "entries": [],
                         "count": None,
+                        **_read_meta_fields(path, is_directory=False, context=context),
                     }
             # tool_video is True → 直接返回 _blocks 载荷
             file_size = resolved.real.stat().st_size
@@ -661,6 +712,7 @@ async def _handle_read(args: dict[str, Any], context: ToolContext | None = None)
                 "limit": 0,
                 "entries": [],
                 "count": None,
+                **_read_meta_fields(path, is_directory=False, context=context),
             }
         # --- 文本分支：直接返回原文片段，行位置另由元数据表示 ---
         try:
@@ -685,6 +737,7 @@ async def _handle_read(args: dict[str, Any], context: ToolContext | None = None)
             "limit": limit,
             "entries": [],
             "count": None,
+            **_read_meta_fields(path, is_directory=False, context=context),
         }
 
     return tool_error("Unsupported path type — must be a file or directory", path=path)
@@ -842,6 +895,10 @@ registry.register(
         # 读取文件原始文本（保留 CRLF/LF/孤立 CR 和末尾换行，另返回总行数、绝对路径）、列出目录条目、或读取图片/音频/视频文件（按 MIME 自动检测）。
         # 支持命名空间前缀：ws:、fork:、fix:、skills: 及其他只读命名空间。
         # 目录分支忽略 offset/limit，文件分支使用 offset/limit 分页，图片/音频/视频分支忽略 offset/limit。
+        # 元数据文件：完整目标名称追加 .meta，目录读取同级而非内部文件；命名空间根目录不附带。
+        # 成功结果的 meta 为 [key] 分段的一层字符串字典；缺失省略，读取/解析失败返回错误字符串。
+        # 值保留全部原始空白与换行；元数据不分页、不执行业务功能；显式 .meta 不继续嵌套。
+        # 目录列表隐藏 .meta 文件（后缀不区分大小写），同后缀目录保留；count 为过滤后条目数。
         #
         # ## 图片/音频/视频分支（MIME 自动检测）
         # 当文件 MIME 类型命中图片白名单（PNG/JPEG/WebP/GIF/BMP/TIFF/SVG）、音频白名单（WAV/MP3）或视频白名单（MP4）时自动走对应分支。
@@ -907,7 +964,7 @@ registry.register(
 
 ## Effect
 **File branch**: `content` is the original text of the selected whole-line slice: no line-number prefixes, newline normalization, or removed trailing newline. Supports pagination via offset (0-indexed start) and limit (max lines); use offset and total_lines for line positions.
-**Directory branch**: Returns entry names; directory entries suffixed with '/'. offset and limit are ignored for directories (filled as 0).
+**Directory branch**: Returns entry names; directory entries suffixed with '/'. Files ending in `.meta` (case-insensitive) are hidden; directories with that suffix remain visible. `count` is the filtered entry count. offset and limit are ignored for directories (filled as 0).
 **Image branch**: Auto-detected by MIME type (PNG, JPEG, WebP, GIF, BMP, TIFF, SVG; max 20 MB). Delivery path depends on probe results:
 - `vision_capable=true` → image is delivered directly in the tool message as a `_blocks` payload (multimodal content block).
 - `vision_capable=false` but `user_vision_capable=true` → image is delivered via a follow-up user message after the current tool round completes. The tool result contains `_user_blocks` and a text note advising you NOT to call any more tools — respond directly to receive the image.
@@ -920,6 +977,14 @@ offset and limit are ignored for images (filled as 0).
 **Video branch**: Auto-detected by MIME type (MP4; max 50 MB). Same four-state delivery as the image branch, using `_blocks` / `_user_blocks` / `description` (forwarded, via `vision_video_profile`) / error. offset and limit are ignored for video (filled as 0).
 
 All branches return absolute_path (resolved absolute path), total_lines (line count; 0 for directories/images/audio/video), entries (directory entries; empty array for files/images/audio/video), and a type discriminant ("file", "directory", "image", "audio", or "video").
+
+## Metadata files
+After a successful read, the complete target name plus `.meta` is read as a sibling metadata file: `ws:a.py` uses `ws:a.py.meta`; `ws:docs/` uses `ws:docs.meta`, never `ws:docs/.meta`. Namespace roots do not attach metadata. Reading a `.meta` target explicitly does not look for another `.meta` layer. Suffix recognition is case-insensitive; automatic lookup appends lowercase `.meta`.
+- A standalone `[key]` line starts a string field. The value extends up to the next key line or EOF; all indentation, blank lines and trailing newlines are preserved. Keys are case-sensitive, are not trimmed, and cannot be empty/whitespace-only or contain brackets or line breaks. Key markers have no surrounding whitespace. LF and CRLF delimit lines; a lone CR remains content.
+- Duplicate keys, invalid bracketed key lines and non-whitespace text before the first key are format errors. Empty/whitespace-only files yield an empty object; an empty field yields an empty string. There is no escape syntax for a standalone `[key]` line inside a value.
+- A valid metadata file adds `meta` as a flat string-to-string object. A missing file omits `meta`. A read/access/format failure adds `meta` as an error string without failing the original read. Metadata file access uses the same sandbox checks and workspace file access registration.
+- Metadata is read in full, independently of the target's offset/limit, including for images/audio/video. Metadata is returned only as data; it does not configure or execute any application behavior, and reading never creates or updates it.
+- Example fields in an otherwise unchanged successful result: `"meta": {"title": "Example"}`; on failure: `"meta": "元数据存在但解析失败（ws:a.py.meta）：line 3: duplicate metadata key: title"`. This is distinct from the internal `_meta` tool timing field.
 
 ## Returns
 File branch:

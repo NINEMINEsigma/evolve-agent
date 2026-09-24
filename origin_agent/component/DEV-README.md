@@ -62,6 +62,18 @@ component/
 | `session_search.py` | `SessionSearch` | 会话内容搜索 |
 | `lsp.py` | LSP 诊断 | LSP 服务器进程管理与代码诊断 |
 
+### Read 元数据文件
+
+仅 `Read` 支持自动附带元数据文件：目标完整名称追加 `.meta`，例如 `ws:a.md` 对应 `ws:a.md.meta`，`ws:docs/` 对应同级 `ws:docs.meta`，不是目录内部的 `.meta`。命名空间根目录（含等价当前目录写法或指向根目录的别名）不附带元数据；显式读取后缀为 `.meta` 的目标不继续嵌套。后缀识别不区分大小写，自动查找统一追加小写 `.meta`。
+
+- 目录列表隐藏后缀匹配且为文件的条目，保留同后缀目录；`count` 为过滤后数量。`Sandbox.list_dir`、SearchFiles、Grep、Agentspace 文件树和写入/移动/删除工具不变。
+- `system/file_metadata.py::parse_meta_content(content)` 是不执行 I/O 的共享解析入口。独立成行的 `[key]` 开始字段，键名不 trim、区分大小写，不允许空/纯空白键或键内方括号、CR、LF。标记行外侧没有空白；LF/CRLF 为行界，孤立 CR 仍是内容。
+- 每个值一直延续到下一个键标记或文件末尾，缩进、空行、CRLF、孤立 CR 与末尾换行原样保留。独立的 `[text]` 是新键，不提供转义语法。
+- 空文件或全空白文件得到 `{}`；无值键得到空字符串。重复键、非法的整行方括号标记、首个键前的非空文字抛带行号的 `MetaFormatError`，不返回部分解析字典。
+- 文本、图片、音频、视频和目录成功结果均可包含普通 `meta` 字段：正常为 `dict[str, str]`，缺失省略，读取/登记/解析失败为错误字符串，不影响原目标结果；不同于内部工具统计字段 `_meta`。
+- 元数据经 `Sandbox.resolve_read` 与 `Sandbox.read(limit=0)` 完整读取和现有编码探测，不使用正文 offset/limit；明确 `ws:` 元数据文件登记当前回复轮次文件接触，登记失败不读取。各媒体 `_blocks`、`_user_blocks` 和转发 description 保持不变。
+- 只返回元数据，不解释或执行键的业务含义，不自动生成或随移动/删除维护文件。当前按完整读取契约不新增大小截断或单独上限，大文件的资源成本由调用方关注。
+
 ### 扩展工具集（`component/extools/`）
 
 | 工具文件 | 用途 |

@@ -21,3 +21,6 @@ WRITE_FILE_TRUNCATION_TAIL: int = 25
 
 # 文件类型嗅探采样字节数 — 通过检查前 N 字节中是否含空字节判断是否为文本文件
 FILE_SNIFF_BYTES: int = 4096
+
+# Read 自动查找的同级元数据文件后缀
+META_FILE_SUFFIX: str = ".meta"
