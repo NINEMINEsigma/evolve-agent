@@ -162,7 +162,7 @@ def build_video_content_blocks(video: dict, text_payload: str) -> list[MessageBl
 # ---------------------------------------------------------------------------
 
 # ── 转发描述特殊标签 ──
-# 标签常量定义于 entity/constant.py，此处提供按 media_type 查找标签的映射与包裹函数，
+# 标签常量定义于 entity/constant/llm.py，此处提供按 media_type 查找标签的映射与包裹函数，
 # 供 preprocess（entry 层）与 Read 工具（component 层）共用，保证两条转发路径产出的
 # 描述都以同一种标签包裹。
 _FORWARDED_TAG_BY_MEDIA: dict[str, str] = {
