@@ -939,6 +939,12 @@ classDiagram
 
 `Application` 持有唯一 `LLMProfileStore`、共享进程锁和 `SessionMetadataService`。`llm_profiles.es` 仅支持 v2 `LLMProfileData` 根对象，三个多模态分工字段、审批 Profile与全局元数据 Profile直接保存根列表中的 `LLMProfile` 实例引用；不存在 UID 或 v1 迁移。Gateway 只接收扁平名称 DTO 和单 Profile CRUD。主会话活动配置以名称指针持久化，每条前端消息只传 `llm_profile_name`；`IMainSessionLoop.set_profile()` 由 Parent/Multi 实现。`/regenerate` 请求明确接收 `llm_profile_name` 并在生成前更新活动 Profile；`/resume` 仅从当前历史恢复工具链，不接收、不更新 Profile，使用 `ParentAgentLoop` 当前已持有的活动 Profile。
 
+### 模型配置分页与会话待用选择
+
+新增只读 HTTP DTO `SessionLlmProfileState`（`entity/puretype/llm.py`，纯字段 BaseModel），通过 `GET /api/sessions/{id}/llm-profile` 返回会话持久化名称及既有全局最近使用回退、名称可用性。Gateway 在 Application 已有 `profile_lock` 内读取无状态 `SessionStore`；不创建 Loop、不新增生命周期对象、不写名称指针。响应不是正在执行的客户端快照。
+
+前端 `useLlmProfiles(sessionId)` 组合 `useSessionLlmSelection`，将浏览器待用名称按主会话隔离。显式本地选择优先，无本地覆盖时读取服务端；每条主会话消息/重新生成仍独立捕获名称，resume不提交本地选择。模型抽屉仅管理定义和全局引用，唯一会话选择入口为顶部栏的独立浮层菜单。`useLlmProfileEditor` 独立管理内存草稿，切分页不重建草稿；没有新增 Agent Loop 字段或 protected 访问。
+
 ### 全局元数据 Profile 与延续摘要保障
 
 `SessionMetadataService`是标题、标签和摘要生成的唯一业务入口。它优先使用 `LLMProfileData.metadata_profile`；仅在全局引用为空时通过 `SessionStore.read_active_profile_name(session_id)`按目标会话回退，并对选定 Profile执行浅拷贝形成单次调用快照。明确配置但无效或调用失败时禁止静默回退。手动终结中的摘要和标签为 best-effort，失败通过 `SessionTerminationResult.metadata_warnings`返回但仍归档；分支、合并与自动超限旋转必须先取得摘要。自动旋转在摘要或延续初始化失败时保持旧会话 active、保留触发消息并追加对 LLM 不可见的系统状态，成功初始化延续 History后才归档旧会话。

@@ -64,6 +64,7 @@ from entity.puretype import (
     LLMProfileDeleteRequest,
     LLMProfileMutationResponse,
     LLMProfileDeleteResult,
+    SessionLlmProfileState,
     MetadataProfileUpdateRequest,
     MetadataProfileMutationResponse,
     AgentspaceWriteRequest,
@@ -524,6 +525,41 @@ async def get_session_status(session_id: str, conn_token: str | None = None):
         processing=processing,
         activity=activity,
     )
+
+
+@app.get("/api/sessions/{session_id}/llm-profile", response_model=SessionLlmProfileState)
+async def get_session_llm_profile(session_id: str, response: Response) -> SessionLlmProfileState:
+    """只读恢复会话保存的名称；不创建 Loop，也不提交浏览器待用选择。"""
+    from entity.constant import SESSIONS_DIR_NAME
+    from system.application import Application
+    from system.session_store import SessionStore
+
+    application = Application.current()
+    sm = application.session_manager
+    if sm is None or not sm.exists(session_id) or sm.is_session_deleting(session_id):
+        raise HTTPException(status_code=404, detail="Session not found")
+    try:
+        with application.profile_lock:
+            if not sm.exists(session_id) or sm.is_session_deleting(session_id):
+                raise HTTPException(status_code=404, detail="Session not found")
+            store = SessionStore(application.runtime_context.workspace / SESSIONS_DIR_NAME)
+            name = store.read_active_profile_name(session_id)
+            available = False
+            if name:
+                try:
+                    application.llm_profile_store.get_profile(name)
+                    available = True
+                except LookupError:
+                    pass
+            response.headers["Cache-Control"] = "no-store"
+            return SessionLlmProfileState(
+                session_id=session_id, profile_name=name, available=available,
+            )
+    except HTTPException:
+        raise
+    except Exception:
+        logger.exception("Failed to read session LLM Profile pointer | session=%s", session_id)
+        raise HTTPException(status_code=500, detail="Failed to read session LLM Profile")
 
 
 @app.get("/api/sessions/{session_id}/subagents")

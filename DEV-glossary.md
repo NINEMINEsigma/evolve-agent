@@ -181,6 +181,8 @@
 | 有效工具集合 | 按"已加载工具集 + 当前 Loop 可见性（`ToolAvailability`）+ `check_fn` 可用性"动态计算的实际工具列表 | effective tools |
 | LLM Profile 根对象 | `LLMProfileData`（英文锚点：`LLM Profile root`）；`llm_profiles.es` v2 中唯一的持久化根，持有全部 Profile 及实例引用关系 |
 | 全局元数据 Profile | `LLMProfileData.metadata_profile`（英文锚点：`global metadata Profile`）；项目级元数据生成 Profile，统一服务所有会话的自动标题、自动标签和摘要；未配置时按目标会话活动 Profile 回退 |
+| 会话待用 Profile 选择 | 浏览器按主会话保存的 Profile 名称，供下一条发送给主会话的消息或重新生成提交使用；选择操作本身不更新后端，可能与后端已保存的名称不同（英文锚点：`pending session Profile selection`） |
+| 抽屉分页按钮 | 模型配置抽屉顶部切换“模型配置”和“全局配置引用”的按钮组；不称作左侧导航栏（英文锚点：`drawer tabs`） |
 | Profile 名称指针 | 会话级或全局最近使用的 Profile 名称（英文锚点：`Profile name pointer`）；只保存名称，不复制端点、密钥或 Profile 对象 |
 | Profile 实例引用 | `LLMProfile` 多模态分工字段直接指向根列表中的另一个 `LLMProfile` 实例（英文锚点：`Profile object reference`） |
 
@@ -287,7 +289,8 @@
 | 会话徽章 | `.session-badge` | 当前会话 ID，≤768px 隐藏 |
 | 调试徽章组 | `DebugBadges` / `.debug-badges` | 连接诊断徽章，≤1100px 隐藏 |
 | 命令菜单 | `.cmd-menu-dropdown`（⋮ 按钮触发） | 本地性能遥测、动态沙盒空间与会话视觉开关；展开期间钉住顶部抽屉 |
-| 状态胶囊 | `HeaderPill` / `.header-pill` | 居中渐变胶囊，hover 展开状态/模型名详情；桌面端渲染于 dock，移动端渲染于中栏 |
+| 状态胶囊 | `HeaderPill` / `.header-pill` | 居中状态胶囊，桌面支持hover/焦点展开；触摸与折叠顶部栏常显待用模型按钮，模型选择由独立浮层承载 |
+| 模型选择菜单 | `ModelProfileMenu` / `.model-profile-menu` | 顶部栏唯一的会话待用 Profile 选择入口，body独立浮层；选择仅更新当前会话浏览器值，发送或重新生成时提交 |
 | 脱手模式徽章 | `.approval-model-badge` | 点击切换自动审批 |
 | 令牌徽章 | `.token-badge` | token 统计文本，≤900px 隐藏 |
 | 令牌环 | `TokenRing` / `.token-ring` | 上下文用量环形图，≤900px 显示 |
@@ -306,6 +309,7 @@
 | 输入栏 | `InputBar` | 底部输入区；普通单Agent桌面会话在已有消息后使用独立底部玻璃热区控制 hidden/peek/open 三态抽屉，空会话保留居中的完整输入栏；非空会话空闲时默认收缩，抵达聊天区底部时自动展开，离开底部后恢复收缩，热区悬停、聚焦及附件、审批、上传、录音、任务进度等交互期间保持展开；触摸设备保持完整形态 |
 | 右侧触发条 | `.right-trigger-strip` / `.right-trigger-bar` | 屏幕右缘的展开把手（资源抽屉 / 子会话面板） |
 | 资源抽屉 | `Drawer` | 后台任务、Cron 等 |
+| 模型配置抽屉 | `LlmProfileDrawer` | “模型配置 / 全局配置引用”两个分页；模型页纵向分组、详情单开、先只读后编辑；全局页管理审批与元数据引用，不提供会话模型切换 |
 | 子会话面板 | `SubagentPanel` | 宽度持久化于 localStorage 键 `evolve_subagent_panel_width` |
 | 图片灯箱 | `Lightbox` | 图片放大查看 |
 | 确认对话框 | `ConfirmDialog` | 工具调用审批弹窗 |

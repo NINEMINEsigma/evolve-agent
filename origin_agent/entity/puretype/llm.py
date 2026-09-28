@@ -188,6 +188,14 @@ class LLMProfilePayload(BaseModel):
     soul_file: str = "SOUL.md"
 
 
+class SessionLlmProfileState(BaseModel):
+    """会话持久化 Profile 名称及既有全局回退；不代表进行中的客户端快照。"""
+
+    session_id: str
+    profile_name: str | None
+    available: bool
+
+
 class LLMProfileUpdateRequest(BaseModel):
     """HTTP 单 Profile 更新请求。"""
 

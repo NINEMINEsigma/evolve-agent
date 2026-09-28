@@ -65,6 +65,7 @@ from .llm import (
     LLMProfileDeleteRequest,
     LLMProfileMutationResponse,
     LLMProfileDeleteResult,
+    SessionLlmProfileState,
     ModalityCapability,
 )
 from .skills import (
@@ -187,6 +188,7 @@ __all__ = [
     "LLMProfileDeleteRequest",
     "LLMProfileMutationResponse",
     "LLMProfileDeleteResult",
+    "SessionLlmProfileState",
     "ModalityCapability",
     # skills
     "SkillPayload",

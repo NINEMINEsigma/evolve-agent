@@ -198,6 +198,9 @@ Shell 输出由 Agent 使用 `ReadShell` 拉取，不通过聊天 WebSocket 主�
 | PUT | `/api/llm/profiles` | 按原名称原地更新或重命名单个 Profile |
 | DELETE | `/api/llm/profiles` | 删除 Profile，并为当前空闲会话指定替换名称或无配置 |
 | GET | `/api/llm/clients` | 返回可用 LLM 客户端实现 |
+| GET | `/api/sessions/{id}/llm-profile` | 只读返回会话保存的Profile名称及缺失时的全局最近使用回退；不创建Loop、不更新选择 |
+
+`llm-profile` 返回 `SessionLlmProfileState(session_id, profile_name, available)`：profile_name为空字符串表示显式无配置，null表示会话和全局指针均缺失；非空名称的available只表示存在于注册表，不代表连接已验证。不存在或删除中会话返回404，指针格式/IO读取错误返回500；响应no-store，可查询归档及随意聊聊。该接口反映持久化指针，不是进行中的客户端快照。浏览器会话待用选择优先于恢复值，只在发送到主会话或重新生成时通过既有通道提交；没有新增切换Profile的PUT接口。
 
 前端 USER_MESSAGE 与重新生成请求只传 `llm_profile_name`，不传完整 Profile。空字符串表示明确无配置。`/resume` 请求不接收 `llm_profile_name`，始终使用当前 `ParentAgentLoop` 已持有的活动 Profile；前端刚切换但尚未通过 USER_MESSAGE 或重新生成提交的 Profile，不会被 resume 应用。Profile 重命名和删除通过 `llm_profile_changed` 广播；忙碌会话不在删除请求中切换。
 

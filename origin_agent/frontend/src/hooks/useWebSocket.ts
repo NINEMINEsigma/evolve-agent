@@ -45,6 +45,8 @@ export function useWebSocket() {
   const connRef = useRef(conn);
   const subagentRef = useRef(subagent);
   const streamDoneSeenRef = useRef(false);
+  // 只用于阻止切会话期间提交旧身份；不承载新的会话真相源。
+  const sessionTransitionRef = useRef(true);
 
   const fetchToolResourcesRef = useRef(async (sid: string) => {
     if (!sid) return;
@@ -67,6 +69,7 @@ export function useWebSocket() {
 
   const session = useSessionStore({
     onSessionRotated: (newSid, oldSid) => {
+      sessionTransitionRef.current = true;
       subagentRef.current.setSubagentSessionsMap((previous) => ({ ...previous, [oldSid]: {} }));
       chatRuntimeController.beginSession(newSid);
     },
@@ -85,7 +88,7 @@ export function useWebSocket() {
     sessionId: session.sessionId,
     addMessage: (role, content) => appendLocalMessage(role, content),
   });
-  const llmProfiles = useLlmProfiles();
+  const llmProfiles = useLlmProfiles(session.sessionId);
   const llmProfilesRef = useRef(llmProfiles);
   useMainSessionActivityPolling(session.sessionId, conn.connected);
 
@@ -101,6 +104,11 @@ export function useWebSocket() {
   useEffect(() => { uploadRef.current = upload; }, [upload]);
   useEffect(() => { subagentRef.current = subagent; }, [subagent]);
   useEffect(() => { llmProfilesRef.current = llmProfiles; }, [llmProfiles]);
+  useEffect(() => {
+    const sid = session.sessionId;
+    sessionTransitionRef.current = !sid || sid !== llmProfiles.sessionId
+      || sid !== useChatRuntimeStore.getState().sessionId;
+  });
 
   const reportTransportDiagnostic = useCallback((diagnostic: ClientDiagnostic) => {
     const sid = sessionRef.current?.sessionId || "";
@@ -136,6 +144,7 @@ export function useWebSocket() {
     const sid = message.session_id || sessionRef.current?.sessionId || "";
     if (!sid) return;
     if (sessionRef.current?.sessionId !== sid) {
+      sessionTransitionRef.current = true;
       sessionRef.current?.setSessionId(sid);
       localStorage.setItem(STORAGE_KEYS.SESSION_ID, sid);
     }
@@ -372,6 +381,7 @@ export function useWebSocket() {
 
   const newChat = useCallback(() => {
     window.history.replaceState({}, "", "/");
+    sessionTransitionRef.current = true;
     conn.disconnect();
     sessionRef.current?.newChat();
     chatRuntimeController.beginSession("");
@@ -380,6 +390,7 @@ export function useWebSocket() {
 
   const switchSession = useCallback((sid: string) => {
     if (sessionRef.current?.sessionId === sid) return;
+    sessionTransitionRef.current = true;
     window.history.replaceState({}, "", `/?session=${sid}`);
     conn.disconnect();
     sessionRef.current?.switchSession(sid);
@@ -390,6 +401,8 @@ export function useWebSocket() {
   const enterColloquy = useCallback(() => switchSession(COLLOQUY_SID), [switchSession]);
 
   const onOpen = useCallback(() => {
+    void llmProfilesRef.current.refreshProfiles().catch(() => {});
+    void llmProfilesRef.current.refreshSessionSelection();
     sessionRef.current?.setApprovalModeSyncStatus("loading");
     if (sessionRef.current) sessionRef.current.ignoreStaleRef.current = false;
     sessionRef.current?.fetchSessions();
@@ -401,7 +414,9 @@ export function useWebSocket() {
   }, []);
 
   const onSessionDeleted = useCallback(() => {
-    if (sessionRef.current?.sessionId === COLLOQUY_SID) return;
+    const deletedSid = sessionRef.current?.sessionId;
+    if (deletedSid) llmProfilesRef.current.forgetSessionSelection(deletedSid);
+    if (deletedSid === COLLOQUY_SID) return;
     switchSession(COLLOQUY_SID);
   }, [switchSession]);
 
@@ -449,6 +464,19 @@ export function useWebSocket() {
     if (!currentSession || !currentUpload || !currentConnection.wsRef.current) return;
     const archived = currentSession.sessions.find((item) => item.id === currentSession.sessionId)?.status === "archived";
     if (archived || currentConnection.wsRef.current.readyState !== WebSocket.OPEN) return;
+    const sid = currentSession.sessionId;
+    const manager = llmProfilesRef.current;
+    if (sessionTransitionRef.current || !sid || runtime.sessionId !== sid || manager.sessionId !== sid) {
+      currentSession.showOperationNotice({ kind: "warning", message: "正在切换会话，请稍候再发送。" });
+      return;
+    }
+    const profileName = manager.toProfileName(sid);
+    const sendsToMain = targetSessions.length === 0 || targetSessions.includes("main");
+    if (sendsToMain && !profileName) {
+      currentSession.showOperationNotice({ kind: "warning", message: manager.selectionError
+        || (manager.selectionStatus === "loading" ? "正在读取该会话的模型配置，请稍候。" : "请先在顶部栏选择该会话的待用模型。") });
+      return;
+    }
     const blocks = currentUpload.extractContentBlocks(
       currentUpload.inputRef.current,
       currentUpload.pendingImages,
@@ -461,7 +489,7 @@ export function useWebSocket() {
       : blocks;
     const clientMessageId = generateUUID();
     runtime.addPendingMessage(clientMessageId, content);
-    if (targetSessions.includes("main")) {
+    if (sendsToMain) {
       runtime.beginOptimisticMainSessionActivity(clientMessageId, "user_message");
     }
     currentConnection.send({
@@ -470,7 +498,7 @@ export function useWebSocket() {
       target_sessions: targetSessions,
       client_message_id: clientMessageId,
       client_info: collectClientInfo(),
-      llm_profile_name: llmProfilesRef.current.toProfileName(),
+      llm_profile_name: profileName ?? "",
       ...(visibleCharacters ? { visible_characters: visibleCharacters } : {}),
       ...(responseCharacters ? { response_characters: responseCharacters } : {}),
     });
@@ -504,6 +532,7 @@ export function useWebSocket() {
         appendLocalMessage("error", `删除会话失败：${reason}`);
         return;
       }
+      llmProfilesRef.current.forgetSessionSelection(sid);
       sessionRef.current?.setSessions((previous) => previous.filter((item) => item.id !== sid));
       if (activeSessionAtStart === sid && sessionRef.current?.sessionId === sid) {
         switchSession(COLLOQUY_SID);
@@ -623,20 +652,32 @@ export function useWebSocket() {
   }, [appendLocalMessage]);
 
   const regenerateResponse = useCallback(async (messageIndex: number) => {
+    const sid = sessionRef.current?.sessionId;
+    const manager = llmProfilesRef.current;
+    const profileName = sid ? manager.toProfileName(sid) : null;
+    if (sessionTransitionRef.current || !sid || manager.sessionId !== sid
+      || useChatRuntimeStore.getState().sessionId !== sid || !profileName) {
+      sessionRef.current?.showOperationNotice({ kind: "warning", message: "请等待会话就绪，并在顶部栏选择待用模型后重新生成。" });
+      return;
+    }
     useChatRuntimeStore.getState().beginOptimisticMainSessionActivity(`regenerate-${messageIndex}-${Date.now()}`, "regenerate");
     useChatRuntimeStore.getState().setProcessing(true);
-    const response = await fetch(`/api/sessions/${sessionRef.current?.sessionId}/regenerate`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        message_index: messageIndex,
-        llm_profile_name: llmProfilesRef.current.toProfileName(),
-      }),
-    });
-    const data = await response.json().catch(() => ({}));
-    if (!response.ok || !data.regenerate) {
+    try {
+      const response = await fetch(`/api/sessions/${encodeURIComponent(sid)}/regenerate`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ message_index: messageIndex, llm_profile_name: profileName }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (sessionRef.current?.sessionId !== sid || useChatRuntimeStore.getState().sessionId !== sid) return;
+      if (!response.ok || !data.regenerate) {
+        useChatRuntimeStore.getState().clearMainSessionActivityPlaceholders();
+        appendLocalMessage("error", `重新生成失败：${data.error || "unknown error"}`);
+      }
+    } catch (cause) {
+      if (sessionRef.current?.sessionId !== sid || useChatRuntimeStore.getState().sessionId !== sid) return;
       useChatRuntimeStore.getState().clearMainSessionActivityPlaceholders();
-      appendLocalMessage("error", `重新生成失败：${data.error || "unknown error"}`);
+      sessionRef.current?.showOperationNotice({ kind: "error", message: `重新生成请求失败：${cause instanceof Error ? cause.message : "网络错误"}` });
     }
   }, [appendLocalMessage]);
 
