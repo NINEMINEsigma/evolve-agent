@@ -38,6 +38,13 @@ export default function Layout({ ws, onContextMenu, contextMenuOpen, onboardingR
   const [pinSidebar, setPinSidebar] = useState(false);
   const [pinHeader, setPinHeader] = useState(false);
   const [llmDrawerOpen, setLlmDrawerOpen] = usePersistentState(STORAGE_KEYS.LLM_DRAWER_OPEN, false);
+  const llmCloseGuardRef = useRef<(() => void) | null>(null);
+  const closeLlmDrawer = useCallback(() => setLlmDrawerOpen(false), [setLlmDrawerOpen]);
+  const registerLlmCloseGuard = useCallback((guard: (() => void) | null) => { llmCloseGuardRef.current = guard; }, []);
+  const requestCloseLlmDrawer = useCallback(() => {
+    if (llmCloseGuardRef.current) llmCloseGuardRef.current();
+    else closeLlmDrawer();
+  }, [closeLlmDrawer]);
   const [sandboxSpacesOpen, setSandboxSpacesOpen] = useState(false);
   const [performanceTelemetryOpen, setPerformanceTelemetryOpen] = useState(false);
   const [siteDrawerOpen, setSiteDrawerOpen] = usePersistentState(STORAGE_KEYS.SITE_DRAWER_OPEN, false);
@@ -279,6 +286,7 @@ export default function Layout({ ws, onContextMenu, contextMenuOpen, onboardingR
           onToggleCollapse={() => setHeaderCollapsed((v) => !v)}
           isMobile={isMobile}
           llmProfiles={ws.llmProfiles}
+          modelMenuBlocked={drawerOpen || subagentPanelOpen || llmDrawerOpen || siteDrawerOpen || sandboxSpacesOpen || performanceTelemetryOpen || !!lightboxSrc || onboardingRun}
           forcePin={pinHeader}
           stagePaused={stagePaused}
           onToggleStagePaused={() => setStagePaused((v) => !v)}
@@ -325,7 +333,7 @@ export default function Layout({ ws, onContextMenu, contextMenuOpen, onboardingR
               <InputBar
                 uploading={ws.uploading}
                 archived={currentSessionArchived}
-                hasActiveProfile={!!ws.llmProfiles?.activeProfile}
+                hasActiveProfile={!!ws.llmProfiles?.activeProfile || (targetSessions.length > 0 && !targetSessions.includes("main"))}
                 sessionId={ws.sessionId}
                 taskProgress={ws.taskProgress}
                 onSend={() => {
@@ -458,7 +466,8 @@ export default function Layout({ ws, onContextMenu, contextMenuOpen, onboardingR
       {llmDrawerOpen && ws.llmProfiles && (
         <LlmProfileDrawer
           open={llmDrawerOpen}
-          onClose={() => setLlmDrawerOpen(false)}
+          onClose={closeLlmDrawer}
+          onRegisterCloseGuard={registerLlmCloseGuard}
           llmProfiles={ws.llmProfiles}
           width={llmDrawerWidth}
           isResizing={llmDrawerResize.isResizing}
@@ -483,6 +492,7 @@ export default function Layout({ ws, onContextMenu, contextMenuOpen, onboardingR
         setSidebarCollapsed={setSidebarCollapsed}
         setDrawerOpen={setDrawerOpen}
         setLlmDrawerOpen={setLlmDrawerOpen}
+        onCloseLlmDrawer={requestCloseLlmDrawer}
         onPinSidebarChange={setPinSidebar}
         onPinHeaderChange={setPinHeader}
       />

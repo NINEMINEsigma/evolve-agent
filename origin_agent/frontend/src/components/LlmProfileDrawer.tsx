@@ -1,6 +1,12 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
-import type { LlmProfile } from "../types";
+import { useCallback, useEffect, useId, useRef, useState } from "react";
+import type { PointerEvent } from "react";
 import type { LlmProfileManager } from "../hooks/useLlmProfiles";
+import { useLlmProfileEditor } from "../hooks/useLlmProfileEditor";
+import type { LlmDrawerTab } from "../types/llmProfileUi";
+import LlmProfileList from "./llm/LlmProfileList";
+import LlmGlobalReferences from "./llm/LlmGlobalReferences";
+import LlmProfileDialogs from "./llm/LlmProfileDialogs";
+import "../styles/llm-profile.css";
 
 interface LlmProfileDrawerProps {
   open: boolean;
@@ -8,573 +14,85 @@ interface LlmProfileDrawerProps {
   llmProfiles: LlmProfileManager;
   width?: number;
   isResizing?: boolean;
-  onResizePointerDown?: (e: React.PointerEvent<HTMLElement>) => void;
+  onResizePointerDown?: (event: PointerEvent<HTMLElement>) => void;
+  onRegisterCloseGuard?: (guard: (() => void) | null) => void;
 }
 
-const EMPTY_PROFILE: LlmProfile = {
-  name: "",
-  llm_client_name: "openai_client",
-  base_url: "",
-  model: "",
-  api_key: "",
-  temperature: 0.7,
-  max_output_tokens: 4096,
-  reasoning_effort: "",
-  max_context_tokens: 128000,
-  vision_image_profile: null,
-  audio_profile: null,
-  vision_video_profile: null,
-  soul_file: "SOUL.md",
-};
-
-function generateDuplicateName(sourceName: string, existingNames: string[]): string {
-  let n = 1;
-  let candidate = `${sourceName}${n}`;
-  while (existingNames.includes(candidate)) {
-    n++;
-    candidate = `${sourceName}${n}`;
-  }
-  return candidate;
-}
-
-/** 三级树数据结构: 客户端类型 → base_url → 配置项列表 */
-interface LlmTreeNode {
-  client: string;
-  baseUrls: {
-    baseUrl: string;
-    profiles: LlmProfile[];
-  }[];
-}
-
-export default function LlmProfileDrawer({
-  open,
-  onClose,
-  llmProfiles,
-  width,
-  isResizing,
-  onResizePointerDown,
-}: LlmProfileDrawerProps) {
-  const {
-    profiles,
-    activeProfileName,
-    approvalProfileName,
-    setApprovalProfile,
-    metadataProfileName,
-    setMetadataProfile,
-    createProfile,
-    updateProfile,
-    deleteProfile,
-    availableClients,
-    setActiveProfile,
-    error: profileError,
-  } = llmProfiles;
-
-  const [selectedName, setSelectedName] = useState<string>(activeProfileName);
-  const [approvalBusy, setApprovalBusy] = useState<string | null>(null);
-  const [metadataBusy, setMetadataBusy] = useState<string | null>(null);
-  const [draft, setDraft] = useState<LlmProfile>(EMPTY_PROFILE);
-  const [isEditing, setIsEditing] = useState(false);
-  const [isNew, setIsNew] = useState(false);
-  // 树展开状态: Set<string>，存储 "client" 和 "client\x00baseUrl" 形式的键
-  // 不持久化,每次打开抽屉时通过 useEffect 自动展开 active profile 路径
-  const [expandedNodes, setExpandedNodes] = useState<Set<string>>(new Set());
-
-  const selectedProfile = profiles.find((p) => p.name === selectedName) || null;
-  const nameExists = isNew && profiles.some((p) => p.name === draft.name.trim());
-
-  // 三级树: 按 llm_client_name → base_url 分组
-  const tree = useMemo<LlmTreeNode[]>(() => {
-    const map = new Map<string, Map<string, LlmProfile[]>>();
-    for (const p of profiles) {
-      if (!map.has(p.llm_client_name)) map.set(p.llm_client_name, new Map());
-      const clientMap = map.get(p.llm_client_name)!;
-      if (!clientMap.has(p.base_url)) clientMap.set(p.base_url, []);
-      clientMap.get(p.base_url)!.push(p);
-    }
-    return Array.from(map.entries())
-      .sort((a, b) => a[0].localeCompare(b[0]))
-      .map(([client, clientMap]) => ({
-        client,
-        baseUrls: Array.from(clientMap.entries())
-          .sort((a, b) => a[0].localeCompare(b[0]))
-          .map(([baseUrl, profs]) => ({ baseUrl, profiles: profs })),
-      }));
-  }, [profiles]);
-
-  // 展开指定 profile 所在路径
-  const expandPath = useCallback((profile: LlmProfile) => {
-    setExpandedNodes((prev) => {
-      const next = new Set(prev);
-      next.add(profile.llm_client_name);
-      next.add(`${profile.llm_client_name}\x00${profile.base_url}`);
-      return next;
-    });
-  }, []);
-
-  // 抽屉打开时自动展开 active profile 路径
+export default function LlmProfileDrawer({ open, onClose, llmProfiles, width, isResizing, onResizePointerDown, onRegisterCloseGuard }: LlmProfileDrawerProps) {
+  const id = useId();
+  const [tab, setTab] = useState<LlmDrawerTab>("profiles");
+  const [referenceDialogOpen, setReferenceDialogOpen] = useState(false);
+  const editor = useLlmProfileEditor(llmProfiles);
+  const root = useRef<HTMLDivElement>(null);
+  const editorDialogOpen = editor.pendingLeave || !!editor.deleteTarget || editor.conflictOpen;
+  const dialogOpen = editorDialogOpen || referenceDialogOpen;
+  const requestClose = useCallback(() => {
+    if (!dialogOpen) editor.requestLeave(onClose);
+  }, [dialogOpen, editor.requestLeave, onClose]);
+  const closeRef = useRef(requestClose);
+  closeRef.current = requestClose;
+  const dialogRef = useRef(dialogOpen);
+  dialogRef.current = dialogOpen;
+  useEffect(() => {
+    onRegisterCloseGuard?.(requestClose);
+    return () => onRegisterCloseGuard?.(null);
+  }, [requestClose, onRegisterCloseGuard]);
   useEffect(() => {
     if (!open) return;
-    const active = profiles.find((p) => p.name === activeProfileName);
-    if (active) expandPath(active);
-  }, [open, activeProfileName, profiles, expandPath]);
-
-  // ESC 关闭支持
-  useEffect(() => {
-    if (!open) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [open, onClose]);
-
-  // 选中配置变化时同步 draft
-  useEffect(() => {
-    if (selectedProfile && !isNew) {
-      setDraft({ ...selectedProfile });
-      setIsEditing(false);
-    }
-  }, [selectedName, selectedProfile, isNew]);
-
-  const toggleExpand = useCallback((key: string) => {
-    setExpandedNodes((prev) => {
-      const next = new Set(prev);
-      next.has(key) ? next.delete(key) : next.add(key);
-      return next;
-    });
-  }, []);
-
-  const handleSelect = useCallback((name: string) => {
-    setSelectedName(name);
-    setIsNew(false);
-    setIsEditing(false);
-  }, []);
-
-  const handleNew = useCallback(() => {
-    // 若当前选中的是真实 profile,预填其 client 和 base_url
-    const prefill = selectedProfile
-      ? { ...EMPTY_PROFILE, llm_client_name: selectedProfile.llm_client_name, base_url: selectedProfile.base_url }
-      : { ...EMPTY_PROFILE };
-    setIsNew(true);
-    setIsEditing(true);
-    setDraft(prefill);
-    setSelectedName("");
-  }, [selectedProfile]);
-
-  const handleEdit = useCallback(() => {
-    setIsEditing(true);
-  }, []);
-
-  const handleSave = useCallback(async () => {
-    if (!draft.name.trim()) return;
-    const nextDraft = { ...draft, name: draft.name.trim() };
-    try {
-      if (isNew) {
-        await createProfile(nextDraft);
-      } else {
-        await updateProfile(selectedName, nextDraft);
+    const previous = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    root.current?.querySelector<HTMLElement>("[role='tab'][aria-selected='true']")?.focus();
+    const key = (event: KeyboardEvent) => {
+      if (event.defaultPrevented || dialogRef.current) return;
+      if (event.key === "Escape") { event.preventDefault(); closeRef.current(); }
+      if (event.key !== "Tab") return;
+      const items = Array.from(root.current?.querySelectorAll<HTMLElement>("button:not(:disabled), input:not(:disabled), select:not(:disabled), summary, [tabindex='0']") ?? [])
+        .filter((element) => !element.closest("[hidden]") && element.getClientRects().length > 0);
+      const first = items[0], last = items[items.length - 1];
+      if (!first) return;
+      if (event.shiftKey && (document.activeElement === first || !root.current?.contains(document.activeElement))) {
+        event.preventDefault(); last.focus();
+      } else if (!event.shiftKey && (document.activeElement === last || !root.current?.contains(document.activeElement))) {
+        event.preventDefault(); first.focus();
       }
-    } catch {
-      return;
-    }
-    setIsEditing(false);
-    setIsNew(false);
-    setSelectedName(nextDraft.name);
-    expandPath(nextDraft);
-  }, [draft, isNew, selectedName, createProfile, updateProfile, expandPath]);
-
-  const handleDelete = useCallback(async () => {
-    const remaining = profiles.filter((profile) => profile.name !== selectedName);
-    const replacementName = (
-      activeProfileName && activeProfileName !== selectedName
-        ? activeProfileName
-        : remaining[0]?.name ?? null
-    );
-    try {
-      await deleteProfile(selectedName, replacementName);
-    } catch {
-      return;
-    }
-    setSelectedName(replacementName ?? "");
-    setIsEditing(false);
-    setIsNew(false);
-  }, [selectedName, profiles, activeProfileName, deleteProfile]);
-
-  const handleSetApproval = useCallback(async (name: string | null) => {
-    if (approvalBusy) return;
-    if (name !== null && approvalProfileName === name) {
-      if (!window.confirm("将清空审批 Profile 并关闭所有会话的脱手模式，确认？")) return;
-    }
-    setApprovalBusy(name ?? "__clear__");
-    try {
-      const target = name !== null && approvalProfileName === name ? null : name;
-      await setApprovalProfile(target);
-    } catch {
-      // error 已由 useLlmProfiles 设置
-    } finally {
-      setApprovalBusy(null);
-    }
-  }, [approvalBusy, approvalProfileName, setApprovalProfile]);
-
-  const handleSetMetadata = useCallback(async (name: string | null) => {
-    if (metadataBusy) return;
-    if (name !== null && metadataProfileName === name) {
-      if (!window.confirm("将清空全局元数据 Profile，确认？")) return;
-    }
-    setMetadataBusy(name ?? "__clear__");
-    try {
-      const target = name !== null && metadataProfileName === name ? null : name;
-      await setMetadataProfile(target);
-    } catch {
-      // error 已由 useLlmProfiles 设置
-    } finally {
-      setMetadataBusy(null);
-    }
-  }, [metadataBusy, metadataProfileName, setMetadataProfile]);
-
-  const handleDuplicate = useCallback(() => {
-    if (!selectedProfile) return;
-    const existingNames = profiles.map((p) => p.name);
-    const newName = generateDuplicateName(selectedProfile.name, existingNames);
-    setIsNew(true);
-    setIsEditing(true);
-    setDraft({ ...selectedProfile, name: newName });
-    setSelectedName("");
-  }, [selectedProfile, profiles]);
-
-  const handleCancel = useCallback(() => {
-    if (isNew) {
-      setSelectedName(activeProfileName);
-      setIsNew(false);
-    } else if (selectedProfile) {
-      setDraft({ ...selectedProfile });
-    }
-    setIsEditing(false);
-  }, [isNew, selectedProfile, activeProfileName]);
-
-  const handleSetActive = useCallback((name: string) => {
-    setActiveProfile(name);
-  }, [setActiveProfile]);
-
-  const updateField = useCallback(
-    <K extends keyof LlmProfile>(field: K, value: LlmProfile[K]) => {
-      setDraft((prev) => ({ ...prev, [field]: value }));
-    },
-    [],
-  );
-
+    };
+    window.addEventListener("keydown", key);
+    return () => { window.removeEventListener("keydown", key); if (previous?.isConnected) previous.focus(); };
+  }, [open]);
   if (!open) return null;
+  const editing = editor.state.kind !== "view";
 
-  return (
-    <div className="drawer-overlay" onClick={onClose}>
-      <div
-        className="drawer-panel llm-drawer"
-        data-tour="llm-drawer-panel"
-        style={width != null ? { width } : undefined}
-        onClick={(e) => e.stopPropagation()}
-      >
-        {/* Header */}
-        <div className="drawer-header">
-          <span className="drawer-title">模型配置</span>
-          <div className="llm-drawer-header-actions">
-            <button className="drawer-header-btn" onClick={handleNew}>+ 新增</button>
-            <button className="drawer-close" onClick={onClose}>✕</button>
-          </div>
-        </div>
-        {profileError && (
-          <div className="llm-profile-error-banner">{profileError}</div>
-        )}
-
-        {/* Body: 左右分栏 */}
-        <div className="llm-drawer-body">
-          {/* 左栏: 三级树 */}
-          <div className="llm-tree">
-            {tree.map((clientNode) => (
-              <div key={clientNode.client} className="llm-tree-client">
-                {/* 一级: 客户端类型 */}
-                <div
-                  className="llm-tree-node-header"
-                  onClick={() => toggleExpand(clientNode.client)}
-                >
-                  <span className={`llm-tree-arrow ${expandedNodes.has(clientNode.client) ? "expanded" : ""}`}>▶</span>
-                  <span className="llm-tree-label">{clientNode.client}</span>
-                  <span className="llm-tree-count">{clientNode.baseUrls.reduce((n, b) => n + b.profiles.length, 0)}</span>
-                </div>
-                {expandedNodes.has(clientNode.client) && clientNode.baseUrls.map((urlNode) => (
-                  <div key={urlNode.baseUrl} className="llm-tree-baseurl">
-                    {/* 二级: base_url */}
-                    <div
-                      className="llm-tree-node-header llm-tree-node-header-sub"
-                      onClick={() => toggleExpand(`${clientNode.client}\x00${urlNode.baseUrl}`)}
-                    >
-                      <span className={`llm-tree-arrow ${expandedNodes.has(`${clientNode.client}\x00${urlNode.baseUrl}`) ? "expanded" : ""}`}>▶</span>
-                      <span className="llm-tree-label llm-tree-label-mono">{urlNode.baseUrl || "(空)"}</span>
-                      <span className="llm-tree-count">{urlNode.profiles.length}</span>
-                    </div>
-                    {expandedNodes.has(`${clientNode.client}\x00${urlNode.baseUrl}`) && urlNode.profiles.map((p) => (
-                      /* 三级: 配置项叶子 */
-                      <div
-                        key={p.name}
-                        className={`llm-tree-leaf${p.name === selectedName ? " active" : ""}${p.name === activeProfileName ? " current" : ""}`}
-                        onClick={() => handleSelect(p.name)}
-                      >
-                        <span className="llm-tree-leaf-name">
-                          {p.name}
-                        </span>
-                        <span className="llm-tree-leaf-model">{p.model}</span>
-                        {/* "设为当前" 开关 */}
-                        <button
-                          className={`llm-tree-active-toggle${p.name === activeProfileName ? " on" : ""}`}
-                          onClick={(e) => { e.stopPropagation(); handleSetActive(p.name); }}
-                          data-tooltip={p.name === activeProfileName ? "当前使用中" : "设为当前"}
-                          disabled={p.name === activeProfileName}
-                        >
-                          {p.name === activeProfileName ? "●" : "○"}
-                        </button>
-                        {/* "设为审批" 开关 */}
-                        <button
-                          className={`llm-tree-approval-toggle${p.name === approvalProfileName ? " on" : ""}`}
-                          onClick={(e) => { e.stopPropagation(); handleSetApproval(p.name); }}
-                          data-tooltip={p.name === approvalProfileName ? "审批 Profile（点击清除）" : "设为审批 Profile"}
-                          disabled={approvalBusy === p.name}
-                        >
-                          {p.name === approvalProfileName ? "🔒" : "🔓"}
-                        </button>
-                        {/* "设为元数据"开关 */}
-                        <button
-                          className={`llm-tree-metadata-toggle${p.name === metadataProfileName ? " on" : ""}`}
-                          onClick={(e) => { e.stopPropagation(); handleSetMetadata(p.name); }}
-                          data-tooltip={p.name === metadataProfileName ? "全局元数据 Profile（点击清除）" : "设为全局元数据 Profile"}
-                          disabled={metadataBusy === p.name}
-                        >
-                          {p.name === metadataProfileName ? "◆" : "◇"}
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                ))}
-              </div>
-            ))}
-          </div>
-
-          {/* 右栏: 编辑表单 */}
-          <div className="llm-profile-form">
-            {selectedProfile || isNew ? (
-              <>
-                <div className="llm-profile-section">
-                  <div className="llm-profile-section-title">连接</div>
-
-                  <label className="llm-profile-label">配置名称</label>
-                  <input
-                    className="llm-profile-input"
-                    type="text"
-                    value={draft.name}
-                    onChange={(e) => updateField("name", e.target.value)}
-                    disabled={!isEditing}
-                    placeholder="输入配置名称"
-                  />
-                  {nameExists && (
-                    <div className="llm-profile-error">配置名称已存在</div>
-                  )}
-
-                  <label className="llm-profile-label">客户端类型</label>
-                  <select
-                    className="llm-profile-input"
-                    value={draft.llm_client_name}
-                    onChange={(e) => updateField("llm_client_name", e.target.value)}
-                    disabled={!isEditing}
-                  >
-                    {availableClients.map((c) => (
-                      <option key={c} value={c}>{c}</option>
-                    ))}
-                  </select>
-
-                  <label className="llm-profile-label">API 端点</label>
-                  <input
-                    className="llm-profile-input"
-                    type="text"
-                    value={draft.base_url}
-                    onChange={(e) => updateField("base_url", e.target.value)}
-                    disabled={!isEditing}
-                    placeholder="https://api.example.com/v1"
-                  />
-
-                  <label className="llm-profile-label">模型名称</label>
-                  <input
-                    className="llm-profile-input"
-                    type="text"
-                    value={draft.model}
-                    onChange={(e) => updateField("model", e.target.value)}
-                    disabled={!isEditing}
-                    placeholder="gpt-4o"
-                  />
-
-                  <label className="llm-profile-label">API 密钥</label>
-                  <input
-                    className="llm-profile-input"
-                    type="password"
-                    value={draft.api_key}
-                    onChange={(e) => updateField("api_key", e.target.value)}
-                    disabled={!isEditing}
-                    placeholder="sk-..."
-                  />
-                </div>
-
-                <div className="llm-profile-section">
-                  <div className="llm-profile-section-title">参数</div>
-
-                  <label className="llm-profile-label">采样温度</label>
-                  <input
-                    className="llm-profile-input"
-                    type="number"
-                    step={0.05}
-                    min={0}
-                    max={2}
-                    value={draft.temperature}
-                    onChange={(e) => updateField("temperature", parseFloat(e.target.value) || 0)}
-                    disabled={!isEditing}
-                  />
-
-                  <label className="llm-profile-label">最大输出 token 数</label>
-                  <input
-                    className="llm-profile-input"
-                    type="number"
-                    value={draft.max_output_tokens}
-                    onChange={(e) => updateField("max_output_tokens", parseInt(e.target.value) || 0)}
-                    disabled={!isEditing}
-                  />
-
-                  <label className="llm-profile-label">推理深度</label>
-                  <select
-                    className="llm-profile-input"
-                    value={draft.reasoning_effort}
-                    onChange={(e) => updateField("reasoning_effort", e.target.value)}
-                    disabled={!isEditing}
-                  >
-                    <option value="">不启用</option>
-                    <option value="low">low</option>
-                    <option value="medium">medium</option>
-                    <option value="high">high</option>
-                  </select>
-
-                  <label className="llm-profile-label">上下文窗口大小</label>
-                  <input
-                    className="llm-profile-input"
-                    type="number"
-                    value={draft.max_context_tokens}
-                    onChange={(e) => updateField("max_context_tokens", parseInt(e.target.value) || 0)}
-                    disabled={!isEditing}
-                  />
-                </div>
-
-                <div className="llm-profile-section">
-                  <div className="llm-profile-section-title">多模态分工</div>
-
-                  <label className="llm-profile-label">视觉（读图）配置</label>
-                  <select
-                    className="llm-profile-input"
-                    value={draft.vision_image_profile ?? ""}
-                    onChange={(e) => updateField("vision_image_profile", e.target.value || null)}
-                    disabled={!isEditing}
-                  >
-                    <option value="">不引用</option>
-                    {profiles
-                      .map((p) => (
-                        <option key={p.name} value={p.name}>{p.name}</option>
-                      ))}
-                  </select>
-
-                  <label className="llm-profile-label">听觉配置</label>
-                  <select
-                    className="llm-profile-input"
-                    value={draft.audio_profile ?? ""}
-                    onChange={(e) => updateField("audio_profile", e.target.value || null)}
-                    disabled={!isEditing}
-                  >
-                    <option value="">不引用</option>
-                    {profiles
-                      .map((p) => (
-                        <option key={p.name} value={p.name}>{p.name}</option>
-                      ))}
-                  </select>
-
-                  <label className="llm-profile-label">视觉（读视频）配置</label>
-                  <select
-                    className="llm-profile-input"
-                    value={draft.vision_video_profile ?? ""}
-                    onChange={(e) => updateField("vision_video_profile", e.target.value || null)}
-                    disabled={!isEditing}
-                  >
-                    <option value="">不引用</option>
-                    {profiles
-                      .map((p) => (
-                        <option key={p.name} value={p.name}>{p.name}</option>
-                      ))}
-                  </select>
-                </div>
-
-                <div className="llm-profile-section">
-                  <div className="llm-profile-section-title">人格</div>
-
-                  <label className="llm-profile-label">灵魂文件名</label>
-                  <input
-                    className="llm-profile-input"
-                    type="text"
-                    value={draft.soul_file}
-                    onChange={(e) => updateField("soul_file", e.target.value)}
-                    disabled={!isEditing}
-                    placeholder="SOUL.md"
-                  />
-                </div>
-
-                {/* 操作按钮区 */}
-                <div className="llm-profile-form-actions">
-                  {isEditing ? (
-                    <>
-                      <button className="modal-btn modal-btn--secondary" onClick={handleCancel}>
-                        取消
-                      </button>
-                      <button
-                        className="modal-btn modal-btn--primary"
-                        onClick={handleSave}
-                        disabled={!draft.name.trim() || nameExists}
-                      >
-                        {isNew ? "创建" : "保存"}
-                      </button>
-                    </>
-                  ) : (
-                    <>
-                      <button className="modal-btn modal-btn--danger" onClick={handleDelete}>
-                        删除
-                      </button>
-                      <button className="modal-btn modal-btn--secondary" onClick={handleEdit}>
-                        编辑
-                      </button>
-                      <button className="modal-btn modal-btn--secondary" onClick={handleDuplicate}>
-                        复制
-                      </button>
-                    </>
-                  )}
-                </div>
-              </>
-            ) : (
-              <div className="llm-profile-empty">
-                {profiles.length === 0
-                  ? "尚无模型配置，请点击「新增」创建第一个配置"
-                  : "选择一个配置项或点击\"新增\""}
-              </div>
-            )}
-          </div>
-        </div>
-
-        {/* 拖拽手柄 */}
-        {onResizePointerDown && (
-          <div
-            className={`drawer-resize-handle ${isResizing ? "dragging" : ""}`}
-            onPointerDown={onResizePointerDown}
-          />
-        )}
+  return <div className="drawer-overlay llm-overlay" onClick={(event) => { if (event.target === event.currentTarget) requestClose(); }}>
+    <div ref={root} className="drawer-panel llm-drawer" data-tour="llm-drawer-panel" role="dialog" aria-modal="true" aria-labelledby={`${id}-title`}
+      style={width != null ? { width } : undefined}>
+      <header className="llm-drawer-heading"><div><span className="llm-eyebrow">模型与用途</span><h2 id={`${id}-title`}>模型配置</h2></div>
+        <button className="llm-close" onClick={requestClose} disabled={editor.state.busy || dialogOpen} aria-label="关闭模型配置">×</button>
+      </header>
+      <div className="llm-tabs" role="tablist" aria-label="模型配置页面">
+        {(["profiles", "references"] as const).map((value) => <button key={value} id={`${id}-tab-${value}`} role="tab"
+          aria-selected={tab === value} aria-controls={`${id}-panel-${value}`} tabIndex={tab === value ? 0 : -1}
+          disabled={dialogOpen} onClick={() => setTab(value)} onKeyDown={(event) => {
+            if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
+            event.preventDefault();
+            const next = event.key === "Home" ? "profiles" : event.key === "End" ? "references" : value === "profiles" ? "references" : "profiles";
+            setTab(next); document.getElementById(`${id}-tab-${next}`)?.focus();
+          }}>{value === "profiles" ? "模型配置" : "全局配置引用"}
+          {value === "profiles" && editing && <span className="llm-tab-dot" aria-label="正在编辑" />}
+        </button>)}
       </div>
+      <div id={`${id}-panel-profiles`} className="llm-tab-panel" role="tabpanel" aria-labelledby={`${id}-tab-profiles`} hidden={tab !== "profiles"}>
+        <div className="llm-page-scroll"><LlmProfileList manager={llmProfiles} editor={editor} /></div>
+        {editing && <footer className="llm-edit-footer"><span>{editor.state.busy ? "正在保存…" : editor.state.saveOutcome === "uncertain" ? "保存结果待确认" : editor.dirty ? "有未保存的修改" : "编辑中"}</span>
+          <div className="llm-inline-actions"><button className="llm-button" onClick={editor.cancel} disabled={editor.state.busy}>取消</button>
+            <button className="llm-button llm-button--primary" onClick={() => void editor.save()}
+              disabled={editor.state.busy || editor.state.externalConflict || editor.state.saveOutcome === "uncertain" || !editor.validation.profile}>
+              {editor.state.kind === "create" ? "创建" : "保存"}</button></div>
+        </footer>}
+      </div>
+      <div id={`${id}-panel-references`} className="llm-tab-panel" role="tabpanel" aria-labelledby={`${id}-tab-references`} hidden={tab !== "references"}>
+        <div className="llm-page-scroll"><LlmGlobalReferences manager={llmProfiles} onOpenProfiles={() => setTab("profiles")} onDialogOpenChange={setReferenceDialogOpen} /></div>
+      </div>
+      <LlmProfileDialogs manager={llmProfiles} editor={editor} />
+      {onResizePointerDown && <div className={`drawer-resize-handle${isResizing ? " dragging" : ""}`} onPointerDown={onResizePointerDown} />}
     </div>
-  );
+  </div>;
 }

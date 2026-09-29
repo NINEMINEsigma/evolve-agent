@@ -24,7 +24,8 @@ export const STORAGE_KEYS = {
   AGENTSPACE_SIDEBAR_COLLAPSED:"evolve_agentspace_sidebar_collapsed",
 
   // LLM 模型配置
-  ACTIVE_LLM_PROFILE:  "evolve_active_llm_profile",
+  // 每会话单独保存待用名称；旧全局键不猜测迁移。
+  SESSION_LLM_PROFILE_PREFIX: "evolve_session_llm_profile:",
 
   // 首次引导向导完成标志
   ONBOARDING_COMPLETED: "evolve_onboarding_completed",

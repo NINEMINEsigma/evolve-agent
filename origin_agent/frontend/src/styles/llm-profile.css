@@ -1,0 +1,140 @@
+/* 模型配置抽屉：独立作用域，不改变动态沙盒等弹窗的共享表单样式。 */
+.drawer-panel.llm-drawer {
+  width: 680px;
+  max-width: 96vw;
+  height: 100dvh;
+  min-height: 0;
+  color: var(--text-primary);
+  border-left: 1px solid var(--border-strong);
+  container-type: inline-size;
+}
+.llm-drawer *, .llm-confirmation * { box-sizing: border-box; }
+.llm-drawer-heading {
+  padding: 24px 20px 16px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-shrink: 0;
+}
+.llm-drawer-heading h2 { margin: 5px 0 0; font-size: 23px; font-weight: 650; letter-spacing: -.5px; }
+.llm-eyebrow { font-size: 11px; letter-spacing: 1px; color: var(--text-secondary); }
+.llm-close { width: 44px; height: 44px; border: none; border-radius: 10px; background: transparent; color: var(--text-secondary); cursor: pointer; font-size: 27px; }
+.llm-close:hover { color: var(--text-primary); background: var(--bg-hover); }
+.llm-tabs { display: flex; gap: 4px; margin: 0 20px 16px; padding: 4px; background: var(--bg-primary); border: 1px solid var(--border); border-radius: 12px; flex-shrink: 0; }
+.llm-tabs > button { flex: 1; min-width: 0; min-height: 44px; border: 1px solid transparent; background: transparent; color: var(--text-secondary); border-radius: 8px; font: inherit; font-size: 13px; font-weight: 600; cursor: pointer; }
+.llm-tabs > button[aria-selected="true"] { background: var(--bg-elevated); color: var(--text-primary); border-color: var(--border-strong); box-shadow: 0 2px 6px rgba(0,0,0,.15); }
+.llm-tab-dot { display: inline-block; width: 5px; height: 5px; margin-left: 7px; border-radius: 50%; background: var(--accent); vertical-align: middle; }
+.llm-tab-panel { display: flex; flex: 1; flex-direction: column; min-height: 0; min-width: 0; }
+.llm-drawer [hidden] { display: none !important; }
+.llm-page-scroll { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 0 20px 24px; scrollbar-gutter: stable; }
+.llm-list-toolbar { display: flex; gap: 10px; align-items: center; padding: 4px 0 8px; }
+.llm-search { flex: 1; min-width: 0; }
+.llm-search input, .llm-field input, .llm-field select {
+  width: 100%; min-width: 0; min-height: 44px; padding: 10px 12px; border: 1px solid var(--border-strong);
+  border-radius: 8px; background: var(--bg-primary); color: var(--text-primary); font: inherit; font-size: 13px;
+}
+.llm-search input::placeholder, .llm-field input::placeholder { color: var(--text-secondary); }
+.llm-field input[aria-invalid="true"], .llm-field select[aria-invalid="true"] { border-color: var(--danger); }
+.llm-field select { text-overflow: ellipsis; }
+.llm-drawer button:focus-visible, .llm-drawer input:focus-visible, .llm-drawer select:focus-visible,
+.llm-drawer summary:focus-visible, .llm-confirmation button:focus-visible, .llm-confirmation select:focus-visible {
+  outline: 2px solid var(--accent); outline-offset: 3px;
+}
+.llm-drawer button:disabled, .llm-drawer input:disabled, .llm-drawer select:disabled { opacity: .55; cursor: default; }
+.llm-button {
+  display: inline-flex; justify-content: center; align-items: center; gap: 6px; min-height: 44px; padding: 9px 14px;
+  border: 1px solid var(--border-strong); border-radius: 8px; background: var(--bg-tertiary); color: var(--text-primary);
+  font: inherit; font-size: 13px; font-weight: 500; cursor: pointer; white-space: nowrap;
+  transition: background var(--duration-fast), border-color var(--duration-fast);
+}
+.llm-button:hover:not(:disabled) { border-color: var(--accent); background: var(--accent-soft); }
+.llm-button--primary { background: var(--accent); border-color: var(--accent); color: var(--bg-primary); font-weight: 650; }
+.llm-button--primary:hover:not(:disabled) { background: var(--accent-hover); color: var(--text-white); }
+.llm-button--danger { color: var(--danger); background: transparent; }
+.llm-text-button { min-height: 44px; padding: 6px 8px; border: 0; background: transparent; color: var(--accent); font: inherit; font-size: 12px; cursor: pointer; }
+.llm-list-caption { display: flex; align-items: center; justify-content: space-between; gap: 8px; color: var(--text-secondary); font-size: 11px; }
+.llm-client-group { margin: 12px 0 18px; }
+.llm-group-heading, .llm-endpoint-heading, .llm-profile-heading {
+  display: flex; align-items: center; gap: 9px; width: 100%; min-width: 0; min-height: 44px; padding: 10px 8px;
+  border: 0; border-radius: 8px; background: transparent; color: var(--text-primary); text-align: left; cursor: pointer; font: inherit;
+}
+.llm-group-heading { font-size: 13px; font-weight: 650; }
+.llm-group-heading > span:nth-child(2) { min-width: 0; overflow-wrap: anywhere; }
+.llm-group-heading:hover:not(:disabled), .llm-endpoint-heading:hover:not(:disabled), .llm-profile-heading:hover:not(:disabled) { background: var(--bg-hover); }
+.llm-group-heading:disabled, .llm-endpoint-heading:disabled { opacity: 1 !important; }
+.llm-count { flex-shrink: 0; margin-left: auto; min-width: 24px; padding: 2px 6px; text-align: center; background: var(--bg-tertiary); border-radius: 5px; color: var(--text-secondary); font-size: 11px; font-weight: 400; }
+.llm-chevron { display: inline-block; flex-shrink: 0; font-size: 20px; line-height: 1; width: 13px; text-align: center; color: var(--text-secondary); transition: transform var(--duration-fast); }
+.llm-chevron--open { transform: rotate(90deg); }
+.llm-group-content { padding-left: 12px; }
+.llm-endpoint-heading { font-size: 11px; color: var(--text-secondary); }
+.llm-endpoint-name { min-width: 0; overflow-wrap: anywhere; font-family: ui-monospace, Consolas, monospace; }
+.llm-profile-stack { padding-left: 12px; display: flex; flex-direction: column; gap: 7px; }
+.llm-profile-card { min-width: 0; border: 1px solid var(--border); border-radius: 10px; background: var(--bg-primary); }
+.llm-profile-card--open { border-color: var(--border-strong); background: var(--bg-tertiary); }
+.llm-profile-heading { padding: 13px 12px; }
+.llm-profile-identity { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 5px; }
+.llm-profile-identity strong { font-size: 13px; font-weight: 600; overflow-wrap: anywhere; }
+.llm-profile-identity > span { color: var(--text-secondary); font-size: 11px; overflow-wrap: anywhere; }
+.llm-tags { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 4px; max-width: 120px; }
+.llm-tags > span, .llm-tag { border-radius: 4px; padding: 3px 6px; font-size: 10px; background: var(--accent-soft); color: var(--accent); white-space: nowrap; }
+.llm-details { padding: 18px 16px 12px; border-top: 1px solid var(--border); min-width: 0; }
+.llm-details-heading { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 18px; }
+.llm-details-heading > div { min-width: 0; }
+.llm-details-heading h3 { font-size: 16px; font-weight: 600; margin: 4px 0; overflow-wrap: anywhere; }
+.llm-edit-indicator { color: var(--accent); font-size: 11px; }
+.llm-inline-actions { display: flex; gap: 7px; align-items: center; flex-wrap: wrap; }
+.llm-section { margin: 16px 0 0; padding: 12px 0; border-top: 1px solid var(--border); }
+.llm-section h4 { margin: 0 0 14px; font-size: 12px; color: var(--text-secondary); font-weight: 600; }
+.llm-field-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px 12px; }
+.llm-field { display: flex; flex-direction: column; gap: 7px; min-width: 0; color: var(--text-secondary); font-size: 12px; }
+.llm-field--full { grid-column: 1 / -1; }
+.llm-field-error { font-size: 12px; color: var(--danger); overflow-wrap: anywhere; }
+.llm-value-grid { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 16px; margin: 0; }
+.llm-value { min-width: 0; }
+.llm-value dt { color: var(--text-secondary); font-size: 11px; margin-bottom: 6px; }
+.llm-value dd { margin: 0; font-size: 13px; overflow-wrap: anywhere; }
+.llm-edit-footer { display: flex; flex-shrink: 0; align-items: center; justify-content: space-between; gap: 8px; padding: 12px 20px max(12px, env(safe-area-inset-bottom)); border-top: 1px solid var(--border-strong); background: var(--bg-secondary); }
+.llm-edit-footer > span { font-size: 12px; color: var(--text-secondary); }
+.llm-message { padding: 10px 12px; margin: 10px 0; border-radius: 8px; background: var(--bg-elevated); border-left: 2px solid var(--accent); font-size: 12px; line-height: 1.6; overflow-wrap: anywhere; }
+.llm-message p { margin: 0 0 6px; }
+.llm-message--error { border-left-color: var(--danger); }
+.llm-empty { text-align: center; padding: 36px 16px; color: var(--text-secondary); font-size: 13px; line-height: 1.7; }
+.llm-empty h3 { color: var(--text-primary); font-size: 16px; font-weight: 500; }
+.llm-page-intro { padding: 4px 0; }
+.llm-page-intro h3 { margin: 0; font-size: 16px; font-weight: 550; }
+.llm-reference-card { margin: 12px 0 20px; padding: 20px; border: 1px solid var(--border-strong); border-radius: 12px; background: var(--bg-tertiary); }
+.llm-reference-title { display: flex; align-items: center; gap: 10px; }
+.llm-reference-title h3 { font-size: 16px; font-weight: 600; margin: 0; }
+.llm-reference-footer { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 12px; }
+.llm-reference-status { color: var(--text-secondary); font-size: 12px; overflow-wrap: anywhere; }
+.llm-reference-status--warning { color: var(--danger); }
+.llm-reference-card > .llm-reference-title { margin-bottom: 12px; }
+.llm-help { display: inline-flex; align-items: center; justify-content: center; width: 44px; height: 44px; flex-shrink: 0; margin-left: auto; padding: 0; border: 0; border-radius: 8px; background: transparent; color: var(--text-secondary); font: inherit; font-size: 14px; cursor: help; }
+.llm-help:hover, .llm-help:focus-visible { background: var(--bg-hover); color: var(--accent); }
+.llm-confirmation-window { max-width: min(520px, calc(100vw - 24px)); }
+.llm-confirmation-window .modal-body { overflow-wrap: anywhere; font-size: 13px; line-height: 1.7; }
+.llm-confirmation-window .modal-actions { flex-wrap: wrap; }
+.llm-confirmation-window .modal-btn { min-height: 44px; }
+.llm-sr-only { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0; }
+@container (max-width: 520px) {
+  .llm-field-grid, .llm-value-grid { grid-template-columns: minmax(0,1fr); }
+  .llm-details-heading { align-items: flex-start; }
+}
+@media (max-width: 768px) {
+  .drawer-panel.llm-drawer { width: 100vw !important; width: 100dvw !important; max-width: 100vw; border-left: 0; }
+  .llm-drawer > .drawer-resize-handle { display: none; }
+  .llm-drawer-heading { padding: 16px 12px 12px; }
+  .llm-drawer-heading h2 { font-size: 20px; }
+  .llm-tabs { margin: 0 12px 12px; }
+  .llm-page-scroll { padding: 0 12px 20px; }
+  .llm-group-content, .llm-profile-stack { padding-left: 8px; }
+  .llm-details { padding: 14px 12px 8px; }
+  .llm-edit-footer { padding-left: 12px; padding-right: 12px; }
+  .llm-reference-card { padding: 16px; }
+  .llm-search input, .llm-field input, .llm-field select { font-size: 16px; }
+  .llm-tags { max-width: 90px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .llm-overlay, .drawer-panel.llm-drawer { animation: none; }
+  .llm-drawer * { transition: none !important; }
+}

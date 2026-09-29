@@ -1,4 +1,5 @@
-import { useRef, useState, useEffect } from "react";
+import { useRef, useState, useEffect, useCallback, useId } from "react";
+import ModelProfileMenu from "./ModelProfileMenu";
 import { useConnectionDiagnostics } from "../context/ConnectionDiagnosticsContext";
 import { useEdgeDrawer } from "../hooks/useEdgeDrawer";
 import { COLLOQUY_SID } from "../constants/session";
@@ -28,6 +29,7 @@ interface HeaderProps {
   isMobile?: boolean;
   llmProfiles?: LlmProfileManager;
   forcePin?: boolean;
+  modelMenuBlocked?: boolean;
   // 会话视觉暂停开关
   stagePaused: boolean;
   onToggleStagePaused: () => void;
@@ -59,6 +61,7 @@ export default function Header({
   isMobile,
   llmProfiles,
   forcePin,
+  modelMenuBlocked = false,
   stagePaused,
   onToggleStagePaused,
   stageStatusText,
@@ -128,11 +131,7 @@ export default function Header({
           </button>
         </div>
         <div className="header-center">
-          <div
-            className={["header-pill", status === "已连接" ? "connected" : "", status.startsWith("重连中") ? "reconnecting" : "", status === "已断开" || status === "连接失败 — 已达到最大重试次数" ? "disconnected" : ""].filter(Boolean).join(" ")}
-          >
-            <span className="pill-label">Evolve Agent</span>
-          </div>
+          <HeaderPill status={status} agents={agents} llmModelName={llmModelName} llmProfiles={llmProfiles} modelMenuBlocked={modelMenuBlocked} compact />
         </div>
         <div className="header-right">
           <button
@@ -155,7 +154,7 @@ export default function Header({
       <div className="header-layer">
         <div className="header-hotzone" {...drawer.hotzoneProps} />
         <div className="header-pill-dock">
-          <HeaderPill status={status} agents={agents} llmModelName={llmModelName} llmProfiles={llmProfiles} />
+          <HeaderPill status={status} agents={agents} llmModelName={llmModelName} llmProfiles={llmProfiles} modelMenuBlocked={modelMenuBlocked} />
         </div>
         <header
           data-tour="header"
@@ -330,7 +329,7 @@ export default function Header({
       </div>
 
       <div className="header-center">
-        <HeaderPill status={status} agents={agents} llmModelName={llmModelName} llmProfiles={llmProfiles} />
+        <HeaderPill status={status} agents={agents} llmModelName={llmModelName} llmProfiles={llmProfiles} modelMenuBlocked={modelMenuBlocked} />
       </div>
 
       {sessionId && (
@@ -426,89 +425,44 @@ function ApprovalModeBadge({
   );
 }
 
-function HeaderPill({
-  status,
-  agents,
-  llmModelName,
-  llmProfiles,
-}: {
+function HeaderPill({ status, agents, llmModelName, llmProfiles, modelMenuBlocked = false, compact = false }: {
   status: string;
   agents?: string[];
   llmModelName: string;
   llmProfiles?: LlmProfileManager;
+  modelMenuBlocked?: boolean;
+  compact?: boolean;
 }) {
-  const [dropdownOpen, setDropdownOpen] = useState(false);
-  const containerRef = useRef<HTMLDivElement>(null);
+  const [menuSession, setMenuSession] = useState<string | null>(null);
+  const anchorRef = useRef<HTMLButtonElement>(null);
+  const menuId = useId();
+  const sid = llmProfiles?.sessionId ?? "";
+  const menuOpen = menuSession !== null && menuSession === sid && !modelMenuBlocked;
+  const closeMenu = useCallback(() => setMenuSession(null), []);
+  useEffect(() => { setMenuSession(null); }, [sid, modelMenuBlocked]);
+  const modelLabel = llmProfiles?.selectionStatus === "loading" ? "读取模型中…"
+    : llmProfiles?.selectionStatus === "error" ? "选择模型（读取失败）"
+      : llmProfiles?.activeProfileName ? `待用：${llmProfiles.activeProfileName}` : "选择模型";
 
-  useEffect(() => {
-    if (!dropdownOpen) return;
-    const onClick = (e: MouseEvent) => {
-      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
-        setDropdownOpen(false);
-      }
-    };
-    document.addEventListener("click", onClick);
-    return () => document.removeEventListener("click", onClick);
-  }, [dropdownOpen]);
-
-  return (
-    <div
-      ref={containerRef}
-      className={[
-        "header-pill",
-        status === "已连接" ? "connected" : "",
-        status.startsWith("重连中") ? "reconnecting" : "",
-        status === "已断开" || status === "连接失败 — 已达到最大重试次数" ? "disconnected" : "",
-        agents && agents.length > 0 ? "multi-agent" : "",
-      ].filter(Boolean).join(" ")}
-      data-tooltip={agents && agents.length > 0 ? `Multi-Agent 模式 · Agents: ${agents.join(", ")}` : undefined}
-    >
-      <span className="pill-label">{agents && agents.length > 0 ? "Evolve Agent · Multi" : "Evolve Agent"}</span>
-      <span className="pill-detail">
-        <span className="pill-status">{status}</span>
-        {llmModelName ? (
-          <span
-            className={`pill-model${llmProfiles ? " pill-model-clickable" : ""}`}
-            onClick={llmProfiles ? () => setDropdownOpen((v) => !v) : undefined}
-            data-tooltip={llmProfiles ? "点击切换模型配置" : undefined}
-          >
-            {llmModelName}
-          </span>
-        ) : (
-          <span
-            className={`pill-model${llmProfiles ? " pill-model-clickable" : ""}`}
-            onClick={llmProfiles ? () => setDropdownOpen((v) => !v) : undefined}
-            data-tooltip={llmProfiles ? "点击配置模型" : undefined}
-          >
-            未配置模型
-          </span>
-        )}
-        {agents && agents.length > 0 && <span className="pill-agent-count">{agents.length} agents</span>}
-      </span>
-      {dropdownOpen && llmProfiles && (
-        <div className="pill-model-dropdown">
-          {llmProfiles.profiles.map((p) => (
-            <div
-              key={p.name}
-              className={`pill-model-option${p.name === llmProfiles.activeProfileName ? " active" : ""}`}
-              onClick={(e) => {
-                e.stopPropagation();
-                llmProfiles.setActiveProfile(p.name);
-                setDropdownOpen(false);
-              }}
-            >
-              <span className="pill-model-option-name">
-                {p.name}
-              </span>
-              <span className="pill-model-option-model">{p.model}</span>
-            </div>
-          ))}
-        </div>
-      )}
-      <span className="pill-ripple" aria-hidden />
-      <span className="pill-ripple" aria-hidden />
-    </div>
-  );
+  return <div className={[
+    "header-pill", compact ? "header-pill--compact" : "", menuOpen ? "header-pill--menu-open" : "",
+    status === "已连接" ? "connected" : "", status.startsWith("重连中") ? "reconnecting" : "",
+    status === "已断开" || status === "连接失败 — 已达到最大重试次数" ? "disconnected" : "",
+    agents && agents.length > 0 ? "multi-agent" : "",
+  ].filter(Boolean).join(" ")}>
+    <span className="pill-label">{agents && agents.length > 0 ? "Evolve Agent · Multi" : "Evolve Agent"}</span>
+    <span className="pill-detail">
+      {!compact && <span className="pill-status">{status}</span>}
+      {llmProfiles ? <button type="button" ref={anchorRef} className="pill-model pill-model-button" aria-expanded={menuOpen}
+        aria-controls={menuId} aria-label={`${modelLabel}，选择当前会话待用模型`} disabled={modelMenuBlocked || !sid}
+        onClick={() => setMenuSession((previous) => previous === sid ? null : sid)}>{modelLabel}</button>
+        : <span className="pill-model">{llmModelName || "未配置模型"}</span>}
+      {!compact && agents && agents.length > 0 && <span className="pill-agent-count">{agents.length} agents</span>}
+    </span>
+    {llmProfiles && <ModelProfileMenu open={menuOpen} anchorRef={anchorRef} manager={llmProfiles} onClose={closeMenu} />}
+    <span className="pill-ripple" aria-hidden />
+    <span className="pill-ripple" aria-hidden />
+  </div>;
 }
 
 function DebugBadges() {

@@ -8,6 +8,7 @@ interface OnboardingTourProps {
   setSidebarCollapsed: React.Dispatch<React.SetStateAction<boolean>>;
   setDrawerOpen: React.Dispatch<React.SetStateAction<boolean>>;
   setLlmDrawerOpen: React.Dispatch<React.SetStateAction<boolean>>;
+  onCloseLlmDrawer: () => void;
   onPinSidebarChange: (pinned: boolean) => void;
   onPinHeaderChange: (pinned: boolean) => void;
 }
@@ -19,6 +20,7 @@ export default function OnboardingTour({
   setSidebarCollapsed,
   setDrawerOpen,
   setLlmDrawerOpen,
+  onCloseLlmDrawer,
   onPinSidebarChange,
   onPinHeaderChange,
 }: OnboardingTourProps) {
@@ -88,18 +90,18 @@ export default function OnboardingTour({
       {
         target: '[data-tour="llm-drawer-panel"]',
         title: "模型配置",
-        content: "在这里配置 LLM Profile，包括 API 密钥、模型选择、温度等参数。",
+        content: "模型配置页按客户端和端点管理连接、参数；全局配置引用页选择审批与元数据模型。当前会话的待用模型从顶部栏切换。",
         placement: "left",
         before: async () => {
           setLlmDrawerOpen(true);
           await wait(300);
         },
         after: () => {
-          setLlmDrawerOpen(false);
+          onCloseLlmDrawer();
         },
       },
     ];
-  }, [isMobile, setSidebarCollapsed, setDrawerOpen, setLlmDrawerOpen]);
+  }, [isMobile, setSidebarCollapsed, setDrawerOpen, setLlmDrawerOpen, onCloseLlmDrawer]);
 
   return (
     <Joyride

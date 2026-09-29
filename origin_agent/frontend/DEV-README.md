@@ -95,6 +95,8 @@ frontend/
 | `Sidebar.tsx` | 会话列表、搜索、新建会话 |
 | `Header.tsx` | 顶部工具栏、模型信息、设置入口；审批徽章按当前会话显示手动/脱手/YOLO，并在连接同步期间显示不可点击的“加载中”或“不可用” |
 | `Drawer.tsx` | 侧边抽屉容器；资源区包含 Shell会话元数据列表与用户停止按钮，不提供终端输出或人工输入 |
+| `LlmProfileDrawer.tsx` | 模型配置分页外壳、焦点管理和受保护关闭入口；内容委托 `components/llm/` 的列表、详情、全局引用及确认组件 |
+| `ModelProfileMenu.tsx` | 顶部栏唯一会话待用模型选择浮层，支持触摸滚动、键盘、视口防越界和焦点返回 |
 | `OnboardingTour.tsx` | 首次访问引导向导（react-joyride），spotlight 高亮 + 步骤动画驱动 |
 | `ErrorBoundary.tsx` | 错误边界，防止模态组件异常卸载整个 App |
 | `SplashScreen.tsx` | 开屏动画，最少停留 800ms、最多 3000ms，可点击跳过 |
@@ -182,7 +184,9 @@ frontend/
 | `features/chat/chatRuntimeStore.ts` | Zustand 聊天运行时唯一高频状态：完整骨架、内容行、live 尾部、输入草稿、pending、滚动与资源；通用 `liveId → historyRowId`关联把user/assistant/tool/system实时行提升到skeleton正典位置，工具请求和结果按 `tool_call_id` 幂等合并为同一工具调用卡片，REST内容页随后覆盖临时内容；未映射或History失败的行不按版本号清理；`toggleMessageCollapse(id, source)`分别维护历史与实时折叠状态 |
 | `features/chat/chatRuntimeController.ts` | History skeleton/page 请求代际、Abort、页去重、正典同步、15秒超时局部错误与诊断 reporter、Minimap 随机目标和资源懒加载 |
 | `features/chat/useChatScrollController.ts` | `initializing/following/detached/minimap_dragging/returning` 五态追底与回底控制；实时提交和列表高度变化通过可取消、按浏览器帧合并的被动追底调度读取 Virtuoso scroller 物理底部；用户意图、小地图拖拽、消息高度操作和非 `following` 状态会取消待执行帧 |
-| `useLlmProfiles.ts` | 从服务端读取 Profile；提供单对象创建/编辑/删除；浏览器仅持久化活动 Profile 名称；审批 Profile与全局元数据 Profile使用服务端权威 REST 状态和 WebSocket广播 |
+| `useLlmProfiles.ts` | 全局Profile目录CRUD、客户端列表、审批/元数据引用状态；组合按会话待用选择，写成功与后续刷新失败分离，目录/引用请求按代际收敛 |
+| `useSessionLlmSelection.ts` | 按会话名称存储、服务端恢复、读取取消与代际隔离、Profile重命名/删除处理 |
+| `useLlmProfileEditor.ts` | 抽屉只读/编辑/新建状态、纯内存草稿、离开确认、删除替换、外部冲突和保存结果确认 |
 | `useWebSocketConnection.ts` | WebSocket 连接生命周期管理：建立/断开/重连/心跳；会话状态预检和握手复检使用可取消15秒截止，超时报告后不误判删除；消息入口按连接代际和当前 WebSocket 实例丢弃旧连接迟到消息，避免快速切换会话时污染当前状态；普通断开保留指数退避重连，永久删除的已建立连接按 4004 停止重连，握手拒绝则通过 `status.exists`二次确认后通知上层切换“随意聊聊” |
 | `useSessionStore.ts` | 会话列表与低频元数据管理：获取/创建/归档/删除/标签/标题；当前连接的审批模式显示与同步状态（服务端为唯一持久化真相）、任务资源、Shell/Cron 和交互队列；自动标题/标签/摘要/终结/合并错误通过全局操作通知展示，终结元数据警告不改变归档成功；主聊天消息、输入草稿与 pending 已迁移到 chat runtime store |
 | `useSubagentManager.ts` | 子代理状态管理：注册/启动/停止/审批/列表 |
@@ -195,7 +199,13 @@ frontend/
 | `useSessionStage.ts` | 会话舞台层状态：由 `Layout` 单例探测 `stage/index.html` 并订阅聊天 WebSocket Agentspace事件；入口文件作为部署提交标记，新内容版本经 1 秒安静窗口后只重建一次 iframe，非入口资源事件和 `resync`不重置运行态 |
 | `useSessionChatStyle.ts` | 会话聊天区自定义样式状态：探测 `chat-style/index.css`，经 PostCSS 作用域处理（`@import` 拒绝、`.chat-area` 前缀、`@font-face` 校验 `ChatStyle-` 前缀），通过聊天 WebSocket Agentspace事件热重载 |
 
-“模型配置”抽屉的每个 Profile 行包含三个互相独立的角色开关：当前会话活动 Profile、审批 Profile、全局元数据 Profile。全局元数据 Profile可再次点击并确认清空；切换状态由服务端持久化与广播，不写入浏览器活动 Profile名称。
+“模型配置”抽屉由顶部分页按钮切换“模型配置”和“全局配置引用”，两个页面在抽屉内保持挂载。模型页按客户端→API端点→Profile纵向分组，详情同时只展开一个；先展示只读字段，再显式编辑。连接、生成参数、多模态分工、人格均使用常显分区标题，查看和编辑状态都不再单独折叠这些区块。Profile行只显示用途标签，不提供角色切换按钮。全局页分别显示审批/元数据用途卡、引用选择器、可用状态和清空确认；用途、保存时机、未配置回退及不可用规则通过标题旁的问号按钮复用全局 `data-tooltip` 展示，并提供完整可访问名称，不再常驻长段说明。错误与重试操作、清空确认的影响说明仍直接显示。引用选择立即保存到服务端，状态由REST响应与WebSocket广播收敛。
+
+会话待用 Profile 选择只通过顶部栏修改。`useSessionLlmSelection` 使用 `evolve_session_llm_profile:<encoded sessionId>` 每会话键保存名称，本地明确选择优先；缺失时读取 `GET /api/sessions/{id}/llm-profile`。空sessionId不继承旧会话值；读失败不写空名称；目录加载失败不误判名称已删除。旧 `evolve_active_llm_profile` 全局键不再读取，也不猜测迁移。新建/分支/合并/旋转按新ID恢复服务端指针，不复制父会话未提交选择。发送消息与重新生成才提交名称，resume不受待用选择影响。读取请求完整覆盖响应正文的15秒截止，切会话/用户重选/名称广播使旧请求失效。
+
+编辑草稿由 `useLlmProfileEditor` 持有且只驻留内存，切分页/搜索不会丢失；切Profile、收起编辑祖先、取消、关闭按钮/遮罩/Escape与引导程序性关闭统一通过离开守卫。外部变更不覆盖草稿，提示另存或放弃；写成功后的目录刷新失败显示警告，不再次创建；网络不确定保存先刷新确认。密钥不出现在只读详情或浏览器存储中。抽屉样式独立为 `llm-profile.css`，不重写其他弹窗共享表单类。
+
+顶部 `ModelProfileMenu` 通过 `PopupLayer` 挂到body，以fixed浮层和真实按钮支持触摸/键盘；触摸与折叠顶部栏均不依赖hover。pointerdown只判断外部关闭，选项通过click提交以保留触摸滚动；菜单追踪锚点与visualViewport变化，层级高于聊天但低于模态。仅选取/Escape关闭时归还触发按钮焦点，外部点击和新模态不抢焦点。
 
 审批 Profile与会话审批模式是两个独立状态：清空、删除或改坏审批 Profile只改变 Profile名称/模型/可用性，不把当前会话改为手动模式。已有脱手模式继续显示，实际审批后端不可用时由服务端返回审批失败；YOLO不受影响。会话模式切换继续采用非乐观更新，只有专用权威回执到达后才解除“加载中”。
 
@@ -262,7 +272,8 @@ frontend/
 | `messages.css` | 消息气泡与渲染 |
 | `input.css` | 输入框（半透明背景模糊、玻璃高光边框与聚焦光晕；非空桌面会话的底部玻璃热区和 hidden/peek/open 三态抽屉动画；空会话及触摸设备保持完整形态） |
 | `dialogs.css` | 弹窗 |
-| `drawer.css` | 抽屉面板 |
+| `drawer.css` | 通用抽屉面板与右侧入口 |
+| `llm-profile.css` | 模型配置抽屉分页、纵向分组、只读详情/编辑、用途卡与窄屏全宽布局 |
 | `panels.css` | 任务进度/子代理面板 |
 | `sidebar.css` | 侧边栏 |
 | `header.css` | 顶部栏 |

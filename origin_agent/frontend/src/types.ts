@@ -544,6 +544,31 @@ export interface LlmProfile {
   soul_file: string;
 }
 
+export type LlmLoadStatus = "loading" | "ready" | "error";
+export type SessionLlmSelectionStatus = "idle" | LlmLoadStatus;
+
+export interface SessionLlmProfileState {
+  session_id: string;
+  profile_name: string | null;
+  /** 只表示名称存在，不表示连接已验证。 */
+  available: boolean;
+}
+
+export interface LlmProfileChangeEvent {
+  operation?: "renamed" | "deleted";
+  old_name?: string | null;
+  new_name?: string | null;
+}
+
+export interface LlmProfileDeleteResult {
+  deleted: boolean;
+  profile_name: string;
+  replacement_profile_name: string | null;
+  switched_sessions: string[];
+  pending_sessions: string[];
+  notification_failures: string[];
+}
+
 export interface ApprovalProfileState {
   profile_name: string | null;
   model: string | null;
