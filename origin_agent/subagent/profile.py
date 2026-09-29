@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING
 
 from entity.constant import (
     CHARACTER_LLM_PROFILE_META_KEY,
+    CHARACTER_SYSTEM_PROMPT_PATHS_META_KEY,
     CHARACTER_PROFILE_FILENAME,
     CHARACTER_PROFILE_META_FILENAME,
     CHARACTER_ROLEPLAY_DIR_NAME,
@@ -100,6 +101,8 @@ class CharacterProfileResolver:
         metadata_path = f"{directory_path}/{CHARACTER_PROFILE_META_FILENAME}"
         metadata: dict[str, str] = {}
         system_prompt = ""
+        system_prompt_paths: list[str] = []
+        system_prompts: list[str] = []
         llm_profile_name = ""
         error: str | None = None
 
@@ -124,10 +127,24 @@ class CharacterProfileResolver:
                 raise CharacterProfileError(
                     f"Missing [{CHARACTER_LLM_PROFILE_META_KEY}] in {metadata_path}"
                 )
+            system_prompt_paths = _parse_system_prompt_paths(
+                metadata.get(CHARACTER_SYSTEM_PROMPT_PATHS_META_KEY, "")
+            )
         except MetaFormatError as exc:
             error = error or f"Invalid character profile metadata {metadata_path}: {exc}"
         except (SandboxError, CharacterProfileError) as exc:
             error = error or str(exc)
+
+        if error is None:
+            try:
+                system_prompts = _load_system_prompts(
+                    self._sandbox,
+                    profile_path=profile_path,
+                    system_prompt=system_prompt,
+                    system_prompt_paths=system_prompt_paths,
+                )
+            except (SandboxError, CharacterProfileError) as exc:
+                error = str(exc)
 
         llm_profile = None
         if error is None:
@@ -147,6 +164,8 @@ class CharacterProfileResolver:
             directory_path=directory_path,
             profile_path=profile_path,
             system_prompt=system_prompt,
+            system_prompt_paths=system_prompt_paths,
+            system_prompts=system_prompts,
             metadata=metadata,
             llm_profile_name=llm_profile_name,
             llm_profile=llm_profile,
@@ -167,6 +186,49 @@ class CharacterProfileResolver:
                 profile.error = profile.error or message
 
 
+def _parse_system_prompt_paths(raw_value: str) -> list[str]:
+    """将[profile]元数据值解析为按行排列的逻辑路径。"""
+    return [line.strip() for line in raw_value.splitlines() if line.strip()]
+
+
+def _load_system_prompts(
+    sandbox: Sandbox,
+    *,
+    profile_path: str,
+    system_prompt: str,
+    system_prompt_paths: list[str],
+) -> list[str]:
+    """按profile.md与[profile]声明顺序读取系统提示词正文。"""
+    prompts: list[str] = []
+    if system_prompt.strip():
+        prompts.append(system_prompt)
+
+    for prompt_path in system_prompt_paths:
+        if prompt_path == profile_path:
+            continue
+        resolved = sandbox.resolve_read(prompt_path)
+        if not resolved.real.exists():
+            raise CharacterProfileError(
+                f"System prompt file not found: {prompt_path}"
+            )
+        if not resolved.real.is_file():
+            raise CharacterProfileError(
+                f"System prompt path is not a file: {prompt_path}"
+            )
+        prompt = sandbox.read(prompt_path, limit=0)
+        if prompt.strip():
+            prompts.append(prompt)
+    return prompts
+
+
+def get_character_system_prompts(profile: CharacterProfile) -> list[str]:
+    """返回角色档案按顺序加载且去除空白的系统提示词。"""
+    prompts = profile.system_prompts
+    if not prompts and profile.system_prompt.strip():
+        prompts = [profile.system_prompt]
+    return [prompt.strip() for prompt in prompts if prompt.strip()]
+
+
 def character_profile_to_agent_config(profile: CharacterProfile) -> AgentConfig:
     """将动态角色档案转换为仅供运行时使用的 AgentConfig。"""
     if profile.error is not None or profile.llm_profile is None:
@@ -178,7 +240,10 @@ def character_profile_to_agent_config(profile: CharacterProfile) -> AgentConfig:
         base_url=llm_profile.base_url,
         model=llm_profile.model,
         api_key=llm_profile.api_key or None,
-        system_prompt_paths=[profile.profile_path],
+        system_prompt_paths=[
+            profile.profile_path,
+            *[path for path in profile.system_prompt_paths if path != profile.profile_path],
+        ],
         max_output_tokens=llm_profile.max_output_tokens,
         max_context_tokens=llm_profile.max_context_tokens,
         client_type=llm_profile.llm_client_name,

@@ -634,7 +634,7 @@
   <div class="done-overlay" id="done-overlay">
     <div class="done-card">
       <h2>Review Complete</h2>
-      <p id="done-message">Your feedback has been saved. Go back to your Evolve Agent session and tell Eve you're done reviewing.</p>
+      <p id="done-message">Your feedback has been saved. Go back to your Evolve Agent session and tell the Agent you're done reviewing.</p>
       <div class="btn-row">
         <button onclick="closeDoneDialog()">OK</button>
       </div>
@@ -1050,7 +1050,7 @@
     function showDoneOverlay(exported) {
       document.getElementById("done-message").textContent = exported
         ? "反馈已导出为 feedback.json，请将内容粘贴回聊天窗口。"
-        : "Your feedback has been saved. Go back to your Evolve Agent session and tell Eve you're done reviewing.";
+        : "Your feedback has been saved. Go back to your Evolve Agent session and tell the Agent you're done reviewing.";
       document.getElementById("done-overlay").classList.add("visible");
     }
 

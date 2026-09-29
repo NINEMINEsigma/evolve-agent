@@ -14,7 +14,10 @@ from entry.agent_support.messages import (
     collect_skill_prompts,
 )
 from entry.multi_agent_loop import AgentProfile
-from subagent.profile import character_profile_to_agent_config
+from subagent.profile import (
+    character_profile_to_agent_config,
+    get_character_system_prompts,
+)
 
 if TYPE_CHECKING:
     from system.context import RuntimeContext
@@ -62,10 +65,8 @@ def _resolve_main_agent_prompts(
 
 
 def _resolve_subagent_prompts(profile: CharacterProfile) -> list[str]:
-    """子Agent直接使用动态解析时读取的 profile.md 正文。"""
-    if profile.system_prompt.strip():
-        return [profile.system_prompt.strip()]
-    return []
+    """返回动态角色档案声明的全部系统提示词。"""
+    return get_character_system_prompts(profile)
 
 
 def build_agent_profiles(

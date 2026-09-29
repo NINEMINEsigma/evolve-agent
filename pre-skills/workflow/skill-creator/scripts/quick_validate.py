@@ -1,15 +1,15 @@
 #!/usr/bin/env python3
 """
-Quick validation script for skills — Evolve Agent 本地化版本。
+Quick validation script for skills.
 
-纯 stdlib 实现（无 PyYAML 依赖），并适配 Evolve Agent 的 frontmatter 扩展字段：
+纯标准库实现，并支持技能 frontmatter 扩展字段：
 name / description / license / allowed-tools / metadata / compatibility / version / author / category / tags
 """
 import re
 import sys
 from pathlib import Path
 
-# Evolve Agent 系统允许的 frontmatter 顶层字段
+# Skill-specific frontmatter fields allowed by the project
 ALLOWED_PROPERTIES = {
     'name', 'description', 'license', 'allowed-tools', 'metadata',
     'compatibility', 'version', 'author', 'category', 'tags',

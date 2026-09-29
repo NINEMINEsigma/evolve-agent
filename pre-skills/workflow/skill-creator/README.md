@@ -1,48 +1,51 @@
-## 本地化说明
+# skill-creator
 
-由 **Eve（Evolve Agent）** 于 2026-08-02 完成 **Windows 平台 + Evolve Agent 工具链本地化改造**，
-作为 Evolve Agent 系统的内置技能使用。
-
-## 本地化改动摘要
-
-| 改动 | 说明 |
-|:-----|:-----|
-| 平台适配 | 移除 `nohup` / `kill` / `cp -r` / `open` 等 Unix 命令，改用 `StartShell` / `StopShell` / `Copy` / `/uploads/` 展示 |
-| 工具链适配 | `claude -p` → `run_subagent` / `RecallSkill`；MCP → `WebSearch` / `WebFetch`；TodoList → `SetTaskProgress` |
-| 展示适配 | 查看器改用 `--static` 静态 HTML 模式，经 `/uploads/` 嵌入聊天 |
-| 脚本处理 | 绑定 Claude CLI 的 `run_eval.py` / `run_loop.py` / `improve_description.py` / `generate_report.py` 归档至 `scripts/_legacy_claude_code/`；`quick_validate.py` 重写为纯 stdlib（无 PyYAML 依赖）并适配本系统 frontmatter 扩展字段 |
-| 工作区约定 | 评估工作区统一放 `evals/<skill-name>-workspace/` |
+用于创建、修改、评估和迭代技能的工作流。完整流程见 `SKILL.md`。
 
 ## 目录结构
 
-```
+```text
 skill-creator/
-├── SKILL.md                      ← 主文档（方法论 + 本地化操作指南）
-├── README.md                     ← 本文件
+├── SKILL.md
 ├── agents/
-│   ├── grader.md                 ← 评分子代理提示词
-│   ├── comparator.md             ← 盲 A/B 对比子代理提示词
-│   └── analyzer.md               ← 结果分析子代理提示词
+│   ├── grader.md
+│   ├── comparator.md
+│   └── analyzer.md
 ├── assets/
-│   └── eval_review.html          ← 描述优化评估集审查模板
+│   └── eval_review.html
 ├── eval-viewer/
-│   ├── generate_review.py        ← 评估查看器生成脚本（纯 stdlib，支持 --static）
-│   └── viewer.html               ← 查看器前端
+│   ├── generate_review.py
+│   └── viewer.html
 ├── references/
-│   └── schemas.md                ← evals.json / grading.json 等 JSON schema
+│   └── schemas.md
 └── scripts/
-    ├── __init__.py
-    ├── aggregate_benchmark.py    ← 聚合基准（grading.json → benchmark.json/md）
-    ├── quick_validate.py         ← SKILL.md 快速校验（纯 stdlib）
-    ├── package_skill.py          ← 打包 .skill 分发文件
-    ├── utils.py                  ← frontmatter 解析等共享工具
-    └── _legacy_claude_code/      ← 已归档的 Claude Code 专用脚本（仅参考，不可用）
+    ├── aggregate_benchmark.py
+    ├── quick_validate.py
+    ├── package_skill.py
+    └── utils.py
 ```
 
-## 快速开始
+## 工作流程
 
-1. 技能文件放入 `skills/<name>/`，含 `SKILL.md` 即被 `RecallSkill` 自动注册
-2. 用 `RecallSkill("skill-creator")` 加载本技能
-3. 按 SKILL.md 的「创建技能 → 测试 → 评估 → 迭代」流程操作
-4. 校验技能：`python scripts/quick_validate.py <skill-dir>`
-5. 打包分发：`python scripts/package_skill.py <skill-dir> [output-dir]`
+1. 明确技能目标、触发条件、输入和输出。
+2. 编写或修改技能的 `SKILL.md`。
+3. 为真实使用场景创建评估提示词。
+4. 并行运行带技能和基线的评估。
+5. 评分、聚合基准并生成查看器。
+6. 根据用户反馈和评估结果迭代技能。
+7. 必要时优化 frontmatter 中的 `description`，提升触发准确率。
+
+评估结果统一放在 `evals/<skill-name>-workspace/`，按迭代和测试用例分别保存。
+
+## 辅助脚本
+
+- `scripts/quick_validate.py`：检查技能目录和 `SKILL.md` frontmatter。
+- `scripts/package_skill.py`：将技能目录打包为 `.skill` 文件。
+- `scripts/aggregate_benchmark.py`：聚合评估结果，生成基准数据和报告。
+- `eval-viewer/generate_review.py`：生成评估结果查看器。
+- `references/schemas.md`：评估文件的 JSON 结构。
+- `agents/grader.md`：评分规则。
+- `agents/comparator.md`：盲比较规则。
+- `agents/analyzer.md`：基准结果分析规则。
+
+创建技能时，先加载 `SKILL.md`，再按其中的流程推进；只在需要时读取对应的参考文件或 Agent 指令。

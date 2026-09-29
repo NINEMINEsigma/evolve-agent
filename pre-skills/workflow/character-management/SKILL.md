@@ -19,8 +19,8 @@ tags:
 
 每个角色目录包含：
 
-- `profile.md`：角色档案，同时作为自定义系统提示词。
-- `profile.md.meta`：元数据文件，通过 `[llm_profile]` 直接引用工作空间中已有的 LLM Profile 名称。
+- `profile.md`：角色档案，同时作为第一个自定义系统提示词。
+- `profile.md.meta`：元数据文件，通过 `[llm_profile]` 直接引用前端「模型配置」中已有的 LLM Profile 名称；可选的 `[profile]` 字段按行声明附加系统提示词文件的沙盒命名空间路径，系统按声明顺序将每个文件作为独立 system message 加载。
 - `.es` 历史文件：可选。系统停止子Agent后默认写入 `ws:tmp/<session_id>.es`，Agent 可按需移动到角色目录。
 
 角色名称在 `roleplay` 和 `task` 两类目录之间全局唯一。重复名称会在列表中显示错误，但不能启动。
@@ -49,15 +49,21 @@ characters/
 
 ## `profile.md.meta` 格式
 
-`profile.md.meta` 使用项目统一的元数据文件格式。必须提供 `[llm_profile]`，值是 `llm_profiles.es` 中已有的 Profile 名称：
+`profile.md.meta` 使用项目统一的元数据文件格式。必须提供 `[llm_profile]`，值是 `llm_profiles.es` 中已有的 Profile 名称；可选的 `[profile]` 值按行填写附加系统提示词文件的沙盒命名空间路径：
 
 ```text
 [llm_profile]
 coding-model
 
+[profile]
+ws:prompts/common/backend-rules.md
+ws:prompts/common/review-checklist.md
+
 [description]
 用于后端开发任务的模型配置
 ```
+
+系统先加载角色目录中的 `profile.md`，再按 `[profile]` 的书写顺序加载这些文件；每个文件对应一个独立 system message。空行会忽略，路径必须是当前模式可读的沙盒命名空间路径。文件不存在、不是文件或无权读取时，角色会在 `ListSubAgents` 中保留错误并被 `RunSubAgent` 拒绝。
 
 LLM 配置不复制到角色目录，也不在角色目录中保存 `base_url`、`api_key` 或模型参数。每次动态获取角色档案时，系统按名称解析当前 Profile。
 
@@ -240,7 +246,8 @@ LiteratureReviewer → Experimentalist → Academic
 
 直接修改 `profile.md` 或 `profile.md.meta`。下一次列表或启动会动态读取新内容，不需要重新注册。
 
-- 修改 `profile.md`：影响下一次子Agent的系统提示词。
+- 修改 `profile.md`：影响下一次子Agent的第一个自定义系统提示词。
+- 修改 `[profile]`：影响下一次子Agent加载的附加系统提示词及其顺序。
 - 修改 `[llm_profile]`：影响下一次子Agent使用的 LLM Profile。
 - 修改其他元数据：只作为角色档案元数据保留，不自动改变运行时配置。
 - 角色名称不能通过修改目录名与其他角色冲突；全局同名角色不可运行。

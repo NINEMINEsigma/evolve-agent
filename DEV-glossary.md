@@ -67,12 +67,12 @@
 | 随意聊聊会话 | `ColloquyLoop` 的内置会话 | `Loop.colloquy` / `COLLOQUY_SESSION_ID` |
 | 子会话 | `SubAgentLoop` 的会话（与前端 UI「子会话面板/抽屉」对齐） | — |
 | 临时子会话 | `TaskAgentLoop` 的会话 | — |
-| 子Agent / subagent | `SubAgentLoop` 运行体；亦指多Agent模式中从注册表加载的非主参与者（两语境互斥，复用不歧义） | — |
+| 子Agent / subagent | `SubAgentLoop` 运行体；亦指多Agent模式中从动态角色档案加载的非主参与者（两语境互斥，复用不歧义） | — |
 | 临时Agent / taskagent | `TaskAgentLoop` 运行体（无系统提示词、无持久化、完成即终止） | — |
-| 角色档案 | `ws:characters/roleplay/<角色名>/` 或 `ws:characters/task/<角色名>/` 中的 `profile.md` 与 `profile.md.meta`，动态提供子Agent系统提示词和 LLM Profile 名称引用 | character profile |
+| 角色档案 | `ws:characters/roleplay/<角色名>/` 或 `ws:characters/task/<角色名>/` 中的 `profile.md` 与 `profile.md.meta`；`profile.md` 和元数据 `[profile]` 声明的多行命名空间路径共同提供子Agent独立系统提示词，`[llm_profile]` 提供 LLM Profile 名称引用 | character profile |
 | 动态角色档案解析器 | 每次扫描角色目录、读取 `profile.md` 与元数据并解析当前 LLM Profile 的运行时组件 | dynamic character profile resolver |
 | 角色类型 | `roleplay` 或 `task`；仅用于分类，角色名称仍跨类型全局唯一 | character type |
-| （子Agent的）档案 | 子Agent 创建时可被主Agent 配置的系统提示词 | `AgentConfig.system_prompt_paths` |
+| （子Agent的）档案 | 角色目录中的 `profile.md` 与 `profile.md.meta`；`[profile]` 可按行声明多个独立系统提示词路径 | character profile prompts |
 | 运行时Profile | 多Agent参与者的运行时形态 | `AgentProfile` 类 |
 | 参与Agent | 多Agent模式主会话中的参与者（主Agent 必居其一） | — |
 | 工具循环 | LLM→工具调用→结果回写→LLM 轮次循环（上限 90） | `MAX_TOOL_TURNS` |

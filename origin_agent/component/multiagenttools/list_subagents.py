@@ -79,7 +79,7 @@ registry.register(
         #
         # ## 何时使用
         # - 启动 RunSubAgent 前查看可用角色。
-        # - 查看 profile.md、profile.md.meta 或 LLM Profile 引用错误。
+        # - 查看 profile.md、profile.md.meta（包括 [profile] 系统提示词路径）或 LLM Profile 引用错误。
         # - 查看当前主会话下角色是否已有运行中的子Agent。
         #
         # ## 副作用/注意
@@ -111,7 +111,7 @@ The `agents` result is an array so duplicate names and their individual errors r
 
 ## When to Use
 - Check which character profiles are available before calling `RunSubAgent`.
-- Inspect profile or LLM Profile reference errors.
+- Inspect `profile.md`, the `[profile]` system-prompt paths in `profile.md.meta`, or LLM Profile reference errors.
 - Check whether a character currently has a running sub-agent session.
 
 ## Side Effects / Notes

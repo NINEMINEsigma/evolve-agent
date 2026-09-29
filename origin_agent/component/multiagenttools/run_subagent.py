@@ -85,7 +85,7 @@ registry.register(
         #
         # ## 前置条件
         # name 对应的角色目录必须同时包含 profile.md 和 profile.md.meta；
-        # profile.md.meta 必须包含引用现有 LLM Profile 的 [llm_profile] 字段。
+        # profile.md.meta 必须包含引用现有 LLM Profile 的 [llm_profile] 字段；可选的 [profile] 字段按行声明附加系统提示词路径。
         # 角色名称跨 roleplay/task 全局唯一；无效或重名角色会拒绝启动。
         #
         # ## 调用效果
@@ -108,7 +108,7 @@ registry.register(
         "description": """Start a sub-agent from a dynamically discovered character profile.
 
 ## Prerequisites
-The character directory must contain `profile.md` and `profile.md.meta`. The metadata must contain a valid `[llm_profile]` reference to an existing LLM Profile. Use `ListSubAgents` to inspect available characters and errors.
+The character directory must contain `profile.md` and `profile.md.meta`. The metadata must contain a valid `[llm_profile]` reference to an existing LLM Profile. An optional `[profile]` section can list additional sandbox namespace paths, one per line; each file is loaded as a separate system prompt after `profile.md`. Use `ListSubAgents` to inspect available characters and errors.
 
 ## Effect
 Each call creates a new sub-agent session from the current character files and current referenced LLM Profile. Character files and LLM configuration are read dynamically; no explicit registration step exists.

@@ -6,6 +6,7 @@ from pydantic import BaseModel
 from system.context import RuntimeContext
 
 from entity.puretype import CharacterProfile, LLMProfile
+from subagent.profile import get_character_system_prompts
 
 
 class SubRuntimeContext(BaseModel):
@@ -19,7 +20,7 @@ class SubRuntimeContext(BaseModel):
     """子Agent的OpenAI兼容API端点地址（来自动态角色档案引用的Profile）。"""
 
     model: str
-    """模型名称（来自注册表）。"""
+    """模型名称（来自动态角色档案引用的Profile）。"""
 
     api_key: str | None = None
     """可选的 API 密钥。本地模型可省略（来自注册表）。"""
@@ -34,13 +35,13 @@ class SubRuntimeContext(BaseModel):
     """上下文窗口 token 上限，用于旋转控制（来自动态角色档案引用的Profile）。"""
 
     client_type: str = "openai_client"
-    """LLM 客户端模块名；注册子Agent来自注册表，临时Agent来自活动 Profile快照。"""
+    """LLM客户端模块名；普通子Agent来自角色档案引用的Profile，临时Agent来自活动Profile快照。"""
 
     llm_profile: LLMProfile | None = None
     """临时Agent的非持久化 LLM Profile快照；注册子Agent为 None。"""
 
     system_prompts: list[str]
-    """系统提示词列表（每项为独立 system message，来自注册表 system_prompt_paths 或内置默认模板）。"""
+    """系统提示词列表（内置默认提示、工具说明和角色档案声明的提示词）。"""
 
     tool_timeout: int = 30
     """单个工具调用允许运行的最大秒数，超时后取消（0 = 无超时）。"""
@@ -66,8 +67,8 @@ async def build_subagent_context(
     if tools_doc:
         prompts.append(tools_doc)
 
-    if profile.system_prompt.strip():
-        prompts.append(profile.system_prompt.strip())
+    for prompt in get_character_system_prompts(profile):
+        prompts.append(prompt)
 
     return SubRuntimeContext(
         base_url=llm_profile.base_url,

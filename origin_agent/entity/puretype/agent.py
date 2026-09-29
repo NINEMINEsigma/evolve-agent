@@ -55,6 +55,12 @@ class CharacterProfile(BaseModel):
     system_prompt: str = ""
     """profile.md的完整正文。"""
 
+    system_prompt_paths: list[str] = Field(default_factory=list)
+    """profile.md.meta的[profile]字段声明的附加系统提示词逻辑路径。"""
+
+    system_prompts: list[str] = Field(default_factory=list)
+    """按声明顺序加载的系统提示词正文，首项通常来自profile.md。"""
+
     metadata: dict[str, str] = Field(default_factory=dict)
     """profile.md.meta解析后的元数据。"""
 

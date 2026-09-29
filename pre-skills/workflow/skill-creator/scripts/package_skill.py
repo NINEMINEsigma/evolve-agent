@@ -15,13 +15,12 @@ import sys
 import zipfile
 from pathlib import Path
 
-# Evolve Agent 本地化：支持直接运行 python scripts/package_skill.py
+# The script can also be run directly with Python.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from quick_validate import validate_skill
 
 # Patterns to exclude when packaging skills.
-# _legacy_claude_code: archived Claude Code-only scripts, not for .skill packages
-EXCLUDE_DIRS = {"__pycache__", "node_modules", "_legacy_claude_code"}
+EXCLUDE_DIRS = {"__pycache__", "node_modules"}
 EXCLUDE_GLOBS = {"*.pyc"}
 EXCLUDE_FILES = {".DS_Store"}
 # Directories excluded only at the skill root (not when nested deeper).
