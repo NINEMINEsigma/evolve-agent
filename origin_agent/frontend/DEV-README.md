@@ -195,9 +195,9 @@ frontend/
 | `useEdgeDrawer.ts` | 边缘抽屉三态状态机（hidden/peek/open），侧栏与顶部栏共用 |
 | `useGlobalTooltip.ts` | 全局 tooltip 管理 |
 | `useMessageCharacterHover.ts` | 主聊天区同角色悬停事件委托；直接维护消息公开属性，避免瞬时悬停进入 React 消息状态 |
-| `useSessionSite.ts` | 会话网页状态：探测当前会话 `site/index.html` 并订阅聊天 WebSocket扇出的 `site/` Agentspace事件；部署完成后自动显示右侧入口，资源连续变化时等待 1 秒安静窗口后热刷新，入口文件或目录删除/移走后自动隐藏 |
-| `useSessionStage.ts` | 会话舞台层状态：由 `Layout` 单例探测 `stage/index.html` 并订阅聊天 WebSocket Agentspace事件；入口文件作为部署提交标记，新内容版本经 1 秒安静窗口后只重建一次 iframe，非入口资源事件和 `resync`不重置运行态 |
-| `useSessionChatStyle.ts` | 会话聊天区自定义样式状态：探测 `chat-style/index.css`，经 PostCSS 作用域处理（`@import` 拒绝、`.chat-area` 前缀、`@font-face` 校验 `ChatStyle-` 前缀），通过聊天 WebSocket Agentspace事件热重载 |
+| `useSessionSite.ts` | 会话网页状态：通过稳定入口的服务端重定向取得最终 `index.html` URL；订阅源 `.meta`/Agentspace 事件并以 HEAD 版本轮询兜底，资源连续变化时防抖刷新，入口或目录删除时隐藏入口 |
+| `useSessionStage.ts` | 会话舞台层状态：通过稳定入口的服务端重定向取得最终 URL；Hook 不解析 `.meta`，以入口提交规则和版本探测自动刷新 iframe |
+| `useSessionChatStyle.ts` | 会话聊天区自定义样式状态：服务端解析重定向，按最终 CSS URL 获取内容；PostCSS 作用域处理并按最终 URL重写 CSS `url()`，禁止 `@import` |
 
 “模型配置”抽屉由顶部分页按钮切换“模型配置”和“全局配置引用”，两个页面在抽屉内保持挂载。模型页按客户端→API端点→Profile纵向分组，详情同时只展开一个；先展示只读字段，再显式编辑。连接、生成参数、多模态分工、人格均使用常显分区标题，查看和编辑状态都不再单独折叠这些区块。Profile行只显示用途标签，不提供角色切换按钮。全局页分别显示审批/元数据用途卡、引用选择器、可用状态和清空确认；用途、保存时机、未配置回退及不可用规则通过标题旁的问号按钮复用全局 `data-tooltip` 展示，并提供完整可访问名称，不再常驻长段说明。错误与重试操作、清空确认的影响说明仍直接显示。引用选择立即保存到服务端，状态由REST响应与WebSocket广播收敛。
 

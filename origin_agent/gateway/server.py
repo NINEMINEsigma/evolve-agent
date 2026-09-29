@@ -23,7 +23,7 @@ from urllib.parse import parse_qs, quote
 
 import uvicorn
 from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect, WebSocketException
-from fastapi.responses import FileResponse, HTMLResponse, Response, StreamingResponse
+from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
 from .chat import Message, MessageType
@@ -54,6 +54,12 @@ from entity.constant import (
     SESSION_HISTORY_PAGE_DEFAULT_LIMIT,
     SESSION_HISTORY_PAGE_MAX_LIMIT,
     WEBSOCKET_CLOSE_SESSION_DELETED,
+    VISUAL_RAW_PARAM,
+    VISUAL_PROBE_PARAM,
+    VISUAL_SID_PARAM,
+    VISUAL_KIND_PARAM,
+    VISUAL_QUERY_ENABLED,
+    VISUAL_VERSION_HEADER,
 )
 from entity.puretype import (
     SessionStatus,
@@ -78,6 +84,7 @@ from entity.puretype import (
     DynamicSandboxSpaceUpdateRequest,
     SessionRuntimeStatus,
     MainSessionActivitySource,
+    SessionVisualKind,
 )
 from system.context import get_runtime_context
 from entry.parent_agent_loop import IncompatibleHistoryError
@@ -518,12 +525,19 @@ async def get_session_status(session_id: str, conn_token: str | None = None):
     processing = bool(
         managed_loop is not None and managed_loop.loop.is_active()
     )
+    from starlette.concurrency import run_in_threadpool
+    visual_resources = (
+        await run_in_threadpool(
+            Application.current().session_visual_resource_service.get_all_states, session_id,
+        ) if exists else None
+    )
     return SessionRuntimeStatus(
         session_id=session_id,
         exists=exists,
         occupied=occupied,
         processing=processing,
         activity=activity,
+        visual_resources=visual_resources,
     )
 
 
@@ -1590,28 +1604,76 @@ async def file_picker():
 
 
 @app.get(STATIC_FILE_HTTP_PREFIX + "/{namespace}/{file_path:path}")
-async def serve_workspace_file(namespace: str, file_path: str):
-    """提供沙盒命名空间下文件的 HTTP 访问，供前端展示图片等静态文件。
-
-    URL 格式: /files/{namespace}/{file_path}
-    例如: /files/ws/uploads/test.png → agentspace/uploads/test.png
-
-    命名空间不带冒号，由 f-string 拼接逻辑路径传给 Sandbox.resolve_read()。
-    通过沙盒复用路径解析、权限校验和路径遍历防护。
-    """
+@app.head(STATIC_FILE_HTTP_PREFIX + "/{namespace}/{file_path:path}")
+def serve_workspace_file(namespace: str, file_path: str, request: Request):
+    """在线程池解析视觉入口；最终 HEAD 响应独立校验来源并返回版本。"""
     from system.application import Application
     from system.sandbox import SandboxError
+    from system.session_visual_resources import SessionVisualResourceError, SessionVisualVersionUnavailable
+    from entity.puretype import SessionVisualKind, SessionVisualSource, SessionVisualStatus
 
+    sandbox = Application.current().sandbox
+    service = Application.current().session_visual_resource_service
     logical = f"{namespace}:{file_path}"
+    raw = request.query_params.get(VISUAL_RAW_PARAM) == VISUAL_QUERY_ENABLED
+    probe = request.query_params.get(VISUAL_PROBE_PARAM) == VISUAL_QUERY_ENABLED
+    headers = {**_NO_CACHE, "Cache-Control": "no-store"} if probe else dict(_NO_CACHE)
+    state = None
+
+    def failure(message: str, code: int) -> Response:
+        return Response(
+            content=b"" if request.method == "HEAD" else message,
+            status_code=code, headers=headers, media_type="text/plain",
+        )
+
     try:
-        sandbox = Application.current().sandbox
+        # 即使源目录尚未部署，也要先检查逻辑路径权限和遍历。
         resolved = sandbox.resolve_read(logical)
-    except SandboxError as exc:
-        return HTMLResponse(str(exc), status_code=403)
-    if not resolved.real.exists() or not resolved.real.is_file():
-        return HTMLResponse("File not found", status_code=404)
-    media_type = _guess_media_type_with_charset(resolved.real)
-    return FileResponse(str(resolved.real), media_type=media_type, headers=_NO_CACHE)
+        if raw and probe:
+            sid = request.query_params.get(VISUAL_SID_PARAM)
+            kind = request.query_params.get(VISUAL_KIND_PARAM)
+            if not sid or not kind:
+                return failure("Missing visual source", 400)
+            source = SessionVisualSource(session_id=sid, kind=SessionVisualKind(kind))
+            state = service.get_state(source.session_id, source.kind)
+            expected = sandbox.resolve_read(service.build_entry_logical_path(state))
+            if expected.namespace != resolved.namespace or expected.real != resolved.real:
+                return failure("Visual source changed", 409)
+        elif not raw:
+            parent, separator, filename = logical.rpartition("/")
+            source = service.match_source_directory(parent) if separator else None
+            if source is not None and filename == service.entry_name(source.kind):
+                state = service.get_state(source.session_id, source.kind)
+                if state.redirected and state.status == SessionVisualStatus.ready:
+                    expected = sandbox.resolve_read(service.build_entry_logical_path(state))
+                    if expected.namespace != resolved.namespace or expected.real != resolved.real:
+                        return RedirectResponse(
+                            url=service.build_entry_url(state, source=source if probe else None),
+                            status_code=307, headers={**_NO_CACHE, "Cache-Control": "no-store"},
+                        )
+        if probe and state is None:
+            return failure("Invalid visual probe", 400)
+        if not resolved.real.is_file():
+            return failure("File not found", 404)
+        with resolved.real.open("rb"):
+            pass
+        if probe and state is not None:
+            headers[VISUAL_VERSION_HEADER] = service.get_version(state)
+        media_type = _guess_media_type_with_charset(resolved.real)
+        if request.method == "HEAD":
+            headers["Content-Length"] = str(resolved.real.stat().st_size)
+            return Response(headers=headers, media_type=media_type)
+        return FileResponse(str(resolved.real), media_type=media_type, headers=headers)
+    except SessionVisualVersionUnavailable:
+        return failure("Visual version unavailable", 503)
+    except SandboxError:
+        return failure("Sandbox access denied", 403)
+    except (SessionVisualResourceError, ValueError):
+        return failure("Invalid visual request", 400)
+    except FileNotFoundError:
+        return failure("File not found", 404)
+    except OSError:
+        return failure("File unavailable", 403)
 
 
 @app.get(LOCAL_FONT_HTTP_PREFIX + "/{font_path:path}")
@@ -1700,7 +1762,7 @@ async def download_workspace_file(namespace: str, file_path: str):
 
 
 @app.get(DIR_ZIP_HTTP_PREFIX + "/{namespace}/{file_path:path}")
-def download_dir_zip(namespace: str, file_path: str):
+def download_dir_zip(namespace: str, file_path: str, request: Request):
     """将沙盒命名空间下的整个目录打包为 zip 后下载。
 
     URL 格式: /zip/{namespace}/{file_path}
@@ -1719,8 +1781,22 @@ def download_dir_zip(namespace: str, file_path: str):
     try:
         sandbox = Application.current().sandbox
         resolved = sandbox.resolve_read(logical)
-    except SandboxError as exc:
-        return HTMLResponse(str(exc), status_code=403)
+        if request.query_params.get(VISUAL_RAW_PARAM) != VISUAL_QUERY_ENABLED:
+            service = Application.current().session_visual_resource_service
+            source = service.match_source_directory(logical)
+            if source is not None and source.kind == SessionVisualKind.site:
+                state = service.get_state(source.session_id, source.kind)
+                if state.redirected:
+                    target = sandbox.resolve_read(state.effective_path)
+                    if target.namespace != resolved.namespace or target.real != resolved.real:
+                        target_ns, relative = state.effective_path.split(":", 1)
+                        location = (
+                            f"{DIR_ZIP_HTTP_PREFIX}/{quote(target_ns, safe='')}/"
+                            f"{quote(relative, safe='/')}?{VISUAL_RAW_PARAM}={VISUAL_QUERY_ENABLED}"
+                        )
+                        return RedirectResponse(url=location, status_code=307, headers={"Cache-Control": "no-store"})
+    except SandboxError:
+        return HTMLResponse("Sandbox access denied", status_code=403)
     if not resolved.real.exists() or not resolved.real.is_dir():
         return HTMLResponse("Directory not found", status_code=404)
 
@@ -1728,9 +1804,22 @@ def download_dir_zip(namespace: str, file_path: str):
     files: list[tuple[Path, str]] = []
     total_size: int = 0
     root: Path = resolved.real
-    for dirpath, _dirnames, filenames in os.walk(str(root)):
+    import stat as stat_module
+    for dirpath, dirnames, filenames in os.walk(str(root), followlinks=False):
+        # 不递归 Windows junction；每个文件还必须独立经过 Sandbox 校验。
+        dirnames[:] = [
+            name for name in dirnames
+            if not (Path(dirpath) / name).is_symlink()
+            and not (getattr((Path(dirpath) / name).lstat(), "st_file_attributes", 0)
+                     & stat_module.FILE_ATTRIBUTE_REPARSE_POINT)
+        ]
         for fname in filenames:
             fpath = Path(dirpath) / fname
+            relative = fpath.relative_to(root).as_posix()
+            try:
+                sandbox.resolve_read(logical.rstrip("/") + "/" + relative)
+            except SandboxError:
+                return HTMLResponse("Archive contains an inaccessible file", status_code=403)
             if not fpath.is_file():
                 continue
             # arcname 以所打包目录名称为根

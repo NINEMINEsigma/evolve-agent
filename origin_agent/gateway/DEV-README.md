@@ -222,7 +222,7 @@ Shell 输出由 Agent 使用 `ReadShell` 拉取，不通过聊天 WebSocket 主�
 
 自动标题、自动标签和摘要直接调用 Application 持有的 `SessionMetadataService`，不要求目标会话存在运行时 Loop。全局元数据 Profile未配置时按目标会话自己的活动 Profile回退；明确配置但不可用时返回失败，不静默回退。配置变化通过 `metadata_profile_changed`广播。删除当前元数据 Profile只清空全局引用，不自动采用删除请求中的替换 Profile。
 
-### 静态文件
+`/files` 的会话视觉入口支持 GET/HEAD 探测：源目录同级 `.meta` 的 `[redirect]` 只解析一层，合法目标通过 307 指向带 `visual_raw` 的原始入口，避免目标目录再次解析；最终 HEAD 响应返回 `X-Session-Visual-Version`。无效配置静默使用源目录，普通静态文件不受影响。site 的 `/zip` 源目录同样复用该规则。
 
 `/files`、`/downloads` 与 `/zip` 均复用 `Application.sandbox`，不再临时构造 Sandbox。因此 fast 模式下可读且当前目录存在的全局动态沙盒空间也遵循同一逻辑前缀解析、遍历防护和权限检查；fallback 不启用动态空间。
 

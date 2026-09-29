@@ -52,7 +52,7 @@
 | 动态沙盒空间 | 用户授权的全局逻辑路径映射（英文锚点：`global dynamic sandbox space`）；独立持久化、仅 fast 模式启用，由 Sandbox 单例管理并供所有 Agent 共享。`is_readonly` 仅表示标准 Sandbox 文件 API 层只读，不是操作系统 ACL |
 | 动态沙盒空间管理弹窗 | 顶部栏命令菜单进入的用户管理界面；通过 REST 接口查询、创建、更新和删除全局动态沙盒空间，不经过 Agent 工具审批 |
 | 逻辑路径 / 物理路径 | 带命名空间前缀的路径（如 `fork:main.py`）/ 真实文件系统路径 |
-| 元数据文件 | 英文锚点：metadata file。目标完整名称追加 `.meta` 的同级文本文件；Read 以独立成行的 `[key]` 分段解析为一层 `dict[str, str]`，值原样保留。正常结果附加 `meta`，缺失省略，读取/解析错误返回错误字符串；命名空间根目录不附带，显式读取 `.meta` 不嵌套。当前仅返回数据，不驱动业务功能；与会话元数据及工具内部 `_meta` 字段不同。 |
+| 元数据文件 | 英文锚点：metadata file。目标完整名称追加 `.meta` 的同级文本文件；Read 以独立成行的 `[key]` 分段解析为一层 `dict[str, str]`，值原样保留。正常结果附加 `meta`，缺失省略，读取/解析错误返回错误字符串；命名空间根目录不附带，显式读取 `.meta` 不嵌套。Read 默认仅返回数据；会话视觉源目录的 `redirect` 字段约定由会话视觉资源服务解释，Read 本身不跟随重定向。与会话元数据及工具内部 `_meta` 字段不同。会话视觉重定向实现进度以对应任务文件为准。 |
 | `.docs/` | 项目示例与引用资料目录 |
 
 ---
@@ -401,6 +401,8 @@
 
 | 规范称谓 | 定义 | 英文锚点 |
 |---|---|---|
+| 会话视觉资源重定向 | 由会话源目录同级 `stage.meta`、`site.meta` 或 `chat-style.meta` 的 `[redirect]` 指定带沙盒命名空间的目标目录。服务端仅解释源目录配置一层；缺失时保持原目录，非法时静默回退，Read 不跟随目标。此为已批准设计约定，运行时接入进度见任务文件 | session visual resource redirect |
+| 会话视觉资源状态 | 服务端按需提供的 stage、site、chat_style 三项非持久化会话快照，包含资源可用状态、源目录、有效目录、是否实际重定向和错误原因；不表示浏览器已渲染成功，不随分支或合并复制。此为已批准设计约定，运行时接入进度见任务文件 | session visual resource state |
 | 会话聊天区自定义样式 | 会话级 CSS 覆盖层，Agent 通过 `ws:sessions/<session_id>/chat-style/index.css` 写入，仅作用于 `.chat-area` 聊天区；变化事件通过已有会话 WebSocket接收 | Session Chat Style |
 | 聊天区样式暂停开关 | 用户在顶部栏命令菜单中独立暂停聊天区自定义样式的开关，按会话持久化 | chat style pause toggle |
 | 舞台层暂停开关 | 用户在顶部栏命令菜单中独立暂停 Agent 舞台层的开关，按会话持久化 | stage pause toggle |

@@ -2,11 +2,7 @@
 
 {{owner_intro}}
 
-You have a dedicated chat style layer for this session — a CSS file that customizes the appearance of chat bubbles, fonts, and other elements within the chat area only. The style directory is located at:
-
-```
-ws:sessions/{{session_id}}/chat-style/
-```
+You have a dedicated chat style layer for this session — a CSS file that customizes the appearance of chat bubbles, fonts, and other elements within the chat area only. The source directory is `ws:sessions/{{session_id}}/chat-style/`. You may place a sibling `chat-style.meta` file with a single `[redirect]` field to reuse another logical directory. The server resolves this source metadata once; missing or invalid redirects silently use the source directory. The current effective directory and redirect status are included in the session metadata prompt.
 
 The entry point is `index.css` inside this directory. Use the standard file tools (`Write`, `PatchEdit`, `Copy`, `Move`) to deploy and modify style files there. All relative paths in your CSS (fonts, images) resolve naturally under the same directory.
 

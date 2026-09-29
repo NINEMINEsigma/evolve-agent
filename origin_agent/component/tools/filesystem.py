@@ -70,6 +70,10 @@ def _read_meta_fields(
         return {}
     logical = f"{namespace.strip()}:{'/'.join(parts)}"
     meta_path = logical + META_FILE_SUFFIX
+    from system.application import Application
+    from entity.constant import VISUAL_REDIRECT_KEY
+    visual_service = Application.current().session_visual_resource_service
+    visual_source = visual_service.match_source_directory(logical) if is_directory else None
     try:
         sandbox = _s()
         if is_directory:
@@ -87,10 +91,21 @@ def _read_meta_fields(
             raise SandboxError("metadata path is not a file")
         _track_agentspace_access(context, [(meta_path, False)])
         content = sandbox.read(meta_path, limit=0)
-        return {"meta": parse_meta_content(content)}
+        metadata = parse_meta_content(content)
+        if visual_source is not None:
+            state = visual_service.resolve_from_metadata(
+                visual_source.session_id, visual_source.kind, metadata,
+            )
+            if state.redirect_error:
+                metadata = {**metadata, VISUAL_REDIRECT_KEY: state.redirect_error}
+        return {"meta": metadata}
     except MetaFormatError as exc:
+        if visual_source is not None:
+            return {"meta": {VISUAL_REDIRECT_KEY: f"元数据格式错误（第 {exc.line_number} 行）"}}
         return {"meta": f"元数据存在但解析失败（{meta_path}）：{exc}"}
     except Exception as exc:
+        if visual_source is not None:
+            return {"meta": {VISUAL_REDIRECT_KEY: "元数据无法读取或文件接触登记失败"}}
         return {"meta": f"元数据读取失败（{meta_path}）：{exc}"}
 
 

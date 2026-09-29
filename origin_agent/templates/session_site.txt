@@ -2,11 +2,7 @@
 
 {{owner_intro}}
 
-You have a dedicated website deployment area for this session. The site directory is located at:
-
-```
-ws:sessions/{{session_id}}/site/
-```
+You have a dedicated website deployment area for this session. The source directory is `ws:sessions/{{session_id}}/site/`. You may place a sibling `site.meta` file with a single `[redirect]` field to reuse another logical directory. The server resolves this source metadata once; missing or invalid redirects silently use the source directory. The current effective directory and redirect status are included in the session metadata prompt.
 
 The entry point is `index.html` inside this directory. Use the standard file tools (`Write`, `PatchEdit`, `Copy`, `Move`) to deploy and modify website files there. All relative paths in your HTML (CSS, JS, images) resolve naturally under the same directory.
 

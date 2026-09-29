@@ -21,6 +21,7 @@ if TYPE_CHECKING:
     from system.shell_manager import ShellManager
     from system.subprocess_utils import SubprocessRunner
     from system.agentspace import AgentspaceService
+    from system.session_visual_resources import SessionVisualResourceService
     from gateway.session_manager import SessionManager
     from component.approval.backend import ApprovalBackend
     from component.approval.mode_store import ApprovalModeStore
@@ -57,6 +58,7 @@ class Application(Architecture):
         self._sandbox:                   Sandbox | None = None
         self._shell_manager:             ShellManager | None = None
         self._agentspace_service:        AgentspaceService | None = None
+        self._session_visual_resource_service: SessionVisualResourceService | None = None
         self._cron_router:               CronRouter | None = None
         self._session_manager:           SessionManager | None = None
         self._frontend_sink:             FrontendSink | None = None
@@ -99,6 +101,8 @@ class Application(Architecture):
             self._sandbox,
             self.runtime_context.agentspace,
         )
+        from system.session_visual_resources import SessionVisualResourceService
+        self._session_visual_resource_service = SessionVisualResourceService(self._sandbox)
 
         # 3. LLMProfileStore — 必须先于审批 Profile 和任何 Loop 恢复。
         from system.llm_profile_store import LLMProfileStore
@@ -174,6 +178,11 @@ class Application(Architecture):
     @property
     def sandbox(self) -> Sandbox:
         return self._sandbox  # type: ignore[return-value]
+
+    @property
+    def session_visual_resource_service(self) -> SessionVisualResourceService:
+        """返回会话视觉资源的唯一服务端解析器。"""
+        return self._session_visual_resource_service  # type: ignore[return-value]
 
     @property
     def shell_manager(self) -> ShellManager:

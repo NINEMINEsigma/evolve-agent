@@ -213,6 +213,28 @@ def _format_approval_mode(session_id: str) -> str:
         return ""
 
 
+def _format_visual_resources(session_id: str) -> str:
+    """格式化服务端解析的三项会话视觉资源状态。"""
+    try:
+        from system.application import Application
+        resources = Application.current().session_visual_resource_service.get_all_states(session_id)
+        payload = {}
+        for name in ("stage", "site", "chat_style"):
+            state = getattr(resources, name)
+            payload[name] = {
+                "status": state.status.value,
+                "source_path": state.source_path,
+                "effective_path": state.effective_path,
+                "redirected": state.redirected,
+            }
+            if state.redirect_error:
+                payload[name]["redirect_error"] = state.redirect_error
+        return "VisualResources: " + json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
+    except Exception:
+        logger.debug("Failed to get session visual resources", exc_info=True)
+        return ""
+
+
 def hook_message(session_id: str = "", workspace: str = "", **kwargs) -> str:
     try:
         from system.application import Application
@@ -241,6 +263,9 @@ def hook_message(session_id: str = "", workspace: str = "", **kwargs) -> str:
         approval_text = _format_approval_mode(session_id)
         if approval_text:
             parts.append(approval_text)
+        visual_text = _format_visual_resources(session_id)
+        if visual_text:
+            parts.append(visual_text)
         if cluster_text:
             parts.append(f"Cluster:\n{cluster_text}")
         if nav_text:

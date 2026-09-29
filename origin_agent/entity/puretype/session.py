@@ -4,6 +4,7 @@ from typing import Any, Literal
 
 from ._base import MessageContent
 from .llm import MessageMetrics
+from .session_visual import SessionVisualResources
 
 # ---------------------------------------------------------------------------
 # Loop Types
@@ -60,13 +61,14 @@ class MainSessionActivitySnapshot(BaseModel):
 
 
 class SessionRuntimeStatus(BaseModel):
-    """会话存在性、连接占用与当前运行活动的统一 REST 响应。"""
+    """会话存在性、连接占用、视觉资源与当前运行活动的统一 REST 响应。"""
 
     session_id: str
     exists: bool
     occupied: bool
     processing: bool
     activity: MainSessionActivitySnapshot | None = None
+    visual_resources: SessionVisualResources | None = None
 
 
 class LoopMeta(BaseModel):

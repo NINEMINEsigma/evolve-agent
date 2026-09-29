@@ -72,7 +72,7 @@ component/
 - 空文件或全空白文件得到 `{}`；无值键得到空字符串。重复键、非法的整行方括号标记、首个键前的非空文字抛带行号的 `MetaFormatError`，不返回部分解析字典。
 - 文本、图片、音频、视频和目录成功结果均可包含普通 `meta` 字段：正常为 `dict[str, str]`，缺失省略，读取/登记/解析失败为错误字符串，不影响原目标结果；不同于内部工具统计字段 `_meta`。
 - 元数据经 `Sandbox.resolve_read` 与 `Sandbox.read(limit=0)` 完整读取和现有编码探测，不使用正文 offset/limit；明确 `ws:` 元数据文件登记当前回复轮次文件接触，登记失败不读取。各媒体 `_blocks`、`_user_blocks` 和转发 description 保持不变。
-- 只返回元数据，不解释或执行键的业务含义，不自动生成或随移动/删除维护文件。当前按完整读取契约不新增大小截断或单独上限，大文件的资源成本由调用方关注。
+- 当前只返回元数据，不解释或执行键的业务含义，不自动生成或随移动/删除维护文件。会话视觉源目录的 `redirect` 字段由会话视觉资源服务按单层规则消费；`Read` 仍只返回原目录元数据，不跟随目标目录。
 
 ### 扩展工具集（`component/extools/`）
 
@@ -238,3 +238,9 @@ MCP 配置示例（`workspace/mcp_config.json`）：
 - 通过 SessionMessageQueue（主会话）或 inbox（子 Agent）将 Cron 结果投递到对应 loop。
 - 提供 REST API：`/api/sessions/{id}/cron-tasks/...`。
 - 生命周期由 `Application.shutdown()` 管理。
+
+---
+
+## 会话视觉资源重定向
+
+`stage/`、`site/` 与 `chat-style/` 的源目录可以使用同级 `.meta` 文件的 `[redirect]` 字段复用其他逻辑目录。服务端只解析源目录一次，合法目标由稳定视觉入口通过 HTTP 307 使用；缺失或非法配置静默回退源目录。前端 Hook 不解析 `.meta`，只消费最终入口并通过 Agentspace 事件与 HEAD 版本探测刷新。会话状态 REST 和根目录 `custom_hooks/session_meta_hook.py` 可读取三项非持久化视觉资源状态。`Read` 对源目录保留原始元数据语义，并只将非法 `redirect` 原因放入 `meta.redirect`。

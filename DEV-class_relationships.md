@@ -850,7 +850,11 @@ classDiagram
 
 ---
 
-### 主会话活动快照
+### 会话视觉资源服务
+
+`Application` 持有 `SessionVisualResourceService`，Gateway 的视觉入口、会话 status REST、`component/tools/filesystem.py` 的视觉源 `Read` 错误转换以及根目录 `custom_hooks/session_meta_hook.py` 均通过其公开接口读取状态。该服务只解析源目录 `.meta` 一次，不持久化视觉状态，不访问目标目录 `.meta`；新增纯数据模型位于 `entity/puretype/session_visual.py`。
+
+
 
 `BaseAgentLoop` 新增 `_main_session_activity` 与 `_main_session_activity_revision`，并提供 `ensure_main_session_activity()`、`set_main_session_activity_phase()`、`get_main_session_activity()`、`finish_main_session_activity()`、`is_active()`。`SessionMessageQueue`、`ParentAgentLoop`、`MultiAgentLoop`、`MultiAgentWorker`、`StreamConsumer` 和 `ToolExecutor` 只通过这些生命周期入口更新活动状态。Gateway 读取快照并返回给前端，前端不依赖新的 WebSocket 活动事件。
 

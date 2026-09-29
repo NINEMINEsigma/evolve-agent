@@ -72,6 +72,13 @@ from .skills import (
     SkillPayload,
     SkillInfo,
 )
+from .session_visual import (
+    SessionVisualKind,
+    SessionVisualStatus,
+    SessionVisualSource,
+    SessionVisualResourceState,
+    SessionVisualResources,
+)
 from .session import (
     Loop,
     SessionStatus,
@@ -154,6 +161,11 @@ from .agentspace import (
 )
 
 __all__ = [
+    "SessionVisualKind",
+    "SessionVisualStatus",
+    "SessionVisualSource",
+    "SessionVisualResourceState",
+    "SessionVisualResources",
     # _base
     "MessageContent",
     "Role",
