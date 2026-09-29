@@ -9,7 +9,7 @@ from __future__ import annotations
 import logging
 import threading
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import Any, TYPE_CHECKING
 
 from gateway.chat import SessionManager as ChatSessionManager
 from entity.puretype import Loop, LoopMeta, Role, SessionInfo, ClientInfo
@@ -254,9 +254,9 @@ class SessionManager:
     ) -> IMainSessionLoop:
         """根据索引中的 LoopMeta 重建 MultiAgentLoop。"""
         from system.context import get_runtime_context
-        from component.multiagenttools._store import SubagentStore
         from abstract.llm.loader import create_llm_client
         from entry.multi_agent_loop import MultiAgentLoop
+        from subagent.profile import CharacterProfileResolver
         from system.templates import get_templates_dir
         from abstract.tools.registry import registry as tool_registry
         from entity.constant import MAIN_AGENT_CHARACTER_NAME
@@ -264,7 +264,6 @@ class SessionManager:
         from component.multiagenttools.profile_builder import (
             build_multi_agent_tools,
             build_agent_profiles,
-            agent_config_to_llm_profile,
         )
 
         info = self._chat_sm.get(session_id)
@@ -272,7 +271,17 @@ class SessionManager:
 
         parent_ctx = get_runtime_context()
         sandbox = self._app.sandbox
-        store = SubagentStore(parent_ctx.agentspace)
+        resolver = CharacterProfileResolver(sandbox, self._app.llm_profile_store)
+        profiles: dict[str, Any] = {}
+        for character_profile in resolver.discover():
+            if character_profile.error is not None or character_profile.name in profiles:
+                logger.warning(
+                    "Skipping unavailable or duplicate character profile '%s' during session restore: %s",
+                    character_profile.name,
+                    character_profile.error or "duplicate name",
+                )
+                continue
+            profiles[character_profile.name] = character_profile
 
         # 从会话级/全局名称指针恢复主 Agent 的根 Profile 实例。
         main_profile = None
@@ -297,15 +306,15 @@ class SessionManager:
             main_agent_name=MAIN_AGENT_CHARACTER_NAME,
             parent_ctx=parent_ctx,
             llm_client_factory=lambda name, profile: create_llm_client(
-                # 子 Agent 优先使用注册时冻结的 client_type，保证协议与 base_url 一致；
-                # 主 Agent 用 main_profile 的客户端类型。
-                profile.client_type if profile is not None else (main_profile.llm_client_name if main_profile else ""),
+                profile.llm_client_name if profile is not None else (
+                    main_profile.llm_client_name if main_profile else ""
+                ),
                 parent_ctx,
-                profile=agent_config_to_llm_profile(profile) if profile is not None else main_profile,
+                profile=profile if profile is not None else main_profile,
             ),
             system_prompt_template=system_prompt_template,
             sandbox=sandbox,
-            store=store,
+            profiles=profiles,
             session_id=session_id,
             skip_missing_subagent=True,
             main_profile=main_profile,

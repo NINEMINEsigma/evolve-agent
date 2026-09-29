@@ -84,7 +84,7 @@ entry/
 `multi_agent_loop.py` + `multi_agent_worker.py` 实现多 Agent 广播协作模式：
 
 - **`MultiAgentLoop`**：继承 `BaseAgentLoop` + 实现 `IMainSessionLoop`，管理共享 `History` 和多 Agent 并发调度。自身不直接调用 LLM，将每个 Agent 的执行委托给 `MultiAgentWorker`。
-  - 持有 `dict[str, AgentProfile]` 配置档案。
+  - 持有 `dict[str, AgentProfile]` 配置档案；进入模式和会话恢复时由 `CharacterProfileResolver` 动态读取角色目录，运行中的 Loop 使用本次构造的快照。
   - 串行动态队列级联调度（`_cascade()`）：每步弹出一个 Agent，等待完全完成后启动下一个。
   - Agent 可通过 `response_characters` DSL 标签指定下一轮响应者。
   - 最大级联深度：`len(agents) * MULTI_AGENT_MAX_CASCADE_DEPTH`。

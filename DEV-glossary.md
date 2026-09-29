@@ -69,7 +69,9 @@
 | 临时子会话 | `TaskAgentLoop` 的会话 | — |
 | 子Agent / subagent | `SubAgentLoop` 运行体；亦指多Agent模式中从注册表加载的非主参与者（两语境互斥，复用不歧义） | — |
 | 临时Agent / taskagent | `TaskAgentLoop` 运行体（无系统提示词、无持久化、完成即终止） | — |
-| 子Agent注册项 | `SubagentStore` 持久化的 `AgentConfig` 条目 | — |
+| 角色档案 | `ws:characters/roleplay/<角色名>/` 或 `ws:characters/task/<角色名>/` 中的 `profile.md` 与 `profile.md.meta`，动态提供子Agent系统提示词和 LLM Profile 名称引用 | character profile |
+| 动态角色档案解析器 | 每次扫描角色目录、读取 `profile.md` 与元数据并解析当前 LLM Profile 的运行时组件 | dynamic character profile resolver |
+| 角色类型 | `roleplay` 或 `task`；仅用于分类，角色名称仍跨类型全局唯一 | character type |
 | （子Agent的）档案 | 子Agent 创建时可被主Agent 配置的系统提示词 | `AgentConfig.system_prompt_paths` |
 | 运行时Profile | 多Agent参与者的运行时形态 | `AgentProfile` 类 |
 | 参与Agent | 多Agent模式主会话中的参与者（主Agent 必居其一） | — |

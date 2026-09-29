@@ -47,13 +47,13 @@ registry.register(
         # 必须知道要停止的子 Agent 会话 ID。可以通过子 Agent 启动返回值或相关接口获取。
         #
         # ## 调用效果
-        # 停止指定 session_id 的子 Agent 会话，并将完整会话历史保存为 JSONL 文件，返回文件路径 history_path。
+        # 保存完整的 easysave `.es` 会话历史，返回默认临时路径 `ws:tmp/<session_id>.es`。
         # 每次调用只能停止一个子 Agent。
         # 已经完成的子 Agent 不能再次停止。
         # 处于排队状态（尚未活跃）的子 Agent 会被移除，且不保存历史。
         # 如果等待队列非空，当前子 Agent 停止后会自动激活下一个排队的子 Agent。
-        # 获得 history_path 后，你必须主动询问用户是否需要将历史文件保存到更持久的位置。
-        # 如果需要保存，使用 Copy 或 Move 工具将文件从原始路径复制/移动到用户指定的位置（如 ws: 下的专门目录），并重命名为具有标识性的名称。
+        # 返回的历史路径指向临时的 easysave `.es` 文件。
+        # 如需长期保留，使用 Copy 或 Move 将 `ws:tmp/<session_id>.es` 移动到用户指定的角色目录或其他 `ws:` 路径。
         #
         # ## 返回
         # ```json
@@ -67,8 +67,8 @@ registry.register(
         #
         # ## 副作用/注意
         # - 强制终止会立即停止子 Agent 的执行。
-        # - 活跃会话的历史被持久化到 JSONL 文件，原始路径随会话环境而定。
-        # - 自动保存的原始路径是临时性的，可能被覆盖或清理。你必须在获得 history_path 后询问用户是否要将其复制或移动到更安全的位置。
+        # - 活跃会话的历史被持久化到 `ws:tmp/<session_id>.es` easysave 文件。
+        # - 自动保存到 `ws:tmp/<session_id>.es`，如需长期保留可自行使用 Copy 或 Move 移动。
         # - 队列中的会话被移除且不留历史。
         # - 停止后会自动激活下一个排队会话（如果有）。
         "description": """Forcefully terminate a sub-agent session.
@@ -77,13 +77,13 @@ registry.register(
 You must know the session_id of the sub-agent to stop. Obtain it from the sub-agent launch result or related interfaces.
 
 ## Effect
-Stops the sub-agent session identified by session_id and persists the complete session history as a JSONL file. The file path is returned as history_path.
+Stops the sub-agent session identified by session_id and persists the complete session history as an easysave `.es` file at temporary path `ws:tmp/<session_id>.es`.
 Only one sub-agent can be stopped per call.
 An already-completed sub-agent cannot be stopped again.
 Queued (not yet active) sub-agents are removed without saving history.
 If the waiting queue is non-empty, the next queued sub-agent is automatically activated after this one stops.
 
-After receiving history_path, you MUST proactively ask the user whether to persist the history file to a more permanent location. If the user wants to save it, use Copy or Move to copy/move the file from the original path to a user-specified location (e.g. a dedicated directory under ws:), and rename it to a descriptive name (including the sub-agent name and task summary).
+The returned history path is temporary. Use Copy or Move if you want to retain the `.es` file under a character directory or another `ws:` path.
 
 ## Returns
 ```json
@@ -97,7 +97,7 @@ After receiving history_path, you MUST proactively ask the user whether to persi
 
 ## Side Effects / Notes
 - Termination immediately halts the sub-agent's execution.
-- Active session history is persisted to a JSONL file; the original path depends on the session environment.
+- Active session history is persisted to `ws:tmp/<session_id>.es` in easysave format.
 - The auto-saved history file is at a temporary location that may be overwritten or cleaned up. After receiving history_path, you must ask the user whether to copy or move it to a safer location for long-term retention.
 - Queued sessions are removed without leaving history.
 - The next queued session is automatically activated if one exists.""",

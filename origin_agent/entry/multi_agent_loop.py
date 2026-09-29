@@ -669,15 +669,24 @@ class MultiAgentLoop(BaseAgentLoop, IMainSessionLoop):
     # -- 级联调度 ----------------------------------------------------------
 
     def _get_available_subagents(self, characters: list[str]) -> list[str]:
-        """从 SubagentStore 过滤出还有 profile 的 agent。
+        """从动态角色档案过滤出当前仍可用的 Agent。
 
         若某个 agent 的 subagent profile 已被其他会话删除，则将其从
         response_characters 中移除，后续不再接受其响应。历史消息不受影响。
         """
-        from component.multiagenttools._store import SubagentStore
-        from system.context import get_runtime_context
-        store = SubagentStore(get_runtime_context().agentspace)
-        available = [c for c in characters if store.get(c) is not None]
+        from subagent.profile import CharacterProfileResolver
+        from system.application import Application
+
+        resolver = CharacterProfileResolver(
+            Application.current().sandbox,
+            Application.current().llm_profile_store,
+        )
+        available_names = {
+            profile.name
+            for profile in resolver.discover()
+            if profile.error is None and profile.llm_profile is not None
+        }
+        available = [c for c in characters if c in available_names]
         dropped = set(characters) - set(available)
         if dropped and MAIN_AGENT_CHARACTER_NAME in dropped:
             dropped.remove(MAIN_AGENT_CHARACTER_NAME)

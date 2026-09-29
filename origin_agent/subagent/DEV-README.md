@@ -13,20 +13,16 @@ subagent/
 ├── taskloop.py              ← TaskAgentLoop（一次性临时Agent循环）
 └── context.py               ← SubRuntimeContext（子代理/临时Agent运行时上下文构建）
 
-component/multiagenttools/   ← 多代理 / 子代理工具
-├── register_subagent.py     ← RegisterSubAgent
-├── unregister_subagent.py   ← unregister_subagent
-├── list_subagents.py        ← list_subagents
-├── run_subagent.py          ← run_subagent
+component/multiagenttools/   ← 多代理 / 子Agent工具
+├── profile_builder.py       ← 动态角色档案到多Agent Profile的构造
+├── list_subagents.py        ← ListSubAgents
+├── run_subagent.py          ← RunSubAgent
+├── stop_subagent.py         ← StopSubAgent
 ├── run_taskagent.py         ← RunTaskAgent
 ├── stop_taskagent.py        ← StopTaskAgent
-├── chat_subagent.py         ← chat_subagent
-├── approval_subagent.py     ← approval_subagent
-├── stop_subagent.py         ← stop_subagent
-├── enter_multi_agent.py     ← enter_multi_agent（切换到多 Agent 协作模式）
-├── agents_group.py          ← agents_group（当前未实现）
-├── _store.py                ← SubagentStore（子代理注册表磁盘存储）
-└── profile_builder.py       ← 多 Agent 模式工具过滤与 Profile 构造
+├── chat_subagent.py         ← ChatSubAgent
+├── approval_subagent.py     ← ApprovalSubAgent
+└── ...                      ← 其他多Agent工具
 ```
 
 ---
@@ -45,7 +41,7 @@ graph TD
     C -->|pending approval| E[approval_subagent]
     E -->|via ParentAgentSink| B
     B -->|periodic inject| A
-    C -->|save history| F[agentspace/subagents/<name>/<session_id>.es]
+    C -->|save history| F[agentspace/tmp/<session_id>.es]
 ```
 
 核心设计：
@@ -55,7 +51,7 @@ graph TD
 - **工具权限隔离**：子代理只能看到 `availability` 包含 `SUBAGENT` 或 `EVERY` 的工具；递归创建子代理的 `multiagent` 工具集仅对主代理可见（`MAIN`）。
 - **审批流**：只读 / 白名单中的工具直接执行；其余工具调用挂起，等待父代理通过 `approval_subagent` 审批，或走脱手模式的自动审批。
 - **结果收集**：事件驱动——子代理 `outbox` 追加或 `pending_approvals` 变化时经 `_outbox_event` 即时触发 waiter，格式化为 `[subagent-result]` 消息 push 到父代理的 `SessionMessageQueue`。
-- **历史持久化**：停止时通过 `save_history()` 写入 `agentspace/subagents/<name>/<session_id>.es`，使用 `easysave` 多态序列化。
+- **历史持久化**：停止时通过 `save_history()` 写入 `agentspace/tmp/<session_id>.es`，使用 `easysave` 多态序列化；角色是否长期保留历史由 Agent 自行移动。
 
 ### 2. 多 Agent 协作模式（MultiAgent）
 
@@ -103,7 +99,7 @@ graph TD
 
 ### `SubRuntimeContext`
 
-`subagent/context.py` 构建子代理与临时Agent运行时上下文。注册子Agent的独立 LLM 配置来自 `AgentConfig`；临时Agent则保存发起 `RunTaskAgent` 调用时父主会话活动 LLM Profile的非持久化深快照，并据此创建客户端。
+`subagent/context.py` 构建子Agent与临时Agent运行时上下文。普通子Agent从动态 `CharacterProfile` 的 `profile.md` 和 `[llm_profile]` 引用构建；临时Agent则保存发起 `RunTaskAgent` 调用时父主会话活动 LLM Profile 的非持久化深快照，并据此创建客户端。
 
 ### `TaskAgentLoop`
 
@@ -111,14 +107,21 @@ graph TD
 
 临时Agent的工具定义与执行期授权都使用同一交集：当前实例已加载工具集中的工具，且 `availability` 包含 `TASKAGENT`，同时 `danger_level` 为 `safe`。因此临时Agent不会进入父Agent或审批模型流程；陈旧或伪造的越权工具调用直接返回失败工具结果。`LoadToolset` 本身符合该交集时可以调用，但加载只改变已加载集合，不会授权非 `TASKAGENT` 或非 `safe` 工具。当前新实例默认从 `core` 开始；后续可按任务类型预加载工具集以减少工具循环轮次，但不得绕过权限交集。
 
-### `SubagentStore`
+### 动态角色档案
 
-`component/multiagenttools/_store.py` 中的子代理注册表磁盘存储：
+`subagent/profile.py::CharacterProfileResolver` 每次从 `agentspace/characters/roleplay/` 和 `agentspace/characters/task/` 扫描角色目录：
 
-- 每个子 Agent 独立持久化到 `agentspace/subagents/<name>-setting.json`。
-- 通过 `agentspace/subagents/_index.json` 维护已注册名称列表。
-- 提供 CRUD API：`get()`、`save()`、`delete()`、`list_names()`。
-- 每次操作均真实读写磁盘，不维护内存缓存。
+- 每个角色目录必须包含 `profile.md` 和同级 `profile.md.meta`。
+- `profile.md` 是自定义系统提示词；元数据中的 `[llm_profile]` 直接引用 `llm_profiles.es` 中已有的 Profile 名称。
+- 角色名称跨 `roleplay` 与 `task` 全局唯一；重复名称保留为错误条目但不可启动。
+- 缺失档案、元数据格式错误、缺少引用或 Profile 不存在时，列表保留条目并返回错误；启动入口拒绝该角色。
+- 解析不使用持久化注册表或内存缓存；Profile 配置不复制到角色目录。
+
+### 历史与临时Agent
+
+普通子Agent停止时默认保存到 `ws:tmp/<session_id>.es`。只有 `RunSubAgent` 显式传入 `.es` 的 `history_path` 才会加载历史；Agent 可以自行将临时历史移动到角色目录或其他 `ws:` 路径。
+
+`TaskAgent` 使用调用时活动 LLM Profile 的非持久化快照，不经过角色档案解析、等待队列，也不保存历史。
 
 ### `profile_builder`
 
@@ -146,16 +149,14 @@ graph TD
 
 | 工具 | 能力 |
 |---|---|
-| `RegisterSubAgent` | 全参数显式注册子代理 LLM 配置（name/base_url/model/api_key/max_output_tokens/max_context_tokens/client_type），不可覆盖已存在项。 |
-| `unregister_subagent` | 从磁盘注册表删除指定 name。 |
-| `list_subagents` | 列出所有注册子代理，并附带当前父会话下的运行状态、待审批、feedback 数量。 |
-| `run_subagent` | 启动一个子代理会话；支持 `history_path` 恢复历史；同一父会话同名子代理只能有一个活跃或排队实例；达到并发上限则 FIFO 排队。 |
-| `chat_subagent` | 向活跃子代理发消息，进入 inbox，当前 tool-call 链结束后注入；若子代理还有未读反馈则调用失败。 |
-| `approval_subagent` | 批量审批/拒绝子代理的工具调用。 |
-| `stop_subagent` | 强制停止子代理，保存会话历史，并可能从队列中激活下一个。 |
-| `enter_multi_agent` | 将当前主会话切换到多 Agent 协作模式。停止所有活跃子 Agent，multiagent 工具集将被禁用。可通过 `exit_multi_agent` 退出。 |
-| `exit_multi_agent` | 退出多 Agent 协作模式，回到普通模式。共享对话历史保留。 |
-| `agents_group` | **当前未实现**，调用会抛出 `NotImplementedError`。 |
+| `ListSubAgents` | 动态扫描所有角色档案，返回档案路径、Profile名称、错误和运行状态。 |
+| `RunSubAgent` | 按当前动态角色档案启动子Agent，可显式传入 `.es` 历史。 |
+| `ChatSubAgent` | 向活跃子Agent发消息。 |
+| `ApprovalSubAgent` | 批量审批/拒绝子Agent的工具调用。 |
+| `StopSubAgent` | 停止子Agent并将历史保存到 `ws:tmp/<session_id>.es`。 |
+| `EnterMultiAgent` | 将当前主会话切换到多Agent协作模式。 |
+| `ExitMultiAgent` | 退出多Agent协作模式。 |
+| `AgentsGroup` | **当前未实现**，调用会抛出 `NotImplementedError`。 |
 
 ---
 
@@ -200,8 +201,8 @@ graph TD
 
 ## 历史持久化
 
-- 运行中：子代理历史保存在内存中的 `SubAgentLoop._history`。
-- 停止时：序列化到 `agentspace/subagents/<name>/<session_id>.es`。
-- 恢复时：`run_subagent` 可传入 `history_path` 参数，通过 `easysave.load()` 恢复。
+- 运行中：子Agent历史保存在内存中的 `SubAgentLoop._history`。
+- 停止时：普通子Agent序列化到 `agentspace/tmp/<session_id>.es`。
+- 恢复时：`RunSubAgent` 只有显式传入逻辑 `history_path` 才通过 `easysave.load()` 恢复 `.es` 历史。
+- 角色是否长期保留历史由 Agent 自行将临时文件移动到角色目录或其他 `ws:` 路径。
 
-> 注意：部分工具描述文案写"保存为 JSONL"，实际使用 `.es`（easysave）格式。

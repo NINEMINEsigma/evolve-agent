@@ -1,25 +1,20 @@
-"""
-多 Agent 模式 Profile 构造器。
-
-提取 enter_multi_agent.py 与 session_manager.py 中重复的
-AgentProfile 构造逻辑，通过回调统一主/子 Agent 的构造路径。
-"""
+"""多Agent模式的运行时 Profile 构造器。"""
 
 from __future__ import annotations
 
 import logging
-from typing import Callable, TYPE_CHECKING
+from typing import Callable, Mapping, TYPE_CHECKING
 
 from system.sandbox import Sandbox
 from system.templates import render_multi_agent_prompt
-from component.multiagenttools._store import SubagentStore
 from abstract.llm.client import BaseLLMClient
-from entity.puretype import AgentConfig, LLMProfile
+from entity.puretype import AgentConfig, CharacterProfile, LLMProfile
 from entry.agent_support.messages import (
     build_agent_system_prompt,
     collect_skill_prompts,
 )
 from entry.multi_agent_loop import AgentProfile
+from subagent.profile import character_profile_to_agent_config
 
 if TYPE_CHECKING:
     from system.context import RuntimeContext
@@ -29,10 +24,7 @@ logger = logging.getLogger(__name__)
 
 
 def build_multi_agent_tools(tool_registry: ToolRegistry) -> list[dict]:
-    """返回多 Agent 模式下可用的工具定义。
-
-    通过 availability scope 直接筛选，无需手动排除 toolset。
-    """
+    """返回多Agent模式下可用的工具定义。"""
     from entity.puretype import ToolAvailability
 
     return tool_registry.get_definitions_for_availability(
@@ -40,10 +32,6 @@ def build_multi_agent_tools(tool_registry: ToolRegistry) -> list[dict]:
     )
 
 
-# ── system_prompts 解析回调类型 ──────────────────────────────────
-# 统一签名：(name, config, parent_ctx, sandbox) -> list[str]
-# 主 Agent：从模板系统生成人设提示词
-# 子 Agent：从 config.system_prompt_paths 沙箱读取
 SystemPromptsResolver = Callable[
     [str, AgentConfig, "RuntimeContext", Sandbox],
     list[str],
@@ -59,12 +47,13 @@ def _resolve_main_agent_prompts(
     session_id: str = "",
     loaded_toolsets: set[str] | None = None,
 ) -> list[str]:
-    """主 Agent 的系统提示词解析：从模板系统生成。"""
+    """主Agent的系统提示词解析：从模板系统生成人设提示词。"""
     from entity.puretype import ToolAvailability
 
     skill_blocks = collect_skill_prompts()
     return build_agent_system_prompt(
-        parent_ctx, skill_blocks,
+        parent_ctx,
+        skill_blocks,
         tool_availability_scope=ToolAvailability.MULTI_AGENT,
         profile=profile,
         session_id=session_id,
@@ -72,92 +61,38 @@ def _resolve_main_agent_prompts(
     )
 
 
-def _resolve_subagent_prompts(
-    name: str,
-    config: AgentConfig,
-    _parent_ctx: RuntimeContext,
-    sandbox: Sandbox,
-) -> list[str]:
-    """子 Agent 的系统提示词解析：从 config.system_prompt_paths 沙箱读取。"""
-    persona_prompts: list[str] = []
-    for p in config.system_prompt_paths:
-        if sandbox.exists(p):
-            persona_prompts.append(sandbox.read(p, limit=0))
-        else:
-            logger.warning(
-                "Subagent %s system prompt path not found: %s",
-                name, p,
-            )
-    return persona_prompts
-
-
-# TODO: 或许有优化空间
-def agent_config_to_llm_profile(config: AgentConfig|None) -> LLMProfile|None:
-    """将 :class:`AgentConfig` 转换为 :class:`LLMProfile`。
-
-    ``AgentConfig`` 缺少 ``temperature`` / ``reasoning_effort`` 字段，
-    且 ``max_output_tokens`` / ``max_context_tokens`` 以 ``0`` 表示未设置；
-    这些缺失字段一律回退到 ``LLMProfile`` 的默认值。
-    """
-    if config is None:
-        return None
-    _defaults = LLMProfile()
-    return LLMProfile(
-        base_url=config.base_url,
-        model=config.model,
-        api_key=config.api_key or "",
-        max_output_tokens=config.max_output_tokens or _defaults.max_output_tokens,
-        max_context_tokens=config.max_context_tokens or _defaults.max_context_tokens,
-        llm_client_name=config.client_type,
-    )
+def _resolve_subagent_prompts(profile: CharacterProfile) -> list[str]:
+    """子Agent直接使用动态解析时读取的 profile.md 正文。"""
+    if profile.system_prompt.strip():
+        return [profile.system_prompt.strip()]
+    return []
 
 
 def build_agent_profiles(
     agents: list[str],
     main_agent_name: str,
     parent_ctx: RuntimeContext,
-    llm_client_factory: Callable[[str, AgentConfig | None], BaseLLMClient | None],
+    llm_client_factory: Callable[[str, LLMProfile | None], BaseLLMClient | None],
     system_prompt_template: str,
     sandbox: Sandbox,
-    store: SubagentStore,
+    profiles: Mapping[str, CharacterProfile],
     *,
     session_id: str = "",
     skip_missing_subagent: bool = False,
     main_profile: LLMProfile | None = None,
 ) -> dict[str, AgentProfile]:
-    """为多 Agent 模式构造每个参与者的 AgentProfile。
+    """为多Agent模式构造每个参与者的运行时 Profile。
 
-    主/子 Agent 统一流程：
-    1. 获取 AgentConfig：主 Agent 从 main_profile 构造；子 Agent 从 SubagentStore 获取
-    2. 解析 system_prompts：主 Agent 从模板系统生成；子 Agent 从沙箱路径读取
-    3. 构造 llm_client：通过 llm_client_factory 回调统一
-    4. 构造 AgentProfile（含 config 字段）
-
-    Args:
-        agents: 参与协作的 agent 名称列表。
-        main_agent_name: 主 agent 名称。
-        parent_ctx: 父 agent 的 RuntimeContext。
-        llm_client_factory: 接收 (name, config_or_none) 返回 BaseLLMClient。
-            主 agent 调用时 config_or_none 为 None；子 agent 调用时为 AgentConfig 实例。
-        system_prompt_template: 多 Agent 协作模板原文。
-        sandbox: 用于读取 system_prompt_paths 的沙盒实例。
-        store: SubagentStore 实例。
-        session_id: 用于日志。
-        skip_missing_subagent: 为 True 时，子 agent config 缺失则跳过；
-            为 False 时抛出 ValueError。
-
-    Returns:
-        dict[str, AgentProfile]: 以 agent 名为键的 AgentProfile 字典。
-        tools 字段初始为空列表，由调用方回填。
+    主Agent从当前活动 Profile构造；子Agent从动态角色档案映射获取当前
+    LLM Profile和 profile.md 正文。`AgentConfig` 只作为 MultiAgentWorker
+    现有运行时接口的临时适配对象，不参与持久化。
     """
     agent_profiles: dict[str, AgentProfile] = {}
 
     for name in agents:
         multi_agent_common_prompt = render_multi_agent_prompt(system_prompt_template, name)
 
-        # ── 1. 获取 AgentConfig ──
         if name == main_agent_name:
-            # 主 Agent 允许在 CLEAR 状态下以空客户端创建运行时档案。
             if main_profile is None:
                 defaults = LLMProfile()
                 config = AgentConfig(
@@ -180,37 +115,50 @@ def build_agent_profiles(
                     max_context_tokens=main_profile.max_context_tokens,
                     client_type=main_profile.llm_client_name,
                 )
-                llm_client = llm_client_factory(name, None)
+                llm_client = llm_client_factory(name, main_profile)
+            persona_prompts = _resolve_main_agent_prompts(
+                name,
+                config,
+                parent_ctx,
+                sandbox,
+                profile=main_profile,
+                session_id=session_id,
+            )
+            agent_llm_profile = main_profile
         else:
-            # 子 Agent 从 SubagentStore 获取
-            config = store.get(name)
-            if config is None and skip_missing_subagent:
-                logger.warning(
-                    "Subagent profile '%s' not found, skipping (session=%s)",
-                    name, session_id,
-                )
-                continue
-            if config is None:
+            character_profile = profiles.get(name)
+            if character_profile is None:
+                if skip_missing_subagent:
+                    logger.warning(
+                        "Character profile '%s' not found, skipping (session=%s)",
+                        name,
+                        session_id,
+                    )
+                    continue
                 raise ValueError(
-                    f"Subagent profile '{name}' not found (session={session_id}). "
-                    "Register it first using RegisterSubAgent."
+                    f"Character profile '{name}' not found (session={session_id})"
                 )
-            llm_client = llm_client_factory(name, config)
+            if character_profile.error is not None or character_profile.llm_profile is None:
+                if skip_missing_subagent:
+                    logger.warning(
+                        "Character profile '%s' unavailable: %s (session=%s)",
+                        name,
+                        character_profile.error,
+                        session_id,
+                    )
+                    continue
+                raise ValueError(character_profile.error or f"Character profile '{name}' is unavailable")
 
-        # ── 2. 解析 system_prompts（统一通过回调） ──
-        if name == main_agent_name:
-            persona_prompts = _resolve_main_agent_prompts(name, config, parent_ctx, sandbox, profile=main_profile, session_id=session_id)
-        else:
-            persona_prompts = _resolve_subagent_prompts(name, config, parent_ctx, sandbox)
+            config = character_profile_to_agent_config(character_profile)
+            agent_llm_profile = character_profile.llm_profile
+            llm_client = llm_client_factory(name, agent_llm_profile)
+            persona_prompts = _resolve_subagent_prompts(character_profile)
 
-        # ── 3. 构造 AgentProfile ──
         system_prompts = persona_prompts + [multi_agent_common_prompt]
-        # 主 agent 用 main_profile；子 agent 从 AgentConfig 转换
-        agent_llm_profile = main_profile if name == main_agent_name else agent_config_to_llm_profile(config)
         agent_profiles[name] = AgentProfile(
             character_name=name,
             system_prompts=system_prompts,
-            tools=[],  # 由调用方在创建 MultiAgentLoop 前统一设置
+            tools=[],
             llm_client=llm_client,
             config=config,
             llm_profile=agent_llm_profile,

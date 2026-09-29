@@ -25,14 +25,16 @@ from entity.constant import (
     SYSTEM_CHARACTER_NAME,
     USER_CHARACTER_NAME,
     History_Version as __History_Version__,
+    SUBAGENT_TEMP_DIR_NAME,
+    SUBAGENT_HISTORY_SUFFIX,
 )
 from entity.messages import CharacterConversationMessage, ToolResultMessage
 from entity.puretype import (
     Role,
     ToolAvailability,
-    AgentConfig,
     ToolDangerLevel,
     LLMProfile,
+    CharacterProfile,
 )
 from abstract.tools.registry import registry as tool_registry
 from system.context import get_runtime_context
@@ -54,21 +56,21 @@ class WaitingEntry:
         self,
         session_id: str,
         name: str,
-        profile: AgentConfig,
+        profile: CharacterProfile,
         temperature: float,
         initial_prompt: str,
         user_name: str,
         message_type: str,
-        history_path: str = "",
+        history_path: str | None = None,
     ) -> None:
         self.session_id: str = session_id
         self.name: str = name
-        self.profile: AgentConfig = profile
+        self.profile: CharacterProfile = profile
         self.temperature: float = temperature
         self.initial_prompt: str = initial_prompt
         self.user_name: str = user_name
         self.message_type: str = message_type
-        self.history_path: str = history_path
+        self.history_path: str | None = history_path
 
 
 class _OrchestratorContext:
@@ -90,7 +92,7 @@ class _OrchestratorContext:
     async def launch(
         self,
         name: str,
-        profile: AgentConfig,
+        profile: CharacterProfile,
         temperature: float,
         initial_prompt: str,
         user_name: str,
@@ -132,7 +134,7 @@ class _OrchestratorContext:
                     initial_prompt=initial_prompt,
                     user_name=user_name,
                     message_type=message_type,
-                    history_path=history_path or "",
+                    history_path=history_path,
                 )
             )
             logger.info(
@@ -445,9 +447,12 @@ class _OrchestratorContext:
         # 强制停止
         sub.stop()
 
-        # 保存会话历史 — 文件路径包含注册名便于定位
+        # 保存会话历史到工作空间临时目录。
         name = self._subagent_names.get(session_id, "")
-        session_path = self._history_path(session_id, name=name)
+        session_path = self._history_path(session_id)
+        history_logical_path = (
+            f"ws:{SUBAGENT_TEMP_DIR_NAME}/{session_id}{SUBAGENT_HISTORY_SUFFIX}"
+        )
         try:
             sub.save_history(session_path)
         except Exception as exc:
@@ -468,7 +473,7 @@ class _OrchestratorContext:
         if waiter and not waiter.done():
             waiter.cancel()
 
-        logger.info("Subagent stopped | session=%s path=%s", session_id, session_path)
+        logger.info("Subagent stopped | session=%s path=%s", session_id, history_logical_path)
 
         # 推送 terminated 状态到前端面板
         await self._push_subagent_ws(
@@ -484,7 +489,7 @@ class _OrchestratorContext:
         return {
             "success": True,
             "session_id": session_id,
-            "session_path": str(session_path),
+            "session_path": history_logical_path,
             "promoted": promoted,
         }
 
@@ -620,7 +625,7 @@ class _OrchestratorContext:
         self,
         session_id: str,
         name: str,
-        profile: AgentConfig,
+        profile: CharacterProfile,
         temperature: float,
         initial_prompt: str,
         user_name: str,
@@ -754,7 +759,7 @@ class _OrchestratorContext:
             entry.initial_prompt,
             entry.user_name,
             entry.message_type,
-            entry.history_path or None,
+            entry.history_path,
         )
         logger.info("Subagent activated from queue | session=%s", entry.session_id)
         return [{"session_id": entry.session_id, "subagent_name": entry.name}]
@@ -872,14 +877,12 @@ class _OrchestratorContext:
         logger.info("Taskagent cleaned up | session=%s", session_id)
 
     @staticmethod
-    def _history_path(session_id: str, name: str = "") -> Path:
-        """子 Agent 会话历史的存储路径（easysave 多态序列化格式）。"""
+    def _history_path(session_id: str) -> Path:
+        """普通子Agent历史的临时 easysave 路径。"""
         ctx = get_runtime_context()
-        dir = ctx.agentspace / "subagents"
-        if name:
-            dir = dir / name
-        dir.mkdir(parents=True, exist_ok=True)
-        return dir / f"{session_id}.es"
+        directory = ctx.agentspace / SUBAGENT_TEMP_DIR_NAME
+        directory.mkdir(parents=True, exist_ok=True)
+        return directory / f"{session_id}{SUBAGENT_HISTORY_SUFFIX}"
 
 
 class SubAgentOrchestrator:

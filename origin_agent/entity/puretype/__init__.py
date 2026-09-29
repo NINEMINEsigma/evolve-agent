@@ -106,6 +106,7 @@ from .session import (
 )
 from .agent import (
     AgentConfig,
+    CharacterProfile,
 )
 from .ws import (
     MessageType,
@@ -231,6 +232,7 @@ __all__ = [
     "MainSessionInterruptResult",
     # agent
     "AgentConfig",
+    "CharacterProfile",
     # ws
     "MessageType",
     "Message",

@@ -1,9 +1,4 @@
-"""获取已注册子 Agent 列表及其当前运行会话。
-
-模块导入时通过 ``registry.register()`` 注册 ``ListSubAgents`` 工具。
-返回所有已注册子 Agent 的配置，并附带当前主会话下该子 Agent 的运行会话信息。
-由于同一主会话下每个子 Agent 只能有一个活跃或排队实例，session 字段为空即表示未运行。
-"""
+"""动态列出角色档案及其当前运行会话。"""
 
 from __future__ import annotations
 
@@ -12,25 +7,19 @@ from typing import Any
 
 from abstract.tools.registry import registry, tool_result
 from entity.puretype import ToolAvailability, ToolDangerLevel
-
-from ._store import SubagentStore
-from system.context import get_runtime_context
+from system.application import Application
+from subagent.profile import CharacterProfileResolver
 
 logger = logging.getLogger(__name__)
 
 
 async def _handle_list_subagents(args: dict[str, Any]) -> dict:
-    """获取所有已注册子 Agent 的配置及当前运行会话。
-
-    自动从 ``_session_id`` 获取当前父会话 ID，查询每个子 Agent 是否已有运行中的会话。
-    """
+    """动态扫描角色档案并附加当前主会话下的运行状态。"""
     parent_session_id: str = str(args.get("_session_id", "")).strip()
 
-    # 按 name 索引当前运行中的子会话
     name_to_session: dict[str, dict[str, Any]] = {}
     if parent_session_id:
         try:
-            from system.application import Application
             orch = Application.current().subagent_orchestrator
             snapshot = orch.get_snapshot(parent_session_id=parent_session_id)
             for session_id, info in snapshot.items():
@@ -43,15 +32,25 @@ async def _handle_list_subagents(args: dict[str, Any]) -> dict:
                         "feedback_count": len(info.get("feedback", [])),
                     }
         except Exception:
-            logger.warning("Failed to get subagent snapshot for session=%s", parent_session_id, exc_info=True)
+            logger.warning(
+                "Failed to get subagent snapshot for session=%s",
+                parent_session_id,
+                exc_info=True,
+            )
 
-    # 为每个注册项注入 session 字段
-    store = SubagentStore(get_runtime_context().agentspace)
-    agents: dict[str, dict[str, Any]] = {}
-    for name, config in store.list().items():
-        entry = config.model_dump()
-        entry["session"] = name_to_session.get(name, None)
-        agents[name] = entry
+    app = Application.current()
+    resolver = CharacterProfileResolver(app.sandbox, app.llm_profile_store)
+    agents: list[dict[str, Any]] = []
+    for profile in resolver.discover():
+        agents.append({
+            "name": profile.name,
+            "type": profile.character_type,
+            "profile_path": profile.profile_path,
+            "llm_profile_name": profile.llm_profile_name,
+            "profile_available": profile.error is None and profile.llm_profile is not None,
+            "error": profile.error,
+            "session": name_to_session.get(profile.name),
+        })
 
     return tool_result(
         success=True,
@@ -64,54 +63,61 @@ registry.register(
     name="ListSubAgents",
     toolset="multiagent",
     schema={
-        # 返回所有当前已注册子 Agent 的完整配置，以及每个子 Agent 在当前主会话下的运行会话信息。
+        # 动态扫描所有角色档案，并返回当前主会话下的子Agent运行状态。
         #
         # ## 前置条件
-        # 无。
+        # 无。每次调用都会重新扫描 ws:characters/roleplay/ 和 ws:characters/task/。
         #
         # ## 调用效果
-        # 纯查询，无副作用。返回以 name 为 key 的字典，每个 value 包含：
-        # - 注册配置：base_url、model、api_key、system_prompt_paths、max_output_tokens、max_context_tokens
-        # - session：当前运行会话信息（含 session_id、status、pending_approvals、feedback_count）；未运行时为 null
+        # 纯查询，不修改角色目录、profile.md、profile.md.meta 或 LLM Profile。
+        # agents 使用数组而不是以名称为 key 的字典，以保留重名错误条目。
+        # 每个条目只返回角色名称、类型、profile.md 路径、LLM Profile 引用名称、
+        # 可用性、错误和当前会话状态，不返回 api_key 或完整模型配置。
         #
         # ## 返回
-        # ```json
-        # {"success": true, "count": 2, "agents": {"coder": {"base_url": "...", "model": "...", "session": {"session_id": "...", "status": "running", "pending_approvals": [], "feedback_count": 0}}}}}
-        # ```
+        # {"success": true, "count": 1, "agents": [{"name": "coder", "type": "task", "profile_path": "ws:characters/task/coder/profile.md", "llm_profile_name": "coding-model", "profile_available": true, "error": null, "session": null}]}
         #
         # ## 何时使用
-        # - 查看当前有哪些子 Agent 可用，以及它们是否正在运行。
-        # - 在调用 run_subagent / chat_subagent / stop_subagent 前确认子 Agent 名称和当前会话状态。
-        # - 需要决定是否需要注册/注销子 Agent 时。
+        # - 启动 RunSubAgent 前查看可用角色。
+        # - 查看 profile.md、profile.md.meta 或 LLM Profile 引用错误。
+        # - 查看当前主会话下角色是否已有运行中的子Agent。
         #
         # ## 副作用/注意
-        # - 纯查询，不修改注册表。
-        # - 返回的配置可能包含敏感信息（如 api_key），谨慎处理。
-        # - 同一主会话下每个子 Agent 只能有一个会话实例，因此 session 字段唯一对应。
-        "description": """Return the full configuration of all currently registered sub-agents, along with their current running session info under the current parent session.
+        # - 纯查询，无副作用。
+        # - 缺失、无效和重名角色仍会展示，但不能启动。
+        # - 返回结果不包含 API 密钥和完整模型配置。
+        "description": """List dynamically discovered sub-agent character profiles and their current session status.
 
 ## Prerequisites
 None.
 
 ## Effect
-Read-only query with no side effects. Returns a dictionary keyed by sub-agent name, where each value contains:
-- Registration config: base_url, model, api_key, system_prompt_paths, max_output_tokens, max_context_tokens
-- session: current running session info (session_id, status, pending_approvals, feedback_count); null if not running
+Read-only query. Scans `ws:characters/roleplay/` and `ws:characters/task/` on every call.
+Each entry contains only:
+- `name`: character directory name
+- `type`: `roleplay` or `task`
+- `profile_path`: logical path of `profile.md`
+- `llm_profile_name`: name referenced by `profile.md.meta`
+- `profile_available`: whether the complete profile is runnable
+- `error`: validation or Profile reference error, if any
+- `session`: current parent-session runtime status, or null
+
+The `agents` result is an array so duplicate names and their individual errors remain visible. No complete LLM configuration or API key is returned.
 
 ## Returns
 ```json
-{"success": true, "count": 2, "agents": {"coder": {"base_url": "...", "model": "...", "session": {"session_id": "...", "status": "running", "pending_approvals": [], "feedback_count": 0}}}}
+{"success": true, "count": 1, "agents": [{"name": "coder", "type": "task", "profile_path": "ws:characters/task/coder/profile.md", "llm_profile_name": "coding-model", "profile_available": true, "error": null, "session": null}]}
 ```
 
 ## When to Use
-- Check which sub-agents are available and whether they are currently running.
-- Confirm a sub-agent's name and current session status before calling run_subagent / chat_subagent / stop_subagent.
-- Decide whether to register or unregister a sub-agent.
+- Check which character profiles are available before calling `RunSubAgent`.
+- Inspect profile or LLM Profile reference errors.
+- Check whether a character currently has a running sub-agent session.
 
 ## Side Effects / Notes
-- Read-only query; does not modify the registry.
-- Returned configurations may contain sensitive information such as api_key; handle with care.
-- Each sub-agent can only have one session instance per parent session, so the session field is unique per name.""",
+- Read-only query; does not create or modify character profiles.
+- Invalid and duplicate-name profiles remain visible with an `error` field but cannot be started.
+- The returned list does not contain API keys or complete model configurations.""",
         "parameters": {
             "type": "object",
             "properties": {},

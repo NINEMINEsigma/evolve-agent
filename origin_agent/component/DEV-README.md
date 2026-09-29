@@ -92,20 +92,17 @@ component/
 
 | 工具文件 | 主要工具 | 用途 |
 |----------|----------|------|
-| `register_subagent.py` | `RegisterSubAgent` | 注册子 Agent |
-| `unregister_subagent.py` | `UnregisterSubAgent` | 注销子 Agent |
-| `list_subagents.py` | `ListSubAgents` | 列出子 Agent |
-| `run_subagent.py` | `RunSubAgent` | 启动子 Agent |
-| `run_taskagent.py` | `RunTaskAgent` | 只接收单个 prompt；继承调用时父主会话活动 LLM Profile快照，启动仅可使用“已加载工具集 ∩ TASKAGENT ∩ safe”的临时Agent |
+| `list_subagents.py` | `ListSubAgents` | 动态扫描角色档案并列出运行状态 |
+| `run_subagent.py` | `RunSubAgent` | 按动态角色档案启动子Agent |
+| `run_taskagent.py` | `RunTaskAgent` | 使用活动 LLM Profile 快照启动临时Agent |
 | `stop_taskagent.py` | `StopTaskAgent` | 提前终止临时Agent，不保存历史 |
-| `chat_subagent.py` | `ChatSubAgent` | 向子 Agent 发消息 |
-| `stop_subagent.py` | `StopSubAgent` | 停止子 Agent |
-| `approval_subagent.py` | `ApprovalSubAgent` | 审批子 Agent 的工具调用 |
-| `enter_multi_agent.py` | `EnterMultiAgent` | 切换到多 Agent 协作模式 |
-| `exit_multi_agent.py` | `ExitMultiAgent` | 退出多 Agent 协作模式 |
-| `agents_group.py` | `AgentsGroup` | Agent 分组管理（当前未实现） |
-| `_store.py` | — | `SubagentStore`：子 Agent 注册表磁盘存储 |
-| `profile_builder.py` | — | `build_multi_agent_tools()`：多 Agent 模式工具过滤 |
+| `stop_subagent.py` | `StopSubAgent` | 停止子Agent并保存临时 `.es` 历史 |
+| `chat_subagent.py` | `ChatSubAgent` | 向子Agent发送消息 |
+| `approval_subagent.py` | `ApprovalSubAgent` | 审批子Agent的工具调用 |
+| `enter_multi_agent.py` | `EnterMultiAgent` | 切换到多Agent协作模式 |
+| `exit_multi_agent.py` | `ExitMultiAgent` | 退出多Agent协作模式 |
+| `agents_group.py` | `AgentsGroup` | Agent分组管理（当前未实现） |
+| `profile_builder.py` | — | 动态角色档案到多Agent运行时 Profile 的构造 |
 
 ---
 

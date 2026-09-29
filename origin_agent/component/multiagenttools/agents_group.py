@@ -1,11 +1,10 @@
+"""预留的Agent分组工具入口。"""
+
 from __future__ import annotations
-from typing import * # type: ignore
 
-from system.context import get_runtime_context
-
-from ._store import SubagentStore
+from typing import Any
 
 
 async def _handle_start_agents_group(args: dict[str, Any]) -> dict:
-    subagent_registry = SubagentStore(get_runtime_context().agentspace).list()
+    """Agent分组尚未实现。"""
     raise NotImplementedError("Not implemented")

@@ -1,7 +1,7 @@
 """
 将当前主会话切换到多 Agent 协作模式。
 
-进入后所有已注册子 Agent 自动全部参与协作，无需手动指定 agents 列表。
+进入后所有动态发现且有效的角色自动参与协作，无需手动注册 agents 列表。
 所有活跃子 Agent 将被停止，multiagent 工具集将被禁用。
 此后所有用户消息均由 MultiAgentLoop 处理：所有参与 Agent 共享同一份对话历史，
 每条用户消息触发一轮串行级联响应：初始响应者组成队列逐个执行，
@@ -22,6 +22,7 @@ from entity.constant import SYSTEM_CHARACTER_NAME
 from entity.messages import CharacterConversationMessage
 from entry.parent_agent_loop import ParentAgentLoop
 from system.application import Application
+from system.context import get_runtime_context
 from system.templates import get_templates_dir
 from entry.multi_agent_loop import MultiAgentLoop
 
@@ -33,7 +34,7 @@ async def _handle_enter_multi_agent(args: dict[str, Any]) -> dict:
 
     预期参数:
         agents: list[str] — 可选，参与协作的 Agent 角色名列表。
-                  缺省时自动使用全部已注册子 Agent。
+                  缺省时自动使用全部动态发现且有效的子Agent。
     """
     session_id: str = str(args.get("_session_id", "")).strip()
 
@@ -55,34 +56,46 @@ async def _handle_enter_multi_agent(args: dict[str, Any]) -> dict:
 
     main_agent_name = parent_loop.current_character_agent
 
-    # 确定参与者列表：优先使用显式传入的 agents，缺省时使用全部已注册子 Agent
-    from component.multiagenttools._store import SubagentStore
-    from system.context import get_runtime_context
-    store = SubagentStore(get_runtime_context().agentspace)
-
+    # 动态扫描角色档案。无参进入过滤无效/重名角色；显式名称严格校验。
+    from subagent.profile import CharacterProfileResolver
+    resolver = CharacterProfileResolver(app.sandbox, app.llm_profile_store)
+    all_profiles = resolver.discover()
     explicit_agents: list[str] = args.get("agents") or []
+    profiles: dict[str, Any] = {}
+
     if explicit_agents:
         agents = list(explicit_agents)
+        for name in agents:
+            if name == main_agent_name:
+                continue
+            try:
+                profiles[name] = resolver.require(name)
+            except Exception as exc:
+                return tool_error(str(exc), name=name)
     else:
-        # 自动使用全部已注册子 Agent
-        agents = list(store.list().keys())
+        agents = []
+        for profile in all_profiles:
+            if profile.error is not None:
+                logger.warning(
+                    "Skipping unavailable character profile '%s': %s",
+                    profile.name,
+                    profile.error,
+                )
+                continue
+            if profile.name in profiles:
+                logger.warning(
+                    "Skipping duplicate character name '%s' in multi-agent mode",
+                    profile.name,
+                )
+                continue
+            profiles[profile.name] = profile
+            agents.append(profile.name)
         if not agents:
-            return tool_error(
-                "No registered sub-agents found. "
-                "Register at least one sub-agent using RegisterSubAgent before entering multi-agent mode."
-            )
+            return tool_error("No available sub-agents found in character directories")
 
-    # 将主 Agent 自身也加入参与者列表（它调用工具后自己也需要参与对话）
+    # 将主Agent自身加入参与者列表。
     if main_agent_name not in agents:
         agents.insert(0, main_agent_name)
-
-    # 前置校验：除主 Agent 外，所有参与者必须有对应的 subagent profile
-    missing = [name for name in agents if name != main_agent_name and store.get(name) is None]
-    if missing:
-        return tool_error(
-            f"Subagent profiles not found: {', '.join(missing)}. "
-            "Register them first using RegisterSubAgent."
-        )
 
     # 停止所有子 Agent
     if app.subagent_orchestrator is not None:
@@ -98,7 +111,6 @@ async def _handle_enter_multi_agent(args: dict[str, Any]) -> dict:
     from component.multiagenttools.profile_builder import (
         build_multi_agent_tools,
         build_agent_profiles,
-        agent_config_to_llm_profile,
     )
     tools = build_multi_agent_tools(tool_registry)
     parent_ctx = get_runtime_context()
@@ -113,15 +125,15 @@ async def _handle_enter_multi_agent(args: dict[str, Any]) -> dict:
         main_agent_name=main_agent_name,
         parent_ctx=parent_loop._get_context(),
         llm_client_factory=lambda name, profile: create_llm_client(
-            # 子 Agent 优先使用注册时冻结的 client_type，保证协议与 base_url 一致；
-            # 主 Agent 用 active profile 的客户端类型。
-            profile.client_type if profile is not None else (_main_profile.llm_client_name if _main_profile else ""),
+            profile.llm_client_name if profile is not None else (
+                _main_profile.llm_client_name if _main_profile else ""
+            ),
             parent_ctx,
-            profile=agent_config_to_llm_profile(profile) if profile is not None else _main_profile,
+            profile=profile if profile is not None else _main_profile,
         ),
         system_prompt_template=system_prompt_template,
         sandbox=sandbox,
-        store=store,
+        profiles=profiles,
         session_id=session_id,
         skip_missing_subagent=False,
         main_profile=_main_profile,
@@ -181,7 +193,7 @@ registry.register(
         #
         # ## 前置条件
         # - 仅有活跃的主会话可以调用；子 Agent 会话不支持。
-        # - 至少有一个已注册子 Agent（通过 RegisterSubAgent 注册）。
+        # - 至少有一个有效的动态角色档案。
         #
         # ## 调用效果
         # - 所有活跃子 Agent 将被停止并清理。
@@ -218,12 +230,12 @@ registry.register(
 
 ## Prerequisites
 - Only an active main session can call this; sub-agent sessions are not supported.
-- At least one sub-agent must be registered (via `RegisterSubAgent`).
+- At least one valid dynamically discovered character profile must exist.
 
 ## Effect
 - All active sub-agents will be stopped and cleaned up.
 - The multiagent toolset (run_subagent, chat_subagent, etc.) will be disabled.
-- From then on, all user messages are handled by MultiAgentLoop. All registered sub-agents automatically participate and share the same conversation history.
+- From then on, all user messages are handled by MultiAgentLoop. All valid dynamically discovered character profiles automatically participate and share the same conversation history.
 - Each user message triggers one round of serial cascading responses: the initial `response_characters` form a queue, agents execute one at a time, each waiting for the previous to fully complete before starting.
 - Every agent reply may use `response_characters` to dynamically adjust the queue — agents already queued are moved to the front, new agents are appended to the back, self-nomination is ignored.
 - The cascade continues until the queue is empty or the maximum depth (len(agents) * cascade_depth) is reached.
@@ -257,7 +269,7 @@ registry.register(
                 "agents": {
                     "type": "array",
                     "items": { "type": "string" },
-                    "description": "Optional list of registered sub-agent character names to participate. If omitted, all registered sub-agents are automatically included.",
+                    "description": "Optional list of dynamically discovered character names to participate. If omitted, all valid character profiles are included.",
                 }
             },
         },

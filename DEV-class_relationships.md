@@ -710,8 +710,8 @@ classDiagram
 | `_consumer_task` | `SessionMessageQueue` | `asyncio.Task \| None` | 懒启动的空闲消费任务 |
 | `_stopped` | `SessionMessageQueue` | `bool` | `stop()` / `mark_stopped()` 置位 |
 | `last_known_sid` | `SessionMessageQueue` | `str` | 旋转检测：与当前 session_id 比对 |
-| `_llm_profile` | `SubAgentLoop` | `LLMProfile \| None` | 工具上下文使用的 LLM Profile；注册子Agent由标量配置构造，临时Agent直接使用调用时活动 Profile的非持久化快照 |
-| `llm_profile` | `SubRuntimeContext` | `LLMProfile \| None` | 注册子Agent为 `None`；临时Agent持有调用时活动 Profile的非持久化深快照 |
+| `_llm_profile` | `SubAgentLoop` | `LLMProfile \| None` | 临时Agent使用调用时 Profile 快照；普通角色子Agent的运行字段来自动态角色档案引用的 Profile |
+| `llm_profile` | `SubRuntimeContext` | `LLMProfile \| None` | TaskAgent持有调用时活动 Profile的非持久化深快照；普通角色子Agent不持久化独立配置 |
 | （无新增字段） | `TaskAgentLoop` | — | 全部继承 `SubAgentLoop`；覆写无系统提示词、`TASKAGENT ∩ safe` 定义/执行授权及完成即终止行为 |
 | `_ws_sinks` | `FrontendSink` | `dict[str, WebSocket]` | session_id → WebSocket 映射 |
 | `_pending_confirms` | `FrontendSink` | `dict[str, Future]` | 外部解析确认结果 |
@@ -1012,7 +1012,7 @@ classDiagram
 
 ### 临时Agent继承活动 LLM Profile与工具权限收敛
 
-`RunTaskAgent` 通过公开 `ToolContext.llm_profile` 取得调用发生时父主会话的活动 Profile，并由 `LLMProfileStore.snapshot_profile()` 在共享锁内验证根对象身份后创建非持久化深快照。快照完整保留客户端、采样、多模态分工等配置；临时Agent不再从 `SubRuntimeContext` 空默认值构造 `custom_llm_client.`，也不再暴露单次 temperature参数。注册子Agent仍使用 `AgentConfig + temperature` 的原有路径。
+`RunTaskAgent` 通过公开 `ToolContext.llm_profile` 取得调用发生时父主会话的活动 Profile，并由 `LLMProfileStore.snapshot_profile()` 在共享锁内验证根对象身份后创建非持久化深快照。快照完整保留客户端、采样、多模态分工等配置；临时Agent不再从 `SubRuntimeContext` 空默认值构造 `custom_llm_client.`，也不再暴露单次 temperature参数。普通角色子Agent不再使用注册配置，而是通过 `subagent/profile.py::CharacterProfileResolver` 动态读取角色档案；`AgentConfig` 仅作为 `AgentProfile` 的运行时适配对象。`TaskAgent` 仍只使用活动 LLM Profile 的非持久化快照。
 
 `TaskAgentLoop` 不新增字段。它复用 `SubAgentLoop._allowed_tool_names` 与会话级已加载工具集，并在模型定义生成和执行期统一要求“已加载工具集 ∩ `TASKAGENT` 可用范围 ∩ `safe` 危险等级”。允许工具直接执行，越权调用直接返回失败工具结果，不进入父Agent或审批模型流程。`LoadToolset` 只扩展已加载集合，不扩大权限交集。
 
