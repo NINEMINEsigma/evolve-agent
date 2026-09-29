@@ -285,6 +285,7 @@ export function useWebSocket() {
           imageMarkdown: parsed.imageMarkdown,
           downloadInfo: parsed.downloadInfo,
           toolCallMeta: message.tool_call_meta,
+          embeddedMessages: message.embedded_messages ?? parsed.embeddedMessages,
           isError: parsed.isError,
         });
       } else {
@@ -296,6 +297,7 @@ export function useWebSocket() {
             imageMarkdown: parsed.imageMarkdown,
             downloadInfo: parsed.downloadInfo,
             toolCallMeta: message.tool_call_meta,
+            embeddedMessages: message.embedded_messages ?? parsed.embeddedMessages,
             isError: parsed.isError,
           },
           message.character_name,

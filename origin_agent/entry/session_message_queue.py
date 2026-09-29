@@ -199,14 +199,14 @@ class SessionMessageQueue:
     # -- 模态 A：链中注入（由 finalize_tool_result 的 field_injector 调用）----
 
     def drain_injected(self, result: dict) -> dict | None:
-        """排空队列并注入 ``queued_messages`` 结构化字段（SP-5 bugfix 修订）。
+        """排空队列并注入内部 ``_queued_messages`` 字段（SP-5 bugfix 修订）。
 
         PM5 结构性不丢消息：先只读快照 + 构造产物（可抛——P1 上抛给 finalize
         既有 try/except willing catcher），构造成功后才从 deque 移除；构造异常时
         deque 未动，消息滞留队列等下轮消费。
 
-        SP-5 bugfix：从 _blocks 就地展开改为 queued_messages 结构化字段——
-        工具结果 content 保持为合法 JSON dict，content_to_text 展平后前端可 json.loads。
+        SP-5 bugfix：从 _blocks 就地展开改为内部 _queued_messages 结构化字段——
+        工具结果 content 保持为合法 JSON dict；该字段由前端单独渲染，不进入普通 JSON 正文。
         """
         if not self._pending:
             return None
@@ -214,15 +214,15 @@ class SessionMessageQueue:
         messages = self._build_queued_messages(items)  # 构造可抛——deque 未动
         for _ in range(len(items)):
             self._pending.popleft()                  # 构造成功后移除（事件循环单线程，快照即队首）
-        existing = result.get("queued_messages")
+        existing = result.get("_queued_messages")
         merged: list = list(existing) if isinstance(existing, list) else []
         merged.extend(messages)
         # 提取被消费消息的 client_message_id 列表（供 tool_result 事件透传给前端移除已排队徽章）
         consumed_ids = [m.client_message_id for m in items if m.client_message_id]
-        return {"queued_messages": merged, "consumed_client_message_ids": consumed_ids}
+        return {"_queued_messages": merged, "consumed_client_message_ids": consumed_ids}
 
     def _build_queued_messages(self, items: list[QueuedMessage]) -> list[dict]:
-        """构造 queued_messages 字段值：每条消息为嵌套结构化 dict。"""
+        """构造 ``_queued_messages`` 字段值：每条消息为结构化 dict。"""
         messages: list[dict] = []
         for m in items:
             content: Any = m.content
@@ -230,13 +230,11 @@ class SessionMessageQueue:
             if isinstance(m.content, list):
                 content = [b for b in m.content if isinstance(b, dict)]
             messages.append({
-                "queued_message": {
-                    "role": "user",
-                    "character_name": m.character_name,
-                    "source": m.source,
-                    "timestamp": m.timestamp,
-                    "content": content,
-                }
+                "role": "user",
+                "character_name": m.character_name,
+                "source": m.source,
+                "timestamp": m.timestamp,
+                "content": content,
             })
         return messages
 

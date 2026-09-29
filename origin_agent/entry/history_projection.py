@@ -35,6 +35,7 @@ from entry.agent_support.multimodal import (
     content_to_serializable,
     content_to_text,
     extract_tool_call_meta,
+    extract_tool_embedded_messages,
 )
 
 logger = logging.getLogger(__name__)
@@ -260,11 +261,13 @@ def _tool_card_content_row(
     result_content: str | list[dict[str, Any]] | None = None
     result_history_index: int | None = None
     tool_call_meta: dict[str, Any] | None = None
+    embedded_messages: list[dict[str, Any]] | None = None
     is_error = False
     if result is not None:
         result_content = _serialized_content(result.message.content)
         result_history_index = result.history_index
         tool_call_meta = extract_tool_call_meta(result.message.content)
+        embedded_messages = extract_tool_embedded_messages(result.message.content)
         raw = result.message.content
         is_error = isinstance(raw, dict) and bool(raw.get("error"))
         status = SessionHistoryToolCardStatus.failed if is_error else SessionHistoryToolCardStatus.succeeded
@@ -277,6 +280,7 @@ def _tool_card_content_row(
         result_content=result_content,
         result_history_index=result_history_index,
         tool_call_meta=tool_call_meta,
+        embedded_messages=embedded_messages,
         is_error=is_error,
     )
     text = f"{character_name} ⚡ {tool_name}"

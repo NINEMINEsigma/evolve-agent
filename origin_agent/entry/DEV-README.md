@@ -24,9 +24,8 @@ entry/
     ├── messages.py               ← 消息组装：system prompt + hooks + history
     ├── history_summary.py        ← 会话历史摘要与文本转换
     └── multimodal.py             ← 多模态处理与 content block 清洗
-                                 NOTE: content_to_text 会自动过滤 JSON 中所有 _ 前缀字段（_image/_meta/_note），
-                                       避免 base64 等载荷泄露到前端/日志。_meta 等字段通过 emit_tool_result
-                                       的 tool_call_meta 参数独立传递，不受此过滤影响。
+                                       NOTE: content_to_text 会自动过滤 JSON 中所有 _ 前缀字段（_image/_meta/_queued_messages/_note），
+                                       避免 base64 或工具链嵌入消息载荷泄露到前端/日志。_meta 与 _queued_messages 等内部字段通过 emit_tool_result 的独立参数传递，分别由工具卡片元信息和嵌入消息区域渲染。
 ```
 
 ---
@@ -211,7 +210,7 @@ sequenceDiagram
 7. 对 tool_call 执行 `ToolExecutor.execute()`：safe / allowlist 直接执行，否则等待审批。
 8. 工具结果加入历史，循环直到 `finish_reason=stop` 或达到 `MAX_TOOL_TURNS`。
 
-> **延迟渲染与消费确认**：前端发送消息后不乐观渲染气泡，改为在输入栏显示"已排队"徽章。后端通过两条路径确认消费方式：空闲消费时 `emit_user_message` 回显 → 前端渲染正式气泡并移除徽章；工具链注入时 `drain_injected` 在 `queued_messages` 旁返回 `consumed_client_message_ids`，经 `finalize_tool_result` pop 隔离后透传到 `tool_result` 事件 → 前端移除匹配徽章（消息仅留在工具结果内，不显示独立气泡）。中断、切会话、历史重载时清空徽章。`SessionMessageQueue` 的长期 consumer 为每批消息创建独立单次回复 task；中断该 task 后 consumer 继续处理后续 FIFO。consumer 意外结束时只恢复 deque 中尚未 drain 的新消息，不回放失败批次。
+> **延迟渲染与消费确认**：前端发送消息后不乐观渲染气泡，改为在输入栏显示"已排队"徽章。后端通过两条路径确认消费方式：空闲消费时 `emit_user_message` 回显 → 前端渲染正式气泡并移除徽章；工具链注入时 `drain_injected` 将消息写入工具结果内部 `_queued_messages`，并返回 `consumed_client_message_ids`，经 `finalize_tool_result` 分离后分别透传到 `tool_result.embedded_messages` 与顶层字段 → 前端在工具调用卡片的独立嵌入消息区域展示消息并移除匹配徽章（不显示独立气泡）。中断、切会话、历史重载时清空徽章。`SessionMessageQueue` 的长期 consumer 为每批消息创建独立单次回复 task；中断该 task 后 consumer 继续处理后续 FIFO。consumer 意外结束时只恢复 deque 中尚未 drain 的新消息，不回放失败批次。
 
 ---
 
@@ -257,7 +256,7 @@ Gateway 的会话状态 REST 返回当前活动快照。前端在用户发送、
 - `project_history_content_rows()`：按完整 History 的请求/结果范围返回普通消息、工具调用卡片和孤立结果降级行，支持结果跨 History 内容页配对。
 - `project_history_resources()`：从完整 History 提取去重后的图片和下载资源索引。
 
-投影是只读视图，不改变 `History` 类型、消息实例或 easysave 存储。工具结果 `_meta` 通过 `agent_support.multimodal.extract_tool_call_meta()` 与旧序列化路径共用口径。
+投影是只读视图，不改变 `History` 类型、消息实例或 easysave 存储。工具结果 `_meta` 与 `_queued_messages` 分别通过 `agent_support.multimodal.extract_tool_call_meta()` / `extract_tool_embedded_messages()` 与旧序列化路径共用口径。
 
 ### `multimodal.py`
 
@@ -265,6 +264,7 @@ Gateway 的会话状态 REST 返回当前活动快照。前端在用户发送、
 - `tool_result_to_content()`：将工具结果转换为 LLM content blocks。
 - `content_to_text()`：将 content blocks 提取为纯文本摘要（用于日志或前端展示）。
 - `extract_tool_call_meta()`：从原生 dict 工具结果只读提取 `_meta` 副本，供旧消息序列化与 History 内容页投影共用。
+- `extract_tool_embedded_messages()`：从 `_queued_messages` 提取工具执行期间排队到的用户消息；同时兼容旧版 `queued_messages`，供实时事件和 History 投影的独立嵌入消息区域使用。
 - `summarize_message_for_log()`：独立的日志安全视图，支持内存态/序列化态块及单个 dict 块；图片、音频、视频替换为占位符，未知块不输出载荷。默认预览上限为 300 字符；原本不限长的日志入口可传 `max_text_len=None`。不修改 `content_to_text()` 的前端展示行为。
 
 ---

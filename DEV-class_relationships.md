@@ -933,7 +933,7 @@ classDiagram
 
 ### 工具结果后处理统一
 
-`entry/tool_post_dispatch.py::finalize_tool_result` 提取 `ToolExecutor.execute` 与 `SubAgentLoop._execute_approved_tool` 中重复的后处理：构建 `ToolCallMeta` 并注入 `_meta`、经 `ResultFieldInjector` 注入附加字段（如消息队列的 `queued_messages`）、推送前端 `tool_result` 事件并经 `ui_event_router` 路由 UI 事件，返回可持久化的 `ToolResultMessage`。
+`entry/tool_post_dispatch.py::finalize_tool_result` 提取 `ToolExecutor.execute` 与 `SubAgentLoop._execute_approved_tool` 中重复的后处理：构建 `ToolCallMeta` 并注入 `_meta`、经 `ResultFieldInjector` 将消息队列写入内部 `_queued_messages`、提取后通过 `tool_result.embedded_messages` 独立推送前端，并经 `ui_event_router` 路由 UI 事件，返回可持久化的 `ToolResultMessage`。History 投影同样从内部字段提取嵌入消息；旧版 `queued_messages` 仅作兼容读取。
 
 ### 会话级消息队列（SP-4/SP-5）
 

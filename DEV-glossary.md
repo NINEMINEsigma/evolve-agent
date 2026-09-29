@@ -138,7 +138,7 @@
 | 流式增量 | `StreamChunk`（content_delta / reasoning_delta） |
 | 思考内容 | reasoning_content / reasoning_delta（DeepSeek thinking-mode 载荷） |
 | 记忆上下文 | memory_hook 注入的长期记忆块（`<|im_memory_context_start|>` 标记包裹，非持久化） |
-| 元数据提取器 | `META_EXTRACTOR_CHARACTER`：生成标题/标签/摘要时的角色名，语义上隔离 agent 发言与元数据生成 |
+| 工具结果嵌入消息 | 工具调用期间排队、随后被下一个工具结果携带展示的用户消息；内部以 `_queued_messages` 保存，通过 `embedded_messages` 独立传输，在工具调用卡片结果区特殊渲染，不作为普通 JSON 正文显示 | embedded tool message |
 
 ---
 

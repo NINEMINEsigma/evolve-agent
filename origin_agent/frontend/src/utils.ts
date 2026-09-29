@@ -1,4 +1,4 @@
-import type { ChatMessage, ContentBlock, DownloadInfo, PendingImage, PendingAudio, PendingVideo, SubagentSession } from "./types";
+import type { ChatMessage, ContentBlock, DownloadInfo, EmbeddedToolMessage, PendingImage, PendingAudio, PendingVideo, SubagentSession } from "./types";
 import { WS_IN } from "./constants/ws";
 
 export function formatTimeSec(sec: number): string {
@@ -21,7 +21,29 @@ export interface ParsedToolResult {
   content?: string;
   imageMarkdown?: string;
   downloadInfo?: DownloadInfo;
+  embeddedMessages?: EmbeddedToolMessage[];
   isError?: boolean;
+}
+
+function parseEmbeddedToolMessages(value: unknown): EmbeddedToolMessage[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const messages: EmbeddedToolMessage[] = [];
+  for (const item of value) {
+    if (!item || typeof item !== "object") continue;
+    const candidate = (item as Record<string, unknown>).queued_message;
+    const message = candidate && typeof candidate === "object" ? candidate : item;
+    if (!message || typeof message !== "object") continue;
+    const record = message as Record<string, unknown>;
+    if (record.role !== "user" || !(typeof record.content === "string" || Array.isArray(record.content))) continue;
+    messages.push({
+      role: "user",
+      character_name: typeof record.character_name === "string" ? record.character_name : undefined,
+      source: typeof record.source === "string" ? record.source : undefined,
+      timestamp: typeof record.timestamp === "string" ? record.timestamp : undefined,
+      content: record.content as EmbeddedToolMessage["content"],
+    });
+  }
+  return messages.length > 0 ? messages : undefined;
 }
 
 export function parseToolResult(raw: string, _toolName?: string): ParsedToolResult {
@@ -29,6 +51,7 @@ export function parseToolResult(raw: string, _toolName?: string): ParsedToolResu
     const parsed = JSON.parse(raw);
     const isError = !!parsed.error;
     const result: ParsedToolResult = { isError };
+    result.embeddedMessages = parseEmbeddedToolMessages(parsed._queued_messages ?? parsed.queued_messages);
 
     // 提取特殊字段（由前端独立组件渲染）
     if (parsed.markdown) result.imageMarkdown = parsed.markdown;
@@ -44,7 +67,7 @@ export function parseToolResult(raw: string, _toolName?: string): ParsedToolResu
     // 移除所有下划线开头的字段（_meta, _image, _note, _parse_failed 等）
     const cleaned: Record<string, unknown> = {};
     for (const [k, v] of Object.entries(parsed)) {
-      if (!k.startsWith("_")) cleaned[k] = v;
+      if (!k.startsWith("_") && k !== "queued_messages") cleaned[k] = v;
     }
 
     // content 始终为完整 JSON（pretty-print）
@@ -110,6 +133,7 @@ export function subagentFeedbackToChatMessages(session: SubagentSession): ChatMe
             content: parsed.content || msg.content || "",
             imageMarkdown: parsed.imageMarkdown,
             downloadInfo: parsed.downloadInfo,
+            embeddedMessages: parsed.embeddedMessages,
             isError: parsed.isError,
           },
         };
@@ -126,6 +150,7 @@ export function subagentFeedbackToChatMessages(session: SubagentSession): ChatMe
               content: parsed.content || msg.content || "",
               imageMarkdown: parsed.imageMarkdown,
               downloadInfo: parsed.downloadInfo,
+              embeddedMessages: parsed.embeddedMessages,
               isError: parsed.isError,
             },
           },

@@ -103,7 +103,7 @@ WS /ws/chat?resume=<sid>
 | `stream_delta` | LLM 流式文本块 |
 | `stream_done` | 流式生成结束 |
 | `tool_call` | 工具调用开始 |
-| `tool_result` | 工具执行结果 |
+| `tool_result` | 工具执行结果；工具链中被消费的排队消息通过 `embedded_messages` 独立传输，不混入普通结果 JSON。 |
 | `task_progress` | 任务进度更新 |
 | `clipboard_display` | 剪贴板展示更新 |
 | `subagent_update` | 子会话状态更新 |

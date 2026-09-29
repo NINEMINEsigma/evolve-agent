@@ -65,6 +65,7 @@ class AgentSink(ABC):
                                tool_call_id: str, content: str,
                                character_name: str | None = None,
                                tool_call_meta: dict | None = None,
+                               embedded_messages: list[dict] | None = None,
                                consumed_client_message_ids: list[str] | None = None) -> None:
         """推送 tool_result 事件。"""
         ...
@@ -474,11 +475,13 @@ class FrontendSink(AgentSink):
                                tool_call_id: str, content: str,
                                character_name: str | None = None,
                                tool_call_meta: dict | None = None,
+                               embedded_messages: list[dict] | None = None,
                                consumed_client_message_ids: list[str] | None = None) -> None:
         await self._send_msg(session_id, "tool_result", tool_name, content,
                              tool_call_id=tool_call_id,
                              character_name=character_name,
                              tool_call_meta=tool_call_meta,
+                             embedded_messages=embedded_messages,
                              consumed_client_message_ids=consumed_client_message_ids)
 
     async def emit_user_message(self, session_id: str, content: Any,
@@ -608,6 +611,7 @@ class FrontendSink(AgentSink):
                         tool_call_id: str = "",
                         character_name: str | None = None,
                         tool_call_meta: dict | None = None,
+                        embedded_messages: list[dict] | None = None,
                         consumed_client_message_ids: list[str] | None = None) -> None:
         """通过 WebSocket 推送一条事件消息。"""
         ws = self.get_ws(session_id)
@@ -627,6 +631,7 @@ class FrontendSink(AgentSink):
                           result=payload, tool_call_id=tool_call_id,
                           character_name=character_name,
                           tool_call_meta=tool_call_meta,
+                          embedded_messages=embedded_messages,
                           consumed_client_message_ids=consumed_client_message_ids)
         elif event_type == "stream_delta":
             data = json.loads(payload)
@@ -766,6 +771,7 @@ class ParentAgentSink(AgentSink):
                                tool_call_id: str, content: str,
                                character_name: str | None = None,
                                tool_call_meta: dict | None = None,
+                               embedded_messages: list[dict] | None = None,
                                consumed_client_message_ids: list[str] | None = None) -> None:
         # consumed_client_message_ids 仅为接口一致性；子 Agent 工具结果不消费主会话消息队列
         self._loop.emit_event("tool_result", tool_call_id=tool_call_id,

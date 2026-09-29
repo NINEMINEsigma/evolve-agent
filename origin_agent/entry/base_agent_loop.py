@@ -1493,7 +1493,8 @@ class IMainSessionLoop(ABC):
         ToolExecutor.execute 在每次工具调用时查询此方法，
         将返回的注入器传给 finalize_tool_result 的 field_injector 参数。
         SP-4 的 SessionMessageQueue 将通过重写此方法返回队列的 drain 回调，
-        使队列在工具链中消费时能向工具结果 dict 注入 queued_messages 字段。
+        使队列在工具链中消费时能向工具结果 dict 注入内部 _queued_messages 字段，
+        由工具结果事件和 History 投影单独传给前端渲染。
         """
         return None
 

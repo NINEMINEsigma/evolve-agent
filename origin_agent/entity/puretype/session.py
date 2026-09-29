@@ -156,6 +156,7 @@ class SessionHistoryToolCard(BaseModel):
     result_content: str | list[dict[str, Any]] | None = None
     result_history_index: int | None = None
     tool_call_meta: dict[str, Any] | None = None
+    embedded_messages: list[dict[str, Any]] | None = None
     is_error: bool = False
 
 

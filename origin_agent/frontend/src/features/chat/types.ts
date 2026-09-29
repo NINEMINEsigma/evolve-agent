@@ -27,6 +27,7 @@ export interface HistoryToolCardDto {
   result_content?: MessageContent | null;
   result_history_index?: number | null;
   tool_call_meta?: import("../../types").ToolCallMeta | null;
+  embedded_messages?: import("../../types").EmbeddedToolMessage[] | null;
   is_error: boolean;
 }
 

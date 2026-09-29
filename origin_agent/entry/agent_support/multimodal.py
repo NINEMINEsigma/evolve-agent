@@ -471,7 +471,10 @@ def _strip_internal_fields(text: str) -> str:
         return text
     if not isinstance(parsed, dict):
         return text
-    filtered = {k: v for k, v in parsed.items() if not k.startswith("_")}
+    filtered = {
+        k: v for k, v in parsed.items()
+        if not k.startswith("_") and k != "queued_messages"
+    }
     return json.dumps(filtered, ensure_ascii=False)
 
 
@@ -640,6 +643,33 @@ def extract_tool_call_meta(
         return None
     meta = content.get("_meta")
     return dict(meta) if isinstance(meta, dict) else None
+
+
+def extract_tool_embedded_messages(
+    content: str | dict[str, Any] | list[MessageBlock],
+) -> list[dict[str, Any]] | None:
+    """读取工具结果内部的嵌入消息，不改变原始 content。
+
+    新字段使用 ``_queued_messages``，避免进入普通工具结果 JSON；同时兼容
+    旧 History 中已经持久化的 ``queued_messages`` 字段，并归一化旧版的
+    ``{"queued_message": {...}}`` 包装结构。
+    """
+    if not isinstance(content, dict):
+        return None
+    raw = content.get("_queued_messages")
+    if not isinstance(raw, list):
+        raw = content.get("queued_messages")
+    if not isinstance(raw, list):
+        return None
+    messages: list[dict[str, Any]] = []
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+        nested = item.get("queued_message")
+        message = nested if isinstance(nested, dict) else item
+        if isinstance(message, dict) and "content" in message:
+            messages.append(dict(message))
+    return messages or None
 
 
 def content_to_serializable(content: str | dict[str, Any] | list[MessageBlock]) -> str | dict[str, Any] | list[dict[str, Any]]:

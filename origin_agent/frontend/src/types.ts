@@ -155,6 +155,13 @@ export interface VideoContentBlock {
 
 export type ContentBlock = TextContentBlock | ImageContentBlock | AudioContentBlock | VideoContentBlock;
 export type MessageContent = string | ContentBlock[];
+export interface EmbeddedToolMessage {
+  role: "user";
+  character_name?: string;
+  source?: string;
+  timestamp?: string;
+  content: MessageContent;
+}
 
 export type MainSessionActivitySource =
   | "user_message"
@@ -208,6 +215,7 @@ export interface ToolCardResult {
   imageMarkdown?: string;
   downloadInfo?: DownloadInfo;
   toolCallMeta?: ToolCallMeta;
+  embeddedMessages?: EmbeddedToolMessage[];
   isError?: boolean;
   historyIndex?: number;
 }
@@ -294,6 +302,7 @@ export interface WSMessage {
   message_suffix?: string;                // USER_MESSAGE：持久化上下文扩展块
   dynamic_message_suffix?: string;        // USER_MESSAGE：当轮动态上下文扩展块
   tool_call_meta?: ToolCallMeta;   // TOOL_RESULT：工具调用时间元信息
+  embedded_messages?: EmbeddedToolMessage[]; // TOOL_RESULT：工具结果中的隐藏嵌入消息
   consumed_client_message_ids?: string[];   // TOOL_RESULT：被工具链消费的用户消息 client_message_id 列表（用于移除已排队徽章）
   danger_level?: string;           // CONFIRM_REQUEST：工具危险等级
   client_info?: Record<string, string>;   // USER_MESSAGE：前端客户端信息
@@ -446,6 +455,7 @@ export interface ChatMessage {
   messageSuffix?: string;
   dynamicMessageSuffix?: string;
   toolCallMeta?: ToolCallMeta;   // 工具调用时间元信息
+  embeddedMessages?: EmbeddedToolMessage[]; // 无匹配 tool_call 时的工具结果嵌入消息
   toolCard?: ToolCardData;
   isError?: boolean;               // 工具结果是否为错误
   isSystemStatus?: boolean;        // 系统状态消息（对 LLM 不可见，仅前端展示）

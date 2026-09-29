@@ -1,6 +1,7 @@
 import type { ChatMessage } from "../types";
 import MessageBody from "./MessageBody";
 import MessageAttachments from "./MessageAttachments";
+import EmbeddedToolMessages from "./EmbeddedToolMessages";
 import { toolCardSummary } from "../features/chat/toolCards";
 
 interface ToolCallCardProps {
@@ -65,6 +66,13 @@ export default function ToolCallCard({
             {resultMessage && card.result ? (
               <>
                 <MessageBody message={resultMessage} onImageClick={onImageClick} onUserHeightMutation={onUserHeightMutation} />
+                {card.result.embeddedMessages && (
+                  <EmbeddedToolMessages
+                    messages={card.result.embeddedMessages}
+                    onImageClick={onImageClick}
+                    onUserHeightMutation={onUserHeightMutation}
+                  />
+                )}
                 <MessageAttachments message={resultMessage} onImageClick={onImageClick} />
                 {card.result.toolCallMeta && (
                   <div className="tool-call-meta">

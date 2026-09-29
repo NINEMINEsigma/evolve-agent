@@ -293,6 +293,30 @@
   padding: 4px 0;
 }
 
+.tool-embedded-messages {
+  margin: 8px 0 4px;
+  padding: 7px 9px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--accent-soft);
+}
+.tool-embedded-messages-title {
+  margin-bottom: 5px;
+  color: var(--accent);
+  font-size: 11px;
+  font-weight: 600;
+}
+.tool-embedded-message + .tool-embedded-message {
+  margin-top: 7px;
+  padding-top: 7px;
+  border-top: 1px solid var(--border);
+}
+.tool-embedded-message-meta {
+  margin-bottom: 2px;
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
 /* ── Tool call collapse ── */
 .tool-call-block {
   margin-bottom: 2px;

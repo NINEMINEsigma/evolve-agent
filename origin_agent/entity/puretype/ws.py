@@ -115,6 +115,7 @@ class Message(BaseModel):
     message_suffix: str | None = None  # 用户消息固定后缀（如 fixator 上下文）
     dynamic_message_suffix: str | None = None  # 用户消息动态后缀（如 memory/hooks 上下文）
     tool_call_meta: dict[str, Any] | None = None  # TOOL_RESULT：工具调用时间元信息
+    embedded_messages: list[dict[str, Any]] | None = None  # TOOL_RESULT：工具结果中隐藏字段的嵌入消息
     consumed_client_message_ids: list[str] | None = None  # TOOL_RESULT：被工具链消费的用户消息 client_message_id 列表（前端用于移除已排队徽章）
     danger_level: str | None = None  # CONFIRM_REQUEST：工具危险等级
     client_info: dict[str, Any] | None = None  # USER_MESSAGE：前端携带的客户端信息

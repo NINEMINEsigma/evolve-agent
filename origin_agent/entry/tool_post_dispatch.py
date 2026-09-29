@@ -12,7 +12,12 @@ from typing import Callable, TYPE_CHECKING
 
 from entity.puretype import Role, ToolCallMeta
 from entity.messages import BaseMessage, ToolResultMessage
-from entry.agent_support.multimodal import tool_result_to_content, tool_result_to_follow_up, content_to_text
+from entry.agent_support.multimodal import (
+    tool_result_to_content,
+    tool_result_to_follow_up,
+    content_to_text,
+    extract_tool_embedded_messages,
+)
 from abstract.tools.ui_event_router import ui_event_router
 
 if TYPE_CHECKING:
@@ -79,8 +84,8 @@ async def finalize_tool_result(
 
     # SP-2: 结果字段注入——由 ToolExecutor 从所属 loop 的队列对象获取注入器，
     # 队列对象本身不进 finalize（R1）。注入器返回要合并的字段 dict（或 None）。
-    # 注入字段在 _meta 之后、tool_result_to_content 之前写入，
-    # 随 JSON 自然进入历史持久化、wire 输出与前端展示。
+    # 注入字段在 _meta 之后、tool_result_to_content 之前写入；内部字段会持久化到 History，
+    # 但由独立事件字段传给前端，不混入普通工具结果正文。
     if field_injector is not None:
         try:
             injected = field_injector(result)
@@ -91,6 +96,9 @@ async def finalize_tool_result(
                 "field_injector failed for tool=%s session=%s",
                 tool_name, session_id, exc_info=True,
             )
+
+    # 提取内部嵌入消息，和 _meta 一样不进入普通工具结果正文，改由前端独立渲染。
+    embedded_messages = extract_tool_embedded_messages(result)
 
     # 转换为可保存到 History 的 content
     # 提取被工具链消费的用户消息 client_message_id 列表（由 drain_injected 通过
@@ -108,6 +116,7 @@ async def finalize_tool_result(
         session_id, tool_name, tool_call_id, content_to_text(content),
         character_name=character_name,
         tool_call_meta=_meta.model_dump(),
+        embedded_messages=embedded_messages,
         consumed_client_message_ids=consumed_ids,
     )
 

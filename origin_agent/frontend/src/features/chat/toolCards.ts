@@ -16,6 +16,7 @@ export function historyToolCardToChatMessage(
     : {
         content: card.result_content ?? "",
         toolCallMeta: card.tool_call_meta ?? undefined,
+        embeddedMessages: card.embedded_messages ?? undefined,
         isError: card.is_error,
         historyIndex: card.result_history_index ?? undefined,
       };
@@ -92,7 +93,7 @@ export function hasVisibleAssistantContent(message: ChatMessage): boolean {
 export function resultPatch(
   content: MessageContent,
   toolCallMeta?: ToolCardResult["toolCallMeta"],
-  extras?: Pick<ToolCardResult, "imageMarkdown" | "downloadInfo" | "isError" | "historyIndex">,
+  extras?: Pick<ToolCardResult, "imageMarkdown" | "downloadInfo" | "embeddedMessages" | "isError" | "historyIndex">,
 ): ToolCardResult {
   return { content, toolCallMeta, ...extras };
 }
