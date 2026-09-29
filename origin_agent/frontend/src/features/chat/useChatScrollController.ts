@@ -56,6 +56,7 @@ export function reduceFollowMode(mode: ChatFollowMode, event: ScrollEvent): Chat
 export function useChatScrollController(
   virtuosoRef: React.RefObject<VirtuosoHandle | null>,
   scrollerElement: HTMLElement | null,
+  topSafeSpacePx: number,
 ) {
   const userIntentUntilRef = useRef(0);
   const metricsFrameRef = useRef<number | null>(null);
@@ -215,7 +216,7 @@ export function useChatScrollController(
     previewMinimapScrollTop(targetScrollTop);
     const store = useChatRuntimeStore.getState();
     const segments = buildHeightWeightedSegments(
-      store.skeleton, store.liveRows, store.rowHeights,
+      store.skeleton, store.liveRows, store.rowHeights, topSafeSpacePx,
     );
     const metrics = normalizeScrollMetrics({
       ...store.scrollMetrics,
@@ -231,7 +232,7 @@ export function useChatScrollController(
     } else {
       await chatRuntimeController.ensureVisibleRangeLoaded(range.startIndex, range.endIndex);
     }
-  }, [previewMinimapScrollTop, scrollToPhysicalBottom, transition]);
+  }, [previewMinimapScrollTop, scrollToPhysicalBottom, topSafeSpacePx, transition]);
 
   useEffect(() => {
     if (followMode !== "following") cancelScheduledFollow();

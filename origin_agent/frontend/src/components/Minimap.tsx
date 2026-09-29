@@ -13,6 +13,7 @@ import {
 } from "../features/chat/minimapGeometry";
 
 interface LogicalMinimapProps {
+  topSafeSpacePx: number;
   onDragStart: () => void;
   onPreviewScrollTop: (scrollTop: number) => void;
   onDragEnd: (scrollTop: number) => void | Promise<void>;
@@ -64,7 +65,7 @@ export function minimapRoleBuckets(roles: string[], bucketCount: number): string
   });
 }
 
-function LogicalMinimap({ onDragStart, onPreviewScrollTop, onDragEnd }: LogicalMinimapProps) {
+function LogicalMinimap({ topSafeSpacePx, onDragStart, onPreviewScrollTop, onDragEnd }: LogicalMinimapProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const rootRef = useRef<HTMLDivElement>(null);
   const frameRef = useRef<number | null>(null);
@@ -82,9 +83,9 @@ function LogicalMinimap({ onDragStart, onPreviewScrollTop, onDragEnd }: LogicalM
   // 流式增量只改变正文；未改变行 ID/Role 时无需重算整份历史权重。
   const liveOutlineKey = liveRows.map((row) => `${row.id}:${row.message.role}`).join("|");
   const segments = useMemo(
-    () => buildHeightWeightedSegments(skeleton, liveRows, rowHeights),
+    () => buildHeightWeightedSegments(skeleton, liveRows, rowHeights, topSafeSpacePx),
     // liveRows 的完整对象只在行身份或角色变化时影响权重，其余由 rowHeights 更新。
-    [skeleton, rowHeights, liveOutlineKey],
+    [skeleton, rowHeights, liveOutlineKey, topSafeSpacePx],
   );
   const hasLogicalRows = segments.length > 0;
   const viewport = minimapViewportGeometry(scrollMetrics, height);
@@ -135,8 +136,9 @@ function LogicalMinimap({ onDragStart, onPreviewScrollTop, onDragEnd }: LogicalM
         segmentIndex < segments.length - 1
         && segments[segmentIndex].endRatio < ratio
       ) segmentIndex += 1;
-      const role = segments[segmentIndex]?.role || "system";
-      context.fillStyle = ROLE_COLORS[role] || ROLE_COLORS.system;
+      const segment = segments[segmentIndex];
+      if (!segment || ratio < segment.startRatio || ratio >= segment.endRatio) continue;
+      context.fillStyle = ROLE_COLORS[segment.role] || ROLE_COLORS.system;
       context.fillRect(6, bucket, Math.max(1, width - 12), 1);
     }
   }, [height, segments]);
@@ -315,6 +317,7 @@ export default function Minimap(props: MinimapProps) {
   }
   return (
     <LogicalMinimap
+      topSafeSpacePx={props.topSafeSpacePx}
       onDragStart={props.onDragStart}
       onPreviewScrollTop={props.onPreviewScrollTop}
       onDragEnd={props.onDragEnd}

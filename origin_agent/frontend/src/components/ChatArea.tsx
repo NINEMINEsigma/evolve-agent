@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { MessageContent } from "../types";
+import { CHAT_TOP_SAFE_SPACE_PX } from "../constants/history";
+import { DIMENSIONS } from "../constants/dimensions";
 import Minimap from "./Minimap";
 import AgentStageLayer from "./AgentStageLayer";
 import ChatStyleLayer from "./ChatStyleLayer";
@@ -41,21 +43,32 @@ export default function ChatArea({
   chatStyleStatus,
   chatStyleReloadKey,
 }: ChatAreaProps) {
-  const [minimapCollapsed, setMinimapCollapsed] = useState(false);
+  const isMobileQuery = `(max-width: ${DIMENSIONS.MOBILE_BREAKPOINT}px)`;
+  const [isMobile, setIsMobile] = useState(() =>
+    typeof window !== "undefined" && window.matchMedia(isMobileQuery).matches,
+  );
+  const [minimapCollapsed, setMinimapCollapsed] = useState(() =>
+    typeof window !== "undefined" && window.matchMedia(isMobileQuery).matches,
+  );
   const listRef = useRef<ChatVirtualListHandle>(null);
   const followMode = useChatRuntimeStore((state) => state.followMode);
   const skeletonLength = useChatRuntimeStore((state) => state.skeleton.length);
   const liveLength = useChatRuntimeStore((state) => state.liveRows.length);
   const processing = useChatRuntimeStore((state) => state.processing);
   const isEmpty = skeletonLength === 0 && liveLength === 0 && !processing;
+  const topSafeSpacePx = isMobile ? 0 : CHAT_TOP_SAFE_SPACE_PX;
 
   useEffect(() => {
-    const media = window.matchMedia("(max-width: 768px)");
+    const media = window.matchMedia(isMobileQuery);
+    const onChange = (event: MediaQueryListEvent) => {
+      setIsMobile(event.matches);
+      setMinimapCollapsed(event.matches);
+    };
+    setIsMobile(media.matches);
     setMinimapCollapsed(media.matches);
-    const onChange = (event: MediaQueryListEvent) => setMinimapCollapsed(event.matches);
     media.addEventListener("change", onChange);
     return () => media.removeEventListener("change", onChange);
-  }, []);
+  }, [isMobileQuery]);
 
   return (
     <div className="chat-area-wrapper">
@@ -77,6 +90,7 @@ export default function ChatArea({
           onDropFiles={onDropFiles}
           agents={agents}
           onToggleMessageVisibility={onToggleMessageVisibility}
+          topSafeSpacePx={topSafeSpacePx}
         />
         {followMode === "detached" && (
           <button
@@ -95,6 +109,7 @@ export default function ChatArea({
       </div>
       {!minimapCollapsed && (
         <Minimap
+          topSafeSpacePx={topSafeSpacePx}
           onDragStart={() => listRef.current?.beginMinimapDrag()}
           onPreviewScrollTop={(scrollTop) => listRef.current?.previewMinimapScrollTop(scrollTop)}
           onDragEnd={(scrollTop) => listRef.current?.commitMinimapDrag(scrollTop)}

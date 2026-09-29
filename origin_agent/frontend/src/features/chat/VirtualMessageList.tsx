@@ -48,16 +48,29 @@ interface VirtualMessageListProps {
   onDropFiles: (files: FileList) => void;
   agents?: string[];
   onToggleMessageVisibility?: (messageId: string, agentName: string) => void;
+  topSafeSpacePx: number;
 }
 
 interface ChatListContext extends VirtualMessageListProps {
   skeleton: HistorySkeletonRowDto[];
   beginUserHeightMutation: () => void;
+  hasChatContent: boolean;
 }
 
 const ChatList = forwardRef<HTMLDivElement, React.HTMLAttributes<HTMLDivElement> & { context: ChatListContext }>(
-  function ChatList({ style, children, context: _context, ...props }, ref) {
-    return <div {...props} ref={ref} style={style} className="chat-content">{children}</div>;
+  function ChatList({ style, children, context, ...props }, ref) {
+    return (
+      <div {...props} ref={ref} style={style} className="chat-content">
+        {context.hasChatContent && (
+          <div
+            className="chat-top-safe-space"
+            style={{ height: context.topSafeSpacePx }}
+            aria-hidden="true"
+          />
+        )}
+        {children}
+      </div>
+    );
   },
 );
 
@@ -190,6 +203,7 @@ const VirtualMessageList = forwardRef<ChatVirtualListHandle, VirtualMessageListP
     const skeletonError = useChatRuntimeStore((state) => state.skeletonError);
     const initialReady = useChatRuntimeStore((state) => state.initialReady);
     const liveVersion = useChatRuntimeStore((state) => state.liveVersion);
+    const liveRows = useChatRuntimeStore((state) => state.liveRows);
     const processing = useChatRuntimeStore((state) => state.processing);
     const virtuosoRef = useRef<VirtuosoHandle>(null);
     const [scrollerElement, setScrollerElement] = useState<HTMLDivElement | null>(null);
@@ -198,7 +212,7 @@ const VirtualMessageList = forwardRef<ChatVirtualListHandle, VirtualMessageListP
       [scrollerElement],
     );
     useMessageCharacterHover(hoverRootRef);
-    const scroll = useChatScrollController(virtuosoRef, scrollerElement);
+    const scroll = useChatScrollController(virtuosoRef, scrollerElement, props.topSafeSpacePx);
 
     useLayoutEffect(() => {
       scroll.followAfterLiveCommit();
@@ -216,10 +230,12 @@ const VirtualMessageList = forwardRef<ChatVirtualListHandle, VirtualMessageListP
       scroll.commitMinimapDrag,
     ]);
 
+    const hasChatContent = skeleton.length > 0 || liveRows.length > 0 || processing;
     const context = useMemo<ChatListContext>(() => ({
       ...props,
       skeleton,
       beginUserHeightMutation: scroll.beginUserHeightMutation,
+      hasChatContent,
     }), [
       props.archived,
       props.onImageClick,
@@ -230,7 +246,9 @@ const VirtualMessageList = forwardRef<ChatVirtualListHandle, VirtualMessageListP
       props.onDropFiles,
       props.agents,
       props.onToggleMessageVisibility,
+      props.topSafeSpacePx,
       skeleton,
+      hasChatContent,
       scroll.beginUserHeightMutation,
     ]);
 

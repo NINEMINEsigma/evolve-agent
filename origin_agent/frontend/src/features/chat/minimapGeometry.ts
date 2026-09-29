@@ -94,6 +94,7 @@ export function buildHeightWeightedSegments(
   skeleton: HistorySkeletonRowDto[],
   liveRows: LiveChatRow[],
   rowHeights: Record<string, number>,
+  topSafeSpacePx: number,
 ): ChatMinimapSegment[] {
   const rows = [
     ...skeleton.map((row) => {
@@ -118,9 +119,10 @@ export function buildHeightWeightedSegments(
   }));
 
   const rowWeight = rows.reduce((sum, row) => sum + row.weight, 0);
-  const totalWeight = rowWeight + CHAT_BOTTOM_SAFE_SPACE_PX;
+  const topSafeSpace = finiteNonNegative(topSafeSpacePx);
+  const totalWeight = topSafeSpace + rowWeight + CHAT_BOTTOM_SAFE_SPACE_PX;
   if (rows.length === 0 || totalWeight <= 0) return [];
-  let cursor = 0;
+  let cursor = topSafeSpace;
   return rows.map((row) => {
     const startRatio = cursor / totalWeight;
     cursor += row.weight;
