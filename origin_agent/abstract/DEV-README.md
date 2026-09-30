@@ -49,6 +49,7 @@ abstract/
 - `messages` 参数类型为 `list[BaseMessage]`（非 `list[dict]`），子类在发送前自行调用 `to_openai_message()` 或 `messages_to_anthropic_list()` 转换为 wire format。
 - `character` 参数为当前运行中的 agent 角色名，用于消息转换时的可见性过滤和前缀修饰。
 - 多模态内容块必须忠实转换并发送；客户端或 wire format 无法表达某种模态时应抛出 `UnsupportedModalityError`（第三方实现也可抛出自身明确异常），禁止静默删除、替换为普通文本或伪造成功。
+- 多模态转发的目标解析由上层传入活动 Profile 与对应全局回退 Profile；活动引用优先、全局引用只补足空引用。明确的 Provider 模态请求失败可转换为转发错误，其他异常必须继续向上抛出。
 - 子类必须实现 `_convert_messages()` 将 `list[BaseMessage]` 转换为对应 LLM 后端的 wire format。
 
 #### `abstract/llm/loader.py` — `create_llm_client()`

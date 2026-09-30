@@ -20,8 +20,9 @@ from entity.constant import (
 )
 from system.modality_capability import (
     ensure_modality_capability,
-    forward_modality_to_ref_profile,
     resolve_active_model_base_url,
+    resolve_modality_reference_profile,
+    forward_modality_to_ref_profile,
     wrap_forwarded_description,
 )
 
@@ -188,19 +189,18 @@ async def _forward_unsupported_block(
         )
         return block.forward_result_content
 
-    # 无已有描述 → 转发借用。按模态显式检查引用实例。
-    if media_type == "image":
-        ref_profile = profile.vision_image_profile
-    elif media_type == "audio":
-        ref_profile = profile.audio_profile
-    else:  # video
-        ref_profile = profile.vision_video_profile
-    if ref_profile is None:
-        # 未配引用字段 → 报错
+    # 无已有描述 → 按活动 Profile 引用优先、全局回退引用次序解析目标。
+    global_profile = context.app.llm_profile_store.get_global_modality_profile(media_type)
+    _ref_profile = resolve_modality_reference_profile(
+        profile,
+        media_type,
+        global_profile,
+    )
+    if _ref_profile is None:
         raise ValueError(
             f"Active model does not support {media_type} in either tool or user messages, "
-            f"and no {media_type} reference profile is configured. Please configure a reference profile "
-            f"or switch to a model that supports {media_type}."
+            f"and no active or global {media_type} reference profile is configured. "
+            f"Please configure a reference profile or switch to a model that supports {media_type}."
         )
 
     # 构造 media_data

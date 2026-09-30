@@ -7,13 +7,16 @@ import logging
 import os
 import tempfile
 import threading
+import time
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
-from easysave import contains, load, save
+from easysave import EasySaveBackupCleanupError, contains, load, save
 from entity.typeref import make_config
 
 from entity.constant import (
+    LLM_PROFILE_BACKUP_CLEANUP_DELAY_SECONDS,
+    LLM_PROFILE_BACKUP_CLEANUP_RETRIES,
     LLM_PROFILES_ES_FILENAME,
     LLM_PROFILES_ES_KEY,
 )
@@ -31,6 +34,11 @@ _REFERENCE_FIELDS: tuple[str, ...] = (
     "audio_profile",
     "vision_video_profile",
 )
+_GLOBAL_MODALITY_REFERENCE_FIELDS: dict[str, str] = {
+    "image": "global_vision_image_profile",
+    "audio": "global_audio_profile",
+    "video": "global_vision_video_profile",
+}
 _PROFILE_FIELDS: tuple[str, ...] = (
     "name",
     "llm_client_name",
@@ -125,6 +133,69 @@ class LLMProfileStore:
         """返回 Profile 是否是根对象当前的全局元数据 Profile 实例。"""
         with self._lock:
             return self._data.metadata_profile is profile
+
+    @staticmethod
+    def _global_modality_field(media_type: str) -> str:
+        try:
+            return _GLOBAL_MODALITY_REFERENCE_FIELDS[media_type]
+        except KeyError as exc:
+            raise ValueError(f"Unsupported modality type: {media_type!r}") from exc
+
+    def get_global_modality_profile(
+        self,
+        media_type: Literal["image", "audio", "video"],
+    ) -> LLMProfile | None:
+        """返回指定媒体类型的全局回退 Profile 实例。"""
+        field = self._global_modality_field(media_type)
+        with self._lock:
+            return getattr(self._data, field)
+
+    def set_global_modality_profile(
+        self,
+        media_type: Literal["image", "audio", "video"],
+        profile: LLMProfile | None,
+    ) -> None:
+        """设置指定媒体类型的全局回退 Profile 引用并持久化。"""
+        field = self._global_modality_field(media_type)
+        with self._lock:
+            if profile is not None and not any(
+                candidate is profile for candidate in self._data.profiles
+            ):
+                raise ValueError(
+                    f"LLMProfileData.{field} must reference a profile in profiles"
+                )
+            previous = getattr(self._data, field)
+            setattr(self._data, field, profile)
+            try:
+                self._validate_root(self._data)
+                self._save_unlocked()
+            except Exception:
+                setattr(self._data, field, previous)
+                raise
+
+    def get_global_modality_profiles(self) -> dict[str, LLMProfile | None]:
+        """返回三种媒体的全局回退 Profile 实例映射。"""
+        with self._lock:
+            return {
+                media_type: getattr(self._data, field)
+                for media_type, field in _GLOBAL_MODALITY_REFERENCE_FIELDS.items()
+            }
+
+    def is_global_modality_profile(
+        self,
+        profile: LLMProfile,
+        media_type: Literal["image", "audio", "video"],
+    ) -> bool:
+        """返回 Profile 是否是指定媒体类型的全局回退 Profile。"""
+        return self.get_global_modality_profile(media_type) is profile
+
+    def is_any_global_modality_profile(self, profile: LLMProfile) -> bool:
+        """返回 Profile 是否被任一全局多模态引用指向。"""
+        with self._lock:
+            return any(
+                getattr(self._data, field) is profile
+                for field in _GLOBAL_MODALITY_REFERENCE_FIELDS.values()
+            )
 
     def list_profiles(self) -> list[LLMProfile]:
         """返回根列表的浅拷贝，列表元素仍是根对象中的实例。"""
@@ -249,7 +320,7 @@ class LLMProfileStore:
             return profile
 
     def assert_removable(self, profile: LLMProfile) -> None:
-        """确认没有其他根 Profile 直接引用目标实例。"""
+        """确认目标实例没有被其他 Profile 或全局多模态引用。"""
         with self._lock:
             for owner in self._data.profiles:
                 if owner is profile:
@@ -260,6 +331,10 @@ class LLMProfileStore:
                             f"LLM profile {profile.name!r} is referenced by "
                             f"{owner.name!r}.{field}"
                         )
+            if self.is_any_global_modality_profile(profile):
+                raise ValueError(
+                    f"LLM profile {profile.name!r} is referenced by a global modality profile"
+                )
 
     def remove_profile(self, name: str) -> LLMProfile:
         """移除未被其他根 Profile 引用的实例。"""
@@ -300,7 +375,13 @@ class LLMProfileStore:
     def _validate_root(self, data: LLMProfileData) -> None:
         if not isinstance(data, LLMProfileData):
             raise TypeError("Profile root must be LLMProfileData")
-        if set(data.__dict__) - {"profiles", "approval_profile", "metadata_profile"}:
+        allowed_fields = {
+            "profiles",
+            "approval_profile",
+            "metadata_profile",
+            *(_GLOBAL_MODALITY_REFERENCE_FIELDS.values()),
+        }
+        if set(data.__dict__) - allowed_fields:
             raise TypeError("LLMProfileData contains unknown fields")
         if not isinstance(data.profiles, list):
             raise TypeError("LLMProfileData.profiles must be a list")
@@ -334,6 +415,17 @@ class LLMProfileStore:
             if id(metadata_profile) not in profile_ids:
                 raise ValueError(
                     "LLMProfileData.metadata_profile must reference a profile in profiles"
+                )
+
+        for field in _GLOBAL_MODALITY_REFERENCE_FIELDS.values():
+            reference = getattr(data, field)
+            if reference is None:
+                continue
+            if not isinstance(reference, LLMProfile):
+                raise TypeError(f"LLMProfileData.{field} must be an LLMProfile or None")
+            if id(reference) not in profile_ids:
+                raise ValueError(
+                    f"LLMProfileData.{field} must reference a profile in profiles"
                 )
 
         for profile in data.profiles:
@@ -422,6 +514,30 @@ class LLMProfileStore:
     # v2 写入
     # ------------------------------------------------------------------
 
+    @staticmethod
+    def _cleanup_easysave_backup_after_save(
+        temp_path: Path,
+        original_error: EasySaveBackupCleanupError,
+    ) -> None:
+        """清理 easysave 已提交临时文件留下的 Windows 备份。"""
+        backup_path = Path(f"{temp_path}.bak")
+        last_error: OSError | None = None
+        for attempt in range(LLM_PROFILE_BACKUP_CLEANUP_RETRIES):
+            try:
+                backup_path.unlink(missing_ok=True)
+                if attempt:
+                    logger.info(
+                        "Removed transient easysave backup after retry | path=%s attempts=%d",
+                        backup_path,
+                        attempt + 1,
+                    )
+                return
+            except OSError as exc:
+                last_error = exc
+                if attempt + 1 < LLM_PROFILE_BACKUP_CLEANUP_RETRIES:
+                    time.sleep(LLM_PROFILE_BACKUP_CLEANUP_DELAY_SECONDS)
+        raise original_error from last_error
+
     def _save_unlocked(self, data: LLMProfileData | None = None) -> None:
         target = data if data is not None else self._data
         self._validate_root(target)
@@ -448,7 +564,12 @@ class LLMProfileStore:
                 encoding="utf-8",
             )
             # 必须直接传递 LLMProfileData，保留 easysave 的对象引用图。
-            save(LLM_PROFILES_ES_KEY, make_config(temp_path), target)
+            try:
+                save(LLM_PROFILES_ES_KEY, make_config(temp_path), target)
+            except EasySaveBackupCleanupError as exc:
+                # easysave 此时已完成临时目标的原子替换；只重试 Windows
+                # 对临时备份的删除，然后继续外层的最终原子替换。
+                self._cleanup_easysave_backup_after_save(temp_path, exc)
             replace_atomic(temp_path, self._path)
         finally:
             if temp_path.exists():

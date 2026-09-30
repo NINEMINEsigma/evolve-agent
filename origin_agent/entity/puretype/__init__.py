@@ -7,6 +7,8 @@ puretype 包 — 只含有不包含任何方法定义的类型定义。
                   ApprovalResult, ApprovalProfileUpdateRequest, ApprovalProfileState,
                   ApprovalProfileMutationResponse, ToolCallMeta, ToolAllowlistEntry
     metadata    : MetadataProfileUpdateRequest, MetadataProfileState, MetadataProfileMutationResponse
+    modality    : ModalityType, ModalityProfileState, ModalityProfileUpdateRequest,
+                  ModalityProfileMutationResponse, ModalityProfileStates
     llm         : ToolCallRequest, Usage, MessageMetrics, LLMResponse, ToolCallDeltaPhase,
                   ToolCallDelta, StreamChunk, LLMProfile, LLMProfileData, LLMProfilePayload,
                   LLMProfileUpdateRequest, LLMProfileDeleteRequest, LLMProfileMutationResponse,
@@ -49,6 +51,13 @@ from .metadata import (
     MetadataProfileUpdateRequest,
     MetadataProfileState,
     MetadataProfileMutationResponse,
+)
+from .modality import (
+    ModalityType,
+    ModalityProfileState,
+    ModalityProfileUpdateRequest,
+    ModalityProfileMutationResponse,
+    ModalityProfileStates,
 )
 from .llm import (
     ToolCallRequest,
@@ -184,6 +193,12 @@ __all__ = [
     "MetadataProfileUpdateRequest",
     "MetadataProfileState",
     "MetadataProfileMutationResponse",
+    # modality
+    "ModalityType",
+    "ModalityProfileState",
+    "ModalityProfileUpdateRequest",
+    "ModalityProfileMutationResponse",
+    "ModalityProfileStates",
     "ToolCallMeta",
     "ToolAllowlistEntry",
     # llm

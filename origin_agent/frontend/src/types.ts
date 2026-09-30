@@ -244,6 +244,7 @@ export type MessageType =
   | "llm_profile_changed"
   | "approval_profile_changed"
   | "metadata_profile_changed"
+  | "modality_profile_changed"
   | "agentspace_event"
   | "client_diagnostic"
   | "handsfree_mode"
@@ -317,6 +318,15 @@ export interface WSMessage {
   metadata_profile_name?: string | null;    // METADATA_PROFILE_CHANGED
   metadata_profile_model?: string | null;   // METADATA_PROFILE_CHANGED
   metadata_profile_available?: boolean;     // METADATA_PROFILE_CHANGED
+  modality_vision_image_profile_name?: string | null; // MODALITY_PROFILE_CHANGED
+  modality_vision_image_profile_model?: string | null;
+  modality_vision_image_profile_available?: boolean;
+  modality_audio_profile_name?: string | null;
+  modality_audio_profile_model?: string | null;
+  modality_audio_profile_available?: boolean;
+  modality_vision_video_profile_name?: string | null;
+  modality_vision_video_profile_model?: string | null;
+  modality_vision_video_profile_available?: boolean;
   handsfree_mode?: boolean;                  // HANDSFREE_MODE：服务端权威回执（向后兼容）
   approval_mode?: ApprovalMode;             // HANDSFREE_MODE：服务端权威审批模式（manual/handsfree/yolo）
   history_count?: number;                    // HISTORY_SYNC：当前正典 History 消息数
@@ -589,6 +599,20 @@ export interface MetadataProfileState {
   profile_name: string | null;
   model: string | null;
   available: boolean;
+}
+
+export type ModalityType = "image" | "audio" | "video";
+
+export interface ModalityProfileState {
+  profile_name: string | null;
+  model: string | null;
+  available: boolean;
+}
+
+export interface ModalityProfileStates {
+  image: ModalityProfileState;
+  audio: ModalityProfileState;
+  video: ModalityProfileState;
 }
 
 export interface OperationNotice {

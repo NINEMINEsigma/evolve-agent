@@ -14,7 +14,7 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import * # type: ignore
 from entity.constant import SYSTEM_CHARACTER_NAME
-from entity.puretype import ApprovalResult, MessageMetrics
+from entity.puretype import ApprovalResult, MessageMetrics, ModalityProfileStates
 
 if TYPE_CHECKING:
     from fastapi import WebSocket
@@ -295,6 +295,46 @@ class FrontendSink(AgentSink):
                 failures.append(session_id)
                 logger.warning(
                     "Failed to broadcast metadata Profile change | session=%s",
+                    session_id,
+                    exc_info=True,
+                )
+        return failures
+
+    async def broadcast_modality_profile_change(
+        self,
+        states: ModalityProfileStates,
+    ) -> list[str]:
+        """向所有已连接前端广播三路全局多模态 Profile 状态。"""
+        from gateway.chat import Message, MessageType
+
+        failures: list[str] = []
+        for session_id, ws in self.get_all_ws().items():
+            message = Message(
+                type=MessageType.MODALITY_PROFILE_CHANGED,
+                session_id=session_id,
+                modality_vision_image_profile_name=states.image.profile_name,
+                modality_vision_image_profile_model=states.image.model,
+                modality_vision_image_profile_available=states.image.available,
+                modality_audio_profile_name=states.audio.profile_name,
+                modality_audio_profile_model=states.audio.model,
+                modality_audio_profile_available=states.audio.available,
+                modality_vision_video_profile_name=states.video.profile_name,
+                modality_vision_video_profile_model=states.video.model,
+                modality_vision_video_profile_available=states.video.available,
+            )
+            try:
+                payload = message.model_dump(exclude_none=True)
+                payload["modality_vision_image_profile_name"] = states.image.profile_name
+                payload["modality_vision_image_profile_model"] = states.image.model
+                payload["modality_audio_profile_name"] = states.audio.profile_name
+                payload["modality_audio_profile_model"] = states.audio.model
+                payload["modality_vision_video_profile_name"] = states.video.profile_name
+                payload["modality_vision_video_profile_model"] = states.video.model
+                await ws.send_text(json.dumps(payload, ensure_ascii=False))
+            except Exception:
+                failures.append(session_id)
+                logger.warning(
+                    "Failed to broadcast modality Profile change | session=%s",
                     session_id,
                     exc_info=True,
                 )

@@ -140,6 +140,10 @@ def build_agent_system_prompt(
     loaded_toolsets: set[str] | None = None,
 ) -> list[str]:
     """构建 Agent 使用的 system prompt 段落列表。"""
+    global_modality_profiles = None
+    if profile is not None:
+        from system.application import Application
+        global_modality_profiles = Application.current().llm_profile_store.get_global_modality_profiles()
     return build_system_prompt(
         mode=ctx.mode,
         extra_blocks=skill_blocks,
@@ -151,6 +155,7 @@ def build_agent_system_prompt(
         tool_availability_scope=tool_availability_scope,
         runtime_ctx=ctx,
         profile=profile,
+        global_modality_profiles=global_modality_profiles,
         session_id=session_id,
         loaded_toolsets=loaded_toolsets,
     )

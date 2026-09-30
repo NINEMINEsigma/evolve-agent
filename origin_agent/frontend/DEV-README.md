@@ -31,7 +31,7 @@ frontend/
 │   │   ├── useSessionStore.ts       ← 会话列表与元数据管理
 │   │   ├── useSubagentManager.ts    ← 子代理状态管理
 │   │   ├── useUploadManager.ts      ← 文件上传管理
-│   │   ├── useLlmProfiles.ts         ← Profile 列表、单对象 CRUD、活动名称、审批与全局元数据 Profile状态
+│   │   ├── useLlmProfiles.ts         ← Profile 列表、单对象 CRUD、活动名称、审批/元数据/三路全局多模态 Profile 状态
 │   │   ├── useAgentspace.ts         ← Agentspace 文件浏览
 │   │   ├── useSessionSite.ts        ← 会话网页探测与 WebSocket事件热刷新
 │   │   ├── useEdgeDrawer.ts         ← 边缘抽屉三态状态机
@@ -184,7 +184,7 @@ frontend/
 | `features/chat/chatRuntimeStore.ts` | Zustand 聊天运行时唯一高频状态：完整骨架、内容行、live 尾部、输入草稿、pending、滚动与资源；通用 `liveId → historyRowId`关联把user/assistant/tool/system实时行提升到skeleton正典位置，工具请求和结果按 `tool_call_id` 幂等合并为同一工具调用卡片，REST内容页随后覆盖临时内容；未映射或History失败的行不按版本号清理；`toggleMessageCollapse(id, source)`分别维护历史与实时折叠状态 |
 | `features/chat/chatRuntimeController.ts` | History skeleton/page 请求代际、Abort、页去重、正典同步、15秒超时局部错误与诊断 reporter、Minimap 随机目标和资源懒加载 |
 | `features/chat/useChatScrollController.ts` | `initializing/following/detached/minimap_dragging/returning` 五态追底与回底控制；实时提交和列表高度变化通过可取消、按浏览器帧合并的被动追底调度读取 Virtuoso scroller 物理底部；用户意图、小地图拖拽、消息高度操作和非 `following` 状态会取消待执行帧 |
-| `useLlmProfiles.ts` | 全局Profile目录CRUD、客户端列表、审批/元数据引用状态；组合按会话待用选择，写成功与后续刷新失败分离，目录/引用请求按代际收敛 |
+| `useLlmProfiles.ts` | 全局Profile目录CRUD、客户端列表、审批/元数据引用状态及图片/音频/视频三路全局回退引用；多模态状态一次 GET 恢复、三路独立 PUT，写成功与后续刷新失败分离，目录/引用请求按代际收敛 |
 | `useSessionLlmSelection.ts` | 按会话名称存储、服务端恢复、读取取消与代际隔离、Profile重命名/删除处理 |
 | `useLlmProfileEditor.ts` | 抽屉只读/编辑/新建状态、纯内存草稿、离开确认、删除替换、外部冲突和保存结果确认 |
 | `useWebSocketConnection.ts` | WebSocket 连接生命周期管理：建立/断开/重连/心跳；会话状态预检和握手复检使用可取消15秒截止，超时报告后不误判删除；消息入口按连接代际和当前 WebSocket 实例丢弃旧连接迟到消息，避免快速切换会话时污染当前状态；普通断开保留指数退避重连，永久删除的已建立连接按 4004 停止重连，握手拒绝则通过 `status.exists`二次确认后通知上层切换“随意聊聊” |
@@ -199,7 +199,7 @@ frontend/
 | `useSessionStage.ts` | 会话舞台层状态：通过稳定入口的服务端重定向取得最终 URL；Hook 不解析 `.meta`，以入口提交规则和版本探测自动刷新 iframe |
 | `useSessionChatStyle.ts` | 会话聊天区自定义样式状态：服务端解析重定向，按最终 CSS URL 获取内容；PostCSS 作用域处理并按最终 URL重写 CSS `url()`，禁止 `@import` |
 
-“模型配置”抽屉由顶部分页按钮切换“模型配置”和“全局配置引用”，两个页面在抽屉内保持挂载。模型页按客户端→API端点→Profile纵向分组，详情同时只展开一个；先展示只读字段，再显式编辑。连接、生成参数、多模态分工、人格均使用常显分区标题，查看和编辑状态都不再单独折叠这些区块。Profile行只显示用途标签，不提供角色切换按钮。全局页分别显示审批/元数据用途卡、引用选择器、可用状态和清空确认；用途、保存时机、未配置回退及不可用规则通过标题旁的问号按钮复用全局 `data-tooltip` 展示，并提供完整可访问名称，不再常驻长段说明。错误与重试操作、清空确认的影响说明仍直接显示。引用选择立即保存到服务端，状态由REST响应与WebSocket广播收敛。
+“模型配置”抽屉由顶部分页按钮切换“模型配置”和“全局配置引用”，两个页面在抽屉内保持挂载。模型页按客户端→API端点→Profile纵向分组，详情同时只展开一个；先展示只读字段，再显式编辑。连接、生成参数、多模态分工、人格均使用常显分区标题，查看和编辑状态都不再单独折叠这些区块。Profile行只显示用途标签，不提供角色切换按钮。全局页分别显示审批/元数据用途卡和图片/音频/视频三张独立全局回退卡片；每张卡片使用独立的可用状态、保存状态、错误状态和清空确认。多模态卡片明确说明活动 Profile 引用优先，活动引用失败时不切换全局回退。引用选择立即保存到服务端，状态由 REST 响应与 WebSocket 广播收敛。
 
 会话待用 Profile 选择只通过顶部栏修改。`useSessionLlmSelection` 使用 `evolve_session_llm_profile:<encoded sessionId>` 每会话键保存名称，本地明确选择优先；缺失时读取 `GET /api/sessions/{id}/llm-profile`。空sessionId不继承旧会话值；读失败不写空名称；目录加载失败不误判名称已删除。旧 `evolve_active_llm_profile` 全局键不再读取，也不猜测迁移。新建/分支/合并/旋转按新ID恢复服务端指针，不复制父会话未提交选择。发送消息与重新生成才提交名称，resume不受待用选择影响。读取请求完整覆盖响应正文的15秒截止，切会话/用户重选/名称广播使旧请求失效。
 

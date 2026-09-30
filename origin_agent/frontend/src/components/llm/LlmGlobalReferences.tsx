@@ -1,4 +1,5 @@
 import { useEffect, useId, useMemo, useState } from "react";
+import type { ModalityType } from "../../types";
 import type { LlmProfileManager } from "../../hooks/useLlmProfiles";
 import { groupLlmProfiles } from "../../utils/llmProfile";
 import { LlmConfirmation } from "./LlmProfileDialogs";
@@ -13,12 +14,13 @@ interface LlmGlobalReferencesProps {
 export default function LlmGlobalReferences({ manager, onOpenProfiles, onDialogOpenChange }: LlmGlobalReferencesProps) {
   const id = useId();
   const [confirmRole, setConfirmRole] = useState<ReferenceRole | null>(null);
+  const [modalityConfirmRole, setModalityConfirmRole] = useState<ModalityType | null>(null);
   const [errors, setErrors] = useState<Partial<Record<ReferenceRole, string>>>({});
   const groups = useMemo(() => groupLlmProfiles(manager.profiles, ""), [manager.profiles]);
   useEffect(() => {
-    onDialogOpenChange(confirmRole !== null);
+    onDialogOpenChange(confirmRole !== null || modalityConfirmRole !== null);
     return () => onDialogOpenChange(false);
-  }, [confirmRole, onDialogOpenChange]);
+  }, [confirmRole, modalityConfirmRole, onDialogOpenChange]);
   const assign = async (role: ReferenceRole, name: string | null) => {
     setErrors((previous) => ({ ...previous, [role]: undefined }));
     try {
@@ -33,10 +35,38 @@ export default function LlmGlobalReferences({ manager, onOpenProfiles, onDialogO
     if (confirmRole === "approval" ? manager.approvalBusy : manager.metadataBusy) return;
     setConfirmRole(null);
   };
+  const cancelModalityConfirm = () => {
+    const busy = modalityConfirmRole === "image"
+      ? manager.modalityImageBusy
+      : modalityConfirmRole === "audio"
+        ? manager.modalityAudioBusy
+        : modalityConfirmRole === "video"
+          ? manager.modalityVideoBusy
+          : false;
+    if (busy) return;
+    setModalityConfirmRole(null);
+  };
+  const assignModality = async (mediaType: ModalityType, name: string | null) => {
+    try {
+      await manager.setModalityProfile(mediaType, name);
+      if (name === null) setModalityConfirmRole(null);
+    } catch {
+      // 状态 hook 已保留该媒体自己的错误；不影响其他媒体卡片。
+    }
+  };
   const cards: { role: ReferenceRole; title: string; description: string; empty: string }[] = [
     { role: "approval", title: "审批模型", description: "为脱手模式的工具调用执行自动审批。选择在所有会话间共享，不改变各会话的审批模式。", empty: "未配置时，脱手模式无法使用审批模型；YOLO 不受影响。" },
     { role: "metadata", title: "元数据模型", description: "统一生成会话标题、标签与摘要。可选择轻量模型，独立于各会话的对话模型。", empty: "未配置时，使用目标会话已保存的模型配置。" },
   ];
+  const modalityCards: { mediaType: ModalityType; title: string; description: string }[] = [
+    { mediaType: "image", title: "全局图片转发", description: "当前活动 Profile 未配置读图转发引用时使用。" },
+    { mediaType: "audio", title: "全局音频转发", description: "当前活动 Profile 未配置音频转发引用时使用。" },
+    { mediaType: "video", title: "全局视频转发", description: "当前活动 Profile 未配置读视频转发引用时使用。" },
+  ];
+  const modalityStatus = (mediaType: ModalityType) => mediaType === "image" ? manager.modalityImageStatus : mediaType === "audio" ? manager.modalityAudioStatus : manager.modalityVideoStatus;
+  const modalityBusy = (mediaType: ModalityType) => mediaType === "image" ? manager.modalityImageBusy : mediaType === "audio" ? manager.modalityAudioBusy : manager.modalityVideoBusy;
+  const modalityError = (mediaType: ModalityType) => mediaType === "image" ? manager.modalityImageError : mediaType === "audio" ? manager.modalityAudioError : manager.modalityVideoError;
+  const modalityCardsState = (mediaType: ModalityType) => manager.modalityProfileStates[mediaType];
   return <div className="llm-references-page">
     <div className="llm-page-intro"><div className="llm-reference-title"><h3>全局配置引用</h3>
       <button type="button" className="llm-help" data-tooltip="引用已有配置，无需重复填写连接信息。更改后立即保存到服务端。"
@@ -74,12 +104,45 @@ export default function LlmGlobalReferences({ manager, onOpenProfiles, onDialogO
         }}>重新读取</button></div>}
       </section>;
     })}
+    {modalityCards.map(({ mediaType, title, description }) => {
+      const state = modalityCardsState(mediaType);
+      const status = modalityStatus(mediaType);
+      const busy = modalityBusy(mediaType);
+      const error = modalityError(mediaType);
+      const unknown = !!state.profile_name && !manager.profiles.some((profile) => profile.name === state.profile_name);
+      const help = `${description} 活动 Profile 已明确指定引用但调用失败时，不会切换到这里的全局回退。`;
+      return <section key={mediaType} className="llm-reference-card">
+        <div className="llm-reference-title"><h3>{title}</h3><span className="llm-tag">全局回退</span>
+          <button type="button" className="llm-help" data-tooltip={help} aria-label={`${title}说明：${help}`}>?</button>
+        </div>
+        <label className="llm-field" htmlFor={`${id}-modality-${mediaType}`}>引用配置
+          <select id={`${id}-modality-${mediaType}`} value={state.profile_name ?? ""} disabled={busy || status === "loading" || manager.profilesStatus !== "ready"}
+            onChange={(event) => { if (event.target.value) void assignModality(mediaType, event.target.value); }}>
+            <option value="" disabled>{status === "loading" ? "正在读取…" : "未配置"}</option>
+            {unknown && <option value={state.profile_name!}>{state.profile_name}（目录中不可用）</option>}
+            {groups.map((group) => group.baseUrls.map((url) => <optgroup key={JSON.stringify([mediaType, group.client, url.baseUrl])} label={`${group.client} · ${url.baseUrl || "未设置端点"}`}>
+              {url.profiles.map((profile) => <option key={profile.name} value={profile.name}>{profile.name} · {profile.model || "未设置模型"}</option>)}
+            </optgroup>))}
+          </select>
+        </label>
+        <div className="llm-reference-footer"><span className={`llm-reference-status${state.profile_name && !state.available ? " llm-reference-status--warning" : ""}`} role="status">
+          {busy ? "保存中…" : status === "loading" ? "正在读取引用状态…" : status === "error" ? "读取失败，状态尚未确认" : state.profile_name ? state.available ? `已配置 · ${state.model || state.profile_name}` : "配置不可用" : "未配置"}
+        </span><button className="llm-button" disabled={busy || status !== "ready" || !state.profile_name}
+          onClick={() => setModalityConfirmRole(mediaType)}>清除</button></div>
+        {error && <div className="llm-message llm-message--error" role="alert">{error}<button className="llm-text-button" disabled={busy} onClick={() => void manager.fetchModalityProfiles().catch(() => {})}>重新读取</button></div>}
+      </section>;
+    })}
     {manager.profilesStatus === "ready" && manager.profiles.length === 0 && <div className="llm-empty"><p>先创建一个模型配置，再为这些用途建立引用。</p><button className="llm-button" onClick={onOpenProfiles}>前往模型配置</button></div>}
     {confirmRole && <LlmConfirmation title={confirmRole === "approval" ? "清空审批模型引用？" : "清空元数据模型引用？"} onCancel={cancelConfirm} actions={<>
       <button className="modal-btn modal-btn--secondary" data-llm-cancel disabled={manager.approvalBusy || manager.metadataBusy} onClick={cancelConfirm}>取消</button>
       <button className="modal-btn modal-btn--danger" disabled={manager.approvalBusy || manager.metadataBusy} onClick={() => void assign(confirmRole, null)}>确认清空</button>
     </>}><p>{confirmRole === "approval" ? "清空后，脱手模式将无法使用审批模型；各会话审批模式保持不变。" : "清空后，标题、标签和摘要将使用各会话已保存的模型配置。"}</p>
       {errors[confirmRole] && <p className="llm-field-error" role="alert">{errors[confirmRole]}</p>}
+    </LlmConfirmation>}
+    {modalityConfirmRole && <LlmConfirmation title="清空全局多模态回退引用？" onCancel={cancelModalityConfirm} actions={<>
+      <button className="modal-btn modal-btn--secondary" data-llm-cancel disabled={modalityBusy(modalityConfirmRole)} onClick={cancelModalityConfirm}>取消</button>
+      <button className="modal-btn modal-btn--danger" disabled={modalityBusy(modalityConfirmRole)} onClick={() => void assignModality(modalityConfirmRole, null)}>确认清空</button>
+    </>}><p>清空后，只有活动 Profile 配置了对应媒体引用时才会转发；未配置时该媒体转发会失败。</p>
     </LlmConfirmation>}
   </div>;
 }

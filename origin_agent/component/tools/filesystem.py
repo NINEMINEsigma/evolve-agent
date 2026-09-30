@@ -45,7 +45,7 @@ except Exception:  # pragma: no cover — PIL is optional
     logger.debug("PIL not available; image size parsing disabled", exc_info=True)
     PILImage = None  # type: ignore
 
-from system.modality_capability import get_cached_vision_support, get_cached_audio_support, get_cached_user_vision_support, get_cached_user_audio_support, get_cached_video_support, get_cached_user_video_support, resolve_active_model_base_url, forward_modality_to_ref_profile, ensure_modality_capability, wrap_forwarded_description, forwarded_tag_for_media
+from system.modality_capability import get_cached_vision_support, get_cached_audio_support, get_cached_user_vision_support, get_cached_user_audio_support, get_cached_video_support, get_cached_user_video_support, resolve_active_model_base_url, resolve_modality_reference_profile, forward_modality_to_ref_profile, ensure_modality_capability, wrap_forwarded_description, forwarded_tag_for_media
 
 logger = logging.getLogger(__name__)
 
@@ -312,7 +312,15 @@ async def _handle_read(args: dict[str, Any], context: ToolContext | None = None)
                 if user_vision is False:
                     # tool 和 user 都不支持 → 检查是否配置了引用字段
                     active_profile = _profile
-                    if active_profile and active_profile.vision_image_profile:
+                    forward_profile = (
+                        resolve_modality_reference_profile(
+                            active_profile,
+                            "image",
+                            context.app.llm_profile_store.get_global_modality_profile("image"),
+                        )
+                        if active_profile is not None else None
+                    )
+                    if active_profile and forward_profile:
                         # 读取文件 + base64
                         file_size = resolved.real.stat().st_size
                         if file_size > _MAX_IMAGE_SIZE:
@@ -359,6 +367,7 @@ async def _handle_read(args: dict[str, Any], context: ToolContext | None = None)
                         }
                     return tool_error(
                         f"This provider does not support images inside either tool messages or user messages, "
+                        f"and no active or global image reference profile is configured, "
                         f"so the Read tool cannot deliver image content to the model.",
                         path=path,
                         model=model_name,
@@ -471,7 +480,15 @@ async def _handle_read(args: dict[str, Any], context: ToolContext | None = None)
                 if user_audio is False:
                     # tool 和 user 都不支持 → 检查是否配置了引用字段
                     active_profile = _profile
-                    if active_profile and active_profile.audio_profile:
+                    forward_profile = (
+                        resolve_modality_reference_profile(
+                            active_profile,
+                            "audio",
+                            context.app.llm_profile_store.get_global_modality_profile("audio"),
+                        )
+                        if active_profile is not None else None
+                    )
+                    if active_profile and forward_profile:
                         file_size = resolved.real.stat().st_size
                         if file_size > _MAX_AUDIO_SIZE:
                             return tool_error(
@@ -515,6 +532,7 @@ async def _handle_read(args: dict[str, Any], context: ToolContext | None = None)
                         }
                     return tool_error(
                         f"This provider does not support audio inside either tool messages or user messages, "
+                        f"and no active or global audio reference profile is configured, "
                         f"so the Read tool cannot deliver audio content to the model.",
                         path=path,
                         model=model_name,
@@ -616,7 +634,15 @@ async def _handle_read(args: dict[str, Any], context: ToolContext | None = None)
                 if user_video is False:
                     # tool 和 user 都不支持 → 检查是否配置了引用字段
                     active_profile = _profile
-                    if active_profile and active_profile.vision_video_profile:
+                    forward_profile = (
+                        resolve_modality_reference_profile(
+                            active_profile,
+                            "video",
+                            context.app.llm_profile_store.get_global_modality_profile("video"),
+                        )
+                        if active_profile is not None else None
+                    )
+                    if active_profile and forward_profile:
                         file_size = resolved.real.stat().st_size
                         if file_size > _MAX_VIDEO_SIZE:
                             return tool_error(
@@ -656,7 +682,7 @@ async def _handle_read(args: dict[str, Any], context: ToolContext | None = None)
                         }
                     return tool_error(
                         f"Video not supported by model '{model_name}' in either tool or user messages, "
-                        f"and no vision_video_profile is configured.",
+                        f"and no active or global vision_video reference profile is configured.",
                         path=path, model=model_name,
                     )
                 if user_video is True:

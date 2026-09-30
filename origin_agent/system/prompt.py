@@ -155,6 +155,7 @@ def build_system_prompt(
     tool_availability_scope: ToolAvailability = ToolAvailability.MAIN,
     runtime_ctx: RuntimeContext | None = None,   # 运行时配置：注入 base.txt 占位符
     profile: LLMProfile | None = None,             # 活跃 LLM 配置（优先于 runtime_ctx 的已删除字段）
+    global_modality_profiles: dict[str, LLMProfile | None] | None = None,
     session_id: str = "",                           # 当前会话 ID，注入 base.txt 的 {{session_id}} 占位符
     loaded_toolsets: set[str] | None = None,        # 会话已加载工具集名称集合
 ) -> list[str]:
@@ -265,7 +266,9 @@ def build_system_prompt(
     # 3b. 多模态能力与转发配置 — 有活跃 profile 时注入（只读探测缓存，不触发探测）
     if profile is not None:
         modality_block: str = build_modality_prompt_block(
-            profile, Path(agentspace) if agentspace else None,
+            profile,
+            Path(agentspace) if agentspace else None,
+            global_modality_profiles,
         )
         if modality_block:
             blocks.append(modality_block)

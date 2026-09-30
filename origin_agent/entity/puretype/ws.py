@@ -37,6 +37,7 @@ class MessageType(str, Enum):
     LLM_PROFILE_CHANGED = "llm_profile_changed"
     APPROVAL_PROFILE_CHANGED = "approval_profile_changed"
     METADATA_PROFILE_CHANGED = "metadata_profile_changed"
+    MODALITY_PROFILE_CHANGED = "modality_profile_changed"
     AGENTSPACE_EVENT = "agentspace_event"
     CLIENT_DIAGNOSTIC = "client_diagnostic"
 
@@ -140,6 +141,16 @@ class Message(BaseModel):
     metadata_profile_name: str | None = None
     metadata_profile_model: str | None = None
     metadata_profile_available: bool | None = None
+    # MODALITY_PROFILE_CHANGED：全局多模态回退 Profile 状态
+    modality_vision_image_profile_name: str | None = None
+    modality_vision_image_profile_model: str | None = None
+    modality_vision_image_profile_available: bool | None = None
+    modality_audio_profile_name: str | None = None
+    modality_audio_profile_model: str | None = None
+    modality_audio_profile_available: bool | None = None
+    modality_vision_video_profile_name: str | None = None
+    modality_vision_video_profile_model: str | None = None
+    modality_vision_video_profile_available: bool | None = None
     # HANDSFREE_MODE：服务端权威脱手模式回执
     handsfree_mode: bool | None = None
     # HANDSFREE_MODE：服务端权威审批模式（manual/handsfree/yolo）

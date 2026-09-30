@@ -111,6 +111,7 @@ WS /ws/chat?resume=<sid>
 | `agentspace_event` | 聊天页会话视觉使用的 typed Agentspace事件；载荷沿用既有文件、锁和重同步元数据范围 |
 | `llm_profile_changed` | Profile 重命名/删除通知；顶层携带 `operation`、`old_name`、`new_name` |
 | `metadata_profile_changed` | 全局元数据 Profile 状态通知；显式携带可空名称、模型和可用性 |
+| `modality_profile_changed` | 图片、音频、视频三路全局回退 Profile 状态通知；一次携带三路可空名称、模型和可用性 |
 | `confirm_request` | 请求用户审批 |
 | `ask_request` | 请求用户回答 |
 | `error` | 错误通知 |
@@ -221,6 +222,15 @@ Shell 输出由 Agent 使用 `ReadShell` 拉取，不通过聊天 WebSocket 主�
 | PUT | `/api/metadata/profile` | 按 Profile 名称设置或以 `null`清空全局元数据 Profile |
 
 自动标题、自动标签和摘要直接调用 Application 持有的 `SessionMetadataService`，不要求目标会话存在运行时 Loop。全局元数据 Profile未配置时按目标会话自己的活动 Profile回退；明确配置但不可用时返回失败，不静默回退。配置变化通过 `metadata_profile_changed`广播。删除当前元数据 Profile只清空全局引用，不自动采用删除请求中的替换 Profile。
+
+### 全局多模态回退 Profile
+
+| 方法 | 端点 | 说明 |
+|---|---|---|
+| GET | `/api/modality/profiles` | 一次返回图片、音频、视频三路全局回退 Profile 的名称、模型和可用性 |
+| PUT | `/api/modality/profiles` | 请求体 `{media_type, profile_name}` 只更新其中一路；`profile_name: null` 清空该路引用 |
+
+多模态回退引用直接保存为 `LLMProfileData` 根对象中根列表实例的引用。运行时先使用活动 Profile 的对应引用，只有该引用为空时才读取对应全局引用；活动引用存在但不可用或调用失败时不切换全局回退。三路引用独立管理，Profile 被任一路全局多模态引用时删除请求会被拒绝，用户须先清除引用。Profile 更新后的可用性和名称变化通过 `modality_profile_changed` 广播；非预期异常不被转成普通转发错误。
 
 `/files` 的会话视觉入口支持 GET/HEAD 探测：源目录同级 `.meta` 的 `[redirect]` 只解析一层，合法目标通过 307 指向带 `visual_raw` 的原始入口，避免目标目录再次解析；最终 HEAD 响应返回 `X-Session-Visual-Version`。无效配置静默使用源目录，普通静态文件不受影响。site 的 `/zip` 源目录同样复用该规则。
 

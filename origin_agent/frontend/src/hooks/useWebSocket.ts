@@ -187,6 +187,10 @@ export function useWebSocket() {
       llmProfilesRef.current.handleMetadataProfileChanged(message);
       return;
     }
+    if (message.type === WS_IN.MODALITY_PROFILE_CHANGED) {
+      llmProfilesRef.current.handleModalityProfileChanged(message);
+      return;
+    }
     if (message.type === WS_IN.HANDSFREE_MODE) {
       const mode = isApprovalMode(message.approval_mode)
         ? message.approval_mode

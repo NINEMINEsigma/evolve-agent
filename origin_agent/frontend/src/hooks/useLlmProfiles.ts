@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSessionLlmSelection } from "./useSessionLlmSelection";
 import type {
-  LlmProfile, ApprovalProfileState, MetadataProfileState, LlmLoadStatus,
+  LlmProfile, ApprovalProfileState, MetadataProfileState, ModalityProfileState,
+  ModalityProfileStates, ModalityType, LlmLoadStatus,
   LlmProfileChangeEvent, LlmProfileDeleteResult,
 } from "../types";
 
@@ -100,6 +101,80 @@ function useGlobalProfileReference(endpoint: string) {
   return { state, status, error, busy, refresh, select, receive };
 }
 
+function useGlobalModalityReferences(endpoint: string) {
+  const emptyState: ModalityProfileStates = {
+    image: { profile_name: null, model: null, available: false },
+    audio: { profile_name: null, model: null, available: false },
+    video: { profile_name: null, model: null, available: false },
+  };
+  const [states, setStates] = useState<ModalityProfileStates>(emptyState);
+  const statesRef = useRef(states);
+  const [statuses, setStatuses] = useState<Record<ModalityType, LlmLoadStatus>>({ image: "loading", audio: "loading", video: "loading" });
+  const [errors, setErrors] = useState<Record<ModalityType, string | null>>({ image: null, audio: null, video: null });
+  const [busy, setBusy] = useState<Record<ModalityType, boolean>>({ image: false, audio: false, video: false });
+  const busyRef = useRef(busy);
+  const revision = useRef(0);
+  const publish = useCallback((value: ModalityProfileStates) => {
+    statesRef.current = value;
+    setStates(value);
+    setStatuses({ image: "ready", audio: "ready", video: "ready" });
+    setErrors({ image: null, audio: null, video: null });
+  }, []);
+  const refresh = useCallback(async (showLoading = true): Promise<ModalityProfileStates> => {
+    const token = revision.current;
+    if (showLoading) setStatuses({ image: "loading", audio: "loading", video: "loading" });
+    try {
+      const response = await fetch(endpoint, { cache: "no-store" });
+      if (!response.ok) throw await responseError(response);
+      const value = await response.json() as ModalityProfileStates;
+      if (token === revision.current) publish(value);
+      return value;
+    } catch (cause) {
+      if (token === revision.current) {
+        setStatuses({ image: "error", audio: "error", video: "error" });
+        setErrors({ image: errorText(cause), audio: errorText(cause), video: errorText(cause) });
+      }
+      throw cause;
+    }
+  }, [endpoint, publish]);
+  const select = useCallback(async (mediaType: ModalityType, profileName: string | null) => {
+    if (busyRef.current[mediaType]) throw new Error("配置正在保存，请稍候。");
+    busyRef.current = { ...busyRef.current, [mediaType]: true };
+    setBusy(busyRef.current);
+    revision.current++;
+    try {
+      const response = await fetch(endpoint, {
+        method: "PUT", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ media_type: mediaType, profile_name: profileName }),
+      });
+      if (!response.ok) throw await responseError(response);
+      const data = await response.json() as { state: ModalityProfileState };
+      const next = { ...statesRef.current, [mediaType]: data.state } as ModalityProfileStates;
+      statesRef.current = next;
+      setStates(next);
+      setStatuses((previous) => ({ ...previous, [mediaType]: "ready" }));
+      setErrors((previous) => ({ ...previous, [mediaType]: null }));
+      return data.state;
+    } catch (cause) {
+      setErrors((previous) => ({ ...previous, [mediaType]: errorText(cause) }));
+      throw cause;
+    } finally {
+      busyRef.current = { ...busyRef.current, [mediaType]: false };
+      setBusy(busyRef.current);
+      void refresh(false).catch(() => {});
+    }
+  }, [endpoint, refresh]);
+  const receive = useCallback((value: ModalityProfileStates) => {
+    revision.current++;
+    publish(value);
+  }, [publish]);
+  useEffect(() => {
+    void refresh().catch(() => {});
+    return () => { revision.current++; };
+  }, [refresh]);
+  return { states, statuses, errors, busy, refresh, select, receive };
+}
+
 export function useLlmProfiles(sessionId: string) {
   const [profiles, setProfiles] = useState<LlmProfile[]>([]);
   const profilesRef = useRef<LlmProfile[]>([]);
@@ -117,6 +192,7 @@ export function useLlmProfiles(sessionId: string) {
   const clientsGeneration = useRef(0);
   const approval = useGlobalProfileReference("/api/approval/profile");
   const metadata = useGlobalProfileReference("/api/metadata/profile");
+  const modality = useGlobalModalityReferences("/api/modality/profiles");
   const selection = useSessionLlmSelection({ sessionId, profiles, profilesStatus });
   const selectionRef = useRef(selection);
   selectionRef.current = selection;
@@ -268,6 +344,33 @@ export function useLlmProfiles(sessionId: string) {
     profile_name: msg.metadata_profile_name ?? null, model: msg.metadata_profile_model ?? null,
     available: msg.metadata_profile_available ?? false,
   }), [metadata.receive]);
+  const handleModalityProfileChanged = useCallback((msg: {
+    modality_vision_image_profile_name?: string | null;
+    modality_vision_image_profile_model?: string | null;
+    modality_vision_image_profile_available?: boolean;
+    modality_audio_profile_name?: string | null;
+    modality_audio_profile_model?: string | null;
+    modality_audio_profile_available?: boolean;
+    modality_vision_video_profile_name?: string | null;
+    modality_vision_video_profile_model?: string | null;
+    modality_vision_video_profile_available?: boolean;
+  }) => modality.receive({
+    image: {
+      profile_name: msg.modality_vision_image_profile_name ?? null,
+      model: msg.modality_vision_image_profile_model ?? null,
+      available: msg.modality_vision_image_profile_available ?? false,
+    },
+    audio: {
+      profile_name: msg.modality_audio_profile_name ?? null,
+      model: msg.modality_audio_profile_model ?? null,
+      available: msg.modality_audio_profile_available ?? false,
+    },
+    video: {
+      profile_name: msg.modality_vision_video_profile_name ?? null,
+      model: msg.modality_vision_video_profile_model ?? null,
+      available: msg.modality_vision_video_profile_available ?? false,
+    },
+  }), [modality.receive]);
   const activeProfile = useMemo(() => selection.selectionStatus === "ready"
     ? profiles.find((profile) => profile.name === selection.activeProfileName) ?? null : null,
   [profiles, selection.activeProfileName, selection.selectionStatus]);
@@ -285,6 +388,19 @@ export function useLlmProfiles(sessionId: string) {
     metadataProfile: profiles.find((profile) => profile.name === metadata.state.profile_name) ?? null,
     metadataStatus: metadata.status, metadataError: metadata.error, metadataBusy: metadata.busy,
     fetchMetadataProfile: metadata.refresh, setMetadataProfile: metadata.select, handleMetadataProfileChanged,
+    modalityProfileStates: modality.states,
+    modalityImageStatus: modality.statuses.image,
+    modalityAudioStatus: modality.statuses.audio,
+    modalityVideoStatus: modality.statuses.video,
+    modalityImageError: modality.errors.image,
+    modalityAudioError: modality.errors.audio,
+    modalityVideoError: modality.errors.video,
+    modalityImageBusy: modality.busy.image,
+    modalityAudioBusy: modality.busy.audio,
+    modalityVideoBusy: modality.busy.video,
+    fetchModalityProfiles: modality.refresh,
+    setModalityProfile: modality.select,
+    handleModalityProfileChanged,
   };
 }
 

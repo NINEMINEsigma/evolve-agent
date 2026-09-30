@@ -47,6 +47,10 @@ LLM_RETRY_COUNT: int = 3
 LLM_PROFILES_ES_FILENAME: str = "llm_profiles.es"
 LLM_PROFILES_ES_KEY: str = "v2"
 
+# Windows 文件占用导致 easysave 临时备份清理失败时的有限重试。
+LLM_PROFILE_BACKUP_CLEANUP_RETRIES: int = 10
+LLM_PROFILE_BACKUP_CLEANUP_DELAY_SECONDS: float = 0.05
+
 # 会话级最近使用 Profile 名称指针文件名（存于会话目录下）
 SESSION_LLM_PROFILE_FILENAME: str = "llm_profile.json"
 

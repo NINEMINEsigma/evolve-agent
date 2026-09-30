@@ -22,7 +22,7 @@ import io
 import logging
 import wave
 from pathlib import Path
-from typing import TYPE_CHECKING, TypeGuard
+from typing import TYPE_CHECKING, Literal, TypeGuard
 
 from easysave import load as es_load, save as es_save
 
@@ -219,28 +219,46 @@ def resolve_active_model_base_url(
     return "", "", None
 
 
+def resolve_modality_reference_profile(
+    active_profile: LLMProfile,
+    media_type: Literal["image", "audio", "video"],
+    global_profile: LLMProfile | None = None,
+) -> LLMProfile | None:
+    """解析指定媒体的有效转发 Profile，不访问 Application 单例。
+
+    活动 Profile 的显式引用优先；活动引用为空时使用调用方传入的全局回退引用。
+    """
+    if media_type == "image":
+        active_reference = active_profile.vision_image_profile
+    elif media_type == "audio":
+        active_reference = active_profile.audio_profile
+    else:
+        active_reference = active_profile.vision_video_profile
+    return active_reference if active_reference is not None else global_profile
+
+
 async def forward_modality_to_ref_profile(
     context: ToolContext | None,
     active_profile: LLMProfile,
     media_data: dict,
     media_type: str,
 ) -> str:
-    """转发多模态内容到被引用 profile 对应的模型，返回描述文本。
+    """转发多模态内容到有效引用 Profile 对应的模型，返回描述文本。
 
-    成功返回被引用模型的描述文本；失败返回错误信息+提示词模板包装。
-    供 Read 工具在活跃模型 tool+user 都不支持该模态时调用。
+    活动 Profile 的对应引用优先；活动引用为空时使用全局多模态回退引用。
+    未配置有效引用属于调用方契约错误，调用方应在进入本函数前处理。
 
     Args:
-        context: 工具执行上下文，用于获取 runtime_context.agentspace
-        active_profile: 当前活跃的 LLMProfile（含 vision_image_profile/audio_profile/vision_video_profile 引用字段）
+        context: 工具执行上下文，用于获取 runtime_context 和全局 Profile 引用
+        active_profile: 当前活跃的 LLMProfile
         media_data: 多模态数据 dict：
             - 图片: {"base64": str, "mime_type": str}
             - 音频: {"base64": str, "format": str}
             - 视频: {"base64": str, "mime_type": str}
-        media_type: "image" 或 "audio" 或 "video"
+        media_type: "image"、"audio" 或 "video"
 
     Returns:
-        描述文本字符串（成功=模型描述，失败=错误信息+提示词模板）
+        被引用模型返回的描述文本
     """
     from system.templates import read_template
 
@@ -253,17 +271,18 @@ async def forward_modality_to_ref_profile(
             .replace("{{error_message}}", error_message)
         )
 
-    # 按 media_type 显式取得根对象中的引用实例，不使用反射。
-    if media_type == "image":
-        ref_profile = active_profile.vision_image_profile
-    elif media_type == "audio":
-        ref_profile = active_profile.audio_profile
-    else:  # video
-        ref_profile = active_profile.vision_video_profile
+    global_profile = (
+        context.app.llm_profile_store.get_global_modality_profile(media_type)
+        if context is not None else None
+    )
+    ref_profile = resolve_modality_reference_profile(
+        active_profile,
+        media_type,
+        global_profile,
+    )
     if ref_profile is None:
-        return _error_text(
-            "(not configured)",
-            f"Active profile has no {media_type} reference profile configured",
+        raise ValueError(
+            f"No active or global reference profile configured for {media_type}"
         )
 
     ctx = context.runtime_context if context is not None else get_runtime_context()
@@ -292,9 +311,9 @@ async def forward_modality_to_ref_profile(
     # 构造单条 user 消息
     messages = [BaseMessage(role=Role.USER, content=blocks)]
 
-    # 建客户端并发送
+    # 建客户端；客户端创建异常属于配置/程序错误，不能伪装成转发结果。
+    client = create_llm_client(ref_profile.llm_client_name, ctx, ref_profile)
     try:
-        client = create_llm_client(ref_profile.llm_client_name, ctx, ref_profile)
         response = await client.chat(messages)
         description: str = response.content or ""
         if not description.strip():
@@ -307,7 +326,19 @@ async def forward_modality_to_ref_profile(
             context.session_id if context else "", ref_profile.name, media_type,
         )
         return description
+    except UnsupportedModalityError as exc:
+        logger.warning(
+            "forward_modality unsupported | session=%s ref_profile=%s media_type=%s error=%s",
+            context.session_id if context else "", ref_profile.name, media_type, exc,
+        )
+        raise
     except Exception as exc:
+        import openai as _openai
+        if not isinstance(exc, _openai.BadRequestError) and not (
+            isinstance(exc, _openai.APIStatusError)
+            and exc.status_code == 400
+        ):
+            raise
         logger.warning(
             "forward_modality | session=%s ref_profile=%s media_type=%s error=%s",
             context.session_id if context else "", ref_profile.name, media_type, exc,
@@ -683,13 +714,14 @@ def _fmt_support(value: bool | None) -> str:
 def build_modality_prompt_block(
     profile: LLMProfile,
     agentspace: Path | None = None,
+    global_modality_profiles: dict[str, LLMProfile | None] | None = None,
 ) -> str:
     """构建系统提示词的多模态能力与转发配置块（每轮实时生成）。
 
     文案来自模板 ``templates/modality_capability.txt``，本函数只负责填值：
     - 能力部分只读探测缓存（不触发探测），未探测项显示 unknown。
       单次读取整个条目，避免 get_cached_* 逐字段重读缓存文件。
-    - 转发部分直接读取三个引用实例的名称与模型。
+    - 转发部分按活动 Profile 引用优先、全局回退引用次之，显示三种媒体的有效目标。
 
     profile 无 model 或模板缺失时返回空串（不注入）。
     """
@@ -717,6 +749,16 @@ def build_modality_prompt_block(
             return "not configured"
         return f'"{reference.name}" (model ``{reference.model}``)'
 
+    global_modality_profiles = global_modality_profiles or {}
+    image_ref = resolve_modality_reference_profile(
+        profile, "image", global_modality_profiles.get("image"),
+    )
+    audio_ref = resolve_modality_reference_profile(
+        profile, "audio", global_modality_profiles.get("audio"),
+    )
+    video_ref = resolve_modality_reference_profile(
+        profile, "video", global_modality_profiles.get("video"),
+    )
     replacements = {
         "{{model}}": profile.model,
         "{{image_tool}}": image_tool,
@@ -725,9 +767,9 @@ def build_modality_prompt_block(
         "{{audio_user}}": audio_user,
         "{{video_tool}}": video_tool,
         "{{video_user}}": video_user,
-        "{{image_ref}}": _ref(profile.vision_image_profile),
-        "{{audio_ref}}": _ref(profile.audio_profile),
-        "{{video_ref}}": _ref(profile.vision_video_profile),
+        "{{image_ref}}": _ref(image_ref),
+        "{{audio_ref}}": _ref(audio_ref),
+        "{{video_ref}}": _ref(video_ref),
     }
     for placeholder, value in replacements.items():
         template = template.replace(placeholder, value)

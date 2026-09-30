@@ -73,6 +73,10 @@ from entity.puretype import (
     SessionLlmProfileState,
     MetadataProfileUpdateRequest,
     MetadataProfileMutationResponse,
+    ModalityProfileUpdateRequest,
+    ModalityProfileMutationResponse,
+    ModalityProfileState,
+    ModalityProfileStates,
     AgentspaceWriteRequest,
     AgentspacePathRequest,
     AgentspaceRenameRequest,
@@ -2058,6 +2062,91 @@ async def put_approval_profile(request: Request):
 
 
 # ---------------------------------------------------------------------------
+# Modality fallback Profile API
+# ---------------------------------------------------------------------------
+
+
+def _modality_profile_state(profile) -> ModalityProfileState:
+    """将全局多模态 Profile 实例转换为 REST/WS 状态。"""
+    if profile is None:
+        return ModalityProfileState()
+    missing = [
+        field
+        for field in ("llm_client_name", "base_url", "model")
+        if not str(getattr(profile, field, "")).strip()
+    ]
+    return ModalityProfileState(
+        profile_name=profile.name,
+        model=profile.model or None,
+        available=not missing,
+    )
+
+
+def _get_modality_profile_states(application) -> ModalityProfileStates:
+    profiles = application.llm_profile_store.get_global_modality_profiles()
+    return ModalityProfileStates(
+        image=_modality_profile_state(profiles["image"]),
+        audio=_modality_profile_state(profiles["audio"]),
+        video=_modality_profile_state(profiles["video"]),
+    )
+
+
+@app.get("/api/modality/profiles")
+async def get_modality_profiles():
+    """返回图片、音频、视频三路全局回退 Profile 状态。"""
+    from system.application import Application
+
+    return _get_modality_profile_states(Application.current()).model_dump()
+
+
+@app.put(
+    "/api/modality/profiles",
+    response_model=ModalityProfileMutationResponse,
+)
+async def put_modality_profile(update: ModalityProfileUpdateRequest):
+    """设置或清空单种媒体的全局回退 Profile 引用。"""
+    from system.application import Application
+
+    application = Application.current()
+    try:
+        with application.profile_lock:
+            profile = (
+                application.llm_profile_store.get_profile(update.profile_name)
+                if update.profile_name is not None else None
+            )
+            if profile is not None:
+                missing = [
+                    field
+                    for field in ("llm_client_name", "base_url", "model")
+                    if not str(getattr(profile, field, "")).strip()
+                ]
+                if missing:
+                    raise ValueError(
+                        f"Modality Profile {profile.name!r} is missing required fields: "
+                        + ", ".join(missing)
+                    )
+            application.llm_profile_store.set_global_modality_profile(
+                update.media_type,
+                profile,
+            )
+            states = _get_modality_profile_states(application)
+            state = getattr(states, update.media_type)
+    except LookupError:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Profile not found: {update.profile_name!r}",
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    failures = await application.frontend_sink.broadcast_modality_profile_change(states)
+    return ModalityProfileMutationResponse(
+        state=state,
+        notification_failures=failures,
+    )
+
+
+# ---------------------------------------------------------------------------
 # Metadata Profile API
 # ---------------------------------------------------------------------------
 
@@ -2468,6 +2557,7 @@ async def update_llm_profile(request: LLMProfileUpdateRequest):
             mgr = application.approval_backend_manager
             mgr.invalidate()
             metadata_state = application.session_metadata_service.get_state()
+            modality_states = _get_modality_profile_states(application)
         failures: list[str] = []
         if new_name != old_name:
             failures = await application.frontend_sink.broadcast_profile_change(
@@ -2481,10 +2571,13 @@ async def update_llm_profile(request: LLMProfileUpdateRequest):
         metadata_failures = await application.frontend_sink.broadcast_metadata_profile_change(
             metadata_state,
         )
+        modality_failures = await application.frontend_sink.broadcast_modality_profile_change(
+            modality_states,
+        )
         return LLMProfileMutationResponse(
             profile=response_payload,
             notification_failures=(
-                failures + approval_failures + metadata_failures
+                failures + approval_failures + metadata_failures + modality_failures
             ),
         )
     except LookupError as exc:
@@ -2533,6 +2626,7 @@ async def delete_llm_profile(request: LLMProfileDeleteRequest):
             store.remove_profile(request.profile_name)
             application.approval_backend_manager.invalidate()
             metadata_state = application.session_metadata_service.get_state()
+            modality_states = _get_modality_profile_states(application)
 
         failures = await application.frontend_sink.broadcast_profile_change(
             "deleted",
@@ -2547,6 +2641,9 @@ async def delete_llm_profile(request: LLMProfileDeleteRequest):
         metadata_failures = await application.frontend_sink.broadcast_metadata_profile_change(
             metadata_state,
         )
+        modality_failures = await application.frontend_sink.broadcast_modality_profile_change(
+            modality_states,
+        )
         return LLMProfileDeleteResult(
             deleted=True,
             profile_name=request.profile_name,
@@ -2554,7 +2651,7 @@ async def delete_llm_profile(request: LLMProfileDeleteRequest):
             switched_sessions=switched,
             pending_sessions=busy,
             notification_failures=(
-                failures + approval_failures + metadata_failures
+                failures + approval_failures + metadata_failures + modality_failures
             ),
         )
     except LookupError as exc:
