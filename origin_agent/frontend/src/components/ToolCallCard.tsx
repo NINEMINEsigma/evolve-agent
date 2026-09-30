@@ -1,3 +1,4 @@
+import { useState } from "react";
 import type { ChatMessage } from "../types";
 import MessageBody from "./MessageBody";
 import MessageAttachments from "./MessageAttachments";
@@ -17,6 +18,7 @@ export default function ToolCallCard({
   onToggleCollapse,
   onUserHeightMutation,
 }: ToolCallCardProps) {
+  const [rawToolJson, setRawToolJson] = useState(false);
   const card = message.toolCard;
   if (!card) return null;
   const collapsed = message.collapsed !== false;
@@ -53,19 +55,33 @@ export default function ToolCallCard({
       </button>
       {!collapsed && (
         <div className="tool-call-detail message-content-collapsed" data-chat-scope="tool-detail">
+          <div className="tool-card-toolbar">
+            <button
+              type="button"
+              className="tool-card-view-toggle"
+              aria-pressed={rawToolJson}
+              title={rawToolJson ? "切换至默认预览" : "切换至原始 JSON"}
+              onClick={() => {
+                onUserHeightMutation?.();
+                setRawToolJson((current) => !current);
+              }}
+            >
+              原始 JSON
+            </button>
+          </div>
           <section className="tool-card-section tool-card-request">
             <div className="tool-card-section-title">请求参数</div>
             {card.request.argsRaw && (!card.request.args || Object.keys(card.request.args).length === 0) ? (
               <pre className="tool-args-raw-content">{card.request.argsRaw}</pre>
             ) : (
-              <MessageBody message={requestMessage} onImageClick={onImageClick} onUserHeightMutation={onUserHeightMutation} />
+              <MessageBody message={requestMessage} rawToolJson={rawToolJson} onImageClick={onImageClick} onUserHeightMutation={onUserHeightMutation} />
             )}
           </section>
           <section className="tool-card-section tool-card-result">
             <div className="tool-card-section-title">工具结果</div>
             {resultMessage && card.result ? (
               <>
-                <MessageBody message={resultMessage} onImageClick={onImageClick} onUserHeightMutation={onUserHeightMutation} />
+                <MessageBody message={resultMessage} rawToolJson={rawToolJson} onImageClick={onImageClick} onUserHeightMutation={onUserHeightMutation} />
                 {card.result.embeddedMessages && (
                   <EmbeddedToolMessages
                     messages={card.result.embeddedMessages}

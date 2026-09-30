@@ -275,6 +275,39 @@
 .tool-call-card-running .tool-call-summary { color: var(--accent); }
 .tool-call-card-failed .tool-call-summary { color: var(--danger); }
 .tool-call-card-missing_result .tool-call-summary { color: var(--text-muted); }
+.tool-card-toolbar {
+  display: flex;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  margin-bottom: 6px;
+}
+
+.tool-card-view-toggle {
+  max-width: 100%;
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 12px;
+  white-space: normal;
+  cursor: pointer;
+}
+
+.tool-card-view-toggle:hover {
+  color: var(--text-primary);
+}
+
+.tool-card-view-toggle[aria-pressed="true"] {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+.tool-card-view-toggle:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
 .tool-card-section + .tool-card-section {
   margin-top: 10px;
   padding-top: 8px;

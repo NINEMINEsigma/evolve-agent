@@ -111,11 +111,12 @@ function ContextExtension({ message, onUserHeightMutation }: { message: ChatMess
 interface MessageBodyProps {
   message: ChatMessage;
   streaming?: boolean;
+  rawToolJson?: boolean;
   onImageClick: (src: string) => void;
   onUserHeightMutation?: () => void;
 }
 
-export default function MessageBody({ message, streaming, onImageClick, onUserHeightMutation }: MessageBodyProps) {
+export default function MessageBody({ message, streaming, rawToolJson = false, onImageClick, onUserHeightMutation }: MessageBodyProps) {
   const m = message;
   const textContent = contentToText(m.content);
 
@@ -192,7 +193,7 @@ export default function MessageBody({ message, streaming, onImageClick, onUserHe
     // tool_call（有 toolArgs）
     if (m.toolArgs) {
       // Write tool_call：content + path 字段同时存在时显示为全绿行 diff
-      if (typeof m.toolArgs.content === "string" && typeof m.toolArgs.path === "string") {
+      if (!rawToolJson && typeof m.toolArgs.content === "string" && typeof m.toolArgs.path === "string") {
         const isAppend = m.toolArgs.mode === "append";
         return (
           <>
@@ -212,7 +213,7 @@ export default function MessageBody({ message, streaming, onImageClick, onUserHe
     const contentStr = typeof m.content === "string" ? m.content : "";
     try {
       const parsed = JSON.parse(contentStr);
-      const specialized = renderToolResult(m.toolName, parsed, onImageClick);
+      const specialized = rawToolJson ? null : renderToolResult(m.toolName, parsed, onImageClick);
       if (specialized) {
         return (
           <>
@@ -223,9 +224,13 @@ export default function MessageBody({ message, streaming, onImageClick, onUserHe
       }
       return (
         <>
-          <div className="tool-json-view">
-            <JsonView src={parsed} collapsed={2} displaySize collapseStringsAfterLength={99999} />
-          </div>
+          {rawToolJson && (parsed === null || typeof parsed !== "object") ? (
+            <pre className="message-text message-text-tool">{JSON.stringify(parsed)}</pre>
+          ) : (
+            <div className="tool-json-view">
+              <JsonView src={parsed} collapsed={2} displaySize collapseStringsAfterLength={99999} />
+            </div>
+          )}
           <ContextExtension message={m} onUserHeightMutation={onUserHeightMutation} />
         </>
       );

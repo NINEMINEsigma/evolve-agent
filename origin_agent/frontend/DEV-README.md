@@ -112,7 +112,8 @@ frontend/
 | `features/chat/VirtualMessageList.tsx` | 基于 Virtuoso 渲染完整骨架的可视窗口；正文按页加载，live 尾部独立渲染 |
 | `features/chat/ChatHistoryRow.tsx` | 单行 selector 消费，按 loaded / skeleton / page-error 三态渲染 |
 | `MessageItem.tsx` | 单条消息渲染（文本、代码块、图片、工具调用卡片）；工具调用卡片以 `tool_call_id` 聚合请求、状态和结果，默认折叠并复用请求/结果的既有特殊渲染；通过 `data-character-name` 暴露角色显示名称，并在用户主动高度操作前通知滚动状态机；工具调用卡片和普通长消息的折叠入口互斥 |
-| `ToolCallCard.tsx` | 工具调用卡片的状态摘要、请求参数区、结果区、耗时和附件；`_meta` 等内部字段不进入普通 JSON 展示，工具链注入的排队消息通过 `embedded_messages` 在结果区单独渲染，因此不会被 Read/PatchEdit 等特殊结果渲染器吞掉。 |
+| `ToolCallCard.tsx` | 工具调用卡片的状态摘要、请求参数区、结果区、耗时和附件；展开详情顶部的“原始 JSON”按钮同时切换请求参数与结果正文，再次点击恢复默认预览。选择仅保留在当前挂载的卡片内，卸载后重新挂载恢复默认，不写入全局状态或浏览器存储。JSON 模式仅展示前端收到的数据，不额外获取后端内部字段；`_meta` 等内部字段不进入普通 JSON 展示，工具链注入的排队消息通过 `embedded_messages` 在结果区单独渲染。独立的嵌入消息、附件和耗时不随模式隐藏。 |
+| `MessageBody.tsx` | 消息正文渲染；可选显示参数 `rawToolJson` 默认 `false`，仅影响工具分支。启用时绕过请求差异预览和结果特殊渲染，对象/数组复用 JSON 树，合法 JSON 标量使用 JSON 文本；非 JSON 文本和多模态内容块保留既有降级。未传参数的调用方保持默认预览，assistant 流式参数展示不受影响。 |
 | `EmbeddedToolMessages.tsx` | 工具结果中嵌入的排队用户消息的独立渲染；显示消息正文、角色、来源和时间，不把内部字段原样展示为 JSON。 |
 | `primitives/MarkdownRenderer.tsx` | 统一 Markdown、代码块、Mermaid、原始 HTML、图片和 KaTeX 数学公式渲染；规范化只作用于普通文本，行内代码和围栏代码中的公式标记保持原文；流式未闭合公式保持可见文本，未知 LaTeX 命令降级而不使消息树崩溃 |
 | `MessageEditor.tsx` | 消息编辑器（编辑历史消息） |
