@@ -64,6 +64,9 @@ class CharacterProfile(BaseModel):
     metadata: dict[str, str] = Field(default_factory=dict)
     """profile.md.meta解析后的元数据。"""
 
+    description: str = ""
+    """profile.md.meta中[description]字段的简介正文，保留内部换行。"""
+
     llm_profile_name: str = ""
     """profile.md.meta中引用的LLM Profile名称。"""
 

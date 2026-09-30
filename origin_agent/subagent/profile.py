@@ -6,6 +6,7 @@ import re
 from typing import TYPE_CHECKING
 
 from entity.constant import (
+    CHARACTER_DESCRIPTION_META_KEY,
     CHARACTER_LLM_PROFILE_META_KEY,
     CHARACTER_SYSTEM_PROMPT_PATHS_META_KEY,
     CHARACTER_PROFILE_FILENAME,
@@ -104,6 +105,7 @@ class CharacterProfileResolver:
         system_prompt_paths: list[str] = []
         system_prompts: list[str] = []
         llm_profile_name = ""
+        description = ""
         error: str | None = None
 
         if not re.fullmatch(SUBAGENT_NAME_PATTERN, name):
@@ -122,6 +124,7 @@ class CharacterProfileResolver:
                     f"Character profile metadata file not found: {metadata_path}"
                 )
             metadata = parse_meta_content(self._sandbox.read(metadata_path, limit=0))
+            description = metadata.get(CHARACTER_DESCRIPTION_META_KEY, "").strip()
             llm_profile_name = metadata.get(CHARACTER_LLM_PROFILE_META_KEY, "").strip()
             if not llm_profile_name:
                 raise CharacterProfileError(
@@ -167,6 +170,7 @@ class CharacterProfileResolver:
             system_prompt_paths=system_prompt_paths,
             system_prompts=system_prompts,
             metadata=metadata,
+            description=description,
             llm_profile_name=llm_profile_name,
             llm_profile=llm_profile,
             error=error,

@@ -46,6 +46,7 @@ async def _handle_list_subagents(args: dict[str, Any]) -> dict:
             "name": profile.name,
             "type": profile.character_type,
             "profile_path": profile.profile_path,
+            "description": profile.description,
             "llm_profile_name": profile.llm_profile_name,
             "profile_available": profile.error is None and profile.llm_profile is not None,
             "error": profile.error,
@@ -71,11 +72,11 @@ registry.register(
         # ## 调用效果
         # 纯查询，不修改角色目录、profile.md、profile.md.meta 或 LLM Profile。
         # agents 使用数组而不是以名称为 key 的字典，以保留重名错误条目。
-        # 每个条目只返回角色名称、类型、profile.md 路径、LLM Profile 引用名称、
+        # 每个条目只返回角色名称、类型、profile.md 路径、简介、LLM Profile 引用名称、
         # 可用性、错误和当前会话状态，不返回 api_key 或完整模型配置。
         #
         # ## 返回
-        # {"success": true, "count": 1, "agents": [{"name": "coder", "type": "task", "profile_path": "ws:characters/task/coder/profile.md", "llm_profile_name": "coding-model", "profile_available": true, "error": null, "session": null}]}
+        # {"success": true, "count": 1, "agents": [{"name": "coder", "type": "task", "description": "负责实现和审查 Python 代码。", "profile_path": "ws:characters/task/coder/profile.md", "llm_profile_name": "coding-model", "profile_available": true, "error": null, "session": null}]}
         #
         # ## 何时使用
         # - 启动 RunSubAgent 前查看可用角色。
@@ -97,6 +98,7 @@ Each entry contains only:
 - `name`: character directory name
 - `type`: `roleplay` or `task`
 - `profile_path`: logical path of `profile.md`
+- `description`: short description from `[description]` in `profile.md.meta`
 - `llm_profile_name`: name referenced by `profile.md.meta`
 - `profile_available`: whether the complete profile is runnable
 - `error`: validation or Profile reference error, if any
@@ -106,7 +108,7 @@ The `agents` result is an array so duplicate names and their individual errors r
 
 ## Returns
 ```json
-{"success": true, "count": 1, "agents": [{"name": "coder", "type": "task", "profile_path": "ws:characters/task/coder/profile.md", "llm_profile_name": "coding-model", "profile_available": true, "error": null, "session": null}]}
+{"success": true, "count": 1, "agents": [{"name": "coder", "type": "task", "description": "负责实现和审查 Python 代码。", "profile_path": "ws:characters/task/coder/profile.md", "llm_profile_name": "coding-model", "profile_available": true, "error": null, "session": null}]}
 ```
 
 ## When to Use

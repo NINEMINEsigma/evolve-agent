@@ -92,7 +92,7 @@ component/
 
 | 工具文件 | 主要工具 | 用途 |
 |----------|----------|------|
-| `list_subagents.py` | `ListSubAgents` | 动态扫描角色档案并列出运行状态 |
+| `list_subagents.py` | `ListSubAgents` | 动态扫描角色档案，列出名称、类型、简介和运行状态 |
 | `run_subagent.py` | `RunSubAgent` | 按动态角色档案启动子Agent |
 | `run_taskagent.py` | `RunTaskAgent` | 使用活动 LLM Profile 快照启动临时Agent |
 | `stop_taskagent.py` | `StopTaskAgent` | 提前终止临时Agent，不保存历史 |

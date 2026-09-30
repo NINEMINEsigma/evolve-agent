@@ -112,6 +112,8 @@ graph TD
 `subagent/profile.py::CharacterProfileResolver` 每次从 `agentspace/characters/roleplay/` 和 `agentspace/characters/task/` 扫描角色目录：
 
 - 每个角色目录必须包含 `profile.md` 和同级 `profile.md.meta`。
+- `profile.md.meta` 的 `[description]` 是可选的简短简介；允许多行，解析后只去除首尾空白，保留内部换行且不截断。它只用于角色发现目录和主Agent系统提示词，不替代 `profile.md` 的系统提示词。
+- `profile.md.meta` 的 `[llm_profile]` 引用运行时 LLM Profile；`[profile]` 可按行声明附加系统提示词逻辑路径。
 - `profile.md` 作为第一个自定义系统提示词；元数据中的 `[profile]` 可按行声明额外的沙盒命名空间路径，系统按声明顺序加载每个文件并分别作为独立 system message。
 - 元数据中的 `[llm_profile]` 直接引用 `llm_profiles.es` 中已有的 Profile 名称。
 - `[profile]` 中的路径不存在、不是文件或不具备当前沙盒的读取权限时，列表保留条目并返回错误，启动入口拒绝该角色。
@@ -135,6 +137,8 @@ graph TD
 
 ### 子代理系统提示词注入
 
+`ParentAgentLoop._build_system_prompt()` 在主Agent scope 下每次动态扫描并注入当前可运行子Agent的名称、类型和简介；无效角色不进入该目录，但仍由 `ListSubAgents` 返回错误详情。
+
 `SubAgentLoop._build_system_prompt()` 在 `SubRuntimeContext.system_prompts` 基础上动态注入父会话级约定块（`owner="parent"`）。普通角色的系统提示词由 `profile.md` 与 `profile.md.meta` 的 `[profile]` 路径按顺序组成，每个文件保持为独立 system message：
 
 - `build_session_site_block(parent_session_id, owner="parent")`：父会话网页 `site/` 约定。
@@ -151,7 +155,7 @@ graph TD
 
 | 工具 | 能力 |
 |---|---|
-| `ListSubAgents` | 动态扫描所有角色档案，返回档案路径、Profile名称、错误和运行状态。 |
+| `ListSubAgents` | 动态扫描所有角色档案，返回名称、类型、简介、档案路径、Profile名称、错误和运行状态。 |
 | `RunSubAgent` | 按当前动态角色档案启动子Agent，可显式传入 `.es` 历史。 |
 | `ChatSubAgent` | 向活跃子Agent发消息。 |
 | `ApprovalSubAgent` | 批量审批/拒绝子Agent的工具调用。 |

@@ -144,6 +144,41 @@ def build_dynamic_sandbox_spaces_block(sandbox: Sandbox) -> str:
     return template.replace("{{dynamic_spaces_json}}", serialized)
 
 
+def build_subagent_catalog_block() -> str:
+    """构建当前可运行子Agent的名称、类型和简介目录。"""
+    from entity.constant import CHARACTER_DESCRIPTION_FALLBACK
+    from subagent.profile import CharacterProfileResolver
+
+    try:
+        from system.application import Application
+
+        app = Application.current()
+        resolver = CharacterProfileResolver(app.sandbox, app.llm_profile_store)
+        profiles = resolver.discover()
+    except Exception:
+        logger.warning("Failed to build sub-agent catalog prompt", exc_info=True)
+        return ""
+
+    available_profiles = [
+        profile
+        for profile in profiles
+        if profile.error is None and profile.llm_profile is not None
+    ]
+    if not available_profiles:
+        return ""
+
+    lines = [
+        "Available sub-agents (dynamically refreshed; use ListSubAgents for current status):",
+        "",
+    ]
+    for profile in available_profiles:
+        lines.append(f"- {profile.name} ({profile.character_type})")
+        description = profile.description or CHARACTER_DESCRIPTION_FALLBACK
+        for line in description.splitlines() or [CHARACTER_DESCRIPTION_FALLBACK]:
+            lines.append(f"  {line}")
+    return "\n".join(lines)
+
+
 def build_system_prompt(
     mode: str = "fast",
     extra_blocks: list[str] | None = None,
@@ -262,6 +297,9 @@ def build_system_prompt(
         subagent_tools: str = read_template("tools_subagent.txt")
         if subagent_tools:
             blocks.append(subagent_tools)
+        subagent_catalog = build_subagent_catalog_block()
+        if subagent_catalog:
+            blocks.append(subagent_catalog)
 
     # 3b. 多模态能力与转发配置 — 有活跃 profile 时注入（只读探测缓存，不触发探测）
     if profile is not None:
