@@ -16,7 +16,6 @@ import {
   type VirtuosoHandle,
 } from "react-virtuoso";
 import type { MessageContent } from "../../types";
-import MessageItem from "../../components/MessageItem";
 import {
   HISTORY_SCROLL_SEEK_ENTER,
   HISTORY_SCROLL_SEEK_EXIT,
@@ -25,12 +24,12 @@ import { DIMENSIONS } from "../../constants/dimensions";
 import { useMessageCharacterHover } from "../../hooks/useMessageCharacterHover";
 import ChatHistoryRow from "./ChatHistoryRow";
 import MessageSkeleton from "./MessageSkeleton";
-import { useChatRuntimeStore } from "./chatRuntimeStore";
+import { useChatRuntimeStore, selectChatRenderRows } from "./chatRuntimeStore";
 import { measuredHistoryRowHeights } from "./minimapGeometry";
 import { chatRuntimeController } from "./chatRuntimeController";
 import { liveBubbleIntersectsViewport } from "./chatViewport";
 import { useChatScrollController } from "./useChatScrollController";
-import type { HistorySkeletonRowDto } from "./types";
+import type { ChatRenderRow, HistorySkeletonRowDto } from "./types";
 
 export interface ChatVirtualListHandle {
   returnToBottom: () => Promise<void>;
@@ -54,6 +53,7 @@ interface VirtualMessageListProps {
 
 interface ChatListContext extends VirtualMessageListProps {
   skeleton: HistorySkeletonRowDto[];
+  renderRows: ChatRenderRow[];
   beginUserHeightMutation: () => void;
   hasChatContent: boolean;
 }
@@ -76,29 +76,28 @@ const ChatList = forwardRef<HTMLDivElement, React.HTMLAttributes<HTMLDivElement>
 );
 
 function ChatSeekPlaceholder({ index, height, context }: { index: number; height: number; context: ChatListContext }) {
-  const row = context.skeleton[index];
+  const row = context.renderRows[index];
+  const skeleton = row?.skeleton;
   const reservedHeight = Number.isFinite(height) && height >= 0 ? height : 0;
   return (
     <div
       className="chat-seek-placeholder"
       style={{ height: reservedHeight, minHeight: reservedHeight }}
-      data-history-row-id={row?.row_id}
+      data-history-row-id={row?.historyRowId || undefined}
     >
-      {row && <MessageSkeleton row={row} />}
+      {skeleton && <MessageSkeleton row={skeleton} />}
     </div>
   );
 }
 
-function MeasuredLiveRow({ id, children }: { id: string; children: ReactNode }) {
+function MeasuredChatRow({ id, historyRowId, children }: { id: string; historyRowId?: string | null; children: ReactNode }) {
   const elementRef = useRef<HTMLDivElement>(null);
   useLayoutEffect(() => {
     const element = elementRef.current;
     if (!element) return;
-    const report = () => {
-      useChatRuntimeStore.getState().mergeRowHeights([
-        { id, height: element.getBoundingClientRect().height },
-      ]);
-    };
+    const report = () => useChatRuntimeStore.getState().mergeRowHeights([
+      { id, height: element.getBoundingClientRect().height },
+    ]);
     report();
     if (typeof ResizeObserver === "undefined") return;
     const observer = new ResizeObserver(report);
@@ -106,7 +105,7 @@ function MeasuredLiveRow({ id, children }: { id: string; children: ReactNode }) 
     return () => observer.disconnect();
   }, [id]);
   return (
-    <div ref={elementRef} className="chat-history-row" data-history-row-id={id}>
+    <div ref={elementRef} className="chat-history-row chat-history-row--history" data-history-row-id={historyRowId || undefined} data-render-row-id={id} data-message-id={id}>
       {children}
     </div>
   );
@@ -122,9 +121,10 @@ function ChatLiveFooter({ context }: { context: ChatListContext }) {
     for (const pending of Object.values(pendingStreamFinishes)) {
       const runtime = useChatRuntimeStore.getState();
       if (!runtime.pendingStreamFinishes[pending.streamId]) continue;
+      const live = runtime.liveRows.find((row) => row.id === pending.streamId);
       runtime.finishStream(
         pending.streamId, pending.content, pending.metrics,
-        liveBubbleIntersectsViewport(footer, pending.streamId), pending.finishReason,
+        liveBubbleIntersectsViewport(null, live?.renderId || pending.streamId), pending.finishReason,
       );
     }
   }, [pendingStreamFinishes, liveRows]);
@@ -139,24 +139,6 @@ function ChatLiveFooter({ context }: { context: ChatListContext }) {
     Object.values(state.pageErrors).find((error) => error.endIndex >= state.knownHistoryCount));
   return (
     <div ref={footerRef} className="chat-live-footer">
-      {liveRows.map((row) => (
-        <MeasuredLiveRow key={row.id} id={row.id}>
-          <MessageItem
-            message={row.message}
-            archived={context.archived || processing}
-            onImageClick={context.onImageClick}
-            onToggleCollapse={(id) => useChatRuntimeStore.getState().toggleMessageCollapse(id, "live")}
-            onEditMessage={context.onEditMessage}
-            onDeleteMessages={context.onDeleteMessages}
-            onDeleteSingleMessage={context.onDeleteSingleMessage}
-            onRegenerateResponse={context.onRegenerateResponse}
-            waiting={processing}
-            streaming={row.streaming}
-            onUserHeightMutation={context.beginUserHeightMutation}
-            animateEntry
-          />
-        </MeasuredLiveRow>
-      ))}
       {processing && !liveRows.some((row) => row.streaming && row.message.role === "assistant") && (
         <div className="message message-assistant message-new" data-chat-scope="waiting" data-message-role="assistant">
           <div className="message-avatar waiting-avatar">⚡</div>
@@ -178,19 +160,19 @@ function ChatLiveFooter({ context }: { context: ChatListContext }) {
   );
 }
 
-const VIRTUOSO_COMPONENTS: Components<HistorySkeletonRowDto, ChatListContext> = {
+const VIRTUOSO_COMPONENTS: Components<ChatRenderRow, ChatListContext> = {
   List: ChatList,
   ScrollSeekPlaceholder: ChatSeekPlaceholder,
   Footer: ChatLiveFooter,
 };
 
-function renderHistoryRow(
+function renderChatRow(
   _index: number,
-  row: HistorySkeletonRowDto,
+  row: ChatRenderRow,
   context: ChatListContext,
 ) {
   return (
-    <div className="chat-history-row chat-history-row--history" data-history-row-id={row.row_id}>
+    <MeasuredChatRow id={row.renderId} historyRowId={row.historyRowId}>
       <ChatHistoryRow
         row={row}
         archived={context.archived}
@@ -203,13 +185,15 @@ function renderHistoryRow(
         onToggleMessageVisibility={context.onToggleMessageVisibility}
         onUserHeightMutation={context.beginUserHeightMutation}
       />
-    </div>
+    </MeasuredChatRow>
   );
 }
 
 const VirtualMessageList = forwardRef<ChatVirtualListHandle, VirtualMessageListProps>(
   function VirtualMessageList(props, ref) {
-    const skeleton = useChatRuntimeStore((state) => state.skeleton);
+    const runtime = useChatRuntimeStore();
+    const skeleton = runtime.skeleton;
+    const renderRows = useMemo(() => selectChatRenderRows(runtime), [runtime]);
     const skeletonError = useChatRuntimeStore((state) => state.skeletonError);
     const initialReady = useChatRuntimeStore((state) => state.initialReady);
     const liveVersion = useChatRuntimeStore((state) => state.liveVersion);
@@ -244,6 +228,7 @@ const VirtualMessageList = forwardRef<ChatVirtualListHandle, VirtualMessageListP
     const context = useMemo<ChatListContext>(() => ({
       ...props,
       skeleton,
+      renderRows,
       beginUserHeightMutation: scroll.beginUserHeightMutation,
       hasChatContent,
     }), [
@@ -258,6 +243,7 @@ const VirtualMessageList = forwardRef<ChatVirtualListHandle, VirtualMessageListP
       props.onToggleMessageVisibility,
       props.topSafeSpacePx,
       skeleton,
+      renderRows,
       hasChatContent,
       scroll.beginUserHeightMutation,
     ]);
@@ -266,7 +252,7 @@ const VirtualMessageList = forwardRef<ChatVirtualListHandle, VirtualMessageListP
       setScrollerElement(element instanceof HTMLDivElement ? element : null);
     }, []);
 
-    const handleItemsRendered = useCallback((items: ListItem<HistorySkeletonRowDto>[]) => {
+    const handleItemsRendered = useCallback((items: ListItem<ChatRenderRow>[]) => {
       const entries = measuredHistoryRowHeights(items);
       if (entries.length) useChatRuntimeStore.getState().mergeRowHeights(entries);
     }, []);
@@ -296,11 +282,11 @@ const VirtualMessageList = forwardRef<ChatVirtualListHandle, VirtualMessageListP
           ref={virtuosoRef}
           className="chat-area"
           style={{ flex: "1 1 0", minHeight: 0 }}
-          data={skeleton}
+          data={renderRows}
           context={context}
-          computeItemKey={(_index, row) => row.row_id}
-          initialTopMostItemIndex={skeleton.length ? { index: "LAST", align: "end" } : 0}
-          itemContent={renderHistoryRow}
+          computeItemKey={(_index, row) => row.renderId}
+          initialTopMostItemIndex={renderRows.length ? { index: "LAST", align: "end" } : 0}
+          itemContent={renderChatRow}
           itemsRendered={handleItemsRendered}
           components={VIRTUOSO_COMPONENTS}
           scrollerRef={setScrollerRef}

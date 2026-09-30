@@ -6,7 +6,7 @@ import Minimap from "./Minimap";
 import AgentStageLayer from "./AgentStageLayer";
 import ChatStyleLayer from "./ChatStyleLayer";
 import VirtualMessageList, { type ChatVirtualListHandle } from "../features/chat/VirtualMessageList";
-import { useChatRuntimeStore } from "../features/chat/chatRuntimeStore";
+import { selectChatRenderRows, useChatRuntimeStore } from "../features/chat/chatRuntimeStore";
 import type { ChatStyleStatus } from "../hooks/useSessionChatStyle";
 import type { SessionStageState } from "../hooks/useSessionStage";
 
@@ -51,13 +51,13 @@ export default function ChatArea({
     typeof window !== "undefined" && window.matchMedia(isMobileQuery).matches,
   );
   const listRef = useRef<ChatVirtualListHandle>(null);
-  const followMode = useChatRuntimeStore((state) => state.followMode);
-  const initialReady = useChatRuntimeStore((state) => state.initialReady);
-  const atBottom = useChatRuntimeStore((state) => state.atBottom);
-  const skeletonLength = useChatRuntimeStore((state) => state.skeleton.length);
-  const liveLength = useChatRuntimeStore((state) => state.liveRows.length);
-  const processing = useChatRuntimeStore((state) => state.processing);
-  const isEmpty = skeletonLength === 0 && liveLength === 0 && !processing;
+  const runtime = useChatRuntimeStore();
+  const followMode = runtime.followMode;
+  const initialReady = runtime.initialReady;
+  const atBottom = runtime.atBottom;
+  const renderRows = selectChatRenderRows(runtime);
+  const processing = runtime.processing;
+  const isEmpty = renderRows.length === 0 && !processing;
   const topSafeSpacePx = isMobile ? 0 : CHAT_TOP_SAFE_SPACE_PX;
 
   useEffect(() => {

@@ -3,10 +3,10 @@ import MessageItem from "../../components/MessageItem";
 import MessageSkeleton from "./MessageSkeleton";
 import { chatRuntimeController } from "./chatRuntimeController";
 import { useChatRuntimeStore } from "./chatRuntimeStore";
-import type { HistorySkeletonRowDto } from "./types";
+import type { ChatRenderRow } from "./types";
 
 interface ChatHistoryRowProps {
-  row: HistorySkeletonRowDto;
+  row: ChatRenderRow;
   archived: boolean;
   onImageClick: (src: string) => void;
   onEditMessage: (id: string, content: MessageContent) => void | Promise<void>;
@@ -30,45 +30,41 @@ export default function ChatHistoryRow({
   onToggleMessageVisibility,
   onUserHeightMutation,
 }: ChatHistoryRowProps) {
-  const message = useChatRuntimeStore((state) => state.contentByRowId[row.row_id]);
   const processing = useChatRuntimeStore((state) => state.processing);
   const lastUserIndex = useChatRuntimeStore((state) => state.lastUserHistoryIndex);
-  const pageError = useChatRuntimeStore((state) =>
-    Object.values(state.pageErrors).find((error) =>
-      row.history_index >= error.startIndex && row.history_index < error.endIndex));
 
-  if (!message) {
-    if (pageError && row.history_index === pageError.startIndex) {
-      return (
-        <div className="chat-history-page-error" data-history-row-id={row.row_id}>
-          <span>历史内容加载失败：{pageError.message}</span>
-          {pageError.retryable && (
-            <button
-              type="button"
-              onClick={() => chatRuntimeController.retryPage(pageError.startIndex, pageError.endIndex)}
-            >
-              重试
-            </button>
-          )}
-        </div>
-      );
-    }
-    return <MessageSkeleton row={row} />;
+  if (row.pageError && !row.message && row.skeleton) {
+    return (
+      <div className="chat-history-page-error" data-history-row-id={row.historyRowId || undefined}>
+        <span>历史内容加载失败：{row.pageError.message}</span>
+        {row.pageError.retryable && (
+          <button
+            type="button"
+            onClick={() => chatRuntimeController.retryPage(row.pageError!.startIndex, row.pageError!.endIndex)}
+          >
+            重试
+          </button>
+        )}
+      </div>
+    );
   }
+
+  if (!row.message) return row.skeleton ? <MessageSkeleton row={row.skeleton} /> : null;
 
   return (
     <MessageItem
-      message={message}
+      message={row.message}
       archived={archived || processing}
       onImageClick={onImageClick}
-      onToggleCollapse={(id) => useChatRuntimeStore.getState().toggleMessageCollapse(id, "history")}
+      onToggleCollapse={() => useChatRuntimeStore.getState().toggleMessageCollapse(row.renderId)}
       onEditMessage={onEditMessage}
       onDeleteMessages={onDeleteMessages}
       onDeleteSingleMessage={onDeleteSingleMessage}
       onRegenerateResponse={onRegenerateResponse}
-      isLastUserMessage={message.role === "user" && row.history_index === lastUserIndex}
-      isAfterLastUser={row.history_index > lastUserIndex}
+      isLastUserMessage={row.message.role === "user" && row.historyIndex === lastUserIndex}
+      isAfterLastUser={row.historyIndex !== null && row.historyIndex > lastUserIndex}
       waiting={processing}
+      streaming={row.streaming}
       agents={agents}
       onToggleMessageVisibility={onToggleMessageVisibility}
       onUserHeightMutation={onUserHeightMutation}

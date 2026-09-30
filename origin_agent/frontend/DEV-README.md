@@ -333,3 +333,11 @@ frontend/
 - `origin_agent/frontend/` 不在仓库根目录，静态类型/IDE 感知可能不准确；不要依赖于此处的 TypeScript 类型检查结论。
 - `tsconfig.app.json` 中针对测试文件名和 `src/test/`、`src/tests/`、嵌套 `__tests__/` 目录的排除模式，是隔离 fast仓库合并复制历史残留的正式构建防御；origin仓库仍严禁测试源、测试配置、测试夹具和测试专用入口，不得通过恢复测试依赖迁就残留文件。
 - 由于前端构建是自动的，修改源码后由用户自行重启 `run.py` 触发重新构建。
+
+### 统一聊天渲染行
+
+主聊天区的历史骨架、历史内容页和实时消息统一投影为 Virtuoso 数据行。每行使用首次创建时确定的 `renderId` 作为 React/Virtuoso key；后端 History 行 ID通过 `historyRowId`关联，不在正典交接时替换渲染身份。实时消息完成后由同一行接收 `live_history_links`、History 正文和折叠状态更新，不再从 Footer 删除后重新挂载历史组件。
+
+`ChatLiveFooter`仅承载等待指示器、最新历史页错误和底部安全留白。流结束可见性判断查询统一聊天列表中的渲染行，不能依赖 Footer 是否挂载。统一行的折叠状态和高度记录都按 `renderId`保存；Virtuoso 离开可视范围的正常卸载仍然保留。
+
+历史内容页和正典关联可能乱序到达时，活动实时行通过正典交接屏障暂缓正文替换；只有后端明确的 `live_history_links`完成关联后，统一行才移动到对应 History 顺序位置。关联缺失、身份不匹配或页面失败时保留实时行，不按正文或数组顺序猜测。

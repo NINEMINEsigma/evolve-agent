@@ -265,6 +265,12 @@ fast 模式的动态沙盒空间由 Application 持有的 Sandbox 单例统一�
 - `entity/gentype.py`：泛型工具类型（`RefWrapper[T]` 可变引用容器，供 loop 与 `ToolExecutor` 等组件共享可变值，如工具循环计数器）。
 - `entity/constant/`：按职责拆分的全局常量包。`constant/__init__.py` 显式重新导出历史公共名称，保持 `from entity.constant import ...` 兼容；`sandbox.py` 保留 `Namespace` 与 `is_namespaced_path()`，其余常量按基础、限制、超时、协议、Shell、文件系统、搜索、Agentspace、上传、聊天样式、HTTP、LLM、Agent、子Agent、多Agent、Cron、会话搜索、Watching、Skill、随意聊聊和 easysave 版本职责分模块维护。
 
+### 前端主聊天统一渲染行补充
+
+主聊天区将历史 skeleton、历史内容页和实时消息统一投影为 Virtuoso 数据行。每条消息首次出现时确定稳定 `renderId`；后端 History 行 ID只作为 `historyRowId`关联字段，正典交接不得替换渲染 key。实时行进入正典位置时保留同一组件实例，折叠状态与高度记录均按 `renderId`维护；Virtuoso 离屏卸载仍按正常虚拟化规则执行。
+
+`stream_meta`中的 `live_history_links`仍是唯一权威关联来源。历史页面乱序、关联缺失、身份不匹配或页面错误时保留实时行，不按正文或数组顺序猜配。`ChatLiveFooter`只承载等待状态、页错误和底部留白，流结束可见性判断改为查询统一聊天列表。
+
 ---
 
 ## 开发者阅读顺序建议

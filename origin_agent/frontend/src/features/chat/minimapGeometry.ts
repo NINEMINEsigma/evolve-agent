@@ -7,9 +7,9 @@ import {
 import { skeletonClassFor, type HistorySkeletonVisualKind } from "./historyProjection";
 import type {
   ChatMinimapSegment,
+  ChatRenderRow,
   ChatScrollMetrics,
   ChatVisibleRange,
-  HistorySkeletonRowDto,
   LiveChatRow,
 } from "./types";
 
@@ -91,29 +91,25 @@ function visualRoleForLive(row: LiveChatRow): HistorySkeletonVisualKind {
 }
 
 export function buildHeightWeightedSegments(
-  skeleton: HistorySkeletonRowDto[],
-  liveRows: LiveChatRow[],
+  renderRows: ChatRenderRow[],
   rowHeights: Record<string, number>,
   topSafeSpacePx: number,
 ): ChatMinimapSegment[] {
-  const rows = [
-    ...skeleton.map((row) => {
-      const role = skeletonClassFor(row);
-      return {
-        id: row.row_id,
-        role,
-        weight: rowHeights[row.row_id] ?? HISTORY_SKELETON_HEIGHTS[role] + HISTORY_ROW_GAP_PX,
-      };
-    }),
-    ...liveRows.map((row) => {
-      const role = visualRoleForLive(row);
-      return {
-        id: row.id,
-        role,
-        weight: rowHeights[row.id] ?? HISTORY_SKELETON_HEIGHTS[role] + HISTORY_ROW_GAP_PX,
-      };
-    }),
-  ].map((row) => ({
+  const rows = renderRows.map((row) => {
+    const role = row.skeleton ? skeletonClassFor(row.skeleton) : visualRoleForLive({
+      id: row.liveId || row.renderId,
+      renderId: row.renderId,
+      version: 0,
+      message: row.message || { id: row.renderId, role: "assistant", content: "" },
+      streaming: row.streaming,
+      frozen: row.frozen,
+    });
+    return {
+      id: row.renderId,
+      role,
+      weight: rowHeights[row.renderId] ?? HISTORY_SKELETON_HEIGHTS[role] + HISTORY_ROW_GAP_PX,
+    };
+  }).map((row) => ({
     ...row,
     weight: Number.isFinite(row.weight) && row.weight > 0 ? row.weight : 1,
   }));
@@ -137,11 +133,11 @@ export function buildHeightWeightedSegments(
 }
 
 export function measuredHistoryRowHeights(
-  items: ListItem<HistorySkeletonRowDto>[],
+  items: ListItem<ChatRenderRow>[],
 ): Array<{ id: string; height: number }> {
   const entries: Array<{ id: string; height: number }> = [];
   for (const item of items) {
-    const id = item.data?.row_id;
+    const id = item.data?.renderId;
     if (!id || !Number.isFinite(item.size) || item.size <= 0) continue;
     entries.push({ id, height: item.size });
   }

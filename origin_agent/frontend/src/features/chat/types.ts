@@ -124,6 +124,8 @@ export interface ChatMinimapSegment {
 
 export interface LiveChatRow {
   id: string;
+  /** React/Virtuoso identity; remains stable when a provisional stream gets its real stream ID. */
+  renderId?: string;
   version: number;
   message: ChatMessage;
   streaming: boolean;
@@ -133,6 +135,21 @@ export interface LiveChatRow {
   provisional?: boolean;
   preserveExpanded?: boolean;
   collapseManuallyChanged?: boolean;
+}
+
+export interface ChatRenderRow {
+  renderId: string;
+  historyRowId: string | null;
+  historyIndex: number | null;
+  skeleton: HistorySkeletonRowDto | null;
+  message: ChatMessage | null;
+  streaming: boolean;
+  frozen: boolean;
+  canonical: boolean;
+  pageError: ChatHistoryPageError | null;
+  liveId: string | null;
+  activityPlaceholder?: boolean;
+  preserveExpanded?: boolean;
 }
 
 export interface PendingStreamFinish {

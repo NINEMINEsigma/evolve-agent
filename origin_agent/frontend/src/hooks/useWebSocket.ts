@@ -18,7 +18,7 @@ import { WS_CONNECTION_WELCOME_TEXT, WS_IN, WS_OUT } from "../constants/ws";
 import { generateUUID, parseToolResult } from "../utils";
 import { chatRuntimeController } from "../features/chat/chatRuntimeController";
 import { useChatRuntimeStore } from "../features/chat/chatRuntimeStore";
-import { hasMountedLiveFooter } from "../features/chat/chatViewport";
+import { hasMountedChatList } from "../features/chat/chatViewport";
 import { createStreamFrameBuffer, type StreamFrameBuffer } from "../features/chat/streamFrameBuffer";
 import { useLlmProfiles } from "./useLlmProfiles";
 import { useSessionStore, type SessionStore } from "./useSessionStore";
@@ -165,6 +165,7 @@ export function useWebSocket() {
     } else {
       void chatRuntimeController.syncCanonicalHistory(historyCount);
     }
+    useChatRuntimeStore.getState().setCanonicalHandoffReady(true);
     fetchToolResourcesRef.current(sid);
     sessionRef.current?.fetchSessions();
   }, []);
@@ -220,7 +221,7 @@ export function useWebSocket() {
         const store = useChatRuntimeStore.getState();
         const content = typeof message.content === "string" ? message.content : undefined;
         const finishReason = message.finish_reason || "stop";
-        if (hasMountedLiveFooter()) store.queueStreamFinish(streamId, content, message.metrics, finishReason);
+        if (hasMountedChatList()) store.queueStreamFinish(streamId, content, message.metrics, finishReason);
         else store.finishStream(streamId, content, message.metrics, false, finishReason);
       }
       streamDoneSeenRef.current = true;

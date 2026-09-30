@@ -8,7 +8,7 @@ import {
   scrollTopToLogicalRange,
 } from "./minimapGeometry";
 import { chatRuntimeController } from "./chatRuntimeController";
-import { useChatRuntimeStore } from "./chatRuntimeStore";
+import { useChatRuntimeStore, selectChatRenderRows } from "./chatRuntimeStore";
 import { chatTelemetry } from "./chatTelemetry";
 import type { ChatFollowMode, ChatScrollMetrics, ChatVisibleRange } from "./types";
 
@@ -319,7 +319,7 @@ export function useChatScrollController(
     if (atBottom) {
       scrollToPhysicalBottom("auto");
     } else {
-      const segments = buildHeightWeightedSegments(store.skeleton, store.liveRows, store.rowHeights, topSafeSpacePx);
+      const segments = buildHeightWeightedSegments(selectChatRenderRows(store), store.rowHeights, topSafeSpacePx);
       const range = scrollTopToLogicalRange(metrics, segments);
       await chatRuntimeController.ensureVisibleRangeLoaded(range.startIndex, range.endIndex);
     }

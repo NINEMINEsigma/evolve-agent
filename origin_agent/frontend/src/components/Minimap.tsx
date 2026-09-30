@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from "react";
 import type { ChatMessage } from "../types";
 import { DIMENSIONS } from "../constants/dimensions";
-import { useChatRuntimeStore } from "../features/chat/chatRuntimeStore";
+import { useChatRuntimeStore, selectChatRenderRows } from "../features/chat/chatRuntimeStore";
 import {
   MINIMAP_THUMB_MIN_HIT_PX,
 } from "../constants/history";
@@ -78,17 +78,15 @@ function LogicalMinimap({ topSafeSpacePx, onDragStart, onPreviewScrollTop, onDra
   const onDragEndRef = useRef(onDragEnd);
   onDragEndRef.current = onDragEnd;
   const [height, setHeight] = useState(0);
-  const sessionGeneration = useChatRuntimeStore((state) => state.generation);
-  const skeleton = useChatRuntimeStore((state) => state.skeleton);
-  const liveRows = useChatRuntimeStore((state) => state.liveRows);
-  const rowHeights = useChatRuntimeStore((state) => state.rowHeights);
-  const scrollMetrics = useChatRuntimeStore((state) => state.scrollMetrics);
-  // 流式增量只改变正文；未改变行 ID/Role 时无需重算整份历史权重。
-  const liveOutlineKey = liveRows.map((row) => `${row.id}:${row.message.role}`).join("|");
+  const runtime = useChatRuntimeStore();
+  const sessionGeneration = runtime.generation;
+  const renderRows = useMemo(() => selectChatRenderRows(runtime), [runtime]);
+  const rowHeights = runtime.rowHeights;
+  const scrollMetrics = runtime.scrollMetrics;
+  const renderOutlineKey = renderRows.map((row) => `${row.renderId}:${row.message?.role || row.skeleton?.role || "system"}`).join("|");
   const segments = useMemo(
-    () => buildHeightWeightedSegments(skeleton, liveRows, rowHeights, topSafeSpacePx),
-    // liveRows 的完整对象只在行身份或角色变化时影响权重，其余由 rowHeights 更新。
-    [skeleton, rowHeights, liveOutlineKey, topSafeSpacePx],
+    () => buildHeightWeightedSegments(renderRows, rowHeights, topSafeSpacePx),
+    [renderRows, rowHeights, renderOutlineKey, topSafeSpacePx],
   );
   const hasLogicalRows = segments.length > 0;
   const viewport = minimapViewportGeometry(scrollMetrics, height);

@@ -10,7 +10,7 @@ import type { AskRequest, ConfirmRequest, InterruptStatus, SubagentSession, Targ
 import { escapeHtml } from "../utils";
 import { SID_DISPLAY_LEN } from "../constants/session";
 import { DIMENSIONS } from "../constants/dimensions";
-import { useChatRuntimeStore } from "../features/chat/chatRuntimeStore";
+import { selectChatRenderRows, useChatRuntimeStore } from "../features/chat/chatRuntimeStore";
 import { useEdgeDrawer } from "../hooks/useEdgeDrawer";
 
 // ── 左下功能组按钮间距（CSS .input-bar-actions-left gap 定值） ──
@@ -166,12 +166,12 @@ export default function InputBar({
   contextTokens,
   llmMaxContextTokens,
 }: InputBarProps) {
-  const input = useChatRuntimeStore((state) => state.draftHtml);
-  const inputText = useChatRuntimeStore((state) => state.draftText);
-  const pendingMessageCount = useChatRuntimeStore((state) => Object.keys(state.pendingMessages).length);
-  const followMode = useChatRuntimeStore((state) => state.followMode);
-  const chatEmpty = useChatRuntimeStore((state) =>
-    state.skeleton.length === 0 && state.liveRows.length === 0 && !state.processing);
+  const runtime = useChatRuntimeStore();
+  const input = runtime.draftHtml;
+  const inputText = runtime.draftText;
+  const pendingMessageCount = Object.keys(runtime.pendingMessages).length;
+  const followMode = runtime.followMode;
+  const chatEmpty = selectChatRenderRows(runtime).length === 0 && !runtime.processing;
   const setInput = useCallback((html: string) => {
     const current = useChatRuntimeStore.getState();
     current.setDraft(html, current.draftText);
