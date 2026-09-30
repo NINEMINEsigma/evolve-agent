@@ -74,6 +74,9 @@ function LogicalMinimap({ topSafeSpacePx, onDragStart, onPreviewScrollTop, onDra
   const [dragging, setDragging] = useState(false);
   const grabOffsetRef = useRef(0);
   const targetScrollTopRef = useRef(0);
+  const dragGenerationRef = useRef<number | null>(null);
+  const onDragEndRef = useRef(onDragEnd);
+  onDragEndRef.current = onDragEnd;
   const [height, setHeight] = useState(0);
   const sessionGeneration = useChatRuntimeStore((state) => state.generation);
   const skeleton = useChatRuntimeStore((state) => state.skeleton);
@@ -92,18 +95,24 @@ function LogicalMinimap({ topSafeSpacePx, onDragStart, onPreviewScrollTop, onDra
   const hitGeometry = minimapHitGeometry(viewport, height, MINIMAP_THUMB_MIN_HIT_PX);
 
   useEffect(() => {
-    draggingRef.current = false;
     setDragging(false);
-    if (frameRef.current !== null) {
-      cancelAnimationFrame(frameRef.current);
-      frameRef.current = null;
-    }
     const root = rootRef.current;
-    const pointerId = pointerIdRef.current;
-    if (root && pointerId !== null && root.hasPointerCapture(pointerId)) {
-      root.releasePointerCapture(pointerId);
-    }
-    pointerIdRef.current = null;
+    return () => {
+      const wasDragging = draggingRef.current;
+      draggingRef.current = false;
+      dragGenerationRef.current = null;
+      if (frameRef.current !== null) cancelAnimationFrame(frameRef.current);
+      frameRef.current = null;
+      const pointerId = pointerIdRef.current;
+      pointerIdRef.current = null;
+      if (root && pointerId !== null && root.hasPointerCapture(pointerId)) {
+        root.releasePointerCapture(pointerId);
+      }
+      // 同会话内收起小地图也要结束拖拽；切会话不提交旧位置。
+      if (wasDragging && useChatRuntimeStore.getState().generation === sessionGeneration) {
+        void onDragEndRef.current(targetScrollTopRef.current);
+      }
+    };
   }, [sessionGeneration]);
 
   useEffect(() => {
@@ -175,6 +184,7 @@ function LogicalMinimap({ topSafeSpacePx, onDragStart, onPreviewScrollTop, onDra
         : pointerY - viewport.top
       : viewport.height / 2;
     draggingRef.current = true;
+    dragGenerationRef.current = sessionGeneration;
     setDragging(true);
     pointerIdRef.current = event.pointerId;
     event.currentTarget.setPointerCapture(event.pointerId);
@@ -184,33 +194,43 @@ function LogicalMinimap({ topSafeSpacePx, onDragStart, onPreviewScrollTop, onDra
     onPreviewScrollTop(target);
   };
   const handlePointerMove = (event: React.PointerEvent<HTMLDivElement>) => {
-    if (!draggingRef.current || pointerIdRef.current !== event.pointerId) return;
+    if (!draggingRef.current || pointerIdRef.current !== event.pointerId
+      || dragGenerationRef.current !== useChatRuntimeStore.getState().generation) return;
     const target = targetFromPointer(event.clientY);
-    targetScrollTopRef.current = target;
     if (frameRef.current !== null) cancelAnimationFrame(frameRef.current);
     frameRef.current = requestAnimationFrame(() => {
       frameRef.current = null;
+      if (!draggingRef.current || dragGenerationRef.current !== useChatRuntimeStore.getState().generation) return;
+      targetScrollTopRef.current = target;
       onPreviewScrollTop(target);
     });
   };
-  const finishDrag = (event: React.PointerEvent<HTMLDivElement>) => {
-    if (!draggingRef.current || pointerIdRef.current !== event.pointerId) return;
+  const finishCurrentDrag = (targetScrollTop: number): void => {
+    if (!draggingRef.current) return;
+    const currentGeneration = dragGenerationRef.current;
+    const pointerId = pointerIdRef.current;
     draggingRef.current = false;
     pointerIdRef.current = null;
+    dragGenerationRef.current = null;
     setDragging(false);
-    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
-      event.currentTarget.releasePointerCapture(event.pointerId);
-    }
     if (frameRef.current !== null) cancelAnimationFrame(frameRef.current);
     frameRef.current = null;
-    const target = targetFromPointer(event.clientY);
-    targetScrollTopRef.current = target;
-    void onDragEnd(targetScrollTopRef.current);
+    const root = rootRef.current;
+    if (root && pointerId !== null && root.hasPointerCapture(pointerId)) root.releasePointerCapture(pointerId);
+    if (currentGeneration !== useChatRuntimeStore.getState().generation) return;
+    targetScrollTopRef.current = targetScrollTop;
+    void onDragEnd(targetScrollTop);
+  };
+  const finishDrag = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (pointerIdRef.current === event.pointerId) finishCurrentDrag(targetFromPointer(event.clientY));
+  };
+  const cancelDrag = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (pointerIdRef.current === event.pointerId) finishCurrentDrag(targetScrollTopRef.current);
   };
 
   if (!hasLogicalRows) return null;
   return (
-    <div ref={rootRef} className={`minimap${dragging ? " minimap-dragging" : ""}`} onPointerDown={handlePointerDown} onPointerMove={handlePointerMove} onPointerUp={finishDrag} onPointerCancel={finishDrag}>
+    <div ref={rootRef} className={`minimap${dragging ? " minimap-dragging" : ""}`} onPointerDown={handlePointerDown} onPointerMove={handlePointerMove} onPointerUp={finishDrag} onPointerCancel={cancelDrag} onLostPointerCapture={cancelDrag}>
       <canvas ref={canvasRef} className="minimap-canvas" />
       <div className="minimap-dim-top" style={{ height: viewport.top }} />
       <div className="minimap-dim-bottom" style={{ top: viewport.top + viewport.height }} />

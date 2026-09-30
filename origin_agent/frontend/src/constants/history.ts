@@ -2,6 +2,8 @@
 export const HISTORY_PAGE_SIZE = 80;
 export const HISTORY_PAGE_OVERSCAN_ROWS = 20;
 export const HISTORY_NEAR_BOTTOM_ROWS = 8;
+// 主聊天用户滚动意图的有效时间，单位：毫秒；连续输入会刷新窗口。
+export const CHAT_SCROLL_USER_INTENT_MS = 700;
 export const HISTORY_SCROLL_SEEK_ENTER = 1200;
 export const HISTORY_SCROLL_SEEK_EXIT = 160;
 export const HISTORY_ROW_GAP_PX = 6;

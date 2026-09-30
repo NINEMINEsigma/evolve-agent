@@ -14,7 +14,7 @@ import { collectClientInfo } from "../constants/clientInfo";
 import { COLLOQUY_SID } from "../constants/session";
 import { STORAGE_KEYS } from "../constants/storage";
 import { TIMING } from "../constants/timing";
-import { WS_IN, WS_OUT } from "../constants/ws";
+import { WS_CONNECTION_WELCOME_TEXT, WS_IN, WS_OUT } from "../constants/ws";
 import { generateUUID, parseToolResult } from "../utils";
 import { chatRuntimeController } from "../features/chat/chatRuntimeController";
 import { useChatRuntimeStore } from "../features/chat/chatRuntimeStore";
@@ -363,7 +363,9 @@ export function useWebSocket() {
       } catch {
         // 普通文本 system 消息继续进入聊天区；协议 JSON 不作为聊天正文渲染。
       }
-      if (!isProtocolMeta && !parsed?.uploaded && (message.is_system_status || !parsed)) {
+      const isConnectionWelcome = message.content === WS_CONNECTION_WELCOME_TEXT
+        && message.index == null && message.is_system_status !== true;
+      if (!isConnectionWelcome && !isProtocolMeta && !parsed?.uploaded && (message.is_system_status || !parsed)) {
         const liveId = Number.isSafeInteger(message.index) && (message.index ?? -1) >= 0
           ? `system:${message.index}` : generateUUID();
         useChatRuntimeStore.getState().appendLiveMessage({

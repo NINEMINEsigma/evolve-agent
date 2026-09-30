@@ -21,6 +21,7 @@ import {
   HISTORY_SCROLL_SEEK_ENTER,
   HISTORY_SCROLL_SEEK_EXIT,
 } from "../../constants/history";
+import { DIMENSIONS } from "../../constants/dimensions";
 import { useMessageCharacterHover } from "../../hooks/useMessageCharacterHover";
 import ChatHistoryRow from "./ChatHistoryRow";
 import MessageSkeleton from "./MessageSkeleton";
@@ -74,9 +75,18 @@ const ChatList = forwardRef<HTMLDivElement, React.HTMLAttributes<HTMLDivElement>
   },
 );
 
-function ChatSeekPlaceholder({ index, context }: { index: number; context: ChatListContext }) {
+function ChatSeekPlaceholder({ index, height, context }: { index: number; height: number; context: ChatListContext }) {
   const row = context.skeleton[index];
-  return row ? <MessageSkeleton row={row} /> : null;
+  const reservedHeight = Number.isFinite(height) && height >= 0 ? height : 0;
+  return (
+    <div
+      className="chat-seek-placeholder"
+      style={{ height: reservedHeight, minHeight: reservedHeight }}
+      data-history-row-id={row?.row_id}
+    >
+      {row && <MessageSkeleton row={row} />}
+    </div>
+  );
 }
 
 function MeasuredLiveRow({ id, children }: { id: string; children: ReactNode }) {
@@ -216,7 +226,7 @@ const VirtualMessageList = forwardRef<ChatVirtualListHandle, VirtualMessageListP
 
     useLayoutEffect(() => {
       scroll.followAfterLiveCommit();
-    }, [liveVersion, processing, scroll.followAfterLiveCommit]);
+    }, [liveVersion, processing, skeleton, liveRows, scroll.followAfterLiveCommit]);
 
     useImperativeHandle(ref, () => ({
       returnToBottom: scroll.returnToBottom,
@@ -295,6 +305,7 @@ const VirtualMessageList = forwardRef<ChatVirtualListHandle, VirtualMessageListP
           components={VIRTUOSO_COMPONENTS}
           scrollerRef={setScrollerRef}
           rangeChanged={(range: ListRange) => scroll.handleRangeChanged(range)}
+          atBottomThreshold={DIMENSIONS.SCROLL_BOTTOM_THRESHOLD}
           atBottomStateChange={scroll.handleAtBottomStateChange}
           totalListHeightChanged={scroll.handleTotalListHeightChanged}
           scrollSeekConfiguration={{

@@ -222,8 +222,14 @@ frontend/
 
 ## 主聊天历史数据流
 
+- 握手欢迎文本 `Connected to Evolve Agent` 由 `constants/ws.ts` 与 Gateway 发送处对应；前端仅在消息无 History 索引且不是业务系统状态时将其排除出聊天列表。首次连接和真实重连均如此，顶部连接状态、协议事件和其他系统消息不变，避免欢迎行留在实时 Footer 并在每轮正典交接后重新显露。
+- 快速滚动的 `ChatSeekPlaceholder` 必须使用 Virtuoso 提供的原行 `height` 保留等高 border-box 外壳；内部复用普通骨架视觉，但不得以骨架估算高度替换长消息高度，缺失骨架数据时也保留空壳。用户验收可在开发者工具观察正文/快速占位切换前后的行外壳高度，允许亚像素误差，不要求肉眼辨认瞬间骨架。
+- `useChatScrollController` 统一读取 scroller 的物理指标并更新 `scrollMetrics` 与 `atBottom`，底部阈值与 Virtuoso 一致。回底按钮在已有内容、初始化完成且物理离底时显示，初始化、小地图拖拽和主动回底期间隐藏；不只依赖 `detached` 状态。
+- Minimap 拖拽独占滚动控制，底部观察和消息高度操作收尾不能提前退出 `minimap_dragging`。释放时以实际 DOM 位置而非请求目标判断到底；取消/丢失捕获按最后已预览位置幂等收尾，切会话不提交旧拖拽位置。拖拽期间不发起新的可见页请求，已有请求可继续合并但不能接管滚动。
+- 用户主列表滚动立即中止被动追底及未完成回底，实际 scroll 采样在用户意图窗口内更新状态；单纯布局变化不解除离底浏览。回底动作带局部动作序号与会话代际，远距离加载检查页错误与已加载索引，下一布局帧才定位；失败保留错误和回底入口，用户新操作、会话切换与卸载均使旧动作失效。
+
 - 主聊天默认水平间距使用 `.chat-area` 的 `--chat-message-inline-inset`：只有历史行添加 `.chat-history-row--history`，其左右内边距为变量的两倍；实时行则由 Footer 和行各提供一次内边距，使相同 Role 的新旧消息保持同一水平起点。
-- 实时 Footer 末尾的 120px 留白属于完整列表的物理底部；被动追随只由 `useChatScrollController` 管理，实时内容提交和列表高度变化只申请一个按浏览器帧合并的追底任务，执行时重新读取 Virtuoso scroller 的最新物理指标。用户主动离底、主动改变消息高度或开始小地图拖拽时会取消待执行任务并停止被动追随；`atBottomStateChange(false)` 只报告布局状态，不独立派生追底任务。
+- 实时 Footer 末尾的 120px 留白属于完整列表的物理底部；被动追随只由 `useChatScrollController` 管理，实时内容提交、skeleton/liveRows 正典交接的布局提交和列表高度变化只申请一个按浏览器帧合并的追底任务，执行时重新读取 Virtuoso scroller 的最新物理指标。用户主动离底、主动改变消息高度或开始小地图拖拽时会取消待执行任务并停止被动追随；`atBottomStateChange(false)` 只报告布局状态，不独立派生追底任务。
 
 - Gateway 通过 `history_sync` 只发送正典 History 元数据；前端 REST 取得全历史骨架和可见范围历史内容页。会话状态预检、骨架和内容页请求等待超过15秒会被主动中止：History显示局部错误与重试，顶层显示持久通知；WebSocket可用时同时上报不含正文、工具参数、附件或密钥的客户端传输诊断，Gateway只写 warning且不写聊天 History。
 - 全历史骨架始终保留完整逻辑顺序；Virtuoso 只挂载可视区附近行，离屏 iframe、Mermaid 和播放器会卸载并可在滚回时重建。

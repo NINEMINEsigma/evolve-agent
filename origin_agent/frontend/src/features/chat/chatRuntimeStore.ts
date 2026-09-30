@@ -1019,7 +1019,3 @@ export const useChatRuntimeStore = create<ChatRuntimeState>((set, get) => ({
   setResources: (resources) => set({ resources, resourcesError: null }),
   setResourcesError: (resourcesError) => set({ resourcesError }),
 }));
-
-export function resetChatRuntimeStoreForTest(): void {
-  useChatRuntimeStore.getState().resetSession();
-}

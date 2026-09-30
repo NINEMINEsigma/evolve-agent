@@ -336,7 +336,7 @@
 | Agent 舞台层 | `AgentStageLayer` / `.agent-stage-layer` | 位于聊天区背景之上、聊天气泡和输入栏之下的会话级渲染层；Agent 通过 `ws:sessions/<session_id>/stage/` 目录写入内容，`index.html` 作为资源完成后的部署提交标记；前端以透明 iframe 渲染且默认鼠标穿透，变化事件通过已有会话 WebSocket接收 |
 | 会话网页 | `SessionSiteDrawer` | 右侧独立抽屉，iframe 加载 `ws:sessions/<session_id>/site/index.html`，用于完整网页预览；仅当前会话已部署 `index.html` 时显示右侧触发按钮；与 Agent 舞台层 `stage/` 分离，变化事件通过已有会话 WebSocket接收 |
 | 小地图 | `Minimap` | 主聊天区按全历史骨架使用逻辑 Minimap 映射并可随机跳转；子会话抽屉保留局部消息 DOM 几何预览；移动端默认折叠 |
-| 回到底部按钮 | `.scroll-to-bottom-btn` | 滚动离开底部时出现的快捷回底按钮 |
+| 回到底部按钮 | `.scroll-to-bottom` | 已有聊天内容、初始化完成且物理离底时显示的快捷回底按钮；初始化、小地图拖拽与主动回底期间隐藏，不仅依赖 `detached` 状态 |
 
 ### 输入栏内部组件
 

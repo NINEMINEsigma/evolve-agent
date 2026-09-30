@@ -904,9 +904,9 @@ classDiagram
 
 ### 主聊天滚动追底协调
 
-`useChatScrollController` 是主聊天区被动追底的唯一协调入口。实时内容提交与列表总高度变化只申请一个可取消的 `requestAnimationFrame` 任务，任务执行时读取 Virtuoso scroller 的最新 `scrollTop`、`scrollHeight` 和 `clientHeight`，并以 `scrollHeight - clientHeight` 为物理底部目标。`atBottomStateChange(false)` 仅更新观察状态，不因自动滚动再次独立创建追底任务；连续流式增长允许按有效布局帧更新底部，但同一帧内不会重复写入滚动位置。
+`useChatScrollController` 是主聊天区被动追底的唯一协调入口。实时内容提交、skeleton/liveRows 正典交接的布局提交与列表总高度变化先复用同一调度；被动追底只申请一个可取消的 `requestAnimationFrame` 任务，任务执行时读取 Virtuoso scroller 的最新 `scrollTop`、`scrollHeight` 和 `clientHeight`，并以 `scrollHeight - clientHeight` 为物理底部目标。`atBottomStateChange` 仅触发统一物理指标采样，不因自动滚动再次独立创建追底任务；连续流式增长允许按有效布局帧更新底部，但同一帧内不会重复写入被动追底位置。
 
-用户滚动意图、消息高度变更、小地图拖拽、会话重置或状态离开 `following` 时取消待执行任务。显式回到底部和小地图提交继续使用独立的用户动作路径。最新流式消息超过视口时保持物理底部锚点，不切换到消息顶部，也不改变 History、Virtuoso 行顺序或消息协议。
+用户滚动意图、消息高度变更、小地图拖拽、会话重置或状态离开 `following` 时取消待执行任务。Minimap 拖拽状态独占，物理底部观察和高度操作收尾不得提前退出；提交按实际 scroller 位置判断到底。显式回底由同一 Hook 持有局部动作序号、会话代际和可取消布局帧，页加载失败回到离底状态，用户新操作与生命周期变化使旧动作失效。快速滚动占位使用 Virtuoso 原行高度；物理离底指标驱动回底按钮，不以 `detached` 作为唯一显示条件。最新流式消息超过视口时保持物理底部锚点，不切换到消息顶部，也不改变 History、Virtuoso 行顺序或消息协议。
 
 
 ### Memory 系统移除

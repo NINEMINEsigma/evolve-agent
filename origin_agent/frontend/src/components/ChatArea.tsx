@@ -52,6 +52,8 @@ export default function ChatArea({
   );
   const listRef = useRef<ChatVirtualListHandle>(null);
   const followMode = useChatRuntimeStore((state) => state.followMode);
+  const initialReady = useChatRuntimeStore((state) => state.initialReady);
+  const atBottom = useChatRuntimeStore((state) => state.atBottom);
   const skeletonLength = useChatRuntimeStore((state) => state.skeleton.length);
   const liveLength = useChatRuntimeStore((state) => state.liveRows.length);
   const processing = useChatRuntimeStore((state) => state.processing);
@@ -92,7 +94,8 @@ export default function ChatArea({
           onToggleMessageVisibility={onToggleMessageVisibility}
           topSafeSpacePx={topSafeSpacePx}
         />
-        {followMode === "detached" && (
+        {!isEmpty && initialReady && !atBottom
+          && followMode !== "initializing" && followMode !== "minimap_dragging" && followMode !== "returning" && (
           <button
             type="button"
             className="scroll-to-bottom"

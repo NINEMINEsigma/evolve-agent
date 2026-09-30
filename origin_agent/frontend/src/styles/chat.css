@@ -52,6 +52,12 @@
   pointer-events: none;
 }
 
+.chat-seek-placeholder {
+  box-sizing: border-box;
+  margin: 0;
+  overflow: hidden;
+}
+
 .chat-history-row {
   box-sizing: border-box;
   /* 与 constants/history.ts 的 HISTORY_ROW_GAP_PX 保持同步 */
