@@ -291,7 +291,8 @@
 | 侧栏开关按钮 | `.sidebar-toggle` | 位于顶部栏左侧，控制左侧导航栏收起/展开 |
 | 会话徽章 | `.session-badge` | 当前会话 ID，≤768px 隐藏 |
 | 调试徽章组 | `DebugBadges` / `.debug-badges` | 连接诊断徽章，≤1100px 隐藏 |
-| 命令菜单 | `.cmd-menu-dropdown`（⋮ 按钮触发） | 本地性能遥测、动态沙盒空间与会话视觉开关；展开期间钉住顶部抽屉 |
+| 命令菜单 | `.cmd-menu-dropdown`（⋮ 按钮触发） | 本地性能遥测、动态沙盒空间、system 角色用户消息显示开关与会话视觉开关；展开期间钉住顶部抽屉 |
+| system 角色用户消息显示开关 | `showSystemUserMessages` | 控制 Role 为 `user` 且角色名为 `system` 的消息是否显示；默认显示，作为浏览器全局偏好保存，覆盖主聊天区、子会话和工具结果嵌入消息；不影响 History、模型上下文或系统状态提示（英文锚点：system-character user message visibility toggle） |
 | 状态胶囊 | `HeaderPill` / `.header-pill` | 居中状态胶囊，桌面支持hover/焦点展开；触摸与折叠顶部栏常显待用模型按钮，模型选择由独立浮层承载 |
 | 模型选择菜单 | `ModelProfileMenu` / `.model-profile-menu` | 顶部栏唯一的会话待用 Profile 选择入口，body独立浮层；选择仅更新当前会话浏览器值，发送或重新生成时提交 |
 | 脱手模式徽章 | `.approval-model-badge` | 点击切换自动审批 |

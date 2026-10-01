@@ -1,7 +1,7 @@
 import { HISTORY_PAGE_OVERSCAN_ROWS, HISTORY_PAGE_SIZE } from "../../constants/history";
-import { historyContentRowToChatMessage, historyIndexRangeForRows } from "./historyProjection";
+import { historyContentRowToChatMessage } from "./historyProjection";
 import { fetchHistoryPage, fetchHistoryResources, fetchHistorySkeleton } from "./historyApi";
-import { useChatRuntimeStore } from "./chatRuntimeStore";
+import { selectChatRenderRows, useChatRuntimeStore } from "./chatRuntimeStore";
 import type { ClientDiagnostic } from "../../types";
 import { RequestTimeoutError } from "../../services/fetchWithTimeout";
 
@@ -75,13 +75,18 @@ class ChatRuntimeController {
   async ensureVisibleRangeLoaded(startRow: number, endRow: number): Promise<void> {
     const state = useChatRuntimeStore.getState();
     if (!state.sessionId || state.skeleton.length === 0 || state.followMode === "minimap_dragging") return;
+    // Virtuoso 和小地图传入的是过滤后的展示行索引，不能直接索引完整骨架。
+    const rows = selectChatRenderRows(state);
     const start = Math.max(0, startRow - HISTORY_PAGE_OVERSCAN_ROWS);
-    const end = Math.min(state.skeleton.length - 1, endRow + HISTORY_PAGE_OVERSCAN_ROWS);
-    const range = historyIndexRangeForRows(state.skeleton, start, end);
-    if (!range) return;
-    const firstPage = Math.floor(range.startIndex / HISTORY_PAGE_SIZE) * HISTORY_PAGE_SIZE;
-    const finalIndex = range.startIndex + range.limit;
-    for (let pageStart = firstPage; pageStart < finalIndex; pageStart += HISTORY_PAGE_SIZE) {
+    const end = Math.min(rows.length - 1, endRow + HISTORY_PAGE_OVERSCAN_ROWS);
+    const pages = new Set<number>();
+    for (let index = start; index <= end; index += 1) {
+      const historyIndex = rows[index].historyIndex;
+      if (historyIndex !== null) {
+        pages.add(Math.floor(historyIndex / HISTORY_PAGE_SIZE) * HISTORY_PAGE_SIZE);
+      }
+    }
+    for (const pageStart of pages) {
       const current = useChatRuntimeStore.getState();
       let missing = false;
       const pageEnd = Math.min(current.knownHistoryCount, pageStart + HISTORY_PAGE_SIZE);
@@ -99,9 +104,9 @@ class ChatRuntimeController {
 
   async jumpToLogicalRow(rowIndex: number): Promise<void> {
     const state = useChatRuntimeStore.getState();
-    const row = state.skeleton[rowIndex];
-    if (!row) return;
-    const start = Math.max(0, row.history_index - Math.floor(HISTORY_PAGE_SIZE / 2));
+    const row = selectChatRenderRows(state)[rowIndex];
+    if (!row || row.historyIndex === null) return;
+    const start = Math.max(0, row.historyIndex - Math.floor(HISTORY_PAGE_SIZE / 2));
     await this.loadPage(state.sessionId, state.generation, start, HISTORY_PAGE_SIZE);
   }
 

@@ -1,5 +1,7 @@
 import type { ChatMessage, EmbeddedToolMessage } from "../types";
 import MessageBody from "./MessageBody";
+import { useChatRuntimeStore } from "../features/chat/chatRuntimeStore";
+import { isMessageVisible } from "../features/chat/messageVisibility";
 
 interface EmbeddedToolMessagesProps {
   messages: EmbeddedToolMessage[];
@@ -12,11 +14,15 @@ export default function EmbeddedToolMessages({
   onImageClick,
   onUserHeightMutation,
 }: EmbeddedToolMessagesProps) {
-  if (messages.length === 0) return null;
+  const showSystemUserMessages = useChatRuntimeStore((state) => state.showSystemUserMessages);
+  const visibleMessages = messages
+    .map((message, index) => ({ message, index }))
+    .filter(({ message }) => isMessageVisible(message.role, message.character_name, showSystemUserMessages));
+  if (visibleMessages.length === 0) return null;
   return (
     <div className="tool-embedded-messages" data-chat-scope="embedded-messages">
       <div className="tool-embedded-messages-title">工具执行期间收到的消息</div>
-      {messages.map((embedded, index) => {
+      {visibleMessages.map(({ message: embedded, index }) => {
         const message: ChatMessage = {
           id: `embedded-tool-message-${index}`,
           role: "user",

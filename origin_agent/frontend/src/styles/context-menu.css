@@ -24,6 +24,21 @@
   background: var(--bg-hover);
 }
 
+button.context-menu-toggle {
+  display: block;
+  width: 100%;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  font-family: inherit;
+  text-align: left;
+}
+
+button.context-menu-toggle:hover,
+button.context-menu-toggle:focus-visible {
+  background: var(--bg-hover);
+}
+
 .context-menu-item-danger {
   color: var(--danger);
 }

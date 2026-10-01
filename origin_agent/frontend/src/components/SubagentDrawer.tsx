@@ -4,6 +4,8 @@ import MessageItem from "./MessageItem";
 import Minimap from "./Minimap";
 import { subagentFeedbackToChatMessages } from "../utils";
 import { SID_DISPLAY_LEN } from "../constants/session";
+import { useChatRuntimeStore } from "../features/chat/chatRuntimeStore";
+import { isMessageVisible } from "../features/chat/messageVisibility";
 
 interface SubagentDrawerProps {
   open: boolean;
@@ -82,7 +84,10 @@ export function SubagentCard({ session, collapsed, onToggleCollapse, disableTogg
   const [expandedMessages, setExpandedMessages] = useState<Set<string>>(new Set());
   const isInactive = session.status === "terminated" || session.status === "completed";
 
-  const chatMessages = useMemo(() => subagentFeedbackToChatMessages(session), [session]);
+  const showSystemUserMessages = useChatRuntimeStore((state) => state.showSystemUserMessages);
+  const chatMessages = useMemo(() => subagentFeedbackToChatMessages(session)
+    .filter((message) => isMessageVisible(message.role, message.characterName, showSystemUserMessages)),
+  [session, showSystemUserMessages]);
 
   const toggleMessageCollapse = useCallback((id: string) => {
     setExpandedMessages((prev) => {

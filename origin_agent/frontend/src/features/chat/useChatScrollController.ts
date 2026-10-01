@@ -81,6 +81,8 @@ export function useChatScrollController(
   const mountedRef = useRef(false);
   const generation = useChatRuntimeStore((state) => state.generation);
   const followMode = useChatRuntimeStore((state) => state.followMode);
+  const showSystemUserMessages = useChatRuntimeStore((state) => state.showSystemUserMessages);
+  const previousVisibilityRef = useRef(showSystemUserMessages);
 
   const isCurrent = useCallback(() => (
     mountedRef.current && useChatRuntimeStore.getState().generation === generation
@@ -239,8 +241,9 @@ export function useChatScrollController(
 
   const returnToBottom = useCallback(async () => {
     const state = useChatRuntimeStore.getState();
+    const rows = selectChatRenderRows(state);
     if (!isCurrent() || state.followMode === "minimap_dragging"
-      || (!state.skeleton.length && !state.liveRows.length)
+      || rows.length === 0
       || !readChatScrollMetrics(scrollerElement) || !virtuosoRef.current) return;
     interruptAutomaticScroll();
     userIntentUntilRef.current = 0;
@@ -256,18 +259,18 @@ export function useChatScrollController(
       cancelReturn();
       transition({ type: "USER_LEFT_BOTTOM" });
     };
-    const distance = state.skeleton.length ? state.skeleton.length - 1 - state.visibleRange.endIndex : 0;
-    const nearBottom = !state.skeleton.length || distance <= HISTORY_NEAR_BOTTOM_ROWS;
+    const distance = rows.length - 1 - state.visibleRange.endIndex;
+    const nearBottom = distance <= HISTORY_NEAR_BOTTOM_ROWS;
     try {
-      if (!nearBottom) {
-        const target = state.skeleton[state.skeleton.length - 1];
-        await chatRuntimeController.jumpToLogicalRow(state.skeleton.length - 1);
+      const targetHistoryIndex = rows[rows.length - 1].historyIndex;
+      if (!nearBottom && targetHistoryIndex !== null) {
+        await chatRuntimeController.jumpToLogicalRow(rows.length - 1);
         if (!ownsReturn()) return;
         const current = useChatRuntimeStore.getState();
         // loadPage将错误写入store而不是重新抛出，不能把Promise完成视为加载成功。
         const targetFailed = Object.values(current.pageErrors).some((error) =>
-          error.startIndex <= target.history_index && error.endIndex > target.history_index);
-        if (targetFailed || !current.loadedHistoryIndices.has(target.history_index)) {
+          error.startIndex <= targetHistoryIndex && error.endIndex > targetHistoryIndex);
+        if (targetFailed || !current.loadedHistoryIndices.has(targetHistoryIndex)) {
           failReturn();
           return;
         }
@@ -339,6 +342,15 @@ export function useChatScrollController(
       minimapGenerationRef.current = null;
     };
   }, [cancelReturn, cancelScheduledFollow, generation, scheduleScrollMetrics]);
+
+  useLayoutEffect(() => {
+    if (previousVisibilityRef.current === showSystemUserMessages) return;
+    previousVisibilityRef.current = showSystemUserMessages;
+    // 切换显示属于主动高度操作，取消旧回底动作并按新的展示索引补取内容。
+    beginUserHeightMutation();
+    const state = useChatRuntimeStore.getState();
+    void chatRuntimeController.ensureVisibleRangeLoaded(state.visibleRange.startIndex, state.visibleRange.endIndex);
+  }, [beginUserHeightMutation, showSystemUserMessages]);
 
   useEffect(() => {
     if (followMode !== "following") cancelScheduledFollow();

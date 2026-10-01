@@ -203,6 +203,7 @@ export default function Header({
                 >
                   动态沙盒空间
                 </div>
+                <SystemUserMessagesToggle />
                 <div
                   className="context-menu-item"
                   onClick={() => { onToggleStagePaused(); }}
@@ -310,6 +311,7 @@ export default function Header({
             >
               动态沙盒空间
             </div>
+            <SystemUserMessagesToggle />
             <div
               className="context-menu-item"
               onClick={() => { onToggleStagePaused(); }}
@@ -363,6 +365,24 @@ export default function Header({
         </button>
       )}
     </header>
+  );
+}
+
+function SystemUserMessagesToggle() {
+  const show = useChatRuntimeStore((state) => state.showSystemUserMessages);
+  const setShow = useChatRuntimeStore((state) => state.setShowSystemUserMessages);
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={show}
+      aria-label="显示 system 角色用户消息"
+      className="context-menu-item context-menu-toggle"
+      onClick={() => setShow(!show)}
+      data-tooltip="仅切换 system 角色用户消息的显示，不影响历史记录、模型上下文和系统状态提示"
+    >
+      system 角色用户消息：{show ? "显示" : "隐藏"}
+    </button>
   );
 }
 

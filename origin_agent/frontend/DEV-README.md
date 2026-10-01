@@ -222,6 +222,16 @@ frontend/
 
 ## 主聊天历史数据流
 
+### system 角色用户消息显示开关
+
+顶部栏“⋮”命令菜单在桌面端和移动端提供“system 角色用户消息：显示／隐藏”开关。默认显示，以 `STORAGE_KEYS.SHOW_SYSTEM_USER_MESSAGES` 保存到浏览器 localStorage，所有会话共用；`chatRuntimeStore` 在初始化时恢复该偏好，切换、重置或重新加载会话时不重置，存储不可用时仍可在当前页面切换。
+
+- `features/chat/messageVisibility.ts::isMessageVisible` 统一判断，仅隐藏 Role 为 `user` 且角色名为 `system` 的消息；普通用户消息、Agent 回复、工具卡片、系统状态和错误提示保持原有行为。
+- 主聊天区在 `selectChatRenderRows` 完成历史与实时行关联之后过滤展示行。完整骨架、正文缓存、原始 History 索引、实时行和正典交接保持不变，重新打开即可恢复显示；空态和顶部/底部留白依据过滤后的展示行计算，不生成零高度占位行。
+- Virtuoso、小地图、分页加载和回到底部使用同一过滤后展示顺序。页请求先从展示行取原始 History 索引，再按页去重；隐藏行之间的长跨度不会导致额外拉取所有中间页。切换显示视为用户主动高度操作，取消旧回底动作并补取新的可见范围。
+- 子会话卡片与其小地图、工具结果嵌入消息复用同一显示规则；嵌入消息全部隐藏时不保留标题空壳。
+- 该偏好只控制前端显示，不删除 History、不修改模型上下文、消息编辑/删除索引、后端协议或资源索引。
+
 - 握手欢迎文本 `Connected to Evolve Agent` 由 `constants/ws.ts` 与 Gateway 发送处对应；前端仅在消息无 History 索引且不是业务系统状态时将其排除出聊天列表。首次连接和真实重连均如此，顶部连接状态、协议事件和其他系统消息不变，避免欢迎行留在实时 Footer 并在每轮正典交接后重新显露。
 - 快速滚动的 `ChatSeekPlaceholder` 必须使用 Virtuoso 提供的原行 `height` 保留等高 border-box 外壳；内部复用普通骨架视觉，但不得以骨架估算高度替换长消息高度，缺失骨架数据时也保留空壳。用户验收可在开发者工具观察正文/快速占位切换前后的行外壳高度，允许亚像素误差，不要求肉眼辨认瞬间骨架。
 - `useChatScrollController` 统一读取 scroller 的物理指标并更新 `scrollMetrics` 与 `atBottom`，底部阈值与 Virtuoso 一致。回底按钮在已有内容、初始化完成且物理离底时显示，初始化、小地图拖拽和主动回底期间隐藏；不只依赖 `detached` 状态。

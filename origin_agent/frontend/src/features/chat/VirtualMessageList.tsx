@@ -153,7 +153,7 @@ function ChatLiveFooter({ context }: { context: ChatListContext }) {
           <button type="button" onClick={() => chatRuntimeController.retryPage(tailPageError.startIndex, tailPageError.endIndex)}>重试</button>
         </div>
       )}
-      {(context.skeleton.length > 0 || liveRows.length > 0 || processing) && (
+      {context.hasChatContent && (
         <div className="chat-bottom-safe-space" />
       )}
     </div>
@@ -224,7 +224,7 @@ const VirtualMessageList = forwardRef<ChatVirtualListHandle, VirtualMessageListP
       scroll.commitMinimapDrag,
     ]);
 
-    const hasChatContent = skeleton.length > 0 || liveRows.length > 0 || processing;
+    const hasChatContent = renderRows.length > 0 || processing;
     const context = useMemo<ChatListContext>(() => ({
       ...props,
       skeleton,

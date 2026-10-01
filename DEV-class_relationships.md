@@ -898,6 +898,10 @@ classDiagram
 
 ## 关键设计变更记录
 
+### system 角色用户消息前端显示偏好
+
+前端 `chatRuntimeStore` 持有浏览器全局 `showSystemUserMessages` 偏好及更新入口，默认显示，localStorage 恢复/保存，独立于会话重置字段。`messageVisibility.ts` 提供无状态判断，主聊天统一行、子会话与工具结果嵌入消息共用；仅筛选 Role 为 `user` 且角色名为 `system` 的消息。`selectChatRenderRows` 在完整正典/实时关联之后过滤，Virtuoso 与小地图共用展示顺序，`chatRuntimeController` 把展示索引转换为原始 History 索引后请求内容页，滚动控制器同步处理显示切换与回底目标。无后端类、字段、protected 访问、History 存储或消息协议变更。
+
 ### 主聊天历史骨架、内容页与虚拟化
 
 `History` 与 `history.es` 保持整体类型保留存储；`BaseAgentLoop` 新增三个只读投影接口，经 `entry/history_projection.py` 输出全历史骨架、按 History 索引范围的历史内容页和完整资源索引。Gateway 只向主会话暴露三个 REST，并以 `history_sync` 通知正典历史数量。前端使用 Zustand 隔离高频状态、Virtuoso 只挂载可视消息行，主聊天区 Minimap 改为逻辑映射；工具调用请求和匹配结果在只读投影层按 `tool_call_id` 聚合为一张工具调用卡片，结果可跨内容页返回，匹配结果不再产生独立视觉行；当前轮 live 行在内容页完成正典合并后再清理。

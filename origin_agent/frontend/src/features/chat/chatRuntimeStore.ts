@@ -24,8 +24,12 @@ import { generateUUID } from "../../utils";
 import { MINIMAP_MEASUREMENT_EPSILON_PX } from "../../constants/history";
 import { isLongChatMessage } from "./messageCollapse";
 import { mergeToolCard, toolCardLiveId } from "./toolCards";
+import { STORAGE_KEYS } from "../../constants/storage";
+import { isMessageVisible } from "./messageVisibility";
 
 export interface ChatRuntimeState {
+  showSystemUserMessages: boolean;
+  setShowSystemUserMessages: (show: boolean) => void;
   sessionId: string;
   generation: number;
   skeleton: HistorySkeletonRowDto[];
@@ -222,7 +226,11 @@ export function selectChatRenderRows(state: ChatRuntimeState): ChatRenderRow[] {
       preserveExpanded: live.preserveExpanded,
     });
   }
-  return rows;
+  return rows.filter((row) => isMessageVisible(
+    row.skeleton?.role ?? row.message?.role ?? "",
+    row.skeleton ? row.skeleton.character_name : row.message?.characterName,
+    state.showSystemUserMessages,
+  ));
 }
 
 type ActivityStreamState = Pick<
@@ -331,8 +339,26 @@ const resolveActivityStreamRow = (
   };
 };
 
+function readShowSystemUserMessages(): boolean {
+  try {
+    return localStorage.getItem(STORAGE_KEYS.SHOW_SYSTEM_USER_MESSAGES) !== "false";
+  } catch {
+    return true;
+  }
+}
+
 export const useChatRuntimeStore = create<ChatRuntimeState>((set, get) => ({
   ...initialState,
+  // 全局显示偏好不放入 initialState，切换或重置会话时保留。
+  showSystemUserMessages: readShowSystemUserMessages(),
+  setShowSystemUserMessages: (showSystemUserMessages) => {
+    try {
+      localStorage.setItem(STORAGE_KEYS.SHOW_SYSTEM_USER_MESSAGES, String(showSystemUserMessages));
+    } catch {
+      // 浏览器存储不可用时，本次页面内的切换仍然生效。
+    }
+    set({ showSystemUserMessages });
+  },
 
   beginSession: (sessionId) => {
     const nextGeneration = get().generation + 1;
