@@ -78,7 +78,7 @@ component/
 
 | 工具文件 | 用途 |
 |----------|------|
-| `web_search.py` / `web_fetch.py` | 网络搜索与抓取 |
+| `web_fetch.py` | 获取指定 URL 的网页内容 |
 | `cron_tools.py` | 一次性/周期性后台定时任务 |
 | `dynamic_endpoint_tools.py` | 动态端点工具 |
 | `archive_tools.py` | 归档工具 |

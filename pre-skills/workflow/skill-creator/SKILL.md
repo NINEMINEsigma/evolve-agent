@@ -53,7 +53,7 @@ tags: [skill, creator, eval, benchmark, workflow]
 
 主动询问边界情况、输入/输出格式、示例文件、成功标准、依赖关系。等这部分敲定后再写测试提示词。
 
-调研可用 `WebSearch` / `WebFetch` 查找文档、相似技能、最佳实践；若有子代理可用，可并行调研（`RunSubAgent`），否则内联进行。带着充分背景来，减少用户负担。
+调研可用 `WebFetch` 读取已知 URL 的文档、相似技能和最佳实践；若有子代理可用，可并行调研（`RunSubAgent`），否则内联进行。带着充分背景来，减少用户负担。
 
 ### 撰写 SKILL.md
 

@@ -163,7 +163,7 @@ registry.register(
         #
         # ## 何时使用
         # - 读取网页内容、API 响应、在线文档。
-        # - 在 web_search 获取 URL 后进一步获取页面详情。
+        # - 获取已知 URL 的页面详情。
         #
         # ## 副作用/注意
         # - 依赖外部网络服务，可能因网络或反爬策略失败。
@@ -190,7 +190,7 @@ Oversized:
 
 ## When to Use
 - Read web page content, API responses, or online documentation.
-- Fetch page details after obtaining a URL from web_search.
+- Fetch page details from a known URL.
 
 ## Side Effects / Notes
 - Depends on external network services; may fail due to network issues or anti-bot measures.

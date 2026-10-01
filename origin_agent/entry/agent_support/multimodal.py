@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import Any, TYPE_CHECKING, Callable
+from typing import * # type: ignore
 
 from entity.messages import AudioBlock, BaseMessage, CharacterConversationMessage, ImageBlock, MessageBlock, TextBlock, VideoBlock
 from entity.puretype import MessageContent, Role, LLMProfile
@@ -173,7 +173,7 @@ async def _forward_unsupported_block(
     context: "ToolContext",
     profile: LLMProfile,
     block: ImageBlock | AudioBlock | VideoBlock,
-    media_type: str,
+    media_type: Literal["image", "audio", "video"],
     save_callback: "Callable[[str], None] | None" = None,
 ) -> str:
     """处理不支持的多模态块：优先用 forward_result_content，无则转发借用。

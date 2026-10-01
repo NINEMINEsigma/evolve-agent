@@ -241,7 +241,7 @@ async def forward_modality_to_ref_profile(
     context: ToolContext | None,
     active_profile: LLMProfile,
     media_data: dict,
-    media_type: str,
+    media_type: Literal["image", "audio", "video"],
 ) -> str:
     """转发多模态内容到有效引用 Profile 对应的模型，返回描述文本。
 

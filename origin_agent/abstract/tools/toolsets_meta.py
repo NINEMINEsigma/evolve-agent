@@ -107,7 +107,7 @@ Task agent dispatch conventions:
     )
     registry.register_toolset(
         name="extools",
-        description="Web search and fetch, archive tools, diff tools.",
+        description="Web fetch, archive tools, diff tools.",
     )
     registry.register_toolset(
         name="cron",
