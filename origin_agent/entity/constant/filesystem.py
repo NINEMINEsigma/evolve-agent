@@ -16,6 +16,12 @@ READ_FILE_MAX_LINES: int = 2000
 # Read 工具默认返回行数
 READ_FILE_DEFAULT_LIMIT: int = 100
 
+# Read 每行正文默认 Unicode 码点上限，不含行尾换行符和截断标识
+READ_FILE_DEFAULT_MAX_LINE_CHARS: int = 1000
+
+# Read 长行展示截断标识（含前导空格），不属于原文件内容
+READ_FILE_LINE_TRUNCATION_MARKER: str = " ... [truncated]"
+
 # Write 截断时返回的尾部字符数 — 用于作为 PatchEdit 的 old_string 或继续追加
 WRITE_FILE_TRUNCATION_TAIL: int = 25
 

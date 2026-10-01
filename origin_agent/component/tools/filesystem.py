@@ -28,11 +28,21 @@ from typing import Any, Dict, TYPE_CHECKING
 
 from abstract.tools.registry import registry, tool_error, tool_result
 from entity.puretype import ToolDangerLevel
-from entity.constant import EDIT_FILE_MAX_CHARS, META_FILE_SUFFIX, READ_FILE_DEFAULT_LIMIT, READ_FILE_MAX_LINES, WRITE_FILE_MAX_CHARS, WRITE_FILE_TRUNCATION_TAIL
+from entity.constant import (
+    EDIT_FILE_MAX_CHARS,
+    META_FILE_SUFFIX,
+    READ_FILE_DEFAULT_LIMIT,
+    READ_FILE_DEFAULT_MAX_LINE_CHARS,
+    READ_FILE_LINE_TRUNCATION_MARKER,
+    READ_FILE_MAX_LINES,
+    WRITE_FILE_MAX_CHARS,
+    WRITE_FILE_TRUNCATION_TAIL,
+)
 from system.file_metadata import MetaFormatError, parse_meta_content
 from system.sandbox import Access, Sandbox, SandboxError
 from system.context import get_runtime_context
 from system.text_codec import split_lf_lines
+from system.text_preview import truncate_lf_lines
 from pathlib import Path
 
 if TYPE_CHECKING:
@@ -244,6 +254,9 @@ async def _handle_read(args: dict[str, Any], context: ToolContext | None = None)
         return tool_error("limit must be >= 1", path=path, limit=limit)
     if limit > READ_FILE_MAX_LINES:
         limit = READ_FILE_MAX_LINES
+    max_line_chars = args.get("max_line_chars", READ_FILE_DEFAULT_MAX_LINE_CHARS)
+    if type(max_line_chars) is not int or max_line_chars < 1:
+        return tool_error("max_line_chars must be a positive integer", path=path)
 
     # 类型探测 — resolve_read 可能抛 SandboxError，is_dir/is_file 不抛错
     try:
@@ -755,7 +768,7 @@ async def _handle_read(args: dict[str, Any], context: ToolContext | None = None)
                 "count": None,
                 **_read_meta_fields(path, is_directory=False, context=context),
             }
-        # --- 文本分支：直接返回原文片段，行位置另由元数据表示 ---
+        # --- 文本分支：先按原文统计分页，再截断长行用于展示 ---
         try:
             content: str = _s().read(path, offset=offset, limit=limit)
         except SandboxError as exc:
@@ -767,12 +780,21 @@ async def _handle_read(args: dict[str, Any], context: ToolContext | None = None)
             return tool_error(str(exc), path=path)
         last_line: int = offset + line_count
         remaining: int = max(0, total - last_line)
+        preview, relative_truncated_lines = truncate_lf_lines(
+            content,
+            max_line_chars=max_line_chars,
+            marker=READ_FILE_LINE_TRUNCATION_MARKER,
+        )
+        truncated_lines = [offset + index for index in relative_truncated_lines]
         return {
             "type": "file",
             "path": path,
             "absolute_path": str(resolved.real),
             "total_lines": total,
-            "content": content,
+            "content": preview,
+            "max_line_chars": max_line_chars,
+            "truncated": bool(truncated_lines),
+            "truncated_lines": truncated_lines,
             "remaining": remaining,
             "offset": offset,
             "limit": limit,
@@ -933,12 +955,14 @@ registry.register(
     name="Read",
     toolset="filesystem",
     schema={
-        # 读取文件原始文本（保留 CRLF/LF/孤立 CR 和末尾换行，另返回总行数、绝对路径）、列出目录条目、或读取图片/音频/视频文件（按 MIME 自动检测）。
+        # 读取文件文本（保留 CRLF/LF/孤立 CR 和末尾换行，超长行截断展示）、列出目录条目、或读取图片/音频/视频文件。
         # 支持命名空间前缀：ws:、fork:、fix:、skills: 及其他只读命名空间。
-        # 目录分支忽略 offset/limit，文件分支使用 offset/limit 分页，图片/音频/视频分支忽略 offset/limit。
+        # 文本按 offset/limit 分页，再按 max_line_chars 截断；目录和媒体忽略这些参数的有效值。
+        # max_line_chars 默认 1000，只接受正整数；所有分支均在 I/O 前校验，不允许关闭。
+        # 每行保留前 N 个 Unicode 码点并附加 " ... [truncated]"；行尾和标识不占额度。
         # 元数据文件：完整目标名称追加 .meta，目录读取同级而非内部文件；命名空间根目录不附带。
         # 成功结果的 meta 为 [key] 分段的一层字符串字典；缺失省略，读取/解析失败返回错误字符串。
-        # 值保留全部原始空白与换行；元数据不分页、不执行业务功能；显式 .meta 不继续嵌套。
+        # 自动附带的元数据值保留全部原始空白与换行，不受正文分页/字符上限影响；显式 .meta 目标的正文受限且不继续嵌套。
         # 目录列表隐藏 .meta 文件（后缀不区分大小写），同后缀目录保留；count 为过滤后条目数。
         #
         # ## 图片/音频/视频分支（MIME 自动检测）
@@ -962,8 +986,9 @@ registry.register(
         #   至少 tool 或 user 消息之一支持该模态时才读取文件。
         #
         # ## 调用效果
-        # **文件分支**：content 为原始文本片段，不添加行号，也不转换或删除换行字符。
-        # offset（0-indexed 起始行）和 limit（最大行数）只用于选择完整的原文行片段。
+        # **文件分支**：未截断内容保持原文；超长行仅返回前缀加标识。不添加行号，不转换换行。
+        # offset（0-indexed 起始行）和 limit（最大行数）先选择原文行，再逐行应用 max_line_chars。
+        # 每行正文以 Python str 的 Unicode 码点计数；孤立 CR、空格和制表符均计入，LF/CRLF 行尾除外。
         # **目录分支**：返回条目名称列表，目录条目以 "/" 后缀标识。
         # offset/limit 在目录分支中被忽略（固定填充为 0）。
         # **图片分支**：按 MIME 自动检测。若 tool 消息支持 → 返回 _blocks（多模态块在 tool 消息中传递）；
@@ -975,9 +1000,11 @@ registry.register(
         #
         # ## 返回
         # ```json
-        # {{"path": "ws:example.txt", "content": "first line\r\nsecond line\r\n", "total_lines": 100, "remaining": 98, "offset": 0, "limit": 2}}
+        # {{"path": "ws:example.txt", "content": "first line\r\nsecond line\r\n", "total_lines": 100, "remaining": 98, "offset": 0, "limit": 2, "max_line_chars": 1000, "truncated": false, "truncated_lines": []}}
         # ```
-        # `total_lines` 为文件总行数。`remaining` 为当前读取的最后一行到文件末尾还剩多少行（0 表示已读至文件末尾）。
+        # `total_lines` 为原文件总行数，`remaining` 为当前分页后剩余行数，不表示省略的字符数。
+        # `truncated` 只表示本次正文逐行字符截断；`truncated_lines` 为原文件绝对 0-indexed 索引。
+        # 例如正文 abcdef 配上限 3 返回 "abc ... [truncated]"；末页仍可 remaining=0 且 truncated=true。
         #
         # ## 何时使用
         # - 编辑前查看文件内容。
@@ -989,14 +1016,15 @@ registry.register(
         #   follow_up 用户消息回退路径传递图片/音频/视频内容。
         #
         # ## 副作用/注意
-        # - 无副作用，纯查询。
-        # - offset < 0 或 limit < 1 返回错误。
+        # - 无副作用，纯查询，不修改原文件。截断标识不是原文，不得直接作为 PatchEdit 的匹配或写回内容。
+        # - 查看完整长行时保持 offset/limit 并显式提高有限的 max_line_chars；没有字符偏移续读。
+        # - offset < 0 或 limit < 1 返回错误；max_line_chars 非正整数（含 bool/float/字符串/null）返回错误。
         # - 文件不存在或沙箱拒绝访问返回描述性错误。
         # - 图片/音频/视频分支：未探测或 tool/user 消息都不支持且未配引用字段时返回错误，不读取文件。
         # - tool/user 消息都不支持但配了引用字段时，转发给被引用模型取描述文本，返回 description 字段。
         # - 仅 user 消息支持时，返回 _user_blocks 而非 _blocks，
         #   多模态内容将在当前轮工具调用完成后通过用户消息注入，返回文本提醒不要再调用工具。
-        "description": """Read original file text (preserving CRLF, LF, lone CR, and trailing newlines), list directory entries, or read an image/audio file (auto-detected by MIME type). Returns total lines and absolute path separately. Supports namespace prefixes: ws:, fork:, fix:, skills:, and read-only namespaces.
+        "description": """Read file text with per-line truncation (preserving original line endings), list directory entries, or read an image/audio/video file (auto-detected by MIME type). Returns total lines and absolute path separately. Supports namespace prefixes: ws:, fork:, fix:, skills:, and read-only namespaces.
 
 ## Prerequisites
 - The path must exist (file or directory).
@@ -1004,7 +1032,10 @@ registry.register(
 - Image/audio branches automatically probe multimodal capability on first access and cache the result. No manual probe needed.
 
 ## Effect
-**File branch**: `content` is the original text of the selected whole-line slice: no line-number prefixes, newline normalization, or removed trailing newline. Supports pagination via offset (0-indexed start) and limit (max lines); use offset and total_lines for line positions.
+**File branch**: Select original lines via offset (0-indexed start) and limit (max lines), then apply max_line_chars to each line's body. The default is 1000 Unicode code points per line; any positive integer is allowed, with no disable value. Overlong lines retain their first N code points followed by the literal marker ` ... [truncated]` (including its leading space), followed by the original line ending. Line endings and the marker do not count toward N. Lines at or below N remain verbatim.
+Only LF separates lines. CRLF, LF, and trailing newlines are preserved; a lone CR, spaces, and tabs count as body characters. No line-number prefixes, newline normalization, or line wrapping are added. Code-point counting is not UTF-8 byte counting or grapheme-cluster counting; a combining/ZWJ sequence may be cut.
+Text results also include max_line_chars (effective value), truncated (whether any body line was shortened), and truncated_lines (absolute 0-indexed original-file line indices, consistent with offset). No truncation means false and an empty list, even if the original text contains the marker. total_lines and remaining are based on the original lines: remaining=0 can coexist with truncated=true. Empty files and offsets at/beyond EOF return empty content, false, and an empty list.
+max_line_chars is validated before any target/metadata read or media probe for ALL branches. A valid value is only applied to text content, not directory entries, media payloads/descriptions, or automatically attached metadata; those branches do not gain the three text truncation fields.
 **Directory branch**: Returns entry names; directory entries suffixed with '/'. Files ending in `.meta` (case-insensitive) are hidden; directories with that suffix remain visible. `count` is the filtered entry count. offset and limit are ignored for directories (filled as 0).
 **Image branch**: Auto-detected by MIME type (PNG, JPEG, WebP, GIF, BMP, TIFF, SVG; max 20 MB). Delivery path depends on probe results:
 - `vision_capable=true` → image is delivered directly in the tool message as a `_blocks` payload (multimodal content block).
@@ -1024,13 +1055,17 @@ After a successful read, the complete target name plus `.meta` is read as a sibl
 - A standalone `[key]` line starts a string field. The value extends up to the next key line or EOF; all indentation, blank lines and trailing newlines are preserved. Keys are case-sensitive, are not trimmed, and cannot be empty/whitespace-only or contain brackets or line breaks. Key markers have no surrounding whitespace. LF and CRLF delimit lines; a lone CR remains content.
 - Duplicate keys, invalid bracketed key lines and non-whitespace text before the first key are format errors. Empty/whitespace-only files yield an empty object; an empty field yields an empty string. There is no escape syntax for a standalone `[key]` line inside a value.
 - A valid metadata file adds `meta` as a flat string-to-string object. A missing file omits `meta`. A read/access/format failure adds `meta` as an error string without failing the original read. Metadata file access uses the same sandbox checks and workspace file access registration.
-- Metadata is read in full, independently of the target's offset/limit, including for images/audio/video. Metadata is returned only as data; it does not configure or execute any application behavior, and reading never creates or updates it.
+- Automatically attached metadata is read in full, independently of the target's offset/limit/max_line_chars, including for images/audio/video. When a `.meta` file is explicitly the Read target, its text content is subject to pagination and max_line_chars, without looking for `.meta.meta`. Metadata is returned only as data; it does not configure or execute any application behavior, and reading never creates or updates it.
 - Example fields in an otherwise unchanged successful result: `"meta": {"title": "Example"}`; on failure: `"meta": "元数据存在但解析失败（ws:a.py.meta）：line 3: duplicate metadata key: title"`. This is distinct from the internal `_meta` tool timing field.
 
 ## Returns
 File branch:
 ```json
-{"type": "file", "path": "ws:a.py", "absolute_path": "...", "total_lines": 100, "content": "first line\r\nsecond line\r\n", "remaining": 98, "offset": 0, "limit": 2, "entries": [], "count": null}
+{"type": "file", "path": "ws:a.py", "absolute_path": "...", "total_lines": 100, "content": "first line\r\nsecond line\r\n", "remaining": 98, "offset": 0, "limit": 2, "max_line_chars": 1000, "truncated": false, "truncated_lines": [], "entries": [], "count": null}
+```
+For a file containing only `abcdef` with no trailing newline, max_line_chars=3 returns:
+```json
+{"type": "file", "path": "ws:short.txt", "absolute_path": "...", "total_lines": 1, "content": "abc ... [truncated]", "remaining": 0, "offset": 0, "limit": 100, "max_line_chars": 3, "truncated": true, "truncated_lines": [0], "entries": [], "count": null}
 ```
 Directory branch:
 ```json
@@ -1062,8 +1097,12 @@ Video branch (user-message fallback path):
 - Read image/audio/video files: multimodal capability is automatically probed on first access. Even if the provider rejects multimodal in tool messages, Read can still deliver images/audio/video via a follow-up user message when the provider accepts multimodal in user messages.
 
 ## Side Effects / Notes
-- No file system side effects, read-only query.
-- offset < 0 or limit out of range returns an error.
+- No file system side effects, read-only query; truncation never modifies the file.
+- The truncation marker is not original file content. Do not copy an inserted marker into PatchEdit matches or write it back as file text. A shortened line is not the complete original line, even when its prefix could be used for a unique substring match.
+- To inspect more of a long line, repeat the same offset/limit with a larger finite max_line_chars; there is no character-offset continuation or unlimited mode.
+- offset < 0 or limit < 1 returns an error; limit above READ_FILE_MAX_LINES is capped at that line limit.
+- max_line_chars must be a positive integer for every target. Explicit null, booleans, strings, floats, arrays/objects, zero, and negative values return an error; only an omitted value uses the default.
+- Per-line truncation is not a total output limit or a bound on full-file reading/decoding memory usage.
 - Non-existent or unsupported paths return a descriptive error.
 - For directories, images, and audio, offset/limit are ignored and filled as 0.
 - Image/audio branch: returns an error if support has not been probed or both tool and user messages are unsupported; the file is not read in this case.
@@ -1079,9 +1118,9 @@ Video branch (user-message fallback path):
                 },
                 "offset": {
                     "type": "integer",
-                    # 起始行号（0-indexed，默认 0）。content 返回对应原文片段，不插入行号。
+                    # 起始行号（0-indexed，默认 0）；选定原文行后应用单行字符限制，不插入行号。
                     "description": "Starting line number, 0-indexed (default 0). "
-                    "Content is the corresponding original text slice, without line-number prefixes.",
+                    "Selects original lines before per-line truncation; no line-number prefixes are added.",
                     "default": 0,
                     "minimum": 0,
                 },
@@ -1092,6 +1131,17 @@ Video branch (user-message fallback path):
                     "default": 100,
                     "minimum": 1,
                     "maximum": READ_FILE_MAX_LINES,
+                },
+                "max_line_chars": {
+                    "type": "integer",
+                    # 每行正文 Unicode 码点上限；所有分支校验，仅文本正文应用。
+                    "description": "Maximum Unicode code points per text line (default 1000). "
+                    "Must be a positive integer; cannot be disabled. Line endings and the "
+                    "' ... [truncated]' marker do not count toward the limit. "
+                    "Validated for all targets; ignored for directories and media. "
+                    "Automatically attached metadata is not truncated.",
+                    "default": READ_FILE_DEFAULT_MAX_LINE_CHARS,
+                    "minimum": 1,
                 },
             },
             "required": ["path"],
@@ -1481,8 +1531,10 @@ registry.register(
         # 如需更大更改，请多次顺序调用 PatchEdit。
         #
         # 使用方式：
-        # - 必须先使用 Read 查看当前原始文本及分页 offset/total_lines。
-        # - exact 模式：Read 返回原文；跨行 old_string 必须保留原文件实际换行（包括 CRLF），保留缩进。
+        # - 必须先使用 Read 查看文本及分页 offset/total_lines，并检查 truncated/truncated_lines。
+        # - Read 未截断内容保持原文；截断标识不属于文件，截断行不是完整原文，不得直接用于匹配或写回。
+        # - 需要完整长行时保持 offset/limit 并提高有限的 max_line_chars 重读，不能把已见前缀误当成整行。
+        # - exact 模式：跨行 old_string 必须保留原文件实际换行（包括 CRLF），保留缩进。
         # - exact 模式：包含 2-3 行周围上下文以确保唯一匹配。
         # - regex 模式：old_string 为 Python 正则表达式，new_string 用 \1 或 \g<1> 引用捕获组（不支持 $1）。
         # - range 模式：start_marker 到其后最近 end_marker（含两端）的整个区间被替换。
@@ -1520,8 +1572,9 @@ All modes share `replace_all` (default false): when false, multiple matches retu
 Both `old_string` and `new_string` are limited to {EDIT_FILE_MAX_CHARS} characters each. Use this instead of Write when only a few lines need changing — avoids resending the entire file content. For larger changes, make multiple sequential PatchEdit calls.
 
 Usage:
-- You must use Read first to inspect the original text (offset and total_lines give line positions).
-- exact: `old_string` must match Read's original UTF-8 file text, including its actual newline characters. Preserve indentation and include 2-3 surrounding lines for uniqueness.
+- You must use Read first to inspect the text (offset and total_lines give line positions), and check truncated/truncated_lines.
+- Read preserves untruncated text, but shortened lines are not complete original lines and inserted truncation markers are not file content. Do not use these markers in matches or write them back as original text. If a complete long line is needed, repeat the same offset/limit with a larger finite max_line_chars; do not mistake a visible prefix for the whole line.
+- exact: `old_string` must match the original UTF-8 file text, including its actual newline characters. Preserve indentation and include 2-3 surrounding lines for uniqueness.
 - regex: old_string is a Python regex. new_string uses Python replacement syntax: \\1, \\g<1>, \\g<name>, \\g<0>. Do NOT use $1 (JS/Perl) — it will be literal text.
 - range: provide start_marker and end_marker. The entire span from start_marker to the nearest end_marker (inclusive) is replaced by new_string.
 - Set replace_all=true to replace all matches (skips uniqueness check).

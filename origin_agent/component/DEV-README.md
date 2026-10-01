@@ -46,7 +46,7 @@ component/
 
 | 工具文件 | 主要工具 | 用途 |
 |----------|----------|------|
-| `filesystem.py` | `Read`, `Write`, `PatchEdit`, `Delete`, `Copy`, `Move`, `SearchFiles`, `Grep`, `file_exists` | 沙盒内文件操作；`Read` 文本分支自动尝试 UTF-8、系统编码和 Windows 常见编码，`content` 返回原文行片段，不添加行号或规范化换行，分页保留 CRLF、孤立 CR 与末尾 LF，行位置由 `offset`/`total_lines` 给出；`PatchEdit` 的 exact/range 均按原始 UTF-8 文本逐字符匹配并原样写入 `new_string`，regex 仅按 Python `re.sub` 语法展开显式引用；三种模式都不自动补换行。`Sandbox.write()`/`append()` 禁用操作系统换行转换；`SearchFiles`/`Grep` 在 Windows x64 优先使用内置 `ripgrep`，不可用或单次不兼容时回退 Python；`Grep` 上下文与回退行号都按 LF 分行；默认遵循 ignore/hidden 过滤，返回 `engine`、`truncated`，`full_scan` 可完整包含隐藏/忽略路径，`exhaustive` 可完整扫描并写超限日志 |
+| `filesystem.py` | `Read`, `Write`, `PatchEdit`, `Delete`, `Copy`, `Move`, `SearchFiles`, `Grep`, `file_exists` | 沙盒内文件操作；`Read` 文本分支自动尝试 UTF-8、系统编码和 Windows 常见编码，按 `offset`/`limit` 选择原文行后逐行应用 `max_line_chars`（默认 1000）；未截断内容保持原文，超长行返回前缀加 ` ... [truncated]`，不添加行号或规范化换行，保留 CRLF、孤立 CR 与末尾 LF，行位置仍由原文件 `offset`/`total_lines` 给出；`PatchEdit` 的 exact/range 均按原始 UTF-8 文本逐字符匹配并原样写入 `new_string`，regex 仅按 Python `re.sub` 语法展开显式引用；三种模式都不自动补换行。`Sandbox.write()`/`append()` 禁用操作系统换行转换；`SearchFiles`/`Grep` 在 Windows x64 优先使用内置 `ripgrep`，不可用或单次不兼容时回退 Python；`Grep` 上下文与回退行号都按 LF 分行；默认遵循 ignore/hidden 过滤，返回 `engine`、`truncated`，`full_scan` 可完整包含隐藏/忽略路径，`exhaustive` 可完整扫描并写超限日志 |
 | `code.py` | `ValidateCode`, `EvolveCode` | 自我进化 |
 | `shell.py` | `StartShell`、`ReadShell`、`WriteShell`、`InterruptShell`、`StopShell` | Windows ConPTY 长期 Shell会话：启动并输入、字符位置读取、复用输入、Ctrl-C 与强制停止 |
 | `frontend.py` | `ValidateFrontend` | 前端构建验证 |
@@ -62,6 +62,24 @@ component/
 | `session_search.py` | `SessionSearch` | 会话内容搜索 |
 | `lsp.py` | LSP 诊断 | LSP 服务器进程管理与代码诊断 |
 
+### Read 正文单行限制
+
+`Read` 的可选参数 `max_line_chars` 默认 1000，只接受大于等于 1 的整数；可以显式提高或降低，没有关闭值或额外硬上限。handler 在路径解析之前校验所有分支的参数：bool、浮点数（包括 1000.0）、字符串、null、0、负数、数组和对象均返回 `max_line_chars must be a positive integer`。只有省略参数才使用默认值；合法值在目录和媒体分支中忽略，不影响它们的返回结构。
+
+文本先按 `offset`/`limit` 分页，再由 `system/text_preview.py::truncate_lf_lines` 逐行处理展示内容。函数没有 I/O，只复用 `system.text_codec` 的 LF 分行/行尾处理，不改变 `Sandbox.read()` 的原文读取和内部 `limit=0` 路径。正文按 Python str 的 Unicode 码点计数，不按字节或字素簇计数；空格、制表符及孤立 CR 计入，LF/CRLF 行尾不计入，组合字符或 ZWJ 序列可能在边界处被切开。
+
+超限行保留前 N 个码点，附加 ` ... [truncated]`（含前导空格），再接原行尾；标识和行尾不占 N 的额度。未超限行保持原文，不插入行号、不折行、不补末尾换行；仅 LF 分行，保留原有 LF/CRLF。成功文本结果增加：
+
+- `max_line_chars`：本次有效上限。
+- `truncated`：本次正文是否至少一行发生字符截断，非分页状态。
+- `truncated_lines`：实际截断行在原文件中的绝对 **0-indexed** 索引，和 offset 口径一致；未截断时为空列表，原文已有标识不影响判断。
+
+空文件或 offset 到达/越过 EOF 时正文为空、`truncated=false`、截断索引为空列表。`total_lines`、`remaining` 均在展示截断前按原文统计；`remaining=0` 仍可同时 `truncated=true`。例如无末尾换行的 `abcdef`，上限 3 时返回 `abc ... [truncated]`，截断索引为 `[0]`。需要完整长行时保持 offset/limit 并显式提高有限的 max_line_chars 重读；没有字符 offset 续读或无限制模式。
+
+截断标识不是原文件内容，截断行不是完整原文；使用 PatchEdit 时不得把人工标识当作匹配或写回内容，也不得把可见前缀误当成整行。PatchEdit 的内部完整读取、原文匹配和写回行为不变。
+
+单行保护不保证结果总量有界，也不减少 Sandbox 全文件读取、解码及重复计行的内存/I/O 开销。目录条目、媒体载荷及转发描述、自动附带 `meta` 均不应用该限制，未添加上述文本结果字段。显式把 `.meta` 作为文本目标则应用该限制，详见下节。
+
 ### Read 元数据文件
 
 仅 `Read` 支持自动附带元数据文件：目标完整名称追加 `.meta`，例如 `ws:a.md` 对应 `ws:a.md.meta`，`ws:docs/` 对应同级 `ws:docs.meta`，不是目录内部的 `.meta`。命名空间根目录（含等价当前目录写法或指向根目录的别名）不附带元数据；显式读取后缀为 `.meta` 的目标不继续嵌套。后缀识别不区分大小写，自动查找统一追加小写 `.meta`。
@@ -71,7 +89,7 @@ component/
 - 每个值一直延续到下一个键标记或文件末尾，缩进、空行、CRLF、孤立 CR 与末尾换行原样保留。独立的 `[text]` 是新键，不提供转义语法。
 - 空文件或全空白文件得到 `{}`；无值键得到空字符串。重复键、非法的整行方括号标记、首个键前的非空文字抛带行号的 `MetaFormatError`，不返回部分解析字典。
 - 文本、图片、音频、视频和目录成功结果均可包含普通 `meta` 字段：正常为 `dict[str, str]`，缺失省略，读取/登记/解析失败为错误字符串，不影响原目标结果；不同于内部工具统计字段 `_meta`。
-- 元数据经 `Sandbox.resolve_read` 与 `Sandbox.read(limit=0)` 完整读取和现有编码探测，不使用正文 offset/limit；明确 `ws:` 元数据文件登记当前回复轮次文件接触，登记失败不读取。各媒体 `_blocks`、`_user_blocks` 和转发 description 保持不变。
+- 自动附带的元数据经 `Sandbox.resolve_read` 与 `Sandbox.read(limit=0)` 完整读取和现有编码探测，不使用正文 offset/limit/max_line_chars；显式将 `.meta` 作为 Read 文本目标时，正文应用分页和单行字符限制，仍不查找 `.meta.meta`。明确 `ws:` 元数据文件登记当前回复轮次文件接触，登记失败不读取。各媒体 `_blocks`、`_user_blocks` 和转发 description 保持不变。
 - 当前只返回元数据，不解释或执行键的业务含义，不自动生成或随移动/删除维护文件。会话视觉源目录的 `redirect` 字段由会话视觉资源服务按单层规则消费；`Read` 仍只返回原目录元数据，不跟随目标目录。
 
 ### 扩展工具集（`component/extools/`）
