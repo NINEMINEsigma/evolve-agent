@@ -110,8 +110,8 @@
 
 | 规范称谓 | 定义 | 英文锚点 |
 |---|---|---|
-| 手动模式 | 会话级审批模式：工具调用经前端弹窗由用户逐条审批；由服务端按主会话持久化并跨程序重启恢复；新建及自动延续、单源分支、多父合并产生的主会话均默认使用该模式 | manual mode |
-| 脱手模式 | 会话级审批模式：工具调用由审批模型自动审批；由服务端按主会话持久化并跨程序重启恢复；审批 Profile不可用不会改写已恢复模式，实际审批按失败路径拒绝 | handsfree mode |
+| 手动模式 | 会话级审批模式：主会话 safe/write 直接执行，dangerous 在未命中白名单时由用户弹窗审批，critical 始终由用户弹窗审批；普通子会话需审批调用由父Agent处理；由服务端按主会话持久化并跨程序重启恢复；新建及自动延续、单源分支、多父合并产生的主会话均默认使用该模式 | manual mode |
+| 脱手模式 | 会话级审批模式：safe 直接执行，主会话未命中白名单的 write/dangerous 由审批模型审批，critical 仍由用户弹窗审批；普通子会话需审批调用走审批模型；由服务端按主会话持久化并跨程序重启恢复；审批 Profile不可用不会改写已恢复模式，实际模型审批按失败路径拒绝 | handsfree mode |
 | YOLO 模式 | "You Only Live Once"：AI 工具的免确认自动执行模式——含 critical 全部自动批准、无审批模型参与；与手动/脱手模式三选一互斥，可运行时自由切换，并由服务端按主会话持久化后跨程序重启恢复 | YOLO mode |
 | 审批模型 | 脱手模式下执行审批的 LLM；由 `LLMProfileData.approval_profile` 引用根对象中的一个 LLMProfile 实例 | approval model |
 | 审批 Profile 名称指针 | 项目级审批 Profile 在 `LLMProfileData.approval_profile` 中的对象引用（英文锚点：`approval Profile reference`）；通过前端「模型配置」抽屉选择，easysave 保留对象身份 |

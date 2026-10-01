@@ -60,10 +60,12 @@ ws:prompts/common/backend-rules.md
 ws:prompts/common/review-checklist.md
 
 [description]
-用于后端开发任务的模型配置
+subagent的简介
 ```
 
 系统先加载角色目录中的 `profile.md`，再按 `[profile]` 的书写顺序加载这些文件；每个文件对应一个独立 system message。空行会忽略，路径必须是当前模式可读的沙盒命名空间路径。文件不存在、不是文件或无权读取时，角色会在 `ListSubAgents` 中保留错误并被 `RunSubAgent` 拒绝。
+
+`[description]` 是可选字段，填写该角色的一句话简介，会作为它在 `ListSubAgents` 列表中的描述展示。
 
 LLM 配置不复制到角色目录，也不在角色目录中保存 `base_url`、`api_key` 或模型参数。每次动态获取角色档案时，系统按名称解析当前 Profile。
 

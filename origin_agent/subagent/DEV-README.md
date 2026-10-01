@@ -49,7 +49,7 @@ graph TD
 - **按父会话隔离**：`SubAgentOrchestrator` 为每个 `parent_session_id` 维护一个 `_OrchestratorContext`。
 - **一条子代理 = 一个 `SubAgentLoop` 任务**：启动时创建独立 `asyncio.Task`，在 `loop.run()` 内完成 LLM 调用 → 工具执行 → 结果回写。
 - **工具权限隔离**：子代理只能看到 `availability` 包含 `SUBAGENT` 或 `EVERY` 的工具；递归创建子代理的 `multiagent` 工具集仅对主代理可见（`MAIN`）。
-- **审批流**：只读 / 白名单中的工具直接执行；其余工具调用挂起，等待父代理通过 `approval_subagent` 审批，或走脱手模式的自动审批。
+- **审批流**：使用父主会话的审批模式。safe、白名单命中或 YOLO 直接执行；手动模式其余调用等待父Agent通过 `ApprovalSubAgent` 审批（不是用户弹窗），脱手模式则由审批模型处理。多Agent模式参与者使用主会话策略，与此独立子会话路径不同。
 - **结果收集**：事件驱动——子代理 `outbox` 追加或 `pending_approvals` 变化时经 `_outbox_event` 即时触发 waiter，格式化为 `[subagent-result]` 消息 push 到父代理的 `SessionMessageQueue`。
 - **历史持久化**：停止时通过 `save_history()` 写入 `agentspace/tmp/<session_id>.es`，使用 `easysave` 多态序列化；角色是否长期保留历史由 Agent 自行移动。
 
@@ -184,12 +184,18 @@ graph TD
 
 ## 审批与结果注入
 
-1. 子代理执行非只读工具时，调用进入 `_pending_approvals`。
-2. `approval_subagent` 工具由父 Agent 调用，批量通过/拒绝。
-3. 子代理 `outbox` 追加或 `pending_approvals` 变化时，`SubAgentOrchestrator` 的 waiter 即时将 outbox + 待审批列表格式化为 `[subagent-result]` 消息，push 到父代理的 `SessionMessageQueue`。
-4. 父 Agent 的下一轮 LLM 调用即可看到子代理的产出。
+普通子会话先按父主会话模式判断：YOLO、safe 或白名单命中直接执行。其余调用在手动模式进入以下父Agent审批流程：
 
-脱手模式下，子代理的工具审批直接走 `request_user_confirm` 到父 session（由 approval 模型审批），不经过 `_pending_approvals` 队列。
+1. 工具调用进入 `_pending_approvals` 并等待决定。
+2. `ApprovalSubAgent` 工具由父Agent调用，批量通过/拒绝；前端 pending 状态并不表示用户审批弹窗。
+3. 子Agent `outbox` 追加或 `pending_approvals` 变化时，`SubAgentOrchestrator` 的 waiter 即时将 outbox + 待审批列表格式化为 `[subagent-result]` 消息，push 到父Agent的 `SessionMessageQueue`。
+4. 父Agent的下一轮 LLM 调用即可看到子Agent的产出。
+
+脱手模式下，需审批调用直接经 `request_user_confirm` 使用父主会话的审批模型，不经过 `_pending_approvals` 队列。白名单以工具名和规范化参数匹配，不是工具名级的无限制授权。
+
+`SUB_SESSION_POLICY` 将 write/dangerous/critical 都列入需审批集合。当前内置 critical 工具不对普通子Agent开放；如果自定义工具开放 critical，现有子会话通用路径仍在手动模式交给父Agent、脱手模式交给审批模型，也没有 critical 专用的白名单例外。不能套用主会话 critical 强制用户弹窗的说明；本次仅修正固定说明，不改变这些执行行为。
+
+`templates/subagent/subagent_system.txt` 描述上述独立子会话规则；`templates/multiagent/multi_agent_system_prompt.txt` 则面向所有多Agent参与者，明确其使用主会话策略（手动模式 write 直接执行）。临时Agent继续无系统提示词、仅允许 safe 工具。
 
 ---
 

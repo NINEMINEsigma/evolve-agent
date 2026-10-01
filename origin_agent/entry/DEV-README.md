@@ -72,7 +72,7 @@ entry/
 
 - 处理用户消息：`process_message()`。
 - 流式 LLM 调用与实时前端推送（通过 `StreamConsumer`）。
-- 工具审批：只读 / 白名单直接执行，其余通过 `ToolExecutor` + `execute_with_approval` 等待确认。
+- 工具审批：复用 `ToolExecutor` + `execute_with_approval`；safe 始终免审批，手动模式 write 也免审批；其余按模式分流到用户或审批模型，非 critical 可命中白名单，critical 在手动/脱手模式均由用户审批，YOLO 全部免审批。
 - 会话旋转：当上下文接近上限时，通过 `LoopSessionManager` 在摘要保障成功后创建延续会话，最后才归档旧会话；摘要失败时保留当前会话与触发消息，追加系统状态并中断本轮。
 - 标题、标签与摘要生成：统一委托 `Application.session_metadata_service`；全局元数据 Profile优先，未配置时按目标会话活动 Profile回退。
 - 子Agent编排：通过 `SubAgentOrchestrator` 启动/管理子 Agent。
@@ -207,7 +207,7 @@ sequenceDiagram
 4. `_build_history_messages()` 组装 system prompt + hooks + 历史。
 5. `StreamConsumer.consume()` 调用 `BaseLLMClient.chat_stream()` 流式生成。
 6. 解析流中的文本 / tool_call，通过 `FrontendSink` 实时推送。
-7. 对 tool_call 执行 `ToolExecutor.execute()`：safe / allowlist 直接执行，否则等待审批。
+7. 对 tool_call 执行 `ToolExecutor.execute()`：按主会话策略检查审批模式、危险等级与白名单；手动模式 safe/write 直接执行，critical 在手动/脱手模式由用户审批，YOLO 全部免审批。该流程也适用于多Agent模式中的所有参与Agent，不使用独立子会话策略。
 8. 工具结果加入历史，循环直到 `finish_reason=stop` 或达到 `MAX_TOOL_TURNS`。
 
 > **延迟渲染与消费确认**：前端发送消息后不乐观渲染气泡，改为在输入栏显示"已排队"徽章。后端通过两条路径确认消费方式：空闲消费时 `emit_user_message` 回显 → 前端渲染正式气泡并移除徽章；工具链注入时 `drain_injected` 将消息写入工具结果内部 `_queued_messages`，并返回 `consumed_client_message_ids`，经 `finalize_tool_result` 分离后分别透传到 `tool_result.embedded_messages` 与顶层字段 → 前端在工具调用卡片的独立嵌入消息区域展示消息并移除匹配徽章（不显示独立气泡）。中断、切会话、历史重载时清空徽章。`SessionMessageQueue` 的长期 consumer 为每批消息创建独立单次回复 task；中断该 task 后 consumer 继续处理后续 FIFO。consumer 意外结束时只恢复 deque 中尚未 drain 的新消息，不回放失败批次。

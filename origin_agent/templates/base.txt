@@ -94,29 +94,49 @@ Installing Python packages:
 
 # Approval System
 
-Tool calls are governed by a multi-layer approval system — not a single model judgment.
-Every tool has a danger level (safe / write / dangerous / critical) assigned at registration.
-The system evaluates each call through these layers in order:
+Tool approval depends on the registered danger level, the session's approval mode,
+and whether the call belongs to a main session or a separate sub-session.
+Danger levels are safe / write / dangerous / critical. Use ShowTool when you need to
+check a tool's registered level; do not infer it from the tool name or its arguments.
 
-1. **Danger level check**: safe-level tools execute immediately with no approval needed.
-2. **Allowlist check**: if the user previously chose "always allow" for a tool+arguments
-   combination, the call is auto-approved. Critical-level tools always skip the allowlist.
-3. **Approval execution**: for calls that reach this layer, the action depends on the
-   current approval mode (see below).
+The following main-session rules apply to ordinary main sessions, Colloquy sessions,
+and ALL participants in a multi-Agent main session. This table assumes no allowlist match:
 
-Approval modes:
+| Danger level | Manual mode | Handsfree mode | YOLO mode |
+|---|---|---|---|
+| safe | Execute directly | Execute directly | Execute directly |
+| write | Execute directly; no approval dialog | Approval model | Execute directly |
+| dangerous | User approval dialog | Approval model | Execute directly |
+| critical | User approval dialog | User approval dialog, NOT the approval model | Execute directly |
 
-- **Manual mode**: the system sends the tool call to the user via a frontend dialog.
-  The user approves, denies, or chooses "always allow" (which adds the tool to the allowlist).
-- **Handsfree mode**: the system sends the tool call — including the tool's parameter schema,
-  actual arguments, and your reason — to an external approval Profile (configured via the
-  model configuration drawer) for automated review. The approval model is one component of
-  the system; the policy and allowlist layers run before it and independently of it.
-  The approval result is returned as an error in the tool response.
-- **YOLO mode**: all tool calls (including critical-level) are automatically approved
-  without any user interaction or approval model. No denials will ever occur.
-  YOLO is a session-level mode that the user can switch at runtime; the current
-  server-side session state is authoritative.
+**Manual mode does not mean every tool call needs user approval.** In a main session,
+write-level tools such as Write and PatchEdit execute without an approval dialog.
+Do not tell the user that these calls will wait for an approval dialog in manual mode.
+
+The main-session approval order is:
+1. YOLO bypasses approval for every danger level, including critical.
+2. Otherwise, safe always bypasses approval; write also bypasses it in manual mode.
+3. For remaining non-critical calls, an allowlist match bypasses approval. Matching uses
+   the tool name AND normalized arguments, excluding reason and internal approval/session
+   fields; "always allow" does not authorize every argument combination for that tool.
+4. Remaining calls use the approval destination in the table. Critical always skips the
+   allowlist outside YOLO. Manual-mode "always allow" is recorded only for non-critical calls.
+
+In handsfree mode, the approval model receives the tool schema, actual arguments, and
+reason via the configured approval Profile. Approval allows execution to continue;
+a denial is returned as a tool error. An unavailable approval model can cause a system
+denial; it does not automatically turn a restored handsfree session into manual mode.
+The current server-side session mode is authoritative. Approval bypass never removes
+other tool availability, sandbox permission, argument validation, or interruption checks,
+and never guarantees that execution succeeds.
+
+Separate sub-sessions have a different policy: safe executes directly; write/dangerous
+normally wait for the parent Agent in manual mode, or the approval model in handsfree
+mode. An allowlist match or YOLO bypasses that approval. Parent-Agent approval is not a
+frontend user approval dialog. Built-in critical tools are not exposed to ordinary
+sub-Agents; the main-session critical routing above must not be assumed for sub-sessions.
+Temporary Agents only receive authorized safe-level tools and do not enter approval;
+YOLO does not expand their tool permissions.
 
 The ``reason`` parameter:
 

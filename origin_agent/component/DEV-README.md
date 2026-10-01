@@ -183,7 +183,7 @@ ShellManager 使用 pywinpty 高层 `PtyProcess` 的 socket reader；通过受�
 
 #### `approval/allowlist.py` — 工具白名单
 
-- `is_allowed(tool_name, session_id)` / `add_allowed(tool_name, session_id)`：工具 allowlist 持久化，命中白名单的工具无需弹窗或模型审批。
+- `is_allowed(tool_name, args)` / `add_allowed(tool_name, args)`：按工具名与规范化参数精确匹配；排除 `reason`、`_session_id`、`_pre_approved`、`_approval_action`，并非对该工具所有参数组合授权。主会话 critical 在手动/脱手模式不使用白名单。
 
 #### `approval/policy.py` — 审批策略
 
@@ -192,15 +192,16 @@ ShellManager 使用 pywinpty 高层 `PtyProcess` 的 socket reader；通过受�
 - `SUB_SESSION_POLICY`：子会话策略（write+dangerous+critical 在两种模式下均需审批）。
 - `ApprovalPolicy` 数据类定义在 `entity/puretype/`（`approval` 子模块）。
 
-### 审批流程
+### 主会话审批流程
 
-1. `ToolExecutor.execute()` 调用 `execute_with_approval()`。
-2. `execute_with_approval` 判断工具危险等级与白名单。
-3. 若工具在 allowlist 中或危险等级为 `safe`，直接执行。
-4. 否则进入审批流程：
-   - **手动模式**：通过 `AgentSink.request_approval()` 弹出前端确认请求，等待用户决策。
-   - **脱手模式**：通过审批 Profile 模型自动评估，使用普通文本决策标记。
-5. 审批结果回传后，允许执行或返回拒绝结果。
+1. `ToolExecutor.execute()` 调用 `execute_with_approval()`；普通模式、随意聊聊及多Agent模式中的所有参与Agent均走此流程。
+2. YOLO 首先放行所有危险等级，包括 critical；免审批不绕过工具可用范围、沙盒权限或参数校验。
+3. 其余模式按 `MAIN_SESSION_POLICY` 选择阈值：safe 始终直接执行，write 在手动模式也直接执行，不弹审批弹窗。
+4. 需要审批的非 critical 调用若命中工具名和参数白名单则直接放行；critical 跳过白名单。
+5. 剩余调用分流：手动模式 dangerous/critical 由用户弹窗审批；脱手模式 write/dangerous 由审批模型处理，critical 仍由用户弹窗审批。
+6. 允许后继续执行；拒绝才返回拒绝工具结果。仅手动模式非 critical 的 `allow_always` 写入白名单。
+
+固定说明分别位于 `templates/base.txt`（主Agent）、`templates/multiagent/multi_agent_system_prompt.txt`（全部多Agent参与者）和 `templates/subagent/subagent_system.txt`（普通子会话）。普通子会话使用不同审批出口，详见 `subagent/DEV-README.md`；临时Agent保持无系统提示词和 safe-only 权限。本次说明纠正不改变 `session_meta_hook` 的模式状态传递方式。
 
 ---
 
