@@ -136,7 +136,6 @@ class StreamConsumer:
 
         content: str = ""
         reasoning_content: str = ""
-        reasoning_field_name: str | None = None
         tool_calls: list[ToolCallRequest] = []
         finish_reason: str = "stop"
         usage_dict: dict[str, int] = {
@@ -233,8 +232,6 @@ class StreamConsumer:
                         reasoning_start_ts = time.monotonic()
                     reasoning_end_ts = time.monotonic()
                     reasoning_content += chunk.reasoning_delta
-                    if chunk.reasoning_field_name:
-                        reasoning_field_name = chunk.reasoning_field_name
                     await self._sink.emit_stream_delta(
                         session_id, stream_id,
                         reasoning_delta=chunk.reasoning_delta,
@@ -273,7 +270,6 @@ class StreamConsumer:
                 tool_calls=list(tool_calls),
                 finish_reason="cancelled",
                 reasoning_content=reasoning_content or None,
-                reasoning_field_name=reasoning_field_name,
                 usage=Usage(
                     prompt_tokens=usage_dict["prompt_tokens"],
                     completion_tokens=usage_dict["completion_tokens"],
@@ -335,7 +331,6 @@ class StreamConsumer:
             tool_calls=tool_calls,
             finish_reason=finish_reason,
             reasoning_content=reasoning_content or None,
-            reasoning_field_name=reasoning_field_name,
             usage=Usage(
                 prompt_tokens=usage_dict["prompt_tokens"],
                 completion_tokens=usage_dict["completion_tokens"],

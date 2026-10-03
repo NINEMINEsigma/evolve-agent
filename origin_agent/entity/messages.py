@@ -186,11 +186,6 @@ class CharacterConversationMessage(CharacterMessage):
     '''
     思考内容
     '''
-    # 字段名应由 LLM 响应实际使用的 provider 字段决定；默认仅作为无响应信息时的兜底. 
-    reasoning_field_name: str|None = "reasoning_content"
-    '''
-    思考内容字段名
-    '''
     visible_characters: list[str]|None = None
     '''
     可见角色列表, 为空时仅用户和自己可见

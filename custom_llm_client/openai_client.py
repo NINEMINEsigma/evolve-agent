@@ -137,13 +137,12 @@ class OpenAILLMClient(BaseLLMClient):
                 choice: Any = completion.choices[0]
                 msg: Any = choice.message
 
-                reasoning_value, reasoning_field = _extract_reasoning_with_field(msg)
+                reasoning_value = _extract_reasoning(msg)
                 return LLMResponse(
                     content=_extract_content(msg),
                     tool_calls=_extract_tool_calls(msg),
                     finish_reason=_extract_finish_reason(choice, "stop") or "stop",
                     reasoning_content=reasoning_value,
-                    reasoning_field_name=reasoning_field,
                     usage=_extract_usage(completion),
                 )
             except (
@@ -194,7 +193,6 @@ class OpenAILLMClient(BaseLLMClient):
         state: dict[str, Any] = {
             "content": "",
             "reasoning": "",
-            "reasoning_field_name": None,
             "completed_tool_calls": [],
             "pending_tool_buffers": {},
             "finish_reason": None,
@@ -304,8 +302,7 @@ class OpenAILLMClient(BaseLLMClient):
                     continue
 
                 content_delta = _extract_content(delta)
-                reasoning_delta, reasoning_field = _extract_reasoning_with_field(delta)
-                reasoning_delta = reasoning_delta or ""
+                reasoning_delta = _extract_reasoning(delta) or ""
 
                 if content_delta:
                     content_buffer += content_delta
@@ -315,11 +312,8 @@ class OpenAILLMClient(BaseLLMClient):
                 if reasoning_delta:
                     reasoning_buffer += reasoning_delta
                     state["reasoning"] = reasoning_buffer
-                    if reasoning_field:
-                        state["reasoning_field_name"] = reasoning_field
                     yield StreamChunk(
                         reasoning_delta=reasoning_delta,
-                        reasoning_field_name=reasoning_field,
                     )
 
                 # 累积 tool_calls
@@ -472,7 +466,6 @@ def _build_resume_messages(
         character_name="",
         content=assistant_content or " ",
         reasoning=assistant_reasoning,
-        reasoning_field_name=state.get("reasoning_field_name") or "reasoning_content",
         tool_calls=msg_tool_calls or None,
     )
     converted = to_openai_message(assistant_entity, current_character_agent="")
@@ -539,25 +532,6 @@ def _extract_content(obj: Any) -> str:
     return getattr(obj, "content", None) or ""
 
 
-def _extract_reasoning_with_field(obj: Any) -> tuple[str | None, str | None]:
-    """从 OpenAI SDK 的 delta/message 对象中提取 reasoning 内容及其原始字段名。
-
-    不同 provider / SDK 版本对 reasoning 字段的命名和暴露方式不同：
-      - DeepSeek: ``reasoning_content``
-      - 某些 OpenAI 兼容接口: ``reasoning``
-      - 标准 OpenAI ``ChoiceDelta``: 可能不存在该字段
-
-    返回 ``(值, 字段名)``；未找到时返回 ``(None, None)``。
-    """
-    if obj is None:
-        return None, None
-    for attr in ("reasoning_content", "reasoning"):
-        value = getattr(obj, attr, None)
-        if value:
-            return value, attr
-    return None, None
-
-
 def _extract_reasoning(obj: Any) -> str | None:
     """从 OpenAI SDK 的 delta/message 对象中提取 reasoning 内容。
 
@@ -569,7 +543,13 @@ def _extract_reasoning(obj: Any) -> str | None:
     统一在此函数内做防御式提取，上层无需关心兼容细节，也便于
     后续升级为按 provider 配置的适配器模式。
     """
-    return _extract_reasoning_with_field(obj)[0]
+    if obj is None:
+        return None
+    for attr in ("reasoning_content", "reasoning"):
+        value = getattr(obj, attr, None)
+        if value:
+            return value
+    return None
 
 
 def _extract_usage(obj: Any) -> Usage:

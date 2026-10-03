@@ -119,7 +119,6 @@ class TaskAgentLoop(SubAgentLoop):
                         character_name=self.current_character_agent,
                         content=text,
                         reasoning=reasoning_text,
-                        reasoning_field_name=resp.reasoning_field_name,
                     )
                     self._history.add_message(assistant_msg)
                     self._outbox.append(text)
@@ -153,7 +152,6 @@ class TaskAgentLoop(SubAgentLoop):
                     content=resp.content or "",
                     tool_calls=tool_calls_data,
                     reasoning=reasoning_text,
-                    reasoning_field_name=resp.reasoning_field_name,
                 )
                 self._history.add_message(assistant_msg)
 

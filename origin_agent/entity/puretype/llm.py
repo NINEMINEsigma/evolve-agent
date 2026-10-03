@@ -56,8 +56,6 @@ class LLMResponse(BaseModel):
     finish_reason: str = "stop"
     reasoning_content: str | None = None
     """DeepSeek thinking-mode 载荷 — 在后续回合中必须回传。"""
-    reasoning_field_name: str | None = None
-    """原始响应中携带 reasoning 的字段名，用于在后续回传时保持字段一致。"""
     usage: Usage = Usage()
     metrics: MessageMetrics | None = None
     """本轮 LLM 调用的计时与 token 速度元信息（StreamConsumer 填充）。"""
@@ -101,8 +99,6 @@ class StreamChunk(BaseModel):
     content_delta: str | None = None
     reasoning_delta: str | None = None
     """DeepSeek thinking-mode 增量 — 仅用于展示。"""
-    reasoning_field_name: str | None = None
-    """当前 reasoning_delta 对应的原始字段名（如 reasoning_content / reasoning）。"""
     tool_call: ToolCallRequest | None = None
     """当前 chunk 中首次完整出现的 tool_call（用于工具调用开始通知）。"""
     tool_call_delta: ToolCallDelta | None = None

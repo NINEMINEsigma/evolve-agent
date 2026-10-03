@@ -494,7 +494,6 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
                         msg_index = self._append(
                             sid, Role.ASSISTANT, partial_content,
                             reasoning_content=partial.reasoning_content if partial else None,
-                            reasoning_field_name=partial.reasoning_field_name if partial else None,
                         )
                         if partial_metrics:
                             collected_metrics.append((sid, msg_index, partial_metrics))
@@ -523,7 +522,6 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
                         msg_index = self._append(
                             sid, Role.ASSISTANT, resp.content,
                             reasoning_content=resp.reasoning_content,
-                            reasoning_field_name=resp.reasoning_field_name,
                         )
                         if resp.metrics:
                             collected_metrics.append((sid, msg_index, resp.metrics))
@@ -563,7 +561,6 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
                     msg_index = self._append(
                         sid, Role.ASSISTANT, assistant_text,
                         reasoning_content=resp.reasoning_content,
-                        reasoning_field_name=resp.reasoning_field_name,
                     )
                     if resp.metrics:
                         collected_metrics.append((sid, msg_index, resp.metrics))
@@ -938,7 +935,6 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
         self, session_id: str, role: Role,
         content: str | list[dict[str, Any]],
         reasoning_content: str | None = None,
-        reasoning_field_name: str | None = None,
         character_name: str | None = None,
         message_suffix: str | None = None,
         dynamic_message_suffix: str | None = None,
@@ -963,7 +959,6 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
                     [self.current_character_agent] if role == Role.USER else None
                 ),
                 reasoning=reasoning_content,
-                reasoning_field_name=reasoning_field_name,
                 message_suffix=message_suffix,
                 dynamic_message_suffix=dynamic_message_suffix,
             )
@@ -976,7 +971,6 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
                     [self.current_character_agent] if role == Role.USER else None
                 ),
                 reasoning=reasoning_content,
-                reasoning_field_name=reasoning_field_name,
                 message_suffix=message_suffix,
                 dynamic_message_suffix=dynamic_message_suffix,
                 tool_calls=None,
@@ -1109,7 +1103,6 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
             content=resp.content or "",
             tool_calls=tool_calls_data,
             reasoning=resp.reasoning_content,
-            reasoning_field_name=resp.reasoning_field_name,
         )
         index = self._history.add_message(message)
         self.save_history(session_id)

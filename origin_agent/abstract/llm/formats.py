@@ -182,8 +182,8 @@ def _charconv_to_openai_dict(
 
     # Self: inject reasoning + tool_calls
     if message.character_name == current_character_agent:
-        if message.reasoning_field_name and message.reasoning:
-            raw[message.reasoning_field_name] = message.reasoning
+        if message.reasoning:
+            raw["reasoning_content"] = message.reasoning
         if message.tool_calls:
             raw["tool_calls"] = [tc.as_object() for tc in message.tool_calls]
 

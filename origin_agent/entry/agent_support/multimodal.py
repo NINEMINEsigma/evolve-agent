@@ -60,113 +60,19 @@ def legacy_tool_result_str_to_dict(content: str) -> dict[str, Any]:
 
 def is_content_block_error(exc: Exception) -> bool:
     """检测异常是否由 unsupported content blocks（如图片/音频/视频）引起。"""
-    import openai as _openai
-    msg: str = str(exc).lower()
-    if isinstance(exc, _openai.BadRequestError):
-        keywords: list[str] = [
-            "image_url",
-            "input_audio",
-            "video_url",
-            "content type",
-            "content block",
-            "unsupported",
-            "invalid content",
-            "multimodal",
-            "vision",
-            "audio",
-            "video",
-        ]
-        return any(k in msg for k in keywords)
-    if isinstance(exc, _openai.APIStatusError):
-        if exc.status_code != 400:
-            return False
-        keywords400: list[str] = ["image", "audio", "video", "content", "unsupported"]
-        return any(k in msg for k in keywords400)
-    return False
-
-
-def is_audio_block_error(exc: Exception) -> bool:
-    """检测异常是否由 unsupported audio content blocks 引起。"""
-    import openai as _openai
-    msg: str = str(exc).lower()
-    if isinstance(exc, _openai.BadRequestError):
-        keywords: list[str] = [
-            "input_audio",
-            "audio",
-            "content type",
-            "content block",
-            "unsupported",
-            "invalid content",
-            "multimodal",
-        ]
-        return any(k in msg for k in keywords)
-    if isinstance(exc, _openai.APIStatusError):
-        if exc.status_code != 400:
-            return False
-        return any(k in msg for k in ["audio", "content", "unsupported"])
-    return False
-
-
-def strip_image_blocks(messages: list[BaseMessage], session_id: str) -> int:
-    """移除 BaseMessage 列表中所有含 image 的 content blocks，转为纯文本。
-
-    返回被剥离的图片数量。
-    """
-    stripped: int = 0
-    for msg in messages:
-        content = msg.content
-        if not isinstance(content, list):
-            continue
-        new_blocks: list[MessageBlock] = []
-        has_image: bool = False
-        for block in content:
-            if isinstance(block, ImageBlock):
-                has_image = True
-                stripped += 1
-                new_blocks.append(TextBlock(
-                    text="[Image content removed — the provider rejected this image content block]",
-                ))
-            else:
-                new_blocks.append(block)
-        if has_image:
-            msg.content = new_blocks
-    if stripped:
-        logger.info(
-            "Stripped %d image block(s) from messages (session=%s)",
-            stripped, session_id,
-        )
-    return stripped
-
-
-def strip_audio_blocks(messages: list[BaseMessage], session_id: str) -> int:
-    """移除 BaseMessage 列表中所有含 audio 的 content blocks，转为纯文本。
-
-    返回被剥离的音频数量。
-    """
-    stripped: int = 0
-    for msg in messages:
-        content = msg.content
-        if not isinstance(content, list):
-            continue
-        new_blocks: list[MessageBlock] = []
-        has_audio: bool = False
-        for block in content:
-            if isinstance(block, AudioBlock):
-                has_audio = True
-                stripped += 1
-                new_blocks.append(TextBlock(
-                    text="[Audio content removed — the provider rejected this audio content block]",
-                ))
-            else:
-                new_blocks.append(block)
-        if has_audio:
-            msg.content = new_blocks
-    if stripped:
-        logger.info(
-            "Stripped %d audio block(s) from messages (session=%s)",
-            stripped, session_id,
-        )
-    return stripped
+    return any(k in str(exc).lower() for k in [
+        "image_url",
+        "input_audio",
+        "video_url",
+        "content type",
+        "content block",
+        "unsupported",
+        "invalid content",
+        "multimodal",
+        "vision",
+        "audio",
+        "video",
+    ])
 
 
 async def _forward_unsupported_block(

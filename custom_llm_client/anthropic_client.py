@@ -217,7 +217,6 @@ class AnthropicLLMClient(BaseLLMClient):
         state: dict[str, Any] = {
             "content": "",
             "reasoning": "",
-            "reasoning_field_name": "reasoning_content",
             "completed_tool_calls": [],
             "finish_reason": None,
         }
@@ -350,7 +349,6 @@ class AnthropicLLMClient(BaseLLMClient):
                             state["reasoning"] = reasoning_buffer
                             yield StreamChunk(
                                 reasoning_delta=thinking_text,
-                                reasoning_field_name="reasoning_content",
                             )
                     elif delta_type in ("tool_use_delta", "input_json_delta"):
                         partial = getattr(delta, "partial_json", "") or ""
@@ -548,7 +546,6 @@ async def _collect_stream_to_response(
     """将 chat_stream() 的异步迭代器收集为完整的 LLMResponse。"""
     content = ""
     reasoning_content = ""
-    reasoning_field_name: str | None = None
     tool_calls: list[ToolCallRequest] = []
     finish_reason = "stop"
     usage = Usage()
@@ -560,8 +557,6 @@ async def _collect_stream_to_response(
             content += chunk.content_delta
         if chunk.reasoning_delta:
             reasoning_content += chunk.reasoning_delta
-        if chunk.reasoning_field_name:
-            reasoning_field_name = chunk.reasoning_field_name
         if chunk.tool_call:
             tool_calls.append(chunk.tool_call)
         if chunk.finish_reason:
@@ -581,7 +576,6 @@ async def _collect_stream_to_response(
         tool_calls=tool_calls,
         finish_reason=finish_reason,
         reasoning_content=reasoning_content or None,
-        reasoning_field_name=reasoning_field_name,
         usage=usage,
     )
 
@@ -606,7 +600,6 @@ def _parse_message(response: Any) -> LLMResponse:
         tool_calls=tool_calls,
         finish_reason=_map_stop_reason(getattr(response, "stop_reason", None)),
         reasoning_content=reasoning_content or None,
-        reasoning_field_name="reasoning_content" if reasoning_content else None,
         usage=_extract_usage(response),
     )
 

@@ -161,20 +161,14 @@ def build_video_content_blocks(video: dict, text_payload: str) -> list[MessageBl
 # 活跃模型解析 / 转发借用
 # ---------------------------------------------------------------------------
 
-# ── 转发描述特殊标签 ──
-# 标签常量定义于 entity/constant/llm.py，此处提供按 media_type 查找标签的映射与包裹函数，
-# 供 preprocess（entry 层）与 Read 工具（component 层）共用，保证两条转发路径产出的
-# 描述都以同一种标签包裹。
-_FORWARDED_TAG_BY_MEDIA: dict[str, str] = {
-    "image": FORWARDED_VISION_TAG,
-    "audio": FORWARDED_AUDIO_TAG,
-    "video": FORWARDED_VIDEO_TAG,
-}
-
 
 def forwarded_tag_for_media(media_type: str) -> str | None:
     """按 media_type 返回对应的转发描述标签名；未知模态返回 None。"""
-    return _FORWARDED_TAG_BY_MEDIA.get(media_type)
+    return {
+        "image": FORWARDED_VISION_TAG,
+        "audio": FORWARDED_AUDIO_TAG,
+        "video": FORWARDED_VIDEO_TAG,
+        }.get(media_type)
 
 
 def wrap_forwarded_description(description: str, tag: str | None) -> str:
@@ -185,14 +179,6 @@ def wrap_forwarded_description(description: str, tag: str | None) -> str:
     if not tag:
         return description
     return f"<{tag}>\n{description}\n</{tag}>"
-
-
-def _resolve_base_url(base_url: str | None) -> str:
-    """解析 base_url：显式传入优先，否则从 active profile 取。"""
-    if base_url:
-        return base_url
-    # ctx.llm_base_url 已删除；调用方应通过 resolve_active_model_base_url 传入 profile
-    return ""
 
 
 def resolve_active_model_base_url(
@@ -213,7 +199,7 @@ def resolve_active_model_base_url(
         profile = context.llm_profile
 
     if profile:
-        return profile.model or "", profile.base_url or "", profile
+        return profile.model, profile.base_url, profile
 
     # 无 active profile — 探针返回不可用而非尝试建 client
     return "", "", None
@@ -350,14 +336,14 @@ async def forward_modality_to_ref_profile(
 # 能力缓存（easysave，类型保留）
 # ---------------------------------------------------------------------------
 
-def _cache_key(model: str, base_url: str | None = None) -> str:
+def _cache_key(model: str, base_url: str) -> str:
     """缓存键按 模型名 + 服务商（base_url） 联合索引。
 
     同一模型在不同服务商上的 tool 消息多模态能力可能不同（图像 token 无"出身"概念，
     工具调用无法使用多模态大概率是提供商网关的问题），只按模型名索引会在不同
     服务商间互相污染缓存。
     """
-    return f"{model.lower()}@{_resolve_base_url(base_url)}"
+    return f"{model.lower()}@{base_url}"
 
 
 def _cache_path() -> Path:
@@ -403,7 +389,7 @@ def _save_cache(data: dict[str, ModalityCapability]) -> None:
             logger.warning("Failed to save modality capability cache: %s", exc)
 
 
-def _get_cached_field(model: str, base_url: str | None, field: str) -> bool | None:
+def _get_cached_field(model: str, base_url: str, field: str) -> bool | None:
     """读取指定 model+base_url 条目的单个能力字段；未命中/未探测返回 None。"""
     entry = _load_cache().get(_cache_key(model, base_url))
     if entry is None:
@@ -411,32 +397,32 @@ def _get_cached_field(model: str, base_url: str | None, field: str) -> bool | No
     return getattr(entry, field)
 
 
-def get_cached_vision_support(model: str, base_url: str | None = None) -> bool | None:
+def get_cached_vision_support(model: str, base_url: str) -> bool | None:
     """读取模型在指定服务商下的 vision（tool 消息图片）能力缓存；未命中返回 None。"""
     return _get_cached_field(model, base_url, "vision")
 
 
-def get_cached_audio_support(model: str, base_url: str | None = None) -> bool | None:
+def get_cached_audio_support(model: str, base_url: str) -> bool | None:
     """读取模型在指定服务商下的 audio（tool 消息音频）能力缓存；未命中返回 None。"""
     return _get_cached_field(model, base_url, "audio")
 
 
-def get_cached_user_vision_support(model: str, base_url: str | None = None) -> bool | None:
+def get_cached_user_vision_support(model: str, base_url: str) -> bool | None:
     """读取模型在指定服务商下的 user 消息 vision 能力缓存；未命中返回 None。"""
     return _get_cached_field(model, base_url, "user_vision")
 
 
-def get_cached_user_audio_support(model: str, base_url: str | None = None) -> bool | None:
+def get_cached_user_audio_support(model: str, base_url: str) -> bool | None:
     """读取模型在指定服务商下的 user 消息 audio 能力缓存；未命中返回 None。"""
     return _get_cached_field(model, base_url, "user_audio")
 
 
-def get_cached_video_support(model: str, base_url: str | None = None) -> bool | None:
+def get_cached_video_support(model: str, base_url: str) -> bool | None:
     """读取模型在指定服务商下的 video（tool 消息视频）能力缓存；未命中返回 None。"""
     return _get_cached_field(model, base_url, "video")
 
 
-def get_cached_user_video_support(model: str, base_url: str | None = None) -> bool | None:
+def get_cached_user_video_support(model: str, base_url: str) -> bool | None:
     """读取模型在指定服务商下的 user 消息 video 能力缓存；未命中返回 None。"""
     return _get_cached_field(model, base_url, "user_video")
 
