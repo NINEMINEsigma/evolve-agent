@@ -95,6 +95,7 @@ from entry.parent_agent_loop import IncompatibleHistoryError
 from entry.base_agent_loop import IMainSessionLoop
 
 if TYPE_CHECKING:
+    from system.application import Application
     from entry.parent_agent_loop import ParentAgentLoop
     from gateway.session_manager import SessionManager
 
@@ -2082,12 +2083,12 @@ def _modality_profile_state(profile) -> ModalityProfileState:
     )
 
 
-def _get_modality_profile_states(application) -> ModalityProfileStates:
-    profiles = application.llm_profile_store.get_global_modality_profiles()
+def _get_modality_profile_states(application: Application) -> ModalityProfileStates:
+    data = application.llm_profile_store.get_data()
     return ModalityProfileStates(
-        image=_modality_profile_state(profiles["image"]),
-        audio=_modality_profile_state(profiles["audio"]),
-        video=_modality_profile_state(profiles["video"]),
+        image=_modality_profile_state(data.global_vision_image_profile),
+        audio=_modality_profile_state(data.global_audio_profile),
+        video=_modality_profile_state(data.global_vision_video_profile),
     )
 
 

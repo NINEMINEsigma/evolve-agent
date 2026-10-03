@@ -34,11 +34,6 @@ _REFERENCE_FIELDS: tuple[str, ...] = (
     "audio_profile",
     "vision_video_profile",
 )
-_GLOBAL_MODALITY_REFERENCE_FIELDS: dict[str, str] = {
-    "image": "global_vision_image_profile",
-    "audio": "global_audio_profile",
-    "video": "global_vision_video_profile",
-}
 _PROFILE_FIELDS: tuple[str, ...] = (
     "name",
     "llm_client_name",
@@ -134,21 +129,19 @@ class LLMProfileStore:
         with self._lock:
             return self._data.metadata_profile is profile
 
-    @staticmethod
-    def _global_modality_field(media_type: str) -> str:
-        try:
-            return _GLOBAL_MODALITY_REFERENCE_FIELDS[media_type]
-        except KeyError as exc:
-            raise ValueError(f"Unsupported modality type: {media_type!r}") from exc
-
     def get_global_modality_profile(
         self,
         media_type: Literal["image", "audio", "video"],
     ) -> LLMProfile | None:
         """返回指定媒体类型的全局回退 Profile 实例。"""
-        field = self._global_modality_field(media_type)
         with self._lock:
-            return getattr(self._data, field)
+            if media_type == "image":
+                return self._data.global_vision_image_profile
+            if media_type == "audio":
+                return self._data.global_audio_profile
+            if media_type == "video":
+                return self._data.global_vision_video_profile
+            raise ValueError(f"Unsupported modality type: {media_type!r}")
 
     def set_global_modality_profile(
         self,
@@ -156,30 +149,36 @@ class LLMProfileStore:
         profile: LLMProfile | None,
     ) -> None:
         """设置指定媒体类型的全局回退 Profile 引用并持久化。"""
-        field = self._global_modality_field(media_type)
         with self._lock:
             if profile is not None and not any(
                 candidate is profile for candidate in self._data.profiles
             ):
                 raise ValueError(
-                    f"LLMProfileData.{field} must reference a profile in profiles"
+                    f"LLMProfileData global {media_type} profile must reference "
+                    "a profile in profiles"
                 )
-            previous = getattr(self._data, field)
-            setattr(self._data, field, profile)
+            if media_type == "image":
+                previous = self._data.global_vision_image_profile
+                self._data.global_vision_image_profile = profile
+            elif media_type == "audio":
+                previous = self._data.global_audio_profile
+                self._data.global_audio_profile = profile
+            elif media_type == "video":
+                previous = self._data.global_vision_video_profile
+                self._data.global_vision_video_profile = profile
+            else:
+                raise ValueError(f"Unsupported modality type: {media_type!r}")
             try:
                 self._validate_root(self._data)
                 self._save_unlocked()
             except Exception:
-                setattr(self._data, field, previous)
+                if media_type == "image":
+                    self._data.global_vision_image_profile = previous
+                elif media_type == "audio":
+                    self._data.global_audio_profile = previous
+                else:
+                    self._data.global_vision_video_profile = previous
                 raise
-
-    def get_global_modality_profiles(self) -> dict[str, LLMProfile | None]:
-        """返回三种媒体的全局回退 Profile 实例映射。"""
-        with self._lock:
-            return {
-                media_type: getattr(self._data, field)
-                for media_type, field in _GLOBAL_MODALITY_REFERENCE_FIELDS.items()
-            }
 
     def is_global_modality_profile(
         self,
@@ -192,9 +191,10 @@ class LLMProfileStore:
     def is_any_global_modality_profile(self, profile: LLMProfile) -> bool:
         """返回 Profile 是否被任一全局多模态引用指向。"""
         with self._lock:
-            return any(
-                getattr(self._data, field) is profile
-                for field in _GLOBAL_MODALITY_REFERENCE_FIELDS.values()
+            return (
+                self._data.global_vision_image_profile is profile
+                or self._data.global_audio_profile is profile
+                or self._data.global_vision_video_profile is profile
             )
 
     def list_profiles(self) -> list[LLMProfile]:
@@ -379,7 +379,9 @@ class LLMProfileStore:
             "profiles",
             "approval_profile",
             "metadata_profile",
-            *(_GLOBAL_MODALITY_REFERENCE_FIELDS.values()),
+            "global_vision_image_profile",
+            "global_audio_profile",
+            "global_vision_video_profile",
         }
         if set(data.__dict__) - allowed_fields:
             raise TypeError("LLMProfileData contains unknown fields")
@@ -417,15 +419,20 @@ class LLMProfileStore:
                     "LLMProfileData.metadata_profile must reference a profile in profiles"
                 )
 
-        for field in _GLOBAL_MODALITY_REFERENCE_FIELDS.values():
-            reference = getattr(data, field)
+        for field_name, reference in (
+            ("global_vision_image_profile", data.global_vision_image_profile),
+            ("global_audio_profile", data.global_audio_profile),
+            ("global_vision_video_profile", data.global_vision_video_profile),
+        ):
             if reference is None:
                 continue
             if not isinstance(reference, LLMProfile):
-                raise TypeError(f"LLMProfileData.{field} must be an LLMProfile or None")
+                raise TypeError(
+                    f"LLMProfileData.{field_name} must be an LLMProfile or None"
+                )
             if id(reference) not in profile_ids:
                 raise ValueError(
-                    f"LLMProfileData.{field} must reference a profile in profiles"
+                    f"LLMProfileData.{field_name} must reference a profile in profiles"
                 )
 
         for profile in data.profiles:

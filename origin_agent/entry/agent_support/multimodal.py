@@ -21,7 +21,7 @@ from entity.constant import (
 from system.modality_capability import (
     ensure_modality_capability,
     resolve_active_model_base_url,
-    resolve_modality_reference_profile,
+    resolve_effective_modality_reference_profile,
     forward_modality_to_ref_profile,
     wrap_forwarded_description,
 )
@@ -96,11 +96,9 @@ async def _forward_unsupported_block(
         return block.forward_result_content
 
     # 无已有描述 → 按活动 Profile 引用优先、全局回退引用次序解析目标。
-    global_profile = context.app.llm_profile_store.get_global_modality_profile(media_type)
-    _ref_profile = resolve_modality_reference_profile(
+    _ref_profile = resolve_effective_modality_reference_profile(
         profile,
         media_type,
-        global_profile,
     )
     if _ref_profile is None:
         raise ValueError(

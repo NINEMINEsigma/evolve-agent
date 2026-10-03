@@ -35,7 +35,7 @@ from entity.constant import (
     MODALITY_CAPABILITY_ES_FILENAME,
     MODALITY_CAPABILITY_ES_KEY,
 )
-from entity.puretype import Role, ModalityCapability, LLMProfile
+from entity.puretype import Role, ModalityCapability, LLMProfile, LLMProfileData
 from entity.messages import (
     BaseMessage,
     ImageBlock,
@@ -208,19 +208,43 @@ def resolve_active_model_base_url(
 def resolve_modality_reference_profile(
     active_profile: LLMProfile,
     media_type: Literal["image", "audio", "video"],
-    global_profile: LLMProfile | None = None,
+    profile_data: LLMProfileData,
 ) -> LLMProfile | None:
-    """解析指定媒体的有效转发 Profile，不访问 Application 单例。
+    """解析指定媒体的有效转发 Profile（纯函数，不访问 Application 单例）。
 
-    活动 Profile 的显式引用优先；活动引用为空时使用调用方传入的全局回退引用。
+    活动 Profile 的显式引用优先；活动引用为空时从 ``LLMProfileData``
+    按媒体类型取全局回退引用。``profile_data`` 由调用方注入，
+    传入 ``LLMProfileData()`` 空实例即表示「无全局回退」。
     """
     if media_type == "image":
         active_reference = active_profile.vision_image_profile
+        global_reference = profile_data.global_vision_image_profile
     elif media_type == "audio":
         active_reference = active_profile.audio_profile
+        global_reference = profile_data.global_audio_profile
     else:
         active_reference = active_profile.vision_video_profile
-    return active_reference if active_reference is not None else global_profile
+        global_reference = profile_data.global_vision_video_profile
+    return active_reference if active_reference is not None else global_reference
+
+
+def resolve_effective_modality_reference_profile(
+    active_profile: LLMProfile,
+    media_type: Literal["image", "audio", "video"],
+) -> LLMProfile | None:
+    """解析指定媒体的有效转发 Profile（便捷封装）。
+
+    内部从 ``Application.current().llm_profile_store`` 取 ``LLMProfileData``
+    后委托 :func:`resolve_modality_reference_profile`。仅在 Application
+    已装配完成的运行路径使用；prompt 构建等无单例依赖路径请直接调用
+    纯函数版本并显式传入 ``LLMProfileData``。
+    """
+    from system.application import Application
+    return resolve_modality_reference_profile(
+        active_profile,
+        media_type,
+        Application.current().llm_profile_store.get_data(),
+    )
 
 
 async def forward_modality_to_ref_profile(
@@ -257,14 +281,9 @@ async def forward_modality_to_ref_profile(
             .replace("{{error_message}}", error_message)
         )
 
-    global_profile = (
-        context.app.llm_profile_store.get_global_modality_profile(media_type)
-        if context is not None else None
-    )
-    ref_profile = resolve_modality_reference_profile(
+    ref_profile = resolve_effective_modality_reference_profile(
         active_profile,
         media_type,
-        global_profile,
     )
     if ref_profile is None:
         raise ValueError(
@@ -700,7 +719,6 @@ def _fmt_support(value: bool | None) -> str:
 def build_modality_prompt_block(
     profile: LLMProfile,
     agentspace: Path | None = None,
-    global_modality_profiles: dict[str, LLMProfile | None] | None = None,
 ) -> str:
     """构建系统提示词的多模态能力与转发配置块（每轮实时生成）。
 
@@ -708,6 +726,8 @@ def build_modality_prompt_block(
     - 能力部分只读探测缓存（不触发探测），未探测项显示 unknown。
       单次读取整个条目，避免 get_cached_* 逐字段重读缓存文件。
     - 转发部分按活动 Profile 引用优先、全局回退引用次之，显示三种媒体的有效目标。
+      全局回退引用通过 :func:`resolve_effective_modality_reference_profile`
+      从 Application 单例获取。
 
     profile 无 model 或模板缺失时返回空串（不注入）。
     """
@@ -735,16 +755,9 @@ def build_modality_prompt_block(
             return "not configured"
         return f'"{reference.name}" (model ``{reference.model}``)'
 
-    global_modality_profiles = global_modality_profiles or {}
-    image_ref = resolve_modality_reference_profile(
-        profile, "image", global_modality_profiles.get("image"),
-    )
-    audio_ref = resolve_modality_reference_profile(
-        profile, "audio", global_modality_profiles.get("audio"),
-    )
-    video_ref = resolve_modality_reference_profile(
-        profile, "video", global_modality_profiles.get("video"),
-    )
+    image_ref = resolve_effective_modality_reference_profile(profile, "image")
+    audio_ref = resolve_effective_modality_reference_profile(profile, "audio")
+    video_ref = resolve_effective_modality_reference_profile(profile, "video")
     replacements = {
         "{{model}}": profile.model,
         "{{image_tool}}": image_tool,

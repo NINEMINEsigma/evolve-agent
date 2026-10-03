@@ -55,7 +55,7 @@ except Exception:  # pragma: no cover — PIL is optional
     logger.debug("PIL not available; image size parsing disabled", exc_info=True)
     PILImage = None  # type: ignore
 
-from system.modality_capability import get_cached_vision_support, get_cached_audio_support, get_cached_user_vision_support, get_cached_user_audio_support, get_cached_video_support, get_cached_user_video_support, resolve_active_model_base_url, resolve_modality_reference_profile, forward_modality_to_ref_profile, ensure_modality_capability, wrap_forwarded_description, forwarded_tag_for_media
+from system.modality_capability import get_cached_vision_support, get_cached_audio_support, get_cached_user_vision_support, get_cached_user_audio_support, get_cached_video_support, get_cached_user_video_support, resolve_active_model_base_url, resolve_effective_modality_reference_profile, forward_modality_to_ref_profile, ensure_modality_capability, wrap_forwarded_description, forwarded_tag_for_media
 
 logger = logging.getLogger(__name__)
 
@@ -326,10 +326,9 @@ async def _handle_read(args: dict[str, Any], context: ToolContext | None = None)
                     # tool 和 user 都不支持 → 检查是否配置了引用字段
                     active_profile = _profile
                     forward_profile = (
-                        resolve_modality_reference_profile(
+                        resolve_effective_modality_reference_profile(
                             active_profile,
                             "image",
-                            context.app.llm_profile_store.get_global_modality_profile("image"),
                         )
                         if active_profile is not None else None
                     )
@@ -494,10 +493,9 @@ async def _handle_read(args: dict[str, Any], context: ToolContext | None = None)
                     # tool 和 user 都不支持 → 检查是否配置了引用字段
                     active_profile = _profile
                     forward_profile = (
-                        resolve_modality_reference_profile(
+                        resolve_effective_modality_reference_profile(
                             active_profile,
                             "audio",
-                            context.app.llm_profile_store.get_global_modality_profile("audio"),
                         )
                         if active_profile is not None else None
                     )
@@ -648,10 +646,9 @@ async def _handle_read(args: dict[str, Any], context: ToolContext | None = None)
                     # tool 和 user 都不支持 → 检查是否配置了引用字段
                     active_profile = _profile
                     forward_profile = (
-                        resolve_modality_reference_profile(
+                        resolve_effective_modality_reference_profile(
                             active_profile,
                             "video",
-                            context.app.llm_profile_store.get_global_modality_profile("video"),
                         )
                         if active_profile is not None else None
                     )
