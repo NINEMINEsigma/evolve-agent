@@ -26,6 +26,7 @@ classDiagram
         +get_session_history_resources()
         +edit_session_message()
         +delete_session_messages()
+        +delete_single_message()
         +regenerate_response()
         +get_tool_resources()
         +pop_session_rotated()
@@ -48,6 +49,58 @@ classDiagram
         #user_character_name*
         #append_user_message()*
         #process_message()*
+    }
+
+    class History {
+        +remove_message_with_pairing()
+    }
+
+    class SessionMessageEditResult {
+        +updated
+        +session_id
+        +index
+        +role
+        +content
+        +visible_characters
+        +error
+    }
+
+    class SessionMessageDeletionResult {
+        +deleted
+        +session_id
+        +removed_indices
+        +remaining_count
+        +history_count
+        +token_usage
+        +context_tokens
+        +error
+    }
+
+    class SessionRegenerateResult {
+        +regenerate
+        +session_id
+        +last_user_content
+        +remaining_count
+        +message_index
+        +message_suffix
+        +dynamic_message_suffix
+        +visible_characters
+        +response_characters
+        +error
+    }
+
+    class SessionToolResources {
+        +session_id
+        +task_progress
+        +clipboard_display
+        +dynamic_endpoints
+    }
+
+    class SessionMergeResult {
+        +merged
+        +session_id
+        +sources
+        +error
     }
 
     class BasePrivateChatAgentLoop {
@@ -598,7 +651,12 @@ classDiagram
         +list_cron_tasks_for_session()
     }
 
-    BaseAgentLoop <|-- BasePrivateChatAgentLoop
+    BaseAgentLoop --> SessionMessageEditResult : returns
+    BaseAgentLoop --> SessionMessageDeletionResult : returns
+    BaseAgentLoop --> SessionRegenerateResult : returns
+    BaseAgentLoop --> SessionToolResources : returns
+    BaseAgentLoop --> SessionMergeResult : returns
+    History --> SessionMessageDeletionResult : returns
     BaseAgentLoop <|-- MultiAgentLoop
     BasePrivateChatAgentLoop <|-- ParentAgentLoop
     BasePrivateChatAgentLoop <|-- SubAgentLoop
@@ -871,6 +929,8 @@ classDiagram
 | `SessionHistoryContentRow` / `SessionHistoryPageResponse` | `entity/puretype/session.py` | `BaseModel` | 按 History 索引范围返回的完整前端投影行 |
 | `SessionHistoryImageResource` / `SessionHistoryDownloadResource` / `SessionHistoryResourcesResponse` | `entity/puretype/session.py` | `BaseModel` | 完整 History 的图片与下载资源索引 |
 | `SessionTerminationResult` | `entity/puretype/session.py` | `BaseModel` | 会话终结结果；元数据失败通过 `metadata_warnings`返回但不改变归档成功 |
+| `SessionMessageEditResult` / `SessionMessageDeletionResult` / `SessionRegenerateResult` | `entity/puretype/session.py` | `BaseModel` | `BaseAgentLoop` 消息编辑、删除和重新生成前置处理的稳定结果；Gateway 通过属性访问，HTTP边界再序列化 |
+| `SessionToolResources` / `SessionMergeResult` | `entity/puretype/session.py` | `BaseModel` | `BaseAgentLoop` 工具资源快照与会话合并/分支结果 |
 | `MetadataProfileUpdateRequest` / `MetadataProfileState` / `MetadataProfileMutationResponse` | `entity/puretype/metadata.py` | `BaseModel` | 全局元数据 Profile REST 请求、权威状态与变更响应 |
 | `ModalityProfileState` / `ModalityProfileUpdateRequest` / `ModalityProfileMutationResponse` / `ModalityProfileStates` | `entity/puretype/modality.py` | `BaseModel` | 图片、音频、视频三路全局回退 Profile 的 REST 状态、更新请求和完整状态快照 |
 | `SessionApprovalModeState` | `entity/puretype/approval.py` | `BaseModel` | easysave类型保留的会话审批模式根对象，只含 `ApprovalMode`；文件版本由 ES key、类型稳定性由 typeref stable type token管理 |

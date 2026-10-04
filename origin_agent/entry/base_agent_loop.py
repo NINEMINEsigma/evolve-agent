@@ -35,6 +35,11 @@ from entity.puretype import (
     MainSessionActivityPhase,
     MainSessionActivitySnapshot,
     SessionTerminationResult,
+    SessionMessageEditResult,
+    SessionMessageDeletionResult,
+    SessionRegenerateResult,
+    SessionToolResources,
+    SessionMergeResult,
 )
 from entity.messages import (
     History,
@@ -829,18 +834,30 @@ class BaseAgentLoop(ABC):
         )
 
     def edit_session_message(self, index: int, content: str | list[dict[str, Any]] | None = None,
-                             visible_characters: list[str] | None = None) -> dict:
+                             visible_characters: list[str] | None = None) -> SessionMessageEditResult:
         logger.info("Edit message | session=%s index=%d", self.session_id, index)
         if not isinstance(index, int) or index < 0:
             logger.warning("Edit message fail | session=%s error=invalid index", self.session_id)
-            return {"updated": False, "error": "invalid message index"}
+            return SessionMessageEditResult(
+                updated=False,
+                session_id=self.session_id,
+                error="invalid message index",
+            )
         if index >= self._history.count:
             logger.warning("Edit message fail | session=%s index=%d error=out of range", self.session_id, index)
-            return {"updated": False, "error": "message index out of range"}
+            return SessionMessageEditResult(
+                updated=False,
+                session_id=self.session_id,
+                error="message index out of range",
+            )
         msg = self._history.get_message(index)
         if not isinstance(msg, CharacterConversationMessage):
             logger.warning("Edit message fail | session=%s index=%d error=type not editable", self.session_id, index)
-            return {"updated": False, "error": "message type not editable"}
+            return SessionMessageEditResult(
+                updated=False,
+                session_id=self.session_id,
+                error="message type not editable",
+            )
         updates: dict = {}
         if content is not None:
             if isinstance(content, list):
@@ -852,34 +869,45 @@ class BaseAgentLoop(ABC):
         updated_msg = msg.model_copy(update=updates)
         self._history.set_message(index, updated_msg)
         self.save_history(self.session_id)
-        result: dict = {
-            "updated": True,
-            "session_id": self.session_id,
-            "index": index,
-            "role": msg.role.value,
-            "content": content_to_serializable(updated_msg.content),
-        }
-        if visible_characters is not None:
-            result["visible_characters"] = visible_characters
+        result = SessionMessageEditResult(
+            updated=True,
+            session_id=self.session_id,
+            index=index,
+            role=msg.role.value,
+            content=content_to_serializable(updated_msg.content),
+            visible_characters=visible_characters,
+        )
         logger.info("Edit message ok | session=%s index=%d role=%s", self.session_id, index, msg.role.value)
         return result
 
-    def delete_session_messages(self, count: int = 1) -> dict:
+    def delete_session_messages(self, count: int = 1) -> SessionMessageDeletionResult:
         """删除最后 count 个逻辑轮次的消息（从倒数第 count 条 user 起，覆盖其后所有 tool/assistant）。"""
         logger.info("Delete messages | session=%s count=%d", self.session_id, count)
         if count < 1:
             logger.warning("Delete messages fail | session=%s error=count must be >= 1", self.session_id)
-            return {"deleted": False, "error": "count must be >= 1"}
+            return SessionMessageDeletionResult(
+                deleted=False,
+                session_id=self.session_id,
+                error="count must be >= 1",
+            )
         remove_from = self._history.find_last_user_message_index(count=count)
         if remove_from is None:
             logger.warning("Delete messages fail | session=%s error=no user messages to delete", self.session_id)
-            return {"deleted": False, "error": "no user messages to delete"}
+            return SessionMessageDeletionResult(
+                deleted=False,
+                session_id=self.session_id,
+                error="no user messages to delete",
+            )
         self._history.truncate_to(remove_from)
         self.save_history(self.session_id)
         logger.info("Delete messages ok | session=%s removed_from=%d remaining=%d", self.session_id, remove_from, self._history.count)
-        return {"deleted": True, "session_id": self.session_id, "remaining_count": self._history.count}
+        return SessionMessageDeletionResult(
+            deleted=True,
+            session_id=self.session_id,
+            remaining_count=self._history.count,
+        )
 
-    def delete_single_message(self, index: int) -> dict:
+    def delete_single_message(self, index: int) -> SessionMessageDeletionResult:
         """删除最后一轮范围内的单条消息（含配对联动清理）。
 
         校验 index 在最后一条 user 消息之后。
@@ -892,24 +920,34 @@ class BaseAgentLoop(ABC):
         last_user_idx = self._history.find_last_user_message_index(count=1)
         if last_user_idx is None:
             logger.warning("Delete single message fail | session=%s error=no user message found", self.session_id)
-            return {"deleted": False, "error": "no user message found"}
+            return SessionMessageDeletionResult(
+                deleted=False,
+                session_id=self.session_id,
+                error="no user message found",
+            )
         if index <= last_user_idx:
             logger.warning("Delete single message fail | session=%s index=%d must be after last user (idx=%d)", self.session_id, index, last_user_idx)
-            return {"deleted": False, "error": "can only delete messages after the last user message"}
+            return SessionMessageDeletionResult(
+                deleted=False,
+                session_id=self.session_id,
+                error="can only delete messages after the last user message",
+            )
 
         # 调用 History 的配对删除
-        result = self._history.remove_message_with_pairing(index)
-        if not result.get("deleted"):
+        result = self._history.remove_message_with_pairing(index).model_copy(
+            update={"session_id": self.session_id}
+        )
+        if not result.deleted:
             return result
 
         # 持久化
         self.save_history(self.session_id)
 
         logger.info("Delete single message ok | session=%s removed=%s remaining=%d",
-                     self.session_id, result.get("removed_indices"), result.get("remaining_count"))
+                    self.session_id, result.removed_indices, result.remaining_count)
         return result
 
-    def regenerate_response(self, message_index: int | None = None) -> dict:
+    def regenerate_response(self, message_index: int | None = None) -> SessionRegenerateResult:
         """截断到目标 user 消息，刷新其上下文扩展块，返回内容供重新生成。
 
         NOTE: 双路径解析目标消息——
@@ -927,18 +965,30 @@ class BaseAgentLoop(ABC):
             # 显式路径
             if not isinstance(message_index, int) or message_index < 0 or message_index >= self._history.count:
                 logger.warning("Regenerate fail | session=%s index=%s out of range", self.session_id, message_index)
-                return {"regenerate": False, "error": "message index out of range"}
+                return SessionRegenerateResult(
+                    regenerate=False,
+                    session_id=self.session_id,
+                    error="message index out of range",
+                )
             target_msg = self._history.get_message(message_index)
             if target_msg.role != Role.USER:
                 logger.warning("Regenerate fail | session=%s index=%s not a user message", self.session_id, message_index)
-                return {"regenerate": False, "error": "target message is not a user message"}
+                return SessionRegenerateResult(
+                    regenerate=False,
+                    session_id=self.session_id,
+                    error="target message is not a user message",
+                )
             last_user_idx = message_index
         else:
             # 兜底路径
             last_user_idx = self._history.find_last_user_message_index(count=1)
             if last_user_idx is None:
                 logger.warning("Regenerate fail | session=%s error=no user message found", self.session_id)
-                return {"regenerate": False, "error": "no user message found"}
+                return SessionRegenerateResult(
+                    regenerate=False,
+                    session_id=self.session_id,
+                    error="no user message found",
+                )
 
         last_user_msg = self._history.get_message(last_user_idx)
         last_user_content = content_to_text(last_user_msg.content)
@@ -959,26 +1009,38 @@ class BaseAgentLoop(ABC):
             self.save_history(self.session_id)
             last_user_msg = updated
 
-        result: dict = {
-            "regenerate": True,
-            "session_id": self.session_id,
-            "last_user_content": last_user_content,
-            "remaining_count": self._history.count,
-            "message_index": last_user_idx,
-            "message_suffix": fixator_context or None,
-            "dynamic_message_suffix": hooks_context or None,
-        }
-        if isinstance(last_user_msg, CharacterConversationMessage):
-            result["visible_characters"] = last_user_msg.visible_characters
-            result["response_characters"] = last_user_msg.response_characters
+        result = SessionRegenerateResult(
+            regenerate=True,
+            session_id=self.session_id,
+            last_user_content=last_user_content,
+            remaining_count=self._history.count,
+            message_index=last_user_idx,
+            message_suffix=fixator_context or None,
+            dynamic_message_suffix=hooks_context or None,
+            visible_characters=(
+                last_user_msg.visible_characters
+                if isinstance(last_user_msg, CharacterConversationMessage)
+                else None
+            ),
+            response_characters=(
+                last_user_msg.response_characters
+                if isinstance(last_user_msg, CharacterConversationMessage)
+                else None
+            ),
+        )
         logger.info("Regenerate ok | session=%s index=%d remaining=%d", self.session_id, last_user_idx, self._history.count)
         return result
 
-    def get_tool_resources(self) -> dict:
+    def get_tool_resources(self) -> SessionToolResources:
         """返回 session 的可恢复工具副作用资源快照。"""
         if self._session_store is None:
-            return {"task_progress": {}, "clipboard_display": {}}
-        return self._session_store.read_tool_resources(self.session_id)
+            return SessionToolResources(session_id=self.session_id)
+        resources = self._session_store.read_tool_resources(self.session_id)
+        return SessionToolResources(
+            session_id=self.session_id,
+            task_progress=resources.get("task_progress", {}),
+            clipboard_display=resources.get("clipboard_display", {}),
+        )
 
     # -- 主会话活动快照 --------------------------------------------------
 
@@ -1093,15 +1155,15 @@ class BaseAgentLoop(ABC):
         logger.info("Terminating session (base): %s", self.session_id)
         return SessionTerminationResult(terminated=True, session_id=self.session_id)
 
-    async def merge_sessions(self, sources: list[str]) -> dict:
+    async def merge_sessions(self, sources: list[str]) -> SessionMergeResult:
         """基于全部父会话摘要创建延续会话；任一摘要失败则整体失败。"""
         sm = self.session_manager
         if sm is None:
-            return {"error": "session manager not available", "merged": False}
+            return SessionMergeResult(merged=False, error="session manager not available")
         if not sources:
-            return {"error": "sources list is empty", "merged": False}
+            return SessionMergeResult(merged=False, error="sources list is empty")
         if self._session_store is None:
-            return {"error": "session store not available", "merged": False}
+            return SessionMergeResult(merged=False, error="session store not available")
 
         from entry.agent_support.history_summary import (
             messages_to_text,
@@ -1122,10 +1184,11 @@ class BaseAgentLoop(ABC):
                     source_id,
                     exc,
                 )
-                return {
-                    "error": f"无法为父会话 {source_id} 生成摘要：{exc}",
-                    "merged": False,
-                }
+                return SessionMergeResult(
+                    merged=False,
+                    sources=sources,
+                    error=f"无法为父会话 {source_id} 生成摘要：{exc}",
+                )
             summaries.append((source_id, summary))
 
         if len(summaries) == 1:
@@ -1201,7 +1264,11 @@ class BaseAgentLoop(ABC):
             sources,
             len(summaries),
         )
-        return {"merged": True, "session_id": new_sid, "sources": sources}
+        return SessionMergeResult(
+            merged=True,
+            session_id=new_sid,
+            sources=sources,
+        )
 
     # -- Hook 支持（所有 loop 共享）----------------------------------------
 

@@ -87,6 +87,10 @@ from entity.puretype import (
     DynamicSandboxSpaceCreateRequest,
     DynamicSandboxSpaceUpdateRequest,
     SessionRuntimeStatus,
+    SessionMessageEditResult,
+    SessionMessageDeletionResult,
+    SessionRegenerateResult,
+    SessionToolResources,
     MainSessionActivitySource,
     SessionVisualKind,
 )
@@ -486,25 +490,20 @@ async def update_session_tags(session_id: str, req: Request):
 
 
 @app.get("/api/sessions/{session_id}/tool-resources")
-async def get_session_tool_resources(session_id: str):
+async def get_session_tool_resources(session_id: str) -> SessionToolResources:
     """返回 session 的可恢复工具副作用资源快照。"""
     from component.extools.dynamic_endpoint_tools import list_session_endpoints
     endpoints = list_session_endpoints(session_id)
     loop = _get_loop(session_id)
     if loop is None:
-        return {
-            "session_id": session_id,
-            "task_progress": {},
-            "clipboard_display": {},
-            "dynamic_endpoints": endpoints,
-        }
-    resources = loop.loop.get_tool_resources()
-    return {
-        "session_id": session_id,
-        "task_progress": resources.get("task_progress", {}),
-        "clipboard_display": resources.get("clipboard_display", {}),
-        "dynamic_endpoints": endpoints,
-    }
+        return SessionToolResources(
+            session_id=session_id,
+            dynamic_endpoints=endpoints,
+        )
+    resources = loop.loop.get_tool_resources().model_copy(
+        update={"dynamic_endpoints": endpoints}
+    )
+    return resources
 
 
 @app.get("/api/sessions/{session_id}/status")
@@ -812,27 +811,39 @@ async def update_session_message(session_id: str, message_index: int, req: Reque
     visible_characters = body.get("visible_characters")
     info = _get_sm().get(session_id)
     if info and info.status == SessionStatus.archived:
-        result = {"updated": False, "error": "archived session cannot be edited", "session_id": session_id}
+        result = SessionMessageEditResult(
+            updated=False,
+            session_id=session_id,
+            error="archived session cannot be edited",
+        )
         return HTMLResponse(
-            json.dumps(result, ensure_ascii=False),
+            json.dumps(result.model_dump(exclude_none=True), ensure_ascii=False),
             media_type="application/json",
             status_code=403,
         )
     loop = _get_loop(session_id)
     if loop is None:
-        return {"updated": False, "error": "agent loop not ready", "session_id": session_id}
+        return SessionMessageEditResult(
+            updated=False,
+            session_id=session_id,
+            error="agent loop not ready",
+        )
     if loop.loop.is_processing():
-        result = {"updated": False, "error": "session is processing", "session_id": session_id}
+        result = SessionMessageEditResult(
+            updated=False,
+            session_id=session_id,
+            error="session is processing",
+        )
         return HTMLResponse(
-            json.dumps(result, ensure_ascii=False),
+            json.dumps(result.model_dump(exclude_none=True), ensure_ascii=False),
             media_type="application/json",
             status_code=409,
         )
     result = loop.loop.edit_session_message(message_index, content, visible_characters)
-    status_code = 200 if result.get("updated") else 400
-    logger.info("Edit message result | session=%s index=%d updated=%s", session_id, message_index, result.get("updated"))
+    status_code = 200 if result.updated else 400
+    logger.info("Edit message result | session=%s index=%d updated=%s", session_id, message_index, result.updated)
     return HTMLResponse(
-        json.dumps(result, ensure_ascii=False),
+        json.dumps(result.model_dump(exclude_none=True), ensure_ascii=False),
         media_type="application/json",
         status_code=status_code,
     )
@@ -844,29 +855,43 @@ async def delete_session_messages(session_id: str, count: int = 1):
     logger.info("Delete messages request | session=%s count=%d", session_id, count)
     info = _get_sm().get(session_id)
     if info and info.status == SessionStatus.archived:
-        result = {"deleted": False, "error": "archived session"}
+        result = SessionMessageDeletionResult(
+            deleted=False,
+            session_id=session_id,
+            error="archived session",
+        )
         return HTMLResponse(
-            json.dumps(result, ensure_ascii=False),
+            json.dumps(result.model_dump(exclude_none=True), ensure_ascii=False),
             media_type="application/json",
             status_code=403,
         )
     loop = _get_loop(session_id)
     if loop is None:
-        return {"deleted": False, "error": "agent loop not ready"}
+        return SessionMessageDeletionResult(
+            deleted=False,
+            session_id=session_id,
+            error="agent loop not ready",
+        )
     if loop.loop.is_processing():
-        result = {"deleted": False, "error": "session is processing"}
+        result = SessionMessageDeletionResult(
+            deleted=False,
+            session_id=session_id,
+            error="session is processing",
+        )
         return HTMLResponse(
-            json.dumps(result, ensure_ascii=False),
+            json.dumps(result.model_dump(exclude_none=True), ensure_ascii=False),
             media_type="application/json",
             status_code=409,
         )
     result = loop.loop.delete_session_messages(count)
-    if result.get("deleted"):
-        result["history_count"] = loop.loop.history.count
-    status_code = 200 if result.get("deleted") else 400
-    logger.info("Delete messages result | session=%s count=%d deleted=%s remaining=%s", session_id, count, result.get("deleted"), result.get("remaining_count"))
+    if result.deleted:
+        result = result.model_copy(
+            update={"history_count": loop.loop.history.count}
+        )
+    status_code = 200 if result.deleted else 400
+    logger.info("Delete messages result | session=%s count=%d deleted=%s remaining=%s", session_id, count, result.deleted, result.remaining_count)
     return HTMLResponse(
-        json.dumps(result, ensure_ascii=False),
+        json.dumps(result.model_dump(exclude_none=True), ensure_ascii=False),
         media_type="application/json",
         status_code=status_code,
     )
@@ -878,42 +903,56 @@ async def delete_single_message(session_id: str, index: int):
     logger.info("Delete single message request | session=%s index=%d", session_id, index)
     info = _get_sm().get(session_id)
     if info and info.status == SessionStatus.archived:
-        result = {"deleted": False, "error": "archived session"}
+        result = SessionMessageDeletionResult(
+            deleted=False,
+            session_id=session_id,
+            error="archived session",
+        )
         return HTMLResponse(
-            json.dumps(result, ensure_ascii=False),
+            json.dumps(result.model_dump(exclude_none=True), ensure_ascii=False),
             media_type="application/json",
             status_code=403,
         )
     loop = _get_loop(session_id)
     if loop is None:
-        return {"deleted": False, "error": "agent loop not ready"}
+        return SessionMessageDeletionResult(
+            deleted=False,
+            session_id=session_id,
+            error="agent loop not ready",
+        )
 
     # 并发防护：处理中拒绝删除
     if loop.loop.is_processing():
-        result = {"deleted": False, "error": "session is processing"}
+        result = SessionMessageDeletionResult(
+            deleted=False,
+            session_id=session_id,
+            error="session is processing",
+        )
         return HTMLResponse(
-            json.dumps(result, ensure_ascii=False),
+            json.dumps(result.model_dump(exclude_none=True), ensure_ascii=False),
             media_type="application/json",
             status_code=409,
         )
 
     result = loop.loop.delete_single_message(index)
-    if not result.get("deleted"):
+    if not result.deleted:
         return HTMLResponse(
-            json.dumps(result, ensure_ascii=False),
+            json.dumps(result.model_dump(exclude_none=True), ensure_ascii=False),
             media_type="application/json",
             status_code=400,
         )
 
     # 返回 token_usage 和 context_tokens 供前端更新（不通过 WS 全量推送，避免滚动位置重置）
-    result["token_usage"] = loop.get_token_usage()
-    result["context_tokens"] = loop.get_context_tokens()
-    result["history_count"] = loop.loop.history.count
+    result = result.model_copy(update={
+        "token_usage": loop.get_token_usage(),
+        "context_tokens": loop.get_context_tokens(),
+        "history_count": loop.loop.history.count,
+    })
 
     logger.info("Delete single message result | session=%s index=%d deleted=%s remaining=%s",
-                session_id, index, result.get("deleted"), result.get("remaining_count"))
+                session_id, index, result.deleted, result.remaining_count)
     return HTMLResponse(
-        json.dumps(result, ensure_ascii=False),
+        json.dumps(result.model_dump(exclude_none=True), ensure_ascii=False),
         media_type="application/json",
         status_code=200,
     )
@@ -925,23 +964,35 @@ async def regenerate_response(session_id: str, req: Request):
     logger.info("Regenerate request | session=%s", session_id)
     info = _get_sm().get(session_id)
     if info and info.status == SessionStatus.archived:
-        result = {"regenerate": False, "error": "archived session"}
+        result = SessionRegenerateResult(
+            regenerate=False,
+            session_id=session_id,
+            error="archived session",
+        )
         return HTMLResponse(
-            json.dumps(result, ensure_ascii=False),
+            json.dumps(result.model_dump(exclude_none=True), ensure_ascii=False),
             media_type="application/json",
             status_code=403,
         )
     loop = _get_loop(session_id)
     if loop is None:
-        return {"regenerate": False, "error": "agent loop not ready"}
+        return SessionRegenerateResult(
+            regenerate=False,
+            session_id=session_id,
+            error="agent loop not ready",
+        )
 
     # 并发防护：处理中拒绝重新生成
     # NOTE: 存在窄 TOCTOU 窗口（is_processing 检查为 False 到 process_message
     # 取锁之间），属尽力防护而非强互斥；强互斥需非阻塞 TryLock，超出本任务范围。
     if loop.loop.is_processing():
-        result = {"regenerate": False, "error": "session is processing"}
+        result = SessionRegenerateResult(
+            regenerate=False,
+            session_id=session_id,
+            error="session is processing",
+        )
         return HTMLResponse(
-            json.dumps(result, ensure_ascii=False),
+            json.dumps(result.model_dump(exclude_none=True), ensure_ascii=False),
             media_type="application/json",
             status_code=409,
         )
@@ -1000,14 +1051,14 @@ async def regenerate_response(session_id: str, req: Request):
     except Exception:
         loop.loop.finish_main_session_activity(activity_id)
         raise
-    if not result.get("regenerate"):
+    if not result.regenerate:
         loop.loop.finish_main_session_activity(activity_id)
         return HTMLResponse(
-            json.dumps(result, ensure_ascii=False),
+            json.dumps(result.model_dump(exclude_none=True), ensure_ascii=False),
             media_type="application/json",
             status_code=400,
         )
-    content: str = result.get("last_user_content", "")
+    content: str = result.last_user_content
     # 通知前端裁剪本地消息并同步刷新后的扩展块
     ws = _get_ws(session_id)
     if ws:
@@ -1019,10 +1070,10 @@ async def regenerate_response(session_id: str, req: Request):
                         session_id=session_id,
                         content=json.dumps({
                             "regenerate_trim": True,
-                            "keep_count": result.get("remaining_count", 0),
-                            "message_index": result.get("message_index"),
-                            "message_suffix": result.get("message_suffix"),
-                            "dynamic_message_suffix": result.get("dynamic_message_suffix"),
+                            "keep_count": result.remaining_count,
+                            "message_index": result.message_index,
+                            "message_suffix": result.message_suffix,
+                            "dynamic_message_suffix": result.dynamic_message_suffix,
                         }),
                     ).model_dump(exclude_none=True),
                     ensure_ascii=False,
@@ -1037,8 +1088,8 @@ async def regenerate_response(session_id: str, req: Request):
     reply: str = await loop.loop.process_message(
         content,
         skip_append=True,
-        visible_characters=result.get("visible_characters"),
-        response_characters=result.get("response_characters"),
+        visible_characters=result.visible_characters,
+        response_characters=result.response_characters,
         activity_source=MainSessionActivitySource.regenerate,
         activity_id=activity_id,
     )

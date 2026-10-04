@@ -260,6 +260,64 @@ class SessionTerminationResult(BaseModel):
     metadata_warnings: list[str] = Field(default_factory=list)
 
 
+class SessionMessageEditResult(BaseModel):
+    """编辑会话消息的稳定结果。"""
+
+    updated: bool
+    session_id: str
+    index: int | None = None
+    role: str | None = None
+    content: str | dict[str, Any] | list[dict[str, Any]] | None = None
+    visible_characters: list[str] | None = None
+    error: str | None = None
+
+
+class SessionMessageDeletionResult(BaseModel):
+    """删除会话消息的稳定结果，兼容批量删除和单条配对删除。"""
+
+    deleted: bool
+    session_id: str | None = None
+    removed_indices: list[int] = Field(default_factory=list)
+    remaining_count: int | None = None
+    history_count: int | None = None
+    token_usage: int | None = None
+    context_tokens: int | None = None
+    error: str | None = None
+
+
+class SessionRegenerateResult(BaseModel):
+    """重新生成会话消息前置处理的稳定结果。"""
+
+    regenerate: bool
+    session_id: str
+    last_user_content: str = ""
+    remaining_count: int = 0
+    message_index: int | None = None
+    message_suffix: str | None = None
+    dynamic_message_suffix: str | None = None
+    visible_characters: list[str] | None = None
+    response_characters: list[str] | None = None
+    error: str | None = None
+
+
+class SessionToolResources(BaseModel):
+    """会话可恢复工具资源的稳定快照。"""
+
+    session_id: str
+    task_progress: dict[str, Any] = Field(default_factory=dict)
+    clipboard_display: dict[str, Any] = Field(default_factory=dict)
+    dynamic_endpoints: list[dict[str, Any]] = Field(default_factory=list)
+
+
+class SessionMergeResult(BaseModel):
+    """会话合并或单源分支的稳定结果。"""
+
+    merged: bool
+    session_id: str | None = None
+    sources: list[str] = Field(default_factory=list)
+    error: str | None = None
+
+
 # ---------------------------------------------------------------------------
 # Token Usage Types
 # ---------------------------------------------------------------------------

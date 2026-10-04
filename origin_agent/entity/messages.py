@@ -2,7 +2,11 @@ import json
 from typing import * # type: ignore
 import logging
 from pydantic import BaseModel, Field, PrivateAttr
-from entity.puretype import Role, MessageContent
+from entity.puretype import (
+    Role,
+    MessageContent,
+    SessionMessageDeletionResult,
+)
 from entity.constant import USER_CHARACTER_NAME, ALL_AGENTS_CHARACTER_REF_NAME, AUDIO_FORMAT_MIME_SUBTYPE
 from system.templates import read_template
 from threading import Lock
@@ -394,7 +398,7 @@ class History(BaseModel):
             self.update_last_user_message()
             return True
 
-    def remove_message_with_pairing(self, index: int) -> dict:
+    def remove_message_with_pairing(self, index: int) -> SessionMessageDeletionResult:
         """删除指定索引的消息，处理 tool_calls/tool_results 配对联动。
 
         - CharacterConversationMessage (assistant)：整条删除 + 从后向前删除其所有
@@ -403,22 +407,30 @@ class History(BaseModel):
           tool_call_id 的 ToolCall 条目（全移除后置 None）
         - 不允许删除 user 消息和 SystemStatusMessage
 
-        返回:
-            {"deleted": True, "removed_indices": list[int], "remaining_count": int}
-            {"deleted": False, "error": str}
+        返回稳定的 ``SessionMessageDeletionResult``，包含 ``deleted``、
+        ``removed_indices``、``remaining_count`` 以及可选的 ``error`` 字段。
         """
         removed_indices: list[int] = []
         with self._io_locker:
             if index < 0 or index >= len(self.messages):
-                return {"deleted": False, "error": "index out of range"}
+                return SessionMessageDeletionResult(
+                    deleted=False,
+                    error="index out of range",
+                )
 
             target = self.messages[index]
 
             # 类型校验：拒绝 user 和 SystemStatusMessage
             if target.role == Role.USER:
-                return {"deleted": False, "error": "cannot delete user message"}
+                return SessionMessageDeletionResult(
+                    deleted=False,
+                    error="cannot delete user message",
+                )
             if isinstance(target, SystemStatusMessage):
-                return {"deleted": False, "error": "cannot delete system status message"}
+                return SessionMessageDeletionResult(
+                    deleted=False,
+                    error="cannot delete system status message",
+                )
 
             if isinstance(target, CharacterConversationMessage) and target.role == Role.ASSISTANT:
                 # assistant 消息：整条删除 + 级联删除对应 tool results
@@ -460,7 +472,11 @@ class History(BaseModel):
         self.remove_unpaired_tool_calls()
         self.update_last_user_message()
 
-        return {"deleted": True, "removed_indices": sorted(removed_indices), "remaining_count": len(self.messages)}
+        return SessionMessageDeletionResult(
+            deleted=True,
+            removed_indices=sorted(removed_indices),
+            remaining_count=len(self.messages),
+        )
 
     def remove_unpaired_tool_calls(self) -> None:
         """移除所有没有对应 ToolResultMessage 的 tool_calls. 

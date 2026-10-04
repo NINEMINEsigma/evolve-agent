@@ -44,7 +44,7 @@ entry/
   - 回复轮次文件锁：`begin_agentspace_round()` / `current_agentspace_round()` / `end_agentspace_round()` 按角色管理唯一 round ID，并在完整回复收尾后幂等释放。
   - 通用持久化方法：`save_history()`、`load_history()`。
   - 前端 History 只读投影：`get_session_history_skeleton(start_index)`、`get_session_history_page(start_index, limit)`、`get_session_history_resources()`；普通模式、多Agent模式与随意聊聊会话共享实现。子Agent虽继承该能力，但 Gateway 不为子会话暴露对应 REST。
-  - Token 统计：`_token_usage`、`_last_prompt_tokens`。
+  - 会话操作结果：`edit_session_message()`、`delete_session_messages()`、`delete_single_message()`、`regenerate_response()`、`get_tool_resources()`、`merge_sessions()` 均返回 `entity.puretype.session` 中的稳定 `BaseModel`；调用方通过属性访问，只有 Gateway HTTP 边界负责 `model_dump()` 序列化。
   - Hooks 加载与上下文收集：`_load_message_hooks()`、`_collect_hooks_context()`。
   - 工具集加载状态：`_loaded_toolsets`（会话级已加载工具集名称集合）、`get_loaded_toolsets()`、`is_toolset_loaded()`、`load_toolsets()`、`_restore_loaded_toolsets()`、`_get_effective_tool_definitions()`（按已加载工具集 × scope 动态计算工具 schema）。
   - `get_tool_availability_scope()`：返回当前 Loop 的 `ToolAvailability`（默认 `EVERY`，子类覆写）。
