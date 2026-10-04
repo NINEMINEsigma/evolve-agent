@@ -425,7 +425,9 @@ classDiagram
         #_active_task
         #_waiting_queue
         #_subagent_names
-        #_background_task
+        #_starting
+        #_startup_tasks
+        #_waiter_tasks
         #_interrupted
         #_shutting_down
         +launch()
@@ -869,7 +871,8 @@ classDiagram
 | `_history_store_dir` | `LoopSessionManager` | `Path \| None` | 历史存储目录 |
 | `_session_rotated_notify` | `LoopSessionManager` | `dict[str, str]` | session 旋转通知 |
 | `_agent_loop` | `_OrchestratorContext` | `ParentAgentLoop` | 访问父 loop 的 `current_character_agent` 等 |
-| `_active` / `_active_task` | `_OrchestratorContext` | `dict` | 管理 SubAgentLoop 实例 |
+| `_active` / `_active_task` | `_OrchestratorContext` | `dict` | 管理已提交的 SubAgentLoop 实例及其运行任务 |
+| `_starting` / `_startup_tasks` | `_OrchestratorContext` | `dict` | 预留启动中的子Agent并跟踪可取消的初始化任务；用于并发上限、重复启动防护和失败回滚 |
 | `_loops` | `SessionManager` | `dict[str, IMainSessionLoop]` | 管理 loop 映射 |
 | `_deleting_sessions` | `SessionManager` | `set[str]` | 正在永久删除的主会话 ID；Gateway 在持久化移除完成前据此拒绝恢复连接 |
 | `_deleting_sessions_lock` | `SessionManager` | `threading.Lock` | 删除中集合的检查并添加、查询和移除同步边界 |

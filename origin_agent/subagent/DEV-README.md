@@ -50,6 +50,7 @@ graph TD
 - **一条子代理 = 一个 `SubAgentLoop` 任务**：启动时创建独立 `asyncio.Task`，在 `loop.run()` 内完成 LLM 调用 → 工具执行 → 结果回写。
 - **工具权限隔离**：子代理只能看到 `availability` 包含 `SUBAGENT` 或 `EVERY` 的工具；递归创建子代理的 `multiagent` 工具集仅对主代理可见（`MAIN`）。
 - **审批流**：使用父主会话的审批模式。safe、白名单命中或 YOLO 直接执行；手动模式其余调用等待父Agent通过 `ApprovalSubAgent` 审批（不是用户弹窗），脱手模式则由审批模型处理。多Agent模式参与者使用主会话策略，与此独立子会话路径不同。
+- **启动事务与失败可见性**：普通子Agent和临时Agent启动时先预留活跃槽位，再完成上下文、历史和前端回放事件准备；提交到活跃表后才创建后台任务。显式传入的 `.es` 历史加载失败会使启动失败，不会降级为空历史；启动阶段异常统一回滚 `_active`、任务和 waiter。直接启动返回结构化失败，等待队列晋级失败通过前端状态和父Agent消息报告。
 - **结果收集**：事件驱动——子代理 `outbox` 追加或 `pending_approvals` 变化时经 `_outbox_event` 即时触发 waiter，格式化为 `[subagent-result]` 消息 push 到父代理的 `SessionMessageQueue`。
 - **稳定类型边界**：`launch()`、`chat()`、`approve()`、`stop()` 与 `get_snapshot()` 在 `SubAgentOrchestrator` 和 `_OrchestratorContext` 之间只传递 `entity.puretype.subagent` 中的 BaseModel；工具结果和 WebSocket/HTTP 序列化仅在边界处执行。`SubAgentSnapshot` 统一定义 `status`、`feedback`、`pending_approvals` 与 `interactive`，调用方通过属性访问，不再依赖字典键。
 - **历史持久化**：停止时通过 `save_history()` 写入 `agentspace/tmp/<session_id>.es`，使用 `easysave` 多态序列化；角色是否长期保留历史由 Agent 自行移动。
@@ -125,9 +126,9 @@ graph TD
 
 ### 历史与临时Agent
 
-普通子Agent停止时默认保存到 `ws:tmp/<session_id>.es`。只有 `RunSubAgent` 显式传入 `.es` 的 `history_path` 才会加载历史；Agent 可以自行将临时历史移动到角色目录或其他 `ws:` 路径。
+普通子Agent停止时默认保存到 `ws:tmp/<session_id>.es`。只有 `RunSubAgent` 显式传入 `.es` 的 `history_path` 才会加载历史；Agent 可以自行将临时历史移动到角色目录或其他 `ws:` 路径。显式历史加载发生在启动提交前，文件不存在、类型不匹配、版本不兼容或历史清洗失败都会拒绝启动；启动中的实例预留并发槽位，失败时回滚已登记状态。等待队列晋级失败会以终止错误事件发送到前端，并注入父Agent消息循环。
 
-`TaskAgent` 使用调用时活动 LLM Profile 的非持久化快照，不经过角色档案解析、等待队列，也不保存历史。
+`TaskAgent` 使用调用时活动 LLM Profile 的非持久化快照，不经过角色档案解析、等待队列，也不保存历史。临时Agent正常完成后会释放活跃槽位并继续晋级等待队列。
 
 ### `profile_builder`
 

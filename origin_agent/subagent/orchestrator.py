@@ -17,7 +17,7 @@ import time as _time_module
 import uuid
 from collections import deque
 from pathlib import Path
-from typing import Any
+from typing import Any, Coroutine
 
 from entity.constant import (
     MAX_TOOL_TURNS,
@@ -101,6 +101,8 @@ class _OrchestratorContext:
         self._active_task: dict[str, asyncio.Task] = {}
         self._waiting_queue: deque[WaitingEntry] = deque()
         self._subagent_names: dict[str, str] = {}  # session_id -> registry_name
+        self._starting: dict[str, str] = {}  # session_id -> registry_name, startup reservation
+        self._startup_tasks: dict[str, asyncio.Task] = {}
         self._waiter_tasks: dict[str, asyncio.Task] = {}  # SP-5 D4：per-subagent event waiter
         self._interrupted: bool = False
         self._shutting_down: bool = False
@@ -119,7 +121,12 @@ class _OrchestratorContext:
         history_path: str | None = None,
     ) -> SubAgentLaunchResult:
         """启动一个子 Agent 会话。"""
-        # 同一主会话下同一 subagent 只能有一个活跃或排队实例
+        if self._shutting_down:
+            return SubAgentLaunchResult(
+                success=False,
+                error="Sub-agent context is shutting down.",
+            )
+        # 同一主会话下同一 subagent 只能有一个活跃、启动中或排队实例。
         for active_sid, active_name in self._subagent_names.items():
             if active_name == name:
                 sub = self._active.get(active_sid)
@@ -128,6 +135,11 @@ class _OrchestratorContext:
                         success=False,
                         error=f"Sub-agent '{name}' is already active in this parent session.",
                     )
+        if name in self._starting.values():
+            return SubAgentLaunchResult(
+                success=False,
+                error=f"Sub-agent '{name}' is still starting in this parent session.",
+            )
         for i, entry in enumerate(self._waiting_queue):
             if entry.name == name:
                 return SubAgentLaunchResult(
@@ -140,9 +152,8 @@ class _OrchestratorContext:
 
         session_id = f"{parent_session_id}_{uuid.uuid4().hex[:12]}"
 
-        # 检查上限
-        if len(self._active) >= SUBAGENT_MAX_ACTIVE:
-            # 进入等待队列
+        # 启动中的实例已经预留活跃槽位，避免异步初始化期间超出上限。
+        if len(self._active) + len(self._starting) >= SUBAGENT_MAX_ACTIVE:
             self._waiting_queue.append(
                 WaitingEntry(
                     session_id=session_id,
@@ -166,11 +177,28 @@ class _OrchestratorContext:
                 queue_position=len(self._waiting_queue),
             )
 
-        # 立即启动
-        await self._start_subagent(
-            session_id, name, profile, temperature,
-            initial_prompt, user_name, message_type, history_path,
-        )
+        self._starting[session_id] = name
+        try:
+            await self._run_startup(
+                session_id,
+                self._start_subagent(
+                    session_id, name, profile, temperature,
+                    initial_prompt, user_name, message_type, history_path,
+                ),
+                task_name=f"subagent-start-{session_id[:16]}",
+            )
+        except Exception as exc:
+            error = f"Failed to start sub-agent '{name}': {type(exc).__name__}: {exc}"
+            logger.exception("Subagent startup failed | session=%s name=%s", session_id, name)
+            await self._notify_start_failure(session_id, name, error)
+            return SubAgentLaunchResult(
+                success=False,
+                session_id=session_id,
+                error=error,
+            )
+        finally:
+            self._starting.pop(session_id, None)
+
         return SubAgentLaunchResult(
             success=True,
             session_id=session_id,
@@ -186,17 +214,39 @@ class _OrchestratorContext:
         profile: LLMProfile,
     ) -> SubAgentLaunchResult:
         """使用调用时活动 Profile快照启动一次性临时Agent。"""
+        if self._shutting_down:
+            return SubAgentLaunchResult(
+                success=False,
+                error="Sub-agent context is shutting down.",
+            )
         session_id = f"{parent_session_id}_{uuid.uuid4().hex[:12]}"
 
-        # 检查上限
-        if len(self._active) >= SUBAGENT_MAX_ACTIVE:
-            # 临时Agent不进等待队列——直接拒绝
+        # 启动中的实例已经预留活跃槽位，临时Agent不进入等待队列。
+        if len(self._active) + len(self._starting) >= SUBAGENT_MAX_ACTIVE:
             return SubAgentLaunchResult(
                 success=False,
                 error=f"Active sub-agent limit reached ({SUBAGENT_MAX_ACTIVE}). Stop some sub-agents first.",
             )
 
-        await self._start_taskagent(session_id, prompt, profile)
+        self._starting[session_id] = "taskagent"
+        try:
+            await self._run_startup(
+                session_id,
+                self._start_taskagent(session_id, prompt, profile),
+                task_name=f"taskagent-start-{session_id[:16]}",
+            )
+        except Exception as exc:
+            error = f"Failed to start task-agent: {type(exc).__name__}: {exc}"
+            logger.exception("Taskagent startup failed | session=%s", session_id)
+            await self._notify_start_failure(session_id, "taskagent", error)
+            return SubAgentLaunchResult(
+                success=False,
+                session_id=session_id,
+                error=error,
+            )
+        finally:
+            self._starting.pop(session_id, None)
+
         return SubAgentLaunchResult(
             success=True,
             session_id=session_id,
@@ -233,38 +283,41 @@ class _OrchestratorContext:
         # 预加载不得绕过“已加载工具集 ∩ TASKAGENT ∩ safe”权限过滤。
         self._active[session_id] = loop
         self._subagent_names[session_id] = "taskagent"
+        try:
+            # 推送 WS 通知前端面板
+            await self._push_subagent_ws(
+                session_id,
+                "taskagent",
+                {"role": "status", "content": "started"},
+                status_override="running",
+                interactive=False,
+            )
 
-        # 推送 WS 通知前端面板
-        await self._push_subagent_ws(
-            session_id,
-            "taskagent",
-            {"role": "status", "content": "started"},
-            status_override="running",
-            interactive=False,
-        )
+            # 推送 initial_prompt 到前端面板
+            wrapped_initial = format_user_message(
+                self._agent_loop.current_character_agent, "direct", prompt,
+            )
+            await self._push_subagent_ws(
+                session_id,
+                "taskagent",
+                {"role": "user", "content": wrapped_initial,
+                 "character_name": self._agent_loop.current_character_agent},
+                interactive=False,
+            )
 
-        # 推送 initial_prompt 到前端面板
-        wrapped_initial = format_user_message(
-            self._agent_loop.current_character_agent, "direct", prompt,
-        )
-        await self._push_subagent_ws(
-            session_id,
-            "taskagent",
-            {"role": "user", "content": wrapped_initial,
-             "character_name": self._agent_loop.current_character_agent},
-            interactive=False,
-        )
-
-        task = asyncio.create_task(
-            loop.run(prompt, self._agent_loop.current_character_agent, "direct"),
-            name=f"taskagent-{session_id[:16]}",
-        )
-        self._active_task[session_id] = task
-        # SP-5 D4：启动 per-subagent 事件驱动 waiter
-        self._waiter_tasks[session_id] = asyncio.create_task(
-            self._subagent_waiter(session_id, loop),
-            name=f"subagent-waiter-{session_id[:16]}",
-        )
+            task = asyncio.create_task(
+                loop.run(prompt, self._agent_loop.current_character_agent, "direct"),
+                name=f"taskagent-{session_id[:16]}",
+            )
+            self._active_task[session_id] = task
+            # SP-5 D4：启动 per-subagent 事件驱动 waiter
+            self._waiter_tasks[session_id] = asyncio.create_task(
+                self._subagent_waiter(session_id, loop),
+                name=f"subagent-waiter-{session_id[:16]}",
+            )
+        except BaseException:
+            self._rollback_startup(session_id, loop)
+            raise
 
         logger.info(
             "Taskagent started | parent=%s session=%s model=%s tools=%d",
@@ -273,6 +326,12 @@ class _OrchestratorContext:
 
     async def stop_taskagent(self, session_id: str) -> SubAgentStopResult:
         """强制停止 taskagent — 不保存历史。"""
+        if session_id in self._starting:
+            return SubAgentStopResult(
+                success=False,
+                session_id=session_id,
+                error="Task-agent is still starting. Please wait for startup to finish.",
+            )
         sub = self._active.get(session_id)
         if sub is None:
             return SubAgentStopResult(
@@ -329,6 +388,12 @@ class _OrchestratorContext:
 
     async def chat_user_direct(self, session_id: str, message: str, co_recipients: list[str] | None = None) -> SubAgentChatResult:
         """最终用户直接向子会话发送消息（支持 FIFO 排队）。"""
+        if session_id in self._starting:
+            return SubAgentChatResult(
+                success=False,
+                session_id=session_id,
+                error="Sub-agent is still starting. Please wait for startup to finish.",
+            )
         sub = self._active.get(session_id)
         if sub is None:
             for entry in self._waiting_queue:
@@ -363,6 +428,12 @@ class _OrchestratorContext:
         co_recipients: list[str] | None = None,
     ) -> SubAgentChatResult:
         """父 Agent 向子 Agent 发送消息。"""
+        if session_id in self._starting:
+            return SubAgentChatResult(
+                success=False,
+                session_id=session_id,
+                error="Sub-agent is still starting. Please wait for startup to finish.",
+            )
         sub = self._active.get(session_id)
         if sub is None:
             # 检查等待队列
@@ -410,6 +481,12 @@ class _OrchestratorContext:
 
     async def approve(self, session_id: str, decisions: list[dict[str, Any]]) -> SubAgentApprovalResult:
         """审批子 Agent 的工具调用。"""
+        if session_id in self._starting:
+            return SubAgentApprovalResult(
+                success=False,
+                session_id=session_id,
+                error="Sub-agent is still starting. Please wait for startup to finish.",
+            )
         sub = self._active.get(session_id)
         if sub is None:
             return SubAgentApprovalResult(
@@ -430,6 +507,12 @@ class _OrchestratorContext:
 
     async def stop(self, session_id: str) -> SubAgentStopResult:
         """停止子 Agent 会话。"""
+        if session_id in self._starting:
+            return SubAgentStopResult(
+                success=False,
+                session_id=session_id,
+                error="Sub-agent is still starting. Please wait for startup to finish.",
+            )
         # 检查是否在等待队列中
         for i, entry in enumerate(self._waiting_queue):
             if entry.session_id == session_id:
@@ -582,6 +665,16 @@ class _OrchestratorContext:
     async def shutdown(self) -> None:
         """关闭本上下文的所有活跃子 Agent。"""
         self._shutting_down = True
+
+        # 先取消仍在执行的初始化任务，避免 shutdown 与 startup 交叉提交状态。
+        startup_tasks = list(self._startup_tasks.values())
+        for task in startup_tasks:
+            if not task.done():
+                task.cancel()
+        if startup_tasks:
+            await asyncio.gather(*startup_tasks, return_exceptions=True)
+        self._starting.clear()
+
         # SP-5 D4：取消所有 waiter task
         for waiter in self._waiter_tasks.values():
             if not waiter.done():
@@ -645,6 +738,81 @@ class _OrchestratorContext:
         except Exception as exc:
             logger.warning("WS push for subagent %s failed: %s", session_id, exc, exc_info=True)
 
+    async def _run_startup(
+        self,
+        session_id: str,
+        startup: Coroutine[Any, Any, None],
+        *,
+        task_name: str,
+    ) -> None:
+        """在可取消的独立任务中运行一次启动流程。"""
+        task = asyncio.create_task(startup, name=task_name)
+        self._startup_tasks[session_id] = task
+        try:
+            await task
+        finally:
+            if self._startup_tasks.get(session_id) is task:
+                self._startup_tasks.pop(session_id, None)
+
+    def _rollback_startup(self, session_id: str, loop: SubAgentLoop) -> None:
+        """回滚已经提交但尚未完成的子Agent启动。"""
+        if self._active.get(session_id) is loop:
+            self._active.pop(session_id, None)
+        if self._subagent_names.get(session_id) == loop.current_character_agent:
+            self._subagent_names.pop(session_id, None)
+
+        task = self._active_task.pop(session_id, None)
+        if task is not None and not task.done():
+            task.cancel()
+        waiter = self._waiter_tasks.pop(session_id, None)
+        if waiter is not None and not waiter.done():
+            waiter.cancel()
+        loop.stop()
+
+    async def _notify_start_failure(
+        self,
+        session_id: str,
+        name: str,
+        error: str,
+        *,
+        notify_parent: bool = False,
+    ) -> None:
+        """向前端及（队列晋级时）父Agent报告启动失败。"""
+        await self._push_subagent_ws(
+            session_id,
+            name,
+            {"role": "error", "content": error},
+            status_override="terminated",
+        )
+        if not notify_parent:
+            return
+
+        loop = self._get_agent_loop()
+        if loop is None or loop.loop is None or loop.loop._message_queue is None:
+            logger.warning(
+                "Cannot report queued subagent startup failure: parent queue unavailable | session=%s",
+                session_id,
+            )
+            return
+        try:
+            full_message = (
+                read_template("subagent/result_message.txt")
+                + "\n\n"
+                + f"session_id: {session_id}\n"
+                + "feedback:\n"
+                + f"  [subagent-startup-error] {error}"
+            )
+            loop.loop._message_queue.push(
+                full_message,
+                character_name=SYSTEM_CHARACTER_NAME,
+                source="subagent",
+            )
+        except Exception:
+            logger.exception(
+                "Failed to report queued subagent startup failure | session=%s",
+                session_id,
+            )
+
     async def _start_subagent(
         self,
         session_id: str,
@@ -656,10 +824,13 @@ class _OrchestratorContext:
         message_type: str,
         history_path: str | None = None,
     ) -> None:
-        """创建 SubAgentLoop 并以 asyncio.Task 启动。"""
+        """创建 SubAgentLoop 并以 asyncio.Task 启动。
+
+        历史文件与前端回放事件先在未提交状态中准备；只有全部准备成功后，
+        才将实例登记为 active。登记后若启动阶段失败，则统一回滚运行态对象。
+        """
         parent_ctx = get_runtime_context()
         ctx = await build_subagent_context(profile, temperature, parent_ctx)
-
         tools = self._build_tool_set()
 
         def _push_msg(event: dict[str, Any]) -> None:
@@ -674,93 +845,104 @@ class _OrchestratorContext:
             parent_character_agent=self._agent_loop.current_character_agent,
             name=name,
         )
-        self._active[session_id] = loop
-        self._subagent_names[session_id] = name
 
+        history_events: list[dict[str, Any]] = []
         if history_path:
             from easysave import load
             from entity.typeref import make_config
             from entity.messages import History, CharacterConversationMessage, ToolResultMessage
 
             path = Path(history_path)
-            # TODO: 不存在应该失败, 实际上不应该静默吞没错误并成功开始
-            if path.exists():
-                try:
-                    loaded_history = load(__History_Version__, make_config(path), History, ignore_missing_fields=True)
-                    if isinstance(loaded_history, History):
-                        loaded_history.remove_unpaired_tool_calls()
-                        loop.load_history(loaded_history)
-                    else:
-                        logger.warning("Loaded subagent history is not History instance: %s", type(loaded_history))
-                        loop.load_history(History())
-                except Exception as exc:
-                    logger.warning("Failed to load subagent history from %s: %s", history_path, exc)
-                    loop.load_history(History())
-            else:
-                loop.load_history(History())
+            if not path.exists():
+                raise FileNotFoundError(f"History file not found: {history_path}")
+
+            loaded_history = load(
+                __History_Version__,
+                make_config(path),
+                History,
+                ignore_missing_fields=True,
+            )
+            if not isinstance(loaded_history, History):
+                raise TypeError(
+                    f"Loaded subagent history must be History, got {type(loaded_history).__name__}"
+                )
+            loaded_history.remove_unpaired_tool_calls()
+            loop.load_history(loaded_history)
 
             for msg in loop.history.iter_messages():
                 if msg.role == Role.USER:
-                    await self._push_subagent_ws(
-                        session_id, name,
-                        {"role": "user", "content": str(msg.content)},
-                    )
+                    history_events.append({
+                        "role": "user",
+                        "content": str(msg.content),
+                    })
                 elif msg.role == Role.ASSISTANT:
                     content = str(msg.content)
                     if content:
-                        await self._push_subagent_ws(
-                            session_id, name,
-                            {"role": "assistant", "content": content},
-                        )
+                        history_events.append({
+                            "role": "assistant",
+                            "content": content,
+                        })
                     if isinstance(msg, CharacterConversationMessage) and msg.tool_calls:
                         for tc in msg.tool_calls:
-                            await self._push_subagent_ws(
-                                session_id, name,
-                                {
-                                    "role": "tool_call",
-                                    "tool_call_id": tc.id,
-                                    "tool_name": tc.function.name,
-                                    "tool_args": _parse_tool_arguments(tc.function.arguments),
-                                },
-                            )
+                            history_events.append({
+                                "role": "tool_call",
+                                "tool_call_id": tc.id,
+                                "tool_name": tc.function.name,
+                                "tool_args": _parse_tool_arguments(tc.function.arguments),
+                            })
                 elif msg.role == Role.TOOL and isinstance(msg, ToolResultMessage):
-                    await self._push_subagent_ws(
-                        session_id, name,
-                        {
-                            "role": "tool_result",
-                            "tool_call_id": msg.tool_call_id,
-                            "content": str(msg.content),
-                        },
-                    )
+                    history_events.append({
+                        "role": "tool_result",
+                        "tool_call_id": msg.tool_call_id,
+                        "content": str(msg.content),
+                    })
             logger.info(
                 "Subagent history loaded | session=%s entries=%d",
                 session_id, loop.history.count,
             )
 
-        # 立即推送 WS 通知前端面板
-        await self._push_subagent_ws(
-            session_id,
-            name,
-            {"role": "status", "content": "started"},
-            status_override="running",
-        )
+        self._active[session_id] = loop
+        self._subagent_names[session_id] = name
+        try:
+            # 先建立 running 状态，再回放历史，避免前端把历史事件判定为 removed。
+            await self._push_subagent_ws(
+                session_id,
+                name,
+                {"role": "status", "content": "started"},
+                status_override="running",
+            )
+            for event in history_events:
+                await self._push_subagent_ws(session_id, name, event)
 
-        # 推送 initial_prompt 到前端面板
-        wrapped_initial = format_user_message(user_name, message_type, initial_prompt)
-        initial_character_name = USER_CHARACTER_NAME if message_type == "user_direct" else self._agent_loop.current_character_agent
-        await self._push_subagent_ws(
-            session_id,
-            name,
-            {"role": "user", "content": wrapped_initial, "character_name": initial_character_name},
-        )
+            wrapped_initial = format_user_message(user_name, message_type, initial_prompt)
+            initial_character_name = (
+                USER_CHARACTER_NAME
+                if message_type == "user_direct"
+                else self._agent_loop.current_character_agent
+            )
+            await self._push_subagent_ws(
+                session_id,
+                name,
+                {
+                    "role": "user",
+                    "content": wrapped_initial,
+                    "character_name": initial_character_name,
+                },
+            )
 
-        task = asyncio.create_task(loop.run(initial_prompt, user_name, message_type), name=f"subagent-{session_id[:16]}")
-        self._active_task[session_id] = task
-        # SP-5 D4：启动 per-subagent 事件驱动 waiter
-        self._waiter_tasks[session_id] = asyncio.create_task(
-            self._subagent_waiter(session_id, loop),
-            name=f"subagent-waiter-{session_id[:16]}",
-        )
+            task = asyncio.create_task(
+                loop.run(initial_prompt, user_name, message_type),
+                name=f"subagent-{session_id[:16]}",
+            )
+            self._active_task[session_id] = task
+            # SP-5 D4：启动 per-subagent 事件驱动 waiter
+            self._waiter_tasks[session_id] = asyncio.create_task(
+                self._subagent_waiter(session_id, loop),
+                name=f"subagent-waiter-{session_id[:16]}",
+            )
+        except BaseException:
+            self._rollback_startup(session_id, loop)
+            raise
 
         logger.info(
             "Subagent started | parent=%s session=%s model=%s tools=%d",
@@ -768,27 +950,60 @@ class _OrchestratorContext:
         )
 
     async def _activate_next(self) -> list[SubAgentPromotion]:
-        """从等待队列取出一个启动。"""
-        if self._shutting_down:
-            return []
-        if not self._waiting_queue:
-            return []
-        entry = self._waiting_queue.popleft()
-        await self._start_subagent(
-            entry.session_id,
-            entry.name,
-            entry.profile,
-            entry.temperature,
-            entry.initial_prompt,
-            entry.user_name,
-            entry.message_type,
-            entry.history_path,
-        )
-        logger.info("Subagent activated from queue | session=%s", entry.session_id)
-        return [SubAgentPromotion(
-            session_id=entry.session_id,
-            subagent_name=entry.name,
-        )]
+        """从等待队列取出并尝试启动下一个子Agent。"""
+        promoted: list[SubAgentPromotion] = []
+        while not self._shutting_down and self._waiting_queue:
+            if len(self._active) + len(self._starting) >= SUBAGENT_MAX_ACTIVE:
+                break
+
+            entry = self._waiting_queue.popleft()
+            self._starting[entry.session_id] = entry.name
+            try:
+                await self._run_startup(
+                    entry.session_id,
+                    self._start_subagent(
+                        entry.session_id,
+                        entry.name,
+                        entry.profile,
+                        entry.temperature,
+                        entry.initial_prompt,
+                        entry.user_name,
+                        entry.message_type,
+                        entry.history_path,
+                    ),
+                    task_name=f"subagent-start-{entry.session_id[:16]}",
+                )
+            except Exception as exc:
+                error = (
+                    f"Failed to activate queued sub-agent '{entry.name}': "
+                    f"{type(exc).__name__}: {exc}"
+                )
+                logger.exception(
+                    "Queued subagent startup failed | session=%s name=%s",
+                    entry.session_id,
+                    entry.name,
+                )
+                await self._notify_start_failure(
+                    entry.session_id,
+                    entry.name,
+                    error,
+                    notify_parent=True,
+                )
+            else:
+                logger.info(
+                    "Subagent activated from queue | session=%s",
+                    entry.session_id,
+                )
+                promoted.append(SubAgentPromotion(
+                    session_id=entry.session_id,
+                    subagent_name=entry.name,
+                ))
+                # 一次释放只晋级一个，保持原有一出一入语义。
+                break
+            finally:
+                self._starting.pop(entry.session_id, None)
+
+        return promoted
 
     def _build_tool_set(self) -> list[dict[str, Any]]:
         """构建子 Agent 的工具集 — 仅包含 availability 包含 SUBAGENT 或 EVERY 的工具。"""
@@ -893,14 +1108,30 @@ class _OrchestratorContext:
                 self._parent_session_id, session_id, exc,
             )
 
+    @staticmethod
+    def _consume_background_task(task: asyncio.Task) -> None:
+        """观察编排器后台任务，避免启动异常变成未处理任务警告。"""
+        try:
+            task.result()
+        except asyncio.CancelledError:
+            pass
+        except Exception:
+            logger.exception("Subagent background lifecycle task failed")
+
     def _cleanup_taskagent(self, session_id: str) -> None:
-        """清理已完成的 taskagent（原 _collect_and_inject 末尾逻辑）。"""
+        """清理已完成的 taskagent，并尝试晋级等待队列。"""
         self._active.pop(session_id, None)
         task = self._active_task.pop(session_id, None)
         if task and not task.done():
             task.cancel()
         self._subagent_names.pop(session_id, None)
         logger.info("Taskagent cleaned up | session=%s", session_id)
+        if not self._shutting_down and self._waiting_queue:
+            activation = asyncio.create_task(
+                self._activate_next(),
+                name=f"subagent-activate-next-{session_id[:16]}",
+            )
+            activation.add_done_callback(self._consume_background_task)
 
     @staticmethod
     def _history_path(session_id: str) -> Path:
