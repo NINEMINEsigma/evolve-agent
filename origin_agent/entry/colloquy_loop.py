@@ -12,7 +12,7 @@ import logging
 from typing import Any
 
 from abstract.tools.registry import registry as tool_registry
-from entity.puretype import Role, ToolAvailability, MessageContent
+from entity.puretype import Role, ToolAvailability, MessageContent, SessionTerminationResult
 from entity.constant import (
     COLLOQUY_COMPRESS_RATIO,
     COLLOQUY_TOOLSET_WHITELIST,
@@ -149,10 +149,14 @@ class ColloquyLoop(ParentAgentLoop):
     # Session 保护
     # ========================================================================
 
-    async def terminate_session(self) -> dict:
+    async def terminate_session(self) -> SessionTerminationResult:
         """colloquy session 不可终结。"""
         logger.warning("Colloquy session terminate rejected | session=%s", self.session_id)
-        return {"terminated": False, "error": "colloquy session cannot be terminated"}
+        return SessionTerminationResult(
+            terminated=False,
+            session_id=self.session_id,
+            error="colloquy session cannot be terminated",
+        )
 
     def pop_session_rotated(self) -> str | None:
         """colloquy session 永不旋转。"""

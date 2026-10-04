@@ -34,6 +34,7 @@ from entity.puretype import (
     MainSessionActivitySource,
     MainSessionActivityPhase,
     MainSessionActivitySnapshot,
+    SessionTerminationResult,
 )
 from entity.messages import (
     History,
@@ -1087,10 +1088,10 @@ class BaseAgentLoop(ABC):
         """
         return self._processing
 
-    async def terminate_session(self) -> dict:
+    async def terminate_session(self) -> SessionTerminationResult:
         """终结当前会话。默认返回简单确认。子类可覆盖。"""
         logger.info("Terminating session (base): %s", self.session_id)
-        return {"terminated": True, "session_id": self.session_id}
+        return SessionTerminationResult(terminated=True, session_id=self.session_id)
 
     async def merge_sessions(self, sources: list[str]) -> dict:
         """基于全部父会话摘要创建延续会话；任一摘要失败则整体失败。"""

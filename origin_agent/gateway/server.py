@@ -1242,7 +1242,7 @@ async def terminate_session_endpoint(session_id: str):
     loop = _get_loop(session_id)
     if loop is not None:
         result = await loop.loop.terminate_session()
-        payload = result.model_dump() if hasattr(result, "model_dump") else result
+        payload = result.model_dump()
         logger.info(
             "Terminate session complete | session=%s terminated=%s warnings=%d",
             session_id,
