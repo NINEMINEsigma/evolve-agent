@@ -31,32 +31,6 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# 存量 history.es 中 SP-3 之前持久化的 ToolResultMessage.content 为 str（JSON 序列化字典）。
-# 加载时经 normalize_legacy_tool_results 调用本 helper 尝试解析回原生 dict；解析失败则
-# 构造一条「历史解析失败的工具调用失败字典」（与 SP-1 {"error": ...} 同族），字段无 _ 前缀，前端可见。
-LEGACY_CONTENT_PREVIEW_CHARS: int = 200
-
-
-# NOTE: 兼容性代码
-def legacy_tool_result_str_to_dict(content: str) -> dict[str, Any]:
-    """将存量 str 形态的工具结果 content 归一化为原生 dict。
-
-    - json.loads 成功且结果为 dict → 原样返回（解析成功的旧会话恢复为原生 dict，_meta 恢复可提取）。
-    - 其他情况（非 JSON、解析结果非 dict）→ 返回失败字典，含截断原文预览保留可读性。
-
-    本函数永不抛出异常。
-    """
-    try:
-        parsed = json.loads(content)
-        if isinstance(parsed, dict):
-            return parsed
-    except (json.JSONDecodeError, TypeError):
-        pass
-    return {
-        "error": "Failed to parse legacy tool result content (stored before native-dict migration).",
-        "legacy_content_preview": content[:LEGACY_CONTENT_PREVIEW_CHARS],
-    }
-
 
 def is_content_block_error(exc: Exception) -> bool:
     """检测异常是否由 unsupported content blocks（如图片/音频/视频）引起。"""
@@ -294,37 +268,29 @@ async def preprocess_multimodal_blocks(
     return result_messages
 
 
-def tool_result_to_content(result: Any) -> str | dict[str, Any] | list[MessageBlock]:
-    """把工具返回结果转换为 ToolResultMessage 可用的 content。
+def tool_result_to_content(result: dict[str, Any]) -> dict[str, Any] | list[MessageBlock]:
+    """把原生 dict 工具结果转换为 ToolResultMessage 可用的 content。
 
-    - str（防御性，实际不可达——SP-1 后 handler 返回 dict）：经 legacy_tool_result_str_to_dict 解析为 dict 后落入 dict 处理。
     - 含 _blocks 字段的 dict：pop _blocks 后经 blocks_from_dicts 转为有序 MessageBlock 列表；
       剩余 dict 非空时追加为末尾 TextBlock(json.dumps(remaining))。
-    - 其他 dict：返回原生 dict（不再 json.dumps）。
-    - 非以上类型：raise TypeError（SP-1 后 handler 必须返回 dict，响亮失败优先于静默兜底）。
+    - 其他 dict：返回原生 dict。
+    - 非 dict 输入：抛出 TypeError，不解析或包装旧格式结果。
     """
-    if isinstance(result, str):
-        # 防御性：SP-1 后 dispatch 层保证 handler 返回 dict，str 理论不可达。
-        # 存量 str（旧 history.es）已在加载缝经 normalize_legacy_tool_results 归一化。
-        result = legacy_tool_result_str_to_dict(result)
-    if isinstance(result, dict):
-        # _blocks 优先：有序混合块列表，复用 blocks_from_dicts 格式
-        blocks_data = result.pop("_blocks", None)
-        if isinstance(blocks_data, list) and blocks_data:
-            blocks = blocks_from_dicts(blocks_data)
-            # 剩余 dict（去掉 _blocks）非空时追加为末尾 TextBlock
-            if result:
-                blocks.append(TextBlock(text=json.dumps(result, ensure_ascii=False)))
-            return blocks
-        # 无媒体键：返回原生 dict（不再 json.dumps）
-        return result
-    raise TypeError(f"tool_result_to_content expects dict, got {type(result).__name__}")
+    # _blocks 优先：有序混合块列表，复用 blocks_from_dicts 格式
+    blocks_data = result.pop("_blocks", None)
+    assert blocks_data is None or isinstance(blocks_data, list), "_blocks must be a list"
+    if blocks_data:
+        blocks = blocks_from_dicts(blocks_data)
+        if result:
+            blocks.append(TextBlock(text=json.dumps(result, ensure_ascii=False)))
+        return blocks
+    return result
 
 
 def tool_result_to_follow_up(
     result: dict,
     character_name: str,
-) -> tuple[list[BaseMessage] | None, str | dict[str, Any] | list[MessageBlock]]:
+) -> tuple[list[BaseMessage] | None, dict[str, Any] | list[MessageBlock]]:
     """提取 _user_blocks，构造 follow_up 用户消息。
 
     从 result dict 中 pop _user_blocks（有序混合块列表），

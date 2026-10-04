@@ -26,7 +26,6 @@ from entity.gentype import RefWrapper
 from entity.constant import TOOL_TASK_CANCEL_CLEANUP_TIMEOUT
 from entity.messages import ToolResultMessage
 from entry.base_agent_loop import BaseAgentLoop, ToolContext, IMainSessionLoop
-from entry.agent_support.multimodal import legacy_tool_result_str_to_dict
 from entry.tool_post_dispatch import finalize_tool_result
 
 logger = logging.getLogger(__name__)
@@ -411,18 +410,12 @@ class ToolExecutor:
                             llm_profile=llm_profile,
                         )
                         try:
-                            dispatch_result = await self._await_or_cancel(
+                            result = await self._await_or_cancel(
                                 tool_registry.async_dispatch(
                                     tc.name, args, context=ctx,
                                 ),
                                 "dispatch",
                             )
-                            if isinstance(dispatch_result, dict):
-                                result = dispatch_result
-                            elif isinstance(dispatch_result, str):
-                                result = legacy_tool_result_str_to_dict(dispatch_result)
-                            else:
-                                result = {"result": dispatch_result}
                         except ToolInterrupted as ti:
                             # 尽力 kill 子进程（run_command / run_python 登记的 Popen）
                             try:

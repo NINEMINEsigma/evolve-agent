@@ -689,7 +689,6 @@ class _OrchestratorContext:
                     loaded_history = load(__History_Version__, make_config(path), History, ignore_missing_fields=True)
                     if isinstance(loaded_history, History):
                         loaded_history.remove_unpaired_tool_calls()
-                        loaded_history.normalize_legacy_tool_results()
                         loop.load_history(loaded_history)
                     else:
                         logger.warning("Loaded subagent history is not History instance: %s", type(loaded_history))

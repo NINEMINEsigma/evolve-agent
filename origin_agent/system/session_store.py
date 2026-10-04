@@ -19,7 +19,7 @@ from entity.constant import (
     GLOBAL_LLM_PROFILE_FILENAME,
     LOADED_TOOLSETS_FILENAME,
 )
-from easysave import save, load
+from easysave import save, load, contains
 from entity.typeref import make_config
 
 from system.atomic_io import write_text_atomic
@@ -84,24 +84,14 @@ class SessionStore:
         return self.session_dir(session_id) / "history.es"
 
     def read_history(self, session_id: str) -> History | None:
-        """从 easysave 多态序列化文件读取 History 实例。"""
+        """读取 History 实例。"""
         path = self.history_path(session_id)
-        if not path.exists():
+        config = make_config(path)
+        if not path.exists() or not contains(__SessionStore_Version__, config):
             return None
-        try:
-            data = load(__SessionStore_Version__, make_config(path), History, ignore_missing_fields=True)
-            if isinstance(data, History):
-                data.remove_unpaired_tool_calls()
-                data.normalize_legacy_tool_results()
-                return data
-            logger.error("Loaded history for session=%s is not History instance: %s", session_id, type(data))
-            return None
-        except KeyError as exc:
-            logger.exception("Failed to load history for session=%s: %s", session_id, exc)
-            return None
-        except Exception as exc:
-            logger.exception("Failed to load history for session=%s: %s", session_id, exc)
-            raise
+        data = load(__SessionStore_Version__, config, History, ignore_missing_fields=True)
+        data.remove_unpaired_tool_calls()
+        return data
 
     def write_history(self, session_id: str, history: History) -> None:
         """将 History 实例以 easysave 多态序列化写入磁盘。"""
