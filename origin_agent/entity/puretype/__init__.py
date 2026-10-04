@@ -19,6 +19,10 @@ puretype 包 — 只含有不包含任何方法定义的类型定义。
                   SessionRegenerateResult, SessionToolResources,
                   SessionRuntimeResourceTransferResult, SessionMergeResult,
                   History skeleton/page/resource DTO, SessionMessageEntry, TokenUsageRecord, QueuedMessage
+    subagent    : SubAgentStatus, SubAgentFeedback, SubAgentPendingApproval,
+                  SubAgentLaunchResult, SubAgentChatResult, SubAgentApprovalResult,
+                  SubAgentStopResult, SubAgentSnapshot, SubAgentSnapshotResponse,
+                  SubAgentUpdate
     agent       : AgentConfig
     ws          : MessageType, Message, HistoryRowLink, ClientDiagnosticKind,
                   ClientDiagnosticPhase, ClientDiagnostic
@@ -90,6 +94,20 @@ from .session_visual import (
     SessionVisualSource,
     SessionVisualResourceState,
     SessionVisualResources,
+)
+from .subagent import (
+    SubAgentStatus,
+    SubAgentFeedback,
+    SubAgentPendingApproval,
+    SubAgentApprovalDecisionResult,
+    SubAgentPromotion,
+    SubAgentLaunchResult,
+    SubAgentChatResult,
+    SubAgentApprovalResult,
+    SubAgentStopResult,
+    SubAgentSnapshot,
+    SubAgentSnapshotResponse,
+    SubAgentUpdate,
 )
 from .session import (
     Loop,
@@ -230,6 +248,19 @@ __all__ = [
     # skills
     "SkillPayload",
     "SkillInfo",
+    # subagent
+    "SubAgentStatus",
+    "SubAgentFeedback",
+    "SubAgentPendingApproval",
+    "SubAgentApprovalDecisionResult",
+    "SubAgentPromotion",
+    "SubAgentLaunchResult",
+    "SubAgentChatResult",
+    "SubAgentApprovalResult",
+    "SubAgentStopResult",
+    "SubAgentSnapshot",
+    "SubAgentSnapshotResponse",
+    "SubAgentUpdate",
     # session
     "Loop",
     "SessionStatus",

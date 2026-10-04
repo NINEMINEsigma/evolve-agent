@@ -35,6 +35,16 @@ from entity.puretype import (
     ToolDangerLevel,
     LLMProfile,
     CharacterProfile,
+    SubAgentStatus,
+    SubAgentFeedback,
+    SubAgentPromotion,
+    SubAgentLaunchResult,
+    SubAgentChatResult,
+    SubAgentApprovalResult,
+    SubAgentStopResult,
+    SubAgentSnapshot,
+    SubAgentSnapshotResponse,
+    SubAgentUpdate,
 )
 from abstract.tools.registry import registry as tool_registry
 from system.context import get_runtime_context
@@ -47,6 +57,14 @@ from .loop import SUB_MESSAGE_SEPARATOR, SubAgentLoop, format_user_message
 from .taskloop import TaskAgentLoop
 
 logger = logging.getLogger(__name__)
+
+
+def _parse_tool_arguments(arguments: str) -> dict[str, Any]:
+    """解析 History 中的工具参数；非法 JSON 或非对象参数直接抛出异常。"""
+    parsed = json.loads(arguments)
+    if not isinstance(parsed, dict):
+        raise ValueError("Tool arguments must be a JSON object")
+    return parsed
 
 
 class WaitingEntry:
@@ -99,26 +117,26 @@ class _OrchestratorContext:
         message_type: str,
         parent_session_id: str,
         history_path: str | None = None,
-    ) -> dict[str, Any]:
+    ) -> SubAgentLaunchResult:
         """启动一个子 Agent 会话。"""
         # 同一主会话下同一 subagent 只能有一个活跃或排队实例
         for active_sid, active_name in self._subagent_names.items():
             if active_name == name:
                 sub = self._active.get(active_sid)
                 if sub is not None and not sub.completed and not sub.terminated:
-                    return {
-                        "success": False,
-                        "error": f"Sub-agent '{name}' is already active in this parent session.",
-                    }
+                    return SubAgentLaunchResult(
+                        success=False,
+                        error=f"Sub-agent '{name}' is already active in this parent session.",
+                    )
         for i, entry in enumerate(self._waiting_queue):
             if entry.name == name:
-                return {
-                    "success": False,
-                    "error": (
+                return SubAgentLaunchResult(
+                    success=False,
+                    error=(
                         f"Sub-agent '{name}' is already queued (position {i + 1}). "
                         "Please wait for it to activate or stop it first."
                     ),
-                }
+                )
 
         session_id = f"{parent_session_id}_{uuid.uuid4().hex[:12]}"
 
@@ -141,23 +159,23 @@ class _OrchestratorContext:
                 "Subagent queued | parent=%s session=%s position=%d",
                 parent_session_id, session_id, len(self._waiting_queue),
             )
-            return {
-                "success": True,
-                "session_id": session_id,
-                "waiting": True,
-                "queue_position": len(self._waiting_queue),
-            }
+            return SubAgentLaunchResult(
+                success=True,
+                session_id=session_id,
+                waiting=True,
+                queue_position=len(self._waiting_queue),
+            )
 
         # 立即启动
         await self._start_subagent(
             session_id, name, profile, temperature,
             initial_prompt, user_name, message_type, history_path,
         )
-        return {
-            "success": True,
-            "session_id": session_id,
-            "waiting": False,
-        }
+        return SubAgentLaunchResult(
+            success=True,
+            session_id=session_id,
+            waiting=False,
+        )
 
     # ── taskagent 启动/停止 ─────────────────────────────────────────
 
@@ -166,24 +184,24 @@ class _OrchestratorContext:
         parent_session_id: str,
         prompt: str,
         profile: LLMProfile,
-    ) -> dict[str, Any]:
+    ) -> SubAgentLaunchResult:
         """使用调用时活动 Profile快照启动一次性临时Agent。"""
         session_id = f"{parent_session_id}_{uuid.uuid4().hex[:12]}"
 
         # 检查上限
         if len(self._active) >= SUBAGENT_MAX_ACTIVE:
             # 临时Agent不进等待队列——直接拒绝
-            return {
-                "success": False,
-                "error": f"Active sub-agent limit reached ({SUBAGENT_MAX_ACTIVE}). Stop some sub-agents first.",
-            }
+            return SubAgentLaunchResult(
+                success=False,
+                error=f"Active sub-agent limit reached ({SUBAGENT_MAX_ACTIVE}). Stop some sub-agents first.",
+            )
 
         await self._start_taskagent(session_id, prompt, profile)
-        return {
-            "success": True,
-            "session_id": session_id,
-            "waiting": False,
-        }
+        return SubAgentLaunchResult(
+            success=True,
+            session_id=session_id,
+            waiting=False,
+        )
 
     async def _start_taskagent(
         self,
@@ -253,22 +271,22 @@ class _OrchestratorContext:
             self._parent_session_id, session_id, ctx.model, len(tools),
         )
 
-    async def stop_taskagent(self, session_id: str) -> dict[str, Any]:
+    async def stop_taskagent(self, session_id: str) -> SubAgentStopResult:
         """强制停止 taskagent — 不保存历史。"""
         sub = self._active.get(session_id)
         if sub is None:
-            return {
-                "success": False,
-                "session_id": session_id,
-                "error": "Task-agent not found.",
-            }
+            return SubAgentStopResult(
+                success=False,
+                session_id=session_id,
+                error="Task-agent not found.",
+            )
 
         if sub.completed:
-            return {
-                "success": False,
-                "session_id": session_id,
-                "error": "Task-agent already completed.",
-            }
+            return SubAgentStopResult(
+                success=False,
+                session_id=session_id,
+                error="Task-agent already completed.",
+            )
 
         # 强制停止
         sub.stop()
@@ -298,10 +316,10 @@ class _OrchestratorContext:
         # 级联出队
         await self._activate_next()
 
-        return {
-            "success": True,
-            "session_id": session_id,
-        }
+        return SubAgentStopResult(
+            success=True,
+            session_id=session_id,
+        )
 
     # ── 交互 ────────────────────────────────────────────────────────
 
@@ -309,22 +327,22 @@ class _OrchestratorContext:
         """清空并返回子 Agent 的发件箱内容。"""
         return sub.get_outbox()
 
-    async def chat_user_direct(self, session_id: str, message: str, co_recipients: list[str] | None = None) -> dict[str, Any]:
+    async def chat_user_direct(self, session_id: str, message: str, co_recipients: list[str] | None = None) -> SubAgentChatResult:
         """最终用户直接向子会话发送消息（支持 FIFO 排队）。"""
         sub = self._active.get(session_id)
         if sub is None:
             for entry in self._waiting_queue:
                 if entry.session_id == session_id:
-                    return {
-                        "success": False,
-                        "session_id": session_id,
-                        "error": "Sub-agent is queued (not yet active).",
-                    }
-            return {
-                "success": False,
-                "session_id": session_id,
-                "error": "Sub-agent not found (may have been stopped or completed).",
-            }
+                    return SubAgentChatResult(
+                        success=False,
+                        session_id=session_id,
+                        error="Sub-agent is queued (not yet active).",
+                    )
+            return SubAgentChatResult(
+                success=False,
+                session_id=session_id,
+                error="Sub-agent not found (may have been stopped or completed).",
+            )
         sub.inject_parent_message(
             message, "User", "user_direct", co_recipients, character_name=USER_CHARACTER_NAME
         )
@@ -334,7 +352,7 @@ class _OrchestratorContext:
             self._subagent_names.get(session_id, ""),
             {"role": "user", "content": wrapped, "character_name": USER_CHARACTER_NAME},
         )
-        return {"success": True, "session_id": session_id}
+        return SubAgentChatResult(success=True, session_id=session_id)
 
     async def chat(
         self,
@@ -343,39 +361,39 @@ class _OrchestratorContext:
         user_name: str,
         message_type: str,
         co_recipients: list[str] | None = None,
-    ) -> dict[str, Any]:
+    ) -> SubAgentChatResult:
         """父 Agent 向子 Agent 发送消息。"""
         sub = self._active.get(session_id)
         if sub is None:
             # 检查等待队列
             for entry in self._waiting_queue:
                 if entry.session_id == session_id:
-                    return {
-                        "success": False,
-                        "session_id": session_id,
-                        "error": "Sub-agent is queued (not yet active). Cannot chat.",
-                    }
-            return {
-                "success": False,
-                "session_id": session_id,
-                "error": "Sub-agent not found (may have been stopped or completed).",
-            }
+                    return SubAgentChatResult(
+                        success=False,
+                        session_id=session_id,
+                        error="Sub-agent is queued (not yet active). Cannot chat.",
+                    )
+            return SubAgentChatResult(
+                success=False,
+                session_id=session_id,
+                error="Sub-agent not found (may have been stopped or completed).",
+            )
         # 硬拦截：本轮响应尚未完成时禁止 chat（防止父 Agent 疯狂催促）
         if sub.round_active:
-            return {
-                "success": False,
-                "session_id": session_id,
-                "error": "Sub-agent is still generating its current response. Wait for [subagent-result] before calling chat_subagent.",
-            }
+            return SubAgentChatResult(
+                success=False,
+                session_id=session_id,
+                error="Sub-agent is still generating its current response. Wait for [subagent-result] before calling chat_subagent.",
+            )
         # 先收取子 Agent 的反馈；如果还有未送达的反馈，让父 Agent 先查看，不要急于发新消息
         outbox = self._drain_outbox(sub)
         if outbox:
-            return {
-                "success": False,
-                "session_id": session_id,
-                "feedback": outbox,
-                "_note": "Sub-agent has already produced feedback that you have not yet received. Please review the feedback first, then decide whether and how to reply via chat_subagent.",
-            }
+            return SubAgentChatResult(
+                success=False,
+                session_id=session_id,
+                feedback=outbox,
+                note="Sub-agent has already produced feedback that you have not yet received. Please review the feedback first, then decide whether and how to reply via chat_subagent.",
+            )
         # 没有未送达反馈，正常发送
         character_name = self._agent_loop.current_character_agent
         sub.inject_parent_message(
@@ -388,61 +406,55 @@ class _OrchestratorContext:
             self._subagent_names.get(session_id, ""),
             {"role": "user", "content": wrapped, "character_name": character_name},
         )
-        return {
-            "success": True,
-            "session_id": session_id,
-            "feedback": None,
-        }
+        return SubAgentChatResult(success=True, session_id=session_id)
 
-    async def approve(self, session_id: str, decisions: list[dict[str, Any]]) -> dict[str, Any]:
+    async def approve(self, session_id: str, decisions: list[dict[str, Any]]) -> SubAgentApprovalResult:
         """审批子 Agent 的工具调用。"""
         sub = self._active.get(session_id)
         if sub is None:
-            return {
-                "success": False,
-                "session_id": session_id,
-                "error": "Sub-agent not found (may have been stopped or completed).",
-            }
+            return SubAgentApprovalResult(
+                success=False,
+                session_id=session_id,
+                error="Sub-agent not found (may have been stopped or completed).",
+            )
         results = sub.approve_tools(decisions)
         # 审批后顺手收集一次 outbox
         outbox = self._drain_outbox(sub)
-        return {
-            "success": True,
-            "session_id": session_id,
-            "processed": len(results),
-            "results": results,
-            "feedback": outbox if outbox else None,
-        }
+        return SubAgentApprovalResult(
+            success=True,
+            session_id=session_id,
+            processed=len(results),
+            results=results,
+            feedback=outbox,
+        )
 
-    async def stop(self, session_id: str) -> dict[str, Any]:
+    async def stop(self, session_id: str) -> SubAgentStopResult:
         """停止子 Agent 会话。"""
         # 检查是否在等待队列中
         for i, entry in enumerate(self._waiting_queue):
             if entry.session_id == session_id:
                 del self._waiting_queue[i]
                 logger.info("Subagent removed from queue | session=%s", session_id)
-                return {
-                    "success": True,
-                    "session_id": session_id,
-                    "session_path": None,
-                    "promoted": [],
-                    "_note": "Sub-agent was queued (not yet active). No history to save.",
-                }
+                return SubAgentStopResult(
+                    success=True,
+                    session_id=session_id,
+                    note="Sub-agent was queued (not yet active). No history to save.",
+                )
 
         sub = self._active.get(session_id)
         if sub is None:
-            return {
-                "success": False,
-                "session_id": session_id,
-                "error": "Sub-agent not found.",
-            }
+            return SubAgentStopResult(
+                success=False,
+                session_id=session_id,
+                error="Sub-agent not found.",
+            )
 
         if sub.completed:
-            return {
-                "success": False,
-                "session_id": session_id,
-                "error": "Sub-agent has already completed.",
-            }
+            return SubAgentStopResult(
+                success=False,
+                session_id=session_id,
+                error="Sub-agent has already completed.",
+            )
 
         # 强制停止
         sub.stop()
@@ -457,11 +469,11 @@ class _OrchestratorContext:
             sub.save_history(session_path)
         except Exception as exc:
             logger.exception("Failed to save subagent history for %s: %s", session_id, exc)
-            return {
-                "success": False,
-                "session_id": session_id,
-                "error": f"Failed to save history: {exc}",
-            }
+            return SubAgentStopResult(
+                success=False,
+                session_id=session_id,
+                error=f"Failed to save history: {exc}",
+            )
 
         # 清理
         self._active.pop(session_id, None)
@@ -486,12 +498,12 @@ class _OrchestratorContext:
         # 级联出队：一出一入
         promoted = await self._activate_next()
 
-        return {
-            "success": True,
-            "session_id": session_id,
-            "session_path": history_logical_path,
-            "promoted": promoted,
-        }
+        return SubAgentStopResult(
+            success=True,
+            session_id=session_id,
+            session_path=history_logical_path,
+            promoted=promoted,
+        )
 
     # ── 生命周期 ────────────────────────────────────────────────────
 
@@ -501,66 +513,71 @@ class _OrchestratorContext:
     def resume(self) -> None:
         self._interrupted = False
 
-    def get_snapshot(self) -> dict[str, dict[str, Any]]:
+    def get_snapshot(self) -> SubAgentSnapshotResponse:
         # TODO: msg.content没有多模态
         """返回所有活跃子会话的快照（供前端刷新时拉取）。"""
-        snap: dict[str, dict[str, Any]] = {}
+        snapshots: dict[str, SubAgentSnapshot] = {}
         for session_id, sub in self._active.items():
-            feedback: list[dict[str, Any]] = []
+            feedback: list[SubAgentFeedback] = []
             for msg in sub.history.iter_messages():
                 if msg.role == Role.SYSTEM:
                     continue
+                character_name = getattr(msg, "character_name", None)
                 if msg.role == Role.USER:
-                    feedback.append({
-                        "role": "user",
-                        "content": str(msg.content),
-                        "character_name": getattr(msg, "character_name", None) or USER_CHARACTER_NAME,
-                    })
+                    feedback.append(SubAgentFeedback(
+                        role="user",
+                        content=str(msg.content),
+                        character_name=character_name or USER_CHARACTER_NAME,
+                    ))
                 elif msg.role == Role.ASSISTANT:
                     content = str(msg.content)
                     reasoning = msg.reasoning if isinstance(msg, CharacterConversationMessage) else None
-                    character_name = getattr(msg, "character_name", None)
                     if content:
-                        item: dict[str, Any] = {
-                            "role": "assistant",
-                            "content": content,
-                            "character_name": character_name,
-                        }
-                        if reasoning:
-                            item["reasoning"] = str(reasoning)
-                        feedback.append(item)
+                        feedback.append(SubAgentFeedback(
+                            role="assistant",
+                            content=content,
+                            character_name=character_name,
+                            reasoning=str(reasoning) if reasoning else None,
+                        ))
                     elif reasoning:
-                        feedback.append({
-                            "role": "reasoning",
-                            "reasoning": str(reasoning),
-                            "character_name": character_name,
-                        })
+                        feedback.append(SubAgentFeedback(
+                            role="reasoning",
+                            reasoning=str(reasoning),
+                            character_name=character_name,
+                        ))
                     if isinstance(msg, CharacterConversationMessage) and msg.tool_calls:
                         for tc in msg.tool_calls:
-                            feedback.append({
-                                "role": "tool_call",
-                                "tool_call_id": tc.id,
-                                "tool_name": tc.function.name,
-                                "tool_args": tc.function.arguments,
-                                "character_name": character_name,
-                            })
+                            feedback.append(SubAgentFeedback(
+                                role="tool_call",
+                                tool_call_id=tc.id,
+                                tool_name=tc.function.name,
+                                tool_args=_parse_tool_arguments(tc.function.arguments),
+                                character_name=character_name,
+                            ))
                 elif msg.role == Role.TOOL and isinstance(msg, ToolResultMessage):
-                    feedback.append({
-                        "role": "tool_result",
-                        "tool_call_id": msg.tool_call_id,
-                        "content": str(msg.content),
-                        "character_name": getattr(msg, "character_name", None),
-                    })
-            status = "completed" if sub.completed else ("terminated" if sub.terminated else "running")
-            snap[session_id] = {
-                "session_id": session_id,
-                "name": self._subagent_names.get(session_id, ""),
-                "status": status,
-                "feedback": feedback,
-                "pending_approvals": sub.pending_approvals_info,
-                "interactive": not isinstance(sub, TaskAgentLoop),
-            }
-        return snap
+                    feedback.append(SubAgentFeedback(
+                        role="tool_result",
+                        tool_call_id=msg.tool_call_id,
+                        content=str(msg.content),
+                        character_name=character_name,
+                    ))
+            status = (
+                SubAgentStatus.completed if sub.completed
+                else SubAgentStatus.terminated if sub.terminated
+                else SubAgentStatus.running
+            )
+            snapshots[session_id] = SubAgentSnapshot(
+                session_id=session_id,
+                name=self._subagent_names.get(session_id, ""),
+                status=status,
+                feedback=feedback,
+                pending_approvals=sub.pending_approvals_info,
+                interactive=not isinstance(sub, TaskAgentLoop),
+            )
+        return SubAgentSnapshotResponse(
+            session_id=self._parent_session_id,
+            subagents=snapshots,
+        )
 
     async def shutdown(self) -> None:
         """关闭本上下文的所有活跃子 Agent。"""
@@ -581,7 +598,7 @@ class _OrchestratorContext:
         self,
         session_id: str,
         name: str,
-        event: dict[str, Any] | None = None,
+        event: SubAgentFeedback | dict[str, Any] | None = None,
         *,
         status_override: str | None = None,
         interactive: bool | None = None,
@@ -605,18 +622,25 @@ class _OrchestratorContext:
                 status = "terminated"
             else:
                 status = "running"
-            feedback: list[dict[str, Any]] = [event] if event else []
+            feedback = []
+            if event is not None:
+                feedback.append(
+                    event if isinstance(event, SubAgentFeedback)
+                    else SubAgentFeedback.model_validate(event)
+                )
             pending = sub.pending_approvals_info if sub is not None else []
-            removed = sub is None
-            await push_subagent_update(
-                parent_session_id=self._parent_session_id,
-                subagent_session_id=session_id,
-                subagent_name=name,
-                status=status,
+            update = SubAgentUpdate(
+                session_id=session_id,
+                name=name,
+                status=SubAgentStatus(status),
                 feedback=feedback,
                 pending_approvals=pending,
-                removed=removed,
-                interactive=interactive,
+                removed=sub is None,
+                interactive=bool(interactive),
+            )
+            await push_subagent_update(
+                parent_session_id=self._parent_session_id,
+                update=update,
             )
         except Exception as exc:
             logger.warning("WS push for subagent %s failed: %s", session_id, exc, exc_info=True)
@@ -697,7 +721,7 @@ class _OrchestratorContext:
                                     "role": "tool_call",
                                     "tool_call_id": tc.id,
                                     "tool_name": tc.function.name,
-                                    "tool_args": tc.function.arguments,
+                                    "tool_args": _parse_tool_arguments(tc.function.arguments),
                                 },
                             )
                 elif msg.role == Role.TOOL and isinstance(msg, ToolResultMessage):
@@ -744,7 +768,7 @@ class _OrchestratorContext:
             self._parent_session_id, session_id, ctx.model, len(tools),
         )
 
-    async def _activate_next(self) -> list[dict[str, str]]:
+    async def _activate_next(self) -> list[SubAgentPromotion]:
         """从等待队列取出一个启动。"""
         if self._shutting_down:
             return []
@@ -762,7 +786,10 @@ class _OrchestratorContext:
             entry.history_path,
         )
         logger.info("Subagent activated from queue | session=%s", entry.session_id)
-        return [{"session_id": entry.session_id, "subagent_name": entry.name}]
+        return [SubAgentPromotion(
+            session_id=entry.session_id,
+            subagent_name=entry.name,
+        )]
 
     def _build_tool_set(self) -> list[dict[str, Any]]:
         """构建子 Agent 的工具集 — 仅包含 availability 包含 SUBAGENT 或 EVERY 的工具。"""
@@ -848,9 +875,9 @@ class _OrchestratorContext:
         if pending:
             parts.append("pending_approvals:")
             for p in pending:
-                parts.append(f"  - tool_call_id: {p['tool_call_id']}")
-                parts.append(f"    tool_name: {p['tool_name']}")
-                parts.append(f"    arguments: {json.dumps(p['arguments'], ensure_ascii=False)}")
+                parts.append(f"  - tool_call_id: {p.tool_call_id}")
+                parts.append(f"    tool_name: {p.tool_name}")
+                parts.append(f"    arguments: {json.dumps(p.arguments, ensure_ascii=False)}")
         full_message = read_template("subagent/result_message.txt") + "\n\n" + "\n".join(parts)
         loop = self._get_agent_loop()
         if loop is None or loop.loop is None or loop.loop._message_queue is None:
@@ -907,19 +934,19 @@ class SubAgentOrchestrator:
 
     # ── 公共代理方法 ─────────────────────────────────────────────────
 
-    async def launch(self, parent_session_id: str, **kwargs: Any) -> dict[str, Any]:
+    async def launch(self, parent_session_id: str, **kwargs: Any) -> SubAgentLaunchResult:
         return await self._get_context(parent_session_id).launch(parent_session_id=parent_session_id, **kwargs)
 
-    async def chat_user_direct(self, parent_session_id: str, session_id: str, message: str, co_recipients: list[str] | None = None) -> dict[str, Any]:
+    async def chat_user_direct(self, parent_session_id: str, session_id: str, message: str, co_recipients: list[str] | None = None) -> SubAgentChatResult:
         return await self._get_context(parent_session_id).chat_user_direct(session_id, message, co_recipients)
 
-    async def chat(self, parent_session_id: str, session_id: str, message: str, user_name: str, message_type: str, co_recipients: list[str] | None = None) -> dict[str, Any]:
+    async def chat(self, parent_session_id: str, session_id: str, message: str, user_name: str, message_type: str, co_recipients: list[str] | None = None) -> SubAgentChatResult:
         return await self._get_context(parent_session_id).chat(session_id, message, user_name, message_type, co_recipients)
 
-    async def approve(self, parent_session_id: str, session_id: str, decisions: list[dict[str, Any]]) -> dict[str, Any]:
+    async def approve(self, parent_session_id: str, session_id: str, decisions: list[dict[str, Any]]) -> SubAgentApprovalResult:
         return await self._get_context(parent_session_id).approve(session_id, decisions)
 
-    async def stop(self, parent_session_id: str, session_id: str) -> dict[str, Any]:
+    async def stop(self, parent_session_id: str, session_id: str) -> SubAgentStopResult:
         return await self._get_context(parent_session_id).stop(session_id)
 
     async def launch_taskagent(
@@ -927,12 +954,12 @@ class SubAgentOrchestrator:
         parent_session_id: str,
         prompt: str,
         profile: LLMProfile,
-    ) -> dict[str, Any]:
+    ) -> SubAgentLaunchResult:
         return await self._get_context(parent_session_id).launch_taskagent(
             parent_session_id, prompt, profile
         )
 
-    async def stop_taskagent(self, parent_session_id: str, session_id: str) -> dict[str, Any]:
+    async def stop_taskagent(self, parent_session_id: str, session_id: str) -> SubAgentStopResult:
         return await self._get_context(parent_session_id).stop_taskagent(session_id)
 
     def interrupt(self, parent_session_id: str) -> None:
@@ -941,10 +968,10 @@ class SubAgentOrchestrator:
     def resume(self, parent_session_id: str) -> None:
         self._get_context(parent_session_id).resume()
 
-    def get_snapshot(self, parent_session_id: str) -> dict[str, dict[str, Any]]:
+    def get_snapshot(self, parent_session_id: str) -> SubAgentSnapshotResponse:
         ctx = self._contexts.get(parent_session_id)
         if ctx is None:
-            return {}
+            return SubAgentSnapshotResponse(session_id=parent_session_id)
         return ctx.get_snapshot()
 
     async def shutdown_all(self) -> None:

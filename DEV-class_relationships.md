@@ -102,6 +102,64 @@ classDiagram
         +tool_resources_error
     }
 
+    class SubAgentLaunchResult {
+        +success
+        +session_id
+        +waiting
+        +queue_position
+        +error
+    }
+
+    class SubAgentChatResult {
+        +success
+        +session_id
+        +feedback
+        +note
+        +error
+    }
+
+    class SubAgentApprovalResult {
+        +success
+        +session_id
+        +processed
+        +results
+        +feedback
+        +error
+    }
+
+    class SubAgentStopResult {
+        +success
+        +session_id
+        +session_path
+        +promoted
+        +note
+        +error
+    }
+
+    class SubAgentSnapshot {
+        +session_id
+        +name
+        +status
+        +feedback
+        +pending_approvals
+        +interactive
+    }
+
+    class SubAgentSnapshotResponse {
+        +session_id
+        +subagents
+    }
+
+    class SubAgentUpdate {
+        +session_id
+        +name
+        +status
+        +feedback
+        +pending_approvals
+        +removed
+        +interactive
+    }
+
     class SessionMergeResult {
         +merged
         +session_id
@@ -663,6 +721,21 @@ classDiagram
     BaseAgentLoop --> SessionToolResources : returns
     BaseAgentLoop --> SessionMergeResult : returns
     LoopSessionManager --> SessionRuntimeResourceTransferResult : returns
+    _OrchestratorContext --> SubAgentLaunchResult : returns
+    _OrchestratorContext --> SubAgentChatResult : returns
+    _OrchestratorContext --> SubAgentApprovalResult : returns
+    _OrchestratorContext --> SubAgentStopResult : returns
+    _OrchestratorContext --> SubAgentSnapshotResponse : returns
+    SubAgentOrchestrator --> SubAgentLaunchResult : returns
+    SubAgentOrchestrator --> SubAgentChatResult : returns
+    SubAgentOrchestrator --> SubAgentApprovalResult : returns
+    SubAgentOrchestrator --> SubAgentStopResult : returns
+    SubAgentOrchestrator --> SubAgentSnapshotResponse : returns
+    SubAgentSnapshotResponse --> SubAgentSnapshot : contains
+    SubAgentSnapshot --> SubAgentFeedback : contains
+    SubAgentSnapshot --> SubAgentPendingApproval : contains
+    SubAgentUpdate --> SubAgentFeedback : contains
+    SubAgentUpdate --> SubAgentPendingApproval : contains
     History --> SessionMessageDeletionResult : returns
     BaseAgentLoop <|-- MultiAgentLoop
     BasePrivateChatAgentLoop <|-- ParentAgentLoop
@@ -939,6 +1012,8 @@ classDiagram
 | `SessionMessageEditResult` / `SessionMessageDeletionResult` / `SessionRegenerateResult` | `entity/puretype/session.py` | `BaseModel` | `BaseAgentLoop` 消息编辑、删除和重新生成前置处理的稳定结果；Gateway 通过属性访问，HTTP边界再序列化 |
 | `SessionToolResources` / `SessionMergeResult` | `entity/puretype/session.py` | `BaseModel` | `BaseAgentLoop` 工具资源快照与会话合并/分支结果 |
 | `SessionRuntimeResourceTransferResult` | `entity/puretype/session.py` | `BaseModel` | `LoopSessionManager` 会话旋转时运行态资源迁移的稳定结果 |
+| `SubAgentLaunchResult` / `SubAgentChatResult` / `SubAgentApprovalResult` / `SubAgentStopResult` | `entity/puretype/subagent.py` | `BaseModel` | `SubAgentOrchestrator` 与 `_OrchestratorContext` 的启动、对话、审批和停止稳定结果；工具层只在边界序列化 |
+| `SubAgentSnapshot` / `SubAgentSnapshotResponse` / `SubAgentUpdate` | `entity/puretype/subagent.py` | `BaseModel` | 统一子Agent快照与前端状态更新中的 `status`、`feedback`、`pending_approvals`、`interactive` 字段 |
 | `MetadataProfileUpdateRequest` / `MetadataProfileState` / `MetadataProfileMutationResponse` | `entity/puretype/metadata.py` | `BaseModel` | 全局元数据 Profile REST 请求、权威状态与变更响应 |
 | `ModalityProfileState` / `ModalityProfileUpdateRequest` / `ModalityProfileMutationResponse` / `ModalityProfileStates` | `entity/puretype/modality.py` | `BaseModel` | 图片、音频、视频三路全局回退 Profile 的 REST 状态、更新请求和完整状态快照 |
 | `SessionApprovalModeState` | `entity/puretype/approval.py` | `BaseModel` | easysave类型保留的会话审批模式根对象，只含 `ApprovalMode`；文件版本由 ES key、类型稳定性由 typeref stable type token管理 |
@@ -991,7 +1066,10 @@ classDiagram
 
 `abstract/llm/formats.py` 提供 `to_openai_message()` 和 `messages_to_anthropic_list()` 两种 wire format 转换器，供 LLM 客户端复用。
 
-### Application 单例
+### 子Agent编排返回值稳定类型化
+
+`SubAgentOrchestrator` 与 `_OrchestratorContext` 的 `launch()`、`chat()`、`approve()`、`stop()`、`get_snapshot()` 统一返回 `entity/puretype/subagent.py` 中的 BaseModel。`SubAgentSnapshot`、`SubAgentUpdate` 共同定义状态、反馈、待审批调用和交互标志；`ListSubAgents`、Gateway 和消息路由通过属性读取。工具结果和 WebSocket/HTTP 仍在传输边界序列化，避免 `info.get(...)`、嵌套字典键漂移和 `tool_result(**result)` 的隐式字段耦合。
+
 
 `system/application.py::Application` 作为进程级唯一单例，替代了原有的模块级全局变量。所有子系统（`LLMProfileStore`、共享 Profile 锁、`SessionMetadataService`、`SessionManager`、`FrontendSink`、`SubAgentOrchestrator`、`ApprovalBackendManager`、`CronRouter`、`ToolRegistry`）通过 `Application.current()` 访问。
 

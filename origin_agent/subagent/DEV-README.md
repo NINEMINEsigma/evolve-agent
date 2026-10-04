@@ -51,6 +51,7 @@ graph TD
 - **工具权限隔离**：子代理只能看到 `availability` 包含 `SUBAGENT` 或 `EVERY` 的工具；递归创建子代理的 `multiagent` 工具集仅对主代理可见（`MAIN`）。
 - **审批流**：使用父主会话的审批模式。safe、白名单命中或 YOLO 直接执行；手动模式其余调用等待父Agent通过 `ApprovalSubAgent` 审批（不是用户弹窗），脱手模式则由审批模型处理。多Agent模式参与者使用主会话策略，与此独立子会话路径不同。
 - **结果收集**：事件驱动——子代理 `outbox` 追加或 `pending_approvals` 变化时经 `_outbox_event` 即时触发 waiter，格式化为 `[subagent-result]` 消息 push 到父代理的 `SessionMessageQueue`。
+- **稳定类型边界**：`launch()`、`chat()`、`approve()`、`stop()` 与 `get_snapshot()` 在 `SubAgentOrchestrator` 和 `_OrchestratorContext` 之间只传递 `entity.puretype.subagent` 中的 BaseModel；工具结果和 WebSocket/HTTP 序列化仅在边界处执行。`SubAgentSnapshot` 统一定义 `status`、`feedback`、`pending_approvals` 与 `interactive`，调用方通过属性访问，不再依赖字典键。
 - **历史持久化**：停止时通过 `save_history()` 写入 `agentspace/tmp/<session_id>.es`，使用 `easysave` 多态序列化；角色是否长期保留历史由 Agent 自行移动。
 
 ### 2. 多 Agent 协作模式（MultiAgent）
@@ -77,6 +78,7 @@ graph TD
 - 创建/停止/查询子代理。
 - 将子代理事件路由到父会话的 `FrontendSink`。
 - 批量收集子代理输出并注入父 Agent 的消息循环。
+- `launch()`、`chat()`、`approve()`、`stop()`、`get_snapshot()` 分别返回 `SubAgentLaunchResult`、`SubAgentChatResult`、`SubAgentApprovalResult`、`SubAgentStopResult`、`SubAgentSnapshotResponse`；调用方通过属性读取。
 - 生命周期由 `Application.shutdown()` 管理（`shutdown_all()`）。
 
 ### `_OrchestratorContext`
@@ -213,6 +215,7 @@ graph TD
 
 ## 历史持久化
 
+- 历史工具参数投影：快照与历史回放共用 `_parse_tool_arguments()`，将 `FunctionCall.arguments` 的 JSON 文本解析为对象。非法 JSON、错误输入类型或非对象 JSON 必须抛出异常，不得静默替换为空字典；原始 History 不变。
 - 运行中：子Agent历史保存在内存中的 `SubAgentLoop._history`。
 - 停止时：普通子Agent序列化到 `agentspace/tmp/<session_id>.es`。
 - 恢复时：`RunSubAgent` 只有显式传入逻辑 `history_path` 才通过 `easysave.load()` 恢复 `.es` 历史。

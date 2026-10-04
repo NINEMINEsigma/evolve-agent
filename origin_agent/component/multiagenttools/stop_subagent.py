@@ -32,7 +32,7 @@ async def _handle_stop_subagent(args: dict[str, Any]) -> dict:
         from system.application import Application
         orch = Application.current().subagent_orchestrator
         result = await orch.stop(parent_session_id=parent_session_id, session_id=session_id)
-        return tool_result(**result)
+        return tool_result(result.model_dump(exclude_none=True))
     except Exception as exc:
         return tool_error(f"Failed to stop subagent: {exc}")
 

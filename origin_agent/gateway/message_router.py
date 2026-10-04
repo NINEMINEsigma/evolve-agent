@@ -600,8 +600,8 @@ class MessageRouter:
             # 建立 session_id → name 映射
             try:
                 snapshot = orch.get_snapshot(parent_session_id=self.sid)
-                for sess_id, info in snapshot.items():
-                    name_map[sess_id] = info.get("name", "")
+                for sess_id, info in snapshot.subagents.items():
+                    name_map[sess_id] = info.name
             except Exception:
                 logger.warning("Failed to get subagent snapshot for session=%s", self.sid, exc_info=True)
 

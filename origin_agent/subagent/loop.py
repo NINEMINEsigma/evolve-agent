@@ -20,7 +20,15 @@ from typing import * # type: ignore
 from abstract.tools.registry import ToolEntry, registry as tool_registry
 from abstract.llm.client import BaseLLMClient
 from abstract.llm.loader import create_llm_client
-from entity.puretype import ApprovalResult, LLMProfile, LLMResponse, ToolCallRequest, ToolAvailability
+from entity.puretype import (
+    ApprovalResult,
+    LLMProfile,
+    LLMResponse,
+    ToolCallRequest,
+    ToolAvailability,
+    SubAgentApprovalDecisionResult,
+    SubAgentPendingApproval,
+)
 from entity.constant import MAIN_AGENT_CHARACTER_NAME, USER_CHARACTER_NAME, History_Version as __History_Version__
 from entity.messages import (
     History,
@@ -527,13 +535,13 @@ class SubAgentLoop(BasePrivateChatAgentLoop):
         self._inbox.put(UserMessage(content=content, character_name=character_name))
         self._wake_event.set()
 
-    def approve_tools(self, decisions: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    def approve_tools(self, decisions: list[dict[str, Any]]) -> list[SubAgentApprovalDecisionResult]:
         """父 Agent 审批结果，触发工具执行并解除阻塞。
 
         Returns:
             审批处理结果列表，每项包含 tool_call_id, approved, error（如有）。
         """
-        results: list[dict[str, Any]] = []
+        results: list[SubAgentApprovalDecisionResult] = []
         decision_map: dict[str, dict[str, Any]] = {
             d["tool_call_id"]: d for d in decisions
         }
@@ -548,17 +556,20 @@ class SubAgentLoop(BasePrivateChatAgentLoop):
                 # 同意：设置 Future 结果
                 if not pending.result.done():
                     pending.result.set_result({"approved": True})
-                results.append({"tool_call_id": pending.tool_call_id, "approved": True})
+                results.append(SubAgentApprovalDecisionResult(
+                    tool_call_id=pending.tool_call_id,
+                    approved=True,
+                ))
             else:
                 # 拒绝：设置 Future 异常
                 reason = decision.get("reason", "Rejected by parent agent.")
                 if not pending.result.done():
                     pending.result.set_exception(RuntimeError(reason))
-                results.append({
-                    "tool_call_id": pending.tool_call_id,
-                    "approved": False,
-                    "reason": reason,
-                })
+                results.append(SubAgentApprovalDecisionResult(
+                    tool_call_id=pending.tool_call_id,
+                    approved=False,
+                    reason=reason,
+                ))
 
         # 清空待审批队列
         self._pending_approvals.clear()
@@ -606,13 +617,13 @@ class SubAgentLoop(BasePrivateChatAgentLoop):
         return list(self._outbox)
 
     @property
-    def pending_approvals_info(self) -> list[dict[str, Any]]:
+    def pending_approvals_info(self) -> list[SubAgentPendingApproval]:
         return [
-            {
-                "tool_call_id": p.tool_call_id,
-                "tool_name": p.name,
-                "arguments": p.arguments,
-            }
+            SubAgentPendingApproval(
+                tool_call_id=p.tool_call_id,
+                tool_name=p.name,
+                arguments=p.arguments,
+            )
             for p in self._pending_approvals
         ]
 

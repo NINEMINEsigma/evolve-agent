@@ -48,7 +48,7 @@ async def _handle_run_taskagent(
             prompt=prompt,
             profile=profile_snapshot,
         )
-        return tool_result(**result)
+        return tool_result(result.model_dump(exclude_none=True))
     except Exception as exc:
         return tool_error(f"Failed to launch taskagent: {exc}")
 

@@ -33,7 +33,7 @@ async def _handle_stop_taskagent(args: dict[str, Any]) -> dict:
             parent_session_id=parent_session_id,
             session_id=session_id,
         )
-        return tool_result(**result)
+        return tool_result(result.model_dump(exclude_none=True))
     except Exception as exc:
         return tool_error(f"Failed to stop taskagent: {exc}")
 

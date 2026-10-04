@@ -72,7 +72,7 @@ async def _handle_run_subagent(args: dict[str, Any]) -> dict:
             message_type=message_type,
             history_path=resolved_history_path,
         )
-        return tool_result(**result)
+        return tool_result(result.model_dump(exclude_none=True))
     except Exception as exc:
         return tool_error(f"Failed to launch subagent: {exc}")
 

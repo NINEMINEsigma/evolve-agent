@@ -22,14 +22,17 @@ async def _handle_list_subagents(args: dict[str, Any]) -> dict:
         try:
             orch = Application.current().subagent_orchestrator
             snapshot = orch.get_snapshot(parent_session_id=parent_session_id)
-            for session_id, info in snapshot.items():
-                name = info.get("name", "")
+            for session_id, info in snapshot.subagents.items():
+                name = info.name
                 if name:
                     name_to_session[name] = {
                         "session_id": session_id,
-                        "status": info.get("status", "unknown"),
-                        "pending_approvals": info.get("pending_approvals", []),
-                        "feedback_count": len(info.get("feedback", [])),
+                        "status": info.status.value,
+                        "pending_approvals": [
+                            approval.model_dump(mode="json")
+                            for approval in info.pending_approvals
+                        ],
+                        "feedback_count": len(info.feedback),
                     }
         except Exception:
             logger.warning(

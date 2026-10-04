@@ -93,6 +93,8 @@ from entity.puretype import (
     SessionToolResources,
     MainSessionActivitySource,
     SessionVisualKind,
+    SubAgentSnapshotResponse,
+    SubAgentUpdate,
 )
 from system.context import get_runtime_context
 from entry.parent_agent_loop import IncompatibleHistoryError
@@ -148,19 +150,12 @@ def get_subagent_orchestrator():
 
 async def push_subagent_update(
     parent_session_id: str,
-    subagent_session_id: str,
-    subagent_name: str,
-    status: str,
-    feedback: list[dict[str, str]],
-    pending_approvals: list[dict[str, Any]],
-    removed: bool = False,
-    interactive: bool = True,
+    update: SubAgentUpdate,
 ) -> None:
-    """将子 Agent 状态更新推送到前端 WebSocket。
+    """将稳定类型的子Agent状态更新序列化后推送到前端 WebSocket。
 
-    前端 UnifiedPanel 接收此消息并更新子会话列表。
-    feedback 每项为 {\"role\": \"assistant\"|\"tool\"|\"status\", \"content\": \"...\"}
-    interactive 为 False 时，前端不会在输入框目标列表中显示该子会话（taskagent 专用）。
+    ``removed`` 在传输边界映射为历史协议字段 ``_removed``；其余字段
+    沿用稳定模型的字段名。
     """
     ws = _get_ws(parent_session_id)
     if ws is None:
@@ -173,13 +168,8 @@ async def push_subagent_update(
                     type=MessageType.SUBAGENT_UPDATE,
                     session_id=parent_session_id,
                     result=_json.dumps({
-                        "session_id": subagent_session_id,
-                        "name": subagent_name,
-                        "status": status,
-                        "feedback": feedback,
-                        "pending_approvals": pending_approvals,
-                        "_removed": removed,
-                        "interactive": interactive,
+                        **update.model_dump(mode="json", exclude={"removed"}),
+                        "_removed": update.removed,
                     }, ensure_ascii=False),
                 ).model_dump(exclude_none=True),
                 ensure_ascii=False,
@@ -586,9 +576,16 @@ async def get_session_subagents(session_id: str):
     try:
         from system.application import Application
         orch = Application.current().subagent_orchestrator
-        return {"session_id": session_id, "subagents": orch.get_snapshot(parent_session_id=session_id)}
+        snapshot = orch.get_snapshot(parent_session_id=session_id)
+        return SubAgentSnapshotResponse(
+            session_id=session_id,
+            subagents=snapshot.subagents,
+        ).model_dump(mode="json")
     except Exception:
-        return {"session_id": session_id, "subagents": {}}
+        return SubAgentSnapshotResponse(
+            session_id=session_id,
+            subagents={},
+        ).model_dump(mode="json")
 
 
 @app.post("/api/confirm/{request_id}")
