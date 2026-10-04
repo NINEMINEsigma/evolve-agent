@@ -12,10 +12,14 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import Any, TYPE_CHECKING
+from typing import TYPE_CHECKING
 
 from entity.messages import History, CharacterConversationMessage
-from entity.puretype import Role, SessionTerminationResult
+from entity.puretype import (
+    Role,
+    SessionRuntimeResourceTransferResult,
+    SessionTerminationResult,
+)
 from system.templates import read_template
 from system.session_store import SessionStore
 
@@ -99,9 +103,8 @@ class LoopSessionManager:
 
     def _transfer_session_runtime_resources(
         self, old_sid: str, new_sid: str,
-    ) -> dict[str, Any]:
+    ) -> SessionRuntimeResourceTransferResult:
         """将旧会话的运行态资源迁移到继承会话。"""
-        result: dict[str, Any] = {"old_sid": old_sid, "new_sid": new_sid}
         self._loop.last_prompt_tokens = 0
         self._session_rotated_notify[old_sid] = new_sid
 
@@ -126,9 +129,11 @@ class LoopSessionManager:
                     "Failed to transfer loaded_toolsets from %s to %s: %s",
                     old_sid, new_sid, exc,
                 )
-        result["tool_resources_error"] = tool_resources_error
-
-        return result
+        return SessionRuntimeResourceTransferResult(
+            old_sid=old_sid,
+            new_sid=new_sid,
+            tool_resources_error=tool_resources_error,
+        )
 
     def pop_session_rotated(self) -> str | None:
         """取出并移除旋转通知（old_sid → new_sid）。"""
@@ -262,7 +267,7 @@ class LoopSessionManager:
             session_id,
             new_sid,
         )
-        if transfer_result.get("tool_resources_error"):
+        if transfer_result.tool_resources_error:
             logger.warning(
                 "Session runtime resource transfer had issues | old=%s new=%s result=%s",
                 session_id,

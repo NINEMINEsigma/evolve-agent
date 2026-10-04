@@ -96,6 +96,12 @@ classDiagram
         +dynamic_endpoints
     }
 
+    class SessionRuntimeResourceTransferResult {
+        +old_sid
+        +new_sid
+        +tool_resources_error
+    }
+
     class SessionMergeResult {
         +merged
         +session_id
@@ -656,6 +662,7 @@ classDiagram
     BaseAgentLoop --> SessionRegenerateResult : returns
     BaseAgentLoop --> SessionToolResources : returns
     BaseAgentLoop --> SessionMergeResult : returns
+    LoopSessionManager --> SessionRuntimeResourceTransferResult : returns
     History --> SessionMessageDeletionResult : returns
     BaseAgentLoop <|-- MultiAgentLoop
     BasePrivateChatAgentLoop <|-- ParentAgentLoop
@@ -931,6 +938,7 @@ classDiagram
 | `SessionTerminationResult` | `entity/puretype/session.py` | `BaseModel` | 会话终结结果；元数据失败通过 `metadata_warnings`返回但不改变归档成功 |
 | `SessionMessageEditResult` / `SessionMessageDeletionResult` / `SessionRegenerateResult` | `entity/puretype/session.py` | `BaseModel` | `BaseAgentLoop` 消息编辑、删除和重新生成前置处理的稳定结果；Gateway 通过属性访问，HTTP边界再序列化 |
 | `SessionToolResources` / `SessionMergeResult` | `entity/puretype/session.py` | `BaseModel` | `BaseAgentLoop` 工具资源快照与会话合并/分支结果 |
+| `SessionRuntimeResourceTransferResult` | `entity/puretype/session.py` | `BaseModel` | `LoopSessionManager` 会话旋转时运行态资源迁移的稳定结果 |
 | `MetadataProfileUpdateRequest` / `MetadataProfileState` / `MetadataProfileMutationResponse` | `entity/puretype/metadata.py` | `BaseModel` | 全局元数据 Profile REST 请求、权威状态与变更响应 |
 | `ModalityProfileState` / `ModalityProfileUpdateRequest` / `ModalityProfileMutationResponse` / `ModalityProfileStates` | `entity/puretype/modality.py` | `BaseModel` | 图片、音频、视频三路全局回退 Profile 的 REST 状态、更新请求和完整状态快照 |
 | `SessionApprovalModeState` | `entity/puretype/approval.py` | `BaseModel` | easysave类型保留的会话审批模式根对象，只含 `ApprovalMode`；文件版本由 ES key、类型稳定性由 typeref stable type token管理 |

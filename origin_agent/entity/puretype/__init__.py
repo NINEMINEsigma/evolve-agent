@@ -16,7 +16,8 @@ puretype 包 — 只含有不包含任何方法定义的类型定义。
     skills      : SkillPayload, SkillInfo
     session     : Loop, SessionStatus, LoopMeta, SessionInfo, SessionTerminationResult,
                   SessionMessageEditResult, SessionMessageDeletionResult,
-                  SessionRegenerateResult, SessionToolResources, SessionMergeResult,
+                  SessionRegenerateResult, SessionToolResources,
+                  SessionRuntimeResourceTransferResult, SessionMergeResult,
                   History skeleton/page/resource DTO, SessionMessageEntry, TokenUsageRecord, QueuedMessage
     agent       : AgentConfig
     ws          : MessageType, Message, HistoryRowLink, ClientDiagnosticKind,
@@ -104,6 +105,7 @@ from .session import (
     SessionMessageDeletionResult,
     SessionRegenerateResult,
     SessionToolResources,
+    SessionRuntimeResourceTransferResult,
     SessionMergeResult,
     SessionHistoryRowKind,
     SessionHistoryToolCardStatus,
@@ -242,6 +244,7 @@ __all__ = [
     "SessionMessageDeletionResult",
     "SessionRegenerateResult",
     "SessionToolResources",
+    "SessionRuntimeResourceTransferResult",
     "SessionMergeResult",
     "SessionHistoryRowKind",
     "SessionHistoryToolCardStatus",

@@ -309,6 +309,14 @@ class SessionToolResources(BaseModel):
     dynamic_endpoints: list[dict[str, Any]] = Field(default_factory=list)
 
 
+class SessionRuntimeResourceTransferResult(BaseModel):
+    """会话旋转时运行态资源迁移的稳定结果。"""
+
+    old_sid: str
+    new_sid: str
+    tool_resources_error: str | None = None
+
+
 class SessionMergeResult(BaseModel):
     """会话合并或单源分支的稳定结果。"""
 
