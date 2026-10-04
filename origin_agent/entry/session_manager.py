@@ -59,15 +59,10 @@ class LoopSessionManager:
     # ------------------------------------------------------------------
 
     def initialize(self) -> None:
-        """从磁盘加载已有历史并设置到 loop history。
-
-        若历史格式不兼容则抛出 IncompatibleHistoryError。
-        """
+        """从磁盘加载已有历史并设置到 loop history"""
         if self._loop.session_store is not None:
             try:
-                disk_history = self._loop.session_store.read_history(
-                    self._loop.session_id,
-                )
+                disk_history = self._loop.session_store.read_history(self._loop.session_id)
                 if disk_history:
                     self._loop.load_history(disk_history)
             except Exception as exc:
