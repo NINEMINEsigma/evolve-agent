@@ -50,7 +50,6 @@ registry.register(
         # ## 调用效果
         # 停止指定 session_id 的 taskagent，不保存任何历史。
         # 已经完成的 taskagent 不能再次停止。
-        # 停止后会自动激活下一个排队的子 Agent（如果有）。
         #
         # ## 返回
         # ```json
@@ -59,7 +58,6 @@ registry.register(
         #
         # ## 何时使用
         # - taskagent 执行时间过长需要提前终止时。
-        # - 需要释放活跃子 Agent 槽位时。
         #
         # ## 副作用/注意
         # - 终止后不保存历史，无法恢复。
@@ -83,7 +81,6 @@ On failure:
 
 ## When to Use
 - A task agent is taking too long and must be terminated early.
-- Free an active sub-agent slot.
 
 ## Side Effects / Notes
 - No history is saved; the task agent cannot be resumed.

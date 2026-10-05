@@ -50,9 +50,10 @@ graph TD
 - **一条子代理 = 一个 `SubAgentLoop` 任务**：启动时创建独立 `asyncio.Task`，在 `loop.run()` 内完成 LLM 调用 → 工具执行 → 结果回写。
 - **工具权限隔离**：子代理只能看到 `availability` 包含 `SUBAGENT` 或 `EVERY` 的工具；递归创建子代理的 `multiagent` 工具集仅对主代理可见（`MAIN`）。
 - **审批流**：使用父主会话的审批模式。safe、白名单命中或 YOLO 直接执行；手动模式其余调用等待父Agent通过 `ApprovalSubAgent` 审批（不是用户弹窗），脱手模式则由审批模型处理。多Agent模式参与者使用主会话策略，与此独立子会话路径不同。
-- **启动事务与失败可见性**：普通子Agent和临时Agent启动时先预留活跃槽位，再完成上下文、历史和前端回放事件准备；提交到活跃表后才创建后台任务。显式传入的 `.es` 历史加载失败会使启动失败，不会降级为空历史；启动阶段异常统一回滚 `_active`、任务和 waiter。直接启动返回结构化失败，等待队列晋级失败通过前端状态和父Agent消息报告。
+- **启动事务与失败可见性**：普通子Agent和临时Agent启动时先登记启动状态，再完成上下文、历史和前端回放事件准备；不设置活跃数量上限，也不进入等待队列。显式传入的 `.es` 历史加载失败会使启动失败，不会降级为空历史；启动阶段异常统一回滚 `_active`、任务和 waiter。
 - **结果收集**：事件驱动——子代理 `outbox` 追加或 `pending_approvals` 变化时经 `_outbox_event` 即时触发 waiter，格式化为 `[subagent-result]` 消息 push 到父代理的 `SessionMessageQueue`。
 - **稳定类型边界**：`launch()`、`chat()`、`approve()`、`stop()` 与 `get_snapshot()` 在 `SubAgentOrchestrator` 和 `_OrchestratorContext` 之间只传递 `entity.puretype.subagent` 中的 BaseModel；工具结果和 WebSocket/HTTP 序列化仅在边界处执行。`SubAgentSnapshot` 统一定义 `status`、`feedback`、`pending_approvals` 与 `interactive`，调用方通过属性访问，不再依赖字典键。
+- **响应与状态**：编排响应不持久化，不保留旧排队协议：启动结果仅含 `success`、可选 `session_id` / `error`；停止结果仅含 `success`、`session_id`、可选 `session_path` / `error`。删除 `SubAgentPromotion`，状态仅为 `running` / `completed` / `terminated`；History 持久化结构保持不变。
 - **历史持久化**：停止时通过 `save_history()` 写入 `agentspace/tmp/<session_id>.es`，使用 `easysave` 多态序列化；角色是否长期保留历史由 Agent 自行移动。
 
 ### 2. 多 Agent 协作模式（MultiAgent）
@@ -75,7 +76,7 @@ graph TD
 
 `subagent/orchestrator.py` 的顶层编排器，职责包括：
 
-- 按父会话维护 `_OrchestratorContext`（活跃子代理、等待队列、后台周期任务）。
+- 按父会话维护 `_OrchestratorContext`（活跃子代理、启动状态、后台事件 waiter）。
 - 创建/停止/查询子代理。
 - 将子代理事件路由到父会话的 `FrontendSink`。
 - 批量收集子代理输出并注入父 Agent 的消息循环。
@@ -88,7 +89,7 @@ graph TD
 
 - `_active`：当前活跃的子代理映射（`session_id → SubAgentLoop`）。
 - `_active_task`：活跃子代理的 asyncio.Task 映射。
-- `_waiting_queue`：达到并发上限后 FIFO 排队的子代理请求。
+- `_starting` / `_startup_tasks`：启动阶段的实例登记和可取消初始化任务，用于重复启动防护与失败回滚；不承担数量限制。
 - 事件驱动 waiter：子 Agent 完成后自动收集并推送结果。
 
 ### `SubAgentLoop`
@@ -106,7 +107,7 @@ graph TD
 
 ### `TaskAgentLoop`
 
-`subagent/taskloop.py` 实现一次性临时Agent：只接收单个 prompt，无系统提示词、无历史持久化，产生纯文本结果或达到工具循环上限后终止。并发槽位已满时直接失败，不进入子Agent等待队列。
+`subagent/taskloop.py` 实现一次性临时Agent：只接收单个 prompt，无系统提示词、无历史持久化，产生纯文本结果或达到工具循环上限后终止。临时Agent不受数量上限限制，也不进入等待队列。
 
 临时Agent的工具定义与执行期授权都使用同一交集：当前实例已加载工具集中的工具，且 `availability` 包含 `TASKAGENT`，同时 `danger_level` 为 `safe`。因此临时Agent不会进入父Agent或审批模型流程；陈旧或伪造的越权工具调用直接返回失败工具结果。`LoadToolset` 本身符合该交集时可以调用，但加载只改变已加载集合，不会授权非 `TASKAGENT` 或非 `safe` 工具。当前新实例默认从 `core` 开始；后续可按任务类型预加载工具集以减少工具循环轮次，但不得绕过权限交集。
 
@@ -126,9 +127,9 @@ graph TD
 
 ### 历史与临时Agent
 
-普通子Agent停止时默认保存到 `ws:tmp/<session_id>.es`。只有 `RunSubAgent` 显式传入 `.es` 的 `history_path` 才会加载历史；Agent 可以自行将临时历史移动到角色目录或其他 `ws:` 路径。显式历史加载发生在启动提交前，文件不存在、类型不匹配、版本不兼容或历史清洗失败都会拒绝启动；启动中的实例预留并发槽位，失败时回滚已登记状态。等待队列晋级失败会以终止错误事件发送到前端，并注入父Agent消息循环。
+普通子Agent停止时默认保存到 `ws:tmp/<session_id>.es`。只有 `RunSubAgent` 显式传入 `.es` 的 `history_path` 才会加载历史；Agent 可以自行将临时历史移动到角色目录或其他 `ws:` 路径。显式历史加载发生在启动提交前，文件不存在、类型不匹配、版本不兼容或历史清洗失败都会拒绝启动；启动状态异常时回滚已登记状态。
 
-`TaskAgent` 使用调用时活动 LLM Profile 的非持久化快照，不经过角色档案解析、等待队列，也不保存历史。临时Agent正常完成后会释放活跃槽位并继续晋级等待队列。
+`TaskAgent` 使用调用时活动 LLM Profile 的非持久化快照，不经过角色档案解析、等待队列，也不保存历史。临时Agent正常完成后释放自身运行资源。
 
 ### `profile_builder`
 

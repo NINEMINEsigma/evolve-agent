@@ -143,6 +143,8 @@ frontend/
 
 ### 面板
 
+子会话状态与后端统一为 `running` / `completed` / `terminated`。数量限制移除后不再保留旧 `waiting` 排队状态、标签或样式；输入栏只将 `running` 且可交互的子会话列为消息目标。此状态保存在页面内存并通过 WebSocket/快照同步，不涉及持久化迁移。
+
 | 组件 | 职责 |
 |---|---|
 | `ClipboardPanel.tsx` | 剪贴板展示面板 |

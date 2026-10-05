@@ -105,8 +105,6 @@ classDiagram
     class SubAgentLaunchResult {
         +success
         +session_id
-        +waiting
-        +queue_position
         +error
     }
 
@@ -131,8 +129,6 @@ classDiagram
         +success
         +session_id
         +session_path
-        +promoted
-        +note
         +error
     }
 
@@ -423,7 +419,6 @@ classDiagram
         #_agent_loop
         #_active
         #_active_task
-        #_waiting_queue
         #_subagent_names
         #_starting
         #_startup_tasks
@@ -440,7 +435,6 @@ classDiagram
         #_drain_outbox()
         #_push_subagent_ws()
         #_start_subagent()
-        #_activate_next()
         #_cycle_loop()
         #_collect_and_inject()
     }
@@ -872,7 +866,7 @@ classDiagram
 | `_session_rotated_notify` | `LoopSessionManager` | `dict[str, str]` | session 旋转通知 |
 | `_agent_loop` | `_OrchestratorContext` | `ParentAgentLoop` | 访问父 loop 的 `current_character_agent` 等 |
 | `_active` / `_active_task` | `_OrchestratorContext` | `dict` | 管理已提交的 SubAgentLoop 实例及其运行任务 |
-| `_starting` / `_startup_tasks` | `_OrchestratorContext` | `dict` | 预留启动中的子Agent并跟踪可取消的初始化任务；用于并发上限、重复启动防护和失败回滚 |
+| `_starting` / `_startup_tasks` | `_OrchestratorContext` | `dict` | 登记启动中的子Agent并跟踪可取消的初始化任务；用于重复启动防护和失败回滚，不限制数量 |
 | `_loops` | `SessionManager` | `dict[str, IMainSessionLoop]` | 管理 loop 映射 |
 | `_deleting_sessions` | `SessionManager` | `set[str]` | 正在永久删除的主会话 ID；Gateway 在持久化移除完成前据此拒绝恢复连接 |
 | `_deleting_sessions_lock` | `SessionManager` | `threading.Lock` | 删除中集合的检查并添加、查询和移除同步边界 |
@@ -1043,6 +1037,10 @@ classDiagram
 ---
 
 ## 关键设计变更记录
+
+### 子Agent数量限制与旧排队协议移除
+
+普通子Agent和临时Agent直接进入启动流程，不再维护数量上限或等待队列；启动登记、重复角色防护、失败回滚及任务清理保持不变。移除非持久化编排响应中的 `waiting`、`queue_position`、`promoted` 和停止结果中仅用于排队提示的 `note`，删除 `SubAgentPromotion` 及其导出。子会话状态统一为 `running` / `completed` / `terminated`，前后端同步移除旧 `waiting` 状态，不保留兼容字段；History 持久化结构不变。
 
 ### system 角色用户消息前端显示偏好
 

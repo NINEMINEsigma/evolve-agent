@@ -223,7 +223,7 @@ export default function InputBar({
     setRecordingActive(isRecording);
   }, []);
   const activeSubagents = Object.values(subagentSessions).filter(
-    (session) => (session.status === "running" || session.status === "waiting") && session.interactive !== false,
+    (session) => session.status === "running" && session.interactive !== false,
   );
   const hasSubagents = activeSubagents.length > 0;
 

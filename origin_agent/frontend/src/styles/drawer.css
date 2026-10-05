@@ -569,10 +569,6 @@
   background: var(--accent);
 }
 
-.subagent-tab-status.subagent-status-waiting {
-  background: var(--status-warning);
-}
-
 .subagent-tab-status.subagent-status-completed {
   background: var(--multi-bright);
 }

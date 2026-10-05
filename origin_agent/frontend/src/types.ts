@@ -517,7 +517,7 @@ export interface SubagentMessage {
 export interface SubagentSession {
   session_id: string;
   name: string;
-  status: "running" | "waiting" | "completed" | "terminated";
+  status: "running" | "completed" | "terminated";
   feedback: SubagentMessage[];
   pending_approvals: PendingApproval[];
   interactive?: boolean;

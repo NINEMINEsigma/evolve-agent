@@ -175,7 +175,6 @@ from .llm import (
 from .agent import MAX_TOOL_TURNS
 from .subagent import (
     SUBAGENT_NAME_PATTERN,
-    SUBAGENT_MAX_ACTIVE,
 )
 from .character import (
     CHARACTERS_DIR_NAME,
@@ -384,7 +383,6 @@ __all__ = [
     "LOADED_TOOLSETS_FILENAME",
     "MAX_TOOL_TURNS",
     "SUBAGENT_NAME_PATTERN",
-    "SUBAGENT_MAX_ACTIVE",
     "CHARACTERS_DIR_NAME",
     "CHARACTER_ROLEPLAY_DIR_NAME",
     "CHARACTER_TASK_DIR_NAME",

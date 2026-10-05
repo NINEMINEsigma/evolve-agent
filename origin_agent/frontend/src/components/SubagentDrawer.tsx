@@ -15,7 +15,6 @@ interface SubagentDrawerProps {
 
 const STATUS_LABEL: Record<SubagentSession["status"], string> = {
   running: "运行中",
-  waiting: "等待",
   completed: "已完成",
   terminated: "已终止",
 };

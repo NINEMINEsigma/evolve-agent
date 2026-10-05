@@ -10,7 +10,6 @@ class SubAgentStatus(str, Enum):
     """子Agent及临时Agent的运行状态。"""
 
     running = "running"
-    waiting = "waiting"
     completed = "completed"
     terminated = "terminated"
 
@@ -43,20 +42,11 @@ class SubAgentApprovalDecisionResult(BaseModel):
     reason: str | None = None
 
 
-class SubAgentPromotion(BaseModel):
-    """从等待队列晋升为活跃状态的子Agent。"""
-
-    session_id: str
-    subagent_name: str
-
-
 class SubAgentLaunchResult(BaseModel):
     """启动普通子Agent或临时Agent的结果。"""
 
     success: bool
     session_id: str | None = None
-    waiting: bool = False
-    queue_position: int | None = None
     error: str | None = None
 
 
@@ -87,8 +77,6 @@ class SubAgentStopResult(BaseModel):
     success: bool
     session_id: str
     session_path: str | None = None
-    promoted: list[SubAgentPromotion] = Field(default_factory=list)
-    note: str | None = None
     error: str | None = None
 
 

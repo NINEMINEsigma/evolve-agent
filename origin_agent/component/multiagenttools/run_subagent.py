@@ -92,10 +92,10 @@ registry.register(
         # 每次启动都会重新读取角色档案和当前引用的 LLM Profile，不需要显式注册。
         # initial_prompt 是发送给子Agent的第一条消息。
         # 不传 history_path 时不继承历史；传入时必须是 .es easysave 历史逻辑路径。
-        # 活跃数量达到上限时进入 FIFO 等待队列，同一主会话下同一角色不能重复运行。
+        # 同一主会话下同一角色不能重复运行。
         #
         # ## 返回
-        # {"success": true, "session_id": "...", "waiting": false}
+        # {"success": true, "session_id": "..."}
         #
         # ## 何时使用
         # - 启动 roleplay 或 task 角色执行任务。
@@ -115,11 +115,11 @@ Each call creates a new sub-agent session from the current character files and c
 
 `initial_prompt` is the first message sent to the sub-agent. `history_path` is optional. If omitted, no history is inherited. If provided, it must be a sandbox logical path to an easysave `.es` history file, such as `ws:tmp/<session_id>.es`.
 
-The sub-agent can use the tools available to the SUBAGENT scope. If the active sub-agent limit is reached, the session enters the FIFO waiting queue. The same character cannot have two active or queued sessions under one parent session.
+The sub-agent can use the tools available to the SUBAGENT scope. The same character cannot have two active sessions under one parent session.
 
 ## Returns
 ```json
-{"success": true, "session_id": "...", "waiting": false}
+{"success": true, "session_id": "..."}
 ```
 
 ## When to Use

@@ -72,11 +72,11 @@ The task agent can only use tools from its loaded toolsets whose availability in
 The result is delivered as a [subagent-result] message when the task completes. Do not poll or interact with task agents. To terminate one early, use StopTaskAgent with the returned session_id.
 
 ## Effect
-Creates a brand-new task agent session that executes the given prompt asynchronously. The task agent terminates automatically when the LLM produces a plain text reply with no tool calls. There is no registration, persistence, or history saving. If the active sub-agent limit is reached, the call fails.
+Creates a brand-new task agent session that executes the given prompt asynchronously. The task agent terminates automatically when the LLM produces a plain text reply with no tool calls. There is no registration, persistence, or history saving.
 
 ## Returns
 ```json
-{"success": true, "session_id": "...", "waiting": false}
+{"success": true, "session_id": "..."}
 ```
 On failure:
 ```json

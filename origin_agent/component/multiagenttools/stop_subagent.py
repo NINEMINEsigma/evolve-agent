@@ -2,7 +2,7 @@
 
 模块导入时通过 ``registry.register()`` 注册 ``StopSubAgent`` 工具。
 父 Agent 通过此工具强制终止指定子 Agent 会话，
-落盘完整会话历史，并可能激活等待队列中的下一个子 Agent。
+落盘完整会话历史。
 """
 
 from __future__ import annotations
@@ -50,27 +50,22 @@ registry.register(
         # 保存完整的 easysave `.es` 会话历史，返回默认临时路径 `ws:tmp/<session_id>.es`。
         # 每次调用只能停止一个子 Agent。
         # 已经完成的子 Agent 不能再次停止。
-        # 处于排队状态（尚未活跃）的子 Agent 会被移除，且不保存历史。
-        # 如果等待队列非空，当前子 Agent 停止后会自动激活下一个排队的子 Agent。
         # 返回的历史路径指向临时的 easysave `.es` 文件。
         # 如需长期保留，使用 Copy 或 Move 将 `ws:tmp/<session_id>.es` 移动到用户指定的角色目录或其他 `ws:` 路径。
         #
         # ## 返回
         # ```json
-        # {"success": true, "session_id": "...", "history_path": "...", "message": "..."}
+        # {"success": true, "session_id": "...", "session_path": "ws:tmp/<session_id>.es"}
         # ```
         #
         # ## 何时使用
         # - 子 Agent 任务完成或需要提前终止时。
         # - 需要保存会话历史以便后续通过 history_path 恢复时。
-        # - 需要释放活跃子 Agent 槽位以让队列中的子 Agent 运行时。
         #
         # ## 副作用/注意
         # - 强制终止会立即停止子 Agent 的执行。
         # - 活跃会话的历史被持久化到 `ws:tmp/<session_id>.es` easysave 文件。
         # - 自动保存到 `ws:tmp/<session_id>.es`，如需长期保留可自行使用 Copy 或 Move 移动。
-        # - 队列中的会话被移除且不留历史。
-        # - 停止后会自动激活下一个排队会话（如果有）。
         "description": """Forcefully terminate a sub-agent session.
 
 ## Prerequisites
@@ -80,27 +75,23 @@ You must know the session_id of the sub-agent to stop. Obtain it from the sub-ag
 Stops the sub-agent session identified by session_id and persists the complete session history as an easysave `.es` file at temporary path `ws:tmp/<session_id>.es`.
 Only one sub-agent can be stopped per call.
 An already-completed sub-agent cannot be stopped again.
-Queued (not yet active) sub-agents are removed without saving history.
-If the waiting queue is non-empty, the next queued sub-agent is automatically activated after this one stops.
 
 The returned history path is temporary. Use Copy or Move if you want to retain the `.es` file under a character directory or another `ws:` path.
 
 ## Returns
 ```json
-{"success": true, "session_id": "...", "history_path": "...", "message": "..."}
+{"success": true, "session_id": "...", "session_path": "ws:tmp/<session_id>.es"}
 ```
 
 ## When to Use
 - Stop a sub-agent after its task completes or when it must be terminated early.
 - Save session history so it can be resumed later via history_path.
-- Free an active sub-agent slot so a queued session can run.
 
 ## Side Effects / Notes
 - Termination immediately halts the sub-agent's execution.
 - Active session history is persisted to `ws:tmp/<session_id>.es` in easysave format.
-- The auto-saved history file is at a temporary location that may be overwritten or cleaned up. After receiving history_path, you must ask the user whether to copy or move it to a safer location for long-term retention.
-- Queued sessions are removed without leaving history.
-- The next queued session is automatically activated if one exists.""",
+- The auto-saved history file is at a temporary location that may be overwritten or cleaned up. After receiving session_path, you must ask the user whether to copy or move it to a safer location for long-term retention.
+- Termination is irreversible.""",
         "parameters": {
             "type": "object",
             "properties": {

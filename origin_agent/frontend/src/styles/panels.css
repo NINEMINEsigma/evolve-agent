@@ -381,11 +381,6 @@
   color: var(--accent);
 }
 
-.subagent-status-waiting {
-  background: rgba(255, 204, 0, 0.15);
-  color: var(--status-warning);
-}
-
 .subagent-status-completed {
   background: rgba(var(--multi-bright-rgb), 0.15);
   color: var(--multi-bright);

@@ -106,7 +106,7 @@ component/
 
 ### 多代理工具（`component/multiagenttools/`）
 
-详见 `../subagent/DEV-README.md`。
+详见 `../subagent/DEV-README.md`。子Agent和临时Agent没有应用层数量上限；启动成功返回 `success` 与 `session_id`，不再返回旧排队字段。停止普通子Agent时通过 `session_path` 返回历史路径；停止响应不含旧队列晋升记录或排队提示。
 
 | 工具文件 | 主要工具 | 用途 |
 |----------|----------|------|

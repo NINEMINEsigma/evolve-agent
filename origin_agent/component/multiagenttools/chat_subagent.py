@@ -56,8 +56,7 @@ registry.register(
         # 向正在运行的子 Agent 会话发送一条消息。
         #
         # ## 前置条件
-        # 目标子 Agent 必须已经处于活跃运行状态（waiting=false）。
-        # 不能用于尚未从 FIFO 队列中激活的子 Agent。
+        # 目标子 Agent 必须已经处于活跃运行状态。
         # 在发送新消息前，应当已经收到子 Agent 的最新一轮回复；避免在上一轮工具调用链尚未结束时连续发送消息。
         #
         # ## 调用效果
@@ -78,13 +77,11 @@ registry.register(
         #
         # ## 副作用/注意
         # - 消息不会立即打断子 Agent 当前的工具调用链，而是排队等待当前链结束后注入。
-        # - 对排队中的子 Agent 调用会失败。
         # - 频繁发送消息可能让子 Agent 上下文变得混乱；应等待子 Agent 回复后再决定是否需要继续发送。
         "description": """Send a message to an active running sub-agent session.
 
 ## Prerequisites
-The target sub-agent must already be active (waiting=false).
-Cannot be used on sub-agents that are still in the FIFO queue and not yet activated.
+The target sub-agent must already be active.
 You MUST wait for the [subagent-result] message from the sub-agent before calling this tool.
 Before sending a new message, you should have received the sub-agent's latest round of response. Avoid calling chat_subagent repeatedly while the previous tool-call chain is still in progress.
 **NEVER use chat_subagent to check whether the sub-agent is alive, to ask "are you there", or to urge the sub-agent.** Such calls will be rejected by the system.
@@ -116,7 +113,6 @@ If the sub-agent is still generating its current response, the call fails with:
 
 ## Side Effects / Notes
 - The message does not interrupt the sub-agent's current tool-call chain; it is queued and injected after the chain ends.
-- Calling this on a queued (not yet active) sub-agent fails.
 - Calling this before the sub-agent has finished its current round fails.
 - Frequent messages may clutter the sub-agent's context; wait for the sub-agent's response before deciding whether to send another message.""",
         "parameters": {

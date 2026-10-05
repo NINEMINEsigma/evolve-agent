@@ -132,7 +132,7 @@ Evolve Agent 内置两套多代理运行时：
 ### 子代理模式（SubAgent）
 
 - `subagent/orchestrator.py` 的 `SubAgentOrchestrator` 按父会话维护子代理上下文。
-- 每个子代理是独立的 `SubAgentLoop`（继承 `BasePrivateChatAgentLoop`），拥有独立的 LLM 配置与历史；启动过程预留活跃槽位，显式历史加载失败会拒绝启动并回滚，不会静默从空历史继续。
+- 每个子代理是独立的 `SubAgentLoop`（继承 `BasePrivateChatAgentLoop`），拥有独立的 LLM 配置与历史；启动过程登记启动状态，不设置活跃数量上限，显式历史加载失败会拒绝启动并回滚，不会静默从空历史继续。
 - `subagent/profile.py::CharacterProfileResolver` 每次动态扫描 `ws:characters/roleplay/` 与 `ws:characters/task/`，从 `profile.md.meta` 的 `[llm_profile]` 解析当前 LLM Profile、读取 `[description]` 简介，并按 `[profile]` 的多行逻辑路径加载多个独立系统提示词；角色名称跨类型全局唯一。主Agent系统提示词每次构建时注入当前可运行角色的名称、类型和简介。
 - `component/multiagenttools/` 提供动态发现、启动、对话、审批、停止和列表工具，不再提供显式注册工具。
 - 子代理的工具可见性由 `availability` 位掩码控制：通常只能看到标记为 `SUBAGENT` 或 `EVERY` 的工具。
@@ -143,7 +143,7 @@ Evolve Agent 内置两套多代理运行时：
 ### 临时Agent（TaskAgent）
 
 - `RunTaskAgent` 只接收单个 prompt，并在调用发生时取得父主会话活动 LLM Profile的非持久化深快照；后续 Profile切换或编辑不影响已经启动的临时Agent。
-- 临时Agent无系统提示词、无历史持久化，产生纯文本结果后立即终止；并发槽位已满时直接失败，不进入等待队列。
+- 临时Agent无系统提示词、无历史持久化，产生纯文本结果后立即终止；不设置临时Agent数量上限。
 - 工具范围严格为“已加载工具集 ∩ `TASKAGENT` 可用范围 ∩ `safe` 危险等级”，定义生成和执行期均校验，因此不会进入审批流程。
 - 初始工具集状态默认从 `core` 开始；符合相同权限交集的 `LoadToolset` 可以加载其他工具集，但加载本身不扩大授权范围。
 
