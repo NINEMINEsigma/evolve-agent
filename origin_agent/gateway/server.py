@@ -22,6 +22,7 @@ from typing import * # type: ignore
 from urllib.parse import parse_qs, quote
 
 import uvicorn
+from pydantic import BaseModel, ValidationError
 from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect, WebSocketException
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
@@ -64,6 +65,15 @@ from entity.constant import (
 from entity.puretype import (
     SessionStatus,
     ClientInfo,
+    SessionTagsUpdateRequest,
+    SessionTitleUpdateRequest,
+    SessionMessageEditRequest,
+    SessionRegenerateRequest,
+    SessionMergeRequest,
+    ConfirmResponseRequest,
+    AskResponseRequest,
+    DynamicEndpointRequest,
+    AgentspaceOperationRequest,
     MessageContent,
     LLMProfilePayload,
     LLMProfileUpdateRequest,
@@ -260,6 +270,53 @@ def _flush_pending_changes() -> str | None:
 
 _NO_CACHE: dict[str, str] = {"Cache-Control": "no-cache, no-store, must-revalidate", "Pragma": "no-cache"}
 
+TRequest = TypeVar("TRequest", bound=BaseModel)
+
+
+async def _parse_request_model(
+    req: Request,
+    model_type: type[TRequest],
+    *,
+    default_on_json_error: bool = False,
+) -> TRequest:
+    """在 HTTP 入站边界把 JSON 解析为稳定请求模型。"""
+    try:
+        payload = await req.json()
+    except Exception as exc:
+        if default_on_json_error:
+            return model_type()
+        raise HTTPException(status_code=400, detail="Invalid JSON body") from exc
+    try:
+        return model_type.model_validate(payload)
+    except ValidationError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+async def _parse_dynamic_endpoint_request(
+    req: Request,
+) -> tuple[DynamicEndpointRequest | None, str | None]:
+    """解析动态端点请求，并把 block 校验错误映射为既有 400 文本。"""
+    try:
+        payload = await req.json()
+    except Exception:
+        return None, "invalid JSON body"
+    try:
+        request = DynamicEndpointRequest.model_validate(payload)
+    except ValidationError:
+        raw_content = payload.get("content") if isinstance(payload, dict) else None
+        if isinstance(raw_content, list):
+            from entry.agent_support.multimodal import validate_content_blocks
+            error = validate_content_blocks(raw_content)
+            return None, error or "invalid content blocks"
+        return None, "'content' must be a string or an array of content blocks"
+    if isinstance(request.content, list):
+        from entry.agent_support.multimodal import validate_content_blocks
+        error = validate_content_blocks(payload.get("content", []))
+        if error is not None:
+            return None, error
+    return request, None
+
+
 # 文本类 MIME 需要追加 charset=utf-8
 _TEXT_MIME_PREFIXES = ("text/", "application/json", "application/xml", "application/javascript")
 _TEXT_MIME_EXTS = {".html", ".htm", ".md", ".txt", ".log", ".json", ".csv", ".py", ".js", ".css",
@@ -315,16 +372,15 @@ async def list_tags():
 @app.put("/api/sessions/{session_id}/tags")
 async def update_session_tags(session_id: str, req: Request):
     """更新 session 的标签列表。"""
-    body: dict = {}
     try:
-        body = await req.json()
-    except Exception:
-        logger.warning("Failed to parse tags request body for session=%s", session_id, exc_info=True)
-        body = {}
-    raw_tags = body.get("tags", [])
-    if not isinstance(raw_tags, list):
+        request = await _parse_request_model(
+            req,
+            SessionTagsUpdateRequest,
+            default_on_json_error=True,
+        )
+    except HTTPException:
         return {"updated": False, "error": "tags must be an array", "session_id": session_id}
-    tags: list[str] = [str(t).strip() for t in raw_tags]
+    tags: list[str] = [str(tag).strip() for tag in request.tags]
     valid = _get_sm().set_session_tags(session_id, tags)
     logger.info("Update tags | session=%s tags=%s", session_id, valid)
     return {"updated": True, "session_id": session_id, "tags": valid}
@@ -442,17 +498,16 @@ async def get_session_subagents(session_id: str):
 @app.post("/api/confirm/{request_id}")
 async def http_confirm(request_id: str, req: Request):
     """通过 HTTP 处理确认响应（独立于 WebSocket 连接状态）。"""
-    body: dict = {}
-    try:
-        body = await req.json()
-    except Exception:
-        logger.warning("Failed to parse confirm request body for request_id=%s", request_id, exc_info=True)
-        body = {}
-    action: str = str(body.get("action", "deny"))
+    request = await _parse_request_model(
+        req,
+        ConfirmResponseRequest,
+        default_on_json_error=True,
+    )
+    action: str = request.action
     if action not in ("allow_once", "allow_always", "deny"):
         action = "deny"
-    deny_reason: str | None = str(body.get("deny_reason", "")) or None
-    denied_by: str = str(body.get("denied_by", "user"))
+    deny_reason: str | None = request.deny_reason or None
+    denied_by: str = request.denied_by
     if action != "deny":
         deny_reason = None
     from system.application import Application
@@ -466,20 +521,22 @@ async def http_confirm(request_id: str, req: Request):
 @app.post("/api/ask/{request_id}")
 async def http_ask(request_id: str, req: Request):
     """通过 HTTP 处理提问响应（独立于 WebSocket 连接状态）。"""
-    body: dict = {}
-    try:
-        body = await req.json()
-    except Exception:
-        logger.warning("Failed to parse ask request body for request_id=%s", request_id, exc_info=True)
-        body = {}
-    option: str | None = str(body.get("option")) if body.get("option") is not None else None
-    custom_text: str | None = str(body.get("custom_text")) if body.get("custom_text") is not None else None
+    request = await _parse_request_model(
+        req,
+        AskResponseRequest,
+        default_on_json_error=True,
+    )
     from system.application import Application
     sink = Application.current().frontend_sink
     if sink:
-        sink.resolve_ask(request_id, option=option, custom_text=custom_text)
-    logger.info("HTTP ask response | request_id=%s option=%s", request_id, option)
-    return {"resolved": True, "request_id": request_id, "option": option, "custom_text": custom_text}
+        sink.resolve_ask(request_id, option=request.option, custom_text=request.custom_text)
+    logger.info("HTTP ask response | request_id=%s option=%s", request_id, request.option)
+    return {
+        "resolved": True,
+        "request_id": request_id,
+        "option": request.option,
+        "custom_text": request.custom_text,
+    }
 
 
 @app.post("/api/interrupt/{session_id}")
@@ -649,14 +706,15 @@ async def get_session_history_resources(session_id: str):
 async def update_session_message(session_id: str, message_index: int, req: Request):
     """编辑指定 session 中一条历史消息的正文或 visible_characters，不触发重新生成。"""
     logger.info("Edit message request | session=%s index=%d", session_id, message_index)
-    body: dict = {}
-    try:
-        body = await req.json()
-    except Exception:
-        logger.warning("Failed to parse edit message request body for session=%s", session_id, exc_info=True)
-        body = {}
-    content = body.get("content")
-    visible_characters = body.get("visible_characters")
+    request = await _parse_request_model(
+        req,
+        SessionMessageEditRequest,
+        default_on_json_error=True,
+    )
+    content = request.content
+    if isinstance(content, list):
+        content = [block.model_dump(mode="json") for block in content]
+    visible_characters = request.visible_characters
     info = _get_sm().get(session_id)
     if info and info.status == SessionStatus.archived:
         result = SessionMessageEditResult(
@@ -845,32 +903,25 @@ async def regenerate_response(session_id: str, req: Request):
             status_code=409,
         )
 
-    # 解析请求 body。
+    # 解析请求模型，保留该端点原有的 400 错误结构。
     try:
-        body: dict = await req.json()
-    except Exception:
+        request = await _parse_request_model(req, SessionRegenerateRequest)
+    except HTTPException as exc:
+        detail = str(exc.detail)
+        if "message_index" in detail:
+            error = "invalid message_index"
+        elif "llm_profile_name" in detail:
+            error = "invalid llm_profile_name"
+        else:
+            error = "invalid JSON body"
         return HTMLResponse(
-            json.dumps({"regenerate": False, "error": "invalid JSON body"}, ensure_ascii=False),
+            json.dumps({"regenerate": False, "error": error}, ensure_ascii=False),
             media_type="application/json",
             status_code=400,
         )
 
-    # 解析 message_index（可选，前端携带所点消息的索引）
-    message_index = body.get("message_index")
-    if message_index is not None and not isinstance(message_index, int):
-        return HTMLResponse(
-            json.dumps({"regenerate": False, "error": "invalid message_index"}, ensure_ascii=False),
-            media_type="application/json",
-            status_code=400,
-        )
-
-    profile_name = body.get("llm_profile_name")
-    if not isinstance(profile_name, str):
-        return HTMLResponse(
-            json.dumps({"regenerate": False, "error": "invalid llm_profile_name"}, ensure_ascii=False),
-            media_type="application/json",
-            status_code=400,
-        )
+    message_index = request.message_index
+    profile_name = request.llm_profile_name
     try:
         from system.application import Application
         application = Application.current()
@@ -1028,13 +1079,12 @@ async def resume_session_endpoint(session_id: str):
 @app.put("/api/sessions/{session_id}/title")
 async def update_session_title(session_id: str, req: Request):
     """手动重命名 session。"""
-    title: str = ""
-    try:
-        body = await req.json()
-        title = str(body.get("title", "")).strip()[:50]
-    except Exception:
-        logger.warning("Failed to parse title request body for session=%s", session_id, exc_info=True)
-        title = ""
+    request = await _parse_request_model(
+        req,
+        SessionTitleUpdateRequest,
+        default_on_json_error=True,
+    )
+    title = request.title.strip()[:50]
     _get_sm().update_title(session_id, title)
     logger.info("Update title | session=%s title=%s", session_id, title)
     return {"updated": True, "session_id": session_id, "title": title}
@@ -1167,12 +1217,12 @@ async def merge_sessions_endpoint(req: Request):
 
     Body: {"sources": ["sid1", "sid2", ...]}
     """
-    body: dict = {}
-    try:
-        body = await req.json()
-    except Exception:
-        logger.warning("Failed to parse merge request body", exc_info=True)
-    sources: list[str] = body.get("sources", [])
+    request = await _parse_request_model(
+        req,
+        SessionMergeRequest,
+        default_on_json_error=True,
+    )
+    sources = request.sources
     logger.info("Merge sessions | sources=%s", sources)
     if not sources:
         return {"error": "sources array required", "merged": False}
@@ -1324,24 +1374,21 @@ async def dynamic_endpoint_handler(
             status_code=404,
         )
 
-    # 读取 POST body
-    body: dict = {}
-    try:
-        body = await req.json()
-    except Exception:
-        logger.warning(
-            "Failed to parse dynamic endpoint body | endpoint=%s", endpoint_name, exc_info=True,
-        )
+    request, request_error = await _parse_dynamic_endpoint_request(req)
+    if request_error is not None or request is None:
+        error_payload = {"error": request_error or "invalid JSON body"}
+        if request_error != "invalid JSON body":
+            error_payload["endpoint_name"] = endpoint_name
         return HTMLResponse(
-            json.dumps({"error": "invalid JSON body"}),
+            json.dumps(error_payload, ensure_ascii=False),
             media_type="application/json",
             status_code=400,
         )
 
-    message: str = str(body.get("message", ""))
+    message = request.message
 
     # 解析 content 字段：支持多模态有序混合内容（与聊天输入框格式一致）
-    raw_content = body.get("content")
+    raw_content = request.content
     payload: MessageContent
     used: str
 
@@ -1351,19 +1398,11 @@ async def dynamic_endpoint_handler(
             payload = f"[dynamic-endpoint] {endpoint_name}\n{message}"
             used = "message"
         else:
-            # 严格校验 block 数组
-            from entry.agent_support.multimodal import validate_content_blocks
-            err = validate_content_blocks(raw_content)
-            if err is not None:
-                return HTMLResponse(
-                    json.dumps({"error": err, "endpoint_name": endpoint_name}),
-                    media_type="application/json",
-                    status_code=400,
-                )
             # 前缀作为独立首个 text block，后接原始 blocks（保序）
-            payload = [{"type": "text", "text": f"[dynamic-endpoint] {endpoint_name}\n"}] + list(raw_content)
+            raw_blocks = [block.model_dump(mode="json") for block in raw_content]
+            payload = [{"type": "text", "text": f"[dynamic-endpoint] {endpoint_name}\n"}] + raw_blocks
             used = "content"
-            block_types = [b.get("type", "?") if isinstance(b, dict) else "?" for b in raw_content]
+            block_types = [block.type for block in raw_content]
             logger.info(
                 "Dynamic endpoint content blocks | endpoint=%s types=%s",
                 endpoint_name, block_types,
@@ -1376,16 +1415,10 @@ async def dynamic_endpoint_handler(
             # 空白字符串 → 回退 message 路径
             payload = f"[dynamic-endpoint] {endpoint_name}\n{message}"
             used = "message"
-    elif raw_content is None:
+    else:
         # 未提供 content → message 路径（watching service 等既有调用方）
         payload = f"[dynamic-endpoint] {endpoint_name}\n{message}"
         used = "message"
-    else:
-        return HTMLResponse(
-            json.dumps({"error": "'content' must be a string or an array of content blocks", "endpoint_name": endpoint_name}),
-            media_type="application/json",
-            status_code=400,
-        )
 
     loop = _get_loop(session_id)
     if loop is None:
@@ -1908,14 +1941,7 @@ async def put_approval_profile(request: Request):
     from system.application import Application
     from entity.puretype import ApprovalProfileUpdateRequest, ApprovalProfileMutationResponse
 
-    try:
-        body = await request.json()
-    except Exception:
-        raise HTTPException(status_code=400, detail="Invalid JSON body")
-    try:
-        update = ApprovalProfileUpdateRequest.model_validate(body)
-    except Exception as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
+    update = await _parse_request_model(req=request, model_type=ApprovalProfileUpdateRequest)
 
     app = Application.current()
     store = app.llm_profile_store
@@ -2138,15 +2164,6 @@ def _raise_agentspace_http(exc: Exception) -> NoReturn:
     raise HTTPException(status_code=status, detail=exc.as_detail())
 
 
-async def _request_operation_id(req: Request) -> str:
-    try:
-        body = await req.json()
-    except Exception:
-        return uuid.uuid4().hex
-    value = body.get("operation_id", "") if isinstance(body, dict) else ""
-    return str(value).strip() or uuid.uuid4().hex
-
-
 @app.get("/api/agentspace/list")
 async def agentspace_list(path: str = ""):
     try:
@@ -2245,7 +2262,12 @@ async def agentspace_trash_list():
 
 @app.post("/api/agentspace/trash/{entry_id}/restore")
 async def agentspace_trash_restore(entry_id: str, req: Request):
-    operation_id = await _request_operation_id(req)
+    operation_request = await _parse_request_model(
+        req,
+        AgentspaceOperationRequest,
+        default_on_json_error=True,
+    )
+    operation_id = operation_request.operation_id.strip() or uuid.uuid4().hex
     try:
         entry, restored_path = await asyncio.to_thread(
             _agentspace_service().restore_trash,
@@ -2263,7 +2285,12 @@ async def agentspace_trash_restore(entry_id: str, req: Request):
 
 @app.delete("/api/agentspace/trash/{entry_id}")
 async def agentspace_trash_purge(entry_id: str, req: Request):
-    operation_id = await _request_operation_id(req)
+    operation_request = await _parse_request_model(
+        req,
+        AgentspaceOperationRequest,
+        default_on_json_error=True,
+    )
+    operation_id = operation_request.operation_id.strip() or uuid.uuid4().hex
     try:
         await asyncio.to_thread(
             _agentspace_service().purge_trash,
@@ -2277,7 +2304,12 @@ async def agentspace_trash_purge(entry_id: str, req: Request):
 
 @app.delete("/api/agentspace/trash")
 async def agentspace_trash_empty(req: Request):
-    operation_id = await _request_operation_id(req)
+    operation_request = await _parse_request_model(
+        req,
+        AgentspaceOperationRequest,
+        default_on_json_error=True,
+    )
+    operation_id = operation_request.operation_id.strip() or uuid.uuid4().hex
     try:
         deleted, failures = await asyncio.to_thread(
             _agentspace_service().empty_trash,

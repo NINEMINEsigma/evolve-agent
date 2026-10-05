@@ -1005,6 +1005,11 @@ classDiagram
 
 | 类 | 定义文件 | 继承 | 说明 |
 |---|---|---|---|
+| `SessionTagsUpdateRequest` / `SessionTitleUpdateRequest` / `SessionMessageEditRequest` / `SessionRegenerateRequest` / `SessionMergeRequest` | `entity/puretype/session.py` | `BaseModel` | Gateway 会话 REST 入站请求模型；HTTP 边界解析后通过属性访问，保持既有默认值和错误语义 | 
+| `ConfirmResponseRequest` / `AskResponseRequest` | `entity/puretype/ws.py` | `BaseModel` | Gateway HTTP 交互响应请求模型；分别承载 confirm 和 ask 的稳定字段 | 
+| `DynamicEndpointRequest` | `entity/puretype/extools.py` | `BaseModel` | 动态端点 HTTP 入站请求；content 使用稳定多模态 block 联合类型 | 
+| `AgentspaceOperationRequest` | `entity/puretype/agentspace.py` | `BaseModel` | Agentspace 垃圾桶恢复、永久删除和清空请求中的 operation_id | 
+| `TextContentBlock` / `ImageContentBlock` / `AudioContentBlock` / `VideoContentBlock` | `entity/puretype/_base.py` | `BaseModel` | Gateway 入站多模态 content block；未知扩展字段保持兼容 | 
 | `SessionHistorySkeletonRow` / `SessionHistorySkeletonResponse` | `entity/puretype/session.py` | `BaseModel` | 前端全历史骨架及后缀响应，不含正文或富媒体 |
 | `SessionHistoryContentRow` / `SessionHistoryPageResponse` | `entity/puretype/session.py` | `BaseModel` | 按 History 索引范围返回的完整前端投影行 |
 | `SessionHistoryImageResource` / `SessionHistoryDownloadResource` / `SessionHistoryResourcesResponse` | `entity/puretype/session.py` | `BaseModel` | 完整 History 的图片与下载资源索引 |

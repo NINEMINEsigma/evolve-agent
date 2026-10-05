@@ -1,8 +1,8 @@
 from enum import Enum
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 from typing import Any, Literal
 
-from ._base import MessageContent
+from ._base import MessageContent, TypedMessageContent
 from .llm import MessageMetrics
 from .session_visual import SessionVisualResources
 
@@ -23,6 +23,48 @@ class SessionStatus(str, Enum):
     """会话生命周期状态。"""
     active = "active"
     archived = "archived"
+
+
+class SessionTagsUpdateRequest(BaseModel):
+    """会话标签更新请求。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    tags: list[str] = Field(default_factory=list)
+
+
+class SessionTitleUpdateRequest(BaseModel):
+    """会话标题更新请求。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    title: str = ""
+
+
+class SessionMessageEditRequest(BaseModel):
+    """历史消息编辑请求。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    content: TypedMessageContent | None = None
+    visible_characters: list[str] | None = None
+
+
+class SessionRegenerateRequest(BaseModel):
+    """重新生成请求。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    message_index: int | None = None
+    llm_profile_name: str
+
+
+class SessionMergeRequest(BaseModel):
+    """会话合并或单源分支请求。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    sources: list[str] = Field(default_factory=list)
 
 
 class MainSessionActivitySource(str, Enum):

@@ -5,6 +5,25 @@ from typing import Annotated, Any, Literal
 from .agentspace import AgentspaceEvent
 from .llm import MessageMetrics, ToolCallDelta, ToolCallRequest
 
+class ConfirmResponseRequest(BaseModel):
+    """HTTP 审批确认响应请求。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    action: str = "deny"
+    deny_reason: str | None = None
+    denied_by: str = "user"
+
+
+class AskResponseRequest(BaseModel):
+    """HTTP Ask 回答请求。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    option: str | None = None
+    custom_text: str | None = None
+
+
 # ---------------------------------------------------------------------------
 # WebSocket Message Types
 # ---------------------------------------------------------------------------

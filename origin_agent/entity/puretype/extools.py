@@ -1,4 +1,6 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
+
+from ._base import TypedMessageContent
 
 # ---------------------------------------------------------------------------
 # Cron Types
@@ -18,9 +20,14 @@ class CronTaskInfo(BaseModel):
     log_path: str = ""
 
 
-# ---------------------------------------------------------------------------
-# Dynamic Endpoint Types
-# ---------------------------------------------------------------------------
+class DynamicEndpointRequest(BaseModel):
+    """动态端点 HTTP 回调请求。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    message: str = ""
+    content: TypedMessageContent | None = None
+
 
 class DynamicEndpointInfo(BaseModel):
     """动态 HTTP 端点的注册记录（供内存注册表与磁盘持久化共用）。"""

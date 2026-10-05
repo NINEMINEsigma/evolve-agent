@@ -133,6 +133,12 @@ WS /ws/chat?resume=<sid>
 
 `processing` 表示 Loop存在活动快照或已经进入处理状态；它覆盖队列排队窗口。WebSocket 的 `history_sync.processing` 保留兼容用途并使用相同活跃语义，首字前精细状态由前端活动状态轮询取得。
 
+## HTTP 请求类型边界
+
+Gateway REST 的 JSON 请求体在进入业务逻辑前统一解析为 `entity.puretype` 中的 Pydantic `BaseModel`。会话操作请求位于 `session.py`，confirm/ask 入站请求位于 `ws.py`，动态端点请求位于 `extools.py`，Agentspace 垃圾桶操作请求位于 `agentspace.py`。`server.py` 的统一解析边界负责保留既有 400、默认值和业务错误响应，业务代码不再通过裸请求字典读取字段。
+
+动态端点的 `content` 使用稳定的多模态 content block 联合类型；content block 对未知扩展字段保持兼容，Gateway 在进入既有消息队列前转换为内部 `MessageContent` 结构。该转换是传输边界适配，不改变 History 或 LLM wire format。前端请求字段和 JSON wire format 保持不变。
+
 ## REST API
 
 ### 会话管理

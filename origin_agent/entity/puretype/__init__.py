@@ -2,7 +2,7 @@
 puretype 包 — 只含有不包含任何方法定义的类型定义。
 
 原始单文件 puretype.py 拆分为以下子模块：
-    _base       : MessageContent, Role, ToolDangerLevel, ToolAvailability
+    _base       : MessageContent, TypedMessageContent, ContentBlock, content block models, Role, ToolDangerLevel, ToolAvailability
     approval    : ApprovalMode, SessionApprovalModeState, ApprovalPolicy, ApprovalOutcome,
                   ApprovalResult, ApprovalProfileUpdateRequest, ApprovalProfileState,
                   ApprovalProfileMutationResponse, ToolCallMeta, ToolAllowlistEntry
@@ -15,6 +15,8 @@ puretype 包 — 只含有不包含任何方法定义的类型定义。
                   LLMProfileDeleteResult, ModalityCapability
     skills      : SkillPayload, SkillInfo
     session     : Loop, SessionStatus, LoopMeta, SessionInfo, SessionTerminationResult,
+                  SessionTagsUpdateRequest, SessionTitleUpdateRequest, SessionMessageEditRequest,
+                  SessionRegenerateRequest, SessionMergeRequest,
                   SessionMessageEditResult, SessionMessageDeletionResult,
                   SessionRegenerateResult, SessionToolResources,
                   SessionRuntimeResourceTransferResult, SessionMergeResult,
@@ -24,13 +26,14 @@ puretype 包 — 只含有不包含任何方法定义的类型定义。
                   SubAgentStopResult, SubAgentSnapshot, SubAgentSnapshotResponse,
                   SubAgentUpdate
     agent       : AgentConfig
-    ws          : MessageType, Message, StreamDeltaEvent, StreamDoneEvent, StreamEvent,
+    ws          : MessageType, Message, ConfirmResponseRequest, AskResponseRequest,
+                  StreamDeltaEvent, StreamDoneEvent, StreamEvent,
                   HistoryRowLink, ClientDiagnosticKind, ClientDiagnosticPhase, ClientDiagnostic
     lsp         : LSPState, LSPDiagnostic, LSPReference, LSPDefinition, LSPSymbol
     runtime     : SystemInfo, ClientInfo, ProcessLineStreamResult
     shell       : ShellInfo, ShellOutputSlice
     sandbox     : DynamicSandboxSpace, DynamicSandboxSpaceData
-    extools     : CronTaskInfo, DynamicEndpointInfo
+    extools     : CronTaskInfo, DynamicEndpointInfo, DynamicEndpointRequest
     agentspace  : AgentspaceEntry/Event/FileSnapshot/Lock/Trash 与 REST 请求模型
 
 所有公共名称通过 __init__.py 再导出，保持 ``from entity.puretype import X`` 的向后兼容。
@@ -38,6 +41,15 @@ puretype 包 — 只含有不包含任何方法定义的类型定义。
 
 from ._base import (
     MessageContent,
+    TypedMessageContent,
+    ContentBlock,
+    TextContentBlock,
+    ImageURLContent,
+    ImageContentBlock,
+    AudioInputContent,
+    AudioContentBlock,
+    VideoURLContent,
+    VideoContentBlock,
     Role,
     ToolDangerLevel,
     ToolAvailability,
@@ -118,6 +130,11 @@ from .session import (
     LoopMeta,
     SessionInfo,
     SessionTerminationResult,
+    SessionTagsUpdateRequest,
+    SessionTitleUpdateRequest,
+    SessionMessageEditRequest,
+    SessionRegenerateRequest,
+    SessionMergeRequest,
     SessionMessageEditResult,
     SessionMessageDeletionResult,
     SessionRegenerateResult,
@@ -153,6 +170,8 @@ from .ws import (
     ClientDiagnosticKind,
     ClientDiagnosticPhase,
     ClientDiagnostic,
+    ConfirmResponseRequest,
+    AskResponseRequest,
 )
 from .lsp import (
     LSPState,
@@ -181,6 +200,7 @@ from .sandbox_spaces import (
 from .extools import (
     CronTaskInfo,
     DynamicEndpointInfo,
+    DynamicEndpointRequest,
 )
 from .agentspace import (
     AgentspaceEntryKind,
@@ -194,6 +214,7 @@ from .agentspace import (
     AgentspaceLockInfo,
     AgentspaceEvent,
     AgentspaceTrashEntry,
+    AgentspaceOperationRequest,
     AgentspaceWriteRequest,
     AgentspacePathRequest,
     AgentspaceRenameRequest,
@@ -207,6 +228,15 @@ __all__ = [
     "SessionVisualResources",
     # _base
     "MessageContent",
+    "TypedMessageContent",
+    "ContentBlock",
+    "TextContentBlock",
+    "ImageURLContent",
+    "ImageContentBlock",
+    "AudioInputContent",
+    "AudioContentBlock",
+    "VideoURLContent",
+    "VideoContentBlock",
     "Role",
     "ToolDangerLevel",
     "ToolAvailability",
@@ -272,6 +302,11 @@ __all__ = [
     "LoopMeta",
     "SessionInfo",
     "SessionTerminationResult",
+    "SessionTagsUpdateRequest",
+    "SessionTitleUpdateRequest",
+    "SessionMessageEditRequest",
+    "SessionRegenerateRequest",
+    "SessionMergeRequest",
     "SessionMessageEditResult",
     "SessionMessageDeletionResult",
     "SessionRegenerateResult",
@@ -302,6 +337,8 @@ __all__ = [
     "StreamDoneEvent",
     "StreamEvent",
     "HistoryRowLink",
+    "ConfirmResponseRequest",
+    "AskResponseRequest",
     # lsp
     "LSPState",
     "LSPDiagnostic",
@@ -323,6 +360,7 @@ __all__ = [
     # extools
     "CronTaskInfo",
     "DynamicEndpointInfo",
+    "DynamicEndpointRequest",
     # agentspace
     "AgentspaceEntryKind",
     "AgentspaceEventKind",
@@ -335,6 +373,7 @@ __all__ = [
     "AgentspaceLockInfo",
     "AgentspaceEvent",
     "AgentspaceTrashEntry",
+    "AgentspaceOperationRequest",
     "AgentspaceWriteRequest",
     "AgentspacePathRequest",
     "AgentspaceRenameRequest",

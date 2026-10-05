@@ -1,5 +1,7 @@
 from enum import Enum, IntFlag
-from typing import Any
+from typing import Annotated, Any, Literal, Union
+
+from pydantic import BaseModel, ConfigDict, Field
 
 # ---------------------------------------------------------------------------
 # Type Aliases
@@ -8,6 +10,67 @@ from typing import Any
 # 序列化后的消息内容——纯文本或多模态 blocks 列表
 # TODO: 存在一些误用
 MessageContent = str | list[dict[str, Any]]
+
+
+# HTTP 入站边界使用的稳定多模态内容类型。内部消息链仍使用上面的
+# MessageContent，避免把传输 DTO 与历史/LLM wire format 混为一体。
+class TextContentBlock(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    type: Literal["text"] = "text"
+    text: str
+
+
+class ImageURLContent(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    url: str
+
+
+class ImageContentBlock(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    type: Literal["image_url"] = "image_url"
+    image_url: ImageURLContent
+
+
+class AudioInputContent(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    data: str
+    format: str = "wav"
+
+
+class AudioContentBlock(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    type: Literal["input_audio"] = "input_audio"
+    input_audio: AudioInputContent
+
+
+class VideoURLContent(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    url: str
+
+
+class VideoContentBlock(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    type: Literal["video_url"] = "video_url"
+    video_url: VideoURLContent
+
+
+ContentBlock = Annotated[
+    Union[
+        TextContentBlock,
+        ImageContentBlock,
+        AudioContentBlock,
+        VideoContentBlock,
+    ],
+    Field(discriminator="type"),
+]
+TypedMessageContent = str | list[ContentBlock]
 
 # ---------------------------------------------------------------------------
 # Flags and Enums

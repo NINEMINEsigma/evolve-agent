@@ -93,11 +93,20 @@ class AgentspaceTrashEntry(BaseModel):
     error: str | None = None
 
 
+class AgentspaceOperationRequest(BaseModel):
+    """Agentspace 垃圾桶操作请求。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    operation_id: str = ""
+
+
 class AgentspaceWriteRequest(BaseModel):
     path: str
     content: str
     expected_version: str | None = None
     operation_id: str = ""
+
 
 
 class AgentspacePathRequest(BaseModel):
