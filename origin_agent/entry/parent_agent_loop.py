@@ -16,7 +16,7 @@ import json
 import logging
 import uuid
 from pathlib import Path
-from typing import Any, Awaitable, Callable, Dict, List, TYPE_CHECKING
+from typing import Any, Dict, List, TYPE_CHECKING
 
 from abstract.tools.registry import registry as tool_registry
 from abstract.llm.client import BaseLLMClient
@@ -156,9 +156,6 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
         # -- 主会话活动任务注册表（强制中断基础，IMainSessionLoop 公共实现）--
         self._init_round_registry()
 
-        # -- 工具调用事件回调 --
-        self._tool_event_callback: Callable[[str, str, str, str], Awaitable[None]] | None = None
-
         # SP-4: 会话级消息队列（_process_lock 已上移至 BaseAgentLoop.__init__）
         self._message_queue = SessionMessageQueue(self)
 
@@ -280,11 +277,6 @@ class ParentAgentLoop(BasePrivateChatAgentLoop, IMainSessionLoop):
     # ========================================================================
     # 公共 API
     # ========================================================================
-
-    def set_tool_event_callback(
-        self, cb: Callable[[str, str, str, str], Awaitable[None]]
-    ) -> None:
-        self._tool_event_callback = cb
 
     def pop_session_rotated(self) -> str | None:
         return self._lifecycle.pop_session_rotated()

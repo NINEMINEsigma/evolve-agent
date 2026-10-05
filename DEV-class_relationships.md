@@ -198,13 +198,11 @@ classDiagram
         #_lifecycle
         #_tool_executor
         #_stream_consumer
-        #_tool_event_callback
         #_processing
         #_process_lock
         #_event_loop
         +subagent_orchestrator
         #_session_manager
-        +set_tool_event_callback()
         +set_session_manager()
         +add_memory_provider()
         +get_all_tool_stats()
@@ -338,6 +336,7 @@ classDiagram
         +resolve_ask()
         #_deny_session_asks()
         #_send_msg()
+        #_send_stream_event(StreamEvent)
     }
 
     class ParentAgentSink {
@@ -741,6 +740,11 @@ classDiagram
     IMainSessionLoop <|.. MultiAgentLoop
     AgentSink <|-- FrontendSink
     AgentSink <|-- ParentAgentSink
+    FrontendSink --> StreamDeltaEvent : constructs and sends
+    FrontendSink --> StreamDoneEvent : constructs and sends
+    StreamDeltaEvent --> ToolCallRequest : contains
+    StreamDeltaEvent --> ToolCallDelta : contains
+    StreamDoneEvent --> MessageMetrics : contains
     BaseLLMClient <|-- OpenAIClient
     BaseLLMClient <|-- AnthropicClient
     BaseLLMClient <|-- KsccClient
@@ -811,7 +815,6 @@ classDiagram
 | `_lifecycle` | `ParentAgentLoop` | `LoopSessionManager` | session 生命周期管理 |
 | `_tool_executor` | `ParentAgentLoop` | `ToolExecutor` | 工具执行器 |
 | `_stream_consumer` | `ParentAgentLoop` | `StreamConsumer` | 流消费器 |
-| `_tool_event_callback` | `ParentAgentLoop` | `Callable \| None` | 工具事件回调 |
 | `_processing` | `ParentAgentLoop` | `bool` | 是否正在处理 |
 | `_process_lock` | `ParentAgentLoop` | `asyncio.Lock` | 处理锁 |
 | `_event_loop` | `ParentAgentLoop` | `asyncio.AbstractEventLoop \| None` | 事件循环引用 |
@@ -1026,6 +1029,7 @@ classDiagram
 | `ShellOutputSlice` | `entity/puretype/shell.py` | `BaseModel` | 规范化输出的绝对字符位置切片 |
 | `ProcessLineStreamResult` | `entity/puretype/runtime.py` | `BaseModel` | 逐行消费子进程输出后的退出码、stderr、截断与行数摘要 |
 | `ClientDiagnostic` / `ClientDiagnosticKind` / `ClientDiagnosticPhase` | `entity/puretype/ws.py` | `BaseModel` / `Enum` | 会话预检与 History关键请求超时的脱敏传输诊断；只写 Gateway日志，不进入 History |
+| `StreamDeltaEvent` / `StreamDoneEvent` | `entity/puretype/ws.py` | `BaseModel` | 按固定 `type` 区分的下行流式事件，`StreamEvent` 为其判别联合；必填非空会话/流标识，工具载荷和计时模型在唯一发送边界序列化 |
 | `HistoryRowLink` | `entity/puretype/ws.py` | `BaseModel` | WebSocket实时行 ID到正典 History投影行 ID的非持久化关联 |
 | `DynamicSandboxSpace` | `entity/puretype/sandbox.py` | `BaseModel` | 单个全局动态沙盒空间的名称、绝对路径、用途描述和工具层只读标志 |
 | `DynamicSandboxSpaceData` | `entity/puretype/sandbox.py` | `BaseModel` | `dynamic_sandbox_spaces.es` v1 的持久化根对象 |
@@ -1037,6 +1041,14 @@ classDiagram
 ---
 
 ## 关键设计变更记录
+
+### 流式事件模型与发送边界收敛
+
+`AgentSink.emit_stream_delta()` 及两个实现均接收 `ToolCallRequest` / `ToolCallDelta`，`StreamConsumer` 不再在调用前降级为 dict。`FrontendSink` 构造 `entity.puretype.ws` 中的 `StreamDeltaEvent` / `StreamDoneEvent`，以 `StreamEvent` 判别联合约束 `_send_stream_event()`，仅在此执行 `model_dump_json(exclude_none=True)` 并发送；模型/序列化错误不作为网络错误吞掉。`MessageMetrics` 全程保持实例，`ParentAgentSink` 通过属性适配原子会话反馈通道，主/子会话路由、History与中断收尾顺序不变。
+
+`stream_delta` 的工具载荷改为顶层对象，前端两种流式事件在 `WSMessage` 中拥有独立类型，旧消息分支排除这两种 `type`，接收时校验实际结构。`stream_done` 的可选正文区分缺失与显式空字符串，既有 `emit_stream_done(content="")` 调用仍按原行为省略正文。前后端同步部署，不保留旧工具载荷内嵌 JSON。
+
+删除未被调用的 `gateway.server._send_tool_event()`、`ParentAgentLoop._tool_event_callback` / `set_tool_event_callback()` 和 `main.py` 注册代码，避免重复编码逻辑继续漂移。无新增全局生命周期对象或跨类 protected访问；协议类型直接依赖 `entity.puretype`，不经 `gateway.chat` 反向导入。
 
 ### 子Agent数量限制与旧排队协议移除
 

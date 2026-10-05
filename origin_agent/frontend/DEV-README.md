@@ -28,6 +28,7 @@ frontend/
 │   ├── hooks/
 │   │   ├── useWebSocket.ts          ← WebSocket 与状态管理核心
 │   │   ├── useWebSocketConnection.ts ← WebSocket 连接生命周期
+│   │   ├── wsMessageDecoder.ts     ← 入站 JSON → 判别联合 WSMessage 解码器
 │   │   ├── useSessionStore.ts       ← 会话列表与元数据管理
 │   │   ├── useSubagentManager.ts    ← 子代理状态管理
 │   │   ├── useUploadManager.ts      ← 文件上传管理
@@ -183,14 +184,15 @@ frontend/
 
 | Hook | 职责 |
 |---|---|
-| `useWebSocket.ts` | WebSocket 连接编排与低频会话状态桥接；聊天事件写入 `chatRuntimeStore`，流式增量经 `StreamFrameBuffer` 按动画帧提交；所有 user/assistant/tool/system 实时行使用明确 History 映射或保留为可诊断未映射行；工具请求和结果按 `tool_call_id` 幂等更新同一工具调用卡片；`agentspace_event`通过页面事件总线扇出给三个会话视觉 hook；关键请求超时显示持久通知并在 WebSocket可用时上报脱敏诊断；Agent 忙碌时仍允许消息进入后端 FIFO；`history_sync.processing` 的 true/false 均作为服务端权威值覆盖本地处理状态；永久删除只在 HTTP 明确成功后移除会话项，失败保留会话并显示错误，删除当前会话固定切换到“随意聊聊”；审批模式不写 localStorage/IndexedDB，只有 `HANDSFREE_MODE` 权威消息可更新三态模式，`APPROVAL_PROFILE_CHANGED` 只更新审批 Profile状态 |
+| `useWebSocket.ts` | WebSocket 连接编排与低频会话状态桥接；入站消息经 `hooks/wsMessageDecoder.ts` 解码为判别联合 `WSMessage`（流式守卫在 `features/chat/streamEventGuards.ts`），`handleMessage` 按 `type` 字面量分流后交给非流 helpers；聊天事件写入 `chatRuntimeStore`，流式增量经 `StreamFrameBuffer` 按动画帧提交；所有 user/assistant/tool/system 实时行使用明确 History 映射或保留为可诊断未映射行；工具请求和结果按 `tool_call_id` 幂等更新同一工具调用卡片；`agentspace_event`通过页面事件总线扇出给三个会话视觉 hook；关键请求超时显示持久通知并在 WebSocket可用时上报脱敏诊断；Agent 忙碌时仍允许消息进入后端 FIFO；`history_sync.processing` 的 true/false 均作为服务端权威值覆盖本地处理状态；永久删除只在 HTTP 明确成功后移除会话项，失败保留会话并显示错误，删除当前会话固定切换到“随意聊聊”；审批模式不写 localStorage/IndexedDB，只有 `HANDSFREE_MODE` 权威消息可更新三态模式，`APPROVAL_PROFILE_CHANGED` 只更新审批 Profile状态 |
 | `features/chat/chatRuntimeStore.ts` | Zustand 聊天运行时唯一高频状态：完整骨架、内容行、live 尾部、输入草稿、pending、滚动与资源；通用 `liveId → historyRowId`关联把user/assistant/tool/system实时行提升到skeleton正典位置，工具请求和结果按 `tool_call_id` 幂等合并为同一工具调用卡片，REST内容页随后覆盖临时内容；未映射或History失败的行不按版本号清理；`toggleMessageCollapse(id, source)`分别维护历史与实时折叠状态 |
 | `features/chat/chatRuntimeController.ts` | History skeleton/page 请求代际、Abort、页去重、正典同步、15秒超时局部错误与诊断 reporter、Minimap 随机目标和资源懒加载 |
 | `features/chat/useChatScrollController.ts` | `initializing/following/detached/minimap_dragging/returning` 五态追底与回底控制；实时提交和列表高度变化通过可取消、按浏览器帧合并的被动追底调度读取 Virtuoso scroller 物理底部；用户意图、小地图拖拽、消息高度操作和非 `following` 状态会取消待执行帧 |
 | `useLlmProfiles.ts` | 全局Profile目录CRUD、客户端列表、审批/元数据引用状态及图片/音频/视频三路全局回退引用；多模态状态一次 GET 恢复、三路独立 PUT，写成功与后续刷新失败分离，目录/引用请求按代际收敛 |
 | `useSessionLlmSelection.ts` | 按会话名称存储、服务端恢复、读取取消与代际隔离、Profile重命名/删除处理 |
 | `useLlmProfileEditor.ts` | 抽屉只读/编辑/新建状态、纯内存草稿、离开确认、删除替换、外部冲突和保存结果确认 |
-| `useWebSocketConnection.ts` | WebSocket 连接生命周期管理：建立/断开/重连/心跳；会话状态预检和握手复检使用可取消15秒截止，超时报告后不误判删除；消息入口按连接代际和当前 WebSocket 实例丢弃旧连接迟到消息，避免快速切换会话时污染当前状态；普通断开保留指数退避重连，永久删除的已建立连接按 4004 停止重连，握手拒绝则通过 `status.exists`二次确认后通知上层切换“随意聊聊” |
+| `useWebSocketConnection.ts` | WebSocket 连接生命周期管理：建立/断开/重连/心跳；会话状态预检和握手复检使用可取消15秒截止，超时报告后不误判删除；消息入口先按连接代际和当前 WebSocket 实例丢弃旧连接迟到消息，再由 `wsMessageDecoder.decodeWSMessage` 将原始 JSON 解码为判别联合 `WSMessage`（非法 JSON / 未知 type / 非法流式载荷在解码层丢弃），避免快速切换会话时污染当前状态；普通断开保留指数退避重连，永久删除的已建立连接按 4004 停止重连，握手拒绝则通过 `status.exists`二次确认后通知上层切换“随意聊聊” |
+| `wsMessageDecoder.ts` | 入站消息统一解码器：`decodeWSMessage(raw)` 把原始 JSON 字符串转为判别联合 `WSMessage`；JSON 解析失败 / 非对象 / 未知 type 丢弃；`stream_delta` / `stream_done` 经 `streamEventGuards` 实际结构校验（嵌套类型、数字有限、整数、`extra=forbid`），非法载荷丢弃并输出不含正文 / 参数的诊断；旧非流事件暂仅基础检查后透传为 `NonStreamWSMessage`；日志只输出已验证且已知的消息 type |
 | `useSessionStore.ts` | 会话列表与低频元数据管理：获取/创建/归档/删除/标签/标题；当前连接的审批模式显示与同步状态（服务端为唯一持久化真相）、任务资源、Shell/Cron 和交互队列；自动标题/标签/摘要/终结/合并错误通过全局操作通知展示，终结元数据警告不改变归档成功；主聊天消息、输入草稿与 pending 已迁移到 chat runtime store |
 | `useSubagentManager.ts` | 子代理状态管理：注册/启动/停止/审批/列表 |
 | `useUploadManager.ts` | 文件上传管理：拖拽上传、进度跟踪、文件选择器 |
@@ -247,6 +249,7 @@ frontend/
 - 全历史骨架始终保留完整逻辑顺序；Virtuoso 只挂载可视区附近行，离屏 iframe、Mermaid 和播放器会卸载并可在滚回时重建。
 - `stream_done` 先登记待结束流，实时 Footer 在布局阶段判断气泡是否与视口相交后再冻结 live 行；`history_sync` 后 skeleton 后缀与末尾内容页成功合并，才按 canonical cutoff 清理对应 live 行。
 - `stream_done` 先使 live 行进入待结束状态；`ChatLiveFooter` 在布局阶段只对结束瞬间与当前聊天区视口有正面积交集的普通 Agent 长回复记录展开选择，之后再固化流。视口外、工具消息与短消息维持既有规则；用户手动收起优先。滚出视口不会自动折叠。
+- 流式 WebSocket 事件类型化：`stream_delta` / `stream_done` 在 `types.ts` 中以 `StreamDeltaEvent` / `StreamDoneEvent` 两个具体结构化类型承载，`WSMessage` 改为判别联合（`StreamDeltaEvent | StreamDoneEvent | NonStreamWSMessage`），非流式事件的 `type` 显式排除 `stream_delta`/`stream_done`，避免宽类型漏掉流式结构约束。后端 wire 使用顶层结构化 `tool_call` / `tool_call_delta`（含 `id`/`name`/`arguments` 或 `id`/`index`/`name`/`args_delta`/`phase`），不再将其塞进 `stream_delta.content` JSON 文本；可选字段后端 `None` 一律省略，不发送 `null`。`createStreamFrameBuffer` 只接收 `StreamDeltaEvent` 并直接消费顶层模型字段，取消 `JSON.parse(content)`。解码集中在独立模块 `hooks/wsMessageDecoder.ts::decodeWSMessage`，由 `useWebSocketConnection` 在 `ws.onmessage` 调用：统一把原始 JSON 转为 `WSMessage`，非法 JSON / 未知 type 丢弃；流式事件经 `features/chat/streamEventGuards.ts` 实际结构校验（嵌套类型、数字有限、整数，`extra=forbid` 拒绝非约定键含旧版 `content` 内嵌 JSON），非法流式载荷丢弃并输出不含正文 / 参数的诊断，不得静默成为其他消息或污染 store；旧非流事件暂仅基础对象 / type 检查后透传为 `NonStreamWSMessage`，未在本次全面迁移。日志只输出已验证且已知的消息 type，避免原始 typeField 包含对象 / 正文导致泄露或字符串转换异常。`useWebSocket.ts` 的 `handleMessage` 接收已解码的 `WSMessage`，按判别联合 `type` 字面量分流，无需 `as` 断言；`stream_done` 不再猜测缺失 `stream_id`（由解码层校验保证非空），但保持先 flush 顺序、正文缺失 vs 空字符串及 metrics 语义。守卫使用 `constants/ws.ts::WS_IN` 常量；`tool_call.id` / `tool_call_delta.id` 后端仅 `str` 允许空，守卫不额外限制非空；`tool_call_delta.index` 仅整数不限定非负；`metrics` 沿用现有 `MessageMetrics`（int,int,int,float），不增加正数约束。
 - 后端在写入 History 后、`history_sync` 前通过 `system.stream_meta`发送 `stream_id`、`history_index`和`live_history_links`权威关联；用户消息使用 `USER_MESSAGE.index`，工具结果使用实际 History 索引。前端在 skeleton 已存在目标行时把实时消息提升到正典位置，REST内容页覆盖临时内容后移除实时行；目标缺失或请求失败时保留原实时行并报告诊断，不按正文或顺序猜配。
 - 工具消息与普通长消息统一使用气泡 `collapsed` 状态，但入口互斥：工具摘要切换工具详情，普通长消息底部按钮切换正文限高；流式工具消息默认折叠且允许摘要展开/收起。历史页重取按相同 History 行 ID 保留用户折叠选择；其他未命中视口保护的 live 行在正典交接时恢复默认折叠。UI 折叠不提高 live 正典版本，避免交接后留下重复气泡。
 - 位于底部时被动内容增长继续追底；追底使用 Virtuoso scroller 的物理底部而不是只对齐最后一个正典数据项，因此空骨架的新会话和动态 live Footer 同样有效。最新流式消息即使超过一个视口，也不切换到消息顶部；实时提交与列表高度变化在同一浏览器帧内最多合并一次物理底部定位，避免长消息高度变化与 Virtuoso 校正互相竞争。用户主动离开底部后不追随。近距离回底平滑，远距离先加载最新页再瞬时定位。

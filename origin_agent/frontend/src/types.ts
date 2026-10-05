@@ -226,6 +226,7 @@ export interface ToolCardData {
   result?: ToolCardResult;
 }
 
+/** WebSocket 入站消息的全部 type 字面量（与 constants/ws.ts::WS_IN 对应）。 */
 export type MessageType =
   | "system"
   | "user_message"
@@ -251,6 +252,57 @@ export type MessageType =
   | "ping"
   | "pong";
 
+/**
+ * 非流式事件的 type 集合：在 MessageType 基础上显式排除 stream_delta/stream_done。
+ * 流式事件由 StreamDeltaEvent / StreamDoneEvent 承载各自的 type 字面量，
+ * 非流式事件类型不得再声明这两个字面量，避免宽类型漏掉流式结构约束。
+ */
+export type NonStreamMessageType = Exclude<MessageType, "stream_delta" | "stream_done">;
+
+/** stream_delta 顶层 tool_call：已确定工具调用的完整结构。 */
+export interface StreamToolCall {
+  id: string;
+  name: string;
+  arguments: Record<string, unknown>;
+}
+
+/** stream_delta 顶层 tool_call_delta：分片式工具调用增量。 */
+export interface StreamToolCallDelta {
+  id: string;          // 允许空字符串
+  index: number;      // 仅要求整数，不额外限定非负
+  name: string;
+  args_delta: string;
+  phase: "start" | "append" | "done";
+}
+
+/**
+ * 流式增量事件：后端以具体 BaseModel 序列化下发，进程内无 JSON 往返。
+ * 可选字段后端 None 一律省略，不发送 null。
+ */
+export interface StreamDeltaEvent {
+  type: "stream_delta";
+  session_id: string;   // 非空
+  stream_id: string;    // 非空
+  delta?: string;
+  reasoning_delta?: string;
+  character_name?: string;
+  tool_call?: StreamToolCall;
+  tool_call_delta?: StreamToolCallDelta;
+}
+
+/**
+ * 流式结束事件：finish_reason 必填；content 缺失与空字符串语义不同；
+ * metrics 沿用现有 MessageMetrics（int,int,int,float，不增加正数约束）。
+ */
+export interface StreamDoneEvent {
+  type: "stream_done";
+  session_id: string;   // 非空
+  stream_id: string;    // 非空
+  finish_reason: string;
+  content?: string;
+  metrics?: MessageMetrics;
+}
+
 export type ClientDiagnosticKind = "critical_request_timeout";
 export type ClientDiagnosticPhase =
   | "session_status_precheck"
@@ -272,8 +324,15 @@ export interface HistoryRowLink {
   history_row_id: string;
 }
 
-export interface WSMessage {
-  type: MessageType;
+/**
+ * 非流式 WebSocket 入站消息的统一结构。
+ * type 显式排除 stream_delta/stream_done —— 流式事件由
+ * StreamDeltaEvent / StreamDoneEvent 承载，不再走此宽类型。
+ * 流式专用字段（stream_id/delta/reasoning_delta/finish_reason/metrics）
+ * 已移至流式事件类型，此接口不再声明。
+ */
+export interface NonStreamWSMessage {
+  type: NonStreamMessageType;
   session_id?: string;
   content?: MessageContent;
   message?: string;
@@ -289,10 +348,6 @@ export interface WSMessage {
   option?: string;
   custom_text?: string;
   detail?: string;                    // ASK_REQUEST：问题详细说明（markdown）
-  stream_id?: string;
-  delta?: string;
-  reasoning_delta?: string;
-  finish_reason?: string;
   target_sessions?: string[];
   visible_characters?: string[];   // 多 Agent 模式：可见角色列表
   response_characters?: string[];  // 多 Agent 模式：需响应角色列表
@@ -311,7 +366,6 @@ export interface WSMessage {
   operation?: "renamed" | "deleted";          // LLM_PROFILE_CHANGED
   old_name?: string;
   new_name?: string | null;
-  metrics?: MessageMetrics;              // STREAM_DONE：计时元信息
   approval_profile_name?: string | null;    // APPROVAL_PROFILE_CHANGED
   approval_profile_model?: string | null;   // APPROVAL_PROFILE_CHANGED
   approval_profile_available?: boolean;     // APPROVAL_PROFILE_CHANGED
@@ -337,6 +391,12 @@ export interface WSMessage {
   agentspace_event?: AgentspaceEvent;        // AGENTSPACE_EVENT：聊天页视觉资源变化
   client_diagnostic?: ClientDiagnostic;      // CLIENT_DIAGNOSTIC：脱敏传输诊断
 }
+
+/**
+ * WebSocket 入站消息的判别联合：流式事件使用具体结构化类型，
+ * 其余沿用 NonStreamWSMessage。以 message.type 字面量收窄区分。
+ */
+export type WSMessage = StreamDeltaEvent | StreamDoneEvent | NonStreamWSMessage;
 
 export interface ToolCallMeta {
   application_time: string;         // 人类可读的申请时间，如 "2026-07-11 14:30:25.123"

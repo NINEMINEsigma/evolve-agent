@@ -1,9 +1,9 @@
 from enum import Enum
-from pydantic import BaseModel, Field
-from typing import Any
+from pydantic import BaseModel, ConfigDict, Field
+from typing import Annotated, Any, Literal
 
 from .agentspace import AgentspaceEvent
-from .llm import MessageMetrics
+from .llm import MessageMetrics, ToolCallDelta, ToolCallRequest
 
 # ---------------------------------------------------------------------------
 # WebSocket Message Types
@@ -42,6 +42,37 @@ class MessageType(str, Enum):
     CLIENT_DIAGNOSTIC = "client_diagnostic"
 
 
+class StreamDeltaEvent(BaseModel):
+    """流式增量事件；工具载荷保持模型类型，在 WebSocket 边界统一序列化。"""
+
+    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
+
+    type: Literal[MessageType.STREAM_DELTA] = MessageType.STREAM_DELTA
+    session_id: str = Field(min_length=1)
+    stream_id: str = Field(min_length=1)
+    delta: str | None = None
+    reasoning_delta: str | None = None
+    character_name: str | None = None
+    tool_call: ToolCallRequest | None = None
+    tool_call_delta: ToolCallDelta | None = None
+
+
+class StreamDoneEvent(BaseModel):
+    """流结束事件；content 缺失保留累计正文，显式空字符串表示空正文。"""
+
+    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
+
+    type: Literal[MessageType.STREAM_DONE] = MessageType.STREAM_DONE
+    session_id: str = Field(min_length=1)
+    stream_id: str = Field(min_length=1)
+    finish_reason: str
+    content: str | None = None
+    metrics: MessageMetrics | None = None
+
+
+StreamEvent = Annotated[StreamDeltaEvent | StreamDoneEvent, Field(discriminator="type")]
+
+
 class ClientDiagnosticKind(str, Enum):
     """客户端传输诊断类型。"""
 
@@ -76,7 +107,11 @@ class HistoryRowLink(BaseModel):
 
 
 class Message(BaseModel):
-    """WebSocket 消息模型。"""
+    """通用 WebSocket 消息兼容模型。
+
+    下行 stream_delta / stream_done 必须使用上方具体事件模型；此处保留
+    既有入站及非流式协议字段，不作为流式发送入口。
+    """
 
     type: MessageType
     session_id: str = ""

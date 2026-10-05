@@ -241,7 +241,7 @@ class StreamConsumer:
                 if chunk.tool_call_delta:
                     await self._sink.emit_stream_delta(
                         session_id, stream_id,
-                        tool_call_delta=chunk.tool_call_delta.model_dump(exclude_none=True),
+                        tool_call_delta=chunk.tool_call_delta,
                         character_name=self._character_name,
                     )
 
@@ -249,11 +249,7 @@ class StreamConsumer:
                     tool_calls.append(chunk.tool_call)
                     await self._sink.emit_stream_delta(
                         session_id, stream_id,
-                        tool_call={
-                            "id": chunk.tool_call.id,
-                            "name": chunk.tool_call.name,
-                            "arguments": chunk.tool_call.arguments,
-                        },
+                        tool_call=chunk.tool_call,
                         character_name=self._character_name,
                     )
 

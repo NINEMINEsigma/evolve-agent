@@ -100,8 +100,8 @@ WS /ws/chat?resume=<sid>
 | `system` | 系统通知；可选 JSON `stream_meta`携带 `stream_id`、`history_index`、`live_history_links`（实时行到正典行的明确关联），或顶层携带 system status 的 `index`/`is_system_status`。关联只在对应 History 写入后发送；前端不得按正文、顺序或实时版本猜测映射。多Agent模式继续携带可见性/响应角色。 |
 | `user_message` | 用户消息回显 |
 | `assistant_message` | 完整助手消息 |
-| `stream_delta` | LLM 流式文本块 |
-| `stream_done` | 流式生成结束 |
+| `stream_delta` | `StreamDeltaEvent`：必填非空 `session_id` / `stream_id`；可选文本、思考内容和角色名，`tool_call` / `tool_call_delta` 为顶层结构化对象，不再编码到 `content` 字符串。 |
+| `stream_done` | `StreamDoneEvent`：必填非空 `session_id` / `stream_id` 与字符串 `finish_reason`；可选 `content`、`MessageMetrics`，缺失正文保留累计输出，显式空字符串表示空正文。 |
 | `tool_call` | 工具调用开始 |
 | `tool_result` | 工具执行结果；工具链中被消费的排队消息通过 `embedded_messages` 独立传输，不混入普通结果 JSON。 |
 | `task_progress` | 任务进度更新 |
@@ -116,6 +116,14 @@ WS /ws/chat?resume=<sid>
 | `ask_request` | 请求用户回答 |
 | `error` | 错误通知 |
 | `pong` | 心跳响应 |
+
+### 流式事件发送边界
+
+`entity.puretype.ws` 中的 `StreamDeltaEvent` / `StreamDoneEvent` 是下行流式事件的权威模型，`StreamEvent` 以 `type` 区分两者。`FrontendSink` 直接持有并发送模型；Gateway只负责连接生命周期，不再提供 `_send_tool_event(session_id, event_type, tool_name, payload)` 字符串回调，启动时也不再注册该旧回调。
+
+`ToolCallRequest`、`ToolCallDelta`、`MessageMetrics` 在进程内保持类型，流式事件在 `FrontendSink._send_stream_event()` 才执行一次 JSON 序列化；可选 `None` 字段省略。工具增量保留 `id/index/name/args_delta/phase`，起始 `id` 可为空，`phase` 为 `start/append/done`，不把未完成的 `args_delta` 当作完整 JSON解析。现有事件出口的空结束正文仍按旧规则省略，不改变中断时的部分输出。其他非流式事件与入站通用 `Message` 暂时保持原协议。
+
+前后端须同步部署：新的流式工具字段替代旧 `content` 内嵌 JSON，不双发两套载荷。前端在 WebSocket接收边界验证两种流式事件结构，非法载荷丢弃并产生不含正文/工具参数的本地诊断；`StreamFrameBuffer` 只接收已验证的流式增量，结束事件先刷新缓冲再固化。
 
 ---
 

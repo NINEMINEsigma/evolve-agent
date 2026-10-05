@@ -5,9 +5,11 @@ import { STORAGE_KEYS } from "../constants/storage";
 import { WS_CLOSE_SESSION_DELETED, WS_IN, WS_OUT } from "../constants/ws";
 import { TIMING } from "../constants/timing";
 import { fetchWithTimeout, RequestTimeoutError } from "../services/fetchWithTimeout";
+import { decodeWSMessage } from "./wsMessageDecoder";
 
 export interface WebSocketConnectionHandlers {
   onOpen?: () => void;
+  /** 接收已解码的 WSMessage（判别联合），非法 JSON/流式/未知类型在解码层丢弃。 */
   onMessage?: (msg: WSMessage) => void;
   onClose?: () => void;
   onSessionDeleted?: () => void;
@@ -250,11 +252,14 @@ export function useWebSocketConnection(): WebSocketConnection {
 
     ws.onmessage = (e) => {
       if (myId !== connectIdRef.current || wsRef.current !== ws) return;
-      const msg: WSMessage = JSON.parse(e.data);
+      const raw = typeof e.data === "string" ? e.data : "";
+      const msg = decodeWSMessage(raw);
+      if (msg === null) return;
       const now = Date.now();
       lastRecvAtRef.current = now;
       setRecvTick((v) => v + 1);
-      const payloadLen = typeof e.data === "string" ? e.data.length : 0;
+      const payloadLen = raw.length;
+      // 日志只输出已验证且已知的消息 type
       console.debug(`[ws recv] type=${msg.type} len=${payloadLen} at=${now}`);
       if (msg.type === WS_IN.PONG) {
         lastPongAtRef.current = now;

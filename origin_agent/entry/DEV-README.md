@@ -100,8 +100,17 @@ entry/
 `agent_sink.py` 定义 Agent 向上通信的抽象：
 
 - **`AgentSink`**（ABC）：抽象接口，声明 `ask_question`、`request_approval`、`emit_tool_call`、`emit_tool_result`、`emit_stream_delta`、`emit_stream_done`、`emit_usage_update`、`emit_progress`、`emit_clipboard_display`、`emit_subagent_update`、`emit_system_message` 等方法。
-- **`FrontendSink`**：主 Agent 使用，通过 WebSocket 与前端交互。持有 `_ws_sinks`（session_id → WebSocket 映射）、`_pending_confirms` / `_pending_asks`（Future 映射），管理审批和提问的异步等待；永久删除会话时 `close_session()`先移除连接映射并拒绝待处理交互，再以专用关闭码终止已建立连接，重复调用保持幂等。
+- **`FrontendSink`**：主 Agent 使用，通过 WebSocket 与前端交互。持有 `_ws_sinks`（session_id → WebSocket 映射）、`_pending_confirms` / `_pending_asks`（Future 映射），管理审批和提问的异步等待；永久删除会话时 `close_session()`先移除连接映射并拒绝待处理交互，再以专用关闭码终止已建立连接，重复调用保持幂等。流式事件单独构造 `StreamDeltaEvent` / `StreamDoneEvent`，只经 `_send_stream_event(StreamEvent)` 序列化发送；不再经过接收字符串的 `_send_msg()`。协议类型直接从 `entity.puretype` 导入，不依赖 `gateway.chat` 的兼容导出。
 - **`ParentAgentSink`**：子 Agent 使用，通过 outbox + orchestrator 与父 Agent 通信。审批请求放入子 Agent 的 `_pending_approvals` 队列；事件转发通过 `Application.current().frontend_sink` 推送到父会话前端。
+
+### 流式事件类型与传输边界
+
+- `AgentSink.emit_stream_delta()` 接收 `ToolCallRequest` / `ToolCallDelta` 实例，`StreamConsumer` 直接传递 `StreamChunk` 内的模型，不提前 `.model_dump()` 或手工拆成字典；`emit_stream_done()` 同样保留 `MessageMetrics` 实例。
+- 两种纯数据模型定义在 `entity/puretype/ws.py`，以固定 `type` 构成 `StreamEvent` 判别联合；`session_id` / `stream_id` 必填且非空，拒绝额外字段，事件本身采用 frozen/strict 配置。工具动态参数仍是开放字典，参数片段仍是未闭合 JSON 文本，不逐片解析。
+- `_send_stream_event()` 只在实际 WebSocket发送边界执行一次 `model_dump_json(exclude_none=True)`；模型构造/序列化错误与传输异常分开，后者记录脱敏定位信息，不额外按中断状态丢弃结束事件。`stream_delta.tool_call` / `tool_call_delta` 为顶层对象，前端不再解析 `content` 中的内嵌 JSON。
+- `StreamDoneEvent.content=None` 在传输中省略，显式 `""` 与缺失具有不同意义。现有 `emit_stream_done(content="")` 调用仍按旧行为省略正文，保留前端累计的部分输出；`finish_reason` 保持开放字符串，兼容 Provider 结束原因及 `error` / `cancelled`。流结束前刷新前端增量缓冲，History 和实时行映射的顺序不变。
+- `ParentAgentSink` 同步收紧参数类型，但子会话增量仍按模型属性适配到原有反馈通道，不引入新的子会话协议。
+- 未使用的 `_tool_event_callback`、`set_tool_event_callback()`、启动注册及 Gateway `_send_tool_event()` 已移除。其他非流式消息继续使用原有协议与发送路径，本次不迁移其所有动态载荷。
 
 ### `LoopSessionManager`
 

@@ -833,8 +833,12 @@ class BaseAgentLoop(ABC):
             list(self._history.iter_messages()), self.session_id,
         )
 
-    def edit_session_message(self, index: int, content: str | list[dict[str, Any]] | None = None,
-                             visible_characters: list[str] | None = None) -> SessionMessageEditResult:
+    def edit_session_message(
+        self, 
+        index: int, 
+        content: str | list[dict[str, Any]] | None = None,
+        visible_characters: list[str] | None = None
+        ) -> SessionMessageEditResult:
         logger.info("Edit message | session=%s index=%d", self.session_id, index)
         if not isinstance(index, int) or index < 0:
             logger.warning("Edit message fail | session=%s error=invalid index", self.session_id)

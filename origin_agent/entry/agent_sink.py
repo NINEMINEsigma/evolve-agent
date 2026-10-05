@@ -14,7 +14,18 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import * # type: ignore
 from entity.constant import SYSTEM_CHARACTER_NAME
-from entity.puretype import ApprovalResult, MessageMetrics, ModalityProfileStates
+from entity.puretype import (
+    ApprovalResult,
+    Message,
+    MessageMetrics,
+    MessageType,
+    ModalityProfileStates,
+    StreamDeltaEvent,
+    StreamDoneEvent,
+    StreamEvent,
+    ToolCallDelta,
+    ToolCallRequest,
+)
 
 if TYPE_CHECKING:
     from fastapi import WebSocket
@@ -92,8 +103,8 @@ class AgentSink(ABC):
     @abstractmethod
     async def emit_stream_delta(self, session_id: str, stream_id: str,
                                 delta: str = "", reasoning_delta: str = "",
-                                tool_call: dict | None = None,
-                                tool_call_delta: dict | None = None,
+                                tool_call: ToolCallRequest | None = None,
+                                tool_call_delta: ToolCallDelta | None = None,
                                 character_name: str | None = None) -> None:
         """推送流式增量。"""
         ...
@@ -211,7 +222,6 @@ class FrontendSink(AgentSink):
         new_name: str | None,
     ) -> list[str]:
         """向所有已连接前端广播独立的 Profile 变更事件。"""
-        from gateway.chat import Message, MessageType
 
         failures: list[str] = []
         for session_id, ws in self.get_all_ws().items():
@@ -245,7 +255,6 @@ class FrontendSink(AgentSink):
         ``state`` 为 ``ApprovalProfileState`` 实例。显式保留 null 值
         以便前端区分"未选择"与"字段缺失"；Profile 变化不携带审批模式。
         """
-        from gateway.chat import Message, MessageType
 
         failures: list[str] = []
         for session_id, ws in self.get_all_ws().items():
@@ -275,7 +284,6 @@ class FrontendSink(AgentSink):
         state,
     ) -> list[str]:
         """向所有已连接前端广播全局元数据 Profile 状态变更。"""
-        from gateway.chat import Message, MessageType
 
         failures: list[str] = []
         for session_id, ws in self.get_all_ws().items():
@@ -305,7 +313,6 @@ class FrontendSink(AgentSink):
         states: ModalityProfileStates,
     ) -> list[str]:
         """向所有已连接前端广播三路全局多模态 Profile 状态。"""
-        from gateway.chat import Message, MessageType
 
         failures: list[str] = []
         for session_id, ws in self.get_all_ws().items():
@@ -380,7 +387,6 @@ class FrontendSink(AgentSink):
             return ApprovalResult(action="deny", deny_reason="WebSocket not connected", denied_by=SYSTEM_CHARACTER_NAME)
 
         try:
-            from gateway.chat import Message, MessageType
             from abstract.tools.registry import registry
             # 前端期望 request_id/tool/args/content 在消息顶层
             display_args = dict(args)
@@ -531,7 +537,6 @@ class FrontendSink(AgentSink):
                                 client_message_id: str | None = None,
                                 message_suffix: str | None = None,
                                 dynamic_message_suffix: str | None = None) -> None:
-        from gateway.chat import Message, MessageType
         ws = self.get_ws(session_id)
         if ws is None:
             return
@@ -556,7 +561,6 @@ class FrontendSink(AgentSink):
                                      character_name: str,
                                      visible_characters: list[str] | None = None,
                                      response_characters: list[str] | None = None) -> None:
-        from gateway.chat import Message, MessageType
         ws = self.get_ws(session_id)
         if ws is None:
             return
@@ -575,34 +579,45 @@ class FrontendSink(AgentSink):
 
     async def emit_stream_delta(self, session_id: str, stream_id: str,
                                 delta: str = "", reasoning_delta: str = "",
-                                tool_call: dict | None = None,
-                                tool_call_delta: dict | None = None,
+                                tool_call: ToolCallRequest | None = None,
+                                tool_call_delta: ToolCallDelta | None = None,
                                 character_name: str | None = None) -> None:
-        data: dict = {"stream_id": stream_id}
-        if delta:
-            data["delta"] = delta
-        if reasoning_delta:
-            data["reasoning_delta"] = reasoning_delta
-        if tool_call:
-            data["tool_call"] = tool_call
-        if tool_call_delta:
-            data["tool_call_delta"] = tool_call_delta
-        if character_name:
-            data["character_name"] = character_name
-        await self._send_msg(session_id, "stream_delta", "",
-                             json.dumps(data, ensure_ascii=False))
+        await self._send_stream_event(StreamDeltaEvent(
+            session_id=session_id,
+            stream_id=stream_id,
+            delta=delta or None,
+            reasoning_delta=reasoning_delta or None,
+            tool_call=tool_call,
+            tool_call_delta=tool_call_delta,
+            character_name=character_name or None,
+        ))
 
     async def emit_stream_done(self, session_id: str, stream_id: str,
                                finish_reason: str = "stop",
                                content: str = "",
                                metrics: MessageMetrics | None = None) -> None:
-        payload: dict = {"stream_id": stream_id, "finish_reason": finish_reason}
-        if content:
-            payload["content"] = content
-        if metrics:
-            payload["metrics"] = metrics.model_dump()
-        await self._send_msg(session_id, "stream_done", "",
-                             json.dumps(payload, ensure_ascii=False))
+        await self._send_stream_event(StreamDoneEvent(
+            session_id=session_id,
+            stream_id=stream_id,
+            finish_reason=finish_reason,
+            # 维持既有语义：调用方的空文本省略，前端保留累计的部分正文。
+            content=content or None,
+            metrics=metrics,
+        ))
+
+    async def _send_stream_event(self, event: StreamEvent) -> None:
+        """流式事件唯一发送边界；模型/序列化错误不作为网络异常吞掉。"""
+        ws = self.get_ws(event.session_id)
+        if ws is None:
+            return
+        payload = event.model_dump_json(exclude_none=True)
+        try:
+            await ws.send_text(payload)
+        except Exception:
+            logger.warning(
+                "Failed to send %s event | session=%s stream=%s",
+                event.type.value, event.session_id, event.stream_id, exc_info=True,
+            )
 
     async def emit_usage_update(self, session_id: str, token_usage: int,
                                 context_tokens: int) -> None:
@@ -632,7 +647,6 @@ class FrontendSink(AgentSink):
             ws = self.get_ws(session_id)
             if ws is None:
                 return
-            from gateway.chat import Message, MessageType
             msg = Message(
                 type=MessageType.SYSTEM,
                 session_id=session_id,
@@ -653,11 +667,10 @@ class FrontendSink(AgentSink):
                         tool_call_meta: dict | None = None,
                         embedded_messages: list[dict] | None = None,
                         consumed_client_message_ids: list[str] | None = None) -> None:
-        """通过 WebSocket 推送一条事件消息。"""
+        """推送既有非流式事件；流式事件只走 _send_stream_event。"""
         ws = self.get_ws(session_id)
         if ws is None:
             return
-        from gateway.chat import Message, MessageType
 
         if event_type == "tool_call":
             msg_type = MessageType.TOOL_CALL
@@ -673,30 +686,6 @@ class FrontendSink(AgentSink):
                           tool_call_meta=tool_call_meta,
                           embedded_messages=embedded_messages,
                           consumed_client_message_ids=consumed_client_message_ids)
-        elif event_type == "stream_delta":
-            data = json.loads(payload)
-            content_payload: dict[str, Any] = {}
-            if data.get("tool_call"):
-                content_payload["tool_call"] = data["tool_call"]
-            if data.get("tool_call_delta"):
-                content_payload["tool_call_delta"] = data["tool_call_delta"]
-            msg = Message(
-                type=MessageType.STREAM_DELTA, session_id=session_id,
-                stream_id=data.get("stream_id"),
-                delta=data.get("delta"),
-                reasoning_delta=data.get("reasoning_delta"),
-                content=json.dumps(content_payload, ensure_ascii=False) if content_payload else None,
-                character_name=data.get("character_name"),
-            )
-        elif event_type == "stream_done":
-            data = json.loads(payload)
-            msg = Message(
-                type=MessageType.STREAM_DONE, session_id=session_id,
-                stream_id=data.get("stream_id"),
-                finish_reason=data.get("finish_reason"),
-                content=data.get("content"),
-                metrics=MessageMetrics.model_validate(data["metrics"]) if data.get("metrics") else None,
-            )
         elif event_type == "usage_update":
             msg = Message(type=MessageType.SYSTEM, session_id=session_id, content=payload)
         elif event_type == "task_progress":
@@ -836,14 +825,22 @@ class ParentAgentSink(AgentSink):
 
     async def emit_stream_delta(self, session_id: str, stream_id: str,
                                 delta: str = "", reasoning_delta: str = "",
-                                tool_call: dict | None = None,
-                                tool_call_delta: dict | None = None,
+                                tool_call: ToolCallRequest | None = None,
+                                tool_call_delta: ToolCallDelta | None = None,
                                 character_name: str | None = None) -> None:
         if delta:
             self._loop.emit_event("assistant", content=delta, reasoning=reasoning_delta,
                              character_name=character_name)
         if tool_call_delta:
-            self._loop.emit_event("tool_call_delta", **tool_call_delta)
+            # 子会话事件仍走独立的反馈通道，按属性适配而非降级/展开模型。
+            self._loop.emit_event(
+                "tool_call_delta",
+                id=tool_call_delta.id,
+                index=tool_call_delta.index,
+                name=tool_call_delta.name,
+                args_delta=tool_call_delta.args_delta,
+                phase=tool_call_delta.phase.value,
+            )
 
     async def emit_stream_done(self, session_id: str, stream_id: str,
                                finish_reason: str = "stop",

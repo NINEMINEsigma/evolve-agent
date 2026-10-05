@@ -1,9 +1,10 @@
-import type { WSMessage } from "../../types";
+import type { StreamDeltaEvent } from "../../types";
 import type { StreamBatch } from "./types";
 import { chatTelemetry } from "./chatTelemetry";
 
 export interface StreamFrameBuffer {
-  push: (message: WSMessage) => void;
+  /** 只接收已校验的 StreamDeltaEvent，直接消费顶层模型字段。 */
+  push: (message: StreamDeltaEvent) => void;
   flush: () => void;
   cancel: () => void;
 }
@@ -40,8 +41,8 @@ export function createStreamFrameBuffer(
     });
   };
 
-  const push = (message: WSMessage) => {
-    const streamId = message.stream_id || "";
+  const push = (message: StreamDeltaEvent) => {
+    const streamId = message.stream_id;
     if (!streamId) return;
     if (pending && pending.streamId !== streamId) flush();
     if (!pending) {
@@ -55,31 +56,24 @@ export function createStreamFrameBuffer(
     }
     pending.delta += message.delta || "";
     pending.reasoningDelta += message.reasoning_delta || "";
-    if (typeof message.content === "string") {
-      try {
-        const parsed = JSON.parse(message.content) as {
-          tool_call?: { name?: string; arguments?: Record<string, unknown> };
-          tool_call_delta?: Record<string, unknown>;
-        };
-        if (parsed.tool_call) {
-          pending.toolName = parsed.tool_call.name;
-          pending.toolArgs = parsed.tool_call.arguments;
-        }
-        if (parsed.tool_call_delta) {
-          const delta = parsed.tool_call_delta;
-          const key = `${delta.index ?? 0}:${delta.id ?? ""}`;
-          const map = { ...(pending.toolArgsRawMap || {}) };
-          if (delta.phase === "start") map[key] = "";
-          if (delta.phase === "append") {
-            map[key] = (map[key] || "") + String(delta.args_delta || "");
-          }
-          pending.toolArgsRawMap = map;
-          pending.activeToolCallKey = key;
-          if (typeof delta.name === "string") pending.toolName = delta.name;
-        }
-      } catch {
-        // 普通文本 content 不影响流式正文。
+    // 顶层结构化 tool_call：完整工具调用的 name 与 arguments，仅覆盖 toolName/toolArgs；
+    // 不清空此前分片累积的 toolArgsRawMap（聚合以 tool_call 为准，分片仅用于打字机渲染）。
+    if (message.tool_call) {
+      pending.toolName = message.tool_call.name;
+      pending.toolArgs = message.tool_call.arguments;
+    }
+    // 顶层结构化 tool_call_delta：分片式参数增量
+    if (message.tool_call_delta) {
+      const delta = message.tool_call_delta;
+      const key = `${delta.index}:${delta.id}`;
+      const map = { ...(pending.toolArgsRawMap || {}) };
+      if (delta.phase === "start") map[key] = "";
+      if (delta.phase === "append") {
+        map[key] = (map[key] || "") + (delta.args_delta || "");
       }
+      pending.toolArgsRawMap = map;
+      pending.activeToolCallKey = key;
+      if (typeof delta.name === "string") pending.toolName = delta.name;
     }
     schedule();
   };

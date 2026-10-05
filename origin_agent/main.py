@@ -223,9 +223,7 @@ class App:
 
             # ParentAgentLoop 构造时已通过全局名称指针恢复 Profile。
 
-            # 将工具事件流连接到前端
-            from gateway.server import _send_tool_event
-            agent_loop.set_tool_event_callback(_send_tool_event)
+            # 流式与工具事件由注入的 FrontendSink 直接发送。
             set_agentspace_path(self.ctx.agentspace)
 
             # ---- 创建 SubAgentOrchestrator ----

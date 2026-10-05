@@ -7,6 +7,7 @@ import type {
   HistoryRowLink,
   InterruptResponse,
   MessageContent,
+  NonStreamWSMessage,
   SubagentSession,
   WSMessage,
 } from "../types";
@@ -140,7 +141,7 @@ export function useWebSocket() {
     return () => chatRuntimeController.setDiagnosticReporter(null);
   }, [reportTransportDiagnostic]);
 
-  const handleHistorySync = useCallback((message: WSMessage) => {
+  const handleHistorySync = useCallback((message: NonStreamWSMessage) => {
     const sid = message.session_id || sessionRef.current?.sessionId || "";
     if (!sid) return;
     if (sessionRef.current?.sessionId !== sid) {
@@ -170,7 +171,7 @@ export function useWebSocket() {
     sessionRef.current?.fetchSessions();
   }, []);
 
-  const handleMessage = useCallback((message: WSMessage) => {
+  const handleNonStreamMessage = useCallback((message: NonStreamWSMessage) => {
     if (routeChatTransportMessage(
       message,
       sessionRef.current?.sessionId || "",
@@ -207,24 +208,6 @@ export function useWebSocket() {
     if (message.type === WS_IN.HISTORY_SYNC) {
       frameBufferRef.current?.flush();
       handleHistorySync(message);
-      return;
-    }
-    if (message.type === WS_IN.STREAM_DELTA) {
-      streamDoneSeenRef.current = false;
-      frameBufferRef.current?.push(message);
-      return;
-    }
-    if (message.type === WS_IN.STREAM_DONE) {
-      frameBufferRef.current?.flush();
-      const streamId = message.stream_id || useChatRuntimeStore.getState().currentStreamId || "";
-      if (streamId) {
-        const store = useChatRuntimeStore.getState();
-        const content = typeof message.content === "string" ? message.content : undefined;
-        const finishReason = message.finish_reason || "stop";
-        if (hasMountedChatList()) store.queueStreamFinish(streamId, content, message.metrics, finishReason);
-        else store.finishStream(streamId, content, message.metrics, false, finishReason);
-      }
-      streamDoneSeenRef.current = true;
       return;
     }
     if (message.type === WS_IN.USER_MESSAGE) {
@@ -387,6 +370,32 @@ export function useWebSocket() {
     sessionRef.current?.handleMessage(message);
     subagentRef.current.handleMessage(message, sessionRef.current?.sessionId ?? "");
   }, [appendLocalMessage, handleHistorySync]);
+
+  /**
+   * WebSocket 入站消息统一入口。
+   * 解码层（wsMessageDecoder）已完成 JSON 解析、流式结构校验与未知类型丢弃；
+   * 此处按判别联合的 type 字面量分流：流式事件直接消费，非流事件交给 helpers。
+   */
+  const handleMessage = useCallback((message: WSMessage) => {
+    if (message.type === WS_IN.STREAM_DELTA) {
+      streamDoneSeenRef.current = false;
+      frameBufferRef.current?.push(message);
+      return;
+    }
+    if (message.type === WS_IN.STREAM_DONE) {
+      frameBufferRef.current?.flush();
+      // stream_id 由解码层校验保证非空，不再猜测缺失 stream_id
+      const streamId = message.stream_id;
+      const store = useChatRuntimeStore.getState();
+      const content = typeof message.content === "string" ? message.content : undefined;
+      const finishReason = message.finish_reason || "stop";
+      if (hasMountedChatList()) store.queueStreamFinish(streamId, content, message.metrics, finishReason);
+      else store.finishStream(streamId, content, message.metrics, false, finishReason);
+      streamDoneSeenRef.current = true;
+      return;
+    }
+    handleNonStreamMessage(message);
+  }, [handleNonStreamMessage]);
 
   const newChat = useCallback(() => {
     window.history.replaceState({}, "", "/");
