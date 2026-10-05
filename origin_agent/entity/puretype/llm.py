@@ -137,6 +137,8 @@ class ModalityCapability(BaseModel):
 
 class LLMProfile(BaseModel):
     """LLM 主模型配置项（前端可切换）。"""
+    model_config = ConfigDict(extra="forbid", validate_assignment=True)
+
     name: str = ""
     llm_client_name: str = ""
     base_url: str = ""
@@ -158,6 +160,7 @@ LLMProfile.model_rebuild()
 
 class LLMProfileData(BaseModel):
     """LLMProfile 持久化根对象。"""
+    model_config = ConfigDict(extra="forbid", validate_assignment=True)
 
     profiles: list[LLMProfile] = Field(default_factory=list, description="LLMProfile列表")
     approval_profile: LLMProfile|None = Field(default=None)

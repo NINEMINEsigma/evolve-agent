@@ -2539,12 +2539,12 @@ async def delete_llm_profile(request: LLMProfileDeleteRequest):
             )
             if replacement is source:
                 raise ValueError("replacement Profile must differ from deleted Profile")
-            store.assert_removable(source)
-            # 审批 Profile 联动：删除当前引用时只清空引用，会话模式保持不变。
+            # 审批/元数据 Profile 在删除前先清空根对象引用。
             if store.is_approval_profile(source):
                 store.set_approval_profile(None)
             if store.is_metadata_profile(source):
                 store.set_metadata_profile(None)
+            store.assert_removable(source)
             switched, busy = application.session_manager.replace_idle_loops_using_profile(
                 source,
                 replacement,

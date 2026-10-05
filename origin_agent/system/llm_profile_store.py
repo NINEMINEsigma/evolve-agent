@@ -9,7 +9,7 @@ import tempfile
 import threading
 import time
 from pathlib import Path
-from typing import Any, Literal
+from typing import Literal
 
 from easysave import EasySaveBackupCleanupError, contains, load, save
 from entity.typeref import make_config
@@ -28,25 +28,6 @@ from entity.puretype.llm import (
 from system.atomic_io import replace_atomic
 
 logger = logging.getLogger(__name__)
-
-_REFERENCE_FIELDS: tuple[str, ...] = (
-    "vision_image_profile",
-    "audio_profile",
-    "vision_video_profile",
-)
-_PROFILE_FIELDS: tuple[str, ...] = (
-    "name",
-    "llm_client_name",
-    "base_url",
-    "model",
-    "api_key",
-    "temperature",
-    "max_output_tokens",
-    "reasoning_effort",
-    "max_context_tokens",
-    "soul_file",
-    *_REFERENCE_FIELDS,
-)
 
 
 class LLMProfileStore:
@@ -90,7 +71,6 @@ class LLMProfileStore:
             previous = self._data.approval_profile
             self._data.approval_profile = profile
             try:
-                self._validate_root(self._data)
                 self._save_unlocked()
             except Exception:
                 self._data.approval_profile = previous
@@ -118,7 +98,6 @@ class LLMProfileStore:
             previous = self._data.metadata_profile
             self._data.metadata_profile = profile
             try:
-                self._validate_root(self._data)
                 self._save_unlocked()
             except Exception:
                 self._data.metadata_profile = previous
@@ -169,7 +148,6 @@ class LLMProfileStore:
             else:
                 raise ValueError(f"Unsupported modality type: {media_type!r}")
             try:
-                self._validate_root(self._data)
                 self._save_unlocked()
             except Exception:
                 if media_type == "image":
@@ -255,14 +233,11 @@ class LLMProfileStore:
 
     def create_profile(self, payload: LLMProfilePayload) -> LLMProfile:
         """新增一个 Profile，并在成功后返回根列表中的新实例。"""
-        if not isinstance(payload, LLMProfilePayload):
-            raise TypeError("payload must be LLMProfilePayload")
         with self._lock:
             if not payload.name:
                 raise ValueError("LLM profile name must not be empty")
             if any(p.name == payload.name for p in self._data.profiles):
                 raise ValueError(f"Duplicate LLM profile name: {payload.name!r}")
-            refs = self._resolve_payload_references(payload)
             profile = LLMProfile(
                 name=payload.name,
                 llm_client_name=payload.llm_client_name,
@@ -273,12 +248,19 @@ class LLMProfileStore:
                 max_output_tokens=payload.max_output_tokens,
                 reasoning_effort=payload.reasoning_effort,
                 max_context_tokens=payload.max_context_tokens,
+                vision_image_profile=self._resolve_profile_reference(
+                    payload.vision_image_profile,
+                ),
+                audio_profile=self._resolve_profile_reference(
+                    payload.audio_profile,
+                ),
+                vision_video_profile=self._resolve_profile_reference(
+                    payload.vision_video_profile,
+                ),
                 soul_file=payload.soul_file,
-                **refs,
             )
             self._data.profiles.append(profile)
             try:
-                self._validate_root(self._data)
                 self._save_unlocked()
             except Exception:
                 self._data.profiles.pop()
@@ -292,8 +274,6 @@ class LLMProfileStore:
         payload: LLMProfilePayload,
     ) -> LLMProfile:
         """原地更新 Profile；重命名不会替换实例身份。"""
-        if not isinstance(payload, LLMProfilePayload):
-            raise TypeError("payload must be LLMProfilePayload")
         with self._lock:
             profile = self.get_profile(original_name)
             if not payload.name:
@@ -303,11 +283,9 @@ class LLMProfileStore:
                 for other in self._data.profiles
             ):
                 raise ValueError(f"Duplicate LLM profile name: {payload.name!r}")
-            refs = self._resolve_payload_references(payload)
             old_values = self._snapshot_profile(profile)
-            self._assign_payload(profile, payload, refs)
             try:
-                self._validate_root(self._data)
+                self._assign_payload(profile, payload)
                 self._save_unlocked()
             except Exception:
                 self._restore_profile(profile, old_values)
@@ -320,17 +298,34 @@ class LLMProfileStore:
             return profile
 
     def assert_removable(self, profile: LLMProfile) -> None:
-        """确认目标实例没有被其他 Profile 或全局多模态引用。"""
+        """确认目标实例没有被任何根对象引用。"""
         with self._lock:
             for owner in self._data.profiles:
                 if owner is profile:
                     continue
-                for field in _REFERENCE_FIELDS:
-                    if getattr(owner, field) is profile:
-                        raise ValueError(
-                            f"LLM profile {profile.name!r} is referenced by "
-                            f"{owner.name!r}.{field}"
-                        )
+                if owner.vision_image_profile is profile:
+                    raise ValueError(
+                        f"LLM profile {profile.name!r} is referenced by "
+                        f"{owner.name!r}.vision_image_profile"
+                    )
+                if owner.audio_profile is profile:
+                    raise ValueError(
+                        f"LLM profile {profile.name!r} is referenced by "
+                        f"{owner.name!r}.audio_profile"
+                    )
+                if owner.vision_video_profile is profile:
+                    raise ValueError(
+                        f"LLM profile {profile.name!r} is referenced by "
+                        f"{owner.name!r}.vision_video_profile"
+                    )
+            if self._data.approval_profile is profile:
+                raise ValueError(
+                    f"LLM profile {profile.name!r} is the approval Profile"
+                )
+            if self._data.metadata_profile is profile:
+                raise ValueError(
+                    f"LLM profile {profile.name!r} is the metadata Profile"
+                )
             if self.is_any_global_modality_profile(profile):
                 raise ValueError(
                     f"LLM profile {profile.name!r} is referenced by a global modality profile"
@@ -344,7 +339,6 @@ class LLMProfileStore:
             index = self._data.profiles.index(profile)
             self._data.profiles.pop(index)
             try:
-                self._validate_root(self._data)
                 self._save_unlocked()
             except Exception:
                 self._data.profiles.insert(index, profile)
@@ -353,7 +347,7 @@ class LLMProfileStore:
             return profile
 
     # ------------------------------------------------------------------
-    # 加载、迁移与校验
+    # 加载与迁移
     # ------------------------------------------------------------------
 
     def _load_unlocked(self) -> LLMProfileData:
@@ -363,159 +357,65 @@ class LLMProfileStore:
         data = load(
             LLM_PROFILES_ES_KEY,
             make_config(self._path),
+            LLMProfileData,
             ignore_missing_fields=True,
         )
-        if not isinstance(data, LLMProfileData):
-            raise TypeError(
-                f"Expected LLMProfileData in v2, got {type(data).__name__}"
-            )
-        self._validate_root(data)
         return data
 
-    def _validate_root(self, data: LLMProfileData) -> None:
-        if not isinstance(data, LLMProfileData):
-            raise TypeError("Profile root must be LLMProfileData")
-        allowed_fields = {
-            "profiles",
-            "approval_profile",
-            "metadata_profile",
-            "global_vision_image_profile",
-            "global_audio_profile",
-            "global_vision_video_profile",
-        }
-        if set(data.__dict__) - allowed_fields:
-            raise TypeError("LLMProfileData contains unknown fields")
-        if not isinstance(data.profiles, list):
-            raise TypeError("LLMProfileData.profiles must be a list")
-
-        names: set[str] = set()
-        profile_ids: set[int] = set()
-        for profile in data.profiles:
-            if not isinstance(profile, LLMProfile):
-                raise TypeError("LLMProfileData.profiles must contain LLMProfile instances")
-            self._validate_profile_scalars(profile)
-            if not profile.name:
-                raise ValueError("LLM profile name must not be empty")
-            if profile.name in names:
-                raise ValueError(f"Duplicate LLM profile name: {profile.name!r}")
-            names.add(profile.name)
-            profile_ids.add(id(profile))
-
-        approval_profile = data.approval_profile
-        if approval_profile is not None:
-            if not isinstance(approval_profile, LLMProfile):
-                raise TypeError("LLMProfileData.approval_profile must be an LLMProfile or None")
-            if id(approval_profile) not in profile_ids:
-                raise ValueError(
-                    "LLMProfileData.approval_profile must reference a profile in profiles"
-                )
-
-        metadata_profile = data.metadata_profile
-        if metadata_profile is not None:
-            if not isinstance(metadata_profile, LLMProfile):
-                raise TypeError("LLMProfileData.metadata_profile must be an LLMProfile or None")
-            if id(metadata_profile) not in profile_ids:
-                raise ValueError(
-                    "LLMProfileData.metadata_profile must reference a profile in profiles"
-                )
-
-        for field_name, reference in (
-            ("global_vision_image_profile", data.global_vision_image_profile),
-            ("global_audio_profile", data.global_audio_profile),
-            ("global_vision_video_profile", data.global_vision_video_profile),
-        ):
-            if reference is None:
-                continue
-            if not isinstance(reference, LLMProfile):
-                raise TypeError(
-                    f"LLMProfileData.{field_name} must be an LLMProfile or None"
-                )
-            if id(reference) not in profile_ids:
-                raise ValueError(
-                    f"LLMProfileData.{field_name} must reference a profile in profiles"
-                )
-
-        for profile in data.profiles:
-            for field in _REFERENCE_FIELDS:
-                reference = getattr(profile, field)
-                if reference is None:
-                    continue
-                if not isinstance(reference, LLMProfile):
-                    raise TypeError(f"{field} must be an LLMProfile or None")
-                if id(reference) not in profile_ids:
-                    raise ValueError(
-                        f"Profile {profile.name!r} references an object outside the root"
-                    )
-
-    @staticmethod
-    def _validate_profile_scalars(profile: LLMProfile) -> None:
-        fields = set(profile.__dict__)
-        if fields - set(_PROFILE_FIELDS):
-            raise TypeError("LLMProfile contains unknown fields")
-        string_fields = (
-            "name",
-            "llm_client_name",
-            "base_url",
-            "model",
-            "api_key",
-            "reasoning_effort",
-            "soul_file",
-        )
-        for field in string_fields:
-            if type(getattr(profile, field)) is not str:
-                raise TypeError(f"LLMProfile.{field} must be a string")
-        for field in ("max_output_tokens", "max_context_tokens"):
-            if type(getattr(profile, field)) is not int:
-                raise TypeError(f"LLMProfile.{field} must be an integer")
-        temperature = getattr(profile, "temperature")
-        if type(temperature) not in (int, float):
-            raise TypeError("LLMProfile.temperature must be numeric")
-
-    def _resolve_payload_references(
+    def _resolve_profile_reference(
         self,
-        payload: LLMProfilePayload,
-    ) -> dict[str, LLMProfile | None]:
-        resolved: dict[str, LLMProfile | None] = {}
-        for field in _REFERENCE_FIELDS:
-            name = getattr(payload, field)
-            if name is None:
-                resolved[field] = None
-                continue
-            if not isinstance(name, str) or not name:
-                raise ValueError(f"{field} must be a Profile name or null")
-            resolved[field] = self.get_profile(name)
-        return resolved
+        name: str | None,
+    ) -> LLMProfile | None:
+        if name is None:
+            return None
+        if not isinstance(name, str) or not name:
+            raise ValueError("Profile reference must be a Profile name or null")
+        return self.get_profile(name)
 
     @staticmethod
-    def _snapshot_profile(profile: LLMProfile) -> tuple[Any, ...]:
-        return tuple(getattr(profile, field) for field in _PROFILE_FIELDS)
+    def _snapshot_profile(profile: LLMProfile) -> LLMProfile:
+        return profile.model_copy()
 
     @staticmethod
-    def _restore_profile(profile: LLMProfile, values: tuple[Any, ...]) -> None:
-        for field, value in zip(_PROFILE_FIELDS, values):
-            setattr(profile, field, value)
+    def _restore_profile(profile: LLMProfile, snapshot: LLMProfile) -> None:
+        profile.name = snapshot.name
+        profile.llm_client_name = snapshot.llm_client_name
+        profile.base_url = snapshot.base_url
+        profile.model = snapshot.model
+        profile.api_key = snapshot.api_key
+        profile.temperature = snapshot.temperature
+        profile.max_output_tokens = snapshot.max_output_tokens
+        profile.reasoning_effort = snapshot.reasoning_effort
+        profile.max_context_tokens = snapshot.max_context_tokens
+        profile.vision_image_profile = snapshot.vision_image_profile
+        profile.audio_profile = snapshot.audio_profile
+        profile.vision_video_profile = snapshot.vision_video_profile
+        profile.soul_file = snapshot.soul_file
 
-    @staticmethod
     def _assign_payload(
+        self,
         profile: LLMProfile,
         payload: LLMProfilePayload,
-        refs: dict[str, LLMProfile | None],
     ) -> None:
-        for field in (
-            "name",
-            "llm_client_name",
-            "base_url",
-            "model",
-            "api_key",
-            "temperature",
-            "max_output_tokens",
-            "reasoning_effort",
-            "max_context_tokens",
-            "soul_file",
-        ):
-            setattr(profile, field, getattr(payload, field))
-        for field, value in refs.items():
-            setattr(profile, field, value)
+        profile.name = payload.name
+        profile.llm_client_name = payload.llm_client_name
+        profile.base_url = payload.base_url
+        profile.model = payload.model
+        profile.api_key = payload.api_key
+        profile.temperature = payload.temperature
+        profile.max_output_tokens = payload.max_output_tokens
+        profile.reasoning_effort = payload.reasoning_effort
+        profile.max_context_tokens = payload.max_context_tokens
+        profile.vision_image_profile = self._resolve_profile_reference(
+            payload.vision_image_profile,
+        )
+        profile.audio_profile = self._resolve_profile_reference(
+            payload.audio_profile,
+        )
+        profile.vision_video_profile = self._resolve_profile_reference(
+            payload.vision_video_profile,
+        )
+        profile.soul_file = payload.soul_file
 
     # ------------------------------------------------------------------
     # v2 写入
@@ -547,7 +447,6 @@ class LLMProfileStore:
 
     def _save_unlocked(self, data: LLMProfileData | None = None) -> None:
         target = data if data is not None else self._data
-        self._validate_root(target)
         self._agentspace_dir.mkdir(parents=True, exist_ok=True)
 
         if self._path.exists():
