@@ -30,17 +30,8 @@ FALLBACK_SESSION = "default"
 
 
 def load_all_memory(path: str | Path) -> dict[str, dict[str, str]]:
-    """从文件加载整个 data 字典。
-
-    文件不存在或 key 不存在时返回空 dict。
-    """
-    try:
-        return load(__VERSION__, str(path), dict[str, dict[str, str]])
-    except (FileNotFoundError, KeyError):
-        return {}
-    except Exception:
-        logger.warning("Failed to load memory data", exc_info=True)
-        return {}
+    """从文件加载整个 data 字典"""
+    return load(__VERSION__, str(path))
 
 
 def save_all_memory(path: str | Path, data: dict[str, dict[str, str]]) -> None:
@@ -53,18 +44,14 @@ def get_parent_ids(session_id: str) -> list[str]:
 
     任何异常或不可用时返回空列表。
     """
-    try:
-        from system.application import Application
-        app = Application.current()
-        if app.session_manager is None:
-            return []
-        info = app.session_manager.get(session_id)
-        if info is None:
-            return []
-        return list(info.parents)
-    except Exception:
-        logger.debug("Failed to get parent ids for session %s", session_id, exc_info=True)
+    from system.application import Application
+    app = Application.current()
+    if app.session_manager is None:
         return []
+    info = app.session_manager.get(session_id)
+    if info is None:
+        return []
+    return list(info.parents)
 
 
 def _get_or_create_session_dict(

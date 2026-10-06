@@ -306,6 +306,7 @@ class AgentspaceService:
                 temp = target.with_name(
                     f".{target.name}.{uuid.uuid4().hex}{AGENTSPACE_ATOMIC_TMP_SUFFIX}"
                 )
+                # TODO: 这里存在一层额外的换行转换, 需要再次考量
                 line_ending = "\r\n" if b"\r\n" in initial_raw else "\n"
                 disk_content = content.replace("\n", line_ending)
                 try:

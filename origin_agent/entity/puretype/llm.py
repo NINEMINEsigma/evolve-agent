@@ -137,7 +137,8 @@ class ModalityCapability(BaseModel):
 
 class LLMProfile(BaseModel):
     """LLM 主模型配置项（前端可切换）。"""
-    model_config = ConfigDict(extra="forbid", validate_assignment=True)
+    # NOTE: 不能设置validate_assignment, 会导致创建时recursion_loop错误
+    model_config = ConfigDict(extra="forbid")
 
     name: str = ""
     llm_client_name: str = ""
