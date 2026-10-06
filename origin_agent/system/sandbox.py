@@ -101,6 +101,28 @@ class SandboxError(PermissionError):
     """当工具操作违反沙盒约束时抛出。"""
 
 
+class DynamicSandboxInputError(ValueError):
+    """动态沙盒空间名称、路径或描述等业务输入无效时抛出。
+
+    Gateway 捕获后映射 HTTP 400。内部类型不变量（如字段非字符串/布尔）
+    仍抛 ``TypeError``，不在此类中。
+    """
+
+
+class DynamicSandboxConflictError(DynamicSandboxInputError):
+    """动态沙盒空间名称重复、同名配置不同或路径与已有空间/内置命名空间重叠时抛出。
+
+    Gateway 捕获后映射 HTTP 409（比 ``DynamicSandboxInputError`` 更具体，优先匹配）。
+    """
+
+
+class DynamicSandboxNotFoundError(KeyError):
+    """按名称更新动态沙盒空间但目标不存在时抛出。
+
+    Gateway 捕获后映射 HTTP 404。
+    """
+
+
 # ---------------------------------------------------------------------------
 # Sandbox
 # ---------------------------------------------------------------------------
@@ -175,11 +197,11 @@ class Sandbox:
 
     def _normalize_dynamic_path(self, raw_path: str) -> Path:
         """词法规范化绝对路径，不主动解析符号链接或目录联接点。"""
-        if type(raw_path) is not str or not raw_path.strip():
-            raise ValueError("Dynamic sandbox space path must be a non-empty string")
+        if not raw_path.strip():
+            raise DynamicSandboxInputError("Dynamic sandbox space path must be a non-empty string")
         candidate = Path(raw_path.strip())
         if not candidate.is_absolute():
-            raise ValueError("Dynamic sandbox space path must be absolute")
+            raise DynamicSandboxInputError("Dynamic sandbox space path must be absolute")
         return Path(os.path.abspath(os.path.normpath(str(candidate))))
 
     @staticmethod
@@ -205,38 +227,25 @@ class Sandbox:
         require_normalized: bool,
     ) -> DynamicSandboxSpace:
         """校验并返回规范化动态空间，不修改传入对象。"""
-        if not isinstance(space, DynamicSandboxSpace):
-            raise TypeError("Dynamic sandbox spaces must contain DynamicSandboxSpace instances")
-        if set(space.__dict__) - {"name", "path", "description", "is_readonly"}:
-            raise TypeError("DynamicSandboxSpace contains unknown fields")
-        if type(space.name) is not str:
-            raise TypeError("DynamicSandboxSpace.name must be a string")
-        if type(space.path) is not str:
-            raise TypeError("DynamicSandboxSpace.path must be a string")
-        if type(space.description) is not str:
-            raise TypeError("DynamicSandboxSpace.description must be a string")
-        if type(space.is_readonly) is not bool:
-            raise TypeError("DynamicSandboxSpace.is_readonly must be a boolean")
-
         name = space.name.strip()
         if not re.fullmatch(DYNAMIC_SANDBOX_SPACE_NAME_PATTERN, name):
-            raise ValueError(
+            raise DynamicSandboxInputError(
                 "Dynamic sandbox space name must start with an ASCII letter or underscore "
                 "and contain only ASCII letters, digits, and underscores"
             )
         if name in NAMESPACE_PREFIXES:
-            raise ValueError(f"Dynamic sandbox space name conflicts with built-in namespace: {name!r}")
+            raise DynamicSandboxInputError(f"Dynamic sandbox space name conflicts with built-in namespace: {name!r}")
 
         description = space.description.strip()
         if not description:
-            raise ValueError("Dynamic sandbox space description must not be empty")
+            raise DynamicSandboxInputError("Dynamic sandbox space description must not be empty")
         if len(description) > DYNAMIC_SANDBOX_SPACE_DESCRIPTION_MAX_CHARS:
-            raise ValueError(
+            raise DynamicSandboxInputError(
                 "Dynamic sandbox space description exceeds "
                 f"{DYNAMIC_SANDBOX_SPACE_DESCRIPTION_MAX_CHARS} characters"
             )
         if any((ord(char) < 32 and char not in "\n\r\t") or ord(char) == 127 for char in description):
-            raise ValueError("Dynamic sandbox space description contains unsafe control characters")
+            raise DynamicSandboxInputError("Dynamic sandbox space description contains unsafe control characters")
 
         normalized_path = self._normalize_dynamic_path(space.path)
         normalized = DynamicSandboxSpace(
@@ -254,14 +263,14 @@ class Sandbox:
 
         for other in existing:
             if other.name == normalized.name:
-                raise ValueError(f"Duplicate dynamic sandbox space name: {normalized.name!r}")
+                raise DynamicSandboxConflictError(f"Duplicate dynamic sandbox space name: {normalized.name!r}")
             if self._paths_overlap(normalized_path, Path(other.path)):
-                raise ValueError(
+                raise DynamicSandboxConflictError(
                     f"Dynamic sandbox space path overlaps {other.name!r}: {other.path}"
                 )
         for namespace, base in self._static_namespace_bases().items():
             if self._paths_overlap(normalized_path, base):
-                raise ValueError(
+                raise DynamicSandboxConflictError(
                     f"Dynamic sandbox space path overlaps built-in namespace "
                     f"'{namespace}:': {base}"
                 )
@@ -272,24 +281,12 @@ class Sandbox:
         config = make_config(self._dynamic_spaces_path)
         if not self._dynamic_spaces_path.exists():
             return DynamicSandboxSpaceData()
-        if not contains(DYNAMIC_SANDBOX_SPACES_ES_KEY, config):
-            raise TypeError(
-                f"Dynamic sandbox space storage is missing key "
-                f"{DYNAMIC_SANDBOX_SPACES_ES_KEY!r}"
-            )
         data = load(
             DYNAMIC_SANDBOX_SPACES_ES_KEY,
             config,
+            DynamicSandboxSpaceData,
             ignore_missing_fields=False,
         )
-        if not isinstance(data, DynamicSandboxSpaceData):
-            raise TypeError(
-                "Dynamic sandbox space storage root must be DynamicSandboxSpaceData"
-            )
-        if set(data.__dict__) - {"spaces"}:
-            raise TypeError("DynamicSandboxSpaceData contains unknown fields")
-        if not isinstance(data.spaces, list):
-            raise TypeError("DynamicSandboxSpaceData.spaces must be a list")
         validated: list[DynamicSandboxSpace] = []
         for space in data.spaces:
             validated.append(self._validate_dynamic_space(
@@ -382,14 +379,6 @@ class Sandbox:
         """新增全局动态空间；完全相同的同名配置幂等成功。"""
         if self._ctx.mode != "fast":
             raise SandboxError("Dynamic sandbox spaces can only be modified in fast mode")
-        if type(name) is not str:
-            raise TypeError("Dynamic sandbox space name must be a string")
-        if type(path) is not str:
-            raise TypeError("Dynamic sandbox space path must be a string")
-        if type(description) is not str:
-            raise TypeError("Dynamic sandbox space description must be a string")
-        if type(is_readonly) is not bool:
-            raise TypeError("Dynamic sandbox space is_readonly must be a boolean")
         candidate = DynamicSandboxSpace(
             name=name,
             path=path,
@@ -413,7 +402,7 @@ class Sandbox:
                         current.path,
                     )
                     return current.model_copy(deep=True), False
-                raise ValueError(
+                raise DynamicSandboxConflictError(
                     f"Dynamic sandbox space {normalized.name!r} already exists with different configuration"
                 )
             self._dynamic_spaces_data.spaces.append(normalized)
@@ -445,19 +434,11 @@ class Sandbox:
         """原子更新全局动态空间；名称固定不变。"""
         if self._ctx.mode != "fast":
             raise SandboxError("Dynamic sandbox spaces can only be modified in fast mode")
-        if type(name) is not str:
-            raise TypeError("Dynamic sandbox space name must be a string")
-        if type(path) is not str:
-            raise TypeError("Dynamic sandbox space path must be a string")
-        if type(description) is not str:
-            raise TypeError("Dynamic sandbox space description must be a string")
-        if type(is_readonly) is not bool:
-            raise TypeError("Dynamic sandbox space is_readonly must be a boolean")
         normalized_name = name.strip()
         if not re.fullmatch(DYNAMIC_SANDBOX_SPACE_NAME_PATTERN, normalized_name):
-            raise ValueError("Invalid dynamic sandbox space name")
+            raise DynamicSandboxInputError("Invalid dynamic sandbox space name")
         if normalized_name in NAMESPACE_PREFIXES:
-            raise ValueError("Built-in namespaces cannot be updated")
+            raise DynamicSandboxInputError("Built-in namespaces cannot be updated")
         candidate = DynamicSandboxSpace(
             name=normalized_name,
             path=path,
@@ -467,7 +448,7 @@ class Sandbox:
         with self._dynamic_spaces_lock:
             current = self._dynamic_space_by_name_unlocked(normalized_name)
             if current is None:
-                raise KeyError(f"Dynamic sandbox space not found: {normalized_name!r}")
+                raise DynamicSandboxNotFoundError(f"Dynamic sandbox space not found: {normalized_name!r}")
             index = self._dynamic_spaces_data.spaces.index(current)
             others = [space for space in self._dynamic_spaces_data.spaces if space is not current]
             normalized = self._validate_dynamic_space(
@@ -501,13 +482,11 @@ class Sandbox:
         """按名称删除全局动态空间；名称不存在时幂等成功。"""
         if self._ctx.mode != "fast":
             raise SandboxError("Dynamic sandbox spaces can only be modified in fast mode")
-        if type(name) is not str:
-            raise TypeError("Dynamic sandbox space name must be a string")
         normalized_name = name.strip()
         if not re.fullmatch(DYNAMIC_SANDBOX_SPACE_NAME_PATTERN, normalized_name):
-            raise ValueError("Invalid dynamic sandbox space name")
+            raise DynamicSandboxInputError("Invalid dynamic sandbox space name")
         if normalized_name in NAMESPACE_PREFIXES:
-            raise ValueError("Built-in namespaces cannot be removed")
+            raise DynamicSandboxInputError("Built-in namespaces cannot be removed")
         with self._dynamic_spaces_lock:
             current = self._dynamic_space_by_name_unlocked(normalized_name)
             if current is None:

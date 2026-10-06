@@ -1047,6 +1047,14 @@ classDiagram
 
 ## 关键设计变更记录
 
+### Gateway 快速失败与 Profile 提交顺序
+
+Gateway 普通 HTTP 响应保留 BaseModel（含字典/列表中的嵌套模型），由 FastAPI 编码；显式 Response、WebSocket 和 SSE 仍在实际传输边界序列化。接口只转换专门的业务异常，意外错误不再被通用 `Exception`/`OSError` 包装成固定 500，也不返回空结果或默认请求掩盖失败。Profile 的 `ProfileNotFoundError`/`ProfileConflictError` 和动态沙盒空间的 `DynamicSandboxInputError`/`DynamicSandboxConflictError`/`DynamicSandboxNotFoundError` 均定义在所属业务模块，不新增全局生命周期对象。
+
+`LLMProfileStore` 六个写方法改为候选根先保存、成功后提交共享内存；更新候选图先复制全部 Profile，再按对象身份重连三个 Profile 引用和五个全局引用，提交时仍更新原实例。不再维护 `_snapshot_profile`/`_restore_profile` 或失败回滚。`assert_removable`/`remove_profile` 的 `clear_global_selections` 关键字参数允许在一次根对象写入中清空指向删除目标的审批/元数据引用，其他 Profile 与全局多模态引用依然阻止删除。先完成业务检查再修改，避免拒绝删除时已经清空全局选择；跨 Profile 文件、会话名称指针和通知仍无整体事务。
+
+`ws_chat` 的初始化归入连接生命周期 `finally`，取消与意外错误继续传播；订阅清理即使失败也释放属于本连接的交互和连接登记。重新生成入口在 `finally` 中结束匹配的活动标识，包括请求取消与通知编码失败；不改变 Loop 的 task 登记归属。无新增 protected 字段或跨类访问。
+
 ### 流式事件模型与发送边界收敛
 
 `AgentSink.emit_stream_delta()` 及两个实现均接收 `ToolCallRequest` / `ToolCallDelta`，`StreamConsumer` 不再在调用前降级为 dict。`FrontendSink` 构造 `entity.puretype.ws` 中的 `StreamDeltaEvent` / `StreamDoneEvent`，以 `StreamEvent` 判别联合约束 `_send_stream_event()`，仅在此执行 `model_dump_json(exclude_none=True)` 并发送；模型/序列化错误不作为网络错误吞掉。`MessageMetrics` 全程保持实例，`ParentAgentSink` 通过属性适配原子会话反馈通道，主/子会话路由、History与中断收尾顺序不变。

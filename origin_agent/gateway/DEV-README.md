@@ -119,6 +119,8 @@ WS /ws/chat?resume=<sid>
 
 ### 流式事件发送边界
 
+`ws_chat` 从连接登记后的初始化起进入统一 `try/finally`：客户端信息读取、Loop 创建、服务端状态与 Agentspace 订阅任一步意外失败均传播，不继续提供不完整握手。订阅释放即使失败，也在嵌套 `finally` 中释放本连接的待审批/询问和连接登记；旧连接不得清除已接管的新连接状态。明确断线按正常生命周期结束，取消继续传播；通用 `RuntimeError` 不再被解释成正常断线。Agentspace 后台转发失败记录原异常并关闭连接，不伪造 watcher 降级状态。
+
 `entity.puretype.ws` 中的 `StreamDeltaEvent` / `StreamDoneEvent` 是下行流式事件的权威模型，`StreamEvent` 以 `type` 区分两者。`FrontendSink` 直接持有并发送模型；Gateway只负责连接生命周期，不再提供 `_send_tool_event(session_id, event_type, tool_name, payload)` 字符串回调，启动时也不再注册该旧回调。
 
 `ToolCallRequest`、`ToolCallDelta`、`MessageMetrics` 在进程内保持类型，流式事件在 `FrontendSink._send_stream_event()` 才执行一次 JSON 序列化；可选 `None` 字段省略。工具增量保留 `id/index/name/args_delta/phase`，起始 `id` 可为空，`phase` 为 `start/append/done`，不把未完成的 `args_delta` 当作完整 JSON解析。现有事件出口的空结束正文仍按旧规则省略，不改变中断时的部分输出。其他非流式事件与入站通用 `Message` 暂时保持原协议。
@@ -135,7 +137,13 @@ WS /ws/chat?resume=<sid>
 
 ## HTTP 请求类型边界
 
-Gateway REST 的 JSON 请求体在进入业务逻辑前统一解析为 `entity.puretype` 中的 Pydantic `BaseModel`。会话操作请求位于 `session.py`，confirm/ask 入站请求位于 `ws.py`，动态端点请求位于 `extools.py`，Agentspace 垃圾桶操作请求位于 `agentspace.py`。`server.py` 的统一解析边界负责保留既有 400、默认值和业务错误响应，业务代码不再通过裸请求字典读取字段。
+Gateway 遵循快速失败：只将明确的业务异常映射为 HTTP 400/404/409 等状态；逻辑之外的异常直接传播给 FastAPI，不额外捕获后转换成通用 500，不返回空列表或默认请求继续执行。请求体 JSON 语法/编码错误返回 400，模型校验错误返回 400；原有 `default_on_json_error` 已移除，要求 JSON 请求体的端点不再用空模型替代无效 JSON（包括空 body）。
+
+普通 HTTP 返回值保留 BaseModel，包括字典/列表中的嵌套模型，由 FastAPI 自动序列化。需要展开字段并增加兼容字段的响应暂保留字典适配；显式 `HTMLResponse` 的 JSON 正文使用 `model_dump_json(exclude_none=True)`，保持原有动态状态码及省略空字段的协议。WebSocket/SSE 不走普通 HTTP 返回值编码，仍在实际发送边界编码。HTTP 附带 WebSocket 通知在编码后跳过明确已关闭的连接，仅捕获 `WebSocketDisconnect`；模型构造、编码和其他内部错误不被吞没。
+
+Profile API 只捕获 `ProfileNotFoundError`/`ProfileConflictError`，不捕获通用 `LookupError`/`ValueError`/`OSError`。动态沙盒空间管理仅映射 `DynamicSandboxInputError`（400）、`DynamicSandboxConflictError`（409）、`DynamicSandboxNotFoundError`（404）及既有 `SandboxError`；不靠错误文本猜测冲突，也不把类型错误当作用户输入错误。Agentspace REST 仅映射 `AgentspaceError`；意外错误直接交给 FastAPI，其 500 响应不承诺旧版自定义 JSON `detail` 结构。
+
+Gateway REST 的 JSON 请求体在进入业务逻辑前统一解析为 `entity.puretype` 中的 Pydantic `BaseModel`。会话操作请求位于 `session.py`，confirm/ask 入站请求位于 `ws.py`，动态端点请求位于 `extools.py`，Agentspace 垃圾桶操作请求位于 `agentspace.py`。合法 JSON 中省略可选字段时沿用模型默认值；非法 JSON 不再使用默认请求，业务代码通过属性访问稳定字段。
 
 动态端点的 `content` 使用稳定的多模态 content block 联合类型；content block 对未知扩展字段保持兼容，Gateway 在进入既有消息队列前转换为内部 `MessageContent` 结构。该转换是传输边界适配，不改变 History 或 LLM wire format。前端请求字段和 JSON wire format 保持不变。
 
@@ -158,7 +166,7 @@ Gateway REST 的 JSON 请求体在进入业务逻辑前统一解析为 `entity.p
 | POST | `/api/sessions/merge` | 合并多个已归档会话；所有父摘要必须齐备，任一失败则整体失败 |
 | DELETE | `/api/sessions/{id}` | 永久删除会话；拒绝“随意聊聊”、不存在目标和重复删除 |
 
-永久删除先建立进程内删除中标记以阻止新连接重建 Loop，再关闭现有 WebSocket、停止子Agent、回收活动回复/消息队列/客户端信息/Cron 注册，随后删除会话索引与目录并清理 Shell、Cron 和动态端点。删除中并发请求对已移除的 Loop返回未找到或未就绪；附带资源清理失败不回滚已经完成的永久删除。
+永久删除先建立进程内删除中标记以阻止新连接重建 Loop，再关闭现有 WebSocket、停止子Agent、回收活动回复/消息队列/客户端信息/Cron 注册，随后删除会话索引与目录并清理 Shell、Cron 和动态端点。删除中并发请求对已移除的 Loop返回未找到或未就绪。Gateway 不吞掉子Agent停止或资源清理异常；前置步骤失败即终止后续删除，已完成的永久删除不因后续失败自动回滚。删除中标记在 `finally` 释放。下层服务的独立异常处理不在本次 Gateway 清理范围内。
 
 ### 聊天 History 按需读取
 
@@ -217,7 +225,9 @@ Shell 输出由 Agent 使用 `ReadShell` 拉取，不通过聊天 WebSocket 主�
 
 `llm-profile` 返回 `SessionLlmProfileState(session_id, profile_name, available)`：profile_name为空字符串表示显式无配置，null表示会话和全局指针均缺失；非空名称的available只表示存在于注册表，不代表连接已验证。不存在或删除中会话返回404，指针格式/IO读取错误返回500；响应no-store，可查询归档及随意聊聊。该接口反映持久化指针，不是进行中的客户端快照。浏览器会话待用选择优先于恢复值，只在发送到主会话或重新生成时通过既有通道提交；没有新增切换Profile的PUT接口。
 
-前端 USER_MESSAGE 与重新生成请求只传 `llm_profile_name`，不传完整 Profile。空字符串表示明确无配置。`/resume` 请求不接收 `llm_profile_name`，始终使用当前 `ParentAgentLoop` 已持有的活动 Profile；前端刚切换但尚未通过 USER_MESSAGE 或重新生成提交的 Profile，不会被 resume 应用。Profile 重命名和删除通过 `llm_profile_changed` 广播；忙碌会话不在删除请求中切换。
+前端 USER_MESSAGE 与重新生成请求只传 `llm_profile_name`，不传完整 Profile。Profile 删除先检查其他 Profile 和全局多模态引用；允许删除时由 Store 在一次根对象写入中删除目标并清空指向它的审批/元数据引用，再更新会话运行配置和名称指针，避免业务拒绝时已清空引用。Profile 文件、会话指针文件和通知不是跨文件事务；后续失败直接报告，已提交部分不自动恢复。
+
+前端 USER_MESSAGE 与重新生成请求中，空字符串表示明确无配置。`/resume` 请求不接收 `llm_profile_name`，始终使用当前 `ParentAgentLoop` 已持有的活动 Profile；前端刚切换但尚未通过 USER_MESSAGE 或重新生成提交的 Profile，不会被 resume 应用。Profile 重命名和删除通过 `llm_profile_changed` 广播；忙碌会话不在删除请求中切换。
 
 ### 审批 Profile
 

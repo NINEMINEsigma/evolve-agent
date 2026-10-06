@@ -26,6 +26,7 @@ from pydantic import BaseModel, ValidationError
 from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect, WebSocketException
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
+from starlette.websockets import WebSocketState
 
 from .chat import Message, MessageType
 from .message_router import MessageRouter
@@ -75,6 +76,7 @@ from entity.puretype import (
     DynamicEndpointRequest,
     AgentspaceOperationRequest,
     MessageContent,
+    LLMProfile,
     LLMProfilePayload,
     LLMProfileUpdateRequest,
     LLMProfileDeleteRequest,
@@ -91,8 +93,6 @@ from entity.puretype import (
     AgentspacePathRequest,
     AgentspaceRenameRequest,
     AgentspaceEvent,
-    AgentspaceEventKind,
-    AgentspaceEventSource,
     DynamicSandboxSpace,
     DynamicSandboxSpaceCreateRequest,
     DynamicSandboxSpaceUpdateRequest,
@@ -107,8 +107,15 @@ from entity.puretype import (
     SubAgentUpdate,
 )
 from system.context import get_runtime_context
-from entry.parent_agent_loop import IncompatibleHistoryError
-from entry.base_agent_loop import IMainSessionLoop
+from system.llm_profile_store import ProfileConflictError, ProfileNotFoundError
+from system.session_metadata import MetadataGenerationError, MetadataProfileUnavailableError
+from system.agentspace import AgentspaceError
+from system.sandbox import (
+    DynamicSandboxConflictError,
+    DynamicSandboxInputError,
+    DynamicSandboxNotFoundError,
+    SandboxError,
+)
 
 if TYPE_CHECKING:
     from system.application import Application
@@ -143,19 +150,27 @@ _agentspace_path: Path | None = None
 
 async def shutdown_subagent_orchestrator() -> None:
     """优雅停止 SubAgentOrchestrator（供 shutdown 流程调用）。"""
-    try:
-        from system.application import Application
-        orch = Application.current().subagent_orchestrator
-        if orch is not None:
-            await orch.shutdown_all()
-    except Exception as exc:
-        logger.warning("SubAgentOrchestrator shutdown skipped: %s", exc, exc_info=True)
+    from system.application import Application
+    orch = Application.current().subagent_orchestrator
+    if orch is not None:
+        await orch.shutdown_all()
 
 
 def get_subagent_orchestrator():
     """返回 SubAgentOrchestrator 单例（供工具层调用）。"""
     from system.application import Application
     return Application.current().subagent_orchestrator
+
+
+async def _send_optional_ws_message(ws: WebSocket, message: Message) -> None:
+    """HTTP 操作的附带通知允许客户端断线；编码和内部错误直接传播。"""
+    payload = message.model_dump_json(exclude_none=True)
+    if ws.application_state is WebSocketState.DISCONNECTED:
+        return
+    try:
+        await ws.send_text(payload)
+    except WebSocketDisconnect:
+        logger.info("WebSocket disconnected during notification | session=%s", message.session_id)
 
 
 async def push_subagent_update(
@@ -170,23 +185,17 @@ async def push_subagent_update(
     ws = _get_ws(parent_session_id)
     if ws is None:
         return
-    import json as _json
-    try:
-        await ws.send_text(
-            json.dumps(
-                Message(
-                    type=MessageType.SUBAGENT_UPDATE,
-                    session_id=parent_session_id,
-                    result=_json.dumps({
-                        **update.model_dump(mode="json", exclude={"removed"}),
-                        "_removed": update.removed,
-                    }, ensure_ascii=False),
-                ).model_dump(exclude_none=True),
-                ensure_ascii=False,
-            )
-        )
-    except Exception as exc:
-        logger.warning("Failed to push subagent update to session=%s: %s", parent_session_id, exc, exc_info=True)
+    await _send_optional_ws_message(
+        ws,
+        Message(
+            type=MessageType.SUBAGENT_UPDATE,
+            session_id=parent_session_id,
+            result=json.dumps({
+                **update.model_dump(mode="json", exclude={"removed"}),
+                "_removed": update.removed,
+            }, ensure_ascii=False),
+        ),
+    )
 
 
 def set_agentspace_path(path: str | Path) -> None:
@@ -233,11 +242,7 @@ def _compute_build_hash() -> str:
     idx: Path = _FRONTEND_DIST / "index.html"
     if not idx.exists():
         return ""
-    try:
-        return hashlib.md5(idx.read_bytes()).hexdigest()[:12]
-    except Exception:
-        logger.warning("Failed to compute frontend build hash", exc_info=True)
-        return ""
+    return hashlib.md5(idx.read_bytes()).hexdigest()[:12]
 
 
 _BUILD_HASH: str = _compute_build_hash()
@@ -255,12 +260,8 @@ if _FRONTEND_DIST.is_dir():
 
 def _flush_pending_changes() -> str | None:
     """供现有 agentspace_changes_hook 调用，委托给唯一业务服务。"""
-    try:
-        from system.application import Application
-        return Application.current().agentspace_service.flush_pending_changes()
-    except Exception:
-        logger.warning("Failed to flush Agentspace change summary", exc_info=True)
-        return None
+    from system.application import Application
+    return Application.current().agentspace_service.flush_pending_changes()
 
 
 # ---------------------------------------------------------------------------
@@ -276,15 +277,11 @@ TRequest = TypeVar("TRequest", bound=BaseModel)
 async def _parse_request_model(
     req: Request,
     model_type: type[TRequest],
-    *,
-    default_on_json_error: bool = False,
 ) -> TRequest:
     """在 HTTP 入站边界把 JSON 解析为稳定请求模型。"""
     try:
         payload = await req.json()
-    except Exception as exc:
-        if default_on_json_error:
-            return model_type()
+    except (json.JSONDecodeError, UnicodeDecodeError) as exc:
         raise HTTPException(status_code=400, detail="Invalid JSON body") from exc
     try:
         return model_type.model_validate(payload)
@@ -298,7 +295,7 @@ async def _parse_dynamic_endpoint_request(
     """解析动态端点请求，并把 block 校验错误映射为既有 400 文本。"""
     try:
         payload = await req.json()
-    except Exception:
+    except (json.JSONDecodeError, UnicodeDecodeError):
         return None, "invalid JSON body"
     try:
         request = DynamicEndpointRequest.model_validate(payload)
@@ -372,14 +369,7 @@ async def list_tags():
 @app.put("/api/sessions/{session_id}/tags")
 async def update_session_tags(session_id: str, req: Request):
     """更新 session 的标签列表。"""
-    try:
-        request = await _parse_request_model(
-            req,
-            SessionTagsUpdateRequest,
-            default_on_json_error=True,
-        )
-    except HTTPException:
-        return {"updated": False, "error": "tags must be an array", "session_id": session_id}
+    request = await _parse_request_model(req, SessionTagsUpdateRequest)
     tags: list[str] = [str(tag).strip() for tag in request.tags]
     valid = _get_sm().set_session_tags(session_id, tags)
     logger.info("Update tags | session=%s tags=%s", session_id, valid)
@@ -453,46 +443,35 @@ async def get_session_llm_profile(session_id: str, response: Response) -> Sessio
     sm = application.session_manager
     if sm is None or not sm.exists(session_id) or sm.is_session_deleting(session_id):
         raise HTTPException(status_code=404, detail="Session not found")
-    try:
-        with application.profile_lock:
-            if not sm.exists(session_id) or sm.is_session_deleting(session_id):
-                raise HTTPException(status_code=404, detail="Session not found")
-            store = SessionStore(application.runtime_context.workspace / SESSIONS_DIR_NAME)
-            name = store.read_active_profile_name(session_id)
-            available = False
-            if name:
-                try:
-                    application.llm_profile_store.get_profile(name)
-                    available = True
-                except LookupError:
-                    pass
-            response.headers["Cache-Control"] = "no-store"
-            return SessionLlmProfileState(
-                session_id=session_id, profile_name=name, available=available,
-            )
-    except HTTPException:
-        raise
-    except Exception:
-        logger.exception("Failed to read session LLM Profile pointer | session=%s", session_id)
-        raise HTTPException(status_code=500, detail="Failed to read session LLM Profile")
+    with application.profile_lock:
+        if not sm.exists(session_id) or sm.is_session_deleting(session_id):
+            raise HTTPException(status_code=404, detail="Session not found")
+        store = SessionStore(application.runtime_context.workspace / SESSIONS_DIR_NAME)
+        name = store.read_active_profile_name(session_id)
+        available = False
+        if name:
+            try:
+                application.llm_profile_store.get_profile(name)
+                available = True
+            except ProfileNotFoundError:
+                pass
+        response.headers["Cache-Control"] = "no-store"
+        return SessionLlmProfileState(
+            session_id=session_id, profile_name=name, available=available,
+        )
 
 
 @app.get("/api/sessions/{session_id}/subagents")
 async def get_session_subagents(session_id: str):
     """返回当前活跃子会话的快照。"""
-    try:
-        from system.application import Application
-        orch = Application.current().subagent_orchestrator
-        snapshot = orch.get_snapshot(parent_session_id=session_id)
-        return SubAgentSnapshotResponse(
-            session_id=session_id,
-            subagents=snapshot.subagents,
-        ).model_dump(mode="json")
-    except Exception:
-        return SubAgentSnapshotResponse(
-            session_id=session_id,
-            subagents={},
-        ).model_dump(mode="json")
+    from system.application import Application
+    snapshot = Application.current().subagent_orchestrator.get_snapshot(
+        parent_session_id=session_id,
+    )
+    return SubAgentSnapshotResponse(
+        session_id=session_id,
+        subagents=snapshot.subagents,
+    )
 
 
 @app.post("/api/confirm/{request_id}")
@@ -501,7 +480,6 @@ async def http_confirm(request_id: str, req: Request):
     request = await _parse_request_model(
         req,
         ConfirmResponseRequest,
-        default_on_json_error=True,
     )
     action: str = request.action
     if action not in ("allow_once", "allow_always", "deny"):
@@ -524,7 +502,6 @@ async def http_ask(request_id: str, req: Request):
     request = await _parse_request_model(
         req,
         AskResponseRequest,
-        default_on_json_error=True,
     )
     from system.application import Application
     sink = Application.current().frontend_sink
@@ -625,22 +602,16 @@ async def delete_session(session_id: str):
                 reason="session_deleted",
             )
 
-        # 停止该主会话下的所有子 Agent 并清理上下文。
-        try:
-            orch = get_subagent_orchestrator()
-            await orch.shutdown(session_id)
-        except Exception:
-            logger.warning("Failed to shutdown subagents for session=%s", session_id, exc_info=True)
+        # 停止子Agent失败时直接终止删除，不能继续移除仍在使用的会话。
+        orch = get_subagent_orchestrator()
+        await orch.shutdown(session_id)
 
         await sm.delete_session_runtime(session_id)
         sm.remove(session_id)
 
-        # 清理会话级附带资源。各资源独立容错，失败不回滚永久删除。
-        try:
-            from gateway.session_cleanup import cleanup_session_resources
-            await cleanup_session_resources(session_id)
-        except Exception:
-            logger.warning("Failed to cleanup session resources for session=%s", session_id, exc_info=True)
+        # 删除已提交；清理失败直接报告，不伪装成完整成功。
+        from gateway.session_cleanup import cleanup_session_resources
+        await cleanup_session_resources(session_id)
     finally:
         sm.end_session_delete(session_id)
 
@@ -654,13 +625,9 @@ async def get_session_history_skeleton(session_id: str, start_index: int = 0):
     loop = _get_loop(session_id)
     if loop is None:
         raise HTTPException(status_code=404, detail="agent loop not ready")
-    try:
-        return loop.loop.get_session_history_skeleton(start_index)
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    except Exception as exc:
-        logger.exception("History skeleton failed | session=%s", session_id)
-        raise HTTPException(status_code=500, detail="history skeleton failed") from exc
+    if start_index < 0 or start_index > loop.loop.history.count:
+        raise HTTPException(status_code=400, detail="start_index out of range")
+    return loop.loop.get_session_history_skeleton(start_index)
 
 
 @app.get("/api/sessions/{session_id}/history/page")
@@ -680,13 +647,7 @@ async def get_session_history_page(
     loop = _get_loop(session_id)
     if loop is None:
         raise HTTPException(status_code=404, detail="agent loop not ready")
-    try:
-        return loop.loop.get_session_history_page(start_index, limit)
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    except Exception as exc:
-        logger.exception("History page failed | session=%s", session_id)
-        raise HTTPException(status_code=500, detail="history page failed") from exc
+    return loop.loop.get_session_history_page(start_index, limit)
 
 
 @app.get("/api/sessions/{session_id}/history/resources")
@@ -695,11 +656,7 @@ async def get_session_history_resources(session_id: str):
     loop = _get_loop(session_id)
     if loop is None:
         raise HTTPException(status_code=404, detail="agent loop not ready")
-    try:
-        return loop.loop.get_session_history_resources()
-    except Exception as exc:
-        logger.exception("History resources failed | session=%s", session_id)
-        raise HTTPException(status_code=500, detail="history resources failed") from exc
+    return loop.loop.get_session_history_resources()
 
 
 @app.put("/api/sessions/{session_id}/messages/{message_index}")
@@ -709,7 +666,6 @@ async def update_session_message(session_id: str, message_index: int, req: Reque
     request = await _parse_request_model(
         req,
         SessionMessageEditRequest,
-        default_on_json_error=True,
     )
     content = request.content
     if isinstance(content, list):
@@ -723,7 +679,7 @@ async def update_session_message(session_id: str, message_index: int, req: Reque
             error="archived session cannot be edited",
         )
         return HTMLResponse(
-            json.dumps(result.model_dump(exclude_none=True), ensure_ascii=False),
+            result.model_dump_json(exclude_none=True),
             media_type="application/json",
             status_code=403,
         )
@@ -741,7 +697,7 @@ async def update_session_message(session_id: str, message_index: int, req: Reque
             error="session is processing",
         )
         return HTMLResponse(
-            json.dumps(result.model_dump(exclude_none=True), ensure_ascii=False),
+            result.model_dump_json(exclude_none=True),
             media_type="application/json",
             status_code=409,
         )
@@ -749,7 +705,7 @@ async def update_session_message(session_id: str, message_index: int, req: Reque
     status_code = 200 if result.updated else 400
     logger.info("Edit message result | session=%s index=%d updated=%s", session_id, message_index, result.updated)
     return HTMLResponse(
-        json.dumps(result.model_dump(exclude_none=True), ensure_ascii=False),
+        result.model_dump_json(exclude_none=True),
         media_type="application/json",
         status_code=status_code,
     )
@@ -767,7 +723,7 @@ async def delete_session_messages(session_id: str, count: int = 1):
             error="archived session",
         )
         return HTMLResponse(
-            json.dumps(result.model_dump(exclude_none=True), ensure_ascii=False),
+            result.model_dump_json(exclude_none=True),
             media_type="application/json",
             status_code=403,
         )
@@ -785,7 +741,7 @@ async def delete_session_messages(session_id: str, count: int = 1):
             error="session is processing",
         )
         return HTMLResponse(
-            json.dumps(result.model_dump(exclude_none=True), ensure_ascii=False),
+            result.model_dump_json(exclude_none=True),
             media_type="application/json",
             status_code=409,
         )
@@ -797,7 +753,7 @@ async def delete_session_messages(session_id: str, count: int = 1):
     status_code = 200 if result.deleted else 400
     logger.info("Delete messages result | session=%s count=%d deleted=%s remaining=%s", session_id, count, result.deleted, result.remaining_count)
     return HTMLResponse(
-        json.dumps(result.model_dump(exclude_none=True), ensure_ascii=False),
+        result.model_dump_json(exclude_none=True),
         media_type="application/json",
         status_code=status_code,
     )
@@ -815,7 +771,7 @@ async def delete_single_message(session_id: str, index: int):
             error="archived session",
         )
         return HTMLResponse(
-            json.dumps(result.model_dump(exclude_none=True), ensure_ascii=False),
+            result.model_dump_json(exclude_none=True),
             media_type="application/json",
             status_code=403,
         )
@@ -835,7 +791,7 @@ async def delete_single_message(session_id: str, index: int):
             error="session is processing",
         )
         return HTMLResponse(
-            json.dumps(result.model_dump(exclude_none=True), ensure_ascii=False),
+            result.model_dump_json(exclude_none=True),
             media_type="application/json",
             status_code=409,
         )
@@ -843,7 +799,7 @@ async def delete_single_message(session_id: str, index: int):
     result = loop.loop.delete_single_message(index)
     if not result.deleted:
         return HTMLResponse(
-            json.dumps(result.model_dump(exclude_none=True), ensure_ascii=False),
+            result.model_dump_json(exclude_none=True),
             media_type="application/json",
             status_code=400,
         )
@@ -858,7 +814,7 @@ async def delete_single_message(session_id: str, index: int):
     logger.info("Delete single message result | session=%s index=%d deleted=%s remaining=%s",
                 session_id, index, result.deleted, result.remaining_count)
     return HTMLResponse(
-        json.dumps(result.model_dump(exclude_none=True), ensure_ascii=False),
+        result.model_dump_json(exclude_none=True),
         media_type="application/json",
         status_code=200,
     )
@@ -876,7 +832,7 @@ async def regenerate_response(session_id: str, req: Request):
             error="archived session",
         )
         return HTMLResponse(
-            json.dumps(result.model_dump(exclude_none=True), ensure_ascii=False),
+            result.model_dump_json(exclude_none=True),
             media_type="application/json",
             status_code=403,
         )
@@ -898,7 +854,7 @@ async def regenerate_response(session_id: str, req: Request):
             error="session is processing",
         )
         return HTMLResponse(
-            json.dumps(result.model_dump(exclude_none=True), ensure_ascii=False),
+            result.model_dump_json(exclude_none=True),
             media_type="application/json",
             status_code=409,
         )
@@ -922,23 +878,18 @@ async def regenerate_response(session_id: str, req: Request):
 
     message_index = request.message_index
     profile_name = request.llm_profile_name
-    try:
-        from system.application import Application
-        application = Application.current()
-        with application.profile_lock:
+    from system.application import Application
+    application = Application.current()
+    with application.profile_lock:
+        try:
             profile = application.llm_profile_store.resolve_profile_name(profile_name)
-            loop.set_profile(profile)
-    except Exception as exc:
-        logger.exception(
-            "Failed to select LLM Profile for regenerate | session=%s name=%r",
-            session_id,
-            profile_name,
-        )
-        return HTMLResponse(
-            json.dumps({"regenerate": False, "error": str(exc)}, ensure_ascii=False),
-            media_type="application/json",
-            status_code=400,
-        )
+        except ProfileNotFoundError as exc:
+            return HTMLResponse(
+                json.dumps({"regenerate": False, "error": str(exc)}, ensure_ascii=False),
+                media_type="application/json",
+                status_code=400,
+            )
+        loop.set_profile(profile)
 
     # Profile 切换成功后、截断 History 前登记活动；失败时由 Gateway 收回。
     activity_id = loop.loop.ensure_main_session_activity(
@@ -947,51 +898,40 @@ async def regenerate_response(session_id: str, req: Request):
     )
     try:
         result = loop.loop.regenerate_response(message_index)
-    except Exception:
-        loop.loop.finish_main_session_activity(activity_id)
-        raise
-    if not result.regenerate:
-        loop.loop.finish_main_session_activity(activity_id)
-        return HTMLResponse(
-            json.dumps(result.model_dump(exclude_none=True), ensure_ascii=False),
-            media_type="application/json",
-            status_code=400,
-        )
-    content: str = result.last_user_content
-    # 通知前端裁剪本地消息并同步刷新后的扩展块
-    ws = _get_ws(session_id)
-    if ws:
-        try:
-            await ws.send_text(
-                json.dumps(
-                    Message(
-                        type=MessageType.SYSTEM,
-                        session_id=session_id,
-                        content=json.dumps({
-                            "regenerate_trim": True,
-                            "keep_count": result.remaining_count,
-                            "message_index": result.message_index,
-                            "message_suffix": result.message_suffix,
-                            "dynamic_message_suffix": result.dynamic_message_suffix,
-                        }),
-                    ).model_dump(exclude_none=True),
-                    ensure_ascii=False,
-                )
+        if not result.regenerate:
+            return HTMLResponse(
+                result.model_dump_json(exclude_none=True),
+                media_type="application/json",
+                status_code=400,
             )
-        except Exception:
-            logger.warning("Failed to send regenerate_trim to session=%s", session_id, exc_info=True)
-    # 没有前端连接时只重新生成并尽力而为推送
-    # 复用 process_message 流程（流式事件自动推送到 ws）
-    # 历史已包含最后一条 user 消息，避免重复追加
-    # Loop 在取得处理锁后自行登记当前回复 task，避免 Gateway 双重所有权。
-    reply: str = await loop.loop.process_message(
-        content,
-        skip_append=True,
-        visible_characters=result.visible_characters,
-        response_characters=result.response_characters,
-        activity_source=MainSessionActivitySource.regenerate,
-        activity_id=activity_id,
-    )
+        ws = _get_ws(session_id)
+        if ws:
+            await _send_optional_ws_message(
+                ws,
+                Message(
+                    type=MessageType.SYSTEM,
+                    session_id=session_id,
+                    content=json.dumps({
+                        "regenerate_trim": True,
+                        "keep_count": result.remaining_count,
+                        "message_index": result.message_index,
+                        "message_suffix": result.message_suffix,
+                        "dynamic_message_suffix": result.dynamic_message_suffix,
+                    }),
+                ),
+            )
+        # History 已包含最后一条 user 消息；Loop 自行登记本轮 task。
+        reply = await loop.loop.process_message(
+            result.last_user_content,
+            skip_append=True,
+            visible_characters=result.visible_characters,
+            response_characters=result.response_characters,
+            activity_source=MainSessionActivitySource.regenerate,
+            activity_id=activity_id,
+        )
+    finally:
+        # 释放本次登记，包含取消和通知编码失败，不吞掉原异常。
+        loop.loop.finish_main_session_activity(activity_id)
     from system.application import Application
     sink = Application.current().frontend_sink
     if sink is not None and reply:
@@ -999,22 +939,17 @@ async def regenerate_response(session_id: str, req: Request):
             session_id, reply, loop.current_character_agent,
         )
     if ws:
-        try:
-            await ws.send_text(
-                json.dumps(
-                    Message(
-                        type=MessageType.HISTORY_SYNC,
-                        session_id=session_id,
-                        history_count=loop.loop.history.count,
-                        processing=loop.loop.is_active(),
-                        token_usage=loop.get_token_usage(),
-                        context_tokens=loop.get_context_tokens(),
-                    ).model_dump(exclude_none=True),
-                    ensure_ascii=False,
-                )
-            )
-        except Exception:
-            logger.warning("Failed to send regenerate history_sync to session=%s", session_id, exc_info=True)
+        await _send_optional_ws_message(
+            ws,
+            Message(
+                type=MessageType.HISTORY_SYNC,
+                session_id=session_id,
+                history_count=loop.loop.history.count,
+                processing=loop.loop.is_active(),
+                token_usage=loop.get_token_usage(),
+                context_tokens=loop.get_context_tokens(),
+            ),
+        )
     logger.info("Regenerate ok | session=%s", session_id)
     return {
         "regenerate": True,
@@ -1053,22 +988,17 @@ async def resume_session_endpoint(session_id: str):
     logger.info("Resume ok | session=%s reply_len=%d", session_id, len(reply))
     ws = _get_ws(session_id)
     if ws:
-        try:
-            await ws.send_text(
-                json.dumps(
-                    Message(
-                        type=MessageType.HISTORY_SYNC,
-                        session_id=session_id,
-                        history_count=loop.loop.history.count,
-                        processing=loop.loop.is_active(),
-                        token_usage=loop.get_token_usage(),
-                        context_tokens=loop.get_context_tokens(),
-                    ).model_dump(exclude_none=True),
-                    ensure_ascii=False,
-                )
-            )
-        except Exception:
-            logger.warning("Failed to send resume history_sync to session=%s", session_id, exc_info=True)
+        await _send_optional_ws_message(
+            ws,
+            Message(
+                type=MessageType.HISTORY_SYNC,
+                session_id=session_id,
+                history_count=loop.loop.history.count,
+                processing=loop.loop.is_active(),
+                token_usage=loop.get_token_usage(),
+                context_tokens=loop.get_context_tokens(),
+            ),
+        )
     return {
         "resumed": True,
         "session_id": session_id,
@@ -1082,7 +1012,6 @@ async def update_session_title(session_id: str, req: Request):
     request = await _parse_request_model(
         req,
         SessionTitleUpdateRequest,
-        default_on_json_error=True,
     )
     title = request.title.strip()[:50]
     _get_sm().update_title(session_id, title)
@@ -1090,18 +1019,12 @@ async def update_session_title(session_id: str, req: Request):
     return {"updated": True, "session_id": session_id, "title": title}
 
 
-def _raise_metadata_http(exc: Exception) -> NoReturn:
-    """把元数据服务错误转换为稳定的 HTTP 状态。"""
-    from system.session_metadata import (
-        MetadataGenerationError,
-        MetadataProfileUnavailableError,
-    )
-
-    if isinstance(exc, MetadataProfileUnavailableError):
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
-    if isinstance(exc, MetadataGenerationError):
-        raise HTTPException(status_code=502, detail=str(exc)) from exc
-    raise exc
+def _raise_metadata_http(
+    exc: MetadataProfileUnavailableError | MetadataGenerationError,
+) -> NoReturn:
+    """只转换已识别的元数据业务错误。"""
+    status = 409 if isinstance(exc, MetadataProfileUnavailableError) else 502
+    raise HTTPException(status_code=status, detail=str(exc)) from exc
 
 
 @app.post("/api/sessions/{session_id}/auto-title")
@@ -1116,7 +1039,7 @@ async def auto_title_session(session_id: str):
         title = await Application.current().session_metadata_service.generate_title(
             session_id
         )
-    except Exception as exc:
+    except (MetadataProfileUnavailableError, MetadataGenerationError) as exc:
         _raise_metadata_http(exc)
     sm.update_title(session_id, title)
     logger.info("Auto title | session=%s title=%s", session_id, title)
@@ -1136,7 +1059,7 @@ async def auto_tags_session(session_id: str):
             session_id,
             sm.get_all_tags(),
         )
-    except Exception as exc:
+    except (MetadataProfileUnavailableError, MetadataGenerationError) as exc:
         _raise_metadata_http(exc)
     sm.set_session_tags(session_id, tags)
     logger.info("Auto tags | session=%s tags=%s", session_id, tags)
@@ -1164,7 +1087,7 @@ async def regenerate_summary_endpoint(session_id: str):
         summary = await Application.current().session_metadata_service.regenerate_summary(
             session_id
         )
-    except Exception as exc:
+    except (MetadataProfileUnavailableError, MetadataGenerationError) as exc:
         _raise_metadata_http(exc)
     return {"success": True, "summary": summary, "session_id": session_id}
 
@@ -1183,22 +1106,18 @@ async def terminate_session_endpoint(session_id: str):
         )
     logger.info("Terminate session | session=%s", session_id)
     # 先停止该父会话的所有子 Agent 会话
-    try:
-        orch = get_subagent_orchestrator()
-        await orch.shutdown(session_id)
-    except Exception:
-        logger.warning("Failed to terminate subagents for session=%s", session_id, exc_info=True)
+    orch = get_subagent_orchestrator()
+    await orch.shutdown(session_id)
     loop = _get_loop(session_id)
     if loop is not None:
         result = await loop.loop.terminate_session()
-        payload = result.model_dump()
         logger.info(
             "Terminate session complete | session=%s terminated=%s warnings=%d",
             session_id,
-            payload.get("terminated"),
-            len(payload.get("metadata_warnings", [])),
+            result.terminated,
+            len(result.metadata_warnings),
         )
-        return payload
+        return result
     logger.warning("Terminate session fail | session=%s error=agent loop not ready", session_id)
     return {"terminated": False, "error": "agent loop not ready", "session_id": session_id}
 
@@ -1220,7 +1139,6 @@ async def merge_sessions_endpoint(req: Request):
     request = await _parse_request_model(
         req,
         SessionMergeRequest,
-        default_on_json_error=True,
     )
     sources = request.sources
     logger.info("Merge sessions | sources=%s", sources)
@@ -1257,7 +1175,7 @@ async def list_shells_endpoint(session_id: str):
     from system.application import Application
 
     shells = Application.current().shell_manager.list_shells(session_id)
-    return {"shells": [item.model_dump() for item in shells]}
+    return {"shells": shells}
 
 
 @app.post("/api/sessions/{session_id}/shells/{shell_id}/stop")
@@ -1273,17 +1191,7 @@ async def stop_shell_endpoint(session_id: str, shell_id: str):
         )
     except ShellAccessError as exc:
         raise HTTPException(status_code=404, detail={"code": "shell_not_found", "message": str(exc)}) from exc
-    except Exception as exc:
-        logger.exception(
-            "Failed to stop Shell from frontend | session=%s shell=%s",
-            session_id,
-            shell_id,
-        )
-        raise HTTPException(
-            status_code=500,
-            detail={"code": "shell_stop_failed", "message": str(exc)},
-        ) from exc
-    return {"stopped": True, "shell": info.model_dump()}
+    return {"stopped": True, "shell": info}
 
 
 @app.get("/api/sessions/{session_id}/cron-tasks")
@@ -1494,9 +1402,6 @@ async def file_picker():
     except subprocess.TimeoutExpired:
         logger.warning("File dialog subprocess timed out")
         return {"uploaded": False, "error": "dialog_timeout"}
-    except Exception as exc:
-        logger.warning("File dialog exception: %s", exc)
-        return {"uploaded": False, "error": f"dialog_exception: {exc}"}
 
     if not paths:
         return {"uploaded": False, "files": []}
@@ -1571,7 +1476,11 @@ def serve_workspace_file(namespace: str, file_path: str, request: Request):
             kind = request.query_params.get(VISUAL_KIND_PARAM)
             if not sid or not kind:
                 return failure("Missing visual source", 400)
-            source = SessionVisualSource(session_id=sid, kind=SessionVisualKind(kind))
+            try:
+                visual_kind = SessionVisualKind(kind)
+            except ValueError:
+                return failure("Invalid visual kind", 400)
+            source = SessionVisualSource(session_id=sid, kind=visual_kind)
             state = service.get_state(source.session_id, source.kind)
             expected = sandbox.resolve_read(service.build_entry_logical_path(state))
             if expected.namespace != resolved.namespace or expected.real != resolved.real:
@@ -1605,12 +1514,12 @@ def serve_workspace_file(namespace: str, file_path: str, request: Request):
         return failure("Visual version unavailable", 503)
     except SandboxError:
         return failure("Sandbox access denied", 403)
-    except (SessionVisualResourceError, ValueError):
+    except SessionVisualResourceError:
         return failure("Invalid visual request", 400)
     except FileNotFoundError:
         return failure("File not found", 404)
-    except OSError:
-        return failure("File unavailable", 403)
+    except PermissionError:
+        return failure("File access denied", 403)
 
 
 @app.get(LOCAL_FONT_HTTP_PREFIX + "/{font_path:path}")
@@ -1633,10 +1542,7 @@ async def serve_local_font(font_path: str):
     if ".." in raw_path:
         return HTMLResponse("Path traversal not allowed", status_code=403)
 
-    try:
-        font_file = Path(raw_path).resolve()
-    except Exception:
-        return HTMLResponse("Invalid path", status_code=400)
+    font_file = Path(raw_path).resolve()
 
     # 扩展名白名单检查
     ext = font_file.suffix.lower()
@@ -1651,10 +1557,7 @@ async def serve_local_font(font_path: str):
         return HTMLResponse("Font file not found", status_code=404)
 
     # 大小限制
-    try:
-        file_size = font_file.stat().st_size
-    except OSError:
-        return HTMLResponse("Cannot read font file", status_code=500)
+    file_size = font_file.stat().st_size
     if file_size > LOCAL_FONT_MAX_BYTES:
         return HTMLResponse(
             f"Font file exceeds {LOCAL_FONT_MAX_BYTES} byte limit",
@@ -1803,28 +1706,24 @@ def _sandbox_space_payload(space: DynamicSandboxSpace, available: bool | None = 
     return payload
 
 
-def _raise_sandbox_space_http(exc: Exception) -> NoReturn:
-    from system.sandbox import SandboxError
-
-    if isinstance(exc, KeyError):
-        raise HTTPException(status_code=404, detail=str(exc))
-    if isinstance(exc, (ValueError, TypeError, SandboxError)):
-        message = str(exc)
-        status = 409 if "overlap" in message.lower() or "already exists" in message.lower() or "duplicate" in message.lower() else 400
-        raise HTTPException(status_code=status, detail=message)
-    logger.exception("Dynamic sandbox space API failure")
-    raise HTTPException(status_code=500, detail="动态沙盒空间操作失败")
+def _raise_sandbox_space_http(
+    exc: DynamicSandboxInputError | DynamicSandboxNotFoundError | SandboxError,
+) -> NoReturn:
+    if isinstance(exc, DynamicSandboxNotFoundError):
+        status = 404
+    elif isinstance(exc, DynamicSandboxConflictError):
+        status = 409
+    else:
+        status = 400
+    raise HTTPException(status_code=status, detail=str(exc)) from exc
 
 
 @app.get("/api/sandbox-spaces")
 async def list_sandbox_spaces():
     from system.application import Application
 
-    try:
-        entries = Application.current().sandbox.list_dynamic_spaces_with_availability()
-        return {"spaces": [_sandbox_space_payload(space, available) for space, available in entries]}
-    except Exception as exc:
-        _raise_sandbox_space_http(exc)
+    entries = Application.current().sandbox.list_dynamic_spaces_with_availability()
+    return {"spaces": [_sandbox_space_payload(space, available) for space, available in entries]}
 
 
 @app.post("/api/sandbox-spaces")
@@ -1839,7 +1738,7 @@ async def create_sandbox_space(request: DynamicSandboxSpaceCreateRequest):
             is_readonly=request.is_readonly,
         )
         return {"space": _sandbox_space_payload(space), "created": created}
-    except Exception as exc:
+    except (DynamicSandboxInputError, DynamicSandboxNotFoundError, SandboxError) as exc:
         _raise_sandbox_space_http(exc)
 
 
@@ -1857,7 +1756,7 @@ async def update_sandbox_space(name: str, request: DynamicSandboxSpaceUpdateRequ
             is_readonly=request.is_readonly,
         )
         return {"space": _sandbox_space_payload(space)}
-    except Exception as exc:
+    except (DynamicSandboxInputError, DynamicSandboxNotFoundError, SandboxError) as exc:
         _raise_sandbox_space_http(exc)
 
 
@@ -1868,7 +1767,7 @@ async def delete_sandbox_space(name: str):
     try:
         removed = Application.current().sandbox.remove_dynamic_space(name)
         return {"removed": removed, "name": name}
-    except Exception as exc:
+    except (DynamicSandboxInputError, DynamicSandboxNotFoundError, SandboxError) as exc:
         _raise_sandbox_space_http(exc)
 
 
@@ -1900,16 +1799,10 @@ async def pick_sandbox_directory():
         )
     except subprocess.TimeoutExpired:
         raise HTTPException(status_code=500, detail="目录选择对话框超时")
-    except Exception as exc:
-        logger.warning("Dynamic sandbox directory picker failed: %s", exc)
-        raise HTTPException(status_code=500, detail="无法打开目录选择对话框")
     if result.returncode != 0:
         logger.warning("Dynamic sandbox directory picker subprocess failed: %s", result.stderr.strip())
         raise HTTPException(status_code=500, detail="目录选择对话框启动失败")
-    try:
-        selected = json.loads(result.stdout.strip() or '""')
-    except Exception:
-        raise HTTPException(status_code=500, detail="目录选择对话框返回结果无效")
+    selected = json.loads(result.stdout.strip())
     if not selected:
         return {"selected": False, "path": None}
     return {"selected": True, "path": selected}
@@ -1920,16 +1813,23 @@ async def pick_sandbox_directory():
 # ---------------------------------------------------------------------------
 
 
+def _missing_profile_connection_fields(profile: LLMProfile) -> list[str]:
+    return [
+        name
+        for name, value in (
+            ("llm_client_name", profile.llm_client_name),
+            ("base_url", profile.base_url),
+            ("model", profile.model),
+        )
+        if not value.strip()
+    ]
+
+
 @app.get("/api/approval/profile")
 async def get_approval_profile():
     """返回项目级审批 Profile 的权威状态。"""
     from system.application import Application
-    try:
-        mgr = Application.current().approval_backend_manager
-        return mgr.get_state().model_dump()
-    except Exception:
-        logger.exception("Failed to get approval profile state")
-        raise HTTPException(status_code=500, detail="Failed to get approval profile state")
+    return Application.current().approval_backend_manager.get_state()
 
 
 @app.put("/api/approval/profile")
@@ -1958,12 +1858,9 @@ async def put_approval_profile(request: Request):
         else:
             try:
                 profile = store.get_profile(update.profile_name)
-            except LookupError:
+            except ProfileNotFoundError:
                 raise HTTPException(status_code=404, detail=f"Profile not found: {update.profile_name!r}")
-            missing = [
-                f for f in ("llm_client_name", "base_url", "model")
-                if not str(getattr(profile, f, "")).strip()
-            ]
+            missing = _missing_profile_connection_fields(profile)
             if missing:
                 raise HTTPException(
                     status_code=409,
@@ -1984,7 +1881,7 @@ async def put_approval_profile(request: Request):
     return ApprovalProfileMutationResponse(
         state=state,
         notification_failures=failures,
-    ).model_dump()
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -1992,15 +1889,11 @@ async def put_approval_profile(request: Request):
 # ---------------------------------------------------------------------------
 
 
-def _modality_profile_state(profile) -> ModalityProfileState:
+def _modality_profile_state(profile: LLMProfile | None) -> ModalityProfileState:
     """将全局多模态 Profile 实例转换为 REST/WS 状态。"""
     if profile is None:
         return ModalityProfileState()
-    missing = [
-        field
-        for field in ("llm_client_name", "base_url", "model")
-        if not str(getattr(profile, field, "")).strip()
-    ]
+    missing = _missing_profile_connection_fields(profile)
     return ModalityProfileState(
         profile_name=profile.name,
         model=profile.model or None,
@@ -2022,7 +1915,7 @@ async def get_modality_profiles():
     """返回图片、音频、视频三路全局回退 Profile 状态。"""
     from system.application import Application
 
-    return _get_modality_profile_states(Application.current()).model_dump()
+    return _get_modality_profile_states(Application.current())
 
 
 @app.put(
@@ -2041,13 +1934,9 @@ async def put_modality_profile(update: ModalityProfileUpdateRequest):
                 if update.profile_name is not None else None
             )
             if profile is not None:
-                missing = [
-                    field
-                    for field in ("llm_client_name", "base_url", "model")
-                    if not str(getattr(profile, field, "")).strip()
-                ]
+                missing = _missing_profile_connection_fields(profile)
                 if missing:
-                    raise ValueError(
+                    raise ProfileConflictError(
                         f"Modality Profile {profile.name!r} is missing required fields: "
                         + ", ".join(missing)
                     )
@@ -2056,13 +1945,18 @@ async def put_modality_profile(update: ModalityProfileUpdateRequest):
                 profile,
             )
             states = _get_modality_profile_states(application)
-            state = getattr(states, update.media_type)
-    except LookupError:
+            if update.media_type == "image":
+                state = states.image
+            elif update.media_type == "audio":
+                state = states.audio
+            else:
+                state = states.video
+    except ProfileNotFoundError:
         raise HTTPException(
             status_code=404,
             detail=f"Profile not found: {update.profile_name!r}",
         )
-    except ValueError as exc:
+    except ProfileConflictError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
 
     failures = await application.frontend_sink.broadcast_modality_profile_change(states)
@@ -2082,7 +1976,7 @@ async def get_metadata_profile():
     """返回项目级全局元数据 Profile 的权威状态。"""
     from system.application import Application
 
-    return Application.current().session_metadata_service.get_state().model_dump()
+    return Application.current().session_metadata_service.get_state()
 
 
 @app.put(
@@ -2105,7 +1999,7 @@ async def put_metadata_profile(
                 else None
             )
             state = application.session_metadata_service.select_profile(profile)
-    except LookupError:
+    except ProfileNotFoundError:
         raise HTTPException(
             status_code=404,
             detail=f"Profile not found: {update.profile_name!r}",
@@ -2132,10 +2026,9 @@ def _agentspace_service():
     return Application.current().agentspace_service
 
 
-def _raise_agentspace_http(exc: Exception) -> NoReturn:
+def _raise_agentspace_http(exc: AgentspaceError) -> NoReturn:
     from system.agentspace import (
         AgentspaceAlreadyExistsError,
-        AgentspaceError,
         AgentspaceInvalidPathError,
         AgentspaceLockedError,
         AgentspaceNotFoundError,
@@ -2153,15 +2046,9 @@ def _raise_agentspace_http(exc: Exception) -> NoReturn:
         status = 415
     elif isinstance(exc, AgentspaceLockedError):
         status = 423
-    elif isinstance(exc, AgentspaceError):
-        status = 400
     else:
-        logger.exception("Unexpected Agentspace API failure")
-        raise HTTPException(
-            status_code=500,
-            detail={"code": "internal_error", "message": "Agentspace 内部错误。"},
-        )
-    raise HTTPException(status_code=status, detail=exc.as_detail())
+        status = 400
+    raise HTTPException(status_code=status, detail=exc.as_detail()) from exc
 
 
 @app.get("/api/agentspace/list")
@@ -2174,7 +2061,7 @@ async def agentspace_list(path: str = ""):
                 for entry in entries
             ]
         }
-    except Exception as exc:
+    except AgentspaceError as exc:
         _raise_agentspace_http(exc)
 
 
@@ -2182,8 +2069,8 @@ async def agentspace_list(path: str = ""):
 async def agentspace_read(path: str = ""):
     try:
         snapshot = await asyncio.to_thread(_agentspace_service().read_file, path)
-        return snapshot.model_dump(mode="json")
-    except Exception as exc:
+        return snapshot
+    except AgentspaceError as exc:
         _raise_agentspace_http(exc)
 
 
@@ -2199,7 +2086,7 @@ async def agentspace_write(request: AgentspaceWriteRequest):
             operation_id,
         )
         return {**snapshot.model_dump(mode="json"), "operation_id": operation_id}
-    except Exception as exc:
+    except AgentspaceError as exc:
         _raise_agentspace_http(exc)
 
 
@@ -2212,8 +2099,8 @@ async def agentspace_mkdir(request: AgentspacePathRequest):
             request.path,
             operation_id,
         )
-        return {"entry": entry.model_dump(mode="json"), "operation_id": operation_id}
-    except Exception as exc:
+        return {"entry": entry, "operation_id": operation_id}
+    except AgentspaceError as exc:
         _raise_agentspace_http(exc)
 
 
@@ -2232,7 +2119,7 @@ async def agentspace_rename(request: AgentspaceRenameRequest):
             "new_path": new_path,
             "operation_id": operation_id,
         }
-    except Exception as exc:
+    except AgentspaceError as exc:
         _raise_agentspace_http(exc)
 
 
@@ -2246,8 +2133,8 @@ async def agentspace_delete(request: AgentspacePathRequest):
             request.path,
             operation_id,
         )
-        return {"entry": entry.model_dump(mode="json"), "operation_id": operation_id}
-    except Exception as exc:
+        return {"entry": entry, "operation_id": operation_id}
+    except AgentspaceError as exc:
         _raise_agentspace_http(exc)
 
 
@@ -2255,8 +2142,8 @@ async def agentspace_delete(request: AgentspacePathRequest):
 async def agentspace_trash_list():
     try:
         entries = await asyncio.to_thread(_agentspace_service().list_trash)
-        return {"entries": [entry.model_dump(mode="json") for entry in entries]}
-    except Exception as exc:
+        return {"entries": entries}
+    except AgentspaceError as exc:
         _raise_agentspace_http(exc)
 
 
@@ -2265,7 +2152,6 @@ async def agentspace_trash_restore(entry_id: str, req: Request):
     operation_request = await _parse_request_model(
         req,
         AgentspaceOperationRequest,
-        default_on_json_error=True,
     )
     operation_id = operation_request.operation_id.strip() or uuid.uuid4().hex
     try:
@@ -2275,11 +2161,11 @@ async def agentspace_trash_restore(entry_id: str, req: Request):
             operation_id,
         )
         return {
-            "entry": entry.model_dump(mode="json"),
+            "entry": entry,
             "restored_path": restored_path,
             "operation_id": operation_id,
         }
-    except Exception as exc:
+    except AgentspaceError as exc:
         _raise_agentspace_http(exc)
 
 
@@ -2288,7 +2174,6 @@ async def agentspace_trash_purge(entry_id: str, req: Request):
     operation_request = await _parse_request_model(
         req,
         AgentspaceOperationRequest,
-        default_on_json_error=True,
     )
     operation_id = operation_request.operation_id.strip() or uuid.uuid4().hex
     try:
@@ -2298,7 +2183,7 @@ async def agentspace_trash_purge(entry_id: str, req: Request):
             operation_id,
         )
         return {"success": True, "operation_id": operation_id}
-    except Exception as exc:
+    except AgentspaceError as exc:
         _raise_agentspace_http(exc)
 
 
@@ -2307,7 +2192,6 @@ async def agentspace_trash_empty(req: Request):
     operation_request = await _parse_request_model(
         req,
         AgentspaceOperationRequest,
-        default_on_json_error=True,
     )
     operation_id = operation_request.operation_id.strip() or uuid.uuid4().hex
     try:
@@ -2320,18 +2204,13 @@ async def agentspace_trash_empty(req: Request):
             "failures": failures,
             "operation_id": operation_id,
         }
-    except Exception as exc:
+    except AgentspaceError as exc:
         _raise_agentspace_http(exc)
 
 
 @app.get("/api/agentspace/locks")
 async def agentspace_locks():
-    return {
-        "locks": [
-            lock.model_dump(mode="json")
-            for lock in _agentspace_service().locks_snapshot()
-        ]
-    }
+    return {"locks": _agentspace_service().locks_snapshot()}
 
 
 def _agentspace_sse(event: AgentspaceEvent) -> str:
@@ -2395,28 +2274,24 @@ async def skills_list():
 
     返回 { skills: [{ name, description, category }] }
     """
-    try:
-        from abstract.skills.loader import list_skills
-        from system.application import Application
-        from entity.constant import Namespace
-        skills_dir = Application.current().sandbox.get_base(Namespace.SKILLS)
-        if not skills_dir.exists():
-            return {"skills": [], "total": 0}
-        skills = list_skills(skills_dir=skills_dir)
-        return {
-            "skills": [
-                {
-                    "name": s.get("name", ""),
-                    "description": s.get("description", ""),
-                    "category": s.get("category"),
-                }
-                for s in skills
-            ],
-            "total": len(skills),
-        }
-    except Exception as exc:
-        logger.warning("Failed to list skills for API: %s", exc, exc_info=True)
-        return {"skills": [], "total": 0, "error": str(exc)}
+    from abstract.skills.loader import list_skills
+    from system.application import Application
+    from entity.constant import Namespace
+    skills_dir = Application.current().sandbox.get_base(Namespace.SKILLS)
+    if not skills_dir.exists():
+        return {"skills": [], "total": 0}
+    skills = list_skills(skills_dir=skills_dir)
+    return {
+        "skills": [
+            {
+                "name": s["name"],
+                "description": s.get("description", ""),
+                "category": s.get("category"),
+            }
+            for s in skills
+        ],
+        "total": len(skills),
+    }
 
 
 @app.get("/api/llm/clients")
@@ -2430,18 +2305,13 @@ async def list_llm_clients_endpoint():
 async def get_llm_profiles():
     """返回共享 v2 根对象的扁平 Profile 列表。"""
     from system.application import Application
-
-    try:
-        store = Application.current().llm_profile_store
-        return {
-            "profiles": [
-                store.to_payload(profile).model_dump()
-                for profile in store.list_profiles()
-            ]
-        }
-    except Exception:
-        logger.exception("Failed to load LLM profiles")
-        raise HTTPException(status_code=500, detail="Failed to load LLM profiles")
+    store = Application.current().llm_profile_store
+    return {
+        "profiles": [
+            store.to_payload(profile)
+            for profile in store.list_profiles()
+        ]
+    }
 
 
 @app.post("/api/llm/profiles", response_model=LLMProfileMutationResponse)
@@ -2455,13 +2325,10 @@ async def create_llm_profile(payload: LLMProfilePayload):
             profile = application.llm_profile_store.create_profile(payload)
             response_payload = application.llm_profile_store.to_payload(profile)
         return LLMProfileMutationResponse(profile=response_payload)
-    except LookupError as exc:
+    except ProfileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc))
-    except ValueError as exc:
+    except ProfileConflictError as exc:
         raise HTTPException(status_code=409, detail=str(exc))
-    except Exception:
-        logger.exception("Failed to create LLM profile")
-        raise HTTPException(status_code=500, detail="Failed to persist LLM profile")
 
 
 @app.put("/api/llm/profiles", response_model=LLMProfileMutationResponse)
@@ -2479,15 +2346,15 @@ async def update_llm_profile(request: LLMProfileUpdateRequest):
                 old_name,
                 request.profile,
             )
+            # 根配置已提交，后续名称指针写入失败也不能保留旧客户端缓存。
+            mgr = application.approval_backend_manager
+            mgr.invalidate()
             new_name = profile.name
             if new_name != old_name:
                 SessionStore(
                     application.runtime_context.workspace / SESSIONS_DIR_NAME
                 ).replace_profile_name_pointers(old_name, new_name)
             response_payload = application.llm_profile_store.to_payload(profile)
-            # 审批 Profile 联动：编辑后使客户端缓存失效；会话审批模式保持不变。
-            mgr = application.approval_backend_manager
-            mgr.invalidate()
             metadata_state = application.session_metadata_service.get_state()
             modality_states = _get_modality_profile_states(application)
         failures: list[str] = []
@@ -2512,13 +2379,10 @@ async def update_llm_profile(request: LLMProfileUpdateRequest):
                 failures + approval_failures + metadata_failures + modality_failures
             ),
         )
-    except LookupError as exc:
+    except ProfileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc))
-    except ValueError as exc:
+    except ProfileConflictError as exc:
         raise HTTPException(status_code=409, detail=str(exc))
-    except Exception:
-        logger.exception("Failed to update LLM profile")
-        raise HTTPException(status_code=500, detail="Failed to persist LLM profile")
 
 
 @app.delete("/api/llm/profiles", response_model=LLMProfileDeleteResult)
@@ -2538,13 +2402,11 @@ async def delete_llm_profile(request: LLMProfileDeleteRequest):
                 if request.replacement_profile_name is not None else None
             )
             if replacement is source:
-                raise ValueError("replacement Profile must differ from deleted Profile")
-            # 审批/元数据 Profile 在删除前先清空根对象引用。
-            if store.is_approval_profile(source):
-                store.set_approval_profile(None)
-            if store.is_metadata_profile(source):
-                store.set_metadata_profile(None)
-            store.assert_removable(source)
+                raise ProfileConflictError("replacement Profile must differ from deleted Profile")
+            # 先检查所有阻止删除的引用，再提交删除与审批/元数据引用清空。
+            store.assert_removable(source, clear_global_selections=True)
+            store.remove_profile(request.profile_name, clear_global_selections=True)
+            application.approval_backend_manager.invalidate()
             switched, busy = application.session_manager.replace_idle_loops_using_profile(
                 source,
                 replacement,
@@ -2555,8 +2417,6 @@ async def delete_llm_profile(request: LLMProfileDeleteRequest):
                 request.profile_name,
                 request.replacement_profile_name,
             )
-            store.remove_profile(request.profile_name)
-            application.approval_backend_manager.invalidate()
             metadata_state = application.session_metadata_service.get_state()
             modality_states = _get_modality_profile_states(application)
 
@@ -2586,13 +2446,10 @@ async def delete_llm_profile(request: LLMProfileDeleteRequest):
                 failures + approval_failures + metadata_failures + modality_failures
             ),
         )
-    except LookupError as exc:
+    except ProfileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc))
-    except ValueError as exc:
+    except ProfileConflictError as exc:
         raise HTTPException(status_code=409, detail=str(exc))
-    except Exception:
-        logger.exception("Failed to delete LLM profile")
-        raise HTTPException(status_code=500, detail="Failed to delete LLM profile")
 
 
 @app.get("/{full_path:path}")
@@ -2623,24 +2480,14 @@ async def _send_approval_mode_state(ws: WebSocket, session_id: str) -> None:
     from component.approval import ApprovalMode, get_approval_mode
 
     mode = get_approval_mode(session_id)
-    try:
-        await ws.send_text(
-            json.dumps(
-                Message(
-                    type=MessageType.HANDSFREE_MODE,
-                    session_id=session_id,
-                    handsfree_mode=mode == ApprovalMode.HANDSFREE,
-                    approval_mode=mode.value,
-                ).model_dump(exclude_none=True),
-                ensure_ascii=False,
-            )
-        )
-    except Exception:
-        logger.warning(
-            "Failed to send approval mode state | session=%s",
-            session_id,
-            exc_info=True,
-        )
+    await ws.send_text(
+        Message(
+            type=MessageType.HANDSFREE_MODE,
+            session_id=session_id,
+            handsfree_mode=mode == ApprovalMode.HANDSFREE,
+            approval_mode=mode.value,
+        ).model_dump_json(exclude_none=True)
+    )
 
 
 async def _send_agentspace_ws_event(
@@ -2650,14 +2497,11 @@ async def _send_agentspace_ws_event(
 ) -> None:
     """通过聊天 WebSocket 发送 typed Agentspace 事件。"""
     await ws.send_text(
-        json.dumps(
-            Message(
-                type=MessageType.AGENTSPACE_EVENT,
-                session_id=session_id,
-                agentspace_event=event,
-            ).model_dump(exclude_none=True),
-            ensure_ascii=False,
-        )
+        Message(
+            type=MessageType.AGENTSPACE_EVENT,
+            session_id=session_id,
+            agentspace_event=event,
+        ).model_dump_json(exclude_none=True)
     )
 
 
@@ -2715,46 +2559,25 @@ async def ws_chat(ws: WebSocket) -> None:
     agentspace_subscription_id: str | None = None
     agentspace_event_task: asyncio.Task[None] | None = None
 
-    # 提取客户端 IP并存入 SessionManager
     try:
-        client_ip: str = ws.client.host if ws.client else ""
-    except Exception:
-        client_ip = ""
-    if client_ip:
-        sm = _get_sm()
-        if sm is not None:
+        # 注册后的所有初始化都属于本连接生命周期；失败也必须释放连接登记。
+        client_ip = ws.client.host if ws.client else ""
+        if client_ip:
             existing = sm.get_client_info(sid)
-            if existing:
-                sm.set_client_info(sid, existing.model_copy(update={"client_ip": client_ip}))
-            else:
-                sm.set_client_info(sid, ClientInfo(client_ip=client_ip))
-
-    # 为当前 session 创建专属 ParentAgentLoop，使 proxy 能正确路由调用
-    try:
-        from system.application import Application as _AppInner
-        _app_inner = _AppInner.current()
-        if _app_inner.session_manager and _app_inner.frontend_sink:
-            from entity.constant import SESSIONS_DIR_NAME
-            _store_inner = _app_inner.runtime_context.workspace / SESSIONS_DIR_NAME
-            _app_inner.session_manager.create_session(
-                session_id=sid,
-                frontend_sink=_app_inner.frontend_sink,
-                history_store_dir=_store_inner,
+            sm.set_client_info(
+                sid,
+                existing.model_copy(update={"client_ip": client_ip})
+                if existing else ClientInfo(client_ip=client_ip),
             )
-    except Exception as exc:
-        logger.warning("Failed to create session loop for %s: %s", sid, exc)
-        await ws.send_text(json.dumps(
-            Message(
-                type=MessageType.ERROR,
-                session_id=sid,
-                message=f"Failed to create session loop for {sid}: {exc}"
-            ).model_dump(exclude_none=True),
-            ensure_ascii=False,
-        ))
-        await ws.close()
-        return
 
-    try:
+        from system.application import Application
+        from entity.constant import SESSIONS_DIR_NAME
+        application = Application.current()
+        application.session_manager.create_session(
+            session_id=sid,
+            frontend_sink=application.frontend_sink,
+            history_store_dir=application.runtime_context.workspace / SESSIONS_DIR_NAME,
+        )
         # 发送欢迎消息
         await ws.send_text(
             json.dumps(
@@ -2780,30 +2603,20 @@ async def ws_chat(ws: WebSocket) -> None:
                 )
             )
 
-        # 发送服务端信息：审批模型状态与 YOLO 标志
-        try:
-            from system.context import get_runtime_context
-            from system.application import Application
-            ctx = get_runtime_context()
-            mgr = Application.current().approval_backend_manager
-            state = mgr.get_state()
-            await ws.send_text(
-                json.dumps(
-                    Message(
-                        type=MessageType.SYSTEM,
-                        session_id=sid,
-                        content=json.dumps({
-                            "server_info": {
-                                "approval_model_name": state.profile_name or "",
-                                "approval_model_available": state.available,
-                            },
-                        }),
-                    ).model_dump(exclude_none=True),
-                    ensure_ascii=False,
-                )
-            )
-        except Exception:
-            logger.warning("RuntimeContext not initialized, skipping server_info push", exc_info=True)  # fallback 模式可能无 LLM
+        # 服务端状态构造失败直接终止连接，不继续提供不完整的握手状态。
+        state = application.approval_backend_manager.get_state()
+        await ws.send_text(
+            Message(
+                type=MessageType.SYSTEM,
+                session_id=sid,
+                content=json.dumps({
+                    "server_info": {
+                        "approval_model_name": state.profile_name or "",
+                        "approval_model_available": state.available,
+                    },
+                }),
+            ).model_dump_json(exclude_none=True)
+        )
 
         # 新会话与恢复会话均主动同步会话级权威审批模式。
         await _send_approval_mode_state(ws, sid)
@@ -2830,71 +2643,35 @@ async def ws_chat(ws: WebSocket) -> None:
                 )
             )
 
-        # 聊天页通过现有 WebSocket 接收 Agentspace 变化；独立编辑器继续使用 SSE。
-        try:
-            agentspace_service = _agentspace_service()
+        # 聊天页通过现有 WebSocket 接收 Agentspace 变化；订阅失败直接传播。
+        agentspace_service = _agentspace_service()
 
-            async def _send_current_agentspace_event(event: AgentspaceEvent) -> None:
-                await _send_agentspace_ws_event(ws, sid, event)
+        async def _send_current_agentspace_event(event: AgentspaceEvent) -> None:
+            await _send_agentspace_ws_event(ws, sid, event)
 
-            agentspace_subscription_id, agentspace_event_task = await attach_agentspace_events(
-                agentspace_service,
-                _send_current_agentspace_event,
-                connection_label=conn_token or sid,
-            )
+        agentspace_subscription_id, agentspace_event_task = await attach_agentspace_events(
+            agentspace_service,
+            _send_current_agentspace_event,
+            connection_label=conn_token or sid,
+        )
 
-            def _close_on_agentspace_failure(task: asyncio.Task[None]) -> None:
-                if task.cancelled():
-                    return
-                try:
-                    failure = task.exception()
-                except asyncio.CancelledError:
-                    return
-                if failure is None:
-                    return
-                logger.warning(
-                    "Agentspace WebSocket forwarding failed | session=%s error=%s",
-                    sid,
-                    failure,
-                    exc_info=(type(failure), failure, failure.__traceback__),
-                )
-                asyncio.create_task(
-                    ws.close(code=1011, reason="agentspace_event_forward_failed"),
-                    name=f"agentspace-ws-close-{sid[:8]}",
-                )
-
-            agentspace_event_task.add_done_callback(_close_on_agentspace_failure)
-        except Exception:
-            logger.warning(
-                "Failed to attach Agentspace events to WebSocket | session=%s",
+        def _close_on_agentspace_failure(task: asyncio.Task[None]) -> None:
+            if task.cancelled():
+                return
+            failure = task.exception()
+            if failure is None:
+                return
+            logger.error(
+                "Agentspace WebSocket forwarding failed | session=%s",
                 sid,
-                exc_info=True,
+                exc_info=(type(failure), failure, failure.__traceback__),
             )
-            if agentspace_subscription_id is not None:
-                try:
-                    _agentspace_service().unsubscribe_events(agentspace_subscription_id)
-                except Exception:
-                    logger.warning(
-                        "Failed to rollback Agentspace WebSocket subscription | session=%s",
-                        sid,
-                        exc_info=True,
-                    )
-                agentspace_subscription_id = None
-            try:
-                degraded_event = AgentspaceEvent(
-                    sequence=0,
-                    kind=AgentspaceEventKind.WATCHER_ERROR,
-                    source=AgentspaceEventSource.SYSTEM,
-                    timestamp=datetime.now(timezone.utc).isoformat(),
-                    message="Agentspace实时事件连接失败，请手动刷新会话视觉内容。",
-                )
-                await _send_agentspace_ws_event(ws, sid, degraded_event)
-            except Exception:
-                logger.warning(
-                    "Failed to report Agentspace WebSocket degradation | session=%s",
-                    sid,
-                    exc_info=True,
-                )
+            asyncio.create_task(
+                ws.close(code=1011, reason="agentspace_event_forward_failed"),
+                name=f"agentspace-ws-close-{sid[:8]}",
+            )
+
+        agentspace_event_task.add_done_callback(_close_on_agentspace_failure)
 
         # 创建消息路由器 — 所有消息处理委托给 MessageRouter
         router = MessageRouter(ws, sid, agentspace_path=_agentspace_path, conn_token=conn_token or "")
@@ -2908,7 +2685,7 @@ async def ws_chat(ws: WebSocket) -> None:
             msg: Message
             try:
                 msg = Message.model_validate_json(raw)
-            except (ValueError, KeyError) as exc:
+            except ValidationError as exc:
                 await ws.send_text(
                     json.dumps(
                         Message(
@@ -2930,11 +2707,8 @@ async def ws_chat(ws: WebSocket) -> None:
     except WebSocketDisconnect:
         logger.info("WebSocket disconnected | session=%s", sid)
     except asyncio.CancelledError:
-        # uvicorn 关闭时取消 handler task，属于正常退出，无需记录为错误
         logger.debug("WebSocket handler cancelled for session=%s (server shutting down)", sid)
-    except RuntimeError as exc:
-        # 收到非 text 消息（如 binary）或连接已关闭时仍尝试读写
-        logger.info("WebSocket runtime error for session=%s: %s", sid, exc)
+        raise
     finally:
         try:
             await detach_agentspace_events(
@@ -2942,21 +2716,14 @@ async def ws_chat(ws: WebSocket) -> None:
                 agentspace_subscription_id,
                 agentspace_event_task,
             )
-        except Exception:
-            logger.warning(
-                "Failed to detach Agentspace WebSocket events | session=%s",
-                sid,
-                exc_info=True,
-            )
-        from system.application import Application
-        _sink = Application.current().frontend_sink
-        if _sink:
-            _sink._deny_session_confirms(sid)
-            _sink._deny_session_asks(sid)
-        # 修复：只有当前 sink 仍是本 ws 实例时才清理，避免切换会话时旧 ws 关闭 pop 掉新 ws
-        if _get_ws(sid) is ws:
-            from system.application import Application as _FSAppEnd
-            _FSAppEnd.current().frontend_sink.unregister_ws(sid)
+        finally:
+            from system.application import Application
+            sink = Application.current().frontend_sink
+            # 旧连接释放不得取消已经接管该会话的新连接的交互。
+            if _get_ws(sid) is ws:
+                sink._deny_session_confirms(sid)
+                sink._deny_session_asks(sid)
+                sink.unregister_ws(sid)
 
 
 # ---------------------------------------------------------------------------
@@ -2970,13 +2737,16 @@ def check_port_available(host: str, port: int) -> bool:
     通过尝试 bind 临时 TCP socket 判断。
     返回 True 表示端口空闲，可以启动 server。
     """
+    import errno
     import socket
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
         try:
             sock.bind((host, port))
             return True
-        except OSError:
-            return False
+        except OSError as exc:
+            if exc.errno == errno.EADDRINUSE:
+                return False
+            raise
 
 
 def create_server(host: str | None = None, port: int | None = None) -> uvicorn.Server:
