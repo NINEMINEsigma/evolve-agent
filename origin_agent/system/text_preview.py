@@ -15,7 +15,7 @@ def truncate_lf_lines(
     marker 与真实行尾不占正文额度；标识符由调用方提供，不绑定具体工具。
     非法上限或空/含 CR/LF 的标识符抛 ValueError，不回退为未截断原文。
     """
-    if type(max_line_chars) is not int or max_line_chars < 1:
+    if max_line_chars < 1:
         raise ValueError("max_line_chars must be a positive integer")
     if not isinstance(marker, str) or not marker or "\r" in marker or "\n" in marker:
         raise ValueError("marker must be a non-empty string without CR or LF")
